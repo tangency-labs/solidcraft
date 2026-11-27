@@ -2837,6 +2837,83 @@ mod arc_conversion_regressions {
     }
 
     #[test]
+    fn polyline_piece_inside_one_writer_cell_joins_the_run_instead_of_refusing_the_path() {
+        use super::super::profile::Loop2;
+        // a drawing's hidden-line pass can leave a piece of an edge whose
+        // projection is far below the writer's grid (a circle seen edge on, cut beside its fold).
+        // A caller whose lengths are written on a 1e-3 grid, with three decimals elsewhere.
+        let encoding = scalar_encoding(|v| Some((v * 1e3).round() / 1e3));
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let (a, b, c) = (Vec2::ZERO, Vec2::new(1.0, 0.0), Vec2::new(1.0002, 1.0));
+        // `b` and `b2` are distinct in storage but both written as (1, 0).
+        let b2 = Vec2::new(1.0002, 0.0);
+        let sliver = line(b, b2);
+        let vertex = |at: Vec2| Vertex { at, bulge: 0.0 };
+        // Written, the sliver is the point where its neighbours meet. Each polyline vertex is the
+        // stored start of the edge leaving it, so the joint is the next edge's start, `b2`.
+        let through = [line(a, b), sliver, line(b2, c)];
+        assert_eq!(
+            path_shapes(PlanarPath::Open(&through), PathStyle::Polyline, encoding),
+            Ok(vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(b2), vertex(c)],
+                closed: false,
+            }])
+        );
+        // A free-form piece whose controls are all written as one point is the same point.
+        let curl = Seg2::Cubic {
+            p0: b,
+            p1: Vec2::new(1.0001, 0.0001),
+            p2: Vec2::new(1.0002, 0.0001),
+            p3: b2,
+        };
+        assert_eq!(
+            path_shapes(
+                PlanarPath::Open(&[line(a, b), curl, line(b2, c)]),
+                PathStyle::Polyline,
+                encoding
+            ),
+            Ok(vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(a), vertex(b2), vertex(c)],
+                closed: false,
+            }])
+        );
+        // A closed loop that starts with the sliver still closes: its last edge ends at the
+        // written point the sliver is, where the first written edge starts.
+        let lp = Loop2 {
+            segs: vec![sliver, line(b2, c), line(c, a), line(a, b)],
+        };
+        assert_eq!(
+            path_shapes(PlanarPath::Closed(&lp), PathStyle::Polyline, encoding),
+            Ok(vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(b2), vertex(c), vertex(a)],
+                closed: true,
+            }])
+        );
+        // A path that is only the sliver draws nothing the file can hold: no entity, no refusal.
+        assert_eq!(
+            path_shapes(PlanarPath::Open(&[sliver]), PathStyle::Polyline, encoding),
+            Ok(vec![])
+        );
+        // An authored zero-length line is not a sliver: it stays a two-vertex polyline.
+        assert_eq!(
+            path_shapes(
+                PlanarPath::Open(&[line(b, b)]),
+                PathStyle::Polyline,
+                encoding
+            ),
+            Ok(vec![PathShape::BulgedPolyline {
+                vertices: vec![vertex(b), vertex(b)],
+                closed: false,
+            }])
+        );
+        // Exact output keeps each piece as its own entity, so it still refuses the sliver.
+        let error =
+            path_shapes(PlanarPath::Open(&through), PathStyle::Exact, encoding).unwrap_err();
+        assert_eq!(error.piece, Some((1, 3)));
+        assert_eq!(error.reason, "line endpoints collapse at writer precision");
+    }
+
+    #[test]
     fn refused_arc_angle_never_certifies_a_one_sided_encoding() {
         let arc = Seg2::Arc {
             center: Vec2::ZERO,

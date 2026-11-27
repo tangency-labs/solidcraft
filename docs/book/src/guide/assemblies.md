@@ -6,9 +6,14 @@ component has its own origin, bodies, sketches and timeline entries. The **activ
 (the radio button in the browser) receives new sketches and features; the others are drawn
 faded. Points and directions you give a command are in world coordinates even when the active
 component is moved or turned: a box's corner and its length, width and height along X, Y and Z,
-or a cylinder's base and an axis given as `[x, y, z]`, land where you asked in the world (a box in
-a component turned by other than quarter turns keeps its sides along the component's axes). Names
-such as the plane `XY` or a cylinder's axis `Z` are the active component's own.
+or a cylinder's base and its axis, land where you asked in the world (a box in a component turned
+by other than quarter turns keeps its sides along the component's axes). A plane name such as `XY`
+is the active component's own.
+
+**Activate Parent** (`component.activate.parent`), at the right end of the **MODEL** tab while a
+component is active, activates the component one level up: a part inside a subassembly goes back
+to the subassembly, and the top component goes back to the design. A double-click on empty space
+in the view does the same, unless Preferences, Design, `double_click_components` is off.
 
 Sketches drawn on a part's face while the design was active belong to the design, so they
 collect in its Sketches folder. **Move Sketches to Their Parts**

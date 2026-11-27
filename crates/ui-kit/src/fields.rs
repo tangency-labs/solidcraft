@@ -1296,6 +1296,9 @@ pub fn bounded_dropdown_menu(ui: &mut Ui, id: impl egui::AsIdSalt, current: &str
             if popup.inner.is_some() && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 response.request_focus();
             }
+            if response.has_focus() && ui.visuals().widgets.active.bg_stroke == ui.visuals().widgets.inactive.bg_stroke {
+                ui.painter().rect_stroke(response.rect, Tokens::get().control_radius, ui.visuals().selection.stroke, egui::StrokeKind::Inside);
+            }
             response
         })
         .inner;
@@ -1370,6 +1373,9 @@ fn dropdown_menu_width(
     }
     if let Some(icon) = leading_icon {
         paint_dropdown_icon(ui, response.rect, icon);
+    }
+    if response.has_focus() && ui.visuals().widgets.active.bg_stroke == ui.visuals().widgets.inactive.bg_stroke {
+        ui.painter().rect_stroke(response.rect, t.control_radius, ui.visuals().selection.stroke, egui::StrokeKind::Inside);
     }
     publish(ui, &response, egui::Role::ComboBox);
     // Kit chrome publishes the row label after egui's selected-text metadata.
@@ -1786,7 +1792,13 @@ pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hin
     // Focus leaves a field on pointer press, before the button reports a released click.
     let opening = (button.clicked() || button.is_pointer_button_down_on()) && !open;
     open |= opening;
-    if open && ui.is_rect_visible(response.rect) {
+    // Keep this frame's inline TextEdit in its layer. Opening the popup on the next frame
+    // avoids registering that same editor id in both Middle and Foreground in one frame.
+    if opening {
+        response.request_focus();
+        ui.ctx().request_repaint();
+    }
+    if open && !opening && ui.is_rect_visible(response.rect) {
         let font = egui::FontId::monospace(t.font_label);
         let text_width = ui.fonts_mut(|f| f.layout_no_wrap("M".repeat(30), font.clone(), t.form_ink)).size().x;
         let width = (text_width + 2.0 * t.form_inset).max(width);
@@ -1845,7 +1857,7 @@ pub fn expandable_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hin
         solidcraft_ui_registry::publish_target(&format!("{handle}:popup"), response.rect.intersect(shown.response.rect));
         open = opening || ctx.memory(|m| m.has_focus(id));
     } else {
-        open = false;
+        open = opening;
     }
     ui.data_mut(|d| d.insert_temp(open_id, open));
     response.widget_info(|| {
@@ -2483,8 +2495,17 @@ pub fn canvas_value_field(ui: &mut Ui, id: egui::Id, value: &mut String, keep_ta
     let mut response = ui.add(edit);
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE);
     t.input_bevel(ui, &response);
-    let field = (ui.ctx().cumulative_pass_nr(), response.id, value.chars().count());
-    ui.ctx().data_mut(|data| data.insert_temp(egui::Id::unique("sc_canvas_value_focus"), field));
+    let pass = ui.ctx().cumulative_pass_nr();
+    let field = (response.id, value.chars().count());
+    ui.ctx().data_mut(|data| {
+        let key = egui::Id::unique("sc_canvas_value_focus");
+        let entry = data.get_temp_mut_or_default::<(u64, Vec<(egui::Id, usize)>)>(key);
+        if entry.0 != pass {
+            entry.0 = pass;
+            entry.1.clear();
+        }
+        entry.1.push(field);
+    });
     response
 }
 
