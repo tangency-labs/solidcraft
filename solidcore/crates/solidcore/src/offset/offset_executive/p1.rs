@@ -1158,6 +1158,52 @@ impl OffsetExecutive {
         Ok(())
     }
 
+    /// A face of the offset replaced by `fragments` (a cancellation's remainders, a
+    /// repaired face): each place of `old` in the face maps, and its closing role, passes
+    /// to every fragment, and `old` goes from them. With no fragment the face is only
+    /// forgotten.
+    pub(super) fn replace_face_relations(
+        &mut self,
+        old: FaceId,
+        fragments: &[FaceId],
+    ) -> Result<()> {
+        for original in self.faceuse_to_faces.firsts(old) {
+            self.faceuse_to_faces.remove_pair(original, old)?;
+            for &new in fragments {
+                self.faceuse_to_faces.relate_pair(original, new)?;
+            }
+        }
+        for original in self.edge_to_faces.firsts(old) {
+            self.edge_to_faces.remove_pair(original, old)?;
+            for &new in fragments {
+                self.edge_to_faces.relate_pair(original, new)?;
+            }
+        }
+        for original in self.vertex_to_faces.firsts(old) {
+            self.vertex_to_faces.remove_pair(original, old)?;
+            for &new in fragments {
+                self.vertex_to_faces.relate_pair(original, new)?;
+            }
+        }
+        for blended in self.blend_to_faces.seconds(old) {
+            self.blend_to_faces.remove_pair(old, blended)?;
+            for &new in fragments {
+                self.blend_to_faces.relate_pair(new, blended)?;
+            }
+        }
+        for blend in self.blend_to_faces.firsts(old) {
+            self.blend_to_faces.remove_pair(blend, old)?;
+            for &new in fragments {
+                self.blend_to_faces.relate_pair(blend, new)?;
+            }
+        }
+        if self.closing_faces.contains(&old) {
+            self.closing_faces.retain(|&f| f != old);
+            self.closing_faces.extend_from_slice(fragments);
+        }
+        Ok(())
+    }
+
     /// `RemoveExcessFaces`' forgetting of the removed faces: `m_vFUToF`, `m_vEToF`,
     /// `m_vVToF` and `m_vBlendToFaces` forget the pairs whose second is gone, and
     /// `m_vBlendToFaces` also those whose first is gone.
