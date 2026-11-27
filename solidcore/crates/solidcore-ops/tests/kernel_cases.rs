@@ -107,6 +107,7 @@ const PORTED: &[&str] = &[
     "thicken",
     "untrim_face",
     "boolean",
+    "boolean_tagged",
     "union_all",
     "extrude",
     "revolve",
@@ -783,7 +784,9 @@ fn call_with_copy(
                 in_place,
             ))
         }
-        "boolean" => {
+        // SolidCraft's boolean of its operands' tagged copies: the tags are history, which
+        // replay does not carry (`tagged` passes its body on), so it is the boolean
+        "boolean" | "boolean_tagged" => {
             let operation = match p["op"].as_str() {
                 Some("union") => BooleanOp::Union,
                 Some("subtract") => BooleanOp::Subtract,
