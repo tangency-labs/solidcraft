@@ -5047,17 +5047,34 @@ mod install_zip {
     }
 
     fn stub_fetch(s: &mut Session, metadata: Value, archive: Vec<u8>) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
+        stub_host(
+            s,
+            "https://api.github.com/repos/maker/gears/releases/latest",
+            "https://github.com/maker/gears/releases/download/v0.1.0/gears.zip",
+            metadata,
+            archive,
+        )
+    }
+
+    /// Recorded answers: the release API at `api` says `metadata`, and the one asset is at `asset`.
+    fn stub_host(
+        s: &mut Session,
+        api: &'static str,
+        asset: &'static str,
+        metadata: Value,
+        archive: Vec<u8>,
+    ) -> std::sync::Arc<std::sync::atomic::AtomicUsize> {
         use crate::plugin::github::{Client, FetchError};
         let downloads = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let download_count = downloads.clone();
         s.plugin_state.http = Some(Client {
             get: std::sync::Arc::new(move |url| {
-                assert_eq!(url, "https://api.github.com/repos/maker/gears/releases/latest");
+                assert_eq!(url, api);
                 Ok(serde_json::to_vec(&metadata).unwrap())
             }),
             download: std::sync::Arc::new(move |url, to, progress| {
                 download_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                assert_eq!(url, "https://github.com/maker/gears/releases/download/v0.1.0/gears.zip");
+                assert_eq!(url, asset);
                 assert!(progress(archive.len() as u64, Some(archive.len() as u64)));
                 assert!(!progress(crate::plugin::install::MAX_ZIP_BYTES as u64 + 1, None));
                 std::fs::write(to, &archive).map_err(|e| FetchError::Failed(e.to_string()))
@@ -5091,8 +5108,8 @@ mod install_zip {
         let too_long = format!("https://github.com/maker/gears/tree/{}", "a".repeat(513));
         for url in [
             "http://github.com/maker/gears",
-            "https://gitlab.com/maker/gears",
-            "https://codeberg.org/maker/gears",
+            "https://example.com/maker/gears",
+            "ftp://github.com/maker/gears",
             "git@github.com:maker/gears.git",
             "https://github.com.evil.test/maker/gears",
             "https://github.com@evil.test/maker/gears",
@@ -5111,7 +5128,15 @@ mod install_zip {
             "https://github.com/maker/gears\\other",
             "https://github.com/maker",
             "https://github.com//gears",
-            "maker/gears",
+            "maker",
+            "maker/gears@",
+            "maker/gears@../x",
+            "maker/ge ars",
+            "https://gitlab.com/maker",
+            "https://gitlab.com/maker/gears/-/blob/main/plugin.json",
+            "https://gitlab.com/maker/gears/-/releases/v1?download=1",
+            "https://codeberg.org/maker/gears/archive/main.zip",
+            "https://codeberg.org/maker/gears/releases/tag/..",
             too_long.as_str(),
         ] {
             let error = Source::parse(url).unwrap_err();
@@ -5124,9 +5149,192 @@ mod install_zip {
     }
 
     #[test]
+    fn shorthand_and_each_host_resolve_to_their_own_release_api() {
+        use crate::plugin::github::{Host, Source};
+        for (input, host, repository, tag, api) in [
+            ("maker/gears", Host::GitHub, "maker/gears", None, "https://api.github.com/repos/maker/gears/releases/latest"),
+            ("maker/gears@v0.1.0", Host::GitHub, "maker/gears", Some("v0.1.0"), "https://api.github.com/repos/maker/gears/releases/tags/v0.1.0"),
+            (
+                "https://codeberg.org/maker/gears",
+                Host::Codeberg,
+                "maker/gears",
+                None,
+                "https://codeberg.org/api/v1/repos/maker/gears/releases/latest",
+            ),
+            (
+                "https://codeberg.org/maker/gears/releases/tag/v0.1.0",
+                Host::Codeberg,
+                "maker/gears",
+                Some("v0.1.0"),
+                "https://codeberg.org/api/v1/repos/maker/gears/releases/tags/v0.1.0",
+            ),
+            (
+                "https://codeberg.org/maker/gears.git",
+                Host::Codeberg,
+                "maker/gears",
+                None,
+                "https://codeberg.org/api/v1/repos/maker/gears/releases/latest",
+            ),
+            (
+                "https://gitlab.com/maker/gears",
+                Host::GitLab,
+                "maker/gears",
+                None,
+                "https://gitlab.com/api/v4/projects/maker%2Fgears/releases/permalink/latest",
+            ),
+            (
+                "https://gitlab.com/maker/tools/gears/-/releases/v0.1.0",
+                Host::GitLab,
+                "maker/tools/gears",
+                Some("v0.1.0"),
+                "https://gitlab.com/api/v4/projects/maker%2Ftools%2Fgears/releases/v0.1.0",
+            ),
+        ] {
+            let source = Source::parse(input).unwrap();
+            assert_eq!((source.host, source.repository.as_str(), source.tag.as_deref()), (host, repository, tag), "{input}");
+            assert_eq!(source.release_url(), api, "{input}");
+            assert_eq!(source.display(), format!("{}/{repository}", host.web()));
+        }
+    }
+
+    fn codeberg_metadata() -> Value {
+        json!({
+            "tag_name":"v0.1.0", "draft":false, "prerelease":false,
+            "assets":[{"name":"gears.zip", "browser_download_url":"https://codeberg.org/maker/gears/releases/download/v0.1.0/gears.zip"}]
+        })
+    }
+
+    fn gitlab_metadata() -> Value {
+        json!({
+            "tag_name":"v0.1.0", "upcoming_release":false,
+            "assets":{"links":[{"name":"The gears plugin", "url":"https://gitlab.com/maker/gears/-/package_files/1/download",
+                "direct_asset_url":"https://gitlab.com/maker/gears/-/releases/v0.1.0/downloads/gears.zip"}]}
+        })
+    }
+
+    #[test]
+    fn codeberg_and_gitlab_packages_use_the_existing_review_and_record_no_update_source() {
+        let codeberg_api = "https://codeberg.org/api/v1/repos/maker/gears/releases/latest";
+        let codeberg_asset = "https://codeberg.org/maker/gears/releases/download/v0.1.0/gears.zip";
+        let gitlab_api = "https://gitlab.com/api/v4/projects/maker%2Fgears/releases/permalink/latest";
+        let gitlab_asset = "https://gitlab.com/maker/gears/-/releases/v0.1.0/downloads/gears.zip";
+        for (name, url, api, asset, metadata, source) in [
+            ("codeberg", "https://codeberg.org/maker/gears", codeberg_api, codeberg_asset, codeberg_metadata(), "codeberg.org/maker/gears"),
+            ("gitlab", "https://gitlab.com/maker/gears", gitlab_api, gitlab_asset, gitlab_metadata(), "gitlab.com/maker/gears"),
+        ] {
+            let (mut s, root) = session(&format!("url-{name}"));
+            let archive = gears("0.1.0");
+            let original = unpack(&archive).unwrap();
+            let downloads = stub_host(&mut s, api, asset, metadata, archive);
+            let dry = s.execute("plugin.install", &json!({"url":url,"dry_run":true})).unwrap();
+            assert_eq!(dry["source"], source, "{name}");
+            assert!(dry.get("repository").is_none(), "{name}: only GitHub names an update source");
+            assert_eq!(dry["approval"], original.approval, "{name}: the reviewed manifest is the published one");
+            assert!(!root.join("plugins").exists(), "{name}");
+            let installed = s.execute("plugin.install", &json!({"url":url,"approval":dry["approval"],"archive":dry["archive"]})).unwrap();
+            assert_eq!(installed["installed"], true, "{name}");
+            assert_eq!(downloads.load(std::sync::atomic::Ordering::Relaxed), 2, "{name}: the reviewed package is fetched again");
+            let package = read_package(&root.join("plugins/gears").to_string_lossy()).unwrap();
+            assert!(package.manifest.updates.is_none(), "{name}");
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_shorthand_with_a_ref_installs_that_githubs_tagged_release() {
+        let (mut s, root) = session("url-shorthand");
+        let archive = gears("0.1.0");
+        let _ = stub_host(
+            &mut s,
+            "https://api.github.com/repos/maker/gears/releases/tags/v0.1.0",
+            "https://github.com/maker/gears/releases/download/v0.1.0/gears.zip",
+            release_metadata(&archive),
+            archive,
+        );
+        let dry = s.execute("plugin.install", &json!({"url":"maker/gears@v0.1.0","dry_run":true})).unwrap();
+        assert_eq!((dry["source"].clone(), dry["repository"].clone()), (json!("github.com/maker/gears"), json!("maker/gears")));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn codeberg_and_gitlab_releases_are_refused_unless_one_package_is_on_their_own_release_downloads() {
+        let archive = gears("0.1.0");
+        let with_asset = |mut metadata: Value, key: &str, url: &str| {
+            if key == "links" {
+                metadata["assets"]["links"][0]["direct_asset_url"] = json!(url);
+            } else {
+                metadata["assets"][0]["browser_download_url"] = json!(url);
+            }
+            metadata
+        };
+        let mut codeberg_prerelease = codeberg_metadata();
+        codeberg_prerelease["prerelease"] = json!(true);
+        let mut gitlab_upcoming = gitlab_metadata();
+        gitlab_upcoming["upcoming_release"] = json!(true);
+        let mut codeberg_two = codeberg_metadata();
+        let mut second = codeberg_two["assets"][0].clone();
+        second["name"] = json!("other.zip");
+        second["browser_download_url"] = json!("https://codeberg.org/maker/gears/releases/download/v0.1.0/other.zip");
+        codeberg_two["assets"].as_array_mut().unwrap().push(second);
+        for (name, url, api, metadata) in [
+            (
+                "codeberg-host",
+                "https://codeberg.org/maker/gears",
+                "https://codeberg.org/api/v1/repos/maker/gears/releases/latest",
+                with_asset(codeberg_metadata(), "assets", "https://evil.test/maker/gears/releases/download/v0.1.0/gears.zip"),
+            ),
+            (
+                "codeberg-other-repository",
+                "https://codeberg.org/maker/gears",
+                "https://codeberg.org/api/v1/repos/maker/gears/releases/latest",
+                with_asset(codeberg_metadata(), "assets", "https://codeberg.org/someone/else/releases/download/v0.1.0/gears.zip"),
+            ),
+            (
+                "codeberg-prerelease",
+                "https://codeberg.org/maker/gears",
+                "https://codeberg.org/api/v1/repos/maker/gears/releases/latest",
+                codeberg_prerelease,
+            ),
+            ("codeberg-ambiguous", "https://codeberg.org/maker/gears", "https://codeberg.org/api/v1/repos/maker/gears/releases/latest", codeberg_two),
+            (
+                "gitlab-host",
+                "https://gitlab.com/maker/gears",
+                "https://gitlab.com/api/v4/projects/maker%2Fgears/releases/permalink/latest",
+                with_asset(gitlab_metadata(), "links", "https://evil.test/maker/gears/-/releases/v0.1.0/downloads/gears.zip"),
+            ),
+            (
+                "gitlab-package-registry",
+                "https://gitlab.com/maker/gears",
+                "https://gitlab.com/api/v4/projects/maker%2Fgears/releases/permalink/latest",
+                with_asset(gitlab_metadata(), "links", "https://gitlab.com/maker/gears/-/package_files/1/download"),
+            ),
+            (
+                "gitlab-traversal",
+                "https://gitlab.com/maker/gears",
+                "https://gitlab.com/api/v4/projects/maker%2Fgears/releases/permalink/latest",
+                with_asset(gitlab_metadata(), "links", "https://gitlab.com/maker/gears/-/releases/v0.1.0/downloads/../gears.zip"),
+            ),
+            (
+                "gitlab-upcoming",
+                "https://gitlab.com/maker/gears",
+                "https://gitlab.com/api/v4/projects/maker%2Fgears/releases/permalink/latest",
+                gitlab_upcoming,
+            ),
+        ] {
+            let (mut s, root) = session(&format!("url-refused-{name}"));
+            let downloads = stub_host(&mut s, api, "https://unreachable.test/never-downloaded.zip", metadata, archive.clone());
+            s.execute("plugin.install", &json!({"url":url,"dry_run":true})).unwrap_err();
+            assert_eq!(downloads.load(std::sync::atomic::Ordering::Relaxed), 0, "{name}: nothing is downloaded");
+            assert!(!root.join("plugins").exists(), "{name}: no package published");
+            assert!(s.plugin_state.grants.is_empty() && s.plugin_state.packages.is_empty(), "{name}");
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    #[test]
     fn install_url_refuses_unsupported_hosts_with_a_typed_error() {
         let (mut s, root) = session("url-refusal");
-        for url in ["http://github.com/maker/gears", "https://gitlab.com/maker/gears", "git@github.com:maker/gears.git"] {
+        for url in ["http://github.com/maker/gears", "https://example.com/maker/gears", "git@github.com:maker/gears.git"] {
             let error = s.execute("plugin.install", &json!({"url":url,"dry_run":true})).unwrap_err();
             assert!(
                 matches!(error.host_error(), Some(HostError::InvalidInput { field, reason })

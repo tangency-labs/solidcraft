@@ -34,7 +34,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("path: plugin package folder; returns inert manifest and approval hash covering manifest and component; runs no plugin code"),
     CommandSpec::new("plugin.install", "Install Plugin", checked!("plugin.install", install)).icon("import").noundo().doc_only()
         .contract(&TypedContract::<InstallParams>::new()).output(output_schema_for::<InstallResult>)
-        .params("path?: plugin .zip, url?: HTTPS GitHub repository or release URL (exactly one of path/url); URL installs require both hashes from a reviewed dry run; repository?: GitHub owner/repo to preserve for an update installed from a local path; approval?: exact hash from a reviewed dry run (mismatch refuses installation), archive?: exact .zip hash from that dry run (any changed file refuses installation), replace?: bool (required to replace an installed plugin of the same id), dry_run?: bool, approve?: {command_groups, folders: [{name, path, read, write}], fuel?: exactly the manifest's limits.fuel, at most 10000000000000, memory_mib?: exactly the manifest's limits.memory_mib, allowed above the user's ceiling for this package, input_folder?: bool, only for an importer that asks for it}; validates requested approvals and checks the .zip (one plugin, safe paths, size caps, manifest) and unpacks it into the plugins folder; runs no plugin code"),
+        .params("path?: plugin .zip, url?: owner/repo[@ref] (GitHub), or an HTTPS repository or release URL on github.com, gitlab.com or codeberg.org (exactly one of path/url); URL installs require both hashes from a reviewed dry run; repository?: GitHub owner/repo to preserve for an update installed from a local path; approval?: exact hash from a reviewed dry run (mismatch refuses installation), archive?: exact .zip hash from that dry run (any changed file refuses installation), replace?: bool (required to replace an installed plugin of the same id), dry_run?: bool, approve?: {command_groups, folders: [{name, path, read, write}], fuel?: exactly the manifest's limits.fuel, at most 10000000000000, memory_mib?: exactly the manifest's limits.memory_mib, allowed above the user's ceiling for this package, input_folder?: bool, only for an importer that asks for it}; validates requested approvals and checks the .zip (one plugin, safe paths, size caps, manifest) and unpacks it into the plugins folder; runs no plugin code"),
     CommandSpec::new("plugin.list", "List Plugins", checked!("plugin.list", list)).icon("inspect").noundo().doc_only()
         .contract(&TypedContract::<ListParams>::new()).output(output_schema_for::<ListResult>)
         .params("List inspected and installed plugin manifests, namespaced entries, declared effects and input schemas; no plugin code runs"),
@@ -106,7 +106,7 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
         }
         .into());
     }
-    let (zip, source): (Vec<u8>, Option<(String, String)>) = match (p.path.as_deref(), p.url.as_deref()) {
+    let (zip, source): (Vec<u8>, Option<(plugin::github::Source, String)>) = match (p.path.as_deref(), p.url.as_deref()) {
         (Some(path), None) => {
             (solidcraft_io::vfs::read(path, MAX_ZIP_BYTES).map_err(|e| crate::EngineError::Other(format!("could not read {path}: {e}")))?, None)
         }
@@ -123,7 +123,7 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
             {
                 let client = s.plugin_state.http.clone().unwrap_or_default();
                 let (zip, offer) = plugin::github::package(&source, &client.get, &client.download).map_err(crate::EngineError::Other)?;
-                (zip, Some((source.repository, offer.version)))
+                (zip, Some((source, offer.version)))
             }
             #[cfg(target_arch = "wasm32")]
             {
@@ -141,7 +141,12 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
             craft_plugin::HostError::InvalidInput { field: "url".into(), reason: "the package version does not match the release".into() }.into()
         );
     }
-    if let Some(repository) = source.as_ref().map(|(repo, _)| repo.as_str()).or(p.repository.as_deref()) {
+    // Only GitHub names an update source; a package from another host is installed without one.
+    let repository = match &source {
+        Some((source, _)) => (source.host == plugin::github::Host::GitHub).then_some(source.repository.as_str()),
+        None => p.repository.as_deref(),
+    };
+    if let Some(repository) = repository {
         plugin = plugin::install::with_repository(plugin, repository).map_err(failed)?;
     }
     if p.approval.as_ref().is_some_and(|approval| approval != &plugin.approval) {
@@ -194,7 +199,8 @@ fn install(s: &mut Session, p: &Value) -> Result<Value> {
     };
     serde_json::to_value(InstallResult {
         panels: runtime.and_then(|r| r.ui.as_ref()).map(|ui| ui.panels.clone()).unwrap_or_default(),
-        repository: source.map(|(repo, _)| repo),
+        repository: source.as_ref().filter(|(source, _)| source.host == plugin::github::Host::GitHub).map(|(source, _)| source.repository.clone()),
+        source: source.as_ref().map(|(source, _)| source.display()),
         approval: plugin.approval.clone(),
         archive: plugin.archive.clone(),
         id: manifest.id.clone(),

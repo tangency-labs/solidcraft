@@ -137,7 +137,7 @@ fn review_dialog(h: &mut crate::scenario::Harness, evidence: &str) -> String {
 #[test]
 fn a_release_is_offered_only_from_its_own_repository_as_a_stable_version() {
     let offer = parse_release(&release(Some(&"AB".repeat(32))), "maker/gears", "gears").unwrap();
-    assert_eq!(offer, Offer { version: "1.1.0".into(), url: ASSET.into(), sha256: "ab".repeat(32), repo: "maker/gears".into() });
+    assert_eq!(offer, Offer { version: "1.1.0".into(), url: ASSET.into(), sha256: Some("ab".repeat(32)), repo: "maker/gears".into() });
     assert_eq!(parse_release(&release(Some(&"ab".repeat(32))), "Maker/Gears", "gears").unwrap().url, ASSET, "the owner's case may differ");
     let versioned = json!({"tag_name":"1.1.0","assets":[{"name":"gears-1.1.0.zip","digest":std::format!("sha256:{}", "cd".repeat(32)),
         "browser_download_url":"https://github.com/maker/gears/releases/download/1.1.0/gears-1.1.0.zip"}]});
@@ -305,7 +305,7 @@ fn a_release_from_another_repository_is_not_offered() {
     let (mut h, _) = installed(Err(FetchError::Failed("offline".into())), Vec::new());
     let dir = plugins_dir(&h);
     let mut plugin = crate::plugin_slots::preferences_inventory(&mut h.app, &dir).into_iter().find(|p| p.id == "gears").unwrap();
-    let offer = Offer { version: "1.1.0".into(), url: ASSET.into(), sha256: "ab".repeat(32), repo: "maker-a/gears".into() };
+    let offer = Offer { version: "1.1.0".into(), url: ASSET.into(), sha256: Some("ab".repeat(32)), repo: "maker-a/gears".into() };
     h.app.plugin_updates.offers.insert("gears".into(), offer);
     plugin.updates = Some("maker-b/gears".into());
     assert!(offered(&h.app, &plugin).is_none(), "maker-a's release is not an update for maker-b's gears");

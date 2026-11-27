@@ -59,12 +59,11 @@ fn call(url: &str, timeout: std::time::Duration) -> Result<ureq::http::Response<
         .max_redirects(3)
         .build()
         .into();
-    let response = agent
-        .get(url)
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .call()
-        .map_err(|e| FetchError::Failed(e.to_string()))?;
+    // GitHub's API wants its media type and version; the other hosts get plain JSON.
+    let github = url.starts_with("https://api.github.com/") || url.starts_with("https://github.com/");
+    let request = agent.get(url).header("Accept", if github { "application/vnd.github+json" } else { "application/json, */*" });
+    let request = if github { request.header("X-GitHub-Api-Version", "2022-11-28") } else { request };
+    let response = request.call().map_err(|e| FetchError::Failed(e.to_string()))?;
     let status = response.status().as_u16();
     let header = |k: &str| response.headers().get(k).and_then(|v| v.to_str().ok()).and_then(|v| v.trim().parse::<u64>().ok());
     if status == 429 || (status == 403 && (header("x-ratelimit-remaining") == Some(0) || header("retry-after").is_some())) {
@@ -73,7 +72,7 @@ fn call(url: &str, timeout: std::time::Duration) -> Result<ureq::http::Response<
         return Err(FetchError::RateLimited { retry_after_s });
     }
     if status != 200 {
-        return Err(FetchError::Failed(format!("GitHub answered HTTP {status}")));
+        return Err(FetchError::Failed(format!("the host answered HTTP {status}")));
     }
     Ok(response)
 }

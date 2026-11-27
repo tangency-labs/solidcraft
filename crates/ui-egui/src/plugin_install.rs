@@ -408,7 +408,7 @@ pub(crate) fn install_now(app: &mut SolveApp, ask: &Ask) {
         .collect();
     let mut params = json!({"approval": text(&ask.plugin, "approval"), "archive": text(&ask.plugin, "archive"), "replace": replace, "approve":{"command_groups":ask.grants.command_groups,"folders":folders,"fuel":ask.grants.fuel,"memory_mib":ask.grants.memory_mib,"input_folder":ask.grants.input_folder}});
     if let Some(fields) = params.as_object_mut() {
-        fields.insert(if ask.plugin.get("repository").is_some() { "url" } else { "path" }.into(), json!(ask.path));
+        fields.insert(if ask.plugin.get("source").is_some() { "url" } else { "path" }.into(), json!(ask.path));
     }
     if let Some(repository) = crate::plugin_updates::repository(app, &ask.path)
         && let Some(fields) = params.as_object_mut()
@@ -502,7 +502,9 @@ mod tests {
                 if frame == 5 {
                     let text = crate::test_support::text_shapes(&output).map(|s| s.galley.text().to_owned()).collect::<Vec<_>>().join("\n");
                     assert!(
-                        text.contains("GitHub repository URL") && text.contains("Review package") && text.contains("https://github.com/maker/gears"),
+                        text.contains("Repository on GitHub, GitLab or Codeberg")
+                            && text.contains("Review package")
+                            && text.contains("https://github.com/maker/gears"),
                         "{text}"
                     );
                     let field = crate::scenario::rect_of("prefs:plugins:url").unwrap();

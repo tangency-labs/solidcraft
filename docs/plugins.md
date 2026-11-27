@@ -176,14 +176,22 @@ leaves the design and undo history unchanged.
 
 ## Installing
 
-**Install from .zip…** in **Preferences > Plugins** (desktop only) picks a plugin `.zip`.
-**Install from URL…** beside it accepts a GitHub repository URL. Paste the URL and choose
+**Install plugin…** in **Preferences > Plugins** (desktop only) picks a plugin `.zip`.
+**Install from URL…** beside it takes a repository on GitHub, GitLab or Codeberg. Paste it and choose
 **Review package** to download its release package, then review it on the same confirmation screen.
-Accepted URLs use `https://github.com/owner/repo`, optionally followed by `/releases/latest`,
-`/releases/tag/<tag>` or `/tree/<tag>`. A tag must be one safe URL path segment. Other hosts,
-protocols and URL forms are refused. The repository must have exactly one plugin `.zip` in a stable, versioned release
-with a SHA256 digest. Missing or ambiguous packages are refused; source archives are not installed.
-Downloads use the same bounded GitHub fetch and digest verification as plugin updates.
+Accepted forms are `owner/repo` or `owner/repo@<tag>` (always GitHub), and `https://` URLs on
+`github.com`, `gitlab.com` or `codeberg.org`, optionally followed by the host's release or tag page:
+`/releases/latest`, `/releases/tag/<tag>` or `/tree/<tag>` on GitHub; `/releases/latest`,
+`/releases/tag/<tag>` or `/src/tag/<tag>` on Codeberg; `/-/releases/<tag>`, `/-/tags/<tag>` or
+`/-/tree/<tag>` on GitLab (whose project may sit in subgroups). A tag must be one safe URL path
+segment. Other hosts, protocols and URL forms are refused. The release is looked up through the host's
+own release API (GitHub, GitLab, or Codeberg's Forgejo API), and the repository must have exactly one
+plugin `.zip` among that release's files, in a stable, versioned release, served from the repository's
+own release downloads. Missing or ambiguous packages are refused; source archives are not installed.
+GitHub lists a SHA256 digest for each file and the download must match it, as for plugin updates.
+GitLab and Codeberg list none, so a package from them is bound by the archive hash you reviewed: the
+install fetches it again and refuses it if a single byte changed. Only GitHub packages record an update
+source; a package from GitLab or Codeberg is installed without one.
 One confirmation screen shows its name, version, summary, requested permissions and entry placements.
 Each command group explains its access in plain words: files, designs, application settings or other plugins.
 Use **Browse…** to choose each requested folder, or type or paste its absolute local path.
@@ -266,7 +274,7 @@ both returned hashes and the selected approvals:
 }
 ```
 
-URL installation requires both hashes. It fetches the package again and refuses to install if either
+URL installation requires both hashes. The reply's `source` names the host and repository. It fetches the package again and refuses to install if either
 hash has changed since review. The same zip checks, limits and permission review apply. The host
 stores the selected `owner/repo` for later updates even if the manifest has no `updates.github`.
 Later updates retain that repository; a package naming a different repository is refused.
@@ -547,7 +555,7 @@ schema hook. An explicit `dialog_hook` entry still runs its general field hook b
 
 Preferences and the Plugins menu share `plugin_install::start(app)` in
 `crates/ui-egui/src/plugin_install.rs`. The local path selects a zip, and the URL form supplies a
-GitHub repository URL. Both call `plugin.install` with `dry_run: true`,
+repository (`owner/repo[@ref]` or a GitHub, GitLab or Codeberg URL). Both call `plugin.install` with `dry_run: true`,
 draws the confirmation screen and submits `plugin.install` with the reviewed `approval` and `archive` hashes and selected `approve` object.
 Successful installation persists grants in desktop preferences and the shared grant store; successful
 removal and `plugin.revoke` delete them. `SolveApp::share_plugin_grants`, called once after the
