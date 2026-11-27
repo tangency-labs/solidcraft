@@ -254,6 +254,8 @@ doesn't change the last known login state.
 | GitHub Copilot CLI, Qwen Code, goose | listed with their install command when missing |
 
 The panel lists agents that aren't installed with their install command and a **Copy** button.
+To copy an installation command during an active chat, open **Add agent…**, choose
+**Installed agent**, and expand **Not installed**.
 
 For Mistral Vibe, put `vibe-acp` on your PATH and refresh the agent list. Follow Vibe's sign-in
 prompt, run `vibe --setup` in a terminal, or set `MISTRAL_API_KEY` before launching SolidCraft.
@@ -472,6 +474,10 @@ load servers you configured for them:
 - **One undo per message:** everything the agent changes while answering one message becomes
   a single undo step, named after your message. The conversation shows *N changes, one undo
   step* with **Undo these changes** while nothing else has happened since.
+- **Show in model:** when a message adds or edits features, its changes card counts them.
+  In a Model view, choose **Show in model** to highlight the features whose edits still match
+  the Assistant's changes. **Hide highlight** clears the highlight. Closing Assistant,
+  changing the design, switching tabs or undoing also clears it.
 - **Tool cards:** each tool call shows as a card with its state; click it to see what it returned.
 - **Formatted text:** the agent's answers show as Markdown: headings, lists, quotes, tables, code
   blocks (with **Copy**), bold, italic, `code` and links (web links only; each link is a button

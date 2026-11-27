@@ -5675,6 +5675,44 @@ fn a_round_along_a_whole_circle_builds_alike_on_both_ends_of_a_mirrored_ring() {
     }
 }
 
+/// #19077, reduced: a quarter turn of a 20 wide, 6 high profile whose outer wall is a cone of
+/// slope 1/320, its two end faces through the axis, each end rounded 0.5 against the cone (the
+/// round's spine is a hyperbola, its plane parallel to the cone's axis) and shelled 0.4 inward.
+/// The reporter's own design (a 120 degree bent slot, the cone a 1 mm band between tangent
+/// arcs, 13 edges rounded 0.4) is not in the repository; rebuilt from its numbers, its rounds
+/// and shells are refused alike on main and here (see the PR), so this guards the reduced
+/// case only: a valid solid whose volume is between 0 and the part's.
+#[test]
+fn a_revolved_body_with_rounds_on_its_shallow_cone_shells_04_inward() {
+    let slope = 1.0 / 320.0;
+    let line = |start: [f64; 3], end: [f64; 3]| Curve::Line { start, end };
+    let (a, b) = ([40.0, 0.0, 0.0], [60.0, 0.0, 0.0]);
+    let (c, d) = ([60.0 + 6.0 * slope, 0.0, 6.0], [40.0, 0.0, 6.0]);
+    let part = solidcore_ops::sweep::revolve(
+        &[line(a, b), line(b, c), line(c, d), line(d, a)],
+        [0.0; 3],
+        [0.0, 0.0, 1.0],
+        PI / 2.0,
+        true,
+    )
+    .unwrap();
+    let middle = 60.0 + 3.0 * slope;
+    let ends = [
+        edge_at(&part, [middle, 0.0, 3.0]),
+        edge_at(&part, [0.0, middle, 3.0]),
+    ];
+    blend(&part, Blend::Round, &ends, &[0.5], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the rounds build: {e}"));
+    assert!(part.check(CheckLevel::All).unwrap().is_valid());
+    let whole = part.volume(1e-8).unwrap();
+    let (_, order) = part.to_record().unwrap();
+    solidcore_ops::shell(&part, &order, &[], -0.4)
+        .unwrap_or_else(|e| panic!("the shell builds: {e}"));
+    assert!(part.check(CheckLevel::All).unwrap().is_valid());
+    let wall = part.volume(1e-8).unwrap();
+    assert!(0.0 < wall && wall < whole, "wall {wall} of {whole}");
+}
+
 /// Acid-1 stage 4: both rims of the upper half torus, including the outer rim's
 /// detour around an r0.7 notch, are rounded r0.8 after joining the seam's boss.
 #[test]
@@ -7309,6 +7347,108 @@ fn a_round_where_a_sphere_meets_a_face_through_its_poles_builds() {
         let case =
             format!("face square to axis {axis}, plate on {side}, sphere turned {turn}, {op:?}");
         round_sphere_rim(&case, r, f, axis, side, &[turn_about(2, turn)], op);
+    }
+}
+
+/// tangency-labs/solidcraft#21941: one edge of a sphere's rim rounded alone, where the sphere
+/// is centred on a plate's face square to x or y, as a nub or a socket. The rim is split at the
+/// poles and where it crosses the sphere's seam, so each edge is a quarter or a half of it, and
+/// its round ends on the edges that run on smoothly from it, unrounded. Where the rim's edge
+/// ends on the seam, the cap's edge on the sphere ran the long way round the cap's circle, to
+/// the rim's point opposite, so the strip the round takes off the sphere stayed open and the
+/// round failed ("the trim leaks"); on the mirrored part, whose edge ends away from the seam,
+/// it built. Every edge's round now builds a valid solid and adds or takes off its share of the
+/// whole rim's ring, the ring's closed form times the edge's share of the circle (counted at
+/// every half degree, none on a split), with the command's turn (`Turn::Auto`). The rim of
+/// #21941's part (face square to y, plate on its positive side, a nub) must be split at the
+/// seam, so that the test holds an edge ending there.
+#[test]
+fn one_edge_of_a_rim_through_a_spheres_poles_rounds_alone() {
+    use solidcore_ops::BooleanOp;
+    all_fixes();
+    let (r, f) = (0.975, 0.3);
+    let ring = sphere_on_plane_round(r, f);
+    for (axis, side, op) in [
+        (1, 1.0, BooleanOp::Union),
+        (1, -1.0, BooleanOp::Union),
+        (0, 1.0, BooleanOp::Union),
+        (0, -1.0, BooleanOp::Union),
+        (1, 1.0, BooleanOp::Subtract),
+        (1, -1.0, BooleanOp::Subtract),
+        (0, 1.0, BooleanOp::Subtract),
+        (0, -1.0, BooleanOp::Subtract),
+    ] {
+        let b = sphere_on_plate(r, axis, side, &[], op);
+        // each rim edge with the number of half-degree samples of the circle on it
+        let (k, brep) = kernel_copy(&b);
+        let all = brep.edge_list();
+        let (u, v) = [(1, 2), (0, 2), (0, 1)][axis];
+        let mut shares: Vec<(usize, u32)> = Vec::new();
+        for i in 0..360_u32 {
+            let a = (0.5 + f64::from(i)).to_radians();
+            let mut p = [0.0; 3];
+            p[u] = r * a.cos();
+            p[v] = r * a.sin();
+            let q = Vec3::new(p[0], p[1], p[2]);
+            let on: Vec<usize> = (0..all.len())
+                .filter(|&e| {
+                    edge_closest_point(&k, &brep, all[e], q)
+                        .unwrap()
+                        .closest
+                        .distance
+                        < 1e-9 * r
+                })
+                .collect();
+            assert_eq!(on.len(), 1, "axis {axis}, side {side}, {op:?}: {a} rad");
+            match shares.iter_mut().find(|(e, _)| *e == on[0]) {
+                Some((_, n)) => *n += 1,
+                None => shares.push((on[0], 1)),
+            }
+        }
+        assert!(
+            shares.len() >= 2,
+            "axis {axis}, side {side}, {op:?}: {shares:?}"
+        );
+        // #21941's part: the rim is split at the poles and at the seam, (r, 0, 0), so two of
+        // its edges end on the seam
+        if (axis, side, op) == (1, 1.0, BooleanOp::Union) {
+            assert_eq!(
+                shares.len(),
+                3,
+                "the rim is not split at the seam: {shares:?}"
+            );
+        }
+        for (edge, n) in shares {
+            let case =
+                format!("axis {axis}, plate on {side}, {op:?}, rim edge {edge} ({n} of 360)");
+            let b = sphere_on_plate(r, axis, side, &[], op);
+            let before = b.volume(RIM_VOLUME_ACCURACY).unwrap();
+            blend_with(
+                &b,
+                Blend::Round,
+                &[edge],
+                &[f],
+                &[],
+                Corners::Filled,
+                BlendOptions {
+                    turn: Turn::Auto,
+                    ..BlendOptions::default()
+                },
+            )
+            .unwrap_or_else(|e| panic!("{case}: the round does not build: {e:?}"));
+            assert!(b.is_manifold_solid().unwrap(), "{case}");
+            let report = b.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{case}: {report}");
+            let after = b.volume(RIM_VOLUME_ACCURACY).unwrap();
+            let sign = if op == BooleanOp::Union { 1.0 } else { -1.0 };
+            let want = sign * ring * f64::from(n) / 360.0;
+            let bound = RIM_VOLUME_ACCURACY * (before.abs() + after.abs()) + 1e-14 * want.abs();
+            assert!(
+                ((after - before) - want).abs() <= bound,
+                "{case}: the volume changed by {}, not {want}",
+                after - before
+            );
+        }
     }
 }
 

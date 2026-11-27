@@ -39,6 +39,40 @@ A sample opens as an ordinary design you can change; a click on its tile is enou
 From there, [A tour of the window](ui-tour.md) shows what's where, and
 [Sketching step by step](sketching.md#step-by-step) starts a part of your own.
 
+### Installing on Windows
+
+The installer (`solidcraft-windows-x64.msi`, also for ARM64 and 32-bit PCs) asks who SolidCraft
+is for:
+
+- **Install for all users (needs admin)**, the default: into `C:\Program Files\SolidCraft`, with
+  the Start menu entry, `.sc` files and `solidcraft://` links set up for everyone on the computer.
+  Windows asks for an administrator's permission.
+- **Install just for me**: into `%LocalAppData%\Programs\SolidCraft`, with the Start menu entry,
+  `.sc` files, `solidcraft://` links and `solidcraft-cli` on the PATH set up for your account
+  only. No administrator is needed.
+
+An update keeps the choice: the installer, and SolidCraft's own **Install** button, update an
+install for all users for all users and an install just for you just for you. Both can be on one
+computer; each is updated and uninstalled on its own, and while both are there your own
+`.sc` files and `solidcraft://` links open the copy installed just for you.
+
+Silent installs, for scripts and deployment tools:
+
+```bat
+:: For all users (run as administrator), as before
+msiexec /i solidcraft-windows-x64.msi /qn
+:: Just for me, no administrator
+msiexec /i solidcraft-windows-x64.msi ALLUSERS=2 MSIINSTALLPERUSER=1 /qn
+:: Uninstall an install just for me
+msiexec /x solidcraft-windows-x64.msi ALLUSERS=2 MSIINSTALLPERUSER=1 /qn
+```
+
+A silent update of an install just for you needs the same two properties. Without them a silent
+install is for all users, as it always was. One version can be installed only one way for a
+given person: to switch, uninstall it first, or install a newer version the other way. Windows
+Server lets only administrators run installers unless the `DisableMsi` policy allows it, so there
+"just for me" needs that policy set to 0.
+
 ### macOS
 
 Open the release `.dmg` and drag `SolidCraft.app` onto Applications.
