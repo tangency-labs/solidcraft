@@ -327,8 +327,8 @@ fn quantity_row(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label
     count_row_to(ui, doc, label, value, MAX_PATTERN_INSTANCES)
 }
 
-/// The most revolutions a coil makes (the helix's own limit).
-const MAX_COIL_REVOLUTIONS: i64 = 200;
+/// The most revolutions a coil makes (the helix's own limit, a whole number of turns).
+const MAX_COIL_REVOLUTIONS: i64 = solidcraft_engine::kernel::MAX_HELIX_TURNS as i64;
 
 /// A count row with step arrows by whole numbers from 1 to `max`, evaluated as the document
 /// evaluates it. A fraction still types in (a coil's revolutions); an arrow steps it to the next
@@ -510,6 +510,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         for rows in crate::dialogs_shaft_spline::shown_picks(&d.inputs) {
             input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, rows);
         }
+    } else if let Kind::CellGrid(c) = &d.kind {
+        // The cell's profile shows with the Sketch shape only.
+        let shown = crate::dialogs_cell_grid::shown_picks(c);
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, shown);
     } else if matches!(d.kind, Kind::Frame(_)) {
         // Corner Overrides shows among Frame Member's own rows, under the corner settings.
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..2);

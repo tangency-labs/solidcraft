@@ -6291,6 +6291,7 @@ version = "0.50.0"
 dependencies = [
  "craft-plugin",
  "craft-plugin-wasm",
+ "crc32fast",
  "flate2",
  "image",
  "log",

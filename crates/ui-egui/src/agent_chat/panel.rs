@@ -2262,20 +2262,36 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
                     }
                 });
             }
-            Item::Changes { steps, revision, history, undone } => {
-                ui.horizontal(|ui| {
-                    let text = trf("ui.agent_chat_changes", &[("n", &steps.to_string())]);
-                    ui.label(RichText::new(text).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
-                    if *undone {
-                        ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
-                    } else if revision.same(current) && view.undo_history.as_ref().is_some_and(|h| history.same(h)) {
-                        let b =
-                            ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.ai_undo_tip"));
-                        solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
-                        if b.clicked() {
-                            undo = Some(n);
-                        }
+            Item::Changes { steps, summary, revision, history, undone } => {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = t.space_6;
+                    if !summary.is_empty() {
+                        ui_kit::assistant_tool_detail(ui, |ui| {
+                            ui.set_min_width(ui.available_width().max(0.0));
+                            ui.spacing_mut().item_spacing.y = t.space_2;
+                            for line in summary {
+                                let mut text = RichText::new(line.as_str()).color(t.text_dim).size(t.font_small);
+                                if *undone {
+                                    text = text.strikethrough();
+                                }
+                                ui.add(egui::Label::new(text).truncate()).backing_on_hover_text(line.as_str());
+                            }
+                        });
                     }
+                    ui.horizontal(|ui| {
+                        let text = trf("ui.agent_chat_changes", &[("n", &steps.to_string())]);
+                        ui.label(RichText::new(text).color(t.text_dim).size(t.font_caption));
+                        if *undone {
+                            ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(t.font_caption));
+                        } else if revision.same(current) && view.undo_history.as_ref().is_some_and(|h| history.same(h)) {
+                            let b = ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal)
+                                .backing_on_hover_text(tr("ui.ai_undo_tip"));
+                            solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
+                            if b.clicked() {
+                                undo = Some(n);
+                            }
+                        }
+                    });
                 });
             }
             Item::Notice { text, error } => {

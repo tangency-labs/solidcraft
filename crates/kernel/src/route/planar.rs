@@ -196,6 +196,17 @@ pub fn hole_reaches_loops(center: [f64; 2], size: [f64; 2], angle: f64, loops: &
     }
 }
 
+/// Whether a side of a board's outline lies on the wall of the drilled hole of
+/// [`hole_reaches_loops`]: every one of `points` is, within `chord` (the sag of a wall drawn as
+/// chords) or 0.6 % of the hole's radius, whichever is larger. No points, or a non-finite or
+/// negative input, is on no wall.
+#[must_use]
+pub fn side_on_hole_wall(center: [f64; 2], size: [f64; 2], angle: f64, points: &[[f64; 2]], chord: f64) -> bool {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.side_on_hole_wall(center, size, angle, points, chord),
+    }
+}
+
 /// The three points a sketch solver holds a circle by, in the orthonormal frame `x`, `y` about
 /// `c`, at `radius` and starting `from` radians.
 #[must_use]
@@ -262,6 +273,8 @@ mod tests {
         let square = vec![vec![[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]]];
         for c in [[5.0, 5.0], [9.5, 5.0], [0.0, 5.0]] {
             assert_eq!(hole_reaches_loops(c, [2.0, 1.0], 0.0, &square), board_drill::hole_reaches_loops(c, [2.0, 1.0], 0.0, &square));
+            let side = [[c[0] + 1.0, c[1]], [c[0], c[1] + 0.5]];
+            assert_eq!(side_on_hole_wall(c, [2.0, 1.0], 0.0, &side, 0.02), board_drill::side_on_hole_wall(c, [2.0, 1.0], 0.0, &side, 0.02));
         }
         let xy = Plane::XY;
         let tilted = Plane { origin: Vec3::new(1.0, 2.0, 3.0), x: Vec3::new(0.0, 1.0, 0.0), y: Vec3::new(0.0, 0.0, 1.0) };
