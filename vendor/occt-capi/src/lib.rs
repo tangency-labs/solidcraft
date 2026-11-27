@@ -52,6 +52,7 @@ mod raw {
         ) -> u32;
         pub fn occt_offset_faces_nearest(h: u32, points: *const f64, count: usize, distance: f64) -> u32;
         pub fn occt_thicken(h: u32, thickness: f64, symmetric: i32) -> u32;
+        pub fn occt_loft_ruled(data: *const f64, count: usize) -> u32;
         pub fn occt_prism_profile(data: *const f64, count: usize, dx: f64, dy: f64, dz: f64, distance: f64) -> u32;
         pub fn occt_revol_profile(data: *const f64, count: usize, ox: f64, oy: f64, oz: f64, dx: f64, dy: f64, dz: f64, angle: f64) -> u32;
 
@@ -65,7 +66,7 @@ mod raw {
 }
 
 /// The ABI these bindings were written for.
-pub const ABI_VERSION: u32 = 5;
+pub const ABI_VERSION: u32 = 6;
 
 /// Why the module refused a call, in its own words.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -260,6 +261,13 @@ impl Shape {
     pub fn thicken(&self, thickness: f64, symmetric: bool) -> Result<Shape> {
         // SAFETY: a live handle.
         shape(unsafe { raw::occt_thicken(self.0, thickness, i32::from(symmetric)) })
+    }
+
+    /// A solid ruled between closed sections: their count, then each in [`Shape::prism_profile`]'s
+    /// encoding with one loop.
+    pub fn loft_ruled(sections: &[f64]) -> Result<Shape> {
+        // SAFETY: `sections.len()` readable doubles.
+        shape(unsafe { raw::occt_loft_ruled(sections.as_ptr(), sections.len()) })
     }
 
     /// Whether OCCT's own checker passes the shape.

@@ -82,9 +82,9 @@ pub(crate) struct Draft {
 pub(crate) use imp::loft_piece_by_piece;
 pub(crate) use imp::{
     body_from_record, curve, curve_tolerance, cylinder, cylinder_circle, extrude, extrude_drafted_with_holes, extrusion_curves, face_section, loft,
-    loft_curves, loft_many_rails, loft_to_point, loft_to_point_with_rails, name_cylinder, name_extrusion, name_revolution, name_revolved_primitive,
-    path_curve, project_onto_face, rail_curves, railed_skin, revolution_curves, revolve, screw, screw_radial, skin_sections, sphere, sweep,
-    sweep_controlled, torus,
+    loft_curves, loft_curves_of, loft_many_rails, loft_to_point, loft_to_point_with_rails, name_cylinder, name_extrusion, name_loft, name_revolution,
+    name_revolved_primitive, path_curve, project_onto_face, rail_curves, railed_skin, revolution_curves, revolve, screw, screw_radial, skin_sections,
+    sphere, sweep, sweep_controlled, torus,
 };
 
 /// `parts` joined in order in a balanced tree: each part with its neighbour, then each pair with
@@ -2497,6 +2497,18 @@ mod imp {
     fn loft_through(sections: &[(Plane, Vec<Piece>)], first: usize, curves: &[Vec<Curve>], degree: u32) -> Result<Body> {
         let brep = Brep::loft(curves, degree, true).map_err(|e| failed("loft", e))?;
         loft_roles(body_of(brep, "loft")?, sections, first)
+    }
+
+    /// The section curves [`loft`] skins (runs of one curve joined where every section agrees),
+    /// section by section: what another kernel lofts.
+    pub(crate) fn loft_curves_of(sections: &[(Plane, Vec<Piece>)]) -> Result<Vec<Vec<Curve>>> {
+        loft_section_curves(sections)
+    }
+
+    /// `body`, another kernel's loft of [`loft_curves_of`], with the roles and history [`loft`]
+    /// gives its own.
+    pub(crate) fn name_loft(body: Body, sections: &[(Plane, Vec<Piece>)], first: usize) -> Result<Body> {
+        loft_roles(body, sections, first)
     }
 
     /// `body`, a loft through `sections` (`first` as [`loft`] takes it), with the roles and the

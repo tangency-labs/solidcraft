@@ -8,6 +8,7 @@
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
+#include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepOffset_MakeOffset.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <gp_Pln.hxx>
@@ -273,8 +274,7 @@ TopoDS_Edge read_edge(Reader& r) {
 
 // A planar face of a profile: a loop count, then each loop (the outer first, then its holes) as
 // a curve count and its curves in order, each starting where the one before ends.
-TopoDS_Face read_profile(const void* data, size_t count) {
-  Reader r{data, count};
+std::vector<TopoDS_Wire> read_loops(Reader& r) {
   const size_t loops = r.size(100000);
   if (loops == 0) throw std::invalid_argument("the profile has no loop");
   std::vector<TopoDS_Wire> wires;
@@ -289,6 +289,12 @@ TopoDS_Face read_profile(const void* data, size_t count) {
     if (!w.Wire().Closed()) throw std::invalid_argument("a profile loop is not closed");
     wires.push_back(w.Wire());
   }
+  return wires;
+}
+
+TopoDS_Face read_profile(const void* data, size_t count) {
+  Reader r{data, count};
+  const std::vector<TopoDS_Wire> wires = read_loops(r);
   if (r.at != count) throw std::invalid_argument("the profile's data runs past its loops");
   BRepBuilderAPI_MakeFace f(wires[0], Standard_True);
   if (!f.IsDone()) throw std::runtime_error("the profile's outer loop is not a planar face");
@@ -329,6 +335,27 @@ API uint32_t occt_revol_profile(const void* data, size_t count, double ox, doubl
     BRepPrimAPI_MakeRevol maker = full ? BRepPrimAPI_MakeRevol(face, axis) : BRepPrimAPI_MakeRevol(face, axis, angle);
     maker.Build();
     if (!maker.IsDone()) throw std::runtime_error("the revolution could not be built");
+    return put_shape(maker.Shape());
+  });
+}
+
+// A solid ruled between closed sections: a section count, then each section as read_profile's
+// data of one loop. Each curve of a section is ruled to the curve in the same place of the next.
+API uint32_t occt_loft_ruled(const void* data, size_t count) {
+  return guard_handle([&]() -> uint32_t {
+    Reader r{data, count};
+    const size_t sections = r.size(50);
+    if (sections < 2) throw std::invalid_argument("a loft needs two sections or more");
+    BRepOffsetAPI_ThruSections maker(Standard_True, Standard_True, 1e-7);
+    maker.CheckCompatibility(Standard_False);
+    for (size_t i = 0; i < sections; ++i) {
+      const std::vector<TopoDS_Wire> wires = read_loops(r);
+      if (wires.size() != 1) throw std::invalid_argument("a loft section is one loop");
+      maker.AddWire(wires[0]);
+    }
+    if (r.at != count) throw std::invalid_argument("the loft's data runs past its sections");
+    maker.Build();
+    if (!maker.IsDone()) throw std::runtime_error("the loft could not be built");
     return put_shape(maker.Shape());
   });
 }

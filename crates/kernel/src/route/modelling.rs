@@ -457,6 +457,18 @@ pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
 /// every section's curve), `fit` saying how they reshape the sections between. Without rails,
 /// the plain loft.
 pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run_each(
+        &crate::backend::Occt,
+        OpKind::Loft,
+        |k| k.loft(sections, rails, fit).map(|s| vec![s]),
+        |bodies| {
+            let (pieces, first) = crate::build::loft_plan(sections)?;
+            bodies.into_iter().map(|b| crate::smlib_sweeps::name_loft(b, &pieces, first)).collect()
+        },
+    ) {
+        return made.and_then(|mut b| b.pop().ok_or_else(|| crate::KernelError::Failed("the loft is empty".into())));
+    }
     match which(OpKind::Loft) {
         Which::Solidcore => Solidcore.loft(sections, rails, fit),
     }

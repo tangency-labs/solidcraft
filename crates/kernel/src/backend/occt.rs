@@ -151,6 +151,7 @@ impl Backend for Occt {
             OpKind::Thicken => Support::Yes,
             OpKind::OffsetFaces => Support::Yes,
             OpKind::Draft => Support::Yes,
+            OpKind::Loft => Support::Some("two sections, no rails".into()),
             _ => Support::No,
         }
     }
@@ -377,8 +378,19 @@ impl Modelling for Occt {
         unsupported("a helical sweep")
     }
 
-    fn loft(&self, _sections: &[(Plane, Loop2)], _rails: &[Vec<Vec3>], _fit: RailFit) -> Result<Shape, BackendError> {
-        unsupported("a loft")
+    fn loft(&self, sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], _fit: RailFit) -> Result<Shape, BackendError> {
+        // Two sections are a ruled skin on solidcore too (degree 1 across them); through more,
+        // its skin's interpolation is its own.
+        if sections.len() != 2 || !rails.is_empty() {
+            return unsupported("a loft through more than two sections or along rails");
+        }
+        let (pieces, _) = crate::build::loft_plan(sections).map_err(refused)?;
+        let curves = crate::smlib_sweeps::loft_curves_of(&pieces).map_err(refused)?;
+        let mut data = vec![curves.len() as f64];
+        for c in &curves {
+            data.extend(encode_profile(c)?);
+        }
+        Shape::loft_ruled(&data).map_err(failed)
     }
 
     fn loft_regions(&self, _sections: &[(Plane, Region2)]) -> Result<Shape, BackendError> {
@@ -420,6 +432,7 @@ mod tests {
                     | OpKind::Thicken
                     | OpKind::OffsetFaces
                     | OpKind::Draft
+                    | OpKind::Loft
             );
             assert_eq!(Occt.supports(op) != Support::No, routed, "{}", op.name());
         }
@@ -660,5 +673,23 @@ mod tests {
         let sphere = named(crate::route::sphere(v(1.0, 2.0, 3.0), 1.5).unwrap());
         assert!((crate::measure(&sphere).unwrap().volume - 4.5 * PI).abs() < 1e-9);
         named(crate::route::torus(v(0.0, 0.0, 0.0), 3.0, 1.0).unwrap());
+    }
+
+    #[test]
+    fn two_section_lofts_match_solidcore_with_the_same_names() {
+        use solidcore_record::{Loop2, Vec2};
+        use std::f64::consts::PI;
+        let sq = |h: f64| poly(&[(-h, -h), (h, -h), (h, h), (-h, h)]);
+        let up = |z: f64| Plane { origin: v(0.0, 0.0, z), x: v(1.0, 0.0, 0.0), y: v(0.0, 1.0, 0.0) };
+        let one = |b: crate::Result<Body>| b.map(|b| vec![b]);
+        // A frustum of a square pyramid: h/3 (A + B + sqrt(A B)).
+        parity("a square to a smaller square", Some(5.0 / 3.0 * (16.0 + 4.0 + 8.0)), || {
+            one(crate::route::loft(&[(up(0.0), sq(2.0)), (up(5.0), sq(1.0))]))
+        });
+        // A frustum of a cone from a circle of 3 to one of 1, 4 apart.
+        parity("a circle to a smaller circle", Some(PI * 4.0 / 3.0 * (9.0 + 1.0 + 3.0)), || {
+            one(crate::route::loft(&[(up(0.0), Loop2::circle(Vec2::ZERO, 3.0)), (up(4.0), Loop2::circle(Vec2::ZERO, 1.0))]))
+        });
+        parity("a square to a circle", None, || one(crate::route::loft(&[(up(0.0), sq(2.0)), (up(3.0), Loop2::circle(Vec2::ZERO, 1.5))])));
     }
 }

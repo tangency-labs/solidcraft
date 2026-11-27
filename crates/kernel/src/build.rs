@@ -1174,32 +1174,52 @@ pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
 
 /// [`loft`] following 1…16 guide rails (polylines from the first section to the last,
 /// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
-/// sections between. Without rails, the plain loft.
-pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
-    let _span = solidcraft_profile::span("kernel", "loft_with_rails");
+type LoftPieces = Vec<(Plane, Vec<crate::smlib_sweeps::Piece>)>;
+
+/// A loft's sections as the kernel lofts them: whether they run reversed, numbered, matched
+/// into loops, and the index of the section given first.
+#[allow(clippy::type_complexity)]
+fn loft_start(sections: &[(Plane, Loop2)]) -> Result<(bool, Vec<(Plane, NumberedLoop)>, Vec<(Plane, NumberedLoop)>, usize)> {
     let reversed = loft_reversed(sections)?;
     let numbered = sections.iter().map(|(p, _)| *p).zip(numbered::number_loops(sections.iter().map(|(_, l)| l))).collect::<Vec<_>>();
     let loops = loft_numbered_loops(&numbered, reversed)?;
     let first = if reversed { loops.len().saturating_sub(1) } else { 0 };
-    let pieces_of = |loops: &[(Plane, NumberedLoop)]| -> Vec<(Plane, Vec<crate::smlib_sweeps::Piece>)> {
-        loops.iter().map(|(p, l)| (*p, crate::smlib_sweeps::pieces([l]))).collect()
-    };
-    let mut pieces = pieces_of(&loops);
+    Ok((reversed, numbered, loops, first))
+}
+
+fn loft_pieces_of(loops: &[(Plane, NumberedLoop)]) -> LoftPieces {
+    loops.iter().map(|(p, l)| (*p, crate::smlib_sweeps::pieces([l]))).collect()
+}
+
+/// [`loft`]'s sections as its skin takes them, and the index of the section given first: what
+/// another kernel lofts, and what names it after.
+pub(crate) fn loft_plan(sections: &[(Plane, Loop2)]) -> Result<(LoftPieces, usize)> {
+    let (reversed, numbered, loops, first) = loft_start(sections)?;
+    let mut pieces = loft_pieces_of(&loops);
     // The smlib wrapper's `MAX_CURVES` bounds the curves in all its sections (and stations): matching
     // can give each section more segments than the largest has, so past that bound the sections
     // are re-split instead, to no more than the largest has.
+    if pieces.iter().map(|(_, p)| p.len()).sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES {
+        pieces = loft_pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
+    }
+    Ok((pieces, first))
+}
+
+/// sections between. Without rails, the plain loft.
+pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "loft_with_rails");
     if rails.is_empty() {
-        if pieces.iter().map(|(_, p)| p.len()).sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES {
-            pieces = pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
-        }
+        let (pieces, first) = loft_plan(sections)?;
         return crate::smlib_sweeps::loft(&pieces, first);
     }
+    let (reversed, numbered, loops, first) = loft_start(sections)?;
+    let mut pieces = loft_pieces_of(&loops);
     if rails.len() > 2 {
         return crate::smlib_sweeps::loft_many_rails(&pieces, first, rails, fit);
     }
     let mut all = crate::smlib_sweeps::rail_curves(&pieces, rails, fit)?;
     if all.iter().map(Vec::len).sum::<usize>() > solidcraft_smlib::sweeps::MAX_CURVES {
-        pieces = pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
+        pieces = loft_pieces_of(&loft_numbered_loops_by(&numbered, reversed, true)?);
         all = crate::smlib_sweeps::rail_curves(&pieces, rails, fit)?;
     }
     crate::smlib_sweeps::loft_curves(&pieces, first, &all)
