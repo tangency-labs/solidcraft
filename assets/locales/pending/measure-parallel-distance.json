@@ -1,0 +1,38 @@
+{
+  "en": {
+    "measure.parallel_distance": "Parallel distance"
+  },
+  "de": {
+    "measure.parallel_distance": "Paralleler Abstand"
+  },
+  "es": {
+    "measure.parallel_distance": "Distancia paralela"
+  },
+  "fr": {
+    "measure.parallel_distance": "Distance parallèle"
+  },
+  "it": {
+    "measure.parallel_distance": "Distanza parallela"
+  },
+  "nl": {
+    "measure.parallel_distance": "Parallelle afstand"
+  },
+  "ar": {
+    "measure.parallel_distance": "المسافة الموازية"
+  },
+  "he": {
+    "measure.parallel_distance": "מרחק מקביל"
+  },
+  "ja": {
+    "measure.parallel_distance": "平行距離"
+  },
+  "vi": {
+    "measure.parallel_distance": "Khoảng cách song song"
+  },
+  "zh": {
+    "measure.parallel_distance": "平行距离"
+  },
+  "ko": {
+    "measure.parallel_distance": "평행 거리"
+  }
+}

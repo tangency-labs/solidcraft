@@ -1848,7 +1848,8 @@ fn saved_section_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) {
 }
 
 /// The measurement in the dialog: each item's size, then the distance (a pair of round items
-/// offers centre to centre, closest and farthest), its ΔX/Y/Z and the angle between two items.
+/// offers centre to centre, closest and farthest), its ΔX/Y/Z, the distance square to two parallel
+/// items where it differs from the closest, and the angle between two items.
 fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut Option<Shown>, dual: &mut bool) {
     let toggle = ui_kit::checkbox(ui, tr("measure.dual_units"), dual);
     crate::scenario::publish_handle("measure:dual_units", toggle.rect.center());
@@ -1936,6 +1937,9 @@ fn measure_rows(app: &SolveApp, ui: &mut egui::Ui, r: Option<&Value>, show: &mut
         for (l, v) in [("ΔX", delta.x), ("ΔY", delta.y), ("ΔZ", delta.z)] {
             value(ui, l, &crate::prefs::show_measure(app, v.abs(), 1, *dual));
         }
+    }
+    if let Some(d) = crate::quick_measure::parallel_distance(r) {
+        value(ui, tr("measure.parallel_distance"), &crate::prefs::show_measure(app, d, 1, *dual));
     }
     if let Some(a) = r["angle_deg"].as_f64()
         && r["items"].as_array().is_some_and(|v| v.len() == 2)

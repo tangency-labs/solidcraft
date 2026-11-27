@@ -25,19 +25,32 @@ fn block() -> Harness {
 }
 
 fn edge(h: &Harness, p: Vec3) -> Sel {
+    body_edge(h, "Body1", p)
+}
+
+fn step_edge(h: &Harness, p: Vec3) -> Sel {
+    body_edge(h, "Step", p)
+}
+
+fn body_edge(h: &Harness, body: &str, p: Vec3) -> Sel {
     let st = crate::open_meshing::session_world(&h.app.session);
-    let m = st.body("Body1").unwrap().mesh();
+    let m = st.body(body).unwrap().mesh();
     let index = m.edges.iter().position(|e| e.windows(2).any(|w| p.dist_to_segment(w[0], w[1]) < 1e-9)).expect("an edge there");
-    Sel::Edge { body: "Body1".into(), index, point: p }
+    Sel::Edge { body: body.into(), index, point: p }
 }
 
 /// The face with a triangle wholly at height `z`.
 fn face_at_height(h: &Harness, z: f64) -> Sel {
+    body_face_at_height(h, "Body1", z)
+}
+
+/// `body`'s face with a triangle wholly at height `z`.
+fn body_face_at_height(h: &Harness, body: &str, z: f64) -> Sel {
     let st = crate::open_meshing::session_world(&h.app.session);
-    let m = st.body("Body1").unwrap().mesh();
+    let m = st.body(body).unwrap().mesh();
     let (t, f) = m.triangles.iter().zip(&m.tri_face).find(|(t, _)| m.tri(t).is_some_and(|ps| ps.iter().all(|p| (p.z - z).abs() < 1e-9))).unwrap();
     let ps = m.tri(t).unwrap();
-    Sel::Face { body: "Body1".into(), index: *f as usize, point: (ps[0] + ps[1] + ps[2]) * (1.0 / 3.0) }
+    Sel::Face { body: body.into(), index: *f as usize, point: (ps[0] + ps[1] + ps[2]) * (1.0 / 3.0) }
 }
 
 /// The readout once its measurement is in (empty if none comes).
@@ -129,6 +142,27 @@ fn two_points_show_their_distance() {
     h.app.session.selection = [[0.0, 0.0, 0.0], [10.0, 20.0, 30.0]].map(|p| Sel::Vertex { body: "Body1".into(), point: p.into() }).to_vec();
     let rows = readout(&mut h);
     assert!(rows.contains(&row("Distance", crate::prefs::show_mm(&h.app, 1400f64.sqrt(), 1))), "{rows:?}");
+}
+
+/// Two parallel flat faces or edges (#17405): facing each other, the distance is the gap and
+/// says it all; offset sideways, the distance square to them shows too.
+#[test]
+fn parallel_items_offset_sideways_show_the_distance_square_to_them() {
+    let mut h = block();
+    h.app.session.selection = vec![face_at_height(&h, 30.0), face_at_height(&h, 0.0)];
+    let rows = readout(&mut h);
+    assert!(rows.contains(&row("Distance", crate::prefs::show_mm(&h.app, 30.0, 1))), "{rows:?}");
+    assert!(!rows.iter().any(|(l, _)| l == "Parallel distance"), "{rows:?}");
+    h.app.run("solid.box", json!({"length": 10, "width": 20, "height": 5, "corner": [30, 0, 50], "operation": "new", "body_name": "Step"})).unwrap();
+    h.frames(2);
+    h.app.session.selection = vec![face_at_height(&h, 30.0), body_face_at_height(&h, "Step", 50.0)];
+    let rows = readout(&mut h);
+    assert!(rows.contains(&row("Distance", crate::prefs::show_mm(&h.app, 800f64.sqrt(), 1))), "{rows:?}");
+    assert!(rows.contains(&row("Parallel distance", crate::prefs::show_mm(&h.app, 20.0, 1))), "{rows:?}");
+    // The top's front edge and the step's lower front edge: the same offset.
+    h.app.session.selection = vec![edge(&h, Vec3::new(5.0, 0.0, 30.0)), step_edge(&h, Vec3::new(35.0, 0.0, 50.0))];
+    let rows = readout(&mut h);
+    assert!(rows.contains(&row("Parallel distance", crate::prefs::show_mm(&h.app, 20.0, 1))), "{rows:?}");
 }
 
 /// A circle and a line: the distance from the line to the circle's centre is named so.

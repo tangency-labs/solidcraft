@@ -153,6 +153,28 @@ fn parallel(a: impl Into<Vec3>, b: impl Into<Vec3>) -> bool {
     a.into().cross(b).len() < 1e-6
 }
 
+/// The distance between two parallel items, square to them: two planes, two straight lines, or a
+/// straight line and a plane it runs along. Lines count as running on past their ends, planes as
+/// running on past their edges. `None` for any other pair, and for items that are not parallel.
+pub(crate) fn parallel_distance(a: &Shape, b: &Shape) -> Option<f64> {
+    let d = match (*a, *b) {
+        (Shape::Plane { point: pa, normal: na }, Shape::Plane { point: pb, normal: nb }) => {
+            parallel(na, nb).then(|| (pb - pa).dot(na.vec()).abs())?
+        }
+        (Shape::Line { a: la, b: lb }, Shape::Line { a: ma, b: mb }) => {
+            let (da, db) = ((lb - la).unit()?, (mb - ma).unit()?);
+            let w = ma - la;
+            parallel(da, db).then(|| (w - da.vec() * w.dot(da.vec())).len())?
+        }
+        (Shape::Line { a: la, b: lb }, Shape::Plane { point, normal }) | (Shape::Plane { point, normal }, Shape::Line { a: la, b: lb }) => {
+            let dir = (lb - la).unit()?;
+            (dir.dot(normal).abs() < 1e-6).then(|| (la - point).dot(normal.vec()).abs())?
+        }
+        _ => return None,
+    };
+    d.is_finite().then_some(d)
+}
+
 /// A measurement from a round item's centre or axis.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Centre {
