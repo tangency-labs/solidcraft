@@ -589,28 +589,3 @@ fn weld_identification_keeps_the_shared_svg_dash_pattern() {
     assert!(text.contains("stroke-dashoffset=\"0.6\""), "{text}");
     assert!(text.contains("M0 295L7 295"), "{text}");
 }
-
-#[test]
-fn weld_identification_keeps_the_shared_svg_dash_pattern() {
-    use solidcraft_geom::weld::{Convention, IdentificationLine, Kind, Style, Weld, WeldSide};
-    let weld = Weld {
-        arrow_side: Some(WeldSide { kind: Kind::Fillet, size: None, length_mm: None, intermittent: None, contour: None }),
-        other_side: None,
-        all_round: false,
-        field: false,
-        tail: None,
-    };
-    let drawing = weld
-        .draw(
-            Convention::Iso2553_2019A { identification: IdentificationLine::Above },
-            Style { height_mm: 1.0, width_mm: 0.2 },
-            |value| Ok((value.to_string(), value)),
-            |text, h| text.len() as f64 * h,
-        )
-        .unwrap();
-    let carrier = drawing.items.into_iter().find(|item| matches!(item, Item::Stroke { pattern: Some(_), .. })).unwrap();
-    let (text, _) = svg(&sheet(vec![carrier]));
-    assert!(text.contains("stroke-dasharray=\"2.4 0.6\""), "{text}");
-    assert!(text.contains("stroke-dashoffset=\"0.7\""), "{text}");
-    assert!(text.contains("M0 295L7 295"), "{text}");
-}
