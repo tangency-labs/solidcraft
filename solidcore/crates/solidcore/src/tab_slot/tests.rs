@@ -473,3 +473,27 @@ fn a_bad_jitter_is_refused() {
         assert!(vary((0.0, 100.0), &[47.0], 6.0, 5.0, LASER, 1, j).is_err());
     }
 }
+
+#[test]
+fn a_thickness_clearance_sizes_the_slot_across_and_the_clearance_along() {
+    // Tab [30, 50] between faces w 30 and 36; clearance 0.1 along, 0.3 across: 20.2 x 6.6.
+    let slot = slot_outline_split(30.0, 20.0, (30.0, 36.0), 0.1, 0.3).unwrap();
+    let (lo, hi) = slot.extent_along(Point2::new(1.0, 0.0), 1e-9).unwrap();
+    assert!((hi - lo - (20.0 + 2.0 * 0.1)).abs() < 1e-12, "{lo} {hi}");
+    let (lo, hi) = slot.extent_along(Point2::new(0.0, 1.0), 1e-9).unwrap();
+    assert!((hi - lo - (6.0 + 2.0 * 0.3)).abs() < 1e-12, "{lo} {hi}");
+    // The same both ways is the plain outline.
+    assert_eq!(
+        slot_outline_split(30.0, 20.0, (30.0, 36.0), 0.1, 0.1).unwrap(),
+        slot_outline(30.0, 20.0, (30.0, 36.0), 0.1).unwrap()
+    );
+    // Along a strip turned a quarter: the sizes swap axes.
+    let d = crate::math::Vec2::new(0.0, 1.0);
+    let turned = slot_outline_along(30.0, 20.0, (30.0, 36.0), 0.1, 0.3, d).unwrap();
+    let (lo, hi) = turned.extent_along(Point2::new(0.0, 1.0), 1e-9).unwrap();
+    assert!((hi - lo - 20.2).abs() < 1e-9, "{lo} {hi}");
+    let (lo, hi) = turned.extent_along(Point2::new(1.0, 0.0), 1e-9).unwrap();
+    assert!((hi - lo - 6.6).abs() < 1e-9, "{lo} {hi}");
+    assert!(slot_outline_split(30.0, 20.0, (30.0, 36.0), 0.1, -0.1).is_err());
+    assert!(slot_outline_split(30.0, 20.0, (30.0, 36.0), 0.1, f64::NAN).is_err());
+}

@@ -6,7 +6,8 @@
 //!
 //! Words (design 6.1): a stretch `[a, b]` of length `L = b − a`; `W` the tab width; `e` the end
 //! distance; `U = L − 2e` the usable length; `g` the space between neighbouring tabs; `q` the
-//! spacing (tab start to tab start); `c` the slot clearance; `g_min` the least space between two
+//! spacing (tab start to tab start); `c` the slot clearance at each end of a tab, along the edge
+//! (`c_t` the one across the tab plate's thickness); `g_min` the least space between two
 //! tabs, from the rules of design 6.3 (for laser cuts [`laser_g_min`]). Tab `k` of a stretch runs
 //! `u ∈ [u_k, u_k + W]`, numbered in increasing `u`.
 //!
@@ -16,7 +17,7 @@
 //! | [`Layout`], [`StretchSkip`], [`place`] | none |
 //! | [`laser_g_min`]              | none     |
 //! | [`TabSkip`], [`tab_outline`] | none     |
-//! | [`slot_outline`], [`slot_outline_along`] | none |
+//! | [`slot_outline`], [`slot_outline_split`], [`slot_outline_along`] | none |
 //! | [`apart`]                    | none     |
 //! | [`vary`], [`stretch_seed`]    | none     |
 
@@ -424,6 +425,29 @@ pub fn tab_outline_for(
 /// evaluation, design 7.2), a non-finite start, a width that is not finite and positive, or
 /// faces that are not finite and ordered.
 pub fn slot_outline(start: f64, width: f64, faces: (f64, f64), clearance: f64) -> Result<Region2> {
+    slot_outline_split(start, width, faces, clearance, clearance)
+}
+
+/// [`slot_outline`] with its own room across the tab plate's thickness: `u ∈ [u_k − c, u_k + W
+/// + c]` along the edge and `w ∈ [w_A − c_t, w_B + c_t]` across, `c_t` the thickness clearance.
+/// Counter-clockwise.
+///
+/// # Errors
+///
+/// Those of [`slot_outline`], and [`SolidError::InvalidInput`] for a thickness clearance that is
+/// not finite and non-negative.
+pub fn slot_outline_split(
+    start: f64,
+    width: f64,
+    faces: (f64, f64),
+    clearance: f64,
+    thickness_clearance: f64,
+) -> Result<Region2> {
+    if !non_negative(thickness_clearance) {
+        return Err(invalid(
+            "the thickness clearance must be finite and non-negative",
+        ));
+    }
     if !non_negative(clearance) {
         return Err(invalid("the clearance must be finite and non-negative"));
     }
@@ -437,31 +461,32 @@ pub fn slot_outline(start: f64, width: f64, faces: (f64, f64), clearance: f64) -
         return Err(invalid("the tab plate's faces must be finite and ordered"));
     }
     Ok(rectangle(
-        (start - clearance, wa - clearance),
-        (start + width + clearance, wb + clearance),
+        (start - clearance, wa - thickness_clearance),
+        (start + width + clearance, wb + thickness_clearance),
     ))
 }
 
-/// [`slot_outline`] for a strip running along `d` in P's frame `(x, y)`: the outline is laid out
+/// [`slot_outline_split`] for a strip running along `d` in P's frame `(x, y)`: the outline is laid out
 /// in the strip's own `(u, w)`, `u` along `d` and `w` a quarter turn left of it (as
 /// [`crate::plate_contact::strip_defects`] reads them), then turned into P's frame, still
 /// counter-clockwise.
 ///
 /// # Errors
 ///
-/// Those of [`slot_outline`], and [`SolidError::InvalidInput`] for a `d` that is not a finite
+/// Those of [`slot_outline_split`], and [`SolidError::InvalidInput`] for a `d` that is not a finite
 /// unit vector.
 pub fn slot_outline_along(
     start: f64,
     width: f64,
     faces: (f64, f64),
     clearance: f64,
+    thickness_clearance: f64,
     d: crate::math::Vec2,
 ) -> Result<Region2> {
     if !(d.x.is_finite() && d.y.is_finite() && (d.x.hypot(d.y) - 1.0).abs() <= 1e-9) {
         return Err(invalid("the strip's direction is not unit"));
     }
-    let r = slot_outline(start, width, faces, clearance)?;
+    let r = slot_outline_split(start, width, faces, clearance, thickness_clearance)?;
     let turn = |p: Point2| Point2::new(p.x * d.x - p.y * d.y, p.x * d.y + p.y * d.x);
     let segs = r
         .outer

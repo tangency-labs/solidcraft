@@ -36,8 +36,10 @@ pub struct TabSlotSpec {
     pub width: f64,
     /// The end distance `e`.
     pub end_distance: f64,
-    /// The slot clearance `c`.
+    /// The slot clearance `c` at each end of a tab, along the edge.
     pub clearance: f64,
+    /// The slot clearance `c_t` each side of a tab's faces, across the tab plate's thickness.
+    pub thickness_clearance: f64,
     /// The least land of S beside a slot.
     pub min_land: f64,
     /// How far a tab reaches past S's far face (negative: short of it, design 6.1).
@@ -345,9 +347,15 @@ impl Body {
                     .map_err(status)?;
                     let mut tabs = Vec::with_capacity(sized.len());
                     for (start, width) in sized {
-                        let outline =
-                            ts::slot_outline_along(start, width, across, spec.clearance, d)
-                                .map_err(status)?;
+                        let outline = ts::slot_outline_along(
+                            start,
+                            width,
+                            across,
+                            spec.clearance,
+                            spec.thickness_clearance,
+                            d,
+                        )
+                        .map_err(status)?;
                         let mut skip = Some(SlotSkip::AtEdge);
                         for (i, region) in face.iter().enumerate() {
                             let s = ts::check_slot(&outline, region, spec.min_land, tol)
@@ -887,6 +895,7 @@ mod tests {
             width: 10.0,
             end_distance: 5.0,
             clearance: 0.1,
+            thickness_clearance: 0.1,
             min_land: 0.5,
             protrusion: 1.0,
             overshoot: 0.5,
@@ -986,6 +995,7 @@ mod tests {
             width: 10.0,
             end_distance: 5.0,
             clearance: 0.1,
+            thickness_clearance: 0.1,
             min_land: 0.5,
             protrusion: 1.0,
             overshoot: 0.5,
@@ -1028,6 +1038,7 @@ mod tests {
             width: 10.0,
             end_distance: 5.0,
             clearance: 0.1,
+            thickness_clearance: 0.1,
             min_land: 0.5,
             protrusion: 1.0,
             overshoot: 0.5,
@@ -1063,6 +1074,7 @@ mod tests {
             width: 10.0,
             end_distance: 5.0,
             clearance: 0.1,
+            thickness_clearance: 0.1,
             min_land: 0.5,
             protrusion: 1.0,
             overshoot: 0.5,
@@ -1106,6 +1118,7 @@ mod tests {
             width: 10.0,
             end_distance: 5.0,
             clearance: 0.1,
+            thickness_clearance: 0.1,
             min_land: 0.5,
             protrusion: 1.0,
             overshoot: 0.5,
@@ -1140,12 +1153,47 @@ mod tests {
         ));
     }
 
+    /// The two clearances differ: clearance 0.1 along the edge, 0.4 across the thickness. Wall on
+    /// Bottom, count 2, 10 wide tabs in the 6 thick Wall: each slot is 10.2 x 6.8 through S's 6.
+    #[test]
+    fn the_slot_takes_the_clearance_along_and_the_thickness_clearance_across() {
+        let (s, p) = bottom();
+        let spec = TabSlotSpec {
+            layout: Layout::Count(2),
+            width: 10.0,
+            end_distance: 5.0,
+            clearance: 0.1,
+            thickness_clearance: 0.4,
+            min_land: 0.5,
+            protrusion: 1.0,
+            overshoot: 0.5,
+            seed: 0,
+            width_jitter: 0.0,
+            tip_chamfer: 0.0,
+        };
+        let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+        let cut = wall.tab_slot_cut(&s, p, spec, TOL).unwrap().expect("joint");
+        let v = |b: &Body| b.mass_properties(1e-9).unwrap().volume;
+        assert!(
+            (v(&cut.tab_plate) - 44040.0).abs() < 1e-6,
+            "{}",
+            v(&cut.tab_plate)
+        );
+        let want = 96000.0 - 2.0 * (10.0 + 2.0 * 0.1) * (6.0 + 2.0 * 0.4) * 6.0;
+        assert!(
+            (v(&cut.slot_plate) - want).abs() < 1e-6,
+            "{}",
+            v(&cut.slot_plate)
+        );
+    }
+
     fn spec2() -> TabSlotSpec {
         TabSlotSpec {
             layout: Layout::Count(2),
             width: 10.0,
             end_distance: 5.0,
             clearance: 0.1,
+            thickness_clearance: 0.1,
             min_land: 0.5,
             protrusion: 1.0,
             overshoot: 0.5,
