@@ -1656,6 +1656,59 @@ mod tests {
     }
 
     #[test]
+    fn plugin_workspace_ribbon_entries_are_the_model_tabs_ribbon_buttons_with_title_and_icon() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.resize", json!({"width":1280.0,"height":800.0}));
+        h.app.home.open = false;
+        let mut plugin = workspace_plugin();
+        plugin.entries[0].slots.push(solidcraft_engine::plugin::UiSlot::Menu { name: "Pocket Milling".into(), label: None });
+        h.app.plugin_menu.listed = vec![plugin.clone()];
+        h.app.plugin_menu.loaded = true;
+        crate::plugin_workspaces::discovered(&mut h.app, &[plugin]);
+        enter(&mut h.app, "plugin:manufacture/cam").unwrap();
+        h.frames(3);
+        assert!(
+            crate::scenario::handle_at("button:plugin_entry:manufacture:pocket").is_some(),
+            "the entry is the shared ribbon button, the same id the Model tab's Plugins group gives it"
+        );
+        let mut output = h.ctx.run_ui(
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))), ..Default::default() },
+            |ui| {
+                let rect = ui.max_rect();
+                let _ = crate::plugin_workspaces::ribbon(&mut h.app, ui, rect, false);
+            },
+        );
+        output.textures_delta.clear();
+        let shown: Vec<String> = crate::test_support::text_shapes(&output).map(|shape| shape.galley.text().to_owned()).collect();
+        assert!(shown.iter().any(|text| text.contains("Pocket")), "the button carries the entry's title, not its raw name: {shown:?}");
+        assert!(!shown.iter().any(|text| text == "pocket"), "{shown:?}");
+        h.step(&json!({"click":{"handle":"button:plugin_entry:manufacture:pocket"}})).unwrap();
+        h.frames(3);
+        assert!(!h.app.plugin_menu.dialogs.is_empty(), "a click starts the entry like the Model tab's button does");
+    }
+
+    #[test]
+    fn a_failing_active_workspace_hook_reports_to_the_status_line_and_messages_not_the_ribbon() {
+        let mut h = crate::scenario::Harness::new();
+        crate::plugin_workspaces::discovered(&mut h.app, &[workspace_plugin()]);
+        enter(&mut h.app, "plugin:manufacture/cam").unwrap();
+        let reply = crate::plugin_workspaces::hook_reply_channel(&mut h.app, "plugin:manufacture/cam");
+        reply.send(Err("enter hook failed".into())).unwrap();
+        crate::plugin_workspaces::poll_hook(&mut h.app);
+        assert_eq!(crate::plugin_workspaces::active_id(&h.app), Some("plugin:manufacture/cam"), "a failing hook never cancels the switch");
+        let status = h.app.status.clone().unwrap();
+        assert!(status.2 && status.0.contains("enter hook failed"));
+        let message = h.app.messages.iter().next_back().unwrap();
+        assert!(message.error && message.text.contains("enter hook failed"));
+        let mut output = h.ctx.run_ui(egui::RawInput::default(), |ui| {
+            let rect = ui.max_rect();
+            let _ = crate::plugin_workspaces::ribbon(&mut h.app, ui, rect, false);
+        });
+        output.textures_delta.clear();
+        assert!(!crate::test_support::text_shapes(&output).any(|shape| shape.galley.text().contains("enter hook failed")));
+    }
+
+    #[test]
     fn queued_workspace_hooks_are_dropped_when_their_document_changes() {
         for replace_session in [false, true] {
             let mut h = crate::scenario::Harness::new();

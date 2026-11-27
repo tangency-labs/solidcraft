@@ -56,7 +56,8 @@ pub(crate) struct State {
     registered: BTreeMap<String, String>,
     drawing_document: Option<HookDocument>,
     tabs: BTreeMap<String, usize>,
-    errors: BTreeMap<String, String>,
+    /// The group whose buttons are open as a menu, when the ribbon is too narrow to show them.
+    menu: Option<usize>,
     hooks: VecDeque<QueuedHook>,
     running: Option<RunningHook>,
     commands: CommandQueue,
@@ -278,9 +279,6 @@ fn queue_hook(app: &mut SolveApp, workspace: Workspace, entering: bool) {
     if hook.is_none() {
         return;
     }
-    if entering {
-        app.plugin_workspaces.errors.remove(&workspace.id);
-    }
     // Bound rapid switching. Hooks are observational; the latest transition stays visible.
     if app.plugin_workspaces.hooks.len() >= 16 {
         app.plugin_workspaces.hooks.pop_front();
@@ -301,9 +299,6 @@ fn report_hook_error(app: &mut SolveApp, document: &HookDocument, id: String, er
     } else {
         // A finished exit hook has no ribbon; keep its failure in the shared Messages window.
         app.messages.push(&message, true, crate::now_ms());
-    }
-    if document.is_current(app) {
-        app.plugin_workspaces.errors.insert(id, error);
     }
 }
 
@@ -420,30 +415,158 @@ pub(crate) fn ribbon(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, fo
         return clicked;
     }
     if let Some(tab) = workspace.spec.ribbon.get(selected) {
-        egui::ScrollArea::horizontal().id_salt("plugin-workspace-groups").auto_shrink([false, true]).show(&mut child, |ui| {
-            ui.horizontal(|ui| {
-                for group in &tab.groups {
-                    ui.vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            for entry in &group.entries {
-                                if crate::ui_kit::button(ui, entry, crate::ui_kit::Button::Normal).clicked()
-                                    && let Ok(mut queue) = app.plugin_workspaces.commands.try_borrow_mut()
-                                {
-                                    queue.push_back((workspace.plugin.id.clone(), entry.clone()));
-                                }
-                            }
-                        });
-                        ui.label(&group.name);
-                    });
-                    ui.separator();
+        groups(app, &mut child, rect, &workspace, tab);
+    }
+    clicked
+}
+
+/// One entry of a workspace's ribbon group, as the Model tab's Plugins group draws it: the
+/// entry's title and icon, with the plugin's name on hover.
+struct EntryButton {
+    id: String,
+    entry: String,
+    label: String,
+    name: String,
+    icon: String,
+}
+
+/// The tab's groups below the tab row, drawn by the shared ribbon row so the buttons are the
+/// ribbon buttons of the Model tab's Plugins group.
+fn groups(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, workspace: &Workspace, tab: &solidcraft_engine::plugin::ui::RibbonTab) {
+    use crate::ribbon;
+    use crate::ui_kit::BackingTooltipExt as _;
+    let t = solidcraft_theme::Tokens::get();
+    let labels = app.preferences.ribbon_labels;
+    let built: Vec<(String, Vec<EntryButton>)> = tab
+        .groups
+        .iter()
+        .map(|group| {
+            let buttons = group
+                .entries
+                .iter()
+                .map(|entry| {
+                    let declared = workspace.plugin.entries.iter().find(|declared| declared.name == *entry);
+                    let title = declared.map_or_else(|| entry.clone(), |declared| crate::plugin_menu::command_title(&workspace.plugin, declared));
+                    let icon =
+                        declared.map_or(crate::plugin_images::GENERIC, |declared| crate::plugin_menu::command_icon(&workspace.plugin, declared));
+                    let name = if title == workspace.plugin.name { title.clone() } else { format!("{}: {title}", workspace.plugin.name) };
+                    EntryButton {
+                        id: format!("{}{}:{entry}", crate::plugin_menu::RIBBON_PREFIX, workspace.plugin.id),
+                        entry: entry.clone(),
+                        label: title,
+                        name,
+                        icon: icon.to_owned(),
+                    }
+                })
+                .collect();
+            (group.name.clone(), buttons)
+        })
+        .collect();
+    let keys: Vec<String> = (0..built.len()).map(|index| format!("{}:{index}", workspace.id)).collect();
+    let open = app.plugin_workspaces.menu.filter(|group| *group < built.len());
+    let row = ribbon::Row {
+        groups: built
+            .iter()
+            .zip(&keys)
+            .enumerate()
+            .map(|(index, ((name, buttons), key))| ribbon::Group {
+                key,
+                name,
+                label: name,
+                tip: name,
+                buttons: buttons
+                    .iter()
+                    .map(|b| ribbon::Button {
+                        id: &b.id,
+                        run: &b.id,
+                        label: &b.label,
+                        name: &b.name,
+                        icon: &b.icon,
+                        size: if labels {
+                            ribbon::ButtonSize { width: ribbon::button_width(ui.painter(), &b.label), min_width: ribbon::BUTTON_MIN_WIDTH }
+                        } else {
+                            ribbon::ButtonSize { width: 40.0, min_width: 40.0 }
+                        },
+                        planned: false,
+                        enabled: true,
+                        pressed: false,
+                        exit: false,
+                        split: None,
+                        app_paints: false,
+                        covers: &[],
+                    })
+                    .collect(),
+                cells: Vec::new(),
+                commands: buttons.iter().map(|b| b.id.as_str()).collect(),
+                icon: Some("prefs_plugins"),
+                enabled: true,
+                open: open == Some(index),
+                running: None,
+                more: buttons
+                    .iter()
+                    .map(|b| ribbon::MoreRow { id: &b.id, label: &b.label, icon: &b.icon, shortcut: "", enabled: true, checked: None, hint: None })
+                    .collect(),
+            })
+            .collect(),
+        labels,
+        accent: crate::workspace::tab_accent(&t, &app.ui.tab),
+        exit: false,
+        reveal: None,
+        more_tip: solidcraft_ui_text::tr_label("More toolbar panels"),
+        handles: crate::toolbar::RIBBON_HANDLES,
+    };
+    let below = egui::Rect::from_min_max(egui::pos2(rect.left(), rect.top() + ribbon::TAB_ROW_HEIGHT), rect.max);
+    let out = ribbon::show(ui, &row, below, &mut |_, _| false);
+    let button_of = |id: &str| built.iter().flat_map(|(_, buttons)| buttons).find(|b| b.id == id);
+    for drawn in &out.buttons {
+        if let Some(button) = built.get(drawn.group).and_then(|(_, buttons)| buttons.get(drawn.index)) {
+            let _ = drawn.response.clone().backing_on_hover_text(&button.name);
+        }
+    }
+    let run = |app: &mut SolveApp, id: &str| {
+        if let Some(button) = button_of(id)
+            && let Ok(mut queue) = app.plugin_workspaces.commands.try_borrow_mut()
+        {
+            queue.push_back((workspace.plugin.id.clone(), button.entry.clone()));
+        }
+    };
+    for action in &out.actions {
+        match action {
+            ribbon::Action::Run { id, .. } => run(app, id),
+            ribbon::Action::Section { group } | ribbon::Action::Open { group } => {
+                app.plugin_workspaces.menu = if app.plugin_workspaces.menu == Some(*group) { None } else { Some(*group) };
+            }
+            ribbon::Action::Menu { .. } | ribbon::Action::Drop { .. } => {}
+        }
+    }
+    // A group too narrow to show its buttons opens them as a menu under its label.
+    let Some((index, group)) = app.plugin_workspaces.menu.and_then(|index| Some((index, built.get(index)?))) else { return };
+    let Some(drawn) = out.groups.iter().find(|drawn| drawn.group == index) else { return };
+    let ctx = ui.ctx().clone();
+    let popup = ui.id().with(("plugin-workspace-group-menu", index));
+    let mut chosen = None;
+    let shown = crate::ui_kit::Container::new(&ctx, crate::ui_kit::Surface::Popup)
+        .area(popup)
+        .fixed_pos(drawn.label.left_bottom())
+        .order(egui::Order::Foreground)
+        .show(&ctx, |ui| {
+            crate::ui_kit::Menu::show_frame(ui, crate::ui_kit::Menu::frame(), |ui| {
+                crate::ui_kit::Menu::heading(ui, &group.0);
+                for button in &group.1 {
+                    if crate::ui_kit::menu::list_row(ui, &crate::ui_kit::Item::action(&button.id, &button.label, &button.icon)).is_some() {
+                        chosen = Some(button.id.clone());
+                    }
                 }
             });
         });
+    if let Some(id) = chosen {
+        run(app, &id);
+        app.plugin_workspaces.menu = None;
+    } else if ctx.input(|i| i.key_pressed(egui::Key::Escape))
+        || (ctx.input(|i| i.pointer.any_pressed()) && !shown.response.contains_pointer() && !drawn.label_response.contains_pointer())
+    {
+        app.plugin_workspaces.menu = None;
     }
-    if let Some(error) = app.plugin_workspaces.errors.get(&workspace.id) {
-        child.label(error);
-    }
-    clicked
 }
 
 pub(crate) fn identity(plugin: &str, panel: &str) -> String {

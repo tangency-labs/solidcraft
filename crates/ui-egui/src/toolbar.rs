@@ -1883,7 +1883,7 @@ impl RibbonPanels {
 }
 
 /// Where SolidCraft's ribbon publishes its parts (scripts and scenarios use these names).
-const RIBBON_HANDLES: ribbon::Handles<'static> = ribbon::Handles {
+pub(crate) const RIBBON_HANDLES: ribbon::Handles<'static> = ribbon::Handles {
     button: &["toolbar:", "button:"],
     button_rect: "button:",
     split: "family:",

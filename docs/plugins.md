@@ -583,14 +583,14 @@ a hook whose schema refuses it fails. Hooks are read-only: no folder is writable
 that reaches files runs, whatever the grants. The only thing a hook may change is its own
 plugin's panels (`ui.set-data`, `show-panel`); the host adopts those updates when the hook
 finishes, if the design is still the one it started in. They run on a worker against a snapshot; the switch
-continues and failures appear in the workspace. Each hook receives at most one second, 1,000,000
+continues and failures appear in the status line and in Messages. Each hook receives at most one second, 1,000,000
 fuel and 32 MiB of memory, respecting lower package and user limits; an explicit stack request is
 capped at 256 KiB. Narrowing these budgets preserves the approval for the original manifest and
 component. Read hooks cannot call edit commands. The host adopts
 no computed design, camera, selection or undo history from a hook, on success or failure.
 A queued hook is dropped if its design is no longer active when it would start. Hook failures
 remain in Messages after leaving the workspace. A result from an earlier design does not replace
-the current design's status or workspace error.
+the current design's status.
 
 This is the workspace portion of [RFC 0015](rfcs/0015-plugin-ui-workspaces.md). Design-changed
 listeners and viewport overlays remain follow-up work.
