@@ -1051,6 +1051,108 @@ fn polygon_inputs_clear_each_other_and_the_preview() {
     }
 }
 
+/// A polygon's first click, then the pointer in one move to a spot just above it, where the
+/// Radius and Sides boxes wait beside the still tiny preview, and a click there. The boxes have to
+/// be off the pointer by then, so the click makes the polygon as it does anywhere else.
+#[test]
+fn polygon_boxes_move_off_a_pointer_that_arrives_on_them_in_one_move() {
+    for command in ["sketch.polygon.inscribed", "sketch.polygon.circumscribed", "sketch.polygon.edge"] {
+        for [dx, dy] in [[0.0, -30.0], [0.0, -45.0], [20.0, -30.0], [-20.0, -30.0]] {
+            let mut h = Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.call("ui.view", json!({"view":"top"}));
+            h.step(&json!({"start":command})).unwrap();
+            h.step(&json!({"click":{"sketch":[0,0]}})).unwrap();
+            h.frames(3);
+            let curves = |h: &Harness| {
+                let state = h.app.session.world_state().unwrap();
+                let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+                sketch.sketch.curves.iter().filter(|curve| !curve.construction).count()
+            };
+            assert_eq!(curves(&h), 0, "{command}: nothing is drawn after the first click");
+            let state = crate::open_meshing::session_world(&h.app.session);
+            let plane = state.sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
+            let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+            let first = proj.to_screen(plane.to_world(super::Vec2::new(0.0, 0.0))).unwrap();
+            let spot = first + egui::vec2(dx, dy);
+            h.step(&json!({"move":[spot.x,spot.y]})).unwrap();
+            h.frames(3);
+            for i in 0..2usize {
+                let rect = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).unwrap();
+                assert!(!rect.expand(2.0).contains(spot), "{command}, ({dx}, {dy}): box {i} at {rect:?} is under the pointer at {spot:?}");
+            }
+            h.step(&json!({"click":[spot.x,spot.y]})).unwrap();
+            h.frames(3);
+            assert!(curves(&h) >= 3, "{command}, ({dx}, {dy}): the click just above the first point makes the polygon");
+        }
+    }
+}
+
+/// The polygon stack keeps off the pointer without giving up its place: with the pointer on the
+/// preview, where it is while a polygon is drawn, nothing moves, and with no side clear of the
+/// pointer the stack goes where it went before.
+#[test]
+fn polygon_inputs_keep_off_the_pointer_and_stay_put_when_it_is_on_the_preview() {
+    let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let sizes = [egui::vec2(86.0, 24.0), egui::vec2(70.0, 24.0)];
+    let room = || Some(Room::new(view, None));
+    let tiny = egui::Rect::from_center_size(egui::pos2(400.0, 300.0), egui::vec2(2.0, 2.0));
+    let before = super::polygon_input_positions(tiny, &sizes, room(), 8.0, None);
+    let pointer = egui::pos2(400.0, 270.0);
+    assert!(egui::Rect::from_min_size(before[1], sizes[1]).contains(pointer), "the Sides box is above the first point without a pointer");
+    let positions = super::polygon_input_positions(tiny, &sizes, room(), 8.0, Some(pointer));
+    for (pos, size) in positions.iter().zip(sizes) {
+        let rect = egui::Rect::from_min_size(*pos, size);
+        assert!(!rect.expand(2.0).contains(pointer), "{rect:?} is under {pointer:?}");
+        assert!(!rect.intersects(tiny), "{rect:?} covers {tiny:?}");
+        assert!(view.contains_rect(rect));
+    }
+    let drawn = egui::Rect::from_min_max(egui::pos2(370.0, 270.0), egui::pos2(430.0, 330.0));
+    for pointer in [drawn.center_top(), drawn.right_center(), drawn.left_top(), drawn.center()] {
+        assert_eq!(
+            super::polygon_input_positions(drawn, &sizes, room(), 8.0, Some(pointer)),
+            super::polygon_input_positions(drawn, &sizes, room(), 8.0, None),
+            "{pointer:?}"
+        );
+    }
+    let small = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(3.0, 3.0));
+    let at = egui::pos2(1.0, 1.0);
+    assert_eq!(
+        super::polygon_input_positions(egui::Rect::from_center_size(at, egui::vec2(1.0, 1.0)), &sizes, Some(Room::new(small, None)), 8.0, Some(at)),
+        super::polygon_input_positions(egui::Rect::from_center_size(at, egui::vec2(1.0, 1.0)), &sizes, Some(Room::new(small, None)), 8.0, None)
+    );
+}
+
+/// A typed Radius or Sides keeps its value while the pointer moves onto its box: the box moves
+/// off the pointer, as the untyped ones do, and still holds what was typed.
+#[test]
+fn a_typed_polygon_value_keeps_it_when_the_pointer_lands_on_its_box() {
+    for (i, typed) in [(0usize, "7"), (1, "5")] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.step(&json!({"start":"sketch.polygon.inscribed"})).unwrap();
+        h.step(&json!({"click":{"sketch":[0,0]}})).unwrap();
+        h.step(&json!({"move":{"sketch":[4,0]}})).unwrap();
+        h.frames(3);
+        if i == 1 {
+            tab(&mut h, false);
+        }
+        type_value(&mut h, typed);
+        h.frames(3);
+        let field = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).unwrap();
+        let spot = field.center();
+        h.step(&json!({"move":[spot.x,spot.y]})).unwrap();
+        h.frames(3);
+        for j in 0..2usize {
+            let moved = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", j)))).unwrap();
+            assert!(!moved.expand(2.0).contains(spot), "box {j} at {moved:?} is under the pointer at {spot:?}");
+        }
+        let value = &h.app.tool.as_ref().unwrap().dims[i];
+        assert_eq!((value.value.as_str(), value.locked), (typed, true), "{}", value.label);
+    }
+}
+
 /// `name = expression` in a value box, as in the Dimension tool's: the shape takes the
 /// expression's size while it is typed and when placed, and the new parameter `name` drives its
 /// dimension (#7567).
