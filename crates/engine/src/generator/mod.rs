@@ -11,11 +11,14 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 use serde_json::Value as Json;
 
+pub mod code_template;
 pub mod expr;
 mod grammar;
 pub mod installed;
 mod table;
 mod template;
+#[cfg(test)]
+mod code_template_tests;
 
 use expr::{Budget, EvalError, Expr, Scope, Value};
 use grammar::Tok;
