@@ -282,8 +282,10 @@ pub(super) fn body_edge_lines(s: &mut Session, p: &Value) -> Result<Value> {
     if bodies.is_empty() {
         return Err(bad(cmd, "`bodies` is empty"));
     }
+    // One set of the model's names: a Select All can send tens of thousands of bodies.
     let state = s.model.state();
-    if let Some(name) = bodies.iter().find(|name| !state.bodies.iter().any(|b| b.name == **name)) {
+    let known: std::collections::HashSet<&str> = state.bodies.iter().map(|b| b.name.as_str()).collect();
+    if let Some(name) = bodies.iter().find(|name| !known.contains(name.as_str())) {
         return Err(bad(cmd, format!("no body `{name}`")));
     }
     let show = match p.get("show").filter(|v| !v.is_null()) {

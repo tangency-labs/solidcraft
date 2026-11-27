@@ -3386,7 +3386,11 @@ fn body_scene(
         // (alike faces share a colour): only while every face has a slot of its own.
         let own_slots = slots.faces != u32::MAX && slots.face_capacity as usize >= faces;
         let edge_colours = (slots.edge, slots.hidden_edge);
-        let instanced = if on_gpu || wire {
+        // A body set to draw no edge lines (`body.edge_lines`), unless an Isolate shows it as them.
+        // It is drawn from its own triangles: an instance draws its mesh's shared edges, which
+        // every copy of that mesh shares.
+        let no_edges = !wire && s.doc.edgeless_bodies.contains(&b.name);
+        let instanced = if on_gpu || wire || no_edges {
             None
         } else if face_looks.is_empty() {
             instances.place(b, slots.instance, edge_colours, look, oit, slots.motion)
@@ -3397,9 +3401,7 @@ fn body_scene(
         };
         // An instance's edges are drawn from its mesh's shared edges where the renderer can (a
         // body with face looks keeps its own: its parts are a look's faces each).
-        // A body set to draw no edge lines (`body.edge_lines`), unless an Isolate shows it as them.
-        let no_edges = !wire && s.doc.edgeless_bodies.contains(&b.name);
-        let edges_shared = instanced.is_some() && face_looks.is_empty() && instances.edges.is_some() && !no_edges;
+        let edges_shared = instanced.is_some() && face_looks.is_empty() && instances.edges.is_some();
         let name = b.name.clone();
         let id = crate::display_lod::body_id(b).0;
         // Drawn from its own triangles or plan, its faces painted or not: in its face slots, which

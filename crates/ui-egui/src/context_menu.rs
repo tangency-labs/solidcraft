@@ -630,11 +630,12 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Body { name } => {
             let mut v = body_items(app, std::slice::from_ref(name), true);
             // A selected browser body hands every selected body to Export, the mesh dialogs
-            // (#18902), Isolate, and Show/Hide. A row outside the selection still targets only
-            // that row.
+            // (#18902), Isolate, Show/Hide and Edge Lines. A row outside the selection still
+            // targets only that row.
             let selected = sel_bodies(app);
             if selected.len() > 1 && selected.contains(name) {
                 let all_hidden = selected.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
+                let all_edgeless = selected.iter().all(|b| app.session.doc.edgeless_bodies.contains(b));
                 for item in &mut v {
                     match item.id.as_str() {
                         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" | "ui.isolate" => {
@@ -643,6 +644,10 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                         "ui.hide" | "ui.show" => {
                             item.id = if all_hidden { "ui.show" } else { "ui.hide" }.into();
                             item.params = Some(json!({ "bodies": selected }));
+                        }
+                        "body.edge_lines" => {
+                            item.label = if all_edgeless { "Show Edge Lines" } else { "Hide Edge Lines" }.into();
+                            item.params = Some(json!({ "bodies": selected, "show": all_edgeless }));
                         }
                         _ => {}
                     }
@@ -5445,6 +5450,21 @@ mod tests {
         assert_eq!(show.params, Some(json!({ "bodies": ["BoxA", "BoxB"] })));
         run_item(&mut h.app, &show, Pos2::ZERO);
         assert!(h.app.session.body_visible("BoxA") && h.app.session.body_visible("BoxB"));
+
+        // Edge lines (#21975) also go to the whole selection, and the label reads all of it: with
+        // only BoxB drawn without them, the row offers to hide them on both.
+        h.app.run("body.edge_lines", json!({ "body": "BoxB", "show": false })).unwrap();
+        let edge_item = |h: &Harness| {
+            items(&h.app, &Target::Body { name: "BoxA".into() }).into_iter().find(|i| i.id == "body.edge_lines").expect("body menu offers Edge Lines")
+        };
+        let hide_edges = edge_item(&h);
+        assert_eq!(hide_edges.label, "Hide Edge Lines");
+        assert_eq!(hide_edges.params, Some(json!({ "bodies": ["BoxA", "BoxB"], "show": false })));
+        run_item(&mut h.app, &hide_edges, Pos2::ZERO);
+        assert!(["BoxA", "BoxB"].iter().all(|b| h.app.session.doc.edgeless_bodies.contains(*b)));
+        let show_edges = edge_item(&h);
+        assert_eq!(show_edges.label, "Show Edge Lines");
+        assert_eq!(show_edges.params, Some(json!({ "bodies": ["BoxA", "BoxB"], "show": true })));
 
         // A body outside the selection still targets only itself.
         let other =
