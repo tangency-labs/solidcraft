@@ -21745,29 +21745,18 @@ fn sketch_curve_sheet(ss: &SolvedSketch, ids: &[String], body: &Body, extend: bo
         let (start, back) = (first.start(), first.start_tangent());
         let (end, on) = (last.end(), last.end_tangent());
         let (head, tail) = (start - back * reach(start), end + on * reach(end));
-        if segments_cross(head, start, end, tail) {
+        let (head_line, tail_line) = (solidcore_record::Seg2::Line { a: head, b: start }, solidcore_record::Seg2::Line { a: end, b: tail });
+        if !solidcraft_develop::crossings(std::slice::from_ref(&head_line), std::slice::from_ref(&tail_line)).is_empty() {
             return Err(DocError::Invalid(
                 "the sketch curves' ends, continued past the body, cross each other: draw the curves past the body, or split with extend false"
                     .into(),
             ));
         }
-        chain.insert(0, solidcore_record::Seg2::Line { a: head, b: start });
-        chain.push(solidcore_record::Seg2::Line { a: end, b: tail });
+        chain.insert(0, head_line);
+        chain.push(tail_line);
     }
     let backwards: Vec<solidcore_record::Seg2> = chain.iter().rev().map(|s| s.reversed()).collect();
     Ok(kernel::extrude_sheet(&ss.plane, &[backwards], below - pad, above + pad)?)
-}
-
-/// Whether the segments `a`–`b` and `c`–`d` cross or touch, from the signs of exact cross products
-/// (each segment's ends on either side of the other's line, or on it within it).
-fn segments_cross(a: Vec2, b: Vec2, c: Vec2, d: Vec2) -> bool {
-    let side = |p: Vec2, q: Vec2, r: Vec2| (q - p).cross(r - p);
-    let within = |p: Vec2, q: Vec2, r: Vec2| r.x >= p.x.min(q.x) && r.x <= p.x.max(q.x) && r.y >= p.y.min(q.y) && r.y <= p.y.max(q.y);
-    let (d1, d2, d3, d4) = (side(c, d, a), side(c, d, b), side(a, b, c), side(a, b, d));
-    if ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0)) && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0)) {
-        return true;
-    }
-    (d1 == 0.0 && within(c, d, a)) || (d2 == 0.0 && within(c, d, b)) || (d3 == 0.0 && within(a, b, c)) || (d4 == 0.0 && within(a, b, d))
 }
 
 /// The plane a straight sketch line sweeps along its sketch's normal: through the line, its x
