@@ -944,6 +944,19 @@ pub struct Session {
     /// design's name. A borrowed name follows Save As to the new file's name (#4907); a name
     /// the user chose is kept.
     pub user_named: bool,
+    /// Set when an earlier revision is open read-only (`doc.restore` with `mode: "readonly"`).
+    /// Edits and Save are refused until that revision is restored as the working model, saved
+    /// as a new file, or another design is opened.
+    pub revision_view: Option<u64>,
+    /// The design's save history (`document_history` in its file): the save count and the
+    /// revisions with their snapshots. The session keeps it, as it keeps `visibility`: opening
+    /// takes it out of the document and a save writes it into the file's copy only, so saving
+    /// never changes the live document or its undo history. The live document's own field stays
+    /// fresh.
+    pub document_history: Arc<solidcraft_doc::document_history::DocumentHistory>,
+    /// Whether saves keep model snapshots, and the size and revision caps. Off by default.
+    /// A preference, like `auto_project`: it belongs to the user, not the design.
+    pub revision_limits: solidcraft_doc::document_history::RevisionHistoryOptions,
     /// One-shot display-only notification during doc.open, before authoritative evaluation.
     /// Interactive loaders may show it provisionally; it never becomes model state.
     pub open_preview: Option<Box<dyn Fn(solidcraft_io::DesignPreview) + Send + Sync>>,
@@ -1424,6 +1437,8 @@ impl Session {
         solidcraft_io::vfs::install_checks();
         // The session keeps what is hidden (an undo step of its own); the design file carries it.
         let visibility = std::mem::take(&mut doc.visibility);
+        // The session keeps the save history too; the design file carries it.
+        let history = std::mem::take(&mut doc.document_history);
         // Likewise the choice to save without linked bodies: the session keeps it.
         let linked_bodies = !std::mem::take(&mut doc.linked_bodies_left_out);
         let mut doc = Arc::new(doc);
@@ -1441,7 +1456,9 @@ impl Session {
                 model
             }
         };
-        Session { linked_bodies, ..Self::with_model(doc, visibility, model) }
+        let mut session = Session { linked_bodies, ..Self::with_model(doc, visibility, model) };
+        session.document_history = Arc::new(history);
+        session
     }
 
     /// The model `doc`'s file kept, when it is `doc`'s evaluation and the cache is not turned off.
@@ -1514,6 +1531,9 @@ impl Session {
             provenance: None,
             signing_allowed: false,
             user_named: false,
+            revision_view: None,
+            document_history: Default::default(),
+            revision_limits: Default::default(),
             open_preview: None,
             log: Vec::new(),
             revision: 1,
@@ -1629,6 +1649,7 @@ impl Session {
             }
         }
         plugin_state.ui_caller = None;
+        let revision_limits = self.revision_limits;
         let param_check = self.param_check;
         let easyprint_upload = self.easyprint_upload.take();
         let keep_print_faces = self.keep_print_faces;
@@ -1663,6 +1684,7 @@ impl Session {
         self.disabled_plugins = disabled_plugins;
         self.plugin_limits = plugin_limits;
         self.plugin_state = plugin_state;
+        self.revision_limits = revision_limits;
         self.plugin_state.link_changes = Default::default();
         self.plugin_state.link_reads = Default::default();
         self.plugin_state.link_read_source = Default::default();
@@ -3311,6 +3333,13 @@ impl Session {
             panels::commands::parse_command(spec.id, params)?;
             return Err(EngineError::Panel(panels::error(panels::Rule::Capability, "application layout backend was not injected")));
         }
+        if let Some(rev) = self.revision_view
+            && (spec.undoable || spec.id == "file.save")
+        {
+            return Err(EngineError::Other(format!(
+                "revision {rev} is open read-only; restore it as the working model (`doc.restore` mode \"working\") or use Save As"
+            )));
+        }
         // The command, the evaluation it causes and the refresh after it: one profiler span.
         let _span = solidcraft_profile::span("command", spec.id);
         let host_viewport = self.render_viewport.clone();
@@ -3852,6 +3881,9 @@ impl Session {
             provenance: self.provenance.clone(),
             signing_allowed: false,
             user_named: self.user_named,
+            revision_view: self.revision_view,
+            document_history: self.document_history.clone(),
+            revision_limits: self.revision_limits,
             open_preview: None,
             saved: self.saved.clone(),
             log: Vec::new(),
@@ -4886,6 +4918,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         next_component_color_index,
         plane_extents,
         plugin_data,
+        document_history,
         linked_bodies_left_out,
     } = a;
     *plugin_data == b.plugin_data
@@ -4930,6 +4963,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *visibility == b.visibility
         && *drawings == b.drawings
         && *next_component_color_index == b.next_component_color_index
+        && *document_history == b.document_history
         && *plane_extents == b.plane_extents
 }
 

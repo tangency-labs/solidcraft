@@ -70,6 +70,12 @@ macro_rules! general_preferences {
             recover_after_browser_leave: bool = true, PAGE_GENERAL => check_id_help("prefs.recover_after_browser_leave", "prefs.recover_after_browser_leave_tip");
             /// Reopen the saved designs that were open when the app was last closed (#5542).
             reopen_designs: bool = true, PAGE_GENERAL;
+            /// Keep a parametric snapshot with each save. Off: the save records the revision and stores no model.
+            revision_history: bool = false, PAGE_GENERAL;
+            /// Megabytes of snapshot payload kept. 1–128; the default and the ceiling are 128.
+            revision_history_mb: u32 = 128, PAGE_GENERAL, accept(1..=128);
+            /// Newest revisions that keep a snapshot. 1–64; the default is 16.
+            revision_history_versions: u32 = 16, PAGE_GENERAL, accept(1..=64);
             /// A right-click in the view with a dialog open confirms its input: on to the next one, then OK.
             /// Off: it does nothing there, as before (#6159).
             right_click_confirms: bool = false, PAGE_GENERAL => check("Right-click confirms dialog inputs", "With a dialog open, a right-click in the view goes on to its next empty input, and on the last one runs OK");

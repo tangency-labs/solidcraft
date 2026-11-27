@@ -283,6 +283,8 @@ struct Snapshot {
     id: String,
     doc: Arc<Document>,
     visibility: crate::Visibility,
+    /// The session's save history, so a recovered design saved over its file keeps its revisions.
+    history: Arc<solidcraft_doc::document_history::DocumentHistory>,
     dimension_values: crate::DimensionValues,
     path: Option<String>,
     /// Whether the design's saves keep the bodies of linked designs ([`Session::linked_bodies`]).
@@ -298,6 +300,9 @@ impl Snapshot {
         let io = |e: std::io::Error| EngineError::Other(format!("autosave: {e}"));
         let (doc, left_out) = drawing::openable(&self.doc);
         let mut design = crate::as_saved(&doc, &self.visibility, &self.dimension_values);
+        if design.document_history != *self.history {
+            design.to_mut().document_history = (*self.history).clone();
+        }
         if !self.linked_bodies {
             design.to_mut().linked_bodies_left_out = true;
         }
@@ -396,6 +401,7 @@ impl Autosaver {
                         id: self.id.clone(),
                         doc,
                         visibility,
+                        history: s.document_history.clone(),
                         dimension_values,
                         path: s.path.clone(),
                         linked_bodies: s.linked_bodies,
@@ -438,6 +444,7 @@ impl Autosaver {
             id: self.id.clone(),
             doc: s.doc.clone(),
             visibility: s.visibility.clone(),
+            history: s.document_history.clone(),
             dimension_values: s.dimension_values.clone(),
             path: s.path.clone(),
             linked_bodies: s.linked_bodies,

@@ -319,6 +319,7 @@ pub(crate) mod refused_part;
 mod render_ui;
 pub mod render_workspace;
 pub mod resume_ui;
+pub mod revisions_panel;
 #[cfg(test)]
 mod revolve_edit_tests;
 #[cfg(test)]
@@ -847,6 +848,8 @@ pub struct SolveApp {
     pub sketch_report: Option<sketch_report::SketchReport>,
     /// The Bill of Materials window, when open.
     pub bom: Option<bom_panel::BomPanel>,
+    /// The Revisions window, when open.
+    pub revisions: Option<revisions_panel::RevisionsPanel>,
     material_card_review: Option<material_card_review::ReviewWindow>,
     /// Context menus, rename box and Properties window.
     pub menu: context_menu::MenuState,
@@ -1268,6 +1271,7 @@ impl SolveApp {
             design_properties: None,
             sketch_report: None,
             bom: None,
+            revisions: None,
             material_card_review: None,
             menu: context_menu::MenuState::default(),
             gesture: mouse_gesture::State::default(),
@@ -1801,6 +1805,7 @@ impl SolveApp {
             .map(|a| a.iter().filter_map(|c| serde_json::from_value::<[u8; 3]>(c.clone()).ok()).take(recent_colors::MAX_RECENT_COLORS).collect())
             .unwrap_or_default();
         panel_runtime::load_preferences(self, &v);
+        prefs::apply_revision_history(self);
         // Loaded preferences are the person's own; the organization's policy still sets its
         // settings. A load without preferences leaves the kept choices as they were.
         if replaced {
@@ -2688,6 +2693,12 @@ impl SolveApp {
             self.usage.started_tool = Some(spec.id);
         }
         self.tree.clear_folder_pick();
+        // Revisions is a file window. Another command closes it, the same way a new command
+        // leaves the File view. While it stayed open it was wider than a command dialog, and
+        // every later dialog failed the shared window-width limit.
+        if id != "doc.revisions" {
+            self.revisions = None;
+        }
         // A command started from the folded ribbon's open panels closes them (#10112).
         self.ui.ribbon_open = false;
         // Folding the ribbon, or showing it whole, keeps the tab it shows (no switch to VIEW).
@@ -3207,6 +3218,11 @@ impl SolveApp {
         }
         if id == "sketch.edit" {
             self.start_sketch_edit(opener);
+            return;
+        }
+        if id == "doc.revisions" {
+            revisions_panel::open(self);
+            self.home.open = false;
             return;
         }
         if id == "sketch.finish" {
@@ -5165,6 +5181,7 @@ impl SolveApp {
         params_dialog::show(self, ui.ctx());
         design_properties::show(self, ui.ctx());
         sketch_report::show(self, ui.ctx());
+        revisions_panel::show(self, ui.ctx());
         material_card_review::show(self, ui.ctx());
         recovery_ui::show(self, ui.ctx());
         mesh_units::show(self, ui.ctx());

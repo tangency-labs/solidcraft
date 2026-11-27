@@ -24,6 +24,8 @@ pub struct OpenSteps {
     /// The history marker the design was saved with.
     marker: Option<usize>,
     visibility: Visibility,
+    /// The save history, which the session keeps as `Session::opened` does.
+    history: solidcraft_doc::document_history::DocumentHistory,
     model: Model,
     /// Features evaluated so far, and where evaluation stops (the saved marker, or the end).
     next: usize,
@@ -74,6 +76,7 @@ impl OpenSteps {
         // What `Session::opened` does before it evaluates.
         solidcraft_io::vfs::install_checks();
         let visibility = std::mem::take(&mut doc.visibility);
+        let history = std::mem::take(&mut doc.document_history);
         let doc = Arc::new(doc);
         let marker = doc.marker;
         let stop = marker.unwrap_or(usize::MAX).min(doc.features.len());
@@ -86,6 +89,7 @@ impl OpenSteps {
             doc,
             marker,
             visibility,
+            history,
             next: if adopted.is_some() { stop } else { 0 },
             stop,
             adopted: adopted.is_some(),
@@ -150,8 +154,9 @@ impl OpenSteps {
             // `Session::opened` keeps.
             self.model.evaluate_shared(&self.doc);
         }
-        let opened = Session { linked_bodies: self.linked_bodies, ..Session::with_model(self.doc, self.visibility, self.model) }
+        let mut opened = Session { linked_bodies: self.linked_bodies, ..Session::with_model(self.doc, self.visibility, self.model) }
             .located_with(Some(&self.path), self.chain.clone());
+        opened.document_history = Arc::new(self.history);
         opened_design(s, opened, &self.path, self.read_only, self.disk, self.checked, self.chain, self.linked)
     }
 }
