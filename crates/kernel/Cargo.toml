@@ -35,3 +35,11 @@ sysinfo = { workspace = true }
 [dev-dependencies]
 solidcraft-profile = { workspace = true, features = ["enabled"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
+
+[features]
+# Solidcore's own profiler, written as JSON Lines through `write_kernel_profiles`.
+solidcore-profile = ["solidcraft-smlib/solidcore-profile"]
+# Open CASCADE (OCCT) as a second kernel beside solidcore, for measurement only
+# (docs/kernel-support.md): the operations it takes go to it, the rest stay on solidcore.
+# Off by default; no build we ship, no release and no CI job turns it on.
+backend-occt = []

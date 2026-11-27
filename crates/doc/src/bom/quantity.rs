@@ -60,11 +60,11 @@ pub(super) fn amount_in(doc: &Document, values: &OnceCell<BTreeMap<String, Value
         None if MASS_AND_VOLUME.contains(&name) => Err(mass_and_volume()),
         None => Err(DocError::Expr(format!("unknown parameter `{name}`"))),
     })?;
-    let amount = match (value.len, value.ang) {
-        (0, 0) => Amount::Pieces(value.v),
-        (1, 0) => Amount::Length(value.v),
-        (2, 0) => return Err(DocError::Invalid("not supported yet: area quantities".into())),
-        (3, 0) => return Err(mass_and_volume()),
+    let amount = match (value.len, value.ang, value.mass) {
+        (0, 0, 0) => Amount::Pieces(value.v),
+        (1, 0, 0) => Amount::Length(value.v),
+        (2, 0, 0) => return Err(DocError::Invalid("not supported yet: area quantities".into())),
+        (3, 0, 0) | (0, 0, 1) => return Err(mass_and_volume()),
         _ => return Err(DocError::Invalid(format!("a quantity is a number of pieces or a length, not {}", value.describe()))),
     };
     let (Amount::Pieces(v) | Amount::Length(v)) = amount;
@@ -75,7 +75,7 @@ pub(super) fn amount_in(doc: &Document, values: &OnceCell<BTreeMap<String, Value
 }
 
 fn mass_and_volume() -> DocError {
-    DocError::Invalid("not supported yet: mass and volume quantities need the expression units of #4811".into())
+    DocError::Invalid("not supported yet: mass and volume quantities".into())
 }
 
 /// What placements add up to, from each one's entry in the definitions' amounts: none without a

@@ -222,6 +222,12 @@ target_point!(
     "must be a finite point [x,y,z]"
 );
 
+target_point!(
+    /// Thread's `from`: a [`Point3`], with the handler's message.
+    ThreadFromPoint,
+    "must be a point [x, y, z] near the end the thread starts at"
+);
+
 /// Extrude's `faces`: 1 to 1024 points on coplanar faces of one body, read as the handler reads
 /// them, with its messages.
 #[derive(Clone, Debug, PartialEq)]
@@ -473,6 +479,44 @@ impl JsonSchema for PointExpr3 {
     }
 }
 
+/// A point of a sketch's own plane: `[x, y]` or `{"x", "y"}`, each a number or a length
+/// expression, as `cell_grid::cell_origin` reads it. Whether the expressions evaluate is checked
+/// by the handler, which has the design.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PointExpr2(pub [Expr; 2]);
+
+impl<'de> Deserialize<'de> for PointExpr2 {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let coords: Option<Vec<&Value>> = match &v {
+            Value::Array(a) if a.len() == 2 => Some(a.iter().collect()),
+            Value::Object(o) => ["x", "y"].iter().map(|k| o.get(*k)).collect(),
+            _ => None,
+        };
+        coords
+            .and_then(|c| c.into_iter().map(|c| params::expr(&wrap(c.clone()), "v")).collect::<Option<Vec<Expr>>>())
+            .and_then(|c| <[Expr; 2]>::try_from(c).ok())
+            .map(PointExpr2)
+            .ok_or_else(|| D::Error::custom("must be a point [x, y] of numbers or length expressions"))
+    }
+}
+
+impl JsonSchema for PointExpr2 {
+    fn schema_name() -> Cow<'static, str> {
+        "PointExpr2".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let c = generator.subschema_for::<LengthExpr>();
+        json_schema!({
+            "description": "A point of a sketch: [x, y] or {\"x\", \"y\"}, each a number in mm or a length expression.",
+            "anyOf": [
+                {"type": "array", "items": c, "minItems": 2, "maxItems": 2},
+                {"type": "object", "properties": {"x": c, "y": c}, "required": ["x", "y"]}
+            ]
+        })
+    }
+}
+
 /// A feature referred to by its id (a number) or its name (a string).
 #[derive(Clone, Debug, PartialEq)]
 pub struct IdOrName(pub String);
@@ -680,6 +724,14 @@ keyword_param!(
     &["axial", "square"],
     "axial or square",
     "Where the wire ends: axial (the default), in a plane through the coil's axis, or square, across the wire. Any case."
+);
+keyword_param!(
+    /// `solid.coil`'s `height_measure`.
+    CoilHeightMeasureParam,
+    "height measure",
+    &["center_line", "centre_line", "overall"],
+    "center_line or overall",
+    "What `height` measures: center_line (the default; centre_line is an alias), the helix's own height from the section's centre at one end to the other, or overall, end to end, from where the wire starts along the axis to where it stops. Any case."
 );
 keyword_param!(
     /// `solid.emboss`'s `mode`.
@@ -1120,6 +1172,21 @@ impl JsonSchema for ProfilesParam {
                     "description": "Internal selections written by the app.",
                     "anyOf": [
                         {"type": "object", "properties": {"type": {"enum": ["whole_boundaries"]}}, "required": ["type"]},
+                        {"type": "object", "properties": {"type": {"enum": ["text_regions"]}, "links": associations}, "required": ["type", "links"]},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "type": {"enum": ["sided_curves"]},
+                                "loops": {"type": "array", "minItems": 1, "maxItems": 128, "items": {
+                                    "type": "array", "minItems": 1, "maxItems": 512, "items": {
+                                        "type": "object",
+                                        "properties": {"curve": {"type": "string"}, "side": {"enum": ["inside", "outside", "left", "right"]}},
+                                        "required": ["curve", "side"], "additionalProperties": false
+                                    }
+                                }}
+                            },
+                            "required": ["type", "loops"]
+                        },
                         {
                             "type": "object", "properties": {"offset_boundaries": associations}, "required": ["offset_boundaries"],
                             "not": {"properties": {"type": {"enum": ["whole_boundaries"]}}, "required": ["type"]}
