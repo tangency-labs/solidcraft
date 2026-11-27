@@ -98,7 +98,9 @@
 //! crossing's line parameter is the foot of its point, inside the line parameters of every
 //! box holding it, so every crossing of the leaf before the least line parameter of the boxes
 //! left lies in a box decided, as every crossing of a finished pass does; the solve adds those
-//! crossings and keeps the guesses' answer past them ([`SearchedLeaf::decided_roots`]). A
+//! crossings and keeps the guesses' answer past them ([`publishable_roots`]: below the least
+//! line parameter of the boxes left by every leaf of the solve at its limit, so that no
+//! crossing published comes after one another leaf left undecided). A
 //! shallow chord of a wide cylinder's side, whose leaf takes several thousand boxes along the
 //! silhouette between its crossings (where the line's direction lies in the tangent plane and
 //! no box about it is regular), gets its first crossing so.
@@ -2140,60 +2142,76 @@ pub(crate) struct SearchedLeaf {
 }
 
 impl SearchedLeaf {
-    /// Its certified roots that the solve adds (module docs, "The order of the boxes"): every
-    /// one where its pass finished; where it stopped at its limit, those whose line parameters
-    /// lie wholly below `b`, the least line parameter of the boxes it left to visit (each
-    /// records the feet of its points widened by the tolerance, the whole line where they
-    /// cannot be enclosed), lowered to the least line parameter of any root reaching it until
-    /// none does.
-    /// A crossing's line parameter is the foot of its point, so a crossing in a box left to
-    /// visit has it at `b` or past it: every crossing below that bound lies in a box the pass
-    /// decided, as every crossing of a finished pass does, and the roots kept are all the
-    /// crossings below it that a finished pass would add, in order along the line. None where
-    /// the pass did not run or its records were not kept (nothing is then known of the boxes
-    /// it left).
-    pub(crate) fn decided_roots(&self) -> Vec<CertifiedRoot> {
-        let bound = match (self.stop, &self.floor) {
-            (Stop::Finished, _) => return self.roots.clone(),
-            (Stop::AtLimit, Some(floor)) => floor
-                .iter()
-                .filter(|f| f.kind == FloorKind::Unvisited)
-                .map(|f| f.t.map_or(f64::NEG_INFINITY, |t| t.lo))
-                .fold(f64::INFINITY, f64::min),
-            _ => return Vec::new(),
-        };
-        let line_parameters = |r: &CertifiedRoot| {
-            let [_, _, t] = r.enclosure;
-            t
-        };
-        // lowered until no root reaches it (each step lowers it to a root's start, or
-        // ends: at most one step a root)
-        let mut bound = bound;
-        loop {
-            let lower = self
-                .roots
-                .iter()
-                .map(line_parameters)
-                .filter(|t| t.hi >= bound)
-                .fold(bound, |b, t| b.min(t.lo));
-            if lower.total_cmp(&bound).is_ge() {
-                break;
-            }
-            bound = lower;
-        }
-        self.roots
-            .iter()
-            .filter(|r| line_parameters(r).hi < bound)
-            .copied()
-            .collect()
-    }
-
     /// Whether a box of this leaf that no record holds is excluded by distance (module docs,
     /// "The drop"): its pass finished, or stopped at its limit with the boxes it had still
     /// to visit recorded, and its records are kept. A pass that did not run proves nothing.
     fn reads_absence(&self) -> bool {
         self.floor.is_some() && matches!(self.stop, Stop::Finished | Stop::AtLimit)
     }
+}
+
+/// The certified roots each searched leaf of one solve adds (module docs, "The order of the
+/// boxes"), in the order of `leaves`: every root of a leaf whose pass finished; of a leaf
+/// whose pass stopped at its limit, those whose line parameters lie wholly below `b`, the
+/// least line parameter of the boxes left to visit by EVERY leaf of the solve at its limit
+/// (each box records the feet of its points widened by the tolerance, the whole line where
+/// they cannot be enclosed), lowered to the least line parameter of any of those leaves'
+/// roots reaching it until none does; none from a leaf whose pass did not run, or from any
+/// leaf at its limit where one such leaf's records were not kept (nothing is then known of
+/// the boxes it left). A crossing's line parameter is the foot of its point, so a crossing in
+/// a box left to visit by any leaf has it at `b` or past it: every crossing of the solve's
+/// searched leaves below `b` lies in a box a pass decided, and a ray's first published hit
+/// below `b` is its first crossing in them. The culled strips and the leaves whose pass did
+/// not run are no part of the bound: what they hold is the guesses' answer, as before the
+/// pass; a finished leaf's roots are all added, as before.
+pub(crate) fn publishable_roots(leaves: &[SearchedLeaf]) -> Vec<Vec<CertifiedRoot>> {
+    let at_limit = || {
+        leaves
+            .iter()
+            .filter(|l| !l.strip && l.stop == Stop::AtLimit)
+    };
+    let mut bound = f64::INFINITY;
+    for leaf in at_limit() {
+        let least = match &leaf.floor {
+            Some(floor) => floor
+                .iter()
+                .filter(|f| f.kind == FloorKind::Unvisited)
+                .map(|f| f.t.map_or(f64::NEG_INFINITY, |t| t.lo))
+                .fold(f64::INFINITY, f64::min),
+            None => f64::NEG_INFINITY,
+        };
+        bound = bound.min(least);
+    }
+    let line_parameters = |r: &CertifiedRoot| {
+        let [_, _, t] = r.enclosure;
+        t
+    };
+    // lowered until no root reaches it (each step lowers it to a root's start, or ends: at
+    // most one step a root)
+    loop {
+        let lower = at_limit()
+            .flat_map(|l| l.roots.iter())
+            .map(line_parameters)
+            .filter(|t| t.hi >= bound)
+            .fold(bound, |b, t| b.min(t.lo));
+        if lower.total_cmp(&bound).is_ge() {
+            break;
+        }
+        bound = lower;
+    }
+    leaves
+        .iter()
+        .map(|leaf| match leaf.stop {
+            Stop::Finished => leaf.roots.clone(),
+            Stop::AtLimit => leaf
+                .roots
+                .iter()
+                .filter(|r| line_parameters(r).hi < bound)
+                .copied()
+                .collect(),
+            Stop::NotRun => Vec::new(),
+        })
+        .collect()
 }
 
 /// What a solve's drop did (module docs, "The drop").
@@ -7326,7 +7344,65 @@ mod tests {
         }
     }
 
-    /// The roots a leaf's pass adds (`SearchedLeaf::decided_roots`): all of a finished pass;
+    /// The bound of a solve's roots is taken over every leaf at its limit: a leaf whose
+    /// root at 10 lies before every box it left adds nothing while another leaf at its limit
+    /// left a box from 5 (a crossing at 6 there would come first along the line); a root of
+    /// the second leaf below 5 is added; a finished leaf adds all its roots whatever the
+    /// others left; a culled strip's undecided boxes and a leaf whose pass did not run bound
+    /// nothing; a leaf at its limit whose records were not kept withholds every leaf at its
+    /// limit.
+    #[test]
+    fn a_leaf_at_its_limit_adds_no_root_past_a_box_another_left() {
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let t = |r: &CertifiedRoot| r.enclosure[2].lo;
+        let leaf = |stop: Stop, floor: Option<Vec<FloorBox>>, roots: Vec<CertifiedRoot>| {
+            let mut l = leaf_of(d, stop, floor);
+            l.roots = roots;
+            l
+        };
+        let first = leaf(
+            Stop::AtLimit,
+            Some(vec![unvisited(Ivl::new(20.0, 30.0))]),
+            vec![root_over(10.0, 10.5)],
+        );
+        let second = leaf(
+            Stop::AtLimit,
+            Some(vec![unvisited(Ivl::new(5.0, 8.0))]),
+            vec![root_over(2.0, 2.5)],
+        );
+        let finished = leaf(
+            Stop::Finished,
+            Some(Vec::new()),
+            vec![root_over(12.0, 12.5)],
+        );
+        let mut strip = leaf(
+            Stop::AtLimit,
+            Some(vec![FloorBox {
+                kind: FloorKind::Culled,
+                ..unvisited(Ivl::new(1.0, 2.0))
+            }]),
+            Vec::new(),
+        );
+        strip.strip = true;
+        let not_run = leaf(Stop::NotRun, None, vec![root_over(0.5, 0.6)]);
+        let added = |leaves: &[SearchedLeaf]| -> Vec<Vec<f64>> {
+            publishable_roots(leaves)
+                .iter()
+                .map(|roots| roots.iter().map(t).collect())
+                .collect()
+        };
+        assert_eq!(added(core::slice::from_ref(&first)), vec![vec![10.0]]);
+        assert_eq!(
+            added(&[first.clone(), second.clone(), finished, strip, not_run]),
+            vec![vec![], vec![2.0], vec![12.0], vec![], vec![]]
+        );
+        assert_eq!(added(&[second, first.clone()]), vec![vec![2.0], vec![]]);
+        let unkept = leaf(Stop::AtLimit, None, Vec::new());
+        let none: Vec<f64> = Vec::new();
+        assert_eq!(added(&[first, unkept]), vec![none.clone(), none]);
+    }
+
+    /// The roots a leaf's pass adds (`publishable_roots`, one leaf): all of a finished pass;
     /// of a pass at its limit, those wholly below the least line parameter of the boxes it
     /// left, that bound lowered to the start of every root reaching it until none does; none
     /// where a box left holds the whole line, the records were not kept, or the pass did not
@@ -7338,7 +7414,11 @@ mod tests {
         let with = |stop: Stop, floor: Option<Vec<FloorBox>>, roots: Vec<CertifiedRoot>| {
             let mut leaf = leaf_of(d, stop, floor);
             leaf.roots = roots;
-            leaf.decided_roots().iter().map(t).collect::<Vec<f64>>()
+            publishable_roots(&[leaf])
+                .concat()
+                .iter()
+                .map(t)
+                .collect::<Vec<f64>>()
         };
         let roots = vec![
             root_over(4.0, 5.0),
