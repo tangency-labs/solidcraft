@@ -217,7 +217,7 @@ fn spec_kind(spec: &str) -> Result<FieldKind, TemplateError> {
         "decimal" => {
             let (lo, hi, extra) = range_text(rest)?;
             let (min, max): (f64, f64) = (number(lo, "number")?, number(hi, "number")?);
-            let (mut step, mut digits) = (0.0, 3usize);
+            let (mut step, mut digits): (f64, usize) = (0.0, 3);
             let mut it = extra.into_iter();
             while let Some(word) = it.next() {
                 match (word, it.next()) {

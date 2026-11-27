@@ -1783,14 +1783,14 @@ mod native {
                 code.push_str(&format!("i32.const {} i32.const {byte} i32.store8\n", base + i));
             }
         }
-        code + &format!("i32.const 2200 i32.const {} i32.const 2400 i32.const {} i32.const 2600 call $run\n", command.len(), args.len())
+        code + format!("i32.const 2200 i32.const {} i32.const 2400 i32.const {} i32.const 2600 call $run\n", command.len(), args.len()).as_str()
     }
 
     /// #22038: a dialog hook runs as a read entry. It can list the components and read its own
     /// data, and a write is still refused.
     #[test]
     fn a_dialog_hook_lists_components_and_reads_its_own_data() {
-        let code = hook_runs("component.list", r#"{"compact":true,"bodies":true}"#) + &hook_runs("storage.get", "{}");
+        let code = hook_runs("component.list", r#"{"compact":true,"bodies":true}"#) + hook_runs("storage.get", "{}").as_str();
         let f = dialog_fixture(&code);
         let path = f.0.join("sample/plugin.json");
         let mut m: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();

@@ -218,7 +218,7 @@ fn version_tuple(v: &str) -> Option<(u64, u64, u64)> {
 /// Drop the `x-` keys, which a package may use for its own notes, at every level.
 fn strip_extension_keys(t: &mut toml::Table) {
     t.retain(|k, _| !k.starts_with("x-"));
-    for v in t.values_mut() {
+    for (_, v) in t.iter_mut() {
         match v {
             toml::Value::Table(inner) => strip_extension_keys(inner),
             toml::Value::Array(items) => {
