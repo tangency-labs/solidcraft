@@ -13,7 +13,7 @@
 use std::collections::BTreeSet;
 
 use crate::curve::curve::CurveKind;
-use crate::error::{Result, SolidError};
+use crate::error::Result;
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
@@ -128,11 +128,6 @@ pub(super) fn in_slab(k: &Kernel, b: &Brep, f: FaceId, p: Plane, gap: f64) -> Re
         && domain.min().y >= natural.min().y
         && domain.max().y <= natural.max().y)
     {
-        if std::env::var_os("SOLIDCORE_OFFSET_TRACE").is_some() {
-            eprintln!(
-                "consumed trace: face={f:?} UV domain={domain:?} outside natural={natural:?}"
-            );
-        }
         return Ok(false);
     }
     let patch = nurb.copy_sub_patch(&domain)?;
@@ -281,9 +276,6 @@ fn candidates(k: &Kernel, b: &mut Brep, open: &[FaceId], t: f64) -> Result<Vec<C
                     }
                 }
             }
-            if std::env::var_os("SOLIDCORE_OFFSET_TRACE").is_some() {
-                eprintln!("consumed trace: seed={seed:?} persistent={persistent:?} gap={gap} group={group:?} root={} analytic={analytic_boundary} touches={touches_persistent}", concave_root.is_some());
-            }
             if let Some(shoulder) = concave_root {
                 // A pillar, closed by side walls of its own, is not a rib that runs into
                 // persistent walls: its collapse is a wall meeting across it, which
@@ -380,21 +372,8 @@ pub(super) fn regularize(
     let mut openings = open.to_vec();
     let mut changed = false;
     let bound = source.face_list().len();
-    if std::env::var_os("SOLIDCORE_OFFSET_TRACE").is_some() {
-        for f in bp1::faces(&source, None)? {
-            if let Some(p) = plane(&source, f)? {
-                eprintln!(
-                    "consumed trace: plane={f:?} origin={:?} normal={:?}",
-                    p.origin, p.normal
-                );
-            }
-        }
-    }
     for _ in 0..bound {
         let found = candidates(k, &mut source, &openings, t)?;
-        if std::env::var_os("SOLIDCORE_OFFSET_TRACE").is_some() {
-            eprintln!("consumed trace: t={t} candidate_count={}", found.len());
-        }
         if found.is_empty() {
             break;
         }
@@ -421,9 +400,6 @@ pub(super) fn regularize(
                 }
             }
         }
-        if std::env::var_os("SOLIDCORE_OFFSET_TRACE").is_some() {
-            eprintln!("consumed trace: union={consumed:?} persistent={persistent:?} planar_boundary={planar_boundary}");
-        }
         if !planar_boundary {
             break;
         }
@@ -432,9 +408,6 @@ pub(super) fn regularize(
             Some(shoulder) => super::clip::clip(k, &source, &consumed, shoulder)?,
             None => None,
         };
-        if std::env::var_os("SOLIDCORE_OFFSET_TRACE").is_some() {
-            eprintln!("consumed trace: clipped={}", clipped.is_some());
-        }
         let Some(clipped) = clipped else {
             // This certificate does not cover every possible topology change.
             // Leave the source untouched and retain offset-space regularization.
@@ -443,7 +416,9 @@ pub(super) fn regularize(
         source = clipped;
         source.refresh_cached_topology();
         if source.face_list().len() >= before {
-            return Err(SolidError::sm_err(OP));
+            // The cut removed nothing: the certificate does not hold. The ordinary
+            // offset of the original solid still builds what it always built.
+            return Ok(None);
         }
         for f in persistent {
             // A support wall can itself belong to another proven consumed rib.
@@ -451,20 +426,22 @@ pub(super) fn regularize(
             if consumed.contains(&f) {
                 continue;
             }
+            // A wall whose containment is not proved declines the whole
+            // reconstruction, so the ordinary offset of the original builds.
             let Some(p) = plane(&old, f)? else {
-                return Err(SolidError::sm_err(OP));
+                return Ok(None);
             };
             let Some(new) = match_plane(&source, p)? else {
-                return Err(SolidError::sm_err(OP));
+                return Ok(None);
             };
             if !boundary_stays_on(k, &mut old, f, &source, new)? {
-                return Err(SolidError::sm_err(OP));
+                return Ok(None);
             }
         }
         openings.clear();
         for &p in &opening_planes {
             let Some(f) = match_plane(&source, p)? else {
-                return Err(SolidError::sm_err(OP));
+                return Ok(None);
             };
             openings.push(f);
         }

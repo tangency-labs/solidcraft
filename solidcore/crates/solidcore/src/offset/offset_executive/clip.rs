@@ -284,9 +284,10 @@ pub(super) fn clip(
     let mut cutter = create_box(k, Point3::new(low.x, low.y, 0.0), length, width, height)?;
     let placement = Axis2Placement::from_stored(shoulder.origin, u, v);
     bp5::transform(k, &mut cutter, &placement, None, false)?;
-    Ok(Some(boolean_difference(
-        k,
-        source.clone_standing_for_self()?,
-        cutter,
-    )?))
+    // The cut is on private B-reps and may still be refused by the caller's support
+    // check: no application callback sees its edits.
+    let private = source.clone_standing_for_self()?;
+    Ok(Some(super::cancel::privately(k, |k| {
+        boolean_difference(k, private, cutter)
+    })?))
 }

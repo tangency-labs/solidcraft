@@ -8,14 +8,18 @@
 //! Deviations: no recursion or retries; each planar boolean runs the existing
 //! kernel pipeline.
 
+use std::collections::BTreeSet;
+
 use super::attributes;
+use super::p1::OffsetExecutive;
 use super::p2::OffsetNotifications;
 use crate::blend::feature_executive::copy_faces_carrying;
 use crate::boolean::api_brep::{boolean_2d, Boolean2d, Boolean2dOutcome};
-use crate::error::{Result, SolidError};
+use crate::error::offset::OffsetFailure;
+use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::tol::USE_DEFAULT;
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3};
+use crate::math::{max2, Point3, Vec3};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::math::gamma;
 use crate::surface::surface::SurfaceKind;
@@ -26,6 +30,27 @@ use crate::topology::shell::ShellMembers;
 use crate::topology::{loopuse, Brep, FaceId, FaceuseId};
 
 const OP: &str = "offset::offset_executive::cancel";
+
+/// A defect of the cancellation, naming the step that failed and, where there is
+/// one, the face it failed on.
+#[track_caller]
+pub(super) fn defect(why: &'static str, face: Option<FaceId>) -> SolidError {
+    let failure = Failure::new(OP, OffsetFailure::Defect { why });
+    match face {
+        Some(face) => failure.at(EntityRef::Face(face)),
+        None => failure,
+    }
+    .into_error()
+}
+
+/// Runs `f` with the kernel context's callbacks lent out, so that no application sees
+/// the edits of work on private B-reps whose result may still be refused.
+pub(super) fn privately<T>(k: &mut Kernel, f: impl FnOnce(&mut Kernel) -> Result<T>) -> Result<T> {
+    let lease = k.context.take_notify_lease()?;
+    let result = f(k);
+    k.context.restore_notify_lease(lease)?;
+    result
+}
 
 #[derive(Clone, Copy)]
 struct PlanarFace {
@@ -86,7 +111,10 @@ fn planar_face(b: &Brep, id: FaceId) -> Result<Option<PlanarFace>> {
     }))
 }
 
-fn opposite(a: PlanarFace, b: PlanarFace) -> bool {
+/// Opposite planes the planar Boolean accepts as coincident: within roundoff, and
+/// closer than twice the sheets' tolerance, the bound `boolean_2d_keyed` applies.
+fn opposite(a: PlanarFace, b: PlanarFace, tolerance: f64) -> bool {
+    let gap = a.normal.dot(b.origin - a.origin).abs();
     let magnitude = a.normal.x.abs() * (a.origin.x.abs() + b.origin.x.abs())
         + a.normal.y.abs() * (a.origin.y.abs() + b.origin.y.abs())
         + a.normal.z.abs() * (a.origin.z.abs() + b.origin.z.abs());
@@ -94,7 +122,8 @@ fn opposite(a: PlanarFace, b: PlanarFace) -> bool {
     // within their subtraction/dot-product roundoff, not a geometric distance.
     magnitude.is_finite()
         && a.normal == -b.normal
-        && a.normal.dot(b.origin - a.origin).abs() <= gamma(32) * magnitude
+        && gap <= gamma(32) * magnitude
+        && gap < 2.0 * tolerance
 }
 
 struct Sheet {
@@ -109,7 +138,11 @@ fn copy_sheet(k: &mut Kernel, source: &mut Brep, face: PlanarFace) -> Result<She
     brep.set_editing_enabled(true);
     let (_, copied) = copy_faces_carrying(k, source, &[face.id], &mut brep, true)?;
     if !copied {
-        return Err(SolidError::sm_err(OP));
+        return Err(defect(
+            "copying an offset face into its own sheet produced no face, though \
+             the face is a live planar sheet of the offset",
+            Some(face.id),
+        ));
     }
     brep.refresh_cached_topology();
     keep_orientation(&mut brep, face.normal)?;
@@ -121,45 +154,64 @@ fn copy_sheet(k: &mut Kernel, source: &mut Brep, face: PlanarFace) -> Result<She
 }
 
 fn planar_boolean(k: &mut Kernel, a: Brep, b: Brep, operation: Boolean2d) -> Result<Brep> {
-    match boolean_2d(k, a, b, operation)? {
+    match privately(k, |k| boolean_2d(k, a, b, operation))? {
         Boolean2dOutcome::Result(result) => Ok(result),
-        Boolean2dOutcome::Unassigned { .. } => Err(SolidError::sm_err(OP)),
+        Boolean2dOutcome::Unassigned { .. } => Err(defect(
+            "the planar Boolean of two offset sheets left its result unassigned, though \
+             both operands are planar sheets of one plane",
+            None,
+        )),
     }
 }
 
 fn keep_orientation(b: &mut Brep, normal: Vec3) -> Result<()> {
     for f in bp1::faces(b, None)? {
         let Some(p) = planar_face(b, f)? else {
-            return Err(SolidError::sm_err(OP));
+            return Err(defect(
+                "a fragment of a planar sheet is not a planar sheet face, though a \
+                 planar Boolean keeps the plane of its operands",
+                Some(f),
+            ));
         };
         if p.normal == -normal {
             // CopyFaces and Boolean2D can choose the other circular-list head.
             // Retain the known construction side of this independent sheet.
-            let fu = signed_sheet_faceuse(b, f)?.ok_or_else(|| SolidError::sm_err(OP))?;
-            let shell = b.faceuse(fu)?.shell.ok_or_else(|| SolidError::sm_err(OP))?;
+            let fu = signed_sheet_faceuse(b, f)?.ok_or_else(|| {
+                defect(
+                    "a sheet fragment is not a two-sided lamina face, though a planar \
+                     Boolean of two sheets leaves laminas",
+                    Some(f),
+                )
+            })?;
+            let shell = b
+                .faceuse(fu)?
+                .shell
+                .ok_or_else(|| defect("a sheet fragment's face use has no shell", Some(f)))?;
             let ShellMembers::Faceuses(members) = &mut b.shell_mut(shell)?.members else {
-                return Err(SolidError::sm_err(OP));
+                return Err(defect(
+                    "a sheet fragment's shell is not a list of face uses",
+                    Some(f),
+                ));
             };
             members.rotate_left(1);
         } else if p.normal != normal {
-            return Err(SolidError::sm_err(OP));
+            return Err(defect(
+                "a sheet fragment has a normal that is neither side of its source's \
+                 plane, though a planar Boolean keeps the plane of its operands",
+                Some(f),
+            ));
         }
     }
     Ok(())
 }
 
 fn cancel_pair(k: &mut Kernel, a: &mut Sheet, b: &mut Sheet) -> Result<()> {
-    if !opposite(a.source, b.source)
+    let tolerance = max2(a.brep.tolerance(), b.brep.tolerance());
+    if !opposite(a.source, b.source, tolerance)
         || bp1::faces(&a.brep, None)?.is_empty()
         || bp1::faces(&b.brep, None)?.is_empty()
     {
         return Ok(());
-    }
-    if std::env::var_os("SOLIDCORE_OFFSET_TRACE").is_some() {
-        eprintln!(
-            "cancel trace: pair={:?}/{:?} intersection",
-            a.source.id, b.source.id
-        );
     }
     let intersection = planar_boolean(
         k,
@@ -169,9 +221,6 @@ fn cancel_pair(k: &mut Kernel, a: &mut Sheet, b: &mut Sheet) -> Result<()> {
     )?;
     if bp1::faces(&intersection, None)?.is_empty() {
         return Ok(());
-    }
-    if std::env::var_os("SOLIDCORE_OFFSET_TRACE").is_some() {
-        eprintln!("cancel trace: positive intersection, differences");
     }
     // Both differences use the same pre-cancellation sheets. Updating A first
     // must not make B retain the very overlap that has just been removed from A.
@@ -189,9 +238,6 @@ fn cancel_pair(k: &mut Kernel, a: &mut Sheet, b: &mut Sheet) -> Result<()> {
     )?;
     keep_orientation(&mut new_a, a.source.normal)?;
     keep_orientation(&mut new_b, b.source.normal)?;
-    if std::env::var_os("SOLIDCORE_OFFSET_TRACE").is_some() {
-        eprintln!("cancel trace: pair completed");
-    }
     a.brep = new_a;
     b.brep = new_b;
     a.changed = true;
@@ -203,13 +249,13 @@ fn take_sheet(sheets: &mut [Option<Sheet>], index: usize) -> Result<Sheet> {
     sheets
         .get_mut(index)
         .and_then(Option::take)
-        .ok_or_else(|| SolidError::sm_err(OP))
+        .ok_or_else(|| defect("a sheet of the cancellation list is missing", None))
 }
 
 fn put_sheet(sheets: &mut [Option<Sheet>], index: usize, sheet: Sheet) -> Result<()> {
     let slot = sheets
         .get_mut(index)
-        .ok_or_else(|| SolidError::sm_err(OP))?;
+        .ok_or_else(|| defect("a sheet slot of the cancellation list is missing", None))?;
     *slot = Some(sheet);
     Ok(())
 }
@@ -217,38 +263,34 @@ fn put_sheet(sheets: &mut [Option<Sheet>], index: usize, sheet: Sheet) -> Result
 /// Remove only the shared regions of coincident, oppositely oriented planes.
 /// Copied patch attributes travel through the planar booleans; replacement and
 /// deletion notify under the offset result's caller-owned identities.
+///
+/// The executive's offset correspondence follows each replaced face to the fragments
+/// that took its place, so they keep its role and its merge exclusions.
 pub(super) fn coincident_opposites(
+    exec: &mut OffsetExecutive,
     k: &mut Kernel,
     b: &mut Brep,
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<()> {
-    if std::env::var_os("SOLIDCORE_OFFSET_TRACE").is_some() {
-        eprintln!("cancel trace: entered faces={}", b.face_list().len());
-    }
-    super::spurs::repair(k, b, notifications)?;
+    super::spurs::repair(exec, k, b, notifications)?;
     super::empty::remove(k, b, notifications)?;
     let mut planes = Vec::new();
     for f in bp1::faces(b, None)? {
         if let Some(p) = planar_face(b, f)? {
-            if std::env::var_os("SOLIDCORE_OFFSET_TRACE").is_some() {
-                eprintln!(
-                    "cancel trace: plane={f:?} origin={:?} normal={:?}",
-                    p.origin, p.normal
-                );
-            }
             planes.push(p);
         }
     }
-    let selected: Vec<_> = planes
-        .iter()
-        .copied()
-        .filter(|&p| {
-            planes
-                .iter()
-                .copied()
-                .any(|q| p.id != q.id && opposite(p, q))
-        })
-        .collect();
+    let tolerance = b.tolerance();
+    let mut selected = Vec::new();
+    for &p in &planes {
+        k.check_cancelled(OP)?;
+        if planes
+            .iter()
+            .any(|&q| p.id != q.id && opposite(p, q, tolerance))
+        {
+            selected.push(p);
+        }
+    }
     if selected.is_empty() {
         return Ok(());
     }
@@ -284,6 +326,7 @@ pub(super) fn coincident_opposites(
     NotifyState::from_kernel_stores(&mut stores).with_kernel_env(k, |k, env| {
         for sheet in &replacements {
             if !bp1::faces(&sheet.brep, None)?.is_empty() {
+                let before: BTreeSet<FaceId> = bp1::faces(b, None)?.into_iter().collect();
                 bp3::merge_brep(
                     k,
                     env,
@@ -294,6 +337,13 @@ pub(super) fn coincident_opposites(
                     None,
                     false,
                 )?;
+                let fragments: Vec<FaceId> = bp1::faces(b, None)?
+                    .into_iter()
+                    .filter(|f| !before.contains(f))
+                    .collect();
+                exec.replace_face_relations(sheet.source.id, &fragments)?;
+            } else {
+                exec.replace_face_relations(sheet.source.id, &[])?;
             }
         }
         let editing = b.editing_enabled();
@@ -301,4 +351,36 @@ pub(super) fn coincident_opposites(
     })?;
     b.refresh_cached_topology();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plane(id: usize, x: f64, normal_x: f64) -> PlanarFace {
+        PlanarFace {
+            id: FaceId::from_index(id),
+            origin: Point3::new(x, 0.0, 0.0),
+            normal: Vec3::new(normal_x, 0.0, 0.0),
+        }
+    }
+
+    #[test]
+    fn opposite_planes_cancel_only_within_the_booleans_bound() {
+        let near = 2f64.powi(30);
+        let gap = 2f64.powi(-20);
+        let tolerance = 1e-7;
+        // Within the roundoff cutoff at this magnitude, but beyond twice the tolerance.
+        assert!(!opposite(
+            plane(1, near, 1.0),
+            plane(2, near + gap, -1.0),
+            tolerance
+        ));
+        assert!(opposite(
+            plane(1, near, 1.0),
+            plane(2, near, -1.0),
+            tolerance
+        ));
+        assert!(!opposite(plane(1, 0.0, 1.0), plane(2, 1.0, 1.0), tolerance));
+    }
 }

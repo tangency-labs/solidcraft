@@ -329,7 +329,9 @@ fn shell_removes_a_chamfered_ribs_vanished_cavity() {
         let mut body = chamfered_rib(&mut k);
         assert!((volume(&k, &mut body).unwrap() - 5710.0).abs() < 1e-7);
         // Source reconstruction must not alias the untouched outer face's metadata.
-        for right in planar_faces_at(&k, &body, 0, 20.0) {
+        let rights = planar_faces_at(&k, &body, 0, 20.0);
+        assert_eq!(rights.len(), 1, "t={t}: one outer face on x=20 before");
+        for &right in &rights {
             body.add_attribute(
                 EntityRef::Face(right),
                 Attribute::new(30001, Behavior::Copy),
@@ -340,8 +342,13 @@ fn shell_removes_a_chamfered_ribs_vanished_cavity() {
         assert_eq!(open.len(), 1);
         let mut made = shell(&mut k, body, -t, &open).unwrap();
         assert!(brep_is_manifold_solid(&made).unwrap());
-        for right in planar_faces_at(&k, &made, 0, 20.0) {
-            assert!(made.find_attribute(EntityRef::Face(right), 30001).is_some());
+        let rights = planar_faces_at(&k, &made, 0, 20.0);
+        assert_eq!(rights.len(), 1, "t={t}: one outer face on x=20 after");
+        for right in rights {
+            assert!(
+                made.find_attribute(EntityRef::Face(right), 30001).is_some(),
+                "t={t}: the outer face keeps its attribute"
+            );
         }
         for (axis, at) in [(0, 0.0), (0, 1.0), (2, 14.0)] {
             for other in planar_faces_at(&k, &made, axis, at) {

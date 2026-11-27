@@ -1620,10 +1620,18 @@ impl OffsetExecutive {
 
             // Opposing inset patches contribute no cavity where they coincide.
             // Preserve their non-overlapping regions before stitching the sheets.
-            if self.inset() && self.operation() == OffsetOperation::SolidOffset {
+            // Only a merged result trims: the stitch-only path takes its sheets as given.
+            if self.inset()
+                && self.merge_results()
+                && self.operation() == OffsetOperation::SolidOffset
+            {
                 let mut temporary = present(self.take_offset_brep(), OP_EXTENDED, NO_OFFSET)?;
-                let status =
-                    super::cancel::coincident_opposites(kernel, &mut temporary, notifications);
+                let status = super::cancel::coincident_opposites(
+                    self,
+                    kernel,
+                    &mut temporary,
+                    notifications,
+                );
                 self.set_offset_brep(temporary);
                 status?;
             }

@@ -73,7 +73,11 @@ remaining limitation cannot be removed on this evidence.
 ## Validation and artifacts
 
 The Rust regression was inserted temporarily in the existing shell construction
-test file and run through buildq:
+test file and run through buildq. The command below is a historical transcript of
+that run: the diagnostic test (`shell_opens_the_shoulder_beside_a_consumed_rib`) is
+not in this revision, so the filter matches no test here. To reproduce, add a test
+that shells a solid with a rib beside a consumed rib at inset 0.5 with the shoulder
+face open, and expect `WallsMeetAcross` from the offset:
 
 ```text
 buildq run solidcraft . -- cargo test --manifest-path solidcore/Cargo.toml -p solidcore --profile goldens --test issue_2350_shell_offset_construction shell_opens_the_shoulder_beside_a_consumed_rib -- --nocapture
@@ -91,14 +95,10 @@ implementation. The subsequent queued area-test and clippy clients were cancelle
 before execution (exit 130); no Rust changes remain. No expectations were blessed.
 No full suite or CI was run locally.
 
-Local diagnostic artifacts are under `/tmp/solidcraft-16307/`:
-
-- `regressions.patch`: both diagnostic tests in the existing test file.
-- `shared-cap-regression.patch`: just the shared-cylinder diagnostic.
-- `proposed-planar-opening.patch`: the reviewed but unverified conservative extension.
-- `input.json`, `shoulder-0.5.json`, `reference-0.5.json`: planar reproductions.
-- `shared-round-input.json`, `shared-round-0.5.json`: shared-cap reproductions.
-- `input.png`, `reference-0.5.png`, `shared-round-input.png`: captured synthetic views.
+The diagnostic files of that run (the two diagnostic tests as a patch, the unverified
+conservative extension as a patch, the planar and shared-cap reproduction scripts
+and their reference results, and three synthetic views) lived only under a
+temporary directory and were not kept; no observation in this record depends on them.
 
 CLI reference evaluation and all three snapshots succeeded. The shared-cap shell
 script failed at step 5 with an uncertified loop gap. The installed CLI is 0.44.1;
