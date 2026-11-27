@@ -1764,7 +1764,8 @@ fn files_dropped_on_a_folded_group_open_beside_it_not_inside_it() {
     rig.frame(Vec::new());
     let label = rect("t:group:0");
     let at = |x: f32| super::file_drop_place(&rig.ctx, egui::Id::unique("test_tabs"), Some(pos2(x, label.center().y)));
-    assert_eq!(at(label.left() - 1.0), Some(0), "before the group");
+    // The label starts the strip: its left end is the place before the group.
+    assert_eq!(at(label.left() + 1.0), Some(0), "before the group");
     assert_eq!(at(label.right() + 1.0), Some(2), "after the group, not between its two folded designs");
 }
 
