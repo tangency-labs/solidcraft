@@ -9199,10 +9199,17 @@ fn chamfer_chain_ending_at_single_branch_tangent_cusp_builds_both_hands() {
         let before = volume(&body);
         let seed = edge_at(&body, [16.25, y_face, 17.75]);
         let chain = tangent_chain(&body, None, &[seed], &[], 2.0_f64.to_radians()).unwrap();
-        assert_eq!(chain.len(), 3, "{label}: {chain:?}");
+        assert_eq!(chain.members.len(), 3, "{label}: {chain:?}");
 
-        blend(&body, Blend::Chamfer, &chain, &[0.4], &[], Corners::Filled)
-            .unwrap_or_else(|e| panic!("{label}: {e:?}"));
+        blend(
+            &body,
+            Blend::Chamfer,
+            &chain.members,
+            &[0.4],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap_or_else(|e| panic!("{label}: {e:?}"));
         body.check_solid().unwrap();
         assert!(body.check(CheckLevel::All).unwrap().is_valid(), "{label}");
         assert!(volume(&body) < before, "{label}");
