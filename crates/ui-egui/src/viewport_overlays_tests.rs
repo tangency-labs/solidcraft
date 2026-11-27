@@ -3095,7 +3095,7 @@ fn the_isolation_pill_shows_off_the_bar_and_its_close_exits_isolation() {
     let effect = isolate(&h).expect("an Isolate status");
     let item = crate::viewport_status::presentation(&h.app, &effect).expect("a pill, the bar having no Isolate slot");
     assert_eq!((item.name.as_str(), item.setting.as_str()), ("Isolation", "1 hidden"));
-    assert_eq!(item.clear_key.as_deref(), Some("Ctrl+Shift+I"), "its close names its own key, not Escape");
+    assert_eq!(item.clear_key.as_deref(), Some(crate::ui_kit::chord_label("Ctrl+Shift+I").as_str()), "its close names its own key, not Escape");
     let close = format!("viewport_status:{}:close", item.id);
     assert!(solidcraft_ui_registry::handle_at(&close).is_some(), "drawn with its close");
     h.app.preferences.escape_closes_analyses = true;

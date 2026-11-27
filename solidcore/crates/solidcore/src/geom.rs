@@ -21,6 +21,7 @@ pub mod extent1d;
 pub mod extent2d;
 pub mod extent3d;
 pub mod facing_trough;
+pub mod footprint;
 pub mod geom_utility;
 pub mod global_solver;
 pub mod grid;
