@@ -39,7 +39,9 @@ pub fn thumbnail_from_png(png: &[u8], width: u32, height: u32, cx: u32) -> Optio
     let rgba = decode(png, width, height)?;
     let mut pixels = if (to_width, to_height) == (width, height) { rgba } else { scale(&rgba, width, height, to_width, to_height)? };
     for pixel in pixels.as_chunks_mut::<4>().0 {
-        pixel.swap(0, 2);
+        // A fully transparent pixel is all zeros, whatever colour the picture gave it.
+        let [r, g, b, a] = *pixel;
+        *pixel = if a == 0 { [0; 4] } else { [b, g, r, a] };
     }
     Some(Bitmap { width: to_width, height: to_height, bgra: pixels })
 }
