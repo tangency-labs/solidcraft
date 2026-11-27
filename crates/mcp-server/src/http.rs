@@ -1459,7 +1459,7 @@ mod tests {
         );
         let chunked_resp = send_raw(addr, chunked.as_bytes());
         assert_eq!(chunked_resp.status, 200);
-        assert!(chunked_resp.body.contains("\"count\":1"));
+        assert_eq!(chunked_resp.json()["result"]["content"][0]["text"], r#"{"count":1}"#);
 
         // Oversized body returns 413 Payload Too Large.
         let too_big = format!(
