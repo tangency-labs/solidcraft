@@ -682,6 +682,100 @@ impl UnitDiff for Runner {
     }
 }
 
+/// The row the offset-extension retirement (WR-458, WR-633, WR-650; #18921) moves: its
+/// box is filleted on every edge (`circular_fillet`, whose rounds run on offset surfaces)
+/// before the projection trims it, and only the record's order and last bits change.
+/// Certified on the body the record holds (the [`crate::trim_hook::with_hook`] hook at its
+/// own `observe` call): a success with the golden's face, edge and vertex counts,
+/// `check_brep` Level 2 reports nothing, every blend face that is a definition
+/// re-certifies its net within its bound (at least one does), and every vertex lies on a
+/// flat face of the rounded box in closed form: one coordinate is the box's face and the
+/// other two lie in that face's flat part, `[lo + r, hi - r]`, to `1e-12` relative.
+#[cfg(test)]
+mod wr458_moved_rows {
+    #![allow(clippy::unwrap_used, clippy::panic)]
+    use super::*;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    /// Row, and its face, edge and vertex counts (the golden's, before and after).
+    const MOVED: [(&str, [usize; 3]); 1] = [("gen0043", [28, 50, 26])];
+
+    #[test]
+    fn each_moved_row_trims_a_rounded_box_on_its_flat_faces() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            let Some(&(name, after)) = MOVED.iter().find(|r| r.0 == c.name) else {
+                continue;
+            };
+            seen += 1;
+            let i: In = c.parse().unwrap();
+            let bx = match &i {
+                In::ProjectAndTrim { brep, .. } => brep,
+                In::ProjectParallel { object: Obj::Box(b), .. } => b,
+                _ => panic!("{name}: not a projection on a box"),
+            };
+            let r = bx.fillet.unwrap().0;
+            let o = a3(&bx.origin);
+            let d = [bx.length.0, bx.width.0, bx.height.0];
+            let lo: [f64; 3] = std::array::from_fn(|a| o[a].min(o[a] + d[a]));
+            let hi: [f64; 3] = std::array::from_fn(|a| o[a].max(o[a] + d[a]));
+            let bodies: Rc<RefCell<usize>> = Rc::default();
+            let into = Rc::clone(&bodies);
+            let out = crate::trim_hook::with_hook(
+                Box::new(move |b: &mut Brep| {
+                    *into.borrow_mut() += 1;
+                    let got = [
+                        p1::faces(b, None).unwrap().len(),
+                        p1::edges(b, None).unwrap().len(),
+                        p1::vertices(b, None).unwrap().len(),
+                    ];
+                    assert_eq!(got, after, "{name}: the golden's counts");
+                    let mut k = Kernel::default();
+                    let lines = check_brep(&mut k, b, CheckLevel::Level2).unwrap().lines();
+                    assert!(lines.is_empty(), "{name}: Level 2: {lines:?}");
+                    // on a face to the rounding floor at the part's scale: about 1e-10 at
+                    // tens of millimetres (docs/definitions-and-certificates.md, "Exact to
+                    // rounding is enough"), never a gate below it
+                    let part = lo.iter().chain(&hi).fold(1.0_f64, |m, x| m.max(x.abs()));
+                    let near = |x: f64, y: f64| (x - y).abs() <= 1e-11 * part;
+                    for v in p1::vertices(b, None).unwrap() {
+                        let p = b.vertex(v).unwrap().point.to_array();
+                        let on = (0..3).any(|a| {
+                            (near(p[a], lo[a]) || near(p[a], hi[a]))
+                                && (0..3).filter(|&e| e != a).all(|e| {
+                                    (p[e] >= lo[e] + r || near(p[e], lo[e] + r))
+                                        && (p[e] <= hi[e] - r || near(p[e], hi[e] - r))
+                                })
+                        });
+                        assert!(on, "{name}: {v:?} at {p:?} is on no flat face of the box");
+                    }
+                    let mut blends = 0;
+                    for f in p1::faces(b, None).unwrap() {
+                        let surface = b.face(f).unwrap().surface.clone();
+                        let Some(blend) = surface.as_ref().and_then(Surface::procedural_blend) else {
+                            continue;
+                        };
+                        let dv = blend
+                            .recertify(&k)
+                            .unwrap_or_else(|e| panic!("{name}: {f:?} does not re-certify: {e}"));
+                        assert!(dv <= blend.bound(), "{name}: {f:?} proved {dv:e} past its bound");
+                        blends += 1;
+                    }
+                    assert!(blends > 0, "{name}: no blend face is a definition");
+                }),
+                || rust(&i),
+            );
+            let out = out.unwrap_or_else(|e| panic!("{name}: {e:?}"));
+            assert!(out.rejected.is_none(), "{name}: {out:?}");
+            assert_eq!(*bodies.borrow(), 1, "{name}: one recorded body");
+        }
+        assert_eq!(seen, MOVED.len());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

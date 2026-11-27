@@ -3746,11 +3746,11 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
                                                 if name.clicked() {
                                                     show_tab = Some(*index);
                                                 }
-                                                let path = ui_kit::text(
-                                                    ui,
-                                                    session.path.as_deref().unwrap_or(solidcraft_ui_text::tr("document.not_saved_yet")),
-                                                    ui_kit::Text::Note("save_path"),
-                                                );
+                                                let shown = session
+                                                    .path
+                                                    .as_deref()
+                                                    .map_or_else(|| solidcraft_ui_text::tr("document.not_saved_yet"), crate::display_user_path);
+                                                let path = ui_kit::text(ui, shown, ui_kit::Text::Note("save_path"));
                                                 crate::scenario::publish_rect(&format!("save_many:path:{index}"), path.rect);
                                             });
                                         });
