@@ -6,6 +6,7 @@ use solidcraft_geom::table::BALLOONED;
 use solidcraft_sketch::PaperFonts;
 
 use super::*;
+use crate::drawing_scene::tests::in_the_model;
 use crate::schema::tests::conforms;
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
@@ -40,7 +41,16 @@ fn placed() -> (Session, u64, [u64; 2]) {
     let (sheet, source) = (d.sheets[0].id, d.sources[0].id);
     let kind = ViewKind::Base { source, view: ViewDirection::Named(NamedView::Front) };
     let settings = ViewOverrides { scale: Some("1:1".parse().unwrap()), ..ViewOverrides::default() };
-    d.add_views([Arc::new(View { id, sheet, kind, place: ViewPlace::At([200.0, 150.0]), settings, reference_shown_percent: 0.0, label: None })]);
+    d.add_views([Arc::new(View {
+        id,
+        sheet,
+        kind,
+        place: ViewPlace::At([200.0, 150.0]),
+        settings,
+        reference_shown_percent: 0.0,
+        centre_marks: None,
+        label: None,
+    })]);
     d.validate().unwrap();
     s.doc_mut().put_drawing(Arc::new(d));
     (s, id, bracket)
@@ -534,32 +544,25 @@ fn a_balloon_follows_its_row_through_the_model() {
     let balloon = add(&mut s, view, occurrence)["balloon"].as_str().unwrap().to_string();
     list(&mut s, json!({}));
     assert_eq!(read(&mut s, &balloon)["item"], json!("1"));
-    let drawing = ids::encode(s.open_drawing.unwrap());
-    let with_drawing_closed = |s: &mut Session, id: &str, p: Value| {
-        s.execute("drawing.close", &json!({})).unwrap();
-        s.execute(id, &p).unwrap();
-        s.execute("drawing.open", &json!({"drawing": drawing})).unwrap();
-    };
-
-    with_drawing_closed(&mut s, "assembly.bom.renumber", json!({"levels": "flat", "start": 7}));
+    in_the_model(&mut s, "assembly.bom.renumber", json!({"levels": "flat", "start": 7}));
     assert_eq!(read(&mut s, &balloon)["item"], json!("7"), "renumbered");
 
-    with_drawing_closed(&mut s, "occurrence.bom_type", json!({"occurrence": occurrence, "bom_type": "reference"}));
+    in_the_model(&mut s, "occurrence.bom_type", json!({"occurrence": occurrence, "bom_type": "reference"}));
     let reference = read(&mut s, &balloon);
     assert_eq!((&reference["row_status"], reference.get("item")), (&json!("reference"), None), "{reference}");
     assert!(reference["warnings"][0].as_str().is_some_and(|w| w.contains("reference")), "{reference}");
-    with_drawing_closed(&mut s, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     assert_eq!(read(&mut s, &balloon)["item"], json!("7"), "undone");
 
-    with_drawing_closed(&mut s, "occurrence.bom_type", json!({"occurrence": occurrence, "bom_type": "phantom"}));
+    in_the_model(&mut s, "occurrence.bom_type", json!({"occurrence": occurrence, "bom_type": "phantom"}));
     assert_eq!(read(&mut s, &balloon)["row_status"], json!("ok"), "a phantom's own bodies are a row of their own");
-    with_drawing_closed(&mut s, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
 
-    with_drawing_closed(&mut s, "component.delete", json!({"component": component}));
+    in_the_model(&mut s, "component.delete", json!({"component": component}));
     let deleted = read(&mut s, &balloon);
     assert_eq!(deleted["row_status"], json!("not_found"), "{deleted}");
     assert_eq!(s.drawing("test").unwrap().balloons.len(), 1, "the balloon stays");
-    with_drawing_closed(&mut s, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     assert_eq!(read(&mut s, &balloon)["item"], json!("7"), "the part back, its number back");
 }
 
@@ -583,16 +586,9 @@ fn ballooned(s: &mut Session) -> Vec<(String, Vec<(String, u64)>)> {
 #[test]
 fn a_parts_list_counts_the_balloons_on_each_row() {
     let (mut s, view, [component, occurrence]) = placed();
-    let drawing = ids::encode(s.open_drawing.unwrap());
-    let with_drawing_closed = |s: &mut Session, id: &str, p: Value| {
-        s.execute("drawing.close", &json!({})).unwrap();
-        let reply = s.execute(id, &p).unwrap();
-        s.execute("drawing.open", &json!({"drawing": drawing})).unwrap();
-        reply
-    };
     // A 10 mm pin of its own at x = 100, below the Bracket in the list.
-    let pin = with_drawing_closed(&mut s, "component.create", json!({"name": "Pin"}));
-    with_drawing_closed(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "body_name": "Pin"}));
+    let pin = in_the_model(&mut s, "component.create", json!({"name": "Pin"}));
+    in_the_model(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [100, 0, 0], "body_name": "Pin"}));
     let pin = pin["occurrence"].as_u64().unwrap();
     let first = list(&mut s, json!({}));
     let rows = |counts: [u64; 2]| vec![(first.clone(), vec![("1".to_string(), counts[0]), ("2".to_string(), counts[1])])];
@@ -620,13 +616,13 @@ fn a_parts_list_counts_the_balloons_on_each_row() {
     s.execute("drawing.table.delete", &json!({"table": first})).unwrap();
     assert_eq!(ballooned(&mut s), vec![(second.clone(), vec![("1".to_string(), 2), ("2".to_string(), 1)])], "the only list again");
 
-    with_drawing_closed(&mut s, "component.delete", json!({"component": component}));
+    in_the_model(&mut s, "component.delete", json!({"component": component}));
     assert_eq!(
         ballooned(&mut s),
         vec![(second.clone(), vec![("2".to_string(), 1)])],
         "the Bracket's balloons count for no row; the Pin keeps its number"
     );
-    with_drawing_closed(&mut s, "assembly.bom.renumber", json!({"levels": "flat", "start": 1}));
+    in_the_model(&mut s, "assembly.bom.renumber", json!({"levels": "flat", "start": 1}));
     assert_eq!(ballooned(&mut s), vec![(second, vec![("1".to_string(), 1)])], "nor for the row that takes the Bracket's number");
 }
 
@@ -817,12 +813,6 @@ fn a_lost_balloon_keeps_its_circle_and_number() {
 fn the_sheet_and_inspect_read_a_balloons_row_alike() {
     let (mut s, view, [component, occurrence]) = placed();
     let balloon = add(&mut s, view, occurrence)["balloon"].as_str().unwrap().to_string();
-    let drawing = ids::encode(s.open_drawing.unwrap());
-    let with_drawing_closed = |s: &mut Session, id: &str, p: Value| {
-        s.execute("drawing.close", &json!({})).unwrap();
-        s.execute(id, &p).unwrap();
-        s.execute("drawing.open", &json!({"drawing": drawing})).unwrap();
-    };
     let alike = |s: &mut Session, want: &str| {
         let inspected = read(s, &balloon);
         let (_, word) = on_sheet(s, &balloon);
@@ -832,12 +822,12 @@ fn the_sheet_and_inspect_read_a_balloons_row_alike() {
     alike(&mut s, "no_list");
     let first = list(&mut s, json!({}));
     alike(&mut s, "ok");
-    with_drawing_closed(&mut s, "occurrence.bom_type", json!({"occurrence": occurrence, "bom_type": "reference"}));
+    in_the_model(&mut s, "occurrence.bom_type", json!({"occurrence": occurrence, "bom_type": "reference"}));
     alike(&mut s, "reference");
-    with_drawing_closed(&mut s, "edit.undo", json!({}));
-    with_drawing_closed(&mut s, "component.delete", json!({"component": component}));
+    in_the_model(&mut s, "edit.undo", json!({}));
+    in_the_model(&mut s, "component.delete", json!({"component": component}));
     alike(&mut s, "not_found");
-    with_drawing_closed(&mut s, "edit.undo", json!({}));
+    in_the_model(&mut s, "edit.undo", json!({}));
     s.execute("drawing.table.delete", &json!({"table": first})).unwrap();
     list(&mut s, json!({"list": {"component": component}}));
     alike(&mut s, "no_row");
@@ -884,6 +874,52 @@ fn the_provider_keeps_a_balloon_until_what_it_reads_changes() {
     assert_eq!(*moved.scene, built(&s, sheet));
 }
 
+/// Centre annotations, balloons and their table share the one-shot and retained sheet without
+/// losing one another when either annotation changes.
+#[test]
+fn a_centre_line_and_balloon_keep_their_groups_and_table_in_the_cached_sheet() {
+    let (mut s, view, [_, occurrence]) = placed();
+    let balloon = add(&mut s, view, occurrence)["balloon"].as_str().unwrap().to_owned();
+    let table = list(&mut s, json!({}));
+    let line = run(
+        &mut s,
+        "drawing.center_line.add",
+        json!({"view": ids::encode(view), "a": {"point": [0, 0, 0], "path": [occurrence]},
+               "b": {"point": [80, 0, 0], "path": [occurrence]}, "overshoot_mm": 2.0}),
+    )["line"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (balloon_id, line_id, table_id) = (ids::decode(&balloon).unwrap(), ids::decode(&line).unwrap(), ids::decode(&table).unwrap());
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let group = |scene: &solidcraft_geom::paper::Scene, id| scene.groups.iter().find(|group| group.object == id).unwrap().clone();
+    let first = settled(&mut s, sheet);
+    assert_eq!(*first.scene, built(&s, sheet));
+    assert!(first.balloons.iter().any(|b| b.balloon == balloon_id && b.drawn && b.row.item() == Some("1")));
+    assert!(first.tables.iter().any(|t| t.table == table_id && t.drawn));
+    let centre = group(&first.scene, line_id);
+    let _ = group(&first.scene, balloon_id);
+    let _ = group(&first.scene, table_id);
+
+    run(&mut s, EDIT, json!({"balloon": balloon, "set": {"at": [70, 50]}}));
+    let moved = settled(&mut s, sheet);
+    assert_eq!(*moved.scene, built(&s, sheet));
+    assert_eq!(group(&moved.scene, line_id), centre);
+    assert_ne!(group(&moved.scene, balloon_id), group(&first.scene, balloon_id));
+    assert!(moved.tables.iter().any(|t| t.table == table_id && t.drawn));
+
+    run(&mut s, "drawing.center_line.edit", json!({"line": line, "overshoot_mm": 4.0}));
+    let edited = settled(&mut s, sheet);
+    assert_eq!(*edited.scene, built(&s, sheet));
+    assert_ne!(group(&edited.scene, line_id), centre);
+    assert_eq!(group(&edited.scene, balloon_id), group(&moved.scene, balloon_id));
+    let exported = s.execute("drawing.export", &json!({"sheet": ids::encode(sheet)})).unwrap();
+    let svg = exported["svg"].as_str().unwrap();
+    assert!(svg.contains("data-kind=\"balloon\"") && svg.contains("data-kind=\"centre_line\"") && svg.contains("data-kind=\"parts_list\""));
+    assert!(exported["balloons"].as_array().unwrap().iter().any(|b| b["balloon"] == json!(balloon) && b["drawn"] == json!(true)));
+    assert!(exported["tables"].as_array().unwrap().iter().any(|t| t["table"] == json!(table) && t["drawn"] == json!(true)));
+}
+
 /// A held deferred drawing keeps a balloon as it keeps its dimensions: closed during a model change
 /// and opened again, it shows the balloon as it was and lists it out of date, and a background
 /// export writes the same; updated, the balloon is read again.
@@ -916,4 +952,32 @@ fn a_held_drawing_keeps_its_balloons_and_exports_them_from_a_scratch_copy() {
     assert_eq!(*now.scene, built(&s, sheet));
     let listed = run(&mut s, "drawing.export", json!({"sheet": ids::encode(sheet)}));
     assert!(!listed["out_of_date"].as_array().into_iter().flatten().any(|v| *v == json!(ids::encode(id))), "{listed}");
+}
+
+/// A view's `hide_bodies` leaves out one body of a part (#22107): a balloon on it is refused in words
+/// that name the body and its path, on the view and on a view projected from it (naming the parent),
+/// and the drawing is left as it was; one added before warns until the edit is undone. Hiding another
+/// body refuses nothing.
+#[test]
+fn a_balloon_is_refused_on_a_body_its_view_leaves_out() {
+    let (mut s, view, [_, bracket]) = placed();
+    let v = ids::encode(view);
+    let id = add(&mut s, view, bracket)["balloon"].clone();
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide_bodies": [{"body": "Base"}]}}));
+    assert!(run(&mut s, INSPECT, json!({"balloon": id}))["warnings"].is_null(), "another body is hidden");
+    run(&mut s, "drawing.view.edit", json!({"view": v, "set": {"hide_bodies": [{"path": [bracket], "body": "Box"}]}}));
+    let words = format!("its hide leaves out body `Box` at occurrence path [{bracket}]");
+    let warned = run(&mut s, INSPECT, json!({"balloon": id}));
+    assert_eq!(warned["warnings"], json!([format!("view {v} doesn't draw this part now: {words}")]), "{warned}");
+    let projected = run(&mut s, "drawing.view.projected", json!({"parent": v, "side": "right"}))["view"].as_str().unwrap().to_string();
+    let before = saved(&s);
+    let on = |view: &str| json!({"view": view, "edge": {"point": [40, 0, 0], "path": [bracket]}, "at": [60, 40]});
+    let e = refused(&mut s, ADD, on(&v));
+    assert!(e.contains(&format!("view {v} doesn't draw that part: {words}")), "{e}");
+    let e = refused(&mut s, ADD, on(&projected));
+    assert!(e.contains(&format!("view {projected} doesn't draw that part: {words} (set on view {v})")), "{e}");
+    assert_eq!(saved(&s), before);
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(run(&mut s, INSPECT, json!({"balloon": id}))["warnings"].is_null());
 }

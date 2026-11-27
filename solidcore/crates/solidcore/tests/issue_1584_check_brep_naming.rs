@@ -60,7 +60,7 @@ fn imported_box(k: &mut Kernel) -> Brep {
         uv_curve_key: &|_: EdgeuseId| ObjectKey(0),
         surface_key: &|_: FaceId| ObjectKey(0),
     };
-    let mut data = BrepData::from_brep(&b, &env, &mut Vec::new()).unwrap();
+    let mut data = BrepData::from_brep(k, &b, &env, &mut Vec::new()).unwrap();
     for eu in &mut data.edgeuses {
         eu.uv_curve = 999_999;
     }

@@ -426,9 +426,10 @@ fn designs_from_before_bend_edges_open_as_recognize_of_the_plate() {
     assert!(!older.to_string().contains("\"bends\""), "{older}");
     older["format"] = json!("solidcraft/16");
     let doc = solidcraft_doc::Document::from_json(&older.to_string()).unwrap();
-    // An older design keeps the numbering of the pieces it was saved with (#3902).
+    // An older design keeps the numbering of the pieces it was saved with (#3902), and the order
+    // of the pieces it splits bodies into (#21552).
     let mut same = solidcraft_doc::Document::clone(&s.doc);
-    same.features.iter_mut().for_each(|f| f.kernel_piece_order = true);
+    same.features.iter_mut().for_each(|f| (f.kernel_piece_order, f.least_face_piece_order) = (true, true));
     // Its rules' hem gaps were inner radii: doubled, they are the same hems (format pending
     // sheet-hem-gap).
     same.sheet.rules.iter_mut().for_each(|r| r.hem_gap = format!("2 * ({})", r.hem_gap));
@@ -1989,6 +1990,8 @@ fn disc_in_box(r: f64, (u0, u1): (f64, f64), (v0, v1): (f64, f64)) -> f64 {
         .sum()
 }
 
+#[path = "sheet_surface_bead_tests.rs"]
+mod beads;
 #[path = "sheet_surface_cut_tests.rs"]
 mod cuts;
 #[path = "sheet_recognize_tests.rs"]
@@ -2066,8 +2069,7 @@ fn flat_area_and_bends(s: &mut Session) -> (f64, Vec<f64>) {
 /// A tray made with this build's sheet metal, read back from STEP, is recognized as the same tray
 /// (an import is Recognize's, #6748): the walls that run on past their bends' ends (a notch, a
 /// tear) step down to the bend there, and a round relief's arc stays; also with the short walls
-/// made in a second feature, where the corners are notched or round (a torn butt corner is torn
-/// differently from one feature's corner).
+/// made in a second feature, which closes its corners as one feature does.
 #[test]
 fn trays_of_its_own_sheet_metal_convert_back() {
     // A round relief's edge on a bend is a circle of the flat folded round the bend: its angle
@@ -2100,7 +2102,7 @@ fn trays_of_its_own_sheet_metal_convert_back() {
     let (off, arcs) = (1e-7 * 120.0, 8.0 * 2.0 * r * (ba / 2.0 / r).acos());
     let (round_volume, round_area, round_bend) = (off * arcs * t, off * arcs, 2.0 * off);
     for shape in ["notch", "tear", "round"] {
-        for two in [false, true].into_iter().filter(|two| !(*two && shape == "tear")) {
+        for two in [false, true] {
             let what = format!("{shape}, {}", if two { "two features" } else { "one feature" });
             let (mut s, picks, mut source) = tray_round_trip(shape, two);
             let body = s.model.state().bodies.first().map(|b| b.name.clone()).unwrap_or_default();

@@ -1,9 +1,10 @@
-//! Sheet metal: rules, Flange (base, edge, contour), Path Flange, Hem, Unfold/Refold, Convert to Sheet Metal,
+//! Sheet metal: rules, Flange (base, edge, contour), Path Flange, Tab, Hem, Unfold/Refold, Convert to Sheet Metal,
 //! the flat pattern (outline, bend lines, bend table) and its DXF export.
 
 use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
 use solidcraft_doc::expr::Kind;
+use solidcraft_doc::hardware_catalog::{HOLE_TOLERANCE, HardwareKind, hardware_size, hardware_sizes_of};
 use solidcraft_doc::sheet::{self, SheetRule};
 use solidcraft_doc::sheet_library as library;
 use solidcraft_doc::{BodyName, SketchId};
@@ -13,24 +14,28 @@ use solidcraft_geom::prelude::*;
 use solidcraft_geom::{Aabb2, Ring};
 
 use super::CommandSpec;
-use super::features::{add_feature, check_expr, feature_sketch, profiles, sketch_id};
+use super::features::{add_feature, check_expr, default_extrude_profiles, feature_sketch, profiles, sketch_id};
 use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
-    BendTableFormat, BendTableParams, BendTableResult, ConvertParams, DxfFile, ExportDxfParams, ExportDxfResult, FlangeParams, FlatCircle,
-    FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HemParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams,
-    ManageRulesResult, MeasureBodyParams, PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleLibraryParams, RuleLibraryResult,
-    RuleReply, RulesParams, RulesResult, SheetBodyMeasure, UnfoldParams,
+    BeadParams, BendTableFormat, BendTableParams, BendTableResult, ConvertParams, DxfFile, ExportDxfParams, ExportDxfResult, FlangeParams,
+    FlatCircle, FlatHardware, FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HardwareInfo, HardwareKindParam,
+    HardwareParams, HardwareResult, HemParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams, ManageRulesResult, MeasureBodyParams,
+    PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleLibraryParams, RuleLibraryResult, RuleReply, RulesParams, RulesResult,
+    SheetBodyMeasure, TabParams, UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const FLANGE_CONTRACT: TypedContract<FlangeParams> = TypedContract::new();
 const PERFORATE_CONTRACT: TypedContract<PerforateParams> = TypedContract::new();
+const HARDWARE_CONTRACT: TypedContract<HardwareParams> = TypedContract::new();
 const HEM_CONTRACT: TypedContract<HemParams> = TypedContract::new();
 const FOLD_CONTRACT: TypedContract<FoldParams> = TypedContract::new();
 const UNFOLD_CONTRACT: TypedContract<UnfoldParams> = TypedContract::new();
 const CONVERT_CONTRACT: TypedContract<ConvertParams> = TypedContract::new();
+const TAB_CONTRACT: TypedContract<TabParams> = TypedContract::new();
+const BEAD_CONTRACT: TypedContract<BeadParams> = TypedContract::new();
 const RECOGNIZE_CONTRACT: TypedContract<RecognizeParams> = TypedContract::new();
 const MEASURE_BODY_CONTRACT: TypedContract<MeasureBodyParams> = TypedContract::new();
 
@@ -44,13 +49,15 @@ const BEND_TABLE_CONTRACT: TypedContract<BendTableParams> = TypedContract::new()
 const EXPORT_DXF_CONTRACT: TypedContract<ExportDxfParams> = TypedContract::new();
 
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sheet.flange", "Flange", crate::checked!("sheet.flange", flange))
+    CommandSpec::new("sheet.flange", "Flange", crate::checked!("sheet.flange", flange)).begins_edit()
         .at("SHEET METAL", "CREATE")
         .icon("flange")
         .contract(&FLANGE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(
-        "base: sketch + profiles? (rule?, flip?) | contour: sketch + curves (open chain of lines and tangent arcs) + distance (rule?, flip?, reverse?) | \
+        "base: sketch + profiles? (omitted: nested outlines keep holes; rule?, flip?) | contour: sketch + curves (open chain of lines and tangent arcs) + distance; radius? (default: rule); \
+         orientation?: center|side1|side2 (where the contour lies across the sheet thickness; default side1); \
+         symmetric?: bool (the distance each way across the sketch plane; total width is twice the distance); rule?, flip?, reverse? | \
          edge: edges: [[x,y,z] on top/bottom edges, or {point: [x,y,z], angle?, height?, segments?} for an edge with its own angle and height, \
          or split into 1…64 segments [{from, to, angle?, height?, flip?}] that tile the stretch the sheet still has there (from, to are \
          fractions 0…1 of it, first from 0, last to 1; consecutive segments that match make one bend)] + \
@@ -61,12 +68,13 @@ pub static COMMANDS: &[CommandSpec] = &[
          the bend starting at the edge (bend_outside is the same), half way, the inner virtual sharp on the edge, \
          or the bend's outer face tangent to the edge's face (below 90 deg the bend's end on that face)), flip?, body?, corner_relief_shape?: notch|round|rectangular|tear and corner_relief? (size across): \
          the relief at the corners these flanges make (default: the rule's); \
+         bend_relief_shape?: rectangular|obround|tear (the relief beside a bend's end where the sheet runs on past it; default: the rule's); \
          then?: [{angle?, height, flip?}] further bends (at most 16), each a flange on the far edge of the one before, flip: true turns that bend the other way (edge only); \
          type?: base|edge|contour (default from the inputs); name?, body_name? (the new body). \
          Thickness, K-factor and bend radius come from the rule (sheet.manage_rules); passing them here is refused, \
-         and so is the corner relief on a base or contour flange",
+         and so is the corner or bend relief on a base or contour flange",
     ),
-    CommandSpec::new("sheet.path_flange", "Path Flange", crate::checked!("sheet.path_flange", path_flange))
+    CommandSpec::new("sheet.path_flange", "Path Flange", crate::checked!("sheet.path_flange", path_flange)).begins_edit()
         .at("SHEET METAL", "CREATE")
         .icon("path_flange")
         .contract(&PATH_FLANGE_CONTRACT)
@@ -76,7 +84,20 @@ pub static COMMANDS: &[CommandSpec] = &[
          that edge, from the edge out (each line one flange as long as the line, to the outer face from the virtual sharp; each \
          corner one bend, turning the way the lines turn); radius? (default: rule); body?. One feature, one body",
     ),
-    CommandSpec::new("sheet.perforate", "Perforate", crate::checked!("sheet.perforate", perforate))
+    CommandSpec::new("sheet.tab", "Tab", crate::checked!("sheet.tab", tab)).begins_edit()
+        .at("SHEET METAL", "CREATE")
+        .icon("sheet_tab")
+        .contract(&TAB_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "sketch?: id|name (default: active or last sketch), drawn on a flat face of a sheet (either side) or in a plane level with one; \
+             profiles? (default: all): closed profiles touching or overlapping that face's outline; exact_regions?: bool (as solid.extrude); body? (default: the sheet whose face \
+             the profile meets). The profile's area joins that panel of the same body through the sheet's thickness (no new body): it \
+             unfolds with its panel, and later flanges, hems and folds can use its edges. Refused when the profile doesn't meet the \
+             face, adds nothing, reaches into a bend zone, would overlap another panel once folded or flat or would join more than one panel, \
+             or the sheet is unfolded",
+        ),
+    CommandSpec::new("sheet.perforate", "Perforate", crate::checked!("sheet.perforate", perforate)).begins_edit()
         .at("SHEET METAL", "CREATE")
         .icon("perforate")
         .contract(&PERFORATE_CONTRACT)
@@ -84,13 +105,34 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
         "diameter, pitch: expr; margin?: expr (clear of edges, cut-outs, bends and the outline; default: the diameter); pattern?: staggered (60°, default) | square; body?; sketch? + profiles? (the outline: closed profiles of a sketch on a face of the sheet; holes only inside them, out of their inner loops) - a perforation field over the whole flat sheet or inside the outline: holes in the flat pattern (perforations), the DXF (layer PERFORATION) and the measured volume, not cut into the B-rep (#732)",
     ),
-    CommandSpec::new("sheet.hem", "Hem", crate::checked!("sheet.hem", hem))
+    CommandSpec::new("sheet.bead", "Bead", crate::checked!("sheet.bead", bead)).begins_edit()
+        .icon("rib")
+        .contract(&BEAD_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "sketch? (default: active or last sketch) + curves: straight sketch lines on a face of a planar panel of a sheet, one bead along each (its ends where the end ramps meet \
+             the face); depth, width: expr (on the side it stands out of, width between the flanks' virtual sharps); angle?: expr (flanks, default \
+             45 deg) | crown_width?: expr; base_radius?, crown_radius?: expr (inner, default: the rule's bend radius); end_length?: expr (each end's \
+             ramp, default 3 x depth); margin?: expr (warns nearer than this to edges, cut-outs, bends and beads; default 3 x thickness); shape?: \
+             trapezoid; flip?: bool (out of the other face); body? (default: the one sheet whose planar panel the first centreline lies on) - formed \
+             beads (stiffening ribs) that keep the sheet's thickness: in the folded solid, listed in the flat pattern (beads) and drawn in the DXF \
+             (FORM_UP / FORM_DOWN); the flat blank stays flat",
+        ),
+    CommandSpec::new("sheet.hardware", "Press-in Hardware", crate::checked!("sheet.hardware", hardware)).begins_edit()
+        .at("SHEET METAL", "CREATE")
+        .icon("press_in_hardware")
+        .contract(&HARDWARE_CONTRACT)
+        .output(output_schema_for::<HardwareResult>)
+        .params(
+        "kind: nut|flush_nut|stud|standoff; thread: \"M3\" (ISO metric coarse; the sizes each kind has are in docs/hardware-catalogue.md); length?: expr (stud and standoff: required; a nut takes none); diameter?: expr (the mounting hole: the table's size to 0.08 mm over it; default the table's); sketch + points? (the holes' centres, as solid.hole), single?, flip? | position: [x,y,z] on the sheet's face; direction?; targets?; name? - cuts the mounting hole of press-in hardware (a plain through hole, in the folded part, the flat pattern and the DXF) and records the hardware on it: kind, thread, length and part (e.g. nut.m3). A sheet thinner than the hardware's minimum is refused; a centre nearer an edge, a cut-out or a bend than its minimum is a warning (the hole is still cut). Redefine the hole with this command, not solid.hole",
+    ),
+    CommandSpec::new("sheet.hem", "Hem", crate::checked!("sheet.hem", hem)).begins_edit()
         .at("SHEET METAL", "CREATE")
         .icon("hem")
         .contract(&HEM_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("edges: [[x,y,z] on sheet edges]; length (to the outer face); gap? (between the leg and the face it folds over, twice the bend's inner radius; default: rule); flip?; body?"),
-    CommandSpec::new("sheet.fold", "Fold", crate::checked!("sheet.fold", fold))
+    CommandSpec::new("sheet.fold", "Fold", crate::checked!("sheet.fold", fold)).begins_edit()
         .at("SHEET METAL", "CREATE")
         .icon("fold")
         .contract(&FOLD_CONTRACT)
@@ -101,19 +143,19 @@ pub static COMMANDS: &[CommandSpec] = &[
          stays?: left|right (the side of the line as drawn that stays, seen from the sheet's surface) or fixed?: [x,y,z] on the sheet, on that side \
          (default: the side with more of the sheet joined to it; decided once, as the fold is made, and kept); flip? (fold the other way); body?",
     ),
-    CommandSpec::new("sheet.unfold", "Unfold", crate::checked!("sheet.unfold", unfold))
+    CommandSpec::new("sheet.unfold", "Unfold", crate::checked!("sheet.unfold", unfold)).begins_edit()
         .at("SHEET METAL", "MODIFY")
         .icon("unfold")
         .contract(&UNFOLD_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("body? (default: the last sheet body) — all bends"),
-    CommandSpec::new("sheet.refold", "Refold", crate::checked!("sheet.refold", refold))
+        .params("body? (default: the last sheet body) — all bends; fixed?: [x,y,z] on the flat panel that stays where it is (default: the largest flat panel, or the one an earlier unfold of the sheet fixed)"),
+    CommandSpec::new("sheet.refold", "Refold", crate::checked!("sheet.refold", refold)).begins_edit()
         .at("SHEET METAL", "MODIFY")
         .icon("refold")
         .contract(&UNFOLD_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("body? (default: the last unfolded sheet)"),
-    CommandSpec::new("sheet.convert", "Convert to Sheet Metal", crate::checked!("sheet.convert", convert))
+    CommandSpec::new("sheet.convert", "Convert to Sheet Metal", crate::checked!("sheet.convert", convert)).begins_edit()
         .at("SHEET METAL", "CREATE")
         .icon("convert_sheet")
         .contract(&CONVERT_CONTRACT)
@@ -131,7 +173,7 @@ pub static COMMANDS: &[CommandSpec] = &[
              them; direction?: inside (default) | outside (the side of the faces the material lies on). The body becomes the \
              folded sheet, and sheet.flat_pattern shows its flat",
         ),
-    CommandSpec::new("sheet.recognize", "Recognize Sheet Metal", crate::checked!("sheet.recognize", recognize))
+    CommandSpec::new("sheet.recognize", "Recognize Sheet Metal", crate::checked!("sheet.recognize", recognize)).begins_edit()
         .at("SHEET METAL", "CREATE")
         .icon("convert_sheet")
         .contract(&RECOGNIZE_CONTRACT)
@@ -161,8 +203,13 @@ pub static COMMANDS: &[CommandSpec] = &[
          gap: between flanges that meet at a corner, whose ends are closed toward each other at any angle); \
          corner_relief_shape?: notch|round|rectangular|tear (what is cut where two bends meet at a corner of the panel they stand on: round and rectangular a relief \
          `corner_relief` across; tear none, each bend's end is cut straight from the corner to its flange's end; default notch); \
+         bend_relief_shape?: rectangular|obround|tear (the bend relief beside a bend's end where the base runs on: a slot relief_width wide and \
+         relief_depth past the bend line, default rectangular; obround rounds its inner end and needs relief_depth at least half relief_width; \
+         tear removes nothing and cuts the flat pattern along the bend's end); \
          angle_display?: bend|included (how the DXF bend notes read the bend angles: the bend angle, default, or the included angle \
          left between the bend's sides, 180° less it; the bend table gives both, and a flange's `angle` is always the bend angle); \
+         unfold_method?: k_factor|deduction|allowance (where the bends' K-factor comes from: k_factor, default, or worked out from \
+         unfold_value, a press brake chart's 90° bend deduction or allowance for this thickness and radius); unfold_value? (length expression); \
          active?: bool; delete?: bool; material?: text (the material the rule is for, a label saved with it); \
          gauge?: with material, a gauge (16 ga) or metric thickness (1.5 mm) of the standard library (sheet.rule_library): the rule takes its thickness and keeps its own bend radius; \
          its K-factor is the bend model's estimate at the rule's R/T for bend_method?: air|bottoming|coining (default air), said in notes, \
@@ -196,15 +243,21 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPORT_DXF_CONTRACT)
         .output(output_schema_for::<ExportDxfResult>)
         .params(
-            "body?, path?, curves?: exact|arcs (default exact: an ellipse as ELLIPSE, splines, text outlines and other Béziers as SPLINE; arcs: tangent arcs and lines within 0.001 mm, for machines that read only those), \
+            "body?, path?, units?: mm|inches (default mm: the drawing in millimetres, $INSUNITS 4; inches: every coordinate, radius and text height in inches, $INSUNITS 1, $MEASUREMENT 0, \
+              the bend notes' radii and the pocket layers' depths in inches too), \
+            curves?: exact|arcs (default exact: an ellipse as ELLIPSE, splines, text outlines and other Béziers as SPLINE; arcs: tangent arcs and lines within 0.001 mm, for machines that read only those), \
              text?: cut|etch (default cut: letters that text cut through the sheet are cut contours on layer TEXT; etch: single contours on layer ETCH and the sheet keeps its material there; text machined to a depth is always on ETCH), \
              bend_notes?: bool (default false: a note beside each bend line on layer BEND_NOTES, `B1 UP 90° R1`, its angle the included angle \
               when the body's rule has angle_display: included), note_height?: mm (default 3), \
+             hardware_notes?: bool (default false: the file is the sheet and its mounting holes, with no mention of the press-in hardware; true: a note beside each press-in hardware hole on layer HARDWARE, `M3 nut`, as high as note_height, with layers: roles), \
              bend_lines?: bool (default true; false leaves BEND_UP and BEND_DOWN out, for a cutter that would cut them), \
+             markings?: bool (default true; false leaves the letter contours on TEXT/ETCH and the bend notes out, for a cutter that would etch them), \
              layers?: roles|single (default roles, the layers below; single: every entity on layer 0), \
+             profile?: a DXF profile file's path, or the profile as an object (which layer, colour and linetype each role is written with, and the roles left out; docs/formats/dxf-profiles.md; default: the layers below; not with layers: single), \
              per_body?: bool (a file for every sheet body, `<path>-<body>.dxf`, or their DXF texts without a path → files: [{body, path | dxf, bends}]; not with `body`) \
-             → DXF (AutoCAD 2000, mm): layers OUTLINE (the outer contour), CUT (what is cut out inside it), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES, \
-             POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth) and PERFORATION; inner contours come before the outline",
+             → DXF (AutoCAD 2000, in `units`): layers OUTLINE (the outer contour), CUT (what is cut out inside it), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES, \
+             POCKET_<BOTTOM|TOP|INTERNAL>_Z<from>_TO_<to>_MM (one per side and depth, named in `_IN` with their inches in an inches drawing), PERFORATION, and FORM_UP and FORM_DOWN (a bead's dashed \
+             centreline and footprint, its note `BEAD UP D2 W10` on BEND_NOTES), and HARDWARE (only with hardware_notes: true and layers: roles); inner contours come before the outline",
         ),
     CommandSpec::new("sheet.export_bend_table", "Export Bend Table", crate::checked!("sheet.export_bend_table", export_bend_table)).icon("bendtable")
         .noundo()
@@ -425,11 +478,22 @@ fn rule_param(s: &Session, p: &Value, cmd: &str) -> Result<Option<String>> {
 
 /// Sheet values a flange takes from its rule. Passing one to `sheet.flange` is refused rather
 /// than ignored, so a script never gets a part of another thickness than it asked for.
-const RULE_ONLY: [&str; 8] =
-    ["thickness", "k_factor", "bend_radius", "relief_width", "relief_depth", "corner_relief", "corner_relief_shape", "hem_gap"];
+const RULE_ONLY: &[&str] = &[
+    "thickness",
+    "k_factor",
+    "bend_radius",
+    "relief_width",
+    "relief_depth",
+    "corner_relief",
+    "corner_relief_shape",
+    "bend_relief_shape",
+    "hem_gap",
+    "unfold_method",
+    "unfold_value",
+];
 
-/// The two rule values an edge flange may set for itself: the corner relief.
-const EDGE_RELIEF: [&str; 2] = ["corner_relief", "corner_relief_shape"];
+/// The rule values an edge flange may set for itself: the corner relief and the bend relief's shape.
+const EDGE_RELIEF: [&str; 3] = ["corner_relief", "corner_relief_shape", "bend_relief_shape"];
 
 fn flange(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sheet.flange";
@@ -465,11 +529,8 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
         FlangeType::Base => {
             let sketch = feature_sketch(s, p, cmd)?;
             let rule = rule_param(s, p, cmd)?;
-            add_feature(
-                s,
-                p,
-                FeatureKind::SheetBase { sketch: SketchId(sketch), profiles: profiles(p, cmd)?, rule, flip: bool_(p, "flip").unwrap_or(false) },
-            )
+            let profiles = if p.get("profiles").is_none() { default_extrude_profiles(s, sketch) } else { profiles(p, cmd)? };
+            add_feature(s, p, FeatureKind::SheetBase { sketch: SketchId(sketch), profiles, rule, flip: bool_(p, "flip").unwrap_or(false) })
         }
         FlangeType::Contour => {
             let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
@@ -479,6 +540,24 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             }
             let distance = req_expr(cmd, p, "distance")?;
             check_expr(s, &distance, Kind::Length, cmd, "distance")?;
+            let radius = expr(p, "radius");
+            if let Some(r) = &radius {
+                check_expr(s, r, Kind::Length, cmd, "radius")?;
+            }
+            let raw_orientation = str_(p, "orientation");
+            if p.get("orientation").is_some() && raw_orientation.is_none() {
+                return Err(bad(cmd, "`orientation` must be center, side1 or side2"));
+            }
+            let orientation = match raw_orientation {
+                Some(orientation @ ("center" | "side1" | "side2")) => Some(orientation.to_string()),
+                Some(other) => return Err(bad(cmd, format!("`orientation` must be center, side1 or side2, not `{other}`"))),
+                None => None,
+            };
+            let symmetric = match p.get("symmetric") {
+                None => false,
+                Some(Value::Bool(value)) => *value,
+                Some(_) => return Err(bad(cmd, "`symmetric` must be a boolean")),
+            };
             let rule = rule_param(s, p, cmd)?;
             add_feature(
                 s,
@@ -487,7 +566,10 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     sketch: SketchId(sketch),
                     curves,
                     distance,
+                    radius,
                     rule,
+                    orientation,
+                    symmetric,
                     flip: bool_(p, "flip").unwrap_or(false),
                     reverse: bool_(p, "reverse").unwrap_or(false),
                 },
@@ -529,6 +611,16 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                 ),
                 None => None,
             };
+            // The bend relief beside these flanges' bend ends, in place of the rule's.
+            let bend_relief_shape = match p.get("bend_relief_shape").filter(|v| !v.is_null()) {
+                Some(v) => Some(
+                    v.as_str()
+                        .and_then(solidcraft_doc::sheet::BendReliefShape::parse)
+                        .map(|shape| shape.name().to_string())
+                        .ok_or_else(|| bad(cmd, "`bend_relief_shape` must be rectangular, obround or tear"))?,
+                ),
+                None => None,
+            };
             let corner_relief = expr(p, "corner_relief");
             if let Some(c) = &corner_relief {
                 check_expr(s, c, Kind::Length, cmd, "corner_relief")?;
@@ -549,6 +641,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     corner_relief_shape,
                     corner_relief,
                     height_from: height_from.clone(),
+                    bend_relief_shape: bend_relief_shape.clone(),
                 },
             )?;
             // The first bend owns the supplied name. Keep its identity and report the completed chain's result.
@@ -572,6 +665,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                         corner_relief_shape: None,
                         corner_relief: None,
                         height_from: height_from.clone(),
+                        bend_relief_shape: bend_relief_shape.clone(),
                     },
                 )?;
             }
@@ -657,6 +751,134 @@ fn perforate(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let profiles = p.get("profiles").map(|_| profiles(p, cmd)).transpose()?;
     add_feature(s, p, FeatureKind::SheetPerforate { diameter, pitch, margin, pattern, body: str_(p, "body").map(BodyName::from), sketch, profiles })
+}
+
+/// The sizes a kind has, for a refusal.
+fn hardware_sizes_text(kind: HardwareKind) -> String {
+    hardware_sizes_of(kind).iter().map(|s| s.thread).collect::<Vec<_>>().join(", ")
+}
+
+/// The longest stud or standoff the command takes (mm): past it a length is a typo.
+const LONGEST_HARDWARE: f64 = 1000.0;
+
+/// What `solid.hole` takes to shape a hole other than a plain through hole: a depth or an end, a
+/// head, a tip, a thread, a clearance fit, reference edges. `sheet.hardware` takes none of them.
+const HOLE_SHAPE_KEYS: &[&str] = &[
+    "depth",
+    "type",
+    "to",
+    "all",
+    "cb_diameter",
+    "cb_depth",
+    "cs_diameter",
+    "cs_angle",
+    "tip_angle",
+    "bridge",
+    "thread_depth",
+    "thread_class",
+    "hand",
+    "modeled",
+    "ease_out",
+    "references",
+    "clearance",
+];
+
+fn hardware(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.hardware";
+    let kind = str_(p, "kind").and_then(HardwareKind::from_name).ok_or_else(|| bad(cmd, "`kind` is nut, flush_nut, stud or standoff"))?;
+    let thread = str_(p, "thread").map(str::trim).filter(|t| !t.is_empty()).ok_or_else(|| bad(cmd, "`thread` names the size, such as \"M3\""))?;
+    let size = hardware_size(kind, thread).ok_or_else(|| {
+        bad(cmd, format!("the table has no {} in `{thread}`: its sizes are {} (docs/hardware-catalogue.md)", kind.label(), hardware_sizes_text(kind)))
+    })?;
+    // A stud's or a standoff's length is saved with the hardware; a nut has none.
+    let length = match (kind.has_length(), expr(p, "length")) {
+        (true, None) => return Err(bad(cmd, format!("a {} needs its `length`", kind.label()))),
+        (false, Some(_)) => return Err(bad(cmd, format!("a {} has no `length`", kind.label()))),
+        (false, None) => None,
+        (true, Some(e)) => {
+            // A bare number is in the design's unit, as `add_feature` will write it: check what it stores.
+            let e: solidcraft_doc::Expr = s.doc.with_design_unit(e.as_str(), Kind::Length).into();
+            check_expr(s, &e, Kind::Length, cmd, "length")?;
+            let mm = s.doc.eval(&e, Kind::Length).map_err(|err| bad(cmd, format!("length: {err}")))?;
+            if !(mm.is_finite() && mm > 0.0 && mm <= LONGEST_HARDWARE) {
+                return Err(bad(cmd, format!("`length` must be more than 0 and at most {LONGEST_HARDWARE} mm, not {mm}")));
+            }
+            Some(e)
+        }
+    };
+    // The mounting hole: the table's size, or another within the makers' tolerance over it.
+    let diameter = match expr(p, "diameter") {
+        None => format!("{} mm", size.hole),
+        Some(e) => {
+            let e: solidcraft_doc::Expr = s.doc.with_design_unit(e.as_str(), Kind::Length).into();
+            check_expr(s, &e, Kind::Length, cmd, "diameter")?;
+            let mm = s.doc.eval(&e, Kind::Length).map_err(|err| bad(cmd, format!("diameter: {err}")))?;
+            let (low, high) = (size.hole, size.hole + HOLE_TOLERANCE);
+            if !(mm.is_finite() && mm >= low - 1e-9 && mm <= high + 1e-9) {
+                return Err(bad(cmd, format!("an {} {} takes a hole of {low} to {high} mm, not {mm}", thread, kind.label())));
+            }
+            e.as_str().to_string()
+        }
+    };
+    let Some(mut q) = p.as_object().cloned() else { return Err(bad(cmd, "the parameters must be an object")) };
+    // Press-in hardware is a plain through hole: what shapes any other hole is not its to take.
+    if let Some(key) = HOLE_SHAPE_KEYS.iter().find(|k| q.contains_key(**k)) {
+        return Err(bad(cmd, format!("press-in hardware cuts a plain through hole: remove `{key}`")));
+    }
+    for key in ["kind", "thread", "length"] {
+        q.remove(key);
+    }
+    q.insert("diameter".into(), json!(diameter));
+    let hardware = solidcraft_doc::Hardware { kind, thread: size.thread.to_string(), length: length.clone(), part: size.part() };
+    let mut reply = super::features::hole_with(s, &Value::Object(q), cmd, Some(hardware))?;
+    // The hole must lie in a sheet metal part, in a sheet thick enough for the hardware. A
+    // refusal here undoes the feature; a design that is rebuilt thinner later only warns.
+    let changed: Vec<&str> =
+        reply.get("changed_bodies").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
+    let state = s.model.state();
+    let cut: Vec<_> = state.surface_sheets.iter().filter(|sk| changed.contains(&sk.body.as_str())).collect();
+    if cut.is_empty() {
+        return Err(bad(cmd, "the hole is not in a sheet metal part: place it on a face of a sheet (`sheet.flange`, `sheet.convert`)"));
+    }
+    // Nor in anything else: a block the hole also cuts (named in `targets`) is no sheet.
+    if changed.iter().any(|b| !state.surface_sheets.iter().any(|sk| sk.body == *b)) {
+        return Err(bad(cmd, "a press-in hole cuts only sheet metal bodies: remove the other targets"));
+    }
+    if let Some(sk) = cut.iter().find(|sk| sk.thickness + 1e-9 < size.min_sheet) {
+        return Err(bad(
+            cmd,
+            format!(
+                "{} is {} mm thick: an {} {} is made for a sheet of at least {} mm (docs/hardware-catalogue.md); use a thicker sheet or another size",
+                sk.body,
+                sk.thickness,
+                thread,
+                kind.label(),
+                size.min_sheet
+            ),
+        ));
+    }
+    let info = HardwareInfo {
+        kind: kind_param(kind),
+        thread: size.thread.to_string(),
+        length: length.and_then(|e| s.doc.eval(&e, Kind::Length).ok()),
+        part: size.part(),
+        hole_diameter: size.hole,
+        min_sheet_thickness: size.min_sheet,
+        min_edge_distance: size.edge,
+    };
+    if let Some(o) = reply.as_object_mut() {
+        o.insert("hardware".into(), serde_json::to_value(info).map_err(|e| bad(cmd, e.to_string()))?);
+    }
+    Ok(reply)
+}
+
+fn kind_param(k: HardwareKind) -> HardwareKindParam {
+    match k {
+        HardwareKind::Nut => HardwareKindParam::Nut,
+        HardwareKind::FlushNut => HardwareKindParam::FlushNut,
+        HardwareKind::Stud => HardwareKindParam::Stud,
+        HardwareKind::Standoff => HardwareKindParam::Standoff,
+    }
 }
 
 fn hem(s: &mut Session, p: &Value) -> Result<Value> {
@@ -758,14 +980,14 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
         // A fixed point that touches no material of the sheet picks no side: refused, here and
         // only here, against the sheet the fold is made on (#263).
         if let Some(f) = fixed
-            && s.doc.fold_fixed_off_sheet(&st, &authored)
+            && s.doc.fold_fixed_off_sheet(&st, &authored, s.active_component)
         {
             return Err(bad(
                 cmd,
                 format!("the fixed point ({:.3}, {:.3}, {:.3}) is not on the sheet: pick a point on the face of the side that stays", f.x, f.y, f.z),
             ));
         }
-        if let Ok(Some(side)) = s.doc.fold_side_at(&st, &authored)
+        if let Ok(Some(side)) = s.doc.fold_side_at(&st, &authored, s.active_component)
             && let FeatureKind::SheetFold { stays, fixed, .. } = &mut kind
         {
             *stays = Some(side);
@@ -773,6 +995,61 @@ fn fold(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     add_feature(s, p, kind)
+}
+
+/// `sheet.bead`: formed beads along straight sketch lines on a planar panel of a sheet.
+fn bead(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.bead";
+    let sketch = feature_sketch(s, p, cmd)?;
+    let curves = string_list(cmd, p, "curves")?;
+    if curves.is_empty() || curves.len() > solidcraft_doc::MAX_BEADS {
+        return Err(bad(cmd, format!("`curves` must list the beads' centrelines (1…{})", solidcraft_doc::MAX_BEADS)));
+    }
+    let shape = str_(p, "shape").map(str::to_string);
+    if !matches!(shape.as_deref(), None | Some("trapezoid")) {
+        return Err(bad(cmd, "`shape` is \"trapezoid\" (the only cross-section so far)"));
+    }
+    let depth = req_expr(cmd, p, "depth")?;
+    check_expr(s, &depth, Kind::Length, cmd, "depth")?;
+    let width = req_expr(cmd, p, "width")?;
+    check_expr(s, &width, Kind::Length, cmd, "width")?;
+    let angle = expr(p, "angle");
+    if let Some(e) = &angle {
+        check_expr(s, e, Kind::Angle, cmd, "angle")?;
+    }
+    let mut lengths = Vec::new();
+    for key in ["crown_width", "base_radius", "crown_radius", "end_length", "margin"] {
+        let e = expr(p, key);
+        if let Some(x) = &e {
+            check_expr(s, x, Kind::Length, cmd, key)?;
+        }
+        lengths.push(e);
+    }
+    if angle.is_some() && lengths.first().is_some_and(Option::is_some) {
+        return Err(bad(cmd, "give the flanks' `angle` or the `crown_width`, not both"));
+    }
+    let mut it = lengths.into_iter();
+    let mut next = || it.next().flatten();
+    let (crown_width, base_radius, crown_radius, end_length, margin) = (next(), next(), next(), next(), next());
+    add_feature(
+        s,
+        p,
+        FeatureKind::SheetBead {
+            sketch: SketchId(sketch),
+            curves,
+            shape,
+            depth,
+            width,
+            angle,
+            crown_width,
+            base_radius,
+            crown_radius,
+            end_length,
+            margin,
+            flip: bool_(p, "flip").unwrap_or(false),
+            body: str_(p, "body").map(BodyName::from),
+        },
+    )
 }
 
 fn path_flange(s: &mut Session, p: &Value) -> Result<Value> {
@@ -794,12 +1071,23 @@ fn path_flange(s: &mut Session, p: &Value) -> Result<Value> {
     )
 }
 
+fn tab(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.tab";
+    let sketch = feature_sketch(s, p, cmd)?;
+    let profiles = profiles(p, cmd)?;
+    add_feature(s, p, FeatureKind::SheetTab { sketch: SketchId(sketch), profiles, body: str_(p, "body").map(BodyName::from) })
+}
+
 fn unfold(s: &mut Session, p: &Value) -> Result<Value> {
-    add_feature(s, p, FeatureKind::SheetUnfold { body: str_(p, "body").map(BodyName::from), refold: false })
+    let fixed = match p.get("fixed") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(Position(vec3(v).ok_or_else(|| bad("sheet.unfold", "`fixed` must be a point [x, y, z]"))?)),
+    };
+    add_feature(s, p, FeatureKind::SheetUnfold { body: str_(p, "body").map(BodyName::from), refold: false, fixed })
 }
 
 fn refold(s: &mut Session, p: &Value) -> Result<Value> {
-    add_feature(s, p, FeatureKind::SheetUnfold { body: str_(p, "body").map(BodyName::from), refold: true })
+    add_feature(s, p, FeatureKind::SheetUnfold { body: str_(p, "body").map(BodyName::from), refold: true, fixed: None })
 }
 
 fn convert(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1004,14 +1292,37 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
             *slot = e.into();
         }
     }
+    let unfold_given = p.get("unfold_method").filter(|v| !v.is_null());
+    if let Some(method) = unfold_given {
+        let method = method.as_str().and_then(sheet::UnfoldMethod::parse);
+        rule.unfold_method = method.ok_or_else(|| bad(cmd, "`unfold_method` must be k_factor, deduction or allowance"))?.name().into();
+    }
     let mut notes = Vec::new();
     if let Some(entry) = picked {
+        // A library pick gives the rule a new thickness, and a 90° bend deduction or allowance is a
+        // chart's value for one thickness: the rule goes back to its K-factor (the pick's), unless
+        // the call says how it unfolds (#6794).
+        let by_chart = sheet::UnfoldMethod::parse(&rule.unfold_method).is_some_and(|m| m != sheet::UnfoldMethod::KFactor);
+        if by_chart && unfold_given.is_none() && expr(p, "unfold_value").is_none() {
+            rule.unfold_method = sheet::UnfoldMethod::KFactor.name().into();
+            rule.unfold_value.clear();
+            notes.push("the rule now unfolds from its K-factor: its 90° bend deduction or allowance was for the thickness it had".to_string());
+        }
         let (vals, _) = s.doc.param_values();
         library_k_and_radius(s, cmd, p, entry, &vals, &mut rule, &mut notes)?;
+    }
+    // A rule that unfolds from its K-factor keeps no 90° value: it saves as a rule did before the
+    // setting existed, and a later switch to a chart method starts from the K-factor it has then.
+    if sheet::UnfoldMethod::parse(&rule.unfold_method) == Some(sheet::UnfoldMethod::KFactor) {
+        rule.unfold_value.clear();
     }
     if let Some(shape) = p.get("corner_relief_shape").filter(|v| !v.is_null()) {
         let shape = shape.as_str().and_then(solidcraft_doc::sheet::ReliefShape::parse);
         rule.corner_relief_shape = shape.ok_or_else(|| bad(cmd, "`corner_relief_shape` must be notch, round, rectangular or tear"))?.name().into();
+    }
+    if let Some(shape) = p.get("bend_relief_shape").filter(|v| !v.is_null()) {
+        let shape = shape.as_str().and_then(sheet::BendReliefShape::parse);
+        rule.bend_relief_shape = shape.ok_or_else(|| bad(cmd, "`bend_relief_shape` must be rectangular, obround or tear"))?.name().into();
     }
     if let Some(display) = p.get("angle_display").filter(|v| !v.is_null()) {
         let display = display.as_str().and_then(sheet::AngleDisplay::parse);
@@ -1063,8 +1374,11 @@ fn library_k_and_radius(
         Some(m) => library::BendMethod::parse(m).ok_or_else(|| bad(cmd, "`bend_method` must be air, bottoming or coining"))?,
     };
     let v = s.doc.rule_values(vals, rule).map_err(|e| bad(cmd, e.to_string()))?;
+    // No estimate for a rule that unfolds from a 90° bend deduction or allowance: its K-factor is
+    // that value's, not the rule's `k_factor`.
     if expr(p, "k_factor").is_none()
         && !entry.given.k_factor
+        && sheet::UnfoldMethod::parse(&rule.unfold_method) == Some(sheet::UnfoldMethod::KFactor)
         && let Some(hardness) = entry.hardness
     {
         let r_over_t = v.bend_radius / v.thickness;
@@ -1273,6 +1587,40 @@ fn surface_flat_json(sk: &solidcraft_doc::SurfaceSheet) -> Value {
     if !bores.is_empty() {
         out["bores"] = Value::Array(bores);
     }
+    // Press-in hardware: what each mounting hole is for, where it is in the flat (as read).
+    let hardware: Vec<FlatHardware> = sk
+        .hardware_holes()
+        .into_iter()
+        .map(|h| FlatHardware {
+            feature: h.feature,
+            kind: kind_param(h.kind),
+            thread: h.thread.clone(),
+            length: h.length,
+            part: h.part.clone(),
+            position: [h.center.x, h.center.y],
+            // The reply gives the hole's diameter, as the table does: twice the radius the flat holds.
+            hole_diameter: h.radius * 2.0,
+        })
+        .collect();
+    if !hardware.is_empty() {
+        out["hardware"] = serde_json::to_value(hardware).unwrap_or(Value::Null);
+    }
+    // Formed beads: not in the outline (the blank is flat), pressed after cutting. Up out of the
+    // sheet's surface, the side the flat is drawn from.
+    let beads: Vec<Value> = sk
+        .beads
+        .iter()
+        .filter_map(|b| {
+            let o = sk.bead_outline(b).ok()?;
+            Some(json!({"feature": b.feature, "curve": b.curve, "direction": if b.far { "down" } else { "up" }, "start": pt(&o.start), "end": pt(&o.end),
+                "footprint": o.footprint.iter().map(pt).collect::<Vec<_>>(), "depth": b.depth, "width": b.width, "angle_deg": b.angle.to_degrees(),
+                "crown_width": o.crown_width, "crown_length": o.crown_length, "base_radius": b.base_radius, "crown_radius": b.crown_radius,
+                "end_length": b.end_length}))
+        })
+        .collect();
+    if !beads.is_empty() {
+        out["beads"] = Value::Array(beads);
+    }
     // Where stretches of a split edge bend to opposite sides, the blank is cut along their
     // junction: a cut with no width, from the bend line out, beside the outline.
     if !sk.slits.is_empty() {
@@ -1362,17 +1710,53 @@ pub enum DxfText {
     Etch,
 }
 
+/// The units the flat-pattern DXF is written in (the geometry of the part is in millimetres).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DxfUnits {
+    /// Millimetres: `$INSUNITS 4`, `$MEASUREMENT 1`.
+    #[default]
+    Millimetres,
+    /// Inches: `$INSUNITS 1`, `$MEASUREMENT 0`.
+    Inches,
+}
+
+impl DxfUnits {
+    /// The header's `$INSUNITS` (DXF: 1 inches, 4 millimetres).
+    pub fn insunits(self) -> i32 {
+        match self {
+            DxfUnits::Millimetres => 4,
+            DxfUnits::Inches => 1,
+        }
+    }
+    /// A length in millimetres in the drawing's units.
+    pub fn scale(self) -> f64 {
+        match self {
+            DxfUnits::Millimetres => 1.0,
+            DxfUnits::Inches => 1.0 / 25.4,
+        }
+    }
+}
+
 /// What `sheet.export_dxf` is asked for.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct DxfOptions {
+    /// The units the drawing's coordinates are written in (the geometry is in millimetres).
+    pub units: DxfUnits,
     pub curves: DxfCurves,
     pub text: DxfText,
     /// The height (mm) of the note beside each bend line, when it is to have one.
     pub bend_notes: Option<f64>,
     /// Leave the bend lines out (BEND_UP, BEND_DOWN), for a cutter that would cut them (#4314).
     pub no_bend_lines: bool,
+    /// Leave the markings out (the letters on TEXT/ETCH and the bend notes), for a cutter that
+    /// would etch them.
+    pub no_markings: bool,
     /// Everything on layer 0 instead of a layer for each role (#4314).
     pub one_layer: bool,
+    /// The height (mm) of the note beside each press-in hardware hole, on layer HARDWARE (#17752);
+    /// none: no notes, the default, so a file for a shop has the sheet and its holes only. Only
+    /// with layers by role, as the note has a layer of its own.
+    pub hardware_notes: Option<f64>,
 }
 
 /// The layer of a role: its AutoCAD colour index (1 red, 2 yellow, 3 green, 4 cyan, 5 blue,
@@ -1394,23 +1778,25 @@ fn dxf_layer(
         "ETCH" => (6, DxfLinetype::Continuous),
         "BEND_UP" => (1, DxfLinetype::Dashed),
         "BEND_DOWN" => (5, DxfLinetype::Dashed),
-        "BEND_NOTES" => (8, DxfLinetype::Continuous),
+        "BEND_NOTES" | "HARDWARE" => (8, DxfLinetype::Continuous),
+        "FORM_UP" => (1, DxfLinetype::Dashed),
+        "FORM_DOWN" => (5, DxfLinetype::Dashed),
         _ => (3, DxfLinetype::Continuous),
     };
     file.declare_layer(name, color, linetype, None)
 }
 
-/// A number in a bend note: at most three decimals, none when they are zeros (`90`, `2.5`).
-fn compact(v: f64) -> String {
-    let t = format!("{v:.3}");
+/// A number in a bend note: at most `digits` decimals, none when they are zeros (`90`, `2.5`).
+fn compact(v: f64, digits: usize) -> String {
+    let t = format!("{v:.digits$}");
     let t = t.trim_end_matches('0').trim_end_matches('.');
     if t.is_empty() || t == "-0" { "0".into() } else { t.into() }
 }
 
 /// The note beside a bend line, `B1 UP 90° R2.5` (number, direction, angle as `display` reads
 /// it, inner radius): as high as `height`, centred half a height beside the middle of the line,
-/// parallel to it and readable from below or from the right.
-fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::AngleDisplay) -> solidcraft_io::DxfShape {
+/// parallel to it and readable from below or from the right. The radius is in the drawing's units.
+fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::AngleDisplay, units: DxfUnits) -> solidcraft_io::DxfShape {
     let along = (b.end - b.start).normalized().unwrap_or(Vec2::X);
     let mut angle = along.angle().to_degrees();
     if angle > 90.0 + 1e-9 {
@@ -1419,24 +1805,53 @@ fn bend_note(b: &solidcraft_doc::sheet::BendInfo, height: f64, display: sheet::A
         angle += 180.0;
     }
     let beside = Vec2::from_angle(angle.to_radians()).perp();
+    let digits = match units {
+        DxfUnits::Millimetres => 3,
+        DxfUnits::Inches => 4,
+    };
     solidcraft_io::DxfShape::Text {
         at: (b.start + b.end) * 0.5 + beside * (height * 0.5),
         height,
         angle_deg: angle,
-        text: format!("B{} {} {}° R{}", b.index, if b.up { "UP" } else { "DOWN" }, compact(display.of(b.angle_deg)), compact(b.radius)),
+        text: format!(
+            "B{} {} {}° R{}",
+            b.index,
+            if b.up { "UP" } else { "DOWN" },
+            compact(display.of(b.angle_deg), 3),
+            compact(b.radius * units.scale(), digits)
+        ),
     }
 }
 
-/// A DXF (AutoCAD 2000, mm) of a sheet's flat pattern (#6748) on layers by role: OUTLINE (the
-/// outer contour of each piece), CUT (what is cut out inside it, and the loose pieces of a cut),
-/// TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES (when asked
-/// for), one layer per pocket depth, PERFORATION and ROLL. Inner contours are written before the
+/// The note beside a hardware hole: its thread, kind and a stud's or standoff's length, `M4 stud 10 mm`.
+fn hardware_note(h: &solidcraft_doc::sheet::SheetHardware) -> String {
+    let kind = h.kind.name().replace('_', " ");
+    match h.length {
+        Some(length) => format!("{} {kind} {} mm", h.thread, compact(length, 3)),
+        None => format!("{} {kind}", h.thread),
+    }
+}
+
+/// A DXF (AutoCAD 2000) of a sheet's flat pattern (#6748) on layers by role, in `o.units`:
+/// OUTLINE (the outer contour of each piece), CUT (what is cut out inside it, and the loose pieces
+/// of a cut), TEXT or ETCH (letters), BEND_UP and BEND_DOWN (dashed centre lines), BEND_NOTES
+/// (when asked for), one layer per pocket depth, PERFORATION, ROLL, and FORM_UP and FORM_DOWN
+/// (each formed bead's centreline and footprint, dashed). Inner contours are written before the
 /// outline, so a program that follows the file's order cuts inside-out. Free-form curves as
-/// `o.curves` says.
-fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -> Result<String> {
+/// `o.curves` says. A DXF profile writes it its own way: its layer, colour and linetype for each
+/// role, and the roles it turns off left out.
+fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions, profile: Option<&solidcraft_io::DxfExportProfile>) -> Result<String> {
     let sk = &sk.shown();
     let rule = s.doc.sheet_rule(Some(&sk.rule));
     let display = sheet::AngleDisplay::parse(&rule.angle_display).unwrap_or_default();
+    let mut beads = Vec::with_capacity(sk.beads.len());
+    for b in &sk.beads {
+        let line = sk.bead_outline(b)?;
+        // Where its note stands, when bend notes are asked for.
+        let note = o.bend_notes.map(|height| sk.bead_note(b, height)).transpose()?;
+        // Up out of the sheet's surface, the side the flat is drawn from.
+        beads.push(FlatBead { a: line.start, b: line.end, footprint: line.footprint, up: !b.far, depth: b.depth, width: b.width, note });
+    }
     let drawing = FlatDrawing {
         body: sk.body.clone(),
         regions: sk.regions.clone(),
@@ -1446,16 +1861,18 @@ fn surface_dxf(s: &Session, sk: &solidcraft_doc::SurfaceSheet, o: &DxfOptions) -
         bends: sk.bend_infos(),
         rolls: sk.roll_lines.iter().map(|l| (l.start, l.end)).collect(),
         slits: sk.slits.iter().map(|[a, b]| (*a, *b)).collect(),
+        hardware: sk.hardware_holes().into_iter().map(|h| (h.center, h.radius, hardware_note(h))).collect(),
         display,
         thickness: sk.thickness,
+        beads,
     };
-    drawing.dxf(o)
+    drawing.dxf(o, profile)
 }
 
 /// What a flat pattern's DXF draws: the flat material, the pockets machined in it, which of its
 /// loops are text, the perforation's holes, the bends, their notes' angles read as `display`, the
-/// rolls' lines (where each starts and ends, and its middle), and the cuts with no width along
-/// the junctions of split edges whose stretches bend to opposite sides.
+/// rolls' lines (where each starts and ends, and its middle), the cuts with no width along the
+/// junctions of split edges whose stretches bend to opposite sides, and the formed beads.
 struct FlatDrawing {
     body: String,
     regions: Vec<solidcore_record::Region2>,
@@ -1465,12 +1882,28 @@ struct FlatDrawing {
     bends: Vec<solidcraft_doc::sheet::BendInfo>,
     rolls: Vec<(Vec2, Vec2)>,
     slits: Vec<(Vec2, Vec2)>,
+    /// Each press-in hardware hole: its centre, radius and the note that names it (#17752).
+    hardware: Vec<(Vec2, f64, String)>,
     display: sheet::AngleDisplay,
     thickness: f64,
+    beads: Vec<FlatBead>,
+}
+
+/// A formed bead in the flat: its centreline from `a` to `b`, its footprint, whether it stands
+/// up (toward the side the flat is drawn from), its depth and width, and where its note stands
+/// (its anchor, and its angle in radians), when notes are asked for.
+struct FlatBead {
+    a: Vec2,
+    b: Vec2,
+    footprint: [Vec2; 4],
+    up: bool,
+    depth: f64,
+    width: f64,
+    note: Option<(Vec2, f64)>,
 }
 
 impl FlatDrawing {
-    fn dxf(&self, o: &DxfOptions) -> Result<String> {
+    fn dxf(&self, o: &DxfOptions, profile: Option<&solidcraft_io::DxfExportProfile>) -> Result<String> {
         use solidcraft_io::{DxfFile, DxfPathStyle, DxfShape};
         let (regions, pockets, letters) = (&self.regions, &self.pockets, &self.letters);
         let pocket_layer = |p: &solidcraft_doc::sheet::SheetPocket| {
@@ -1481,7 +1914,11 @@ impl FlatDrawing {
             } else {
                 "INTERNAL"
             };
-            format!("POCKET_{side}_Z{:.6}_TO_{:.6}_MM", p.z0, p.z1)
+            let (suffix, z0, z1) = match o.units {
+                DxfUnits::Millimetres => ("MM", p.z0, p.z1),
+                DxfUnits::Inches => ("IN", p.z0 * o.units.scale(), p.z1 * o.units.scale()),
+            };
+            format!("POCKET_{side}_Z{z0:.6}_TO_{z1:.6}_{suffix}")
         };
         // A piece inside another piece's hole (a letter's counter, the middle of a ring cut) is no
         // outline of the sheet but a loose piece the cut leaves.
@@ -1504,6 +1941,8 @@ impl FlatDrawing {
         let mut loops: Vec<(Pass, &solidcore_record::Loop2, String)> = Vec::new();
         for (j, r) in regions.iter().enumerate() {
             for (k, lp) in std::iter::once(&r.outer).chain(&r.holes).enumerate() {
+                // A letter's cut contour is a marking; a piece whose outer contour is the sheet's own
+                // outline stays.
                 let (pass, layer) = if k == 0 && !nested.get(j).copied().unwrap_or(false) {
                     (Pass::Outline, "OUTLINE")
                 } else if letters.is_letter(lp) {
@@ -1514,6 +1953,9 @@ impl FlatDrawing {
                 } else {
                     (Pass::Cut, "CUT")
                 };
+                if o.no_markings && (layer == "TEXT" || layer == "ETCH") {
+                    continue;
+                }
                 loops.push((pass, lp, layer.to_string()));
             }
         }
@@ -1521,6 +1963,9 @@ impl FlatDrawing {
             let layer = pocket_layer(p);
             for lp in std::iter::once(&p.region.outer).chain(&p.region.holes) {
                 // Text machined to a depth is a marking, whatever its depth.
+                if o.no_markings && letters.is_letter(lp) {
+                    continue;
+                }
                 if letters.is_letter(lp) {
                     loops.push((Pass::Etch, lp, "ETCH".to_string()));
                 } else {
@@ -1531,8 +1976,15 @@ impl FlatDrawing {
         loops.sort_by_key(|(pass, ..)| *pass);
         // Slits (two lines each) and rolls (one line each) are planned like bends: at most two
         // entities and a bend's few values apiece.
-        let lines = self.bends.len().saturating_add(self.rolls.len()).saturating_add(self.slits.len().saturating_mul(2));
-        let mut file = DxfFile::for_flat_pattern_export(loops.len(), lines, self.perforation.len())?;
+        // A bead's five lines and its note fit in four bends' allowance.
+        let lines = self
+            .bends
+            .len()
+            .saturating_add(self.rolls.len())
+            .saturating_add(self.slits.len().saturating_mul(2))
+            .saturating_add(self.hardware.len())
+            .saturating_add(self.beads.len().saturating_mul(4));
+        let mut file = DxfFile::for_flat_pattern_export_units(loops.len(), lines, self.perforation.len(), o.units.insunits())?;
         if !o.one_layer {
             // These four baseline roles exist even without matching geometry. The
             // compatibility writer keeps their historical sorted table order.
@@ -1540,6 +1992,13 @@ impl FlatDrawing {
                 dxf_layer(&mut file, name, false)?;
             }
         }
+        // In the file's units: every length scaled before it is written; the notes' text and the
+        // layers' names read in those units.
+        let k = o.units.scale();
+        let push = |file: &mut DxfFile<DxfShape>, layer: solidcraft_io::DxfLayerId, shape: DxfShape| -> Result<()> {
+            file.push(layer, shape.scaled(k), None)?;
+            Ok(())
+        };
         for (i, (_, h, layer)) in loops.into_iter().enumerate() {
             let style = match o.curves {
                 DxfCurves::Exact => DxfPathStyle::Exact,
@@ -1550,7 +2009,7 @@ impl FlatDrawing {
             if !shapes.is_empty() {
                 let layer = dxf_layer(&mut file, &layer, o.one_layer)?;
                 for shape in shapes {
-                    file.push(layer, shape, None)?;
+                    push(&mut file, layer, shape)?;
                 }
             }
         }
@@ -1558,23 +2017,57 @@ impl FlatDrawing {
         // back, as the outline would run round a cut with no width.
         for (a, b) in &self.slits {
             let layer = dxf_layer(&mut file, "OUTLINE", o.one_layer)?;
-            file.push(layer, DxfShape::Line(*a, *b), None)?;
-            file.push(layer, DxfShape::Line(*b, *a), None)?;
+            push(&mut file, layer, DxfShape::Line(*a, *b))?;
+            push(&mut file, layer, DxfShape::Line(*b, *a))?;
         }
         for b in &self.bends {
             if !o.no_bend_lines {
                 let layer = dxf_layer(&mut file, if b.up { "BEND_UP" } else { "BEND_DOWN" }, o.one_layer)?;
-                file.push(layer, DxfShape::Line(b.start, b.end), None)?;
+                push(&mut file, layer, DxfShape::Line(b.start, b.end))?;
             }
-            if let Some(height) = o.bend_notes {
+            if let Some(height) = o.bend_notes
+                && !o.no_markings
+            {
                 let layer = dxf_layer(&mut file, "BEND_NOTES", o.one_layer)?;
-                file.push(layer, bend_note(b, height, self.display), None)?;
+                push(&mut file, layer, bend_note(b, height, self.display, o.units))?;
             }
         }
         if !self.perforation.is_empty() {
             let layer = dxf_layer(&mut file, "PERFORATION", o.one_layer)?;
             for (c, r) in &self.perforation {
-                file.push(layer, DxfShape::Circle { c: *c, r: *r }, None)?;
+                push(&mut file, layer, DxfShape::Circle { c: *c, r: *r })?;
+            }
+        }
+        // The hardware's notes, each beside its hole on layer HARDWARE, as a bend's note is.
+        if let Some(height) = o.hardware_notes {
+            for (c, r, text) in &self.hardware {
+                let layer = dxf_layer(&mut file, "HARDWARE", o.one_layer)?;
+                let at = solidcraft_kernel::affine::note_beside((*c, *r), height);
+                push(&mut file, layer, DxfShape::Text { at, height, angle_deg: 0.0, text: text.clone() })?;
+            }
+        }
+        // Formed beads: the centreline and the footprint, dashed, and a note `BEAD UP D2 W10`.
+        for b in &self.beads {
+            let layer = dxf_layer(&mut file, if b.up { "FORM_UP" } else { "FORM_DOWN" }, o.one_layer)?;
+            push(&mut file, layer, DxfShape::Line(b.a, b.b))?;
+            for (i, corner) in b.footprint.iter().enumerate() {
+                let next = b.footprint.get((i + 1) % 4).copied().unwrap_or(*corner);
+                push(&mut file, layer, DxfShape::Line(*corner, next))?;
+            }
+            if let (Some(height), Some((at, angle))) = (o.bend_notes, b.note) {
+                // Depth and width in the file's units, as a bend note's radius.
+                let digits = match o.units {
+                    DxfUnits::Millimetres => 3,
+                    DxfUnits::Inches => 4,
+                };
+                let text = format!(
+                    "BEAD {} D{} W{}",
+                    if b.up { "UP" } else { "DOWN" },
+                    compact(b.depth * o.units.scale(), digits),
+                    compact(b.width * o.units.scale(), digits)
+                );
+                let notes = dxf_layer(&mut file, "BEND_NOTES", o.one_layer)?;
+                push(&mut file, notes, DxfShape::Text { at, height, angle_deg: angle.to_degrees(), text })?;
             }
         }
         // A roll's lines on a layer of their own, so that a reader of the bend layers doesn't
@@ -1582,10 +2075,24 @@ impl FlatDrawing {
         if !o.no_bend_lines && !self.rolls.is_empty() {
             let layer = dxf_layer(&mut file, "ROLL", o.one_layer)?;
             for (a, b) in &self.rolls {
-                file.push(layer, DxfShape::Line(*a, *b), None)?;
+                push(&mut file, layer, DxfShape::Line(*a, *b))?;
             }
         }
-        Ok(solidcraft_io::write_dxf_file(&file)?)
+        // The drawing is made on the standard layers either way; a profile restyles it as it is
+        // written.
+        Ok(match profile {
+            None => solidcraft_io::write_dxf_file(&file)?,
+            Some(profile) => solidcraft_io::write_dxf_file_as(&file, profile)?,
+        })
+    }
+}
+
+/// A DXF export's `units`: millimetres or inches, in any case.
+pub(crate) fn dxf_units(t: &str) -> Option<DxfUnits> {
+    match t.to_ascii_lowercase().as_str() {
+        "mm" => Some(DxfUnits::Millimetres),
+        "inches" => Some(DxfUnits::Inches),
+        _ => None,
     }
 }
 
@@ -1625,6 +2132,10 @@ pub(crate) fn dxf_note_height(mm: f64) -> Option<f64> {
 
 /// What a `sheet.export_dxf` call asks for; a value it cannot use is refused.
 fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
+    let units = match str_(p, "units") {
+        None => DxfUnits::Millimetres,
+        Some(v) => dxf_units(v).ok_or_else(|| bad(cmd, "`units` must be mm or inches"))?,
+    };
     let curves = match str_(p, "curves") {
         None => DxfCurves::Exact,
         Some(v) => dxf_curves(v).ok_or_else(|| bad(cmd, "`curves` must be exact or arcs"))?,
@@ -1647,11 +2158,44 @@ fn dxf_options(p: &Value, cmd: &str) -> Result<DxfOptions> {
         Some(Value::Bool(false)) => true,
         Some(_) => return Err(bad(cmd, "`bend_lines` must be true or false")),
     };
+    let no_markings = match p.get("markings").filter(|v| !v.is_null()) {
+        None | Some(Value::Bool(true)) => false,
+        Some(Value::Bool(false)) => true,
+        Some(_) => return Err(bad(cmd, "`markings` must be true or false")),
+    };
     let one_layer = match p.get("layers").filter(|v| !v.is_null()) {
         None => false,
         Some(v) => v.as_str().and_then(dxf_layers).ok_or_else(|| bad(cmd, "`layers` must be roles or single"))?,
     };
-    Ok(DxfOptions { curves, text, bend_notes, no_bend_lines, one_layer })
+    // Press-in hardware is noted beside its hole only when asked, and on a layer of its own: with
+    // the layers by role.
+    let hardware_notes = match p.get("hardware_notes").filter(|v| !v.is_null()) {
+        None | Some(Value::Bool(false)) => None,
+        Some(Value::Bool(true)) => (!one_layer).then_some(height),
+        Some(_) => return Err(bad(cmd, "`hardware_notes` must be true or false")),
+    };
+    Ok(DxfOptions { units, curves, text, bend_notes, no_bend_lines, no_markings, one_layer, hardware_notes })
+}
+
+/// A `sheet.export_dxf` call's `profile`: a profile file's path, or the profile itself as an
+/// object (`docs/formats/dxf-profiles.md`). A profile that cannot be read or used as it stands is
+/// refused, and so is one together with `layers: single`, which has no layers to style.
+fn dxf_profile(p: &Value, cmd: &str, options: &DxfOptions) -> Result<Option<solidcraft_io::DxfExportProfile>> {
+    use solidcraft_io::DxfExportProfile;
+    let profile = match p.get("profile").filter(|v| !v.is_null()) {
+        None => return Ok(None),
+        Some(Value::String(path)) if !path.trim().is_empty() => {
+            let bytes =
+                solidcraft_io::vfs::read(path, solidcraft_io::MAX_DXF_PROFILE_BYTES).map_err(|e| bad(cmd, format!("`profile` {path}: {e}")))?;
+            DxfExportProfile::read(&bytes).map_err(|e| bad(cmd, format!("`profile` {path}: {e}")))?
+        }
+        Some(given @ Value::Object(_)) => DxfExportProfile::from_json(given).map_err(|e| bad(cmd, format!("`profile`: {e}")))?,
+        Some(_) => return Err(bad(cmd, "`profile` must be a DXF profile file's path or a profile object")),
+    };
+    if options.one_layer {
+        return Err(bad(cmd, "`layers: single` writes everything on layer 0 and a `profile` gives each role its layer: use one of them"));
+    }
+    Ok(Some(profile))
 }
 
 /// The files of an export of every sheet body: `path` with `-<body>` before its extension
@@ -1683,6 +2227,7 @@ fn body_paths(path: &str, bodies: &[String]) -> Vec<String> {
 fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sheet.export_dxf";
     let options = dxf_options(p, cmd)?;
+    let profile = dxf_profile(p, cmd, &options)?;
     let per_body = match p.get("per_body").filter(|v| !v.is_null()) {
         None => false,
         Some(Value::Bool(b)) => *b,
@@ -1701,7 +2246,7 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
         let mut made: Vec<(String, String, usize)> = Vec::new();
         for sk in &st.surface_sheets {
             sk.flat_matches_body()?;
-            made.push((sk.body.clone(), surface_dxf(s, sk, &options)?, sk.bends.len()));
+            made.push((sk.body.clone(), surface_dxf(s, sk, &options, profile.as_ref())?, sk.bends.len()));
         }
         let paths = path.map(|path| body_paths(path, &made.iter().map(|(body, ..)| body.clone()).collect::<Vec<_>>()));
         let mut files = Vec::new();
@@ -1717,7 +2262,7 @@ fn export_dxf(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let sk = surfaces_of(s, p, cmd)?;
     sk.flat_matches_body()?;
-    let text = surface_dxf(s, &sk, &options)?;
+    let text = surface_dxf(s, &sk, &options, profile.as_ref())?;
     let bends = sk.bends.len();
     let reply = if let Some(path) = path {
         solidcraft_io::vfs::write(path, text.as_bytes()).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
@@ -1806,6 +2351,9 @@ mod face_names_tests;
 #[cfg(test)]
 #[path = "sheet_parity_tests.rs"]
 mod parity_tests;
+#[cfg(test)]
+#[path = "sheet_surface_tab_tests.rs"]
+mod surface_tab_tests;
 #[cfg(test)]
 #[path = "sheet_upgrade_tests.rs"]
 mod upgrade_tests;

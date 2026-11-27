@@ -500,7 +500,7 @@ fn move_inputs(h: &Harness) -> Vec<SelInput> {
 /// A fresh Move window's values, with one field replaced. Functional record update (`..base`)
 /// is a struct feature, so an enum variant has to spell every field out.
 fn moved(x: &str, y: &str, angle: &str) -> Mod {
-    Mod::Move { x: x.into(), y: y.into(), angle: angle.into(), copy: false }
+    Mod::Move { x: x.into(), y: y.into(), angle: angle.into(), copy: false, z: "0 mm".into(), three_d: false }
 }
 
 #[test]
@@ -515,7 +515,7 @@ fn the_command_now_has_a_toolbar_placement_and_opens_a_window() {
     h.step(&json!({"start": "sketch.move"})).unwrap();
     let d = h.app.dialog.as_ref().expect("sketch.move opens a tool window");
     assert!(matches!(d.kind, Kind::SketchModify(Mod::Move { .. })), "{:?}", d.kind);
-    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), vec!["Entities", "Center"]);
+    assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), vec!["Entities", "Center", "From", "To"]);
     // Opening the window commits nothing, and the context menu's engine error is gone.
     assert_eq!(curve_ids(&h).len(), before);
     assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{:?}", h.app.status);
@@ -535,7 +535,7 @@ fn the_context_menu_item_fills_the_window_from_the_selection() {
 fn the_typed_distances_and_angle_reach_the_command() {
     let h = rectangle();
     let inputs = move_inputs(&h);
-    let k = Mod::Move { x: "10 mm".into(), y: "-4 mm".into(), angle: "90 deg".into(), copy: false };
+    let k = Mod::Move { x: "10 mm".into(), y: "-4 mm".into(), angle: "90 deg".into(), copy: false, z: "0 mm".into(), three_d: false };
     let out = commands(&h.app, &k, &inputs, &serde_json::Map::new()).unwrap();
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].0, "sketch.move");
@@ -551,7 +551,7 @@ fn an_expression_and_a_bare_angle_are_evaluated() {
     let mut h = rectangle();
     h.app.run("parameters.add", json!({"name": "step", "expression": "7 mm", "unit": "mm"})).unwrap();
     let inputs = move_inputs(&h);
-    let k = Mod::Move { x: "step * 2".into(), y: String::new(), angle: "45".into(), copy: false };
+    let k = Mod::Move { x: "step * 2".into(), y: String::new(), angle: "45".into(), copy: false, z: "0 mm".into(), three_d: false };
     let out = commands(&h.app, &k, &inputs, &serde_json::Map::new()).unwrap();
     assert_eq!(out[0].1["translate"], json!([14.0, 0.0]));
     assert!((out[0].1["angle"].as_f64().unwrap() - 45.0).abs() < 1e-9, "{}", out[0].1["angle"]);
@@ -577,7 +577,14 @@ fn the_window_moves_the_rectangle_and_the_copy_row_leaves_the_original_behind() 
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
-        d.kind = Kind::SketchModify(Mod::Move { x: "30 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: true });
+        d.kind = Kind::SketchModify(Mod::Move {
+            x: "30 mm".into(),
+            y: "0 mm".into(),
+            angle: "0 deg".into(),
+            copy: true,
+            z: "0 mm".into(),
+            three_d: false,
+        });
     }
     // A frame with the picks in place: the canvas value box takes focus on the frame after a
     // pick, and Enter only applies once it has had it.
@@ -591,6 +598,99 @@ fn the_window_moves_the_rectangle_and_the_copy_row_leaves_the_original_behind() 
     let xs: Vec<f64> = sk.points.iter().map(|p| p.pos.x).collect();
     assert!(xs.iter().any(|x| x.abs() < 1e-6), "the original stays at x = 0: {xs:?}");
     assert!(xs.iter().any(|x| (x - 50.0).abs() < 1e-6), "the copy's far corner is at x = 50: {xs:?}");
+}
+
+/// #21235: Point to Point. With a From and a To point picked, X and Y follow To minus From, and
+/// OK moves the picked entities so From lands on To. Without them, the typed X and Y stand.
+#[test]
+fn the_move_window_moves_from_one_picked_point_to_another() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    // Clear of the sketch origin, which would hold a corner drawn on it.
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [30, 20]})).unwrap();
+    let rect = curve_ids(&h);
+    h.app.run("sketch.point", json!({"point": [50, 40], "id": "target"})).unwrap();
+    let target = "target".to_string();
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    let corner = {
+        let st = h.app.session.model.state();
+        let sk = &st.sketch(sid).unwrap().sketch;
+        let p = sk.points.iter().position(|p| (p.pos - solidcore_record::Vec2::new(10.0, 10.0)).len2() < 1e-18).unwrap();
+        sk.points[p].id.clone()
+    };
+    h.step(&json!({"start": "sketch.move"})).unwrap();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = rect.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
+        // A typed step first: From and To take over from it once both are picked.
+        d.kind = Kind::SketchModify(moved("7 mm", "7 mm", "0 deg"));
+        d.inputs[2].items = vec![Sel::SketchPoint { id: corner }];
+        d.inputs[3].items = vec![Sel::SketchPoint { id: target }];
+    }
+    h.frames(2);
+    let d = h.app.dialog.as_ref().unwrap();
+    let Kind::SketchModify(k @ Mod::Move { x, y, .. }) = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!((x.as_str(), y.as_str()), ("40 mm", "30 mm"), "X and Y show To - From");
+    let out = commands(&h.app, k, &d.inputs, &serde_json::Map::new()).unwrap();
+    assert_eq!(out[0].1["translate"], json!([40.0, 30.0]));
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "Enter applies and closes the window: {:?}", h.app.status);
+    let st = h.app.session.model.state();
+    let sk = &st.sketch(sid).unwrap().sketch;
+    let at: Vec<solidcore_record::Vec2> = sk.points.iter().map(|p| p.pos).collect();
+    assert!(
+        at.iter().filter(|p| (**p - solidcore_record::Vec2::new(50.0, 40.0)).len2() < 1e-12).count() >= 2,
+        "the corner lands on the To point: {at:?}"
+    );
+    assert!(at.iter().any(|p| (*p - solidcore_record::Vec2::new(70.0, 50.0)).len2() < 1e-12), "the far corner moved with it: {at:?}");
+}
+
+/// #19523: the Move/Copy window showed nothing until OK, so a user could not see where the
+/// picked entities would land before committing the move. The window previews the move: the
+/// entities are drawn where they will be, and the design itself is untouched until OK.
+#[test]
+fn the_move_window_previews_where_the_entities_will_land() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    // Clear of the sketch origin: a rectangle drawn from the origin keeps a corner tied to it,
+    // and the solver pulls that corner back after the move.
+    let made = h.app.run("sketch.rectangle.two_point", json!({"p0": [10, 10], "p1": [30, 20]})).unwrap();
+    let corners: Vec<String> = made["corners"].as_object().into_iter().flatten().filter_map(|(_, v)| v.as_str().map(str::to_string)).collect();
+    assert_eq!(corners.len(), 4, "{made}");
+    h.settle();
+    let sid = h.app.session.active_sketch.unwrap();
+    h.step(&json!({"start": "sketch.move"})).unwrap();
+    // Read the ids before the dialog is borrowed mutably: `curve_ids` borrows the harness.
+    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.inputs[0].items = picks;
+        d.kind = Kind::SketchModify(Mod::Move {
+            x: "30 mm".into(),
+            y: "0 mm".into(),
+            angle: "0 deg".into(),
+            copy: false,
+            z: "0 mm".into(),
+            three_d: false,
+        });
+    }
+    // The preview runs on a worker: frames until it has drawn the moved entities.
+    h.step(&json!({"until": {"count": {"name": "sketch_preview_curves", "value": 4}}})).unwrap();
+    // The preview draws the rectangle where the move will leave it: 30 mm further along x.
+    let preview = h.app.preview.sketches.first().expect("the move is previewed");
+    let xs: Vec<f64> = preview.sketch.sketch.points.iter().map(|p| p.pos.x).collect();
+    assert!(
+        xs.iter().any(|x| (x - 40.0).abs() < 1e-6) && xs.iter().any(|x| (x - 60.0).abs() < 1e-6),
+        "the preview shows the rectangle 30 mm along x: {xs:?}"
+    );
+    // The design itself is untouched until OK: the rectangle is still where it was drawn.
+    let now = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    assert_eq!(now.curves.len(), 4, "the preview adds no curve");
+    let xs: Vec<f64> = now.points.iter().filter(|p| corners.contains(&p.id)).map(|p| p.pos.x).collect();
+    assert_eq!(xs.len(), 4, "{xs:?}");
+    assert!(xs.iter().all(|x| (*x - 10.0).abs() < 1e-6 || (*x - 30.0).abs() < 1e-6), "the rectangle has not moved: {xs:?}");
 }
 
 #[test]
@@ -611,7 +711,14 @@ fn a_plain_move_takes_the_geometry_with_it() {
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
-        d.kind = Kind::SketchModify(Mod::Move { x: "0 mm".into(), y: "5 mm".into(), angle: "0 deg".into(), copy: false });
+        d.kind = Kind::SketchModify(Mod::Move {
+            x: "0 mm".into(),
+            y: "5 mm".into(),
+            angle: "0 deg".into(),
+            copy: false,
+            z: "0 mm".into(),
+            three_d: false,
+        });
     }
     // A frame with the picks in place: the canvas value box takes focus on the frame after a
     // pick, and Enter only applies once it has had it.
@@ -639,7 +746,14 @@ fn a_move_that_lets_go_of_the_origin_says_so_and_offers_undo() {
     {
         let d = h.app.dialog.as_mut().unwrap();
         d.inputs[0].items = picks;
-        d.kind = Kind::SketchModify(Mod::Move { x: "15 mm".into(), y: "0 mm".into(), angle: "0 deg".into(), copy: false });
+        d.kind = Kind::SketchModify(Mod::Move {
+            x: "15 mm".into(),
+            y: "0 mm".into(),
+            angle: "0 deg".into(),
+            copy: false,
+            z: "0 mm".into(),
+            three_d: false,
+        });
     }
     h.frames(2);
     h.step(&json!({"key": "Enter"})).unwrap();
@@ -735,6 +849,119 @@ fn two_sided_offset_shows_a_dimension_for_each_distance() {
     let first = crate::scenario::handle_at("arrow").expect("Distance stays on the sketch");
     let second = crate::scenario::handle_at("arrow2").expect("Distance 2 gets its own dimension");
     assert!(first.distance(second) > 20.0, "the two dimensions sit on opposite sides: {first:?} {second:?}");
+}
+
+#[test]
+fn offset_takes_no_curve_on_a_corner_of_a_closed_shape_until_a_pick_opens_it() {
+    use crate::sketch_modify_ui::candidate;
+    use crate::viewport::Hit;
+    // An arch: a rectangle with an arc across its top line, three curves at each top corner.
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [-10, -20], "p1": [10, 0]})).unwrap();
+    let arc = h.app.run("sketch.arc.three_point", json!({"start": [10, 0], "end": [-10, 0], "through": [0, 6.2]})).unwrap()["curves"][0]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    h.settle();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let line = |h: &Harness, at: fn(solidcore_record::Vec2) -> bool| {
+        let st = h.app.session.model.state();
+        let sk = &st.sketch(sketch).unwrap().sketch;
+        let found = sk
+            .curves
+            .iter()
+            .find(|c| matches!(c.kind, solidcraft_engine::sketch::CurveKind::Line { a, b } if at(sk.points[a].pos) && at(sk.points[b].pos)));
+        found.unwrap().id.clone()
+    };
+    let top = line(&h, |p| p.y.abs() < 1e-6);
+    let left = line(&h, |p| (p.x + 10.0).abs() < 1e-6);
+    let right = line(&h, |p| (p.x - 10.0).abs() < 1e-6);
+    h.step(&json!({"start": "sketch.offset"})).unwrap();
+    let offered = |h: &Harness, id: &str| {
+        let hit = Hit::SketchCurve { sketch, id: id.to_owned(), straight: true, point: solidcore_record::Vec3::ZERO };
+        candidate(h.app.dialog.as_ref().unwrap(), &h.app.session, &hit).is_some()
+    };
+    let click =
+        |h: &mut Harness, id: &str| h.app.dialog.as_mut().unwrap().inputs[0].toggle(vec![Sel::SketchCurve { id: id.to_owned(), sketch: None }]);
+
+    click(&mut h, &left);
+    assert!(offered(&h, &arc), "one side closes nothing, so the arc is still offered");
+    click(&mut h, &top);
+    // The left and top lines close the rectangle (#14788).
+    assert!(!offered(&h, &arc), "a curve on two corners of the closed rectangle neither highlights nor picks");
+    assert!(offered(&h, &right), "an unpicked line of the rectangle is part of the shape");
+    assert!(offered(&h, &top), "a picked line can be clicked to take it out");
+    click(&mut h, &top);
+    assert!(offered(&h, &arc), "taking the top line out opens the shape again");
+}
+
+/// Picks that close a shape refuse only a curve that meets that shape at a corner: the curves of
+/// shapes apart from it still join the same Offset.
+#[test]
+fn offset_takes_two_separate_rectangles_and_a_circle_into_one_offset() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [-30, -10], "p1": [-10, 10]})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [10, -10], "p1": [30, 10]})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [0, 25], "radius": 5})).unwrap();
+    // A line off the first rectangle's top right corner.
+    h.app.run("sketch.line", json!({"points": [[-10, 10], [-10, 25]], "ids": ["spur"]})).unwrap();
+    h.settle();
+    let own = curve_ids(&h).len();
+    h.step(&json!({"start": "sketch.offset"})).unwrap();
+    let picked = |h: &Harness| h.app.dialog.as_ref().unwrap().inputs[0].items.len();
+
+    // Chain is on, so one line closes each rectangle.
+    h.step(&json!({"click": {"sketch": [30, 3]}})).unwrap();
+    assert_eq!(picked(&h), 1);
+    h.step(&json!({"click": {"sketch": [-30, 3]}})).unwrap();
+    assert_eq!(picked(&h), 2, "a second, separate rectangle joins the Offset");
+    h.step(&json!({"click": {"sketch": [5, 25]}})).unwrap();
+    assert_eq!(picked(&h), 3, "a circle joins the Offset");
+    h.step(&json!({"click": {"sketch": [-10, 18]}})).unwrap();
+    assert_eq!(picked(&h), 3, "a line on a corner of a closed rectangle does not");
+
+    h.frames(2);
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
+    assert_eq!(curve_ids(&h).len(), own + 9, "both rectangles and the circle have a copy");
+    let state = h.app.session.model.state();
+    let sketch = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+    let chains: Vec<(usize, bool)> = sketch.offsets.iter().map(|o| (o.sources.len(), o.closed)).collect();
+    assert_eq!(chains, [(4, true), (4, true), (1, true)], "each shape is one closed chain");
+}
+
+/// A circle closes a shape of its own with no corner, so it keeps nothing out of the Offset.
+#[test]
+fn offset_takes_other_curves_after_a_circle_or_with_chain_off() {
+    use crate::sketch_modify_ui::candidate;
+    use crate::viewport::Hit;
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [0, 25], "radius": 5})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [-10, -10], "p1": [10, 10]})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[20, 0], [30, 0]], "ids": ["apart"]})).unwrap();
+    h.settle();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let all = curve_ids(&h);
+    h.step(&json!({"start": "sketch.offset"})).unwrap();
+    let refused = |h: &Harness| -> Vec<String> {
+        let d = h.app.dialog.as_ref().unwrap();
+        let hit = |id: &String| Hit::SketchCurve { sketch, id: id.clone(), straight: true, point: solidcore_record::Vec3::ZERO };
+        all.iter().filter(|id| candidate(d, &h.app.session, &hit(id)).is_none()).cloned().collect()
+    };
+    let pick = |h: &mut Harness, ids: &[String]| {
+        h.app.dialog.as_mut().unwrap().inputs[0].items = ids.iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
+    };
+    pick(&mut h, &all[..1]);
+    assert!(refused(&h).is_empty(), "a picked circle refuses nothing");
+    if let Kind::SketchModify(Mod::Offset { chain, .. }) = &mut h.app.dialog.as_mut().unwrap().kind {
+        *chain = false;
+    }
+    pick(&mut h, &all[1..5]);
+    assert!(refused(&h).is_empty(), "with Chain off, four picked lines that close refuse no curve apart from them");
 }
 
 #[test]
@@ -1218,4 +1445,30 @@ fn mirror_sends_an_origin_axis_outside_the_sketch_plane_for_its_projection() {
         (mirrored(start, -10.0, 3.0) && mirrored(end, -15.0, 8.0)) || (mirrored(start, -15.0, 8.0) && mirrored(end, -10.0, 3.0)),
         "{start:?} {end:?}"
     );
+}
+
+/// #18448: X (and the menu's Normal / Construction) switches a selected point to construction,
+/// and again back; the point is drawn and saved as such, and the sketch origin is left alone.
+#[test]
+fn construction_switches_a_selected_point_and_the_menu_offers_it() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.point", json!({"point": [5, 5], "id": "guide"})).unwrap();
+    h.settle();
+    let is_construction = |h: &Harness, id: &str| {
+        let sid = h.app.session.active_sketch.unwrap();
+        let st = h.app.session.model.state();
+        st.sketch(sid).unwrap().sketch.points.iter().find(|p| p.id == id).unwrap().construction
+    };
+    h.app.session.selection = vec![Sel::SketchPoint { id: "guide".into() }];
+    let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    assert!(items.iter().any(|i| i.id == "sketch.construction"), "{:?}", items.iter().map(|i| i.id.clone()).collect::<Vec<_>>());
+    crate::sketch_palette::toggle_construction(&mut h.app);
+    assert!(is_construction(&h, "guide"));
+    // The same key turns it back, and the origin alone is not a selection it acts on.
+    crate::sketch_palette::toggle_construction(&mut h.app);
+    assert!(!is_construction(&h, "guide"));
+    h.app.session.selection = vec![Sel::SketchPoint { id: "origin".into() }];
+    let items = crate::context_menu::items(&h.app, &crate::context_menu::Target::Viewport);
+    assert!(!items.iter().any(|i| i.id == "sketch.construction"), "the origin is not offered Normal / Construction");
 }

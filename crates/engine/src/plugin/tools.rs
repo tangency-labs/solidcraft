@@ -3,7 +3,7 @@
 //! in words an agent can act on: which plugin, which grant and how to approve it, or which host
 //! import a `read` entry was refused. A refusal is an error, never a prompt.
 use super::*;
-use crate::schema::plugin::{PluginTool, PluginToolKind};
+use crate::schema::plugin::{PluginTool, PluginToolKind, RunParams};
 
 /// How a person approves a grant a plugin lacks.
 pub const APPROVE: &str = "approve it in Preferences › Plugins by installing the plugin again and allowing it, \
@@ -32,7 +32,7 @@ pub fn tools(session: &mut Session, name: Option<&str>) -> Vec<PluginTool> {
         session.plugin_state.register_discovered(id.clone(), folder.clone());
         for entry in &runtime.entries {
             let (kind, input_schema) = match entry.kind {
-                EntryKind::Command => (PluginToolKind::Command, craft_plugin::strict_input_schema(&entry.input_schema)),
+                EntryKind::Command => (PluginToolKind::Command, tool_input(entry)),
                 EntryKind::Exporter => (PluginToolKind::Exporter, format_schema(entry)),
                 EntryKind::Importer => (PluginToolKind::Importer, format_schema(entry)),
             };
@@ -72,12 +72,11 @@ pub(super) fn describe(session: &Session, id: &str) -> Result<Option<Value>> {
     let Some(entry) = runtime.entries.iter().find(|e| e.name == name) else { return Ok(None) };
     Ok(Some(match entry.kind {
         EntryKind::Command => {
-            let inputs = craft_plugin::strict_input_schema(&entry.input_schema);
+            let inputs = tool_input(entry);
+            let input = entry_input_schema(inputs.clone());
             json!({"id":id,"label":name,"kind":"command","plugin":plugin,
-                "params":"approval: the package hash (plugin.tools {name} or plugin.inspect), params: the entry's declared inputs, expected_design?: token this edit was computed against; as a tool, the inputs alone",
-                "input":{"type":"object","required":["approval","params"],"additionalProperties":false,"properties":{
-                    "approval":{"type":"string"},"params":inputs.clone(),
-                    "expected_design":schemars::schema_for!(craft_plugin::DesignToken).to_value()}},
+                "params":"approval: the package hash (plugin.tools {name} or plugin.inspect), params: the entry's declared inputs, ui_event?: explicit panel action, expected_design?: token this edit was computed against; as a tool, the inputs alone",
+                "input":input,
                 "tool":{"name":id,"input":inputs},
                 "output":{},"effect":entry.effect,"slots":entry.slots})
         }
@@ -100,6 +99,31 @@ pub(super) fn describe(session: &Session, id: &str) -> Result<Option<Value>> {
     }))
 }
 
+/// Keep the named-call envelope and its typed event definitions in step with plugin.run.
+fn entry_input_schema(inputs: Value) -> Value {
+    let mut schema = crate::schema::input_schema_for::<RunParams>().to_value();
+    if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        properties.retain(|name, _| matches!(name.as_str(), "approval" | "params" | "ui_event" | "expected_design"));
+        properties.insert("params".into(), inputs);
+    }
+    if let Some(object) = schema.as_object_mut() {
+        object.insert("required".into(), json!(["approval", "params"]));
+    }
+    schema
+}
+
+/// Hook defaults are resolved by the engine, so the transport accepts omitted keys. All other
+/// constraints remain; the original required list is checked after the single hook call.
+fn tool_input(entry: &Entry) -> Value {
+    let mut schema = craft_plugin::strict_input_schema(&entry.input_schema);
+    if entry.dialog_hook
+        && let Some(object) = schema.as_object_mut()
+    {
+        object.remove("required");
+    }
+    schema
+}
+
 /// A format tool's arguments: the file, and the options the slot declares.
 fn format_schema(entry: &Entry) -> Value {
     let extensions: Vec<String> = entry.extensions.iter().map(|e| format!(".{e}")).collect();
@@ -113,7 +137,7 @@ fn format_schema(entry: &Entry) -> Value {
         "type": "object",
         "properties": {
             "path": {"type": "string", "description": destination},
-            "options": craft_plugin::strict_input_schema(&entry.input_schema),
+            "options": tool_input(entry),
         },
         "required": ["path"],
         "additionalProperties": false,
@@ -191,7 +215,11 @@ fn explain(error: HostError, manifest: &Manifest, grants: &Grants, entry: &str) 
             error.into()
         }
         HostError::LimitExceeded { limit } if limit.starts_with("memory exceeds") => missing_grant(id, "memory_mib"),
-        HostError::OverCeiling { limit, .. } if limit == "memory_mib" => missing_grant(id, "memory_mib"),
+        HostError::OverCeiling { limit, requested, .. }
+            if limit == "memory_mib" || (limit == "fuel" && *requested <= craft_plugin::MAX_APPROVED_FUEL) =>
+        {
+            missing_grant(id, limit)
+        }
         _ => error.into(),
     }
 }
@@ -202,6 +230,12 @@ fn explain(error: HostError, manifest: &Manifest, grants: &Grants, entry: &str) 
 pub fn structured_error(text: &str) -> Option<Value> {
     if text.len() > 8192 {
         return None;
+    }
+    if let Some((_, rest)) = text.split_once("interactive_required: opening ")
+        && let Some((entry, _)) = rest.split_once(" requires the app form;")
+        && entry.split('.').all(valid_id)
+    {
+        return Some(json!({"kind":"interactive_required","entry":entry,"action":"call_entry_with_params"}));
     }
     let start = text.find("plugin `")?;
     let rest = &text[start + "plugin `".len()..];

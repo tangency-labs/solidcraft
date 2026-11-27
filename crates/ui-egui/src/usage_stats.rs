@@ -13,7 +13,7 @@
 //!   `SOLIDCRAFT_NO_TELEMETRY=1` ([`ENV_OFF`]), or the organization's `UsageStatistics` policy
 //!   (`policy`). Off, nothing is counted, kept or sent, and what was kept is deleted.
 //! - **Nothing before the notice.** Nothing is counted until the notice that says so has been
-//!   shown ([`Store::notice_shown`]).
+//!   answered with OK ([`Store::notice_ok`]); until then the counter doesn't run at all.
 //! - **Sending** happens in the background through the host's HTTP ([`crate::Services::usage_http`]):
 //!   a finished day is posted once, to [`ENDPOINT`] only. The window never waits on it. A day
 //!   that could not be sent is kept for at most [`KEEP_DAYS`] days, and the app tries again once
@@ -30,6 +30,18 @@ use crate::agent_chat::backend::HttpRequest;
 
 /// Where reports go: the one address the app ever posts them to.
 pub const ENDPOINT: &str = "https://metrics.solidcraft.io/v1/report";
+
+/// Where Delete my data goes: this followed by the installation id, sent as `DELETE`.
+pub const INSTALL_ENDPOINT: &str = "https://metrics.solidcraft.io/v1/install/";
+
+/// The most deletions waiting to be sent.
+pub const MAX_FORGET: usize = 10;
+
+/// The only addresses the host's HTTP for usage statistics may reach: the report endpoint, and
+/// an installation's delete address.
+pub fn allowed_url(url: &str) -> bool {
+    url == ENDPOINT || url.strip_prefix(INSTALL_ENDPOINT).is_some_and(valid_id)
+}
 
 /// The version of the report's fields ([`Report::v`]).
 pub const SCHEMA: u32 = 1;
@@ -122,10 +134,16 @@ pub struct Day {
 pub struct Store {
     /// Random, made on first use and by Reset ID; never derived from the computer.
     pub install_id: String,
-    /// The notice that usage statistics are on has been shown: until then nothing is counted.
-    pub notice_shown: bool,
+    /// The person chose OK on the notice (or switched sharing on in Preferences › Privacy): only
+    /// from then on is anything counted or sent. Until then the notice shows at every start.
+    /// (0.46 kept `notice_shown` and `notice_dismissed` instead, which recorded only that its
+    /// notice had shown or been closed; they are not read, so those installations see the new
+    /// notice and count nothing until OK.)
+    pub notice_ok: bool,
     /// Days counted and not sent yet, by `YYYY-MM-DD` (UTC).
     pub days: BTreeMap<String, Day>,
+    /// Earlier installation ids whose reports the server is still to delete (Delete my data).
+    pub forget: Vec<String>,
 }
 
 impl Store {
@@ -136,6 +154,8 @@ impl Store {
             store.install_id.clear();
         }
         store.days.retain(|day, _| day_number(day).is_some());
+        store.forget.retain(|id| valid_id(id));
+        store.forget.truncate(MAX_FORGET);
         store
     }
 
@@ -160,6 +180,14 @@ pub enum Off {
 #[derive(Default)]
 pub struct UsageStats {
     pub store: Store,
+    /// The host keeps this app's usage statistics between runs (`SolveApp::load_usage_stats`).
+    /// Until then (tests, scenarios, an app that keeps nothing) the notice never shows and nothing
+    /// is counted.
+    pub(crate) hosted: bool,
+    /// Preferences › Privacy shows the next report.
+    pub show_report: bool,
+    /// The notice was closed with its × this run: it shows again at the next start.
+    notice_hidden: bool,
     /// [`ENV_OFF`] said off when the app started.
     pub env_off: bool,
     /// The minute (since 1970) of the last input counted.
@@ -172,6 +200,10 @@ pub struct UsageStats {
     started: Option<f64>,
     /// A tool or dialog the person started, until it is applied or cancelled.
     open_tool: Option<OpenTool>,
+    /// The deletion on its way: the id and the answer to come.
+    deleting: Option<(String, crate::tickets::Call)>,
+    /// When the last deletion was tried (the app's clock); None: none since the last request.
+    last_delete_try: Option<f64>,
     /// A tool just started (`SolveApp::start`), stamped at the next tick.
     pub(crate) started_tool: Option<&'static str>,
 }
@@ -225,7 +257,7 @@ pub fn off(app: &SolveApp) -> Option<Off> {
 
 /// Usage statistics are on and the person has been told: count and send.
 pub fn active(app: &SolveApp) -> bool {
-    off(app).is_none() && app.usage.store.notice_shown
+    app.usage.hosted && off(app).is_none() && app.usage.store.notice_ok
 }
 
 /// A new random installation id (a version 4 UUID). None when the system has no randomness.
@@ -250,6 +282,25 @@ fn valid_id(id: &str) -> bool {
 pub fn reset_id(app: &mut SolveApp) {
     app.usage.store.install_id = new_id().unwrap_or_default();
     app.usage.store.days.clear();
+}
+
+/// Delete my data: the server is asked to delete everything it has for this installation id
+/// (sent in the background, retried like a report until the server answers), and a new id is
+/// used from now on. False when there is nothing to delete or the organization or the environment
+/// turned statistics off (then nothing is sent at all).
+pub fn delete_my_data(app: &mut SolveApp) -> bool {
+    if matches!(off(app), Some(Off::Policy | Off::Environment)) {
+        return false;
+    }
+    let old = std::mem::take(&mut app.usage.store.install_id);
+    if valid_id(&old) && !app.usage.store.forget.contains(&old) {
+        app.usage.store.forget.push(old);
+        let extra = app.usage.store.forget.len().saturating_sub(MAX_FORGET);
+        app.usage.store.forget.drain(..extra);
+    }
+    reset_id(app);
+    app.usage.last_delete_try = None;
+    !app.usage.store.forget.is_empty()
 }
 
 /// Days since 1970-01-01 of a `YYYY-MM-DD` date; None when it isn't one.
@@ -379,12 +430,17 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 pub fn tick_at(app: &mut SolveApp, unix: i64, now: f64, input: bool) {
     let on = active(app);
     app.session.count_usage = on;
+    // The counts are the process's: only the app that keeps them takes them, so another app in
+    // the same process (a test's) never takes this one's.
+    if !app.usage.hosted {
+        return;
+    }
+    forget(app, now);
     let counted = solidcraft_engine::usage::take();
     if !on {
-        if off(app).is_some() {
-            app.usage.store.days.clear();
-            app.usage.sending = None;
-        }
+        // Off, or no OK yet: nothing is kept to send later.
+        app.usage.store.days.clear();
+        app.usage.sending = None;
         return;
     }
     if app.usage.store.install_id.is_empty() {
@@ -467,6 +523,44 @@ fn time_tools(usage: &mut UsageStats, now: f64, open: bool, operations: bool) ->
     done
 }
 
+/// Send the deletions asked for (Delete my data), one at a time, whether or not statistics are on;
+/// none when the organization or the environment turned them off. A deletion the server didn't
+/// take is tried again an hour later, never in a loop.
+fn forget(app: &mut SolveApp, now: f64) {
+    if matches!(off(app), Some(Off::Policy | Off::Environment)) {
+        app.usage.store.forget.clear();
+        app.usage.deleting = None;
+        return;
+    }
+    if let Some((id, call)) = &app.usage.deleting {
+        let Some(reply) = call.poll() else { return };
+        let id = id.clone();
+        app.usage.deleting = None;
+        match reply {
+            Ok((status, _)) if done(status) => {
+                app.usage.store.forget.retain(|old| *old != id);
+                // The next one waiting goes at once.
+                app.usage.last_delete_try = None;
+                if app.usage.store.forget.is_empty() {
+                    let text = app.tr("prefs.privacy.delete_done").to_string();
+                    app.set_status(text, false);
+                }
+            }
+            Ok((status, _)) => log::info!("usage statistics: delete answered {status}; it waits"),
+            Err(why) => log::info!("usage statistics: delete not sent ({why}); it waits"),
+        }
+        return;
+    }
+    if app.usage.last_delete_try.is_some_and(|at| now - at < 3600.0) || !may_send() {
+        return;
+    }
+    let Some(id) = app.usage.store.forget.first().cloned() else { return };
+    let Some(http) = app.services.usage_http.clone() else { return };
+    let request = HttpRequest { method: "DELETE", url: format!("{INSTALL_ENDPOINT}{id}"), headers: Vec::new(), body: None, timeout_s: 30 };
+    app.usage.last_delete_try = Some(now);
+    app.usage.deleting = Some((id, crate::tickets::Call::start(&http, request)));
+}
+
 /// Reports go only from release builds (`update::release_build`): a development build counts but
 /// never sends.
 fn may_send() -> bool {
@@ -525,6 +619,63 @@ fn send(app: &mut SolveApp, today: &str, now: f64) {
 /// The server took the report (2xx) or will never take it (4xx other than 429).
 fn done(status: u16) -> bool {
     (200..300).contains(&status) || ((400..500).contains(&status) && status != 429)
+}
+
+/// What the notice's buttons do.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoticeAction {
+    /// Sharing is fine: counting starts now.
+    Ok,
+    /// Preferences › Privacy opens, where the switch is. No answer: the notice stays.
+    Settings,
+    /// The ×: hidden until the next start, still no answer, nothing counted.
+    Close,
+}
+
+/// The person agreed to sharing (OK on the notice, or the switch turned on in Preferences ›
+/// Privacy): counting starts.
+pub fn agree(app: &mut SolveApp) {
+    app.usage.store.notice_ok = true;
+    app.preferences.usage_statistics = true;
+}
+
+/// A button of the notice was pressed.
+pub fn act(app: &mut SolveApp, action: NoticeAction) {
+    match action {
+        NoticeAction::Ok => agree(app),
+        NoticeAction::Settings => crate::prefs::open_at(app, crate::prefs::PAGE_PRIVACY),
+        NoticeAction::Close => app.usage.notice_hidden = true,
+    }
+}
+
+/// The notice as one of the shared toasts in `free`; its rect when shown.
+pub fn notice_toast(app: &mut SolveApp, ui: &egui::Ui, free: egui::Rect) -> Option<egui::Rect> {
+    if !notice_pending(app) {
+        return None;
+    }
+    use crate::ui_kit::toast::Action;
+    const ACTIONS: [NoticeAction; 2] = [NoticeAction::Settings, NoticeAction::Ok];
+    let labels = [app.tr("usage.settings").to_string(), app.tr("usage.ok").to_string()];
+    let actions = [(labels[0].as_str(), Action::Secondary), (labels[1].as_str(), Action::Primary)];
+    // No countdown: it stays until OK, or until sharing is turned off.
+    let extras = crate::ui_kit::toast::Extras { close: Some("toast:usage_stats:close"), ..Default::default() };
+    let text = app.tr("usage.notice").to_string();
+    let toast = crate::viewport::paint_toast_ext(ui, free, text, crate::ui_kit::toast::Lead::Dot(false), &actions, extras)?;
+    crate::scenario::publish_rect("toast:usage_stats", toast.rect);
+    for (index, button) in toast.buttons.iter().enumerate() {
+        crate::scenario::publish_rect(&format!("toast:usage_stats:button:{index}"), *button);
+    }
+    let action = if toast.closed { Some(NoticeAction::Close) } else { toast.clicked.and_then(|i| ACTIONS.get(i).copied()) };
+    if let Some(action) = action {
+        act(app, action);
+    }
+    Some(toast.rect)
+}
+
+/// Whether the notice shows: at every start until the person chooses OK, or turns sharing off
+/// (in Preferences, by policy or by the environment). Closed with ×, it is back at the next start.
+pub fn notice_pending(app: &SolveApp) -> bool {
+    app.usage.hosted && off(app).is_none() && !app.usage.store.notice_ok && !app.usage.notice_hidden
 }
 
 #[cfg(test)]

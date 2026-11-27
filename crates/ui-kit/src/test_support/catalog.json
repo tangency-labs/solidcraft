@@ -11,6 +11,8 @@
   "ui.save": "Save",
   "ui.cancel": "Cancel",
   "ui.don_t_save": "Don't Save",
+  "ui.table.gallery.configurations": "Configurations",
+  "ui.table.gallery.parameters": "Parameters",
   "prefs.sketch.state_icons": "State icons",
   "prefs.sketch_state_icons": "Sketch icons in the color of their state"
 }

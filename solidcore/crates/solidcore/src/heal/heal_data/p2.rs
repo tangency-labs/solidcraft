@@ -89,8 +89,16 @@
 //!   bound is under the limit. The gap gain is a margin over 20 samples; an enclosure needs
 //!   none. Upstream gave an imported edge whose gap is under the limit a tolerance the check
 //!   refuses.
+//! - **`Fix_TolSizes` vertex tolerances** (not upstream, #17739): a vertex's new tolerance is
+//!   at least the gap gain times twice its largest gap. The check holds a vertex's gaps to half
+//!   its tolerance (WR-679, `SmBrep` Tests #0-#3), and upstream's `gain * gap / 2` and
+//!   `gain * gap - def` are under twice the gap. As the check's own tolerance update, it grows
+//!   no further than the limit past which Test #82 refuses a vertex (a misplaced vertex, not a
+//!   gap to absorb). From that limit up it grows only where the check's clearance proof of
+//!   Test #82 shows the ball reaching no topology the vertex does not bound.
 //! - No recursion; no allocation from caller counts beyond the target lists given.
 
+use crate::error::heal::HealFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
@@ -98,17 +106,17 @@ use crate::geom::hash_table::{
     gap_histogram_index, FindPairsOptions, ObjsInVoxels, GAP_HISTOGRAM_BUCKETS,
 };
 use crate::geom::tol::{
-    approx_tol_3d, brep_calc_edge_zone_tol_3d, brep_calc_face_zone_tol_3d,
-    brep_calc_vertex_zone_tol_3d, brep_model_size_estimate, calc_edge_zone_tol_3d,
-    calc_vertex_zone_tol_3d, context_model_size_estimate, context_zone_tol_3d, gap_gain,
-    set_brep_model_size_estimate, size_estimate_to_zone_tol_3d, zone_tol3d, SmallTopoType,
-    LARGE_SMALL_SIZE_RATIO, USE_DEFAULT,
+    brep_calc_edge_zone_tol_3d, brep_calc_face_zone_tol_3d, brep_calc_vertex_zone_tol_3d,
+    brep_model_size_estimate, brep_size_calc_gap_zone_tol_3d, brep_size_zone_tol_3d,
+    context_model_size_estimate, gap_gain, set_brep_model_size_estimate,
+    size_estimate_to_zone_tol_3d, zone_tol3d, LARGE_SMALL_SIZE_RATIO, USE_DEFAULT,
 };
 use crate::heal::face_props::{
     FaceProps, HealerOpType, LoopObject, MixedLinkType, PropStage, Tri, TriedLinkType,
 };
 use crate::kernel::Kernel;
 use crate::math::{BIG_DOUBLE, EFF_ZERO, UNDEF_DOUBLE};
+use crate::topology::brep::validation::{vertex_ball_reaches, GROWTH_PAST_RATIO};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face_p2;
 use crate::topology::{
@@ -496,16 +504,18 @@ impl EdgeProps {
         }
 
         // locals - Edge Tols and gaps
-        let def_zone_tol_3d = context_zone_tol_3d(k, Some(&k.context), SmallTopoType::NormalSize);
+        // (upstream asks the B-rep's context, there this model's: the zone tolerance
+        // of this B-rep's own model size estimate)
+        let def_zone_tol_3d = brep_size_zone_tol_3d(k, b);
         let edge_edge_max_gap_length_3d = self.max_edge_edge_gap_length(b)?;
         let edge_face_max_gap_length_3d = self.max_edge_face_gap_length(b)?;
         // Don't send MaxFaceZoneTol, as those Tols haven't been set yet.
-        let calc_zone_tol_3d = calc_edge_zone_tol_3d(
+        let calc_zone_tol_3d = brep_size_calc_gap_zone_tol_3d(
             k,
             edge_edge_max_gap_length_3d,
             edge_face_max_gap_length_3d,
+            b,
             None,
-            Some(&k.context),
         );
 
         // check - CalcZoneTol3d should = OrigZoneTol3d
@@ -524,13 +534,14 @@ impl EdgeProps {
 
     /// `SetProps_Metadata`: sets the edge, its index, its tolerances, interval, curve,
     /// approximate length (5 samples), natural interval and the degenerate and
-    /// uncontained flags.
+    /// uncontained flags. The degenerate flag is certified ([`degenerate_edge`]), not
+    /// upstream's sampled `IsDegenerate`.
     ///
     /// # Errors
     ///
-    /// [`SolidError::NotFound`] for a dangling edge; [`SolidError::InvalidInput`] for
-    /// an edge without curve (upstream dereferences null); those of the curve's
-    /// `ApproximateLength` and `IsDegenerate`.
+    /// [`SolidError::NotFound`] for a dangling edge or vertex; [`SolidError::InvalidInput`]
+    /// for an edge without curve (upstream dereferences null); those of the curve's
+    /// `ApproximateLength`.
     pub fn set_props_metadata(
         &mut self,
         k: &Kernel,
@@ -538,9 +549,6 @@ impl EdgeProps {
         edge_id: EdgeId,
         edge_index: u64,
     ) -> Result<()> {
-        // locals
-        let approx_tol_3d = approx_tol_3d(k, SmallTopoType::NormalSize);
-
         // set property member values
         self.edge = Some(edge_id);
         self.edge_index = edge_index;
@@ -561,9 +569,8 @@ impl EdgeProps {
             .0;
         self.natural_interval = curve.natural_interval();
 
-        // Bad Degen Edge
-        self.bad_degen_edge =
-            Tri::from(curve.is_degenerate(k, approx_tol_3d, Some(&self.edge_interval))?);
+        // Bad Degen Edge (certified, not upstream's sampled `IsDegenerate`)
+        self.bad_degen_edge = Tri::from(degenerate_edge(b, edge_id, self.zone_tol_3d)?);
 
         // Bad UnContained Edge
         self.bad_uncontained_edge = Tri::from(
@@ -740,16 +747,17 @@ impl VertexProps {
         }
 
         // locals for Problem gap checks
-        let def_zone_tol_3d = context_zone_tol_3d(k, Some(&k.context), SmallTopoType::NormalSize);
+        // (the zone tolerance of this B-rep's own model size estimate, as for edges)
+        let def_zone_tol_3d = brep_size_zone_tol_3d(k, b);
         let vertex_edge_max_gap_length_3d = self.max_vtx_edge_gap_length(b)?;
         let vertex_face_max_gap_length_3d = self.max_vtx_face_gap_length(b)?;
         // EdgeTol not yet set, so unreliable for this test
-        let calc_zone_tol_3d = calc_vertex_zone_tol_3d(
+        let calc_zone_tol_3d = brep_size_calc_gap_zone_tol_3d(
             k,
             vertex_edge_max_gap_length_3d,
             vertex_face_max_gap_length_3d,
+            b,
             None,
-            Some(&k.context),
         );
 
         // ZoneTol3d for current Gap3d sizes
@@ -3053,10 +3061,12 @@ impl<O: LoopObject> HealData<O> {
 
         // When The BrepTolerance needs to be set - set it based on ModelSizeEstimate
         if this_est_zone_tol_3d != brep_est_zone_tol_3d {
+            // (the context's is the kernel's configured default, which no B-rep
+            // writes: the B-rep stores the default where that already fits it)
             if this_est_zone_tol_3d == context_est_zone_tol_3d {
-                set_brep_model_size_estimate(k, b, USE_DEFAULT);
+                set_brep_model_size_estimate(b, USE_DEFAULT);
             } else {
-                set_brep_model_size_estimate(k, b, this_model_size);
+                set_brep_model_size_estimate(b, this_model_size);
             }
         }
         set_brep_tolerance(k, b, this_est_zone_tol_3d)?;
@@ -3205,6 +3215,25 @@ impl<O: LoopObject> HealData<O> {
                 b,
                 Some(max_edge_tol_3d),
             );
+            // not upstream (#17739): `gain * gap / 2` and `gain * gap - def` are under twice the
+            // gap, and the check holds a vertex's gaps to half its tolerance (WR-679), so a fixed
+            // vertex failed a gap its tolerance had covered. The tolerance covers twice the gap
+            // with the gap gain, as the edge branch above covers the edge/face gap, unless that
+            // passes the limit past which Test #82 refuses the vertex (as `validate_and_update`).
+            // From the limit up, Test #82 also refuses a ball that reaches topology the vertex
+            // does not bound (validity-and-tolerances.md §8: a tolerance grows only while it
+            // stays clear), so the cover is taken there only where the check proves it clear.
+            let twice_gap = 2.0 * max_vertex_edge_gap_3d_length.max(max_vertex_face_gap_3d_length);
+            let covered = zone_tol3d(k, gap_gain(k) * twice_gap);
+            let limit = LARGE_SMALL_SIZE_RATIO * b.tolerance();
+            let zone_tol_3d = if twice_gap > zone_tol_3d
+                && covered < GROWTH_PAST_RATIO * limit
+                && (covered < limit || ball_clears(k, b, bad_tol_vertex, covered)?)
+            {
+                covered
+            } else {
+                zone_tol_3d
+            };
             if p.orig_zone_tol_3d == UNDEF_DOUBLE {
                 let t = vertex::tolerance(b, bad_tol_vertex)?;
                 self.vertex_props.props_mut(id)?.orig_zone_tol_3d = t;
@@ -3423,13 +3452,14 @@ impl<O: LoopObject> HealData<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) when coincident edges are listed.
+    /// [`HealFailure::CoincidentEdgesUnfixed`] (`SM_ERR`) when coincident edges are
+    /// listed.
     pub fn fix_coin_edges(&self, this_healer_op: HealerOpType) -> Result<()> {
         let _ = this_healer_op;
         if !self.bad_edge_props_coin_edges.base.is_empty() {
-            return Err(SolidError::heal_failed(
+            return Err(SolidError::heal(
                 "heal::heal_data::p2::HealData::fix_coin_edges",
-                "coincident edges cannot be fixed",
+                HealFailure::CoincidentEdgesUnfixed,
             ));
         }
         Ok(())
@@ -3446,13 +3476,14 @@ impl<O: LoopObject> HealData<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` ([`SolidError::Upstream`]) when missed intersections are listed.
+    /// [`HealFailure::MissedEdgeIntersectionsUnfixed`] (`SM_ERR`) when missed
+    /// intersections are listed.
     pub fn fix_missed_edge_xsects(&self, this_healer_op: HealerOpType) -> Result<()> {
         let _ = this_healer_op;
         if !self.bad_edge_props_missed_edge_xsects.base.is_empty() {
-            return Err(SolidError::heal_failed(
+            return Err(SolidError::heal(
                 "heal::heal_data::p2::HealData::fix_missed_edge_xsects",
-                "missed edge intersections cannot be fixed",
+                HealFailure::MissedEdgeIntersectionsUnfixed,
             ));
         }
         Ok(())
@@ -3491,6 +3522,26 @@ impl<O: LoopObject> HealData<O> {
     /// `Fix_BadGaps` (not implemented upstream: does nothing).
     pub fn fix_bad_gaps(&self, this_healer_op: HealerOpType) {
         let _ = this_healer_op;
+    }
+}
+
+/// Whether vertex `v` at tolerance `radius` passes the clearance half of Test #82
+/// ([`vertex_ball_reaches`]): its ball provably reaches no face or edge it does not bound. The
+/// vertex keeps its tolerance; a query that cannot be had proves nothing, so the ball counts as
+/// reaching, as in the check.
+///
+/// # Errors
+///
+/// A cancelled pass and a dangling vertex.
+fn ball_clears(k: &Kernel, b: &mut Brep, v: VertexId, radius: f64) -> Result<bool> {
+    let kept = vertex::tolerance(b, v)?;
+    vertex::set_tolerance(b, v, radius, false, false)?;
+    let reaches = vertex_ball_reaches(k, b, v);
+    vertex::set_tolerance(b, v, kept, false, false)?;
+    match reaches {
+        Ok(reaches) => Ok(!reaches),
+        Err(error) if error.is_cancelled() => Err(error),
+        Err(_) => Ok(false),
     }
 }
 
@@ -3537,13 +3588,73 @@ fn certified_edge_face_gap(k: &Kernel, b: &Brep, e: EdgeId, floor: f64) -> Resul
             Some(SurfaceKind::ProceduralBlend(pb)) => pb.bound(),
             _ => 0.0,
         };
-        if !(net_off.is_finite() && net_off >= 0.0) {
+        let Some(g) = plus_net_bound(g, net_off) else {
             return Ok(None);
-        }
-        let g = g + net_off;
+        };
         most = Some(most.map_or(g, |m| m.max(g)));
     }
     Ok(most)
+}
+
+/// The bound `g` to a face's net plus the net's bound `net_off` from its definition, rounded
+/// up (a sum of two bounds is a bound only with its rounding: definitions-and-certificates.md
+/// §7, 5). A `net_off` of 0 leaves `g` as it is. `None` for a `net_off` that is not a finite
+/// non-negative number, or a sum that is not finite.
+fn plus_net_bound(g: f64, net_off: f64) -> Option<f64> {
+    use crate::blend::fillet_section::interval::Ivl;
+
+    if !(net_off.is_finite() && net_off >= 0.0) {
+        return None;
+    }
+    if net_off == 0.0 {
+        return Some(g);
+    }
+    let sum = (Ivl::from(g) + Ivl::from(net_off)).hi;
+    sum.is_finite().then_some(sum)
+}
+
+/// Whether edge `e` is degenerate (`m_bBadDegenEdge`): it lies within `tol`, the edge's
+/// tolerance, of one point, so its tolerance covers its length. An open edge is degenerate when
+/// its vertices are within `tol` of each other (a longer edge is a valid one, `SmBrep` Edge test
+/// 7) and its whole curve is certified within `tol` of their midpoint, the point its squeeze
+/// puts them at ([`short_edge_bound`]: interval enclosures of the whole curve); a closed edge
+/// when its whole curve is certified within `tol` of its vertex. A curve with no enclosure, or
+/// one that reaches farther, is not shown degenerate, nor is an edge without its vertices (there
+/// is no point to squeeze it into), and a NaN distance, bound or tolerance is not within.
+///
+/// Not upstream: `SetProps_Metadata` asks the curve's sampled `IsDegenerate` against the
+/// context's approximation tolerance, so an edge shorter than its own, larger tolerance was not
+/// degenerate, and one longer than its own, smaller tolerance was.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling edge or vertex; `InvalidInput` for an edge without
+/// a curve.
+pub(crate) fn degenerate_edge(b: &Brep, e: EdgeId, tol: f64) -> Result<bool> {
+    use crate::heal::stitch::bounds::{curve_to_point, points};
+    use crate::heal::tolerance_defects::short_edge_bound;
+
+    let (Some(v), Some(w)) = edge::start_end_vertices(b, e)? else {
+        return Ok(false);
+    };
+    let bound = if v == w {
+        let curve = edge::curve(b, e)?
+            .ok_or_else(|| SolidError::invalid_input(OP_EDGE, "edge without curve"))?;
+        match curve_to_point(curve, &edge::interval(b, e)?, vertex::point(b, v)?) {
+            Ok(bound) if bound.is_finite() => bound,
+            _ => return Ok(false),
+        }
+    } else {
+        match points(vertex::point(b, v)?, vertex::point(b, w)?) {
+            Ok(apart) if apart <= tol => {}
+            _ => return Ok(false),
+        }
+        match short_edge_bound(b, e, None)? {
+            Ok(bound) => bound,
+            Err(_) => return Ok(false),
+        }
+    };
+    Ok(bound <= tol)
 }
 
 #[cfg(test)]
@@ -3619,6 +3730,22 @@ mod tests {
     /// probes the net at (the edge's 257 equally spaced parameters, 100/256 and 101/256). Its
     /// stated bound is `h`. The edge on v = 0 is the net's own row, so it lies on B (bound to B
     /// about 0) and is off S by the bump, whose peak is `2h/3` (a uniform cubic B-spline's).
+    /// The sum with a blend's bound is rounded up: `1 + 2^-53` rounds to 1 to nearest, under
+    /// the two bounds' sum. Without a bound to add the gap's bound is kept bit for bit.
+    #[test]
+    fn a_blend_s_bound_is_added_rounded_up() {
+        let tiny = f64::EPSILON / 2.0;
+        assert_eq!(1.0 + tiny, 1.0);
+        let sum = plus_net_bound(1.0, tiny).unwrap();
+        assert!(sum > 1.0, "{sum}");
+        assert!(sum <= 1.0 + 4.0 * f64::EPSILON, "{sum}");
+        let g = 0.1 + 0.2;
+        assert_eq!(plus_net_bound(g, 0.0).map(f64::to_bits), Some(g.to_bits()));
+        assert_eq!(plus_net_bound(f64::MAX, f64::MAX), None);
+        assert_eq!(plus_net_bound(1.0, -1e-9), None);
+        assert_eq!(plus_net_bound(1.0, f64::NAN), None);
+    }
+
     #[test]
     fn a_procedural_blend_s_gap_bound_is_to_its_definition() {
         use crate::blend::fillet_section::section::GnSectionFsg;

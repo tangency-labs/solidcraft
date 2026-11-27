@@ -14,7 +14,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use super::{EDGE_PX, EDGE_SEG_SIZE, INSTANCE_SIZE, InstancedDraw, SharedEdges, Tally};
+use super::{EDGE_SEG_SIZE, INSTANCE_SIZE, InstancedDraw, SharedEdges, Tally};
 
 /// The instanced edge vertex shaders, appended to the viewport's (they draw with its
 /// `line_vertex` and `fs_line`).
@@ -35,44 +35,51 @@ fn edge_moved(r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>, p: vec3<f32>) -> vec3
 /// Segment `vertex_index / 6` of the part's shared edges at the instance's placement, in its
 /// edge colour (`EDGE_WIDTH` pixels wide).
 @vertex
-fn vs_edge_inst(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) edge: u32, @location(8) hidden: u32) -> LOut {
+fn vs_edge_inst(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) edge: u32, @location(8) hidden: u32, @location(9) slot: u32) -> LOut {
     let s = edge_segs[vi / 6u];
-    return line_vertex(vi % 6u, edge_moved(r0, r1, r2, s.a), edge_moved(r0, r1, r2, s.b), edge, bitcast<u32>(1.3));
+    return line_vertex(vi % 6u, edge_moved(r0, r1, r2, s.a), edge_moved(r0, r1, r2, s.b), edge, bitcast<u32>(1.3), edge_motion(slot, edge));
+}
+
+/// The motion an instance's edges are drawn moved by: its own slot, else the one the palette entry
+/// `c` they are drawn in names (only read while something moves).
+fn edge_motion(slot: u32, c: u32) -> u32 {
+    if (u.screen.z < 0.5) { return 0u; }
+    return placement_motion(slot, palette_entry(c));
 }
 
 /// A lit segment (a whole hovered or selected body's edges, drawn again over the model) in
 /// `style`: the palette index from bit 8, a raised line at bit 7, the width in eighths of a pixel
 /// below it (`lit_line_style`, as `vs_line_lit` reads it).
-fn edge_lit(vi: u32, r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>, style: u32) -> LOut {
+fn edge_lit(vi: u32, r0: vec4<f32>, r1: vec4<f32>, r2: vec4<f32>, style: u32, slot: u32) -> LOut {
     let s = edge_segs[vi / 6u];
     let eighths = style & 127u;
     var w = bitcast<u32>(f32(eighths) / 8.0);
     if ((style & 128u) != 0u) { w = 0x80000000u | (eighths << 24u); }
-    return line_vertex(vi % 6u, edge_moved(r0, r1, r2, s.a), edge_moved(r0, r1, r2, s.b), style >> 8u, w);
+    return line_vertex(vi % 6u, edge_moved(r0, r1, r2, s.a), edge_moved(r0, r1, r2, s.b), style >> 8u, w, edge_motion(slot, style >> 8u));
 }
 
 /// A lit segment in the instance's first style (the halo, or the hidden edges' style).
 @vertex
-fn vs_edge_inst_lit_a(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) a: u32, @location(8) b: u32) -> LOut {
-    return edge_lit(vi, r0, r1, r2, a);
+fn vs_edge_inst_lit_a(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) a: u32, @location(8) b: u32, @location(9) slot: u32) -> LOut {
+    return edge_lit(vi, r0, r1, r2, a, slot);
 }
 
 /// A lit segment in the instance's second style (the line over the halo).
 @vertex
-fn vs_edge_inst_lit_b(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) a: u32, @location(8) b: u32) -> LOut {
-    return edge_lit(vi, r0, r1, r2, b);
+fn vs_edge_inst_lit_b(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) a: u32, @location(8) b: u32, @location(9) slot: u32) -> LOut {
+    return edge_lit(vi, r0, r1, r2, b, slot);
 }
 
 /// The same segment as a hidden edge, in its hidden edge colour (`HIDDEN_EDGE_WIDTH` wide).
 @vertex
-fn vs_edge_inst_hidden(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) edge: u32, @location(8) hidden: u32) -> LOut {
+fn vs_edge_inst_hidden(@builtin(vertex_index) vi: u32, @location(3) r0: vec4<f32>, @location(4) r1: vec4<f32>, @location(5) r2: vec4<f32>, @location(7) edge: u32, @location(8) hidden: u32, @location(9) slot: u32) -> LOut {
     let s = edge_segs[vi / 6u];
-    return line_vertex(vi % 6u, edge_moved(r0, r1, r2, s.a), edge_moved(r0, r1, r2, s.b), hidden, bitcast<u32>(1.0));
+    return line_vertex(vi % 6u, edge_moved(r0, r1, r2, s.a), edge_moved(r0, r1, r2, s.b), hidden, bitcast<u32>(1.0), edge_motion(slot, hidden));
 }
 "#;
 
 /// Vertices drawn per segment (two triangles).
-const VERTICES: u32 = 6;
+pub(super) const VERTICES: u32 = 6;
 /// Bytes of one draw's arguments ([`wgpu::util::DrawIndirectArgs`]).
 const ARGS_SIZE: u64 = 16;
 
@@ -82,11 +89,11 @@ pub(super) fn supported(device: &wgpu::Device) -> bool {
     device.limits().max_storage_buffers_per_shader_stage > 0 && super::indirect::supported(device)
 }
 
-/// The placements' layout for the edge shaders: their rows and the edge palette indices
-/// ([`INSTANCE_SIZE`]).
+/// The placements' layout for the edge shaders: their rows, the edge palette indices and the
+/// motion slot ([`INSTANCE_SIZE`]).
 pub(super) fn instance_layout() -> wgpu::VertexBufferLayout<'static> {
-    const A: [wgpu::VertexAttribute; 6] =
-        wgpu::vertex_attr_array![3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Uint32, 7 => Uint32, 8 => Uint32];
+    const A: [wgpu::VertexAttribute; 7] =
+        wgpu::vertex_attr_array![3 => Float32x4, 4 => Float32x4, 5 => Float32x4, 6 => Uint32, 7 => Uint32, 8 => Uint32, 9 => Uint32];
     wgpu::VertexBufferLayout { array_stride: INSTANCE_SIZE as u64, step_mode: wgpu::VertexStepMode::Instance, attributes: &A }
 }
 
@@ -279,6 +286,12 @@ pub(super) struct Edges {
     instances: Option<(wgpu::Buffer, u64)>,
     /// Segments the entries draw now (the draw statistics).
     segments: u64,
+    /// Where the arguments and the placements start in their buffers (bytes; a GPU cull's
+    /// buffers hold the triangles' first, [`super::gpu_cull`]).
+    args_at: u64,
+    instances_at: u64,
+    /// The GPU culls the placements: drawn even when the last count it reported was none.
+    on_gpu: bool,
 }
 
 impl Edges {
@@ -305,9 +318,9 @@ impl Edges {
                 entries.push(Entry { draw: i, level, first: *first, count: *count });
             }
         }
-        let mut out = Edges { arena, entries, args: None, instances: None, segments: 0 };
+        let mut out = Edges { arena, entries, args: None, instances: None, segments: 0, args_at: 0, instances_at: 0, on_gpu: false };
         let (instances, args) = out.contents(parts);
-        out.args = Some(super::buffer_init(device, "sc_edge_args", &args, wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST)?);
+        out.args = Some(super::buffer_init(device, "sc_edge_args", &args, Self::args_usage())?);
         if !instances.is_empty() {
             let usage = wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST;
             out.instances = Some((super::buffer_init(device, "sc_edge_instances", &instances, usage)?, instances.len() as u64));
@@ -346,17 +359,78 @@ impl Edges {
         (instances, args)
     }
 
-    /// Write the placements in view and each entry's arguments ([`Edges::contents`]).
+    /// Each entry: its part, level, first segment and segment count, in the order of the
+    /// arguments.
+    pub(super) fn entry_list(&self) -> Vec<(usize, usize, u32, u32)> {
+        self.entries.iter().map(|e| (e.draw, e.level, e.first, e.count)).collect()
+    }
+
+    /// Draw from the arguments (from `args_at`) and placements (from `instances_at`) a GPU cull
+    /// fills ([`super::gpu_cull`]).
+    pub(super) fn cull_on_gpu(&mut self, args: wgpu::Buffer, args_at: u64, instances: wgpu::Buffer, instances_at: u64) {
+        self.args = Some(args);
+        self.args_at = args_at;
+        self.instances = Some((instances, 0));
+        self.instances_at = instances_at;
+        self.on_gpu = true;
+    }
+
+    fn args_usage() -> wgpu::BufferUsages {
+        let base = wgpu::BufferUsages::INDIRECT | wgpu::BufferUsages::COPY_DST;
+        if cfg!(test) { base | wgpu::BufferUsages::COPY_SRC } else { base }
+    }
+
+    /// Whether the edge-argument buffer is missing (for example after a refused allocation) and
+    /// needs another [`Self::write`] even when the shown placements did not change.
+    pub(super) fn args_missing(&self) -> bool {
+        self.args.is_none()
+    }
+
+    /// The buffer the edge draw arguments are drawn from (for tests).
+    #[cfg(test)]
+    pub(super) fn args(&self) -> Option<wgpu::Buffer> {
+        self.args.clone()
+    }
+
+    /// Drop the argument buffer to simulate a refused allocation (for tests).
+    #[cfg(test)]
+    pub(super) fn clear_args(&mut self) {
+        self.args = None;
+    }
+
+    /// Whether a GPU cull last filled its arguments and placements, rather than the CPU.
+    pub(super) fn culls_on_gpu(&self) -> bool {
+        self.on_gpu
+    }
+
+    /// The placements each entry drew (a GPU cull's, read back): the segments drawn.
+    pub(super) fn counted(&mut self, counts: &[u32]) {
+        self.segments = self.entries.iter().zip(counts).map(|(e, c)| u64::from(e.count) * u64::from(*c)).sum();
+    }
+
+    /// Write the placements in view and each entry's arguments ([`Edges::contents`]): the CPU
+    /// culled this frame, so the arguments and placements start their buffers again.
     pub(super) fn write(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, parts: &[Part<'_>]) {
+        let was_on_gpu = self.on_gpu;
+        self.args_at = 0;
+        self.instances_at = 0;
+        self.on_gpu = false;
         let (instances, args) = self.contents(parts);
-        if let Some(buffer) = &self.args {
+        if was_on_gpu || self.args.is_none() {
+            // Leaving a GPU cull (or retrying after a refused allocation): allocate a private
+            // argument buffer instead of clobbering `Indirect`'s shared buffer at offset 0.
+            self.args = crate::buffer_init(device, "sc_edge_args", &args, Self::args_usage()).ok();
+        } else if let Some(buffer) = &self.args {
             queue.write_buffer(buffer, 0, &args);
         }
         if instances.is_empty() {
+            if was_on_gpu {
+                self.instances = None;
+            }
             return;
         }
         let need = instances.len() as u64;
-        if self.instances.as_ref().is_none_or(|(_, size)| *size < need) {
+        if was_on_gpu || self.instances.as_ref().is_none_or(|(_, size)| *size < need) {
             let size = need.saturating_mul(3) / 2;
             let buffer = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("sc_edge_instances"),
@@ -382,13 +456,13 @@ impl Edges {
     /// when there are none.
     pub(super) fn draw_uncounted(&self, pass: &mut wgpu::RenderPass<'_>, pipeline: &wgpu::RenderPipeline) -> bool {
         let (Some((instances, _)), Some(args)) = (&self.instances, &self.args) else { return false };
-        if self.segments == 0 {
+        if self.segments == 0 && !self.on_gpu {
             return false;
         }
         pass.set_pipeline(pipeline);
         pass.set_bind_group(3, &self.arena.bind, &[]);
-        pass.set_vertex_buffer(0, instances.slice(..));
-        pass.multi_draw_indirect(args, 0, u32::try_from(self.entries.len()).unwrap_or(u32::MAX));
+        pass.set_vertex_buffer(0, instances.slice(self.instances_at..));
+        pass.multi_draw_indirect(args, self.args_at, u32::try_from(self.entries.len()).unwrap_or(u32::MAX));
         true
     }
 }
@@ -409,12 +483,13 @@ pub(super) struct Pipelines {
 }
 
 /// The edge level each placement in view is drawn from: the coarsest whose deviation stays under
-/// [`EDGE_PX`] at `scale`, the most pixels a millimetre of the placement covers where it is drawn
+/// `px` pixels ([`super::EDGE_PX`], or [`super::EDGE_PX_MOVING`] while the view moves) at `scale`, the
+/// most pixels a millimetre of the placement covers where it is drawn
 /// ([`placement_stretch`](super::placement_stretch)).
-pub(super) fn level_for(e: &SharedEdges, scale: f32) -> u8 {
+pub(super) fn level_for(e: &SharedEdges, scale: f32, px: f32) -> u8 {
     if e.levels.len() < 2 {
         return 0;
     }
-    let level = e.levels.iter().rposition(|(_, tolerance)| *tolerance * scale <= EDGE_PX).unwrap_or(0);
+    let level = e.levels.iter().rposition(|(_, tolerance)| *tolerance * scale <= px).unwrap_or(0);
     u8::try_from(level).unwrap_or(0)
 }

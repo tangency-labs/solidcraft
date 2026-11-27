@@ -63,14 +63,20 @@ pub fn newer_file(newer: &Newer) -> NewerFile {
 }
 
 /// Read a design a newer build saved, or say why it truly can't be read.
-pub(crate) fn read(mut raw: Value, version: u32, applied: Option<Vec<String>>, newer: Newer) -> Result<Document> {
+pub(crate) fn read(
+    mut raw: Value,
+    version: u32,
+    applied: Option<Vec<String>>,
+    newer: Newer,
+    drawing_text: Option<&[&serde_json::value::RawValue]>,
+) -> Result<Document> {
     let applied_names = applied.as_deref();
     let mut file = newer_file(&newer);
-    let (mut doc, read_as) = match format::decode(raw.clone(), version, applied_names) {
+    let (mut doc, read_as) = match format::decode(raw.clone(), version, applied_names, drawing_text) {
         Ok(doc) => (doc, raw),
         Err(_) => {
             let mut foreign = BTreeMap::new();
-            let mut doc = salvage(&mut raw, version, applied_names, &mut file, &mut foreign).map_err(|why| {
+            let mut doc = salvage(&mut raw, version, applied_names, &mut file, &mut foreign, drawing_text).map_err(|why| {
                 DocError::Invalid(format!(
                     "this design was saved by a newer SolidCraft (format {}, this version reads up to {}) and this version can't read it: {why}. Update SolidCraft to open it",
                     newer.format, newer.reads_up_to
@@ -104,6 +110,7 @@ fn salvage(
     applied: Option<&[String]>,
     file: &mut NewerFile,
     foreign: &mut BTreeMap<u64, Value>,
+    drawing_text: Option<&[&serde_json::value::RawValue]>,
 ) -> std::result::Result<Document, String> {
     let piece = |key: &str, value: &Value| {
         let mut stub = json!({"name": "", "params": [], "features": []});
@@ -140,7 +147,7 @@ fn salvage(
     for key in ["params", "features"] {
         top.entry(key).or_insert_with(|| json!([]));
     }
-    read_around(top, file, &CORE, "design", |top: &Map<String, Value>| format::decode(Value::Object(top.clone()), version, applied))
+    read_around(top, file, &CORE, "design", |top: &Map<String, Value>| format::decode(Value::Object(top.clone()), version, applied, drawing_text))
 }
 
 fn feature_note(feature: &Value, why: &str) -> String {

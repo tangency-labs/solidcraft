@@ -262,6 +262,31 @@ fn clicking_again_on_the_same_spot_selects_the_next_thing_under_it() {
     assert_eq!(curves(&h), ["l1"]);
 }
 
+/// A repeat click after the selection mode changed is a plain click in the new mode, not a step
+/// through the old mode's list (#4255): two blocks one behind the other, Bodies then Faces & edges.
+#[test]
+fn a_changed_selection_mode_starts_the_cycle_over() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length": 20, "width": 10, "height": 20, "corner": [0, 0, 0], "body_name": "Front"})).unwrap();
+    h.app.run("solid.box", json!({"length": 20, "width": 10, "height": 20, "corner": [0, 30, 0], "body_name": "Back"})).unwrap();
+    h.call("ui.view", json!({"view": "front"}));
+    h.call("ui.view", json!({"view": "fit"}));
+    h.frames(2);
+    let p = h.app.viewport.rect.unwrap().center();
+    let at = json!([p.x, p.y]);
+    h.call("ui.set", json!({"pickMode": "bodies"}));
+    h.step(&json!({"click": at})).unwrap();
+    assert_eq!(h.app.session.selection, [Sel::Body { name: "Front".into() }]);
+    h.frames(30);
+    h.call("ui.set", json!({"pickMode": "faces"}));
+    h.step(&json!({"click": at})).unwrap();
+    assert!(
+        matches!(h.app.session.selection.as_slice(), [Sel::Face { body, .. }] if body == "Front"),
+        "the front block's face, not the next row: {:?}",
+        h.app.session.selection
+    );
+}
+
 #[test]
 fn a_double_click_does_not_cycle() {
     let (mut h, at) = two_lines();
@@ -987,7 +1012,7 @@ fn hidden_edge_mode_is_scoped_and_invalidates_hover_without_pointer_motion() {
     assert!(pick_all(&h.app, &proj, pos).iter().any(target));
     for style in [0, 1, 2, 3] {
         h.app.ui.visual_style = style;
-        assert_eq!(pick_cached(&mut h.app, &proj, pos).iter().any(target), style >= 2, "style {style}");
+        assert!(pick_cached(&mut h.app, &proj, pos).iter().any(target), "style {style}");
     }
     h.app.session.visibility.hidden_bodies.push("Target".into());
     assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));
@@ -999,6 +1024,22 @@ fn hidden_edge_mode_is_scoped_and_invalidates_hover_without_pointer_motion() {
     h.app.session.section = Vec::new();
     h.call("ui.prefs", json!({"select_hidden_edges":false}));
     assert!(!pick_cached(&mut h.app, &proj, pos).iter().any(target));
+}
+
+#[test]
+fn edges_are_picked_through_faces_in_every_display_style_when_the_preference_is_on() {
+    use crate::viewport::{Hit, pick_all, pick_cached, projection};
+    let (mut h, pos) = covered_edge();
+    let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+    let target = |hit: &Hit| matches!(hit, Hit::Edge { body, .. } if body == "Target");
+    for style in [0, 1, 2, 3] {
+        h.app.ui.visual_style = style;
+        h.app.preferences.select_hidden_edges = false;
+        assert_eq!(pick_cached(&mut h.app, &proj, pos).iter().any(target), style == 2, "off, style {style}");
+        h.app.preferences.select_hidden_edges = true;
+        assert!(pick_cached(&mut h.app, &proj, pos).iter().any(target), "on, style {style}");
+        assert!(pick_all(&h.app, &proj, pos).iter().any(target), "on, pick_all, style {style}");
+    }
 }
 
 #[test]

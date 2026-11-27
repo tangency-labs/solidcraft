@@ -19,7 +19,9 @@ use crate::{KernelError, Result};
 /// An import kept as records.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ImportRecords {
-    /// The bodies, in the file's order.
+    /// The bodies, in the file's order. Reading records refuses more than an import makes
+    /// (`bounded_bodies`).
+    #[serde(deserialize_with = "bounded_bodies")]
     pub bodies: Vec<RecordBody>,
     /// The file's product tree; its nodes' `bodies` index [`ImportRecords::bodies`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -87,6 +89,35 @@ pub struct RecordMesh {
     pub triangles: Vec<[u32; 3]>,
 }
 
+/// [`ImportRecords::bodies`] as read, refused at the first body past [`super::MAX_BODIES`], which
+/// [`records_import`] refuses in any case. A body takes a dozen bytes of text and over 500 in
+/// memory, so records of millions of tiny bodies, small once compressed in a design, would
+/// otherwise take tens of gigabytes before any check ran. Only this list is bounded as it is read.
+/// The other lists of records cost what parsing their JSON costs.
+fn bounded_bodies<'de, D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Vec<RecordBody>, D::Error> {
+    struct Bodies;
+    impl<'de> serde::de::Visitor<'de> for Bodies {
+        type Value = Vec<RecordBody>;
+        fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "a list of at most {} bodies", super::MAX_BODIES)
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Vec<RecordBody>, A::Error> {
+            let mut bodies = Vec::new();
+            while let Some(body) = seq.next_element::<RecordBody>()? {
+                if bodies.len() == super::MAX_BODIES {
+                    return Err(serde::de::Error::custom(format!("an import of more than {} bodies", super::MAX_BODIES)));
+                }
+                bodies.push(body);
+            }
+            // The list keeps no spare room, so it takes the memory of its bodies and no more (a
+            // design reader bounds the bodies it keeps by their count).
+            bodies.shrink_to_fit();
+            Ok(bodies)
+        }
+    }
+    deserializer.deserialize_seq(Bodies)
+}
+
 /// Most vertices of a mesh kept as a record (as an AP242 tessellated part read from STEP text).
 const MAX_MESH_VERTICES: usize = 1_000_000;
 /// Most triangles of a mesh kept as a record.
@@ -96,17 +127,26 @@ const MAX_MESH_TRIANGLES: usize = 2_000_000;
 /// SMLib's own, as a STEP import's are. Readers outside the kernel (cadmpeg's neutral model, in
 /// `solidcraft-io`) pass this, so only the kernel uses SMLib.
 pub fn import_trims() -> &'static (dyn solidcore_ops::pcurve::Trims + Sync) {
-    &solidcraft_smlib::pcurves::SmlibTrims
+    &solidcraft_smlib::pcurves::SmlibImportTrims
 }
 
 /// The bodies an import kept as records makes, with its tree and warnings: what a STEP import
 /// gives, so a design uses either the same way.
 pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
+    records_import_with_workers(records, super::parallel::workers())
+}
+
+/// [`records_import`] with at most `workers` threads preparing independent original bodies in
+/// parallel while assembling the import in exact file order.
+pub(crate) fn records_import_with_workers(records: &ImportRecords, workers: usize) -> Result<StepImport> {
     let _span = solidcraft_profile::span("import", "records.import");
     if records.bodies.len() > super::MAX_BODIES {
         return Err(KernelError::Invalid(format!("an import of {} bodies (at most {})", records.bodies.len(), super::MAX_BODIES)));
     }
     check_tree(&records.tree, records.bodies.len(), 0, &mut 0)?;
+    if crate::watch::cancelled() {
+        return Err(crate::watch::cancelled_error("import"));
+    }
     let mut bodies = Vec::with_capacity(records.bodies.len());
     // A part placed again is one part: its copies are not counted again. One root product: the
     // first name of every issue's path is the import's own component.
@@ -127,6 +167,23 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             detail: w.clone(),
         });
     }
+    // Prepare independent original bodies in parallel (on desktop), collecting in exact file order.
+    let original_indices: Vec<usize> = records.bodies.iter().enumerate().filter_map(|(k, r)| r.copy_of.is_none().then_some(k)).collect();
+    let mut prepared: Vec<Option<std::result::Result<Part, String>>> = vec![None; records.bodies.len()];
+    if original_indices.len() > 1 && workers > 1 {
+        let made = crate::par::map_on_threads(&original_indices, workers.min(original_indices.len()), |&k| {
+            if crate::watch::cancelled() {
+                return Err(String::new());
+            }
+            part_of(&records.bodies[k])
+        });
+        if crate::watch::cancelled() {
+            return Err(crate::watch::cancelled_error("import"));
+        }
+        for (&k, res) in original_indices.iter().zip(made) {
+            prepared[k] = Some(res.unwrap_or_else(|| Err("record body worker panicked".into())));
+        }
+    }
     // A body SMLib refuses is left out, as a STEP import leaves out a solid it cannot make, and
     // the others still come in: `kept[k]` is where record body `k` is among the bodies made.
     let mut kept = vec![None; records.bodies.len()];
@@ -135,11 +192,14 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
     // The parts counted among the import's solids.
     let mut counted = std::collections::HashSet::new();
     for (k, r) in records.bodies.iter().enumerate() {
+        if crate::watch::cancelled() {
+            return Err(crate::watch::cancelled_error("import"));
+        }
         let label = if r.name.is_empty() { format!("body {}", k + 1) } else { r.name.clone() };
         // The record body whose part this is: itself, or the one it is a copy of.
         let source = r.copy_of.unwrap_or(k);
         let part = match r.copy_of {
-            None => part_of(r),
+            None => prepared[k].take().unwrap_or_else(|| part_of(r)),
             Some(j) => copy_part(records, &originals, k, j),
         };
         // An original's part is kept for its copies whatever its own placement: a copy placed
@@ -209,6 +269,7 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             source_item: source as u64,
             face_origin: part.face_origin,
             name: r.name.clone(),
+            common_face_name: None,
             body,
             color,
             path: r.path.clone(),
@@ -218,6 +279,9 @@ pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
             refused: None,
             hidden: r.hidden,
         });
+    }
+    if crate::watch::cancelled() {
+        return Err(crate::watch::cancelled_error("import"));
     }
     Ok(StepImport {
         tree: renumbered(&records.tree, &kept, &bodies),
@@ -268,6 +332,12 @@ fn renumbered(nodes: &[StepNode], kept: &[Option<usize>], made: &[ImportedBody])
 /// [`records_import`] through the recent imports' cache ([`super::step_import_shared`]'s), keyed
 /// by the records' serialised form.
 pub fn records_import_shared(records: &ImportRecords) -> Result<Arc<StepImport>> {
+    records_import_shared_with_workers(records, super::parallel::workers())
+}
+
+/// [`records_import_shared`] with at most `workers` inner worker threads, bounding nested
+/// parallelism when multiple independent imports decode concurrently.
+pub fn records_import_shared_with_workers(records: &ImportRecords, workers: usize) -> Result<Arc<StepImport>> {
     let text = records_text(records)?;
     let key = super::text_key(&text);
     // Records are made into bodies as they are, whatever the heal preference
@@ -275,7 +345,7 @@ pub fn records_import_shared(records: &ImportRecords) -> Result<Arc<StepImport>>
     if let Some(imp) = super::recent(key, false) {
         return Ok(imp);
     }
-    let imp = Arc::new(records_import(records)?);
+    let imp = Arc::new(records_import_with_workers(records, workers)?);
     super::remember(key, false, &imp, text.len() <= super::KEEP_SMALL_BYTES);
     Ok(imp)
 }
@@ -383,7 +453,7 @@ fn mesh_part(mesh: &RecordMesh) -> std::result::Result<Part, String> {
     }
     let body = crate::mesh_body(&positions, &mesh.triangles).map_err(|e| e.to_string())?;
     let closed = body.is_closed_mesh();
-    Ok(Part { body, closed, file_faces: 0, face_origin: Vec::new(), refused: None })
+    Ok(Part { body, closed, file_faces: 0, face_origin: Vec::new(), refused: None, split_edges: 0 })
 }
 
 /// The part of body `k`, a copy of body `j`: `j`'s, which must be an earlier original that

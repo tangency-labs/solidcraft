@@ -27,7 +27,9 @@ pub struct PanelLayoutPreferences {
 pub(super) struct PreferenceRecord {
     pub version: u32,
     pub selected: WorkspaceId,
-    #[serde(with = "catalogue_bytes")]
+    /// The catalogue snapshot; stored as plain JSON by [`PreferenceRecord::value`] and read by
+    /// [`PreferenceRecord::read`], never through this field's own serde.
+    #[serde(skip_serializing, default)]
     pub catalogue: Vec<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rejected: Option<Value>,
@@ -46,15 +48,15 @@ pub(super) struct UnreadEntry {
     /// `builtin`, `user`, `remembered` or `native`.
     pub kind: String,
     pub name: String,
-    #[serde(with = "catalogue_bytes")]
+    #[serde(with = "stored_bytes")]
     pub record: Vec<u8>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub recovery: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "stored_bytes::optional")]
+    pub recovery: Option<Vec<u8>>,
 }
 
 impl UnreadEntry {
     fn new(kind: &str, name: &str, record: &[u8], recovery: Option<&[u8]>) -> Self {
-        Self { kind: kind.into(), name: name.into(), record: record.to_vec(), recovery: recovery.map(solidcraft_engine::doc::canvas::base64_encode) }
+        Self { kind: kind.into(), name: name.into(), record: record.to_vec(), recovery: recovery.map(<[u8]>::to_vec) }
     }
     pub(super) fn from_raw(kind: &str, name: &str, raw: &commands::RawRecord) -> Self {
         Self::new(kind, name, &raw.bytes, raw.rejected.as_deref())
@@ -63,7 +65,8 @@ impl UnreadEntry {
         Self::new("native", &workspace.0, bytes, None)
     }
     pub(super) fn size(&self) -> usize {
-        self.kind.len() + self.name.len() + self.record.len().div_ceil(3) * 4 + self.recovery.as_ref().map_or(0, String::len)
+        // As stored: the entry written out, so the cap bounds the preferences it is kept in.
+        serde_json::to_vec(self).map_or(usize::MAX, |written| written.len())
     }
 }
 
@@ -87,26 +90,70 @@ pub(super) fn merge_unread(kept: &mut Vec<UnreadEntry>, incoming: Vec<UnreadEntr
     Some(added)
 }
 
-mod catalogue_bytes {
-    use serde::Deserialize as _;
-    use serde::de::Error as _;
+/// Bytes an older build packed as base64 text: read once, canonical and within `max`; nothing
+/// writes them so again.
+fn legacy_packed(packed: &str, max: usize) -> Option<Vec<u8>> {
     use solidcraft_engine::doc::canvas::{base64_decode, base64_encode};
+    if packed.len() > max.div_ceil(3) * 4 {
+        return None;
+    }
+    let bytes = base64_decode(packed)?;
+    (bytes.len() <= max && base64_encode(&bytes) == packed).then_some(bytes)
+}
 
-    pub(super) const MAX_PACKED_BYTES: usize = super::commands::MAX_CATALOGUE_SNAPSHOT_BYTES.div_ceil(3) * 4;
+/// The panel catalogue as preferences store it: plain JSON ([`commands::snapshot_value`]); an older
+/// build's base64 text still reads.
+fn catalogue_from_value(value: &Value) -> PanelResult<Vec<u8>> {
+    match value {
+        Value::String(packed) => legacy_packed(packed, commands::MAX_CATALOGUE_SNAPSHOT_BYTES)
+            .ok_or_else(|| error(Rule::Schema, "invalid or oversized packed panel catalogue")),
+        Value::Object(object) if object.contains_key("text") || object.contains_key("bytes") => {
+            commands::bytes_from_plain(value, commands::MAX_CATALOGUE_SNAPSHOT_BYTES)
+        }
+        Value::Object(_) => commands::snapshot_from_value(value),
+        _ => Err(error(Rule::Schema, "panel catalogue required")),
+    }
+}
+
+/// A kept layout's bytes: plain JSON (`{"text": ...}` or `{"bytes": [...]}`), or an older build's
+/// base64 text, which still reads.
+mod stored_bytes {
+    use serde::Deserialize as _;
+    use serde::Serialize as _;
+    use serde::de::Error as _;
+    use serde_json::Value;
+
+    const MAX: usize = super::commands::MAX_CATALOGUE_SNAPSHOT_BYTES;
 
     pub fn serialize<S: serde::Serializer>(bytes: &[u8], serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&base64_encode(bytes))
+        super::commands::plain_bytes(bytes).serialize(serializer)
     }
     pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<u8>, D::Error> {
-        let packed = String::deserialize(deserializer)?;
-        if packed.len() > MAX_PACKED_BYTES {
-            return Err(D::Error::custom("panel catalogue packed byte cap"));
+        read(&Value::deserialize(deserializer)?).ok_or_else(|| D::Error::custom("invalid kept panel layout bytes"))
+    }
+    fn read(value: &Value) -> Option<Vec<u8>> {
+        match value {
+            Value::String(packed) => super::legacy_packed(packed, MAX),
+            other => super::commands::bytes_from_plain(other, MAX).ok(),
         }
-        let bytes = base64_decode(&packed).ok_or_else(|| D::Error::custom("invalid packed panel catalogue"))?;
-        if bytes.len() > super::commands::MAX_CATALOGUE_SNAPSHOT_BYTES || base64_encode(&bytes) != packed {
-            return Err(D::Error::custom("invalid or oversized packed panel catalogue"));
+    }
+    pub mod optional {
+        use serde::Deserialize as _;
+        use serde::de::Error as _;
+        use serde_json::Value;
+
+        pub fn serialize<S: serde::Serializer>(bytes: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error> {
+            match bytes {
+                Some(bytes) => super::serialize(bytes, serializer),
+                None => serializer.serialize_none(),
+            }
         }
-        Ok(bytes)
+        pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Vec<u8>>, D::Error> {
+            match Option::<Value>::deserialize(deserializer)? {
+                None | Some(Value::Null) => Ok(None),
+                Some(value) => super::read(&value).map(Some).ok_or_else(|| D::Error::custom("invalid kept panel layout bytes")),
+            }
+        }
     }
 }
 
@@ -325,11 +372,13 @@ impl PreferenceRecord {
         if value.get("version").and_then(Value::as_u64) != Some(u64::from(RECORD_VERSION)) {
             return Err(error(Rule::Version, "unsupported application panel preferences"));
         }
-        let packed = value.get("catalogue").and_then(Value::as_str).ok_or_else(|| error(Rule::Schema, "packed panel catalogue required"))?;
-        if packed.len() > catalogue_bytes::MAX_PACKED_BYTES {
-            return Err(error(Rule::CollectionLimit, "panel catalogue snapshot byte cap"));
+        let catalogue = catalogue_from_value(value.get("catalogue").ok_or_else(|| error(Rule::Schema, "panel catalogue required"))?)?;
+        let mut fields = value.clone();
+        if let Some(object) = fields.as_object_mut() {
+            object.remove("catalogue");
         }
-        let mut record: Self = serde_json::from_value(value.clone()).map_err(|_| error(Rule::Schema, "invalid application panel preferences"))?;
+        let mut record: Self = serde_json::from_value(fields).map_err(|_| error(Rule::Schema, "invalid application panel preferences"))?;
+        record.catalogue = catalogue;
         // Explicit JSON null is rejected source data, not an absent sidecar.
         record.rejected = value.get("rejected").cloned();
         if let Some(legacy) = &record.legacy {
@@ -387,8 +436,10 @@ impl PreferenceRecord {
         commands::CatalogueState::hydrate(&self.catalogue, registry)
     }
     pub(super) fn value(&self) -> Value {
-        let packed = solidcraft_engine::doc::canvas::base64_encode(&self.catalogue);
-        let mut value = serde_json::json!({"version":self.version,"selected":self.selected,"catalogue":packed,"legacy":self.legacy});
+        // A catalogue this build exported always reads as a snapshot; one that somehow doesn't is
+        // kept as its bytes, as plain numbers, rather than lost.
+        let catalogue = commands::snapshot_value(&self.catalogue).unwrap_or_else(|_| commands::plain_bytes(&self.catalogue));
+        let mut value = serde_json::json!({"version":self.version,"selected":self.selected,"catalogue":catalogue,"legacy":self.legacy});
         if !self.unread.is_empty()
             && let Some(object) = value.as_object_mut()
         {
@@ -420,6 +471,24 @@ pub fn persistent_preferences_value(app: &crate::SolveApp) -> PanelResult<Option
 }
 
 /// Also used for the held Preferences baseline. Unreadable recovery stays exact.
+/// Everything [`portable_preferences_value`] reads besides the layout it converts: the saved
+/// record recovery keeps as it is, and the panels registered now. A conversion cached with these
+/// and the layout is the one a fresh conversion would make.
+#[derive(Clone, PartialEq)]
+pub struct PortableInputs {
+    preserve: Option<Value>,
+    registry: PanelRegistry,
+}
+
+/// The inputs of [`portable_preferences_value`] for `app`, other than the layout.
+pub fn portable_inputs(app: &crate::SolveApp) -> PortableInputs {
+    let runtime = app.panel_runtime.as_ref();
+    PortableInputs {
+        preserve: runtime.and_then(|runtime| runtime.preferences.as_ref()).and_then(|state| state.preserve.clone()),
+        registry: runtime.map(|runtime| runtime.runtime().layout().registry().clone()).unwrap_or_default(),
+    }
+}
+
 pub fn portable_preferences_value(app: &crate::SolveApp, value: Option<Value>) -> PanelResult<Option<Value>> {
     let Some(value) = value else { return Ok(None) };
     bounded_record(&value)?;

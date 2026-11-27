@@ -1,6 +1,7 @@
 //! Application-owned command execution shared by UI, control and headless MCP.
 //! No Session, document, geometry, dialogs or camera are reachable here.
 mod catalogue;
+pub use catalogue::{bytes_from_plain, plain_bytes, snapshot_from_value, snapshot_value};
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -301,6 +302,7 @@ pub fn is_command(id: &str) -> bool {
 }
 pub const IDS: &[&str] = &[
     "layout.apply",
+    "layout.delete",
     "layout.get",
     "layout.reset",
     "layout.save",
@@ -348,6 +350,7 @@ pub enum PanelCommand {
     ResetPair(wire::ResetPair),
     Save(wire::Save),
     Apply(wire::Apply),
+    Delete(wire::Delete),
     Reset(wire::Revision),
     Workspace(wire::WorkspaceSelect),
 }
@@ -410,6 +413,7 @@ pub fn parse_command(id: &str, params: &Value) -> PanelResult<PanelCommand> {
             PanelCommand::Save(read(params)?)
         }
         "layout.apply" => PanelCommand::Apply(read(params)?),
+        "layout.delete" => PanelCommand::Delete(read(params)?),
         "layout.reset" => PanelCommand::Reset(read(params)?),
         "layout.workspace.select" => PanelCommand::Workspace(read(params)?),
         _ => return Err(error(Rule::MissingTarget, "not an application layout command")),
@@ -500,6 +504,9 @@ fn validate_command(command: &PanelCommand) -> PanelResult<()> {
             preset_name(&p.name)?;
         }
         PanelCommand::Apply(p) => {
+            preset_name(&p.name)?;
+        }
+        PanelCommand::Delete(p) => {
             preset_name(&p.name)?;
         }
         PanelCommand::Workspace(p) => valid_id(&p.workspace.0)?,
@@ -673,7 +680,13 @@ fn current_envelope(catalogue: &CatalogueState, state: &LayoutReply, registry: &
 /// v1 writes merely to inspect identities; callers union current live IDs too.
 pub fn current_envelope_snapshot(catalogue: &dyn LayoutCatalogue, state: &LayoutReply, registry: &PanelRegistry) -> PanelResult<LayoutEnvelope> {
     match catalogue.state().remembered(&state.layout.workspace) {
-        Some(stored) => stored.project_envelope(registry, &state.layout.workspace),
+        Some(stored) => {
+            let mut envelope = stored.project_envelope(registry, &state.layout.workspace)?;
+            if holds_live_quarantine(&envelope, &state.layout, registry) {
+                restore_quarantine(&mut envelope, registry)?;
+            }
+            Ok(envelope)
+        }
         None => Ok(LayoutEnvelope::new(state.layout.clone())),
     }
 }
@@ -887,6 +900,20 @@ pub fn execute_command(command: PanelCommand, context: &mut PanelCommandContext<
             let state = stage_current(context, &state, &action, &current, recovery, next)?;
             value(wire::SaveReply { name, overwritten, state })
         }
+        PanelCommand::Delete(p) => {
+            revision(p.expected_revision, &state)?;
+            let name = match next.find_preset_name(&preset_name(&p.name)?) {
+                Some((PresetKind::BuiltIn, _)) => return Err(error(Rule::Capability, "built-in presets are immutable")),
+                Some((PresetKind::User, name)) => name.to_string(),
+                None => return Err(error(Rule::MissingTarget, "layout preset not registered")),
+            };
+            // Only the library changes: the panels stay where they are, even when
+            // they match the deleted layout.
+            next.users.remove(&name);
+            let action = LayoutAction::Inspect;
+            let state = stage_current(context, &state, &action, &current, recovery, next)?;
+            value(wire::DeleteReply { name, state })
+        }
         PanelCommand::Apply(p) => {
             revision(p.expected_revision, &state)?;
             let stored = next.preset(&preset_name(&p.name)?)?;
@@ -1079,7 +1106,7 @@ pub fn preflight_batch(steps: &[Value], workspace: &WorkspaceId) -> PanelResult<
             step.get("command").or_else(|| step.get("id")).and_then(Value::as_str).ok_or_else(|| error(Rule::Schema, "batch command required"))?;
         let empty = json!({});
         match parse_command(id, step.get("params").unwrap_or(&empty))? {
-            PanelCommand::List | PanelCommand::Get | PanelCommand::Save(_) => {}
+            PanelCommand::List | PanelCommand::Get | PanelCommand::Save(_) | PanelCommand::Delete(_) => {}
             PanelCommand::HeaderAction(_) => header_action = true,
             PanelCommand::Contextual { .. } => contextual = true,
             PanelCommand::Apply(_) | PanelCommand::Reset(_) => replacement = true,
@@ -1165,7 +1192,7 @@ pub fn execute_batch(steps: &[Value], context: &mut PanelCommandContext<'_>) -> 
         match id {
             "panel.list" => result = value(wire::ListReply { state: committed.clone(), kinds: context.registry.specs().cloned().collect() })?,
             "layout.get" => result = value(wire::GetReply { state: committed.clone(), workspaces: context.catalogue.state().summaries() })?,
-            "layout.save" | "layout.workspace.select" => result["state"] = value(committed.clone())?,
+            "layout.save" | "layout.delete" | "layout.workspace.select" => result["state"] = value(committed.clone())?,
             _ => result = value(committed.clone())?,
         }
         results.push(result);

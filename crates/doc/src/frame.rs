@@ -18,8 +18,7 @@ use solidcraft_geom::prelude::*;
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
-use solidcore_ops::prism::tapered_flange_ends;
-use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 
 use crate::expr::Kind;
 use crate::{DocError, Expr, Result};
@@ -35,12 +34,18 @@ pub mod sizes;
 pub const MAX_MEMBERS: usize = 1000;
 /// The largest profile dimension (mm).
 pub const MAX_PROFILE_SIZE: f64 = 10_000.0;
+
+/// Is `v` a finite length within [`MAX_PROFILE_SIZE`] either way: a coordinate of a member's
+/// `locate`, or an offset from its anchor, the engine takes.
+pub fn within_profile_size(v: f64) -> bool {
+    v.is_finite() && v.abs() <= MAX_PROFILE_SIZE
+}
 /// The smallest profile dimension (mm): walls and sides thinner than this are refused, and so
 /// are radii smaller than this but not 0.
 pub const MIN_PROFILE_DIMENSION: f64 = 0.01;
 /// How far from vertical (radians) a member's line may lean and still count as vertical for its
 /// orientation ([`member_axes`]).
-pub const VERTICAL_TOLERANCE: f64 = 1e-6;
+pub const VERTICAL_TOLERANCE: f64 = solidcraft_kernel::FRAME_VERTICAL_TOLERANCE;
 
 /// A built-in profile and its dimensions (mm). `Option` dimensions take a default worked out from
 /// the profile's size ([`Profile::filled`] says which).
@@ -349,10 +354,12 @@ impl crate::walk::Walk for ProfileSpec {
 }
 
 pub use crate::eval::frame_member::{
-    LaterPieces, corner_at_point, corner_point, default_order, default_orders, is_crossing, is_member_line, is_member_wire, member_line_ids,
-    member_names, member_of_body, member_parts, member_segments, member_turns, members_cross, members_of_bodies, overlap_parent,
+    LaterPieces, SectionView, corner_at_point, corner_point, default_order, default_orders, group_member_names, is_crossing, is_member_line,
+    is_member_wire, located_point, member_line_ids, member_names, member_of_body, member_parts, member_segments, member_turns, members_cross,
+    members_of_bodies, overlap_parent, section_view,
 };
 pub use crate::frame_corners::{CornerOverride, CornerType, MAX_GAP, MemberRef, checked_gap, read_coped};
+pub use crate::frame_plate::{PlateHoles, PlateMember, PlateShape, plate_member, plate_region};
 
 /// A frame member between two points (#15705): its id, which names the member as a line's id
 /// does (`names`, End Caps), and its two ends, found again on every evaluation so the member
@@ -393,6 +400,91 @@ pub enum MemberProfile {
     },
 }
 
+/// One member: the member a `FrameMember` feature lays on one of its lines. A member is known by
+/// its feature and line, not by its body, so its trims (and later its cut list row) stay with it
+/// when its body is rebuilt or renamed.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct TrimMemberRef {
+    pub feature: crate::FeatureName,
+    pub line: String,
+}
+
+/// A side of a member: of its profile's bounding box, in the profile's own x and y (`right` is
+/// +x, `top` +y), so the side follows the member when its profile turns or is mirrored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Side {
+    Right,
+    Left,
+    Top,
+    Bottom,
+}
+
+/// What a member is trimmed (or extended) to.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TrimTarget {
+    /// A side of another member (a butt joint), worked out from that member's line and profile,
+    /// so it follows sketch and parameter edits. No side: the side the trimmed member meets.
+    Member {
+        member: TrimMemberRef,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        side: Option<Side>,
+    },
+    /// A plane: an origin or construction plane, or a planar face of a body.
+    Plane { plane: crate::PlaneRef },
+}
+
+/// Which end of a member a trim moves.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrimEnd {
+    /// The end nearer the target.
+    #[default]
+    Auto,
+    /// The end at its line's start.
+    Start,
+    /// The end at its line's end.
+    End,
+}
+
+impl TrimEnd {
+    pub fn is_auto(&self) -> bool {
+        *self == TrimEnd::Auto
+    }
+}
+
+/// Most targets one trim feature trims to.
+pub const MAX_TRIM_TARGETS: usize = 256;
+/// The largest weld gap (mm).
+pub const MAX_TRIM_GAP: f64 = 1000.0;
+
+/// A member as the model holds it after the features so far: its body, and where its ends are, so
+/// a trim rebuilds it from its feature's line and profile with its ends moved.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct MemberRecord {
+    /// The `FrameMember` feature, by id, and the line.
+    pub feature: u64,
+    pub line: String,
+    pub body: String,
+    /// The plane each end (start, end) is cut in, its normal out of the member; none: square at
+    /// its line's end.
+    pub ends: [Option<Plane>; 2],
+    /// Shared body of the last member/trim build. Body identity detects even a symmetric
+    /// rotation or a modification entirely inside the outline. Saved states preserve whether
+    /// the live body still shares this shape; old caches are evaluated again.
+    #[serde(skip)]
+    pub(crate) built: Option<solidcraft_kernel::Body>,
+}
+
+impl MemberRecord {
+    /// Whether this is the body last built by Frame Member or Trim/Extend.
+    /// A later body operation, including a symmetric move, invalidates that identity.
+    pub fn is_unchanged(&self, body: &solidcraft_kernel::Body) -> bool {
+        self.built.as_ref().is_some_and(|built| built.same(body))
+    }
+}
+
 impl Anchor {
     pub fn is_origin(&self) -> bool {
         *self == Anchor::Origin
@@ -417,6 +509,73 @@ pub enum Anchor {
     BottomLeft,
     Bottom,
     BottomRight,
+}
+
+/// The world direction a frame member's profile takes as up ([`member_axes`]): world +Z by default,
+/// or another world axis for a part drawn with that axis up (a part with Y up takes `Y`). Lines
+/// along it are the vertical members.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UpAxis {
+    #[serde(rename = "X")]
+    X,
+    #[serde(rename = "-X")]
+    NegX,
+    #[serde(rename = "Y")]
+    Y,
+    #[serde(rename = "-Y")]
+    NegY,
+    #[default]
+    #[serde(rename = "Z")]
+    Z,
+    #[serde(rename = "-Z")]
+    NegZ,
+}
+
+/// Every [`UpAxis`] as JSON spells it.
+pub const UP_AXES: [&str; 6] = ["X", "-X", "Y", "-Y", "Z", "-Z"];
+
+impl UpAxis {
+    pub fn is_z(&self) -> bool {
+        *self == UpAxis::Z
+    }
+
+    /// The up direction, a world unit vector.
+    pub fn up(self) -> Vec3 {
+        match self {
+            UpAxis::X => Vec3::X,
+            UpAxis::NegX => -Vec3::X,
+            UpAxis::Y => Vec3::Y,
+            UpAxis::NegY => -Vec3::Y,
+            UpAxis::Z => Vec3::Z,
+            UpAxis::NegZ => -Vec3::Z,
+        }
+    }
+
+    /// The world direction a vertical member's profile x takes: world +X, or world +Y when X is
+    /// up.
+    pub fn across(self) -> Vec3 {
+        match self {
+            UpAxis::X | UpAxis::NegX => Vec3::Y,
+            _ => Vec3::X,
+        }
+    }
+}
+
+impl Anchor {
+    /// Every anchor, in the order the Frame Member dialog lists them.
+    pub const ALL: &[Anchor] = &[
+        Anchor::Origin,
+        Anchor::Center,
+        Anchor::Centroid,
+        Anchor::TopLeft,
+        Anchor::Top,
+        Anchor::TopRight,
+        Anchor::Left,
+        Anchor::Right,
+        Anchor::BottomLeft,
+        Anchor::Bottom,
+        Anchor::BottomRight,
+    ];
 }
 
 /// A profile's section properties (mm², mm, mm⁴). Second moments are about axes through the
@@ -846,14 +1005,7 @@ pub fn section(region: &Region2) -> Section {
 
 /// Where `anchor` is on the profile made of `regions`, in the profile's own coordinates.
 pub fn anchor_point(regions: &[Region2], anchor: Anchor) -> Vec2 {
-    let (mut lo, mut hi) = (Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
-    for p in regions.iter().flat_map(|r| extreme_points(&r.outer)) {
-        lo = Vec2::new(lo.x.min(p.x), lo.y.min(p.y));
-        hi = Vec2::new(hi.x.max(p.x), hi.y.max(p.y));
-    }
-    if !(lo.x <= hi.x && lo.y <= hi.y) {
-        return Vec2::ZERO;
-    }
+    let Some((lo, hi)) = profile_bounds(regions) else { return Vec2::ZERO };
     let mid = Vec2::new((lo.x + hi.x) / 2.0, (lo.y + hi.y) / 2.0);
     match anchor {
         Anchor::Origin => Vec2::ZERO,
@@ -894,21 +1046,22 @@ pub fn mirrored(region: &Region2) -> Region2 {
 }
 
 /// The directions a member's profile x and y take in the world, for a member running along `d`
-/// (any length): the profile's y points up (world +Z) as far as the line allows and x = y × d, so
-/// x × y runs along the line; a vertical member's x is world +X (a line leaning less than
-/// [`VERTICAL_TOLERANCE`] counts as vertical, so rounding never turns a post). `angle` (radians) then turns the
-/// profile counter-clockwise about the line, seen looking back from its end. `None` for a
-/// direction of no length.
-pub fn member_axes(d: Vec3, angle: f64) -> Option<(Vec3, Vec3)> {
-    let d = d.normalized()?;
-    let up = Vec3::Z - d * Vec3::Z.dot(d);
-    // `up` is as long as the sine of the line's lean from vertical.
-    let (x, y) = match up.normalized().filter(|_| up.len() > VERTICAL_TOLERANCE) {
-        Some(y) => (y.cross(d), y),
-        None => (Vec3::X, d.cross(Vec3::X)),
-    };
-    let (c, s) = (angle.cos(), angle.sin());
-    Some((x * c + y * s, y * c - x * s))
+/// (any length): the profile's y points up (`up`, world +Z by default) as far as the line allows
+/// and x = y × d, so x × y runs along the line; a vertical member's x is [`UpAxis::across`] (a
+/// line leaning less than [`VERTICAL_TOLERANCE`] from `up` counts as vertical, so rounding never
+/// turns a post). `angle` (radians) then turns the profile counter-clockwise about the line, seen
+/// looking back from its end. `None` for a direction of no length. The kernel's member axes take
+/// world +Z as up; another up axis turns the world so that it is +Z and `across` is +X, and back.
+pub fn member_axes(d: Vec3, angle: f64, up: UpAxis) -> Option<(Vec3, Vec3)> {
+    let axes = |d| solidcraft_kernel::member_axes(d, angle).ok().flatten();
+    if up.is_z() {
+        return axes(d);
+    }
+    let (z, x) = (up.up(), up.across());
+    let y = z.cross(x);
+    let world = |v: Vec3| x * v.x + y * v.y + z * v.z;
+    let (ax, ay) = axes(Vec3::new(d.dot(x), d.dot(y), d.dot(z)))?;
+    Some((world(ax), world(ay)))
 }
 
 /// [`member_axes`] for a member running along `dir` with its `up` given (#4003 Auto's lined-up sections): the
@@ -921,6 +1074,16 @@ pub fn group_axes(dir: Vec3, up: Vec3, turn: f64) -> Option<(Vec3, Vec3)> {
     let x = y.cross(d);
     let (c, s) = (turn.cos(), turn.sin());
     Some((x * c + y * s, y * c - x * s))
+}
+
+/// The bounding box (lowest and highest corner) of a profile's regions; `None` without any.
+pub fn profile_bounds(regions: &[Region2]) -> Option<(Vec2, Vec2)> {
+    let (mut lo, mut hi) = (Vec2::new(f64::INFINITY, f64::INFINITY), Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY));
+    for p in regions.iter().flat_map(|r| extreme_points(&r.outer)) {
+        lo = Vec2::new(lo.x.min(p.x), lo.y.min(p.y));
+        hi = Vec2::new(hi.x.max(p.x), hi.y.max(p.y));
+    }
+    (lo.x <= hi.x && lo.y <= hi.y).then_some((lo, hi))
 }
 
 /// `region` turned by `angle` (radians, counter-clockwise) about its `anchor` point and moved so
@@ -940,4 +1103,151 @@ pub fn placed(region: &Region2, anchor: Vec2, at: Vec2, angle: f64) -> Region2 {
     };
     let lp = |l: &Loop2| Loop2 { segs: l.segs.iter().map(seg).collect() };
     Region2 { outer: lp(&region.outer), holes: region.holes.iter().map(lp).collect() }
+}
+
+/// One group of a frame member feature: lines whose members share a placement on the profile
+/// (#4003). This records placement; joined finishing across several groups is explicitly
+/// unsupported until its per-group joint rules are defined.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct MemberGroup {
+    /// The lines, by curve id; none (only in a feature's single group): every straight line drawn
+    /// in the frame sketch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lines: Vec<String>,
+    /// The profile point that sits on each line.
+    #[serde(default, skip_serializing_if = "Anchor::is_origin")]
+    pub anchor: Anchor,
+    /// The profile point that sits on each line, [x, y] from the profile's own origin
+    /// ([`Profile::origin`]). Some: takes precedence over `anchor`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locate: Option<[f64; 2]>,
+    /// How far the profile turns about each line (see [`member_axes`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[walk(angle = "Rotation")]
+    pub angle: Option<Expr>,
+    /// The profile mirrored across its y axis (before it turns).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mirror: bool,
+    /// What the group's members are named after when they have no name of their own; none: the
+    /// profile's description or the profile sketch's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body_name: Option<String>,
+}
+
+/// The groups of a frame member feature, in the order their members are made: its `groups`, or,
+/// without them, the one group its own `lines`, `anchor`, `locate`, `angle`, `mirror` and `body_name`
+/// make.
+pub fn member_groups(kind: &crate::FeatureKind) -> Vec<MemberGroup> {
+    match kind {
+        crate::FeatureKind::FrameMember { groups, .. } if !groups.is_empty() => groups.clone(),
+        crate::FeatureKind::FrameMember { lines, anchor, locate, angle, mirror, body_name, .. } => vec![MemberGroup {
+            lines: lines.clone(),
+            anchor: *anchor,
+            locate: *locate,
+            angle: angle.clone(),
+            mirror: *mirror,
+            body_name: body_name.clone(),
+        }],
+        _ => Vec::new(),
+    }
+}
+
+/// Check the combinations this first grouped placement model can represent. Flat Frame Members
+/// retain every Auto/corner/pair option; a grouped frame is independent straight sketch lines.
+/// Refuse an unsupported combination rather than dropping a saved finishing or path setting.
+pub fn check_group_options(kind: &crate::FeatureKind) -> crate::Result<()> {
+    let crate::FeatureKind::FrameMember {
+        groups,
+        path_sketch,
+        lines,
+        anchor,
+        locate,
+        angle,
+        mirror,
+        body_name,
+        pairs,
+        corner,
+        corners,
+        flip,
+        fit_ends,
+        coped,
+        gap,
+        ..
+    } = kind
+    else {
+        return Ok(());
+    };
+    if groups.is_empty() {
+        return Ok(());
+    }
+    let invalid = |s: &str| crate::DocError::Invalid(s.into());
+    if path_sketch.is_none() {
+        return Err(invalid("frame member groups need a frame sketch"));
+    }
+    if !pairs.is_empty() {
+        return Err(invalid("not supported yet: frame member groups with point pairs; use a separate Frame Member for pairs"));
+    }
+    if !corner.is_none() || !corners.is_empty() {
+        return Err(invalid("not supported yet: frame member groups with joined corners; use corner none without corner overrides"));
+    }
+    if *flip || *fit_ends || *coped || gap.is_some() {
+        return Err(invalid("not supported yet: frame member groups with flip, fit_ends, coped or gap; use separate Frame Members for finishing"));
+    }
+    if !lines.is_empty() || !anchor.is_origin() || locate.is_some() || angle.is_some() || *mirror || body_name.is_some() {
+        return Err(invalid("frame member groups keep lines and placement inside each group, not beside groups"));
+    }
+    let total = groups.iter().fold(0usize, |n, g| n.saturating_add(g.lines.len()));
+    if groups.len() > MAX_MEMBERS || total > MAX_MEMBERS {
+        return Err(crate::DocError::Invalid(format!("at most {MAX_MEMBERS} members in one feature")));
+    }
+    let mut seen = std::collections::HashSet::new();
+    for (i, group) in groups.iter().enumerate() {
+        if groups.len() > 1 && group.lines.is_empty() {
+            return Err(crate::DocError::Invalid(format!("group {} has no lines", i + 1)));
+        }
+        if let Some(line) = group.lines.iter().find(|l| !seen.insert(l.as_str())) {
+            return Err(crate::DocError::Invalid(format!("line `{line}` is in two groups")));
+        }
+    }
+    Ok(())
+}
+
+/// A tapered flange's thickness at its two ends: `(at the toe, at the root)`. The flange is
+/// `thickness` thick at the middle of its inside length `inside` (a channel's width less its web)
+/// and its inside face slopes by `slope` degrees across that length, so each end differs from the
+/// middle by half the length times the slope's tangent. No slope: `thickness` at both ends.
+/// Inputs are not checked: a caller refuses a slope or a length out of its range first; a
+/// non-finite input gives a non-finite answer, never a panic.
+fn tapered_flange_ends(inside: f64, thickness: f64, slope: f64) -> (f64, f64) {
+    let change = inside / 2.0 * slope.to_radians().tan();
+    (thickness - change, thickness + change)
+}
+
+/// Group placements as flat views of the same feature: same id, component, profile, pinned
+/// member names, copy metadata and pair-id counter. Evaluation uses main's straight-member
+/// pipeline for each view; the design itself always keeps its groups.
+pub(crate) fn group_features(f: &crate::Feature) -> crate::Result<Option<Vec<crate::Feature>>> {
+    let crate::FeatureKind::FrameMember { groups, .. } = &f.kind else { return Ok(None) };
+    if groups.is_empty() {
+        return Ok(None);
+    }
+    check_group_options(&f.kind)?;
+    Ok(Some(
+        groups
+            .iter()
+            .map(|group| {
+                let mut flat = f.clone();
+                if let crate::FeatureKind::FrameMember { groups, lines, anchor, locate, angle, mirror, body_name, .. } = &mut flat.kind {
+                    groups.clear();
+                    lines.clone_from(&group.lines);
+                    *anchor = group.anchor;
+                    *locate = group.locate;
+                    angle.clone_from(&group.angle);
+                    *mirror = group.mirror;
+                    body_name.clone_from(&group.body_name);
+                }
+                flat
+            })
+            .collect(),
+    ))
 }

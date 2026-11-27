@@ -837,6 +837,56 @@ fn with_extent_all_a_negative_kept_distance_keeps_its_side() {
     assert!((depth - 30.0).abs() < 0.05, "{depth}");
 }
 
+/// The side of the sketch an arrow's tip is on: 1 along the normal, -1 against it. A tip as near
+/// one side as the other has no side, and fails.
+fn arrow_side(h: &mut Harness, handle: &str) -> f64 {
+    let tip = crate::scenario::handle_at(handle).expect("the arrow");
+    let mut screen = |at: f64| {
+        let p = h.call("ui.at", on_arrow(h, at));
+        egui::pos2(p["result"][0].as_f64().unwrap() as f32, p["result"][1].as_f64().unwrap() as f32)
+    };
+    let (ahead, behind) = (tip.distance(screen(5.0)), tip.distance(screen(-5.0)));
+    assert!((ahead - behind).abs() > 1.0, "{handle}'s tip is on neither side: {ahead} {behind}");
+    if ahead < behind { 1.0 } else { -1.0 }
+}
+
+/// With All the arrow goes to the side the extrude goes to (#21844): a negative kept Distance
+/// cuts below the sketch, and the arrow points there, with either Direction of one side. With
+/// Symmetric the cut goes both ways, and the tip that carries the value box stays on the kept
+/// Distance's side, as before All.
+#[test]
+fn with_extent_all_the_arrow_points_where_the_extrude_goes() {
+    for (params, side) in [
+        (json!({"distance":"-10 mm"}), -1.0),
+        (json!({"distance":"10 mm"}), 1.0),
+        (json!({"distance":"-10 mm","direction":"negative"}), 1.0),
+        (json!({"distance":"10 mm","direction":"negative"}), -1.0),
+        (json!({"distance":"-10 mm","direction":"symmetric"}), -1.0),
+    ] {
+        let mut h = open_cut(params.clone());
+        assert_eq!(arrow_side(&mut h, "arrow"), side, "{params}: the Distance's arrow");
+        set_all(&mut h, true);
+        assert_eq!(arrow_side(&mut h, "arrow"), side, "{params}: with All, on the same side");
+    }
+}
+
+/// Two Sides with All and a negative kept Distance (#21844): the first side goes through below
+/// the sketch, and the model sends the second side the other way, above it. Distance 2's arrow
+/// points there too.
+#[test]
+fn with_extent_all_the_second_arrow_points_where_the_second_side_goes() {
+    let mut h = open_cut(json!({"distance":"-10 mm","distance2":"3 mm"}));
+    assert_eq!((arrow_side(&mut h, "arrow"), arrow_side(&mut h, "arrow2")), (-1.0, -1.0), "entered: Distance 2 stays below");
+    set_all(&mut h, true);
+    assert_eq!(arrow_side(&mut h, "arrow"), -1.0, "with All the first side goes through below");
+    assert_eq!(arrow_side(&mut h, "arrow2"), 1.0, "with All Distance 2 goes above, where the model puts it");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    // 30 mm of box below the sketch and 3 mm above it: the second side is above.
+    let depth = (16000.0 - volume(&h, "Main")) / (std::f64::consts::PI * 4.0);
+    assert!((depth - 33.0).abs() < 0.05, "{depth}");
+}
+
 /// With value stepping on, the box that names the extent is an empty box: Up and Down have no
 /// number to step, so the kept Distance and All stay as they are.
 #[test]
@@ -853,6 +903,32 @@ fn with_extent_all_the_value_box_has_no_number_to_step() {
         h.frames(2);
         assert_eq!(distance_and_all(&h), ("11 mm".into(), true), "{key}");
         assert_eq!(value_box_texts(&h), ["Distance", "All"], "{key}");
+    }
+}
+
+/// Two Sides gives the second side the extent types of the first (#18691): its own Extent Type
+/// row, a To Object input for it, and an edit that keeps what was saved.
+#[test]
+fn two_sides_second_side_has_its_own_extent_type() {
+    for (second, all2, to2) in [(json!({"through_all2":true}), true, false), (json!({"to2":[5,5,-20],"to_offset2":"2 mm"}), false, true)] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[0,0,-30],"body_name":"Floor"})).unwrap();
+        let mut params = json!({"distance":"5 mm","distance2":"3 mm","operation":"join","targets":["Floor"]});
+        params.as_object_mut().unwrap().extend(second.as_object().unwrap().clone());
+        let mut h = make_in(h, params);
+        open(&mut h);
+        assert!(h.widget("Extent Type 2").is_some(), "the second side's Extent Type row");
+        let d = h.app.dialog.as_ref().unwrap();
+        let crate::dialogs::Kind::Extrude { all2: shown_all2, .. } = &d.kind else { panic!("extrude") };
+        assert_eq!(*shown_all2, all2);
+        assert_eq!(d.inputs.iter().any(|i| i.label == crate::dialogs::TO_OBJECT2), to2);
+        // The hidden Distance 2 text is not read while the second side is All or To Object.
+        let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Extrude { distance2, .. }, .. }) = &mut h.app.dialog else { panic!("extrude") };
+        *distance2 = "1 +".into();
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "OK waited on the hidden Distance 2: {:?}", h.app.dialog.as_ref().map(|d| &d.error));
+        let saved = extent(&h);
+        assert_eq!((saved.through_all2, saved.to2.is_some()), (all2, to2), "OK keeps the second side's extent");
     }
 }
 
@@ -1186,6 +1262,183 @@ fn surface_extrude_dialog_has_the_drag_arrow_on_every_side() {
     }
 }
 
+#[test]
+fn taper_angle_steps_by_one_degree() {
+    let mut h = make(json!({}));
+    open(&mut h);
+    h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
+    let taper = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        crate::dialogs::Kind::Extrude { taper, .. } => taper.clone(),
+        other => panic!("extrude: {other:?}"),
+    };
+    h.step(&json!({"click":{"handle":"dialog:Taper Angle up"}})).unwrap();
+    assert_eq!(taper(&h), "1 deg");
+    h.step(&json!({"click":{"handle":"dialog:Taper Angle down"}})).unwrap();
+    assert_eq!(taper(&h), "0 deg");
+}
+
+/// Surface Extrude's Extent Type takes To Object (#16537): the window adds Extrude's To Object
+/// input, OK makes the surface end at the face picked there, and editing it again shows the
+/// same extent and pick.
+#[test]
+fn surface_extrude_dialog_ends_at_a_picked_face() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"corner":[-5,-5,10],"length":10,"width":10,"height":5,"body_name":"Lid"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[-3,0],[3,0]],"ids":["l1"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("surface.extrude", json!({"sketch":"Base","curves":["l1"],"distance":"4 mm","name":"Wall","body_name":"Sheet"})).unwrap();
+    h.frames(4);
+    let surf = |h: &Harness| match &h.app.dialog {
+        Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Surface(k @ crate::dialogs_surface::Surf::Extrude { .. }), .. }) => k.clone(),
+        _ => panic!("surface extrude dialog"),
+    };
+    let extent = |h: &Harness| match h.app.session.doc.features.iter().find(|f| f.name == "Wall").map(|f| &f.kind) {
+        Some(solidcraft_engine::doc::FeatureKind::SurfaceExtrude { extent, .. }) => extent.clone(),
+        _ => panic!("the surface extrude"),
+    };
+    let top = |h: &Harness| solidcraft_engine::kernel::measure(&h.app.session.world_state().unwrap().body("Sheet").unwrap().body).unwrap().bbox.max.z;
+
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Object"}})).unwrap();
+    h.frames(2);
+    assert!(matches!(surf(&h), crate::dialogs_surface::Surf::Extrude { to_object: true, .. }));
+    let lid = crate::dialogs::face_sel(&h.app.session, solidcore_record::Vec3::new(0.0, 0.0, 10.0)).expect("the lid's bottom face");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        assert_eq!(d.active_input().unwrap().label, "To Object", "the To Object input takes the next pick");
+        let active = d.active;
+        d.inputs[active].items = vec![lid];
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(extent(&h).to.map(|p| p.0), Some(solidcore_record::Vec3::new(0.0, 0.0, 10.0)));
+    assert!((top(&h) - 10.0).abs() < 1e-6, "the surface ends at the lid: {}", top(&h));
+
+    // Editing it again shows To Object with the face, and OK keeps it.
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    assert!(matches!(surf(&h), crate::dialogs_surface::Surf::Extrude { to_object: true, .. }));
+    let picked = h.app.dialog.as_ref().unwrap().inputs.iter().find(|i| i.label == "To Object").map(|i| i.items.len());
+    assert_eq!(picked, Some(1));
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(extent(&h).to.map(|p| p.0), Some(solidcore_record::Vec3::new(0.0, 0.0, 10.0)));
+}
+
+/// Surface Extrude's Taper Angle (#10129): the row steps by a degree as Extrude's does, OK saves
+/// the taper with the feature and the walls lean (a 10 mm square over 10 mm at 1°: the far loop
+/// is 10 + 2 × 10 tan 1° wide), and editing shows it again. Symmetric takes no taper yet: the
+/// row is gone there and OK sends none, so the sheet is straight.
+#[test]
+fn surface_extrude_dialog_takes_a_taper_angle() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("surface.extrude", json!({"sketch":"Base","distance":"10 mm","name":"Wall","body_name":"Sheet"})).unwrap();
+    h.frames(4);
+    let taper = |h: &Harness| match &h.app.dialog {
+        Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Surface(crate::dialogs_surface::Surf::Extrude { taper, .. }), .. }) => {
+            taper.clone()
+        }
+        _ => panic!("surface extrude dialog"),
+    };
+    let saved = |h: &Harness| match h.app.session.doc.features.iter().find(|f| f.name == "Wall").map(|f| &f.kind) {
+        Some(solidcraft_engine::doc::FeatureKind::SurfaceExtrude { extent, .. }) => extent.taper.as_ref().map(|t| t.to_string()),
+        _ => panic!("the surface extrude"),
+    };
+    let width = |h: &Harness| {
+        let bb = solidcraft_engine::kernel::measure(&h.app.session.world_state().unwrap().body("Sheet").unwrap().body).unwrap().bbox;
+        bb.max.x - bb.min.x
+    };
+    assert_eq!(saved(&h), None);
+
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    assert_eq!(taper(&h), "0 deg");
+    h.step(&json!({"click":{"handle":"dialog:Taper Angle up"}})).unwrap();
+    assert_eq!(taper(&h), "1 deg");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(saved(&h).as_deref(), Some("1 deg"));
+    let want = 10.0 + 2.0 * 10.0 * 1f64.to_radians().tan();
+    assert!((width(&h) - want).abs() < 1e-6, "{} vs {want}", width(&h));
+
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    assert_eq!(taper(&h), "1 deg");
+    h.step(&json!({"click":{"handle":"dialog:Direction"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Direction:Symmetric"}})).unwrap();
+    h.frames(2);
+    assert!(h.at(&json!({"handle":"dialog:Taper Angle up"})).is_err(), "Symmetric shows no Taper Angle");
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(saved(&h), None);
+    assert!((width(&h) - 10.0).abs() < 1e-9, "{}", width(&h));
+}
+
+/// Surface Extrude's Extent Type takes To Next (#16537): no pick and no length, OK makes each
+/// wall end at the first body in its way, Flipped runs it the other way, and editing it again
+/// shows To Next with its direction.
+#[test]
+fn surface_extrude_dialog_runs_to_the_next_body() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"corner":[-5,-5,10],"length":10,"width":10,"height":5,"body_name":"Lid"})).unwrap();
+    h.app.run("solid.box", json!({"corner":[-5,-5,-8],"length":10,"width":10,"height":1,"body_name":"Floor"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[-3,0],[3,0]],"ids":["l1"]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("surface.extrude", json!({"sketch":"Base","curves":["l1"],"distance":"4 mm","name":"Wall","body_name":"Sheet"})).unwrap();
+    h.frames(4);
+    let surf = |h: &Harness| match &h.app.dialog {
+        Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Surface(k @ crate::dialogs_surface::Surf::Extrude { .. }), .. }) => k.clone(),
+        _ => panic!("surface extrude dialog"),
+    };
+    let to_next = |h: &Harness| match h.app.session.doc.features.iter().find(|f| f.name == "Wall").map(|f| &f.kind) {
+        Some(solidcraft_engine::doc::FeatureKind::SurfaceExtrude { extent, to_next, .. }) => (*to_next, extent.direction),
+        _ => panic!("the surface extrude"),
+    };
+    let bbox = |h: &Harness| solidcraft_engine::kernel::measure(&h.app.session.world_state().unwrap().body("Sheet").unwrap().body).unwrap().bbox;
+
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "dialog:Extent Type"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Extent Type:To Next"}})).unwrap();
+    h.frames(2);
+    assert!(matches!(surf(&h), crate::dialogs_surface::Surf::Extrude { to_next: true, to_object: false, .. }));
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        assert!(d.inputs.iter().all(|i| i.label != "To Object"), "To Next takes no pick");
+        assert!(d.primary().is_none(), "To Next has no length to type or drag");
+    }
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(to_next(&h), (true, solidcraft_engine::doc::Direction::Positive));
+    assert!((bbox(&h).max.z - 10.0).abs() < 1e-6, "the surface ends at the lid: {:?}", bbox(&h));
+
+    // Editing it again shows To Next; Flipped runs the wall down to the floor's top at z = -7.
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    assert!(matches!(surf(&h), crate::dialogs_surface::Surf::Extrude { to_next: true, direction: 0, .. }));
+    if let Some(crate::dialogs::Dialog { kind: crate::dialogs::Kind::Surface(crate::dialogs_surface::Surf::Extrude { direction, .. }), .. }) =
+        h.app.dialog.as_mut()
+    {
+        *direction = 2;
+    }
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.session.log);
+    assert_eq!(to_next(&h), (true, solidcraft_engine::doc::Direction::Negative));
+    let bb = bbox(&h);
+    assert!((bb.min.z + 7.0).abs() < 1e-6 && bb.max.z.abs() < 1e-6, "the surface ends at the floor: {bb:?}");
+    h.step(&json!({"call":"ui.editFeature","params":{"feature":"Wall"}})).unwrap();
+    h.frames(4);
+    assert!(matches!(surf(&h), crate::dialogs_surface::Surf::Extrude { to_next: true, direction: 2, .. }));
+}
+
 /// Double-clicking the distance arrow in the view reverses the direction, as Reverse Direction
 /// does, and keeps the distance (#17402); Symmetric has no direction to reverse.
 #[test]
@@ -1476,4 +1729,159 @@ fn removing_an_earlier_input_keeps_the_active_one() {
     // The active input itself going leaves the input after it active, as before.
     crate::dialogs::set_object_accepting(&mut inputs, &mut active, "From Object", FACES | VERTICES, false);
     assert_eq!(inputs[active].label, "Target Bodies");
+}
+
+/// #18668: the Extrude dialog has a Name row. Editing, it shows the feature's name and a changed
+/// one renames it after the edit (a rename is a step of its own to undo); blank or unchanged
+/// keeps the name.
+#[test]
+fn editing_an_extrude_can_rename_it_with_the_edit() {
+    let mut h = make(json!({}));
+    let undo = h.app.session.undo.len();
+    open(&mut h);
+    assert_eq!(h.app.dialog.as_ref().unwrap().extra.get("name"), Some(&json!("Depth")), "the row shows the name it has");
+    h.app.dialog.as_mut().unwrap().extra.insert("name".into(), json!("  Boss "));
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert!(h.app.session.doc.find_feature("Boss").is_some() && h.app.session.doc.find_feature("Depth").is_none());
+    assert_eq!(h.app.session.undo.len(), undo + 2, "the edit and the rename");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert!(h.app.session.doc.find_feature("Depth").is_some() && h.app.session.doc.find_feature("Boss").is_none());
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.undo.len(), undo);
+    // Blank, or the name it has: nothing is renamed.
+    for same in ["", "Depth"] {
+        open(&mut h);
+        h.app.dialog.as_mut().unwrap().extra.insert("name".into(), json!(same));
+        h.frames(2);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none());
+        assert!(h.app.session.doc.find_feature("Depth").is_some(), "{same:?}");
+    }
+}
+
+#[test]
+fn a_new_extrude_starts_with_its_default_name_and_takes_another() {
+    for (typed, want) in [(Some("Rim"), "Rim"), (Some("  "), "Extrude1"), (None, "Extrude1")] {
+        let mut h = make(json!({}));
+        h.app.run("timeline.delete", json!({"feature":"Depth"})).unwrap();
+        let sketch = h.app.session.doc.find_feature("Base").unwrap().id;
+        h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+        h.app.start("solid.extrude");
+        h.frames(8);
+        let d = h.app.dialog.as_mut().expect("the extrude dialog");
+        assert_eq!(d.extra.get("name"), Some(&json!("Extrude1")), "the name it will get");
+        if let Some(typed) = typed {
+            d.extra.insert("name".into(), json!(typed));
+        }
+        h.frames(2);
+        h.step(&json!({"widget":"OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+        assert!(h.app.session.doc.find_feature(want).is_some(), "{typed:?} -> {want}");
+    }
+}
+
+#[test]
+fn a_name_another_feature_has_is_refused_and_leaves_the_design_alone() {
+    let mut h = make(json!({}));
+    h.app.run("solid.extrude", json!({"sketch":"Base","distance":"3 mm","operation":"new","name":"Other","body_name":"Second"})).unwrap();
+    h.frames(4);
+    let undo = h.app.session.undo.len();
+    open(&mut h);
+    // A changed distance and a taken name together: the name is refused before anything runs, so
+    // the distance is not applied either.
+    h.step(&json!({"click":{"handle":"dialog:Distance"}})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"20 mm"})).unwrap();
+    h.app.dialog.as_mut().unwrap().extra.insert("name".into(), json!("Other"));
+    h.frames(2);
+    h.frames(3);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    // The window stays open and says why; nothing was committed.
+    assert!(h.app.dialog.is_some());
+    let said = h.app.dialog.as_ref().and_then(|d| d.error.clone()).or(h.app.preview.error.clone());
+    assert!(said.as_deref().is_some_and(|e| e.contains("another feature is called `Other`")), "{said:?}");
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert!(h.app.session.doc.find_feature("Depth").is_some());
+    assert_eq!(extent(&h).distance, "10 mm", "the edit did not half happen");
+}
+
+#[test]
+fn a_default_name_nobody_touched_is_left_to_the_engine() {
+    // The window suggested Extrude1; another feature took it before OK. The untouched suggestion is
+    // not sent, so the engine names the new one Extrude2 instead of failing on a duplicate.
+    let mut h = make(json!({}));
+    h.app.run("timeline.delete", json!({"feature":"Depth"})).unwrap();
+    let sketch = h.app.session.doc.find_feature("Base").unwrap().id;
+    h.app.session.selection = vec![solidcraft_engine::Sel::Profile { sketch, index: 0 }];
+    h.app.start("solid.extrude");
+    h.frames(8);
+    assert_eq!(h.app.dialog.as_ref().unwrap().extra.get("name"), Some(&json!("Extrude1")));
+    h.app.run("solid.extrude", json!({"sketch":"Base","distance":"2 mm","operation":"new","name":"Extrude1","body_name":"Taken"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    assert!(h.app.session.doc.find_feature("Extrude2").is_some());
+}
+
+#[test]
+fn editing_symmetric_extrude_toggles_symmetric_offset() {
+    let mut h = make(json!({"direction": "symmetric", "start_offset": "4 mm"}));
+    assert!(!extent(&h).symmetric_offset);
+    open(&mut h);
+    h.frames(2);
+    assert!(crate::scenario::handle_at("dialog:Symmetric Offset").is_some());
+    h.step(&json!({"click":{"handle":"dialog:Symmetric Offset"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget":"OK"})).unwrap();
+    assert!(h.app.dialog.is_none());
+    assert!(extent(&h).symmetric_offset);
+}
+
+#[test]
+fn extrude_body_name_row_shows_for_new_body_and_a_typed_name_is_sent() {
+    use crate::dialogs::{Kind, apply_commands};
+    let shows = |h: &Harness| {
+        let label = solidcraft_ui_text::tr("ui.body_name");
+        h.output
+            .accesskit_update
+            .as_ref()
+            .unwrap()
+            .nodes
+            .iter()
+            .any(|(_, n)| n.role() == egui::accesskit::Role::TextInput && n.label() == Some(label) && !n.is_disabled())
+    };
+    let sent = |h: &Harness| {
+        // A refusal (a Cut with nothing to cut) sends nothing, so no name either.
+        let (cmd, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).ok()?.into_iter().next()?;
+        // An edit is a `timeline.redefine` with the feature's parameters under `params`.
+        let params = if cmd == "timeline.redefine" { params.get("params")?.clone() } else { params };
+        params.get("body_name").and_then(Value::as_str).map(str::to_string)
+    };
+    let mut h = make(json!({}));
+    // Editing shows the name the body has, and keeps it.
+    open(&mut h);
+    assert!(shows(&h));
+    assert_eq!(sent(&h).as_deref(), Some("Main"));
+    // Join and Cut hide the row and send no name.
+    for operation in [1, 2] {
+        if let Some(Kind::Extrude { operation: op, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *op = operation;
+        }
+        h.frames(2);
+        assert!(!shows(&h), "operation {operation}");
+        assert_eq!(sent(&h), None, "operation {operation}");
+    }
+    // A cleared name sends none, as before; a typed one is sent trimmed.
+    if let Some(Kind::Extrude { operation, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *operation = 0;
+    }
+    let dialog = h.app.dialog.as_mut().unwrap();
+    dialog.extra.insert("body_name".into(), json!(""));
+    assert_eq!(sent(&h), None);
+    h.app.dialog.as_mut().unwrap().extra.insert("body_name".into(), json!(" Slab "));
+    h.frames(2);
+    assert!(shows(&h));
+    assert_eq!(sent(&h).as_deref(), Some("Slab"));
 }

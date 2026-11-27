@@ -7,6 +7,9 @@ use solidcraft_geom::prelude::*;
 use crate::body::Body;
 use crate::{KernelError, Result};
 
+/// The most turns a helical sweep takes: the kernel's, as many as its spans hold.
+pub const MAX_HELIX_TURNS: f64 = solidcore_ops::sweep::SCREW_MAX_TURNS;
+
 /// Rotate `v` about the unit axis `k` by `ang` (Rodrigues).
 fn rot(v: Vec3, k: Vec3, ang: f64) -> Vec3 {
     v * ang.cos() + k.cross(v) * ang.sin() + k * (k.dot(v) * (1.0 - ang.cos()))
@@ -58,8 +61,8 @@ fn helix_profile(
     turns: f64,
 ) -> Result<(Vec3, crate::numbered::NumberedLoop)> {
     let k = axis.normalized().ok_or_else(|| KernelError::Invalid("helix axis".into()))?;
-    if !(pitch.is_finite() && turns.is_finite() && turns > 0.0 && turns <= 200.0 && pitch.abs() < 1e7 && axis_origin.is_finite()) {
-        return Err(KernelError::Invalid("helix: turns must be in (0, 200] and the pitch finite".into()));
+    if !(pitch.is_finite() && turns.is_finite() && turns > 0.0 && turns <= MAX_HELIX_TURNS && pitch.abs() < 1e7 && axis_origin.is_finite()) {
+        return Err(KernelError::Invalid(format!("helix: turns must be in (0, {MAX_HELIX_TURNS}] and the pitch finite")));
     }
     if region.area().abs() < 1e-9 {
         return Err(KernelError::Invalid("profile has no area".into()));
@@ -68,8 +71,22 @@ fn helix_profile(
     let numbered = crate::numbered::number_regions(std::slice::from_ref(region)).pop().ok_or_else(|| KernelError::Invalid("profile".into()))?;
     let profile = numbered.outer.oriented(false);
     let lp = &profile.lp;
-    let along: Vec<f64> =
-        lp.segs.iter().flat_map(|s| (0..8).map(move |i| s.point_at(i as f64 / 8.0))).map(|q| (plane.to_world(q) - axis_origin).dot(k)).collect();
+    let radial = |q: Vec2| {
+        let w = plane.to_world(q) - axis_origin;
+        (w - k * w.dot(k), w.dot(k))
+    };
+    let e = lp.segs.first().and_then(|s| radial(s.point_at(0.0)).0.normalized()).unwrap_or_else(|| k.any_perp());
+    // Each point's height where the screw motion carries it into the half-plane through the first:
+    // a profile across the helix (not in a plane of the axis) reaches further along it there.
+    let along: Vec<f64> = lp
+        .segs
+        .iter()
+        .flat_map(|s| (0..8).map(move |i| s.point_at(i as f64 / 8.0)))
+        .map(|q| {
+            let (v, h) = radial(q);
+            h - pitch * v.dot(k.cross(e)).atan2(v.dot(e)) / std::f64::consts::TAU
+        })
+        .collect();
     let extent = along.iter().cloned().fold(f64::NEG_INFINITY, f64::max) - along.iter().cloned().fold(f64::INFINITY, f64::min);
     if turns > 1.0 && pitch.abs() <= extent {
         // A section exactly one pitch wide makes neighbouring turns share a face, which a single solid cannot hold yet.
@@ -81,7 +98,9 @@ fn helix_profile(
                 extent * 0.99
             )));
         }
-        return Err(KernelError::Invalid(format!("the coil runs into itself: the pitch must exceed the section ({extent:.3} mm)")));
+        return Err(KernelError::Invalid(format!(
+            "the coil runs into itself: the pitch must exceed the section's extent along the axis ({extent:.3} mm)"
+        )));
     }
     Ok((k, profile))
 }
@@ -142,6 +161,25 @@ pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
     crate::smlib_sweeps::loft_to_point(plane, &crate::smlib_sweeps::pieces([&base]), apex)
 }
 
+/// [`loft_to_point`] following one or two guide `rails` (polylines from the loop to the apex),
+/// `fit` saying how they reshape the section on the way (#20985). Without rails, the plain loft to
+/// a point.
+pub fn loft_to_point_with_rails(plane: &Plane, lp: &Loop2, apex: Vec3, rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
+    if rails.is_empty() {
+        return loft_to_point(plane, lp, apex);
+    }
+    let _span = solidcraft_profile::span("kernel", "loft_to_point_with_rails");
+    if !apex.is_finite() || lp.segs.is_empty() || lp.segs.len() > 10_000 {
+        return Err(KernelError::Invalid("loft to a point: bad section or apex".into()));
+    }
+    if ((apex - plane.origin).dot(plane.normal())).abs() < 1e-9 {
+        return Err(KernelError::Invalid("the apex lies in the section's plane".into()));
+    }
+    let above = (apex - plane.origin).dot(plane.normal()) > 0.0;
+    let base = crate::numbered::number_loops([lp]).pop().ok_or_else(|| KernelError::Invalid("loft to a point: bad section".into()))?.oriented(above);
+    crate::smlib_sweeps::loft_to_point_with_rails(plane, &crate::smlib_sweeps::pieces([&base]), apex, rails, fit)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,6 +199,27 @@ mod tests {
         assert!((v - want).abs() / want < 1e-3, "{v} vs {want}");
         assert!(sweep_helix(&pl, &region, Vec3::ZERO, Vec3::Z, 3.0, 3.0).is_err(), "pitch below the section");
         assert!(sweep_helix(&pl, &region, Vec3::ZERO, Vec3::ZERO, 8.0, 3.0).is_err());
+    }
+
+    /// #22577: the issue's thread along a whole rod, a V 1 wide at radius 8.5 with its point at
+    /// 7.2, on the XZ plane about the X axis from x = -1, 202 turns of pitch 1.25 (the bound was
+    /// 200). Its top line runs along the axis, so its three walls come in 404 half turns, between
+    /// two caps. Pappus gives the volume, off by at most the tolerance (a ten-thousandth of the
+    /// pitch) times the walls' area, each wall at most its line's length times the helix at its
+    /// outer end.
+    #[test]
+    fn a_coil_of_more_than_200_turns_builds() {
+        use std::f64::consts::TAU;
+        let pl = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+        let v = Loop2::polygon(&[Vec2::new(-1.5, 8.5), Vec2::new(-0.5, 8.5), Vec2::new(-1.0, 7.2)]);
+        let region = Region2 { outer: v, holes: vec![] };
+        let (pitch, turns) = (1.25, 202.0);
+        let b = sweep_helix(&pl, &region, Vec3::new(-1.0, 0.0, 0.0), Vec3::X, pitch, turns).unwrap();
+        assert_eq!(b.face_count(), 3 * 404 + 2, "three walls in 404 half turns, two caps");
+        let want = 0.5 * 1.3 * TAU * (7.2 + 8.5 + 8.5) / 3.0 * turns;
+        let bound = pitch * 1e-4 * (1.0 + 2.0 * 0.5f64.hypot(1.3)) * (TAU * 8.5).hypot(pitch) * turns;
+        let got = crate::measure(&b).unwrap().volume;
+        assert!((got - want).abs() <= bound, "{got} vs {want} within {bound}");
     }
 
     #[test]

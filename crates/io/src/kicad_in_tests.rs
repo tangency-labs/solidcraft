@@ -63,6 +63,9 @@ fn models_stand_on_the_board_face_they_are_on() {
     let footprint = |layer: &str| KicadFootprint {
         reference: String::new(),
         value: String::new(),
+        name: String::new(),
+        fields: Vec::new(),
+        uuid: String::new(),
         layer: layer.into(),
         at: [10.0, 20.0, 90.0],
         models: Vec::new(),
@@ -120,6 +123,17 @@ fn a_back_side_model_is_turned_over_under_the_board() {
 }
 
 #[test]
+fn a_back_side_model_offset_is_turned_over_with_the_model() {
+    let model = KicadModel { path: String::new(), at: [-24.6, -12.8, 0.5], scale: [1.0; 3], rotate: [0.0; 3] };
+    let origin = solidcraft_doc::apply_point(&model_local_matrix(&model, true), Vec3::ZERO);
+    // KiCad 10.0.1 turns a back-side footprint's model over together with its offset: X stays,
+    // Y is reversed, and a positive Z offset moves the model away from the board, which is down.
+    assert!((origin.x + 24.6).abs() < 1e-9 && (origin.y - 12.8).abs() < 1e-9 && (origin.z + 0.5).abs() < 1e-9, "{origin:?}");
+    let front = solidcraft_doc::apply_point(&model_local_matrix(&model, false), Vec3::ZERO);
+    assert!((front.x + 24.6).abs() < 1e-9 && (front.y + 12.8).abs() < 1e-9 && (front.z - 0.5).abs() < 1e-9, "{front:?}");
+}
+
+#[test]
 fn builds_a_closed_mesh_from_a_concave_outline() {
     let source = r#"(kicad_pcb (general (thickness 1.6))
       (gr_line (start 0 0) (end 20 0) (layer "Edge.Cuts"))
@@ -136,6 +150,118 @@ fn builds_a_closed_mesh_from_a_concave_outline() {
     let measure = solidcraft_kernel::measure(&body).unwrap();
     assert!((measure.volume - 300.0 * 1.6).abs() < 1.0, "{measure:?}");
     assert!((measure.bbox.min.y + 20.0).abs() < 1e-9, "KiCad's Y is mapped to -Y: {measure:?}");
+}
+
+#[test]
+fn an_outline_whose_lines_miss_each_other_by_nanometres_is_closed() {
+    // A 20 x 10 board as KiCad can save it: every corner has a gap of 1 to 6 nm between the end of
+    // one line and the start of the next. KiCad reads this outline as closed.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 20.000006 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10.000001) (end 0.000002 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0.000004) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "gaps.kicad_pcb").unwrap();
+    assert!(board.warnings.is_empty(), "{:?}", board.warnings);
+    let [outline] = board.outlines.as_slice() else { panic!("expected one outline: {:?}", board.outlines) };
+    assert_eq!(outline.len(), 4, "one point per corner: {outline:?}");
+    let mesh = kicad_board_mesh(&board, board.thickness).unwrap();
+    let body = solidcraft_kernel::mesh_body(&mesh.positions, &mesh.triangles).unwrap();
+    let measure = solidcraft_kernel::measure(&body).unwrap();
+    assert!((measure.volume - 200.0 * 1.6).abs() < 1e-3, "{measure:?}");
+}
+
+#[test]
+fn an_outline_piece_shorter_than_the_joining_distance_is_kept() {
+    // The outline's last piece is 0.005 mm long, so the corner before it is already within the
+    // joining distance of the start. The piece still belongs to the outline: five corners, and
+    // nothing left over.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 20 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10) (end 0 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0.005) (layer "Edge.Cuts"))
+      (gr_line (start 0 0.005) (end 0 0) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "short.kicad_pcb").unwrap();
+    assert!(board.warnings.is_empty(), "{:?}", board.warnings);
+    let [outline] = board.outlines.as_slice() else { panic!("expected one outline: {:?}", board.outlines) };
+    assert_eq!(outline.len(), 5, "{outline:?}");
+    // Short pieces right after the start do not close on themselves either.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 0.003 0) (layer "Edge.Cuts"))
+      (gr_line (start 0.003 0) (end 0.006 0) (layer "Edge.Cuts"))
+      (gr_line (start 0.006 0) (end 0.009 0) (layer "Edge.Cuts"))
+      (gr_line (start 0.009 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 20 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10) (end 0 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "short-start.kicad_pcb").unwrap();
+    assert!(board.warnings.is_empty(), "{:?}", board.warnings);
+    let [outline] = board.outlines.as_slice() else { panic!("expected one outline: {:?}", board.outlines) };
+    assert_eq!(outline.len(), 7, "{outline:?}");
+}
+
+#[test]
+fn an_outline_with_its_ends_piled_in_one_place_is_given_up_not_searched_forever() {
+    // 12,000 short pieces zigzag inside one 0.01 mm square, so every step of the join would look at
+    // every end left: about 144 million looks. The join stops at its limit and says so. A closed
+    // square drawn before the pile is not kept either: the board gets no outline, not part of one.
+    let given_up = "the Edge.Cuts outline has too many ends in one place to join";
+    let mut source = String::from("(kicad_pcb (general (thickness 1.6))\n(gr_rect (start 10 10) (end 20 20) (layer \"Edge.Cuts\"))\n");
+    let point = |i: usize| (0.002 + 0.002 * (i % 2) as f64, 0.0005 + 5e-7 * i as f64);
+    for i in 0..12_000 {
+        let ((x0, y0), (x1, y1)) = (point(i), point(i + 1));
+        source.push_str(&format!("(gr_line (start {x0:.7} {y0:.7}) (end {x1:.7} {y1:.7}) (layer \"Edge.Cuts\"))\n"));
+    }
+    source.push(')');
+    let board = parse_kicad_board(source.as_bytes(), "pile.kicad_pcb").unwrap();
+    assert!(board.outlines.is_empty(), "{} outlines", board.outlines.len());
+    assert!(board.warnings.iter().any(|w| w == given_up), "{:?}", board.warnings);
+
+    // Pieces of no length skip the search for a next piece, but taking each one out of the grid
+    // still looks through every end in its cell: 100,000 of them in one spot is 2 × 10¹⁰ looks
+    // unless that counts toward the limit too.
+    let mut source = String::from("(kicad_pcb (general (thickness 1.6))\n");
+    for _ in 0..100_000 {
+        source.push_str("(gr_line (start 0.005 0.005) (end 0.005 0.005) (layer \"Edge.Cuts\"))\n");
+    }
+    source.push(')');
+    let started = std::time::Instant::now();
+    let board = parse_kicad_board(source.as_bytes(), "points.kicad_pcb").unwrap();
+    assert!(board.outlines.is_empty(), "{} outlines", board.outlines.len());
+    assert!(board.warnings.iter().any(|w| w == given_up), "{:?}", board.warnings.iter().take(3).collect::<Vec<_>>());
+    assert!(started.elapsed() < std::time::Duration::from_secs(30), "{:?}", started.elapsed());
+}
+
+#[test]
+fn an_outline_with_a_real_gap_stays_open() {
+    // The last line stops 0.02 mm short of the first corner: more than the 0.01 mm KiCad joins.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 20 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10) (end 0 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0.02) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "open.kicad_pcb").unwrap();
+    assert!(board.outlines.is_empty(), "{:?}", board.outlines);
+    assert_eq!(board.warnings, ["skipped an open Edge.Cuts contour"]);
+}
+
+#[test]
+fn an_exact_continuation_is_joined_before_one_across_a_gap() {
+    // Two squares whose corners are 5 nm apart: each closes on its own lines, not on the other's.
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_line (start 0 0) (end 10 0) (layer "Edge.Cuts"))
+      (gr_line (start 10.000005 0) (end 20 0) (layer "Edge.Cuts"))
+      (gr_line (start 10 0) (end 10 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 0) (end 20 10) (layer "Edge.Cuts"))
+      (gr_line (start 10 10) (end 0 10) (layer "Edge.Cuts"))
+      (gr_line (start 20 10) (end 10.000005 10) (layer "Edge.Cuts"))
+      (gr_line (start 0 10) (end 0 0) (layer "Edge.Cuts"))
+      (gr_line (start 10.000005 10) (end 10.000005 0) (layer "Edge.Cuts")))"#;
+    let board = parse_kicad_board(source.as_bytes(), "pair.kicad_pcb").unwrap();
+    assert!(board.warnings.is_empty(), "{:?}", board.warnings);
+    assert_eq!(board.outlines.len(), 2, "{:?}", board.outlines);
+    assert!(board.outlines.iter().all(|outline| outline.len() == 4), "{:?}", board.outlines);
 }
 
 #[test]
@@ -200,6 +326,106 @@ fn drilled_pads_cut_holes_in_the_substrate() {
     assert!((measure.volume - expected).abs() < expected * 0.01, "{measure:?}");
 }
 
+/// A castellated hole (a drill centred on the board's edge) is cut as a half-hole in the edge, and
+/// the board's other drills are kept: one drill reaching the outline used to drop every drill.
+#[test]
+fn a_castellated_hole_is_a_notch_and_keeps_the_other_drills() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "castle" (at 0 5) (layer "F.Cu")
+        (pad "1" thru_hole circle (at 0 0) (size 1.6 1.6) (drill 1) (layers "*.Cu" "*.Mask")))
+      (footprint "inner" (at 10 5) (layer "F.Cu")
+        (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask"))))"#;
+    let board = parse_kicad_board(source.as_bytes(), "castle.kicad_pcb").unwrap();
+    assert_eq!(board.drills.len(), 2);
+    let mesh = kicad_board_mesh(&board, 1.6).unwrap();
+    let body = solidcraft_kernel::mesh_body(&mesh.positions, &mesh.triangles).unwrap();
+    let measure = solidcraft_kernel::measure(&body).unwrap();
+    let disc = std::f64::consts::PI * 0.25;
+    let expected = (200.0 - disc - disc / 2.0) * 1.6;
+    // Tighter than the missing half-hole (0.63 mm3), loose enough for the polygon approximation.
+    assert!((measure.volume - expected).abs() < 0.25, "{measure:?} against {expected}");
+    let mut load = |_: &str| Err("none".to_string());
+    let options = KicadOptions { representation: KicadRepresentation::Brep, ..KicadOptions::default() };
+    let imported = read_kicad(source.as_bytes(), "castle.kicad_pcb", &options, &mut load).unwrap();
+    assert!(imported.board_step.is_some(), "the board is a solid");
+    assert!(!imported.feature.warnings.iter().any(|w| w.contains("drilled holes")), "{:?}", imported.feature.warnings);
+}
+
+/// A castellated hole is cut on every edge of the board, whichever of the outline's edges the drill
+/// is centred on: a drill centred exactly on the outline (the right and bottom edges) was not found on the board and was
+/// dropped with nothing said.
+#[test]
+fn a_castellated_hole_is_cut_on_every_edge() {
+    let disc = std::f64::consts::PI;
+    let expected = (200.0 - disc / 2.0) * 1.6;
+    for (edge, at) in [("left", "0 5"), ("right", "20 5"), ("top", "10 0"), ("bottom", "10 10")] {
+        let source = format!(
+            r#"(kicad_pcb (general (thickness 1.6))
+              (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+              (footprint "castle" (at {at}) (layer "F.Cu")
+                (pad "1" thru_hole circle (at 0 0) (size 3 3) (drill 2) (layers "*.Cu" "*.Mask"))))"#
+        );
+        let board = parse_kicad_board(source.as_bytes(), "edge.kicad_pcb").unwrap();
+        let mesh = kicad_board_mesh(&board, 1.6).unwrap();
+        let body = solidcraft_kernel::mesh_body(&mesh.positions, &mesh.triangles).unwrap();
+        let volume = solidcraft_kernel::measure(&body).unwrap().volume;
+        assert!((volume - expected).abs() < expected * 0.002, "{edge} edge: {volume} against {expected}");
+        let mut load = |_: &str| Err("none".to_string());
+        let options = KicadOptions { representation: KicadRepresentation::Brep, ..KicadOptions::default() };
+        let imported = read_kicad(source.as_bytes(), "edge.kicad_pcb", &options, &mut load).unwrap();
+        assert!(imported.board_step.is_some(), "{edge} edge: the board is a solid");
+        assert!(imported.feature.warnings.is_empty(), "{edge} edge: {:?}", imported.feature.warnings);
+    }
+}
+
+/// A slot that lies wholly inside the outline, 0.1 mm from the edge, is a hole; one that reaches
+/// past the edge is a half-hole.
+#[test]
+fn a_slot_near_the_edge_is_a_notch_only_when_it_crosses_it() {
+    let outer = Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(20.0, 10.0), Vec2::new(0.0, 10.0)]).ccw();
+    let inside = slot_loop(Vec2::new(0.2, 5.0), 0.2, 4.0, 0.0);
+    assert!(!drill_crosses(&outer, &inside), "0.1 mm from the edge is not a notch");
+    let across = slot_loop(Vec2::new(0.05, 5.0), 0.2, 4.0, 0.0);
+    assert!(drill_crosses(&outer, &across), "a slot over the edge is a notch");
+}
+
+/// A missing model names the folder that was searched, and the same warning from many footprints
+/// is said once with a count.
+#[test]
+fn missing_model_warnings_name_the_folder_and_repeats_are_counted() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "a" (at 5 5) (layer "F.Cu") (model "/libs/jst/JST_SH.step"))
+      (footprint "b" (at 10 5) (layer "F.Cu") (model "/libs/jst/JST_SH.step"))
+      (footprint "c" (at 15 5) (layer "F.Cu") (model "/libs/jst/JST_SH.step")))"#;
+    let mut load = |model: &str| Err(format!("{model}: No such file or directory (os error 2)"));
+    let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    let lines: Vec<&String> = imported.feature.warnings.iter().filter(|w| w.contains("JST_SH")).collect();
+    assert_eq!(lines.len(), 1, "{:?}", imported.feature.warnings);
+    assert_eq!(lines[0].as_str(), "JST_SH.step: not found in /libs/jst (x3)");
+    // A model beside the board is named from the board, not by the folder's full path.
+    let beside = r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "a" (at 5 5) (layer "F.Cu") (model "/work/board/models/X.step")))"#;
+    let imported = read_kicad(beside.as_bytes(), "/work/board/t.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    assert!(imported.feature.warnings.iter().any(|w| w == "X.step: not found in the board's folder, models"), "{:?}", imported.feature.warnings);
+    // Windows and the browser word a missing file differently; the folder is named all the same.
+    for words in ["The system cannot find the file specified. (os error 2)", "no such file in this browser"] {
+        let mut other = |path: &str| Err(format!("{path}: {words}"));
+        let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut other).unwrap();
+        assert!(
+            imported.feature.warnings.iter().any(|w| w == "JST_SH.step: not found in /libs/jst (x3)"),
+            "{words}: {:?}",
+            imported.feature.warnings
+        );
+    }
+    let mut unset = |_: &str| Err("unresolved environment variable `EASYEDA2KICAD`".to_string());
+    let imported = read_kicad(source.as_bytes(), "t.kicad_pcb", &KicadOptions::default(), &mut unset).unwrap();
+    let lines: Vec<&String> = imported.feature.warnings.iter().filter(|w| w.contains("EASYEDA2KICAD")).collect();
+    assert_eq!(lines.len(), 1, "{:?}", imported.feature.warnings);
+    assert!(lines[0].ends_with("(x3)"), "{lines:?}");
+}
+
 #[test]
 fn missing_model_is_warned_and_the_board_is_kept() {
     let mut load = |_: &str| Err("model file was not found".to_string());
@@ -230,6 +456,29 @@ fn skips_footprints_with_invalid_models_and_keeps_other_parts() {
 fn rejects_malformed_and_wrong_root_documents() {
     assert!(parse_kicad_board(b"(kicad_pcb (general", "bad.kicad_pcb").is_err());
     assert!(parse_kicad_board(b"(kicad_pro)", "bad.kicad_pcb").is_err());
+}
+
+#[test]
+fn a_board_over_the_old_token_cap_but_under_the_size_cap_is_read() {
+    // 4 tokens per indented `(zz 1)` line, as KiCad writes them: just over 2 000 000 tokens in
+    // about 4.5 MB, far below the size cap.
+    let mut board = String::from("(kicad_pcb (general (thickness 1.6))\n");
+    for _ in 0..500_100 {
+        board.push_str("\t\t(zz 1)\n");
+    }
+    board.push(')');
+    assert!(board.len() < MAX_KICAD_BYTES);
+    assert!(tokenize(&board).map(|t| t.len() > MIN_TOKEN_CAP).unwrap_or(false));
+    assert!(parse_kicad_board(board.as_bytes(), "big.kicad_pcb").is_ok());
+}
+
+#[test]
+fn the_token_cap_follows_the_size_and_still_refuses_dense_junk() {
+    assert_eq!(token_cap(0), MIN_TOKEN_CAP);
+    assert_eq!(token_cap(MAX_KICAD_BYTES), MAX_KICAD_BYTES / 2);
+    // One token per byte is denser than any board: refused by count, quickly.
+    let junk = format!("(kicad_pcb {})", "()".repeat(MIN_TOKEN_CAP));
+    assert!(parse_kicad_board(junk.as_bytes(), "junk.kicad_pcb").is_err());
 }
 
 #[test]
@@ -354,8 +603,9 @@ fn vrml_models_are_read_and_placed() {
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
     assert_eq!(meshes.len(), 1, "the VRML model");
     assert!(imported.board_step.is_some(), "the board is a solid");
-    assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
+    assert_eq!(imported.plan.slots, vec!["part".to_string()]);
     assert_eq!(imported.plan.places.len(), 1);
+    assert_eq!(imported.plan.places[0].name.as_deref(), Some("U1"));
     assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
 }
 
@@ -412,7 +662,7 @@ fn a_missing_model_keeps_the_other_models_of_its_footprint() {
     let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
     assert_eq!(meshes.len(), 1, "the model that is here still comes in: {meshes:?}");
-    assert_eq!(imported.plan.slots, vec!["U1".to_string()], "the model that is here is placed");
+    assert_eq!(imported.plan.slots, vec!["body".to_string()], "the model that is here is placed");
     assert_eq!(imported.plan.places.len(), 1);
     assert!(
         imported.feature.warnings.iter().any(|warning| warning.contains("gone.step") && warning.contains("was not found")),
@@ -442,8 +692,34 @@ fn one_model_named_in_both_formats_is_placed_once() {
     let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
     assert_eq!(meshes.len(), 1, "one file, one model: {meshes:?}");
-    assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
+    assert_eq!(imported.plan.slots, vec!["part".to_string()]);
     assert_eq!(imported.plan.places.len(), 1, "placed once, not once per reference");
+}
+
+/// Two resistors share one model: it is one component, named after the model, placed twice, and
+/// each placement carries its own footprint's reference (not both the first one's).
+#[test]
+fn footprints_sharing_a_model_are_placed_under_their_own_references() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "R_0603" (at 5 5) (layer "F.Cu") (property "Reference" "R1")
+        (model "${KICAD10_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0603_1608Metric.wrl"))
+      (footprint "R_0603" (at 12 5) (layer "F.Cu") (property "Reference" "R33")
+        (model "${KICAD10_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0603_1608Metric.wrl")))"#;
+    let mut load = |path: &str| {
+        Ok(KicadModelFile {
+            path: path.to_string(),
+            bytes: br#"#VRML V2.0 utf8
+      Shape { geometry Box { size 2 2 2 } }"#
+                .to_vec(),
+        })
+    };
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
+    assert_eq!(imported.plan.slots, vec!["R_0603_1608Metric".to_string()], "one model, one component");
+    let places: Vec<(usize, Option<&str>)> = imported.plan.places.iter().map(|p| (p.slot, p.name.as_deref())).collect();
+    assert_eq!(places, vec![(0, Some("R1")), (0, Some("R33"))]);
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    assert_eq!(meshes.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(), vec!["R_0603_1608Metric"], "the shared body is not named after R1");
 }
 
 /// KiCad 10's 3D library ships `….stpZ`: a zip archive holding one STEP file.
@@ -468,8 +744,8 @@ fn a_zipped_stpz_model_is_read_as_step() {
     let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
     assert_eq!(meshes.len(), 1, "the zipped STEP comes in: {meshes:?} {:?}", imported.feature.warnings);
-    assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
-    // The model is placed for U1, and its mesh goes into U1's component, not the board's.
+    assert_eq!(imported.plan.slots, vec!["part".to_string()]);
+    // The model is placed for U1, and its mesh goes into the model's component, not the board's.
     assert_eq!(imported.plan.places.len(), 1, "{:?}", imported.plan.places);
     assert_eq!(imported.plan.places[0].slot, 0);
     assert_eq!(imported.plan.bodies, vec![Some(0)], "{:?}", imported.plan.bodies);
@@ -489,8 +765,8 @@ fn a_wrl_reference_answered_by_an_stpz_file_is_read_as_step() {
     let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap();
     let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
     assert_eq!(meshes.len(), 1, "{:?}", imported.feature.warnings);
-    // The model is placed for U1, and its mesh goes into U1's component, not the board's.
-    assert_eq!(imported.plan.slots, vec!["U1".to_string()]);
+    // The model is placed for U1, and its mesh goes into the model's component, not the board's.
+    assert_eq!(imported.plan.slots, vec!["part".to_string()]);
     assert_eq!(imported.plan.places.len(), 1, "{:?}", imported.plan.places);
     assert_eq!(imported.plan.places[0].slot, 0);
     assert_eq!(imported.plan.bodies, vec![Some(0)], "{:?}", imported.plan.bodies);
@@ -592,6 +868,316 @@ fn modern_property_fields_on_a_text_layer_are_text() {
     assert_eq!(footprint.texts[0].at, [0.0, -3.0, 0.0]);
 }
 
+/// The bounds of the front pads' copper when `footprint` is the only copper on a 40 mm board.
+fn front_pad_bounds(footprint: &str) -> [f64; 4] {
+    let source = format!(r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -20 -20) (end 20 20) (layer "Edge.Cuts")) {footprint})"#);
+    let options = KicadOptions { copper: KicadCopper::Mesh, silkscreen: false, components: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(source.as_bytes(), "pads.kicad_pcb", &options, &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    // Plated pads have a body of their own; others are in the layer's copper.
+    let pads = meshes.iter().find(|m| m.name == "Copper F.Cu pads").or_else(|| meshes.iter().find(|m| m.name == "Copper F.Cu"));
+    bounds(pads.unwrap_or_else(|| panic!("no front copper: {:?}", meshes.iter().map(|m| &m.name).collect::<Vec<_>>())))
+}
+
+/// KiCad stores a pad's rotation on the board (the footprint's rotation already added), as KiCad
+/// 10 draws it: on a footprint turned a quarter turn, a 2 × 0.5 mm pad written at 90° stands up and
+/// one written at 0° lies flat. Its position still turns with the footprint: (3, 0) in a
+/// footprint turned 90° is 3 mm up the board.
+#[test]
+fn pads_on_a_turned_footprint_keep_their_own_rotation() {
+    let pad = |at: &str| {
+        front_pad_bounds(&format!(r#"(footprint "P" (layer "F.Cu") (at 0 0 90) (pad "1" smd rect (at {at}) (size 2 0.5) (layers "F.Cu")))"#))
+    };
+    let close = |a: [f64; 4], b: [f64; 4]| a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-6);
+    let upright = pad("0 0 90");
+    assert!(close(upright, [-0.25, -1.0, 0.25, 1.0]), "{upright:?}");
+    let flat = pad("0 0 0");
+    assert!(close(flat, [-1.0, -0.25, 1.0, 0.25]), "{flat:?}");
+    let moved = pad("3 0 90");
+    assert!(close(moved, [-0.25, 2.0, 0.25, 4.0]), "{moved:?}");
+}
+
+/// A slotted hole lies along its pad: on a footprint turned a quarter turn, an oval pad and its
+/// 2 × 0.8 mm slot written at 90° stand up. The drill's angle, the outline traces stop at, the hole
+/// cut through the board, the hole opened in the pad's copper and the pad itself are all checked.
+#[test]
+fn a_slot_on_a_turned_footprint_lies_along_its_pad() {
+    let source = r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -20 -20) (end 20 20) (layer "Edge.Cuts"))
+      (footprint "S" (layer "F.Cu") (at 0 0 90)
+        (pad "1" thru_hole oval (at 0 0 90) (size 3 1.5) (drill oval 2 0.8) (layers "*.Cu" "*.Mask"))))"#;
+    let board = parse_kicad_board(source.as_bytes(), "slot.kicad_pcb").unwrap();
+    let [drill] = board.drills.as_slice() else { panic!("one drill: {:?}", board.drills) };
+    assert!((drill.angle.sin().abs() - 1.0).abs() < 1e-9, "the slot stands up the board: {drill:?}");
+    let [outline] = drill_outlines(&board).try_into().unwrap_or_else(|o: Vec<_>| panic!("one outline: {}", o.len()));
+    let (xs, ys): (Vec<f64>, Vec<f64>) = outline.iter().map(|p| (p[0], p[1])).unzip();
+    let width = xs.iter().cloned().fold(f64::MIN, f64::max) - xs.iter().cloned().fold(f64::MAX, f64::min);
+    let height = ys.iter().cloned().fold(f64::MIN, f64::max) - ys.iter().cloned().fold(f64::MAX, f64::min);
+    assert!((width - 0.8).abs() < 1e-3 && (height - 2.0).abs() < 1e-3, "{width} × {height}");
+    // The hole cut through the board and the hole opened in the pad's copper stand up too: both read
+    // the drill's angle, and a hole that ignored it would be 2 mm wide and 0.8 mm tall.
+    let corners = [[-20.0, -20.0], [20.0, -20.0], [20.0, 20.0], [-20.0, 20.0]];
+    let square = Loop2::polygon(&corners.map(|[x, y]| Vec2::new(x, y)));
+    let extent = |hole: &Loop2| {
+        let (xs, ys): (Vec<f64>, Vec<f64>) = hole.polyline(1e-3).to_vec().into_iter().map(|p| (p.x, p.y)).unzip();
+        let span = |v: &[f64]| v.iter().cloned().fold(f64::MIN, f64::max) - v.iter().cloned().fold(f64::MAX, f64::min);
+        (span(&xs), span(&ys))
+    };
+    let regions = regions_from_loops(vec![square.clone()], Some(&board.drills));
+    let [region] = regions.as_slice() else { panic!("one region: {}", regions.len()) };
+    let [board_hole] = region.holes.as_slice() else { panic!("one hole in the board: {}", region.holes.len()) };
+    let (w, h) = extent(board_hole);
+    assert!((w - 0.8).abs() < 1e-3 && (h - 2.0).abs() < 1e-3, "the hole through the board: {w} × {h}");
+    let pad_hole = pad_holes(&square, &corners, &board.drills);
+    let [pad_hole] = pad_hole.as_slice() else { panic!("one hole in the pad: {}", pad_hole.len()) };
+    let (w, h) = extent(pad_hole);
+    assert!((w - 0.8).abs() < 1e-3 && (h - 2.0).abs() < 1e-3, "the hole in the pad's copper: {w} × {h}");
+    let pads = front_pad_bounds(
+        r#"(footprint "S" (layer "F.Cu") (at 0 0 90) (pad "1" thru_hole oval (at 0 0 90) (size 3 1.5) (drill oval 2 0.8) (layers "*.Cu" "*.Mask")))"#,
+    );
+    assert!((pads[2] - pads[0] - 1.5).abs() < 1e-6 && (pads[3] - pads[1] - 3.0).abs() < 1e-6, "{pads:?}");
+}
+
+/// The front silkscreen's bounds when `items` (footprints, board text) are drawn on a 40 mm board.
+fn front_silk_bounds(items: &str) -> [f64; 4] {
+    let source = format!(r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -20 -20) (end 20 20) (layer "Edge.Cuts")) {items})"#);
+    let options = KicadOptions { copper: KicadCopper::None, silkscreen: true, components: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(source.as_bytes(), "text.kicad_pcb", &options, &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    bounds(meshes.iter().find(|m| m.name == "Silkscreen F.SilkS").unwrap_or_else(|| panic!("no front silk: {meshes:?}")))
+}
+
+fn same_bounds(a: [f64; 4], b: [f64; 4]) -> bool {
+    a.iter().zip(&b).all(|(x, y)| (x - y).abs() < 1e-6)
+}
+
+const FONT: &str = "(effects (font (size 1 1) (thickness 0.15)))";
+const FONT_LEFT: &str = "(effects (font (size 1 1) (thickness 0.15)) (justify left))";
+
+/// KiCad stores a footprint text's rotation on the board: on a footprint turned a quarter turn, a
+/// reference at 0° reads level, as board text at 0° does. Its position still turns with the
+/// footprint: (3, 0) in a footprint turned 90° is (0, -3) on the board.
+#[test]
+fn footprint_text_keeps_its_own_angle_on_a_turned_footprint() {
+    let turned = front_silk_bounds(&format!(
+        r#"(footprint "R" (layer "F.Cu") (at 0 0 90) (property "Reference" "ABCDEFGH" (at 3 0 0) (layer "F.SilkS") {FONT}))"#
+    ));
+    let level = front_silk_bounds(&format!(r#"(gr_text "ABCDEFGH" (at 0 -3 0) (layer "F.SilkS") {FONT})"#));
+    assert!(same_bounds(turned, level), "{turned:?} {level:?}");
+    assert!(turned[2] - turned[0] > turned[3] - turned[1], "reads level, not up the board: {turned:?}");
+}
+
+/// A footprint text turned past a quarter turn is drawn half a turn round so that it reads
+/// upright (KiCad's rule for text that is not unlocked), keeping its anchor and justification:
+/// 180° is drawn as 0°, 270° as 90°. Board text keeps its rotation.
+#[test]
+fn locked_footprint_text_past_a_quarter_turn_reads_upright() {
+    let footprint = |angle: u32, font: &str| {
+        front_silk_bounds(&format!(
+            r#"(footprint "R" (layer "F.Cu") (at 0 0) (property "Reference" "ABCDEFGH" (at 0 0 {angle}) (layer "F.SilkS") {font}))"#
+        ))
+    };
+    let board = |angle: u32, font: &str| front_silk_bounds(&format!(r#"(gr_text "ABCDEFGH" (at 0 0 {angle}) (layer "F.SilkS") {font})"#));
+    assert!(same_bounds(footprint(180, FONT_LEFT), board(0, FONT_LEFT)), "{:?} {:?}", footprint(180, FONT_LEFT), board(0, FONT_LEFT));
+    assert!(same_bounds(footprint(270, FONT), board(90, FONT)), "{:?} {:?}", footprint(270, FONT), board(90, FONT));
+    assert!(same_bounds(footprint(90, FONT), board(90, FONT)), "a quarter turn is already upright");
+    // Board text at 180° is drawn upside down: left-justified, it runs to the left of its anchor.
+    let upside_down = board(180, FONT_LEFT);
+    assert!(upside_down[2] < 0.5 && upside_down[0] < -5.0, "{upside_down:?}");
+}
+
+/// An unlocked footprint text is drawn at its own rotation, upside down if that is what it says.
+#[test]
+fn unlocked_footprint_text_keeps_its_upside_down_angle() {
+    let unlocked = front_silk_bounds(&format!(
+        r#"(footprint "R" (layer "F.Cu") (at 0 0) (property "Reference" "ABCDEFGH" (at 0 0 180) (unlocked yes) (layer "F.SilkS") {FONT_LEFT}))"#
+    ));
+    let board = front_silk_bounds(&format!(r#"(gr_text "ABCDEFGH" (at 0 0 180) (layer "F.SilkS") {FONT_LEFT})"#));
+    assert!(same_bounds(unlocked, board), "{unlocked:?} {board:?}");
+}
+
+/// Older files write `unlocked` inside the text's `at`: the position and rotation are still read.
+#[test]
+fn unlocked_written_in_the_position_keeps_the_position() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start -10 -10) (end 10 10) (layer "Edge.Cuts"))
+      (footprint "R" (layer "F.Cu") (at 0 0)
+        (fp_text reference "R1" (at 3 1 180 unlocked) (layer "F.SilkS")
+          (effects (font (size 1 1) (thickness 0.15))))))"#;
+    let board = parse_kicad_board(source.as_bytes(), "legacy.kicad_pcb").unwrap();
+    let [footprint] = board.footprints.as_slice() else { panic!("expected one footprint") };
+    assert_eq!(footprint.texts.len(), 1, "{:?}", footprint.texts);
+    assert_eq!(footprint.texts[0].at, [3.0, 1.0, 180.0]);
+    assert!(footprint.texts[0].unlocked);
+}
+
+/// The board text and each footprint's text, after the variables are put in.
+fn texts_of(items: &str) -> (Vec<String>, Vec<Vec<String>>) {
+    let source = format!(r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -20 -20) (end 20 20) (layer "Edge.Cuts")) {items})"#);
+    let board = parse_kicad_board(source.as_bytes(), "vars.kicad_pcb").unwrap();
+    let texts = |list: &[KicadText]| list.iter().map(|t| t.text.clone()).collect::<Vec<_>>();
+    (texts(&board.texts), board.footprints.iter().map(|f| texts(&f.texts)).collect())
+}
+
+const VAR_FONT: &str = "(effects (font (size 1 1) (thickness 0.15)))";
+
+const TITLE_BLOCK: &str = r#"(title_block (title "Probe board") (date "2026-01-02") (rev "B2") (company "Acme") (comment 1 "first"))"#;
+
+/// A footprint R7 (value 10k, a hidden MPN field) from library `Lib`, with one silk text `text`.
+fn footprint_with_text(text: &str) -> String {
+    format!(
+        r#"(footprint "Lib:Part" (layer "F.Cu") (at 0 0)
+          (property "Reference" "R7" (at 0 -3) (layer "F.Fab") (hide yes) {VAR_FONT})
+          (property "Value" "10k" (at 0 3) (layer "F.Fab") (hide yes) {VAR_FONT})
+          (property "MPN" "XQ-12" (at 0 0) (layer "F.Fab") (hide yes) {VAR_FONT})
+          (fp_text user "{text}" (at 0 0) (layer "F.SilkS") {VAR_FONT}))"#
+    )
+}
+
+/// Each name and its value, as KiCad 10 draws them (checked against kicad-cli renders): the title
+/// block anywhere, and in a footprint's text its reference, value, any field by name (hidden ones
+/// too), its library and name, and the text's layer by the name KiCad shows.
+#[test]
+fn reference_and_title_block_variables_are_expanded() {
+    let board_text = |text: &str| format!(r#"(gr_text "{text}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#);
+    let (board, _) = texts_of(&format!("{TITLE_BLOCK} {}", board_text("${TITLE} rev ${REVISION}, ${ISSUE_DATE}, ${COMPANY}, ${COMMENT1}, ${LAYER}")));
+    assert_eq!(board, vec!["Probe board rev B2, 2026-01-02, Acme, first, F.Silkscreen"]);
+    let (_, footprints) = texts_of(&format!(
+        "{TITLE_BLOCK} {}",
+        footprint_with_text("${REFERENCE}=${VALUE} ${MPN} ${FOOTPRINT_LIBRARY}/${FOOTPRINT_NAME} ${LAYER} ${REVISION}")
+    ));
+    assert_eq!(footprints, vec![vec!["R7=10k XQ-12 Lib/Part F.Silkscreen B2"]]);
+}
+
+/// `${R7:VALUE}` reads another footprint's field, from board text or another footprint's; a
+/// reference no footprint has reads as KiCad shows it.
+#[test]
+fn a_text_variable_can_read_another_footprints_field() {
+    let (board, _) = texts_of(&format!(
+        r#"{TITLE_BLOCK} {} (gr_text "${{R7:VALUE}} ${{R7:REVISION}} ${{R9:VALUE}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#,
+        footprint_with_text("x")
+    ));
+    assert_eq!(board, vec!["10k B2 <Unknown reference: R9>"]);
+}
+
+/// KiCad's text dialog saves `${R7:VALUE}` with the footprint's id in place of its reference
+/// (`(uuid …)` since KiCad 8, `(tstamp …)` before), and reads either form back.
+#[test]
+fn a_saved_cross_reference_names_the_footprint_by_its_id() {
+    for id in ["uuid", "tstamp"] {
+        let footprint =
+            footprint_with_text("x").replacen(r#"(layer "F.Cu")"#, &format!(r#"(layer "F.Cu") ({id} "0e467c16-584b-4a66-9b99-5dd5e1ebf143")"#), 1);
+        let (board, _) =
+            texts_of(&format!(r#"{footprint} (gr_text "${{0e467c16-584b-4a66-9b99-5dd5e1ebf143:VALUE}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+        assert_eq!(board, vec!["10k"], "{id}");
+    }
+}
+
+/// A field's own variables are put in where the field is read, in its footprint (KiCad reads a
+/// field by its shown text): from the footprint's text, through a cross reference, and through a
+/// chain of them.
+#[test]
+fn a_field_holding_variables_is_expanded_where_it_is_read() {
+    let footprint = footprint_with_text("${Label}").replacen(
+        r#"(property "MPN""#,
+        &format!(r#"(property "Label" "${{REFERENCE}}=${{VALUE}}" (at 0 0) (layer "F.Fab") (hide yes) {VAR_FONT}) (property "MPN""#),
+        1,
+    );
+    let (board, footprints) = texts_of(&format!(r#"{footprint} (gr_text "${{R7:Label}} ${{R7:R7:VALUE}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+    assert_eq!(footprints, vec![vec!["R7=10k"]]);
+    assert_eq!(board, vec!["R7=10k 10k"]);
+}
+
+/// A field that names itself, and a cross reference repeated a hundred thousand times, end at the
+/// depth limit and stay as written instead of running the stack out.
+#[test]
+fn variables_that_never_end_stay_as_written() {
+    let footprint = footprint_with_text("${Loop}").replacen(
+        r#"(property "MPN""#,
+        &format!(r#"(property "Loop" "${{Loop}}" (at 0 0) (layer "F.Fab") (hide yes) {VAR_FONT}) (property "MPN""#),
+        1,
+    );
+    let chain = format!("${{{}VALUE}}", "R7:".repeat(100_000));
+    let (board, footprints) = texts_of(&format!(r#"{footprint} (gr_text "{chain}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+    assert_eq!(board, vec![chain]);
+    assert_eq!(footprints, vec![vec!["${Loop}"]]);
+}
+
+/// Fields that each read the next a hundred times, eight deep, would take about 100^8 lookups to
+/// put in. One work budget for the whole text stops it: the import finishes at once, the text
+/// stays within the length limit, and the board says which text was left partly as written.
+#[test]
+fn deeply_nested_fields_stop_at_the_work_budget() {
+    let names = ["A", "B", "C", "D", "E", "F", "G", "H"];
+    let mut fields = String::new();
+    for (i, name) in names.iter().enumerate() {
+        let value = match names.get(i + 1) {
+            Some(next) => format!("${{{next}}}").repeat(100),
+            None => "x".to_string(),
+        };
+        fields.push_str(&format!(r#"(property "{name}" "{value}" (at 0 0) (layer "F.Fab") (hide yes) {VAR_FONT}) "#));
+    }
+    let footprint = footprint_with_text("${A}").replacen(r#"(property "MPN""#, &format!(r#"{fields}(property "MPN""#), 1);
+    let source = format!(r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -20 -20) (end 20 20) (layer "Edge.Cuts")) {footprint})"#);
+    let board = parse_kicad_board(source.as_bytes(), "vars.kicad_pcb").unwrap();
+    let text = &board.footprints[0].texts[0].text;
+    assert!(text.len() <= 4096 + 8, "{} characters", text.len());
+    assert!(board.warnings.iter().any(|w| w.contains("text variables") && w.contains("R7")), "{:?}", board.warnings);
+}
+
+/// A value that would take a text past the length limit is not put in: the name stays as written,
+/// so a long title read by many texts cannot make each of them long.
+#[test]
+fn a_value_past_the_length_limit_leaves_its_name() {
+    let title = "T".repeat(5000);
+    let (board, _) = texts_of(&format!(r#"(title_block (title "{title}")) (gr_text "Board ${{TITLE}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+    assert_eq!(board, vec!["Board ${TITLE}"]);
+}
+
+/// A layer the board's layer table names is shown by that name.
+#[test]
+fn the_layer_variable_reads_the_boards_own_layer_name() {
+    let (board, _) = texts_of(&format!(r#"(layers (5 "F.SilkS" user "Top silk")) (gr_text "${{LAYER}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+    assert_eq!(board, vec!["Top silk"]);
+}
+
+/// A title-block name the board never set is empty, so a text made only of it draws nothing; a
+/// text with other characters keeps them.
+#[test]
+fn empty_text_variables_draw_nothing() {
+    let (board, _) = texts_of(&format!(
+        r#"(gr_text "${{REVISION}}" (at 0 0) (layer "F.SilkS") {VAR_FONT}) (gr_text "${{ISSUE_DATE}} " (at 0 5) (layer "F.SilkS") {VAR_FONT}) (gr_text "Rev ${{REVISION}}" (at 0 9) (layer "F.SilkS") {VAR_FONT})"#
+    ));
+    assert_eq!(board, vec!["Rev "]);
+}
+
+/// Unknown names, names in the wrong case, a footprint's names in board text and a cross
+/// reference to a field the footprint lacks stay as written; a `${` never closed runs to the end
+/// of the text, and a name is expanded first, as KiCad reads them.
+#[test]
+fn unknown_text_variables_stay_literal() {
+    let (board, footprints) = texts_of(&format!(
+        r#"{TITLE_BLOCK} {} (gr_text "${{NOSUCH}} ${{revision}} ${{REFERENCE}} ${{R7:NOSUCH}}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#,
+        footprint_with_text("${mpn} ${${REFERENCE}} x${REFERENCE")
+    ));
+    assert_eq!(board, vec!["${NOSUCH} ${revision} ${REFERENCE} ${R7:NOSUCH}"]);
+    assert_eq!(footprints, vec![vec!["${mpn} ${R7} xR7"]]);
+}
+
+/// A text that names a long title many times grows only so far.
+#[test]
+fn expanded_text_has_a_length_limit() {
+    let title = "T".repeat(1000);
+    let text = "${TITLE}".repeat(1000);
+    let (board, _) = texts_of(&format!(r#"(title_block (title "{title}")) (gr_text "{text}" (at 0 0) (layer "F.SilkS") {VAR_FONT})"#));
+    let [expanded] = board.as_slice() else { panic!("one text: {board:?}") };
+    // It stops past 4096 characters; the names after that stay as written.
+    assert!(expanded.len() > 4096 && expanded.len() < 4096 + 1000 + 8000, "{}", expanded.len());
+    assert!(expanded.starts_with(&title), "the first names are expanded");
+    assert!(expanded.ends_with("${TITLE}"), "the rest stays as written");
+}
+
 #[test]
 fn copper_overlay_is_a_flat_face_on_the_board() {
     let source = r#"(kicad_pcb (general (thickness 1.6))
@@ -631,7 +1217,8 @@ fn copper_overlay_clips_a_drill_crossing_a_zone_boundary() {
       (via (at 2.1 10) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
       (zone (net 1) (net_name "GND") (layer "F.Cu")
         (filled_polygon (layer "F.Cu") (pts (xy 2 2) (xy 18 2) (xy 18 18) (xy 2 18)))))"#;
-    let options = KicadOptions { copper: KicadCopper::Overlay, components: false, silkscreen: false, ..Default::default() };
+    // The via is drilled: by default only mounting holes are.
+    let options = KicadOptions { copper: KicadCopper::Overlay, components: false, silkscreen: false, holes: KicadHoles::All, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "crossing.kicad_pcb", &options, &mut load).unwrap();
     assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
@@ -657,7 +1244,7 @@ fn modelled_copper_is_a_closed_prism() {
       (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
       (segment (start 1 2) (end 10 2) (width 0.3) (layer "F.Cu") (net 1))
       (via (at 14 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1)))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "prism.kicad_pcb", &options, &mut load).unwrap();
     assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
@@ -704,7 +1291,7 @@ fn a_fill_outline_that_touches_itself_keeps_its_area() {
     let points = [a[0], a[1], a[2], b[1], b[2], b[3], b[0], a[3]];
     let region = Region2 { outer: Loop2::polygon(&points), holes: Vec::new() };
     let loops = region_loops(&region).unwrap();
-    let (points, triangles) = solidcore_tess::triangulate_planar(&loops).unwrap();
+    let (points, triangles) = solidcraft_kernel::tessellate::triangulate_planar(&loops).unwrap();
     let area: f64 = triangles
         .iter()
         .map(|[a, b, c]| {
@@ -727,7 +1314,7 @@ fn a_wide_trace_reaches_the_copper_it_ends_on() {
       (segment (start 20 5) (end 30 5) (width 1.0) (layer "F.Cu") (net 1))
       (footprint "test:TH" (layer "F.Cu") (at 30 5)
         (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1.2) (layers "F.Cu" "B.Cu"))))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "wide.kicad_pcb", &options, &mut load).unwrap();
     let area = layer_area(&imported, "Copper F.Cu", 0.035);
@@ -757,7 +1344,7 @@ fn trace_into_a_via_stops_at_its_drill() {
       (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
       (via (at 10 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
       (segment (start 10 5) (end 16 5) (width 0.4) (layer "F.Cu") (net 1)))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "via.kicad_pcb", &options, &mut load).unwrap();
     let area = copper_area(&imported, "Copper F.Cu", 0.035);
@@ -775,7 +1362,7 @@ fn a_trace_crossing_a_hole_is_cut_at_the_hole() {
       (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
       (via (at 10 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
       (segment (start 6 5) (end 14 5) (width 0.4) (layer "F.Cu") (net 1)))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "via.kicad_pcb", &options, &mut load).unwrap();
     let area = copper_area(&imported, "Copper F.Cu", 0.035);
@@ -811,7 +1398,7 @@ fn traces_stop_at_drilled_holes() {
       (footprint "test:TH" (layer "F.Cu") (at 10 5)
         (pad "1" thru_hole circle (at 0 0) (size 3 3) (drill 1.2) (layers "F.Cu" "B.Cu"))))"#;
     // Only the trace's copper: the pad's own ring is not built.
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "trace.kicad_pcb", &options, &mut load).unwrap();
     let area = layer_area(&imported, "Copper F.Cu", 0.035);
@@ -843,7 +1430,7 @@ fn via_copper_is_a_ring_around_its_drill() {
     let source = r#"(kicad_pcb (general (thickness 1.6))
       (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
       (via (at 10 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1)))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "via.kicad_pcb", &options, &mut load).unwrap();
     let expected = std::f64::consts::PI * (0.6 * 0.6 - 0.3 * 0.3);
@@ -861,7 +1448,7 @@ fn through_hole_pad_copper_has_the_drill_through_it() {
       (footprint "test:TH" (layer "F.Cu") (at 10 5)
         (property "Reference" "J1")
         (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "F.Cu" "B.Cu"))))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "pad.kicad_pcb", &options, &mut load).unwrap();
     let expected = std::f64::consts::PI * (1.0 - 0.25);
@@ -870,6 +1457,62 @@ fn through_hole_pad_copper_has_the_drill_through_it() {
         let area = copper_area(&imported, layer, 0.035);
         assert!((area - expected).abs() < 0.05, "{layer}: {area} vs {expected}");
     }
+}
+
+/// `(drill … (offset dx dy))` moves a pad's copper off its hole, in the pad's own frame: the hole
+/// stays at the pad's position (checked with kicad-cli 10: its drill file and copper plot). Library
+/// footprints use it for hand-soldering pads and module castellations (Adafruit Feather, Raspberry
+/// Pi Pico, TO-92 HandSolder); an SMD pad writes it without a drill size.
+#[test]
+fn a_pad_offset_moves_the_copper_off_its_hole() {
+    let front_copper = |at: &str, pad: &str| {
+        let source = format!(
+            r#"(kicad_pcb (general (thickness 1.6))
+              (gr_rect (start 0 0) (end 40 20) (layer "Edge.Cuts"))
+              (footprint "test:Offset" (layer "F.Cu") (at {at})
+                (property "Reference" "J1")
+                {pad}))"#
+        );
+        // The pad holes come in: by default only mounting holes are drilled.
+        let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, holes: KicadHoles::Pads, ..Default::default() };
+        let mut load = |_: &str| Err("not used".to_string());
+        let imported = read_kicad(source.as_bytes(), "offset.kicad_pcb", &options, &mut load).unwrap();
+        let board = parse_kicad_board(source.as_bytes(), "offset.kicad_pcb").unwrap();
+        let drills: Vec<[f64; 2]> = board.drills.iter().map(|d| d.center).collect();
+        let area = copper_area(&imported, "Copper F.Cu", 0.035);
+        let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+        let mesh = meshes.iter().find(|m| m.name == "Copper F.Cu").expect("front copper");
+        let points = mesh.positions.as_chunks::<3>().0;
+        let low = |i: usize| points.iter().map(|p| p[i]).fold(f64::MAX, f64::min);
+        let high = |i: usize| points.iter().map(|p| p[i]).fold(f64::MIN, f64::max);
+        ([low(0), high(0), low(1), high(1)], area, drills)
+    };
+    let near = |a: [f64; 4], b: [f64; 4]| a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-6);
+
+    // A 3 × 2 pad drilled 1 mm, its copper 0.5 mm to the right of the hole: copper from X 9 to 12
+    // (KiCad's Y 9 to 11, -11 to -9 here), the hole still at the footprint's origin and inside it.
+    let (extent, area, drills) = front_copper("10 10", r#"(pad "1" thru_hole rect (at 0 0) (size 3 2) (drill 1 (offset 0.5 0)) (layers "*.Cu"))"#);
+    assert!(near(extent, [9.0, 12.0, -11.0, -9.0]), "{extent:?}");
+    assert_eq!(drills, [[10.0, -10.0]], "the hole stays at the pad's position");
+    let expected = 6.0 - std::f64::consts::PI * 0.25;
+    assert!((area - expected).abs() < 0.05, "the hole opens the shifted copper: {area} vs {expected}");
+
+    // A pad turned a quarter turn turns its offset too: (3, 0) puts the copper 3 mm up the board
+    // (KiCad's Y 6 to 8 for a pad at Y 10).
+    let (extent, _, drills) = front_copper("10 10", r#"(pad "1" thru_hole rect (at 10 0 90) (size 2 2) (drill 1 (offset 3 0)) (layers "*.Cu"))"#);
+    assert!(near(extent, [19.0, 21.0, -8.0, -6.0]), "{extent:?}");
+    assert_eq!(drills, [[20.0, -10.0]]);
+
+    // An SMD pad has an offset and no drill: the copper moves and no hole comes in.
+    let (extent, _, drills) = front_copper("10 10", r#"(pad "1" smd rect (at 0 5) (size 1 1) (drill (offset 3 0)) (layers "F.Cu"))"#);
+    assert!(near(extent, [12.5, 13.5, -15.5, -14.5]), "{extent:?}");
+    assert!(drills.is_empty(), "{drills:?}");
+
+    // On a turned footprint the file writes the pad's angle on the board (90° here), and the offset
+    // turns with the pad: KiCad draws this copper from X 19 to 21 and Y 6 to 8, hole at (20, 10).
+    let (extent, _, drills) = front_copper("20 10 90", r#"(pad "1" thru_hole rect (at 0 0 90) (size 2 2) (drill 1 (offset 3 0)) (layers "*.Cu"))"#);
+    assert!(near(extent, [19.0, 21.0, -8.0, -6.0]), "{extent:?}");
+    assert_eq!(drills, [[20.0, -10.0]]);
 }
 
 #[test]
@@ -911,8 +1554,8 @@ fn track_legs_that_continue_each_other_are_one_trace() {
         track([10.0, 10.0], [20.0, 10.0], 0.25, "F.Cu"),
     ]);
     assert_eq!(traces.len(), 1, "{traces:?}");
-    let (front, width, points) = &traces[0];
-    assert!(*front);
+    let (layer, width, points) = &traces[0];
+    assert_eq!(*layer, CopperLayer::Front);
     assert!((*width - 0.25).abs() < 1e-12);
     // Board frame: KiCad's Y is negated, and the legs are one 4-point polyline.
     assert_eq!(points, &[[0.0, 0.0], [10.0, 0.0], [10.0, -10.0], [20.0, -10.0]]);
@@ -1086,7 +1729,7 @@ fn a_pad_opens_up_for_any_hole_it_covers() {
       (via (at 5 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
       (footprint "part" (layer "F.Cu") (at 0 0)
         (pad "1" smd rect (at 5 5) (size 3 3) (layers "F.Cu" "F.Mask"))))"#;
-    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let options = KicadOptions { holes: KicadHoles::All, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
     let mut load = |_: &str| Err("not used".to_string());
     let imported = read_kicad(source.as_bytes(), "unplated.kicad_pcb", &options, &mut load).unwrap();
     // A bare pad stands above the masked copper, so it is PAD_PROUD thicker.
@@ -1094,4 +1737,550 @@ fn a_pad_opens_up_for_any_hole_it_covers() {
     // The pad with the via's drill open through it: the pad data names no drill of its own.
     let expected = 9.0 - std::f64::consts::PI * 0.3 * 0.3;
     assert!((area - expected).abs() < 0.05, "{area} vs {expected}");
+}
+
+/// Base64 text of `bytes`, wrapped over lines the way a board file stores an embedded file.
+fn base64_wrapped(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut text = String::new();
+    for chunk in bytes.chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |acc, (i, b)| acc | u32::from(*b) << (16 - 8 * i));
+        for i in 0..=chunk.len() {
+            text.push(ALPHABET[(n >> (18 - 6 * i) & 63) as usize] as char);
+        }
+        text.extend(std::iter::repeat_n('=', 3 - chunk.len()));
+    }
+    let lines: Vec<&str> = text.as_bytes().chunks(76).map(|c| std::str::from_utf8(c).unwrap()).collect();
+    lines.join("\n\t\t\t")
+}
+
+/// A 10 x 20 x 30 mm box as a STEP file, packed the way KiCad embeds it (one zstd frame).
+fn packed_box_step() -> Vec<u8> {
+    let block = solidcraft_kernel::box_solid(solidcore_record::Vec3::ZERO, solidcore_record::Vec3::new(10.0, 20.0, 30.0)).unwrap();
+    let text = solidcraft_kernel::step_export(&[&block], "").unwrap();
+    ruzstd::encoding::compress_to_vec(text.as_bytes(), ruzstd::encoding::CompressionLevel::Fastest)
+}
+
+/// A synthetic board with one footprint whose model is `kicad-embed://box.step`, the file stored
+/// in the board's own `embedded_files` block with `data` (base64 text) and `checksum`; the
+/// footprint lists it with `footprint_checksum`.
+fn embedded_board(data: &str, checksum: &str, footprint_checksum: &str) -> String {
+    format!(
+        r#"(kicad_pcb (version 20240108) (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (embedded_files (file (name "box.step") (type model) (checksum "{footprint_checksum}")))
+        (model "kicad-embed://box.step" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0))))
+      (embedded_files
+        (file
+          (name "box.step")
+          (type model)
+          (data |{data}|)
+          (checksum "{checksum}"))))"#
+    )
+}
+
+fn embedded_import(source: &str) -> KicadImport {
+    let mut load = |path: &str| Err(format!("{path}: an embedded model is not looked up on disk"));
+    read_kicad(source.as_bytes(), "board.kicad_pcb", &KicadOptions::default(), &mut load).unwrap()
+}
+
+/// KiCad 8 and later store a model inside the board and name it `kicad-embed://<name>`: the
+/// footprint's model is that file, not one found on disk.
+#[test]
+fn a_model_embedded_in_the_board_comes_in_on_its_footprint() {
+    let source = embedded_board(&base64_wrapped(&packed_box_step()), "0123456789ABCDEF0123456789ABCDEF", "0123456789abcdef0123456789abcdef");
+    let board = parse_kicad_board(source.as_bytes(), "board.kicad_pcb").unwrap();
+    assert_eq!(board.embedded_files.len(), 2, "the footprint's entry and the board's own: {:?}", board.embedded_files);
+    let imported = embedded_import(&source);
+    assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
+    assert_eq!(imported.plan.slots, vec!["box".to_string()]);
+    assert_eq!(imported.plan.places.len(), 1);
+    assert_eq!(imported.plan.places[0].name.as_deref(), Some("U1"));
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    // The model itself: a 10 x 20 x 30 mm box, in the component's own frame.
+    assert!(!meshes.is_empty(), "the embedded model's body");
+    let mut low = [f64::MAX; 3];
+    let mut high = [f64::MIN; 3];
+    for point in meshes.iter().flat_map(|m| m.positions.as_chunks::<3>().0.iter()) {
+        for axis in 0..3 {
+            low[axis] = low[axis].min(point[axis]);
+            high[axis] = high[axis].max(point[axis]);
+        }
+    }
+    let mut size: Vec<f64> = (0..3).map(|axis| high[axis] - low[axis]).collect();
+    size.sort_by(f64::total_cmp);
+    for (got, want) in size.iter().zip([10.0, 20.0, 30.0]) {
+        assert!((got - want).abs() < 1e-3, "size {size:?}");
+    }
+}
+
+/// A damaged embedded file is one warning that names it; the board and its other parts still
+/// come in, and nothing panics.
+#[test]
+fn a_corrupt_embedded_model_is_a_warning_naming_the_file() {
+    let packed = packed_box_step();
+    let mut truncated = packed.clone();
+    truncated.truncate(packed.len() / 2);
+    let cases = [
+        ("not base64", "!!!! this is not base64 !!!!".to_string(), "not base64"),
+        ("not compressed", base64_wrapped(b"ISO-10303-21; plain text, not a zstd frame"), "not compressed"),
+        ("truncated", base64_wrapped(&truncated), ""),
+        ("empty", String::new(), "corrupt"),
+    ];
+    for (what, data, want) in cases {
+        let source = embedded_board(&data, "0123456789ABCDEF0123456789ABCDEF", "0123456789ABCDEF0123456789ABCDEF");
+        let imported = embedded_import(&source);
+        let warnings = &imported.feature.warnings;
+        assert!(warnings.iter().any(|w| w.starts_with("box.step: ") && w.contains(want)), "{what}: {warnings:?}");
+        assert!(imported.plan.places.is_empty(), "{what}: no model, no placement");
+        assert!(imported.board_step.is_some(), "{what}: the board still comes in");
+    }
+}
+
+/// The checksums the board records for one file must agree; a file whose data is missing, or
+/// whose name no entry has, is a warning too.
+#[test]
+fn an_embedded_model_that_changed_or_is_missing_is_reported() {
+    let data = base64_wrapped(&packed_box_step());
+    let imported = embedded_import(&embedded_board(&data, "0123456789ABCDEF0123456789ABCDEF", "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"));
+    assert!(
+        imported.feature.warnings.iter().any(|w| w.starts_with("box.step: ") && w.contains("checksums disagree")),
+        "{:?}",
+        imported.feature.warnings
+    );
+    assert!(imported.plan.places.is_empty());
+
+    let no_data = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 5 5) (layer "F.Cu") (property "Reference" "U1")
+        (embedded_files (file (name "box.step") (type model) (checksum "AB")))
+        (model "kicad-embed://box.step")
+        (model "kicad-embed://gone.step")))"#;
+    let imported = embedded_import(no_data);
+    let warnings = &imported.feature.warnings;
+    assert!(warnings.iter().any(|w| w.starts_with("box.step: ") && w.contains("holds no data")), "{warnings:?}");
+    assert!(warnings.iter().any(|w| w.starts_with("gone.step: ") && w.contains("not in the board file")), "{warnings:?}");
+}
+
+/// A small compressed file must not grow into memory: a frame that unpacks past the limit is
+/// refused, and so is text that is not base64.
+#[test]
+fn embedded_data_is_bounded_and_decoded_strictly() {
+    let big = vec![0u8; MAX_EMBEDDED_FILE_BYTES + 1];
+    let packed = ruzstd::encoding::compress_to_vec(&big[..], ruzstd::encoding::CompressionLevel::Fastest);
+    assert!(unpack_zstd(&packed, MAX_EMBEDDED_FILE_BYTES).unwrap_err().contains("too large"));
+    assert_eq!(decode_base64("TWFu"), Some(b"Man".to_vec()));
+    assert_eq!(decode_base64("TWE="), Some(b"Ma".to_vec()));
+    assert_eq!(decode_base64("TQ"), Some(b"M".to_vec()));
+    assert_eq!(decode_base64("T"), None);
+    assert_eq!(decode_base64("TW-u"), None);
+    assert_eq!(decode_base64("TQ==="), None);
+    // An unterminated `|…|` text is an error, not a hang or a panic.
+    assert!(parse_kicad_board(b"(kicad_pcb (embedded_files (file (data |abc", "x.kicad_pcb").is_err());
+}
+
+/// A pour with a square hole, as KiCad saves a fill: one outline that runs in to the hole along a
+/// zero-width bridge, round the hole and back out along the same line.
+const BRIDGED_FILL: &str = r#"(kicad_pcb (general (thickness 1.6))
+  (gr_rect (start 0 0) (end 20 20) (layer "Edge.Cuts"))
+  (zone (net 1) (net_name "GND") (layer "F.Cu")
+    (filled_polygon (layer "F.Cu") (pts (xy 2 2) (xy 18 2) (xy 18 18) (xy 2 18) (xy 2 10)
+      (xy 8 10) (xy 8 12) (xy 12 12) (xy 12 8) (xy 8 8) (xy 8 10) (xy 2 10)))))"#;
+
+#[test]
+fn a_fill_s_bridges_to_its_holes_are_taken_out() {
+    let board = parse_kicad_board(BRIDGED_FILL.as_bytes(), "bridged.kicad_pcb").unwrap();
+    let [zone] = board.zones.as_slice() else { panic!("one zone") };
+    // The outline and the hole, each a loop of its own, and no edge run both ways.
+    let mut sizes: Vec<usize> = zone.contours.iter().map(Vec::len).collect();
+    sizes.sort_unstable();
+    assert_eq!(sizes, vec![4, 4], "{:?}", zone.contours);
+    // Drawn, the pour's open edges are the outline and the hole's, not the bridge as well.
+    let options = KicadOptions { copper: KicadCopper::Overlay, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(BRIDGED_FILL.as_bytes(), "bridged.kicad_pcb", &options, &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = &imported.feature.kind else { panic!("expected a mesh import") };
+    let mesh = meshes.iter().find(|m| m.name == "Copper F.Cu").expect("the pour");
+    let points = mesh.positions.as_chunks::<3>().0;
+    let mut uses: HashMap<(u32, u32), i32> = HashMap::new();
+    for [a, b, c] in mesh.triangles.as_chunks::<3>().0.iter().copied() {
+        for (p, q) in [(a, b), (b, c), (c, a)] {
+            *uses.entry((p.min(q), p.max(q))).or_default() += 1;
+        }
+    }
+    let open: f64 = uses
+        .iter()
+        .filter(|(_, n)| **n == 1)
+        .map(|((p, q), _)| {
+            let (p, q) = (points[*p as usize], points[*q as usize]);
+            ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2)).sqrt()
+        })
+        .sum();
+    assert!((open - (64.0 + 16.0)).abs() < 1e-6, "open edges {open} mm: the bridge is drawn");
+}
+
+/// Two holes, the second bridged on from the first, as KiCad's fill joins neighbouring holes.
+const CHAINED_FILL: &str = r#"(kicad_pcb (general (thickness 1.6))
+  (gr_rect (start 0 0) (end 20 20) (layer "Edge.Cuts"))
+  (zone (net 1) (net_name "GND") (layer "F.Cu")
+    (filled_polygon (layer "F.Cu") (pts (xy 2 2) (xy 18 2) (xy 18 18) (xy 2 18) (xy 2 6) (xy 4 6) (xy 4 8) (xy 8 8)
+      (xy 8 6) (xy 12 6) (xy 12 8) (xy 16 8) (xy 16 4) (xy 12 4) (xy 12 6) (xy 8 6) (xy 8 4) (xy 4 4) (xy 4 6) (xy 2 6)))))"#;
+
+#[test]
+fn a_fill_s_holes_bridged_one_to_the_next_are_each_a_loop() {
+    let board = parse_kicad_board(CHAINED_FILL.as_bytes(), "chained.kicad_pcb").unwrap();
+    let [zone] = board.zones.as_slice() else { panic!("one zone") };
+    let mut sizes: Vec<usize> = zone.contours.iter().map(Vec::len).collect();
+    sizes.sort_unstable();
+    assert_eq!(sizes, vec![4, 4, 4], "the outline and two holes: {:?}", zone.contours);
+}
+
+#[test]
+fn a_hatched_fill_s_thousands_of_holes_are_taken_apart_in_one_pass() {
+    // One pour, 2500 holes each bridged from its bottom edge: 17,500 points in one polygon.
+    const HOLES: usize = 2500;
+    let width = 2.0 * HOLES as f64 + 1.0;
+    let mut pts = String::from("(xy 0 0)");
+    for i in 0..HOLES {
+        let (x0, x1) = (2.0 * i as f64 + 0.5, 2.0 * i as f64 + 1.5);
+        pts += &format!(" (xy {x0} 0) (xy {x0} 1) (xy {x0} 2) (xy {x1} 2) (xy {x1} 1) (xy {x0} 1) (xy {x0} 0)");
+    }
+    pts += &format!(" (xy {width} 0) (xy {width} 3) (xy 0 3)");
+    let text = format!(
+        r#"(kicad_pcb (general (thickness 1.6)) (gr_rect (start -1 -1) (end {} 4) (layer "Edge.Cuts"))
+  (zone (net 1) (net_name "GND") (layer "F.Cu") (filled_polygon (layer "F.Cu") (pts {pts}))))"#,
+        width + 1.0
+    );
+    let board = parse_kicad_board(text.as_bytes(), "hatched.kicad_pcb").unwrap();
+    let [zone] = board.zones.as_slice() else { panic!("one zone") };
+    assert_eq!(zone.contours.len(), HOLES + 1, "the outline and every hole");
+    assert!(zone.contours.iter().all(|c| c.len() == 4), "each a plain rectangle");
+    let options = KicadOptions { copper: KicadCopper::Overlay, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(text.as_bytes(), "hatched.kicad_pcb", &options, &mut load).unwrap();
+    assert!(imported.feature.warnings.is_empty(), "{:?}", imported.feature.warnings);
+}
+
+/// A 4-layer board with a track on each copper layer and a pour on In2.
+const FOUR_LAYERS: &str = r#"(kicad_pcb (general (thickness 1.6))
+  (layers (0 "F.Cu" signal) (4 "In1.Cu" signal) (6 "In2.Cu" signal) (2 "B.Cu" signal))
+  (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+  (segment (start 1 2) (end 10 2) (width 0.3) (layer "F.Cu") (net 1))
+  (segment (start 1 3) (end 10 3) (width 0.3) (layer "In1.Cu") (net 2))
+  (segment (start 1 4) (end 10 4) (width 0.3) (layer "In2.Cu") (net 3))
+  (segment (start 1 5) (end 10 5) (width 0.3) (layer "B.Cu") (net 4))
+  (zone (net 3) (net_name "GND") (layer "In2.Cu")
+    (filled_polygon (layer "In2.Cu") (pts (xy 12 1) (xy 19 1) (xy 19 9) (xy 12 9)))))"#;
+
+/// The lowest and highest Z of a body's mesh.
+fn z_range(mesh: &solidcraft_doc::MeshData) -> (f64, f64) {
+    let zs: Vec<f64> = mesh.positions.as_chunks::<3>().0.iter().map(|p| p[2]).collect();
+    (zs.iter().copied().fold(f64::INFINITY, f64::min), zs.iter().copied().fold(f64::NEG_INFINITY, f64::max))
+}
+
+fn modelled_copper(source: &str) -> (Vec<solidcraft_doc::MeshData>, Vec<String>) {
+    let options = KicadOptions { copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &options, &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    (meshes, imported.feature.warnings)
+}
+
+#[test]
+fn inner_copper_sits_inside_the_board_at_its_own_depth() {
+    let (meshes, warnings) = modelled_copper(FOUR_LAYERS);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let body = |name: &str| {
+        meshes.iter().find(|mesh| mesh.name == name).unwrap_or_else(|| panic!("no {name}: {:?}", meshes.iter().map(|m| &m.name).collect::<Vec<_>>()))
+    };
+    let (front, in1, in2, back) =
+        (z_range(body("Copper F.Cu")), z_range(body("Copper In1.Cu")), z_range(body("Copper In2.Cu")), z_range(body("Copper B.Cu")));
+    // The faces: the back copper is below Z = 0, the front copper above Z = 1.6.
+    assert!(back.1 <= 1e-6 && front.0 >= 1.6 - 1e-6, "{back:?} {front:?}");
+    // Evenly spaced through the board, In1 nearest the front: 1.6 * 2/3 and 1.6 * 1/3.
+    for (range, centre) in [(in1, 1.6 * 2.0 / 3.0), (in2, 1.6 / 3.0)] {
+        assert!(range.0 > 0.0 && range.1 < 1.6, "inside the board: {range:?}");
+        assert!(((range.0 + range.1) / 2.0 - centre).abs() < 1e-4, "{range:?} should be centred at {centre}");
+        assert!((range.1 - range.0 - COPPER_THICKNESS).abs() < 1e-4, "the foil keeps its thickness: {range:?}");
+    }
+    assert!(in1.0 > in2.1, "In1 is above In2: {in1:?} {in2:?}");
+    // Each layer holds only its own copper: the In2 body has the track and the pour, B.Cu has one track.
+    let ys = |mesh: &solidcraft_doc::MeshData| -> Vec<f64> { mesh.positions.as_chunks::<3>().0.iter().map(|p| p[1]).collect() };
+    assert!(ys(body("Copper B.Cu")).iter().all(|y| (*y + 5.0).abs() < 0.2), "B.Cu holds only its own track");
+    assert!(ys(body("Copper In2.Cu")).iter().any(|y| *y < -8.0), "the In2 pour is on In2");
+}
+
+#[test]
+fn an_overlay_leaves_the_inner_copper_out_and_says_so() {
+    let mut load = |_: &str| Err("not used".to_string());
+    let options = KicadOptions { components: false, silkscreen: false, ..Default::default() };
+    let imported = read_kicad(FOUR_LAYERS.as_bytes(), "board.kicad_pcb", &options, &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    let names: Vec<&str> = meshes.iter().map(|m| m.name.as_str()).collect();
+    assert!(names.contains(&"Copper F.Cu") && names.contains(&"Copper B.Cu"), "{names:?}");
+    assert!(!names.iter().any(|name| name.contains("In1") || name.contains("In2")), "{names:?}");
+    assert_eq!(imported.feature.warnings.len(), 1, "{:?}", imported.feature.warnings);
+}
+
+#[test]
+fn a_stackup_places_the_inner_layers_and_even_spacing_is_the_fallback() {
+    let source = |stackup: &str| {
+        format!(
+            r#"(kicad_pcb (general (thickness 1.6))
+  (layers (0 "F.Cu" signal) (4 "In1.Cu" signal) (6 "In2.Cu" signal) (2 "B.Cu" signal))
+  (setup {stackup})
+  (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts")))"#
+        )
+    };
+    let depths = |text: String| parse_kicad_board(text.as_bytes(), "b.kicad_pcb").unwrap().inner_layers;
+    let even = depths(source(""));
+    assert_eq!(even.len(), 2);
+    assert!((even[0].1 - 1.0 / 3.0).abs() < 1e-9 && (even[1].1 - 2.0 / 3.0).abs() < 1e-9, "{even:?}");
+    // In1 is a tenth of the way down, In2 nine tenths: 0.1 prepreg, 0.8 core, 0.1 prepreg.
+    let stackup = r#"(stackup
+      (layer "F.Cu" (type "copper") (thickness 0.035))
+      (layer "dielectric 1" (type "prepreg") (thickness 0.1))
+      (layer "In1.Cu" (type "copper") (thickness 0.01))
+      (layer "dielectric 2" (type "core") (thickness 0.78))
+      (layer "In2.Cu" (type "copper") (thickness 0.01))
+      (layer "dielectric 3" (type "prepreg") (thickness 0.1))
+      (layer "B.Cu" (type "copper") (thickness 0.035)))"#;
+    let placed = depths(source(stackup));
+    assert!((placed[0].1 - 0.105 / 1.0).abs() < 1e-9 && (placed[1].1 - 0.895).abs() < 1e-9, "{placed:?}");
+    // A stackup with sublayers is not simple: the even spacing stands.
+    let complex = stackup.replace("(thickness 0.78)", "(thickness 0.78) addsublayer (thickness 0.1)");
+    assert_eq!(depths(source(&complex)), even);
+}
+
+#[test]
+fn inner_pads_cut_inner_traces_and_a_through_pad_has_copper_on_every_layer() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (layers (0 "F.Cu" signal) (4 "In1.Cu" signal) (2 "B.Cu" signal))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (segment (start 1 5) (end 19 5) (width 0.3) (layer "In1.Cu") (net 1))
+      (footprint "part" (at 10 5) (layer "F.Cu")
+        (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask"))))"#;
+    let (meshes, warnings) = modelled_copper(source);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    // The pad's copper and the trace either side of it touch only at the pad's edge, so In1 comes
+    // back as several bodies, all named after the layer.
+    let inner: Vec<&solidcraft_doc::MeshData> = meshes.iter().filter(|mesh| mesh.name.starts_with("Copper In1.Cu")).collect();
+    assert!(inner.len() >= 2, "the trace stops at the pad: {:?}", meshes.iter().map(|m| &m.name).collect::<Vec<_>>());
+    for mesh in &inner {
+        let (low, high) = z_range(mesh);
+        assert!(low > 0.0 && high < 1.6, "{low} {high}");
+    }
+    let xs: Vec<f64> = inner.iter().flat_map(|mesh| mesh.positions.as_chunks::<3>().0.iter().map(|p| p[0])).collect();
+    assert!(xs.iter().any(|x| (*x - 10.0).abs() < 0.6), "the pad's ring is on In1");
+}
+
+#[test]
+fn only_real_inner_layer_names_count_as_copper() {
+    assert_eq!(copper_layer("In1.Cu"), Some(CopperLayer::Inner(1)));
+    assert_eq!(copper_layer("In30.Cu"), Some(CopperLayer::Inner(30)));
+    for name in ["In0.Cu", "In31.Cu", "In.Cu", "Inx.Cu", "In1.Cu ", "In+1.Cu", "F.SilkS", "In99999999999999999999.Cu"] {
+        assert_eq!(copper_layer(name), None, "{name}");
+    }
+}
+
+#[test]
+fn footprint_copper_graphics_and_wildcard_pads_reach_the_inner_layers_or_are_reported() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (layers (0 "F.Cu" signal) (4 "In1.Cu" signal) (2 "B.Cu" signal))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "part" (at 10 5) (layer "F.Cu")
+        (fp_rect (start -2 -1) (end 2 1) (layer "In1.Cu") (width 0.2) (fill solid))
+        (pad "1" thru_hole circle (at 5 0) (size 1.6 1.6) (drill 0.8) (layers "*.Cu" "*.Mask"))))"#;
+    let (meshes, warnings) = modelled_copper(source);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let xs: Vec<f64> = meshes
+        .iter()
+        .filter(|mesh| mesh.name.starts_with("Copper In1.Cu"))
+        .flat_map(|mesh| mesh.positions.as_chunks::<3>().0.iter().map(|p| p[0]))
+        .collect();
+    // The rectangle spans X = 8 to 12 (its stroke reaches 0.1 mm past that); the pad's ring spans 14.2 to 15.8.
+    assert!(
+        xs.iter().any(|x| (*x - 8.0).abs() < 0.15),
+        "the footprint's rectangle is on In1: {:?}",
+        xs.iter().map(|x| (x * 10.0).round() / 10.0).collect::<Vec<_>>()
+    );
+    // A board with only wildcard pads on its inner layers still says the overlay leaves them out,
+    // and a board thinner than the foil says it has no room.
+    let mut load = |_: &str| Err("not used".to_string());
+    let overlay = KicadOptions { components: false, silkscreen: false, ..Default::default() };
+    let imported = read_kicad(source.as_bytes(), "board.kicad_pcb", &overlay, &mut load).unwrap();
+    assert!(imported.feature.warnings.iter().any(|w| w.contains("inner copper")), "{:?}", imported.feature.warnings);
+    let thin = source.replace("(thickness 1.6)", "(thickness 0.02)");
+    let modelled = KicadOptions { copper: KicadCopper::Mesh, ..overlay };
+    let imported = read_kicad(thin.as_bytes(), "board.kicad_pcb", &modelled, &mut load).unwrap();
+    let solidcraft_doc::FeatureKind::MeshImport { meshes, .. } = imported.feature.kind else { panic!("expected a mesh import") };
+    assert!(!meshes.iter().any(|mesh| mesh.name.contains("In1")), "no inner copper in a board thinner than the foil");
+    assert!(imported.feature.warnings.iter().any(|w| w.contains("thinner")), "{:?}", imported.feature.warnings);
+}
+
+/// One hole of each kind: a via, a plated pin, a peg's unplated hole, a mounting hole's plated
+/// pad, and a pin cut in half by the board's edge (a castellated hole).
+const HOLES: &str = r#"(kicad_pcb (general (thickness 1.6))
+  (gr_rect (start 0 0) (end 30 10) (layer "Edge.Cuts"))
+  (via (at 5 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
+  (footprint "Connector:Pin" (layer "F.Cu") (at 10 5)
+    (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask")))
+  (footprint "Connector:Peg" (layer "F.Cu") (at 15 5)
+    (pad "" np_thru_hole circle (at 0 0) (size 1.5 1.5) (drill 1.5) (layers "*.Cu" "*.Mask")))
+  (footprint "MountingHole:MountingHole_3.2mm_M3_Pad" (layer "F.Cu") (at 22 5)
+    (pad "1" thru_hole circle (at 0 0) (size 6 6) (drill 3.2) (layers "*.Cu" "*.Mask")))
+  (footprint "Connector:Castellated" (layer "F.Cu") (at 27 10)
+    (pad "1" thru_hole circle (at 0 0) (size 1.6 1.6) (drill 1) (layers "*.Cu" "*.Mask"))))"#;
+
+#[test]
+fn each_holes_choice_keeps_its_own_holes() {
+    let (via, pin, peg, mounting, edge) = ([5.0, -5.0], [10.0, -5.0], [15.0, -5.0], [22.0, -5.0], [27.0, -10.0]);
+    for (holes, expected) in [
+        (KicadHoles::None, vec![edge]),
+        (KicadHoles::Mounting, vec![peg, mounting, edge]),
+        (KicadHoles::Pads, vec![pin, peg, mounting, edge]),
+        (KicadHoles::All, vec![via, pin, peg, mounting, edge]),
+    ] {
+        let mut board = parse_kicad_board(HOLES.as_bytes(), "holes.kicad_pcb").unwrap();
+        keep_holes(&mut board, holes);
+        let mut centres: Vec<[f64; 2]> = board.drills.iter().map(|d| d.center).collect();
+        centres.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        assert_eq!(centres, expected, "{holes:?}");
+    }
+}
+
+/// A 4 × 0.5 slot 1 mm from the board's edge: lying along the edge it keeps 0.75 mm clear and is
+/// left out with the other holes; standing across the edge it cuts the board and stays.
+#[test]
+fn a_slot_is_kept_for_the_edge_only_when_its_own_shape_reaches_it() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 30 10) (layer "Edge.Cuts"))
+      (footprint "Connector:Along" (layer "F.Cu") (at 10 9)
+        (pad "1" thru_hole oval (at 0 0) (size 4.5 1) (drill oval 4 0.5) (layers "*.Cu" "*.Mask")))
+      (footprint "Connector:Across" (layer "F.Cu") (at 20 9)
+        (pad "1" thru_hole oval (at 0 0) (size 1 4.5) (drill oval 0.5 4) (layers "*.Cu" "*.Mask"))))"#;
+    let mut board = parse_kicad_board(source.as_bytes(), "slots.kicad_pcb").unwrap();
+    keep_holes(&mut board, KicadHoles::None);
+    let centres: Vec<[f64; 2]> = board.drills.iter().map(|d| d.center).collect();
+    assert_eq!(centres, vec![[20.0, -9.0]]);
+}
+
+#[test]
+fn holes_default_to_mounting_holes_only() {
+    assert_eq!(KicadOptions::default().holes, KicadHoles::Mounting);
+    for holes in [KicadHoles::None, KicadHoles::Mounting, KicadHoles::Pads, KicadHoles::All] {
+        assert_eq!(KicadHoles::parse(holes.as_str()), Some(holes));
+    }
+    assert_eq!(KicadHoles::parse(" Vias "), None);
+}
+
+#[test]
+fn a_hole_left_out_is_left_out_of_every_layer() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (via (at 5 5) (size 1.2) (drill 0.6) (layers "F.Cu" "B.Cu") (net 1))
+      (footprint "Connector:Pin" (layer "F.Cu") (at 10 5)
+        (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask")))
+      (footprint "Connector:Peg" (layer "F.Cu") (at 15 5)
+        (pad "" np_thru_hole circle (at 0 0) (size 1.5 1.5) (drill 1.5) (layers "*.Cu" "*.Mask"))))"#;
+    // The substrate is whole.
+    let mut board = parse_kicad_board(source.as_bytes(), "closed.kicad_pcb").unwrap();
+    keep_holes(&mut board, KicadHoles::None);
+    let mesh = kicad_board_mesh(&board, 1.6).unwrap();
+    let body = solidcraft_kernel::mesh_body(&mesh.positions, &mesh.triangles).unwrap();
+    let volume = solidcraft_kernel::measure(&body).unwrap().volume;
+    assert!((volume - 200.0 * 1.6).abs() < 1e-6, "{volume}");
+    // The copper closes over the holes: the via is a disc, the pin's pad is whole, and the peg,
+    // which is only a hole, leaves nothing.
+    let options = KicadOptions { holes: KicadHoles::None, copper: KicadCopper::Mesh, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let imported = read_kicad(source.as_bytes(), "closed.kicad_pcb", &options, &mut load).unwrap();
+    let via = copper_area(&imported, "Copper F.Cu", 0.035);
+    assert!((via - std::f64::consts::PI * 0.36).abs() < 0.01, "via: {via}");
+    let pads = copper_area(&imported, "Copper F.Cu pads", 0.035 + 0.005);
+    assert!((pads - std::f64::consts::PI).abs() < 0.02, "pads: {pads}");
+}
+
+#[test]
+fn plated_hole_walls_take_the_pads_colour() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "Connector:Pin" (layer "F.Cu") (at 5 5)
+        (pad "1" thru_hole circle (at 0 0) (size 2 2) (drill 1) (layers "*.Cu" "*.Mask")))
+      (footprint "Connector:Slot" (layer "F.Cu") (at 10 5)
+        (pad "1" thru_hole oval (at 0 0 90) (size 3 1.5) (drill oval 2 0.8) (layers "*.Cu" "*.Mask")))
+      (footprint "Connector:Peg" (layer "F.Cu") (at 15 5)
+        (pad "" np_thru_hole circle (at 0 0) (size 1.5 1.5) (drill 1.5) (layers "*.Cu" "*.Mask"))))"#;
+    let board = parse_kicad_board(source.as_bytes(), "plated.kicad_pcb").unwrap();
+    assert!(board_bodies(&board, 1.6, false).unwrap().0.iter().all(|body| body.paint().is_none()), "no copper, no plating");
+    let bodies = board_bodies(&board, 1.6, true).unwrap().0;
+    let [body] = bodies.as_slice() else { panic!("one board body") };
+    let paint = body.paint().expect("the plated walls are painted");
+    let painted: HashSet<usize> = paint.faces.iter().map(|f| f.face).collect();
+    assert!(paint.faces.iter().all(|f| f.color == PAD_COLOR), "{paint:?}");
+    // Each side face by the profile segment it was extruded from: the outline, the pin's wall, the
+    // slot's wall or the peg's.
+    let mut walls = [0usize; 3];
+    for (face, source) in body.face_sources().expect("an extrusion knows its faces").iter().enumerate() {
+        let wall = match source {
+            Some(solidcraft_kernel::FaceSource::ExtrudeSide { segment, .. }) => {
+                let m = segment.mid();
+                ((m.y + 5.0).abs() < 1.6 && m.x > 1.0 && m.x < 19.0).then_some(if m.x < 7.5 {
+                    0
+                } else if m.x < 12.5 {
+                    1
+                } else {
+                    2
+                })
+            }
+            _ => None,
+        };
+        let plated = matches!(wall, Some(0 | 1));
+        assert_eq!(painted.contains(&face), plated, "face {face} ({wall:?}) {source:?}");
+        if let Some(wall) = wall {
+            walls[wall] += 1;
+        }
+    }
+    assert!(walls.iter().all(|n| *n > 0), "every hole has a wall: {walls:?}");
+    // The colours go into the board's STEP file, which is how the design gets them.
+    let options = KicadOptions { holes: KicadHoles::All, components: false, silkscreen: false, ..Default::default() };
+    let mut load = |_: &str| Err("not used".to_string());
+    let step = read_kicad(source.as_bytes(), "plated.kicad_pcb", &options, &mut load).unwrap().board_step.expect("a solid board");
+    let imported = solidcraft_kernel::step_import_shared(&step).unwrap();
+    let faces: usize = imported.bodies.iter().filter_map(|b| b.body.paint()).map(|p| p.faces.len()).sum();
+    assert_eq!(faces, painted.len());
+}
+
+/// A plated half-hole on the board's edge paints its wall, though the edge cuts it as chords whose
+/// middles fall inside it; a plated hole 0.001 mm clear of the edge paints its own wall and not the
+/// board's side, whose middle passes that close to it.
+#[test]
+fn a_plated_half_hole_paints_its_wall_and_a_hole_near_the_edge_only_its_own() {
+    let source = r#"(kicad_pcb (general (thickness 1.6))
+      (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts"))
+      (footprint "Module:Castellated" (layer "F.Cu") (at 5 0)
+        (pad "1" thru_hole circle (at 0 0) (size 1.6 1.6) (drill 1) (layers "*.Cu" "*.Mask")))
+      (footprint "Connector:Pin" (layer "F.Cu") (at 10 8.999)
+        (pad "1" thru_hole circle (at 0 0) (size 2.4 2.4) (drill 2) (layers "*.Cu" "*.Mask"))))"#;
+    let board = parse_kicad_board(source.as_bytes(), "edge.kicad_pcb").unwrap();
+    let bodies = board_bodies(&board, 1.6, true).unwrap().0;
+    let [body] = bodies.as_slice() else { panic!("one board body") };
+    let painted: HashSet<usize> = body.paint().map(|p| p.faces.iter().map(|f| f.face).collect()).unwrap_or_default();
+    // In the board's frame Y is KiCad's turned over: the half-hole is about (5, 0), the near hole
+    // about (10, -8.999), and the board's side the near hole almost touches is y = -10.
+    let (half, near) = (Vec2::new(5.0, 0.0), Vec2::new(10.0, -8.999));
+    let dist = |p: Vec2, q: Vec2| (p.x - q.x).hypot(p.y - q.y);
+    let (mut half_walls, mut near_walls) = (0, 0);
+    for (face, source) in body.face_sources().expect("an extrusion knows its faces").iter().enumerate() {
+        let Some(solidcraft_kernel::FaceSource::ExtrudeSide { segment, .. }) = source else { continue };
+        let (a, m, b) = (segment.start(), segment.mid(), segment.end());
+        let side = matches!(segment, Seg2::Line { .. }) && dist(a, b) > 2.0;
+        let on_half = !side && [a, m, b].iter().all(|p| (dist(*p, half) - 0.5).abs() < 0.03);
+        let on_near = !side && [a, m, b].iter().all(|p| (dist(*p, near) - 1.0).abs() < 0.03);
+        half_walls += usize::from(on_half);
+        near_walls += usize::from(on_near);
+        assert_eq!(painted.contains(&face), on_half || on_near, "face {face} {segment:?}");
+    }
+    assert!(half_walls > 0 && near_walls > 0, "both holes have walls: {half_walls} {near_walls}");
 }
