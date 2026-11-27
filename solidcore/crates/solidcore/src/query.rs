@@ -10,6 +10,7 @@ pub mod contact;
 pub mod continuity;
 pub mod curve;
 pub mod curve_surface_gap;
+pub mod cylinder_wall;
 pub mod deviation;
 pub mod distance_bound;
 pub mod edge;

@@ -45,8 +45,8 @@ impl From<crate::Error> for WallError {
 pub fn cylinder_wall(brep: &Brep, face: usize, tol: f64) -> Result<CylinderWall, WallError> {
     let (body, order) = Body::from_record(brep, true)?;
     let id = crate::order::face(&order, face)?;
-    let wall = read_body("cylinder_wall", &body, |_, b| {
-        Ok(Some(kernel_cylinder_wall(b, id, tol)))
+    let wall = read_body("cylinder_wall", &body, |k, b| {
+        Ok(Some(kernel_cylinder_wall(k, b, id, tol)))
     })?;
     match wall {
         Some(Ok(w)) => Ok(convert::cell_grid_wall::record_wall(&w)),

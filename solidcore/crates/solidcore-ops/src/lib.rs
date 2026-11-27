@@ -48,6 +48,7 @@ pub mod bspline;
 pub mod cancel;
 pub mod cap;
 pub mod cell_grid;
+pub mod cell_grid_wall;
 pub mod check;
 pub mod conic_projection;
 pub mod constraint;

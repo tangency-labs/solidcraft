@@ -38,6 +38,7 @@ pub mod drawing_view;
 pub mod end_cap;
 mod envelope;
 mod eval;
+mod eval_cell_grid_wall;
 pub mod expr;
 pub mod face_anchor;
 mod feature_geometry;
