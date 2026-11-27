@@ -5,6 +5,7 @@
 use solidcore_record::brep::Curve;
 
 use crate::Backend;
+use crate::affine::Matrix;
 
 /// A curve of a profile, in space.
 #[derive(Clone, Debug, PartialEq)]
@@ -61,14 +62,23 @@ pub trait Profiles: Backend {
     /// The kernel's refusal.
     fn zone_tolerance(&self) -> Result<f64, ProfileRefused>;
     /// The closed `profile` turned `angle` (radians) about the line through `origin` along
-    /// `axis`; `cap` closes the ends of a turn short of a whole one.
+    /// `axis`; `cap` closes the ends of a turn short of a whole one. With `place`, the body is
+    /// then moved by that affine map (rows the images of x, y and z, then the translation), by
+    /// the kernel's own move of the body it made.
     ///
     /// # Errors
     ///
     /// The kernel's refusal: a profile that is not closed or not planar, an axis of no length,
     /// a turn out of range, numbers that are not finite.
-    fn revolve_curves(&self, profile: &[ProfileCurve], origin: [f64; 3], axis: [f64; 3], angle: f64, cap: bool)
-    -> Result<Self::Form, ProfileRefused>;
+    fn revolve_curves(
+        &self,
+        profile: &[ProfileCurve],
+        origin: [f64; 3],
+        axis: [f64; 3],
+        angle: f64,
+        cap: bool,
+        place: Option<&Matrix>,
+    ) -> Result<Self::Form, ProfileRefused>;
     /// The closed `profile` moved `distance` along `direction`, its walls straight; `cap`
     /// closes both ends.
     ///
@@ -83,12 +93,14 @@ pub trait Profiles: Backend {
     ///
     /// The kernel's refusal of the curves, or nothing made.
     fn planar_faces(&self, loops: &[ProfileCurve]) -> Result<Self::Form, ProfileRefused>;
-    /// A ball of `radius` about `center`.
+    /// A ball of `radius` about `center`, moved by `place` as [`Profiles::revolve_curves`]
+    /// moves its body.
     ///
     /// # Errors
     ///
-    /// The kernel's refusal: a centre that is not finite, a radius that is not positive.
-    fn ball(&self, center: [f64; 3], radius: f64) -> Result<Self::Form, ProfileRefused>;
+    /// The kernel's refusal: a centre that is not finite, a radius that is not positive, a map
+    /// that is not a regular one.
+    fn ball(&self, center: [f64; 3], radius: f64, place: Option<&Matrix>) -> Result<Self::Form, ProfileRefused>;
     /// Record curve `curve` over `interval`, as the profile curves that are it.
     ///
     /// # Errors

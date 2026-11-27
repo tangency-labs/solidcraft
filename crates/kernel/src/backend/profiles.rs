@@ -4,6 +4,7 @@
 
 use solidcore_ops::sweep::{self, Curve};
 use solidcore_record::brep;
+use solidcraft_kernel_api::affine::Matrix;
 use solidcraft_kernel_api::profiles::{ProfileCurve, ProfileRefused, Profiles};
 
 use super::Solidcore;
@@ -38,9 +39,13 @@ fn ops_curves(profile: &[ProfileCurve]) -> Vec<Curve> {
     profile.iter().map(ops_curve).collect()
 }
 
-/// solidcore-ops' body as the application's: its record.
-fn body(made: solidcore_ops::Result<solidcore_ops::Body>) -> Result<Body, ProfileRefused> {
-    let (record, _) = made.and_then(|b| b.to_record()).map_err(refused)?;
+/// solidcore-ops' body, moved by `place` when there is one, as the application's: its record.
+fn body(made: solidcore_ops::Result<solidcore_ops::Body>, place: Option<&Matrix>) -> Result<Body, ProfileRefused> {
+    let made = made.map_err(refused)?;
+    if let Some(m) = place {
+        made.transform(m).map_err(refused)?;
+    }
+    let (record, _) = made.to_record().map_err(refused)?;
     Body::from_record(record).map_err(|e| ProfileRefused(e.to_string()))
 }
 
@@ -51,20 +56,28 @@ impl Profiles for Solidcore {
         sweep::zone_tolerance().map_err(refused)
     }
 
-    fn revolve_curves(&self, profile: &[ProfileCurve], origin: [f64; 3], axis: [f64; 3], angle: f64, cap: bool) -> Result<Body, ProfileRefused> {
-        body(sweep::revolve(&ops_curves(profile), origin, axis, angle, cap))
+    fn revolve_curves(
+        &self,
+        profile: &[ProfileCurve],
+        origin: [f64; 3],
+        axis: [f64; 3],
+        angle: f64,
+        cap: bool,
+        place: Option<&Matrix>,
+    ) -> Result<Body, ProfileRefused> {
+        body(sweep::revolve(&ops_curves(profile), origin, axis, angle, cap), place)
     }
 
     fn extrude_curves(&self, profile: &[ProfileCurve], direction: [f64; 3], distance: f64, cap: bool) -> Result<Body, ProfileRefused> {
-        body(sweep::extrude(&ops_curves(profile), direction, distance, 0.0, sweep::DraftCorner::default(), cap))
+        body(sweep::extrude(&ops_curves(profile), direction, distance, 0.0, sweep::DraftCorner::default(), cap), None)
     }
 
     fn planar_faces(&self, loops: &[ProfileCurve]) -> Result<Body, ProfileRefused> {
-        body(sweep::planar_faces(&ops_curves(loops)))
+        body(sweep::planar_faces(&ops_curves(loops)), None)
     }
 
-    fn ball(&self, center: [f64; 3], radius: f64) -> Result<Body, ProfileRefused> {
-        body(solidcore_ops::make_sphere(center, radius))
+    fn ball(&self, center: [f64; 3], radius: f64, place: Option<&Matrix>) -> Result<Body, ProfileRefused> {
+        body(solidcore_ops::make_sphere(center, radius), place)
     }
 
     fn curve_pieces(&self, curve: &brep::Curve, interval: [f64; 2]) -> Result<Vec<ProfileCurve>, ProfileRefused> {

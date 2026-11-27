@@ -4,6 +4,7 @@
 
 use solidcore_record::brep::Curve;
 use solidcraft_kernel_api::OpKind;
+use solidcraft_kernel_api::affine::Matrix;
 use solidcraft_kernel_api::profiles::Profiles;
 
 pub use solidcraft_kernel_api::profiles::{ProfileCurve, ProfileRefused};
@@ -32,14 +33,23 @@ pub fn zone_tolerance() -> Result<f64, ProfileRefused> {
 }
 
 /// The closed `profile` turned `angle` (radians) about the line through `origin` along `axis`;
-/// `cap` closes the ends of a turn short of a whole one.
+/// `cap` closes the ends of a turn short of a whole one. With `place`, the body is then moved by
+/// that affine map (rows the images of x, y and z, then the translation), by the kernel's own move
+/// of the body it made.
 ///
 /// # Errors
 ///
 /// The kernel's refusal: a profile that is not closed or not planar, an axis of no length, a
 /// turn out of range, numbers that are not finite.
-pub fn revolve_curves(profile: &[ProfileCurve], origin: [f64; 3], axis: [f64; 3], angle: f64, cap: bool) -> Result<Body, ProfileRefused> {
-    kernel().revolve_curves(profile, origin, axis, angle, cap)
+pub fn revolve_curves(
+    profile: &[ProfileCurve],
+    origin: [f64; 3],
+    axis: [f64; 3],
+    angle: f64,
+    cap: bool,
+    place: Option<&Matrix>,
+) -> Result<Body, ProfileRefused> {
+    kernel().revolve_curves(profile, origin, axis, angle, cap, place)
 }
 
 /// The closed `profile` moved `distance` along `direction`, its walls straight; `cap` closes
@@ -62,13 +72,14 @@ pub fn planar_faces(loops: &[ProfileCurve]) -> Result<Body, ProfileRefused> {
     kernel().planar_faces(loops)
 }
 
-/// A ball of `radius` about `center`.
+/// A ball of `radius` about `center`, moved by `place` as [`revolve_curves`] moves its body.
 ///
 /// # Errors
 ///
-/// The kernel's refusal: a centre that is not finite, a radius that is not positive.
-pub fn ball(center: [f64; 3], radius: f64) -> Result<Body, ProfileRefused> {
-    kernel().ball(center, radius)
+/// The kernel's refusal: a centre that is not finite, a radius that is not positive, a map that
+/// is not a regular one.
+pub fn ball(center: [f64; 3], radius: f64, place: Option<&Matrix>) -> Result<Body, ProfileRefused> {
+    kernel().ball(center, radius, place)
 }
 
 /// Record curve `curve` over `interval`, as the profile curves that are it.

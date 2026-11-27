@@ -319,11 +319,7 @@ pub fn spot_weld(spot: &SpotWeld) -> Result<Vec<SpotPiece>> {
     let tol = profiles::zone_tolerance()?;
     check_sizes(spot, &layout, tol)?;
     let placement = placement(spot.at, spot.normal)?;
-    let mut pieces = local_pieces(&layout, tol)?;
-    for piece in &mut pieces {
-        piece.body = solidcraft_kernel::transform_matrix(&piece.body, placement)?;
-    }
-    Ok(pieces)
+    local_pieces(&layout, tol, &placement)
 }
 
 /// Refuses a style with no piece, or a fraction out of its range.
@@ -459,16 +455,16 @@ fn placement(at: [f64; 3], normal: [f64; 3]) -> Result<affine::Matrix> {
     Ok([[u[0], u[1], u[2], 0.0], [w[0], w[1], w[2], 0.0], [n[0], n[1], n[2], 0.0], [at[0], at[1], at[2], 1.0]])
 }
 
-/// The pieces in the local frame.
-fn local_pieces(layout: &Layout, tol: f64) -> Result<Vec<SpotPiece>> {
+/// The pieces, each made in the local frame and moved by `place` to the spot.
+fn local_pieces(layout: &Layout, tol: f64, place: &affine::Matrix) -> Result<Vec<SpotPiece>> {
     let (t_u, t_l) = (layout.t_u, layout.t_l);
     let mut pieces = Vec::new();
     let inside = |body| SpotPiece { body, zone: SpotZone::Inside, side: SpotSide::Through };
     if let Some(r) = layout.ball {
-        pieces.push(inside(profiles::ball([0.0; 3], r)?));
+        pieces.push(inside(profiles::ball([0.0; 3], r, Some(place))?));
     }
     if let Some((r, [upper, lower])) = layout.pin {
-        pieces.push(inside(pin(r, t_u, t_l, upper, lower, tol)?));
+        pieces.push(inside(pin(r, t_u, t_l, upper, lower, tol, place)?));
     }
     if let (Some(zones), Some(top)) = (layout.zones, layout.top) {
         for ((side, face, sense), on) in [(SpotSide::Upper, t_u, 1.0), (SpotSide::Lower, -t_l, -1.0)].into_iter().zip(layout.marks_on) {
@@ -494,7 +490,7 @@ fn local_pieces(layout: &Layout, tol: f64) -> Result<Vec<SpotPiece>> {
                         curves.extend([line((outer, face), (outer, z)), line((outer, z), (inner, z)), line((inner, z), (inner, face))]);
                     }
                 }
-                pieces.push(SpotPiece { body: revolve(&curves)?, zone, side });
+                pieces.push(SpotPiece { body: revolve(&curves, place)?, zone, side });
             }
         }
     }
@@ -540,13 +536,15 @@ fn line((ra, za): (f64, f64), (rb, zb): (f64, f64)) -> Curve {
     Curve::Line { start: [ra, 0.0, za], end: [rb, 0.0, zb] }
 }
 
-/// The body swept by revolving the closed profile `curves` once about the local Z axis.
-fn revolve(curves: &[Curve]) -> Result<Body> {
-    Ok(profiles::revolve_curves(curves, [0.0; 3], [0.0, 0.0, 1.0], TAU, true)?)
+/// The body swept by revolving the closed profile `curves` once about the local Z axis, moved by
+/// `place`.
+fn revolve(curves: &[Curve], place: &affine::Matrix) -> Result<Body> {
+    Ok(profiles::revolve_curves(curves, [0.0; 3], [0.0, 0.0, 1.0], TAU, true, Some(place))?)
 }
 
-/// The pin of radius `r` from `z = -t_l` to `z = t_u`, each end flat or dished by the depth given.
-fn pin(r: f64, t_u: f64, t_l: f64, upper: Option<f64>, lower: Option<f64>, tol: f64) -> Result<Body> {
+/// The pin of radius `r` from `z = -t_l` to `z = t_u`, each end flat or dished by the depth given,
+/// moved by `place`.
+fn pin(r: f64, t_u: f64, t_l: f64, upper: Option<f64>, lower: Option<f64>, tol: f64, place: &affine::Matrix) -> Result<Body> {
     // an end dished `c` into the face at `face`, from the axis out to the pin's wall
     let dished = |face: f64, sense: f64, c: f64| -> Result<Vec<Curve>> {
         let arc = curve::arc_through([[-r, 0.0, face], [0.0, 0.0, face - sense * c], [r, 0.0, face]])?;
@@ -563,7 +561,7 @@ fn pin(r: f64, t_u: f64, t_l: f64, upper: Option<f64>, lower: Option<f64>, tol: 
         None => curves.push(line((0.0, -t_l), (r, -t_l))),
         Some(c) => curves.extend(dished(-t_l, -1.0, c)?),
     }
-    revolve(&curves)
+    revolve(&curves, place)
 }
 
 /// One sheet a spot joins.

@@ -531,7 +531,7 @@ fn a_sheet_crossed_twice_is_refused() {
 /// A curved picked face is not flat; a sheet tilted 5° under the line is not square to it.
 #[test]
 fn a_face_not_flat_or_not_square_is_refused() {
-    let ball = solidcraft_kernel::profiles::ball([0.0, 0.0, 10.0], 5.0).unwrap();
+    let ball = solidcraft_kernel::profiles::ball([0.0, 0.0, 10.0], 5.0, None).unwrap();
     let lower = sheet(0.0, 1.5);
     assert_eq!(spot_site(&[&ball, &lower], 0, 0, [0.0, 0.0, 15.0], D), Err(SpotRefusal::FaceNotFlat { sheet: 0, face: 0 }));
     // a sheet whose lower face passes through (0, 0, 1.5), tilted 5° about the y axis
