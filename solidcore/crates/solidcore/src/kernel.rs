@@ -264,6 +264,7 @@ pub struct WorkCounters {
     shells: Cell<u64>,
     booleans: Cell<u64>,
     apart_unions: Cell<u64>,
+    volume_sign_decisions: Cell<u64>,
     move_trim_bisection_pieces: Cell<u64>,
     fit_gap_calcs: Cell<u64>,
 }
@@ -707,6 +708,14 @@ impl WorkCounters {
         self.apart_unions.get()
     }
 
+    /// Signs of a closed body's volume decided from its enclosure: the calls of
+    /// `mass::enclosure::volume_sign`, the step that ends a proof that a body is valid and
+    /// faces out (`topology::brep::valid_and_outward_failure`). Not the fork's.
+    #[must_use]
+    pub fn volume_sign_decisions(&self) -> u64 {
+        self.volume_sign_decisions.get()
+    }
+
     /// Bisection pieces evaluated while certifying trim-image gaps across rigid moves
     /// (`topology::edgeuse::p3::cover_moved_trims`, through `query::curve_surface_gap`),
     /// so a far-origin boolean test can catch regressions back to `MAX_PIECES` pole-trim
@@ -778,6 +787,7 @@ impl WorkCounters {
         self.shells.set(0);
         self.booleans.set(0);
         self.apart_unions.set(0);
+        self.volume_sign_decisions.set(0);
         self.move_trim_bisection_pieces.set(0);
         self.fit_gap_calcs.set(0);
     }
@@ -820,6 +830,12 @@ impl WorkCounters {
     pub(crate) fn add_apart_union(&self) {
         self.apart_unions
             .set(self.apart_unions.get().saturating_add(1));
+    }
+
+    /// Counts one sign of a closed body's volume decided.
+    pub(crate) fn add_volume_sign_decision(&self) {
+        self.volume_sign_decisions
+            .set(self.volume_sign_decisions.get().saturating_add(1));
     }
 
     /// Counts one UV trim curve built.

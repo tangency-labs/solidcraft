@@ -122,12 +122,6 @@ pub use original_trim::{OriginalSurfaceDeletion, OriginalSurfaceSelection};
 
 const OP: &str = "blend::fillet_executive::session";
 
-/// The session's note at a bevel corner of three chamfers of both convexities.
-const MIXED_CHAMFER_CORNER: &str = "Fillet Error: chamfers of convex and of concave edges meet at the vertex; their mitre is not built yet";
-/// The same, as the refusing step's reason.
-const MIXED_CHAMFER_CORNER_REASON: &str =
-    "chamfers of convex and of concave edges meet at the vertex";
-
 /// The tangency within which the band check takes two blended edges for one tangent chain
 /// (`chains_among`), radians: 10 degrees, as a chamfer's chain (`two_offsets`) and an
 /// edge's continuation (`edge_refusals`) take it.
@@ -2590,9 +2584,6 @@ impl<'target> FilletSession<'target> {
                                 refusal: None,
                             });
                         }
-                        ChamferClass::MixedConvexity => {
-                            corner.chamfer_mixed_convexity = true;
-                        }
                         ChamferClass::Declined(_) => {}
                     }
                 }
@@ -3219,7 +3210,10 @@ impl<'target> FilletSession<'target> {
     /// meet each other) or the Facet (one plane through the rails' crossings), refused
     /// where the asked type does not exist. Unset, the corner is the Mitre where it exists,
     /// at four or more chamfers the patch or (crossings in one plane) the Facet, and
-    /// otherwise the pinned corner, never a refusal of the type (`classify_chamfer`). It
+    /// otherwise the pinned corner, never a refusal of the type (`classify_chamfer`). Three
+    /// chamfers of both convexities are the exception: the pinned corner builds nothing
+    /// there, so where their mitre point is outside the corner they are refused with the fit
+    /// whether a type was set or not. It
     /// overrides the corner's bevel flag ([`Self::set_corner_bevel`]) at
     /// such a corner. Set it before [`Self::do_fillet`] (the corners are made there).
     pub fn set_chamfer_corner(&mut self, corner: crate::blend::blend_corner::BlendChamferCorner) {
@@ -5637,6 +5631,9 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
         let corner = corners
             .get_mut(id.0 as usize)
             .ok_or_else(|| invalid("corner patch is not live"))?;
+        // the chamfer event's mitre of both convexities: the rails are trimmed, so the
+        // chamfers' surfaces are continued to their mitre point before the faces are made
+        crate::blend::blend_corner::chamfer::continue_chamfer_surfaces(k, pseudo, corner)?;
         corner.calc_corner_geom_with(&mut (), |corner, ()| {
             // SmFilletCorner::CreateCornerPatch, building into m_pFilletBrep.
             let body = intermediate
@@ -8973,29 +8970,6 @@ impl SessionObjects<'_> {
         if let Some(corner) = self.corners.get_mut(id.0 as usize) {
             if let Some(event) = corner.chamfer_corner.as_ref() {
                 corner.bevel = event.definition.is_mitre();
-            }
-        }
-        // Chamfers of both convexities at a vertex of three, as a bevel: the bevel looks for
-        // the chamfers' common point from a rails' crossing towards the vertex, and here it
-        // lies across the vertex's faces. Refused, at the vertex, until the chamfer event
-        // builds their mitre.
-        if let Some(corner) = self.corners.get(id.0 as usize) {
-            if corner.bevel && corner.chamfer_mixed_convexity {
-                let vertex = corner.filleted_vertex();
-                let location =
-                    vertex.and_then(|v| crate::topology::vertex::point(self.target, v).ok());
-                executive.error.note_vertex_error(
-                    vertex
-                        .map(|v| FilletObject::Topology(FilletBody::Target, EntityRef::Vertex(v))),
-                    location,
-                    crate::blend::fillet_geom::p1::FilStatus::Failure,
-                    crate::blend::fillet_geom::p1::FilletErrorType::CornerUnsupported,
-                    Some(MIXED_CHAMFER_CORNER),
-                );
-                return Err(SolidError::Unsupported {
-                    operation: NATIVE,
-                    reason: MIXED_CHAMFER_CORNER_REASON,
-                });
             }
         }
         let edgeuses = self

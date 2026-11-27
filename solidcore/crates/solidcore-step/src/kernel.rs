@@ -88,6 +88,20 @@ pub(crate) fn angle_crossing(curve: &CurveEval, origin: Vec3, x: Vec3, y: Vec3, 
     })
 }
 
+/// The unit axis along `z` and the unit direction of `v`'s component square to it: a record
+/// frame's two axes, unit and square to rounding as the record's check asks (the kernel's STEP
+/// frame, [`solidcore::Vec3::make_unit_ortho_vectors`]). `None` where `z` has no length or `v`
+/// lies along it, where the kernel would take an arbitrary direction instead.
+pub(crate) fn square_frame(z: Vec3, v: Vec3) -> Option<(Vec3, Vec3)> {
+    let (z, v) = (c::vec3(z), c::vec3(v));
+    let unit = z.unitize().ok()?;
+    if unit.cross(v).length_squared() <= solidcore::math::EFF_ZERO_SQ {
+        return None;
+    }
+    let [axis, x, _] = z.make_unit_ortho_vectors(Some(v)).ok()?;
+    Some((c::record_vec3(axis), c::record_vec3(x)))
+}
+
 /// A closed spline or polyline with its seam moved to `start`, exactly.
 pub(crate) fn restart_curve(curve: &Curve, start: f64) -> Result<Curve, Error> {
     let curve = c::curve(curve).map_err(|e| e.to_string())?;

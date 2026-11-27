@@ -139,10 +139,11 @@ commands:
                   geometry: fails on a function outside display, export, previews and mesh bodies
                   that uses a mesh and xtask/mesh-decisions/ does not list, and on a listed one
                   that no longer does (the list only shrinks)
-  app-geometry [--print]
+  app-geometry [--print] [--base REF]
                   check that apps compute no geometry: fails on a function in crates/doc, engine,
                   ui-egui, io, kernel or geom that does vector maths, solves or mesh queries, is
-                  new since the base (git merge-base HEAD origin/main, else HEAD~1) and
+                  new since the base (git merge-base HEAD REF with --base, which ci --base passes
+                  on, else git merge-base HEAD origin/main, else HEAD~1) and
                   xtask/app-geometry.txt does not list; reports unlisted sites from main and warns
                   on stale lines; prints the listed count per crate. --print writes the sites
                   found, in the list's format

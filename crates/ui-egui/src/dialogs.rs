@@ -445,11 +445,14 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// Move this plane of the section, keeping the others (Edit on several planes).
                 edit: Option<u64>,
             },
-            /// Measure one or two picked items (vertices, edges, faces): the result of the last
-            /// measurement and the items it was for.
+            /// Measure one or two picked items (vertices, edges, faces), or the spacing of several
+            /// round ones: the result of the last measurement and the items it was for.
             Measure {
                 /// Show an additional metric or inch readout without changing design units.
                 dual_units: bool,
+                /// Picks add up past two, to measure the spacing of round edges and holes along
+                /// a row or round a bolt circle (#10170). Off, a third pick starts over.
+                spacing: bool,
                 result: Option<Value>,
                 of: Vec<Sel>,
                 /// The measure chosen in the panel (centre, min or max); `None` follows the result's
@@ -1277,7 +1280,7 @@ impl Dialog {
                 vec![SelInput::new("Plane", PLANES | PLANAR_FACES, false)],
             ),
             "inspect.measure" => Dialog::new(
-                Kind::Measure { dual_units: false, result: None, of: Vec::new(), show: None, labels: Default::default() },
+                Kind::Measure { dual_units: false, spacing: false, result: None, of: Vec::new(), show: None, labels: Default::default() },
                 vec![SelInput::new(
                     "Items",
                     FACES
@@ -2330,8 +2333,10 @@ impl Dialog {
         }
         inp.toggle(picked);
         self.focus = true;
-        // A measurement is between two items: a third pick starts over from the last one.
-        if matches!(self.kind, Kind::Measure { .. }) && inp.items.len() > 2 {
+        // A measurement is between two items: a third pick starts over from the last one. With
+        // the panel's spacing option on, picks add up instead, as far as one measurement takes.
+        let most = if matches!(self.kind, Kind::Measure { spacing: true, .. }) { MEASURE_SPACING_ITEMS } else { 2 };
+        if matches!(self.kind, Kind::Measure { .. }) && inp.items.len() > most {
             let keep = inp.items.split_off(inp.items.len() - 1);
             inp.items = keep;
         }
@@ -4977,6 +4982,9 @@ fn fill_cells_between(
     }
     out
 }
+
+/// The most picks Measure keeps with its spacing option on: what `inspect.measure` takes.
+const MEASURE_SPACING_ITEMS: usize = 64;
 
 /// Measure again when the picked items changed.
 fn update_measure(app: &SolveApp, d: &mut Dialog) {
