@@ -2265,7 +2265,7 @@ mod tests {
     }
 
     #[test]
-    fn curves_split_at_a_profile_corner_are_one_component() {
+    fn a_curve_across_profile_corners_is_one_component() {
         let k = Kernel::default();
         let e = extruded_polyline(&k, &[[0.0, 0.0], [1.0, 1.0], [2.0, -1.0], [3.0, 0.0]]);
         // z = 0.5 + x / 4 runs across the extrusion, through both corners' knot lines
@@ -2276,11 +2276,8 @@ mod tests {
             [5.0, 3.0],
         );
         let (d, r) = answer(&k, [&e, &p]);
-        assert!(
-            r.curves_3d.len() > 1,
-            "the intersector splits at the corners: {}",
-            r.curves_3d.len()
-        );
+        // one curve across both corners (tangency-labs/solidcraft#18488)
+        assert_eq!(r.curves_3d.len(), 1, "{:?}", r.curve_types);
         let (_, found) = certified(&k, [&e, &p]);
         assert_eq!(
             found.len(),
