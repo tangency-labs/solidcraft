@@ -5448,3 +5448,215 @@ fn a_fitted_loft_insert_with_a_knife_on_the_floor_gets_through_imprint_and_relat
         }
     }
 }
+
+/// Build a closed faceted UV sphere (`nlat` bands × `2*nlat` longitudes, so `2*nlat^2` planar
+/// faces: triangles at poles and planar trapezoids in between) matching #18211's reproducer.
+#[allow(clippy::disallowed_methods)] // test fixture construction, not ops computing geometry
+fn faceted_uv_sphere(nlat: usize, radius: f64) -> Body {
+    use solidcore_record::brep::{
+        Brep, Curve, Curve2, Edge, EdgeUseRef, Face, Loop, OrientedEdge, OrientedFace, Region,
+        Shell, Surface, Vertex, VERSION,
+    };
+    let nlon = 2 * nlat;
+    let off = PI / nlon as f64;
+    let mut pts: Vec<[f64; 3]> = Vec::new();
+    let north = 0u32;
+    pts.push([0.0, 0.0, radius]);
+    for i in 1..nlat {
+        let theta = PI * i as f64 / nlat as f64;
+        let st = theta.sin();
+        let ct = theta.cos();
+        for j in 0..nlon {
+            let phi = 2.0 * PI * j as f64 / nlon as f64 + off;
+            pts.push([
+                radius * st * phi.cos(),
+                radius * st * phi.sin(),
+                radius * ct,
+            ]);
+        }
+    }
+    let south = pts.len() as u32;
+    pts.push([0.0, 0.0, -radius]);
+
+    let ring = |i: usize, j: usize| -> u32 { 1 + ((i - 1) * nlon + (j % nlon)) as u32 };
+    let mut polys: Vec<Vec<u32>> = Vec::with_capacity(nlat * nlon);
+    for j in 0..nlon {
+        // Outward CCW viewed from outside (+normal): (north, ring(1, j), ring(1, j+1))
+        polys.push(vec![north, ring(1, j), ring(1, j + 1)]);
+    }
+    for i in 1..nlat - 1 {
+        for j in 0..nlon {
+            polys.push(vec![
+                ring(i, j),
+                ring(i + 1, j),
+                ring(i + 1, j + 1),
+                ring(i, j + 1),
+            ]);
+        }
+    }
+    for j in 0..nlon {
+        polys.push(vec![ring(nlat - 1, j), south, ring(nlat - 1, j + 1)]);
+    }
+
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let cross = |a: [f64; 3], b: [f64; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let norm = |a: [f64; 3]| {
+        let l = dot(a, a).sqrt();
+        [a[0] / l, a[1] / l, a[2] / l]
+    };
+
+    let tol = 1e-6;
+    let mut edge_map: std::collections::BTreeMap<(u32, u32), u32> =
+        std::collections::BTreeMap::new();
+    let mut edges: Vec<Edge> = Vec::new();
+    let mut faces: Vec<Face> = Vec::with_capacity(polys.len());
+
+    for (fi, poly) in polys.iter().enumerate() {
+        let p0 = pts[poly[0] as usize];
+        let p1 = pts[poly[1] as usize];
+        let p2 = pts[poly[2] as usize];
+        let u_axis = norm(sub(p1, p0));
+        let n = norm(cross(sub(p1, p0), sub(p2, p0)));
+        let v_axis = norm(cross(n, u_axis));
+        let uv = |p: [f64; 3]| {
+            let d = sub(p, p0);
+            [dot(d, u_axis), dot(d, v_axis)]
+        };
+        let (mut umin, mut umax, mut vmin, mut vmax) = (
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        );
+        for &vi in poly {
+            let [u, v] = uv(pts[vi as usize]);
+            umin = umin.min(u);
+            umax = umax.max(u);
+            vmin = vmin.min(v);
+            vmax = vmax.max(v);
+        }
+        let pad = 1e-3;
+        let mut oedges = Vec::with_capacity(poly.len());
+        for (pos, &a) in poly.iter().enumerate() {
+            let b = poly[(pos + 1) % poly.len()];
+            let (lo, hi, forward) = if a < b { (a, b, true) } else { (b, a, false) };
+            let ei = *edge_map.entry((lo, hi)).or_insert_with(|| {
+                let idx = edges.len() as u32;
+                edges.push(Edge {
+                    curve: Curve::Line {
+                        start: pts[lo as usize],
+                        end: pts[hi as usize],
+                    },
+                    nurbs: None,
+                    interval: [0.0, 1.0],
+                    vertices: [lo, hi],
+                    tolerance: tol,
+                    uses: Vec::new(),
+                });
+                idx
+            });
+            edges[ei as usize].uses.push(EdgeUseRef {
+                face: fi as u32,
+                r#loop: 0,
+                position: pos as u32,
+                upper: !forward,
+            });
+            oedges.push(OrientedEdge {
+                edge: ei,
+                forward,
+                pcurve: Curve2::Spline {
+                    knots: vec![0.0, 0.0, 1.0, 1.0],
+                    points: vec![uv(pts[lo as usize]), uv(pts[hi as usize])],
+                },
+            });
+        }
+        faces.push(Face {
+            surface: Surface::Plane {
+                origin: p0,
+                u_axis,
+                v_axis,
+            },
+            nurbs: None,
+            domain: [[umin - pad, umax + pad], [vmin - pad, vmax + pad]],
+            loops: vec![Loop::Edges { edges: oedges }],
+        });
+    }
+
+    let oriented_faces = (0..faces.len() as u32)
+        .map(|face| OrientedFace {
+            face,
+            forward: true,
+        })
+        .collect();
+    let vertices = pts
+        .into_iter()
+        .map(|point| Vertex {
+            point,
+            tolerance: tol,
+        })
+        .collect();
+    let record = Brep {
+        version: VERSION,
+        tolerance: tol,
+        regions: vec![
+            Region {
+                shells: vec![0],
+                void: false,
+            },
+            Region {
+                shells: vec![0],
+                void: false,
+            },
+        ],
+        shells: vec![Shell::Faces {
+            faces: oriented_faces,
+            wires: Vec::new(),
+        }],
+        faces,
+        edges,
+        vertices,
+    };
+    Body::from_record(&record, true).unwrap().0
+}
+
+/// Issue #18211: splitting a closed planar-faceted UV sphere at the XZ plane produces
+/// both closed hemispheres with exact face/edge/vertex counts and volume summing to the
+/// original sphere.
+#[test]
+fn faceted_sphere_plane_split_produces_both_halves() {
+    all_fixes();
+    let nlat = 16usize;
+    let sphere_a = faceted_uv_sphere(nlat, 10.0);
+    let sphere_b = faceted_uv_sphere(nlat, 10.0);
+    let full_vol = volume(&sphere_a);
+    let pos_box = make_box([-60.0, 0.0, -60.0], [120.0, 60.0, 120.0]).unwrap();
+    let neg_box = make_box([-60.0, -60.0, -60.0], [120.0, 60.0, 120.0]).unwrap();
+
+    let pos_half = boolean(sphere_a, pos_box, BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    let neg_half = boolean(sphere_b, neg_box, BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(pos_half.counts().unwrap(), [273, 543, 272]);
+    assert_eq!(neg_half.counts().unwrap(), [273, 543, 272]);
+    let pos_vol = volume(&pos_half);
+    let neg_vol = volume(&neg_half);
+    assert!(
+        (pos_vol - neg_vol).abs() < 1e-6,
+        "halves differ: {pos_vol} vs {neg_vol}"
+    );
+    assert!(
+        (pos_vol + neg_vol - full_vol).abs() < 1e-6,
+        "sum {} != full {full_vol}",
+        pos_vol + neg_vol
+    );
+}
