@@ -119,7 +119,13 @@ impl KnotLine {
         } else {
             (Side::Left, Side::Right)
         };
-        let ahead = ignored(evaluate_1st_derivatives(k, surface, on, Side::Left, Side::Left))?;
+        let ahead = ignored(evaluate_1st_derivatives(
+            k,
+            surface,
+            on,
+            Side::Left,
+            Side::Left,
+        ))?;
         let behind = ignored(evaluate_1st_derivatives(k, surface, on, across.0, across.1))?;
         let jumps = |x: Vec3, y: Vec3| (x - y).length() > JUMP * x.length().max(y.length());
         Ok(ahead
