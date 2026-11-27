@@ -7098,7 +7098,7 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
     let mut normalized = d.clone();
     // The Name row (#18668): left blank it is the default name when making a feature and the name
     // it has when editing one; an edit that gives another name renames it after the rebuild.
-    let rename = extrude_rename(app, &mut normalized)?;
+    let rename = feature_dialog_rename(app, &mut normalized)?;
     normalized.sync_material(&app.session);
     for value in crate::length_input::fields(&app.session.doc, &mut normalized.kind) {
         *value = crate::length_input::expression(&app.session.doc, value, ValueKind::Length);
@@ -7181,18 +7181,19 @@ pub fn apply_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>
     Ok(cmds)
 }
 
-/// An Extrude dialog's Name row: a blank name, or the default the window suggested, is not sent
-/// (making one, the engine names it, so a name taken meanwhile cannot collide; editing one, it
-/// keeps its name), and the new name of an edited feature is returned to be applied as a rename,
-/// which `timeline.redefine` does not do. A name another feature has is refused here, before any
-/// command runs, so the edit is not half done.
-fn extrude_rename(app: &SolveApp, d: &mut Dialog) -> Result<Option<String>, String> {
-    if !matches!(d.kind, Kind::Extrude { .. }) {
+/// A feature dialog's Name row: blank keeps the name when editing. Extrude also suggests a
+/// name when creating a feature; an untouched suggestion is left to the engine. Edited names
+/// are applied with timeline.rename, since timeline.redefine does not rename a feature.
+/// Refuse a duplicate before the edit runs. Other dialogs keep the editor-only text separate
+/// from any command-specific parameter called "name".
+fn feature_dialog_rename(app: &SolveApp, d: &mut Dialog) -> Result<Option<String>, String> {
+    let extrude = matches!(d.kind, Kind::Extrude { .. });
+    let key = if extrude { "name" } else { "feature_edit_name" };
+    if !extrude && d.editing.is_none() {
         return Ok(None);
     }
-    let name = d.extra.get("name").and_then(Value::as_str).map(|n| n.trim().to_string()).unwrap_or_default();
-    let suggested = d.extra.remove("name_default").and_then(|v| v.as_str().map(str::to_string));
-    d.extra.remove("name");
+    let name = d.extra.remove(key).and_then(|v| v.as_str().map(|n| n.trim().to_string())).unwrap_or_default();
+    let suggested = if extrude { d.extra.remove("name_default").and_then(|v| v.as_str().map(str::to_string)) } else { None };
     if name.is_empty() {
         return Ok(None);
     }
@@ -11122,10 +11123,10 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
     {
         d.extra.insert("body_name".into(), json!(name));
     }
-    // Extrude shows the name it has, to read and to change (#18668).
-    if matches!(f.kind, FeatureKind::Extrude { .. }) {
-        d.extra.insert("name".into(), json!(f.name));
-    }
+    // Every feature with an edit dialog can be named there (#16088). Extrude's
+    // existing Name row also works when creating the feature.
+    let key = if matches!(f.kind, FeatureKind::Extrude { .. }) { "name" } else { "feature_edit_name" };
+    d.extra.insert(key.into(), json!(f.name));
     d.editing = Some((id, marker));
     d.active = 0;
     d.error = None;
