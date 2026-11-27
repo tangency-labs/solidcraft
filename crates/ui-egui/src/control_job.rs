@@ -120,6 +120,7 @@ const NAMES_A_FILE: &[&str] = &["path", "paths", "file", "files", "dir", "folder
 const ANSWERED_ON_A_COPY: &[&str] = &[
     "file.export",
     "file.export_3mf",
+    "file.export_mjcf",
     "file.export_obj",
     "file.export_sdf",
     "file.export_step",
@@ -127,6 +128,7 @@ const ANSWERED_ON_A_COPY: &[&str] = &[
     "file.export_urdf",
     "file.export_urdf_options",
     "file.save_mesh",
+    "frame.export_cope_dxf",
 ];
 
 /// Commands that only read the design, which can take long on a large one (a measure of every
@@ -951,7 +953,15 @@ impl SolveApp {
             let result = result.and_then(|reply| {
                 if let Some(exits) = reply.get("sketch_exits").and_then(Value::as_array) {
                     for sketch in exits {
-                        self.sketch_closed(sketch.as_u64());
+                        self.sketch_closed(sketch.as_u64(), false);
+                    }
+                }
+                if let Some(messages) = reply.get("messages").and_then(Value::as_array) {
+                    for m in messages {
+                        let level = m.get("level").and_then(Value::as_str).unwrap_or("info");
+                        let text = m.get("message").and_then(Value::as_str).unwrap_or_default();
+                        let error = level == "error";
+                        self.messages.push(text, error, crate::now_ms());
                     }
                 }
                 crate::render_workspace::apply_command(self, "plugin.run", &reply)?;

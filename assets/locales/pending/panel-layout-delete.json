@@ -62,5 +62,13 @@
     "ui.panel_layout.delete": "删除",
     "ui.panel_layout.delete_layout": "删除布局",
     "ui.panel_layout.deleted": "已删除布局 {name}"
+  },
+  "fr": {
+    "cmd.layout.delete": "Supprimer la disposition",
+    "help.layout.delete": "Supprime une disposition que vous avez enregistrée. Les dispositions intégrées sont conservées, tout comme la position des panneaux.",
+    "ui.panel_layout.confirm_delete": "Supprimer « {name} » ?",
+    "ui.panel_layout.delete": "Supprimer",
+    "ui.panel_layout.delete_layout": "Supprimer la disposition",
+    "ui.panel_layout.deleted": "Disposition {name} supprimée"
   }
 }

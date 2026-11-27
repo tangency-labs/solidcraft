@@ -338,9 +338,9 @@ fn a_circle_whose_rounded_pieces_turn_past_a_quarter_is_written() {
     assert!(over > 0, "no circle here gave a piece past a quarter turn: the test doesn't reach the case");
 }
 
-/// Strokes and fills are painted as SVG and PNG paint them: butt caps, miter joins, a miter limit
-/// of 4, each width and dash pattern set once until it changes, a closed outline closed, fills
-/// even-odd.
+/// Strokes and fills are painted as SVG and PNG paint them: round caps and round joins, each width
+/// and dash pattern set once until it changes, a closed outline closed, fills even-odd. A dash
+/// pattern is the one its caps need: [4.2, 1.05] from 0.5 at 0.35 mm wide is [3.85, 1.4] from 0.325.
 #[test]
 fn strokes_and_fills_are_painted_as_the_other_writers_paint_them() {
     let dashed = Some(Dashes { lengths_mm: vec![4.2, 1.05], phase_mm: 0.5 });
@@ -357,10 +357,10 @@ fn strokes_and_fills_are_painted_as_the_other_writers_paint_them() {
         ],
     );
     let content = content(&pdf(&sheet, &NONE));
-    assert!(content.starts_with("q 2.834645669 0 0 2.834645669 0 0 cm 0 J 0 j 4 M\n") && content.ends_with("Q\n"), "{content}");
+    assert!(content.starts_with("q 2.834645669 0 0 2.834645669 0 0 cm 1 J 1 j\n") && content.ends_with("Q\n"), "{content}");
     let ops = ops(&content);
     let set: Vec<(&str, &[f64])> = ops.iter().filter(|(op, _)| op == "w" || op == "d").map(|(op, n)| (op.as_str(), n.as_slice())).collect();
-    assert_eq!(set, [("w", &[0.35][..]), ("d", &[4.2, 1.05, 0.5][..]), ("w", &[0.7][..]), ("d", &[0.0][..])], "{content}");
+    assert_eq!(set, [("w", &[0.35][..]), ("d", &[3.85, 1.4, 0.325][..]), ("w", &[0.7][..]), ("d", &[0.0][..])], "{content}");
     let paints: Vec<&str> = ops.iter().map(|(op, _)| op.as_str()).filter(|op| ["S", "s", "f*", "h"].contains(op)).collect();
     assert_eq!(paints, ["S", "S", "S", "S", "s", "h", "h", "f*"], "{content}");
 }
@@ -399,7 +399,7 @@ fn what_cannot_be_written_is_refused() {
 // maximum-sized scene. They can tighten, never raise, the production ceiling.
 #[test]
 fn content_budget_includes_the_header_and_the_final_graphics_restore() {
-    let expected = "q 2.834645669 0 0 2.834645669 0 0 cm 0 J 0 j 4 M\nQ\n";
+    let expected = "q 2.834645669 0 0 2.834645669 0 0 cm 1 J 1 j\nQ\n";
     assert_eq!(super::content_with_limit(&[], expected.len()).unwrap(), expected);
     for limit in 0..expected.len() {
         assert!(super::content_with_limit(&[], limit).is_err(), "accepted {limit} bytes for an empty sheet's stream");
@@ -560,7 +560,7 @@ fn pdf_layers_cover_all_five_kinds_and_preserve_paint_and_styles() {
     let starts: Vec<_> = operators.iter().filter(|(op, _)| op == "m").map(|(_, n)| (n[0], n[1])).collect();
     assert_eq!(starts, [(10.0, 10.0), (10.0, 20.0), (10.0, 30.0), (10.0, 50.0), (10.0, 60.0), (10.0, 70.0)]);
     let styles: Vec<(&str, &[f64])> = operators.iter().filter(|(op, _)| op == "w" || op == "d").map(|(op, n)| (op.as_str(), n.as_slice())).collect();
-    assert_eq!(styles, [("w", &[0.35][..]), ("w", &[0.7][..]), ("d", &[4.0, 2.0, 0.0][..]), ("w", &[0.35][..]), ("d", &[0.0][..])]);
+    assert_eq!(styles, [("w", &[0.35][..]), ("w", &[0.7][..]), ("d", &[3.3, 2.7, 5.65][..]), ("w", &[0.35][..]), ("d", &[0.0][..])]); // [4, 2] under 0.7 mm round caps.
     assert!(check_number_grid(&stream).is_ok());
     // A reviewer may retain these exact asserted bytes for independent PDF readers.
     if let Some(path) = std::env::var_os("SOLIDCRAFT_PDF_LAYER_REVIEW_OUTPUT") {
@@ -753,10 +753,13 @@ fn flat_pdf_reproduces_the_original_p1_a3_sample_bytes() {
     let bytes = pdf(&sheet, &options);
     // The Info dictionary names the build ("SolidCraft <version>"), so the pin is every byte before it:
     // the header, catalog, page tree, page and content stream. Taken at 0.19.0 as the whole file (1063
-    // bytes, SHA-256 0de09bc3...); those 721 bytes are unchanged since.
+    // bytes, SHA-256 0de09bc3...); those 721 bytes were unchanged until strokes took round caps and
+    // joins (0.46): the content stream then differs in two lines only, `0 J 0 j 4 M` became `1 J 1 j`,
+    // and the 0.25 mm centre line's `[12 3 1 3] 0 d` became `[11.75 3.25 0.75 3.25] 18.875 d`, each
+    // dash 0.25 shorter about its middle and the phase back 0.125 within 19. 726 bytes since.
     let info = bytes.windows(7).position(|w| w == b"5 0 obj").unwrap();
-    assert_eq!(info, 721);
-    assert_eq!(format!("{:x}", sha2::Sha256::digest(&bytes[..info])), "4ed2ee8f77b5317f9306492b1880cd2a25b0d1f04931b0fa82d0cfdd4b75e241");
+    assert_eq!(info, 726);
+    assert_eq!(format!("{:x}", sha2::Sha256::digest(&bytes[..info])), "244c7249a610d749171ba3b4c1ca00bcdbd5fd7bbc773b460b209b6c96bcf5c8");
     assert!(text(&bytes[info..]).contains(concat!("/Producer (SolidCraft ", env!("CARGO_PKG_VERSION"), ")")));
     assert_eq!(pdf(&sheet, &options), bytes);
     assert!(check_xref(&bytes).is_ok());
@@ -859,7 +862,7 @@ fn a_merged_pdf_run_keeps_all_paint_and_shared_width_and_dash_state() {
     let paints: Vec<_> = operators.iter().filter(|(op, _)| ["S", "h", "f*"].contains(&op.as_str())).map(|(op, _)| op.as_str()).collect();
     assert_eq!(paints, ["S", "S", "h", "f*", "S", "S"]);
     let styles: Vec<_> = operators.iter().filter(|(op, _)| op == "w" || op == "d").map(|(op, n)| (op.as_str(), n.as_slice())).collect();
-    assert_eq!(styles, [("w", &[0.35][..]), ("w", &[0.7][..]), ("d", &[4.0, 2.0, 0.0][..]), ("d", &[0.0][..])]);
+    assert_eq!(styles, [("w", &[0.35][..]), ("w", &[0.7][..]), ("d", &[3.3, 2.7, 5.65][..]), ("d", &[0.0][..])]); // [4, 2] under 0.7 mm round caps.
     let starts: Vec<_> = operators.iter().filter(|(op, _)| op == "m").map(|(_, n)| (n[0], n[1])).collect();
     assert_eq!(starts, [(10.0, 10.0), (10.0, 20.0), (10.0, 30.0), (10.0, 50.0), (10.0, 60.0)]);
     let stripped = stream.lines().filter(|line| !line.ends_with(" BDC") && *line != "EMC").map(|line| format!("{line}\n")).collect::<String>();
@@ -879,7 +882,7 @@ fn merged_pdf_run_limits_charge_transitions_and_the_final_close() {
     // Literal independent stream: adjacent objects retain two strokes within
     // L0; only the change to L1 closes and reopens marked content.
     let expected = concat!(
-        "q 2.834645669 0 0 2.834645669 0 0 cm 0 J 0 j 4 M\n",
+        "q 2.834645669 0 0 2.834645669 0 0 cm 1 J 1 j\n",
         "/OC /L0 BDC\n0.35 w\n10 10 m\n20 10 l\nS\n10 20 m\n20 20 l\nS\n",
         "EMC\n/OC /L1 BDC\n10 30 m\n20 30 l\nS\nEMC\nQ\n",
     );

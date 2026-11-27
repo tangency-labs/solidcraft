@@ -50,6 +50,9 @@ enum Kind {
     Number { max: u32 },
     /// A `REG_SZ`: one of the agent permission modes (`ask`, `edits`, `all`).
     Permission,
+    /// A `REG_SZ`: the path of a theme file to follow, as `theme_follow` takes it (at most
+    /// [`crate::theme_files::MAX_FOLLOW_PATH`] bytes, no control characters, never empty).
+    ThemeFile,
 }
 
 /// A preference an organization can set: the policy's value name, the preference's `ui.prefs`
@@ -74,7 +77,16 @@ pub const LOCKS: &[Lock] = &[
     Lock { policy: "ReopenDesigns", pref: "reopen_designs", kind: Kind::Switch },
     Lock { policy: "ShowDiscordButton", pref: "show_discord_button", kind: Kind::Switch },
     Lock { policy: "ShowDonateButton", pref: "show_donate_button", kind: Kind::Switch },
+    Lock { policy: THEME_FILE, pref: "theme_follow", kind: Kind::ThemeFile },
 ];
+
+/// The theme file everyone on this computer follows: its colours replace the chosen theme, and a
+/// change to the file shows within a second. Locks `theme_follow` and the theme picker.
+pub const THEME_FILE: &str = "ThemeFile";
+
+/// Features that send data outside the organization and that its policy can turn off: the
+/// policy's value name (`REG_DWORD`, 0 turns the feature off, 1 leaves it on) and the feature.
+pub const ALLOWS: &[(&str, &str)] = &[("AllowEasyPrint", "easyprint"), ("AllowProblemReports", "problem_reports")];
 
 /// A preference's value, as a policy sets it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
@@ -123,6 +135,8 @@ pub enum Value {
 pub struct Layer {
     /// The valid values of [`LOCKS`], by the preference they set.
     pub settings: BTreeMap<&'static str, Setting>,
+    /// The valid values of [`ALLOWS`], by feature: false turns it off.
+    pub allowed: BTreeMap<&'static str, bool>,
     /// [`USAGE_STATISTICS`]: 0 turns them off and locks the preference; 1 leaves the choice.
     pub usage_statistics: Option<bool>,
     /// [`ORGANIZATION_NAME`], cleaned: one line, no control or direction characters, at most
@@ -151,6 +165,19 @@ impl Layer {
                 Some((lock.pref, setting?))
             })
             .collect();
+        let allowed = ALLOWS
+            .iter()
+            .filter_map(|(policy, feature)| {
+                let value = get(policy)?;
+                match parse(Kind::Switch, &value) {
+                    Some(Setting::Switch(on)) => Some((*feature, on)),
+                    _ => {
+                        log::warn!("policy: {policy} is {value:?}, expected 0 or 1; ignored");
+                        None
+                    }
+                }
+            })
+            .collect();
         let usage_statistics = match get(USAGE_STATISTICS) {
             None => None,
             Some(value) => {
@@ -164,7 +191,7 @@ impl Layer {
                 on
             }
         };
-        Layer { settings, usage_statistics, organization: text(ORGANIZATION_NAME) }
+        Layer { settings, allowed, usage_statistics, organization: text(ORGANIZATION_NAME) }
     }
 
     /// [`CHECK_FOR_UPDATES`]: whether update checks run.
@@ -177,7 +204,7 @@ impl Layer {
 
     /// Whether any value is set.
     fn any(&self) -> bool {
-        !self.settings.is_empty() || self.usage_statistics.is_some() || self.organization.is_some()
+        !self.settings.is_empty() || !self.allowed.is_empty() || self.usage_statistics.is_some() || self.organization.is_some()
     }
 
     /// `self`, with `under` for the values `self` leaves unset.
@@ -185,8 +212,12 @@ impl Layer {
         for (pref, setting) in under.settings {
             self.settings.entry(pref).or_insert(setting);
         }
+        for (feature, on) in under.allowed {
+            self.allowed.entry(feature).or_insert(on);
+        }
         Layer {
             settings: self.settings,
+            allowed: self.allowed,
             usage_statistics: self.usage_statistics.or(under.usage_statistics),
             organization: self.organization.or(under.organization),
         }
@@ -212,6 +243,7 @@ fn parse(kind: Kind, value: &Value) -> Option<Setting> {
         (Kind::Permission, Value::Text(text)) if text.len() <= MAX_CHOICE => {
             crate::agent_chat::agents::Mode::parse(&text.trim().to_ascii_lowercase()).map(|mode| Setting::Text(mode.id().into()))
         }
+        (Kind::ThemeFile, Value::Text(text)) => crate::theme_files::follow_path(text).ok().filter(|path| !path.is_empty()).map(Setting::Text),
         _ => None,
     }
 }
@@ -231,6 +263,7 @@ fn get(p: &crate::prefs::Prefs, pref: &str) -> Option<Setting> {
         "reopen_designs" => Setting::Switch(p.reopen_designs),
         "show_discord_button" => Setting::Switch(p.show_discord_button),
         "show_donate_button" => Setting::Switch(p.show_donate_button),
+        "theme_follow" => Setting::Text(p.theme_follow.clone()),
         _ => return None,
     })
 }
@@ -254,6 +287,7 @@ fn set(p: &mut crate::prefs::Prefs, pref: &str, setting: &Setting) {
         ("reopen_designs", Setting::Switch(on)) => p.reopen_designs = *on,
         ("show_discord_button", Setting::Switch(on)) => p.show_discord_button = *on,
         ("show_donate_button", Setting::Switch(on)) => p.show_donate_button = *on,
+        ("theme_follow", Setting::Text(path)) => p.theme_follow.clone_from(path),
         _ => {}
     }
 }
@@ -271,6 +305,17 @@ pub struct Policy {
 }
 
 impl Policy {
+    /// Whether the feature (one of [`ALLOWS`]) may run: false only when a mandatory value turns
+    /// it off.
+    pub fn allows(&self, feature: &str) -> bool {
+        self.mandatory.allowed.get(feature) != Some(&false)
+    }
+
+    /// The features a mandatory value turns off.
+    pub fn turned_off(&self) -> Vec<&'static str> {
+        self.mandatory.allowed.iter().filter(|(_, on)| !**on).map(|(feature, _)| *feature).collect()
+    }
+
     /// The preferences (by their `ui.prefs` names) a mandatory value replaces.
     pub fn locked(&self) -> Vec<&'static str> {
         // UsageStatistics allowed (1) leaves the choice to the person; only off locks it.
@@ -341,6 +386,7 @@ pub fn check_updates(app: &SolveApp) -> bool {
 /// person's own choice (from the saved file, a reload or a shortcut such as the Donate pill's
 /// Hide): it is kept in [`Policy::own`] for when the policy goes. Cheap; runs every frame.
 pub fn enforce(app: &mut SolveApp) {
+    crate::easyprint_ui::block(app, !app.policy.allows("easyprint"));
     enforce_keeping(app, false);
 }
 
@@ -364,6 +410,10 @@ pub fn enforce_after_reset(app: &mut SolveApp) {
 fn enforce_keeping(app: &mut SolveApp, keep_own: bool) {
     if app.policy.mandatory.settings.is_empty() {
         return;
+    }
+    // The organization's theme file wins over the `--theme-file` launch flag too.
+    if app.policy.locks("theme_follow") {
+        app.prefs_window.follow.launch = None;
     }
     let mut units = false;
     for (pref, setting) in app.policy.mandatory.settings.clone() {
@@ -678,17 +728,19 @@ mod tests {
 
     #[test]
     fn the_organizations_permissions_hold_for_every_agent_and_its_always_allowed_answers_wait() {
-        use crate::agent_chat::agents::{Mode, always_allowed_in_force, mode_in_force};
+        use crate::agent_chat::agents::{Mode, always_allowed_in_force, mode_in_force, mode_shown};
         let mut app = SolveApp::new(Default::default(), Default::default());
         app.preferences.ai_permissions = Mode::Edits;
         app.preferences.agent_permissions.insert("codex".into(), Mode::All);
         app.preferences.agent_always_allow.insert("claude".into(), vec!["file.save".into()]);
         assert_eq!(mode_in_force(&app, "codex"), Mode::All, "without a policy an agent's own mode holds");
         assert!(always_allowed_in_force(&app, "claude", "file.save"));
+        assert_eq!((mode_shown(&app, "codex"), mode_shown(&app, "claude")), (Some(Mode::All), None), "each agent's row shows its own choice");
         app.policy = Policy::from_json(r#"{"AiPermissions": "ask"}"#);
         enforce(&mut app);
         for agent in ["codex", "claude", "other"] {
             assert_eq!(mode_in_force(&app, agent), Mode::Ask, "{agent}");
+            assert_eq!(mode_shown(&app, agent), Some(Mode::Ask), "{agent}'s locked row shows the organization's mode");
         }
         assert!(!always_allowed_in_force(&app, "claude", "file.save"), "an Always allowed answer doesn't apply");
         // Kept for when the policy goes.
@@ -704,6 +756,24 @@ mod tests {
             (12, false, false, false, false)
         );
         assert_eq!(saved(&app)["agent_chat_turn_limit"], serde_json::json!(0), "the person's own limit is saved");
+    }
+
+    #[test]
+    fn a_feature_is_turned_off_only_by_a_mandatory_zero() {
+        for (policy, feature) in ALLOWS {
+            let off = Policy::from_json(&format!(r#"{{"{policy}": 0}}"#));
+            assert!(!off.allows(feature) && off.managed(), "{policy}");
+            assert_eq!(off.turned_off(), [*feature]);
+            assert!(off.locked().is_empty(), "{policy} locks no preference");
+            assert!(Policy::from_json(&format!(r#"{{"{policy}": 1}}"#)).allows(feature), "{policy}");
+            for hostile in [r#"2"#, r#""0""#, r#"-1"#, r#"null"#] {
+                let policy = Policy::from_json(&format!(r#"{{"{policy}": {hostile}}}"#));
+                assert!(policy.allows(feature) && !policy.managed(), "{hostile}");
+            }
+            let recommended = Policy::from_json(&format!(r#"{{"Recommended": {{"{policy}": 0}}}}"#));
+            assert!(recommended.allows(feature), "a recommended value turns nothing off");
+            assert!(Policy::default().allows(feature));
+        }
     }
 
     #[test]
@@ -744,6 +814,22 @@ mod tests {
         assert_eq!(name(Value::Text("é".repeat(70))).map(|n| n.chars().count()), Some(MAX_NAME), "cut by characters, not bytes");
         for nothing in [Value::Text(String::new()), Value::Text(" \n\u{200B} ".into()), Value::Number(1)] {
             assert_eq!(name(nothing), None);
+        }
+    }
+
+    #[test]
+    fn the_theme_file_is_one_line_path_and_anything_else_is_not_set() {
+        assert_eq!(one(THEME_FILE, Value::Text(r"  C:\ProgramData\ACME\theme.json ".into())), text(r"C:\ProgramData\ACME\theme.json"));
+        assert_eq!(one(THEME_FILE, Value::Text("/etc/solidcraft/acme-theme.json".into())), text("/etc/solidcraft/acme-theme.json"));
+        for hostile in [
+            Value::Text(String::new()),
+            Value::Text("  ".into()),
+            Value::Text("a\nb".into()),
+            Value::Text("a\u{0}b".into()),
+            Value::Text("x".repeat(5000)),
+            Value::Number(1),
+        ] {
+            assert_eq!(one(THEME_FILE, hostile), None);
         }
     }
 
@@ -881,6 +967,76 @@ mod tests {
     }
 
     #[test]
+    fn a_theme_file_policy_is_followed_and_cannot_be_stopped_or_changed() {
+        use egui::Color32;
+        use serde_json::json;
+        use solidcraft_theme::Tokens;
+        crate::i18n::install();
+        let dir = std::env::temp_dir().join(format!("solidcraft-policy-theme-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("acme-theme.json");
+        let path = file.to_string_lossy().to_string();
+        let write = |panel: &str| {
+            let text = format!(r##"{{"format":"solidcraft-theme/1","name":"ACME","base":"light","colors":{{"panel":"{panel}"}}}}"##);
+            std::fs::write(&file, text).unwrap();
+        };
+        write("#203040");
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        // A file followed with --theme-file gives way to the organization's.
+        let other = dir.join("own.json").to_string_lossy().to_string();
+        std::fs::write(&other, r##"{"format":"solidcraft-theme/1","name":"Own","base":"dark","colors":{"panel":"#010203"}}"##).unwrap();
+        crate::prefs::follow_theme_file_for_run(&mut h.app, &other).unwrap();
+        h.app.policy = Policy::from_json(&json!({ "ThemeFile": path }).to_string());
+        h.frames(2);
+        assert!(h.app.prefs_window.follow.launch.is_none(), "the launch flag no longer applies");
+        assert_eq!(h.app.preferences.theme_follow, path);
+        assert_eq!(Tokens::get().panel, Color32::from_rgb(0x20, 0x30, 0x40), "the organization's colours are on");
+        assert_eq!(saved(&h.app)["theme_follow"], json!(""), "the person's own choice is kept");
+
+        // The control channel refuses another file, the organization's included: only the stored
+        // choice goes back, and sending it back doesn't stop following.
+        for value in [json!(other), json!(path)] {
+            let refused = h.call("ui.prefs", json!({ "theme_follow": value }));
+            assert_eq!(refused["ok"], json!(false), "{refused}");
+            assert!(refused["error"].as_str().unwrap_or_default().contains("set by your organization's policy"), "{refused}");
+        }
+        let back = h.call("ui.prefs", json!({ "theme_follow": "" }));
+        assert_eq!(back["ok"], json!(true), "sending back what was read is no change: {back}");
+        assert_eq!(back["result"]["theme_followed"].as_str(), Some(path.as_str()), "{back}");
+        // Picking a theme records the person's choice and keeps following the file.
+        let picked = h.call("ui.prefs", json!({"theme": "dark"}));
+        assert_eq!(picked["result"]["theme_followed"].as_str(), Some(path.as_str()), "{picked}");
+        h.frames(2);
+        assert_eq!(Tokens::get().panel, Color32::from_rgb(0x20, 0x30, 0x40));
+
+        // The organization replaces the file: shown without a restart.
+        write("#506070");
+        h.frames(70);
+        assert_eq!(Tokens::get().panel, Color32::from_rgb(0x50, 0x60, 0x70));
+        // A missing file keeps the last good theme and says why.
+        std::fs::remove_file(&file).unwrap();
+        h.frames(70);
+        assert_eq!(Tokens::get().panel, Color32::from_rgb(0x50, 0x60, 0x70));
+        let out = h.call("ui.prefs", json!({}));
+        assert!(out["result"]["theme_follow_error"].is_string(), "{out}");
+        assert!(out["result"]["policy"]["locked"].as_array().is_some_and(|l| l.contains(&json!("theme_follow"))), "{out}");
+
+        // Preferences shows the row greyed out with who set it.
+        let _language = solidcraft_ui_text::scope("en");
+        h.call("ui.prefs", json!({"open": "Appearance"}));
+        h.frames(4);
+        crate::prefs::reveal_preference(&mut h, "prefs:theme_follow_toggle");
+        assert!(h.widget("Set by your organization").is_some(), "the row says who set it");
+        let tree = h.output.accesskit_update.as_ref().expect("an accessibility tree");
+        let boxes: Vec<_> =
+            tree.nodes.iter().filter(|(_, n)| n.role() == egui::accesskit::Role::CheckBox && n.label() == Some("Follow a theme file")).collect();
+        assert_eq!(boxes.len(), 1);
+        assert!(boxes[0].1.is_disabled(), "the follow row is locked");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn without_a_policy_nothing_is_enforced_or_kept() {
         let mut h = crate::scenario::Harness::new();
         h.app.preferences.default_units = "ft".into();
@@ -896,7 +1052,8 @@ mod tests {
     fn the_templates_offer_every_policy_the_app_reads() {
         let admx = include_str!("../../../packaging/windows/policies/solidcraft.admx");
         let adml = include_str!("../../../packaging/windows/policies/en-US/solidcraft.adml");
-        for name in LOCKS.iter().map(|lock| lock.policy).chain([ORGANIZATION_NAME, USAGE_STATISTICS]) {
+        for name in LOCKS.iter().map(|lock| lock.policy).chain(ALLOWS.iter().map(|(policy, _)| *policy)).chain([ORGANIZATION_NAME, USAGE_STATISTICS])
+        {
             assert!(admx.contains(&format!(r#"valueName="{name}""#)), "{name} is missing from solidcraft.admx");
             assert!(adml.contains(&format!(r#"<string id="{name}">"#)), "{name} is missing from solidcraft.adml");
         }
