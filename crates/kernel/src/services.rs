@@ -14,8 +14,6 @@ pub use solidcore_ops::face_pair;
 pub use solidcore_ops::mid_joint;
 pub use solidcore_ops::mid_sheet;
 pub use solidcore_ops::stroke_runs;
-pub use solidcore_ops::sweep;
-pub use solidcore_ops::{Body as ExactBody, CheckLevel, Order, Result, boolean, make_box, make_sphere, measure};
 
 /// The display plan and meshes (`solidcore-tess`).
 pub mod tess {

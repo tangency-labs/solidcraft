@@ -2486,6 +2486,88 @@ impl Body {
         }
     }
 
+    /// The body's exact form for `what`, which a mesh body and a record the kernel refuses have
+    /// none of.
+    fn exact_form(&self, what: &str) -> Result<OpsForm> {
+        self.ops_body().ok_or_else(|| KernelError::Failed(format!("{what}: exact face form unavailable")))
+    }
+
+    /// Every point where the ray from `origin` along `direction` meets a face, nearest first, a
+    /// tie (one point, one distance: a ray through an edge) in record face order
+    /// ([`solidcore_ops::Body::face_hits_by_ray`]): exact, no mesh. A face the ray crosses twice
+    /// gives two hits. Empty where the ray meets no face.
+    ///
+    /// # Errors
+    /// [`KernelError::Invalid`] for a coordinate that is not finite or a direction of no length;
+    /// [`KernelError::Failed`] for a mesh body and the kernel's failure.
+    pub fn face_hits_by_ray(&self, origin: [f64; 3], direction: [f64; 3]) -> Result<Vec<solidcraft_kernel_api::FaceHit>> {
+        let form = self.exact_form("faces along a ray")?;
+        let (body, order) = &*form;
+        let hits = body.face_hits_by_ray(order, origin, direction).map_err(|e| ops_failure("faces along a ray", e))?;
+        Ok(hits.into_iter().map(|h| solidcraft_kernel_api::FaceHit { face: h.face, point: h.point, distance: h.distance }).collect())
+    }
+
+    /// The outward unit normal of face `face` when it is flat, with its proved bound
+    /// ([`solidcore_ops::Body::face_plane_normal`]); `None` for a face that is not flat.
+    ///
+    /// # Errors
+    /// [`KernelError::Invalid`] for an index past the faces; [`KernelError::Failed`] for a mesh
+    /// body, a face with no side facing out and the kernel's failure.
+    pub fn face_plane_normal(&self, face: usize) -> Result<Option<solidcraft_kernel_api::UnitNormal>> {
+        let form = self.exact_form("flat face normal")?;
+        let (body, order) = &*form;
+        let n = body.face_plane_normal(order, face).map_err(|e| ops_failure("flat face normal", e))?;
+        Ok(n.map(|n| solidcraft_kernel_api::UnitNormal { value: n.value, bound: n.bound }))
+    }
+
+    /// The rim of faces `faces`: the edges with a face of the set on one side only, in record
+    /// order ([`solidcore_ops::Body::rim_edges`]). Empty when the faces close up on their own.
+    ///
+    /// # Errors
+    /// [`KernelError::Invalid`] for an index past the faces; [`KernelError::Failed`] for a mesh
+    /// body, a face with material on both sides and the kernel's failure.
+    pub fn rim_edges(&self, faces: &[usize]) -> Result<Vec<usize>> {
+        let form = self.exact_form("rim edges")?;
+        let (body, order) = &*form;
+        body.rim_edges(order, faces).map_err(|e| ops_failure("rim edges", e))
+    }
+
+    /// The closest points of `p` and faces `faces` (as trimmed) and edges `edges` (over their
+    /// intervals), by the kernel's minimum-distance solve on the exact geometry
+    /// ([`solidcore_ops::Body::closest_to_point`]). `None` where the solve finds no points.
+    ///
+    /// # Errors
+    /// [`KernelError::Invalid`] for an index past the faces or edges or a point that is not
+    /// finite; [`KernelError::Failed`] for a mesh body and the kernel's failure.
+    pub fn closest_to_point(&self, faces: &[usize], edges: &[usize], p: [f64; 3]) -> Result<Option<solidcraft_kernel_api::MembersClosest>> {
+        let form = self.exact_form("closest to a point")?;
+        let (body, order) = &*form;
+        let c = body.closest_to_point(order, faces, edges, p).map_err(|e| ops_failure("closest to a point", e))?;
+        Ok(c.map(members_closest))
+    }
+
+    /// The closest points of edge `edge` of `other` (over its interval) and faces `faces` and
+    /// edges `edges` of this body, as [`Body::closest_to_point`] measures them
+    /// ([`solidcore_ops::Body::closest_to_curve`]).
+    ///
+    /// # Errors
+    /// [`KernelError::Invalid`] for an index past either body's faces or edges;
+    /// [`KernelError::Failed`] for a mesh body, an edge without a curve and the kernel's failure.
+    pub fn closest_to_edge_of(
+        &self,
+        faces: &[usize],
+        edges: &[usize],
+        other: &Body,
+        edge: usize,
+    ) -> Result<Option<solidcraft_kernel_api::MembersClosest>> {
+        let theirs = other.exact_form("closest to an edge")?;
+        let curve = theirs.0.edge_curve(&theirs.1, edge).map_err(|e| ops_failure("closest to an edge", e))?;
+        let form = self.exact_form("closest to an edge")?;
+        let (body, order) = &*form;
+        let c = body.closest_to_curve(order, faces, edges, &curve).map_err(|e| ops_failure("closest to an edge", e))?;
+        Ok(c.map(members_closest))
+    }
+
     /// [`Body::classify_point`] for each of `points`, in order, through one classification of
     /// the body: SMLib's copy of it and its search structures are made once for all the points,
     /// where a call a point makes them again each time (on a large body far more work than a
@@ -2847,4 +2929,18 @@ fn record_outline(record: &Brep) -> Aabb3 {
         curve_hull(e.parameters(), e.interval, &mut b);
     }
     b
+}
+
+/// solidcore-ops' error of a query: an argument it refuses is the caller's input, anything else
+/// the kernel's failure.
+fn ops_failure(what: &str, e: solidcore_ops::Error) -> KernelError {
+    match e {
+        solidcore_ops::Error::Argument => KernelError::Invalid(format!("{what}: {e}")),
+        e => KernelError::Failed(format!("{what}: {e}")),
+    }
+}
+
+/// solidcore-ops' closest points, field for field.
+fn members_closest(c: solidcore_ops::measure::MembersClosest) -> solidcraft_kernel_api::MembersClosest {
+    solidcraft_kernel_api::MembersClosest { distance: c.distance, from: c.from, to: c.to }
 }

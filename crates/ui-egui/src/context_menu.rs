@@ -1566,6 +1566,9 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
         entries.insert(0, Item::heading("Shared child: edits affect all copies of its parent"));
     }
     let bodies = app.session.occurrence_bodies(path, true).unwrap_or_default();
+    // What this placement shows decides the rows that act on it. The component's own bodies don't:
+    // a sub-assembly built from parts defined in another component owns none (#22710).
+    let has_bodies = !bodies.is_empty();
     let selected_paths = crate::browser::selected_occurrence_paths(app, path);
     let show_selected = selected_paths.iter().all(|path| app.session.occurrence_hidden(path));
     // The component's menu asks its first placement; this row may be another one.
@@ -1576,7 +1579,10 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             item.enabled = app.session.active_occurrence_path.as_deref() != Some(path);
         }
         "ui.editInPlace" => item.params = Some(json!({"component": placement.component, "path": path})),
-        "ui.zoomTo" => item.params = Some(json!({ "items": [Sel::Occurrence { path: path.to_vec() }] })),
+        "ui.zoomTo" => {
+            item.params = Some(json!({ "items": [Sel::Occurrence { path: path.to_vec() }] }));
+            item.enabled = has_bodies;
+        }
         "occurrence.ground" => {
             item.label = if placement.grounded { "Unground" } else { "Ground" }.into();
             item.params = Some(json!({"occurrence": placement.occurrence, "grounded": !placement.grounded}));
@@ -1610,7 +1616,13 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
                 item.params = Some(json!({"paths": selected_paths}));
             }
         }
-        "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
+        "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => {
+            item.params = Some(json!({"bodies": bodies}));
+            item.enabled = has_bodies && (item.id != "ui.sendToSlicer" || crate::dialogs_save_mesh::available(app));
+        }
+        // A flyout's row is on while any of its entries is, as `group` made it; the entries
+        // above may have changed (each row is visited after its entries).
+        id if id.starts_with("ui.group.") && !item.children.is_empty() => item.enabled = item.children.iter().any(|c| c.enabled),
         // Expand Below and Collapse Below fold this placement's branch; Collapse All keeps the
         // whole tree.
         "browser.expand_all" | "browser.collapse_all" if item.params.as_ref().is_some_and(|p| p.get("component").is_some()) => {
@@ -1618,6 +1630,17 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
         }
         _ => {}
     });
+    // A placement that shows bodies can be isolated even when its component owns none, as a
+    // sub-assembly of parts defined elsewhere (#22710): its own Isolate goes before Zoom to Selection.
+    let isolates = |item: &Item| item.id == "ui.isolate" || item.id == "ui.isolateOccurrence";
+    if has_bodies && !entries.iter().any(isolates) {
+        let mut isolate = isolate_occurrence_item(app, path);
+        if selected_paths.len() > 1 {
+            isolate.params = Some(json!({"paths": selected_paths}));
+        }
+        let at = entries.iter().position(|item| item.id == "ui.zoomTo").unwrap_or(entries.len());
+        entries.insert(at, isolate);
+    }
     // One placement of several can show another design on its own, above the row for all of them.
     if app.session.doc.links.contains_key(&placement.component)
         && app.session.doc.occurrences.iter().filter(|o| o.component == placement.component).count() > 1

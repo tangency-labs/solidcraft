@@ -510,6 +510,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         for rows in crate::dialogs_shaft_spline::shown_picks(&d.inputs) {
             input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, rows);
         }
+    } else if let Kind::CellGrid(c) = &d.kind {
+        // The cell's profile shows with the Sketch shape only.
+        let shown = crate::dialogs_cell_grid::shown_picks(c);
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, shown);
     } else if matches!(d.kind, Kind::Frame(_)) {
         // Corner Overrides shows among Frame Member's own rows, under the corner settings.
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..2);
