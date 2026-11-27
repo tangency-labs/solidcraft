@@ -1837,6 +1837,30 @@ fn a_swept_circle_saved_with_its_caps_off_square_opens() {
     assert!(rel(v, w) < 1e-9, "volume {w} vs {v}");
 }
 
+/// A half circle of radius 5 turned a whole turn about an axis in its plane at 30 degrees to
+/// x, its two ends 1.1e-3 off the axis (tangency-labs/solidcore#3389): a ball with a thin hole
+/// along the axis, whose ends sweep two pole circles of radius 1.1e-3. The solid's record is
+/// written, opens again as a valid solid, and the record it writes again is the same.
+#[test]
+fn a_whole_turn_of_an_arc_ending_a_hair_off_its_axis_writes_its_record() {
+    rig_fixes();
+    let arc = Curve::Arc {
+        center: [4.330677018922193, 2.499047372055837, 0.0],
+        axis: Z,
+        reference: [0.8660254037844387, 0.49999999999999994, 0.0],
+        radius: 5.0,
+        start: PI,
+        end: TAU,
+    };
+    let body = revolve(&[arc], [0.0; 3], [0.8660254037844387, 0.5, 0.0], TAU, false)
+        .expect("the revolve is a solid");
+    let (record, _) = body.to_record().expect("the record is written");
+    let (back, _) = Body::from_record(&record, true).expect("the record opens");
+    assert!(back.check(CheckLevel::All).unwrap().is_valid());
+    let (again, _) = back.to_record().expect("the record is written again");
+    assert_eq!(again, record);
+}
+
 /// A profile's runs of arcs on one circle are found and joined as [`join_arcs`] joins them: a
 /// circle in two halves of one frame is the full circle from its frame's start; two frames
 /// close at the middle of the longer; an open run in a loop with a line is one arc and the line
