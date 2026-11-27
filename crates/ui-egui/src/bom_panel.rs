@@ -3,7 +3,7 @@
 //! JSON…. Picking a row edits its part
 //! number, description and revision (`metadata::BOM_KEYS`), a typed-in material and the finish (with a
 //! list of common finishes) through one `component.metadata.set`
-//! per definition. The toolbar's Bill of Materials (`ui.start` of `assembly.bom`) opens it.
+//! per definition, sending only the fields that were edited. The toolbar's Bill of Materials (`ui.start` of `assembly.bom`) opens it.
 
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -30,7 +30,8 @@ pub struct BomPanel {
     cache: Option<(u64, [bool; 3], Rc<Value>)>,
     /// The picked row's index, its fields as edited (one for each of [`edit_keys`]), and what each of
     /// its components holds as far as Apply knows: the row's fields when it was picked, then what
-    /// Apply last wrote to that component (by component id).
+    /// Apply last wrote to that component (by component id). A row grouped by part number shows the
+    /// first value its definitions give, so a field left as it opened says nothing about the others.
     pub picked: Option<usize>,
     pub fields: Vec<String>,
     opened: BTreeMap<String, Vec<String>>,
@@ -143,9 +144,6 @@ const COLUMN_KEYS: [&str; 8] = ["item", "part_number", "description", "revision"
 fn edit_keys() -> impl Iterator<Item = &'static str> {
     BOM_KEYS.iter().copied().chain([MATERIAL, FINISH])
 }
-/// How many of [`edit_keys`] are [`BOM_KEYS`]: Apply always sends those, and the material and the
-/// finish only when they were changed.
-const ALWAYS: usize = BOM_KEYS.len();
 /// The column that takes the space the others leave, truncating its text.
 const DESCRIPTION: usize = 2;
 const COLUMN_SPACING: f32 = 14.0;
@@ -194,17 +192,21 @@ fn opened_fields(row: &Value) -> Vec<String> {
 /// Apply the picked row's fields to each of its definitions (one undo step each). The design is
 /// the part of a design that places nothing (component 0): its properties are the design's own.
 ///
-/// What it sends for a component is what differs from what that component holds as far as Apply
-/// knows ([`BomPanel::opened`]: the part properties always, material and finish only when changed, so
-/// a worked-out material is never turned into typed text). Each successful write updates that
-/// component's baseline, a refused one leaves it, so a value typed back to what the row opened with
-/// is still written after another was applied.
+/// What it sends for a component is only what differs from what that component holds as far as Apply
+/// knows ([`BomPanel::opened`]), so a worked-out material is never turned into typed text and a row
+/// grouped by part number never copies its first definition's description or revision onto the
+/// others (#22868); a component with nothing changed gets no command and no undo step. Each
+/// successful write updates that component's baseline, a refused one leaves it, so a value typed back
+/// to what the row opened with is still written after another was applied.
 fn apply(app: &mut SolveApp, d: &mut BomPanel, row: &Value) {
     for c in row["components"].as_array().into_iter().flatten() {
         let known = d.opened.get(&c.to_string());
-        let sent = |at: usize, now: &String| at < ALWAYS || known.and_then(|k| k.get(at)) != Some(now);
+        let sent = |at: usize, now: &String| known.and_then(|k| k.get(at)) != Some(now);
         let params: Map<String, Value> =
             edit_keys().zip(&d.fields).enumerate().filter(|(at, (_, v))| sent(*at, v)).map(|(_, (k, v))| (k.to_string(), json!(v))).collect();
+        if params.is_empty() {
+            continue;
+        }
         let r = if c.as_u64() == Some(0) {
             app.run("document.metadata.set", json!({"values": params}))
         } else {
@@ -630,6 +632,45 @@ mod tests {
         assert_eq!((material(&h), h.app.bom.as_ref().unwrap().error.clone()), (Some("B".into()), None));
         set(&mut h, "A");
         assert_eq!(material(&h), Some("A".into()));
+    }
+
+    /// A row grouped by part number covers several definitions and shows the first description and
+    /// revision they give. Apply writes only what was edited (#22868): untouched, it changes nothing,
+    /// and a finish typed in reaches every definition while each keeps its own description and revision.
+    #[test]
+    fn apply_on_a_grouped_row_writes_only_the_edited_fields() {
+        let mut h = Harness::new();
+        for (name, rev) in [("Bracket A", "A"), ("Bracket B", "B")] {
+            h.app.run("component.create", json!({"name": name})).unwrap();
+            h.app.run("solid.box", json!({"length": 20, "width": 10, "height": 5})).unwrap();
+            let description = format!("{name} description");
+            h.app
+                .run("component.metadata.set", json!({"component": name, "part_number": "BR-100", "description": description, "revision": rev}))
+                .unwrap();
+            h.app.run("component.activate", json!({"component": 0})).unwrap();
+        }
+        open_report(&mut h);
+        h.frames(2);
+        assert!(h.widget("1 rows, 2 placed").is_some(), "one row for both brackets");
+        h.step(&json!({"click": {"handle": "dialog:list:0"}})).unwrap();
+        assert_eq!(h.app.bom.as_ref().unwrap().fields, ["BR-100", "Bracket A description", "A", "", ""], "the first definition's");
+        let meta = |h: &mut Harness, name: &str| {
+            let m = h.app.session.execute("component.metadata", &json!({"component": name})).unwrap();
+            [&m["part_number"], &m["description"], &m["revision"], &m["finish"]].map(|v| v.as_str().unwrap_or_default().to_string())
+        };
+        let undo = h.app.session.undo.len();
+        h.step(&json!({"widget": "Apply"})).unwrap();
+        assert_eq!(h.app.bom.as_ref().unwrap().error, None);
+        assert_eq!(meta(&mut h, "Bracket B"), ["BR-100", "Bracket B description", "B", ""], "nothing edited, nothing written");
+        assert_eq!(meta(&mut h, "Bracket A"), ["BR-100", "Bracket A description", "A", ""]);
+        assert_eq!(h.app.session.undo.len(), undo, "no undo step for an Apply that changes nothing");
+        h.app.bom.as_mut().unwrap().fields[4] = "Zinc plated".into();
+        h.frames(2);
+        h.step(&json!({"widget": "Apply"})).unwrap();
+        assert_eq!(h.app.bom.as_ref().unwrap().error, None);
+        assert_eq!(meta(&mut h, "Bracket A"), ["BR-100", "Bracket A description", "A", "Zinc plated"]);
+        assert_eq!(meta(&mut h, "Bracket B"), ["BR-100", "Bracket B description", "B", "Zinc plated"], "only the finish reaches Bracket B");
+        assert_eq!(h.app.session.undo.len(), undo + 2, "one undo step per definition");
     }
 
     /// `column_widths` for `rows` in a grid `width` wide, and the measured width of each text.
