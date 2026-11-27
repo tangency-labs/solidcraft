@@ -119,9 +119,11 @@ fn an_app_not_running_says_how_to_start_it() {
     let port = NEVER_LISTENING_PORT;
     // If a system let this connect through, say so here, not as a confusing `Lost` below.
     assert!(
-        std::net::TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), Duration::from_secs(2)).is_err(),
+        std::net::TcpStream::connect_timeout(&([127, 0, 0, 1], port).into(), CONNECT_TIMEOUT).is_err(),
         "a connect to port 0 succeeded on this system"
     );
+    // `Connection::new` reads an address it cannot parse as port 0, so check it reads a real port.
+    assert_eq!(Connection::new(APP, &addr(4242), None).port(), 4242);
     let mut c = Connection::new(APP, &addr(port), Some(TOKEN));
     let e = c.call(Request::new("document.inspect", json!({}))).unwrap_err();
     let CallError::NotRunning(m) = &e else { panic!("{e:?}") };
@@ -138,6 +140,9 @@ fn an_app_gone_during_a_call_is_lost_and_reached_again_once_back() {
     let port = app.port();
     let mut c = Connection::new(APP, &addr(port), Some(TOKEN));
     c.call(Request::new("document.inspect", json!({}))).unwrap();
+    // The port is closed from here until `serve` binds it again below, and a test that binds port 0
+    // in that gap can be given it. The test needs it closed (to see "not running"), and std cannot
+    // hold a bound socket that does not listen, so this window stays.
     app.stop();
     let e = c.call(Request::new("document.inspect", json!({}))).unwrap_err();
     let CallError::Lost(m) = &e else { panic!("{e:?}") };
