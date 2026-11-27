@@ -4,6 +4,180 @@ use solidcraft_kernel::measure;
 use solidcraft_sketch::{ConstraintKind, Sketch};
 
 use crate::*;
+#[cfg(test)]
+mod weld_tests {
+    use super::*;
+    fn record() -> crate::weld::WeldRecord {
+        crate::weld::WeldRecord {
+            id: 42,
+            number: 1,
+            settings: crate::weld::WeldSettings::default(),
+            symbol: Some(solidcraft_geom::weld::Weld {
+                arrow_side: Some(solidcraft_geom::weld::WeldSide {
+                    kind: solidcraft_geom::weld::Kind::Fillet,
+                    size: Some(solidcraft_geom::weld::Size::Throat(3.)),
+                    length_mm: None,
+                    intermittent: None,
+                    contour: None,
+                }),
+                other_side: None,
+                all_round: false,
+                field: true,
+                tail: None,
+            }),
+        }
+    }
+    #[test]
+    fn weld_graphics_round_trip_and_old_design_default() {
+        let mut doc = Document::new("Welds");
+        doc.welds.push(record());
+        let text = serde_json::to_string(&doc).unwrap();
+        let back = crate::format::read(&text).unwrap();
+        assert_eq!(back.welds, doc.welds);
+        assert!(back.next_item_id().unwrap() > 42);
+        let old = crate::format::read(&serde_json::to_string(&Document::new("Old")).unwrap()).unwrap();
+        assert!(old.welds.is_empty());
+    }
+    #[test]
+    fn weld_butt_full_penetration_round_trip() {
+        let mut weld = record();
+        weld.settings.weld_type = "butt".into();
+        weld.settings.size = [("h".into(), 1.)].into_iter().collect();
+        weld.settings.face = "flat".into();
+        weld.settings.process = Some("135".into());
+        let symbol = weld.symbol.as_mut().unwrap();
+        symbol.tail = Some("135".into());
+        let side = symbol.arrow_side.as_mut().unwrap();
+        side.kind = solidcraft_geom::weld::Kind::SingleVButt;
+        side.size = None;
+        side.contour = Some(solidcraft_geom::weld::Contour::Flush);
+        let mut doc = Document::new("Butt");
+        doc.welds.push(weld);
+        let back = crate::format::read(&serde_json::to_string(&doc).unwrap()).unwrap();
+        assert_eq!(back.welds, doc.welds);
+        assert!(back.welds[0].settings.density.is_none());
+    }
+    #[test]
+    fn weld_settings_validate_names_sizes_and_spans() {
+        use crate::weld::{WeldSettings, WeldSpans};
+        let settings = WeldSettings::default();
+        assert!(settings.validate().is_ok());
+        assert_eq!(settings.size.keys().map(String::as_str).collect::<Vec<_>>(), ["a"]);
+        for (field, value) in [
+            ("weld_type", "groove"),
+            ("process", "MAG"),
+            ("process", ""),
+            ("process", "1234"),
+            ("process", "１２"),
+            ("side", "left"),
+            ("ends", "round"),
+            ("spot_look", "unknown"),
+            ("reference_plane", "0"),
+            ("face", "unknown"),
+            ("symbol_standard", "jis"),
+            ("groove", "double_v"),
+            ("penetration", "unknown"),
+            ("root", "unknown"),
+            ("tack_mode", "unknown"),
+        ] {
+            let mut raw = serde_json::to_value(&settings).unwrap();
+            raw[field] = serde_json::json!(value);
+            let bad: WeldSettings = serde_json::from_value(raw).unwrap();
+            assert!(bad.validate().is_err(), "{field}={value}");
+        }
+        for typ in crate::weld::TYPES {
+            let mut settings = settings.clone();
+            settings.weld_type = (*typ).into();
+            for key in crate::weld::SIZE_KEYS {
+                settings.size = [((*key).into(), 1.)].into_iter().collect();
+                if *typ == "butt" {
+                    settings.penetration = if *key == "s" { "partial" } else { "full" }.into();
+                }
+                if *typ == "tack" {
+                    settings.size.insert("l".into(), 5.);
+                    settings.tack_mode = if *key == "n" { "count" } else { "pitch" }.into();
+                    if *key != "n" {
+                        settings.size.insert("e".into(), 40.);
+                    }
+                }
+                assert_eq!(settings.validate().is_ok(), crate::weld::size_keys(typ).contains(key), "{typ}/{key}");
+            }
+        }
+        for (count, length_mm, pitch_mm, valid) in [
+            (1, 1., 1., true),
+            (10000, 1., 2., true),
+            (0, 1., 2., false),
+            (10001, 1., 2., false),
+            (2, 0., 2., false),
+            (2, 1., -1., false),
+            (2, f64::NAN, 2., false),
+            (2, 1., f64::INFINITY, false),
+        ] {
+            let settings = WeldSettings { spans: Some(WeldSpans { count, length_mm, pitch_mm }), ..Default::default() };
+            assert_eq!(settings.validate().is_ok(), valid);
+        }
+    }
+    #[test]
+    fn weld_graphics_refuse_hostile_saved_records() {
+        let mut doc = Document::new("Welds");
+        doc.welds.push(record());
+        for (path, bad) in [
+            (vec!["id"], serde_json::json!(0)),
+            (vec!["number"], serde_json::json!(0)),
+            (vec!["settings", "weld_type"], serde_json::json!("unknown")),
+            (vec!["settings", "size", "a"], serde_json::json!(-1)),
+            (vec!["settings", "process"], serde_json::json!(7)),
+            (vec!["symbol", "arrow_side", "size", "mm"], serde_json::json!(0)),
+        ] {
+            let mut value = serde_json::to_value(&doc).unwrap();
+            let mut target = &mut value["welds"][0];
+            for key in path {
+                target = &mut target[key];
+            }
+            *target = bad;
+            assert!(crate::format::read(&value.to_string()).is_err());
+        }
+        let mut value = serde_json::to_value(&doc).unwrap();
+        value["welds"] = serde_json::json!([record(), record()]);
+        assert!(crate::format::read(&value.to_string()).is_err());
+    }
+
+    #[test]
+    fn weld_choices_and_new_sizes_round_trip_without_changing_legacy_defaults() {
+        use crate::weld::WeldSettings;
+        let legacy: WeldSettings = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(legacy.symbol_standard, "iso2553_2019_a");
+        assert_eq!((&*legacy.groove, &*legacy.penetration, &*legacy.root, &*legacy.tack_mode), ("v", "full", "as_welded", "pitch"));
+        for standard in crate::weld::SYMBOL_STANDARDS {
+            let mut r = record();
+            r.settings.symbol_standard = (*standard).into();
+            r.settings.root_gap = Some(0.);
+            r.settings.size.extend([("z1".into(), 4.), ("z2".into(), 6.), ("s".into(), 5.)]);
+            let back: crate::weld::WeldRecord = serde_json::from_value(serde_json::to_value(&r).unwrap()).unwrap();
+            assert_eq!(back, r);
+        }
+        for (mode, sizes) in [("pitch", vec![("l", 5.), ("e", 40.)]), ("count", vec![("l", 5.), ("n", 4.)]), ("points", vec![("l", 5.)])] {
+            let settings = WeldSettings {
+                weld_type: "tack".into(),
+                tack_mode: mode.into(),
+                size: sizes.into_iter().map(|(k, v)| (k.into(), v)).collect(),
+                ..Default::default()
+            };
+            settings.validate().unwrap();
+            let back: WeldSettings = serde_json::from_value(serde_json::to_value(&settings).unwrap()).unwrap();
+            assert_eq!(back, settings);
+        }
+        for n in [0., -1., 1.5, f64::NAN, f64::INFINITY] {
+            let settings = WeldSettings {
+                weld_type: "tack".into(),
+                tack_mode: "count".into(),
+                size: [("l".into(), 5.), ("n".into(), n)].into_iter().collect(),
+                ..Default::default()
+            };
+            assert!(settings.validate().is_err());
+        }
+    }
+}
 
 fn rel(a: f64, b: f64) -> f64 {
     (a - b).abs() / b.abs().max(1e-12)
@@ -137,6 +311,8 @@ fn plate_doc() -> (Document, u64) {
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -250,6 +426,8 @@ fn an_outline_closed_by_point_on_curve_tangent_joints_extrudes() {
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -462,6 +640,64 @@ fn a_sketch_whose_face_point_is_on_no_face_warns() {
     let warning = warning.unwrap_or_default();
     assert!(warning.contains("no face is at the point the sketch was placed on, [60, 60, 20]"), "{warning}");
     assert!((z - 20.0).abs() < 1e-9, "the sketch stays on the plane of the nearest face, not at z {z}");
+}
+
+/// A sketch saved on a face by a name worked out from geometry (an Align that kept no history
+/// guessed it, #20308) finds no face once that face has its exact name (#22919). Where the saved
+/// point still lies on a flat face on the sketch's own plane and the feature and side that made the
+/// named face still make one, the plane is the same, and the sketch opens on it with a note; a face
+/// that moved off that plane, a point on no face, a name whose root is gone and a name saved
+/// before format 14 still ask for the face to be picked again.
+#[test]
+fn a_sketch_on_a_face_saved_by_a_guessed_name_stays_on_the_same_plane() {
+    use solidcraft_geom::prelude::*;
+
+    // The plate is 40 x 30 mm, 20 mm tall: its top face is at z = 20.
+    let sketch_on = |picked_z: f64, at: Vec3, name: &str| {
+        let (mut doc, _) = plate_doc();
+        let top = Plane::new(Vec3::new(0.0, 0.0, picked_z), Vec3::X, Vec3::Y).unwrap();
+        let mut sk = Sketch::new();
+        let a = sk.add_point(Vec2::new(1.0, 1.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(3.0, 3.0), None).unwrap();
+        sk.add_line_pts(a, b, None).unwrap();
+        let plane = PlaneRef::Face { plane: top, at, name: Some(name.into()), anchor: None };
+        let id = doc.add_feature(FeatureKind::Sketch { plane, sketch: sk }, Some("On top")).unwrap();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        let result = m.result(id).unwrap().clone();
+        let z = m.state().sketches.iter().find(|s| s.feature == id).map(|s| s.plane.origin.z);
+        (result, z)
+    };
+    // The top face's own name told apart by a move no face has: what its root names (the
+    // feature and the side that made it) is still there.
+    let top = {
+        let (doc, _) = plate_doc();
+        let mut m = Model::new();
+        m.evaluate(&doc);
+        naming::face_names_at(&m.state(), &[Vec3::new(10.0, 10.0, 20.0)]).pop().unwrap()
+    };
+    let guessed = format!("{top}@F99.1");
+    let guessed = guessed.as_str();
+    let (result, z) = sketch_on(20.0, Vec3::new(10.0, 10.0, 20.0), guessed);
+    assert!(result.error.is_none(), "{:?}", result.error);
+    let warning = result.warning.unwrap_or_default();
+    assert!(warning.contains("has a new name; the sketch stays on the same plane"), "{warning}");
+    assert!(z.is_some_and(|z| (z - 20.0).abs() < 1e-9), "{z:?}");
+    let lost = |result: &FeatureResult, name: &str| result.error.as_deref().and_then(reselect_parts) == Some(("On top", name));
+    // Picked on a plane 5 mm under the top face: the sketch would move, so the face under the
+    // point is not taken for it.
+    let (result, _) = sketch_on(15.0, Vec3::new(10.0, 10.0, 20.0), guessed);
+    assert!(lost(&result, guessed), "{result:?}");
+    // The point is on no face.
+    let (result, _) = sketch_on(20.0, Vec3::new(60.0, 60.0, 20.0), guessed);
+    assert!(lost(&result, guessed), "{result:?}");
+    // A name whose root no face has any more (its sketch curve deleted and drawn again) is lost.
+    let (result, _) = sketch_on(20.0, Vec3::new(10.0, 10.0, 20.0), "F7:side:l47@F9.1");
+    assert!(lost(&result, "F7:side:l47@F9.1"), "{result:?}");
+    // A name saved before format 14 is never found by its point.
+    let legacy = format!("{}{guessed}", naming::LEGACY_MARK);
+    let (result, _) = sketch_on(20.0, Vec3::new(10.0, 10.0, 20.0), &legacy);
+    assert!(lost(&result, &legacy), "{result:?}");
 }
 
 /// Rolling the marker back must not discard unchanged results just because the bounded cache
@@ -1763,6 +1999,8 @@ fn box_fillet_cut_timeline() {
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
             },
             operation: Operation::Cut,
             targets: vec![],
@@ -1798,6 +2036,7 @@ fn errors_are_reported_not_fatal() {
             angle2: None,
             symmetric: false,
             convention: Default::default(),
+            join_profile_arcs: false,
             to: None,
         },
         None,
@@ -2106,6 +2345,43 @@ fn copy_lineage_resolves_seed_material_and_respects_overrides() {
     doc.materials.insert("B".into(), "Steel".into());
     doc.materials.insert("A (2)".into(), DEFAULT_MATERIAL.into());
     assert_eq!(doc.body_material("A (2)"), DEFAULT_MATERIAL);
+
+    // Combined Mirror: single-seed unmerged lump inherits its seed; multi-seed unmerged lumps
+    // inherit unanimously when every seed shares the same material.
+    let single_mir_id = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "YZ".into() },
+                bodies: vec!["A".into()],
+                combine: true,
+                placements: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(single_mir_id).unwrap().body_names = vec!["A_mir".into()];
+    assert_eq!(doc.copy_seed_body("A_mir"), Some("A"));
+    assert_eq!(doc.body_material("A_mir"), "Steel");
+
+    let multi_mir_id = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "XZ".into() },
+                bodies: vec!["A".into(), "B".into()],
+                combine: true,
+                placements: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(multi_mir_id).unwrap().body_names = vec!["AB_mir".into()];
+    assert_eq!(doc.copy_seed_body("AB_mir"), None);
+    assert!(doc.has_copy_material_lineage("AB_mir"));
+    assert_eq!(doc.body_material("AB_mir"), "Steel");
+    doc.materials.insert("B".into(), "Brass".into());
+    assert_eq!(doc.body_material("AB_mir"), DEFAULT_MATERIAL);
 }
 
 #[test]
@@ -2844,6 +3120,8 @@ fn a_split_of_a_body_of_two_pieces_gives_the_halves_of_both() {
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
             },
             operation: Operation::NewBody,
             targets: vec![],
@@ -3356,6 +3634,8 @@ fn an_extruded_ellipse_or_spline_is_one_wall_named_by_its_curve() {
             from_level: false,
             picked_placements: Vec::new(),
             one_sided_direction: None,
+            to_ref: None,
+            from_ref: None,
         },
         operation: Operation::NewBody,
         targets: vec![],
@@ -3448,6 +3728,39 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
     close(crate::apply_vector(&m, solved.plane.normal()), want.normal(), "normal");
     let end = solved.plane.origin + solved.plane.x * 10.0 + solved.plane.y * 5.0;
     close(crate::apply_point(&m, end), want.origin + want.x * 10.0 + want.y * 5.0, "line end");
+}
+
+/// An extrude To Object on the construction plane of another component ends where that
+/// component puts the plane, not where the plane's numbers fall in the extrude's own, placed
+/// component (#8527, as #11734 for sketches).
+#[test]
+fn an_extrude_to_the_construction_plane_of_another_component_ends_on_it() {
+    let (mut doc, sketch) = plate_doc();
+    let owner = doc.add_component(Some("Owner"), 0).unwrap();
+    let part = doc.add_component(Some("Part"), 0).unwrap();
+    doc.occurrences.iter_mut().find(|o| o.component == part).unwrap().transform = rigid(Vec3::new(0.0, 0.0, 10.0), Vec3::ZERO, Vec3::Z, 0.0);
+    let offset = PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "25 mm".into() };
+    let plane = doc.add_feature(FeatureKind::ConstructionPlane { plane: offset }, Some("Target")).unwrap();
+    doc.feature_mut(plane).unwrap().component = owner;
+    // The plane comes first in the timeline, then the sketch and the extrude of the part.
+    let at = doc.features.iter().position(|f| f.id == plane).unwrap();
+    let moved = doc.features.remove(at);
+    doc.features.insert(0, moved);
+    let extrude = doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Extrude { .. })).unwrap().id;
+    doc.feature_mut(sketch).unwrap().component = part;
+    let f = doc.feature_mut(extrude).unwrap();
+    f.component = part;
+    let FeatureKind::Extrude { extent, .. } = &mut f.kind else { panic!("an extrude") };
+    extent.to = Some(crate::FacePick(Vec3::new(0.0, 0.0, 25.0)));
+    extent.to_ref =
+        Some(crate::ObjectRef(crate::construct::GeoRef::Plane { plane: PlaneRef::Construction { feature: plane.into(), placement: None } }));
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    // The part sits 10 mm up, so the plane at 25 mm is 15 mm above its sketch.
+    let body = &model.state().bodies[0];
+    assert!(rel(measure(&body.body).unwrap().volume, 1200.0 * 15.0) < 1e-9, "{}", measure(&body.body).unwrap().volume);
 }
 
 /// Freeze the persisted v6 face-role encoding independently of display-mesh fields and serde layout.
@@ -5033,6 +5346,8 @@ fn capture_position_20644_isolation_for_to_object_mirror_pattern_plane_and_joint
                     to_offset2: None,
                     picked_placements: Vec::new(),
                     one_sided_direction: None,
+                    to_ref: None,
+                    from_ref: None,
                 },
                 operation: Operation::NewBody,
                 targets: Vec::new(),
@@ -5375,6 +5690,8 @@ fn extrude_start_offset_caps_are_named_consistently_across_rotations() {
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,
+                        to_ref: None,
+                        from_ref: None,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],

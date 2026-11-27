@@ -91,6 +91,25 @@ fn a_balloon_points_at_a_placed_part_and_is_saved_by_name() {
     assert_eq!(saved(&s), one);
 }
 
+/// With `at_edge: picked` the arrow ends where the edge was picked, not on its middle, saved as a
+/// part of the edge's length (#22195); a pick by index has no point to keep and is refused.
+#[test]
+fn a_balloon_can_end_its_arrow_where_its_edge_was_picked() {
+    let (mut s, view, [_, bracket]) = placed();
+    let v = json!(ids::encode(view));
+    let reply = run(&mut s, ADD, json!({"view": v, "edge": {"point": [7.5, 0, 0], "path": [bracket]}, "at": [0, 0], "at_edge": "picked"}));
+    assert_eq!(reply["status"].as_str(), Some("ok"), "{reply}");
+    ends_at(&reply, [7.5, 0.0, 0.0]);
+    let along = reply["record"]["along"].as_f64().unwrap();
+    assert!(along > 0.0 && along < 1.0 && (along - 0.5).abs() > 0.3, "{reply}");
+    let middle = run(&mut s, ADD, json!({"view": v, "edge": {"point": [7.5, 0, 0], "path": [bracket]}, "at": [0, 0], "at_edge": "middle"}));
+    ends_at(&middle, [40.0, 0.0, 0.0]);
+    assert!(middle["record"].get("along").is_none(), "a middle saves nothing: {middle}");
+    let body = reply["record"]["edge"]["body"].as_str().unwrap().to_string();
+    let e = refused(&mut s, ADD, json!({"view": v, "edge": {"body": body, "index": 0, "path": [bracket]}, "at": [0, 0], "at_edge": "picked"}));
+    assert!(e.contains("pick the edge by a point"), "{e}");
+}
+
 /// What a balloon can't point at is refused with its reason, and the drawing is left as it was: a
 /// view the drawing doesn't have, a body of the design itself (no part), an occurrence that isn't
 /// there, a point on no edge, and a place off paper.

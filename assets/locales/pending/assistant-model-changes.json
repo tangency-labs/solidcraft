@@ -1,0 +1,42 @@
+{
+  "en": {
+    "ui.agent_chat_hide_model_changes": "Hide highlight",
+    "ui.agent_chat_model_changes": "Changed features ({n}), one undo step",
+    "ui.agent_chat_show_model_changes": "Show in model"
+  },
+  "ar": {
+    "ui.agent_chat_hide_model_changes": "إخفاء التمييز",
+    "ui.agent_chat_model_changes": "الميزات المعدّلة ({n})، خطوة تراجع واحدة",
+    "ui.agent_chat_show_model_changes": "إظهار في النموذج"
+  },
+  "de": {
+    "ui.agent_chat_hide_model_changes": "Hervorhebung ausblenden",
+    "ui.agent_chat_model_changes": "Geänderte Features ({n}), ein Rückgängig-Schritt",
+    "ui.agent_chat_show_model_changes": "Im Modell zeigen"
+  },
+  "he": {
+    "ui.agent_chat_hide_model_changes": "הסתרת ההדגשה",
+    "ui.agent_chat_model_changes": "מאפיינים ששונו ({n}), שלב ביטול אחד",
+    "ui.agent_chat_show_model_changes": "הצגה במודל"
+  },
+  "ja": {
+    "ui.agent_chat_hide_model_changes": "強調表示を解除",
+    "ui.agent_chat_model_changes": "変更したフィーチャー（{n}件）、元に戻す操作は1回",
+    "ui.agent_chat_show_model_changes": "モデルで確認"
+  },
+  "ko": {
+    "ui.agent_chat_hide_model_changes": "강조 표시 숨기기",
+    "ui.agent_chat_model_changes": "변경한 피처({n}개), 한 번에 실행 취소",
+    "ui.agent_chat_show_model_changes": "모델에서 보기"
+  },
+  "vi": {
+    "ui.agent_chat_hide_model_changes": "Ẩn phần tô sáng",
+    "ui.agent_chat_model_changes": "Tính năng đã thay đổi ({n}), một bước hoàn tác",
+    "ui.agent_chat_show_model_changes": "Hiển thị trong mô hình"
+  },
+  "zh": {
+    "ui.agent_chat_hide_model_changes": "取消高亮",
+    "ui.agent_chat_model_changes": "已更改的特征（{n} 个），可一次撤销",
+    "ui.agent_chat_show_model_changes": "在模型中查看"
+  }
+}

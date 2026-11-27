@@ -2124,12 +2124,28 @@ fn reads_natively(path: &str) -> bool {
         || matches!(extension.as_str(), "sc" | "solidcraft" | "json")
 }
 
+/// For SolidCraft's own lock file (`.~<design>.lock`, #5467): what it is and which design to open,
+/// with the computer that has that design open while the lock is fresh (#22924). `None` for any
+/// other file, one only named like a lock, or a path this caller may not read.
+fn lock_file_advice(path: &str) -> Option<EngineError> {
+    solidcraft_io::vfs::check(path).ok()?;
+    let file = std::path::Path::new(path);
+    let name = file.file_name()?.to_str()?.strip_prefix(".~")?.strip_suffix(".lock")?;
+    let lock = solidcraft_io::design_lock::read(&file.with_file_name(name))?;
+    let held = !lock.is_stale(solidcraft_io::design_lock::now_secs()) && !lock.owner_is_gone();
+    let holder = if held { format!(" (open in SolidCraft on {})", lock.host) } else { String::new() };
+    Some(EngineError::Other(format!("{path}: this is SolidCraft's lock file for {name}{holder}. Open {name} instead.")))
+}
+
 /// Why a file read as a design could not be: with a design's own extension, what the reader said;
 /// with any other, that SolidCraft does not open that kind of file (#18465). A file of another
 /// CAD program reaches the design reader because nothing else claims it, and its words about a
 /// "design container" or an environment resource say nothing of that. An importer plugin can add
 /// support for the format (Preferences › Plugins) (#19238).
 fn unreadable_design(path: &str, reason: &str) -> EngineError {
+    if let Some(error) = lock_file_advice(path) {
+        return error;
+    }
     let extension = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or_default();
     if matches!(extension.to_ascii_lowercase().as_str(), "sc" | "solidcraft" | "json") {
         return EngineError::Other(format!("{path}: {reason}"));

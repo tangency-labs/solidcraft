@@ -15,25 +15,40 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, dashed: &mut bool, tolerance: &mut f64, zero_origin: &mut bool) {
     crate::ui_kit::text(ui, app.tr_label("Hidden edges"), crate::ui_kit::Text::Note("hidden"));
-    for (value, key, label) in [(false, "omit", "Do not export hidden edges"), (true, "dashed", "Export hidden edges as dashed lines")] {
-        let r = crate::ui_kit::list_picker(ui, key, app.tr_label(label), *dashed == value);
-        crate::scenario::publish_handle(&format!("dialog:dxf:{key}"), r.rect.center());
-        if r.clicked() {
-            *dashed = value;
-        }
-    }
+    // An organization's DxfDashedHiddenLines policy sets the choice: shown, greyed out and noted.
+    let locked = app.policy.locks("view_dxf_dashed");
+    crate::policy::row_below(ui, locked, |ui| {
+        ui.vertical(|ui| {
+            for (value, key, label) in [(false, "omit", "Do not export hidden edges"), (true, "dashed", "Export hidden edges as dashed lines")] {
+                let r = crate::ui_kit::list_picker(ui, key, app.tr_label(label), *dashed == value);
+                crate::scenario::publish_handle(&format!("dialog:dxf:{key}"), r.rect.center());
+                if r.clicked() && !locked {
+                    *dashed = value;
+                }
+            }
+        });
+    });
     crate::ui_kit::text(ui, app.tr("dxf.zero"), crate::ui_kit::Text::Note("zero"));
-    for (value, key, label) in [(false, "zero_target", "dxf.zero_target"), (true, "zero_origin", "dxf.zero_origin")] {
-        let r = crate::ui_kit::list_picker(ui, key, app.tr(label), *zero_origin == value);
-        crate::scenario::publish_handle(&format!("dialog:dxf:{key}"), r.rect.center());
-        if r.clicked() {
-            *zero_origin = value;
-        }
-    }
+    // DxfOrigin sets the zero point the same way.
+    let zero_locked = app.policy.locks("view_dxf_zero");
+    crate::policy::row_below(ui, zero_locked, |ui| {
+        ui.vertical(|ui| {
+            for (value, key, label) in [(false, "zero_target", "dxf.zero_target"), (true, "zero_origin", "dxf.zero_origin")] {
+                let r = crate::ui_kit::list_picker(ui, key, app.tr(label), *zero_origin == value);
+                crate::scenario::publish_handle(&format!("dialog:dxf:{key}"), r.rect.center());
+                if r.clicked() && !zero_locked {
+                    *zero_origin = value;
+                }
+            }
+        });
+    });
     crate::ui_kit::text(ui, app.tr("dxf.zero_help"), crate::ui_kit::Text::Note("zero help"));
-    form_row(ui, "dxf.tolerance", |ui| {
-        let r = crate::ui_kit::bounded_length_field(ui, tolerance, &app.session.doc.units, 8, 0.0001..=1.0, 0.001);
-        crate::scenario::publish_handle("dialog:dxf:tolerance", r.rect.center());
+    // DxfTolerance sets the tolerance the same way.
+    crate::policy::row_below(ui, app.policy.locks("view_dxf_tolerance"), |ui| {
+        form_row(ui, "dxf.tolerance", |ui| {
+            let r = crate::ui_kit::bounded_length_field(ui, tolerance, &app.session.doc.units, 8, 0.0001..=1.0, 0.001);
+            crate::scenario::publish_handle("dialog:dxf:tolerance", r.rect.center());
+        });
     });
     crate::ui_kit::text(
         ui,
@@ -44,6 +59,8 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, dashed: &mut bool, tolerance: &mu
 }
 
 pub fn run(app: &mut SolveApp, dashed: bool, tolerance: f64, zero_origin: bool) -> Result<(), String> {
+    let tolerance_locked = app.policy.locks("view_dxf_tolerance");
+    let tolerance = if tolerance_locked { app.preferences.view_dxf_tolerance } else { tolerance };
     if !crate::viewport::section_planes(app).is_empty() {
         return Err(app.tr_label("Turn off section analysis before exporting the view.").into());
     }
@@ -53,9 +70,16 @@ pub fn run(app: &mut SolveApp, dashed: bool, tolerance: f64, zero_origin: bool) 
     if !tolerance.is_finite() || !(0.0001..=1.0).contains(&tolerance) {
         return Err(app.tr_label("dxf.invalid_tolerance").into());
     }
-    app.preferences.view_dxf_dashed = dashed;
-    app.preferences.view_dxf_tolerance = tolerance;
-    app.preferences.view_dxf_zero = if zero_origin { "origin" } else { "target" }.into();
+    // A locked choice stays the organization's; the person's own one is kept by the policy.
+    if !app.policy.locks("view_dxf_dashed") {
+        app.preferences.view_dxf_dashed = dashed;
+    }
+    if !tolerance_locked {
+        app.preferences.view_dxf_tolerance = tolerance;
+    }
+    if !app.policy.locks("view_dxf_zero") {
+        app.preferences.view_dxf_zero = if zero_origin { "origin" } else { "target" }.into();
+    }
     let camera = app.cam;
     app.pick_save(&format!("{}-view.dxf", app.session.doc.name), &["dxf"], move |app, path| {
         if let Some(path) = path {

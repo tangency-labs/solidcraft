@@ -374,13 +374,26 @@ rounding of that calculation is bounded too (the comment on `cone_box_gap`). The
 within the other face's edges, not only on its plane: its vertices and three points along each of its
 edges must classify to the other face (`points_in_face`). That part is sampled, not proved. Any
 other pair of kinds, and a face that leaves the plane or the other face anywhere, is only possibly a
-copy and goes to the ray. Where the operation keeps no copy of coincident faces (a
-difference of faces facing the same way), the patch goes. Where it keeps one, the copy is the other
-face's when that face is kept, so the patch goes, and the patch's when the other face is deleted.
-This replaces a ray cast from a point within the tolerance of the other boundary, whose answer there
-can go either way. The patches are visited again until a pass classifies none, so a patch whose
-other face is classified by a later patch follows it; one whose other face is still unclassified
-then is left to the ray. Two faces of one kind are left as before.
+copy and goes to the ray. Where the operation keeps one copy of coincident faces, the copy is the
+other face's when that face is kept, so the patch goes, and the patch's when the other face is
+deleted. Where it keeps none (a difference of faces facing the same way, a union or an
+intersection of faces facing opposite ways), a deleted other face takes the patch with it. A kept
+other face still covers the patch, since the imprint drew no edge round the patch in it, so the
+space between the two, thinner than the tolerance, lies against a face of the result, and the
+patch stays to close it: a thin wedge less a part whose round grazes the wedge's plane keeps that
+plane, which lies outside the part, and the sliver of the round on it closes what is left of the
+wedge beside it. Which side of the other face the patch lies on is below the tolerance and is not
+read. A patch of the other operand that stays is copied into
+the primary like the other operand's kept faces, but not in the region its edges' radial sectors
+find: lying on the other face within the tolerance, it can be put on either side of that face, and
+on the wrong side it splits no region with the faces it bounds the result with, so the result has
+no solid region. It is made in the region on the side of the other face where the operation keeps
+the other operand's faces (`kept_patch_region`): the solid side for a difference or an
+intersection, the void side for a union. This replaces a ray cast from a point within the tolerance
+of the other boundary, whose answer there can go either way. The patches are visited again until a
+pass classifies none, so a patch whose other face is classified by a later patch follows it; one
+whose other face is still unclassified then is left to the ray. Two faces of one kind are left as
+before.
 
 This is the problem Segal's tolerant modeller and Jackson's local tolerances address [9, 10]: two
 entities within tolerance are one, and a decision across that band has to be made once and kept by
@@ -890,7 +903,7 @@ What the port does today:
   them 3e-5 to 2.5e-4 from the cusp, within the tolerance of both of the tool's edges, and
   a vertex there split one edge while the intersection ran along the other (the imprint
   failed with no vertex at an edge definition's end, or the merge with a vertex that is no
-  end of its edge; #15049). Three sites now read each such contact as one touch:
+  end of its edge; #15049). Five sites now read each such contact as one touch:
   - Two surfaces of revolution about one axis meet in one circle per meeting of their
     generators in a plane through the axis (`intersect_revolved_into`,
     `surface/surf_of_revolution/p3.rs`). Where both are faces' surfaces the generators are
@@ -910,6 +923,28 @@ What the port does today:
   - A point with no curve classified onto a circle edge of one body and a line edge of the
     other in its plane, the line a hair inside the circle, is their touch
     (`touch_of_edges`, `line_touch`, `proto_topology/p3.rs`), as two such circles' is.
+  - Where the cut ends on a face that holds its axis (a floor, the face the cut started
+    from), that plane meets the tool's swept arc in a meridian, the arc turned into the
+    plane, which runs tangentially into the plane's side at the cusp a hair outside it:
+    trimmed to the plane's domain it crossed the side once, `√(2rδ)` from the cusp (2.5e-4
+    mm at r = 30 and δ = 1e-9), and the two pieces met at a vertex of no contact; the result
+    was not a solid. Where both surfaces are faces', the meridian is trimmed without a break
+    at a point where it lies inside the domain on both sides
+    (`Plane::trim_curve_to_plane_domain_joined`, `surface/plane/p2.rs`, from
+    `surface/surf_of_revolution/p1.rs`), as a graze already is: one curve, which the
+    boundary rules above end at the cusp.
+  - A point with no curve classified onto a circle edge and a line edge in its plane that
+    meet at one point by the contact rule, the point beside that meeting within the band
+    where the two edges lie within the tolerance of each other, is that meeting
+    (`meeting_beside`, `proto_topology/p3.rs`). The surface intersection of the block's arc
+    face swept to the start plane and the tool's face swept from its line touches at the
+    cusp, and found that touch 1.5e-4 from it: a vertex there split the tool's line edge and
+    not the block's arc edge, and the merge failed in `make_faceuse`. The meeting is taken
+    where it lies more than the tolerance and at most a thousand times it from the point,
+    and the point and the meeting lie within the tolerance of both edges and so does the
+    whole stretch between them, by enclosure and not by sampling: the line's distance is
+    convex, so its two ends bound it, and the circle's out-of-plane and radial deviations
+    along the stretch are bounded in outward-rounded intervals (`stretch_within_circle`).
 
   Bare surfaces and curves keep upstream's zero contact.
 
