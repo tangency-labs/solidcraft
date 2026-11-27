@@ -13,6 +13,8 @@
 use std::io::{Read, Seek};
 
 mod bitmap;
+#[cfg(windows)]
+mod com;
 
 pub use bitmap::{Bitmap, fit, thumbnail_from_png};
 
@@ -26,7 +28,8 @@ pub const CLSID_U128: u128 = 0x34025B8F_2354_4B5F_8967_89BA0B71FDCF;
 /// picture when the picture's key matches the design (`solidcraft_design_preview::keyed_picture`),
 /// decoded and fitted. `None` for anything else.
 pub fn thumbnail<R: Read + Seek>(source: R, cx: u32) -> Option<Bitmap> {
-    let _ = (source, cx); None
+    let picture = solidcraft_design_preview::keyed_picture(source)?;
+    thumbnail_from_png(&picture.png, picture.width, picture.height, cx)
 }
 
 #[cfg(test)]
