@@ -402,7 +402,7 @@ pub(crate) fn choose(app: &mut SolveApp, kind: catalog::Kind, id: &str) {
 
 /// [`choose`] with the highest sequence a lookup has stored (`stored`): a list below it is one a
 /// newer index may have delisted or revoked from, so it is read again instead.
-fn choose_after(app: &mut SolveApp, kind: catalog::Kind, id: &str, stored: Option<u64>) {
+pub(crate) fn choose_after(app: &mut SolveApp, kind: catalog::Kind, id: &str, stored: Option<u64>) {
     if app.workshop.job.is_some() || app.workshop.ask.is_some() {
         app.set_status(tr("workshop.busy").to_string(), true);
         return;
