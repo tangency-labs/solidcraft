@@ -1721,7 +1721,6 @@ impl Model {
 }
 
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 fn cache_adopted_result(
     cache: &mut EvalCache,
     eval_doc: &Document,
