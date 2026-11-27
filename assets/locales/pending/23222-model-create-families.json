@@ -1,0 +1,37 @@
+{
+  "en": {
+    "Primitives": "Primitives",
+    "Along Path": "Along Path",
+    "At Face": "At Face"
+  },
+  "de": {
+    "Primitives": "Grundkörper",
+    "Along Path": "Entlang Pfad",
+    "At Face": "An Fläche"
+  },
+  "ar": {
+    "Primitives": "الأشكال الأولية",
+    "Along Path": "على طول المسار",
+    "At Face": "عند الوجه"
+  },
+  "he": {
+    "Primitives": "צורות בסיסיות",
+    "Along Path": "לאורך מסלול",
+    "At Face": "על פאה"
+  },
+  "ja": {
+    "Primitives": "基本形状",
+    "Along Path": "パスに沿って",
+    "At Face": "面上"
+  },
+  "vi": {
+    "Primitives": "Khối nguyên thủy",
+    "Along Path": "Dọc theo đường dẫn",
+    "At Face": "Trên mặt"
+  },
+  "zh": {
+    "Primitives": "基本体",
+    "Along Path": "沿路径",
+    "At Face": "在面上"
+  }
+}
