@@ -951,3 +951,16 @@ pub fn active_backend() -> &'static str {
         "solidcore"
     }
 }
+
+/// The backend whose persistent geometry caches can be trusted. An experimental
+/// process that explicitly changes kernels cannot safely label older geometry.
+pub fn persistent_cache_backend() -> Option<&'static str> {
+    #[cfg(feature = "backend-occt")]
+    {
+        foreign::cache_kernel().map(|k| k.name())
+    }
+    #[cfg(not(feature = "backend-occt"))]
+    {
+        Some("solidcore")
+    }
+}

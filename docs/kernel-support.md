@@ -79,4 +79,7 @@ adapter carries back: history, construction sources and apart solids.
 
 The model cache records the selected kernel. The import cache also separates entries from the
 opt-in `backend-occt` backend from those computed by solidcore. Switching kernels between runs
-causes a cache miss rather than reusing another kernel's geometry.
+causes a cache miss rather than reusing another kernel's geometry. An experimental process
+that explicitly calls `set_kernel` no longer reads or writes persistent geometry caches.
+Older evaluated models may still be alive, so those caches cannot safely be labelled with
+the new selection. Normal app runs select their backend once and retain caching.

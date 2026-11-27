@@ -826,10 +826,12 @@ fn a_dome_inset_by_its_radius_or_more_stays_solid() {
 /// and at both vertices their offsets take the vertex's image as an end. Their extended UV
 /// curves, each wound round the circle many times, coincide: their thousands of crossings
 /// within the tolerance had some five thousand stretches certified for moving to a curve end
-/// (over 90 s). The base's shell is still refused, so the first refusal stands, unchanged.
+/// (over 90 s). Since #22785 the cap's rim on the top's plane is taken out, so the base is a
+/// plain cylinder that shells, and the boss (narrower than twice the wall) is joined back on
+/// solid: π·600²·2400 + π·70²·140 − π·528²·2256.
 #[test]
 #[allow(clippy::disallowed_methods)] // the seams' turn places the test body, not ops geometry
-fn a_thin_boss_touching_its_faces_rim_is_refused_without_winding_its_footprint() {
+fn a_thin_boss_touching_its_faces_rim_stays_solid_without_winding_its_footprint() {
     all_fixes();
     // each circle's seam turned 0.6131 rad about its axis, as SolidCraft's cylinders have it
     let (s, c) = 0.6131_f64.sin_cos();
@@ -849,22 +851,15 @@ fn a_thin_boss_touching_its_faces_rim_is_refused_without_winding_its_footprint()
         .unwrap()
         .unwrap();
     let o = order(&b);
-    let before = volume(&b);
     let (r, certified) = session::counted(
         solidcore::kernel::WorkCounters::contact_stretch_certifications,
         || shell(&b, &o, &[], -72.0),
     );
-    match r {
-        Err(Error::OffsetRefused {
-            why: crate::OffsetRefusal::Collapses { distance, radius },
-            ..
-        }) => {
-            assert!((distance.abs() - 72.0).abs() < 1e-9, "{distance}");
-            assert!((radius - 70.0).abs() < 1e-9, "{radius}");
-        }
-        other => panic!("{other:?}"),
-    }
-    assert!(rel(volume(&b), before) < 1e-12);
+    r.unwrap();
+    let want = PI * 360_000.0 * 2400.0 + PI * 4900.0 * 140.0 - PI * 528.0_f64.powi(2) * 2256.0;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
     // the shells' own intersections certify under a hundred stretches; the footprint's wound
     // extensions certified thousands
     assert!(certified < 1_000, "{certified} stretches certified");

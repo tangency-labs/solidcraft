@@ -44,6 +44,8 @@ impl Kernel {
 const UNREAD: u8 = 0;
 const SOLIDCORE: u8 = 1;
 const OCCT: u8 = 2;
+// An explicit override can leave geometry from an earlier choice alive in the process.
+const EXPLICIT_CHOICE: u8 = 4;
 
 static CHOICE: AtomicU8 = AtomicU8::new(UNREAD);
 
@@ -64,7 +66,7 @@ pub fn occt_version() -> &'static str {
 /// The kernel chosen: [`set_kernel`]'s, else `SOLIDCRAFT_KERNEL`'s, else Open CASCADE (the build
 /// asked for it). An unknown name is logged and ignored.
 pub fn kernel() -> Kernel {
-    match CHOICE.load(Ordering::Relaxed) {
+    match CHOICE.load(Ordering::Relaxed) & !EXPLICIT_CHOICE {
         SOLIDCORE => Kernel::Solidcore,
         OCCT => Kernel::Occt,
         _ => {
@@ -83,9 +85,20 @@ pub fn kernel() -> Kernel {
     }
 }
 
-/// Chooses the kernel from now on, for every thread.
+/// Chooses the kernel from now on, for every thread. Persistent geometry caches are
+/// no longer trusted in this process: previously evaluated models may still be alive.
 pub fn set_kernel(k: Kernel) {
-    CHOICE.store(code(k), Ordering::Relaxed);
+    CHOICE.store(code(k) | EXPLICIT_CHOICE, Ordering::Relaxed);
+}
+
+/// The fixed process backend, if no experimental runtime override has been used.
+pub(crate) fn cache_kernel() -> Option<Kernel> {
+    let _ = kernel();
+    match CHOICE.load(Ordering::Relaxed) {
+        SOLIDCORE => Some(Kernel::Solidcore),
+        OCCT => Some(Kernel::Occt),
+        _ => None,
+    }
 }
 
 const fn code(k: Kernel) -> u8 {
@@ -158,8 +171,10 @@ mod tests {
     fn the_choice_can_change_while_the_program_runs() {
         set_kernel(Kernel::Solidcore);
         assert_eq!(kernel(), Kernel::Solidcore);
+        assert!(cache_kernel().is_none());
         set_kernel(Kernel::Occt);
         assert_eq!(kernel(), Kernel::Occt);
+        assert!(cache_kernel().is_none());
     }
 
     #[test]

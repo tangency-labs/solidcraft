@@ -121,6 +121,9 @@ pub(super) fn encode_model(model: &SavedModel, document: &[u8], space: usize) ->
 /// budget keeps fewer states, then its final state only ([`SavedModel::thinned`], #3220); an
 /// error when not even that fits.
 pub(super) fn encode_model_with_budget(model: &SavedModel, document: &[u8], file_space: usize, expanded_space: usize) -> Result<(Vec<u8>, Vec<u8>)> {
+    if solidcraft_kernel::persistent_cache_backend().is_none() {
+        return Err(invalid("model cache disabled after an explicit kernel override"));
+    }
     let encoded = Encoded::of(model, document)?;
     let total = encoded.slices.iter().fold(0usize, |n, s| n.saturating_add(s.len()));
     let max_payload = max_design();
@@ -588,6 +591,7 @@ impl Encoded {
             slices.push(json!([data.len(), bytes.len()]));
             data.extend_from_slice(bytes);
         }
+        let kernel = solidcraft_kernel::persistent_cache_backend().ok_or_else(|| invalid("model cache disabled after an explicit kernel override"))?;
         let manifest = serde_json::to_vec(&Manifest {
             app: env!("CARGO_PKG_VERSION"),
             bodies: table,
@@ -595,7 +599,7 @@ impl Encoded {
             document: digest(document),
             evaluation: evaluation(),
             format: FORMAT,
-            kernel: solidcraft_kernel::active_backend(),
+            kernel,
             model: records,
             payload: digest(&data),
             producer: PRODUCER,
@@ -641,11 +645,12 @@ pub fn read_design_geometry(bytes: &[u8]) -> Option<std::sync::Arc<ModelState>> 
 /// The application version and commit that wrote it are not asked: another version of the same
 /// evaluation source computed the same model.
 fn current(manifest: &Value, document: &[u8]) -> bool {
+    let Some(kernel) = solidcraft_kernel::persistent_cache_backend() else { return false };
     let is = |key: &str, value: &str| manifest.get(key).and_then(Value::as_str) == Some(value);
     is("format", FORMAT)
         && is("producer", PRODUCER)
         && is("evaluation", &evaluation())
-        && is("kernel", solidcraft_kernel::active_backend())
+        && is("kernel", kernel)
         && is("document", &digest(document))
         && source_trusted(env!("SOLIDCRAFT_EVALUATION_SOURCE"), cfg!(any(test, feature = "trust-unknown-source")))
 }
@@ -740,6 +745,9 @@ fn read_geometry<R: Read + Seek>(reader: &mut PackageReader<R>, document: &[u8],
         bodies.push(b);
     }
     let records = manifest.get_mut("model").map(Value::take).ok_or_else(|| invalid("cached model"))?;
+    if solidcraft_kernel::persistent_cache_backend().is_none() {
+        return Err(invalid("model cache disabled after an explicit kernel override"));
+    }
     Ok(SavedModel { records, bodies })
 }
 
