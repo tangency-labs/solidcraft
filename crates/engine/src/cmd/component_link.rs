@@ -3327,7 +3327,14 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                     .map(|f| digest(f.link_faces.as_slice()));
                 if let Some((known, properties, metadata)) = kept_faces.and_then(|faces| {
                     let meshes = link_meshes(s, comp, link.feature);
-                    unchanged_read(&file, selected_configuration(&link), digest(bytes.as_slice()), import_source_digest(&old.0, old.1.as_deref()), faces, meshes)
+                    unchanged_read(
+                        &file,
+                        selected_configuration(&link),
+                        digest(bytes.as_slice()),
+                        import_source_digest(&old.0, old.1.as_deref()),
+                        faces,
+                        meshes,
+                    )
                 }) {
                     if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
                         kept.file_sha256 = Some(read);

@@ -8999,8 +8999,8 @@ fn shared_evaluation_falls_back_on_cross_component_parametric_dependencies() {
 /// (each component: Box + Cut + Fillet + Chamfer) driven across 20 motion steps.
 #[test]
 #[ignore]
-fn bench_wt111_placement_reuse_parametric() {
-    let mut doc = Document::new("wt111 12-component parametric assembly");
+fn bench_placement_reuse_parametric() {
+    let mut doc = Document::new("12-component parametric assembly");
     let mut comps = Vec::with_capacity(12);
     for i in 0..12 {
         let comp = doc.add_component(Some(&format!("Part{i}")), 0).unwrap();
@@ -9117,9 +9117,9 @@ fn bench_wt111_placement_reuse_parametric() {
     let shared_ms = t_shared.elapsed().as_secs_f64() * 1000.0;
 
     assert!(Arc::ptr_eq(&proven, &shared_model.state()));
-    assert_world_bit_exact(steps.last().unwrap(), &shared_model, "bench_wt111 final step");
+    assert_world_bit_exact(steps.last().unwrap(), &shared_model, "bench final step");
     eprintln!(
-        "bench_wt111_placement_reuse_parametric (12 parametric components x 20 steps): cold={cold_ms:.2} ms, warm_eval={warm_ms:.2} ms, evaluate_shared={shared_ms:.3} ms (vs cold: {:.1}x, vs warm: {:.1}x)",
+        "bench_placement_reuse_parametric (12 parametric components x 20 steps): cold={cold_ms:.2} ms, warm_eval={warm_ms:.2} ms, evaluate_shared={shared_ms:.3} ms (vs cold: {:.1}x, vs warm: {:.1}x)",
         cold_ms / shared_ms.max(1e-6),
         warm_ms / shared_ms.max(1e-6),
     );
