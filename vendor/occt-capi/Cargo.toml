@@ -1,0 +1,12 @@
+[package]
+name = "occt-capi"
+description = "Open CASCADE (OCCT) behind a small C ABI module, linked dynamically, for SolidCraft's opt-in OCCT kernel adapter (solidcraft-kernel's backend-occt feature)"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+publish = false
+links = "occt_capi"
+build = "build.rs"
+
+[lib]
+path = "src/lib.rs"
