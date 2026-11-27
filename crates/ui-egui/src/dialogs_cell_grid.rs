@@ -92,6 +92,8 @@ pub struct CellGrid {
     pub cell_angle: String,
     /// Mirror every other sketched cell.
     pub flip: bool,
+    /// A wall is picked: the grid takes no profiles, so their row is hidden ([`follow_wall`]).
+    pub walled: bool,
 }
 
 impl Default for CellGrid {
@@ -116,6 +118,7 @@ impl Default for CellGrid {
             stagger: "0".into(),
             cell_angle: "0 deg".into(),
             flip: false,
+            walled: false,
         }
     }
 }
@@ -180,9 +183,19 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     (id == "solid.cell_grid").then(|| (crate::length_input::defaults(&app.session.doc, Kind::CellGrid(CellGrid::default())), inputs()))
 }
 
-/// The pick rows to show, in order: the cell's profile only for a sketched cell, the wall always.
+/// The pick rows to show, in order: the cell's profile only for a sketched cell, the profiles
+/// only without a wall, the wall always.
 pub fn shown_picks(c: &CellGrid) -> Vec<usize> {
-    (0..=WALL_INPUT).filter(|&i| i != CELL_INPUT || c.sketched()).collect()
+    (0..=WALL_INPUT).filter(|&i| (i != CELL_INPUT || c.sketched()) && (i != PROFILES_INPUT || !c.walled)).collect()
+}
+
+/// Follow the wall pick: with a wall the profiles row is hidden, and a hidden row never waits for
+/// the next click; the wall's row does (an edited wall grid opened on the empty Profiles row).
+pub(crate) fn follow_wall(c: &mut CellGrid, inputs: &[SelInput], active: &mut usize) {
+    c.walled = !crate::selection::items(inputs, WALL_INPUT).is_empty();
+    if c.walled && !shown_picks(c).contains(active) {
+        *active = WALL_INPUT;
+    }
 }
 
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, inputs: &[SelInput]) -> bool {
@@ -490,6 +503,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
         stagger: stagger.as_ref().map_or(defaults.stagger, |e| shown_expr(e, ValueKind::Unitless)),
         cell_angle: cell_angle.as_ref().map_or(defaults.cell_angle, |e| shown_expr(e, ValueKind::Angle)),
         flip: *flip,
+        walled: face.is_some(),
     };
     let mut inputs = inputs();
     let state = crate::open_meshing::session_world(&app.session);
