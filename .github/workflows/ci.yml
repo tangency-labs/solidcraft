@@ -1990,9 +1990,8 @@ jobs:
         if: matrix.check == 'kernel rig and goldens'
         env:
           KERNEL_CASES_REPORT: ${{ github.workspace }}/solidcore/reports/kernel-rig/table.md
-          # each case in a process of its own, one per vCPU of the 16-vCPU, 64 GB runner, with a
-          # CPU-time hang limit (#14277)
-          KERNEL_CASES_JOBS: "16"
+          # Match the runner's CPU count so the per-case hang limit is meaningful on hosted CI.
+          KERNEL_CASES_JOBS: ${{ vars.CI_RUNNER == 'ubuntu-24.04' && '4' || '16' }}
         run: |
           mkdir -p reports/kernel-rig
           cd crates/solidcore-ops
