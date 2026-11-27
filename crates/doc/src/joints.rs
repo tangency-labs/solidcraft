@@ -76,6 +76,14 @@ impl AxisRef {
     }
 }
 
+/// One face of a between-faces pair: its persistent name and a pick in component coordinates
+/// to distinguish copies of the same face.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FacePick {
+    pub pick: Vec3,
+    pub face: String,
+}
+
 /// Where a joint origin sits on a component's geometry (component coordinates).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -149,6 +157,10 @@ pub enum Snap {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         x: Option<XRef>,
     },
+    /// The plane midway between two planar faces of the origin's own component (a slot's walls):
+    /// z along the normal of a deterministically chosen wall, independent of pick order. The origin is the midpoint of the saved picks projected onto the current midplane.
+    /// Both faces are found again by name, so the plane follows them as they move or resize.
+    BetweenFaces { a: FacePick, b: FacePick },
     /// An axis (the side's own origin axis "X"|"Y"|"Z", a construction axis, a placement's origin
     /// datum, or model edge/axis): z along the axis, x square to z (or `x` if given). Origin at
     /// `pick` projected onto the axis line, or the axis origin when `pick` is None.
@@ -423,6 +435,9 @@ impl Snap {
         if let Snap::Edge { edge, face, corner, .. } = self {
             out.extend(edge.iter().chain(face.iter()).chain(corner.iter()));
         }
+        if let Snap::BetweenFaces { a, b } = self {
+            out.extend([&a.face, &b.face]);
+        }
         if let Snap::Plane { x, .. } | Snap::Axis { x, .. } | Snap::SketchPoint { x, .. } = self {
             out.extend(x.as_ref().into_iter().flat_map(XRef::geometry_names));
         }
@@ -443,6 +458,7 @@ impl Snap {
                 out.extend(x.as_mut().into_iter().flat_map(XRef::geometry_names_mut));
             }
             Snap::Edge { edge, face, corner, .. } => out.extend(edge.iter_mut().chain(face.iter_mut()).chain(corner.iter_mut())),
+            Snap::BetweenFaces { a, b } => out.extend([&mut a.face, &mut b.face]),
             Snap::Plane { x, .. } | Snap::Axis { x, .. } | Snap::SketchPoint { x, .. } => {
                 out.extend(x.as_mut().into_iter().flat_map(XRef::geometry_names_mut));
             }
@@ -507,6 +523,7 @@ impl Snap {
             Snap::Point { point, z, x } => point.is_finite() && z.is_none_or(|z| z.is_finite()) && x.is_none_or(|x| x.is_finite()),
             Snap::Edge { pick, axis, .. } => pick.is_finite() && axis.is_none_or(|a| a.dir().is_finite()),
             Snap::Plane { pick, x, .. } | Snap::Axis { pick, x, .. } => pick.is_none_or(|p| p.is_finite()) && x_ok(x),
+            Snap::BetweenFaces { a, b } => a.pick.is_finite() && b.pick.is_finite(),
             Snap::SketchPoint { sketch, point, x } => *sketch != 0 && !point.is_empty() && point.len() <= 512 && x_ok(x),
         }
     }
@@ -661,10 +678,14 @@ pub enum Constraint {
     Tangent,
     /// A point on an axis (point on line).
     PointOnAxis,
+    /// A part midway between two parallel faces (planar): one side a between-faces reference,
+    /// the other a plane — its datum, its own face pair, or a plain face or plane.
+    Center,
 }
 
 impl Constraint {
-    /// Every rule, the likeliest first for a pair of references (see [`Constraint::fitting`]).
+    /// Rules that can be offered from reference shapes alone, likeliest first. Center is picked
+    /// separately: a plane shape alone does not say whether it came from a pair of faces.
     pub const ALL: [Constraint; 10] = [
         Constraint::Mate,
         Constraint::Flush,
@@ -691,6 +712,7 @@ impl Constraint {
             Constraint::Angle => "angle",
             Constraint::Tangent => "tangent",
             Constraint::PointOnAxis => "point_on_axis",
+            Constraint::Center => "center",
         }
     }
 
@@ -720,6 +742,7 @@ impl Constraint {
         };
         match (self, a, b) {
             (Constraint::Mate, Plane, Plane) => fixed(JointKind::Planar, false),
+            (Constraint::Center, Plane, Plane) => facing(JointKind::Planar),
             (Constraint::Flush, Plane, Plane) => fixed(JointKind::Planar, true),
             (Constraint::Distance, Plane, Plane) => facing(JointKind::Planar),
             (Constraint::Distance, ..) => onto(JointKind::PointOnPlane, &|s| s == Plane, &|s| s == Round || spot(s)),
@@ -745,6 +768,7 @@ impl Constraint {
         match key.as_str() {
             "coincident" => Some(Constraint::Mate),
             "axis" => Some(Constraint::Concentric),
+            "center" | "centered" => Some(Constraint::Center),
             _ => Constraint::ALL.into_iter().find(|c| c.name().replace('_', "") == key),
         }
     }
@@ -770,7 +794,7 @@ impl RefShape {
     /// The shape of a joint origin's snap.
     pub fn of(snap: &Snap) -> RefShape {
         match snap {
-            Snap::FaceCenter { .. } | Snap::Frame { .. } | Snap::Plane { .. } => RefShape::Plane,
+            Snap::FaceCenter { .. } | Snap::Frame { .. } | Snap::Plane { .. } | Snap::BetweenFaces { .. } => RefShape::Plane,
             Snap::Axis { .. } => RefShape::Axis,
             Snap::CircleCenter { .. } => RefShape::Round,
             Snap::Edge { .. } => RefShape::Edge,
@@ -1569,9 +1593,9 @@ pub fn resolve_origin(doc: &Document, st: &ModelState, o: &JointOrigin) -> Resul
         let on_part = resolve_origin(doc, st, &JointOrigin::new(o.part(), o.snap.clone()))?;
         return Ok(mat_mul(&inside_transform(doc, o)?, &on_part));
     }
-    // A face, edge or round face is found by searching the bodies' triangles, and its frame does
-    // not depend on the joint's values: kept for as long as the component's bodies are the same.
-    if matches!(o.snap, Snap::FaceCenter { .. } | Snap::Edge { .. } | Snap::CircleCenter { .. }) {
+    // Geometry snaps search the component's bodies, but their frames do not depend on the
+    // joint's values: kept for as long as the component's bodies are the same.
+    if matches!(o.snap, Snap::FaceCenter { .. } | Snap::Edge { .. } | Snap::CircleCenter { .. } | Snap::BetweenFaces { .. }) {
         let kept = origin_key(doc, st, o);
         if let Some((key, bodies)) = &kept
             && let Some(found) = st.origin_frames.get(key, bodies)
@@ -1686,6 +1710,32 @@ fn resolve_snap(doc: &Document, st: &ModelState, o: &JointOrigin) -> Result<Mat>
                 None => Some(pl.x),
             };
             frame_with_x_policy(origin, n, x_axis, o.snap.strict_alignment()).ok_or_else(bad)
+        }
+        Snap::BetweenFaces { a, b } => {
+            let comp = component_of(doc, o.occurrence)?;
+            // Use a stable wall as the normal source, including for faces parallel only within
+            // tolerance. Reversing the pick order must leave the whole joint frame unchanged.
+            let order = a
+                .face
+                .cmp(&b.face)
+                .then_with(|| a.pick.x.total_cmp(&b.pick.x))
+                .then_with(|| a.pick.y.total_cmp(&b.pick.y))
+                .then_with(|| a.pick.z.total_cmp(&b.pick.z));
+            let (a, b) = if order.is_gt() { (b, a) } else { (a, b) };
+            let fa = face::between_face(doc, st, comp, a)?;
+            let fb = face::between_face(doc, st, comp, b)?;
+            if std::ptr::eq(fa.body, fb.body) && fa.face == fb.face {
+                return Err(DocError::Invalid("center takes two different faces".into()));
+            }
+            let (pa, na) = fa.wall_plane(&a.face)?;
+            let (pb, z) = fb.wall_plane(&b.face)?;
+            let at = Vec3::new(a.pick.x.midpoint(b.pick.x), a.pick.y.midpoint(b.pick.y), a.pick.z.midpoint(b.pick.z));
+            let mid = crate::construct::midway((pa, na), (pb, z), at).ok_or_else(|| {
+                DocError::Invalid(
+                    "center takes two parallel faces; for faces that meet at an angle, construct.plane.midplane makes the bisector".into(),
+                )
+            })?;
+            frame(mid, z, None).ok_or_else(bad)
         }
         Snap::Axis { axis, pick, x } => {
             let comp = component_of(doc, o.occurrence)?;
@@ -3901,7 +3951,7 @@ pub use reach::ball_values_from_rotation_vector;
 
 #[path = "joints_face.rs"]
 mod face;
-pub use face::{end_faces, face_is_round, face_name_at, named_face_spot, pin_end, round_end_at};
+pub use face::{between_face_pick, end_faces, face_is_round, face_name_at, named_face_spot, pin_end, round_end_at};
 #[path = "joints_relations.rs"]
 mod relations;
 pub use reach::{FrameCarry, REACH_TOL, Reach, Reached, reach, reach_frame};

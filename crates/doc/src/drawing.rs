@@ -344,6 +344,12 @@ pub struct SheetComponent {
     pub component: u64,
 }
 
+impl SheetComponent {
+    /// A template parts list waiting for the design chosen when a drawing is created.
+    /// Only a drawing with no sources can carry this value on a parts list.
+    pub const UNBOUND: Self = Self { source: 0, component: 0 };
+}
+
 /// What a sheet is left out of.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]

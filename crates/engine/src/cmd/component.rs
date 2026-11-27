@@ -177,6 +177,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&properties::BODY_COLLISION_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::component::BodyCollisionResult>)
         .params("body: its name, or component: id or name for all its bodies; shape: auto|mesh|box|cylinder|sphere|none: what it looks like to a simulator (URDF export; box, cylinder and sphere are set in the body's bounding box)"),
+    CommandSpec::new("body.edge_lines", "Edge Lines", crate::checked!("body.edge_lines", properties::body_edge_lines))
+        .icon("eye")
+        .contract(&properties::BODY_EDGE_LINES_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::component::BodyEdgeLinesResult>)
+        .params("body: its name, or bodies: several names; show?: bool (default true): false draws the bodies without their edge lines in every visual style (an overlay such as a thin label), true draws them as the style says; saved in the design"),
     CommandSpec::new("component.physical_override", "Mass Override", crate::checked!("component.physical_override", properties::physical_override))
         .icon("measure")
         .contract(&properties::PHYSICAL_OVERRIDE_CONTRACT)
@@ -849,16 +854,21 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     for (body, feat, _) in &body_owners {
         if removed.features.contains(feat) {
             d.materials.remove(body);
+            d.appearances.bodies.remove(body);
+            d.appearances.faces.retain(|face| face.body != *body);
         }
     }
     for (feature, made, skipped) in imported {
-        // A body an outside Import keeps building only drops its material when it is one of the
-        // skipped (deleted) parts; a surviving feature's body keeps what it was assigned.
+        // A body an outside Import keeps building only drops its material and appearances when it
+        // is one of the skipped (deleted) parts; a surviving feature's body keeps what it was
+        // assigned.
         if let Some(f) = d.feature(feature) {
             let slots = f.body_name_slots(made.len());
             for (slot, name) in slots.iter().zip(&made) {
                 if skipped.contains(&(*slot as u64)) {
                     d.materials.remove(name);
+                    d.appearances.bodies.remove(name);
+                    d.appearances.faces.retain(|face| face.body != *name);
                 }
             }
         }

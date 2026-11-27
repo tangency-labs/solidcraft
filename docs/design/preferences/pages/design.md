@@ -1,5 +1,12 @@
 # Design
 
+Weld symbol standard is an app-wide default on this page. Key:
+`weld_symbol_standard`; default: `iso2553_2019_a`. The dropdown offers ISO 2553 A,
+ISO 2553 B (`iso2553_2019_b`) and AWS A2.4 (`aws_a2_4_2020`). JIS Z 3021,
+GB/T 324 and GOST appear disabled and marked not yet available. Help explains
+that saved weld graphics retain their convention. Design Defaults restores ISO A;
+the existing Preferences Apply/Cancel transaction and `ui.prefs` use the same key.
+
 Board: `Prefs2_Design` (1920x1196). Heading: Work. Subtitle "What new designs start with." No "In
 profile" tag. Source today: Design page (`prefs/design.rs`).
 

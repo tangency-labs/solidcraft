@@ -30,9 +30,9 @@ enum K {
     Make,
     /// A direction: turned with the command's frame.
     Dir,
-    /// A primitive's axis: a direction as `Dir`, or `[x, y, z]` / `{x, y, z}` with unitless
-    /// expressions (#18822), turned with the command's frame and kept as expressions. X, Y or Z
-    /// by name passes through: it names the component's own axis.
+    /// A primitive's axis: a direction as `Dir` (including X, Y or Z by name, #21098), or
+    /// `[x, y, z]` / `{x, y, z}` with unitless expressions (#18822), turned with the command's frame
+    /// and kept as expressions.
     PrimitiveAxis,
     /// A displacement with length expressions: turned without the frame's translation.
     Delta,
@@ -90,7 +90,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.box" | "solid.sphere" => &[("corner", Make), ("center", Make)],
         "solid.cylinder" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", PrimitiveAxis)],
         // Coil's axis may also be a reference (a named axis, an edge, `{origin, dir}`); `Axis`
-        // turns a bare direction as `PrimitiveAxis` does and passes X, Y or Z by name through.
+        // turns a bare direction (including X, Y or Z by name, #21098) as `PrimitiveAxis` does.
         "solid.coil" => &[("base", Make), ("center", Make), ("axis", Axis)],
         "solid.fillet" | "solid.chamfer" => &[("edges", Picks), ("body", Body)],
         "solid.hole" => &[("position", Pick), ("references", Picks), ("direction", PrimitiveAxis), ("body", Body)],
@@ -310,8 +310,13 @@ impl Mapper<'_> {
     }
 
     fn dir(&mut self, v: &Value) -> Option<Value> {
-        // `[x, y, z]` or `{x, y, z}`, as commands read a direction.
-        let d = crate::params::vec3(v)?;
+        // `[x, y, z]` or `{x, y, z}`, or X|Y|Z, as commands read a direction.
+        let d = crate::params::vec3(v).or_else(|| match v.as_str().map(str::trim).map(str::to_ascii_uppercase).as_deref() {
+            Some("X") => Some(Vec3::X),
+            Some("Y") => Some(Vec3::Y),
+            Some("Z") => Some(Vec3::Z),
+            _ => None,
+        })?;
         let m = self.first.unwrap_or(self.f.active);
         if is_identity(&m) {
             return None;
@@ -644,6 +649,17 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
     if !picks || (!placed(s) && !axis_edit && grouped_thread.is_none() && !copying && !copy_edit) {
         return Ok(None);
     }
+    // Commands whose entries only map into the active component's frame (Make, Dir, PrimitiveAxis)
+    // never read world geometry: an identity active frame needs no mapping at all, and a moved
+    // active frame needs no `world_state()` build.
+    let active_only = !table(id).is_empty()
+        && !matches!(id, "library.apply" | "timeline.redefine" | "sketch.redefine" | "solid.move")
+        && !PICKED_PLANES.contains(&id)
+        && grouped_thread.is_none()
+        && table(id).iter().all(|(_, k)| matches!(k, Make | Dir | PrimitiveAxis));
+    if active_only && is_identity(&s.active_component_frame()) {
+        return Ok(None);
+    }
     // A move of bodies in differently turned frames keeps its world vectors: `solid.move` splits
     // it by frame and maps each part itself (`split_move`).
     if id == "solid.move" && split_move(s, params)?.is_some() {
@@ -662,26 +678,35 @@ pub fn to_local(s: &Session, id: &str, params: &Value) -> crate::Result<Option<V
     } else {
         None
     };
-    let world = match (placed, &thread_input) {
+    let world = match (placed && !active_only, &thread_input) {
         (true, Some(input)) => std::sync::Arc::new(solidcraft_doc::world_state(&s.placed_document(), input)?),
         (true, None) => s.world_state()?,
         (false, Some(input)) => input.clone(),
         (false, None) => s.model.state(),
     };
-    let mut normalized = params.clone();
-    if let Some(faces) = grouped_thread {
+    let has_grouped_thread = grouped_thread.is_some();
+    let normalized;
+    let params = if let Some(faces) = grouped_thread {
+        let mut copy = params.clone();
         let input = thread_input.clone().unwrap_or_else(|| s.model.state());
         let faces = Value::Array(thread_body_picks(s, &input, faces)?);
         if id == "timeline.redefine" {
-            normalized["params"]["faces"] = faces;
+            copy["params"]["faces"] = faces;
         } else {
-            normalized["faces"] = faces;
+            copy["faces"] = faces;
         }
-    }
-    if !placed && !axis_edit && !copying && !copy_edit {
-        return Ok(grouped_thread.map(|_| normalized));
-    }
-    Ok(map_local_with_input(s, &world, id, &normalized, thread_input.as_deref(), None).or_else(|| grouped_thread.map(|_| normalized)))
+        normalized = copy;
+        if !placed && !axis_edit && !copying && !copy_edit {
+            return Ok(Some(normalized));
+        }
+        &normalized
+    } else {
+        if !placed && !axis_edit && !copying && !copy_edit {
+            return Ok(None);
+        }
+        params
+    };
+    Ok(map_local_with_input(s, &world, id, params, thread_input.as_deref(), None).or_else(|| has_grouped_thread.then(|| params.clone())))
 }
 
 /// A `solid.move` of bodies placed in different frames, as one move per frame (#9660). A Move
@@ -996,9 +1021,9 @@ fn map_local_with_input(
                 Make => m.make(v),
                 Dir => m.dir(v),
                 // An axis holding expressions (#18822), as `[x, y, z]` or `{x, y, z}`, turns with
-                // the frame and stays expressions; a component's axis named X, Y or Z stays its
-                // own. One that comes out as numbers is written as numbers, as `Dir` writes them.
-                PrimitiveAxis if v.is_string() => None,
+                // the frame and stays expressions; an axis named X, Y or Z turns like the unit
+                // vector it names (#21098). One that comes out as numbers is written as numbers,
+                // as `Dir` writes them.
                 PrimitiveAxis => m.dir(v).or_else(|| {
                     let frame = m.first.unwrap_or(m.f.active);
                     let d = crate::cmd::axis_expr_form(v).ok()?;
@@ -1021,10 +1046,20 @@ fn map_local_with_input(
                 Axis => {
                     // A name, including a component origin key (`o:…/origin/X`), passes
                     // through untouched so the command keeps its persistent reference.
-                    // Coil takes a bare direction in either vector form. Use its parser to
-                    // distinguish an object direction from a saved axis reference.
-                    if vec3(v).is_some() || (id == "solid.coil" && v.is_object() && crate::cmd::axis_dir_form(v).is_ok()) {
+                    // Coil takes a bare direction in vector, expression, or letter form (#21098).
+                    // Use its parser to distinguish a direction from a saved axis reference.
+                    if vec3(v).is_some() || (id == "solid.coil" && crate::cmd::axis_dir_form(v).is_ok()) {
                         m.dir(v)
+                    } else if id == "solid.coil" && crate::cmd::axis_expr_form(v).is_ok() {
+                        let frame = m.first.unwrap_or(m.f.active);
+                        let d = crate::cmd::axis_expr_form(v).ok()?;
+                        let turned = m.map_expr(&frame, &serde_json::json!(d.map(|e| e.to_string())), map_dir_expr)?;
+                        let nums: Option<Vec<f64>> = turned
+                            .as_array()?
+                            .iter()
+                            .map(|c| c.as_str().and_then(|t| t.trim().parse::<f64>().ok()).filter(|x| x.is_finite()))
+                            .collect();
+                        Some(nums.map_or(turned, |n| serde_json::json!(n)))
                     } else if let Some(axis) = v.as_object() {
                         let mut axis = axis.clone();
                         // An `{origin, dir}` axis without its origin passes through the world's,

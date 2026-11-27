@@ -194,6 +194,7 @@ pub mod timeline_clipboard;
 pub mod ui_prefs;
 pub mod view_navigation;
 pub mod view_pick;
+pub mod weld;
 
 pub use check::Contract;
 pub use check::Issue;
