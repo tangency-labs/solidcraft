@@ -39,13 +39,8 @@ pub fn require_unfolded_screw_section(plane: &Plane, region: &Region2, axis_orig
     if tilt <= 1e-9 && offset <= 1e-6 {
         return Ok(());
     }
-    let points: Vec<[f64; 3]> = region
-        .outer
-        .segs
-        .iter()
-        .flat_map(|s| (0..32).map(move |i| s.point_at(i as f64 / 32.0)))
-        .map(|q| arr(plane.to_world(q)))
-        .collect();
+    let points: Vec<[f64; 3]> =
+        region.outer.segs.iter().flat_map(|s| (0..32).map(move |i| s.point_at(i as f64 / 32.0))).map(|q| arr(plane.to_world(q))).collect();
     let (lo, hi) = solidcore_ops::axial_section::screw_speed_range(arr(plane.x), arr(plane.y), arr(axis_origin), arr(axis), pitch, &points)
         .ok_or_else(|| KernelError::Invalid("the coil's profile plane or axis".into()))?;
     let scale = hi.abs().max(lo.abs()).max(f64::MIN_POSITIVE);

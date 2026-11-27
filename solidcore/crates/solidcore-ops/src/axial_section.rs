@@ -171,7 +171,14 @@ pub fn screw_speed_range(
     points: &[[f64; 3]],
 ) -> Option<(f64, f64)> {
     let points: Vec<Vec3> = points.iter().map(|&p| vec(p)).collect();
-    k::screw_speed_range(vec(plane_x), vec(plane_y), vec(axis_point), vec(axis_dir), pitch, &points)
+    k::screw_speed_range(
+        vec(plane_x),
+        vec(plane_y),
+        vec(axis_point),
+        vec(axis_dir),
+        pitch,
+        &points,
+    )
 }
 
 /// Whether the plane through `plane_point` square to `plane_normal` holds the axis of `on`

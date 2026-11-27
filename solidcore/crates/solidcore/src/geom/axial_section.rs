@@ -338,7 +338,11 @@ pub fn screw_speed_range(
     points: &[Point3],
 ) -> Option<(f64, f64)> {
     let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
-    if !(finite(plane_x) && finite(plane_y) && finite(axis_point) && finite(axis_dir) && pitch.is_finite())
+    if !(finite(plane_x)
+        && finite(plane_y)
+        && finite(axis_point)
+        && finite(axis_dir)
+        && pitch.is_finite())
         || points.is_empty()
     {
         return None;
