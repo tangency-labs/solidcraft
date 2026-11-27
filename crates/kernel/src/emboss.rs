@@ -248,7 +248,10 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
                     .iter()
                     .fold((c, c), |(l, h), p| (Vec2::new(l.x.min(p.x), l.y.min(p.y)), Vec2::new(h.x.max(p.x), h.y.max(p.y))));
                 let corners = [lo2, Vec2::new(hi2.x, lo2.y), hi2, Vec2::new(lo2.x, hi2.y)];
-                if !on_wall((theta, height)) || !corners.into_iter().all(|p| on_wall(laid(p))) {
+                // The prism runs square to the wall at the centroid, so a point `s` round it lands
+                // at the angle asin(s / r), not s / r.
+                let projected = |(t, h): (f64, f64)| (theta + (t - theta).clamp(-1.0, 1.0).asin(), h);
+                if !on_wall((theta, height)) || !corners.into_iter().all(|p| on_wall(projected(laid(p)))) {
                     return Err(refuse(NOT_FITTING));
                 }
                 let radial = radial0 * theta.cos() + tangent0 * theta.sin();
@@ -257,10 +260,10 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
                 let (x, y) = if along_axis { (a * kx.signum(), tangent) } else { (tangent, a * ky.signum()) };
                 // The region keeps its sketch coordinates: the frame's origin sits so its centroid lands on the wall.
                 let Some(local) = Plane::new(at_c - x * c.x - y * c.y, x, y) else { continue };
-                // Through the ring under the whole region, where the wall falls `sag` away from the
+                // Through the ring under the whole region, where its inside falls `sag` away from the
                 // region's tangent plane at its widest, short of the ring's far side.
                 let w = if along_axis { (c.y - lo2.y).max(hi2.y - c.y) } else { (c.x - lo2.x).max(hi2.x - c.x) };
-                let sag = r - (r * r - w * w).max(0.0).sqrt();
+                let sag = r - (r_in * r_in - w * w).max(0.0).sqrt();
                 let far = (r + (r_in * r_in - w * w).max(0.0).sqrt() - overlap).max(r);
                 let pad = ((d + overlap) * 2.5 + 2.0 + sag).min(far);
                 prisms.extend(crate::extrude(&local, std::slice::from_ref(reg), -pad, pad)?);
@@ -2313,6 +2316,12 @@ mod tests {
             Region2 { outer: Loop2::polygon(&[Vec2::new(20., -3.), Vec2::new(26., -3.), Vec2::new(26., 3.), Vec2::new(20., 3.)]), holes: vec![] };
         let e = emboss_project_face(&trough, inner, at, &sketch, &[past], -1.).unwrap_err();
         assert!(e.to_string().contains("not fitting the selected target face"), "{e}");
+        // Laid from 1 to 23 round it, its arc fits, but projected square to the wall at 12 its far
+        // end lands at 12 / 15 + asin(11 / 15) = 1.62 rad, past the edge at π / 2.
+        let wide =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(1., -3.), Vec2::new(23., -3.), Vec2::new(23., 3.), Vec2::new(1., 3.)]), holes: vec![] };
+        let e = emboss_project_face(&trough, inner, at, &sketch, &[wide], 1.).unwrap_err();
+        assert!(e.to_string().contains("not fitting the selected target face"), "{e}");
     }
 
     /// solidcore#3431: a rectangle `2 w` wide and 4 tall on a plane tangent to a radius-30 wall,
@@ -2325,13 +2334,13 @@ mod tests {
         let wall = face_where(&cyl, |s| matches!(s, Surf::Cylinder { convex: true, .. }));
         let sketch = Plane::new(Vec3::new(30., 0., 10.), Vec3::Y, Vec3::Z).unwrap();
         let quarter = |r: f64, y: f64| 0.5 * (y * (r * r - y * y).sqrt() + r * r * (y / r).asin());
-        for (w, d) in [(20., 0.5), (2., 0.5), (20., 3.)] {
+        for (w, d) in [(20., 0.5), (2., 0.5), (20., 3.), (25., -3.)] {
             let rect =
                 Region2 { outer: Loop2::polygon(&[Vec2::new(-w, -2.), Vec2::new(w, -2.), Vec2::new(w, 2.), Vec2::new(-w, 2.)]), holes: vec![] };
             let want = 4. * 2. * (quarter(30. + d, w) - quarter(30., w));
             let result = emboss_project_face(&cyl, wall, Vec3::new(30., 0., 10.), &sketch, &[rect], d).unwrap();
             let added = volume(&result) - volume(&cyl);
-            assert!((added - want).abs() < 1e-4 * want, "w {w}, d {d}: added {added}, want {want}");
+            assert!((added - want).abs() < 1e-4 * want.abs(), "w {w}, d {d}: added {added}, want {want}");
         }
     }
 
