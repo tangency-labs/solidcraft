@@ -4230,6 +4230,21 @@ impl crate::blend::fillet_executive::p1::SmoothSequenceAccess<FilletObject> for 
         }
         Ok(())
     }
+
+    fn smooth_reverse_solver_law(&mut self, solver: FilletObject) -> Result<()> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let s = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live"))?;
+        if let SolverObject::VariableRadius(vr) = s {
+            vr.law_orientation = !vr.law_orientation;
+        }
+        Ok(())
+    }
 }
 
 impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
