@@ -1102,3 +1102,156 @@ fn unchecked_pair_carries_non_boolean_distance_while_staying_excluded_from_neare
     let a_near: Vec<(&str, f64)> = summary.nearest["A"].iter().map(|n| (n.body.as_str(), n.distance_mm)).collect();
     assert_eq!(a_near, vec![("C", 15.0)]);
 }
+
+#[test]
+fn memory_policy_scales_concurrency_chunks_and_refuses_below_headroom_floor() {
+    use super::{
+        DEFAULT_CHUNK_PAIRS, MAX_CLEARANCE_THREADS, MAX_SHAPE_CACHE_BYTES, MIN_HEADROOM_BYTES, MIN_SHAPE_CACHE_BYTES, check_memory_headroom,
+        chunk_size_for_memory, clearance_worker_limit, shape_cache_budget,
+    };
+
+    const GB: u64 = 1 << 30;
+    const MB: u64 = 1 << 20;
+
+    // Unknown host memory uses normal bounded defaults (never unbounded `usize::MAX`).
+    assert_eq!(clearance_worker_limit(1000, None), MAX_CLEARANCE_THREADS);
+    assert_eq!(chunk_size_for_memory(None), DEFAULT_CHUNK_PAIRS);
+    assert_eq!(shape_cache_budget(None), MAX_SHAPE_CACHE_BYTES);
+
+    // Concurrency and chunk sizes step down smoothly as headroom tightens.
+    assert_eq!(clearance_worker_limit(1000, Some(16 * GB)), MAX_CLEARANCE_THREADS);
+    assert_eq!(clearance_worker_limit(1000, Some(6 * GB)), 4);
+    assert_eq!(clearance_worker_limit(1000, Some(3 * GB)), 2);
+    assert_eq!(clearance_worker_limit(1000, Some(GB)), 1);
+    assert_eq!(clearance_worker_limit(0, Some(16 * GB)), 1);
+    assert_eq!(clearance_worker_limit(3, Some(16 * GB)), 3);
+
+    assert_eq!(chunk_size_for_memory(Some(16 * GB)), DEFAULT_CHUNK_PAIRS);
+    assert_eq!(chunk_size_for_memory(Some(3 * GB)), 32);
+    assert_eq!(chunk_size_for_memory(Some(GB)), 16);
+
+    assert_eq!(shape_cache_budget(Some(16 * GB)), MAX_SHAPE_CACHE_BYTES);
+    assert_eq!(shape_cache_budget(Some(512 * MB)), 64 << 20);
+    assert_eq!(shape_cache_budget(Some(64 * MB)), MIN_SHAPE_CACHE_BYTES);
+
+    // Above the headroom floor succeeds; below it returns a clear error instead of risking OOM abort.
+    assert!(check_memory_headroom("inspect.clearance", None, 100, 100).is_ok());
+    assert!(check_memory_headroom("inspect.clearance", Some(MIN_HEADROOM_BYTES), 100, 100).is_ok());
+    let err = check_memory_headroom("inspect.clearance", Some(MIN_HEADROOM_BYTES - 1), 42, 200).unwrap_err().to_string();
+    assert!(err.contains("not enough available memory") && err.contains("42 of 200 pairs remaining"), "{err}");
+}
+
+/// Placed component occurrences checked by `inspect.clearance` share their definition's display
+/// mesh (never caching deep-cloned moved meshes on each occurrence), keep lazy B-rep records
+/// unmaterialized for bodies pruned before exact checks, and release transient SMLib/ops kernel
+/// forms on completion while preserving forms that were already cached beforehand.
+#[test]
+fn placed_occurrences_share_definition_mesh_and_release_transient_kernel_forms() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part"}));
+    cube(&mut s, "Block", 10.0, [0.0, 0.0, 0.0]);
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    // Place multiple rigid occurrences of `Part`:
+    // - Part:1 at origin (identity)
+    // - Part:2 overlapping Part:1 by 1 mm³ at (9, 9, 9)
+    // - Part:3 near Part:1 with 2 mm gap at (12, 0, 0)
+    // - Part:4 far away at (500, 0, 0) so broad-phase AABB prunes it before exact geometry.
+    run(&mut s, "occurrence.copy", json!({"component": "Part", "translate": [9.0, 9.0, 9.0]}));
+    run(&mut s, "occurrence.copy", json!({"component": "Part", "translate": [12.0, 0.0, 0.0]}));
+    run(&mut s, "occurrence.copy", json!({"component": "Part", "translate": [500.0, 0.0, 0.0]}));
+
+    let world_before = s.world_state().unwrap();
+    let names: Vec<String> = world_before.bodies.iter().map(|b| b.name.clone()).collect();
+    assert_eq!(names.len(), 4, "{names:?}");
+    // Ensure a pre-existing kernel form on the first body is preserved across `inspect.clearance`.
+    let prewarmed_name = names[0].clone();
+    let _ = world_before.bodies[0].body.exact_bounds().unwrap();
+    assert!(world_before.bodies[0].body.holds_kernel_form());
+    for b in world_before.bodies.iter().skip(1) {
+        assert!(!b.body.holds_kernel_form(), "{} started cold", b.name);
+        assert!(b.cached_mesh().is_none(), "{} started without a moved mesh copy", b.name);
+        assert!(b.body.has_pending_lazy_record(), "{} started with a lazy moved record", b.name);
+    }
+
+    let r = run(&mut s, "inspect.clearance", json!({"bodies": [names[0], names[3]], "against": [names[1], names[2]], "clearance": 6.0}));
+    let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+    let near = r["near"].as_array().cloned().unwrap_or_default();
+    assert_eq!(overlaps.len(), 1, "{r}");
+    assert!((f(&overlaps[0]["volume_mm3"]) - 1.0).abs() < 1e-6, "{r}");
+    assert_eq!(near.len(), 1, "{r}");
+    assert!((f(&near[0]["distance_mm"]) - 2.0).abs() < 1e-6, "{r}");
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+
+    let world_after = s.world_state().unwrap();
+    for b in &world_after.bodies {
+        if b.name == prewarmed_name {
+            assert!(b.body.holds_kernel_form(), "pre-existing kernel form on {} must be preserved", b.name);
+        } else {
+            assert!(!b.body.holds_kernel_form(), "transient kernel form on {} must be released", b.name);
+            assert!(b.cached_mesh().is_none(), "placed occurrence {} must not cache a moved display mesh copy", b.name);
+        }
+    }
+    // The far-away occurrence at x = 500 was pruned before exact geometry and kept its lazy record.
+    let far = world_after.bodies.iter().find(|b| b.name == names[3]).unwrap();
+    assert!(far.body.has_pending_lazy_record(), "pruned occurrence must keep its lazy record unmaterialized");
+}
+
+/// Multi-chunk `inspect.clearance` (more than `DEFAULT_CHUNK_PAIRS` close pairs) produces exact
+/// overlaps, near gaps, and nearest neighbours across chunk boundaries, and releases transient
+/// kernel forms once done.
+#[test]
+fn chunked_clearance_across_many_close_pairs_matches_exact_results() {
+    let mut s = Session::default();
+    // Two rows of 9 cubes each (9 × 9 = 81 cross-pairs, > DEFAULT_CHUNK_PAIRS = 64) packed within
+    // a 6 mm clearance window so all 81 pairs survive broad-phase pruning and span multiple chunks.
+    let mut moving = Vec::new();
+    let mut fixed = Vec::new();
+    for i in 0..9usize {
+        let m_name = format!("M{i}");
+        let f_name = format!("F{i}");
+        let y = (i as f64) * 1.5;
+        cube(&mut s, &m_name, 1.0, [0.0, y, 0.0]);
+        // F0 overlaps M0 by 0.2 × 1 × 1 = 0.2 mm³; F1..F8 sit 1.0 mm away along X from M1..M8.
+        let x = if i == 0 { 0.8 } else { 2.0 };
+        cube(&mut s, &f_name, 1.0, [x, y, 0.0]);
+        moving.push(m_name);
+        fixed.push(f_name);
+    }
+
+    // Large clearance (20 mm) makes all 81 moving×fixed pairs pass AABB pruning (> 64 chunk size).
+    let r = run(&mut s, "inspect.clearance", json!({"bodies": moving, "against": fixed, "clearance": 20.0, "nearest": 1}));
+    assert_eq!(r["pairs_checked"], 81, "{r}");
+    assert_eq!(r["unchecked"], json!([]), "{r}");
+    let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+    assert_eq!(overlaps.len(), 1, "{r}");
+    assert_eq!(pair(&overlaps[0]), ["F0", "M0"]);
+    assert!((f(&overlaps[0]["volume_mm3"]) - 0.2).abs() < 1e-6, "{r}");
+    let near = r["near"].as_array().cloned().unwrap_or_default();
+    assert_eq!(near.len(), 80, "all 80 non-overlapping pairs are within 20 mm: {r}");
+    // M1's nearest fixed neighbour is F0 (X overlaps [0.8, 1.0], Y gap = 0.5 mm);
+    // M2's nearest fixed neighbour is F2 at exactly 1.0 mm along X.
+    assert_eq!(r["nearest"]["M1"][0]["body"], "F0", "{r}");
+    assert!((f(&r["nearest"]["M1"][0]["distance_mm"]) - 0.5).abs() < 1e-6, "{r}");
+    assert_eq!(r["nearest"]["M2"][0]["body"], "F2", "{r}");
+    assert!((f(&r["nearest"]["M2"][0]["distance_mm"]) - 1.0).abs() < 1e-6, "{r}");
+}
+
+/// Under severe host memory pressure, `inspect.clearance` returns a structured error instead of
+/// proceeding into an allocation abort, leaving the session intact for subsequent calls.
+#[test]
+fn low_host_memory_returns_error_and_preserves_session() {
+    let mut s = Session::default();
+    cube(&mut s, "A", 10.0, [0.0, 0.0, 0.0]);
+    cube(&mut s, "B", 10.0, [11.0, 0.0, 0.0]);
+
+    let low = solidcraft_kernel::with_available_memory_for_test(Some(64 << 20), || s.execute("inspect.clearance", &json!({"clearance": 2.0})));
+    let err = low.unwrap_err().to_string();
+    assert!(err.contains("not enough available memory"), "{err}");
+
+    // Once memory headroom recovers, the session and design are intact and the same call succeeds.
+    let ok =
+        solidcraft_kernel::with_available_memory_for_test(Some(16u64 << 30), || s.execute("inspect.clearance", &json!({"clearance": 2.0}))).unwrap();
+    let near = ok["near"].as_array().cloned().unwrap_or_default();
+    assert_eq!(near.len(), 1, "{ok}");
+    assert!((f(&near[0]["distance_mm"]) - 1.0).abs() < 1e-6, "{ok}");
+}
