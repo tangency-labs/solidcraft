@@ -304,9 +304,9 @@ fn match_token(tok: &[char], cand: &FoldedText, allow_typo: bool) -> Option<Toke
     for (idx, word) in cand.words.iter().enumerate() {
         let Some(slice) = cand.chars.get(word.start..word.end) else { continue };
         if slice.starts_with(tok) {
-            let exact_bonus = if slice.len() == tok.len() { 80 } else { 0 };
+            let exact_bonus: u32 = if slice.len() == tok.len() { 80 } else { 0 };
             let pos_penalty = (idx as u32).min(40) * 2;
-            let s = (800 + exact_bonus).saturating_sub(pos_penalty);
+            let s = (800u32 + exact_bonus).saturating_sub(pos_penalty);
             if best_word.as_ref().is_none_or(|(best_s, _)| s > *best_s) {
                 best_word = Some((s, word.start..(word.start + tok.len())));
             }
@@ -444,7 +444,7 @@ pub fn score_text(query: &str, candidate: &str) -> u32 {
     }
     let mut total = 0u32;
     for tok in &tokens {
-        let hit = match_token(tok, &cand, false)?;
+        let Some(hit) = match_token(tok, &cand, false) else { return 0 };
         total = total.saturating_add(hit.score);
     }
     (total / tokens.len() as u32).saturating_sub(40).max(1)
