@@ -538,7 +538,8 @@ mod tests {
         assert!((ours.0 - theirs.0).abs() <= 1e-9 * volume, "{what}: volume {} against {}", theirs.0, ours.0);
         assert!((ours.1 - theirs.1).abs() <= 1e-9 * ours.1, "{what}: area {} against {}", theirs.1, ours.1);
         assert_eq!((ours.2, ours.3), (theirs.2, theirs.3), "{what}: faces and edges");
-        assert!(ours.4.dist(theirs.4) <= 1e-9 * volume.cbrt(), "{what}: centroid {:?} against {:?}", theirs.4, ours.4);
+        let apart = ((ours.4.x - theirs.4.x).powi(2) + (ours.4.y - theirs.4.y).powi(2) + (ours.4.z - theirs.4.z).powi(2)).sqrt();
+        assert!(apart <= 1e-9 * volume.cbrt(), "{what}: centroid {:?} against {:?}", theirs.4, ours.4);
     }
 
     #[test]
