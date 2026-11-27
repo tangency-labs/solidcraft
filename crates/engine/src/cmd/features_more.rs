@@ -260,6 +260,21 @@ fn dome(s: &mut Session, p: &Value) -> Result<Value> {
     add_face_feature(&picked, s, p, FeatureKind::Dome { face: FacePick(face), height, shape, reverse, body: picked.body.clone().map(BodyName) })
 }
 
+fn nearest_mesh_face(body: &solidcraft_doc::ModelBody, at: Vec3) -> Option<(f64, usize)> {
+    let mesh = body.mesh();
+    mesh.triangles
+        .iter()
+        .zip(&mesh.tri_face)
+        .filter_map(|(tri, face)| {
+            let [a, b, c] = mesh.tri(tri)?;
+            let n = (b - a).cross(c - a).normalized()?;
+            let q = at - n * (at - a).dot(n);
+            let inside = [(a, b), (b, c), (c, a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= -1e-9);
+            inside.then_some(((at - a).dot(n).abs(), *face as usize))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+}
+
 fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "solid.emboss";
     let sketch = feature_sketch(s, p, cmd)?;
@@ -290,19 +305,7 @@ fn emboss(s: &mut Session, p: &Value) -> Result<Value> {
             if !targets.is_empty() && !targets.iter().any(|n| n == definition || n == &body.name) {
                 continue;
             }
-            let mesh = body.mesh();
-            let closest = mesh
-                .triangles
-                .iter()
-                .zip(&mesh.tri_face)
-                .filter_map(|(tri, face)| {
-                    let [a, b, c] = mesh.tri(tri)?;
-                    let n = (b - a).cross(c - a).normalized()?;
-                    let q = at - n * (at - a).dot(n);
-                    let inside = [(a, b), (b, c), (c, a)].iter().all(|(u, v)| (*v - *u).cross(q - *u).dot(n) >= -1e-9);
-                    inside.then_some(((at - a).dot(n).abs(), *face as usize))
-                })
-                .min_by(|a, b| a.0.total_cmp(&b.0));
+            let closest = if body.body.is_mesh() { nearest_mesh_face(body, at) } else { body.body.nearest_face(at) };
             match closest {
                 Some((distance, index)) if distance < (body.body.size() * 1e-3).max(1e-3) => candidates.push((body, index)),
                 Some((distance, _)) if nearest.is_none_or(|(d, _)| distance < d) => nearest = Some((distance, body.name.as_str())),
