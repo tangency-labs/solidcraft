@@ -2443,9 +2443,9 @@ fn folder_reads_confine_paths_resolve_case_and_share_the_import_budgets() {
     let mut exhausted = make();
     exhausted.folder_bytes = MAX_IMPORT_INPUT_BYTES;
     assert!(exhausted.read("library".into(), "Part.BIN".into(), 0, 1).is_err());
-    let mut exhausted = make();
-    exhausted.folder_files = (0..MAX_IMPORT_FILES).map(|i| ("library".into(), PathBuf::from(format!("file{i}")))).collect();
-    assert!(exhausted.size("library".into(), "Part.BIN".into()).is_err());
+    let mut out_of_files = make();
+    out_of_files.folder_files = (0..MAX_IMPORT_FILES).map(|i| ("library".into(), PathBuf::from(format!("file{i}")))).collect();
+    assert!(out_of_files.size("library".into(), "Part.BIN".into()).is_err());
     let mut cancelled = make();
     cancelled.host.cancelled = true;
     assert!(matches!(cancelled.size("library".into(), "Part.BIN".into()), Err(PluginError::Cancelled)));
@@ -2454,6 +2454,8 @@ fn folder_reads_confine_paths_resolve_case_and_share_the_import_budgets() {
         std::os::unix::fs::symlink(root.join("Part.BIN"), root.join("linked")).unwrap();
         assert!(make().read("library".into(), "linked".into(), 0, 1).is_err());
     }
+    // Windows does not remove a folder while a handle to it is open.
+    drop((allowed, edge, importing, exhausted, out_of_files, cancelled));
     std::fs::remove_dir_all(root).unwrap();
 }
 
