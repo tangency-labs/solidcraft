@@ -319,12 +319,15 @@ pub struct FailedTest {
     pub number: Option<u32>,
     /// The kinds of entity it failed on (`SmVertex`), each once, when the check names them.
     pub owners: Vec<String>,
-    /// The edges it failed on, each once, by the index the check's `[edge N]` tag gives, in the
-    /// order the check first reported them.
+    /// The edges it failed on, each once, in the order the check first reported them, by the
+    /// index of the edge in the checked body's edge arena (`EdgeId::index`): the check's `[edge N]`.
     pub edges: Vec<u32>,
     /// How many times it failed.
     pub times: usize,
 }
+
+/// The edges a failed test's line names before it says how many more.
+const EDGES_SHOWN: usize = 8;
 
 impl CheckFailure {
     /// The failure `check` reports, `None` when it passes.
@@ -382,8 +385,11 @@ impl std::fmt::Display for CheckFailure {
                 write!(f, "{sep}{}", t.name)?
             }
             if !t.edges.is_empty() {
-                let list: Vec<String> = t.edges.iter().map(u32::to_string).collect();
-                write!(f, " on edge{} {}", if t.edges.len() == 1 { "" } else { "s" }, list.join(", "))?;
+                let shown: Vec<String> = t.edges.iter().take(EDGES_SHOWN).map(u32::to_string).collect();
+                write!(f, " on edge{} {}", if t.edges.len() == 1 { "" } else { "s" }, shown.join(", "))?;
+                if t.edges.len() > EDGES_SHOWN {
+                    write!(f, " and {} more", t.edges.len() - EDGES_SHOWN)?;
+                }
             }
         }
         Ok(())
@@ -516,6 +522,8 @@ mod tests {
         assert_eq!(test.name, "SmEdge::Test #61 Valid: Bad Edge fails pE->ValidateGeometry(FALSE) check");
         assert_eq!(test.edges, [4, 17]);
         assert!(failure.to_string().ends_with("(×2) on edges 4, 17"), "{failure}");
+        let many = solidcraft_smlib::CheckReport { failures: 10, text: (0..10).map(line).collect() };
+        assert!(CheckFailure::of(&many).unwrap().to_string().ends_with("(×10) on edges 0, 1, 2, 3, 4, 5, 6, 7 and 2 more"));
     }
 
     #[test]
