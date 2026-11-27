@@ -1637,7 +1637,8 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             }
         }
         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => {
-            item.params = Some(json!({"bodies": bodies}));
+            item.params =
+                Some(if item.id == "ui.export" { json!({"bodies": bodies, "component": placement.component}) } else { json!({"bodies": bodies}) });
             item.enabled = has_bodies && (item.id != "ui.sendToSlicer" || crate::dialogs_save_mesh::available(app));
         }
         // A flyout's row is on while any of its entries is, as `group` made it; the entries
@@ -1808,7 +1809,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         "Export",
         "export",
         vec![
-            act("ui.export", "Export…", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()),
+            act("ui.export", "Export…", "export").with(json!({ "bodies": names, "component": id })).on(!bodies.is_empty()),
             act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()),
             act("ui.sendToSlicer", "Send to Slicer", "export")
                 .with(json!({ "bodies": names }))
@@ -2572,7 +2573,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.export" => {
             let body = bodies.first().map(String::as_str);
             let default_name = crate::export_name::default_for_bodies(app, &bodies);
-            let name = crate::export_name::offered(app, body, &default_name);
+            let name = crate::export_name::offered_for_component(app, body, id_of(&p, "component"), &default_name);
             // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
             let formats: Vec<&str> = ["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm"]
                 .into_iter()
