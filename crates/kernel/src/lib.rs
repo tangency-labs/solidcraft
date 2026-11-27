@@ -485,6 +485,7 @@ pub use route::orient_stock;
 pub use route::plan_cell_grid;
 pub use route::planar;
 pub use route::points;
+pub use route::profiles;
 pub use route::projection;
 pub use route::query;
 pub use route::read_cadir;

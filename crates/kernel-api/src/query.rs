@@ -33,6 +33,29 @@ pub struct SurfacePoint {
     pub distance: f64,
 }
 
+/// Where a ray meets a face of a body (the router's `Body::face_hits_by_ray`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FaceHit {
+    /// The record face.
+    pub face: usize,
+    /// The point on the ray where it meets the face.
+    pub point: [f64; 3],
+    /// The distance from the ray's origin to the point, along the ray.
+    pub distance: f64,
+}
+
+/// The closest points of a curve or point and a body's chosen faces and edges, by the kernel's
+/// minimum-distance solve on the exact geometry.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MembersClosest {
+    /// The solve's distance between the two points (a solve's, not certified).
+    pub distance: f64,
+    /// On the curve or point.
+    pub from: [f64; 3],
+    /// On the faces or edges.
+    pub to: [f64; 3],
+}
+
 /// A query the kernel refuses, in its words: a view not a finite unit vector, a size not
 /// finite and positive, an edge or face it cannot read.
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
