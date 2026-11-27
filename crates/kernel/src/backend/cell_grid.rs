@@ -3,7 +3,10 @@
 
 use solidcore_ops::cell_grid as ops;
 use solidcore_record::cell_grid::{CellGridPlan, CellGridSpec, GridCell, SketchCell};
-use solidcore_record::{Loop2, Region2};
+use solidcore_ops::cell_grid_wall as wall_ops;
+use solidcore_record::brep::Brep;
+use solidcore_record::cell_grid_wall::{CylinderWall, WallCellPlan, WallDepth};
+use solidcore_record::{Loop2, Region2, Vec2, Vec3};
 use solidcraft_kernel_api::{CellGrid, CellGridLimits};
 
 use super::Solidcore;
@@ -31,5 +34,23 @@ impl CellGrid for Solidcore {
 
     fn cell_regions(&self, cell: &GridCell) -> Result<Vec<Region2>> {
         ops::cell_regions(cell).map_err(refused)
+    }
+
+    fn cylinder_wall(&self, body: &Brep, face: usize) -> Result<CylinderWall> {
+        wall_ops::cylinder_wall(body, face, body.tolerance).map_err(refused)
+    }
+
+    fn plan_wall_cell_grid(&self, wall: &CylinderWall, spec: &CellGridSpec, depth: WallDepth) -> Result<WallCellPlan> {
+        wall_ops::plan_wall_cell_grid(wall, spec, depth).map_err(refused)
+    }
+
+    fn unroll_wall_point(&self, wall: &CylinderWall, p: Vec3) -> Result<Vec2> {
+        let [x, y] = wall_ops::unroll_wall_point(wall, [p.x, p.y, p.z]).map_err(refused)?;
+        Ok(Vec2::new(x, y))
+    }
+
+    fn default_wall_anchor(&self, wall: &CylinderWall, spec: &CellGridSpec) -> Result<Vec2> {
+        let [x, y] = wall_ops::default_wall_anchor(wall, spec).map_err(refused)?;
+        Ok(Vec2::new(x, y))
     }
 }
