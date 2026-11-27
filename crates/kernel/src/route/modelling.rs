@@ -256,6 +256,13 @@ pub fn thicken(body: &Body, thickness: f64, symmetric: bool) -> Result<Body> {
 
 /// The faces nearest `at` moved `distance` along their normals.
 pub fn offset_faces(b: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::OffsetFaces, &[b], |k, f| match f {
+        [fb] => k.offset_faces(fb, at, distance).map(Some),
+        _ => Err(solidcraft_kernel_api::BackendError::Invalid("it takes one body".into())),
+    }) {
+        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the result is empty".into())));
+    }
     match which(OpKind::OffsetFaces) {
         Which::Solidcore => Solidcore.offset_faces(b, at, distance),
     }

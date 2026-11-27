@@ -148,6 +148,7 @@ impl Backend for Occt {
             OpKind::Chamfer => Support::Some("equal chamfers".into()),
             OpKind::Shell => Support::Some("open at one face or more".into()),
             OpKind::Thicken => Support::Yes,
+            OpKind::OffsetFaces => Support::Yes,
             _ => Support::No,
         }
     }
@@ -302,8 +303,12 @@ impl Modelling for Occt {
         sheet.thicken(thickness, symmetric).map_err(failed)
     }
 
-    fn offset_faces(&self, _body: &Shape, _at: &[Vec3], _distance: f64) -> Result<Shape, BackendError> {
-        unsupported("an offset")
+    fn offset_faces(&self, body: &Shape, at: &[Vec3], distance: f64) -> Result<Shape, BackendError> {
+        if at.is_empty() || !distance.is_finite() || distance == 0.0 || distance.abs() > 1e6 || at.iter().any(|p| !finite(&xyz(*p))) {
+            return unsupported("an offset solidcore refuses, or one of 0");
+        }
+        let points: Vec<[f64; 3]> = at.iter().map(|p| xyz(*p)).collect();
+        body.offset_faces_nearest(&points, distance).map_err(failed)
     }
 }
 
@@ -548,5 +553,8 @@ mod tests {
         same_solid("a sheet thickened up", 200.0, || crate::route::thicken(&sheet()?, 2.0, false));
         same_solid("a sheet thickened down", 200.0, || crate::route::thicken(&sheet()?, -2.0, false));
         same_solid("a sheet thickened both ways", 200.0, || crate::route::thicken(&sheet()?, 2.0, true));
+        // The top face up 2 (10 x 10 x 12); the side face at x = 10 in 1 (9 x 10 x 10).
+        same_solid("a face moved out", 1200.0, || crate::route::offset_faces(&cube()?, &[v(5.0, 5.0, 10.0)], 2.0));
+        same_solid("a face moved in", 900.0, || crate::route::offset_faces(&cube()?, &[v(10.0, 5.0, 5.0)], -1.0));
     }
 }

@@ -50,6 +50,7 @@ mod raw {
             pz: f64,
             angle: f64,
         ) -> u32;
+        pub fn occt_offset_faces_nearest(h: u32, points: *const f64, count: usize, distance: f64) -> u32;
         pub fn occt_thicken(h: u32, thickness: f64, symmetric: i32) -> u32;
         pub fn occt_prism_profile(data: *const f64, count: usize, dx: f64, dy: f64, dz: f64, distance: f64) -> u32;
         pub fn occt_revol_profile(data: *const f64, count: usize, ox: f64, oy: f64, oz: f64, dx: f64, dy: f64, dz: f64, angle: f64) -> u32;
@@ -246,6 +247,13 @@ impl Shape {
                 angle,
             )
         })
+    }
+
+    /// The faces nearest `faces` moved `distance` along their outward normals.
+    pub fn offset_faces_nearest(&self, faces: &[[f64; 3]], distance: f64) -> Result<Shape> {
+        let flat: Vec<f64> = faces.iter().flatten().copied().collect();
+        // SAFETY: a live handle and `faces.len()` triples of doubles.
+        shape(unsafe { raw::occt_offset_faces_nearest(self.0, flat.as_ptr(), faces.len(), distance) })
     }
 
     /// A sheet thickened into a solid `thickness` thick (to both sides when `symmetric`).

@@ -134,6 +134,22 @@ API uint32_t occt_draft_nearest(uint32_t h, const void* points, size_t count, do
   });
 }
 
+// The faces nearest each point (count * 3 doubles) moved `distance` along their outward normals
+// (negative: into the solid), the faces around them extended or trimmed to meet them.
+API uint32_t occt_offset_faces_nearest(uint32_t h, const void* points, size_t count, double distance) {
+  return guard_handle([&]() -> uint32_t {
+    if (!std::isfinite(distance) || distance == 0.0) throw std::invalid_argument("the offset must be finite and not 0");
+    const TopoDS_Shape shape = get_shape(h);
+    const ShapeMap chosen = nearest(shape, TopAbs_FACE, points, count);
+    BRepOffset_MakeOffset maker;
+    maker.Initialize(shape, 0.0, 1e-7, BRepOffset_Skin, Standard_True, Standard_False, GeomAbs_Intersection, Standard_False);
+    for (int f = 1; f <= chosen.Extent(); ++f) maker.SetOffsetOnFace(TopoDS::Face(chosen(f)), distance);
+    maker.MakeOffsetShape();
+    if (!maker.IsDone()) throw std::runtime_error("offset failed");
+    return put_shape(maker.Shape());
+  });
+}
+
 // A sheet thickened into a solid by `thickness` along its normals (negative: against them; to
 // both sides, half each, when `symmetric`).
 API uint32_t occt_thicken(uint32_t h, double thickness, int32_t symmetric) {
