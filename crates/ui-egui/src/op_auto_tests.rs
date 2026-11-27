@@ -292,6 +292,121 @@ fn a_pipe_or_thicken_cut_from_its_window_leaves_hidden_bodies_alone() {
     }
 }
 
+/// A saved New Body feature changed to Cut in its edit window leaves a hidden body alone, as a
+/// new Cut does: two 20 mm boxes, the second hidden, and a tool body that runs through both.
+#[test]
+fn a_new_body_edited_to_cut_leaves_hidden_bodies_alone() {
+    let volume = |h: &Harness, name: &str| {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        st.body(name).and_then(|b| solidcraft_engine::doc::kernel::measure(&b.body).ok()).map(|m| m.volume)
+    };
+    let mut found = Vec::new();
+    for tool in ["solid.box", "solid.revolve", "solid.pipe", "surface.thicken"] {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"})).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [40, 0, 0], "body_name": "B"})).unwrap();
+        h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 10, "name": "Mid"})).unwrap();
+        h.app.run("sketch.create", json!({"plane": "Mid", "name": "S"})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[-10, 10], [70, 10]], "ids": ["path"]})).unwrap();
+        if tool == "solid.revolve" {
+            h.app.run("sketch.rectangle.two_point", json!({"p0": [5, 12], "p1": [55, 14]})).unwrap();
+        }
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let mut made = match tool {
+            "solid.box" => json!({"length": 40, "width": 10, "height": 10, "corner": [10, 5, 5]}),
+            "solid.revolve" => json!({"sketch": "S", "axis": "path"}),
+            "solid.pipe" => json!({"path_sketch": "S", "path": ["path"], "diameter": 6}),
+            _ => {
+                h.app.run("surface.extrude", json!({"curves": ["path"], "distance": 4, "body_name": "Sheet"})).unwrap();
+                json!({"bodies": ["Sheet"], "thickness": 2})
+            }
+        };
+        made["operation"] = json!("new");
+        made["name"] = json!("Tool");
+        h.app.run(tool, made).unwrap_or_else(|e| panic!("{tool}: {e}"));
+        h.app.run("browser.visibility", json!({"items": ["B"], "visible": false})).unwrap();
+        h.app.run("select.clear", json!({})).unwrap();
+        h.step(&json!({"call": "ui.editFeature", "params": {"feature": "Tool"}})).unwrap();
+        h.frames(2);
+        match h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            Some(
+                Kind::Primitive { operation, .. }
+                | Kind::Revolve { operation, .. }
+                | Kind::Pipe { operation, .. }
+                | Kind::Surface(crate::dialogs_surface::Surf::Thicken { operation, .. }),
+            ) => *operation = CUT,
+            other => panic!("{tool}: {other:?}"),
+        }
+        h.ctx.data_mut(|m| m.insert_temp(super::picked_id(), true));
+        ok(&mut h);
+        found.push((tool, volume(&h, "A").unwrap_or_default(), volume(&h, "B").unwrap_or_default()));
+    }
+    // Box: 10 x 10 x 10 of each box. Revolve: a ring of radii 2 and 4 over 15 mm, 180π
+    // (565.49 mm3). Pipe: 6 mm across 20 mm, 180π. Thicken: 20 x 4 x 2.
+    for (tool, a, b) in &found {
+        let cut = match *tool {
+            "solid.box" => 1000.0,
+            "surface.thicken" => 160.0,
+            _ => 180.0 * std::f64::consts::PI,
+        };
+        assert!((a - (8000.0 - cut)).abs() < 1.0 && (b - 8000.0).abs() < 1e-6, "{tool}: the shown box A is cut, the hidden B untouched: {found:?}");
+    }
+}
+
+/// The same edit to Join joins only the shown box; with every body hidden it is refused and changes
+/// nothing; a saved Cut that named no bodies keeps naming none when edited after a body is hidden.
+#[test]
+fn a_new_body_edited_to_join_or_with_every_body_hidden_leaves_hidden_bodies_alone() {
+    let volume = |h: &Harness, name: &str| {
+        let st = crate::open_meshing::session_world(&h.app.session);
+        st.body(name).and_then(|b| solidcraft_engine::doc::kernel::measure(&b.body).ok()).map(|m| m.volume)
+    };
+    // Two 20 mm boxes and a 40 x 10 x 10 tool box through both, made as `operation`.
+    let design = |operation: &str| {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "A"})).unwrap();
+        h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [40, 0, 0], "body_name": "B"})).unwrap();
+        let tool = json!({"length": 40, "width": 10, "height": 10, "corner": [10, 5, 5], "operation": operation, "name": "Tool", "body_name": "T"});
+        h.app.run("solid.box", tool).unwrap();
+        h
+    };
+    let edit = |h: &mut Harness, to: Option<usize>| {
+        h.app.run("select.clear", json!({})).unwrap();
+        h.step(&json!({"call": "ui.editFeature", "params": {"feature": "Tool"}})).unwrap();
+        h.frames(2);
+        if let Some(to) = to {
+            pick(h, to);
+        }
+    };
+    // Join: A takes the tool (8000 + 4000 - 1000), the hidden B is untouched.
+    let mut h = design("new");
+    h.app.run("browser.visibility", json!({"items": ["B"], "visible": false})).unwrap();
+    edit(&mut h, Some(JOIN));
+    ok(&mut h);
+    let joined = (volume(&h, "A").unwrap_or_default(), volume(&h, "B").unwrap_or_default());
+    assert!((joined.0 - 11000.0).abs() < 1e-6 && (joined.1 - 8000.0).abs() < 1e-6, "A joined, the hidden B untouched: {joined:?}");
+    // Every body hidden: OK is refused with the window's message and the design stays as it was.
+    let mut h = design("new");
+    h.app.run("browser.visibility", json!({"items": ["A", "B"], "visible": false})).unwrap();
+    edit(&mut h, Some(CUT));
+    let refused = h.app.dialog.as_ref().map(|d| crate::dialogs::apply_commands(&h.app, d));
+    assert_eq!(refused, Some(Err(solidcraft_ui_text::tr("dialog.no_shown_body").to_string())));
+    h.step(&json!({"key": "Escape"})).unwrap();
+    h.frames(2);
+    let kept = [volume(&h, "A"), volume(&h, "B"), volume(&h, "T")];
+    assert!(
+        h.app.dialog.is_none() && kept.iter().zip([8000.0, 8000.0, 4000.0]).all(|(v, want)| v.is_some_and(|v| (v - want).abs() < 1e-6)),
+        "{kept:?}"
+    );
+    // A saved Cut that named no bodies (both were shown) keeps naming none when edited with B hidden.
+    let mut h = design("cut");
+    h.app.run("browser.visibility", json!({"items": ["B"], "visible": false})).unwrap();
+    edit(&mut h, None);
+    let sent = h.app.dialog.as_ref().and_then(|d| crate::dialogs::apply_commands(&h.app, d).ok());
+    let targets = sent.as_ref().and_then(|c| c.first()).map(|(_, p)| p["params"].get("targets").cloned());
+    assert_eq!(targets, Some(None), "the saved Cut keeps its saved targets: {sent:?}");
+}
+
 #[test]
 fn into_a_hidden_body_with_nothing_shown_is_a_new_body_until_it_is_shown() {
     // The profile on the hidden cube's base, extruded into it (#9919).

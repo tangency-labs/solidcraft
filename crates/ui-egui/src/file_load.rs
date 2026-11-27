@@ -727,8 +727,10 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
             Kind::ExportDxf | Kind::ExportSheet => {
                 let (command, params) = request.command();
                 let r = app.run(command, params);
-                if r.is_ok() && !request.path.is_empty() {
-                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", crate::display_user_path(&request.path))]), false);
+                if let Ok(reply) = &r
+                    && !request.path.is_empty()
+                {
+                    app.set_status(crate::drawing_workspace::export::saved_status(crate::display_user_path(&request.path), reply), false);
                 }
                 r
             }
@@ -1859,12 +1861,12 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
         let request = &running.request;
         match job {
             Ok(made) if request.kind.exports() && request.print => {
-                crate::drawing_workspace::print::written(app, &request.path);
+                crate::drawing_workspace::print::written(app, &request.path, &made.result);
                 request.answer(Ok(made.result));
             }
             Ok(made) if request.kind.exports() && (!request.sheet_in_reply() || !running.cancelled()) => {
                 if !request.path.is_empty() {
-                    app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", crate::display_user_path(&request.path))]), false);
+                    app.set_status(crate::drawing_workspace::export::saved_status(crate::display_user_path(&request.path), &made.result), false);
                 }
                 request.answer(Ok(made.result));
             }

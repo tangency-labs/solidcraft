@@ -19,7 +19,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<AppearanceChainParams>(), &["target"]);
     assert_keys(input_schema_for::<AppearanceLibraryParams>(), &[]);
     assert_keys(input_schema_for::<AppearanceFavoriteParams>(), &["favorite", "look"]);
-    assert_keys(input_schema_for::<AppearanceListParams>(), &["body"]);
+    assert_keys(input_schema_for::<AppearanceListParams>(), &["active_only", "body"]);
     assert_keys(input_schema_for::<AppearancePaintParams>(), &["appearance", "color", "done", "name", "opacity", "pbr"]);
     assert_keys(input_schema_for::<AppearancePasteParams>(), &["bodies", "body", "components", "faces"]);
     assert_keys(input_schema_for::<AppearancePickUpParams>(), &["target"]);
@@ -103,6 +103,9 @@ fn replies_match_the_output_schema() {
     let all = run("appearance.list", json!({}));
     assert!(all.get("param_warnings").is_none() && all.get("body").is_none(), "{all}");
     matches(output_schema_for::<AppearanceListResult>(), "appearance.list", &all);
+    let active = run("appearance.list", json!({"active_only": true}));
+    assert!(active.get("param_warnings").is_none() && active.get("body").is_none(), "{active}");
+    matches(output_schema_for::<AppearanceListResult>(), "appearance.list", &active);
     let one = run("appearance.list", json!({"body": body}));
     assert_eq!(one["body"]["faces"].as_array().map(Vec::len), Some(1), "{one}");
     matches(output_schema_for::<AppearanceListResult>(), "appearance.list", &one);

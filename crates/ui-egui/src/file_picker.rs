@@ -520,7 +520,7 @@ mod tests {
         }));
         crate::params_dialog::open(&mut h.app);
         h.frames(2);
-        h.step(&json!({"widget": "Import…"})).unwrap();
+        h.step(&json!({"click": {"handle": "params:import"}})).unwrap();
         h.frames(2);
         h.app.params = None;
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
