@@ -34,8 +34,8 @@ use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
 use std::sync::Arc;
 
 use crate::blend::fillet_section::certificate::{
-    below_continuity, curve_derivs_over, curve_derivs_over_about, knot_cuts,
-    nurbs_partials_over_piece, partials_hull, past_one_low_line, EndContinuation, NurbsCurve,
+    below_continuity, curve_derivs_over, curve_derivs_over_about, curve_derivs_over_centred,
+    knot_cuts, partials_hull, past_one_low_line, EndContinuation, NurbsCurve,
 };
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::offset_box::offset_and_base_partials_over_piece;
@@ -45,6 +45,7 @@ use crate::blend::fillet_section::station::{
 };
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
+use crate::geom::nurbs_enclosure::{partials_over_piece, Shift};
 use crate::kernel::Kernel;
 use crate::math::Point2;
 use crate::nurbs::b_spline_curve::BSplineCurve;
@@ -641,7 +642,12 @@ impl NetSurface {
         let n = &self.net;
         // (an offset of exactly zero is its base, and evaluates as it, with no step-off)
         let Some(d) = self.offset.filter(|d| !(d.lo == 0.0 && d.hi == 0.0)) else {
-            return nurbs_partials_over_piece(n, ku, kv, a0, a1, b0, b1, lk);
+            let shift = if a0 == a1 && b0 == b1 {
+                Shift::None
+            } else {
+                Shift::Middle
+            };
+            return partials_over_piece(n, ku, kv, a0, a1, b0, b1, lk, None, shift);
         };
         let (q, s) = offset_and_base_partials_over_piece(n, d, ku, kv, a0, a1, b0, b1, lk)?;
         let p = s.at(0, 0);
@@ -1029,7 +1035,7 @@ fn piece(
         ends = ends.max(g);
     }
     let span = Ivl::new(a, b);
-    let cd = curve_derivs_over(cn, span, 2, None)?;
+    let cd = curve_derivs_over_centred(cn, span, 2, None)?;
     let wd = uv_derivs_over(wn, span, 2)?;
     let (Some(c1), Some(c2)) = (cd.get(1), cd.get(2)) else {
         return Ok(None);
@@ -1205,7 +1211,7 @@ fn piece_reparametrised(
     let (Some(&r0), Some(&p1), Some(&p2)) = (r.first(), r.get(1), r.get(2)) else {
         return Ok(None);
     };
-    let cd = curve_derivs_over(cn, r0, 2, None)?;
+    let cd = curve_derivs_over_centred(cn, r0, 2, None)?;
     let wd = uv_derivs_over(wn, span, 2)?;
     let (Some(c1), Some(c2), Some(w1)) = (cd.get(1), cd.get(2), wd.get(1)) else {
         return Ok(None);
@@ -3606,7 +3612,7 @@ fn surface_piece(
     }
     let span = Ivl::new(a, b);
     let h = Ivl::from(b) - Ivl::from(a);
-    let cd = curve_derivs_over(cn, span, 2, None)?;
+    let cd = curve_derivs_over_centred(cn, span, 2, None)?;
     let (Some(c1), Some(c2)) = (cd.get(1).copied(), cd.get(2).copied()) else {
         return Ok(None);
     };
@@ -3682,7 +3688,7 @@ fn target_piece(
     }
     let span = Ivl::new(a, b);
     let h = Ivl::from(b) - Ivl::from(a);
-    let cd = curve_derivs_over(cn, span, 2, None)?;
+    let cd = curve_derivs_over_centred(cn, span, 2, None)?;
     let (Some(c1), Some(c2)) = (cd.get(1).copied(), cd.get(2).copied()) else {
         return Ok(None);
     };
@@ -3695,7 +3701,7 @@ fn target_piece(
         Prepared::Curve(dn, [s0, s1]) => {
             let w1 = slope(range, [*s0, *s1]);
             let s = clamp_ivl(along(span, range, [*s0, *s1]), *s0, *s1);
-            let dd = curve_derivs_over(dn, s, 2, None)?;
+            let dd = curve_derivs_over_centred(dn, s, 2, None)?;
             let (Some(d1), Some(d2)) = (dd.get(1).copied(), dd.get(2).copied()) else {
                 return Ok(None);
             };
@@ -4986,6 +4992,38 @@ pub fn trim_image_gap_bound_within(
         [enough, over],
         budget,
         Correspondence::Fitted,
+        false,
+    )
+}
+
+/// [`trim_image_gap_bound_within`] for internal callers that treat every proved bound at most
+/// `enough` identically (such as [`crate::topology::edgeuse::p3::trim_deviation_bound`]): when
+/// `enough > 0.0`, enables same-parameter structured proofs (`end_row` / `row_piece_pair_bound`,
+/// closing `BallPatch` and iso-curve trims without bisection) and the budgeted identity
+/// correspondence before fitting a dense Hermite `ψ`. When `enough <= 0.0`, matches
+/// [`trim_image_gap_bound_within`] bit for bit.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn trim_image_gap_bound_within_any(
+    k: &Kernel,
+    surface: &Surface,
+    curve: &Curve,
+    uv: &Curve,
+    range: [f64; 2],
+    floor: f64,
+    [enough, over]: [f64; 2],
+    budget: Option<usize>,
+) -> Result<Option<f64>> {
+    trim_gap_bound_with(
+        k,
+        surface,
+        curve,
+        uv,
+        range,
+        floor,
+        [enough, over],
+        budget,
+        Correspondence::Fitted,
+        enough.is_finite() && enough > 0.0,
     )
 }
 
@@ -5035,6 +5073,7 @@ pub fn trim_same_parameter_gap_bound_within(
         [enough, over],
         budget,
         Correspondence::SameParameter,
+        false,
     )
 }
 
@@ -5094,6 +5133,7 @@ pub(crate) fn trim_image_gap_bound_for_move(
 
 /// The bound of [`trim_image_gap_bound_within`] (`Correspondence::Fitted`) or
 /// [`trim_same_parameter_gap_bound_within`] (`Correspondence::SameParameter`).
+#[allow(clippy::too_many_arguments)]
 fn trim_gap_bound_with(
     k: &Kernel,
     surface: &Surface,
@@ -5104,6 +5144,7 @@ fn trim_gap_bound_with(
     [enough, over]: [f64; 2],
     budget: Option<usize>,
     correspondence: Correspondence,
+    any_within_enough: bool,
 ) -> Result<Option<f64>> {
     let fitted = correspondence == Correspondence::Fitted;
     if !(floor.is_finite() && floor >= 0.0) {
@@ -5123,7 +5164,7 @@ fn trim_gap_bound_with(
         budget,
         correspondence,
         false,
-        false,
+        any_within_enough,
         false,
         &pair,
     )?;
@@ -9511,5 +9552,145 @@ mod tests {
             .unwrap(),
         );
         assert!(pure_nurbs_flags(&surface, &curve, &uv).is_some());
+    }
+
+    /// #22467: `curve_derivs_over_centred` keeps rational curve derivative enclosures narrow
+    /// far from the origin (`x = 2000`), matching `x = 0` instead of inflating by `|x| / r`.
+    #[test]
+    fn curve_derivs_over_centred_stays_narrow_far_from_origin() {
+        use crate::curve::arc::ArcDefinition;
+        use crate::curve::ellipse::Ellipse;
+        use crate::math::Vec3;
+
+        let k = Kernel::default();
+        let make_arc = |x0: f64| {
+            let def = ArcDefinition {
+                centre: Point3::new(x0, 0.0, 0.0),
+                axis: Vec3::Z,
+                reference: Vec3::X,
+                radius: 4.0,
+                start: 0.0,
+                end: std::f64::consts::FRAC_PI_2,
+            };
+            let el = Ellipse::arc(&k, &def).unwrap();
+            NurbsCurve::of(el.base()).unwrap()
+        };
+        let near = make_arc(0.0);
+        let far = make_arc(2000.0);
+        let s = Ivl::new(0.25, 0.5);
+
+        let d_near = curve_derivs_over_centred(&near, s, 2, None).unwrap();
+        let d_far = curve_derivs_over_centred(&far, s, 2, None).unwrap();
+        let d_far_plain = curve_derivs_over(&far, s, 2, None).unwrap();
+
+        let width_x = |d: &[V3<Ivl>], order: usize| d[order].x.hi - d[order].x.lo;
+        assert!(
+            width_x(&d_far, 2) <= width_x(&d_near, 2) * 1.05 + 1e-12,
+            "far centred C'' width {} vs near {}",
+            width_x(&d_far, 2),
+            width_x(&d_near, 2),
+        );
+        assert!(
+            width_x(&d_far_plain, 2) > width_x(&d_far, 2) * 100.0,
+            "expected uncentred C'' ({}) to be >100x wider than centred ({})",
+            width_x(&d_far_plain, 2),
+            width_x(&d_far, 2),
+        );
+
+        // Soundness check: centred intervals enclose point evaluations across `s`.
+        for i in 0..=8 {
+            let t = s.lo + (s.hi - s.lo) * f64::from(i) / 8.0;
+            let pt = curve_derivs_over(&far, Ivl::from(t), 2, None).unwrap();
+            for order in 0..=2 {
+                assert!(d_far[order].x.lo <= pt[order].x.lo && pt[order].x.hi <= d_far[order].x.hi);
+                assert!(d_far[order].y.lo <= pt[order].y.lo && pt[order].y.hi <= d_far[order].y.hi);
+                assert!(d_far[order].z.lo <= pt[order].z.lo && pt[order].z.hi <= d_far[order].z.hi);
+            }
+        }
+    }
+
+    /// #22467: centred rational partials and curve derivatives let `bisected_surface_gap_bound`
+    /// close a far-origin (`x = 2000`) rational arc/cylinder pair in the same piece count as at
+    /// `x = 0` without exhausting `MAX_PIECES` before `recentred_retry`, and
+    /// `trim_image_gap_bound_within_any` closes a `(p=2, q=2)` sphere end-row/equator trim at
+    /// `x = 2000` within `1e-5`.
+    #[test]
+    fn far_origin_centred_gap_bounds_match_origin_pieces() {
+        use crate::curve::arc::ArcDefinition;
+        use crate::curve::ellipse::Ellipse;
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::math::Vec3;
+        use crate::nurbs::b_spline_surface::SurfParamType;
+        use crate::surface::cone::Cone;
+        use crate::surface::sphere::Sphere;
+
+        let k = Kernel::default();
+        let run_cyl = |x0: f64| -> (f64, usize) {
+            let place = Axis2Placement::new(Point3::new(x0, 0.0, 0.0), Vec3::X, Vec3::Y);
+            let cyl = Surface::from(Cone::create_canonical_cylinder(&k, &place, 4.0).unwrap());
+            let dom = cyl.natural_uv_domain_with_nurb(&k).unwrap();
+            let def = ArcDefinition {
+                centre: Point3::new(x0, 0.0, 0.5),
+                axis: Vec3::Z,
+                reference: Vec3::X,
+                radius: 4.0,
+                start: 0.0,
+                end: std::f64::consts::FRAC_PI_2,
+            };
+            let arc = Ellipse::arc(&k, &def).unwrap();
+            let ivl = arc.base().natural_interval();
+            let pieces = Cell::new(0);
+            let bound = bisected_surface_gap_bound(
+                &k,
+                &cyl,
+                &dom,
+                arc.base(),
+                [ivl.min(), ivl.max()],
+                1e-9,
+                [1e-5, f64::INFINITY],
+                &pieces,
+            )
+            .unwrap()
+            .unwrap();
+            (bound, pieces.get())
+        };
+        let (b_near, p_near) = run_cyl(0.0);
+        let (b_far, p_far) = run_cyl(2000.0);
+        assert!(b_near <= 1e-5, "near bound {b_near:e}");
+        assert!(b_far <= 1e-5, "far bound {b_far:e}");
+        assert!(
+            p_far <= p_near + 8,
+            "far cylinder gap bound evaluated {p_far} pieces vs near {p_near}",
+        );
+
+        // `(p = 2, q = 2)` rational sphere equator trim at `x = 2000` via `trim_image_gap_bound_within_any`.
+        let place = Axis2Placement::new(Point3::new(2000.0, 0.0, 0.0), Vec3::X, Vec3::Y);
+        let sphere = Sphere::create_canonical(&k, &place, 4.0).unwrap();
+        let iso = sphere
+            .create_iso_parametric_curve(&k, SurfParamType::V, 0.5, None, true)
+            .unwrap();
+        let surface = Surface::from(sphere);
+        let curve = iso.curve;
+        let uv = Curve::from(
+            BSplineCurve::create_line_segment(
+                2,
+                Point3::new(0.0, 0.5, 0.0),
+                Point3::new(1.0, 0.5, 0.0),
+            )
+            .unwrap(),
+        );
+        let bound = trim_image_gap_bound_within_any(
+            &k,
+            &surface,
+            &curve,
+            &uv,
+            [0.0, 1.0],
+            1e-8,
+            [1e-5, f64::INFINITY],
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(bound <= 1e-5, "far sphere iso trim bound {bound:e}");
     }
 }

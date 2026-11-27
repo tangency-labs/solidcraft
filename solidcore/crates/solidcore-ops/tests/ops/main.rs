@@ -91,6 +91,8 @@ mod fillet_sheets_long_run;
 mod frame_trim;
 #[path = "../heal.rs"]
 mod heal;
+#[path = "../issue_22467_far_origin_fillet_auto.rs"]
+mod issue_22467_far_origin_fillet_auto;
 #[path = "../issue_22467_far_origin_fillet_boolean.rs"]
 mod issue_22467_far_origin_fillet_boolean;
 #[path = "../issue_22820_dome_boolean_regression.rs"]

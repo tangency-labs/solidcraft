@@ -292,7 +292,7 @@ pub fn curve_derivs_over(
     ld: usize,
     piece: Option<usize>,
 ) -> Result<Vec<V3<Ivl>>> {
-    derivs_over(cn, s, ld, piece, None)
+    derivs_over(cn, s, ld, piece, CurveShift::None)
 }
 
 /// [`curve_derivs_over`] of the curve moved by `−about`: the derivatives of `C − about`,
@@ -312,17 +312,47 @@ pub fn curve_derivs_over_about(
     piece: Option<usize>,
     about: [f64; 3],
 ) -> Result<Vec<V3<Ivl>>> {
-    derivs_over(cn, s, ld, piece, Some(about))
+    derivs_over(cn, s, ld, piece, CurveShift::About(about))
 }
 
-/// [`curve_derivs_over`], of the curve moved by `−about` where given
-/// ([`curve_derivs_over_about`]).
+/// [`curve_derivs_over`], the rational quotient on each non-degenerate piece taken about the
+/// curve's point at the piece's middle `o` and added back to `D[0]` (`(C − o) + o`), with no
+/// extra basis evaluation. On a rational curve far from the origin every derivative is far
+/// narrower than from the origin (as [`nurbs_partials_within_span_centred`] centres a
+/// surface's partials); a single-point interval (`a == b`), or a piece where `o` is not
+/// finite, is enclosed identically to [`curve_derivs_over`].
+///
+/// # Errors
+///
+/// As [`curve_derivs_over`].
+pub fn curve_derivs_over_centred(
+    cn: &NurbsCurve,
+    s: Ivl,
+    ld: usize,
+    piece: Option<usize>,
+) -> Result<Vec<V3<Ivl>>> {
+    derivs_over(cn, s, ld, piece, CurveShift::Middle)
+}
+
+/// The point the rational quotient of [`derivs_over`] is taken about.
+#[derive(Clone, Copy)]
+enum CurveShift {
+    /// The origin: the derivatives of `C`.
+    None,
+    /// `about`: the derivatives of `C − about` ([`curve_derivs_over_about`]).
+    About([f64; 3]),
+    /// Each non-degenerate piece's midpoint `o`, added back to `D[0]`
+    /// ([`curve_derivs_over_centred`]).
+    Middle,
+}
+
+/// [`curve_derivs_over`], the quotient taken about the point `shift` names.
 fn derivs_over(
     cn: &NurbsCurve,
     s: Ivl,
     ld: usize,
     piece: Option<usize>,
-    about: Option<[f64; 3]>,
+    shift: CurveShift,
 ) -> Result<Vec<V3<Ivl>>> {
     let k0 = piece.unwrap_or_else(|| span(&cn.u, cn.p, cn.n, s.lo));
     let k1 = piece.unwrap_or_else(|| span(&cn.u, cn.p, cn.n, s.hi));
@@ -369,15 +399,31 @@ fn derivs_over(
                 z = z + nj * Ivl::from(pw_at(&cn.pw, li + 2));
                 w = w + nj * Ivl::from(pw_at(&cn.pw, li + 3));
             }
-            if let Some([ox, oy, oz]) = about {
-                // (A − o w): the homogeneous form of C − o
-                x = x - Ivl::from(ox) * w;
-                y = y - Ivl::from(oy) * w;
-                z = z - Ivl::from(oz) * w;
-            }
             if let (Some(ad), Some(wd)) = (am.get_mut(d), wm.get_mut(d)) {
                 *ad = V3 { x, y, z };
                 *wd = w;
+            }
+        }
+        let (about, add_back) = match shift {
+            CurveShift::None => (None, false),
+            CurveShift::About(o) => (Some(o), false),
+            CurveShift::Middle if a == b => (None, false),
+            CurveShift::Middle => {
+                // The curve's point at the piece's middle, as doubles: any finite point is
+                // sound, and this makes C − o smallest over [a, b].
+                let a0 = at1(&am, 0, VZ);
+                let w0 = at1(&wm, 0, IZ).mid();
+                let o = [a0.x.mid() / w0, a0.y.mid() / w0, a0.z.mid() / w0];
+                let finite = o.iter().all(|x| x.is_finite());
+                (finite.then_some(o), finite)
+            }
+        };
+        if let Some([ox, oy, oz]) = about {
+            for (ad, &w) in am.iter_mut().zip(&wm) {
+                // (A − o w): the homogeneous form of C − o
+                ad.x = ad.x - Ivl::from(ox) * w;
+                ad.y = ad.y - Ivl::from(oy) * w;
+                ad.z = ad.z - Ivl::from(oz) * w;
             }
         }
         let dt = Ivl::new(a, b) - Ivl::from(m);
@@ -422,6 +468,14 @@ fn derivs_over(
                     y: v.y / w0,
                     z: v.z / w0,
                 };
+            }
+        }
+        if let (true, Some([ox, oy, oz])) = (add_back, about) {
+            // C = (C − o) + o, rounded outward
+            if let Some(c0) = cv.first_mut() {
+                c0.x = c0.x + Ivl::from(ox);
+                c0.y = c0.y + Ivl::from(oy);
+                c0.z = c0.z + Ivl::from(oz);
             }
         }
         for (r, c) in rd.iter_mut().zip(&cv) {

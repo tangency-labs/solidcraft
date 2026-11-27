@@ -2,18 +2,19 @@
 //! its partial derivatives up to second order over a UV box of its base NURBS net, in
 //! outward-rounded [`Ivl`] arithmetic.
 //!
-//! Not upstream. Built on [`nurbs_partials_over_piece`] and [`partials_hull`] so UV-lift
+//! Not upstream. Built on [`partials_over_piece`] and [`partials_hull`] so UV-lift
 //! certification ([`crate::surface::surface::exact_pieces::certified_lift`]) shares the G^n
 //! certificate's interval and rational B-spline machinery with zero duplicate interval type
 //! or heuristic rounding slack.
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
-use super::certificate::{nurbs_partials_over_piece, partials_hull};
+use super::certificate::partials_hull;
 use super::interval::Ivl;
 use super::series::{v_add, v_hull, v_scale, v_sub, V3, VZ};
 use super::station::{Nurbs, Partials};
 use crate::error::{Result, SolidError};
+use crate::geom::nurbs_enclosure::{partials_over_piece, Shift};
 
 const OP: &str = "blend::fillet_section::offset_box";
 
@@ -44,7 +45,7 @@ fn v_cross(a: V3<Ivl>, b: V3<Ivl>) -> V3<Ivl> {
 ///
 /// # Errors
 ///
-/// [`SolidError::PortInvariant`] when `lk > 2`; those of [`nurbs_partials_over_piece`].
+/// [`SolidError::PortInvariant`] when `lk > 2`; those of [`partials_over_piece`].
 #[allow(clippy::too_many_arguments)]
 pub fn offset_partials_over_piece(
     net: &Nurbs,
@@ -84,12 +85,17 @@ pub fn offset_and_base_partials_over_piece(
             "offset partials requested past second order",
         ));
     }
+    let shift = if ua == ub && va == vb {
+        Shift::None
+    } else {
+        Shift::Middle
+    };
     // Exact-zero offset identity (Q = S), not a tolerance.
     if d.lo == 0.0 && d.hi == 0.0 {
-        let s = nurbs_partials_over_piece(net, ku, kv, ua, ub, va, vb, lk)?;
+        let s = partials_over_piece(net, ku, kv, ua, ub, va, vb, lk, None, shift)?;
         return Ok((s.clone(), s));
     }
-    let b = nurbs_partials_over_piece(net, ku, kv, ua, ub, va, vb, lk + 1)?;
+    let b = partials_over_piece(net, ku, kv, ua, ub, va, vb, lk + 1, None, shift)?;
     let s = b.at(0, 0);
     let bu = b.at(1, 0);
     let bv = b.at(0, 1);
@@ -215,7 +221,12 @@ fn unit_normal_over_parts(
     let mut out: Option<V3<Ivl>> = None;
     for &(ua, ub, ku) in pu {
         for &(va, vb, kv) in pv {
-            let b = nurbs_partials_over_piece(net, ku, kv, ua, ub, va, vb, 1)?;
+            let shift = if ua == ub && va == vb {
+                Shift::None
+            } else {
+                Shift::Middle
+            };
+            let b = partials_over_piece(net, ku, kv, ua, ub, va, vb, 1, None, shift)?;
             let m = v_cross(b.at(1, 0), b.at(0, 1));
             let inv_l = Ivl::from(1.0) / v_dot(m, m).sqrt();
             let n = v_scale(m, inv_l);
@@ -244,7 +255,7 @@ fn unit_normal_over_parts(
 ///
 /// # Errors
 ///
-/// Those of [`nurbs_partials_over_piece`].
+/// Those of [`partials_over_piece`].
 pub fn offset_crossed_knot_jumps(
     net: &Nurbs,
     d: Ivl,
