@@ -306,6 +306,11 @@ fn fitting_columns(label_widths: &[f32], lead: f32, available: f32, gap: f32, wa
 
 /// Compact checkbox options in bounded columns. Tokens: `form_checkbox_height, control_fill/border, radius_sm, accent, on_accent, font_body, text, space_2/3/6/8/14`.
 pub fn checkbox_grid(ui: &mut Ui, items: &mut [(&str, &mut bool)], columns: usize) {
+    checkbox_grid_enabled(ui, items, columns, |_| true);
+}
+
+/// [`checkbox_grid`] with the items whose label `enabled` rejects drawn disabled; gives each item's response, in order. Tokens: `checkbox_grid tokens`.
+pub fn checkbox_grid_enabled(ui: &mut Ui, items: &mut [(&str, &mut bool)], columns: usize, enabled: impl Fn(&str) -> bool) -> Vec<egui::Response> {
     let t = Tokens::get();
     let columns = columns.clamp(1, items.len().max(1));
     // Fewer columns for labels (a translation can be much longer) that would be cut in these.
@@ -320,26 +325,35 @@ pub fn checkbox_grid(ui: &mut Ui, items: &mut [(&str, &mut bool)], columns: usiz
         .collect();
     let columns = fitting_columns(&widths, t.space_14 / 2.0 + t.space_6 + t.space_14 / 2.0, dimension(ui.available_width()), t.space_8, columns);
     let width = ((dimension(ui.available_width()) - t.space_8 * columns.saturating_sub(1) as f32) / columns as f32).max(0.0);
+    let mut responses = Vec::with_capacity(items.len());
     for chunk in items.chunks_mut(columns) {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing = vec2(t.space_8, 0.0);
             for (label, value) in chunk {
-                let (rect, mut response) = ui.allocate_exact_size(vec2(width, t.form_checkbox_height), egui::Sense::click());
-                if response.clicked() {
-                    **value = !**value;
-                    response.mark_changed();
-                }
-                let square = super::checks::box_at(ui, egui::pos2(rect.left() + t.space_14 / 2.0, rect.center().y));
-                super::checks::paint_box(ui, square, &response, **value, false);
-                let translated = solidcraft_ui_text::tr_label(label);
-                let text = if translated == "Tangent Chain" { "Tangent chain" } else { translated };
-                let text_rect = egui::Rect::from_min_max(egui::pos2((square.right() + t.space_6).min(rect.right()), rect.top()), rect.max);
-                paint_text(ui, text_rect, text, egui::FontId::proportional(t.font_body), t.form_ink, false);
-                response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), **value, translated));
-                solidcraft_ui_registry::publish_target_as(&format!("dialog:{label}"), &format!("dialog:checkbox:{label}"), rect);
+                let on = enabled(label);
+                responses.push(ui.add_enabled_ui(on, |ui| checkbox_cell(ui, label, value, width)).inner);
             }
         });
     }
+    responses
+}
+
+fn checkbox_cell(ui: &mut Ui, label: &str, value: &mut bool, width: f32) -> egui::Response {
+    let t = Tokens::get();
+    let (rect, mut response) = ui.allocate_exact_size(vec2(width, t.form_checkbox_height), egui::Sense::click());
+    if response.clicked() {
+        *value = !*value;
+        response.mark_changed();
+    }
+    let square = super::checks::box_at(ui, egui::pos2(rect.left() + t.space_14 / 2.0, rect.center().y));
+    super::checks::paint_box(ui, square, &response, *value, false);
+    let translated = solidcraft_ui_text::tr_label(label);
+    let text = if translated == "Tangent Chain" { "Tangent chain" } else { translated };
+    let text_rect = egui::Rect::from_min_max(egui::pos2((square.right() + t.space_6).min(rect.right()), rect.top()), rect.max);
+    paint_text(ui, text_rect, text, egui::FontId::proportional(t.font_body), t.form_ink, false);
+    response.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, ui.is_enabled(), *value, translated));
+    solidcraft_ui_registry::publish_target_as(&format!("dialog:{label}"), &format!("dialog:checkbox:{label}"), rect);
+    response
 }
 
 /// Shared expanded options band for feature dialogs.

@@ -54,6 +54,7 @@ pub mod design_tab_prefs;
 pub mod design_view_ui;
 mod dialog_descriptor;
 pub mod dialogs;
+pub mod dialogs_align;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
 pub mod dialogs_capture;

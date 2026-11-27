@@ -1191,13 +1191,14 @@ impl Dialog {
             }
             "solid.align" => {
                 let components = s.selection.iter().any(|x| matches!(x, Sel::Occurrence { .. }));
+                let objects_tip = crate::dialogs_align::objects_tip(components);
                 // Bodies also take sketch points and circles: a frame the bodies follow (#6257).
                 let picks =
                     if components { FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN } else { ALIGN_PICKS } | selection::SNAP_POINTS;
                 Dialog::new(
                     Kind::Align { flip: false, components, axes: [true; 3], angle: String::new() },
                     vec![
-                        SelInput::new(if components { "Components" } else { "Bodies" }, BODIES, true),
+                        SelInput::new(if components { "Components" } else { "Bodies" }, BODIES, true).tip(objects_tip),
                         SelInput::new("From", picks, false),
                         SelInput::new("To", picks, false),
                     ],
@@ -1704,9 +1705,14 @@ impl Dialog {
     }
 
     /// Make the first single input still empty (after the filled ones) active. Coil's Axis is
-    /// optional and stays unvisited, so another profile click replaces the profile.
+    /// optional and stays unvisited, so another profile click replaces the profile. Align's Bodies
+    /// is optional too (what the From pick is on moves): it is not visited.
     fn advance(&mut self) {
-        let optional = |index: usize| index == 1 && matches!(self.kind, Kind::Primitive { cmd: "solid.coil", .. });
+        let optional = |index: usize| match self.kind {
+            Kind::Primitive { cmd: "solid.coil", .. } => index == 1,
+            Kind::Align { .. } => index == 0,
+            _ => false,
+        };
         if let Some(i) = self.inputs.iter().enumerate().position(|(index, i)| i.items.is_empty() && !optional(index)) {
             self.active = i;
         } else {
@@ -3441,7 +3447,7 @@ thread_local! {
 }
 
 /// A plane input as a command parameter: an origin/construction plane name or a face plane.
-fn plane_value(s: &Session, sel: Option<&Sel>) -> Option<Value> {
+pub(crate) fn plane_value(s: &Session, sel: Option<&Sel>) -> Option<Value> {
     match sel? {
         Sel::Plane { name } => Some(json!(name)),
         Sel::Face { body, index, point } => {
@@ -3754,12 +3760,13 @@ fn align_object_type_row(d: &mut Dialog, ui: &mut egui::Ui) {
     if ty != cur {
         *components = ty == 1;
         inp.label = if *components { "Components" } else { "Bodies" };
+        inp.tip = Some(crate::dialogs_align::objects_tip(*components));
         let back = d.other_objects.get_mut(ty).map(std::mem::take).unwrap_or_default();
         let items = std::mem::replace(&mut inp.items, back);
         if let Some(slot) = d.other_objects.get_mut(cur) {
             *slot = items;
         }
-        d.active = 0;
+        d.active = 1;
         d.error = None;
     }
 }
@@ -3939,7 +3946,7 @@ fn align_moves_shared(s: &Session, items: &[Sel]) -> bool {
     occurrence_paths(s, items).iter().any(|path| s.occurrence_shared(path))
 }
 
-fn occurrence_paths(s: &Session, items: &[Sel]) -> Vec<Vec<u64>> {
+pub(crate) fn occurrence_paths(s: &Session, items: &[Sel]) -> Vec<Vec<u64>> {
     let mut out = Vec::new();
     for item in items {
         let path = match item {
@@ -5856,7 +5863,7 @@ fn remembered_extra_keys(kind: &Kind) -> &'static [&'static str] {
 }
 
 /// Keep the options and values of an applied dialog for the next one of the same command.
-fn remember(app: &mut SolveApp, dialog: &Dialog) {
+pub(crate) fn remember(app: &mut SolveApp, dialog: &Dialog) {
     if !app.preferences.remember_dialog_values {
         return;
     }
@@ -6687,7 +6694,7 @@ pub(crate) fn facing(app: &SolveApp, n: Vec3, again: bool) -> Vec3 {
     if again && app.cam.back().dot(n) > 0.999 { -n } else { n }
 }
 
-fn sels(d: &Dialog, i: usize) -> &[Sel] {
+pub(crate) fn sels(d: &Dialog, i: usize) -> &[Sel] {
     selection::items(&d.inputs, i)
 }
 
@@ -7895,76 +7902,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "faces")?;
             ("face.delete", with_single_body(json!({"faces": face_points(0)}), sels(d, 0)))
         }
-        Kind::Align { flip, components, axes, angle } => {
-            need(0, if *components { "components" } else { "bodies" })?;
-            need(1, "what to move from")?;
-            need(2, "where to move it to")?;
-            let mut p = if *components {
-                let paths = occurrence_paths(s, sels(d, 0));
-                if paths.is_empty() {
-                    return Err("select components first".into());
-                }
-                json!({"paths": paths, "flip": flip})
-            } else {
-                let mut p = json!({"bodies": sels(d, 0).body_names(), "flip": flip});
-                if *axes != [true; 3] {
-                    p["axes"] = json!(axes);
-                }
-                p
-            };
-            for (i, key) in [(1, "from"), (2, "to")] {
-                let snap = d.extra.get(&format!("{key}_snap")).and_then(Value::as_str).unwrap_or("picked");
-                match (sels(d, i).first(), snap) {
-                    // Onto Plane sets the bodies on a plane: a planar face or a plane, nothing else.
-                    (Some(sel), "plane") if key == "to" && !*components && !matches!(sel, Sel::Face { .. } | Sel::Plane { .. }) => {
-                        return Err("Onto Plane takes a planar face or a plane".into());
-                    }
-                    // A sketch point or circle is a frame whatever the snap: the bodies follow it
-                    // when it moves (#6257).
-                    (Some(sel @ (Sel::SketchPoint { .. } | Sel::SketchCurve { .. })), _) if !*components => {
-                        p[format!("{key}_frame")] = construct_ref(app, sel)?
-                    }
-                    // The joint origin the Joint dialog makes of the pick, found again by name.
-                    (Some(sel @ (Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. })), "origin")
-                        if !*components && !matches!(sel, Sel::Vertex { body, .. } if body.is_empty()) =>
-                    {
-                        p[format!("{key}_frame")] = crate::dialogs_assembly::snap_of(s, sel).ok_or("this pick has no joint origin")?.param;
-                    }
-                    (Some(Sel::Face { point, .. }), "center") => p[key] = json!({"snap": "face_center", "at": pt(*point)}),
-                    (Some(Sel::Face { point, .. } | Sel::Edge { point, .. }), "circle") => {
-                        p[key] = json!({"snap": "circle_center", "at": pt(*point)})
-                    }
-                    // Onto Plane: the To face as the plane it lies in, so the bodies come onto it
-                    // along its normal only.
-                    (Some(sel @ Sel::Face { .. }), "plane") if key == "to" && !*components => {
-                        p["to_plane"] = plane_value(s, Some(sel)).ok_or("Onto Plane takes a planar face or a plane")?
-                    }
-                    (Some(Sel::Face { point, .. }), _) => p[format!("{key}_face")] = pt(*point),
-                    (Some(Sel::Edge { point, .. }), _) => p[key] = json!({"snap": "edge_mid", "at": pt(*point)}),
-                    // The origin point (a vertex of no body at the origin) stays the origin; a snap
-                    // point of no body elsewhere (a sketch line's middle) is where it is.
-                    (Some(Sel::Vertex { body, point }), _) if body.is_empty() && [point.x, point.y, point.z].iter().all(|v| v.abs() < 1e-9) => {
-                        p[key] = json!("origin")
-                    }
-                    (Some(Sel::Vertex { point, .. }), _) => p[key] = pt(*point),
-                    // A plane stays a plane, so the bodies follow it when it moves.
-                    (Some(Sel::Plane { name }), _) => p[format!("{key}_plane")] = json!(name),
-                    _ => return Err("pick faces, edges, vertices, planes or sketch points".into()),
-                }
-            }
-            // Axes limit a point-to-point move; a face, plane or frame pick has no point to limit, and the
-            // command would refuse with its parameter names (#13502). Say it in the dialog's words.
-            if p.get("axes").is_some()
-                && ["from_face", "to_face", "from_plane", "to_plane", "from_frame", "to_frame"].iter().any(|k| p.get(*k).is_some())
-            {
-                return Err("X, Y and Z limit a move between points: with a face, plane or frame pick, tick all three, or pick a vertex, an edge or a Center snap".into());
-            }
-            // Frames and a turn are the bodies' (#6257); components align without them.
-            if !*components && !angle.trim().is_empty() {
-                p["angle"] = json!(angle.trim());
-            }
-            (if *components { "occurrence.align" } else { "solid.align" }, p)
-        }
+        Kind::Align { .. } => crate::dialogs_align::command(app, d)?,
         Kind::Remove => {
             need(0, "bodies")?;
             ("solid.remove", json!({"bodies": sels(d, 0).body_names()}))

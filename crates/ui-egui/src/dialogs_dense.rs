@@ -1264,6 +1264,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
     // Picked components moved earlier and not captured: Revert Position puts just them back.
     let revertible = if placing { crate::dialogs_move::revertible(app, d) } else { Vec::new() };
     let unresolved_axis = unresolved_coil_axis(d, &app.session);
+    let align_flip_blocked = if matches!(d.kind, Kind::Align { .. }) { crate::dialogs_align::flip_blocked(app, d) } else { None };
     match &mut d.kind {
         Kind::Revolve { angle, operation, .. } => {
             let cur = usize::from(to_object_on(&d.inputs));
@@ -1434,17 +1435,26 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             // Where on the picked face or edge to snap: as picked (a face turns to meet
             // the other, an edge at its middle), its center, a round one's center, or, for bodies,
             // the joint origin the Joint dialog makes of it (found again as the part changes, #6257).
+            // Bodies start on Auto, what is under the cursor: a round edge or face its circle, a
+            // flat face the face, anything else as picked.
             let snaps: &[(&str, &str)] = if *components {
                 &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle")]
             } else {
-                &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin")]
+                &[("Auto", "auto"), ("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin")]
             };
             // A planar To face as the plane it lies in: the moved face comes onto it along its
             // normal only, without sliding across to the picked point.
             let to_snaps: &[(&str, &str)] = if *components {
                 snaps
             } else {
-                &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin"), ("Onto Plane", "plane")]
+                &[
+                    ("Auto", "auto"),
+                    ("As Picked", "picked"),
+                    ("Center", "center"),
+                    ("Circle Center", "circle"),
+                    ("Joint Origin", "origin"),
+                    ("Onto Plane", "plane"),
+                ]
             };
             for (label, key, choices) in [("From Snap", "from_snap", snaps), ("To Snap", "to_snap", to_snaps)] {
                 form_row(ui, label, |ui| {
@@ -1452,11 +1462,11 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 });
             }
             if *components {
-                ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
+                crate::dialogs_align::options(ui, flip, &mut [], align_flip_blocked);
             } else {
                 // A turn about the target's direction after the move (#6257).
                 enter |= hint_row(ui, "Angle", angle, tr("none"));
-                ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("X", ax), ("Y", ay), ("Z", az)]);
+                crate::dialogs_align::options(ui, flip, &mut [("X", ax), ("Y", ay), ("Z", az)], align_flip_blocked);
             }
             // A part inside a subassembly placed more than once sits where that shared
             // definition says: aligning it moves it in every placement.
