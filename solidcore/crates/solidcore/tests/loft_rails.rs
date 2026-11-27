@@ -211,6 +211,11 @@ fn four_rails_to_an_apex_certify_through_one_station() {
     let made = loft_rails_to_point(&mut k, &base, apex, &refs, &opts).unwrap();
     assert_eq!(made.params, vec![0.0, 0.5, 1.0], "{:?}", made.bounds);
     assert!(made.bounds.iter().all(|b| *b <= 1e-6), "{:?}", made.bounds);
+    let two = loft_rails_to_point(&mut k, &base, apex, &refs[..2], &opts);
+    assert!(
+        matches!(two, Err(SolidError::InvalidInput { .. })),
+        "{two:?}"
+    );
 }
 
 /// The rectangle and trapezoid lie on perpendicular planes. Their corresponding

@@ -69,7 +69,8 @@
 //! its own, as a loft to a point makes its walls, and the rails are certified against those
 //! walls. A wall's edge at the apex closes to a point, where any foot along it is a foot: each
 //! rail's foot there is taken on the line of the wall's parameters its foot at the wire before
-//! lies on. Refused besides: an apex not finite or within the body tolerance of the base's plane.
+//! lies on. Refused besides: fewer than three rails, an apex not finite or within the body
+//! tolerance of the base's plane.
 //!
 //! **One profile along two rails ([`sweep_two_rails`]).** The two-rail sweep (Piegl and
 //! Tiller, *The NURBS Book*, 2nd ed., §10.4: a sweep as a skin through placed sections): an open
@@ -1043,8 +1044,7 @@ pub struct RailedToPoint {
 /// rail guiding there the point it guided at the base. Each column of rows is skinned on its own
 /// through the rows' parameters, as a loft to a point through them makes its walls, and each
 /// rail is certified against those walls. `opts.cap` and `opts.degree` are not used. It takes
-/// three to sixteen rails: the warp's stations stay off the apex, where one or two rails' maps
-/// need a station's middle.
+/// three to sixteen rails.
 ///
 /// # Errors
 ///
