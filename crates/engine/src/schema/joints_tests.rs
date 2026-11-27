@@ -63,6 +63,7 @@ fn schemas_and_the_key_check_agree() {
             "end",
             "export_frame",
             "face",
+            "faces",
             "frame",
             "name",
             "occurrence",
@@ -82,6 +83,26 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RackPinionParams>(), &["a", "b", "link", "quiet", "radius", "reverse"]);
     assert_keys(input_schema_for::<ScrewParams>(), &["a", "b", "joint", "link", "pitch", "quiet", "reverse"]);
     assert_keys(input_schema_for::<CamParams>(), &["a", "b", "flip", "follower", "link", "profile", "quiet", "radius", "tip"]);
+}
+
+#[test]
+fn center_rule_wall_pairs_have_two_world_points_in_both_schemas() {
+    let named = serde_json::to_value(input_schema_for::<MakeJointOriginParams>()).unwrap();
+    let constraint = serde_json::to_value(input_schema_for::<CreateConstraintParams>()).unwrap();
+    for (faces, valid) in [
+        (json!([[1, 2, 3], {"x": 4, "y": 5, "z": 6}]), true),
+        (json!([[1, 2, 3]]), false),
+        (json!([[1, 2, 3], [4, 5, 6], [7, 8, 9]]), false),
+        (json!([[1, 2, 3], "F1:+x"]), false),
+        (json!(null), false),
+    ] {
+        let origin = json!({"occurrence": "Slot:1", "faces": faces});
+        let center = json!({"type": "center", "a": origin, "b": {"plane": "YZ"}});
+        assert_eq!(conforms(&named, &named, &origin), valid, "{origin}");
+        assert_eq!(conforms(&constraint, &constraint, &center), valid, "{center}");
+        assert_eq!(serde_json::from_value::<MakeJointOriginParams>(origin).is_ok(), valid);
+        assert_eq!(serde_json::from_value::<CreateConstraintParams>(center).is_ok(), valid);
+    }
 }
 
 #[test]
@@ -1611,8 +1632,15 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
     let screw = input_schema_for::<ScrewParams>();
     assert_eq!(screw.as_value()["anyOf"], json!([{"required": ["joint"]}, {"required": ["a", "b"]}]));
     assert_eq!(input_schema_for::<ReachParams>().as_value()["dependentRequired"], json!({"axis": ["z"]}));
-    // face, circle, edge, point, sketch, plane, axis and frame: the forms the handler reads.
-    assert_eq!(input_schema_for::<MakeJointOriginParams>().as_value()["anyOf"].as_array().map(Vec::len), Some(8));
+    // The eight existing origin forms and the new pair of distinct parallel faces.
+    assert_eq!(
+        input_schema_for::<MakeJointOriginParams>().as_value()["anyOf"],
+        json!([
+            {"required": ["face"]}, {"required": ["circle"]}, {"required": ["edge"]},
+            {"required": ["point"]}, {"required": ["sketch"]}, {"required": ["plane"]},
+            {"required": ["axis"]}, {"required": ["frame"]}, {"required": ["faces"]}
+        ])
+    );
 }
 
 /// A design with the pieces the couplings join, and a tray with a hole for the joint origins by
