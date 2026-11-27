@@ -1450,7 +1450,7 @@ fn replace_sketch_from_file(app: &mut SolveApp, sketch: u64, at: Pos2) {
         let sketches: Vec<(u64, String)> = match solidcraft_engine::io::read_design_file(&path, None::<fn(solidcraft_engine::io::DesignPreview)>) {
             Ok((doc, _)) => doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| (f.id, f.name.clone())).collect(),
             Err(e) => {
-                app.set_status(format!("{path}: {e}"), true);
+                app.set_status(format!("{}: {e}", crate::display_user_path(&path)), true);
                 return;
             }
         };
