@@ -11112,19 +11112,15 @@ mod refused_ok_tests {
         let state = app.session.model.state();
         let sheet = &state.surface_sheets[0];
         let body = state.body(&sheet.body).unwrap();
-        let (query, order) = solidcraft_kernel::services::ExactBody::from_record(body.body.record(), true).unwrap();
+        let faces = body.body.faces(0.01).unwrap();
         [0, 1].map(|joint| {
             let source = sheet.bend_source_edge(joint, body).unwrap();
             sheet
                 .bend_face_indices(body, &source)
                 .into_iter()
                 .find_map(|index| {
-                    let centroid = query.face_centroid(&order, index, 1e-6).ok()?.centroid;
-                    let [x, y, z] = centroid;
-                    let point = Vec3::new(x, y, z);
-                    let distances = query.face_distances(&order, index, &[centroid]).unwrap();
-                    let distance = distances.first().copied().flatten().expect("the trimmed face distance is answered");
-                    (distance.is_finite() && (0.0..=1e-6).contains(&distance)).then_some((index, point))
+                    let point = faces.get(index)?.centroid;
+                    body.body.faces_within(point, 1e-6).unwrap().iter().any(|&(face, _)| face == index).then_some((index, point))
                 })
                 .expect("a built flange has a point inside one of its faces")
         })

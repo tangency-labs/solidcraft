@@ -2864,22 +2864,10 @@ impl SurfaceSheet {
         if body.is_mesh() {
             return err("pick corner joins on an exact sheet body");
         }
-        let query_error = |error: solidcraft_kernel::services::Error| DocError::Invalid(format!("could not query the selected sheet: {error}"));
-        let (query, order) = solidcraft_kernel::services::ExactBody::from_record(body.record(), true).map_err(query_error)?;
-        let points = picks.map(|point| [point.x, point.y, point.z]);
         let mut joints = [None, None];
-        for face in 0..body.face_count() {
-            let distances = query.face_distances(&order, face, &points).map_err(query_error)?;
-            if distances.len() != points.len() {
-                return err("the corner face query was not answered");
-            }
-            for (saved, distance) in joints.iter_mut().zip(distances) {
-                let Some(distance) = distance.filter(|distance| distance.is_finite() && *distance >= 0.0) else {
-                    return err("the corner face query was not answered");
-                };
-                if distance > tol {
-                    continue;
-                }
+        for (saved, point) in joints.iter_mut().zip(picks) {
+            let faces = body.faces_within(point, tol).map_err(|error| DocError::Invalid(format!("could not query the selected sheet: {error}")))?;
+            for (face, _) in faces {
                 let Some(joint) = self.parts.get(face).and_then(Option::as_ref).and_then(|part| self.bend_joint_for_part(&part.part)) else {
                     continue;
                 };
