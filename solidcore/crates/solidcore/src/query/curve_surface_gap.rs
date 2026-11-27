@@ -8836,7 +8836,7 @@ mod tests {
         assert_eq!(composed(&cn, &polyline(&beyond)), None);
     }
 
-    /// #22930 (CodeRabbit on #23045): a trim whose hull passes its patch's neighbours would be
+    /// #22930 (review of #23045): a trim whose hull passes its patch's neighbours would be
     /// moved through spans whose speed the bound does not take, so it is not bounded. On a
     /// degree 1 net in the plane `x = 0`, `u` knots `0, 1, 2, 3, 10`, `z` rising by 100 over
     /// `[0, 1]` and flat after, a trim from `u = 0.25` to `9.75` would be moved into
