@@ -1334,6 +1334,35 @@ mod tests {
         worst
     }
 
+    /// [`same_parameter_off`] at the parameters `2^-k` of the way from the rib's start,
+    /// `k = 1..=48`: toward its tangent end, below where its graded pieces stop.
+    fn near_end_off(
+        k: &Kernel,
+        rib: &TangentEndRib,
+        fillet: &Surface,
+        end: &Surface,
+        exact: &dyn Fn(f64) -> Point3,
+    ) -> f64 {
+        let ivl = rib.curve_3d.natural_interval();
+        let on = |c: &BSplineCurve, s: &Surface, t: f64| {
+            let p = c.evaluate_point(t).unwrap();
+            s.evaluate_point(k, Point2::new(p.x, p.y)).unwrap()
+        };
+        let mut worst: f64 = 0.0;
+        for i in 1..=48 {
+            let t = ivl.min() + (ivl.max() - ivl.min()) * 0.5_f64.powi(i);
+            let x = exact(t);
+            for y in [
+                rib.curve_3d.evaluate_point(t).unwrap(),
+                on(&rib.fillet_uv, fillet, t),
+                on(&rib.end_uv, end, t),
+            ] {
+                worst = worst.max(y.distance(x));
+            }
+        }
+        worst
+    }
+
     /// The farthest the rib's curves are from the surfaces, at 1001 parameters: the 3D
     /// curve from either surface, the fillet UV curve's point from the end surface, the end
     /// UV curve's point from the fillet surface. Each is at most the curve's distance from
@@ -1782,7 +1811,8 @@ mod tests {
     /// [`tangent_end_surfaces`], both NURBS; #19140): the graded pieces stop at `t*` near
     /// the tangent end, where a ring about the fixed centre `alpha0` costs more than the
     /// tolerance. The rib is still bounded up to its tangent end, and the bound holds each
-    /// curve's distance from the closed-form rib at the same parameter.
+    /// curve's distance from the closed-form rib at the same parameter, also at parameters
+    /// down to `2^-48`, inside the part next to the tangent end.
     #[test]
     fn a_rib_at_a_true_tangent_end_of_a_large_round_is_certified_within_the_tolerance() {
         let k = Kernel::default();
@@ -1793,10 +1823,11 @@ mod tests {
         let rib = tangent_end_rib(&k, &fillet, &end, 2, p, other, None, false, tol, 0.0).unwrap();
         let bound = rib.bound.unwrap();
         assert!(bound <= tol, "{bound:e}");
-        let same = same_parameter_off(&k, &rib, &fillet, &end, &|t| {
-            on_tangent_rib(&k, &fillet, r, t)
-        });
+        let exact = |t| on_tangent_rib(&k, &fillet, r, t);
+        let same = same_parameter_off(&k, &rib, &fillet, &end, &exact);
         assert!(same <= bound + 1e-12, "{same:e} > {bound:e}");
+        let near = near_end_off(&k, &rib, &fillet, &end, &exact);
+        assert!(near <= bound + 1e-12, "{near:e} > {bound:e}");
     }
 
     /// [`tangent_end_surfaces`] with its end surface lifted by `d` along z, its normal at the

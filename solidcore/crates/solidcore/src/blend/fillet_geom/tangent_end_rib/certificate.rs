@@ -1131,15 +1131,16 @@ impl Rib<'_, '_> {
             return Ok(None);
         };
         let offset = (b[0] - Ivl::from(a0)).mag();
-        if let Some(d) = self.fixed_ring(&f, (a0, start), ts, 2.0 * offset, tol)? {
-            return Ok(Some(d));
-        }
-        self.moving_bands(&f, (a0, start), ts, b[0], tol)
+        Ok(match self.fixed_ring(&f, (a0, start), ts, 2.0 * offset, tol)? {
+            Ring::Within(d) => Some(d),
+            // the ring about alpha0 costs more than tol: the bands about alpha_c
+            Ring::Over => self.moving_bands(&f, (a0, start), ts, b[0], tol)?,
+            Ring::Open => None,
+        })
     }
 
     /// The ring `A <= |alpha − alpha0| <= 2A` over `[0, t_hi]` ([`Self::near_bound`]), from
-    /// `big_a`, the root at `t_hi` less than `big_a` from `alpha0`: the bound within `tol`,
-    /// or `None`.
+    /// `big_a`, the root at `t_hi` less than `big_a` from `alpha0`.
     fn fixed_ring(
         &self,
         f: &Frame,
@@ -1147,7 +1148,7 @@ impl Rib<'_, '_> {
         t_hi: f64,
         big_a: f64,
         tol: f64,
-    ) -> Result<Option<f64>> {
+    ) -> Result<Ring> {
         let t = Ivl::new(0.0, t_hi);
         let sigma = self.sigma(t).0;
         let at = Ivl::from;
@@ -1157,11 +1158,14 @@ impl Rib<'_, '_> {
             self.kernel.check_cancelled(OP)?;
             let alpha = at(a0) + Ivl::new(-big_a, big_a);
             let Some(s) = self.fillet_over(sigma, alpha, 1) else {
-                return Ok(None);
+                return Ok(Ring::Open);
             };
+            if !big_a.is_finite() || big_a <= 0.0 {
+                return Ok(Ring::Open);
+            }
             // past the tolerance the bound cannot clear it, and a wider ring only adds to it
-            if !big_a.is_finite() || big_a <= 0.0 || norm(s(0, 1)) * big_a > tol {
-                return Ok(None);
+            if norm(s(0, 1)) * big_a > tol {
+                return Ok(Ring::Over);
             }
             let band = Band {
                 t,
@@ -1174,24 +1178,28 @@ impl Rib<'_, '_> {
                 alpha,
                 half: big_a,
             };
-            let Some(d) = self.near_errors(&band).filter(|&d| d <= tol) else {
-                return Ok(None);
+            let Some(d) = self.near_errors(&band) else {
+                return Ok(Ring::Open);
             };
+            // (a NaN fails it)
+            if !(d <= tol) {
+                return Ok(Ring::Over);
+            }
             let ring = |lo: f64, hi: f64| at(a0) + Ivl::new(lo, hi);
             if self.one_sign(f, (sigma, ring(big_a, 2.0 * big_a)), &place, start)?
                 && self.one_sign(f, (sigma, ring(-2.0 * big_a, -big_a)), &place, start)?
             {
-                return Ok(Some(d));
+                return Ok(Ring::Within(d));
             }
             big_a *= 2.0;
         }
-        Ok(None)
+        Ok(Ring::Open)
     }
 
     /// The bands of [`Self::near_bound`] (#19140, after the maintainer's sketch on #18674),
     /// the root's alpha `root` at `t*`: the bound within `tol`, or `None`. Band `k` is
     /// `T_k = [t_k / 2, t_k]`, `t_0 = t*`, with the inner radius `h_k`, two thirds of the
-    /// centre's least distance from `alpha0` over it (the root's mirror, the other root of
+    /// centre's distance from `alpha0` at `t_k / 2` (the root's mirror, the other root of
     /// the section and E, lies about `2 |alpha_c − alpha0|` off), at least `h_(k−1) / 2`.
     /// Where the separation keeps one sign on `h_k <= |alpha − alpha_c(t)| <= 2 h_k` over
     /// `T_k` ([`Self::one_sign`], cut on `t` and on the offset, the centre enclosed over each
@@ -1199,7 +1207,8 @@ impl Rib<'_, '_> {
     /// `h_(k−1) <= 2 h_k` (at `t*` within `|root − alpha_c(t*)|`, which must be at most `2 h_0`)
     /// and off the ring, and it is continuous (ARGUED as the ring's branch above). Below
     /// `T_k` the ring about `alpha0` takes over, the root at `t_k / 2` within
-    /// `|alpha_c − alpha0| + h_k` of `alpha0` ([`Self::fixed_ring`]).
+    /// `|alpha_c − alpha0| + h_k` of `alpha0` ([`Self::fixed_ring`]); where that ring too
+    /// costs more than `tol`, the next band.
     fn moving_bands(
         &self,
         f: &Frame,
@@ -1229,8 +1238,9 @@ impl Rib<'_, '_> {
             };
             // the inner ring's separation at its edges, `−h` and `−2h` from the centre, is
             // `½ Δκ h (2a − h)` and `2 Δκ h (a − h)` with `a = |alpha_c − alpha0|`: equal
-            // for `h = 2a / 3`, both `4/9 Δκ a²` (the outer ring's least is twice that)
-            half = (2.0 / 3.0 * (c - at(a0)).mig()).max(0.5 * half);
+            // for `h = 2a / 3`, both `4/9 Δκ a²` (the outer ring's least is twice that); `a`
+            // at the band's lower end, nearest the tangent end
+            half = (2.0 / 3.0 * (c_lo - at(a0)).mig()).max(0.5 * half);
             // (a NaN fails it)
             if !(inside <= 2.0 * half && half.is_finite()) {
                 return Ok(None);
@@ -1256,10 +1266,13 @@ impl Rib<'_, '_> {
                 return Ok(None);
             }
             worst = worst.max(d);
-            // the ring starts an eighth past the root's farthest alpha there, and widens
+            // the ring starts at the root's farthest alpha there (it lies strictly inside),
+            // and widens
             let offset = (at((c_lo - at(a0)).mag()) + at(half)).hi;
-            if let Some(d) = self.fixed_ring(f, (a0, start), lo, 1.125 * offset, tol)? {
-                return Ok(Some(worst.max(d)));
+            match self.fixed_ring(f, (a0, start), lo, offset, tol)? {
+                Ring::Within(d) => return Ok(Some(worst.max(d))),
+                Ring::Over => {}
+                Ring::Open => return Ok(None),
             }
             (hi, c_hi, inside) = (lo, c_lo, half);
         }
@@ -1340,6 +1353,17 @@ impl Rib<'_, '_> {
         }
         worst.is_finite().then_some(worst)
     }
+}
+
+/// What the ring about `alpha0` says of `[0, t_hi]` ([`Rib::fixed_ring`]).
+enum Ring {
+    /// Bounded within the tolerance.
+    Within(f64),
+    /// Its bound is over the tolerance at the least ring it may take, and only grows with
+    /// a wider one.
+    Over,
+    /// Not bounded otherwise: a sign change on every ring tried, or a part not enclosed.
+    Open,
 }
 
 /// The tangent end's point and unit normal, as numbers ([`Rib::frame`]).
