@@ -201,6 +201,24 @@ fn keyword_score(q: &str, keywords: &str) -> u32 {
     if q.split_whitespace().all(|w| words().any(|k| k.starts_with(w))) { 700 } else { 0 }
 }
 
+/// Longer queries need a contiguous match or a close spelling, not just scattered letters.
+fn command_score(q: &str, label: &str) -> u32 {
+    let rank = score(q, label);
+    let len = q.chars().count();
+    if rank >= 500 || len <= 3 {
+        return rank;
+    }
+    if len > 32 {
+        return 0;
+    }
+    let q: Vec<_> = q.chars().collect();
+    if label.split(|c: char| !c.is_alphanumeric()).any(|word| word.chars().count().abs_diff(len) <= 1 && edit_distance(&q, word) == 1) {
+        450
+    } else {
+        0
+    }
+}
+
 /// A row of the box: the command id, its label, its icon, and where it lives on the toolbar
 /// (tab, panel; `None` off the toolbar), in the current language.
 pub type Row = (&'static str, &'static str, &'static str, Option<(&'static str, &'static str)>);
@@ -246,13 +264,13 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
                 solidcraft_ui_text::tr_label(home_panel),
             );
             let place = (!home_tab.is_empty()).then_some((tab, panel));
-            let s = score(&q, label)
-                .max(score(&q, c.label))
-                .max(score(&q, info.label))
-                .max(score(&q, c.id) * 9 / 10)
+            let s = command_score(&q, label)
+                .max(command_score(&q, c.label))
+                .max(command_score(&q, info.label))
+                .max(command_score(&q, c.id) * 9 / 10)
                 .max(keyword_score(&q, keywords(c.id)))
-                .max(score(&q, tab).max(score(&q, home_tab)) / 3)
-                .max(score(&q, panel).max(score(&q, home_panel)) / 3);
+                .max(command_score(&q, tab).max(command_score(&q, home_tab)) / 3)
+                .max(command_score(&q, panel).max(command_score(&q, home_panel)) / 3);
             let recent = app.sbox.recent.iter().position(|r| r == c.id).map_or(0, |i| 2000u32.saturating_sub(i.min(2000) as u32));
             // Commands that can run now come before those that can't.
             let usable = if info.enabled { 150 } else { 0 };
@@ -410,26 +428,36 @@ fn typed(line: &str) -> Option<(&str, Result<Value, String>)> {
 }
 
 /// Bounded Levenshtein distance also handles transposed/missing letters in a no-match query.
+fn edit_distance(q: &[char], label: &str) -> usize {
+    let mut prev: Vec<_> = (0..=q.len()).collect();
+    for (j, ch) in label.to_lowercase().chars().take(128).enumerate() {
+        let mut next = vec![j + 1];
+        for (i, qc) in q.iter().enumerate() {
+            next.push(
+                (prev.get(i).copied().unwrap_or(128) + usize::from(ch != *qc))
+                    .min(prev.get(i + 1).copied().unwrap_or(128) + 1)
+                    .min(next.last().copied().unwrap_or(128) + 1),
+            );
+        }
+        prev = next;
+    }
+    prev.last().copied().unwrap_or(128)
+}
+
 fn closest(query: &str) -> Option<&'static str> {
     let q: Vec<_> = query.trim().to_lowercase().chars().take(128).collect();
+    let limit = match q.len() {
+        0..=2 => return None,
+        3..=4 => 1,
+        _ => 2,
+    };
     command_specs()
         .into_iter()
         .map(|c| {
             let label = solidcraft_ui_text::tr_command(c.id, c.label);
-            let mut prev: Vec<_> = (0..=q.len()).collect();
-            for (j, ch) in label.to_lowercase().chars().take(128).enumerate() {
-                let mut next = vec![j + 1];
-                for (i, qc) in q.iter().enumerate() {
-                    next.push(
-                        (prev.get(i).copied().unwrap_or(128) + usize::from(ch != *qc))
-                            .min(prev.get(i + 1).copied().unwrap_or(128) + 1)
-                            .min(next.last().copied().unwrap_or(128) + 1),
-                    );
-                }
-                prev = next;
-            }
-            (prev.last().copied().unwrap_or(128), label)
+            (edit_distance(&q, label), label)
         })
+        .filter(|(distance, _)| *distance <= limit)
         .min()
         .map(|(_, label)| label)
 }
@@ -1283,6 +1311,16 @@ mod tests {
         assert_eq!(crate::scenario::rect_of("palette:search"), crate::scenario::rect_of("shortcut:search"));
         h.step(&json!({"key":"Escape"})).unwrap();
         assert!(!h.app.ui.palette_open && h.app.sbox.text.is_empty());
+    }
+
+    #[test]
+    fn command_search_rejects_weak_matches_and_unrelated_suggestions() {
+        assert_eq!(command_score("fillet", "Delete Settings Profile"), 0);
+        assert_eq!(command_score("mesure", "Remove Surface Binding"), 0);
+        assert!(command_score("mesure", "Measure") > 0);
+        assert!(command_score("ppl", "Press Pull") > 0);
+        assert_eq!(closest("xyzzy nothing"), None);
+        assert_eq!(closest("fliet"), Some("Fillet"));
     }
 
     #[test]
