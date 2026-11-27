@@ -2,16 +2,21 @@
 //! two strategies behind the same calls, so going back is one line ([`DEFAULT`]) for everyone or
 //! one variable for one machine.
 //!
-//! - [`GpuStartup::Standard`] (the default): one wgpu instance on wgpu's own backends, a hardware
-//!   Vulkan adapter first where there is one, else wgpu's own choice (D3D12, then OpenGL, on
-//!   Windows). No API is probed beforehand, and the window is not restarted on another API when
-//!   frames stall. A crash-guard file names an API on disk only while Intel's Vulkan driver
-//!   creates the window's device on Windows ([`guards_device_creation`], #22110); after a crash
-//!   there, the launches of that version start the other APIs. On Windows, in Automatic, OpenGL
-//!   is named the same way while the instance starts, until the adapter is chosen
-//!   ([`guards_instance_creation`], #22917). A window that can't start falls
-//!   back to the software renderer, as safe graphics mode does. Preferences › Graphics' backend
-//!   choice and `WGPU_BACKEND` still pick the API.
+//! - [`GpuStartup::Standard`] (the default): one wgpu instance on one API. On Windows that is
+//!   Direct3D 12, as Firefox's WebGPU (wgpu) and Chrome's (Dawn) use, and the instance starts it
+//!   alone, so no Vulkan or OpenGL driver is loaded into the process beside it. Only when D3D12
+//!   can't open the window's device does the launch start again on Vulkan, then OpenGL, then the
+//!   software renderer ([`WINDOWS_ORDER`]); an API that failed is skipped by the launches of that
+//!   version after it. On macOS (Metal) and Linux, wgpu's own backends, a hardware Vulkan adapter
+//!   first where there is one ([`vulkan_first`]). No API is probed beforehand, and the window is
+//!   not restarted on another API when frames stall. A crash-guard file names an API on disk only
+//!   while Intel's Vulkan driver creates the window's device on Windows
+//!   ([`guards_device_creation`], #22110); after a crash there, the launches of that version
+//!   start the other APIs. Where wgpu's own set starts OpenGL beside another API on Windows,
+//!   OpenGL is named the same way while the instance starts, until the adapter is chosen
+//!   ([`guards_instance_creation`], #22917). A window that can't start on any API falls back to
+//!   the software renderer, as safe graphics mode does. Preferences › Graphics' backend choice
+//!   and `WGPU_BACKEND` still pick the API.
 //! - [`GpuStartup::Legacy`]: the startup every release had before: on Windows each API probed for
 //!   a hardware adapter in turn (Vulkan, D3D12, OpenGL), the crash guard (#18683), the fallback
 //!   through the APIs when a window can't start, and the restart on another API when the GPU hangs
@@ -25,7 +30,7 @@ pub const ENV: &str = "SOLIDCRAFT_GPU_STARTUP";
 /// How the window's graphics device is brought up (the module's docs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GpuStartup {
-    /// One instance, Vulkan first, else wgpu's own choice.
+    /// One instance on one API: Direct3D 12 on Windows, wgpu's own choice elsewhere.
     Standard,
     /// The API probe ladder, crash guard and hang restarts every release had before.
     Legacy,
@@ -64,6 +69,11 @@ impl GpuStartup {
     }
 }
 
+/// The order Automatic starts the window's API in on Windows: Direct3D 12, then Vulkan, then
+/// OpenGL (then the software renderer, D3D12's WARP). One at a time: the next one is started, in
+/// a new launch, only when the one before could not open the window's device.
+pub const WINDOWS_ORDER: [eframe::wgpu::Backends; 3] = [eframe::wgpu::Backends::DX12, eframe::wgpu::Backends::VULKAN, eframe::wgpu::Backends::GL];
+
 /// [`GpuStartup::Standard`]'s instance backends, or `None` for wgpu's own set (`WGPU_BACKEND`
 /// when set, else every backend wgpu was built with):
 /// - `WGPU_BACKEND` set (`env_set`): `None`, whatever it says wins.
@@ -71,9 +81,12 @@ impl GpuStartup {
 ///   `None` elsewhere (lavapipe, llvmpipe).
 /// - A backend `preference` (Preferences › Graphics, `dx12`, `vulkan`, `gl` or a comma list;
 ///   `auto` or empty for none): those backends.
-/// - An API whose driver crashed the process while its device was created on this version
-///   (`crashed`, recorded only under [`guards_device_creation`]'s condition): every other API this
-///   system has, so that driver is not loaded again (#22110).
+/// - Windows, Automatic: the first API of [`WINDOWS_ORDER`] (Direct3D 12) alone, less those
+///   whose driver crashed the process while starting on this version (`crashed`, #22110) or
+///   whose window failed to start on it (`failed`); D3D12 when every one did.
+/// - Elsewhere, an API whose driver crashed (`crashed`, recorded only under
+///   [`guards_device_creation`]'s condition): every other API this system has, so that driver is
+///   not loaded again.
 /// - Otherwise `None`: the adapter is picked by [`vulkan_first`].
 pub fn standard_backends(
     windows: bool,
@@ -81,6 +94,7 @@ pub fn standard_backends(
     cpu: bool,
     preference: Option<&str>,
     crashed: eframe::wgpu::Backends,
+    failed: eframe::wgpu::Backends,
 ) -> Option<eframe::wgpu::Backends> {
     use eframe::wgpu::Backends;
     if env_set {
@@ -92,11 +106,56 @@ pub fn standard_backends(
     if let Some(chosen) = chosen_backends(preference) {
         return Some(chosen);
     }
+    if windows {
+        return Some(windows_automatic(crashed | failed).unwrap_or(Backends::DX12));
+    }
     if crashed.is_empty() {
         return None;
     }
-    let platform = if windows { Backends::VULKAN | Backends::DX12 | Backends::GL } else { Backends::VULKAN | Backends::GL | Backends::METAL };
-    Some(crate::startup::without_crashed(platform, crashed))
+    Some(crate::startup::without_crashed(Backends::VULKAN | Backends::GL | Backends::METAL, crashed))
+}
+
+/// The first API of [`WINDOWS_ORDER`] not in `skip`, alone; `None` when every one is.
+pub fn windows_automatic(skip: eframe::wgpu::Backends) -> Option<eframe::wgpu::Backends> {
+    WINDOWS_ORDER.into_iter().find(|b| !skip.contains(*b))
+}
+
+/// The API a launch on Windows in Automatic starts next after `failed` (the one API it started)
+/// could not open the window's device: the next of [`WINDOWS_ORDER`] that is not in `skipped`
+/// (crashed or failed before on this version), else the software renderer (`cpu`).
+pub fn next_after_failure(failed: eframe::wgpu::Backends, skipped: eframe::wgpu::Backends) -> &'static str {
+    let after = WINDOWS_ORDER.iter().rposition(|b| failed.intersects(*b)).map_or(0, |i| i + 1);
+    WINDOWS_ORDER[after..]
+        .iter()
+        .find(|b| !skipped.contains(**b) && !failed.intersects(**b))
+        .and_then(|b| crate::startup::backend_name(*b))
+        .unwrap_or(crate::startup::SOFTWARE_BACKEND)
+}
+
+/// Safe graphics mode's API on Windows in Automatic, after a full launch on `failed` failed or
+/// lost its device: Direct3D 12, else Vulkan, never the failed one or one that crashed
+/// (`crashed`); `None` when both are out, and safe graphics starts the software renderer.
+/// OpenGL is not on this ladder: safe graphics is the plain path, and AMD's OpenGL draws nothing
+/// (`startup::counts_as_hardware`).
+pub fn safe_windows_backends(failed: Option<&str>, crashed: eframe::wgpu::Backends) -> Option<eframe::wgpu::Backends> {
+    use eframe::wgpu::Backends;
+    let avoid = failed.map(Backends::from_comma_list).unwrap_or(Backends::empty()) | crashed;
+    [Backends::DX12, Backends::VULKAN].into_iter().find(|b| !avoid.contains(*b))
+}
+
+/// On Windows, Automatic's OpenGL step ([`WINDOWS_ORDER`]) takes only a hardware adapter that
+/// draws: never a software one, and never AMD's OpenGL driver, whose scene passes draw nothing
+/// (`startup::counts_as_hardware`, #11357). `Some(None)`: wgpu's own pick is fine (another API);
+/// `None`: nothing usable, the launch moves on to the software renderer.
+pub fn opengl_step_adapter(adapters: &[AdapterKind]) -> Option<Option<usize>> {
+    use eframe::wgpu::{Backend, DeviceType};
+    if !adapters.iter().all(|a| a.backend == Backend::Gl) || adapters.is_empty() {
+        return Some(None);
+    }
+    adapters
+        .iter()
+        .position(|a| a.compatible && a.device_type != DeviceType::Cpu && crate::startup::counts_as_hardware(true, a.backend, a.vendor))
+        .map(Some)
 }
 
 /// The backends a Preferences › Graphics choice names (`dx12`, `vulkan`, `gl` or a comma list);
@@ -221,15 +280,21 @@ mod tests {
     #[test]
     fn standard_starts_wgpus_backends_unless_something_names_one() {
         let none = Backends::empty();
-        assert_eq!(standard_backends(true, false, false, None, none), None, "wgpu's own set; the adapter is picked Vulkan first");
-        assert_eq!(standard_backends(true, false, false, Some("auto"), none), None);
-        assert_eq!(standard_backends(false, false, false, Some(" "), none), None);
-        assert_eq!(standard_backends(true, false, false, Some("nonsense"), none), None);
-        assert_eq!(standard_backends(true, false, false, Some("dx12"), none), Some(Backends::DX12), "Preferences › Graphics");
-        assert_eq!(standard_backends(false, false, false, Some("vulkan,gl"), none), Some(Backends::VULKAN | Backends::GL));
-        assert_eq!(standard_backends(true, true, false, Some("dx12"), none), None, "WGPU_BACKEND wins");
-        assert_eq!(standard_backends(true, false, true, Some("vulkan"), none), Some(Backends::DX12), "the software renderer: WARP");
-        assert_eq!(standard_backends(false, false, true, None, none), None);
+        assert_eq!(standard_backends(true, false, false, None, none, none), Some(Backends::DX12), "Windows: Direct3D 12 alone");
+        assert_eq!(standard_backends(true, false, false, Some("auto"), none, none), Some(Backends::DX12));
+        assert_eq!(standard_backends(true, false, false, Some("nonsense"), none, none), Some(Backends::DX12));
+        assert_eq!(standard_backends(false, false, false, None, none, none), None, "macOS, Linux: wgpu's own set, Vulkan first");
+        assert_eq!(standard_backends(false, false, false, Some(" "), none, none), None);
+        assert_eq!(standard_backends(false, false, false, Some("nonsense"), none, none), None);
+        assert_eq!(standard_backends(true, false, false, Some("dx12"), none, Backends::empty()), Some(Backends::DX12), "Preferences › Graphics");
+        assert_eq!(standard_backends(false, false, false, Some("vulkan,gl"), none, Backends::empty()), Some(Backends::VULKAN | Backends::GL));
+        assert_eq!(standard_backends(true, true, false, Some("dx12"), none, Backends::empty()), None, "WGPU_BACKEND wins");
+        assert_eq!(
+            standard_backends(true, false, true, Some("vulkan"), none, Backends::empty()),
+            Some(Backends::DX12),
+            "the software renderer: WARP"
+        );
+        assert_eq!(standard_backends(false, false, true, None, none, Backends::empty()), None);
     }
 
     /// #22110: after Intel's Vulkan driver crashed the process while the window's device was
@@ -238,15 +303,15 @@ mod tests {
     #[test]
     fn a_crashed_api_is_left_out_of_automatic_and_a_choice_still_wins() {
         let vk = Backends::VULKAN;
-        assert_eq!(standard_backends(true, false, false, None, vk), Some(Backends::DX12 | Backends::GL));
-        assert_eq!(standard_backends(true, false, false, Some("auto"), vk), Some(Backends::DX12 | Backends::GL));
-        assert_eq!(standard_backends(false, false, false, None, vk), Some(Backends::GL | Backends::METAL));
-        assert_eq!(standard_backends(true, false, false, Some("gl"), vk), Some(Backends::GL), "the user's choice");
-        assert_eq!(standard_backends(true, false, false, Some("vulkan"), vk), Some(vk), "an explicit Vulkan choice");
-        assert_eq!(standard_backends(true, true, false, None, vk), None, "WGPU_BACKEND wins");
-        assert_eq!(standard_backends(true, false, true, None, vk), Some(Backends::DX12), "the software renderer: WARP");
+        assert_eq!(standard_backends(true, false, false, None, vk, Backends::empty()), Some(Backends::DX12), "D3D12 alone, as without the crash");
+        assert_eq!(standard_backends(true, false, false, Some("auto"), vk, Backends::empty()), Some(Backends::DX12));
+        assert_eq!(standard_backends(false, false, false, None, vk, Backends::empty()), Some(Backends::GL | Backends::METAL));
+        assert_eq!(standard_backends(true, false, false, Some("gl"), vk, Backends::empty()), Some(Backends::GL), "the user's choice");
+        assert_eq!(standard_backends(true, false, false, Some("vulkan"), vk, Backends::empty()), Some(vk), "an explicit Vulkan choice");
+        assert_eq!(standard_backends(true, true, false, None, vk, Backends::empty()), None, "WGPU_BACKEND wins");
+        assert_eq!(standard_backends(true, false, true, None, vk, Backends::empty()), Some(Backends::DX12), "the software renderer: WARP");
         let all = Backends::VULKAN | Backends::DX12 | Backends::GL;
-        assert_eq!(standard_backends(true, false, false, None, all), Some(all), "everything crashed: all are tried again");
+        assert_eq!(standard_backends(true, false, false, None, all, Backends::empty()), Some(Backends::DX12), "everything crashed: D3D12 again");
     }
 
     #[test]
@@ -307,14 +372,14 @@ mod tests {
     #[test]
     fn a_crashed_opengl_is_left_out_of_automatic_and_a_chosen_api_never_starts_it() {
         let gl = Backends::GL;
-        assert_eq!(standard_backends(true, false, false, None, gl), Some(Backends::VULKAN | Backends::DX12));
-        assert_eq!(standard_backends(true, false, false, Some("auto"), gl), Some(Backends::VULKAN | Backends::DX12));
-        assert_eq!(standard_backends(true, false, false, Some("gl"), gl), Some(gl), "an explicit OpenGL choice");
-        assert_eq!(standard_backends(true, true, false, None, gl), None, "WGPU_BACKEND wins");
-        assert_eq!(standard_backends(true, false, true, None, gl), Some(Backends::DX12), "the software renderer: WARP");
+        assert_eq!(standard_backends(true, false, false, None, gl, Backends::empty()), Some(Backends::DX12));
+        assert_eq!(standard_backends(true, false, false, Some("auto"), gl, Backends::empty()), Some(Backends::DX12));
+        assert_eq!(standard_backends(true, false, false, Some("gl"), gl, Backends::empty()), Some(gl), "an explicit OpenGL choice");
+        assert_eq!(standard_backends(true, true, false, None, gl, Backends::empty()), None, "WGPU_BACKEND wins");
+        assert_eq!(standard_backends(true, false, true, None, gl, Backends::empty()), Some(Backends::DX12), "the software renderer: WARP");
         for crashed in [Backends::empty(), gl, Backends::VULKAN, Backends::DX12] {
             for (choice, backends) in [("dx12", Backends::DX12), ("vulkan", Backends::VULKAN)] {
-                let started = standard_backends(true, false, false, Some(choice), crashed);
+                let started = standard_backends(true, false, false, Some(choice), crashed, Backends::empty());
                 assert_eq!(started, Some(backends), "{choice} after {crashed:?}");
                 assert!(!started.unwrap().contains(gl));
             }
@@ -354,5 +419,74 @@ mod tests {
         let unusable = AdapterKind { compatible: false, ..kind(vk, DeviceType::DiscreteGpu) };
         assert_eq!(vulkan_first(&[unusable, kind(vk, DeviceType::IntegratedGpu)]), Some(1));
         assert_eq!(vulkan_first(&[]), None);
+    }
+
+    /// Windows, Automatic: D3D12 alone; after it failed to open the window's device on this
+    /// version, Vulkan alone, then OpenGL alone. A choice in Preferences and `WGPU_BACKEND` win.
+    #[test]
+    fn windows_automatic_starts_d3d12_alone_then_vulkan_then_opengl() {
+        let none = Backends::empty();
+        assert_eq!(WINDOWS_ORDER, [Backends::DX12, Backends::VULKAN, Backends::GL]);
+        assert_eq!(standard_backends(true, false, false, None, none, Backends::DX12), Some(Backends::VULKAN));
+        assert_eq!(standard_backends(true, false, false, None, none, Backends::DX12 | Backends::VULKAN), Some(Backends::GL));
+        assert_eq!(standard_backends(true, false, false, None, Backends::VULKAN, Backends::DX12), Some(Backends::GL), "crashed and failed both skip");
+        let all = Backends::DX12 | Backends::VULKAN | Backends::GL;
+        assert_eq!(standard_backends(true, false, false, None, none, all), Some(Backends::DX12), "every one failed: D3D12 again");
+        assert_eq!(standard_backends(true, false, false, Some("vulkan"), none, none), Some(Backends::VULKAN), "the user's choice wins");
+        assert_eq!(standard_backends(true, false, false, Some("gl"), none, Backends::GL), Some(Backends::GL), "even a failed one");
+        assert_eq!(standard_backends(true, true, false, None, none, none), None, "WGPU_BACKEND wins");
+        assert_eq!(standard_backends(true, false, true, None, none, none), Some(Backends::DX12), "the software renderer: WARP");
+        // Never more than one API in the instance.
+        for crashed in [none, Backends::DX12, Backends::VULKAN, Backends::GL] {
+            for failed in [none, Backends::DX12, Backends::VULKAN, Backends::DX12 | Backends::VULKAN] {
+                let started = standard_backends(true, false, false, None, crashed, failed).unwrap();
+                assert!(crate::startup::backend_name(started).is_some(), "{started:?} after {crashed:?} crashed, {failed:?} failed");
+                assert!(!guards_instance_creation(true, started, true), "no OpenGL beside another API");
+            }
+        }
+        // Other systems: as before, failed APIs are not skipped there.
+        assert_eq!(standard_backends(false, false, false, None, none, Backends::VULKAN), None);
+    }
+
+    /// A window that can't open on Windows in Automatic: the next API, then the software renderer.
+    #[test]
+    fn a_failed_window_moves_down_the_windows_order_then_to_software() {
+        let none = Backends::empty();
+        assert_eq!(next_after_failure(Backends::DX12, none), "vulkan");
+        assert_eq!(next_after_failure(Backends::VULKAN, none), "gl");
+        assert_eq!(next_after_failure(Backends::GL, none), "cpu");
+        assert_eq!(next_after_failure(Backends::DX12, Backends::VULKAN), "gl", "a crashed Vulkan is not loaded again");
+        assert_eq!(next_after_failure(Backends::DX12, Backends::VULKAN | Backends::GL), "cpu");
+        assert_eq!(next_after_failure(Backends::VULKAN, Backends::DX12), "gl", "never back up the order");
+        assert_eq!(next_after_failure(none, none), "dx12", "nothing started: from the top");
+    }
+
+    /// Safe graphics after a failed or lost full launch on Windows: D3D12, then Vulkan, then the
+    /// software renderer (`None`).
+    #[test]
+    fn safe_graphics_on_windows_is_d3d12_then_vulkan_then_software() {
+        let none = Backends::empty();
+        assert_eq!(safe_windows_backends(None, none), Some(Backends::DX12));
+        assert_eq!(safe_windows_backends(Some("vulkan"), none), Some(Backends::DX12));
+        assert_eq!(safe_windows_backends(Some("gl"), none), Some(Backends::DX12));
+        assert_eq!(safe_windows_backends(Some("dx12"), none), Some(Backends::VULKAN));
+        assert_eq!(safe_windows_backends(None, Backends::DX12), Some(Backends::VULKAN));
+        assert_eq!(safe_windows_backends(Some("dx12"), Backends::VULKAN), None);
+        assert_eq!(safe_windows_backends(Some("vulkan"), Backends::DX12), None);
+    }
+
+    /// Automatic's OpenGL step takes a hardware adapter that draws, never AMD's OpenGL driver or
+    /// a software one; other APIs' instances are left to the usual pick.
+    #[test]
+    fn the_opengl_step_takes_only_hardware_that_draws() {
+        const AMD: u32 = 0x1002;
+        const NVIDIA: u32 = 0x10de;
+        let gl = |device_type, vendor| AdapterKind { backend: Backend::Gl, device_type, vendor, compatible: true };
+        assert_eq!(opengl_step_adapter(&[gl(DeviceType::IntegratedGpu, AMD)]), None, "AMD's OpenGL draws nothing (#11357)");
+        assert_eq!(opengl_step_adapter(&[gl(DeviceType::Cpu, 0)]), None);
+        assert_eq!(opengl_step_adapter(&[]), Some(None));
+        assert_eq!(opengl_step_adapter(&[gl(DeviceType::IntegratedGpu, AMD), gl(DeviceType::DiscreteGpu, NVIDIA)]), Some(Some(1)));
+        assert_eq!(opengl_step_adapter(&[gl(DeviceType::Other, INTEL_VENDOR)]), Some(Some(0)), "wgpu's GL adapters are often Other");
+        assert_eq!(opengl_step_adapter(&[kind(Backend::Dx12, DeviceType::IntegratedGpu)]), Some(None), "not the OpenGL step");
     }
 }

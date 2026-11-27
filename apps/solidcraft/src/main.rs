@@ -1941,6 +1941,17 @@ fn main() -> eframe::Result {
         notes.push(note.clone());
     }
     let saved_samples = if safe_mode { None } else { msaa() };
+    // Safe graphics on Windows in Automatic after D3D12 and Vulkan both failed (or crashed): the
+    // software renderer, the ladder's last step (`gpu_startup::safe_windows_backends`).
+    if safe
+        && cfg!(target_os = "windows")
+        && !cpu_renderer
+        && !backend_override
+        && gpu_startup::chosen_backends(backend_launch.backend.as_deref()).is_none()
+        && gpu_startup::safe_windows_backends(failed_backend.as_deref(), skipped.crashed).is_none()
+    {
+        cpu_renderer = true;
+    }
     let wgpu_options = if safe {
         safe_wgpu_options(cpu_renderer, failed_backend.as_deref(), skipped.crashed, backend_launch.backend.as_deref())
     } else {
@@ -1964,6 +1975,14 @@ fn main() -> eframe::Result {
     // writes the attempt file and removes it once the adapter is chosen.
     let automatic =
         !cpu_renderer && !backend_override && gpu_startup::chosen_backends(retry_backend.as_deref().or(backend_launch.backend.as_deref())).is_none();
+    // Standard startup on Windows in Automatic (a retry on the next API included): a window that
+    // can't open moves on through `gpu_startup::WINDOWS_ORDER`, and the API that failed is
+    // skipped by the launches of this version after it.
+    let windows_ladder = cfg!(target_os = "windows")
+        && !gpu_startup.legacy()
+        && !cpu_renderer
+        && !backend_override
+        && gpu_startup::chosen_backends(backend_launch.backend.as_deref()).is_none();
     if let Some(guard) = &backend_guard
         && !gpu_startup.legacy()
         && let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &wgpu_options.wgpu_setup
@@ -2417,9 +2436,17 @@ fn main() -> eframe::Result {
         guard.clear();
     }
     match result {
-        Err(e) if !created.load(std::sync::atomic::Ordering::SeqCst) => {
-            no_window(e, gpu_startup, cpu_renderer, safe, started, skipped.crashed | skipped.failed, settings.as_deref(), backend_attempt.as_ref())
-        }
+        Err(e) if !created.load(std::sync::atomic::Ordering::SeqCst) => no_window(
+            e,
+            gpu_startup,
+            windows_ladder,
+            cpu_renderer,
+            safe,
+            started,
+            skipped.crashed | skipped.failed,
+            settings.as_deref(),
+            backend_attempt.as_ref(),
+        ),
         r => r,
     }
 }
@@ -2527,7 +2554,8 @@ const WINDOW_SURFACE: eframe::egui_wgpu::SurfaceConfig = eframe::egui_wgpu::Surf
 
 /// The renderer settings: with `cpu`, the software adapter (WARP, lavapipe, llvmpipe);
 /// `preference` is `graphics.json`'s `backend`. Under [`gpu_startup::GpuStartup::Standard`] the
-/// instance has wgpu's backends and a hardware Vulkan adapter is picked first
+/// instance starts Direct3D 12 alone on Windows in Automatic (`gpu_startup::standard_backends`),
+/// and elsewhere wgpu's backends with a hardware Vulkan adapter picked first
 /// ([`gpu_startup::vulkan_first`]). Under `Legacy` the backends come from
 /// `startup::choose_backends` (on Windows Vulkan first, and only the backend in use is started);
 /// `skipped`: the APIs that crashed while starting or whose window failed to start; `guard` names
@@ -2544,6 +2572,14 @@ fn wgpu_options(
         let env_set = std::env::var(startup::WGPU_BACKEND_ENV).is_ok_and(|v| !v.trim().is_empty());
         // A retry applies only to this launch. WGPU_BACKEND always has priority.
         let retry = std::env::var(startup::RETRY_BACKEND_ENV).ok();
+        // Automatic's OpenGL step on Windows (`gpu_startup::WINDOWS_ORDER`), after D3D12 and
+        // Vulkan could not open the window's device: only a hardware adapter that draws.
+        let opengl_step = cfg!(target_os = "windows")
+            && !startup_strategy.legacy()
+            && !env_set
+            && !cpu
+            && gpu_startup::chosen_backends(preference).is_none()
+            && retry.as_deref().is_some_and(|r| r.trim().eq_ignore_ascii_case("gl"));
         let preference = if cpu { preference } else { retry.as_deref().or(preference) };
         // Each API probed is named on disk while it is probed: a driver that crashes in the probe is
         // caught too.
@@ -2554,7 +2590,7 @@ fn wgpu_options(
         let chosen = if startup_strategy.legacy() {
             startup::choose_backends(cfg!(target_os = "windows"), env_set, cpu, preference, skipped.crashed, skipped.failed, probe)
         } else {
-            gpu_startup::standard_backends(cfg!(target_os = "windows"), env_set, cpu, preference, skipped.crashed)
+            gpu_startup::standard_backends(cfg!(target_os = "windows"), env_set, cpu, preference, skipped.crashed, skipped.failed)
         };
         if let Some(backends) = chosen {
             solidcraft_engine::note!("SolidCraft graphics: starting {backends:?}");
@@ -2578,8 +2614,14 @@ fn wgpu_options(
             setup.native_adapter_selector = Some(std::sync::Arc::new(move |adapters, surface| {
                 let names: Vec<_> = adapters.iter().map(|a| startup::AdapterChoice::of(a, surface)).collect();
                 let kinds: Vec<_> = adapters.iter().map(|a| gpu_startup::AdapterKind::of(a, surface)).collect();
-                let picked =
+                let mut picked =
                     startup::choose_adapter(&names, environment.as_deref(), adapter.as_deref()).or_else(|| gpu_startup::vulkan_first(&kinds));
+                if opengl_step {
+                    match gpu_startup::opengl_step_adapter(&kinds) {
+                        None => return Err("OpenGL has no hardware adapter that draws here".to_string()),
+                        Some(step) => picked = picked.or(step),
+                    }
+                }
                 if let (Some(guard), Some(kind)) = (&guard, picked.and_then(|i| kinds.get(i)))
                     && gpu_startup::guards_device_creation(cfg!(target_os = "windows"), kind.backend, kind.vendor)
                 {
@@ -2634,10 +2676,14 @@ fn safe_wgpu_options(
             // The software renderer starts D3D12 alone on Windows, its WARP adapter's API, so no
             // Vulkan or OpenGL driver loads beside it (#22917).
             let failed = if cpu { None } else { failed };
+            // On Windows Automatic starts D3D12, else Vulkan, never the failed API
+            // (`gpu_startup::safe_windows_backends`); with neither, the caller asked for the
+            // software renderer.
             let chosen = if cpu {
                 gpu_startup::safe_software_backends(cfg!(target_os = "windows"), crashed)
             } else {
                 gpu_startup::chosen_backends(preference)
+                    .or_else(|| cfg!(target_os = "windows").then(|| gpu_startup::safe_windows_backends(failed, crashed)).flatten())
             };
             setup.instance_descriptor.backends = startup::safe_backends(chosen.unwrap_or(setup.instance_descriptor.backends), failed, crashed);
         }
@@ -2648,9 +2694,11 @@ fn safe_wgpu_options(
 
 /// A failed renderer returns here before app creation. A fresh process avoids reusing winit's
 /// event loop or a failed device; each retry advances through the APIs, then software once.
+#[allow(clippy::too_many_arguments)]
 fn no_window(
     error: eframe::Error,
     startup_strategy: gpu_startup::GpuStartup,
+    windows_ladder: bool,
     tried_cpu: bool,
     safe_graphics: bool,
     failed: eframe::wgpu::Backends,
@@ -2689,7 +2737,7 @@ fn no_window(
     // automatic order from now on, so the next launch of this version starts on the API that
     // works without failing on this one first. Window-system errors are not the API's fault.
     if matches!(error, eframe::Error::Wgpu(_))
-        && startup_strategy.legacy()
+        && (startup_strategy.legacy() || windows_ladder)
         && !explicit
         && !tried_cpu
         && !safe_graphics
@@ -2698,9 +2746,12 @@ fn no_window(
     {
         startup::record_failed_backend(&dir.join("graphics.json"), failed, solidcraft_ui_egui::help::VERSION);
     }
-    // Safe graphics and standard startup try no other graphics API, only the software renderer as
-    // the last resort.
-    let next = if (safe_graphics || !startup_strategy.legacy()) && !explicit && !tried_cpu {
+    // Standard startup on Windows in Automatic tries the next API of `gpu_startup::WINDOWS_ORDER`
+    // (D3D12, Vulkan, OpenGL), then the software renderer. Safe graphics and standard startup
+    // elsewhere try no other graphics API, only the software renderer as the last resort.
+    let next = if windows_ladder && !safe_graphics && !explicit && !tried_cpu {
+        Some(gpu_startup::next_after_failure(failed, skipped))
+    } else if (safe_graphics || !startup_strategy.legacy()) && !explicit && !tried_cpu {
         Some("cpu")
     } else {
         startup::fallback_backend(cfg!(target_os = "windows"), explicit, tried_cpu, failed, skipped)

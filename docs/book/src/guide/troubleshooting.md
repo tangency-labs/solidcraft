@@ -153,12 +153,13 @@ A graphics driver can crash the app while it starts, before SolidCraft can show 
 old Intel Vulkan driver, `igvk64.dll`, did). Windows' Event Viewer names the driver under
 *Windows Logs › Application* ("Faulting module name").
 
-SolidCraft on Windows starts Vulkan first and loads no other graphics API when Vulkan has a
-graphics card. Direct3D 12 and then OpenGL are tried only on a computer without one (older Intel
-graphics, virtual machines, Remote Desktop), each only with a graphics card, and software
-rendering only after both. A Vulkan device that fails to start falls back to Direct3D 12, then to
-software rendering, and later launches of that version go straight to the API that worked. From 0.11.1 until this change Direct3D 12 came first;
-before 0.11.1 the app started Vulkan, Direct3D 12 and OpenGL together.
+SolidCraft on Windows starts Direct3D 12, as web browsers do, and loads no other graphics API
+beside it. Only when Direct3D 12 can't open the window does it start again on Vulkan, then
+OpenGL, then software rendering, and later launches of that version go straight to the API that
+worked. Earlier versions started Vulkan first, with Direct3D 12 and OpenGL loaded alongside; choose
+**Vulkan** in **Preferences > Graphics > Graphics API** to keep using it. The GPU path tracer in
+Render needs Vulkan on Windows: on Direct3D 12 it offers **Restart with Vulkan**, and the CPU
+image methods work on either.
 
 If a graphics driver crashes the app while it starts a graphics API, the next launch knows
 which API it was and skips it on this computer, going on in the same order. Safe mode and
