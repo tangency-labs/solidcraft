@@ -244,7 +244,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pl, inputs: &[SelInpu
                         *values = std::iter::once(b.material.clone())
                             .chain(b.fields().iter().map(|(_, e, kind)| {
                                 if *kind == ValueKind::Length {
-                                    crate::length_input::stored(&app.session.doc, e)
+                                    rule_length_display(&app.session.doc, e)
                                 } else {
                                     crate::dialogs::shown_expr(e, *kind)
                                 }
@@ -272,6 +272,17 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pl, inputs: &[SelInpu
         }
     }
     enter
+}
+
+/// A rule's literal length is in model units even if its authored text names another unit.
+fn rule_length_display(doc: &solidcraft_engine::doc::Document, expr: &str) -> String {
+    if solidcraft_engine::doc::expr::is_literal(expr)
+        && let Ok(mm) = doc.eval(expr, ValueKind::Length)
+        && mm.is_finite()
+    {
+        return crate::length_input::model(doc, mm);
+    }
+    crate::length_input::stored(doc, expr)
 }
 
 /// The rule's value fields, in the order `PlasticRule::fields` gives them.
@@ -345,7 +356,20 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
         }
         Pl::Rules { pick, name, values, active, .. } => {
             let rules = app.session.doc.plastic_rules();
-            let fields = std::iter::once("material").chain(rule_keys()).zip(values);
+            // Preserve exact authored expressions for fields that the user did not change.
+            // This also keeps built-in presets from turning into overrides just by opening OK.
+            let mut authored = values.clone();
+            if let Some(base) = rules.get(*pick).or(rules.first()) {
+                for (index, (_, original, kind)) in base.fields().iter().enumerate() {
+                    if *kind == ValueKind::Length
+                        && let Some(value) = authored.get_mut(index + 1)
+                        && *value == rule_length_display(&app.session.doc, original)
+                    {
+                        *value = original.to_string();
+                    }
+                }
+            }
+            let fields = std::iter::once("material").chain(rule_keys()).zip(&authored);
             let p = crate::rule_editor::params(rules.get(*pick).map(|r| r.name.as_str()), name, *active, fields)?;
             ("plastic.manage_rules", p)
         }
