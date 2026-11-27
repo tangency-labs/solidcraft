@@ -103,6 +103,15 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             }
         });
+        ui_kit::settings_section(ui, "sketches", app.tr("ui.sketches"), |ui| {
+            ui.horizontal_wrapped(|ui| {
+                let response = setting::auto_hide_sketches(app, ui).backing_on_hover_text(app.tr("prefs.auto_hide_sketches_help"));
+                crate::scenario::publish_target("prefs:auto_hide_sketches", response.rect);
+                if !crate::ui_kit::settings_search::suppress_chrome(ui) {
+                    ui_kit::help_icon(ui, app.tr("prefs.auto_hide_sketches_help"));
+                }
+            });
+        });
         // When SMLib's full check runs while features are computed (`diagnostics.validation`).
         ui_kit::settings_section(ui, "validation", app.tr("prefs.validation"), |ui| {
             use solidcraft_engine::kernel::Validation;

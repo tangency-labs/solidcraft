@@ -3887,6 +3887,95 @@ mod tests {
         assert!(crate::view::sketch_shown(&s, sketch), "shown on its own, it stays shown");
     }
 
+    /// #23256: `auto_hide_sketches` defaults to on (matching existing behaviour). Turning it off
+    /// keeps newly consumed sketches visible across Extrude, Revolve, Hole and sheet metal
+    /// features (and off-thread computed commands), respects manual hides, undoes cleanly, does
+    /// not retroactively unhide sketches consumed earlier, and survives `file.new`.
+    #[test]
+    fn auto_hide_sketches_preference_controls_hiding_on_feature_creation() {
+        let mut s = Session::default();
+        assert!(s.auto_hide_sketches, "enabled by default");
+
+        // With auto-hide on, Extrude hides its sketch as before.
+        let earlier = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Earlier"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": earlier, "distance": 5}));
+        assert!(!crate::view::sketch_shown(&s, earlier), "default on: Extrude hides its sketch");
+
+        // Turning auto-hide off leaves previously consumed sketches hidden.
+        s.auto_hide_sketches = false;
+        assert!(!crate::view::sketch_shown(&s, earlier), "turning off does not retroactively unhide old sketches");
+
+        // Extrude with auto-hide off keeps the sketch visible.
+        let reused = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Reused"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [20, 0], "p1": [30, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": reused, "distance": 5, "operation": "new"}));
+        assert!(crate::view::sketch_shown(&s, reused), "off: Extrude keeps its sketch visible");
+        assert!(s.visibility.shown_sketches.contains(&reused));
+
+        // Undo removes the feature and restores pre-feature visibility; Redo restores both.
+        run(&mut s, "edit.undo", json!({}));
+        assert!(!s.visibility.shown_sketches.contains(&reused), "undo restores pre-feature shown_sketches");
+        assert!(crate::view::sketch_shown(&s, reused), "unconsumed sketch is still shown");
+        run(&mut s, "edit.redo", json!({}));
+        assert!(crate::view::sketch_shown(&s, reused) && s.visibility.shown_sketches.contains(&reused), "redo keeps it shown");
+
+        // Manually hiding the kept sketch still hides it.
+        run(&mut s, "browser.visibility", json!({"items": [reused], "visible": false}));
+        assert!(!crate::view::sketch_shown(&s, reused), "manual hide overrides kept visibility");
+
+        // A sketch explicitly hidden BEFORE feature creation stays hidden.
+        let pre_hidden = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "PreHidden"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [50, 0], "p1": [60, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "browser.visibility", json!({"items": [pre_hidden], "visible": false}));
+        run(&mut s, "solid.extrude", json!({"sketch": pre_hidden, "distance": 5, "operation": "new"}));
+        assert!(!crate::view::sketch_shown(&s, pre_hidden), "explicitly hidden sketch stays hidden");
+        assert!(!s.visibility.shown_sketches.contains(&pre_hidden));
+
+        // Revolve, Hole at sketch points, and Sheet Base Flange all respect auto-hide off.
+        let rev_sk = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "RevSketch"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [100, 0], "p1": [105, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.revolve", json!({"sketch": rev_sk, "axis": "y", "operation": "new"}));
+        assert!(crate::view::sketch_shown(&s, rev_sk), "off: Revolve keeps its sketch visible");
+
+        let pts = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "HolePts", "offset": 5}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.point", json!({"point": [5, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.hole", json!({"sketch": "HolePts", "diameter": 2, "depth": 3}));
+        assert!(crate::view::sketch_shown(&s, pts), "off: Hole at sketch points keeps its sketch visible");
+
+        let sheet_sk = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SheetBase"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 30], "p1": [20, 45]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "sheet.flange", json!({"sketch": "SheetBase"}));
+        assert!(crate::view::sketch_shown(&s, sheet_sk), "off: Sheet Base Flange keeps its sketch visible");
+
+        // Off-thread dialog path (`scratch().compute_commands()` + `accept_commands()`) keeps it visible too.
+        let off_sk = run(&mut s, "sketch.create", json!({"plane": "XY", "name": "OffThread"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [70, 0], "p1": [80, 10]}));
+        run(&mut s, "sketch.finish", json!({}));
+        let prepared =
+            s.scratch().compute_commands(&[("solid.extrude".into(), json!({"sketch": off_sk, "distance": 5, "operation": "new"}))], None).unwrap();
+        s.accept_commands(prepared).unwrap();
+        assert!(crate::view::sketch_shown(&s, off_sk), "off-thread computed Extrude keeps its sketch visible");
+        assert!(s.visibility.shown_sketches.contains(&off_sk));
+
+        // Saving and reopening preserves the kept sketch visibility even when opened with default auto-hide on.
+        let saved = s.design().to_json();
+        let reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+        assert!(reopened.auto_hide_sketches, "fresh session defaults to auto-hide on");
+        assert!(crate::view::sketch_shown(&reopened, off_sk), "saved kept sketch stays visible when reopened");
+        assert!(!crate::view::sketch_shown(&reopened, earlier), "earlier auto-hidden sketch stays hidden when reopened");
+
+        // Preference survives `file.new` (`replace_design`).
+        run(&mut s, "file.new", json!({}));
+        assert!(!s.auto_hide_sketches, "auto_hide_sketches survives file.new");
+    }
+
     /// #12125: a sketch on a body face, right before the History marker, stayed drawn after its
     /// eye hid it, and hiding it again changed nothing. The user's hide wins over the marker; a
     /// sketch hidden only because a feature uses it is still shown at the marker (#5202).

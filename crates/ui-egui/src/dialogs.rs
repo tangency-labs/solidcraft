@@ -806,6 +806,7 @@ impl DialogComputation {
         }
         let cmds = apply_commands(app, d)?;
         let mut session = app.session.scratch();
+        session.auto_hide_sketches = app.preferences.auto_hide_sketches;
         // The window's operation check already evaluated this Join (#6901).
         if let Some(joined) = app.op_check.joined_for(&cmds, app.session.revision) {
             session.prime(&joined);

@@ -1566,8 +1566,12 @@ pub(crate) struct ConsumedSketches {
 
 /// The sketches the features of a design use (see [`sketch_consumed`]), once per use.
 fn consumed_sketches(doc: &solidcraft_doc::Document) -> impl Iterator<Item = u64> + '_ {
-    use solidcraft_doc::{FeatureKind, SketchPoints};
     sketch_work::add(doc.features.len() as u64);
+    consumed_sketches_iter(doc)
+}
+
+fn consumed_sketches_iter(doc: &solidcraft_doc::Document) -> impl Iterator<Item = u64> + '_ {
+    use solidcraft_doc::{FeatureKind, SketchPoints};
     doc.features.iter().filter_map(|f| match &f.kind {
         FeatureKind::Extrude { sketch, .. }
         | FeatureKind::Revolve { sketch, .. }
@@ -1580,6 +1584,21 @@ fn consumed_sketches(doc: &solidcraft_doc::Document) -> impl Iterator<Item = u64
         | FeatureKind::SheetPerforate { sketch: Some(sketch), .. } => Some(sketch.0),
         _ => None,
     })
+}
+
+/// The sketches `after` consumes that already existed in `before` and were not consumed there,
+/// in feature order, each once. Used when [`Session::auto_hide_sketches`] is off so creating a
+/// feature keeps its sketch visible without unhiding sketches that were already consumed or
+/// came from an inserted design (#23256).
+pub(crate) fn newly_consumed_sketches(before: &solidcraft_doc::Document, after: &solidcraft_doc::Document) -> Vec<u64> {
+    let previously: std::collections::HashSet<u64> = consumed_sketches_iter(before).collect();
+    let mut added = Vec::new();
+    for id in consumed_sketches_iter(after) {
+        if !previously.contains(&id) && before.feature(id).is_some() && !added.contains(&id) {
+            added.push(id);
+        }
+    }
+    added
 }
 
 /// How many features [`sketch_consumed`] walked, for the tests that hold it to one walk per
@@ -2046,6 +2065,11 @@ mod tests {
             assert!(!preview.shown_sketches.contains(&sketch), "{} leaves the sketch hidden after the run", command.0);
             assert!(sketch_shown(&s, sketch), "the live session is unchanged");
         }
+        s.auto_hide_sketches = false;
+        let extrude = ("solid.extrude".into(), json!({"sketch":sketch,"distance":10}));
+        let preview = s.preview_visible_world(std::slice::from_ref(&extrude)).unwrap();
+        assert!(preview.shown_sketches.contains(&sketch), "auto_hide_sketches off keeps the sketch shown in preview");
+        assert!(sketch_shown(&s, sketch), "the live session is unchanged");
     }
 
     /// The viewport asks whether each sketch is used several times a frame: the features are

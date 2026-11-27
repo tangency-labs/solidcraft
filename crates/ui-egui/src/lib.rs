@@ -1803,6 +1803,7 @@ impl SolveApp {
         }
         // Before a design given at start opens: its paths follow the network preferences.
         prefs::sync_surface_analysis(self);
+        prefs::sync_auto_hide_sketches(self);
         crate::plugins::sync_policy(self);
         prefs::apply_network(&self.preferences);
         // Before a file given at start opens: the largest file it may be (#4086).
@@ -1915,6 +1916,7 @@ impl SolveApp {
             solidcraft_engine::slicers::set_chosen_programs(&self.preferences.custom_slicers);
         }
         self.session.set_validation(self.preferences.validation);
+        self.session.auto_hide_sketches = self.preferences.auto_hide_sketches;
         workspace::command_receiver(self, id, &params)?;
         print_face_ui::sync(&mut self.session, &self.preferences);
         if id == "timeline.play" {

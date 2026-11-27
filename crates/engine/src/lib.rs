@@ -985,6 +985,11 @@ pub struct Session {
     /// make construction geometry rather than normal geometry (off by default; #13142). A
     /// preference, kept like `auto_project` when another design is opened or started.
     pub project_construction: bool,
+    /// Automatically hide a sketch when a feature consumes it (on by default, matching existing
+    /// behaviour; #23256). Off: creating a feature that consumes a sketch keeps the sketch visible
+    /// (unless it was already hidden) by adding it to `visibility.shown_sketches`. A preference,
+    /// kept like `auto_project` when another design is opened or started.
+    pub auto_hide_sketches: bool,
     /// Host preferences; never saved in a design.
     pub disabled_plugins: std::collections::BTreeSet<String>,
     /// User resource ceilings; never loaded from or saved in a design.
@@ -1541,6 +1546,7 @@ impl Session {
             followed: None,
             auto_project: true,
             project_construction: false,
+            auto_hide_sketches: true,
             disabled_plugins: Default::default(),
             plugin_limits: plugin::default_host_limits(),
             plugin_state: plugin::AppState::for_process(),
@@ -1633,6 +1639,7 @@ impl Session {
         }
         let auto_project = self.auto_project;
         let project_construction = self.project_construction;
+        let auto_hide_sketches = self.auto_hide_sketches;
         let validation = self.validation();
         let single_surface_analysis = self.single_surface_analysis;
         let disabled_plugins = self.disabled_plugins.clone();
@@ -1674,6 +1681,7 @@ impl Session {
         self.command_check = command_check;
         self.auto_project = auto_project;
         self.project_construction = project_construction;
+        self.auto_hide_sketches = auto_hide_sketches;
         // The user's, like `auto_project`: the commands that open a design evaluate it under it
         // already (`Session::opened_validating`).
         self.set_validation(validation);
@@ -3554,6 +3562,21 @@ impl Session {
             None
         };
         let changed = !Arc::ptr_eq(&self.doc, &before.doc);
+        // With auto-hide off (#23256), creating a feature that consumes an existing visible sketch
+        // keeps that sketch visible in `shown_sketches` instead of letting `sketch_consumed` hide it.
+        if r.is_ok()
+            && !self.auto_hide_sketches
+            && changed
+            && outermost
+            && self.replacements == replacements
+            && !matches!(spec.id, "edit.undo" | "edit.redo" | "edit.restore_checkpoint")
+        {
+            for id in view::newly_consumed_sketches(&before.doc, &self.doc) {
+                if !self.visibility.hidden_sketches.contains(&id) && !self.visibility.shown_sketches.contains(&id) {
+                    self.visibility.shown_sketches.push(id);
+                }
+            }
+        }
         // Hiding or showing (`browser.visibility`) leaves the document alone, so it needs its own
         // test: it is saved with the design and has an undo step of its own.
         let hidden = self.visibility != before.visibility;
@@ -3930,6 +3953,7 @@ impl Session {
             followed: self.followed.clone(),
             auto_project: self.auto_project,
             project_construction: self.project_construction,
+            auto_hide_sketches: self.auto_hide_sketches,
             disabled_plugins: self.disabled_plugins.clone(),
             plugin_limits: self.plugin_limits,
             plugin_state: {
@@ -4391,6 +4415,7 @@ impl Session {
             }
             rebase_hidden(&mut before.visibility.hidden_occurrences, &live.hidden_occurrences, &start.hidden_occurrences);
             rebase_hidden(&mut before.visibility.hidden_folders, &live.hidden_folders, &start.hidden_folders);
+            rebase_hidden(&mut before.visibility.shown_sketches, &live.shown_sketches, &start.shown_sketches);
         }
         // This session's hidden bodies, and the computation's start, follow its renames; then
         // what the computation hid or showed is compared in its own names.
@@ -4403,6 +4428,8 @@ impl Session {
         self.visibility.hidden_bodies = std::mem::take(&mut computed.visibility.hidden_bodies);
         merge_hidden(&mut self.visibility.hidden_occurrences, &start.hidden_occurrences, &computed.visibility.hidden_occurrences);
         merge_hidden(&mut self.visibility.hidden_folders, &start.hidden_folders, &computed.visibility.hidden_folders);
+        merge_hidden(&mut self.visibility.shown_sketches, &start.shown_sketches, &computed.visibility.shown_sketches);
+        self.visibility.shown_sketches.retain(|id| !self.visibility.hidden_sketches.contains(id));
         self.body_renames = computed.body_renames;
         // Only committed source reads cross back from the worker. A no-op read must not
         // replace a disk observation made since this evaluation began; changed source bytes

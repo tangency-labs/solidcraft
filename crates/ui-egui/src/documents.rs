@@ -606,6 +606,7 @@ fn swap_in(app: &mut SolveApp, mut slot: DocSlot, presenting: bool) -> DocSlot {
     // So does the host's pre-command check: every tab is held to it.
     app.session.set_command_check(out.session.command_check());
     app.session.set_single_surface_analysis(app.preferences.single_surface_analysis);
+    app.session.auto_hide_sketches = app.preferences.auto_hide_sketches;
     crate::print_face_ui::sync(&mut app.session, &app.preferences);
     // The incoming design's plugin panels: the Model tab reads the installed plugins once, not on
     // every frame, so it no longer syncs them when the design comes to the front (#21594).

@@ -1,0 +1,30 @@
+{
+  "de": {
+    "prefs.auto_hide_sketches": "Skizze beim Erstellen eines Features automatisch ausblenden",
+    "prefs.auto_hide_sketches_help": "Blendet eine Skizze aus, sobald ein Feature (Extrusion, Drehung, Bohrung an Skizzenpunkten, Blechflansch usw.) sie verwendet. Aus: Die Skizze bleibt sichtbar, damit sie ohne erneutes Einblenden für weitere Features verwendet werden kann."
+  },
+  "en": {
+    "prefs.auto_hide_sketches": "Auto-hide sketch on feature creation",
+    "prefs.auto_hide_sketches_help": "Hide a sketch when a feature (Extrude, Revolve, Hole at sketch points, sheet metal flange, etc.) uses it. Off: the sketch stays visible so you can reuse it across multiple features without turning its eye back on."
+  },
+  "es": {
+    "prefs.auto_hide_sketches": "Ocultar boceto automáticamente al crear una operación",
+    "prefs.auto_hide_sketches_help": "Oculta un boceto cuando una operación (Extruir, Revolución, Agujero en puntos de boceto, brida de chapa, etc.) lo usa. Desactivado: el boceto permanece visible para reutilizarlo en varias operaciones sin volver a mostrarlo."
+  },
+  "fr": {
+    "prefs.auto_hide_sketches": "Masquer automatiquement l'esquisse lors de la création d'une fonction",
+    "prefs.auto_hide_sketches_help": "Masque une esquisse lorsqu'une fonction (Extrusion, Révolution, Perçage sur points d'esquisse, pli de tôlerie, etc.) l'utilise. Désactivé : l'esquisse reste visible afin de la réutiliser pour plusieurs fonctions sans la réafficher."
+  },
+  "ja": {
+    "prefs.auto_hide_sketches": "フィーチャー作成時にスケッチを自動で非表示",
+    "prefs.auto_hide_sketches_help": "フィーチャー（押し出し、回転、スケッチ点の穴、シートメタルのフランジなど）がスケッチを使用すると、そのスケッチを非表示にします。オフ：スケッチが表示されたままになるため、再表示せずに複数のフィーチャーで再利用できます。"
+  },
+  "ko": {
+    "prefs.auto_hide_sketches": "피처 생성 시 스케치 자동 숨기기",
+    "prefs.auto_hide_sketches_help": "피처(돌출, 회전, 스케치 점 구멍, 판금 플랜지 등)가 스케치를 사용하면 해당 스케치를 숨깁니다. 끄기: 스케치가 표시된 상태로 유지되어 다시 표시하지 않고 여러 피처에서 재사용할 수 있습니다."
+  },
+  "zh": {
+    "prefs.auto_hide_sketches": "创建特征时自动隐藏草图",
+    "prefs.auto_hide_sketches_help": "当特征（拉伸、旋转、草图点打孔、钣金法兰等）使用草图时自动将其隐藏。关闭：草图保持可见，无需重新打开显示即可在多个特征中重复使用。"
+  }
+}
