@@ -5716,6 +5716,44 @@ fn a_round_along_a_whole_circle_builds_alike_on_both_ends_of_a_mirrored_ring() {
     }
 }
 
+/// #19077, reduced: a quarter turn of a 20 wide, 6 high profile whose outer wall is a cone of
+/// slope 1/320, its two end faces through the axis, each end rounded 0.5 against the cone (the
+/// round's spine is a hyperbola, its plane parallel to the cone's axis) and shelled 0.4 inward.
+/// The reporter's own design (a 120 degree bent slot, the cone a 1 mm band between tangent
+/// arcs, 13 edges rounded 0.4) is not in the repository; rebuilt from its numbers, its rounds
+/// and shells are refused alike on main and here (see the PR), so this guards the reduced
+/// case only: a valid solid whose volume is between 0 and the part's.
+#[test]
+fn a_revolved_body_with_rounds_on_its_shallow_cone_shells_04_inward() {
+    let slope = 1.0 / 320.0;
+    let line = |start: [f64; 3], end: [f64; 3]| Curve::Line { start, end };
+    let (a, b) = ([40.0, 0.0, 0.0], [60.0, 0.0, 0.0]);
+    let (c, d) = ([60.0 + 6.0 * slope, 0.0, 6.0], [40.0, 0.0, 6.0]);
+    let part = solidcore_ops::sweep::revolve(
+        &[line(a, b), line(b, c), line(c, d), line(d, a)],
+        [0.0; 3],
+        [0.0, 0.0, 1.0],
+        PI / 2.0,
+        true,
+    )
+    .unwrap();
+    let middle = 60.0 + 3.0 * slope;
+    let ends = [
+        edge_at(&part, [middle, 0.0, 3.0]),
+        edge_at(&part, [0.0, middle, 3.0]),
+    ];
+    blend(&part, Blend::Round, &ends, &[0.5], &[], Corners::Filled)
+        .unwrap_or_else(|e| panic!("the rounds build: {e}"));
+    assert!(part.check(CheckLevel::All).unwrap().is_valid());
+    let whole = part.volume(1e-8).unwrap();
+    let (_, order) = part.to_record().unwrap();
+    solidcore_ops::shell(&part, &order, &[], -0.4)
+        .unwrap_or_else(|e| panic!("the shell builds: {e}"));
+    assert!(part.check(CheckLevel::All).unwrap().is_valid());
+    let wall = part.volume(1e-8).unwrap();
+    assert!(0.0 < wall && wall < whole, "wall {wall} of {whole}");
+}
+
 /// Acid-1 stage 4: both rims of the upper half torus, including the outer rim's
 /// detour around an r0.7 notch, are rounded r0.8 after joining the seam's boss.
 #[test]
@@ -8554,6 +8592,119 @@ fn open_frustum_end_refusal_names_the_interior_peak_that_fits() {
         None,
         true,
     );
+}
+
+/// A law corner where the law's slope jumps only a little is a corner of the union of its
+/// balls like any other (#22141): 2 -> 2 -> 1 and 2 -> 1.2 -> 1 at 0, 0.5 and 1 along the 60
+/// cube's top edge y = 0, z = 60 from x = 0. The first peaks (the slope falls from 0 to -1/30
+/// per mm), the second dips (it rises from -0.8/30 to -0.2/30) though 1.2 is no least radius.
+/// Both sides of such a corner touch its ball, so their normals there differ by less than one
+/// degree: the split, which looked for the corner with the continuity search (a kink within
+/// one degree is G1 there), left the round one face turning inside, its rails kinked by more
+/// than SMLib's check takes (1.9 degrees at the peak), and dropped the exact pieces.
+///
+/// Each round removes its balls' union: the ball at x is centred r(x) in from both faces with
+/// radius r(x), and each slice's removed area is the part of the rails' square [0, r(x)]^2
+/// that the rays from the edge cross before they enter a ball, integrated over the slices
+/// and the rays' angle (clustered at the faces, where a ray grazes the ball touching that
+/// face) to convergence: 40.768845 and 24.632230, within 1e-6 (the same integral gives
+/// 39.54204 for the 2 -> 4 -> 2 case above, whose value it holds to 3e-5 relative). Each
+/// is one sound body of 8 faces at the peak (each side its own) and 9 at the dip (with the
+/// corner ball's zone between them), every round face a rolling-ball round of its own side's
+/// law, the dip's zone on the corner ball; on the box as made and as read back from its record.
+#[test]
+fn a_variable_round_with_a_small_corner_in_its_law_is_split_there() {
+    all_fixes();
+    let from = [0.0, 0.0, 60.0];
+    let middle = [30.0, 0.0, 60.0];
+    let rails = [[0.0, 2.0, 60.0], [0.0, 0.0, 58.0]];
+    let knots = [0.0, 0.0, 0.5, 1.0, 1.0];
+    // radii, removed, faces, whether it dips
+    let cases: [([f64; 3], f64, usize, bool); 2] = [
+        ([2.0, 2.0, 1.0], 40.768845, 8, false),
+        ([2.0, 1.2, 1.0], 24.632230, 9, true),
+    ];
+    let runs = cases
+        .into_iter()
+        .flat_map(|case| [(case, false), (case, true)]);
+    for ((radii, want, faces, dips), read_back) in runs {
+        let cube = make_box([0.0; 3], [60.0; 3]).unwrap();
+        let b = if read_back {
+            Body::from_record(&cube.to_record().unwrap().0, true)
+                .unwrap()
+                .0
+        } else {
+            cube
+        };
+        let e = edge_at(&b, middle);
+        let start = vertex_at(&b, from);
+        fillet_variable(&b, e, start, 1, &knots, &radii)
+            .unwrap_or_else(|e| panic!("{radii:?}, read back {read_back}: {e:?}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(
+            report.is_valid(),
+            "{radii:?}, read back {read_back}:\n{}",
+            report.text
+        );
+        let removed = 60.0_f64.powi(3) - volume(&b);
+        assert!(
+            (removed - want).abs() <= 1e-4 * want,
+            "{radii:?}, read back {read_back}: removed {removed}, want {want}"
+        );
+        assert_eq!(
+            b.counts().unwrap()[0],
+            faces,
+            "{radii:?}, read back {read_back}"
+        );
+        // each round face rolls its own side's law; the dip's zone is the corner ball's
+        let (k, made) = kernel_copy(&b);
+        let piece_round = LawPieces::new(from, middle, rails, radii[0]);
+        // side 0 the law on [0, 0.5], side 1 on [0.5, 1]
+        let side = |i: usize, y: f64| {
+            if i == 0 {
+                2.0 + 2.0 * y * (radii[1] - 2.0)
+            } else {
+                radii[1] + 2.0 * (y - 0.5) * (1.0 - radii[1])
+            }
+        };
+        let (mut pieces, mut zones) = (Vec::new(), 0);
+        for &f in made.face_list() {
+            let s = made.face(f).unwrap().surface.as_ref().unwrap();
+            match s.procedural_blend() {
+                _ if matches!(s.kind(), SurfaceKind::Plane(_)) => {}
+                Some(BlendRef::Procedural(pb)) => {
+                    let points = definition_points(&k, pb);
+                    pieces.push((0..2).find(|&i| {
+                        points
+                            .iter()
+                            .all(|&p| piece_round.off(p, |y| side(i, y)) < 1e-6)
+                    }));
+                }
+                None if surface_kind_name(s) == "ball-patch" => {
+                    let SurfaceKind::BallPatch(bp) = s.kind() else {
+                        panic!("{radii:?}: a ball patch named so is one");
+                    };
+                    let ball =
+                        piece_round.from + piece_round.along * 0.5 + piece_round.inward * radii[1];
+                    assert!(
+                        bp.centre().distance(ball) < 1e-6 && (bp.radius() - radii[1]).abs() < 1e-6,
+                        "{radii:?}: a zone on ({:?}, {})",
+                        bp.centre(),
+                        bp.radius()
+                    );
+                    zones += 1;
+                }
+                _ => panic!("{radii:?}: {:?}", surface_kind_name(s)),
+            }
+        }
+        pieces.sort_unstable();
+        assert_eq!(
+            pieces,
+            [Some(0), Some(1)],
+            "{radii:?}, read back {read_back}"
+        );
+        assert_eq!(zones, usize::from(dips), "{radii:?}, read back {read_back}");
+    }
 }
 
 /// A rectangle `2w` by `2h` about the origin extruded `height` with every wall leaning in by

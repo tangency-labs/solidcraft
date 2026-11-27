@@ -11,6 +11,12 @@ frame_member_turn
   inputs:
     Angle = turn.angle (Angle)
   expressions: turn.angle
+dogbone
+  inputs:
+    Bit Diameter = dogbone.diameter (Length)
+    Gap = dogbone.gap (Length)
+    Largest Angle = dogbone.max_angle (Angle)
+  expressions: dogbone.diameter, dogbone.gap, dogbone.max_angle
 frame_gusset
   inputs:
     Angle = gusset1.angle (Angle)
@@ -122,6 +128,11 @@ cone
     Height = cone.height (Length)
   expressions: cone.radius, cone.top_radius, cone.height, cone.x, cone.y, cone.z, 0, 0, 1
 combine
+finger_joint
+  inputs:
+    Clearance = joint.clearance (Length)
+    Edge offset = joint.edge_offset (Length)
+  expressions: joint.clearance, joint.edge_offset
 pattern_rectangular
   inputs:
     Quantity = rect.count1 (Unitless)

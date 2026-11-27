@@ -439,8 +439,11 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                 label: "Faces",
                 ids: &["solid.press_pull", "solid.draft", "solid.offset_face", "solid.replace_face", "solid.split_face", "face.delete"],
             },
-            CommandGroup { label: "Bodies", ids: &["solid.shell", "solid.combine", "solid.split_body", "solid.scale", "solid.remove"] },
-            CommandGroup { label: "Specialise", ids: &["sheet.convert"] },
+            CommandGroup {
+                label: "Bodies",
+                ids: &["solid.shell", "solid.combine", "solid.finger_joint", "solid.split_body", "solid.scale", "solid.remove"],
+            },
+            CommandGroup { label: "Specialise", ids: &["sheet.convert", "solid.dogbone"] },
         ],
         _ => &[],
     }
@@ -592,6 +595,9 @@ pub const SECTIONS: &[Section] = &[
         promoted: 3,
         ids: &["construct.plane", "construct.axis", "construct.point", "construct.plane.offset"],
     },
+    // Only while a component other than the design is active (`toolbar::panel_shown`), pinned at
+    // the right as FINISH SKETCH is. The next group comes after it when both show.
+    Section { tab: "MODEL", panel: "ACTIVE COMPONENT", promoted: 1, ids: &["component.activate.parent"] },
     // Only while a linked design is edited in place, pinned at the right as FINISH SKETCH is.
     Section { tab: "MODEL", panel: "FINISH EDITING", promoted: 1, ids: &["component.finish_edit"] },
     // Sketches drive surfaces too: New Sketch leads the tab, as on MODEL and SHEET METAL.
@@ -908,6 +914,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("render.settings.apply", "Saved Camera"),
     ("render.preflight", "Check"),
     ("appearance.assign", "Appearance"),
+    ("component.activate.parent", "Parent"),
     ("component.capture_position", "Capture Pos."),
     ("component.create", "New Comp."),
     ("component.from_bodies", "From Bodies"),
@@ -1648,10 +1655,12 @@ mod tests {
                 "face.delete",
                 "solid.shell",
                 "solid.combine",
+                "solid.finger_joint",
                 "solid.split_body",
                 "solid.scale",
                 "solid.remove",
                 "sheet.convert",
+                "solid.dogbone",
                 "timeline.delete",
             ]
         );
