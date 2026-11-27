@@ -12,6 +12,8 @@ use crate::{DocError, Result};
 
 pub const MAX_FEATURES: usize = 10_000;
 pub const MAX_PARAMS: usize = 10_000;
+/// Limit the quadratic number of pair checks in a finger-joint feature.
+pub const MAX_FINGER_JOINT_BODIES: usize = 32;
 /// Largest feature id a replayed feature may keep (`Document::insert_feature`): exact in JSON
 /// numbers, and far from overflowing the next id.
 pub const MAX_FEATURE_ID: u64 = 1 << 52;
@@ -204,6 +206,35 @@ pub enum ProfileSel {
     WholeBoundaries { profiles: Vec<WholeProfileBoundary> },
     /// The profile containing each sketch point.
     Points { points: Vec<Vec2> },
+    /// Every letter of these sketch texts (their links), counters left open: found again from the
+    /// text on every evaluation, so the pick follows new words (#727). A letter that other curves
+    /// of the sketch cut into is an error, never a guess.
+    TextRegions { links: Vec<String> },
+    /// Profiles that the curves around them can't tell apart (twins, such as the halves of a lens
+    /// a line cuts), each saved as the curves of its outer loop with the side of each it lies on
+    /// (#22548). Found again on every evaluation; after a change of the regions, the profile that
+    /// shares the most of those curves on the same sides and lies against none of them. A tie is
+    /// an error, never a guess.
+    SidedCurves { loops: Vec<Vec<SidedCurve>> },
+}
+
+/// The side of a sketch curve a region lies on: inside or outside a circle or arc (toward its
+/// centre or away from it), left or right of a line seen from its start to its end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CurveSide {
+    Inside,
+    Outside,
+    Left,
+    Right,
+}
+
+/// A curve of a profile's outer loop and the side of it the profile lies on.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SidedCurve {
+    pub curve: String,
+    pub side: CurveSide,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -485,7 +516,21 @@ pub struct Extent {
     /// was not known): no cap answers to `start`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub one_sided_direction: Option<Direction>,
+    /// To Object as a construction plane or point (or an origin plane or the origin), found
+    /// again on each evaluation so the end follows it. `to` then holds a point on it, so the
+    /// extrude still reads as To Object. Designs saved before it carry none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_ref: Option<ObjectRef>,
+    /// From Object as a reference, as `to_ref`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_ref: Option<ObjectRef>,
 }
+
+/// A To / From Object that is a construction plane or point, not a body face: see
+/// [`Extent::to_ref`].
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct ObjectRef(pub GeoRef);
 
 /// A component's placement relative to a feature's own component, as it was when the feature
 /// picked something in it ([`Extent::picked_placements`]).
@@ -1016,6 +1061,10 @@ pub enum FeatureKind {
         /// Missing fields retain the angular placement of existing designs.
         #[serde(default)]
         convention: RevolveConvention,
+        /// Join pieces of a circular profile before turning it. Older designs retain their
+        /// separate faces and edges so their stored references still resolve.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        join_profile_arcs: bool,
         /// To Object: turn until the face, vertex or point here.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<FacePick>,
@@ -1080,6 +1129,39 @@ pub enum FeatureKind {
         /// Cut each picked edge's tangent chain with it (the default), or only the picked edges.
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
         tangent_chain: bool,
+    },
+    /// Dogbone reliefs (CNC routing): a round bite of the bit's diameter cut into each picked
+    /// inside corner edge, or into the inside corners at picked planar faces (a pocket's floor, a
+    /// plate's face a slot runs through), so that a square part seats where a round bit would
+    /// leave a round. See `crate::dogbone`.
+    Dogbone {
+        /// Reference points on the inside corner edges (each re-finds the nearest edge).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        edges: Vec<Position>,
+        /// Points on planar faces whose inside corners, along the face's normal, are relieved.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        faces: Vec<FacePick>,
+        #[walk(length = "Bit Diameter")]
+        diameter: Expr,
+        #[serde(default, skip_serializing_if = "crate::dogbone::DogboneStyle::is_normal")]
+        style: crate::dogbone::DogboneStyle,
+        /// Minimal style: how far short of the sharp corner the relief stops (default 5% of the
+        /// bit diameter).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Gap")]
+        gap: Option<Expr>,
+        /// T-bone style: the wall the relief bites.
+        #[serde(default, skip_serializing_if = "crate::dogbone::DogboneSide::is_longer")]
+        side: crate::dogbone::DogboneSide,
+        /// The largest corner angle relieved (default 90°).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Largest Angle")]
+        max_angle: Option<Expr>,
+        /// The bit's axis: picked edges not along it are skipped (default: any direction).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        along: Option<Dir>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
     },
     Box {
         /// The box's lowest corner, or its centre when `centred` is set.
@@ -1183,6 +1265,18 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Offset radius")]
         offset_radius: Option<Expr>,
+    },
+    /// Alternating rectangular cuts in the intersection of two crossing rectangular blocks.
+    FingerJoint {
+        bodies: Vec<BodyName>,
+        count: usize,
+        #[walk(length = "Clearance")]
+        clearance: Expr,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        inverted: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Edge offset")]
+        edge_offset: Option<Expr>,
     },
     /// Copies of other features' results, of bodies, or of components (rectangular, circular or
     /// along a path). The copied features are named by id (#1134). Component copies are named by
@@ -1339,6 +1433,11 @@ pub enum FeatureKind {
         /// that fades out); none: the groove stops square there.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ease_out: Option<ThreadRunout>,
+        /// A modelled internal thread runs down to a blind hole's bottom, its last turn trimmed at
+        /// the plane of the bottom, instead of stopping clear of it (#22616): a printed part needs
+        /// no room for a tap's lead. Missing in older designs, whose threads stop clear as before.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        to_bottom: bool,
         /// The chamfered tip at the thread's free end (ISO 4753).
         #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
         tip: crate::thread_forms::ThreadTip,
@@ -1878,9 +1977,43 @@ pub enum FeatureKind {
         /// The centres' grid for circles and polygons.
         #[serde(default = "default_cell_dot_grid")]
         dot_grid: solidcore_record::cell_grid::DotGrid,
-        /// A cell's inscribed diameter.
+        /// A cell's inscribed diameter. Not used by a sketched cell (`cell_sketch`), which has
+        /// its own outline and is laid out by `pitch_x` and `pitch_y`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Cell size")]
-        size: Expr,
+        size: Option<Expr>,
+        /// The sketch holding the cell, with exactly one closed profile (#21722): the cells are
+        /// that profile repeated on a lattice, instead of one of the built-in `shape`s (which is
+        /// then not used). Saved by designs of a newer format.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cell_sketch: Option<SketchId>,
+        /// A sketched cell's distance between origins along a row.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Pitch X")]
+        pitch_x: Option<Expr>,
+        /// A sketched cell's distance between rows.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Pitch Y")]
+        pitch_y: Option<Expr>,
+        /// How far each row shifts along the row, as a fraction of `pitch_x` (0 to 1; default 0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(unitless = "Stagger")]
+        stagger: Option<Expr>,
+        /// A sketched cell's turn about its own origin, apart from the grid's `angle`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(angle = "Cell angle")]
+        cell_angle: Option<Expr>,
+        /// Mirror every other sketched cell (those with `i + j` odd).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flip: bool,
+        /// A sketched cell's origin in its sketch's own coordinates (default: the profile's
+        /// centroid); both or neither.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Cell origin X")]
+        cell_origin_x: Option<Expr>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Cell origin Y")]
+        cell_origin_y: Option<Expr>,
         /// The wall between neighbouring cells.
         #[walk(length = "Web")]
         web: Expr,
@@ -2193,6 +2326,16 @@ pub enum FeatureKind {
         /// rule's `bend_relief_shape` (rectangular | obround | tear). None follows the rule.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bend_relief_shape: Option<String>,
+        /// Corner choices for these flanges, identified by their named source rims.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        corners: Vec<crate::CornerJoinParams>,
+    },
+    /// A corner shared by two bends, saved by their source-edge identities.
+    SheetCornerJoin {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
+        #[serde(flatten)]
+        corner: crate::CornerJoinParams,
     },
     /// Flat hems on sheet edges.
     SheetHem {
@@ -2984,6 +3127,14 @@ pub enum FeatureKind {
         /// of each instead of moving them in place.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         copy: bool,
+        /// Constructions (by feature id) carried along with the bodies although they are not
+        /// built only on them, such as a Center Pole placed at fixed points.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        carry: Vec<FeatureId>,
+        /// Constructions (by feature id) built on the moved bodies that stay where they are
+        /// instead of following them.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        leave: Vec<FeatureId>,
         /// For each copied body, its captured source frame in the copy's component. Applied
         /// after the source-local move. Empty in older designs, which copy local geometry.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -3842,6 +3993,16 @@ pub enum PatternKind {
         copy_at_end1: bool,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         copy_at_end2: bool,
+        /// Count and spacing list: the gaps between neighbours along the first direction, used
+        /// in turn and from the start again, so `10; 20; 30` with a count of 5 puts the copies
+        /// at 10, 30, 60 and 70.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[walk(length = "Spacing list")]
+        spacing_list1: Vec<Expr>,
+        /// The spacing list along the second direction.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[walk(length = "Spacing list 2")]
+        spacing_list2: Vec<Expr>,
     },
     Circular {
         /// A point on the axis the copies turn about: numbers, or length expressions it follows
@@ -3927,6 +4088,8 @@ pub enum PatternDistance {
     CountExtent,
     /// The spacing and the extent: as many evenly spaced copies as fit in the extent.
     SpacingExtent,
+    /// The count and a list of spacings, used in turn and from the start again.
+    CountList,
 }
 
 impl PatternDistance {
@@ -3940,12 +4103,13 @@ impl PatternDistance {
             Self::CountSpacing => "count_spacing",
             Self::CountExtent => "count_extent",
             Self::SpacingExtent => "spacing_extent",
+            Self::CountList => "count_list",
         }
     }
 
     /// Read [`PatternDistance::as_str`]'s word.
     pub fn from_word(word: &str) -> Option<Self> {
-        [Self::CountSpacing, Self::CountExtent, Self::SpacingExtent].into_iter().find(|d| d.as_str() == word)
+        [Self::CountSpacing, Self::CountExtent, Self::SpacingExtent, Self::CountList].into_iter().find(|d| d.as_str() == word)
     }
 
     /// Whether the count is given (else worked out from the spacing and the extent).
@@ -3953,14 +4117,20 @@ impl PatternDistance {
         self != Self::SpacingExtent
     }
 
-    /// Whether the spacing is given (else worked out from the count and the extent).
+    /// Whether one spacing is given (else worked out from the count and the extent, or the
+    /// list's first).
     pub fn uses_spacing(self) -> bool {
-        self != Self::CountExtent
+        matches!(self, Self::CountSpacing | Self::SpacingExtent)
     }
 
     /// Whether an extent is given.
     pub fn uses_extent(self) -> bool {
-        self != Self::CountSpacing
+        matches!(self, Self::CountExtent | Self::SpacingExtent)
+    }
+
+    /// Whether a list of spacings is given.
+    pub fn uses_list(self) -> bool {
+        self == Self::CountList
     }
 }
 
@@ -4075,6 +4245,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. }
                 | FeatureKind::SheetContour { .. }
                 | FeatureKind::SheetFlange { .. }
+                | FeatureKind::SheetCornerJoin { .. }
                 | FeatureKind::SheetHem { .. }
                 | FeatureKind::SheetPerforate { .. }
                 | FeatureKind::SheetFold { .. }
@@ -4110,12 +4281,14 @@ impl FeatureKind {
             FeatureKind::Revolve { .. } => "RevolveFeature",
             FeatureKind::Fillet { .. } => "FilletFeature",
             FeatureKind::Chamfer { .. } => "ChamferFeature",
+            FeatureKind::Dogbone { .. } => "DogboneFeature",
             FeatureKind::Box { .. } => "BoxFeature",
             FeatureKind::Cylinder { .. } => "CylinderFeature",
             FeatureKind::Sphere { .. } => "SphereFeature",
             FeatureKind::Torus { .. } => "TorusFeature",
             FeatureKind::Cone { .. } => "ConeFeature",
             FeatureKind::Combine { .. } => "CombineFeature",
+            FeatureKind::FingerJoint { .. } => "FingerJointFeature",
             FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPatternFeature",
             FeatureKind::Pattern { pattern: PatternKind::Path { .. }, .. } => "PathPatternFeature",
             FeatureKind::Pattern { .. } => "CircularPatternFeature",
@@ -4157,6 +4330,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. } => "BaseFlangeFeature",
             FeatureKind::SheetContour { .. } => "ContourFlangeFeature",
             FeatureKind::SheetFlange { .. } => "EdgeFlangeFeature",
+            FeatureKind::SheetCornerJoin { .. } => "CornerJoinFeature",
             FeatureKind::SheetHem { .. } => "HemFeature",
             FeatureKind::SheetPerforate { .. } => "PerforateFeature",
             FeatureKind::SheetFold { .. } => "FoldFeature",
@@ -4212,12 +4386,14 @@ impl FeatureKind {
             FeatureKind::Revolve { .. } => "revolve",
             FeatureKind::Fillet { .. } => "fillet",
             FeatureKind::Chamfer { .. } => "chamfer",
+            FeatureKind::Dogbone { .. } => "dogbone",
             FeatureKind::Box { .. } => "box",
             FeatureKind::Cylinder { .. } => "cylinder",
             FeatureKind::Sphere { .. } => "sphere",
             FeatureKind::Torus { .. } => "torus",
             FeatureKind::Cone { .. } => "cone",
             FeatureKind::Combine { .. } => "combine",
+            FeatureKind::FingerJoint { .. } => "finger_joint",
             FeatureKind::Pattern { .. } => "pattern",
             FeatureKind::Mirror { .. } => "mirror",
             FeatureKind::Hole { .. } => "hole",
@@ -4254,6 +4430,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. } => "sheet_base",
             FeatureKind::SheetContour { .. } => "sheet_contour",
             FeatureKind::SheetFlange { .. } => "sheet_flange",
+            FeatureKind::SheetCornerJoin { .. } => "sheet_corner_join",
             FeatureKind::SheetHem { .. } => "sheet_hem",
             FeatureKind::SheetPerforate { .. } => "sheet_perforate",
             FeatureKind::SheetFold { .. } => "sheet_fold",
@@ -4310,12 +4487,14 @@ impl FeatureKind {
             "RevolveFeature" => "revolve",
             "FilletFeature" => "fillet",
             "ChamferFeature" => "chamfer",
+            "DogboneFeature" => "dogbone",
             "BoxFeature" => "box",
             "CylinderFeature" => "cylinder",
             "SphereFeature" => "sphere",
             "TorusFeature" => "torus",
             "ConeFeature" => "cone",
             "CombineFeature" => "combine",
+            "FingerJointFeature" => "finger_joint",
             "RectangularPatternFeature" | "PathPatternFeature" | "CircularPatternFeature" => "pattern",
             "MirrorFeature" => "mirror",
             "ConstructionPlane" => "construction_plane",
@@ -4354,6 +4533,7 @@ impl FeatureKind {
             "BaseFlangeFeature" => "sheet_base",
             "ContourFlangeFeature" => "sheet_contour",
             "EdgeFlangeFeature" => "sheet_flange",
+            "CornerJoinFeature" => "sheet_corner_join",
             "HemFeature" => "sheet_hem",
             "PerforateFeature" => "sheet_perforate",
             "FoldFeature" => "sheet_fold",
@@ -4407,12 +4587,14 @@ impl FeatureKind {
             FeatureKind::Revolve { .. } => "Revolve",
             FeatureKind::Fillet { .. } => "Fillet",
             FeatureKind::Chamfer { .. } => "Chamfer",
+            FeatureKind::Dogbone { .. } => "Dogbone",
             FeatureKind::Box { .. } => "Box",
             FeatureKind::Cylinder { .. } => "Cylinder",
             FeatureKind::Sphere { .. } => "Sphere",
             FeatureKind::Torus { .. } => "Torus",
             FeatureKind::Cone { .. } => "Cone",
             FeatureKind::Combine { .. } => "Combine",
+            FeatureKind::FingerJoint { .. } => "FingerJoint",
             FeatureKind::Pattern { pattern: PatternKind::Rectangular { .. }, .. } => "RectangularPattern",
             FeatureKind::Pattern { pattern: PatternKind::Path { .. }, .. } => "PathPattern",
             FeatureKind::Pattern { .. } => "CircularPattern",
@@ -4454,6 +4636,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. } => "BaseFlange",
             FeatureKind::SheetContour { .. } => "ContourFlange",
             FeatureKind::SheetFlange { .. } => "EdgeFlange",
+            FeatureKind::SheetCornerJoin { .. } => "CornerJoin",
             FeatureKind::SheetHem { .. } => "Hem",
             FeatureKind::SheetPerforate { .. } => "Perforate",
             FeatureKind::SheetFold { .. } => "Fold",
@@ -4937,6 +5120,10 @@ pub struct Document {
     /// What a body looks like to a simulator, by body name; a body not listed is `Auto`.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub collision_shapes: std::collections::BTreeMap<String, CollisionShape>,
+    /// Bodies drawn without their edge lines (by body name), whatever the visual style: an
+    /// overlay such as a thin label on a plate. Every other body draws them as the style says.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub edgeless_bodies: std::collections::BTreeSet<String>,
     /// Physical materials defined in this design (`material.create`), next to the built-in ones.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub user_materials: Vec<UserMaterial>,
@@ -4979,6 +5166,9 @@ pub struct Document {
     /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<crate::notes::Note>,
+    /// Weld graphics, independent of timeline features and bodies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", deserialize_with = "crate::weld::deserialize_records")]
+    pub welds: Vec<crate::weld::WeldRecord>,
     /// What was hidden when the design was saved. A session takes it from here when the design
     /// opens and keeps the live state itself (`browser.visibility`: saved, and undone like any
     /// other change), so a document in a session leaves this empty; the session puts it back when
@@ -5269,6 +5459,7 @@ impl Document {
             .chain(self.canvases.iter().map(|c| c.id))
             .chain(self.point_clouds.iter().map(|c| c.id))
             .chain(self.notes.iter().map(|n| n.id))
+            .chain(self.welds.iter().map(|w| w.id))
             .chain(a.joints.iter().map(|j| j.id))
             .chain(a.contact_sets.iter().map(|c| c.id))
             .chain(a.studies.iter().map(|s| s.id))
@@ -5317,6 +5508,7 @@ impl Document {
             body_offsets: Default::default(),
             materials: Default::default(),
             collision_shapes: Default::default(),
+            edgeless_bodies: Default::default(),
             print_faces: Default::default(),
             user_materials: Vec::new(),
             appearances: Default::default(),
@@ -5332,6 +5524,7 @@ impl Document {
             saved_sections: Vec::new(),
             plane_extents: std::collections::BTreeMap::new(),
             notes: Vec::new(),
+            welds: Vec::new(),
             visibility: Visibility::default(),
             drawings: Vec::new(),
             plugin_data: Default::default(),
@@ -5357,6 +5550,9 @@ impl Document {
         }
         if let Some(shape) = self.collision_shapes.remove(old) {
             self.collision_shapes.insert(new.to_string(), shape);
+        }
+        if self.edgeless_bodies.remove(old) {
+            self.edgeless_bodies.insert(new.to_string());
         }
         if let Some(mut face) = self.print_faces.remove(old) {
             face.body = new.to_string();
@@ -5469,6 +5665,12 @@ impl Document {
     /// The parameter renamed from `previous` to this design, as `(old, new)`, when that rename
     /// ([`Document::rename_param`], with every reference it follows) is all that changed (#611).
     pub fn param_rename_from(&self, previous: &Document) -> Option<(String, String)> {
+        if self.features.len() != previous.features.len()
+            || self.params.len() != previous.params.len()
+            || self.text_params.len() != previous.text_params.len()
+        {
+            return None;
+        }
         // Borrowed names: every command that changes the design asks, and most rename nothing.
         fn names(d: &Document) -> std::collections::BTreeSet<&str> {
             let stored = d.params.iter().map(|p| p.name.as_str()).chain(d.text_params.iter().map(|p| p.name.as_str()));
@@ -5616,10 +5818,10 @@ impl Document {
     }
 
     /// The copy-lineage source(s) of `body` from the active feature that created it
-    /// (`Pattern`, `Mirror` without combine, or `Move` with `copy: true`).
+    /// (`Pattern`, `Mirror`, or `Move` with `copy: true`).
     ///
-    /// A multi-seed `Pattern` with `join: true` booleans all seeds and copies together before
-    /// splitting disconnected `lumps()`, so `body_names` has no per-seed slot mapping; unmerged
+    /// A multi-seed `Pattern` with `join: true` (or `Mirror` with `combine: true`) splits
+    /// disconnected `lumps()` without a fixed per-seed slot layout in `body_names`; unmerged
     /// lumps resolve unanimously when every seed carries the same material.
     fn copy_material_sources(&self, body: &str) -> CopyMaterialSources<'_> {
         if body.is_empty() {
@@ -5648,8 +5850,14 @@ impl Document {
                         None
                     }
                 }
-                FeatureKind::Mirror { bodies, combine: false, .. } if !bodies.is_empty() => {
-                    bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
+                FeatureKind::Mirror { bodies, combine, .. } if !bodies.is_empty() => {
+                    if !*combine {
+                        bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
+                    } else if bodies.len() == 1 {
+                        (bodies[0].0.as_str() != body).then_some(CopyMaterialSources::Single(bodies[0].0.as_str()))
+                    } else {
+                        (!bodies.iter().any(|b| b.0.as_str() == body)).then_some(CopyMaterialSources::Unanimous(bodies.as_slice()))
+                    }
                 }
                 FeatureKind::Move { bodies, copy: true, .. } if !bodies.is_empty() => {
                     bodies.get(idx).map(|b| b.0.as_str()).filter(|s| *s != body).map(CopyMaterialSources::Single)
@@ -5662,9 +5870,9 @@ impl Document {
     }
 
     /// The seed body `body` was copied from by the active feature that created it
-    /// (`Pattern`, `Mirror` without combine, or `Move` with `copy: true`), when that
-    /// lineage is unambiguous from pinned `body_names`. Multi-seed joined patterns merge all
-    /// seeds before splitting disconnected lumps and therefore have no single per-slot seed.
+    /// (`Pattern`, `Mirror`, or `Move` with `copy: true`), when that lineage is unambiguous
+    /// from pinned `body_names`. Multi-seed joined patterns and combined mirrors emit unmerged
+    /// lumps without a single per-slot seed.
     pub fn copy_seed_body(&self, body: &str) -> Option<&str> {
         match self.copy_material_sources(body) {
             CopyMaterialSources::Single(seed) => Some(seed),

@@ -276,7 +276,6 @@ crates/doc/src/print_face.rs:Document::locate_print_face dot,normalized
 crates/doc/src/project.rs:arc_geom normalized
 crates/doc/src/project.rs:as_spline dot,normalized
 crates/doc/src/project.rs:at_vertices dot,normalized
-crates/doc/src/project.rs:cache_key triangles
 crates/doc/src/project.rs:circle3 cross,dot,normalized
 crates/doc/src/project.rs:closest_on_segment dot
 crates/doc/src/project.rs:closest_on_triangle cross,dot,normalized
@@ -490,7 +489,6 @@ crates/engine/src/cmd/features_more.rs:emboss cross,dot,normalized,triangles
 crates/engine/src/cmd/features_more.rs:snap_point dot
 crates/engine/src/cmd/file.rs:mesh_data triangles
 crates/engine/src/cmd/file.rs:saved_preview triangles
-crates/engine/src/cmd/file_thumbnail.rs:scene triangles
 crates/engine/src/cmd/joints.rs:circle_centre dot
 crates/engine/src/cmd/joints.rs:origin_on_part cross
 crates/engine/src/cmd/joints.rs:reach atan2,cross,dot
@@ -662,6 +660,7 @@ crates/engine/src/snap.rs:axis_ends dot
 crates/engine/src/snap.rs:face_points normalized
 crates/engine/src/snap.rs:same_circle dot
 crates/engine/src/snap.rs:whole_arc dot,tangent_chain
+crates/engine/src/thumbnail.rs:scene triangles
 crates/engine/src/view.rs:SectionIndex::new triangles
 crates/engine/src/view.rs:SectionIndex::segments dot,triangles
 crates/engine/src/view.rs:build_scene cross,dot
@@ -994,7 +993,6 @@ crates/kernel/src/iges_in.rs:Tr::curve_parts atan2
 crates/kernel/src/iso.rs:iso_record cross
 crates/kernel/src/lip.rs:Piece::at cross
 crates/kernel/src/lip.rs:face_at cross,dot,normalized,triangles
-crates/kernel/src/lip.rs:offset_loop cross,dot,normalized
 crates/kernel/src/lip.rs:piece_edge cross,normalized
 crates/kernel/src/lip.rs:pieces cross,dot
 crates/kernel/src/lip.rs:raise_band cross
@@ -1482,7 +1480,8 @@ crates/ui-egui/src/viewport.rs:build_block triangles
 crates/ui-egui/src/viewport.rs:build_shared_tris triangles
 crates/ui-egui/src/viewport.rs:build_sketch_scene cross,dot
 crates/ui-egui/src/viewport.rs:current_face dot
-crates/ui-egui/src/viewport.rs:edge_normals dot
+# Display only: picks mesh normals to lift edge highlights at grazing angles.
+crates/ui-egui/src/viewport.rs:edge_normal_lookup dot
 crates/ui-egui/src/viewport.rs:feature_parts triangles
 crates/ui-egui/src/viewport.rs:first_triangle_point triangles
 crates/ui-egui/src/viewport.rs:grid_centre dot

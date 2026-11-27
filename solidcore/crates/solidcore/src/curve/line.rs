@@ -119,6 +119,7 @@ use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::assert_array::labels::{self, SURF_OF_EXTRUSION_TYPE, SURF_OF_REVOLUTION_TYPE};
 use crate::geom::assert_array::{AssertArray, ObjectKey, ReportSpec};
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::expansion;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
@@ -823,6 +824,75 @@ impl Line {
         self.point + step_param * self.scale * self.vector
     }
 
+    /// The exact analytic point at a NURB parameter, when the conversion to STEP
+    /// is known exactly and every coordinate is representable. A bounded line's
+    /// natural endpoints map directly to the analytic endpoints, avoiding a
+    /// rounded interpolation.
+    pub(crate) fn exact_point_at_parameter(&self, t: f64) -> Option<Point3> {
+        let [x, y, z] = self.point_expansions_at_parameter(t)?.map(|terms| {
+            let coordinate = expansion::to_f64(&terms);
+            (coordinate.is_finite() && expansion::is_zero(&expansion::sub(&terms, &[coordinate])))
+                .then_some(coordinate)
+        });
+        Some(Point3::new(x?, y?, z?))
+    }
+
+    /// Exact coordinates of a line point when the parameter conversion is exact.
+    pub(crate) fn point_expansions_at_parameter(&self, t: f64) -> Option<[Vec<f64>; 3]> {
+        let step = self.exact_step_parameter_at(t)?;
+        let parameter = expansion::product(step, self.scale)?;
+        let [x, y, z] = [
+            (self.point.x, self.vector.x),
+            (self.point.y, self.vector.y),
+            (self.point.z, self.vector.z),
+        ]
+        .map(|(origin, direction)| {
+            Some(expansion::add(
+                &expansion::scale(&parameter, direction)?,
+                &[origin],
+            ))
+        });
+        Some([x?, y?, z?])
+    }
+
+    /// The STEP parameter when conversion from the line's NURB domain is exact.
+    pub(crate) fn exact_step_parameter_at(&self, t: f64) -> Option<f64> {
+        if !t.is_finite() {
+            return None;
+        }
+        let step = if self.is_bounded() {
+            let nurb = self.natural_interval();
+            let length = nurb.length();
+            if !length.is_finite()
+                || length < 0.0
+                || !self.anal_domain.length().is_finite()
+                || self.anal_domain.has_negative_length()
+            {
+                return None;
+            }
+            let [first, last] = if self.inside_out {
+                [nurb.max(), nurb.min()]
+            } else {
+                [nurb.min(), nurb.max()]
+            };
+            if is_zero(length) {
+                t
+            } else if t == first {
+                self.anal_domain.min()
+            } else if t == last {
+                self.anal_domain.max()
+            } else {
+                return None;
+            }
+        } else if self.inside_out {
+            -t
+        } else {
+            t
+        };
+
+        Some(step)
+    }
+
     /// Not upstream: the STEP parameter of NURB parameter `t` as
     /// [`Self::convert_t_from_nurbs_to_step`] rounds it, with a bound on its distance from
     /// the exact one. `None` for numbers not finite.
@@ -840,7 +910,7 @@ impl Line {
     /// `η = 2^-1075` (sums and differences are exact there). The quotient's `η` is then
     /// multiplied by `A`, the product's is not, so `(1 + |A|) · 2^-1074` covers both with
     /// room for the bound's own rounding. The other branches copy or negate `t`, exactly.
-    fn step_param_enclosure(&self, t: f64) -> Option<(f64, f64)> {
+    pub(crate) fn step_param_enclosure(&self, t: f64) -> Option<(f64, f64)> {
         let s = self.convert_t_from_nurbs_to_step(t);
         let err = if self.is_bounded() && !is_zero(self.natural_interval().length()) {
             let subnormal = (1.0 + self.anal_domain.length().abs()) * f64::from_bits(1);
@@ -875,10 +945,28 @@ impl Line {
     pub(crate) fn point_error(&self, t: f64) -> Option<f64> {
         let size = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
         let (s, ds) = self.step_param_enclosure(t)?;
-        let e = (gamma(3) * (size(self.point) + (s * self.scale).abs() * size(self.vector))
-            + ds * self.scale.abs() * size(self.vector))
-            * (1.0 + gamma(3));
-        e.is_finite().then_some(e)
+        let error = self.point_evaluation_error(s, ds, size(self.point), size(self.vector));
+        error.is_finite().then_some(error)
+    }
+
+    /// The separate Cartesian rounding bounds of the line evaluation at this endpoint.
+    pub(crate) fn point_coordinate_errors(&self, t: f64) -> Option<[f64; 3]> {
+        let (s, ds) = self.step_param_enclosure(t)?;
+        let errors = [
+            (self.point.x, self.vector.x),
+            (self.point.y, self.vector.y),
+            (self.point.z, self.vector.z),
+        ]
+        .map(|(point, vector)| self.point_evaluation_error(s, ds, point.abs(), vector.abs()));
+        errors
+            .iter()
+            .all(|error| error.is_finite())
+            .then_some(errors)
+    }
+
+    fn point_evaluation_error(&self, s: f64, ds: f64, point: f64, vector: f64) -> f64 {
+        (gamma(3) * (point + (s * self.scale).abs() * vector) + ds * self.scale.abs() * vector)
+            * (1.0 + gamma(3))
     }
 
     /// Not upstream: an upper bound on the speed of [`Self::evaluate_point`] in its NURB
@@ -2207,17 +2295,37 @@ impl Line {
         key: ObjectKey,
         trim_surface: Option<&Surface>,
     ) -> Result<bool> {
+        if !level_given {
+            self.ensure_nurb_for_assert()?;
+        }
+        self.assert_valid_on_prepared(k, list, level_given, key, trim_surface)
+    }
+
+    /// Materializes the cached NURB representation if missing (the only mutation
+    /// [`Self::assert_valid_on`] performs).
+    pub(crate) fn ensure_nurb_for_assert(&mut self) -> Result<()> {
+        if self.base.nurb.is_none() {
+            ignore_status(self.make_nurb())?;
+        }
+        Ok(())
+    }
+
+    /// Read-only body of [`Self::assert_valid_on`], once [`Self::ensure_nurb_for_assert`]
+    /// has run (when `!level_given`).
+    pub(crate) fn assert_valid_on_prepared(
+        &self,
+        k: &Kernel,
+        list: Option<&mut AssertArray>,
+        level_given: bool,
+        key: ObjectKey,
+        trim_surface: Option<&Surface>,
+    ) -> Result<bool> {
         let mut list = list;
         let mut rtn = true;
 
         // call the base class AssertValid
         if !level_given {
-            // SmBSplineCurve::AssertValid makes a missing NURB (virtual MakeNurb,
-            // status ignored)
-            if self.base.nurb.is_none() {
-                ignore_status(self.make_nurb())?;
-            }
-            let this = &*self;
+            let this = self;
             let is_degenerate = |tol: f64| Ok(this.is_degenerate(tol, None));
             rtn &= this.base.assert_valid_with(
                 k,
@@ -2753,6 +2861,40 @@ mod tests {
         .unwrap();
         assert_eq!(s.natural_interval(), Extent1d::from_min_max(0.0, 4.0));
         assert_eq!(s.step_interval(), Extent1d::from_min_max(0.0, 1.0));
+    }
+
+    #[test]
+    fn an_exact_line_point_requires_an_exact_parameter_and_coordinates() {
+        let analytic_domain = Extent1d::from_min_max(0.0, 1.0);
+        let natural_domain = Extent1d::from_min_max(1.0, 7.0);
+        let start = Vec3::new(10.0, 5.0, 4.0);
+        let end = Vec3::new(15.0, 5.0, 4.0);
+        for inside_out in [false, true] {
+            let mut line = Line::bounded(
+                start,
+                Vec3::X,
+                &analytic_domain,
+                &BoundedLineOptions {
+                    scale: 5.0,
+                    inside_out,
+                    ..BoundedLineOptions::default()
+                },
+            );
+            line.edit_parameterization(&natural_domain).unwrap();
+            let (first, last) = if inside_out {
+                (end, start)
+            } else {
+                (start, end)
+            };
+            assert_eq!(line.exact_point_at_parameter(1.0), Some(first));
+            assert_eq!(line.exact_point_at_parameter(7.0), Some(last));
+            assert_eq!(line.exact_point_at_parameter(4.0), None);
+        }
+
+        let line = Line::infinite(Vec3::X, Vec3::X, 3, true);
+        assert_eq!(line.exact_point_at_parameter(1.0), Some(Vec3::ZERO));
+        // The exact coordinate 1 - 2^-54 lies between adjacent doubles.
+        assert_eq!(line.exact_point_at_parameter(f64::EPSILON / 4.0), None);
     }
 
     /// A parameter whose conversion to the STEP domain rounds away (review on

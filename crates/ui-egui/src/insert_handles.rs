@@ -205,6 +205,8 @@ mod tests {
             align: Align::Middle,
             simplify: 0.0,
             block: false,
+            auto: false,
+            auto_value: None,
         }
     }
 

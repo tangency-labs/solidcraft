@@ -1,13 +1,13 @@
 //! Resistance seam welds: every zone of a band along a line, a line and an arc turning either way,
 //! a sharp corner (its notice and the rounded union), spots apart and overlapping, against their
-//! closed-form volumes; the kernel's check on every body, on a tilted seam too; the refusals; and
-//! the site of a seam drawn on stacks of boxes, with a notch the path passes and a joint off the
-//! face.
+//! closed-form volumes; the kernel's check on every body, on a tilted seam too; the refusals, an
+//! arc bulging past the size limit among them; and the site of a seam drawn on stacks of boxes,
+//! with a notch the path passes, an arc tighter than the seam and a joint off the face.
 
 use std::f64::consts::{FRAC_PI_2, PI};
 
-use solidcraft_kernel::services::boolean::{self, BooleanOp};
-use solidcraft_kernel::services::{CheckLevel, ExactBody as Body, Order, make_box};
+use solidcore_record::Vec3;
+use solidcraft_kernel::{BoolOp, SmlibCheck, box_solid, validity};
 
 use super::*;
 use crate::weld_spot::SpotRefusal;
@@ -21,12 +21,13 @@ const H: f64 = 0.006 * W;
 const R: [f64; 3] = [0.55 * W / 2.0, W / 2.0, 1.05 * W / 2.0];
 
 fn volume(b: &Body) -> f64 {
-    b.volume(1e-9).unwrap()
+    b.volume_at(1e-9).unwrap()
 }
 
+/// The record's check, and the kernel's own at its strictest level.
 fn check(b: &Body, what: &str) {
-    let report = b.check(CheckLevel::All).unwrap();
-    assert!(report.is_valid(), "{what}: {}", report.text);
+    let v = validity(b);
+    assert!(v.record.is_ok() && matches!(v.smlib, Some(SmlibCheck::Valid)), "{what}: {v:?}");
 }
 
 fn close(got: f64, want: f64, what: &str) {
@@ -72,7 +73,8 @@ fn a_band_along_a_line_has_round_ends_on_both_faces() {
     assert!(got.notices.is_empty());
     zones_are(&got, |r| smooth(r, 20.0), "line");
     for piece in &got.pieces {
-        let (lo, hi) = piece.body.bounds().unwrap();
+        let bb = piece.body.exact_bounds().unwrap();
+        let (lo, hi) = ([bb.min.x, bb.min.y, bb.min.z], [bb.max.x, bb.max.y, bb.max.z]);
         let (lo, hi) = (lo[2], hi[2]);
         match piece.side {
             SpotSide::Upper => assert!((lo - T_U).abs() < 1e-9 && (hi - T_U - H).abs() < 1e-9, "{lo}..{hi}"),
@@ -169,32 +171,32 @@ fn bad_seams_are_refused_as_invalid_input() {
     assert!(bad(band(vec![to(0.0, 0.0)])));
     assert!(bad(band(vec![SeamPiece::Arc { center: [0.0, 10.0, 0.0], to: [12.0, 10.0, 0.0], turn: Turn::Left }])));
     assert!(bad(band(vec![SeamPiece::Arc { center: [0.0, 10.0, 0.0], to: [0.0, 0.0, 0.0], turn: Turn::Left }])));
-    assert!(bad(SeamWeld { start: [f64::NAN, 0.0, 0.0], ..ok }));
+    assert!(bad(SeamWeld { start: [f64::NAN, 0.0, 0.0], ..ok.clone() }));
+    // centre 5e8 out, but the long way round over the top reaches y = 1.01e9, past the size limit
+    let bulge = SeamPiece::Arc { center: [0.0, 5e8, 0.0], to: [1e8, 0.0, 0.0], turn: Turn::Right };
+    assert!(bad(SeamWeld { start: [-1e8, 0.0, 0.0], path: vec![bulge], ..ok }));
 }
 
 // ---- where a seam sits ----
 
-fn ordered(b: Body) -> (Body, Order) {
-    let (_, order) = b.to_record().unwrap();
-    (b, order)
+/// A 40 × 40 sheet from `z` up `t`, centred on the z axis.
+fn sheet(z: f64, t: f64) -> Body {
+    block([-20.0, -20.0, z], [40.0, 40.0, t])
 }
 
-/// A 40 × 40 sheet from `z` up `t`, centred on the z axis.
-fn sheet(z: f64, t: f64) -> (Body, Order) {
-    ordered(make_box([-20.0, -20.0, z], [40.0, 40.0, t]).unwrap())
+/// The box from `corner` of `size`.
+fn block(corner: [f64; 3], size: [f64; 3]) -> Body {
+    let lo = Vec3::from(corner);
+    box_solid(lo, lo + Vec3::from(size)).unwrap()
 }
 
 /// The record face of a box whose plane holds `p`.
-fn face_at((b, o): &(Body, Order), p: [f64; 3]) -> usize {
-    (0..o.faces.len()).find(|&f| b.face_square_level(o, f, [0.0, 0.0, 1.0], p).unwrap().is_some_and(|l| l.level.abs() < 1e-9)).unwrap()
+fn face_at(b: &Body, p: [f64; 3]) -> usize {
+    (0..b.face_count()).find(|&f| b.face_square_level(f, Vec3::new(0.0, 0.0, 1.0), p.into()).unwrap().is_some_and(|l| l.level.abs() < 1e-9)).unwrap()
 }
 
-fn listed<'a>(sheets: &[&'a (Body, Order)]) -> Vec<(&'a Body, &'a Order)> {
-    sheets.iter().map(|&s| (&s.0, &s.1)).collect()
-}
-
-fn site(sheets: &[&(Body, Order)], picked: usize, start: [f64; 3], path: &[SeamPiece]) -> Result<SeamSite> {
-    seam_site(&listed(sheets), picked, face_at(sheets[picked], start), start, path, W)
+fn site(sheets: &[&Body], picked: usize, start: [f64; 3], path: &[SeamPiece]) -> Result<SeamSite> {
+    seam_site(sheets, picked, face_at(sheets[picked], start), start, path, W)
 }
 
 /// Drawn on the upper sheet's top from x = -10 to 10: the line runs down, the upper sheet first,
@@ -221,7 +223,8 @@ fn a_seam_drawn_on_top_gives_the_frame_the_sheets_and_the_moved_path() {
         look: SeamLook::Band,
     };
     for piece in seam_weld(&weld).unwrap().pieces {
-        let (lo, hi) = piece.body.bounds().unwrap();
+        let bb = piece.body.exact_bounds().unwrap();
+        let (lo, hi) = ([bb.min.x, bb.min.y, bb.min.z], [bb.max.x, bb.max.y, bb.max.z]);
         match piece.side {
             // `Lower` is the first sheet's outer face: the picked one
             SpotSide::Lower => assert!(lo[2] >= 2.5 - 1e-9, "{lo:?}"),
@@ -237,15 +240,29 @@ fn a_seam_drawn_on_top_gives_the_frame_the_sheets_and_the_moved_path() {
 #[test]
 fn a_path_passing_a_face_edge_is_refused_with_the_width_that_fits() {
     let lower = sheet(0.0, 1.5);
-    let (plate, _) = sheet(1.5, 1.0);
-    let notch = make_box([-2.0, 1.5, 1.0], [4.0, 30.0, 2.0]).unwrap();
-    let upper = ordered(boolean::boolean(plate, notch, BooleanOp::Subtract).unwrap().unwrap());
+    let plate = sheet(1.5, 1.0);
+    let notch = block([-2.0, 1.5, 1.0], [4.0, 30.0, 2.0]);
+    let upper = solidcraft_kernel::boolean(&plate, &notch, BoolOp::Cut).unwrap().unwrap();
     let got = site(&[&lower, &upper], 0, [-15.0, 0.0, 0.0], &[SeamPiece::Line { to: [15.0, 0.0, 0.0] }]);
     let Err(SeamRefusal::PastFaceEdge { piece: 0, sheet: 1, width, fits, .. }) = got else {
         panic!("{got:?}");
     };
     assert_eq!(width, W);
     assert!((fits - 3.0).abs() < 1e-9, "fits {fits}");
+}
+
+/// An arc of radius 2 drawn on the top is tighter than the edge zone (2.625): refused at the site,
+/// as the build refuses it, with the same width that fits.
+#[test]
+fn a_site_refuses_an_arc_tighter_than_the_seam() {
+    let lower = sheet(0.0, 1.5);
+    let upper = sheet(1.5, 1.0);
+    let tight = SeamPiece::Arc { center: [0.0, 0.0, 2.5], to: [2.0, 0.0, 2.5], turn: Turn::Left };
+    let got = site(&[&lower, &upper], 1, [-2.0, 0.0, 2.5], &[tight]);
+    let Err(SeamRefusal::ArcTighterThanSeam { piece: 0, fits }) = got else {
+        panic!("{got:?}");
+    };
+    assert!((fits - 4.0 / 1.05).abs() < 1e-9, "{fits}");
 }
 
 /// A path whose end runs off the picked face is refused at that joint with the spot's reason.

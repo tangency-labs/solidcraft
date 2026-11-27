@@ -511,11 +511,11 @@ pub fn paint_assembly_section(
     p.text(
         pos2(banner_rect.left() + 24.0, banner_rect.center().y),
         Align2::LEFT_CENTER,
-        "ASSEMBLY & JOINTS",
+        solidcraft_ui_text::tr_label("ASSEMBLY & JOINTS"),
         FontId::proportional(t.font_small),
         t.text,
     );
-    let count_text = format!("{} Joints", num_joints);
+    let count_text = solidcraft_ui_text::format("ui.timeline_2d_joints_badge", &[("count", &num_joints.to_string())]);
     let badge_rect = Rect::from_center_size(pos2(banner_rect.left() + 175.0, banner_rect.center().y), vec2(56.0, 16.0));
     p.rect_filled(badge_rect, 3.0, purple_accent.gamma_multiply(0.2));
     p.rect_stroke(badge_rect, 3.0, Stroke::new(1.0, purple_accent.gamma_multiply(0.4)), StrokeKind::Inside);
@@ -524,7 +524,10 @@ pub fn paint_assembly_section(
     // Right side: Active summary and quick transport buttons
     if banner_rect.width() > 320.0 {
         let active_joints = app.session.doc.assembly.joints.iter().take(marker_step.min(num_joints)).filter(|j| !j.suppressed).count();
-        let active_summary = format!("Active: {} / {}", active_joints, num_joints);
+        let active_summary = solidcraft_ui_text::format(
+            "ui.timeline_2d_active_summary",
+            &[("active", &active_joints.to_string()), ("total", &num_joints.to_string())],
+        );
         p.text(
             pos2(banner_rect.right() - 85.0, banner_rect.center().y),
             Align2::RIGHT_CENTER,
@@ -663,11 +666,14 @@ pub fn paint_assembly_section(
         let line_width = if marker_hovered || marker_dragged { 3.0 } else { 2.5 };
 
         // Vertical marker line through tracks - drawn using clipped painter p so it slides under the splitter bar when scrolled
-        p.line_segment([pos2(line_x, line_top), pos2(line_x, line_bottom)], Stroke::new(line_width, purple_accent));
+        p.line_segment(
+            [pos2(line_x, line_top), pos2(line_x, line_bottom - super::canvas::MARKER_FOOT_OVERLAP)],
+            Stroke::new(line_width, purple_accent),
+        );
 
-        // Bottom handle cap on vertical line
-        let bottom_cap_rect = Rect::from_min_size(pos2(line_x - 5.0, line_bottom - 4.0), vec2(10.0, 4.0));
-        p.rect_filled(bottom_cap_rect, egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, purple_accent);
+        // Bottom of the vertical line: a down arrowhead while component rows are out of sight below
+        let rows_bottom = content_tracks_top + component_ids.len() as f32 * ROW_HEIGHT;
+        p.add(super::canvas::marker_foot(line_x, line_bottom, purple_accent, rows_bottom > section_rect.bottom() + 0.5));
 
         // Square pin handle in Tier 1 contacting vertical line
         let pin_size = if marker_hovered || marker_dragged { vec2(15.0, 15.0) } else { vec2(14.0, 14.0) };
@@ -926,9 +932,10 @@ pub fn paint_splitter(
 }
 
 /// The longest title of a collapsed track strip that fits in `room` points, measured by `width`; none when even the short one does not fit (the strip's tooltip still names the track).
+/// The titles are in the reader's language, so the fit is measured on the text that is drawn.
 pub(crate) fn collapsed_strip_title(is_modeling: bool, room: f32, width: impl Fn(&str) -> f32) -> Option<&'static str> {
     let titles: [&'static str; 2] = if is_modeling { ["Modeling Features", "Modeling"] } else { ["Assembly & Joints", "Assembly"] };
-    titles.into_iter().find(|title| width(title) <= room)
+    titles.into_iter().map(solidcraft_ui_text::tr_label).find(|title| width(title) <= room)
 }
 
 /// Paints the collapsed dock strip for contracted Modeling or Assembly tracks.
@@ -992,9 +999,9 @@ pub fn paint_collapsed_strip(
         state.modeling_split_ratio = if is_modeling { 0.65 } else { 0.5 };
         ui.ctx().request_repaint();
     }
-    resp.on_hover_text(if is_modeling {
+    resp.on_hover_text(solidcraft_ui_text::tr_label(if is_modeling {
         "Modeling Track contracted. Click to restore split view."
     } else {
         "Assembly Track contracted. Click to restore split view."
-    });
+    }));
 }

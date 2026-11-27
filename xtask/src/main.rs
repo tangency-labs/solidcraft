@@ -25,6 +25,7 @@ mod parallel;
 mod params;
 mod pending;
 mod plugin_examples;
+mod python;
 mod render_assets;
 mod rustfmt;
 mod shared;
@@ -60,6 +61,7 @@ commands:
                   and build them for wasm32-unknown-unknown; --run also wraps each as a component
                   and runs solidcraft-cli plugin test --require-cases on its package
   features        list SolidCraft's commands by area in docs/features.md (from the registry)
+  python          the Python client's generated bindings in python/src/solidcraft/_generated/ [--cli PATH] [--out DIR]
   i18n [--check | --add-missing] [--no-registry | --cli <solidcraft-cli>]
                   report how complete the message catalogs in assets/locales are:
                   which messages a locale has not translated and which command labels the English
@@ -194,6 +196,7 @@ fn main() -> ExitCode {
         Some("icons") => icons::run(&root()),
         Some("app-icons") => app_icons::run(&root()),
         Some("features") => features::run(&root()),
+        Some("python") => python::run(&root(), &rest),
         Some("i18n") => i18n::run(&root(), &rest),
         Some("kernel-cases") => kernel_cases::run(&rest),
         Some("known-failing") => known_failing::run(&root(), &rest),
