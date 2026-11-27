@@ -567,6 +567,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             Frame(crate::dialogs_frame::Member),
             /// End caps on frame members (`dialogs_end_cap`).
             EndCap(crate::dialogs_end_cap::EndCap),
+            /// Weld tool (`dialogs_weld`).
+            Weld(Box<crate::dialogs_weld::WeldDialog>),
             /// Dogbone reliefs in inside corners (`dialogs_dogbone`).
             Dogbone(crate::dialogs_dogbone::Dogbone),
             /// Cell Grid (`dialogs_cell_grid`).
@@ -1417,6 +1419,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_frame::start(app, id))
                     .or_else(|| crate::dialogs_shaft_spline::start(app, id))
                     .or_else(|| crate::dialogs_end_cap::start(app, id))
+                    .or_else(|| crate::dialogs_weld::start(app, id))
                     .or_else(|| crate::dialogs_dogbone::start(app, id))
                     .or_else(|| crate::dialogs_cell_grid::start(app, id))
                     .or_else(|| crate::dialogs_rotate_member::start(app, id))
@@ -3564,6 +3567,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
         Kind::EndCap(_) => "ui.end_cap_title",
+        Kind::Weld(_) => "cmd.weld.create",
         Kind::Dogbone(_) => "ui.dogbone_title",
         Kind::CellGrid(_) => "ui.cell_grid_title",
         Kind::RotateMember(_) => "ui.rotate_member_title",
@@ -4491,7 +4495,7 @@ fn command_disabled(app: &SolveApp, d: &Dialog, error: &str) -> bool {
     spec.disabled_refusal(&app.session).is_some_and(|refusal| refusal == error)
 }
 
-fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) {
+pub(crate) fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) {
     if matches!(d.kind, Kind::SketchModify(_))
         && d.previews()
         && let Err(error) = apply_commands(app, d)
@@ -5309,6 +5313,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     // Physical materials: the library's, then the design's own (material.create).
+    if matches!(d.kind, Kind::Weld(_)) {
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !app.esc_handled && escape_routed_here {
+            app.esc_handled = true;
+        } else {
+            crate::dialogs_weld::show(app, ctx, d);
+        }
+        return;
+    }
     let t = Tokens::get();
     let vp = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
     let placement = crate::shell::editor_space(app, vp);
@@ -8587,6 +8599,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
         Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),
+        Kind::Weld(k) => return crate::dialogs_weld::params(k).map(|p| vec![("weld.create".into(), p)]),
         Kind::Dogbone(k) => return crate::dialogs_dogbone::commands(app, k, &d.inputs, &d.extra),
         Kind::CellGrid(k) => return crate::dialogs_cell_grid::commands(app, k, &d.inputs, &d.extra),
         Kind::RotateMember(k) => return crate::dialogs_rotate_member::commands(app, k, &d.inputs, &d.extra, d.editing.is_some()),
