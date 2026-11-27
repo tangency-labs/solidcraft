@@ -775,6 +775,8 @@ pub struct Dialog {
     pub(crate) started_from_sketch: Option<u64>,
     /// New Sketch was pressed: the dialog waits while the sketch is drawn ([`crate::command_sketch`]).
     pub(crate) new_sketch: bool,
+    /// Its handle drags, for Undo and Redo while it is open (#22838).
+    pub(crate) drag_undo: crate::dialog_drag_undo::DragUndo,
 }
 
 #[derive(Clone, Debug)]
@@ -1019,6 +1021,11 @@ impl Dialog {
         dense::command(&self.kind)
     }
 
+    /// The value box that has, or last had, the keyboard.
+    pub(crate) fn value_focus(&self) -> Option<egui::Id> {
+        self.value_focus
+    }
+
     /// Show why OK (or starting the sketch) was refused, for as long as the inputs stay as they are.
     pub(crate) fn refuse(&mut self, app: &SolveApp, error: String) {
         self.refused = Some(Refused::now(app, self));
@@ -1064,6 +1071,7 @@ impl Dialog {
             started_from_sketch: None,
             auto: None,
             new_sketch: false,
+            drag_undo: Default::default(),
         }
     }
 
