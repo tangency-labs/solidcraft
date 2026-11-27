@@ -10555,6 +10555,174 @@ fn with_propagation_hint(e: DocError) -> DocError {
     }
 }
 
+/// Parses an edge coordinate reported in a blend failure message (`"at the edge at (x, y, z)"`).
+fn parse_edge_point(msg: &str) -> Option<Vec3> {
+    const MARKER: &str = "at the edge at (";
+    let rest = msg.get(msg.find(MARKER)? + MARKER.len()..)?;
+    let inside = rest.get(..rest.find(')')?)?;
+    let mut parts = inside.split(',');
+    let x: f64 = parts.next()?.trim().parse().ok()?;
+    let y: f64 = parts.next()?.trim().parse().ok()?;
+    let z: f64 = parts.next()?.trim().parse().ok()?;
+    (parts.next().is_none() && x.is_finite() && y.is_finite() && z.is_finite()).then_some(Vec3::new(x, y, z))
+}
+
+/// Maximum number of bisection probes spent isolating a single failing pick on a failed multi-edge
+/// blend (enough for up to `MAX_POINTS = 1000` picks since `ceil(log2(1000)) = 10`).
+const FAILING_PICK_MAX_PROBES: usize = 12;
+
+/// Maximum elapsed time of the initial failing blend for which automatic bisection runs, and total
+/// wall-clock budget for the diagnostic probes so a slow model never stalls.
+const FAILING_PICK_INITIAL_LIMIT: std::time::Duration = std::time::Duration::from_millis(500);
+const FAILING_PICK_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Binary-searches `0..count` (known to fail as a whole) to isolate a single index that fails on
+/// its own, stopping after at most `max_probes` calls to `succeeds` or once `has_budget()` is
+/// false. Returns `None` if no single index can be verified to fail alone (e.g. an interaction
+/// between two edges) or if the budget runs out before narrowing to one index.
+fn bisect_failing_pick(
+    count: usize,
+    max_probes: usize,
+    mut has_budget: impl FnMut() -> bool,
+    mut succeeds: impl FnMut(usize, usize) -> bool,
+) -> Option<usize> {
+    if count < 2 {
+        return None;
+    }
+    let mut lo = 0usize;
+    let mut hi = count;
+    let mut probes = 0usize;
+    let mut last_tested_failed = false;
+    while hi - lo > 1 && probes < max_probes && has_budget() {
+        let mid = lo + (hi - lo) / 2;
+        probes += 1;
+        if succeeds(lo, mid) {
+            lo = mid;
+            last_tested_failed = false;
+        } else {
+            hi = mid;
+            last_tested_failed = true;
+        }
+    }
+    if hi - lo != 1 {
+        return None;
+    }
+    if last_tested_failed {
+        return Some(lo);
+    }
+    if probes < max_probes && has_budget() && !succeeds(lo, hi) {
+        return Some(lo);
+    }
+    None
+}
+
+/// Matches a failing edge coordinate already reported by the kernel to the nearest pick in
+/// `picked_edges` (using resolved edge midpoints when available), formatting a pick-index hint.
+fn annotate_failing_pick(msg: &str, body: &Body, picked_edges: &[Vec3]) -> Option<String> {
+    let at = parse_edge_point(msg)?;
+    let refs = kernel::blend_edge_middles(body, picked_edges).unwrap_or_else(|_| picked_edges.to_vec());
+    let tol = (body.size() * 0.05 + 1e-3).max(1e-2);
+    let (idx, _) = refs.iter().enumerate().map(|(i, p)| (i, p.dist(at))).filter(|(_, d)| *d <= tol).min_by(|a, b| a.1.total_cmp(&b.1))?;
+    let p = *picked_edges.get(idx)?;
+    Some(format!("{msg} [pick #{}/{} at ({:.3}, {:.3}, {:.3})]", idx + 1, picked_edges.len(), p.x, p.y, p.z))
+}
+
+/// On a failed multi-edge `Chamfer` or constant `Fillet`, identifies which picked edge failed so
+/// the user does not have to bisect large edge lists manually:
+/// - If the kernel failure already names an edge coordinate, matches it to its pick index at zero
+///   extra blend cost.
+/// - Otherwise, for `KernelError::Failed` only (never `TooLarge`), runs a strictly bounded
+///   binary search over `picked_edges` (at most [`FAILING_PICK_MAX_PROBES`] probes and
+///   [`FAILING_PICK_BUDGET`] wall-clock time, skipped if the initial blend already exceeded
+///   [`FAILING_PICK_INITIAL_LIMIT`]) and reports the isolated pick only once verified to fail on
+///   its own.
+#[allow(clippy::too_many_arguments)]
+fn with_failing_edge_hint(
+    e: DocError,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    body: &Body,
+    picked_edges: &[Vec3],
+    chain: bool,
+    r: f64,
+    has_each_r: bool,
+    initial_elapsed: std::time::Duration,
+) -> DocError {
+    enum ProbeKind {
+        Chamfer,
+        ChamferSides(kernel::ChamferSide, bool),
+        Fillet(kernel::FilletTurn),
+    }
+
+    if picked_edges.len() < 2 {
+        return e;
+    }
+    let DocError::Kernel(kernel::KernelError::Failed(msg)) = e else {
+        return e;
+    };
+    if let Some(annotated) = annotate_failing_pick(&msg, body, picked_edges) {
+        return DocError::Kernel(kernel::KernelError::Failed(annotated));
+    }
+    if msg.contains("at (") || has_each_r || initial_elapsed > FAILING_PICK_INITIAL_LIMIT {
+        return DocError::Kernel(kernel::KernelError::Failed(msg));
+    }
+    let probe_kind = match &f.kind {
+        FeatureKind::Chamfer { distance2, angle, flip, .. } => match (distance2, angle) {
+            (Some(expr), _) => match val(vals, expr, Kind::Length) {
+                Ok(d2) => ProbeKind::ChamferSides(kernel::ChamferSide::Distance(d2), *flip),
+                Err(_) => return DocError::Kernel(kernel::KernelError::Failed(msg)),
+            },
+            (None, Some(expr)) => match val(vals, expr, Kind::Angle) {
+                Ok(a) => ProbeKind::ChamferSides(kernel::ChamferSide::Angle(a), *flip),
+                Err(_) => return DocError::Kernel(kernel::KernelError::Failed(msg)),
+            },
+            (None, None) => ProbeKind::Chamfer,
+        },
+        FeatureKind::Fillet { style, corner, setbacks, turn, .. } if style.is_constant() && corner.is_rolling() && setbacks.is_empty() => {
+            ProbeKind::Fillet(turn.kernel())
+        }
+        _ => return DocError::Kernel(kernel::KernelError::Failed(msg)),
+    };
+    let deadline = now() + FAILING_PICK_BUDGET;
+    let found = bisect_failing_pick(
+        picked_edges.len(),
+        FAILING_PICK_MAX_PROBES,
+        || now() < deadline,
+        |lo, hi| {
+            let subset = match picked_edges.get(lo..hi) {
+                Some(s) if !s.is_empty() => s,
+                _ => return true,
+            };
+            let sub_edges = if chain {
+                match kernel::tangent_chain(body, subset) {
+                    Ok(e) => e,
+                    Err(_) => return false,
+                }
+            } else {
+                subset.to_vec()
+            };
+            match probe_kind {
+                ProbeKind::Chamfer => kernel::chamfer(body, &sub_edges, r).is_ok(),
+                ProbeKind::ChamferSides(side, flip) => kernel::chamfer_sides(body, &sub_edges, r, side, flip).is_ok(),
+                ProbeKind::Fillet(turn) => kernel::fillet_removing(body, &sub_edges, r, turn).is_ok(),
+            }
+        },
+    );
+    if let Some(idx) = found
+        && let Some(p) = picked_edges.get(idx)
+    {
+        return DocError::Kernel(kernel::KernelError::Failed(format!(
+            "{msg} (failing edge: pick #{}/{} at ({:.3}, {:.3}, {:.3}))",
+            idx + 1,
+            picked_edges.len(),
+            p.x,
+            p.y,
+            p.z
+        )));
+    }
+    DocError::Kernel(kernel::KernelError::Failed(msg))
+}
+
 /// How many points along each edge [`left_sharp_note`] checks.
 const LEFT_SHARP_SAMPLES: usize = 7;
 
@@ -19397,16 +19565,20 @@ fn eval_feature_kind(
             let run_group = |(ti, edges): &(usize, Vec<Vec3>)| -> Result<BlendGroupOut> {
                 let ti = *ti;
                 let Some(mb) = st.bodies.get(ti) else { return Err(DocError::Invalid("body".into())) };
-                let picked = edges.len();
-                let beyond = if chain { Ok(Vec::new()) } else { chain_beyond_picks(&mb.body, edges) };
-                let edges = if chain { kernel::tangent_chain(&mb.body, edges)? } else { edges.clone() };
+                let picked_edges: &[Vec3] = edges;
+                let picked = picked_edges.len();
+                let beyond = if chain { Ok(Vec::new()) } else { chain_beyond_picks(&mb.body, picked_edges) };
+                let edges = if chain { kernel::tangent_chain(&mb.body, picked_edges)? } else { picked_edges.to_vec() };
                 let mut note = None;
                 let propagated = edges.len() > picked;
                 // This body's edges' own radii, found by their resolved points.
                 let each: Option<Vec<f64>> =
                     each_r.as_ref().map(|_| edges.iter().map(|e| radius_of.get(&key(ti, e)).map_or(r, |(_, x)| *x)).collect());
-                let (nb, used, tapered) = blend_body(vals, f, mb, &edges, r, each.as_deref(), &mut note)
-                    .map_err(|e| if propagated { with_propagation_hint(e) } else { e })?;
+                let started = now();
+                let (nb, used, tapered) = blend_body(vals, f, mb, &edges, r, each.as_deref(), &mut note).map_err(|e| {
+                    let e = with_failing_edge_hint(e, vals, f, &mb.body, picked_edges, chain, r, each.is_some(), started.elapsed());
+                    if propagated { with_propagation_hint(e) } else { e }
+                })?;
                 let mut group_notes = Vec::new();
                 if let Some(n) = note {
                     group_notes.push(n);
@@ -22335,5 +22507,66 @@ mod migrated_placement_digest_tests {
 
         assert_ne!(mirror_lost, mirror_ok, "mirror digest must invalidate when migration stops resolving");
         assert_ne!(pattern_lost, pattern_ok, "pattern digest must invalidate when migration stops resolving");
+    }
+}
+
+#[cfg(test)]
+mod blend_failing_edge_diagnostic_tests {
+    use super::*;
+
+    #[test]
+    fn parses_edge_point_from_blend_failure_message() {
+        let p = parse_edge_point(
+            "SMLib chamfer: operation: the blend failed (status 1001): failed: a blend past its faces does not sew into the body along its creases and rails, at the edge at (-60.000, 4.000, 0.000)",
+        )
+        .unwrap();
+        assert!((p.x - (-60.0)).abs() < 1e-12 && (p.y - 4.0).abs() < 1e-12 && p.z.abs() < 1e-12);
+        assert!(parse_edge_point("SMLib chamfer: operation: the blend failed (status 1001)").is_none());
+        assert!(parse_edge_point("at the edge at (1.0, 2.0)").is_none());
+    }
+
+    #[test]
+    fn bisects_single_failing_pick_in_logarithmic_probes_and_skips_interactions() {
+        // Isolates one failing pick out of 136 within the 12-probe cap.
+        let mut calls = 0usize;
+        let bad = 73usize;
+        let found = bisect_failing_pick(
+            136,
+            FAILING_PICK_MAX_PROBES,
+            || true,
+            |lo, hi| {
+                calls += 1;
+                !(lo..hi).contains(&bad)
+            },
+        );
+        assert_eq!(found, Some(bad));
+        assert!(calls <= 10, "expected logarithmic probe count, got {calls}");
+
+        // Pick 0 failing does not need an extra confirmation probe.
+        calls = 0;
+        let first = bisect_failing_pick(
+            8,
+            FAILING_PICK_MAX_PROBES,
+            || true,
+            |lo, hi| {
+                calls += 1;
+                !(lo..hi).contains(&0)
+            },
+        );
+        assert_eq!(first, Some(0));
+        assert_eq!(calls, 3);
+
+        // Pairwise interaction failure (every single pick succeeds alone) must not blame one pick.
+        let interaction = bisect_failing_pick(8, FAILING_PICK_MAX_PROBES, || true, |lo, hi| !((lo..hi).contains(&2) && (lo..hi).contains(&3)));
+        assert_eq!(interaction, None);
+    }
+
+    #[test]
+    fn annotates_failing_pick_index_from_kernel_edge_point() {
+        let plate = kernel::box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(40.0, 20.0, 10.0)).unwrap();
+        let picks = [Vec3::new(20.0, 0.0, 10.0), Vec3::new(40.0, 10.0, 10.0), Vec3::new(20.0, 20.0, 10.0)];
+        let msg = "SMLib chamfer: operation: the blend failed (status 1001): failed: a blend past its faces does not sew into the body along its creases and rails, at the edge at (40.000, 10.000, 10.000)";
+        let annotated = annotate_failing_pick(msg, &plate, &picks).unwrap();
+        assert!(annotated.contains("[pick #2/3 at (40.000, 10.000, 10.000)]"), "{annotated}");
     }
 }
