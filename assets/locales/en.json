@@ -4011,7 +4011,7 @@
   "prefs.shortcuts": "Shortcuts",
   "prefs.shortcuts_import": "Import",
   "prefs.shortcuts_intro": "Keys for each command.",
-  "prefs.shortcuts_not_assigned": "Not assigned",
+  "prefs.shortcuts_not_assigned": "Add Shortcut",
   "prefs.shortcuts_press": "Press a key...",
   "prefs.show_discord_button": "Show Discord button",
   "prefs.show_discord_button_help": "A Discord pill in the title bar, before Report a bug. The × on it turns it off; the Help menu, About and Home keep the Discord link either way.",

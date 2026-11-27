@@ -3778,7 +3778,7 @@
   "prefs.shortcuts": "Raccourcis",
   "prefs.shortcuts_import": "Importer",
   "prefs.shortcuts_intro": "Les touches associées à chaque commande.",
-  "prefs.shortcuts_not_assigned": "Non attribué",
+  "prefs.shortcuts_not_assigned": "Ajouter un raccourci",
   "prefs.shortcuts_press": "Appuyez sur une touche...",
   "prefs.show_discord_button": "Afficher le bouton Discord",
   "prefs.show_discord_button_help": "Un bouton Discord dans la barre de titre, avant Signaler un bogue. Le symbole × permet de le désactiver ; les menus Aide, À propos et Accueil conservent le lien Discord dans tous les cas.",

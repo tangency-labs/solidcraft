@@ -330,6 +330,17 @@ mod tests {
     use solidcraft_ui_text::*;
     use std::collections::BTreeMap;
 
+    #[test]
+    fn keymap_caption_uses_the_current_packed_catalog_and_uk_fallback() {
+        install();
+        let source: BTreeMap<String, String> = serde_json::from_str(include_str!("../../../assets/locales/en.json")).unwrap();
+        let id = "prefs.shortcuts_not_assigned";
+        assert_eq!(source.get(id).map(String::as_str), Some("Add Shortcut"));
+        for language in ["en", "en-GB"] {
+            assert_eq!(Locale::for_language(language).text(id), source[id], "{language}: the packed runtime catalog must match this worktree");
+        }
+    }
+
     /// The system's locale tags pick a catalog: exact tag, then base language, then English (#10138).
     #[test]
     fn panel_direction_follows_effective_catalog_including_missing_message_fallback() {

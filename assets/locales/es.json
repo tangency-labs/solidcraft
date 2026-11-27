@@ -3640,7 +3640,7 @@
   "prefs.shortcuts": "Atajos de teclado",
   "prefs.shortcuts_import": "Importar",
   "prefs.shortcuts_intro": "Teclas para cada comando.",
-  "prefs.shortcuts_not_assigned": "No asignado",
+  "prefs.shortcuts_not_assigned": "Añadir atajo",
   "prefs.shortcuts_press": "Pulsa una tecla...",
   "prefs.show_discord_button": "Mostrar el botón Discord",
   "prefs.show_discord_button_help": "Un botón de Discord en la barra de título, antes de Notificar un error. La × lo desactiva; el menú Ayuda, Acerca de e Inicio mantienen el enlace a Discord de todos modos.",

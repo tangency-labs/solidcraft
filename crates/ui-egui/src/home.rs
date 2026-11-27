@@ -1253,7 +1253,6 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, action: FileAction) {
         FileAction::Settings => crate::prefs::open_at(app, 0),
         FileAction::Shortcuts => {
             app.keymap.open = true;
-            app.keymap.read_only = true;
         }
         FileAction::Crashes => crate::help::run(app, ctx, "crashes"),
         FileAction::About => crate::help::run(app, ctx, "about"),

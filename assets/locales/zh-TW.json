@@ -3355,7 +3355,7 @@
   "prefs.shortcuts": "快速鍵",
   "prefs.shortcuts_import": "導入",
   "prefs.shortcuts_intro": "每個命令的按鍵。",
-  "prefs.shortcuts_not_assigned": "未分配",
+  "prefs.shortcuts_not_assigned": "新增快速鍵",
   "prefs.shortcuts_press": "請按鍵...",
   "prefs.show_discord_button": "顯示 Discord 按鈕",
   "prefs.show_discord_button_help": "在標題欄的“報告錯誤”之前顯示 Discord 按鈕。點擊 × 可隱藏；說明選單、關於和主頁始終保留該鏈接。",

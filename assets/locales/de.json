@@ -4002,7 +4002,7 @@
   "prefs.shortcuts": "Tastenkürzel",
   "prefs.shortcuts_import": "Importieren",
   "prefs.shortcuts_intro": "Tasten für jeden Befehl.",
-  "prefs.shortcuts_not_assigned": "Nicht zugewiesen",
+  "prefs.shortcuts_not_assigned": "Tastenkürzel hinzufügen",
   "prefs.shortcuts_press": "Taste drücken...",
   "prefs.show_discord_button": "Discord-Schaltfläche anzeigen",
   "prefs.show_discord_button_help": "Eine Discord-Schaltfläche in der Titelleiste vor „Fehler melden“. Das × darauf blendet sie aus; der Discord-Link bleibt im Hilfemenü, unter „Über“ und auf der Startseite verfügbar.",

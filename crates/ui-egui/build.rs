@@ -37,7 +37,8 @@ fn main() {
     if let Some(dir) = git(&["rev-parse", "--git-dir"]) {
         println!("cargo:rerun-if-changed={dir}/logs/HEAD");
     }
-    println!("cargo:rerun-if-changed=build.rs");
+    // env! also makes Cargo rebuild this script when another worktree shares its target dir.
+    println!("cargo:rerun-if-changed={}/build.rs", env!("CARGO_MANIFEST_DIR"));
     scenario_tests();
     if let Err(e) = merged_locales() {
         eprintln!("locales: {e}");
@@ -87,23 +88,25 @@ fn keyboard_profiles() -> Result<(), String> {
 /// build, as `cargo xtask lists` does.
 fn merged_locales() -> Result<(), String> {
     use serde_json::{Map, Value};
-    let dir = std::path::Path::new("../../assets/locales");
-    let shared = std::path::Path::new("../ui-text/locales");
+    let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let dir = manifest.join("../../assets/locales");
+    let shared = manifest.join("../ui-text/locales");
     let mut catalogs: std::collections::BTreeMap<String, Map<String, Value>> = std::collections::BTreeMap::new();
-    for dir in [dir, shared] {
+    for dir in [&dir, &shared] {
         println!("cargo:rerun-if-changed={}", dir.display());
         for entry in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?.filter_map(Result::ok) {
             let path = entry.path();
             if path.extension().is_none_or(|x| x != "json") {
                 continue;
             }
+            println!("cargo:rerun-if-changed={}", path.display());
             let Some(id) = path.file_stem().and_then(|s| s.to_str()) else { continue };
             let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             let map = match serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))? {
                 Value::Object(map) => map,
                 _ => return Err(format!("{}: a catalog must be a JSON object", path.display())),
             };
-            if dir == shared && !catalogs.contains_key(id) {
+            if dir == &shared && !catalogs.contains_key(id) {
                 return Err(format!("{}: `{id}` has no catalog assets/locales/{id}.json", path.display()));
             }
             let merged = catalogs.entry(id.to_string()).or_default();
@@ -121,6 +124,7 @@ fn merged_locales() -> Result<(), String> {
         .unwrap_or_default();
     files.sort();
     for file in files {
+        println!("cargo:rerun-if-changed={}", file.display());
         let text = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
         let map: std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>> =
             serde_json::from_str(&text).map_err(|e| format!("{}: expected {{\"<locale>\": {{\"<id>\": \"<text>\"}}}}: {e}", file.display()))?;

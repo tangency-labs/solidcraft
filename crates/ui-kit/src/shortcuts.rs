@@ -15,12 +15,11 @@ fn chord_parts(chord: &str) -> Vec<&str> {
     }
 }
 
-/// Natural width of a complete chord in the same mono keycaps used by command search, or of
-/// the host's `unassigned` text for an empty chord.
+/// Natural width including padding for the focus ring and an empty binding's plus cue.
 pub fn shortcut_binding_width(ui: &Ui, chord: &str, unassigned: &str) -> f32 {
     let t = Tokens::get();
     if chord.is_empty() {
-        return super::ContentWidth::label(ui, unassigned) + t.space_8;
+        return super::ContentWidth::label(ui, unassigned) + t.space_12 + t.space_8 + t.space_4 * 2.0;
     }
     let parts = chord_parts(chord);
     parts
@@ -28,6 +27,7 @@ pub fn shortcut_binding_width(ui: &Ui, chord: &str, unassigned: &str) -> f32 {
         .map(|part| ui.painter().layout_no_wrap((*part).to_owned(), FontId::monospace(t.font_small), t.form_dim).size().x + t.space_10)
         .sum::<f32>()
         + t.space_4 * parts.len().saturating_sub(1) as f32
+        + t.space_4 * 2.0
 }
 
 /// One focusable binding, with a separate full keycap for every modifier and key; an empty
@@ -42,10 +42,13 @@ pub fn shortcut_binding(ui: &mut Ui, chord: &str, unassigned: &str, editable: bo
     if editable && response.clicked() {
         response.request_focus();
     }
-    let mut x = rect.left();
+    let mut x = rect.left() + t.space_4;
     if chord.is_empty() {
-        let galley = ui.painter().layout_no_wrap(unassigned.to_owned(), FontId::proportional(t.font_label), t.form_dim);
-        ui.painter().galley(pos2(x + t.space_4, rect.center().y - galley.size().y / 2.0), galley, t.form_dim);
+        let ink = if editable { t.form_primary } else { t.form_dim };
+        let icon = Rect::from_center_size(pos2(x + t.space_12 * 0.5, rect.center().y), vec2(t.space_12, t.space_12));
+        icons::paint_ink(ui.painter(), icon, "plus", ink);
+        let galley = ui.painter().layout_no_wrap(unassigned.to_owned(), FontId::proportional(t.font_label), ink);
+        ui.painter().galley(pos2(icon.right() + t.space_8, rect.center().y - galley.size().y / 2.0), galley, ink);
     } else {
         for part in chord_parts(chord) {
             let width = ui.painter().layout_no_wrap(part.to_owned(), FontId::monospace(t.font_small), t.form_dim).size().x + t.space_10;
@@ -54,7 +57,7 @@ pub fn shortcut_binding(ui: &mut Ui, chord: &str, unassigned: &str, editable: bo
         }
     }
     if response.has_focus() || (editable && response.hovered()) {
-        ui.painter().rect_stroke(rect, t.radius_sm, Stroke::new(1.0, t.form_primary), egui::StrokeKind::Outside);
+        ui.painter().rect_stroke(rect.shrink(0.5), t.radius_sm, Stroke::new(1.0, t.form_primary), egui::StrokeKind::Inside);
     }
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
@@ -63,7 +66,7 @@ pub fn shortcut_binding(ui: &mut Ui, chord: &str, unassigned: &str, editable: bo
             if chord.is_empty() { unassigned } else { chord },
         )
     });
-    response
+    if editable { response.on_hover_cursor(egui::CursorIcon::PointingHand) } else { response }
 }
 
 /// The shortcut pill at the end of a search field names the key that focuses it, as this platform

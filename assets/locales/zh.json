@@ -4011,7 +4011,7 @@
   "prefs.shortcuts": "快捷键",
   "prefs.shortcuts_import": "导入",
   "prefs.shortcuts_intro": "每个命令的按键。",
-  "prefs.shortcuts_not_assigned": "未分配",
+  "prefs.shortcuts_not_assigned": "添加快捷键",
   "prefs.shortcuts_press": "请按键...",
   "prefs.show_discord_button": "显示 Discord 按钮",
   "prefs.show_discord_button_help": "在标题栏的“报告错误”之前显示 Discord 按钮。点击 × 可隐藏；帮助菜单、关于和主页始终保留该链接。",
