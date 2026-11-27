@@ -3939,6 +3939,19 @@ impl SolveApp {
     /// Everything shown as selected, including the Assistant's temporary highlights.
     pub fn highlighted(&self) -> Vec<solidcraft_engine::Sel> {
         let mut v = self.session.selection.clone();
+        if joint_handles::began_on(self).is_some() {
+            // While dragging a Move handle on the GPU motion table, sub-body highlights
+            // (face/edge/vertex) would stay at the pre-drag pose and force a CPU world rebuild;
+            // highlight their whole body instead so it moves with the GPU motion table.
+            for item in &mut v {
+                if let solidcraft_engine::Sel::Face { body, .. }
+                | solidcraft_engine::Sel::Edge { body, .. }
+                | solidcraft_engine::Sel::Vertex { body, .. } = item
+                {
+                    *item = solidcraft_engine::Sel::Body { name: std::mem::take(body) };
+                }
+            }
+        }
         if let Some(d) = &self.dialog {
             v.extend(d.highlighted(&self.session));
         }
