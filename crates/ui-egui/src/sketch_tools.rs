@@ -2046,9 +2046,12 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 return;
             }
             if !tool.picks.contains(&id) {
+                // Every clicked pick gets its place, also when the click misses the sketch
+                // plane (a view along it): the places then stay matched to the last picks.
+                let place = at.map(|(p, _)| p).or_else(|| hit_place(app, &hits, &id));
                 tool.picks.push(id);
                 tool.picks_dropped = false;
-                if let Some((p, _)) = at {
+                if let Some(p) = place {
                     tool.pts.push((p, None));
                 }
             }
@@ -2237,8 +2240,27 @@ pub(crate) fn drop_gone_picks(app: &SolveApp, t: &mut Tool) -> bool {
     let mut flags = keep.iter();
     t.picks.retain(|_| flags.next().copied().unwrap_or(true));
     crate::sketch_dims::reset(t);
-    t.picks_dropped = true;
+    t.picks_dropped = t.picks.is_empty();
     true
+}
+
+/// A right-click on the view while a tool runs: true when the Undo button just took every pick
+/// of a curve-picking tool away, so the right-click that was meant to apply keeps the tool on for
+/// the user to pick again, as a pick still standing would (#23086). Esc still ends the tool.
+pub(crate) fn keep_on_right_click(app: &mut SolveApp) -> bool {
+    app.tool.as_mut().is_some_and(|t| std::mem::take(&mut t.picks_dropped) && t.picks.is_empty())
+}
+
+/// Where on the active sketch the hit for entity `id` is, in sketch coordinates.
+fn hit_place(app: &SolveApp, hits: &[Hit], id: &str) -> Option<Vec2> {
+    let sid = active_sketch(app)?;
+    let st = crate::open_meshing::session_world(&app.session);
+    let plane = st.sketch(sid)?.plane;
+    hits.iter().find_map(|h| match h {
+        Hit::SketchPoint { sketch, id: hit, at } if *sketch == sid && hit == id => Some(*at),
+        Hit::SketchCurve { sketch, id: hit, point, .. } if *sketch == sid && hit == id => Some(plane.to_local(*point)),
+        _ => None,
+    })
 }
 
 fn run_entities(app: &mut SolveApp, t: &Tool) -> bool {
@@ -2275,12 +2297,6 @@ pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
     }
     let Some(m) = mode(tool.cmd) else { return false };
     match m {
-        // The Undo button took every pick away: the right-click that was meant to apply keeps the
-        // tool on, for the user to pick again, as a pick still standing would (#23086).
-        Mode::Entities(_) if tool.picks.is_empty() && tool.picks_dropped => {
-            tool.picks_dropped = false;
-            true
-        }
         Mode::Points(0) if tool.pts.len() >= 2 => {
             run_points(app, tool);
             tool.pts.clear();

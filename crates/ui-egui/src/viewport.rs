@@ -9355,7 +9355,9 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         let chord = ui.input(|i| i.pointer.middle_down()) && crate::prefs::nav_chord(app, crate::prefs::NavButton::Right).is_some();
         if resp.secondary_clicked() && !crate::mouse_gesture::took_press(app) && !chord {
             if app.tool.is_some() {
-                crate::tools::finish(app);
+                if !crate::sketch_tools::keep_on_right_click(app) {
+                    crate::tools::finish(app);
+                }
             } else if app.dialog.is_none() {
                 if crate::sketch_tools::detach_simulated_at(app, p) {
                     // Right-clicking a simulated break-off glyph detaches the curve endpoint immediately.

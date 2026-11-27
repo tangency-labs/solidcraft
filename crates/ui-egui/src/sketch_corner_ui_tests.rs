@@ -1662,6 +1662,45 @@ fn a_constrainer_whose_pick_lost_its_curve_to_undo_stays_on_for_the_right_click(
     assert_eq!(constraints(&h), before + 1, "a constraint on the bottom line");
 }
 
+/// One of the Constrainer's three picks taken away by the Undo button: the right-click applies to
+/// the two lines that stand and keeps the tool on, and the next right-click ends it, as on main.
+/// Esc after every pick was taken away ends the tool at once, as on main.
+#[test]
+fn a_constrainer_with_a_pick_left_after_undo_applies_then_ends_and_esc_ends_it() {
+    let mut h = picked_then_undone("sketch.constrainer", &[[30, 0, 0], [0, 30, 0], [30, 60, 0]]);
+    let sid = h.app.session.active_sketch.unwrap();
+    let constraints = |h: &crate::scenario::Harness| h.app.session.model.state().sketch(sid).unwrap().sketch.constraints.len();
+    assert_eq!(h.app.tool.as_ref().map(|t| (t.picks.clone(), t.picks_dropped)), Some((vec!["bottom".to_string(), "left".to_string()], false)));
+    let before = constraints(&h);
+    h.step(&json!({"click":{"world":[30, 30, 0]},"button":"right"})).unwrap();
+    assert!(!h.app.status.as_ref().is_some_and(|s| s.2), "{:?}", h.app.status);
+    assert!(constraints(&h) > before, "the two lines that stand are constrained");
+    assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some("sketch.constrainer"), "the right-click that applied keeps the tool on");
+    h.step(&json!({"click":{"world":[30, 30, 0]},"button":"right"})).unwrap();
+    assert!(h.app.tool.is_none(), "the next right-click ends the tool");
+
+    let mut h = picked_then_undone("sketch.constrainer", &[[30, 60, 0]]);
+    h.step(&json!({"key":"Escape"})).unwrap();
+    assert!(h.app.tool.is_none(), "Esc ends the tool");
+}
+
+/// Seen along its plane, a sketch's curves can still be clicked though the click misses the
+/// plane: the pick still gets its place, so the places stay matched to the picks.
+#[test]
+fn a_curve_picked_in_a_view_along_the_sketch_plane_keeps_its_place() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[-10,0],[70,0]],"ids":["bottom"]})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"front"}})).unwrap();
+    h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+    h.settle();
+    h.step(&json!({"start":"sketch.circle.three_tangent"})).unwrap();
+    h.step(&json!({"click":{"world":[30, 0, 0]}})).unwrap();
+    let tool = h.app.tool.as_ref().unwrap();
+    assert_eq!(tool.picks, ["bottom"], "the line is picked in the view along the plane");
+    assert_eq!(tool.pts.len(), 1, "with its place: {:?}", tool.pts);
+}
+
 /// A preselected pick has no click place and comes before the clicked ones, so a dropped clicked
 /// pick takes its own place with it, not the place of another.
 #[test]
@@ -1673,7 +1712,7 @@ fn a_dropped_pick_takes_its_own_click_place_after_a_preselected_pick() {
     assert!(crate::sketch_tools::drop_gone_picks(&h.app, &mut tool));
     assert_eq!(tool.picks, ["bottom", "left"]);
     assert_eq!(tool.pts.iter().map(|p| p.0).collect::<Vec<_>>(), [Vec2::new(0.0, 30.0)]);
-    assert!(tool.picks_dropped);
+    assert!(!tool.picks_dropped, "picks stand, so a right-click applies or ends as on main");
 }
 
 /// Redo after that Undo brings the line back, and the circle's centre clicked on it is held on it
