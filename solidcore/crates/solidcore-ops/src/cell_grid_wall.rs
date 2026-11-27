@@ -138,6 +138,32 @@ mod tests {
     }
 
     #[test]
+    fn a_rod_reads_as_an_outside_wall_and_its_caps_are_refused() {
+        let (rod, _) = crate::body::make_cylinder([0.0; 3], 5.0, 10.0)
+            .unwrap()
+            .to_record()
+            .unwrap();
+        let mut walls = 0;
+        for face in 0..rod.faces.len() {
+            match cylinder_wall(&rod, face, 1e-6) {
+                Ok(w) => {
+                    walls += 1;
+                    assert!((w.radius - 5.0).abs() < 1e-9 && w.convex);
+                    assert!(((w.z_hi - w.z_lo).abs() - 10.0).abs() < 1e-9);
+                    assert_eq!(w.facing_radius, None);
+                }
+                Err(WallError::Wall(_)) => {}
+                Err(e) => panic!("face {face}: {e:?}"),
+            }
+        }
+        assert_eq!(walls, 1);
+        assert!(matches!(
+            cylinder_wall(&rod, rod.faces.len(), 1e-6),
+            Err(WallError::Ops(_))
+        ));
+    }
+
+    #[test]
     fn a_tube_wall_is_planned_in_record_types() {
         let plan = plan_wall_cell_grid(&tube(), &spec(), WallDepth::Through).unwrap();
         assert_eq!(plan.round, 20);
