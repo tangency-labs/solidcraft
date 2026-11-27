@@ -155,6 +155,8 @@ pub struct Harness {
     /// The window does not have the platform's focus, as when a script drives the app while
     /// another window is in front.
     pub window_unfocused: bool,
+    /// `window_unfocused` as the last frame had it, to tell egui when it changes.
+    was_unfocused: bool,
     /// The camera as the last `camera` step left it.
     cam_mark: Option<solidcraft_viewport::Camera>,
 }
@@ -196,6 +198,7 @@ impl Harness {
             size: egui::vec2(1600.0, 1000.0),
             screen_scale: None,
             window_unfocused: false,
+            was_unfocused: false,
             cam_mark: None,
         };
         WIDTHS.with(|m| m.borrow_mut().clear());
@@ -273,8 +276,13 @@ impl Harness {
     }
 
     /// The next frame's input: the window's size on its screen, `events`, and the time a frame on.
-    fn input(&mut self, events: Vec<egui::Event>) -> egui::RawInput {
+    fn input(&mut self, mut events: Vec<egui::Event>) -> egui::RawInput {
         self.tick();
+        // A platform says when the focus changes; egui then lets go of held keys and modifiers.
+        if self.window_unfocused != self.was_unfocused {
+            self.was_unfocused = self.window_unfocused;
+            events.insert(0, egui::Event::WindowFocused(!self.window_unfocused));
+        }
         let mut raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.size)),
             time: Some(self.time),
