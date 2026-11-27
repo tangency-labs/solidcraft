@@ -2045,6 +2045,17 @@ fn drive(s: &mut Session, p: &Value) -> Result<Value> {
         s.pending_joint_bases = pending;
     }
     let sol = solution(s, &BTreeMap::new(), response_analysis(p));
+    // When the drive already placed every occurrence and joint identically to a fresh solve
+    // (and no expression or coupling changed), the refresh after the command can skip re-solving.
+    if !hold && !s.doc.has_capture_position_timeline() {
+        let st = s.model.state();
+        if reexpressed(&s.doc, &st).is_empty() && recoupled(&s.doc, &st).is_empty() {
+            let mut probe = (*s.doc).clone();
+            if !probe.apply_joint_solution(&sol) || (probe.occurrences == s.doc.occurrences && probe.assembly.joints == s.doc.assembly.joints) {
+                s.joints_placed();
+            }
+        }
+    }
     // How motion stopped, as `motion::drive_with_contact` says: an object, or null.
     let stop = |key: &str| r.get(key).filter(|v| v.is_object()).cloned();
     let stopped_by_contact =

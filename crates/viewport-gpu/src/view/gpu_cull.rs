@@ -128,6 +128,29 @@ const COPIED: u8 = 1;
 const MAPPING: u8 = 2;
 const MAPPED: u8 = 3;
 
+/// First indirect triangle entry index for each `(draw, level)`, in O(D * L) time.
+fn tri_entry_table(draw_levels: &[usize], tri_entries: &[(usize, usize, u32, u32, i32)]) -> Vec<Vec<Option<usize>>> {
+    let mut table: Vec<Vec<Option<usize>>> = draw_levels.iter().map(|&len| vec![None; len]).collect();
+    for (entry, &(draw, level, ..)) in tri_entries.iter().enumerate() {
+        if let Some(slot) = table.get_mut(draw).and_then(|levels| levels.get_mut(level)) {
+            slot.get_or_insert(entry);
+        }
+    }
+    table
+}
+
+/// Indirect edge `(entry, level)` pairs grouped by edge part in ascending entry order, in
+/// O(D + E) time.
+fn edge_entry_table(part_count: usize, edge_entries: &[(usize, usize, u32, u32)]) -> Vec<Vec<(usize, usize)>> {
+    let mut table: Vec<Vec<(usize, usize)>> = vec![Vec::new(); part_count];
+    for (n, &(part, level, ..)) in edge_entries.iter().enumerate() {
+        if let Some(entries) = table.get_mut(part) {
+            entries.push((n, level));
+        }
+    }
+    table
+}
+
 /// One scene's instanced placements, culled on the GPU.
 #[derive(Clone)]
 pub(super) struct GpuCull {
@@ -189,6 +212,10 @@ impl GpuCull {
             return None;
         }
         let edge_entries = edges.as_deref().map(|e| e.entry_list()).unwrap_or_default();
+        let draw_levels: Vec<usize> = draws.iter().map(|d| d.levels.len()).collect();
+        let tri_table = tri_entry_table(&draw_levels, &tri_entries);
+        let edge_part_count = if edges.is_some() { draws.iter().filter(|d| d.edges.is_some()).count() } else { 0 };
+        let edge_table = edge_entry_table(edge_part_count, &edge_entries);
         // Each draw's part, levels and the entries that draw them.
         let mut parts: Vec<u32> = Vec::with_capacity(draws.len() * PART_WORDS);
         let mut levels: Vec<u32> = Vec::new();
@@ -203,17 +230,19 @@ impl GpuCull {
             let first = u32::try_from(levels.len() / LEVEL_WORDS).ok()?;
             let here = d.look == InstanceLook::Opaque;
             for (k, l) in d.levels.iter().enumerate() {
-                let entry = tri_entries.iter().position(|e| e.0 == i && e.1 == k)?;
+                let entry = tri_table[i][k]?;
                 levels.extend([l.error.to_bits(), u32::try_from(entry).ok()?, 0, 0]);
             }
             parts.extend([first, u32::try_from(d.levels.len()).ok()?, u32::from(here), 0]);
             let first = u32::try_from(levels.len() / LEVEL_WORDS).ok()?;
             let mut count = 0u32;
             if let (Some(e), true) = (&d.edges, edges.is_some()) {
-                for (n, entry) in edge_entries.iter().enumerate().filter(|(_, x)| x.0 == edge_part) {
-                    let tolerance = e.levels.get(entry.1).map_or(f32::INFINITY, |(_, t)| *t);
-                    levels.extend([tolerance.to_bits(), u32::try_from(n).ok()?, 0, 0]);
-                    count += 1;
+                if let Some(entries) = edge_table.get(edge_part) {
+                    for &(n, level) in entries {
+                        let tolerance = e.levels.get(level).map_or(f32::INFINITY, |(_, t)| *t);
+                        levels.extend([tolerance.to_bits(), u32::try_from(n).ok()?, 0, 0]);
+                        count += 1;
+                    }
                 }
                 edge_part += 1;
             }
@@ -576,6 +605,50 @@ mod tests {
         assert!(hidden_by_depth(0.80, 0.20, 0.01));
         // Within the depth buffer's own resolution: the same surface, not one behind another.
         assert!(!hidden_by_depth(0.500_000_5, 0.5, 0.0));
+    }
+
+    /// The O(D * L) triangle and edge lookup tables built in `GpuCull::new` match the previous
+    /// linear `.position(...)` and `.enumerate().filter(...)` lookups identically across arbitrary
+    /// entry orderings, missing-edge draws, and varying level counts.
+    #[test]
+    fn entry_tables_match_linear_lookup() {
+        use super::{edge_entry_table, tri_entry_table};
+        let draw_levels = [3usize, 1, 4, 2, 3];
+        // Shuffled order as `Indirect::new` groups entries by (look, flat, closed).
+        let tri_entries: Vec<(usize, usize, u32, u32, i32)> = vec![
+            (2, 0, 12, 0, 0),
+            (0, 1, 6, 12, 4),
+            (4, 2, 3, 18, 8),
+            (1, 0, 9, 21, 12),
+            (0, 0, 18, 30, 16),
+            (2, 3, 3, 48, 20),
+            (3, 1, 6, 51, 24),
+            (4, 0, 15, 57, 28),
+            (0, 2, 3, 72, 32),
+            (2, 1, 9, 75, 36),
+            (3, 0, 12, 84, 40),
+            (4, 1, 9, 96, 44),
+            (2, 2, 6, 105, 48),
+            // Duplicate (draw, level) must resolve to the first entry just like `.position(...)`.
+            (0, 1, 6, 111, 52),
+        ];
+        let tri_table = tri_entry_table(&draw_levels, &tri_entries);
+        for (i, &len) in draw_levels.iter().enumerate() {
+            assert_eq!(tri_table[i].len(), len);
+            for (k, &got) in tri_table[i].iter().enumerate() {
+                let linear = tri_entries.iter().position(|e| e.0 == i && e.1 == k);
+                assert_eq!(got, linear, "draw {i}, level {k}");
+            }
+        }
+
+        let part_count = 4usize;
+        let edge_entries = vec![(2, 0, 0, 10), (0, 0, 10, 8), (0, 1, 18, 4), (2, 1, 22, 5), (2, 2, 27, 2), (3, 0, 29, 12)];
+        let edge_table = edge_entry_table(part_count, &edge_entries);
+        assert_eq!(edge_table.len(), part_count);
+        for (part, got) in edge_table.iter().enumerate() {
+            let linear: Vec<(usize, usize)> = edge_entries.iter().enumerate().filter(|(_, x)| x.0 == part).map(|(n, x)| (n, x.1)).collect();
+            assert_eq!(*got, linear, "edge part {part}");
+        }
     }
 
     /// The GPU culls a scene's placements as the CPU does: every level of every part draws the

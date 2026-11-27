@@ -149,6 +149,13 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
             other => other.to_string(),
         })
         .collect();
+    for workspace in plugin.get("workspaces").and_then(Value::as_array).into_iter().flatten() {
+        let name = workspace.get("name").and_then(Value::as_str).unwrap_or_default();
+        lines.push(format("ui.plugin_workspace.install", &[("name", name)]));
+        if workspace.get("on_enter").and_then(Value::as_str).is_some() || workspace.get("on_exit").and_then(Value::as_str).is_some() {
+            lines.push(tr("ui.plugin_workspace.hooks").to_owned());
+        }
+    }
     for folder in permissions.and_then(|p| p.get("files")).and_then(Value::as_array).into_iter().flatten() {
         let name = folder.get("name").and_then(Value::as_str).unwrap_or_default();
         let read = folder.get("read").and_then(Value::as_bool).unwrap_or(false);
@@ -426,6 +433,18 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn plugin_install_lists_workspaces_and_read_only_hooks_before_approval() {
+        crate::i18n::install();
+        let lines = permission_lines(&json!({"workspaces":[
+            {"name":"Machining", "on_enter":"refresh"}, {"name":"Review"}
+        ]}));
+        assert!(lines.iter().any(|line| line.contains("Machining")));
+        assert!(lines.iter().any(|line| line.contains("Review")));
+        assert!(lines.iter().any(|line| line == tr("ui.plugin_workspace.hooks")));
+        assert!(permission_lines(&json!({})).is_empty());
     }
 
     #[test]

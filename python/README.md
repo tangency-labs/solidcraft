@@ -21,4 +21,12 @@ several scripts work on one design, and otherwise starts its own headless SolidC
 `solidcraft-cli mcp --structured`, the same MCP server agents use (`SOLIDCRAFT_CLI` names the
 binary when it is not on `PATH`). Design notes: `docs/python-api.md`.
 
+```sh
+pip install solidcraft
+uvx solidcraft mcp     # the MCP server over stdio: command "uvx", args ["solidcraft", "mcp"]
+```
+
+The `solidcraft` command runs `solidcraft-cli` with the same arguments and exit code
+(`uvx solidcraft --version`).
+
 The generated bindings come from `cargo xtask python` and are not committed.

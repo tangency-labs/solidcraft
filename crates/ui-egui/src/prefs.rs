@@ -36,6 +36,7 @@ mod mouse3d;
 mod navbar;
 mod navigation;
 mod panel_layout;
+mod platform;
 mod privacy;
 mod security;
 mod sketch;
@@ -12282,6 +12283,35 @@ mod tests {
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert_eq!(h.app.preferences.orbit_around, OrbitAround::Cursor);
         }
+    }
+
+    /// #22848: the twist and the cursor wrap are drawn only where the platform delivers them
+    /// (`platform::available`), and a hidden option keeps its saved value.
+    #[test]
+    fn navigation_shows_the_twist_and_the_cursor_wrap_only_where_they_work() {
+        use platform::{Facts, Needs, available};
+        let rows = [("prefs:trackpad_twist_turns", Needs::TrackpadTwist), ("prefs:orbit_cursor_wrap", Needs::CursorWarp)];
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.trackpad_twist_turns = true;
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.frames(2);
+        for (handle, needs) in rows {
+            assert_eq!(crate::scenario::handle_at(handle).is_some(), available(needs, Facts::of(&h.app)), "{handle}");
+        }
+        if cfg!(target_os = "windows") {
+            assert!(crate::scenario::handle_at("prefs:trackpad_twist_turns").is_none(), "no twist reaches the app on Windows");
+            assert!(crate::scenario::handle_at("prefs:orbit_cursor_wrap").is_some());
+        }
+        // On Linux the window system this run uses decides.
+        for window_system in ["wayland", "x11"] {
+            h.app.services.window_system = Some(window_system);
+            h.frames(2);
+            for (handle, needs) in rows {
+                assert_eq!(crate::scenario::handle_at(handle).is_some(), available(needs, Facts::of(&h.app)), "{handle} on {window_system}");
+            }
+        }
+        h.call("ui.prefs", json!({"button":"apply"}));
+        assert!(h.app.preferences.trackpad_twist_turns, "a hidden option keeps its value");
     }
 
     #[test]

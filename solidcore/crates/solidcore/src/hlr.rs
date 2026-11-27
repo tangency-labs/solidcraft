@@ -1741,6 +1741,70 @@ fn classify_track(t: &Track, ctx: &Ctx, shadows: &ShadowIndex) -> Result<Vec<Pie
     let p = scene
         .get(t.placement)
         .ok_or(HlrError::Invalid("placement"))?;
+    // Two screen places closer than the coverage tolerance are already one place (`cover`).
+    // A cut just short of a silhouette turn stays above the parameter and 3D merge, because
+    // the screen gap is only the square of that parameter gap. Consecutive pieces that small
+    // are one run. A run whose own screen box is still within the tolerance joins a neighbour
+    // of the same visibility, or, when that would flip visibility, the piece before it (else the
+    // piece after it) runs on over it, so the pieces still meet end to end and no end moves by
+    // more than that box, not by one tolerance per piece. A
+    // run that is larger than the tolerance is kept, and so is a track of only such pieces:
+    // that is a short edge.
+    let tol = 1e-7 + 1e-9 * scale;
+    // The box includes an arc's extremes, so a fold whose ends meet is not small. A non-finite
+    // box is not small.
+    let screen_span = |range: [f64; 2]| {
+        let (lo, hi) = screen_box(c, range, p, view);
+        let d = (hi[0] - lo[0]).hypot(hi[1] - lo[1]);
+        d.is_finite().then_some(d)
+    };
+    let tiny = |range: [f64; 2]| screen_span(range).is_some_and(|d| d <= tol);
+    if !pieces.is_empty() && !pieces.iter().all(|piece| tiny(piece.t)) {
+        let mut merged: Vec<Piece> = Vec::new();
+        let mut pending: Option<f64> = None;
+        let mut rest = pieces.into_iter().peekable();
+        while let Some(mut piece) = rest.next() {
+            if let Some(t0) = pending.take() {
+                piece.t[0] = t0.min(piece.t[0]);
+            }
+            if !tiny(piece.t) {
+                merged.push(piece);
+                continue;
+            }
+            let mut run = Vec::new();
+            run.push(piece);
+            while rest.peek().is_some_and(|next| tiny(next.t)) {
+                if let Some(next) = rest.next() {
+                    run.push(next);
+                }
+            }
+            let (Some(first), Some(last)) = (run.first(), run.last()) else {
+                continue;
+            };
+            let span = [first.t[0], last.t[1]];
+            let vis = first.visibility;
+            let one_vis = run.iter().all(|item| item.visibility == vis);
+            if !tiny(span) {
+                merged.extend(run);
+                continue;
+            }
+            if one_vis && merged.last().is_some_and(|prev| prev.visibility == vis) {
+                if let Some(prev) = merged.last_mut() {
+                    prev.t[0] = prev.t[0].min(span[0]);
+                    prev.t[1] = prev.t[1].max(span[1]);
+                }
+            } else if one_vis && rest.peek().is_some_and(|next| next.visibility == vis) {
+                pending = Some(span[0]);
+            } else if let Some(prev) = merged.last_mut() {
+                // Left out: the neighbour before it runs on over it, so the pieces still meet end
+                // to end, with at most the run's own box (inside the tolerance) painted by it.
+                prev.t[1] = prev.t[1].max(span[1]);
+            } else {
+                pending = Some(span[0]);
+            }
+        }
+        pieces = merged;
+    }
     for piece in &mut pieces {
         let mut pts = vec![view.screen(p.apply(c.at(piece.t[0])))];
         pts.extend(

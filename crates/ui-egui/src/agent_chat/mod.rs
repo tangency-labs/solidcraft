@@ -28,6 +28,8 @@ pub mod backend;
 pub mod context;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod discover;
+#[cfg(not(target_arch = "wasm32"))]
+mod export;
 pub mod gate;
 mod markdown;
 mod markdown_view;
@@ -54,9 +56,13 @@ use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
 use solidcraft_ui_text::{format as trf, tr};
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use panel::finish_native_window;
 pub(crate) use panel::finish_shared;
 pub(crate) use panel::owns_keyboard_input;
 pub(crate) use panel::prepare_shared;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use panel::request_export;
 pub(crate) use panel::request_new_chat;
 pub(crate) use panel::shared_content;
 pub use panel::show;
@@ -579,6 +585,9 @@ pub struct AgentChat {
     restore_mode: Option<String>,
     /// New chat is waiting for the user's yes (a message is running or queued).
     pub confirm_new: bool,
+    /// The export dialog is open, with this choice for including tool details.
+    #[cfg(not(target_arch = "wasm32"))]
+    export_tools: Option<bool>,
     /// What the panel recorded this frame, run after it is drawn (`panel::run`).
     pub actions: Vec<panel::PanelAction>,
     /// What the panel measured for the shared panel host this frame, handed over after it is drawn.
@@ -2155,6 +2164,10 @@ pub fn new_chat(app: &mut SolveApp) {
     end_turn(app);
     let chat = &mut app.agent_chat;
     chat.confirm_new = false;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        chat.export_tools = None;
+    }
     chat.items.clear();
     chat.model_changes_shown = None;
     chat.all_selected = false;
