@@ -342,3 +342,37 @@ fn a_cut_bar_chamfer_with_mismatched_setbacks_is_refused_at_the_join() {
         Some(NoRoomReason::JoinOffsetsDiffer)
     );
 }
+
+#[test]
+fn a_near_square_cut_bar_chamfer_stays_constant_offset() {
+    let mut k = kernel();
+    let mut body = bar_with_cut_end(&mut k, 1.0e-11);
+    let before = volume(&k, &mut body);
+
+    let chain = end_rim(&k, &mut body);
+    let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+    session
+        .prepare_chamfers_along(&k, &chain, &[ChamferSize::Distances([0.2; 2])], &[])
+        .unwrap();
+    session.do_fillet(&mut k).unwrap();
+    drop(session);
+
+    let findings = check_brep(&mut k, &mut body, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(findings.is_empty(), "{findings:?}");
+    assert!(is_outward_solid(&mut k, &mut body).unwrap());
+    assert_eq!(body.face_list().len(), 18);
+    assert!(volume(&k, &mut body) < before);
+
+    let equal_setback_faces = body
+        .face_list()
+        .iter()
+        .filter_map(|&id| match surface(&body, id).unwrap().map(Surface::kind) {
+            Some(SurfaceKind::ProceduralBlend(blend)) => Some(to_record(&k, blend).unwrap()),
+            _ => None,
+        })
+        .filter(|record| matches!(record.definition.radius, RadiusRecord::EqualSetback))
+        .count();
+    assert_eq!(equal_setback_faces, 0);
+}

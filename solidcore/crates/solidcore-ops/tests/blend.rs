@@ -9155,3 +9155,56 @@ fn a_short_ridge_end_rounds_and_chamfers_past_twice_its_length() {
         assert!(rel(v, expected) < 1e-9, "{case}: {v} {expected}");
     }
 }
+
+/// A chamfer chain running onto a single-branch degenerate tangent cusp between two
+/// tangent fillets builds cleanly in both orientations (cusp at start or end of the edge).
+#[test]
+fn chamfer_chain_ending_at_single_branch_tangent_cusp_builds_both_hands() {
+    all_fixes();
+    for (y_face, label) in [(0.0_f64, "front"), (20.0_f64, "back")] {
+        let body = make_box([0.0; 3], [20.0, 20.0, 20.0]).unwrap();
+        let top_right = edge_at(&body, [20.0, 10.0, 20.0]);
+        blend(
+            &body,
+            Blend::Chamfer,
+            &[top_right],
+            &[6.0],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap();
+
+        let vertical = edge_at(&body, [20.0, y_face, 7.0]);
+        blend(
+            &body,
+            Blend::Round,
+            &[vertical],
+            &[1.5],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap();
+
+        let bevel_wall = edge_at(&body, [20.0, 10.0, 14.0]);
+        blend(
+            &body,
+            Blend::Round,
+            &[bevel_wall],
+            &[1.0],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap();
+
+        let before = volume(&body);
+        let seed = edge_at(&body, [16.25, y_face, 17.75]);
+        let chain = tangent_chain(&body, None, &[seed], &[], 2.0_f64.to_radians()).unwrap();
+        assert_eq!(chain.len(), 3, "{label}: {chain:?}");
+
+        blend(&body, Blend::Chamfer, &chain, &[0.4], &[], Corners::Filled)
+            .unwrap_or_else(|e| panic!("{label}: {e:?}"));
+        body.check_solid().unwrap();
+        assert!(body.check(CheckLevel::All).unwrap().is_valid(), "{label}");
+        assert!(volume(&body) < before, "{label}");
+    }
+}

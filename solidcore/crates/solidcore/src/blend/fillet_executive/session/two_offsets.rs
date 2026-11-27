@@ -184,6 +184,42 @@ fn chain_wedge(
     Ok((anchor.unwrap_or(narrowest), false))
 }
 
+/// Whether every planar edge in the same chamfer chain produces offsets within `tol` of the
+/// first planar edge's offsets. Tiny sketch or boolean plane-normal noise can exceed
+/// [`chain_wedge`]'s machine-epsilon check while shifting the chamfer offsets by orders of
+/// magnitude less than the body's modeling tolerance; keeping the constant-offset anchor
+/// avoids dropping exact analytic blend surfaces for station-wise procedural surfaces.
+fn planar_anchor_within_tolerance(
+    wedges: &[f64],
+    between_planes: &[bool],
+    size: ChamferSize,
+    tol: f64,
+    alike: impl Fn(usize) -> Result<bool>,
+) -> Result<Option<f64>> {
+    let mut anchor: Option<(f64, [f64; 2])> = None;
+    for (other, (&w, &planes)) in wedges.iter().zip(between_planes).enumerate() {
+        if !planes || !alike(other)? {
+            continue;
+        }
+        let Ok(def) = ChamferDefinition::new(size, w) else {
+            return Ok(None);
+        };
+        let Ok(offsets) = def.offsets() else {
+            return Ok(None);
+        };
+        match anchor {
+            None => anchor = Some((w, offsets)),
+            Some((_, [a0, a1])) => {
+                let [o0, o1] = offsets;
+                if (a0 - o0).abs() > tol || (a1 - o1).abs() > tol {
+                    return Ok(None);
+                }
+            }
+        }
+    }
+    Ok(anchor.map(|(w, _)| w))
+}
+
 /// The wedge a chamfer of setbacks `setbacks` is measured at, on a chain measured at `narrowest`
 /// whose faces open to `widest`: `narrowest`, or the least wedge past it at which no station
 /// folds. Measured at `a`, the setback along a face at wedge `w` is `(d_1 - d_2 cos a + (d_2 -
@@ -507,8 +543,20 @@ impl FilletSession<'_> {
                     && !knife.get(other).copied().unwrap_or(false)
                     && value(OP_ALONG, sizes, other)? == size)
             };
-            let (mut wedge, conflicting_planes) =
+            let (mut wedge, mut conflicting_planes) =
                 chain_wedge(&wedges, &between_planes, index, alike)?;
+            if conflicting_planes {
+                if let Some(anchor) = planar_anchor_within_tolerance(
+                    &wedges,
+                    &between_planes,
+                    size,
+                    0.5 * target.tolerance(),
+                    alike,
+                )? {
+                    wedge = anchor;
+                    conflicting_planes = false;
+                }
+            }
             let mut on_chain = Vec::new();
             let mut uniform = true;
             for other in 0..edges.len() {
@@ -977,5 +1025,33 @@ mod tests {
                     .unwrap();
             }
         }
+    }
+
+    #[test]
+    fn planar_wedge_noise_within_tolerance_keeps_the_constant_offset_anchor() {
+        let all = |_: usize| Ok(true);
+        let right = 0.5 * crate::math::PI;
+        let size = ChamferSize::Distances([0.2, 0.2]);
+        let planes = [false, true, true];
+
+        // 2.5e-11 rad plane-normal noise exceeds chain_wedge's machine-epsilon check,
+        // but shifts the chamfer offsets by ~5e-12, far below half a 1e-5 body tolerance.
+        let noisy = [right, right, right + 2.5e-11];
+        assert_eq!(chain_wedge(&noisy, &planes, 0, all).unwrap(), (right, true));
+        assert_eq!(
+            planar_anchor_within_tolerance(&noisy, &planes, size, 0.5e-5, all).unwrap(),
+            Some(right)
+        );
+
+        // A genuine angled cut shifts offsets well past tolerance and stays station-wise.
+        let slanted = [right, right, right + 0.075];
+        assert_eq!(
+            chain_wedge(&slanted, &planes, 0, all).unwrap(),
+            (right, true)
+        );
+        assert_eq!(
+            planar_anchor_within_tolerance(&slanted, &planes, size, 0.5e-5, all).unwrap(),
+            None
+        );
     }
 }
