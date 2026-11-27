@@ -2614,7 +2614,18 @@ fn named_view_rows(app: &mut SolveApp, rows: &mut Rows<'_>, depth: usize, acts: 
     for (label, view) in STANDARD_VIEWS {
         let view_key = format!("stdview:{view}");
         let r = node_row(rows, Spec { key: &view_key, ..Default::default() }, Row { depth: depth + 1, icon: "home", label, ..Default::default() });
-        if r.double {
+        let sketch_plane = match view {
+            "top" => Some("XY"),
+            "front" => Some("XZ"),
+            "right" => Some("YZ"),
+            _ => None,
+        };
+        if r.clicked
+            && app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::Sketch))
+            && let Some(name) = sketch_plane
+        {
+            pick_from_browser(app, Sel::Plane { name: name.into() });
+        } else if r.double {
             app.animate_view(view);
         }
         if let Some(p) = r.secondary {
