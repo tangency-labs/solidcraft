@@ -27,6 +27,8 @@ pub mod tube_cope;
 
 mod cell_grid;
 mod exchange;
+#[cfg(feature = "backend-occt")]
+pub mod foreign;
 mod frames;
 mod holes;
 mod modelling;
