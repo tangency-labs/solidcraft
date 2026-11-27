@@ -8510,3 +8510,18 @@ fn body_transfer_cache_invalidates_when_destination_component_is_added() {
     assert_eq!(cached.state().body("Plate").unwrap().component, dest);
     assert!(cached.last_recomputed >= 1);
 }
+
+#[test]
+fn feature_error_codes_do_not_describe_recovered_kernel_failures() {
+    kernel::failure::clear();
+    let body = kernel::box_solid(Vec3::ZERO, Vec3::new(30.0, 2.0, 10.0)).unwrap();
+    let failure = kernel::fillet(&body, &[Vec3::new(15.0, 0.0, 10.0), Vec3::new(15.0, 2.0, 10.0)], 1.5).unwrap_err();
+    let code = kernel::failure::last().expect("the refused round records its kernel code");
+    assert_eq!(super::feature_failure_code(&DocError::Kernel(failure)), Some(code));
+    // The feature recovered from that call and later refused unrelated input.
+    let invalid = DocError::Kernel(kernel::KernelError::Invalid("non-finite profile".into()));
+    assert!(kernel::failure::last().is_some(), "the recovered call is still recorded");
+    assert_eq!(super::feature_failure_code(&invalid), None);
+    assert_eq!(super::feature_failure_code(&DocError::Invalid("no profile".into())), None);
+    kernel::failure::clear();
+}

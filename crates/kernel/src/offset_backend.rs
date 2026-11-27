@@ -31,7 +31,7 @@ fn failed(op: &str, what: &str, e: impl crate::Cause) -> KernelError {
 /// The error for SMLib's refusal of `op`, in the words of the operation; `wall` is its wall's
 /// thickness, where it has one.
 fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
-    match e {
+    crate::failure::translated(e, |e| match e {
         SmError::NoRoom => KernelError::Invalid(format!("{op}: the wall is too thick: it leaves no room inside the body")),
         // The walls just meet: thinner they stay apart, thicker they cross and merge.
         SmError::WallsTouch => {
@@ -81,7 +81,7 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
         }
         SmError::NoEffect => KernelError::Failed(format!("SMLib made no change: the {op} reported success but moved no face onto its new surface")),
         e => failed(op, "operation", e),
-    }
+    })
 }
 
 /// How far a selection point may be from the face it picks: the kernel's own picking reach.
@@ -164,11 +164,13 @@ pub(crate) fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
     let (r, h) = match attempt(thickness) {
         Ok(done) => done,
         Err(first) => {
+            let code = crate::failure::code_for(&first);
             let failure = seen.borrow().clone();
-            return Err(match failure {
+            let error = match failure {
                 Some(f) if shell_may_be_thinner(&f) => thinner_shell_hint(thickness, &f, first, |t| attempt(t).is_ok()),
                 _ => first,
-            });
+            };
+            return Err(crate::failure::remember(error, code));
         }
     };
     let h = h.and_then(|h| with_offsets(&r, b, h, thickness));

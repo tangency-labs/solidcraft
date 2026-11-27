@@ -8,9 +8,15 @@
 //! ([`clear`] before the work, [`last`] after it failed); [`code_in`] gives it only for an error
 //! whose text carries that call's error word for word. A failure on another thread (a pool thread
 //! of a feature that works on its bodies side by side) leaves its code there: the work's failure
-//! then has none.
+//! then has none. At the blend and offset adapters, translated errors retain their association
+//! with the original failure even when their user-facing wording changes.
 
 use serde::{Deserialize, Serialize};
+use std::cell::RefCell;
+
+thread_local! {
+    static TRANSLATED: RefCell<Option<(crate::KernelError, ErrorCode)>> = const { RefCell::new(None) };
+}
 
 /// A failed kernel call's code as data to keep and send: the call (`"blend"`), the kernel's
 /// stable number for the kind of failure (`kind`, 0 for a failure solidcore-ops decided itself),
@@ -50,6 +56,7 @@ impl std::fmt::Display for ErrorCode {
 /// asked about.
 pub fn clear() {
     solidcraft_smlib::failure::clear();
+    let _ = TRANSLATED.try_with(|entry| entry.replace(None));
 }
 
 /// The code of the last kernel call that failed on this thread since [`clear`]: for work that
@@ -64,6 +71,28 @@ pub fn last() -> Option<ErrorCode> {
 #[must_use]
 pub fn code_in(error: &str) -> Option<ErrorCode> {
     solidcraft_smlib::failure::code_in(error).map(ErrorCode::from)
+}
+
+/// The code associated with this error, including an adapter's translated refusal.
+#[must_use]
+pub fn code_for(error: &crate::KernelError) -> Option<ErrorCode> {
+    TRANSLATED
+        .try_with(|entry| entry.borrow().as_ref().filter(|(mapped, _)| mapped == error).map(|(_, code)| code.clone()))
+        .ok()
+        .flatten()
+        .or_else(|| code_in(&error.to_string()))
+}
+
+/// Associate a translated error with a code captured before changing its wording.
+pub(crate) fn remember(error: crate::KernelError, code: Option<ErrorCode>) -> crate::KernelError {
+    let _ = TRANSLATED.try_with(|entry| entry.replace(code.map(|code| (error.clone(), code))));
+    error
+}
+
+/// Preserve the code when an adapter replaces the original kernel message.
+pub(crate) fn translated(source: solidcraft_smlib::Error, map: impl FnOnce(solidcraft_smlib::Error) -> crate::KernelError) -> crate::KernelError {
+    let code = code_in(&source.to_string());
+    remember(map(source), code)
 }
 
 #[cfg(test)]
