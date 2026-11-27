@@ -6205,7 +6205,6 @@ impl Model {
             &self.cache,
             &self.import_digests,
             &constructions,
-            &feature_component,
             &component_digests,
             &envelopes,
             carried.as_ref(),
