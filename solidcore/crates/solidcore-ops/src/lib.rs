@@ -95,6 +95,7 @@ pub mod profile;
 pub mod provenance;
 pub mod query;
 pub mod record_check;
+pub mod ruled_strip;
 pub mod section_corners;
 pub mod session;
 pub mod sketch_arc;

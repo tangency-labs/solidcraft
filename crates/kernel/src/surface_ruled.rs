@@ -89,7 +89,7 @@ pub fn ruled_surface(body: &Body, at: &[Vec3], r: &Ruled) -> Result<Body> {
 /// is exact (its far edge is its edge's image), else the default curve's (see [`far_curves`]):
 /// the handles a caller may move and give back to [`ruled_surface_with`].
 pub fn ruled_far_handles(body: &Body, at: &[Vec3], r: &Ruled) -> Result<Vec<Option<Vec<Vec3>>>> {
-    let plan = planned(body, at, r, &[])?;
+    let plan = planned(body, at, r, &[], None)?;
     Ok(plan
         .strips
         .iter()
@@ -101,15 +101,6 @@ pub fn ruled_far_handles(body: &Body, at: &[Vec3], r: &Ruled) -> Result<Vec<Opti
         })
         .collect())
 }
-
-/// Samples along each close strip where [`planned_refined`] compares its far edge with its edge
-/// (a strip that folds over itself is refused).
-const FOLD_SAMPLES: usize = 64;
-/// Samples along a free strip where [`ruled_surface_close`] measures its far curve against its
-/// rulings' ends.
-const REFINE_SAMPLES: usize = 64;
-/// Most rounds of halving a free strip's spans ([`ruled_surface_close`]).
-const MAX_REFINE: usize = 6;
 
 /// The strips and chain of a ruled surface, before its joints.
 struct Plan {
@@ -126,18 +117,18 @@ struct Plan {
 /// order, as [`ruled_far_handles`] lists them; `None` or missing: the default curve). A handle
 /// list of the wrong length, or one for an exact strip, is refused.
 pub fn ruled_surface_with(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option<Vec<Vec3>>]) -> Result<Body> {
-    built(body, r, planned(body, at, r, handles)?)
+    built(body, r, planned(body, at, r, handles, None)?)
 }
 
 /// [`ruled_surface`] whose free strips' far curves pass within `tol` of their rulings' ends:
 /// each such strip's edge is taken with its spans halved (exact knot insertion, the same curve)
-/// until its far curve, solved as [`far_curves`] solves it, comes that close at
-/// [`REFINE_SAMPLES`] points along it, for at most [`MAX_REFINE`] rounds (what is left is
-/// refused). Strips that fold over themselves are refused ([`planned_refined`]). The law
-/// extension's strip (Surface › Extend); Ruled Surface keeps its own far curves (and its saved
-/// handles).
+/// until its far curve, solved as [`far_curves`] solves it, comes that close as the kernel
+/// measures it ([`solidcore_ops::ruled_strip::strays`]), for at most
+/// [`solidcore_ops::ruled_strip::MAX_HALVINGS`] rounds (what is left is refused). Strips that
+/// fold over themselves are refused ([`planned`]). The law extension's strip (Surface › Extend);
+/// Ruled Surface keeps its own far curves (and its saved handles).
 pub(crate) fn ruled_surface_close(body: &Body, at: &[Vec3], r: &Ruled, tol: f64) -> Result<Body> {
-    built(body, r, planned_refined(body, at, r, &[], Some(tol))?)
+    built(body, r, planned(body, at, r, &[], Some(tol))?)
 }
 
 /// The ruled surface of `plan` (strips, joints and corner faces) as one surface body.
@@ -167,7 +158,7 @@ fn built(body: &Body, r: &Ruled, plan: Plan) -> Result<Body> {
         let end = joints.get(if closed { (j + 1) % n } else { j + 1 }).ok_or_else(|| KernelError::Failed("ruled surface: a joint".into()))?;
         let (up_start, top_start) = start.side(Side::Out, s);
         let (up_end, top_end) = end.side(Side::In, s);
-        if s.line && (top_end - top_start).dot(s.start.tangent) <= eps {
+        if s.line && solidcore_ops::ruled_strip::cut_away(a3(top_end - top_start), a3(s.start.tangent), eps) {
             return Err(KernelError::Invalid("the corners cut a strip away entirely: try a shorter distance".into()));
         }
         let edge = chain.get(j).map_or(0, |(e, _)| *e);
@@ -199,14 +190,10 @@ fn built(body: &Body, r: &Ruled, plan: Plan) -> Result<Body> {
 }
 
 /// The chain picked by `at`, each edge's rulings read, and its strips with their far edges (the
-/// free ones solved with `handles` given; see [`ruled_surface_with`]).
-fn planned(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option<Vec<Vec3>>]) -> Result<Plan> {
-    planned_refined(body, at, r, handles, None)
-}
-
-/// [`planned`], with `refine` (a tolerance) the free strips' far curves solved as
-/// [`ruled_surface_close`] solves them.
-fn planned_refined(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option<Vec<Vec3>>], refine: Option<f64>) -> Result<Plan> {
+/// free ones solved with `handles` given; see [`ruled_surface_with`]). With `refine` (a
+/// tolerance) the free strips' far curves are solved as [`ruled_surface_close`] solves them, and
+/// a strip that folds is refused.
+fn planned(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option<Vec<Vec3>>], refine: Option<f64>) -> Result<Plan> {
     body.require_brep("ruled surface")?;
     let d = r.distance;
     if !(d.is_finite() && d > 0.0 && d < 1e6) {
@@ -387,24 +374,21 @@ fn planned_refined(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option<Vec<Ve
         let Some(tol) = refine else {
             break (exact, tops);
         };
-        // The free strips whose far curves stray more than `tol` from their rulings' ends.
+        // The free strips whose far curves stray more than `tol` from their rulings' ends, as the
+        // kernel measures them ([`solidcore_ops::ruled_strip::strays`]).
         let mut far_off = Vec::new();
         for (k, (far, top)) in fars.iter().zip(&tops).enumerate() {
             let (Some(far), Some(top)) = (far, top) else { continue };
-            for i in 0..=REFINE_SAMPLES {
-                let f = i as f64 / REFINE_SAMPLES as f64;
-                let p = point(top, f).ok_or_else(|| KernelError::Failed("ruled surface: a far curve".into()))?;
-                if p.dist(far.rulings.end_at(f)?) > tol {
-                    far_off.push(k);
-                    break;
-                }
+            let ends = |f: f64| Some((a3(point(top, f)?), a3(far.rulings.end_at(f).ok()?)));
+            if solidcore_ops::ruled_strip::strays(tol, ends).ok_or_else(|| KernelError::Failed("ruled surface: a far curve".into()))? {
+                far_off.push(k);
             }
         }
         if far_off.is_empty() {
             break (exact, tops);
         }
         let free_points: usize = bases.iter().zip(&sampled).filter(|(_, s)| s.affine.is_none()).map(|(b, _)| b.ctrl.len()).sum();
-        if round >= MAX_REFINE || 2 * free_points > MAX_FREE {
+        if round >= solidcore_ops::ruled_strip::MAX_HALVINGS || 2 * free_points > MAX_FREE {
             return Err(KernelError::Invalid(format!(
                 "the strip's far edge can't be made to follow its rulings within {tol} mm: try a shorter distance or a smaller angle"
             )));
@@ -430,19 +414,18 @@ fn planned_refined(body: &Body, at: &[Vec3], r: &Ruled, handles: &[Option<Vec<Ve
         // A close strip (the law extension's) that folds over itself is refused: where its far
         // edge runs against its edge (or stands still), the rulings between have crossed and the
         // strip overlaps itself there (an arc's rulings leaning in past its axis, a curve's past
-        // its centre of curvature). Far edge and edge share their parameter, so their tangents
-        // are compared at the same parameters, [`FOLD_SAMPLES`] along each.
+        // its centre of curvature). Far edge and edge share their parameter, so the kernel
+        // compares their tangents at the same parameters ([`solidcore_ops::ruled_strip::strip_folds`]).
         if refine.is_some() {
-            for i in 0..=FOLD_SAMPLES {
-                let f = i as f64 / FOLD_SAMPLES as f64;
-                let (Some((_, along)), Some((_, far))) = (point_tangent(&base, f), point_tangent(&top, f)) else {
-                    return Err(KernelError::Invalid("a strip's edge can't be evaluated".into()));
-                };
-                if !(far.dot(along) > 1e-9 * along.dot(along)) {
+            let tangents = |f: f64| Some((a3(point_tangent(&base, f)?.1), a3(point_tangent(&top, f)?.1)));
+            match solidcore_ops::ruled_strip::strip_folds(tangents) {
+                None => return Err(KernelError::Invalid("a strip's edge can't be evaluated".into())),
+                Some(true) => {
                     return Err(KernelError::Invalid(
                         "the strip would fold over itself (its rulings cross before they end): use a shorter distance or a smaller angle".into(),
                     ));
                 }
+                Some(false) => {}
             }
         }
         free.push(s.affine.is_none());
@@ -534,17 +517,17 @@ fn without_smooth_joints(c: CurveN<4>, tol: f64) -> CurveN<4> {
     }
 }
 
-/// `c` with a knot inserted at the middle of each of its spans (Boehm's insertion: the same curve,
-/// twice the spans), so a far curve on its knots has twice the freedom.
+/// `c` with a knot inserted at the middle of each of its spans by the kernel
+/// ([`solidcore_ops::curve_knots::halve_spans`]: the same curve, twice the spans), so a far curve
+/// on its knots has twice the freedom.
 fn halved(c: &CurveN<4>) -> Result<CurveN<4>> {
-    let [t0, t1] = range(c);
-    let mids: Vec<f64> = c.knots.windows(2).filter(|w| w[1] > w[0] && w[0] >= t0 && w[1] <= t1).map(|w| 0.5 * (w[0] + w[1])).collect();
-    let (mut knots, mut ctrl) = (c.knots.clone(), hpoints(c));
-    for u in mids {
-        (knots, ctrl) = solidcraft_geom::bspline::insert_knot(c.degree, &knots, &ctrl, u)
-            .map_err(|e| KernelError::Failed(format!("ruled surface: refining an edge: {e}")))?;
+    let refining = |e: &dyn std::fmt::Display| KernelError::Failed(format!("ruled surface: refining an edge: {e}"));
+    let (curve, _) = spline_curve(&hpoints(c), c.knots.clone())?;
+    match solidcore_ops::curve_knots::halve_spans(&curve).map_err(|e| refining(&e))? {
+        b::Curve::Spline { knots, points } => Ok(CurveN { degree: c.degree, knots, ctrl: points.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect() }),
+        b::Curve::RationalSpline { knots, homogeneous } => Ok(CurveN { degree: c.degree, knots, ctrl: homogeneous }),
+        _ => Err(refining(&"not a spline")),
     }
-    Ok(CurveN { degree: c.degree, knots, ctrl: ctrl.iter().map(|h| [h.x, h.y, h.z, h.w]).collect() })
 }
 
 fn degree(knots: &[f64], n: usize) -> Result<usize> {
@@ -615,6 +598,11 @@ fn mapped(c: &CurveN<4>, f: impl Fn(Vec3) -> Vec3) -> CurveN<4> {
         })
         .collect();
     CurveN { degree: c.degree, knots: c.knots.clone(), ctrl }
+}
+
+/// A point or vector as the array solidcore's ops take.
+fn a3(v: Vec3) -> [f64; 3] {
+    [v.x, v.y, v.z]
 }
 
 fn hpoints(c: &CurveN<4>) -> Vec<HPoint> {
@@ -1728,7 +1716,7 @@ mod tests {
         let lifted: Vec<Vec3> = h.iter().map(|p| *p + Vec3::new(0.0, 0.0, 1.0)).collect();
         let moved = ruled_surface_with(&cover, &edge, &r, &[Some(lifted.clone())]).unwrap();
         // The plan takes the handles as they are, and keeps the corners.
-        let (plain, given) = (planned(&cover, &edge, &r, &[]).unwrap(), planned(&cover, &edge, &r, &[Some(lifted.clone())]).unwrap());
+        let (plain, given) = (planned(&cover, &edge, &r, &[], None).unwrap(), planned(&cover, &edge, &r, &[Some(lifted.clone())], None).unwrap());
         let (far, far_moved) = (&plain.strips[0].top, &given.strips[0].top);
         let ctrl = |c: &CurveN<4>| c.ctrl.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect::<Vec<_>>();
         let (before, after) = (ctrl(far), ctrl(far_moved));
@@ -1802,7 +1790,7 @@ mod tests {
             assert_eq!(joints(&own), [0.5], "to {reach}: the edge's knots {:?}", own.knots);
             for mode in [RuledMode::Normal, RuledMode::Tangent] {
                 let r = ruled(mode, 20.0, on_skin);
-                let plan = planned(&skin, &edge, &r, &[]).unwrap();
+                let plan = planned(&skin, &edge, &r, &[], None).unwrap();
                 let [strip] = plan.strips.as_slice() else { panic!("one strip: {}", plan.strips.len()) };
                 assert_eq!(plan.free, [true], "{mode:?} to {reach}: the rulings turn along the edge");
                 assert!(joints(&strip.base).is_empty(), "{mode:?} to {reach}: the strip's edge keeps a joint: {:?}", strip.base.knots);
@@ -1822,7 +1810,7 @@ mod tests {
                 assert!(s.is_surface() && s.face_count() == 1, "{mode:?} to {reach}");
                 // Handles for the edge's own knots: taken as they are, on those knots.
                 let old: Vec<Vec3> = (1..own.ctrl.len() - 1).map(|i| Vec3::new(f64::from(i as u32), 0.0, 0.0)).collect();
-                let kept = planned(&skin, &edge, &r, &[Some(old.clone())]).unwrap();
+                let kept = planned(&skin, &edge, &r, &[Some(old.clone())], None).unwrap();
                 assert_eq!(kept.strips[0].top.knots, own.knots, "{mode:?} to {reach}");
                 let ctrl: Vec<Vec3> = kept.strips[0].top.ctrl.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect();
                 assert!(ctrl[1..ctrl.len() - 1].iter().zip(&old).all(|(a, b)| a.dist(*b) < 1e-12), "{mode:?} to {reach}: {ctrl:?}");

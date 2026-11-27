@@ -27,6 +27,7 @@
 //! | [`periodic_uniform`]                   | none (not upstream)               |
 //! | [`is_periodic`]                        | none (not upstream)               |
 //! | [`joints`]                             | none (not upstream)               |
+//! | [`span_midpoints`]                     | none (not upstream)               |
 //!
 //! Deviations:
 //! - Out-params become return values ([`Basis`], tuples, `Vec`s sized by the callee).
@@ -920,8 +921,39 @@ pub fn joints(knots: &[f64], degree: usize, [t0, t1]: [f64; 2]) -> Vec<f64> {
         .collect()
 }
 
+/// The middle of each span of `knots` inside `[t0, t1]` (each pair of neighbouring knots with
+/// room between them), in order: the knots that, inserted once each, halve every span of a
+/// B-spline on `knots` over that interval (the same curve, twice the spans).
+///
+/// Not upstream.
+#[must_use]
+pub fn span_midpoints(knots: &[f64], [t0, t1]: [f64; 2]) -> Vec<f64> {
+    knots
+        .windows(2)
+        .filter_map(|w| match *w {
+            [a, z] if z > a && a >= t0 && z <= t1 => Some(0.5 * (a + z)),
+            _ => None,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn span_midpoints_halve_each_span_inside_the_interval() {
+        // A cubic on [0, 0, 0, 0, 1, 3, 3, 3, 3]: spans [0, 1] and [1, 3], middles 0.5 and 2.
+        let cubic = [0.0, 0.0, 0.0, 0.0, 1.0, 3.0, 3.0, 3.0, 3.0];
+        assert_eq!(span_midpoints(&cubic, [0.0, 3.0]), vec![0.5, 2.0]);
+        // Only the spans inside the interval.
+        assert_eq!(span_midpoints(&cubic, [1.0, 3.0]), vec![2.0]);
+        // A repeated inner knot has no span of its own.
+        let twice = [0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 2.0];
+        assert_eq!(span_midpoints(&twice, [0.0, 2.0]), vec![0.5, 1.5]);
+        // No span, or knots that are not numbers: none.
+        assert!(span_midpoints(&[1.0, 1.0], [0.0, 2.0]).is_empty());
+        assert!(span_midpoints(&[0.0, f64::NAN, 1.0], [0.0, 1.0]).is_empty());
+    }
 
     #[test]
     fn periodic_knots_repeat_their_spans_one_period_on() {

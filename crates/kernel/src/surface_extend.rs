@@ -39,6 +39,7 @@
 use solidcraft_geom::prelude::*;
 use std::collections::{BTreeMap, BTreeSet};
 
+use solidcore_ops::ruled_strip::{Reach, far_tolerance, ruling_angle};
 use solidcore_record::Vec3;
 use solidcore_record::brep::{self};
 use solidcraft_geom::brep::eval::CurveEval;
@@ -76,8 +77,9 @@ pub enum ExtendMode {
 }
 
 /// The largest law-extension angle (radians, either way) short of a right angle: at 90° the
-/// strip would stand along the surface's normal, no longer an extension of it.
-pub const LAW_ANGLE_LIMIT: f64 = std::f64::consts::FRAC_PI_2 - 1e-6;
+/// strip would stand along the surface's normal, no longer an extension of it
+/// ([`solidcore_ops::ruled_strip::ANGLE_LIMIT`]).
+pub const LAW_ANGLE_LIMIT: f64 = solidcore_ops::ruled_strip::ANGLE_LIMIT;
 
 /// How far an extension goes.
 #[derive(Clone, Copy, Debug)]
@@ -138,7 +140,7 @@ pub fn extend_surface(body: &Body, at: &[Vec3], opts: &ExtendOptions) -> Result<
         }
         _ => {}
     }
-    if opts.mode == ExtendMode::Law && !(opts.angle.is_finite() && opts.angle.abs() <= LAW_ANGLE_LIMIT) {
+    if opts.mode == ExtendMode::Law && ruling_angle(opts.angle).is_none() {
         return Err(KernelError::Invalid("the law extension's angle must lie between -90° and 90°".into()));
     }
     let record = crate::native::brep_record(body)?;
@@ -469,30 +471,29 @@ fn back_to_bounds(body: &Body, faces: &[usize]) -> Result<Body> {
 // source along the picked edges: the source's faces are kept as they are, the strip's faces are
 // made from the edges they stand on.
 
-/// The ruled settings of a law extension at `angle` (0: tangent) reaching `distance`.
-fn law_rulings(angle: f64, distance: f64) -> crate::surface_ruled::Ruled {
+/// The ruled settings of a law extension at `angle` (0: tangent) reaching `distance`: the ruled
+/// surface measures its angle from the face's normal, turned away from the face
+/// ([`solidcore_ops::ruled_strip::ruling_angle`]).
+fn law_rulings(angle: f64, distance: f64) -> Result<crate::surface_ruled::Ruled> {
     use crate::surface_ruled::{Ruled, RuledCorners, RuledMode};
-    // The ruled surface measures its angle from the face's normal, turned away from the face.
-    let mode = RuledMode::Angle { angle: std::f64::consts::FRAC_PI_2 - angle, reference: None };
-    Ruled { distance, mode, flip: false, corners: RuledCorners::Mitre, face: None }
+    let angle = ruling_angle(angle).ok_or_else(|| KernelError::Invalid("the law extension's angle must lie between -90° and 90°".into()))?;
+    let mode = RuledMode::Angle { angle, reference: None };
+    Ok(Ruled { distance, mode, flip: false, corners: RuledCorners::Mitre, face: None })
 }
 
-/// How near its rulings' ends a law strip's far edge passes, in parts of the body's size and the
-/// strip's length together: where the rulings turn freely along an edge, the far edge is a fair
-/// curve of the ruled surface, refined until it is this close.
-const LAW_FAR_TOLERANCE: f64 = 1e-5;
-
 /// The law strip alone on the edges `at` pick (one chain), as its own surface body whose history
-/// is over `[body]`; a strip that would fold over itself is refused.
+/// is over `[body]`; a strip that would fold over itself is refused. Where the rulings turn
+/// freely along an edge, the far edge is a fair curve of the ruled surface, refined until it
+/// passes within [`far_tolerance`] of the rulings' ends.
 fn law_strip(body: &Body, at: &[Vec3], angle: f64, distance: f64) -> Result<Body> {
-    let r = law_rulings(angle, distance);
+    let r = law_rulings(angle, distance)?;
     let chain = |e: KernelError| match e {
         KernelError::Invalid(m) if m.contains("chain") || m.contains("branch") || m.contains("loop") => {
             KernelError::Invalid(format!("a law extension takes one chain of edges: {m}"))
         }
         e => e,
     };
-    let tol = LAW_FAR_TOLERANCE * (body.size() + distance);
+    let tol = far_tolerance(body.size(), distance);
     crate::surface_ruled::ruled_surface_close(body, at, &r, tol).map_err(chain)
 }
 
@@ -523,18 +524,14 @@ fn law(body: &Body, at: &[Vec3], count: usize, angle: f64, distance: f64) -> Res
     sewn_to(body, &strip, count)
 }
 
-/// How many times a law strip up to a target is halved while it folds, and then how many times
-/// the length between the last strip that folded and the first that did not is halved.
-const LAW_FOLD_HALVINGS: usize = 60;
-const LAW_FOLD_BISECTIONS: usize = 24;
-
 /// The law extension of the picked `edges` (of `record`, picked by `at`) up to a plane or face:
 /// the strip built long ([`REACH`] body sizes), cut where the target meets it keeping the piece
 /// on the edges, and sewn to the surface. The surface itself is never cut. A strip the target
 /// misses, wholly or in part (the piece kept still holds part of the strip's far edge), is
-/// refused. Where the long strip folds over itself, a shorter one is built (halved until it does
-/// not fold, then the length between narrowed): only a target the strip reaches before it folds
-/// is accepted; one past the fold (or so near it the strip can't be built) is refused as a fold.
+/// refused. Where the long strip folds over itself, a shorter one is built
+/// ([`solidcore_ops::ruled_strip::up_to_target`] picks the lengths): only a target the strip
+/// reaches before it folds is accepted; one past the fold (or so near it the strip can't be
+/// built) is refused as a fold.
 fn law_up_to(body: &Body, at: &[Vec3], record: &brep::Brep, edges: &BTreeSet<usize>, angle: f64, tool: &SplitTool) -> Result<Body> {
     let reach = body.size().max(1e-6) * REACH;
     let on_edges = edges.iter().map(|e| edge_middle(record, *e)).collect::<Result<Vec<_>>>()?;
@@ -549,52 +546,16 @@ fn law_up_to(body: &Body, at: &[Vec3], record: &brep::Brep, edges: &BTreeSet<usi
             Err(KernelError::Invalid(_)) => return Ok(None),
             Err(e) => return Err(e),
         };
-        if keeps_far_edge(body, &long, &cut, LAW_FAR_TOLERANCE * (body.size() + length))? {
+        if keeps_far_edge(body, &long, &cut, far_tolerance(body.size(), length))? {
             return Ok(None);
         }
         Ok(Some(crate::record::after(cut, &long, &crate::record::counts(&[body]))))
     };
     let folded = || KernelError::Invalid("the strip would fold over itself before it reaches the face it extends up to: use a smaller angle".into());
-    // Halve the strip while it folds.
-    let mut length = reach;
-    let mut fold_at = None;
-    let mut found = None;
-    for _ in 0..LAW_FOLD_HALVINGS {
-        match attempt(length) {
-            Ok(cut) => {
-                found = Some(cut);
-                break;
-            }
-            Err(e) if folds(&e) => {
-                fold_at = Some(length);
-                length *= 0.5;
-            }
-            Err(e) => return Err(e),
-        }
-    }
-    let Some(cut) = found else { return Err(folded()) };
-    let cut = match (cut, fold_at) {
-        (Some(cut), _) => cut,
-        (None, None) => return Err(missed()),
-        // Missed short of the fold: narrow down the longest strip that does not fold.
-        (None, Some(mut hi)) => {
-            let mut lo = length;
-            let mut hit = None;
-            for _ in 0..LAW_FOLD_BISECTIONS {
-                let mid = 0.5 * (lo + hi);
-                match attempt(mid) {
-                    Ok(Some(cut)) => {
-                        hit = Some(cut);
-                        break;
-                    }
-                    Ok(None) => lo = mid,
-                    // Past a strip that builds and short of one that folds, a strip that can't be
-                    // built is nearly folded (its far edge shrinking to a point): taken as folding.
-                    Err(_) => hi = mid,
-                }
-            }
-            hit.ok_or_else(folded)?
-        }
+    let cut = match solidcore_ops::ruled_strip::up_to_target(reach, attempt, folds)? {
+        Reach::Cut(cut) => cut,
+        Reach::Missed => return Err(missed()),
+        Reach::Folded => return Err(folded()),
     };
     sewn_to(body, &cut, edges.len())
 }
