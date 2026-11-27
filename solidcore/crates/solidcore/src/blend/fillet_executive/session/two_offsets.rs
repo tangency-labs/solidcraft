@@ -1477,16 +1477,26 @@ mod tests {
                         let arm = p - c;
                         assert!((arm.length() - 1.0).abs() <= tol, "{p:?}: {}", arm.length());
                         assert!(arm.dot(t).abs() <= tol, "{p:?} not square to the edge");
+                        // each foot on its own face, on the face's side of the edge (the
+                        // mirror feet, C - (1, 0, 0) and C - (0, -1, 0.1) / sqrt(1.01), lie on
+                        // the same surfaces' continuations past the edge, off the faces)
                         if on_top(p) {
+                            assert!((arm.x - 1.0).abs() <= tol, "{p:?} not the top's own foot");
                             continue;
                         }
+                        assert!(p.y <= 0.5 + 0.1 * p.z + tol, "{p:?} above the top plane");
                         if p.y >= 0.0 {
                             assert!(p.x.abs() <= tol, "{p:?} above the seam off the side");
+                            let down = Vec3::new(0.0, -1.0, 0.1).unitize().unwrap();
+                            assert!(
+                                (arm.dot(down) - 1.0).abs() <= tol,
+                                "{p:?} not the side's own foot"
+                            );
                             on_strip += 1;
                         } else {
                             let axis = (p.x - 5.0).hypot(p.y);
                             assert!(
-                                (axis - 5.0).abs() <= tol,
+                                (axis - 5.0).abs() <= tol && p.x >= -tol && p.x <= 5.0 + tol,
                                 "{p:?} below the seam off the round"
                             );
                             on_cylinder += 1;
@@ -1811,7 +1821,8 @@ mod tests {
         /// on the round's cylinder past the vertex (from the side edge's height 30 - 0.49976 =
         /// 29.50024, where it crosses the seam, to V), while the round is native there, its foot
         /// (-40 - 10 cos ε, 30 + 10 sin ε, 12 + 12.5 sin ε) with 200 (1 - cos ε) + 156.25 sin² ε
-        /// = 0.64, ε = 0.0499 (-49.98751, 30.49958, 12.62448), the sag 0.0125 from the side's.
+        /// = 0.64, ε = 0.0499903: (-49.98751, 30.49970, 12.62462), the sag 0.0125 from the
+        /// side's.
         /// Deferred the other way round: the side chamfer rolls onto the cylinder. Seven
         /// chamfers of setbacks (five edges, a piece on each side edge), each foot on its own
         /// face.
