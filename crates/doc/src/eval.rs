@@ -7357,45 +7357,51 @@ impl CaptureStepper {
                                 joint_components.insert(c);
                             }
                         };
-                        let x_ref = match &o.snap {
-                            crate::joints::Snap::FaceCenter { x, .. }
-                            | crate::joints::Snap::CircleCenter { x, .. }
-                            | crate::joints::Snap::Plane { x, .. }
-                            | crate::joints::Snap::Axis { x, .. }
-                            | crate::joints::Snap::SketchPoint { x, .. } => x.as_ref(),
-                            _ => None,
-                        };
-                        if let Some(crate::joints::XRef::Reference { reference, .. }) = x_ref {
-                            match reference {
-                                crate::joints::AlignmentRef::SketchLine { sketch, .. } => {
-                                    joint_sketches.insert(*sketch);
+                        let mut record_snap = |snap: &crate::joints::Snap| {
+                            let x_ref = match snap {
+                                crate::joints::Snap::FaceCenter { x, .. }
+                                | crate::joints::Snap::CircleCenter { x, .. }
+                                | crate::joints::Snap::Plane { x, .. }
+                                | crate::joints::Snap::Axis { x, .. }
+                                | crate::joints::Snap::SketchPoint { x, .. } => x.as_ref(),
+                                _ => None,
+                            };
+                            if let Some(crate::joints::XRef::Reference { reference, .. }) = x_ref {
+                                match reference {
+                                    crate::joints::AlignmentRef::SketchLine { sketch, .. } => {
+                                        joint_sketches.insert(*sketch);
+                                    }
+                                    crate::joints::AlignmentRef::Construction { feature }
+                                    | crate::joints::AlignmentRef::ConstructionPlane { feature } => {
+                                        joint_construct.insert(*feature);
+                                    }
+                                    _ => {}
                                 }
-                                crate::joints::AlignmentRef::Construction { feature }
-                                | crate::joints::AlignmentRef::ConstructionPlane { feature } => {
-                                    joint_construct.insert(*feature);
-                                }
-                                _ => {}
                             }
-                        }
-                        match &o.snap {
-                            crate::joints::Snap::Frame { .. } | crate::joints::Snap::Point { .. } => {}
-                            crate::joints::Snap::FaceCenter { .. }
-                            | crate::joints::Snap::CircleCenter { .. }
-                            | crate::joints::Snap::Edge { .. }
-                            | crate::joints::Snap::BetweenFaces { .. } => {
-                                note_comp(&mut joint_components, &mut any_component_dirty);
-                            }
-                            crate::joints::Snap::SketchPoint { sketch, x, .. } => {
-                                joint_sketches.insert(*sketch);
-                                if x.is_some() {
+                            match snap {
+                                crate::joints::Snap::Frame { .. } | crate::joints::Snap::Point { .. } => {}
+                                crate::joints::Snap::FaceCenter { .. }
+                                | crate::joints::Snap::CircleCenter { .. }
+                                | crate::joints::Snap::Edge { .. }
+                                | crate::joints::Snap::BetweenFaces { .. } => {
                                     note_comp(&mut joint_components, &mut any_component_dirty);
                                 }
+                                crate::joints::Snap::SketchPoint { sketch, x, .. } => {
+                                    joint_sketches.insert(*sketch);
+                                    if x.is_some() {
+                                        note_comp(&mut joint_components, &mut any_component_dirty);
+                                    }
+                                }
+                                crate::joints::Snap::Plane { .. } | crate::joints::Snap::Axis { .. } => {
+                                    any_component_dirty = true;
+                                    any_sketch_dirty = true;
+                                    any_construct_dirty = true;
+                                }
                             }
-                            crate::joints::Snap::Plane { .. } | crate::joints::Snap::Axis { .. } => {
-                                any_component_dirty = true;
-                                any_sketch_dirty = true;
-                                any_construct_dirty = true;
-                            }
+                        };
+                        record_snap(&o.snap);
+                        if let crate::joints::Snap::BetweenFaces { snap: Some(inner), .. } = &o.snap {
+                            record_snap(inner);
                         }
                     }
                 }
