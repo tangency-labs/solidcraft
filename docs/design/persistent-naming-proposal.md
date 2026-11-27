@@ -1,6 +1,9 @@
 # Persistent naming: what a second implementation suggests
 
-Status: proposal, not adopted. Nothing here is built in SolidCraft. Related: #4341, #5198, #5308,
+Status: partial — the #4341 blend safeguards in sections 1 and 2 (no unrelated-body or nearest-edge
+jumps in `blend_target`, `named_body`, `blend_bodies`, and `resolve_edges`, and distinguishing
+suppressed vs deleted upstream makers for Fillet and Chamfer in `crates/doc/src/eval.rs`) are now
+implemented; the remaining sections (3–6) are still a proposal. Related: #4341, #5198, #5308,
 #5857, #5858, #5860, #5861, #23.
 
 This note comes from building persistent naming for Form Studio, a T-spline modeling tool with its
