@@ -4884,7 +4884,7 @@
   "ui.ribbon_exit": "Kilépés",
   "ui.ribbon_labels": "Szöveg megjelenítése a menüszalag ikonjai alatt",
   "ui.ribbon_menus_skip_pinned": "A rögzített parancsok kihagyása a legördülő menükből",
-  "ui.ribbon_pin_footer": "A rögzített parancsok megjelennek a menüszalagon. Egy sor fölé víve rögzíthető vagy feloldható.",
+  "ui.ribbon_pin_footer": "A rögzített parancsok megjelennek a menüszalagon. Egy parancs a ⋯ menüjéből rögzíthető vagy oldható fel.",
   "ui.ribbon_workspace": "Munkaterület",
   "ui.right": "Jobb",
   "ui.right_click_confirms": "A jobb kattintás jóváhagyja a párbeszédablak bemeneteit",

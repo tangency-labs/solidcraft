@@ -69,7 +69,7 @@ pub fn code_in(error: &str) -> Option<ErrorCode> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::services::{ErrorClass, FailureCode};
+    use solidcore_ops::{ErrorClass, FailureCode};
 
     /// #22148: the code keeps the kernel's class by its name, for every class, without deriving
     /// it from the kind (a refusal of kind 6 stays a refusal).

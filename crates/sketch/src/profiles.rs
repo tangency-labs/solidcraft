@@ -1195,6 +1195,7 @@ struct Island {
 
 struct IslandLoop {
     lp: Loop2,
+    poly: Ring<Vec2>,
     ids: Vec<String>,
     /// For each piece of `ids`, the other curves lying on it ([`without_overlaps`]).
     alternates: Vec<Vec<String>>,
@@ -1210,9 +1211,10 @@ struct IslandLoop {
 
 impl IslandLoop {
     fn new(lp: Loop2, ids: Vec<String>, comp: usize, complete: Option<Vec<String>>, key: (u8, usize, usize)) -> IslandLoop {
-        let bounds = lp.polyline(1e-3).bounds();
+        let poly = lp.polyline(CONTAINS_TOL);
+        let bounds = poly.bounds();
         let area = lp.signed_area().abs();
-        IslandLoop { lp, ids, alternates: Vec::new(), comp, complete, key, bounds, area }
+        IslandLoop { lp, poly, ids, alternates: Vec::new(), comp, complete, key, bounds, area }
     }
 
     fn with_alternates(mut self, alternates: Vec<Vec<String>>) -> IslandLoop {
@@ -1222,7 +1224,7 @@ impl IslandLoop {
 
     /// Rough size, for bounding the cache.
     fn weight(&self) -> usize {
-        self.lp.segs.len() + self.ids.len() + self.alternates.iter().map(Vec::len).sum::<usize>() + 1
+        self.lp.segs.len() + self.poly.len() + self.ids.len() + self.alternates.iter().map(Vec::len).sum::<usize>() + 1
     }
 }
 
@@ -2519,27 +2521,85 @@ fn assemble(sk: &Sketch, islands: &[Arc<Island>]) -> Vec<Profile> {
     let loops: Vec<(&Loop2, &Vec<String>, (usize, usize), &Option<Vec<String>>)> =
         all.iter().map(|(c, l)| (&l.lp, &l.ids, *c, &l.complete)).collect();
 
-    // Nesting: parent = smallest containing loop from another component. Bounding boxes rule
-    // out most pairs before the point-in-loop test.
+    // Nesting: parent = smallest containing loop from another component. Sweep along x while
+    // keeping active loops sorted by (area, index) so the first containing match with area > ai
+    // is the exact innermost parent (ties broken by smallest index). Cached loop polylines avoid
+    // re-tessellating during containment tests.
     let areas: Vec<f64> = all.iter().map(|(_, l)| l.area).collect();
     let boxes: Vec<solidcraft_geom::Aabb2> = all.iter().map(|(_, l)| l.bounds).collect();
-    let inside_box = |j: usize, p: Vec2| boxes.get(j).is_some_and(|b| b.contains(p));
+    let probes: Vec<Vec2> = loops.iter().map(|(li, ..)| li.segs.first().map(Seg2::mid).unwrap_or_default()).collect();
     let mut parent_of: Vec<Option<usize>> = vec![None; loops.len()];
-    for (i, (li, _, ci, _)) in loops.iter().enumerate() {
-        let probe = li.segs.first().map(Seg2::mid).unwrap_or_default();
-        let ai = areas.get(i).copied().unwrap_or(0.0);
-        let mut best: Option<(f64, usize)> = None;
-        for (j, (lj, _, cj, _)) in loops.iter().enumerate() {
-            let aj = areas.get(j).copied().unwrap_or(0.0);
-            if i == j || ci == cj || aj <= ai || !inside_box(j, probe) || best.is_some_and(|(ba, _)| aj >= ba) {
-                continue;
+    if areas.iter().any(|a| !a.is_finite()) {
+        for (i, (_, _, ci, _)) in loops.iter().enumerate() {
+            let probe = probes.get(i).copied().unwrap_or_default();
+            let ai = areas.get(i).copied().unwrap_or(0.0);
+            let mut best: Option<(f64, usize)> = None;
+            for (j, (_, _, cj, _)) in loops.iter().enumerate() {
+                let aj = areas.get(j).copied().unwrap_or(0.0);
+                if i == j || ci == cj || aj <= ai || !boxes.get(j).is_some_and(|b| b.contains(probe)) || best.is_some_and(|(ba, _)| aj >= ba) {
+                    continue;
+                }
+                if all.get(j).is_some_and(|(_, l)| l.poly.contains(probe)) {
+                    best = Some((aj, j));
+                }
             }
-            if lj.contains(probe) {
-                best = Some((aj, j));
+            if let Some(p) = parent_of.get_mut(i) {
+                *p = best.map(|(_, j)| j);
             }
         }
-        if let Some(p) = parent_of.get_mut(i) {
-            *p = best.map(|(_, j)| j);
+    } else {
+        let mut box_order: Vec<usize> = (0..loops.len()).filter(|&j| boxes.get(j).is_some_and(|b| !b.is_empty())).collect();
+        box_order.sort_by(|&a, &b| {
+            let ax = boxes.get(a).map_or(f64::INFINITY, |box_a| box_a.min.x);
+            let bx = boxes.get(b).map_or(f64::INFINITY, |box_b| box_b.min.x);
+            ax.total_cmp(&bx)
+        });
+        let mut probe_order: Vec<usize> = (0..loops.len()).filter(|&i| probes.get(i).is_some_and(|p| p.is_finite())).collect();
+        probe_order.sort_by(|&a, &b| {
+            let ax = probes.get(a).map_or(f64::INFINITY, |pa| pa.x);
+            let bx = probes.get(b).map_or(f64::INFINITY, |pb| pb.x);
+            ax.total_cmp(&bx)
+        });
+        let mut active: Vec<usize> = Vec::new();
+        let mut next_box = 0usize;
+        for i in probe_order {
+            let Some(&probe) = probes.get(i) else { continue };
+            let Some(&ai) = areas.get(i) else { continue };
+            let Some(&(_, _, ci, _)) = loops.get(i) else { continue };
+            active.retain(|&j| boxes.get(j).is_some_and(|b| b.max.x >= probe.x));
+            while let Some(&j) = box_order.get(next_box) {
+                if boxes.get(j).is_some_and(|b| b.min.x <= probe.x) {
+                    next_box += 1;
+                    if boxes.get(j).is_some_and(|b| b.max.x >= probe.x) {
+                        let aj = areas.get(j).copied().unwrap_or(0.0);
+                        let pos = active.partition_point(|&k| {
+                            let ak = areas.get(k).copied().unwrap_or(0.0);
+                            ak.total_cmp(&aj).then_with(|| k.cmp(&j)).is_lt()
+                        });
+                        active.insert(pos, j);
+                    }
+                } else {
+                    break;
+                }
+            }
+            let start = active.partition_point(|&j| areas.get(j).copied().unwrap_or(0.0) <= ai);
+            for &j in active.get(start..).unwrap_or(&[]) {
+                if i == j {
+                    continue;
+                }
+                if loops.get(j).is_none_or(|(_, _, cj, _)| ci == *cj) {
+                    continue;
+                }
+                if boxes.get(j).is_none_or(|b| !(b.min.y..=b.max.y).contains(&probe.y)) {
+                    continue;
+                }
+                if all.get(j).is_some_and(|(_, l)| l.poly.contains(probe)) {
+                    if let Some(p) = parent_of.get_mut(i) {
+                        *p = Some(j);
+                    }
+                    break;
+                }
+            }
         }
     }
     let mut kids_of: Vec<Vec<usize>> = vec![Vec::new(); loops.len()];
@@ -2843,10 +2903,118 @@ fn rejoined(segs: Vec<Seg2>, joins: &impl Fn(&Seg2, &Seg2) -> bool) -> Vec<Seg2>
     out
 }
 
+/// Total-ordered `f64` key (`f64::total_cmp`) for indexing areas in a `BTreeSet`.
+#[derive(Clone, Copy)]
+struct OrderedF64(f64);
+
+impl PartialEq for OrderedF64 {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for OrderedF64 {}
+
+impl PartialOrd for OrderedF64 {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for OrderedF64 {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.total_cmp(&other.0)
+    }
+}
+
+/// Spatial hash grid over 2D points for radius-`tol` neighborhood queries.
+/// Uses cell step `2 * tol` so any two points within `tol` fall in adjacent cells (within ±1 in
+/// each axis) without IEEE-754 floor-boundary misses. Non-finite or huge coordinates stay in
+/// `fallback` and are always checked; huge query coordinates fall back to scanning all entries.
+struct PointGrid {
+    cell_size: f64,
+    cells: std::collections::HashMap<(i64, i64), Vec<usize>>,
+    fallback: Vec<usize>,
+}
+
+impl PointGrid {
+    fn new(tol: f64, capacity: usize) -> Self {
+        Self { cell_size: tol * 2.0, cells: std::collections::HashMap::with_capacity(capacity), fallback: Vec::new() }
+    }
+
+    fn cell(&self, p: Vec2) -> Option<(i64, i64)> {
+        if !(p.is_finite() && self.cell_size.is_finite() && self.cell_size > 0.0) {
+            return None;
+        }
+        let gx = (p.x / self.cell_size).floor();
+        let gy = (p.y / self.cell_size).floor();
+        const LIMIT: f64 = 1e15;
+        if !(gx.is_finite() && gy.is_finite() && gx.abs() < LIMIT && gy.abs() < LIMIT) {
+            return None;
+        }
+        Some((gx as i64, gy as i64))
+    }
+
+    fn insert(&mut self, p: Vec2, idx: usize) {
+        match self.cell(p) {
+            Some(c) => self.cells.entry(c).or_default().push(idx),
+            None => self.fallback.push(idx),
+        }
+    }
+
+    fn for_each_near(&self, p: Vec2, mut f: impl FnMut(usize)) {
+        if !p.is_finite() {
+            return;
+        }
+        let Some((cx, cy)) = self.cell(p) else {
+            for bucket in self.cells.values() {
+                for &idx in bucket {
+                    f(idx);
+                }
+            }
+            for &idx in &self.fallback {
+                f(idx);
+            }
+            return;
+        };
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                if let Some(bucket) = self.cells.get(&(cx + dx, cy + dy)) {
+                    for &idx in bucket {
+                        f(idx);
+                    }
+                }
+            }
+        }
+        for &idx in &self.fallback {
+            f(idx);
+        }
+    }
+
+    fn any_near(&self, p: Vec2, mut pred: impl FnMut(usize) -> bool) -> bool {
+        if !p.is_finite() {
+            return false;
+        }
+        let Some((cx, cy)) = self.cell(p) else {
+            return self.cells.values().any(|b| b.iter().copied().any(&mut pred)) || self.fallback.iter().copied().any(pred);
+        };
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                if let Some(bucket) = self.cells.get(&(cx + dx, cy + dy))
+                    && bucket.iter().copied().any(&mut pred)
+                {
+                    return true;
+                }
+            }
+        }
+        self.fallback.iter().copied().any(pred)
+    }
+}
+
 /// `regions` with each region that repeats an earlier one (the same boundary within a small
 /// tolerance) left out.
 fn without_repeats(regions: &[Region2]) -> Vec<Region2> {
-    // Comparing every pair is quadratic: beyond this many the regions are kept as they are.
+    // Beyond this many regions, keep them as they are.
     const MAX_COMPARED: usize = 5000;
     if regions.len() < 2 || regions.len() > MAX_COMPARED {
         return regions.to_vec();
@@ -2854,15 +3022,31 @@ fn without_repeats(regions: &[Region2]) -> Vec<Region2> {
     let keys: Vec<(f64, Vec2, f64)> =
         regions.iter().map(|r| (r.outer.signed_area().abs(), r.outer.centroid(), r.outer.segs.iter().map(Seg2::length).sum::<f64>())).collect();
     let mut kept: Vec<usize> = Vec::new();
+    let mut by_area: std::collections::BTreeSet<(OrderedF64, usize)> = std::collections::BTreeSet::new();
+    let mut non_finite: Vec<usize> = Vec::new();
     for (i, r) in regions.iter().enumerate() {
         let Some(&(area, centroid, size)) = keys.get(i) else { continue };
         let tol = 1e-7 * (1.0 + size);
-        let repeat = kept.iter().any(|&k| {
-            keys.get(k).is_some_and(|&(a, c, _)| (a - area).abs() <= tol * (1.0 + size) && c.dist(centroid) <= tol)
+        let area_tol = tol * (1.0 + size);
+        let matches = |k: usize| {
+            keys.get(k).is_some_and(|&(a, c, _)| (a - area).abs() <= area_tol && c.dist(centroid) <= tol)
                 && regions.get(k).is_some_and(|other| same_region(r, other, tol))
-        });
+        };
+        let pad = area_tol + 4.0 * f64::EPSILON * (area + area_tol);
+        let lo = area - pad;
+        let hi = area + pad;
+        let repeat = if area.is_finite() && tol.is_finite() && area_tol.is_finite() && lo.is_finite() && hi.is_finite() && lo <= hi {
+            by_area.range((OrderedF64(lo), 0)..=(OrderedF64(hi), usize::MAX)).any(|&(_, k)| matches(k)) || non_finite.iter().copied().any(matches)
+        } else {
+            kept.iter().copied().any(matches)
+        };
         if !repeat {
             kept.push(i);
+            if area.is_finite() {
+                by_area.insert((OrderedF64(area), i));
+            } else {
+                non_finite.push(i);
+            }
         }
     }
     kept.iter().filter_map(|&i| regions.get(i).cloned()).collect()
@@ -2944,21 +3128,37 @@ pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
     let mut alive = vec![true; segs.len()];
     let mut shared = false;
     for (end_tol, distinct_loops_only) in [(MERGE_TOL, false), (tol, true)] {
-        for i in 0..segs.len() {
+        let mut end_grid = PointGrid::new(end_tol, segs.len());
+        for (j, seg) in segs.iter().enumerate() {
+            if alive.get(j).copied().unwrap_or(false) {
+                end_grid.insert(seg.end(), j);
+            }
+        }
+        for (i, a) in segs.iter().enumerate() {
             if !alive.get(i).copied().unwrap_or(false) {
                 continue;
             }
-            for j in (i + 1)..segs.len() {
+            let mut best_j: Option<usize> = None;
+            end_grid.for_each_near(a.start(), |j| {
+                if j <= i || best_j.is_some_and(|best| j >= best) {
+                    return;
+                }
                 if alive.get(j).copied().unwrap_or(false)
                     && (!distinct_loops_only || loop_ids.get(i) != loop_ids.get(j))
-                    && let (Some(a), Some(b)) = (segs.get(i), segs.get(j))
+                    && let Some(b) = segs.get(j)
                     && same_seg(a, &b.reversed(), end_tol, MERGE_TOL)
                 {
-                    alive[i] = false;
-                    alive[j] = false;
-                    shared = true;
-                    break;
+                    best_j = Some(j);
                 }
+            });
+            if let Some(j) = best_j {
+                if let Some(ai) = alive.get_mut(i) {
+                    *ai = false;
+                }
+                if let Some(aj) = alive.get_mut(j) {
+                    *aj = false;
+                }
+                shared = true;
             }
         }
     }
@@ -2968,18 +3168,27 @@ pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
     // Where the shared boundaries ended, the outline is left split in two: the lines on either
     // side are one edge again (else they make split faces and vertices that booleans trip on).
     let ends: Vec<Vec2> = segs.iter().zip(&alive).filter(|(_, a)| !**a).flat_map(|(s, _)| [s.start(), s.end()]).collect();
+    let mut ends_grid = PointGrid::new(tol, ends.len());
+    for (idx, &e) in ends.iter().enumerate() {
+        ends_grid.insert(e, idx);
+    }
     let rejoin = |s: &Seg2, t: &Seg2| match (*s, *t) {
         (Seg2::Line { a, b }, Seg2::Line { a: b2, b: c }) => {
             b.dist(b2) <= MERGE_TOL
-                && ends.iter().any(|e| e.dist(b) <= tol)
+                && ends_grid.any_near(b, |idx| ends.get(idx).is_some_and(|e| e.dist(b) <= tol))
                 && (b - a).normalized().zip((c - b).normalized()).is_some_and(|(u, v)| u.dot(v) > 1.0 - 1e-12)
         }
         _ => false,
     };
     let rest: Vec<Seg2> = segs.iter().zip(&alive).filter(|(_, a)| **a).map(|(s, _)| *s).collect();
+    let mut start_grid = PointGrid::new(tol, rest.len());
+    for (k, s) in rest.iter().enumerate() {
+        start_grid.insert(s.start(), k);
+    }
     // Chain into loops, preferring exact-corner continuations before bridging up to `tol` and
     // taking the sharpest left turn where several continue at the same corner.
     let mut used = vec![false; rest.len()];
+    let mut nearby: Vec<(usize, f64)> = Vec::new();
     let mut loops: Vec<Loop2> = Vec::new();
     for start in 0..rest.len() {
         if used.get(start).copied().unwrap_or(true) {
@@ -2999,10 +3208,19 @@ pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
             lp.push(seg);
             let end = seg.end();
             let close_dist = rest.get(start).map_or(f64::INFINITY, |first| end.dist(first.start()));
-            let best_next_dist = (0..rest.len())
-                .filter(|k| !used.get(*k).copied().unwrap_or(true))
-                .filter_map(|k| rest.get(k).map(|s| s.start().dist(end)))
-                .fold(f64::INFINITY, f64::min);
+            nearby.clear();
+            let mut best_next_dist = f64::INFINITY;
+            start_grid.for_each_near(end, |k| {
+                if !used.get(k).copied().unwrap_or(true)
+                    && let Some(s) = rest.get(k)
+                {
+                    let dist = s.start().dist(end);
+                    if dist <= tol {
+                        best_next_dist = best_next_dist.min(dist);
+                        nearby.push((k, dist));
+                    }
+                }
+            });
             if close_dist <= tol && lp.len() > 1 && (close_dist <= MERGE_TOL || close_dist <= best_next_dist + MERGE_TOL) {
                 if let Some(first) = lp.first_mut() {
                     *first = started_at(*first, end);
@@ -3012,14 +3230,19 @@ pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
             corner = Some(end);
             let back = (-seg.end_tangent()).angle();
             let next_tol = (best_next_dist + MERGE_TOL).min(tol);
-            let next = (0..rest.len())
-                .filter(|k| !used.get(*k).copied().unwrap_or(true) && rest.get(*k).is_some_and(|s| s.start().dist(end) <= next_tol))
-                .min_by(|x, y| {
-                    let d = |k: usize| rest.get(k).map(|s| (back - s.start_tangent().angle()).rem_euclid(TAU)).unwrap_or(TAU);
-                    d(*x).total_cmp(&d(*y))
-                });
-            match next {
-                Some(k) => cur = k,
+            let mut best_next: Option<(f64, usize)> = None;
+            for &(k, dist) in &nearby {
+                if dist <= next_tol
+                    && let Some(s) = rest.get(k)
+                {
+                    let angle = (back - s.start_tangent().angle()).rem_euclid(TAU);
+                    if best_next.is_none_or(|(ba, bk)| angle.total_cmp(&ba).then_with(|| k.cmp(&bk)).is_lt()) {
+                        best_next = Some((angle, k));
+                    }
+                }
+            }
+            match best_next {
+                Some((_, k)) => cur = k,
                 None => break,
             }
         }
@@ -3033,15 +3256,44 @@ pub fn merge_regions(regions: &[Region2]) -> Vec<Region2> {
             }
         }
     }
-    let outers: Vec<&Loop2> = loops.iter().filter(|l| l.signed_area() > 0.0).collect();
-    let holes: Vec<&Loop2> = loops.iter().filter(|l| l.signed_area() < 0.0).collect();
-    let mut out: Vec<Region2> = outers.iter().map(|o| Region2 { outer: (*o).clone(), holes: Vec::new() }).collect();
-    for h in holes {
-        let probe = h.segs.first().map(Seg2::mid).unwrap_or_default();
-        // Innermost containing outer loop.
-        let best = out.iter_mut().filter(|r| r.outer.contains(probe)).min_by(|a, b| a.outer.signed_area().total_cmp(&b.outer.signed_area()));
-        if let Some(r) = best {
-            r.holes.push(h.clone());
+    let mut out: Vec<Region2> = Vec::new();
+    let mut outer_areas: Vec<f64> = Vec::new();
+    let mut holes: Vec<&Loop2> = Vec::new();
+    for l in &loops {
+        let area = l.signed_area();
+        if area > 0.0 {
+            out.push(Region2 { outer: l.clone(), holes: Vec::new() });
+            outer_areas.push(area);
+        } else if area < 0.0 {
+            holes.push(l);
+        }
+    }
+    if !holes.is_empty() {
+        let outer_polys: Vec<(Ring<Vec2>, Aabb2)> = out
+            .iter()
+            .map(|r| {
+                let poly = r.outer.polyline(CONTAINS_TOL);
+                let bounds = poly.bounds();
+                (poly, bounds)
+            })
+            .collect();
+        for h in holes {
+            let probe = h.segs.first().map(Seg2::mid).unwrap_or_default();
+            // Innermost containing outer loop.
+            let mut best: Option<(f64, usize)> = None;
+            for (idx, ((poly, bounds), &area)) in outer_polys.iter().zip(&outer_areas).enumerate() {
+                if !bounds.contains(probe) || best.is_some_and(|(ba, _)| !area.total_cmp(&ba).is_lt()) {
+                    continue;
+                }
+                if poly.contains(probe) {
+                    best = Some((area, idx));
+                }
+            }
+            if let Some((_, idx)) = best
+                && let Some(r) = out.get_mut(idx)
+            {
+                r.holes.push(h.clone());
+            }
         }
     }
     if out.is_empty() { regions.to_vec() } else { out }
@@ -3778,5 +4030,367 @@ mod tests {
             assert!((profiles[0].area - 900.0).abs() < 1e-3, "step {step}: area={}", profiles[0].area);
             assert!(profiles[0].region.outer.joints().all(|(a, b)| a.end().dist(b.start()) < 1e-9), "step {step}: open joint");
         }
+    }
+
+    /// Reference O(L^2) `assemble` matching the original nested-loop nesting logic verbatim.
+    fn assemble_naive(sk: &Sketch, islands: &[Arc<Island>]) -> Vec<Profile> {
+        let mut all: Vec<((usize, usize), &IslandLoop)> =
+            islands.iter().enumerate().flat_map(|(k, island)| island.loops.iter().map(move |l| ((k, l.comp), l))).collect();
+        all.sort_by_key(|(_, l)| l.key);
+        let loops: Vec<(&Loop2, &Vec<String>, (usize, usize), &Option<Vec<String>>)> =
+            all.iter().map(|(c, l)| (&l.lp, &l.ids, *c, &l.complete)).collect();
+        let areas: Vec<f64> = all.iter().map(|(_, l)| l.area).collect();
+        let boxes: Vec<solidcraft_geom::Aabb2> = all.iter().map(|(_, l)| l.bounds).collect();
+        let inside_box = |j: usize, p: Vec2| boxes.get(j).is_some_and(|b| b.contains(p));
+        let mut parent_of: Vec<Option<usize>> = vec![None; loops.len()];
+        for (i, (li, _, ci, _)) in loops.iter().enumerate() {
+            let probe = li.segs.first().map(Seg2::mid).unwrap_or_default();
+            let ai = areas[i];
+            let mut best: Option<(f64, usize)> = None;
+            for (j, (lj, _, cj, _)) in loops.iter().enumerate() {
+                let aj = areas[j];
+                if i == j || ci == cj || aj <= ai || !inside_box(j, probe) || best.is_some_and(|(ba, _)| aj >= ba) {
+                    continue;
+                }
+                if lj.contains(probe) {
+                    best = Some((aj, j));
+                }
+            }
+            parent_of[i] = best.map(|(_, j)| j);
+        }
+        let mut kids_of: Vec<Vec<usize>> = vec![Vec::new(); loops.len()];
+        for (k, p) in parent_of.iter().enumerate() {
+            if let Some(p) = p {
+                kids_of[*p].push(k);
+            }
+        }
+        for kids in &mut kids_of {
+            if kids.len() > 1 {
+                *kids = without_repeated_loops(kids, |k| loops.get(k).map(|(l, ..)| *l), |k| areas[k]);
+            }
+        }
+        let out: Vec<Profile> = loops
+            .iter()
+            .enumerate()
+            .map(|(i, (l, ids, _, complete_outer))| {
+                let kids = &kids_of[i];
+                let holes: Vec<Loop2> = kids.iter().map(|&k| loops[k].0.ccw().reversed()).collect();
+                let hole_curves: Vec<Vec<String>> = kids.iter().map(|&k| loops[k].1.clone()).collect();
+                let region = Region2 { outer: l.ccw(), holes };
+                let area = region.area();
+                let centroid = region.centroid();
+                let mut complete_holes = kids.iter().map(|&k| loops[k].3.clone()).collect::<Option<Vec<_>>>();
+                if let Some(holes) = &mut complete_holes {
+                    holes.sort();
+                }
+                Profile {
+                    region,
+                    outer_curves: (*ids).clone(),
+                    outer_alternates: all[i].1.alternates.clone(),
+                    hole_curves,
+                    area,
+                    centroid,
+                    complete_outer: (*complete_outer).clone(),
+                    complete_holes,
+                    hull: OnceLock::new(),
+                    outline: OnceLock::new(),
+                }
+            })
+            .collect();
+        let index: std::collections::HashMap<&str, usize> = sk.curves.iter().enumerate().map(|(i, c)| (c.id.as_str(), i)).collect();
+        let first_curve = |p: &Profile| p.outer_curves.iter().filter_map(|id| index.get(id.as_str()).copied()).min().unwrap_or(usize::MAX);
+        let mut keyed: Vec<(usize, Profile)> = out.into_iter().map(|p| (first_curve(&p), p)).collect();
+        keyed.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.area.total_cmp(&a.1.area)));
+        keyed.into_iter().map(|x| x.1).collect()
+    }
+
+    /// Reference O(N^2) `without_repeats` matching the original linear scan verbatim.
+    fn without_repeats_naive(regions: &[Region2]) -> Vec<Region2> {
+        const MAX_COMPARED: usize = 5000;
+        if regions.len() < 2 || regions.len() > MAX_COMPARED {
+            return regions.to_vec();
+        }
+        let keys: Vec<(f64, Vec2, f64)> =
+            regions.iter().map(|r| (r.outer.signed_area().abs(), r.outer.centroid(), r.outer.segs.iter().map(Seg2::length).sum::<f64>())).collect();
+        let mut kept: Vec<usize> = Vec::new();
+        for (i, r) in regions.iter().enumerate() {
+            let (area, centroid, size) = keys[i];
+            let tol = 1e-7 * (1.0 + size);
+            let repeat = kept.iter().any(|&k| {
+                let (a, c, _) = keys[k];
+                (a - area).abs() <= tol * (1.0 + size) && c.dist(centroid) <= tol && same_region(r, &regions[k], tol)
+            });
+            if !repeat {
+                kept.push(i);
+            }
+        }
+        kept.iter().map(|&i| regions[i].clone()).collect()
+    }
+
+    /// Reference O(S^2) `merge_regions` matching the original linear scans verbatim.
+    fn merge_regions_naive(regions: &[Region2]) -> Vec<Region2> {
+        let distinct = without_repeats_naive(regions);
+        let regions = distinct.as_slice();
+        let tol = ENDPOINT_JOIN_TOL;
+        let mut segs: Vec<Seg2> = Vec::new();
+        let mut loop_ids: Vec<usize> = Vec::new();
+        let mut next_loop_id = 0usize;
+        for r in regions {
+            let outer = r.outer.ccw().segs;
+            loop_ids.extend(std::iter::repeat_n(next_loop_id, outer.len()));
+            segs.extend(outer);
+            next_loop_id += 1;
+            for h in &r.holes {
+                let hole = h.ccw().reversed().segs;
+                loop_ids.extend(std::iter::repeat_n(next_loop_id, hole.len()));
+                segs.extend(hole);
+                next_loop_id += 1;
+            }
+        }
+        if segs.len() > MAX_EDGES {
+            return regions.to_vec();
+        }
+        let mut alive = vec![true; segs.len()];
+        let mut shared = false;
+        for (end_tol, distinct_loops_only) in [(MERGE_TOL, false), (tol, true)] {
+            for (i, a) in segs.iter().enumerate() {
+                if !alive[i] {
+                    continue;
+                }
+                for (j, b) in segs.iter().enumerate().skip(i + 1) {
+                    if alive[j] && (!distinct_loops_only || loop_ids[i] != loop_ids[j]) && same_seg(a, &b.reversed(), end_tol, MERGE_TOL) {
+                        alive[i] = false;
+                        alive[j] = false;
+                        shared = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if !shared {
+            return regions.to_vec();
+        }
+        let ends: Vec<Vec2> = segs.iter().zip(&alive).filter(|(_, a)| !**a).flat_map(|(s, _)| [s.start(), s.end()]).collect();
+        let rejoin = |s: &Seg2, t: &Seg2| match (*s, *t) {
+            (Seg2::Line { a, b }, Seg2::Line { a: b2, b: c }) => {
+                b.dist(b2) <= MERGE_TOL
+                    && ends.iter().any(|e| e.dist(b) <= tol)
+                    && (b - a).normalized().zip((c - b).normalized()).is_some_and(|(u, v)| u.dot(v) > 1.0 - 1e-12)
+            }
+            _ => false,
+        };
+        let rest: Vec<Seg2> = segs.iter().zip(&alive).filter(|(_, a)| **a).map(|(s, _)| *s).collect();
+        let mut used = vec![false; rest.len()];
+        let mut loops: Vec<Loop2> = Vec::new();
+        for start in 0..rest.len() {
+            if used[start] {
+                continue;
+            }
+            let mut lp: Vec<Seg2> = Vec::new();
+            let mut cur = start;
+            let mut corner: Option<Vec2> = None;
+            for _ in 0..=rest.len() {
+                used[cur] = true;
+                let seg = corner.map_or(rest[cur], |p| started_at(rest[cur], p));
+                lp.push(seg);
+                let end = seg.end();
+                let close_dist = end.dist(rest[start].start());
+                let best_next_dist = (0..rest.len()).filter(|&k| !used[k]).map(|k| rest[k].start().dist(end)).fold(f64::INFINITY, f64::min);
+                if close_dist <= tol && lp.len() > 1 && (close_dist <= MERGE_TOL || close_dist <= best_next_dist + MERGE_TOL) {
+                    if let Some(first) = lp.first_mut() {
+                        *first = started_at(*first, end);
+                    }
+                    break;
+                }
+                corner = Some(end);
+                let back = (-seg.end_tangent()).angle();
+                let next_tol = (best_next_dist + MERGE_TOL).min(tol);
+                let next = (0..rest.len()).filter(|&k| !used[k] && rest[k].start().dist(end) <= next_tol).min_by(|&x, &y| {
+                    let dx = (back - rest[x].start_tangent().angle()).rem_euclid(TAU);
+                    let dy = (back - rest[y].start_tangent().angle()).rem_euclid(TAU);
+                    dx.total_cmp(&dy)
+                });
+                match next {
+                    Some(k) => cur = k,
+                    None => break,
+                }
+            }
+            let is_single_line = lp.len() == 1 && matches!(lp.first(), Some(Seg2::Line { .. }));
+            if !lp.is_empty() && !is_single_line && lp.first().zip(lp.last()).is_some_and(|(f, l)| l.end().dist(f.start()) <= tol) {
+                let lp = Loop2 { segs: rejoined(lp, &rejoin) };
+                if area_about_start(&lp.segs).abs() > 1e-9 {
+                    loops.push(lp);
+                }
+            }
+        }
+        let outers: Vec<&Loop2> = loops.iter().filter(|l| l.signed_area() > 0.0).collect();
+        let holes: Vec<&Loop2> = loops.iter().filter(|l| l.signed_area() < 0.0).collect();
+        let mut out: Vec<Region2> = outers.iter().map(|o| Region2 { outer: (*o).clone(), holes: Vec::new() }).collect();
+        for h in holes {
+            let probe = h.segs.first().map(Seg2::mid).unwrap_or_default();
+            let best = out.iter_mut().filter(|r| r.outer.contains(probe)).min_by(|a, b| a.outer.signed_area().total_cmp(&b.outer.signed_area()));
+            if let Some(r) = best {
+                r.holes.push(h.clone());
+            }
+        }
+        if out.is_empty() { regions.to_vec() } else { out }
+    }
+
+    fn assert_same_regions(got: &[Region2], want: &[Region2]) {
+        assert_eq!(got.len(), want.len());
+        for (g, w) in got.iter().zip(want) {
+            assert_eq!(serde_json::to_string(g).unwrap(), serde_json::to_string(w).unwrap());
+        }
+    }
+
+    fn rect_loop(x0: f64, y0: f64, x1: f64, y1: f64) -> Loop2 {
+        Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)])
+    }
+
+    /// `assemble()`'s x-interval sweep and cached loop polylines match the naive nested loop
+    /// bit-for-bit on a 40x40 (1,600-hole) nested plate, multi-level nesting, equal-area ties,
+    /// and non-finite area fallback.
+    #[test]
+    fn assemble_sweep_matches_naive_on_40x40_nested_plate_and_equal_area_ties() {
+        let mut sk = Sketch::new();
+        let mut islands: Vec<Arc<Island>> = Vec::new();
+        let mut curve_seq = 0usize;
+        let mut push_loop = |sk: &mut Sketch, lp: Loop2, kind: u8, comp: usize| -> String {
+            let id = format!("c{curve_seq}");
+            let idx = sk.add_circle(Vec2::new(curve_seq as f64, 0.0), 1.0, None, Some(&id)).unwrap();
+            let cid = sk.curves[idx].id.clone();
+            let key = (kind, idx, 0);
+            islands.push(Arc::new(Island {
+                loops: vec![IslandLoop::new(lp, vec![cid.clone()], comp, Some(vec![cid.clone()]), key)],
+                incomplete: false,
+            }));
+            curve_seq += 1;
+            cid
+        };
+
+        // Outer plate enclosing a 40x40 grid of 1,600 holes (alternating squares and circles).
+        let plate_id = push_loop(&mut sk, rect_loop(0.0, 0.0, 400.0, 400.0), 1, 0);
+        let mut inner_parent_id = String::new();
+        for row in 0..40_u32 {
+            for col in 0..40_u32 {
+                let cx = 5.0 + 10.0 * f64::from(col);
+                let cy = 5.0 + 10.0 * f64::from(row);
+                let lp = if (row + col) % 2 == 0 {
+                    // Slight size jitter on some cells, exact repeats on others.
+                    let half = 3.0 + if col % 4 == 0 { 0.0 } else { 0.01 * f64::from(col % 4) };
+                    rect_loop(cx - half, cy - half, cx + half, cy + half)
+                } else {
+                    Loop2::circle(Vec2::new(cx, cy), 3.0)
+                };
+                let id = push_loop(&mut sk, lp, if (row + col) % 2 == 0 { 1 } else { 0 }, 0);
+                if row == 10 && col == 10 {
+                    inner_parent_id = id;
+                }
+            }
+        }
+        // Multi-level nested island inside hole (10, 10) at (105, 105).
+        let nested_id = push_loop(&mut sk, rect_loop(104.0, 104.0, 106.0, 106.0), 1, 0);
+
+        // Equal-area tie case: two distinct-component 30x20 rectangles (exact area 600) both
+        // containing a 4x4 square inside their overlap. The smaller loop index must win.
+        let tie_first_id = push_loop(&mut sk, rect_loop(420.0, 0.0, 450.0, 20.0), 1, 0);
+        let tie_second_id = push_loop(&mut sk, rect_loop(430.0, 0.0, 460.0, 20.0), 1, 0);
+        let tie_child_id = push_loop(&mut sk, rect_loop(438.0, 8.0, 442.0, 12.0), 1, 0);
+
+        let got = assemble(&sk, &islands);
+        let want = assemble_naive(&sk, &islands);
+        assert_same(&got, &want);
+
+        let plate = got.iter().find(|p| p.outer_curves == [plate_id.clone()]).expect("outer plate");
+        assert_eq!(plate.hole_curves.len(), 1600);
+        let inner_parent = got.iter().find(|p| p.outer_curves == [inner_parent_id.clone()]).expect("nested hole parent");
+        assert_eq!(inner_parent.hole_curves, vec![vec![nested_id]]);
+        let tie_first = got.iter().find(|p| p.outer_curves == [tie_first_id.clone()]).expect("first tie container");
+        let tie_second = got.iter().find(|p| p.outer_curves == [tie_second_id.clone()]).expect("second tie container");
+        assert_eq!(tie_first.hole_curves, vec![vec![tie_child_id]]);
+        assert!(tie_second.hole_curves.is_empty());
+
+        // Non-finite area fallback path matches naive too.
+        let mut with_nan = islands.clone();
+        let mut nan_loop = IslandLoop::new(rect_loop(500.0, 0.0, 510.0, 10.0), vec!["nan".into()], 0, None, (1, curve_seq, 0));
+        nan_loop.area = f64::NAN;
+        with_nan.push(Arc::new(Island { loops: vec![nan_loop], incomplete: false }));
+        assert_same(&assemble(&sk, &with_nan), &assemble_naive(&sk, &with_nan));
+    }
+
+    /// `merge_regions()` and `without_repeats()` match their naive O(N^2)/O(S^2) references
+    /// bit-for-bit on a 30x30 adjacent grid union, 1,000 disjoint regions with duplicates, and
+    /// hole-nesting with tangent-split shared edges.
+    #[test]
+    fn merge_regions_and_without_repeats_match_naive_on_grid_disjoint_holes_and_duplicates() {
+        let solid = |l: Loop2| Region2 { outer: l, holes: Vec::new() };
+
+        // 1. 30x30 adjacent grid union (900 unit squares -> 1 rejoined 30x30 square).
+        let mut grid_regions: Vec<Region2> = Vec::with_capacity(900);
+        for row in 0..30_u32 {
+            for col in 0..30_u32 {
+                let (x, y) = (f64::from(col), f64::from(row));
+                grid_regions.push(solid(rect_loop(x, y, x + 1.0, y + 1.0)));
+            }
+        }
+        let merged_grid = merge_regions(&grid_regions);
+        let naive_grid = merge_regions_naive(&grid_regions);
+        assert_same_regions(&merged_grid, &naive_grid);
+        assert_eq!(merged_grid.len(), 1);
+        assert_eq!(merged_grid[0].outer.segs.len(), 4);
+        assert!((merged_grid[0].area() - 900.0).abs() < 1e-9);
+
+        // 2. 1,000 disjoint regions + 50 exact and segment-rotated duplicates.
+        let mut disjoint_with_dups: Vec<Region2> = Vec::with_capacity(1050);
+        for k in 0..1000_u32 {
+            let x = f64::from(k) * 5.0;
+            // Mix varying areas and repeated areas at different positions.
+            let size = 1.0 + 0.01 * f64::from(k % 250);
+            let r = solid(rect_loop(x, 0.0, x + size, size));
+            disjoint_with_dups.push(r.clone());
+            if k % 20 == 0 {
+                let mut rotated = r.outer.segs.clone();
+                rotated.rotate_left(2);
+                disjoint_with_dups.push(Region2 { outer: Loop2 { segs: rotated }, holes: Vec::new() });
+            }
+        }
+        let got_unique = without_repeats(&disjoint_with_dups);
+        let want_unique = without_repeats_naive(&disjoint_with_dups);
+        assert_same_regions(&got_unique, &want_unique);
+        assert_eq!(got_unique.len(), 1000);
+        assert_same_regions(&merge_regions(&disjoint_with_dups), &merge_regions_naive(&disjoint_with_dups));
+
+        // 3. Hole-nesting + duplicates + tangent-split shared edges within ENDPOINT_JOIN_TOL.
+        let mut mixed: Vec<Region2> = Vec::new();
+        // 4x4 ring of unit squares around a 2x2 central cavity [1, 3] x [1, 3].
+        for row in 0..4_u32 {
+            for col in 0..4_u32 {
+                if (1..=2).contains(&row) && (1..=2).contains(&col) {
+                    continue;
+                }
+                let (x, y) = (f64::from(col), f64::from(row));
+                mixed.push(solid(rect_loop(x, y, x + 1.0, y + 1.0)));
+            }
+        }
+        // Duplicate of a ring cell with rotated segments.
+        let mut dup_segs = rect_loop(0.0, 0.0, 1.0, 1.0).segs;
+        dup_segs.rotate_left(1);
+        mixed.push(solid(Loop2 { segs: dup_segs }));
+        // Inner island inside the 2x2 cavity, itself having a circular hole.
+        mixed.push(Region2 { outer: rect_loop(1.2, 1.2, 2.8, 2.8), holes: vec![Loop2::circle(Vec2::new(2.0, 2.0), 0.4).reversed()] });
+        // Outer enclosing frame with a hole that contains the entire 4x4 ring.
+        mixed.push(Region2 { outer: rect_loop(-2.0, -2.0, 6.0, 6.0), holes: vec![rect_loop(-1.0, -1.0, 5.0, 5.0).reversed()] });
+        // Two adjacent squares with a 5e-5 mm corner split along the shared carrier (Pass 2).
+        let eps = 5e-5;
+        mixed.push(solid(rect_loop(10.0, 0.0, 15.0, 5.0)));
+        mixed.push(solid(Loop2::polygon(&[Vec2::new(15.0, eps), Vec2::new(20.0, 0.0), Vec2::new(20.0, 5.0), Vec2::new(15.0, 5.0 - eps)])));
+
+        let got_mixed = merge_regions(&mixed);
+        let want_mixed = merge_regions_naive(&mixed);
+        assert_same_regions(&got_mixed, &want_mixed);
+        // Expected: outer frame (with 1 hole), merged 4x4 ring (with 2x2 hole), inner island (with
+        // circular hole), and merged 10x5 rectangle.
+        assert_eq!(got_mixed.len(), 4);
+        assert_eq!(got_mixed.iter().filter(|r| r.holes.len() == 1).count(), 3);
     }
 }
