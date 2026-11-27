@@ -406,6 +406,7 @@ pub use ops::BoolOp;
 pub use ops::apart;
 pub use ops::half_space;
 pub use ops::join_apart;
+pub use ops::overlapping_piece_pairs;
 pub use ops::place_matrix;
 pub use ops::split_by_plane;
 pub use ops::transform;
