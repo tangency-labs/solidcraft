@@ -2732,6 +2732,30 @@ mod tests {
     /// A rectangle lofted to the same rectangle with its corners rounded (radius 4), both orders:
     /// each corner runs to a point near the middle of its rounded corner, and the rounded
     /// corners' ends split the rectangle's sides next to the corners (12 vertices each).
+    /// #22856: a conic of weight 999 over a 20 x 10 rectangle. Expected centres from the
+    /// conic's segment integrated on a dense polygon, and Archimedes' 2/5 for the parabola.
+    #[test]
+    fn a_high_weight_conic_keeps_its_area_centre() {
+        for (w, y) in [(999.0, 0.833_273_297_235), (1.0, -1.4)] {
+            let segs = [
+                Seg2::Conic {
+                    a: p(0.0, 0.0),
+                    apex: p(10.0, 20.0),
+                    b: p(20.0, 0.0),
+                    w,
+                },
+                line((20.0, 0.0), (20.0, -10.0)),
+                line((20.0, -10.0), (0.0, -10.0)),
+                line((0.0, -10.0), (0.0, 0.0)),
+            ];
+            let c = centroid(&segs);
+            assert!(
+                (c.x - 10.0).abs() < 1e-9 && (c.y - y).abs() < 1e-9,
+                "w = {w}: centre {c:?}, expected (10, {y})"
+            );
+        }
+    }
+
     #[test]
     fn a_corner_runs_to_the_middle_of_a_rounded_corner() {
         let (w, h, r) = (40.0, 20.0, 4.0);
