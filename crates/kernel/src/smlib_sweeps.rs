@@ -1010,7 +1010,9 @@ mod imp {
                 .flat_map(|s| (0..=CROSSING_SAMPLES).map(move |i| seg_at(s, i as f64 / CROSSING_SAMPLES as f64).map(|(_, t)| t)))
                 .collect::<Option<Vec<Vec3>>>()
                 .ok_or_else(bad)?;
-            crate::sweep_path::crossing_check(plane, &tangents)?;
+            crate::sweep_path::crossing_check(plane, &tangents, false)?;
+        } else {
+            turning_check(plane, pieces, path)?;
         }
         let runs = smooth_runs(path)?;
         if runs.len() > 1 {
@@ -1031,6 +1033,48 @@ mod imp {
             _ => roles(&body, plane, Some(&placed(plane, &last)), &seeds(plane, pieces, |q| q), &inside, false)?,
         };
         with_history(body, &roles, pieces)
+    }
+
+    /// [`crate::sweep_path::crossing_check`] with `turning` of the profile on `plane`, already where the
+    /// sweep starts, against the path's direction there. It applies only to a profile the path
+    /// starts in (the start point lies inside the profile or on its outline): that profile lies
+    /// along the path. One that sits off the path, though its plane holds the direction, still
+    /// sweeps a volume and is left to the sweep.
+    fn turning_check(plane: &Plane, pieces: &[Piece], path: &[crate::PathSeg]) -> Result<()> {
+        let (t0, _) =
+            path.first().and_then(crate::PathSeg::tangents).ok_or_else(|| KernelError::Invalid("a path segment has no direction".into()))?;
+        let Some(start) = path.first().map(crate::PathSeg::start) else { return Ok(()) };
+        if path_starts_in(plane, pieces, start) {
+            crate::sweep_path::crossing_check(plane, &[t0], true)?;
+        }
+        Ok(())
+    }
+
+    /// Whether `start`, a point of `plane` (to the sweep's tolerance), lies inside the profile
+    /// `pieces` by the even-odd rule on their outlines sampled at 64 points a piece, or within a
+    /// millionth of the profile's size of one of those points.
+    fn path_starts_in(plane: &Plane, pieces: &[Piece], start: Vec3) -> bool {
+        const SAMPLES: usize = 64;
+        let p = plane.to_local(start);
+        let outline: Vec<Vec<Vec2>> = pieces.iter().map(|x| (0..=SAMPLES).map(|i| x.seg.point_at(i as f64 / SAMPLES as f64)).collect()).collect();
+        let (mut lo, mut hi) = (Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN));
+        for q in outline.iter().flatten() {
+            (lo, hi) = (Vec2::new(lo.x.min(q.x), lo.y.min(q.y)), Vec2::new(hi.x.max(q.x), hi.y.max(q.y)));
+        }
+        let near = 1e-6 * (hi - lo).len();
+        if outline.iter().flatten().any(|q| (*q - p).len() <= near) {
+            return true;
+        }
+        let mut crossings = 0;
+        for chain in &outline {
+            for w in chain.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                if (a.y > p.y) != (b.y > p.y) && p.x < a.x + (p.y - a.y) * (b.x - a.x) / (b.y - a.y) {
+                    crossings += 1;
+                }
+            }
+        }
+        crossings % 2 == 1
     }
 
     /// The sweep of the profile on `plane` along `path`, with the rigid motions SMLib reports
@@ -1904,7 +1948,11 @@ mod imp {
         let pieces = pieces(region.loops());
         // A profile drawn away from the path's start is carried there as it is: it is the start
         // section, and the twist and the scale run from there.
-        let plane = &at_path_start(plane, &pieces, path, ctl.orientation == crate::SweepOrientation::Parallel)?;
+        let parallel = ctl.orientation == crate::SweepOrientation::Parallel;
+        let plane = &at_path_start(plane, &pieces, path, parallel)?;
+        if !parallel {
+            turning_check(plane, &pieces, path)?;
+        }
         let runs = smooth_runs(path)?;
         if runs.len() > 1 {
             return cornered_controlled(plane, region, path, &runs, ctl);
