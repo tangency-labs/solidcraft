@@ -17031,7 +17031,35 @@ pub(crate) fn lost_sheet_face(plane: &PlaneRef) -> DocError {
 fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> Result<(Plane, Option<String>)> {
     let n = picked.normal();
     if let Some(name) = name {
-        let hit = crate::naming::locate_face(st, name, at).ok_or_else(|| DocError::reselect(name))?;
+        let Some(hit) = crate::naming::locate_face(st, name, at) else {
+            // A name worked out from geometry when the design was saved (an Align that kept no
+            // history guessed the names of the faces it moved, #20308) finds nothing once the same
+            // face has its exact name (#22919). When the saved point still lies on a flat face
+            // that is exactly the picked plane (same normal, no farther along it than rounding),
+            // the plane the sketch sits on is unchanged, and so is the sketch. A face that moved,
+            // turned or is gone from under the point still fails, asking for it to be picked again.
+            let same_plane = crate::name_lookup::refound_at_saved_point(name, &st.bodies)
+                && at.is_finite()
+                && st.bodies.iter().filter(|b| !b.body.is_mesh()).any(|b| {
+                    let rounding = (b.body.size() * 1e-6).max(1e-6);
+                    let Ok(faces) = b.body.faces((b.body.size() * 1e-3).max(1e-3)) else { return false };
+                    crate::name_lookup::faces_at_saved_point(b, at).into_iter().any(|(index, _)| {
+                        faces.iter().any(|f| {
+                            f.index == index
+                                && f.plane_normal.is_some_and(|fnrm| fnrm.dot(n) > 1.0 - 1e-9)
+                                && (f.centroid.dot(n) - picked.origin.dot(n)).abs() <= rounding
+                        })
+                    })
+                });
+            if !same_plane {
+                return Err(DocError::reselect(name));
+            }
+            let note = format!(
+                "face `{}` has a new name; the sketch stays on the same plane, found again at its saved point",
+                crate::name_lookup::quoted(name)
+            );
+            return Ok((*picked, Some(note)));
+        };
         let b = st.bodies.get(hit.body).ok_or_else(|| DocError::reselect(name))?;
         let tol = (b.body.size() * 1e-3).max(1e-3);
         let face = b.body.faces(tol)?.into_iter().find(|f| f.index == hit.face).ok_or_else(|| DocError::reselect(name))?;

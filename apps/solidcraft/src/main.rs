@@ -1836,6 +1836,20 @@ fn main() -> eframe::Result {
     {
         guard.attempt_when_the_instance_starts(setup.instance_descriptor.backends);
     }
+    // Standard startup on Windows, in Automatic: OpenGL is named on disk while the instance
+    // starts, since its driver loads there before any adapter or vendor is known (#22917: AMD's
+    // `atio6axx.dll` crashed every start, safe mode included). After a crash there the launches of
+    // this version start Vulkan and D3D12 (`gpu_startup::standard_backends`); a clean start only
+    // writes the attempt file and removes it once the adapter is chosen.
+    let automatic =
+        !cpu_renderer && !backend_override && gpu_startup::chosen_backends(retry_backend.as_deref().or(backend_launch.backend.as_deref())).is_none();
+    if let Some(guard) = &backend_guard
+        && !gpu_startup.legacy()
+        && let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &wgpu_options.wgpu_setup
+        && gpu_startup::guards_instance_creation(cfg!(target_os = "windows"), setup.instance_descriptor.backends, automatic)
+    {
+        guard.attempt_while_the_instance_starts(eframe::wgpu::Backends::GL);
+    }
     // A tracked full launch notes the API it starts, for the safe launch after a failure.
     if !safe
         && tracked
@@ -2374,6 +2388,8 @@ fn startup_step(step: &'static str, detail: &str) {
         startup::instance_starting();
     }
     if step == eframe::egui_wgpu::STEP_ADAPTER_CHOSEN {
+        // The instance came up: standard startup's OpenGL guard is over (#22917).
+        startup::adapter_chosen();
         solidcraft_engine::crash::set_environment(&format!("Renderer: {detail}"));
     }
     solidcraft_engine::crash::startup_step(step);
@@ -2494,8 +2510,14 @@ fn safe_wgpu_options(
             // WGPU_BACKEND always has priority; otherwise the failed API (not for the software
             // renderer, which picks its own adapter) and the crashed ones are left out. A chosen API
             // takes the place of wgpu's own set (not for the software renderer).
+            // The software renderer starts D3D12 alone on Windows, its WARP adapter's API, so no
+            // Vulkan or OpenGL driver loads beside it (#22917).
             let failed = if cpu { None } else { failed };
-            let chosen = if cpu { None } else { gpu_startup::chosen_backends(preference) };
+            let chosen = if cpu {
+                gpu_startup::safe_software_backends(cfg!(target_os = "windows"), crashed)
+            } else {
+                gpu_startup::chosen_backends(preference)
+            };
             setup.instance_descriptor.backends = startup::safe_backends(chosen.unwrap_or(setup.instance_descriptor.backends), failed, crashed);
         }
     }
@@ -3376,6 +3398,39 @@ mod msaa_tests {
         // After a failure of the API in use, the chosen ones less it, never none.
         assert_eq!(backends(false, Some("dx12"), none, Some("dx12,gl")), Backends::GL);
         assert_eq!(backends(false, Some("gl"), none, Some("gl")), Backends::GL);
+    }
+
+    /// #22917: the software renderer in safe graphics mode (`--safe-mode`, or after failed starts)
+    /// starts D3D12 alone on Windows, so AMD's OpenGL driver is never loaded; elsewhere, or once
+    /// D3D12 crashed, wgpu's own set less the crashed APIs as before.
+    #[test]
+    fn safe_software_renderer_never_starts_opengl_on_windows() {
+        use eframe::wgpu::Backends;
+        if std::env::var_os("WGPU_BACKEND").is_some() {
+            return;
+        }
+        let backends = |crashed, preference| {
+            let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = super::safe_wgpu_options(true, None, crashed, preference).wgpu_setup else {
+                panic!()
+            };
+            assert!(setup.native_adapter_selector.is_some(), "the software adapter");
+            setup.instance_descriptor.backends
+        };
+        let eframe::egui_wgpu::WgpuSetup::CreateNew(default) = eframe::egui_wgpu::WgpuConfiguration::default().wgpu_setup else { panic!() };
+        let own = default.instance_descriptor.backends;
+        for preference in [None, Some("gl"), Some("vulkan"), Some("dx12")] {
+            for crashed in [Backends::empty(), Backends::GL, Backends::VULKAN] {
+                let started = backends(crashed, preference);
+                if cfg!(target_os = "windows") {
+                    assert_eq!(started, Backends::DX12, "{preference:?} {crashed:?}");
+                } else {
+                    assert_eq!(started, crate::startup::safe_backends(own, None, crashed), "as before");
+                }
+            }
+        }
+        if cfg!(target_os = "windows") {
+            assert_eq!(backends(Backends::DX12, None), own - Backends::DX12, "WARP's API crashed");
+        }
     }
 
     /// The window keeps two frames in flight with vsync, in safe graphics mode too: with one, the
