@@ -36,6 +36,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         ("frame_member_turn", json!({"type":"frame_member_turn","member":{"feature":7,"line":"l1"},"angle":"turn.angle"})),
         (
+            "dogbone",
+            json!({"type": "dogbone", "edges": [o], "faces": [o], "diameter": "dogbone.diameter", "style": "minimal", "gap": "dogbone.gap",
+                "max_angle": "dogbone.max_angle", "along": [0, 0, 1]}),
+        ),
+        (
             "frame_gusset",
             json!({"type":"frame_gusset","supports":[{"plane":plane("gusset1"),"member":{"feature":7,"line":"l1"}},{"plane":plane("gusset2"),"member":null}],"leg1":"gusset.leg1","leg2":"gusset.leg2","thickness":"gusset.thickness","relief":"gusset.relief","clip":"gusset.clip","offset":"gusset.offset","placement":"center"}),
         ),
@@ -78,6 +83,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             json!({"type": "cone", "base": ["cone.x", "cone.y", "cone.z"], "radius": "cone.radius", "top_radius": "cone.top_radius", "height": "cone.height"}),
         ),
         ("combine", json!({"type": "combine", "target": "A", "tools": ["B"], "operation": "join"})),
+        (
+            "finger_joint",
+            json!({"type": "finger_joint", "bodies": ["A", "B"], "count": 4, "clearance": "joint.clearance",
+                "inverted": true, "edge_offset": "joint.edge_offset"}),
+        ),
         (
             "pattern_rectangular",
             pattern(
@@ -355,6 +365,7 @@ pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
         "emboss" => json!({"face": {"body": "B", "at": o}, "targets": ["B"]}),
         "sheet_fold" => json!({"sketch": 7, "body": "B"}),
         "patch" => json!({"sketch": 8, "body": "B"}),
+        "dogbone" => json!({"body": "B"}),
         _ => json!({}),
     };
     if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) {

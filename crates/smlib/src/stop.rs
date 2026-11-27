@@ -15,7 +15,7 @@
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex, Weak};
 
-use solidcore::kernel::CancelToken;
+use solidcore_ops::cancel::CancelToken;
 
 thread_local! {
     static CURRENT: RefCell<Option<Stop>> = const { RefCell::new(None) };

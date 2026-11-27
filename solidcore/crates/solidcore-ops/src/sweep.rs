@@ -124,8 +124,9 @@ const DRAFT_LIMIT: f64 = PI / 2.0 - 1e-6;
 )]
 const TURN_LIMIT: f64 = std::f64::consts::TAU * (1.0 + 1e-12);
 
-/// Most turns of a screw sweep.
-pub const SCREW_MAX_TURNS: f64 = 200.0;
+/// Most turns of a screw sweep: the kernel's, as many as its spans hold
+/// (`sweep::screw::MAX_TURNS`).
+pub const SCREW_MAX_TURNS: f64 = screw::MAX_TURNS;
 
 /// Most pairs of a screw sweep's radial law.
 pub const SCREW_MAX_LAW: usize = 1024;
@@ -1882,8 +1883,10 @@ pub fn sweep_stations(profile: &[Curve], stations: &[Affine], end: Ends) -> Resu
 /// ([`ScrewWalls::Pieces`]); [`screw_sweep_with`] chooses.
 ///
 /// # Errors
-/// [`Error::Argument`] for a number, law or curve list refused (and the kernel's refusals of
-/// them); the kernel's status; [`Error::Empty`], [`Error::NotSolid`].
+/// [`Error::Argument`] for a number, law or curve list refused; [`Error::Refused`] for the
+/// kernel's refusals, in its words (an axis without a usable length, a profile on the axis,
+/// more turns than the spans hold at the tolerance); the kernel's status; [`Error::Empty`],
+/// [`Error::NotSolid`].
 pub fn screw_sweep(
     profile: &[Curve],
     origin: [f64; 3],
@@ -2018,7 +2021,7 @@ pub fn screw_sweep_with(
         );
         match built {
             Ok(b) => finish(k, b, Expect::SOLID),
-            Err(e) => Ok(Err(argument_or_status(e))),
+            Err(e) => Ok(Err(status(e))),
         }
     })
 }

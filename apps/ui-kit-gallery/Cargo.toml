@@ -3,9 +3,7 @@ name = "ui-kit-gallery"
 description = "The UI kit's live component gallery: every public component of solidcraft-ui-kit in its real states, with what it is for, how to call it and its rules, and a theme panel; on the desktop and in the browser (docs.solidcraft.io/kit/)"
 version.workspace = true
 edition.workspace = true
-# It shows SolidCraft's interface: the kit, the look and the theme are under the SolidCraft Brand
-# and Interface Licence (crates/ui-kit/LICENSE).
-license-file = "../../crates/ui-kit/LICENSE"
+license.workspace = true
 publish = false
 
 [lints]
