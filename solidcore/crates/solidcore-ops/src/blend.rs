@@ -1364,7 +1364,7 @@ fn crossing_end_passes(
                 sizes: &chamfers,
                 along: &[],
             },
-            law: None,
+            laws: Vec::new(),
             setbacks: &[],
             earlier: &[],
             patches: false,
