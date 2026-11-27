@@ -738,16 +738,8 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     recent.push(FileRow::Separator);
     recent.push(button("clear_recent", app.tr("ui.clear_recent"), "delete", None));
     rows.push(FileRow::Sub { label: app.tr("ui.open_recent").to_string(), rows: recent });
-    // Insert and Export each sit in a submenu, so the menu fits on the screen (#21980); the
-    // `file_menu_flat` preference lists them at the top level, as before.
-    let flat = app.preferences.file_menu_flat;
-    let group = |rows: &mut Vec<FileRow>, label: &str, items: Vec<FileRow>| {
-        if flat {
-            rows.extend(items);
-        } else {
-            rows.push(FileRow::Sub { label: label.to_string(), rows: items });
-        }
-    };
+    // Insert and Export each sit in a submenu, so the menu fits on the screen (#21980).
+    let group = |rows: &mut Vec<FileRow>, label: &str, items: Vec<FileRow>| rows.push(FileRow::Sub { label: label.to_string(), rows: items });
     let insert = vec![
         row("file.insert_step", &format!("{}…", app.tr_label("Insert STEP")), "", "import", shown),
         row("file.insert_mesh", &format!("{}…", app.tr_label("Insert Mesh")), "", "import", shown),
@@ -3981,10 +3973,9 @@ mod header_report_tests {
     }
 
     /// #21980: the File menu keeps its Insert and Export rows in an Insert and an Export submenu, so
-    /// it fits on the screen; a row there still runs its command. `file_menu_flat` lists them at the
-    /// top level, as before.
+    /// it fits on the screen; a row there still runs its command.
     #[test]
-    fn file_menu_groups_insert_and_export_rows_in_submenus_unless_flat() {
+    fn file_menu_groups_insert_and_export_rows_in_submenus() {
         let ids = |rows: &[app_bar::FileRow]| {
             rows.iter()
                 .filter_map(|row| match row {
@@ -4003,7 +3994,6 @@ mod header_report_tests {
         let exports = ["file.export_stl", "file.export_3mf", "file.export_step", "file.export_urdf", "export_json"];
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
-        assert!(!h.app.preferences.file_menu_flat, "grouped by default");
         let grouped = file_rows(&h.app);
         let top = ids(&grouped);
         assert!(inserts.iter().chain(&exports).all(|id| !top.contains(&id.to_string())), "{top:?}");
@@ -4020,15 +4010,6 @@ mod header_report_tests {
         let Some(crate::dialogs::Kind::SaveMesh(k)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("no Save as mesh dialog") };
         assert_eq!(k.format_name(), "stl");
         crate::dialogs::cancel(&mut h.app);
-        // Flat: every row at the top level, in the order it had, and no Insert or Export submenu.
-        h.app.preferences.file_menu_flat = true;
-        let flat = file_rows(&h.app);
-        let top = ids(&flat);
-        assert!(sub(&flat, "Insert").is_none() && sub(&flat, "Export").is_none());
-        let at = |id: &str| top.iter().position(|t| t == id).unwrap_or_else(|| panic!("{id}: {top:?}"));
-        assert!(at("open") < at("file.insert_step") && at("component.insert_design") < at("save"));
-        assert!(at("file.export_stl") < at("export_json") && at("export_json") < at("document.metadata"));
-        assert_eq!(flat.len(), grouped.len() - 2 + inserts.len() + export.len());
     }
 
     /// File › New Drawing draws the open design: it enters Drawing and shows the new drawing's first
