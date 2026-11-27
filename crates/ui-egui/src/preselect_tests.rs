@@ -4698,6 +4698,32 @@ fn mesh_conversion_harness() -> crate::scenario::Harness {
     h
 }
 
+#[test]
+fn mesh_context_menu_opens_tools_on_the_named_mesh() {
+    use crate::context_menu::{Target, items, run_item};
+    let mut h = mesh_conversion_harness();
+    h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5, "body_name": "Solid"})).unwrap();
+    let mesh = Target::Body { name: "Mesh".into() };
+    let solid = Target::Body { name: "Solid".into() };
+    assert!(!items(&h.app, &solid).iter().any(|i| matches!(i.id.as_str(), "mesh.convert" | "mesh.reduce")));
+    for id in ["mesh.convert", "mesh.reduce"] {
+        // A menu opened on a browser row uses that row, not an unrelated selection.
+        h.app.session.selection = vec![Sel::Body { name: "Solid".into() }];
+        let menu = items(&h.app, &mesh);
+        let item = menu.iter().find(|i| i.id == id).unwrap();
+        assert!(item.enabled);
+        run_item(&mut h.app, item, egui::Pos2::ZERO);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs[0].items, [Sel::Body { name: "Mesh".into() }]);
+        crate::dialogs::cancel(&mut h.app);
+    }
+    h.app.session.selection = vec![Sel::Body { name: "Mesh".into() }];
+    let viewport = items(&h.app, &Target::Viewport);
+    for id in ["mesh.convert", "mesh.reduce"] {
+        assert!(viewport.iter().any(|i| i.id == id && i.enabled), "{id}");
+    }
+}
+
 /// #3001: Convert Mesh opens a dialog instead of failing with "select a mesh body". With the
 /// mesh selected first it takes it, and OK rebuilds it as faces.
 #[test]
