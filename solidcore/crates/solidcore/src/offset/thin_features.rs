@@ -23,10 +23,17 @@
 //! cavity, it does not prove there is none), and the whole result stands only if every step
 //! builds; otherwise the caller's refusal stands. The features with a face whose inset
 //! collapses come off together, first, before one shell of what is left (solidcore#3353).
+//!
+//! The cap lies on the plane of the face the feature stands on, so the body with the feature
+//! taken off is that face run on across the footprint: the cap's rim, an edge between two
+//! faces on one plane, is taken out before the shell ([`remove_cap_rims`]). Left in, it
+//! pinched the face where the footprint touches the face's outer edge (a boss whose side is
+//! tangent to that edge, or within the contact tolerance of it, solidcraft#22785), and the
+//! offset, which moves that touching vertex along both loops, refused the edge as vanishing.
 
 use std::collections::BTreeSet;
 
-use crate::blend::feature_executive::{defeature_and_rebuild, RebuildBrepType};
+use crate::blend::feature_executive::{defeature_and_rebuild, remove_patch_rims, RebuildBrepType};
 use crate::boolean::api_brep::boolean_union;
 use crate::error::offset::OffsetFailure;
 use crate::error::{Reason, Result, SolidError};
@@ -207,11 +214,40 @@ fn take_off(k: &mut Kernel, b: &Brep, faces: &[FaceId], wall: f64) -> Result<Opt
     };
     base.refresh_cached_topology();
     feature.refresh_cached_topology();
+    remove_cap_rims(k, b, &mut base, faces)?;
     // a feature with room for a cavity is not one the wall fills
     Ok(match shell_wall_room(k, &mut feature, &[], wall)? {
         WallRoom::NotShown => Some((base, feature)),
         _ => None,
     })
+}
+
+/// `base` (`b` with the feature `faces` taken off by [`take_off`]) with the rims of its caps
+/// taken out where a cap and the face beside it lie on one surface, so that face runs on
+/// across the footprint (module docs). A cap is a face of `base` that `b` did not have, or one
+/// whose id was a feature face's. A rim stays where taking it out would grow a tolerance
+/// (`remove_topological_joins`), and `base` stays as it was where the removal is refused.
+///
+/// # Errors
+///
+/// A cancellation, or an unported step, of the removal.
+fn remove_cap_rims(k: &mut Kernel, b: &Brep, base: &mut Brep, faces: &[FaceId]) -> Result<()> {
+    let had: BTreeSet<FaceId> = b.faces().ids().collect();
+    let (caps, supports): (Vec<FaceId>, Vec<FaceId>) = base
+        .faces()
+        .ids()
+        .partition(|f| !had.contains(f) || faces.contains(f));
+    if caps.is_empty() {
+        return Ok(());
+    }
+    let saved = base.snapshot()?;
+    match remove_patch_rims(k, base, &supports, &caps) {
+        Ok(()) => {}
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => base.restore(saved),
+    }
+    base.refresh_cached_topology();
+    Ok(())
 }
 
 /// The shell of `b` (`options`, inward: a negative distance, no faces opened) whose offset
