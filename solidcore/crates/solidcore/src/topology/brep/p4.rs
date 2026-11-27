@@ -389,6 +389,7 @@ fn sync_faceuse_links(b: &mut Brep, s: ShellId) -> Result<()> {
 
 /// `SmOwningTopology::PostInsert` of a face use at the end of a shell's list (the
 /// arena model's face list of the shell follows).
+#[cfg(test)]
 fn shell_post_insert_faceuse(b: &mut Brep, s: ShellId, fu: FaceuseId) -> Result<()> {
     let members = &mut b.shell_mut(s)?.members;
     match members {
@@ -1527,6 +1528,62 @@ fn delete_wire_edge(
 }
 
 /// The shell traversals of the wire branch of [`delete_edge`], under `lock`.
+/// Creates a new shell in `shell`'s region and transfers `v2`'s connected component of
+/// `shell` (both wire edge uses and face uses) into it, rebuilding cached `Shell::faces`.
+#[allow(clippy::too_many_arguments)]
+fn transfer_wire_split_component(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut DeleteEnv<'_>,
+    marks: &mut super::p3::DeletionMarks<'_>,
+    lock: &MarkLock,
+    shell: ShellId,
+    v2: VertexId,
+) -> Result<()> {
+    let new_shell = b.add_shell_record(Shell::default())?;
+    let region = shell_region(b, shell)?;
+    region_post_insert(b, region, new_shell)?;
+    let mut edgeuses2 = Vec::new();
+    let mut faceuses2 = Vec::new();
+    marks.with_marks(env.records, env.key_of, |marks| {
+        topology_traverser::shell_traversal_with_marks(
+            k,
+            b,
+            marks,
+            v2,
+            shell,
+            Some(&mut edgeuses2),
+            Some(&mut faceuses2),
+            lock,
+        )
+    })?;
+    if faceuses2.is_empty() {
+        // NewShell is a wireShell - set first edge and ShellType (an empty
+        // edge-use list keeps the NULL head; upstream only asserts)
+        if let Some(&first) = edgeuses2.first() {
+            set_shell_head(b, new_shell, ShellMembers::Edgeuse(first), None)?;
+        }
+        b.shell_mut(new_shell)?.shell_type = ShellType::Wire;
+    } else {
+        // the first face is set later by shell_move_faceuses
+        b.shell_mut(new_shell)?.shell_type = ShellType::Faceuse;
+    }
+    for &x in &edgeuses2 {
+        if eu1::is_shell_edgeuse(b, x)? {
+            b.edgeuse_mut(x)?.owner = EdgeuseOwner::Shell(Some(new_shell));
+        }
+    }
+    // transfer faceuses from the old shell to the new shell in one pass and rebuild
+    // both cached `Shell::faces` lists from their authoritative face-use members
+    shell::shell_move_faceuses(b, shell, new_shell, &faceuses2)?;
+    for s in [shell, new_shell] {
+        if let Some(faces) = crate::topology::integrity::derived_shell_faces(b, s) {
+            b.shell_mut(s)?.faces = faces;
+        }
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn wire_split_shell(
     k: &mut Kernel,
@@ -1540,7 +1597,6 @@ fn wire_split_shell(
     eu_mate: EdgeuseId,
     body: Option<ObjectRef>,
 ) -> Result<()> {
-    const OP: &str = OP_DELETE_EDGE;
     let head = shell_head(b, shell)?;
     let head_deleted =
         head == Some(EntityRef::Edgeuse(eu)) || head == Some(EntityRef::Edgeuse(eu_mate));
@@ -1567,40 +1623,7 @@ fn wire_split_shell(
                 v1_has_faceuse,
                 v1_first_edgeuse,
             } => {
-                let new_shell = b.add_shell_record(Shell::default())?;
-                let region = shell_region(b, shell)?;
-                region_post_insert(b, region, new_shell)?;
-                let mut edgeuses2 = Vec::new();
-                let mut faceuses2 = Vec::new();
-                marks.with_marks(env.records, env.key_of, |marks| {
-                    topology_traverser::shell_traversal_with_marks(
-                        k,
-                        b,
-                        marks,
-                        v2,
-                        shell,
-                        Some(&mut edgeuses2),
-                        Some(&mut faceuses2),
-                        lock,
-                    )
-                })?;
-                if faceuses2.is_empty() {
-                    if let Some(&first) = edgeuses2.first() {
-                        set_shell_head(b, new_shell, ShellMembers::Edgeuse(first), None)?;
-                    }
-                    b.shell_mut(new_shell)?.shell_type = ShellType::Wire;
-                } else {
-                    b.shell_mut(new_shell)?.shell_type = ShellType::Faceuse;
-                }
-                for &x in &edgeuses2 {
-                    if eu1::is_shell_edgeuse(b, x)? {
-                        b.edgeuse_mut(x)?.owner = EdgeuseOwner::Shell(Some(new_shell));
-                    }
-                }
-                for &fu in &faceuses2 {
-                    shell_remove_faceuse(b, shell, fu, OP)?;
-                    shell_post_insert_faceuse(b, new_shell, fu)?;
-                }
+                transfer_wire_split_component(k, b, env, &mut marks, lock, shell, v2)?;
                 let shell_keeps_faceuses = v1_has_faceuse
                     || (!v1_exhausted
                         && matches!(
@@ -1657,44 +1680,7 @@ fn wire_split_shell(
         marks.is_marked(k, Entity::Vertex(v2), lock.mark_type())
     });
     if split_shell {
-        let new_shell = b.add_shell_record(Shell::default())?;
-        let region = shell_region(b, shell)?;
-        region_post_insert(b, region, new_shell)?;
-        let mut edgeuses2 = Vec::new();
-        let mut faceuses2 = Vec::new();
-        marks.with_marks(env.records, env.key_of, |marks| {
-            topology_traverser::shell_traversal_with_marks(
-                k,
-                b,
-                marks,
-                v2,
-                shell,
-                Some(&mut edgeuses2),
-                Some(&mut faceuses2),
-                lock,
-            )
-        })?;
-        if faceuses2.is_empty() {
-            // NewShell is a wireShell - set first edge and ShellType (an empty
-            // edge-use list keeps the NULL head; upstream only asserts)
-            if let Some(&first) = edgeuses2.first() {
-                set_shell_head(b, new_shell, ShellMembers::Edgeuse(first), None)?;
-            }
-            b.shell_mut(new_shell)?.shell_type = ShellType::Wire;
-        } else {
-            // the first face is set later by PostInsert(pFU)
-            b.shell_mut(new_shell)?.shell_type = ShellType::Faceuse;
-        }
-        for &x in &edgeuses2 {
-            if eu1::is_shell_edgeuse(b, x)? {
-                b.edgeuse_mut(x)?.owner = EdgeuseOwner::Shell(Some(new_shell));
-            }
-        }
-        // transfer faceuses from the old shell to the new shell
-        for &fu in &faceuses2 {
-            shell_remove_faceuse(b, shell, fu, OP)?;
-            shell_post_insert_faceuse(b, new_shell, fu)?;
-        }
+        transfer_wire_split_component(k, b, env, &mut marks, lock, shell, v2)?;
     }
     // when pShell points to a deleted edgeuse (wireshell case) or is a wireshell
     // after a shell split, ensure it has a valid first edge
@@ -2722,5 +2708,57 @@ mod tests {
         let r = face_remove_loop(&mut b, f, None);
         assert!(matches!(r, Err(SolidError::InvalidInput { .. })));
         assert_eq!(b.face(f).unwrap().rectangular_trim, face2::UNSURE);
+    }
+
+    #[test]
+    fn delete_bridge_wire_edge_rebuilds_shell_faces_caches() {
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::brep::p3::delete_faces_batch;
+        use crate::topology::integrity::derived_shell_faces;
+
+        let mut k = Kernel::default();
+        let mut b = create_box(&mut k, crate::math::Point3::ZERO, 10.0, 10.0, 10.0).unwrap();
+        b.set_editing_enabled(true);
+
+        let side_faces: Vec<FaceId> = brep1::faces(&b, None)
+            .unwrap()
+            .into_iter()
+            .filter(|&f| {
+                let bb = crate::query::api_queries::face_bounding_box(&k, &b, f, true).unwrap();
+                (bb.max.z - bb.min.z).abs() > 1.0
+            })
+            .collect();
+        let bridge_wire = brep1::edges(&b, None)
+            .unwrap()
+            .into_iter()
+            .find(|&e| {
+                let bb = crate::query::api_queries::edge_bounding_box(&k, &b, e, true).unwrap();
+                (bb.max.z - bb.min.z).abs() > 1.0
+            })
+            .unwrap();
+
+        {
+            let mut state = ArenaNotifyState::new(&b);
+            let mut env = state.env(None);
+            delete_faces_batch(&mut k, &mut b, &mut env, &side_faces, Some(&[bridge_wire]))
+                .unwrap();
+        }
+        assert_eq!(brep1::shells(&mut k, &b, None).unwrap().len(), 1);
+
+        {
+            let mut state = ArenaNotifyState::new(&b);
+            let mut env = state.env(None);
+            let mut del = DeleteEnv::from_notify(&mut env);
+            delete_edge(&mut k, &mut b, &mut del, bridge_wire, None).unwrap();
+        }
+
+        let shells = brep1::shells(&mut k, &b, None).unwrap();
+        assert_eq!(shells.len(), 2);
+        for s in shells {
+            let expected = derived_shell_faces(&b, s).unwrap();
+            assert_eq!(expected.len(), 1);
+            assert_eq!(b.shell(s).unwrap().faces, expected);
+        }
     }
 }

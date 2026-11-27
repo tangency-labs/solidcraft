@@ -40,6 +40,7 @@
 use std::collections::{HashMap, HashSet};
 
 use solidcore::blend::band_room::law_fits_band;
+use solidcore::blend::blend_corner::crossing_ends::{plan as crossing_end_plan, CrossingEndPlan};
 use solidcore::blend::blend_corner::rollover::{
     chain_off_seams, concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, seams_back,
     RollOver,
@@ -1335,6 +1336,47 @@ fn separated_end_passes(
     groups.build(k, b, pass_group).map(Some)
 }
 
+/// Chamfers whose Ends meet across an unblended edge, built in the kernel's two passes
+/// ([`solidcore::blend::blend_corner::crossing_ends`]), each the ordinary chamfer pass;
+/// `None` where the kernel plans no passes.
+fn crossing_end_passes(
+    k: &mut Kernel,
+    b: &mut Brep,
+    picked: &[EdgeId],
+    sizes: &[f64],
+    turn: Turn,
+    chamfer_corner: ChamferCorner,
+    contract: Contract,
+) -> solidcore::Result<Option<Result<()>>> {
+    let CrossingEndPlan::Passes(passes) = crossing_end_plan(k, b, picked, sizes)? else {
+        return Ok(None);
+    };
+    let pass_group = |k: &mut Kernel, b: &mut Brep, edges: &[EdgeId], sizes: &[f64]| {
+        let chamfers: Vec<_> = sizes
+            .iter()
+            .map(|&d| ChamferSize::Distances([d, d]))
+            .collect();
+        let p = Pass {
+            edges,
+            section: Section::Chamfer {
+                sizes: &chamfers,
+                along: &[],
+            },
+            law: None,
+            setbacks: &[],
+            earlier: &[],
+            patches: false,
+            overflow: None,
+            turn,
+            chamfer_corner,
+            roll_over: RollOverStep::No,
+            contract,
+        };
+        pass_or_refuse(k, b, p).map(|result| result.map(|_| ()))
+    };
+    passes.build(k, b, pass_group).map(Some)
+}
+
 /// The rounds of [`blend`] when blends of several edges overflow their faces (the first call
 /// stopped in `b`, `edges` its edges, `sizes` theirs, `mitred` the mitred pairs it found): the
 /// blends that overflow on their own (each edge's alone, classified in `b`, where nothing was
@@ -2021,6 +2063,19 @@ fn blend_on_body(
         Blend::Curvature => |s| Section::Curvature(s),
         Blend::Chord => |s| Section::Chord(s),
         Blend::Chamfer => {
+            // chamfers whose Ends meet across an unblended edge: two passes (#17026)
+            if let Some(made) =
+                crossing_end_passes(k, b, &picked, each, turn, options.chamfer_corner, contract)?
+            {
+                if let Err(e) = made {
+                    return Ok(Err(e));
+                }
+                return Ok(done(k, b, expect, contract)?.map(|()| Blended {
+                    dropped,
+                    holes: Vec::new(),
+                    made: Vec::new(),
+                }));
+            }
             let sizes: Vec<ChamferSize> = each
                 .iter()
                 .map(|&d| ChamferSize::Distances([d, d]))

@@ -688,6 +688,30 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         faces: &[O],
         opt_keep_as_wires: Option<&[O]>,
     ) -> Result<()> {
+        if faces.is_empty() {
+            return Ok(());
+        }
+        if let Some((deleted_edges, deleted_vertices)) =
+            brep.brep_delete_faces_batch(k, faces, opt_keep_as_wires)?
+        {
+            for &f in faces {
+                if let Some(o_face) = self.other_mate(Some(f)) {
+                    self.remove_relationship(Some(f), Some(o_face))?;
+                }
+            }
+            for e in deleted_edges {
+                if let Some(o_e) = self.other_mate(Some(e)) {
+                    self.remove_relationship(Some(e), Some(o_e))?;
+                }
+            }
+            for v in deleted_vertices {
+                if let Some(o_v) = self.other_mate(Some(v)) {
+                    self.remove_relationship(Some(v), Some(o_v))?;
+                }
+            }
+            return Ok(());
+        }
+
         let mut faces_vertices: Vec<O> = Vec::new();
         let mut seen_vertices: std::collections::BTreeSet<O> = std::collections::BTreeSet::new();
         let mut faces_edges: Vec<O> = Vec::new();

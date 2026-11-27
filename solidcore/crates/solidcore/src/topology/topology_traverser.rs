@@ -517,11 +517,7 @@ pub fn faceuse_shell_replacement(
 ) -> Result<()> {
     lock.new_mark(std::slice::from_mut(&mut k.context))?;
     faceuse_traversal(k, b, marks, start, lock.mark_type(), Some(replaced))?;
-    for &fu in replaced.iter() {
-        if b.faceuse(fu)?.shell != Some(new_shell) {
-            shell::move_faceuse(b, fu, new_shell)?;
-        }
-    }
+    shell::move_faceuses_to_shell(b, replaced, new_shell)?;
     Ok(())
 }
 
@@ -663,14 +659,14 @@ pub(crate) fn shell_wire_split_check(
     check_mark(lock.mark_type())?;
 
     let mut start1 = None;
-    for vu in vertex::vertexuses(b, v1)? {
+    for &vu in &b.vertex(v1)?.vertexuses {
         if vertexuse::shell(b, vu)? == Some(shell) {
             start1 = Some(vu);
             break;
         }
     }
     let mut start2 = None;
-    for vu in vertex::vertexuses(b, v2)? {
+    for &vu in &b.vertex(v2)?.vertexuses {
         if vertexuse::shell(b, vu)? == Some(shell) {
             start2 = Some(vu);
             break;
@@ -743,7 +739,7 @@ pub(crate) fn shell_wire_split_check(
             return Ok(WireSplitCheck::Connected);
         }
         if seen_v.get_mut(side).is_some_and(|s| s.insert(v)) {
-            for next in vertex::vertexuses(b, v)? {
+            for &next in &b.vertex(v)?.vertexuses {
                 if seen_vu.get(other).is_some_and(|s| s.contains(&next)) {
                     return Ok(WireSplitCheck::Connected);
                 }
@@ -1234,6 +1230,48 @@ mod tests {
                 v1_has_faceuse: false,
                 v1_first_edgeuse: Some(_),
                 ..
+            }
+        ));
+        // Add a longer chain on v0's side ending in a face use so v2's tiny wire component
+        // (v3-v4) exhausts before v1's search reaches the face (`v1_exhausted == false`,
+        // `v1_has_faceuse == false`).
+        let v5 = b.add_vertex(Vec3::new(3.0, 0.0, 0.0)).unwrap();
+        let v6 = b.add_vertex(Vec3::new(4.0, 0.0, 0.0)).unwrap();
+        let _ = add_wire(&mut b, v2, v5);
+        let _ = add_wire(&mut b, v5, v6);
+        let f_id = b
+            .add_face_record(crate::topology::Face::new(shell))
+            .unwrap();
+        let fu_id = b
+            .add_faceuse_record(crate::topology::Faceuse {
+                face: Some(f_id),
+                shell: Some(shell),
+                ..crate::topology::Faceuse::default()
+            })
+            .unwrap();
+        let lu_id = b
+            .add_loopuse_record(crate::topology::Loopuse {
+                faceuse: Some(fu_id),
+                ..crate::topology::Loopuse::default()
+            })
+            .unwrap();
+        let vu_face = b
+            .add_vertexuse_record(Vertexuse {
+                vertex: Some(v6),
+                owner: VertexuseOwner::Loopuse(Some(lu_id)),
+                ..Vertexuse::default()
+            })
+            .unwrap();
+        b.vertex_mut(v6).unwrap().vertexuses.push(vu_face);
+        b.loopuse_mut(lu_id).unwrap().start =
+            crate::topology::LoopuseStart::Vertexuse(Some(vu_face));
+        b.faceuse_mut(fu_id).unwrap().loopuses.push(lu_id);
+        assert!(matches!(
+            shell_wire_split_check(&mut k, &b, v0, v3, shell, &lock).unwrap(),
+            WireSplitCheck::Split {
+                v1_exhausted: false,
+                v1_has_faceuse: false,
+                v1_first_edgeuse: Some(_),
             }
         ));
         lock.release(std::slice::from_mut(&mut k.context)).unwrap();

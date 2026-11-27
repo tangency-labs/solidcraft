@@ -198,18 +198,16 @@ fn grid_and_strip_shell_walks(n: u32) -> (u64, [usize; 3], f64) {
 }
 
 /// The union deletes the faces of the grid inside the strip and of the strip inside the
-/// grid, one by one, and after each asks whether what the face joined is still one shell:
-/// the walk from one of the face's vertices ends when it has reached the others, which the
-/// faces next to the deleted one join a step away, and deleting a wire edge left behind
-/// asks the same of its two ends. With bidirectional BFS wire-split checks, the walks
-/// marked 562 and 1750 faces for 4 x 4 and 8 x 8 strips (down from 862 and 3194 with
-/// one-way BFS, and 4936 and 27464 with upstream's depth-first walks). The union is the
-/// one the depth-first walks make: valid, 91 faces, 289 edges, 191 vertices and
-/// 90.2478725649763 of volume for 4 x 4, 271, 945, 627 and 339.57198870404693 for 8 x 8.
+/// grid in one batch per operand, then reconciles each surviving shell once: 104 and 292
+/// faces marked for 4 x 4 and 8 x 8 strips (essentially once per surviving face).
+/// Per-face breadth-first early-exit walks marked 862 and 3194 faces, and upstream's
+/// depth-first walks marked 4936 and 27464 faces. The union is the one the depth-first
+/// walks make: valid, 91 faces, 289 edges, 191 vertices and 90.2478725649763 of volume
+/// for 4 x 4, 271, 945, 627 and 339.57198870404693 for 8 x 8.
 #[test]
 fn deleting_faces_inside_a_union_walks_only_near_the_face() {
     let unions = [4, 8].map(grid_and_strip_shell_walks);
-    assert_eq!(unions.map(|u| u.0), [562, 1750]);
+    assert_eq!(unions.map(|u| u.0), [104, 292]);
     assert_eq!(unions.map(|u| u.1), [[91, 289, 191], [271, 945, 627]]);
     for (u, reference) in unions.iter().zip([90.2478725649763, 339.57198870404693]) {
         assert!(
