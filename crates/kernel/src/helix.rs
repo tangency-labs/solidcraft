@@ -30,7 +30,7 @@ fn rot(v: Vec3, k: Vec3, ang: f64) -> Vec3 {
 ///
 /// # Errors
 /// [`KernelError::Invalid`] for a profile that would sweep over itself, or a plane or axis that
-/// is not finite.
+/// is not finite. The speeds are solidcore's `screw_speed_range`.
 pub fn require_unfolded_screw_section(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec3, pitch: f64) -> Result<()> {
     let arr = |v: Vec3| [v.x, v.y, v.z];
     let (tilt, offset) =
@@ -39,19 +39,15 @@ pub fn require_unfolded_screw_section(plane: &Plane, region: &Region2, axis_orig
     if tilt <= 1e-9 && offset <= 1e-6 {
         return Ok(());
     }
-    let (Some(n), Some(k)) = (plane.x.cross(plane.y).normalized(), axis.normalized()) else {
-        return Err(KernelError::Invalid("the coil's profile plane or axis".into()));
-    };
-    let rise = pitch / std::f64::consts::TAU * n.dot(k);
-    let speeds: Vec<f64> = region
+    let points: Vec<[f64; 3]> = region
         .outer
         .segs
         .iter()
         .flat_map(|s| (0..32).map(move |i| s.point_at(i as f64 / 32.0)))
-        .map(|q| n.dot(k.cross(plane.to_world(q) - axis_origin)) + rise)
+        .map(|q| arr(plane.to_world(q)))
         .collect();
-    let lo = speeds.iter().cloned().fold(f64::INFINITY, f64::min);
-    let hi = speeds.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let (lo, hi) = solidcore_ops::axial_section::screw_speed_range(arr(plane.x), arr(plane.y), arr(axis_origin), arr(axis), pitch, &points)
+        .ok_or_else(|| KernelError::Invalid("the coil's profile plane or axis".into()))?;
     let scale = hi.abs().max(lo.abs()).max(f64::MIN_POSITIVE);
     if !(lo.is_finite() && hi.is_finite()) || !(lo > 1e-9 * scale || hi < -1e-9 * scale) {
         return Err(KernelError::Invalid(
