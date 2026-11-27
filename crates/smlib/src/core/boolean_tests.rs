@@ -704,16 +704,16 @@ fn tagged_owned_and_union_all_join_coincident_cut_tubes() {
         };
 
         let (a0, b0) = make_pair();
-        let expected_vol = volume(&a0).unwrap() + volume(&b0).unwrap();
+        let expected_vol = volume(&a0, 1e-6).unwrap() + volume(&b0, 1e-6).unwrap();
 
         let shared = super::boolean::boolean_tagged_owned(Ok(&a0), Ok(&b0), BooleanOp::Union)
             .unwrap_or_else(|e| panic!("tilt {tilt_deg} deg shared: {e:?}"))
             .unwrap();
         assert_eq!(solid_count(&shared).unwrap(), 1, "tilt {tilt_deg} deg shared");
         assert!(
-            (volume(&shared).unwrap() - expected_vol).abs() <= 1e-5 * expected_vol,
+            (volume(&shared, 1e-6).unwrap() - expected_vol).abs() <= 1e-5 * expected_vol,
             "tilt {tilt_deg} deg shared: {} vs {expected_vol}",
-            volume(&shared).unwrap()
+            volume(&shared, 1e-6).unwrap()
         );
         let sh = super::history::read(&shared).unwrap();
         let s_origins: BTreeSet<usize> = sh.faces.iter().flat_map(|f| f.origins.iter().map(|o| o.0)).collect();
@@ -725,18 +725,18 @@ fn tagged_owned_and_union_all_join_coincident_cut_tubes() {
             .unwrap();
         assert_eq!(solid_count(&owned).unwrap(), 1, "tilt {tilt_deg} deg owned");
         assert!(
-            (volume(&owned).unwrap() - expected_vol).abs() <= 1e-5 * expected_vol,
+            (volume(&owned, 1e-6).unwrap() - expected_vol).abs() <= 1e-5 * expected_vol,
             "tilt {tilt_deg} deg owned: {} vs {expected_vol}",
-            volume(&owned).unwrap()
+            volume(&owned, 1e-6).unwrap()
         );
 
         let (a2, b2) = make_pair();
         let all = super::boolean::union_all_tagged(&[&a2, &b2]).unwrap_or_else(|e| panic!("tilt {tilt_deg} deg union_all_tagged: {e:?}"));
         assert_eq!(solid_count(&all).unwrap(), 1, "tilt {tilt_deg} deg union_all_tagged");
         assert!(
-            (volume(&all).unwrap() - expected_vol).abs() <= 1e-5 * expected_vol,
+            (volume(&all, 1e-6).unwrap() - expected_vol).abs() <= 1e-5 * expected_vol,
             "tilt {tilt_deg} deg union_all_tagged: {} vs {expected_vol}",
-            volume(&all).unwrap()
+            volume(&all, 1e-6).unwrap()
         );
     }
 }
