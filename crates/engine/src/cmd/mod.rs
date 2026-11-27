@@ -142,6 +142,7 @@ pub(crate) use inspect::color_param;
 pub use join_pieces::Addition;
 pub use join_pieces::addition;
 pub use joints::MAX_REACH_JOINTS;
+pub use joints::drive_preview;
 pub use joints::posed_joints;
 pub use joints::reach_from;
 pub use joints::reach_preview;
