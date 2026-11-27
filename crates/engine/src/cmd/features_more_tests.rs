@@ -4727,6 +4727,32 @@ fn a_draft_of_a_spline_side_is_refused_naming_what_the_face_is() {
     assert_eq!(body_volume(&s, "Base"), volume);
 }
 
+/// #22803: a cylinder R 20 x 60 whose top edge is rounded 2, its side drafted 3° about its circle
+/// on XY, leaning in. The round follows the drafted side, as if the side had been drafted first
+/// and the edge rounded after. With t = tan 3°, q = sqrt(1 + t^2): the round's centre circle is
+/// at z = 58, rho_c = 20 - 58 t - 2 q; it meets the side at z_s = 58 + 2 t / q, radius
+/// rho_s = 20 - t z_s; the frustum below z_s is pi z_s (400 + 20 rho_s + rho_s^2) / 3 and the cap
+/// above it pi times the integral of (rho_c + sqrt(4 - u^2))^2 for u from 2 t / q to 2. It was
+/// refused: how far the round extends to meet the drafted side "has no certified bound".
+#[test]
+fn a_cylinders_side_drafts_under_its_rounded_top_edge() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 60, "base": [0, 0, 0], "axis": "Z", "operation": "new", "body_name": "Part"}));
+    run(&mut s, "solid.fillet", json!({"edges": [[0, -20, 60]], "radius": 2}));
+    run(&mut s, "solid.draft", json!({"faces": [[0, -20, 30]], "angle": "3 deg", "neutral": "XY"}));
+    let t = 3.0_f64.to_radians().tan();
+    let q = (1.0 + t * t).sqrt();
+    let rho_c = 20.0 - 58.0 * t - 2.0 * q;
+    let (z_s, a) = (58.0 + 2.0 * t / q, 2.0 * t / q);
+    let rho_s = 20.0 - t * z_s;
+    let frustum = std::f64::consts::PI * z_s * (400.0 + 20.0 * rho_s + rho_s * rho_s) / 3.0;
+    let f = |u: f64| rho_c * rho_c * u + rho_c * (u * (4.0 - u * u).sqrt() + 4.0 * (u / 2.0).asin()) + 4.0 * u - u * u * u / 3.0;
+    let want = frustum + std::f64::consts::PI * (f(2.0) - f(a));
+    assert!((want - 64086.644031).abs() < 1e-5, "closed form {want}");
+    let got = body_volume(&s, "Part");
+    assert!((got - want).abs() < 1e-9 * want, "{got} {want}");
+}
+
 #[test]
 fn draft_invalid_neutral_errors_name_neutral() {
     let mut s = Session::default();
