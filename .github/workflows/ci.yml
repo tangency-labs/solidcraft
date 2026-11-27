@@ -171,6 +171,13 @@ jobs:
       carried: ${{ steps.paths.outputs.carried }}
       # A batch branch's base (where it leaves main), for the jobs that read a merge group's base.
       batch_base: ${{ steps.paths.outputs.batch_base }}
+      # A push to main whose commit the merge queue (or a Tickets batch) already tested and passed:
+      # Format and repository checks are skipped too, as the build jobs already are.
+      queue_tested: ${{ steps.paths.outputs.queue_tested }}
+      # The key a passing SolidCore result is kept under (its tree and the CI that tested it), and
+      # the run whose result for that exact key this run reuses instead of testing again.
+      solidcore_key: ${{ steps.paths.outputs.solidcore_key }}
+      solidcore_reused: ${{ steps.paths.outputs.solidcore_reused }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -192,6 +199,7 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           REPO: ${{ github.repository }}
           APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'approved-for-ci') }}
+          REPO_ID: ${{ github.repository_id }}
           GH_TOKEN: ${{ github.token }}
         run: |
           native=false
@@ -202,6 +210,9 @@ jobs:
           solidcore=false
           full=true
           packages=
+          queue_tested=false
+          solidcore_key=
+          solidcore_reused=
           # Whether the NUL-separated paths in $1 reach any code: scripts/ci/affected.py selects
           # something or the whole workspace. Documentation, packaging, other workflows and the bots'
           # scripts select nothing. Pull requests and pushes to main share it.
@@ -213,7 +224,7 @@ jobs:
           }
           # Whether the NUL-separated paths in $1 (the diff $2) reach what the Windows D3D12 jobs
           # exercise: the GPU crate and its shaders, the app and its startup, the viewport's wgpu
-          # glue, the vendored egui, winit (its Windows event loop builds only there) and kernel,
+          # glue, the vendored egui, winit (its Windows event loop builds only there),
           # the title bar's hit test (the window chrome and the app bar's title-bar module, which
           # the app's Windows-only window procedure answers from), their scripts, the control
           # server (its refusals, #10967), or a lockfile change that moves the graphics stack
@@ -221,7 +232,7 @@ jobs:
           windows_paths() {
             while IFS= read -r -d '' path; do
               case "$path" in
-                crates/gpu/*|crates/ui-kit/src/window_chrome*|crates/ui-egui/src/titlebar.rs|vendor/winit/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui/*|solidcore/*|crates/control/src/server.rs) windows=true ;;
+                crates/gpu/*|crates/ui-kit/src/window_chrome*|crates/ui-egui/src/titlebar.rs|vendor/winit/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui/*|crates/control/src/server.rs) windows=true ;;
                 tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
               esac
             done < "$1"
@@ -336,7 +347,8 @@ jobs:
               packages=
               native=true
             elif [ "${tested:-0}" -gt 0 ]; then
-              echo "The merge queue already tested $PUSH_SHA: repository checks only."
+              echo "The merge queue already tested $PUSH_SHA: no checks repeated."
+              queue_tested=true
             elif tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
                 "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=push&branch=$GITHUB_REF_NAME&status=success&per_page=1" \
                 | grep -o '"head_sha": *"[0-9a-f]*"' | head -n 1 | grep -o '[0-9a-f]\{40\}') \
@@ -440,6 +452,43 @@ jobs:
               solidcore=false
             fi
           fi
+          # SolidCore's tests and checks read nothing outside solidcore/ (its own lockfile, toolchain
+          # file and test data are inside it) but the steps that run them: this workflow and the
+          # repository's actions. A passing result is kept under the solidcore/ tree that was tested
+          # and those two (an artifact, see SolidCore checks (tests)); a merge group or batch whose
+          # tree and CI are exactly the same reuses it (a batch rebuilt without a failing pull
+          # request, or stacked on one, usually is). Only runs that test a fixed commit keep one
+          # (merge groups, batches, main): a pull request's jobs each merge today's main
+          # (merge-main), so its jobs may not all test the same tree. Pull requests always run their
+          # shards (the queue reads them), pushes to main too (they save the caches), and so do the
+          # nightly and Run workflow.
+          if [ "$solidcore" = true ]; then
+            case "$EVENT_NAME" in
+              merge_group|push)
+                tree=$(git rev-parse "$GROUP_HEAD_SHA:solidcore" 2>/dev/null) || tree=
+                ci_tree=$(git rev-parse "$GROUP_HEAD_SHA:.github/workflows/ci.yml" 2>/dev/null) || ci_tree=
+                actions_tree=$(git rev-parse "$GROUP_HEAD_SHA:.github/actions" 2>/dev/null) || actions_tree= ;;
+              *) tree= ;;
+            esac
+            if [ -n "$tree" ] && [ -n "$ci_tree" ] && [ -n "$actions_tree" ]; then
+              solidcore_key="solidcore-pass-$tree-${ci_tree:0:12}-${actions_tree:0:12}"
+            fi
+            if [ -n "$solidcore_key" ] && [ "$EVENT_NAME" = merge_group ]; then
+              # Only results this repository's own fixed-commit runs kept: a fork's run could name
+              # an artifact anything.
+              solidcore_reused=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$REPO/actions/artifacts?name=$solidcore_key&per_page=20" \
+                | jq -r --argjson repo "$REPO_ID" '[.artifacts[] | select(.expired | not)
+                    | select(.workflow_run.head_repository_id == $repo and .workflow_run.repository_id == $repo)
+                    | select(.workflow_run.head_branch == "main" or (.workflow_run.head_branch // "" | startswith("batch/")) or (.workflow_run.head_branch // "" | startswith("gh-readonly-queue/")))
+                    | .workflow_run.id][0] // empty' 2>/dev/null) || solidcore_reused=
+              if [ -n "$solidcore_reused" ]; then
+                echo "SolidCore $tree passed with this CI in run $solidcore_reused: not tested again."
+                solidcore_reused="https://github.com/$REPO/actions/runs/$solidcore_reused"
+                solidcore=false
+              fi
+            fi
+          fi
           # The GPU path tests (their own job, about 56 runner-minutes) are for render changes only:
           # - on a pull request, when it carries the render-tests label (opt-in for a big render
           #   change) or touches render code (gpu_paths); no other pull request runs them;
@@ -471,6 +520,9 @@ jobs:
             echo "solidcore=$solidcore"
             echo "carried=$carried"
             echo "batch_base=${batch_base:-}"
+            echo "queue_tested=$queue_tested"
+            echo "solidcore_key=$solidcore_key"
+            echo "solidcore_reused=$solidcore_reused"
             echo "full=$full"
             echo "quick=$quick"
             echo "packages=$packages"
@@ -478,7 +530,9 @@ jobs:
 
   checks:
     name: Format and repository checks
-    if: (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
+    # Not on a push to main the merge queue (or a batch) already tested and passed: nothing changed.
+    needs: changes
+    if: needs.changes.outputs.queue_tested != 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft) && (github.event.action != 'labeled' || github.event.label.name == 'approved-for-ci')
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-4vcpu-ubuntu-2404' }}
     timeout-minutes: ${{ vars.CI_RUNNER && 75 || 25 }}
     steps:
@@ -1397,6 +1451,7 @@ jobs:
         env:
           CHANGES: ${{ needs.changes.result }}
           CHECKS: ${{ needs.checks.result }}
+          QUEUE_TESTED: ${{ needs.changes.outputs.queue_tested }}
           NATIVE: ${{ needs.changes.outputs.native }}
           QUICK: ${{ needs.changes.outputs.quick }}
           QUICK_COMPILE: ${{ needs.quick-compile.result }}
@@ -1433,7 +1488,11 @@ jobs:
           NO_USAGE_STATS: ${{ needs.no-usage-stats.result }}
         run: |
           test "$CHANGES" = success
-          test "$CHECKS" = success
+          if [ "$QUEUE_TESTED" = true ]; then
+            test "$CHECKS" = skipped
+          else
+            test "$CHECKS" = success
+          fi
           # An unapproved pull request: the heavy jobs are skipped on purpose.
           if [ "$QUICK" = true ]; then
             test "$QUICK_COMPILE" = success
@@ -1481,6 +1540,13 @@ jobs:
           if [ "$RIG_RUN" = true ]; then
             test "$RIG" = success
           fi
+      - name: Note a reused SolidCore result
+        if: needs.changes.outputs.solidcore_reused != ''
+        env:
+          REUSED: ${{ needs.changes.outputs.solidcore_reused }}
+          KEY: ${{ needs.changes.outputs.solidcore_key }}
+        run: |
+          echo "SolidCore: reused the passing result for ${KEY#solidcore-pass-} from $REUSED; its build, tests and checks were not repeated." >> "$GITHUB_STEP_SUMMARY"
       - name: Note a carried result
         if: needs.changes.outputs.carried != ''
         env:
@@ -1880,7 +1946,7 @@ jobs:
 
   solidcore-tests:
     name: SolidCore checks (tests)
-    needs: [changes, solidcore-tests-build, solidcore-tests-shard, solidcore-tests-extras]
+    needs: [changes, solidcore-tests-build, solidcore-tests-shard, solidcore-tests-extras, solidcore, solidcore-standalone]
     if: always() && needs.changes.outputs.solidcore == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-2vcpu-ubuntu-2404' }}
     timeout-minutes: 5
@@ -1892,6 +1958,23 @@ jobs:
         run: |
           echo "build=$BUILD shards=$SHARDS extras=$EXTRAS"
           test "$BUILD" = success && test "$SHARDS" = success && test "$EXTRAS" = success
+      # Every SolidCore job passed on a fixed commit (a merge group, a batch, main): keep the result
+      # under its key, for a later run with exactly the same solidcore/ tree and CI (Select checks).
+      - name: Keep the passing result
+        id: keep
+        if: >-
+          needs.changes.outputs.solidcore_key != '' && needs.solidcore.result == 'success' &&
+          needs.solidcore-standalone.result == 'success' && github.repository == 'tangency-labs/solidcraft' &&
+          (github.event_name == 'merge_group' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/batch/'))))
+        env:
+          KEY: ${{ needs.changes.outputs.solidcore_key }}
+        run: echo "$KEY ${{ github.sha }}" > "$RUNNER_TEMP/solidcore-pass.txt"
+      - if: steps.keep.outcome == 'success'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ needs.changes.outputs.solidcore_key }}
+          path: ${{ runner.temp }}/solidcore-pass.txt
+          retention-days: 7
 
   riscv64-gates:
     name: Compile RISC-V (manual)

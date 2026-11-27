@@ -219,12 +219,15 @@ pub use safe_write::write_atomic;
 pub use sketch2d::Geom2;
 pub use sketch2d::MAX_DRAWING_BYTES;
 pub use svg::CurveWarning;
+pub use svg::SVG_DEFAULT_DPI;
 pub use svg::SvgDrawing;
 pub use svg::decode_svg;
 pub use svg::read_svg;
 pub use svg::read_svg_drawing;
+pub use svg::read_svg_drawing_at;
 pub use svg::svg_nothing_to_import;
 pub use svg::svg_sheet;
+pub use svg::svg_sheet_at;
 pub use svg_out::SvgShape;
 pub use svg_out::svg_unit;
 pub use svg_out::write_svg;
@@ -242,6 +245,7 @@ pub use kicad_in::KicadBoard;
 pub use kicad_in::KicadCopper;
 pub use kicad_in::KicadDrill;
 pub use kicad_in::KicadFootprint;
+pub use kicad_in::KicadHoles;
 pub use kicad_in::KicadImport;
 pub use kicad_in::KicadLoader;
 pub use kicad_in::KicadModel;
@@ -2876,10 +2880,10 @@ mod tests {
     fn notes_say_short_only_for_a_face_under_the_angle() {
         let spec = solidcraft_kernel::MeshSpec::chord(0.01);
         assert!(mesh_notes(&solidcraft_kernel::PlanStats::default(), &spec).is_empty());
-        let unshaped = |face: usize, smallest_angle: f64| solidcraft_kernel::services::tess::Unshaped {
+        let unshaped = |face: usize, smallest_angle: f64| solidcraft_kernel::Unshaped {
             face,
             smallest_angle,
-            limits: vec![solidcraft_kernel::services::tess::ShapeLimit::Rounds],
+            limits: vec![solidcraft_kernel::ShapeLimit::Rounds],
         };
         let stats = solidcraft_kernel::PlanStats { unshaped: vec![unshaped(3, 18.5), unshaped(7, 27.25)], ..Default::default() };
         let notes = mesh_notes(&stats, &spec);

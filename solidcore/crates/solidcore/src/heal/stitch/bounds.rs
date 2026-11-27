@@ -2467,9 +2467,16 @@ mod tests {
             2,
             vec![0.0, 0.1, 0.2, 0.5, 0.8, 0.9, 1.0],
         );
-        // `basis_eval` fails on its natural ends; the box there holds both the end
-        // control point and the end piece's value.
-        assert!(uv.evaluate_point(&k, 0.2).is_err() && uv.evaluate_point(&k, 0.8).is_err());
+        // At U[2] the quadratic basis weights are 3/4 and 1/4 on P0,P1;
+        // at U[4] they are 1/4 and 3/4 on P2,P3. Both natural ends are valid.
+        let expected = [Vec3::new(0.2, 0.375, 0.0), Vec3::new(0.675, 0.15, 0.0)];
+        for (t, expected) in [0.2, 0.8].into_iter().zip(expected) {
+            let point = uv.evaluate_point(&k, t).unwrap();
+            assert!((point - expected).length() < 1e-12, "{t}: {point:?}");
+            let end = curve_box(&uv, Ivl::from(t)).unwrap();
+            assert!(contains(end, point), "{t}: {point:?} outside {end:?}");
+        }
+        // The conservative endpoint enclosure still holds the stored end control point.
         let end = curve_box(&uv, Ivl::from(0.2)).unwrap();
         assert!(contains(end, Vec3::new(0.1, 0.2, 0.0)), "{end:?}");
         for range in [[0.21, 0.79], [0.3, 0.6]] {
