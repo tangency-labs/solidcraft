@@ -883,7 +883,62 @@ fn local_operation_on(
     // outside along a line (a notch's wall tangent to it) into a region of its own, made
     // material: its void flag is read from the faces again (`p5::set_alternating_void_flags`)
     p5::set_alternating_void_flags(b)?;
+    // (not upstream, #15715) an implicit offset face (a moved thread flank) is stored as the
+    // certified net of its offset (`net_implicit_offsets`), which a solid's proof can read
+    let before_nets = b.editing_enabled();
+    b.set_editing_enabled(true);
+    let netted = net_implicit_offsets(k, b);
+    b.set_editing_enabled(before_nets);
+    netted?;
+    // (not upstream, #15715) the copied faces meet along edges and vertices that carry the
+    // tolerances the offset left them, and where an edge's end lies a hair further from its
+    // vertex than that (a thread flank's moved edge: 1.02e-5 against 1.0155e-5) the final
+    // check reports a gap no tolerance covers. Each vertex and edge grows to cover the gaps
+    // it bounds, as an API offset's result does (`update_result_tolerances`); a vertex grown
+    // too wide to excuse is still the check's (test #82)
+    validation::validate_and_update_tolerances(k, b, false, None, 0)?;
     refuse_unsound(k, b, &input)
+}
+
+/// (not upstream, #15715) The faces of the solid `b` whose surface is an implicit offset (a
+/// thread flank moved along its normal is one) take the certified net of their offset in its
+/// place ([`OffsetExecutive::replace_implicit_offsets`], within the body's tolerance of the
+/// offset at every parameter, as a shell's result has them). An implicit offset has no NURBS
+/// form to enclose, so a solid holding one has no volume the final gate or the caller's proof
+/// can read: both gave up as unsupported, though the body is sound. A body that is no solid
+/// is left as it is.
+///
+/// # Errors
+///
+/// Those of the replacement (an offset of an offset, which has no B-spline base, is not
+/// supported).
+fn net_implicit_offsets(k: &mut Kernel, b: &mut Brep) -> Result<()> {
+    if !p2::is_manifold_solid(b)? {
+        return Ok(());
+    }
+    let mut implicit = false;
+    for face in bp1::faces(b, None)? {
+        implicit |= matches!(
+            b.face(face)?.surface.as_ref().map(Surface::kind),
+            Some(SurfaceKind::OffsetSurface(_))
+        );
+    }
+    if !implicit {
+        return Ok(());
+    }
+    let tolerance = b.tolerance();
+    let mut records = crate::topology::topology::NotifyRecords::new();
+    let mut attributes = crate::geom::attribute::AttributeStore::default();
+    OffsetExecutive::replace_implicit_offsets(
+        k,
+        b,
+        tolerance,
+        &mut crate::topology::edge::NotificationStores {
+            records: &mut records,
+            attributes: &mut attributes,
+            key_of: &crate::topology::loopuse::notify_ref,
+        },
+    )
 }
 
 /// (not upstream) The local operation's final gate: the body it built is refused when it
