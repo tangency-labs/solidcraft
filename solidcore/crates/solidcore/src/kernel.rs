@@ -207,6 +207,7 @@ pub struct WorkCounters {
     face_pairs: Cell<u64>,
     loops_classified: Cell<u64>,
     wall_body_copies: Cell<u64>,
+    keep_feature_creases: Cell<u64>,
     proto_edge_intersections: Cell<u64>,
     shell_traversal_faces: Cell<u64>,
     proto_vertex_point_solves: Cell<u64>,
@@ -282,6 +283,13 @@ impl WorkCounters {
     #[must_use]
     pub fn wall_body_copies(&self) -> u64 {
         self.wall_body_copies.get()
+    }
+
+    /// Creases keep features computes, each the section of a sheet face of rounds by a
+    /// feature's wall (a planar section, or a surface intersection). Not the fork's.
+    #[must_use]
+    pub fn keep_feature_creases(&self) -> u64 {
+        self.keep_feature_creases.get()
     }
 
     /// Curve intersections a boolean ran to split its proto edges where they cross
@@ -705,6 +713,7 @@ impl WorkCounters {
         self.face_pairs.set(0);
         self.loops_classified.set(0);
         self.wall_body_copies.set(0);
+        self.keep_feature_creases.set(0);
         self.proto_edge_intersections.set(0);
         self.shell_traversal_faces.set(0);
         self.proto_vertex_point_solves.set(0);
@@ -853,6 +862,12 @@ impl WorkCounters {
     pub(crate) fn add_wall_body_copy(&self) {
         self.wall_body_copies
             .set(self.wall_body_copies.get().saturating_add(1));
+    }
+
+    /// Counts one crease keep features computes between a sheet face and a wall.
+    pub(crate) fn add_keep_feature_crease(&self) {
+        self.keep_feature_creases
+            .set(self.keep_feature_creases.get().saturating_add(1));
     }
 
     /// Counts one curve intersection of two proto edges.

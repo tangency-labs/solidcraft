@@ -2018,7 +2018,7 @@ fn perforate_toolbar_opens_without_running_empty_parameters() {
         let ctx = crate::fonts::test_context();
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
             if let Kind::Sheet(k) = &mut dialog.kind {
-                rows(&mut app, ui, k, &mut dialog.inputs);
+                rows(&mut app, ui, k, &mut dialog.inputs, &dialog.extra);
             }
         });
         let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text()).collect();
@@ -2838,7 +2838,7 @@ fn press_in_hardware_form_offers_the_sizes_the_table_has_for_the_kind() {
         }
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
             if let Kind::Sheet(k) = &mut dialog.kind {
-                rows(&mut app, ui, k, &mut dialog.inputs);
+                rows(&mut app, ui, k, &mut dialog.inputs, &dialog.extra);
             }
         });
         let texts: Vec<String> = crate::test_support::text_shapes(&output).map(|text| text.galley.text().to_string()).collect();
