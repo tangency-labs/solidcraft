@@ -391,7 +391,8 @@ mod tests {
 
     #[test]
     fn device_failures_respect_policy_and_report_each_eligible_adapter() {
-        let found = [candidate("first", DeviceType::DiscreteGpu), candidate("second", DeviceType::DiscreteGpu), candidate("software", DeviceType::Cpu)];
+        let found =
+            [candidate("first", DeviceType::DiscreteGpu), candidate("second", DeviceType::DiscreteGpu), candidate("software", DeviceType::Cpu)];
         let mut attempted = Vec::new();
         let result: crate::Result<(&str, ())> = open_first(Policy::Hardware, found, |name| {
             attempted.push(*name);
