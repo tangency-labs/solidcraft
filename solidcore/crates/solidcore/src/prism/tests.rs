@@ -1943,9 +1943,7 @@ mod recognition {
                 })
                 .collect(),
         };
-        let (center, _, _) = rounded
-            .as_ellipse()
-            .expect("controls rounded as a + b - c");
+        let (center, _, _) = rounded.as_ellipse().expect("controls rounded as a + b - c");
         assert_eq!(center, c);
     }
 
