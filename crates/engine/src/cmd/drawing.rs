@@ -215,8 +215,20 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
     if request.standard_views {
         d = super::drawing_view::first_standard_views(s, &d)?;
     }
+    let lists: Vec<_> = d
+        .tables
+        .iter()
+        .filter_map(|table| match &table.kind {
+            Kind::PartsList(list) => Some(list.request()),
+            _ => None,
+        })
+        .collect();
     s.open_drawing = Some(d.id);
     s.doc_mut().put_drawing(Arc::new(d));
+    for request in &lists {
+        // As drawing.table.add does: what is printed doesn't move when the design changes.
+        let _ = super::bom::keep_shown_numbers(s, request);
+    }
     inspect(s, &Value::Null)
 }
 

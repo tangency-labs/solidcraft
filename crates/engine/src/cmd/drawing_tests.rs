@@ -277,6 +277,12 @@ fn file_template_keeps_parts_list_layout_for_the_new_design() {
     assert_eq!(list.sheet, made.sheets[0].id);
     let kind = serde_json::to_value(&list.kind).unwrap();
     assert_eq!(kind["parts_list"]["of"], json!({"source": ids::encode(made.sources[0].id), "component": 0}));
+    // The numbers the new list shows are saved, as drawing.table.add saves them: a later change to
+    // the design does not move what is printed.
+    // The original list was of the empty Fixture component; the new one is of the design's root, whose
+    // one body is item 1.
+    let saved = s.doc.assembly.item_numbers.iter().find(|n| n.source == 0);
+    assert!(saved.is_some_and(|n| n.items.len() == 1 && n.items[0].number == 1), "{:?}", s.doc.assembly.item_numbers);
 }
 
 #[test]
