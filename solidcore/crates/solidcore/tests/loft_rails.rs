@@ -12,7 +12,9 @@ use solidcore::error::{Reason, SolidError};
 use solidcore::math::{Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use solidcore::query::api_queries::surface_closest_point;
-use solidcore::sweep::loft_rails::{loft_rails, RailLoftOptions, RailSection, RailedLoft};
+use solidcore::sweep::loft_rails::{
+    loft_rails, loft_rails_to_point, RailLoftOptions, RailSection, RailedLoft,
+};
 use solidcore::sweep::stations::RailFit;
 use solidcore::Kernel;
 
@@ -179,6 +181,36 @@ fn a_straight_rail_tapering_similar_sections_gives_the_frustum() {
     let corner = line(a1, b1);
     let off = sampled_off(&k, &made, &corner, 50);
     assert!(off <= 1e-9, "{off}");
+}
+
+/// #22751: four straight rails from the corners of a square to the apex above its middle are
+/// the pyramid's edges, which its flat walls hold exactly: the walls through the base and one
+/// station certify them, every rail's foot at the apex taken on the edge the rail runs up.
+#[test]
+fn four_rails_to_an_apex_certify_through_one_station() {
+    let mut k = Kernel::default();
+    let c = [
+        Point3::new(1.0, -1.0, 0.0),
+        Point3::new(1.0, 1.0, 0.0),
+        Point3::new(-1.0, 1.0, 0.0),
+        Point3::new(-1.0, -1.0, 0.0),
+    ];
+    let apex = Point3::new(0.0, 0.0, 10.0);
+    let square: Vec<Curve> = (0..4).map(|i| line(c[i], c[(i + 1) % 4])).collect();
+    let base = RailSection {
+        origin: c[0],
+        normal: Vec3::Z,
+        curves: square.iter().collect(),
+    };
+    let rails: Vec<Curve> = c.iter().map(|p| line(*p, apex)).collect();
+    let refs: Vec<&Curve> = rails.iter().collect();
+    let opts = RailLoftOptions {
+        closed: true,
+        ..RailLoftOptions::new(1e-6)
+    };
+    let made = loft_rails_to_point(&mut k, &base, apex, &refs, &opts).unwrap();
+    assert_eq!(made.params, vec![0.0, 0.5, 1.0], "{:?}", made.bounds);
+    assert!(made.bounds.iter().all(|b| *b <= 1e-6), "{:?}", made.bounds);
 }
 
 /// The rectangle and trapezoid lie on perpendicular planes. Their corresponding

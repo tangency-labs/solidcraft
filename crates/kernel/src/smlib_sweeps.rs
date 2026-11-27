@@ -2518,6 +2518,31 @@ mod imp {
         Ok(record)
     }
 
+    /// The solidcore loft from the section `pieces` on `plane` to `apex` guided by `rails`, as its
+    /// record, certified as [`railed_skin`] is.
+    fn railed_skin_to_point(plane: &Plane, pieces: &[Piece], apex: Vec3, rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<solidcore_record::brep::Brep> {
+        let sections = skin_sections(&matched(&[(*plane, pieces.to_vec())])?)?;
+        let section = sections.first().ok_or_else(|| KernelError::Invalid("loft to a point: the section".into()))?;
+        let rail_curves: Vec<SkinCurve> = rails
+            .iter()
+            .map(|r| {
+                let points: Vec<[f64; 3]> = r.iter().map(|p| [p.x, p.y, p.z]).collect();
+                solidcore_ops::sweep::railed::polyline_rail(&points).map_err(|e| KernelError::Invalid(e.to_string()))
+            })
+            .collect::<Result<_>>()?;
+        let how = RailLoft {
+            fit: match fit {
+                crate::RailFit::Scale => SkinFit::Scale,
+                crate::RailFit::Stretch => SkinFit::Stretch,
+            },
+            ..RailLoft::relative(1e-4)
+        };
+        let body = solidcore_ops::sweep::railed::loft_rails_to_point(section, [apex.x, apex.y, apex.z], &rail_curves, &how)
+            .map_err(|e| KernelError::Invalid(e.to_string()))?;
+        let (record, _) = body.to_record().map_err(|e| KernelError::Invalid(e.to_string()))?;
+        Ok(record)
+    }
+
     /// The sections as the one or two rails' loft makes them (their curves as NURBS, in order).
     fn matched(sections: &[(Plane, Vec<Piece>)]) -> Result<Vec<crate::loft_rails::Section>> {
         sections
@@ -2563,19 +2588,22 @@ mod imp {
         with_history(body, &roles, pieces)
     }
 
-    /// [`loft_to_point`] following one or two guide `rails` (polylines from the section to the
-    /// apex), `fit` saying how they reshape the section on the way: the base is the start cap, each
-    /// wall comes from the segment it stands on.
+    /// [`loft_to_point`] following 1…[`crate::MAX_LOFT_RAILS`] guide `rails` (polylines from the
+    /// section to the apex), `fit` saying how they reshape the section on the way: the base is the
+    /// start cap, each wall comes from the segment it stands on. Three or more rails are
+    /// solidcore's ([`railed_skin_to_point`]).
     pub(crate) fn loft_to_point_with_rails(plane: &Plane, pieces: &[Piece], apex: Vec3, rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
-        if rails.is_empty() || rails.len() > 2 {
-            return Err(KernelError::Invalid("a loft to a point takes one or two guide rails".into()));
-        }
-        let segs: Vec<Seg2> = pieces.iter().map(|x| x.seg).collect();
-        let base = crate::loft_rails::Section::of(plane, &segs, pieces.iter().map(|x| x.numbers.clone()).collect())?;
-        let (rows, along) = crate::loft_rails::railed_to_point(&base, apex, rails, fit)?;
-        let sections: Vec<Vec<Curve>> = rows.iter().map(|section| section.iter().map(rows_curve).collect()).collect();
-        let brep = Brep::loft_to_point_through(&sections, p(apex), &along).map_err(|e| failed("loft to a point", e))?;
-        let body = body_of(brep, "loft to a point")?;
+        check_rail_count(rails.len())?;
+        let body = if rails.len() > 2 {
+            body_from_record(&railed_skin_to_point(plane, pieces, apex, rails, fit)?, "loft to a point")?
+        } else {
+            let segs: Vec<Seg2> = pieces.iter().map(|x| x.seg).collect();
+            let base = crate::loft_rails::Section::of(plane, &segs, pieces.iter().map(|x| x.numbers.clone()).collect())?;
+            let (rows, along) = crate::loft_rails::railed_to_point(&base, apex, rails, fit)?;
+            let sections: Vec<Vec<Curve>> = rows.iter().map(|section| section.iter().map(rows_curve).collect()).collect();
+            let brep = Brep::loft_to_point_through(&sections, p(apex), &along).map_err(|e| failed("loft to a point", e))?;
+            body_of(brep, "loft to a point")?
+        };
         let roles = roles(&body, plane, None, &seeds(plane, pieces, |q| q), &[], false)?;
         with_history(body, &roles, pieces)
     }

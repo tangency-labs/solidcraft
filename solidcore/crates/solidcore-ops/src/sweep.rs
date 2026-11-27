@@ -1733,79 +1733,92 @@ pub fn loft_to_point_through(
             }
             rows.push((made.curves, row));
         }
-        let Some((base, base_splines)) = rows.first() else {
-            return Ok(Err(Error::Argument));
-        };
-        if !path::closed_loop(k, base, 1e-6)?.is_yes() {
-            return Ok(Err(Error::Argument));
-        }
-        let top: Point3 = v3(apex);
-        match path::point_off_plane_of(k, base, top, 1e-9) {
-            Ok(v) if v.is_yes() => {}
-            _ => return Ok(Err(Error::Argument)),
-        }
-        // The apex row: each base curve with every control point on the apex (its own weights
-        // and knots).
-        let mut tip = Vec::with_capacity(n);
-        for b in base_splines {
-            let c = b.canonical()?;
-            let at_apex = vec![top; c.control_points.len()];
-            let data = CanonicalData {
-                dim: 3,
-                degree: c.degree,
-                control_points: &at_apex,
-                form: BSplineCurveForm::Unspecified,
-                knot_multiplicities: &c.knot_multiplicities,
-                knots: &c.knots,
-                knot_type: KnotType::Unspecified,
-                weights: (!c.weights.is_empty()).then_some(c.weights.as_slice()),
-                trim: None,
-            };
-            tip.push(BSplineCurve::create_canonical(&data)?);
-        }
-        let mut columns: Vec<Vec<BSplineCurve>> = vec![Vec::with_capacity(rows.len() + 1); n];
-        for (_, row) in &rows {
-            for (column, b) in columns.iter_mut().zip(row) {
-                column.push(b.clone());
-            }
-        }
-        for (column, b) in columns.iter_mut().zip(tip) {
-            column.push(b);
-        }
-        let degree = (params.len() - 1).min(3);
-        let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
-        let region = b.infinite_region();
-        let tol = 1e-6;
-        let built = build_faces(&mut b, |b, fenv| -> Out<()> {
-            called(create_planar_face_with_3d_curves(
-                k, b, region, base, tol, fenv,
-            ))?;
-            for column in &columns {
-                let wall = called(BSplineSurface::create_skinned_surface(
-                    k,
-                    column,
-                    SkinnedSurfaceOptions {
-                        deriv_surfs: Some([None, None]),
-                        degree,
-                        section_params: Some(params),
-                        ..Default::default()
-                    },
-                ))?;
-                let surface = Surface::from(wall);
-                let domain = called(surface.natural_uv_domain_with_nurb(k))?;
-                called(create_face_from_surface(k, b, Some(surface), &domain, fenv))?;
-            }
-            Ok(())
-        });
-        if let Err(e) = built {
-            return Ok(Err(e));
-        }
-        if let Err(e) = stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default()) {
-            return Ok(Err(status(e)));
-        }
-        b.refresh_cached_topology();
-        finish(k, b, Expect::SOLID)
+        point_walls(k, &rows, v3(apex), params)
     })
+}
+
+/// The loft to the point `top` through `rows` (each a row's curves and their B-splines, the
+/// base first), skinned at `params` (each row's, then the apex's): the base capped, one wall per
+/// column. Refused as [`Error::Argument`] for a base that is not one closed loop or an apex not
+/// proved off its plane.
+pub(crate) fn point_walls(
+    k: &mut Kernel,
+    rows: &[(Vec<KCurve>, Vec<BSplineCurve>)],
+    top: Point3,
+    params: &[f64],
+) -> solidcore::Result<Out<Brep>> {
+    let n = rows.first().map_or(0, |r| r.1.len());
+    let Some((base, base_splines)) = rows.first() else {
+        return Ok(Err(Error::Argument));
+    };
+    if !path::closed_loop(k, base, 1e-6)?.is_yes() {
+        return Ok(Err(Error::Argument));
+    }
+    match path::point_off_plane_of(k, base, top, 1e-9) {
+        Ok(v) if v.is_yes() => {}
+        _ => return Ok(Err(Error::Argument)),
+    }
+    // The apex row: each base curve with every control point on the apex (its own weights
+    // and knots).
+    let mut tip = Vec::with_capacity(n);
+    for b in base_splines {
+        let c = b.canonical()?;
+        let at_apex = vec![top; c.control_points.len()];
+        let data = CanonicalData {
+            dim: 3,
+            degree: c.degree,
+            control_points: &at_apex,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &c.knot_multiplicities,
+            knots: &c.knots,
+            knot_type: KnotType::Unspecified,
+            weights: (!c.weights.is_empty()).then_some(c.weights.as_slice()),
+            trim: None,
+        };
+        tip.push(BSplineCurve::create_canonical(&data)?);
+    }
+    let mut columns: Vec<Vec<BSplineCurve>> = vec![Vec::with_capacity(rows.len() + 1); n];
+    for (_, row) in rows {
+        for (column, b) in columns.iter_mut().zip(row) {
+            column.push(b.clone());
+        }
+    }
+    for (column, b) in columns.iter_mut().zip(tip) {
+        column.push(b);
+    }
+    let degree = (params.len() - 1).min(3);
+    let mut b = new_brep(k, USE_DEFAULT, USE_DEFAULT)?;
+    let region = b.infinite_region();
+    let tol = 1e-6;
+    let built = build_faces(&mut b, |b, fenv| -> Out<()> {
+        called(create_planar_face_with_3d_curves(
+            k, b, region, base, tol, fenv,
+        ))?;
+        for column in &columns {
+            let wall = called(BSplineSurface::create_skinned_surface(
+                k,
+                column,
+                SkinnedSurfaceOptions {
+                    deriv_surfs: Some([None, None]),
+                    degree,
+                    section_params: Some(params),
+                    ..Default::default()
+                },
+            ))?;
+            let surface = Surface::from(wall);
+            let domain = called(surface.natural_uv_domain_with_nurb(k))?;
+            called(create_face_from_surface(k, b, Some(surface), &domain, fenv))?;
+        }
+        Ok(())
+    });
+    if let Err(e) = built {
+        return Ok(Err(e));
+    }
+    if let Err(e) = stitch_and_orient(k, &mut b, &StitchAndOrientOptions::default()) {
+        return Ok(Err(status(e)));
+    }
+    b.refresh_cached_topology();
+    finish(k, b, Expect::SOLID)
 }
 
 /// Each station map finite, its translation within [`MAX_COORD`], its rows shorter than 1e6,

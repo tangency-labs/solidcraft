@@ -13,7 +13,7 @@ mod common;
 use common::edge_at;
 use solidcore_ops::make_cylinder;
 use solidcore_ops::sweep::railed::{
-    loft_blend, loft_rails, open_section_turns, point_frames, polyline_rail, section_frames,
+    loft_blend, loft_rails, loft_rails_to_point, open_section_turns, point_frames, polyline_rail, section_frames,
     BlendFrame, Continuity, RailFit, RailLoft, RailSection,
 };
 use solidcore_ops::sweep::Curve;
@@ -86,6 +86,78 @@ fn four_straight_rails_loft_the_square_frustum() {
     let v = body.volume(1e-10).unwrap();
     let want = 10.0 / 3.0 * 28.0;
     assert!((v - want).abs() <= 1e-6 * want, "{v} against {want}");
+}
+
+/// #22751: three or four straight rails from corners of the square of side 2 at z = 0 to the
+/// apex (0, 0, 10) make the pyramid, `A h / 3 = 40 / 3`, as no rail does.
+#[test]
+fn three_or_four_straight_rails_to_an_apex_make_the_pyramid() {
+    let corners = [[1.0, -1.0], [1.0, 1.0], [-1.0, 1.0], [-1.0, -1.0]];
+    for n in [3, 4] {
+        let rails: Vec<Curve> = corners[..n]
+            .iter()
+            .map(|c| line([c[0], c[1], 0.0], [0.0, 0.0, 10.0]))
+            .collect();
+        let body = loft_rails_to_point(
+            &section(1.0, 0.0),
+            [0.0, 0.0, 10.0],
+            &rails,
+            &RailLoft::new(1e-6),
+        )
+        .unwrap();
+        let v = body.volume(1e-10).unwrap();
+        let want = 40.0 / 3.0;
+        assert!((v - want).abs() <= 1e-6 * want, "{n} rails: {v} against {want}");
+    }
+}
+
+/// Four rails from the square's corners curving in to the apex, each at `1 - t^2` of its
+/// corner, `t = z / 10`: every station is the square of half side `1 - t^2`, so the solid is
+/// `10 ∫ 4 (1 - t^2)^2 dt = 64 / 3`.
+#[test]
+fn four_curved_rails_to_an_apex_carry_the_square_in() {
+    let corners = [[1.0, -1.0], [1.0, 1.0], [-1.0, 1.0], [-1.0, -1.0]];
+    let rails: Vec<Curve> = corners
+        .iter()
+        .map(|c| {
+            let points: Vec<[f64; 3]> = (0..=80)
+                .map(|i| f64::from(i) / 80.0)
+                .map(|t| {
+                    let r = 1.0 - t * t;
+                    [c[0] * r, c[1] * r, 10.0 * t]
+                })
+                .collect();
+            polyline_rail(&points).unwrap()
+        })
+        .collect();
+    let body = loft_rails_to_point(
+        &section(1.0, 0.0),
+        [0.0, 0.0, 10.0],
+        &rails,
+        &RailLoft::relative(1e-4),
+    )
+    .unwrap();
+    let v = body.volume(1e-10).unwrap();
+    let want = 64.0 / 3.0;
+    assert!((v - want).abs() <= 1e-3 * want, "{v} against {want}");
+}
+
+/// A rail that ends beside the apex is refused.
+#[test]
+fn a_rail_missing_the_apex_is_refused() {
+    let corners = [[1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]];
+    let mut rails: Vec<Curve> = corners
+        .iter()
+        .map(|c| line([c[0], c[1], 0.0], [0.0, 0.0, 10.0]))
+        .collect();
+    rails[2] = line([-1.0, 1.0, 0.0], [0.5, 0.0, 10.0]);
+    let made = loft_rails_to_point(
+        &section(1.0, 0.0),
+        [0.0, 0.0, 10.0],
+        &rails,
+        &RailLoft::new(1e-6),
+    );
+    assert!(made.is_err(), "{made:?}");
 }
 
 /// The kernel's refusal past the wires reaches ops as its own error, naming the bound.

@@ -4,7 +4,7 @@
 
 use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::sweep::loft_rails::{
-    loft_rails as kernel_loft_rails, polyline, RailLoftOptions, RailSection as KernelSection,
+    loft_rails as kernel_loft_rails, loft_rails_to_point as kernel_loft_rails_to_point, polyline, RailLoftOptions, RailSection as KernelSection,
     DEFAULT_MAX_WIRES,
 };
 use solidcore::sweep::section_blend::{section_blend_surface, EndOrder, SectionFrame};
@@ -144,6 +144,79 @@ pub fn loft_rails(sections: &[RailSection], rails: &[Curve], how: &RailLoft) -> 
             ),
             Err(e) => Ok(Err(refused(e))),
         }
+    })
+}
+
+/// The loft from `section` (closed, capped) to the point `apex` guided by one to sixteen
+/// `rails`, each from the section to the apex ([`solidcore::sweep::loft_rails::loft_rails_to_point`]):
+/// the section capped, one wall per curve meeting at the apex, each guided edge certified within
+/// `how.tolerance` of its rail. `how.cap` is not used.
+///
+/// # Errors
+/// [`Error::Argument`] for a curve list refused, a count out of range or an apex not finite or
+/// not off the section's plane; [`Error::RailPastTolerance`] and the kernel's other refusals as
+/// for [`loft_rails`]; [`Error::Empty`], [`Error::NotSolid`].
+pub fn loft_rails_to_point(
+    section: &RailSection,
+    apex: [f64; 3],
+    rails: &[Curve],
+    how: &RailLoft,
+) -> Result<Body> {
+    if !(1..=solidcore::sweep::loft_rails::MAX_RAILS).contains(&rails.len())
+        || !super::coord_ok(&apex)
+    {
+        return Err(Error::Argument);
+    }
+    let all: Vec<Curve> = section
+        .curves
+        .iter()
+        .cloned()
+        .chain(rails.iter().cloned())
+        .collect();
+    making("loft_rails_to_point", |k| {
+        let made = match parse(k, &all) {
+            Ok(m) => m,
+            Err(e) => return Ok(Err(e)),
+        };
+        let n = section.curves.len();
+        let (Some(curves), Some(rail_curves)) = (made.curves.get(..n), made.curves.get(n..))
+        else {
+            return Ok(Err(Error::Argument));
+        };
+        let base = KernelSection {
+            origin: Vec3::new(section.origin[0], section.origin[1], section.origin[2]),
+            normal: Vec3::new(section.normal[0], section.normal[1], section.normal[2]),
+            curves: curves.iter().collect(),
+        };
+        let rail_refs: Vec<_> = rail_curves.iter().collect();
+        let opts = RailLoftOptions {
+            fit: match how.fit {
+                RailFit::Scale => KernelRailFit::Scale,
+                RailFit::Stretch => KernelRailFit::Stretch,
+            },
+            closed: true,
+            degree: 3,
+            cap: false,
+            tolerance: how.tolerance,
+            max_wires: how.max_wires,
+        };
+        let top = Vec3::new(apex[0], apex[1], apex[2]);
+        let made = match kernel_loft_rails_to_point(k, &base, top, &rail_refs, &opts) {
+            Ok(m) => m,
+            Err(e) => return Ok(Err(refused(e))),
+        };
+        let mut rows = Vec::with_capacity(made.rows.len());
+        for row in made.rows {
+            let mut splines = Vec::with_capacity(row.len());
+            for c in &row {
+                let Some(b) = c.b_spline_base() else {
+                    return Ok(Err(Error::Argument));
+                };
+                splines.push(b.clone());
+            }
+            rows.push((row, splines));
+        }
+        super::point_walls(k, &rows, top, &made.params)
     })
 }
 
