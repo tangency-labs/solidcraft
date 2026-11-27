@@ -3218,6 +3218,8 @@ fn the_history_bar_feature_menu_is_reported_and_picked() {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
     h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "Blk"})).unwrap();
+    // A second feature, so the delete after the marker below takes more than the clicked one.
+    h.app.run("solid.box", json!({"corner": [40, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Spare"})).unwrap();
     h.frames(3);
     let (id, name) = (h.app.session.doc.features[0].id, h.app.session.doc.features[0].name.clone());
     let labels = |menu: &serde_json::Value| -> Vec<String> {
@@ -3274,7 +3276,46 @@ fn the_history_bar_feature_menu_is_reported_and_picked() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     h.frames(2);
-    assert!(h.app.session.doc.feature(id).is_none(), "the features after the marker are deleted");
+    assert!(h.app.session.doc.features.is_empty(), "the features after the marker are deleted");
+}
+
+/// The ids of the "Delete N Features After History Marker" entries in a History bar feature's menu.
+fn delete_after_marker_entries(app: &SolveApp, id: u64) -> Vec<serde_json::Value> {
+    let items = crate::timeline::feature_items(app, id);
+    items.into_iter().filter(|item| item.id == "ui.deleteAfterMarker").map(|item| item.params.unwrap_or_default()).collect()
+}
+
+#[test]
+fn delete_after_marker_is_offered_only_when_it_deletes_more_than_the_clicked_feature() {
+    let mut app = crate::SolveApp::new(Session::default(), Services::default());
+    for (i, name) in ["Box1", "Box2", "Box3"].into_iter().enumerate() {
+        let corner = [i as f64 * 30.0, 0.0, 0.0];
+        app.run("solid.box", json!({"corner": corner, "length": 10, "width": 10, "height": 10, "body_name": name})).unwrap();
+    }
+    let ids: Vec<u64> = app.session.doc.features.iter().map(|f| f.id).collect();
+    let (box1, box2, box3) = (ids[0], ids[1], ids[2]);
+
+    // Only Box3 after the marker: Delete in its menu does the same, so no second entry (#23191).
+    app.run("timeline.roll_to", json!({"position": 2})).unwrap();
+    assert_eq!(delete_after_marker_entries(&app, box3), Vec::<serde_json::Value>::new());
+    // A feature before the marker does not offer it, as before: the entry would delete
+    // features other than the one the menu is for.
+    assert_eq!(delete_after_marker_entries(&app, box1), Vec::<serde_json::Value>::new());
+    assert_eq!(delete_after_marker_entries(&app, box2), Vec::<serde_json::Value>::new());
+
+    // Box2 and Box3 after the marker: both of them, from either one's menu, as before.
+    app.run("timeline.roll_to", json!({"position": 1})).unwrap();
+    for id in [box2, box3] {
+        assert_eq!(delete_after_marker_entries(&app, id), vec![json!({"features": [box2, box3]})]);
+    }
+    assert_eq!(delete_after_marker_entries(&app, box1), Vec::<serde_json::Value>::new());
+
+    // Several selected features: not offered, whatever lies after the marker.
+    app.session.selection = vec![solidcraft_engine::Sel::Feature { id: box2 }, solidcraft_engine::Sel::Feature { id: box3 }];
+    assert_eq!(delete_after_marker_entries(&app, box3), Vec::<serde_json::Value>::new());
+    app.run("timeline.roll_to", json!({"position": 0})).unwrap();
+    app.session.selection = vec![solidcraft_engine::Sel::Feature { id: box1 }, solidcraft_engine::Sel::Feature { id: box3 }];
+    assert_eq!(delete_after_marker_entries(&app, box3), Vec::<serde_json::Value>::new());
 }
 
 #[test]
