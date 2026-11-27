@@ -39,6 +39,21 @@
   <true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key>
   <true/>
+  <!-- solidcraft:// links (a Workshop page's Open in SolidCraft button, docs/workshop-links.md):
+       AppKit hands them to application:openURLs: (apps/solidcraft/src/open_documents.rs). -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>io.tangencylabs.solidcraft.workshop</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>solidcraft</string>
+      </array>
+      <key>CFBundleTypeRole</key>
+      <string>Viewer</string>
+    </dict>
+  </array>
   <key>CFBundleDocumentTypes</key>
   <array>
     <dict>

@@ -74,6 +74,7 @@ pub static PAGES: &[Page] = &[
     inputs::SLIDER,
     inputs::CHECKBOX,
     inputs::SEGMENTED,
+    inputs::PAGE_SWITCH,
     inputs::DROPDOWN,
     inputs::COLOR,
     inputs::SEARCH_FIELD,

@@ -3,8 +3,8 @@
 //! fit are offered (two faces: mate, flush, distance, parallel…; two round ones: concentric,
 //! insert…). Apply adds the rule and keeps the dialog on the same two parts, for the next rule
 //! between them. The rules already between the two parts are listed: each can be loaded to change
-//! it (through `assembly.constraint.edit`), suppressed or deleted. A line says how free the moving
-//! part is with the rule the preview shows.
+//! it (through `assembly.constraint.edit`), suppressed or deleted. Center adds a face pair
+//! in place of a single reference. A line says how free the moving part is with the previewed rule.
 
 use serde_json::{Value, json};
 use solidcraft_engine::Sel;
@@ -13,14 +13,19 @@ use solidcraft_engine::doc::joints::{self, Constraint, RefShape};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
-use crate::dialogs_assembly::{Asm, Hover, SNAPS, SnapKind, SnapPt, picked_snap, side_pick};
-use crate::selection::SelInput;
+use crate::dialogs_assembly::{Asm, Hover, SNAPS, SnapKind, SnapPt, between_face_picks, picked_snap, side_pick, snap_in};
+use crate::selection::{PLANAR_FACES, SelInput, same_item};
 use crate::ui_kit::{StatusTone, choice_row, expr_row, status_line};
 
 #[derive(Clone, Debug, Default)]
 pub struct ConstrainForm {
     /// The rule chosen, among those that fit the picks.
     pub rule: Option<Constraint>,
+    /// The Center mode: the first two references are the walls of one part, the third the
+    /// part to center between them (`assembly.constraint.create`'s center rule).
+    pub center: bool,
+    /// Pick the moving reference from two faces, rather than a plane or axis.
+    center_pair: bool,
     /// A mate's or flush's gap, a distance (a length or an expression).
     pub offset: String,
     /// An angle rule's angle.
@@ -34,7 +39,7 @@ pub struct ConstrainForm {
     pub pair: Option<(u64, u64)>,
     /// The constraint being changed (loaded from the list), and the picks it was loaded with: picking
     /// something else makes a new rule instead.
-    pub editing: Option<(u64, [Option<Sel>; 2])>,
+    pub editing: Option<(u64, Vec<Option<Sel>>)>,
     /// The snap under the cursor, as the Joint dialog keeps it for its glyphs.
     pub hover: Hover,
     /// How free the moving part is in the saved design, worked out once per design (the line shown
@@ -77,6 +82,7 @@ pub(crate) fn label(c: Constraint) -> &'static str {
         Constraint::Angle => "constrain.rule_angle",
         Constraint::Tangent => "constrain.rule_tangent",
         Constraint::PointOnAxis => "constrain.rule_point_on_axis",
+        Constraint::Center => "constrain.rule_center",
     })
 }
 
@@ -93,6 +99,7 @@ pub(crate) fn rule_icon(c: Constraint) -> &'static str {
         Constraint::Angle => "constraint_angle",
         Constraint::Tangent => "constraint_tangent",
         Constraint::PointOnAxis => "constraint_point_on_axis",
+        Constraint::Center => "plane_midplane",
     }
 }
 
@@ -199,16 +206,71 @@ fn saved_freedom(app: &SolveApp, f: &mut ConstrainForm, occ: u64) -> (String, bo
     (text, warn)
 }
 
-/// Load constraint `id` into the form: its references as the picks, its rule, gap and angle.
-fn load(app: &SolveApp, f: &mut ConstrainForm, inputs: &mut [SelInput], active: &mut usize, id: u64) {
+const WALL_LABELS: [&str; 2] = ["constrain.center_wall_1", "constrain.center_wall_2"];
+const PART_FACE_1: &str = "constrain.center_part_face_1";
+const PART_FACE_2: &str = "constrain.center_part_face_2";
+const PART: &str = "constrain.center_part";
+
+/// Center uses two planar wall inputs and either one joint snap or two planar part inputs.
+fn sync_inputs(app: &SolveApp, f: &ConstrainForm, inputs: &mut Vec<SelInput>, active: &mut usize) {
+    let planar = |sel: &Sel| match sel {
+        Sel::Face { body, index, .. } => crate::dialogs::planar_face(&app.session, body, *index).is_some(),
+        _ => false,
+    };
+    let refs = if f.center { WALL_LABELS } else { ["Reference 1", "Reference 2"] };
+    for (input, label) in inputs.iter_mut().zip(refs) {
+        input.label = label;
+        input.accept = if f.center { PLANAR_FACES } else { SNAPS };
+        if f.center {
+            input.items.retain(planar);
+            input.from_face.clear();
+        }
+    }
+    // Adding an input normally focuses it. Here the first unfilled pick is the next step.
+    let old_active = *active;
+    // The single part pick can survive a switch to two faces if it was itself a planar face.
+    if let Some(input) = inputs.get_mut(2) {
+        input.label = PART;
+    }
+    crate::dialogs::set_object_accepting(inputs, active, PART, SNAPS, f.center);
+    crate::dialogs::set_object_accepting(inputs, active, PART_FACE_2, PLANAR_FACES, f.center && f.center_pair);
+    if let Some(input) = inputs.get_mut(2) {
+        input.label = if f.center_pair { PART_FACE_1 } else { PART };
+        input.accept = if f.center_pair { PLANAR_FACES } else { SNAPS };
+        if f.center_pair {
+            input.items.retain(planar);
+            input.from_face.clear();
+        }
+    }
+    let next = inputs.iter().position(|i| i.items.is_empty()).unwrap_or(old_active);
+    *active = next.min(inputs.len().saturating_sub(1));
+}
+
+/// Load the stored origins as picks for highlighting; keep the saved references when unchanged.
+fn load(app: &SolveApp, f: &mut ConstrainForm, inputs: &mut Vec<SelInput>, active: &mut usize, id: u64) {
     let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == id) else { return };
-    let sides = [side_pick(app, &j.a), side_pick(app, &j.b)];
+    f.rule = j.constraint;
+    f.center = j.constraint == Some(Constraint::Center);
+    f.center_pair = false;
+    let sides = if f.center {
+        let (first, second) = if matches!(j.a.snap, joints::Snap::BetweenFaces { .. }) { (&j.a, &j.b) } else { (&j.b, &j.a) };
+        let mut sides = between_face_picks(app, first).into_iter().flatten().collect::<Vec<_>>();
+        if let Some(pair) = between_face_picks(app, second) {
+            f.center_pair = true;
+            sides.extend(pair);
+        } else {
+            sides.push(side_pick(app, second));
+        }
+        sides
+    } else {
+        vec![side_pick(app, &j.a), side_pick(app, &j.b)]
+    };
+    sync_inputs(app, f, inputs, active);
     for (input, side) in inputs.iter_mut().zip(&sides) {
         input.items = side.iter().cloned().collect();
+        input.from_face.clear();
     }
     *active = 0;
-    f.rule = j.constraint;
-    // A tangent's gap is its offset's expression; any other rule's, its offset.
     f.offset = j.exprs.offset.clone().unwrap_or_else(|| format!("{} mm", crate::dialogs_coupling::trim(j.offset)));
     f.angle = j.exprs.angle.clone().unwrap_or_else(|| format!("{} deg", crate::dialogs_coupling::trim(j.angle.to_degrees())));
     f.flip = false;
@@ -216,23 +278,19 @@ fn load(app: &SolveApp, f: &mut ConstrainForm, inputs: &mut [SelInput], active: 
     f.editing = Some((id, sides));
 }
 
-/// The constraint being changed, while the picks are still the ones it was loaded with.
+/// Changing the mode or picks starts a new rule, as it does for ordinary constraints.
 fn editing(f: &ConstrainForm, inputs: &[SelInput]) -> Option<u64> {
     let (id, sides) = f.editing.as_ref()?;
-    let now: Vec<Option<&Sel>> = inputs.iter().take(2).map(|i| i.items.first()).collect();
-    let was: Vec<Option<&Sel>> = sides.iter().map(Option::as_ref).collect();
-    (now == was).then_some(*id)
+    inputs.iter().map(|i| i.items.first()).eq(sides.iter().map(Option::as_ref)).then_some(*id)
 }
 
 /// The dialog's rows; true when Enter was pressed in a value.
-pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut ConstrainForm, inputs: &mut [SelInput], active: &mut usize) -> bool {
+pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut ConstrainForm, inputs: &mut Vec<SelInput>, active: &mut usize) -> bool {
     let mut enter = false;
-    let now = refs(app, f, inputs);
+    let was = (f.center, f.center_pair);
+    let now = (!f.center).then(|| refs(app, f, inputs)).flatten();
     let fit = now.as_ref().map(|r| Constraint::fitting(r.shapes[0], r.shapes[1])).unwrap_or_default();
-    if fit.is_empty() {
-        status_line(ui, solidcraft_ui_text::tr("constrain.pick_hint"), StatusTone::Dim);
-    } else {
-        // The rule chosen, or the likeliest when the picks changed.
+    if !fit.is_empty() {
         let mut pos = f.rule.and_then(|r| fit.iter().position(|c| *c == r)).unwrap_or(0);
         let labels: Vec<&str> = fit.iter().map(|c| label(*c)).collect();
         choice_row(ui, solidcraft_ui_text::tr("constrain.type"), "constrain_type", &mut pos, &labels);
@@ -244,30 +302,51 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut ConstrainForm, inputs
             }
             _ => {}
         }
-        crate::ui_kit::options(ui, "constrain_options", &mut [(solidcraft_ui_text::tr("constrain.flip"), &mut f.flip)]);
-        let apply_label = solidcraft_ui_text::tr(if editing(f, inputs).is_some() { "constrain.change" } else { "constrain.apply" });
-        let r = crate::ui_kit::button(ui, apply_label, crate::ui_kit::Button::Normal);
-        crate::scenario::publish_handle("dialog:Apply", r.rect.center());
-        if r.clicked()
-            && let Ok(cmds) = commands(app, f, inputs)
-        {
-            let parts = now.as_ref().map(|r| held_and_moving(r, f.rule));
-            f.error = cmds.into_iter().find_map(|(id, p)| app.run(&id, p).err());
-            // Done: keep the two parts, and pick the next rule on them again, from the first
-            // reference and the defaults (a gap typed for one rule is not the next one's). Refused:
-            // keep the picks and values, to correct the one that was wrong.
-            if f.error.is_none() {
-                for i in inputs.iter_mut() {
-                    i.items.clear();
+    }
+    crate::ui_kit::section(ui, "constrain_options", "Options", true, |ui| {
+        let r = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("constrain.center"), &mut f.center);
+        crate::scenario::publish_handle("dialog:center_mode", r.rect.center());
+        if f.center {
+            let r = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("constrain.center_pair"), &mut f.center_pair);
+            crate::scenario::publish_handle("dialog:center_pair", r.rect.center());
+        } else if !fit.is_empty() {
+            crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("constrain.flip"), &mut f.flip);
+        }
+    });
+    if was != (f.center, f.center_pair) {
+        sync_inputs(app, f, inputs, active);
+        f.editing = None;
+        f.error = None;
+    }
+    let (cmds, parts) = command_and_parts(app, f, inputs);
+    match cmds {
+        Ok(cmds) => {
+            let apply_label = solidcraft_ui_text::tr(if editing(f, inputs).is_some() { "constrain.change" } else { "constrain.apply" });
+            let r = crate::ui_kit::button(ui, apply_label, crate::ui_kit::Button::Normal);
+            crate::scenario::publish_handle("dialog:Apply", r.rect.center());
+            if r.clicked() {
+                let (id, params) = cmds;
+                f.error = app.run(&id, params).err();
+                if f.error.is_none() {
+                    for input in inputs.iter_mut() {
+                        input.items.clear();
+                        input.from_face.clear();
+                    }
+                    *active = 0;
+                    *f = ConstrainForm { pair: parts.or(f.pair), center: f.center, center_pair: f.center_pair, ..start_form() };
+                    sync_inputs(app, f, inputs, active);
                 }
-                *active = 0;
-                *f = ConstrainForm { pair: parts.or(f.pair), ..start_form() };
             }
+        }
+        Err(message) => {
+            let waiting = ["constrain.pick_hint", "constrain.center_hint", "constrain.center_part_hint"]
+                .into_iter()
+                .any(|id| message == solidcraft_ui_text::tr(id));
+            status_line(ui, &message, if waiting { StatusTone::Dim } else { StatusTone::Error });
         }
     }
     // The rules already between the two parts, and how free the moving one is.
-    let parts = refs(app, f, inputs).map(|r| held_and_moving(&r, f.rule)).or(f.pair);
-    if let Some((a, b)) = parts {
+    if let Some((a, b)) = parts.or(f.pair) {
         let rules = between(&app.session.doc, (a, b));
         if !rules.is_empty() {
             ui.label(egui::RichText::new(solidcraft_ui_text::tr("constrain.between")).strong());
@@ -302,10 +381,11 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut ConstrainForm, inputs
         if let Some(id) = load_id {
             load(app, f, inputs, active, id);
         }
-        // With a rule previewed, the preview's own reply; else the saved design.
-        let (text, warn) = match app.preview.placed.as_ref().filter(|_| refs(app, f, inputs).is_some()) {
-            Some(reply) => freedom(&app.session.doc, reply, b),
-            None => saved_freedom(app, f, b),
+        // A root datum is held even when picked on the second side.
+        let moving = if b == 0 { a } else { b };
+        let (text, warn) = match app.preview.placed.as_ref().filter(|_| parts.is_some()) {
+            Some(reply) => freedom(&app.session.doc, reply, moving),
+            None => saved_freedom(app, f, moving),
         };
         let r = status_line(ui, &text, if warn { StatusTone::Warning } else { StatusTone::Dim });
         crate::scenario::publish_handle("dialog:constrain_status", r.rect.center());
@@ -318,7 +398,25 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut ConstrainForm, inputs
 
 /// The command OK (and Apply) runs: a new rule, or a change to the one loaded from the list.
 pub fn commands(app: &SolveApp, f: &ConstrainForm, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
-    let r = refs(app, f, inputs).ok_or_else(|| solidcraft_ui_text::tr("constrain.pick_hint").to_string())?;
+    command_and_parts(app, f, inputs).0.map(|(id, params)| vec![(id, params)])
+}
+
+type RuleCommand = (String, Value);
+
+fn command_and_parts(app: &SolveApp, f: &ConstrainForm, inputs: &[SelInput]) -> (Result<RuleCommand, String>, Option<(u64, u64)>) {
+    if f.center {
+        return match center_command(app, f, inputs) {
+            Ok((cmd, parts)) => (Ok(cmd), Some(parts)),
+            Err(e) => (Err(e), None),
+        };
+    }
+    let now = refs(app, f, inputs);
+    let parts = now.as_ref().map(|r| held_and_moving(r, f.rule));
+    (ordinary_command(app, f, inputs, now), parts)
+}
+
+fn ordinary_command(app: &SolveApp, f: &ConstrainForm, inputs: &[SelInput], refs: Option<Refs>) -> Result<RuleCommand, String> {
+    let r = refs.ok_or_else(|| solidcraft_ui_text::tr("constrain.pick_hint").to_string())?;
     // The rule chosen, or the likeliest the picks fit (as the Type row shows before it is drawn).
     let fit = Constraint::fitting(r.shapes[0], r.shapes[1]);
     let rule = f.rule.filter(|c| fit.contains(c)).or(fit.first().copied());
@@ -342,7 +440,56 @@ pub fn commands(app: &SolveApp, f: &ConstrainForm, inputs: &[SelInput]) -> Resul
         _ => {}
     }
     let id = if editing(f, inputs).is_some() { "assembly.constraint.edit" } else { "assembly.constraint.create" };
-    Ok(vec![(id.into(), p)])
+    Ok((id.into(), p))
+}
+
+/// The Center mode builds two joint origins. The wall pair and optional part pair share
+/// the same format and validation; a plane or axis on its own uses the ordinary snap.
+fn center_command(app: &SolveApp, f: &ConstrainForm, inputs: &[SelInput]) -> Result<(RuleCommand, (u64, u64)), String> {
+    let text = |id: &str| solidcraft_ui_text::tr(id).to_string();
+    if let Some(id) = editing(f, inputs)
+        && let Some(j) = app.session.doc.assembly.joints.iter().find(|j| j.id == id)
+    {
+        return Ok((("assembly.constraint.edit".into(), json!({"constraint": id})), (j.a.part(), j.b.part())));
+    }
+    let pick = |i: usize| inputs.get(i).and_then(|input| input.items.first().map(|sel| (input, sel)));
+    let pair = |i: usize, hint: &str| -> Result<Value, String> {
+        let (_, a) = pick(i).ok_or_else(|| text(hint))?;
+        let (_, b) = pick(i + 1).ok_or_else(|| text(hint))?;
+        let face = |sel: &Sel| {
+            let snap = picked_snap(app, sel).ok_or_else(|| text("constrain.center_walls"))?;
+            snap.param.get("face").is_some().then_some(snap.param).ok_or_else(|| text("constrain.center_walls"))
+        };
+        let (a_param, b_param) = (face(a)?, face(b)?);
+        if a_param.get("path") != b_param.get("path") || a_param.get("occurrence") != b_param.get("occurrence") {
+            return Err(text("constrain.center_two_walls"));
+        }
+        if same_item(a, b) {
+            return Err(text("constrain.center_distinct"));
+        }
+        let mut side = json!({"faces": [a_param["face"], b_param["face"]]});
+        for key in ["occurrence", "path"] {
+            if let Some(value) = a_param.get(key) {
+                side[key] = value.clone();
+            }
+        }
+        Ok(side)
+    };
+    let a = pair(0, "constrain.center_hint")?;
+    let (command, kind, b) = if f.center_pair {
+        ("assembly.constraint.create", "center", pair(2, "constrain.center_part_hint")?)
+    } else {
+        let (input, sel) = pick(2).ok_or_else(|| text("constrain.center_part_hint"))?;
+        let part = snap_in(app, input, sel).ok_or_else(|| text("constrain.center_reference"))?;
+        match shape(&part) {
+            RefShape::Plane => ("assembly.constraint.create", "center", part.param),
+            RefShape::Round | RefShape::Axis => ("joint.create", "line_on_plane", part.param),
+            RefShape::Point | RefShape::Edge => return Err(text("constrain.center_reference")),
+        }
+    };
+    let occurrence = |p: &Value| p.get("occurrence").and_then(Value::as_u64).unwrap_or(0);
+    let parts = (occurrence(&a), occurrence(&b));
+    Ok(((command.into(), json!({"type": kind, "a": a, "b": b})), parts))
 }
 
 #[cfg(test)]
