@@ -772,6 +772,23 @@ fn in_span_stretches(
     Ok(stretches)
 }
 
+/// A crossing of a rail with its face's side edge at an end of the filleted edge that
+/// [`FilletSolver::rails_fit_their_faces_judged_with_ops`] passes as past that end (#17646):
+/// where the End at that end takes the rail over. Nothing past the check reads it; the
+/// session's tests pin it to the End's own rail end.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code))] // read only by the session's tests
+pub(crate) struct PassedCrossing {
+    /// The rail edge in the pseudo B-rep.
+    pub(crate) rail: EdgeId,
+    /// The crossing's rail parameter.
+    pub(crate) rail_param: f64,
+    /// The rail point there.
+    pub(crate) point: Point3,
+    /// The end it is passed to: 0 the filleted edge's interval's start, 1 its end.
+    pub(crate) end: usize,
+}
+
 impl FilletSolver {
     /// `SmFilletSolver::RailsFitTheirFaces` (the fork's refusal, see the module doc):
     /// whether every rail of this solver's fillet, untrimmed, stays on the face it rolls
@@ -811,7 +828,6 @@ impl FilletSolver {
     /// As [`FilletSolver::rails_fit_their_faces_with_ops`]; those of the material
     /// judgements, and `SM_ERR` when the filleted edge's middle does not drop onto a rail
     /// nowhere on its face.
-    #[allow(clippy::too_many_lines)] // one fork routine
     pub fn rails_fit_their_faces_judged_with_ops(
         solver: &mut dyn FilletSolverOps,
         k: &Kernel,
@@ -820,6 +836,32 @@ impl FilletSolver {
         context: &mut impl RailClassificationContext,
         judge_material: bool,
     ) -> Result<RailsFit> {
+        Self::rails_fit_their_faces_with_crossings_with_ops(
+            solver,
+            k,
+            target,
+            fillets,
+            context,
+            judge_material,
+        )
+        .map(|(judged, _)| judged)
+    }
+
+    /// [`FilletSolver::rails_fit_their_faces_judged_with_ops`], and the crossings it
+    /// passed at the ends ([`PassedCrossing`]), in the order found.
+    ///
+    /// # Errors
+    /// As [`FilletSolver::rails_fit_their_faces_judged_with_ops`].
+    #[allow(clippy::too_many_lines)] // one fork routine
+    pub(crate) fn rails_fit_their_faces_with_crossings_with_ops(
+        solver: &mut dyn FilletSolverOps,
+        k: &Kernel,
+        target: &mut Brep,
+        fillets: &mut FilletBrep,
+        context: &mut impl RailClassificationContext,
+        judge_material: bool,
+    ) -> Result<(RailsFit, Vec<PassedCrossing>)> {
+        let mut passed_crossings = Vec::new();
         let mut fit = true;
         let mut rolls_over = false;
         let mut into_material = false;
@@ -838,16 +880,19 @@ impl FilletSolver {
         // no body to subtract from (not the fork's, whose `IsConcaveEdge` fails there).
         if let Some(e) = filleted {
             if !edge_bounds_material(target, e)? {
-                return Ok(RailsFit {
-                    fit: true,
-                    rolls_over: false,
-                    into_material: false,
-                    boundaries_into_material: false,
-                    left_across: Vec::new(),
-                    return_across: Vec::new(),
-                    continued_cliffs: Vec::new(),
-                    wraps_past_both_ends: false,
-                });
+                return Ok((
+                    RailsFit {
+                        fit: true,
+                        rolls_over: false,
+                        into_material: false,
+                        boundaries_into_material: false,
+                        left_across: Vec::new(),
+                        return_across: Vec::new(),
+                        continued_cliffs: Vec::new(),
+                        wraps_past_both_ends: false,
+                    },
+                    passed_crossings,
+                ));
             }
         }
         for id in solver.solver().fillet_geoms() {
@@ -998,33 +1043,33 @@ impl FilletSolver {
                         for stretch in
                             in_span_stretches(solver.solver(), k, target, &curve, &pieces)?
                         {
-                            let passed = match (stretch.from, stretch.to) {
-                                (None, Some(end)) => {
-                                    run_end_past(
-                                        solver.solver(),
-                                        k,
-                                        target,
-                                        face,
-                                        &curve,
-                                        d_leave,
-                                        leave,
-                                        true,
-                                    )? == Some(end)
-                                }
-                                (Some(end), None) => {
-                                    run_end_past(
-                                        solver.solver(),
-                                        k,
-                                        target,
-                                        face,
-                                        &curve,
-                                        d_back,
-                                        &last.end,
-                                        false,
-                                    )? == Some(end)
-                                }
-                                _ => false,
+                            let crossing = match (stretch.from, stretch.to) {
+                                (None, Some(end)) => Some((end, d_leave, leave, true)),
+                                (Some(end), None) => Some((end, d_back, &last.end, false)),
+                                _ => None,
                             };
+                            let mut passed = false;
+                            if let Some((end, d, at, leaving)) = crossing {
+                                if run_end_past(
+                                    solver.solver(),
+                                    k,
+                                    target,
+                                    face,
+                                    &curve,
+                                    d,
+                                    at,
+                                    leaving,
+                                )? == Some(end)
+                                {
+                                    passed = true;
+                                    passed_crossings.push(PassedCrossing {
+                                        rail,
+                                        rail_param: d,
+                                        point: curve.evaluate_point(k, d)?,
+                                        end,
+                                    });
+                                }
+                            }
                             if !passed {
                                 judged = true;
                                 // off the face across the whole span, from one end's cross
@@ -1050,15 +1095,21 @@ impl FilletSolver {
                             continued_cliffs.push((rim, wall));
                             continue;
                         }
-                        if past_end(leave, d_leave)?
-                            || past_closed_corner(
-                                solver.solver(),
-                                k,
-                                target,
-                                &curve,
-                                d_leave,
-                                j == 0,
-                            )?
+                        if past_end(leave, d_leave)? {
+                            let fil_edge = filleted_edge(solver.solver(), target)?;
+                            if let Some(&end) =
+                                side_edge_ends(target, fil_edge, face, leave)?.first()
+                            {
+                                passed_crossings.push(PassedCrossing {
+                                    rail,
+                                    rail_param: d_leave,
+                                    point: curve.evaluate_point(k, d_leave)?,
+                                    end,
+                                });
+                            }
+                            continue;
+                        }
+                        if past_closed_corner(solver.solver(), k, target, &curve, d_leave, j == 0)?
                         {
                             continue;
                         }
@@ -1216,15 +1267,18 @@ impl FilletSolver {
                 }
             }
         }
-        Ok(RailsFit {
-            fit,
-            rolls_over,
-            into_material,
-            boundaries_into_material,
-            left_across,
-            return_across,
-            continued_cliffs,
-            wraps_past_both_ends,
-        })
+        Ok((
+            RailsFit {
+                fit,
+                rolls_over,
+                into_material,
+                boundaries_into_material,
+                left_across,
+                return_across,
+                continued_cliffs,
+                wraps_past_both_ends,
+            },
+            passed_crossings,
+        ))
     }
 }
