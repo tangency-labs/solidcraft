@@ -830,7 +830,7 @@ fn line_input_placement_measures_each_field_and_handles_tiny_views() {
         [egui::pos2(780.0, 580.0), egui::pos2(766.0, 566.0)],
         [egui::pos2(400.0, 300.0), egui::pos2(400.0, 300.0)],
     ] {
-        let positions = super::line_input_positions(segment, &sizes, Some(Room::new(view, None)), 8.0);
+        let positions = super::line_inputs_off_pointer(segment, &sizes, Some(Room::new(view, None)), 8.0, None);
         let rects: Vec<_> = positions.iter().zip(sizes).map(|(p, size)| egui::Rect::from_min_size(*p, size)).collect();
         assert!(!rects[0].intersects(rects[1]), "{rects:?}");
         for rect in rects {
@@ -839,7 +839,7 @@ fn line_input_placement_measures_each_field_and_handles_tiny_views() {
         }
     }
     let tiny = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(3.0, 3.0));
-    let positions = super::line_input_positions([egui::pos2(1.0, 1.0); 2], &sizes, Some(Room::new(tiny, None)), 8.0);
+    let positions = super::line_inputs_off_pointer([egui::pos2(1.0, 1.0); 2], &sizes, Some(Room::new(tiny, None)), 8.0, None);
     assert_eq!(positions.len(), 2);
     assert!(positions.iter().all(|p| p.is_finite()));
 }
@@ -856,7 +856,7 @@ fn line_inputs_retry_the_first_position_when_both_fit_in_a_shallow_view() {
         assert!(view.contains_rect(rect));
         assert!(!segment_intersects_input(segment, rect.expand(4.0)));
     }
-    let positions = super::line_input_positions(segment, &sizes, Some(Room::new(view, None)), 8.0);
+    let positions = super::line_inputs_off_pointer(segment, &sizes, Some(Room::new(view, None)), 8.0, None);
     let rects: Vec<_> = positions.iter().zip(sizes).map(|(p, size)| egui::Rect::from_min_size(*p, size)).collect();
     assert!(!rects[0].intersects(rects[1].expand(4.0)), "fields overlap: {rects:?}");
     for rect in rects {
@@ -986,7 +986,7 @@ fn line_inputs_slide_clear_of_slanted_previews_in_small_views() {
             assert!(view.contains_rect(rect));
             assert!(!segment_intersects_input(segment, rect.expand(4.0)));
         }
-        let positions = super::line_input_positions(segment, &sizes, Some(Room::new(view, None)), 8.0);
+        let positions = super::line_inputs_off_pointer(segment, &sizes, Some(Room::new(view, None)), 8.0, None);
         let rects: Vec<_> = positions.iter().map(|p| egui::Rect::from_min_size(*p, size)).collect();
         assert!(!rects[0].intersects(rects[1].expand(4.0)), "fields overlap: {segment:?}, {rects:?}");
         for rect in rects {
@@ -1048,6 +1048,108 @@ fn polygon_inputs_clear_each_other_and_the_preview() {
             let expected = if command == "sketch.polygon.inscribed" { 6.0 * 3f64.sqrt() } else { 8.0 * 3f64.sqrt() };
             assert!((sketch.profiles[0].area - expected).abs() < 1e-6, "{command}: {}", sketch.profiles[0].area);
         }
+    }
+}
+
+/// A polygon's first click, then the pointer in one move to a spot just above it, where the
+/// Radius and Sides boxes wait beside the still tiny preview, and a click there. The boxes have to
+/// be off the pointer by then, so the click makes the polygon as it does anywhere else.
+#[test]
+fn polygon_boxes_move_off_a_pointer_that_arrives_on_them_in_one_move() {
+    for command in ["sketch.polygon.inscribed", "sketch.polygon.circumscribed", "sketch.polygon.edge"] {
+        for [dx, dy] in [[0.0, -30.0], [0.0, -45.0], [20.0, -30.0], [-20.0, -30.0]] {
+            let mut h = Harness::new();
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.call("ui.view", json!({"view":"top"}));
+            h.step(&json!({"start":command})).unwrap();
+            h.step(&json!({"click":{"sketch":[0,0]}})).unwrap();
+            h.frames(3);
+            let curves = |h: &Harness| {
+                let state = h.app.session.world_state().unwrap();
+                let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+                sketch.sketch.curves.iter().filter(|curve| !curve.construction).count()
+            };
+            assert_eq!(curves(&h), 0, "{command}: nothing is drawn after the first click");
+            let state = crate::open_meshing::session_world(&h.app.session);
+            let plane = state.sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
+            let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+            let first = proj.to_screen(plane.to_world(super::Vec2::new(0.0, 0.0))).unwrap();
+            let spot = first + egui::vec2(dx, dy);
+            h.step(&json!({"move":[spot.x,spot.y]})).unwrap();
+            h.frames(3);
+            for i in 0..2usize {
+                let rect = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).unwrap();
+                assert!(!rect.expand(2.0).contains(spot), "{command}, ({dx}, {dy}): box {i} at {rect:?} is under the pointer at {spot:?}");
+            }
+            h.step(&json!({"click":[spot.x,spot.y]})).unwrap();
+            h.frames(3);
+            assert!(curves(&h) >= 3, "{command}, ({dx}, {dy}): the click just above the first point makes the polygon");
+        }
+    }
+}
+
+/// The polygon stack keeps off the pointer without giving up its place: with the pointer on the
+/// preview, where it is while a polygon is drawn, nothing moves, and with no side clear of the
+/// pointer the stack goes where it went before.
+#[test]
+fn polygon_inputs_keep_off_the_pointer_and_stay_put_when_it_is_on_the_preview() {
+    let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let sizes = [egui::vec2(86.0, 24.0), egui::vec2(70.0, 24.0)];
+    let room = || Some(Room::new(view, None));
+    let tiny = egui::Rect::from_center_size(egui::pos2(400.0, 300.0), egui::vec2(2.0, 2.0));
+    let before = super::polygon_input_positions(tiny, &sizes, room(), 8.0, None);
+    let pointer = egui::pos2(400.0, 270.0);
+    assert!(egui::Rect::from_min_size(before[1], sizes[1]).contains(pointer), "the Sides box is above the first point without a pointer");
+    let positions = super::polygon_input_positions(tiny, &sizes, room(), 8.0, Some(pointer));
+    for (pos, size) in positions.iter().zip(sizes) {
+        let rect = egui::Rect::from_min_size(*pos, size);
+        assert!(!rect.expand(2.0).contains(pointer), "{rect:?} is under {pointer:?}");
+        assert!(!rect.intersects(tiny), "{rect:?} covers {tiny:?}");
+        assert!(view.contains_rect(rect));
+    }
+    let drawn = egui::Rect::from_min_max(egui::pos2(370.0, 270.0), egui::pos2(430.0, 330.0));
+    for pointer in [drawn.center_top(), drawn.right_center(), drawn.left_top(), drawn.center()] {
+        assert_eq!(
+            super::polygon_input_positions(drawn, &sizes, room(), 8.0, Some(pointer)),
+            super::polygon_input_positions(drawn, &sizes, room(), 8.0, None),
+            "{pointer:?}"
+        );
+    }
+    let small = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(3.0, 3.0));
+    let at = egui::pos2(1.0, 1.0);
+    assert_eq!(
+        super::polygon_input_positions(egui::Rect::from_center_size(at, egui::vec2(1.0, 1.0)), &sizes, Some(Room::new(small, None)), 8.0, Some(at)),
+        super::polygon_input_positions(egui::Rect::from_center_size(at, egui::vec2(1.0, 1.0)), &sizes, Some(Room::new(small, None)), 8.0, None)
+    );
+}
+
+/// A typed Radius or Sides keeps its value while the pointer moves onto its box: the box moves
+/// off the pointer, as the untyped ones do, and still holds what was typed.
+#[test]
+fn a_typed_polygon_value_keeps_it_when_the_pointer_lands_on_its_box() {
+    for (i, typed) in [(0usize, "7"), (1, "5")] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.step(&json!({"start":"sketch.polygon.inscribed"})).unwrap();
+        h.step(&json!({"click":{"sketch":[0,0]}})).unwrap();
+        h.step(&json!({"move":{"sketch":[4,0]}})).unwrap();
+        h.frames(3);
+        if i == 1 {
+            tab(&mut h, false);
+        }
+        type_value(&mut h, typed);
+        h.frames(3);
+        let field = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).unwrap();
+        let spot = field.center();
+        h.step(&json!({"move":[spot.x,spot.y]})).unwrap();
+        h.frames(3);
+        for j in 0..2usize {
+            let moved = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", j)))).unwrap();
+            assert!(!moved.expand(2.0).contains(spot), "box {j} at {moved:?} is under the pointer at {spot:?}");
+        }
+        let value = &h.app.tool.as_ref().unwrap().dims[i];
+        assert_eq!((value.value.as_str(), value.locked), (typed, true), "{}", value.label);
     }
 }
 
@@ -1330,4 +1432,103 @@ fn the_arc_centre_guides_join_the_ends_it_lines_up_with() {
     assert_eq!(super::centre_guides(at(10.0, 5.0), [at(-20.0, 5.05), at(30.0, 40.0)], 0.1), vec![(at(10.0, 5.0), at(-20.0, 5.05))]);
     // Lined up with neither, or too far off the line.
     assert!(super::centre_guides(at(10.0, 5.0), [at(0.0, 9.0), at(30.0, 40.0)], 0.1).is_empty());
+}
+
+/// A chain of lines: the pointer arrives in one move at a spot just above and left of the point
+/// placed last, where the next segment's Length box waits, and clicks. The box has to be off the
+/// pointer by then, so the click places the third point as it does after a slow move.
+#[test]
+fn line_boxes_move_off_a_pointer_that_arrives_on_them_in_one_move() {
+    for [dx, dy] in [[-20.0, -20.0], [-30.0, -12.0], [-12.0, -28.0]] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.step(&json!({"start":"sketch.line"})).unwrap();
+        h.step(&json!({"click":{"sketch":[-31,-17]}})).unwrap();
+        h.step(&json!({"click":{"sketch":[3,7]}})).unwrap();
+        h.frames(3);
+        let lines = |h: &Harness| {
+            let state = h.app.session.world_state().unwrap();
+            let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+            sketch.sketch.curves.iter().filter(|curve| !curve.construction).count()
+        };
+        assert_eq!(lines(&h), 1, "the first segment is drawn");
+        let state = crate::open_meshing::session_world(&h.app.session);
+        let plane = state.sketch(h.app.session.active_sketch.unwrap()).unwrap().plane;
+        let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+        let last = proj.to_screen(plane.to_world(super::Vec2::new(3.0, 7.0))).unwrap();
+        let spot = last + egui::vec2(dx, dy);
+        h.step(&json!({"move":[spot.x,spot.y]})).unwrap();
+        h.frames(3);
+        for i in 0..2usize {
+            let rect = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).unwrap();
+            assert!(!rect.expand(2.0).contains(spot), "({dx}, {dy}): box {i} at {rect:?} is under the pointer at {spot:?}");
+        }
+        h.step(&json!({"click":[spot.x,spot.y]})).unwrap();
+        h.frames(3);
+        assert_eq!(lines(&h), 2, "({dx}, {dy}): the click near the last point places the third point");
+    }
+}
+
+/// The Line fields keep off the pointer without giving up their place beside the preview: with
+/// the pointer on the preview's end, where it is while a line is drawn, nothing moves.
+#[test]
+fn line_inputs_keep_off_the_pointer_and_stay_put_when_it_is_on_the_preview() {
+    let view = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
+    let sizes = [egui::vec2(86.0, 24.0), egui::vec2(70.0, 24.0)];
+    let room = || Some(Room::new(view, None));
+    // The preview left at the last point while the pointer rests on a field.
+    let resting = [egui::pos2(400.0, 300.0), egui::pos2(404.0, 300.0)];
+    let before = super::line_inputs_off_pointer(resting, &sizes, room(), 8.0, None);
+    for offset in [egui::vec2(-20.0, -20.0), egui::vec2(-30.0, -12.0), egui::vec2(-12.0, -28.0)] {
+        let pointer = resting[0] + offset;
+        assert!(egui::Rect::from_min_size(before[0], sizes[0]).contains(pointer), "{offset:?} is on the Length field without a pointer");
+        let positions = super::line_inputs_off_pointer(resting, &sizes, room(), 8.0, Some(pointer));
+        let rects: Vec<_> = positions.iter().zip(sizes).map(|(p, size)| egui::Rect::from_min_size(*p, size)).collect();
+        assert!(!rects[0].intersects(rects[1]), "{rects:?}");
+        for rect in rects {
+            assert!(!rect.expand(2.0).contains(pointer), "{rect:?} is under {pointer:?}");
+            assert!(view.contains_rect(rect));
+            assert!(!segment_intersects_input(resting, rect), "{rect:?} covers {resting:?}");
+        }
+    }
+    for end in [egui::pos2(460.0, 300.0), egui::pos2(400.0, 240.0), egui::pos2(380.0, 280.0), egui::pos2(414.0, 310.0)] {
+        let segment = [egui::pos2(400.0, 300.0), end];
+        assert_eq!(
+            super::line_inputs_off_pointer(segment, &sizes, room(), 8.0, Some(end)),
+            super::line_inputs_off_pointer(segment, &sizes, room(), 8.0, None),
+            "{segment:?}"
+        );
+    }
+    // No room clear of the pointer: the fields go where they went before.
+    let tiny = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(3.0, 3.0));
+    let segment = [egui::pos2(1.0, 1.0); 2];
+    assert_eq!(
+        super::line_inputs_off_pointer(segment, &sizes, Some(Room::new(tiny, None)), 8.0, Some(egui::pos2(1.0, 1.0))),
+        super::line_inputs_off_pointer(segment, &sizes, Some(Room::new(tiny, None)), 8.0, None)
+    );
+}
+
+/// A typed length keeps its value while the pointer moves onto its field: the field moves off the
+/// pointer, as the untyped ones do, and the box still holds what was typed.
+#[test]
+fn a_typed_line_length_keeps_its_value_when_the_pointer_lands_on_its_field() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.step(&json!({"start":"sketch.line"})).unwrap();
+    h.step(&json!({"click":{"sketch":[-31,-17]}})).unwrap();
+    h.step(&json!({"click":{"sketch":[3,7]}})).unwrap();
+    h.step(&json!({"move":{"sketch":[18,15]}})).unwrap();
+    h.frames(3);
+    h.step(&json!({"text":"25"})).unwrap();
+    h.frames(3);
+    let field = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", 0usize)))).unwrap();
+    let spot = field.center();
+    h.step(&json!({"move":[spot.x,spot.y]})).unwrap();
+    h.frames(3);
+    let moved = h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", 0usize)))).unwrap();
+    assert!(!moved.expand(2.0).contains(spot), "the typed field at {moved:?} is under the pointer at {spot:?}");
+    let length = &h.app.tool.as_ref().unwrap().dims[0];
+    assert_eq!((length.label, length.value.as_str(), length.locked), ("Length", "25", true));
 }

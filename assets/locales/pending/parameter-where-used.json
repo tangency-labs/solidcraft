@@ -1,82 +1,35 @@
 {
   "en": {
-    "Where used": "Where used",
-    "Sketches": "Sketches",
-    "Features": "Features",
-    "Parameters": "Parameters",
-    "Not used": "Not used",
-    "Other uses": "Other uses"
+    "parameters.redesign.other_uses": "Other uses"
   },
   "de": {
-    "Where used": "Verwendet in",
-    "Sketches": "Skizzen",
-    "Features": "Features",
-    "Parameters": "Parameter",
-    "Not used": "Nicht verwendet",
-    "Other uses": "Weitere Verwendungen"
+    "parameters.redesign.other_uses": "Weitere Verwendungen"
   },
   "es": {
-    "Where used": "Dónde se usa",
-    "Sketches": "Bocetos",
-    "Features": "Operaciones",
-    "Parameters": "Parámetros",
-    "Not used": "Sin usar",
-    "Other uses": "Otros usos"
+    "parameters.redesign.other_uses": "Otros usos"
   },
   "fr": {
-    "Where used": "Où est-il utilisé",
-    "Sketches": "Esquisses",
-    "Features": "Fonctions",
-    "Parameters": "Paramètres",
-    "Not used": "Non utilisé",
-    "Other uses": "Autres utilisations"
+    "parameters.redesign.other_uses": "Autres utilisations"
   },
   "it": {
-    "Where used": "Dove è usato",
-    "Sketches": "Schizzi",
-    "Features": "Funzioni",
-    "Parameters": "Parametri",
-    "Not used": "Non usato",
-    "Other uses": "Altri usi"
+    "parameters.redesign.other_uses": "Altri usi"
   },
   "ja": {
-    "Where used": "使用箇所",
-    "Sketches": "スケッチ",
-    "Features": "フィーチャー",
-    "Parameters": "パラメーター",
-    "Not used": "未使用",
-    "Other uses": "その他の使用箇所"
+    "parameters.redesign.other_uses": "その他の使用箇所"
+  },
+  "ko": {
+    "parameters.redesign.other_uses": "기타 사용처"
   },
   "zh": {
-    "Where used": "使用位置",
-    "Sketches": "草图",
-    "Features": "特征",
-    "Parameters": "参数",
-    "Not used": "未使用",
-    "Other uses": "其他用途"
+    "parameters.redesign.other_uses": "其他用途"
   },
   "ar": {
-    "Where used": "أماكن الاستخدام",
-    "Sketches": "الرسومات",
-    "Features": "الميزات",
-    "Parameters": "المعاملات",
-    "Not used": "غير مستخدم",
-    "Other uses": "استخدامات أخرى"
+    "parameters.redesign.other_uses": "استخدامات أخرى"
   },
   "he": {
-    "Where used": "היכן בשימוש",
-    "Sketches": "סקיצות",
-    "Features": "פיצ'רים",
-    "Parameters": "פרמטרים",
-    "Not used": "לא בשימוש",
-    "Other uses": "שימושים אחרים"
+    "parameters.redesign.other_uses": "שימושים אחרים"
   },
   "vi": {
-    "Where used": "Nơi sử dụng",
-    "Sketches": "Phác thảo",
-    "Features": "Tính năng",
-    "Parameters": "Tham số",
-    "Not used": "Không dùng",
-    "Other uses": "Nơi dùng khác"
+    "parameters.redesign.other_uses": "Nơi dùng khác"
   }
 }

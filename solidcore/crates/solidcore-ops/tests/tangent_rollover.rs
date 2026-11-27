@@ -753,6 +753,20 @@ fn a_rim_round_partly_on_the_top_rolls_onto_the_foot_round_partway() {
 /// there, 1.66e-5 wide, did not skin (the rails' ends were not made to meet), and the pass
 /// failed internally with status 1001. The fit size is not pinned: it is named above the
 /// size asked (3.25 for 2), tangency-labs/solidcraft#16782.
+///
+/// With the offset's extension the default, the round on x = -36 and the foot round is
+/// refused before that judgement: the foot round is tangent to the plane x = -36 at
+/// (-36, -90, 10), the ball's two contacts meet there (the section has width 0), and the
+/// trace runs on through that point into both extensions. A section of width 0 is
+/// singular in the definition, so its certificate's enclosure there is unbounded and its
+/// work budget runs out ([`Error::BlendNotCertified`], 234 halvings over 316 stations; the
+/// same on main with every fix on). The part is still refused. The trace should end where
+/// the rails meet, and the refusal is then the rail leaving its face again.
+///
+/// That was so until tangency-labs/solidcraft#22796. Now only the rim edge beside the slot
+/// goes first: the corner's round edge overflows alone (running on past its ends), not with
+/// the other rim edges, which it runs on into, so it stays with them. Their pass is refused
+/// as too large, naming a radius below the one asked, and that radius builds a valid body.
 #[test]
 fn a_rim_round_whose_top_reaches_the_contact_between_sections_is_not_built() {
     let r4 = 9.0;
@@ -762,36 +776,24 @@ fn a_rim_round_whose_top_reaches_the_contact_between_sections_is_not_built() {
     let ys = v - 8.5 * step;
     let width = 0.04;
     assert!(width < step / 2.0, "the slot lies between two sections");
-    fixes();
-    let b = arm_boss_and_foot_round(r4);
-    let slot = make_box([-38.6, ys - width / 2.0, 5.0], [2.3, width, 2.0]).unwrap();
-    let b = boolean(b, slot, BooleanOp::Subtract).unwrap().unwrap();
+    let round = |d: f64| {
+        fixes();
+        let b = arm_boss_and_foot_round(r4);
+        let slot = make_box([-38.6, ys - width / 2.0, 5.0], [2.3, width, 2.0]).unwrap();
+        let b = boolean(b, slot, BooleanOp::Subtract).unwrap().unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid());
+        let rim = top_rim(&b, r4);
+        session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+        let result = blend(&b, Blend::Round, &rim, &[d], &[], Corners::Filled);
+        fixes();
+        result.map(|_| b)
+    };
+    let fit = match round(d) {
+        Err(Error::TooLarge { size, .. }) if size > 0.0 && size < d => size,
+        other => panic!("the slot between the sections: {:?}", other.err()),
+    };
+    let b = round(fit).unwrap();
     assert!(b.check(CheckLevel::All).unwrap().is_valid());
-    let rim = top_rim(&b, r4);
-    session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
-    let result = blend(&b, Blend::Round, &rim, &[d], &[], Corners::Filled);
-    fixes();
-    // the middle of the rim edge beside the slot, (-36, -74, 5) to (-36, w, 5)
-    let mid = [-36.0, 0.5 * (v + w), 5.0];
-    match result {
-        // the size waits on tangency-labs/solidcraft#16782
-        Err(Error::TooLarge {
-            at: Some(at),
-            why: Some(RoomReason::RailLeavesFace),
-            ..
-        }) => {
-            let off = at
-                .iter()
-                .zip(mid)
-                .map(|(a, m)| (a - m).abs())
-                .fold(0.0, f64::max);
-            assert!(
-                off < 1e-9,
-                "found for {at:?}, not the edge beside the slot {mid:?}"
-            );
-        }
-        other => panic!("the slot between the sections: {other:?}"),
-    }
 }
 
 /// The largest round at C that builds on the arm and boss, in closed form. The ball touches

@@ -38,7 +38,7 @@
 
 use core::cell::{Cell, RefCell};
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::error::SolidError;
 use crate::geom::context::Context;
@@ -140,6 +140,17 @@ pub struct Caches {
     /// is not solved again. A [`RefCell`] so the check can fill it through the `&Kernel`
     /// it takes (the kernel stays `Send`; it is not shared between threads).
     pub(crate) curve_analysis: RefCell<crate::nurbs::b_spline_curve::analysis::AnalysisMemo>,
+    /// Not upstream (#22467): exact-input memo of trim-image gap outcomes
+    /// (`query::curve_surface_gap::TrimBoundMemo`), keyed by the pair's data and bound
+    /// parameters bit for bit. Off when [`Kernel::memoize_curve_caches`] is false; clearing it
+    /// changes no result, only speed.
+    pub(crate) trim_move_bounds: RefCell<crate::query::curve_surface_gap::TrimBoundMemo>,
+    /// Not upstream (#20158): content-keyed memo of [`crate::topology::edgeuse::p3::fit_tolerance`]'s
+    /// uncached edge/face gap measurements (`topology::edgeuse::p3::FitGapMemo`). Shared through
+    /// an [`Arc`] so boolean worker cache kernels reuse gaps already measured by their parent
+    /// (a hit returns the exact same gap, so sharing changes no result). Off when
+    /// [`Kernel::memoize_curve_caches`] is false; clearing it changes no result, only speed.
+    pub(crate) fit_gap_memo: Arc<Mutex<crate::topology::edgeuse::p3::FitGapMemo>>,
     /// Not upstream (#18166): whether a lazily built UV trim raises its edge's tolerance by
     /// the trim's proved distance from the edge (`topology::edgeuse::p3::trim_raise_distance`),
     /// as it does by default, or by upstream's sampled distance, as a file's translation asks
@@ -167,6 +178,8 @@ impl Default for Caches {
     fn default() -> Self {
         Self {
             curve_analysis: RefCell::default(),
+            trim_move_bounds: RefCell::default(),
+            fit_gap_memo: Arc::default(),
             prove_lazy_trim_raise: true,
             hold_trim_raise: false,
             refit_raising_trims: Cell::new(false),
@@ -201,6 +214,7 @@ pub struct WorkCounters {
     face_pairs: Cell<u64>,
     loops_classified: Cell<u64>,
     wall_body_copies: Cell<u64>,
+    keep_feature_creases: Cell<u64>,
     proto_edge_intersections: Cell<u64>,
     shell_traversal_faces: Cell<u64>,
     proto_vertex_point_solves: Cell<u64>,
@@ -250,6 +264,8 @@ pub struct WorkCounters {
     shells: Cell<u64>,
     booleans: Cell<u64>,
     apart_unions: Cell<u64>,
+    move_trim_bisection_pieces: Cell<u64>,
+    fit_gap_calcs: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -275,6 +291,13 @@ impl WorkCounters {
     #[must_use]
     pub fn wall_body_copies(&self) -> u64 {
         self.wall_body_copies.get()
+    }
+
+    /// Creases keep features computes, each the section of a sheet face of rounds by a
+    /// feature's wall (a planar section, or a surface intersection). Not the fork's.
+    #[must_use]
+    pub fn keep_feature_creases(&self) -> u64 {
+        self.keep_feature_creases.get()
     }
 
     /// Curve intersections a boolean ran to split its proto edges where they cross
@@ -684,11 +707,28 @@ impl WorkCounters {
         self.apart_unions.get()
     }
 
+    /// Bisection pieces evaluated while certifying trim-image gaps across rigid moves
+    /// (`topology::edgeuse::p3::cover_moved_trims`, through `query::curve_surface_gap`),
+    /// so a far-origin boolean test can catch regressions back to `MAX_PIECES` pole-trim
+    /// bisections or repeated `reparametrisation` work (#22467). Not the fork's.
+    #[must_use]
+    pub fn move_trim_bisection_pieces(&self) -> u64 {
+        self.move_trim_bisection_pieces.get()
+    }
+
+    /// Uncached edge/face gap evaluations (`topology::edgeuse::p1::calc_max_edge_face_gap`)
+    /// performed by `topology::edgeuse::p3::fit_tolerance` (#20158). Not the fork's.
+    #[must_use]
+    pub fn fit_gap_calcs(&self) -> u64 {
+        self.fit_gap_calcs.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
         self.loops_classified.set(0);
         self.wall_body_copies.set(0);
+        self.keep_feature_creases.set(0);
         self.proto_edge_intersections.set(0);
         self.shell_traversal_faces.set(0);
         self.proto_vertex_point_solves.set(0);
@@ -738,6 +778,20 @@ impl WorkCounters {
         self.shells.set(0);
         self.booleans.set(0);
         self.apart_unions.set(0);
+        self.move_trim_bisection_pieces.set(0);
+        self.fit_gap_calcs.set(0);
+    }
+
+    /// Counts `pieces` bisection pieces evaluated while certifying a moved trim's gap.
+    pub(crate) fn add_move_trim_bisection_pieces(&self, pieces: u64) {
+        self.move_trim_bisection_pieces
+            .set(self.move_trim_bisection_pieces.get().saturating_add(pieces));
+    }
+
+    /// Counts one uncached edge/face gap calculation inside `fit_tolerance`.
+    pub(crate) fn add_fit_gap_calc(&self) {
+        self.fit_gap_calcs
+            .set(self.fit_gap_calcs.get().saturating_add(1));
     }
 
     /// Counts one intersection of a blend's section with a face.
@@ -830,6 +884,12 @@ impl WorkCounters {
     pub(crate) fn add_wall_body_copy(&self) {
         self.wall_body_copies
             .set(self.wall_body_copies.get().saturating_add(1));
+    }
+
+    /// Counts one crease keep features computes between a sheet face and a wall.
+    pub(crate) fn add_keep_feature_crease(&self) {
+        self.keep_feature_creases
+            .set(self.keep_feature_creases.get().saturating_add(1));
     }
 
     /// Counts one curve intersection of two proto edges.
@@ -1431,9 +1491,11 @@ pub struct Kernel {
     /// Not upstream: the memo of the procedural blends this kernel recertified as it gave a
     /// record's faces their definitions back
     /// ([`crate::surface::procedural_blend::convert::RecertifyMemo`]), on with
-    /// [`Kernel::memoize_curve_caches`]. A [`RefCell`]: it is never borrowed across a
-    /// certificate, and a hit returns what recertifying the same blend again returns.
-    pub recertify_memo: RefCell<crate::surface::procedural_blend::convert::RecertifyMemo>,
+    /// [`Kernel::memoize_curve_caches`]. Shared through an [`Arc`] (a kernel a boolean
+    /// copies for its workers keeps the certificates the parent finished: a hit returns
+    /// what recertifying the same blend again returns, so sharing it changes no answer),
+    /// and a [`Mutex`], as the copies run on their own threads.
+    pub recertify_memo: Arc<Mutex<crate::surface::procedural_blend::convert::RecertifyMemo>>,
     /// Not upstream: the fork's `thread_local` count of open blend operation scopes
     /// (`t_lOperationScopes`; [`crate::blend::fillet_section::section::OperationScope`]).
     /// Shared, so that a scope can outlive a borrow of the kernel (a fillet session holds
@@ -1468,7 +1530,7 @@ pub struct Kernel {
     /// Test-only seam of the curved coincident strip's drop ([`StripProbe`]); shared with
     /// the kernel copies an operation makes.
     #[cfg(test)]
-    pub(crate) strip_probe: Arc<std::sync::Mutex<StripProbe>>,
+    pub(crate) strip_probe: Arc<Mutex<StripProbe>>,
 }
 
 /// Test-only seam of `boolean::topology_intersector::curved_strip`
@@ -1534,7 +1596,7 @@ impl Kernel {
             blend_w_memo: RefCell::default(),
             loop_area_memo: RefCell::default(),
             check_memo: RefCell::default(),
-            recertify_memo: RefCell::default(),
+            recertify_memo: Arc::default(),
             blend_operation_scopes: Arc::default(),
             work_counters: WorkCounters::default(),
             blend_face_log: None,

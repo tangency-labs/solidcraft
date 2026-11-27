@@ -1916,7 +1916,8 @@ impl<O: SolutionObject> SolutionArray<O> {
     /// it was rejected: its value is `SM_BIG_DOUBLE` (uninitialised), or it
     /// [`Solution::is_equal`] a solution already held, which `new` then
     /// replaces when its value is smaller in magnitude; the solution kept takes
-    /// the [`Contact::merged`] of both. Solutions are never otherwise merged.
+    /// the [`Contact::merged`] of both, and keeps no unique box unless that is a crossing.
+    /// Solutions are never otherwise merged.
     ///
     /// # Errors
     ///
@@ -1963,6 +1964,11 @@ impl<O: SolutionObject> SolutionArray<O> {
                 }
                 old.contact = contact;
                 old.shared_contact = None;
+                // (a unique box is a crossing's, by the root it carries: a merged solution
+                // that is not a crossing carries none, whichever of the two was kept)
+                if old.contact != Contact::Crossing {
+                    old.unique = None;
+                }
                 return Ok(None);
             }
 
@@ -2291,6 +2297,35 @@ mod tests {
                 Some((Undecided, None))
             );
         }
+        // two boxed crossings merged are undecided and keep no unique box, whether the one
+        // held or the one coming in is kept; a crossing not merged keeps its box
+        let boxed = |value: f64, unique: [[f64; 2]; 2]| {
+            let mut s = with_contact(single(value, &[2.0]), Crossing);
+            s.unique = Some(unique);
+            s
+        };
+        let (p, q) = ([[0.1, 0.2], [0.3, 0.4]], [[0.2, 0.3], [0.3, 0.4]]);
+        for (held, incoming) in [(2.0, 2.0 + 1e-7), (2.0 + 1e-7, 2.0), (2.0, 2.0)] {
+            let mut d: SolutionArray<Obj> = SolutionArray::new();
+            d.add_sorted_solution(&boxed(held, p), SortKey::BySolutionValue)
+                .unwrap();
+            d.add_sorted_solution(&boxed(incoming, q), SortKey::BySolutionValue)
+                .unwrap();
+            assert_eq!(d.len(), 1);
+            assert_eq!(
+                d.get(0).map(|s| (s.contact, s.unique)),
+                Some((Undecided, None)),
+                "{held} {incoming}"
+            );
+        }
+        let mut e: SolutionArray<Obj> = SolutionArray::new();
+        e.add_sorted_solution(&boxed(2.0, p), SortKey::BySolutionValue)
+            .unwrap();
+        e.add_sorted_solution(&boxed(5.0, q), SortKey::BySolutionValue)
+            .unwrap();
+        assert_eq!(e.len(), 2);
+        assert_eq!(e.get(0).and_then(|s| s.unique), Some(p));
+        assert_eq!(e.get(1).and_then(|s| s.unique), Some(q));
     }
 
     #[test]

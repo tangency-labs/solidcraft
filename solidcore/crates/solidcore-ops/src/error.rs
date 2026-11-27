@@ -103,6 +103,8 @@ pub enum Error {
     /// `room` where no radius of the rounds builds it (a sharp concave side edge between them),
     /// else where the blend corner does not build one yet (unequal or variable rounds, a corner
     /// of four edges, a curved, drafted or tangent side edge); `why` is the kernel's reason.
+    /// Where no radius builds it, the kernel names the side edge and the radius it is
+    /// rounded at first for the turn to pass (`side_edge`, `least_radius`).
     TurnRefused {
         /// Whether no radius builds it; otherwise the corner is of a kind not built yet.
         room: bool,
@@ -110,6 +112,12 @@ pub enum Error {
         why: String,
         /// The corner's point, where the kernel's session notes it.
         at: Option<[f64; 3]>,
+        /// The sharp side edge between the rounds that no radius of theirs passes (its index
+        /// in the body's native list), where the kernel names it.
+        side_edge: Option<usize>,
+        /// The least radius `side_edge` is rounded at first for the turn to pass (the rounds'
+        /// one radius), where the kernel names it.
+        least_radius: Option<f64>,
     },
     /// The kernel does not set back corner `corner` (an index into the call's corners): it sets
     /// back a corner only where every edge meeting it is blended, all convex or all concave, or
@@ -690,6 +698,12 @@ pub enum OffsetRefusal {
         /// The largest draft angle that keeps a wall, radians.
         largest: f64,
     },
+    /// A drafted cone or cylinder whose radius would drop to zero or below within the face's
+    /// span: the draft angle closes the cone before the end of the face.
+    DraftConeCloses,
+    /// A drafted cone whose neutral plane is at or past its apex, so its radius on the neutral
+    /// plane is not positive and there is no hinge circle.
+    DraftNeutralPlanePastApex,
     /// How far the surfaces beside an edge or at a vertex of the face must be extended to
     /// meet has no certified bound (a pair or corner of kinds it does not bound yet): refused
     /// before anything changed.
@@ -774,6 +788,12 @@ impl std::fmt::Display for OffsetRefusal {
                 "the drafted face would reach another shell of the body, closing the wall \
                  between them; the largest draft angle that keeps a wall is {largest} rad"
             ),
+            OffsetRefusal::DraftConeCloses => {
+                write!(f, "a drafted cone would close within the face")
+            }
+            OffsetRefusal::DraftNeutralPlanePastApex => {
+                write!(f, "the neutral plane is at or past a drafted cone's apex")
+            }
             OffsetRefusal::ReachUncertified => {
                 write!(
                     f,
