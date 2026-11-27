@@ -15,6 +15,7 @@
 //!
 //! Lookups and downloads run on worker threads; the window never waits on the network.
 
+pub mod browser;
 pub mod index;
 pub mod library;
 pub mod link;
@@ -48,6 +49,8 @@ pub type HttpGet = Arc<dyn Fn(&str) -> Result<Signed, String> + Send + Sync>;
 #[derive(Default)]
 pub(crate) struct State {
     job: Option<Job>,
+    /// The Workshop window (Plugins › Browse the Workshop…) and the list it shows.
+    pub(crate) browser: browser::Browser,
     pub(crate) ask: Option<Resolved>,
     /// When the question first drew (`egui::InputState::time`), for [`KEY_DELAY`].
     asked_at: Option<f64>,
@@ -123,6 +126,18 @@ pub(crate) fn lookup(
     now: i64,
     app_version: &semver::Version,
 ) -> Result<Resolved, Refusal> {
+    let index = fetch_index(keys, get, seen, now)?;
+    index::resolve(&index, link, app_version)
+}
+
+/// Fetch the index and check its signature and freshness, keeping the highest sequence verified
+/// in `seen`. A link's lookup and the Workshop window (`browser`) read it the same way.
+pub(crate) fn fetch_index(
+    keys: &[(&str, &str)],
+    get: &dyn Fn(&str) -> Result<Signed, String>,
+    seen: Option<&Path>,
+    now: i64,
+) -> Result<index::Index, Refusal> {
     let answer = get(index::INDEX_URL).map_err(Refusal::Unreachable)?;
     let index = index::verify_with(keys, &answer.body, answer.signature.as_deref(), answer.key_id.as_deref())?;
     let highest = seen.and_then(|path| std::fs::read_to_string(path).ok()).and_then(|s| s.trim().parse::<u64>().ok());
@@ -133,7 +148,7 @@ pub(crate) fn lookup(
         let _ = path.parent().map(std::fs::create_dir_all);
         let _ = solidcraft_engine::io::safe_write::write_atomic(path, index.sequence.to_string().as_bytes(), false);
     }
-    index::resolve(&index, link, app_version)
+    Ok(index)
 }
 
 fn sequence_file() -> Option<PathBuf> {
@@ -455,6 +470,8 @@ fn start_download(app: &mut SolveApp, ctx: &egui::Context, item: Resolved) {
 
 /// The question, while an item waits for the answer.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    // The window first: the question it hands an item to draws over it.
+    browser::show(app, ctx);
     let Some(item) = app.workshop.ask.take() else {
         app.workshop.asked_at = None;
         return;

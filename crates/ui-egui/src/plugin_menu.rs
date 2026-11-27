@@ -38,6 +38,8 @@ use crate::ui_kit::BackingTooltipExt as _;
 const INSTALL: &str = "install";
 /// Last import report…: the report of the last file an importer plugin opened, again.
 const LAST_REPORT: &str = "last_import_report";
+/// The Plugins menu's Browse the Workshop… row (`workshop::browser`).
+const WORKSHOP: &str = "workshop";
 
 /// The start of a plugin command's ribbon button id: `plugin_entry:<plugin id>:<entry name>`.
 pub(crate) const RIBBON_PREFIX: &str = "plugin_entry:";
@@ -1097,15 +1099,18 @@ pub(crate) fn list(app: &SolveApp, dir: Option<&Path>) -> Vec<Listed> {
     listed
 }
 
-/// The menu's rows: Install plugin…, Last import report…, a separator, then each plugin's entries.
+/// The menu's rows: Install plugin…, Browse the Workshop… (desktop), Last import report…, a separator, then each
+/// plugin's entries.
 pub(crate) fn rows(app: &SolveApp) -> Vec<crate::app_bar::FileRow> {
     use crate::app_bar::{FileItem, FileRow};
     let item = |id: String, label: String, enabled: bool| FileRow::Item(FileItem { id, label, key: String::new(), icon: String::new(), enabled });
-    let mut rows = vec![
-        item(INSTALL.into(), app.tr("ui.plugin_menu_install").into(), true),
-        item(LAST_REPORT.into(), app.tr("ui.plugin_menu_last_report").into(), app.import_report.is_some()),
-        FileRow::Separator,
-    ];
+    let mut rows = vec![item(INSTALL.into(), app.tr("ui.plugin_menu_install").into(), true)];
+    // The desktop app reads the Workshop's list; the browser build and tests have no way to.
+    if crate::workshop::browser::offered(app) {
+        rows.push(item(WORKSHOP.into(), app.tr("workshop.browse").into(), true));
+    }
+    rows.push(item(LAST_REPORT.into(), app.tr("ui.plugin_menu_last_report").into(), app.import_report.is_some()));
+    rows.push(FileRow::Separator);
     if app.plugin_menu.listed.iter().all(|plugin| plugin.entries.is_empty()) {
         rows.push(item("empty".into(), app.tr("ui.plugin_menu_empty").into(), false));
     } else if !app.plugin_menu.listed.iter().any(|p| shown(app, p)) {
@@ -1192,6 +1197,10 @@ pub(crate) fn choose(app: &mut SolveApp, id: &str) {
     }
     if id == LAST_REPORT {
         crate::import_report::reopen(app);
+        return;
+    }
+    if id == WORKSHOP {
+        crate::workshop::browser::open(app);
         return;
     }
     let mut parts = id.strip_prefix("entry:").into_iter().flat_map(|rest| rest.split(':')).map(str::parse::<usize>);

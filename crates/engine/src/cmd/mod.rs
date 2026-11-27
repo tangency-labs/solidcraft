@@ -326,6 +326,7 @@ mod tab_views;
 mod view_dxf;
 mod view_navigation;
 mod view_pick;
+mod workshop;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -745,6 +746,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(drawing_ui::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v.extend(render_ui::COMMANDS.iter());
+    v.extend(workshop::COMMANDS.iter());
     v
 }
 

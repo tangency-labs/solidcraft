@@ -40,6 +40,30 @@ in the Workshop's `docs/link-scheme.md`; the app's parser is `crates/ui-egui/src
 If SolidCraft is already running, a link opened from the browser goes to that window
 (`apps/solidcraft/src/single_instance.rs`) instead of starting a second copy.
 
+## Browsing the Workshop in the app
+
+**Plugins › Browse the Workshop…** (desktop app) lists what the same signed index offers:
+plugins, models and parts libraries, with a search box, a kind filter and each item's tier badge,
+author, size and the version this SolidCraft would get (the newest that runs here and isn't
+blocked). Items that are delisted, blocked in every version or that a link would refuse are left
+out; an item whose every version needs a newer SolidCraft says which one. The list is read in the
+background when the window first opens and again with **Refresh**. A read that fails (no network,
+a signature that doesn't verify, a replayed or expired index) keeps the last good list and says
+why.
+
+**Open…** or **Install…** on a row asks the question above, exactly as a link to that item would,
+after checking that the index is still fresh. Nothing downloads from the list itself.
+`crates/ui-egui/src/workshop/browser.rs` has the window.
+
+Scripts and agents read the same list with two commands, which never download or install:
+
+| Command | Input | Output |
+|---|---|---|
+| `workshop.list` | `{kind?: plugin\|model\|part, tier?: official\|community\|unverified, query?, limit?: 1..500}` | `{state: empty\|loading\|ready\|failed, error?, sequence, issued_at, expires_at, total, items: [{id, kind, owner, slug, name, summary, tier, author, licence, version, needs_app?, permissions, size, warning?, page_url}]}` |
+| `workshop.refresh` | `{}` | `{refreshing: true}`: reads the index again in the background |
+
+Both refuse in a build without the Workshop (the command line, the browser build).
+
 ## Where the scheme is registered
 
 | Platform | Where |
