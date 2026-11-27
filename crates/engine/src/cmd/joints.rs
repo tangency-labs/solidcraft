@@ -2860,6 +2860,9 @@ fn dynamics(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
+    if p.get("set").is_some() {
+        return Err(bad("joint.edit", "unknown key `set`; give offset, angle or other joint edits as top-level parameters"));
+    }
     edit_joint(s, p, true)
 }
 
