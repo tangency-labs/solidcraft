@@ -120,7 +120,7 @@ env:
   # `warm`); every other run mounts a clone of main's latest and never writes back.
   # scripts/ci/warm_target.py marks the files that differ from the tree the disk was built from,
   # so Cargo rebuilds only those crates and their dependents. Change this to start every disk afresh.
-  WARM_TARGET: target-v1
+  WARM_TARGET: target-trial1
   # sccache's server stops after 10 idle minutes by default, so the statistics printed after
   # the tests (often longer than that) came from a new, empty server.
   SCCACHE_IDLE_TIMEOUT: "0"
@@ -654,9 +654,9 @@ jobs:
         with:
           key: ${{ github.repository }}-${{ env.WARM_TARGET }}-quick-compile
           path: ${{ github.workspace }}/target
-          commit: ${{ github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+          commit: ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && 'on-change' || 'false' }}
       - name: Mark what changed since the build directory's tree
-        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ github.ref == 'refs/heads/main' && '--writer' || '' }}
+        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && '--writer' || '' }}
       # The registry and git checkouts only: target/ is on the disk above.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -666,7 +666,7 @@ jobs:
       - name: Cargo check
         run: cargo check --workspace --all-targets --locked
       - name: Seal the build directory
-        if: success() && github.ref == 'refs/heads/main'
+        if: success() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target')
         run: python3 -I scripts/ci/warm_target.py seal --target target
 
   clippy:
@@ -689,9 +689,9 @@ jobs:
         with:
           key: ${{ github.repository }}-${{ env.WARM_TARGET }}-clippy
           path: ${{ github.workspace }}/target
-          commit: ${{ github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+          commit: ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && 'on-change' || 'false' }}
       - name: Mark what changed since the build directory's tree
-        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ github.ref == 'refs/heads/main' && '--writer' || '' }}
+        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && '--writer' || '' }}
       # The registry and git checkouts only: target/ is on the disk above.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -707,7 +707,7 @@ jobs:
         # other features than main's build, so it compiled their dependencies again.
         run: cargo clippy --workspace --all-targets --profile ci --locked -- -D warnings
       - name: Seal the build directory
-        if: success() && github.ref == 'refs/heads/main'
+        if: success() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target')
         run: python3 -I scripts/ci/warm_target.py seal --target target
 
   shared-crates:
@@ -732,9 +732,9 @@ jobs:
         with:
           key: ${{ github.repository }}-${{ env.WARM_TARGET }}-shared
           path: ${{ github.workspace }}/target
-          commit: ${{ github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+          commit: ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && 'on-change' || 'false' }}
       - name: Mark what changed since the build directory's tree
-        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ github.ref == 'refs/heads/main' && '--writer' || '' }}
+        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && '--writer' || '' }}
       # The registry and git checkouts only: target/ is on the disk above.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -744,7 +744,7 @@ jobs:
       - name: Shared crates build on their own
         run: cargo xtask shared
       - name: Seal the build directory
-        if: success() && github.ref == 'refs/heads/main'
+        if: success() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target')
         run: python3 -I scripts/ci/warm_target.py seal --target target
 
   build-tests:
@@ -877,9 +877,9 @@ jobs:
         with:
           key: ${{ github.repository }}-${{ env.WARM_TARGET }}-tests
           path: ${{ github.workspace }}/target
-          commit: ${{ github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+          commit: ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && 'on-change' || 'false' }}
       - name: Mark what changed since the build directory's tree
-        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ github.ref == 'refs/heads/main' && '--writer' || '' }}
+        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && '--writer' || '' }}
       # The registry and git checkouts only: target/ is on the disk above.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -964,7 +964,7 @@ jobs:
         if: always()
         run: if command -v sccache >/dev/null; then sccache --show-stats; else echo "sccache was not set up; built without it"; fi
       - name: Seal the build directory
-        if: success() && github.ref == 'refs/heads/main'
+        if: success() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target')
         run: python3 -I scripts/ci/warm_target.py seal --target target
       - name: Upload test timings
         if: always() && needs.changes.outputs.warm != 'true'
@@ -1455,9 +1455,9 @@ jobs:
         with:
           key: ${{ github.repository }}-${{ env.WARM_TARGET }}-no-usage-stats
           path: ${{ github.workspace }}/target
-          commit: ${{ github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+          commit: ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && 'on-change' || 'false' }}
       - name: Mark what changed since the build directory's tree
-        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ github.ref == 'refs/heads/main' && '--writer' || '' }}
+        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && '--writer' || '' }}
       # The registry and git checkouts only: target/ is on the disk above.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -1478,7 +1478,7 @@ jobs:
           fi
           echo "no trace of $endpoint"
       - name: Seal the build directory
-        if: success() && github.ref == 'refs/heads/main'
+        if: success() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target')
         run: python3 -I scripts/ci/warm_target.py seal --target target
 
   ci:
@@ -1928,10 +1928,10 @@ jobs:
         with:
           key: ${{ github.repository }}-${{ env.WARM_TARGET }}-solidcore-tests
           path: ${{ github.workspace }}/solidcore/bin
-          commit: ${{ github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+          commit: ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && 'on-change' || 'false' }}
       - name: Mark what changed since the build directory's tree
         working-directory: .
-        run: python3 -I scripts/ci/warm_target.py prepare --target solidcore/bin ${{ github.ref == 'refs/heads/main' && '--writer' || '' }}
+        run: python3 -I scripts/ci/warm_target.py prepare --target solidcore/bin ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && '--writer' || '' }}
       # The registry and git checkouts only: solidcore/bin (its target-dir) is on the disk above.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -1951,7 +1951,7 @@ jobs:
           retention-days: 1
           compression-level: 0
       - name: Seal the build directory
-        if: success() && github.ref == 'refs/heads/main'
+        if: success() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target')
         working-directory: .
         run: python3 -I scripts/ci/warm_target.py seal --target solidcore/bin
 
