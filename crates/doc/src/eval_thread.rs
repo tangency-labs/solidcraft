@@ -71,7 +71,11 @@ pub fn metric_thread_sizes() -> &'static [(f64, f64)] {
 }
 
 /// "M8" or "M8x1" → (nominal diameter, pitch).
+/// A designation with a tolerance class (`M8-6H`) is none: a tapped hole saves its class apart.
 pub fn parse_metric_thread(s: &str) -> Option<(f64, f64)> {
+    if crate::thread_forms::metric_class(s).1.is_some() {
+        return None;
+    }
     ThreadForm::Metric.parse(s, 1).ok().filter(|z| (z.lead - z.pitch).abs() < 1e-12).map(|z| (z.major, z.pitch))
 }
 
@@ -337,6 +341,17 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
         // fractional sizes absent from the catalogue. The parser has validated this callout.
         designation = given.split_whitespace().collect::<Vec<_>>().join(" ").to_ascii_uppercase();
     }
+    // An ISO metric tolerance class (ISO 965-1) is kept in the callout as written, after the
+    // size's own designation; the size, and so the groove and the fit, are the size's alone.
+    let size_designation = designation.clone();
+    if form == ThreadForm::Metric
+        && tapped.is_none()
+        && let Some(given) = ask.designation
+        && let (_, Some(class)) = crate::thread_forms::metric_class(given)
+    {
+        form.check_class(given, cyl.internal).map_err(DocError::Invalid)?;
+        designation = format!("{designation}-{class}");
+    }
     let minor = 2.0 * form.groove(major, pitch, true).crest_r;
     let fits = if let Some(t) = tapped.as_ref().filter(|t| t.family != crate::TappedThreadFamily::Metric) {
         // The hole drilled for it, without borrowing an ISO minor-diameter rule.
@@ -351,7 +366,7 @@ pub(super) fn thread_on_in(st: &ModelState, feature: u64, component: Option<u64>
         let try_instead = form
             .fit(dia, cyl.internal)
             .map(|(n, q)| form.format(n, q, q))
-            .filter(|a| *a != designation)
+            .filter(|a| *a != size_designation)
             .map(|a| format!("; this {kind} takes {a}"))
             .unwrap_or_default();
         return Err(DocError::Invalid(format!("an {designation} thread does not fit a {dia:.2} mm {kind}{try_instead}")));

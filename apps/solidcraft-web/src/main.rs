@@ -475,6 +475,8 @@ mod web {
         rename_focus: bool,
         /// The start page's recent designs were filled from the stored ones.
         recents_synced: bool,
+        /// The recent designs last checked for one file on the computer listed twice.
+        recents_checked: Vec<String>,
         /// On-demand script fonts: fetched only when a CJK language is selected.
         font: solidcraft_ui_egui::ui_kit::type_face::CjkFontLoader,
         font_result: FontLoadResult,
@@ -600,6 +602,23 @@ mod web {
             for path in self.files.gone.borrow_mut().drain(..) {
                 self.app.home.recent.retain(|r| *r != path);
                 self.app.home.opened_at.remove(&path);
+            }
+            // The same file picked again is listed once, under its newest entry (#23033). The list
+            // may have changed while the browser compared the files: drop only an entry still
+            // listed after the one that stays.
+            for (kept, repeat) in self.files.same_file.borrow_mut().drain(..) {
+                let recent = &mut self.app.home.recent;
+                if let (Some(k), Some(r)) = (recent.iter().position(|p| *p == kept), recent.iter().position(|p| *p == repeat))
+                    && k < r
+                {
+                    recent.remove(r);
+                    self.app.home.opened_at.remove(&repeat);
+                }
+            }
+            // Each change of the recent designs is checked for one file listed twice.
+            if self.recents_synced && self.app.home.recent != self.recents_checked {
+                self.recents_checked = self.app.home.recent.clone();
+                disk::find_same_files(&self.files, self.recents_checked.clone());
             }
             for (text, error) in self.files.messages.borrow_mut().drain(..) {
                 self.app.set_status(text, error);
@@ -1501,7 +1520,7 @@ mod web {
                         let files = Rc::new(Files::default());
                         let (panel, opener, saver, shown) = (files.clone(), files.clone(), files.clone(), files.clone());
                         let (restorable, restorer, writer) = (files.clone(), files.clone(), files.clone());
-                        let services = if !launch.persists() { Services::default() } else { Services {
+                        let mut services = if !launch.persists() { Services::default() } else { Services {
                             // Open shows the browser's open dialog for a design where it has one
                             // (the file keeps its handle, so Save writes back to it), else the
                             // browser's files window. A command that reads another kind of file
@@ -1546,6 +1565,7 @@ mod web {
                             usage_http: Some(std::sync::Arc::new(crate::usage::post)),
                             ..Default::default()
                         }};
+                        services.browser_safari = crate::install::safari();
                         // Thumbnails of saves and start-page cards.
                         solidcraft_ui_egui::gpu::install_cpu_picture_renderer();
                         let (sender, receiver) = std::sync::mpsc::channel();
@@ -1607,6 +1627,7 @@ mod web {
                             renaming: None,
                             rename_focus: false,
                             recents_synced: false,
+                            recents_checked: Vec::new(),
                             font: Default::default(),
                             font_result: Rc::new(std::cell::RefCell::new(None)),
                             cjk_bytes: None,
