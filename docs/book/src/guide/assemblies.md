@@ -6,6 +6,11 @@ component has its own origin, bodies, sketches and timeline entries. The **activ
 (the radio button in the browser) receives new sketches and features; the others are drawn
 faded.
 
+**Activate Parent** (`component.activate.parent`), at the right end of the **MODEL** tab while a
+component is active, activates the component one level up: a part inside a subassembly goes back
+to the subassembly, and the top component goes back to the design. A double-click on empty space
+in the view does the same, unless Preferences, Design, `double_click_components` is off.
+
 Sketches drawn on a part's face while the design was active belong to the design, so they
 collect in its Sketches folder. **Move Sketches to Their Parts**
 (`component.move_sketches.to_parts`), on a Sketches folder's menu and on a sketch's menu, moves
@@ -132,9 +137,9 @@ go to the new `.sc` file at its origin, with the parameters they use, and the co
 becomes linked to that file, as **Insert Design** makes it. Its placements and the joints to the
 rest of the assembly stay. Components whose own history builds the same bodies are offered to
 become placements of the new link too (`component.copies`, `component.replace_with_link`).
-The menu offers Extract only for a component that can leave: nothing outside uses its sketches
-or changes its bodies, no bodies were moved into or out of it, and none of its subcomponents is
-joined to the rest of the design.
+A component can leave when nothing outside uses its sketches or changes its bodies, no bodies
+were moved into or out of it, and none of its subcomponents is joined to the rest of the design.
+When it can't, the menu shows Extract greyed out, and hovering it says why.
 
 **Joints** (`joint.create`, J) connect two components by joint origins that snap to faces, edges,
 circles and vertices: rigid, revolute, slider, cylindrical, pin-slot, planar and ball, with
@@ -167,6 +172,19 @@ pointing out of the face with its y into it, or with `"corner": [x, y, z]` at th
 point, its x and y running along the two edges into the face. The edge, the face and the corner
 are found again by name, so a bracket set 40 mm in from a panel's corner (a planar joint with
 values `[40, 40, 0]`) stays 40 mm in from that corner when the panel changes size.
+
+To center a slider in a slot, open **Constrain** and turn on **Center between two faces**.
+Pick the two parallel walls of the slot, then pick the reference on the slider. Pick a plane
+that marks the slider's middle, or turn on **Center the part by two faces** and pick its two
+parallel faces. For a round part, pick its cylindrical face or axis instead. The rule follows
+the named faces when the design changes. A slider can still slide along the walls and turn
+about their normal; a round part's axis stays in the halfway plane.
+
+Scripts pass `"faces": [[x, y, z], [x, y, z]]` as a joint origin, with one point on each of two
+parallel faces of the same occurrence. Use `assembly.constraint.create` with `"type": "center"`
+for the plane or two-face case, or `joint.create` with `"type": "line_on_plane"` for an axis.
+For a part with a datum at its middle, **Construct → Midplane** followed by a mate to that
+datum is also an option.
 
 A joint's Z offset, angle, values and the minimum and maximum of its limits can be typed as
 expressions over the design's parameters (`"offset": "gap + 2"`, `"values": ["travel"]`,
@@ -217,7 +235,8 @@ It returns `overlaps` (pairs sharing at least `min_volume`, 0.01 mm³ by default
 volume, area, box and centre), `near` (pairs closer than `clearance`, with the distance and the
 two nearest points; a contact sharing less than `min_volume` is listed here at 0 with its
 `overlap_mm3`), `nearest` (each body's `nearest` closest checked bodies, omitting pairs in
-`unchecked`) and `unchecked` (pairs whose overlap could not be worked out, with the reason).
+`unchecked`) and `unchecked` (pairs whose overlap could not be worked out, with the reason and
+the non-boolean minimum `distance_mm` when computable).
 `against` limits the check to pairs with one
 body in `bodies` and the other in `against`, and `skip_within` leaves out pairs inside one
 occurrence (`"occurrence"`) or one placed component, its subcomponents included
@@ -526,6 +545,15 @@ automatic STEP refresh. Use **Break Link** on the
 component to keep an independent copy, or pass `link: false` to `file.insert_step`. Older designs keep their unlinked imports. The web app keeps independent
 copies because uploaded files have no disk source path.
 
+A file that an installed **importer plugin** reads links the same way: **Insert Design** takes it
+(`component.insert_design` with `path`, and `format` and `options` to choose the importer). The
+link remembers which plugin and version read the file, with its options. **Update Links** asks
+that plugin to read the file again when it changed, and keeps placements, names and joints as
+for any linked part. If the plugin is not installed or is turned off, the link says which plugin
+and version it needs and the component keeps its last bodies. A file read by a plugin is not
+read again by itself when a tab comes back; use **Update Links**. **Break Link** keeps the
+bodies and forgets both the file and the plugin.
+
 An assembly can be saved without the bodies of its linked parts:
 `file.save {linked_bodies: false}` (or `file.save_as`). The file then keeps each link, with its
 placements, joints and face names, and no copy of the part's bodies, so it stays small and a
@@ -606,6 +634,16 @@ new linked component; the other occurrences keep the old source. Scripts pass th
 `component.relink {component, occurrence, path}`, and the reply's `component` is then the one
 the occurrence shows and `previous_component` the one it showed.
 
+Relink Source leaves the linked bodies' names as they are, unless the new source has another
+number of bodies, when they take the source's names. **Relink Source and Use Its Names…**
+(in the same menu) gives the bodies the new source's names instead: what the design keeps under
+the old names (materials, appearances, later features that name the body) follows each body to
+its new name, and the linked feature takes the source design's name when it still had its
+component's. The component's own name stays yours, and a body whose new name another body
+already has keeps its name and is reported in the warnings. Scripts pass `names: "keep"`
+(the default) or `names: "sync"`; it applies when the whole component is relinked, not to one
+placement shown by `occurrence`, which shows a component made from the new source.
+
 Scripts use `component.relink {component, path}`. The reply includes `previous_path`, `path`,
 `warnings`, `joint_errors` and `joint_conflicts`. Changed geometry can invalidate a joint's
 face reference: relinking reports those joints in the reply and UI status/message history;
@@ -627,7 +665,9 @@ uses its first placement; `occurrence.properties` selects a specific instance. R
 measures the complete assembly. A placement that counts as a reference (a bill of materials
 type, below) adds nothing, nor does anything inside it; the component or occurrence measured
 counts whatever its type. Volumes are summed, including overlapping bodies, rather than
-measuring their union. The same workflow is available through `component.properties` and
+measuring their union. A placement's Properties also shows where it sits: **Position** and
+**Rotation** (angle, then axis), with **Frame** choosing between **In parent** and **World**, and
+**Copy matrix** for the matrix `occurrence.move` takes. The same workflow is available through `component.properties` and
 `occurrence.properties`; see
 [placement and measurement details](https://github.com/tangency-labs/solidcraft/blob/main/docs/assembly-properties.md).
 
@@ -638,9 +678,20 @@ revision, other tools' data under a reverse-DNS key (the same rules as the desig
 properties), and free text properties such as a material grade or a finish. Every occurrence of
 the component shares them, Paste New copies them, and they are saved with the component.
 `component.metadata {component}` reads them and
-`component.metadata.set {component, part_number?, description?, revision?, bom_type?, material?, bom_quantity?, virtual?, values?, properties?}`
+`component.metadata.set {component, part_number?, description?, revision?, bom_type?, material?, finish?, bom_quantity?, virtual?, values?, properties?}`
 changes them in one undo step (an empty value removes a field). The root component is the
-design itself: its properties are `document.metadata`'s. Standard parts (`parts.insert`) get a
+design itself: its properties are `document.metadata`'s.
+
+A part's **material** is what it is ordered as ("5052-H32, 0.090 in", "CRS, 16 ga") and its
+**finish** is free text ("powder coat, RAL 9005, matt", "zinc plate, clear", "#4 brushed, grain
+along length"); masking and no-coat notes stay ordinary notes. Both are text of your own: the
+windows offer common finishes to pick from and never hold you to them. A design that is one part has
+no component to hold them, so the design carries them itself: `document.metadata.set {values:
+{material, finish}}` (Design Properties in the window). They are in the bill of materials (a
+`finish` column in the rows and the CSV), in a drawing's parts list (a FINISH column you add with the table's columns; a new list
+keeps its columns) and in its title block, whose Material and Finish cells read them with nothing typed over. A part
+that has only a free property named `finish` (as parts did before) shows that one wherever a finish
+is shown. Standard parts (`parts.insert`) get a
 part number from their standard and size (`ISO 4762 M6x20`, `GOST 7798-70 M12x60`, or a bearing's
 designation) and a description; **Change Part Size** renumbers them, keeping a field you changed yourself.
 
@@ -711,7 +762,7 @@ in the one material an assembly around it shares, so two parts typed in as S355 
 S355. Where several definitions share a row, the first one's static material wins. It doesn't change
 the mass, which still comes from the bodies, and clearing it (empty or null) brings the worked-out
 material back.
-A free property such as a material grade stays in `properties`. `mass: true` adds `mass_g`: what one of the row's parts weighs in grams, with
+Each row also has `finish`: the part's finish, else a free property named `finish`. A free property such as a material grade stays in `properties`. `mass: true` adds `mass_g`: what one of the row's parts weighs in grams, with
 what is placed inside it except what the list shows as rows of their own beside it, so the rows of any
 list add up to the assembly. It adds `total_mass_g` beside the rows too: what the assembly weighs, measured
 from the design rather than added up from the rows. At the top level a row weighs all it holds. In parts only a part's contents
@@ -720,7 +771,7 @@ one (all it holds) and an inseparable one (all but its purchased parts). A refer
 nothing. Every part is measured for it, once per definition, so it takes longer. It is `null` when nothing
 in the part has a body, a body can't be measured, or the definitions sharing the row's part number weigh
 differently (by more than the measurement can tell apart: one part modelled two ways weighs the same). `path` writes them to a `.csv` file
-(the columns item, part_number, description, revision, count, definition, material and quantity, every field
+(the columns item, part_number, description, revision, count, definition, material, quantity and finish (a column added later goes last, so the others keep their places), every field
 quoted, and a field that a spreadsheet would run as a formula written with a `'` before it so the
 spreadsheet shows it as text; children follow their row) or a `.json` file. A formula field is one that
 starts with `=`, `+`, `-` or `@`, their full-width forms, a tab or a line break, after any spaces and

@@ -12,6 +12,7 @@ use solidcore_record::Vec2;
 use solidcraft_engine::doc::Document;
 use solidcraft_engine::doc::expr::{Kind as ValueKind, definition};
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_kernel::planar as arcs;
 
 use crate::SolveApp;
 use crate::tools::Tool;
@@ -66,6 +67,8 @@ pub fn boxes_for(cmd: &str, n: usize) -> Vec<DimBox> {
         ("sketch.ellipse", 2) => vec![b("Minor radius", Length)],
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 1) => vec![b("Radius", Length)],
         ("sketch.arc.center_point" | "sketch.slot.arc_center", 2) => vec![b("Sweep", Angle)],
+        // The third point of a 3-Point Arc gives its radius and sweep (#20719).
+        ("sketch.arc.three_point", 2) => vec![b("Radius", Length), b("Sweep", Angle)],
         ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => vec![b("Radius", Length), b("Sides", Unitless)],
         // By side: the side from the first click to the second (#11271).
         ("sketch.polygon.edge", 1) => vec![b("Length", Length), b("Sides", Unitless)],
@@ -111,6 +114,31 @@ fn dir_or_x(v: Vec2) -> Vec2 {
 
 fn sign(x: f64) -> f64 {
     if x < 0.0 { -1.0 } else { 1.0 }
+}
+
+/// The circle through `s`, `e` and `t`: its centre, radius and the sweep (radians) of the arc from
+/// `s` to `e` that passes through `t`. None for points on one line.
+pub(crate) fn three_point_circle(s: Vec2, e: Vec2, t: Vec2) -> Option<(Vec2, f64, f64)> {
+    let (centre, r, sweep) = arcs::three_point_circle(s.into(), e.into(), t.into())?;
+    Some((centre.into(), r, sweep))
+}
+
+/// The dotted guides of a 3-Point Arc whose centre is `centre`: one from the centre to each end
+/// that it is level with (the same height) or plumb with (the same place across), within `tol`.
+/// Display only; the centre itself sits at the arc's own centre, not on the guide's line (#20719).
+pub(crate) fn centre_guides(centre: Vec2, ends: [Vec2; 2], tol: f64) -> Vec<(Vec2, Vec2)> {
+    ends.into_iter()
+        .filter(|e| e.dist(centre) > tol && ((e.y - centre.y).abs() <= tol || (e.x - centre.x).abs() <= tol))
+        .map(|e| (centre, e))
+        .collect()
+}
+
+/// The third point of the 3-Point Arc from `s` to `e` for the cursor `h` with a typed radius or
+/// sweep (radians; the sweep wins when both are typed): on the arc of that size whose middle is
+/// nearest the cursor. A radius picks among the minor and major arcs on either side of the chord;
+/// a sweep takes the cursor's side. None: no such arc (a radius under half the chord).
+fn arc_through(s: Vec2, e: Vec2, h: Vec2, radius: Option<f64>, sweep: Option<f64>) -> Option<Vec2> {
+    arcs::arc_third_point(s.into(), e.into(), h.into(), radius, sweep).map(Vec2::from)
 }
 
 /// The next point the tool would place for the cursor at `h`, honouring locked values.
@@ -172,6 +200,14 @@ pub fn effective(app: &SolveApp, t: &Tool, h: Vec2) -> Vec2 {
             c + Vec2::from_angle(a0 + sweep) * r
         }
         ("sketch.polygon.inscribed" | "sketch.polygon.circumscribed", 1) => a + dir_or_x(h - a) * lk("Radius").unwrap_or((h - a).len()),
+        // A typed radius or sweep puts the third point on the arc of that size nearest the cursor.
+        ("sketch.arc.three_point", 2) => {
+            let Some(start) = t.pts.first().map(|p| p.0) else { return h };
+            if lk("Radius").is_none() && lk("Sweep").is_none() {
+                return h;
+            }
+            arc_through(start, a, h, lk("Radius"), lk("Sweep")).unwrap_or(h)
+        }
         ("sketch.polygon.edge", 1) => a + dir_or_x(h - a) * lk("Length").unwrap_or((h - a).len()),
         ("sketch.slot.center_to_center" | "sketch.slot.overall" | "sketch.slot.center_point", 2) => match lk("Width") {
             Some(w) => {
@@ -444,6 +480,14 @@ fn live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Vec<(f64, Vec2)> {
             };
             vec![(sweep, e + dir_or_x(e - first) * (2.5 * off))]
         }
+        // Beyond the cursor, away from the centre, clear of the pointer (#2201).
+        ("sketch.arc.three_point", 2) => {
+            let (r, sweep, out) = match three_point_circle(first, a, e) {
+                Some((centre, r, sweep)) => (r, sweep, dir_or_x(e - centre)),
+                None => (0.0, 0.0, Vec2::X),
+            };
+            vec![(r, e + out * (2.5 * off)), (sweep, e + out * (4.5 * off))]
+        }
         ("sketch.conic", 2) => {
             // `rho` is the curve's fullness, not a distance: the conic passes through
             // `chord midpoint + rho * (apex - chord midpoint)`, so the box sits on that point
@@ -480,6 +524,8 @@ fn fmt(app: &SolveApp, label: &str, kind: ValueKind, v: f64) -> String {
         }
         ValueKind::Unitless => format!("{}", v.round()),
         ValueKind::Length => crate::prefs::show_mm_bare(app, v),
+        // Sketch tools size lengths, angles and counts; anything else shows as the number it is.
+        ValueKind::Mass | ValueKind::Volume | ValueKind::Area => format!("{v}"),
     }
 }
 
@@ -546,6 +592,10 @@ fn construction_offset_live(app: &SolveApp, t: &Tool, e: Vec2, px: f64) -> Optio
 /// side, and a box on that click would take it.
 fn boxes_now(t: &Tool) -> Vec<DimBox> {
     let mut boxes = boxes_for(t.cmd, t.pts.len());
+    // The 3-Point Arc's Radius and Sweep boxes belong to its tangent mode (#20719).
+    if t.cmd == "sketch.arc.three_point" && !t.arc_modes {
+        boxes.clear();
+    }
     if t.cmd == "sketch.construction_line.parallel" && input_stage(t) == 0 || !t.pts.is_empty() {
         boxes.retain(|b| b.label != "Offset");
     }
@@ -693,6 +743,23 @@ pub fn validate(app: &SolveApp, t: &Tool) -> Result<(), String> {
             _ => return Err(format!("{} must be positive", dimension.label)),
         }
     }
+    if t.cmd == "sketch.arc.three_point"
+        && let (Some(start), Some(end)) = (t.pts.first(), t.pts.get(1))
+    {
+        let chord = start.0.dist(end.0);
+        let (radius, sweep) = (locked(app, t, "Radius"), locked(app, t, "Sweep"));
+        if radius.is_some_and(|r| r * 2.0 < chord - 1e-9) {
+            return Err("Radius must be at least half the distance between the arc's ends".into());
+        }
+        if sweep.is_some_and(|sw| !(sw > 1e-9 && sw < std::f64::consts::TAU - 1e-9)) {
+            return Err("Sweep must be greater than zero and less than 360 degrees".into());
+        }
+        if let (Some(r), Some(sw)) = (radius, sweep)
+            && (2.0 * r * (sw * 0.5).sin() - chord).abs() > 1e-6 * (1.0 + chord)
+        {
+            return Err("Radius and Sweep do not fit the distance between the arc's ends: type one of them".into());
+        }
+    }
     if t.cmd == "sketch.slot.overall"
         && let (Some(length), Some(width)) = (locked(app, t, "Length"), locked(app, t, "Width"))
         && length <= width
@@ -749,16 +816,67 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
         return;
     }
     let Some(mut t) = app.tool.take() else { return };
+    // A pick whose curve the Undo button took away goes before the boxes are decided (#23086).
+    if crate::sketch_tools::drop_gone_picks(app, &mut t) {
+        app.set_tool_hint(crate::tools::hint(t.cmd));
+    }
     t.classic = app.preferences.construction_line_classic;
+    t.arc_modes = app.preferences.sketch_arc_tangent_snap;
     sync(&mut t);
     let place = if t.dims.is_empty() { None } else { boxes(app, ui, proj, &mut t) };
     if t.classic {
         crate::sketch_construction::line_type_switch(ui, &mut t);
     }
+    rectangle_switch(ui, &mut t);
     app.tool = Some(t);
     if let Some(p) = place {
         crate::tools::place(app, (p, None));
     }
+}
+
+thread_local! {
+    static LAST_RECTANGLE_ROTATABLE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether a rectangle tool starts drawing rectangles that can be turned: the choice last made on
+/// its switch while the app runs, else Fixed.
+pub(crate) fn last_rectangle_rotatable() -> bool {
+    LAST_RECTANGLE_ROTATABLE.with(std::cell::Cell::get)
+}
+
+/// The 2-Point and Center Rectangle tools' Fixed/Can turn switch under the Width box (#21467). Can
+/// turn holds the sides parallel and perpendicular with only the bottom one horizontal, so
+/// deleting that constraint turns the rectangle; Fixed keeps each side horizontal or vertical. It
+/// belongs to the tool alone, as the construction line tools' Construction/Normal switch does.
+fn rectangle_switch(ui: &mut egui::Ui, t: &mut Tool) {
+    if !matches!(t.cmd, "sketch.rectangle.two_point" | "sketch.rectangle.center") {
+        return;
+    }
+    let Some(i) = t.dims.iter().position(|b| b.label == "Width") else { return };
+    let Some(width_box) = ui.ctx().memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))) else { return };
+    let tokens = Tokens::get();
+    let options = [solidcraft_ui_text::tr("sketch.rectangle.fixed"), solidcraft_ui_text::tr("sketch.rectangle.can_turn")];
+    let mut selected = usize::from(t.rotatable);
+    let frame = crate::ui_kit::Container::popup_frame(ui.style()).inner_margin(egui::Margin::same(1)).fill(tokens.panel);
+    crate::ui_kit::Container::new(ui.ctx(), crate::ui_kit::Surface::Canvas)
+        .area(egui::Id::unique("sc_rectangle_switch"))
+        .fixed_pos(width_box.left_bottom() + egui::vec2(0.0, tokens.space_2))
+        .order(egui::Order::Background)
+        .show(ui.ctx(), |ui| {
+            crate::ui_kit::Container::show_backing(ui, frame, |ui| {
+                let segments = crate::ui_kit::Segments {
+                    targets: &["rectangle_switch:fixed", "rectangle_switch:can_turn"],
+                    small: true,
+                    intrinsic: true,
+                    compact: true,
+                    ..Default::default()
+                };
+                if crate::ui_kit::segmented(ui, &mut selected, &options, segments) {
+                    t.rotatable = selected == 1;
+                    LAST_RECTANGLE_ROTATABLE.with(|last| last.set(t.rotatable));
+                }
+            });
+        });
 }
 
 fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option<Vec2> {
@@ -772,6 +890,29 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
     let e = shown(app, t, hover.as_ref()?);
     let px = 2.0 * app.cam.half_height() / f64::from(proj.rect.height().max(1.0));
     let lv = live(app, t, e, px);
+    // The 3-Point Arc's centre, a small cross while its third point is placed, in the arc's
+    // tangent mode only. Only a marker: no geometry is added (#20719).
+    if t.cmd == "sketch.arc.three_point"
+        && t.arc_modes
+        && let (Some(start), Some(end)) = (t.pts.first(), t.pts.get(1))
+        && let Some((centre, _, _)) = three_point_circle(start.0, end.0, e)
+        && let Some(at) = proj.to_screen(plane.to_world(centre))
+        && at.is_finite()
+    {
+        let stroke = egui::Stroke::new(1.5, tk.rubber_band);
+        let arm = 5.0;
+        ui.painter().line_segment([at - vec2(arm, 0.0), at + vec2(arm, 0.0)], stroke);
+        ui.painter().line_segment([at - vec2(0.0, arm), at + vec2(0.0, arm)], stroke);
+        crate::scenario::publish_count("arc_centre_marker", 1.0);
+        // Dotted lines from the centre to the ends it lines up with.
+        let guides = centre_guides(centre, [start.0, end.0], 3.0 * px);
+        for (from, to) in &guides {
+            if let (Some(a), Some(b)) = (proj.to_screen(plane.to_world(*from)), proj.to_screen(plane.to_world(*to))) {
+                ui.painter().extend(crate::ui_kit::dashed_line(&[a, b], ui.painter().clip_rect(), egui::Stroke::new(1.0, tk.rubber_band), 2.0, 3.0));
+            }
+        }
+        crate::scenario::publish_count("arc_centre_guides", guides.len() as f64);
+    }
     let focus = std::mem::take(&mut t.dims_focus);
     // Egui processes ordinary Tab navigation before these floating text edits are drawn.
     // Remember the box that owned the keyboard and restore a focus within this tool after
@@ -846,7 +987,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             .unwrap_or_else(|| t.pts.iter().map(|p| p.0).chain(std::iter::once(e)).collect());
         let points: Vec<_> = corners.iter().filter_map(|p| proj.to_screen(plane.to_world(*p))).collect();
         let bounds = egui::Rect::from_points(&points);
-        bounds.is_finite().then(|| polygon_input_positions(bounds, &sizes, view, tk.space_8))
+        bounds.is_finite().then(|| polygon_input_positions(bounds, &sizes, view, tk.space_8, ui.ctx().pointer_latest_pos()))
     } else {
         None
     };
@@ -870,7 +1011,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
             if !start.is_finite() || !end.is_finite() || !(end - start).length().is_finite() {
                 return None;
             }
-            Some(line_input_positions([start, end], &sizes, view, tk.space_8))
+            Some(line_inputs_off_pointer([start, end], &sizes, view, tk.space_8, ui.ctx().pointer_latest_pos()))
         })
     } else {
         None
@@ -1052,12 +1193,27 @@ fn rectangle_input_positions(anchors: &[Pos2], sizes: &[egui::Vec2], view: Optio
         .collect()
 }
 
-/// Keep measured Length and Angle fields clear of the projected line and each other.
-/// Opposite sides are preferred; drawing-area edges may require both fields on one side.
-/// Retry first-field candidates when the second field cannot fit. Candidate count is bounded
-/// for the two fields. Only if the original candidates fail, also try axis-aligned
-/// neighbors and slides away from the line. An area too small to fit them can only clamp.
-fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<Room>, gap: f32) -> Vec<Pos2> {
+/// Where the Line tool's measured Length and Angle fields go: [`line_input_positions`], with the
+/// fields also kept off `pointer`. While the pointer rests on a field the tool has no hover and
+/// the preview stays at the last point, so a field left there would take the click meant for the
+/// next point (#22769). Where no placement clears the pointer, the fields go where they would
+/// without one.
+fn line_inputs_off_pointer(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<Room>, gap: f32, pointer: Option<Pos2>) -> Vec<Pos2> {
+    let under = |positions: &[Pos2]| {
+        pointer.is_some_and(|pointer| {
+            positions.iter().zip(sizes).any(|(pos, size)| egui::Rect::from_min_size(*pos, *size).expand(2.0).contains(pointer))
+        })
+    };
+    let placed = line_input_positions(segment, sizes, view, gap, pointer);
+    if under(&placed) { line_input_positions(segment, sizes, view, gap, None) } else { placed }
+}
+
+/// Keep measured Length and Angle fields clear of the projected line, each other and `pointer`
+/// (when given). Opposite sides are preferred; drawing-area edges may require both fields on one
+/// side. Retry first-field candidates when the second field cannot fit. Candidate count is bounded
+/// for the two fields. Only if the original candidates fail, also try axis-aligned neighbors and
+/// slides away from the line. An area too small to fit them can only clamp.
+fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<Room>, gap: f32, pointer: Option<Pos2>) -> Vec<Pos2> {
     let [start, end] = segment;
     let delta = end - start;
     let length = delta.length();
@@ -1137,7 +1293,9 @@ fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<R
         }
         rects
     };
-    let usable = |rect: egui::Rect| view.is_none_or(|view| view.fits(rect)) && clear(rect);
+    let usable = |rect: egui::Rect| {
+        view.is_none_or(|view| view.fits(rect)) && clear(rect) && pointer.is_none_or(|pointer| !rect.expand(2.0).contains(pointer))
+    };
     let mut placed: Vec<egui::Rect> = Vec::new();
     for (i, &size) in sizes.iter().enumerate() {
         let mut position = candidates(i, size, placed.last().copied(), false)
@@ -1176,7 +1334,10 @@ fn line_input_positions(segment: [Pos2; 2], sizes: &[egui::Vec2], view: Option<R
 
 /// Stack the polygon inputs beside its screen bounds. Try each side before falling back to
 /// the drawing area's edge when the polygon fills the view; keep the boxes separate even then.
-fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Option<Room>, gap: f32) -> Vec<Pos2> {
+/// The stack also keeps off `pointer` (when given): while the pointer rests on a box the tool has
+/// no hover and the preview stays tiny at the first point, so a box left there would take the
+/// click meant for the polygon. Where no side clears both, the pointer is not considered.
+fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Option<Room>, gap: f32, pointer: Option<Pos2>) -> Vec<Pos2> {
     let size =
         vec2(sizes.iter().map(|s| s.x).fold(0.0, f32::max), sizes.iter().map(|s| s.y).sum::<f32>() + gap * sizes.len().saturating_sub(1) as f32);
     let candidates = [
@@ -1186,10 +1347,13 @@ fn polygon_input_positions(bounds: egui::Rect, sizes: &[egui::Vec2], view: Optio
         egui::pos2(bounds.right() + gap, bounds.center().y - size.y * 0.5),
     ];
     let inside = |pos: Pos2| view.map_or(pos, |view| view.clamp(egui::Rect::from_min_size(pos, size)).min);
+    let clear = |pos: &Pos2| !egui::Rect::from_min_size(*pos, size).intersects(bounds.expand(gap * 0.5));
+    let off_pointer = |pos: &Pos2| pointer.is_none_or(|pointer| !egui::Rect::from_min_size(*pos, size).expand(2.0).contains(pointer));
     let start = candidates
         .into_iter()
         .map(inside)
-        .find(|pos| !egui::Rect::from_min_size(*pos, size).intersects(bounds.expand(gap * 0.5)))
+        .find(|pos| clear(pos) && off_pointer(pos))
+        .or_else(|| candidates.into_iter().map(inside).find(clear))
         .unwrap_or_else(|| inside(candidates[0]));
     let mut y = start.y;
     sizes

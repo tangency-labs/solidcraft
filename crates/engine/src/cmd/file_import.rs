@@ -465,12 +465,77 @@ fn by_new_index<T: Clone + Default>(matched: &[Option<usize>], stored: &[T]) -> 
 /// reader that will build it. The reads are returned so the caller can hold them while it
 /// evaluates `doc`: the evaluation then finds each file read already instead of reading it again.
 pub(crate) fn realign_imports(doc: &mut solidcraft_doc::Document) -> Vec<std::sync::Arc<StepImport>> {
-    let mut reads = Vec::new();
-    for f in doc.features.iter_mut().filter(|f| !f.suppressed) {
-        let FeatureKind::Import { step, components, .. } = &f.kind else { continue };
-        if step.is_empty() || components.is_empty() {
-            continue;
+    let targets: Vec<usize> = doc
+        .features
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| match &f.kind {
+            FeatureKind::Import { step, components, .. } if !f.suppressed && !step.is_empty() && !components.is_empty() => Some(i),
+            _ => None,
+        })
+        .collect();
+    if targets.is_empty() {
+        return Vec::new();
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let cores = std::thread::available_parallelism().map(usize::from).unwrap_or(1);
+    #[cfg(target_arch = "wasm32")]
+    let cores = 1usize;
+    if targets.len() > 1 && cores > 1 && !solidcraft_doc::progress::cancelled() {
+        // Deduplicate identical STEP payloads so shared imports decode once across worker threads.
+        let mut unique_steps: Vec<std::sync::Arc<str>> = Vec::new();
+        let mut by_key: HashMap<(u64, usize), Vec<usize>> = HashMap::new();
+        let mut target_job: Vec<usize> = Vec::with_capacity(targets.len());
+        for &idx in &targets {
+            let FeatureKind::Import { step, .. } = &doc.features[idx].kind else { continue };
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            step.hash(&mut h);
+            let key = (h.finish(), step.len());
+            let found = by_key.get(&key).and_then(|jobs| {
+                jobs.iter().copied().find(|&j| std::sync::Arc::ptr_eq(&unique_steps[j], step) || unique_steps[j].as_ref() == step.as_ref())
+            });
+            let job = match found {
+                Some(j) => j,
+                None => {
+                    let j = unique_steps.len();
+                    unique_steps.push(step.clone());
+                    by_key.entry(key).or_default().push(j);
+                    j
+                }
+            };
+            target_job.push(job);
         }
+        let decoded: Vec<Option<std::sync::Arc<StepImport>>> = if unique_steps.len() > 1 {
+            let outer = cores.min(16).min(unique_steps.len());
+            let inner = (cores / outer.max(1)).clamp(1, 8);
+            solidcraft_kernel::map_on_threads(&unique_steps, outer, |step| {
+                if solidcraft_kernel::watch::cancelled() {
+                    return None;
+                }
+                solidcraft_doc::kernel::step_import_shared_with_workers(step, inner).ok()
+            })
+            .into_iter()
+            .map(Option::flatten)
+            .collect()
+        } else {
+            unique_steps.iter().map(|step| solidcraft_doc::kernel::step_import_shared(step).ok()).collect()
+        };
+        let mut reads = Vec::with_capacity(targets.len());
+        for (&idx, job) in targets.iter().zip(target_job) {
+            // A file that doesn't read fails the feature when it is evaluated, which reports it.
+            let Some(imp) = decoded.get(job).and_then(Option::as_ref).cloned() else { continue };
+            let f = &mut doc.features[idx];
+            if realign_import(f, &imp) {
+                log::info!("{}: the stored body names follow this version's numbering of the file's bodies", f.name);
+            }
+            reads.push(imp);
+        }
+        return reads;
+    }
+    let mut reads = Vec::with_capacity(targets.len());
+    for idx in targets {
+        let f = &mut doc.features[idx];
+        let FeatureKind::Import { step, .. } = &f.kind else { continue };
         // A file that doesn't read fails the feature when it is evaluated, which reports it.
         let Ok(imp) = solidcraft_doc::kernel::step_import_shared(step) else { continue };
         if realign_import(f, &imp) {
@@ -519,7 +584,7 @@ pub(crate) fn component_name(path: &str, name: Option<&str>) -> String {
 /// Evaluates the design. Returns the feature and the component.
 pub(crate) fn add_in_component(
     s: &mut Session,
-    mut kind: FeatureKind,
+    kind: FeatureKind,
     feature_name: &str,
     body_names: Vec<String>,
     hidden: &[bool],
@@ -527,6 +592,22 @@ pub(crate) fn add_in_component(
     tree: Tree<'_>,
 ) -> Result<(u64, Placed)> {
     let (top, top_occ) = new_component(s, name)?;
+    add_into_component(s, top, top_occ, kind, feature_name, body_names, hidden, tree)
+}
+
+/// [`add_in_component`] into the component `top` that already exists (placed by `top_occ`), empty
+/// of the file's contents: a linked board read again fills the component it had.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn add_into_component(
+    s: &mut Session,
+    top: u64,
+    top_occ: Option<u64>,
+    mut kind: FeatureKind,
+    feature_name: &str,
+    body_names: Vec<String>,
+    hidden: &[bool],
+    tree: Tree<'_>,
+) -> Result<(u64, Placed)> {
     let (plan, imp, prepared) = match tree {
         Tree::Flat(prepared) => (Plan::default(), None, prepared),
         Tree::Step(imp) => (Plan::of(imp), Some(imp), None),
@@ -695,6 +776,14 @@ pub(crate) fn move_to_origin(s: &mut Session, placed: &Placed) -> Result<Option<
 /// Evaluates the design. Returns the features made and the component.
 pub(crate) fn add_design(s: &mut Session, design: &solidcraft_io::NativeDesign, name: &str) -> Result<(Vec<u64>, Placed)> {
     let (top, top_occ) = new_component(s, name)?;
+    let made = add_design_in(s, design, top)?;
+    let name = s.doc.components.iter().find(|c| c.id == top).map(|c| c.name.clone()).unwrap_or_default();
+    Ok((made, Placed { component: top, occurrence: top_occ, name, components: 0, rigid_group: None }))
+}
+
+/// Add a design rebuilt from a file (as [`add_design`] does) inside component `top`, which
+/// already exists. Evaluates the design. Returns the features made.
+pub(crate) fn add_design_in(s: &mut Session, design: &solidcraft_io::NativeDesign, top: u64) -> Result<Vec<u64>> {
     let source = &design.doc;
     let mut sketches: BTreeMap<u64, u64> = BTreeMap::new();
     let mut names: BTreeMap<String, String> = BTreeMap::new();
@@ -762,8 +851,7 @@ pub(crate) fn add_design(s: &mut Session, design: &solidcraft_io::NativeDesign, 
     if let Some(e) = made.iter().find_map(|id| s.model.result(*id).and_then(|r| r.error.clone())) {
         return Err(EngineError::Other(e));
     }
-    let name = s.doc.components.iter().find(|c| c.id == top).map(|c| c.name.clone()).unwrap_or_default();
-    Ok((made, Placed { component: top, occurrence: top_occ, name, components: 0, rigid_group: None }))
+    Ok(made)
 }
 
 /// Record that body `names[b]` lives in component `c`, placed by `offset`.

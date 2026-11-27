@@ -787,6 +787,54 @@ fn whole_cylinder() -> BSurface {
     }
 }
 
+/// [`whole_cylinder`] of radius `r`.
+fn whole_cylinder_of(r: f64) -> BSurface {
+    match whole_cylinder() {
+        BSurface::RationalSpline { u_knots, v_knots, homogeneous } => {
+            let homogeneous = homogeneous.into_iter().map(|row| row.into_iter().map(|[x, y, z, w]| [r * x, r * y, z, w]).collect()).collect();
+            BSurface::RationalSpline { u_knots, v_knots, homogeneous }
+        }
+        other => other,
+    }
+}
+
+/// Seating a trim that lies a sliver across a closed patch's seam is edited only under an enclosed
+/// bound: the unit cylinder's trim 2e-3 across its seam (a period of 4) moves its surface by about
+/// 2.83e-3 mm, which the bound holds and is accepted against 5e-2; the cylinder 50 times wider moves
+/// 50 times as far over the same sliver (0.14 mm), its partials make the bound past 5e-2, and the
+/// trim is declined; so is a trim past the sliver, one not finite, a weight that is not positive
+/// and a surface that is not a spline.
+#[test]
+fn a_trim_is_seated_only_under_an_enclosed_bound_within_the_tolerance() {
+    let trim = |x: f64| Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[x, 0.1], [x, 0.9]] };
+    let shift = |surface: &BSurface, pcurve: &Curve2, which: Option<bool>| {
+        let eval = SurfaceEval::new(surface).unwrap();
+        let dom = eval.domain();
+        let (Some(period), Some((lo, hi))) = (dom.period[0], dom.range[0]) else { panic!("{dom:?}") };
+        assert_eq!((period, lo, hi), (4.0, 0.0, 4.0));
+        seating_shift(&eval, 0, [lo, hi], period, pcurve, which, 0.0)
+    };
+    // The move of the surface for 2e-3 of u at the seam: a quarter turn is one unit of u, and the
+    // rational arc runs sqrt(2) per unit of u at its ends (a bit over 1.4), so 2.83e-3 mm.
+    let moved = 2e-3 * 1.4;
+    let narrow = shift(&whole_cylinder(), &trim(-2e-3), None).expect("a bound");
+    assert!(narrow >= moved && narrow < 5e-2, "{narrow}");
+    // The same from the other side of the line, and with only the end that moves counted.
+    assert!(shift(&whole_cylinder(), &trim(2e-3), None).is_some_and(|s| s >= moved && s < 5e-2));
+    assert!(shift(&whole_cylinder(), &trim(-2e-3), Some(true)).is_some_and(|s| s >= moved && s < 5e-2));
+    let wide = shift(&whole_cylinder_of(50.0), &trim(-2e-3), None).expect("a bound");
+    assert!(wide >= 50.0 * moved && wide > 5e-2, "{wide}");
+    // A trim past the sliver (4e-3), or not finite, is not bounded.
+    assert!(shift(&whole_cylinder(), &trim(-5e-3), None).is_none());
+    assert!(shift(&whole_cylinder(), &trim(f64::NAN), None).is_none());
+    let rational = Curve2::RationalSpline { knots: vec![0.0, 0.0, 1.0, 1.0], homogeneous: vec![[-2e-3, 0.1, 1.0], [-2e-3, -0.9, -1.0]] };
+    assert!(shift(&whole_cylinder(), &rational, None).is_none());
+    // A surface that is not a spline is not decided: its trim stays where it is.
+    let plane = BSurface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] };
+    let eval = SurfaceEval::new(&plane).unwrap();
+    assert!(seating_shift(&eval, 0, [0.0, 4.0], 4.0, &trim(-2e-3), None, 0.0).is_none());
+}
+
 /// A closed patch started elsewhere is the same surface: from its new start to the old seam at
 /// the same parameters, and past the old seam one period on. Its seam moves inside a span or onto
 /// a knot; a patch that does not close, or a start outside its range, is refused.

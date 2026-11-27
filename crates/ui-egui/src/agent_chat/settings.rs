@@ -579,6 +579,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 agents_section(app, ui);
             }
             instructions_section(app, ui);
+            allowed_folders_section(app, ui);
             panel_section(app, ui);
             connecting_section(app, ui);
         });
@@ -622,6 +623,64 @@ fn instructions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         solidcraft_ui_registry::publish_target("prefs:agent_instructions", response.rect);
         ui_kit::text(ui, tr("ai.prefs.instructions_note"), ui_kit::Text::Hint("instructions"));
+    });
+}
+
+/// Extra folders the built-in Assistant's MCP server may reach (`agent_allowed_paths`, #20326).
+fn allowed_folders_section(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let t = solidcraft_theme::Tokens::get();
+    ui_kit::settings_section(ui, "allowed_folders", tr("ai.prefs.allowed_folders"), |ui| {
+        ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, tr("ai.prefs.allowed_folders_note")));
+        if app.preferences.agent_allowed_paths.is_empty() {
+            ui.horizontal_wrapped(|ui| ui_kit::settings_inline_note(ui, tr("ai.prefs.allowed_folders_none")));
+        } else {
+            let mut remove = None;
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(t.space_6, t.space_6);
+                for (i, folder) in app.preferences.agent_allowed_paths.iter().enumerate() {
+                    let chip = ui_kit::SettingsChip {
+                        key: Some(folder),
+                        monospace: true,
+                        remove: Some(tr("ai.prefs.allowed_folders_remove")),
+                        ..Default::default()
+                    };
+                    let button = ui_kit::settings_chip(ui, folder, chip);
+                    let key = format!("prefs:agent_allowed_folder:{i}:remove");
+                    solidcraft_ui_registry::publish_target(&key, button.rect);
+                    solidcraft_ui_registry::publish_handle(&key, button.rect.center());
+                    if button.clicked() {
+                        remove = Some(i);
+                    }
+                }
+            });
+            if let Some(i) = remove.filter(|i| *i < app.preferences.agent_allowed_paths.len()) {
+                app.preferences.agent_allowed_paths.remove(i);
+            }
+        }
+        ui.horizontal(|ui| {
+            let can_browse = !cfg!(target_arch = "wasm32") && app.services.pick_folder.is_some();
+            let add = ui.add_enabled_ui(can_browse, |ui| ui_kit::button(ui, tr("ai.prefs.allowed_folders_add"), ui_kit::Button::Normal)).inner;
+            solidcraft_ui_registry::publish_target("prefs:agent_allowed_folders:add", add.rect);
+            solidcraft_ui_registry::publish_handle("prefs:agent_allowed_folders:add", add.rect.center());
+            if add.clicked() {
+                let start = app.preferences.agent_allowed_paths.last().cloned().unwrap_or_default();
+                app.pick_folder(&start, |app, folder| {
+                    if let Some(folder) = folder.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+                        && !app.preferences.agent_allowed_paths.contains(&folder)
+                    {
+                        app.preferences.agent_allowed_paths.push(folder);
+                    }
+                });
+            }
+            if !app.preferences.agent_allowed_paths.is_empty() {
+                let clear = ui_kit::button(ui, tr("ai.prefs.allowed_folders_clear"), ui_kit::Button::Normal);
+                solidcraft_ui_registry::publish_target("prefs:agent_allowed_folders:clear", clear.rect);
+                solidcraft_ui_registry::publish_handle("prefs:agent_allowed_folders:clear", clear.rect.center());
+                if clear.clicked() {
+                    app.preferences.agent_allowed_paths.clear();
+                }
+            }
+        });
     });
 }
 
@@ -699,13 +758,23 @@ fn permissions_section(app: &mut SolveApp, ui: &mut egui::Ui) {
 fn panel_section(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = solidcraft_theme::Tokens::get();
     ui_kit::settings_section(ui, "panel", tr("ui.ai_panel"), |ui| {
-        let label_width = [tr("ui.assistant"), tr("ui.agent_chat_thinking"), tr("ui.agent_chat_turn_limit")]
+        let label_width = [tr("ui.assistant"), tr("ui.agent_chat_tabs"), tr("ui.agent_chat_thinking"), tr("ui.agent_chat_turn_limit")]
             .iter()
             .map(|label| ui_kit::ContentWidth::label(ui, label) + t.space_4)
             .fold(0.0, f32::max);
         ui_kit::settings_form(ui, label_width, |ui| {
             ui_kit::row(ui, tr("ui.assistant"), |ui| {
                 ui_kit::checkbox(ui, tr("ui.agent_chat_own_window"), &mut app.preferences.agent_chat_popped);
+            });
+            ui_kit::row(ui, tr("ui.agent_chat_tabs"), |ui| {
+                let was = app.preferences.agent_shared_session;
+                let response = ui_kit::checkbox(ui, tr("ui.agent_shared_session"), &mut app.preferences.agent_shared_session)
+                    .backing_on_hover_text(tr("ui.agent_shared_session_note"));
+                solidcraft_ui_registry::publish_target("prefs:agent_shared_session", response.rect);
+                solidcraft_ui_registry::publish_handle("prefs:agent_shared_session", response.rect.center());
+                if !was && app.preferences.agent_shared_session {
+                    crate::documents::disconnect_background_chats(app, false);
+                }
             });
             ui_kit::row(ui, tr("ui.agent_chat_thinking"), |ui| {
                 let response = ui_kit::checkbox(ui, tr("ui.agent_thinking_folded"), &mut app.preferences.agent_thinking_folded)
@@ -963,7 +1032,7 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 let locked = app.policy.locks("ai_permissions");
                                 ui_kit::row(ui, tr("ui.ai_permissions"), |ui| {
                                     crate::policy::row(ui, locked, |ui| {
-                                        let current = app.preferences.agent_permissions.get(&entry.id).copied();
+                                        let current = super::agents::mode_shown(app, &entry.id);
                                         let shown = current.map_or_else(|| tr("ui.ai_mode_global").to_owned(), |mode| mode.label().to_owned());
                                         let mut pick: Option<Option<Mode>> = None;
                                         let options: Vec<_> = std::iter::once(tr("ui.ai_mode_global")).chain(Mode::ALL.map(Mode::label)).collect();
@@ -1284,6 +1353,16 @@ pub fn dialog(app: &mut SolveApp, ctx: &egui::Context) {
                         ui_kit::text_field(ui, &mut s.command, "");
                     });
                     ui_kit::text(ui, tr("ui.ai_add_installed_note"), ui_kit::Text::Note("installed"));
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if !editing {
+                        super::panel::missing_agents(
+                            ui,
+                            "sc_ai_add_missing",
+                            tr("ui.agent_chat_not_installed"),
+                            false,
+                            app.agent_chat.detection.as_ref(),
+                        );
+                    }
                 }
                 AddKind::Custom => {
                     ui_kit::row(ui, tr("ui.ai_name"), |ui| {
@@ -1639,7 +1718,16 @@ mod card_tests {
             assert!(scope_visible, "the full localized permission scope remains visible without hovering, including with AI off");
             assert!(privacy_visible, "the localized privacy note remains visible without hovering, including with AI off");
             let mut previous: Option<f32> = None;
-            for key in ["assistant_availability", "permissions", "agents", "instructions", "panel", "assistant_connecting", "agent_pointer"] {
+            for key in [
+                "assistant_availability",
+                "permissions",
+                "agents",
+                "instructions",
+                "allowed_folders",
+                "panel",
+                "assistant_connecting",
+                "agent_pointer",
+            ] {
                 let section = solidcraft_ui_registry::rect_of(&format!("prefs:section:{key}")).unwrap();
                 assert!((section.left() - body.left()).abs() <= 1.0 && (section.right() - body.right()).abs() <= 1.0);
                 assert!((section.height() - (solidcraft_theme::Tokens::get().control_height + solidcraft_theme::Tokens::get().space_2)).abs() <= 1.0);

@@ -76,25 +76,14 @@ fn explicit_rebind_preserves_geometry_dimensions_context_and_one_undo() {
 #[test]
 fn unsupported_face_has_explicit_fixed_alternative_and_no_live_projection() {
     let mut s = Session::default();
-    // A rib's wall: a rib reports no roles for the faces it builds (Traced::unnamed), so the
-    // wall has no construction certificate and no exact history name to attach by.
-    run(&mut s, "solid.box", json!({"length":40,"width":20,"height":5,"corner":[0,0,0],"body_name":"L"}));
-    run(&mut s, "solid.box", json!({"length":5,"width":20,"height":40,"corner":[0,0,0],"operation":"join"}));
-    run(&mut s, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"RibSketch"}));
-    run(&mut s, "sketch.line", json!({"points":[[5,25],[25,5]],"ids":["l1"]}));
-    run(&mut s, "sketch.finish", json!({}));
-    run(&mut s, "solid.rib", json!({"sketch":"RibSketch","curves":["l1"],"thickness":4}));
+    // A coil's end: a coil reports no roles for the faces it sweeps (Traced::unnamed), so its
+    // flat end has no construction certificate and no exact history name to attach by.
+    run(&mut s, "solid.coil", json!({"diameter":40,"revolutions":1.5,"pitch":8,"section":"square","section_size":4,"body_name":"Coil"}));
     let mut pick = {
         let world = s.world_state().unwrap();
-        let body = world.body("L").unwrap();
-        let face = body
-            .body
-            .faces(0.01)
-            .unwrap()
-            .into_iter()
-            .find(|face| face.plane_normal.is_some_and(|n| n.dot(Vec3::Y) > 0.999) && (face.centroid.y - 12.0).abs() < 1e-6)
-            .unwrap();
-        json!({"body":"L","index":face.index,"face":[face.centroid.x,face.centroid.y,face.centroid.z]})
+        let body = world.body("Coil").unwrap();
+        let face = body.body.faces(0.01).unwrap().into_iter().find(|face| face.plane_normal.is_some()).unwrap();
+        json!({"body":"Coil","index":face.index,"face":[face.centroid.x,face.centroid.y,face.centroid.z]})
     };
     let before = s.doc.to_json();
     let error = s.execute("sketch.create", &json!({"plane":pick})).unwrap_err();
@@ -1108,4 +1097,18 @@ fn a_face_of_a_moved_and_turned_component_is_picked_by_its_world_point() {
         let plane = s.model.state().sketch(id).unwrap().plane;
         assert!((plane.origin.z - 40.0).abs() < 1e-6 && plane.normal().z > 1.0 - 1e-9, "{plane:?}");
     }
+}
+
+/// A sphere resting on a box's top touches it at one point, and the point is on both bodies. With
+/// no body or index given, the box's plane face is the one chosen: the sphere's face is refused
+/// (it is curved), and the search goes on to the box. The flat-needs-fixed refusal is not reached
+/// here: no buildable face reaches it.
+#[test]
+fn a_point_where_bodies_touch_picks_the_flat_face_of_the_other_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,0],"body_name":"B"}));
+    run(&mut s, "solid.sphere", json!({"radius":2,"center":[10,10,12],"operation":"new","body_name":"A"}));
+    let id = run(&mut s, "sketch.create", json!({"plane":{"face":[10,10,10]}}))["sketch"].as_u64().unwrap();
+    let plane = s.model.state().sketch(id).unwrap().plane;
+    assert!((plane.origin.z - 10.0).abs() < 1e-6 && plane.normal().z > 1.0 - 1e-9, "{plane:?}");
 }

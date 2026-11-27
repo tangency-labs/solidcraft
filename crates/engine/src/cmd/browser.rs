@@ -22,8 +22,8 @@ use crate::schema::browser::{
     BrowserMoveParams, BrowserMoved, BrowserOrderParams, BrowserOrdered, BrowserRenameGroupParams, BrowserUngroupParams, BrowserUngrouped,
     BrowserVisibilityParams, BrowserVisibilityResult, DocumentUnitsParams, DocumentUnitsResult, FindParams, FindResult, FlipAxis, Isolated,
     PlaneFrame, PlaneSizeParams, PlaneSized, RedefineAttachment, RedefineSketchParams, RedefineSketchResult, RenamedBody, RepairDone, RepairFace,
-    RepairHole, RepairParams, RepairResult, RepairSewn, ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewListParams, ViewListResult,
-    ViewRenameParams, ViewRenamed, ViewSaveParams, ViewSaved, VisibilityState,
+    RepairHole, RepairParams, RepairResult, RepairSewn, ViewApplyParams, ViewDeleteParams, ViewDeleted, ViewHome, ViewListParams, ViewListResult,
+    ViewRenameParams, ViewRenamed, ViewResetHomeParams, ViewSaveParams, ViewSaved, ViewSetHomeParams, VisibilityState,
 };
 use crate::schema::view_navigation::CameraReply;
 use crate::schema::{TypedContract, output_schema_for};
@@ -48,6 +48,8 @@ const VIEW_RENAME_CONTRACT: TypedContract<ViewRenameParams> = TypedContract::new
 const VIEW_DELETE_CONTRACT: TypedContract<ViewDeleteParams> = TypedContract::new();
 const VIEW_LIST_CONTRACT: TypedContract<ViewListParams> = TypedContract::new();
 const VIEW_APPLY_CONTRACT: TypedContract<ViewApplyParams> = TypedContract::new();
+const VIEW_SET_HOME_CONTRACT: TypedContract<ViewSetHomeParams> = TypedContract::new();
+const VIEW_RESET_HOME_CONTRACT: TypedContract<ViewResetHomeParams> = TypedContract::new();
 const PLANE_SIZE_CONTRACT: TypedContract<PlaneSizeParams> = TypedContract::new();
 
 /// A reply as JSON: the commands here build their replies from the types their output schemas
@@ -75,7 +77,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane")
         .contract(&REDEFINE_SKETCH_CONTRACT)
         .output(output_schema_for::<RedefineSketchResult>)
-        .params("sketch: id or name; plane: as sketch.create; flip?: bool | \"x\" | \"y\" as sketch.create (not on a face; default: when the new plane faces the other way, it is turned so the sketch keeps facing the way it did and stays upright, and the reply's `flip` says about which axis; false keeps the new plane's own side); frame?: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names"),
+        .params("sketch: id or name; plane: as sketch.create; flip?: bool | \"x\" | \"y\" as sketch.create (not on a face; default: when the new plane faces the other way, it is turned so the sketch keeps facing the way it did and stays upright, and the reply's `flip` says about which axis; false keeps the new plane's own side); frame?: as sketch.create; author_path?: exact owner occurrence ids; explicitly rebinds or freezes the plane while preserving geometry and dimension names; a construction plane later in the timeline that the sketch can't use where it is moves the sketch to just after that plane in the same step (note says so), refused with why when the plane uses the sketch or the move breaks a feature"),
     CommandSpec::new("browser.group", "New Group", crate::checked!("browser.group", group))
         .icon("folder")
         .contract(&GROUP_CONTRACT)
@@ -123,6 +125,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&VIEW_DELETE_CONTRACT)
         .output(output_schema_for::<ViewDeleted>)
         .params("view: name"),
+    CommandSpec::new("view.set_home", "Set Current View as Home", crate::checked!("view.set_home", view_set_home))
+        .icon("home")
+        .contract(&VIEW_SET_HOME_CONTRACT)
+        .output(output_schema_for::<ViewHome>)
+        .params("camera: {target: [x,y,z], yaw, pitch, distance, fov?, roll?, up?: z|y} (Home goes to it, saved with the design; replaces the Home view set before)"),
+    CommandSpec::new("view.reset_home", "Reset Home View", crate::checked!("view.reset_home", view_reset_home))
+        .icon("home")
+        .contract(&VIEW_RESET_HOME_CONTRACT)
+        .output(output_schema_for::<ViewHome>)
+        .enabled(has_home_view)
+        .params("(none) Home frames the model from the iso view again"),
     CommandSpec::new("view.list", "List Named Views", crate::checked!("view.list", view_list))
         .icon("list")
         .noundo()
@@ -1390,8 +1403,15 @@ fn document_units(s: &mut Session, p: &Value) -> Result<Value> {
 /// handler refuses it with.
 pub(crate) fn saved_view_form(c: &Value) -> std::result::Result<solidcraft_doc::NamedView, String> {
     let v: solidcraft_doc::NamedView = serde_json::from_value(c.clone()).map_err(|e| format!("bad camera: {e}"))?;
-    let ok = [v.target.x, v.target.y, v.target.z, v.yaw, v.pitch, v.distance, v.fov, v.roll].iter().all(|x| x.is_finite()) && v.distance > 0.0;
-    if ok { Ok(v) } else { Err("the camera must be finite with a positive distance".into()) }
+    let values = [v.target.x, v.target.y, v.target.z, v.yaw, v.pitch, v.distance, v.fov, v.roll];
+    if !(values.iter().all(|x| x.is_finite()) && v.distance > 0.0) {
+        return Err("the camera must be finite with a positive distance".into());
+    }
+    // Within what a design file may hold, or the design would save and not open again.
+    if values.iter().any(|x| x.abs() > solidcraft_doc::format::MAX_REAL) {
+        return Err("the camera's values must be within ±1e9".into());
+    }
+    Ok(v)
 }
 
 /// The camera `view.apply` turns to for a `camera` it is given, as the handler reads it (and
@@ -1442,6 +1462,32 @@ fn view_save(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, ViewSaved { view: name, param_warnings: Vec::new() })
 }
 
+fn view_set_home(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "view.set_home";
+    let c = p.get("camera").ok_or_else(|| bad(cmd, "`camera` is required"))?;
+    let v = saved_view_form(c).map_err(|e| bad(cmd, e))?;
+    // Home must be a camera `view.apply` can go to: a field of view below 0 is refused here,
+    // and the Home kept so far stays.
+    if !usable_camera(&camera_of(&v)) {
+        return Err(bad(cmd, "the camera's field of view must be 0 or more"));
+    }
+    s.doc_mut().home_view = Some(solidcraft_doc::NamedView { name: String::new(), ..v });
+    reply(cmd, ViewHome { home: s.doc.home_view.clone(), param_warnings: Vec::new() })
+}
+
+/// `view.reset_home` has something to reset only while the design keeps a Home view of its own.
+fn has_home_view(s: &Session) -> std::result::Result<(), String> {
+    match s.doc.home_view {
+        Some(_) => Ok(()),
+        None => Err("the design has no Home view of its own: Home already frames the model from the iso view".into()),
+    }
+}
+
+fn view_reset_home(s: &mut Session, _p: &Value) -> Result<Value> {
+    s.doc_mut().home_view = None;
+    reply("view.reset_home", ViewHome { home: None, param_warnings: Vec::new() })
+}
+
 /// Most a plane's drawn rectangle reaches from its origin, mm.
 const MAX_PLANE_EXTENT: f64 = 1e7;
 
@@ -1483,15 +1529,21 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
         (Some(_), Some(_)) => return Err(bad(cmd, "give `view` or `camera`, not both")),
         (None, None) => return Err(bad(cmd, "`view` (a name) or `camera` is required")),
         (None, Some(c)) => applied_camera_form(c).map_err(|e| bad(cmd, e))?,
-        // Standard view names come first, as in the browser's Named Views folder.
-        (Some(name), None) => match solidcraft_viewport::StandardView::parse(name) {
-            Some(sv) => {
-                let mut c = crate::view::home_camera(s)?;
-                c.set_view(sv);
-                c.fit(&solidcraft_render::view_bounds(&crate::view::bounds(s)?));
-                c
-            }
-            None => s.doc.named_views.iter().find(|v| v.name == name).map(camera_of).ok_or_else(|| bad(cmd, format!("no named view `{name}`")))?,
+        (Some(name), None) => match crate::view::home_view(s).filter(|_| name.eq_ignore_ascii_case("home")) {
+            // The design's own Home view, when it keeps one (#19972).
+            Some(home) => home,
+            // Standard view names come first, as in the browser's Named Views folder.
+            None => match solidcraft_viewport::StandardView::parse(name) {
+                Some(sv) => {
+                    let mut c = crate::view::home_camera(s)?;
+                    c.set_view(sv);
+                    c.fit(&solidcraft_render::view_bounds(&crate::view::bounds(s)?));
+                    c
+                }
+                None => {
+                    s.doc.named_views.iter().find(|v| v.name == name).map(camera_of).ok_or_else(|| bad(cmd, format!("no named view `{name}`")))?
+                }
+            },
         },
     };
     if !usable_camera(&cam) {
@@ -1502,7 +1554,7 @@ fn view_apply(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The full orbit camera of a named view, including its saved roll and up direction.
-fn camera_of(v: &solidcraft_doc::NamedView) -> solidcraft_viewport::Camera {
+pub(crate) fn camera_of(v: &solidcraft_doc::NamedView) -> solidcraft_viewport::Camera {
     solidcraft_viewport::Camera { target: v.target, yaw: v.yaw, pitch: v.pitch, distance: v.distance, fov: v.fov, roll: v.roll, up: v.up }
 }
 
@@ -1540,7 +1592,7 @@ fn view_list(s: &mut Session, _p: &Value) -> Result<Value> {
 
 /// The keys whose strings name bodies, alone or in a list (`body`, `targets`…), at any depth of a
 /// feature: its own fields and the face, edge and link references inside it.
-const BODY_KEYS: [&str; 6] = ["body", "bodies", "target", "target_bodies", "targets", "tools"];
+const BODY_KEYS: [&str; 7] = ["body", "bodies", "member", "target", "target_bodies", "targets", "tools"];
 
 /// Replace the body name `old` with `new` where a string names a body (the value of one of
 /// [`BODY_KEYS`]); other strings equal to it (sketch text, plane and feature names, expressions)
@@ -1787,7 +1839,7 @@ fn numbered_names(s: &Session, olds: &[String], name: &str) -> Vec<String> {
 }
 
 /// Rename the body `given` (or the body a placed copy's name shows) to `name`.
-fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<BodyRenamed> {
+pub(super) fn rename_one(s: &mut Session, cmd: &str, given: &str, name: &str) -> Result<BodyRenamed> {
     // A placed copy's name (`KB (K:2)`, the name the browser lists a pasted placement's body by)
     // means the body it shows, as appearance.assign takes it (#9740): renaming it renames that body,
     // in every placement of its component (#10017).
@@ -1997,6 +2049,80 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("plane").is_none() {
         return Err(bad(cmd, "`plane` is required"));
     }
+    let later = later_plane(s, id, p, cmd)?;
+    let out = match redefine_in_place(s, id, p, cmd) {
+        Ok(out) => out,
+        // A construction plane made after the sketch may be built from features that come after
+        // the sketch too, which redefine can't see where the sketch is (#14675). The sketch moves
+        // to just after the plane first, in the same step.
+        Err(error) => match later {
+            Some(plane) => redefine_after(s, id, plane, p, cmd)?,
+            None => return Err(error),
+        },
+    };
+    reply(cmd, out)
+}
+
+/// The construction plane `p` names, as its feature id, when it comes after sketch `id` in the
+/// timeline.
+fn later_plane(s: &Session, id: u64, p: &Value, cmd: &str) -> Result<Option<u64>> {
+    let Some(v @ (Value::String(_) | Value::Number(_))) = p.get("plane") else { return Ok(None) };
+    let solidcraft_doc::PlaneRef::Construction { feature, .. } = super::features::plane_param(s, Some(v), cmd)? else { return Ok(None) };
+    let sketch = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "sketch disappeared"))?;
+    Ok(s.doc.feature_index(feature.0).filter(|at| *at > sketch).map(|_| feature.0))
+}
+
+/// Redefine sketch `id` onto construction plane `plane`, which comes after it: the sketch moves to
+/// just after the plane in the timeline, then goes on it. Refused, with why, when the plane uses
+/// the sketch or the move breaks a feature that worked.
+fn redefine_after(s: &mut Session, id: u64, plane: u64, p: &Value, cmd: &str) -> Result<RedefineSketchResult> {
+    let name = |s: &Session, id: u64| s.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
+    let (sketch, plane_name) = (name(s, id), name(s, plane));
+    let to = s.doc.feature_index(plane).ok_or_else(|| bad(cmd, "plane disappeared"))?;
+    let from = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "sketch disappeared"))?;
+    let later = format!("{plane_name} comes after {sketch} in the timeline");
+    if s.doc.marker.is_some_and(|marker| from < marker && to >= marker) {
+        return Err(bad(cmd, format!("{later} and after the history marker: move the marker past {plane_name} first")));
+    }
+    let mut moved = s.scratch();
+    super::edit::reorder(&mut moved, &json!({"feature": id, "position": to, "allow_errors": true}))
+        .map_err(|error| bad(cmd, format!("{later}, and {sketch} can't move after it: {error}")))?;
+    // Over the whole history: a feature behind the history marker that the move breaks counts too,
+    // and one that failed before the move doesn't.
+    let broken: Vec<(String, String)> = super::edit::newly_broken_in_history(&s.doc, &s.model, &moved.doc, &moved.model)
+        .into_iter()
+        // The sketch itself gets its new plane next.
+        .filter(|(feature, _)| *feature != sketch)
+        .collect();
+    if broken.iter().any(|(feature, _)| *feature == plane_name) {
+        return Err(bad(
+            cmd,
+            format!("{plane_name} uses {sketch}, directly or through a feature made from it, so {sketch} can't go on {plane_name}"),
+        ));
+    }
+    if !broken.is_empty() {
+        let list: Vec<String> = broken.iter().map(|(feature, error)| format!("{feature} ({error})")).collect();
+        return Err(bad(
+            cmd,
+            format!(
+                "{later}, so {sketch} would have to move after {plane_name}, and that breaks {}; move those features after {plane_name} first",
+                list.join("; ")
+            ),
+        ));
+    }
+    let mut out = redefine_in_place(&mut moved, id, p, cmd)?;
+    s.doc = moved.doc;
+    s.pending_moves = moved.pending_moves;
+    let note = format!("{sketch} moved after {plane_name} in the timeline, because {later}");
+    out.note = Some(match out.note.take() {
+        Some(frame) => format!("{note}; {frame}"),
+        None => note,
+    });
+    Ok(out)
+}
+
+/// Redefine sketch `id` where it is in the timeline: its new plane may only use what comes before it.
+fn redefine_in_place(s: &mut Session, id: u64, p: &Value, cmd: &str) -> Result<RedefineSketchResult> {
     let feature = s.doc.feature(id).ok_or_else(|| bad(cmd, "sketch disappeared"))?;
     let component = feature.component;
     let index = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "sketch disappeared"))?;
@@ -2089,6 +2215,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     trial.refresh();
     s.doc = trial.doc;
     s.pending_moves = trial.pending_moves;
+    s.pending_move_records = trial.pending_move_records;
 
     let attachment = s.doc.feature(id).and_then(|feature| match &feature.kind {
         FeatureKind::Sketch { plane, .. } => {
@@ -2099,7 +2226,7 @@ fn redefine_sketch(s: &mut Session, p: &Value) -> Result<Value> {
     let note = frame.and_then(|f| super::sketch::frame_note(Some(f), &placement)).map(str::to_string);
     let frame = frame.and_then(PlaneFrame::from_name);
     let flip = flipped.map(|about_y| if about_y { FlipAxis::Y } else { FlipAxis::X });
-    reply(cmd, RedefineSketchResult { sketch: id, attachment, flip, frame, note, created: None, param_warnings: Vec::new() })
+    Ok(RedefineSketchResult { sketch: id, attachment, flip, frame, note, created: None, param_warnings: Vec::new() })
 }
 
 /// Moved onto a plane whose normal points against the one it is on now, a sketch would come
@@ -2592,6 +2719,61 @@ mod tests {
         assert!(!s.body_visible("Peg"));
         run(&mut s, "edit.redo", json!({}));
         assert!(!s.body_visible("Stud"));
+    }
+
+    #[test]
+    fn computed_hides_are_kept_through_a_rename_and_in_every_undo_step() {
+        // #22153: what a computation hid stays hidden beside what was hidden meanwhile, also
+        // when it renamed a body, and undoing any of its steps keeps the hide made meanwhile.
+        let boxes = |s: &mut Session| {
+            for name in ["Peg", "Master", "Door", "Cabinet"] {
+                run(s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": name}));
+            }
+        };
+        let mut s = Session::default();
+        boxes(&mut s);
+        run(&mut s, "browser.visibility", json!({"items": ["Peg"], "visible": false}));
+        let mut computed = s.scratch();
+        run(&mut computed, "body.rename", json!({"body": "Peg", "name": "Stud"}));
+        run(&mut computed, "browser.visibility", json!({"items": ["Master"], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": ["Cabinet"], "visible": false}));
+        s.accept_computed(computed).unwrap();
+        let shown = |s: &Session, names: &[&str]| names.iter().map(|name| s.body_visible(name)).collect::<Vec<_>>();
+        assert_eq!(shown(&s, &["Stud", "Master", "Door", "Cabinet"]), [false, false, true, false], "rename, run hide and hide meanwhile");
+
+        let mut s = Session::default();
+        boxes(&mut s);
+        let mut computed = s.scratch();
+        run(&mut computed, "browser.visibility", json!({"items": ["Master"], "visible": false}));
+        run(&mut computed, "browser.visibility", json!({"items": ["Door"], "visible": false}));
+        run(&mut s, "browser.visibility", json!({"items": ["Cabinet"], "visible": false}));
+        s.accept_computed(computed).unwrap();
+        let all = ["Master", "Door", "Cabinet"];
+        assert_eq!(shown(&s, &all), [false, false, false]);
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(shown(&s, &all), [false, true, false], "undoing the second step keeps the first and the hide meanwhile");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(shown(&s, &all), [true, true, false], "undoing the first step keeps the hide meanwhile");
+        run(&mut s, "edit.redo", json!({}));
+        run(&mut s, "edit.redo", json!({}));
+        assert_eq!(shown(&s, &all), [false, false, false]);
+    }
+
+    #[test]
+    fn computed_visibility_merges_large_hidden_sets_by_membership() {
+        // Ten thousand hidden bodies, a few changed: the result is the live list with them.
+        let start: Vec<String> = (0..10_000).map(|i| format!("B{i}")).collect();
+        let mut ran = start.clone();
+        ran.retain(|b| b != "B5");
+        ran.push("New".into());
+        let mut live = start.clone();
+        live.push("Meanwhile".into());
+        crate::merge_hidden(&mut live, &start, &ran);
+        assert_eq!(live.len(), 10_001);
+        assert!(!live.contains(&"B5".to_string()) && live.contains(&"New".to_string()) && live.contains(&"Meanwhile".to_string()));
+        let mut unchanged = live.clone();
+        crate::merge_hidden(&mut unchanged, &ran, &ran);
+        assert_eq!(unchanged, live, "a computation that hid and showed nothing leaves the list as it is");
     }
 
     #[test]
@@ -3276,6 +3458,121 @@ mod tests {
         }
     }
 
+    /// The names of the design's features in timeline order.
+    fn order(s: &Session) -> Vec<String> {
+        s.doc.features.iter().map(|f| f.name.clone()).collect()
+    }
+
+    /// A sketch named `name` on `plane` holding one line from `a` to `b`; returns the line's id.
+    fn line_sketch(s: &mut Session, name: &str, plane: Value, a: [f64; 2], b: [f64; 2]) -> String {
+        run(s, "sketch.create", json!({"plane": plane, "name": name}));
+        let line = run(s, "sketch.line", json!({"points": [a, b]}))["curves"][0].as_str().unwrap().to_string();
+        run(s, "sketch.finish", json!({}));
+        line
+    }
+
+    #[test]
+    fn redefine_onto_a_plane_built_from_a_later_sketch_moves_the_sketch_after_that_plane() {
+        // #14675: Plane5 is a plane along a line of Sketch5, which comes after Sketch4. Redefine
+        // used to fail with "unknown sketch <id of Sketch5>"; it now moves Sketch4 after Plane5.
+        let mut s = Session::default();
+        line_sketch(&mut s, "Sketch4", json!("XY"), [0.0, 0.0], [10.0, 0.0]);
+        let path = line_sketch(&mut s, "Sketch5", json!("XZ"), [0.0, 0.0], [0.0, 40.0]);
+        run(&mut s, "construct.plane.along_path", json!({"path": {"sketch": "Sketch5", "curve": path}, "t": 0.5, "name": "Plane5"}));
+        let before = order(&s);
+        assert_eq!(before, ["Sketch4", "Sketch5", "Plane5"]);
+        let out = run(&mut s, "sketch.redefine", json!({"sketch": "Sketch4", "plane": "Plane5"}));
+        assert_eq!(order(&s), ["Sketch5", "Plane5", "Sketch4"]);
+        let note = out["note"].as_str().unwrap_or_default();
+        assert!(note.contains("Sketch4 moved after Plane5"), "{out}");
+        let plane = s.doc.find_feature("Plane5").unwrap().id;
+        let solidcraft_doc::FeatureKind::Sketch { plane: on, .. } = &s.doc.find_feature("Sketch4").unwrap().kind else { panic!("a sketch") };
+        // Facing the other way, the plane is turned so the sketch keeps facing the way it did.
+        let on = match on {
+            solidcraft_doc::PlaneRef::Flipped { base, .. } => base.as_ref(),
+            on => on,
+        };
+        assert!(matches!(on, solidcraft_doc::PlaneRef::Construction { feature, .. } if feature.0 == plane), "{on:?}");
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "every feature builds");
+        // One undo puts both the order and the plane back.
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(order(&s), before);
+        assert!(matches!(
+            &s.doc.find_feature("Sketch4").unwrap().kind,
+            solidcraft_doc::FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Origin { .. }, .. }
+        ));
+        // A later plane the sketch can use where it is (built from nothing in the model) moves
+        // nothing, as before.
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 25, "name": "Shelf"}));
+        let before = order(&s);
+        let out = run(&mut s, "sketch.redefine", json!({"sketch": "Sketch4", "plane": "Shelf"}));
+        assert_eq!(order(&s), before);
+        assert!(out["note"].is_null(), "{out}");
+    }
+
+    #[test]
+    fn redefine_onto_a_later_plane_that_uses_the_sketch_says_why_it_cannot() {
+        // A plane along the sketch's own line: the sketch can't come after it.
+        let mut s = Session::default();
+        let own = line_sketch(&mut s, "Sketch4", json!("XY"), [0.0, 0.0], [10.0, 0.0]);
+        run(&mut s, "construct.plane.along_path", json!({"path": {"sketch": "Sketch4", "curve": own}, "t": 0.5, "name": "Plane5"}));
+        let before = order(&s);
+        let e = s.execute("sketch.redefine", &json!({"sketch": "Sketch4", "plane": "Plane5"})).unwrap_err().to_string();
+        assert!(e.contains("Plane5") && e.contains("uses Sketch4") && !e.contains("unknown sketch"), "{e}");
+        assert_eq!(order(&s), before, "nothing moved");
+        // A feature after the sketch that the move would break is named.
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sketch4"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Sketch4", "distance": 5, "name": "Extrude1"}));
+        let path = line_sketch(&mut s, "Sketch5", json!("XZ"), [0.0, 0.0], [0.0, 40.0]);
+        run(&mut s, "construct.plane.along_path", json!({"path": {"sketch": "Sketch5", "curve": path}, "t": 0.5, "name": "Plane5"}));
+        let before = order(&s);
+        let e = s.execute("sketch.redefine", &json!({"sketch": "Sketch4", "plane": "Plane5"})).unwrap_err().to_string();
+        assert!(e.contains("Plane5") && e.contains("comes after Sketch4") && e.contains("Extrude1"), "{e}");
+        assert_eq!(order(&s), before, "nothing moved");
+    }
+
+    #[test]
+    fn redefine_onto_a_later_plane_ignores_features_that_failed_before_and_keeps_the_history_marker() {
+        // A feature that already failed before the redefine is not one the move breaks.
+        let mut s = Session::default();
+        line_sketch(&mut s, "Sketch4", json!("XY"), [0.0, 0.0], [10.0, 0.0]);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SketchA"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [50, 0], "p1": [60, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "SketchA", "distance": 5, "name": "ExtrudeA"}));
+        run(&mut s, "timeline.reorder", json!({"feature": "ExtrudeA", "position": 1, "allow_errors": true}));
+        let path = line_sketch(&mut s, "Sketch5", json!("XZ"), [0.0, 0.0], [0.0, 40.0]);
+        run(&mut s, "construct.plane.along_path", json!({"path": {"sketch": "Sketch5", "curve": path}, "t": 0.5, "name": "Plane5"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-60, 0, 0], "name": "Box"}));
+        assert_eq!(order(&s), ["Sketch4", "ExtrudeA", "SketchA", "Sketch5", "Plane5", "Box"]);
+        let failed = |s: &Session| -> Vec<String> { s.model.results.iter().filter(|r| r.error.is_some()).map(|r| r.name.clone()).collect() };
+        assert_eq!(failed(&s), ["ExtrudeA"]);
+        // The history marker before Box stays there: Box is still rolled back afterwards.
+        run(&mut s, "timeline.rollback", json!({"position": 5}));
+        run(&mut s, "sketch.redefine", json!({"sketch": "Sketch4", "plane": "Plane5"}));
+        assert_eq!(order(&s), ["ExtrudeA", "SketchA", "Sketch5", "Plane5", "Sketch4", "Box"]);
+        assert_eq!(s.doc.marker, Some(5));
+        assert_eq!(failed(&s), ["ExtrudeA"]);
+        // With the sketch and the plane both rolled back, a rolled-back feature the move would
+        // break still refuses the move.
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sketch4"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 20]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Sketch4", "distance": 5, "name": "Extrude1"}));
+        let path = line_sketch(&mut s, "Sketch5", json!("XZ"), [0.0, 0.0], [0.0, 40.0]);
+        run(&mut s, "construct.plane.along_path", json!({"path": {"sketch": "Sketch5", "curve": path}, "t": 0.5, "name": "Plane5"}));
+        run(&mut s, "timeline.rollback", json!({"position": 0}));
+        let before = order(&s);
+        let e = s.execute("sketch.redefine", &json!({"sketch": "Sketch4", "plane": "Plane5"})).unwrap_err().to_string();
+        assert!(e.contains("Extrude1"), "{e}");
+        assert_eq!(order(&s), before, "nothing moved");
+        assert_eq!(s.doc.marker, Some(0));
+    }
+
     #[test]
     fn design_units_change_without_moving_geometry() {
         let mut s = Session::default();
@@ -3428,9 +3725,17 @@ mod tests {
         assert_eq!(back.named_views[0].target.z, 3.0);
         run(&mut s, "view.delete", json!({"view": "Detail"}));
         assert_eq!(run(&mut s, "view.list", json!({}))["views"].as_array().unwrap().len(), 1);
-        for p in [json!({}), json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": -1}}), json!({"camera": "x"})] {
+        for p in [
+            json!({}),
+            json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": -1}}),
+            json!({"camera": "x"}),
+            // Beyond what a design file holds: the design would save and not open again.
+            json!({"camera": {"target": [1e12, 0, 0], "yaw": 0, "pitch": 0, "distance": 100}}),
+            json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 1e15}}),
+        ] {
             assert!(s.execute("view.save", &p).is_err(), "{p}");
         }
+        solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
         run(&mut s, "edit.undo", json!({}));
         assert_eq!(s.doc.named_views.len(), 2);
     }
@@ -3462,6 +3767,50 @@ mod tests {
             let invalid = json!({"camera":{"target":[0,0,0],"yaw":0,"pitch":0,"distance":100,"roll":roll}});
             assert!(s.execute("view.save", &invalid).is_err());
         }
+    }
+
+    /// The design keeps its own Home view (#19972): set from a camera, saved with the design,
+    /// taken by `view.apply` home, undone in one step and reset to the iso view framing the model.
+    #[test]
+    fn the_home_view_is_set_saved_applied_and_reset() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": 30}));
+        let framed = run(&mut s, "view.apply", json!({"view": "home"}))["camera"].clone();
+        assert!(crate::view::home_view(&s).is_none());
+        assert!(crate::find_command("view.reset_home").unwrap().allowed(&s).is_err(), "nothing to reset yet");
+        let why = s.execute("view.reset_home", &json!({})).unwrap_err().to_string();
+        assert!(why.contains("no Home view of its own"), "{why}");
+
+        let camera = json!({"target": [1, 2, 3], "yaw": 0.25, "pitch": -0.3, "distance": 150, "fov": 0.1, "roll": 0.6, "up": "y"});
+        let set = run(&mut s, "view.set_home", json!({"camera": camera}));
+        assert_eq!(set["home"]["yaw"], 0.25);
+        let applied = run(&mut s, "view.apply", json!({"view": "Home"}))["camera"].clone();
+        assert_eq!(
+            (&applied["yaw"], &applied["pitch"], &applied["distance"], &applied["roll"]),
+            (&json!(0.25), &json!(-0.3), &json!(150.0), &json!(0.6))
+        );
+        // The standard views still frame the model, and the named views are untouched.
+        assert_ne!(run(&mut s, "view.apply", json!({"view": "iso"}))["camera"], applied);
+        assert!(s.doc.named_views.is_empty());
+
+        let reopened = serde_json::from_str::<solidcraft_doc::Document>(&serde_json::to_string(&*s.doc).unwrap()).unwrap();
+        let mut restored = Session::new(reopened);
+        assert_eq!(run(&mut restored, "view.apply", json!({"view": "home"}))["camera"], applied);
+
+        for p in [json!({}), json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": -1}}), json!({"camera": "x"})] {
+            assert!(s.execute("view.set_home", &p).is_err(), "{p}");
+        }
+        let kept = s.doc.home_view.clone();
+        let unusable = json!({"camera": {"target": [0, 0, 0], "yaw": 0, "pitch": 0, "distance": 100, "fov": -1}});
+        assert!(s.execute("view.set_home", &unusable).is_err(), "a field of view below 0 is refused");
+        assert_eq!(s.doc.home_view, kept, "and the Home kept so far stays");
+        run(&mut s, "view.reset_home", json!({}));
+        assert!(s.doc.home_view.is_none());
+        assert_eq!(run(&mut s, "view.apply", json!({"view": "home"}))["camera"], framed);
+        run(&mut s, "edit.undo", json!({}));
+        assert!(crate::view::home_view(&s).is_some(), "reset is one undo step");
+        run(&mut s, "edit.undo", json!({}));
+        assert!(s.doc.home_view.is_none(), "set is one undo step");
     }
 
     #[test]
