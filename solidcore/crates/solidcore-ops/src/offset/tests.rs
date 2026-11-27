@@ -817,6 +817,41 @@ fn a_dome_inset_by_its_radius_or_more_stays_solid() {
     assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
 }
 
+#[test]
+fn a_thin_lofted_neck_on_a_cylinder_stays_solid() {
+    all_fixes();
+    let corner = |i: usize, z: f64| {
+        let [x, y] = [[2.0, -2.0], [2.0, 2.0], [-2.0, 2.0], [-2.0, -2.0]][i % 4];
+        [x, y, z]
+    };
+    let square = (0..4)
+        .map(|i| crate::sweep::Curve::Line {
+            start: corner(i, 60.0),
+            end: corner(i + 1, 60.0),
+        })
+        .collect::<Vec<_>>();
+    let circle = (0..4u8)
+        .map(|i| crate::sweep::Curve::Arc {
+            center: [0.0, 0.0, 76.0],
+            axis: [0.0, 0.0, 1.0],
+            reference: [1.0, 0.0, 0.0],
+            radius: 2.0,
+            start: f64::from(i) * PI / 2.0 - PI / 4.0,
+            end: f64::from(i + 1) * PI / 2.0 - PI / 4.0,
+        })
+        .collect::<Vec<_>>();
+    let neck = crate::sweep::loft(&[square, circle], 1, true).unwrap();
+    let base = make_cylinder([0.0; 3], 20.0, 60.0).unwrap();
+    let b = crate::boolean::boolean(base, neck, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let want = volume(&b) - PI * 17.6 * 17.6 * 55.2;
+    shell(&b, &order(&b), &[], -2.4).unwrap();
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+}
+
 /// A 1200 x 2400 cylinder (r 600) with a 140 x 140 boss (r 70) on its top whose side touches
 /// the top's rim from inside (its axis 530 from the cylinder's: 530 + 70 = 600), shelled
 /// closed with a 72 wall (stress corpus S6050, S0837). The boss's side offset by 72 passes its
