@@ -838,7 +838,7 @@ fn loop_as_quarter_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
     if !center.is_finite() || !matches!(exact(u)?.cross(exact(v)?)?.sign()?, 1 | -1) {
         return None;
     }
-    let (mut major, minor, ratio, _) = ellipse_axes(u, v)?;
+    let (mut major, _, ratio, _) = ellipse_axes(u, v)?;
 
     let (min, max) = corners.iter().fold((p0, p0), |(min, max), p| {
         (
@@ -891,13 +891,15 @@ fn loop_as_quarter_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
         }
     }
     // How far the stored points actually are from the construction, along each semi-axis,
-    // against sqrt(EPSILON) of that semi-axis.
-    let resolved = [major, minor].into_iter().all(|axis| {
-        let length = axis.length_hypot();
-        let reach = (farthest.x * axis.x.abs() + farthest.y * axis.y.abs()) / length;
-        reach <= length * f64::EPSILON.sqrt()
-    });
-    if !resolved {
+    // against sqrt(EPSILON) of that semi-axis. The minor axis is taken perpendicular to the
+    // major one, with length |u x v| / |major|: for a thin ellipse the computed minor
+    // vector's direction is rounding.
+    let semi_major = major.length_hypot();
+    let semi_minor = u.cross(v).abs() / semi_major;
+    let along = |axis: Vec2| (farthest.x * axis.x.abs() + farthest.y * axis.y.abs()) / semi_major;
+    if !(along(major) <= semi_major * f64::EPSILON.sqrt()
+        && along(major.perp()) <= semi_minor * f64::EPSILON.sqrt())
+    {
         return None;
     }
     if major.x < 0.0 || (major.x == 0.0 && major.y < 0.0) {
