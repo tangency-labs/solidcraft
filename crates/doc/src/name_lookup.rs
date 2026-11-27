@@ -1107,7 +1107,7 @@ fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: V
         }
     }
     let whole_edge_context = |status: &crate::history_names::QualifierStatus, x: &str, other_face: &str| -> Option<bool> {
-        if told_apart_by_index_only(x) || status.missing.iter().any(|m| crate::history_names::is_split_role(m)) {
+        if told_apart_by_index_only(x) || status.missing.iter().any(|m| crate::history_names::is_piece_role(m)) {
             return None;
         }
         if status.lists_other && status.matched > 0 {
@@ -1141,7 +1141,7 @@ fn resuffixed_edge(b: &ModelBody, m: &Mesh, faces: &Names, wanted: &str, near: V
         let (core, at) = crate::history_names::instance_suffix(&today);
         let is_split = stem_counts.get(&(strip_piece(core).to_string(), at.to_string())).copied().unwrap_or(0) > 1;
         let status = crate::history_names::qualifier_status(faces, f, x, other_face);
-        let has_overlap = status.as_ref().is_some_and(|s| s.matched > 0 && !s.missing.iter().any(|m| crate::history_names::is_split_role(m)));
+        let has_overlap = status.as_ref().is_some_and(|s| s.matched > 0 && !s.missing.iter().any(|m| crate::history_names::is_piece_role(m)));
         let unqualified_piece = || told_apart_by_index_only(x) && beside_index.get(f).copied().unwrap_or(false);
         if is_split {
             return Some((true, has_overlap));
@@ -1775,7 +1775,7 @@ fn resuffixed_level_face(st: &ModelState, body: Option<&str>, name: &str, p: Vec
                     continue;
                 }
                 let Some(status) = crate::history_names::qualifier_status(&names, face, name, "") else { continue };
-                if status.missing.iter().any(|m| crate::history_names::is_split_role(m)) {
+                if status.missing.iter().any(|m| crate::history_names::is_piece_role(m)) {
                     continue;
                 }
                 let total = status.matched + status.missing.len();
@@ -1883,7 +1883,7 @@ pub(crate) fn unique_resuffixed_on_body(names: &Names, name: &str) -> Option<usi
     for face in stems {
         let overlap = if is_split {
             crate::history_names::qualifier_status(names, face, name, "")
-                .filter(|s| !s.missing.iter().any(|m| crate::history_names::is_split_role(m)))
+                .filter(|s| !s.missing.iter().any(|m| crate::history_names::is_piece_role(m)))
                 .map(|s| (s.matched, s.matched + s.missing.len()))
         } else {
             crate::history_names::piece_overlap(names, face, name)
@@ -1930,7 +1930,7 @@ fn resuffixed_face<'a>(
         let is_split = body_counts.get(&bi).copied().unwrap_or(0) > 1;
         let overlap = if is_split {
             crate::history_names::qualifier_status(&names, face, name, "")
-                .filter(|s| !s.missing.iter().any(|m| crate::history_names::is_split_role(m)))
+                .filter(|s| !s.missing.iter().any(|m| crate::history_names::is_piece_role(m)))
                 .map(|s| (s.matched, s.matched + s.missing.len()))
         } else {
             crate::history_names::piece_overlap(&names, face, name)
