@@ -22,7 +22,10 @@
 //! common edge with a face of the other body on a surface of another analytic kind, when the
 //! pair is not made (the partner already classified, or `FixFoundFaceCoincidence` pairing
 //! nothing), is classified once every common edge has been visited, as a copy of that part of
-//! its partner (`resolve_tangent_patches`), instead of being left to a ray.
+//! its partner (`resolve_tangent_patches`), instead of being left to a ray. Not upstream
+//! (#21931): with no copy kept, such a face stays beside a kept partner, and one of the other
+//! body that stays is made in its partner's region on the side the operation keeps the other
+//! body's faces (`kept_patch_region`).
 //! Global cache queue limits are absent (the port has no global caches).
 //! The temporary origin shift goes through `merge_p1`, before any topology
 //! mutation. Its inverse token spans the entire operation,
@@ -426,6 +429,9 @@ struct Faces {
     /// Not upstream (#17118): the tangent patches found at common edges, resolved by
     /// [`resolve_tangent_patches`] once every common edge has been visited.
     tangent_patches: Vec<TangentPatch>,
+    /// Not upstream (#21931): each face of the other body that [`resolve_tangent_patches`]
+    /// kept, with its partner face in the primary, for [`kept_patch_region`].
+    kept_patches: Vec<(FaceId, FaceId)>,
 }
 
 /// Not upstream (#17118): a face found coincident at a common edge with a face of the other
@@ -497,15 +503,22 @@ fn surfaces_of_other_kinds(primary: &Brep, pf: FaceId, other: &Brep, of: FaceId)
     Ok(surface(primary, pf)?.is_other_analytic_kind(surface(other, of)?))
 }
 
-/// Not upstream (#17118): classifies each tangent patch still unclassified once every common
-/// edge has been visited. A face on a surface of another kind than the face it coincides with
-/// lies on it only over a tangent patch within the tolerance, so within the tolerance it is a
-/// copy of that part of its partner. The operation keeps one copy of coincident faces or none
-/// ([`coincident_keep`]). With none, the patch goes. With one, the copy is the partner's when
-/// the partner is kept, so the patch goes, and the patch's when the partner is deleted. A
-/// patch whose partner is classified by a later patch is visited again, so the order of the
-/// list does not matter; a patch whose partner is still unclassified when a pass classifies
-/// nothing more is left to the ray, as before.
+/// Not upstream (#17118, #21931): classifies each tangent patch still unclassified once every
+/// common edge has been visited. A face on a surface of another kind than the face it coincides
+/// with lies on it only over a tangent patch within the tolerance, so within the tolerance it is
+/// a copy of that part of its partner. The operation keeps one copy of coincident faces or none
+/// ([`coincident_keep`]). With one, the copy is the partner's when the partner is kept, so the
+/// patch goes, and the patch's when the partner is deleted. With none (a difference of faces
+/// facing the same way, a union or intersection of faces facing opposite ways), a deleted
+/// partner takes the patch with it. A kept partner still covers the patch, since the imprint
+/// drew no edge round the patch in it, so the space between the two, thinner than the
+/// tolerance, lies against a face of the result, and the patch is kept to close it: a wedge
+/// less a part whose round grazes the wedge's plane keeps that plane (it lies outside the
+/// part), and the round's sliver on it closes the leftover beside it. Which side of the partner
+/// the patch lies on is below the tolerance, so it is not read. A patch whose partner is
+/// classified by a later patch is visited again, so the order of the list does not matter; a
+/// patch whose partner is still unclassified when a pass classifies nothing more is left to the
+/// ray, as before.
 fn resolve_tangent_patches(
     kernels: &BooleanKernels<'_>,
     state: &mut ManifoldState,
@@ -560,15 +573,16 @@ fn resolve_tangent_patch(
     if source_marked {
         return true;
     }
-    if keep_copy && !partner_kept && !partner_deleted {
+    if !partner_kept && !partner_deleted {
         return false;
     }
-    let keep_source = keep_copy && partner_deleted;
+    let keep_source = keep_copy != partner_kept;
     if reverse {
         state
             .other_marks
             .mark(kernels.other(), Entity::Face(of), marks.1);
         if keep_source {
+            faces.kept_patches.push((of, pf));
             faces.other_keep.push(of);
         } else {
             faces.other_delete.push(of);
@@ -584,6 +598,37 @@ fn resolve_tangent_patch(
         }
     }
     true
+}
+
+/// Not upstream (#21931): the region a face `f` of the other body is made in when
+/// [`resolve_tangent_patches`] kept it. The patch lies on its partner within the tolerance, so
+/// a radial sector at its edges or a point on them can fall on either side of the partner, and
+/// made in the region on the wrong side it splits no region with the faces it bounds the result
+/// with. Its side is the one where the operation keeps the other body's faces
+/// ([`region_keep`]): of the two regions the partner lies between, the one on that side. `None`
+/// for a face that is no kept patch, or a partner with that side on both or neither of its
+/// faces (no face between a solid and its outside), which is placed as any other face.
+fn kept_patch_region(
+    primary: &Brep,
+    operation: BooleanOperation,
+    faces: &Faces,
+    f: FaceId,
+) -> Result<Option<RegionId>> {
+    let Some(&(_, partner)) = faces.kept_patches.iter().find(|&&(of, _)| of == f) else {
+        return Ok(None);
+    };
+    let Some(fu) = face::faceuses(primary, partner)?.0 else {
+        return Ok(None);
+    };
+    let (r1, r2) = region_pair(primary, fu)?;
+    let kept = |r: RegionId| -> Result<bool> {
+        Ok(region_keep(operation, true, void(primary, r)? != 0, None) == Some(true))
+    };
+    Ok(match (kept(r1)?, kept(r2)?) {
+        (true, false) => Some(r1),
+        (false, true) => Some(r2),
+        _ => None,
+    })
 }
 
 /// Not upstream (#17118): a bound on how far any point of `f` lies from the plane of
@@ -1568,6 +1613,11 @@ fn repair_lists(
         faces.keep.retain(|f| actual.contains(f));
         faces.delete.retain(|f| actual.contains(f));
     }
+    // a patch whose partner is gone (a last coincidence repair that changed the topology) has
+    // no side to be made on
+    faces
+        .kept_patches
+        .retain(|(_, partner)| actual.contains(partner));
     let actual = bp::faces(other, None)?;
     if operation != BooleanOperation::PartialMerge
         && actual.len() as i128 - faces.other_keep.len() as i128 - faces.other_delete.len() as i128
@@ -1738,8 +1788,10 @@ fn make_other_faces(
             )
         });
         let (fu1, fu2) = (fu1?, fu2?);
-        let original =
-            intersector.find_region_of_other_face(kernels.primary, primary, other, fu1)?;
+        let original = match kept_patch_region(primary, operation, faces, f)? {
+            Some(r) => Some(r),
+            None => intersector.find_region_of_other_face(kernels.primary, primary, other, fu1)?,
+        };
         let original_void = if let Some(r) = original {
             void(primary, r)?
         } else {
@@ -2804,6 +2856,54 @@ mod tests {
         assert_eq!(faces.keep, [p2, p1]);
         assert_eq!(faces.other_delete, [q]);
         assert!(faces.delete.is_empty() && faces.other_keep.is_empty());
+        assert!(faces.tangent_patches.is_empty());
+        kernels
+            .mark_action(|contexts| lock.release(contexts))
+            .unwrap();
+    }
+
+    /// #21931: where the operation keeps no copy of coincident faces, a patch whose partner is
+    /// kept stays (it bounds the film between them), one whose partner is deleted goes, and a
+    /// patch of the other body that stays is recorded with its partner.
+    #[test]
+    fn a_tangent_patch_with_no_copy_kept_stays_beside_a_kept_partner_only() {
+        let mut first = Kernel::default();
+        let mut second = Kernel::default();
+        first.context.set_doing_boolean(true);
+        let mut kernels = BooleanKernels {
+            primary: &mut first,
+            other: Some(&mut second),
+        };
+        let mut lock = kernels
+            .mark_action(|contexts| MarkLock::new_pair(contexts, 0, 1))
+            .unwrap();
+        kernels
+            .mark_action(|contexts| lock.new_mark(contexts))
+            .unwrap();
+        let marks = (lock.mark_type1(), lock.mark_type2());
+        let (kept, deleted, q1, q2) = (
+            FaceId::from_index(1),
+            FaceId::from_index(2),
+            FaceId::from_index(3),
+            FaceId::from_index(4),
+        );
+        let mut state = ManifoldState::default();
+        let patch = |pf, of| TangentPatch {
+            reverse: true,
+            pf,
+            of,
+            keep: Some(false),
+        };
+        let mut faces = Faces {
+            keep: vec![kept],
+            delete: vec![deleted],
+            tangent_patches: vec![patch(kept, q1), patch(deleted, q2)],
+            ..Faces::default()
+        };
+        resolve_tangent_patches(&kernels, &mut state, &mut faces, marks);
+        assert_eq!(faces.other_keep, [q1]);
+        assert_eq!(faces.other_delete, [q2]);
+        assert_eq!(faces.kept_patches, [(q1, kept)]);
         assert!(faces.tangent_patches.is_empty());
         kernels
             .mark_action(|contexts| lock.release(contexts))

@@ -549,3 +549,53 @@ fn pasted_extrude_from_root_sketch_moves_with_target_component() {
     let near = |a: f64, e: f64| (a - e).abs() < 1e-5;
     assert!(near(pasted.min.x, 60.0) && near(pasted.max.x, 70.0), "pasted body must move with RailB: {pasted:?}");
 }
+
+/// A primitive's axis given by letter or as a vector builds the same solid in a turned component (#21098).
+#[test]
+fn primitive_axis_letter_and_vector_agree_in_turned_component() {
+    let cylinder_bounds = |axis: serde_json::Value| {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "A", "grounded": false, "activate": true}));
+        run(&mut s, "occurrence.move", json!({"occurrence": "A:1", "to_matrix": [0, -1, 0, 100, 1, 0, 0, 0, 0, 0, 1, 0]}));
+        run(&mut s, "solid.cylinder", json!({"diameter": "20 mm", "height": "50 mm", "base": [10, 0, 0], "axis": axis, "body_name": "Cyl"}));
+        s.world_state().unwrap().body("Cyl").unwrap().mesh().bounds()
+    };
+    let by_letter = cylinder_bounds(json!("Y"));
+    let by_vector = cylinder_bounds(json!([0, 1, 0]));
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-5;
+    assert!(
+        near(by_letter.min.x, by_vector.min.x)
+            && near(by_letter.max.x, by_vector.max.x)
+            && near(by_letter.min.y, by_vector.min.y)
+            && near(by_letter.max.y, by_vector.max.y)
+            && near(by_letter.min.z, by_vector.min.z)
+            && near(by_letter.max.z, by_vector.max.z),
+        "cylinder letter axis {by_letter:?} must match vector axis {by_vector:?}"
+    );
+    let approx = |a: f64, b: f64| (a - b).abs() < 1e-2;
+    assert!(approx(by_letter.min.x, 0.0) && approx(by_letter.max.x, 20.0), "{by_letter:?}");
+    assert!(approx(by_letter.min.y, 0.0) && approx(by_letter.max.y, 50.0), "{by_letter:?}");
+
+    let cone_bounds = |axis: serde_json::Value| {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "A", "grounded": false, "activate": true}));
+        run(&mut s, "occurrence.move", json!({"occurrence": "A:1", "to_matrix": [0, -1, 0, 100, 1, 0, 0, 0, 0, 0, 1, 0]}));
+        run(
+            &mut s,
+            "solid.cone",
+            json!({"radius": "10 mm", "top_radius": "5 mm", "height": "50 mm", "base": [10, 0, 0], "axis": axis, "body_name": "Cone"}),
+        );
+        s.world_state().unwrap().body("Cone").unwrap().mesh().bounds()
+    };
+    let cone_letter = cone_bounds(json!("Y"));
+    let cone_vector = cone_bounds(json!([0, 1, 0]));
+    assert!(
+        near(cone_letter.min.x, cone_vector.min.x)
+            && near(cone_letter.max.x, cone_vector.max.x)
+            && near(cone_letter.min.y, cone_vector.min.y)
+            && near(cone_letter.max.y, cone_vector.max.y)
+            && near(cone_letter.min.z, cone_vector.min.z)
+            && near(cone_letter.max.z, cone_vector.max.z),
+        "cone letter axis {cone_letter:?} must match vector axis {cone_vector:?}"
+    );
+}

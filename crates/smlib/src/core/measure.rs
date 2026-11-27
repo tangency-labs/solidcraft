@@ -3,16 +3,16 @@
 //! (`smlib_flat_api.cpp`) and `smlib_brep_check` (`smlib_check.cpp`) do on the C++ kernel, here
 //! composed from solidcore's ports of the same SMLib routines.
 //!
-//! The bounds, the manifold and solid-count tests, point classification, the edge/face gap and
-//! the check, mass properties and area are solidcore-ops' ([`solidcore_ops::Body`]). [`check`] fails with "not supported yet" while a test it reaches is unported in
-//! solidcore.
+//! The bounds, the manifold and solid-count tests, point classification, the edge/face gap, the
+//! curve/face gap bound, the check, mass properties and area are solidcore-ops'
+//! ([`solidcore_ops::Body`]). [`check`] fails with "not supported yet" while a test it reaches is
+//! unported in solidcore.
 
-use solidcore::topology::brep::p1 as bl;
 use solidcore_ops::PointLocation;
 use solidcore_ops::check::ValidityScope;
 
+use super::Body;
 use super::call::{ops_as, ops_on};
-use super::{Body, with_body};
 use crate::check::{CheckLevel, CheckReport};
 use crate::measure::{MassProperties, PointClass};
 use crate::{Error, Result};
@@ -83,10 +83,10 @@ pub(crate) fn edge_face_distance(body: &Body, edge: usize, face: usize) -> Resul
     })
 }
 
-/// A proved upper bound on the distance from the record curve `curve` (a spline or rational
-/// spline) over its parameters `interval` to the surface of face `face` (the body's face
-/// order): [`solidcore_ops::curve_gap::curve_face_gap_bound`]. `None` when the
-/// kernel does not enclose the gap or there is no such face.
+/// A proved upper bound on the distance from the record curve `curve` (a spline, rational
+/// spline, circle or ellipse) over its parameters `interval` to the surface of face `face` (the
+/// body's face order): [`Body::curve_face_gap_bound`]. `None` when the kernel does not enclose
+/// the gap or there is no such face.
 pub(crate) fn curve_face_gap_bound(
     body: &Body,
     curve: &solidcore_record::brep::Curve,
@@ -94,16 +94,25 @@ pub(crate) fn curve_face_gap_bound(
     face: usize,
     floor: f64,
 ) -> Result<Option<f64>> {
+    if body.kernel_left_unfinished() {
+        return Err(Error::Internal("curve_face_gap_bound: the body was left unfinished by an earlier panic".to_owned()));
+    }
+    if !(interval[0].is_finite() && interval[1].is_finite() && interval[0] < interval[1] && floor.is_finite() && floor >= 0.0) {
+        return Err(Error::Argument);
+    }
     // a circle or ellipse is the kernel's exact rational spline, over its interval there
-    let (curve, interval) = match solidcore_ops::curve_gap::GapCurve::of_conic(curve, interval).map_err(|e| Error::Solidcore(e.to_string()))? {
-        Some(found) => found,
-        None => (solidcore_ops::curve_gap::GapCurve::new(curve).ok_or(Error::Argument)?, interval),
-    };
-    with_body("curve_face_gap_bound", body, |k, b| {
-        let Some(&f) = bl::faces(b, None)?.get(face) else {
-            return Ok(None);
+    let (curve, interval) =
+        match crate::stop::unstoppable(|| ops_on("curve_face_gap_bound", &[], || solidcore_ops::curve_gap::GapCurve::of_conic(curve, interval)))? {
+            Some(found) => found,
+            None => (solidcore_ops::curve_gap::GapCurve::new(curve).ok_or(Error::Argument)?, interval),
         };
-        solidcore_ops::curve_gap::curve_face_gap_bound(k, b, f, &curve, interval, floor)
+    let order = body.own_order();
+    if face >= order.faces.len() {
+        return Ok(None);
+    }
+    // A read on a body itself is not stopped by a cancelled token (as before with `with_body`).
+    crate::stop::unstoppable(|| {
+        ops_on("curve_face_gap_bound", &[("brep", body)], || body.curve_face_gap_bound(&order, face, &curve, interval, floor))
     })
 }
 
@@ -193,6 +202,21 @@ pub(crate) fn check_scoped(body: &Body, level: CheckLevel, stoppable: bool, scop
     let checked = || ops_as("check", &[("brep", body)], refused, || body.check_scoped(lv, scope));
     // a body others read too is checked whatever the token says (solidcore#3247)
     let c = if stoppable { checked()? } else { crate::stop::unstoppable(checked)? };
+    Ok(CheckReport { failures: c.failures, text: c.text })
+}
+
+/// [`check`]'s tests of faces `faces` with their loops and edges `edges` with their vertices
+/// (indices in the body's face and edge orders), and no other: not the pointer check, the
+/// tolerance pass or the body's, regions' and shells' own tests ([`Body::check_local`]). A body
+/// others read: never stopped part way, as [`check`].
+pub(crate) fn check_local(body: &Body, faces: &[usize], edges: &[usize], level: CheckLevel) -> Result<CheckReport> {
+    let lv = match level {
+        CheckLevel::Basic => solidcore_ops::check::CheckLevel::Basic,
+        CheckLevel::Geometry => solidcore_ops::check::CheckLevel::Geometry,
+        CheckLevel::All => solidcore_ops::check::CheckLevel::All,
+    };
+    let order = body.own_order();
+    let c = crate::stop::unstoppable(|| ops_as("check local", &[("brep", body)], refused, || body.check_local(&order, faces, edges, lv)))?;
     Ok(CheckReport { failures: c.failures, text: c.text })
 }
 
