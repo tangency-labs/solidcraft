@@ -2961,6 +2961,16 @@ pub(crate) fn uv_into_period(k: &Kernel, surface: &Surface, uv: &mut Curve) -> R
 /// # Errors
 /// Those of the copy.
 fn uv_hull(uv: &Curve) -> Result<Option<Vec<(Point3, f64)>>> {
+    uv_hull_over(uv, &uv.natural_interval())
+}
+
+/// [`uv_hull`] over `interval` alone: the points whose convex hull holds the UV curve `uv`
+/// over `interval`, each with the error bound of its coordinates (the control points of the
+/// piece over `interval`, [`Curve::piece_hull_points`]).
+///
+/// # Errors
+/// Those of the copy.
+pub(crate) fn uv_hull_over(uv: &Curve, interval: &Extent1d) -> Result<Option<Vec<(Point3, f64)>>> {
     let mut copy = uv.clone_for_evaluation()?;
     let made_3d = match copy.kind_mut() {
         CurveKind::BSpline(b) => b.convert_to_3d().is_ok(),
@@ -2971,9 +2981,7 @@ fn uv_hull(uv: &Curve) -> Result<Option<Vec<(Point3, f64)>>> {
         }
         _ => false,
     };
-    Ok(made_3d
-        .then(|| copy.piece_hull_points(&uv.natural_interval()))
-        .flatten())
+    Ok(made_3d.then(|| copy.piece_hull_points(interval)).flatten())
 }
 
 // ---- B-rep intersection (SmBrep::BrepIntersect) -----------------------------------------

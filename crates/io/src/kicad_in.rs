@@ -14,7 +14,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_doc::Mat;
 use solidcraft_geom::prelude::*;
 
@@ -33,6 +33,15 @@ const MAX_EXPANDED_TEXT: usize = 4096;
 /// How deep variables inside a variable's name are expanded (`${${REFERENCE}}`).
 const MAX_VARIABLE_DEPTH: usize = 8;
 const MAX_MODELS: usize = 500_000;
+/// Files listed in a board's `embedded_files` blocks, over the board and its footprints.
+const MAX_EMBEDDED_ENTRIES: usize = 50_000;
+/// The largest embedded file, unpacked. A real STEP model is a few hundred kilobytes; the limit
+/// stops a small compressed file from growing into memory.
+const MAX_EMBEDDED_FILE_BYTES: usize = 64 << 20;
+/// All embedded files together, unpacked.
+const MAX_EMBEDDED_TOTAL_BYTES: usize = 256 << 20;
+/// The prefix of a footprint model path that names a file stored inside the board.
+const EMBED_SCHEME: &str = "kicad-embed://";
 const MAX_OUTLINE_SEGMENTS: usize = 500_000;
 const MAX_OUTLINE_POINTS: usize = 500_000;
 const MAX_MODEL_VERTICES: usize = 5_000_000;
@@ -117,6 +126,44 @@ impl KicadCopper {
     }
 }
 
+/// Which drilled holes come in. Each choice keeps the ones before it: mounting holes, then the
+/// holes of through-hole pads, then vias.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum KicadHoles {
+    /// No holes, except those that reach the board's edge or a cutout (a castellated pad).
+    None,
+    /// Mounting holes: every unplated hole, and every hole of a `MountingHole…` footprint.
+    #[default]
+    Mounting,
+    /// Mounting holes and the plated holes of through-hole pads.
+    Pads,
+    /// Every hole, vias as well.
+    All,
+}
+
+impl KicadHoles {
+    /// `none`, `mounting`, `pads` or `all` (any case).
+    pub fn parse(s: &str) -> Option<KicadHoles> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "none" => Some(KicadHoles::None),
+            "mounting" => Some(KicadHoles::Mounting),
+            "pads" => Some(KicadHoles::Pads),
+            "all" => Some(KicadHoles::All),
+            _ => None,
+        }
+    }
+
+    /// The option's parameter value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            KicadHoles::None => "none",
+            KicadHoles::Mounting => "mounting",
+            KicadHoles::Pads => "pads",
+            KicadHoles::All => "all",
+        }
+    }
+}
+
 /// What the importer brings in besides the board substrate.
 #[derive(Clone, Debug, PartialEq)]
 pub struct KicadOptions {
@@ -128,6 +175,8 @@ pub struct KicadOptions {
     pub copper: KicadCopper,
     /// Build the front and back silkscreen.
     pub silkscreen: bool,
+    /// Which drilled holes come in; a hole left out is left out of every layer.
+    pub holes: KicadHoles,
     /// Board substrate colour (`None`: [`DEFAULT_BOARD_COLOR`]).
     pub color: Option<[u8; 3]>,
     /// Mesh or B-rep (B-rep is refused).
@@ -141,6 +190,7 @@ impl Default for KicadOptions {
             components: true,
             copper: KicadCopper::Overlay,
             silkscreen: true,
+            holes: KicadHoles::default(),
             color: None,
             representation: KicadRepresentation::default(),
         }
@@ -179,12 +229,29 @@ pub struct KicadBoard {
     pub texts: Vec<KicadText>,
     /// Drilled holes (pads and vias) in the board frame.
     pub drills: Vec<KicadDrill>,
+    /// The files stored inside the board (KiCad 8 and later), by name: what a footprint's
+    /// `kicad-embed://<name>` model path refers to.
+    pub embedded_files: Vec<KicadEmbeddedFile>,
     /// The inner copper layers the board has (`In<n>.Cu`, by `n`, In1 nearest the front), each
     /// with how deep its copper sits as a fraction of the board's thickness: 0 is the front face,
     /// 1 the back face. From the board's stackup when it gives a simple one, else spaced evenly.
     pub inner_layers: Vec<(u32, f64)>,
     pub color: [f32; 3],
     pub warnings: Vec<String>,
+}
+
+/// A file stored in the board's `embedded_files` block (board level or inside a footprint).
+/// A footprint lists the files it uses with their checksums; the board-level block also carries
+/// the data. One name can therefore appear several times.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KicadEmbeddedFile {
+    pub name: String,
+    /// KiCad's file type: `model`, `font`, `datasheet` or `worksheet`.
+    pub kind: String,
+    /// The compressed file as base64 text, when this entry carries it.
+    pub data: Option<String>,
+    /// The checksum KiCad recorded for the file, when this entry has one.
+    pub checksum: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -253,6 +320,8 @@ pub struct KicadModel {
 pub struct KicadPad {
     pub at: [f64; 3],
     pub size: [f64; 2],
+    /// `thru_hole`, `np_thru_hole`, `smd` or `connect`.
+    pub kind: String,
     /// `circle`, `rect`, `oval`, `roundrect`, `trapezoid` or `custom`.
     pub shape: String,
     pub layers: Vec<String>,
@@ -279,6 +348,7 @@ pub struct KicadVia {
     /// Board frame.
     pub at: [f64; 2],
     pub size: f64,
+    /// 0: no hole (the holes option left it out).
     pub drill: f64,
     pub layers: Vec<String>,
 }
@@ -299,6 +369,9 @@ pub struct KicadDrill {
     /// The direction of a slot's width in the board frame, in radians anticlockwise from +X (its
     /// pad's rotation on the board).
     pub angle: f64,
+    /// A plated hole, with copper on its wall: a via's, or a `thru_hole` pad's. KiCad's drill files
+    /// put these in the plated (PTH) file and an `np_thru_hole` pad's in the unplated (NPTH) one.
+    pub plated: bool,
 }
 
 /// A KiCad board and the reusable component placements it references.
@@ -435,6 +508,7 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
         graphics: Vec::new(),
         texts: Vec::new(),
         drills: Vec::new(),
+        embedded_files: Vec::new(),
         inner_layers: Vec::new(),
         color,
         warnings: Vec::new(),
@@ -534,24 +608,11 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
     }
     board.outlines = join_outline_segments(segments, &mut board.warnings);
     // Drilled holes are cut from the substrate.
-    for footprint in &board.footprints {
-        let transform = footprint_world(footprint);
-        for pad in &footprint.pads {
-            let Some(drill) = pad.drill else { continue };
-            let center = apply2(&transform, pad.at[0], pad.at[1]);
-            // The pad's own X axis, turned by its rotation in the footprint frame, on the board.
-            let [ux, uy] = pad_axis(pad);
-            let ahead = apply2(&transform, pad.at[0] + ux, pad.at[1] + uy);
-            let angle = (ahead[1] - center[1]).atan2(ahead[0] - center[0]);
-            board.drills.push(KicadDrill { center, size: [drill[0].abs(), drill[1].abs()], angle });
-        }
-    }
-    for via in &board.vias {
-        board.drills.push(KicadDrill { center: [via.at[0], -via.at[1]], size: [via.drill.abs(), via.drill.abs()], angle: 0.0 });
-    }
+    board.drills = board_drills(&board);
     if extra_text_seen {
         board.warnings.push("text boxes, dimensions and tables are not modeled yet".into());
     }
+    collect_embedded_files(&root, &mut board.embedded_files, &mut board.warnings);
     board.inner_layers = inner_layer_depths(&root, &board);
     expand_text_variables(&mut board, &root);
     Ok(board)
@@ -848,6 +909,73 @@ fn default_layer_name(layer: &str) -> &str {
         "B.SilkS" => "B.Silkscreen",
         other => other,
     }
+}
+
+/// Every drilled hole of the board's pads and vias, in the board frame.
+fn board_drills(board: &KicadBoard) -> Vec<KicadDrill> {
+    let mut drills = Vec::new();
+    for footprint in &board.footprints {
+        let transform = footprint_world(footprint);
+        drills.extend(footprint.pads.iter().filter_map(|pad| pad_drill(&transform, pad)));
+    }
+    drills.extend(board.vias.iter().filter_map(via_drill));
+    drills
+}
+
+/// A pad's drilled hole on the board, if it has one; `transform` places its footprint.
+fn pad_drill(transform: &Mat, pad: &KicadPad) -> Option<KicadDrill> {
+    let drill = pad.drill?;
+    let center = apply2(transform, pad.at[0], pad.at[1]);
+    // The pad's own X axis, turned by its rotation in the footprint frame, on the board.
+    let [ux, uy] = pad_axis(pad);
+    let ahead = apply2(transform, pad.at[0] + ux, pad.at[1] + uy);
+    let angle = solidcraft_kernel::planar::direction_angle(center, ahead);
+    Some(KicadDrill { center, size: [drill[0].abs(), drill[1].abs()], angle, plated: pad.kind == "thru_hole" })
+}
+
+/// A via's drilled hole on the board, unless it has none.
+fn via_drill(via: &KicadVia) -> Option<KicadDrill> {
+    (via.drill > 0.0).then(|| KicadDrill { center: [via.at[0], -via.at[1]], size: [via.drill, via.drill], angle: 0.0, plated: true })
+}
+
+/// Leave out the drilled holes `holes` does not keep. The substrate stays whole there and the copper
+/// closes over the spot; an unplated pad, which is only its hole, goes with it. A hole that reaches
+/// the board's edge or a cutout (a castellated pad) is always kept: it shapes the board.
+fn keep_holes(board: &mut KicadBoard, holes: KicadHoles) {
+    if holes == KicadHoles::All {
+        return;
+    }
+    let outlines = &board.outlines;
+    for footprint in &mut board.footprints {
+        let transform = footprint_world(footprint);
+        let mounting = footprint.name.rsplit(':').next().is_some_and(|name| name.to_ascii_lowercase().starts_with("mountinghole"));
+        footprint.pads.retain_mut(|pad| {
+            let Some(drill) = pad_drill(&transform, pad) else { return true };
+            let unplated = pad.kind == "np_thru_hole";
+            let kept = match holes {
+                KicadHoles::None => false,
+                KicadHoles::Mounting => mounting || unplated,
+                KicadHoles::Pads | KicadHoles::All => true,
+            };
+            if kept || reaches_an_outline(outlines, &drill) {
+                return true;
+            }
+            pad.drill = None;
+            !unplated
+        });
+    }
+    for via in &mut board.vias {
+        if via_drill(via).is_some_and(|drill| !reaches_an_outline(outlines, &drill)) {
+            via.drill = 0.0;
+        }
+    }
+    board.drills = board_drills(board);
+}
+
+/// Does a drill reach an outline, the board's edge or a cutout's? Measured to the drill's own
+/// shape, so a slot counts when its end comes to an edge and not when it only lies beside one.
+fn reaches_an_outline(outlines: &[Vec<[f64; 2]>], drill: &KicadDrill) -> bool {
+    solidcraft_kernel::planar::hole_reaches_loops(drill.center, drill.size, drill.angle, outlines)
 }
 
 /// The matrix that maps a board point (KiCad's Y down) to SolidCraft's Y up.
@@ -1375,9 +1503,11 @@ fn kicad_board_mesh_noted(board: &KicadBoard, thickness: f64, notes: &mut Vec<St
     })
 }
 
-/// The board substrate as exact solids, exported as a STEP file: the engine adds it as an Import
-/// feature, so its faces and edges can be picked and used like any other body.
-fn board_solid(board: &KicadBoard, thickness: f64) -> Result<(String, bool, Vec<String>)> {
+/// The board substrate as exact solids, its outline with cutouts and drilled holes extruded to
+/// `thickness`, with whether the drilled holes were lost and the notes on the half-holes. With
+/// `plating`, the wall of every plated hole takes the colour of the pads' plating, as a face colour:
+/// the board's own faces, so it costs no geometry.
+fn board_bodies(board: &KicadBoard, thickness: f64, plating: bool) -> Result<(Vec<solidcraft_kernel::Body>, bool, Vec<String>)> {
     let loops = outline_loops(board)?;
     let mut notes = Vec::new();
     let regions = regions_from_loops_noted(loops.clone(), Some(&board.drills), &mut notes);
@@ -1393,6 +1523,44 @@ fn board_solid(board: &KicadBoard, thickness: f64) -> Result<(String, bool, Vec<
     if bodies.is_empty() {
         return Err(IoError::Invalid("the board has no closed outline to build".into()));
     }
+    let plated: Vec<&KicadDrill> = board.drills.iter().filter(|drill| drill.plated).collect();
+    if !plating || plated.is_empty() {
+        return Ok((bodies, holes_lost, notes));
+    }
+    let bodies = bodies
+        .into_iter()
+        .map(|body| {
+            let faces: Vec<solidcraft_kernel::FacePaint> = body
+                .face_sources()
+                .unwrap_or_default()
+                .iter()
+                .enumerate()
+                .filter(|(_, source)| match source {
+                    Some(solidcraft_kernel::FaceSource::ExtrudeSide { segment, .. }) => plated.iter().any(|drill| on_drill_wall(drill, segment)),
+                    _ => false,
+                })
+                .map(|(face, _)| solidcraft_kernel::FacePaint { face, color: PAD_COLOR, opacity: 1.0, name: None })
+                .collect();
+            if faces.is_empty() { body } else { body.with_paint(Some(solidcraft_kernel::Paint { opacity: 1.0, faces, name: None })) }
+        })
+        .collect();
+    Ok((bodies, holes_lost, notes))
+}
+
+/// Does the side `segment` lie on a drill's wall? A drill is a stadium, a round one with no straight
+/// part. Its ends and its middle must all be on the wall: a side that only passes near a drill is
+/// not. A half-hole is cut as chords of [`CURVE_TOLERANCE`] (see [`notch_loop`]) and a slot's ends
+/// are drawn as chords (see [`slot_loop`]), whose middles fall a little inside the wall; the
+/// kernel's test allows for that.
+fn on_drill_wall(drill: &KicadDrill, segment: &Seg2) -> bool {
+    let points = [segment.start(), segment.mid(), segment.end()].map(|p| [p.x, p.y]);
+    solidcraft_kernel::planar::side_on_hole_wall(drill.center, drill.size, drill.angle, &points, CURVE_TOLERANCE)
+}
+
+/// The board substrate as exact solids, exported as a STEP file: the engine adds it as an Import
+/// feature, so its faces and edges can be picked and used like any other body.
+fn board_solid(board: &KicadBoard, thickness: f64, plating: bool) -> Result<(String, bool, Vec<String>)> {
+    let (bodies, holes_lost, notes) = board_bodies(board, thickness, plating)?;
     let exports: Vec<solidcraft_kernel::ExportBody<'_>> = bodies
         .iter()
         .enumerate()
@@ -1429,7 +1597,8 @@ fn report_import(step: usize) {
 /// Read a board and its referenced STEP/VRML models into one mesh feature and placement plan.
 pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadLoader<'_>) -> Result<KicadImport> {
     report_import(0);
-    let board = parse_kicad_board_with(bytes, file, options.clone())?;
+    let mut board = parse_kicad_board_with(bytes, file, options.clone())?;
+    keep_holes(&mut board, options.holes);
     report_import(1);
     let corner = board_corner(&board);
     let thickness = options.thickness.unwrap_or(board.thickness);
@@ -1438,7 +1607,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
     let mut plan = crate::MeshPlan::default();
     let mut board_step = None;
     if options.representation == KicadRepresentation::Brep {
-        match board_solid(&board, thickness) {
+        match board_solid(&board, thickness, options.copper != KicadCopper::None) {
             Ok((step, holes_lost, notes)) => {
                 warnings.extend(notes);
                 if holes_lost {
@@ -1466,6 +1635,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
     // beside it: a footprint that names both forms of one model has one model, built once.
     let mut files = std::collections::HashMap::<(std::path::PathBuf, [u64; 10]), usize>::new();
     let mut totals = (0usize, 0usize);
+    let mut embedded_cache = EmbeddedCache::new(&board);
     if options.components {
         for footprint in &board.footprints {
             let back = footprint.layer.starts_with("B.");
@@ -1490,7 +1660,11 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                     place_model(&mut plan, &mut placed_here, slot, footprint, back, thickness);
                     continue;
                 }
-                let file = match load(&model.path) {
+                let loaded = match model.path.strip_prefix(EMBED_SCHEME) {
+                    Some(name) => embedded_model(&board, name, &mut embedded_cache),
+                    None => load(&model.path),
+                };
+                let file = match loaded {
                     Ok(file) => file,
                     Err(reason) => {
                         warnings.push(load_failure(&model.path, &reason, Path::new(file).parent()));
@@ -1663,6 +1837,136 @@ fn unzip_stpz(bytes: &[u8]) -> std::result::Result<Vec<u8>, String> {
         return Err("the model file is too large".into());
     }
     Ok(out)
+}
+
+/// Collect the `embedded_files` blocks of a board: the board's own and each footprint's.
+fn collect_embedded_files(root: &Expr<'_>, out: &mut Vec<KicadEmbeddedFile>, warnings: &mut Vec<String>) {
+    let mut blocks: Vec<&Expr<'_>> = Vec::new();
+    for item in children(root) {
+        match head(item) {
+            Some("embedded_files") => blocks.push(item),
+            Some("footprint" | "module") => blocks.extend(children(item).iter().filter(|e| head(e) == Some("embedded_files"))),
+            _ => {}
+        }
+    }
+    for block in blocks {
+        for file in children(block).iter().filter(|e| head(e) == Some("file")) {
+            if out.len() >= MAX_EMBEDDED_ENTRIES {
+                warnings.push("additional embedded files were skipped".into());
+                return;
+            }
+            let text = |name: &str| field(file, name).and_then(|e| children(e).get(1)).and_then(atom).map(str::to_string);
+            let Some(name) = text("name").filter(|n| !n.is_empty()) else { continue };
+            let data = text("data").map(|d| d.chars().filter(|c| !c.is_whitespace()).collect::<String>());
+            out.push(KicadEmbeddedFile { name, kind: text("type").unwrap_or_default(), data, checksum: text("checksum") });
+        }
+    }
+}
+
+/// Embedded files already unpacked (or already found unusable), by name, and the bytes unpacked
+/// so far: one file used by many footprints is unpacked once, and the total is bounded.
+struct EmbeddedCache {
+    files: HashMap<String, std::result::Result<Vec<u8>, String>>,
+    total: usize,
+    /// The board's embedded entries by name (positions in `KicadBoard::embedded_files`, every
+    /// entry of a name), so a lookup is one hash probe, not a scan of all entries.
+    by_name: HashMap<String, Vec<usize>>,
+}
+
+impl EmbeddedCache {
+    fn new(board: &KicadBoard) -> Self {
+        let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
+        for (index, file) in board.embedded_files.iter().enumerate() {
+            by_name.entry(file.name.clone()).or_default().push(index);
+        }
+        Self { files: HashMap::new(), total: 0, by_name }
+    }
+}
+
+/// The model file a `kicad-embed://<name>` path stands for. `Err` says in a few words why the
+/// board's own copy cannot be used: missing, not a model, not stored with data, disagreeing
+/// checksums, or damaged data.
+/// Each reason is under 60 characters: `load_failure` cuts a reason there, so it reads whole.
+fn embedded_model(board: &KicadBoard, name: &str, cache: &mut EmbeddedCache) -> std::result::Result<KicadModelFile, String> {
+    let path = format!("{EMBED_SCHEME}{name}");
+    if let Some(done) = cache.files.get(name) {
+        return done.clone().map(|bytes| KicadModelFile { path, bytes });
+    }
+    let result = unpack_embedded(board, name, cache);
+    cache.files.insert(name.to_string(), result.clone());
+    result.map(|bytes| KicadModelFile { path, bytes })
+}
+
+fn unpack_embedded(board: &KicadBoard, name: &str, cache: &mut EmbeddedCache) -> std::result::Result<Vec<u8>, String> {
+    let entries: Vec<&KicadEmbeddedFile> =
+        cache.by_name.get(name).into_iter().flatten().filter_map(|index| board.embedded_files.get(*index)).collect();
+    if entries.is_empty() {
+        return Err("the embedded file is not in the board file".into());
+    }
+    if entries.iter().any(|f| !f.kind.is_empty() && f.kind != "model") {
+        return Err("the embedded file is not a 3D model".into());
+    }
+    let Some(data) = entries.iter().find_map(|f| f.data.as_deref()) else {
+        return Err("the board holds no data for the embedded file".into());
+    };
+    // KiCad's checksum algorithm is not part of its published file format, so it cannot be
+    // recomputed here; the checksums the board records for one file (each footprint's and the
+    // data's own) must at least agree.
+    let mut sums = entries.iter().filter_map(|f| f.checksum.as_deref());
+    if let Some(first) = sums.next()
+        && sums.any(|other| !other.eq_ignore_ascii_case(first))
+    {
+        return Err("the embedded file's checksums disagree".into());
+    }
+    let packed = decode_base64(data).ok_or_else(|| "the embedded file is corrupt (its data is not base64)".to_string())?;
+    let room = MAX_EMBEDDED_FILE_BYTES.min(MAX_EMBEDDED_TOTAL_BYTES.saturating_sub(cache.total));
+    let bytes = unpack_zstd(&packed, room)?;
+    cache.total = cache.total.saturating_add(bytes.len());
+    Ok(bytes)
+}
+
+/// Unpack one zstd frame into at most `limit` bytes.
+fn unpack_zstd(packed: &[u8], limit: usize) -> std::result::Result<Vec<u8>, String> {
+    use std::io::Read;
+    let decoder = ruzstd::decoding::StreamingDecoder::new(packed).map_err(|_| "the embedded file is corrupt (not compressed data)".to_string())?;
+    let mut out = Vec::new();
+    decoder.take(limit as u64 + 1).read_to_end(&mut out).map_err(|_| "the embedded file is corrupt (damaged data)".to_string())?;
+    if out.len() > limit {
+        return Err(format!("the embedded file is too large (limit {} MB unpacked)", MAX_EMBEDDED_FILE_BYTES >> 20));
+    }
+    if out.is_empty() {
+        return Err("the embedded file is empty".into());
+    }
+    Ok(out)
+}
+
+/// Standard base64 (RFC 4648) with or without padding; `None` for any other character or a
+/// length no base64 text has.
+fn decode_base64(text: &str) -> Option<Vec<u8>> {
+    let body = text.trim_end_matches('=');
+    if text.len() - body.len() > 2 || body.len() % 4 == 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(body.len() / 4 * 3 + 2);
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for byte in body.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        };
+        acc = (acc << 6) | u32::from(value);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
 }
 
 /// The warning for a model that could not be read. The loader's reason starts with the path it
@@ -2266,7 +2570,7 @@ fn extrude_regions(regions: &[Region2], z0: f64, z1: f64) -> Result<Vec<solidcra
         items.push(region_loops(region)?);
     }
     let (mut points, triangles) =
-        solidcraft_kernel::services::tess::triangulate_union(&items).map_err(|error| IoError::Invalid(format!("KiCad copper: {error}")))?;
+        solidcraft_kernel::tessellate::triangulate_union(&items).map_err(|error| IoError::Invalid(format!("KiCad copper: {error}")))?;
     // One face of each triangle, without the ones that could not be on a surface: a corner twice
     // has an edge of its own, and the same triangle twice would put two faces on one edge.
     let mut seen: HashSet<[u32; 3]> = HashSet::with_capacity(triangles.len());
@@ -2964,7 +3268,7 @@ impl Plate {
     fn add_surface_region(&mut self, region: &Region2, z0: f64, z1: f64) -> bool {
         let Some(front) = self.surface else { return false };
         let Ok(loops) = region_loops(region) else { return false };
-        let Ok((points, mut triangles)) = solidcraft_kernel::services::tess::triangulate_planar(&loops) else { return false };
+        let Ok((points, mut triangles)) = solidcraft_kernel::tessellate::triangulate_planar(&loops) else { return false };
         if triangles.is_empty() {
             return false;
         }
@@ -3068,7 +3372,7 @@ fn cut_lists(pads: &[Vec<[f64; 2]>], vias: &[Vec<[f64; 2]>], drills: &[Vec<[f64;
 /// one, whichever side it is on (a drill goes through the board).
 fn drill_outlines(board: &KicadBoard) -> Vec<Vec<[f64; 2]>> {
     let mut out = Vec::new();
-    for via in &board.vias {
+    for via in board.vias.iter().filter(|via| via.drill > 0.0) {
         let center = [via.at[0], -via.at[1]];
         let points = circle_points(center, (via.drill * 0.5).abs());
         if points.len() >= 3 {
@@ -3912,6 +4216,7 @@ fn parse_pad(expr: &Expr<'_>) -> std::result::Result<KicadPad, String> {
     if !(sx.is_finite() && sy.is_finite() && sx > 0.0 && sy > 0.0 && sx <= MAX_NUMBER && sy <= MAX_NUMBER) {
         return Err("invalid size".into());
     }
+    let kind = children(expr).get(2).and_then(atom).unwrap_or_default().to_string();
     let shape = children(expr).get(3).and_then(atom).unwrap_or("rect").to_string();
     let layers = field(expr, "layers").map(|e| children(e).iter().skip(1).filter_map(atom).map(str::to_string).collect()).unwrap_or_default();
     let drill = field(expr, "drill").and_then(numeric_atoms).and_then(|n| {
@@ -3933,7 +4238,7 @@ fn parse_pad(expr: &Expr<'_>) -> std::result::Result<KicadPad, String> {
         .and_then(|n| n.first().copied())
         .filter(|v| v.is_finite() && *v >= 0.0 && *v <= 0.5)
         .unwrap_or(0.0);
-    Ok(KicadPad { at: [x, y, angle], size: [sx, sy], shape, layers, drill, offset, roundrect_ratio })
+    Ok(KicadPad { at: [x, y, angle], size: [sx, sy], kind, shape, layers, drill, offset, roundrect_ratio })
 }
 
 fn numeric_atoms(expr: &Expr<'_>) -> Option<Vec<f64>> {
@@ -4181,6 +4486,19 @@ fn tokenize(source: &str) -> Result<Vec<Token<'_>>> {
                 let (value, next) = quoted(source, index + 1)?;
                 push_token(&mut tokens, cap, Token::String(value))?;
                 index = next;
+            }
+            b'|' => {
+                // `|…|`: the text between the bars is one atom, whitespace and all. KiCad stores an
+                // embedded file's base64 data this way, wrapped over many lines.
+                let start = index + 1;
+                let end = source
+                    .get(start..)
+                    .and_then(|rest| rest.find('|'))
+                    .map(|n| start + n)
+                    .ok_or_else(|| IoError::Invalid("unterminated |…| text in KiCad PCB".into()))?;
+                let text = source.get(start..end).ok_or_else(|| IoError::Invalid("invalid UTF-8 boundary in KiCad PCB".into()))?;
+                push_token(&mut tokens, cap, Token::Atom(text))?;
+                index = end + 1;
             }
             b';' => {
                 while index < source.len() && source.as_bytes().get(index) != Some(&b'\n') {

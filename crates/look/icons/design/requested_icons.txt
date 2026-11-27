@@ -168,6 +168,7 @@ feature_group	false
 fillet	false
 filter	false
 find_kinds	false
+finger_joint	false
 finish	false
 finish_edit	false
 fit	false
@@ -176,6 +177,7 @@ flange	false
 flat	false
 fold	false
 folder	false
+frame_cope	false
 frame_member	false
 frame_plate	false
 frame_trim	false
@@ -287,6 +289,7 @@ prefs_plugins	false
 prefs_shortcuts	false
 prefs_sketch	false
 prefs_tools	false
+press_in_hardware	false
 presspull	false
 print_face	false
 project	false
@@ -327,6 +330,7 @@ select_sketch	false
 send	false
 settings	false
 settings_profile	false
+shaft_spline	false
 sheet	false
 sheet_rules	false
 sheet_tab	false

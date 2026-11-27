@@ -29,6 +29,7 @@
 //! | [`nurbs::NurbsFailure`], [`nurbs::BSplineFailure`] | NLib error flag + `NL_ERROR.eno` (`N_ErrSet`): the `NL_*_ERR` numbers, in solidcore's terms |
 //! | [`defeature::DefeatureFailure`] | none: why a defeature keeps a feature (#3218) |
 //! | [`sweep::SweepFailure`]     | none: why a sweep or loft refuses, and the sweep routines' failures |
+//! | [`teeth::TeethFailure`], [`teeth::Why`], [`teeth::PlanRefusal`], [`teeth::ProfileWhy`], [`teeth::SplineQuantity`], [`teeth::RequiredUnit`] | none: why numbers give no teeth, and the shaft-spline planner's refusals with the number each is about |
 //! | [`curve::CurveFailure`]     | none: why a curve query refuses, and the curve routines' failures |
 //! | [`query::QueryFailure`]     | none: the query routines' failures               |
 //! | [`topology::TopologyFailure`] | none: the topology routines' failures          |
@@ -112,6 +113,7 @@ mod site_scan;
 mod stage_sites;
 pub mod surface;
 pub mod sweep;
+pub mod teeth;
 pub mod topology;
 
 use crate::math::Point3;
@@ -1113,6 +1115,8 @@ pub enum Reason {
     Blend(blend::BlendFailure),
     /// A channel fill cannot be built as asked (`prism::fill`; not upstream, #18500).
     Fill(fill::FillFailure),
+    /// A tooth outline, fit or shaft-spline plan refused (`crate::teeth`).
+    Teeth(teeth::TeethFailure),
     /// A blend certificate's feet box runs past a support's net in a direction the
     /// support's kind does not continue (not upstream, tangency-labs/solidcraft#14284):
     /// support `support` (0 or 1) over the leader's piece `s`, the box `uv` against the net's
@@ -1160,6 +1164,7 @@ impl Reason {
             | Self::Query(_)
             | Self::Topology(_)
             | Self::Surface(_)
+            | Self::Teeth(_)
             | Self::FootPastDomainEnd { .. }
             | Self::EdgeOffItsFaces { .. } => None,
             Self::Blend(b) => b.entity(),
@@ -1191,6 +1196,7 @@ impl Reason {
             Self::Surface(s) => s.comparison_status(),
             Self::Blend(b) => b.comparison_status(),
             Self::Fill(w) => w.comparison_status(),
+            Self::Teeth(t) => t.comparison_status(),
         }
     }
 
@@ -1217,6 +1223,7 @@ impl Reason {
             Self::Surface(s) => s.kind(),
             Self::Blend(b) => b.class(),
             Self::Fill(w) => w.kind(),
+            Self::Teeth(t) => t.kind(),
         }
     }
 }
@@ -1249,6 +1256,7 @@ impl core::fmt::Display for Reason {
             Self::Surface(s) => s.fmt(f),
             Self::Blend(b) => b.fmt(f),
             Self::Fill(w) => w.fmt(f),
+            Self::Teeth(t) => t.fmt(f),
             Self::FootPastDomainEnd {
                 support,
                 s,
@@ -1356,6 +1364,12 @@ impl From<surface::SurfaceFailure> for Reason {
 impl From<blend::BlendFailure> for Reason {
     fn from(b: blend::BlendFailure) -> Self {
         Self::Blend(b)
+    }
+}
+
+impl From<teeth::TeethFailure> for Reason {
+    fn from(t: teeth::TeethFailure) -> Self {
+        Self::Teeth(t)
     }
 }
 
@@ -1700,6 +1714,45 @@ impl core::fmt::Display for ErrorKind {
     }
 }
 
+/// What an error says about its way out, from [`SolidError::class`]: a refusal (change the
+/// input), a defect (the kernel's fault: report it), a port failure (a solidcore-side failure:
+/// a part not ported, a preparation the caller skipped), or none of them. A caller that acts on
+/// the class reads this instead of keeping its own table of the kinds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum ErrorClass {
+    /// [`SolidError::is_refusal`]: a fact of the geometry, so the way out is a different input.
+    Refusal,
+    /// [`SolidError::is_defect`]: the kernel's fault.
+    Defect,
+    /// [`SolidError::is_port_failure`]: a solidcore-side failure, not a failure of the operation
+    /// on its input.
+    PortFailure,
+    /// None of the classes: a kind solidcore has not classed (a bare status, a generic failure,
+    /// an invalid argument, a cancellation, a spent work budget).
+    Unclassed,
+}
+
+impl ErrorClass {
+    /// The class's stable name (`snake_case`): `refusal`, `defect`, `port_failure` or
+    /// `unclassed`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Refusal => "refusal",
+            Self::Defect => "defect",
+            Self::PortFailure => "port_failure",
+            Self::Unclassed => "unclassed",
+        }
+    }
+}
+
+impl core::fmt::Display for ErrorClass {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
 /// The largest size (a distance) that works, as a refusal's message ends with it, when there
 /// is one.
 fn fmt_size(size: Option<f64>) -> String {
@@ -1992,6 +2045,23 @@ impl SolidError {
     #[must_use]
     pub fn is_refusal(&self) -> bool {
         self.deciding_class().is_some_and(ErrorKind::is_refusal)
+    }
+
+    /// This error's class, as [`SolidError::is_port_failure`], [`SolidError::is_defect`] and
+    /// [`SolidError::is_refusal`] decide it, in that order: a port failure anywhere in the cause
+    /// chain makes it one, whatever its other errors say, as a caller that skips where the
+    /// operation fails on its input must not skip on it (#1452); otherwise the deepest classed
+    /// error in the chain decides between a defect and a refusal; otherwise it is unclassed.
+    #[must_use]
+    pub fn class(&self) -> ErrorClass {
+        if self.is_port_failure() {
+            return ErrorClass::PortFailure;
+        }
+        match self.deciding_class() {
+            Some(kind) if kind.is_defect() => ErrorClass::Defect,
+            Some(kind) if kind.is_refusal() => ErrorClass::Refusal,
+            _ => ErrorClass::Unclassed,
+        }
     }
 
     /// True when this error is a refusal a size that builds is the way out of
@@ -2477,6 +2547,97 @@ mod tests {
         // the port-failure kinds on top still count
         assert!(SolidError::port_invariant("op", "broken").is_port_failure());
         assert!(!SolidError::sm_err("op").is_port_failure());
+    }
+
+    /// An error's class is the one `is_port_failure`, `is_defect` and `is_refusal` give it, read
+    /// down its cause chain: an unclassed failure over a classed one takes its class, a defect
+    /// over a refusal is a refusal and a refusal over a defect a defect (the deepest classed
+    /// error decides), any error over a port failure a port failure, and an error none of them
+    /// classes is unclassed.
+    #[test]
+    fn an_errors_class_is_the_one_its_cause_chain_gives() {
+        let refusal = SolidError::blend(
+            "blend::op",
+            blend::BlendFailure::NoRoom(
+                crate::blend::fillet_executive::NoRoomReason::BallDoesNotFit,
+            ),
+        );
+        let defect = SolidError::blend("blend::op", blend::BlendFailure::StageFailed);
+        let unported = SolidError::unported("topology::callee", "u");
+        let stage =
+            |cause: &SolidError| SolidError::failed_after("op", "a stage failed", cause.clone());
+        // a defect over a port failure: the port failure decides
+        let over_unported = Failure::new("blend::op", blend::BlendFailure::StageFailed)
+            .caused_by(unported.clone())
+            .into_error();
+        assert!(over_unported.is_defect() && over_unported.is_port_failure());
+        // the deepest classed error decides between a defect and a refusal
+        let defect_over_refusal = Failure::new("blend::op", blend::BlendFailure::StageFailed)
+            .caused_by(refusal.clone())
+            .into_error();
+        let refusal_over_defect = Failure::new(
+            "blend::op",
+            blend::BlendFailure::NoRoom(
+                crate::blend::fillet_executive::NoRoomReason::BallDoesNotFit,
+            ),
+        )
+        .caused_by(defect.clone())
+        .into_error();
+        let cases = [
+            (&defect_over_refusal, ErrorClass::Refusal, "refusal"),
+            (&refusal_over_defect, ErrorClass::Defect, "defect"),
+            (&refusal, ErrorClass::Refusal, "refusal"),
+            (&stage(&refusal), ErrorClass::Refusal, "refusal"),
+            (&defect, ErrorClass::Defect, "defect"),
+            (&stage(&defect), ErrorClass::Defect, "defect"),
+            (&unported, ErrorClass::PortFailure, "port_failure"),
+            (&stage(&unported), ErrorClass::PortFailure, "port_failure"),
+            (&over_unported, ErrorClass::PortFailure, "port_failure"),
+            (
+                &SolidError::port_invariant("op", "broken"),
+                ErrorClass::PortFailure,
+                "port_failure",
+            ),
+            (
+                &SolidError::PreparationRequired { operation: "op" },
+                ErrorClass::PortFailure,
+                "port_failure",
+            ),
+            (
+                &SolidError::sm_err("op"),
+                ErrorClass::Unclassed,
+                "unclassed",
+            ),
+            (
+                &stage(&SolidError::sm_err("op")),
+                ErrorClass::Unclassed,
+                "unclassed",
+            ),
+            (
+                &SolidError::invalid_input("op", "bad"),
+                ErrorClass::Unclassed,
+                "unclassed",
+            ),
+            (
+                &SolidError::cancelled("op"),
+                ErrorClass::Unclassed,
+                "unclassed",
+            ),
+        ];
+        for (e, class, name) in cases {
+            assert_eq!(e.class(), class, "{e:?}");
+            assert_eq!(class.name(), name);
+            assert_eq!(class.to_string(), name);
+            assert_eq!(
+                e.class() == ErrorClass::PortFailure,
+                e.is_port_failure(),
+                "{e:?}"
+            );
+            if class != ErrorClass::PortFailure {
+                assert_eq!(e.class() == ErrorClass::Defect, e.is_defect(), "{e:?}");
+                assert_eq!(e.class() == ErrorClass::Refusal, e.is_refusal(), "{e:?}");
+            }
+        }
     }
 
     #[test]

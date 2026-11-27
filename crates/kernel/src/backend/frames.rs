@@ -115,6 +115,10 @@ impl Frames for Solidcore {
         stock::section_plane(&piece(first)?, at, turn).map_err(path_failure)
     }
 
+    fn stock_terminal_planes(&self, path: &[PieceData], at: Vec2, turn: f64) -> Result<[Plane; 2], PathFailure> {
+        stock::terminal_planes(&pieces(path)?, at, turn).map_err(path_failure)
+    }
+
     fn check_bend_clearance(&self, path: &[PieceData], region: &Region2, at: Vec2, turn: f64) -> Result<(), PathFailure> {
         stock::check_bend_clearance(&pieces(path)?, region, at, turn).map_err(path_failure)
     }
