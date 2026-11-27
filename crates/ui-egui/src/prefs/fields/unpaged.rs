@@ -22,6 +22,9 @@ macro_rules! unpaged_preferences {
             /// Agents the user added (the installed ones are found by themselves). API keys are never
             /// here: they live in the system keychain.
             agents: Vec<crate::agent_chat::agents::AgentConfig> = Vec::new();
+            /// The local appearance library the Appearance panel loads whenever it opens (#20361); empty:
+            /// none, the panel opens with no library, as it always has. Set by the panel's own checkbox.
+            appearance_library: String = String::new();
             /// The programs the user added to the slicer list, newest first.
             custom_slicers: Vec<String> = Vec::new();
             /// Imported theme files (`theme_files`), kept here so they also work in the browser.
@@ -49,11 +52,17 @@ macro_rules! unpaged_preferences {
             /// edits wait in the dialog until Apply or OK sets them together, in one rebuild and one undo
             /// step. Its checkbox is in the dialog itself.
             parameters_apply_live: bool = true;
+            /// Model Parameters are listed under the component each feature belongs to (#20648); off keeps
+            /// the flat list in listing order. Its check box is in the Parameters window, next to the list.
+            params_group_by_component: bool = false;
             /// Personal Sheet Metal Rules, offered by the rule manager of every design in this profile
             /// (#9346). No page reset discards this user-authored library.
             personal_sheet_rules: crate::personal_sheet_rules::Library = crate::personal_sheet_rules::Library::default();
             /// Approved install permissions survive page resets and Cancel, like installed files.
             plugin_grants: std::collections::BTreeMap<String, solidcraft_engine::plugin::Grants> = std::collections::BTreeMap::new();
+            /// Importer options, by plugin id and entry name: each entry's own "Remember these options"
+            /// choice and its last-run values. Bookkeeping, never design data.
+            plugin_importer_options: std::collections::BTreeMap<String, std::collections::BTreeMap<String, crate::plugin_menu::ImporterMemory>> = std::collections::BTreeMap::new();
             /// Resource identities and history belong to the user, never the design.
             render_library_favorites: std::collections::BTreeSet<(String, String)> = Default::default();
             render_library_recent: std::collections::VecDeque<(String, String)> = Default::default();
@@ -65,13 +74,40 @@ macro_rules! unpaged_preferences {
             save_mesh_format: String = "stl".into();
             /// Save as mesh: the last quality (`standard`, `fine` or `finest`, #4747).
             save_mesh_quality: String = "standard".into();
+            /// Send to Slicer: the format last sent to each slicer, by its key in the slicer list (`3mf`,
+            /// `stl` or `step`). A slicer that is not in it starts from its own default, 3MF for most.
+            send_formats: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
             /// Send to Slicer: the last slicer used (an installed slicer's id or a program path).
             send_slicer: String = String::new();
+            /// A shape's shortcut (C, R, ...) starts the tool the menu lists it next to (#22247). A mode of
+            /// the shape tools, set in the Sketch Palette's Feature Options while one runs and kept; no
+            /// Preferences page shows or resets it. Off (the default): the key starts the family's tool
+            /// used last, as before (#4308).
+            shortcut_starts_listed_tool: bool = false;
+            /// The 3-Point Arc's third point snaps to the arc tangent to the line or arc it starts or ends, or to the arc
+            /// whose centre is on a sketch point, and the click adds the Tangent or Coincident constraint (#20719). A mode of the 3-Point Arc tool, set
+            /// in the Sketch Palette while it runs and kept for the next time; no Preferences page shows or
+            /// resets it. It also turns on that tool's Radius and Sweep boxes for the third point and the cross at
+            /// the arc's centre. Off (the default): the tool is as it always was, its point snaps on the curve and
+            /// shows only the pointer's coordinates.
+            sketch_arc_tangent_snap: bool = false;
             /// The variant last started in each split tool family (Rectangle, Circle, Arc, Slot, Polygon, Line,
             /// Spline): the family's button and shortcut start it again (`sketch_families`).
             sketch_variants: crate::sketch_families::Choices = crate::sketch_families::Choices::default();
+            /// Send to Slicer: the folder the file is kept in for each saved design (its path), asked for in
+            /// the Send window (#18311). A design with no entry keeps it in the slicer folder; one that was
+            /// never saved has none.
+            slicer_copy_folders: std::collections::BTreeMap<String, String> = Default::default();
+            /// Send to Slicer: a file kept in a folder is replaced each time, not numbered (#18311).
+            slicer_copy_overwrite: bool = false;
             /// The line about sending again replacing the slicer's file has been shown.
             slicer_resend_hint_seen: bool = false;
+            /// The 3D mice read through smed (`smed V:P`) that are done taking over what was saved for them
+            /// read directly (`space_mouse::adopt_direct_settings`): they have a calibration or button jobs of
+            /// their own, carried over or set before, so a later reset of those stays a reset. Kept when settings
+            /// are reset, like `space_mouse_offered`.
+            #[serde(deserialize_with = "devices_that_read")]
+            space_mouse_adopted: std::collections::BTreeSet<String> = Default::default();
             /// Per 3D mouse, what each of its buttons does, by number from 1, once the user has changed
             /// any of them; until then a measured device has its printed keys' jobs
             /// (`space_mouse::default_button_jobs`). Kept, like calibrations, when settings are reset.
@@ -81,6 +117,12 @@ macro_rules! unpaged_preferences {
             /// 3Dconnexion's. A device without one is read as it reports. Page resets keep calibrations.
             #[serde(deserialize_with = "calibrations_that_read")]
             space_mouse_calibrations: std::collections::BTreeMap<String, solidcraft_space_mouse::Calibration> = Default::default();
+            /// Per 3D mouse, what each button does when held past the device's long-press threshold, once the
+            /// user has changed any; until then the measured defaults (`space_mouse::default_long_button_jobs`).
+            /// A button without one does its short job. Only devices read through a driver that reports long
+            /// presses (smed) have them. Kept like `space_mouse_buttons` when settings are reset.
+            #[serde(deserialize_with = "button_jobs_that_read")]
+            space_mouse_long_buttons: std::collections::BTreeMap<String, std::collections::BTreeMap<u8, crate::space_mouse::ButtonJob>> = Default::default();
             /// The 3D mice (`space_mouse::Input::device`) whose calibration has been offered and dismissed, so
             /// the offer (`space_mouse_offer`) is made once per device. A saved entry that is not text is dropped.
             /// Kept when settings are reset, like the calibrations and button mappings it goes with: resetting

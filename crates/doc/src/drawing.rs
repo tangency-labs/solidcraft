@@ -69,6 +69,7 @@ use crate::format::{CheckNumbers as _, DRAWING};
 use crate::ids::{self, IdSource};
 use crate::{DocError, Metadata, Result, expr};
 
+pub mod auto_marks;
 pub mod balloon;
 pub mod by_id;
 pub mod centre_line;
@@ -341,6 +342,12 @@ pub struct SheetComponent {
     pub source: u64,
     /// The component's id in that design, as the design writes it (0: the design itself).
     pub component: u64,
+}
+
+impl SheetComponent {
+    /// A template parts list waiting for the design chosen when a drawing is created.
+    /// Only a drawing with no sources can carry this value on a parts list.
+    pub const UNBOUND: Self = Self { source: 0, component: 0 };
 }
 
 /// What a sheet is left out of.

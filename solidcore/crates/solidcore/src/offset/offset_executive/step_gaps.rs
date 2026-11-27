@@ -343,9 +343,9 @@ impl OffsetExecutive {
         let mut segments: Vec<GapSegment> = Vec::new();
         // (WR-657) the corners whose offset planes no longer meet in one point
         self.split_corner_vertices(kernel, original, b, approx_tol, notifications)?;
-        // (fork ccbf77a) each edge that closed to a point: its offset face and the original
-        // face across it
-        let mut closed_edges: Vec<(FaceId, Option<FaceId>)> = Vec::new();
+        // (fork ccbf77a) each edge that closed to a point: its offset face, and the original
+        // edge and the original face across it
+        let mut closed_edges: Vec<(FaceId, Option<(EdgeId, FaceId)>)> = Vec::new();
         let closing = self.close_gaps_of_faces(
             kernel,
             original,
@@ -404,7 +404,7 @@ impl OffsetExecutive {
         b: &mut Brep,
         approx_tol: f64,
         notifications: &mut OffsetNotifications<'_>,
-        closed_edges: &mut Vec<(FaceId, Option<FaceId>)>,
+        closed_edges: &mut Vec<(FaceId, Option<(EdgeId, FaceId)>)>,
         segments: &mut Vec<GapSegment>,
     ) -> Result<()> {
         for f in bp1::faces(b, None)? {
@@ -582,7 +582,7 @@ impl OffsetExecutive {
         kernel: &Kernel,
         original: &Brep,
         b: &mut Brep,
-        closed_edges: &[(FaceId, Option<FaceId>)],
+        closed_edges: &[(FaceId, Option<(EdgeId, FaceId)>)],
     ) -> Result<(Vec<FaceId>, BTreeSet<FaceId>)> {
         // offset faces closed to nothing, in the order they closed, and the original faces
         // they were offset from
@@ -602,12 +602,59 @@ impl OffsetExecutive {
             }
         }
         for &(face, across) in closed_edges {
-            let explained = gone.contains(&face) || across.is_some_and(|a| gone_orig.contains(&a));
+            let explained = gone.contains(&face)
+                || across.is_some_and(|(_, a)| gone_orig.contains(&a))
+                || self.closed_on_both_sides(original, b, closed_edges, face, across)?;
             if !explained {
                 return Err(self.edge_vanishes(original, face, None));
             }
         }
         Ok((gone_list, gone))
+    }
+
+    /// (#1126) Whether the edge of `face` closed to a point (the original edge and the
+    /// original face beside it, `across`) is one edge closed on both its sides: `face`'s
+    /// only closed edge, the face across having closed exactly one edge, that same
+    /// original edge across from `face`, and both faces keeping a loop of three edges or
+    /// more. The point is then a vertex where the faces either side meet the two faces
+    /// whose edge closed (an offset that just reaches where its neighbours converge). An
+    /// edge of a face that closed more than once, or that leaves a face fewer than three
+    /// edges, is no such vertex.
+    ///
+    /// # Errors
+    ///
+    /// Those of the face and loop queries.
+    fn closed_on_both_sides(
+        &self,
+        original: &Brep,
+        b: &Brep,
+        closed_edges: &[(FaceId, Option<(EdgeId, FaceId)>)],
+        face: FaceId,
+        across: Option<(EdgeId, FaceId)>,
+    ) -> Result<bool> {
+        let Some((edge, across)) = across else {
+            return Ok(false);
+        };
+        let original_of = |f: FaceId| -> Result<Option<FaceId>> {
+            match self.faceuse_to_faces.firsts(f).as_slice() {
+                [fu] => eu::faceuse_face(original, *fu),
+                _ => Ok(None),
+            }
+        };
+        let Some(this_orig) = original_of(face)? else {
+            return Ok(false);
+        };
+        let Some(other) =
+            closed_back_across(closed_edges, face, (edge, across), this_orig, original_of)?
+        else {
+            return Ok(false);
+        };
+        for f in [face, other] {
+            if face4::edges(b, f, None, false, None)?.len() < 3 {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// The end of the fork's `CloseLoopGaps` (ccbf77a, WR-566): the offset faces that
@@ -628,7 +675,7 @@ impl OffsetExecutive {
         kernel: &mut Kernel,
         original: &Brep,
         b: &mut Brep,
-        closed_edges: &[(FaceId, Option<FaceId>)],
+        closed_edges: &[(FaceId, Option<(EdgeId, FaceId)>)],
         notifications: &mut OffsetNotifications<'_>,
     ) -> Result<()> {
         let (gone_list, gone) = self.closed_faces(kernel, original, b, closed_edges)?;
@@ -684,7 +731,7 @@ impl OffsetExecutive {
         f: FaceId,
         gap: Gap,
         notifications: &mut OffsetNotifications<'_>,
-        closed_edges: &mut Vec<(FaceId, Option<FaceId>)>,
+        closed_edges: &mut Vec<(FaceId, Option<(EdgeId, FaceId)>)>,
     ) -> Result<Option<(Point3, Point3, Option<BSplineCurve>)>> {
         let Gap {
             u,
@@ -764,6 +811,30 @@ impl OffsetExecutive {
                 edge::set_interval(b, e, &new_ivl)?;
                 return Ok(None);
             }
+        }
+
+        // (#1126) The edge's two vertices met at the gap and its curve misses them: the
+        // edge closed to a point where the faces either side meet (a draft that just
+        // reaches where its neighbours converge). It is squeezed out like a closed edge
+        // above; `closed_faces` takes it only where its edge on the face across closed
+        // with it. Only a straight edge (`squeezes_to_its_vertex`).
+        if self.operation() == OffsetOperation::LocalOperation
+            && squeezes_to_its_vertex(&trimmed, tol)?
+            && self.squeeze_closed_edge(
+                kernel,
+                original,
+                b,
+                f,
+                u,
+                e,
+                at_start,
+                vertex_point,
+                tol,
+                notifications,
+                closed_edges,
+            )?
+        {
+            return Ok(None);
         }
 
         // (#21215) The gap's end on the other edge at the vertex: the two edges cross
@@ -1095,8 +1166,8 @@ impl OffsetExecutive {
 
     /// `CloseLoopGap`'s closed edge (fork ccbf77a): when the edge's other vertex is at
     /// `vertex_point`, the edge is squeezed into the vertex at the gap and noted with
-    /// `face` and the original face across it (`None` where the edge use maps to no single
-    /// original edge use); `false` (nothing done) otherwise.
+    /// `face`, and the original edge and the original face across it (`None` where the
+    /// edge use maps to no single original edge use); `false` (nothing done) otherwise.
     #[allow(clippy::too_many_arguments)] // one fork branch
     fn squeeze_closed_edge(
         &mut self,
@@ -1110,7 +1181,7 @@ impl OffsetExecutive {
         vertex_point: Point3,
         tol: f64,
         notifications: &mut OffsetNotifications<'_>,
-        closed_edges: &mut Vec<(FaceId, Option<FaceId>)>,
+        closed_edges: &mut Vec<(FaceId, Option<(EdgeId, FaceId)>)>,
     ) -> Result<bool> {
         let at = if at_start {
             edgeuse_vertex(b, u)?
@@ -1138,7 +1209,7 @@ impl OffsetExecutive {
             let orig_face = eu::face(original, *orig_eu)?;
             for of in edge::faces(original, orig_edge, None)? {
                 if Some(of) != orig_face {
-                    across = Some(of);
+                    across = Some((orig_edge, of));
                 }
             }
         }
@@ -1242,6 +1313,51 @@ impl OffsetExecutive {
         }
         Ok(())
     }
+}
+
+/// (#1126) The offset face across from `face` that closed `face`'s closed edge with it:
+/// the one offset face whose original face is `across`, where it closed exactly one edge,
+/// on the same original `edge`, across onto `this_orig` (`face`'s original face), and
+/// `face` closed only this one. Two faces whose originals share two edges, each closing a
+/// different one, closed no edge between them. `original_of` maps an offset face to its
+/// original face.
+///
+/// # Errors
+///
+/// Those of `original_of`.
+fn closed_back_across(
+    closed_edges: &[(FaceId, Option<(EdgeId, FaceId)>)],
+    face: FaceId,
+    (edge, across): (EdgeId, FaceId),
+    this_orig: FaceId,
+    original_of: impl Fn(FaceId) -> Result<Option<FaceId>>,
+) -> Result<Option<FaceId>> {
+    // the closed edges of the offset face across, and that face
+    let mut across_closed = Vec::new();
+    for &(other, other_across) in closed_edges {
+        if other != face && original_of(other)? == Some(across) {
+            across_closed.push((other, other_across));
+        }
+    }
+    let once = closed_edges.iter().filter(|&&(f, _)| f == face).count() == 1;
+    let [(other, Some((back_edge, back)))] = across_closed[..] else {
+        return Ok(None);
+    };
+    Ok((once && back_edge == edge && back == this_orig).then_some(other))
+}
+
+/// (#1126) Whether an edge on `curve` whose two vertices met at a gap may be squeezed into
+/// that point: only a straight one. Its curve keeps its old ends (the vertices moved, not
+/// the curve), and a straight edge between two vertices at one point is that point, where a
+/// curved one whose ends meet can still bound the face. Certified over the whole curve (its
+/// control points within `tol` of one line, so the curve is), not at samples, between which
+/// a curve can bend.
+///
+/// # Errors
+///
+/// Those of the control polygon query.
+fn squeezes_to_its_vertex(curve: &Curve, tol: f64) -> Result<bool> {
+    crate::topology::brep::trim_extend::is_straight(curve, tol)
 }
 
 /// The point where three planes `(point, normal)` meet; `None` where two are parallel.
@@ -1368,6 +1484,111 @@ fn corner_split(
         }
     }
     Ok(None)
+}
+
+/// (#1126) An edge of the original whose offset ends cross (see
+/// [`OffsetExecutive::split_corner_vertices`]): the edge between `wall` and the face
+/// across it, whose end vertices `ends` each join exactly one more face. Its offset
+/// vanishes: the wall's offset ends in `p` (where it meets the offsets of those two
+/// faces), the face across's in `q`, and the two faces meet along `p`-`q`.
+struct EdgeFlip {
+    ends: [VertexId; 2],
+    wall: FaceId,
+    p: Point3,
+    q: Point3,
+}
+
+/// The flip of the original's edge `e0` (see [`EdgeFlip`]), `None` where `e0` is not an
+/// edge between two plane faces whose two end vertices each join one more plane face,
+/// or its offset ends do not cross by more than `tol` (ends that meet are the closed
+/// edge `close_loop_gap` squeezes).
+fn edge_flip(
+    original: &Brep,
+    b: &Brep,
+    e0: EdgeId,
+    sheet_of: &BTreeMap<FaceId, FaceId>,
+    tol: f64,
+) -> Result<Option<EdgeFlip>> {
+    let [fw, fb] = edge::faces(original, e0, None)?[..] else {
+        return Ok(None);
+    };
+    if fw == fb {
+        return Ok(None);
+    }
+    let (Some(v1), Some(v2)) = (
+        edge::start_vertex(original, e0)?,
+        edge::end_vertex(original, e0)?,
+    ) else {
+        return Ok(None);
+    };
+    if v1 == v2 {
+        return Ok(None);
+    }
+    let plane_of = |f: FaceId| -> Result<Option<(Point3, Vec3)>> {
+        let Some(sheet) = sheet_of.get(&f) else {
+            return Ok(None);
+        };
+        let Some(surface) = b.face(*sheet)?.surface.as_ref() else {
+            return Ok(None);
+        };
+        let SurfaceKind::Plane(plane) = surface.kind() else {
+            return Ok(None);
+        };
+        let (point, normal, _) = plane.is_planar();
+        Ok(Some((point, normal)))
+    };
+    // the one more face at an end where exactly three edges meet
+    let third = |v: VertexId| -> Result<Option<FaceId>> {
+        let mut edges = crate::topology::vertex::edges(original, v, None)?;
+        edges.sort_unstable();
+        edges.dedup();
+        if edges.len() != 3 {
+            return Ok(None);
+        }
+        let mut others: Vec<FaceId> = Vec::new();
+        for e in edges {
+            for f in edge::faces(original, e, None)? {
+                if f != fw && f != fb && !others.contains(&f) {
+                    others.push(f);
+                }
+            }
+        }
+        Ok(match others[..] {
+            [s] => Some(s),
+            _ => None,
+        })
+    };
+    let (Some(s1), Some(s2)) = (third(v1)?, third(v2)?) else {
+        return Ok(None);
+    };
+    if s1 == s2 {
+        return Ok(None);
+    }
+    let (Some(w), Some(a), Some(n1), Some(n2)) =
+        (plane_of(fw)?, plane_of(fb)?, plane_of(s1)?, plane_of(s2)?)
+    else {
+        return Ok(None);
+    };
+    let (Some(p1), Some(p2), Some(p), Some(q)) = (
+        three_planes([w, a, n1]),
+        three_planes([w, a, n2]),
+        three_planes([w, n1, n2]),
+        three_planes([a, n1, n2]),
+    ) else {
+        return Ok(None);
+    };
+    let Ok(d) = (original.vertex(v2)?.point - original.vertex(v1)?.point).unitize() else {
+        return Ok(None);
+    };
+    if (p2 - p1).dot(d) >= -tol {
+        return Ok(None);
+    }
+    Ok(Some(EdgeFlip {
+        ends: [v1, v2],
+        wall: fw,
+        p,
+        q,
+    }))
 }
 
 /// The vertex the original's edges `e1` and `e2` share (one only).
@@ -2524,6 +2745,37 @@ impl OffsetExecutive {
                 corners.insert(v0, split);
             }
         }
+        // (#1126) in a local operation, the edges whose offset ends cross: each end splits
+        // as a corner whose new edge joins the faces at the edge's ends, and the edge
+        // closes to a point on each of its two faces (`close_loop_gap` squeezes it). An
+        // end shared by two such edges is left as it is (more changes there than one edge).
+        let mut flips: BTreeMap<EdgeId, EdgeFlip> = BTreeMap::new();
+        if self.operation() == OffsetOperation::LocalOperation {
+            for e0 in bp1::edges(original, None)? {
+                if let Some(flip) = edge_flip(original, b, e0, &sheet_of, tol)? {
+                    flips.insert(e0, flip);
+                }
+            }
+            let mut uses: BTreeMap<VertexId, usize> = BTreeMap::new();
+            for flip in flips.values() {
+                for v in flip.ends {
+                    *uses.entry(v).or_default() += 1;
+                }
+            }
+            flips.retain(|_, flip| flip.ends.iter().all(|v| uses.get(v) == Some(&1)));
+            for flip in flips.values() {
+                for v in flip.ends {
+                    corners.insert(
+                        v,
+                        CornerSplit {
+                            b: flip.wall,
+                            t_b: flip.p,
+                            t_d: flip.q,
+                        },
+                    );
+                }
+            }
+        }
         if corners.is_empty() {
             return Ok(());
         }
@@ -2561,6 +2813,14 @@ impl OffsetExecutive {
                         continue;
                     };
                     let end_of = |e: EdgeId| -> Result<Point3> {
+                        // a flipped edge ends where its own face's offset ends
+                        if let Some(flip) = flips.get(&e) {
+                            return Ok(if sheet_of.get(&flip.wall) == Some(&f) {
+                                flip.p
+                            } else {
+                                flip.q
+                            });
+                        }
                         Ok(if edge::faces(original, e, None)?.contains(&split.b) {
                             split.t_b
                         } else {
@@ -2569,7 +2829,12 @@ impl OffsetExecutive {
                     };
                     let (t_this, t_next) = (end_of(o_this)?, end_of(o_next)?);
                     let plan = plans.entry(v0).or_default();
-                    for (u, target) in [(this, t_this), (next, t_next)] {
+                    for (u, o, target) in [(this, o_this, t_this), (next, o_next, t_next)] {
+                        // a flipped edge keeps its curve; its vertices move, and
+                        // `close_loop_gap` squeezes it
+                        if flips.contains_key(&o) {
+                            continue;
+                        }
                         let e = eu::edge(b, u)?.ok_or_else(|| null("edge use without edge"))?;
                         let Some(ends) = straight_edge_ends(kernel, b, e, tol)? else {
                             plan.unusable = true;
@@ -3170,5 +3435,149 @@ mod tests {
         );
         let part = curved_area_vector(origin, &polyline).unwrap().unwrap();
         assert!((part.twice_area - Vec3::new(0.0, 0.0, -2.0)).length() <= 1.0e-14);
+    }
+
+    /// Review r4712105664: an edge closed on both its sides is one original edge closed from
+    /// both faces along it. Two offset faces whose original faces share two edges, each
+    /// closing a different one, closed no edge between them; closing the same one, they did.
+    #[test]
+    fn a_closure_is_matched_across_only_by_its_own_original_edge() {
+        let mut original = Brep::new();
+        let shell = original.add_shell().unwrap();
+        let (fa, fb) = (
+            original.add_face(shell).unwrap(),
+            original.add_face(shell).unwrap(),
+        );
+        let v = original.add_vertex(Vec3::ZERO).unwrap();
+        let (e1, e2) = (
+            original.add_edge(v, v).unwrap(),
+            original.add_edge(v, v).unwrap(),
+        );
+        let mut offset = Brep::new();
+        let shell = offset.add_shell().unwrap();
+        let (oa, ob) = (
+            offset.add_face(shell).unwrap(),
+            offset.add_face(shell).unwrap(),
+        );
+        let original_of = |f: FaceId| -> Result<Option<FaceId>> {
+            Ok([(oa, fa), (ob, fb)]
+                .into_iter()
+                .find_map(|(o, f0)| (o == f).then_some(f0)))
+        };
+        let same = [(oa, Some((e1, fb))), (ob, Some((e1, fa)))];
+        let got = closed_back_across(&same, oa, (e1, fb), fa, original_of).unwrap();
+        assert_eq!(
+            got,
+            Some(ob),
+            "the same original edge closed from both sides"
+        );
+        let different = [(oa, Some((e1, fb))), (ob, Some((e2, fa)))];
+        let got = closed_back_across(&different, oa, (e1, fb), fa, original_of).unwrap();
+        assert_eq!(got, None, "two original edges, each closed from one side");
+    }
+
+    /// The plane curve `(t, y(t), 0)` on `[0, 1]` as one Bézier curve of `y`'s degree, `y`
+    /// given by its power coefficients `a_0..a_n` (`n >= 1`): control points
+    /// `(i / n, Σ_(j <= i) C(i, j) / C(n, j) a_j, 0)`.
+    fn plane_bezier(a: &[f64]) -> BSplineCurve {
+        let n = a.len() - 1;
+        let choose = |n: usize, k: usize| -> f64 {
+            (0..k).fold(1.0, |acc, i| acc * (n - i) as f64 / (i + 1) as f64)
+        };
+        let points: Vec<[f64; 3]> = (0..=n)
+            .map(|i| {
+                let y = (0..=i).map(|j| choose(i, j) / choose(n, j) * a[j]).sum();
+                [i as f64 / n as f64, y, 0.0]
+            })
+            .collect();
+        let knots: Vec<f64> = [0.0, 1.0]
+            .iter()
+            .flat_map(|&k| std::iter::repeat_n(k, n + 1))
+            .collect();
+        spline(&points, n, &knots)
+    }
+
+    /// The power coefficients of the product of the polynomials `factors` (each by its power
+    /// coefficients).
+    fn product(factors: &[Vec<f64>]) -> Vec<f64> {
+        factors.iter().fold(vec![1.0], |acc, f| {
+            let mut out = vec![0.0; acc.len() + f.len() - 1];
+            for (i, &x) in acc.iter().enumerate() {
+                for (j, &y) in f.iter().enumerate() {
+                    out[i + j] += x * y;
+                }
+            }
+            out
+        })
+    }
+
+    /// Review r4712105683: straightness is certified over the whole curve, not at samples.
+    /// With `q(t) = t (t - 1/4) (t - 1/2) (t - 3/4) (t - 1)`, `(t, 256 q, 0)` meets the chord at
+    /// the quarters and `(t, 10^4 q^2, 0)` does too, tangent to it there, yet both leave it
+    /// between (by about `0.82` and `0.10` at `t = 1/8`): neither is squeezed. A degree 1
+    /// line and a cubic with collinear, unevenly spaced control points are straight.
+    #[test]
+    fn a_curve_bending_between_samples_is_not_squeezed() {
+        let tol = 1.0e-6;
+        let q: Vec<Vec<f64>> = [0.0, 0.25, 0.5, 0.75, 1.0]
+            .iter()
+            .map(|&r| vec![-r, 1.0])
+            .collect();
+        // `scale q^power`
+        let scaled = |scale: f64, power: usize| {
+            let mut factors = vec![vec![scale]];
+            for _ in 0..power {
+                factors.extend(q.iter().cloned());
+            }
+            product(&factors)
+        };
+        for (name, a, bulge) in [
+            ("256 q", scaled(256.0, 1), 0.82),
+            ("1e4 q^2", scaled(1.0e4, 2), 0.10),
+        ] {
+            let c = plane_bezier(&a);
+            let y = c.evaluate_point(0.125).unwrap().y;
+            assert!((y.abs() - bulge).abs() < 0.01, "{name}: {y} at t = 1/8");
+            let straight = squeezes_to_its_vertex(&Curve::from(c), tol).unwrap();
+            assert!(!straight, "{name} bends between its samples");
+        }
+        let line = spline(
+            &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            1,
+            &[0.0, 0.0, 1.0, 1.0],
+        );
+        let cubic = spline(
+            &[
+                [0.0, 0.0, 0.0],
+                [0.1, 0.0, 0.0],
+                [0.7, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+            ],
+            3,
+            &[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        );
+        for (name, c) in [("line", line), ("collinear cubic", cubic)] {
+            let straight = squeezes_to_its_vertex(&Curve::from(c), tol).unwrap();
+            assert!(straight, "a {name} is straight");
+        }
+    }
+
+    /// Review r4712105664: an edge whose vertices met is squeezed out only where it is
+    /// straight; an arc between the same ends can still bound the face.
+    #[test]
+    fn only_a_straight_edge_is_squeezed_into_its_vertex() {
+        let tol = 1.0e-6;
+        let arc = spline(
+            &[[0.0, 0.0, 0.0], [0.5, 0.2, 0.0], [1.0, 0.0, 0.0]],
+            2,
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        );
+        let chord = spline(
+            &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+            1,
+            &[0.0, 0.0, 1.0, 1.0],
+        );
+        assert!(!squeezes_to_its_vertex(&Curve::from(arc), tol).unwrap());
+        assert!(squeezes_to_its_vertex(&Curve::from(chord), tol).unwrap());
     }
 }

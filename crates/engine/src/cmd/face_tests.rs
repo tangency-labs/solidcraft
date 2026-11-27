@@ -328,21 +328,23 @@ fn internal_capture_in_another_component_anchors_an_offset_face_by_its_history_n
 }
 
 /// Extrude from a face in another component whose occurrence has an uncaptured move, where the
-/// face has neither a construction certificate nor an exact history name: a half of a box's top
-/// that Split Face divided. The face profile would take the legacy path, which can't capture the
-/// source's pending position, so the extrude is refused and changes nothing.
+/// face has neither a construction certificate nor an exact history name: one of two arms of a
+/// notched box's top that Split Face cut off on the same side of its plane, told apart only by
+/// place. The face profile would take the legacy path, which can't capture the source's pending
+/// position, so the extrude is refused and changes nothing.
 #[test]
 fn face_extrude_of_a_split_face_in_another_component_refuses_an_uncaptured_source() {
     let mut s = Session::default();
     let component = run(&mut s, "component.create", json!({"name":"Source","grounded":false}));
     let occurrence = component["occurrence"].as_u64().unwrap();
     run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20,"body_name":"Stock"}));
-    run(&mut s, "solid.split_face", json!({"faces":[[10,15,20]],"plane":{"origin":[20,0,0],"normal":[1,0,0]}}));
+    run(&mut s, "solid.box", json!({"length":24,"width":10,"height":5,"corner":[16,10,15],"operation":"cut","targets":["Stock"]}));
+    run(&mut s, "solid.split_face", json!({"faces":[[5,15,20]],"plane":{"origin":[28,0,0],"normal":[1,0,0]}}));
     run(&mut s, "component.activate", json!({"component":0}));
     run(&mut s, "occurrence.move", json!({"occurrence":occurrence,"translate":[30,0,0],"capture":false}));
     let before = s.doc.to_json();
     let pending = s.pending_moves.clone();
-    let error = s.execute("solid.extrude", &json!({"face":[40,15,20],"distance":5,"operation":"new"})).unwrap_err();
+    let error = s.execute("solid.extrude", &json!({"face":[64,5,20],"distance":5,"operation":"new"})).unwrap_err();
     assert!(error.to_string().contains("capture the source occurrence position"), "{error}");
     assert_eq!(s.doc.to_json(), before);
     assert_eq!(s.pending_moves, pending);
@@ -844,4 +846,64 @@ fn offset_face_distance_parameter_can_pass_through_zero() {
         let (v, t) = volume_and_top(&mut s);
         assert!((v - volume).abs() < 1e-6 && (t - top).abs() < 1e-6, "lift {lift}: {v} {t}");
     }
+}
+
+/// #22806: moving the top of a hollowed periodic-spline extrusion (2 shells: outer body and
+/// closed internal void) succeeds both outward (+2) and inward (-0.5) without touching or
+/// re-dropping the tightly-shrunk faces of the unmoved inner void shell.
+#[test]
+fn offset_face_moves_the_top_of_a_hollowed_periodic_spline_extrusion() {
+    let outline = [[50.0, 0.0], [37.9, 7.57], [0.0, 9.0], [-37.9, 7.57], [-50.0, 0.0], [-32.9, -6.57], [0.0, -11.0], [32.9, -6.57]];
+    for distance in [2.0_f64, -0.5_f64] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Outline"}));
+        run(&mut s, "sketch.spline.fit_point", json!({"points": outline, "periodic": true}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Outline", "distance": 10, "operation": "new", "body_name": "Part"}));
+        let (solid_volume, _) = volume_and_top(&mut s);
+        let section = solid_volume / 10.0;
+        run(&mut s, "solid.shell", json!({"faces": [], "thickness": 1, "body": "Part"}));
+        let (hollow_volume, _) = volume_and_top(&mut s);
+
+        run(&mut s, "solid.offset_face", json!({"faces": [[0, 0, 10]], "distance": distance, "body": "Part"}));
+        s.refresh();
+        assert!(
+            s.model.results.iter().all(|result| result.error.is_none() && result.warning.is_none()),
+            "distance {distance}: {:?}",
+            s.model.results
+        );
+        let state = s.model.state();
+        let body = &state.body("Part").unwrap().body;
+        assert_eq!(body.shell_count(), 2, "distance {distance}: outer shell + closed void");
+        assert_eq!(body.face_count(), 6, "distance {distance}: 3 outer + 3 inner faces");
+        assert!(body.validity().is_empty(), "distance {distance}: {:?}", body.validity());
+
+        let m = solidcraft_kernel::measure(body).unwrap();
+        let expected_volume = hollow_volume + distance * section;
+        assert!((m.volume - expected_volume).abs() < 1e-3, "distance {distance}: volume {} vs expected {expected_volume}", m.volume);
+        if (distance - 2.0).abs() < 1e-12 {
+            assert!((m.volume - 8080.997).abs() < 0.05, "outward +2 volume {}", m.volume);
+        }
+        assert!((m.bbox.max.z - (10.0 + distance)).abs() < 1e-5, "distance {distance}: top z {} vs {}", m.bbox.max.z, 10.0 + distance);
+        assert_eq!(
+            body.classify_point(Vec3::new(0.0, 0.0, 5.0)).unwrap(),
+            solidcraft_kernel::PointClass::Outside,
+            "distance {distance}: inner void must remain empty"
+        );
+        assert_eq!(
+            body.classify_point(Vec3::new(0.0, 0.0, 10.0 + distance - 0.25)).unwrap(),
+            solidcraft_kernel::PointClass::Inside,
+            "distance {distance}: moved top wall must be solid"
+        );
+    }
+}
+
+#[test]
+fn extruding_a_curved_face_points_to_offset_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20}));
+    let features = s.doc.features.len();
+    let error = s.execute("solid.extrude", &json!({"face": [10, 0, 10], "distance": 2})).unwrap_err();
+    assert!(error.to_string().contains("use Offset Face"), "{error}");
+    assert_eq!(s.doc.features.len(), features);
 }
