@@ -14556,6 +14556,14 @@ fn pattern_bodies(
     // Named against an index of the names in use: searching every body for every name tried
     // took time cubic in the copies.
     let mut names = BodyNames::new(st);
+    // Separate body copies own their cosmetic markings. Joined patterns need to resolve
+    // the resulting pieces before assigning markings, so keep their existing behavior.
+    let mut source_threads = BTreeMap::<String, Vec<ThreadInfo>>::new();
+    if matches!(&f.kind, FeatureKind::Pattern { join: false, .. }) {
+        for thread in &st.threads {
+            source_threads.entry(thread.body.clone()).or_default().push(thread.clone());
+        }
+    }
     let count = bodies.len();
     let mut skipped = Vec::new();
     let mut left_out = Vec::new();
@@ -14594,6 +14602,18 @@ fn pattern_bodies(
             let slot = pattern_name_slot(f.body_names.len(), count, mats.len(), s, k, f.pattern_names_in_order);
             let name = pattern_copy_name(&mut names, f, slot, &p.mb.name);
             copy_sheet(st, &p.mb.name, &name, &local);
+            if let Some(threads) = source_threads.get(&p.mb.name) {
+                for thread in threads {
+                    let mut marking = thread.clone();
+                    marking.feature = f.id;
+                    marking.body.clone_from(&name);
+                    marking.axis_point = crate::apply_point(&local, thread.axis_point);
+                    marking.axis = crate::apply_vector(&local, *thread.axis)
+                        .unit()
+                        .ok_or_else(|| DocError::Invalid("a patterned thread's axis cannot be placed".into()))?;
+                    st.threads.push(marking);
+                }
+            }
             let mut mb = ModelBody::traced_new(name, copy, f.id);
             // A copy is its source moved: it is drawn from the source's triangles and display plans,
             // moved, rather than meshed and planned again for every copy.

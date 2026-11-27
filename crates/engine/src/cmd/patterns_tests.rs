@@ -3544,6 +3544,43 @@ fn copies_of_a_tapped_hole_are_threaded() {
     assert_eq!(s.world_state().unwrap().threads.len(), 1, "only the original hole's thread");
 }
 
+/// #23252: a pattern of a body carries the cosmetic threads already present on that body.
+#[test]
+fn separate_body_pattern_copies_tapped_hole_markings() {
+    use solidcore_record::Vec3;
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Block"}));
+    for (x, y) in [(5, 5), (5, 15), (15, 5), (15, 15)] {
+        run(&mut s, "solid.hole", json!({"position": [x, y, 10], "thread": "M3", "depth": 6, "modeled": false}));
+    }
+    let original = s.world_state().unwrap().threads.clone();
+    assert_eq!(original.len(), 4);
+    let r = run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Block"], "dir1": [1, 0, 0], "count1": 4, "spacing1": 30}));
+    assert!(r["error"].is_null(), "{r}");
+    let world = s.world_state().unwrap();
+    assert_eq!(world.bodies.len(), 4);
+    assert_eq!(world.threads.len(), 16);
+    for k in 0..4 {
+        let name = &world.bodies[k].name;
+        let markings: Vec<_> = world.threads.iter().filter(|t| &t.body == name).collect();
+        assert_eq!(markings.len(), 4, "{name}");
+        for source in &original {
+            let expected = source.axis_point + Vec3::new(30.0 * k as f64, 0.0, 0.0);
+            assert!(
+                markings.iter().any(|t| t.axis_point.dist(expected) < 1e-6
+                    && t.axis == source.axis
+                    && t.designation == source.designation
+                    && t.start == source.start
+                    && t.end == source.end),
+                "{name}: {expected:?}"
+            );
+        }
+    }
+    let reply = run(&mut s, "model.threads", json!({}));
+    assert_eq!(reply["threads"].as_array().unwrap().len(), 16);
+}
+
 /// #16799: two holes placed from edges, mirrored together. The second hole's edge names mean the
 /// edges of the original body, which the first hole's copy has already cut into.
 #[test]
