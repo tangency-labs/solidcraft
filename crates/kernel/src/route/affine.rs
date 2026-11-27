@@ -65,7 +65,7 @@ pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2], Affin
 }
 
 /// The axes `x` and `y` of a frame whose normal runs along `d`: `y` along `v`'s part square to
-/// `d` and `x = y × d`, both unit. Refused for numbers not finite, no length, or a `v` whose part
+/// `d` and `x = y × unit(d)`, both unit. Refused for numbers not finite, no length, or a `v` whose part
 /// square to `d` is within its own rounding.
 pub fn frame_axes(d: [f64; 3], v: [f64; 3]) -> Result<[[f64; 3]; 2], AffineRefused> {
     match which(OpKind::Affine) {

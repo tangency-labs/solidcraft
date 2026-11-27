@@ -105,6 +105,11 @@ pub enum GrooveRefusal {
     /// each other), so no stretch has its whole section (brett19's point D on #22033 review 6).
     #[error("face {face} of the {part:?} part has its whole section nowhere along the joint: its ends lean past each other")]
     GrooveFaceNeverWhole { part: JointPart, face: usize },
+    /// Groove face `face` of a part is interrupted inside its span along the joint: a hole or
+    /// cut-out inside it (a second loop), or a notch in one of its edges along the joint (a run
+    /// with a gap, [`face_read`]), so its section is not whole all along (CodeRabbit on #22033).
+    #[error("face {face} of the {part:?} part has a hole, cut-out or notch: its section is not whole all along the joint")]
+    GrooveFaceInterrupted { part: JointPart, face: usize },
     /// Face `face` of a part (a groove face or its outer face) is a surface whose straightness
     /// along the joint the kernel cannot prove (no bound from [`Body::face_straying`]): it may be
     /// straight, but it is not taken unproved.
@@ -437,7 +442,8 @@ pub struct Stretch {
 /// [`GrooveRefusal::OuterFaceWrongSide`];
 /// [`GrooveRefusal::DirectionUndetermined`]; [`GrooveRefusal::DirectionUndecided`];
 /// [`GrooveRefusal::GrooveFaceNotStraight`] for a picked face not straight along the joint or a groove face with no length along it;
-/// [`GrooveRefusal::GrooveFaceNeverWhole`]; [`GrooveRefusal::GrooveFaceNotProved`];
+/// [`GrooveRefusal::GrooveFaceNeverWhole`]; [`GrooveRefusal::GrooveFaceInterrupted`];
+/// [`GrooveRefusal::GrooveFaceNotProved`];
 /// [`GrooveRefusal::Fill`] with the size that builds. The errors of the kernel calls otherwise, a
 /// fill's input the kernel refuses among them.
 pub fn groove_weld(picks: [&GroovePick<'_>; 2], options: &FillOptions) -> Result<GrooveWeld> {
@@ -453,15 +459,21 @@ pub fn groove_weld(picks: [&GroovePick<'_>; 2], options: &FillOptions) -> Result
 /// section (the stretches [`GrooveRefusal::SectionChanges`] names), for the app's "weld 0 to 60
 /// mm" (Q56).
 ///
+/// An `over` that reaches past its stretch by no more than the zone tolerance is held to the
+/// stretch, so the weld never runs past the plates' faces (CodeRabbit on #22033).
+///
 /// # Errors
-/// [`GrooveRefusal::SectionChanges`] for an `over` that is not within one such stretch, or no
-/// longer than the zone tolerance; otherwise as [`groove_weld`].
+/// [`GrooveRefusal::SectionChanges`] for an `over` that is not within one such stretch, or, held
+/// to it, no longer than the zone tolerance; otherwise as [`groove_weld`].
 pub fn groove_weld_over(picks: [&GroovePick<'_>; 2], options: &FillOptions, over: Stretch) -> Result<GrooveWeld> {
     let zone = zone_tolerance()?;
     let joint = cut(picks, zone)?;
-    let within = |s: &Stretch| s.from <= over.from + zone && over.to <= s.to + zone && over.to - over.from > zone;
+    let within = |s: &Stretch| s.from <= over.from + zone && over.to <= s.to + zone;
     match joint.stretches.iter().find(|(s, _)| within(s)) {
-        Some((_, walls)) => build(picks, &joint, over, walls, options, zone),
+        Some((s, walls)) => {
+            let held = Stretch { from: over.from.max(s.from), to: over.to.min(s.to) };
+            if held.to - held.from > zone { build(picks, &joint, held, walls, options, zone) } else { Err(joint.refusal()) }
+        }
         None => Err(joint.refusal()),
     }
 }
@@ -512,7 +524,7 @@ fn cut(picks: [&GroovePick<'_>; 2], zone: f64) -> Result<Joint> {
     let mut reads: [Vec<FaceRead>; 2] = [Vec::new(), Vec::new()];
     for (((pick, part), f), read) in picks.into_iter().zip(parts).zip(&faces).zip(&mut reads) {
         for &face in f {
-            match face_read(pick, face, &frame, d, zone)? {
+            match face_read(pick, part, face, &frame, d, zone)? {
                 Some(r) if r.span[1] - r.span[0] > zone => read.push(r),
                 Some(_) => return Err(GrooveRefusal::GrooveFaceNeverWhole { part, face }),
                 None => return Err(GrooveRefusal::GrooveFaceNotStraight { part, face }),
@@ -666,8 +678,8 @@ pub struct WeldNote {
     /// The note in weld words, sizes in mm.
     pub text: String,
     /// A warning: the tool shows it as one and tints the bead (a concave face below a plate's
-    /// surface all along the weld: an incompletely filled groove that ISO 5817 permits at no
-    /// quality level, see [`weld_note`]).
+    /// surface all along the weld: on the weld face an incompletely filled groove that ISO 5817
+    /// permits at no quality level, on the root side root concavity, see [`weld_note`]).
     pub warning: bool,
 }
 
@@ -693,6 +705,9 @@ fn face_name(side: FillSide) -> &'static str {
 /// which ISO 5817:2023 permits at no quality level: Table 1, no. 1.14 allows it only as short
 /// imperfections (subclauses 3.2 and 3.3: at most 25 mm in any 100 mm of weld, or a quarter of a
 /// weld shorter than that), at every level for plates over 3 mm and at D and C only for 0.5 to 3 mm.
+/// On the root side the same dip is root concavity (ISO 6520-1 no. 515), which ISO 5817 limits by
+/// plate thickness and quality level, all along a weld at some of them: still a warning, but not
+/// called 511 and not said to fail every level (CodeRabbit on #22033).
 fn weld_note(note: &FillNote, zone: f64) -> WeldNote {
     let (text, warning) = match *note {
         FillNote::DeeperThanChannel { asked, channel } => {
@@ -704,6 +719,15 @@ fn weld_note(note: &FillNote, zone: f64) -> WeldNote {
         FillNote::BuiltFlat { side, asked } => {
             (format!("the {} asked {asked:.2} mm high or deep is within the model tolerance: built flat", face_name(side)), false)
         }
+        FillNote::BelowToes { side: FillSide::Second, depth, below: [left, right], .. } if left > zone || right > zone => (
+            format!(
+                "the concave {} dips {depth:.2} mm below the chord, {left:.2} mm below the left plate's root-side surface and \
+                 {right:.2} mm below the right one's, all along the weld: root concavity (ISO 6520-1 no. 515); check its depth \
+                 against ISO 5817's limit for the plate thickness and quality level",
+                face_name(FillSide::Second)
+            ),
+            true,
+        ),
         FillNote::BelowToes { side, depth, below: [left, right], .. } if left > zone || right > zone => (
             format!(
                 "the concave {} dips {depth:.2} mm below the chord, {left:.2} mm below the left plate's surface and {right:.2} mm \
@@ -784,15 +808,23 @@ struct FaceRead {
 ///
 /// Its section: the one line or arc its other edges (its ends) read across the joint
 /// ([`Body::planar_edges`]: its ends square to the joint), all reads the same within their
-/// tolerance; else, for a plane, the line between its two runs. `None` for a face with no long
-/// edge.
-fn face_read(pick: &GroovePick<'_>, face: usize, frame: &Plane, d: [f64; 3], zone: f64) -> Result<Option<FaceRead>> {
+/// tolerance; else (no end square, or an end read in pieces), for a plane, the line between its
+/// two runs. `None` for a face with no long edge.
+///
+/// # Errors
+/// [`GrooveRefusal::GrooveFaceInterrupted`] for a face with a hole or cut-out inside it (more than
+/// one loop) or a run with a gap along the joint (a notch in its edge): the span from its runs
+/// would sweep its section across the gap (CodeRabbit on #22033). The errors of the kernel calls.
+fn face_read(pick: &GroovePick<'_>, part: JointPart, face: usize, frame: &Plane, d: [f64; 3], zone: f64) -> Result<Option<FaceRead>> {
     let tol = zone * ALLOWANCE;
     let o = point(frame.origin);
     let edges = pick.part.rim_edges(&[face])?;
     let record = pick.part.record();
-    // each run along the joint: its point in the frame and how far it reaches along d
-    let mut runs: Vec<(Vec2, [f64; 2])> = Vec::new();
+    if record.faces.get(face).is_some_and(|f| f.loops.len() > 1) {
+        return Err(GrooveRefusal::GrooveFaceInterrupted { part, face });
+    }
+    // each run along the joint: its point in the frame and how far each of its edges reaches along d
+    let mut runs: Vec<(Vec2, Vec<[f64; 2]>)> = Vec::new();
     // the edges across the joint (its ends), read for its section below
     let mut ends: Vec<usize> = Vec::new();
     for &e in &edges {
@@ -807,18 +839,33 @@ fn face_read(pick: &GroovePick<'_>, face: usize, frame: &Plane, d: [f64; 3], zon
         }
         let reach = [s.min(t), s.max(t)];
         match runs.iter_mut().find(|(x, _)| near(*x, at(p), tol)) {
-            Some((_, r)) => *r = [r[0].min(reach[0]), r[1].max(reach[1])],
-            None => runs.push((at(p), reach)),
+            Some((_, r)) => r.push(reach),
+            None => runs.push((at(p), vec![reach])),
         }
     }
     if runs.is_empty() {
         return Ok(None);
     }
-    let span = runs.iter().fold([f64::NEG_INFINITY, f64::INFINITY], |[lo, hi], &(_, [a, b])| [lo.max(a), hi.min(b)]);
+    // each run's edges end to end; a gap between them is a notch in the face's edge
+    let mut whole: Vec<(Vec2, [f64; 2])> = Vec::new();
+    for (x, reaches) in &mut runs {
+        reaches.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        let Some((&first, rest)) = reaches.split_first() else { continue };
+        let mut run = first;
+        for r in rest {
+            if r[0] > run[1] + tol {
+                return Err(GrooveRefusal::GrooveFaceInterrupted { part, face });
+            }
+            run[1] = run[1].max(r[1]);
+        }
+        whole.push((*x, run));
+    }
+    let span = whole.iter().fold([f64::NEG_INFINITY, f64::INFINITY], |[lo, hi], &(_, [a, b])| [lo.max(a), hi.min(b)]);
     let agree = pick.part.planar_edges_tolerance().max(zone);
     let segs: Vec<Seg2> = pick.part.planar_edges(frame, &ends).into_iter().flatten().filter_map(|p| one_seg(&p)).collect();
-    let section = match (segs.split_first(), runs.as_slice()) {
-        (Some((a, rest)), _) => rest.iter().all(|b| same(a, b, agree)).then_some(*a),
+    let from_ends = segs.split_first().and_then(|(a, rest)| rest.iter().all(|b| same(a, b, agree)).then_some(*a));
+    let section = match (from_ends, whole.as_slice()) {
+        (Some(s), _) => Some(s),
         (None, [(a, _), (b, _)]) if pick.part.face_plane_normal(face)?.is_some() => Some(Seg2::Line { a: *a, b: *b }),
         _ => None,
     };
@@ -879,10 +926,22 @@ fn same(a: &Seg2, b: &Seg2, tol: f64) -> bool {
     let ends_agree = (near(a0, b0, tol) && near(a1, b1, tol)) || (near(a0, b1, tol) && near(a1, b0, tol));
     let kind_agrees = match (a, b) {
         (Seg2::Line { .. }, Seg2::Line { .. }) => true,
-        (Seg2::Arc { center: c, radius: r, .. }, Seg2::Arc { center: k, radius: q, .. }) => near(*c, *k, tol) && (r - q).abs() <= tol,
+        (Seg2::Arc { center: c, radius: r, start: s0, sweep: w0 }, Seg2::Arc { center: k, radius: q, start: s1, sweep: w1 }) => {
+            near(*c, *k, tol) && (r - q).abs() <= tol && same_turn((*s0, *w0), (*s1, *w1), tol / r.max(tol))
+        }
         _ => false,
     };
     ends_agree && kind_agrees
+}
+
+/// Whether two arcs of one circle turn over the same angles, either way round: each one's start
+/// and sweep taken counter-clockwise, compared within `eps` radians. Two halves of one circle have
+/// the same ends, centre and radius, but not the same start (CodeRabbit on #22033).
+fn same_turn((s0, w0): (f64, f64), (s1, w1): (f64, f64), eps: f64) -> bool {
+    let ccw = |s: f64, w: f64| if w < 0.0 { (s + w, -w) } else { (s, w) };
+    let ((a, u), (b, v)) = (ccw(s0, w0), ccw(s1, w1));
+    let off = (a - b).rem_euclid(std::f64::consts::TAU);
+    (u - v).abs() <= eps && (off <= eps || off >= std::f64::consts::TAU - eps)
 }
 
 /// The same line or arc the other way round.

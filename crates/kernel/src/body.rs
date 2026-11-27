@@ -3073,6 +3073,7 @@ pub fn straight_direction(faces: &[(&Body, usize)]) -> Result<solidcore_ops::mea
 fn ops_failure(what: &str, e: solidcore_ops::Error) -> KernelError {
     match e {
         solidcore_ops::Error::Argument => KernelError::Invalid(format!("{what}: {e}")),
+        solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("{what}: {message}")),
         e => KernelError::Failed(format!("{what}: {e}")),
     }
 }

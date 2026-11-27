@@ -55,6 +55,7 @@ pub fn fill_channel(
     crate::guard("channel fill", || {
         solidcore_ops::prism::fill_channel(left, right, depth_normal, options).map_err(|e| match e {
             solidcore_ops::Error::Refused { .. } | solidcore_ops::Error::Argument => KernelError::Invalid(format!("channel fill: {e}")),
+            solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("channel fill: {message}")),
             e => KernelError::Failed(format!("channel fill: {e}")),
         })
     })

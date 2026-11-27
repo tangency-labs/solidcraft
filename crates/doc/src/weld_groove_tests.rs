@@ -10,9 +10,11 @@
 //! volumes in closed form), a fill the groove cannot take refused with the size that builds; parts
 //! of different length, a gap that steps along the joint and a plate whose ends lean (both, or one
 //! with the other square) refused with the stretches that keep one section, each of which builds on
-//! its own; a wall whose runs never overlap refused as never whole; a pick off the chain refused
-//! naming it; the fill's notes and refusals in weld words (ISO 6520-1 no. 511 as a warning, full
-//! penetration). Ported from the second groove PR's first slice (solidcore `weld::groove::joint`,
+//! its own; a wall whose runs never overlap refused as never whole; a wall with a hole or a notch
+//! refused as interrupted; a square end read in two pieces and a stretch asked a hair past its ends
+//! still built as they should; two halves of one circle not taken for one section; a pick off the
+//! chain refused naming it; the fill's notes and refusals in weld words (ISO 6520-1 no. 511 as a
+//! warning on the weld face, no. 515 on the root side, full penetration). Ported from the second groove PR's first slice (solidcore `weld::groove::joint`,
 //! never pushed) onto ops reads, now through the kernel interface (#18500).
 
 use std::f64::consts::{FRAC_PI_2, TAU};
@@ -717,4 +719,92 @@ fn a_y_groove_takes_its_direction_from_a_plane_pair() {
     }
     let got = straight_direction(&reads).unwrap();
     assert!(matches!(got, Straight::Along { by: StraightBy::Planes(..), .. }), "{got:?}");
+}
+
+/// The I groove's left plate (gap 1 with a right wall at x = 0.5, 8 mm plates).
+fn i_groove_left() -> Body {
+    plate(&[(-40.0, 0.0), (-40.0, -8.0), (-0.5, -8.0), (-0.5, 0.0)])
+}
+
+/// A right plate swept 39.5 along x from x = 0.5, from the region of `outline` (y, z) less `holes`:
+/// its wall is the face at x = 0.5, facing -x.
+fn along_x(outline: &[(f64, f64)], holes: &[&[(f64, f64)]]) -> Body {
+    let plane = Plane { origin: Vec3::new(0.5, 0.0, 0.0), x: Vec3::new(0.0, 1.0, 0.0), y: Vec3::new(0.0, 0.0, 1.0) };
+    let poly = |c: &[(f64, f64)]| Loop2::polygon(&c.iter().map(|&(x, y)| Vec2::new(x, y)).collect::<Vec<_>>());
+    let region = Region2 { outer: poly(outline), holes: holes.iter().map(|&h| poly(h)).collect() };
+    extrude_planar_regions(&plane, &[region], 0.0, 39.5).unwrap()
+}
+
+/// The I groove with `right` as its right plate: the parts and each one's wall.
+fn i_groove_with(right: Body) -> ([Body; 2], [Vec<usize>; 2]) {
+    let left = i_groove_left();
+    let (lf, rf) = (facing(&left, [1.0, 0.0, 0.0]), facing(&right, [-1.0, 0.0, 0.0]));
+    assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
+    ([left, right], [lf, rf])
+}
+
+/// CodeRabbit on #22033: a concave root-side face below the plates' root-side surfaces is root
+/// concavity (ISO 6520-1 no. 515), still a warning, but not an incompletely filled groove (511)
+/// and not said to fail every quality level.
+#[test]
+fn a_concave_root_side_face_is_root_concavity_not_an_incompletely_filled_groove() {
+    let (parts, faces) = y_groove();
+    let through = FillOptions { face: Contour::Flat, second_face: Some(Contour::Concave { depth: 0.3 }), depth: Some(20.0) };
+    let notes = weld(&parts, &faces, &through).unwrap().notes();
+    let root = notes.iter().find(|n| n.text.contains("root-side weld face dips")).unwrap_or_else(|| panic!("no root-side note: {notes:?}"));
+    assert!(root.warning && root.text.contains("root concavity (ISO 6520-1 no. 515)"), "{root:?}");
+    assert!(notes.iter().all(|n| !n.text.contains("no. 511") && !n.text.contains("no quality level")), "{notes:?}");
+}
+
+/// CodeRabbit on #22033 (major): an I groove whose right plate has a square hole through it along
+/// x, 50 to 70 along the joint: its wall has a second loop, so it is not whole all along its span
+/// and is refused, not swept across the hole.
+#[test]
+fn a_wall_with_a_hole_inside_is_refused_as_interrupted() {
+    let right = along_x(&[(-8.0, 0.0), (0.0, 0.0), (0.0, 120.0), (-8.0, 120.0)], &[&[(-5.0, 50.0), (-5.0, 70.0), (-3.0, 70.0), (-3.0, 50.0)]]);
+    let (parts, faces) = i_groove_with(right);
+    let got = weld(&parts, &faces, &flat()).unwrap_err();
+    assert_eq!(got, GrooveRefusal::GrooveFaceInterrupted { part: JointPart::Right, face: faces[1][0] });
+}
+
+/// The same with a notch 2 deep cut into the right plate's top, 40 to 60 along the joint: one loop,
+/// but the wall's toe run has a gap, so it is refused as interrupted.
+#[test]
+fn a_wall_with_a_notch_in_its_edge_is_refused_as_interrupted() {
+    let right = along_x(&[(-8.0, 0.0), (0.0, 0.0), (0.0, 40.0), (-2.0, 40.0), (-2.0, 60.0), (0.0, 60.0), (0.0, 120.0), (-8.0, 120.0)], &[]);
+    let (parts, faces) = i_groove_with(right);
+    let got = weld(&parts, &faces, &flat()).unwrap_err();
+    assert_eq!(got, GrooveRefusal::GrooveFaceInterrupted { part: JointPart::Right, face: faces[1][0] });
+}
+
+/// CodeRabbit on #22033: the right wall's square end at z = 0 is two collinear edges, so its reads
+/// disagree; the wall is a plane, so its section is the line between its runs and the whole joint
+/// builds: the gap 1 times 8 times 120.
+#[test]
+fn a_square_end_read_in_two_pieces_still_gives_the_wall_its_section() {
+    let right = along_x(&[(-8.0, 0.0), (-4.0, 0.0), (0.0, 0.0), (0.0, 120.0), (-8.0, 120.0)], &[]);
+    let (parts, faces) = i_groove_with(right);
+    let volume = weld(&parts, &faces, &flat()).unwrap().body.volume_at(1e-9).unwrap();
+    assert!((volume - 960.0).abs() <= 1e-6 * volume, "{volume} != 960");
+}
+
+/// CodeRabbit on #22033: the parts of different length, welded over their stretch asked half a zone
+/// tolerance past each end: the weld is held to the stretch, 0 to 100, not past the plates' faces.
+#[test]
+fn a_stretch_asked_a_hair_past_its_ends_is_held_to_them() {
+    let (parts, faces) = y_groove_of(100.0);
+    let z = zone();
+    let built = weld_over(&parts, &faces, -z / 2.0, 100.0 + z / 2.0).unwrap();
+    let (lo, hi) = bounds(&built.body);
+    assert!(lo[2] >= -1e-6 && hi[2] <= 100.0 + 1e-6, "{lo:?} {hi:?}");
+}
+
+/// CodeRabbit on #22033 (major): two halves of one circle have the same ends, centre and radius, but
+/// are not one section; an arc and itself the other way round are.
+#[test]
+fn two_halves_of_one_circle_are_not_one_section() {
+    let half = |start: f64| Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: 8.0, start, sweep: std::f64::consts::PI };
+    let (upper, lower) = (half(0.0), half(std::f64::consts::PI));
+    assert!(!same(&upper, &lower, 1e-9));
+    assert!(same(&upper, &upper, 1e-9) && same(&upper, &reversed(&upper), 1e-9));
 }
