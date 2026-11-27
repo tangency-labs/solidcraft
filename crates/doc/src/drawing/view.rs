@@ -30,7 +30,7 @@
 //! view is placed at a point; an auxiliary view's side is a direction of about unit length; a view
 //! lined up with its parent is on the parent's sheet; a section view is placed at a point, and its
 //! cutting line keeps [`CuttingLine::new`]'s rules; a view's place is on paper
-//! ([`is_paper_coordinate`]); a view's occurrence paths keep [`check_occurrence_paths`]; at most
+//! ([`is_paper_coordinate`]); a view's occurrence paths keep [`check_occurrence_paths`], and its hidden bodies [`check_hidden_bodies`]; at most
 //! [`MAX_VIEWS`] views, listed by id ([`Drawing::add_views`]).
 
 use std::collections::BTreeSet;
@@ -39,6 +39,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Plane, Vec2, Vec3};
 use solidcraft_geom::cell::{Projection, check_label};
+use solidcraft_geom::drawing_detail::Boundary;
 use solidcraft_geom::drawing_sheet::view_letter;
 use solidcraft_geom::drawing_view::{ProjectedSide, Scale, is_paper_coordinate, projected_basis};
 use solidcraft_geom::paper::MAX_SIDE_MM;
@@ -46,11 +47,12 @@ use solidcraft_geom::paper::line::LineGroup;
 use solidcraft_render::VisualStyle;
 
 use super::cutting_line::CuttingLine;
+use super::dimension::{ModelEdge, check_edge};
 use super::fold::{auxiliary_basis, pictorial_basis};
 use super::{Drawing, add_by_id, in_id_order, require};
 use crate::drawing_view::{
-    Exploded, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose, TangentEdges, ViewConfiguration,
-    ViewDirection, ViewOverrides, ViewSettings,
+    Exploded, HiddenBodies, HiddenBody, MAX_JOINT_VALUES, MAX_POSE_JOINTS, MAX_POSE_VALUE, MAX_REFERENCE_SHOWN_PERCENT, OccurrencePaths, Pose, Shows,
+    TangentEdges, ViewConfiguration, ViewDirection, ViewOverrides, ViewSettings,
 };
 use crate::{DocError, MAX_PLACEMENT_DEPTH, Result, ids};
 
@@ -58,10 +60,14 @@ use crate::{DocError, MAX_PLACEMENT_DEPTH, Result, ids};
 pub const MAX_VIEWS: usize = 4096;
 /// The most views in a chain, from a base view down through the views projected from it.
 pub const MAX_VIEW_DEPTH: usize = 32;
+/// The most edge references excluded from automatic centre marks on one view.
+pub const MAX_MARK_EXCLUSIONS: usize = 10_000;
 /// Occurrence paths a view's `occurrences` or `hide` may hold, each.
 pub const MAX_PATHS: usize = 1_000;
 /// Ids a view's `occurrences` and `hide` may hold in all.
 pub const MAX_PATH_IDS: usize = 4_096;
+/// Characters a body name in a view's `hide_bodies` may hold, as a body's own name does.
+pub const MAX_BODY_NAME: usize = 128;
 
 /// One view of a drawing.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -82,10 +88,22 @@ pub struct View {
     /// parts, each side on its own: 0 to [`MAX_REFERENCE_SHOWN_PERCENT`], each view its own.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub reference_shown_percent: f64,
+    /// An opt-in rule for automatic centre marks, with persistent exclusions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centre_marks: Option<AutoMarks>,
     /// Its label (#13044), from when it is first placed apart from its projection place
     /// ([`Drawing::give_letter`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<ViewLabel>,
+}
+
+/// Automatic centre marks on a view. Only the rule and exclusions are saved; the marks are derived.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AutoMarks {
+    /// Persistent source edges excluded from this view. Lost references remain here.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<ModelEdge>,
 }
 
 /// The most letters a view's letter has: `ZZZ` is the last one given.
@@ -93,6 +111,8 @@ pub const MAX_LETTERS: usize = 3;
 /// What a new label prints before its letter: English capitals, as a new parts list's headings are,
 /// typed over after.
 pub const VIEW_WORDS: &str = "VIEW";
+/// What a detail view's label prints before its letter when made.
+pub const DETAIL_WORDS: &str = "DETAIL";
 /// What a new label prints before its scale.
 pub const SCALE_WORDS: &str = "SCALE";
 
@@ -227,6 +247,13 @@ pub enum ViewKind {
         parent: u64,
         toward: [f64; 2],
     },
+    /// A region of `parent` inside `boundary`, drawn again at its own scale and placed apart: the
+    /// parent shows the boundary and the detail's letter, the detail what lies inside it.
+    Detail {
+        #[serde(with = "crate::ids")]
+        parent: u64,
+        boundary: DetailBoundary,
+    },
     /// The flat pattern of sheet-metal body `body` of the design of `source` (#13030), turned `turn`.
     Flat {
         #[serde(with = "crate::ids")]
@@ -245,6 +272,7 @@ impl ViewKind {
             ViewKind::Section { .. } => "section",
             ViewKind::Pictorial { .. } => "pictorial",
             ViewKind::Auxiliary { .. } => "auxiliary",
+            ViewKind::Detail { .. } => "detail",
             ViewKind::Flat { .. } => "flat",
         }
     }
@@ -258,7 +286,8 @@ impl ViewKind {
             ViewKind::Projected { parent, .. }
             | ViewKind::Section { parent, .. }
             | ViewKind::Pictorial { parent, .. }
-            | ViewKind::Auxiliary { parent, .. } => Some(*parent),
+            | ViewKind::Auxiliary { parent, .. }
+            | ViewKind::Detail { parent, .. } => Some(*parent),
         }
     }
 
@@ -267,7 +296,7 @@ impl ViewKind {
     /// command puts it.
     pub fn beside(&self) -> Option<Beside> {
         match self {
-            ViewKind::Base { .. } | ViewKind::Flat { .. } | ViewKind::Section { .. } | ViewKind::Auxiliary { .. } => None,
+            ViewKind::Base { .. } | ViewKind::Flat { .. } | ViewKind::Section { .. } | ViewKind::Auxiliary { .. } | ViewKind::Detail { .. } => None,
             ViewKind::Projected { side, .. } => Some(Beside::Side(*side)),
             ViewKind::Pictorial { diagonal, .. } => Some(Beside::Diagonal(*diagonal)),
         }
@@ -278,7 +307,11 @@ impl ViewKind {
         match self {
             ViewKind::Base { .. } => Some("a base view"),
             ViewKind::Flat { .. } => Some("a flat pattern view"),
-            ViewKind::Projected { .. } | ViewKind::Section { .. } | ViewKind::Pictorial { .. } | ViewKind::Auxiliary { .. } => None,
+            ViewKind::Projected { .. }
+            | ViewKind::Section { .. }
+            | ViewKind::Pictorial { .. }
+            | ViewKind::Auxiliary { .. }
+            | ViewKind::Detail { .. } => None,
         }
     }
 }
@@ -474,6 +507,10 @@ pub struct ResolvedView {
     pub occurrences: Setting<Option<OccurrencePaths>>,
     /// The subtrees it leaves out: none when None.
     pub hide: Setting<Option<OccurrencePaths>>,
+    /// The bodies of its parts it leaves out, each on its own: none when None.
+    pub hide_bodies: Setting<Option<HiddenBodies>>,
+    /// Which bodies it draws: every one, or only those the design shows (#22107).
+    pub shows: Setting<Shows>,
     /// The line group its lines are drawn in: the chain's, else its sheet's, else the drawing's.
     pub line_group: Setting<LineGroup>,
     pub reference_shown_percent: f64,
@@ -485,6 +522,30 @@ pub struct ResolvedView {
     pub configuration: Setting<ViewConfiguration>,
     /// A flat pattern view's body and turn; none for a view of the model.
     pub flat: Option<FlatOf>,
+    /// A detail view's region of its parent, on the parent's plane: none for any other view.
+    pub detail: Option<Boundary>,
+}
+
+/// A detail view's region of its parent, in the parent's plane coordinates (model millimetres
+/// along the view's x and y), as saved.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
+pub enum DetailBoundary {
+    /// The disc of `radius` round `centre`.
+    Circle { centre: [f64; 2], radius: f64 },
+    /// The rectangle from corner `min` to corner `max`, its sides along the view's x and y.
+    Rectangle { min: [f64; 2], max: [f64; 2] },
+}
+
+impl DetailBoundary {
+    /// The region as geometry, refused when it isn't one ([`Boundary`]'s rules).
+    pub fn geometry(&self) -> Result<Boundary> {
+        let made = match *self {
+            DetailBoundary::Circle { centre, radius } => Boundary::circle(Vec2::from(centre), radius),
+            DetailBoundary::Rectangle { min, max } => Boundary::rectangle(Vec2::from(min), Vec2::from(max)),
+        };
+        made.map_err(|e| DocError::Invalid(format!("a detail view's boundary: {e}")))
+    }
 }
 
 fn is_zero(v: &f64) -> bool {
@@ -502,7 +563,7 @@ impl View {
     pub fn needs_letter(&self) -> bool {
         matches!(
             (&self.kind, self.place),
-            (ViewKind::Projected { .. }, ViewPlace::At(_)) | (ViewKind::Section { .. } | ViewKind::Auxiliary { .. }, _)
+            (ViewKind::Projected { .. }, ViewPlace::At(_)) | (ViewKind::Section { .. } | ViewKind::Auxiliary { .. } | ViewKind::Detail { .. }, _)
         )
     }
 }
@@ -519,6 +580,21 @@ pub fn check_occurrence_paths(occurrences: &[Vec<u64>], hide: &[Vec<u64>]) -> Re
         format!("an occurrence path is 1..{MAX_PLACEMENT_DEPTH} ids")
     })?;
     require(hide.iter().all(|path| !path.is_empty()), || "hide [] would leave out the design's own bodies: give source instead".into())
+}
+
+/// What bodies a view's `hide_bodies` may leave out, saved or asked for: at most [`MAX_PATHS`]
+/// entries and [`MAX_PATH_IDS`] ids in all, no path deeper than an assembly goes, each body named in
+/// 1 to [`MAX_BODY_NAME`] characters. The bodies aren't checked against the design here: one deleted
+/// or renamed later matches nothing, and the view draws what is left.
+pub fn check_hidden_bodies(bodies: &[HiddenBody]) -> Result<()> {
+    let ids = bodies.iter().map(|b| b.path.len()).fold(0usize, usize::saturating_add);
+    require(bodies.len() <= MAX_PATHS && ids <= MAX_PATH_IDS, || {
+        format!("at most {MAX_PATHS} bodies in hide_bodies, and {MAX_PATH_IDS} ids in all")
+    })?;
+    require(bodies.iter().all(|b| b.path.len() <= MAX_PLACEMENT_DEPTH), || format!("a hide_bodies path is 0..{MAX_PLACEMENT_DEPTH} ids"))?;
+    require(bodies.iter().all(|b| !b.body.is_empty() && b.body.chars().count() <= MAX_BODY_NAME), || {
+        format!("a hide_bodies body is named in 1 to {MAX_BODY_NAME} characters")
+    })
 }
 
 /// What a view's position may hold, saved or asked for: 1 to [`MAX_POSE_JOINTS`] joints, each once,
@@ -646,12 +722,21 @@ impl Drawing {
         require(percent.is_finite() && (0.0..=MAX_REFERENCE_SHOWN_PERCENT).contains(&percent), || {
             format!("its reference_shown_percent is 0 to {MAX_REFERENCE_SHOWN_PERCENT}")
         })?;
+        if let Some(rule) = &view.centre_marks {
+            require(rule.exclude.len() <= MAX_MARK_EXCLUSIONS, || format!("a view has at most {MAX_MARK_EXCLUSIONS} centre mark exclusions"))?;
+            let mut seen = BTreeSet::new();
+            for edge in &rule.exclude {
+                check_edge(edge)?;
+                require(seen.insert((&edge.body, edge.origin_feature, &edge.path, &edge.name)), || "a centre mark exclusion is listed twice".into())?;
+            }
+        }
         let place = match view.place {
             ViewPlace::At([x, y]) => is_paper_coordinate(x) && is_paper_coordinate(y),
             ViewPlace::Aligned(along) => is_paper_coordinate(along),
         };
         require(place, || format!("its place is at most {MAX_SIDE_MM} mm from the sheet's origin"))?;
         check_occurrence_paths(view.settings.occurrences.as_deref().unwrap_or_default(), view.settings.hide.as_deref().unwrap_or_default())?;
+        check_hidden_bodies(view.settings.hide_bodies.as_deref().unwrap_or_default())?;
         view.settings.pose.as_ref().map_or(Ok(()), check_pose)?;
         if let Some(label) = &view.label {
             let letter = (1..=MAX_LETTERS).contains(&label.letter.len()) && label.letter.bytes().all(|b| b.is_ascii_uppercase());
@@ -698,6 +783,13 @@ impl Drawing {
                 })?;
                 require(matches!(view.place, ViewPlace::At(_)), || "an auxiliary view is placed at a point: it isn't lined up with its parent".into())
             }
+            ViewKind::Detail { parent, boundary } => {
+                self.chain_of(view.id)?;
+                self.can_detail(*parent)?;
+                boundary.geometry()?;
+                require(view.settings.scale.is_some(), || "a detail view has a scale of its own".into())?;
+                require(matches!(view.place, ViewPlace::At(_)), || "a detail view is placed at a point: it isn't lined up with its parent".into())
+            }
         }
     }
 
@@ -711,7 +803,17 @@ impl Drawing {
         let pictorial = matches!(chain.first().map(|view| &view.kind), Some(ViewKind::Pictorial { .. }));
         require(!pictorial, || "not supported yet: a view projected from a pictorial view".into())?;
         let flat = matches!(chain.last().map(|end| &end.kind), Some(ViewKind::Flat { .. }));
-        require(!flat, || "not supported yet: a view made from a flat pattern view".into())
+        require(!flat, || "not supported yet: a view made from a flat pattern view".into())?;
+        let detail = matches!(chain.first().map(|view| &view.kind), Some(ViewKind::Detail { .. }));
+        require(!detail, || "not supported yet: a view made from a detail view".into())
+    }
+
+    /// Whether a detail view can be made of view `parent`: one a view can be made from
+    /// ([`Self::can_project_from`]), but not a section view yet, whose cut a detail doesn't keep.
+    pub fn can_detail(&self, parent: u64) -> Result<()> {
+        self.can_project_from(parent)?;
+        let section = matches!(self.view(parent).map(|view| &view.kind), Some(ViewKind::Section { .. }));
+        require(!section, || "not supported yet: a detail of a section view".into())
     }
 
     /// The rules of a view that ends a chain, a base or flat pattern view: it draws one of the
@@ -737,9 +839,12 @@ impl Drawing {
             _ => return Err(DocError::Invalid(format!("view {} has no base view", ids::encode(id)))),
         };
         let mut cut = None;
+        let mut detail = None;
         for view in chain.iter().rev() {
             match &view.kind {
                 ViewKind::Base { .. } | ViewKind::Flat { .. } => {}
+                // The parent's basis: only the view itself shows the region.
+                ViewKind::Detail { boundary, .. } => detail = (view.id == id).then(|| boundary.geometry()).transpose()?,
                 ViewKind::Projected { side, .. } => basis = Beside::Side(*side).basis(&basis, self.projection)?,
                 ViewKind::Pictorial { diagonal, .. } => basis = Beside::Diagonal(*diagonal).basis(&basis, self.projection)?,
                 ViewKind::Section { line, .. } => {
@@ -769,12 +874,15 @@ impl Drawing {
             tangent_edges: or_default(&chain, |s| s.tangent_edges, defaults.tangent_edges),
             occurrences: or_default(&chain, |s| s.occurrences.clone().map(Some), None),
             hide: or_default(&chain, |s| s.hide.clone().map(Some), None),
+            hide_bodies: or_default(&chain, |s| s.hide_bodies.clone().map(Some), None),
+            shows: or_default(&chain, |s| s.shows, Shows::All),
             line_group,
             reference_shown_percent: chain.first().map_or(0.0, |view| view.reference_shown_percent),
             exploded: or_default(&chain, |s| s.exploded, Exploded::Assembled),
             pose: or_default(&chain, |s| s.pose.clone(), Pose::Designed),
             configuration: or_default(&chain, |s| s.configuration, ViewConfiguration::Active),
             flat,
+            detail,
         })
     }
 
@@ -795,7 +903,8 @@ impl Drawing {
                     | ViewKind::Flat { .. }
                     | ViewKind::Section { .. }
                     | ViewKind::Pictorial { .. }
-                    | ViewKind::Auxiliary { .. },
+                    | ViewKind::Auxiliary { .. }
+                    | ViewKind::Detail { .. },
                 ) => {
                     return Err(DocError::Invalid(format!("{} view {} isn't placed at a point", view.kind.name(), ids::encode(view.id))));
                 }
@@ -863,6 +972,18 @@ impl Drawing {
         }
         self.view_letters = given;
         Ok(())
+    }
+
+    /// Names detail view `id`'s label [`DETAIL_WORDS`] in place of [`VIEW_WORDS`], as ISO 128-30
+    /// names a detail (`DETAIL A`); a label with words of its own keeps them.
+    pub fn name_detail(&mut self, id: u64) {
+        let Some(view) = self.view_index(id).and_then(|at| self.views.get_mut(at)) else { return };
+        if !matches!(view.kind, ViewKind::Detail { .. }) {
+            return;
+        }
+        if let Some(label) = Arc::make_mut(view).label.as_mut().filter(|label| label.words == VIEW_WORDS) {
+            label.words = DETAIL_WORDS.into();
+        }
     }
 
     /// What view `id`'s label reads, a line for each part shown: its words and letter (`VIEW B`), its

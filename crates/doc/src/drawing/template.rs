@@ -13,7 +13,8 @@
 //! The built-ins ([`BUILT_INS`]) are made in code when asked for, never stored: ISO A4 to A0, each
 //! for a part and for an assembly, one sheet with the ISO border and the built-in title block
 //! ([`default_block`](title_block::default_block)), the kind's general tolerances typed over its
-//! cell ([`PART_NOTE`], [`ASSEMBLY_NOTE`]). A part's drawing starts from ISO A3 and an assembly's from
+//! cell ([`PART_NOTE`], [`ASSEMBLY_NOTE`]) and its document type over its type cell ([`PART_TYPE`],
+//! [`ASSEMBLY_TYPE`]). A part's drawing starts from ISO A3 and an assembly's from
 //! ISO A2 ([`default_for`]). A drawing saved as a template replaces or changes them: a copy of a
 //! built-in with a company's changes, its own note among them, is a template like any other. A later
 //! built-in never changes a drawing made from an earlier one: a drawing keeps copies, never names.
@@ -28,8 +29,11 @@ use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile, Orientation, Pa
 use solidcraft_geom::revision::RevisionRecord;
 use solidcraft_geom::title_block::{self, CellKind, TitleBlock};
 
-use super::Drawing;
 use super::image::ImageFile;
+use super::note::Anchor;
+use super::sketch::Owner;
+use super::table::Kind;
+use super::{Drawing, FillPaint, SheetComponent};
 use crate::format::DRAWING;
 use crate::ids::{self, IdSource};
 use crate::{DocError, Document, Result};
@@ -59,6 +63,10 @@ pub const PART_NOTE: &str = "Unless stated: linear ±0.2 mm, angles ±0.5°. Bre
 pub const ASSEMBLY_NOTE: &str = "Unless stated: assembled positions ±0.5 mm, angles ±1°. Part tolerances are on the part drawings.";
 /// The title block cell the notes are typed over.
 const TOLERANCES_CELL: &str = "general_tolerances";
+/// What a part's built-ins and an assembly's call their document, typed over the block's type cell.
+pub const PART_TYPE: &str = "Part drawing";
+pub const ASSEMBLY_TYPE: &str = "Assembly drawing";
+const TYPE_CELL: &str = "document_type";
 
 /// The built-in a new drawing starts from when nothing else is chosen: ISO A3 for a part, ISO A2 for
 /// an assembly.
@@ -66,9 +74,14 @@ pub fn default_for(assembly: bool) -> &'static str {
     if assembly { "iso-a2-assembly" } else { "iso-a3-part" }
 }
 
-/// Whether `doc`'s drawings are an assembly's, for the template they start from: it places components.
+/// Whether `doc`'s drawings are an assembly's: it places two or more components, or one beside a
+/// body of its own. A STEP file of one part opens as one component (#19753).
 pub fn is_assembly(doc: &Document) -> bool {
-    !doc.occurrences.is_empty()
+    match doc.occurrences.len() {
+        0 => false,
+        1 => doc.features.iter().any(|f| f.component == 0 && !matches!(f.kind, crate::FeatureKind::Sketch { .. }) && !f.kind.is_construction()),
+        _ => true,
+    }
 }
 
 /// The template rules: a drawing's ([`Drawing::validate`]), and nothing of a model. A template
@@ -80,6 +93,8 @@ pub fn check(template: &Drawing) -> Result<()> {
         (!template.views.is_empty(), "views"),
         (!template.dimensions.is_empty(), "dimensions"),
         (!template.balloons.is_empty(), "balloons"),
+        (!template.centre_marks.is_empty(), "centre marks"),
+        (!template.centre_lines.is_empty(), "centre lines"),
         (template.revisions.ids().next().is_some(), "revision rows"),
         (template.sheets.iter().any(|sheet| sheet.documents.is_some()), "a sheet that documents a component"),
         (!template.sheet_images.is_empty(), "images placed on its sheets"),
@@ -96,31 +111,103 @@ pub fn check(template: &Drawing) -> Result<()> {
 /// `id_source`.
 pub fn instantiate(template: &Drawing, name: &str, taken: &BTreeSet<u64>, id_source: &mut IdSource) -> Result<Drawing> {
     check(template)?;
-    let id = id_source.next(taken)?;
-    let mut in_use = BTreeSet::from([id]);
-    let mut sheets = Vec::with_capacity(template.sheets.len());
-    for sheet in &template.sheets {
-        let sheet_id = id_source.next(&in_use)?;
-        in_use.insert(sheet_id);
-        sheets.push(Arc::new(super::Sheet { id: sheet_id, ..(**sheet).clone() }));
+    let mut in_use: BTreeSet<_> = template.object_ids().collect();
+    in_use.extend(taken);
+    // Allocate in record order, starting with the drawing and its sheets as for a built-in.
+    let ids: BTreeMap<_, _> = template.object_ids().map(|old| Ok((old, id_source.next(&in_use)?))).collect::<Result<_>>()?;
+    let fresh = |id: u64| ids.get(&id).copied().ok_or_else(|| DocError::Invalid(format!("the template has no object {}", ids::encode(id))));
+    let mut drawing = Drawing {
+        format: DRAWING.format_string(DRAWING.current()),
+        format_pending: DRAWING.pending_names(),
+        id: fresh(template.id)?,
+        name: name.into(),
+        ..template.clone()
+    };
+    for sheet in &mut drawing.sheets {
+        let sheet = Arc::make_mut(sheet);
+        sheet.id = fresh(sheet.id)?;
+        if let Some(block) = &mut sheet.title_block {
+            for cell in &mut block.cells {
+                if let CellKind::Text(text) = &mut cell.kind {
+                    text.image = text.image.map(fresh).transpose()?;
+                }
+            }
+        }
     }
-    let format = DRAWING.format_string(DRAWING.current());
-    let drawing = Drawing { format, format_pending: DRAWING.pending_names(), id, name: name.into(), sheets, ..template.clone() };
+    for image in drawing.images.iter_mut() {
+        let image = Arc::make_mut(image);
+        image.id = fresh(image.id)?;
+    }
+    for table in drawing.tables.iter_mut() {
+        let table = Arc::make_mut(table);
+        table.id = fresh(table.id)?;
+        table.sheet = fresh(table.sheet)?;
+    }
+    for note in drawing.notes.iter_mut() {
+        let note = Arc::make_mut(note);
+        note.id = fresh(note.id)?;
+        if let Anchor::Sheet(sheet) = &mut note.anchor {
+            *sheet = fresh(*sheet)?;
+        }
+    }
+    for sketch in &mut drawing.sketches {
+        let sketch = Arc::make_mut(sketch);
+        sketch.id = fresh(sketch.id)?;
+        if let Owner::Sheet(sheet) = &mut sketch.owner {
+            *sheet = fresh(*sheet)?;
+        }
+    }
+    for fill in &mut drawing.fills {
+        let fill = Arc::make_mut(fill);
+        fill.id = fresh(fill.id)?;
+        fill.sketch = fresh(fill.sketch)?;
+        if let FillPaint::Hatch { pattern, .. } = &mut fill.paint {
+            *pattern = fresh(*pattern)?;
+        }
+    }
+    for pattern in &mut drawing.patterns {
+        let pattern = Arc::make_mut(pattern);
+        pattern.id = fresh(pattern.id)?;
+    }
+    for symbol in drawing.symbols.iter_mut() {
+        let symbol = Arc::make_mut(symbol);
+        symbol.id = fresh(symbol.id)?;
+    }
+    drawing.images.put_in_order();
+    drawing.tables.put_in_order();
+    drawing.notes.put_in_order();
+    drawing.symbols.put_in_order();
     drawing.validate()?;
     Ok(drawing)
 }
 
 /// `drawing` as a template: its format, and nothing it draws or documents (its sources, views,
-/// dimensions, balloons, placed images, revision rows, and the component each sheet documents),
-/// nor its number, which drawings made from it get their own of. Its other properties, its revision
-/// numbering, its logos and the text typed over its cells of plain text stay; text typed over a cell
-/// that shows a field (a parameter, a value or a reference) goes with the design that field reads.
+/// dimensions, balloons, centre marks and lines, placed images, revision rows, and the component each
+/// sheet documents), nor its number, which drawings made from it get their own of. Its other
+/// properties, its revision numbering, its logos and the text typed over its cells of plain text stay;
+/// text typed over a cell that shows a field (a parameter, a value or a reference) goes with the
+/// design that field reads.
 pub fn from_drawing(drawing: &Drawing) -> Result<Drawing> {
     let mut template = drawing.clone();
     template.sources.clear();
+    template.notes.retain(|note| matches!(note.anchor, Anchor::Sheet(_)));
+    for table in template.tables.iter_mut() {
+        let table = Arc::make_mut(table);
+        // Overrides name rows from this specific bill of materials or revision record.
+        table.table.overrides.clear();
+        if let Kind::PartsList(list) = &mut table.kind {
+            list.of = SheetComponent::UNBOUND;
+        }
+    }
+    // A sketch drawn on a view goes with that view; a fill of a sketch that went goes too.
+    template.sketches.retain(|sketch| matches!(sketch.owner, Owner::Sheet(_)));
+    let kept: BTreeSet<u64> = template.sketches.iter().map(|sketch| sketch.id).collect();
+    template.fills.retain(|fill| kept.contains(&fill.sketch));
     template.views.clear();
     template.dimensions.clear();
     template.balloons.clear();
+    template.centre_marks.clear();
+    template.centre_lines.clear();
     template.sheet_images.clear();
     template.drop_unused_images();
     Arc::make_mut(&mut template.properties).remove(crate::metadata::PART_NUMBER);
@@ -244,20 +331,21 @@ pub fn assembly(name: &str) -> Option<bool> {
 /// The built-in template `name` ([`BUILT_INS`]), made now; none for another name.
 pub fn built_in(name: &str) -> Option<Result<Drawing>> {
     let (size, title, assembly) = parse(name)?;
-    // A4 is used upright (ISO 5457); the larger sizes lie flat.
-    let orientation = if size == PaperSize::A4 { Orientation::Portrait } else { Orientation::Landscape };
-    Some(made(&title, drawing_sheet::Sheet::standard(size, orientation), if assembly { ASSEMBLY_NOTE } else { PART_NOTE }))
+    let (note, kind) = if assembly { (ASSEMBLY_NOTE, ASSEMBLY_TYPE) } else { (PART_NOTE, PART_TYPE) };
+    // Every size lies flat, A4 too: a sheet stands upright only when Portrait is chosen (#21676).
+    Some(made(&title, drawing_sheet::Sheet::standard(size, Orientation::Landscape), note, kind))
 }
 
 /// One sheet of `paper` with the ISO border and the built-in title block, `note` typed over its
-/// general tolerances.
-fn made(title: &str, paper: drawing_sheet::Sheet, note: &str) -> Result<Drawing> {
+/// general tolerances and `kind` over its document type.
+fn made(title: &str, paper: drawing_sheet::Sheet, note: &str, kind: &str) -> Result<Drawing> {
     let mut id_source = IdSource::seeded(BUILT_IN_SEED);
     let mut d = Drawing::new(title, "en", "Sheet 1", paper, Some(DrawingBorderProfile::iso()), &BTreeSet::new(), &mut id_source)?;
     if let Some(first) = d.sheets.first_mut() {
         let first = Arc::make_mut(first);
         first.title_block = Some(title_block::default_block());
         first.title_block_overrides.insert(TOLERANCES_CELL.into(), note.into());
+        first.title_block_overrides.insert(TYPE_CELL.into(), kind.into());
     }
     check(&d)?;
     Ok(d)

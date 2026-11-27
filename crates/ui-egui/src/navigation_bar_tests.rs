@@ -2,7 +2,7 @@
 //! and bars measured in its viewport.
 use crate::navigation::NavCaps;
 use crate::navigation_bar::*;
-use crate::navigation_slots::{CATALOGUE, SELECTION_MODE_ICONS};
+use crate::navigation_slots::{CATALOGUE, SELECTION_MODE_ICONS, selection_mode_icons};
 use crate::ui_kit::nav_bar_layout::measure;
 use crate::ui_kit::{NavigationEdge, NavigationKind, NavigationSize};
 use egui::{Rect, pos2, vec2};
@@ -12,11 +12,26 @@ use serde_json::json;
 fn selection_mode_icons_resolve_to_real_masters() {
     crate::navigation_slots::install();
     assert_eq!(SELECTION_MODE_ICONS.len(), 6);
-    for (mode, icon) in SELECTION_MODE_ICONS {
+    for (mode, icon) in selection_mode_icons() {
         let resolved = crate::icon_svg::resolve(icon);
-        assert!(!resolved.placeholder, "{mode}: {icon}");
-        assert_eq!(resolved.master, *icon);
+        assert!(!resolved.placeholder, "{mode:?}: {icon}");
+        assert_eq!(resolved.master, icon);
     }
+}
+
+#[test]
+fn the_selection_mode_slot_shows_each_modes_icon_and_name() {
+    crate::navigation_slots::install();
+    let slot = find("selection_mode").unwrap();
+    assert_eq!(selection_mode_icons().map(|(mode, _)| mode).collect::<Vec<_>>(), solidcraft_engine::PickMode::ALL);
+    for (mode, icon) in selection_mode_icons() {
+        let ui = crate::UiState { pick_mode: mode, ..Default::default() };
+        assert_eq!(slot.current_icon(crate::navigation_slots::value(&ui, slot)), icon);
+    }
+    // The menus whose icon shows the setting they hold offer "Shows: Icon and value / Icon only".
+    let holds_value = |id| !find(id).unwrap().value_icons.is_empty();
+    assert!(holds_value("selection_mode") && holds_value("visual_style") && !holds_value("display"));
+    assert_eq!(NavigationBar::default().menu_display("selection_mode"), MenuDisplay::IconAndValue);
 }
 
 #[test]
@@ -44,7 +59,7 @@ fn slot_catalogue_uses_registered_commands_and_existing_icons() {
         assert!(ids.insert(slot.id), "duplicate catalogue id {}", slot.id);
         match slot.command {
             Some(command) => assert!(solidcraft_engine::find_command(command).is_some(), "{}", slot.id),
-            None => assert!(["projection", "display", "sheet_zoom", "separator"].contains(&slot.id)),
+            None => assert!(["projection", "display", "sheet_zoom", "separator", "isolate"].contains(&slot.id)),
         }
         if slot.kind != NavigationKind::Separator {
             assert!(!crate::icon_svg::resolve(slot.icon).placeholder, "{}: {}", slot.id, slot.icon);
@@ -92,9 +107,31 @@ fn measured_bar_drops_labels_then_overflows_in_order_without_compass_overlap() {
     }
     let wide = Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 720.0));
     assert!(measure(wide, &prefs, |slot| NavCaps::MODEL.shows(slot), |_| 50.0).labels);
-    let middle = Rect::from_min_size(pos2(0.0, 0.0), vec2(380.0, 720.0));
+    // The default row without labels or menu values is 382 wide, with 12 at each edge: 406.
+    let middle = Rect::from_min_size(pos2(0.0, 0.0), vec2(430.0, 720.0));
     let bar = measure(middle, &prefs, |slot| NavCaps::MODEL.shows(slot), |_| 50.0);
     assert!(!bar.labels && bar.overflow.is_empty(), "text disappears before slots fold");
+}
+
+/// #8120: in a narrow view the slots before Isolate fold into More and Isolate stays on the bar;
+/// with no room even for it, it folds like the rest.
+#[test]
+fn a_narrow_bar_folds_other_slots_before_isolate() {
+    crate::navigation_slots::install();
+    let mut prefs = NavigationBar::default();
+    prefs.slots.push("isolate".into());
+    let narrow = Rect::from_min_size(pos2(0.0, 0.0), vec2(250.0, 720.0));
+    let bar = measure(narrow, &prefs, |_| true, |_| 50.0);
+    assert!(!bar.overflow.is_empty(), "the view is too narrow for every slot");
+    assert_eq!(bar.slots.last().map(|(slot, _)| slot.id), Some("isolate"), "Isolate stays, last on the row");
+    assert!(!bar.overflow.iter().any(|slot| slot.id == "isolate"));
+    assert!(narrow.contains_rect(bar.rect));
+    let order: Vec<_> =
+        bar.slots.iter().map(|(slot, _)| slot.id).filter(|id| *id != "isolate").chain(bar.overflow.iter().map(|slot| slot.id)).collect();
+    assert_eq!(order, NavigationBar::default().slots, "the others keep their order across the row and More");
+    let tiny = Rect::from_min_size(pos2(0.0, 0.0), vec2(90.0, 720.0));
+    let bar = measure(tiny, &prefs, |_| true, |_| 50.0);
+    assert!(bar.slots.is_empty() && bar.overflow.last().is_some_and(|slot| slot.id == "isolate"), "no room: everything folds");
 }
 
 #[test]
@@ -389,6 +426,8 @@ fn navigation_board_metrics_and_state_colors_are_shared_in_both_themes() {
         assert_eq!(navigation_fill(&tokens, NavigationFill::Hover), Some(tokens.nav_hover));
         assert_eq!(navigation_fill(&tokens, NavigationFill::Press), Some(tokens.nav_press));
         assert_eq!(navigation_fill(&tokens, NavigationFill::Active), Some(tokens.selected_bg));
+        assert_eq!(navigation_fill(&tokens, NavigationFill::Strong), Some(tokens.form_primary_fill));
+        assert_eq!(navigation_ink(&tokens, NavigationFill::Strong), tokens.on_accent);
         let frame = navigation_popup_frame();
         assert_eq!(frame.fill, tokens.dialog_body);
         assert_eq!(frame.stroke, egui::Stroke::new(NAV_BORDER, tokens.dialog_border));

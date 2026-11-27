@@ -71,7 +71,7 @@ fn extruded(dx: f64) -> Body {
 #[test]
 fn issue_3012_cut_of_filleted_boxes_a_sliver_apart() {
     // the fillets of both bodies are cones, not surfaces of extrusion
-    use_the_two_fixes();
+    use_the_arc_cylinder_fix();
     for dx in [1e-4, 1e-3, 1e-2] {
         for reversed in [false, true] {
             let (a, b) = (rounded_box(), extruded(dx));
@@ -84,29 +84,51 @@ fn issue_3012_cut_of_filleted_boxes_a_sliver_apart() {
             assert_eq!(r.solid_count().unwrap(), 1, "dx {dx} reversed {reversed}");
             // The sliver is the box's outline less its translate by dx along x: every line
             // y = const in 0 < y < 30 meets it in exactly dx (the outline is at least 36 wide
-            // there), so its section is 30 dx (PROVEN for that set). The body cuts each
-            // translated fillet dx of arc short of its tangent end (its face is 10 dx short,
-            // MEASURED below), which leaves out the piece between the cut and y = 0 under that
-            // arc, y = 2 - sqrt(4 - u^2) ~ u^2 / 4 over 0 < u < dx: dx^3 / 12 of the section at
-            // each end (ARGUED from the measured cut; 1.7e-6 of the volume at 1e-2). Until
-            // `brep_volume` closed tolerant edges' gaps (#16735) the volume measured 5 dx^2
-            // less (4.8e-8 at 1e-4, 5.0e-6 at 1e-3), read then as the ends cut off where the
-            // fillets cross; it was the caps' trims (below). It is now this closed form to the
-            // 1e-8 the volume is asked for (MEASURED -2.3e-9, -2.3e-9 and -2.0e-9 at 1e-4,
-            // 1e-3 and 1e-2).
+            // there), so its section is 30 dx (PROVEN for that set). At each end (y = 0 and
+            // y = 30) the subtracted operand's fillet, centre (c, 2) say, has its tangent end
+            // (c, 0) on the other's flat side and stays inside the other: a point of it,
+            // (c + 2 s sin t, 2 - 2 cos t) with s = +-1 the side the other lies to, is
+            // (2 sin t - dx)^2 + 4 cos^2 t = 4 - 4 dx sin t + dx^2 squared from the other's
+            // centre (c + s dx, 2), under 4 once sin t > dx / 4, and short of that it is less
+            // than dx / 2 along x from c, where the other is still flat. So the exact sliver
+            // keeps that fillet whole and closes its end with a strip of the other's flat side,
+            // dx by 10 (PROVEN; the same mirrored at y = 30). The boolean
+            // gives each end either that exact form or the one it has given since #3012: the
+            // fillet cut dx of arc short of its tangent end (its face 10 dx short), no strip,
+            // which leaves out the piece under that arc, y = 2 - sqrt(4 - u^2) ~ u^2 / 4 over
+            // 0 < u < dx: dx^3 / 12 of the section (ARGUED from the cut; 1.7e-6 of the volume
+            // at 1e-2). Which form an end takes rests on the fillets' last bits (the closed-form
+            // rounds are exact cylinders, the fillet sessions' are 1e-15 off them): at dx 1e-2
+            // reversed the closed-form round's start end is exact, the rest are cut (MEASURED,
+            // face by face, closed form on and off). `exact` counts the ends with the strip.
+            // Until `brep_volume` closed tolerant edges' gaps (#16735) the volume measured
+            // 5 dx^2 less (4.8e-8 at 1e-4, 5.0e-6 at 1e-3), read then as the ends cut off where
+            // the fillets cross; it was the caps' trims (below). It is now this closed form to
+            // the 1e-8 the volume is asked for (MEASURED -2.3e-9, -2.3e-9 and -2.0e-9 at 1e-4,
+            // 1e-3 and 1e-2, both ends cut).
             let h = 10.0;
-            let section = dx * 30.0 - 2.0 * dx * dx * dx / 12.0;
+            let (rec, order) = r.to_record().unwrap();
+            let strip = dx * h;
+            let exact = (0..rec.faces.len())
+                .filter(|&i| (r.face_area(&order, i, 1e-10).unwrap() - strip).abs() < 1e-3 * strip)
+                .count();
+            assert!(
+                exact <= 2,
+                "dx {dx} reversed {reversed}: {exact} end strips"
+            );
+            let cut = 2.0 - exact as f64;
+            let section = dx * 30.0 - cut * dx * dx * dx / 12.0;
             let expected = section * h;
             let v = volume(&r);
             assert!(
                 (expected - v).abs() < 1e-8,
-                "dx {dx} reversed {reversed}: {v} vs {expected}"
+                "dx {dx} reversed {reversed}: {v} vs {expected} ({exact} ends exact)"
             );
             // Every face of the sliver: the two flat sides (26 x 10 each), the four fillets (a
-            // quarter turn of R2 by 10 each) and the two caps, each the section above. A
-            // fillet face the sector skipped and a neighbouring edge put in the wrong region
-            // would add or drop 31.4. The two translated fillets end dx of arc short of their
-            // tangent ends, over 10: 20 dx. The area routine takes each cap over its trims,
+            // quarter turn of R2 by 10 each), the two caps, each the section above, and a strip
+            // dx by 10 at each exact end. A fillet face the sector skipped and a neighbouring
+            // edge put in the wrong region would add or drop 31.4. A fillet cut dx of arc short
+            // of its tangent end is 10 dx short. The area routine takes each cap over its trims,
             // which enclose dx^2 / 2 less than the cap's edges (MEASURED: -0.5000, -0.5000
             // and -0.5015 dx^2 per cap at 1e-4, 1e-3 and 1e-2; not derived, the same class of
             // defect #16735 closed for the volume; tracked in #16854), so the area is dx^2
@@ -114,11 +136,12 @@ fn issue_3012_cut_of_filleted_boxes_a_sliver_apart() {
             // Up to a second-order term (measured 0.02 dx^2 at most: the arcs are not straight)
             // and the area routine's slack of 1e-7 (measured 4e-8).
             let faces = 2.0 * 26.0 * 10.0 + 4.0 * FRAC_PI_2 * 2.0 * 10.0 + 2.0 * section;
+            let ends = exact as f64 * strip - cut * 10.0 * dx;
             let trims_short = dx * dx;
             let area = r.area(1e-8).unwrap();
             assert!(
-                (area - (faces - 20.0 * dx - trims_short)).abs() < 0.05 * dx * dx + 1e-7,
-                "dx {dx} reversed {reversed}: area {area} vs {faces} - 20 dx - dx^2"
+                (area - (faces + ends - trims_short)).abs() < 0.05 * dx * dx + 1e-7,
+                "dx {dx} reversed {reversed}: area {area} vs {faces} + {ends} - dx^2"
             );
             let (k, mut brep) = kernel_copy(&r);
             // What the fix does: every vertex of the result, the four tangent ends among them,
@@ -147,7 +170,7 @@ fn issue_3012_cut_of_filleted_boxes_a_sliver_apart() {
 /// `is_cylinder`), the kind `faces_coincide` gates: a cylinder has no kind of its own.
 #[test]
 fn issue_3012_the_fillets_are_cylinders_of_the_cone_kind() {
-    use_the_two_fixes();
+    use_the_arc_cylinder_fix();
     for body in [rounded_box(), extruded(1e-4)] {
         let (_, brep) = kernel_copy(&body);
         let round: Vec<_> = brep
@@ -167,6 +190,6 @@ fn issue_3012_the_fillets_are_cylinders_of_the_cone_kind() {
 
 /// `session::set_fixes` sets the process kernel's fixes, shared by every test of this binary
 /// (they run on parallel threads): every test here takes this one set, so none can race another.
-fn use_the_two_fixes() {
-    session::set_fixes(["linear_sweep_arc_is_cylinder", "classify_edge_interval"]).unwrap();
+fn use_the_arc_cylinder_fix() {
+    session::set_fixes(["linear_sweep_arc_is_cylinder"]).unwrap();
 }

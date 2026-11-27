@@ -6,17 +6,26 @@
 //! - [`AnalysisMemo`]: the analyses' results kept in the kernel by the curve's exact
 //!   content, so an unchanged curve checked again is not solved again.
 //!
-//! It is off when `Kernel::memoize_curve_caches` is off (the `curve-memo-off` feature),
-//! which runs every analysis in full, to check that it changes nothing.
+//! It is off when `Kernel::memoize_curve_caches` is off (set on the kernel), which runs
+//! every analysis in full, to check that it changes nothing.
 //!
 //! The control-point bounds that used to skip an analysis whose tolerance they cleared
 //! are gone: the analyses' own statuses are passed on (WR-663, tangency-labs/smlib
 //! 8843967), so a search that fails must run to report its failure, which no bound on
 //! the curve's speed or radius predicts.
 //!
+//! Not upstream (tangency-labs/solidcraft#11574): one closed-form exception,
+//! `span_bounds` in `p3.rs`. On a curve of degree 1 or 2 made of Bezier spans (straight
+//! segments and conic arcs), it bounds the speed and the radius of curvature from below,
+//! exactly up to rounding. A search whose bound clears its tolerance is not run: no
+//! solution could fail its test, but a numeric failure of that search is then not
+//! reported either, which is the WR-663 trade-off this exception makes for such curves.
+//! It is off with `Kernel::memoize_curve_caches`, as the memo is.
+//!
 //! Deviations: not upstream. No recursion.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 
 use crate::geom::solution_array::SolutionEnd;
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
@@ -38,18 +47,19 @@ pub(crate) type AnalysisResult = (bool, Vec<SolutionEnd>);
 /// results are kept, the oldest dropped first.
 #[derive(Debug, Default)]
 pub struct AnalysisMemo {
-    results: BTreeMap<Vec<u64>, AnalysisResult>,
-    order: VecDeque<Vec<u64>>,
+    results: HashMap<Arc<[u64]>, Arc<AnalysisResult>>,
+    order: VecDeque<Arc<[u64]>>,
 }
 
 impl AnalysisMemo {
     /// The result kept for `key`.
-    pub(crate) fn get(&self, key: &[u64]) -> Option<AnalysisResult> {
+    pub(crate) fn get(&self, key: &[u64]) -> Option<Arc<AnalysisResult>> {
         self.results.get(key).cloned()
     }
 
     /// Keeps `result` for `key`, dropping the oldest result past [`MEMO_CAPACITY`].
     pub(crate) fn insert(&mut self, key: Vec<u64>, result: AnalysisResult) {
+        let key: Arc<[u64]> = Arc::from(key);
         if self.results.contains_key(&key) {
             return;
         }
@@ -61,8 +71,8 @@ impl AnalysisMemo {
                 None => break,
             }
         }
-        self.order.push_back(key.clone());
-        self.results.insert(key, result);
+        self.order.push_back(Arc::clone(&key));
+        self.results.insert(key, Arc::new(result));
     }
 }
 
@@ -79,28 +89,32 @@ pub(crate) fn analysis_key(
     settings: &[u64],
 ) -> Option<Vec<u64>> {
     let cur = curve.nurb.as_ref()?;
-    if cur.cpts().len() > MEMO_MAX_POINTS {
+    let cpts = cur.cpts();
+    if cpts.len() > MEMO_MAX_POINTS {
         return None;
     }
-    let mut key = vec![
+    let knots = cur.knots();
+    let degree = u64::try_from(cur.degree()).ok()?;
+    let n_cpts = u64::try_from(cpts.len()).ok()?;
+    let n_knots = u64::try_from(knots.len()).ok()?;
+    let mut key = Vec::new();
+    let _ = key.try_reserve(10 + cpts.len() * 4 + knots.len() + settings.len());
+    key.extend_from_slice(&[
         property,
         lo.to_bits(),
         hi.to_bits(),
         min_sep.to_bits(),
         curve.dim,
         u64::from(curve.out_of_bounds_enabled),
-        u64::try_from(cur.degree()).ok()?,
-        u64::try_from(cur.cpts().len()).ok()?,
-        u64::try_from(cur.knots().len()).ok()?,
-    ];
-    for c in cur.cpts() {
-        key.extend([c.x.to_bits(), c.y.to_bits(), c.z.to_bits(), c.w.to_bits()]);
+        degree,
+        n_cpts,
+        n_knots,
+        ((curve.form as u64) << 8) | (curve.knot_type as u64),
+    ]);
+    for c in cpts {
+        key.extend_from_slice(&[c.x.to_bits(), c.y.to_bits(), c.z.to_bits(), c.w.to_bits()]);
     }
-    key.extend(cur.knots().iter().map(|v| v.to_bits()));
-    // (form and knot type by their debug names, as bytes)
-    for b in format!("{:?}/{:?}", curve.form, curve.knot_type).bytes() {
-        key.push(u64::from(b));
-    }
+    key.extend(knots.iter().map(|v| v.to_bits()));
     key.extend_from_slice(settings);
     Some(key)
 }

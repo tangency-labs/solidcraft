@@ -92,6 +92,8 @@ fn navigation_sample(ui: &mut Ui, size: NavigationSize) {
 // One entry per element/variant: names, rendering and geometry expectations stay together.
 #[cfg(any(test, feature = "test-support"))]
 pub const ELEMENTS: &[Element] = &[
+    element!("cell_selection", "dialog:table:cell_sample:selection", None, |ui, _| selection_sample(ui, "cell_sample", SelectionMode::Cell)),
+    element!("range_selection", "dialog:table:range_sample:selection", None, |ui, _| selection_sample(ui, "range_sample", SelectionMode::Range)),
     element!("theme_mode_segments", |ui, _| {
         theme_segments(
             ui,
@@ -222,6 +224,7 @@ pub const ELEMENTS: &[Element] = &[
             setting: "Z · 1°".into(),
             has_key: true,
             editable: false,
+            clear_key: None,
         };
         viewport_status_item(ui, &item, &mut StatusPresentation::default());
     }),
@@ -382,6 +385,10 @@ pub const ELEMENTS: &[Element] = &[
         let (rect, _) = ui.allocate_exact_size(vec2(side, side), egui::Sense::hover());
         checkbox_at(ui, rect, "Enabled", &mut sample.checked);
     }),
+    element!("switch_at", |ui, sample| {
+        let (rect, _) = ui.allocate_exact_size(switch_size(), egui::Sense::hover());
+        switch_at(ui, rect, "Enabled", &mut sample.checked);
+    }),
     element!("settings_plugin_card", |ui, sample| {
         settings_plugin_card(
             ui,
@@ -390,7 +397,7 @@ pub const ELEMENTS: &[Element] = &[
             "1.2.0",
             "Adds a parametric gear feature.",
             &mut sample.checked,
-            &PluginCardLabels { show_in_folder: "Show in folder", enabled: "Enabled" },
+            &PluginCardLabels { show_in_folder: "Show in folder", enabled: "Enabled", update: None },
         );
     }),
     element!("text_button", |ui, _| {
@@ -1476,13 +1483,13 @@ pub const ELEMENTS: &[Element] = &[
     element!("table_row_height", |ui, _| {
         ui.allocate_space(vec2(table_row_height(), table_row_height()));
     }),
-    element!("summary_row", |ui, s| {
-        summary_row(ui, "Rule", "Drives width = 120 mm", &mut s.checked, ContentWidth::button(ui, "Edit"), |ui| {
-            button(ui, "Edit", Button::Normal);
-        });
-    }),
     element!("compact_button", |ui, _| {
         compact_button(ui, "▲", "Move up", true, false);
+    }),
+    element!("compact_toggle", |ui, s| {
+        if compact_toggle(ui, if s.checked { "★" } else { "☆" }, "Favourite", true, s.checked).clicked() {
+            s.checked = !s.checked;
+        }
     }),
     element!("error", |ui, _| {
         text(ui, "Invalid expression", Text::Error("gallery"));
@@ -1509,6 +1516,44 @@ pub const ELEMENTS: &[Element] = &[
                 table.add_prompt(ui, "Add parameter", "Add parameter");
             },
         );
+    }),
+    element!("table_groups", |ui, s| {
+        table_custom(ui, "groups", &[Column::new("Name", 1.0).flex(), Column::new("Value", 1.0).flex()], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
+            if table.group(ui, "parameters", solidcraft_ui_text::tr("ui.table.gallery.parameters"), 2, &mut s.checked).clicked() {
+                ui.ctx().request_repaint();
+            }
+            if s.checked {
+                for (name, value) in [("Width", "12 mm"), ("Height", "25 mm")] {
+                    table.row(ui, name, false, |row| {
+                        row.cell(|ui| text(ui, name, Text::Cell));
+                        row.cell(|ui| text(ui, value, Text::MonoCell));
+                    });
+                }
+            }
+            let key = ui.scope_id().with("gallery_collapsed_group");
+            let mut open = ui.data_mut(|data| *data.get_temp_mut_or(key, false));
+            table.group(ui, "configurations", solidcraft_ui_text::tr("ui.table.gallery.configurations"), 1, &mut open);
+            ui.data_mut(|data| data.insert_temp(key, open));
+            if open {
+                table.row(ui, "Default", false, |row| {
+                    row.cell(|ui| text(ui, "Default", Text::Cell));
+                    row.cell(|ui| text(ui, "Active", Text::Cell));
+                });
+            }
+            table.add_prompt(ui, "Add parameter", "Add parameter");
+        });
+    }),
+    element!("table_selection", "dialog:table:selection:Width", None, |ui, _| {
+        table_custom(ui, "selection", &[Column::new("Name", 1.0).flex(), Column::new("Value", 1.0).flex()], "Empty", |ui, table| {
+            table.headers(ui, |_, _| false);
+            for (name, value, selected) in [("Width", "12 mm", true), ("Height", "25 mm", true), ("Depth", "10 mm", false)] {
+                table.row(ui, name, selected, |row| {
+                    row.cell(|ui| text(ui, name, Text::Cell));
+                    row.cell(|ui| text(ui, value, Text::MonoCell));
+                });
+            }
+        });
     }),
     element!("cell_name", |ui, _| {
         text(ui, "Width", Text::NameCell(false));
@@ -1615,7 +1660,7 @@ pub const ELEMENTS: &[Element] = &[
     element!("table", "dialog:table:gallery:row", None, |ui, s| {
         table_custom(ui, "gallery", &[Column::new("Name", 1.0), Column::new("Expression", 1.5)], "No rows", |ui, table| {
             table.headers(ui, |_, _| false);
-            table.row(ui, "row", true, |row| {
+            table.row(ui, "row", false, |row| {
                 row.cell(|ui| {
                     text(ui, "Width", Text::Cell);
                 });
@@ -1671,6 +1716,12 @@ pub const ELEMENTS: &[Element] = &[
     }),
     element!("cell_editor", |ui, s| {
         cell_editor(ui, ui.scope_id().with("cell"), &mut s.value, "Expression", true);
+    }),
+    element!("expandable_cell_preview", "gallery:comment-preview", Some("gallery:comment-preview:expand"), |ui, s| {
+        expandable_cell_preview(ui, ui.scope_id().with("comment-preview"), &s.value, "gallery:comment-preview");
+    }),
+    element!("expandable_cell_editor", "gallery:comment", Some("gallery:comment:expand"), |ui, s| {
+        expandable_cell_editor(ui, ui.scope_id().with("comment"), &mut s.value, "Comment", "gallery:comment");
     }),
     element!("color_field", |ui, _| {
         color_field(ui, &mut [120, 150, 180]);
@@ -2201,6 +2252,31 @@ pub const ELEMENTS: &[Element] = &[
 ];
 
 #[cfg(any(test, feature = "test-support"))]
+fn selection_sample(ui: &mut Ui, id: &str, mode: SelectionMode) {
+    let state = ui.make_persistent_id((id, "selection"));
+    let mut selection = ui
+        .data_mut(|data| data.get_temp::<CellSelection>(state))
+        .unwrap_or_else(|| CellSelection { anchor: Some((1, 1)), focus: Some(if mode == SelectionMode::Cell { (1, 1) } else { (3, 3) }) });
+    let columns = ["Name", "Expression", "Value", "Status", "Unit"].map(|label| Column::new(label, 1.0).flex());
+    table_custom(ui, id, &columns, "Empty", |ui, table| {
+        table.cell_selection(&mut selection, mode);
+        table.headers(ui, |_, _| false);
+        for row in 0..6 {
+            table.row(ui, &row.to_string(), false, |cells| {
+                cells.cell(|ui| text(ui, "Width", Text::Cell));
+                cells.cell(|ui| text(ui, "20 mm", Text::Cell));
+                cells.cell(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| text(ui, "20.00", Text::MonoCell));
+                });
+                cells.cell(active_pill);
+                cells.cell(|ui| text(ui, "mm", Text::Cell));
+            });
+        }
+    });
+    ui.data_mut(|data| data.insert_temp(state, selection));
+}
+
+#[cfg(any(test, feature = "test-support"))]
 pub fn example(ui: &mut Ui, element: &Element) -> (&'static str, Option<&'static str>) {
     let mut sample = Sample { value: "12 mm".into(), second: "25 mm".into(), selected: 0, checked: true };
     let rect = ui.scope(|ui| (element.draw)(ui, &mut sample)).response.rect;
@@ -2236,6 +2312,8 @@ pub fn check_elements(elements: &[Element], context: fn() -> egui::Context) {
             for pass in 0..3 {
                 let events = if element.name.starts_with("checkbox_hovered") && pass > 0 {
                     vec![egui::Event::PointerMoved(solidcraft_ui_registry::rect_of("gallery:allocation").expect("hover allocation").center())]
+                } else if element.name == "table_selection" && pass > 0 {
+                    vec![egui::Event::PointerMoved(solidcraft_ui_registry::rect_of("dialog:table:selection:Depth").expect("hover row").center())]
                 } else {
                     vec![]
                 };
@@ -2601,6 +2679,56 @@ fn gallery_covers_every_inline_element() {
     }
 }
 
+#[test]
+fn compact_star_toggle_uses_ink_hover_and_focus_without_a_selected_square() {
+    let t = solidcraft_theme::Tokens::get();
+    for enabled in [false, true] {
+        let ctx = crate::test_support::context();
+        let id = std::cell::Cell::new(egui::Id::NULL);
+        let rect = std::cell::Cell::new(egui::Rect::NOTHING);
+        let mut draw = |ui: &mut Ui| {
+            scope(ui, |ui| {
+                let response = compact_toggle(ui, "★", "Favourite", enabled, true);
+                id.set(response.id);
+                rect.set(response.rect);
+            });
+        };
+        let idle = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), &mut draw);
+        assert!(!idle.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill.a() > 0)));
+        assert!(crate::test_support::text_shapes(&idle).any(|text| text.galley.job.text == "★"
+            && text.galley.job.sections[0].format.color == if enabled { t.form_primary } else { t.form_dim.gamma_multiply(0.35) }));
+        let events = vec![egui::Event::PointerMoved(rect.get().center())];
+        crate::test_support::raw_frame(&ctx, egui::RawInput { events: events.clone(), ..Default::default() }, &mut draw);
+        let hovered = crate::test_support::raw_frame(&ctx, egui::RawInput { events, ..Default::default() }, &mut draw);
+        assert_eq!(hovered.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == t.text.gamma_multiply(0.06))), enabled);
+        assert!(!hovered.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == t.selected_bg)));
+        if enabled {
+            ctx.memory_mut(|m| m.request_focus(id.get()));
+            let focused = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), &mut draw);
+            assert_eq!(
+                focused
+                    .shapes
+                    .iter()
+                    .filter(|s| matches!(&s.shape, egui::Shape::Rect(r)
+                if r.rect == rect.get() && r.stroke == egui::Stroke::new(1.5, t.form_primary)
+                    && r.stroke_kind == egui::StrokeKind::Inside && r.corner_radius == egui::CornerRadius::same(t.control_radius)))
+                    .count(),
+                1
+            );
+        }
+    }
+    let ctx = crate::test_support::context();
+    let output = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+        scope(ui, |ui| {
+            compact_button(ui, "▲", "Move up", true, true);
+        });
+    });
+    assert!(
+        output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == t.selected_bg)),
+        "ordinary selected compact actions retain their fill"
+    );
+}
+
 /// CPU-rendered review board using the actual gallery widgets, without a window.
 #[test]
 fn material_widgets_board_in_both_themes() {
@@ -2668,6 +2796,28 @@ fn card_looks_follow_selected_hover_disabled_and_focus() {
     assert_eq!((disabled.fill, disabled.alpha, disabled.focus_ring), (CardFill::Face, 0.5, false), "a disabled card neither hovers nor shows focus");
     assert!(card_look(false, true, false, true).focus_ring);
     assert!(card_look(true, false, false, false).alpha < 1.0, "a selected card can be disabled too");
+}
+
+#[test]
+fn card_disclosure_keeps_its_body_inside_narrow_ltr_and_rtl_headers() {
+    let ctx = super::test_support::context();
+    for (title, layout) in
+        [("Corner 1", egui::Layout::left_to_right(egui::Align::Center)), ("زاوية 1", egui::Layout::right_to_left(egui::Align::Center))]
+    {
+        super::test_support::frame(&ctx, vec![], |ui| {
+            for width in [0.0, 1.0, 20.0, 240.0] {
+                ui.allocate_ui_with_layout(egui::vec2(width, 0.0), layout, |ui| {
+                    let closed = super::card_section(ui, "closed", title, false, Some("chevron"), |_| true);
+                    let open = super::card_section(ui, "open", title, true, Some("chevron"), |ui| {
+                        assert!(ui.available_width().is_finite());
+                        true
+                    });
+                    assert_eq!(closed, None);
+                    assert_eq!(open, Some(true));
+                });
+            }
+        });
+    }
 }
 
 #[test]
@@ -2847,4 +2997,65 @@ fn preference_widgets_and_figures_board_in_both_themes() {
         }
     }
     solidcraft_theme::set_dark(previous);
+}
+
+#[test]
+fn page_switch_empty_and_stale_selection_are_bounded() {
+    assert_eq!(super::page_switch::selected_index(0, 0), None);
+    assert_eq!(super::page_switch::selected_index(usize::MAX, 2), Some(1));
+    assert_eq!(super::page_switch::selected_index(0, 2), Some(0));
+}
+
+#[test]
+fn page_switch_slide_eases_out_and_finishes_in_140_ms() {
+    let mut slide = super::page_switch::Slide::new([0.0, 80.0], 1.0);
+    assert_eq!(slide.sample([80.0, 200.0], 1.0, 0.14), [0.0, 80.0]);
+    let halfway = slide.sample([80.0, 200.0], 1.07, 0.14);
+    assert!((halfway[0] - 70.0).abs() < 0.01);
+    assert!((halfway[1] - 185.0).abs() < 0.01);
+    assert_eq!(slide.sample([80.0, 200.0], 1.15, 0.14), [80.0, 200.0]);
+}
+
+#[test]
+fn page_switch_rapid_reversal_starts_at_the_current_position() {
+    let mut slide = super::page_switch::Slide::new([0.0, 80.0], 1.0);
+    slide.sample([80.0, 200.0], 1.0, 0.14);
+    let moving = slide.sample([80.0, 200.0], 1.04, 0.14);
+    assert_eq!(slide.sample([0.0, 80.0], 1.04, 0.14), moving);
+    assert_eq!(slide.sample([0.0, 80.0], 1.19, 0.14), [0.0, 80.0]);
+}
+
+#[test]
+fn page_switch_reduced_motion_and_invalid_duration_snap() {
+    let mut slide = super::page_switch::Slide::new([0.0, 80.0], 1.0);
+    for duration in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+        assert_eq!(slide.sample([80.0, 200.0], 1.02, duration), [80.0, 200.0]);
+        assert_eq!(slide.sample([0.0, 80.0], 1.03, duration), [0.0, 80.0]);
+    }
+}
+
+#[test]
+fn page_switch_honours_the_hosts_zero_animation_duration() {
+    let ctx = super::test_support::context();
+    ctx.global_style_mut(|style| style.animation_time = 0.14);
+    let selected = std::cell::Cell::new(0);
+    let mut draw = |ui: &mut Ui| {
+        let mut value = selected.get();
+        PageSwitch::new("test_pages", &["Named", "Dimensions"])
+            .counts(&[8, 41])
+            .targets(&["test:page:first", "test:page:second"])
+            .show(ui, &mut value);
+        selected.set(value);
+    };
+    super::test_support::raw_frame(&ctx, egui::RawInput { time: Some(1.0), ..Default::default() }, &mut draw);
+    let original = solidcraft_ui_registry::rect_of("page_switch:highlight").unwrap();
+    selected.set(1);
+    super::test_support::raw_frame(&ctx, egui::RawInput { time: Some(1.01), ..Default::default() }, &mut draw);
+    assert_eq!(solidcraft_ui_registry::rect_of("page_switch:highlight"), Some(original));
+    ctx.global_style_mut(|style| style.animation_time = 0.0);
+    super::test_support::raw_frame(&ctx, egui::RawInput { time: Some(1.02), ..Default::default() }, &mut draw);
+    let pill = solidcraft_ui_registry::rect_of("page_switch:highlight").unwrap();
+    let target = solidcraft_ui_registry::rect_of("test:page:second").unwrap();
+    assert_eq!(pill.x_range(), target.x_range());
+    assert!(pill.left() > original.left());
 }

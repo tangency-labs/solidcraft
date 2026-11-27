@@ -15,6 +15,8 @@
 #   macOS universal         .dmg, and the CLI as a .zip (both archs built in parallel)  packaging/macos
 #   Windows x64, x86, arm64 .msi and a portable .zip; x64 also the plain .exe      packaging/windows
 #   Web                     a .zip of the static site                              packaging/web
+#   Python                  wheels of the client (python/), each with that platform's released
+#                           solidcraft-cli, and one without a binary                packaging/python
 #
 # The main installers are also attached without the version in their names
 # (solidcraft-windows-x64.msi, solidcraft-linux-x86_64.AppImage, ...) so that
@@ -433,6 +435,8 @@ jobs:
           path: |
             target/${{ matrix.target }}/release/solidcraft
             target/${{ matrix.target }}/release/solidcraft-cli
+            target/${{ matrix.target }}/release/solidcraft-thumbnail-extension
+            target/${{ matrix.target }}/release/solidcraft-preview-extension
           if-no-files-found: error
 
   macos:
@@ -466,7 +470,8 @@ jobs:
       - name: Join, sign, package and check (dmg, CLI zip; the dmg is mounted and checked)
         run: |
           # Artifacts don't keep the executable bit.
-          chmod +x target/*-apple-darwin/release/solidcraft target/*-apple-darwin/release/solidcraft-cli
+          chmod +x target/*-apple-darwin/release/solidcraft target/*-apple-darwin/release/solidcraft-cli \
+            target/*-apple-darwin/release/solidcraft-thumbnail-extension target/*-apple-darwin/release/solidcraft-preview-extension
           packaging/macos/package.sh --arch universal --skip-build ${MACOS_SIGN_IDENTITY:+--sign}
       - name: Remove the signing keychain and API key
         if: always()
@@ -664,9 +669,62 @@ jobs:
           path: dist/release/*
           if-no-files-found: error
 
+  python:
+    name: Python wheels
+    # Repackages the released solidcraft-cli of each platform into a wheel of the client, so the
+    # wheels carry the same, signed bytes as the release (docs/python-api.md, "Packaging").
+    # pypi.yml uploads them when the release is published.
+    needs: [version, linux, macos, windows]
+    if: needs.version.outputs.build == 'true'
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: release-python
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-linux-*
+          path: packages
+          merge-multiple: true
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-macos
+          path: packages
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: release-windows-*
+          path: packages
+          merge-multiple: true
+      - name: Build the wheels
+        run: packaging/python/wheels.sh packages dist/python
+      - run: ls -l dist/python
+      # Uploaded before the check below installs anything from PyPI, so nothing that check runs
+      # can change the wheels that ship (and that SHA256SUMS.txt lists).
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-python
+          path: dist/python/*.whl
+          if-no-files-found: error
+      - name: Check the Linux x86_64 wheel with its own binary
+        # Installed into a clean environment with no SOLIDCRAFT_CLI, so the client must find the
+        # solidcraft-cli inside the wheel; then the client's tests run against it. pytest comes from
+        # python/tests/requirements.txt, exact versions with their hashes; the NumPy test skips
+        # without NumPy, so it is not installed here.
+        run: |
+          python3 -m venv "$RUNNER_TEMP/wheel-check"
+          "$RUNNER_TEMP/wheel-check/bin/pip" install --quiet --require-hashes --only-binary :all: -r python/tests/requirements.txt
+          "$RUNNER_TEMP/wheel-check/bin/pip" install --quiet --no-deps dist/python/solidcraft-*-manylinux_*_x86_64.whl
+          # `solidcraft` (what `uvx solidcraft` runs) reaches the bundled binary.
+          env -u SOLIDCRAFT_CLI "$RUNNER_TEMP/wheel-check/bin/solidcraft" --version
+          cd "$RUNNER_TEMP" && env -u SOLIDCRAFT_CLI "$RUNNER_TEMP/wheel-check/bin/python" -m pytest -q -p no:cacheprovider "$GITHUB_WORKSPACE/python/tests"
+
   release:
     name: GitHub Release or dry-run artifacts
-    needs: [version, linux, flatpak, arch, snap, freebsd, macos, windows, web]
+    needs: [version, linux, flatpak, arch, snap, freebsd, macos, windows, web, python]
     # Not for the release gate (packages_only): it builds and checks the packages, nothing more.
     if: needs.version.outputs.build == 'true' && !inputs.packages_only
     runs-on: blacksmith-8vcpu-ubuntu-2404

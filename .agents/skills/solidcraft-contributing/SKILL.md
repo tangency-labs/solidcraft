@@ -21,6 +21,7 @@ The PR workflow in detail: `.agents/skills/solidcraft-file-pr/SKILL.md` (writing
   feature under another number, and PRs that change the files you will change
   (`gh pr list ... --json number,title,files`). If someone has it, comment on their PR or issue
   instead of opening a second one: two PRs for one change cannot both land.
+- **Search before you start.** Scan ALL issues and PRs, open and closed, for similar work (`gh issue list` and `gh pr list --state all --search`). New features are discussed on Discord, then get an issue. Kernel functionality goes in `solidcore/`, and features call its API (CONTRIBUTING.md, "Kernel work goes in solidcore/"); work begun before 0.40 is ported onto today's code first.
 - **Claim with a draft PR.** `gh pr list -R tangency-labs/solidcraft --state open --search "#N"`; if none,
   branch from the latest `origin/main`, `git commit --allow-empty -m "claim: #N"`, push, and open a
   draft PR titled `<summary> (#N)`. The lowest-numbered open PR for an issue wins; close yours if it
@@ -45,9 +46,15 @@ The PR workflow in detail: `.agents/skills/solidcraft-file-pr/SKILL.md` (writing
 - **Push daily.** A draft with no pushes for 72 hours may be taken over: comment first, then open your
   own claim (you may start from its branch). The bot's automatic cleanup deadlines in CONTRIBUTING.md
   are separate.
+- **Check the scope before building.** A change that adds a dependency, background network or CPU
+  work (polling, animation), or a new kind of feature rather than a fix is the kind most often
+  declined after the work is done. Ask on the issue first, and build it once a maintainer agrees.
+- **Fix the cause.** When the right fix is in a lower layer (the kernel, cancellation, a shared
+  helper), say so on the issue instead of building around it in the caller. A workaround that makes
+  a limitation part of the design is held until the cause is fixed.
 - **One topic and one issue per PR.** Never commit `plan/`, build directories (`target*/`) or generated
-  reference data; check `git ls-files` before pushing. Run `cargo xtask fast` before every commit;
-  CI runs the full gate (`cargo xtask ci`) on the pull request.
+  reference data; check `git ls-files` before pushing. Run `cargo xtask ci` before pushing: it runs what
+  your change needs.
   Commit after every feature arc that builds.
 - **Merge flow.** The heavy CI jobs start when a maintainer adds `approved-for-ci`. Contributors don't
   queue or merge their own PRs: a maintainer or steward adds `ready to merge` (and `approved-for-ci` for
@@ -55,9 +62,10 @@ The PR workflow in detail: `.agents/skills/solidcraft-file-pr/SKILL.md` (writing
   (CodeRabbit threads resolved; CI or workflow changes need the owner's approval). The queue runs the
   full suite on each group before it lands on `main`. Never force-push `main`.
 - **Do not push only to catch up with `main`:** every push restarts the whole CI run, and `main`'s own
-  run catches what lands in between. When you push anyway, or GitHub reports a conflict, rebase onto
-  the latest `main` (preferred for your own branch; push it with `--force-with-lease`) or merge `main`
-  in; both are fine. Never force-push a branch someone else works on. Automation that updates your PR
+  run catches what lands in between. When you push anyway, or GitHub reports a conflict, merge `main`
+  in or rebase onto the latest `main`; both are fine. Merging costs less: when the PR already passed
+  and the merge leaves its own change as it was, CI carries the passing run and repeats only the
+  repository checks, while a rebase re-runs the full suite (push one with `--force-with-lease`). Never force-push a branch someone else works on. Automation that updates your PR
   merges `main` into your branch and never force-pushes over your history. Resolve conflicts without
   discarding others' work. Do not re-run CI on an unchanged commit: re-run only a job that runner
   trouble cancelled, with "Re-run failed jobs".
@@ -67,12 +75,22 @@ The PR workflow in detail: `.agents/skills/solidcraft-file-pr/SKILL.md` (writing
   error shape, API, format or schema) gets a design review before later parts are accepted. Drawings
   work targets the `drawings` branch. A UI addition needs full-flow 1280×720 screenshots and a
   small-window check.
-- **Evidence.** For observable CAD, UI or model behaviour (kernel, geometry, assembly and backend
-  changes included), the issue or PR carries real screenshots or a short recording from a small
-  reproduction, preferably before and after, with steps and expected/actual behaviour. Capture it
-  yourself; do not ask a human for evidence you can produce. Diagrams do not replace it. Changes with
-  nothing observable need none. Use a public-safe example, check for private designs, paths and account
-  details, attach the media rather than committing it.
+- **Evidence.** Screenshots go in the PR up front, only in these cases:
+  1. A visible UI change (a new or changed dialog, panel, menu, control, label or layout): before and
+     after, at 1280×720, plus a small-window check for a UI addition.
+  2. A change to what a model looks like (a feature that now builds, or builds differently): one
+     image of the result from a small public-safe reproduction, before and after when there was a
+     before.
+
+  Nothing else needs media: kernel, geometry or backend fixes proven by tests, refactors, tests,
+  documentation, error-message wording (quote the text in the body instead), a rebase or a merge of
+  main, and review fixes that change nothing visible. A recording is optional; when you attach one,
+  add a still image of the key frame, because review tools may not play video. Capture media yourself;
+  do not ask a human for evidence you can produce. Diagrams do not replace it. Check for private
+  designs, paths and account details, and attach the media rather than committing it.
+- **Reviewers ask for media only in those two cases**, and only when the PR has none. Media already in
+  the PR stands through rebases, merges of main and fixes that leave the visible result unchanged;
+  never ask for it again after the fact.
 - **Follow through.** Check the PR's merge status throughout and before handoff. Report the state you
   checked and any conflicts resolved. While the PR is open, keep monitoring it and say clearly that it
   is pending; do not claim it merged without checking.
@@ -144,7 +162,7 @@ at each step: what you found, what comes next, and what needs their decision.
 Explain that changes go to their own copy on GitHub. After approval, run:
 
 ```sh
-gh repo fork tangency-labs/solidcraft --clone --remote
+gh repo fork tangency-labs/solidcraft --clone
 cd solidcraft
 git remote -v
 ```
@@ -223,13 +241,10 @@ Use the affected crate and test module in commands such as:
 cargo test --profile ci -p solidcraft-engine --lib -- tests::feature_inputs_are_parameters
 cargo clippy -p solidcraft-engine --all-targets -- -D warnings
 cargo xtask fmt --check
-cargo xtask fast
+cargo xtask ci
 ```
 
-Run `cargo xtask fast` before each implementation commit: it checks what the change
-touches (for a kernel change, pass `--units <id,...>` from the PR's `Units:` line to run
-their goldens). CI and the merge queue run the full suite; run `cargo xtask ci` locally only to reproduce a CI
-failure. Report exactly what passed and what could not run; do not claim the full
+Run `cargo xtask ci` before pushing: it runs what your change needs. Report exactly what passed and what could not run; do not claim the full
 suite passed. Follow
 [testing guidance](../../../docs/book/src/dev/testing.md) for applicable checks.
 Review the diff, keep one topic, and commit the finished change. Before an approved
@@ -238,7 +253,7 @@ with `main`. Explain progress and ask before publishing each update.
 
 ### Faster local builds
 
-Both are opt-in tools on your machine. The repository doesn't require them, and CI builds without them.
+sccache is an opt-in tool on your machine. The repository doesn't require it, and CI builds without it.
 
 - **sccache** shares compiled crates across worktrees and branches, so a new worktree or a rebase
   recompiles only what changed. Install it with `cargo install sccache --locked` or your system's
@@ -251,20 +266,16 @@ Both are opt-in tools on your machine. The repository doesn't require them, and 
     build), so those are rebuilt as usual and the gain is in everything else. The usual
     combination is sccache plus debug info off (`CARGO_PROFILE_DEV_DEBUG=0`,
     `CARGO_PROFILE_TEST_DEBUG=0`): smaller targets and faster links.
-- **blaze** (https://github.com/indexable-inc/blaze, MIT or Apache-2.0) is an incremental build
-  daemon that keeps the workspace compiled in memory. Edit-build-test loops get much faster,
-  especially tests.
-  - Install it from crates.io (`cargo install cargo-blaze --locked`) or with Nix, as its README
-    describes. Prefer either over piping an install script from the web.
-  - Use it in the loop: `blaze check`, `blaze test`, `blaze run`, with cargo's usual flags.
-  - It uses its own code generation, so `cargo xtask fast`, `cargo xtask ci` and CI stay the
-    final word before you push.
-  - The daemon holds the project in memory (a few GB). Run one per machine, not one per worktree.
+- **blaze** (https://github.com/indexable-inc/blaze) doesn't build this workspace yet, so don't
+  plan around it. As of blaze 0.20261027 it stops on thread-local statics in tests
+  (`unsupported: writable static`) and on `unsupported: vector in the C ABI` in the app, and it
+  builds with its own toolchain instead of the pinned rustc. Keep sccache as the speed-up.
 
 ## 6. Show the result
 
-For visible changes, reproduce the result with a small public-safe example and
-capture actual screenshots or a short recording, preferably before and after.
+For the two cases in "Evidence" above (a visible UI change, or a change to what a
+model looks like), reproduce the result with a small public-safe example and capture
+screenshots, before and after where there was a before. Other changes need no media.
 For model output without a display, run:
 
 ```sh

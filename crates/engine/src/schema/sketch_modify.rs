@@ -514,6 +514,10 @@ pub struct FilletParams {
     pub radius: Option<Expr>,
     #[serde(flatten)]
     pub corners: CornerSelection,
+    /// For two parallel lines `a` and `b` that share no end: which end the half circle that joins
+    /// them closes, `start` (default) or `end`, along line `a`'s direction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<String>,
     /// The sketch (default: the one being edited).
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
@@ -531,8 +535,13 @@ impl FilletParams {
             Some(_) => Some(expr(p, "radius").ok_or_else(|| format!("`radius` {}", params::expr_problem(p.get("radius"))))?),
         };
         let corners = CornerSelection::read(p)?;
+        let end = match str_(p, "end") {
+            None => None,
+            Some(e @ ("start" | "end")) => Some(e.to_string()),
+            Some(_) => return Err("`end` must be \"start\" or \"end\"".into()),
+        };
         let sketch = sketch_of(p)?;
-        Ok(FilletParams { radius, corners, sketch })
+        Ok(FilletParams { radius, corners, end, sketch })
     }
 }
 
@@ -903,6 +912,11 @@ pub struct MoveParams {
     /// unchanged. Default: true. Not used with `copy`.
     #[serde(default)]
     pub rotate_constraints: Option<bool>,
+    /// How far along the sketch's normal, in mm, within 1 km: in a 3D sketch the moved lines
+    /// and fit-point splines (or their copies) become drawn 3D curves that far off the plane.
+    /// Default: 0.
+    #[serde(default)]
+    pub z: Option<f64>,
     /// The sketch (default: the one being edited).
     #[serde(default)]
     pub sketch: Option<SketchTarget>,
@@ -921,7 +935,8 @@ impl MoveParams {
         let entities = names(p, "entities")?;
         let sketch = sketch_of(p)?;
         let center = point_or_id(p, "center")?;
-        Ok(MoveParams { entities, translate, angle, center, copy, rotate_constraints, sketch })
+        let z = number(p, "z", "`z` must be a distance in mm")?;
+        Ok(MoveParams { entities, translate, angle, center, copy, rotate_constraints, z, sketch })
     }
 }
 
@@ -1596,6 +1611,9 @@ pub struct ScaleResult {
 pub struct TransformResult {
     /// The curves that moved, by id (an ellipse's axes come with it).
     pub curves: Vec<String>,
+    /// The constraints tying the transformed geometry to what stays that the transform let go,
+    /// as `{id, kind}`.
+    pub released: Vec<Value>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

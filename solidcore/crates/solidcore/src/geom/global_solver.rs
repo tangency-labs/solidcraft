@@ -65,6 +65,12 @@
 //!   the solve and back out afterwards (also on error), so solutions added
 //!   after `SolveIt` returns go to the solver's own array instead of the
 //!   caller's.
+//! - **Contact.** A duplicate `AddSortedSolution` drops leaves the solution it keeps
+//!   with the [`Contact::merged`](crate::geom::solution_array::Contact::merged) of both,
+//!   and a range `sm_CombineMinMax` keeps, makes
+//!   or cuts takes the [`Contact::absorbed`](crate::geom::solution_array::Contact::absorbed)
+//!   of the two (unclassified only when both
+//!   are): the contact of a point is not that of a stretch.
 //! - **Optional vectors** are copied into the solver (upstream keeps the
 //!   caller's pointer).
 //! - **Errors.** `AddSortedSolution` returns `Result` because the solution
@@ -111,12 +117,13 @@
 //!   owner object returns [`SolidError::Unported`] (see the `UNPORTED` marker).
 
 use crate::curve::crv_on_surf::CrvOnSurf;
+use crate::error::geom::GeomFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{line_closest_point, point_project_to_plane};
 use crate::geom::solution_array::{
-    EndClass, OwnDomains, ParameterDomains, Solution, SolutionArray, SolutionObject, SolutionType,
-    SortKey,
+    Contact, EndClass, OwnDomains, ParameterDomains, Solution, SolutionArray, SolutionObject,
+    SolutionType, SortKey,
 };
 use crate::geom::tol::is_zero;
 use crate::geom::tree::{AuxDataType, NodeData, NodeId, Tree, TreeNode};
@@ -776,13 +783,23 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
     /// [`SolidError::InvalidInput`] for a null slot or tree, or a node id the
     /// tree does not hold.
     pub fn branch_node(&self, branch: &Branch, index: usize) -> Result<&'t TreeNode<O>> {
+        Ok(self.branch_entry(branch, index)?.1)
+    }
+
+    /// The id and the node of `branch` in tree `index` (`apBranch[index]`), for a caller
+    /// that reads both.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`GlobalSolver::branch_node`].
+    pub fn branch_entry(&self, branch: &Branch, index: usize) -> Result<(NodeId, &'t TreeNode<O>)> {
         const OP: &str = "geom::global_solver::GlobalSolver::branch_node";
         let id = branch
             .get(index)
             .copied()
             .flatten()
             .ok_or_else(|| null_node(OP))?;
-        self.tree(index)?.node(id)
+        Ok((id, self.tree(index)?.node(id)?))
     }
 
     /// The bounding box of `branch`'s node in tree `index`
@@ -1347,7 +1364,12 @@ impl<'t, O: SolutionObject> GlobalSolver<'t, O> {
         self.check_num_trees(OP)?;
         // check for failure
         let Some(best) = self.find_largest_non_leaf(branch)? else {
-            return Err(SolidError::geom_failed(OP, "no node can be subdivided"));
+            return Err(SolidError::geom(
+                OP,
+                GeomFailure::NoNodeToSubdivide {
+                    trees: self.num_trees,
+                },
+            ));
         };
 
         if self.operation == SolverOperation::Rayfire {
@@ -1630,6 +1652,14 @@ fn combine_min_max<O: SolutionObject>(
     max: &mut Solution<O>,
     combine_contiguous_ranges: bool,
 ) -> Result<Option<Solution<O>>> {
+    // (not upstream) the contact of a range the two make, or one takes the other into
+    let both = min.contact.absorbed(max.contact);
+    let ranged = |s: Solution<O>| Solution {
+        contact: both,
+        unique: None,
+        shared_contact: None,
+        ..s
+    };
     // when 1st solution is rangeOfValues
     if min.solution_type == SolutionType::RangeOfValues {
         // and 2nd solution is a point - crMax->Start to crMin
@@ -1647,7 +1677,7 @@ fn combine_min_max<O: SolutionObject>(
                 || class1 == EndClass::AtEnd
                 || (class1 == EndClass::Within && operation != SolverOperation::Intersect)
             {
-                return Ok(Some(*min));
+                return Ok(Some(ranged(*min)));
             } else if class1 == EndClass::Within && operation == SolverOperation::Intersect {
                 // arrive here when inserting a intersection point solution into a range solution
 
@@ -1662,13 +1692,20 @@ fn combine_min_max<O: SolutionObject>(
                     // change point solution into a range that starts at the point solution
                     max.solution_type = SolutionType::RangeOfValues;
                     max.end = min.end;
+                    // (not upstream) a range made from a point is not that point's contact
+                    max.contact = both;
+                    max.unique = None;
+                    max.shared_contact = None;
 
                     // change min solution into a range that stops at the point solution
                     min.end = max.start;
+                    min.contact = both;
+                    min.unique = None;
+                    min.shared_contact = None;
                     return Ok(None);
                 }
                 // combine point into range
-                return Ok(Some(*min));
+                return Ok(Some(ranged(*min)));
             }
         } else {
             // MaxSolution is a range: classify Max Start and End against Min
@@ -1695,11 +1732,11 @@ fn combine_min_max<O: SolutionObject>(
 
             // Max is contained within Min
             if class1 == EndClass::Within && class2 == EndClass::Within {
-                return Ok(Some(*min));
+                return Ok(Some(ranged(*min)));
             }
 
             // The remaining cases require the combination of the intervals
-            let mut combined = *min;
+            let mut combined = ranged(*min);
             if class1 == EndClass::BelowStart {
                 combined.start = max.start;
             }
@@ -1715,7 +1752,7 @@ fn combine_min_max<O: SolutionObject>(
     if max.solution_type == SolutionType::RangeOfValues {
         let class1 = max.classify_solution_end(min, true)?;
         if class1.is_at_or_within() {
-            return Ok(Some(*max));
+            return Ok(Some(ranged(*max)));
         }
         // (upstream's following tests for -1, 1 and 0 can no longer succeed)
     }
@@ -2052,15 +2089,21 @@ pub trait GlobalSolve<'t, O: SolutionObject + 't> {
             let (pair, preferred) = self.identical_solutions(solution, test)?;
             if pair == SolutionPairType::Identical {
                 // save the preferred solution if possible, else better solution - improve tolerances
-                // (keeping the stored one, `Second`, is writing it back unchanged: nothing to do)
                 let keep = match preferred {
                     Some(PreferredSolution::First) => true,
                     Some(PreferredSolution::Second) => false,
                     None => solution.start.solution_value.abs() < test.start.solution_value.abs(),
                 };
-                if keep {
-                    self.solver_mut().solutions.set_at(ii, solution)?;
+                // (not upstream) the solution kept carries both contacts
+                let mut kept = if keep { *solution } else { *test };
+                kept.contact = test.contact.merged(solution.contact);
+                kept.shared_contact = None;
+                // (a unique box is a crossing's, by the root it carries: a merged solution
+                // that is not a crossing carries none, whichever of the two was kept)
+                if kept.contact != Contact::Crossing {
+                    kept.unique = None;
                 }
+                self.solver_mut().solutions.set_at(ii, &kept)?;
                 return Ok(());
             }
 
@@ -2654,6 +2697,106 @@ mod tests {
         assert_eq!(a.end.parameters[0], 1.0);
         assert_eq!(b.solution_type, SolutionType::RangeOfValues);
         assert_eq!(b.end.parameters[0], 2.0);
+    }
+
+    /// The range a tight point is turned into, when it splits a range, is a stretch,
+    /// not the point's contact, and the range it splits is cut at a point it did not
+    /// type: both are unclassified when the two were, and undecided once either was
+    /// typed.
+    #[test]
+    fn a_range_made_from_a_point_is_unclassified() {
+        for (range_contact, point_contact, want) in [
+            (
+                Contact::Unclassified,
+                Contact::Unclassified,
+                Contact::Unclassified,
+            ),
+            (Contact::Touching, Contact::Crossing, Contact::Undecided),
+            (Contact::Unclassified, Contact::Crossing, Contact::Undecided),
+        ] {
+            let mut solver: GlobalSolver<'_, Obj> = GlobalSolver::new();
+            solver.set_3d_tolerance(1e-6);
+            let mut whole = range(1e-3, 0.0, 1e-3, 2.0);
+            whole.contact = range_contact;
+            solver
+                .add_sorted_solution(&whole, SortKey::ByFirstParameter, true)
+                .unwrap();
+            let mut point = single(1e-9, 1.0);
+            point.contact = point_contact;
+            solver
+                .add_sorted_solution(&point, SortKey::ByFirstParameter, true)
+                .unwrap();
+            assert_eq!(solver.solutions.len(), 2);
+            let a = solver.solutions.get(0).unwrap();
+            let b = solver.solutions.get(1).unwrap();
+            assert_eq!((a.end.parameters[0], a.contact), (1.0, want));
+            assert_eq!(b.solution_type, SolutionType::RangeOfValues);
+            assert_eq!(b.contact, want);
+        }
+    }
+
+    /// A duplicate `add_sorted_solution` drops leaves the solution it keeps with the
+    /// merged contact of both, whichever of the two it keeps.
+    #[test]
+    fn a_dropped_duplicate_merges_its_contact_into_the_kept_one() {
+        for (stored, added, want) in [
+            (Contact::Crossing, Contact::Touching, Contact::Undecided),
+            (Contact::Crossing, Contact::Crossing, Contact::Undecided),
+            (Contact::Unclassified, Contact::Touching, Contact::Undecided),
+            (
+                Contact::Unclassified,
+                Contact::Unclassified,
+                Contact::Unclassified,
+            ),
+            (Contact::Undecided, Contact::Crossing, Contact::Undecided),
+        ] {
+            // the added one is tighter (kept), then looser (dropped)
+            for (v_stored, v_added) in [(2e-7, 1e-7), (1e-7, 2e-7)] {
+                let mut solver: GlobalSolver<'_, Obj> = GlobalSolver::new();
+                solver.set_solver_operation(SolverOperation::Find);
+                solver.set_3d_tolerance(1e-6);
+                let mut first = single(v_stored, 1.0);
+                first.contact = stored;
+                let mut second = single(v_added, 1.0);
+                second.contact = added;
+                for s in [first, second] {
+                    solver
+                        .add_sorted_solution(&s, SortKey::ByFirstParameter, true)
+                        .unwrap();
+                }
+                assert_eq!(solver.solutions.len(), 1);
+                let kept = solver.solutions.get(0).unwrap();
+                assert_eq!(kept.start.solution_value, 1e-7, "{stored:?} {added:?}");
+                assert_eq!(kept.contact, want, "{stored:?} {added:?} {v_stored}");
+                // the same with a unique box on either one or both: the solution kept is no
+                // crossing, so it keeps no box
+                let boxed = Some([[0.5, 1.5], [0.0, 1.0]]);
+                for (box_first, box_second) in [(true, false), (false, true), (true, true)] {
+                    let mut solver: GlobalSolver<'_, Obj> = GlobalSolver::new();
+                    solver.set_solver_operation(SolverOperation::Find);
+                    solver.set_3d_tolerance(1e-6);
+                    let (mut a, mut b) = (first, second);
+                    if box_first {
+                        a.unique = boxed;
+                    }
+                    if box_second {
+                        b.unique = boxed;
+                    }
+                    for s in [a, b] {
+                        solver
+                            .add_sorted_solution(&s, SortKey::ByFirstParameter, true)
+                            .unwrap();
+                    }
+                    assert_eq!(solver.solutions.len(), 1);
+                    let kept = solver.solutions.get(0).unwrap();
+                    assert_eq!(
+                        (kept.contact, kept.unique),
+                        (want, None),
+                        "{stored:?} {added:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

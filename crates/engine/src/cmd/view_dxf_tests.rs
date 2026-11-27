@@ -347,6 +347,47 @@ fn view_dxf_hides_finished_sketches_behind_bodies_but_draws_the_active_sketch_on
     assert!((length(&dashed) - 80.).abs() < 1e-3, "{}", length(&dashed));
 }
 
+/// A shown sketch under an extrusion's outline is drawn once, as the body's black line, not again
+/// in blue on SKETCH: a cutting service reads the blue copy as a marking line (#19507).
+#[test]
+fn view_dxf_draws_a_shown_sketch_under_a_bodys_outline_once() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Panel"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[40,30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Panel","distance":2,"body_name":"Panel"}));
+    let sketch = s.doc.features[0].id;
+    let sides = |v: &Value| {
+        let mut sides: Vec<i64> = lines(v).iter().map(|(a, b)| (a.dist(*b) * 1000.).round() as i64).collect();
+        sides.sort_unstable();
+        sides
+    };
+    for hidden in ["omit", "dashed"] {
+        // The body's own lines, with the sketch hidden. The top view is tilted a hair, so the
+        // panel's bottom edge on one side can show beside the top one: that line is the body's.
+        s.visibility.shown_sketches.retain(|id| *id != sketch);
+        let body = sides(&export(&mut s, camera(StandardView::Top), hidden));
+        assert!(
+            body.iter().filter(|l| **l == 30_000).count() >= 2 && body.iter().filter(|l| **l == 40_000).count() >= 2,
+            "hidden={hidden}: {body:?}"
+        );
+        s.visibility.shown_sketches.push(sketch);
+        assert!(crate::view::sketch_shown(&s, sketch));
+        let v = export(&mut s, camera(StandardView::Top), hidden);
+        assert_eq!(v["sketch"], 0, "hidden={hidden}: {v}");
+        let file = solidcraft_io::read_dxf_file(v["dxf"].as_str().unwrap()).unwrap();
+        assert!(file.entities().iter().all(|e| file.layer(e.layer()).unwrap().name() != "SKETCH"), "hidden={hidden}");
+        // Showing the sketch adds no line: the drawing is the body's lines alone.
+        assert_eq!(sides(&v), body, "hidden={hidden}");
+    }
+    // The sketch past the body keeps its own line: a second rectangle beside the panel.
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Beside"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0":[50,0],"p1":[60,10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let v = export(&mut s, camera(StandardView::Top), "omit");
+    assert!(v["sketch"].as_u64().is_some_and(|n| n > 0), "{v}");
+}
+
 #[test]
 fn view_dxf_zero_origin_puts_the_model_origin_at_the_drawing_zero() {
     let mut s = sample();
@@ -468,9 +509,11 @@ fn view_dxf_curves_arcs_with_dashed_hidden_lines_keep_their_layers_and_order() {
 // byte-baseline seam. This is not another production writer or parser.
 fn legacy_view_projection_bytes(s: &Session, cam: &Camera, dashed: bool) -> String {
     use solidcraft_io::test_support::{DxfEntity, DxfLayer, legacy_dxf_baseline};
-    let meshes = mesh_lines::prepare(s, CMD, 0.01, mesh_lines::Ask::default(), |b| s.body_visible(&b.name), refused).unwrap();
+    let meshes =
+        mesh_lines::prepare(s, &s.world_state().unwrap(), CMD, 0.01, mesh_lines::Ask::default(), |b| s.body_visible(&b.name), refused).unwrap();
     let parts = sketch::parts(s, 0.01).unwrap();
-    let drawing = mesh_lines::drawing(&meshes, &parts, &View::from_camera(cam)).unwrap();
+    let mut drawing = mesh_lines::drawing(&meshes, &parts, &View::from_camera(cam)).unwrap();
+    drawing.sketch = mesh_lines::sketch_off_lines(std::mem::take(&mut drawing.sketch), &drawing.lines, 0.02 + drawing.eps);
     let mut entities = Vec::new();
     let mut hidden = Vec::new();
     for line in drawing.lines {
@@ -590,4 +633,48 @@ fn view_dxf_front_view_of_a_tray_with_round_corner_reliefs_is_exported_not_refus
     assert!(stats["segments"].as_u64().unwrap() < 2_000, "{stats}");
     assert!(stats["occlusion_work"].as_u64().unwrap() < 2_000_000, "{stats}");
     assert!(v["visible"].as_u64().unwrap() > 0 && v["hidden"].as_u64().unwrap() > 0, "{v}");
+}
+
+/// #22913: with Section Analysis on, the view is exported as the section cuts it, not refused: the
+/// side each plane's normal points to is left out, and the cut faces' outlines are drawn. A
+/// `section` of its own stands in for the session's; `[]` draws the bodies whole.
+#[test]
+fn view_dxf_exports_the_view_as_the_section_cuts_it() {
+    let mut s = sample();
+    let top = camera(StandardView::Top);
+    let width = |v: &Value| {
+        let xs: Vec<f64> = lines(v).iter().flat_map(|(a, b)| [a.x, b.x]).collect();
+        xs.iter().copied().fold(f64::NEG_INFINITY, f64::max) - xs.iter().copied().fold(f64::INFINITY, f64::min)
+    };
+    assert!((width(&export(&mut s, top, "omit")) - 40.).abs() < 1e-3);
+    // Section Analysis on the YZ plane at x = 20: half the plate is left.
+    run(&mut s, "inspect.section", json!({"plane":"YZ","at":20}));
+    let cut = export(&mut s, top, "omit");
+    assert!((width(&cut) - 20.).abs() < 1e-3, "{}", width(&cut));
+    assert!((width(&run(&mut s, CMD, json!({"camera":top,"section":[]}))) - 40.).abs() < 1e-3);
+    run(&mut s, "inspect.section", json!({"clear":true}));
+    // Cut across y at 12, the side toward -y left out: from above, 40 by 18 of the plate is left.
+    let height = |v: &Value| {
+        let ys: Vec<f64> = lines(v).iter().flat_map(|(a, b)| [a.y, b.y]).collect();
+        ys.iter().copied().fold(f64::NEG_INFINITY, f64::max) - ys.iter().copied().fold(f64::INFINITY, f64::min)
+    };
+    let across_y = run(&mut s, CMD, json!({"camera":top,"section":[{"origin":[0,12,0],"normal":[0,-1,0]}]}));
+    assert!((width(&across_y) - 40.).abs() < 1e-3 && (height(&across_y) - 18.).abs() < 1e-3, "{} by {}", width(&across_y), height(&across_y));
+    // From the front, the blind hole is hidden in the plate; cut through its axis, its section shows:
+    // a line across the hole's top, 4 mm up, from x = 7 to 13 (the view is centred on (20, 15, 5)).
+    let front = camera(StandardView::Front);
+    let across_the_hole = |v: &Value| {
+        lines(v)
+            .iter()
+            .any(|(a, b)| (a.y + 1.).abs() < 1e-3 && (b.y + 1.).abs() < 1e-3 && (a.x.min(b.x) + 13.).abs() < 1e-3 && (a.x.max(b.x) + 7.).abs() < 1e-3)
+    };
+    assert!(!across_the_hole(&export(&mut s, front, "omit")));
+    let through_the_axis = json!([{"origin":[0,10,0],"normal":[0,-1,0]}]);
+    let section = run(&mut s, CMD, json!({"camera":front,"section":through_the_axis}));
+    assert!(across_the_hole(&section), "{:?}", lines(&section));
+    // Bad planes are refused, and so is a section that leaves nothing.
+    let refused = |s: &mut Session, section: Value| s.execute(CMD, &json!({"camera":front,"section":section})).unwrap_err().to_string();
+    assert!(refused(&mut s, json!([{"origin":[0,0,0],"normal":[0,0,0]}])).contains("normal that isn't zero"));
+    assert!(refused(&mut s, json!([{"origin":[0,0,-1],"normal":[0,0,1]}])).contains("cuts away every visible body"));
+    assert!(refused(&mut s, json!([{"origin":[0,0,0]}])).contains("each with an origin and a normal"));
 }

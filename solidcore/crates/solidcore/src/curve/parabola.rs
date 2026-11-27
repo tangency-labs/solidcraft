@@ -70,6 +70,7 @@
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::PARABOLA_TYPE;
 use crate::curve::curve::Curve;
+use crate::error::curve::CurveFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -177,7 +178,11 @@ fn trim_infinite(domain: &mut Extent1d) {
 /// `Ok` for any result but [`SolidError::Unported`] (a status upstream ignores).
 fn ignore_status<T>(r: Result<T>) -> Result<()> {
     match r {
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => Err(e),
         _ => Ok(()),
     }
 }
@@ -376,9 +381,12 @@ impl Parabola {
     /// `SM_ERR` for more than 3 derivatives.
     pub fn evaluate_step(&self, t: f64, num_derivs: usize) -> Result<Vec<Vec3>> {
         if num_derivs > 3 {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_EVAL,
-                "more than 3 derivatives were asked",
+                CurveFailure::TooManyDerivatives {
+                    asked: num_derivs,
+                    most: 3,
+                },
             ));
         }
         let mut t = t;
@@ -697,9 +705,9 @@ impl Parabola {
             let unit_scale = s.x == 1.0 && s.y == 1.0 && s.z == 1.0;
             if !unit_scale && (!are_same(s.x, s.y) || !are_same(s.x, s.z)) {
                 // Unable to scale analytical curves non-uniformly
-                return Err(SolidError::curve_failed(
+                return Err(SolidError::curve(
                     OP_XFORM,
-                    "the scale is not uniform",
+                    CurveFailure::NonUniformScale { scale: s },
                 ));
             }
         }
@@ -791,7 +799,11 @@ impl Parabola {
         // read the base type (status ignored upstream)
         let (base, read_ok) = match BSplineCurve::read_from_db(db, dim, version) {
             Ok(b) => (b, true),
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(_) => (BSplineCurve::default(), false),
         };
         let mut parabola = Self {
@@ -832,7 +844,15 @@ mod tests {
             assert!(a.distance(b) < 1e-12, "{t}: {a:?} {b:?}");
         }
         assert_eq!(p.base().form(), BSplineCurveForm::ParabolicArc);
-        assert!(p.evaluate_step(0.0, 4).is_err());
+        let err = p.evaluate_step(0.0, 4).unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::TooManyDerivatives { asked: 4, most: 3 })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
         let d = p.evaluate_step(1.0, 3).unwrap();
         assert_eq!(d.len(), 4);
         assert_eq!(d[2], Vec3::new(1.0, 0.0, 0.0));
@@ -896,7 +916,17 @@ mod tests {
     fn transform_rejects_nonuniform() {
         let mut p = sample();
         let r = p.transform(&Axis2Placement::default(), Some(Vec3::new(1.0, 2.0, 1.0)));
-        assert!(r.is_err());
+        let err = r.unwrap_err();
+        assert_eq!(
+            err.curve_failure(),
+            Some(&CurveFailure::NonUniformScale {
+                scale: Vec3::new(1.0, 2.0, 1.0)
+            })
+        );
+        assert_eq!(
+            crate::error::upstream_status(&err),
+            Some(crate::error::SM_ERR)
+        );
         p.transform(&Axis2Placement::default(), Some(Vec3::new(2.0, 2.0, 2.0)))
             .unwrap();
         assert_eq!(p.focal_dist(), 1.0);

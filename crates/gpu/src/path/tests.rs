@@ -2164,15 +2164,26 @@ fn gpu_thin_lens_focus_and_defocus_match_geometric_oracle() {
                     assert!((actual - expected).len() < 4e-6, "fov={fov},uv=({ux},{uy}),slot={slot}: {actual:?} vs {expected:?}");
                 }
                 assert!((origin - eye - disk).len() < 3e-6);
-                let focus_hit = origin + direction * ((focal - origin).dot(back) / direction.dot(back));
-                assert!((focus_hit - focal).len() < 5e-6, "focus {focus_hit:?} != {focal:?}");
+                // How far a point `reach` along the ray may be from the f64 oracle when the ray is
+                // exact f32 work (#13425). The readback holds the origin biased by 16 and the
+                // direction biased by 2 (camera_reference), so each component is rounded to half
+                // the f32 spacing there: 2^-20 on [16, 32) and 2^-23 on [2, 4). The shader's own
+                // f32 arithmetic on the unit direction gets 2e-7 more (f32 epsilon is 1.2e-7).
+                // The direction's share grows with the reach, so a wide view's far corner
+                // (reach 15.7 at fov 2) is allowed more than the axis (reach 9).
+                let f32_limit = |reach: f64| 3f64.sqrt() * (2f64.powi(-20) + reach * 2f64.powi(-23)) + reach * 2e-7;
+                let reach = (focal - origin).dot(back) / direction.dot(back);
+                let focus_hit = origin + direction * reach;
+                assert!((focus_hit - focal).len() < f32_limit(reach), "fov={fov},uv=({ux},{uy}): focus {focus_hit:?} != {focal:?}");
                 // At axial depth z, signed displacement from the pinhole hit is
                 // disk*(1-z/focus). Check both sides, including the flip beyond focus.
                 for depth in [4.5, 18.0] {
                     let centre = eye - back * depth;
-                    let hit = origin + direction * ((centre - origin).dot(back) / direction.dot(back));
+                    let reach = (centre - origin).dot(back) / direction.dot(back);
+                    let hit = origin + direction * reach;
                     let pinhole = eye + (focal - eye) * (depth / lens.focus_distance_mm);
-                    assert!((hit - pinhole - disk * (1.0 - depth / lens.focus_distance_mm)).len() < 1e-5);
+                    let miss = (hit - pinhole - disk * (1.0 - depth / lens.focus_distance_mm)).len();
+                    assert!(miss < f32_limit(reach), "fov={fov},uv=({ux},{uy}),depth={depth}: off by {miss:e}");
                 }
             }
         }
@@ -8162,4 +8173,61 @@ fn gpu_paged_optical_scratch_and_refreshed_photons_keep_global_sample_identity()
         }
     }
     println!("paged rough optical/photon parity: indexed records and masks exact; maximum independent-gather difference={maximum_difference}");
+}
+
+#[test]
+fn gpu_scene_preparation_cache_reuses_buffers_and_preserves_bit_identical_output() {
+    let Some(executor) = executor() else { return };
+    let scene = sphere_grid(white(), 16, 32);
+    let image = request(8);
+    let options = JobOptions { samples: 2, max_depth: 3, seed: 19, ..Default::default() };
+
+    // Preflight on a cold cache validates without populating GPU cache state.
+    executor.validate_prepared(&scene, &image, options, &CancelToken::default()).unwrap();
+    assert!(executor.context.scene_cache.lock().unwrap().is_empty(), "preflight must not retain GPU buffers on a miss");
+
+    // First job misses and populates the single-entry cache.
+    let mut cold = Task::new(executor.context.clone(), scene.clone(), image.clone(), options, CancelToken::default()).unwrap();
+    assert!(!cold.scene_cache_hit);
+    assert!(cold.metrics.1 > 0);
+    for _ in 0..options.samples {
+        cold.complete_sample().unwrap();
+    }
+    let cold_linear = cold.read_linear().unwrap();
+
+    // Second job with identical scene, camera target, and nested_media hits the cache and renders bit-identically.
+    let mut warm = Task::new(executor.context.clone(), scene.clone(), image.clone(), options, CancelToken::default()).unwrap();
+    assert!(warm.scene_cache_hit);
+    assert!(warm.metrics.1 < cold.metrics.1, "cached job must skip geometry and BVH VRAM upload");
+    for _ in 0..options.samples {
+        warm.complete_sample().unwrap();
+    }
+    let warm_linear = warm.read_linear().unwrap();
+    assert_eq!(warm_linear.len(), cold_linear.len());
+    for (a, b) in cold_linear.iter().zip(&warm_linear) {
+        assert_eq!(a.map(f32::to_bits), b.map(f32::to_bits), "cached preparation must produce bit-identical pixels");
+    }
+
+    // Orbiting around the same camera.target hits the cache too.
+    let mut orbited = image.clone();
+    orbited.camera.yaw += 0.5;
+    orbited.camera.distance *= 1.25;
+    let orbited_task = Task::new(executor.context.clone(), scene.clone(), orbited, options, CancelToken::default()).unwrap();
+    assert!(orbited_task.scene_cache_hit);
+
+    // Moving camera.target changes the rebase origin -> miss and evict.
+    let mut panned = image.clone();
+    panned.camera.target += Vec3::new(0.25, 0.0, 0.0);
+    let panned_task = Task::new(executor.context.clone(), scene.clone(), panned.clone(), options, CancelToken::default()).unwrap();
+    assert!(!panned_task.scene_cache_hit);
+
+    // Changing surface appearance invalidates the cache too.
+    let mut repainted = scene;
+    repainted.meshes[0].surface = Some(OpaqueSurface::new(Vec3::new(0.2, 0.5, 0.8), 0.1, 0.4, 1.5).unwrap());
+    let repainted_task = Task::new(executor.context.clone(), repainted, panned, options, CancelToken::default()).unwrap();
+    assert!(!repainted_task.scene_cache_hit);
+
+    // Explicit eviction clears the single-entry cache cleanly.
+    executor.context.clear_scene_cache();
+    assert!(executor.context.scene_cache.lock().unwrap().is_empty());
 }

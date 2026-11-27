@@ -13,8 +13,9 @@
 use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, FRAC_PI_3, FRAC_PI_4, PI, TAU};
 
 use solidcore_ops::prism::{
-    extrude_planar_regions, fitted_loop, loop_holds, planar_regions_boolean, prism_equivalent,
-    prism_section, region_area, PrismSection,
+    extrude_planar_regions, fill_channel, fitted_loop, loop_crosses_itself, loop_holds,
+    planar_regions_boolean, prism_equivalent, prism_section, region_area, Contour, FillFailure,
+    FillOptions, FillSide, PrismSection,
 };
 use solidcore_ops::{make_box, make_cylinder, session, Body, BooleanOp, CheckLevel, Error};
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
@@ -1481,6 +1482,55 @@ fn loop_holds_a_point_on_an_edge_line_off_the_loop() {
     assert_eq!(loop_holds(&sq, v(5.0, 0.0)), None);
 }
 
+/// The distance to a loop's segment is exact for a line and an arc and none for a free-form
+/// curve, so a caller measuring a clearance to a loop knows which segments it could not measure.
+#[test]
+fn segment_distance_is_exact_for_lines_and_arcs_and_none_for_curves() {
+    use solidcore_ops::prism::segment_distance;
+    let line = Seg2::Line {
+        a: v(0.0, 0.0),
+        b: v(10.0, 0.0),
+    };
+    assert_eq!(segment_distance(&line, v(5.0, 3.0)), Some(3.0));
+    assert_eq!(segment_distance(&line, v(-3.0, 4.0)), Some(5.0));
+    let arc = Seg2::Arc {
+        center: v(0.0, 0.0),
+        radius: 5.0,
+        start: 0.0,
+        sweep: FRAC_PI_2,
+    };
+    assert_eq!(segment_distance(&arc, v(10.0, 0.0)), Some(5.0));
+    let curve = Seg2::Cubic {
+        p0: v(0.0, 0.0),
+        p1: v(1.0, 2.0),
+        p2: v(3.0, 2.0),
+        p3: v(4.0, 0.0),
+    };
+    assert_eq!(segment_distance(&curve, v(2.0, 5.0)), None);
+    assert_eq!(segment_distance(&line, v(f64::NAN, 0.0)), None);
+    // A whole circle hole is the distance to its rim: the sheet's holes are measured so.
+    let hole = Loop2::circle(v(30.0, 40.0), 2.125);
+    let to_rim = hole
+        .segs
+        .iter()
+        .filter_map(|s| segment_distance(s, v(30.0, 36.0)))
+        .fold(f64::INFINITY, f64::min);
+    assert!((to_rim - (4.0 - 2.125)).abs() < 1e-12, "{to_rim}");
+}
+
+/// A hole in the flat is one hole when its centre and radius agree within the tolerance, and a note
+/// naming it stands beside it, level with its centre.
+#[test]
+fn a_hole_is_told_from_another_and_named_beside_itself() {
+    use solidcore_ops::prism::{note_beside, same_circle};
+    let hole = (v(30.0, 40.0), 2.125);
+    assert!(same_circle(hole, (v(30.0 + 5e-7, 40.0), 2.125), 1e-6));
+    assert!(!same_circle(hole, (v(30.0 + 2e-6, 40.0), 2.125), 1e-6));
+    assert!(!same_circle(hole, (v(30.0, 40.0), 2.125 + 2e-6), 1e-6));
+    let at = note_beside(hole, 3.0);
+    assert_eq!((at.x, at.y), (30.0 + 2.125 + 1.5, 40.0 - 1.5));
+}
+
 #[test]
 fn directed_planar_sweep_preserves_record_coordinates() {
     let center = v(10.0, 20.0);
@@ -1495,27 +1545,33 @@ fn directed_planar_sweep_preserves_record_coordinates() {
 }
 
 #[test]
-fn hatch_record_admission_bounds_conversion_before_geometry() {
-    use solidcore_ops::hatch::generate;
-    use solidcore_record::hatch::{Invalid, Pattern};
-    let pattern = Pattern::lines_45();
+fn line_family_record_admission_bounds_conversion_before_geometry() {
+    use solidcore_ops::profile::clip_line_family;
+    use solidcore_record::profile::line_family::{Invalid, LineFamily};
+    let families = [LineFamily {
+        angle: FRAC_PI_4,
+        origin: v(0.0, 0.0),
+        delta_x: 0.0,
+        delta_y: 1.0,
+        dashes: Vec::new(),
+    }];
     let line = Seg2::Line {
         a: v(0.0, 0.0),
         b: v(1.0, 0.0),
     };
     let mut region = Region2 {
         outer: Loop2 {
-            segs: vec![line; solidcore::hatch::MAX_INPUT_PIECES + 1],
+            segs: vec![line; solidcore::prism::profile::line_family::MAX_INPUT_PIECES + 1],
         },
         holes: Vec::new(),
     };
     assert_eq!(
-        generate(&pattern, &region),
+        clip_line_family(&families, &region),
         Err(Invalid("input piece budget exhausted"))
     );
     region.outer.segs.pop();
     assert_ne!(
-        generate(&pattern, &region),
+        clip_line_family(&families, &region),
         Err(Invalid("input piece budget exhausted")),
         "the exact ceiling remains inclusive"
     );
@@ -1525,17 +1581,20 @@ fn hatch_record_admission_bounds_conversion_before_geometry() {
         holes: vec![circle.clone(), circle],
     };
     assert_eq!(
-        generate(&pattern, &region),
+        clip_line_family(&families, &region),
         Err(Invalid("not supported yet: multiple circular hatch holes"))
     );
     region = Region2 {
         outer: Loop2 {
             segs: vec![line; 3],
         },
-        holes: vec![Loop2::default(); solidcore::hatch::MAX_INPUT_PIECES / 3 + 1],
+        holes: vec![
+            Loop2::default();
+            solidcore::prism::profile::line_family::MAX_INPUT_PIECES / 3 + 1
+        ],
     };
     assert_eq!(
-        generate(&pattern, &region),
+        clip_line_family(&families, &region),
         Err(Invalid("too many region holes"))
     );
 }
@@ -1816,4 +1875,755 @@ fn a_round_notch_drawn_as_two_arcs_keeps_their_meeting_points_on_its_outline() {
         "{}",
         area(&out[0])
     );
+}
+
+/// A face strays across a direction by its tilt over its own size (the diagonal of its tight
+/// box), in closed form: on a Y-groove plate swept along z the walls not at all, each cap by
+/// twice its diagonal, the 30° bevel across x by √3 times its own diagonal, the top not at all;
+/// a cylinder's side along its axis not at all and across it by four times its box diagonal; a
+/// wide thin disc's caps by their whole diameter (a cap's only vertex is its seam's, brett19 on
+/// #21614); a ruled spline net along its rulings not at all, short or long, and across a tilt by
+/// twice its height times the tilt's sine; any finite scale of a direction as the unit one; zero
+/// no bound; NaN and a face past the faces refused.
+#[test]
+fn a_face_strays_across_a_direction_by_its_tilt_over_its_own_size() {
+    let zone = solidcore_ops::sweep::zone_tolerance().unwrap();
+    let close = |got: f64, want: f64, what: &str| {
+        assert!((got - want).abs() <= 1e-6 * want, "{what}: {got} != {want}");
+    };
+    let t = 30.0_f64.to_radians().tan();
+    let top = 0.5 + 7.0 * t;
+    let corners = [
+        v(-40.0, 0.0),
+        v(-40.0, -8.0),
+        v(-0.5, -8.0),
+        v(-0.5, -7.0),
+        v(-top, 0.0),
+    ];
+    let region = Region2 {
+        outer: Loop2::polygon(&corners),
+        holes: vec![],
+    };
+    let plate = extrude_planar_regions(&Plane::XY, &[region], 0.0, 120.0).unwrap();
+    let (_, order) = plate.to_record().unwrap();
+    let normal = |f: usize| plate.face_plane_normal(&order, f).unwrap().unwrap().value;
+    let stray = |f: usize, d: [f64; 3]| plate.face_straying(&order, f, d).unwrap().unwrap();
+    let cap = (39.5_f64.powi(2) + 8.0_f64.powi(2)).sqrt();
+    let bevel = ((7.0 * t).powi(2) + 7.0_f64.powi(2) + 120.0_f64.powi(2)).sqrt();
+    let (mut caps, mut bevels, mut tops) = (0, 0, 0);
+    for f in 0..order.faces.len() {
+        let n = normal(f);
+        let along = stray(f, [0.0, 0.0, 1.0]);
+        if n[2].abs() > 0.99 {
+            caps += 1;
+            close(along, 2.0 * cap, "cap");
+            continue;
+        }
+        assert!(along <= zone, "face {f}: {along}");
+        let across = stray(f, [1.0, 0.0, 0.0]);
+        if n[1] > 0.99 {
+            tops += 1;
+            assert!(across <= zone, "top: {across}");
+        } else if n[0] > 0.1 && n[1] > 0.1 {
+            bevels += 1;
+            close(across, 3.0_f64.sqrt() * bevel, "bevel");
+        }
+    }
+    assert_eq!((caps, bevels, tops), (2, 1, 1));
+    // any finite scale of a direction gives the unit direction's bound
+    let f = (0..order.faces.len())
+        .find(|&f| normal(f)[0] > 0.1 && normal(f)[1] > 0.1)
+        .unwrap();
+    let unit = stray(f, [1.0, 0.0, 0.0]);
+    for scale in [7.0, 1e200, 1e-200] {
+        let scaled = stray(f, [scale, 0.0, 0.0]);
+        assert!(
+            (scaled - unit).abs() <= 1e-12 * unit,
+            "{scale}: {scaled} != {unit}"
+        );
+    }
+    assert_eq!(plate.face_straying(&order, f, [0.0; 3]).unwrap(), None);
+    assert!(matches!(
+        plate.face_straying(&order, f, [f64::NAN, 0.0, 1.0]),
+        Err(Error::Argument)
+    ));
+    assert!(matches!(
+        plate.face_straying(&order, order.faces.len(), [0.0, 0.0, 1.0]),
+        Err(Error::Argument)
+    ));
+
+    // a cylinder of radius 5 and height 20: its side's box diagonal is √600
+    let cylinder = make_cylinder([0.0; 3], 5.0, 20.0).unwrap();
+    let (_, order) = cylinder.to_record().unwrap();
+    let side = (0..order.faces.len())
+        .find(|&f| cylinder.face_plane_normal(&order, f).unwrap().is_none())
+        .unwrap();
+    let along = cylinder
+        .face_straying(&order, side, [0.0, 0.0, 1.0])
+        .unwrap()
+        .unwrap();
+    assert!(along <= zone, "{along}");
+    let across = cylinder
+        .face_straying(&order, side, [1.0, 0.0, 0.0])
+        .unwrap()
+        .unwrap();
+    close(across, 4.0 * 600.0_f64.sqrt(), "side across x");
+
+    // a disc of radius 1000 and height 1, d 4e-6 off its plane: a line along d across a cap
+    // leaves it by 8e-3, so each cap is far from straight (its vertex box would have said 1)
+    let disc = make_cylinder([0.0; 3], 1000.0, 1.0).unwrap();
+    let (_, order) = disc.to_record().unwrap();
+    let d = [1.0, 0.0, 4e-6];
+    let mut flat = 0;
+    for f in 0..order.faces.len() {
+        if disc.face_plane_normal(&order, f).unwrap().is_some() {
+            flat += 1;
+            let got = disc.face_straying(&order, f, d).unwrap().unwrap();
+            close(got, 2.0 * 8.0_f64.sqrt() * 1000.0 * 4e-6, "disc cap");
+        }
+    }
+    assert_eq!(flat, 2);
+
+    // a plain ruled spline net (brett19 on #21614): a degree-1 loft between a cubic at z = 0 and
+    // the same cubic at z = h runs straight along its rulings, however short they are against
+    // its width, and strays across a direction tilted θ off them by 2·h·sin θ
+    let ruled = |width: f64, h: f64| {
+        let cubic = |z: f64| solidcore_ops::sweep::Curve::Nurbs {
+            degree: 3,
+            points: vec![
+                [0.0, 0.0, z, 1.0],
+                [0.3 * width, 0.2 * width, z, 1.0],
+                [0.7 * width, -0.2 * width, z, 1.0],
+                [width, 0.0, z, 1.0],
+            ],
+            knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        };
+        let sheet =
+            solidcore_ops::sweep::loft(&[vec![cubic(0.0)], vec![cubic(h)]], 1, false).unwrap();
+        let (_, order) = sheet.to_record().unwrap();
+        assert_eq!(order.faces.len(), 1);
+        (sheet, order)
+    };
+    for (width, h) in [(10.0, 10.0), (10.0, 1.0), (1000.0, 1.0)] {
+        let (sheet, order) = ruled(width, h);
+        let along = sheet
+            .face_straying(&order, 0, [0.0, 0.0, 1.0])
+            .unwrap()
+            .unwrap();
+        assert!(along <= zone, "ruled {width} x {h}: {along}");
+    }
+    let (sheet, order) = ruled(10.0, 10.0);
+    let tilted = sheet
+        .face_straying(&order, 0, [1e-3, 0.0, 1.0])
+        .unwrap()
+        .unwrap();
+    let sin = 1e-3 / (1.0 + 1e-6_f64).sqrt();
+    close(tilted, 2.0 * 10.0 * sin, "ruled, tilted");
+}
+
+/// The record faces of `body` whose outward plane normal is `n` (within 1e-9 per component).
+fn faces_facing(body: &Body, order: &solidcore_ops::Order, n: [f64; 3]) -> Vec<usize> {
+    (0..order.faces.len())
+        .filter(|&f| {
+            body.face_plane_normal(order, f)
+                .unwrap()
+                .is_some_and(|m| m.value.iter().zip(n).all(|(a, b)| (a - b).abs() < 1e-9))
+        })
+        .collect()
+}
+
+/// The edges faces `a` and `b` of `body` share.
+fn shared_edges(body: &Body, order: &solidcore_ops::Order, a: usize, b: usize) -> Vec<usize> {
+    let ea = body.rim_edges(order, &[a]).unwrap();
+    let eb = body.rim_edges(order, &[b]).unwrap();
+    ea.into_iter().filter(|e| eb.contains(e)).collect()
+}
+
+/// An L-shaped plate seen from above (brett19's probe on #22033): its top face runs from x = -40
+/// to -1 for z in 0..120 and on to x = 200 for z in 120..240, so the face's centroid (x about 66)
+/// lies past its edge at x = -1. The direction into the top face from that edge is -x all the
+/// same, and into the wall below it is down; an edge that does not bound the face is refused.
+#[test]
+fn the_direction_into_a_face_comes_from_its_loop_not_its_centroid() {
+    all_fixes();
+    let above = Plane {
+        origin: Vec3::new(0.0, 0.0, 0.0),
+        x: Vec3::new(1.0, 0.0, 0.0),
+        y: Vec3::new(0.0, 0.0, 1.0),
+    };
+    let outline = [
+        v(-40.0, 0.0),
+        v(-1.0, 0.0),
+        v(-1.0, 120.0),
+        v(200.0, 120.0),
+        v(200.0, 240.0),
+        v(-40.0, 240.0),
+    ];
+    let region = Region2 {
+        outer: Loop2::polygon(&outline),
+        holes: vec![],
+    };
+    let plate = extrude_planar_regions(&above, &[region], 0.0, 8.0).unwrap();
+    let (_, order) = plate.to_record().unwrap();
+    let top = faces_facing(&plate, &order, [0.0, 1.0, 0.0]);
+    assert_eq!(top.len(), 1, "{top:?}");
+    let top = top[0];
+    let centroid = plate.face_centroid(&order, top, 1e-8).unwrap().centroid;
+    assert!(centroid[0] > 60.0, "{centroid:?}");
+    let wall = faces_facing(&plate, &order, [1.0, 0.0, 0.0])
+        .into_iter()
+        .find(|&f| {
+            shared_edges(&plate, &order, f, top)
+                .iter()
+                .any(|&e| (plate.edge_middle(&order, e).unwrap()[0] + 1.0).abs() < 1e-9)
+        })
+        .unwrap();
+    let toe = shared_edges(&plate, &order, wall, top);
+    assert_eq!(toe.len(), 1, "{toe:?}");
+    let near = |got: [f64; 3], want: [f64; 3]| {
+        assert!(
+            got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-9),
+            "{got:?} != {want:?}"
+        );
+    };
+    near(
+        plate.edge_inward(&order, toe[0], top).unwrap(),
+        [-1.0, 0.0, 0.0],
+    );
+    near(
+        plate.edge_inward(&order, toe[0], wall).unwrap(),
+        [0.0, -1.0, 0.0],
+    );
+    let bottom = faces_facing(&plate, &order, [0.0, -1.0, 0.0])[0];
+    assert!(matches!(
+        plate.edge_inward(&order, toe[0], bottom),
+        Err(Error::Argument)
+    ));
+}
+
+/// The direction faces run straight along: a plane pair gives it (on one body or two, in any
+/// order); a cylinder gives its axis where the planes are parallel or there are none; a face
+/// across the only direction is not straight; parallel planes alone give none.
+#[test]
+fn faces_run_straight_along_a_plane_pair_or_else_a_cylinder_axis() {
+    use solidcore_ops::measure::{straight_direction, Straight, StraightBy};
+    all_fixes();
+    let a = make_box([0.0, 0.0, 0.0], [10.0, 20.0, 30.0]).unwrap();
+    let (_, ao) = a.to_record().unwrap();
+    let b = make_box([20.0, 0.0, 0.0], [10.0, 20.0, 30.0]).unwrap();
+    let (_, bo) = b.to_record().unwrap();
+    let top = faces_facing(&a, &ao, [0.0, 0.0, 1.0])[0];
+    let side = faces_facing(&b, &bo, [-1.0, 0.0, 0.0])[0];
+    // +z and -x: their cross product is along y
+    let along = |got: Straight, want: [f64; 3]| match got {
+        Straight::Along { direction, .. } => assert!(
+            direction
+                .iter()
+                .zip(want)
+                .all(|(p, q)| (p - q).abs() < 1e-12),
+            "{direction:?}"
+        ),
+        other => panic!("not straight along {want:?}: {other:?}"),
+    };
+    let one = straight_direction(&[(&a, &ao, top), (&b, &bo, side)]).unwrap();
+    along(one, [0.0, 1.0, 0.0]);
+    assert!(matches!(
+        one,
+        Straight::Along {
+            by: StraightBy::Planes(..),
+            ..
+        }
+    ));
+    assert_eq!(
+        straight_direction(&[(&b, &bo, side), (&a, &ao, top)]).unwrap(),
+        match one {
+            Straight::Along { direction, .. } => Straight::Along {
+                direction,
+                by: StraightBy::Planes(1, 0),
+            },
+            other => other,
+        }
+    );
+    // two parallel faces give no direction
+    let bottom = faces_facing(&a, &ao, [0.0, 0.0, -1.0])[0];
+    assert_eq!(
+        straight_direction(&[(&a, &ao, top), (&a, &ao, bottom)]).unwrap(),
+        Straight::Undetermined
+    );
+    // a cylinder's side: along its axis; with its cap, the cap is across it
+    let c = make_cylinder([0.0, 0.0, 0.0], 5.0, 20.0).unwrap();
+    let (_, co) = c.to_record().unwrap();
+    let round = (0..co.faces.len())
+        .find(|&f| c.face_plane_normal(&co, f).unwrap().is_none())
+        .unwrap();
+    let cap = faces_facing(&c, &co, [0.0, 0.0, 1.0])[0];
+    let got = straight_direction(&[(&c, &co, round)]).unwrap();
+    along(got, [0.0, 0.0, 1.0]);
+    assert!(matches!(
+        got,
+        Straight::Along {
+            by: StraightBy::Axis(0),
+            ..
+        }
+    ));
+    assert_eq!(
+        straight_direction(&[(&c, &co, round), (&c, &co, cap)]).unwrap(),
+        Straight::NotStraight { face: 1 }
+    );
+}
+
+fn cross(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+fn unit3(a: [f64; 3]) -> [f64; 3] {
+    let n = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+    a.map(|c| c / n)
+}
+
+fn vec3(a: [f64; 3]) -> Vec3 {
+    Vec3::new(a[0], a[1], a[2])
+}
+
+/// A 10 by 10 plate 1 thick whose top faces `n`, its sides along `x` (square to `n`) and `n × x`,
+/// and the record index of its top face.
+fn plate_facing(n: [f64; 3], x: [f64; 3]) -> (Body, solidcore_ops::Order, usize) {
+    let (n, x) = (unit3(n), unit3(x));
+    let plane = Plane {
+        origin: Vec3::new(0.0, 0.0, 0.0),
+        x: vec3(x),
+        y: vec3(cross(n, x)),
+    };
+    let body =
+        extrude_planar_regions(&plane, &[rectangle(v(0.0, 0.0), v(10.0, 10.0))], 0.0, 1.0).unwrap();
+    let (_, order) = body.to_record().unwrap();
+    let top = faces_facing(&body, &order, n);
+    assert_eq!(top.len(), 1, "{top:?}");
+    (body, order, top[0])
+}
+
+/// brett19's probe on #22066: three 10 mm faces off the world axes, each tilted off square to y by
+/// 0.9 of what the zone allows. y proves all three straight; the cross product of the two furthest
+/// from parallel does not prove the third, so the answer is a direction inside every face's band.
+#[test]
+fn faces_tilted_within_the_zone_run_along_a_direction_inside_every_band() {
+    use solidcore_ops::measure::{straight_direction, Straight, StraightBy};
+    all_fixes();
+    let zone = solidcore_ops::sweep::zone_tolerance().unwrap();
+    let alpha = 0.9 * zone / (2.0 * 10.0 * 2.0_f64.sqrt());
+    let a = plate_facing([0.0, alpha, 1.0], [1.0, 0.0, 0.0]);
+    let b = plate_facing([1.0, alpha, 0.0], [0.0, 0.0, 1.0]);
+    let c = plate_facing([1.0, -alpha, 1.0], [1.0, 0.0, -1.0]);
+    let faces = [(&a.0, &a.1, a.2), (&b.0, &b.1, b.2), (&c.0, &c.1, c.2)];
+    for (body, order, face) in faces {
+        let e = body
+            .face_straying(order, face, [0.0, 1.0, 0.0])
+            .unwrap()
+            .unwrap();
+        assert!(e <= zone, "{e}");
+    }
+    let got = straight_direction(&faces).unwrap();
+    let Straight::Along { direction, by } = got else {
+        panic!("{got:?}");
+    };
+    assert_eq!(by, StraightBy::Bands, "{got:?}");
+    assert!((direction[1] - 1.0).abs() < 1e-12, "{direction:?}");
+    for (body, order, face) in faces {
+        let e = body.face_straying(order, face, direction).unwrap().unwrap();
+        assert!(e <= zone, "{e}");
+    }
+}
+
+/// Flipped senses on #22066: the faces +x, +y and -x of a box, and the same with the first and
+/// last swapped, give the same direction and name the same positions. +x and -x share one
+/// canonical normal, so the pair names the first of them passed (the review bot on #22066): +x
+/// in the first call, -x in the second.
+#[test]
+fn flipped_senses_give_the_same_direction_and_name_the_first_of_tied_faces() {
+    use solidcore_ops::measure::{straight_direction, Straight, StraightBy};
+    all_fixes();
+    let a = make_box([0.0, 0.0, 0.0], [10.0, 20.0, 30.0]).unwrap();
+    let (_, ao) = a.to_record().unwrap();
+    let face = |n: [f64; 3]| faces_facing(&a, &ao, n)[0];
+    let (px, py, nx) = (
+        face([1.0, 0.0, 0.0]),
+        face([0.0, 1.0, 0.0]),
+        face([-1.0, 0.0, 0.0]),
+    );
+    let named = |inputs: [usize; 3]| {
+        let faces: Vec<_> = inputs.iter().map(|&f| (&a, &ao, f)).collect();
+        match straight_direction(&faces).unwrap() {
+            Straight::Along {
+                direction,
+                by: StraightBy::Planes(i, j),
+            } => (direction, [inputs[i], inputs[j]]),
+            got => panic!("{got:?}"),
+        }
+    };
+    assert_eq!(named([px, py, nx]), ([0.0, 0.0, 1.0], [py, px]));
+    assert_eq!(named([nx, py, px]), ([0.0, 0.0, 1.0], [py, nx]));
+}
+
+/// The review bot on #22066: a face with no band (a ruled spline net whose rulings lean 1e-3 off z)
+/// strays along z, the direction of a box's +x and +y faces, which is inside both their bands.
+/// That proves no refusal, so the answer is `Undecided`, not `NotStraight` naming the net.
+#[test]
+fn a_face_with_no_band_that_strays_is_undecided_not_refused() {
+    use solidcore_ops::measure::{straight_direction, Straight};
+    all_fixes();
+    let a = make_box([0.0, 0.0, 0.0], [10.0, 20.0, 30.0]).unwrap();
+    let (_, ao) = a.to_record().unwrap();
+    let (px, py) = (
+        faces_facing(&a, &ao, [1.0, 0.0, 0.0])[0],
+        faces_facing(&a, &ao, [0.0, 1.0, 0.0])[0],
+    );
+    let cubic = |z: f64, dx: f64| solidcore_ops::sweep::Curve::Nurbs {
+        degree: 3,
+        points: vec![
+            [dx, 0.0, z, 1.0],
+            [3.0 + dx, 2.0, z, 1.0],
+            [7.0 + dx, -2.0, z, 1.0],
+            [10.0 + dx, 0.0, z, 1.0],
+        ],
+        knots: vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+    };
+    let sheet =
+        solidcore_ops::sweep::loft(&[vec![cubic(0.0, 0.0)], vec![cubic(10.0, 0.01)]], 1, false)
+            .unwrap();
+    let (_, so) = sheet.to_record().unwrap();
+    assert_eq!(so.faces.len(), 1);
+    let zone = solidcore_ops::sweep::zone_tolerance().unwrap();
+    let strays = sheet
+        .face_straying(&so, 0, [0.0, 0.0, 1.0])
+        .unwrap()
+        .unwrap();
+    assert!(strays > zone, "{strays}");
+    let got = straight_direction(&[(&a, &ao, px), (&a, &ao, py), (&sheet, &so, 0)]).unwrap();
+    assert_eq!(got, Straight::Undecided, "{got:?}");
+}
+
+/// A plate off the world axes with a square hole: from the edge where its top meets a wall of the
+/// hole (a face whose use runs the other way round), the way into the top is away from the hole
+/// and into the wall is down. A cylinder's seam, with its face on both sides, is refused.
+#[test]
+fn the_direction_into_a_face_off_the_axes_and_at_a_hole_and_a_seam_refused() {
+    all_fixes();
+    let (ex, ey) = ([2.0 / 3.0, 1.0 / 3.0, 2.0 / 3.0], unit3([-1.0, 2.0, 0.0]));
+    let n = cross(ex, ey);
+    let plane = Plane {
+        origin: Vec3::new(3.0, -2.0, 7.0),
+        x: vec3(ex),
+        y: vec3(ey),
+    };
+    let region = Region2 {
+        outer: Loop2::polygon(&[
+            v(-20.0, -20.0),
+            v(20.0, -20.0),
+            v(20.0, 20.0),
+            v(-20.0, 20.0),
+        ]),
+        holes: vec![Loop2::polygon(&[
+            v(-5.0, -5.0),
+            v(-5.0, 5.0),
+            v(5.0, 5.0),
+            v(5.0, -5.0),
+        ])],
+    };
+    let plate = extrude_planar_regions(&plane, &[region], 0.0, 8.0).unwrap();
+    let (_, order) = plate.to_record().unwrap();
+    let top = faces_facing(&plate, &order, n);
+    assert_eq!(top.len(), 1, "{top:?}");
+    let top = top[0];
+    // the toe of the hole's wall at local x = 5, which faces -ex into the hole
+    let at = [0, 1, 2].map(|i| [3.0, -2.0, 7.0][i] + 5.0 * ex[i] + 8.0 * n[i]);
+    let (wall, edge) = faces_facing(&plate, &order, ex.map(|c| -c))
+        .into_iter()
+        .find_map(|f| {
+            shared_edges(&plate, &order, f, top)
+                .into_iter()
+                .find(|&e| {
+                    let m = plate.edge_middle(&order, e).unwrap();
+                    (0..3).all(|i| (m[i] - at[i]).abs() < 1e-9)
+                })
+                .map(|e| (f, e))
+        })
+        .unwrap();
+    let near = |got: [f64; 3], want: [f64; 3]| {
+        assert!(
+            got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-9),
+            "{got:?} != {want:?}"
+        );
+    };
+    near(plate.edge_inward(&order, edge, top).unwrap(), ex);
+    near(
+        plate.edge_inward(&order, edge, wall).unwrap(),
+        n.map(|c| -c),
+    );
+    // a cylinder's seam: its round face lies on both sides
+    let c = make_cylinder([0.0, 0.0, 0.0], 5.0, 20.0).unwrap();
+    let (_, co) = c.to_record().unwrap();
+    let round = (0..co.faces.len())
+        .find(|&f| c.face_plane_normal(&co, f).unwrap().is_none())
+        .unwrap();
+    let seam = (0..co.edges.len())
+        .find(|&e| {
+            let m = c.edge_middle(&co, e).unwrap();
+            (m[0] - 5.0).abs() < 1e-9 && m[1].abs() < 1e-9 && (m[2] - 10.0).abs() < 1e-9
+        })
+        .unwrap();
+    assert!(c.edge_inward(&co, seam, round).is_err());
+}
+
+/// brett19 on #22066: a direction on the edge of a face's band is one the face runs straight
+/// along within the zone: a cylinder's side leaned off its axis by exactly its band, and its cap
+/// leaned off square to its normal by exactly its band.
+#[test]
+fn a_direction_on_the_edge_of_a_band_is_within_the_zone() {
+    use solidcore_ops::measure::FaceRun;
+    all_fixes();
+    let zone = solidcore_ops::sweep::zone_tolerance().unwrap();
+    let c = make_cylinder([0.0, 0.0, 0.0], 5.0, 20.0).unwrap();
+    let (_, co) = c.to_record().unwrap();
+    let round = (0..co.faces.len())
+        .find(|&f| c.face_plane_normal(&co, f).unwrap().is_none())
+        .unwrap();
+    let cap = faces_facing(&c, &co, [0.0, 0.0, 1.0])[0];
+    for face in [round, cap] {
+        let run = c.face_run(&co, face, zone).unwrap();
+        // the band's direction a, a unit p square to it, and how far d leans from a or from
+        // square to a
+        let (a, slope, along) = match run {
+            FaceRun::Axis { axis, slope } => ([axis.x, axis.y, axis.z], slope, true),
+            FaceRun::Plane { normal, slope } => ([normal.x, normal.y, normal.z], slope, false),
+            FaceRun::Other => panic!("{run:?}"),
+        };
+        assert!(slope > 0.0, "{run:?}");
+        let p = unit3(cross(a, [1.0, 0.0, 0.0]));
+        let (s, c2) = (slope, (1.0 - slope * slope).sqrt());
+        let d: [f64; 3] = if along {
+            [0, 1, 2].map(|i| a[i] * c2 + p[i] * s)
+        } else {
+            [0, 1, 2].map(|i| a[i] * s + p[i] * c2)
+        };
+        let e = c.face_straying(&co, face, d).unwrap().unwrap();
+        assert!(e <= zone, "{run:?}: {e} > {zone}");
+    }
+}
+
+/// #3384: a prism on a flat segment (an arc of sagitta 1.5e-4 or 5e-4 over a chord of 0.2 or 40,
+/// its centre 33.3 or 4e5 below the chord's middle at the world origin) writes its record, its
+/// two caps, its flat wall and its arc's wall, and reads back. On main its record was refused:
+/// the arc's NURBS was "off its own frame and radii".
+#[test]
+fn a_prism_on_a_flat_segment_writes_its_record() {
+    all_fixes();
+    for (h, cy) in [
+        (0.1_f64, -33.3_f64),
+        (20.0, -(4e5_f64 * 4e5 - 400.0).sqrt()),
+    ] {
+        let r = h.hypot(cy);
+        let start = (-cy).atan2(h);
+        let segment = Region2 {
+            outer: Loop2 {
+                segs: vec![
+                    Seg2::Arc {
+                        center: Vec2::new(0.0, cy),
+                        radius: r,
+                        start,
+                        sweep: (-cy).atan2(-h) - start,
+                    },
+                    Seg2::Line {
+                        a: Vec2::new(-h, 0.0),
+                        b: Vec2::new(h, 0.0),
+                    },
+                ],
+            },
+            holes: vec![],
+        };
+        let body = extrude_planar_regions(&Plane::XY, &[segment], 0.0, 10.0)
+            .unwrap_or_else(|e| panic!("h = {h}: {e:?}"));
+        let (record, _) = body
+            .to_record()
+            .unwrap_or_else(|e| panic!("h = {h}: {e:?}"));
+        assert_eq!(record.faces.len(), 4, "h = {h}: {:?}", record.faces);
+        Body::from_record(&record, true).unwrap_or_else(|e| panic!("h = {h}: {e:?}"));
+    }
+}
+
+#[test]
+fn a_channel_is_filled_in_the_records_types_and_a_refusal_comes_back_with_its_fit() {
+    // a 60 degree V, 6 deep with a gap of 1: the walls from the toes (±(0.5 + 6 tan 30), 0)
+    let top = 0.5 + 6.0 * (PI / 6.0).tan();
+    let right = [Seg2::Line {
+        a: v(top, 0.0),
+        b: v(0.5, -6.0),
+    }];
+    let left = [Seg2::Line {
+        a: v(-top, 0.0),
+        b: v(-0.5, -6.0),
+    }];
+    let options = |face| FillOptions {
+        face,
+        second_face: None,
+        depth: None,
+    };
+    let filled = fill_channel(&left, &right, None, &options(Contour::Flat))
+        .unwrap()
+        .unwrap();
+    let want = 6.0 + 36.0 * (PI / 6.0).tan();
+    assert!((area(&filled.region) - want).abs() <= 1e-9 * want);
+    assert!(filled.through && (filled.channel_depth - 6.0).abs() <= 1e-12);
+    // a concave face past what it touches: refused, as a value, with a depth that builds
+    let refusal = fill_channel(
+        &left,
+        &right,
+        None,
+        &options(Contour::Concave { depth: 3.0 }),
+    )
+    .unwrap()
+    .unwrap_err();
+    assert!(
+        matches!(
+            refusal.why,
+            FillFailure::ConcaveFaceCrossesWall {
+                side: FillSide::Face,
+                ..
+            }
+        ),
+        "{refusal:?}"
+    );
+    let fit = refusal.fit.unwrap();
+    assert!(fill_channel(
+        &left,
+        &right,
+        None,
+        &options(Contour::Concave { depth: fit })
+    )
+    .unwrap()
+    .is_ok());
+    // input the kernel refuses stays an error
+    assert!(matches!(
+        fill_channel(&left, &[], None, &options(Contour::Flat)),
+        Err(Error::Refused { .. })
+    ));
+}
+
+/// An extruded rectangle on a sketch plane that is not axis-aligned reads its record back, also
+/// as saved before #21509 (tangency-labs/solidcraft#13737: two side walls' planes were written
+/// with `u·v` = -3.886e-16, 1.2 times past the reader's old squareness bound, and
+/// `from_record` refused them).
+#[test]
+fn an_extruded_rectangle_on_a_tilted_plane_reads_its_record_back() {
+    // x = (584.394, 0, 385.337) made unit, the slot of tangency-labs/solidcraft#12365
+    let x = Vec3::new(0.8348477614519991, 0.0, 0.5504808944900683);
+    let plane = Plane {
+        origin: Vec3::new(3.302884, 0.0, -5.009087),
+        x,
+        y: Vec3::Y,
+    };
+    let p =
+        [(159.2, -6.5), (168.2, -6.5), (168.2, 6.5), (159.2, 6.5)].map(|(a, b)| Vec2::new(a, b));
+    let r = Region2 {
+        outer: Loop2::polygon(&p),
+        holes: vec![],
+    };
+    let body = extrude_planar_regions(&plane, &[r], 0.0, 12.0).unwrap();
+    let (mut record, _) = body.to_record().unwrap();
+    assert_eq!(
+        (
+            record.faces.len(),
+            record.edges.len(),
+            record.vertices.len()
+        ),
+        (6, 12, 8)
+    );
+    let (back, _) = Body::from_record(&record, false).unwrap();
+    assert!(back.check(CheckLevel::All).unwrap().is_valid());
+    // the record as written before #21509: every plane's v leaning on its u past the reader's
+    // old bound (3e-16), as the -3.886e-16 measured there, by enough to stay past it rounded
+    for face in &mut record.faces {
+        if let solidcore_record::brep::Surface::Plane { u_axis, v_axis, .. } = &mut face.surface {
+            for i in 0..3 {
+                v_axis[i] -= 1e-15 * u_axis[i];
+            }
+        }
+    }
+    let (old, _) = Body::from_record(&record, false).unwrap();
+    assert!(old.check(CheckLevel::All).unwrap().is_valid());
+    let (v, w) = (body.volume(1e-9).unwrap(), old.volume(1e-9).unwrap());
+    assert!((v - w).abs() <= 1e-9 * v, "volume {w} vs {v}");
+}
+
+/// brett19 on #22066 (review of 84964e53): an ops answer of undecided. Sixty 10 mm plates with
+/// their tops spread round y, each tilted off square to y by 0.9 of what the zone allows: y
+/// proves every one, the cross product of the two furthest from parallel does not, and past the
+/// search's budget of constraints the answer is `Undecided`, not `NotStraight`.
+#[test]
+fn faces_past_the_search_s_budget_are_undecided_not_refused() {
+    use solidcore_ops::measure::{straight_direction, Straight};
+    all_fixes();
+    let zone = solidcore_ops::sweep::zone_tolerance().unwrap();
+    let alpha = 0.9 * zone / (2.0 * 10.0 * 2.0_f64.sqrt());
+    let plates: Vec<_> = (0..60)
+        .map(|k| {
+            let (sin, cos) = (TAU * f64::from(k) / 60.0).sin_cos();
+            plate_facing([cos, alpha, sin], [-sin, 0.0, cos])
+        })
+        .collect();
+    let faces: Vec<_> = plates.iter().map(|(b, o, f)| (b, o, *f)).collect();
+    for &(body, order, face) in &faces {
+        let e = body
+            .face_straying(order, face, [0.0, 1.0, 0.0])
+            .unwrap()
+            .unwrap();
+        assert!(e <= zone, "{e}");
+    }
+    let got = straight_direction(&faces).unwrap();
+    assert_eq!(got, Straight::Undecided, "{got:?}");
+}
+
+/// A square does not cross itself; a bow tie (the square with two corners swapped) crosses
+/// itself at its middle, and a loop moved past a neck (two sides lying along one line) touches
+/// itself there. A loop with a free-form side is not decided.
+#[test]
+fn loop_crosses_itself_at_a_bow_tie_and_along_a_shared_line() {
+    let sq = Loop2::polygon(&[v(0.0, 0.0), v(10.0, 0.0), v(10.0, 10.0), v(0.0, 10.0)]);
+    assert_eq!(loop_crosses_itself(&sq, 1e-7), Some(false));
+    let bow = Loop2::polygon(&[v(0.0, 0.0), v(10.0, 0.0), v(0.0, 10.0), v(10.0, 10.0)]);
+    assert_eq!(loop_crosses_itself(&bow, 1e-7), Some(true));
+    let neck = Loop2::polygon(&[
+        v(0.0, 0.0),
+        v(4.0, 0.0),
+        v(4.0, 6.0),
+        v(10.0, 6.0),
+        v(10.0, 10.0),
+        v(4.0, 10.0),
+        v(4.0, 4.0),
+        v(0.0, 4.0),
+    ]);
+    assert_eq!(loop_crosses_itself(&neck, 1e-7), Some(true));
+    assert_eq!(loop_crosses_itself(&sq, 0.0), None);
+    let curvy = Loop2 {
+        segs: vec![
+            Seg2::Line {
+                a: v(0.0, 0.0),
+                b: v(10.0, 0.0),
+            },
+            Seg2::Cubic {
+                p0: v(10.0, 0.0),
+                p1: v(12.0, 5.0),
+                p2: v(5.0, 12.0),
+                p3: v(0.0, 10.0),
+            },
+            Seg2::Line {
+                a: v(0.0, 10.0),
+                b: v(0.0, 0.0),
+            },
+        ],
+    };
+    assert_eq!(loop_crosses_itself(&curvy, 1e-7), None);
 }

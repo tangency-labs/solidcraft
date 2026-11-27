@@ -20,20 +20,21 @@ use std::cell::OnceCell;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use solidcore_record::brep::Brep;
 use solidcore_record::{Seg2, Vec2, Vec3};
 use solidcraft_doc::ModelState;
 use solidcraft_geom::drawing_view::ViewFrame;
-use solidcraft_geom::hlr::{self, HlrError, Source, Visibility};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_geom::{Aabb2, EPS, Similarity2};
+use solidcraft_kernel::hlr::{self, HlrError, Source, Visibility};
 
 use super::ShownSet;
-use super::lines::{LineRequest, Piece, ViewLine, continues, on_arc, within};
+use super::lines::{LineRequest, Piece, ViewLine, continues, joined_sweep, on_arc, within};
 use crate::mesh_lines::{self, Placed, Stage};
 
 /// The edges the view draws of a body, in its record's order, and which of them are tangent edges.
-pub(super) type Edges<'a> = dyn Fn(&Placed) -> (Vec<bool>, Vec<bool>) + 'a;
+pub(super) type Edges<'a> = dyn Fn(&Placed) -> (Vec<bool>, Vec<bool>) + Sync + 'a;
 
 /// Why a shown body's lines come from the mesh instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -132,7 +133,17 @@ pub(super) fn lines(
     let mut own = PreparedBodies::default();
     let prepared = if prepared.serves(&shown.state) { prepared } else { &mut own };
     let made = prepared.defs.len();
-    let groups = prepare(placed, shown, opts, edges, &cancel, prepared)?;
+    let groups = prepare(
+        placed,
+        shown,
+        opts,
+        edges,
+        &cancel,
+        &|| {
+            let _ = stage.advance(1);
+        },
+        prepared,
+    )?;
     let (defs, prepared) = (&prepared.defs, prepared.defs.len() - made);
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
     let reference: Vec<bool> = (0..placed.len()).map(|i| shown.bodies.get(i).is_some_and(|b| b.reference)).collect();
@@ -144,7 +155,16 @@ pub(super) fn lines(
     // The bodies' boxes on the view, read only when a body drawn from the mesh may hide one drawn
     // exact, or a reference part is drawn exact.
     let boxes = OnceCell::new();
-    let boxes = || boxes.get_or_init(|| placed.iter().map(|item| view_box(item, &basis)).collect::<Vec<ViewBox>>()).as_slice();
+    let boxes = || {
+        boxes
+            .get_or_init(|| {
+                solidcraft_kernel::map_on_threads(placed, mesh_lines::WORKERS, |item| view_box(item, &basis))
+                    .into_iter()
+                    .map(Option::flatten)
+                    .collect::<Vec<ViewBox>>()
+            })
+            .as_slice()
+    };
     if drawn.iter().any(Result::is_err) {
         in_front(&reference, request.reference_hides_model, boxes(), &mut drawn);
     }
@@ -386,60 +406,115 @@ fn refuse(exact: &mut Exact, which: impl Fn(usize) -> bool) {
 
 /// Per placement group, its first body as `prepared` holds it, prepared for `hlr` with `opts` when no
 /// earlier view has, or why it can't be drawn exact; with the `edges` this view draws of it. Each
-/// body is known by its index among the shown set's state's bodies. `None` when cancelled, keeping
-/// only the bodies prepared whole.
+/// body is known by its index among the shown set's state's bodies. The bodies still to prepare
+/// are prepared side by side, on the meshes' own worker cap, because each takes milliseconds and a
+/// frame of a thousand tubes has a thousand of them (#20484); `done` is called as each finishes.
+/// `None` when cancelled, keeping only the bodies prepared whole.
 fn prepare(
     placed: &[Placed],
     shown: &ShownSet,
     opts: &hlr::Options,
     edges: &Edges,
     cancel: &(dyn Fn() -> bool + Sync),
+    done: &(dyn Fn() + Sync),
     prepared: &mut PreparedBodies,
 ) -> Option<Vec<std::result::Result<Group, Fallback>>> {
-    let mut groups = Vec::new();
+    let firsts: Vec<(usize, &Placed)> = placed.iter().enumerate().filter(|(_, item)| item.first).collect();
+    let index_of = |i: usize| shown.bodies.get(i).map(|b| b.index);
+    // The records of the bodies no earlier view prepared, in order; `None` for a mesh body.
+    let wanted: Vec<Option<&Brep>> = firsts
+        .iter()
+        .filter(|(i, _)| index_of(*i).is_none_or(|index| !prepared.bodies.contains_key(&index)))
+        .map(|(_, item)| (!item.body.body.is_mesh()).then(|| item.body.body.record()))
+        .collect();
+    let mut made = solidcraft_kernel::map_on_threads(&wanted, mesh_lines::WORKERS, |record| {
+        // A body not started by the time of a cancel is not prepared at all: the workers take
+        // every queued body, and preparing one reads and copies it before the kernel looks.
+        if cancel() {
+            return None;
+        }
+        let made = prepare_body(*record, opts, cancel);
+        // Only a finished body moves the count; a cancelled one is told by the next check.
+        if made.is_some() {
+            done();
+        }
+        made
+    })
+    .into_iter();
+    let mut cancelled = false;
+    let mut defs_for_firsts: Vec<std::result::Result<usize, Fallback>> = Vec::with_capacity(firsts.len());
     // Groups are numbered in the order of their first bodies.
-    for (i, item) in placed.iter().enumerate().filter(|(_, item)| item.first) {
-        let index = shown.bodies.get(i).map(|b| b.index);
+    for &(i, _) in &firsts {
+        let index = index_of(i);
         let def = match index.and_then(|index| prepared.bodies.get(&index)) {
             Some(known) => *known,
             None => {
-                let made = prepare_body(item, opts, cancel, &mut prepared.defs)?;
+                // A worker that panicked lost its body: it is read as one `hlr` can't draw.
+                let made = match made.next().flatten() {
+                    Some(Some(Made::Def(def))) => {
+                        prepared.defs.push(*def);
+                        Ok(prepared.defs.len() - 1)
+                    }
+                    Some(Some(Made::Fallback(why))) => Err(why),
+                    Some(None) => {
+                        cancelled = true;
+                        continue;
+                    }
+                    None => Err(Fallback::Unread),
+                };
                 if let Some(index) = index {
                     prepared.bodies.insert(index, made);
                 }
                 made
             }
         };
-        // The edges come in the record's order, as `hlr`'s do; this view's must all be `hlr`'s.
-        groups.push(def.and_then(|def| {
-            let (drawn, tangent) = edges(item);
-            let all = prepared.defs.get(def).is_some_and(|d| d.report.edges == drawn.len());
-            if all { Ok(Group { def, drawn, tangent }) } else { Err(Fallback::Unread) }
-        }));
+        defs_for_firsts.push(def);
+    }
+    if cancelled {
+        return None;
+    }
+    // Classify drawn and tangent edges side by side too: on a many-body assembly with cold display
+    // meshes, calling `edges(item)` serially tessellates every unique body on one thread (#20484).
+    let edge_jobs: Vec<usize> = defs_for_firsts.iter().enumerate().filter_map(|(k, def)| def.is_ok().then_some(k)).collect();
+    let mut edge_results = solidcraft_kernel::map_on_threads(&edge_jobs, mesh_lines::WORKERS, |&k| {
+        if cancel() {
+            return None;
+        }
+        firsts.get(k).map(|(_, item)| edges(item))
+    })
+    .into_iter();
+    let mut groups = Vec::with_capacity(defs_for_firsts.len());
+    for def in defs_for_firsts {
+        match def {
+            Ok(def) => match edge_results.next() {
+                Some(Some(Some((drawn, tangent)))) => {
+                    // The edges come in the record's order, as `hlr`'s do; this view's must all be `hlr`'s.
+                    let all = prepared.defs.get(def).is_some_and(|d| d.report.edges == drawn.len());
+                    groups.push(if all { Ok(Group { def, drawn, tangent }) } else { Err(Fallback::Unread) });
+                }
+                Some(Some(None)) => return None,
+                _ => groups.push(Err(Fallback::Unread)),
+            },
+            Err(why) => groups.push(Err(why)),
+        }
     }
     Some(groups)
 }
 
-/// `item`'s body prepared for `hlr` with `opts`, pushed onto `defs`: its index there, or why it can't
-/// be drawn exact whatever the view. `None` when cancelled.
-fn prepare_body(
-    item: &Placed,
-    opts: &hlr::Options,
-    cancel: &(dyn Fn() -> bool + Sync),
-    defs: &mut Vec<hlr::Prepared>,
-) -> Option<std::result::Result<usize, Fallback>> {
-    let body = &item.body.body;
-    if body.is_mesh() {
-        return Some(Err(Fallback::MeshBody));
-    }
-    Some(match hlr::prepare_cancellable(body.record(), opts, cancel) {
+/// A body prepared for `hlr`, or why it can't be drawn exact whatever the view.
+enum Made {
+    Def(Box<hlr::Prepared>),
+    Fallback(Fallback),
+}
+
+/// `record` (`None` for a mesh body) prepared for `hlr` with `opts`. `None` when cancelled.
+fn prepare_body(record: Option<&Brep>, opts: &hlr::Options, cancel: &(dyn Fn() -> bool + Sync)) -> Option<Made> {
+    let Some(record) = record else { return Some(Made::Fallback(Fallback::MeshBody)) };
+    Some(match hlr::prepare_cancellable(record, opts, cancel) {
         Err(HlrError::Cancelled) => return None,
-        Err(_) => Err(Fallback::Unread),
-        Ok(def) if !(def.report.freeform_faces.is_empty() && def.report.unsupported_trims.is_empty()) => Err(Fallback::Unsupported),
-        Ok(def) => {
-            defs.push(def);
-            Ok(defs.len() - 1)
-        }
+        Err(_) => Made::Fallback(Fallback::Unread),
+        Ok(def) if !(def.report.freeform_faces.is_empty() && def.report.unsupported_trims.is_empty()) => Made::Fallback(Fallback::Unsupported),
+        Ok(def) => Made::Def(Box::new(def)),
     })
 }
 
@@ -514,7 +589,7 @@ fn on_paper(geometry: &[Seg2], accuracy: CurveAccuracy, frame: &ViewFrame, chord
             }
         }
     }
-    let accuracy = match (frame.accuracy_on_paper(accuracy), flattened, proven) {
+    let accuracy = match (hlr::accuracy_on_paper(frame, accuracy), flattened, proven) {
         (on_paper, false, _) => on_paper,
         (CurveAccuracy::Analytic, true, true) => CurveAccuracy::Bounded { max_deviation_mm: chord },
         (CurveAccuracy::Bounded { max_deviation_mm }, true, true) => CurveAccuracy::Bounded { max_deviation_mm: max_deviation_mm + chord },
@@ -530,9 +605,9 @@ fn on_paper(geometry: &[Seg2], accuracy: CurveAccuracy, frame: &ViewFrame, chord
 fn joined(path: &mut Vec<Seg2>, seg: Seg2) {
     if let (Some(Seg2::Arc { center, radius, start, sweep }), Seg2::Arc { center: c, radius: r, start: s, sweep: turn }) = (path.last_mut(), seg)
         && continues((*center, *radius, *start, *sweep), (c, r, s, turn))
-        && (*sweep + turn).abs() <= std::f64::consts::TAU + 1e-9
+        && let Some(whole) = joined_sweep(*sweep, turn)
     {
-        *sweep += turn;
+        *sweep = whole;
         return;
     }
     path.push(seg);
@@ -600,11 +675,65 @@ mod tests {
         let ask = mesh_lines::Ask { tangent_edges: false, sources: true };
         let edges = |item: &Placed| mesh_lines::drawn_edges(&item.body.mesh(), ask);
         let mut prepared = PreparedBodies::default();
-        assert!(prepare(&placed, &shown, &options(), &edges, &|| true, &mut prepared).is_none());
+        assert!(prepare(&placed, &shown, &options(), &edges, &|| true, &|| {}, &mut prepared).is_none());
         assert!(prepared.defs.is_empty() && prepared.bodies.is_empty());
-        let groups = prepare(&placed, &shown, &options(), &edges, &|| false, &mut prepared).unwrap();
+        let groups = prepare(&placed, &shown, &options(), &edges, &|| false, &|| {}, &mut prepared).unwrap();
         assert!(matches!(groups.as_slice(), [Ok(Group { def: 0, .. })]));
         assert_eq!((prepared.defs.len(), prepared.bodies.get(&shown.bodies[0].index)), (1, Some(&Ok(0))));
+    }
+
+    /// Bodies are prepared side by side, each reporting as it finishes: a frame of many bodies
+    /// reports every one (not one count for the whole), the groups keep the bodies' order, and a body an
+    /// earlier view prepared is neither prepared nor reported again (#20484).
+    #[test]
+    fn many_bodies_are_prepared_side_by_side_and_each_reported() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        const COUNT: usize = 40;
+        let mut s = crate::Session::default();
+        for i in 0..COUNT {
+            let name = format!("Box {i}");
+            s.execute(
+                "solid.box",
+                &serde_json::json!({"length": 10 + i, "width": 5, "height": 5, "corner": [30 * i, 0, 0], "body_name": name, "operation": "new"}),
+            )
+            .unwrap();
+        }
+        let shown = crate::drawing_view::shown(&s).unwrap();
+        let placed = mesh_lines::placed(&s, &shown.state, |_| true, "test").unwrap();
+        let ask = mesh_lines::Ask { tangent_edges: false, sources: true };
+        let edges = |item: &Placed| mesh_lines::drawn_edges(&item.body.mesh(), ask);
+        let mut prepared = PreparedBodies::default();
+        let reported = AtomicUsize::new(0);
+        let groups = prepare(
+            &placed,
+            &shown,
+            &options(),
+            &edges,
+            &|| false,
+            &|| {
+                reported.fetch_add(1, Ordering::Relaxed);
+            },
+            &mut prepared,
+        )
+        .unwrap();
+        assert_eq!((groups.len(), reported.load(Ordering::Relaxed), prepared.defs.len()), (COUNT, COUNT, COUNT));
+        // Group i holds the def made for body i: the order is the bodies', not the order the workers finished in.
+        let defs: Vec<usize> = groups.iter().filter_map(|g| g.as_ref().ok().map(|g| g.def)).collect();
+        assert_eq!(defs, (0..COUNT).collect::<Vec<_>>());
+        // Prepared again, nothing is made or reported.
+        let again = prepare(
+            &placed,
+            &shown,
+            &options(),
+            &edges,
+            &|| false,
+            &|| {
+                reported.fetch_add(1, Ordering::Relaxed);
+            },
+            &mut prepared,
+        )
+        .unwrap();
+        assert_eq!((again.len(), reported.load(Ordering::Relaxed), prepared.defs.len()), (COUNT, COUNT, COUNT));
     }
 
     /// A quarter of a circle of 5 round (1, 2), from 0 to 90 degrees, as a conic.
@@ -689,5 +818,77 @@ mod tests {
         joined(&mut path, Seg2::Arc { center: c, radius: 6.0, start: FRAC_PI_2, sweep: FRAC_PI_2 });
         joined(&mut path, q(3.0));
         assert_eq!(path.len(), 3);
+    }
+
+    /// Quarters whose rounded sweeps add up to a hair either side of a whole turn, as a hole's
+    /// conics do (#212), join into one arc of exactly one turn: a circle, which a DXF writes as one.
+    #[test]
+    fn quarters_that_close_a_circle_join_into_exactly_one_turn() {
+        let c = Vec2::new(0.0, 0.0);
+        for (quarter, sense) in [(FRAC_PI_2.next_up(), 1.0), (FRAC_PI_2.next_down(), 1.0), (FRAC_PI_2.next_up(), -1.0), (FRAC_PI_2 - 1e-14, -1.0)] {
+            let sweep = quarter * sense;
+            let mut path = Vec::new();
+            let mut start = 0.6131;
+            for _ in 0..4 {
+                joined(&mut path, Seg2::Arc { center: c, radius: 2.0, start, sweep });
+                start += sweep;
+            }
+            let [Seg2::Arc { sweep: whole, .. }] = path.as_slice() else { panic!("{path:?}") };
+            assert_eq!(*whole, std::f64::consts::TAU * sense, "quarters of {sweep}");
+        }
+    }
+
+    /// A base view of a multi-body assembly (with foreground/background occlusion) produces the
+    /// exact same lines under parallel prepare, parallel edge classification and parallel HLR as
+    /// under single-threaded HLR (#20484).
+    #[test]
+    fn base_view_lines_on_multi_body_assembly_match_serial_hlr() {
+        use solidcraft_geom::drawing_view::NamedView;
+
+        let mut s = crate::Session::default();
+        for row in 0..2 {
+            for col in 0..12 {
+                let x = col as f64 * 16.0 + if row == 1 { 4.0 } else { 0.0 };
+                let y = row as f64 * 25.0;
+                s.execute(
+                    "solid.box",
+                    &serde_json::json!({
+                        "length": 12,
+                        "width": 10,
+                        "height": 14 + (col % 3) * 4,
+                        "corner": [x, y, 0],
+                        "body_name": format!("Member {row}-{col}"),
+                        "operation": "new",
+                    }),
+                )
+                .unwrap();
+            }
+        }
+        let shown = crate::drawing_view::shown(&s).unwrap();
+        let basis = NamedView::Front.basis();
+        let extents = crate::drawing_view::measure(&shown, &basis).unwrap();
+        let frame = ViewFrame::new(basis, "1:2".parse().unwrap(), extents.model.center(), Vec2::new(210.0, 148.5)).unwrap();
+        let request = LineRequest {
+            shows: extents.model,
+            hidden: true,
+            reference_hidden: false,
+            reference_hides_model: false,
+            tangent_edges: false,
+            chord_mm: super::super::CHORD_MM,
+        };
+        let placed = mesh_lines::placed(&s, &shown.state, |_| true, "test").unwrap();
+        let ask = mesh_lines::Ask { tangent_edges: false, sources: true };
+        let edges = |item: &Placed| mesh_lines::drawn_edges(&item.body.mesh(), ask);
+
+        let parallel = super::lines(&placed, &shown, &frame, &request, &options(), &edges, &mut PreparedBodies::default()).unwrap();
+        let serial_opts = hlr::Options { threads: 1, ..options() };
+        let serial = super::lines(&placed, &shown, &frame, &request, &serial_opts, &edges, &mut PreparedBodies::default()).unwrap();
+
+        assert_eq!(parallel.drawn.len(), 24);
+        assert!(parallel.drawn.iter().all(Result::is_ok));
+        assert_eq!(parallel.drawn, serial.drawn);
+        assert_eq!(parallel.split, serial.split);
+        assert_eq!(parallel.covered, serial.covered);
+        assert_eq!(parallel.uncertain, serial.uncertain);
     }
 }

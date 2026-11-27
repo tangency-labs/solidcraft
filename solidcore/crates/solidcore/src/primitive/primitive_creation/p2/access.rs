@@ -10,11 +10,11 @@
 //! `SweepAccess`. Defaults call the ported services (`topology.brep_p2`,
 //! `topology.face_p3`, `topology.brep_p5`, `boolean.merge_p3` through
 //! `boolean::api_brep`) and defer only callees whose unit is not ported yet;
-//! outputs no p2 caller reads (stitch counts and gaps) are not returned. With
-//! `keep_exact_pcurves` (WR-722, opt-in), `face_with_curves` keeps the walls' exact
-//! pcurves (`pbOptCrvOnSurf`).
+//! outputs no p2 caller reads (stitch counts and gaps) are not returned.
+//! `face_with_curves` keeps the walls' exact pcurves (`pbOptCrvOnSurf`, WR-722).
 
 use crate::curve::composite_curve::OffsetMapAttribute;
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::math::{Point3, Vec3};
@@ -124,9 +124,9 @@ pub trait PrimitiveCreationAccess: PrimitiveAccess {
         Self: Sized,
     {
         self.with_brep_mut(brep, |k, b, this_face, env| {
-            // Not the fork (WR-722, opt-in): the walls' exact pcurves are their edge uses'
-            // trims (`pbOptCrvOnSurf`), not projected again later
-            let keep = (k.fixes.keep_exact_pcurves && curves.uv_curves.is_some()).then_some(true);
+            // Not the fork (WR-722): the walls' exact pcurves are their edge uses' trims
+            // (`pbOptCrvOnSurf`), not projected again later
+            let keep = curves.uv_curves.is_some().then_some(true);
             crate::topology::brep::p7::make_face_with_curves(
                 k,
                 b,
@@ -212,9 +212,14 @@ pub trait PrimitiveCreationAccess: PrimitiveAccess {
         }
         let count = operands.len();
         if count > breps.len() {
-            return Err(SolidError::primitive_failed(
+            // only a tree that names a B-rep twice and combines neither leaf leaves more
+            // B-reps than it was given (each operator takes two and leaves one)
+            return Err(SolidError::primitive(
                 OP,
-                "the Boolean tree returned more B-reps than it was given",
+                PrimitiveFailure::TreeLeavesMoreBreps {
+                    left: count,
+                    given: breps.len(),
+                },
             ));
         }
         let mut missing = false;
@@ -229,10 +234,7 @@ pub trait PrimitiveCreationAccess: PrimitiveAccess {
         }
         breps.truncate(count);
         if missing {
-            return Err(SolidError::primitive_missing(
-                OP,
-                "a B-rep the Boolean tree should leave",
-            ));
+            return Err(SolidError::primitive(OP, PrimitiveFailure::TreeLeftNoBrep));
         }
         Ok(())
     }

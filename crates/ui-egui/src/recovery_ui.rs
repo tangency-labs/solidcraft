@@ -101,20 +101,39 @@ pub fn start(app: &mut SolveApp, dir: &std::path::Path, interval: std::time::Dur
     }
 }
 
-/// The app is closing: keep unsaved work for the next launch, drop everything else.
-pub fn close(app: &mut SolveApp) {
-    if let Some(mut a) = app.autosave.take() {
-        for slot in app.docs.background_mut() {
-            let _ = save_slot(&a.dir, &mut slot.autosave, &slot.session, true, true);
-            if let Some(saver) = slot.autosave.take() {
-                saver.close(&slot.session);
+/// The app is closing: keep unsaved work for the next launch, drop everything else. Returns the
+/// designs whose unsaved changes couldn't be kept, as "name: why": a write that failed, or
+/// autosave off (no recovery folder). A restart the app forces (a lost or hung GPU) can't ask
+/// about them, so its next start says which they were instead of "kept for recovery" (#3321).
+pub fn close(app: &mut SolveApp) -> Vec<String> {
+    let mut unkept = Vec::new();
+    let mut lost = |session: &Session, why: String| {
+        let name = if session.doc.name.trim().is_empty() { "Untitled" } else { session.doc.name.trim() };
+        unkept.push(format!("{name}: {why}"));
+    };
+    let Some(mut a) = app.autosave.take() else {
+        for session in app.docs.background().chain([&app.session]) {
+            if session.is_dirty() {
+                lost(session, "autosave is off".into());
             }
         }
-        let _ = a.save(&app.session);
-        if let Some(saver) = a.active.take() {
-            saver.close(&app.session);
+        return unkept;
+    };
+    for slot in app.docs.background_mut() {
+        if let Err(e) = save_slot(&a.dir, &mut slot.autosave, &slot.session, true, true) {
+            lost(&slot.session, e.to_string());
+        }
+        if let Some(saver) = slot.autosave.take() {
+            saver.close(&slot.session);
         }
     }
+    if let Err(e) = a.save(&app.session) {
+        lost(&app.session, e.to_string());
+    }
+    if let Some(saver) = a.active.take() {
+        saver.close(&app.session);
+    }
+    unkept
 }
 
 pub(crate) fn ago(secs: u64) -> String {
@@ -135,13 +154,17 @@ pub fn ago_between(now: u64, secs: u64) -> String {
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    // File view presents the same entries inline, without a second window covering them.
-    if app.home.open || app.recoverable.is_empty() {
+    if app.recoverable.is_empty() {
         app.recovery_discard_all = false;
         return;
     }
+    // Asked from this window or from File view's recovery banner.
     if app.recovery_discard_all {
         confirm_discard_all(app, ctx);
+        return;
+    }
+    // File view presents the same entries inline, without a second window covering them.
+    if app.home.open {
         return;
     }
     let mut act: Option<(Entry, bool)> = None;
@@ -168,10 +191,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 act = Some((e.clone(), false));
                             }
                         });
-                        let file = e.path.clone().unwrap_or_else(|| solidcraft_ui_text::tr("recovery.never_saved").to_string());
+                        let file = e.path.as_deref().map_or_else(|| solidcraft_ui_text::tr("recovery.never_saved"), crate::display_user_path);
                         let detail = solidcraft_ui_text::format(
                             "recovery.detail",
-                            &[("file", &file), ("features", &e.features.to_string()), ("when", &ago(e.saved_at))],
+                            &[("file", file), ("features", &e.features.to_string()), ("when", &ago(e.saved_at))],
                         );
                         ui_kit::text(ui, &detail, ui_kit::Text::Note(&format!("detail:{index}")));
                     }
@@ -564,9 +587,101 @@ mod tests {
                 documents::answer_prompt(&mut app, documents::Answer::DontSave);
                 assert!(app.quit_requested);
             }
-            close(&mut app);
+            assert_eq!(close(&mut app), Vec::<String>::new(), "every unsaved design kept");
             assert_eq!(recovery::orphans(&dir).len(), if discard { 0 } else { 2 });
             assert!(app.docs.background_mut().all(|s| s.autosave.is_none()), "shutdown releases every lock");
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    /// Closing names each design whose unsaved changes it couldn't keep, and why: a restart the
+    /// app forces after a lost or hung GPU tells the next start, instead of claiming they were
+    /// kept (#3321). With autosave off (no recovery folder), that is every unsaved design.
+    #[test]
+    fn close_names_the_designs_whose_unsaved_changes_it_could_not_keep() {
+        let (mut app, dir) = app("unkept", Duration::from_secs(3600));
+        name(&mut app, "Bracket");
+        edit(&mut app);
+        documents::new_tab(&mut app);
+        name(&mut app, "Plate");
+        edit(&mut app);
+        documents::new_tab(&mut app); // A third tab, in view, with nothing unsaved.
+        // Writes fail: the recovery folder's path is a file now. A tab that left the view took
+        // the active saver with it (`documents`), so every tab's saver is dropped: each write
+        // needs a new one there.
+        let blocked = dir.join("not-a-folder");
+        fs::write(&blocked, b"").unwrap();
+        for slot in app.docs.background_mut() {
+            slot.autosave = None;
+        }
+        let a = app.autosave.as_mut().unwrap();
+        a.dir = blocked;
+        a.active = None;
+        let mut unkept = close(&mut app);
+        unkept.sort();
+        assert_eq!(unkept.len(), 2, "{unkept:?}");
+        assert!(unkept[0].starts_with("Bracket: ") && unkept[1].starts_with("Plate: "), "{unkept:?}");
+        fs::remove_dir_all(dir).unwrap();
+
+        let mut off = SolveApp::new(Session::default(), Services::default());
+        assert!(close(&mut off).is_empty(), "nothing unsaved, nothing to say");
+        name(&mut off, "Bracket");
+        edit(&mut off);
+        documents::new_tab(&mut off);
+        name(&mut off, "Plate");
+        edit(&mut off);
+        let mut unkept = close(&mut off);
+        unkept.sort();
+        assert_eq!(unkept, ["Bracket: autosave is off", "Plate: autosave is off"]);
+    }
+
+    #[test]
+    fn noninteractive_forced_quit_discards_recovery_but_refusal_and_legacy_force_keep_it() {
+        use crate::control::{ControlRequest, Outcome, handle};
+
+        for (tag, params, discards) in [
+            ("control-refused", json!({"ask": false}), false),
+            ("control-discard", json!({"ask": false, "force": true}), true),
+            ("control-legacy-force", json!({"force": true}), false),
+        ] {
+            let (mut app, dir) = app(tag, Duration::ZERO);
+            name(&mut app, "Background design");
+            edit(&mut app);
+            documents::new_tab(&mut app);
+            name(&mut app, "Active design");
+            edit(&mut app);
+            tick_and_wait(&mut app);
+            let before = entries(&dir);
+            assert_eq!(before.len(), 2, "both dirty tabs already have recovery copies");
+            assert!(documents::any_dirty(&app));
+            let active = app.session.document_id.clone();
+            let (req, _rx) = ControlRequest::new("app.quit", params.clone());
+            let Outcome::Done(reply) = handle(&mut app, &egui::Context::default(), &req) else {
+                panic!("quit must answer without requesting a screenshot");
+            };
+            if params.get("force") == Some(&json!(true)) {
+                assert_eq!(reply["ok"], true, "{tag}: {reply}");
+                assert_eq!(reply["result"]["quitting"], true, "{tag}: {reply}");
+                assert!(app.quit_requested);
+            } else {
+                assert_eq!(reply["ok"], false, "{reply}");
+                let error = reply["error"].as_str().unwrap();
+                assert!(error.contains("Background design") && error.contains("Active design"), "{reply}");
+                assert!(!app.quit_requested);
+                assert_eq!(app.session.document_id, active);
+                assert!(app.session.is_dirty());
+                assert!(app.docs.background_mut().all(|slot| slot.session.is_dirty()));
+                assert_eq!(entries(&dir), before, "refusal keeps every existing recovery copy");
+            }
+            assert!(app.docs.closing.is_none(), "{tag}: quit never opens a save prompt");
+            assert!(app.docs.quitting.is_none(), "{tag}: quit never starts an interactive quit");
+            close(&mut app); // The native host calls this when the window exits.
+            let remaining = recovery::orphans(&dir);
+            assert_eq!(remaining.len(), if discards { 0 } else { 2 }, "{tag}: only explicit noninteractive discard removes recovery");
+            if !discards {
+                assert_eq!(entries(&dir), before);
+            }
+            drop(app);
             fs::remove_dir_all(dir).unwrap();
         }
     }

@@ -17,13 +17,30 @@
 //! `upstream_sil_adv.json` fixtures are the `prog_test` `my_test_sil_adv` faces
 //! (`harness/fixturegen/sil_adv.py`), and `silNNNN` cases come from their own seed stream.
 //!
-//! `DomCont` makes the surface's cache first (UB-83: upstream reads a null cache) and
-//! then calls `GetDomainWithContinuity`; `history` says what happened to that cache before
-//! the call (made during a Boolean operation, so without tree and with empty continuity
-//! arrays; then its tree built; or reused during a Boolean operation). The `domhistNNNN`
-//! cases (their own seed stream) cover those histories, half of them at points off the
-//! surface domain, where the end-knot discontinuities clamp the domain only once the
-//! cache's tree has been built (`plan/findings.md`, "surface cache history").
+//! `DomCont` calls `GetDomainWithContinuity` (UB-83: upstream reads a null cache unless
+//! one was made first; the port's reads none). `history` runs real calls before it: the
+//! surface's cache requested during a Boolean operation (so its tree is deferred and its
+//! continuity arrays are empty), then its tree built or not, and the call made during the
+//! Boolean operation or after it. The `domhistNNNN` cases (their own seed stream) cover
+//! those histories, half of them at points off the surface domain, where the end-knot
+//! discontinuities clamp the domain. Upstream's answer there depends on the history (its
+//! arrays are empty until the tree is built); the port's must not, so every
+//! `domhistNNNN` expectation is the answer without history (`plan/findings/`, "surface
+//! cache history"); the harness checks it on every run: a case with history also queries
+//! a fresh surface without history and fails on any difference. The `history` values
+//! (their meaning changed with #20054; before, they seeded the modelled tree state):
+//! `0`, the query alone, outside a Boolean operation; `1`, the surface's cache requested
+//! during a Boolean operation (its tree deferred), then the query during it; `2`, as `1`
+//! with the cache's `GetTree` before the query; `3`, the cache requested during a Boolean
+//! operation, then the query after it. A history step that fails writes `-1`
+//! (`DOM_CONT_HISTORY_FAILED`) before the query's record: only `GetTree` of a
+//! curve-bounded surface fails there (0052, 0074, 0075); any other failed step is a
+//! harness error. A curve-bounded surface answers for its basis (#20054). Off the
+//! domain the end knots clamp from the side the start point is on (#20239; upstream
+//! compared the direction's component, WR-20239), so such a start gets the span next to
+//! it whatever the direction: the test
+//! `domcont_answers_are_the_span_next_to_the_start_point` works every such answer out
+//! from the knots and continuities.
 //!
 //! Deferred cases: the paths into unported units (every surface cache build needs
 //! `SmSurface::CalculateContinuities`, `surface.surface_p6`: `Cache`, `BBox` of
@@ -51,7 +68,6 @@ use solidcore::surface::surface::p1::{
 use solidcore::surface::surface::p2::IsoCurveLengthIntegrand;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::surface::surface_cache::p1::SurfaceCache;
-use solidcore::error::SM_ERR;
 use solidcore::SolidError;
 
 use super::surface_surface_cache_p1::{
@@ -188,10 +204,10 @@ enum OpIn {
         cont: u8,
         uv: [f64; 2],
         vec: [f64; 2],
-        /// What happened to the surface's cache before the call (the shim's
-        /// `op_dom_cont`): `0` made outside a Boolean operation, `1` made while doing
-        /// one (no tree), `2` as `1` then its tree built, `3` as `0` with the call made
-        /// while doing a Boolean operation.
+        /// What ran before the call: `0` nothing; otherwise the surface's cache was
+        /// requested during a Boolean operation (its tree deferred), then `1` the call
+        /// made during that Boolean operation, `2` the cache's tree built (`GetTree`)
+        /// and the call made during the Boolean operation, `3` the call made after it.
         #[serde(default)]
         history: u8,
     },
@@ -664,13 +680,29 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
         } => {
             let s = run()?;
             let c = continuity(*cont)?;
+            let (uv, vec) = (p2(*uv), Vec2::new(vec[0], vec[1]));
+            // the query's record: status 0 and the domain, or the failure's status
+            let query = |s: &Surface, k: &Kernel| -> solidcore::Result<Vec<f64>> {
+                match s.domain_with_continuity(k, c, uv, vec) {
+                    Ok(d) => {
+                        let mut o = vec![0.0];
+                        push_dom(&mut o, &d);
+                        Ok(o)
+                    }
+                    Err(e) if e.is_unported() => Err(e),
+                    Err(e) => Ok(vec![status(&e)]),
+                }
+            };
             let mut k = Kernel::default();
+            let mut failed_step = false;
             if *history != 0 && !matches!(s.kind(), SurfaceKind::Step(_)) {
-                // the shim's cache history: the surface's cache, made while doing a
-                // Boolean operation for 1 and 2 (no tree), its tree then built for 2
-                k.context.set_doing_boolean(matches!(history, 1 | 2));
+                // the cache history: the surface's cache, requested while doing a
+                // Boolean operation (its tree deferred), its tree then built for 2
+                k.context.set_doing_boolean(true);
                 let made = get_surface_cache::<()>(&k, &s, None);
-                k.context.set_doing_boolean(false);
+                if made.as_ref().is_ok_and(|cache| cache.tree().is_some()) {
+                    return Err(harness("dom_cont: a cache requested during a Boolean operation has its tree"));
+                }
                 let built = made.and_then(|mut cache| {
                     if *history == 2 {
                         cache.get_tree(&k)?;
@@ -680,19 +712,41 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                 match built {
                     Ok(()) => {}
                     Err(e) if e.is_unported() => return Ok(Err(e)),
-                    Err(_) => return Ok(Ok(vec![f64::from(SM_ERR)])),
+                    // a failed history step is not a failed query: its own marker, then
+                    // the query's record. Only a curve-bounded surface is expected to fail
+                    // here (its `GetTree` needs the knots it does not answer, as it did
+                    // before #20054: #20163)
+                    Err(_) if matches!(s.kind(), SurfaceKind::CurveBounded(_)) => {
+                        failed_step = true;
+                    }
+                    Err(e) => {
+                        return Err(harness(format!("dom_cont: a history step failed: {e}")));
+                    }
                 }
             }
-            k.context.set_doing_boolean(*history == 3);
-            match s.domain_with_continuity(&k, c, p2(*uv), Vec2::new(vec[0], vec[1])) {
-                Ok(d) => {
-                    let mut o = vec![0.0];
-                    push_dom(&mut o, &d);
-                    Ok(o)
+            k.context.set_doing_boolean(matches!(history, 1 | 2));
+            let got = query(&s, &k);
+            // the standing check: under every history the answer is the one without
+            // history (a fresh surface, outside a Boolean operation)
+            if *history != 0 {
+                let fresh = run()?;
+                let without = query(&fresh, &Kernel::default());
+                let same = match (&got, &without) {
+                    (Ok(a), Ok(b)) => a.len() == b.len()
+                        && a.iter().zip(b).all(|(x, y)| x.to_bits() == y.to_bits()),
+                    (Err(a), Err(b)) => a.to_string() == b.to_string(),
+                    _ => false,
+                };
+                if !same {
+                    return Err(harness(format!(
+                        "dom_cont: history {history} answers {got:?}, without history {without:?}"
+                    )));
                 }
-                Err(e) if e.is_unported() => Err(e),
-                Err(e) => Ok(vec![status(&e)]),
             }
+            if failed_step {
+                return Ok(got.map(|o| std::iter::once(DOM_CONT_HISTORY_FAILED).chain(o).collect()));
+            }
+            got
         }
     })
 }
@@ -732,6 +786,12 @@ const MIN_SIL_ANG: f64 = 1e-3;
 const MAX_CONTINUITY: u8 = 13;
 /// The longest cache history of a `dom_cont` case.
 const MAX_DOM_CONT_HISTORY: u8 = 3;
+
+/// The first value of the record of a `DomCont` case whose history step (the cache
+/// request or its `GetTree`) failed: distinct from every status. The query's own record
+/// follows it. Only a curve-bounded surface's `GetTree` fails there; any other failure
+/// is a harness error.
+const DOM_CONT_HISTORY_FAILED: f64 = -1.0;
 
 fn fins(vs: &[f64]) -> bool {
     vs.iter().all(|&v| fin(v))
@@ -1309,5 +1369,256 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         rust(&case.parse()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The case's inputs with the surface replaced by the bare basis when it is
+    /// curve-bounded, and no history.
+    fn fresh_basis(inputs: &Inputs) -> Inputs {
+        let mut v = serde_json::to_value(inputs).expect("json");
+        let basis = v["surf"]["curve_bounded"].clone();
+        if !basis.is_null() {
+            v["surf"] = serde_json::json!({ "bspline": basis });
+        }
+        v["history"] = serde_json::json!(0);
+        serde_json::from_value(v).expect("fresh")
+    }
+
+    /// How far the case's start point is off the natural domain of its (bare) surface, in
+    /// u and v.
+    fn off_domain(inputs: &Inputs) -> (f64, f64) {
+        let OpIn::DomCont { uv, .. } = &inputs.op else {
+            panic!("not a DomCont case");
+        };
+        let fresh = fresh_basis(inputs);
+        let d = wrapped_of(fresh.wrap, &fresh.surf)
+            .expect("surface")
+            .natural_uv_domain_with_nurb(&Kernel::default())
+            .expect("domain");
+        let off = |x: f64, lo: f64, hi: f64| (lo - x).max(x - hi).max(0.0);
+        (off(uv[0], d.min().x, d.max().x), off(uv[1], d.min().y, d.max().y))
+    }
+
+    /// The positive factors the direction is scaled by in the evidence of #20239: the same
+    /// direction, so the same request about the same surface.
+    const SCALINGS: [f64; 3] = [1e-3, 1.0, 1e3];
+
+    /// `GetDomainWithContinuity` of the case's surface made fresh (the bare basis for a
+    /// curve-bounded one; no history, outside a Boolean operation), with the direction
+    /// scaled by each of [`SCALINGS`]: each domain as `[u0, u1] x [v0, v1]`, or the error.
+    fn scaled_answers(inputs: &Inputs) -> Vec<String> {
+        let OpIn::DomCont { cont, uv, vec, .. } = &inputs.op else {
+            panic!("not a DomCont case");
+        };
+        let fresh = fresh_basis(inputs);
+        let s = wrapped_of(fresh.wrap, &fresh.surf).expect("surface");
+        let c = continuity(*cont).expect("continuity");
+        SCALINGS
+            .iter()
+            .map(|f| {
+                let v = Vec2::new(vec[0] * f, vec[1] * f);
+                match s.domain_with_continuity(&Kernel::default(), c, p2(*uv), v) {
+                    Ok(d) => format!(
+                        "[{}, {}] x [{}, {}]",
+                        d.min().x,
+                        d.max().x,
+                        d.min().y,
+                        d.max().y
+                    ),
+                    Err(e) => format!("error: {e}"),
+                }
+            })
+            .collect()
+    }
+
+    /// The blessed `GetDomainWithContinuity` cases on a curve-bounded surface answer what
+    /// the bare basis answers made fresh (no history, outside a Boolean operation)
+    /// (#20054). Each start point is on the natural domain except domhist0052's, which is
+    /// off it in u (it gets the span next to it: #20239). Where the history step failed
+    /// (`GetTree` of the kind), the record is the marker followed by that answer.
+    #[test]
+    fn curve_bounded_domhist_rows_answer_as_the_fresh_basis() {
+        for (name, on_domain) in [
+            ("domhist0017", true),
+            ("domhist0052", false),
+            ("domhist0070", true),
+            ("domhist0074", true),
+            ("domhist0075", true),
+            ("gen0471", true),
+        ] {
+            let case = crate::case::regression_case(&Runner, name);
+            let inputs: Inputs = case.parse().expect("inputs");
+            assert!(
+                matches!(inputs.surf, SurfIn::CurveBounded(_)) && !inputs.wrap,
+                "{name}: not curve-bounded"
+            );
+            let (du, dv) = off_domain(&inputs);
+            assert_eq!((du, dv) == (0.0, 0.0), on_domain, "{name}: off by ({du}, {dv})");
+            let got = rust(&inputs).expect("rust");
+            let want = rust(&fresh_basis(&inputs)).expect("fresh");
+            if got.values["status"] == [DOM_CONT_HISTORY_FAILED] {
+                let mut record = want.values["status"].clone();
+                record.extend_from_slice(&want.values["out"]);
+                assert_eq!(got.values["out"], record, "{name}");
+            } else {
+                assert_eq!(got.values, want.values, "{name}");
+            }
+        }
+    }
+
+    /// The `[lo, hi]` span of `knots` in one direction that `GetDomainWithContinuity`
+    /// answers for a start parameter `x` off that direction's natural domain, worked
+    /// from the knots and their continuities alone (#20239): the knots where the
+    /// surface is less continuous than `c` are its breaks, and the end knots bound the
+    /// domain whatever `c` is. A start before the first knot gets the span from the
+    /// first knot to the next break (the last knot when there is none, as for `c` =
+    /// `Discontinuous`, which no knot is less continuous than); one after the last knot
+    /// gets the span from the break before it (else the first knot) to the last. `None`
+    /// when `x` is on the domain.
+    fn end_span(knots: &[f64], conts: &[ContinuityType], c: ContinuityType, x: f64) -> Option<(f64, f64)> {
+        let breaks: Vec<f64> = knots
+            .iter()
+            .zip(conts)
+            .filter(|(_, k)| (**k as i32) < (c as i32))
+            .map(|(k, _)| *k)
+            .collect();
+        let (first, last) = (*knots.first()?, *knots.last()?);
+        if x < first {
+            Some((first, breaks.iter().copied().find(|b| *b > first).unwrap_or(last)))
+        } else if x > last {
+            Some((breaks.iter().copied().rev().find(|b| *b < last).unwrap_or(first), last))
+        } else {
+            None
+        }
+    }
+
+    /// Every `DomCont` case (STEP surfaces included) answers by construction after the
+    /// fix of #20239 (`GetDomainWithContinuity` clamps at an end knot from the side of it
+    /// the start point is on, not from the direction's component):
+    /// - the answer is the same under every positive scaling of the direction (the same
+    ///   request about the same surface), and a domain is a box of positive width in both
+    ///   directions;
+    /// - in a direction where the start point is off the natural domain, the answer is
+    ///   the span next to it, [`end_span`], worked from the knots and continuities, and
+    ///   does not depend on the direction's sign either;
+    /// - no `DomCont` case is known failing.
+    ///
+    /// Before the fix 30 cases (all off the domain) answered a zero-width box or changed
+    /// with the direction's length; every one of them is among the cases checked here.
+    #[test]
+    fn domcont_answers_are_the_span_next_to_the_start_point() {
+        let k = &Kernel::default();
+        let tol = solidcore::math::EFF_ZERO_SQRT;
+        let dir = crate::case::repo_root().join("crates/goldens/expected");
+        let listed = crate::golden::known_failing(&dir, Runner.id()).expect("known failing");
+        let cases = Runner
+            .cases(&CaseContext {
+                root: crate::case::repo_root(),
+                seeds: 16,
+            })
+            .expect("cases");
+        let (mut seen, mut off_seen) = (0, 0);
+        let mut off_names = std::collections::BTreeSet::new();
+        for case in cases {
+            let Ok(inputs) = case.parse::<Inputs>() else {
+                continue;
+            };
+            let OpIn::DomCont { uv, cont, vec, .. } = &inputs.op else {
+                continue;
+            };
+            let name = &case.name;
+            seen += 1;
+            assert!(!listed.contains_key(name), "{name}: listed known failing");
+            let answers = scaled_answers(&inputs);
+            assert!(answers.iter().all(|a| *a == answers[1]), "{name}: {answers:?}");
+            let fresh = fresh_basis(&inputs);
+            let s = wrapped_of(fresh.wrap, &fresh.surf).expect("surface");
+            let c = continuity(*cont).expect("continuity");
+            let ask = |f: f64| {
+                s.domain_with_continuity(k, c, p2(*uv), Vec2::new(vec[0] * f, vec[1] * f))
+            };
+            let Ok(got) = ask(1.0) else {
+                continue;
+            };
+            assert!(
+                got.min().x < got.max().x && got.min().y < got.max().y,
+                "{name}: {got:?}"
+            );
+            let (du, dv) = off_domain(&inputs);
+            let reversed = ask(-1.0).expect("reversed");
+            for (param, off, x, lo, hi, rlo, rhi) in [
+                (SurfParamType::U, du, uv[0], got.min().x, got.max().x, reversed.min().x, reversed.max().x),
+                (SurfParamType::V, dv, uv[1], got.min().y, got.max().y, reversed.min().y, reversed.max().y),
+            ] {
+                if off <= tol {
+                    continue;
+                }
+                off_seen += 1;
+                off_names.insert(name.clone());
+                let (knots, _) = s.knots_with_nurb(k, param, None).expect("knots");
+                let (_, conts) = s.calculate_continuities(k, param).expect("continuities");
+                let want = end_span(&knots, &conts, c, x).unwrap_or_else(|| {
+                    panic!("{name} {param:?}: start {x} off by {off}, knots {knots:?}, conts {conts:?}, got {got:?}")
+                });
+                assert_eq!((lo, hi), want, "{name} {param:?}: start {x}");
+                assert_eq!((rlo, rhi), want, "{name} {param:?}: reversed direction");
+            }
+        }
+        assert!(seen > 0 && off_seen >= 30, "{seen} cases, {off_seen} off the domain");
+        // the 30 cases known failing before the fix, each checked off the domain here
+        for n in [
+            2, 4, 6, 9, 11, 21, 23, 28, 29, 35, 43, 49, 51, 57, 61, 62, 63, 67, 68, 71, 73,
+            79, 81, 82, 86, 88, 89, 90, 93, 95,
+        ] {
+            let name = format!("domhist{n:04}");
+            assert!(off_names.contains(&name), "{name}: not checked off the domain");
+        }
+    }
+
+    /// WR-441 (`crate::bstuv_trim_rows`): the silhouette rows whose UV curves keep their short
+    /// end spans. A parallel projection splits each traced curve at its interior points with
+    /// a tangent parallel to the view, and trims its UV curve at the same intervals. Each
+    /// moved UV curve's end spans are certified on the 3D curve within the trace's
+    /// tolerance (`pOptApproxTol3d`): a rounded-interval Hausdorff bound between `C` and
+    /// `S(W)`. The moved curves are listed by their control point counts, the ones the row
+    /// records.
+    #[test]
+    fn bstuv_silhouette_kept_spans_lie_on_their_curves() {
+        use solidcore::geom::tol::{zone_tol_3d, SmallTopoType};
+        let moved: [(&str, &[(usize, usize)]); 2] = [
+            ("sil0048", &[(4, 1389)]),
+            ("sil_adv_20_torus_f0", &[(2, 96), (3, 96), (5, 108)]),
+        ];
+        for (name, curves) in moved {
+            let case = crate::case::regression_case(&Runner, name);
+            let i: Inputs = case.parse().expect("inputs");
+            let OpIn::Sil { dom, eye, perspective, tol, ang, translate } = &i.op else {
+                panic!("{name}: not a silhouette case")
+            };
+            let k = Kernel::default();
+            let mut s = surface_in(&i.surf).unwrap();
+            if let Some(t) = translate {
+                let mut ax = Axis2Placement::default();
+                ax.translate(v3(*t));
+                s.transform(&k, &ax, None).unwrap();
+            }
+            let (c3, cuv) = s
+                .create_silhouette_curves(&k, &dom_of(*dom), v3(*eye), *perspective, *tol, *ang)
+                .unwrap();
+            let tol = tol.expect("a trace tolerance");
+            for &(j, n) in curves {
+                let cleanup = tol.max(zone_tol_3d(&k, SmallTopoType::NormalSize));
+                let ends = crate::bstuv_trim_rows::trim_end_spans(&k, &s, &c3[j], &cuv[j], cleanup);
+                eprintln!("BSTUV {name} curve {j}: {ends:?} (tolerance {tol:e})");
+                assert_eq!(ends.n, n, "{name} curve {j}: the row's UV curve");
+                for b in ends.bound.into_iter().chain(ends.degen.iter().map(|d| d.1)) {
+                    assert!(b <= tol, "{name} curve {j}: an end span {b:e} off its curve");
+                }
+            }
+        }
     }
 }

@@ -36,7 +36,7 @@ fn a_finished_sketch_on_a_face_draws_a_halo_under_its_own_curves_only() {
                 assert!(remainder.is_empty());
                 let halo = super::c4(tokens.sketch_halo);
                 let halo_count = lines.iter().filter(|line| line_color(&scene, *line) == halo).count();
-                crate::prefs::set(&mut app, &json!({"sketch_halo": false})).unwrap();
+                crate::prefs::set(&mut app, &json!({"sketch_halo": false, "dimension_rim": false})).unwrap();
                 assert_ne!(super::sketch_scene_key(&app, &projection), enabled_key, "changing the preference rebuilds the sketch scene");
                 let disabled = super::build_sketch_scene(&app, &projection);
                 let disabled_bytes = if finished { &disabled.lines } else { &disabled.overlay };
@@ -565,6 +565,56 @@ fn painted_in(shapes: &[egui::epaint::ClippedShape], colour: egui::Color32) -> u
 }
 
 #[test]
+fn projected_and_lost_point_colours_require_the_project_option() {
+    fn points_in(shapes: &[egui::epaint::ClippedShape], colour: egui::Color32) -> usize {
+        fn walk(shape: &egui::Shape, colour: egui::Color32) -> usize {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().map(|shape| walk(shape, colour)).sum(),
+                egui::Shape::Rect(rect) => usize::from(rect.fill == colour && rect.rect.size() == egui::vec2(5.0, 5.0)),
+                _ => 0,
+            }
+        }
+        shapes.iter().map(|shape| walk(&shape.shape, colour)).sum()
+    }
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call(
+        "ui.prefs",
+        json!({"theme_import":{"format":"solidcraft-theme/1","name":"Projection markers","base":"light",
+            "colors":{"sketch_projected":"#12ab34","sketch_lost":"#ef1256","sketch_point":"#ab3412","sketch_point_free":"#3412ab"}}}),
+    );
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
+    let source = h.app.session.doc.features.last().unwrap().id;
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.project", json!({"refs":[{"body":"Body1"}]})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.app.cam.distance = 80.0;
+    for lost in [false, true] {
+        if lost {
+            h.app.run("sketch.finish", json!({})).unwrap();
+            h.app.run("timeline.suppress", json!({"feature":source,"suppressed":true})).unwrap();
+            h.app.edit_sketch(sketch);
+        }
+        for enhanced in [false, true, false] {
+            h.call("ui.set", json!({"projectLinkTools":enhanced}));
+            h.settle();
+            let projected = egui::Color32::from_rgb(0x12, 0xab, 0x34);
+            let missing = egui::Color32::from_rgb(0xef, 0x12, 0x56);
+            if enhanced {
+                let expected = if lost { missing } else { projected };
+                assert!(points_in(&h.shapes, expected) >= 4, "lost={lost}: projected corners show their reference status");
+            } else {
+                assert_eq!(points_in(&h.shapes, projected), 0, "projected point colours are opt-in");
+                assert_eq!(points_in(&h.shapes, missing), 0, "lost point colours are opt-in");
+                let determined = egui::Color32::from_rgb(0xab, 0x34, 0x12);
+                let free = egui::Color32::from_rgb(0x34, 0x12, 0xab);
+                assert!(points_in(&h.shapes, determined) + points_in(&h.shapes, free) >= 4, "lost={lost}: main's point colours remain visible");
+            }
+        }
+    }
+}
+
+#[test]
 fn conflicting_curves_points_glyphs_and_dimensions_take_the_conflict_colour_until_the_conflict_is_gone() {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
@@ -809,6 +859,38 @@ fn a_shown_sketch_failing_for_a_lost_projection_draws_its_last_geometry() {
     assert_eq!(sketch_lines_in(&h.app, t.sketch_lost), 0, "hidden");
 }
 
+/// A sketch that failed for a lost projection marks where the lost face was on the model: the
+/// point the face was picked at, with the point under it in the sketch's plane (#5048). Shown
+/// or open for editing it is marked once; used by another feature, or hidden, it isn't. The mark
+/// follows its component when the component moves.
+#[test]
+fn a_lost_projection_marks_where_its_face_was_on_the_model() {
+    use solidcraft_engine::geom::prelude::*;
+    let (mut h, outline, part) = part_lost(true);
+    assert!(super::lost_sources(&h.app).is_empty(), "used by Peg, not shown");
+    h.app.session.visibility.shown_sketches.push(outline);
+    let marked = |h: &crate::scenario::Harness| super::lost_sources(&h.app);
+    let check = |sources: &[super::LostSource], at: Vec3| {
+        let [source] = sources else { panic!("{sources:?}") };
+        assert!(source.at.dist(at) < 1e-6, "picked on the block's front face: {source:?}");
+        // Guide is 30 off XZ: the foot is straight across from the pick, in the sketch's plane.
+        let across = source.foot - source.at;
+        assert!(across.x.abs() < 1e-6 && across.z.abs() < 1e-6 && (across.len() - 30.0).abs() < 1e-6, "{source:?}");
+    };
+    // Only Block's face lost its name: Block2's projection is still found.
+    check(&marked(&h), Vec3::new(20.0, 0.0, 5.0));
+    h.app.run("occurrence.move", json!({"occurrence": part, "translate": [0, 0, 50]})).unwrap();
+    h.frames(2);
+    check(&marked(&h), Vec3::new(20.0, 0.0, 55.0));
+    h.app.session.visibility.hidden_sketches.push(outline);
+    assert!(marked(&h).is_empty(), "hidden");
+    h.app.session.visibility.hidden_sketches.retain(|s| *s != outline);
+    h.app.run("sketch.edit", json!({"sketch": "Outline"})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.active_sketch, Some(outline));
+    check(&marked(&h), Vec3::new(20.0, 0.0, 55.0));
+}
+
 /// A 40 x 20 x 10 block and, in the same design (no components), `copies` sketches (Outline,
 /// Outline2, ...) on a plane `offset` off XZ, each projecting the block's front face beside a
 /// circle; then the block's front side drawn again, so each fails for its projection. Returns
@@ -895,6 +977,40 @@ fn dragging_in_a_later_sketch_does_not_build_an_earlier_failed_one_again() {
     }
     assert!(sketch_lines_in(&h.app, t.sketch_lost) > 0, "still drawn");
     assert_eq!(super::failed_sketch_counts(&h.app).0, builds, "five drag frames, no build");
+}
+
+/// A camera move asks which sketches failed many times a frame. Only a sketch that lost a
+/// projection is looked up among the model's sketches: looking up every feature's took most of
+/// each frame in a design of thousands of features.
+#[test]
+fn a_camera_move_looks_up_only_the_sketches_that_lost_a_projection() {
+    let orbit = |h: &mut crate::scenario::Harness| {
+        let before = super::failed_sketches_asked(&h.app);
+        for _ in 0..3 {
+            h.app.cam.yaw += 0.1;
+            h.frame();
+        }
+        super::failed_sketches_asked(&h.app) - before
+    };
+    let mut h = crate::scenario::Harness::new();
+    for i in 0..4 {
+        h.app.run("sketch.create", json!({"plane":"XY","offset":10 * i,"name":format!("Sound{i}")})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":3})).unwrap();
+        h.app.finish_sketch();
+    }
+    h.frames(3);
+    assert!(h.app.session.model.results.len() >= 4);
+    assert_eq!(orbit(&mut h), 0, "no sketch lost a projection: none is looked up");
+
+    // One that did, among sound ones: it alone is looked up, as often as it is asked for.
+    let (mut h, sketches) = lost_without_components(30.0, 1);
+    let asked = orbit(&mut h);
+    let once = super::failed_sketches_asked(&h.app);
+    let (shown, _) = super::failed_sketches(&h.app);
+    assert_eq!(shown.iter().map(|ss| ss.feature).collect::<Vec<_>>(), sketches, "still found");
+    assert_eq!(super::failed_sketches_asked(&h.app) - once, 1, "one answer looks up one sketch");
+    assert!(asked > 0);
+    assert!(h.app.session.model.results.len() > 1, "there are others it could have looked up");
 }
 
 /// A shown failed sketch 10 m from the bodies is in the depth range the picture is drawn

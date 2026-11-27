@@ -269,7 +269,7 @@ fn param_method(code: u32) -> Option<ParamMethod> {
 }
 
 fn rust(i: &In) -> Result<Output, HarnessError> {
-    let k = Kernel::default();
+    let k = crate::runner_kernel();
     // the one curve of an offset or continuity case, else the case's record
     let one = |c: &Crv| -> Result<Result<Curve, Box<Output>>, HarnessError> {
         let mut v = Vec::new();

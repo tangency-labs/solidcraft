@@ -10,7 +10,25 @@ use crate::SolveApp;
 
 /// A view being drawn on a worker thread.
 pub struct Drawing {
-    done: std::sync::mpsc::Receiver<Done>,
+    /// The work, and how long the worker took over it.
+    done: std::sync::mpsc::Receiver<(Done, std::time::Duration)>,
+    /// The view being drawn (none: a picture's setup), and when it was asked for.
+    view: Option<u64>,
+    asked: web_time::Instant,
+}
+
+/// One line in the log for each view drawn: how long its lines took to work out, how long they
+/// then waited for the window to take them, and the two together. A view that takes long says
+/// where the time went.
+fn log_view(view: u64, worked: std::time::Duration, total: std::time::Duration) {
+    let waited = total.saturating_sub(worked);
+    log::info!(
+        "drawing view {}: worked out in {:.3} s, waited {:.3} s for the window, {:.3} s in all",
+        solidcraft_engine::doc::ids::encode(view),
+        worked.as_secs_f64(),
+        waited.as_secs_f64(),
+        total.as_secs_f64()
+    );
 }
 
 /// Whether no drawing view is being drawn on a worker thread.
@@ -24,7 +42,10 @@ pub fn idle(app: &SolveApp) -> bool {
 pub fn tick(app: &mut SolveApp) -> bool {
     if let Some(drawing) = &app.drawing_job {
         match drawing.done.try_recv() {
-            Ok(done) => {
+            Ok((done, worked)) => {
+                if let Some(view) = drawing.view {
+                    log_view(view, worked, drawing.asked.elapsed());
+                }
                 drawing_scene::finish(&mut app.session, done);
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => return true,
@@ -39,11 +60,14 @@ pub fn tick(app: &mut SolveApp) -> bool {
         // picture set up draws its bands for a few milliseconds, as `step` does.
         let Some(job) = drawing_scene::begin(&mut app.session) else { return drawing_scene::step(&mut app.session) };
         let (tx, rx) = std::sync::mpsc::channel();
+        let (view, asked) = (job.view(), web_time::Instant::now());
         let worker = std::thread::Builder::new().name("drawing view".into()).spawn(move || {
-            let _ = tx.send(job.run());
+            let began = web_time::Instant::now();
+            let done = job.run();
+            let _ = tx.send((done, began.elapsed()));
         });
         if worker.is_ok() {
-            app.drawing_job = Some(Drawing { done: rx });
+            app.drawing_job = Some(Drawing { done: rx, view, asked });
             return true;
         }
         // No thread to draw on: draw here, as before.
@@ -86,6 +110,7 @@ mod tests {
                 place: ViewPlace::At(at),
                 settings: ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() },
                 reference_shown_percent: 0.0,
+                centre_marks: None,
                 label: None,
             })]);
         }
