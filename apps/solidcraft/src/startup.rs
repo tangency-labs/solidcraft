@@ -476,7 +476,7 @@ pub fn choose_adapter(adapters: &[AdapterChoice], environment: Option<&str>, pre
 /// selector always names an adapter.
 pub fn configure_adapter(setup: &mut eframe::egui_wgpu::WgpuSetupCreateNew, cpu: bool, environment: Option<String>, preference: Option<String>) {
     if cpu {
-        setup.native_adapter_selector = Some(std::sync::Arc::new(|adapters, surface| pick_cpu_adapter(adapters, surface)));
+        setup.native_adapter_selector = Some(std::sync::Arc::new(pick_cpu_adapter));
     } else if environment.as_deref().is_some_and(|s| !s.is_empty()) || preference.as_deref().is_some_and(|s| !s.is_empty()) {
         setup.native_adapter_selector = Some(std::sync::Arc::new(move |adapters, surface| {
             let choices: Vec<_> = adapters.iter().map(|a| AdapterChoice::of(a, surface)).collect();
