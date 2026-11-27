@@ -2886,6 +2886,15 @@ pub fn canvas_items(app: &SolveApp, id: u64) -> Vec<Item> {
     ]
 }
 
+/// An active viewport drag of Point A (`0`) or Point B (`1`) while calibrating or straightening (#23210).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct CanvasPointDrag {
+    /// Which point is being dragged: `0` for Point A, `1` for Point B.
+    pub point: u8,
+    /// Offset from the point to the press position on the canvas plane so grabbing never jumps.
+    pub offset: [f64; 2],
+}
+
 /// Editing a canvas (position, size, angle, opacity, flip), calibrating it (two points on
 /// the image and their true distance) or straightening it (two points along an edge of the
 /// image and the direction that edge should have, #11989). Live edits of one opening are one
@@ -2917,6 +2926,8 @@ pub struct CanvasPanel {
     /// A click on the image has set Point B: Straighten's hint then asks for the direction and
     /// the Straighten button rather than for Point A again (#11989).
     pub picked_both: bool,
+    /// Active drag of Point A or Point B in the viewport (#23210).
+    pub(crate) drag: Option<CanvasPointDrag>,
 }
 
 impl CanvasPanel {
@@ -2945,6 +2956,7 @@ impl CanvasPanel {
             angle: 0.0,
             next: 0,
             picked_both: false,
+            drag: None,
         }
     }
 
@@ -2961,6 +2973,13 @@ impl CanvasPanel {
     /// Does a click on the image set Point A or B (Calibrate and Straighten)?
     pub fn picks_points(&self) -> bool {
         self.calibrate || self.straighten
+    }
+
+    /// Current planar distance between Point A and Point B, in mm.
+    pub fn measured_distance(&self) -> f64 {
+        let dx = self.b[0] - self.a[0];
+        let dy = self.b[1] - self.a[1];
+        dx.hypot(dy)
     }
 
     /// The direction, in degrees, Straighten turns the line A–B to.
