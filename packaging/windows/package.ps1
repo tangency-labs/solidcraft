@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Produces, in $env:DIST (default: dist/release):
-    solidcraft-<version>-windows-<arch>.msi            per-machine installer (WiX v5)
+    solidcraft-<version>-windows-<arch>.msi            installer (WiX v5): all users, or just for me
     solidcraft-<version>-windows-<arch>-portable.zip   solidcraft.exe + solidcraft-cli.exe + licences
     SolidCraft-<version>-windows-<arch>.exe            the app alone (x64 only: a plain download)
     solidcraft-<version>-windows-policy-templates.zip  solidcraft.admx + en-US/solidcraft.adml for
