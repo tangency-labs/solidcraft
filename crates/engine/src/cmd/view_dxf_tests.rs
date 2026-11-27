@@ -657,7 +657,9 @@ fn view_dxf_exports_the_view_as_the_section_cuts_it() {
     // a line across the hole's top, 4 mm up, from x = 7 to 13 (the view is centred on (20, 15, 5)).
     let front = camera(StandardView::Front);
     let across_the_hole = |v: &Value| {
-        lines(v).iter().any(|(a, b)| (a.y + 1.).abs() < 1e-3 && (b.y + 1.).abs() < 1e-3 && (a.x.min(b.x) + 13.).abs() < 1e-3 && (a.x.max(b.x) + 7.).abs() < 1e-3)
+        lines(v)
+            .iter()
+            .any(|(a, b)| (a.y + 1.).abs() < 1e-3 && (b.y + 1.).abs() < 1e-3 && (a.x.min(b.x) + 13.).abs() < 1e-3 && (a.x.max(b.x) + 7.).abs() < 1e-3)
     };
     assert!(!across_the_hole(&export(&mut s, front, "omit")));
     let through_the_axis = json!([{"origin":[0,10,0],"normal":[0,-1,0]}]);

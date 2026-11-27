@@ -20,7 +20,7 @@ use solidcraft_viewport::Camera;
 use super::CommandSpec;
 use crate::mesh_lines::{self, Refused, Stage, View};
 use crate::params::{bad, str_};
-use crate::schema::silhouette::{DxfOutput, DxfSectionPlane, DxfProjection, DxfUnits, ExportViewDxfParams, ViewDxfResult, ViewDxfStats};
+use crate::schema::silhouette::{DxfOutput, DxfProjection, DxfSectionPlane, DxfUnits, ExportViewDxfParams, ViewDxfResult, ViewDxfStats};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
