@@ -46,6 +46,10 @@ pub struct RunParams {
     /// Populated forms require explicit acknowledgement of this document revision.
     #[serde(default)]
     pub form_guard: Option<FormGuard>,
+    /// Run the entry as a live preview: `plugin.preview` answers true inside it. A dialog's
+    /// preview sets it on its scratch design; a script sets it to try that path.
+    #[serde(default)]
+    pub preview: bool,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -82,6 +86,12 @@ pub struct FormValidation {
 fn empty_params() -> Value {
     Value::Object(Default::default())
 }
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+pub struct PluginMessage {
+    pub level: craft_plugin::LogLevel,
+    pub message: String,
+}
+
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct RunResult {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -98,6 +108,8 @@ pub struct RunResult {
     pub view: Option<PluginView>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub messages: Vec<PluginMessage>,
 }
 
 /// A view command a plugin called, for the window to apply after the run lands.
@@ -162,6 +174,18 @@ pub struct ListResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Ask whether the plugin run under way is a live preview (`plugin.preview`).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PreviewParams {}
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PreviewResult {
+    /// True while a plugin dialog's live preview runs the entry on a scratch design that is
+    /// thrown away; false in a run whose result is kept.
+    pub preview: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
 /// List the installed, enabled plugins' entries as tools for agents (`plugin.tools`).
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -320,6 +344,10 @@ pub struct InstallResult {
     /// Host-drawn panels declared by the plugin, shown during permission review.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub panels: Vec<crate::plugin::ui::PanelSpec>,
+    /// Workspaces declared by the plugin, shown during permission review. They are inert data;
+    /// any enter or exit hook is a read-only entry listed in `entry_points`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<crate::plugin::ui::WorkspaceSpec>,
     /// SHA-256 of the exact manifest and component. Send it as `approval` after reviewing this reply.
     pub approval: String,
     /// SHA-256 of the whole `.zip`. Send it as `archive` after reviewing this reply.
@@ -344,8 +372,10 @@ pub struct InstallResult {
     pub extensions: serde_json::Map<String, Value>,
     /// What it asks for: command groups, named folders, the clock.
     pub permissions: craft_plugin::Permissions,
-    /// The fuel, memory and time it asks for. Fuel and memory above `host_limits` can be approved
-    /// at install (`approve.fuel`, up to `MAX_APPROVED_FUEL`, and `approve.memory_mib`).
+    /// The fuel, memory, host-call count and guest time it asks for. Fuel and memory above
+    /// `host_limits` can be approved at install (`approve.fuel`, up to `MAX_APPROVED_FUEL`, and
+    /// `approve.memory_mib`); host calls and guest time must fit the user's ceilings in
+    /// `host_limits` (importers keep their existing 600000 ms time ceiling).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub limits: Option<craft_plugin::Limits>,
     /// The app's ceilings for plugins, before any approval.

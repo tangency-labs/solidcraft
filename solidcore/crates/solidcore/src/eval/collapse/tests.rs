@@ -484,6 +484,48 @@ fn a_row_collapsed_over_part_of_its_range_is_a_pole_there() {
     assert!(!collapsed(&s, at, 1, 0.0).unwrap());
 }
 
+/// A strip 10 by 1 mm (u along x, v along y, degree 1 by 3, v's cubic net evenly spaced so v is
+/// y) and the iso-line across it at its end, x = 10, about the centre (10, 0.5, 0): its piece v
+/// 0.1 to 0.9 lies within 0.4 of it, the whole line within 0.5. Within 0.45 the piece is, the
+/// whole line is not, and lifted 0.3 off the strip the centre is 0.5 from the piece's ends. A
+/// collapse check of the piece (its diameter, 0.8) never takes it within 0.45. A plane's
+/// iso-line is decided by its ends; a piece off the knots is refused.
+#[test]
+fn an_iso_line_piece_within_reach_of_a_point_is_certified() {
+    let rows: Vec<Vec<([f64; 3], f64)>> = [0.0, 10.0]
+        .iter()
+        .map(|&x| {
+            (0..4)
+                .map(|j| ([x, f64::from(j) / 3.0, 0.0], 1.0))
+                .collect()
+        })
+        .collect();
+    let s = spline([1, 3], &rows);
+    let at = [1.0, 0.3];
+    let centre = Vec3::new(10.0, 0.5, 0.0);
+    assert!(iso_within(&s, at, 1, (0.1, 0.9), centre, 0.45).unwrap());
+    assert!(
+        iso_within(&s, at, 1, (0.9, 0.1), centre, 0.45).unwrap(),
+        "either order"
+    );
+    assert!(iso_within(&s, at, 1, (0.0, 1.0), centre, 0.5 + 1e-9).unwrap());
+    assert!(!iso_within(&s, at, 1, (0.0, 1.0), centre, 0.45).unwrap());
+    let above = Vec3::new(10.0, 0.5, 0.3);
+    assert!(!iso_within(&s, at, 1, (0.1, 0.9), above, 0.45).unwrap());
+    assert!(iso_within(&s, at, 1, (0.1, 0.9), above, 0.5 + 1e-9).unwrap());
+    assert!(!collapsed_on(&s, at, 1, 0.45, Some((0.1, 0.9))).unwrap());
+    // One point of it: the piece is that point.
+    assert!(iso_within(&s, at, 1, (0.5, 0.5), centre, 1e-9).unwrap());
+    assert!(iso_within(&s, at, 1, (-0.1, 0.5), centre, 1.0).is_err());
+    let plane = EvalSurface::Plane {
+        origin: Vec3::ZERO,
+        du: Vec3::new(10.0, 0.0, 0.0),
+        dv: Vec3::new(0.0, 1.0, 0.0),
+    };
+    assert!(iso_within(&plane, at, 1, (0.1, 0.9), centre, 0.45).unwrap());
+    assert!(!iso_within(&plane, at, 1, (0.0, 1.0), centre, 0.45).unwrap());
+}
+
 /// R2-6: knots with an empty span where one is needed are malformed (Invalid), not a point off
 /// the surface; a revolution's axis must be of unit length.
 #[test]
@@ -1419,4 +1461,61 @@ fn a_strip_shift_bound_covers_the_speed_over_the_strip() {
     assert!(b >= o * 2.0 * w * 3.0 && b < o * 20.0, "{b}");
     assert!(strip_shift_bound(&s, 0, [1.0 - o, 1.0], [0.0, 1.5], o).is_err());
     assert!(strip_shift_bound(&s, 0, [1.0 - o, 1.0], [0.0, 1.0], f64::NAN).is_err());
+}
+
+/// A dense periodic wavy loft-like B-spline (361 x 12 control points, closed in u) certifies as
+/// non-collapsed in O(1), still refuses off-range parameters, and handles sub-range queries;
+/// a dense pinched B-spline with one collapsed boundary row still reports its pole there.
+#[test]
+fn dense_periodic_bspline_collapse_certifies_and_handles_poles() {
+    let (nu, nv) = (361u32, 12u32);
+    let wavy: Vec<Vec<([f64; 3], f64)>> = (0..nu)
+        .map(|i| {
+            let t = std::f64::consts::TAU * (f64::from(i) / f64::from(nu - 1));
+            (0..nv)
+                .map(|j| {
+                    let s = f64::from(j) / f64::from(nv - 1);
+                    let r =
+                        10.0 + 0.4 * (24.0 * t + 0.6 * s).sin() + 0.3 * (3.0 * t + 0.2 * s).sin();
+                    ([r * t.cos(), r * t.sin(), 30.0 * s], 1.0)
+                })
+                .collect()
+        })
+        .collect();
+    let s = spline([3, 3], &wavy);
+    for (u, v) in [(0.0, 0.0), (0.37, 0.5), (0.99, 1.0), (0.5, 0.123)] {
+        for reach in [0.0, 1e-2] {
+            assert_eq!(collapse(&s, [u, v], reach).unwrap(), Collapse::Neither);
+        }
+    }
+    assert!(matches!(
+        collapse(&s, [0.5, 1.5], 0.0),
+        Err(EvalError::Unevaluable(_))
+    ));
+    assert!(!collapsed_on(&s, [0.25, 0.5], 0, 0.0, Some((0.1, 0.9))).unwrap());
+    assert!(!collapsed_on(&s, [0.25, 0.5], 1, 0.0, Some((0.1, 0.9))).unwrap());
+
+    let (pnu, pnv) = (121u32, 8u32);
+    let pinched_rows: Vec<Vec<([f64; 3], f64)>> = (0..pnu)
+        .map(|i| {
+            let t = std::f64::consts::TAU * (f64::from(i) / f64::from(pnu - 1));
+            (0..pnv)
+                .map(|j| {
+                    let s = f64::from(j) / f64::from(pnv - 1);
+                    let r = 10.0 * s;
+                    ([r * t.cos(), r * t.sin(), 20.0 * s], 1.0)
+                })
+                .collect()
+        })
+        .collect();
+    let pinched = spline([3, 3], &pinched_rows);
+    assert_eq!(collapse(&pinched, [0.37, 0.0], 0.0).unwrap(), Collapse::U);
+    assert_eq!(
+        collapse(&pinched, [0.37, 0.5], 0.0).unwrap(),
+        Collapse::Neither
+    );
+    assert_eq!(
+        collapse(&pinched, [0.37, 1.0], 0.0).unwrap(),
+        Collapse::Neither
+    );
 }

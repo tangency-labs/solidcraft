@@ -88,6 +88,20 @@ pub(crate) fn angle_crossing(curve: &CurveEval, origin: Vec3, x: Vec3, y: Vec3, 
     })
 }
 
+/// The unit axis along `z` and the unit direction of `v`'s component square to it: a record
+/// frame's two axes, unit and square to rounding as the record's check asks (the kernel's STEP
+/// frame, [`solidcore::Vec3::make_unit_ortho_vectors`]). `None` where `z` has no length or `v`
+/// lies along it, where the kernel would take an arbitrary direction instead.
+pub(crate) fn square_frame(z: Vec3, v: Vec3) -> Option<(Vec3, Vec3)> {
+    let (z, v) = (c::vec3(z), c::vec3(v));
+    let unit = z.unitize().ok()?;
+    if unit.cross(v).length_squared() <= solidcore::math::EFF_ZERO_SQ {
+        return None;
+    }
+    let [axis, x, _] = z.make_unit_ortho_vectors(Some(v)).ok()?;
+    Some((c::record_vec3(axis), c::record_vec3(x)))
+}
+
 /// A closed spline or polyline with its seam moved to `start`, exactly.
 pub(crate) fn restart_curve(curve: &Curve, start: f64) -> Result<Curve, Error> {
     let curve = c::curve(curve).map_err(|e| e.to_string())?;
@@ -127,6 +141,18 @@ impl SurfaceEval {
     /// ([`k::SurfaceEval::pole_within`]); refused where that cannot be decided.
     pub(crate) fn pole_within(&self, uv: [f64; 2], reach: f64) -> Result<[bool; 2], String> {
         self.0.pole_within(uv, reach).map_err(|e| e.to_string())
+    }
+    /// Whether the piece of the iso-line along `d` through `uv` over the `d` parameters `range`
+    /// lies within `reach` mm of `centre`, certified ([`k::SurfaceEval::iso_within`]); refused
+    /// where that cannot be decided.
+    pub(crate) fn iso_within(&self, uv: [f64; 2], d: usize, range: (f64, f64), centre: Vec3, reach: f64) -> Result<bool, String> {
+        self.0.iso_within(uv, d, range, c::vec3(centre), reach).map_err(|e| e.to_string())
+    }
+    /// A certified bound on how far the surface moves when a point of the strip `along` x `across`
+    /// moves along `d` by at most `o` within it ([`k::SurfaceEval::strip_shift_bound`]), rounded up;
+    /// refused for a surface that is not a spline and where no bound is decided.
+    pub(crate) fn strip_shift_bound(&self, d: usize, along: [f64; 2], across: [f64; 2], o: f64) -> Result<f64, String> {
+        self.0.strip_shift_bound(d, along, across, o).map_err(|e| e.to_string())
     }
     /// `pc` with its control points put on the knot range and a certified bound on how far that
     /// moves the surface under it; `None` when it is on the range, refused where the move is past

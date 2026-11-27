@@ -697,6 +697,89 @@ fn shared_field_definitions_are_drawn_like_inline_fields() {
 }
 
 #[test]
+fn layout_annotations_draw_headings_fold_sections_follow_units_and_link_help() {
+    // Alphabetical keys: without a recorded declaration order the dialog sorts optional fields by name.
+    let schema = json!({"type":"object","x-solidcraft-sections":"collapsible","properties":{
+        "a_units":{"type":"string","title":"Units","enum":["mm","in"],"default":"in","x-solidcraft-section":"Carcass"},
+        "b_width":{"type":"number","title":"Width","default":20,"unit":"cm","x-solidcraft-unit-from":"a_units",
+            "x-solidcraft-help":"https://example.com/width"},
+        "c_drawers":{"type":"integer","title":"Drawers","default":2,"x-solidcraft-section":"Drawers"},
+        "d_labels":{"type":"boolean","title":"Labels","x-solidcraft-section":""}
+    }});
+    let fields = form(&schema).expect("layout annotations keep the dialog drawable");
+    let layouts: Vec<&Layout> = fields.iter().map(|(f, _)| &f.layout).collect();
+    assert_eq!((layouts[0].section.as_deref(), layouts[0].collapsible), (Some("Carcass"), true));
+    assert_eq!(layouts[1].unit_from.as_deref(), Some("a_units"));
+    assert_eq!(layouts[1].help.as_deref(), Some("https://example.com/width"));
+    assert_eq!((layouts[3].section.as_deref(), layouts[3].collapsible), (Some(""), false), "an empty heading is a divider");
+    let plain =
+        form(&json!({"type":"object","properties":{"w":{"type":"number","x-solidcraft-section":"Size","x-solidcraft-help":"http://example.com"}}}));
+    let plain = plain.unwrap();
+    assert!(!plain[0].0.layout.collapsible, "headings fold only when the schema asks");
+    assert_eq!(plain[0].0.layout.help, None, "only https links are drawn");
+
+    let mut h = crate::scenario::Harness::new();
+    let mut command = entry("cabinet", "edit", json!([]));
+    command.input_schema = schema;
+    h.app.plugin_menu.listed = vec![listed("woodwork", vec![command])];
+    h.app.plugin_menu.loaded = true;
+    h.app.home.open = false;
+    open_entry(&mut h.app, 0, 0);
+    h.app.plugin_menu.dialogs.last_mut().unwrap().preview = false;
+    h.frames(4);
+    let unit = |h: &crate::scenario::Harness| {
+        let fields = h.app.plugin_menu.dialog().unwrap().fields.clone().unwrap();
+        match &fields.iter().find(|(f, _)| f.key == "b_width").unwrap().0.kind {
+            Kind::Number { unit, .. } => unit.clone(),
+            other => panic!("{other:?}"),
+        }
+    };
+    assert_eq!(unit(&h), Some("in".into()), "the suffix follows the units choice");
+    if let Some((_, input)) = h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "a_units") {
+        *input = Input::Choice(Some(0));
+    }
+    h.frames(2);
+    assert_eq!(unit(&h), Some("mm".into()));
+    if let Some((_, input)) = h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap().iter_mut().find(|(f, _)| f.key == "a_units") {
+        *input = Input::Choice(None);
+    }
+    h.frames(2);
+    assert_eq!(unit(&h), Some("cm".into()), "nothing chosen: the field's own unit again");
+    assert!(crate::scenario::rect_of("dialog:section:Carcass").is_some() && crate::scenario::rect_of("dialog:section:Drawers").is_some());
+    assert!(crate::scenario::rect_of("dialog:divider:plugin_dialog:d_labels").is_some());
+    assert!(crate::scenario::handle_at("plugin_dialog:field:c_drawers").is_some());
+
+    // Folding Drawers hides its field and keeps the next heading's fields; Carcass is untouched.
+    h.step(&json!({"click":{"handle":"dialog:section:Drawers"}})).unwrap();
+    h.frames(3);
+    assert!(crate::scenario::handle_at("plugin_dialog:field:c_drawers").is_none(), "a folded section hides its fields");
+    assert!(crate::scenario::handle_at("plugin_dialog:field:b_width").is_some());
+    assert!(crate::scenario::handle_at("plugin_dialog:field:d_labels").is_some(), "a divider ends the folded section");
+    assert_eq!(params(h.app.plugin_menu.dialog().unwrap().fields.as_ref().unwrap()).unwrap()["c_drawers"], 2, "folded fields are still sent");
+    let drawers = |h: &mut crate::scenario::Harness, value: Input| {
+        let fields = h.app.plugin_menu.dialogs.last_mut().unwrap().fields.as_mut().unwrap();
+        fields.iter_mut().find(|(f, _)| f.key == "c_drawers").unwrap().1 = value;
+        h.frames(2);
+    };
+    drawers(&mut h, Input::Typed("many".into()));
+    assert!(crate::scenario::handle_at("plugin_dialog:field:c_drawers").is_some(), "a folded field Run refuses stays drawn");
+    drawers(&mut h, Input::Integer(2));
+    assert!(crate::scenario::handle_at("plugin_dialog:field:c_drawers").is_none());
+
+    let at = crate::scenario::handle_at("plugin_dialog:help:b_width").expect("help link");
+    let (x, y) = (f64::from(at.x), f64::from(at.y));
+    assert_eq!(h.call("ui.move", json!({"x":x,"y":y}))["ok"], true);
+    let (request, _reply) = crate::control::ControlRequest::new("ui.click", json!({"x":x,"y":y}));
+    assert!(matches!(crate::control::handle(&mut h.app, &h.ctx, &request), crate::control::Outcome::Done(value) if value["ok"] == true));
+    let mut commands = Vec::new();
+    for _ in 0..12 {
+        h.frame();
+        commands.extend(h.output.commands.clone());
+    }
+    assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(open) if open.url == "https://example.com/width")));
+}
+
+#[test]
 fn described_field_labels_and_values_show_the_same_tooltip() {
     for mut property in [
         json!({"type":"number","default":2}),
@@ -2038,6 +2121,7 @@ pub(crate) fn listed(id: &str, entries: Vec<solidcraft_engine::plugin::Entry>) -
         entries,
         ribbon_groups: Vec::new(),
         images: Default::default(),
+        declarations: Default::default(),
         swatches: Default::default(),
         shaders: Vec::new(),
         tints: Vec::new(),
@@ -2315,6 +2399,64 @@ fn each_plugin_command_has_its_own_menu_row_and_ribbon_button_and_a_disabled_plu
     app.preferences.disabled_plugins.insert("tools".into());
     assert!(ribbon_buttons(&app).is_empty());
     assert!(matches!(&rows(&app)[3], FileRow::Item(i) if i.label == app.tr("ui.plugin_menu_all_off") && !i.enabled));
+}
+
+#[test]
+fn plugin_ribbon_slot_labels_and_model_tab_opt_out() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+    let mold = listed(
+        "mold",
+        vec![
+            entry("feature", "edit", json!([{"kind":"ribbon","name":"Inspect","label":"형상인식","model_group":false}])),
+            entry("height", "edit", json!([{"kind":"ribbon","name":"Inspect","label":"높이측정","model_group":false}])),
+            entry("overview", "read", json!([{"kind":"ribbon","name":"Inspect","label":"개요"}])),
+        ],
+    );
+    app.plugin_menu.listed = vec![mold];
+    let model_buttons = ribbon_buttons(&app);
+    assert_eq!(model_buttons.len(), 1);
+    assert_eq!(model_buttons[0].id, "plugin_entry:mold:overview");
+    assert_eq!(model_buttons[0].label, "개요");
+}
+
+#[test]
+fn plugin_slots_display_custom_label_on_ribbon_tab() {
+    let mut h = crate::scenario::Harness::new();
+    let root = h.dir.join("plugins-slots-custom");
+    let package = root.join("mold-helper");
+    std::fs::create_dir_all(&package).unwrap();
+    std::fs::write(package.join("entry.wasm"), []).unwrap();
+    std::fs::write(
+        package.join("plugin.json"),
+        json!({
+            "id": "mold-helper", "name": "Mold helper", "version": "1.0", "capabilities": ["commands@0.1"],
+            "runtime": {
+                "module": "entry.wasm",
+                "commands": [],
+                "entries": [
+                    {"name": "feature", "effect": "edit", "slots": [{"kind": "ribbon", "name": "Inspect", "label": "형상인식", "model_group": false}]},
+                    {"name": "height", "effect": "edit", "slots": [{"kind": "ribbon", "name": "Inspect", "label": "높이측정", "model_group": false}]}
+                ]
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    h.app.session.plugin_state.plugins_dir = Some(root);
+    crate::plugin_slots::invalidate(&mut h.app);
+    crate::plugin_slots::refresh(&mut h.app);
+    crate::plugin_slots::wait_for_discovery(&mut h.app);
+    crate::test_support::frame(&h.ctx, egui::RawInput::default(), |ui| {
+        let groups = crate::plugin_slots::ribbon_groups(&h.app, ui, "INSPECT");
+        assert_eq!(groups.len(), 1);
+        let group = groups[0].group(ui);
+        assert_eq!(group.label, "Mold helper");
+        assert_eq!(group.buttons.len(), 2);
+        assert_eq!(group.buttons[0].label, "형상인식");
+        assert_eq!(group.buttons[1].label, "높이측정");
+    });
+    crate::plugin_menu::ensure_listed(&mut h.app);
+    assert!(crate::plugin_menu::ribbon_buttons(&h.app).is_empty());
 }
 
 #[test]
@@ -3098,6 +3240,48 @@ mod native {
         panic!("the run did not finish");
     }
 
+    /// #22032: a form a docked panel's action asks for with `forms.open` opens once the run has
+    /// succeeded, as a Plugins-menu entry's does, against the design the action ran on. A reply
+    /// that comes while another design is in front waits for its own design.
+    #[test]
+    fn a_form_a_panel_action_asks_for_opens_after_the_run() {
+        let root = package("panel-form");
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        h.app.plugin_menu.loaded = true;
+        let asks = json!({"ok":true,"result":{"forms":[{"plugin":"boxes","entry":"make","params":{"length":7}}],"result":{}}});
+        let opened = |h: &crate::scenario::Harness| h.app.plugin_menu.dialogs.iter().find(|d| d.entry == "make").map(|d| d.form_guard.clone());
+        // The action is dispatched on this design: its reply opens the form.
+        run_panel(&mut h.app, "sample.make".into(), json!({})).unwrap();
+        let request = h.app.control_held.pop_back().unwrap();
+        check_dispatch(&mut h.app, &request).unwrap();
+        request.reply.send(asks.clone()).unwrap();
+        poll(&mut h.app);
+        let guard = opened(&h).expect("the requested form opens").expect("against the action's design");
+        assert_eq!(guard.document_id, h.app.session.document_id);
+        checked_prefill(&h.app);
+        let dialog = h.app.plugin_menu.dialogs.iter().find(|d| d.entry == "make").unwrap();
+        assert_eq!(dialog.ready(&h.app).unwrap(), json!({"length":7.0,"width":10.0,"height":3.0}));
+        assert!(h.app.plugin_menu.panel_runs.is_empty());
+        h.app.plugin_menu.dialogs.clear();
+        // Another design comes to the front before the reply: the form waits for its own design.
+        let first = h.app.docs.current_tab();
+        run_panel(&mut h.app, "sample.make".into(), json!({})).unwrap();
+        let request = h.app.control_held.pop_back().unwrap();
+        check_dispatch(&mut h.app, &request).unwrap();
+        crate::documents::open_tab(&mut h.app, solidcraft_engine::Session::default()).unwrap();
+        request.reply.send(asks).unwrap();
+        poll(&mut h.app);
+        assert!(opened(&h).is_none(), "not over another design");
+        assert_eq!(h.app.plugin_menu.panel_runs.len(), 1, "held for its own design");
+        assert!(crate::documents::select_tab(&mut h.app, first));
+        poll(&mut h.app);
+        assert!(opened(&h).is_some(), "opens when its design is back in front");
+        assert!(h.app.plugin_menu.panel_runs.is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     #[test]
     fn interactive_guest_import_opens_the_same_prefilled_form_after_success() {
         let root = package("guest-form");
@@ -3359,6 +3543,32 @@ mod native {
         assert!(h.app.plugin_menu.dialogs.is_empty());
         h.frames(2);
         assert!(!h.app.preview.active, "no dialog, no preview");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// A preview that fails says why at the top of its dialog, in the error colour (#22297). The
+    /// dialogs are out of the list while they are drawn, so the line used never to show.
+    #[test]
+    fn a_failed_preview_shows_its_error_at_the_top_of_the_dialog() {
+        let root = view_package("preview-error");
+        let mut h = crate::scenario::Harness::new();
+        h.app.plugin_menu.listed = list(&h.app, Some(&root));
+        h.app.plugin_menu.loaded = true;
+        let fail = h.app.plugin_menu.listed[0].entries.iter().position(|entry| entry.name == "fail").expect("fail");
+        open_entry(&mut h.app, 0, fail);
+        previewed(&mut h);
+        let error = h.app.preview.error.clone().expect("the failed run's error");
+        assert!(!h.app.preview.active, "nothing is drawn for a run that failed");
+        h.frames(2);
+        let line = solidcraft_ui_text::format("ui.plugin_dialog_preview_failed", &[("error", &error)]);
+        let shown = solidcraft_ui_registry::rect_of(&format!("dialog:status:{line}")).expect("the dialog shows the preview's error");
+        // Above the Preview box, which comes after the fields.
+        let preview_box = h.widget("Preview").expect("the Preview box");
+        assert!(f64::from(shown.center().y) < preview_box[1], "the error is above the fields and the Preview box: {shown:?} vs {preview_box:?}");
+        // Preview off: no error is shown.
+        h.app.plugin_menu.dialogs[0].preview = false;
+        previewed(&mut h);
+        assert!(preview_error(&h.app, &h.app.plugin_menu.dialogs[0]).is_none());
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -4433,4 +4643,16 @@ fn scoped_ui_file_import_keeps_its_caller_scope_when_submitted_from_a_normal_fra
     std::fs::write(&outside, b"private").unwrap();
     assert!(scope.check(&outside.to_string_lossy()).is_err());
     h.app.file_load.cancel();
+}
+
+/// Every message the plugin dialog names is in the English catalog, so no button or line shows
+/// its key instead of text (#22652).
+#[test]
+fn every_plugin_dialog_message_has_text() {
+    crate::i18n::install();
+    let mut missing: Vec<&str> =
+        include_str!("plugin_menu.rs").split('"').filter(|s| s.starts_with("ui.plugin_dialog_") && solidcraft_ui_text::tr(s) == *s).collect();
+    missing.sort_unstable();
+    missing.dedup();
+    assert!(missing.is_empty(), "no text for {missing:?}");
 }

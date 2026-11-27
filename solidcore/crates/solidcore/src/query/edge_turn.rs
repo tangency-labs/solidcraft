@@ -10,6 +10,7 @@
 //! | [`turn_at`]   | (none)   |
 //! | [`convex_at`] | (none)   |
 //! | [`joint_turn`] | (none)  |
+//! | [`turn_to_parallel`] | (none) |
 //!
 //! Deviations: no upstream counterpart.
 
@@ -18,7 +19,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::interval_vector::{cross as cross_ivl, dot as dot_ivl, norm as norm_ivl};
 use crate::geom::vector2d::Vec2;
 use crate::kernel::Kernel;
-use crate::math::Vec3;
+use crate::math::{Vec3, PI};
 use crate::nurbs::math::UNIT;
 use crate::query::tangent_edge::face_use_normal;
 use crate::topology::edgeuse::p1 as eu1;
@@ -246,4 +247,94 @@ pub fn joint_turn(before: [f64; 2], after: [f64; 2]) -> Result<f64> {
         return Err(invalid("direction is not finite"));
     }
     Vec2::from(before).angle_between(Vec2::from(after))
+}
+
+/// The turn about an axis that makes a plane normal's tangent parallel to a line, with the two
+/// measures a caller compares with tolerances.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SquareTurnMeasure {
+    /// [`Vec3::square_turn`] of the axis, normal and line, in radians. `0.0` when the line or
+    /// the normal is along the axis (the turn means nothing then; the other two measures say so).
+    pub turn: f64,
+    /// `|n·a|` for the unit normal `n` and unit axis `a`: 0 when the normal is square to the axis.
+    pub normal_along_axis: f64,
+    /// The angle between the line and the axis, in [0, PI/2] (the line has no sense).
+    pub line_off_axis: f64,
+}
+
+/// Measure the turn about `axis` that makes a direction square to `axis` (given by its normal
+/// `normal`) parallel to `line`.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a zero or non-finite vector.
+pub fn turn_to_parallel(axis: Vec3, normal: Vec3, line: Vec3) -> Result<SquareTurnMeasure> {
+    let finite = |v: Vec3| v.x.is_finite() && v.y.is_finite() && v.z.is_finite();
+    if !(finite(axis) && finite(normal) && finite(line)) {
+        return Err(invalid("non-finite vector"));
+    }
+    let axis = axis.unitize()?;
+    let normal = normal.unitize()?;
+    let line = line.unitize()?;
+    let normal_along_axis = normal.dot(axis).abs();
+    let angle = axis.angle_between(line)?;
+    let line_off_axis = if angle > PI / 2.0 { PI - angle } else { angle };
+    let turn = if line_off_axis < 1e-9 || normal_along_axis > 1.0 - 1e-9 {
+        0.0
+    } else {
+        axis.square_turn(normal, line)?
+    };
+    Ok(SquareTurnMeasure {
+        turn,
+        normal_along_axis,
+        line_off_axis,
+    })
+}
+
+/// Whether two 3D directions agree within cosine threshold `min_cos` (`a·b >= min_cos`, or
+/// `|a·b| >= min_cos` when `unsigned` is true).
+#[must_use]
+pub fn directions_aligned(a: Vec3, b: Vec3, min_cos: f64, unsigned: bool) -> bool {
+    let d = a.dot(b);
+    let score = if unsigned { d.abs() } else { d };
+    score >= min_cos
+}
+
+/// How far a frame's origin and Z axis moved between two column-major 4×4 transforms:
+/// `(origin_shift_mm, z_angle_deg)`.
+#[must_use]
+pub fn frame_z_deviation(before: &[[f64; 4]; 4], after: &[[f64; 4]; 4]) -> (f64, f64) {
+    let [_, _, [bz0, bz1, bz2, _], [bt0, bt1, bt2, _]] = *before;
+    let [_, _, [az0, az1, az2, _], [at0, at1, at2, _]] = *after;
+    let shift = Vec3::new(at0 - bt0, at1 - bt1, at2 - bt2).length();
+    let bz = Vec3::new(bz0, bz1, bz2);
+    let az = Vec3::new(az0, az1, az2);
+    let angle_deg = bz.cross(az).length().atan2(bz.dot(az)).to_degrees();
+    (shift, angle_deg)
+}
+
+/// How far two rigid column-major 4×4 transforms differ: `(translation_mm, rotation_deg)`.
+#[must_use]
+pub fn rigid_pose_delta(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> (f64, f64) {
+    let [[ax0, ax1, ax2, _], [ay0, ay1, ay2, _], [az0, az1, az2, _], [at0, at1, at2, _]] = *a;
+    let [[bx0, bx1, bx2, _], [by0, by1, by2, _], [bz0, bz1, bz2, _], [bt0, bt1, bt2, _]] = *b;
+    let t = Vec3::new(at0 - bt0, at1 - bt1, at2 - bt2).length();
+    let ax = Vec3::new(ax0, ax1, ax2);
+    let ay = Vec3::new(ay0, ay1, ay2);
+    let az = Vec3::new(az0, az1, az2);
+    let bx = Vec3::new(bx0, bx1, bx2);
+    let by = Vec3::new(by0, by1, by2);
+    let bz = Vec3::new(bz0, bz1, bz2);
+    let c00 = ax.dot(bx);
+    let c11 = ay.dot(by);
+    let c22 = az.dot(bz);
+    let c12 = ay.dot(bz);
+    let c21 = az.dot(by);
+    let c20 = az.dot(bx);
+    let c02 = ax.dot(bz);
+    let c01 = ax.dot(by);
+    let c10 = ay.dot(bx);
+    let sin2 = Vec3::new(c12 - c21, c20 - c02, c01 - c10).length();
+    let angle_deg = sin2.atan2(c00 + c11 + c22 - 1.0).to_degrees();
+    (t, angle_deg)
 }

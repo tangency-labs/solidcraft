@@ -34,7 +34,7 @@ const LEVEL_WORDS: usize = 4;
 const TRI_ARGS_WORDS: usize = 5;
 const EDGE_ARGS_WORDS: usize = 4;
 /// Bytes of the shader's `View` uniform.
-const VIEW_SIZE: usize = 192;
+const VIEW_SIZE: usize = 208;
 /// Placements a workgroup of `pick` and `place` takes.
 const GROUP: u32 = 64;
 
@@ -128,6 +128,29 @@ const COPIED: u8 = 1;
 const MAPPING: u8 = 2;
 const MAPPED: u8 = 3;
 
+/// First indirect triangle entry index for each `(draw, level)`, in O(D * L) time.
+fn tri_entry_table(draw_levels: &[usize], tri_entries: &[(usize, usize, u32, u32, i32)]) -> Vec<Vec<Option<usize>>> {
+    let mut table: Vec<Vec<Option<usize>>> = draw_levels.iter().map(|&len| vec![None; len]).collect();
+    for (entry, &(draw, level, ..)) in tri_entries.iter().enumerate() {
+        if let Some(slot) = table.get_mut(draw).and_then(|levels| levels.get_mut(level)) {
+            slot.get_or_insert(entry);
+        }
+    }
+    table
+}
+
+/// Indirect edge `(entry, level)` pairs grouped by edge part in ascending entry order, in
+/// O(D + E) time.
+fn edge_entry_table(part_count: usize, edge_entries: &[(usize, usize, u32, u32)]) -> Vec<Vec<(usize, usize)>> {
+    let mut table: Vec<Vec<(usize, usize)>> = vec![Vec::new(); part_count];
+    for (n, &(part, level, ..)) in edge_entries.iter().enumerate() {
+        if let Some(entries) = table.get_mut(part) {
+            entries.push((n, level));
+        }
+    }
+    table
+}
+
 /// One scene's instanced placements, culled on the GPU.
 #[derive(Clone)]
 pub(super) struct GpuCull {
@@ -155,7 +178,7 @@ pub(super) struct GpuCull {
     /// The shader's `View` after its matrix and size.
     words: [u32; 8],
     /// The view the placements were last culled for.
-    culled_for: Option<([[f32; 4]; 4], [f32; 2], bool)>,
+    culled_for: Option<([[f32; 4]; 4], [f32; 2], bool, Option<u32>)>,
     /// The device's workgroups per dispatch dimension.
     max_groups: u32,
     readback: wgpu::Buffer,
@@ -189,6 +212,10 @@ impl GpuCull {
             return None;
         }
         let edge_entries = edges.as_deref().map(|e| e.entry_list()).unwrap_or_default();
+        let draw_levels: Vec<usize> = draws.iter().map(|d| d.levels.len()).collect();
+        let tri_table = tri_entry_table(&draw_levels, &tri_entries);
+        let edge_part_count = if edges.is_some() { draws.iter().filter(|d| d.edges.is_some()).count() } else { 0 };
+        let edge_table = edge_entry_table(edge_part_count, &edge_entries);
         // Each draw's part, levels and the entries that draw them.
         let mut parts: Vec<u32> = Vec::with_capacity(draws.len() * PART_WORDS);
         let mut levels: Vec<u32> = Vec::new();
@@ -203,17 +230,19 @@ impl GpuCull {
             let first = u32::try_from(levels.len() / LEVEL_WORDS).ok()?;
             let here = d.look == InstanceLook::Opaque;
             for (k, l) in d.levels.iter().enumerate() {
-                let entry = tri_entries.iter().position(|e| e.0 == i && e.1 == k)?;
+                let entry = tri_table[i][k]?;
                 levels.extend([l.error.to_bits(), u32::try_from(entry).ok()?, 0, 0]);
             }
             parts.extend([first, u32::try_from(d.levels.len()).ok()?, u32::from(here), 0]);
             let first = u32::try_from(levels.len() / LEVEL_WORDS).ok()?;
             let mut count = 0u32;
             if let (Some(e), true) = (&d.edges, edges.is_some()) {
-                for (n, entry) in edge_entries.iter().enumerate().filter(|(_, x)| x.0 == edge_part) {
-                    let tolerance = e.levels.get(entry.1).map_or(f32::INFINITY, |(_, t)| *t);
-                    levels.extend([tolerance.to_bits(), u32::try_from(n).ok()?, 0, 0]);
-                    count += 1;
+                if let Some(entries) = edge_table.get(edge_part) {
+                    for &(n, level) in entries {
+                        let tolerance = e.levels.get(level).map_or(f32::INFINITY, |(_, t)| *t);
+                        levels.extend([tolerance.to_bits(), u32::try_from(n).ok()?, 0, 0]);
+                        count += 1;
+                    }
                 }
                 edge_part += 1;
             }
@@ -396,11 +425,12 @@ impl GpuCull {
         draws: &[InstancedDraw],
         indirect: &mut indirect::Indirect,
         edges: Option<&mut edges::Edges>,
+        hover: Option<u32>,
     ) {
         self.collect(indirect, edges);
         // Against a pyramid, each frame (it changes with every frame drawn); without one, again
         // only for another view, or after a cull that left out hidden placements.
-        let key = (*vp, size, hidden.is_some());
+        let key = (*vp, size, hidden.is_some(), hover);
         if !cpu_changed && hidden.is_none() && self.culled_for == Some(key) {
             // A cull whose statistics could not be copied while the readback was busy: copy them
             // now that it is free (a cull below would overwrite its arguments).
@@ -459,6 +489,9 @@ impl GpuCull {
         }
         let words = pyramid.map_or([1, 1, 1, 0], |(h, _, reversed)| [h.frame[0], h.frame[1], h.levels, 1 | if reversed { 2 } else { 0 }]);
         view.extend(words.iter().flat_map(|w| w.to_le_bytes()));
+        // x: the whole-body hovered placement's index in the scene, y: 1 when there is one.
+        let hover_words = hover.map_or([0; 4], |index| [index, 1, 0, 0]);
+        view.extend(hover_words.iter().flat_map(|w| w.to_le_bytes()));
         queue.write_buffer(&self.view, 0, &view);
 
         let n = self.words[0];
@@ -574,9 +607,54 @@ mod tests {
         assert!(!hidden_by_depth(0.500_000_5, 0.5, 0.0));
     }
 
+    /// The O(D * L) triangle and edge lookup tables built in `GpuCull::new` match the previous
+    /// linear `.position(...)` and `.enumerate().filter(...)` lookups identically across arbitrary
+    /// entry orderings, missing-edge draws, and varying level counts.
+    #[test]
+    fn entry_tables_match_linear_lookup() {
+        use super::{edge_entry_table, tri_entry_table};
+        let draw_levels = [3usize, 1, 4, 2, 3];
+        // Shuffled order as `Indirect::new` groups entries by (look, flat, closed).
+        let tri_entries: Vec<(usize, usize, u32, u32, i32)> = vec![
+            (2, 0, 12, 0, 0),
+            (0, 1, 6, 12, 4),
+            (4, 2, 3, 18, 8),
+            (1, 0, 9, 21, 12),
+            (0, 0, 18, 30, 16),
+            (2, 3, 3, 48, 20),
+            (3, 1, 6, 51, 24),
+            (4, 0, 15, 57, 28),
+            (0, 2, 3, 72, 32),
+            (2, 1, 9, 75, 36),
+            (3, 0, 12, 84, 40),
+            (4, 1, 9, 96, 44),
+            (2, 2, 6, 105, 48),
+            // Duplicate (draw, level) must resolve to the first entry just like `.position(...)`.
+            (0, 1, 6, 111, 52),
+        ];
+        let tri_table = tri_entry_table(&draw_levels, &tri_entries);
+        for (i, &len) in draw_levels.iter().enumerate() {
+            assert_eq!(tri_table[i].len(), len);
+            for (k, &got) in tri_table[i].iter().enumerate() {
+                let linear = tri_entries.iter().position(|e| e.0 == i && e.1 == k);
+                assert_eq!(got, linear, "draw {i}, level {k}");
+            }
+        }
+
+        let part_count = 4usize;
+        let edge_entries = vec![(2, 0, 0, 10), (0, 0, 10, 8), (0, 1, 18, 4), (2, 1, 22, 5), (2, 2, 27, 2), (3, 0, 29, 12)];
+        let edge_table = edge_entry_table(part_count, &edge_entries);
+        assert_eq!(edge_table.len(), part_count);
+        for (part, got) in edge_table.iter().enumerate() {
+            let linear: Vec<(usize, usize)> = edge_entries.iter().enumerate().filter(|(_, x)| x.0 == part).map(|(n, x)| (n, x.1)).collect();
+            assert_eq!(*got, linear, "edge part {part}");
+        }
+    }
+
     /// The GPU culls a scene's placements as the CPU does: every level of every part draws the
     /// same placements (in any order), triangles and edges alike, for a view with placements out
-    /// of it on every side, behind the eye, and near and far enough for each level.
+    /// of it on every side, behind the eye, and near and far enough for each level. Both mark a
+    /// whole-body hover's one placement alike.
     #[test]
     fn the_gpu_culls_the_placements_the_cpu_would() {
         use super::super::{
@@ -639,8 +717,8 @@ mod tests {
         let size = [800.0, 600.0];
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         let motions = Motions::default();
-        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None);
-        cpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None);
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None, None);
+        cpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None, None);
         queue.submit([encoder.finish()]);
         assert!(cpu.gpu_cull.is_none());
         let Some(g) = gpu.gpu_cull.as_ref() else { panic!("the GPU culls the scene") };
@@ -693,14 +771,53 @@ mod tests {
             levels_drawn[level] += usize::from(count > 0);
         }
         assert!(levels_drawn.iter().all(|n| *n > 0), "every level drawn: {levels_drawn:?}");
+        // A whole-body hover flags its one placement's palette word in what each cull writes,
+        // on the GPU and on the CPU alike, and the flag goes when the hover does.
+        let row = cpu.instanced[0].shown.as_ref().and_then(|s| s.first()).map(|(i, _)| *i).expect("a placement in view");
+        let rows: Arc<std::collections::HashMap<String, (u32, u32)>> = Arc::new([("Hovered".to_owned(), (0, row))].into_iter().collect());
+        let flagged = |b: &super::super::Batches| -> Vec<u32> {
+            let out = read(&b.indirect.as_ref().unwrap().instances().unwrap());
+            (0..out.len() / INSTANCE_SIZE)
+                .map(|k| word(&out, k * INSTANCE_SIZE / 4 + 12))
+                .filter(|w| w & crate::view::HOVER_FLAG != 0)
+                .map(|w| w & !crate::view::HOVER_FLAG)
+                .collect()
+        };
+        for b in [&mut gpu, &mut cpu] {
+            b.instance_rows = rows.clone();
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            b.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None, Some("Hovered"));
+            queue.submit([encoder.finish()]);
+        }
+        // Placement `row` of the first part is in palette entry `row` (see `scene`).
+        assert_eq!(flagged(&gpu), vec![row], "the GPU cull flags the hovered placement alone");
+        // The CPU writes its placements from the draws' own (its buffer is not read back here).
+        let cpu_flagged = |b: &super::super::Batches| -> Vec<(usize, usize)> {
+            b.instanced
+                .iter()
+                .enumerate()
+                .flat_map(|(d, x)| x.placements.as_chunks::<INSTANCE_SIZE>().0.iter().enumerate().map(move |(k, p)| (d, k, p[51])))
+                .filter(|(_, _, high)| high & 0x80 != 0)
+                .map(|(d, k, _)| (d, k))
+                .collect()
+        };
+        assert_eq!(cpu_flagged(&cpu), vec![(0, row as usize)], "the CPU cull flags the hovered placement alone");
+        assert!(cpu.instanced[0].shown.as_ref().is_some_and(|s| s.iter().any(|(i, _)| *i == row)), "and writes it");
+        assert!(cpu_flagged(&gpu).is_empty(), "the GPU's flag is in its output only");
+        for b in [&mut gpu, &mut cpu] {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            b.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None, None);
+            queue.submit([encoder.finish()]);
+        }
+        assert!(flagged(&gpu).is_empty() && cpu_flagged(&cpu).is_empty(), "no flag once nothing is hovered");
         // The cull reads the placements where the scene holds them, not where a motion puts one:
         // a frame that moves a body is culled on the CPU, and the next that moves nothing on the
         // GPU again, from the buffers the cull took back.
         let shift = [[1.0, 0.0, 0.0, 30.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        gpu.cull(&device, &queue, &mut encoder, &vp, size, &Motions::new([(1, shift)]), crate::view::EDGE_PX, None);
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &Motions::new([(1, shift)]), crate::view::EDGE_PX, None, None);
         assert!(gpu.gpu_cull.is_none(), "a frame with motions is culled on the CPU");
-        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None);
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX, None, None);
         assert!(gpu.gpu_cull.is_some(), "a frame without motions is culled on the GPU again");
         queue.submit([encoder.finish()]);
     }
@@ -718,7 +835,7 @@ mod tests {
     ) -> (u32, Vec<u8>) {
         use super::super::INSTANCE_SIZE;
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        batches.cull(device, queue, &mut encoder, vp, size, &super::super::Motions::default(), crate::view::EDGE_PX, hidden);
+        batches.cull(device, queue, &mut encoder, vp, size, &super::super::Motions::default(), crate::view::EDGE_PX, hidden, None);
         queue.submit([encoder.finish()]);
         let Some(g) = batches.gpu_cull.as_ref() else { panic!("the GPU culls the scene") };
         let out = batches.indirect.as_ref().and_then(|i| i.instances()).expect("placements");
@@ -991,5 +1108,111 @@ fn fs() -> @builtin(frag_depth) f32 {
             assert_eq!(culled(&mut batches, &device, &queue, &vp, size, None).0, 1, "{name}: a still view draws it");
             assert_eq!(culled(&mut batches, &device, &queue, &vp, size, Some((&pyramid, false))).0, 1, "{name} keeps the placement drawn");
         }
+    }
+
+    /// Falling back from GPU culling to CPU culling for a frame with motions keeps the triangles'
+    /// indirect draw arguments separate from the edges' draw arguments: `Edges::write` must not
+    /// overwrite `Indirect`'s shared GPU-cull argument buffer at offset 0.
+    #[test]
+    fn cpu_fallback_during_motion_keeps_triangle_and_edge_args_separate() {
+        use super::super::{
+            Batches, GpuScene, GpuTarget, InstanceLook, InstancedMesh, Motions, PaletteIndex, Renderer, SceneSlot, SharedEdges, SharedTris,
+        };
+        use solidcore_record::Vec3;
+        use std::sync::{Arc, Mutex};
+        let (_, device, queue) = match crate::open_headless(crate::test_env::policy()) {
+            Ok(opened) => opened,
+            Err(error) if crate::test_env::skip_unless_required(crate::test_env::required(), &error) => return,
+            Err(error) => panic!("required GPU unavailable: {error}"),
+        };
+        if !super::supported(&device) {
+            return;
+        }
+        let target = GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false, edges: true };
+        let r = Renderer::new(&device, target, None);
+        let mesh = solidcore_tess::Mesh {
+            positions: vec![Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0), Vec3::new(0.0, 10.0, 0.0), Vec3::new(0.0, 0.0, 10.0)],
+            normals: vec![Vec3::Z; 4],
+            triangles: vec![[0, 1, 2], [0, 1, 3], [0, 2, 3], [1, 2, 3]],
+            tri_face: vec![0; 4],
+            edges: vec![vec![Vec3::ZERO, Vec3::new(10.0, 0.0, 0.0)], vec![Vec3::ZERO, Vec3::new(0.0, 0.0, 10.0)]],
+            edge_faces: vec![vec![0], vec![0]],
+            ..Default::default()
+        };
+        let scene = || {
+            let mut parts = Vec::new();
+            for key in [1u64, 2u64] {
+                let mut m = InstancedMesh {
+                    key,
+                    tris: Arc::new(SharedTris::new(&mesh)),
+                    instances: Vec::new(),
+                    look: InstanceLook::Opaque,
+                    levels: Vec::new(),
+                    closed: true,
+                    edges: Some(Arc::new(SharedEdges::new(&mesh, |_| true, Vec::new()))),
+                };
+                let rows = [[1.0, 0.0, 0.0, key as f32 * 20.0 - 30.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, -60.0]];
+                m.place_edged(rows, PaletteIndex(key as u32), PaletteIndex(1), PaletteIndex(2));
+                parts.push(m);
+            }
+            GpuScene { instanced: parts, ..GpuScene::default() }
+        };
+        let take = |cpu: bool| {
+            let mut b = Batches { cull_kernel_failed: cpu, ..Batches::default() };
+            let slot: SceneSlot = Arc::new(Mutex::new(Some(scene())));
+            b.take(&device, &queue, &r.uniform, &r.uniform_bgl, 1, &slot, None, false).unwrap();
+            b
+        };
+        let (mut gpu, mut cpu) = (take(false), take(true));
+        let vp = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, -1.0, -1.0], [0.0, 0.0, -1.0, 0.0]];
+        let size = [800.0, 600.0];
+        let rest = Motions::default();
+        // Frame 1: at rest, GPU cull takes over both `indirect` and `edges` with a shared args buffer.
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &rest, crate::view::EDGE_PX, None, None);
+        cpu.cull(&device, &queue, &mut encoder, &vp, size, &rest, crate::view::EDGE_PX, None, None);
+        queue.submit([encoder.finish()]);
+        assert!(gpu.gpu_cull.is_some(), "GPU cull takes over at rest");
+        // Frame 2: dragging a joint brings motions, dropping GPU cull and falling back to CPU culling.
+        let shift = [[1.0, 0.0, 0.0, 5.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+        let moving = Motions::new([(1, shift)]);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &moving, crate::view::EDGE_PX, None, None);
+        cpu.cull(&device, &queue, &mut encoder, &vp, size, &moving, crate::view::EDGE_PX, None, None);
+        queue.submit([encoder.finish()]);
+        assert!(gpu.gpu_cull.is_none(), "motion frame falls back to CPU culling");
+        let read = |buffer: &wgpu::Buffer, len: u64| -> Vec<u8> {
+            let staging = device.create_buffer(&wgpu::BufferDescriptor {
+                label: None,
+                size: len,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            encoder.copy_buffer_to_buffer(buffer, 0, &staging, 0, len);
+            queue.submit([encoder.finish()]);
+            staging.slice(..).map_async(wgpu::MapMode::Read, |_| {});
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            staging.slice(..).get_mapped_range().unwrap().to_vec()
+        };
+        let tri_bytes = (gpu.indirect.as_ref().unwrap().entry_list().len() * super::TRI_ARGS_WORDS * 4) as u64;
+        let edge_bytes = (gpu.edges.as_ref().unwrap().entry_list().len() * super::EDGE_ARGS_WORDS * 4) as u64;
+        let gpu_tri = read(&gpu.indirect.as_ref().unwrap().args().unwrap(), tri_bytes);
+        let cpu_tri = read(&cpu.indirect.as_ref().unwrap().args().unwrap(), tri_bytes);
+        let gpu_edge = read(&gpu.edges.as_ref().unwrap().args().unwrap(), edge_bytes);
+        let cpu_edge = read(&cpu.edges.as_ref().unwrap().args().unwrap(), edge_bytes);
+        assert_eq!(gpu_tri, cpu_tri, "triangle indirect args must match CPU cull without being overwritten by edges");
+        assert_eq!(gpu_edge, cpu_edge, "edge indirect args must match CPU cull");
+        // If either argument buffer was refused on an earlier frame, the next frame retries even
+        // when the shown placements did not change.
+        gpu.indirect.as_mut().unwrap().clear_args();
+        gpu.edges.as_mut().unwrap().clear_args();
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        gpu.cull(&device, &queue, &mut encoder, &vp, size, &moving, crate::view::EDGE_PX, None, None);
+        queue.submit([encoder.finish()]);
+        let retried_tri = read(&gpu.indirect.as_ref().unwrap().args().unwrap(), tri_bytes);
+        let retried_edge = read(&gpu.edges.as_ref().unwrap().args().unwrap(), edge_bytes);
+        assert_eq!(retried_tri, cpu_tri, "triangle indirect args are retried when missing");
+        assert_eq!(retried_edge, cpu_edge, "edge indirect args are retried when missing");
     }
 }

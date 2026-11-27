@@ -62,7 +62,12 @@ boolean_intersection, boolean_with_options}` and the manifold engine under them
 (`boolean/merge/p4.rs`, `manifold_boolean`); the topology intersector
 (`boolean/topology_intersector`); the point classification the classify step calls
 (`query/brep.rs`, `BrepQuery::point_3d_classify`; `intersect/point_class.rs`); and the ops entry
-points (`solidcore-ops/src/boolean.rs`).
+points (`solidcore-ops/src/boolean.rs`). The ops union of a list (`union_all`) unites it pairwise,
+level by level; two solids of a pair that are proved apart are put side by side instead of
+intersected (`boolean/apart.rs`): every shell's certified box lies farther than their intersection
+tolerance from every shell box of the other, so a boolean would pair none of their faces, and
+the second operand's topology is copied into the first (`MergeBrep`) with the boolean's operand
+preparation and union tail.
 
 **Out**, each with its own page:
 - Surface/surface intersection, its curves and their certification: [ssi.md](ssi.md).
@@ -153,7 +158,17 @@ where the surfaces cross back. Where two equal holes cross a hair off each other
 round the tip of one hole's lens in the other's wall has its midpoint in a neck 0.018 mm wide, the
 walls within 1e-5 of each other, and read there the face lying in the material was put in the
 holes' space; a point nearer the edge's ends, where the walls cross at a clear angle (36° at the
-ends), decides at the edge. The sector's region gives the class: `region_keep` reads its void flag.
+ends), decides at the edge. A second thing differs: how the steps grow (`parting_step`). The
+faces' distance is 0 at the edge and, to second order, a parabola in the step; through the edge and
+the last two steps it gives the next step, aimed where the faces are twice the tolerance apart. Aimed
+at the tolerance along a line through 0, as upstream's was, faces parting at a small angle and faster
+than linearly (a ball dipped 2e-5 into a face leaves it at 0.094°) settled short of it, and the
+unchanging distance read as a coincidence. Faces that cross again part only so far: a cylinder sunk
+2.2e-5 into a plane meets it in two lines 0.0297 apart, between which the two part to 2.2e-5 at the
+middle and close again, and past the middle the cylinder turns back and is read on the other side of
+the plane. Where the parabola tops out under three times the tolerance, the step aims midway between
+the tolerance and its top, before the middle. The sector's region gives the class: `region_keep`
+reads its void flag.
 
 A sector whose faces coincide is the coincident case of §5.
 
@@ -250,7 +265,7 @@ sampled: a 6 × 6 grid of points dropped onto the other for whole surfaces, and 
 boundary curve of one meeting one of the other where the surfaces agree to second order, or the
 middle of one dropping onto the other. A sampled check is not a proof; deciding coincidence from the
 definitions (two quadrics by their coefficients, a definition against its own copy by identity, a
-B-spline pair from the composed implicit field as `ssi/src/coincide.rs` does) is open work. Only the merge gate decides from definitions: `faces_coincide` (`merge/p1.rs`) decides cone (a cylinder is a cone of semi-angle 0), sphere and torus pairs by `Surface::same_analytic_surface`. Two cones or two spheres that are not one surface (axes or centres apart) still count as one over the two faces' boxes when an enclosed bound keeps them within the tolerance there: the box is halved across the axes until a Lipschitz bound on their separation decides each part that can hold either surface (`revolved_within`, `surface/surface/p8.rs`; two arcs through the same corners about centres 8.4e-5 apart stay within 1e-10 over the sliver they share). The intersector's coincidence check is still the sampled one. The sector test also tells two planes apart from their faces (`faces_on_other_surfaces`, `query/face/p1.rs`): two planes closer than 0.001° at a common edge are not coincident when a point of either face is proved to lie farther than the two faces' tolerance band from the other's plane (walls through a common edge at a tiny angle, within tolerance near it and apart beyond). The gap is read on each edge curve dropped onto its face's own plane, since the exact edge lies on the plane within the edge's tolerance τ_e of the curve while the curve may stand τ_e + τ_f off it; the band grows by τ_e times the sine of the planes' angle for that. The proof is an enclosure, never samples: a line's ends, and on a B-spline or conic edge the ends of its Bézier pieces, halved by de Casteljau while their hull leaves the band. Two planes, two different kinds (tangent, they can stay within the tolerance over a patch) and any pair with an offset, B-spline, extrusion or revolution keep the sector's answer.
+B-spline pair from the composed implicit field as `ssi/src/coincide.rs` does) is open work. Only the merge gate decides from definitions: `faces_coincide` (`merge/p1.rs`) decides cone (a cylinder is a cone of semi-angle 0), sphere and torus pairs by `Surface::same_analytic_surface`. Two cones or two spheres that are not one surface (axes or centres apart) still count as one over the two faces' boxes when an enclosed bound keeps them within the tolerance there: the box is halved across the axes until a Lipschitz bound on their separation decides each part that can hold either surface (`revolved_within`, `surface/surface/p8.rs`; two arcs through the same corners about centres 8.4e-5 apart stay within 1e-10 over the sliver they share). The intersector's coincidence check is still the sampled one. The sector test also tells two planes apart from their faces (`faces_on_other_surfaces`, `query/face/p1.rs`): two planes closer than 0.001° at a common edge are not coincident when a point of either face is proved to lie farther than the two faces' coincidence tolerance (the coincidence rule below) from the other's plane (walls through a common edge at a tiny angle, within tolerance near it and apart beyond); two planes whose gap cannot change by that tolerance over the faces (the sine of their angle times the diagonal of the faces' box) stand at an offset and part only past the two zone tolerances' sum, the intersection tolerance at which `edge_solutions` placed their common edge on both. The gap is read on each edge curve dropped onto its face's own plane, since the exact edge lies on the plane within the edge's tolerance τ_e of the curve while the curve may stand τ_e + τ_f off it; the band grows by τ_e times the sine of the planes' angle for that. The proof is an enclosure, never samples: a line's ends, and on a B-spline or conic edge the ends of its Bézier pieces, halved by de Casteljau while their hull leaves the band. Two planes, two different kinds (tangent, they can stay within the tolerance over a patch) and any pair with an offset, B-spline, extrusion or revolution keep the sector's answer.
 
 **Near-coincident strips.** Two planar faces crossing at a small angle θ meet in a line fixed only
 to tol / sin θ. The crossing is no event when, on each side of it, one of the two faces lies over its
@@ -359,13 +374,26 @@ rounding of that calculation is bounded too (the comment on `cone_box_gap`). The
 within the other face's edges, not only on its plane: its vertices and three points along each of its
 edges must classify to the other face (`points_in_face`). That part is sampled, not proved. Any
 other pair of kinds, and a face that leaves the plane or the other face anywhere, is only possibly a
-copy and goes to the ray. Where the operation keeps no copy of coincident faces (a
-difference of faces facing the same way), the patch goes. Where it keeps one, the copy is the other
-face's when that face is kept, so the patch goes, and the patch's when the other face is deleted.
-This replaces a ray cast from a point within the tolerance of the other boundary, whose answer there
-can go either way. The patches are visited again until a pass classifies none, so a patch whose
-other face is classified by a later patch follows it; one whose other face is still unclassified
-then is left to the ray. Two faces of one kind are left as before.
+copy and goes to the ray. Where the operation keeps one copy of coincident faces, the copy is the
+other face's when that face is kept, so the patch goes, and the patch's when the other face is
+deleted. Where it keeps none (a difference of faces facing the same way, a union or an
+intersection of faces facing opposite ways), a deleted other face takes the patch with it. A kept
+other face still covers the patch, since the imprint drew no edge round the patch in it, so the
+space between the two, thinner than the tolerance, lies against a face of the result, and the
+patch stays to close it: a thin wedge less a part whose round grazes the wedge's plane keeps that
+plane, which lies outside the part, and the sliver of the round on it closes what is left of the
+wedge beside it. Which side of the other face the patch lies on is below the tolerance and is not
+read. A patch of the other operand that stays is copied into
+the primary like the other operand's kept faces, but not in the region its edges' radial sectors
+find: lying on the other face within the tolerance, it can be put on either side of that face, and
+on the wrong side it splits no region with the faces it bounds the result with, so the result has
+no solid region. It is made in the region on the side of the other face where the operation keeps
+the other operand's faces (`kept_patch_region`): the solid side for a difference or an
+intersection, the void side for a union. This replaces a ray cast from a point within the tolerance
+of the other boundary, whose answer there can go either way. The patches are visited again until a
+pass classifies none, so a patch whose other face is classified by a later patch follows it; one
+whose other face is still unclassified then is left to the ray. Two faces of one kind are left as
+before.
 
 This is the problem Segal's tolerant modeller and Jackson's local tolerances address [9, 10]: two
 entities within tolerance are one, and a decision across that band has to be made once and kept by
@@ -403,6 +431,18 @@ The sites move to the rule one at a time (§10, "The coincidence rule in migrati
   floor, a face and edges held to 1e-7 with an edge 1.17e-6 inside the face's domain side,
   running along it the other way (the floor of a U whose base is that thin), were refused
   the same way (#17689; `a_u_whose_base_is_well_past_a_tight_tolerance_thick_is_valid`);
+- two planar faces one surface in the radial sector (`faces_on_other_surfaces`,
+  `query/face/p1.rs`, above): the faces part when a point of either is proved farther than
+  the coincidence tolerance from the other's plane, where the band was the two zone
+  tolerances' sum. An insert's side 5.6e-6 rad off a chamfered block's facet, 1.1e-5
+  outside it at the insert's corner, was one wall with the facet in the sector, while the
+  intersector's plane check, at the tolerance, had found the two apart and made no curve
+  where the side leaves the chamfer below it: the intersect kept the insert whole and lost
+  both chamfer wedges (kernel case
+  `booleans/21687-insert-intersect-chamfered-block-corner`). Two planes at an offset (their
+  gap changes by less than the coincidence tolerance over the faces) keep the sum until
+  `edge_solutions` moves: two boxes whose bottoms lie 1.98e-5 apart, read apart while their
+  common edges stood on both, lost their intersection (goldens `boolean.api_brep` `more0080`);
 - two points one proto vertex (`find_proto_vertex_within` and `DeclaredContact::overlaps`,
   `proto_topology/p1/proto.rs`; "One point or two" below): two points, or their uncertainty
   regions, are one within the larger of their tolerances (radii), where upstream took their
@@ -854,6 +894,59 @@ What the port does today:
   them had no vertex to end on (a plate cut by notches whose entry arcs are tangent to its
   side). The touch is taken only along an end that the requested part of the wall holds and
   where its line meets the plane's own patch; else the crossing stays.
+- **A cusp swept onto a face.** A profile whose arc runs tangentially into its line at a
+  corner (a cusp) has two edges there that stay within the tolerance of each other for
+  `√(2rτ)` past the corner, about 0.02 mm at r = 30, and swept, two faces as close.
+  Where the line sweeps onto a face of the other body, every contact near the cusp is a
+  tangency, and its crossings lie `√(2rδ)` off it, δ the rounding by which the two bodies
+  overlap there: a sketch read back from a face a few billionths of a millimetre off put
+  them 3e-5 to 2.5e-4 from the cusp, within the tolerance of both of the tool's edges, and
+  a vertex there split one edge while the intersection ran along the other (the imprint
+  failed with no vertex at an edge definition's end, or the merge with a vertex that is no
+  end of its edge; #15049). Five sites now read each such contact as one touch:
+  - Two surfaces of revolution about one axis meet in one circle per meeting of their
+    generators in a plane through the axis (`intersect_revolved_into`,
+    `surface/surf_of_revolution/p3.rs`). Where both are faces' surfaces the generators are
+    intersected at `contact_tol_3d` (`revolved_contact_tol`), so a circle and a line in its
+    plane a hair less than tangent touch at one point, moved to a generator's end on the
+    stretch between the two crossings as above, and the surfaces touch along one circle.
+  - A crossing or near-tangent curve of a face pair that runs beside the pair's tangent
+    curve is the other edge of the same contact and goes (`crossing_beside_tangent_contact`,
+    `topology/face/p3.rs`): between two zeros a distance D apart the surfaces' separation is
+    to second order a quadratic, no larger than `θD/4` with θ the angle of their normals
+    at the zeros, and where that is within the tolerance the band between the curves is
+    one contact, as the cap rule reads a closed crossing (WR-79). D is proved on
+    enclosures (`curve_runs_along`) and at most a thousand times the tolerance; θ is read
+    at samples, as the cap rule reads it, and so is the band's middle, which must lie within
+    the tolerance of both surfaces (a separation that is not quadratic across the band
+    refuses). An enclosure of the separation over the whole band is open.
+  - A point with no curve classified onto a circle edge of one body and a line edge of the
+    other in its plane, the line a hair inside the circle, is their touch
+    (`touch_of_edges`, `line_touch`, `proto_topology/p3.rs`), as two such circles' is.
+  - Where the cut ends on a face that holds its axis (a floor, the face the cut started
+    from), that plane meets the tool's swept arc in a meridian, the arc turned into the
+    plane, which runs tangentially into the plane's side at the cusp a hair outside it:
+    trimmed to the plane's domain it crossed the side once, `√(2rδ)` from the cusp (2.5e-4
+    mm at r = 30 and δ = 1e-9), and the two pieces met at a vertex of no contact; the result
+    was not a solid. Where both surfaces are faces', the meridian is trimmed without a break
+    at a point where it lies inside the domain on both sides
+    (`Plane::trim_curve_to_plane_domain_joined`, `surface/plane/p2.rs`, from
+    `surface/surf_of_revolution/p1.rs`), as a graze already is: one curve, which the
+    boundary rules above end at the cusp.
+  - A point with no curve classified onto a circle edge and a line edge in its plane that
+    meet at one point by the contact rule, the point beside that meeting within the band
+    where the two edges lie within the tolerance of each other, is that meeting
+    (`meeting_beside`, `proto_topology/p3.rs`). The surface intersection of the block's arc
+    face swept to the start plane and the tool's face swept from its line touches at the
+    cusp, and found that touch 1.5e-4 from it: a vertex there split the tool's line edge and
+    not the block's arc edge, and the merge failed in `make_faceuse`. The meeting is taken
+    where it lies more than the tolerance and at most a thousand times it from the point,
+    and the point and the meeting lie within the tolerance of both edges and so does the
+    whole stretch between them, by enclosure and not by sampling: the line's distance is
+    convex, so its two ends bound it, and the circle's out-of-plane and radial deviations
+    along the stretch are bounded in outward-rounded intervals (`stretch_within_circle`).
+
+  Bare surfaces and curves keep upstream's zero contact.
 
 **The refusal that names a tangent contact.** The kernel's boolean has none today. The `ssi` crate
 refuses a contact it cannot prove with `Error::Tangent`, code `BOOLEAN_TANGENT`, carrying where it

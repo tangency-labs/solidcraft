@@ -372,6 +372,34 @@ fn a_variant_with_its_own_key_leaves_the_family_key_alone() {
     assert_eq!(tool(&h), Some("sketch.rectangle.three_point"), "a variant without a key comes back on R");
 }
 
+/// #22247: after a Two-Tangent Circle from the menu, C started that tool again, though the menu
+/// lists C next to Center-Diameter Circle. With the option in the Sketch Palette's Feature Options
+/// on, C starts the listed tool; off (the default), the variant used last still comes back on C.
+#[test]
+fn a_shape_shortcut_can_start_the_tool_listed_next_to_it() {
+    for listed in [false, true] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        h.app.start("sketch.circle.two_tangent");
+        h.settle();
+        if listed {
+            // A mode of the shape tools: it shows in the palette while one runs, not in Preferences.
+            let at = crate::scenario::handle_at("sketch_palette:toggle:shortcut_starts_listed_tool").expect("the circle tools show the option");
+            h.call("ui.click", json!({"x": at.x, "y": at.y}));
+            h.settle();
+            assert!(h.app.preferences.shortcut_starts_listed_tool, "the click turns it on");
+        }
+        press(&mut h, "Escape");
+        press(&mut h, "C");
+        let expected = if listed { "sketch.circle.center" } else { "sketch.circle.two_tangent" };
+        assert_eq!(tool(&h), Some(expected), "listed = {listed}");
+        press(&mut h, "Escape");
+        // The tool C started is the one the menu's main button remembers next, as for any start.
+        assert_eq!(h.app.preferences.sketch_variants.resolve("sketch.circle.center"), expected);
+    }
+}
+
 /// #2459: with Preferences › Sketch asking for it, a tool's shortcut pressed again before the
 /// first point steps through its family's modes and wraps round; a held key's repeats and a shape
 /// already begun keep the tool.
@@ -1046,4 +1074,55 @@ fn undo_does_not_bring_back_a_chain_ended_with_esc() {
     assert_eq!(chain.pts.len(), 1);
     assert!(chain.pts[0].1.is_none(), "a new chain, from the click, not the old one's point: {:?}", chain.pts);
     assert_eq!(lines(&h).len(), 1, "only the first segment is left");
+}
+
+/// #12889: a line that starts on a circle is drawn, and it stays held there: its start on the
+/// circle's edge, its end away from it. The reporter drew a centre rectangle and a circle in a
+/// new sketch, then a line that starts on the circle: the line was not attached to it, while
+/// the line's end was held on the geometry it ended on.
+#[test]
+fn a_line_started_on_a_circle_is_drawn_and_held_on_it() {
+    use solidcraft_engine::sketch::{ConstraintKind, CurveKind};
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    // The centre rectangle and the circle the reporter drew.
+    h.step(&json!({"start":"sketch.rectangle.center"})).unwrap();
+    h.step(&json!({"click":{"sketch":[0,0]}})).unwrap();
+    h.step(&json!({"click":{"sketch":[30,15]}})).unwrap();
+    h.step(&json!({"start":"sketch.circle.center"})).unwrap();
+    h.step(&json!({"click":{"sketch":[60,0]}})).unwrap();
+    h.step(&json!({"click":{"sketch":[70,0]}})).unwrap();
+    h.settle();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.camera", json!({"target":[15,0,0],"distance":220}));
+    h.settle();
+    let before = lines(&h).len();
+    h.step(&json!({"start":"sketch.line"})).unwrap();
+    // The start on the circle's edge, the end away from it. The pointer moves between the two
+    // clicks, as a hand does.
+    for at in [[70.0, 0.0], [-40.0, -30.0]] {
+        h.step(&json!({"move":{"sketch":at}})).unwrap();
+        h.step(&json!({"click":{"sketch":at}})).unwrap();
+    }
+    h.settle();
+    let _ = h.step(&json!({"shot":"12889-line-from-the-circle"}));
+    let drawn = lines(&h);
+    assert_eq!(drawn.len(), before + 1, "no line from the circle; {:?}", h.app.status);
+    let sid = h.app.session.active_sketch.unwrap();
+    let state = h.app.session.world_state().unwrap();
+    let sketch = &state.sketch(sid).unwrap().sketch;
+    let Some(CurveKind::Line { a, .. }) = sketch.curves.last().map(|c| c.kind.clone()) else {
+        panic!("no new line");
+    };
+    let circle = sketch.curves.iter().position(|c| matches!(c.kind, CurveKind::Circle { .. })).expect("the circle");
+    let kinds = || sketch.constraints.iter().map(|k| &k.kind).collect::<Vec<_>>();
+    assert!(
+        sketch.constraints.iter().any(|k| matches!(k.kind, ConstraintKind::PointOnCurve { p, c } if p == a && c == circle)),
+        "the line's start is not held on the circle: {:?}",
+        kinds()
+    );
+    // The start is on the circle's edge, where the pointer was: a click comes from an f32 screen
+    // position, so it is a hair off the edge.
+    let start = sketch.point(a).unwrap();
+    assert!((start.x - 70.0).abs() < 1e-3 && start.y.abs() < 1e-3, "the line's start is at {start:?}");
 }

@@ -41,10 +41,10 @@
 //!   pointer). `CopyFaces` copies from one B-rep into another one: upstream also allows
 //!   the destination to be the source B-rep, which a shared and a mutable borrow cannot
 //!   express (copy within one B-rep through a clone).
-//! - **Exact pcurves (WR-722, opt-in `keep_exact_pcurves`).** `MakeFaceWithCurves`'s keep
-//!   step flips the orientations it matches the given UV curves by on a face made with its
-//!   surface's orientation opposite, and `CopyFaces` without the merge passes the face's
-//!   own trims on to its copy (`pbOptCrvOnSurf`).
+//! - **Exact pcurves (WR-722).** `MakeFaceWithCurves`'s keep step flips the orientations
+//!   it matches the given UV curves by on a face made with its surface's orientation
+//!   opposite, and `CopyFaces` without the merge passes the face's own trims on to its
+//!   copy (`pbOptCrvOnSurf`).
 //! - **Index checks.** Loop counts that add up to more curves, orientations or edge uses
 //!   than given, and self-intersection UV curve arrays shorter than the 3D curves, are
 //!   [`SolidError::InvalidInput`] (upstream reads past its arrays).
@@ -1876,12 +1876,12 @@ fn make_face_with_curves_transfer_impl(
         let uv: Vec<Curve> = uv_curves
             .ok_or_else(|| null("crv_on_surf without UV curves (upstream dereferences null)"))?;
         // CreateUVTrimCurves(FALSE, &sNewUVCurves, &crCurveOrientations, ..). Not upstream
-        // (WR-722, opt-in): on a face made with its surface's orientation opposite, the
+        // (WR-722): on a face made with its surface's orientation opposite, the
         // upward face use's edge uses run against the loop the orientations are given
         // along, so they are flipped to match them (upstream's tangent test in
         // sm_FindBestUVCurve refuses each exact curve there, and it is projected again)
         let flipped: Vec<OrientType>;
-        let orients = if k.fixes.keep_exact_pcurves && orientation == OrientType::Opposite {
+        let orients = if orientation == OrientType::Opposite {
             flipped = orientations
                 .iter()
                 .map(|&o| {
@@ -2232,6 +2232,20 @@ pub(crate) fn glue_edges_general_searching(
 
         let surv_eus = ed::edgeuses(b, surv, None, None)?;
         ed::add_oriented_eu_pair(b, surv, deu1, deu2, Some(sector))?;
+        // The moved edge uses now reference `surv`'s curve, interval and orientation, so
+        // any gaps cached against `del` are stale (#21432).
+        for moved in [deu1, deu2] {
+            let use_ = b.edgeuse_mut(moved)?;
+            use_.max_edge_face_gap.reset();
+            use_.edge_ccw_edge_gap.reset();
+            let (cw, vu) = (use_.cw, use_.vertexuse);
+            if let Some(cw) = cw {
+                b.edgeuse_mut(cw)?.edge_ccw_edge_gap.reset();
+            }
+            if let Some(vu) = vu {
+                b.vertexuse_mut(vu)?.vertex_edge_gap.reset();
+            }
+        }
 
         // the surviving edge was a wire: drop its wire edge uses and their vertex uses
         if surv_wire {
@@ -2786,9 +2800,9 @@ fn copy_faces_named(
             orientations: curves.curve_orients,
             loop_points: Vec::new(),
         };
-        // Not upstream (WR-722, opt-in): the copy keeps the face's own trims
-        // (`pbOptCrvOnSurf`), not projected again later
-        let keep = (k.fixes.keep_exact_pcurves && input.uv_curves.is_some()).then_some(true);
+        // Not upstream (WR-722): the copy keeps the face's own trims (`pbOptCrvOnSurf`),
+        // not projected again later
+        let keep = input.uv_curves.is_some().then_some(true);
         match make_face_with_curves(
             k,
             dest,

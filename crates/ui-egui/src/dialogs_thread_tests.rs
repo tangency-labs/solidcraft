@@ -227,6 +227,53 @@ fn a_form_change_keeps_what_still_applies() {
     assert_eq!((&p["hand"], &p["starts"], &p["length"], &p["ease_out"]), (&json!("left"), &json!(3), &json!("4 mm"), &json!("standard")));
 }
 
+/// Unified offers the shared UNC/UNF sizes by their full designation, including the pitch;
+/// displaying an authored class must keep it in the command and saved dialog.
+#[test]
+fn unified_form_offers_catalogue_sizes_and_keeps_an_authored_class() {
+    let mut h = shaft();
+    choose(&mut h, "Form", "thread.form_unified");
+    assert_eq!(options(&h).form, ThreadForm::Unified);
+    assert_eq!(params(&h)["form"], "unified");
+    assert!(params(&h).get("designation").is_none(), "the Unified face size is automatic");
+    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Thread { designation, .. } if designation == "5/16-18 UNC"));
+    click(&mut h, &["dialog:Automatic size"]);
+    choose(&mut h, "Size", "#10-32 UNF");
+    assert_eq!(params(&h)["designation"], "#10-32 UNF");
+    type_in(&mut h, "Designation", "5/16-24 UNF-2A");
+    h.frames(2);
+    assert_eq!(params(&h)["designation"], "5/16-24 UNF-2A");
+    let (command, args) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    h.app.run(&command, args).unwrap();
+    let saved = h.app.session.doc.features.last().unwrap().clone();
+    let mut dialog = crate::dialogs::Dialog::for_command(&h.app, "solid.thread").unwrap();
+    crate::dialogs_thread::reopen(&mut dialog, &h.app.session, &saved);
+    assert!(
+        matches!(dialog.kind, Kind::Thread { designation, options, .. } if designation == "5/16-24 UNF-2A" && options.form == ThreadForm::Unified)
+    );
+}
+
+/// An ISO metric class typed after the size stays through a pitch or size change (the Size and
+/// Pitch rows still read the size), and reaches the command and the reopened dialog.
+#[test]
+fn metric_form_keeps_an_authored_class() {
+    let mut h = shaft();
+    type_in(&mut h, "Designation", "M8-6g");
+    assert_eq!(params(&h)["designation"], "M8-6g");
+    choose(&mut h, "Size", "3 mm");
+    assert_eq!(params(&h)["designation"], "M3-6g", "a new size starts with its coarse pitch");
+    type_in(&mut h, "Designation", "M8-6g");
+    choose(&mut h, "Pitch", "1 mm");
+    assert_eq!(params(&h)["designation"], "M8x1-6g");
+    let (command, args) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    h.app.run(&command, args).unwrap();
+    assert_eq!(h.app.session.model.state().threads[0].designation, "M8x1-6g");
+    let saved = h.app.session.doc.features.last().unwrap().clone();
+    let mut dialog = crate::dialogs::Dialog::for_command(&h.app, "solid.thread").unwrap();
+    crate::dialogs_thread::reopen(&mut dialog, &h.app.session, &saved);
+    assert!(matches!(dialog.kind, Kind::Thread { designation, .. } if designation == "M8x1-6g"));
+}
+
 /// The dialog shows the command's own error text for options it cannot build.
 #[test]
 fn the_command_error_is_what_the_dialog_shows() {
@@ -511,7 +558,7 @@ fn a_legacy_multi_face_thread_reopens_in_group_selection_mode() {
     let FeatureKind::Thread { target_bodies, .. } = &mut doc.feature_mut(id).unwrap().kind else { panic!("Thread") };
     target_bodies.clear();
     let saved = h.app.session.doc.to_json();
-    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    *h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
     assert_eq!(h.app.session.model.state().threads.len(), 2);
     h.app.edit_feature(id);
     h.frames(2);
@@ -758,7 +805,7 @@ fn a_grouped_thread_reopens_named_faces_after_its_shafts_move() {
     assert_eq!(face.0.x, 3.0, "the saved point remains at its original location");
     assert_eq!(additional_faces[0].0.x, 33.0);
     let saved = h.app.session.doc.to_json();
-    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    *h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
     let features = h.app.session.doc.features.len();
     h.app.edit_feature(id);
     h.frames(2);
@@ -802,7 +849,7 @@ fn an_unchanged_grouped_thread_edit_keeps_its_exact_saved_parameters() {
     let id = h.app.run("solid.thread", json!({"faces":points,"designation":"M6x0.75"})).unwrap()["feature"].as_u64().unwrap();
     let before = h.app.session.doc.feature(id).unwrap().kind.clone();
     let saved = h.app.session.doc.to_json();
-    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    *h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
     h.app.edit_feature(id);
     h.frames(2);
     let d = h.app.dialog.take().expect("the unchanged group can be edited");
@@ -826,7 +873,7 @@ fn a_single_thread_face_keeps_the_selected_body_when_shafts_coincide() {
     let id = h.app.session.doc.features.last().unwrap().id;
     h.app.run("body.rename", json!({"body":"B","name":"Renamed"})).unwrap();
     let saved = h.app.session.doc.to_json();
-    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    *h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
     h.app.edit_feature(id);
     h.frames(2);
     let d = h.app.dialog.take().unwrap();
@@ -868,7 +915,7 @@ fn grouped_thread_dialog_preserves_coincident_body_identities_and_missing_slots(
     let id = h.app.run("solid.thread", json!({"faces":[{"body":"B","point":[4,0,2]},{"body":"A","point":[4,0,2]}],"designation":"M8"})).unwrap()["feature"].as_u64().unwrap();
     h.app.run("body.rename", json!({"body":"B","name":"Renamed"})).unwrap();
     let saved = h.app.session.doc.to_json();
-    h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
+    *h.app = crate::SolveApp::new(Session::new(Document::from_json(&saved).unwrap()), crate::Services::default());
     h.app.edit_feature(id);
     h.frames(2);
     let mut d = h.app.dialog.take().unwrap();
@@ -888,4 +935,23 @@ fn grouped_thread_dialog_preserves_coincident_body_identities_and_missing_slots(
     let d = crate::dialogs::for_feature(&app, id, None).unwrap();
     assert_eq!(d.inputs[0].items.len(), 2, "the failed saved reference is not silently dropped");
     assert!(apply_commands(&app, &d).is_err());
+}
+
+/// A stud is chamfered at both ends: with the start chamfered, "Chamfer both ends" sends the
+/// command's `tip: both`, and unticking it goes back to the start alone (#20629).
+#[test]
+fn a_thread_can_be_chamfered_at_both_ends() {
+    let mut h = shaft();
+    // A checkbox, not a labelled row: its own handle is what is drawn.
+    assert!(crate::scenario::handle_at("dialog:Chamfer both ends").is_none(), "only offered once the start is chamfered");
+    choose(&mut h, "Start", "Chamfer");
+    assert!(crate::scenario::handle_at("dialog:Chamfer both ends").is_some());
+    assert_eq!(params(&h)["tip"], "start");
+    click(&mut h, &["dialog:Chamfer both ends"]);
+    assert_eq!(params(&h)["tip"], "both");
+    assert_eq!(options(&h).tip, ThreadTip::Both);
+    click(&mut h, &["dialog:Chamfer both ends"]);
+    assert_eq!(params(&h)["tip"], "start");
+    choose(&mut h, "Start", "None");
+    assert!(params(&h).get("tip").is_none());
 }

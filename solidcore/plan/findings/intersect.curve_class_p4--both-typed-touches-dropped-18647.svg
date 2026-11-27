@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="760" height="400" viewBox="0 0 760 400">
+  <title>both-typed-touches</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="760" height="400" fill="#ffffff"/>
+    <rect id="plane_face_8_x_8" data-name="plane face 8 x 8" x="60" y="70" width="240" height="240" fill="#f0f0f0" stroke="#555555" stroke-miterlimit="10"/>
+    <circle id="tol_band_start" data-name="tol band start" cx="64.9" cy="195.9" r="60" fill="#dce9f5" opacity="0.8"/>
+    <circle id="tol_band_end" data-name="tol band end" cx="315.1" cy="172.1" r="60" fill="#dce9f5" opacity="0.8"/>
+    <polygon id="loop" points="253.5,147.2 184,125.8 124.4,204.9 224.9,263.9" fill="none" stroke="#000000" stroke-width="2" stroke-miterlimit="10"/>
+    <line id="bisector" x1="64.9" y1="195.9" x2="315.1" y2="172.1" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <circle cx="64.9" cy="195.9" r="4" fill="#555555"/>
+    <circle cx="315.1" cy="172.1" r="4" fill="#555555"/>
+    <circle cx="136.3" cy="189.1" r="4" fill="#000000"/>
+    <circle cx="245.8" cy="178.7" r="4" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 30 36)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="18" font-weight="bold" fill="#000000"><tspan x="0" y="0">s3gen0009: a bisector 8.4 long whose parameter interval lies inside the UV tolerance</tspan></text>
+    <text transform="matrix(1 0 0 1 60 332)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">plane face 8 x 8, one loop (schematic, distances to scale)</tspan></text>
+    <text transform="matrix(1 0 0 1 50 226)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">start</tspan></text>
+    <text transform="matrix(1 0 0 1 320 163)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">end</tspan></text>
+    <text transform="matrix(1 0 0 1 82 214)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">2.39</tspan></text>
+    <text transform="matrix(1 0 0 1 264 200)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">2.32</tspan></text>
+    <text transform="matrix(1 0 0 1 266 108)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">tol 2</tspan></text>
+    <text transform="matrix(1 0 0 1 190 118)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">loop</tspan></text>
+    <text transform="matrix(1 0 0 1 160 205)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#1f6fb2"><tspan x="0" y="0">bisector</tspan></text>
+    <rect id="uv_tol_in_parameter" data-name="uv tol in parameter" x="395" y="138" width="310" height="24" fill="#dce9f5"/>
+    <line id="interval" x1="420" y1="150" x2="680" y2="150" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line x1="420" y1="142" x2="420" y2="158" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line x1="680" y1="142" x2="680" y2="158" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <circle cx="494.2" cy="150" r="4" fill="#000000"/>
+    <circle cx="607.9" cy="150" r="4" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 416 180)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">0</tspan></text>
+    <text transform="matrix(1 0 0 1 676 180)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">1</tspan></text>
+    <text transform="matrix(1 0 0 1 395 110)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">the bisector&apos;s parameter interval [0, 1]</tspan></text>
+    <text transform="matrix(1 0 0 1 395 127)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">inside the zone tolerance mapped to it (band)</tspan></text>
+    <text transform="matrix(1 0 0 1 395 205)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">main: ClassifyPoint types both crossings Both, so GetLoopTouches</tspan><tspan x="0" y="26.4">drops every touch as on a degenerate curve: the loop is crossed</tspan><tspan x="0" y="40.8">nowhere and the face is refused (1040).</tspan></text>
+    <text transform="matrix(1 0 0 1 395 275)" x="0" y="12" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="12">this change: each end is checked in 3D. The crossings lie 2.39 and</tspan><tspan x="0" y="26.4">2.32 from their nearer end, at least the tolerance 2 from both ends,</tspan><tspan x="0" y="40.8">so both are Inside: the loop is the face&apos;s outer loop (1000).</tspan></text>
+  </g>
+</svg>

@@ -250,6 +250,15 @@ pub struct InsertDesignKeys {
     /// another occurrence of it. Default: false.
     #[serde(default)]
     pub reuse: Option<bool>,
+    /// An installed importer plugin's `plugin.entry`, to read `path` with it instead of as a
+    /// design (default: the importer that claims the file's extension, when `path` is not a
+    /// design). The link keeps the plugin's id and version, so Update Links reads the file again
+    /// with it. Not with `configuration`.
+    #[serde(default)]
+    pub format: Option<String>,
+    /// The importer's declared options, as `file.import` takes them. Kept with the link.
+    #[serde(default)]
+    pub options: Option<serde_json::Map<String, Value>>,
 }
 
 /// `component.insert_design` parameters: [`InsertDesignKeys`].
@@ -523,10 +532,14 @@ pub struct RelinkResult {
     pub geometry_changed: bool,
     /// What the new design gave that did not come in, and joints to check.
     pub warnings: Vec<String>,
-    /// Joints that no longer solve.
+    /// Joints that no longer solve, or whose resolved face became incompatible after the relink.
     pub joint_errors: Vec<JointDiagnostic>,
     /// Joints that conflict with others.
     pub joint_conflicts: Vec<JointDiagnostic>,
+    /// Joints on the relinked component whose resolved origin shifted or rotated.
+    pub joint_deviations: Vec<JointDeviation>,
+    /// Occurrences whose solved world pose moved after the relink.
+    pub moved_occurrences: Vec<MovedOccurrence>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -539,6 +552,38 @@ pub struct JointDiagnostic {
     pub joint: u64,
     pub name: String,
     pub why: String,
+}
+
+/// A joint origin whose resolved face or frame moved or rotated after a relink.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct JointDeviation {
+    /// The joint, by id.
+    pub joint: u64,
+    pub name: String,
+    /// Which side of the joint deviated (`"a"` or `"b"`).
+    pub side: String,
+    /// Persistent face name on that side, when the origin references a named face.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub face: Option<String>,
+    /// Distance in mm between the resolved origin before and after the relink.
+    pub origin_shift_mm: f64,
+    /// Angle in degrees between the resolved frame's Z axis (face normal or round axis) before and after.
+    pub normal_angle_deg: f64,
+    /// Whether the resolved normal/axis rotated sharply (>= 45°), indicating a likely re-binding
+    /// to a different face.
+    pub incompatible: bool,
+}
+
+/// An occurrence whose solved world pose changed as a result of a relink.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MovedOccurrence {
+    /// The occurrence, by id.
+    pub occurrence: u64,
+    pub name: String,
+    /// World-space translation shift of the occurrence origin in mm.
+    pub translation_mm: f64,
+    /// World-space rotation change of the occurrence frame in degrees.
+    pub rotation_deg: f64,
 }
 
 /// Forget a component's link to its design file and keep its bodies as they are. One undo step.
@@ -578,6 +623,30 @@ pub struct LinksResult {
     pub param_warnings: Vec<String>,
 }
 
+/// The reader a linked file comes through, as `component.links` lists it: what Update Links asks
+/// to read the file again.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LinkSource {
+    /// `step` for the built-in STEP reader, else an importer plugin's `plugin.entry`.
+    pub format: String,
+    /// The importer plugin's id; left out for a built-in reader.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plugin: Option<String>,
+    /// The version of the plugin that read the file last; left out for a built-in reader.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Plugin only: whether the plugin is installed and on, so Update Links can read the file again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available: Option<bool>,
+    /// Plugin only: the version installed now, when it differs from `version` or the plugin is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub installed_version: Option<String>,
+    /// Plugin only, when it is not available: which plugin and version the link needs, and why it
+    /// can't be used. The component keeps the bodies it has.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub needs: Option<String>,
+}
+
 /// One linked component. A file that is looked for has `found` and `changed`, and a `state` and
 /// a `reason` when it can't be reached; a refused one is not looked for and has `found` null, a
 /// `state` and a `reason`.
@@ -594,6 +663,10 @@ pub enum LinkInfo {
         /// Selected source configuration row id; absent when following the saved source state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         configuration: Option<u64>,
+        /// What read the linked file and would read it again: `step`, or an importer plugin.
+        /// Left out for a linked design.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        importer: Option<LinkSource>,
         /// The file it resolves to.
         file: String,
         /// Whether the file is there; null when that can't be told.
@@ -619,6 +692,10 @@ pub enum LinkInfo {
         /// Selected source configuration row id; absent when following the saved source state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         configuration: Option<u64>,
+        /// What read the linked file and would read it again: `step`, or an importer plugin.
+        /// Left out for a linked design.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        importer: Option<LinkSource>,
         file: String,
         /// Always null: it is not looked for.
         found: Option<bool>,
@@ -636,6 +713,10 @@ pub enum LinkInfo {
         /// Selected source configuration row id; absent when following the saved source state.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         configuration: Option<u64>,
+        /// What read the linked file and would read it again: `step`, or an importer plugin.
+        /// Left out for a linked design.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        importer: Option<LinkSource>,
         file: String,
         /// Always null: it is not looked for.
         found: Option<bool>,

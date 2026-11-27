@@ -184,11 +184,50 @@ fn keep_component_looks(doc: &mut Document, owners: &BTreeMap<String, u64>, comp
     }
 }
 
+/// Whether two faces have compatible analytic surface orientations for automatic re-binding:
+/// planar normals must agree within 60° (rejecting perpendicular/opposite faces), cylindrical or
+/// conical axes must align within 60°, and planar vs. round classes must not swap.
+fn compatible_face_surface(old: &ModelBody, old_face: usize, new: &ModelBody, new_face: usize) -> bool {
+    use solidcraft_kernel::FaceSurface;
+    const MIN_COS: f64 = 0.5;
+    match (solidcraft_kernel::face_surface(&old.body, old_face), solidcraft_kernel::face_surface(&new.body, new_face)) {
+        (Some(FaceSurface::Plane { normal: a, .. }), Some(FaceSurface::Plane { normal: b, .. })) => {
+            let (a, b) = (a.vec(), b.vec());
+            solidcraft_kernel::directions_aligned([a.x, a.y, a.z], [b.x, b.y, b.z], MIN_COS, false)
+        }
+        (
+            Some(FaceSurface::Cylinder { axis: a, .. } | FaceSurface::Cone { axis: a, .. }),
+            Some(FaceSurface::Cylinder { axis: b, .. } | FaceSurface::Cone { axis: b, .. }),
+        ) => {
+            let (a, b) = (a.vec(), b.vec());
+            solidcraft_kernel::directions_aligned([a.x, a.y, a.z], [b.x, b.y, b.z], MIN_COS, true)
+        }
+        (Some(FaceSurface::Plane { .. }), Some(FaceSurface::Cylinder { .. } | FaceSurface::Cone { .. }))
+        | (Some(FaceSurface::Cylinder { .. } | FaceSurface::Cone { .. }), Some(FaceSurface::Plane { .. })) => false,
+        _ => true,
+    }
+}
+
 /// What the bodies `new` call the face or edge that `old` calls `name`, found where it is.
 fn renamed(old: &ModelState, new: &[&ModelBody], name: &str, near: Vec3) -> Option<String> {
-    use solidcraft_doc::{appearance::face_index_at, naming};
-    if let Some(p) = naming::point_on_face(old, name, near) {
-        return new.iter().find_map(|b| face_index_at(b, p).and_then(|i| naming::face_names(b).get(i).cloned()));
+    use solidcraft_doc::{
+        appearance::{face_index_at, faces_within},
+        naming,
+    };
+    if let Some(hit) = naming::locate_face(old, name, near) {
+        let old_body = old.bodies.get(hit.body);
+        return new.iter().find_map(|b| {
+            let i = face_index_at(b, hit.point)?;
+            if old_body.is_none_or(|ob| compatible_face_surface(ob, hit.face, b, i)) {
+                return naming::face_names(b).get(i).cloned();
+            }
+            // When `hit.point` lies on a shared edge (e.g., an edge snap), `face_index_at` can
+            // tie-break onto the adjacent perpendicular face; recover the matching face on that edge.
+            let ob = old_body?;
+            let tol = (b.body.size() * 1e-4).max(1e-4);
+            let matched = faces_within(b, hit.point, tol).into_iter().find(|&j| compatible_face_surface(ob, hit.face, b, j))?;
+            naming::face_names(b).get(matched).cloned()
+        });
     }
     let p = old.bodies.iter().find_map(|b| naming::find_edge(b, name, near).ok())?;
     new.iter().find(|b| face_index_at(b, p).is_some()).and_then(|b| naming::edge_names_at(b, &[p]).pop())
@@ -521,6 +560,8 @@ fn part_design(s: &Session, sc: &Scope, stem: &str, cmd: &str) -> Result<(Sessio
         g.features.retain(|f| sc.inside.contains(f));
     }
     part.named_views.clear();
+    part.home_view = None;
+    part.saved_sections.clear();
     part.configs = Default::default();
     part.assembly = Default::default();
     let features: BTreeMap<u64, u64> = sc.inside.iter().chain(&sc.carried).map(|f| (*f, *f)).collect();
@@ -725,7 +766,18 @@ impl Session {
     /// Whether component `id` can leave the design for a file of its own or a link: what
     /// `component.extract` and `component.replace_with_link` check before they build anything.
     pub fn can_extract(&self, id: u64) -> bool {
-        scope(self, id, CMD).is_ok()
+        self.extract_refusal(id).is_none()
+    }
+
+    /// Why component `id` can't be extracted, as a sentence for a disabled menu entry's hover
+    /// text (#18623), or `None` when it can: the same check as [`Session::can_extract`].
+    pub fn extract_refusal(&self, id: u64) -> Option<String> {
+        let why = match scope(self, id, CMD).err()? {
+            EngineError::BadParams { msg, .. } => msg,
+            other => other.to_string(),
+        };
+        let mut chars = why.chars();
+        Some(chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or(why))
     }
 }
 
@@ -787,7 +839,7 @@ pub(super) fn extract(s: &mut Session, p: &Value) -> Result<Value> {
     part.path = s.path.clone();
     part.execute("file.save", &json!({"path": shown}))?;
     // The link keeps what the new file holds, as Insert Design's does (#9739).
-    if let Some(read) = file_sha256(&file, s.path.as_deref())
+    if let Some(read) = file_sha256(&file, s.path.as_deref(), false)
         && let Some(link) = s.doc_mut().links.get_mut(&comp)
     {
         link.file_sha256 = Some(read);

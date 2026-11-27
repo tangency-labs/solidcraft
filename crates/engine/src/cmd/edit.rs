@@ -169,7 +169,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&MOVE_MANY_CONTRACT)
         .output(output_schema_for::<TimelineMoved>)
         .params(
-        "features?: [id|name], groups?: [folder ids], group?: folder id, position: insertion slot, active?: bool (true = the moved contents end up before the history marker, false = behind it; other features keep their state); atomically changes folder membership and moves all selected contents as one block",
+        "features?: [id|name], groups?: [folder ids], group?: folder id, position: insertion slot, active?: bool (true = the moved contents end up before the history marker, false = behind it; other features keep their state); atomically changes folder membership and moves all selected contents as one block; refused when a feature that worked would fail, unless allow_errors?: bool (default false): then made, and broken: [{feature, error}] lists the features it broke",
     ),
     CommandSpec::new("timeline.rollback", "Move Timeline Marker", crate::checked!("timeline.rollback", rollback))
         .icon("rollback")
@@ -260,6 +260,13 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("select.filter", "Selection filter", crate::checked!("select.filter", select_filter)).icon("select").noundo().doc_only()
         .contract(&SELECT_FILTER_CONTRACT).output(output_schema_for::<SelectFilterResult>)
         .params("mode: body|face|component → validated UI pick granularity; headless echo only, no document edits or undo"),
+    CommandSpec::new("select.boundary", "Select Boundary", crate::checked!("select.boundary", select_boundary))
+        .icon("select")
+        .noundo()
+        .doc_only()
+        .contract(&BOUNDARY_CONTRACT)
+        .output(output_schema_for::<crate::schema::select::BoundaryResult>)
+        .params("body?: world body name, faces?: face indices of it (default: the selected faces, else the last selected body), holes?: bool, add?: bool → selects the edges that bound exactly one face of the set (exact topology), outer loops only unless holes (a hole: a walk of the faces' inner loops only); a body alone gives its free edges → selected, body, edges, loops, holes_left"),
     CommandSpec::new("select.clear", "Clear Selection", crate::checked!("select.clear", select_clear))
         .any_part()
         .icon("select")
@@ -314,6 +321,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 const SELECT_SET_CONTRACT: TypedContract<SelectSetParams> = TypedContract::new();
 const SELECT_FILTER_CONTRACT: TypedContract<SelectFilterParams> = TypedContract::new();
+const BOUNDARY_CONTRACT: TypedContract<crate::schema::select::BoundaryParams> = TypedContract::new();
 const SELECT_CLEAR_CONTRACT: TypedContract<SelectClearParams> = TypedContract::new();
 const SELECT_ALL_CONTRACT: TypedContract<SelectAllParams> = TypedContract::new();
 const SELECT_INVERT_CONTRACT: TypedContract<SelectInvertParams> = TypedContract::new();
@@ -484,7 +492,10 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
     }
     snap.doc = Session::refreshed_sheet_fill_history_document(&s.doc, &snap.doc, snap.part, cmd)?;
     let same = Arc::ptr_eq(&s.doc, &snap.doc);
-    let moved = s.active_sketch != snap.active_sketch || s.pending_moves != snap.pending_moves;
+    let moved = s.active_sketch != snap.active_sketch
+        || s.pending_moves != snap.pending_moves
+        || s.pending_move_records != snap.pending_move_records
+        || s.pending_joint_bases != snap.pending_joint_bases;
     // Undoing a hide (or a show) leaves the document alone: the model needs no evaluating, and
     // a section step needs nothing evaluated or drawn again.
     let display_only = same && !moved && s.visibility != snap.visibility;
@@ -497,6 +508,9 @@ fn go_to(s: &mut Session, snap: Snapshot, cmd: &str) -> Result<Snapshot> {
     s.active_sheet_sketch = snap.active_sheet_sketch;
     s.prune_sheet_sketch_edit();
     s.pending_moves = snap.pending_moves;
+    s.pending_move_records = snap.pending_move_records;
+    s.pending_joint_bases = snap.pending_joint_bases;
+    s.last_capture_state = snap.last_capture_state;
     s.visibility = snap.visibility;
     s.clear_selection();
     // A new document is evaluated by `execute`, and a drawing's change evaluates nothing.
@@ -560,6 +574,9 @@ fn compute_all(s: &mut Session, _p: &Value) -> Result<Value> {
     s.model = solidcraft_doc::Model::new();
     // and nothing taken from the rows built before (`config.activate`)
     s.row_models.clear();
+    if let Ok(mut cache) = s.clearance_cache.lock() {
+        cache.clear();
+    }
     s.set_validation(validation);
     s.refresh();
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
@@ -572,6 +589,49 @@ pub(super) fn feature_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u6
         Some(Value::String(name)) => s.doc.resolve_feature_name(name).map(|f| f.id).map_err(|e| bad(cmd, e.to_string())),
         _ => Err(bad(cmd, "`feature` must be an id or name")),
     }
+}
+
+fn cleanup_capture_position_bases(doc: &mut solidcraft_doc::Document, removed_joints: &std::collections::BTreeSet<u64>) -> Vec<u64> {
+    let mut used_occs = std::collections::BTreeSet::new();
+    let mut used_joints = std::collections::BTreeSet::new();
+    for f in &doc.features {
+        if let FeatureKind::CapturePosition { moves, joints } = &f.kind {
+            for m in moves {
+                used_occs.insert(m.occurrence);
+            }
+            for cj in joints {
+                used_joints.insert(cj.joint);
+            }
+        }
+    }
+    for o in &mut doc.occurrences {
+        if !used_occs.contains(&o.id)
+            && let Some(base) = o.base_transform.take()
+        {
+            o.transform = base;
+        }
+    }
+    let mut reset_joints = Vec::new();
+    for j in &mut doc.assembly.joints {
+        if !used_joints.contains(&j.id) && (removed_joints.contains(&j.id) || j.base_values.is_some()) {
+            reset_joints.push(j.id);
+            j.captured = None;
+            if let Some(base) = j.base_values.take() {
+                let dofs = j.kind.dofs().len();
+                let mut q = base;
+                q.resize(dofs, 0.0);
+                solidcraft_doc::joints::clamp(j, &mut q);
+                j.values = q;
+                let base_exprs = std::mem::take(&mut j.base_exprs);
+                for i in 0..dofs {
+                    j.exprs.set_value(i, base_exprs.get(i).and_then(|e| e.clone()));
+                }
+            } else {
+                j.base_exprs.clear();
+            }
+        }
+    }
+    reset_joints
 }
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
@@ -591,12 +651,40 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     // Features that work now; any of them failing after the delete is reported (a later
     // feature that names a deleted body, #267).
     let worked: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.error.is_none() && !r.skipped).map(|r| r.id).collect();
+    // Pin surviving features' evaluated body names before deleting, so disambiguated names
+    // (e.g. `VIS (3)`) do not slide down into freed suffixes.
+    s.pin_body_names();
+    let feature_bodies: Vec<(u64, Vec<String>)> =
+        s.doc.features.iter().filter(|f| !f.body_names.is_empty()).map(|f| (f.id, f.body_names.clone())).collect();
+    let mut removed_capture_joints = std::collections::BTreeSet::new();
+    for &id in &ids {
+        if let Some(f) = s.doc.feature(id)
+            && let FeatureKind::CapturePosition { joints, .. } = &f.kind
+        {
+            for cj in joints {
+                removed_capture_joints.insert(cj.joint);
+            }
+        }
+    }
     super::joints::delete_joints(s.doc_mut(), &joints);
     let mut gone = Vec::new();
     for id in ids {
         if s.doc.feature(id).is_some() {
             gone.extend(s.doc_mut().delete_feature(id)?);
         }
+    }
+    let gone_ids: std::collections::BTreeSet<u64> = gone.iter().copied().collect();
+    let deleted_bodies: std::collections::BTreeSet<String> =
+        feature_bodies.into_iter().filter(|(id, _)| gone_ids.contains(id)).flat_map(|(_, names)| names).filter(|name| !name.is_empty()).collect();
+    if !deleted_bodies.is_empty() {
+        let surviving: std::collections::BTreeSet<String> =
+            s.doc.features.iter().flat_map(|f| f.body_names.iter().cloned()).chain(s.doc.body_components.keys().cloned()).collect();
+        let d = s.doc_mut();
+        d.appearances.bodies.retain(|name, _| !deleted_bodies.contains(name) || surviving.contains(name));
+        d.appearances.faces.retain(|face| !deleted_bodies.contains(&face.body) || surviving.contains(&face.body));
+    }
+    for jid in cleanup_capture_position_bases(s.doc_mut(), &removed_capture_joints) {
+        s.pending_joint_bases.remove(&jid);
     }
     if !folders.is_empty() {
         s.doc_mut().timeline_groups.retain(|group| !folders.contains(&group.id));
@@ -875,6 +963,10 @@ impl Session {
 
 fn group(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.group";
+    // A design file holds at most this many folders: one more would save and not open again.
+    if s.doc.timeline_groups.len() >= solidcraft_doc::MAX_FEATURES {
+        return Err(bad(cmd, format!("a design holds at most {} timeline folders", solidcraft_doc::MAX_FEATURES)));
+    }
     let features = group_features(s, p, false, cmd)?;
     let joints = group_joints(s, p, cmd)?;
     let groups = group_ids(s, p, false, cmd)?;
@@ -1025,6 +1117,10 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, "a folder cannot be moved into itself or one of its descendants"));
     }
+    let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
+    let active = active_param(p, cmd)?;
+    let allow = allow_errors(p, cmd)?;
+    s.pin_timeline_body_names();
     let nested = group_feature_ids(&s.doc, &groups);
     features.retain(|feature| !nested.contains(feature));
     let moving: Vec<u64> =
@@ -1040,19 +1136,24 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     sort_group_features(&mut next);
-    let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
-    let active = active_param(p, cmd)?;
-    let (mut next, ordered, _, checked) = reorder_features(s, next, &moving, slot, false, cmd)?;
-    let marker = next.marker;
-    place_marker(s, &mut next, &moving, active, cmd)?;
-    let checked = checked.filter(|_| next.marker == marker);
+    let (next, ordered, broken, checked) = reorder_features(s, next, &moving, slot, active, allow, cmd)?;
     if next != *s.doc {
         if let Some(model) = checked {
             s.model = model;
         }
         *s.doc_mut() = next;
     }
-    reply(cmd, TimelineMoved { features: ordered, groups, group: target, position: slot, param_warnings: Vec::new() })
+    reply(
+        cmd,
+        TimelineMoved {
+            features: ordered,
+            groups,
+            group: target,
+            position: slot,
+            broken: allow.then(|| broken_features(&broken)),
+            param_warnings: Vec::new(),
+        },
+    )
 }
 
 fn rollback(s: &mut Session, p: &Value) -> Result<Value> {
@@ -1204,6 +1305,9 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
                 && joints.iter().all(|id| s.doc.assembly.joints.iter().any(|joint| joint.id == *id && joint.suppressed)))
         }
     };
+    if want {
+        s.pin_body_names();
+    }
     let keep = if want { counted_names_from(s, &ids) } else { Vec::new() };
     // One command, so one undo step however many features it changes.
     let doc = s.doc_mut();
@@ -1667,11 +1771,25 @@ fn keeps_member(old: &FeatureKind, new: &FeatureKind, cmd: &str) -> Result<()> {
     }
 }
 
+/// Refuse an edit that resolves geometric picks against `s.model.state_before(id)` when active
+/// features before `id` sit past the history marker: `state_before` would return the earlier
+/// marker geometry and silently attach the picks to unrelated edges or faces.
+fn picks_past_marker(cmd: &str, name: &str, what: &str) -> EngineError {
+    bad(
+        cmd,
+        format!(
+            "{name} is past the history marker: its {what} cannot be resolved while earlier features are rolled back; move the marker to just before {name} (or past it) first"
+        ),
+    )
+}
+
 fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.edit";
     let id = feature_id(s, p.get("feature"), cmd)?;
     let set = p.get("set").filter(|v| v.is_object()).ok_or_else(|| bad(cmd, "`set` must be an object of fields"))?;
     let f = s.doc.feature(id).cloned().ok_or_else(|| bad(cmd, "feature"))?;
+    let idx = s.doc.feature_index(id).ok_or_else(|| bad(cmd, "feature"))?;
+    let unbuilt_before = s.doc.marker.is_some_and(|m| s.doc.features.get(m..idx).is_some_and(|between| between.iter().any(|feat| !feat.suppressed)));
     let before = serde_json::to_value(&f).map_err(|e| EngineError::Other(e.to_string()))?;
     let set = expand_dotted(set, Some(&before), cmd, 0)?;
     let set = hole_position_expressions(set, &f.kind);
@@ -1698,6 +1816,9 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         solidcraft_doc::frame::read_coped(corner, corners, coped);
         own_corner_members(corners, &f.name).map_err(|e| bad(cmd, e))?;
         if flips.iter().any(Option::is_some) {
+            if unbuilt_before {
+                return Err(picks_past_marker(cmd, &f.name, "corner flips"));
+            }
             super::frame::flips_as_order(&s.doc, &s.model.state_before(id), &mut nf, &flips);
         }
     }
@@ -1749,11 +1870,16 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // broken references re-picked via #16661): remember where they sit now (in the model before
     // the feature). An edit sending only radius, distance, or options leaves the names alone.
     if let (
-        FeatureKind::Fillet { edges: a, body, .. } | FeatureKind::Chamfer { edges: a, body, .. },
-        FeatureKind::Fillet { edges: b, body: was, .. } | FeatureKind::Chamfer { edges: b, body: was, .. },
+        FeatureKind::Fillet { edges: a, body, .. } | FeatureKind::Chamfer { edges: a, body, .. } | FeatureKind::Dogbone { edges: a, body, .. },
+        FeatureKind::Fillet { edges: b, body: was, .. }
+        | FeatureKind::Chamfer { edges: b, body: was, .. }
+        | FeatureKind::Dogbone { edges: b, body: was, .. },
     ) = (&nf.kind, &f.kind)
         && (a != b || body != was || sets_path(set, "edges"))
     {
+        if unbuilt_before {
+            return Err(picks_past_marker(cmd, &f.name, "picked edges"));
+        }
         let before = s.model.state_before(id);
         nf.edge_refs = solidcraft_doc::edge_refs(&before, body, &solidcraft_doc::plain(a));
         nf.edge_names = solidcraft_doc::edge_names_for(&before, body, &solidcraft_doc::plain(a));
@@ -1763,6 +1889,9 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if let (FeatureKind::SheetFlange { edges: a, .. }, FeatureKind::SheetFlange { edges: b, .. }) = (&nf.kind, &f.kind) {
         let points = |e: &[solidcraft_doc::FlangeEdge]| e.iter().map(|x| x.point).collect::<Vec<_>>();
         if points(a) != points(b) || sets_path(set, "edges") {
+            if unbuilt_before {
+                return Err(picks_past_marker(cmd, &f.name, "picked edges"));
+            }
             nf.edge_names = solidcraft_doc::sheet::sheet_edge_names(&s.model.state_before(id), &solidcraft_doc::plain(&points(a)));
         }
     }
@@ -1770,14 +1899,26 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     if let (FeatureKind::Hole { references: a, position, .. }, FeatureKind::Hole { references: b, .. }) = (&nf.kind, &f.kind) {
         let edges = |r: &[solidcraft_doc::HoleReference]| r.iter().map(|x| x.edge.0).collect::<Vec<_>>();
         if edges(a) != edges(b) || sets_path(set, "references") {
-            nf.edge_names = solidcraft_doc::hole_reference::reference_edge_names(&s.model.state_before(id), position.0, &edges(a));
+            if a.is_empty() {
+                nf.edge_names.clear();
+            } else if unbuilt_before {
+                return Err(picks_past_marker(cmd, &f.name, "reference edges"));
+            } else {
+                nf.edge_names = solidcraft_doc::hole_reference::reference_edge_names(&s.model.state_before(id), position.0, &edges(a));
+            }
         }
     }
     // New reference edges for a cylinder (#6380), or reference edges re-sent: likewise.
     if let (FeatureKind::Cylinder { references: a, base, .. }, FeatureKind::Cylinder { references: b, .. }) = (&nf.kind, &f.kind) {
         let edges = |r: &[solidcraft_doc::HoleReference]| r.iter().map(|x| x.edge.0).collect::<Vec<_>>();
         if edges(a) != edges(b) || sets_path(set, "references") {
-            nf.edge_names = solidcraft_doc::hole_reference::cylinder_edge_names(&s.model.state_before(id), base, a);
+            if a.is_empty() {
+                nf.edge_names.clear();
+            } else if unbuilt_before {
+                return Err(picks_past_marker(cmd, &f.name, "reference edges"));
+            } else {
+                nf.edge_names = solidcraft_doc::hole_reference::cylinder_edge_names(&s.model.state_before(id), base, a);
+            }
         }
     }
     // New bend edges for a conversion (or bends re-sent): the names of the body's edges there now.
@@ -1786,10 +1927,27 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     | (FeatureKind::SheetRecognize { bends: a, body, .. }, FeatureKind::SheetRecognize { bends: b, body: was, .. }) = (&nf.kind, &f.kind)
         && (a != b || body != was || sets_path(set, "bends"))
     {
-        nf.edge_names = solidcraft_doc::sheet::bend_edge_names(&s.model.state_before(id), body, &solidcraft_doc::plain(a));
+        if a.is_empty() {
+            nf.edge_names.clear();
+        } else if unbuilt_before {
+            return Err(picks_past_marker(cmd, &f.name, "bend edges"));
+        } else {
+            nf.edge_names = solidcraft_doc::sheet::bend_edge_names(&s.model.state_before(id), body, &solidcraft_doc::plain(a));
+        }
     }
     // Profiles picked by index or point are kept by their curves, as when the feature was made.
-    if nf.kind.clone().profile_sels_mut() != f.kind.clone().profile_sels_mut() {
+    let old_profiles = f.kind.profile_sels();
+    if nf.kind.profile_sels() != old_profiles {
+        let st = s.model.state();
+        let unbuilt_sketch = nf.kind.profile_sels().into_iter().any(|(sketch, sel)| {
+            !matches!(sel, solidcraft_doc::ProfileSel::All)
+                && !old_profiles.iter().any(|(old_sk, old_sel)| *old_sk == sketch && *old_sel == sel)
+                && st.sketch(sketch).is_none()
+                && s.doc.feature_index(sketch).is_some_and(|si| s.doc.marker.is_some_and(|m| si >= m))
+        });
+        if unbuilt_sketch {
+            return Err(picks_past_marker(cmd, &f.name, "picked profiles"));
+        }
         super::features::stable_profiles(s, &mut nf.kind, false)?;
     }
     if nf.kind.constructor_profile_sketch() != f.kind.constructor_profile_sketch() {
@@ -1805,14 +1963,18 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
             nf.pattern_names_in_order = nf.pins_every_body_name();
         } else {
             if f.pins_every_body_name() && !f.pattern_names_in_order {
-                let made: Vec<String> = s
+                let pinned: Vec<String> = s
                     .model
                     .result(id)
                     .filter(|r| r.error.is_none() && !r.skipped)
-                    .map(|r| r.state.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect())
+                    .map(|r| {
+                        let made: Vec<String> = r.state.bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect();
+                        let left_out = r.state.pattern_left_out(id);
+                        f.pattern_pins(&made, left_out).map_or(made, |(names, _)| names)
+                    })
                     .unwrap_or_default();
-                if !made.is_empty() && made.len() != nf.body_names.len() {
-                    nf.body_names = made;
+                if !pinned.is_empty() && pinned.len() != nf.body_names.len() {
+                    nf.body_names = pinned;
                 }
             }
             nf.keep_pattern_names_with_sources(old);
@@ -1823,12 +1985,22 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // the stored name would be kept and fail the same way. An edit that sends no point (a new
     // thickness) leaves the names alone.
     if nf.kind.face_points() != f.kind.face_points() || f.kind.face_point_fields().iter().any(|path| sets_path(set, path)) {
-        nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component)?;
+        if nf.kind.face_points().is_empty() {
+            nf.face_names.clear();
+        } else if unbuilt_before {
+            return Err(picks_past_marker(cmd, &f.name, "picked faces"));
+        } else {
+            nf.face_names = solidcraft_doc::face_point_names(&s.doc, &s.model.state_before(id), &nf.kind, nf.component)?;
+        }
     }
     // A new To or From Object pick measures against the placements shown now (#16732).
     if let (FeatureKind::Extrude { extent: a, .. }, FeatureKind::Extrude { extent: b, .. }) = (&nf.kind, &f.kind)
         && (a.to != b.to || a.from != b.from)
     {
+        let has_object = a.to.is_some() || a.from.is_some() || a.to2.is_some();
+        if has_object && unbuilt_before {
+            return Err(picks_past_marker(cmd, &f.name, "picked faces"));
+        }
         let before = s.model.state_before(id);
         super::component::pin_picked_placements_in(s, &mut nf.kind, nf.component, &before);
     }
@@ -1838,33 +2010,122 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // A one-sided extrude made symmetric remembers the way it went, so what was picked on its
     // start cap is still found on the cap facing the same way.
     solidcraft_doc::keep_one_sided_direction(&s.model, &f, &mut nf);
-    let copy_sources = match &nf.kind {
-        FeatureKind::Pattern { bodies, components, occurrences, .. } if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() => {
+    keep_object_refs(&f, &mut nf, [sets_path(set, "extent.to_ref"), sets_path(set, "extent.from_ref")]);
+    let copy_sources_of = |kind: &FeatureKind| match kind {
+        FeatureKind::Pattern { bodies, components, occurrences, join, .. }
+            if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() && (!*join || bodies.len() == 1) =>
+        {
             Some(solidcraft_doc::plain(bodies))
         }
+        FeatureKind::Mirror { bodies, combine: false, .. } if !bodies.is_empty() => Some(solidcraft_doc::plain(bodies)),
         FeatureKind::Move { bodies, copy: true, .. } if !bodies.is_empty() => Some(solidcraft_doc::plain(bodies)),
         _ => None,
     };
-    let sources_changed = match (&f.kind, &nf.kind) {
-        (FeatureKind::Pattern { bodies: old, .. }, FeatureKind::Pattern { bodies: new, .. })
-        | (FeatureKind::Move { bodies: old, .. }, FeatureKind::Move { bodies: new, .. }) => old != new,
-        _ => false,
-    };
-    let existing_copies: std::collections::HashSet<String> = if copy_sources.is_some() && !sources_changed {
-        s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect()
+    let copy_sources = copy_sources_of(&nf.kind);
+    let previous_copy_sources: std::collections::HashMap<String, String> = if copy_sources.is_some() {
+        copy_sources_of(&f.kind)
+            .and_then(|old_sources| super::features::copy_pairs_for(s, id, &old_sources))
+            .map(|pairs| pairs.into_iter().collect())
+            .unwrap_or_default()
     } else {
-        std::collections::HashSet::new()
+        std::collections::HashMap::new()
     };
+    let mut capture_removed_joints = std::collections::BTreeSet::new();
+    let mut capture_edited = false;
+    if let (FeatureKind::CapturePosition { joints: old_joints, .. }, FeatureKind::CapturePosition { moves, joints }) = (&f.kind, &nf.kind) {
+        capture_edited = true;
+        if moves.len() > solidcraft_doc::MAX_PLACEMENTS {
+            return Err(bad(cmd, format!("too many moves (at most {})", solidcraft_doc::MAX_PLACEMENTS)));
+        }
+        if joints.len() > 10_000 {
+            return Err(bad(cmd, "too many joints (at most 10000)"));
+        }
+        let (vals, _) = s.doc.param_values();
+        for m in moves {
+            if !s.doc.occurrences.iter().any(|o| o.id == m.occurrence) {
+                return Err(bad(cmd, format!("no occurrence `{}`", m.occurrence)));
+            }
+            if let Some(path) = &m.path {
+                if path.len() > solidcraft_doc::MAX_PLACEMENT_DEPTH + 1 || path.last() != Some(&m.occurrence) {
+                    return Err(bad(cmd, "invalid occurrence path"));
+                }
+                s.occurrence_placement(path).map_err(|e| bad(cmd, e.to_string()))?;
+            }
+            if let Some(rot) = &m.rotation
+                && (!solidcraft_doc::is_placement(rot) || rot[3][..3].iter().any(|v| v.abs() >= 1e-9))
+            {
+                return Err(bad(cmd, "invalid rotation matrix"));
+            }
+            if let Some(axis) = m.rotate_axis
+                && axis.iter().any(|v| !v.is_finite())
+            {
+                return Err(bad(cmd, "invalid rotation axis"));
+            }
+            m.eval_delta(&vals).map_err(|e| bad(cmd, e.to_string()))?;
+        }
+        for cj in joints {
+            let Some(dj) = s.doc.assembly.joints.iter().find(|dj| dj.id == cj.joint) else {
+                return Err(bad(cmd, format!("no joint `{}`", cj.joint)));
+            };
+            if dj.kind == solidcraft_doc::joints::JointKind::Rigid {
+                return Err(bad(cmd, format!("joint `{}` is rigid", dj.name)));
+            }
+            if cj.values.len() > 64 || cj.exprs.len() > 64 {
+                return Err(bad(cmd, "joint values exceed supported DOF count"));
+            }
+            if cj.values.iter().any(|v| !v.is_finite() || v.abs() >= 1e9) {
+                return Err(bad(cmd, "joint values must be finite and within range"));
+            }
+            if cj.exprs.iter().flatten().any(|e| e.trim().is_empty() || e.len() > 4096) {
+                return Err(bad(cmd, "joint expressions must be non-empty and at most 4096 characters"));
+            }
+            solidcraft_doc::eval_captured_joint(&s.doc, &vals, cj).map_err(|e| bad(cmd, e.to_string()))?;
+        }
+        let new_joints: std::collections::BTreeSet<u64> = joints.iter().map(|cj| cj.joint).collect();
+        for cj in old_joints {
+            if !new_joints.contains(&cj.joint) {
+                capture_removed_joints.insert(cj.joint);
+            }
+        }
+        let active = !nf.suppressed && s.doc.feature_index(id).is_some_and(|idx| s.doc.marker.is_none_or(|m| idx < m));
+        let occ_ids: std::collections::BTreeSet<u64> = moves.iter().map(|m| m.occurrence).collect();
+        let mut pending_bases = std::mem::take(&mut s.pending_joint_bases);
+        let doc = s.doc_mut();
+        for o in &mut doc.occurrences {
+            if occ_ids.contains(&o.id) {
+                o.base_transform.get_or_insert(o.transform);
+            }
+        }
+        for cj in joints {
+            if let Some(j) = doc.assembly.joints.iter_mut().find(|j| j.id == cj.joint) {
+                let dofs = j.kind.dofs().len();
+                if j.base_values.is_none() {
+                    let (base_vals, base_exprs) = if active { pending_bases.remove(&j.id) } else { pending_bases.get(&j.id).cloned() }
+                        .unwrap_or_else(|| (j.values.clone(), crate::normalize_joint_exprs(&j.exprs.values, dofs)));
+                    j.base_values = Some(base_vals);
+                    j.base_exprs = base_exprs;
+                } else if active {
+                    pending_bases.remove(&j.id);
+                }
+            }
+        }
+        s.pending_joint_bases = pending_bases;
+    }
     if let Some(slot) = s.doc_mut().feature_mut(id) {
         *slot = nf;
+    }
+    if capture_edited {
+        for jid in cleanup_capture_position_bases(s.doc_mut(), &capture_removed_joints) {
+            s.pending_joint_bases.remove(&jid);
+        }
+        s.doc_mut().name_feature_inputs(id);
     }
     s.refresh();
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }
     if let Some(sources) = copy_sources {
-        let preserve = (!sources_changed).then_some(&existing_copies);
-        let _ = super::features::copy_keeps_appearance_for(s, id, &sources, preserve, cmd);
+        let _ = super::features::copy_keeps_appearance_for(s, id, &sources, Some(&previous_copy_sources), cmd);
     }
     reply(cmd, TimelineEditResult { feature: id, recomputed: s.model.last_recomputed, restored: s.model.last_restored, param_warnings: Vec::new() })
 }
@@ -2322,15 +2583,175 @@ fn select_clear(s: &mut Session, _p: &Value) -> Result<Value> {
     reply("select.clear", SelectClearResult { selected: 0, param_warnings: Vec::new() })
 }
 
-/// Features that worked in `before` and fail in `after`: (name, error).
-fn newly_broken(before: &solidcraft_doc::Model, after: &solidcraft_doc::Model) -> Vec<(String, String)> {
+/// `select.boundary`: the edges round a set of faces, or a body's free edges, from the body's
+/// exact topology (#18098). See [`crate::schema::select::BoundaryParams`].
+fn select_boundary(s: &mut Session, p: &Value) -> Result<Value> {
+    use solidcore_record::brep::Loop;
+    use std::collections::BTreeSet;
+    const CMD: &str = "select.boundary";
+    let request: crate::schema::select::BoundaryParams = serde_json::from_value(p.clone()).map_err(|e| bad(CMD, e.to_string()))?;
+    // The body and its face set (None: every face of the body).
+    let (name, faces): (String, Option<BTreeSet<usize>>) = match (request.body, request.faces) {
+        (Some(body), faces) => (body, faces.map(|f| f.into_iter().collect())),
+        (None, Some(_)) => return Err(bad(CMD, "give body with faces")),
+        (None, None) => {
+            let picked: Vec<(&String, usize)> = s
+                .selection
+                .iter()
+                .filter_map(|x| match x {
+                    Sel::Face { body, index, .. } => Some((body, *index)),
+                    _ => None,
+                })
+                .collect();
+            match picked.first() {
+                Some((body, _)) if picked.iter().any(|(b, _)| b != body) => return Err(bad(CMD, "select faces of one body")),
+                Some((body, _)) => ((*body).clone(), Some(picked.iter().map(|(_, f)| *f).collect())),
+                None => {
+                    let body = s
+                        .selection
+                        .iter()
+                        .rev()
+                        .find_map(|x| match x {
+                            Sel::Body { name } => Some(name.clone()),
+                            _ => None,
+                        })
+                        .ok_or_else(|| bad(CMD, "select faces or a body, or give body"))?;
+                    (body, None)
+                }
+            }
+        }
+    };
+    let state = s.world_state()?;
+    let body = state.body(&name).ok_or_else(|| bad(CMD, format!("no body `{name}`")))?;
+    let record = body.body.record();
+    if record.faces.is_empty() {
+        return Err(bad(CMD, format!("`{name}` is a mesh body: it has no edge topology")));
+    }
+    let face_set = faces.is_some();
+    let set: BTreeSet<usize> = match faces {
+        Some(f) if f.is_empty() => return Err(bad(CMD, "faces is empty")),
+        Some(f) => match f.iter().find(|i| **i >= record.faces.len()) {
+            Some(i) => return Err(bad(CMD, format!("no face {i} of `{name}`"))),
+            None => f,
+        },
+        None => (0..record.faces.len()).collect(),
+    };
+    // Every use of an edge in the set's loops: (face, loop, place in the loop). One use is the
+    // boundary; two are an edge between two faces of the set, or a seam of one face.
+    let mut uses: BTreeMap<usize, Vec<(usize, usize, usize)>> = BTreeMap::new();
+    for f in &set {
+        for (l, lp) in record.faces.get(*f).map(|face| face.loops.as_slice()).unwrap_or_default().iter().enumerate() {
+            if let Loop::Edges { edges } = lp {
+                for (i, u) in edges.iter().enumerate() {
+                    uses.entry(u.edge as usize).or_default().push((*f, l, i));
+                }
+            }
+        }
+    }
+    let loops = boundary_walks(record, &uses);
+    if loops.is_empty() {
+        return Err(bad(CMD, if face_set { format!("the faces of `{name}` have no boundary") } else { format!("`{name}` has no free edges") }));
+    }
+    // A face's first loop is its outer loop (SMLib's form, which every B-rep body is imported
+    // into); a walk made only of inner loops' edges goes round a hole or an island of the set.
+    let is_hole = |walk: &Vec<usize>| walk.iter().all(|e| uses.get(e).and_then(|u| u.first()).is_some_and(|(_, l, _)| *l > 0));
+    let keep_holes = !face_set || request.holes.unwrap_or(false);
+    let (kept, left): (Vec<Vec<usize>>, Vec<Vec<usize>>) = loops.into_iter().partition(|walk| keep_holes || !is_hole(walk));
+    if kept.is_empty() {
+        return Err(bad(CMD, format!("the faces of `{name}` are bounded by holes only: give holes: true")));
+    }
+    let edges: Vec<usize> = kept.iter().flatten().copied().collect();
+    let add = request.add.unwrap_or(false);
+    // An edge already selected stays as it was picked (its pick point is part of the selection).
+    let new: Vec<Value> = edges
+        .iter()
+        .filter(|e| !add || !s.selection.iter().any(|x| matches!(x, Sel::Edge { body, index, .. } if *body == name && index == *e)))
+        .map(|e| json!({"type": "edge", "body": name, "index": e}))
+        .collect();
+    drop(state);
+    let selected = if new.is_empty() {
+        s.selection.len()
+    } else {
+        let set = select_set(s, &json!({"items": new, "add": add}))?;
+        set.get("selected").and_then(Value::as_u64).unwrap_or_default() as usize
+    };
+    let result =
+        crate::schema::select::BoundaryResult { selected, body: name, edges, loops: kept.len(), holes_left: left.len(), param_warnings: Vec::new() };
+    reply(CMD, result)
+}
+
+/// The closed walks round the boundary of a face set: each boundary edge (one use in the set) is
+/// followed by the next use round its face's loop; where that edge is inside the set, the walk
+/// crosses to the edge's other use and goes on round that face's loop. So two loops that only
+/// meet at a vertex are two walks. `uses` holds every use of an edge in the set's loops.
+fn boundary_walks(record: &solidcore_record::brep::Brep, uses: &BTreeMap<usize, Vec<(usize, usize, usize)>>) -> Vec<Vec<usize>> {
+    use solidcore_record::brep::Loop;
+    let loop_of = |f: usize, l: usize| match record.faces.get(f).and_then(|face| face.loops.get(l)) {
+        Some(Loop::Edges { edges }) => edges.as_slice(),
+        _ => &[],
+    };
+    let edge_at = |(f, l, i): (usize, usize, usize)| loop_of(f, l).get(i).map(|u| u.edge as usize);
+    let next = |(f, l, i): (usize, usize, usize)| (f, l, (i + 1) % loop_of(f, l).len().max(1));
+    // Every step moves to another use, so a walk takes at most this many.
+    let limit = uses.values().map(Vec::len).sum::<usize>() + 1;
+    let mut seen: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+    let mut walks = Vec::new();
+    for (start, first) in uses.iter().filter_map(|(e, u)| match u.as_slice() {
+        [one] => Some((*e, *one)),
+        _ => None,
+    }) {
+        if seen.contains(&start) {
+            continue;
+        }
+        let mut walk = Vec::new();
+        let mut at = first;
+        for _ in 0..limit {
+            let Some(edge) = edge_at(at) else { break };
+            if !seen.insert(edge) {
+                break;
+            }
+            walk.push(edge);
+            // The use after this one, crossing inner edges to the face on their other side.
+            let mut n = next(at);
+            for _ in 0..limit {
+                match edge_at(n).and_then(|e| uses.get(&e)).map(Vec::as_slice) {
+                    Some([a, b]) => n = next(if *a == n { *b } else { *a }),
+                    _ => break,
+                }
+            }
+            // An edge used by three or more faces of the set ends the walk.
+            if edge_at(n).and_then(|e| uses.get(&e)).map(Vec::len) != Some(1) {
+                break;
+            }
+            at = n;
+        }
+        walks.push(walk);
+    }
+    walks
+}
+
+/// Features that worked in `before` and fail in `after`: (name, error). When `include_left_out`
+/// is true, body patterns that newly leave out a source body they copied before are reported too
+/// (so a timeline reorder cannot silently drop pattern copies with a warning and zero errors).
+fn newly_broken(before: &solidcraft_doc::Model, after: &solidcraft_doc::Model, include_left_out: bool) -> Vec<(String, String)> {
     after
         .results
         .iter()
         .filter_map(|r| {
-            let e = r.error.clone()?;
-            let was_ok = before.result(r.id).is_some_and(|b| b.error.is_none() && !b.skipped);
-            was_ok.then(|| (r.name.clone(), e))
+            let prev = before.result(r.id).filter(|b| b.error.is_none() && !b.skipped)?;
+            if let Some(e) = r.error.clone() {
+                return Some((r.name.clone(), e));
+            }
+            if !include_left_out || r.skipped {
+                return None;
+            }
+            let prev_left = prev.state.pattern_left_out(r.id);
+            let after_left = r.state.pattern_left_out(r.id);
+            if after_left.iter().any(|s| !prev_left.contains(s)) {
+                let reason = r.warning.clone().unwrap_or_else(|| "a patterned body could not be copied".into());
+                return Some((r.name.clone(), reason));
+            }
+            None
         })
         .collect()
 }
@@ -2347,8 +2768,18 @@ pub(super) fn newly_broken_in_history(
     after_doc: &solidcraft_doc::Document,
     after: &solidcraft_doc::Model,
 ) -> Vec<(String, String)> {
+    newly_broken_in_history_with_left_out(before_doc, before, after_doc, after, false)
+}
+
+fn newly_broken_in_history_with_left_out(
+    before_doc: &solidcraft_doc::Document,
+    before: &solidcraft_doc::Model,
+    after_doc: &solidcraft_doc::Document,
+    after: &solidcraft_doc::Model,
+    include_left_out: bool,
+) -> Vec<(String, String)> {
     if (before_doc.marker.is_none() && after_doc.marker.is_none()) || only_constraints_changed(before_doc, before, after_doc, after) {
-        return newly_broken(before, after);
+        return newly_broken(before, after, include_left_out);
     }
     let whole = |doc: &solidcraft_doc::Document, model: &solidcraft_doc::Model| {
         let mut doc = doc.clone();
@@ -2364,10 +2795,10 @@ pub(super) fn newly_broken_in_history(
     // history before it needn't be built again (#9917: each build ran every boolean after the
     // marker, half a minute on a large design).
     let after = whole(after_doc, after);
-    if after.results.iter().all(|r| r.error.is_none()) {
+    if after.results.iter().all(|r| r.error.is_none() && (!include_left_out || r.state.pattern_left_out(r.id).is_empty())) {
         return Vec::new();
     }
-    newly_broken(&whole(before_doc, before), &after)
+    newly_broken(&whole(before_doc, before), &after, include_left_out)
 }
 
 /// Whether `after_doc` differs from `before_doc` only in sketch constraints and dimensions (and
@@ -2429,16 +2860,19 @@ pub(super) fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
         let note = Some(format!("nothing moved: {why}"));
         return reply(cmd, TimelineReordered { feature: id, position: to, from, moved: false, note, broken: None, param_warnings: Vec::new() });
     }
+    // Pin evaluated body names (including disambiguated suffixes) before reordering so moving a
+    // later same-named component or import earlier does not renumber existing bodies.
+    s.pin_timeline_body_names();
     let mut next = (*s.doc).clone();
     let f = next.features.remove(from);
     let name = f.name.clone();
     next.features.insert(to, f);
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
-    // Everything that evaluated before must still evaluate.
+    // Everything in the history that evaluated before must still evaluate.
     let mut after = s.model.clone();
     after.evaluate(&next);
-    let broken = newly_broken(&s.model, &after);
+    let broken = newly_broken_in_history_with_left_out(&s.doc, &s.model, &next, &after, true);
     // `allow_errors`: made anyway, with what it broke said (#5962).
     let allow = allow_errors(p, cmd)?;
     if !broken.is_empty() && !allow {
@@ -2536,11 +2970,8 @@ fn reorder_many(s: &mut Session, p: &Value) -> Result<Value> {
     let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
     let active = active_param(p, cmd)?;
     let allow = allow_errors(p, cmd)?;
-    let (mut next, ordered, broken, checked) = reorder_features(s, (*s.doc).clone(), &ids, slot, allow, cmd)?;
-    let marker = next.marker;
-    place_marker(s, &mut next, &ordered, active, cmd)?;
-    // The checked results stand only when placing the marker left the design as they were made for.
-    let checked = checked.filter(|_| next.marker == marker);
+    s.pin_timeline_body_names();
+    let (next, ordered, broken, checked) = reorder_features(s, (*s.doc).clone(), &ids, slot, active, allow, cmd)?;
     if next != *s.doc {
         if let Some(model) = checked {
             s.model = model;
@@ -2552,12 +2983,13 @@ fn reorder_many(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// The reordered design, the moved features in order, and the model the move was checked on
-/// (none when the order didn't change), for the caller to keep (#6186).
+/// (none when neither the order nor the history marker changed), for the caller to keep (#6186).
 fn reorder_features(
     s: &Session,
     mut next: solidcraft_doc::Document,
     ids: &[u64],
     slot: usize,
+    active: Option<bool>,
     allow_errors: bool,
     cmd: &str,
 ) -> Result<(solidcraft_doc::Document, Vec<u64>, Vec<(String, String)>, Option<solidcraft_doc::Model>)> {
@@ -2585,14 +3017,16 @@ fn reorder_features(
     next.features.splice(insert_at..insert_at, moving);
     sort_group_features(&mut next);
     require_contiguous_groups(&next, cmd)?;
-    if unchanged {
+    let marker = next.marker;
+    place_marker(s, &mut next, &ordered, active, cmd)?;
+    if unchanged && next.marker == marker {
         return Ok((next, ordered, Vec::new(), None));
     }
     // From the session's own results: the features before the first one moved are kept, not
     // evaluated again from an empty model (#6186).
     let mut after = s.model.clone();
     after.evaluate(&next);
-    let broken = newly_broken(&s.model, &after);
+    let broken = if unchanged { Vec::new() } else { newly_broken_in_history_with_left_out(&s.doc, &s.model, &next, &after, true) };
     if !broken.is_empty() && !allow_errors {
         let list: Vec<String> = broken.iter().map(|(name, error)| format!("{name} ({error})")).collect();
         return Err(bad(cmd, format!("moving the selected features there breaks {}", list.join("; "))));
@@ -2727,7 +3161,36 @@ fn input_keys(kind: &FeatureKind, edge_names: &[String]) -> Vec<(String, solidcr
             }
         }
     }
+    if let FeatureKind::CapturePosition { moves, .. } = kind {
+        let mut occ_counts: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
+        let mut pos = 0;
+        for m in moves {
+            let count = occ_counts.entry(m.occurrence).or_insert(0);
+            let n = 3 + usize::from(m.angle.is_some());
+            for (key, _) in keys.iter_mut().skip(pos).take(n) {
+                *key = format!("capture_position.occ{}.{count}.{key}", m.occurrence);
+            }
+            *count += 1;
+            pos += n;
+        }
+    }
     keys
+}
+
+/// An extrude's To and From references (#8527) through an edit. The Extrude dialog reopens a
+/// reference as the point stored with it and sends that point back unchanged: the same point
+/// keeps the reference, so the extrude still follows it. Another point replaces it. An edit that
+/// gives a reference itself, or clears it, says what it is: `given` holds that for To and From.
+fn keep_object_refs(old: &Feature, new: &mut Feature, given: [bool; 2]) {
+    let (FeatureKind::Extrude { extent: a, .. }, FeatureKind::Extrude { extent: b, .. }) = (&old.kind, &mut new.kind) else { return };
+    let same =
+        |x: Option<solidcraft_doc::FacePick>, y: Option<solidcraft_doc::FacePick>| matches!((x, y), (Some(x), Some(y)) if x.0.dist(y.0) < 1e-6);
+    if !given[0] {
+        b.to_ref = if same(a.to, b.to) { a.to_ref.clone() } else { None };
+    }
+    if !given[1] {
+        b.from_ref = if same(a.from, b.from) { a.from_ref.clone() } else { None };
+    }
 }
 
 /// An old design's From Object keeps starting at the face's level (`from_level`) through an edit
@@ -2808,7 +3271,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let constructor = super::features::COMMANDS
         .iter()
         .chain(super::features_more::COMMANDS)
+        .chain(super::dogbone::COMMANDS)
         .chain(super::cell_grid::COMMANDS)
+        .chain(super::shaft_spline::COMMANDS)
         .chain(super::construct::COMMANDS)
         .chain(super::surface::COMMANDS)
         .chain(super::surface_boundary::COMMANDS)
@@ -2818,6 +3283,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
             "sheet.flange"
                 | "sheet.hem"
                 | "sheet.perforate"
+                | "sheet.hardware"
                 | "sheet.fold"
                 | "sheet.path_flange"
                 | "sheet.tab"
@@ -2826,6 +3292,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "sheet.refold"
                 | "sheet.convert"
                 | "sheet.recognize"
+                | "sheet.corner_join"
                 | "plastic.boss"
                 | "plastic.lip"
                 | "plastic.snap_fit"
@@ -2835,7 +3302,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 | "frame.gusset"
                 | "frame.member"
                 | "frame.trim"
+                | "frame.cope"
                 | "frame.plate"
+                | "component.capture_position"
         );
     if !constructor {
         return Err(bad(cmd, format!("`{cid}` does not make a feature")));
@@ -2854,11 +3323,22 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         };
         parameters.entry("convention").or_insert_with(|| json!(convention));
     }
-    if let FeatureKind::Revolve { convention, .. } = &old.kind
+    // The Surface Extrude window has no start offset to show or send, so an edit that names
+    // none keeps the stored one instead of moving the walls back to the sketch plane. An edit
+    // that names one still replaces it.
+    if let FeatureKind::SurfaceExtrude { extent, .. } = &old.kind
+        && cid == "surface.extrude"
+        && let Some(start) = &extent.start_offset
+        && let Some(parameters) = params.as_object_mut()
+    {
+        parameters.entry("start_offset").or_insert_with(|| json!(start));
+    }
+    if let FeatureKind::Revolve { convention, join_profile_arcs, .. } = &old.kind
         && cid == "solid.revolve"
         && let Some(parameters) = params.as_object_mut()
     {
         parameters.entry("convention").or_insert_with(|| json!(convention));
+        parameters.entry("join_profile_arcs").or_insert_with(|| json!(join_profile_arcs));
     }
     if let FeatureKind::SurfaceRevolve { faced, stays_surface, .. } = &old.kind
         && cid == "surface.revolve"
@@ -2902,6 +3382,13 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         && parameters.get("designation").is_none_or(|d| d.is_null() || d.as_str().is_some_and(|d| d.trim().is_empty()))
     {
         parameters.entry("old_auto_size").or_insert_with(|| json!(true));
+    }
+    // Press-in hardware's hole is redefined by the command that made it: the Hole command would
+    // drop the hardware it names and leave a plain hole of its size (#17752).
+    if let FeatureKind::Hole { hardware: Some(h), .. } = &old.kind
+        && cid == "solid.hole"
+    {
+        return Err(bad(cmd, format!("this hole is the mounting hole of an {} {}: redefine it with `sheet.hardware`", h.thread, h.kind.label())));
     }
     // A hole saved before a sketch on a derived plane started its holes at that plane keeps
     // starting at the surface when it is edited (#11538).
@@ -2989,6 +3476,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     {
         parameters.entry("participants").or_insert_with(|| json!(old.participants));
     }
+    let flange_corners = if matches!(old.kind, FeatureKind::SheetFlange { .. }) && cid == "sheet.flange" {
+        let corners = super::sheet::flange_corners(s, &params, cmd)?;
+        if let Some(parameters) = params.as_object_mut() {
+            parameters.remove("corners");
+        }
+        Some(corners)
+    } else {
+        None
+    };
     // Run the constructor on a scratch session: failed edits must not disturb sketch mode,
     // selections, component authoring state or the original feature's definition.
     let mut trial = s.scratch();
@@ -3038,7 +3534,17 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         let _world = (spec.id == "construct.plane.offset").then(crate::frames::world_geometry);
         spec.run_nested_continuing(&mut trial, &params)
     }?;
-    let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
+    let made = r.get("feature").and_then(Value::as_u64).ok_or_else(|| match r.get("occurrences") {
+        // A pattern of picked placements adds them again once and keeps no feature (#22942).
+        Some(_) => bad(
+            cmd,
+            format!(
+                "a pattern of picked placements adds new placements once and is not kept in the timeline, so `{}` can't be changed into one: make it as a new pattern instead",
+                old.name
+            ),
+        ),
+        None => bad(cmd, format!("`{cid}` did not make a feature")),
+    })?;
     let mut new = trial.doc.feature(made).cloned().ok_or_else(|| bad(cmd, format!("`{cid}` did not make a feature")))?;
     if let FeatureKind::Pattern { components, occurrences, .. } = &old.kind
         && !occurrences.is_empty()
@@ -3055,6 +3561,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     if let (FeatureKind::Hole { points: Some(before), .. }, FeatureKind::Hole { points: Some(after), .. }) = (&old.kind, &mut new.kind) {
         after.legacy_face_roles = before.legacy_face_roles && before.sketch == after.sketch && before.ids == after.ids;
+    }
+    if matches!(new.kind, FeatureKind::CapturePosition { .. }) {
+        trial.last_capture_state = trial.doc.replay_occurrence_transforms().ok();
     }
     if let (FeatureKind::Emboss { face: Some(before), .. }, FeatureKind::Emboss { face: Some(after), .. }) = (&old.kind, &mut new.kind)
         && before.body == after.body
@@ -3097,6 +3606,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     keep_from_level_on_the_same_face(s, &old, &mut new);
     solidcraft_doc::keep_one_sided_direction(&s.model, &old, &mut new);
+    let given = match &new.kind {
+        FeatureKind::Extrude { extent, .. } => [extent.to_ref.is_some(), extent.from_ref.is_some()],
+        _ => [false; 2],
+    };
+    keep_object_refs(&old, &mut new, given);
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
     let boundary = |k: &FeatureKind| matches!(k, FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. });
@@ -3108,6 +3622,21 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // and once swapped in it would be built on itself (#3567).
     if new.kind.names_feature(old.id, &old.name) {
         return Err(bad(cmd, format!("{} can't be built on itself: pick another plane or face", old.name)));
+    }
+    if let (FeatureKind::SheetFlange { corners, .. }, Some(mut saved)) = (&mut new.kind, flange_corners) {
+        if s.doc.units.trim() != "mm" {
+            for corner in &mut saved {
+                if corner.kind == solidcraft_doc::CornerJoinKind::PartialOverlap
+                    && let Some(overlap) = &mut corner.overlap
+                {
+                    *overlap = s.doc.with_design_unit(overlap, solidcraft_doc::expr::Kind::Length).into();
+                }
+                if let Some(gap) = &mut corner.gap {
+                    *gap = s.doc.with_design_unit(gap, solidcraft_doc::expr::Kind::Length).into();
+                }
+            }
+        }
+        *corners = saved;
     }
     // Optional inputs can move other inputs' positions (e.g. Distance 2 goes before Taper).
     // Keep each existing model parameter attached to its semantic input, rather than its
@@ -3196,7 +3725,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         // An edge's own angle or height whose key missed is on an edge the old feature did not
         // have: it keeps the constructor's name, and a deleted edge's name never lands on it
         // (#5927, #5928).
-        if edge_of_key(key).is_some() {
+        if edge_of_key(key).is_some() || key.starts_with("capture_position.") {
             continue;
         }
         if key.starts_with("frame.member.rotation.") && !flat_rotation {
@@ -3210,6 +3739,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
                 && segment_span(old_key).is_none()
                 && edge_of_key(old_key).is_none()
                 && (flat_rotation || !old_key.starts_with("frame.member.rotation."))
+                && !old_key.starts_with("capture_position.")
         }) {
             param_names[i] = old_inputs.remove(k).3.clone();
         }
@@ -3274,6 +3804,15 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
             slot.participants = new.participants;
         }
     }
+    if let (FeatureKind::CapturePosition { joints: old_joints, .. }, Some(FeatureKind::CapturePosition { joints: new_joints, .. })) =
+        (&old.kind, trial.doc.feature(id).map(|f| &f.kind))
+    {
+        let keep: std::collections::BTreeSet<u64> = new_joints.iter().map(|cj| cj.joint).collect();
+        let removed_joints: std::collections::BTreeSet<u64> = old_joints.iter().map(|cj| cj.joint).filter(|j| !keep.contains(j)).collect();
+        for jid in cleanup_capture_position_bases(trial.doc_mut(), &removed_joints) {
+            trial.pending_joint_bases.remove(&jid);
+        }
+    }
     // New optional inputs need model parameter names, while existing dimensions keep theirs.
     trial.doc_mut().name_feature_inputs(id);
     trial.refresh();
@@ -3319,6 +3858,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     s.pending_moves = trial.pending_moves;
+    s.pending_move_records = trial.pending_move_records;
+    s.pending_joint_bases = trial.pending_joint_bases;
+    s.last_capture_state = trial.last_capture_state;
     s.doc = trial.doc;
     s.model.keep(Some(shared));
     s.refresh();

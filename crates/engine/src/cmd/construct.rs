@@ -55,12 +55,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&AXIS_THROUGH_CYLINDER_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("face: ref (a cylinder, cone or torus face, or a circular edge); name?"),
-    CommandSpec::new("construct.axis.normal_to_face", "Axis Perpendicular To Face", crate::checked!("construct.axis.normal_to_face", axis_normal)).begins_edit()
+    CommandSpec::new("construct.axis.normal_to_face", "Axis Perpendicular To Face or Plane", crate::checked!("construct.axis.normal_to_face", axis_normal)).begins_edit()
         .at("SOLID", "CONSTRUCT")
         .icon("axis_normal_to_face")
         .contract(&AXIS_NORMAL_TO_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("face: ref; point: ref (the axis goes through it, square to the face); name?"),
+        .params("face: ref (a face, or a construction or origin plane, #23006); point: ref (the axis goes through it, square to the face or plane); name?"),
     CommandSpec::new("construct.axis.two_planes", "Axis Through Two Planes", crate::checked!("construct.axis.two_planes", axis_planes)).begins_edit()
         .at("SOLID", "CONSTRUCT")
         .icon("axis_two_planes")
@@ -150,7 +150,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane_tangent")
         .contract(&PLANE_TANGENT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("face: ref (cylinder, cone, sphere or torus); at?: [x,y,z] where it touches (default: the face pick); reference?: plane or planar face ref (the plane touches where the face turns towards it: parallel to it, on the side of `at`); angle?: expr (with reference, default 0 deg: turned that far about the face's axis; not on a sphere); name?"),
+        .params("face: ref (any face: a cylinder, cone, sphere or torus, or another curved face such as a loft's, a sweep's or a patch's); at?: [x,y,z] where it touches (the point of the face nearest it; default: the face pick); reference?: plane or planar face ref (on a cylinder, cone, sphere or torus only: the plane touches where the face turns towards it: parallel to it, on the side of `at`); angle?: expr (with reference, default 0 deg: turned that far about the face's axis; not on a sphere); name?"),
     CommandSpec::new("construct.plane.along_path", "Plane Along Path", crate::checked!("construct.plane.along_path", plane_along)).begins_edit()
         .at("SOLID", "CONSTRUCT")
         .icon("plane_along_path")
@@ -184,7 +184,9 @@ pub(crate) fn is_model_axis(v: &Value) -> bool {
 
 /// An axis on an edge or round face of the model (`{edge: [x,y,z]}` or `{face: [x,y,z]}`, the
 /// point on it), with the line it gives now (`solidcraft_doc::construct::model_axis`); `None`
-/// for any other form of `axis`.
+/// for any other form of `axis`. The pick is named in the world, where the axis is found now and
+/// on each evaluation: on a moved component, another edge can pass through the picked point
+/// before the move (#20492).
 pub(super) fn model_axis_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<(GeoRef, Vec3, Vec3)>> {
     let Some(v) = v.filter(|v| is_model_axis(v)) else { return Ok(None) };
     let state = s.world_state()?;
@@ -195,7 +197,7 @@ pub(super) fn model_axis_param(s: &Session, v: Option<&Value>, cmd: &str) -> Res
         let line = solidcraft_doc::construct::coil_model_axis(&state, &g);
         (placed_edge_of_pick(s, &state, g), line)
     } else {
-        let g = geo(s, Some(v), cmd, "axis")?;
+        let g = geo_in(s, Some(v), cmd, "axis", &state)?;
         let line = solidcraft_doc::construct::model_axis_in(Some(&s.doc), &state, &g, 0);
         (g, line)
     };

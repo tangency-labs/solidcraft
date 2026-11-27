@@ -73,7 +73,13 @@ pub(super) fn workers() -> usize {
 }
 
 pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
-    let _span = solidcraft_profile::span("import", "step.body");
+    // On a worker thread: the span says which item of the file it reads (#22473); a part read
+    // before is placed again, and the import's own span names the file's feature.
+    let span = solidcraft_profile::span("import", "step.body");
+    let _span = match &job.source {
+        Source::Item { item, .. } => span.arg("item", format_args!("#{item}")),
+        Source::Oriented(_) => span,
+    };
     let (part, read) = match &job.source {
         Source::Oriented(part) => (part.clone(), None),
         Source::Item { item, units } => {
@@ -96,11 +102,23 @@ pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
         false => (body, 0),
         true if job.placement == IDENTITY => {
             let body = body.keeping_plans();
-            let missing = solidcraft_profile::scope("import", "step.mesh_check", || body.unmeshed_display_faces());
+            let span = solidcraft_profile::span("import", "step.mesh_check");
+            let _span = match &job.source {
+                Source::Item { item, .. } => span.arg("item", format_args!("#{item}")),
+                Source::Oriented(_) => span,
+            };
+            let missing = body.unmeshed_display_faces();
+            drop(_span);
             (body, missing)
         }
         true => {
-            let missing = solidcraft_profile::scope("import", "step.mesh_check", || part.body.unmeshed_faces());
+            let span = solidcraft_profile::span("import", "step.mesh_check");
+            let _span = match &job.source {
+                Source::Item { item, .. } => span.arg("item", format_args!("#{item}")),
+                Source::Oriented(_) => span,
+            };
+            let missing = part.body.unmeshed_faces();
+            drop(_span);
             (body, missing)
         }
     };
@@ -157,10 +175,10 @@ pub(super) fn placed(body: &Body, m: &M4) -> crate::Result<Body> {
 /// and brought back as a body: the part SMLib made of the file. A solid the reader or SMLib
 /// refuses fails with the reason ([`surface_part`] then imports what it can of it).
 pub(super) fn smlib_part(ex: &Exchange, item: u64, units: Units) -> std::result::Result<(Part, Vec<Note>), Failure> {
-    let solid = solidcraft_profile::scope("import", "step.read_solid", || {
-        solidcore_step::topology::read_solid_with(ex, item, units, &solidcraft_smlib::pcurves::SmlibImportTrims)
-    })
-    .map_err(|msg| Failure { read: true, msg })?;
+    let _span = solidcraft_profile::span("import", "step.read_solid").arg("item", format_args!("#{item}"));
+    let solid = solidcore_step::topology::read_solid_with(ex, item, units, &solidcraft_smlib::pcurves::SmlibImportTrims)
+        .map_err(|msg| Failure { read: true, msg })?;
+    drop(_span);
     let part = solid_part(&solid)?;
     Ok((part, solid.notes.into_iter().map(Note::Repaired).collect()))
 }
@@ -330,7 +348,7 @@ const MAX_LEFT_OUT_ROUNDS: usize = 8;
 /// Where SMLib cannot stitch them either, or there is no face to import, the solid stays refused
 /// with the reason it was: a B-rep SMLib refuses is never kept as a mesh of its faces.
 fn surface_part(ex: &Exchange, item: u64, units: Units, refused: Failure) -> std::result::Result<(Part, Vec<Note>), Failure> {
-    let _span = solidcraft_profile::span("import", "step.refused_surfaces");
+    let _span = solidcraft_profile::span("import", "step.refused_surfaces").arg("item", format_args!("#{item}"));
     let trims = &solidcraft_smlib::pcurves::SmlibImportTrims;
     let Ok(faces) = solidcore_step::topology::read_faces_with(ex, item, units, trims) else { return Err(refused) };
     let of_solid: std::collections::HashSet<u64> = faces.iter().map(|f| f.face).collect();
@@ -467,6 +485,93 @@ fn stitched_part(pieces: &[(u64, Body)], file_faces: usize, refused: &str) -> cr
         .ok_or_else(|| KernelError::Failed("a stitched face from no one face".into()))?;
     let closed = !body.is_surface();
     Ok(Part { body, closed, file_faces, face_origin, refused: Some(refused.to_string()), split_edges: 0 })
+}
+
+/// Completed jobs as well as running ones take a slot. A slow early part can hold up
+/// publication, but cannot make the reader keep the rest of a whole assembly in memory.
+pub(super) struct Queue {
+    send: std::sync::mpsc::Sender<(Job, std::sync::mpsc::Sender<Prepared>)>,
+    pending: std::collections::HashMap<u64, std::sync::mpsc::Receiver<Prepared>>,
+    submitted: std::collections::HashSet<u64>,
+    next: usize,
+}
+
+impl Queue {
+    pub fn fill(&mut self, reader: &super::Reader) {
+        while self.pending.len() < 2 * super::MAX_WINDOW {
+            let Some(p) = reader.plan.get(self.next) else { break };
+            self.next += 1;
+            if !self.submitted.insert(p.item) || reader.oriented.contains_key(&p.item) || reader.unreadable.contains_key(&p.item) {
+                continue;
+            }
+            let placement = reader.batches.get(p.batch).map_or(IDENTITY, |b| b.m);
+            let job = Job { source: Source::Item { item: p.item, units: p.units }, placement, check_mesh: true };
+            let (send, receive) = std::sync::mpsc::channel();
+            if self.send.send((job, send)).is_err() {
+                break;
+            }
+            self.pending.insert(p.item, receive);
+        }
+    }
+
+    pub fn take(&mut self, ex: &Exchange, job: &Job) -> Prepared {
+        if let Source::Item { item, .. } = &job.source
+            && let Some(reply) = self.pending.remove(item)
+            && let Ok(made) = reply.recv()
+        {
+            return made;
+        }
+        guarded_prepare(ex, job)
+    }
+}
+
+fn guarded_prepare(ex: &Exchange, job: &Job) -> Prepared {
+    crate::guard("STEP body worker", || Ok(prepare(ex, job)))
+        .unwrap_or_else(|_| Err(Failure { read: false, msg: "STEP body worker panicked".into() }))
+}
+
+/// A pool scoped to one complete desktop read. File order is imposed by the receiving reader.
+/// Dropping the sender ends every worker. Cancelled reads discard queued jobs without running them.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn with_queue(ex: &Exchange, count: usize, first: usize, read: impl FnOnce(Option<&mut Queue>)) {
+    use std::sync::{Mutex, mpsc};
+    let (send, receive) = mpsc::channel::<(Job, mpsc::Sender<Prepared>)>();
+    let receive = Mutex::new(receive);
+    let validation = crate::validation::current();
+    let traced = solidcraft_smlib::trace::current();
+    let parent = solidcraft_smlib::stop::current();
+    let stop = solidcraft_smlib::stop::Stop::new();
+    let watch = crate::watch::current();
+    let run_jobs = || {
+        loop {
+            // Release the lock before preparing the body, so every worker can take a job.
+            let next = receive.lock().ok().and_then(|receiver| receiver.recv().ok());
+            let Some((job, reply)) = next else { break };
+            let made = if stop.is_stopped() || crate::watch::cancelled() || parent.as_ref().is_some_and(|p| p.is_stopped()) {
+                Err(Failure { read: true, msg: "STEP import cancelled".into() })
+            } else {
+                guarded_prepare(ex, &job)
+            };
+            let _ = reply.send(made);
+        }
+    };
+    let work = || {
+        crate::watch::scoped(watch.clone(), || {
+            solidcraft_smlib::trace::scoped(traced.clone(), || {
+                solidcraft_smlib::stop::scoped(parent.clone(), || stop.within(|| crate::validation::within(validation.clone(), run_jobs)))
+            })
+        })
+    };
+    std::thread::scope(|scope| {
+        let started = (0..count.min(workers())).filter_map(|_| crate::par::kernel_thread("solidcraft-step").spawn_scoped(scope, work).ok()).count();
+        if started == 0 {
+            read(None);
+        } else {
+            let mut queue = Queue { send, pending: Default::default(), submitted: Default::default(), next: first };
+            read(Some(&mut queue));
+            stop.stop();
+        }
+    });
 }
 
 /// Prepare `jobs`, the results in the jobs' order. Solids still to read and orient (the slow

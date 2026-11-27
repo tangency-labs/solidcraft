@@ -444,9 +444,10 @@ impl<'a> ExactSketchCurves<'a> {
         let reversed = generated.reversed();
         let mut found: Option<Option<&str>> = None;
         for (id, originals) in &self.free_form {
-            if originals.iter().any(|original| {
-                *original == *generated || *original == reversed || solidcraft_kernel::services::prism::cubic_contains(original, generated)
-            }) {
+            if originals
+                .iter()
+                .any(|original| *original == *generated || *original == reversed || solidcraft_kernel::affine::cubic_contains(original, generated))
+            {
                 found = Some(if found.is_some() { None } else { Some(*id) });
             }
         }
@@ -844,6 +845,12 @@ impl Document {
         if full != stem {
             candidates.push(full);
         }
+        // Where its name stands for other faces too (the two caps of an extrude from an offset
+        // start share their role), the face by another name of its own (`F7:cap:low`), made by the
+        // same feature. Only a name that finds this face, with its pieces, on one plane is taken.
+        if let Some(info) = names.info.get(index) {
+            candidates.extend(info.synonyms.iter().map(String::as_str).filter(|name| crate::persistent_name::made_by(name) == Some(origin)));
+        }
         candidates.into_iter().find_map(|name| {
             let target = crate::config::ConfigFaceTarget {
                 body: body.definition_name().into(),
@@ -886,6 +893,18 @@ impl Document {
                 .filter(|(_, info)| info.synonyms.iter().chain(&info.aliases).any(|other| crate::persistent_name::same_face(other, name)))
                 .map(|(index, _)| index)
                 .collect();
+        }
+        if indices.is_empty() {
+            let pieces: Vec<usize> = (0..names.faces.len())
+                .filter(|&i| crate::history_names::matches(&names, i, name) == Some(crate::history_names::Match::Piece))
+                .collect();
+            if let [only] = pieces.as_slice() {
+                indices.push(*only);
+            } else if pieces.is_empty()
+                && let Some(only) = crate::name_lookup::unique_resuffixed_on_body(&names, name)
+            {
+                indices.push(only);
+            }
         }
         if indices.is_empty() {
             return Err(DocError::Unknown(format!("face `{name}` on `{}` no longer exists", body.name)));

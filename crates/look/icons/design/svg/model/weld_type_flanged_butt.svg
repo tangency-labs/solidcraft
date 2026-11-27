@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: flanged butt</title>
+  <path d="M6 34L24 34L24 18L30 18L30 42L6 42Z" fill="#b8c3cf"/>
+  <path d="M6 34L24 34L24 18L30 18L30 42L6 42Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M58 34L40 34L40 18L34 18L34 42L58 42Z" fill="#b8c3cf"/>
+  <path d="M58 34L40 34L40 18L34 18L34 42L58 42Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M30 18L34 18L34 42L30 42Z" fill="#328bd3"/>
+  <path d="M30 18L34 18L34 42L30 42Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M29 18Q32 11 35 18Z" fill="#328bd3"/>
+  <path d="M29 18Q32 11 35 18Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>
