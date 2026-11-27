@@ -51,6 +51,10 @@ impl Affine for Solidcore {
         ops::orthonormal_axes(x, y).map_err(refused)
     }
 
+    fn frame_axes(&self, d: [f64; 3], v: [f64; 3]) -> Result<[[f64; 3]; 2], AffineRefused> {
+        ops::frame_axes(d, v).map_err(refused)
+    }
+
     fn axis_squared_axes(&self, x: [f64; 3], y: [f64; 3], noise: f64) -> Option<[[f64; 3]; 2]> {
         ops::axis_squared_axes(x, y, noise)
     }
@@ -127,6 +131,22 @@ impl Affine for Solidcore {
 
     fn loop_circle(&self, lp: &Loop2) -> Option<(Vec2, f64)> {
         prism::loop_circle(lp)
+    }
+
+    fn loop_holds(&self, lp: &Loop2, p: Vec2) -> Option<bool> {
+        prism::loop_holds(lp, p)
+    }
+
+    fn segment_distance(&self, seg: &Seg2, p: Vec2) -> Option<f64> {
+        prism::segment_distance(seg, p)
+    }
+
+    fn same_circle(&self, a: (Vec2, f64), b: (Vec2, f64), tol: f64) -> bool {
+        prism::same_circle(a, b, tol)
+    }
+
+    fn note_beside(&self, at: (Vec2, f64), height: f64) -> Vec2 {
+        prism::note_beside(at, height)
     }
 
     fn extent_along(&self, min: [f64; 3], max: [f64; 3], placement: &Matrix, axis: [f64; 3]) -> Result<f64, AxisRefusal> {

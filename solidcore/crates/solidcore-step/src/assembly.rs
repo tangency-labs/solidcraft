@@ -59,6 +59,18 @@ pub(crate) const MAX_SPLINE_DEGREE: usize = 16;
 pub(crate) const MAX_TOLERANCE: f64 = 1.0;
 /// A vertex's tolerance over its largest gap from its curves and surfaces.
 pub(crate) const VERTEX_GAP_MARGIN: f64 = 1.5;
+/// A record tolerance over the largest vertex gap SMLib's check passes: the kernel takes half a
+/// record tolerance as its zone (`convert.rs`) and holds a vertex's gaps to half its zone
+/// (`SmBrep::UpdateAndValidateTolerances`).
+pub(crate) const CHECKED_GAP_FACTOR: f64 = 4.0;
+
+/// The tolerance a vertex `gap` mm off its curve or surface needs, read at a tolerance finer than
+/// the `stated` one ([`Assembly::stated`]): [`VERTEX_GAP_MARGIN`] of the gap, and as much as
+/// SMLib's check asks of it ([`CHECKED_GAP_FACTOR`]) up to what the file states. A gap the stated
+/// tolerance covers stays covered when the solid is read finer; one it does not stays a gap.
+pub(crate) fn vertex_cover(gap: f64, stated: f64) -> f64 {
+    (VERTEX_GAP_MARGIN * gap).max((CHECKED_GAP_FACTOR * VERTEX_GAP_MARGIN * gap).min(stated))
+}
 /// Intervals an edge's curve is measured over against each face's surface it bounds.
 pub(crate) const EDGE_GAP_SAMPLES: usize = 16;
 /// The least span of a face's parameter box along a direction of its surface that is not
@@ -204,6 +216,9 @@ pub enum SweptSurface {
 #[derive(Clone)]
 pub struct Assembly<'t> {
     pub(crate) tol: f64,
+    /// The tolerance the file states, when the solid is read at a finer one (`tol`) for edges
+    /// shorter than it: a vertex's gap is covered up to it ([`vertex_cover`]). Else `tol`.
+    pub(crate) stated: f64,
     /// Makes the pcurves of uses that have no closed form; without it such a face is refused.
     pub(crate) trims: Option<&'t dyn Trims>,
     pub(crate) vertices: Vec<Vertex>,
@@ -250,6 +265,7 @@ impl<'t> Assembly<'t> {
     pub fn new(tolerance: f64, trims: Option<&'t dyn Trims>) -> Self {
         Assembly {
             tol: tolerance,
+            stated: tolerance,
             trims,
             vertices: Vec::new(),
             edges: Vec::new(),
@@ -329,8 +345,8 @@ impl<'t> Assembly<'t> {
     /// A sphere face bounded by vertex loops alone, each at one of its poles (a face of a closed
     /// surface bounded by vertices is all of the surface): the whole sphere, its loop a meridian
     /// from the south pole to the north and back, which [`Assembly::complete_slits`] keeps as its
-    /// seam. The sphere is about `origin`, `axis` its north, `reference` its meridian's plane. Any
-    /// other face without an edge loop is refused.
+    /// seam. The sphere is about `origin`, `axis` its north, `reference` its meridian's plane. A
+    /// vertex bound away from either pole is refused.
     pub(crate) fn whole_sphere(&mut self, origin: P3, axis: P3, reference: P3, radius: f64, loops: &[Bound]) -> R<Vec<Bound>> {
         let unsupported_here = || unsupported("a face without an edge loop");
         let (o, z, x) = (v3(origin), v3(axis), v3(reference));
@@ -515,7 +531,7 @@ impl<'t> Assembly<'t> {
             return Err(format!("edge #{edge}: a vertex lies {gap} mm off its curve"));
         }
         if let Some(x) = self.vertices.get_mut(v as usize) {
-            x.tolerance = x.tolerance.max(VERTEX_GAP_MARGIN * gap);
+            x.tolerance = x.tolerance.max(vertex_cover(gap, self.stated));
         }
         Ok(())
     }
@@ -538,12 +554,15 @@ impl<'t> Assembly<'t> {
     /// states. Its closed-form pcurve then has its ends put in the box, which the pcurves'
     /// construction asks for; the record's tolerances cover the move as before (`onto_form`,
     /// `raise_edges`).
-    fn measure_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], form_box: Option<[[f64; 2]; 2]>) -> R<()> {
+    fn measure_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], form_box: Option<[[f64; 2]; 2]>, loop_count: usize) -> R<()> {
         // Only where the nearest point is in closed form: on a spline the search may settle on
         // another part of the surface, or on its boundary for a point a hair past it, and report a
         // gap the edge does not have (2.9 mm on Poppy Humanoid's leg shells, whose edges lie within
         // 0.003 mm), widening tolerances past what SMLib takes. A spline face's gaps are measured
         // on the pcurves its kernel makes (`raise_edges`).
+        if matches!(surface, BSurface::Spline { .. } | BSurface::RationalSpline { .. }) {
+            return self.measure_boundary_edges(surface, edge_loops, form_box, loop_count);
+        }
         if !matches!(
             surface,
             BSurface::Plane { .. }
@@ -617,6 +636,55 @@ impl<'t> Assembly<'t> {
                     x.pcurve_tolerance = x.pcurve_tolerance.max(allowance);
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// A face that is a whole polynomial spline patch holds, on each of its four edges, the bound a
+    /// proof puts on that edge's distance from the patch's boundary curve it runs along
+    /// ([`pcurve::boundary_covers`]), before the pcurves are asked for: the pcurve is then the
+    /// straight line along the boundary, whatever the few micrometres the file's edge stands off
+    /// it, with no kernel in between. The face is asked as a whole, once: only a face of exactly
+    /// one loop of four uses (`loop_count` counts every loop of the face, vertex loops too),
+    /// whose edges are four, on the patch's four sides, each taken as the line at the tolerance
+    /// the raise gives, and (where `domain` is known) whose box is the patch's, is raised, so no
+    /// edge is held wider for a pcurve the kernel makes, nor for a trimmed face's. Nothing else is
+    /// measured on a spline (see [`Self::measure_edges`]); a face the proof does not cover is left
+    /// as it is, and its pcurves are made as they were.
+    ///
+    /// The honest limit: with no `domain` supplied, a face of four uses on the four natural sides
+    /// is read as the whole patch, and a sliver face whose trim lies within the proof's cap of a
+    /// natural side cannot be told apart from an exporter's rounding.
+    fn measure_boundary_edges(
+        &mut self,
+        surface: &BSurface,
+        edge_loops: &[Vec<(u32, bool)>],
+        domain: Option<[[f64; 2]; 2]>,
+        loop_count: usize,
+    ) -> R<()> {
+        if loop_count != 1 || edge_loops.len() != 1 || !matches!(edge_loops.first().map(Vec::len), Some(3 | 4)) {
+            return Ok(());
+        }
+        // A face whose edges the closed forms already take at the tolerance in force is read as it
+        // always was, nothing raised: the proof is for the faces they decline.
+        let fit = self.pcurve_tolerance();
+        let already = pcurve::exact_pcurves(surface, &uses_of(&self.edges, edge_loops, None)?, fit, domain);
+        if matches!(&already, Ok(l) if l.iter().flatten().all(Option::is_some)) {
+            return Ok(());
+        }
+        // As `exact_pcurves` takes it: within the larger of the face's and the edge's.
+        let mut uses = uses_of(&self.edges, edge_loops, None)?;
+        for u in uses.iter_mut().flatten() {
+            u.tolerance = self.tol.max(u.tolerance);
+        }
+        let Some(uses) = uses.first() else { return Ok(()) };
+        let gaps = match pcurve::boundary_covers(surface, uses, domain, pcurve::SURFACE_GAP_MARGIN, MAX_TOLERANCE) {
+            Ok(Some(gaps)) => gaps,
+            _ => return Ok(()),
+        };
+        let edges: Vec<u32> = uses.iter().map(|u| u.edge).collect();
+        for (e, gap) in edges.into_iter().zip(gaps) {
+            self.cover_edge(e, gap, pcurve::SURFACE_GAP_MARGIN)?;
         }
         Ok(())
     }
@@ -768,6 +836,7 @@ impl<'t> Assembly<'t> {
         if at_poles > 0 {
             notes.push(format!("{at_poles} edges split where they pass through a face's pole"));
         }
+        self.reduce_pole_closed_seams()?;
         self.start_splines_clear_of_faces()?;
         let seams = self.add_seams()?;
         if seams > 0 {
@@ -1104,7 +1173,7 @@ impl<'t> Assembly<'t> {
                     if !(VERTEX_GAP_MARGIN * gap <= MAX_TOLERANCE) {
                         return Err(format!("face #{}: a vertex loop's vertex lies {gap} mm off its surface", face.origin));
                     }
-                    x.tolerance = x.tolerance.max(VERTEX_GAP_MARGIN * gap);
+                    x.tolerance = x.tolerance.max(vertex_cover(gap, self.stated));
                 }
             }
         }
@@ -1217,6 +1286,7 @@ impl<'t> Assembly<'t> {
         // the whole body mutable, can its crossed cuts become edges and its trim pieces be
         // moved into the base period. An internal seam used on both sides is replaced rather
         // than retained as a boundary that would divide the same material into sliver faces.
+        seat_seam_trims(&mut brep);
         let (completion, skipped) = pcurve::complete_periodic_seams_noted(&brep).map_err(|e| e.to_string())?;
         if let Some(why) = skipped {
             // The body keeps its imported trims, which passed every check; say so rather than
@@ -1698,7 +1768,7 @@ impl<'t> Assembly<'t> {
         let wound = extent.is_some_and(crate::kernel::form::winds);
         let mut extended = false;
         // How far each edge lies off this surface, so its closed form is checked at that.
-        self.measure_edges(&label, &edge_loops, box_on_form.filter(|_| !wound))?;
+        self.measure_edges(&label, &edge_loops, box_on_form.filter(|_| !wound), face.loops.len())?;
         // Closed forms where the geometry has them; the kernel makes the rest (`trims`).
         let fit = self.pcurve_tolerance();
         let mut exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, fit, box_on_form).map_err(|e| e.to_string())?;
@@ -2381,6 +2451,241 @@ pub(crate) fn reverse(uses: &mut [(u32, bool)]) {
     }
 }
 
+/// How far, as a share of the period, a seam's trim may lie off its surface's boundary line and
+/// still be put on it ([`seat_seam_trims`]); within that the edge's tolerance decides.
+const SEAM_SLIVER: f64 = 1e-3;
+
+/// The control points of `pcurve` in (u, v), a rational one's divided out (none of weight 0).
+fn pcurve_points(pcurve: &Curve2) -> Vec<[f64; 2]> {
+    match pcurve {
+        Curve2::Spline { points, .. } => points.clone(),
+        Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().filter(|h| h[2] != 0.0).map(|h| [h[0] / h[2], h[1] / h[2]]).collect(),
+    }
+}
+
+/// Coordinate `d` of the control points of `pcurve` at `which` (all, or only its first or last)
+/// set to `x`, a rational one's weights kept.
+fn set_pcurve_coordinate(pcurve: &mut Curve2, d: usize, x: f64, which: Option<bool>) {
+    fn set(points: &mut [[f64; 3]], d: usize, x: f64) {
+        for h in points {
+            let w = h[2];
+            if let Some(c) = h.get_mut(d) {
+                *c = x * w;
+            }
+        }
+    }
+    let pick = |n: usize| -> std::ops::Range<usize> {
+        match which {
+            None => 0..n,
+            Some(true) => 0..n.min(1),
+            Some(false) => n.saturating_sub(1)..n,
+        }
+    };
+    match pcurve {
+        Curve2::Spline { points, .. } => {
+            let r = pick(points.len());
+            for p in points.get_mut(r).into_iter().flatten() {
+                if let Some(c) = p.get_mut(d) {
+                    *c = x;
+                }
+            }
+        }
+        Curve2::RationalSpline { homogeneous, .. } => {
+            let r = pick(homogeneous.len());
+            if let Some(points) = homogeneous.get_mut(r) {
+                set(points, d, x);
+            }
+        }
+    }
+}
+
+/// An enclosed bound, rounded up, on how far the surface under `pcurve` moves, at any parameter,
+/// when `which` of its control points (all, or only its first or last) have their coordinate `d`
+/// set to `line`: `None` where it is not decided (a surface that is not a spline, a weight that is
+/// not positive, anything not finite) or where a moved coordinate lies further than
+/// [`SEAM_SLIVER`] of the period from `line`; the move is then not made.
+///
+/// A B-spline (a rational one with positive weights) is a convex combination of its control
+/// points, so its point at each parameter has its coordinate `d` within `o` of where it is moved
+/// to (`o` the largest move of a control point), and both lie in the hull of the coordinates of
+/// the control points that count there (all of them, or the pcurve's degree and one more at the
+/// end that moves: the other ones' B-splines are zero there) and `line`. Across, the hull is the
+/// same points' other coordinate and does not change. The surface moves by at most `o` times its
+/// partial along `d` over that strip, which [`SurfaceEval::strip_shift_bound`] encloses with its
+/// rounding. Where `d` is the surface's period the strip is cut at the base period's ends and each
+/// part taken on the range, the part past an end one period on (the surface is closed there); the
+/// parts' bounds are added, as a move crosses the boundary at most once and each part's bound is
+/// for the whole of `o`. The sum and `o` are rounded up.
+fn seating_shift(eval: &SurfaceEval, d: usize, [lo, hi]: [f64; 2], period: f64, pcurve: &Curve2, which: Option<bool>, line: f64) -> Option<f64> {
+    let (knots, count) = match pcurve {
+        Curve2::Spline { knots, points } => (knots.len(), points.len()),
+        Curve2::RationalSpline { knots, homogeneous } => (knots.len(), homogeneous.len()),
+    };
+    let degree = knots.checked_sub(count.checked_add(1)?)?;
+    if let Curve2::RationalSpline { homogeneous, .. } = pcurve
+        && !homogeneous.iter().all(|h| h[2] > 0.0 && h[2].is_finite())
+    {
+        return None;
+    }
+    let points = pcurve_points(pcurve);
+    let n = points.len();
+    let reach = degree.checked_add(1)?;
+    // The control points whose B-splines move the pcurve, and the ones moved.
+    let (window, moved) = match which {
+        None => (points.get(..)?, points.get(..)?),
+        Some(true) => (points.get(..reach.min(n))?, points.get(..1)?),
+        Some(false) => (points.get(n.saturating_sub(reach)..)?, points.get(n.checked_sub(1)?..)?),
+    };
+    let coordinate = |ps: &[[f64; 2]], e: usize| -> Option<Vec<f64>> { ps.iter().map(|p| p.get(e).copied()).collect() };
+    let (xs, ys, moved) = (coordinate(window, d)?, coordinate(window, 1 - d)?, coordinate(moved, d)?);
+    if !(line.is_finite() && period > 0.0 && period.is_finite() && lo.is_finite() && hi.is_finite() && xs.iter().chain(&ys).all(|x| x.is_finite())) {
+        return None;
+    }
+    let o = moved.iter().map(|x| (x - line).abs()).fold(0.0, f64::max);
+    if !(o <= SEAM_SLIVER * period) {
+        return None;
+    }
+    let ulp = f64::EPSILON;
+    let o = o * (1.0 + 4.0 * ulp);
+    let a = xs.iter().copied().fold(line, f64::min);
+    let b = xs.iter().copied().fold(line, f64::max);
+    let across = [ys.iter().copied().fold(f64::INFINITY, f64::min), ys.iter().copied().fold(f64::NEG_INFINITY, f64::max)];
+    // The strip's parts on the base period, each widened past the rounding of its ends.
+    let mut parts: Vec<[f64; 2]> = Vec::new();
+    if b >= lo && a <= hi {
+        parts.push([a.max(lo), b.min(hi)]);
+    }
+    if a < lo {
+        parts.push([a + period, b.min(lo) + period]);
+    }
+    if b > hi {
+        parts.push([a.max(hi) - period, b - period]);
+    }
+    let pad = 8.0 * ulp * (lo.abs() + hi.abs() + period + a.abs() + b.abs());
+    let mut shift = 0.0;
+    for [x0, x1] in parts {
+        // A part of no width holds no stretch of the move.
+        if !(x0 < x1) {
+            continue;
+        }
+        shift += eval.strip_shift_bound(d, [x0 - pad, x1 + pad], across, o).ok()?;
+    }
+    let shift = shift * (1.0 + 4.0 * ulp);
+    shift.is_finite().then_some(shift)
+}
+
+/// Seam trims put on their surface's boundary line: on a face closed in u or v, an edge its loop
+/// uses twice (a seam the file writes) whose two trims lie along the two boundary lines of the
+/// surface's base period, each within a sliver of its line and, by an enclosed bound rounded up
+/// over the whole trim ([`seating_shift`]), within the edge's tolerance of it on the surface, has
+/// each trim made the line itself (its coordinate across the line set to the line's, along it
+/// kept), and the ends of the uses on either side that meet it there put on the line too, by the
+/// same test; a trim whose bound is not decided or is past the tolerance stays as it is. An edge
+/// fitted to a little off the surface's own boundary (a wire's
+/// seam written on its exact tube, the surface fitted 0.2 % off it) is projected a sliver across
+/// the line, its trims then crossing the base period; the seam completion takes such a seam for
+/// one to delete and insert again, and that insertion, which projects the face's other edges
+/// afresh, can put a trim of an edge that passes close to another part of the surface there
+/// (a cut almost touching the next turn of a coil) and leave the loop a period short. On the line,
+/// the seam stands as the file wrote it. Returns how many trims were moved.
+fn seat_seam_trims(brep: &mut Brep) -> usize {
+    let tolerances: Vec<f64> = brep.edges.iter().map(|e| e.tolerance).collect();
+    let mut seated = 0;
+    for face in &mut brep.faces {
+        let Ok(eval) = SurfaceEval::new(face.parameters()) else { continue };
+        let dom = eval.domain();
+        let seated_before = seated;
+        for d in 0..2 {
+            let (Some(Some(period)), Some(Some((lo, hi)))) = (dom.period.get(d).copied(), dom.range.get(d).copied()) else { continue };
+            if !(period > 0.0) {
+                continue;
+            }
+            // Whether putting `which` of `pcurve`'s control points on `line` is proved, by an enclosed
+            // bound over the whole pcurve ([`seating_shift`]), to move the surface under it by no more
+            // than `tol`.
+            let near = |pcurve: &Curve2, which: Option<bool>, line: f64, tol: f64| -> bool {
+                seating_shift(&eval, d, [lo, hi], period, pcurve, which, line).is_some_and(|shift| shift <= tol)
+            };
+            for l in &mut face.loops {
+                let Loop::Edges { edges } = l else { continue };
+                // Each seam use and the boundary line its trim lies along.
+                let mut lines: Vec<(usize, u32, f64)> = Vec::new();
+                for (i, u) in edges.iter().enumerate() {
+                    if edges.iter().filter(|o| o.edge == u.edge).count() != 2 {
+                        continue;
+                    }
+                    let tol = tolerances.get(u.edge as usize).copied().unwrap_or(0.0);
+                    let points = pcurve_points(&u.pcurve);
+                    let Some(x) = points.first().and_then(|p| p.get(d)).copied() else { continue };
+                    let line = if (x - lo).abs() <= (x - hi).abs() { lo } else { hi };
+                    if near(&u.pcurve, None, line, tol) {
+                        lines.push((i, u.edge, line));
+                    }
+                }
+                // Only a seam whose two uses lie on the two lines, one each.
+                let seams: Vec<(usize, f64)> = lines
+                    .iter()
+                    .filter(|(i, e, line)| lines.iter().any(|(j, f, other)| j != i && f == e && other != line))
+                    .map(|(i, _, line)| (*i, *line))
+                    .collect();
+                let n = edges.len();
+                for (i, line) in seams {
+                    let on_line = |u: &OrientedEdge| pcurve_points(&u.pcurve).iter().all(|p| p.get(d) == Some(&line));
+                    if let Some(u) = edges.get_mut(i)
+                        && !on_line(u)
+                    {
+                        set_pcurve_coordinate(&mut u.pcurve, d, line, None);
+                        seated += 1;
+                    }
+                    // The use before ends where the seam's starts; the use after starts where it ends.
+                    for (k, at_loop_end) in [(i + n - 1, true), (i + 1, false)] {
+                        let Some(k) = k.checked_rem(n) else { continue };
+                        if seams_at(&lines, k) {
+                            continue;
+                        }
+                        let Some(u) = edges.get_mut(k) else { continue };
+                        let tol = tolerances.get(u.edge as usize).copied().unwrap_or(0.0);
+                        // The pcurve runs along its edge; the loop runs it backwards on a reversed use.
+                        let first = at_loop_end != u.forward;
+                        let points = pcurve_points(&u.pcurve);
+                        let end = if first { points.first() } else { points.last() };
+                        if let Some(p) = end
+                            && p.get(d) != Some(&line)
+                            && near(&u.pcurve, Some(first), line, tol)
+                        {
+                            set_pcurve_coordinate(&mut u.pcurve, d, line, Some(first));
+                            seated += 1;
+                        }
+                    }
+                }
+            }
+        }
+        if seated > seated_before {
+            // The face's domain is around every loop (`Face::domain`), and a trim moved to the
+            // base period's boundary can lie a sliver outside the box taken before: take it again
+            // from the moved pcurves, by the rule that made it. `face_domain` refuses only a face
+            // without finite pcurves, which the record check rejects; the box then stays as it was.
+            let pcs: Vec<Vec<Curve2>> = face
+                .loops
+                .iter()
+                .filter_map(|l| match l {
+                    Loop::Edges { edges } => Some(edges.iter().map(|u| u.pcurve.clone()).collect()),
+                    Loop::Vertex { .. } => None,
+                })
+                .collect();
+            if let Ok(domain) = face_domain(face.parameters(), &pcs) {
+                face.domain = domain;
+            }
+        }
+    }
+    seated
+}
+
+/// Whether use `k` of a loop is one of the seam uses in `lines`.
+fn seams_at(lines: &[(usize, u32, f64)], k: usize) -> bool {
+    lines.iter().any(|(i, _, _)| *i == k)
+}
+
 fn natural_periods(s: &BSurface) -> [bool; 2] {
     solidcore_ops::label::surface_natural(s).map(|n| matches!(n, Natural::Periodic))
 }
@@ -2649,9 +2954,14 @@ pub(crate) fn pcurve_box(pcs: &[Vec<Curve2>]) -> [[f64; 2]; 2] {
 /// onto that end. Left there, the seam completion moves the use a whole period, to the seam's
 /// other side, a period from the uses it joins (face #553893 of the Pro Shop file, a period of
 /// 0.0215 and a seam use 4.3e-11 past it). A use further past crosses the seam, and a loop of
-/// one use has no neighbour: those stay. A B-spline is a convex combination of its control
-/// points, so the pcurve then lies on the range, and moves by no more than its points did; the
-/// gap to the edge is measured and covered (`raise_edges`). The number of uses moved.
+/// one use has no neighbour: those stay. The miss counts only the uses beside it that end on the
+/// seam, and a use with none stays: in a loop lifted past the seam, whose next use starts a turn
+/// back (as at a sphere's pole), that jump is no rounding, and put on the seam the use would lie
+/// a quarter turn from its edge. The miss is taken around the period, the seam's two sides being
+/// one place: a use from one side beside a use ending on the other misses it by nothing. A
+/// B-spline is a convex combination of its control points, so the pcurve then lies on the range,
+/// and moves by no more than its points did; the gap to the edge is measured and covered
+/// (`raise_edges`). The number of uses moved.
 pub(crate) fn onto_seam(surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], pcs: &mut [Vec<Curve2>]) -> usize {
     let Ok(on) = SurfaceEval::new(surface) else { return 0 };
     let domain = on.domain();
@@ -2687,9 +2997,25 @@ pub(crate) fn onto_seam(surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], pcs
                 else {
                     continue;
                 };
-                // How far it misses the uses beside it at its vertices.
+                // How far it misses the uses beside it that end on the seam, at its vertices, as
+                // points on the surface (the seam's two sides, `lo` and `hi`, are one place, so a
+                // use from `hi` beside one ending at `lo` misses it by nothing, not a turn); none
+                // of them on the seam, it stays.
                 let at = |q: &[f64; 2]| q.get(d).copied().unwrap_or(f64::NAN);
-                let miss = (at(start) - at(prev_end)).abs().max((at(end) - at(next_start)).abs());
+                let on_end = |x: f64| (x - lo).abs() <= round || (x - hi).abs() <= round;
+                let apart = |a: f64, b: f64| {
+                    let r = (a - b).rem_euclid(*period);
+                    r.min(*period - r)
+                };
+                let misses: Vec<f64> = [(at(start), at(prev_end)), (at(end), at(next_start))]
+                    .into_iter()
+                    .filter(|&(_, beside)| on_end(beside))
+                    .map(|(own, beside)| apart(own, beside))
+                    .collect();
+                if misses.is_empty() {
+                    continue;
+                }
+                let miss = misses.into_iter().fold(0.0f64, f64::max);
                 let Some(c) = pc.get_mut(k) else { continue };
                 let xs: Vec<f64> = control_points(c).iter().map(at).collect();
                 let past = xs.iter().fold(0.0f64, |m, &x| m.max(lo - x).max(x - hi));

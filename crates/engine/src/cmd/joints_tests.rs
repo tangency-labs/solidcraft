@@ -3977,6 +3977,23 @@ fn board_twice(s: &mut Session) -> (u64, u64, u64) {
     (occ(s, "Board"), second, occ(s, "Header"))
 }
 
+#[test]
+fn center_rule_names_both_faces_on_the_second_placement() {
+    let mut s = Session::default();
+    let (_, second, header) = board_twice(&mut s);
+    s.param_check = crate::schema::ParamCheck::Strict;
+    // Header's local x = 0 and 10 faces run along world Y, on the +100 X copy.
+    let r = run(&mut s, "joint.origin", json!({"name": "Mid", "path": [second, header], "faces": [[95, 20, 5], [95, 30, 5]]}));
+    assert_eq!(r["origin"], "Mid", "{r}");
+    let mid = &s.doc.assembly.origins.iter().find(|o| o.name == "Mid").unwrap().origin;
+    assert_eq!((mid.occurrence, mid.inside.as_slice()), (second, &[header][..]));
+    let frame = s.doc.origin_world(&s.model.state(), mid).unwrap();
+    assert!(near(solidcraft_doc::apply_point(&frame, Vec3::ZERO), Vec3::new(95.0, 25.0, 5.0)));
+    let r = run(&mut s, "assembly.constraint.create", json!({"type": "center", "a": "Mid", "b": {"occurrence": "Probe", "plane": "XZ"}}));
+    assert_eq!(r["errors"], json!([]), "{r}");
+    assert!(near(place(&s, "Probe", Vec3::ZERO), Vec3::new(0.0, 25.0, 0.0)));
+}
+
 /// The Probe's centre in the world.
 fn probe_centre(s: &Session) -> Vec3 {
     place(s, "Probe", Vec3::new(1.0, 1.0, 1.0))
@@ -4632,6 +4649,64 @@ fn driving_a_joint_moves_the_ungrounded_side() {
     assert_eq!(r["reason"], "both sides are held by grounded parts: Base:1, Post:1", "{r}");
 }
 
+/// A joint between two grounded parts that don't meet where it puts them moves neither, and the
+/// reply says that is why, in `conflicts` and `warnings`, not "off by … from the placement the
+/// other joints give" when there are no other joints (#12867). Ungrounding one lets the joint
+/// place it; grounding it again where it now meets lists nothing. A constraint (Mate) shares
+/// this, and a part grounded against the root's own bodies is held in place the same way.
+#[test]
+fn a_joint_between_two_grounded_parts_says_it_moves_neither() {
+    let ground_b = |s: &mut Session, grounded: bool| {
+        let b = occ(s, "B");
+        run(s, "occurrence.ground", json!({"occurrence": b, "grounded": grounded}))
+    };
+    let mut s = two_cubes();
+    ground_b(&mut s, true);
+    let corner = |s: &Session| place(s, "B", Vec3::new(20.0, 0.0, 0.0));
+    let before = corner(&s);
+    let why = "both its parts are grounded (A:1, B:1), so it can move neither";
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "name": "Seat", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 10]}}),
+    );
+    assert_eq!(r["conflicts"], json!([{"joint": r["joint"], "name": "Seat", "why": why}]), "{r}");
+    assert_eq!(r["warnings"], json!([format!("Seat: {why}; unground one to let the joint place it")]), "{r}");
+    assert!(near(corner(&s), before), "neither part moves");
+    let solved = run(&mut s, "joint.solve", json!({}));
+    assert_eq!(solved["conflicts"][0]["why"], why, "{solved}");
+
+    // Ungrounded, B goes where the joint puts it; grounded there again, nothing conflicts.
+    let r = ground_b(&mut s, false);
+    assert!(r["conflicts"].as_array().is_none_or(Vec::is_empty), "{r}");
+    assert!(!near(corner(&s), before), "the joint places B");
+    ground_b(&mut s, true);
+    let r = run(&mut s, "joint.solve", json!({}));
+    assert!(r["conflicts"].as_array().is_some_and(Vec::is_empty), "parts that meet list nothing: {r}");
+
+    // A Mate between two grounded parts, by its own name.
+    let mut s = two_cubes();
+    ground_b(&mut s, true);
+    let r = run(
+        &mut s,
+        "assembly.constraint.create",
+        json!({"type": "mate", "name": "Flat", "a": {"occurrence": "A", "face": [5, 5, 10]}, "b": {"occurrence": "B", "face": [25, 5, 0]}, "offset": 5}),
+    );
+    assert_eq!(r["conflicts"][0]["why"], why, "{r}");
+    assert!(r["warnings"][0].as_str().is_some_and(|w| w.starts_with("Flat: both its parts are grounded")), "{r}");
+
+    // The root's own bodies are held in place too.
+    let mut s = two_cubes();
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 40, 0]}));
+    let r = run(
+        &mut s,
+        "joint.create",
+        json!({"type": "rigid", "name": "Base", "a": {"occurrence": "root", "face": [5, 45, 10]}, "b": {"occurrence": "A", "face": [5, 5, 10]}}),
+    );
+    assert_eq!(r["conflicts"][0]["why"], "both its parts are held in place (the root, A:1), so it can move neither", "{r}");
+}
+
 /// A rigid joint whose origin face is gone (its sketch circle replaced) still holds its part at
 /// the pose it had, the error stays on the rigid joint, and a revolute from that part to a leaf
 /// turns only the leaf: the part is not cut from the grounded base (#16139).
@@ -4868,6 +4943,145 @@ fn joint_dynamics_refuses_hostile_values() {
         assert!(s.execute("joint.dynamics", &p).is_err(), "{p}");
     }
     assert!(s.doc.assembly.joints[0].dynamics.iter().all(Option::is_none));
+}
+
+/// A joint origin snapped to a sketch circle's centre (`sketch` + `point` or `curve`) stores a
+/// persistent `Snap::SketchPoint` reference, reports it in `joint.inspect`, survives save/open,
+/// and follows parameter changes (#21815).
+#[test]
+fn joint_origin_on_sketch_circle_follows_parameter_change() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "100", "unit": "mm"}));
+    run(&mut s, "component.create", json!({"name": "Post", "parent": "root", "activate": true, "grounded": true}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 20, "width": 20, "height": "h", "corner": [0, 0, 0], "operation": "new", "body_name": "PostBody", "name": "PostBox"}),
+    );
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "offset": 20, "name": "HoleSketch"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [10, 90], "radius": 3}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["c1"], "type": "diameter", "value": "6"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "horizontal", "value": "10"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["origin", "c1.center"], "type": "vertical", "value": "h - 10"}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.create", json!({"name": "Beam", "parent": "root", "activate": true, "grounded": false}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({"length": 50, "width": 20, "height": 20, "corner": [20, 0, 80], "operation": "new", "body_name": "BeamBody", "name": "BeamBox"}),
+    );
+    run(&mut s, "component.activate", json!({"component": 0}));
+
+    // Named origin via `curve` shorthand also works.
+    let named = run(&mut s, "joint.origin", json!({"name": "HoleCenter", "sketch": "HoleSketch", "curve": "c1"}));
+    assert_eq!(named["origin"], "HoleCenter");
+
+    run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "rigid",
+            "name": "PostToBeam",
+            "flip": false,
+            "a": {"occurrence": "Post:1", "sketch": "HoleSketch", "point": "c1.center"},
+            "b": {"occurrence": "Beam:1", "face": [20, 10, 90]}
+        }),
+    );
+
+    // Inspect reports the persistent sketch_point snap and reference.
+    let insp = run(&mut s, "joint.inspect", json!({"joint": "PostToBeam"}));
+    let a = &insp["joints"][0]["a"];
+    assert_eq!(a["snap"]["type"], "sketch_point", "{insp}");
+    assert_eq!(a["snap"]["point"], "c1.center", "{insp}");
+    assert_eq!(a["references"][0]["role"], "sketch_point", "{insp}");
+    assert_eq!(a["references"][0]["sketch_name"], "HoleSketch", "{insp}");
+    assert_eq!(a["references"][0]["point"], "c1.center", "{insp}");
+
+    // Change h from 100 mm to 60 mm: c1.center moves to [20, 10, 50] and Beam:1 follows it.
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "60"}));
+    let com = place(&s, "Beam", Vec3::new(45.0, 10.0, 90.0));
+    assert!(near(com, Vec3::new(45.0, 10.0, 50.0)), "Beam:1 COM should move to [45, 10, 50]: {com:?}");
+    let mut bmin = Vec3::new(f64::INFINITY, f64::INFINITY, f64::INFINITY);
+    let mut bmax = Vec3::new(f64::NEG_INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for x in [20.0, 70.0] {
+        for y in [0.0, 20.0] {
+            for z in [80.0, 100.0] {
+                let p = place(&s, "Beam", Vec3::new(x, y, z));
+                bmin = Vec3::new(bmin.x.min(p.x), bmin.y.min(p.y), bmin.z.min(p.z));
+                bmax = Vec3::new(bmax.x.max(p.x), bmax.y.max(p.y), bmax.z.max(p.z));
+            }
+        }
+    }
+    assert!(near(bmin, Vec3::new(20.0, 0.0, 40.0)) && near(bmax, Vec3::new(70.0, 20.0, 60.0)), "bbox {bmin:?} -> {bmax:?}");
+
+    // Save and reopen preserves the persistent sketch-point snap and continues following edits.
+    let (dir, path) = temp_design("joint-sketch-point", "solidcraft");
+    run(&mut s, "file.save", json!({"path": path}));
+    run(&mut s, "file.new", json!({}));
+    run(&mut s, "doc.open", json!({"path": path}));
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "80"}));
+    let com2 = place(&s, "Beam", Vec3::new(45.0, 10.0, 90.0));
+    assert!(near(com2, Vec3::new(45.0, 10.0, 70.0)), "after reopen Beam:1 COM should move to [45, 10, 70]: {com2:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // Invalid sketch origins are refused cleanly.
+    for bad in [
+        json!({"occurrence": "Beam:1", "sketch": "HoleSketch", "point": "c1.center"}),
+        json!({"occurrence": "Post:1", "sketch": "HoleSketch", "point": "nonexistent"}),
+        json!({"occurrence": "Post:1", "sketch": "HoleSketch", "point": "c1.center", "curve": "c1"}),
+        json!({"occurrence": "Post:1", "sketch": "HoleSketch"}),
+        json!({"occurrence": "Post:1", "sketch": "PostBox", "point": "origin"}),
+    ] {
+        assert!(s.execute("joint.origin", &bad).is_err(), "{bad}");
+    }
+
+    // Strict schema check accepts sketch-point origins on joint.create and joint.as_built,
+    // and clearing a_alignment with null clears a stored x reference without adding one when absent.
+    s.param_check = crate::schema::ParamCheck::Strict;
+    run(&mut s, "joint.delete", json!({"joint": "PostToBeam"}));
+    run(
+        &mut s,
+        "joint.create",
+        json!({
+            "type": "rigid",
+            "name": "PostToBeamStrict",
+            "flip": false,
+            "a": {"occurrence": "Post:1", "sketch": "HoleSketch", "curve": "c1"},
+            "b": {"occurrence": "Beam:1", "face": [20, 10, 70]}
+        }),
+    );
+    // Unaligned sketch-point origin stays x: None when cleared with a_alignment: null.
+    run(&mut s, "joint.edit", json!({"joint": "PostToBeamStrict", "a_alignment": null}));
+    assert!(
+        matches!(&s.doc.assembly.joints[0].a.snap, solidcraft_doc::joints::Snap::SketchPoint { x: None, .. }),
+        "{:?}",
+        s.doc.assembly.joints[0].a.snap
+    );
+    // A sketch-point origin with a stored x reference clears that reference when a_alignment is null.
+    if let solidcraft_doc::joints::Snap::SketchPoint { x, .. } = &mut s.doc_mut().assembly.joints[0].a.snap {
+        *x = Some(solidcraft_doc::joints::XRef::Reference {
+            reference: solidcraft_doc::joints::AlignmentRef::OriginAxis { axis: "Y".into() },
+            reverse: false,
+        });
+    }
+    run(&mut s, "joint.edit", json!({"joint": "PostToBeamStrict", "a_alignment": null}));
+    assert!(
+        matches!(&s.doc.assembly.joints[0].a.snap, solidcraft_doc::joints::Snap::SketchPoint { x: Some(solidcraft_doc::joints::XRef::Dir(_)), .. }),
+        "{:?}",
+        s.doc.assembly.joints[0].a.snap
+    );
+    // joint.as_built also accepts a sketch-point `at` under Strict parameter checking.
+    run(&mut s, "joint.delete", json!({"joint": "PostToBeamStrict"}));
+    run(
+        &mut s,
+        "joint.as_built",
+        json!({"type": "revolute", "a": "Post:1", "b": "Beam:1", "at": {"occurrence": "Post:1", "sketch": "HoleSketch", "point": "c1.center"}}),
+    );
+    assert!(
+        matches!(&s.doc.assembly.joints[0].a.snap, solidcraft_doc::joints::Snap::SketchPoint { point, .. } if point == "c1.center"),
+        "{:?}",
+        s.doc.assembly.joints[0].a.snap
+    );
 }
 
 #[test]

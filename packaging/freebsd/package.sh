@@ -51,6 +51,7 @@ install -m 755 "$BIN/solidcraft" "$BIN/solidcraft-cli" "$STAGE/bin/"
 strip "$STAGE/bin/solidcraft" "$STAGE/bin/solidcraft-cli" 2>/dev/null || true
 # The desktop entry, MIME type, metainfo and icons are the freedesktop files Linux ships.
 install -m 644 "$LINUX/$APP_ID.desktop" "$STAGE/share/applications/$APP_ID.desktop"
+install -m 644 "$LINUX/$APP_ID.workshop-links.desktop" "$STAGE/share/applications/$APP_ID.workshop-links.desktop"
 install -m 644 "$LINUX/$APP_ID.mime.xml" "$STAGE/share/mime/packages/$APP_ID.xml"
 sed -e "s/@VERSION@/$VERSION/g" -e "s/@DATE@/$SOLIDCRAFT_BUILD_DATE/g" \
   "$LINUX/$APP_ID.metainfo.xml.in" >"$STAGE/share/metainfo/$APP_ID.metainfo.xml"
@@ -58,7 +59,7 @@ make_icons "$STAGE/bin/solidcraft-cli" "$WORK/icons"
 cp -R "$WORK/icons/hicolor" "$STAGE/share/icons/"
 copy_docs "$STAGE/share/doc/solidcraft"
 
-for f in bin/solidcraft bin/solidcraft-cli "share/applications/$APP_ID.desktop" \
+for f in bin/solidcraft bin/solidcraft-cli "share/applications/$APP_ID.desktop" "share/applications/$APP_ID.workshop-links.desktop" \
   "share/icons/hicolor/256x256/apps/$APP_ID.png" share/doc/solidcraft/LICENSE-MIT \
   share/doc/solidcraft/LICENSE-APACHE share/doc/solidcraft/THIRD-PARTY-LICENSES.txt; do
   if [ ! -e "$STAGE/$f" ]; then echo "error: $f is missing from the package" >&2; exit 1; fi

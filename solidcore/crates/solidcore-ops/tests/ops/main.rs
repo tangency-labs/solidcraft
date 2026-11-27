@@ -91,6 +91,10 @@ mod fillet_sheets_long_run;
 mod frame_trim;
 #[path = "../heal.rs"]
 mod heal;
+#[path = "../issue_22467_far_origin_fillet_boolean.rs"]
+mod issue_22467_far_origin_fillet_boolean;
+#[path = "../issue_22820_dome_boolean_regression.rs"]
+mod issue_22820_dome_boolean_regression;
 #[path = "../issue_2843_round_on_tangent_line.rs"]
 mod issue_2843_round_on_tangent_line;
 #[path = "../issue_2844_loft_rim.rs"]

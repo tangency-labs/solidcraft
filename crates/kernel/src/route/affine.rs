@@ -64,6 +64,15 @@ pub fn orthonormal_axes(x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2], Affin
     }
 }
 
+/// The axes `x` and `y` of a frame whose normal runs along `d`: `y` along `v`'s part square to
+/// `d` and `x = y × unit(d)`, both unit. Refused for numbers not finite, no length, or a `v` whose part
+/// square to `d` is within its own rounding.
+pub fn frame_axes(d: [f64; 3], v: [f64; 3]) -> Result<[[f64; 3]; 2], AffineRefused> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.frame_axes(d, v),
+    }
+}
+
 /// A plane's axes with the coordinates smaller than `noise` dropped, each unit again. `None`
 /// when nothing sound is left; the caller keeps its own axes.
 pub fn axis_squared_axes(x: [f64; 3], y: [f64; 3], noise: f64) -> Option<[[f64; 3]; 2]> {
@@ -208,6 +217,39 @@ pub fn cubic_contains(source: &Seg2, piece: &Seg2) -> bool {
 pub fn loop_circle(lp: &Loop2) -> Option<(Vec2, f64)> {
     match which(OpKind::Affine) {
         Which::Solidcore => Solidcore.loop_circle(lp),
+    }
+}
+
+/// Whether `lp` holds `p` by the even-odd rule, decided exactly: `None` when `p` is on the
+/// loop or within rounding of it.
+pub fn loop_holds(lp: &Loop2, p: Vec2) -> Option<bool> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.loop_holds(lp, p),
+    }
+}
+
+/// How far `p` is from `seg`, exactly, for a line or a circular arc: the foot clamped to a
+/// line's ends; on an arc the radial distance where `p` is within its angles, else the
+/// distance to the nearer end. `None` for a free-form segment or a point that is no number.
+pub fn segment_distance(seg: &Seg2, p: Vec2) -> Option<f64> {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.segment_distance(seg, p),
+    }
+}
+
+/// Whether the circles `a` and `b` (centre and radius) are one hole: their centres and their
+/// radii each less than `tol` apart.
+pub fn same_circle(a: (Vec2, f64), b: (Vec2, f64), tol: f64) -> bool {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.same_circle(a, b, tol),
+    }
+}
+
+/// Where a note `height` high stands to name the circle `at` (centre and radius), level with
+/// its centre and clear of its rim on the right: its lower left corner.
+pub fn note_beside(at: (Vec2, f64), height: f64) -> Vec2 {
+    match which(OpKind::Affine) {
+        Which::Solidcore => Solidcore.note_beside(at, height),
     }
 }
 

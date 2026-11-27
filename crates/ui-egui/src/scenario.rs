@@ -347,10 +347,12 @@ impl Harness {
         }
         // A file opening, recovering or saving in the background, the offer to stand it up being
         // worked out (its estimate can end frames after the meshing), a view being drawn on a
-        // worker, or a window checking what its material does: wait for it (as a person would).
+        // worker, a window checking what its material does, or a picked drawing being read before
+        // its placement window opens: wait for it (as a person would).
         let began = std::time::Instant::now();
         while (!self.app.file_load.idle()
             || self.app.saving.is_some()
+            || self.app.insert_read.is_some()
             || crate::open_meshing::active(&self.app)
             || self.app.stand_up_later.is_some()
             || self.app.op_check.busy()
@@ -418,6 +420,8 @@ impl Harness {
 
     /// Accessibility bounds include scrolled-out page content. Reveal that content with
     /// wheel input before using its coordinates; window actions and navigation stay put.
+    /// A feature card's scrolling body is revealed the same way, as a user scrolls to a row
+    /// below what the card shows, while the body still has content that way.
     fn reveal_widget(&mut self, text: &str, near: Option<&str>) -> Result<[f64; 2], String> {
         let find = |h: &Self| match near {
             Some(label) => h.widget_near(text, label),
@@ -426,8 +430,19 @@ impl Harness {
         for _ in 0..32 {
             let point = find(self).ok_or_else(|| format!("no widget `{text}` on screen"))?;
             let at = egui::pos2(point[0] as f32, point[1] as f32);
-            let page = self.app.prefs_window.shell.open.then(|| rect_of("prefs:page_body")).flatten();
-            let chrome = ["prefs:ok", "prefs:apply", "prefs:cancel", "prefs:search"].iter().any(|key| handle_at(key) == Some(at));
+            let page = if self.app.prefs_window.shell.open {
+                rect_of("prefs:page_body")
+            } else {
+                self.app.dialog.is_some().then(|| rect_of("dialog:body:viewport")).flatten().filter(|body| {
+                    let (scroll, content) = (count_of("dialog:body:scroll_y").unwrap_or(0.0), count_of("dialog:body:content_height").unwrap_or(0.0));
+                    let more_above = scroll > 0.5;
+                    let more_below = scroll + f64::from(body.height()) < content - 0.5;
+                    (at.y < body.top() && more_above) || (at.y > body.bottom() && more_below) || body.contains(at)
+                })
+            };
+            let chrome = ["prefs:ok", "prefs:apply", "prefs:cancel", "prefs:search", "dialog:ok", "dialog:apply", "dialog:cancel"]
+                .iter()
+                .any(|key| handle_at(key) == Some(at));
             let Some(page) = page.filter(|page| !chrome && page.x_range().contains(at.x)) else { return Ok(point) };
             if page.contains(at) {
                 return Ok(point);
