@@ -54,6 +54,14 @@ area and the shared check (OCCT 8.0.1, `main` at 339a5119f5):
 - The worst tolerance the records declare is 1e-7 on OCCT results (OCCT's STEP uncertainty, as
   solidcore's reader records it) against 2e-5 to 8e-5 on solidcore's.
 
+**Chamfer, shell, thicken and offset faces** (`chamfers_shells_and_thickened_sheets_match_solidcore`
+in `backend/occt.rs`): a cube's edge chamfered 1 back, the cube shelled 1 thick open at the top, a
+10 x 10 sheet thickened 2 up, 2 down and 1 each way, a face moved out 2 and another in 1. On each,
+OCCT's result has solidcore's volume (and the closed form) to 1e-9, its area, face and edge
+counts and centroid, and passes the shared check. These results carry no history yet, so features
+that name their faces find them by geometry only; unequal chamfers, chamfers that carry a face on
+and closed hollows stay on solidcore.
+
 **Naming corpus** (`cargo test --profile ci -p solidcraft-cli --test naming_corpus --features
 solidcraft-kernel/backend-occt`, with `SOLIDCRAFT_KERNEL` set to each kernel): 181 of 184
 designs pass on solidcore, whose route runs the code a build without the feature runs. 168 pass on OCCT,
