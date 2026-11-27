@@ -645,9 +645,23 @@ fn large_icons_fill_the_room_around_them_without_reaching_the_label() {
             assert!(button_icon_side(labels, true, exit) > button_icon_side(labels, false, false), "labels {labels}, exit {exit}");
         }
     }
-    // Above a label the icon, centred 16 points down, ends before the label starts; in an
-    // icon-only button it fits the button's height.
-    assert!(16.0 + button_icon_side(true, true, false) / 2.0 <= BUTTON_LABEL_TOP);
+    // Above a label the icon, centred 16 points down, ends before the label starts where it is
+    // painted, a two-line label too (raised to fit the button); in an icon-only button it fits
+    // the button's height.
+    let ctx = crate::test_support::context();
+    let mut heights = Vec::new();
+    crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
+        for label in ["Hole", "Extrude Cut"] {
+            let galley = button_galley(ui.painter(), label, 30.0, Color32::WHITE);
+            heights.push((galley.rows.len(), galley.size().y));
+        }
+    });
+    assert_eq!(heights.iter().map(|(rows, _)| *rows).collect::<Vec<_>>(), [1, 2], "one label of each: {heights:?}");
+    let whole = Rect::from_min_size(Pos2::ZERO, vec2(BUTTON_MIN_WIDTH, BUTTON_HEIGHT));
+    for (rows, height) in heights {
+        let top = label_top(whole, height);
+        assert!(16.0 + button_icon_side(true, true, false) / 2.0 <= top, "{rows} line(s): the label starts at {top}");
+    }
     assert!(button_icon_side(false, true, false) <= ICON_BUTTON_HEIGHT);
 }
 

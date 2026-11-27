@@ -597,11 +597,12 @@ fn handle(prefix: &str, key: &str) -> String {
 }
 
 /// The side of a button's icon: 26 points, the exit button's 30. Large icons (#22061) take the
-/// room around them: 30 points above a label, which starts 32 points down, and 32 points in an
-/// icon-only button 36 points high.
+/// room around them: 28 points above a label, so the icon, centred 16 points down, ends where a
+/// two-line label (raised to fit the button, [`label_top`]) starts, and 32 points in an icon-only
+/// button 36 points high.
 pub fn button_icon_side(labels: bool, large: bool, exit: bool) -> f32 {
     match (large, labels) {
-        (true, true) => 30.0,
+        (true, true) => 28.0,
         (true, false) => 32.0,
         (false, _) if exit => 30.0,
         (false, _) => 26.0,
