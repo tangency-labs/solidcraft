@@ -961,7 +961,7 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
         Some("law") => ExtendMode::Law,
         Some(m) => return Err(bad(cmd, format!("`mode` must be natural, tangent, curvature or law, not `{m}`"))),
     };
-    let angle = match expr(p, "angle") {
+    let angle = match optional_expr(p, "angle", cmd)? {
         Some(_) if mode != ExtendMode::Law => return Err(bad(cmd, "`angle` belongs to a law extension (mode law)")),
         Some(a) => {
             check_expr(s, &a, Kind::Angle, cmd, "angle")?;
@@ -2568,8 +2568,9 @@ mod tests {
     }
 
     /// A law extension refuses what it can't build, leaving the design as it was: an angle
-    /// without law, an angle at or past ±90°, a strip folding over itself (the cylinder's top arc
-    /// leaning 60° in, 15 long, past its axis), a plane it never reaches, a whole body, the bounds.
+    /// without law, an angle at or past ±90° or not an angle (true, empty, too long), a strip
+    /// folding over itself (the cylinder's top arc leaning 60° in, 15 long, past its axis), a plane
+    /// it never reaches, a whole body, the bounds.
     #[test]
     fn extend_by_law_refuses() {
         let mut s = Session::default();
@@ -2582,6 +2583,9 @@ mod tests {
             json!({"body": "Strip", "edges": [top], "distance": 5, "mode": "law", "angle": "90 deg"}),
             json!({"body": "Strip", "edges": [top], "distance": 5, "mode": "law", "angle": "-95 deg"}),
             json!({"body": "Strip", "edges": [top], "distance": 5, "mode": "law", "angle": "5 mm"}),
+            json!({"body": "Strip", "edges": [top], "distance": 5, "mode": "law", "angle": true}),
+            json!({"body": "Strip", "edges": [top], "distance": 5, "mode": "law", "angle": ""}),
+            json!({"body": "Strip", "edges": [top], "distance": 5, "mode": "law", "angle": "1".repeat(5000)}),
             json!({"body": "Strip", "edges": [top], "distance": 15, "mode": "law", "angle": "-60 deg"}),
             json!({"body": "Strip", "edges": [top], "mode": "law", "up_to": {"origin": [0, 0, 10], "normal": [0, 0, 1]}}),
             json!({"body": "Strip", "edges": [top], "mode": "law", "up_to": {"body": "Block"}}),

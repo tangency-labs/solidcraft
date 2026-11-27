@@ -523,31 +523,96 @@ fn law(body: &Body, at: &[Vec3], count: usize, angle: f64, distance: f64) -> Res
     sewn_to(body, &strip, count)
 }
 
+/// How many times a law strip up to a target is halved while it folds, and then how many times
+/// the length between the last strip that folded and the first that did not is halved.
+const LAW_FOLD_HALVINGS: usize = 60;
+const LAW_FOLD_BISECTIONS: usize = 24;
+
 /// The law extension of the picked `edges` (of `record`, picked by `at`) up to a plane or face:
 /// the strip built long ([`REACH`] body sizes), cut where the target meets it keeping the piece
 /// on the edges, and sewn to the surface. The surface itself is never cut. A strip the target
-/// misses, wholly or in part (the piece kept still reaches the long strip's far end), is refused.
+/// misses, wholly or in part (the piece kept still holds part of the strip's far edge), is
+/// refused. Where the long strip folds over itself, a shorter one is built (halved until it does
+/// not fold, then the length between narrowed): only a target the strip reaches before it folds
+/// is accepted; one past the fold (or so near it the strip can't be built) is refused as a fold.
 fn law_up_to(body: &Body, at: &[Vec3], record: &brep::Brep, edges: &BTreeSet<usize>, angle: f64, tool: &SplitTool) -> Result<Body> {
     let reach = body.size().max(1e-6) * REACH;
-    let long = law_strip(body, at, angle, reach)?;
     let on_edges = edges.iter().map(|e| edge_middle(record, *e)).collect::<Result<Vec<_>>>()?;
     let missed = || KernelError::Invalid("the extension never reaches the face it extends up to (all along the edges)".into());
-    let cut = crate::trim_keep(&long, tool, TrimKeep::Regions(&on_edges)).map_err(|e| match e {
-        KernelError::Invalid(_) => missed(),
-        e => e,
-    })?;
-    // What is kept must stop well short of the long strip's far end.
-    let bb = crate::measure(body)?.bbox;
-    let off = |p: Vec3| {
-        let q = Vec3::new(p.x.clamp(bb.min.x, bb.max.x), p.y.clamp(bb.min.y, bb.max.y), p.z.clamp(bb.min.z, bb.max.z));
-        p.dist(q)
+    let folds = |e: &KernelError| matches!(e, KernelError::Invalid(m) if m.contains("fold over itself"));
+    // The strip `length` long cut at the target, or `None` where the target misses it (wholly
+    // or in part); `Err` with the fold's message where that strip folds.
+    let attempt = |length: f64| -> Result<Option<Body>> {
+        let long = law_strip(body, at, angle, length)?;
+        let cut = match crate::trim_keep(&long, tool, TrimKeep::Regions(&on_edges)) {
+            Ok(cut) => cut,
+            Err(KernelError::Invalid(_)) => return Ok(None),
+            Err(e) => return Err(e),
+        };
+        if keeps_far_edge(body, &long, &cut, LAW_FAR_TOLERANCE * (body.size() + length))? {
+            return Ok(None);
+        }
+        Ok(Some(crate::record::after(cut, &long, &crate::record::counts(&[body]))))
     };
-    let far = cut.record().vertices.iter().any(|v| off(Vec3::new(v.point[0], v.point[1], v.point[2])) > 0.5 * reach);
-    if far {
-        return Err(missed());
+    let folded = || KernelError::Invalid("the strip would fold over itself before it reaches the face it extends up to: use a smaller angle".into());
+    // Halve the strip while it folds.
+    let mut length = reach;
+    let mut fold_at = None;
+    let mut found = None;
+    for _ in 0..LAW_FOLD_HALVINGS {
+        match attempt(length) {
+            Ok(cut) => {
+                found = Some(cut);
+                break;
+            }
+            Err(e) if folds(&e) => {
+                fold_at = Some(length);
+                length *= 0.5;
+            }
+            Err(e) => return Err(e),
+        }
     }
-    let cut = crate::record::after(cut, &long, &crate::record::counts(&[body]));
+    let Some(cut) = found else { return Err(folded()) };
+    let cut = match (cut, fold_at) {
+        (Some(cut), _) => cut,
+        (None, None) => return Err(missed()),
+        // Missed short of the fold: narrow down the longest strip that does not fold.
+        (None, Some(mut hi)) => {
+            let mut lo = length;
+            let mut hit = None;
+            for _ in 0..LAW_FOLD_BISECTIONS {
+                let mid = 0.5 * (lo + hi);
+                match attempt(mid) {
+                    Ok(Some(cut)) => {
+                        hit = Some(cut);
+                        break;
+                    }
+                    Ok(None) => lo = mid,
+                    // Past a strip that builds and short of one that folds, a strip that can't be
+                    // built is nearly folded (its far edge shrinking to a point): taken as folding.
+                    Err(_) => hi = mid,
+                }
+            }
+            hit.ok_or_else(folded)?
+        }
+    };
     sewn_to(body, &cut, edges.len())
+}
+
+/// Whether `cut`, the law strip `long` cut at a target, still holds part of the strip's far edge
+/// (the target missed the strip there): a point of a far edge (an edge of `long` with neither
+/// end on the surface `body`) within `tol` of `cut`.
+fn keeps_far_edge(body: &Body, long: &Body, cut: &Body, tol: f64) -> Result<bool> {
+    for e in long.edges(tol)? {
+        let (Some(a), Some(b)) = (e.points.first(), e.points.last()) else { continue };
+        if body.face_at(*a, tol).is_some() || body.face_at(*b, tol).is_some() {
+            continue;
+        }
+        if e.points.iter().chain([&e.mid]).any(|p| cut.face_at(*p, 2.0 * tol).is_some()) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn failed(what: &str, e: impl crate::Cause) -> KernelError {
@@ -1007,6 +1072,32 @@ mod tests {
         let t = 5.0 / (1.5 - 30f64.to_radians().cos());
         assert!(rel(area(&out), 100.0 + 10.0 * t) < 1e-9, "{} vs {}", area(&out), 100.0 + 10.0 * t);
         assert!(measure(&out).unwrap().bbox.min.x.abs() < 1e-9);
+    }
+
+    /// Up to a target the long strip would fold before or reach only far out: the cylinder strip's
+    /// top arc leaning 60° in folds 10 / sin 60° = 11.547 out (its rulings meet on the axis); up
+    /// to the plane z = 22 its rulings are 2 / cos 60° = 4 long, a quarter of the cone frustum from
+    /// radius 10 to 10 − 4 sin 60° = 10 − 2√3 with slant 4, π/4 · (20 − 2√3) · 4 more: π (120 − 2√3).
+    /// Up to z = 26 (rulings 12 long, past the fold) it is refused as a fold. The square at 0° up to
+    /// the plane x = 500 (far out, but short of the long strip's end): 10 × 500 = 5000.
+    #[test]
+    fn a_law_extension_up_to_a_target_short_of_a_fold_or_far_out() {
+        let c = cylinder_strip(FRAC_PI_2);
+        let top = [Vec3::new(10.0 * FRAC_PI_4.cos(), 10.0 * FRAC_PI_4.sin(), 20.0)];
+        let plane = |o: Vec3, n: Vec3| SplitTool::Plane(Plane::from_normal(o, n).unwrap());
+        let z22 = plane(Vec3::new(0.0, 0.0, 22.0), Vec3::Z);
+        let out = extend_surface(&c, &top, &law(-60.0, ExtendLimit::UpTo(&z22))).unwrap();
+        let want = PI * (120.0 - 2.0 * 3f64.sqrt());
+        assert!(rel(area(&out), want) < 1e-3, "{} vs {want}", area(&out)); // (measured on meshes)
+        assert!((measure(&out).unwrap().bbox.max.z - 22.0).abs() < 1e-6, "{:?}", measure(&out).unwrap().bbox);
+        let z26 = plane(Vec3::new(0.0, 0.0, 26.0), Vec3::Z);
+        let e = extend_surface(&c, &top, &law(-60.0, ExtendLimit::UpTo(&z26))).unwrap_err();
+        assert!(e.to_string().contains("fold"), "{e}");
+        let s = square();
+        let x500 = plane(Vec3::new(500.0, 0.0, 0.0), Vec3::X);
+        let out = extend_surface(&s, &[Vec3::new(10.0, 5.0, 0.0)], &law(0.0, ExtendLimit::UpTo(&x500))).unwrap();
+        assert!(rel(area(&out), 5000.0) < 1e-9, "{}", area(&out));
+        assert!((measure(&out).unwrap().bbox.max.x - 500.0).abs() < 1e-9);
     }
 
     /// Refused: an angle at or past ±90° or not finite; a strip folding over itself (the cylinder
