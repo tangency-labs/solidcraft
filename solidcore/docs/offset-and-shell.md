@@ -81,7 +81,8 @@ negates it (`OffsetGeometryCreation::faceuse_offset_with_backend`, `offset/offse
 | surface of revolution | the generator offset in its plane and swept again: a line or circle stays a line or circle; a B-spline or conic generator is offset by `create_simple_offset` within the approximation tolerance | exact for lines and arcs; **fitted, not certified**, otherwise | `surface/surf_of_revolution/p2.rs` |
 | extrusion, B-spline, curve-bounded, STEP | an `OffsetSurface`: S + d n of a copy of the surface, evaluated on demand (`base_create_offset_surface`); the extrusion's own override is not ported (commented out upstream) | exact as a definition; its net is §3.2's | `surface/surface/p1.rs`, `surface/offset_surface.rs` |
 | round of the ball's circle, one radius | the round of radius r + τd on the supports offset by σᵢd, the same spine, leader and seeds; its net built on the stations and certified; r + τd ≤ 0: collapsed | certified | `surface/procedural_blend/offset.rs` |
-| round of an exact class | its kind's exact offset (a cylinder of r to a cylinder of r ± d) carrying the definition of the new radius, re-certified by identity | exact | same |
+| round of an exact class whose kind offsets as itself (line, circle, point: a cylinder, torus or sphere) | its kind's exact offset (a cylinder of r to a cylinder of r ± d) carrying the definition of the new radius, re-certified by identity | exact | same |
+| round of a rational exact class (a conic, a conic pair or a nodal quartic spine) | its kind's offset is the offset surface of its B-spline net, kept as it is; the net is S (bound 0), so it is S + d n; no definition kept, since that offset has no NURBS form to re-certify one on | exact as a definition; its net is §3.2's | `surface/procedural_blend/offset.rs` |
 | chamfer between planes | the plane offset as a plane; no definition kept | exact | `surface/surface/p1.rs` |
 | Gⁿ round (order ≥ 2), radius law, round on a B-spline support | the offset surface of the face, as an extrusion's | see §3.2 | `surface/procedural_blend/offset.rs` |
 | corner face, drafted face | the offset of the face's own surface kind; a drafted face's surface is its plane or cone, so the offset is exact; a corner keeps no definition | as its kind | `surface/surface/p1.rs` |
@@ -484,7 +485,9 @@ point of the body. If a turn before the shell fails, the shell builds, or is ref
 as it would without that turn. If a turn back fails, the result is the same valid body, with
 that face's seam left on the turned ruling. An inward closed shell refused for a thin feature
 (`offset/thin_features.rs`) takes off together every feature with a face whose inset collapses,
-then each other feature on its own.
+then each other feature on its own. Each cap's rim is taken out where the cap and the face beside
+it lie on one plane (`remove_cap_rims`), so that face runs on across the footprint; left in, a
+footprint touching the face's outer edge pinched the face, and the offset refused it (solidcraft#22785).
 
 Ops (`solidcore-ops/src/offset.rs`) calls this as `SmApiShellBrepFull` with convex edges extended,
 results merged, the offset solid made and the sheet's side walls merged. `thicken` with

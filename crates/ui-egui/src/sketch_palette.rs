@@ -470,6 +470,7 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut construction = false;
     let mut look = false;
     let mut finish = false;
+    let mut cancel = false;
     let mut slice_changed = false;
     let mut tie = false;
     let mut start = None;
@@ -624,11 +625,18 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
         section_alias("sketch_palette:options_fold", more);
     };
     let mut draw_footer = |ui: &mut egui::Ui| {
-        let button = crate::ui_kit::wide_primary_button(ui, "Finish Sketch");
+        // Cancel Sketch beside Finish Sketch, Cancel left of OK as in every dialog footer; the same
+        // discard as the ribbon's X (#19961). "Cancel Sketch", not "Cancel": an open dialog's Cancel
+        // stays the only one.
+        let (cancel_button, button) = crate::ui_kit::wide_secondary_and_primary(ui, solidcraft_ui_text::tr("cmd.sketch_cancel"), "Finish Sketch");
+        crate::panel_runtime::register_content_focus(ui.ctx(), &cancel_button);
         crate::panel_runtime::register_content_focus(ui.ctx(), &button);
-        crate::scenario::publish_rect("sketch_palette:finish", button.rect);
-        crate::scenario::publish_handle("sketch_palette:finish", button.rect.center());
+        for (name, response) in [("sketch_palette:finish", &button), ("sketch_palette:cancel", &cancel_button)] {
+            crate::scenario::publish_rect(name, response.rect);
+            crate::scenario::publish_handle(name, response.rect.center());
+        }
         finish = button.clicked();
+        cancel = cancel_button.clicked();
         let (at, slice) = crate::ui_kit::button_pair(
             ui,
             "sketch_palette",
@@ -723,6 +731,8 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if finish {
         app.finish_sketch();
+    } else if cancel {
+        app.cancel_sketch();
     }
 }
 
@@ -868,12 +878,37 @@ mod tests {
         let look = crate::scenario::rect_of("sketch_palette:look_at").expect("Look At | Slice stay");
         let slice = crate::scenario::rect_of("sketch_palette:slice").unwrap();
         let finish = crate::scenario::rect_of("sketch_palette:finish").unwrap();
-        assert_eq!((finish.left(), finish.right()), (look.left(), slice.right()), "Finish {finish:?} shares the pair's inset");
+        let cancel = crate::scenario::rect_of("sketch_palette:cancel").expect("Cancel Sketch beside it (#19961)");
+        assert_eq!((cancel.left(), finish.right()), (look.left(), slice.right()), "Cancel {cancel:?} | Finish {finish:?} share the pair's inset");
         assert_eq!(finish.height(), Tokens::get().form_button_height);
         assert!(look.top() - finish.bottom() >= Tokens::get().space_6, "the footer rows remain distinct");
         assert!(crate::scenario::handle_at("button:sketch.finish").is_some(), "and so does the ribbon's Finish");
         h.call("ui.click", json!({"x":at.x,"y":at.y}));
         assert!(h.app.session.active_sketch.is_none());
+    }
+
+    #[test]
+    fn palette_cancel_discards_the_sketch_like_sketch_cancel() {
+        let features = |h: &crate::scenario::Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+        let mut left = Vec::new();
+        for panel in [true, false] {
+            let mut h = crate::scenario::Harness::new();
+            let before = features(&h);
+            h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+            h.app.run("sketch.line", json!({"points": [[0, 0], [30, 10]]})).unwrap();
+            h.settle();
+            if panel {
+                let at = crate::scenario::handle_at("sketch_palette:cancel").expect("the palette has Cancel");
+                h.call("ui.click", json!({"x":at.x,"y":at.y}));
+            } else {
+                h.app.run("sketch.cancel", json!({})).unwrap();
+            }
+            h.settle();
+            assert!(h.app.session.active_sketch.is_none(), "panel {panel}: the sketch is left");
+            assert_eq!(features(&h), before, "panel {panel}: the sketch is discarded");
+            left.push(features(&h));
+        }
+        assert_eq!(left[0], left[1], "the panel's Cancel does what sketch.cancel does");
     }
 
     #[test]
