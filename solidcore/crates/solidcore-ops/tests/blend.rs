@@ -5677,7 +5677,7 @@ fn a_round_along_a_whole_circle_builds_alike_on_both_ends_of_a_mirrored_ring() {
 
 /// #19077, reduced: a quarter turn of a 20 wide, 6 high profile whose outer wall is a cone of
 /// slope 1/320, its two end faces through the axis, each end rounded 0.5 against the cone (the
-/// round's spine is a hyperbola, its plane square to the cone's axis) and shelled 0.4 inward.
+/// round's spine is a hyperbola, its plane parallel to the cone's axis) and shelled 0.4 inward.
 /// The reporter's own design (a 120 degree bent slot, the cone a 1 mm band between tangent
 /// arcs, 13 edges rounded 0.4) is not in the repository; rebuilt from its numbers, its rounds
 /// and shells are refused alike on main and here (see the PR), so this guards the reduced

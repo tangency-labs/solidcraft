@@ -518,8 +518,11 @@ fn plane_section(point: Point3, normal: Vec3, q: &BlendQuadric) -> Result<Conic>
         // A zero linear term gives lines, not a parabola.
         let linear = coupling * pn;
         // `linear` is a length (a dimensionless coefficient times `pn`), `dscale` a
-        // dimensionless one: the bound is relative to the extent of the section's data.
-        let extent = max2(max2(pn.abs(), pv.abs()), max2(pu.abs(), k0.sqrt()));
+        // dimensionless one. The rounding of `linear` is that of `coupling * pn`, so the
+        // bound is relative to `pn` and the quadric's radius, not to where the plane's
+        // origin lies within the plane (`pu`, `pv`): sliding it along the plane leaves
+        // the section, and so its kind, unchanged.
+        let extent = max2(pn.abs(), k0.sqrt());
         if linear.abs() <= EFF_ZERO * dscale * extent {
             // R x^2 + (N pn^2 - k0) = 0: no real roots, or one/two lines.
             let constant = (radial * s * s + axial * t * t) * pn * pn - k0;
@@ -1640,7 +1643,7 @@ mod tests {
     }
 
     /// A quarter turn: the placement's axes are exact in floating point, so the plane
-    /// square to the cone's axis stays exactly square to it.
+    /// parallel to the cone's axis stays exactly parallel to it.
     #[test]
     fn a_rotated_shallow_cone_round_keeps_its_certificate_through_its_record() {
         shallow_cone_round_at(
@@ -1776,7 +1779,11 @@ mod tests {
         if refused {
             let error = certified.unwrap_err();
             assert!(
-                matches!(error, SolidError::InvalidInput { .. }),
+                matches!(
+                    error,
+                    SolidError::InvalidInput { reason, .. }
+                        if reason == "the spine is off the faces' offsets"
+                ),
                 "{error:?}"
             );
             return;
@@ -1801,10 +1808,36 @@ mod tests {
             p[1] += 0.001 * normal.y * w;
             p[2] += 0.001 * normal.z * w;
         }
+        let error = exact_rebuild(&k, &off).unwrap_err();
         assert!(
-            exact_rebuild(&k, &off).is_err(),
-            "a spine off its plane is refused"
+            matches!(
+                error,
+                SolidError::InvalidInput { reason, .. }
+                    if reason == "the spine is off the faces' offsets"
+            ),
+            "a spine off its plane is refused as off the offsets: {error:?}"
         );
+    }
+
+    /// A parabola stays a parabola when the plane's origin slides along the plane: a 45 degree
+    /// cone about Z with its apex at the origin, cut by a plane parallel to a generator.
+    #[test]
+    fn a_parabola_is_found_wherever_the_planes_origin_lies_in_the_plane() {
+        let cone = BlendQuadric {
+            kind: QuadricKind::Cone,
+            point: Point3::ZERO,
+            dir: Vec3::new(0.0, 0.0, 1.0),
+            radius: 0.0,
+            angle: PI / 4.0,
+            side: 1.0,
+            tube: 0.0,
+        };
+        let normal = Vec3::new(1.0, 0.0, 1.0).unitize().unwrap();
+        let near = 2.0_f64.powi(-26);
+        for slide in [0.0, 65536.0] {
+            let conic = plane_section(Point3::new(near, slide, near), normal, &cone).unwrap();
+            assert_eq!(conic.kind, ConicKind::Parabola, "origin slid by {slide}");
+        }
     }
 
     /// A plane square to the axis up to rounding cuts a circle, whichever way the rounding
