@@ -80,8 +80,15 @@ fn ends(c: &Curve) -> Option<([f64; 3], [f64; 3])> {
 /// A profile's curves (loop after loop, each starting where the one before ends) in the module's
 /// encoding ([`Shape::prism_profile`]): a loop ends at the curve that returns to its start.
 fn encode_profile(curves: &[Curve]) -> Result<Vec<f64>, BackendError> {
-    let scale = curves.iter().filter_map(ends).flat_map(|(a, b)| a.into_iter().chain(b)).fold(1.0_f64, |m, v| m.max(v.abs()));
-    let near = |a: [f64; 3], b: [f64; 3]| (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt() <= 1e-9 * scale;
+    // Ends meet within 1e-9 of the profile's size, or a few ulps of its coordinates where those
+    // are larger: the distance from the origin alone never closes a loop early.
+    let points: Vec<[f64; 3]> = curves.iter().filter_map(ends).flat_map(|(a, b)| [a, b]).collect();
+    let span = (0..3)
+        .map(|i| points.iter().map(|p| p[i]).fold(f64::NEG_INFINITY, f64::max) - points.iter().map(|p| p[i]).fold(f64::INFINITY, f64::min))
+        .fold(0.0_f64, f64::max);
+    let far = points.iter().flatten().fold(0.0_f64, |m, v| m.max(v.abs()));
+    let tolerance = (1e-9 * span.max(1.0)).max(16.0 * f64::EPSILON * far);
+    let near = |a: [f64; 3], b: [f64; 3]| (0..3).map(|i| (a[i] - b[i]).powi(2)).sum::<f64>().sqrt() <= tolerance;
     let mut loops: Vec<Vec<f64>> = Vec::new();
     let mut current: Vec<f64> = Vec::new();
     let (mut count, mut first) = (0usize, None);
@@ -464,6 +471,21 @@ mod tests {
     }
 
     #[test]
+    fn a_profile_far_from_the_origin_closes_where_it_returns() {
+        // A unit square 1e9 out: one loop of four lines (tolerance 1e-9 of its coordinates
+        // would be 1, and close it after the first line).
+        let corner = |i: usize| [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]][i % 4];
+        let curves: Vec<Curve> = (0..4)
+            .map(|i| {
+                let (a, b) = (corner(i), corner(i + 1));
+                Curve::Line { start: [1e9 + a[0], a[1], 0.0], end: [1e9 + b[0], b[1], 0.0] }
+            })
+            .collect();
+        let encoded = encode_profile(&curves).unwrap();
+        assert_eq!(encoded[..2], [1.0, 4.0], "one loop of four curves");
+    }
+
+    #[test]
     fn a_record_goes_there_and_back() {
         let b = crate::build::cylinder(v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0), 2.0, 3.0).unwrap();
         let back = Body::from_record(Occt.export(&Occt.import(b.record()).unwrap()).unwrap().record).unwrap();
@@ -472,6 +494,7 @@ mod tests {
 
     #[test]
     fn a_routed_cut_is_made_there() {
+        let _chosen = crate::route::foreign::choosing();
         crate::route::foreign::set_kernel(crate::route::foreign::Kernel::Occt);
         let a = crate::route::box_solid(v(0.0, 0.0, 0.0), v(2.0, 2.0, 2.0)).unwrap();
         let b = crate::route::box_solid(v(1.0, 1.0, 1.0), v(3.0, 3.0, 3.0)).unwrap();
@@ -531,6 +554,7 @@ mod tests {
     /// the closed-form `volume` where one is given, and Open CASCADE really ran it.
     fn parity(what: &str, volume: Option<f64>, build: impl Fn() -> crate::Result<Vec<Body>>) {
         use crate::route::foreign::{Kernel, fell_back, set_kernel};
+        let _chosen = crate::route::foreign::choosing();
         set_kernel(Kernel::Solidcore);
         let ours: Vec<Made> = build().unwrap().iter().map(made).collect();
         set_kernel(Kernel::Occt);
@@ -621,6 +645,7 @@ mod tests {
         use crate::route::foreign::{Kernel, fell_back, set_kernel};
         use solidcore_record::Vec2;
         let rect = region(poly(&[(2.0, 0.0), (4.0, 0.0), (4.0, 3.0), (2.0, 3.0)]), vec![]);
+        let _chosen = crate::route::foreign::choosing();
         set_kernel(Kernel::Occt);
         let before = fell_back();
         let b = crate::route::revolve_joining_arcs(&Plane::XZ, std::slice::from_ref(&rect), Vec2::ZERO, Vec2::new(0.0, 1.0), 1.0).unwrap();
@@ -639,6 +664,7 @@ mod tests {
             let m = crate::measure(b).unwrap();
             (m.volume, m.area, b.record().faces.len(), b.record().edges.len(), m.centroid)
         };
+        let _chosen = crate::route::foreign::choosing();
         set_kernel(Kernel::Solidcore);
         let ours = grade(&build().unwrap());
         set_kernel(Kernel::Occt);
@@ -708,6 +734,7 @@ mod tests {
         });
         // A square to a circle pairs a line with an arc: that stays on solidcore.
         use crate::route::foreign::{Kernel, fell_back, set_kernel};
+        let _chosen = crate::route::foreign::choosing();
         set_kernel(Kernel::Occt);
         let before = fell_back();
         crate::route::loft(&[(up(0.0), sq(2.0)), (up(3.0), Loop2::circle(Vec2::ZERO, 1.5))]).unwrap();
