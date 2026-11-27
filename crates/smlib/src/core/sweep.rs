@@ -67,8 +67,8 @@ const MAX_COORD: f64 = 1e9;
 /// `SMLIB_FLAT_MAX_LEN`: most reals a curve list may hold.
 const FLAT_MAX_LEN: usize = 1 << 27;
 
-/// `SMLIB_SCREW_MAX_TURNS`.
-const SCREW_MAX_TURNS: f64 = 200.0;
+/// `SMLIB_SCREW_MAX_TURNS`: solidcore-ops' bound, as many turns as the kernel's spans hold.
+const SCREW_MAX_TURNS: f64 = solidcore_ops::sweep::SCREW_MAX_TURNS;
 
 /// `SMLIB_SCREW_MAX_LAW`.
 const SCREW_MAX_LAW: usize = 1024;

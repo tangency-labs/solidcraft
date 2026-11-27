@@ -25,6 +25,7 @@ mod planar;
 mod points;
 mod projection;
 mod query;
+mod runtime;
 mod sections;
 mod shaft_spline;
 mod tessellate;

@@ -1,0 +1,93 @@
+{
+  "en": {
+    "MODELING FEATURES": "MODELING FEATURES",
+    "ASSEMBLY & JOINTS": "ASSEMBLY & JOINTS",
+    "Modeling Features": "Modeling Features",
+    "Modeling": "Modeling",
+    "Assembly & Joints": "Assembly & Joints",
+    "Assembly": "Assembly",
+    "Modeling Track contracted. Click to restore split view.": "Modeling Track contracted. Click to restore split view.",
+    "Assembly Track contracted. Click to restore split view.": "Assembly Track contracted. Click to restore split view.",
+    "ui.timeline_2d_steps_badge": "{count} Steps",
+    "ui.timeline_2d_joints_badge": "{count} Joints",
+    "ui.timeline_2d_active_summary": "Active: {active} / {total}"
+  },
+  "cs": {
+    "MODELING FEATURES": "MODELOVACÍ PRVKY",
+    "ASSEMBLY & JOINTS": "SESTAVA A SPOJE",
+    "Modeling Features": "Modelovací prvky",
+    "Modeling": "Modelování",
+    "Assembly & Joints": "Sestava a spoje",
+    "Assembly": "Sestava",
+    "Modeling Track contracted. Click to restore split view.": "Stopa modelování je sbalená. Kliknutím obnovíte rozdělené zobrazení.",
+    "Assembly Track contracted. Click to restore split view.": "Stopa sestavy je sbalená. Kliknutím obnovíte rozdělené zobrazení.",
+    "ui.timeline_2d_steps_badge": "Kroky: {count}",
+    "ui.timeline_2d_joints_badge": "Spoje: {count}",
+    "ui.timeline_2d_active_summary": "Aktivní: {active} / {total}"
+  },
+  "ar": {
+    "MODELING FEATURES": "ميزات النمذجة",
+    "ASSEMBLY & JOINTS": "التجميع والمفاصل",
+    "Modeling Features": "ميزات النمذجة",
+    "Modeling": "النمذجة",
+    "Assembly & Joints": "التجميع والمفاصل",
+    "Assembly": "التجميع",
+    "Modeling Track contracted. Click to restore split view.": "مسار النمذجة مطوي. انقر لاستعادة العرض المقسّم.",
+    "Assembly Track contracted. Click to restore split view.": "مسار التجميع مطوي. انقر لاستعادة العرض المقسّم.",
+    "ui.timeline_2d_steps_badge": "الخطوات: {count}",
+    "ui.timeline_2d_joints_badge": "المفاصل: {count}",
+    "ui.timeline_2d_active_summary": "نشط: {active} / {total}"
+  },
+  "he": {
+    "MODELING FEATURES": "תכונות מידול",
+    "ASSEMBLY & JOINTS": "מכלול ומפרקים",
+    "Modeling Features": "תכונות מידול",
+    "Modeling": "מידול",
+    "Assembly & Joints": "מכלול ומפרקים",
+    "Assembly": "מכלול",
+    "Modeling Track contracted. Click to restore split view.": "מסלול המידול מכווץ. לחצו כדי לשחזר את התצוגה המפוצלת.",
+    "Assembly Track contracted. Click to restore split view.": "מסלול המכלול מכווץ. לחצו כדי לשחזר את התצוגה המפוצלת.",
+    "ui.timeline_2d_steps_badge": "שלבים: {count}",
+    "ui.timeline_2d_joints_badge": "מפרקים: {count}",
+    "ui.timeline_2d_active_summary": "פעיל: {active} / {total}"
+  },
+  "ja": {
+    "MODELING FEATURES": "モデリングフィーチャー",
+    "ASSEMBLY & JOINTS": "アセンブリとジョイント",
+    "Modeling Features": "モデリングフィーチャー",
+    "Modeling": "モデリング",
+    "Assembly & Joints": "アセンブリとジョイント",
+    "Assembly": "アセンブリ",
+    "Modeling Track contracted. Click to restore split view.": "モデリングトラックは折りたたまれています。クリックすると分割表示に戻ります。",
+    "Assembly Track contracted. Click to restore split view.": "アセンブリトラックは折りたたまれています。クリックすると分割表示に戻ります。",
+    "ui.timeline_2d_steps_badge": "{count} ステップ",
+    "ui.timeline_2d_joints_badge": "{count} ジョイント",
+    "ui.timeline_2d_active_summary": "アクティブ: {active} / {total}"
+  },
+  "vi": {
+    "MODELING FEATURES": "TÍNH NĂNG MÔ HÌNH HÓA",
+    "ASSEMBLY & JOINTS": "LẮP RÁP & KHỚP NỐI",
+    "Modeling Features": "Tính năng mô hình hóa",
+    "Modeling": "Mô hình hóa",
+    "Assembly & Joints": "Lắp ráp & khớp nối",
+    "Assembly": "Lắp ráp",
+    "Modeling Track contracted. Click to restore split view.": "Đã thu gọn rãnh mô hình hóa. Nhấp để khôi phục chế độ xem chia đôi.",
+    "Assembly Track contracted. Click to restore split view.": "Đã thu gọn rãnh lắp ráp. Nhấp để khôi phục chế độ xem chia đôi.",
+    "ui.timeline_2d_steps_badge": "{count} bước",
+    "ui.timeline_2d_joints_badge": "{count} khớp nối",
+    "ui.timeline_2d_active_summary": "Đang kích hoạt: {active} / {total}"
+  },
+  "zh": {
+    "MODELING FEATURES": "建模特征",
+    "ASSEMBLY & JOINTS": "装配与关节",
+    "Modeling Features": "建模特征",
+    "Modeling": "建模",
+    "Assembly & Joints": "装配与关节",
+    "Assembly": "装配",
+    "Modeling Track contracted. Click to restore split view.": "建模轨道已收起。单击恢复分屏视图。",
+    "Assembly Track contracted. Click to restore split view.": "装配轨道已收起。单击恢复分屏视图。",
+    "ui.timeline_2d_steps_badge": "{count} 步",
+    "ui.timeline_2d_joints_badge": "{count} 个关节",
+    "ui.timeline_2d_active_summary": "活动：{active} / {total}"
+  }
+}
