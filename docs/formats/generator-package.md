@@ -27,8 +27,7 @@ Format tag: `solidcraft-generator/1`. This page is the format; the machine form 
 
 `grammar` has `alternatives`, a list of token lists; a code must match exactly one alternative
 completely (the first that matches wins; a code that fits none is refused with the grammar's
-`refuse` text). Matching is by hand-written code, in time linear in the code's length (at most 128
-characters, no backtracking). Tokens:
+`refuse` text). Matching is hand-written code that tries the longest fit first and backs up when a later token fails, within a budget of 20,000 matching steps (a code is at most 128 characters); an integer has no leading zeros. Tokens:
 
 | Token | Meaning |
 |---|---|
@@ -56,7 +55,8 @@ lookups of section 3, in order. A rule is
 default: the code is not an ordering code of this series) or `not_modelled` (a real code this
 generator does not model; the dialog says so in different words and the command reply says
 `"reason": "not_modelled"`). Defaults are in the grammar (`default` above) and in `defaults`, a
-`{field: expression}` object for values that depend on others.
+`{field: expression}` object for values that depend on others (used only when the field is
+absent). The order of evaluation is: grammar, `defaults`, `lookups`, `vars`, then `rules`.
 
 **RFC 0019 regex declarations.** A Workshop manifest's `[[declares.matches]]` regex is a
 *search hint*: it lets global search offer the generator for a typed string. It does not parse.
@@ -108,8 +108,8 @@ form can therefore emit the grammar mechanically; a hand-written grammar does no
   record's columns are read as `s.E`, `t.drill`. A missing row refuses the code with `missing`.
   Lookup by a field (type to E, T, allowed M) and by a second field (M to tap drill) are both just
   lookups; a list column is tested with `in(m, s.allowed_m)`, so "offered in M3, M4, M5, not M6" is
-  `{"when": "!in(m, s.allowed_m)", "refuse": "HNTT{type} is offered in {s.allowed_m_text}, not {m}"}`
-  (`join(list, ", ")` builds the text).
+  `{"when": "!in(m, s.allowed_m)", "refuse": "HNTT{type} is offered in {s.allowed_m}, not {m}"}`
+  (a list shows as its items joined by `, `).
 
 ## 4. Expressions
 
@@ -126,8 +126,9 @@ recursion). Values are numbers (finite, `f64`), text, booleans and lists.
 - Division by zero, a non-finite result, `sqrt` of a negative, an unknown name, a wrong type or an
   out-of-range index is an error that **refuses the code** with the expression and the cause (never
   a panic, never `NaN` in a command).
-- Bounds: an expression is at most 512 characters, nests at most 32 deep, and costs at most
-  10000 evaluation steps; a whole build costs at most 1,000,000.
+- Bounds: an expression is at most 512 characters and 256 parts, and nests at most 32 levels
+  (each parenthesis, call argument, sign and `?` counts one level, a sign or `!` and a
+  parenthesis each count two); a whole build costs at most 1,000,000 evaluation steps.
 
 **Variables.** `vars` is an ordered list `{"name": "neck", "expr": "s.E / 2"}`; a variable may use
 fields, lookups and earlier variables only, so there are no cycles (a forward reference is an
@@ -227,10 +228,11 @@ machine and in the browser.
 |---|---|---|
 | Package file | 1 MiB | before parsing |
 | Ordering code | 128 characters | before parsing |
+| Grammar matching | 20,000 steps per code; optional groups nest at most 4 deep | during matching, at load |
 | Text value (any one string, input or result) | 4096 characters | on creation |
 | Table | 5000 rows, 64 columns | at load |
 | Points in one cell | 512 | at load |
-| Expression | 512 characters, depth 32, 10000 steps | at load (size, depth), at evaluation (steps) |
+| Expression | 512 characters, 256 parts, nesting 32 | at load |
 | Whole build | 1,000,000 evaluation steps | at evaluation |
 | Steps in the package | 256 | at load |
 | Repeat count | a whole number, 0 to its `max`; `max` at most 1024 | after evaluating the count and **before expanding** |

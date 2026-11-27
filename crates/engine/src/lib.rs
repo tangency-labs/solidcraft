@@ -32,6 +32,7 @@ mod edit_start;
 mod failure_codes;
 pub mod frames;
 pub mod fuzz;
+pub mod generator;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod gpg;
 pub mod licences;
