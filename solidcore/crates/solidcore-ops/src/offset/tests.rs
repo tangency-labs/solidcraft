@@ -144,6 +144,7 @@ fn a_shell_keeps_its_rounds_as_blends_of_the_moved_radius() {
 /// tilted 20° about the x axis (its normal `(0, -sin 20°, cos 20°)`, `drop` along it), its
 /// slanted rim rounded `round`. The round between the plane and the cylinder at a slant
 /// is of an exact class whose net is a rational B-spline (its spine an ellipse).
+#[allow(clippy::disallowed_methods)] // the fixture's placement, not ops geometry
 fn slanted_rim_cylinder(r: f64, bottom: f64, drop: f64, round: f64) -> Body {
     let tilt = 20f64.to_radians();
     let cylinder = make_cylinder([0.0, 0.0, bottom], r, 40.0 - bottom).unwrap();
@@ -171,6 +172,7 @@ fn slanted_rim_cylinder(r: f64, bottom: f64, drop: f64, round: f64) -> Body {
 /// placed within the body's tolerance over both boundaries, each of less area than the
 /// uncut cylinder's side and two of its slanted ends, 2 pi 10 40 + 2 pi 10² / cos 20°.
 #[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
 fn a_round_on_a_slanted_rim_shells_by_its_offset_surface() {
     all_fixes();
     let body = slanted_rim_cylinder(10.0, 0.0, 0.0, 2.0);
