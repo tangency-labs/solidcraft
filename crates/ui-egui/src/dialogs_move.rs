@@ -53,8 +53,8 @@ pub fn inputs(mode: usize) -> Vec<SelInput> {
         ROTATE => v.push(SelInput::new("Axis", AXIS_PICKS, false)),
         POINT_TO_POINT => {
             v.push(SelInput::new("From", POINTS, false));
-            // Several To points make a copy at each (#22900).
-            v.push(SelInput::new("To", POINTS, true));
+            // Several To points make a copy at each (#22900), several on one face too.
+            v.push(SelInput::new("To", POINTS, true).places());
         }
         POINT_TO_POSITION => v.push(SelInput::new("Point", POINTS, false)),
         _ => {}

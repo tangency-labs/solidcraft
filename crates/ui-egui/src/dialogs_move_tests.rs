@@ -3134,7 +3134,11 @@ fn point_to_point_copies_to_each_to_point() {
         d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
         let at = |x: f64, y: f64| Sel::Vertex { body: String::new(), point: Vec3::new(x, y, 0.0) };
         d.inputs[1].items = vec![at(0.0, 0.0)];
-        d.inputs[2].items = vec![at(30.0, 0.0), at(0.0, 40.0)];
+        // Two places on one face, as two clicks on the ground plate pick them.
+        let on_face = |x: f64, y: f64| Sel::Face { body: "Body1".into(), index: 0, point: Vec3::new(x, y, 0.0) };
+        d.inputs[2].toggle(vec![on_face(30.0, 0.0)]);
+        d.inputs[2].toggle(vec![on_face(0.0, 40.0)]);
+        assert_eq!(d.inputs[2].items.len(), 2, "a second click on the same face adds a To point");
     }
     let d = h.app.dialog.clone().unwrap();
     assert!(several_destinations(&d));
