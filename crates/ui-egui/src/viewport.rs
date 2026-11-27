@@ -6650,9 +6650,13 @@ fn seen_edge_lines(sc: &mut GpuScene, e: &[Vec3], cols: EdgeColours, w: f32, nor
 /// over a face seen at a grazing angle (`GpuScene::lifted_line`). One pass over the mesh's
 /// vertices: the tessellation shares the edge's points with the faces on either side.
 fn edge_normals(m: &solidcraft_engine::geom::Mesh, e: &[Vec3]) -> Vec<[[f32; 3]; 2]> {
+    edge_normal_lookup(m, [e])(e)
+}
+
+fn edge_normal_lookup<'a>(m: &solidcraft_engine::geom::Mesh, edges: impl IntoIterator<Item = &'a [Vec3]>) -> impl Fn(&[Vec3]) -> Vec<[[f32; 3]; 2]> {
     let tol = m.bounds().diagonal().max(1.0) * 1e-7;
-    let key = |p: Vec3| ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64);
-    let mut at: std::collections::HashMap<(i64, i64, i64), Vec<Vec3>> = e.iter().map(|p| (key(*p), Vec::new())).collect();
+    let key = move |p: Vec3| ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64);
+    let mut at: std::collections::HashMap<(i64, i64, i64), Vec<Vec3>> = edges.into_iter().flatten().map(|p| (key(*p), Vec::new())).collect();
     for (p, n) in m.positions.iter().zip(&m.normals) {
         if let Some(list) = at.get_mut(&key(*p))
             && list.len() < 8
@@ -6660,17 +6664,19 @@ fn edge_normals(m: &solidcraft_engine::geom::Mesh, e: &[Vec3]) -> Vec<[[f32; 3];
             list.push(*n);
         }
     }
-    e.windows(2)
-        .map(|w| {
-            let mut found: Vec<Vec3> = Vec::new();
-            for p in w {
-                found.extend(at.get(&key(*p)).into_iter().flatten().copied());
-            }
-            let Some(first) = found.first().copied() else { return [[0.0; 3]; 2] };
-            let other = found.iter().copied().min_by(|a, b| a.dot(first).total_cmp(&b.dot(first))).unwrap_or(first);
-            [first.to_f32(), other.to_f32()]
-        })
-        .collect()
+    move |edge| {
+        edge.windows(2)
+            .map(|w| {
+                let mut found: Vec<Vec3> = Vec::new();
+                for p in w {
+                    found.extend(at.get(&key(*p)).into_iter().flatten().copied());
+                }
+                let Some(first) = found.first().copied() else { return [[0.0; 3]; 2] };
+                let other = found.iter().copied().min_by(|a, b| a.dot(first).total_cmp(&b.dot(first))).unwrap_or(first);
+                [first.to_f32(), other.to_f32()]
+            })
+            .collect()
+    }
 }
 
 /// The outline of a highlighted face where the model hides it (dimmed).
@@ -6999,6 +7005,7 @@ fn highlight_geometry_key_with(app: &SolveApp, model_key: u64, selected: &[Sel])
     }
     app.preview.key.hash(&mut h);
     app.preview.rolled_back.hash(&mut h);
+    app.preview.corner_hover().map(|_| (app.preview.key, app.preview.hovered_corner)).hash(&mut h);
     app.viewport.refused_ring.hash(&mut h);
     // Where a Move dialog has moved its bodies; while its triad is dragged, only that it is.
     if crate::dialogs_move::dragging(app) {
@@ -7753,6 +7760,33 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     let mut lit_shared = EdgeHighlights::default();
     let mut lit_shared_hidden = EdgeHighlights::default();
     let mut selected_instances = HighlightInstances::default();
+    if app.dialog.as_ref().is_some_and(|dialog| matches!(dialog.kind, crate::dialogs::Kind::Sheet(crate::dialogs_sheet::Sm::Flange { ty: 1, .. })))
+        && let Some(corner) = app.preview.corner_hover()
+        && app.body_visible(&corner.body)
+    {
+        let faces: std::collections::BTreeSet<usize> = corner.faces.iter().flatten().copied().collect();
+        let lift = t.hover_face_lift;
+        let (r, g, b) = body_rgb(app, &corner.body);
+        mesh_tris(&mut feedback, &corner.mesh, [r.saturating_add(lift), g.saturating_add(lift), b.saturating_add(lift), 255], true, |face| {
+            faces.contains(&(face as usize))
+        });
+        let edges = || {
+            corner
+                .mesh
+                .edges
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| {
+                    corner.mesh.edge_pickable(*index)
+                        && corner.mesh.edge_faces.get(*index).is_some_and(|adjacent| adjacent.iter().any(|face| faces.contains(&(*face as usize))))
+                })
+                .map(|(_, edge)| edge.as_slice())
+        };
+        let normals = edge_normal_lookup(&corner.mesh, edges());
+        for edge in edges() {
+            edge_lines(&mut feedback, edge, hover_edge, 1.5, &normals(edge));
+        }
+    }
     // Print faces (#8429): tinted towards the colour section views give cut faces, and outlined,
     // so the face a slicer export lays its body on shows at a glance. Drawn before the selection,
     // which lights over it.

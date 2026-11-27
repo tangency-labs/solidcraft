@@ -166,6 +166,12 @@ sheet_contour
   remap_refs: sketch
 sheet_flange
   remap_bodies: body
+sheet_flange_with_corners
+  remap_refs: corners[0].covered, corners[0].covering, corners[1].covering
+  remap_bodies: body
+sheet_corner_join
+  remap_refs: covered, covering
+  remap_bodies: body
 sheet_hem
   remap_bodies: body
 sheet_perforate

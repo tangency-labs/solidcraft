@@ -2308,6 +2308,16 @@ pub enum FeatureKind {
         /// rule's `bend_relief_shape` (rectangular | obround | tear). None follows the rule.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         bend_relief_shape: Option<String>,
+        /// Corner choices for these flanges, identified by their named source rims.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        corners: Vec<crate::CornerJoinParams>,
+    },
+    /// A corner shared by two bends, saved by their source-edge identities.
+    SheetCornerJoin {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
+        #[serde(flatten)]
+        corner: crate::CornerJoinParams,
     },
     /// Flat hems on sheet edges.
     SheetHem {
@@ -4217,6 +4227,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. }
                 | FeatureKind::SheetContour { .. }
                 | FeatureKind::SheetFlange { .. }
+                | FeatureKind::SheetCornerJoin { .. }
                 | FeatureKind::SheetHem { .. }
                 | FeatureKind::SheetPerforate { .. }
                 | FeatureKind::SheetFold { .. }
@@ -4301,6 +4312,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. } => "BaseFlangeFeature",
             FeatureKind::SheetContour { .. } => "ContourFlangeFeature",
             FeatureKind::SheetFlange { .. } => "EdgeFlangeFeature",
+            FeatureKind::SheetCornerJoin { .. } => "CornerJoinFeature",
             FeatureKind::SheetHem { .. } => "HemFeature",
             FeatureKind::SheetPerforate { .. } => "PerforateFeature",
             FeatureKind::SheetFold { .. } => "FoldFeature",
@@ -4400,6 +4412,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. } => "sheet_base",
             FeatureKind::SheetContour { .. } => "sheet_contour",
             FeatureKind::SheetFlange { .. } => "sheet_flange",
+            FeatureKind::SheetCornerJoin { .. } => "sheet_corner_join",
             FeatureKind::SheetHem { .. } => "sheet_hem",
             FeatureKind::SheetPerforate { .. } => "sheet_perforate",
             FeatureKind::SheetFold { .. } => "sheet_fold",
@@ -4502,6 +4515,7 @@ impl FeatureKind {
             "BaseFlangeFeature" => "sheet_base",
             "ContourFlangeFeature" => "sheet_contour",
             "EdgeFlangeFeature" => "sheet_flange",
+            "CornerJoinFeature" => "sheet_corner_join",
             "HemFeature" => "sheet_hem",
             "PerforateFeature" => "sheet_perforate",
             "FoldFeature" => "sheet_fold",
@@ -4604,6 +4618,7 @@ impl FeatureKind {
             FeatureKind::SheetBase { .. } => "BaseFlange",
             FeatureKind::SheetContour { .. } => "ContourFlange",
             FeatureKind::SheetFlange { .. } => "EdgeFlange",
+            FeatureKind::SheetCornerJoin { .. } => "CornerJoin",
             FeatureKind::SheetHem { .. } => "Hem",
             FeatureKind::SheetPerforate { .. } => "Perforate",
             FeatureKind::SheetFold { .. } => "Fold",
