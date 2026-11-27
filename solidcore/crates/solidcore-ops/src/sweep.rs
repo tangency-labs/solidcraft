@@ -77,7 +77,7 @@ pub use solidcore::geom::certified::Verdict;
 /// kernel's own reasons.
 pub use solidcore::sweep::api_brep::TaperCornerRefusal as CornerRefusal;
 
-use crate::body::{finish, finish_under, Body, Contract, Expect};
+use crate::body::{finish, finish_proved, finish_under, Body, Contract, Expect, Outward};
 use crate::error::status;
 use crate::order::{self, Order};
 use crate::session::{read_body, run, with_body};
@@ -562,6 +562,15 @@ fn making(
     run(call, f)?.map(Body::new)
 }
 
+/// [`making`], the new body keeping the proof its result test made ([`finish_proved`],
+/// [`finish_under`]), so the next proved operation that takes it does not prove it again.
+fn making_held(
+    call: &'static str,
+    f: impl FnOnce(&mut Kernel) -> solidcore::Result<Out<(Brep, Option<Outward>)>>,
+) -> Result<Body> {
+    run(call, f)?.map(|(b, proof)| Body::held(b, proof))
+}
+
 /// A curve list's own refusal inside a kernel call.
 macro_rules! parsed {
     ($e:expr) => {
@@ -978,7 +987,7 @@ pub fn sweep_placed(
     let mut placed = unplaced();
     let mut route = SweepRoute::Curve(frame);
     let expect = if cap { Expect::SOLID } else { Expect::FACES };
-    let body = making("sweep", |k| {
+    let body = making_held("sweep", |k| {
         let (made, along) = match (parse(k, profile), parse(k, path)) {
             (Ok(c), Ok(p)) => (c, p),
             (Err(e), _) | (_, Err(e)) => return Ok(Err(e)),
@@ -995,7 +1004,7 @@ pub fn sweep_placed(
                 };
                 placed = line_placements(l.direction, l.length).map(|t| Affine::of(&t));
                 route = SweepRoute::Line;
-                return finish(k, r, expect);
+                return finish_proved(k, r, expect);
             }
             PathShape::Undecided(d) => doubt = Some(d),
             PathShape::Not => {}
@@ -1016,7 +1025,7 @@ pub fn sweep_placed(
                         Err(_) => return Ok(Err(Error::Argument)),
                     };
                     route = SweepRoute::Arc;
-                    return finish(k, r, expect);
+                    return finish_proved(k, r, expect);
                 }
                 PathShape::Undecided(d) => doubt = doubt.or(Some(d)),
                 PathShape::Not => {}
@@ -1027,7 +1036,7 @@ pub fn sweep_placed(
                         Ok((b, motions)) => {
                             placed = motions.map(|t| Affine::of(&t));
                             route = SweepRoute::Segments;
-                            finish(k, b, expect)
+                            finish_proved(k, b, expect)
                         }
                         Err(e) => Ok(Err(status(e))),
                     };
@@ -1085,7 +1094,7 @@ pub fn sweep_placed(
             match curve_swept(k, &made.curves, &path_curve, closed, cap, &options) {
                 Ok(Ok((b, motions))) => {
                     placed = motions;
-                    finish(k, b, expect)?
+                    finish_proved(k, b, expect)?
                 }
                 Ok(Err(e)) => Err(e),
                 Err(e) => Err(status(e)),
@@ -1229,7 +1238,7 @@ pub fn curve_sweep(
 ) -> Result<(Body, [Affine; 3])> {
     let mut placed = unplaced();
     let expect = if cap { Expect::SOLID } else { Expect::FACES };
-    let body = making("curve_sweep", |k| {
+    let body = making_held("curve_sweep", |k| {
         let (made, along) = match (parse(k, profile), parse(k, path)) {
             (Ok(c), Ok(p)) => (c, p),
             (Err(e), _) | (_, Err(e)) => return Ok(Err(e)),
@@ -1238,7 +1247,7 @@ pub fn curve_sweep(
             match curve_sweep_in(k, &made.curves, &along.curves, frame, cap) {
                 Ok(Ok((b, motions))) => {
                     placed = motions;
-                    finish_under(k, b, expect, contract)?.map(|(b, _)| b)
+                    finish_under(k, b, expect, contract)?
                 }
                 Ok(Err(e)) => Err(e),
                 Err(e) => Err(status(e)),
@@ -1248,16 +1257,14 @@ pub fn curve_sweep(
     Ok((body, placed))
 }
 
-/// [`curve_sweep`] in the kernel `k`, of curves the caller has made (a caller that builds its
-/// own curves from its own numbers, inside its own kernel call), before the result contract:
-/// the swept B-rep and the placements. The caller checks the result ([`Body::check_solid`], or
-/// the topology tests it takes) and words a kernel error itself.
+/// [`curve_sweep`] in the kernel `k`, of the curves made from its lists, before the result
+/// contract: the swept B-rep and the placements.
 ///
 /// # Errors
 /// The kernel's error of any step, as it is (the outer error). Inside: [`Error::Argument`]
 /// for no profile or path, a path curve with no B-spline form or an up direction not finite;
 /// [`Error::NotSolid`] for a capped tube round a closed path left with a free edge.
-pub fn curve_sweep_in(
+fn curve_sweep_in(
     k: &mut Kernel,
     profile: &[KCurve],
     path: &[KCurve],
@@ -2617,6 +2624,23 @@ mod tests {
             sweep_placed(&rectangle(4.0, 3.0, false), &path, SweepFrame::Follow, true).unwrap();
         let v = body.volume(1e-8).unwrap();
         assert!((v - 12.0 * length).abs() < 1e-4 * 12.0 * length, "{v}");
+    }
+
+    /// A swept solid keeps the proof its result test made: `sweep_placed`'s, and `curve_sweep`'s
+    /// under [`Contract::Proved`], so the next proved operation does not prove it again. Under
+    /// [`Contract::Closed`] no proof is made, so none is held.
+    #[test]
+    fn a_proved_sweep_keeps_its_proof() {
+        let (path, _) = rounded_rectangle();
+        let profile = rectangle(4.0, 3.0, false);
+        let (body, ..) = sweep_placed(&profile, &path, SweepFrame::Follow, true).unwrap();
+        assert!(body.holds_proof(), "sweep_placed");
+        let (body, _) =
+            curve_sweep(&profile, &path, SweepFrame::Follow, true, Contract::Proved).unwrap();
+        assert!(body.holds_proof(), "curve_sweep, proved");
+        let (body, _) =
+            curve_sweep(&profile, &path, SweepFrame::Follow, true, Contract::Closed).unwrap();
+        assert!(!body.holds_proof(), "curve_sweep, closed");
     }
 
     /// The four lines of a square profile with the given half-width, in order.

@@ -478,6 +478,14 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
 
+### key parameter
+
+A named value marked with a star for frequent changes.
+
+- **In SolidCraft:** `parameters.favorite`; the Key parameters band and its compact fields and sliders.
+- **Don't use:** favourites as the name of a separate, duplicated list.
+- **For translators:** a frequently changed input, not a keyboard key or a database key.
+
 ### keyboard profile
 
 A built-in set of another CAD tool's keys, mapped onto SolidCraft's own commands.
@@ -1071,6 +1079,12 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the
 Normal line type as "normal vector".
+
+## Weld graphic
+
+A saved record of a weld's manufacturing settings and optional manual symbol.
+It is separate from timeline features and bodies; creating it does not add a
+solid bead or change mass properties.
 
 ## Mounting plate
 

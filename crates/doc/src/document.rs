@@ -5162,6 +5162,9 @@ pub struct Document {
     /// Notes: text anchored to points in model space, drawn as screen-facing callouts (#1631).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<crate::notes::Note>,
+    /// Weld graphics, independent of timeline features and bodies.
+    #[serde(default, skip_serializing_if = "Vec::is_empty", deserialize_with = "crate::weld::deserialize_records")]
+    pub welds: Vec<crate::weld::WeldRecord>,
     /// What was hidden when the design was saved. A session takes it from here when the design
     /// opens and keeps the live state itself (`browser.visibility`: saved, and undone like any
     /// other change), so a document in a session leaves this empty; the session puts it back when
@@ -5452,6 +5455,7 @@ impl Document {
             .chain(self.canvases.iter().map(|c| c.id))
             .chain(self.point_clouds.iter().map(|c| c.id))
             .chain(self.notes.iter().map(|n| n.id))
+            .chain(self.welds.iter().map(|w| w.id))
             .chain(a.joints.iter().map(|j| j.id))
             .chain(a.contact_sets.iter().map(|c| c.id))
             .chain(a.studies.iter().map(|s| s.id))
@@ -5516,6 +5520,7 @@ impl Document {
             saved_sections: Vec::new(),
             plane_extents: std::collections::BTreeMap::new(),
             notes: Vec::new(),
+            welds: Vec::new(),
             visibility: Visibility::default(),
             drawings: Vec::new(),
             plugin_data: Default::default(),

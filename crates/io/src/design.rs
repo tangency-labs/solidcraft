@@ -9,6 +9,11 @@ use std::sync::Arc;
 
 mod drawing;
 mod import_cache;
+// Known limitation: the model cache key (`native_cache::KERNEL`, a constant, and the evaluation
+// digest from `build.rs`, which hashes source only) doesn't record the active kernel backend.
+// That is fine for the builds we ship, but the opt-in `backend-occt` build can share cached bodies
+// with a normal build; see #23125 (https://github.com/tangency-labs/solidcraft/issues/23125).
+// The note lives here because comments in those two files change the digest itself.
 mod native_cache;
 mod provenance;
 mod text;
@@ -2254,8 +2259,14 @@ mod tests {
             fs::remove_file(root.join("crates/kernel/src/new.rs")).unwrap();
             // A change outside what computes models keeps the commit's digest, as a commit of it does.
             write(&root, "solidcore/docs/reference.md", "# changed\n");
+            write(&root, "solidcore/crates/solidcore/tests/a.rs", "fn t() { edited }\n");
+            write(&root, "solidcore/crates/goldens/src/lib.rs", "pub fn g() { edited }\n");
             write(&root, "crates/viewport/src/lib.rs", "pub fn camera() { edited }\n");
-            assert_eq!(build_script::evaluation_source(&root).as_deref(), Some(clean.as_str()), "the interface and the notes compute no model");
+            assert_eq!(
+                build_script::evaluation_source(&root).as_deref(),
+                Some(clean.as_str()),
+                "the interface, notes, tests and goldens compute no model"
+            );
             let _ = fs::remove_dir_all(&root);
         }
 

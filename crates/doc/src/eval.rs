@@ -843,7 +843,8 @@ pub struct SketchCopy {
 /// large for the geometry around them is reduced where it doesn't fit, to the largest that works
 /// for each group of edges sharing a face; the radius per edge is returned. With
 /// [`FilletFit::Taper`](crate::FilletFit::Taper) it tapers along each edge it doesn't fit. With
-/// the exact fit a radius too large is refused, naming the largest that fits ([`with_largest_fit`]).
+/// the exact fit a radius too large is refused directly with the largest size SMLib reports
+/// without searching by retrying builds (#10849).
 /// Also the picks whose edges a round overflowing its faces removed whole ([`kernel::fillet_removing`]).
 fn fillet_fitted(
     body: &kernel::Body,
@@ -856,22 +857,10 @@ fn fillet_fitted(
     cost_tests::count(|c| c.blends += 1);
     match kernel::fillet_removing(body, edges, r, turn) {
         Ok((b, gone)) => Ok((b, None, gone)),
-        // A refusal the kernel could not size names no radius to try, and the search for the
-        // largest radius that fits cannot be guided by it: it then halves the radius from the
-        // middle down and blends every edge again for each of the sizes it tries. On the design
-        // of #4282 (a cube with a hole through each axis, a 2 mm round of every edge) those ten
-        // blends of the forty-one edges took 77 s, fifteen times the blend that failed, and they
-        // found nothing: the round fails at any radius there. The refusal is reported as the
-        // kernel stated it, less a size it names that no round can have ([`without_unusable_fit`]).
-        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact && kernel::named_fit(&why).is_none() => {
-            Err(kernel::KernelError::TooLarge(without_unusable_fit(&why)))
-        }
-        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => Err({
-            let hint = kernel::named_fit(&why);
-            #[cfg(test)]
-            cost_tests::count(|c| c.fit_searches += 1);
-            with_largest_fit(why, "radius", || kernel::fillet_max_why(body, edges, r, turn, hint))
-        }),
+        // SMLib's refusal already computes the largest fitting radius from the cause's own
+        // geometry (never by retrying builds): return it directly instead of running a search,
+        // dropping any unusable 0 mm fit note (#10849, #4282, #20685).
+        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Exact => Err(kernel::KernelError::TooLarge(without_unusable_fit(&why))),
         Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r, turn)? {
             // Built at the radius asked for after all (the groups apart): nothing reduced.
             Some((used, b)) => Ok((b, used.iter().any(|u| *u < r).then_some(used), Vec::new())),
@@ -2052,6 +2041,13 @@ pub struct FeatureResult {
     unkept: bool,
     #[serde(skip)]
     pub state: Arc<ModelState>,
+}
+
+impl FeatureResult {
+    /// The largest fitting size reported by a blend refusal on this feature, if any.
+    pub fn largest_fit(&self) -> Option<kernel::BlendFit> {
+        self.error.as_deref().and_then(kernel::named_blend_fit)
+    }
 }
 
 /// Incremental evaluator: holds the state after every feature.
@@ -17001,27 +16997,23 @@ fn runs_along(st: &ModelState, (bi, fi): (usize, usize), n: Vec3) -> bool {
 
 /// Whether a face that runs along the normal of `plane` ([`runs_along`]), seen along that
 /// normal, meets one of the profile `regions`. Seen so, the face is the curve its boundary edges
-/// make: their exact curves, sampled finely, meet a region where a sample lies in it or a step
-/// between two samples crosses one of its loops (a profile narrower than the steps).
+/// make: their exact curves, sampled finely, meet a region where they run through its inside, so
+/// also across a profile narrower than the steps between the samples, not where they only run
+/// along its outline or through one of its corners (#7330); the kernel answers that from the
+/// samples and the outline's polylines.
 fn meets_footprint(st: &ModelState, (bi, fi): (usize, usize), plane: &Plane, regions: &[Region2]) -> bool {
     let Some(b) = st.bodies.get(bi) else { return false };
     let tol = (b.body.size() * 1e-4).max(1e-4);
     let Ok(edges) = b.body.edges(tol) else { return true };
     let own = kernel::face_edge_indices(&b.body, fi);
-    let curves: Vec<Vec<Vec2>> = own.iter().filter_map(|e| edges.get(*e)).map(|e| e.points.iter().map(|q| plane.to_local(*q)).collect()).collect();
-    if curves.iter().flatten().any(|q| regions.iter().any(|r| r.contains(*q))) {
-        return true;
-    }
-    let loops: Vec<_> = regions.iter().flat_map(|r| std::iter::once(&r.outer).chain(&r.holes)).map(|l| l.polyline(1e-3)).collect();
-    curves.iter().flat_map(|c| c.windows(2)).any(|w| loops.iter().any(|l| l.edges().any(|(a, b)| segments_meet(w[0], w[1], *a, *b))))
-}
-
-/// Whether segments `p`-`q` and `a`-`b` cross or touch.
-fn segments_meet(p: Vec2, q: Vec2, a: Vec2, b: Vec2) -> bool {
-    let side = |o: Vec2, u: Vec2, v: Vec2| (u.x - o.x) * (v.y - o.y) - (u.y - o.y) * (v.x - o.x);
-    let (d1, d2) = (side(a, b, p), side(a, b, q));
-    let (d3, d4) = (side(p, q, a), side(p, q, b));
-    d1 * d2 <= 0.0 && d3 * d4 <= 0.0 && !(d1 == 0.0 && d2 == 0.0 && d3 == 0.0 && d4 == 0.0)
+    let xy = |q: Vec2| [q.x, q.y];
+    let curves: Vec<Vec<[f64; 2]>> =
+        own.iter().filter_map(|e| edges.get(*e)).map(|e| e.points.iter().map(|q| xy(plane.to_local(*q))).collect()).collect();
+    let regions: Vec<Vec<Vec<[f64; 2]>>> =
+        regions.iter().map(|r| r.loops().map(|l| l.polyline(1e-3).into_vec().into_iter().map(xy).collect()).collect()).collect();
+    // Off the outline is farther than the wall's samples (`tol`) and the outline's (1e-3) can
+    // stray from each other: a round wall flush with a round profile crosses its chords.
+    curves.iter().any(|c| kernel::planar::path_runs_inside(c, &regions, tol + 1e-3))
 }
 
 /// The body at `p` when the face there is not planar.

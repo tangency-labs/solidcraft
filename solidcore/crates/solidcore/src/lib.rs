@@ -54,6 +54,7 @@ pub mod develop;
 pub mod dogbone;
 pub mod eval;
 pub mod finger_joint;
+pub mod gap_wedge;
 pub mod geom;
 pub mod heal;
 pub mod hlr;

@@ -72,6 +72,61 @@ fn a_hole_drilled_through_a_folded_sheet_is_a_cut_out_of_its_flat() {
     assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
 }
 
+/// A vertical base carries a web with two parallel flanges bent down from it. A triangle below
+/// the bends clips the free corner of each flange in one Through All cut.
+#[test]
+fn a_through_all_notch_cuts_both_parallel_flanges() {
+    let mut s = session();
+    rule(&mut s, "Test", T, 0.44, 2.0, 0.5);
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [60, 12]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"type": "base", "sketch": "Base", "body_name": "Plate"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[2, 30, 12]], "height": 80, "position": "inside"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[40, 0, 10], [40, 60, 10]], "height": 20, "position": "inside"}));
+
+    let before_volume = exact_volume(&s);
+    let (before_area, before_cutouts) = flat_outline(&mut s);
+    let bends = flat(&mut s)["bends"].clone();
+    assert_eq!(bends.as_array().unwrap().len(), 3);
+    let probes = json!({"body": "Plate", "points": [[70, 1, -5], [70, 59, -5]]});
+    let classes = |s: &mut Session| run(s, "inspect.classify_points", probes.clone());
+    let before = classes(&mut s);
+    assert_eq!(before["results"][0]["class"], "inside");
+    assert_eq!(before["results"][1]["class"], "inside");
+
+    run(&mut s, "sketch.create", json!({"name": "Cut", "plane": {"x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+    run(&mut s, "sketch.line", json!({"points": [[14, -8], [80, -8], [80, 4]], "closed": true, "infer": false}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Cut", "through_all": true, "direction": "negative", "operation": "cut"}));
+
+    let removed_area = 2.0 * (80.0 - 14.0) * (4.0 - (-8.0)) / 2.0;
+    let expected_volume = before_volume - T * removed_area;
+    let (after_area, after_cutouts) = flat_outline(&mut s);
+    assert!((before_area - after_area - removed_area).abs() < 1e-7, "flat area lost {}", before_area - after_area);
+    assert_eq!(after_cutouts, before_cutouts);
+    assert_eq!(flat(&mut s)["bends"], bends);
+
+    let check_folded = |s: &mut Session| {
+        let volume = exact_volume(s);
+        assert!((volume - expected_volume).abs() < 1e-7, "{volume} vs {expected_volume}");
+        let after = classes(s);
+        assert_eq!(after["results"][0]["class"], "outside");
+        assert_eq!(after["results"][1]["class"], "outside");
+        let measure = run(s, "inspect.measure", json!({"bodies": ["Plate"]}));
+        let body = &measure["bodies"][0];
+        // Each clipped corner adds one face, three edges and two net vertices.
+        assert_eq!(body["faces"], 28);
+        assert_eq!(body["edges"], 70);
+        assert_eq!(body["vertices"], 42);
+        assert_eq!(body["kernel"]["shells"], 1);
+    };
+    check_folded(&mut s);
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sheet.refold", json!({}));
+    check_folded(&mut s);
+}
+
 /// An engraving cut 0.5 into the sheet's surface is a pocket down from the flat's face on the
 /// surface, its top (z 1.5…2), on its DXF layer; a hole drilled through it is a cut-out of the
 /// flat and a hole in the pocket. Cut into the other face, an engraving is a pocket from z 0 to 0.5.
@@ -266,6 +321,42 @@ fn a_small_notch_cut_into_a_large_base_flanges_edge_is_a_pocket() {
     let want = 1000.0 * 200.0 * 1.0 - 0.48 * 0.24 * 0.5;
     assert!((exact_volume(&s) - want).abs() < 1e-9 * want, "{} vs {want}", exact_volume(&s));
     assert_eq!(pockets(&mut s).len(), 1, "{:?}", pockets(&mut s));
+}
+
+/// #22818: a 2.9 × 2.9 × 3 mm half-depth edge notch at the flattest spot `(0, 720)` of a 6 mm
+/// thick, 2400 mm periodic spline-outline sheet-metal flange must succeed as a pocket and keep
+/// the body valid with the exact removed volume (previously refused with "planar regions: not
+/// supported yet: a loop whose turning its area does not decide" because the trimmed spline edge
+/// on the notch floor was flattened to its chord under the body-scaled reading tolerance).
+#[test]
+fn a_half_depth_edge_notch_on_a_large_spline_flange_is_a_pocket() {
+    let mut s = session();
+    rule(&mut s, "Stock", 6.0, 0.44, 6.0, 1.0);
+    let outline = json!([[1200, 0], [908, 604], [0, 720], [-908, 604], [-1200, 0], [-788, -524], [0, -880], [788, -524]]);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.spline.fit_point", json!({"points": outline, "periodic": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base", "body_name": "Plate"}));
+    let v0 = exact_volume(&s);
+    let notch = json!({
+        "length": 2.9,
+        "width": 2.9,
+        "height": 3.0,
+        "corner": [-1.45, 720.0 - 1.45, 3.0],
+        "operation": "cut",
+        "targets": ["Plate"]
+    });
+    run(&mut s, "solid.box", notch);
+    let st = s.model.state();
+    let body = &st.bodies.iter().find(|b| b.name == "Plate").expect("Plate").body;
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    assert_eq!(body.classify_point(Vec3::new(0.0, 719.0, 4.5)).expect("classify notch"), solidcraft_kernel::PointClass::Outside);
+    assert_eq!(body.classify_point(Vec3::new(0.0, 719.0, 1.5)).expect("classify below floor"), solidcraft_kernel::PointClass::Inside);
+    let removed = v0 - exact_volume(&s);
+    let box_half = 2.9 * 1.45 * 3.0;
+    assert!((removed - box_half).abs() < 0.05, "removed {removed} vs ~{box_half} mm³");
+    let p = pockets(&mut s);
+    assert!(p.len() == 1 && (p[0]["depth_mm"].as_f64().unwrap_or(0.0) - 3.0).abs() < 1e-6, "{p:?}");
 }
 
 /// A 100 x 60 base flange on XY of the default rule (T 2.5), its metal z 0 to 2.5:
