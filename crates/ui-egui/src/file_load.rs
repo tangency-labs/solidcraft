@@ -1841,7 +1841,7 @@ pub(crate) fn cancel_waiting(app: &mut SolveApp, serial: u64) {
     let running = app.file_load.waiting.remove(at);
     app.file_load.drop_warm(serial);
     crate::operations::ended(app, &format!("file:{serial}"), Outcome::Cancelled);
-    app.set_status("file operation cancelled", false);
+    app.set_status(solidcraft_ui_text::tr("file_load.cancelled"), false);
     running.request.answer(Err("file operation cancelled".into()));
 }
 
@@ -2140,9 +2140,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let export = r.request.kind.exports();
     // What Cancel says once it has stopped the job.
     let stopped = match r.request.kind {
-        Kind::ExportDxf => solidcraft_ui_text::tr_label("dxf.cancelled"),
-        Kind::ExportSheet => solidcraft_ui_text::tr_label("drawing_export.cancelled"),
-        _ => "file operation cancelled",
+        Kind::ExportDxf => solidcraft_ui_text::tr("dxf.cancelled"),
+        Kind::ExportSheet => solidcraft_ui_text::tr("drawing_export.cancelled"),
+        _ => solidcraft_ui_text::tr("file_load.cancelled"),
     };
     let work = r.work().filter(|(_, d, t)| export || (phase == 0 && d < t));
     let screen = ctx.content_rect();
