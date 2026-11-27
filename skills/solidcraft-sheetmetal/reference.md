@@ -237,11 +237,15 @@ Ask the shop for the rule: thickness, K-factor (or a 90° deduction or allowance
 relief width and depth, the gap between flanges that meet at a corner, and the corner relief. Never
 invent a K-factor: it depends on the material, the tooling and the grain direction.
 
-Today's build unfolds every bend from the rule's K-factor. OPEN DRAFT PR #9911 adds
-`unfold_method` (`KFactor`|`Deduction`|`Allowance`) and a 90° deduction or allowance value per
-rule, and derives K = (2·BA90/π − R)/T; it is not in the build from this branch. When it lands, a
-rule can take a shop's chart value instead of a K-factor, and the skill's arithmetic above stays
-the same because the engine still unfolds from one K.
+Every bend unfolds from the rule's K-factor. A rule can give that K-factor directly
+(`unfold_method` `k_factor`, the default) or take a shop's chart value instead: `unfold_method`
+`deduction` or `allowance`, with `unfold_value` the 90° bend deduction or allowance for the rule's
+thickness and radius. The rule derives K = (2·BA90/π − R)/T, with BA90 = 2·(R + T) − BD90 for a
+deduction, and refuses a value whose K is outside 0…1, naming the range. The arithmetic above
+stays the same: read the derived K from `sheet.rules` (`values.k_factor`). One chart value fits
+one thickness and radius, so make one rule per chart line. A library pick (`material` with
+`gauge`) changes the thickness, so it takes such a rule back to `k_factor`, said in `notes`,
+unless the same call gives `unfold_method` or `unfold_value`.
 
 ## Corners and relief
 

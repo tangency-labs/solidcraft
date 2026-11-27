@@ -2259,9 +2259,12 @@ fn marks_draw_each_item_of_the_scene() {
     assert!(marks.error.is_none(), "{:?}", marks.error);
     let lines: Vec<&Vec<Vec2>> = marks.marks.iter().filter_map(|m| if let Mark::Line { points, .. } = m { Some(points) } else { None }).collect();
     assert_eq!(lines.len(), 1 + 3 + 1, "the line, three dashes, the arc");
-    for dash in &lines[1..4] {
+    // Each 5 mm dash is drawn 0.35 mm shorter about its middle, so its round caps end it at 5 mm:
+    // from 0.175 + 10k to 4.825 + 10k.
+    for (k, dash) in lines[1..4].iter().enumerate() {
         let length: f64 = dash.windows(2).map(|w| w[0].dist(w[1])).sum();
-        assert!((length - 5.0).abs() < 1e-9, "{dash:?}");
+        let start = dash.first().map_or(f64::NAN, |p| p.x);
+        assert!((length - 4.65).abs() < 1e-9 && (start - (0.175 + 10.0 * k as f64)).abs() < 1e-9, "{dash:?}");
     }
     assert!(lines[4].iter().all(|p| (p.dist(Vec2::new(50.0, 50.0)) - 20.0).abs() <= 0.01 + 1e-9) && lines[4].len() > 20);
     let Some(Mark::Fill { triangles, .. }) = marks.marks.last() else { panic!("{:?}", marks.marks) };
@@ -2272,6 +2275,60 @@ fn marks_draw_each_item_of_the_scene() {
     bad.size_mm = Vec2::new(f64::NAN, 1.0);
     let marks = Marks::of(&bad, 8, 0.01);
     assert!(marks.marks.is_empty() && marks.error.is_some());
+}
+
+/// A chain line whose dot is one line width long keeps its dots: under round caps the dot is a
+/// dash 0 long, drawn as a disc. 0.5 mm wide, 12, 1.5, 0.5, 1.5 is stroked 11.5, 2, 0, 2 from
+/// 15.25: along 31 mm, dashes from 0.25 and 15.75 and dots at 13.75 and 29.25.
+#[test]
+fn a_chain_line_keeps_its_dots_under_round_caps() {
+    let chain = Item::Stroke {
+        path: vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(31.0, 0.0) }],
+        closed: false,
+        width_mm: 0.5,
+        pattern: Some(Dashes { lengths_mm: vec![12.0, 1.5, 0.5, 1.5], phase_mm: 0.0 }),
+    };
+    let scene = Scene {
+        size_mm: Vec2::new(100.0, 100.0),
+        groups: vec![Group { object: 1, kind: ObjectKind::View, items: vec![chain] }],
+        fonts: Vec::new(),
+        clips: Vec::new(),
+    };
+    let marks = Marks::of(&scene, 7, 0.01);
+    assert!(marks.error.is_none(), "{:?}", marks.error);
+    let ends: Vec<(f64, f64)> = marks
+        .marks
+        .iter()
+        .filter_map(|m| if let Mark::Line { points, .. } = m { Some((points.first()?.x, points.last()?.x)) } else { None })
+        .collect();
+    let expected = [(0.25, 11.75), (13.75, 13.75), (15.75, 27.25), (29.25, 29.25)];
+    assert!(ends.len() == expected.len() && ends.iter().zip(expected).all(|(a, b)| (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9), "{ends:?}");
+}
+
+/// A line that starts exactly on a dot draws it, and none exactly at its end, as the writers do:
+/// 0.5 mm wide, 0.5, 1.5 from 0.25 is stroked 0, 2 from 0, so along 4 mm the dots are at 0 and 2.
+#[test]
+fn a_dotted_line_starts_on_its_dot() {
+    let dotted = Item::Stroke {
+        path: vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(4.0, 0.0) }],
+        closed: false,
+        width_mm: 0.5,
+        pattern: Some(Dashes { lengths_mm: vec![0.5, 1.5], phase_mm: 0.25 }),
+    };
+    let scene = Scene {
+        size_mm: Vec2::new(100.0, 100.0),
+        groups: vec![Group { object: 1, kind: ObjectKind::View, items: vec![dotted] }],
+        fonts: Vec::new(),
+        clips: Vec::new(),
+    };
+    let marks = Marks::of(&scene, 7, 0.01);
+    assert!(marks.error.is_none(), "{:?}", marks.error);
+    let ends: Vec<(f64, f64)> = marks
+        .marks
+        .iter()
+        .filter_map(|m| if let Mark::Line { points, .. } = m { Some((points.first()?.x, points.last()?.x)) } else { None })
+        .collect();
+    assert_eq!(ends, [(0.0, 0.0), (2.0, 2.0)]);
 }
 
 /// The plate's sheet draws its border, views, dimension and title block text: every text run's

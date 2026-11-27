@@ -26,6 +26,7 @@ pub mod affine;
 pub mod cell_grid;
 pub mod curves;
 pub mod develop;
+pub mod dxf;
 pub mod exchange;
 pub mod frames;
 pub mod hatch;
@@ -34,24 +35,33 @@ pub mod mesh;
 pub mod modelling;
 pub mod planar;
 pub mod points;
+pub mod profiles;
 pub mod projection;
 pub mod query;
+pub mod runtime;
+pub mod sections;
 pub mod shaft_spline;
+pub mod tessellate;
 pub mod tube_cope;
 
 pub use affine::{Affine, AffineRefused, AxisRefusal, Matrix, OffsetQuad, SquareFaceLevel};
 pub use cell_grid::{CellGrid, CellGridLimits};
 pub use curves::{CurveRefused, CurveSample, Curves};
+pub use dxf::Dxf;
 pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWritten, Exchange};
 pub use frames::{Frames, GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
 pub use hole_stacks::{HoleStacks, HoleStacksRefused};
 pub use mesh::{MeshRebuilt, MeshRefused, Meshes, ReconstructionKind};
 pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
 pub use planar::{Planar, PlanarRefused};
-pub use points::{Distance, PointSetSummary, Points, PointsRefused};
+pub use points::{ClassifiedPoint, Distance, PointNormalFace, PointSetSummary, Points, PointsRefused, UnitNormal};
+pub use profiles::{ProfileCurve, ProfileRefused, Profiles};
 pub use projection::{ProjectionRefused, Projections};
-pub use query::{OutlineStretch, Queries, QueryRefused, SurfacePoint};
+pub use query::{FaceHit, MembersClosest, OutlineStretch, Queries, QueryRefused, SurfacePoint};
+pub use runtime::{ErrorClass, FailureCode, Runtime};
+pub use sections::{BlendFrame, FramesRefused, Sections, TurnRefusal};
 pub use shaft_spline::ShaftSplines;
+pub use tessellate::{PlanarFill, TessRefused, Tessellate};
 pub use tube_cope::{CopeFailed, CopeRefusal, TemplateRefusal, TubeCopes};
 
 /// A kernel's stable name: what build features, the support matrix and reports call it.
@@ -127,6 +137,18 @@ pub enum OpKind {
     TubeCope,
     /// Shaft splines planned, and round faces' seats and ends ([`ShaftSplines`]).
     ShaftSpline,
+    /// DXF geometry: paths converted for a file, bounds, scales, entity checks ([`Dxf`]).
+    Dxf,
+    /// Blend sections: a section's frames from its points, which open sections to turn
+    /// ([`Sections`]).
+    Sections,
+    /// Planar fills: loops and unions of regions filled with triangles ([`Tessellate`]).
+    Tessellate,
+    /// The kernel's runtime: stopping its work, the code of its last failed call ([`Runtime`]).
+    Runtime,
+    /// Bodies from profiles of curves in space: revolved, extruded, planar sheets, balls
+    /// ([`Profiles`]).
+    Profiles,
 }
 
 impl OpKind {
@@ -159,6 +181,11 @@ impl OpKind {
         OpKind::Mesh,
         OpKind::TubeCope,
         OpKind::ShaftSpline,
+        OpKind::Dxf,
+        OpKind::Sections,
+        OpKind::Tessellate,
+        OpKind::Runtime,
+        OpKind::Profiles,
     ];
 
     /// The operation's stable name, as the support matrix and route files spell it.
@@ -191,6 +218,11 @@ impl OpKind {
             OpKind::Mesh => "mesh",
             OpKind::TubeCope => "tube_cope",
             OpKind::ShaftSpline => "shaft_spline",
+            OpKind::Dxf => "dxf",
+            OpKind::Sections => "sections",
+            OpKind::Tessellate => "tessellate",
+            OpKind::Runtime => "runtime",
+            OpKind::Profiles => "profiles",
         }
     }
 

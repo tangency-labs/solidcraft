@@ -316,8 +316,8 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
             "parent: a saved view's id; ",
             "line: {kind: full|half|offset|aligned, points: 2 to 32 [x, y] on the parent's plane in model mm (full 2, half and aligned 3, offset an even number from 4), arrows: left|right, the side of the line walked from its first point that is kept and seen}; ",
             "place?: {at: [x, y]} (default: where the projected view looking its way would sit, lined up with its parent, its boundary 20 mm past the parent's: away from the arrows in third angle, towards them in first) → {view, sheet: its parent's, scale: its parent's, boundary_mm, letter, outside?}. A view of the parent's model cut along the line, looking the arrows' way; ",
-            "its scale and display settings follow its parent. Only full sections draw their cut so far; ",
-            "the others say \"not supported yet\". The line is saved with this view, on the parent, so it moves and scales with the parent: this is the way to draw a section line, never a free line, sketch or text on the sheet; ",
+            "its scale and display settings follow its parent. Only full sections are supported so far; ",
+            "half, offset, aligned and shaded section views are refused as \"not supported yet\". The line is saved with this view, on the parent, so it moves and scales with the parent: this is the way to draw a section line, never a free line, sketch or text on the sheet; ",
             "there is no command yet to move the cut, so a changed cut is a new section view (delete the old one). One undo step; ",
             "the design is unchanged.",
         )),
@@ -2039,6 +2039,9 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     let record = s.drawing(SECTION)?.clone();
     let (parent, sheet) = find(&record, request.parent.0, SECTION).map(|v| (v.id, v.sheet))?;
     record.can_project_from(parent).map_err(|e| bad(SECTION, e.to_string()))?;
+    if let Some(why) = crate::drawing_view::not_cut_yet_kind(request.line.kind.0) {
+        return Err(bad(SECTION, why));
+    }
     let points = request.line.points.iter().map(|point| point.0).collect();
     let line = CuttingLine::new(request.line.kind.0, points, request.line.arrows.0).map_err(|e| bad(SECTION, e.to_string()))?;
     let side = line.side(record.projection);
@@ -2048,12 +2051,16 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
     let place = request.place.map_or(ViewPlace::At([parent_centre.x, parent_centre.y]), |place| place.0);
     let kind = ViewKind::Section { parent, line };
     let mut view = View { id, sheet, kind, place, settings: ViewOverrides::default(), reference_shown_percent: 0.0, label: None, centre_marks: None };
+    let mut staged = Drawing::clone(&record);
+    staged.add_views([Arc::new(view.clone())]);
+    staged.validate().map_err(|e| bad(SECTION, e.to_string()))?;
+    let resolved = staged.resolve_view(id).map_err(|e| bad(SECTION, e.to_string()))?;
+    if let Some(why) = crate::drawing_view::not_cut_yet(&resolved) {
+        return Err(bad(SECTION, why));
+    }
     if request.place.is_none() {
         // Staged on its parent's centre to measure it, then moved along the free axis of the side a
         // projected view looking its way takes, as `projected` places one.
-        let mut staged = Drawing::clone(&record);
-        staged.add_views([Arc::new(view.clone())]);
-        staged.validate().map_err(|e| bad(SECTION, e.to_string()))?;
         let centre = place_beside(s, &staged, parent, id, Beside::Side(side), SECTION)?;
         view.place = ViewPlace::At([centre.x, centre.y]);
     }
