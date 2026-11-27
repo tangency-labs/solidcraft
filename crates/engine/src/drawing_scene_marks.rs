@@ -129,7 +129,7 @@ pub(super) fn groups(
                 Some(Ok(shown)) => shown,
                 Some(Err(why)) => return Err(bad(CMD, format!("cannot scan shown bodies: {}", why.name()))),
             };
-            let (edges, candidates) = scan(&shown.of_view(&view), &view)?;
+            let (edges, candidates) = scan(&shown.of_view(&drawing_view::DrawnView::new(s, view.clone())), &view)?;
             let resolved = resolve_exclusions(&s.doc, &s.model, &rule.exclude).map_err(|e| bad(CMD, e.to_string()))?;
             let by_index: BTreeMap<_, _> = edges
                 .iter()
@@ -228,7 +228,7 @@ pub(super) fn candidates(s: &Session, id: u64) -> Result<Vec<MarkCandidate>> {
         Err(Unmeasured::NoBodies) => return Ok(Vec::new()),
         Err(why) => return Err(bad(CMD, format!("cannot scan shown bodies: {}", why.name()))),
     };
-    scan(&shown.of_view(&view), &view).map(|(_, marks)| marks)
+    scan(&shown.of_view(&drawing_view::DrawnView::new(s, view.clone())), &view).map(|(_, marks)| marks)
 }
 
 fn scan(shown: &ShownSet, view: &ResolvedView) -> Result<(Vec<CircularEdge>, Vec<MarkCandidate>)> {

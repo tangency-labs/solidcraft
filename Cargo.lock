@@ -6622,6 +6622,7 @@ dependencies = [
  "arboard",
  "craft-plugin",
  "ed25519-dalek",
+ "eframe",
  "egui",
  "egui-wgpu",
  "flate2",

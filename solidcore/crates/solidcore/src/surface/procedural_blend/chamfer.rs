@@ -76,6 +76,33 @@ fn positive(x: f64) -> bool {
 }
 
 impl ChamferDefinition {
+    /// Not upstream (#20158): writes every field of this chamfer definition into `d`.
+    pub(crate) fn content(&self, d: &mut crate::geom::content::Digest) {
+        let Self {
+            size,
+            wedge,
+            stationwise,
+        } = self;
+        match size {
+            ChamferSize::Distances([a, b]) => {
+                d.tag(1);
+                d.f64(*a);
+                d.f64(*b);
+            }
+            ChamferSize::DistanceAngle { distance, angle } => {
+                d.tag(2);
+                d.f64(*distance);
+                d.f64(*angle);
+            }
+            ChamferSize::Chord(c) => {
+                d.tag(3);
+                d.f64(*c);
+            }
+        }
+        d.f64(*wedge);
+        d.bool(*stationwise);
+    }
+
     /// The sizes at the wedge `wedge`, checked: every size finite and positive, the wedge
     /// and the angle inside their ranges.
     ///

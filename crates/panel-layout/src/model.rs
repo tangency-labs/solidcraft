@@ -213,6 +213,10 @@ pub struct PanelSpec {
     /// and collapse capability. The declared height must satisfy those bounds.
     #[serde(default)]
     pub fixed_bottom_height: Option<f32>,
+    /// A Bottom card that never collapses to its header, though its height may vary
+    /// ([`PanelRegistry::set_bottom_heights`]): its own controls raise and lower it.
+    #[serde(default)]
+    pub bottom_always_open: bool,
     #[serde(default)]
     pub header_actions: Vec<HeaderActionSpec>,
     #[serde(default)]
@@ -232,7 +236,7 @@ impl PanelSpec {
     }
 
     pub fn collapsible_in(&self, zone: Zone) -> bool {
-        self.features.collapsible && !(zone == Zone::Bottom && self.fixed_bottom_height.is_some())
+        self.features.collapsible && !(zone == Zone::Bottom && (self.fixed_bottom_height.is_some() || self.bottom_always_open))
     }
 }
 
@@ -240,6 +244,7 @@ impl PanelSpec {
 pub struct PanelRegistry {
     specs: BTreeMap<PanelKind, PanelSpec>,
     side_widths: BTreeMap<PanelKind, Vec<(f32, f32)>>,
+    bottom_heights: BTreeMap<PanelKind, Vec<(f32, f32)>>,
 }
 
 impl PanelRegistry {
@@ -299,6 +304,22 @@ impl PanelRegistry {
             return Err(error(Rule::Bounds, "invalid side width intervals"));
         }
         self.side_widths.insert(kind.clone(), ranges);
+        Ok(())
+    }
+
+    /// Declare sorted, disjoint closed height intervals for the Bottom row, the heights analogue of
+    /// [`Self::set_side_widths`]: a height between two intervals snaps to the nearer one, so a panel
+    /// can change what it shows across a gap (a one-row strip, then a taller view).
+    pub fn set_bottom_heights(&mut self, kind: &PanelKind, ranges: Vec<(f32, f32)>) -> PanelResult<()> {
+        let spec = self.get(kind)?;
+        if ranges.is_empty()
+            || ranges.len() > 16
+            || ranges.iter().any(|&(lo, hi)| !lo.is_finite() || !hi.is_finite() || lo < spec.min_size.height || hi > spec.max_size.height || lo > hi)
+            || ranges.windows(2).any(|pair| pair[0].1 >= pair[1].0)
+        {
+            return Err(error(Rule::Bounds, "invalid bottom height intervals"));
+        }
+        self.bottom_heights.insert(kind.clone(), ranges);
         Ok(())
     }
 
@@ -1005,6 +1026,7 @@ pub fn resolve_column_width(layout: &Layout, registry: &PanelRegistry, column: &
 
 /// Repair widths in gaps while retaining the existing validation of out-of-bounds widths.
 pub fn normalize_column_widths(layout: &mut Layout, registry: &PanelRegistry) -> PanelResult<()> {
+    normalize_bottom_heights(layout, registry)?;
     if registry.side_widths.is_empty() {
         return Ok(());
     }
@@ -1025,6 +1047,57 @@ pub fn normalize_column_widths(layout: &mut Layout, registry: &PanelRegistry) ->
                     instance.memory.column_width = Some(width);
                 }
             }
+        }
+    }
+    Ok(())
+}
+
+/// The heights the Bottom cards `shown` keeps all admit: the intersection of each tab's registered
+/// intervals, or its continuous bounds when it declared none.
+pub fn bottom_height_ranges(layout: &Layout, registry: &PanelRegistry, shown: impl Fn(&Section) -> bool) -> PanelResult<Vec<(f32, f32)>> {
+    let mut ranges = vec![(0.0_f32, MAX_LOGICAL)];
+    for section in layout.sections.iter().filter(|s| s.location.zone() == Zone::Bottom && shown(s)) {
+        for id in &section.tabs {
+            let kind = &layout.instance(id)?.kind;
+            let spec = registry.get(kind)?;
+            let continuous = [(spec.min_size.height, spec.max_size.height)];
+            let allowed = registry.bottom_heights.get(kind).map_or(continuous.as_slice(), Vec::as_slice);
+            ranges = ranges
+                .iter()
+                .flat_map(|&(lo, hi)| {
+                    allowed.iter().filter_map(move |&(a, b)| {
+                        let lower = lo.max(a);
+                        let upper = hi.min(b);
+                        (lower <= upper).then_some((lower, upper))
+                    })
+                })
+                .collect();
+            if ranges.is_empty() {
+                return Err(error(Rule::IncompatibleTabs, "Bottom row height constraints have no intersection"));
+            }
+        }
+    }
+    Ok(ranges)
+}
+
+/// Project onto the admitted heights; equal distances select the smaller height.
+pub fn resolve_bottom_height(ranges: &[(f32, f32)], height: f32) -> Option<f32> {
+    ranges.iter().map(|&(lo, hi)| height.clamp(lo, hi)).min_by(|a, b| (a - height).abs().total_cmp(&(b - height).abs()))
+}
+
+/// Repair a Bottom card whose height lies in a gap between the heights its tabs admit.
+pub fn normalize_bottom_heights(layout: &mut Layout, registry: &PanelRegistry) -> PanelResult<()> {
+    if registry.bottom_heights.is_empty() {
+        return Ok(());
+    }
+    let sections: Vec<_> = layout.sections.iter().filter(|s| s.location.zone() == Zone::Bottom).map(|s| (s.id.clone(), s.size.height)).collect();
+    for (id, height) in sections {
+        let ranges = bottom_height_ranges(layout, registry, |s| s.id == id)?;
+        let Some(snapped) = resolve_bottom_height(&ranges, height).filter(|snapped| *snapped != height) else { continue };
+        let tabs = layout.section(&id)?.tabs.clone();
+        layout.sections.iter_mut().filter(|s| s.id == id).for_each(|s| s.size.height = snapped);
+        for panel in layout.instances.iter_mut().filter(|p| tabs.contains(&p.id)) {
+            panel.memory.size.height = snapped;
         }
     }
     Ok(())

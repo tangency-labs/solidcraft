@@ -1102,6 +1102,102 @@ fn a_closed_path_whose_ends_are_almost_meeting_is_refused() {
     );
 }
 
+/// The closed foot profile in the plane y = 21 (x across the path at x = -0.25, z up): a
+/// pentagon, drawn as its five sides or, `split`, as ten lines with the bottom split three times
+/// and the two 45 degree chamfers split once and twice (the upper chamfer's points sit 0.25 along
+/// it either side of the path, as a sketch offset leaves them).
+fn foot_profile(split: bool) -> Vec<Curve> {
+    let s = 0.25 * std::f64::consts::FRAC_1_SQRT_2;
+    let c = 0.7 + 0.25 * (2f64.sqrt() - 1.0);
+    let pts: Vec<[f64; 2]> = if split {
+        vec![
+            [-1.25, 0.0],
+            [-0.25, 0.0],
+            [2.6, 0.0],
+            [2.15 + c, 0.0],
+            [2.15 + c - s, s],
+            [2.15, c],
+            [2.15, c + 1.8],
+            [-0.25 + s, c + 4.2 - s],
+            [-0.25, c + 4.2],
+            [-1.25, c + 5.2],
+        ]
+    } else {
+        vec![
+            [-1.25, 0.0],
+            [2.15 + c, 0.0],
+            [2.15, c],
+            [2.15, c + 1.8],
+            [-1.25, c + 5.2],
+        ]
+    };
+    let pts: Vec<[f64; 3]> = pts.iter().map(|p| [p[0], 21.0, p[1]]).collect();
+    polygon(&pts)
+}
+
+/// The 42 mm square with corners of radius 4 about (3.75, 3.75) and the other three corners
+/// of a 34 mm square from it, z = 0, starting half way along its side x = -0.25 and running
+/// counter-clockwise seen from below (down that side first).
+fn rounded_square_path() -> Vec<Curve> {
+    let arc = |center: [f64; 2], reference: [f64; 2]| Curve::Arc {
+        center: [center[0], center[1], 0.0],
+        axis: Z,
+        reference: [reference[0], reference[1], 0.0],
+        radius: 4.0,
+        start: 0.0,
+        end: FRAC_PI_2,
+    };
+    vec![
+        line([-0.25, 21.0, 0.0], [-0.25, 3.75, 0.0]),
+        arc([3.75, 3.75], [-1.0, 0.0]),
+        line([3.75, -0.25, 0.0], [37.75, -0.25, 0.0]),
+        arc([37.75, 3.75], [0.0, -1.0]),
+        line([41.75, 3.75, 0.0], [41.75, 37.75, 0.0]),
+        arc([37.75, 37.75], [1.0, 0.0]),
+        line([37.75, 41.75, 0.0], [3.75, 41.75, 0.0]),
+        arc([3.75, 37.75], [0.0, 1.0]),
+        line([-0.25, 37.75, 0.0], [-0.25, 21.0, 0.0]),
+    ]
+}
+
+/// A 41.5 x 41.5 x 35 box cut by the foot profile swept round its rounded square path.
+fn box_cut_by_the_foot(split: bool) -> Body {
+    let (tool, _, route) = sweep_placed(
+        &foot_profile(split),
+        &rounded_square_path(),
+        SweepFrame::Follow,
+        true,
+    )
+    .unwrap();
+    assert_eq!(route, SweepRoute::Curve(SweepFrame::Follow));
+    let bin = make_box([0.0; 3], [41.5, 41.5, 35.0]).unwrap();
+    solidcore_ops::boolean::boolean(bin, tool, solidcore_ops::boolean::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// T-2272: a profile's run of collinear lines sweeps as one line. The curve sweep joins the
+/// profile with one knot span per line and makes a face only where it turns a corner, so the
+/// upper chamfer's three lines (3.14, 0.25 and 1.41 mm) were one face whose parameter speed
+/// jumped 12.6 and 5.7 times at its hidden knots. Round each corner the box's side crosses that
+/// face from where it grazes it (the chamfer's circle of radius 3.75 about the corner's centre,
+/// the distance to the side) to its top, across both creases, and the boolean fitted that trim
+/// with near-kinks: SMLib's check refused 8 of them (test 13, a radius of curvature of 9e-6
+/// against 1.2e-4). Split or not, the profile is the same pentagon, so the cut is the same
+/// solid: it passes the check and has the volume and the faces of the unsplit profile's cut.
+#[test]
+fn a_run_of_collinear_profile_lines_sweeps_as_one_line() {
+    rig_fixes();
+    let split = box_cut_by_the_foot(true);
+    let report = split.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    let whole = box_cut_by_the_foot(false);
+    assert!(whole.check(CheckLevel::All).unwrap().is_valid());
+    let (v_split, v_whole) = (split.volume(1e-12).unwrap(), whole.volume(1e-12).unwrap());
+    assert!(rel(v_split, v_whole) < 1e-9, "{v_split} against {v_whole}");
+    assert_eq!(split.counts().unwrap(), whole.counts().unwrap());
+}
+
 /// The faces of a 10 mm box named by record index through its `Order`: the plane z = 5 (its
 /// normal at length 2) sections the four side faces in one curve each, at z = 5, and misses the
 /// top and bottom; an index past the record's faces and a normal of no length are refused.

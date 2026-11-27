@@ -88,7 +88,7 @@ pub use cmd::addition;
 pub use cmd::auto_operation;
 pub use cmd::command_specs;
 pub use cmd::dimension_roles;
-pub use cmd::drawing_export::print_pdf;
+pub use cmd::drawing_export::{PrintedPdf, print_pdf};
 pub use cmd::extrude_reach;
 pub use cmd::find_command;
 pub use cmd::motion::AutomaticExplode;
@@ -206,6 +206,16 @@ impl EngineError {
             EngineError::Feature(f) => Some(&f.code),
             _ => None,
         }
+    }
+    /// The largest fitting size reported by the kernel when a blend is refused as too large, if
+    /// the backend reported one (#10849).
+    pub fn largest_fit(&self) -> Option<solidcraft_kernel::BlendFit> {
+        let text = match self {
+            EngineError::Feature(f) => f.error.as_str(),
+            EngineError::Other(s) => s.as_str(),
+            _ => return None,
+        };
+        solidcraft_kernel::named_blend_fit(text)
     }
 }
 
@@ -1050,6 +1060,8 @@ pub struct Session {
     /// the features nor the model's results (a joint drag frame) has no new body to pin.
     names_pinned: Option<(Arc<Document>, std::sync::Weak<solidcraft_doc::ModelState>)>,
     occurrence_visibility_cache: std::sync::Mutex<Option<occurrences::VisibilityCache>>,
+    /// [`Session::design_hidden`]'s last answer (#22107).
+    design_hidden_cache: std::sync::Mutex<Option<occurrences::DesignHiddenCache>>,
     /// The hidden joints, folders and bodies of the view, as sets: the browser asks about every
     /// joint of the design on every frame (#3892), the viewport about every body, and an answer
     /// that walked the hidden lists made a frame cost grow with the size of the design.
@@ -1552,6 +1564,7 @@ impl Session {
             joints_settled: None,
             names_pinned: None,
             occurrence_visibility_cache: Default::default(),
+            design_hidden_cache: Default::default(),
             visibility_index_cache: Default::default(),
             consumed_sketches_cache: Default::default(),
             made_bodies: MadeBodies::new(),
@@ -3948,6 +3961,7 @@ impl Session {
             made_bodies: MadeBodies::new(),
             names_pinned: None,
             occurrence_visibility_cache: Default::default(),
+            design_hidden_cache: Default::default(),
             visibility_index_cache: Default::default(),
             consumed_sketches_cache: Default::default(),
             removed_later_cache: Default::default(),
@@ -4936,6 +4950,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         home_view,
         saved_sections,
         notes,
+        welds,
         visibility,
         drawings,
         next_component_color_index,
@@ -4983,6 +4998,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *home_view == b.home_view
         && *saved_sections == b.saved_sections
         && *notes == b.notes
+        && *welds == b.welds
         && *visibility == b.visibility
         && *drawings == b.drawings
         && *next_component_color_index == b.next_component_color_index
