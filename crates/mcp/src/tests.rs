@@ -6147,7 +6147,7 @@ fn completion_suggests_bodies_sketches_features_commands_skills_and_prompt_args(
     let skills = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://skill/{skill}/{file}"}), "skill", "solidcraft-m");
     assert_eq!(skills, ["solidcraft-mechanisms", "solidcraft-modeling"]);
     let all_files = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://skill/{skill}/{file}"}), "file", "");
-    assert_eq!(all_files, ["SKILL.md", "reference.md", "reference/porting.md"]);
+    assert_eq!(all_files, ["SKILL.md", "reference.md", "reference/porting.md", "reference/report-template.md"]);
     let scoped_files = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://skill/solidcraft-checking/{file}"}), "file", "ref");
     assert_eq!(scoped_files, ["reference/porting.md"]);
 
