@@ -474,7 +474,7 @@ fn refine_ivl(u: &mut Vec<f64>, q: &mut Vec<[Ivl; 3]>, p: usize, target: &[f64])
 
 /// The knot values of `a` and `b` merged, each as many times as the one holding it more
 /// often.
-fn knot_union(a: &[f64], b: &[f64]) -> Vec<f64> {
+pub(crate) fn knot_union(a: &[f64], b: &[f64]) -> Vec<f64> {
     let mut all: Vec<f64> = a.iter().chain(b).copied().collect();
     all.sort_by(f64::total_cmp);
     all.dedup();
