@@ -201,9 +201,7 @@ fn pure_nurbs_flags(surface: &Surface, curve: &Curve, uv: &Curve) -> Option<u64>
         SurfaceKind::SurfOfExtrusion(s) => s.base(),
         _ => return None,
     };
-    if s_base.gw_nurb().is_none() {
-        return None;
-    }
+    s_base.gw_nurb()?;
     let curve_oob = |c: &Curve| match c.kind() {
         CurveKind::BSpline(b) => Some(b.is_out_of_bounds_enabled()),
         CurveKind::Ellipse(e) => Some(e.base().is_out_of_bounds_enabled()),
