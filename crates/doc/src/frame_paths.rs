@@ -384,3 +384,33 @@ pub(super) fn wire_line(w: &solidcraft_sketch::Wire) -> Result<Option<PieceData>
         Err(e) => Err(path_error(&[], e)),
     }
 }
+
+/// Retained end datums for the same ordered physical paths this module emitted.
+/// The caller certifies only final bodies of structurally pristine frames.
+pub(super) fn cope_records(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &ModelState,
+) -> Result<BTreeMap<String, crate::frame_cope::RoundMember>> {
+    let FeatureKind::FrameMember { profile, continuous, .. } = &f.kind else {
+        return Err(DocError::Invalid("not a frame member feature".into()));
+    };
+    let Layout { paths, at, turn, .. } = layout(doc, vals, f, st)?;
+    let mut records = BTreeMap::new();
+    for (id, path) in path_keys(&paths, *continuous).into_iter().zip(paths) {
+        let straight_frame = if let [piece] = path.as_slice()
+            && kernel::stock_line_length(&piece.geometry).map_err(|e| path_error(&path, e))?.is_some()
+        {
+            let (plane, length, _, _) = member_section(doc, vals, f, st, &id)?;
+            Some((plane, length))
+        } else {
+            None
+        };
+        let geometry: Vec<_> = path.iter().map(|p| p.geometry).collect();
+        if let Some(record) = super::round_record(vals, profile, at, turn, &geometry, straight_frame)? {
+            records.insert(id, record);
+        }
+    }
+    Ok(records)
+}

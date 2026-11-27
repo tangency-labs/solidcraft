@@ -405,8 +405,7 @@ impl ExpressedMove {
         // The primitive refuses only a number that is not finite: `now.origin` is bounded by `eval`
         // and `rotation` is a rigid matrix the commands checked, so for a stored move it does not
         // fail. Were it to, no extra move (the turn's own part is gone) is the safe reading.
-        let kept = solidcraft_kernel::services::affine::pivot_displacement(&self.rotation, [o.x, o.y, o.z])
-            .map_or(Vec3::ZERO, |k| Vec3::new(k[0], k[1], k[2]));
+        let kept = solidcraft_kernel::affine::pivot_displacement(&self.rotation, [o.x, o.y, o.z]).map_or(Vec3::ZERO, |k| Vec3::new(k[0], k[1], k[2]));
         apply_vector(&self.frame, d(now.translate, self.at) + kept)
     }
 
@@ -844,8 +843,12 @@ impl Document {
         let mut out = Vec::new();
         let owners = self.model_body_components(st);
         let names = WorldNames::new(self, st);
+        let mut by_component: std::collections::HashMap<u64, Vec<_>> = std::collections::HashMap::new();
+        for (b, owner) in st.bodies.iter().zip(&owners) {
+            by_component.entry(*owner).or_default().push(b);
+        }
         for (comp, path, m) in self.placements() {
-            for (b, _) in st.bodies.iter().zip(&owners).filter(|(_, owner)| **owner == comp) {
+            for b in by_component.get(&comp).into_iter().flatten().copied() {
                 let name = names.name(&b.name, comp, &path);
                 let w = match self.model_body_offset(b) {
                     Some(o) => mat_mul(&m, o),
@@ -1105,7 +1108,7 @@ impl Document {
 }
 
 /// The most occurrences a design holds.
-const MAX_OCCURRENCES: usize = 100_000;
+pub(crate) const MAX_OCCURRENCES: usize = 100_000;
 
 /// Is `a` inside `b` (or `b` itself), following each component up to the one it was created in?
 /// `parent_of` gives that parent, `None` for an unknown component. The walk stops after 1000

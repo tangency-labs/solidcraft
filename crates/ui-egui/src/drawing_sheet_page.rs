@@ -271,6 +271,11 @@ pub(crate) fn show_view(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) -> bool 
         message(ui, ui.max_rect(), app.tr("sheet_views.missing"), Tokens::get().error);
         return true;
     };
+    // New drawing… closed the drawing this focused Sheet shows: the setup page takes its place.
+    if app.session.view_context.focused() == id && crate::drawing_workspace::left_for_new(app).is_some() {
+        crate::drawing_workspace::show_setup(app, ui);
+        return true;
+    }
     let subject = descriptor.subject;
     let (drawing, sheet) = match crate::sheet_views::resolve(app, subject.as_deref()) {
         Ok(owner) => owner,
@@ -1239,8 +1244,7 @@ impl Marks {
                     }
                     let width = ((width_mm * at.scale) as f32).max(hair);
                     let points: Vec<Pos2> = points.iter().map(|p| at.screen(*p)).collect();
-                    let stroke = Stroke::new(width, ink);
-                    painter.add(if *closed { closed_line(points, stroke) } else { egui::Shape::line(points, stroke) });
+                    round_line(painter, &points, *closed, Stroke::new(width, ink));
                 }
                 Mark::Fill { triangles, outlines, bounds } => {
                     if !bounds.meets(&visible) {
@@ -1255,7 +1259,7 @@ impl Marks {
                     }
                     for outline in outlines {
                         let points: Vec<Pos2> = outline.iter().map(|p| at.screen(*p)).collect();
-                        painter.add(closed_line(points, Stroke::new(hair * 0.5, ink)));
+                        round_line(painter, &points, true, Stroke::new(hair * 0.5, ink));
                     }
                 }
                 Mark::Picture { source, rect, opacity, clip, within } => {
@@ -1302,41 +1306,38 @@ impl Marks {
     }
 }
 
-/// The paper's miter limit ([`solidcraft_engine::geom::paper`]): a join whose miter is longer than
-/// this many line widths is bevelled.
-const MITER_LIMIT: f32 = 4.0;
+/// The cosine of the sharpest turn a line is drawn through in one piece: past 30° egui's miter
+/// (which has no limit) would show past the round join the writers draw, by more than 3.5% of the
+/// half width.
+const SMOOTH_TURN_COS: f64 = 0.866;
 
-/// A closed line through `points`, joined as the paper joins it. egui joins a closed line's
-/// corners by miter with no limit, so a corner where the line turns back on itself (an edge loop
-/// seen almost edge-on, a thin sliver of a face) draws a spike far off the line, out of all
-/// proportion to its width. A loop with a join past the miter limit is drawn instead as an open
-/// line from the middle of its first side round to it again, whose sharp joins egui bevels; the
-/// two ends meet square in the middle of a straight side. Any other loop is drawn as before.
-fn closed_line(mut points: Vec<Pos2>, stroke: Stroke) -> egui::Shape {
-    // A point repeated on screen has no direction to join by.
-    points.dedup();
-    while points.len() > 2 && points.first() == points.last() {
-        points.pop();
-    }
-    let n = points.len();
-    let normal = |a: Pos2, b: Pos2| (b - a).normalized().rot90();
-    let past_limit = (0..n).any(|i| {
-        let (before, at, after) = (points[(i + n - 1) % n], points[i], points[(i + 1) % n]);
-        let join = (normal(before, at) + normal(at, after)) * 0.5;
-        // egui puts a miter's corner 1 / |join| half widths from the point.
-        join.length_sq() * MITER_LIMIT * MITER_LIMIT < 1.0
-    });
-    match points.as_slice() {
-        [first, second, ..] if n > 1 && past_limit => {
-            let middle = first.lerp(*second, 0.5);
-            let mut open = Vec::with_capacity(n + 2);
-            open.push(middle);
-            open.extend_from_slice(&points[1..]);
-            open.push(*first);
-            open.push(middle);
-            egui::Shape::line(open, stroke)
+/// Points of a line closer than this on screen are one point, in pixels.
+const SAME_POINT_PX: f64 = 1e-3;
+
+/// A line through `points` with round caps and round joins, as every writer strokes it
+/// ([`solidcraft_geom::paper`]): egui strokes with butt caps and unlimited miters, so the line is
+/// drawn in the runs the kernel cuts it into at each sharper turn, with a disc one width across at
+/// the ends of every run. A line that closes without a sharp turn is one loop with no ends.
+fn round_line(painter: &egui::Painter, points: &[Pos2], closed: bool, stroke: Stroke) {
+    let points: Vec<[f64; 2]> = points.iter().map(|p| [f64::from(p.x), f64::from(p.y)]).collect();
+    let runs = solidcraft_kernel::planar::stroke_runs(&points, closed, SAME_POINT_PX, SMOOTH_TURN_COS);
+    let r = stroke.width / 2.0;
+    let on_screen = |p: &[f64; 2]| pos2(p[0] as f32, p[1] as f32);
+    for run in &runs {
+        let piece: Vec<Pos2> = run.points.iter().map(on_screen).collect();
+        if run.closed {
+            painter.add(egui::Shape::closed_line(piece, stroke));
+            continue;
         }
-        _ => egui::Shape::closed_line(points, stroke),
+        if let Some(start) = piece.first() {
+            painter.circle_filled(*start, r, stroke.color);
+        }
+        if piece.len() > 1 {
+            painter.add(egui::Shape::line(piece, stroke));
+        }
+    }
+    if let Some(end) = runs.last().filter(|run| !run.closed && run.points.len() > 1).and_then(|run| run.points.last()) {
+        painter.circle_filled(on_screen(end), r, stroke.color);
     }
 }
 
@@ -1565,7 +1566,8 @@ fn marks_owned_detail(scene: &Scene, tol: f64, detail: bool) -> Result<(Vec<Mark
                     let points = flatten(path, tol, &mut budget)?;
                     match pattern {
                         Some(dashes) => {
-                            for points in dashed(&points, *closed, dashes, &mut budget)? {
+                            // Each dash's round caps lie within its length, as the writers draw it.
+                            for points in dashed(&points, *closed, &dashes.under_round_caps(*width_mm), &mut budget)? {
                                 out.push(line(points, false, *width_mm));
                             }
                         }
@@ -1636,20 +1638,22 @@ fn flatten(path: &[Seg2], tol: f64, budget: &mut usize) -> Result<Vec<Vec2>, Fau
 /// The dashes of a line through `points` with pattern `dashes`, along its whole length (round a
 /// closed one), in paper millimetres.
 fn dashed(points: &[Vec2], closed: bool, dashes: &Dashes, budget: &mut usize) -> Result<Vec<Vec<Vec2>>, Fault> {
-    let lengths: Vec<f64> = dashes.lengths_mm.iter().copied().filter(|l| l.is_finite() && *l > 0.0).collect();
-    if lengths.len() < 2 {
+    // A dash may be 0 long: a dot under round caps.
+    let lengths: Vec<f64> = dashes.lengths_mm.iter().copied().filter(|l| l.is_finite() && *l >= 0.0).collect();
+    let period: f64 = lengths.iter().sum();
+    if lengths.len() < 2 || period <= 0.0 {
         return Ok(vec![points.to_vec()]);
     }
     let mut path = points.to_vec();
     if closed && let Some(first) = points.first() {
         path.push(*first);
     }
-    // Where in the pattern the line starts.
-    let period: f64 = lengths.iter().sum();
+    // Where in the pattern the line starts: on a dot when the phase ends exactly at one, as the
+    // writers start.
     let mut into = dashes.phase_mm.rem_euclid(period);
     let mut index = 0usize;
     while let Some(l) = lengths.get(index)
-        && into >= *l
+        && (into > *l || (into == *l && *l > 0.0))
     {
         into -= l;
         index = (index + 1) % lengths.len();
