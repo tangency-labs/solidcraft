@@ -258,6 +258,7 @@ pub struct WorkCounters {
     booleans: Cell<u64>,
     apart_unions: Cell<u64>,
     move_trim_bisection_pieces: Cell<u64>,
+    edge_tight_box_solves: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -708,6 +709,15 @@ impl WorkCounters {
         self.move_trim_bisection_pieces.get()
     }
 
+    /// Tight boxes of edge curves solved
+    /// (`query::edge::calculate_tight_bounding_box`, for an edge whose curve's loose box
+    /// is not already inside its vertices' box), so a test can check that a B-rep's tight
+    /// box does not solve an edge again for each planar face on it. Not the fork's.
+    #[must_use]
+    pub fn edge_tight_box_solves(&self) -> u64 {
+        self.edge_tight_box_solves.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -764,6 +774,13 @@ impl WorkCounters {
         self.booleans.set(0);
         self.apart_unions.set(0);
         self.move_trim_bisection_pieces.set(0);
+        self.edge_tight_box_solves.set(0);
+    }
+
+    /// Counts one solve of an edge curve's tight box.
+    pub(crate) fn add_edge_tight_box_solve(&self) {
+        self.edge_tight_box_solves
+            .set(self.edge_tight_box_solves.get().saturating_add(1));
     }
 
     /// Counts `pieces` bisection pieces evaluated while certifying a moved trim's gap.
