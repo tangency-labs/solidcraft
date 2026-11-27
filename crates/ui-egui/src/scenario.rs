@@ -347,10 +347,12 @@ impl Harness {
         }
         // A file opening, recovering or saving in the background, the offer to stand it up being
         // worked out (its estimate can end frames after the meshing), a view being drawn on a
-        // worker, or a window checking what its material does: wait for it (as a person would).
+        // worker, a window checking what its material does, or a picked drawing being read before
+        // its placement window opens: wait for it (as a person would).
         let began = std::time::Instant::now();
         while (!self.app.file_load.idle()
             || self.app.saving.is_some()
+            || self.app.insert_read.is_some()
             || crate::open_meshing::active(&self.app)
             || self.app.stand_up_later.is_some()
             || self.app.op_check.busy()
