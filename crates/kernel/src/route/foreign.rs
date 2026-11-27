@@ -88,6 +88,14 @@ pub fn set_kernel(k: Kernel) {
     CHOICE.store(code(k), Ordering::Relaxed);
 }
 
+/// Held by every test that chooses a kernel or counts [`fell_back`]: both are the process's, so
+/// two such tests running at once would change each other's choice and count.
+#[cfg(test)]
+pub(crate) fn choosing() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 const fn code(k: Kernel) -> u8 {
     match k {
         Kernel::Solidcore => SOLIDCORE,
@@ -237,6 +245,7 @@ mod tests {
 
     #[test]
     fn the_choice_can_change_while_the_program_runs() {
+        let _chosen = choosing();
         set_kernel(Kernel::Solidcore);
         assert_eq!(kernel(), Kernel::Solidcore);
         set_kernel(Kernel::Occt);
