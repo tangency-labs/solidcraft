@@ -7295,7 +7295,7 @@ fn markdown_snapshot_shared_headers_open_export_without_clearing_chat() {
 }
 
 #[test]
-fn markdown_snapshot_collapsed_assistant_can_export_from_its_header() {
+fn markdown_snapshot_collapsed_assistant_can_export_from_its_overflow() {
     use crate::panel_runtime::{HostControlTarget, HostPointerTarget};
     use solidcraft_engine::panels::{ControlId, InstanceId};
 
@@ -7310,21 +7310,21 @@ fn markdown_snapshot_collapsed_assistant_can_export_from_its_header() {
     assert!(!h.app.file_picker_busy());
 
     h.app.run_panel_command("panel.collapse", &json!({"target":{"type":"instance","id":"assistant"},"collapsed":true})).unwrap();
+    // Keep Export registered and available, but leave it out of the header so
+    // the host exposes it through its normal overflow menu.
+    h.app.panel_runtime_mut().unwrap().host_mut().unwrap().set_header_action_visible(instance.clone(), action.clone(), false);
     h.frames(3);
     let header = HostControlTarget::Pointer(HostPointerTarget::HeaderAction { instance: instance.clone(), action: action.clone() });
     let position = |h: &crate::scenario::Harness, target: HostControlTarget| {
         let control = h.app.universal_panel_frame()?.controls.iter().find(|control| control.target == target)?;
         Some(egui::pos2(control.bounds.origin.x + control.bounds.size.width / 2.0, control.bounds.origin.y + control.bounds.size.height / 2.0))
     };
-    let at = if let Some(at) = position(&h, header) {
-        at
-    } else {
-        let menu = HostControlTarget::Pointer(HostPointerTarget::Menu { instance: instance.clone() });
-        let at = position(&h, menu).expect("the collapsed panel's menu");
-        click_at(&mut h, at, egui::PointerButton::Primary);
-        h.frames(3);
-        position(&h, HostControlTarget::Content { instance, action }).expect("the menu offers the overflow export action")
-    };
+    assert!(position(&h, header).is_none());
+    let menu = HostControlTarget::Pointer(HostPointerTarget::Menu { instance: instance.clone() });
+    let at = position(&h, menu).expect("the collapsed panel's menu");
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    h.frames(3);
+    let at = position(&h, HostControlTarget::Content { instance, action }).expect("the menu offers the overflow export action");
     click_at(&mut h, at, egui::PointerButton::Primary);
     h.frames(3);
     assert!(h.widget(tr("ui.agent_chat_export_tools")).is_some(), "export still opens when the Assistant body is collapsed");

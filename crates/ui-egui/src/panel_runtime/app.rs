@@ -853,6 +853,10 @@ impl AppPanelRuntime {
     pub fn host(&self) -> Option<&WorkspacePanelHost> {
         self.host.as_ref()
     }
+    #[cfg(test)]
+    pub(crate) fn host_mut(&mut self) -> Option<&mut WorkspacePanelHost> {
+        self.host.as_mut()
+    }
     pub fn enable_host(&mut self, options: HostOptions) -> PanelResult<()> {
         self.runtime.require_live()?;
         if self.host.is_some() {
