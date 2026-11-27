@@ -3251,6 +3251,79 @@ fn a_later_mirrored_extrusion_can_connect_an_earlier_copy() {
     assert!(rel(volume(&mut s), 496.0) < 1e-9);
 }
 
+/// Issue #21113: Feature Mirror joins two extruded tabs onto the opposite curved inner wall of a
+/// symmetric cylindrical enclosure, whether both tabs come from one multi-profile Extrude
+/// (`union_all_tagged`) or two separate Extrude features (`boolean_tagged_owned`).
+#[test]
+fn feature_mirror_joins_two_extruded_tabs_to_opposite_curved_wall() {
+    let pt = |r: f64, deg: f64| -> [f64; 2] {
+        let a = deg.to_radians();
+        [r * a.cos(), r * a.sin()]
+    };
+    let add_annular_tab = |s: &mut Session, a0_deg: f64, a1_deg: f64| {
+        run(s, "sketch.arc.center_point", json!({"center": [0, 0], "start": pt(25.0, a0_deg), "end": pt(25.0, a1_deg)}));
+        run(s, "sketch.arc.center_point", json!({"center": [0, 0], "start": pt(20.0, a0_deg), "end": pt(20.0, a1_deg)}));
+        run(s, "sketch.line", json!({"points": [pt(20.0, a0_deg), pt(25.0, a0_deg)], "closed": false}));
+        run(s, "sketch.line", json!({"points": [pt(20.0, a1_deg), pt(25.0, a1_deg)], "closed": false}));
+    };
+    let make_enclosure = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 30, "height": 20, "body_name": "Housing"}));
+        run(&mut s, "solid.cylinder", json!({"radius": 25, "height": 22, "base": [0, 0, -1], "operation": "cut", "targets": ["Housing"]}));
+        s
+    };
+
+    // Hollow cylinder (R_o = 30, R_i = 25, H = 20): 5500 * pi mm³.
+    // Each 20° annular-sector tab (r in [20, 25], z in [4, 16]): 150 * pi mm³.
+    let housing_vol = PI * (30.0 * 30.0 - 25.0 * 25.0) * 20.0;
+    let tab_vol = 0.5 * (25.0 * 25.0 - 20.0 * 20.0) * 20.0_f64.to_radians() * 12.0;
+    let seed_vol = housing_vol + 2.0 * tab_vol;
+    let mirrored_vol = housing_vol + 4.0 * tab_vol;
+
+    let assert_joined = |s: &mut Session, reply: &Value, label: &str| {
+        assert!(reply["warning"].is_null(), "{label}: {reply}");
+        assert!(reply["notice"].is_null(), "{label}: {reply}");
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{label}: {:?}", s.model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+        let bodies = &s.model.state().bodies;
+        assert_eq!(bodies.len(), 1, "{label}: expected one body");
+        assert!(bodies[0].is_closed(), "{label}: expected closed solid");
+        assert!(bodies[0].body.validity().is_empty(), "{label}: {:?}", bodies[0].body.validity());
+        assert_eq!(bodies[0].body.lumps().unwrap().len(), 1, "{label}: expected single manifold lump");
+        assert!(rel(volume(s), mirrored_vol) < 1e-6, "{label}: got {} vs expected {mirrored_vol}", volume(s));
+    };
+
+    // 1. Single Extrude feature with two tab profiles (exercises union_all_tagged).
+    let mut s_single = make_enclosure();
+    run(&mut s_single, "sketch.create", json!({"plane": "XY", "name": "Tabs"}));
+    add_annular_tab(&mut s_single, 10.0, 30.0);
+    add_annular_tab(&mut s_single, -30.0, -10.0);
+    run(&mut s_single, "sketch.finish", json!({}));
+    run(
+        &mut s_single,
+        "solid.extrude",
+        json!({"sketch": "Tabs", "start_offset": 4, "distance": 12, "operation": "join", "targets": ["Housing"], "name": "Join Tabs"}),
+    );
+    assert!(rel(volume(&mut s_single), seed_vol) < 1e-6, "single seed: {}", volume(&mut s_single));
+    let reply_single = run(&mut s_single, "solid.mirror", json!({"features": ["Join Tabs"], "plane": "YZ", "name": "Mirror Tabs"}));
+    assert_joined(&mut s_single, &reply_single, "single multi-profile extrude");
+
+    // 2. Two separate Extrude features mirrored together (exercises boolean_tagged_owned).
+    let mut s_two = make_enclosure();
+    for (sketch_name, feat_name, a0, a1) in [("TabUpper", "Join Tab Upper", 10.0, 30.0), ("TabLower", "Join Tab Lower", -30.0, -10.0)] {
+        run(&mut s_two, "sketch.create", json!({"plane": "XY", "name": sketch_name}));
+        add_annular_tab(&mut s_two, a0, a1);
+        run(&mut s_two, "sketch.finish", json!({}));
+        run(
+            &mut s_two,
+            "solid.extrude",
+            json!({"sketch": sketch_name, "start_offset": 4, "distance": 12, "operation": "join", "targets": ["Housing"], "name": feat_name}),
+        );
+    }
+    assert!(rel(volume(&mut s_two), seed_vol) < 1e-6, "two seeds: {}", volume(&mut s_two));
+    let reply_two = run(&mut s_two, "solid.mirror", json!({"features": ["Join Tab Upper", "Join Tab Lower"], "plane": "YZ", "name": "Mirror Tabs"}));
+    assert_joined(&mut s_two, &reply_two, "two separate extrudes");
+}
+
 /// A pure translation loses the same slice: the copy must be congruent to the original,
 /// whatever filled the space where its tool was rebuilt (#6452).
 #[test]
