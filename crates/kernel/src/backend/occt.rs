@@ -159,6 +159,7 @@ impl Backend for Occt {
             OpKind::OffsetFaces => Support::Yes,
             OpKind::Draft => Support::Yes,
             OpKind::Loft => Support::Some("two sections, no rails".into()),
+            OpKind::Split => Support::Some("a body split by a plane into one piece on each side".into()),
             _ => Support::No,
         }
     }
@@ -357,8 +358,14 @@ impl Modelling for Occt {
         unsupported("a face split")
     }
 
-    fn split_body(&self, _body: &Shape, _tool: &SplitTool<'_, Shape>) -> Result<Vec<Shape>, BackendError> {
-        unsupported("a body split")
+    fn split_body(&self, body: &Shape, tool: &SplitTool<'_, Shape>) -> Result<Vec<Shape>, BackendError> {
+        // A plane only: a face's surface extended, and sketch curves swept, are solidcore's.
+        let SplitTool::Plane(plane) = tool else { return unsupported("a split by a face or by sketch curves") };
+        let n = solidcraft_geom::PlaneGeom::normal(plane);
+        if !finite(&xyz(plane.origin)) || !finite(&xyz(n)) || n == Vec3::ZERO {
+            return unsupported("a split plane solidcore refuses");
+        }
+        body.split_plane(xyz(plane.origin), xyz(n)).and_then(|pieces| pieces.solids()).map_err(failed)
     }
 
     fn split_body_by_faces(&self, _body: &Shape, _sheet: &Shape, _face: usize, _faces: &[usize]) -> Result<Vec<Shape>, BackendError> {
@@ -456,6 +463,7 @@ mod tests {
                     | OpKind::OffsetFaces
                     | OpKind::Draft
                     | OpKind::Loft
+                    | OpKind::Split
             );
             assert_eq!(Occt.supports(op) != Support::No, routed, "{}", op.name());
         }
@@ -740,5 +748,66 @@ mod tests {
         crate::route::loft(&[(up(0.0), sq(2.0)), (up(3.0), Loop2::circle(Vec2::ZERO, 1.5))]).unwrap();
         set_kernel(Kernel::Solidcore);
         assert!(fell_back() > before);
+    }
+
+    /// `build` (a split) on both kernels: Open CASCADE ran it, and piece by piece, in order, the
+    /// shared check passes both and their volume (each within 1e-9 of `volumes`), area, face and
+    /// edge counts and centroid agree. Open CASCADE's pieces carry no history yet.
+    fn same_pieces(what: &str, volumes: &[f64], build: impl Fn() -> crate::Result<Vec<Body>>) {
+        use crate::route::foreign::{Kernel, fell_back, set_kernel};
+        let grade = |b: &Body| {
+            assert!(matches!(crate::failing_check(b), Ok(None)), "{what}: the shared check fails");
+            let m = crate::measure(b).unwrap();
+            (m.volume, m.area, b.record().faces.len(), b.record().edges.len(), m.centroid)
+        };
+        let _chosen = crate::route::foreign::choosing();
+        set_kernel(Kernel::Solidcore);
+        let ours: Vec<_> = build().unwrap().iter().map(grade).collect();
+        set_kernel(Kernel::Occt);
+        let before = fell_back();
+        let theirs: Vec<_> = build().unwrap().iter().map(grade).collect();
+        set_kernel(Kernel::Solidcore);
+        assert_eq!(fell_back(), before, "{what}: solidcore ran it");
+        assert_eq!(ours.len(), volumes.len(), "{what}: solidcore's pieces");
+        assert_eq!(theirs.len(), volumes.len(), "{what}: Open CASCADE's pieces");
+        for ((o, t), &v) in ours.iter().zip(&theirs).zip(volumes) {
+            assert!((t.0 - v).abs() <= 1e-9 * v, "{what}: volume {} against {v}", t.0);
+            assert!((o.1 - t.1).abs() <= 1e-9 * o.1, "{what}: area {} against {}", t.1, o.1);
+            assert_eq!((o.2, o.3), (t.2, t.3), "{what}: faces and edges");
+            let apart = ((o.4.x - t.4.x).powi(2) + (o.4.y - t.4.y).powi(2) + (o.4.z - t.4.z).powi(2)).sqrt();
+            assert!(apart <= 1e-9 * v.cbrt(), "{what}: centroid {:?} against {:?}", t.4, o.4);
+        }
+    }
+
+    #[test]
+    fn splits_by_a_plane_match_solidcore_piece_by_piece() {
+        use crate::route::foreign::{Kernel, fell_back, set_kernel};
+        use solidcraft_geom::PlaneGeom as _;
+        let cube = || crate::route::box_solid(v(0.0, 0.0, 0.0), v(10.0, 10.0, 10.0));
+        let at = |o: Vec3, n: Vec3| Plane::from_normal(o, n).unwrap();
+        let split = |plane: Plane| move || crate::route::split_body(&cube()?, &crate::SplitTool::Plane(plane));
+        // The back (below the plane) first: 3 of the 10 high, then 7.
+        same_pieces("a box cut across", &[300.0, 700.0], split(at(v(0.0, 0.0, 3.0), v(0.0, 0.0, 1.0))));
+        // The plane turned over: its back is now above.
+        same_pieces("a box cut across, plane turned over", &[700.0, 300.0], split(at(v(0.0, 0.0, 3.0), v(0.0, 0.0, -1.0))));
+        // Corner to corner: two prisms of half the box.
+        same_pieces("a box cut on its diagonal", &[500.0, 500.0], split(at(v(0.0, 0.0, 0.0), v(1.0, -1.0, 0.0))));
+        // A cylinder cut along its axis: two half cylinders of r 2, 5 long.
+        let half = std::f64::consts::PI * 4.0 * 5.0 / 2.0;
+        same_pieces("a cylinder halved along its axis", &[half, half], || {
+            crate::route::split_body(
+                &crate::route::cylinder(v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0), 2.0, 5.0)?,
+                &crate::SplitTool::Plane(at(v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0))),
+            )
+        });
+        // A plane that misses the box: solidcore's whole body.
+        let _chosen = crate::route::foreign::choosing();
+        set_kernel(Kernel::Occt);
+        let before = fell_back();
+        let whole = split(at(v(0.0, 0.0, 20.0), v(0.0, 0.0, 1.0)))().unwrap();
+        set_kernel(Kernel::Solidcore);
+        assert!(fell_back() > before, "a miss runs on solidcore");
+        assert_eq!(whole.len(), 1);
+        assert!((volume(&whole[0]) - 1000.0).abs() < 1e-9);
     }
 }

@@ -364,8 +364,43 @@ pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Bod
 /// Split a body into the closed parts on either side of a tool, those on its back first; a body
 /// the tool misses or only nicks comes back whole. Each part's history is over `[body]`.
 pub fn split_body(body: &Body, tool: &SplitTool) -> Result<Vec<Body>> {
+    #[cfg(feature = "backend-occt")]
+    if let SplitTool::Plane(plane) = tool
+        && let Some(made) = super::foreign::run_parts(
+            &crate::backend::Occt,
+            OpKind::Split,
+            &[body],
+            |k, f| match f {
+                [fb] => k.split_body(fb, &solidcraft_kernel_api::SplitTool::Plane(*plane)),
+                _ => Err(solidcraft_kernel_api::BackendError::Invalid("a split takes one body".into())),
+            },
+            |parts| back_then_front(plane, parts),
+        )
+    {
+        return made;
+    }
     match which(OpKind::Split) {
         Which::Solidcore => Solidcore.split_body(body, tool),
+    }
+}
+
+/// Another kernel's pieces of a body split by `plane` in solidcore's order, the one on the
+/// plane's back first: refused unless there is one piece on each side (solidcore's whole body
+/// where the plane misses or nicks it, and its order of several pieces a side, are its own).
+#[cfg(feature = "backend-occt")]
+fn back_then_front(plane: &Plane, parts: Vec<Body>) -> std::result::Result<Vec<Body>, solidcraft_kernel_api::BackendError> {
+    use solidcraft_geom::PlaneGeom as _;
+    use solidcraft_kernel_api::BackendError;
+    let mut sided = Vec::with_capacity(parts.len());
+    for part in parts {
+        let at = crate::measure(&part).map_err(|e| BackendError::Exchange(format!("a piece can't be measured ({e})")))?.centroid;
+        sided.push((plane.height(at), part));
+    }
+    match <[_; 2]>::try_from(sided) {
+        Ok([(a, back), (b, front)]) if a < 0.0 && b > 0.0 => Ok(vec![back, front]),
+        Ok([(a, front), (b, back)]) if a > 0.0 && b < 0.0 => Ok(vec![back, front]),
+        Ok(_) => Err(BackendError::Unsupported("a split that leaves both pieces on one side".into())),
+        Err(sided) => Err(BackendError::Unsupported(format!("a split into {} pieces", sided.len()))),
     }
 }
 
