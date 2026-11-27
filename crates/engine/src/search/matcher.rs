@@ -286,7 +286,7 @@ struct TokenHit {
 }
 
 /// Match a single folded token against one folded candidate string.
-fn match_token(tok: &[char], cand: &FoldedText, allow_typo: bool) -> Option<TokenHit> {
+fn match_token(tok: &[char], cand: &FoldedText, allow_subsequence: bool, allow_typo: bool) -> Option<TokenHit> {
     if tok.is_empty() || cand.is_empty() {
         return None;
     }
@@ -328,7 +328,7 @@ fn match_token(tok: &[char], cand: &FoldedText, allow_typo: bool) -> Option<Toke
     }
 
     // 5. Ordered subsequence match (letters in order with bounded gaps).
-    if let Some((gaps, first, last)) = match_subsequence(&cand.chars, tok) {
+    if allow_subsequence && let Some((gaps, first, last)) = match_subsequence(&cand.chars, tok) {
         let s = 300u32.saturating_sub(gaps.saturating_mul(20)).max(10);
         return Some(TokenHit { kind: MatchKind::Subsequence, score: s, span: cand.byte_span(first..(last + 1)) });
     }
@@ -434,7 +434,7 @@ pub fn score_text(query: &str, candidate: &str) -> u32 {
         return 0;
     }
     let full: Vec<char> = q.chars().collect();
-    if let Some(hit) = match_token(&full, &cand, false) {
+    if let Some(hit) = match_token(&full, &cand, true, false) {
         return hit.score;
     }
     // Multi-token fallback for phrases like "center rect" or "repeat last".
@@ -444,7 +444,7 @@ pub fn score_text(query: &str, candidate: &str) -> u32 {
     }
     let mut total = 0u32;
     for tok in &tokens {
-        let Some(hit) = match_token(tok, &cand, false) else { return 0 };
+        let Some(hit) = match_token(tok, &cand, true, false) else { return 0 };
         total = total.saturating_add(hit.score);
     }
     (total / tokens.len() as u32).saturating_sub(40).max(1)
@@ -485,7 +485,8 @@ pub fn match_query_against_fields(raw_query: &str, fields: &[SearchField], viewe
     // Pass 1: try matching the whole query string directly on any single readable field.
     let mut best_full: Option<(u32, MatchKind, bool, Option<MatchSpan>)> = None;
     for (field, folded) in &readable {
-        if let Some(hit) = match_token(&full_chars, folded, true) {
+        let allow_subseq = field.is_title || field.is_identifier || field.weight >= 80;
+        if let Some(hit) = match_token(&full_chars, folded, allow_subseq, true) {
             let weighted = hit.score.saturating_mul(field.weight) / 100;
             let exact_id = hit.kind == MatchKind::Exact && (field.is_identifier || field.is_title);
             let title_span = field.is_title.then_some(hit.span).flatten();
@@ -528,7 +529,8 @@ pub fn match_query_against_fields(raw_query: &str, fields: &[SearchField], viewe
         for tok in &tokens {
             let mut best_tok: Option<(u32, MatchKind, Option<MatchSpan>)> = None;
             for (field, folded) in &readable {
-                if let Some(hit) = match_token(tok, folded, true) {
+                let allow_subseq = field.is_title || field.is_identifier || field.weight >= 80;
+                if let Some(hit) = match_token(tok, folded, allow_subseq, true) {
                     let weighted = hit.score.saturating_mul(field.weight) / 100;
                     let title_span = field.is_title.then_some(hit.span).flatten();
                     let better = best_tok.as_ref().is_none_or(|(best_s, best_k, _)| {
