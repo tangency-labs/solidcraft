@@ -6,8 +6,8 @@ use solidcore_record::{Loop2, Region2, Vec2, Vec3};
 use solidcraft_kernel_api::{CellGrid, CellGridLimits, OpKind};
 
 use super::{Which, which};
-use crate::{Body, Result};
 use crate::backend::Solidcore;
+use crate::{Body, Result};
 
 /// The ranges a cell grid's spec is taken in: the kernel's. This build holds solidcore only, so
 /// they are solidcore's, known when it is compiled.
@@ -131,9 +131,8 @@ mod tests {
             holes: vec![],
         };
         let tube = crate::revolve(&solidcore_record::Plane::YZ, &[ring], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().pop().unwrap();
-        let outside = (0..tube.record().faces.len())
-            .find_map(|f| cylinder_wall(&tube, f).ok().filter(|w| w.convex))
-            .expect("the tube has an outside wall");
+        let outside =
+            (0..tube.record().faces.len()).find_map(|f| cylinder_wall(&tube, f).ok().filter(|w| w.convex)).expect("the tube has an outside wall");
         assert_eq!(outside.radius, 30.0);
         let face = (0..tube.record().faces.len()).find(|f| cylinder_wall(&tube, *f).ok() == Some(outside)).unwrap();
         assert_eq!(outside, ops::cylinder_wall(tube.record(), face, tube.record().tolerance).unwrap());
@@ -166,10 +165,8 @@ mod tests {
         assert!(matches!(cylinder_wall(&b, 9999), Err(crate::KernelError::Invalid(_))));
         let ball = crate::sphere(Vec3::new(0.0, 0.0, 0.0), 5.0).unwrap();
         assert!(matches!(cylinder_wall(&ball, 0), Err(crate::KernelError::Invalid(w)) if !w.is_empty()));
-        let outline = Region2 {
-            outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(8.0, 0.0), Vec2::new(5.0, 20.0), Vec2::new(0.0, 20.0)]),
-            holes: vec![],
-        };
+        let outline =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(8.0, 0.0), Vec2::new(5.0, 20.0), Vec2::new(0.0, 20.0)]), holes: vec![] };
         let cone = crate::revolve(&solidcore_record::Plane::YZ, &[outline], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU).unwrap().pop().unwrap();
         let words: Vec<String> = (0..cone.record().faces.len())
             .filter_map(|f| match cylinder_wall(&cone, f) {

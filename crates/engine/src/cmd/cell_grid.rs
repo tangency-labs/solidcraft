@@ -194,7 +194,10 @@ fn wall_face(s: &Session, p: &Value, cmd: &str) -> Result<Option<(FacePick, Face
     let Some(raw) = p.get("face") else { return Ok(None) };
     for key in ["sketch", "profiles"] {
         if p.get(key).is_some() {
-            return Err(bad(cmd, format!("`{key}` is for a grid in a sketch: a grid on a wall `face` takes none (a field sketch on a wall is a later step)")));
+            return Err(bad(
+                cmd,
+                format!("`{key}` is for a grid in a sketch: a grid on a wall `face` takes none (a field sketch on a wall is a later step)"),
+            ));
         }
     }
     let targets = string_list(cmd, p, "targets")?;

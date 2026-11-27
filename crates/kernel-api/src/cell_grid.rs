@@ -2,8 +2,8 @@
 //! outer loop is the field, a loop inside it a keep-out), each cell's opening as regions to cut
 //! or raise. The spec, the plan and the cells are the record's (`solidcore_record::cell_grid`).
 
-use solidcore_record::cell_grid::{CellGridPlan, CellGridSpec, GridCell, SketchCell};
 use solidcore_record::brep::Brep;
+use solidcore_record::cell_grid::{CellGridPlan, CellGridSpec, GridCell, SketchCell};
 use solidcore_record::cell_grid_wall::{CylinderWall, WallCellPlan, WallDepth};
 use solidcore_record::{Loop2, Region2, Vec2, Vec3};
 

@@ -141,10 +141,7 @@ pub struct WallCellPlan {
 /// [`CellGridError::Parameter`] for a refused parameter or a circumference that is not a positive
 /// length up to [`MAX_COORD`]; [`CellGridError::Layout`] when the lattice does not go round
 /// evenly (to within `1e-9` of the circumference), naming the two nearest sizes that do.
-pub fn closing_steps(
-    spec: &CellGridSpec,
-    circumference: f64,
-) -> Result<(i64, i64), CellGridError> {
+pub fn closing_steps(spec: &CellGridSpec, circumference: f64) -> Result<(i64, i64), CellGridError> {
     let c = circumference;
     if !(c.is_finite() && c > 0.0 && c <= MAX_COORD) {
         return Err(CellGridError::Parameter(format!(
@@ -231,9 +228,7 @@ fn not_closing(spec: &CellGridSpec, c: f64, v1: Vec2, v2: Vec2) -> CellGridError
     // The period scales with the pitch for every shape but the polygon, whose pitch is not
     // the size plus the web.
     if spec.shape == CellShape::Polygon {
-        return CellGridError::Layout(format!(
-            "{lead}; choose a size whose period divides it"
-        ));
+        return CellGridError::Layout(format!("{lead}; choose a size whose period divides it"));
     }
     let per_period = (period / column).round().max(1.0);
     let n_lo = (c / period).floor();
@@ -528,7 +523,9 @@ fn check_wall(wall: &CylinderWall) -> Result<f64, CellGridError> {
         return Err(bad("the tolerance must be a small positive length"));
     }
     if !(wall.radius.is_finite() && wall.radius > 0.0 && wall.radius <= MAX_COORD) {
-        return Err(bad("the radius must be a positive length up to a billion mm"));
+        return Err(bad(
+            "the radius must be a positive length up to a billion mm",
+        ));
     }
     if !(wall.z_lo.is_finite()
         && wall.z_hi.is_finite()
@@ -545,11 +542,15 @@ fn check_wall(wall: &CylinderWall) -> Result<f64, CellGridError> {
     }
     let unit = |v: [f64; 3]| (dot(v, v).sqrt() - 1.0).abs() <= 1e-6;
     if !(unit(wall.axis) && unit(wall.x_dir) && dot(wall.axis, wall.x_dir).abs() <= 1e-6) {
-        return Err(bad("the axis and the x direction must be unit and square to each other"));
+        return Err(bad(
+            "the axis and the x direction must be unit and square to each other",
+        ));
     }
     let along = dot(wall.tangent, cross(wall.axis, wall.x_dir));
     if !((along.abs() - 1.0).abs() <= 1e-6) {
-        return Err(bad("the tangent must be square to the axis and the x direction"));
+        return Err(bad(
+            "the tangent must be square to the axis and the x direction",
+        ));
     }
     Ok(along.signum())
 }

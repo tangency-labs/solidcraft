@@ -3960,15 +3960,29 @@ mod wall_tests {
                 unrolled_at(wall, plan, sector, 1.0)[0],
             ];
             ends.sort_by(f64::total_cmp);
-            assert!((ends[0] - (mid - s / 2.0)).abs() < 1e-9, "{ends:?} round {mid}");
-            assert!((ends[1] - (mid + s / 2.0)).abs() < 1e-9, "{ends:?} round {mid}");
+            assert!(
+                (ends[0] - (mid - s / 2.0)).abs() < 1e-9,
+                "{ends:?} round {mid}"
+            );
+            assert!(
+                (ends[1] - (mid + s / 2.0)).abs() < 1e-9,
+                "{ends:?} round {mid}"
+            );
         }
         let all = mids(wall, plan);
         for row in all.chunks(18) {
             for k in 0..18 {
-                let next = if k == 17 { row[0][0] + c } else { row[k + 1][0] };
+                let next = if k == 17 {
+                    row[0][0] + c
+                } else {
+                    row[k + 1][0]
+                };
                 let gap = (next - row[k][0]) / r - s / r;
-                assert!((gap - (p - s) / r).abs() < 1e-9, "gap {gap} after {:?}", row[k]);
+                assert!(
+                    (gap - (p - s) / r).abs() < 1e-9,
+                    "gap {gap} after {:?}",
+                    row[k]
+                );
                 assert!((row[k][1] - row[0][1]).abs() < 1e-9);
             }
         }
@@ -4021,7 +4035,10 @@ mod wall_tests {
     fn hexagons_and_triangles_close_but_are_not_cut_into_a_wall_yet() {
         let (s, w) = (5.0, 1.2);
         let c = 12.0 * SQRT3 * (s + w);
-        for (shape, steps) in [(CellShape::Hexagon, (24, -12)), (CellShape::Triangle, (12, 0))] {
+        for (shape, steps) in [
+            (CellShape::Hexagon, (24, -12)),
+            (CellShape::Triangle, (12, 0)),
+        ] {
             let spec = CellGridSpec {
                 shape,
                 size: s,
@@ -4106,7 +4123,10 @@ mod wall_tests {
         let (a, b) = (mids(&wall, &flat), mids(&wall, &turned));
         assert_eq!(a.len(), b.len());
         for (p, q) in a.iter().zip(&b) {
-            assert!((p[0] - q[0]).abs() < 1e-9 && (p[1] - q[1]).abs() < 1e-9, "{p:?} {q:?}");
+            assert!(
+                (p[0] - q[0]).abs() < 1e-9 && (p[1] - q[1]).abs() < 1e-9,
+                "{p:?} {q:?}"
+            );
         }
         let slanted = CellGridSpec {
             angle: FRAC_PI_6,
@@ -4130,14 +4150,27 @@ mod wall_tests {
         assert_eq!(plan.sectors.len(), 90);
         let ov = 0.6;
         let bottom = |s: &WallSector| s.placement[2][3];
-        let top = |s: &WallSector| {
-            s.placement[2][3] + plan.masters[s.master as usize].section_hi[1]
-        };
-        let lowest = plan.sectors.iter().map(bottom).fold(f64::INFINITY, f64::min);
-        let highest = plan.sectors.iter().map(top).fold(f64::NEG_INFINITY, f64::max);
+        let top =
+            |s: &WallSector| s.placement[2][3] + plan.masters[s.master as usize].section_hi[1];
+        let lowest = plan
+            .sectors
+            .iter()
+            .map(bottom)
+            .fold(f64::INFINITY, f64::min);
+        let highest = plan
+            .sectors
+            .iter()
+            .map(top)
+            .fold(f64::NEG_INFINITY, f64::max);
         assert!((lowest - (0.0 - ov)).abs() < 1e-9, "{lowest}");
         assert!((highest - (40.0 + ov)).abs() < 1e-9, "{highest}");
-        assert_eq!(plan.sectors.iter().filter(|&s| (top(s) - 40.6).abs() < 1e-9).count(), 18);
+        assert_eq!(
+            plan.sectors
+                .iter()
+                .filter(|&s| (top(s) - 40.6).abs() < 1e-9)
+                .count(),
+            18
+        );
         let closed = CylinderWall {
             open_hi: false,
             ..wall
@@ -4257,8 +4290,14 @@ mod wall_tests {
             },
         ];
         for wall in &walls {
-            assert!(plan_wall(wall, &spec, WallDepth::Through).is_err(), "{wall:?}");
-            assert!(plan_wall(wall, &spec, WallDepth::Blind(1e-10)).is_err(), "{wall:?}");
+            assert!(
+                plan_wall(wall, &spec, WallDepth::Through).is_err(),
+                "{wall:?}"
+            );
+            assert!(
+                plan_wall(wall, &spec, WallDepth::Blind(1e-10)).is_err(),
+                "{wall:?}"
+            );
         }
         for wall in &walls[..10] {
             assert!(unroll_point(wall, [1.0, 2.0, 3.0]).is_err(), "{wall:?}");
@@ -4288,7 +4327,10 @@ mod wall_tests {
             },
         ];
         for grid in &grids {
-            assert!(plan_wall(&tube(), grid, WallDepth::Through).is_err(), "{grid:?}");
+            assert!(
+                plan_wall(&tube(), grid, WallDepth::Through).is_err(),
+                "{grid:?}"
+            );
         }
         // A billion cells round: closes, then the strip reaches too many cells.
         let tiny = CellGridSpec {

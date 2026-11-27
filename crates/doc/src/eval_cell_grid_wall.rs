@@ -266,15 +266,10 @@ fn master_body(m: &SectorMaster) -> Result<Body> {
     let plane = Plane::new(Vec3::from(m.plane_origin), Vec3::from(m.plane_x), Vec3::from(m.plane_y)).ok_or_else(bad)?;
     let ([r_in, z0], [r_out, z1]) = (m.section_lo, m.section_hi);
     if !(r_in > 0.0 && r_out > r_in && z1 > z0 && m.sweep.is_finite() && m.sweep > 0.0 && m.sweep < std::f64::consts::TAU) {
-        return Err(DocError::Invalid(format!(
-            "the wall plan's sector [{r_in}, {r_out}] × [{z0}, {z1}] turned {} is not a sector",
-            m.sweep
-        )));
+        return Err(DocError::Invalid(format!("the wall plan's sector [{r_in}, {r_out}] × [{z0}, {z1}] turned {} is not a sector", m.sweep)));
     }
-    let rect = Region2 {
-        outer: Loop2::polygon(&[Vec2::new(r_in, z0), Vec2::new(r_out, z0), Vec2::new(r_out, z1), Vec2::new(r_in, z1)]),
-        holes: Vec::new(),
-    };
+    let rect =
+        Region2 { outer: Loop2::polygon(&[Vec2::new(r_in, z0), Vec2::new(r_out, z0), Vec2::new(r_out, z1), Vec2::new(r_in, z1)]), holes: Vec::new() };
     let mut bodies = kernel::revolve(&plane, &[rect], Vec2::ZERO, Vec2::Y, REVOLVE_SIGN * m.sweep)?;
     bodies.pop().ok_or_else(|| DocError::Invalid("the sector did not revolve".into()))
 }
@@ -300,7 +295,10 @@ mod tests {
     #[test]
     fn revolve_turns_toward_the_plane_normal() {
         let plane = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
-        let rect = Region2 { outer: Loop2::polygon(&[Vec2::new(10.0, 0.0), Vec2::new(12.0, 0.0), Vec2::new(12.0, 5.0), Vec2::new(10.0, 5.0)]), holes: vec![] };
+        let rect = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(10.0, 0.0), Vec2::new(12.0, 0.0), Vec2::new(12.0, 5.0), Vec2::new(10.0, 5.0)]),
+            holes: vec![],
+        };
         let b = kernel::revolve(&plane, &[rect], Vec2::ZERO, Vec2::Y, 0.5).unwrap().pop().unwrap();
         let (c, s) = (11.0 * 0.25_f64.cos(), 11.0 * 0.25_f64.sin());
         assert!(b.contains(Vec3::new(c, -s, 2.5)), "toward the normal −Y");
