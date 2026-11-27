@@ -268,7 +268,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&DIMENSION_CONTRACT)
         .output(output_schema_for::<DimensionResult>)
         .params(
-        "entities: [refs] (3D sketch geometry too, #10608: a drawn 3D line for its length, two 3D points such as \"w1.start\" for their distance, with type distance_x / distance_y / distance_z for the run along an axis, two drawn 3D lines for the angle between them, a drawn 3D arc for its radius, two points one of them an included model point or a 2D point, a 3D point and a plane (xy / yz / xz, a construction plane's name, or {face: [x,y,z], body?} on a planar model face) for its distance from the plane (keeping the side it is on), a drawn 3D line and a plane for its angle to the plane (0 to 90°); driven and value work as below; a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|major|minor|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points or a line off the axes: with auto, text_at across from them (between the perpendiculars through them, or a tenth of their distance past) is the distance between them; pulled further past an end, up or down from it horizontal, sideways vertical. Two midpoints: placing text above or below their bounding box measures horizontally, beside it vertically, anywhere else (inside it or past its corners) the distance between them. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An ellipse: a half-axis, the distance from the centre to an axis end (major or minor; with auto, text_at pulled across the major axis gives the major half-axis, pulled out past an end of it the minor one, the minor without text_at; previous_axis?: major|minor, the half-axis an earlier placement chose, kept while text_at is near the boundary between them; the reply's axis names the one chosen; with auto, when a driving dimension already holds one half-axis (or its whole axis), the other one, wherever text_at is; without its major axis line the major half-axis goes to the ellipse's own major end, without its minor axis line the minor half-axis is the minor radius); any other type, radius among them, the minor radius; an ellipse's axis line with auto: its length, the whole axis, wherever text_at is; half_axes?: bool (default true; false: with auto, the minor radius wherever text_at is, as before half-axes, which the Dimension tool sends with Draw ellipses with their axes off). An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends the Sketch preference, on by default): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales to the value instead of distorting: about the origin when the drawing is tied to it (joined to the origin, or constrained to a sketch axis), otherwise about the middle of the drawing, so it stays where it was drawn (#11043); scale_about_origin?: bool (default false; the dimension tool sends the Sketch preference) scales about the origin always, as before #11043. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
+        "entities: [refs] (3D sketch geometry too, #10608: a drawn 3D line for its length, two 3D points such as \"w1.start\" for their distance, with type distance_x / distance_y / distance_z for the run along an axis, two drawn 3D lines for the angle between them, a drawn 3D arc for its radius, two points one of them an included model point or a 2D point, a 3D point and a plane (xy / yz / xz, a construction plane's name, or {face: [x,y,z], body?} on a planar model face) for its distance from the plane (keeping the side it is on), a drawn 3D line and a plane for its angle to the plane (0 to 90°); driven and value work as below; a line midpoint is \"mid:line_id\"; a model edge or vertex, {edge: [x,y,z], body?} or {vertex: [x,y,z], body?}, is projected into the sketch first and measured there: a point against the projected edge measures the distance to it), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|major|minor|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points or a line off the axes: with auto, text_at across from them (between the perpendiculars through them, or a tenth of their distance past) is the distance between them; pulled further past an end, up or down from it horizontal, sideways vertical. Two midpoints: placing text above or below their bounding box measures horizontally, beside it vertically, anywhere else (inside it or past its corners) the distance between them. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A point or a parallel line and a centerline: with auto, the diameter (twice the distance); to a construction line or an origin or sketch axis, with auto, text_at across that line from the point or line gives the diameter too (#22916). A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An ellipse: a half-axis, the distance from the centre to an axis end (major or minor; with auto, text_at pulled across the major axis gives the major half-axis, pulled out past an end of it the minor one, the minor without text_at; previous_axis?: major|minor, the half-axis an earlier placement chose, kept while text_at is near the boundary between them; the reply's axis names the one chosen; with auto, when a driving dimension already holds one half-axis (or its whole axis), the other one, wherever text_at is; without its major axis line the major half-axis goes to the ellipse's own major end, without its minor axis line the minor half-axis is the minor radius); any other type, radius among them, the minor radius; an ellipse's axis line with auto: its length, the whole axis, wherever text_at is; half_axes?: bool (default true; false: with auto, the minor radius wherever text_at is, as before half-axes, which the Dimension tool sends with Draw ellipses with their axes off). An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends the Sketch preference, on by default): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales to the value instead of distorting: about the origin when the drawing is tied to it (joined to the origin, or constrained to a sketch axis), otherwise about the middle of the drawing, so it stays where it was drawn (#11043); scale_about_origin?: bool (default false; the dimension tool sends the Sketch preference) scales about the origin always, as before #11043. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
     ),
     CommandSpec::new("sketch.constraint.horizontal_vertical", "Horizontal/Vertical", crate::checked!("sketch.constraint.horizontal_vertical", c_horizontal_vertical))
         .in_sketch_part()
@@ -4665,8 +4665,11 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
             ((Some(q), None), Some((None, Some(l)))) | ((None, Some(l)), Some((Some(q), None))) if is_line(l) => {
                 let (a, b) = line_pts(sk, l).unwrap_or_default();
                 let pq = sk.point(q).unwrap_or_default();
-                let d = (b - a).normalized().map(|d| d.cross(pq - a).abs()).unwrap_or(0.0);
-                if diameter_about(sk, l, &ty) {
+                let dir = (b - a).normalized();
+                let d = dir.map(|d| d.cross(pq - a).abs()).unwrap_or(0.0);
+                // Text placed across the line from the point asks for the diameter (#22916).
+                let across = text_at.zip(dir).is_some_and(|(t, d)| d.cross(pq - a) * d.cross(t - a) < 0.0);
+                if diameter_about(sk, l, &ty, across) {
                     (ConstraintKind::LinearDiameter { p: q, l, value: 2.0 * d }, 2.0 * d)
                 } else {
                     (ConstraintKind::PointLineDistance { p: q, l, value: d }, d)
@@ -4696,19 +4699,23 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
                     // order, so the free line is the one kept parallel to it. Other linked lines
                     // (a projected edge) keep the pick order and get no Parallel.
                     let linked = |c: usize| sk.curves.get(c).is_some_and(|c| c.link.is_some());
-                    let axis = |c: usize| {
-                        sk.curves.get(c).and_then(|c| c.link.as_deref()).and_then(|l| sk.link(l)).is_some_and(|l| {
-                            matches!(l.source, solidcraft_sketch::LinkSource::Axis { .. } | solidcraft_sketch::LinkSource::SketchAxis { .. })
-                        })
-                    };
-                    // A centerline comes first, then an axis, whichever was picked first.
+                    let axis = |c: usize| is_axis(sk, c);
+                    // A centerline comes first, then an axis, whichever was picked first. A
+                    // construction line picked first with the text across it is the reference
+                    // too, for its diameter (#22916).
                     let centerline = |c: usize| sk.curves.get(c).is_some_and(|c| c.centerline);
-                    let a_ref = centerline(a) || (!centerline(b) && axis(a) && !linked(b));
+                    let construction = |c: usize| sk.curves.get(c).is_some_and(|c| c.construction);
+                    let text_across_a = text_at.zip(da.normalized()).is_some_and(|(t, d)| d.cross(b0 - a0) * d.cross(t - a0) < 0.0);
+                    let a_ref = centerline(a)
+                        || (!centerline(b) && axis(a) && !linked(b))
+                        || (text_across_a && construction(a) && !centerline(b) && !axis(b) && !construction(b));
                     let (a, b, b0) = if a_ref { (a, b, b0) } else { (b, a, a0) };
                     let (bq, _) = line_ends(sk, b);
                     let (a0, a1) = line_pts(sk, a).unwrap_or_default();
-                    let d = (a1 - a0).normalized().map(|d| d.cross(b0 - a0).abs()).unwrap_or(0.0);
-                    if diameter_about(sk, a, &ty) {
+                    let dir = (a1 - a0).normalized();
+                    let d = dir.map(|d| d.cross(b0 - a0).abs()).unwrap_or(0.0);
+                    let across = text_at.zip(dir).is_some_and(|(t, d)| d.cross(b0 - a0) * d.cross(t - a0) < 0.0);
+                    if diameter_about(sk, a, &ty, across) {
                         (ConstraintKind::LinearDiameter { p: bq, l: a, value: 2.0 * d }, 2.0 * d)
                     } else {
                         if axis(a) && !linked(b) {
@@ -4744,7 +4751,7 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
                     }
                 }
             }
-            // A line and a circle or arc: the distance from the line to its edge (#1803).
+            // A point or a parallel line and a centerline: with auto, the diameter (twice the distance); to a construction line or an origin or sketch axis, with auto, text_at across that line from the point or line gives the diameter too (#22916). A line and a circle or arc: the distance from the line to its edge (#1803).
             ((None, Some(l)), Some((None, Some(c)))) | ((None, Some(c)), Some((None, Some(l)))) if is_line(l) && is_round(c) => {
                 let (a, b) = line_pts(sk, l).unwrap_or_default();
                 let (centre, r) = sk.center(c).zip(sk.radius(c)).ok_or_else(|| bad(cmd, "cannot dimension that curve"))?;
@@ -5249,10 +5256,22 @@ fn dimension_text(s: &mut Session, p: &Value) -> Result<Value> {
     reply(cmd, DimensionTextResult { dimension: id, sketch: info, param_warnings: Vec::new() })
 }
 
-/// Dimension a point (or a parallel line) to line `l` as a diameter: when `l` is a centerline
-/// (unless a plain distance was asked for) or when a diameter was asked for.
-fn diameter_about(sk: &Sketch, l: usize, ty: &str) -> bool {
-    ty == "diameter" || (ty == "auto" && sk.curves.get(l).is_some_and(|c| c.centerline))
+/// Dimension a point (or a parallel line) to line `l` as a diameter: when a diameter was asked
+/// for, or (unless a plain distance was asked for) when `l` is a centerline, or when `l` is a
+/// construction line or an axis and the text was placed `across` it from the measured side
+/// (#22916).
+fn diameter_about(sk: &Sketch, l: usize, ty: &str, across: bool) -> bool {
+    let Some(c) = sk.curves.get(l) else { return ty == "diameter" };
+    ty == "diameter" || (ty == "auto" && (c.centerline || (across && (c.construction || is_axis(sk, l)))))
+}
+
+/// Whether curve `c` is the sketch's copy of an origin axis or a sketch axis.
+fn is_axis(sk: &Sketch, c: usize) -> bool {
+    sk.curves
+        .get(c)
+        .and_then(|c| c.link.as_deref())
+        .and_then(|l| sk.link(l))
+        .is_some_and(|l| matches!(l.source, solidcraft_sketch::LinkSource::Axis { .. } | solidcraft_sketch::LinkSource::SketchAxis { .. }))
 }
 
 fn arc_len(sk: &Sketch, c: usize) -> Option<f64> {
