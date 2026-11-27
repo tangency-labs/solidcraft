@@ -3,7 +3,7 @@
 //! `RailEdgeuseIntersect` widens a straight side edge's interval past both of its ends.
 //! Behind the corner's vertex, the side edge's line lies on the far side of the filleted
 //! edge, where no rail of the blend can be. Once the faces continue as themselves (WR-633,
-//! `offset_extension_as_itself`), the mirror image of the ball lies there.
+//! the only path since #18921), the mirror image of the ball lies there.
 //!
 //! The part is WR-570's knife edge (`wr_570_knife_edge_rounds.rs`: a 62 1/6 x 21 plate whose
 //! corner is cut by a circle of radius 21 tangent to the back face at the tip, extruded 10).
@@ -113,8 +113,6 @@ fn round(s: f64, r: f64) -> Result<(usize, f64, bool), i32> {
     let mut k = Kernel::default();
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.offset_extension_from_base = true;
-    k.fixes.offset_extension_as_itself = true;
     let mut b = part(&mut k, s);
     let e = knife_edge(&k, &b, s);
     {
@@ -156,12 +154,12 @@ fn wr643_knife_edge_rounds_with_the_run_on_past_the_far_end_only() {
     }
 }
 
-/// The mirrored r 2 round: since the ball's regularity is judged on every kernel (WR-696,
-/// WR-685 addendum 2026-11-06), `BallIsRegular` refuses it as a fold ("touch circles move
-/// back", a radius below 1.6875 fits), a straight extruded edge whose sections are all the
-/// same; the other side and r 0.5 and 5 on this one build. Known failing, tangency-labs/solidcore#2963.
+/// The mirrored r 2 round, with the ball's regularity judged on every kernel (WR-696, WR-685
+/// addendum 2026-11-06): a straight extruded edge whose sections are all the same, so the ball
+/// cannot fold along it. `BallIsRegular` refused it as a fold ("touch circles move back", a
+/// radius below 1.6875 fits; tangency-labs/solidcore#2963, #13731); it builds, as the other
+/// side and r 0.5 and 5 on this one do.
 #[test]
-#[ignore = "BallIsRegular refuses it as a fold: tangency-labs/solidcore#2963"]
 fn wr643_mirrored_knife_edge_round_r2() {
     assert_knife_edge_round(2.0, -1.0);
 }

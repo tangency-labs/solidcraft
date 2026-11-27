@@ -4,6 +4,134 @@ use std::f64::consts::PI;
 use serde_json::{Value, json};
 
 use crate::*;
+#[cfg(test)]
+mod weld_tests {
+    use super::*;
+    #[test]
+    fn weld_review_choices_evaluate_and_reject_hostile_values_atomically() {
+        let mut s = Session::default();
+        for groove in solidcraft_doc::weld::GROOVES {
+            s.execute("weld.create", &json!({"weld_type":"butt", "groove":groove, "penetration":"partial", "size":{"h":"1 mm","s":"2 mm"}, "root":"backing_run", "root_gap":"0 mm", "add_fillet":true, "symbol_standard":"iso2553_2019_b"})).unwrap();
+            let settings = &s.doc.welds.last().unwrap().settings;
+            assert_eq!(settings.groove, *groove);
+            assert_eq!(settings.size["s"], 2.);
+            assert_eq!(settings.root_gap, Some(0.));
+            assert!(settings.add_fillet);
+        }
+        s.execute("weld.create", &json!({"weld_type":"fillet", "size":{"a":3,"z1":4,"z2":6,"s":5}})).unwrap();
+        assert_eq!(s.doc.welds.last().unwrap().settings.size["z2"], 6.);
+        for mode in ["pitch", "count", "points"] {
+            s.execute("weld.create", &json!({"weld_type":"tack", "tack_mode":mode})).unwrap();
+            assert_eq!(s.doc.welds.last().unwrap().settings.tack_mode, mode);
+        }
+        s.execute("weld.create", &json!({"weld_type":"tack","tack_mode":"count","size":{"l":"5 mm","n":"2+3"}})).unwrap();
+        assert_eq!(s.doc.welds.last().unwrap().settings.size["n"], 5.);
+        let back = solidcraft_doc::format::read(&serde_json::to_string(&s.doc).unwrap()).unwrap();
+        assert_eq!(back.welds, s.doc.welds);
+        for invalid in [
+            json!({"weld_type":"butt","groove":"unknown"}),
+            json!({"weld_type":"butt","penetration":"partial"}),
+            json!({"weld_type":"butt","size":{"h":1,"s":2}}),
+            json!({"weld_type":"butt","root":"unknown"}),
+            json!({"weld_type":"butt","root_gap":-1}),
+            json!({"weld_type":"butt","root_gap":"1/0"}),
+            json!({"weld_type":"fillet","symbol_standard":"jis"}),
+            json!({"weld_type":"fillet","symbol_standard":4}),
+            json!({"weld_type":"tack","tack_mode":"unknown"}),
+            json!({"weld_type":"tack","tack_mode":"count","size":{"l":5,"n":1.5}}),
+            json!({"weld_type":"tack","tack_mode":"count","size":{"l":5,"n":0}}),
+            json!({"weld_type":"tack","tack_mode":"count","size":{"l":5,"n":"2 mm"}}),
+            json!({"weld_type":"tack","tack_mode":"points","size":{"l":5,"e":40}}),
+            json!({"weld_type":"plug","size":{"fill":20}}),
+        ] {
+            let before = s.doc.clone();
+            assert!(matches!(s.execute("weld.create", &invalid), Err(EngineError::BadParams { .. })), "{invalid}");
+            assert_eq!(s.doc, before);
+        }
+    }
+    #[test]
+    fn weld_create_is_a_graphic_and_undoable() {
+        let mut s = Session::default();
+        let reply = s.execute("weld.create", &json!({"weld_type":"fillet","size":{"a":"0.25 in"}})).unwrap();
+        assert_eq!(reply["number"], "W1");
+        assert_eq!(s.doc.welds.len(), 1);
+        assert_eq!(s.doc.welds[0].settings.size["a"], 6.35);
+        assert_eq!(s.doc.welds[0].symbol.as_ref().unwrap().arrow_side.as_ref().unwrap().size, Some(solidcraft_geom::weld::Size::Throat(6.35)));
+        assert!(s.doc.features.is_empty());
+        assert!(s.model.state().bodies.is_empty());
+        assert_eq!(s.execute("weld.create", &json!({"weld_type":"spot"})).unwrap()["number"], "W2");
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc.welds.len(), 1);
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert!(s.doc.welds.is_empty());
+        s.execute("edit.redo", &json!({})).unwrap();
+        assert_eq!(s.doc.welds.len(), 1);
+    }
+    #[test]
+    fn weld_create_hostile_params_leave_document_unchanged() {
+        let mut s = Session::default();
+        let before = s.doc.clone();
+        let cases = [
+            json!(null),
+            json!([]),
+            json!({}),
+            json!({"weld_type":7}),
+            json!({"weld_type":"unknown"}),
+            json!({"weld_type":"fillet","size":{"a":0}}),
+            json!({"weld_type":"fillet","size":{"a":-1}}),
+            json!({"weld_type":"fillet","size":{"a":100001}}),
+            json!({"weld_type":"fillet","size":{"a":"NaN"}}),
+            json!({"weld_type":"fillet","size":{"a":"1 / 0"}}),
+            json!({"weld_type":"fillet","size":{"a":"2 deg"}}),
+            json!({"weld_type":"fillet","size":{"a":[]}}),
+            json!({"weld_type":"fillet","size":{"nope":3}}),
+            json!({"weld_type":"fillet","size":{}}),
+            json!({"weld_type":"fillet","face":"inward"}),
+            json!({"weld_type":"fillet","process":7}),
+            json!({"weld_type":"fillet","root_side":2}),
+            json!({"weld_type":"fillet","ends":3}),
+            json!({"weld_type":"fillet","reference_plane":1}),
+            json!({"weld_type":"fillet","tack":"yes"}),
+            json!({"weld_type":"fillet","pattern_count":1.5}),
+            json!({"weld_type":"fillet","pattern_count":10001}),
+            json!({"weld_type":"fillet","pattern_pitch":0}),
+            json!({"weld_type":"fillet","density":-1}),
+            json!({"weld_type":"fillet","picks":{"line":["Edge 1"]}}),
+            json!({"weld_type":"fillet","picks":{"unknown":[]}}),
+            json!({"weld_type":"fillet","picks":{"line":[{"edge":[0,0,0]}]}}),
+            json!({"weld_type":"fillet","picks":{"line":[{"edge":[0,0,0],"body":"missing","index":0}]}}),
+            json!({"weld_type":"fillet","picks":{"point":[{"point":[1e10,0,0]}]}}),
+            json!({"weld_type":"fillet","symbol":{"arrow_side":null,"other_side":null,"field":false,"all_round":false,"tail":""}}),
+        ];
+        for p in cases {
+            assert!(matches!(s.execute("weld.create", &p), Err(EngineError::BadParams { .. })), "{p}");
+            assert_eq!(s.doc, before, "{p}");
+        }
+    }
+    #[test]
+    fn weld_all_panel_type_ids_and_delete() {
+        let mut s = Session::default();
+        for id in solidcraft_doc::weld::TYPES {
+            s.execute("weld.create", &json!({"weld_type":id})).unwrap();
+        }
+        assert_eq!(s.doc.welds.len(), solidcraft_doc::weld::TYPES.len());
+        let id = s.doc.welds[0].id;
+        assert_eq!(s.execute("weld.delete", &json!({"id":id})).unwrap()["deleted"], id);
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc.welds.len(), solidcraft_doc::weld::TYPES.len());
+        assert_eq!(s.doc.welds[0].id, id);
+    }
+    #[test]
+    fn weld_topology_picks_validate_exact_indices() {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":10,"width":10,"height":10})).unwrap();
+        let body = s.model.state().bodies[0].name.clone();
+        s.execute("weld.create", &json!({"weld_type":"fillet","picks":{"line":[{"edge":[0,0,0],"body":body,"index":0}]}})).unwrap();
+        let before = s.doc.clone();
+        assert!(s.execute("weld.create", &json!({"weld_type":"fillet","picks":{"line":[{"edge":[0,0,0],"body":body,"index":999999}]}})).is_err());
+        assert_eq!(s.doc, before);
+    }
+}
 
 /// A folder of the test's own, removed when dropped.
 pub(crate) struct Folder(pub std::path::PathBuf);
@@ -1149,6 +1277,7 @@ pub(crate) fn hostile_values() -> Vec<Value> {
         json!("a = = 3"),
         json!("é = 1e308 * 10"),
         json!(format!("{} = 1", "n".repeat(5000))),
+        json!("7.85 g/cm³ * 1 kg^17"),
         json!([]),
         json!([1e308, -1e308]),
         json!([0, 0, 0]),
@@ -1270,6 +1399,7 @@ fn hostile_params_never_panic() {
         "head",
         "head_gap",
         "height",
+        "hide_bodies",
         "id",
         "ids",
         "infer",
@@ -1335,6 +1465,7 @@ fn hostile_params_never_panic() {
         "shaft_face",
         "shape",
         "sheet",
+        "shows",
         "side",
         "sides",
         "size",
@@ -3697,6 +3828,47 @@ fn deleting_a_path_sketch_deletes_its_pipe() {
     assert_eq!(r["deleted"].as_array().map(Vec::len), Some(2), "{r}");
     assert!(s.doc.features.is_empty(), "{:?}", s.doc.features.iter().map(|f| &f.name).collect::<Vec<_>>());
     assert!(s.model.results.iter().all(|r| r.error.is_none()));
+}
+
+/// #16084: a pipe follows a chain of a body's edges, as a sweep does. Along two edges of a
+/// 40 x 20 x 10 block meeting square at its corner (40 along X, then 10 up Z) a 4 mm pipe is
+/// pi * 2^2 * 50: the mitre at the corner adds as much as it takes. Its open ends are square to
+/// the edges, at x = 0 and z = 10, and its mitred corner reaches 2 past the block's corner.
+#[test]
+fn a_pipe_follows_a_chain_of_a_bodys_edges() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 10, "corner": [0, 0, 0], "body_name": "Block"}));
+    run(&mut s, "solid.pipe", json!({"path_body": "Block", "path_edges": [[20, 0, 0], [40, 0, 5]], "diameter": 4, "body_name": "Tube"}));
+    let m = run(&mut s, "inspect.measure", json!({"bodies": ["Tube"]}));
+    let v = m["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(rel(v, PI * 4.0 * 50.0) < 1e-4, "{v} vs {}", PI * 200.0);
+    let bb = &m["bodies"][0]["bbox"];
+    let at = |k: &str, i: usize| bb[k][i].as_f64().unwrap();
+    for (got, want) in
+        [(at("min", 0), 0.0), (at("max", 0), 42.0), (at("min", 1), -2.0), (at("max", 1), 2.0), (at("min", 2), -2.0), (at("max", 2), 10.0)]
+    {
+        assert!((got - want).abs() < 1e-6, "{bb}");
+    }
+    // The path is saved as the body and its points, and comes back the same.
+    let saved = s.doc.to_json();
+    assert!(saved.contains("\"path_body\"") && saved.contains("\"path_edges\""), "{saved}");
+    let mut reopened = Session::new(solidcraft_doc::Document::from_json(&saved).unwrap());
+    let v2 = run(&mut reopened, "inspect.measure", json!({"bodies": ["Tube"]}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!(rel(v2, v) < 1e-9, "{v2} vs {v}");
+}
+
+/// #16084: a pipe round the closed circular edge of a cylinder is a torus: 2 pi^2 R r^2 with
+/// R = 10 and r = 2. The pipe uses the cylinder, so deleting the cylinder would fail the pipe.
+#[test]
+fn a_pipe_round_a_closed_edge_is_a_torus() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": 10, "height": 5, "body_name": "Can", "name": "Can"}));
+    run(&mut s, "solid.pipe", json!({"path_body": "Can", "path_edges": [[10, 0, 5]], "diameter": 4, "body_name": "Ring"}));
+    let v = run(&mut s, "inspect.measure", json!({"bodies": ["Ring"]}))["total"]["volume_mm3"].as_f64().unwrap();
+    let want = 2.0 * PI * PI * 10.0 * 4.0;
+    assert!(rel(v, want) < 1e-4, "{v} vs {want}");
+    let deps = run(&mut s, "timeline.dependents", json!({"feature": "Can"}));
+    assert_eq!(deps["would_fail"].as_array().map(Vec::len), Some(1), "{deps}");
 }
 
 /// Regression: batches were rolled back by undoing as many steps as the undo history grew,
@@ -6641,10 +6813,24 @@ fn drawing_on_existing_points_connects_to_them() {
     let again = run(&mut s, "sketch.constraint.coincident", json!({"a": "origin", "b": "l1.start"}));
     assert_eq!(again["existing"], true, "{again}");
 
-    // A line from a corner, a circle on a corner and a point on the origin connect too.
-    assert_eq!(n(&run(&mut s, "sketch.line", json!({"points": [[40, 30], [60, 30]]}))), 1);
-    assert_eq!(n(&run(&mut s, "sketch.circle.center", json!({"center": [0, 30], "radius": 3}))), 1);
+    // A line from a corner and a circle on a corner merge onto those points; a point on the
+    // protected origin connects with a Coincident constraint.
+    let line = run(&mut s, "sketch.line", json!({"points": [[40, 30], [60, 30]]}));
+    assert_eq!(n(&line), 0, "{line}");
+    let circle = run(&mut s, "sketch.circle.center", json!({"center": [0, 30], "radius": 3}));
+    assert_eq!(n(&circle), 0, "{circle}");
     assert_eq!(n(&run(&mut s, "sketch.point", json!({"point": [0, 0]}))), 1);
+    let sk = s.doc.sketch(s.active_sketch.unwrap()).unwrap();
+    assert_eq!(
+        sk.resolve_point(&format!("{}.start", line["curves"][0].as_str().unwrap())),
+        sk.resolve_point(r["corners"]["top_right"].as_str().unwrap()),
+        "line start merges into top_right corner"
+    );
+    assert_eq!(
+        sk.resolve_point(&format!("{}.center", circle["curves"][0].as_str().unwrap())),
+        sk.resolve_point(r["corners"]["top_left"].as_str().unwrap()),
+        "circle center merges into top_left corner"
+    );
     // Close is not on it, and `connect: false` opts out.
     assert_eq!(n(&run(&mut s, "sketch.point", json!({"point": [40.001, 0]}))), 0);
     assert_eq!(n(&run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -10]], "connect": false}))), 0);
