@@ -14,6 +14,8 @@ pub const TABLE: Page = Page {
         "Column",
         "Table",
         "TableRow",
+        "CellSelection",
+        "SelectionMode",
         "cell_editor",
         "sort_header",
         "Sort",
@@ -88,6 +90,40 @@ ui_kit::table_custom(ui, "params", &columns, "No parameters yet", |ui, table| {
                 d.rows.push((name, String::new()));
             }
         });
+        for (id, label, fallback, mode) in [
+            ("gallery_cell_selection", "ui.table.gallery.cell_selection", "Cell selection", ui_kit::SelectionMode::Cell),
+            ("gallery_range_selection", "ui.table.gallery.range_selection", "Range selection", ui_kit::SelectionMode::Range),
+        ] {
+            // The standalone gallery embeds the folded English catalogue. Keep the specimen
+            // name readable while these two new messages are still in a pending catalogue.
+            let translated = solidcraft_ui_text::tr(label);
+            state(ui, if translated == label { fallback } else { translated }, |ui| {
+                let state_id = ui.make_persistent_id((id, "selection"));
+                let mut selection = ui.data_mut(|data| data.get_temp::<ui_kit::CellSelection>(state_id)).unwrap_or_else(|| ui_kit::CellSelection {
+                    anchor: Some((1, 1)),
+                    focus: Some(if mode == ui_kit::SelectionMode::Cell { (1, 1) } else { (3, 3) }),
+                });
+                let columns = ["Name", "Expression", "Value", "Status", "Unit"].map(|label| ui_kit::Column::new(label, 1.0).flex());
+                ui_kit::table_custom(ui, id, &columns, "Empty", |ui, table| {
+                    table.cell_selection(&mut selection, mode);
+                    table.headers(ui, |_, _| false);
+                    for row in 0..6 {
+                        table.row(ui, &row.to_string(), false, |cells| {
+                            cells.cell(|ui| ui_kit::text(ui, "Width", ui_kit::Text::Cell));
+                            cells.cell(|ui| ui_kit::text(ui, "20 mm", ui_kit::Text::Cell));
+                            cells.cell(|ui| {
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    ui_kit::text(ui, "20.00", ui_kit::Text::MonoCell)
+                                });
+                            });
+                            cells.cell(ui_kit::active_pill);
+                            cells.cell(|ui| ui_kit::text(ui, "mm", ui_kit::Text::Cell));
+                        });
+                    }
+                });
+                ui.data_mut(|data| data.insert_temp(state_id, selection));
+            });
+        }
         state(ui, "Empty", |ui| {
             ui_kit::table_custom(ui, "gallery_empty", &[ui_kit::Column::new("Name", 1.0).flex()], "No configurations yet", |ui, table| {
                 table.headers(ui, |_, _| false);

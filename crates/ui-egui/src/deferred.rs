@@ -419,6 +419,11 @@ impl SolveApp {
                     let playback = self.timeline_playback.take();
                     let r = self.run_evaluated(&id, params, job.evaluated.take().flatten().as_ref(), job.kept.take());
                     self.timeline_playback = playback;
+                    if let Ok(out) = &r
+                        && id == "body.remove_history"
+                    {
+                        crate::context_menu::remove_history_report(self, out);
+                    }
                     let outcome = match r {
                         Ok(_) => crate::operations::Outcome::Done,
                         Err(e) => crate::operations::Outcome::Failed(crate::friendly_error(&id, &e)),

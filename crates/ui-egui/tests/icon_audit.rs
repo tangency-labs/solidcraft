@@ -1,4 +1,7 @@
 //! Runtime icon discovery: use the same headless UI and requests as control clients.
+// Test helpers outside #[test] functions print what they skip or measure; clippy.toml
+// `allow-print-in-tests` covers only #[test] functions and #[cfg(test)] code.
+#![allow(clippy::print_stderr)]
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -646,10 +649,13 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
         h.call("ui.selectOther", json!({"close":true}));
     }
 
-    // Search every command by its full label so results beyond the first page are painted.
+    // Search every command by its full label so results beyond the first page are painted. Search
+    // leaves a script-only command out of a search by name and lists it for its exact id (#9734),
+    // so such a command is searched by its id and its icon is painted too.
     for command in solidcraft_engine::command_specs() {
+        let by_label = solidcraft_ui_egui::shortcut_box::search(&h.app, command.label).iter().any(|row| row.0 == command.id);
         solidcraft_ui_egui::shortcut_box::open(&mut h.app, None);
-        h.app.sbox.text = command.label.to_owned();
+        h.app.sbox.text = if by_label { command.label } else { command.id }.to_owned();
         h.frames(2);
         collect(&mut h, command.id, &mut requested);
         escape(&mut h);
@@ -830,7 +836,17 @@ fn audit_is_opt_in_drains_and_records_resolved_aliases() {
 #[test]
 fn offset_mode_artwork_review() {
     use solidcraft_theme::{ColorVision, Tokens};
-    let names = ["offset", "offset_two_sides", "offset_symmetric", "sketch_chamfer", "sketch_chamfer_two_distances", "split_body"];
+    let names = [
+        "offset",
+        "offset_two_sides",
+        "offset_symmetric",
+        "sketch_chamfer",
+        "sketch_chamfer_two_distances",
+        "split_body",
+        "gusset_side_negative",
+        "gusset_side_center",
+        "gusset_side_positive",
+    ];
     let mut sheet = tiny_skia::Pixmap::new(400, names.len() as u32 * 88).unwrap();
     for (row, name) in names.iter().enumerate() {
         let resolved = icon_svg::resolve(name);

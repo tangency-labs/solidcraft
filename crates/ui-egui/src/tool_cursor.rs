@@ -42,9 +42,13 @@ pub(crate) fn command(app: &SolveApp) -> Option<&'static str> {
     }
 }
 
-/// The icon the badge shows: None when it is turned off, nothing runs, or the command has no icon.
+/// The icon the badge shows: None when it is turned off, nothing runs, a constraint pick tool
+/// already renders its own cursor badge, or the command has no icon.
 pub(crate) fn icon(app: &SolveApp) -> Option<&'static str> {
     if !app.ui.tool_cursor {
+        return None;
+    }
+    if app.tool.as_ref().is_some_and(crate::tools::is_constraint_pick_tool) {
         return None;
     }
     command(app).and_then(solidcraft_engine::find_command).map(|spec| spec.icon).filter(|icon| !icon.is_empty())

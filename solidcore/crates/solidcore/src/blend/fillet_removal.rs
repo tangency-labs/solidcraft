@@ -46,9 +46,17 @@
 //!   vertex uses directly, and before [`delete_fillet_face`] returns, the port's cached
 //!   topology fields are refreshed (`Brep::refresh_cached_topology`; upstream has no such
 //!   fields).
-//! - **Null pointers.** Where upstream dereferences `NULL` (an edge use missing where it
-//!   sets a UV trim curve, a vertex without its vertex uses), the port returns
-//!   [`SolidError::InvalidInput`].
+//! - **Null pointers.** Where upstream dereferences `NULL` the port names what is
+//!   missing: an edge's curve, a face's surface or an edge's vertex as the body's
+//!   ([`crate::error::blend::BlendFailure::EdgeWithoutCurve`],
+//!   [`crate::error::blend::BlendFailure::FaceHasNoSurface`],
+//!   [`crate::error::blend::BlendFailure::EdgeWithoutVertices`]), a link of the topology
+//!   it walks ([`crate::error::blend::BlendFailure::RemovalInputMissing`]), and an object
+//!   the removal holds or has checked as a defect
+//!   ([`crate::error::blend::BlendFailure::Defect`]), each keeping `SM_ERR_NULL_POINTER`.
+//!   An absent or mismatched argument of a public function is a named stop of kind
+//!   [`crate::error::ErrorKind::InvalidInput`]
+//!   ([`crate::error::blend::BlendFailure::RemovalStopped`]).
 //! - **Curve owners.** A curve the removal installs is owned under its edge's
 //!   [`Brep::owner_identity`], the identity the B-rep check compares (`SetOwner(pEdge)`),
 //!   and `ValidateGeometry` checks it under the same identities. `SetCurve` records the
@@ -75,15 +83,19 @@
 //! - **Failures.** Where upstream returns `SM_ERR` because the face and its neighbours are
 //!   not a fillet it removes, or because the removal would continue a face or an edge past
 //!   its geometry, the port refuses with a typed cause
-//!   ([`crate::error::blend::BlendFailure::RemovalRefused`], classes 130 and 131). Every
-//!   other failure is a [`crate::error::blend::BlendFailure::StageFailed`], a defect: an
-//!   `NER` keeps its `SM_ERR_NULL_POINTER` status, and a call whose status upstream turns
-//!   into `SM_ERR` is kept as the cause. The statuses are upstream's.
+//!   ([`crate::error::blend::BlendFailure::RemovalRefused`], classes 130 and 131). A
+//!   search or drop that finds nothing or stops, and an argument of its edits that does
+//!   not hold, stops it with a named cause
+//!   ([`crate::error::blend::BlendFailure::RemovalStopped`]); a call whose status
+//!   upstream turns into `SM_ERR` is kept as that stop's cause. Editing not enabled is
+//!   [`crate::error::topology::TopologyFailure::EditingDisabled`]. The statuses are
+//!   upstream's.
 //! - No recursion.
 
 use crate::curve::curve::p6::DroppedPoint;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::blend::{BlendFailure, RemovalRefusal as R};
+use crate::error::blend::{BlendFailure, RemovalInput, RemovalRefusal as R, RemovalStop};
+use crate::error::topology::TopologyFailure;
 use crate::error::{
     ignore_status, ignored, EntityRef, Failure, Result, SolidError, SM_ERR_NULL_POINTER,
 };
@@ -120,13 +132,6 @@ pub use chain::delete_fillet_faces;
 
 const OP: &str = "blend::fillet_removal";
 
-/// `SM_ERR` where a stage of the removal failed with no reason the kernel names: a
-/// [`BlendFailure::StageFailed`], a defect.
-#[track_caller]
-fn stage_failed() -> SolidError {
-    SolidError::blend(OP, BlendFailure::StageFailed)
-}
-
 /// `SM_ERR` where the removal refuses the face, for `reason`: a
 /// [`BlendFailure::RemovalRefused`], a refusal no size decides.
 #[track_caller]
@@ -134,13 +139,133 @@ fn refused(reason: R) -> SolidError {
     SolidError::blend(OP, BlendFailure::RemovalRefused(reason))
 }
 
-/// A stage of the removal failed, keeping `cause`, the error of the call it made (upstream
-/// `SER(SM_ERR)` of the call's status).
+/// The removal stops, for `stop` ([`BlendFailure::RemovalStopped`], with the stop's kind
+/// and status).
 #[track_caller]
-fn stage_failed_after(cause: SolidError) -> SolidError {
-    Failure::new(OP, BlendFailure::StageFailed)
+fn stopped(stop: RemovalStop) -> SolidError {
+    SolidError::blend(OP, BlendFailure::RemovalStopped(stop))
+}
+
+/// The removal stops, for `stop`, after a call it made failed with `cause`, which is kept
+/// (upstream `SER(SM_ERR)` of the call's status): the cause decides whether it is a defect
+/// or a refusal. An unported or cancelled call passes on as it is.
+#[track_caller]
+fn stopped_after(stop: RemovalStop, cause: SolidError) -> SolidError {
+    if cause.is_unported_or_cancelled() {
+        return cause;
+    }
+    Failure::new(OP, BlendFailure::RemovalStopped(stop))
         .caused_by(cause)
         .into_error()
+}
+
+/// A failure that is the removal's own fault: `why` names the object the removal holds,
+/// has just made or has checked, and why it cannot be missing ([`BlendFailure::Defect`],
+/// with the `SM_ERR_NULL_POINTER` status of upstream's `NER`).
+#[track_caller]
+fn own<T>(v: Option<T>, why: &'static str) -> Result<T> {
+    match v {
+        Some(v) => Ok(v),
+        None => Err(Failure::new(OP, BlendFailure::Defect { why })
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()),
+    }
+}
+
+/// A failure that is the removal's own fault, with the `SM_ERR` status upstream returns
+/// there ([`BlendFailure::Defect`]).
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    SolidError::blend(OP, BlendFailure::Defect { why })
+}
+
+/// `NER(p)` of a link of the topology the removal walks: missing, `input` names it
+/// ([`BlendFailure::RemovalInputMissing`], `SM_ERR_NULL_POINTER`).
+#[track_caller]
+fn have<T>(v: Option<T>, input: RemovalInput) -> Result<T> {
+    match v {
+        Some(v) => Ok(v),
+        None => Err(SolidError::blend(
+            OP,
+            BlendFailure::RemovalInputMissing(input),
+        )),
+    }
+}
+
+/// `NER(pEdge->GetCurve())`: the body's edge `e` has no curve
+/// ([`BlendFailure::EdgeWithoutCurve`] at the edge, `SM_ERR_NULL_POINTER`).
+#[track_caller]
+fn edge_curve(b: &Brep, e: EdgeId) -> Result<&Curve> {
+    match edge::curve(b, e)? {
+        Some(c) => Ok(c),
+        None => Err(no_curve(e)),
+    }
+}
+
+/// The body's edge `e` has no curve ([`BlendFailure::EdgeWithoutCurve`] at the edge,
+/// `SM_ERR_NULL_POINTER`).
+#[track_caller]
+fn no_curve(e: EdgeId) -> SolidError {
+    Failure::new(OP, BlendFailure::EdgeWithoutCurve)
+        .with_status(SM_ERR_NULL_POINTER)
+        .at(EntityRef::Edge(e))
+        .into_error()
+}
+
+/// `NER(pFace->GetSurface())`: the body's face `f` has no surface
+/// ([`BlendFailure::FaceHasNoSurface`] at the face, `SM_ERR_NULL_POINTER`).
+#[track_caller]
+fn face_surface(b: &Brep, f: FaceId) -> Result<&Surface> {
+    match crate::topology::face::p2::surface(b, f)? {
+        Some(s) => Ok(s),
+        None => Err(no_surface(f)),
+    }
+}
+
+/// The body's face `f` has no surface ([`BlendFailure::FaceHasNoSurface`] at the face,
+/// `SM_ERR_NULL_POINTER`).
+#[track_caller]
+fn no_surface(f: FaceId) -> SolidError {
+    Failure::new(OP, BlendFailure::FaceHasNoSurface)
+        .with_status(SM_ERR_NULL_POINTER)
+        .at(EntityRef::Face(f))
+        .into_error()
+}
+
+/// `NER` of a vertex of the body's edge `edge`: it lacks one at an end
+/// ([`BlendFailure::EdgeWithoutVertices`], `SM_ERR_NULL_POINTER`).
+#[track_caller]
+fn edge_vertex(v: Option<VertexId>, edge: EdgeId) -> Result<VertexId> {
+    match v {
+        Some(v) => Ok(v),
+        None => Err(SolidError::blend(
+            OP,
+            BlendFailure::EdgeWithoutVertices { edge },
+        )),
+    }
+}
+
+/// `curve` (of the edge `edge`, where there is one) has no B-spline form where upstream
+/// casts it to `SmBSplineCurve` and dereferences the result
+/// ([`BlendFailure::CurveWithoutNet`], keeping `SM_ERR_NULL_POINTER`; rule 8).
+#[track_caller]
+fn curve_without_net(edge: Option<EdgeId>, curve: &Curve) -> SolidError {
+    Failure::new(
+        OP,
+        BlendFailure::CurveWithoutNet {
+            edge,
+            kind: curve.type_string(),
+        },
+    )
+    .with_status(SM_ERR_NULL_POINTER)
+    .into_error()
+}
+
+/// `m_bEditingEnabled` is off: the caller has not enabled editing
+/// ([`TopologyFailure::EditingDisabled`], `SM_ERR`).
+#[track_caller]
+fn editing_disabled() -> SolidError {
+    SolidError::topology(OP, TopologyFailure::EditingDisabled)
 }
 
 fn null(what: &'static str) -> SolidError {
@@ -148,55 +273,31 @@ fn null(what: &'static str) -> SolidError {
 }
 
 /// The corner dropped onto the side edge's run-on line (exact only, WR-606): the drop when it
-/// converged within `tol`; [`R::CornerOffSideLine`] when it converged farther away; a stage
-/// failure when the drop stopped or failed, which proves nothing about the line (#15034
-/// rule 5; a failed call is kept as the cause). Unported and cancelled calls pass on.
+/// converged within `tol`; [`R::CornerOffSideLine`] when it converged farther away; a stop
+/// when the drop stopped or failed, which proves nothing about the line (#15034 rule 5; a
+/// failed call is kept as the cause). Unported and cancelled calls pass on.
 #[track_caller]
 fn run_on_drop(drop: Result<DroppedPoint>, tol: f64) -> Result<DroppedPoint> {
     match drop {
         Ok(d) if d.success && d.distance <= tol => Ok(d),
-        Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(e) => Err(stage_failed_after(e)),
-        Ok(d) if !d.success => Err(stage_failed()),
+        Err(e) => Err(stopped_after(RemovalStop::RunOnDropFailed, e)),
+        Ok(d) if !d.success => Err(stopped(RemovalStop::RunOnDropStopped)),
         Ok(_) => Err(refused(R::CornerOffSideLine)),
     }
 }
 
 /// A curved side edge that does not reach the new corner (exact only, WR-606):
 /// [`R::SideEdgeNotStraight`] when the drop onto it converged (`decided`), so that it stops
-/// short is proved; a stage failure when the drop stopped or failed (#15034 rule 5), keeping
-/// the failed drop's error (`drop_err`) as its cause.
+/// short is proved; a stop when the drop stopped or failed (#15034 rule 5), keeping the
+/// failed drop's error (`drop_err`) as its cause.
 #[track_caller]
 fn curved_side_edge(decided: bool, drop_err: Option<SolidError>) -> SolidError {
     if decided {
         refused(R::SideEdgeNotStraight)
     } else if let Some(e) = drop_err {
-        stage_failed_after(e)
+        stopped_after(RemovalStop::SideEdgeDropFailed, e)
     } else {
-        stage_failed()
-    }
-}
-
-/// `NER(p)`: a `NULL` pointer is `SM_ERR_NULL_POINTER`, an object the removal holds or
-/// looks up that is not there: a [`BlendFailure::StageFailed`] with that status.
-#[track_caller]
-fn ner<T>(v: Option<T>) -> Result<T> {
-    match v {
-        Some(v) => Ok(v),
-        None => Err(Failure::new(OP, BlendFailure::StageFailed)
-            .with_status(SM_ERR_NULL_POINTER)
-            .into_error()),
-    }
-}
-
-/// A status upstream turns into `SER(SM_ERR)` whatever it was: any failure but an
-/// unported callee becomes a stage failure that keeps the call's error as its cause.
-#[track_caller]
-fn or_sm_err<T>(r: Result<T>) -> Result<T> {
-    match r {
-        Ok(v) => Ok(v),
-        Err(e) if e.is_unported_or_cancelled() => Err(e),
-        Err(e) => Err(stage_failed_after(e)),
+        stopped(RemovalStop::SideEdgeDropStopped)
     }
 }
 
@@ -393,7 +494,7 @@ impl FilletRemoval {
                     ],
                 ];
                 for (face, face_uvs) in faces.into_iter().zip(uvs) {
-                    let srf = ner(crate::topology::face::p2::surface(b, face)?)?;
+                    let srf = face_surface(b, face)?;
                     let domain = srf.natural_uv_domain_with_nurb(k)?;
                     let slack = EFF_ZERO_SQRT * (1.0 + domain.max_dimension());
                     let mut inside = true;
@@ -434,19 +535,31 @@ impl FilletRemoval {
     }
 
     fn tan_edge(&self, i: usize) -> Result<EdgeId> {
-        ner(self.tan_edges.get(i).copied().flatten())
+        own(
+            self.tan_edges.get(i).copied().flatten(),
+            "the tangent edges are found for both indices before any is read",
+        )
     }
 
     fn end_edge(&self, i: usize) -> Result<EdgeId> {
-        ner(self.end_edges.get(i).copied().flatten())
+        own(
+            self.end_edges.get(i).copied().flatten(),
+            "the end edges are found for both indices before any is read",
+        )
     }
 
     fn tan_face(&self, i: usize) -> Result<FaceId> {
-        ner(self.tan_faces.get(i).copied().flatten())
+        own(
+            self.tan_faces.get(i).copied().flatten(),
+            "the tangent faces are found for both indices before any is read",
+        )
     }
 
     fn end_face(&self, i: usize) -> Result<FaceId> {
-        ner(self.end_faces.get(i).copied().flatten())
+        own(
+            self.end_faces.get(i).copied().flatten(),
+            "the end faces are found for both indices before any is read",
+        )
     }
 
     /// `CollectFilletTopology`: the two tangent and two end edges, the faces across
@@ -524,7 +637,7 @@ impl FilletRemoval {
                 } else if ev1 == tv0 || ev1 == tv1 {
                     ev1
                 } else {
-                    return Err(stage_failed());
+                    return Err(refused(R::EndEdgeMissesTangentEdges));
                 };
                 self.corner_mut(which_end, which_side)?.vertex = found;
             }
@@ -549,7 +662,10 @@ impl FilletRemoval {
             } else if *f1 == fil_face {
                 Ok(*f0)
             } else {
-                Err(stage_failed())
+                // the edge is one of the fillet face's own, so the fillet face borders it
+                Err(defect(
+                    "an edge of the fillet face does not border the fillet face",
+                ))
             }
         };
         for which_end in 0..2 {
@@ -577,20 +693,32 @@ impl FilletRemoval {
         // Also find the side edges: the third edge coming into each corner vertex.
         for which_end in 0..2 {
             for which_side in 0..2 {
-                let vtx = ner(self.corner(which_end, which_side)?.vertex)?;
+                let vtx = own(
+                    self.corner(which_end, which_side)?.vertex,
+                    "every corner's vertex is set when the edges are sorted",
+                )?;
                 let end_face = self.end_face(which_end)?;
                 let tan_face = self.tan_face(which_side)?;
 
                 // Fillet Face:
-                let vu = ner(vertex::vertexuse_of_face(b, vtx, Some(fil_face))?)?;
+                let vu = have(
+                    vertex::vertexuse_of_face(b, vtx, Some(fil_face))?,
+                    RemovalInput::VertexUseOnFace,
+                )?;
                 let uv_fil = vertexuse::compute_uv_point(k, b, vu, true)?;
 
                 // End Face:
-                let vu = ner(vertex::vertexuse_of_face(b, vtx, Some(end_face))?)?;
+                let vu = have(
+                    vertex::vertexuse_of_face(b, vtx, Some(end_face))?,
+                    RemovalInput::VertexUseOnFace,
+                )?;
                 let uv_end = vertexuse::compute_uv_point(k, b, vu, true)?;
 
                 // Tangent Face:
-                let vu = ner(vertex::vertexuse_of_face(b, vtx, Some(tan_face))?)?;
+                let vu = have(
+                    vertex::vertexuse_of_face(b, vtx, Some(tan_face))?,
+                    RemovalInput::VertexUseOnFace,
+                )?;
                 let uv_tan = vertexuse::compute_uv_point(k, b, vu, true)?;
 
                 // Also find the side edges.
@@ -607,7 +735,7 @@ impl FilletRemoval {
                         side_edge = Some(this_edge);
                         break;
                     }
-                    let side = ner(side_edge)?;
+                    let side = have(side_edge, RemovalInput::SideEdge)?;
 
                     // We will also want to know which end of the side edge we're at.
                     let side_vtx = edge::start_vertex(b, side)?;
@@ -618,7 +746,10 @@ impl FilletRemoval {
                         if side_vtx == Some(vtx) {
                             high_end = true;
                         } else {
-                            return Err(stage_failed()); // If this happens it's our own fault.
+                            // If this happens it's our own fault.
+                            return Err(defect(
+                                "a side edge found at a corner vertex has it at neither end",
+                            ));
                         }
                     }
                 }
@@ -684,9 +815,8 @@ impl FilletRemoval {
             k, &end_dom, &tan0, &tan_dom0, &tan1, &tan_dom1, uv_end, uv_tan0, uv_tan1,
         ) {
             Ok(Some(sol)) => sol,
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Ok(None) => return Err(stage_failed()),
-            Err(e) => return Err(stage_failed_after(e)),
+            Ok(None) => return Err(stopped(RemovalStop::CornerNotSolved)),
+            Err(e) => return Err(stopped_after(RemovalStop::CornerNotSolved, e)),
         };
 
         // Store the new vtx position and the three surface uv's.
@@ -713,7 +843,7 @@ impl FilletRemoval {
         let dist11 = vtx_pt_tan0.distance(vtx_pt_tan1);
         let tol = self.tol_3d;
         if dist00 > tol || dist01 > tol || dist11 > tol {
-            return Err(stage_failed());
+            return Err(stopped(RemovalStop::CornerSurfacesApart));
         }
 
         let new_vtx_pt = (vtx_pt_end + vtx_pt_tan0 + vtx_pt_tan1) / 3.0;
@@ -758,7 +888,7 @@ impl FilletRemoval {
         if let Some(side) = side_edge {
             let ivl = edge::interval(b, side)?;
             let crv_guess_param = if high_end { ivl.max() } else { ivl.min() };
-            let curve = ner(edge::curve(b, side)?)?;
+            let curve = edge_curve(b, side)?;
             match curve.drop_point(
                 k,
                 &curve.natural_interval(),
@@ -787,7 +917,7 @@ impl FilletRemoval {
             let Some(side) = side_edge else {
                 return Err(refused(R::CornerNeedsFittedIntersection));
             };
-            let side_curve = ner(edge::curve(b, side)?)?.clone();
+            let side_curve = edge_curve(b, side)?.clone();
             if bspline_part(&side_curve).is_none() || !side_curve.is_linear(k, tol, false)?.linear {
                 let decided = stat_ok && success;
                 // (an undecided drop proves no inexactness)
@@ -808,16 +938,20 @@ impl FilletRemoval {
             let speed = d1.length();
             // (`!(dSpeed > SM_EFF_ZERO)`: a NaN speed fails too)
             if speed.is_nan() || speed <= EFF_ZERO {
-                return Err(stage_failed());
+                return Err(stopped(RemovalStop::RunOnEndHasNoSpeed));
             }
             let reach = (p0.distance(new_vtx_pt) + 10.0 * tol) / speed;
             let far = if high_end { end + reach } else { end - reach };
-            let side_part = ner(bspline_part_with_nurb(&side_curve)?)?;
-            let longer = Curve::from(ner(side_part.create_extended_curve(
-                far,
-                ContinuityType::CInfinity,
-                true,
-            )?)?);
+            let side_part = own(
+                bspline_part_with_nurb(&side_curve)?,
+                "the side curve's B-spline part was checked above",
+            )?;
+            let Some(longer) =
+                side_part.create_extended_curve(far, ContinuityType::CInfinity, true)?
+            else {
+                return Err(stopped(RemovalStop::CurveNotExtended));
+            };
+            let longer = Curve::from(longer);
             let guess = far;
             let drop = longer.drop_point(
                 k,
@@ -838,7 +972,10 @@ impl FilletRemoval {
 
         if stat_ok && success && crv_dist <= tol {
             // Good, the curve is long enough, just update the Edge domain.
-            let side = ner(side_edge)?;
+            let side = own(
+                side_edge,
+                "a drop that converged within tolerance was onto the side edge's curve",
+            )?;
             {
                 let corner = self.corner_mut(which_end, which_side)?;
                 corner.new_side_edge_param = crv_param;
@@ -925,7 +1062,10 @@ impl FilletRemoval {
             // Definitely want to give it a start direction.
             // Just start-to-end should be fine, it won't curve much
             // over the radius of a fillet.
-            let vtx = ner(corner.vertex)?;
+            let vtx = own(
+                corner.vertex,
+                "every corner's vertex is set when the edges are sorted",
+            )?;
             let start_dir: Vec3 = new_vtx_pt - b.vertex(vtx)?.point;
 
             let end_surf = out_of_bounds_copy(b, self.end_face(which_end)?)?;
@@ -937,20 +1077,22 @@ impl FilletRemoval {
             uv_domain_end.expand_relative(2.0);
             uv_domain_tan.expand_relative(2.0);
 
-            let int = or_sm_err(end_surf.point_based_surface_intersect(
-                k,
-                &uv_domain_end,
-                &tan_surf,
-                &uv_domain_tan,
-                &surface0_points,
-                &surface1_points,
-                [false, false],
-                [Some(start_dir), None],
-                Some(tol),
-                None,
-            ))?;
+            let int = end_surf
+                .point_based_surface_intersect(
+                    k,
+                    &uv_domain_end,
+                    &tan_surf,
+                    &uv_domain_tan,
+                    &surface0_points,
+                    &surface1_points,
+                    [false, false],
+                    [Some(start_dir), None],
+                    Some(tol),
+                    None,
+                )
+                .map_err(|e| stopped_after(RemovalStop::SideExtensionNotFound, e))?;
             let Some(int_crv_3d) = int.curve_3d else {
-                return Err(stage_failed());
+                return Err(stopped(RemovalStop::SideExtensionNotFound));
             };
 
             // Save the curves in the kit.
@@ -979,7 +1121,7 @@ impl FilletRemoval {
 
         // Get a start direction.
         let uv = self.corner(0, 0)?.uv_fil_surf;
-        let fil_surface = ner(crate::topology::face::p2::surface(b, self.face_to_delete)?)?;
+        let fil_surface = face_surface(b, self.face_to_delete)?;
         let (_pt, su, sv) = fil_surface.evaluate_1st_derivatives(k, uv, true, true)?;
         let start_dir = if self.rail_param == SurfParamType::U {
             if self.ends_swapped {
@@ -1008,20 +1150,22 @@ impl FilletRemoval {
             continue_plane(&mut tan1, &uv_domain2);
         }
 
-        let int = or_sm_err(tan0.point_based_surface_intersect(
-            k,
-            &uv_domain1,
-            &tan1,
-            &uv_domain2,
-            &surface0_points,
-            &surface1_points,
-            [false, false],
-            [Some(start_dir), None],
-            Some(self.tol_3d),
-            None,
-        ))?;
+        let int = tan0
+            .point_based_surface_intersect(
+                k,
+                &uv_domain1,
+                &tan1,
+                &uv_domain2,
+                &surface0_points,
+                &surface1_points,
+                [false, false],
+                [Some(start_dir), None],
+                Some(self.tol_3d),
+                None,
+            )
+            .map_err(|e| stopped_after(RemovalStop::TangentIntersectionNotFound, e))?;
         let Some(int_crv_3d) = int.curve_3d else {
-            return Err(stage_failed());
+            return Err(stopped(RemovalStop::TangentIntersectionNotFound));
         };
 
         self.new_edge_curve_3d = Some(int_crv_3d);
@@ -1061,7 +1205,10 @@ impl FilletRemoval {
             // and it will now be between the Tangent Face and the End Face.
             let which_side = usize::from(!no_side[0]);
             let end_edge = self.end_edge(which_end)?;
-            let corner_vertex = ner(self.corner(which_end, which_side)?.vertex)?;
+            let corner_vertex = own(
+                self.corner(which_end, which_side)?.vertex,
+                "every corner's vertex is set when the edges are sorted",
+            )?;
             // (status ignored upstream)
             ignore_status(move_vtx_and_edge_to_adjacent_face(
                 b,
@@ -1074,14 +1221,12 @@ impl FilletRemoval {
 
             // Now change its geometry.
             let old_ivl = edge::interval(b, end_edge)?;
-            let old_tan = curve_tangent(
-                k,
-                ner(edge::curve(b, end_edge)?)?,
-                old_ivl.evaluate(0.5),
-                false,
-            )?;
+            let old_tan = curve_tangent(k, edge_curve(b, end_edge)?, old_ivl.evaluate(0.5), false)?;
             let corner = self.corner_mut(which_end, which_side)?;
-            let new_crv = ner(corner.new_side_edge_extension_3d.as_mut())?;
+            let new_crv = own(
+                corner.new_side_edge_extension_3d.as_mut(),
+                "the side extension is made for the corner with a side edge before the end edge is moved",
+            )?;
             let new_tan =
                 curve_tangent(k, new_crv, new_crv.natural_interval().evaluate(0.5), false)?;
             // Check whether the new geometry goes in the right direction.
@@ -1096,7 +1241,10 @@ impl FilletRemoval {
                     ignore_status(c.reverse_parameterization(k, &dummy))?;
                 }
             }
-            let new_crv = ner(corner.new_side_edge_extension_3d.take())?;
+            let new_crv = own(
+                corner.new_side_edge_extension_3d.take(),
+                "the side extension is made for the corner with a side edge before the end edge is moved",
+            )?;
             let end_uv = corner.new_side_edge_ext_end_face_uv.take();
             let tan_uv = corner.new_side_edge_ext_tan_face_uv.take();
 
@@ -1193,7 +1341,10 @@ impl FilletRemoval {
                 if corner.no_side_edge() {
                     continue;
                 }
-                let v = ner(corner.vertex)?;
+                let v = own(
+                    corner.vertex,
+                    "every corner's vertex is set when the edges are sorted",
+                )?;
                 set_vertex_point(k, b, v, new_vtx_pt)?;
                 let zone = tol::zone_tol3d(k, new_tol);
                 vertex::set_tolerance(b, v, zone, true, true)?;
@@ -1225,7 +1376,10 @@ impl FilletRemoval {
         let end_face = self.end_face(which_end)?;
         let tan_face = self.tan_face(which_side)?;
         let corner = self.corner(which_end, which_side)?;
-        let side_edge = ner(corner.side_edge)?;
+        let side_edge = own(
+            corner.side_edge,
+            "the side edges are extended only at corners that have one",
+        )?;
         let high_end = corner.high_end_of_side_edge;
         let mut new_side_edge_domain = edge::interval(b, side_edge)?;
 
@@ -1270,14 +1424,13 @@ impl FilletRemoval {
         // Append this curve piece to the side edge's curve.
         // First, we had better make sure that the side edge curve
         // doesn't extend past the original vertex position.
-        let mut curve = ner(b.edge_mut(side_edge)?.curve.take())?;
+        let Some(mut curve) = b.edge_mut(side_edge)?.curve.take() else {
+            return Err(no_curve(side_edge));
+        };
         let r = (|| -> Result<Extent1d> {
             // pCurve will have to be a SmBSplineCurve, for JoinWith().
             if bspline_part(&curve).is_none() {
-                return Err(SolidError::blend_missing(
-                    OP,
-                    "the side edge curve's B-spline form",
-                ));
+                return Err(curve_without_net(Some(side_edge), &curve));
             }
             let mut curve_domain = curve.natural_interval();
             if high_end {
@@ -1290,7 +1443,10 @@ impl FilletRemoval {
 
             // Now append the new intersection curve.
             let corner = self.corner_mut(which_end, which_side)?;
-            let mut ext = ner(corner.new_side_edge_extension_3d.take())?;
+            let mut ext = own(
+                corner.new_side_edge_extension_3d.take(),
+                "the extension was checked to be there above",
+            )?;
             crate::blend::fillet_corner::p3::join_with(k, &mut curve, high_end, &mut ext, false)?;
             Ok(curve.natural_interval())
         })();
@@ -1308,7 +1464,7 @@ impl FilletRemoval {
         let (fixed, far_point, guess) = if high_end {
             let t1 = curve_domain.max();
             // Set t0 at the far end.
-            let start = ner(edge::start_vertex(b, side_edge)?)?;
+            let start = edge_vertex(edge::start_vertex(b, side_edge)?, side_edge)?;
             let far_point = b.vertex(start)?.point;
             (
                 t1,
@@ -1319,7 +1475,7 @@ impl FilletRemoval {
             let t0 = curve_domain.min();
             // Set t1 at the far end.
             let near = edge::start_vertex(b, side_edge)?;
-            let far = ner(edge::other_vertex(b, side_edge, near)?)?;
+            let far = edge_vertex(edge::other_vertex(b, side_edge, near)?, side_edge)?;
             let far_point = b.vertex(far)?.point;
             (
                 t0,
@@ -1327,18 +1483,26 @@ impl FilletRemoval {
                 curve_domain.clamp_value(new_side_edge_domain.max()),
             )
         };
-        let curve = ner(edge::curve(b, side_edge)?)?;
-        let drop = or_sm_err(curve.drop_point(
-            k,
-            &curve_domain,
-            far_point,
-            None,
-            tol,
-            Some(guess),
-            SolverOperation::Minimize,
-        ))?;
-        if !drop.success || drop.distance > tol {
-            return Err(stage_failed());
+        let curve = own(
+            edge::curve(b, side_edge)?,
+            "the side edge's joined curve was put back just above",
+        )?;
+        let drop = curve
+            .drop_point(
+                k,
+                &curve_domain,
+                far_point,
+                None,
+                tol,
+                Some(guess),
+                SolverOperation::Minimize,
+            )
+            .map_err(|e| stopped_after(RemovalStop::FarVertexDropFailed, e))?;
+        if !drop.success {
+            return Err(stopped(RemovalStop::FarVertexDropStopped));
+        }
+        if drop.distance > tol {
+            return Err(stopped(RemovalStop::FarVertexOffSideEdge));
         }
         let (t0, t1) = if high_end {
             (drop.parameter, fixed)
@@ -1368,7 +1532,10 @@ impl FilletRemoval {
             let Some(holder) = uv_trim_holder(b, side_eu)? else {
                 continue;
             };
-            let mut side_uv = ner(b.edgeuse_mut(holder)?.uv_trim_curve.take())?;
+            let mut side_uv = own(
+                b.edgeuse_mut(holder)?.uv_trim_curve.take(),
+                "the UV trim holder is an edge use that has a UV trim curve",
+            )?;
             let joined = crate::blend::fillet_corner::p3::join_with(
                 k,
                 &mut side_uv,
@@ -1402,18 +1569,8 @@ impl FilletRemoval {
         let tan_edge1 = self.tan_edge(1)?;
         let domain0 = edge::interval(b, tan_edge0)?;
         let domain1 = edge::interval(b, tan_edge1)?;
-        let pv0 = curve_tangent(
-            k,
-            ner(edge::curve(b, tan_edge0)?)?,
-            domain0.evaluate(0.5),
-            true,
-        )?;
-        let pv1 = curve_tangent(
-            k,
-            ner(edge::curve(b, tan_edge1)?)?,
-            domain1.evaluate(0.5),
-            true,
-        )?;
+        let pv0 = curve_tangent(k, edge_curve(b, tan_edge0)?, domain0.evaluate(0.5), true)?;
+        let pv1 = curve_tangent(k, edge_curve(b, tan_edge1)?, domain1.evaluate(0.5), true)?;
         let orient = if pv0.dot(pv1) > 0.0 {
             OrientType::Same
         } else {
@@ -1427,7 +1584,10 @@ impl FilletRemoval {
 
         // We have to get the direction of the new Edge curve right:
         // it has to run in the same direction as the Edge.
-        let mut new_curve = ner(self.new_edge_curve_3d.take())?;
+        let mut new_curve = own(
+            self.new_edge_curve_3d.take(),
+            "the tangent faces' intersection is made before the new edge is installed",
+        )?;
         let new_domain = new_curve.natural_interval();
         let new_tan = curve_tangent(k, &new_curve, new_domain.evaluate(0.5), true)?;
         if pv0.dot(new_tan) < 0.0 {
@@ -1505,10 +1665,12 @@ impl FilletRemoval {
                 for &eu in &uses {
                     get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
                     if eu1::uv_trim_curve(b, eu)?.0.is_none() {
-                        return Err(SolidError::blend_missing(
+                        return Err(Failure::new(
                             OP,
-                            "the edge use's UV trim curve",
-                        ));
+                            BlendFailure::RemovalStopped(RemovalStop::UvTrimNotMade),
+                        )
+                        .at(EntityRef::Edgeuse(eu))
+                        .into_error());
                     }
                 }
             }
@@ -1576,7 +1738,7 @@ fn uv_trim_holder(b: &Brep, eu: EdgeuseId) -> Result<Option<EdgeuseId>> {
 /// An evaluation copy of `f`'s surface with out-of-bounds evaluation on (upstream turns
 /// it on temporarily on the face's own `SmBSplineSurface`).
 fn out_of_bounds_copy(b: &Brep, f: FaceId) -> Result<Surface> {
-    let mut s = ner(crate::topology::face::p2::surface(b, f)?)?.clone_for_evaluation()?;
+    let mut s = face_surface(b, f)?.clone_for_evaluation()?;
     set_out_of_bounds_enabled(&mut s, true);
     Ok(s)
 }
@@ -1631,20 +1793,23 @@ fn grow_face(k: &Kernel, b: &mut Brep, f: FaceId, domain: &Extent2d) -> Result<(
         (domain.min().y, SurfParamType::V),
         (domain.max().y, SurfParamType::V),
     ] {
-        ignore_status(expand_boundary_span(k, surface, param, dir))?;
+        ignore_status(expand_boundary_span(k, f, surface, param, dir))?;
     }
     ignore_status(update_analytical_domain(k, surface, domain))
 }
 
 /// `SmBSplineSurface::ExpandBoundarySpan` on a surface's `SmBSplineSurface` part, its
-/// NURB made first as upstream's `GetOrCreateGwNurbPointer` makes it.
+/// NURB made first as upstream's `GetOrCreateGwNurbPointer` makes it. `face` is the
+/// face whose surface it is, named when the surface has no B-spline net.
 fn expand_boundary_span(
     k: &Kernel,
+    face: FaceId,
     surface: &mut Surface,
     param: f64,
     dir: SurfParamType,
 ) -> Result<()> {
     surface.natural_uv_domain_with_nurb(k)?;
+    let kind = surface.type_string();
     let base = match surface.kind_mut() {
         SurfaceKind::BSpline(s) => s,
         SurfaceKind::Plane(p) => p.base_mut(),
@@ -1658,7 +1823,12 @@ fn expand_boundary_span(
         SurfaceKind::ProceduralBlend(pb) => pb.net_mut(),
         // (the fork's SmBallPatch is an SmBSplineSurface too: its net)
         SurfaceKind::BallPatch(pb) => pb.net_mut(),
-        _ => return Err(SolidError::blend_missing(OP, "the surface's B-spline net")),
+        _ => {
+            return Err(SolidError::blend(
+                OP,
+                BlendFailure::SurfaceWithoutBSplineForm { face, kind },
+            ))
+        }
     };
     base.expand_boundary_span(param, dir)
 }
@@ -1700,8 +1870,9 @@ pub fn update_analytical_domain(
 ///
 /// # Errors
 ///
-/// `SM_ERR` when the edge has no edge use on `from_face`; [`SolidError::InvalidInput`]
-/// where upstream dereferences null; [`SolidError::NotFound`] for a dangling id.
+/// `SM_ERR` when the edge has no edge use on `from_face`; `SM_ERR_NULL_POINTER` where
+/// upstream dereferences null (an edge without an end, a vertex that is neither end of the
+/// edge, a missing topology link); [`SolidError::NotFound`] for a dangling id.
 pub fn move_vtx_and_edge_to_adjacent_face(
     b: &mut Brep,
     vtx_to_move: VertexId,
@@ -1709,26 +1880,35 @@ pub fn move_vtx_and_edge_to_adjacent_face(
     from_face: FaceId,
 ) -> Result<()> {
     // Grab this before we change anything:
-    let opp_vtx = ner(edge::other_vertex(b, edge_to_move, Some(vtx_to_move))?)?;
+    let Some(opp_vtx) = edge::other_vertex(b, edge_to_move, Some(vtx_to_move))? else {
+        // Upstream dereferences the null either way; name the vertex given when the edge
+        // has both ends and it is neither.
+        return Err(match edge::start_end_vertices(b, edge_to_move) {
+            Ok((Some(a), Some(c))) if a != vtx_to_move && c != vtx_to_move => {
+                stopped(RemovalStop::VertexNotOnEdge)
+            }
+            _ => SolidError::blend(OP, BlendFailure::EdgeWithoutVertices { edge: edge_to_move }),
+        });
+    };
 
     // Start with the edge use oriented in the direction (vtx_to_move -> edge_to_move),
     // i.e., whose vertex use corresponds to vtx_to_move.
     let Some(mut eu_to_move) = edge::edgeuse_of_face(b, edge_to_move, Some(from_face))? else {
-        return Err(stage_failed());
+        return Err(stopped(RemovalStop::EdgeNotOnFace));
     };
     let eu_vertex = |b: &Brep, eu: EdgeuseId| -> Result<Option<VertexId>> {
-        let vu = ner(eu1::vertexuse(b, eu)?)?;
+        let vu = have(eu1::vertexuse(b, eu)?, RemovalInput::EdgeUseVertexUse)?;
         Ok(b.vertexuse(vu)?.vertex)
     };
     if eu_vertex(b, eu_to_move)? != Some(vtx_to_move) {
-        eu_to_move = ner(eu1::mate(b, eu_to_move)?)?;
+        eu_to_move = have(eu1::mate(b, eu_to_move)?, RemovalInput::EdgeUseMate)?;
     }
 
     // first pass: 'Before' means CW
     relink(b, eu_to_move, vtx_to_move, opp_vtx, true)?;
 
     // Now repeat for the Mates.  CW and CCW get switched.
-    let mate = ner(eu1::mate(b, eu_to_move)?)?;
+    let mate = have(eu1::mate(b, eu_to_move)?, RemovalInput::EdgeUseMate)?;
     relink(b, mate, vtx_to_move, opp_vtx, false)
 }
 
@@ -1743,10 +1923,13 @@ fn relink(
     first_pass: bool,
 ) -> Result<()> {
     let rec = b.edgeuse(eu)?;
-    let (cw, ccw) = (ner(rec.cw)?, ner(rec.ccw)?);
+    let (cw, ccw) = (
+        have(rec.cw, RemovalInput::EdgeUseNeighbour)?,
+        have(rec.ccw, RemovalInput::EdgeUseNeighbour)?,
+    );
 
     // Make sure that this EU is not the one in the list that the EU's Loopuse points to.
-    let lu = ner(eu1::loopuse(b, eu)?)?;
+    let lu = have(eu1::loopuse(b, eu)?, RemovalInput::EdgeUseLoopUse)?;
     if b.loopuse(lu)?.start == LoopuseStart::Edgeuse(Some(eu)) {
         // Just slide it around the loop by one.
         b.loopuse_mut(lu)?.start = LoopuseStart::Edgeuse(Some(ccw));
@@ -1755,13 +1938,15 @@ fn relink(
     // Get the EUs in the adjacent face where eu should go,
     // and grab the vertexuse to move, before we change anything.
     let (insert_before, insert_after, vu_to_move) = if first_pass {
-        let before = ner(eu1::radial(b, cw)?)?;
-        let after = ner(b.edgeuse(before)?.cw)?;
-        (before, after, ner(eu1::vertexuse(b, before)?)?)
+        let before = have(eu1::radial(b, cw)?, RemovalInput::EdgeUseRadial)?;
+        let after = have(b.edgeuse(before)?.cw, RemovalInput::EdgeUseNeighbour)?;
+        let vu = have(eu1::vertexuse(b, before)?, RemovalInput::EdgeUseVertexUse)?;
+        (before, after, vu)
     } else {
-        let after = ner(eu1::radial(b, ccw)?)?;
-        let before = ner(b.edgeuse(after)?.ccw)?;
-        (before, after, ner(eu1::vertexuse(b, ccw)?)?)
+        let after = have(eu1::radial(b, ccw)?, RemovalInput::EdgeUseRadial)?;
+        let before = have(b.edgeuse(after)?.ccw, RemovalInput::EdgeUseNeighbour)?;
+        let vu = have(eu1::vertexuse(b, ccw)?, RemovalInput::EdgeUseVertexUse)?;
+        (before, after, vu)
     };
 
     // Unhitch eu from its doubly-linked EU list.
@@ -1849,7 +2034,7 @@ pub fn set_trim_curve(
         }
     }
     // should never arrive there
-    Err(stage_failed())
+    Err(stopped(RemovalStop::NoSameUseOnFace))
 }
 
 /// `SmBrep::GlueEdges(pSurvivingEdge, eRelativeOrientation, dEdgeGap, pEdgeToDelete)`
@@ -1861,8 +2046,9 @@ pub fn set_trim_curve(
 ///
 /// # Errors
 ///
-/// `SM_ERR` when `to_delete` is not a lamina edge; [`SolidError::InvalidInput`] where
-/// upstream dereferences null; those of the notifications and list edits.
+/// `SM_ERR` when `to_delete` is not a lamina edge; `SM_ERR_NULL_POINTER` where upstream
+/// dereferences null (a missing topology link or curve); those of the notifications and
+/// list edits.
 pub fn glue_edges(
     k: &mut Kernel,
     b: &mut Brep,
@@ -1874,7 +2060,7 @@ pub fn glue_edges(
 ) -> Result<()> {
     // Make sure we have both lamina edges.
     if !eu1::edge_is_lamina(b, to_delete)? {
-        return Err(stage_failed());
+        return Err(stopped(RemovalStop::EdgeToDeleteNotLamina));
     }
 
     let this = Some(NotifyArg::Object(brep_p2::brep_ref(b)));
@@ -1913,8 +2099,11 @@ pub fn glue_edges(
     }
 
     // Remove edgeuses from pEdgeToDelete and orient them again
-    let deu1 = ner(b.edge(to_delete)?.edgeuses.first().copied())?;
-    let deu2 = ner(eu1::mate(b, deu1)?)?;
+    let deu1 = own(
+        b.edge(to_delete)?.edgeuses.first().copied(),
+        "a lamina edge has two edge uses",
+    )?;
+    let deu2 = have(eu1::mate(b, deu1)?, RemovalInput::EdgeUseMate)?;
     // Remove Geometry from Edgeuses
     for eu in [deu1, deu2] {
         let rec = b.edgeuse_mut(eu)?;
@@ -1972,7 +2161,7 @@ pub fn delete_fillet_face(
 ) -> Result<()> {
     // check state - m_bEditingEnabled must be on
     if !b.editing_enabled() {
-        return Err(stage_failed());
+        return Err(editing_disabled());
     }
     let tol_3d = match tol_3d {
         Some(t) => t,
@@ -2029,9 +2218,9 @@ mod tests {
         assert!(end.distance(Point3::new(2.0, 0.0, 0.0)) <= 1e-12, "{end:?}");
     }
 
-    /// #13790: removing a face while editing is off is refused with a typed blend failure
-    /// that keeps the `SM_ERR` status of the bare `Upstream` it replaced, and the body is
-    /// left alone.
+    /// #13790: removing a face while editing is off fails with the topology's typed
+    /// cause, editing not enabled, under the `SM_ERR` status of the bare `Upstream` it
+    /// replaced, and the body is left alone.
     #[test]
     fn removal_with_editing_off_is_a_typed_failure() {
         let mut k = Kernel::default();
@@ -2041,8 +2230,8 @@ mod tests {
         b.set_editing_enabled(false);
         let face = crate::topology::brep::p1::faces(&b, None).unwrap()[0];
         let error = delete_fillet_face(&mut k, &mut b, face, None).unwrap_err();
-        assert_eq!(error, stage_failed());
-        assert!(error.blend_failure().is_some());
+        assert_eq!(error, editing_disabled());
+        assert!(!error.is_defect() && !error.is_refusal());
         assert_eq!(error.sm_status(), Some(crate::error::SM_ERR));
         assert_eq!(error.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(crate::topology::brep::p1::faces(&b, None).unwrap().len(), 6);
@@ -2069,30 +2258,59 @@ mod tests {
         assert_eq!(crate::topology::brep::p1::faces(&b, None).unwrap().len(), 6);
     }
 
-    /// A missing object is a stage failure built on purpose, a defect, with the
-    /// `SM_ERR_NULL_POINTER` status of upstream's `NER`; a failed call keeps its error as the
-    /// cause, and an unported or cancelled call passes on as it is.
+    /// An object the removal holds that is missing is a defect with the
+    /// `SM_ERR_NULL_POINTER` status of upstream's `NER`, built where it is found; a
+    /// missing link of the topology it walks is named and keeps that status; a stop after
+    /// a failed call keeps the call's error as the cause, and an unported or cancelled
+    /// call passes on as it is.
     #[test]
-    fn missing_objects_and_failed_calls_are_stage_failures() {
+    fn missing_objects_and_failed_calls_are_named() {
         let before = line!();
-        let missing = ner::<()>(None).unwrap_err();
+        let missing = own::<()>(None, "held").unwrap_err();
         assert!((before..line!()).contains(&missing.failure().unwrap().origin().line()));
-        assert_eq!(missing.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert_eq!(
+            missing.blend_failure(),
+            Some(&BlendFailure::Defect { why: "held" })
+        );
         assert_eq!(missing.upstream_status(), Some(SM_ERR_NULL_POINTER));
         assert!(missing.is_defect() && !missing.is_refusal());
+        let link = have::<()>(None, RemovalInput::EdgeUseMate).unwrap_err();
+        assert_eq!(
+            link.blend_failure(),
+            Some(&BlendFailure::RemovalInputMissing(
+                RemovalInput::EdgeUseMate
+            ))
+        );
+        assert_eq!(link.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert!(!link.is_defect() && !link.is_refusal());
         let call = SolidError::invalid_input("blend::call", "no such face");
-        let failed = or_sm_err::<()>(Err(call.clone())).unwrap_err();
-        assert_eq!(failed.blend_failure(), Some(&BlendFailure::StageFailed));
+        let failed = stopped_after(RemovalStop::CornerNotSolved, call.clone());
+        assert_eq!(
+            failed.blend_failure(),
+            Some(&BlendFailure::RemovalStopped(RemovalStop::CornerNotSolved))
+        );
         assert_eq!(failed.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(failed.cause(), Some(&call));
-        assert!(failed.is_defect() && !failed.is_refusal());
+        // The stop's own kind is its class; the cause decides defect or refusal.
+        assert_eq!(failed.kind(), crate::error::ErrorKind::NotFound);
+        assert!(!failed.is_defect() && !failed.is_refusal());
+        let over_defect = stopped_after(RemovalStop::CornerNotSolved, defect("held"));
+        assert!(over_defect.is_defect() && !over_defect.is_refusal());
+        let over_refusal = stopped_after(
+            RemovalStop::CornerNotSolved,
+            refused(R::EndEdgeMissesTangentEdges),
+        );
+        assert!(over_refusal.is_refusal() && !over_refusal.is_defect());
         let unported = SolidError::unported("SmX::Y", "unit");
-        assert_eq!(or_sm_err::<()>(Err(unported.clone())), Err(unported));
+        assert_eq!(
+            stopped_after(RemovalStop::CornerNotSolved, unported.clone()),
+            unported
+        );
     }
 
     /// The side edge's run-on drop refuses only when it converged farther than `tol` from
-    /// the corner: a drop that stopped, or failed, proves nothing about the line and is a
-    /// stage failure (#15034 rule 5).
+    /// the corner: a drop that stopped, or failed, proves nothing about the line and stops
+    /// the removal with a named cause (#15034 rule 5).
     #[test]
     fn the_run_on_drop_refuses_only_a_converged_drop() {
         let tol = 1e-6;
@@ -2110,12 +2328,19 @@ mod tests {
         assert!(off.is_refusal());
         for d in [drop(false, 0.0), drop(false, 0.1)] {
             let stopped = run_on_drop(Ok(d), tol).unwrap_err();
-            assert_eq!(stopped.blend_failure(), Some(&BlendFailure::StageFailed));
-            assert!(stopped.is_defect() && !stopped.is_refusal());
+            assert_eq!(
+                stopped.blend_failure(),
+                Some(&BlendFailure::RemovalStopped(RemovalStop::RunOnDropStopped))
+            );
+            assert!(!stopped.is_defect() && !stopped.is_refusal());
+            assert_eq!(stopped.kind(), crate::error::ErrorKind::NotConverged);
         }
         let call = SolidError::invalid_input("blend::call", "no such curve");
         let failed = run_on_drop(Err(call.clone()), tol).unwrap_err();
-        assert_eq!(failed.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert_eq!(
+            failed.blend_failure(),
+            Some(&BlendFailure::RemovalStopped(RemovalStop::RunOnDropFailed))
+        );
         assert_eq!(failed.cause(), Some(&call));
         // a curved side edge is refused only when the drop onto it converged
         assert_eq!(
@@ -2123,19 +2348,30 @@ mod tests {
             Some(&BlendFailure::RemovalRefused(R::SideEdgeNotStraight))
         );
         let stopped = curved_side_edge(false, None);
-        assert_eq!(stopped.blend_failure(), Some(&BlendFailure::StageFailed));
+        assert_eq!(
+            stopped.blend_failure(),
+            Some(&BlendFailure::RemovalStopped(
+                RemovalStop::SideEdgeDropStopped
+            ))
+        );
         assert_eq!(stopped.cause(), None);
     }
 
-    /// A drop onto a curved side edge that failed with an error (exact only) is a stage
-    /// failure that keeps the drop's error as its cause, so the chain reaches the call that
+    /// A drop onto a curved side edge that failed with an error (exact only) stops the
+    /// removal and keeps the drop's error as its cause, so the chain reaches the call that
     /// failed; a drop that only stopped has no cause to keep.
     #[test]
     fn a_failed_drop_onto_a_curved_side_edge_is_kept_as_the_cause() {
         let call = SolidError::invalid_input("curve::drop_point", "no such curve");
         let failed = curved_side_edge(false, Some(call.clone()));
-        assert_eq!(failed.blend_failure(), Some(&BlendFailure::StageFailed));
-        assert!(failed.is_defect() && !failed.is_refusal());
+        assert_eq!(
+            failed.blend_failure(),
+            Some(&BlendFailure::RemovalStopped(
+                RemovalStop::SideEdgeDropFailed
+            ))
+        );
+        assert_eq!(failed.kind(), crate::error::ErrorKind::Failed);
+        assert!(!failed.is_refusal() && !failed.is_defect());
         assert_eq!(failed.cause(), Some(&call));
         assert_eq!(failed.root_cause(), &call);
         assert_eq!(curved_side_edge(false, None).cause(), None);

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Mate constraint</title>
+  <path d="M8.62 31.43L32 44.93L32 52.81L8.62 39.31Z" fill="#b8c3cf"/>
+  <path d="M55.38 31.43L32 44.93L32 52.81L55.38 39.31Z" fill="#8e9faf"/>
+  <path d="M32 17.93L55.38 31.43L32 44.93L8.62 31.43Z" fill="#b9ddf8"/>
+  <path d="M32 17.93L55.38 31.43L55.38 39.31L32 52.81L8.62 39.31L8.62 31.43Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.62 31.43L32 44.93L55.38 31.43" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 44.93L32 52.81" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20.31 17.93L32 24.69L32 38.19L20.31 31.43Z" fill="#b8c3cf"/>
+  <path d="M43.69 17.93L32 24.69L32 38.19L43.69 31.43Z" fill="#8e9faf"/>
+  <path d="M32 11.19L43.69 17.93L32 24.69L20.31 17.93Z" fill="#e2e8ef"/>
+  <path d="M32 11.19L43.69 17.93L43.69 31.43L32 38.19L20.31 31.43L20.31 17.93Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20.31 17.93L32 24.69L43.69 17.93" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 24.69L32 38.19" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20.31 31.43L32 38.19L43.69 31.43" fill="none" stroke="#236ead" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -23,13 +23,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
 pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
     let chosen = |button: NavButton| nav_choice(&app.preferences, button);
     let row = |button: NavButton, keys: NavKeys, mode: NavMode| {
-        let button = match button {
-            NavButton::Left => "prefs.button_left",
-            NavButton::Middle => "prefs.button_middle",
-            NavButton::Right => "prefs.button_right",
-            NavButton::Extra1 => "nav.buttons.extra1",
-            NavButton::Extra2 => "nav.buttons.extra2",
-        };
+        let button = button_label(button);
         let mut names = Vec::new();
         if keys.shift {
             names.push(solidcraft_ui_text::tr("prefs.shift"));
@@ -40,7 +34,7 @@ pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
         if keys.alt {
             names.push("Alt/Option");
         }
-        names.push(solidcraft_ui_text::tr(button));
+        names.push(button.as_str());
         let action = match mode {
             NavMode::Orbit => "prefs.gesture_orbit",
             NavMode::Pan => "prefs.gesture_pan",
@@ -56,7 +50,15 @@ pub(super) fn mapping_rows(app: &SolveApp) -> Vec<(Vec<String>, String)> {
         .filter(|binding| app.preferences.right_drag_orbits || !(binding.button == NavButton::Right && binding.mode == NavMode::Orbit))
         .map(|binding| row(binding.button, binding.keys, binding.mode))
         .collect();
-    gestures.extend(NavButton::ALL.into_iter().filter_map(|button| {
+    // The preset's two-button drags (NX: middle + right pans, middle + left zooms, #22063).
+    if chosen(NavButton::Middle).is_none() {
+        gestures.extend(nav_preset(&app.preferences.nav).chords.iter().map(|(other, mode)| {
+            let (mut names, action) = row(NavButton::Middle, NavKeys::default(), *mode);
+            names.push(button_label(*other));
+            (names, action)
+        }));
+    }
+    gestures.extend(NavButton::ALL.into_iter().chain(NavButton::mapped_numbered(&app.preferences)).filter_map(|button| {
         let choice = chosen(button)?;
         Some(row(button, choice.keys, choice.mode?))
     }));
@@ -227,6 +229,28 @@ fn orbit(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
             let response = setting::free_orbit_upright(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.free_orbit_upright.help"));
             crate::scenario::publish_target("prefs:free_orbit_upright", response.rect);
         });
+        let label = app.tr("nav.free_orbit_key.label");
+        let width = ui_kit::ContentWidth::label(ui, label) + t.space_16 + t.space_4;
+        ui_kit::settings_form(ui, width, |ui| {
+            ui_kit::settings_row_help(ui, label, app.tr("nav.free_orbit_key.help"), |ui| {
+                let current = FreeOrbitKey::of(app);
+                let name = |key: FreeOrbitKey| match key {
+                    FreeOrbitKey::Off => solidcraft_ui_text::tr("nav.buttons.no_key"),
+                    FreeOrbitKey::Alt => "Alt/Option",
+                    FreeOrbitKey::Ctrl => "Ctrl/Cmd",
+                };
+                ui_kit::settings_control_width(ui, t.space_24 * 4.0, |ui| {
+                    let response = ui_kit::dropdown_menu(ui, "pref_free_orbit_key", name(current), |ui| {
+                        for &(key, id) in FreeOrbitKey::ALL {
+                            if ui_kit::list_picker(ui, id, name(key), current == key).clicked() {
+                                app.preferences.free_orbit_key = id.into();
+                            }
+                        }
+                    });
+                    crate::scenario::publish_target("prefs:free_orbit_key", response.rect);
+                });
+            });
+        });
     });
 }
 
@@ -357,6 +381,9 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         {
             crate::scenario::publish_target("prefs:navigator", all);
         }
+        if app.preferences.navigator_style == NavigatorStyle::Custom && app.view_gizmo.shape.is_none() {
+            ui_kit::text(ui, app.tr("view_gizmo.pick_body_hint"), ui_kit::Text::Note("navigator_body_hint"));
+        }
         setting::look_at_anim(app, ui);
         let width =
             ["ui.animation_speed", "prefs.home_fit_size"].into_iter().map(|id| ui_kit::ContentWidth::label(ui, app.tr(id))).fold(0.0, f32::max);
@@ -377,6 +404,9 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         let (label, note) = (app.tr("prefs.navigator_fit").to_owned(), app.tr("prefs.navigator_fit_note").to_owned());
         let response = ui_kit::checkbox(ui, &label, &mut app.preferences.navigator_fit).backing_on_hover_text(note);
         crate::scenario::publish_target("prefs:navigator_fit", response.rect);
+        let (label, help) = (app.tr("prefs.navigator_turn_around").to_owned(), app.tr("prefs.navigator_turn_around_help").to_owned());
+        let response = ui_kit::checkbox(ui, &label, &mut app.preferences.navigator_turn_around).backing_on_hover_text(help);
+        crate::scenario::publish_target("prefs:navigator_turn_around", response.rect);
         let (label, note) = (app.tr("prefs.keep_hover_while_navigating").to_owned(), app.tr("prefs.keep_hover_while_navigating_note").to_owned());
         let response = ui_kit::checkbox(ui, &label, &mut app.preferences.keep_hover_while_navigating).backing_on_hover_text(note);
         crate::scenario::publish_target("prefs:keep_hover_while_navigating", response.rect);
@@ -394,11 +424,13 @@ fn view(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
 /// are here too; a plain click on one still goes Back.
 fn button_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     ui_kit::settings_inline_note(ui, app.tr("nav.buttons.help"));
-    let width = NavButton::ALL.iter().map(|b| ui_kit::ContentWidth::label(ui, button_label(*b))).fold(0.0, f32::max) + t.space_16 + t.space_4;
+    // The further buttons (6 and up) of a mouse with many have a row once they are mapped.
+    let buttons: Vec<NavButton> = NavButton::ALL.into_iter().chain(NavButton::mapped_numbered(&app.preferences)).collect();
+    let width = buttons.iter().map(|b| ui_kit::ContentWidth::label(ui, &button_label(*b))).fold(0.0, f32::max) + t.space_16 + t.space_4;
     ui_kit::settings_form(ui, width, |ui| {
-        for button in NavButton::ALL {
-            ui_kit::row(ui, button_label(button), |ui| {
-                let side = matches!(button, NavButton::Extra1 | NavButton::Extra2);
+        for button in buttons {
+            ui_kit::row(ui, &button_label(button), |ui| {
+                let side = button.is_side();
                 let current = nav_choice(&app.preferences, button);
                 let action_text = match current {
                     None => solidcraft_ui_text::tr(if side { "nav.buttons.nothing" } else { "nav.buttons.as_preset" }),
@@ -466,14 +498,16 @@ fn button_rows(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
     }
 }
 
-fn button_label(button: NavButton) -> &'static str {
-    solidcraft_ui_text::tr(match button {
+pub(super) fn button_label(button: NavButton) -> String {
+    let id = match button {
         NavButton::Left => "prefs.button_left",
         NavButton::Middle => "prefs.button_middle",
         NavButton::Right => "prefs.button_right",
         NavButton::Extra1 => "nav.buttons.extra1",
         NavButton::Extra2 => "nav.buttons.extra2",
-    })
+        NavButton::Numbered(n) => return solidcraft_ui_text::format("nav.buttons.numbered", &[("number", &n.to_string())]),
+    };
+    solidcraft_ui_text::tr(id).to_owned()
 }
 
 /// The held keys a choice needs, as the second drop-down shows them.
