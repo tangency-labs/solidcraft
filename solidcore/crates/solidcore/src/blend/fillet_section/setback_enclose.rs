@@ -258,16 +258,26 @@ fn inside_piece(u: &[f64], k: usize, x: Ivl, side: i32) -> bool {
     (side > 0 || a <= x.lo) && (side < 0 || x.hi <= b)
 }
 
-/// How far (3D) a definition's stations may lie past its leader's end: the leader is cut to
-/// the stations, and the cut (`BSplineCurve::trim`) moves an end onto a knot only within
-/// `100 · scaled_zero` of it or, on a rational curve, where the span it cuts off collapses
-/// to a pole, its control points within `ZONE_TOL_3D / 10` of each other (check test #15):
-/// either way the stations past the cut end lie within this of its end point.
+/// How far (3D) a definition's stations may lie past its leader's end where the leader's cut
+/// (`BSplineCurve::trim`) took off a short end span collapsing to a pole: a rational curve's
+/// end within such a span of an interior knot is moved onto the knot when the span's control
+/// points all lie within `ZONE_TOL_3D / 10` of its first (`end_span_is_pole`, check test
+/// #15), and the span lies in their convex hull, so within that of the end point.
 const PAST_LEADER_END: f64 = crate::geom::tol::ZONE_TOL_3D / 10.0;
+
+/// How far (in the leader's parameter) a definition's stations may lie past its leader's end
+/// `t` where the leader's cut snapped the end onto a knot: `trim` moves an end onto a knot
+/// within `100 · scaled_zero(t)` of it, `100 · EFF_ZERO · (1 + |t|)` (`ScaledZero for f64`).
+/// In 3D that is about `1e-10 (1 + |t|) |C′|`, past [`PAST_LEADER_END`] on a long edge (10 m on
+/// [0, 1]), so it is measured in the parameter, as the cut measures it.
+fn past_leader_knot(t: f64) -> f64 {
+    100.0 * crate::math::EFF_ZERO * (1.0 + t.abs())
+}
 
 /// Whether `[lo, hi]` lies in the closed knot span `[u_k, u_{k+1}]` of `edge`, to its
 /// rounding; the first piece continued below the domain's start and the last above its
-/// end while the continued piece stays within [`PAST_LEADER_END`] of the end point.
+/// end as far as the leader's cut can have shortened it: within [`past_leader_knot`] of the
+/// end in the parameter, or within [`PAST_LEADER_END`] of the end point.
 ///
 /// # Errors
 ///
@@ -281,9 +291,12 @@ fn inside_span(edge: &NurbsCurve, k: usize, lo: f64, hi: f64) -> Result<bool> {
     // crosses into another piece, except past a domain end, where no piece lies: the
     // certificate's evaluator (`span`, `derivs_over`) continues the end piece there, and a
     // definition's stations lie past its leader's end only as far as the leader's cut
-    // shortened it ([`PAST_LEADER_END`]), so the proof is taken that far and no farther
+    // shortened it (either snap), so the proof is taken that far and no farther
     let slack = |x: f64| 8.0 * f64::EPSILON * x.abs().max(1.0);
     let reaches = |end: f64, past: f64| -> Result<bool> {
+        if (past - end).abs() <= past_leader_knot(end) {
+            return Ok(true);
+        }
         let (Some(e), Some(q)) = (edge_at(edge, end)?, edge_at(edge, past)?) else {
             return Ok(false);
         };
@@ -2058,6 +2071,53 @@ mod tests {
         assert!(enclose_foot(&k, &fl, &edge, 2.0, inside, x)
             .unwrap()
             .is_some());
+    }
+
+    /// A long straight edge, 10 m along x on [0, 1] (|C′| = 1e4), on the plane z = 0: a span
+    /// reaching 1.5e-10 past its end in the parameter, within the leader cut's knot snap
+    /// (100 · 1e-12 · (1 + 1) = 2e-10), reaches 1.5e-6 past it in 3D, past the pole bound
+    /// 1e-6, and still proves: the foot at setback 6 is (x, 6, 0) square to the edge. Twice
+    /// the snap past it (4e-10, 4e-6 in 3D) proves nothing.
+    #[test]
+    fn a_long_edge_s_span_past_its_end_within_the_cut_s_knot_snap_proves() {
+        let k = Kernel::default();
+        let edge = NurbsCurve {
+            p: 1,
+            n: 2,
+            u: vec![0.0, 0.0, 1.0, 1.0],
+            pw: vec![0.0, 0.0, 0.0, 1.0, 1.0e4, 0.0, 0.0, 1.0],
+        };
+        let face = Nurbs::of(
+            &BSplineSurface::create_bilinear_surface(
+                Point3::new(-2.0e4, -2.0e4, 0.0),
+                Point3::new(2.0e4, -2.0e4, 0.0),
+                Point3::new(-2.0e4, 2.0e4, 0.0),
+                Point3::new(2.0e4, 2.0e4, 0.0),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let at_past = |past: f64| Span {
+            m: 1.0 - 1e-4 + 0.5 * past,
+            delta: 1e-4 + 0.5 * past,
+        };
+        let past = 1.5e-10;
+        assert!(past < past_leader_knot(1.0) && past * 1.0e4 > PAST_LEADER_END);
+        let at = at_past(past);
+        let guess = uv_of(&face, [1.0e4 * at.m, 6.0, 0.0]);
+        let foot = enclose_foot(&k, &face, &edge, 6.0, at, guess)
+            .unwrap()
+            .expect("proved within the knot snap");
+        for t in [-1.0, 0.0, 1.0] {
+            let x = 1.0e4 * (at.m + at.delta * t);
+            assert!(holds(at_t(foot.point, t), [x, 6.0, 0.0]), "at {t}");
+        }
+        let past = 2.0 * past_leader_knot(1.0);
+        let at = at_past(past);
+        let guess = uv_of(&face, [1.0e4 * at.m, 6.0, 0.0]);
+        assert!(enclose_foot(&k, &face, &edge, 6.0, at, guess)
+            .unwrap()
+            .is_none());
     }
 
     /// A span reaching past the edge's end runs on its end piece continued, as the
