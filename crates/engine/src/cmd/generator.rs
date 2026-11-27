@@ -105,7 +105,13 @@ fn to_params(m: Map<String, Value>) -> Params {
 
 fn provenance(r: &Resolved) -> Option<GeneratorProvenance> {
     let (name, row) = r.configuration.as_ref().zip(r.row.as_ref())?;
-    Some(GeneratorProvenance { row: name.clone(), source: row.source.clone(), page: row.page.clone(), status: row.status.clone(), note: row.note.clone() })
+    Some(GeneratorProvenance {
+        row: name.clone(),
+        source: row.source.clone(),
+        page: row.page.clone(),
+        status: row.status.clone(),
+        note: row.note.clone(),
+    })
 }
 
 fn list(_s: &mut Session, p: &Value) -> Result<Value> {

@@ -34,7 +34,9 @@ pub fn start(_: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 fn shown(v: &Json) -> String {
     match v {
         Json::String(s) => s.clone(),
-        Json::Object(o) => o.iter().map(|(k, x)| if x == &Json::Bool(true) { k.clone() } else { format!("{k} {}", shown(x)) }).collect::<Vec<_>>().join(", "),
+        Json::Object(o) => {
+            o.iter().map(|(k, x)| if x == &Json::Bool(true) { k.clone() } else { format!("{k} {}", shown(x)) }).collect::<Vec<_>>().join(", ")
+        }
         other => other.to_string(),
     }
 }

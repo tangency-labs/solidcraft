@@ -97,7 +97,21 @@ fn a_text_field_takes_its_escape_characters() {
 
 #[test]
 fn a_malformed_template_is_refused_in_words() {
-    for src in ["", "A{", "A}", "A[", "A]", "A[]", "{x: int 5..1}", "{x: nope 1..2}", "{1x: int 1..2}", "{size}", "{x: int 1..2}{x: text 0..3}", "[[[[[[A]]]]]]", "{a: A=}"] {
+    for src in [
+        "",
+        "A{",
+        "A}",
+        "A[",
+        "A]",
+        "A[]",
+        "{x: int 5..1}",
+        "{x: nope 1..2}",
+        "{1x: int 1..2}",
+        "{size}",
+        "{x: int 1..2}{x: text 0..3}",
+        "[[[[[[A]]]]]]",
+        "{a: A=}",
+    ] {
         assert!(Template::parse(src, &Declared::new()).is_err(), "{src:?}");
     }
 }

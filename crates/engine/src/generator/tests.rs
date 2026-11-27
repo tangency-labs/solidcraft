@@ -71,11 +71,7 @@ fn write_model(path: &Path) {
     run(&mut s, "parameters.add", json!({"name": "length", "expression": "40 mm"}));
     run(&mut s, "solid.box", json!({"length": "length", "width": "w", "height": "h", "body_name": "Nut"}));
     run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "body_name": "Peg"}));
-    run(
-        &mut s,
-        "solid.pattern.rectangular",
-        json!({"bodies": ["Peg"], "dir1": [1, 0, 0], "count1": "floor(length / 20 mm)", "spacing1": 20}),
-    );
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Peg"], "dir1": [1, 0, 0], "count1": "floor(length / 20 mm)", "spacing1": 20}));
     run(&mut s, "config.configure", json!({"params": ["w", "h", "length"]}));
     for (row, w, h) in [("M4", "7 mm", "3.2 mm"), ("M5", "8 mm", "4 mm"), ("M6", "10 mm", "5 mm"), ("M8", "13 mm", "6.5 mm")] {
         run(&mut s, "config.row", json!({"name": row, "values": {"param:w": w, "param:h": h, "param:length": "40 mm"}}));
@@ -125,13 +121,14 @@ fn a_code_reads_into_a_row_and_parameters() {
 fn refusals_say_why() {
     let dir = nut_package(None);
     let g = load(&dir);
+    let long = "9".repeat(200);
     for (code, kind, words) in [
         ("TN-M8-40", RefusalKind::NotModelled, "not modelled yet"),
         ("TN-M4-110", RefusalKind::Invalid, "not a Metric T-nut"),
         ("TN-M4-45", RefusalKind::Invalid, "ordering code"),
         ("XX-M4-40", RefusalKind::Invalid, "ordering code"),
         ("", RefusalKind::Invalid, "ordering code"),
-        (&"9".repeat(200), RefusalKind::Limit, "more than 128"),
+        (long.as_str(), RefusalKind::Limit, "more than 128"),
     ] {
         let e = g.parse(code).unwrap_err();
         assert_eq!(e.kind, kind, "{code}: {e:?}");
@@ -141,7 +138,7 @@ fn refusals_say_why() {
 
 #[test]
 fn a_package_with_a_script_resolves_through_rhai_and_tables() {
-    let dir = nut_package(Some(&MANIFEST.replace("row_from = [\"size\"]\n", "")));
+    let dir = nut_package(Some(MANIFEST.replace("row_from = [\"size\"]\n", "").as_str()));
     std::fs::create_dir(dir.path().join("tables")).unwrap();
     std::fs::write(dir.path().join("tables/sizes.csv"), "key,row,note\nM4,M4,\nM6,M6,\nM5,,no such row\n").unwrap();
     std::fs::write(
@@ -185,13 +182,13 @@ fn hostile_packages_are_refused_in_words() {
         String::new(),
     ];
     for m in &bad_manifests {
-        let dir = nut_package(Some(m));
+        let dir = nut_package(Some(m.as_str()));
         assert!(Package::load(dir.path()).is_err(), "{m}");
     }
-    let dir = nut_package(Some(&MANIFEST.replace("solidcraft-generator/2", "solidcraft-generator/9")));
+    let dir = nut_package(Some(MANIFEST.replace("solidcraft-generator/2", "solidcraft-generator/9").as_str()));
     assert!(matches!(Package::load(dir.path()), Err(GeneratorError::NeedsNewer { .. })));
     // x- keys are notes and are ignored.
-    let dir = nut_package(Some(&format!("x-note = \"hi\"\n{MANIFEST}")));
+    let dir = nut_package(Some(format!("x-note = \"hi\"\n{MANIFEST}").as_str()));
     assert!(Package::load(dir.path()).is_ok());
     // A runaway script cannot be loaded into a hang.
     let dir = nut_package(None);

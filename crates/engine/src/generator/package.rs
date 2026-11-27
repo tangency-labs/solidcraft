@@ -236,7 +236,9 @@ fn strip_extension_keys(t: &mut toml::Table) {
 fn read_limited(path: &Path, limit: usize, what: &str) -> Result<String, GeneratorError> {
     let file = std::fs::File::open(path).map_err(|e| GeneratorError::Package(format!("cannot open {what} `{}`: {e}", path.display())))?;
     let mut text = String::new();
-    file.take(limit as u64 + 1).read_to_string(&mut text).map_err(|e| GeneratorError::Package(format!("cannot read {what} `{}`: {e}", path.display())))?;
+    file.take(limit as u64 + 1)
+        .read_to_string(&mut text)
+        .map_err(|e| GeneratorError::Package(format!("cannot read {what} `{}`: {e}", path.display())))?;
     if text.len() > limit {
         return Err(GeneratorError::Limit { what: "bytes in a package file", limit });
     }
@@ -246,10 +248,7 @@ fn read_limited(path: &Path, limit: usize, what: &str) -> Result<String, Generat
 /// A file inside the package folder: relative, no `..`, and still inside once links are followed.
 fn inside(dir: &Path, relative: &str) -> Result<PathBuf, GeneratorError> {
     let rel = Path::new(relative);
-    if relative.is_empty()
-        || rel.is_absolute()
-        || rel.components().any(|c| !matches!(c, std::path::Component::Normal(_)))
-        || relative.contains('\\')
+    if relative.is_empty() || rel.is_absolute() || rel.components().any(|c| !matches!(c, std::path::Component::Normal(_))) || relative.contains('\\')
     {
         return pkg(format!("`{relative}` must be a plain relative path inside the package folder"));
     }

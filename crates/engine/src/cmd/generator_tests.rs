@@ -52,10 +52,7 @@ fn the_inserted_part_stays_parametric_and_stays_within_its_limits() {
     run(&mut s, "component.set_link_parameters", json!({"component": component, "parameters": {"length": "60 mm"}}));
     assert!(close(volume(&mut s), 7.0 * 3.2 * 60.0 + 3.0 * 8.0), "{}", volume(&mut s));
     // Out of the declared range: refused, naming the rule, and nothing changes.
-    let e = s
-        .execute("component.set_link_parameters", &json!({"component": component, "parameters": {"length": "120 mm"}}))
-        .unwrap_err()
-        .to_string();
+    let e = s.execute("component.set_link_parameters", &json!({"component": component, "parameters": {"length": "120 mm"}})).unwrap_err().to_string();
     assert!(e.contains("Length range"), "{e}");
     assert!(close(volume(&mut s), 7.0 * 3.2 * 60.0 + 3.0 * 8.0));
     // A name the design does not have is refused too.

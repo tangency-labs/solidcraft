@@ -1266,8 +1266,11 @@ struct SelectedConfiguration {
 
 fn selected_configuration(link: &DesignLink) -> Option<SelectedConfiguration> {
     let parameters = LinkParameters::intern(&link.parameters);
-    (link.configuration.is_some() || parameters.is_some())
-        .then(|| SelectedConfiguration { row: link.configuration, identity: link.configuration_identity, parameters })
+    (link.configuration.is_some() || parameters.is_some()).then(|| SelectedConfiguration {
+        row: link.configuration,
+        identity: link.configuration_identity,
+        parameters,
+    })
 }
 
 struct LinkRead {
@@ -1804,7 +1807,7 @@ fn evaluate_parsed_design(
         }
         if let Some(values) = selected.parameters {
             // The link's values on top of the row, within the limits the part declares.
-            let mut next = part.doc.clone();
+            let mut next: Document = (*part.doc).clone();
             next.set_parameters_within_limits(values.pairs()).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
             *part.doc_mut() = next;
             part.refresh();
@@ -2515,7 +2518,7 @@ fn placement_transform(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_
 fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.insert_design";
     let selection = configuration_key(p, None, cmd)?;
-    let given_parameters = link_parameters(p, &Default::default(), cmd)?;
+    let given_parameters = link_parameters(p, &std::collections::BTreeMap::new(), cmd)?;
     // The design to link: a file, or the design the caller holds in memory (one open in this
     // session that has no file yet, #16829).
     let (given, held) = match (p.get("path"), p.get("document")) {
@@ -3953,7 +3956,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     let selection = configuration_key(p, if same_source { link.configuration } else { None }, cmd)?;
     let bytes = read_link(&file, s.path.as_deref(), false).map_err(|e| bad(cmd, e.to_string()))?;
     let configuration = configuration_id(&bytes, selection).map_err(|e| bad(cmd, e.to_string()))?;
-    let configuration = with_parameters(configuration, &link_parameters(p, if same_source { &link.parameters } else { &Default::default() }, cmd)?);
+    let no_parameters = std::collections::BTreeMap::new();
+    let configuration = with_parameters(configuration, &link_parameters(p, if same_source { &link.parameters } else { &no_parameters }, cmd)?);
     if same_source && p.get("configuration").is_none() && p.get("parameters").is_none() && configuration != selected_configuration(&link) {
         return Err(bad(cmd, "the selected configuration was replaced; select a configuration again"));
     }
@@ -4388,7 +4392,10 @@ fn relink_placement(
     let old_mesh_feature = link_mesh_feature(s, comp, link.feature).map(|(id, _)| id);
     let old_solid_bodies = linked_body_entries(s, link.feature);
     let old_mesh_bodies = old_mesh_feature.map(|id| linked_body_entries(s, id)).unwrap_or_default();
-    let made = insert_design(s, &json!({"path": given, "parent": parent, "reuse": true, "configuration": configuration.and_then(|c| c.row), "parameters": parameters_json(configuration)}))?;
+    let made = insert_design(
+        s,
+        &json!({"path": given, "parent": parent, "reuse": true, "configuration": configuration.and_then(|c| c.row), "parameters": parameters_json(configuration)}),
+    )?;
     let linked = made["component"].as_u64().ok_or_else(|| bad(cmd, "the linked component was not created"))?;
     if s.doc.links.get(&linked).and_then(selected_configuration) != configuration {
         return Err(bad(cmd, "the selected configuration changed while relinking; try again"));

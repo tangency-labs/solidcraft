@@ -152,10 +152,17 @@ enum Node {
     /// Fixed text, case ignored; its separators match any run of separators, except one written
     /// `\-` (the `true` here), which must be present as it is.
     Lit(Vec<(char, bool)>),
-    Field { name: String, kind: FieldKind },
+    Field {
+        name: String,
+        kind: FieldKind,
+    },
     /// A part that may be left out. `flag` is a boolean parameter that says whether it is there;
     /// `absent` are the values set when it is left out.
-    Optional { nodes: Vec<Node>, flag: Option<String>, absent: Vec<(String, Json)> },
+    Optional {
+        nodes: Vec<Node>,
+        flag: Option<String>,
+        absent: Vec<(String, Json)>,
+    },
 }
 
 /// A compiled template.
@@ -254,7 +261,10 @@ fn spec_kind(spec: &str) -> Result<FieldKind, TemplateError> {
         }
         _ => {
             let values: Vec<String> = spec.split('|').map(|v| v.trim().to_string()).collect();
-            if values.is_empty() || values.len() > MAX_CHOICES || values.iter().any(|v| v.is_empty() || v.chars().count() > 64) {
+            if values.is_empty()
+                || values.len() > MAX_CHOICES
+                || values.iter().any(|v| v.is_empty() || v.chars().count() > 64 || v.chars().any(char::is_whitespace))
+            {
                 return syntax("a choice lists 1 to 256 values of 1 to 64 characters, separated by `|`");
             }
             Ok(FieldKind::Choice(values))
