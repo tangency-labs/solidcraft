@@ -42,7 +42,7 @@ fn probe(os: &str, release: bool, env: &[(&str, &str)], exe: &str, files: &[&str
     let files: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
     let get = |k: &str| env.get(k).cloned();
     let exists = |p: &Path| files.iter().any(|f| f == p);
-    detect(&Probe { os, release_build: release, env: &get, exe: Some(PathBuf::from(exe)), exists: &exists, msi_dir: None })
+    detect(&Probe { os, release_build: release, env: &get, exe: Some(PathBuf::from(exe)), exists: &exists, msi_dir: None, msi_user_dir: None })
 }
 
 #[test]
@@ -103,7 +103,7 @@ fn portable_windows_layout_is_recognised() {
     let get = |k: &str| (k == "ProgramFiles").then(|| "C:\\Program Files".to_string());
     let exists = |p: &Path| p == Path::new("/portable/solidcraft-cli.exe");
     assert_eq!(
-        detect(&Probe { os: "windows", release_build: true, env: &get, exe: Some(exe), exists: &exists, msi_dir: None }),
+        detect(&Probe { os: "windows", release_build: true, env: &get, exe: Some(exe), exists: &exists, msi_dir: None, msi_user_dir: None }),
         InstallKind::WindowsPortable
     );
 }
@@ -121,7 +121,15 @@ fn an_msi_install_outside_program_files_is_recognised() {
     // solidcraft-cli.exe is beside it.
     let exists = |_: &Path| true;
     let kind = |msi_dir: Option<&str>| {
-        detect(&Probe { os: "windows", release_build: true, env: &get, exe: Some(exe.clone()), exists: &exists, msi_dir: msi_dir.map(PathBuf::from) })
+        detect(&Probe {
+            os: "windows",
+            release_build: true,
+            env: &get,
+            exe: Some(exe.clone()),
+            exists: &exists,
+            msi_dir: msi_dir.map(PathBuf::from),
+            msi_user_dir: None,
+        })
     };
     // The installer records [INSTALLFOLDER], which ends in a backslash; Windows paths ignore case.
     assert_eq!(kind(Some(r"D:\Program Files\SolidCraft\")), InstallKind::WindowsMsi);
@@ -130,6 +138,40 @@ fn an_msi_install_outside_program_files_is_recognised() {
     assert_eq!(kind(None), InstallKind::WindowsPortable);
     assert_eq!(kind(Some("")), InstallKind::WindowsPortable);
     assert_eq!(kind(Some(r"D:\Program Files\SolidCraft2\")), InstallKind::WindowsPortable, "a folder whose name only starts the same");
+}
+
+/// A "just for me" MSI install (`%LocalAppData%\Programs\SolidCraft`, recorded under HKCU) is
+/// updated by the MSI in the per-user context, not swapped like the portable zip beside which it
+/// looks the same; an all-users record of the same folder wins.
+#[test]
+fn per_user_msi_install_is_told_apart() {
+    let exe = PathBuf::from(r"C:\Users\a b\AppData\Local\Programs\SolidCraft\solidcraft.exe");
+    let get = |k: &str| match k {
+        "ProgramFiles" | "ProgramW6432" => Some(r"C:\Program Files".to_string()),
+        "LOCALAPPDATA" => Some(r"C:\Users\a b\AppData\Local".to_string()),
+        _ => None,
+    };
+    let exists = |_: &Path| true;
+    let kind = |machine: Option<&str>, user: Option<&str>| {
+        detect(&Probe {
+            os: "windows",
+            release_build: true,
+            env: &get,
+            exe: Some(exe.clone()),
+            exists: &exists,
+            msi_dir: machine.map(PathBuf::from),
+            msi_user_dir: user.map(PathBuf::from),
+        })
+    };
+    let here = r"c:\users\a b\appdata\local\programs\solidcraft\";
+    assert_eq!(kind(None, Some(here)), InstallKind::WindowsMsiPerUser);
+    assert_eq!(kind(Some(r"C:\Program Files\SolidCraft\"), Some(here)), InstallKind::WindowsMsiPerUser, "an all-users install elsewhere");
+    assert_eq!(kind(Some(here), Some(here)), InstallKind::WindowsMsi);
+    // One recorded folder inside the other: the deeper one is the install.
+    assert_eq!(kind(Some(r"C:\Users\a b\AppData\Local\Programs\"), Some(here)), InstallKind::WindowsMsiPerUser);
+    assert_eq!(kind(Some(here), Some(r"C:\Users\a b\AppData\Local\Programs")), InstallKind::WindowsMsi);
+    assert_eq!(kind(None, None), InstallKind::WindowsPortable);
+    assert_eq!(asset_name(&InstallKind::WindowsMsiPerUser, "x86_64", "0.51.0").as_deref(), Some("solidcraft-windows-x64.msi"));
 }
 
 /// The assets of v0.10.0, as published.
@@ -448,7 +490,7 @@ fn a_setting_under_policy_shows_the_organizations_value_and_cannot_be_changed() 
         let reply = h.call("ui.prefs", json!({"open":"General"}));
         assert_eq!(
             reply["result"]["policy"],
-            json!({"locked": ["check_updates"], "check_updates": on, "settings": {"check_updates": on}}),
+            json!({"locked": ["check_updates"], "check_updates": on, "settings": {"check_updates": on}, "off": []}),
             "{reply}"
         );
         assert_eq!(reply["result"]["check_updates"], json!(!on), "the stored preference is reported as stored");
@@ -808,6 +850,46 @@ fn the_pill_shortens_in_a_narrow_title_bar() {
         }
     }
     assert!(shortened, "the long label gives way in a narrow bar");
+}
+
+/// Update, Donate and Discord are one kind of chip: the same height in both panel layouts, never
+/// crossing each other or Report a bug, at a wide and at narrow window widths.
+#[test]
+fn the_update_chip_matches_the_link_chips_in_both_layouts() {
+    let dir = scratch();
+    let (feed, _) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.updater.feed = Some(feed);
+    h.frame();
+    wait_for_check(&mut h);
+    let mut seen = Vec::new();
+    for layout in ["floating", "docked"] {
+        h.call("ui.set", json!({"layout": layout}));
+        for width in [1920.0, 1280.0, 1024.0, 900.0] {
+            h.call("ui.resize", json!({"width": width, "height": 720}));
+            h.frames(3);
+            let chips: Vec<_> = ["titlebar:update", "titlebar:kofi", "titlebar:discord", "titlebar:report"]
+                .into_iter()
+                .filter_map(|name| crate::scenario::rect_of(name).map(|r| (name, r)))
+                .collect();
+            assert!(chips.iter().any(|(n, _)| *n == "titlebar:update"), "{layout} {width}: Update is on the bar");
+            if width == 1920.0 {
+                for name in ["titlebar:kofi", "titlebar:discord"] {
+                    assert!(chips.iter().any(|(n, _)| *n == name), "{layout} {width}: {name} is on the bar");
+                }
+            }
+            for (name, r) in &chips {
+                assert_eq!(r.height(), solidcraft_ui_kit::app_bar::PILL_HEIGHT, "{layout} {width}: {name} {r:?}");
+                for (other, o) in &chips {
+                    assert!(name == other || !r.intersects(*o), "{layout} {width}: {name} {r:?} crosses {other} {o:?}");
+                }
+            }
+            seen.push((width as u32, chips));
+        }
+    }
+    // The bar draws the chips the same way in either panel layout.
+    let (floating, docked) = seen.split_at(4);
+    assert_eq!(floating, docked);
 }
 
 #[test]

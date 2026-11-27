@@ -553,6 +553,15 @@ fn switching_from_a_sketch_to_a_feature_defers_a_new_command_until_restoration()
     assert_eq!(marker(&h), None);
     assert_eq!(h.app.dialog.as_ref().unwrap().editing, None);
     let undo = h.app.session.undo.len();
+    // Wait for the box's preview, as a person does: the window's height changes while it
+    // computes, and a click aimed at OK a frame earlier can miss it.
+    for _ in 0..3000 {
+        if !h.app.preview.busy && h.app.applying.is_none() {
+            break;
+        }
+        h.frames(1);
+        std::thread::sleep(Duration::from_millis(10));
+    }
     h.frames(2);
     h.step(&json!({"click":{"handle":"dialog:OK"}})).unwrap();
     for _ in 0..500 {
@@ -1009,6 +1018,63 @@ fn an_agent_export_runs_on_a_copy() {
     assert!(std::fs::metadata(&path).is_ok_and(|m| m.len() > 0), "written");
     assert!(h.app.session.log.iter().any(|l| l.contains("Export")), "echoed as when it runs here: {:?}", h.app.session.log);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn an_agent_cope_computes_ahead_and_its_template_export_reads_a_copy() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (name, points, diameter) in [("Rail", json!([[0, 0], [200, 0]]), 40), ("Mate", json!([[0, -150], [0, 150]]), 60)] {
+        let sketch = format!("{name} path");
+        for (command, params) in [
+            ("sketch.create", json!({"plane":"XY", "name":sketch})),
+            ("sketch.line", json!({"points":points, "ids":["l1"], "infer":false})),
+            ("sketch.finish", json!({})),
+            ("frame.member", json!({"sketch":sketch, "profile":{"kind":"round_tube", "diameter":diameter, "wall":2}, "body_name":name})),
+        ] {
+            h.app.run(command, params).unwrap();
+        }
+    }
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h.app.preferences.agent_off_thread = true;
+    let (tx, rx) = std::sync::mpsc::channel();
+    h.app.control_rx = Some(rx);
+    let before = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    let cope = ask(&tx, "engine.execute", json!({"command":"frame.cope", "params":{"member":"Rail", "tools":["Mate"], "end":"start"}}));
+    let view = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    assert!(view.try_recv().is_ok_and(|r| r["ok"] == true), "the window answers meanwhile");
+    // The worker may already have finished; while it computes, the design is untouched.
+    if h.app.agent_computing().is_some() {
+        assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
+    }
+    let reply = reply_to(&mut h, &cope);
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert_eq!(h.app.session.doc.features.len(), before.features.len() + 1);
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    assert_eq!(h.app.session.model.last_recomputed, 0, "the window reuses the computed cut");
+
+    let treated = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    let path = h.dir.join("rail-start.dxf");
+    let export = ask(
+        &tx,
+        "engine.execute",
+        json!({"command":"frame.export_cope_dxf", "params":{"member":"Rail", "end":"start", "tolerance":0.05, "path":path}}),
+    );
+    let view = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    // The worker may already have finished; while it reads its copy, no design change waits on it.
+    if !h.app.control_answering.is_empty() {
+        assert!(h.app.agent_computing().is_none(), "export holds no design-change slot");
+    }
+    assert!(view.try_recv().is_ok_and(|r| r["ok"] == true));
+    let reply = reply_to(&mut h, &export);
+    assert_eq!(reply["ok"], true, "{reply}");
+    assert!(path.is_file());
+    assert!(std::sync::Arc::ptr_eq(&treated, &h.app.session.doc));
+    assert_eq!(h.app.session.undo.len(), undo);
 }
 
 /// #4604: measuring the whole design (an inspection measures every body) reads a copy off the
@@ -2519,4 +2585,57 @@ fn an_interference_check_of_a_motion_study_is_read_on_a_copy() {
     let hits = r["result"]["collisions"].as_array().cloned().unwrap_or_default();
     assert_eq!(hits.len(), 1, "{r}");
     assert_eq!((&hits[0]["a"], &hits[0]["first_step"]), (&json!("A:1"), &json!(11.0)), "{r}");
+}
+
+/// #20484: `drawing.view.snapshot`, an automatic drawing's `drawing.scene`, and `drawing.export`
+/// run on a copy off the window thread so large-assembly hidden-line projection does not block the
+/// control channel; `ui.*` answers meanwhile and the replies match running on the window thread.
+#[test]
+fn drawing_snapshot_scene_and_export_answer_on_a_copy_without_blocking_control() {
+    let (mut h, tx) = agent_harness();
+    h.app.run("drawing.create", json!({})).unwrap();
+    h.app.run("drawing.view.base", json!({"sheet": "Sheet 1", "scale": "1:2", "position_mm": [150, 150]})).unwrap();
+
+    let untimed_stats = |mut v: serde_json::Value| {
+        if let Some(stats) = v.pointer_mut("/stats").and_then(serde_json::Value::as_object_mut) {
+            for k in ["prepare_ms", "projection_ms", "occlusion_ms"] {
+                stats.remove(k);
+            }
+        }
+        if let Some(views) = v.pointer_mut("/views").and_then(serde_json::Value::as_array_mut) {
+            for view in views {
+                if let Some(stats) = view.pointer_mut("/stats").and_then(serde_json::Value::as_object_mut) {
+                    for k in ["prepare_ms", "projection_ms", "occlusion_ms"] {
+                        stats.remove(k);
+                    }
+                }
+            }
+        }
+        v
+    };
+
+    let snapshot_here = untimed_stats(h.app.run("drawing.view.snapshot", json!({"view": "front"})).unwrap());
+    let scene_here = untimed_stats(h.app.run("drawing.scene", json!({"sheet": "Sheet 1"})).unwrap());
+    let export_here = untimed_stats(h.app.run("drawing.export", json!({"sheet": "Sheet 1", "format": "svg"})).unwrap());
+
+    let snapshot = ask(&tx, "engine.execute", json!({"command": "drawing.view.snapshot", "params": {"view": "front"}}));
+    let scene = ask(&tx, "engine.execute", json!({"command": "drawing.scene", "params": {"sheet": "Sheet 1"}}));
+    let export = ask(&tx, "engine.execute", json!({"command": "drawing.export", "params": {"sheet": "Sheet 1", "format": "svg"}}));
+    let view = ask(&tx, "ui.inspect", json!({}));
+    h.frames(1);
+    assert!(view.try_recv().is_ok_and(|v| v["ok"] == true), "ui.* answered while drawing commands ran");
+    // `drawing.view.snapshot` and `drawing.scene` run on copies in `control_answering`;
+    // `drawing.export` is dispatched off-thread through `file_load`.
+    assert_eq!(h.app.control_answering.len(), 2, "snapshot and scene answered on copies");
+
+    let r = reply_to(&mut h, &snapshot);
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(untimed_stats(r["result"].clone()), snapshot_here);
+    let r = reply_to(&mut h, &scene);
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(untimed_stats(r["result"].clone()), scene_here);
+    let r = reply_to(&mut h, &export);
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(untimed_stats(r["result"].clone()), export_here);
+    assert!(h.app.control_answering.is_empty());
 }

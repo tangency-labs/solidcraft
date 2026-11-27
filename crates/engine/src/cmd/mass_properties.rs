@@ -20,8 +20,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::Value;
 use solidcore_record::Vec3;
-use solidcraft_doc::joints::{self, JointKind, MAX_JOINTS};
-use solidcraft_doc::{Document, IDENTITY, MAX_PLACEMENTS, Mat, ModelState, apply_point, mat_inverse, mat_mul};
+use solidcraft_doc::joints::{JointKind, MAX_JOINTS};
+use solidcraft_doc::{Document, IDENTITY, MAX_PLACEMENTS, Mat, ModelState, Occurrence, WorldNames, apply_point, mat_inverse, mat_mul};
 use solidcraft_geom::inertia::{self, Tensor3};
 
 use super::CommandSpec;
@@ -151,20 +151,22 @@ impl Groups {
     }
 }
 
-/// Occurrence ids from the top of the assembly down, as `joints::occurrence_world` walks them.
-fn canonical_path(doc: &Document, occ: u64) -> Vec<u64> {
+/// World transform and canonical occurrence path (top down), as `joints::occurrence_world` walks them.
+fn occurrence_world_and_path(occ: u64, occ_by_id: &HashMap<u64, &Occurrence>, first_occ_by_comp: &HashMap<u64, &Occurrence>) -> (Mat, Vec<u64>) {
+    let mut world = IDENTITY;
     let mut path = Vec::new();
-    let mut cur = doc.occurrences.iter().find(|o| o.id == occ);
+    let mut cur = occ_by_id.get(&occ).copied();
     for _ in 0..1000 {
         let Some(o) = cur else { break };
+        world = mat_mul(&o.transform, &world);
         path.push(o.id);
         if o.parent == 0 {
             break;
         }
-        cur = doc.occurrence_of(o.parent);
+        cur = first_occ_by_comp.get(&o.parent).copied();
     }
     path.reverse();
-    path
+    (world, path)
 }
 
 fn out_of_range() -> EngineError {
@@ -193,6 +195,8 @@ struct Shape {
     volume: f64,
     centroid: Vec3,
     gyration: Option<Tensor3>,
+    measure_error: Option<String>,
+    inertia_error: Option<String>,
 }
 
 /// [`Session::mass_properties`] of a document and its evaluated state.
@@ -218,13 +222,23 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
             groups.join(a, b);
         }
     }
+    let mut occ_by_id: HashMap<u64, &Occurrence> = HashMap::with_capacity(doc.occurrences.len());
+    let mut first_occ_by_comp: HashMap<u64, &Occurrence> = HashMap::new();
+    let mut occ_count_by_comp: HashMap<u64, usize> = HashMap::new();
+    let mut has_children: HashSet<u64> = HashSet::new();
+    for o in &doc.occurrences {
+        occ_by_id.entry(o.id).or_insert(o);
+        first_occ_by_comp.entry(o.component).or_insert(o);
+        *occ_count_by_comp.entry(o.component).or_default() += 1;
+        has_children.insert(o.parent);
+    }
     for o in doc.occurrences.iter().filter(|o| o.parent != 0 && !jointed.contains(&o.id)) {
-        if let (Some(&child), Some(&parent)) = (index.get(&o.id), doc.occurrence_of(o.parent).and_then(|p| index.get(&p.id))) {
+        if let (Some(&child), Some(&parent)) = (index.get(&o.id), first_occ_by_comp.get(&o.parent).and_then(|p| index.get(&p.id))) {
             groups.join(child, parent);
         }
     }
-    for c in doc.components.iter().filter(|c| doc.occurrences.iter().any(|o| o.parent == c.id)) {
-        let copies = doc.occurrences.iter().filter(|o| o.component == c.id).count();
+    for c in doc.components.iter().filter(|c| has_children.contains(&c.id)) {
+        let copies = occ_count_by_comp.get(&c.id).copied().unwrap_or(0);
         if copies > 1 {
             warnings.push(format!(
                 "`{}` is placed {copies} times: the occurrences inside it are listed at its first placement only, where joints place them",
@@ -235,55 +249,101 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
 
     // Each placed body measured once, on worker threads.
     let owners = doc.model_body_components(state);
-    let placed: HashSet<u64> =
-        ids.iter().map(|id| if *id == 0 { 0 } else { doc.occurrences.iter().find(|o| o.id == *id).map_or(u64::MAX, |o| o.component) }).collect();
+    let world_names = WorldNames::new(doc, state);
+    let placed: HashSet<u64> = ids.iter().map(|id| if *id == 0 { 0 } else { occ_by_id.get(id).map_or(u64::MAX, |o| o.component) }).collect();
     let measured: Vec<usize> = (0..state.bodies.len()).filter(|i| owners.get(*i).is_some_and(|c| placed.contains(c))).collect();
-    let shapes = solidcraft_kernel::map_on_threads(&measured, 16, |&i| -> Result<Shape> {
-        let body = state.bodies.get(i).ok_or_else(|| EngineError::Other("body index out of range".into()))?;
-        let closed = crate::cmd::inspect::encloses_volume(&body.body);
+    let mut bodies_by_comp: HashMap<u64, Vec<usize>> = HashMap::new();
+    for (k, &owner) in owners.iter().enumerate() {
+        bodies_by_comp.entry(owner).or_default().push(k);
+    }
+    let shapes = solidcraft_kernel::map_on_threads(&measured, 16, |&i| -> Shape {
+        let Some(body) = state.bodies.get(i) else {
+            return Shape {
+                closed: false,
+                volume: 0.0,
+                centroid: Vec3::ZERO,
+                gyration: None,
+                measure_error: Some("body index out of range".into()),
+                inertia_error: None,
+            };
+        };
+        let closed = body.is_closed();
         if !closed {
-            return Ok(Shape { closed, volume: 0.0, centroid: Vec3::ZERO, gyration: None });
+            return Shape { closed, volume: 0.0, centroid: Vec3::ZERO, gyration: None, measure_error: None, inertia_error: None };
         }
         let sheet = state.surface_sheets.iter().find(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty());
-        let (volume, centroid) = if sheet.is_some() {
-            let measured = super::inspect::measure_body(body, Some(state))?;
-            (measured.volume, measured.centroid)
+        let volume_centroid: Result<(f64, Vec3)> = if sheet.is_some() {
+            super::inspect::measure_body(body, Some(state)).map(|measured| (measured.volume, measured.centroid))
         } else {
-            let measured = solidcraft_kernel::measure_mass(&body.body)?;
-            (measured.volume, measured.centroid)
+            solidcraft_kernel::measure_mass(&body.body).map(|measured| (measured.volume, measured.centroid)).map_err(EngineError::from)
         };
-        let mut moments = solidcraft_io::mass_properties(&body.body)?;
-        if let (Some(sheet), Some(moments)) = (sheet, moments.as_mut()) {
-            sheet.correct_perforation_mass_properties(moments, &IDENTITY)?;
-        }
-        let gyration = moments.and_then(|p| p.gyration());
-        Ok(Shape { closed, volume, centroid, gyration })
+        let (volume, centroid) = match volume_centroid {
+            Ok(pair) => pair,
+            Err(err) => {
+                return Shape {
+                    closed: false,
+                    volume: 0.0,
+                    centroid: Vec3::ZERO,
+                    gyration: None,
+                    measure_error: Some(err.to_string()),
+                    inertia_error: None,
+                };
+            }
+        };
+        let (gyration, inertia_error) = match solidcraft_io::mass_properties(&body.body) {
+            Ok(Some(mut moments)) => {
+                if let Some(sheet) = sheet {
+                    match sheet.correct_perforation_mass_properties(&mut moments, &IDENTITY) {
+                        Ok(()) => (moments.gyration(), None),
+                        Err(err) => (None, Some(err.to_string())),
+                    }
+                } else {
+                    (moments.gyration(), None)
+                }
+            }
+            Ok(None) => (None, None),
+            Err(err) => (None, Some(err.to_string())),
+        };
+        Shape { closed, volume, centroid, gyration, measure_error: None, inertia_error }
     });
     let mut shape: BTreeMap<usize, Shape> = BTreeMap::new();
     for (i, s) in measured.into_iter().zip(shapes) {
-        shape.insert(i, s.ok_or_else(|| bad(CMD, "measuring a body failed"))??);
+        shape.insert(
+            i,
+            s.unwrap_or_else(|| Shape {
+                closed: false,
+                volume: 0.0,
+                centroid: Vec3::ZERO,
+                gyration: None,
+                measure_error: Some("measuring this body failed".into()),
+                inertia_error: None,
+            }),
+        );
     }
 
     let mut occurrences = Vec::with_capacity(ids.len());
     let mut totals: Vec<Option<MassBody>> = Vec::with_capacity(ids.len());
+    let mut worlds: Vec<Mat> = Vec::with_capacity(ids.len());
     for (i, &id) in ids.iter().enumerate() {
         let (component, name, world, path, fixed) = if id == 0 {
             (0, doc.name.clone(), IDENTITY, Vec::new(), true)
         } else {
             // Every id came from `doc.occurrences`, so the occurrence is there.
-            let o = doc.occurrences.iter().find(|o| o.id == id);
+            let o = occ_by_id.get(&id).copied();
             let (component, name, grounded) = o.map_or((u64::MAX, String::new(), false), |o| (o.component, o.name.clone(), o.grounded));
-            (component, name, joints::occurrence_world(doc, id), canonical_path(doc, id), grounded)
+            let (world, path) = occurrence_world_and_path(id, &occ_by_id, &first_occ_by_comp);
+            (component, name, world, path, grounded)
         };
         if world.iter().flatten().any(|x| !x.is_finite()) {
             return Err(out_of_range());
         }
         let (mut bodies, mut parts, mut skipped) = (Vec::new(), Vec::new(), 0);
-        for (k, body) in state.bodies.iter().enumerate().filter(|(k, _)| owners.get(*k) == Some(&component)) {
+        for k in bodies_by_comp.get(&component).into_iter().flatten().copied() {
+            let Some(body) = state.bodies.get(k) else { continue };
             let Some(s) = shape.get(&k) else { continue };
             let density = doc.density(&body.name);
             let mut entry = BodyMassEntry {
-                name: body.name.clone(),
+                name: world_names.name(&body.name, component, &path),
                 material: doc.body_material(&body.name),
                 density_g_cm3: density,
                 closed: s.closed,
@@ -301,14 +361,22 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
                     return Err(out_of_range());
                 }
                 if inertia.is_none() {
-                    warnings.push(format!("body `{}`: its mesh does not close, so its inertia is unknown", body.name));
+                    if let Some(err) = &s.inertia_error {
+                        warnings.push(format!("body `{}`: could not compute inertia ({err})", entry.name));
+                    } else {
+                        warnings.push(format!("body `{}`: its mesh does not close, so its inertia is unknown", entry.name));
+                    }
                 }
                 parts.push(part);
                 entry.volume_mm3 = Some(volume);
                 entry.mass_kg = Some(mass);
             } else {
                 skipped += 1;
-                warnings.push(format!("body `{}` is not a closed solid: it adds no mass", body.name));
+                if let Some(err) = &s.measure_error {
+                    warnings.push(format!("body `{}` could not be measured ({err}): it adds no mass", entry.name));
+                } else {
+                    warnings.push(format!("body `{}` is not a closed solid: it adds no mass", entry.name));
+                }
             }
             bodies.push(entry);
         }
@@ -320,6 +388,7 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
             warnings.push(format!("`{name}` is scaled: its inertia in its own axes is left out"));
         }
         totals.push(total);
+        worlds.push(world);
         occurrences.push(OccurrenceMass {
             occurrence: id,
             name,
@@ -343,7 +412,7 @@ pub fn assembly(doc: &Document, state: &ModelState) -> Result<AssemblyMassResult
     for (g, members) in by_root.values().enumerate() {
         let fixed = members.iter().any(|&m| occurrences.get(m).is_some_and(|o| o.fixed));
         let frame_occurrence = members.first().and_then(|&m| ids.get(m)).copied().unwrap_or(0);
-        let world = if frame_occurrence == 0 { IDENTITY } else { joints::occurrence_world(doc, frame_occurrence) };
+        let world = members.first().and_then(|&m| worlds.get(m)).copied().unwrap_or(IDENTITY);
         let parts: Vec<MassBody> = members.iter().filter_map(|&m| totals.get(m).copied().flatten()).collect();
         let total = MassBody::combine(&parts);
         if total.is_none() && !parts.is_empty() {

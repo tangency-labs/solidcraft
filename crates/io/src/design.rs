@@ -9,13 +9,18 @@ use std::sync::Arc;
 
 mod drawing;
 mod import_cache;
+// Known limitation: the model cache key (`native_cache::KERNEL`, a constant, and the evaluation
+// digest from `build.rs`, which hashes source only) doesn't record the active kernel backend.
+// That is fine for the builds we ship, but the opt-in `backend-occt` build can share cached bodies
+// with a normal build; see #23125 (https://github.com/tangency-labs/solidcraft/issues/23125).
+// The note lives here because comments in those two files change the digest itself.
 mod native_cache;
 mod provenance;
 mod text;
 mod thumbnail;
 pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
 pub use import_cache::ImportCache;
-pub use native_cache::read_design_geometry;
+pub use native_cache::{read_design_geometry, take_last_cache_refusal};
 pub use provenance::{
     OpenPgpSignature, OpenPgpSigner, ProvenanceChain, ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus,
     ProvenanceSummary, SignatureSource, Signer,
@@ -136,7 +141,7 @@ const SAVE_LIMITS: Limits = Limits { max_expanded: || usize::MAX, part_limit: |_
 
 /// [`LIMITS`] for reading back a container this process just wrote: no open-size check, since the
 /// bytes don't come from outside and a save may be over that limit (#18686).
-const WRITTEN_LIMITS: Limits = Limits { max_expanded: || usize::MAX, check_size: |_| Ok(()), ..LIMITS };
+const WRITTEN_LIMITS: Limits = Limits { check_size: |_| Ok(()), ..SAVE_LIMITS };
 
 /// The Deflate level of a part: STEP sources take [`STEP_LEVEL`], and so does a mesh past the file
 /// limit: level 1 of a large payload leaves more on disk, and that part exists only because
@@ -175,7 +180,7 @@ fn part_limit(name: &str) -> usize {
 
 impl PackageWriter {
     fn new() -> PackageWriter {
-        PackageWriter(Writer::new(SAVE_LIMITS))
+        PackageWriter(Writer::for_save(SAVE_LIMITS, max_expanded))
     }
     fn finish(self) -> Result<Vec<u8>> {
         Ok(self.0.finish()?)
@@ -230,7 +235,32 @@ pub fn write_design_container_with_thumbnail(
     thumbnail: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design(), None)
+    write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, None)
+}
+
+/// [`write_design_container_with_thumbnail`] reusing what `reuse` already holds: `reuse` is the
+/// container the design was opened from, and an import's blob it holds is copied as it is stored
+/// there instead of being encoded again, when its entry carries the content this save writes (its
+/// name is the content's SHA-256, and its length, CRC-32 and compression match). When that part
+/// was written by this writer the bytes are identical; any other container's entry is the same
+/// content kept as it was saved, which reads back the same. A part that does not match is
+/// encoded, so `reuse` can never put content other than the document's into the file.
+#[allow(clippy::too_many_arguments)]
+pub fn write_design_container_reusing(
+    doc: &Document,
+    compression: DesignCompression,
+    preview: Option<&DesignPreview>,
+    geometry: Option<&solidcraft_doc::SavedModel>,
+    thumbnail: Option<&[u8]>,
+    reuse: &[u8],
+) -> Result<Vec<u8>> {
+    let _span = solidcraft_profile::span("io", "write_design_container_with_thumbnail");
+    // Reusing is only ever a shortcut: a source that cannot be copied from (damaged or cut short
+    // on disk) never fails a save the document alone would make.
+    match write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, Some(reuse)) {
+        Err(_) if !crate::safe_write::cancelled() => write_container(doc, compression, preview, geometry, thumbnail, max_design(), None, None),
+        result => result,
+    }
 }
 
 /// Write a container with one signed provenance record appended to `save.chain` (see
@@ -245,11 +275,13 @@ pub fn write_design_container_with_provenance(
     save: &ProvenanceSave<'_>,
 ) -> Result<Vec<u8>> {
     let _span = solidcraft_profile::span("io", "write_design_container_with_provenance");
-    write_container(doc, compression, preview, geometry, thumbnail, max_design(), Some(save))
+    write_container(doc, compression, preview, geometry, thumbnail, max_design(), Some(save), None)
 }
 
 /// The common container writer. `provenance` records a signed record when present; the budget
-/// bounds the optional caches (tests pass less).
+/// bounds the optional caches (tests pass less). `reuse` is the container the design was opened
+/// from, whose blobs are copied for content that has not changed since.
+#[allow(clippy::too_many_arguments)]
 fn write_container(
     doc: &Document,
     compression: DesignCompression,
@@ -258,8 +290,11 @@ fn write_container(
     thumbnail: Option<&[u8]>,
     budget: usize,
     provenance: Option<&ProvenanceSave<'_>>,
+    reuse: Option<&[u8]>,
 ) -> Result<Vec<u8>> {
     doc.render.validate().map_err(invalid)?;
+    // A source that is not a container it can read is not reused; it never fails the save.
+    let mut reuse = reuse.and_then(|bytes| PackageReader::new(Cursor::new(bytes)).ok());
     let mut writer = PackageWriter::new();
     if provenance.is_some() {
         writer.track_parts(provenance::is_authoritative);
@@ -270,13 +305,13 @@ fn write_container(
             FeatureKind::Import { step, records, .. } => {
                 // STEP is text and shrinks several times: always compressed, so an import as large
                 // as MAX_STEP_BYTES still fits in a design file.
-                let blob = writer.blob(step.as_bytes(), "step", true)?;
+                let blob = blob_reusing(&mut writer, reuse.as_mut(), step.as_bytes(), "step", true)?;
                 let mut replaced = fields([("step", Value::String(String::new())), ("step_blob", blob)]);
                 // An import kept as records: they go in a part of their own, compressed as STEP.
                 if let Some(r) = records {
                     let text = solidcraft_kernel::records_text(r)?;
                     replaced.insert("records".into(), Value::Null);
-                    replaced.insert("records_blob".into(), writer.blob(text.as_bytes(), "records", true)?);
+                    replaced.insert("records_blob".into(), blob_reusing(&mut writer, reuse.as_mut(), text.as_bytes(), "records", true)?);
                 }
                 replaced
             }
@@ -414,8 +449,17 @@ fn write_container(
     if crate::safe_write::cancelled() {
         return Err(cancelled());
     }
-    let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata, writer.space(2, budget)).ok());
+    native_cache::take_last_cache_refusal();
+    let cache = match geometry {
+        Some(g) => match native_cache::encode_model_with_budget(g, &metadata, writer.file_space(2, budget), writer.expanded_space(2)) {
+            Ok(cache) => Some(cache),
+            Err(_) if crate::safe_write::cancelled() => return Err(cancelled()),
+            Err(_) => None,
+        },
+        None => None,
+    };
     if let Some((manifest, data)) = cache {
+        native_cache::take_last_cache_refusal();
         let [manifest_entry, payload_entry] = native_cache::ENTRIES;
         // Deflated whatever the policy: the encoded bodies shrink about fourfold to tenfold, faster
         // than the extra bytes would be written and read.
@@ -673,6 +717,20 @@ impl<R: Read + Seek> std::ops::DerefMut for PackageReader<R> {
     }
 }
 
+/// Add `bytes` as a blob, or copy it from `reuse` — the container the design was opened from —
+/// when that holds this content stored as this writer stores it ([`Writer::blob_reusing`] checks
+/// the part's name, length and CRC-32 against `bytes`): the bytes written either way read back
+/// as the same content.
+fn blob_reusing(
+    writer: &mut PackageWriter,
+    reuse: Option<&mut PackageReader<Cursor<&[u8]>>>,
+    bytes: &[u8],
+    extension: &str,
+    compressed: bool,
+) -> Result<Value> {
+    writer.blob_reusing(bytes, extension, compressed, reuse.map(|r| &mut r.0)).map_err(IoError::from)
+}
+
 impl<R: Read + Seek> PackageReader<R> {
     fn new(source: R) -> Result<Self> {
         Ok(Self(Reader::new(source, LIMITS)?))
@@ -734,10 +792,10 @@ pub fn read_design_provenance(bytes: &[u8]) -> Option<ProvenanceReport> {
 /// The provenance records a container carries, without verifying them. That is what a save
 /// appends to; verification is [`read_design_provenance`].
 pub fn read_design_provenance_chain(bytes: &[u8]) -> Option<ProvenanceChain> {
-    if bytes.len() > max_design() {
+    if bytes.len() > max_design() || !is_design_container(bytes) {
         return None;
     }
-    written_design_provenance_chain(bytes)
+    DesignContainerReader::new(Cursor::new(bytes)).ok()?.provenance_chain()
 }
 
 /// [`read_design_provenance_chain`] for a container this process just wrote: no open-size limit,
@@ -747,7 +805,7 @@ pub fn written_design_provenance_chain(bytes: &[u8]) -> Option<ProvenanceChain> 
     if !is_design_container(bytes) {
         return None;
     }
-    provenance::read_chain(&mut PackageReader(Reader::new(Cursor::new(bytes), WRITTEN_LIMITS).ok()?))
+    DesignContainerReader::from_written_bytes(bytes).ok()?.provenance_chain()
 }
 
 /// [`read_design_provenance`] for a file on disk (or the browser's storage).
@@ -863,6 +921,19 @@ fn read_preview<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<DesignP
 /// This type does not turn untrusted cached data into editable geometry.
 pub struct DesignContainerReader<R: Read + Seek> {
     reader: PackageReader<R>,
+}
+
+impl<'a> DesignContainerReader<Cursor<&'a [u8]>> {
+    /// Inspect only bytes this process just wrote. Report the expanded opening limit separately so
+    /// an oversized save can still inspect its cache and keep its provenance chain.
+    pub fn from_written_bytes(bytes: &'a [u8]) -> Result<Self> {
+        Ok(Self { reader: PackageReader(Reader::with_open_limits(Cursor::new(bytes), WRITTEN_LIMITS, Some(LIMITS))?) })
+    }
+
+    /// Whether the directory of the just-written container exceeds a part or total opening limit.
+    pub fn exceeds_expanded_open_limit(&self) -> bool {
+        self.reader.exceeds_expanded_open_limit
+    }
 }
 
 impl<R: Read + Seek> DesignContainerReader<R> {
@@ -988,6 +1059,19 @@ pub struct DesignFile {
     pub chain: Option<ProvenanceChain>,
     /// The signature check, when asked for; `None` for a file without an entry.
     pub report: Option<ProvenanceReport>,
+}
+
+/// A container file's bytes, for a save to copy blobs whose content has not changed since the
+/// design was opened; `None` when the file is not a container or cannot be read. Bounded by the
+/// design limit, which bounds what a container can be.
+pub fn read_container_bytes(path: &str) -> Option<Vec<u8>> {
+    let mut source = open_regular_file(path).ok()?;
+    if !is_container_source(&mut source).ok()? {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    source.take((max_design() as u64).saturating_add(1)).read_to_end(&mut bytes).ok()?;
+    Some(bytes)
 }
 
 /// [`read_design_file`] for opening a design: the document, model, signature presence,
@@ -1665,6 +1749,50 @@ mod tests {
     use super::*;
     use solidcore_record::Vec2;
 
+    /// A save copies an import's source blob from the container the design came from when the
+    /// content has not changed: the file it writes is the one encoding the content writes, and an
+    /// edited import is a new blob, so a copied one can never carry old geometry into a design.
+    #[test]
+    fn a_save_reuses_an_unchanged_import_blob_and_an_edit_writes_a_new_one() {
+        let step = "ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\nENDSEC;\nEND-ISO-10303-21;\n".repeat(64);
+        let mut doc = Document::new("Reuse");
+        doc.add_feature(
+            FeatureKind::Import { file: "reuse.step".into(), step: step.clone().into(), components: Vec::new(), skip: Vec::new(), records: None },
+            None,
+        )
+        .unwrap();
+        let first = write_design_container(&doc).unwrap();
+        let reused = write_design_container_reusing(&doc, DesignCompression::Fast, None, None, None, &first).unwrap();
+        assert_eq!(first, reused, "a save that copies the blob writes the same container");
+        let back = DesignContainerReader::new(Cursor::new(reused)).unwrap().read_document().unwrap();
+        assert_eq!(back.to_json(), doc.to_json());
+
+        let mut edited = Document::new("Reuse");
+        edited
+            .add_feature(
+                FeatureKind::Import {
+                    file: "reuse.step".into(),
+                    step: format!("{step}/* edited */\n").into(),
+                    components: Vec::new(),
+                    skip: Vec::new(),
+                    records: None,
+                },
+                None,
+            )
+            .unwrap();
+        let fresh = write_design_container_reusing(&edited, DesignCompression::Fast, None, None, None, &first).unwrap();
+        assert_ne!(fresh, first, "an edited import is a new blob");
+        let back = DesignContainerReader::new(Cursor::new(fresh)).unwrap().read_document().unwrap();
+        assert_eq!(back.to_json(), edited.to_json(), "the edit is what the file holds");
+
+        // A source damaged or cut short on disk is not copied from, and never fails the save.
+        let broken = [&first[..first.len() / 2], b"not a container".as_slice(), &[]];
+        for source in broken {
+            let saved = write_design_container_reusing(&doc, DesignCompression::Fast, None, None, None, source).unwrap();
+            assert_eq!(saved, first, "a source that cannot be read is a save that encodes");
+        }
+    }
+
     #[test]
     fn a_missing_design_file_is_a_check_error_not_an_unsigned_design() {
         let path = std::env::temp_dir().join(format!("solidcraft-check-missing-{}.sc", std::process::id()));
@@ -1773,6 +1901,7 @@ mod tests {
             colors: Colors(vec![128; n * 3].into()),
             source_points: n as u64,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -1896,8 +2025,15 @@ mod tests {
             workspace.lines().find_map(|l| l.strip_prefix(prefix.as_str())?.split('"').next().map(str::to_string))
         };
         let keyed: Vec<&str> = env!("SOLIDCRAFT_EVALUATION_CRATES").split(',').collect();
+        // The display crates are deliberately not keyed (see `EVALUATION_CRATES`): the cache holds
+        // the kernel-encoded bodies and the placement shares, and the display plans are derived on
+        // open from those, so a change to either cannot change a cached model.
+        const DISPLAY: [&str; 2] = ["viewport", "render"];
         let (mut todo, mut seen) = (vec!["doc".to_string()], BTreeSet::new());
         while let Some(krate) = todo.pop() {
+            if DISPLAY.contains(&krate.as_str()) {
+                continue;
+            }
             if !seen.insert(krate.clone()) {
                 continue;
             }
@@ -2010,6 +2146,217 @@ mod tests {
         // Missing required inputs fail closed (`None` -> `"unknown"`).
         std::fs::remove_file(dir.0.join("Cargo.lock")).unwrap();
         assert_eq!(build_script::evaluation_source_from_disk(&dir.0, false), None);
+    }
+
+    /// What the model cache's key covers in a git checkout (`crates/io/build.rs`): the source a
+    /// model is computed from, committed and uncommitted, and nothing else.
+    #[cfg(not(target_arch = "wasm32"))]
+    mod evaluation_scope {
+        use crate::build_script;
+        use std::fs;
+        use std::path::{Path, PathBuf};
+        use std::process::Command;
+
+        fn git_in(root: &Path, args: &[&str]) {
+            let out = Command::new("git").arg("-C").arg(root).args(args).output().unwrap();
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        }
+
+        fn write(root: &Path, path: &str, text: &str) {
+            let p = root.join(path);
+            fs::create_dir_all(p.parent().unwrap()).unwrap();
+            fs::write(p, text).unwrap();
+        }
+
+        fn repo(name: &str) -> PathBuf {
+            let root = std::env::temp_dir().join(format!("solidcraft-evaluation-{name}-{}", std::process::id()));
+            let _ = fs::remove_dir_all(&root);
+            fs::create_dir_all(&root).unwrap();
+            for krate in build_script::EVALUATION_CRATES {
+                write(&root, &format!("crates/{krate}/src/lib.rs"), "pub fn x() {}\n");
+            }
+            write(&root, "crates/io/build.rs", "fn main() {}\n");
+            write(&root, "crates/viewport/src/lib.rs", "pub fn camera() {}\n");
+            write(&root, "crates/render/src/lib.rs", "pub fn look() {}\n");
+            write(&root, "crates/io/src/design/native_cache.rs", "pub fn y() {}\n");
+            write(&root, ".cargo/config.toml", "[build]\n");
+            write(&root, "solidcore/Cargo.toml", "[workspace]\n");
+            write(&root, "solidcore/Cargo.lock", "version = 4\n");
+            write(&root, "solidcore/crates/solidcore/src/lib.rs", "pub fn kernel() {}\n");
+            write(&root, "solidcore/crates/solidcore/tests/a.rs", "fn t() {}\n");
+            write(&root, "solidcore/crates/goldens/src/lib.rs", "pub fn g() {}\n");
+            write(&root, "solidcore/docs/reference.md", "# reference\n");
+            write(&root, "solidcore/plan/STATUS.md", "status\n");
+            write(&root, "solidcore/fixtures/a/b.step", "ISO\n");
+            write(&root, "vendor/README.md", "notes\n");
+            write(&root, "vendor/egui/src/lib.rs", "pub fn e() {}\n");
+            write(&root, "Cargo.lock", "version = 4\n");
+            write(&root, "Cargo.toml", "[workspace.package]\nversion = \"0.46.2\"\n");
+            git_in(&root, &["init", "-q"]);
+            commit(&root, "one");
+            root
+        }
+
+        fn commit(root: &Path, message: &str) {
+            git_in(root, &["add", "-A"]);
+            let out = Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(["-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-q", "-m", message])
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        }
+
+        /// A change to a file the kernel's model is not computed from keeps the digest, and a change
+        /// to one it is computed from moves it; a clean tree has one digest.
+        #[test]
+        fn only_the_source_the_model_is_computed_from_is_keyed() {
+            let root = repo("scope");
+            let clean = build_script::evaluation_source(&root).expect("a clean digest");
+            assert_eq!(build_script::evaluation_source(&root).as_deref(), Some(clean.as_str()), "a clean tree has one digest");
+            for outside in [
+                "solidcore/docs/reference.md",
+                "solidcore/plan/STATUS.md",
+                "solidcore/fixtures/a/b.step",
+                "solidcore/crates/solidcore/tests/a.rs",
+                "solidcore/crates/goldens/src/lib.rs",
+            ] {
+                write(&root, outside, "changed\n");
+                commit(&root, outside);
+                assert_eq!(build_script::evaluation_source(&root).as_deref(), Some(clean.as_str()), "{outside} computes no model");
+            }
+            write(&root, "solidcore/crates/solidcore/src/lib.rs", "pub fn kernel() { }\n");
+            commit(&root, "kernel");
+            let kernel = build_script::evaluation_source(&root).expect("a digest");
+            assert_ne!(kernel, clean, "the kernel computes the model");
+            // A file whose name git would quote (not ASCII) is keyed like any other.
+            write(&root, "solidcore/crates/solidcore/src/\u{66f2}\u{7dda}.rs", "pub fn curve() {}\n");
+            commit(&root, "curve");
+            let curve = build_script::evaluation_source(&root).expect("a digest");
+            assert_ne!(curve, kernel, "a new kernel file with a non-ASCII name");
+            write(&root, "solidcore/crates/solidcore/src/\u{66f2}\u{7dda}.rs", "pub fn curve() { }\n");
+            commit(&root, "curve edited");
+            assert_ne!(build_script::evaluation_source(&root).as_deref(), Some(curve.as_str()), "an edit to it");
+            let _ = fs::remove_dir_all(&root);
+        }
+
+        /// A working tree with uncommitted changes has a digest of its own, and the committed one comes
+        /// back when they are reverted: a build from a changed tree cannot write a cache a clean build
+        /// of the same commit trusts. Two different changes have different digests, so a build with
+        /// one cannot write a cache a build with the other trusts, and a new file a change adds counts.
+        #[test]
+        fn a_changed_working_tree_has_its_own_digest() {
+            let root = repo("dirty");
+            let clean = build_script::evaluation_source(&root).expect("a clean digest");
+            write(&root, "solidcore/crates/solidcore/src/lib.rs", "pub fn kernel() { edited }\n");
+            let one = build_script::evaluation_source(&root).expect("a digest");
+            assert_ne!(one, clean, "a changed working tree is not the commit");
+            write(&root, "solidcore/crates/solidcore/src/lib.rs", "pub fn kernel() { other }\n");
+            let other = build_script::evaluation_source(&root).expect("a digest");
+            assert_ne!(other, clean, "a changed working tree is not the commit");
+            assert_ne!(other, one, "two changes are two digests");
+            write(&root, "solidcore/crates/solidcore/src/lib.rs", "pub fn kernel() {}\n");
+            assert_eq!(build_script::evaluation_source(&root).as_deref(), Some(clean.as_str()), "reverting restores the commit's digest");
+            write(&root, "crates/kernel/src/new.rs", "pub fn one() {}\n");
+            let added = build_script::evaluation_source(&root).expect("a digest");
+            assert_ne!(added, clean, "an untracked file in a crate that computes models counts");
+            write(&root, "crates/kernel/src/new.rs", "pub fn two() {}\n");
+            assert_ne!(build_script::evaluation_source(&root).as_deref(), Some(added.as_str()), "and so does its content");
+            fs::remove_file(root.join("crates/kernel/src/new.rs")).unwrap();
+            // A change outside what computes models keeps the commit's digest, as a commit of it does.
+            write(&root, "solidcore/docs/reference.md", "# changed\n");
+            write(&root, "solidcore/crates/solidcore/tests/a.rs", "fn t() { edited }\n");
+            write(&root, "solidcore/crates/goldens/src/lib.rs", "pub fn g() { edited }\n");
+            write(&root, "crates/viewport/src/lib.rs", "pub fn camera() { edited }\n");
+            assert_eq!(
+                build_script::evaluation_source(&root).as_deref(),
+                Some(clean.as_str()),
+                "the interface, notes, tests and goldens compute no model"
+            );
+            let _ = fs::remove_dir_all(&root);
+        }
+
+        /// The display crates derive plans, and plans are not cached: a change there keeps the model
+        /// cache, while a change to a crate that computes the bodies moves it.
+        #[test]
+        fn a_display_crate_does_not_move_the_digest() {
+            let root = repo("display");
+            let clean = build_script::evaluation_source(&root).expect("a clean digest");
+            for outside in ["crates/viewport/src/lib.rs", "crates/render/src/lib.rs"] {
+                write(&root, outside, "pub fn changed() {}\n");
+                commit(&root, outside);
+                assert_eq!(build_script::evaluation_source(&root).as_deref(), Some(clean.as_str()), "{outside} derives plans, which are not cached");
+            }
+            write(&root, "crates/kernel/src/lib.rs", "pub fn kernel() { }\n");
+            commit(&root, "kernel");
+            assert_ne!(build_script::evaluation_source(&root).as_deref(), Some(clean.as_str()), "the kernel computes the bodies");
+            let _ = fs::remove_dir_all(&root);
+        }
+
+        /// doc stores display values, and these are the modules that carry them. A model is computed
+        /// by doc's own code, which must not name the display crates: the cache is keyed by doc and
+        /// its geometry crates, not by the display ones, so a body or a plan derived from viewport or
+        /// render code would change something the cache cannot see.
+        ///
+        /// What this guard does not catch: a call through a re-export in a document-value module
+        /// (allowed, and the module is where the reference lives), a macro-generated path, and a
+        /// semantic change that arrives through a keyed crate's constant. A document-value module that
+        /// starts computing a model moves off this list, and one that stops using the display crates
+        /// fails here until it is removed from it.
+        #[test]
+        fn a_model_is_computed_without_the_display_crates() {
+            const DOCUMENT_VALUES: [&str; 13] = [
+                "appearance.rs",
+                "document.rs",
+                "drawing_view.rs",
+                "drawing/view.rs",
+                "pbr_appearance.rs",
+                "render_aging.rs",
+                "render_coat.rs",
+                "render_job.rs",
+                "render_optics.rs",
+                "render_resources.rs",
+                "render_settings.rs",
+                "render_surface.rs",
+                "render_texture_resources.rs",
+            ];
+            let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../crates/doc/src");
+            let mut pending = vec![src.clone()];
+            let mut allowed: Vec<String> = Vec::new();
+            while let Some(dir) = pending.pop() {
+                for entry in fs::read_dir(&dir).unwrap_or_else(|e| panic!("{}: {e}", dir.display())) {
+                    let path = entry.unwrap().path();
+                    if path.is_dir() {
+                        pending.push(path);
+                        continue;
+                    }
+                    let Some(name) = path.to_str() else { continue };
+                    if !name.ends_with(".rs") || name.ends_with("_tests.rs") {
+                        continue;
+                    }
+                    let text = fs::read_to_string(&path).unwrap();
+                    let Some((line, text)) = text
+                        .lines()
+                        .enumerate()
+                        .find_map(|(i, l)| (l.contains("solidcraft_viewport") || l.contains("solidcraft_render")).then_some((i + 1, l.trim())))
+                    else {
+                        continue;
+                    };
+                    let relative = path.strip_prefix(&src).unwrap().to_string_lossy().replace('\\', "/");
+                    if !DOCUMENT_VALUES.contains(&relative.as_str()) {
+                        panic!("{relative}:{line}: doc computes models without the display crates, but this file names one: {text}");
+                    }
+                    allowed.push(relative);
+                }
+            }
+            for name in DOCUMENT_VALUES {
+                assert!(
+                    allowed.iter().any(|a| a.as_str() == name),
+                    "crates/doc/src/{name} no longer names a display crate: remove it from DOCUMENT_VALUES"
+                );
+            }
+        }
     }
 
     #[test]
@@ -2236,15 +2583,87 @@ mod tests {
     #[test]
     fn a_model_cache_too_big_for_the_file_is_left_out_not_a_failed_save() {
         let doc = document();
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000, None).unwrap();
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, 70_000, None, None).unwrap();
         assert!(!parts(&bytes).contains_key("cache/model.json") && !parts(&bytes).contains_key("cache/bodies.bin"));
         assert!(!DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache(), "the omitted cache is observable without decoding");
         assert!(read_design_geometry(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
         // With room for it, the same model is kept.
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None).unwrap();
+        let bytes =
+            write_container(&doc, DesignCompression::Fast, None, Some(&native_geometry()), None, crate::MAX_DESIGN_BYTES, None, None).unwrap();
         assert!(read_design_geometry(&bytes).is_some());
         assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
+    }
+
+    #[test]
+    fn optional_caches_keep_a_compressible_design_within_the_expanded_open_limit() {
+        let mut doc = Document::new("Compressible imports");
+        for pad in ["a", "b"] {
+            doc.add_feature(
+                FeatureKind::Import {
+                    file: format!("{pad}.step"),
+                    step: pad.repeat(2 << 20).into(),
+                    components: Vec::new(),
+                    skip: Vec::new(),
+                    records: None,
+                },
+                None,
+            )
+            .unwrap();
+        }
+        let required = write_design_container_with_cache(&doc, DesignCompression::Fast, None, None).unwrap();
+        let expanded: usize = parts(&required).values().map(Vec::len).sum();
+        // Both imports fit individually. Together the required entries leave at most one
+        // byte for optional parts, despite plenty of space in the compressed file.
+        crate::limits::test_cap::set(Some(expanded.div_ceil(2)));
+        let preview = DesignPreview { meshes: vec![mesh()] };
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, Some(&preview), Some(&native_geometry())).unwrap();
+        let reopened = crate::read_design(&bytes);
+        assert!(!DesignContainerReader::from_written_bytes(&bytes).unwrap().exceeds_expanded_open_limit());
+
+        // Lower the cap just enough that only the sum of the required entries exceeds it.
+        crate::limits::test_cap::set(Some((expanded - 1) / 2));
+        assert!(bytes.len() < max_design());
+        assert!(DesignContainerReader::new(Cursor::new(&bytes)).is_err());
+        assert!(DesignContainerReader::from_written_bytes(&bytes).unwrap().exceeds_expanded_open_limit());
+        crate::limits::test_cap::set(None);
+        assert_eq!(reopened.unwrap().to_json(), doc.to_json());
+        assert_eq!(bytes, required);
+    }
+
+    /// When an imported body fails round-trip encoding or decoding, the refusal specifically identifies
+    /// the failing body and feature rather than misdiagnosing the refusal as file size budget (#21610).
+    #[test]
+    fn unencodable_body_refusal_identifies_body_and_feature_name() -> Result<()> {
+        use solidcore_record::Vec3;
+        let broken = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.))?.with_paint(Some(solidcraft_kernel::Paint {
+            opacity: 1.0,
+            faces: vec![solidcraft_kernel::FacePaint { face: usize::MAX, color: [1.0, 0.0, 0.0], opacity: 1.0, name: None }],
+            name: None,
+        }));
+        let mut model = saved_model(vec![broken]);
+        model.records["model_bodies"][0]["name"] = json!("CoolingFin");
+        let doc_json = json!({
+            "features": [{"id": 1, "name": "GPU Cooler Import"}]
+        });
+        let doc_bytes = serde_json::to_vec(&doc_json).map_err(invalid)?;
+        let err = native_cache::encode_model(&model, &doc_bytes, usize::MAX).err().ok_or_else(|| invalid("expected encode error"))?;
+        assert!(
+            err.to_string().contains("body 'CoolingFin' in feature 'GPU Cooler Import' could not be stored exactly"),
+            "unexpected error message: {err}"
+        );
+        let refusal = take_last_cache_refusal().ok_or_else(|| invalid("refusal reason was captured"))?;
+        assert!(refusal.contains("body 'CoolingFin' in feature 'GPU Cooler Import' could not be stored exactly"), "unexpected refusal: {refusal}");
+        assert!(!refusal.contains("design file budget"), "must not blame budget: {refusal}");
+
+        let mut doc = document();
+        doc.features[0].id = 1;
+        doc.features[0].name = "GPU Cooler Import".into();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&model))?;
+        assert!(!DesignContainerReader::new(Cursor::new(&bytes))?.has_model_cache());
+        let refusal = take_last_cache_refusal().ok_or_else(|| invalid("refusal captured after write_design_container"))?;
+        assert!(refusal.contains("CoolingFin") && refusal.contains("GPU Cooler Import"), "write_design_container captured refusal: {refusal}");
+        Ok(())
     }
 
     /// #20724: the cap on the cache's manifest follows the design file limit (an eighth of it, the
@@ -2261,13 +2680,13 @@ mod tests {
         let doc = document();
         // At the default limit: left out, as before.
         assert!(native_cache::encode_model(&model, b"{}", usize::MAX).is_err());
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&model), None, 2 << 30, None).unwrap();
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&model), None, 2 << 30, None, None).unwrap();
         assert!(!DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
         // With a limit that allows it: kept, and read back from the cache.
         crate::limits::test_cap::set(Some(1 << 30));
         let (manifest, _) = native_cache::encode_model(&model, b"{}", usize::MAX).unwrap();
         assert!(manifest.len() > 32 << 20, "{} bytes is not past the default cap", manifest.len());
-        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&model), None, 2 << 30, None).unwrap();
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&model), None, 2 << 30, None, None).unwrap();
         assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
         // Read back under the larger cap. The 40 MiB body name is only padding for the manifest, so
         // the check is that the cache reads, not a model built from that name.
@@ -2316,6 +2735,57 @@ mod tests {
         }
     }
 
+    #[test]
+    fn native_cache_prededup_encodes_unique_bodies_once_and_preserves_metadata() -> Result<()> {
+        use solidcore_record::Vec3;
+        use solidcraft_kernel::{DisplayShare, FacePaint, Paint};
+
+        let base = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0))?;
+        let share = DisplayShare::new(base.clone());
+        let shared_placed = base.clone().with_display_share(&share, solidcraft_doc::IDENTITY);
+        let colored = base.clone().with_color(Some([0.2, 0.4, 0.6]));
+        let painted = base.clone().with_paint(Some(Paint {
+            opacity: 0.5,
+            faces: vec![FacePaint { face: 0, color: [1.0, 0.0, 0.0], opacity: 0.8, name: None }],
+            name: None,
+        }));
+        // Clearing face paint keeps inherited `regularization_protected = true`, so this body
+        // shares `base`'s record and has `color == None, paint == None` yet encodes differently.
+        let protected = painted.clone().with_paint(None);
+
+        let model =
+            saved_model(vec![base.clone(), base.clone(), base.clone(), base.clone(), base.clone(), shared_placed, colored, painted, protected]);
+
+        let before = native_cache::ENCODED_UNIQUE.with(std::cell::Cell::get);
+        let (manifest_bytes, payload_bytes) = native_cache::encode_model(&model, b"{}", usize::MAX)?;
+        let encoded_unique = native_cache::ENCODED_UNIQUE.with(std::cell::Cell::get) - before;
+        assert_eq!(encoded_unique, 4, "9 bodies + 1 share with 4 distinct encodings must encode only 4 times");
+
+        let manifest: Value = serde_json::from_slice(&manifest_bytes).map_err(invalid)?;
+        assert_eq!(manifest["slices"].as_array().map(Vec::len), Some(4));
+        let body_entries = manifest["bodies"].as_array().ok_or_else(|| invalid("bodies"))?;
+        assert_eq!(body_entries.len(), 9);
+        for entry in &body_entries[..6] {
+            assert_eq!(entry[0], json!(0), "identical body copies must map to slice 0");
+        }
+        assert_eq!(manifest["shares"], json!([0]), "display share of base must reuse slice 0");
+        assert_ne!(body_entries[6][0], json!(0), "colored body must keep its own slice");
+        assert_ne!(body_entries[7][0], json!(0), "painted body must keep its own slice");
+        assert_ne!(body_entries[8][0], json!(0), "boundary-protected body must not collapse into base's slice");
+        assert!(!payload_bytes.is_empty());
+
+        let doc = document();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&model))?;
+        let round_tripped = DesignContainerReader::new(Cursor::new(&bytes))?.geometry().ok_or_else(|| invalid("missing cache"))?;
+        assert_eq!(round_tripped.bodies.len(), 9);
+        assert_eq!(round_tripped.bodies[0].color(), None);
+        assert!(round_tripped.bodies[5].display_share().is_some());
+        assert_eq!(round_tripped.bodies[6].color(), Some([0.2, 0.4, 0.6]));
+        assert_eq!(round_tripped.bodies[7].paint().map(|p| p.faces.len()), Some(1));
+        assert_eq!(round_tripped.bodies[8].paint(), None);
+        Ok(())
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn opening_adopts_the_model_with_a_large_point_clouds_properties() {
@@ -2338,6 +2808,7 @@ mod tests {
             colors: Colors::default(),
             source_points: count as u64,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -2516,6 +2987,67 @@ mod tests {
         assert!(all > space);
         let (manifest, _) = native_cache::encode_model(&model, document, space).unwrap();
         assert_eq!(kept_states(&serde_json::from_slice::<Value>(&manifest).unwrap()["model"]), vec![false, false, false, true]);
+    }
+
+    /// #18815: the design file budget is checked against the Deflate-compressed cache size, while
+    /// still enforcing the reader's unpacked expanded-package budget so opening never fails with
+    /// `expanded package too large`.
+    #[test]
+    fn model_cache_budget_uses_compressed_size_while_enforcing_expanded_limit() {
+        // Part 1: multi-state B-rep cache whose uncompressed size exceeds `file_space`, while its
+        // Deflate-compressed size fits cleanly within `file_space` and unpacked fits `expanded_space`.
+        let model = timeline_model();
+        let doc_bytes = b"{}";
+        let (full_manifest, full_payload) = native_cache::encode_model(&model, doc_bytes, usize::MAX).unwrap();
+        let raw = full_manifest.len() + full_payload.len();
+        let [manifest_entry, payload_entry] = native_cache::ENTRIES;
+        let compressed =
+            native_cache::deflated_len(&full_manifest, manifest_entry).unwrap() + native_cache::deflated_len(&full_payload, payload_entry).unwrap();
+        assert!(compressed * 2 < raw, "B-rep cache compresses significantly: {compressed} vs {raw}");
+
+        let file_space = compressed + (raw - compressed) / 2;
+        assert!(compressed < file_space && file_space < raw);
+        let (kept_manifest, kept_payload) = native_cache::encode_model_with_budget(&model, doc_bytes, file_space, raw).unwrap();
+        assert_eq!(kept_manifest.len() + kept_payload.len(), raw, "all states fit once compressed");
+        assert_eq!(kept_states(&serde_json::from_slice::<Value>(&kept_manifest).unwrap()["model"]), vec![true; 4]);
+
+        // When even the compressed final state exceeds `file_space`, it is dropped with a clear refusal.
+        take_last_cache_refusal();
+        assert!(native_cache::encode_model_with_budget(&model, doc_bytes, 1, raw).is_err());
+        let refusal = take_last_cache_refusal().expect("compressed-size refusal recorded");
+        assert!(refusal.contains("compressed"), "{refusal}");
+
+        // When the unpacked size exceeds `expanded_space`, the reader's unpacked limit still wins.
+        let pieces: Vec<Vec<(usize, usize)>> = (0..40).map(|i| vec![(i, BODY)]).collect();
+        let (last_only, _, _) = model.thinned(&pieces, 16 * BODY + BODY / 2).unwrap();
+        let (one_manifest, one_payload) = native_cache::encode_model(&last_only, doc_bytes, usize::MAX).unwrap();
+        let one_raw = one_manifest.len() + one_payload.len();
+        take_last_cache_refusal();
+        assert!(native_cache::encode_model_with_budget(&model, doc_bytes, raw, one_raw - 1).is_err());
+        let refusal = take_last_cache_refusal().expect("unpacked-size refusal recorded");
+        assert!(refusal.contains("unpacked"), "{refusal}");
+
+        // Part 2: end-to-end `write_container` keeps a compressible cache whose raw bytes exceed
+        // the remaining file budget (`file_space`), and `read_design_with_model` reads it back.
+        let doc = document();
+        let mut compressible = native_geometry();
+        compressible.records["model_bodies"][0]["name"] = json!("x".repeat(2 << 20));
+        // `file_space` deducts ~1 MiB + directory overhead (~66 KiB), leaving ~384 KiB of compressed
+        // budget for a 1.5 MiB container budget — far below the ~2 MiB raw cache, well above its
+        // ~10 KiB compressed size.
+        let budget = 1_500_000;
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&compressible), None, budget, None, None).unwrap();
+        assert!(bytes.len() <= budget, "written container ({} bytes) fits within budget ({budget})", bytes.len());
+        assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
+        let (opened, cached) = read_design_with_model(&bytes).unwrap();
+        assert_eq!(opened.to_json(), doc.to_json());
+        assert!(cached.is_some(), "reader accepts the compressed cache cleanly");
+
+        // Truly over budget even compressed: omitted with a clear refusal reason.
+        take_last_cache_refusal();
+        let dropped = write_container(&doc, DesignCompression::Fast, None, Some(&compressible), None, 70_000, None, None).unwrap();
+        assert!(!DesignContainerReader::new(Cursor::new(&dropped)).unwrap().has_model_cache());
+        assert!(take_last_cache_refusal().is_some());
     }
 
     #[test]
@@ -3362,6 +3894,7 @@ mod tests {
             colors: Colors::default(),
             source_points: 3,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -3450,8 +3983,9 @@ mod tests {
     fn portable_thumbnail_is_keyed_bounded_and_does_not_read_sources() {
         // IO validates an opaque PNG header/hash; UI tests exercise real PNG decoding.
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
-        png.extend(240u32.to_be_bytes());
-        png.extend(150u32.to_be_bytes());
+        for side in crate::THUMBNAIL_SIZE {
+            png.extend((side as u32).to_be_bytes());
+        }
         let mut doc = Document::from_json(&document().to_json()).unwrap();
         if let FeatureKind::Import { step, .. } = &mut doc.features[0].kind {
             *step = "source data".repeat(250_000).into();
@@ -3463,7 +3997,7 @@ mod tests {
         assert!(count.get() < 256 * 1024);
         assert_eq!(reader.read_document().unwrap(), doc);
         let original = parts(&bytes);
-        for field in ["format", "app", "document", "payload"] {
+        for field in ["format", "document", "payload"] {
             let mut entries = original.clone();
             let mut key: Value = serde_json::from_slice(&entries["cache/thumbnail.json"]).unwrap();
             key[field] = json!("mismatch");
@@ -3472,6 +4006,12 @@ mod tests {
             assert!(read_design_thumbnail(&changed).is_none());
             assert_eq!(crate::read_design(&changed).unwrap(), doc);
         }
+        // A picture another version saved is still the design's picture: an update hides none.
+        let mut entries = original.clone();
+        let mut key: Value = serde_json::from_slice(&entries["cache/thumbnail.json"]).unwrap();
+        key["app"] = json!("0.0.1");
+        entries.insert("cache/thumbnail.json".into(), serde_json::to_vec(&key).unwrap());
+        assert_eq!(read_design_thumbnail(&package(&entries)), Some(png.clone()));
         let mut entries = original.clone();
         let source = entries.keys().find(|k| k.ends_with(".step")).unwrap().clone();
         entries.insert(source, b"corrupt source".to_vec());
@@ -3872,7 +4412,10 @@ mod tests {
                 legacy.start_file(name, zip::write::SimpleFileOptions::default().compression_method(method)).unwrap();
                 legacy.write_all(&data).unwrap();
             }
-            assert_eq!(crate::read_design(&legacy.finish().unwrap().into_inner()).unwrap(), doc);
+            // Its features keep the order of the pieces they split bodies into (#21552).
+            let mut upgraded = doc.clone();
+            upgraded.features.iter_mut().for_each(|f| f.least_face_piece_order = true);
+            assert_eq!(crate::read_design(&legacy.finish().unwrap().into_inner()).unwrap(), upgraded);
         }
     }
 
@@ -3982,6 +4525,26 @@ mod tests {
                 .is_ok()
             );
         }
+    }
+
+    #[test]
+    fn saved_sections_round_trip_and_an_old_design_has_none() {
+        use solidcore_record::Vec3;
+        let mut doc = Document::new("Sections");
+        assert!(!String::from_utf8_lossy(&crate::write_design(&doc).unwrap()).contains("saved_sections"), "none saved, nothing written");
+        let plane = solidcraft_doc::SavedSectionPlane { id: 1, origin: Vec3::new(0.0, 15.0, 0.0), normal: Vec3::Y, hidden: false };
+        doc.saved_sections.push(solidcraft_doc::SavedSection { name: "Wall".into(), planes: vec![plane.clone()], hatch: true });
+        doc.saved_sections.push(solidcraft_doc::SavedSection {
+            name: "Hidden".into(),
+            planes: vec![solidcraft_doc::SavedSectionPlane { hidden: true, ..plane }],
+            hatch: false,
+        });
+        let back = crate::read_design(&crate::write_design(&doc).unwrap()).unwrap();
+        assert_eq!(back.saved_sections, doc.saved_sections);
+        assert_eq!(crate::read_design(&write_design_container(&doc).unwrap()).unwrap().saved_sections, doc.saved_sections);
+        // A design written before sections could be saved opens with none.
+        let old = Document::new("Old");
+        assert!(crate::read_design(&crate::write_design(&old).unwrap()).unwrap().saved_sections.is_empty());
     }
 
     #[test]

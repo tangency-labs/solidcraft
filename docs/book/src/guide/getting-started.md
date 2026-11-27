@@ -39,6 +39,40 @@ A sample opens as an ordinary design you can change; a click on its tile is enou
 From there, [A tour of the window](ui-tour.md) shows what's where, and
 [Sketching step by step](sketching.md#step-by-step) starts a part of your own.
 
+### Installing on Windows
+
+The installer (`solidcraft-windows-x64.msi`, also for ARM64 and 32-bit PCs) asks who SolidCraft
+is for:
+
+- **Install for all users (needs admin)**, the default: into `C:\Program Files\SolidCraft`, with
+  the Start menu entry, `.sc` files and `solidcraft://` links set up for everyone on the computer.
+  Windows asks for an administrator's permission.
+- **Install just for me**: into `%LocalAppData%\Programs\SolidCraft`, with the Start menu entry,
+  `.sc` files, `solidcraft://` links and `solidcraft-cli` on the PATH set up for your account
+  only. No administrator is needed.
+
+An update keeps the choice: the installer, and SolidCraft's own **Install** button, update an
+install for all users for all users and an install just for you just for you. Both can be on one
+computer; each is updated and uninstalled on its own, and while both are there your own
+`.sc` files and `solidcraft://` links open the copy installed just for you.
+
+Silent installs, for scripts and deployment tools:
+
+```bat
+:: For all users (run as administrator), as before
+msiexec /i solidcraft-windows-x64.msi /qn
+:: Just for me, no administrator
+msiexec /i solidcraft-windows-x64.msi ALLUSERS=2 MSIINSTALLPERUSER=1 /qn
+:: Uninstall an install just for me
+msiexec /x solidcraft-windows-x64.msi ALLUSERS=2 MSIINSTALLPERUSER=1 /qn
+```
+
+A silent update of an install just for you needs the same two properties. Without them a silent
+install is for all users, as it always was. One version can be installed only one way for a
+given person: to switch, uninstall it first, or install a newer version the other way. Windows
+Server lets only administrators run installers unless the `DisableMsi` policy allows it, so there
+"just for me" needs that policy set to 0.
+
 ### macOS
 
 Open the release `.dmg` and drag `SolidCraft.app` onto Applications.
@@ -116,19 +150,37 @@ command-line paths outside Documents may need a specific additional filesystem p
 
 ### Linux Snap
 
-On Ubuntu and other distributions with snapd:
+On Ubuntu and other distributions with snapd, download the latest release's
+[Snap package for x86-64](https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.snap)
+or [Snap package for ARM64](https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-aarch64.snap).
+Open a terminal in the download folder and install the package for your computer.
+
+For x86-64:
 
 ```sh
-sudo snap install solidcraft
+sudo snap install --dangerous ./solidcraft-linux-x86_64.snap
+```
+
+For ARM64:
+
+```sh
+sudo snap install --dangerous ./solidcraft-linux-aarch64.snap
+```
+
+`--dangerous` is required for a local package without a Snap Store signature. These installs
+do not update automatically. Check the [releases page](https://github.com/tangency-labs/solidcraft/releases)
+for newer packages.
+
+After installation:
+
+```sh
 solidcraft                # or open SolidCraft from the app menu
 solidcraft.cli --version  # the CLI, for scripts and `solidcraft.cli mcp`
 ```
 
 The snap can open designs in your home folder (not hidden folders) and, through the file
 chooser, anywhere else. For USB drives and other mounted disks, run
-`sudo snap connect solidcraft:removable-media` once. A release's `.snap` file installs without
-the store with `sudo snap install --dangerous ./solidcraft-VERSION-linux-ARCH.snap`; it then
-doesn't update automatically.
+`sudo snap connect solidcraft:removable-media` once.
 
 ## Web
 
@@ -399,12 +451,14 @@ solidcraft-cli run --in part.sc --out part.stl --quality fine
 only: the file on disk is not touched. Repeat it to set several; they apply in the order given,
 before the script's own commands run, so a later one can use an earlier one's value. `--params-file
 FILE.json` does the same from an object such as `{"width": "30 mm", "depth": 20}` and applies before
-any `--param`. The name must already be a parameter of the design (or of one of its features), so a
-typo fails the run and names the parameter, rather than adding a new one. Overrides need a design to
-act on: the positional design, or `--in` with a script on top; a script alone has no parameters yet
-(have it set them itself). A missing `=`, an empty name or expression, or an expression that does not
-evaluate fails the run with the command's own message, and nothing is written. `eval` takes the same
-two options.
+any `--param`. The name must already be a parameter of the design (or of one of its features), or
+one the script sets itself, so a typo fails the run and names the parameter, rather than adding a new
+one. A parameter the script sets with `parameters.add` (or `parameters.change`) takes the value given
+instead of the script's at the first step that sets it, so a plain JSON command script can be a template
+whose sizes come from the command line; a later `parameters.change` in the script still changes it: `solidcraft-cli run cabinet.json --param "W=900 mm"`. A script
+given as `--in` runs as it loads, before any override, so overrides are refused there. A missing `=`, an
+empty name or expression, or an expression that does not evaluate fails the run with the command's own
+message, and nothing is written. `eval` takes the same two options.
 
 ```sh
 solidcraft-cli run part.sc --param width=30mm --param depth=width/2 --out part.step

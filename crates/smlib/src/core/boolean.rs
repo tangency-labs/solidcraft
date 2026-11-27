@@ -4,11 +4,6 @@
 //! and consumes the second. A SolidCraft body never changes, so every operation here copies its
 //! operands first ([`Body::copy`], `SmApiBrepCopy`).
 
-use solidcore::Result as SolidResult;
-use solidcore::boolean::api_brep as sm;
-use solidcore::geom::a_object::BooleanOperation;
-use solidcore::kernel::Kernel;
-use solidcore::topology::Brep;
 use solidcore_ops::boolean as ops;
 
 use super::Body;
@@ -55,27 +50,62 @@ pub(crate) fn boolean(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>>
     call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::boolean(ca, cb, operation(op)))
 }
 
-/// The kernel's operation for [`merged`].
-fn kernel_operation(op: BooleanOp) -> BooleanOperation {
-    match op {
-        BooleanOp::Union => BooleanOperation::Union,
-        BooleanOp::Subtract => BooleanOperation::Difference,
-        BooleanOp::Intersect => BooleanOperation::Intersection,
+/// [`boolean`] of `a` and `b` tagged as operands 0 and 1 ([`super::history::tag`]): the tagged
+/// copies are the operation's to consume, so they are not copied again. A boolean of tagged
+/// copies made them and then copied them both, the larger operand's copy as dear as the
+/// boolean on a body of many faces (solidcore#3359). On a union radial-sector failure, retries
+/// via [`ops::union_copies`] on fresh tagged copies so tagged unions keep the same recovery as
+/// [`boolean`] (#21114) without copying on the fast path. A failure's dump gets `a` and `b`.
+pub(crate) fn boolean_tagged(a: &Body, b: &Body, op: BooleanOp) -> Result<Option<Body>> {
+    usable("SmApiBoolean", &[a, b])?;
+    let ta = super::history::tag(a, 0)?;
+    let tb = super::history::tag(b, 1)?;
+    let first = call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::boolean(ta, tb, operation(op)));
+    if op != BooleanOp::Union {
+        return first;
+    }
+    let Err(ref err) = first else {
+        return first;
+    };
+    if !matches!(err, Error::Solidcore(msg) if msg.contains("boolean::merge::p2::make_faceuse") && msg.contains("no radial edge use")) {
+        return first;
+    }
+    let ta = super::history::tag(a, 0)?;
+    let tb = super::history::tag(b, 1)?;
+    match call::ops_on("SmApiBoolean", &operands(&[a, b]), || ops::union_copies(&ta, &tb)) {
+        ok @ Ok(Some(_)) => ok,
+        Err(e @ Error::Cancelled(_)) => Err(e),
+        _ => first,
     }
 }
 
-/// `SmApiBoolean` of `a` and `b` in the kernel `k` (both consumed), with the result's
-/// tolerances grown as [`boolean`] grows them.
-pub(crate) fn merged(k: &mut Kernel, a: Brep, b: Brep, op: BooleanOp) -> SolidResult<Brep> {
-    let mut r = sm::boolean(k, a, b, kernel_operation(op))?;
-    // Grow the result's tolerances to cover marginal edge/vertex, vertex/face and
-    // edge/face gaps, so an otherwise-sound union is not refused as "Bad Gap" for a
-    // sub-micron gap (SolidCraft issue #10, fuzzer seed 73). Tolerances only grow:
-    // a body that already passes is unchanged; a marginal failure becomes sound.
-    // Offset and shell already grow their results' tolerances this way. First, a vertex
-    // a grazing cut left wider than the check allows is centred on its edges' ends.
-    solidcore::topology::brep::validation::update_tolerances_after_boolean(k, &mut r.result)?;
-    Ok(r.result)
+/// [`boolean_tagged`] of operands each either read (`Ok`) or handed over by the caller, who never
+/// reads it again (`Err`): a handed-over operand is tagged itself instead of a copy of it
+/// ([`super::history::tag_owned`]), the copy [`boolean_tagged`] would make of it skipped. The
+/// tagged bodies are the same either way, so the result is. Bodies are handed over only while no
+/// failure dump folder is set ([`super::dump::dumping`]); a failure's dump gets the read operands.
+pub(crate) fn boolean_tagged_owned(a: std::result::Result<&Body, Body>, b: std::result::Result<&Body, Body>, op: BooleanOp) -> Result<Option<Body>> {
+    let read: Vec<&Body> = [&a, &b].into_iter().filter_map(|x| x.as_ref().ok().copied()).collect();
+    let owned: Vec<&Body> = [&a, &b].into_iter().filter_map(|x| x.as_ref().err()).collect();
+    usable("SmApiBoolean", &read)?;
+    usable("SmApiBoolean", &owned)?;
+    let tag = |x: &std::result::Result<&Body, Body>, n: usize| -> Option<Result<Body>> { x.as_ref().ok().map(|x| super::history::tag(x, n)) };
+    let (ta, tb) = (tag(&a, 0), tag(&b, 1));
+    let inputs: Vec<(&'static str, &Body)> = [(OPERANDS.first(), &a), (OPERANDS.get(1), &b)]
+        .into_iter()
+        .filter_map(|(name, x)| x.as_ref().ok().map(|x| (name.copied().unwrap_or("operand"), *x)))
+        .collect();
+    let ta = match (ta, a) {
+        (Some(t), _) => t?,
+        (None, Err(owned)) => super::history::tag_owned(owned, 0)?,
+        (None, Ok(_)) => return Err(Error::Argument),
+    };
+    let tb = match (tb, b) {
+        (Some(t), _) => t?,
+        (None, Err(owned)) => super::history::tag_owned(owned, 1)?,
+        (None, Ok(_)) => return Err(Error::Argument),
+    };
+    call::ops_on("SmApiBoolean", &inputs, || ops::boolean(ta, tb, operation(op)))
 }
 
 /// The union of copies of `bodies`, pairwise, level by level (an odd one carried to the next
@@ -145,6 +175,31 @@ fn boolean_pair(a: &Body, b: &Body) -> Result<Option<Body>> {
     let (Some(ca), Some(cb)) = (c.next(), c.next()) else { return Err(Error::Argument) };
     let inputs = [("a", a), ("b", b)];
     call::ops_on("smlib_boolean_union_all", &inputs, || ops::boolean(ca, cb, operation(BooleanOp::Union)))
+}
+
+/// [`union_all`] of `bodies` tagged each as its own operand, in order
+/// ([`super::history::tag`]): the tagged copies are the union's to consume, so they are not
+/// copied again, as in [`boolean_tagged`]. Keeps [`union_all`]'s `NotOneFoot` one-by-one retry
+/// (#16552) on fresh tagged copies. A failure's dump gets `bodies`.
+pub(crate) fn union_all_tagged(bodies: &[&Body]) -> Result<Body> {
+    if bodies.is_empty() || bodies.len() > crate::MAX_UNION_BREPS {
+        return Err(Error::Argument);
+    }
+    usable("smlib_boolean_union_all", bodies)?;
+    let tag_all = || bodies.iter().enumerate().map(|(i, b)| super::history::tag(b, i)).collect::<Result<Vec<_>>>();
+    let tagged = tag_all()?;
+    match call::ops_on("smlib_boolean_union_all", &operands(bodies), || ops::union_all(tagged)) {
+        Ok(b) => Ok(b),
+        Err(first @ Error::NotOneFoot { .. }) => {
+            let fresh = tag_all()?;
+            match union_one_by_one(fresh) {
+                Ok(b) => Ok(b),
+                Err(Error::NotOneFoot { .. }) => Err(first),
+                Err(e) => Err(e),
+            }
+        }
+        Err(first) => Err(first),
+    }
 }
 
 /// `a` op `b` for sheets of planar faces on one plane, on copies: `None` when either has no

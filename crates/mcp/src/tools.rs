@@ -1,7 +1,8 @@
 //! MCP tool definitions and dispatch. Every tool is a thin wrapper over engine commands
 //! (`engine.execute`) and the inspection / rendering control methods.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use serde_json::{Map, Value, json};
 use solidcraft_engine::io::vfs;
@@ -158,7 +159,11 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              finish, extrude, fillet… in one call. A long one (a polyline of hundreds of points) can be written to a JSON \
              file and passed as `path` instead of `commands`. Give `expect` {volume_mm3, tol, bodies, bbox} with the numbers \
              you computed beforehand: after the last step the design is measured and compared, so no separate measure call is \
-             needed; a mismatch is flagged as an error naming it, and the design is kept as built.",
+             needed; a mismatch is flagged as an error naming it, and the design is kept as built (unless `dry_run: true`). \
+             With `dry_run: true`, every step runs normally (so measure and inspect steps see the edits, and `expect` checks \
+             the simulated result) and then all document, model and undo/redo history changes are unconditionally rolled back \
+             (`dry_run: true`, `rolled_back: true`); commands with disk or external side effects (such as `save` and `export`), \
+             application layout steps and `rollback: false` are refused before anything runs.",
             object(
                 json!({
                     "commands": {
@@ -170,6 +175,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                      `solidcraft-cli run` takes and `solidcraft-cli script` writes), read by this server within the folders the \
                      agent may use; the steps run as if they had been sent here"),
                     "rollback": {"type": "boolean", "description": "Undo completed steps when one fails (default true)"},
+                    "dry_run": {"type": "boolean", "description": "Run all steps normally (including measure/inspect and `expect`), then unconditionally roll back all document, model and undo/redo history changes so the session is unchanged (`dry_run: true`, `rolled_back: true`). Refuses disk-writing/external steps such as save and export, layout steps and `rollback: false` before anything runs (default false)"},
                     "coalesce_parameters": {"type": "boolean", "description": "Set each run of consecutive plain parameter edits (parameters.change or set_parameter with a name and a value, or changes) together, rebuilding the design once for the run instead of once per edit; a run that is refused goes step by step, naming the refused step. Other steps still see the design up to date. Each step keeps its own result; the run is one undo step (default false)"},
                     "timings": {"type": "boolean", "description": "Add `timings`: [{index, command, ms}] for every step run (the failing one included) and `total_ms` (default false)"},
                     "profile": {"type": "boolean", "description": "Like timings, and each step's `profile`: {boolean_ms, tessellate_ms, other_ms}, its time in kernel booleans, in tessellation and the rest (default false)"},
@@ -197,6 +203,11 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "names_only": {"type": "boolean", "description": "Only each body's name (assembly occurrences included) and its definition's, without measuring (default false)"},
                     "items": {"type": "array", "items": {"type": "object"}, "description": "One or two selections to measure instead of bodies, e.g. {\"type\": \"face\", \"body\": \"Body1\", \"index\": 3, \"point\": [x,y,z]}"},
                     "summary": {"type": "boolean", "description": "Per body only name, volume_mm3, bbox {min, max}, faces and closed, and total.volume_mm3 (default false: the full reply)"},
+                    "within": {"type": "object", "properties": {
+                        "min": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
+                        "max": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
+                    }, "required": ["min", "max"], "additionalProperties": false, "description": "Filter bodies by their world-coordinate bounding box (mm)"},
+                    "mode": {"type": "string", "enum": ["intersects", "inside"], "description": "With within: include boxes that touch or overlap (intersects, default), or only boxes fully inside"},
                 }),
                 &[],
             ),
@@ -319,6 +330,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names to outline (default: the visible bodies)"},
                     "crop_px": {"type": "array", "items": {"type": "number"}, "description": "[x, y, w, h] in pixels"},
                     "crop_fraction": {"type": "array", "items": {"type": "number"}, "description": "[x, y, w, h] as fractions 0..1 of the picture"},
+                    "part_fills_crop": {"type": "boolean", "description": "true: the crop box is the part itself and no background search runs, for a crop that tightly frames it (default false)"},
                     "fit": {"type": "string", "enum": ["width", "height", "both"], "description": "The dimension the one uniform scale comes from (default width); both scales by width and reports aspect_mismatch"},
                     "rows": {"type": "integer", "description": "The model outline's height in pixels (default 240)"},
                 }),
@@ -341,13 +353,18 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              component placement with mass and inertia, joints from the assembly's joints, and STL meshes in metres written \
              next to it, or where mesh_prefix points with place_meshes (docs/urdf.md); RViz needs mesh_prefix such as package://robot/meshes/. SDF (.sdf) writes a Gazebo \
              model folder at the path (a .sdf ending dropped): model.config, model.sdf, an STL per body and each decal's image \
-             on a textured quad, the image also its visual's albedo map (docs/sdf.md).",
+             on a textured quad, the image also its visual's albedo map (docs/sdf.md). MJCF (format mjcf, any path such as robot.xml) exports the whole \
+             assembly as a MuJoCo model at its current joint values: a body per component placement with mass and inertia, a \
+             joint per joint value (ball joints as one), loops and motion links as equality constraints, and STL meshes written next to it \
+             (docs/mjcf.md).",
             object(
                 json!({
                     "path": string("Output file"),
-                    "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm", "urdf", "sdf"]},
-                    "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf)"},
+                    "format": {"type": "string", "enum": ["step", "stp", "iges", "igs", "3mf", "3mf-tagged", "stl", "stla", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm", "urdf", "mjcf", "sdf"]},
+                    "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names (default: all; not with urdf or mjcf)"},
                     "writer": {"type": "string", "enum": ["solidcraft", "cadmpeg"], "description": "STEP and IGES only: SolidCraft's own writer (default), or cadmpeg's, which writes STEP AP242 with the components and colours but no solid names, and IGES 5.3 with each body where the design shows it; refused for other formats"},
+                    "quality": {"type": "string", "enum": ["standard", "fine", "finest"], "description": "stl, stla, obj, 3mf, glb, usd, 3dm, urdf and sdf: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size (default standard)"},
+                    "chord": {"type": "number", "minimum": 0.001, "maximum": 1000, "description": "Instead of quality, for the same formats: one chord tolerance for every body, in mm; coarser gives fewer triangles (a simulator's limit on triangles per mesh file). Refused with quality"},
                     "mesh_prefix": string("urdf: put before each mesh file name (default: none, so relative to the .urdf)"),
                     "place_meshes": {"type": "boolean", "description": "urdf: write the meshes where mesh_prefix points, making its folder (default false: next to the .urdf)"},
                     "effort": {"type": "number", "description": "urdf: effort limit for joints with none saved, N or N m (default 1000)"},
@@ -498,22 +515,27 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "Open a .sc design file (or a .solidcraft one from an earlier release), a STEP file (.step/.stp: a new design whose bodies come from the file, as an \
              Import base feature in a component named after the file; an assembly's parts become nested components) or a \
              mesh (.3mf/.stl/.obj/.glb/.gltf: mesh bodies in such a component; a glTF file's nodes become nested components and its \
-             materials appearances); the result reports the component (id, component_name). Replaces the current design; insert into it \
+             materials appearances) or a KiCad board (.kicad_pcb, or the project's .kicad_pro: a new design with the board as a solid, its copper, \
+             silkscreen and component models in a component named after it); the result reports the component (id, component_name). Replaces the current design; insert into it \
              instead with the file.insert_step (STEP) or file.insert_mesh (mesh) commands. A STEP file from a system \
              that has Y up opens lying on its back: `up: \"y\"` turns its component a quarter turn about X (Y becomes Z). glTF is Y up, \
              so it is turned by default (`up: \"z\"` keeps its axes). `names` picks what the bodies are named after when the solids' own names say nothing useful. \
              An OpenUSD file (.usd/.usda/.usdc/.usdz) opens as meshes, turned to Z up when the stage says Y is up; `geometry: \"exact\"` brings its exact B-rep \
              where it has one (as SolidCraft's own OpenUSD exports carry) as B-rep bodies of an Import feature instead. \
              A file of another kind opens with an installed importer plugin that claims its extension (the `<plugin>.<entry>` tools \
-             titled \"Open .ext files with …\" list them).",
+             titled \"Open .ext files with …\" list them). \
+             A KiCad board takes the options `thickness`, `components`, `copper`, `silkscreen`, `color` and `representation`, the same as \
+             `execute` with `doc.open` takes; a component model that could not be read is named in the reply's warnings, with why. A model is \
+             read from the board's folder or from KiCad's own 3D model library on this machine; a model in another folder outside the agent's \
+             folders is refused with the folder named, and the user allows it with `--allow-path`.",
             object(
-                json!({
-                    "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb, .gltf or OpenUSD (.usd, .usda, .usdc, .usdz) file"),
+                open_properties(json!({
+                    "path": string("Path to a .sc (or .solidcraft), .step/.stp, .3mf, .stl, .obj, .glb, .gltf, OpenUSD (.usd, .usda, .usdc, .usdz) or KiCad board (.kicad_pcb, or the project's .kicad_pro) file"),
                     "up": {"type": "string", "enum": ["z", "y"], "description": "STEP, glTF and OpenUSD only. z keeps the file's axes; y: the file has Y up, so its bodies are turned to stand Z up. Default: z for STEP, y for glTF, the stage's own up axis for OpenUSD"},
                     "geometry": {"type": "string", "enum": ["meshes", "exact"], "description": "OpenUSD only. meshes (default): its meshes as mesh bodies; exact: its exact B-rep where it has one as B-rep bodies of an Import feature, and only its meshes with no B-rep as mesh bodies"},
                     "new_tab": {"type": "boolean", "description": "Open the file in a tab of its own, after the active one, and show it, even when the active design is empty, so the design that was open stays open. Desktop app only. Default: false: a design that is not empty is kept in its tab and the file gets one, an empty one is replaced"},
                     "names": {"type": "string", "enum": ["auto", "solid", "product", "instance"], "description": "STEP, IGES, FreeCAD and Rhino. auto (default): keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's"},
-                }),
+                })),
                 &["path"],
             ),
             Effect::Files,
@@ -539,12 +561,13 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "skill_reference",
             "Skill reference",
             "Read a document of SolidCraft's bundled agent skills (solidcraft-modeling, solidcraft-mechanisms, \
-             solidcraft-editing, solidcraft-checking, solidcraft-sheetmetal) from the copy built into SolidCraft. `file` defaults to reference.md; \
-             each skill also has SKILL.md. Unknown skills or files are refused with the available ones.",
+             solidcraft-editing, solidcraft-checking, solidcraft-reporting, solidcraft-sheetmetal) from the copy built into SolidCraft. \
+             `file` defaults to reference.md, or SKILL.md for skills without reference.md; each skill also has SKILL.md. \
+             Unknown skills or files are refused with the available ones.",
             object(
                 json!({
                     "skill": string("Skill name, such as solidcraft-modeling"),
-                    "file": {"type": "string", "description": "Document of that skill", "default": "reference.md"},
+                    "file": {"type": "string", "description": "Document of that skill (defaults to reference.md, or SKILL.md when the skill has none)", "default": "reference.md"},
                 }),
                 &["skill"],
             ),
@@ -674,12 +697,41 @@ fn text_result(v: &Value, is_error: bool, opts: Options) -> Value {
 const AGENT_PREFERENCES: &[&str] =
     &["default_units", "theme", "language", "up_axis", "ui_scale", "zoom_to_cursor", "smooth_wheel_zoom", "show_frame_rate"];
 
+/// Per-call MCP execution context: an optional progress reporter (`_meta.progressToken`) and an
+/// out-of-band cancellation flag (`notifications/cancelled`).
+#[derive(Clone, Default)]
+pub struct CallContext {
+    pub progress: Option<solidcraft_mcp_server::ProgressReporter>,
+    pub cancel: Option<Arc<AtomicBool>>,
+}
+
+impl CallContext {
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.as_ref().is_some_and(|flag| flag.load(Ordering::SeqCst))
+    }
+
+    pub fn report_progress(&self, progress: f64, total: Option<f64>, message: Option<&str>) {
+        if let Some(reporter) = &self.progress {
+            reporter.report(progress, total, message);
+        }
+    }
+}
+
 pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> Value {
     call_tool_with(b, name, args, Options::default())
 }
 
 /// [`call_tool`] with these [`Options`].
 pub fn call_tool_with(b: &mut dyn Backend, name: &str, args: &Value, opts: Options) -> Value {
+    call_tool_with_context(b, name, args, opts, &CallContext::default())
+}
+
+/// [`call_tool_with`] carrying an MCP [`CallContext`] (progress reporting and out-of-band
+/// cancellation).
+pub fn call_tool_with_context(b: &mut dyn Backend, name: &str, args: &Value, opts: Options, ctx: &CallContext) -> Value {
+    if ctx.is_cancelled() {
+        return text_result(&Value::String(format!("cancelled: `{name}` was cancelled by client")), true, opts);
+    }
     let empty = Map::new();
     let a = args.as_object().unwrap_or(&empty);
     let r = match name {
@@ -689,7 +741,7 @@ pub fn call_tool_with(b: &mut dyn Backend, name: &str, args: &Value, opts: Optio
         },
         "screenshot" => return screenshot(b, a),
         "compare_picture" => return compare_picture(b, a, opts),
-        "batch" => return batch(b, a, opts),
+        "batch" => return batch(b, a, opts, ctx),
         "check_parameters" => return check_parameters(b, a, opts),
         "execute" => return execute(b, a, opts),
         "inspect_design" if opts.compact => inspect_design_compact(b, a),
@@ -881,20 +933,22 @@ fn xyz_text(c: [f64; 3]) -> String {
     format!("[{}, {}, {}]", num(c[0]), num(c[1]), num(c[2]))
 }
 
-/// A reply that went through, with its `expectation` when `expect` was given. A mismatch is a
-/// tool error that names it first; the design stays as built (the agent decides what to do).
-fn with_expectation(b: &mut dyn Backend, mut reply: Value, expect: Option<Expect>, opts: Options) -> Value {
-    let Some(expect) = expect else { return text_result(&reply, false, opts) };
-    let expectation = match expect.check(b) {
+fn evaluate_expect(b: &mut dyn Backend, expect: &Expect) -> Value {
+    match expect.check(b) {
         Ok(e) => e,
         Err(e) => json!({"ok": false, "expected": expect.expected(), "mismatch": [format!("the design could not be measured: {e}")]}),
-    };
+    }
+}
+
+fn attach_expectation(mut reply: Value, expectation: Value, dry_run_rolled_back: bool, opts: Options) -> Value {
     let mismatch: Vec<&str> = expectation["mismatch"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     let note = (expectation["ok"] != true).then(|| {
-        format!(
-            "expectation not met: {}. The design is kept as built: inspect it, then fix it (timeline.edit, undo) or carry on.",
-            mismatch.join("; ")
-        )
+        let tail = if dry_run_rolled_back {
+            "The dry run was rolled back, so the design is unchanged."
+        } else {
+            "The design is kept as built: inspect it, then fix it (timeline.edit, undo) or carry on."
+        };
+        format!("expectation not met: {}. {tail}", mismatch.join("; "))
     });
     if !reply.is_object() {
         reply = json!({"result": reply});
@@ -906,6 +960,14 @@ fn with_expectation(b: &mut dyn Backend, mut reply: Value, expect: Option<Expect
         content.insert(0, json!({"type": "text", "text": note}));
     }
     r
+}
+
+/// A reply that went through, with its `expectation` when `expect` was given. A mismatch is a
+/// tool error that names it first; the design stays as built (the agent decides what to do).
+fn with_expectation(b: &mut dyn Backend, reply: Value, expect: Option<Expect>, opts: Options) -> Value {
+    let Some(expect) = expect else { return text_result(&reply, false, opts) };
+    let expectation = evaluate_expect(b, &expect);
+    attach_expectation(reply, expectation, false, opts)
 }
 
 fn exec(b: &mut dyn Backend, command: &str, params: Value) -> Result<Value, String> {
@@ -1000,6 +1062,24 @@ fn command_distance(a: &str, b: &str) -> usize {
     row.last().copied().unwrap_or(a.len())
 }
 
+/// The properties of the `open` tool: `own`, and the KiCad board options, which are `doc.open`'s
+/// own (the engine's `kicad_open_properties`, not a copy).
+fn open_properties(mut own: Value) -> Value {
+    if let Some(map) = own.as_object_mut() {
+        map.extend(solidcraft_engine::schema::file::kicad_open_properties());
+    }
+    own
+}
+
+/// The arguments of `open` that `doc.open` takes.
+fn open_params(a: &Map<String, Value>) -> Value {
+    let keys: Vec<&str> = ["path", "new_tab", "up", "names", "geometry"]
+        .into_iter()
+        .chain(solidcraft_engine::schema::file::KICAD_OPEN_OPTIONS.iter().copied())
+        .collect();
+    pick(a, &keys)
+}
+
 fn pick(a: &Map<String, Value>, keys: &[&str]) -> Value {
     Value::Object(keys.iter().filter_map(|k| a.get(*k).filter(|v| !v.is_null()).map(|v| (k.to_string(), v.clone()))).collect())
 }
@@ -1008,9 +1088,17 @@ fn str_arg<'a>(a: &'a Map<String, Value>, k: &str) -> Option<&'a str> {
     a.get(k).and_then(Value::as_str)
 }
 
+/// Preserve present region keys, even null, for validation by the engine.
+fn measure_region_params(a: &Map<String, Value>) -> Value {
+    Value::Object(["within", "mode"].iter().filter_map(|k| a.get(*k).map(|v| (k.to_string(), v.clone()))).collect())
+}
+
 /// `measure`'s arguments (without `items`) as `inspect.measure` takes them.
 fn measure_params(a: &Map<String, Value>) -> Value {
-    let mut p = pick(a, &["names_only"]);
+    let mut p = measure_region_params(a);
+    if let Some(v) = a.get("names_only").filter(|v| !v.is_null()) {
+        p["names_only"] = v.clone();
+    }
     if let Some(body) = str_arg(a, "body") {
         p["bodies"] = json!([body]);
     }
@@ -1078,7 +1166,9 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "pending" => pending(b),
         "measure" => {
             if let Some(items) = a.get("items") {
-                return exec(b, "inspect.measure", json!({ "items": items }));
+                let mut p = measure_region_params(a);
+                p["items"] = items.clone();
+                return exec(b, "inspect.measure", p);
             }
             let m = exec(b, "inspect.measure", measure_params(a))?;
             Ok(if measure_summary_wanted(a) { measure_summary(m) } else { m })
@@ -1107,6 +1197,8 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
                     "format",
                     "bodies",
                     "writer",
+                    "quality",
+                    "chord",
                     "mesh_prefix",
                     "place_meshes",
                     "effort",
@@ -1193,7 +1285,7 @@ fn dispatch(b: &mut dyn Backend, name: &str, a: &Map<String, Value>) -> Result<V
         "undo" => exec(b, "edit.undo", json!({})),
         "redo" => exec(b, "edit.redo", json!({})),
         "new_design" => exec(b, "file.new", pick(a, &["name", "new_tab"])),
-        "open" => exec(b, "doc.open", pick(a, &["path", "new_tab", "up", "names", "geometry"])),
+        "open" => exec(b, "doc.open", open_params(a)),
         "save" => exec(b, "file.save", pick(a, &["path", "format", "overwrite"])),
         other => Err(format!("unknown tool `{other}`")),
     }
@@ -1306,6 +1398,9 @@ fn pending(b: &mut dyn Backend) -> Result<Value, String> {
         return Ok(json!({"pending": null, "note": "nothing is running"}));
     }
     let name = what.as_str().unwrap_or("the request").to_string();
+    if p.get("cancelled").and_then(Value::as_bool) == Some(true) {
+        return Err(format!("cancelled: {name} was cancelled by client"));
+    }
     if p.get("lost").and_then(Value::as_bool) == Some(true) {
         return Err(format!(
             "the connection to the app was lost while {name} was running, and its result with it: inspect the design (inspect_design) \
@@ -1377,13 +1472,18 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
             mapped(inner, a.get("params").cloned().filter(Value::is_object).unwrap_or(json!({})))
         }
         "measure" => match a.get("items") {
-            Some(items) => mapped("inspect.measure", json!({"items": items})),
+            Some(items) => {
+                let mut p = measure_region_params(a);
+                p["items"] = items.clone();
+                mapped("inspect.measure", p)
+            }
             None => Ok(("inspect.measure".into(), measure_params(a), measure_summary_wanted(a).then_some(Narrow::MeasureSummary))),
         },
         // A batch step gets the numbers; the overlay picture is the `compare_picture` tool's.
-        "compare_picture" => {
-            mapped("inspect.compare_picture", pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]))
-        }
+        "compare_picture" => mapped(
+            "inspect.compare_picture",
+            pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "part_fills_crop", "fit", "rows"]),
+        ),
         "inspect_design" => {
             let keys: &[&str] = if a.get("bodies").is_some_and(Value::is_array) { &["timeline"] } else { &["timeline", "bodies"] };
             mapped("document.inspect", inspect_params(a, a.get("measure").and_then(Value::as_bool).unwrap_or(true), keys))
@@ -1399,6 +1499,8 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
                     "format",
                     "bodies",
                     "writer",
+                    "quality",
+                    "chord",
                     "mesh_prefix",
                     "place_meshes",
                     "effort",
@@ -1417,7 +1519,7 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
             ),
         ),
         "save" => mapped("file.save", pick(a, &["path", "format", "overwrite"])),
-        "open" => mapped("doc.open", pick(a, &["path", "new_tab", "up", "names", "geometry"])),
+        "open" => mapped("doc.open", open_params(a)),
         "new_design" => mapped("file.new", pick(a, &["name", "new_tab"])),
         "crash_reports" => match a.get("id") {
             Some(_) => mapped("diagnostics.crash_report", pick(a, &["id"])),
@@ -1722,21 +1824,175 @@ impl Undo {
     }
 }
 
+struct BatchOutcome {
+    reply: Value,
+    is_error: bool,
+    /// Present when `dry_run: true` already evaluated `expect` on the simulated design before
+    /// rolling back.
+    expectation: Option<Value>,
+}
+
+impl BatchOutcome {
+    fn ok(reply: Value) -> Self {
+        Self { reply, is_error: false, expectation: None }
+    }
+
+    fn err(reply: Value) -> Self {
+        Self { reply, is_error: true, expectation: None }
+    }
+}
+
+/// Commands that write to disk, trigger external actions, or mutate state outside a document
+/// checkpoint, and therefore cannot run inside a `batch` with `dry_run: true`.
+fn dry_run_refusal(id: &str, params: Option<&Value>) -> Option<String> {
+    let canonical = solidcraft_engine::find_command(id).map_or(id, |spec| spec.id);
+    if canonical.split('.').next().is_some_and(|area| area.eq_ignore_ascii_case("panel") || area.eq_ignore_ascii_case("layout")) {
+        return Some(format!("`{canonical}` changes application layout outside document checkpoints and cannot run in a `dry_run` batch"));
+    }
+    if canonical == "edit.restore_checkpoint" {
+        return Some("`edit.restore_checkpoint` cannot run inside a `dry_run` batch".into());
+    }
+    let has_param = |k: &str| params.and_then(|p| p.get(k)).is_some_and(|v| !v.is_null());
+    let always_side_effect = matches!(
+        canonical,
+        "file.save"
+            | "file.save_as"
+            | "file.save_mesh"
+            | "file.stl_to_step"
+            | "file.export"
+            | "file.export_step"
+            | "file.export_stl"
+            | "file.export_3mf"
+            | "file.export_obj"
+            | "file.export_urdf"
+            | "file.export_urdf_options"
+            | "file.export_sdf"
+            | "file.export_mjcf"
+            | "file.export_view_dxf"
+            | "file.copy"
+            | "file.move"
+            | "file.trash"
+            | "file.import_cache_clear"
+            | "file.send_to_slicer"
+            | "file.open_in_easyprint"
+            | "component.extract"
+            | "doc.recovery_discard"
+            | "drawing.export"
+            | "drawing.print"
+            | "drawing.template.save"
+            | "frame.export_cope_dxf"
+            | "library.export"
+            | "motion.export"
+            | "motion.export_animation"
+            | "render.export"
+            | "render.start"
+            | "render.batch"
+            | "plugin.run"
+            | "plugin.install"
+            | "plugin.remove"
+            | "plugin.revoke"
+            | "settings.profile.save"
+            | "settings.profile.apply"
+            | "settings.profile.rename"
+            | "settings.profile.delete"
+            | "settings.profile.export"
+            | "settings.profile.import"
+            | "tab.layout.save"
+            | "tab.layout.remove"
+            | "tab.layout.rename"
+            | "diagnostics.crash_reports.clear"
+            | "diagnostics.report_issue"
+            | "diagnostics.crash_test"
+    );
+    let writes_file = always_side_effect
+        || solidcraft_engine::control_pending::command_effect(canonical, params.unwrap_or(&Value::Null)) == solidcraft_control::Effect::WritesFile
+        || (canonical == "assembly.bom" && has_param("path"))
+        || (canonical == "inspect.compare_picture" && has_param("overlay"))
+        || (canonical == "doc.recover" && params.and_then(|p| p.get("discard")).and_then(Value::as_bool) == Some(true));
+    if writes_file {
+        return Some(format!("`{canonical}` has disk or external side effects and cannot run in a `dry_run` batch"));
+    }
+    None
+}
+
+fn forget_checkpoint(b: &mut dyn Backend, checkpoint_id: Option<u64>) {
+    if let Some(id) = checkpoint_id {
+        let _ = exec(b, "edit.restore_checkpoint", json!({"checkpoint": id, "forget": true}));
+    }
+}
+
+/// Unconditionally restore `checkpoint_id` at the end of a `dry_run: true` batch.
+/// When all steps succeeded and `expect` was given, `expect` is evaluated on the simulated
+/// design before restoring the checkpoint.
+fn finish_dry_run(b: &mut dyn Backend, checkpoint_id: u64, mut reply: Value, step_failed: bool, expect: Option<&Expect>) -> BatchOutcome {
+    let expectation = expect.filter(|_| !step_failed).map(|e| evaluate_expect(b, e));
+    match exec(b, "edit.restore_checkpoint", json!({"checkpoint": checkpoint_id})) {
+        Ok(_) => {
+            if let Some(o) = reply.as_object_mut() {
+                o.insert("dry_run".into(), json!(true));
+                o.insert("rolled_back".into(), json!(true));
+                if step_failed {
+                    o.insert("applied".into(), json!([]));
+                    if let Some(failed) = o.get_mut("failed").and_then(Value::as_object_mut) {
+                        failed.remove("still_running");
+                    }
+                    if o.get("undone").and_then(Value::as_u64).unwrap_or(0) == 0
+                        && let Some(completed) = o.get("completed").and_then(Value::as_u64)
+                    {
+                        o.insert("undone".into(), json!(completed));
+                    }
+                }
+            }
+            BatchOutcome { reply, is_error: step_failed, expectation }
+        }
+        Err(restore_error) => {
+            if !reply.is_object() {
+                reply = json!({"result": reply});
+            }
+            if let Some(exp) = expectation {
+                reply["expectation"] = exp;
+            }
+            reply["dry_run"] = json!(true);
+            reply["rolled_back"] = json!(false);
+            reply["restore_error"] = json!(restore_error);
+            reply["note"] = json!(
+                "THE DESIGN MAY STILL HOLD THE SIMULATED CHANGES: the dry-run checkpoint could not be restored. Inspect the design and undo before saving."
+            );
+            BatchOutcome { reply, is_error: true, expectation: None }
+        }
+    }
+}
+
 /// `batch`: run steps in order, stop at the first failure and (by default) go back to the
-/// design as it was before the batch. A batch that went through is then checked against its
-/// `expect`.
-fn batch(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options) -> Value {
+/// design as it was before the batch. With `dry_run: true`, all steps run and then the design
+/// and undo/redo history are unconditionally rolled back. A batch that went through is checked
+/// against its `expect` (before rollback in `dry_run: true` mode).
+fn batch(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options, ctx: &CallContext) -> Value {
     let expect = match Expect::parse(a) {
         Ok(e) => e,
         Err(e) => return text_result(&Value::String(e), true, opts),
     };
+    let dry_run = match a.get("dry_run").filter(|v| !v.is_null()) {
+        None => false,
+        Some(v) => match v.as_bool() {
+            Some(flag) => flag,
+            None => return text_result(&Value::String("batch: `dry_run` must be true or false".into()), true, opts),
+        },
+    };
     // Discovery can change the backend while the headless session is still empty. Use one
     // session for preflight, every step, and the final expectation or checkpoint restore.
     let b = if let Some(active) = b.batch_backend() { active } else { b };
-    match batch_run(b, a) {
-        (reply, true) => text_result(&reply, true, opts),
-        (reply, false) => with_expectation(b, reply, expect, opts),
+    let outcome = batch_run(b, a, dry_run, expect.as_ref(), ctx);
+    if outcome.is_error {
+        return text_result(&outcome.reply, true, opts);
     }
+    if dry_run {
+        return match outcome.expectation {
+            Some(expectation) => attach_expectation(outcome.reply, expectation, true, opts),
+            None => text_result(&outcome.reply, false, opts),
+        };
+    }
+    with_expectation(b, outcome.reply, expect, opts)
 }
 
 fn layout_step(step: &Value) -> bool {
@@ -1749,7 +2005,7 @@ fn layout_step(step: &Value) -> bool {
     command.split('.').next().is_some_and(|area| area.eq_ignore_ascii_case("panel") || area.eq_ignore_ascii_case("layout"))
 }
 
-fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, detail: &str) -> (Value, bool) {
+fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, detail: &str) -> BatchOutcome {
     use solidcraft_engine::panels::{commands, error};
     let mut reply = commands::sequential_failure(0, None, commands::error_text(error(rule, detail)), Vec::new());
     reply["ok"] = json!(false);
@@ -1760,35 +2016,41 @@ fn atomic_layout_refusal(count: usize, rule: solidcraft_engine::panels::Rule, de
     reply["not_run"] = if count <= MAX_BATCH { json!((0..count).collect::<Vec<_>>()) } else { json!([]) };
     reply["not_run_count"] = json!(count);
     reply["note"] = json!("nothing was run: atomic application layout requires the authoritative backend transaction");
-    (reply, true)
+    BatchOutcome::err(reply)
 }
 
-fn preflight_refusal(refusal: solidcraft_engine::batch_preflight::Refusal, count: usize, rollback: bool) -> (Value, bool) {
+fn preflight_refusal(refusal: solidcraft_engine::batch_preflight::Refusal, count: usize, rollback: bool, dry_run: bool) -> BatchOutcome {
     let mut reply = refusal.reply(count, rollback);
     reply["ok"] = json!(false);
     reply["applied"] = json!([]);
+    if dry_run {
+        reply["dry_run"] = json!(true);
+    }
     if let Some(command) = refusal.command.as_deref() {
         reply["failed"]["error"] = Value::String(command_error(command, refusal.error));
     }
-    (reply, true)
+    BatchOutcome::err(reply)
 }
 
 /// The batch itself: its reply and whether it failed.
-fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
+fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>, dry_run: bool, expect: Option<&Expect>, ctx: &CallContext) -> BatchOutcome {
     let from_file = match script_file(a) {
         Ok(f) => f,
-        Err(e) => return (json!(e), true),
+        Err(e) => return BatchOutcome::err(json!(e)),
     };
     let Some(steps) = from_file.as_ref().map_or_else(|| a.get("commands").and_then(Value::as_array), Some) else {
-        return (json!("`commands` must be an array of {command, params}"), true);
+        return BatchOutcome::err(json!("`commands` must be an array of {command, params}"));
     };
+    if dry_run && a.get("rollback").and_then(Value::as_bool) == Some(false) {
+        return BatchOutcome::err(json!("batch: `dry_run: true` always rolls back the design and cannot be combined with `rollback: false`"));
+    }
+    let rollback = dry_run || a.get("rollback").and_then(Value::as_bool).unwrap_or(true);
     if steps.len() > MAX_BATCH {
-        if a.get("rollback").and_then(Value::as_bool).unwrap_or(true) && steps.iter().any(layout_step) {
+        if rollback && steps.iter().any(layout_step) {
             return atomic_layout_refusal(steps.len(), solidcraft_engine::panels::Rule::CollectionLimit, "atomic layout batch step count cap");
         }
-        return (json!(format!("batch too long ({} steps, at most {MAX_BATCH})", steps.len())), true);
+        return BatchOutcome::err(json!(format!("batch too long ({} steps, at most {MAX_BATCH})", steps.len())));
     }
-    let rollback = a.get("rollback").and_then(Value::as_bool).unwrap_or(true);
     let verbose = a.get("verbose").and_then(Value::as_bool).unwrap_or(true);
     let profile = a.get("profile").and_then(Value::as_bool).unwrap_or(false);
     let timed = profile || a.get("timings").and_then(Value::as_bool).unwrap_or(false);
@@ -1805,6 +2067,9 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             } else {
                 (command.as_str(), Some(&params))
             };
+            if dry_run && let Some(reason) = dry_run_refusal(id, command_params) {
+                return Err(reason);
+            }
             match solidcraft_engine::find_command(id).map(|spec| spec.id) {
                 Some(c @ ("component.edit_in_place" | "component.finish_edit")) => {
                     Err(format!("`{c}` goes to another design's tab: send it on its own, not in a batch"))
@@ -1833,7 +2098,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             Err(e) => {
                 let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str);
                 // Nothing ran: the design is where the batch started, as a rollback leaves it (#10749).
-                let reply = json!({
+                let mut reply = json!({
                     "ok": false,
                     "completed": 0,
                     "failed": {"index": i, "command": command, "error": e},
@@ -1844,7 +2109,10 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                     "results": [],
                     "note": "nothing was run",
                 });
-                return (reply, true);
+                if dry_run {
+                    reply["dry_run"] = json!(true);
+                }
+                return BatchOutcome::err(reply);
             }
         }
     }
@@ -1856,7 +2124,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     if b.in_process()
         && let Some(refusal) = solidcraft_engine::batch_preflight::check(steps, b.param_check(), &[])
     {
-        return preflight_refusal(refusal, steps.len(), rollback);
+        return preflight_refusal(refusal, steps.len(), rollback, dry_run);
     }
     // A tool step's result as the tool would reply it: a `list_commands` step's catalog filtered,
     // a `measure {summary: true}` step's reply summarised.
@@ -1877,6 +2145,40 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
         o.insert("profile".into(), Value::Bool(profile));
     }
     let fits_transport = params.to_string().len().saturating_add(64 * 1024) <= solidcraft_engine::MAX_LINE;
+    // Oversized bridged dry runs go step by step: refuse unrecognized commands before taking a checkpoint.
+    if dry_run
+        && !fits_transport
+        && b.has_ui()
+        && let Some(mut refusal) = solidcraft_engine::batch_preflight::check(steps, solidcraft_engine::schema::ParamCheck::Off, &[])
+    {
+        if let Some(command) = &refusal.command {
+            refusal.error = format!("this MCP server does not recognize `{command}`. Run it separately or use `rollback: false`");
+        }
+        return preflight_refusal(refusal, steps.len(), rollback, dry_run);
+    }
+    let dry_checkpoint = if dry_run {
+        match exec(b, "edit.checkpoint", json!({})) {
+            Ok(v) => match v["checkpoint"].as_u64() {
+                Some(id) => Some(id),
+                None => {
+                    return BatchOutcome::err(json!(
+                        "batch: `dry_run: true` requires edit.checkpoint to roll back the design, but the backend returned no checkpoint id"
+                    ));
+                }
+            },
+            Err(e)
+                if e.starts_with(crate::backend::NOT_RUNNING)
+                    || e.starts_with(STILL_RUNNING)
+                    || e.contains(crate::backend::REFUSED_UNRUN)
+                    || e.starts_with(solidcraft_control::NOT_RUN) =>
+            {
+                return BatchOutcome::err(Value::String(e));
+            }
+            Err(e) => return BatchOutcome::err(json!(format!("batch: `dry_run: true` requires edit.checkpoint to roll back the design ({e})"))),
+        }
+    } else {
+        None
+    };
     if fits_transport {
         match b.call("engine.batch", params) {
             Ok(mut r) => {
@@ -1888,25 +2190,52 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                         failed.insert("error".into(), Value::String(error));
                     }
                 }
-                return batch_reply(&r, steps.len(), rollback, verbose, &narrow);
+                let (reply, is_err) = batch_reply(&r, steps.len(), rollback, verbose, &narrow);
+                if let Some(reporter) = &ctx.progress
+                    && reporter.count() == 0
+                {
+                    let done = reply["completed"].as_u64().unwrap_or(steps.len() as u64) as usize;
+                    let total = steps.len();
+                    let message = if is_err { format!("batch stopped at step {done}/{total}") } else { format!("completed {done}/{total} steps") };
+                    reporter.report(done as f64, Some(total as f64), Some(&message));
+                }
+                return match dry_checkpoint {
+                    Some(id) => finish_dry_run(b, id, reply, is_err, expect),
+                    None => BatchOutcome { reply, is_error: is_err, expectation: None },
+                };
             }
             // A newer app may know about tab-switching commands this server cannot preflight.
             Err(e) if rollback && e.starts_with("engine.batch unavailable:") && e.ends_with("switches to another design") => {
-                return (Value::String(e), true);
+                forget_checkpoint(b, dry_checkpoint);
+                return BatchOutcome::err(Value::String(e));
             }
             // Older apps and the headless session, or the app wants the steps one by one.
             Err(e) if e.starts_with("unknown method") || e.starts_with("engine.batch unavailable") => {}
-            Err(e) if solidcraft_engine::panels::commands::structured_error(&e).is_some() => return (Value::String(e), true),
+            Err(e) if solidcraft_engine::panels::commands::structured_error(&e).is_some() => {
+                forget_checkpoint(b, dry_checkpoint);
+                return BatchOutcome::err(Value::String(e));
+            }
             // Never sent: no app to send it to. Refused unrun: every connection the app serves is
             // taken (#10967). Or sent and still running (it was not cancelled): the `pending` tool
             // gets its result.
             Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) || e.contains(crate::backend::REFUSED_UNRUN) => {
-                return (Value::String(e), true);
+                return BatchOutcome::err(Value::String(e));
+            }
+            // The app said it ran nothing (the user declined the call), or the call was cancelled.
+            Err(e) if e.starts_with(solidcraft_control::NOT_RUN) || e.starts_with("cancelled:") || e.starts_with("stopped:") => {
+                forget_checkpoint(b, dry_checkpoint);
+                return BatchOutcome::err(Value::String(e));
             }
             // The app may have run it: sending the steps again would apply them twice.
             Err(e) => {
-                let msg = format!("the app did not answer engine.batch ({e}); it may have run: inspect the design before sending it again");
-                return (Value::String(msg), true);
+                let msg = if dry_run {
+                    format!(
+                        "the app did not answer engine.batch ({e}); the dry run may have run without rolling back: inspect the design before sending it again"
+                    )
+                } else {
+                    format!("the app did not answer engine.batch ({e}); it may have run: inspect the design before sending it again")
+                };
+                return BatchOutcome::err(Value::String(msg));
             }
         }
     }
@@ -1914,6 +2243,7 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
     // batch endpoint nor an oversized transport request authorizes a sequential
     // emulation of an atomic layout/mixed transaction.
     if atomic_layout {
+        forget_checkpoint(b, dry_checkpoint);
         return atomic_layout_refusal(
             steps.len(),
             if fits_transport { solidcraft_engine::panels::Rule::Capability } else { solidcraft_engine::panels::Rule::CollectionLimit },
@@ -1930,23 +2260,29 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
         && b.has_ui()
         && let Some(mut refusal) = solidcraft_engine::batch_preflight::check(steps, solidcraft_engine::schema::ParamCheck::Off, &[])
     {
+        forget_checkpoint(b, dry_checkpoint);
         if let Some(command) = &refusal.command {
             refusal.error = format!("this MCP server does not recognize `{command}`. Run it separately or use `rollback: false`");
         }
-        return preflight_refusal(refusal, steps.len(), rollback);
+        return preflight_refusal(refusal, steps.len(), rollback, dry_run);
     }
-    let start = if rollback { Undo::begin(b) } else { Undo::None };
+    let start = if dry_checkpoint.is_none() && rollback { Undo::begin(b) } else { Undo::None };
     let mut results = Vec::with_capacity(steps.len());
     let mut rows = Vec::new();
     let clock = timing::Clock::start();
     // The kernel's share can only be measured where the commands run: in this process.
     let profile = profile && b.in_process();
+    let total = steps.len() as f64;
     // With `coalesce_parameters`, each run of plain parameter edits as one edit (#5822); a run
     // whose combined edit is refused goes step by step.
     for run in solidcraft_engine::batch_params::plan(steps, coalesce) {
         let singles = match run {
             solidcraft_engine::batch_params::BatchRun::Step(i) => vec![i],
             solidcraft_engine::batch_params::BatchRun::Params { steps: indices, changes } => {
+                if ctx.is_cancelled() {
+                    let at = indices.first().copied().unwrap_or(results.len());
+                    return cancel_batch(b, start, dry_checkpoint, rollback, timed, rows, clock.ms(), steps, results, at);
+                }
                 let (r, took) = timing::time(profile, || exec(b, "parameters.change", solidcraft_engine::batch_params::combined_params(&changes)));
                 match r {
                     Ok(v) => {
@@ -1955,6 +2291,8 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                         }
                         let rows = solidcraft_engine::batch_params::step_results(steps, &indices, &v);
                         results.extend(rows.into_iter().map(|v| if verbose { v } else { compact(v) }));
+                        let done = results.len();
+                        ctx.report_progress(done as f64, Some(total), Some(&format!("step {done}/{}: parameters.change", steps.len())));
                         continue;
                     }
                     Err(_) => indices,
@@ -1962,6 +2300,9 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             }
         };
         for i in singles {
+            if ctx.is_cancelled() {
+                return cancel_batch(b, start, dry_checkpoint, rollback, timed, rows, clock.ms(), steps, results, i);
+            }
             let Some(step) = steps.get(i) else { continue };
             let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str);
             let (r, took) = timing::time(profile, || match command {
@@ -1974,12 +2315,34 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
             match r {
                 Ok(v) => {
                     let v = narrow(i, v);
-                    results.push(if verbose { v } else { compact(v) })
+                    results.push(if verbose { v } else { compact(v) });
+                    let done = i + 1;
+                    let label = command.unwrap_or("step");
+                    ctx.report_progress(done as f64, Some(total), Some(&format!("step {done}/{}: {label}", steps.len())));
                 }
                 Err(e) => {
                     // A step still running in the app was not cancelled: the rollback first waits for
                     // it (the backend does), so a restored checkpoint takes it back too.
                     let running = e.starts_with(STILL_RUNNING);
+                    if let Some(id) = dry_checkpoint {
+                        let mut failed = json!({"index": i, "command": command, "error": e});
+                        let mut applied: Vec<usize> = (0..i).collect();
+                        if running {
+                            failed["still_running"] = json!(true);
+                            applied.push(i);
+                        }
+                        let reply = json!({
+                            "ok": false,
+                            "completed": i,
+                            "failed": failed,
+                            "rolled_back": false,
+                            "undone": 0,
+                            "applied": applied,
+                            "not_run": (i + 1..steps.len()).collect::<Vec<_>>(),
+                            "results": results,
+                        });
+                        return finish_dry_run(b, id, with_timings(reply, timed, rows, clock.ms()), true, None);
+                    }
                     let (went_back, undone) = start.rollback(b, i);
                     // Only a rollback asked for is reported as one.
                     let rolled_back = rollback && went_back;
@@ -2001,14 +2364,65 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>) -> (Value, bool) {
                         "not_run": (i + 1..steps.len()).collect::<Vec<_>>(),
                         "results": results,
                     });
-                    return (with_timings(reply, timed, rows, clock.ms()), true);
+                    return BatchOutcome::err(with_timings(reply, timed, rows, clock.ms()));
                 }
             }
         }
     }
+    let reply = with_timings(json!({"ok": true, "completed": results.len(), "results": results}), timed, rows, clock.ms());
+    if let Some(id) = dry_checkpoint {
+        return finish_dry_run(b, id, reply, false, expect);
+    }
     start.finish(b);
-    let reply = json!({"ok": true, "completed": results.len(), "results": results});
-    (with_timings(reply, timed, rows, clock.ms()), false)
+    BatchOutcome::ok(reply)
+}
+
+/// Abort a per-step `batch` cleanly when MCP `notifications/cancelled` arrives mid-batch,
+/// rolling back completed steps when `rollback` is enabled.
+#[allow(clippy::too_many_arguments)]
+fn cancel_batch(
+    b: &mut dyn Backend,
+    start: Undo,
+    dry_checkpoint: Option<u64>,
+    rollback: bool,
+    timed: bool,
+    rows: Vec<Value>,
+    total_ms: f64,
+    steps: &[Value],
+    results: Vec<Value>,
+    at: usize,
+) -> BatchOutcome {
+    let completed = results.len();
+    let command = steps.get(at).and_then(|s| s.get("command").or_else(|| s.get("id"))).and_then(Value::as_str);
+    if let Some(id) = dry_checkpoint {
+        let reply = json!({
+            "ok": false,
+            "cancelled": true,
+            "completed": completed,
+            "failed": {"index": at, "command": command, "error": "cancelled: batch was cancelled by client"},
+            "rolled_back": false,
+            "undone": 0,
+            "applied": (0..completed).collect::<Vec<_>>(),
+            "not_run": (at..steps.len()).collect::<Vec<_>>(),
+            "results": results,
+        });
+        return finish_dry_run(b, id, with_timings(reply, timed, rows, total_ms), true, None);
+    }
+    let (went_back, undone) = start.rollback(b, completed);
+    let rolled_back = rollback && went_back;
+    let applied: Vec<usize> = if rolled_back { Vec::new() } else { (0..completed).collect() };
+    let reply = json!({
+        "ok": false,
+        "cancelled": true,
+        "completed": completed,
+        "failed": {"index": at, "command": command, "error": "cancelled: batch was cancelled by client"},
+        "rolled_back": rolled_back,
+        "undone": undone,
+        "applied": applied,
+        "not_run": (at..steps.len()).collect::<Vec<_>>(),
+        "results": results,
+    });
+    BatchOutcome::err(with_timings(reply, timed, rows, total_ms))
 }
 
 /// `reply` with `timings` and `total_ms` when they were asked for.
@@ -2594,7 +3008,7 @@ fn compare_picture(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options) -
     let n = SHOT.fetch_add(1, Ordering::Relaxed);
     let dir = crate::scratch_dir().unwrap_or_else(vfs::temp_dir);
     let path = dir.join(format!("compare-{n}.png")).to_string_lossy().to_string();
-    let mut params = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]);
+    let mut params = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "part_fills_crop", "fit", "rows"]);
     params["overlay"] = json!(path);
     let ran = exec(b, "inspect.compare_picture", params);
     let png = vfs::read(&path, MAX_IMAGE_BYTES);

@@ -35,6 +35,20 @@ pub fn panel_host_surface<R>(
     palette: Option<&Tokens>,
     body: impl FnOnce(&mut egui::Ui, egui::Rect) -> R,
 ) -> R {
+    panel_host_surface_reaching(ui, id, bounds, floating, 0.0, fill, palette, body)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn panel_host_surface_reaching<R>(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    bounds: egui::Rect,
+    floating: bool,
+    reach: f32,
+    fill: egui::Color32,
+    palette: Option<&Tokens>,
+    body: impl FnOnce(&mut egui::Ui, egui::Rect) -> R,
+) -> R {
     let _tokens = palette.map(|tokens| solidcraft_theme::scoped_panel_tokens(*tokens));
     let container = panel_host_container(ui.ctx(), floating);
     let mut frame = panel_host_frame(ui.ctx(), floating);
@@ -66,16 +80,15 @@ pub fn panel_host_surface<R>(
     if floating {
         let layer = egui::LayerId::new(egui::Order::Background, id.with("area"));
         Container::bring_to_front(ui.ctx(), layer);
-        container
-            .area(id.with("area"))
-            .fixed_pos(bounds.min)
-            .movable(false)
-            .fade_in(false)
-            .show(ui.ctx(), |ui| {
-                ui.set_min_size(bounds.size());
-                paint(ui)
-            })
-            .inner
+        let mut area = container.area(id.with("area")).fixed_pos(bounds.min - egui::vec2(reach, reach)).movable(false).fade_in(false);
+        if reach > 0.0 {
+            area = area.constrain(false);
+        }
+        area.show(ui.ctx(), |ui| {
+            ui.set_min_size(bounds.size() + egui::vec2(2.0 * reach, 2.0 * reach));
+            paint(ui)
+        })
+        .inner
     } else {
         paint(ui)
     }
@@ -169,9 +182,6 @@ pub fn panel_host_control_label_opacity(
             if let Some(transport) = icon.strip_prefix("timeline_").filter(|name| matches!(*name, "first" | "back" | "play" | "forward" | "last")) {
                 let glyph = if transport == "play" && chrome.selected { "pause" } else { transport };
                 crate::icons::glyphs::transport_glyph(&painter, icon_rect.center(), glyph, ink);
-            } else if matches!(icon, "timeline_1d" | "timeline_2d") {
-                // The timeline view switch keeps its blue chips, so it reads as timeline steps, not as the menu's dots.
-                crate::icons::paint_icon(&painter, icon_rect, icon, if chrome.enabled { 1.0 } else { 0.5 });
             } else {
                 crate::icons::paint_ink(&painter, icon_rect, icon, ink);
             }
@@ -269,12 +279,34 @@ pub fn panel_host_disclosure(
     response
 }
 
+/// Which way a sash splits, and so which resize cursor it shows.
+/// `Horizontal` is a horizontal divider (it moves vertically).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SashAxis {
+    Horizontal,
+    Vertical,
+    NorthwestSoutheast,
+    NortheastSouthwest,
+}
+
 /// The owner supplies the controlled extent and axis; clipping or scrolling
-/// the sash must not change its accessible value or orientation.
-pub fn panel_host_sash(ui: &mut egui::Ui, id: egui::Id, bounds: egui::Rect, name: &str, horizontal: bool, extent: f32) -> egui::Response {
+/// the sash must not change its accessible value or orientation. `bounds` is
+/// the grab area; only `ink` is drawn. Without `keyboard` the handle takes
+/// pointer drags only: it is not a Tab stop.
+#[allow(clippy::too_many_arguments)]
+pub fn panel_host_sash(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    bounds: egui::Rect,
+    ink: egui::Rect,
+    name: &str,
+    axis: SashAxis,
+    extent: f32,
+    keyboard: bool,
+) -> egui::Response {
     let t = Tokens::get();
-    let response = ui.interact(bounds, id, egui::Sense::click_and_drag());
-    if response.has_focus() {
+    let response = ui.interact(bounds, id, if keyboard { egui::Sense::click_and_drag() } else { egui::Sense::DRAG });
+    if keyboard && response.has_focus() {
         ui.memory_mut(|memory| {
             memory.set_focus_lock_filter(
                 id,
@@ -289,16 +321,25 @@ pub fn panel_host_sash(ui: &mut egui::Ui, id: egui::Id, bounds: egui::Rect, name
     response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, ui.is_enabled(), name));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Splitter);
-        node.set_orientation(if horizontal { egui::accesskit::Orientation::Horizontal } else { egui::accesskit::Orientation::Vertical });
+        match axis {
+            SashAxis::Horizontal => node.set_orientation(egui::accesskit::Orientation::Horizontal),
+            SashAxis::Vertical => node.set_orientation(egui::accesskit::Orientation::Vertical),
+            SashAxis::NorthwestSoutheast | SashAxis::NortheastSouthwest => {}
+        }
         node.set_numeric_value(f64::from(extent));
     });
     if response.hovered() || response.has_focus() || response.dragged() {
-        ui.painter().rect_filled(bounds.intersect(ui.clip_rect()), t.radius_sm, t.form_primary);
+        ui.painter().rect_filled(ink.intersect(ui.clip_rect()), t.radius_sm, t.form_primary);
     }
     if response.hovered() {
-        ui.ctx().set_cursor_icon(if horizontal { egui::CursorIcon::ResizeVertical } else { egui::CursorIcon::ResizeHorizontal });
+        ui.ctx().set_cursor_icon(match axis {
+            SashAxis::Horizontal => egui::CursorIcon::ResizeVertical,
+            SashAxis::Vertical => egui::CursorIcon::ResizeHorizontal,
+            SashAxis::NorthwestSoutheast => egui::CursorIcon::ResizeNwSe,
+            SashAxis::NortheastSouthwest => egui::CursorIcon::ResizeNeSw,
+        });
     }
-    response.backing_on_hover_text(name)
+    if keyboard { response.backing_on_hover_text(name) } else { response }
 }
 
 /// A scrollbar owns only its narrow track. The surrounding canvas has no

@@ -59,7 +59,9 @@ mod vertex;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use super::{object_info, validate_pointers_excluding, validate_pointers_traced, Object, SUCCESS};
+use super::{
+    object_info, validate_pointers_excluding, validate_pointers_traced, Object, PointerCheck,
+};
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::assert_array::{
     obj_type_string, AssertArray, AssertReport, ObjectKey, ReportSpec,
@@ -133,9 +135,8 @@ pub enum ValidityScope {
 /// [`BrepCheck::warnings`] lists them.
 #[derive(Debug, Clone)]
 pub struct BrepCheck {
-    /// `ValidatePointers`' native status (1000 success, 1001 a required pointer
-    /// failed, 0 an early boolean return).
-    pub pointers_status: i32,
+    /// What `ValidatePointers` concluded.
+    pub pointers: PointerCheck,
     /// The pointer check's reports, in native order.
     pub pointer_reports: AssertArray,
     /// `AssertValid`'s return; `None` when it was skipped because the pointer check
@@ -183,8 +184,8 @@ impl BrepCheck {
     /// One line per failure (warnings left out), as the capi formats them:
     /// `<reporting type>::Test #<n> <name>: <message> [owner <owner type>]` (without the
     /// owner tag when the report names no owner type), plus
-    /// `SmBrep::ValidatePointers failed with status N` when the pointer check failed
-    /// without a report, `AssertValid skipped: ValidatePointers failed` when it was
+    /// `SmBrep::ValidatePointers failed without a report` when the pointer check did not
+    /// pass and reported no failure, `AssertValid skipped: ValidatePointers failed` when it was
     /// skipped, and `SmBrep::AssertValid failed without a report` when `AssertValid`
     /// returned `false` without reporting a failure.
     #[must_use]
@@ -193,8 +194,8 @@ impl BrepCheck {
             .into_iter()
             .map(|(class, report)| match (class, report) {
                 (_, Some(r)) => report_line(r),
-                (FailureClass::PointersStatus(status), None) => {
-                    format!("SmBrep::ValidatePointers failed with status {status}")
+                (FailureClass::Pointers(_), None) => {
+                    "SmBrep::ValidatePointers failed without a report".to_string()
                 }
                 (FailureClass::AssertValidSkipped, None) => {
                     "AssertValid skipped: ValidatePointers failed".to_string()
@@ -242,7 +243,7 @@ impl BrepCheck {
                 .failures()
                 .find(|r| FailureClass::of(r) == class)
                 .map_or("the edited B-rep failed validation", |r| r.name),
-            FailureClass::PointersStatus(_) => "ValidatePointers failed",
+            FailureClass::Pointers(_) => "ValidatePointers failed",
             FailureClass::AssertValidSkipped => {
                 "AssertValid was skipped after ValidatePointers failed"
             }
@@ -255,8 +256,8 @@ impl BrepCheck {
     fn classified(&self) -> Vec<(FailureClass, Option<&AssertReport>)> {
         let mut out = Vec::new();
         let pointer_failures = self.pointer_reports.reports().iter().any(is_failure);
-        if self.pointers_status != SUCCESS && !pointer_failures {
-            out.push((FailureClass::PointersStatus(self.pointers_status), None));
+        if !self.pointers.is_passed() && !pointer_failures {
+            out.push((FailureClass::Pointers(self.pointers), None));
         }
         out.extend(
             self.pointer_reports
@@ -300,8 +301,8 @@ pub enum FailureClass {
         /// [`AssertReport::owner_type`].
         owner_type: i64,
     },
-    /// `ValidatePointers` failed with this status and no report.
-    PointersStatus(i32),
+    /// `ValidatePointers` did not pass ([`PointerCheck`]) and reported no failure.
+    Pointers(PointerCheck),
     /// `AssertValid` was skipped: `ValidatePointers` reported a failure.
     AssertValidSkipped,
     /// `AssertValid` failed without a report.
@@ -379,6 +380,160 @@ pub fn check_brep_scoped(
     Ok(check_brep_counted(k, b, level, scope)?.0)
 }
 
+/// (not upstream) [`check_brep_scoped`] in full, the verify mode: with every memo and
+/// result-invariant shortcut off ([`Kernel::memoize_curve_caches`] off for the call), so
+/// nothing an earlier check or operation worked out about `b`'s geometry
+/// ([`crate::geom::check_memo`]) is read back. The memos never change a result, so this
+/// reports what [`check_brep_scoped`] does, only slower; it is there to show that.
+///
+/// # Errors
+///
+/// As [`check_brep`].
+pub fn check_brep_full(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    scope: ValidityScope,
+) -> Result<BrepCheck> {
+    let memoize = std::mem::replace(&mut k.memoize_curve_caches, false);
+    let out = check_brep_scoped(k, b, level, scope);
+    k.memoize_curve_caches = memoize;
+    out
+}
+
+/// (not upstream) The tests [`check_brep`] runs of some of a B-rep's entities, and of no other:
+/// the tolerance pass on each of `edges`' uses (its vertex/edge and vertex/face gaps at both ends
+/// and its edge/face gap, list 2 tests 0-4, validating only), then each of `faces`' own tests
+/// (`SmFace`, its loops' disjointness in UV space among them, test 38) and its loops' (`SmLoop`);
+/// each of `edges`' (`SmEdge`) and those of the vertices at their ends (`SmVertex`). Each entity
+/// is tested once, at `level` with the walk, and reported as [`check_brep`] reports it. None of
+/// the other body-wide passes runs (the pointer check, the tolerance pass on the other edges, the
+/// B-rep, region and shell tests), so its time is that of the entities named and not of the body.
+///
+/// For an edit of a body that passed [`check_brep`], with `faces` the faces it changed (and those
+/// beside an edge it changed) and `edges` the edges it changed, it runs every test of the whole
+/// check that reads what the edit made, apart from the body-wide ones above: the pointer check
+/// (whether a vertex's or an edge's tolerance zone reaches topology it does not bound) and the
+/// region and shell tests. It proves nothing of the rest, and a caller that needs the body's
+/// verdict runs [`check_brep`]. [`BrepCheck::pointers`] reads passed and
+/// [`BrepCheck::pointer_reports`] is empty: the pointer check is not run. As [`check_brep`], where one of `faces` lacks its UV trim
+/// curves the tests run on a copy standing for `b`, so the trims they build stay off it.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a face or edge `b` does not have, or a B-rep naming no scheme
+/// (as [`check_brep`]); those of the tests.
+pub fn check_brep_local(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    faces: &[crate::topology::FaceId],
+    edges: &[crate::topology::EdgeId],
+) -> Result<BrepCheck> {
+    const OP: &str = "topology::brep::validation::check_brep_local";
+    let naming = b.naming();
+    if naming == NamingScheme::Unknown {
+        return Err(SolidError::invalid_input(
+            OP,
+            "the B-rep records no naming scheme, so its geometry owners cannot be checked; \
+             set one (Brep::set_naming, Brep::use_arena_naming)",
+        ));
+    }
+    if faces.iter().any(|f| !b.face_list().contains(f)) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a face to check is not a face of the B-rep",
+        ));
+    }
+    if edges.iter().any(|e| !b.edge_list().contains(e)) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "an edge to check is not an edge of the B-rep",
+        ));
+    }
+    let recorded = b.geometry_owner_keys().clone();
+    let keys =
+        |e: EntityRef| crate::topology::owner_identity_of(naming, recorded.get(&e).copied(), e);
+    let lacking = faces.iter().any(|&f| {
+        !matches!(
+            crate::topology::trimming_tools::face_uv_curves_present(b, f),
+            Ok(true)
+        )
+    });
+    let mut standing = if lacking {
+        Some(b.clone_standing_for_self_keeping_definitions()?)
+    } else {
+        None
+    };
+    let b = standing.as_mut().unwrap_or(b);
+    // each entity once, in the order given
+    let mut face_list = Vec::new();
+    let mut loop_list = Vec::new();
+    for &f in faces {
+        if face_list.contains(&f) {
+            continue;
+        }
+        face_list.push(f);
+        for l in crate::topology::face::p2::loops(b, f, false, None)? {
+            if !loop_list.contains(&l) {
+                loop_list.push(l);
+            }
+        }
+    }
+    let mut edge_list = Vec::new();
+    let mut vertex_list = Vec::new();
+    for &e in edges {
+        if edge_list.contains(&e) {
+            continue;
+        }
+        edge_list.push(e);
+        for v in crate::topology::edge::vertices(b, e, None)?
+            .into_iter()
+            .flatten()
+        {
+            if !vertex_list.contains(&v) {
+                vertex_list.push(v);
+            }
+        }
+    }
+    let mut reports = AssertArray::new();
+    let index = base::Index::new(b);
+    let mut cx = Cx {
+        rep: Rep {
+            array: Some(&mut reports),
+            level: level.code(),
+            stitched: false,
+        },
+        keys: &keys,
+        index,
+        edge_sets: edge::EdgeSets::default(),
+    };
+    // the tolerance pass on the edges' uses, where the whole check runs it: before the walk
+    let mut ok = brep::edge_tolerances(k, b, &mut cx, &edge_list)?;
+    for f in face_list {
+        k.check_cancelled(OP)?;
+        ok &= face::face(k, b, &mut cx, f)?;
+    }
+    for l in loop_list {
+        k.check_cancelled(OP)?;
+        ok &= loops::loop_(k, b, &mut cx, l)?;
+    }
+    for e in edge_list {
+        k.check_cancelled(OP)?;
+        ok &= edge::edge(k, b, &mut cx, e)?;
+    }
+    for v in vertex_list {
+        k.check_cancelled(OP)?;
+        ok &= vertex::vertex(k, b, &mut cx, v)?;
+    }
+    Ok(BrepCheck {
+        pointers: PointerCheck::Passed,
+        pointer_reports: AssertArray::new(),
+        assert_valid: Some(ok),
+        reports,
+    })
+}
+
 /// [`check_brep_scoped`], also saying how many `ValidatePointers` passes its `AssertValid` ran
 /// (0 when [`check_brep_with_keys`] skipped it, or when `AssertValid` did not run).
 fn check_brep_counted(
@@ -454,12 +609,45 @@ fn check_with_keys_counted(
     keys: &dyn Fn(EntityRef) -> ObjectRef,
     scope: ValidityScope,
 ) -> Result<(BrepCheck, usize)> {
+    use crate::geom::check_memo;
     let mut standing = standing_where_trims_lack(b)?;
     let b = standing.as_mut().unwrap_or(b);
+    // not upstream: the incremental check ([`crate::geom::check_memo`]): the geometric
+    // tests of entities whose neighbourhoods passed them before are skipped, and a body
+    // found valid with no report at all leaves its neighbourhoods clean
+    let salt = check_memo::salt(k, level.code(), scope == ValidityScope::Stitched);
+    if let Some(salt) = salt {
+        check_memo::begin(k, check_memo::Stars::of(b, salt));
+    }
+    let ran = check_once(k, b, level, keys, scope);
+    let after = match (&ran, salt) {
+        (Ok((c, _, true)), Some(salt))
+            if c.pointers.is_passed()
+                && c.assert_valid == Some(true)
+                && c.pointer_reports.is_empty()
+                && c.reports.is_empty() =>
+        {
+            Some(check_memo::Stars::of(b, salt))
+        }
+        _ => None,
+    };
+    check_memo::end(k, after);
+    ran.map(|(c, passes, _)| (c, passes))
+}
+
+/// One run of [`check_with_keys_counted`] on the body it checks, also saying whether the
+/// pointer check found every face whole.
+fn check_once(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: CheckLevel,
+    keys: &dyn Fn(EntityRef) -> ObjectRef,
+    scope: ValidityScope,
+) -> Result<(BrepCheck, usize, bool)> {
     let mut pointer_reports = AssertArray::new();
     let before = b.write_stamps();
     let mut faces_whole = true;
-    let (pointers_status, exclusion_failed) = validate_pointers_traced(
+    let (pointers, exclusion_failed) = validate_pointers_traced(
         k,
         b,
         Some(&mut pointer_reports),
@@ -470,7 +658,7 @@ fn check_with_keys_counted(
         false,
     )?;
     let pointers_repeat = !(k.memoize_curve_caches
-        && pointers_status == SUCCESS
+        && pointers.is_passed()
         && !exclusion_failed
         && faces_whole
         && !pointer_reports.reports().iter().any(is_failure)
@@ -508,12 +696,13 @@ fn check_with_keys_counted(
     let passes = usize::from(assert_valid.is_some() && pointers_repeat);
     Ok((
         BrepCheck {
-            pointers_status,
+            pointers,
             pointer_reports,
             assert_valid,
             reports,
         },
         passes,
+        faces_whole,
     ))
 }
 
@@ -660,8 +849,41 @@ pub fn validate_and_update_tolerances(
         level,
         stitched: false,
     };
-    let (status, gaps) = brep::validate_and_update(k, b, &mut rep, validate_only)?;
-    if status != SUCCESS {
+    let (ok, gaps) = brep::validate_and_update(k, b, &mut rep, validate_only)?;
+    if !ok {
+        return Err(SolidError::topology(
+            "topology::brep::validation::validate_and_update_tolerances",
+            crate::error::topology::TopologyFailure::VertexuseWithoutVertex,
+        ));
+    }
+    Ok(gaps)
+}
+
+/// [`validate_and_update_tolerances`] growing tolerances, with no report list, skipping the
+/// faces it found clean on a body before where the kernel's memo is on (not upstream;
+/// `brep::validate_and_update_remembering`): the same tolerances and the same outputs where it
+/// skips, since a skipped face is one whose tests would grow and report nothing.
+///
+/// # Errors
+/// As [`validate_and_update_tolerances`].
+pub(crate) fn update_tolerances_remembering(
+    k: &mut Kernel,
+    b: &mut Brep,
+    level: u8,
+) -> Result<ToleranceGaps> {
+    let Some(salt) = crate::geom::check_memo::update_salt(k, b, level) else {
+        return validate_and_update_tolerances(k, b, false, None, level);
+    };
+    if level > LEVEL_GIVEN {
+        return Err(super::invalid("invalid assert test level"));
+    }
+    let mut rep = Rep {
+        array: None,
+        level,
+        stitched: false,
+    };
+    let (ok, gaps) = brep::validate_and_update_remembering(k, b, &mut rep, salt)?;
+    if !ok {
         return Err(SolidError::topology(
             "topology::brep::validation::validate_and_update_tolerances",
             crate::error::topology::TopologyFailure::VertexuseWithoutVertex,
@@ -922,7 +1144,7 @@ mod tests {
             .unwrap(),
         );
         BrepCheck {
-            pointers_status: SUCCESS,
+            pointers: PointerCheck::Passed,
             pointer_reports: AssertArray::new(),
             assert_valid: Some(assert_valid),
             reports,

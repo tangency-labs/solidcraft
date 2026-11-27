@@ -123,7 +123,10 @@
 //!   one plane that touch by the contact rule (`circle_coplanar_circle_intersect_in_contact`
 //!   at `contact_tol_3d`), for their touching point (`touch_of_edges`): the surface
 //!   intersection met their lens at its two crossings, which became vertices beside the
-//!   touch (docs/booleans.md §6).
+//!   touch (docs/booleans.md §6). Not upstream either (#15049): a circle edge and a line edge
+//!   in its plane, the line a hair inside it (`line_touch`), or the two meeting at one point
+//!   that lies beside the classified point within the band where both edges lie within the
+//!   tolerance of each other (`meeting_beside`), give that one point.
 //! - **Vertex identity** (not upstream): `FindOrCreateProtoVertex(PC, PC)` makes no proto
 //!   vertex for two classifications onto vertices farther apart than the intersection
 //!   tolerance of the two (a distance upstream's `sm_FindPositionFromPCs` only reports and
@@ -145,28 +148,34 @@
 //!   each.
 
 use crate::curve::curve::p2::Curve;
+use crate::curve::curve::p6::is_measurable_box;
 use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::CurveKind;
 use crate::error::boolean::BooleanFailure;
 use crate::error::topology::TopologyFailure;
 use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{circle_coplanar_circle_intersect_in_contact, CircleCircle};
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
 use crate::geom::tol::{
-    contact_tol_3d, xsect_tol3d, xsect_tol_3d_from_zones, zone_tol3d, USE_DEFAULT,
+    coincidence_reach_3d, contact_tol_3d, xsect_tol3d, xsect_tol_3d_from_zones, zone_tol3d,
+    USE_DEFAULT,
 };
 use crate::intersect::curve_class::p5::ExtractOptions;
 use crate::intersect::curve_class::{ClassificationInit, CurveClassification, CurveInterval};
 use crate::intersect::point_class::{
-    ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
+    periodic_trim_witness, ClassGeometry, ClassObject, ClassObjectKind, PointClassType,
+    PointClassification,
 };
 use crate::kernel::Kernel;
 use crate::math::{max2, min2, Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
+use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::knots::Side;
 use crate::query::face::p2 as face_p2;
+use crate::surface::implicit::AnalyticSupport;
 use crate::surface::surface::p6::COINCIDENT_TANGENT_SINE;
 
 use super::p1::proto::{can_imprint, find_position_from_pcs, topo_dimension};
@@ -230,6 +239,7 @@ fn split_soft<T>(r: Result<T>) -> Result<core::result::Result<T, SolidError>> {
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }),
         ) => Err(e),
@@ -264,6 +274,20 @@ fn as_topology<O: ClassObject>(o: Option<O>) -> Option<O> {
 fn curve_of<O: Copy>(geometry: &impl ClassGeometry<O>, o: Option<O>) -> Result<&Curve> {
     o.and_then(|o| geometry.curve(o))
         .ok_or(dangling("curve handle is null or unknown"))
+}
+
+/// A provably enclosing axis-aligned bounding box of `curve` over `dom`, or `None` when
+/// the curve kind has no certified box or the box is undefined/non-finite (not upstream).
+fn curve_conservative_box(k: &Kernel, curve: &Curve, dom: &Extent1d) -> Result<Option<Extent3d>> {
+    let Some(Some(b)) = ignore_soft(curve.certified_bounding_box(k, dom))? else {
+        return Ok(None);
+    };
+    let finite = |p: Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if b.is_defined() && !b.has_negative_volume() && finite(b.min()) && finite(b.max()) {
+        Ok(Some(b))
+    } else {
+        Ok(None)
+    }
 }
 
 /// `FindOrCreateProtoEdge`'s quits once both end proto vertices are made: the interval's
@@ -507,7 +531,11 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let region = crossing_region(
             k, geometry, crossing, along, pc1, pc2, position, point_tol, limit,
         )?;
-        let within = self.find_proto_vertex_within(k, position, point_tol, Some(&region))?;
+        let within =
+            self.find_proto_vertex_within_if(k, position, point_tol, Some(&region), |id| {
+                self.proto_vertex_incidence_conflicts(k, geometry, id, [pc1, pc2])
+                    .map(|conflict| !conflict)
+            })?;
         let found = self.find_proto_vertex_holding(k, geometry, position, pc1, pc2, within)?;
         // Not upstream: a point classified on a vertex is that vertex's point, whatever the
         // position found for the pair (the average of the two objects' points), so the proto
@@ -1249,12 +1277,62 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// than a split; [`SolidError::InvalidInput`] for a
     /// deleted object or missing curve; [`SolidError::Unported`] for the callees
     /// listed in the module header.
+    /// Conservative axis-aligned bounding box of `pe`'s primary curve over its current
+    /// intersection interval, for AABB pre-culling of proto-edge intersections (not upstream).
+    /// Returns `None` when `pe` has no definitions, uses a compound curve kind, or yields an
+    /// undefined/non-finite box.
+    pub(crate) fn proto_edge_bounding_box(
+        &self,
+        k: &Kernel,
+        geometry: &impl ProtoBrep<O>,
+        pe: ProtoEdgeId,
+    ) -> Result<Option<Extent3d>> {
+        let Some(e) = self.proto_edge(pe) else {
+            return Ok(None);
+        };
+        let Some(&first) = e.edge_definitions().first() else {
+            return Ok(None);
+        };
+        let Some(ed) = self.edge_def(first) else {
+            return Ok(None);
+        };
+        let crv = curve_of(geometry, ed.xsect_curve_3d())?;
+        let dom = e.xsect_interval();
+        curve_conservative_box(k, crv, &dom)
+    }
+
+    /// `SmProtoTopologyManager::SplitIntersectingProtoEdges`: intersects the curves of
+    /// `pe1` and `pe2` (skipping edges that already share a proto vertex or are known to
+    /// overlap), splits each edge at every interior point intersection, combines the
+    /// split proto vertices, and removes the pair from their overlap lists when they had
+    /// a non-end intersection. Returns the curve handles deleted.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when a proto edge has no definition; [`SolidError::InvalidInput`] for a
+    /// deleted object or missing curve; [`SolidError::Unported`] for the callees
+    /// listed in the module header.
     pub fn split_intersecting_proto_edges(
         &mut self,
         k: &Kernel,
         geometry: &mut impl ProtoBrep<O>,
         pe1: ProtoEdgeId,
         pe2: ProtoEdgeId,
+    ) -> Result<Vec<O>> {
+        self.split_intersecting_proto_edges_with_boxes(k, geometry, pe1, pe2, None, None)
+    }
+
+    /// [`Self::split_intersecting_proto_edges`] with optional pre-computed conservative
+    /// bounding boxes for `pe1` and `pe2` so callers scanning all pairs compute each
+    /// proto edge's box once (not upstream).
+    pub(crate) fn split_intersecting_proto_edges_with_boxes(
+        &mut self,
+        k: &Kernel,
+        geometry: &mut impl ProtoBrep<O>,
+        pe1: ProtoEdgeId,
+        pe2: ProtoEdgeId,
+        box1: Option<Extent3d>,
+        box2: Option<Extent3d>,
     ) -> Result<Vec<O>> {
         let mut deleted: Vec<O> = Vec::new();
         // fork bcc6f01 (`SplitIntersectingProtoEdges`): the splits, combines and
@@ -1309,10 +1387,37 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // (not upstream, #14329) Two lines go to `IntersectWithLine`, whose first test
         // returns no solution when the segments' boxes are apart: answer that here, before
         // the intersection's setup. A boolean asks it for every pair of proto edges, so
-        // with long outlines nearly every pair ends here.
+        // with long outlines nearly every pair ends here. For curved proto edges, reject
+        // pairs whose certified bounding boxes are disjoint by `2 * tol + EFF_ZERO`.
+        let box_tol = (tol.is_finite() && tol >= 0.0).then_some(2.0 * tol + EFF_ZERO);
+        if !core::ptr::eq(c1, c2) {
+            if let Some(bt) = box_tol {
+                if let (Some(b1), Some(b2)) = (box1, box2) {
+                    if b1.are_disjoint(&b2, bt) {
+                        return Ok(deleted);
+                    }
+                }
+            }
+        }
         if let (CurveKind::Line(l1), CurveKind::Line(l2)) = (c1.kind(), c2.kind()) {
             if l1.segments_apart(&dom1, l2, &dom2, tol) {
                 return Ok(deleted);
+            }
+        } else if !core::ptr::eq(c1, c2) && (box1.is_none() || box2.is_none()) {
+            if let Some(bt) = box_tol {
+                let b1 = match box1 {
+                    Some(b) => Some(b),
+                    None => curve_conservative_box(k, c1, &dom1)?,
+                };
+                let b2 = match box2 {
+                    Some(b) => Some(b),
+                    None => curve_conservative_box(k, c2, &dom2)?,
+                };
+                if let (Some(b1), Some(b2)) = (b1, b2) {
+                    if b1.are_disjoint(&b2, bt) {
+                        return Ok(deleted);
+                    }
+                }
             }
         }
         k.work_counters.add_proto_edge_intersection();
@@ -1819,32 +1924,48 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     }
                 }
 
-                // ... and ProtoFaces have EdgeDefinitions too.
-                let pfs: Vec<ProtoFaceId> = self.proto_faces().to_vec();
-                for &this_pf in &pfs {
-                    let coinc: Vec<ProtoEdgeId> = self
+                // ... and ProtoFaces have EdgeDefinitions too. Not upstream: each coincident
+                // proto edge is taken once, however many proto faces list it, and every
+                // definition on a deleted edge goes. Upstream takes an edge once per proto
+                // face that lists it and, as above, steps past the definition that moves
+                // down after a removal, so how many of such definitions went hung on how the
+                // proto faces had been split (`update_faces` no longer splits them).
+                let mut coinc: Vec<ProtoEdgeId> = Vec::new();
+                let mut seen = std::collections::BTreeSet::new();
+                for &this_pf in self.proto_faces() {
+                    let listed = self
                         .proto_face(this_pf)
                         .ok_or(dangling("proto face is deleted"))?
-                        .coinc_proto_edges()
-                        .to_vec();
-                    for this_pe in coinc {
-                        let mut nn = 0;
-                        loop {
-                            let list = self
+                        .coinc_proto_edges();
+                    coinc.extend(listed.iter().copied().filter(|&pe| seen.insert(pe)));
+                }
+                for this_pe in coinc {
+                    let mut nn = 0;
+                    loop {
+                        let list = self
+                            .proto_edge(this_pe)
+                            .ok_or(dangling("proto edge is deleted"))?
+                            .edge_definitions();
+                        let Some(&ed) = list.get(nn) else { break };
+                        let d = self
+                            .edge_def(ed)
+                            .ok_or(dangling("edge definition is deleted"))?;
+                        let hit = d.final_edge(1).is_some_and(|e| deleted_edges1.contains(&e))
+                            || d.final_edge(2).is_some_and(|e| deleted_edges2.contains(&e));
+                        if hit {
+                            self.remove_edge_definition(ed, false)?;
+                            // the next definition moved down into this slot
+                            let still = self
                                 .proto_edge(this_pe)
                                 .ok_or(dangling("proto edge is deleted"))?
-                                .edge_definitions();
-                            let Some(&ed) = list.get(nn) else { break };
-                            let d = self
-                                .edge_def(ed)
-                                .ok_or(dangling("edge definition is deleted"))?;
-                            let hit = d.final_edge(1).is_some_and(|e| deleted_edges1.contains(&e))
-                                || d.final_edge(2).is_some_and(|e| deleted_edges2.contains(&e));
-                            if hit {
-                                self.remove_edge_definition(ed, false)?;
+                                .edge_definitions()
+                                .get(nn)
+                                == Some(&ed);
+                            if !still {
+                                continue;
                             }
-                            nn += 1;
                         }
+                        nn += 1;
                     }
                 }
             }
@@ -2118,25 +2239,68 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 .edge_interval(edge2)
                 .ok_or(dangling("edge is unknown"))?;
 
+            let edge_tol1 = geometry
+                .topology_tolerance(edge1)
+                .ok_or(dangling("edge is unknown"))?;
+            let edge_tol2 = geometry
+                .topology_tolerance(edge2)
+                .ok_or(dangling("edge is unknown"))?;
+            // Both classifications carry the first edge's curve and its source zone.
+            let curve_tol = max2(tol, edge_tol1);
+
             // arbitrary - pick XSectFace as first Edge Face
             f1 = Some(*faces1.first().ok_or(dangling("edge has no faces"))?);
             f2 = Some(*faces2.first().ok_or(dangling("edge has no faces"))?);
 
-            // Find the Edge->Curve coincidences; the status is ignored.
+            // Find the coincident intervals of the two edge curves.
             let sols = {
                 let c1 = curve_of(&*geometry, h1)?;
                 let c2 = curve_of(&*geometry, h2)?;
-                Some(c1.global_coincidence_checker::<CurveHandle>(
+                // Prior merges can raise edge zones. Bound this new shared-interval
+                // search by each owning B-rep's zone, as in find_edge_proved_along.
+                let manager_zone = self.tolerance(k);
+                let [search_zone1, search_zone2] =
+                    [(edge1, edge_tol1), (edge2, edge_tol2)].map(|(edge, edge_zone)| {
+                        let body_zone = geometry
+                            .topology_entity(edge)
+                            .map_or(manager_zone, |(brep, _)| brep.tolerance());
+                        // Unknown zones stay unknown through the cap and floor.
+                        if edge_zone.is_nan() || body_zone.is_nan() || manager_zone.is_nan() {
+                            f64::NAN
+                        } else {
+                            edge_zone.min(body_zone).max(manager_zone)
+                        }
+                    });
+                // Include rounding at the trimmed curves' scale.
+                // A missing normal box contributes zero extra rounding.
+                let req = BoundingBoxRequest {
+                    normal: true,
+                    ..BoundingBoxRequest::default()
+                };
+                let mut size = 0.0;
+                for (curve, interval) in [(c1, &ivl1), (c2, &ivl2)] {
+                    let boxes = curve.calculate_bounding_box(k, interval, req, true)?;
+                    if let Some(bounds) = boxes.normal {
+                        if bounds.is_defined()
+                            && bounds.is_bounded()
+                            && !bounds.has_negative_volume()
+                            && is_measurable_box(&bounds)
+                        {
+                            size = max2(size, bounds.max_dimension());
+                        }
+                    }
+                }
+                let coincidence_tol = coincidence_reach_3d(k, search_zone1, search_zone2, size);
+                c1.global_coincidence_checker::<CurveHandle>(
                     k,
                     &ivl1,
                     c2,
                     &ivl2,
-                    tol,
+                    coincidence_tol,
                     true,
                     [None, None],
-                )?)
-                .map(|c| c.solutions)
-                .unwrap_or_default()
+                )?
+                .solutions
             };
 
             for sol in &sols {
@@ -2144,8 +2308,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     // PEs expect the same curve classified against each face
                     let ivl = Extent1d::from_min_max(sol.start.param(0)?, sol.end.param(0)?);
                     let c1h = h1.ok_or(dangling("edge has no curve"))?;
-                    let mut cc1 = new_curve_classification(k, c1h, ivl, tol)?;
-                    let mut cc2 = new_curve_classification(k, c1h, ivl, tol)?;
+                    let mut cc1 = new_curve_classification(k, c1h, ivl, curve_tol)?;
+                    let mut cc2 = new_curve_classification(k, c1h, ivl, curve_tol)?;
 
                     // Classify the coincident curves against their faces
                     let face1 = f1.ok_or(dangling("face is null"))?;
@@ -2407,7 +2571,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             None => BIG_DOUBLE,
         };
         for &id in self.proto_vertices() {
-            if Some(id) == within || !self.is_same_edge_face_crossing(k, geometry, id, pc1, pc2)? {
+            if Some(id) == within
+                || !self.is_same_edge_face_crossing(k, geometry, id, pc1, pc2)?
+                || self.proto_vertex_incidence_conflicts(k, geometry, id, [pc1, pc2])?
+            {
                 continue;
             }
             let dist = distance(id)?;
@@ -2417,6 +2584,81 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             }
         }
         Ok(held)
+    }
+
+    /// A shared event must keep each fixed native vertex on every opposite defining face.
+    /// Check both definition orders so reach regions cannot erase a proved separation.
+    pub(crate) fn proto_vertex_incidence_conflicts(
+        &self,
+        k: &Kernel,
+        geometry: &impl ProtoBrep<O>,
+        id: ProtoVertexId,
+        incoming: [&PointClassification<O>; 2],
+    ) -> Result<bool> {
+        let pv = self
+            .proto_vertex(id)
+            .ok_or(dangling("proto vertex is deleted"))?;
+        for &def in pv.vertex_definitions() {
+            let def = self
+                .vertex_def(def)
+                .ok_or(dangling("vertex definition is deleted"))?;
+            let stored = [def.brep_point_classif(1), def.brep_point_classif(2)];
+            for (fixed, faces) in [(incoming, stored), (stored, incoming)] {
+                let [first, second] = fixed;
+                let [opposite_first, opposite_second] = faces;
+                for (fixed, opposite) in [(first, opposite_second), (second, opposite_first)] {
+                    let Some(vertex) = fixed.vertex_object() else {
+                        continue;
+                    };
+                    let Some(marker) = periodic_trim_witness(k, geometry, vertex)? else {
+                        continue;
+                    };
+                    let Some(vertex_zone) = geometry.topology_tolerance(vertex) else {
+                        continue;
+                    };
+                    let Some(vertex_face_zone) = fixed
+                        .face()
+                        .and_then(|face| geometry.topology_tolerance(face))
+                    else {
+                        continue;
+                    };
+                    let Some(face) = opposite.face().or_else(|| opposite.face_object()) else {
+                        continue;
+                    };
+                    let Some(surface) = geometry
+                        .face_surface(face)
+                        .flatten()
+                        .and_then(|s| geometry.surface(s))
+                    else {
+                        continue;
+                    };
+                    let Some(face_zone) = geometry.topology_tolerance(face) else {
+                        continue;
+                    };
+                    let Some(object_zone) = opposite
+                        .object()
+                        .and_then(|o| geometry.topology_tolerance(o))
+                    else {
+                        continue;
+                    };
+                    if ![face_zone, object_zone, vertex_zone, vertex_face_zone]
+                        .iter()
+                        .all(|zone| zone.is_finite() && *zone >= 0.0)
+                        // Raised stitched zones retain their covering-gap policy.
+                        || object_zone > face_zone
+                        || vertex_zone > vertex_face_zone
+                    {
+                        continue;
+                    }
+                    if AnalyticSupport::of(surface).is_some_and(|support| {
+                        marker.outside_surface(k, &support, face_zone.max(object_zone))
+                    }) {
+                        return Ok(true);
+                    }
+                }
+            }
+        }
+        Ok(false)
     }
 
     /// Not upstream (#17595; see the module's Deviations). Whether the proto vertex `pv`
@@ -2845,7 +3087,9 @@ fn crossing_sine<O: ClassObject>(
 /// Not upstream: moves `pc1` and `pc2`, a point classified onto an edge of each B-rep, to
 /// where those two edges touch when they are circles in one plane that the contact rule
 /// takes for touching (`circle_coplanar_circle_intersect_in_contact` at `contact_tol_3d`,
-/// as the edge/curve intersections of the boolean read them), and the touching point lies
+/// as the edge/curve intersections of the boolean read them), or (#15049) a circle and a
+/// line in its plane a hair inside it ([`line_touch`]) or meeting it at one point near which
+/// the surface intersection put its touch ([`meeting_beside`]), and the touching point lies
 /// on both edges within their intersection tolerance. Any other pair is left as it is.
 ///
 /// # Errors
@@ -2860,25 +3104,16 @@ fn touch_of_edges<O: ClassObject>(
     if pc1.point_class() != PointClassType::Edge || pc2.point_class() != PointClassType::Edge {
         return Ok(());
     }
-    // an edge's circle: centre, unit normal, radius
-    let circle = |pc: &PointClassification<O>| -> Result<Option<(Point3, Vec3, f64)>> {
+    // an edge's curve and interval
+    let edge_curve = |pc: &PointClassification<O>| -> Result<Option<(&Curve, Extent1d)>> {
         let Some((b, EntityRef::Edge(e))) = pc.object().and_then(|o| geometry.topology_entity(o))
         else {
             return Ok(None);
         };
-        let Some(curve) = b.edge(e)?.curve.as_ref() else {
-            return Ok(None);
-        };
-        let CurveKind::Ellipse(c) = curve.kind() else {
-            return Ok(None);
-        };
-        if !c.is_circle() {
-            return Ok(None);
-        }
-        let place = c.position();
-        Ok(Some((place.origin(), place.z_axis(), c.x_radius())))
+        let rec = b.edge(e)?;
+        Ok(rec.curve.as_ref().map(|c| (c, rec.interval)))
     };
-    let (Some((c1, n1, r1)), Some((c2, n2, r2))) = (circle(pc1)?, circle(pc2)?) else {
+    let (Some((curve1, ivl1)), Some((curve2, ivl2))) = (edge_curve(pc1)?, edge_curve(pc2)?) else {
         return Ok(());
     };
     let tol = xsect_tol_3d_from_zones(
@@ -2886,15 +3121,67 @@ fn touch_of_edges<O: ClassObject>(
         pc1.obj_zone_tol_3d(k, geometry)?,
         pc2.obj_zone_tol_3d(k, geometry)?,
     );
-    // one plane: parallel normals (the angle test of the circles' own intersection) and
-    // the second centre on the first plane within the tolerance
-    if n1.cross(n2).length() > EFF_ZERO_SQRT || (c2 - c1).dot(n1).abs() > tol {
-        return Ok(());
-    }
-    let CircleCircle::Tangent(touch) =
-        circle_coplanar_circle_intersect_in_contact(n1, c1, r1, c2, r2, tol, contact_tol_3d(k))?
-    else {
-        return Ok(());
+    let touch = match (curve1.kind(), curve2.kind()) {
+        (CurveKind::Ellipse(a), CurveKind::Ellipse(b)) if a.is_circle() && b.is_circle() => {
+            let (pa, pb) = (a.position(), b.position());
+            let (c1, n1, r1) = (pa.origin(), pa.z_axis(), a.x_radius());
+            let (c2, n2, r2) = (pb.origin(), pb.z_axis(), b.x_radius());
+            // one plane: parallel normals (the angle test of the circles' own intersection)
+            // and the second centre on the first plane within the tolerance
+            if n1.cross(n2).length() > EFF_ZERO_SQRT || (c2 - c1).dot(n1).abs() > tol {
+                return Ok(());
+            }
+            let CircleCircle::Tangent(touch) = circle_coplanar_circle_intersect_in_contact(
+                n1,
+                c1,
+                r1,
+                c2,
+                r2,
+                tol,
+                contact_tol_3d(k),
+            )?
+            else {
+                return Ok(());
+            };
+            touch
+        }
+        // Not upstream (#15049): a circle and a line in its plane, the line a hair inside
+        // the circle, touch at one point (`Ellipse::intersect_with_line` at the contact
+        // tolerance, the point moved to an end of either on the stretch between upstream's
+        // two crossings), as the edge/curve intersections of the boolean read them.
+        (CurveKind::Ellipse(c), CurveKind::Line(l)) if c.is_circle() => {
+            match line_touch(k, (curve1, c, &ivl1), (l, &ivl2), tol)? {
+                Some(p) => p,
+                None => match meeting_beside(
+                    k,
+                    geometry,
+                    pc1,
+                    (curve1, c, &ivl1),
+                    (curve2, l, &ivl2),
+                    tol,
+                )? {
+                    Some(p) => p,
+                    None => return Ok(()),
+                },
+            }
+        }
+        (CurveKind::Line(l), CurveKind::Ellipse(c)) if c.is_circle() => {
+            match line_touch(k, (curve2, c, &ivl2), (l, &ivl1), tol)? {
+                Some(p) => p,
+                None => match meeting_beside(
+                    k,
+                    geometry,
+                    pc1,
+                    (curve2, c, &ivl2),
+                    (curve1, l, &ivl1),
+                    tol,
+                )? {
+                    Some(p) => p,
+                    None => return Ok(()),
+                },
+            }
+        }
+        _ => return Ok(()),
     };
     // the touching point on both edges' arcs: dropped onto each edge's interval within
     // their tolerance (a drop that fails leaves the point where it was)
@@ -2909,6 +3196,191 @@ fn touch_of_edges<O: ClassObject>(
     *pc1 = q1;
     *pc2 = q2;
     Ok(())
+}
+
+/// Not upstream (#15049): where the arc of `circle` over `circle_ivl` and the line `line`
+/// over `line_ivl` touch by the contact rule: their one meeting at [`contact_tol_3d`]
+/// (`Ellipse::intersect_with_line`, which takes a line a hair inside the circle for a touch
+/// and moves it to an end of the arc or the line on the stretch between the two crossings),
+/// where at zero contact they do not meet at that point (the contact rule made it). `None`
+/// for a plain crossing, a line out of the circle's plane, or anything but one meeting.
+///
+/// # Errors
+///
+/// Those of the intersections and the evaluation.
+fn line_touch(
+    k: &Kernel,
+    (circle_curve, circle, circle_ivl): (&Curve, &crate::curve::ellipse::Ellipse, &Extent1d),
+    (line, line_ivl): (&crate::curve::line::Line, &Extent1d),
+    tol: f64,
+) -> Result<Option<Point3>> {
+    let in_contact = circle.intersect_with_line::<()>(
+        k,
+        circle_ivl,
+        line,
+        line_ivl,
+        tol,
+        contact_tol_3d(k),
+        None,
+        None,
+    )?;
+    let [touch] = in_contact.solutions[..] else {
+        return Ok(None);
+    };
+    if touch.solution_type != SolutionType::SingleValue {
+        return Ok(None);
+    }
+    // the contact rule made it: at zero contact the two cross elsewhere, twice or not at all
+    let point = circle_curve.evaluate_point(k, touch.start.param(0)?)?;
+    let plain =
+        circle.intersect_with_line::<()>(k, circle_ivl, line, line_ivl, tol, 0.0, None, None)?;
+    if let [crossing] = plain.solutions[..] {
+        if circle_curve
+            .evaluate_point(k, crossing.start.param(0)?)?
+            .distance(point)
+            <= tol
+        {
+            return Ok(None);
+        }
+    }
+    Ok(Some(point))
+}
+
+/// Not upstream (#15049): where a point `pc` classified onto a circle edge and onto a line
+/// edge in its plane stands for their one meeting. The surface intersection of two faces
+/// tangent at a corner finds their touch wherever the rounding of the faces puts it inside
+/// the band in which the two edges at that corner lie within the tolerance of each other
+/// (√(2rτ) long for the circle's radius r: a cusp's arc running tangentially into its line,
+/// swept onto the line's face, touched it 1.5e-4 from the corner, and the line edge was split
+/// there while the arc was not). Where the two edges meet at one point by the contact rule
+/// ([`Ellipse::intersect_with_line`](crate::curve::ellipse::Ellipse::intersect_with_line) at
+/// [`contact_tol_3d`], as [`line_touch`] reads it), that meeting lies farther than `tol` from
+/// the point, but within a thousand times it, and the point and the meeting both lie within `tol` of both edges and the whole straight
+/// stretch between them lies within `tol` of both (the edges within the tolerance of each
+/// other all along it, as the cap rule reads a band, docs/booleans.md §6), the point is that
+/// meeting. The stretch is enclosed, not sampled: the distance to a line is convex, so its two
+/// ends bound it; for the circle [`stretch_within_circle`] bounds the out-of-plane and the
+/// radial deviation over the stretch in outward-rounded intervals. `None` otherwise, or when a point cannot be read or dropped.
+///
+/// # Errors
+///
+/// Those of the intersection; an unported or cancelled evaluation or drop.
+fn meeting_beside<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    pc: &PointClassification<O>,
+    (circle_curve, circle, circle_ivl): (&Curve, &crate::curve::ellipse::Ellipse, &Extent1d),
+    (line_curve, line, line_ivl): (&Curve, &crate::curve::line::Line, &Extent1d),
+    tol: f64,
+) -> Result<Option<Point3>> {
+    let at = match pc.find_obj_point_3d(k, geometry) {
+        Ok(p) => p,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => return Ok(None),
+    };
+    let meetings = circle.intersect_with_line::<()>(
+        k,
+        circle_ivl,
+        line,
+        line_ivl,
+        tol,
+        contact_tol_3d(k),
+        None,
+        None,
+    )?;
+    let [meeting] = meetings.solutions[..] else {
+        return Ok(None);
+    };
+    if meeting.solution_type != SolutionType::SingleValue {
+        return Ok(None);
+    }
+    let meeting = circle_curve.evaluate_point(k, meeting.start.param(0)?)?;
+    let apart = meeting.distance(at);
+    // (a NaN distance refuses: every comparison below is false for it)
+    let within = apart > tol && apart <= 1000.0 * tol;
+    if !within {
+        return Ok(None);
+    }
+    for point in [at, meeting] {
+        for (curve, interval) in [(circle_curve, circle_ivl), (line_curve, line_ivl)] {
+            let near = match curve.drop_point(
+                k,
+                interval,
+                point,
+                None,
+                0.0,
+                None,
+                SolverOperation::Minimize,
+            ) {
+                Ok(near) => near,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => return Ok(None),
+            };
+            let on = near.success && near.distance <= tol;
+            if !on {
+                return Ok(None);
+            }
+        }
+    }
+    if !stretch_within_circle(circle, meeting, at, tol) {
+        return Ok(None);
+    }
+    Ok(Some(meeting))
+}
+
+/// Not upstream (#15049): whether every point of the straight stretch from `from` to `to`
+/// lies within `tol` of the full circle `circle`, by enclosure: the out-of-plane distance is
+/// linear along the stretch and the in-plane distance from the centre convex, so over the
+/// stretch the out-of-plane distance is at most that at an end, the radius exceeds the
+/// radius of the circle at most as at an end, and falls short of it at most by the least
+/// in-plane distance from the centre to the stretch's line (taken only where the foot of
+/// the perpendicular may lie on the stretch). The distance to the circle is then at most
+/// the hypotenuse of the two worst deviations. All in outward-rounded intervals; `false` for
+/// anything not finite or a stretch with no in-plane extent.
+fn stretch_within_circle(
+    circle: &crate::curve::ellipse::Ellipse,
+    from: Point3,
+    to: Point3,
+    tol: f64,
+) -> bool {
+    use crate::blend::fillet_section::interval::Ivl;
+    use crate::geom::interval_vector::{dot, norm, square, unit};
+    let xyz = |p: Point3| [Ivl::from(p.x), Ivl::from(p.y), Ivl::from(p.z)];
+    let sub = |[ax, ay, az]: [Ivl; 3], [bx, by, bz]: [Ivl; 3]| [ax - bx, ay - by, az - bz];
+    let position = circle.position();
+    let Some(axis) = unit(xyz(position.z_axis())) else {
+        return false;
+    };
+    let centre = xyz(position.origin());
+    let radius = Ivl::from(circle.x_radius());
+    // an end's out-of-plane height, in-plane vector from the centre and its length
+    let end = |p: Point3| {
+        let w = sub(xyz(p), centre);
+        let height = dot(w, axis);
+        let flat = sub(w, axis.map(|v| v * height));
+        (height, flat, norm(flat))
+    };
+    let (height_from, flat_from, rho_from) = end(from);
+    let (height_to, flat_to, rho_to) = end(to);
+    let run = sub(flat_to, flat_from);
+    let run_sq = dot(run, run);
+    if !run_sq.is_finite() || run_sq.lo <= 0.0 {
+        return false;
+    }
+    let along = dot(flat_from, run);
+    let foot = (Ivl::from(0.0) - along) / run_sq;
+    let mut least = rho_from.lo.min(rho_to.lo);
+    if foot.hi > 0.0 && foot.lo < 1.0 {
+        let nearest = (dot(flat_from, flat_from) - along * along / run_sq).sqrt();
+        least = least.min(nearest.lo);
+    }
+    let over = (rho_from - radius).hi.max((rho_to - radius).hi).max(0.0);
+    let under = (radius - Ivl::from(least)).hi.max(0.0);
+    let rise = Ivl::from(height_from.mag().max(height_to.mag()));
+    let dev = Ivl::from(over.max(under));
+    let worst = square(rise) + square(dev);
+    let limit = Ivl::from(tol) * Ivl::from(tol);
+    worst.is_finite() && limit.is_finite() && worst.hi <= limit.lo
 }
 
 #[cfg(test)]
@@ -3625,6 +4097,48 @@ mod tests {
         let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
         crate::sweep::api_brep::create_linear_sweep(k, &refs, Vec3::new(0.0, 0.0, 1.0), h, true)
             .unwrap()
+    }
+
+    /// The stretch between a meeting and a point is enclosed, not sampled: two ends within the
+    /// tolerance of the circle with the middle of the chord between them farther out of it
+    /// (the end a hair inside the circle, the chord's middle `1.1 tol` inside it) is refused,
+    /// and a short chord of the circle, its sagitta far below the tolerance, is taken.
+    #[test]
+    fn a_stretch_leaving_the_tolerance_of_the_circle_between_its_ends_is_refused() {
+        let k = Kernel::default();
+        let circle = crate::curve::ellipse::Ellipse::new(
+            &k,
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::X,
+            Vec3::Y,
+            Extent1d::from_min_max(0.0, 6.0),
+            1.0,
+            1.0,
+            &crate::curve::ellipse::EllipseOptions::default(),
+        )
+        .expect("circle");
+        let tol = 2e-5;
+        let y = 1.0 - 1.1 * tol;
+        let b = (1.0_f64 - y * y).sqrt();
+        let (meeting, at) = (Point3::new(-b, y, 0.0), Point3::new(0.35 * b, y, 0.0));
+        assert!(!stretch_within_circle(&circle, meeting, at, tol));
+        // a chord of 1e-3 on the circle: its sagitta is 1.25e-7
+        let (from, to) = (
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.999_999_5, 1e-3, 0.0),
+        );
+        assert!(stretch_within_circle(&circle, from, to, tol));
+        // the same chord lifted out of the circle's plane by more than the tolerance
+        let lifted = Point3::new(to.x, to.y, 2.0 * tol);
+        assert!(!stretch_within_circle(&circle, from, lifted, tol));
+        // not finite, or no stretch at all
+        assert!(!stretch_within_circle(
+            &circle,
+            from,
+            Point3::new(f64::NAN, 0.0, 0.0),
+            tol
+        ));
+        assert!(!stretch_within_circle(&circle, from, from, tol));
     }
 
     /// A Join of a prism into a prism of the same outline (z 1..2 into z 0..2: coincident

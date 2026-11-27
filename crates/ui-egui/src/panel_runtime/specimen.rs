@@ -172,6 +172,7 @@ fn specimen_layout(name: &str) -> PanelResult<(Layout, PanelRegistry)> {
             features: PanelFeatures { multi_instance: !editor, popout: false, hot_closable: editor, ..PanelFeatures::default() },
             side_height_policy: if fill { SideHeightPolicy::Fill } else { SideHeightPolicy::Content },
             fixed_bottom_height: None,
+            bottom_always_open: false,
             header_actions: if editor {
                 vec![HeaderActionSpec { id: ControlId::new("apply")?, label_key: "ui.panel_fixture.apply".into(), icon: "list".into() }]
             } else {
@@ -749,6 +750,7 @@ fn drop_target_observation(target: &HostDropTargetId) -> Value {
         HostDropTargetId::Tab { section, before } => json!({"type":"tab","section":section,"before":before}),
         HostDropTargetId::Relative { section, placement } => json!({"type":"relative","section":section,"placement":placement}),
         HostDropTargetId::Window => json!({"type":"window"}),
+        HostDropTargetId::Float => json!({"type":"float"}),
     }
 }
 
@@ -776,7 +778,8 @@ fn target_observation(target: &HostControlTarget) -> Value {
             HostPointerTarget::Sash { first, second } => json!({"type":"sash","first":first,"second":second}),
             HostPointerTarget::Resize { section, edge } => json!({"type":"resize","section":section,"edge":match edge {
                 HostResizeEdge::Left => "left", HostResizeEdge::Right => "right", HostResizeEdge::Top => "top",
-                HostResizeEdge::Bottom => "bottom", HostResizeEdge::BottomRight => "bottom_right",
+                HostResizeEdge::Bottom => "bottom", HostResizeEdge::TopLeft => "top_left", HostResizeEdge::TopRight => "top_right",
+                HostResizeEdge::BottomLeft => "bottom_left", HostResizeEdge::BottomRight => "bottom_right",
             }}),
             HostPointerTarget::Overflow { zone } => json!({"type":"overflow","zone":zone}),
             HostPointerTarget::OverflowAll => json!({"type":"overflow_all"}),

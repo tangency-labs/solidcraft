@@ -492,7 +492,9 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
                 Err(e)
                     if matches!(
                         e,
-                        SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                        SolidError::Unported { .. }
+                            | SolidError::Cancelled { .. }
+                            | SolidError::OutOfFuel { .. }
                     ) || e.is_not_certified() =>
                 {
                     return Err(e)
@@ -506,7 +508,9 @@ fn quadric_of_surface(k: &Kernel, surface: &Surface, uv: Point2, tol: f64) -> Re
                     Err(e)
                         if matches!(
                             e,
-                            SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                            SolidError::Unported { .. }
+                                | SolidError::Cancelled { .. }
+                                | SolidError::OutOfFuel { .. }
                         ) || e.is_not_certified() =>
                     {
                         return Err(e)
@@ -795,6 +799,11 @@ impl BlendQuadric {
     /// `SmBlendQuadric::Implicit`: the implicit form `x.A.x + 2 b.x + c = 0` as `(A, b, c)`
     /// (sphere, cylinder, cone: the double cone; plane: `A = 0`, `b` the half normal; no
     /// quadric, a torus or its circle: all zero).
+    ///
+    /// A cone uses `cos²(a) |d × (x - p)|² - sin²(a) (d · (x - p))²`.
+    /// Expanding `cos²(a) I - d dᵀ` instead loses the small axial coefficient
+    /// to cancellation on shallow cones; forming its constant as `pᵀ A p`
+    /// also cancels terms of the distant apex's squared coordinates.
     #[must_use]
     pub fn implicit(&self) -> ([[f64; 3]; 3], [f64; 3], f64) {
         let ap = [self.point.x, self.point.y, self.point.z];
@@ -821,8 +830,20 @@ impl BlendQuadric {
                 k0 = self.radius * self.radius;
             }
             QuadricKind::Cone => {
-                ki = self.angle.cos() * self.angle.cos();
-                kd = 1.0;
+                let (sin, cos) = self.angle.sin_cos();
+                let (ss, cc) = (sin * sin, cos * cos);
+                let [dx, dy, dz] = ad;
+                let (xy, xz, yz) = (-dx * dy, -dx * dz, -dy * dz);
+                a = [
+                    [cc * (dy * dy + dz * dz) - ss * dx * dx, xy, xz],
+                    [xy, cc * (dx * dx + dz * dz) - ss * dy * dy, yz],
+                    [xz, yz, cc * (dx * dx + dy * dy) - ss * dz * dz],
+                ];
+                let cross = self.point.cross(self.dir);
+                let along = self.point.dot(self.dir);
+                let linear = self.dir.cross(cross) * (-cc) + self.dir * (ss * along);
+                let constant = cc * cross.length_squared() - ss * along * along;
+                return (a, [linear.x, linear.y, linear.z], constant);
             }
             QuadricKind::None | QuadricKind::Torus | QuadricKind::Circle => {}
         }

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Backing run</title>
+  <path d="M6 12L16 12L30 40L6 40Z" fill="#b8c3cf"/>
+  <path d="M6 12L16 12L30 40L6 40Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M58 12L48 12L34 40L58 40Z" fill="#b8c3cf"/>
+  <path d="M58 12L48 12L34 40L58 40Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M16 12L48 12L34 40L30 40Z" fill="#328bd3"/>
+  <path d="M16 12L48 12L34 40L30 40Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M24 40Q32 58 40 40Z" fill="#328bd3"/>
+  <path d="M24 40Q32 58 40 40Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -232,6 +232,37 @@ thread_local! {
     /// How many (placement, body) pairs [`Session::bodies_hidden_by_parents`] has looked at on
     /// this thread (tests).
     pub(crate) static HIDDEN_BY_PARENTS_CHECKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many times [`Session::design_hidden`] has worked its set out on this thread (tests).
+    pub(crate) static DESIGN_HIDDEN_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The bodies the browser's eyes hide, as a drawing view that shows only what the design shows
+/// leaves them out (#22107): each by the occurrences that place it and its definition's body name,
+/// the pair a view's shown body carries ([`crate::drawing_view::Shown`]). A body's own eye, a hidden
+/// placement above it and a hidden folder or group it is in hide it; an open sketch doesn't, so a
+/// drawing doesn't change while someone sketches ([`Session::design_hidden`]).
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct DesignHidden(std::collections::HashMap<Vec<u64>, std::collections::HashSet<String>>);
+
+impl DesignHidden {
+    /// Whether it hides body `body` placed by `path`.
+    pub fn hides(&self, path: &[u64], body: &str) -> bool {
+        self.0.get(path).is_some_and(|bodies| bodies.contains(body))
+    }
+
+    /// Whether it hides nothing.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// [`Session::design_hidden`]'s last answer, and what it was worked out from.
+pub(crate) struct DesignHiddenCache {
+    revision: u64,
+    bodies: Vec<String>,
+    paths: Vec<Vec<u64>>,
+    folders: Vec<String>,
+    hidden: std::sync::Arc<DesignHidden>,
 }
 
 /// How many placement paths [`PlacementIndex`] names before it stops remembering more.
@@ -386,7 +417,10 @@ impl Session {
         rename: Option<(&str, &str)>,
     ) {
         let selected: std::collections::BTreeSet<&str> = self.selection.iter().filter_map(|s| s.body_name()).collect();
-        if self.visibility.hidden_bodies.is_empty() && selected.is_empty() {
+        // The bodies Unisolate will hide again follow renames too (#8120).
+        let before_isolate = self.visibility.before_isolate.as_ref().map_or(&[][..], |before| before.hidden_bodies.as_slice());
+        let shown_before = self.visibility.before_isolate.as_ref().map(|before| &before.shown_bodies);
+        if self.visibility.hidden_bodies.is_empty() && before_isolate.is_empty() && shown_before.is_none_or(|s| s.is_empty()) && selected.is_empty() {
             return;
         }
         if rename.is_none() {
@@ -404,12 +438,18 @@ impl Session {
                 body.name = new.to_string();
             }
         }
-        let hidden: std::collections::BTreeSet<_> = self.visibility.hidden_bodies.iter().map(String::as_str).collect();
+        let hidden: std::collections::BTreeSet<_> =
+            self.visibility.hidden_bodies.iter().chain(before_isolate).chain(shown_before.into_iter().flatten()).map(String::as_str).collect();
         let mut names = std::collections::BTreeMap::new();
         let mut destinations = std::collections::BTreeSet::new();
         let (before, after) = (solidcraft_doc::WorldNames::new(previous, state), solidcraft_doc::WorldNames::new(&self.doc, &renamed));
+        let owners = previous.model_body_components(state);
+        let mut by_component: std::collections::HashMap<u64, Vec<&solidcraft_doc::ModelBody>> = std::collections::HashMap::new();
+        for (body, owner) in state.bodies.iter().zip(owners) {
+            by_component.entry(owner).or_default().push(body);
+        }
         for (component, path, _) in previous.placements() {
-            for body in state.bodies.iter().filter(|body| previous.model_body_component(body) == component) {
+            for body in by_component.get(&component).into_iter().flatten().copied() {
                 let old = before.name(&body.name, component, &path);
                 let source = rename.filter(|(old, _)| *old == body.name).map_or(body.name.as_str(), |(_, new)| new);
                 let new = after.name(source, component, &path);
@@ -421,7 +461,7 @@ impl Session {
                 }
             }
         }
-        self.visibility.hidden_bodies.retain_mut(|hidden| {
+        let remap = |hidden: &mut String| {
             if let Some(new) = names.get(hidden) {
                 hidden.clone_from(new);
                 true
@@ -430,7 +470,14 @@ impl Session {
                 // body's hide follows into that name; a stale entry must not hide it.
                 !destinations.contains(hidden)
             }
-        });
+        };
+        self.visibility.hidden_bodies.retain_mut(remap);
+        if let Some(before) = self.visibility.before_isolate.as_mut() {
+            before.hidden_bodies.retain_mut(remap);
+            let mut shown: Vec<String> = std::mem::take(&mut before.shown_bodies).into_iter().collect();
+            shown.retain_mut(remap);
+            before.shown_bodies = shown.into_iter().collect();
+        }
         for sel in &mut self.selection {
             let name = match sel {
                 Sel::Body { name } => name,
@@ -847,6 +894,15 @@ impl Session {
         self.occurrence_placement(&path).map(|p| p.world).unwrap_or(IDENTITY)
     }
 
+    /// The active component's placement as occurrence ids from the top: the one it was activated
+    /// at while that still leads to it, else its first. Empty for the design.
+    pub fn active_path(&self) -> Vec<u64> {
+        match &self.active_occurrence_path {
+            Some(path) if self.doc.path_placement(path).is_some_and(|(component, _)| component == self.active_component) => path.clone(),
+            _ => self.doc.first_path(self.active_component),
+        }
+    }
+
     pub fn occurrence_visible(&self, path: &[u64]) -> bool {
         !self.visibility.hidden_occurrences.iter().any(|hidden| path.starts_with(hidden))
     }
@@ -961,7 +1017,7 @@ impl Session {
 
     /// The placement a sketch or construction feature is drawn at: the active one while its
     /// component is being edited, else the component's first (empty for the design's own).
-    fn feature_path(&self, component: u64) -> Vec<u64> {
+    pub fn feature_path(&self, component: u64) -> Vec<u64> {
         match &self.active_occurrence_path {
             _ if component == 0 => Vec::new(),
             Some(p) if self.active_component == component => p.clone(),
@@ -985,7 +1041,17 @@ impl Session {
             return false;
         }
         let component = self.doc.feature(id).map_or(0, |f| f.component);
-        self.item_folder_hidden(&Self::folder_scope(&self.feature_path(component)), component, folder, &id.to_string())
+        self.feature_folder_hidden_at(id, &self.feature_path(component), folder)
+    }
+
+    /// [`Self::feature_folder_hidden`] at the placement `path` of the feature's component: a
+    /// part placed more than once has a folder of its own under each copy.
+    pub fn feature_folder_hidden_at(&self, id: u64, path: &[u64], folder: &str) -> bool {
+        if self.visibility.hidden_folders.is_empty() {
+            return false;
+        }
+        let component = self.doc.feature(id).map_or(0, |f| f.component);
+        self.item_folder_hidden(&Self::folder_scope(path), component, folder, &id.to_string())
     }
 
     /// Is construction geometry or an origin item (by name) shown: not hidden itself, nor by
@@ -1046,6 +1112,62 @@ impl Session {
             return cache.as_ref().is_none_or(|c| !c.bodies.contains(name));
         }
         !self.bodies_hidden_by_parents().contains(name)
+    }
+
+    /// The bodies the design shows hidden, for a drawing view that follows the browser's eyes
+    /// (#22107): [`Session::body_visible`]'s rule less what is about an open sketch (its rolled-off
+    /// bodies, [`Session::body_removed_later`]), so a drawing doesn't flicker while someone sketches.
+    ///
+    /// Kept until the design or its hidden lists change, and handed back as the same `Arc` while the
+    /// set is the same, so a view drawn from it stays up to date through a selection or any other
+    /// change that moves the revision alone.
+    pub fn design_hidden(&self) -> std::sync::Arc<DesignHidden> {
+        let v = &self.visibility;
+        let Ok(mut cache) = self.design_hidden_cache.lock() else {
+            // The lock is poisoned: worked out each time.
+            return std::sync::Arc::new(self.work_out_design_hidden());
+        };
+        if let Some(c) = cache.as_ref()
+            && c.revision == self.revision
+            && c.bodies == v.hidden_bodies
+            && c.paths == v.hidden_occurrences
+            && c.folders == v.hidden_folders
+        {
+            return c.hidden.clone();
+        }
+        let now = self.work_out_design_hidden();
+        let hidden = match cache.as_ref() {
+            Some(c) if *c.hidden == now => c.hidden.clone(),
+            _ => std::sync::Arc::new(now),
+        };
+        *cache = Some(DesignHiddenCache {
+            revision: self.revision,
+            bodies: v.hidden_bodies.clone(),
+            paths: v.hidden_occurrences.clone(),
+            folders: v.hidden_folders.clone(),
+            hidden: hidden.clone(),
+        });
+        hidden
+    }
+
+    /// [`Session::design_hidden`]'s set, worked out: every body the design places that its own eye,
+    /// a hidden placement above it or a hidden folder or group hides.
+    fn work_out_design_hidden(&self) -> DesignHidden {
+        #[cfg(test)]
+        DESIGN_HIDDEN_BUILDS.with(|n| n.set(n.get() + 1));
+        let v = &self.visibility;
+        if v.hidden_bodies.is_empty() && v.hidden_occurrences.is_empty() && v.hidden_folders.is_empty() {
+            return DesignHidden::default();
+        }
+        let by_parents =
+            if v.hidden_occurrences.is_empty() && v.hidden_folders.is_empty() { Default::default() } else { self.bodies_hidden_by_parents() };
+        let mut out: std::collections::HashMap<Vec<u64>, std::collections::HashSet<String>> = std::collections::HashMap::new();
+        for (name, body, _, path, _) in self.doc.body_frames_with_source(&self.model.state()) {
+            if by_parents.contains(&name) || self.body_hidden_itself(&name) {
+                out.entry(path).or_default().insert(body);
+            }
+        }
+        DesignHidden(out)
     }
 
     /// Is the body hidden itself (its own eye; a placement, folder or group may still hide it)?
@@ -1151,8 +1273,66 @@ impl Session {
             .collect()
     }
 
+    pub(crate) fn clear_pending_move(&mut self, id: u64) {
+        self.pending_moves.remove(&id);
+        self.pending_move_records.retain(|r| r.occurrence != id);
+    }
+
+    pub(crate) fn clear_pending_moves(&mut self) {
+        self.pending_moves.clear();
+        self.pending_move_records.clear();
+    }
+
+    pub(crate) fn record_pending_move(
+        &mut self,
+        id: u64,
+        doc_transform: Mat,
+        prior_uncaptured: Option<Mat>,
+        base_transform: Option<Mat>,
+        next: Mat,
+        step: solidcraft_doc::CapturedOccurrenceMove,
+    ) {
+        let close = |a: &Mat, b: &Mat| a.iter().flatten().zip(b.iter().flatten()).all(|(x, y)| (x - y).abs() < 1e-9);
+        if let Some(base) = base_transform {
+            if let Some(k) = self.pending_move_records.iter().rposition(|r| r.occurrence == id && close(&r.after, &base)) {
+                let mut idx = 0usize;
+                self.pending_move_records.retain(|r| {
+                    let keep = idx <= k || r.occurrence != id;
+                    idx += 1;
+                    keep
+                });
+                self.pending_move_records.push(crate::PendingMoveRecord { occurrence: id, step, after: next });
+            } else if close(&base, &doc_transform) {
+                self.pending_move_records.retain(|r| r.occurrence != id);
+                self.pending_move_records.push(crate::PendingMoveRecord { occurrence: id, step, after: next });
+            } else {
+                self.pending_move_records.retain(|r| r.occurrence != id);
+                if let Some(delta_step) = captured_delta_move(id, &doc_transform, &next) {
+                    self.pending_move_records.push(crate::PendingMoveRecord { occurrence: id, step: delta_step, after: next });
+                }
+            }
+        } else {
+            if let Some(prev) = prior_uncaptured
+                && !self.pending_move_records.iter().any(|r| r.occurrence == id)
+                && !close(&prev, &doc_transform)
+                && let Some(delta_step) = captured_delta_move(id, &doc_transform, &prev)
+            {
+                self.pending_move_records.push(crate::PendingMoveRecord { occurrence: id, step: delta_step, after: prev });
+            }
+            self.pending_move_records.push(crate::PendingMoveRecord { occurrence: id, step, after: next });
+        }
+        if self.pending_move_records.len() > crate::MAX_PENDING_MOVE_RECORDS {
+            self.pending_move_records.retain(|r| r.occurrence != id);
+            if let Some(delta_step) = captured_delta_move(id, &doc_transform, &next) {
+                self.pending_move_records.push(crate::PendingMoveRecord { occurrence: id, step: delta_step, after: next });
+            }
+        }
+    }
+
     pub(crate) fn prune_occurrence_state(&mut self) {
         self.pending_moves.retain(|id, _| self.doc.occurrences.iter().any(|o| o.id == *id));
+        self.pending_move_records.retain(|r| self.doc.occurrences.iter().any(|o| o.id == r.occurrence));
+        self.pending_joint_bases.retain(|id, _| self.doc.assembly.joints.iter().any(|j| j.id == *id));
         self.exploded.retain(|id, _| self.doc.occurrences.iter().any(|o| o.id == *id));
         if self.active_component != 0 && !self.doc.components.iter().any(|c| c.id == self.active_component) {
             self.active_component = 0;
@@ -1192,5 +1372,39 @@ impl Session {
         let shown = shown.into_iter().filter(kept).collect();
         self.visibility.hidden_occurrences = hidden;
         self.visibility.shown_component_origins = shown;
+    }
+}
+
+pub(crate) fn format_mm_expr(v: f64) -> solidcraft_doc::Expr {
+    if v == 0.0 { solidcraft_doc::Expr::new("0") } else { solidcraft_doc::Expr::new(format!("{v} mm")) }
+}
+
+pub(crate) fn captured_delta_move(occurrence: u64, from: &Mat, to: &Mat) -> Option<solidcraft_doc::CapturedOccurrenceMove> {
+    let inv = solidcraft_doc::mat_inverse(from)?;
+    let delta = mat_mul(to, &inv);
+    if !solidcraft_doc::is_placement(&delta) {
+        return None;
+    }
+    Some(captured_move_from_delta(occurrence, solidcraft_doc::MoveSpace::Local, &delta, None))
+}
+
+pub(crate) fn captured_move_from_delta(
+    occurrence: u64,
+    space: solidcraft_doc::MoveSpace,
+    delta: &Mat,
+    path: Option<Vec<u64>>,
+) -> solidcraft_doc::CapturedOccurrenceMove {
+    let mut rot = *delta;
+    rot[3] = [0.0, 0.0, 0.0, 1.0];
+    let rotation = (!solidcraft_doc::is_identity(&rot)).then_some(rot);
+    solidcraft_doc::CapturedOccurrenceMove {
+        occurrence,
+        space,
+        translate: [format_mm_expr(delta[3][0]), format_mm_expr(delta[3][1]), format_mm_expr(delta[3][2])],
+        origin: None,
+        rotate_axis: None,
+        angle: None,
+        rotation,
+        path,
     }
 }

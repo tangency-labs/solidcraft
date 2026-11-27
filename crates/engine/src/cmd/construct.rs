@@ -55,12 +55,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&AXIS_THROUGH_CYLINDER_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params("face: ref (a cylinder, cone or torus face, or a circular edge); name?"),
-    CommandSpec::new("construct.axis.normal_to_face", "Axis Perpendicular To Face", crate::checked!("construct.axis.normal_to_face", axis_normal)).begins_edit()
+    CommandSpec::new("construct.axis.normal_to_face", "Axis Perpendicular To Face or Plane", crate::checked!("construct.axis.normal_to_face", axis_normal)).begins_edit()
         .at("SOLID", "CONSTRUCT")
         .icon("axis_normal_to_face")
         .contract(&AXIS_NORMAL_TO_FACE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("face: ref; point: ref (the axis goes through it, square to the face); name?"),
+        .params("face: ref (a face, or a construction or origin plane, #23006); point: ref (the axis goes through it, square to the face or plane); name?"),
     CommandSpec::new("construct.axis.two_planes", "Axis Through Two Planes", crate::checked!("construct.axis.two_planes", axis_planes)).begins_edit()
         .at("SOLID", "CONSTRUCT")
         .icon("axis_two_planes")
@@ -150,7 +150,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("plane_tangent")
         .contract(&PLANE_TANGENT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("face: ref (cylinder, cone, sphere or torus); at?: [x,y,z] where it touches (default: the face pick); reference?: plane or planar face ref (the plane touches where the face turns towards it: parallel to it, on the side of `at`); angle?: expr (with reference, default 0 deg: turned that far about the face's axis; not on a sphere); name?"),
+        .params("face: ref (any face: a cylinder, cone, sphere or torus, or another curved face such as a loft's, a sweep's or a patch's); at?: [x,y,z] where it touches (the point of the face nearest it; default: the face pick); reference?: plane or planar face ref (on a cylinder, cone, sphere or torus only: the plane touches where the face turns towards it: parallel to it, on the side of `at`); angle?: expr (with reference, default 0 deg: turned that far about the face's axis; not on a sphere); name?"),
     CommandSpec::new("construct.plane.along_path", "Plane Along Path", crate::checked!("construct.plane.along_path", plane_along)).begins_edit()
         .at("SOLID", "CONSTRUCT")
         .icon("plane_along_path")
@@ -184,12 +184,39 @@ pub(crate) fn is_model_axis(v: &Value) -> bool {
 
 /// An axis on an edge or round face of the model (`{edge: [x,y,z]}` or `{face: [x,y,z]}`, the
 /// point on it), with the line it gives now (`solidcraft_doc::construct::model_axis`); `None`
-/// for any other form of `axis`.
+/// for any other form of `axis`. The pick is named in the world, where the axis is found now and
+/// on each evaluation: on a moved component, another edge can pass through the picked point
+/// before the move (#20492).
 pub(super) fn model_axis_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<(GeoRef, Vec3, Vec3)>> {
     let Some(v) = v.filter(|v| is_model_axis(v)) else { return Ok(None) };
-    let g = geo(s, Some(v), cmd, "axis")?;
-    let (o, d) = solidcraft_doc::construct::model_axis_in(Some(&s.doc), &*s.world_state()?, &g, 0).map_err(|e| bad(cmd, format!("`axis`: {e}")))?;
+    let state = s.world_state()?;
+    let (g, line) = if cmd == "solid.coil" {
+        // A Coil finds its edge or face in the world as it evaluates, so its world pick is named
+        // there too: an unplaced body's edge may pass through the pick where no placed one does.
+        let g = geo_in(s, Some(v), cmd, "axis", &state)?;
+        let line = solidcraft_doc::construct::coil_model_axis(&state, &g);
+        (placed_edge_of_pick(s, &state, g), line)
+    } else {
+        let g = geo_in(s, Some(v), cmd, "axis", &state)?;
+        let line = solidcraft_doc::construct::model_axis_in(Some(&s.doc), &state, &g, 0);
+        (g, line)
+    };
+    let (o, d) = line.map_err(|e| bad(cmd, format!("`axis`: {e}")))?;
     Ok(Some((g, o, d)))
+}
+
+/// A Coil's named edge pick on a placed component, kept as that placement's edge as a dialog pick
+/// is, so it follows the placement it was picked on when another placement shares its edge names.
+/// An edge outside a placement keeps its world pick.
+fn placed_edge_of_pick(s: &Session, world: &solidcraft_doc::ModelState, g: GeoRef) -> GeoRef {
+    let GeoRef::Edge { at, name: Some(name) } = &g else { return g };
+    let Some((world_body, ..)) = solidcraft_doc::construct::named_edge_pick(world, *at, name) else { return g };
+    let doc = s.placed_document();
+    let frames = doc.body_frames_with_source(&s.model.state());
+    let Some((_, body, _, path, frame)) = frames.into_iter().find(|(placed, ..)| *placed == world_body) else { return g };
+    let Some(inverse) = solidcraft_doc::mat_inverse(&frame).filter(|_| !path.is_empty()) else { return g };
+    let at = solidcraft_doc::apply_point(&inverse, *at);
+    GeoRef::PlacedEdge { body: body.into(), path, author_path: Vec::new(), at, name: name.clone() }
 }
 
 /// A reference as [`geo`] reads it before looking anything up in the design: which form it has.
@@ -267,6 +294,11 @@ pub(crate) fn geo_form(v: &Value) -> std::result::Result<GeoForm<'_>, GeoFormErr
 
 /// A reference from its JSON form.
 pub(super) fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Result<GeoRef> {
+    geo_in(s, v, cmd, what, &s.model.state())
+}
+
+/// [`geo`], with its picked faces and edges named in `st`: the state the reference is found in.
+fn geo_in(s: &Session, v: Option<&Value>, cmd: &str, what: &str, st: &solidcraft_doc::ModelState) -> Result<GeoRef> {
     let v = v.ok_or_else(|| bad(cmd, format!("`{what}` is required: {REF}")))?;
     let mut g = match geo_form(v) {
         Ok(GeoForm::Saved(g)) => g,
@@ -326,7 +358,7 @@ pub(super) fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Resu
         Err(GeoFormError::Saved(e)) => return Err(bad(cmd, format!("`{what}`: {e}"))),
         Err(GeoFormError::Unknown) => return Err(bad(cmd, format!("`{what}` must be {REF}"))),
     };
-    g.name_picks(&s.model.state());
+    g.name_picks(st);
     Ok(g)
 }
 

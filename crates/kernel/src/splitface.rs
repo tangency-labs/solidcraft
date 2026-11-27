@@ -159,10 +159,16 @@ fn face_patch(body: &Body, face: usize) -> Result<Patch> {
     let f = record.faces.get(face).ok_or_else(|| invalid(format!("the tool body has no face {face}")))?;
     let forward = body.face_forward(face);
     // The surface's own parameter box, unbounded where it is: of `surface` itself, not of its
-    // NURBS form (SMLib's cylinder is held on one, parameterised otherwise).
-    let dom = SurfaceEval::new(&f.surface).map_err(|e| invalid(format!("the split tool's surface: {e}")))?.domain();
+    // NURBS form (SMLib's cylinder is held on one, parameterised otherwise). A label (a round's
+    // definition, a ball patch) has no (u, v) of its own: its face's NURBS form is the surface,
+    // over its knot box, as a round's face was before it kept its definition.
+    let surface = match &f.surface {
+        Surface::Blend { .. } | Surface::BallPatch { .. } => f.parameters(),
+        s => s,
+    };
+    let dom = SurfaceEval::new(surface).map_err(|e| invalid(format!("the split tool's surface: {e}")))?.domain();
     let range = |k: usize| dom.range[k].map_or(ALL, |(a, b)| [a, b]);
-    Ok(Patch { surface: f.surface.clone(), domain: [range(0), range(1)], flip: !forward })
+    Ok(Patch { surface: surface.clone(), domain: [range(0), range(1)], flip: !forward })
 }
 
 /// The unit sweep direction of a sketch tool, on the sketch normal's side (`None`: along the
@@ -186,7 +192,7 @@ fn curve_patches(plane: &Plane, segs: &[Seg2], sweep: Vec3, reach: &Aabb3) -> Re
     if !segs.iter().all(|s| ok(s.start()) && ok(s.end())) {
         return Err(invalid("split curves need finite segments"));
     }
-    let closed = (first.start() - last.end()).len() <= 1e-9 * (1.0 + first.start().len());
+    let closed = chain_closed(segs);
     let far = reach.diagonal() + (plane.origin - (reach.min + reach.max) * 0.5).len();
     let mut out = Vec::new();
     let line = |a: Vec2, b: Vec2, out: &mut Vec<Patch>| -> Result<()> {
@@ -361,6 +367,95 @@ impl ToolSide {
     pub(crate) fn at(&self, p: Vec3) -> f64 {
         self.0.iter().filter_map(|m| m.near(p)).min_by(|a, b| a.0.total_cmp(&b.0)).map_or(f64::NAN, |(_, side)| side)
     }
+}
+
+/// Whether a sketch curve's chain of segments closes on itself (its end on its start).
+fn chain_closed(segs: &[Seg2]) -> bool {
+    match (segs.first(), segs.last()) {
+        (Some(first), Some(last)) => (first.start() - last.end()).len() <= 1e-9 * (1.0 + first.start().len()),
+        _ => false,
+    }
+}
+
+/// What one field of a split tool is, which says what its two sides are called.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FieldKind {
+    /// A plane: the side its normal points to, or the other.
+    Plane,
+    /// Another body's face: outside that body (the face's outward side), or inside.
+    Face,
+    /// A sketch curve that closes on itself: inside it, or outside.
+    Loop,
+    /// An open sketch curve: on its left (looking down the sketch normal), or its right.
+    Curve,
+}
+
+/// The pieces of a Split Face told apart by the tool: what each field of the tool is, and for
+/// each face asked about, which side of each field it lies on.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PieceSides {
+    pub fields: Vec<FieldKind>,
+    /// By face asked about, then by field: `Some(true)` on the field's first side (a plane's
+    /// normal side, outside a tool face, inside a closed curve, left of an open one), `Some(false)`
+    /// on the other, `None` where it can't be told.
+    pub sides: Vec<Vec<Option<bool>>>,
+}
+
+/// Which side of each field of `tool` each of the faces `faces` of `split` (a body `tool` split
+/// with [`split_faces`]) lies on: the tool's field at a point inside the face, on its surface and
+/// inside its trims (SMLib's `CalculateAnInternalPoint`). Each piece of a split face lies wholly
+/// on one side of every field, so one point says which; a face that lies on a field says nothing.
+pub fn split_piece_sides(split: &Body, faces: &[usize], tool: &SplitTool) -> Result<PieceSides> {
+    let fields: Vec<ToolSide> = cutters(tool, &reach_of(split))?
+        .iter()
+        .map(|g| g.iter().map(Measured::new).collect::<Result<Vec<_>>>().map(ToolSide))
+        .collect::<Result<_>>()?;
+    // Each patch's positive side is a sketch curve's left: inside a counter-clockwise loop,
+    // outside a clockwise one.
+    let kinds: Vec<(FieldKind, bool)> = match tool {
+        SplitTool::Plane(_) => vec![(FieldKind::Plane, true)],
+        SplitTool::Face { .. } => vec![(FieldKind::Face, true)],
+        SplitTool::Curves { curves, .. } => curves
+            .iter()
+            .map(|c| if chain_closed(c) { (FieldKind::Loop, solidcore_record::Loop2 { segs: c.clone() }.is_ccw()) } else { (FieldKind::Curve, true) })
+            .collect(),
+    };
+    if kinds.len() != fields.len() {
+        return Err(invalid("a split tool's fields and curves differ"));
+    }
+    let points = inner_points(split)?;
+    let tol = (split.size() * 1e-6).max(1e-9);
+    let sides = faces
+        .iter()
+        .map(|f| {
+            let p = points.get(*f).copied().flatten();
+            fields
+                .iter()
+                .zip(&kinds)
+                .map(|(field, (_, ahead))| {
+                    let side = field.at(p?);
+                    (side.is_finite() && side.abs() > tol).then_some((side > 0.0) == *ahead)
+                })
+                .collect()
+        })
+        .collect();
+    Ok(PieceSides { fields: kinds.into_iter().map(|(k, _)| k).collect(), sides })
+}
+
+/// A point inside each face of `body` (in its face order), on its surface and inside its trims
+/// (SMLib's `CalculateAnInternalPoint`); `None` for a face SMLib numbers outside the record.
+pub(crate) fn inner_points(body: &Body) -> Result<Vec<Option<Vec3>>> {
+    let (sm, order) = crate::native::smlib_body_ordered(body)?;
+    let order = order.ok_or_else(|| KernelError::Failed("SMLib numbers the body's faces differently from its record".into()))?;
+    let points = sm.face_points().map_err(|e| KernelError::smlib("SMLib: a point inside each face", e))?;
+    let mut out = vec![None; body.face_count()];
+    for (i, p) in points.iter().enumerate() {
+        let face = if order.faces.is_empty() { i } else { order.faces.get(i).copied().unwrap_or(usize::MAX) };
+        if let Some(slot) = out.get_mut(face) {
+            *slot = Some(Vec3::new(p[0], p[1], p[2]));
+        }
+    }
+    Ok(out)
 }
 
 /// How many fields a tool is (a sketch tool: one per curve).
@@ -615,6 +710,26 @@ pub fn split_body_by_faces(body: &Body, sheet: &Body, face: usize, faces: &[usiz
         return Err(invalid("the tool faces do not cut the body through"));
     }
     Ok(parts)
+}
+
+/// Split a body with every face of the surface body `sheet` exactly as it is, never extended,
+/// where that cuts it through (#13303): `face` gives the sides, as [`split_body_by_faces`].
+/// `None` when the sheet does not cut the body into closed solids (it misses it, or ends inside
+/// it): one of several surface bodies may cross only some of the pieces the others leave, and
+/// the body never comes back with a slit. Each part's history is over `[body]`.
+pub fn split_body_by_sheet_where_it_cuts(body: &Body, sheet: &Body, face: usize) -> Result<Option<Vec<Body>>> {
+    let _span = solidcraft_profile::span("kernel", "split_body_by_sheet_where_it_cuts");
+    body.require_brep(SPLIT_BODY)?;
+    sheet.require_brep("a split tool")?;
+    if !sheet.is_surface() {
+        return Err(invalid("a solid cannot split as a whole surface body"));
+    }
+    if face >= sheet.face_count() {
+        return Err(invalid(format!("the tool body has no face {face}")));
+    }
+    let faces: Vec<usize> = (0..sheet.face_count()).collect();
+    let parts = split_by_sheet(body, sheet, face, &faces)?;
+    Ok(closed_solids(&parts)?.then_some(parts))
 }
 
 /// Whether `parts` are two or more parts, each one closed manifold solid (SMLib's exact
@@ -1151,6 +1266,27 @@ mod tests {
         assert!(split_body_by_faces(&cube, &sheet, first, &[7]).is_err());
     }
 
+    /// One of several surface bodies splitting a body cuts the pieces it crosses and leaves the
+    /// others (#13303). The bent sheet of the test above cuts the cube 0…10 into 437.5 and 562.5.
+    /// A flat sheet at y = 5 that ends at x = 5, inside the cube, only nicks it, and a flat sheet
+    /// at y = 20 misses it: both leave it alone (`None`), never with a slit. A solid is refused.
+    #[test]
+    fn a_whole_surface_body_splits_where_it_cuts_and_leaves_what_it_misses() {
+        let p = |x: f64, y: f64| Vec2::new(x, y);
+        let bent = vec![Seg2::Line { a: p(-3.0, 5.0), b: p(5.0, 5.0) }, Seg2::Line { a: p(5.0, 5.0), b: p(13.0, 9.0) }];
+        let bent = crate::extrude_sheet(&Plane::XY, &[bent], -5.0, 15.0).unwrap();
+        let cube = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let parts = split_body_by_sheet_where_it_cuts(&cube, &bent, 0).unwrap().unwrap();
+        let v = volumes(&parts);
+        assert!(v.len() == 2 && rel(v[0], 437.5) < 1e-9 && rel(v[1], 562.5) < 1e-9, "{v:?}");
+        assert!(parts.iter().all(|b| b.smlib().unwrap().is_manifold_solid().unwrap()));
+        for line in [Seg2::Line { a: p(-3.0, 5.0), b: p(5.0, 5.0) }, Seg2::Line { a: p(-3.0, 20.0), b: p(13.0, 20.0) }] {
+            let sheet = crate::extrude_sheet(&Plane::XY, &[vec![line]], -5.0, 15.0).unwrap();
+            assert!(split_body_by_sheet_where_it_cuts(&cube, &sheet, 0).unwrap().is_none());
+        }
+        assert!(split_body_by_sheet_where_it_cuts(&cube, &cube, 0).is_err());
+    }
+
     /// A face of a creased sheet whose smooth part ends inside the body cuts with the whole sheet
     /// (#17250, the loft of #17192): two spans meeting tangent from x = -3 to 9, then a line rising
     /// 1 in 50 from their end (a crease of about 1.15°) to x = 13, extruded from z = -5 to 15. The
@@ -1221,6 +1357,45 @@ mod tests {
         let v = volumes(&split_body(&across, &SplitTool::Face { body: &ball, face }).unwrap());
         assert!(v.len() == 3, "{v:?}");
         assert!(rel(v[0], end) < 1e-4 && rel(v[1], end) < 1e-4 && rel(v[2], core) < 1e-4, "{v:?}, core {core}, ends {end}");
+    }
+
+    /// A round along a curved edge keeps its definition (`Surface::Blend`), which has no (u, v)
+    /// of its own, and is a split tool by its face's NURBS form. A cylinder r 20, 20 tall, its
+    /// bottom rim rounded r 5: the round is the torus of major radius 15 and tube radius 5 about
+    /// (0, 0, 5). Shelled 2 in from the top, the cavity's round is that torus with tube radius 3.
+    /// A tube r 16 to 17, 20 tall, split by either round: below the torus of tube radius r it
+    /// holds 2 pi times the integral of (5 - sqrt(r^2 - u^2)) (15 + u) over u = rho - 15 in
+    /// [1, 2]. Both splits were refused (#23158): "the split tool's surface: not supported yet:
+    /// a blend's label".
+    #[test]
+    fn a_tube_splits_by_a_round_on_a_cylinder_rim_and_by_the_round_of_its_shell() {
+        let pi = std::f64::consts::PI;
+        let disc = cylinder(Vec3::ZERO, Vec3::Z, 20.0, 20.0).unwrap();
+        let rounded = crate::fillet(&disc, &[Vec3::new(20.0, 0.0, 0.0)], 5.0).unwrap();
+        let shelled = crate::shell(&rounded, &[Vec3::new(0.0, 0.0, 20.0)], 2.0).unwrap();
+        let outer = cylinder(Vec3::ZERO, Vec3::Z, 17.0, 20.0).unwrap();
+        let bore = cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 16.0, 22.0).unwrap();
+        let tube = crate::boolean(&outer, &bore, crate::BoolOp::Cut).unwrap().unwrap();
+        let whole = pi * (289.0 - 256.0) * 20.0;
+        // The integral of sqrt(r^2 - u^2) and of u sqrt(r^2 - u^2).
+        let f = |r: f64, u: f64| u / 2.0 * (r * r - u * u).sqrt() + r * r / 2.0 * (u / r).asin();
+        let g = |r: f64, u: f64| -(r * r - u * u).powf(1.5) / 3.0;
+        let below = |r: f64| 2.0 * pi * (5.0 * 16.5 - (g(r, 2.0) - g(r, 1.0)) - 15.0 * (f(r, 2.0) - f(r, 1.0)));
+        // The round's face of each body: the face at the point (17.5, 0, z) of its torus.
+        let round_of = |b: &Body, r: f64| {
+            let z = 5.0 - (r * r - 2.5f64 * 2.5).sqrt();
+            let i = b.face_at(Vec3::new(17.5, 0.0, z), 1e-6).unwrap();
+            assert!(matches!(b.record().faces[i].surface, Surface::Blend { .. }), "face {i} of the r {r} round keeps its definition");
+            i
+        };
+        for (b, r) in [(&rounded, 5.0), (&shelled, 3.0)] {
+            let v = volumes(&split_body(&tube, &SplitTool::Face { body: b, face: round_of(b, r) }).unwrap());
+            let low = below(r);
+            assert!(
+                v.len() == 2 && rel(v[0], low.min(whole - low)) < 1e-6 && rel(v[1], low.max(whole - low)) < 1e-6,
+                "r {r}: {v:?}, below {low}, whole {whole}"
+            );
+        }
     }
 
     #[test]
@@ -1347,5 +1522,95 @@ mod tests {
             let got = measure(start).unwrap().volume;
             assert!(rel(got, want) < 1e-6, "from {from}: {got} vs {want}");
         }
+    }
+
+    /// #21864: a split-in pocket whose tangent spline outline merges a degree-2 vertex during
+    /// pre-offset healing must remain separate from the raised face regardless of loop direction
+    /// (both forward and reversed outlines must cut the same 4 mm recess instead of filling it).
+    #[test]
+    fn offset_face_keeps_split_pocket_regardless_of_spline_outline_direction() {
+        use solidcore_record::{Loop2, Region2};
+        use std::f64::consts::TAU;
+
+        // Unit checks for `on_split_line` across joined/merged recorded split lines.
+        let l1 = vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0)];
+        let l2 = vec![Vec3::new(5.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0)];
+        let l3 = vec![Vec3::new(10.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 0.0)];
+        let keep_lines = vec![l1, l2, l3];
+        // Edge spanning l1 + l2 (merged degree-2 vertex at x = 5): every sample lies on the union.
+        let merged_pts =
+            [Vec3::new(0.0, 0.0, 0.0), Vec3::new(2.5, 0.0, 0.0), Vec3::new(5.0, 0.0, 0.0), Vec3::new(7.5, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0)];
+        assert!(crate::heal::on_split_line(&merged_pts, &keep_lines));
+        // Diagonal chord bridging l2 and l3 across the corner (10, 0): interior samples miss both.
+        let chord_pts =
+            [Vec3::new(5.0, 0.0, 0.0), Vec3::new(6.25, 2.5, 0.0), Vec3::new(7.5, 5.0, 0.0), Vec3::new(8.75, 7.5, 0.0), Vec3::new(10.0, 10.0, 0.0)];
+        assert!(!crate::heal::on_split_line(&chord_pts, &keep_lines));
+        assert!(!crate::heal::on_split_line(&[], &keep_lines));
+        assert!(!crate::heal::on_split_line(&merged_pts, &[]));
+
+        let outer = Loop2 { segs: vec![Seg2::Arc { center: Vec2::ZERO, radius: 101.0, start: 0.0, sweep: TAU }] };
+        let inner = Loop2 { segs: vec![Seg2::Arc { center: Vec2::ZERO, radius: 99.0, start: 0.0, sweep: TAU }] };
+        let tube = crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![inner] }], 0.0, 400.0).unwrap().remove(0);
+        let f_pos = tube.face_within(Vec3::new(0.0, 99.0, 10.0), 1.0).unwrap().unwrap();
+        let f_neg = tube.face_within(Vec3::new(0.0, -99.0, 10.0), 1.0).unwrap().unwrap();
+        let mut faces = vec![f_pos];
+        if f_neg != f_pos {
+            faces.push(f_neg);
+        }
+        let pl_y = Plane::new(Vec3::ZERO, Vec3::X, Vec3::Z).unwrap();
+        let tube = split_faces(&tube, &faces, &SplitTool::Plane(pl_y)).unwrap();
+
+        let p = |x: f64, y: f64| Vec2::new(x, y);
+        let forward = vec![
+            Seg2::Line { a: p(-8.44878, 378.5), b: p(-3.799174, 378.5) },
+            Seg2::Cubic { p0: p(-3.799174, 378.5), p1: p(-2.442599, 378.499905), p2: p(-1.254548, 377.587947), p3: p(-0.902724, 376.277972) },
+            Seg2::Cubic { p0: p(-0.902724, 376.277972), p1: p(-0.550956, 374.96748), p2: p(-1.122935, 373.583376), p3: p(-2.297185, 372.903494) },
+            Seg2::Cubic { p0: p(-2.297185, 372.903494), p1: p(-3.848691, 372.005326), p2: p(-5.399984, 371.106791), p3: p(-6.950631, 370.207141) },
+            Seg2::Cubic { p0: p(-6.950631, 370.207141), p1: p(-7.875272, 369.670732), p2: p(-9.015685, 369.668575), p3: p(-9.940929, 370.204788) },
+            Seg2::Cubic { p0: p(-9.940929, 370.204788), p1: p(-10.867204, 370.741687), p2: p(-11.433462, 371.734105), p3: p(-11.433499, 372.803648) },
+            Seg2::Line { a: p(-11.433499, 372.803648), b: p(-11.433499, 375.5) },
+            Seg2::Cubic { p0: p(-11.433499, 375.5), p1: p(-11.433488, 376.294081), p2: p(-11.120363, 377.057985), p3: p(-10.56026, 377.62132) },
+            Seg2::Cubic { p0: p(-10.56026, 377.62132), p1: p(-10.001249, 378.183525), p2: p(-9.241693, 378.499988), p3: p(-8.44878, 378.5) },
+        ];
+        let reversed: Vec<Seg2> = forward
+            .iter()
+            .rev()
+            .map(|s| match *s {
+                Seg2::Line { a, b } => Seg2::Line { a: b, b: a },
+                Seg2::Cubic { p0, p1, p2, p3 } => Seg2::Cubic { p0: p3, p1: p2, p2: p1, p3: p0 },
+                other => other,
+            })
+            .collect();
+
+        // Precomputed unit vector for the sketch plane X axis (unit normalization of (-0.382683, 0.92388, 0)).
+        const SKETCH_X: Vec3 = Vec3::new(-0.382_682_898_036_223, 0.923_879_753_837_282, 0.0);
+        // Precomputed plain offset-tube volume: pi * (101^2 - 95^2) * 400 = 470_400 * pi mm^3.
+        const PLAIN_TUBE_VOL: f64 = 1_477_805.184_292_861_8;
+
+        let sk_plane = Plane::new(Vec3::ZERO, SKETCH_X, Vec3::Z).unwrap();
+        let target = tube.face_within(Vec3::new(91.464074, 37.88566, 10.0), 1.0).unwrap().unwrap();
+        let picks = [Vec3::new(91.464074, 37.88566, 10.0), Vec3::new(91.464074, -37.88566, 10.0)];
+
+        let run_case = |segs: Vec<Seg2>| {
+            let split = split_faces(&tube, &[target], &SplitTool::Curves { plane: sk_plane, curves: vec![segs], along: None }).unwrap();
+            // Even a second heal after degree-2 vertex merging must keep the pocket separate.
+            let healed_once = crate::boolean_record::healed(&split).unwrap().with_split_lines(split.splits.clone());
+            let healed_twice = crate::boolean_record::healed(&healed_once).unwrap().with_split_lines(split.splits.clone());
+            assert_eq!(healed_twice.face_count(), split.face_count());
+            let raised = crate::offset_faces(&split, &picks, 4.0).unwrap();
+            let vol = raised.volume_at(1e-6).unwrap();
+            let raised_healed = crate::offset_faces(&healed_twice, &picks, 4.0).unwrap();
+            let healed_vol = raised_healed.volume_at(1e-6).unwrap();
+            assert_eq!(raised_healed.face_count(), raised.face_count());
+            assert!((healed_vol - vol).abs() < 1e-3, "repeated-heal offset volume ({healed_vol:.3}) must match split offset volume ({vol:.3})");
+            (raised.face_count(), vol)
+        };
+
+        let (fwd_faces, fwd_vol) = run_case(forward);
+        let (rev_faces, rev_vol) = run_case(reversed);
+        assert!(fwd_vol < PLAIN_TUBE_VOL - 200.0, "forward pocket was filled: {fwd_vol:.3} vs plain {PLAIN_TUBE_VOL:.3}");
+        assert!((fwd_vol - 1_477_519.984).abs() < 0.05, "forward volume {fwd_vol:.3}");
+        assert!((fwd_vol - rev_vol).abs() < 1e-3, "forward ({fwd_vol:.3}) and reversed ({rev_vol:.3}) volumes must match");
+        assert!(fwd_faces > 6 && rev_faces > 6, "recess walls must exist: fwd={fwd_faces}, rev={rev_faces}");
     }
 }

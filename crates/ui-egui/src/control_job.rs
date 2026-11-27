@@ -120,6 +120,7 @@ const NAMES_A_FILE: &[&str] = &["path", "paths", "file", "files", "dir", "folder
 const ANSWERED_ON_A_COPY: &[&str] = &[
     "file.export",
     "file.export_3mf",
+    "file.export_mjcf",
     "file.export_obj",
     "file.export_sdf",
     "file.export_step",
@@ -127,13 +128,17 @@ const ANSWERED_ON_A_COPY: &[&str] = &[
     "file.export_urdf",
     "file.export_urdf_options",
     "file.save_mesh",
+    "frame.export_cope_dxf",
 ];
 
 /// Commands that only read the design, which can take long on a large one (a measure of every
 /// body, an inspection that measures them, #4604; a clearance or interference check of every pair
-/// of bodies, minutes on an assembly of 150): they run on a copy too, whatever the preference,
-/// since an answer from the design as it was when asked has no order to keep.
+/// of bodies, minutes on an assembly of 150; exact hidden-line drawing views of a thousand-body
+/// assembly, #20484): they run on a copy too, whatever the preference, since an answer from the
+/// design as it was when asked has no order to keep.
 const READ_ON_A_COPY: &[&str] = &[
+    "drawing.scene",
+    "drawing.view.snapshot",
     "model.mesh",
     "plugin.inspect",
     // Compiles the package's component to check it: tens of seconds for a large importer.
@@ -672,6 +677,7 @@ impl SolveApp {
             solidcraft_engine::plugin::sync_panels(&mut self.session);
             let mut copy = self.session.scratch();
             copy.plugin_forms_interactive = crate::plugin_menu::take_interactive_run(self, req.serial);
+            copy.plugin_state.user.dialog_folders = crate::plugin_menu::take_folder_consent(self, req.serial);
             if let Some(level) = level {
                 copy.param_check = level;
             }
@@ -723,11 +729,15 @@ impl SolveApp {
         if self.apply_off_thread.is_none() || self.file_load_holds() || self.file_picker.is_some() {
             return Some(req);
         }
-        // Reading the design (a measure, an inspection that measures): on a copy, answered from
-        // there, preference or not. On a large assembly it took a minute on the window thread,
-        // and the window, answering nothing meanwhile, was closed as not responding (#4604).
+        // Reading the design (a measure, an inspection that measures, an automatic drawing scene):
+        // on a copy, answered from there, preference or not. On a large assembly it took a minute
+        // on the window thread, and the window, answering nothing meanwhile, was closed as not
+        // responding (#4604, #20484). A deferred drawing's `drawing.scene` settles the live sheet
+        // cache, so it stays on the window thread.
         if self.control_answering.len() < MAX_ANSWERING
             && let Some((id, params)) = reading(&req)
+            && (id != "drawing.scene"
+                || self.session.drawing("drawing.scene").is_ok_and(|d| d.updates == solidcraft_engine::doc::drawing::Updates::Automatic))
         {
             return self.answer_on_a_copy(req, id, params);
         }
@@ -765,7 +775,7 @@ impl SolveApp {
         // The request's own level (#9184) checks it on the copy, and the reply says so, as
         // `control::handle` does; a word that is no level is refused there.
         let Ok(level) = crate::control::request_param_check(&req.method, &req.params) else { return Some(req) };
-        let mut copy = self.session.scratch();
+        let mut copy = if id == "drawing.scene" { self.session.scratch_as_shown() } else { self.session.scratch() };
         if let Some(level) = level {
             copy.param_check = level;
         }
@@ -923,7 +933,8 @@ impl SolveApp {
                         let before = self.session.doc.clone();
                         // Move the redo stack instead of cloning the whole history on the window thread.
                         let redo = std::mem::take(&mut self.session.redo);
-                        let replies = self.session.accept_commands(prepared);
+                        let chat_turn = job.req.chat_turn.as_ref();
+                        let replies = crate::agent_chat::with_tool_request(self, chat_turn, |app| app.session.accept_commands(prepared));
                         // A read or a failed run leaves this design's document as it was, so the
                         // Start page stays up. An edit that landed shows this design, as clicking
                         // its tab does (`documents::switch`). The dialog only runs on the session
@@ -937,6 +948,8 @@ impl SolveApp {
                             if let Some(solidcraft_engine::plugin::HostError::StaleRevision { expected, actual }) = error.host_error() {
                                 stale_revision = Some((expected.clone(), actual.clone()));
                                 error.to_string()
+                            } else if error.host_error().is_some() {
+                                error.to_string()
                             } else {
                                 self.tr("ui.plugin_context_changed").to_string()
                             }
@@ -948,7 +961,15 @@ impl SolveApp {
             let result = result.and_then(|reply| {
                 if let Some(exits) = reply.get("sketch_exits").and_then(Value::as_array) {
                     for sketch in exits {
-                        self.sketch_closed(sketch.as_u64());
+                        self.sketch_closed(sketch.as_u64(), false);
+                    }
+                }
+                if let Some(messages) = reply.get("messages").and_then(Value::as_array) {
+                    for m in messages {
+                        let level = m.get("level").and_then(Value::as_str).unwrap_or("info");
+                        let text = m.get("message").and_then(Value::as_str).unwrap_or_default();
+                        let error = level == "error";
+                        self.messages.push(text, error, crate::now_ms());
                     }
                 }
                 crate::render_workspace::apply_command(self, "plugin.run", &reply)?;

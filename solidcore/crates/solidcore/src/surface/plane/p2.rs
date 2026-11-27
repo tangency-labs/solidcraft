@@ -30,6 +30,11 @@
 //!   the side by up to a contact tolerance its caller gives, read as every contact site
 //!   reads it (`within_contact_tol`; [`Plane::make_new_plane_ellipse_in_contact`]; zero,
 //!   upstream's, by [`Plane::make_new_plane_ellipse`]).
+//! - **A meridian tangent to a side (not upstream, #15049).** A surface of revolution's
+//!   meridian is trimmed to the plane's domain by `Plane::trim_curve_to_plane_domain_joined`
+//!   where both surfaces are faces': a point at which the curve lies inside the domain on
+//!   both sides is no crossing, so a meridian a hair outside a side it is tangent to stays
+//!   one curve (upstream split it at the lens's one crossing inside the curve).
 //! - **Plane first with a torus (not upstream).** `GlobalSurfaceIntersect` takes a torus's
 //!   own plane section (`Torus::intersect_with_plane_owned_into`, its orders and UV curves
 //!   swapped as for a surface of revolution; WR-721, #2405); upstream has no torus case and
@@ -119,6 +124,30 @@ const OP_PP: &str = "surface::plane::p2::Plane::intersect_with_plane";
 const OP_NURB: &str = "surface::plane::p2::Plane::is_nurb_surface_plane";
 const OP_XFORM: &str = "surface::plane::p2::Plane::transform";
 const OP_TRIM: &str = "surface::plane::p2::Plane::trim_with_domain";
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ClipPurpose {
+    Trim,
+    /// Not upstream (#15049): [`ClipPurpose::Trim`] that takes a point at which the curve
+    /// is inside the domain on both sides for no crossing (`trim_curve_to_plane_domain_joined`).
+    TrimJoined,
+    Section,
+}
+
+impl ClipPurpose {
+    fn handle_status<T>(self, result: Result<T>) -> Result<Option<T>> {
+        match self {
+            Self::Trim | Self::TrimJoined => ignored(result),
+            Self::Section => result.map(Some),
+        }
+    }
+}
+
+pub(super) struct PlaneClip {
+    pub curves: Vec<Curve>,
+    /// All boundary hits were isolated crossings inside the curve and side intervals.
+    pub proper_crossings: bool,
+}
 
 /// A warning [`Plane::intersect_with_plane`] returns with its result. It is not a
 /// failure of the intersection: the caller decides whether to stop on it.
@@ -370,6 +399,7 @@ impl Plane {
                 Err(
                     e @ (SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
                     | SolidError::PreparationRequired { .. }),
                 ) => return Err(e),
                 Err(e) => return Err(unmeasurable.caused_by(e).into_error()),
@@ -999,7 +1029,6 @@ impl Plane {
     ///
     /// Those of the curve evaluations, copies and degenerate curves (statuses upstream
     /// ignores); [`SolidError::Unported`] from the intersection.
-    #[allow(clippy::too_many_lines)] // one upstream function
     pub fn trim_curve_to_plane_domain(
         &self,
         k: &Kernel,
@@ -1007,6 +1036,48 @@ impl Plane {
         curve: &Curve,
         tol_3d: f64,
     ) -> Result<Vec<Curve>> {
+        Ok(self
+            .clip_curve(k, uv_domain, curve, tol_3d, ClipPurpose::Trim)?
+            .curves)
+    }
+
+    /// Not upstream (#15049): [`Plane::trim_curve_to_plane_domain`] where a point at which
+    /// the curve lies inside the domain on both sides is no crossing. A curve tangent to a
+    /// side of the domain a hair outside it crosses that side twice, `2√(2rδ)` apart for its
+    /// radius of curvature `r` and overlap δ, while it stays within δ of the side between
+    /// the two (the lens of `docs/booleans.md` §6), and where the curve ends inside the lens
+    /// only one crossing is left, wherever the rounding puts it: the meridian of a cut whose
+    /// arc runs tangentially into its line, on a floor that line sweeps onto, was split
+    /// 2.5e-4 from the cusp. The pieces on both sides of such a point classify inside the
+    /// domain within `tol_3d`, as a graze does (which the trim already skips by its
+    /// tangents), and are one piece.
+    ///
+    /// # Errors
+    ///
+    /// As [`Plane::trim_curve_to_plane_domain`].
+    pub(crate) fn trim_curve_to_plane_domain_joined(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        tol_3d: f64,
+    ) -> Result<Vec<Curve>> {
+        Ok(self
+            .clip_curve(k, uv_domain, curve, tol_3d, ClipPurpose::TrimJoined)?
+            .curves)
+    }
+
+    #[allow(clippy::too_many_lines)] // one upstream function
+    pub(super) fn clip_curve(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        tol_3d: f64,
+        purpose: ClipPurpose,
+    ) -> Result<PlaneClip> {
+        let section = purpose == ClipPurpose::Section;
+        let mut proper_crossings = true;
         // init output
         let mut curves_3d = Vec::new();
 
@@ -1023,6 +1094,15 @@ impl Plane {
         let p01 = self.evaluate_point(Point2::new(min_x, max_y));
         let p10 = self.evaluate_point(Point2::new(max_x, min_y));
         let p11 = self.evaluate_point(Point2::new(max_x, max_y));
+
+        // Sides that coincide within the model tolerance cannot distinguish a
+        // crossing from a point contact. Let the surface intersector classify them.
+        if section && (p00.distance(p10) <= tol_3d || p00.distance(p01) <= tol_3d) {
+            return Ok(PlaneClip {
+                curves: curves_3d,
+                proper_crossings: false,
+            });
+        }
 
         // boundary line segments - a PlaneSurface domain boundary is a line
         let line_ivl = Extent1d::from_min_max(0.0, 1.0);
@@ -1046,9 +1126,9 @@ impl Plane {
 
         // for every boundary line
         for (line_id, line) in (1u8..).zip(&lines) {
-            // Intersect Curve with boundary lines (status ignored)
+            // A section needs every boundary solve. Ordinary trimming keeps the upstream status policy.
             let line_curve = Curve::from(line.clone());
-            let t_solutions = ignored(curve.global_curve_intersect(
+            let boundary_hits = curve.global_curve_intersect(
                 k,
                 &ivl,
                 &line_curve,
@@ -1065,14 +1145,20 @@ impl Plane {
                         Some(CurveHandle(10 + line_id, line.natural_interval())),
                     ],
                 },
-            ))?
-            .unwrap_or_default();
+            );
+            let Some(t_solutions) = purpose.handle_status(boundary_hits)? else {
+                continue;
+            };
 
             // accumulate the solutions - sorted by crCurve parameter
             let mut gs: GlobalSolver<'_, CurveHandle> = GlobalSolver::new();
             gs.set_solutions(core::mem::take(&mut solutions));
             gs.set_num_variables(1);
             for solution in t_solutions.as_slice() {
+                let line_parameter = solution.start.param(1)?;
+                proper_crossings &= solution.solution_type == SolutionType::SingleValue
+                    && !is_zero(line_parameter - line_ivl.min())
+                    && !is_zero(line_parameter - line_ivl.max());
                 // Skip grazing solutions.  [Boolean Restructure]
                 if solution.solution_type == SolutionType::SingleValue
                     && is_grazing_intersection(
@@ -1083,11 +1169,15 @@ impl Plane {
                         solution.start.param(1)?,
                     )?
                 {
+                    proper_crossings = false;
                     continue;
                 }
 
-                // (status ignored)
-                ignore_status(gs.add_sorted_solution(solution, SortKey::ByFirstParameter, true))?;
+                let _ = purpose.handle_status(gs.add_sorted_solution(
+                    solution,
+                    SortKey::ByFirstParameter,
+                    true,
+                ))?;
             }
             solutions = gs.set_solutions(SolutionArray::new());
         }
@@ -1113,6 +1203,7 @@ impl Plane {
             let speed = d0.length();
             if is_zero_to_tol(s_param - e_param, 10.0 * tol_3d / max2(1.0, speed)) && dist < tol_3d
             {
+                proper_crossings = false;
                 continue;
             }
 
@@ -1140,6 +1231,14 @@ impl Plane {
             ends.push(e_param);
             keeps.push(2); // unclassified interval
         }
+
+        if !solutions.is_empty() && is_zero(s_param - e_param) {
+            proper_crossings = false;
+        }
+
+        // (not upstream, #15049) the intervals that lie between two point solutions or
+        // the curve's ends, classified below; a coincident range is kept as it is
+        let free: Vec<bool> = keeps.iter().map(|&keep| keep == 2).collect();
 
         // classify every interval unclassified interval
         for ((&s_param, &e_param), keep) in starts.iter().zip(&ends).zip(keeps.iter_mut()) {
@@ -1182,6 +1281,28 @@ impl Plane {
             *keep = u8::from(!t_solutions.is_empty());
         }
 
+        // Not upstream (#15049): two classified intervals inside the domain on both sides
+        // of a point solution are one; the curve does not leave the domain there.
+        if purpose == ClipPurpose::TrimJoined {
+            let (mut s_out, mut e_out, mut k_out) = (Vec::new(), Vec::new(), Vec::new());
+            let mut last_free = false;
+            for (((&s_param, &e_param), &keep), &is_free) in
+                starts.iter().zip(&ends).zip(&keeps).zip(&free)
+            {
+                if is_free && last_free && keep == 1 && k_out.last() == Some(&1) {
+                    if let Some(end) = e_out.last_mut() {
+                        *end = e_param;
+                    }
+                    continue;
+                }
+                s_out.push(s_param);
+                e_out.push(e_param);
+                k_out.push(keep);
+                last_free = is_free;
+            }
+            (starts, ends, keeps) = (s_out, e_out, k_out);
+        }
+
         // build an output curve for every keeper interval
         let mut prev_keep: Option<u8> = None;
         for ((&s_param, &e_param), &keep) in starts.iter().zip(&ends).zip(&keeps) {
@@ -1202,8 +1323,8 @@ impl Plane {
             // copy, trim, and add curve to output
             let mut trim_ivl = Extent1d::from_min_max(s_param, e_param);
             let mut new_curve = curve.copy(k)?;
-            // may snap sIvl by tol to existing knots (status ignored)
-            ignore_status(new_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?;
+            // Trimming may snap the interval to existing knots.
+            let _ = purpose.handle_status(new_curve.trim(k, &mut trim_ivl, TrimMode::Notify))?;
             // A full circle has coincident endpoints. Bound the whole analytic
             // interval using its diameter and arc length, with signed sizes by magnitude.
             // Round each computed upper bound outward, including norm underflow.
@@ -1238,7 +1359,10 @@ impl Plane {
             curves_3d.push(new_curve);
         }
 
-        Ok(curves_3d)
+        Ok(PlaneClip {
+            curves: curves_3d,
+            proper_crossings,
+        })
     }
 
     /// The segment `start_pt`-`end_pt` (known to lie in the plane) trimmed to
@@ -1746,6 +1870,10 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
                 uv_domain,
                 approx_tol_3d,
                 &SurfOfRevolution::own_sweep_iso,
+                crate::surface::surf_of_revolution::p3::revolved_contact_tol(
+                    k,
+                    [Some(this), Some(other)],
+                ),
                 out,
             );
             core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);
@@ -1830,6 +1958,210 @@ pub(crate) fn global_surface_intersect_into<O: SolutionObject + Copy + PartialEq
 mod tests {
     use super::*;
     use crate::error::SM_ERR_WARNING;
+
+    #[test]
+    fn translated_spline_rows_give_one_section_in_either_parameter_direction() {
+        use crate::nurbs::math::CPoint;
+        use crate::surface::plane::spline_section;
+
+        let k = Kernel::default();
+        let plane = rect();
+        // A quadratic profile and its translate, at z = -1 and z = 3. Their z = 0
+        // section is one quarter of the way between corresponding points.
+        let row = |z, shift| {
+            [(-1.0, shift), (0.0, 1.0 + shift), (1.0, shift)]
+                .map(|(x, y)| CPoint::from_point(Vec3::new(x, y, z)))
+                .to_vec()
+        };
+        let mut rows = vec![row(-1.0, 0.0), row(3.0, 2.0)];
+        let make = |rows: &[Vec<CPoint>]| {
+            BSplineSurface::from_data(
+                1,
+                2,
+                1,
+                2,
+                3,
+                5,
+                rows,
+                &[4.0, 4.0, 12.0, 12.0],
+                &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            )
+            .unwrap()
+        };
+        let mut spline = make(&rows);
+        for swap in [false, true] {
+            if swap {
+                spline.swap_uv().unwrap();
+            }
+            let mut domain = Extent2d::from_bounds(5.0, 0.25, 8.0, 0.75);
+            if swap {
+                domain.transpose();
+            }
+            let section = spline_section::intersect(
+                &k,
+                &spline,
+                &domain,
+                &plane,
+                &plane.natural_uv_domain(),
+                1e-6,
+            )
+            .unwrap()
+            .unwrap();
+            assert_eq!(section.curve_types, [TsectCurveType::Crossing]);
+            let c = &section.curves_3d[0];
+            let iv = c.natural_interval();
+            for f in [0.0, 0.5, 1.0] {
+                let t = 0.25 + 0.5 * f;
+                let expected = Vec3::new(2.0 * t - 1.0, 0.5 + 2.0 * t * (1.0 - t), 0.0);
+                assert!(
+                    c.evaluate_point(&k, iv.evaluate(f))
+                        .unwrap()
+                        .distance(expected)
+                        < 1e-12
+                );
+            }
+        }
+        // Both profiles still lie in parallel planes, but their middle poles
+        // now move by a different vector than their endpoints (a twisted loft).
+        let defers = |rows: &[Vec<CPoint>]| {
+            let loft = make(rows);
+            spline_section::intersect(
+                &k,
+                &loft,
+                &loft.natural_uv_domain(),
+                &plane,
+                &plane.natural_uv_domain(),
+                1e-6,
+            )
+            .unwrap()
+            .is_none()
+        };
+        let mut twisted = rows.clone();
+        twisted[1][1].y += 1e-10;
+        assert!(defers(&twisted));
+        // The profiles can also remain translates but leave their respective planes.
+        for row in &mut rows {
+            row[1].z += 0.125;
+        }
+        assert!(defers(&rows));
+    }
+
+    #[test]
+    fn a_section_with_an_isolated_endpoint_and_a_crossing_defers_to_the_full_intersector() {
+        use crate::nurbs::math::CPoint;
+        use crate::surface::plane::spline_section;
+
+        let k = Kernel::default();
+        let plane = rect();
+        // The quadratic (t, t(1/2-t)) lies in y <= 0 at t=0 and over [1/2,1].
+        let rows = [-1.0, 1.0].map(|z| {
+            [(0.0, 0.0), (0.5, 0.25), (1.0, -0.5)]
+                .map(|(x, y)| CPoint::from_point(Vec3::new(x, y, z)))
+                .to_vec()
+        });
+        let spline = BSplineSurface::from_data(
+            1,
+            2,
+            1,
+            2,
+            3,
+            5,
+            &rows,
+            &[0., 0., 1., 1.],
+            &[0., 0., 0., 1., 1., 1.],
+        )
+        .unwrap();
+        let section = spline_section::intersect(
+            &k,
+            &spline,
+            &spline.natural_uv_domain(),
+            &plane,
+            &Extent2d::from_bounds(-1., -2., 2., 0.),
+            1e-6,
+        )
+        .unwrap();
+        assert!(
+            section.is_none(),
+            "a crossing alone would lose the endpoint contact"
+        );
+    }
+
+    #[test]
+    fn spline_sections_distinguish_a_thin_plane_patch_from_a_failed_boundary_solve() {
+        use crate::nurbs::math::CPoint;
+        use crate::surface::surface::p2::base_global_surface_intersect;
+
+        let k = Kernel::default();
+        let rows = [-1.0, 1.0].map(|z| {
+            [(-1.0, 0.0), (0.0, 1.0), (1.0, 0.0)]
+                .map(|(x, y)| CPoint::from_point(Vec3::new(x, y, z)))
+                .to_vec()
+        });
+        let spline = BSplineSurface::from_data(
+            1,
+            2,
+            1,
+            2,
+            3,
+            5,
+            &rows,
+            &[0., 0., 1., 1.],
+            &[0., 0., 0., 1., 1., 1.],
+        )
+        .unwrap();
+        let domain = spline.natural_uv_domain();
+        let loft = Surface::from(spline);
+        let plane = Surface::from(rect());
+        // Both horizontal sides meet the parabola at its ends within tolerance.
+        let thin = loft
+            .global_surface_intersect(
+                &k,
+                &domain,
+                &plane,
+                &Extent2d::from_bounds(-1., 0., 1., 1e-14),
+                [false; 2],
+                Some(1e-6),
+                None,
+            )
+            .unwrap();
+        assert!(!thin.curve_types.is_empty());
+        assert!(thin
+            .curve_types
+            .iter()
+            .all(|kind| *kind == TsectCurveType::Touching));
+        // A non-finite upper boundary prevents the section's curve solver from building
+        // its cache. Both surface orders must defer to the general intersector.
+        let plane_domain = Extent2d::from_bounds(-1., 0., 1., f64::NAN);
+        for (first, first_domain, second, second_domain) in [
+            (&loft, &domain, &plane, &plane_domain),
+            (&plane, &plane_domain, &loft, &domain),
+        ] {
+            let section = first
+                .global_surface_intersect(
+                    &k,
+                    first_domain,
+                    second,
+                    second_domain,
+                    [false; 2],
+                    Some(1e-6),
+                    None,
+                )
+                .unwrap();
+            let general = base_global_surface_intersect(
+                &k,
+                first,
+                first_domain,
+                second,
+                second_domain,
+                [false; 2],
+                Some(1e-6),
+                None,
+            )
+            .unwrap();
+            assert!(general.curve_types.contains(&TsectCurveType::Crossing));
+            assert_eq!(section.curve_types, general.curve_types);
+        }
+    }
 
     fn skewed_bilinear(domain: Extent2d, shear: f64) -> BSplineSurface {
         let dx = 40.0 * shear;

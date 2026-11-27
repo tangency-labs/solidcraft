@@ -86,6 +86,7 @@ use crate::nurbs::knots::Side;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 use chamfer::{ChamferDefinition, ChamferSize};
+use record::{ChamferKindRecord, ChamferRecord, ChamferSizeRecord};
 
 const OP_CREATE: &str = "surface::procedural_blend::ProceduralBlend::create";
 const OP_EVAL: &str = "surface::procedural_blend::ProceduralBlend::evaluate";
@@ -317,6 +318,64 @@ pub struct ProceduralBlend {
     pub(crate) def: BlendDefinition,
 }
 
+impl ProceduralBlend {
+    /// Not upstream (#20158): writes this blend's net and non-support definition fields into
+    /// `d` (its two support surfaces are pushed onto the caller's iterative stack so digesting
+    /// nested blends uses no recursion). `identity` is a station-memo key only and is omitted.
+    pub(crate) fn eval_content_head(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        use crate::geom::content::Content;
+        let Self { net, def } = self;
+        let BlendDefinition {
+            supports: _,
+            sides,
+            offsets,
+            law,
+            order,
+            thumbweight,
+            leader,
+            seeds,
+            bound,
+            chamfer,
+            map_a,
+            map_b,
+            swapped,
+            identity: _,
+        } = def;
+        d.tag(0xB1E4);
+        net.content(d)?;
+        d.f64(sides[0]);
+        d.f64(sides[1]);
+        d.f64(offsets[0]);
+        d.f64(offsets[1]);
+        match law {
+            Some(c) => {
+                d.bool(true);
+                c.content(d)?;
+            }
+            None => d.bool(false),
+        }
+        d.u64(u64::from(*order));
+        d.f64(*thumbweight);
+        leader.content(d)?;
+        seeds[0].content(d)?;
+        seeds[1].content(d)?;
+        d.f64(*bound);
+        match chamfer {
+            Some(ch) => {
+                d.bool(true);
+                ch.content(d);
+            }
+            None => d.bool(false),
+        }
+        d.f64(map_a[0]);
+        d.f64(map_a[1]);
+        d.f64(map_b[0]);
+        d.f64(map_b[1]);
+        d.bool(*swapped);
+        Some(())
+    }
+}
+
 /// `sm_ReadCurve`: a curve of a definition (its type header with its dimension, then its
 /// record), which must be a B-spline; it evaluates past its ends.
 fn read_curve(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<BSplineCurve> {
@@ -345,20 +404,65 @@ fn copy_curve(curve: &BSplineCurve) -> BSplineCurve {
     copy
 }
 
-/// A chamfer's sizes as the database holds them (#2486): kind 0 two distances, 1 a
-/// distance and an angle, 2 a chord, 3 an equal setback at every station, then the wedge.
-fn chamfer_of_db(kind: i64, sizes: [f64; 3]) -> Result<ChamferDefinition> {
+/// A chamfer's sizes as the database holds them (#2486): its code, then three numbers.
+///
+/// | code | kind | numbers |
+/// |---|---|---|
+/// | 0 | offsets, two distances | `d_1`, `d_2`, the wedge |
+/// | 1 | offsets, a distance and an angle | the distance, the angle, the wedge |
+/// | 2 | offsets, a chord | the chord, 0, the wedge |
+/// | 3 | offsets, an equal setback in the local wedge at every station | `d`, 0, the wedge |
+/// | 4 | setbacks held at every station, two distances | `d_1`, `d_2`, 0 |
+/// | 5 | setbacks, a distance and an angle: reserved, refused (not defined yet) | |
+/// | 6 | setbacks, a chord | the chord, 0, 0 |
+///
+/// Code 3's record is a chamfer of offsets `[d, d]`: that it follows the local wedge is its
+/// definition's radius ([`record::RadiusRecord::EqualSetback`]), so [`chamfer_record_to_db`]
+/// writes such a record as code 0 and [`chamfer_to_db`] writes the definition as 3. A chamfer
+/// of setbacks (codes 4 and 6) has no ball: the row's two offsets are written 0 and it has no
+/// law; its leader is the edge, extended past its ends, and its seeds the feet. A reader that
+/// knows only codes 0 to 3 refuses 4 to 6. Nothing builds a chamfer of setbacks yet, so
+/// reading one is refused ([`convert::chamfer_of`]).
+///
+/// # Errors
+///
+/// `InvalidInput` for an unknown code, code 5, or a chamfer of setbacks whose wedge or
+/// unused size is not 0.
+pub fn chamfer_record_of_db(code: i64, sizes: [f64; 3]) -> Result<ChamferRecord> {
     let [a, b, wedge] = sizes;
-    let size = match kind {
-        0 => ChamferSize::Distances([a, b]),
-        1 => ChamferSize::DistanceAngle {
-            distance: a,
-            angle: b,
-        },
-        2 => ChamferSize::Chord(a),
-        3 => {
-            return ChamferDefinition::new(ChamferSize::Distances([a; 2]), wedge)?
-                .at_every_station()
+    let (size, kind) = match code {
+        0 => (
+            ChamferSizeRecord::Distances([a, b]),
+            ChamferKindRecord::Offsets,
+        ),
+        1 => (
+            ChamferSizeRecord::DistanceAngle {
+                distance: a,
+                angle: b,
+            },
+            ChamferKindRecord::Offsets,
+        ),
+        2 => (ChamferSizeRecord::Chord(a), ChamferKindRecord::Offsets),
+        3 => (
+            ChamferSizeRecord::Distances([a; 2]),
+            ChamferKindRecord::Offsets,
+        ),
+        4 => (
+            ChamferSizeRecord::Distances([a, b]),
+            ChamferKindRecord::Setbacks,
+        ),
+        6 if b == 0.0 => (ChamferSizeRecord::Chord(a), ChamferKindRecord::Setbacks),
+        6 => {
+            return Err(SolidError::invalid_input(
+                OP_READ,
+                "a chamfer of setbacks by a chord has one size",
+            ))
+        }
+        5 => {
+            return Err(SolidError::invalid_input(
+                OP_READ,
+                "a chamfer of setbacks by a distance and an angle is not defined yet",
+            ))
         }
         _ => {
             return Err(SolidError::invalid_input(
@@ -367,7 +471,40 @@ fn chamfer_of_db(kind: i64, sizes: [f64; 3]) -> Result<ChamferDefinition> {
             ))
         }
     };
-    ChamferDefinition::new(size, wedge)
+    let record = ChamferRecord { size, wedge, kind };
+    // (a chamfer of offsets is checked by `ChamferDefinition::new`, as before the kind)
+    if record.is_setbacks() {
+        record
+            .validate("chamfer")
+            .map_err(|e| SolidError::invalid_input(OP_READ, e.reason))?;
+    }
+    Ok(record)
+}
+
+/// The database's code and numbers of a chamfer's record ([`chamfer_record_of_db`]'s
+/// inverse).
+#[must_use]
+pub fn chamfer_record_to_db(c: &ChamferRecord) -> (i64, [f64; 3]) {
+    let shift = if c.is_setbacks() { 4 } else { 0 };
+    match c.size {
+        ChamferSizeRecord::Distances([a, b]) => (shift, [a, b, c.wedge]),
+        ChamferSizeRecord::DistanceAngle { distance, angle } => {
+            (1 + shift, [distance, angle, c.wedge])
+        }
+        ChamferSizeRecord::Chord(l) => (2 + shift, [l, 0.0, c.wedge]),
+    }
+}
+
+/// A chamfer's sizes as the database holds them ([`chamfer_record_of_db`]), checked: a
+/// chamfer of setbacks is refused as not built yet, and code 3's equal setback is held in the
+/// local wedge at every station.
+fn chamfer_of_db(kind: i64, sizes: [f64; 3]) -> Result<ChamferDefinition> {
+    let c = convert::chamfer_of(&chamfer_record_of_db(kind, sizes)?)?;
+    if kind == 3 {
+        c.at_every_station()
+    } else {
+        Ok(c)
+    }
 }
 
 /// The database's numbers of a chamfer's sizes ([`chamfer_of_db`]'s inverse).
@@ -2158,6 +2295,31 @@ mod tests {
         assert!(chord(&k, 0, [1.0, 2.0], c).is_err());
         assert!(chord(&k, 1, [2.0, 1.0], c).is_err());
         assert!(chord(&k, 2, [2.0, 1.0], c).is_err());
+    }
+
+    /// The database's chamfer codes: 0 to 3 read as before; a chamfer of setbacks (4, 6) is
+    /// refused by name as not built yet (the ASCII and binary readers both decode through
+    /// `chamfer_of_db`); the reserved 5 and an unknown code are refused.
+    #[test]
+    fn the_database_refuses_a_chamfer_of_setbacks() {
+        let right = 0.5 * crate::math::PI;
+        let c = chamfer_of_db(0, [1.0, 2.0, right]).unwrap();
+        assert_eq!(c.size, ChamferSize::Distances([1.0, 2.0]));
+        assert_eq!(chamfer_to_db(&c), (0, [1.0, 2.0, right]));
+        for (code, sizes) in [(4, [1.0, 2.0, 0.0]), (6, [1.5, 0.0, 0.0])] {
+            let r = chamfer_of_db(code, sizes);
+            assert!(
+                matches!(r, Err(SolidError::Unsupported { .. })),
+                "{code}: {r:?}"
+            );
+        }
+        for code in [5, 7, -1] {
+            let r = chamfer_of_db(code, [1.0, 0.5, 0.0]);
+            assert!(
+                matches!(r, Err(SolidError::InvalidInput { .. })),
+                "{code}: {r:?}"
+            );
+        }
     }
 
     #[test]

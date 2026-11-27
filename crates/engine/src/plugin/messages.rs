@@ -10,15 +10,28 @@ pub const MESSAGES: &[(&str, &str)] = &[
     ("plugin_error.failed", "{plugin}: {reason}"),
     ("plugin_error.failed_export", "{plugin} could not export {file}: {reason}"),
     ("plugin_error.failed_file", "{plugin} could not open {file}: {reason}"),
+    ("plugin_error.folder_option_read_approval", "the option {option} needs read approval for its folder"),
     (
         "plugin_error.fuel_ceiling",
         "it asks for {requested} fuel, and plugins may use {allowed}. Install the plugin again and allow its fuel request, or raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file).",
+    ),
+    (
+        "plugin_error.guest_time_exhausted",
+        "it used all {seconds} s of guest time it asks for and was stopped. Ask its author to raise runtime.limits.deadline_ms; if needed, raise Max plugin guest time (ms) in Preferences › Plugins (in solidcraft-cli, max_deadline_ms in the --plugin-limits file).",
+    ),
+    (
+        "plugin_error.host_calls_ceiling",
+        "it asks for {requested} host calls, and plugins may use {allowed}. Raise Max plugin host calls in Preferences › Plugins (in solidcraft-cli, max_host_calls in the --plugin-limits file).",
     ),
     (
         "plugin_error.memory_ceiling",
         "it asks for {requested} MiB of memory, and plugins may use {allowed} MiB. Install the plugin again and allow its memory request, or raise Max plugin memory (MiB) in Preferences › Plugins (in solidcraft-cli, max_memory_mib in the --plugin-limits file).",
     ),
     ("plugin_error.out_of_fuel", "it used all {allowed} fuel it asks for and was stopped. Ask its author to raise its fuel limit."),
+    (
+        "plugin_error.out_of_host_calls",
+        "it used all {allowed} host calls it asks for and was stopped. Ask its author to raise runtime.limits.host_calls; if needed, raise Max plugin host calls in Preferences › Plugins (in solidcraft-cli, max_host_calls in the --plugin-limits file).",
+    ),
     (
         "plugin_error.out_of_memory",
         "it needed more than the {allowed} MiB of memory it asks for and was stopped. Ask its author to raise its memory limit.",
@@ -29,9 +42,17 @@ pub const MESSAGES: &[(&str, &str)] = &[
         "plugin_error.stale_revision",
         "the design changed since this edit was calculated (expected {expected}; current {actual}). Run the calculation again.",
     ),
+    (
+        "plugin_error.time_ceiling",
+        "it asks for {requested} ms of guest time, and plugins may use {allowed} ms. Raise Max plugin guest time (ms) in Preferences › Plugins (in solidcraft-cli, max_deadline_ms in the --plugin-limits file).",
+    ),
     ("plugin_error.trap", "it stopped on an error inside the plugin ({reason}). Report this to its author."),
     ("plugin_error.unsupported", "{plugin} does not support this: {reason}"),
     ("plugin_error.unsupported_file", "{plugin} does not support {file}: {reason}"),
+    (
+        "plugin_error.user_storage_conflict",
+        "its user settings changed or are being written by another run. Retry the plugin run to load the latest settings.",
+    ),
 ];
 
 /// A plugin's failure: which plugin, the file it was opening (an importer), and what went wrong.
@@ -47,7 +68,7 @@ pub struct PluginFailure {
 }
 
 /// `id`'s text in this thread's language, or its English when no catalog has it.
-fn say(id: &str, args: &[(&str, &str)]) -> String {
+pub(super) fn say(id: &str, args: &[(&str, &str)]) -> String {
     let text = solidcraft_ui_text::format(id, args);
     if text != id {
         return text;
@@ -85,7 +106,7 @@ fn fill(template: &str, args: &[(&str, &str)]) -> String {
 
 /// Seconds, as a person reads them: 300, or 0.05.
 fn seconds(ms: u64) -> String {
-    if ms.is_multiple_of(1000) { (ms / 1000).to_string() } else { format!("{}", ms as f64 / 1000.0) }
+    if ms.is_multiple_of(1000) { (ms / 1000).to_string() } else { format!("{}.{:03}", ms / 1000, ms % 1000).trim_end_matches('0').to_string() }
 }
 
 impl PluginFailure {
@@ -103,15 +124,23 @@ impl PluginFailure {
             HostError::OverCeiling { limit, requested, allowed } if limit == "fuel" => {
                 say("plugin_error.fuel_ceiling", &[("requested", &number(*requested)), ("allowed", &number(*allowed))])
             }
+            HostError::OverCeiling { limit, requested, allowed } if limit == "host_calls" => {
+                say("plugin_error.host_calls_ceiling", &[("requested", &number(*requested)), ("allowed", &number(*allowed))])
+            }
+            HostError::OverCeiling { limit, requested, allowed } if limit == "deadline_ms" => {
+                say("plugin_error.time_ceiling", &[("requested", &number(*requested)), ("allowed", &number(*allowed))])
+            }
             HostError::Exhausted { limit, allowed } => match limit.as_str() {
                 "fuel" => say("plugin_error.out_of_fuel", &[("allowed", &number(*allowed))]),
+                "host_calls" => say("plugin_error.out_of_host_calls", &[("allowed", &number(*allowed))]),
                 "memory_mib" => say("plugin_error.out_of_memory", &[("allowed", &number(*allowed))]),
                 "stack_kib" => say("plugin_error.out_of_stack", &[("allowed", &number(*allowed))]),
-                "deadline_ms" => say("plugin_error.out_of_time", &[("seconds", &seconds(*allowed))]),
+                "deadline_ms" => say("plugin_error.guest_time_exhausted", &[("seconds", &seconds(*allowed))]),
                 "design_mib" => say("plugin_error.design_too_large", &[("allowed", &number(*allowed))]),
                 _ => self.error.to_string(),
             },
             HostError::Trap { reason } => say("plugin_error.trap", &[("reason", reason)]),
+            HostError::UserStorageConflict { .. } => say("plugin_error.user_storage_conflict", &[]),
             // What the plugin or the host said about the input, without the field's name.
             HostError::InvalidInput { reason, .. } | HostError::Unsupported { reason } => reason.clone(),
             error => error.to_string(),

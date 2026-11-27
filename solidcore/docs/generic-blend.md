@@ -78,6 +78,12 @@ or a law r(t).
   at each pair of support feet. The local tangent planes give the radius from their wedge and
   the requested distance. As the normals approach those of an adjacent planar strip, both
   constructions give the same radius and the same end chord.
+  A second chamfer kind, setbacks held at every station (each foot a straight line of its size
+  from the edge, in the plane square to it), is defined but not built: its record
+  (`ChamferKindRecord::Setbacks`, its radius `RadiusRecord::Edge`, the edge as its leader) is
+  refused when read. Its station, and the definitions it is built under (where stations
+  cross, which root is the foot, ends and corners), are in
+  `blend::fillet_section::setback_station`.
 
 Every geometric quantity downstream (rails, sections, events, corner boundaries) is built from the
 same exact spine points.
@@ -354,6 +360,15 @@ ball's sphere. Setback: the rounds stop short and a 2n-sided hole is filled.*
   that the points where they meet are not determined to the part's rounding are refused, naming
   that. Three chamfers of both convexities between planes are refused, naming the vertex, until
   their mitre is built. The corner keeps its definition: its chamfers and the points they meet in (opt-in, WR-716).
+- **Chamfer Ends meeting across an edge.** Two chamfers on one face can end at the two
+  vertices of an unchamfered edge of it, each an End on the face beyond that edge (a box's
+  top edges after its upright edges were chamfered). Where their bands reach past each other
+  across the edge, the End ribs cross and the chamfer planes meet the end face in a point no
+  per-vertex End makes. A chamfer between planes keeps a half-space near the corner, and
+  intersections commute, so such a selection is built in two passes, no two picks of a pass
+  meeting this way and picks that share a vertex in one pass: each End of the second pass is
+  the single-edge End on the first pass's chamfer (`blend_corner/crossing_ends.rs`, #17026).
+  Parallel or converging picks, whose bands overlap along their length, are not split.
 - **Setback** [44, 43]. Each blend stops at a setback distance from the vertex. The hole has 2n
   sides: n profile curves (the blends' end sections) alternating with n spring curves on the faces.
   Plain trimlines that simply meet give poor shapes for unequal radii, edges far from 90° and

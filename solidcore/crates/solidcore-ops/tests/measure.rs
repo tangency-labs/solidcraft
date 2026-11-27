@@ -120,6 +120,109 @@ fn a_box_classifies_many_points_as_each_alone() {
     assert!(refused.len() == 2 && refused.iter().all(Result::is_err));
 }
 
+/// Located points are the classified points, each a location where the class names one; an
+/// unsure region never arises on a box, whose regions the kernel knows.
+#[test]
+fn a_box_locates_points_as_it_classifies_them() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let points = [
+        [0.5, 1.0, 1.5],
+        [f64::INFINITY, 0.0, 0.0],
+        [5.0, 1.0, 1.5],
+        [1.0, 1.0, 1.5],
+    ];
+    let located = b.locate_points(&points).unwrap();
+    let classified = b.classify_points(&points).unwrap();
+    assert_eq!(located.len(), classified.len());
+    for (l, c) in located.iter().zip(&classified) {
+        let as_class = l.as_ref().ok().map(|l| match l {
+            solidcore_ops::PointLocation::OnBoundary => PointClass::OnBoundary,
+            solidcore_ops::PointLocation::Inside => PointClass::Inside,
+            solidcore_ops::PointLocation::Outside => PointClass::Outside,
+            solidcore_ops::PointLocation::Unsure { .. } => panic!("a box has no unsure region"),
+        });
+        assert_eq!(as_class, c.as_ref().ok().copied());
+        assert_eq!(l.is_err(), c.is_err());
+    }
+    assert_eq!(located[1], Err(Error::Argument));
+}
+
+/// A body's own order is its lists as the kernel holds them: a box's 6 faces, 12 edges and 8
+/// vertices, and an edge picked by a point is the one at that index of the own order (the
+/// nearest edge to a point on it is at distance 0).
+#[test]
+fn a_box_own_order_names_its_picked_edges() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let order = b.own_order();
+    assert_eq!(
+        (order.faces.len(), order.edges.len(), order.vertices.len()),
+        (6, 12, 8)
+    );
+    assert_eq!(order.split_edges, 0);
+    let at = [0.5, 0.0, 0.0];
+    let Ok(picked) = solidcore_ops::pick::edges(&b, &[at], 1e-6).unwrap() else {
+        panic!("a point on an edge picks it")
+    };
+    let p = b
+        .edge_closest_point(&order, picked[0], at)
+        .unwrap()
+        .unwrap();
+    assert!(p.distance <= 1e-12, "{p:?}");
+}
+
+/// The largest gap sample of an edge against each face of a box is the largest of the gap
+/// samples, and an edge lies on the faces it bounds: its largest gap to them is nothing.
+#[test]
+fn a_box_edge_largest_gap_is_its_largest_sample() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let order = b.own_order();
+    let mut bounded = 0;
+    for face in 0..order.faces.len() {
+        let largest = b.edge_face_largest_gap(&order, 0, face).unwrap();
+        let samples = b.edge_face_gap_samples(&order, 0, face).unwrap();
+        let most = samples
+            .iter()
+            .map(|s| s.distance.value)
+            .fold(0.0_f64, f64::max);
+        assert!(
+            (largest - most).abs() <= 1e-12,
+            "face {face}: {largest} against {most}"
+        );
+        if largest <= 1e-12 {
+            bounded += 1;
+        }
+    }
+    assert!(bounded >= 2, "an edge lies on the two faces it bounds");
+    assert!(b.edge_face_largest_gap(&order, 99, 0).is_err());
+}
+
+/// A check scoped to the whole body is the plain check; a valid box is valid in either scope.
+#[test]
+fn a_box_checks_the_same_in_either_scope() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    let plain = b.check(solidcore_ops::check::CheckLevel::All).unwrap();
+    assert_eq!(
+        b.check_scoped(
+            solidcore_ops::check::CheckLevel::All,
+            solidcore_ops::check::ValidityScope::Body
+        )
+        .unwrap(),
+        plain
+    );
+    assert!(plain.is_valid(), "{plain}");
+    assert!(b
+        .check_scoped(
+            solidcore_ops::check::CheckLevel::All,
+            solidcore_ops::check::ValidityScope::Stitched
+        )
+        .unwrap()
+        .is_valid());
+}
+
 #[test]
 fn a_torus_area_is_its_closed_form() {
     all_fixes();
@@ -354,6 +457,155 @@ fn a_ray_through_a_tube_hits_both_sides_nearest_first() {
         b.face_hits_by_ray(&order, [-20.0, 3.0, 4.0], [0.0, 0.0, 0.0]),
         Err(Error::Argument)
     );
+}
+
+/// What, the body, the line's point and direction, and the parameters it meets faces at.
+type LineCase = (&'static str, Body, [f64; 3], [f64; 3], Vec<f64>);
+
+/// Where a whole line meets a body's faces, both ways from its point, on each face's exact
+/// surface, in closed form:
+/// - the 10 mm cube at the origin, slanted along (0.6, 0, 0.8) through its centre (5, 5, 5): its
+///   top z = 10 at x = 8.75 and its bottom z = 0 at x = 1.25, parameters -6.25 and 6.25; the
+///   planes x = 0 and x = 10 it meets at z = -1.67 and 11.67, outside their trims;
+/// - the radius-5 cylinder about +Z (z 0..20), along x through (0, 3, 10): its side at x = -4 and
+///   4 (a 3-4-5 triangle), parameters -4 and 4, and neither end;
+/// - the cone of base radius 6 and top radius 2 over height 8, radius 6 - z/2, along x through
+///   (0, 0, 4): its side where the radius is 4, parameters -4 and 4;
+/// - the radius-2 sphere about (1, 2, 3), along z through (1.72, 2.96, 3): 1.2 off its axis
+///   (0.24 times a 3-4-5 triangle), at z = 3 -+ 1.6, parameters -1.6 and 1.6;
+/// - the torus of radii 10 and 2 about +Z, along x through (0, 0, 0): x = -12, -8, 8 and 12;
+/// - the rational B-spline tube of radius 5 (z 0..10), along x through (-20, 3, 4): x = -4 and 4,
+///   parameters 16 and 24.
+///
+/// The cone meets the line on its seam (+x) once. Each point is the line's at its parameter. A
+/// face index past the faces and a direction of no length are refused.
+#[test]
+fn a_line_meets_each_kind_of_face_on_its_exact_surface_both_ways() {
+    all_fixes();
+    let (tube_body, _, _) = tube();
+    let cases: Vec<LineCase> = vec![
+        (
+            "cube",
+            make_box([0.0; 3], [10.0; 3]).unwrap(),
+            [5.0; 3],
+            [0.6, 0.0, 0.8],
+            vec![-6.25, 6.25],
+        ),
+        (
+            "cylinder",
+            make_cylinder([0.0; 3], 5.0, 20.0).unwrap(),
+            [0.0, 3.0, 10.0],
+            [1.0, 0.0, 0.0],
+            vec![-4.0, 4.0],
+        ),
+        (
+            "cone",
+            solidcore_ops::make_cone([0.0; 3], 6.0, 2.0, 8.0).unwrap(),
+            [0.0, 0.0, 4.0],
+            [1.0, 0.0, 0.0],
+            vec![-4.0, 4.0],
+        ),
+        (
+            "sphere",
+            make_sphere([1.0, 2.0, 3.0], 2.0).unwrap(),
+            [1.72, 2.96, 3.0],
+            [0.0, 0.0, 1.0],
+            vec![-1.6, 1.6],
+        ),
+        (
+            "torus",
+            make_torus([0.0; 3], 10.0, 2.0).unwrap(),
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            vec![-12.0, -8.0, 8.0, 12.0],
+        ),
+        (
+            "B-spline tube",
+            tube_body,
+            [-20.0, 3.0, 4.0],
+            [1.0, 0.0, 0.0],
+            vec![16.0, 24.0],
+        ),
+    ];
+    for (what, b, through, direction, expected) in cases {
+        let (record, order) = b.to_record().unwrap();
+        let mut hits = Vec::new();
+        for f in 0..record.faces.len() {
+            hits.extend(b.face_line_hits(&order, f, through, direction).unwrap());
+        }
+        hits.sort_by(|x, y| x.parameter.total_cmp(&y.parameter));
+        let got: Vec<f64> = hits.iter().map(|h| h.parameter).collect();
+        assert_eq!(got.len(), expected.len(), "{what}: {got:?}");
+        for (h, t) in hits.iter().zip(&expected) {
+            assert!(near(h.parameter, *t, 1e-9), "{what}: {got:?}");
+            let on_line = [0, 1, 2].map(|i| through[i] + direction[i] * t);
+            assert!(close(h.point, on_line), "{what}: {h:?}");
+        }
+        assert_eq!(
+            b.face_line_hits(&order, record.faces.len(), through, direction),
+            Err(Error::Argument),
+            "{what}"
+        );
+        assert_eq!(
+            b.face_line_hits(&order, 0, through, [0.0; 3]),
+            Err(Error::Argument),
+            "{what}"
+        );
+    }
+}
+
+/// A line lying on a face is no single place on it: the face leaves it out and answers, it does
+/// not fail (a hole on a cylinder's side drilled along its axis). The radius-5 cylinder about +Z
+/// (z 0..20), along z through its side at (3, 4) and on its seam (+x), at z = 10: its side
+/// holds the whole line, which meets the body only where it leaves through its ends, z = 0 and
+/// z = 20, parameters -10 and 10 (each end face once, on its rim). The 10 mm cube, along x through
+/// (5, 5, 10) on its top: the top holds the line, which meets the body where it crosses x = 0 and
+/// x = 10, parameters -5 and 5. Every face answers; no face fails.
+#[test]
+fn a_line_lying_on_a_face_is_left_out_of_its_hits() {
+    all_fixes();
+    let cases: Vec<LineCase> = vec![
+        (
+            "cylinder side at (3, 4)",
+            make_cylinder([0.0; 3], 5.0, 20.0).unwrap(),
+            [3.0, 4.0, 10.0],
+            [0.0, 0.0, -1.0],
+            vec![-10.0, 10.0],
+        ),
+        (
+            "cylinder seam",
+            make_cylinder([0.0; 3], 5.0, 20.0).unwrap(),
+            [5.0, 0.0, 10.0],
+            [0.0, 0.0, 1.0],
+            vec![-10.0, 10.0],
+        ),
+        (
+            "cube top",
+            make_box([0.0; 3], [10.0; 3]).unwrap(),
+            [5.0, 5.0, 10.0],
+            [1.0, 0.0, 0.0],
+            vec![-5.0, 5.0],
+        ),
+    ];
+    for (what, b, through, direction, expected) in cases {
+        let (record, order) = b.to_record().unwrap();
+        let mut hits = Vec::new();
+        for f in 0..record.faces.len() {
+            let found = b.face_line_hits(&order, f, through, direction);
+            let Ok(found) = found else {
+                panic!("{what}: face {f}: {found:?}")
+            };
+            hits.extend(found);
+        }
+        hits.sort_by(|x, y| x.parameter.total_cmp(&y.parameter));
+        let got: Vec<f64> = hits.iter().map(|h| h.parameter).collect();
+        assert_eq!(got.len(), expected.len(), "{what}: {got:?}");
+        for (h, t) in hits.iter().zip(&expected) {
+            assert!(near(h.parameter, *t, 1e-9), "{what}: {got:?}");
+            let on_line = [0, 1, 2].map(|i| through[i] + direction[i] * t);
+            assert!(close(h.point, on_line), "{what}: {h:?}");
+        }
+    }
 }
 
 /// A doubly curved face: a ray along +z through (1.72, 2.96) runs (0.72, 0.96) off the axis of
@@ -1011,4 +1263,360 @@ fn edge_points_lie_on_the_circles_of_a_cylinder() {
         assert!(close(c.edge_points(&order, edge, 3).unwrap()[1], middle));
     }
     assert_eq!(rims, 2, "the cylinder's two rims");
+}
+
+/// The line helpers the app's hole start uses: a direction made unit (and refused when it has no
+/// length or a bad coordinate), the nearer of two meetings with ties going ahead, a point along a
+/// line, and a distance measured across a surface.
+#[test]
+fn line_helpers_make_unit_choose_the_nearer_meeting_and_measure_across() {
+    assert_eq!(
+        solidcore_ops::unit_direction([0.0, 0.0, 5.0]),
+        Some([0.0, 0.0, 1.0])
+    );
+    assert_eq!(solidcore_ops::unit_direction([0.0; 3]), None);
+    assert_eq!(solidcore_ops::unit_direction([f64::NAN, 0.0, 1.0]), None);
+    assert_eq!(
+        solidcore_ops::nearer_line_meeting(Some(3.0), Some(2.0)),
+        Some(-2.0)
+    );
+    assert_eq!(
+        solidcore_ops::nearer_line_meeting(Some(2.0), Some(2.0)),
+        Some(2.0)
+    );
+    assert_eq!(
+        solidcore_ops::nearer_line_meeting(None, Some(4.0)),
+        Some(-4.0)
+    );
+    assert_eq!(solidcore_ops::nearer_line_meeting(None, None), None);
+    assert_eq!(
+        solidcore_ops::point_along_line([1.0, 2.0, 3.0], [0.0, 0.0, 1.0], -2.0),
+        Some([1.0, 2.0, 1.0])
+    );
+    // Off a surface along its normal (z): only the z gap counts across it; on it, plain distance.
+    let across =
+        solidcore_ops::distance_across_surface([0.0, 0.0, 1.0], [0.0, 0.0, 0.0], [3.0, 0.0, 3.0])
+            .unwrap();
+    assert!((across - 2.0).abs() < 1e-12, "{across}");
+    let plain =
+        solidcore_ops::distance_across_surface([0.0; 3], [0.0; 3], [3.0, 4.0, 0.0]).unwrap();
+    assert!((plain - 5.0).abs() < 1e-12, "{plain}");
+}
+
+/// A body that names its geometry owners by keys the check cannot know (its naming scheme
+/// `Unknown`) is refused by the check, scoped or not: the check runs on a copy, named afresh,
+/// and the refusal reads the body's own scheme. A body named by its maker is checked.
+#[test]
+fn a_body_of_unknown_naming_is_refused_by_the_check() {
+    all_fixes();
+    let b = make_box([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]).unwrap();
+    b.kernel()
+        .set_naming(solidcore::topology::NamingScheme::Unknown);
+    assert!(matches!(
+        b.check(solidcore_ops::check::CheckLevel::All),
+        Err(Error::Unsupported(_))
+    ));
+    assert!(matches!(
+        b.check_scoped(
+            solidcore_ops::check::CheckLevel::All,
+            solidcore_ops::check::ValidityScope::Stitched
+        ),
+        Err(Error::Unsupported(_))
+    ));
+    b.kernel()
+        .set_naming(solidcore::topology::NamingScheme::Caller);
+    assert!(b.check(solidcore_ops::check::CheckLevel::All).is_ok());
+}
+
+/// `Body::curve_face_gap_bound` bounds a spline and a conic on a face near 0, bounds a lifted
+/// spline at its shift, rejects out-of-range face indices, returns `None` for invalid interval
+/// or floor, and honours cancellation.
+#[test]
+fn curve_face_gap_bound_bounds_splines_and_conics_and_honours_cancel() {
+    use solidcore_ops::cancel::{self, CancelToken};
+    use solidcore_ops::curve_gap::GapCurve;
+    use solidcore_record::brep::Frame;
+
+    all_fixes();
+    let b = make_box([1.0, -2.0, 3.0], [10.0, 20.0, 30.0]).unwrap();
+    assert_eq!(b.counts().unwrap(), [6, 12, 8]);
+    let order = b.own_order();
+    assert_eq!(order.faces.len(), 6);
+
+    let on_top = GapCurve::new(&Curve::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[2.0, 0.0, 33.0], [10.0, 16.0, 33.0]],
+    })
+    .unwrap();
+    let bounds_all: Vec<f64> = (0..6)
+        .map(|f| {
+            b.curve_face_gap_bound(&order, f, &on_top, [0.0, 1.0], 1e-9)
+                .unwrap()
+                .unwrap()
+        })
+        .collect();
+    let zero_faces: Vec<usize> = bounds_all
+        .iter()
+        .enumerate()
+        .filter_map(|(f, &d)| (d < 1e-9).then_some(f))
+        .collect();
+    assert_eq!(zero_faces.len(), 1, "exactly the top face: {bounds_all:?}");
+    let top = zero_faces[0];
+
+    let lifted = GapCurve::new(&Curve::Spline {
+        knots: vec![0.0, 0.0, 1.0, 1.0],
+        points: vec![[2.0, 0.0, 35.5], [10.0, 16.0, 35.5]],
+    })
+    .unwrap();
+    let gap = b
+        .curve_face_gap_bound(&order, top, &lifted, [0.0, 1.0], 1e-9)
+        .unwrap()
+        .unwrap();
+    assert!((2.5..=2.5 + 1e-6).contains(&gap), "lifted gap {gap}");
+
+    // Bisection stops once a piece's remainder is at most `floor`, so `floor = 1e-10` proves a
+    // zero-gap quarter circle within 1e-9 (remainder <= 1e-10 plus evaluation rounding).
+    let circle = Curve::Circle {
+        frame: Frame {
+            origin: [6.0, 8.0, 33.0],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 1.0, 0.0],
+        },
+        radius: 2.0,
+    };
+    let (arc, arc_ivl) = GapCurve::of_conic(&circle, [0.0, std::f64::consts::FRAC_PI_2])
+        .unwrap()
+        .unwrap();
+    let arc_gap = b
+        .curve_face_gap_bound(&order, top, &arc, arc_ivl, 1e-10)
+        .unwrap()
+        .unwrap();
+    assert!(arc_gap < 1e-9, "quarter circle on top face: {arc_gap}");
+
+    // A quarter circle rising off the top face to z = 35 at theta = pi/2 proves the full
+    // converted spline interval is measured (not truncated to `[0, pi/2]` in degree domain,
+    // which would give ~0.055 mm). Pieces close at `CLOSE_RELATIVE = 1e-3` of end distance,
+    // so the proved upper bound lies in `[2.0, 2.0 * (1 + 2e-3)]`.
+    let vertical_circle = Curve::Circle {
+        frame: Frame {
+            origin: [6.0, 8.0, 33.0],
+            x_axis: [1.0, 0.0, 0.0],
+            y_axis: [0.0, 0.0, 1.0],
+        },
+        radius: 2.0,
+    };
+    let (v_arc, v_arc_ivl) =
+        GapCurve::of_conic(&vertical_circle, [0.0, std::f64::consts::FRAC_PI_2])
+            .unwrap()
+            .unwrap();
+    let v_gap = b
+        .curve_face_gap_bound(&order, top, &v_arc, v_arc_ivl, 1e-9)
+        .unwrap()
+        .unwrap();
+    assert!(
+        (2.0..=2.0 * (1.0 + 2.0e-3)).contains(&v_gap),
+        "vertical arc {v_gap}"
+    );
+
+    assert_eq!(
+        b.curve_face_gap_bound(&order, 6, &on_top, [0.0, 1.0], 1e-9),
+        Err(Error::Argument)
+    );
+    assert_eq!(
+        b.curve_face_gap_bound(&order, usize::MAX, &on_top, [0.0, 1.0], 1e-9),
+        Err(Error::Argument)
+    );
+    for bad_ivl in [
+        [1.0, 0.0],
+        [1.0, 1.0],
+        [f64::NAN, 1.0],
+        [f64::NEG_INFINITY, 1.0],
+    ] {
+        assert_eq!(
+            b.curve_face_gap_bound(&order, top, &on_top, bad_ivl, 1e-9),
+            Err(Error::Argument),
+            "interval {bad_ivl:?}"
+        );
+    }
+    for bad_floor in [-1.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(
+            b.curve_face_gap_bound(&order, top, &on_top, [0.0, 1.0], bad_floor),
+            Err(Error::Argument),
+            "floor {bad_floor}"
+        );
+    }
+
+    let token = CancelToken::new();
+    token.cancel();
+    assert_eq!(
+        cancel::within(&token, || {
+            b.curve_face_gap_bound(&order, top, &on_top, [0.0, 1.0], 1e-9)
+        }),
+        Err(Error::Cancelled)
+    );
+    assert_eq!(b.counts().unwrap(), [6, 12, 8]);
+}
+
+/// `Body::face_internal_point` and `Body::face_internal_points` return a point strictly inside
+/// each face of a box and of a holed plate, match per-face calls bit for bit, reject bad indices,
+/// handle empty orders, and stop mid-loop when cancelled.
+#[test]
+fn face_internal_points_lie_inside_each_face_and_honour_cancel() {
+    use solidcore_ops::cancel::{self, CancelToken};
+
+    all_fixes();
+    let b = make_box([1.0, -2.0, 3.0], [10.0, 20.0, 30.0]).unwrap();
+    assert_eq!(b.counts().unwrap(), [6, 12, 8]);
+    let order = b.own_order();
+    let pts = b.face_internal_points(&order).unwrap();
+    assert_eq!(pts.len(), 6);
+
+    let lo = [1.0, -2.0, 3.0];
+    let hi = [11.0, 18.0, 33.0];
+    let mut sides = std::collections::BTreeSet::new();
+    for (f, &p) in pts.iter().enumerate() {
+        assert_eq!(b.face_internal_point(&order, f).unwrap(), p, "face {f}");
+        assert!(p.iter().all(|x| x.is_finite()), "{p:?}");
+        assert_eq!(
+            b.classify_point(p).unwrap(),
+            PointClass::OnBoundary,
+            "{p:?}"
+        );
+        assert!(
+            b.point_on_face(&order, f, p, 1e-9).unwrap().is_some(),
+            "face {f} point {p:?}"
+        );
+        let mut on = None;
+        for axis in 0..3 {
+            assert!(
+                (lo[axis] - 1e-9..=hi[axis] + 1e-9).contains(&p[axis]),
+                "{p:?}"
+            );
+            if (p[axis] - lo[axis]).abs() < 1e-9 {
+                assert!(on.replace((axis, false)).is_none(), "edge/corner {p:?}");
+            } else if (p[axis] - hi[axis]).abs() < 1e-9 {
+                assert!(on.replace((axis, true)).is_none(), "edge/corner {p:?}");
+            } else {
+                assert!(
+                    p[axis] > lo[axis] + 1e-6 && p[axis] < hi[axis] - 1e-6,
+                    "too close to edge: {p:?}"
+                );
+            }
+        }
+        assert!(
+            sides.insert(on.expect("point on a box face")),
+            "duplicate face"
+        );
+    }
+    assert_eq!(sides.len(), 6);
+
+    assert_eq!(b.face_internal_point(&order, 6), Err(Error::Argument));
+    assert_eq!(
+        b.face_internal_point(&order, usize::MAX),
+        Err(Error::Argument)
+    );
+    let mut empty = order.clone();
+    empty.faces.clear();
+    assert_eq!(
+        b.face_internal_points(&empty).unwrap(),
+        Vec::<[f64; 3]>::new()
+    );
+
+    // Pre-cancelled token refuses both single and batch queries.
+    let token = CancelToken::new();
+    token.cancel();
+    assert_eq!(
+        cancel::within(&token, || b.face_internal_point(&order, 0)),
+        Err(Error::Cancelled)
+    );
+    assert_eq!(
+        cancel::within(&token, || b.face_internal_points(&order)),
+        Err(Error::Cancelled)
+    );
+    // Mid-loop cancellation: count exact polls on the warmed box to prove `face_internal_points`
+    // polls once per face inside its loop (beyond `run_with` entry and `kept` exit) and stops
+    // before face 1 when cancelled at that poll.
+    let mut single_kernel_polls = 0u64;
+    let mut first_face_polls = 0u64;
+    for f in 0..6 {
+        let p = CancelToken::after_polls(u64::MAX);
+        cancel::within(&p, || b.face_internal_point(&order, f)).unwrap();
+        let k_polls = p.polls().unwrap().saturating_sub(2);
+        if f == 0 {
+            first_face_polls = k_polls;
+        }
+        single_kernel_polls += k_polls;
+    }
+    let probe = CancelToken::after_polls(u64::MAX);
+    cancel::within(&probe, || b.face_internal_points(&order)).unwrap();
+    let whole = probe.polls().unwrap();
+    assert_eq!(whole, 8 + single_kernel_polls, "batch polls {whole}");
+    let cut = 3 + first_face_polls;
+    assert!(cut + 1 < whole, "cut {cut} vs whole {whole}");
+    let limited = CancelToken::after_polls(cut);
+    assert_eq!(
+        cancel::within(&limited, || b.face_internal_points(&order)),
+        Err(Error::Cancelled)
+    );
+    assert_eq!(limited.polls(), Some(cut + 1));
+    assert_eq!(b.counts().unwrap(), [6, 12, 8]);
+
+    // Holed plate (20 x 20 x 5 box minus radius-3 cylinder): 7 faces, 15 edges, 10 vertices.
+    let block = make_box([0.0; 3], [20.0, 20.0, 5.0]).unwrap();
+    let pin = make_cylinder([10.0, 10.0, -1.0], 3.0, 7.0).unwrap();
+    let plate = solidcore_ops::boolean::boolean(block, pin, solidcore_ops::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    assert_eq!(plate.counts().unwrap(), [7, 15, 10]);
+    let plate_order = plate.own_order();
+    let plate_pts = plate.face_internal_points(&plate_order).unwrap();
+    assert_eq!(plate_pts.len(), 7);
+    let mut plate_faces = std::collections::BTreeSet::new();
+    for (f, &p) in plate_pts.iter().enumerate() {
+        assert_eq!(plate.face_internal_point(&plate_order, f).unwrap(), p);
+        assert!(p.iter().all(|x| x.is_finite()), "{p:?}");
+        assert_eq!(
+            plate.classify_point(p).unwrap(),
+            PointClass::OnBoundary,
+            "{p:?}"
+        );
+        // Strictly inside face `f` alone: not on any edge or vertex shared with another face.
+        let matching: Vec<usize> = (0..7)
+            .filter(|&other| {
+                plate
+                    .point_on_face(&plate_order, other, p, 1e-6)
+                    .unwrap()
+                    .is_some()
+            })
+            .collect();
+        assert_eq!(matching, vec![f], "face {f} point {p:?}");
+        let [x, y, z] = p;
+        let dx = x - 10.0;
+        let dy = y - 10.0;
+        let r2 = dx * dx + dy * dy;
+        let hole_lo = (3.0 - 1e-6) * (3.0 - 1e-6);
+        let hole_hi = (3.0 + 1e-6) * (3.0 + 1e-6);
+        let in_x = x > 1e-6 && x < 20.0 - 1e-6;
+        let in_y = y > 1e-6 && y < 20.0 - 1e-6;
+        let in_z = z > 1e-6 && z < 5.0 - 1e-6;
+        let tag = if x.abs() < 1e-6 && in_y && in_z {
+            0
+        } else if (x - 20.0).abs() < 1e-6 && in_y && in_z {
+            1
+        } else if y.abs() < 1e-6 && in_x && in_z {
+            2
+        } else if (y - 20.0).abs() < 1e-6 && in_x && in_z {
+            3
+        } else if z.abs() < 1e-6 && in_x && in_y && r2 > hole_hi {
+            4
+        } else if (z - 5.0).abs() < 1e-6 && in_x && in_y && r2 > hole_hi {
+            5
+        } else if (hole_lo..=hole_hi).contains(&r2) && in_z {
+            6
+        } else {
+            panic!("point {p:?} not strictly inside any face of the holed plate");
+        };
+        assert!(plate_faces.insert(tag), "duplicate plate face {tag}: {p:?}");
+    }
+    assert_eq!(plate_faces.len(), 7);
 }

@@ -185,6 +185,7 @@ fn as_sm_err(e: SolidError, op: &'static str) -> SolidError {
         e if e.is_not_certified() => e,
         SolidError::Unported { .. }
         | SolidError::Cancelled { .. }
+        | SolidError::OutOfFuel { .. }
         | SolidError::InvalidInput { .. }
         | SolidError::PortInvariant { .. } => e,
         _ => Failure::new(op, BlendFailure::Solver(SolverFailure::JacobianNotLoaded))
@@ -681,6 +682,14 @@ pub struct FilletSolver {
     /// Fork `m_abTraceAcross` (WR-609): `[surface][u, v]`, whether that parameter
     /// direction runs across the edge (gets [`FilletSolver::trace_reach`]).
     pub trace_across: [[bool; 2]; 2],
+    /// How far (3D) the trace's base surface domains reach past their own at least along
+    /// the filleted edge (`0` = by the extension factor alone;
+    /// [`FilletSolver::domain_extension`]), when a side edge leaves a corner vertex
+    /// obliquely backward past the filleted edge's end.
+    pub trace_reach_along: f64,
+    /// `[surface][u, v]`, whether that parameter direction runs along the filleted edge
+    /// (gets [`FilletSolver::trace_reach_along`]).
+    pub trace_along: [[bool; 2]; 2],
     /// `m_dConversionTol` (`SM_EFF_ZERO / 10`).
     pub conversion_tol: f64,
     /// `m_bReverseTrim`.
@@ -723,6 +732,26 @@ pub struct FilletSolver {
     /// (`ball_section_at`) is solved, extended past it (as upstream) for every other solve, the
     /// trace's included.
     pub seam_domain: SeamDomain,
+    /// Not upstream (tangency-labs/solidcraft#21940): how the rail ends' feet on a closed base
+    /// are named before the trace ([`RailEndNames`]).
+    pub rail_end_names: RailEndNames,
+}
+
+/// Not upstream (tangency-labs/solidcraft#21940): how [`FilletSolver`]'s rail ends' feet on a
+/// closed base are named before the trace (`c1_collect_points`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RailEndNames {
+    /// On their edge use's trim curve's side of the seam where some lie across it and some do
+    /// not: the ball's contact crosses the seam between the rail's ends.
+    #[default]
+    TrimCurveSide,
+    /// On the base of rail `rail` (0 or 1), in its natural domain: the rails never cross its
+    /// seam, which ends short of them (a closed blend's Join whose side seam ends inside the
+    /// band, `FilletCorner::seam_short_of_rails`); the other base as [`Self::TrimCurveSide`].
+    InDomain {
+        /// The rail whose base's seam ends short of the rails.
+        rail: usize,
+    },
 }
 
 impl FilletSolver {
@@ -778,6 +807,8 @@ impl FilletSolver {
             surface_extension_factor: 0.5,
             trace_reach: 0.0,
             trace_across: [[true, true], [true, true]],
+            trace_reach_along: 0.0,
+            trace_along: [[false, false]; 2],
             conversion_tol: EFF_ZERO / 10.0,
             reverse_trim: false,
             extend_before: false,
@@ -790,6 +821,7 @@ impl FilletSolver {
             rolled_faces: [None, None],
             rollover_proof: RolloverProof::AfterTrace,
             seam_domain: SeamDomain::Extended,
+            rail_end_names: RailEndNames::TrimCurveSide,
             chamfer: None,
             law_corner_pieces: Vec::new(),
         }
@@ -2068,7 +2100,9 @@ pub(crate) fn seam_periods(k: &Kernel, surface: &Surface) -> Result<[Option<Exte
             Err(e)
                 if matches!(
                     e,
-                    SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                    SolidError::Unported { .. }
+                        | SolidError::Cancelled { .. }
+                        | SolidError::OutOfFuel { .. }
                 ) || e.is_not_certified() =>
             {
                 return Err(e);
@@ -2080,6 +2114,54 @@ pub(crate) fn seam_periods(k: &Kernel, surface: &Surface) -> Result<[Option<Exte
         }
     }
     Ok(out)
+}
+
+/// Not upstream: the name of the point `uv` of `surface` nearest `near`. A surface that
+/// closes on itself in a direction ([`seam_periods`]) names each of its points once per
+/// period there; a solve that continues from `near` across the seam (a trace along an edge
+/// use, a section solved from its parameters) needs the name on `near`'s side of the seam,
+/// not the one the surface's own interval gives. `uv` is moved by whole periods only, so it
+/// stays the same point of the surface. Not along a direction that collapses at `near` (a
+/// sphere's pole): there `near`'s parameter is an arbitrary label, not a side of the seam,
+/// and the name nearest it could lie a quarter period outside the domain; a predicate that
+/// cannot evaluate reads as collapsed, and `uv` keeps its name.
+///
+/// # Errors
+///
+/// Those of [`seam_periods`], and an unported or cancelled singularity test.
+pub(crate) fn period_name_nearest(
+    k: &Kernel,
+    surface: &Surface,
+    uv: Point2,
+    near: Point2,
+) -> Result<Point2> {
+    let sing = match surface.is_singularity(k, near, EFF_ZERO, false) {
+        Ok(sing) => sing,
+        Err(e) if e.is_unported_or_cancelled() => return Err(e),
+        Err(_) => crate::surface::surface::p5::Singularity {
+            singular: true,
+            direction: SurfParamType::Neither,
+        },
+    };
+    let collapsed = |dir: SurfParamType| {
+        sing.direction == dir
+            || (sing.singular
+                && matches!(sing.direction, SurfParamType::Neither | SurfParamType::Both))
+    };
+    let mut named = uv;
+    let periods = seam_periods(k, surface)?;
+    for (period, (value, near, dir)) in periods.iter().zip([
+        (&mut named.x, near.x, SurfParamType::U),
+        (&mut named.y, near.y, SurfParamType::V),
+    ]) {
+        if let Some(interval) = period {
+            if !collapsed(dir) {
+                let length = interval.length();
+                *value += length * ((near - *value) / length).round();
+            }
+        }
+    }
+    Ok(named)
 }
 
 /// Not upstream (solidcore-native, #15767): the solve parameters `index` and `index + 1`,
@@ -2117,7 +2199,9 @@ fn bool_status(r: Result<bool>) -> Result<bool> {
         Err(e)
             if matches!(
                 e,
-                SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
             ) || e.is_not_certified() =>
         {
             Err(e)
@@ -2136,7 +2220,9 @@ fn singularity_status(
         Err(e)
             if matches!(
                 e,
-                SolidError::Unported { .. } | SolidError::Cancelled { .. }
+                SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }
             ) || e.is_not_certified() =>
         {
             Err(e)
@@ -3765,7 +3851,6 @@ pub fn trim_rail(k: &Kernel, b: &mut Brep, rail: EdgeId, trim_interval: &Extent1
     // path reads it
     tk.seed = k.seed;
     tk.cancel.clone_from(&k.cancel);
-    tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
     b.edge_mut(rail)?
         .curve
         .as_mut()

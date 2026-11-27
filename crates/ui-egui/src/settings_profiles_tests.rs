@@ -37,11 +37,17 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    // Test change: show_design_view_switcher, the setting the owner asked for, is a portable key.
+    // Test change: show_design_view_switcher is a portable key; 110 -> 109 because the
+    // wide_panel_grab key left Preferences, so one fewer portable key; 109 -> 107 because the
+    // documents browser's show_document_browser and library_thumbnail_size left with it (#8206);
+    // 108 -> 109 because Turn Around adds one portable Navigation preference; 110 -> 111 because
+    // the keyboard profile (#15302) is a portable Shortcuts preference; 111 -> 113 because the Roll
+    // key and the twist's roll (roll_key, trackpad_twist_rolls, #22691) are two more portable
+    // Navigation preferences.
     assert_eq!(
         keys.len(),
-        109,
-        "include document browser visibility and sizing, the repeated-shortcut preference and the browser scroll wheel preferences among the current portable settings"
+        113,
+        "include the repeated-shortcut preference, the browser scroll wheel preferences and the centred command search among the current portable settings"
     );
     for key in [
         "nav",
@@ -55,11 +61,10 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "ui_scale",
         "ui_font",
         "navigator_style",
+        "navigator_turn_around",
         "nav_bridge_enabled",
         "nav_bridge_port",
         "language",
-        "library_thumbnail_size",
-        "show_document_browser",
         "suppress_sketch_snap",
         "browser_scroll_wheel",
     ] {
@@ -73,6 +78,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "space_mouse_axis_speed",
         "space_mouse_reverse",
         "space_mouse_buttons",
+        "space_mouse_long_buttons",
         "space_mouse_enabled",
         "dark_parts_shading",
         "msaa",
@@ -814,6 +820,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "browser_scroll_wheel",
         "center_arc_follows_cursor",
         "color_vision",
+        "command_search_centred",
         "design_reopen_views",
         "design_reuse_views",
         "design_sub_tab_render",
@@ -823,6 +830,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "direct_interaction",
         "escape_twice_finishes_sketch",
         "free_orbit",
+        "free_orbit_key",
         "free_orbit_upright",
         "hidden_toolbar_tabs",
         "hide_constraint_glyphs_zoomed_out",
@@ -833,9 +841,9 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "invert_navigator_arrows",
         "keep_hover_while_navigating",
         "keep_work_on_tab_switch",
+        "keyboard_profile",
         "language",
         "layout",
-        "library_thumbnail_size",
         "line_drag_draws_one",
         "line_hover_tangent_arc",
         "live_panel_drag_preview",
@@ -853,6 +861,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "navigation_bar",
         "navigator_fit",
         "navigator_style",
+        "navigator_turn_around",
         "orbit_around",
         "orbit_reverse",
         "origin_plane_names",
@@ -871,12 +880,12 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "ribbon_reveal",
         "ribbon_tabs_only",
         "right_drag_orbits",
+        "roll_key",
         "select_other_hidden",
         "selection_shift_add_only",
         "shortcut_again_ends_tool",
         "shortcut_cycles_modes",
         "show_design_view_switcher",
-        "show_document_browser",
         "show_selected_hidden_edges",
         "sketch_align_points",
         "sketch_auto_dimensions",
@@ -903,6 +912,7 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "timeline_origin_bodies",
         "toast_place",
         "trackpad_pan",
+        "trackpad_twist_rolls",
         "trackpad_twist_turns",
         "trackpad_zoom_modifier",
         "ui_font",
@@ -923,7 +933,12 @@ fn profile_keys_cover_the_current_portable_preferences() {
     actual.sort_unstable();
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
     // Test change: one more portable key, nav_button_map (what each mouse button drags).
-    assert_eq!(expected.len(), 109);
+    // Test change: one more portable key, free_orbit_key (the key that makes one orbit drag free).
+    // Test change: two more portable keys, roll_key and trackpad_twist_rolls (rolling the view, #22691).
+    // Test change: two fewer portable keys, show_document_browser and library_thumbnail_size, gone with the document browser;
+    // Turn Around adds one portable Navigation preference to the 108 keys on main.
+    // Test change: one more portable key, keyboard_profile (the keyboard profile your keys sit on, #15302).
+    assert_eq!(expected.len(), 113);
     assert_eq!(actual, expected);
 }
 
@@ -945,6 +960,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.keep_work_on_tab_switch = true;
     h.app.preferences.line_hover_tangent_arc = true;
     h.app.preferences.navigator_fit = true;
+    h.app.preferences.navigator_turn_around = false;
     h.app.preferences.invert_navigator_arrows = true;
     h.app.preferences.home_fit_size = 0.5;
     h.app.preferences.ribbon_click_ends_tool = false;
@@ -959,6 +975,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
         ("home_fit_size", json!(0.5)),
         ("invert_navigator_arrows", json!(true)),
         ("navigator_fit", json!(true)),
+        ("navigator_turn_around", json!(false)),
         ("ribbon_click_ends_tool", json!(false)),
         ("ribbon_menus_follow_hover", json!(true)),
         ("sketch_face_activates_part", json!(true)),
@@ -986,6 +1003,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.keep_work_on_tab_switch = false;
     h.app.preferences.line_hover_tangent_arc = false;
     h.app.preferences.navigator_fit = defaults.navigator_fit;
+    h.app.preferences.navigator_turn_around = defaults.navigator_turn_around;
     h.app.preferences.invert_navigator_arrows = defaults.invert_navigator_arrows;
     h.app.preferences.home_fit_size = defaults.home_fit_size;
     h.app.preferences.ribbon_click_ends_tool = defaults.ribbon_click_ends_tool;

@@ -204,6 +204,7 @@ use crate::math::{max2, min2, Point2, Point3, BIG_DOUBLE, EFF_ZERO, PI};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::math::gamma;
+use crate::surface::surface::certified_line::LinePasses;
 use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::p2::SurfaceKind;
@@ -215,7 +216,7 @@ use crate::surface::surface_cache::face_context::{
 };
 use crate::surface::surface_cache::{SurfaceCache, SurfaceCacheState};
 use crate::topology::proto_topology::p2::exactly_placed;
-use crate::topology::proto_topology::{ProtoBrep, ProtoTopologyManager};
+use crate::topology::proto_topology::{ProtoBrep, ProtoTopologyManager, VertexDefId};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, VertexId};
 use crate::EntityRef;
 
@@ -258,6 +259,12 @@ const OP_FACE_FACE: &str = "boolean::topology_intersector::p1::face_face_interse
 const OP_CERTIFIED_GAPS: &str = "boolean::topology_intersector::p1::certified_vertex_gaps";
 const OP_ABSORBED_PAIR: &str = "boolean::topology_intersector::p1::absorbed_pair_growths";
 
+/// How many times `imprint_body` imprints the vertex definitions added while vertex
+/// definitions were being imprinted (each pass imprints those the previous one added).
+/// A split adds at most one definition, at a point where an edge was already split, so
+/// a pass adds definitions only where the previous one split an edge.
+const LATE_VERTEX_PASSES: usize = 64;
+
 /// A dereference of a null pointer or a deleted object upstream (undefined
 /// behaviour).
 pub(super) const fn dangling(reason: &'static str) -> SolidError {
@@ -282,6 +289,7 @@ pub(super) fn split_soft<T>(r: Result<T>) -> Result<core::result::Result<T, Soli
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }),
         ) => Err(e),
@@ -580,6 +588,23 @@ pub trait IntersectorBrep<O>:
     ///
     /// Those of the edit; [`SolidError::InvalidInput`] for a vertex of another B-rep.
     fn brep_delete_vertex(&mut self, k: &mut Kernel, brep: O, vertex: O) -> Result<()>;
+    /// Batch deletion of `faces`, together with any edges of those faces that become wire
+    /// edges (except those in `keep_wires`) and any vertices that become shell vertices,
+    /// reconciling affected shells once at the end. Returns `Ok(Some((edges, vertices)))`
+    /// with the deleted wire edges and shell vertices when handled in batch, or `Ok(None)`
+    /// to use the per-entity `brep_delete_*` path.
+    ///
+    /// # Errors
+    ///
+    /// Those of the batch edit.
+    fn brep_delete_faces_batch(
+        &mut self,
+        _k: &mut Kernel,
+        _faces: &[O],
+        _keep_wires: Option<&[O]>,
+    ) -> Result<Option<(Vec<O>, Vec<O>)>> {
+        Ok(None)
+    }
     /// `SmBrep::GlueEdgesGeneral(pSurvivingEdge, eRelativeOrientation, dEdgeGap,
     /// bDoRegionNesting, pEdgeToDelete, pInsideFaceuses)` on B-rep `brep`
     /// (`topology::brep::p7::glue_edges_general`; `pInsideFaceuses` defaults to `NULL`).
@@ -2494,6 +2519,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             }
         };
 
+        // (#21801) every vertex definition imprinted so far
+        let mut imprinted: BTreeSet<VertexDefId> = BTreeSet::new();
         let pvs = mgr.proto_vertices().to_vec();
         for pv in pvs {
             k.check_cancelled("boolean::topology_intersector::p1::imprint_intersections")?;
@@ -2507,7 +2534,47 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 .to_vec();
             for vd in vds {
                 // (a vertex definition's first step is a B-rep merge)
+                imprinted.insert(vd);
                 if !record(mgr.imprint_vertex_definition(k, brep, vd), ret)? {
+                    *failure_edited = true;
+                }
+            }
+        }
+
+        // Not upstream (#21801): an imprinted vertex that splits an edge splits the edge
+        // definitions running across it as well (WR-533, `ProtoTopologyManager::update_edges`),
+        // and each split adds a vertex definition at the split point, on whatever each B-rep
+        // has there. When that definition joins a proto vertex whose definitions were already
+        // imprinted (the vertex being imprinted, or one earlier in the list), or a proto vertex
+        // made after the list above was read, it is never imprinted: it has no vertex in either
+        // B-rep, so neither part of the split definition finds a final vertex at the split
+        // point (`SM_ERR_NULL_POINTER` in `Imprint`) and the curve is missing from the face it
+        // lies in. Every definition left over is imprinted in the same way, in list order,
+        // until a pass adds none; past `LATE_VERTEX_PASSES` passes the remainder stays as
+        // before. It joined its proto vertex after the definitions there were combined, so when
+        // one of them is the same point and already imprinted, it is combined with that one
+        // and takes its vertices: imprinted as well, it would put a second vertex beside that
+        // one's (#20408's collars; `ProtoTopologyManager::combine_with_imprinted`).
+        for _ in 0..LATE_VERTEX_PASSES {
+            let late: Vec<VertexDefId> = mgr
+                .all_vertex_definitions()?
+                .into_iter()
+                .filter(|vd| !imprinted.contains(vd))
+                .collect();
+            if late.is_empty() {
+                break;
+            }
+            for vd in late {
+                k.check_cancelled("boolean::topology_intersector::p1::imprint_intersections")?;
+                if !imprinted.insert(vd) {
+                    continue;
+                }
+                let imprint = match mgr.combine_with_imprinted(k, brep, vd) {
+                    Ok(true) => Ok(()),
+                    Ok(false) => mgr.imprint_vertex_definition(k, brep, vd),
+                    Err(e) => Err(e),
+                };
+                if !record(imprint, ret)? {
                     *failure_edited = true;
                 }
             }
@@ -4213,6 +4280,11 @@ struct FaceCaches<O> {
     /// The faces the classifications of the attempt resolved to B-rep entities, from
     /// which the face owning a trim request's edge use is found.
     classified_faces: RefCell<Vec<O>>,
+    /// (not upstream) The searches of the certified line pass the solve has made, kept
+    /// over its attempts: an attempt after a cache is built or a trim made runs the solve
+    /// again from its start, and its line solves repeat the searches of the attempts before
+    /// it on the same inputs ([`LinePasses`]).
+    line_passes: RefCell<LinePasses>,
 }
 
 /// The intersector's topology objects with the face caches of [`FaceCaches`]: the
@@ -4306,6 +4378,10 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
 
     fn face_queries(&self) -> Option<&dyn FaceQueries<O>> {
         Some(self)
+    }
+
+    fn line_passes(&self) -> Option<&RefCell<LinePasses>> {
+        Some(&self.0.caches.line_passes)
     }
 }
 
@@ -4734,6 +4810,7 @@ where
         tree_requested: RefCell::new(BTreeSet::new()),
         trims: crate::query::brep::RayPreparation::default(),
         classified_faces: RefCell::new(Vec::new()),
+        line_passes: RefCell::new(LinePasses::default()),
     };
     loop {
         caches.classified_faces.borrow_mut().clear();

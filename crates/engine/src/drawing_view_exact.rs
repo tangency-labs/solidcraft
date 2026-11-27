@@ -24,17 +24,17 @@ use solidcore_record::brep::Brep;
 use solidcore_record::{Seg2, Vec2, Vec3};
 use solidcraft_doc::ModelState;
 use solidcraft_geom::drawing_view::ViewFrame;
-use solidcraft_geom::hlr::{self, HlrError, Source, Visibility};
 use solidcraft_geom::prelude::*;
 use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_geom::{Aabb2, EPS, Similarity2};
+use solidcraft_kernel::hlr::{self, HlrError, Source, Visibility};
 
 use super::ShownSet;
 use super::lines::{LineRequest, Piece, ViewLine, continues, joined_sweep, on_arc, within};
 use crate::mesh_lines::{self, Placed, Stage};
 
 /// The edges the view draws of a body, in its record's order, and which of them are tangent edges.
-pub(super) type Edges<'a> = dyn Fn(&Placed) -> (Vec<bool>, Vec<bool>) + 'a;
+pub(super) type Edges<'a> = dyn Fn(&Placed) -> (Vec<bool>, Vec<bool>) + Sync + 'a;
 
 /// Why a shown body's lines come from the mesh instead.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -155,7 +155,16 @@ pub(super) fn lines(
     // The bodies' boxes on the view, read only when a body drawn from the mesh may hide one drawn
     // exact, or a reference part is drawn exact.
     let boxes = OnceCell::new();
-    let boxes = || boxes.get_or_init(|| placed.iter().map(|item| view_box(item, &basis)).collect::<Vec<ViewBox>>()).as_slice();
+    let boxes = || {
+        boxes
+            .get_or_init(|| {
+                solidcraft_kernel::map_on_threads(placed, mesh_lines::WORKERS, |item| view_box(item, &basis))
+                    .into_iter()
+                    .map(Option::flatten)
+                    .collect::<Vec<ViewBox>>()
+            })
+            .as_slice()
+    };
     if drawn.iter().any(Result::is_err) {
         in_front(&reference, request.reference_hides_model, boxes(), &mut drawn);
     }
@@ -433,9 +442,9 @@ fn prepare(
     })
     .into_iter();
     let mut cancelled = false;
-    let mut groups = Vec::new();
+    let mut defs_for_firsts: Vec<std::result::Result<usize, Fallback>> = Vec::with_capacity(firsts.len());
     // Groups are numbered in the order of their first bodies.
-    for (i, item) in firsts {
+    for &(i, _) in &firsts {
         let index = index_of(i);
         let def = match index.and_then(|index| prepared.bodies.get(&index)) {
             Some(known) => *known,
@@ -459,14 +468,37 @@ fn prepare(
                 made
             }
         };
-        // The edges come in the record's order, as `hlr`'s do; this view's must all be `hlr`'s.
-        groups.push(def.and_then(|def| {
-            let (drawn, tangent) = edges(item);
-            let all = prepared.defs.get(def).is_some_and(|d| d.report.edges == drawn.len());
-            if all { Ok(Group { def, drawn, tangent }) } else { Err(Fallback::Unread) }
-        }));
+        defs_for_firsts.push(def);
     }
-    if cancelled { None } else { Some(groups) }
+    if cancelled {
+        return None;
+    }
+    // Classify drawn and tangent edges side by side too: on a many-body assembly with cold display
+    // meshes, calling `edges(item)` serially tessellates every unique body on one thread (#20484).
+    let edge_jobs: Vec<usize> = defs_for_firsts.iter().enumerate().filter_map(|(k, def)| def.is_ok().then_some(k)).collect();
+    let mut edge_results = solidcraft_kernel::map_on_threads(&edge_jobs, mesh_lines::WORKERS, |&k| {
+        if cancel() {
+            return None;
+        }
+        firsts.get(k).map(|(_, item)| edges(item))
+    })
+    .into_iter();
+    let mut groups = Vec::with_capacity(defs_for_firsts.len());
+    for def in defs_for_firsts {
+        match def {
+            Ok(def) => match edge_results.next() {
+                Some(Some(Some((drawn, tangent)))) => {
+                    // The edges come in the record's order, as `hlr`'s do; this view's must all be `hlr`'s.
+                    let all = prepared.defs.get(def).is_some_and(|d| d.report.edges == drawn.len());
+                    groups.push(if all { Ok(Group { def, drawn, tangent }) } else { Err(Fallback::Unread) });
+                }
+                Some(Some(None)) => return None,
+                _ => groups.push(Err(Fallback::Unread)),
+            },
+            Err(why) => groups.push(Err(why)),
+        }
+    }
+    Some(groups)
 }
 
 /// A body prepared for `hlr`, or why it can't be drawn exact whatever the view.
@@ -557,7 +589,7 @@ fn on_paper(geometry: &[Seg2], accuracy: CurveAccuracy, frame: &ViewFrame, chord
             }
         }
     }
-    let accuracy = match (frame.accuracy_on_paper(accuracy), flattened, proven) {
+    let accuracy = match (hlr::accuracy_on_paper(frame, accuracy), flattened, proven) {
         (on_paper, false, _) => on_paper,
         (CurveAccuracy::Analytic, true, true) => CurveAccuracy::Bounded { max_deviation_mm: chord },
         (CurveAccuracy::Bounded { max_deviation_mm }, true, true) => CurveAccuracy::Bounded { max_deviation_mm: max_deviation_mm + chord },
@@ -804,5 +836,59 @@ mod tests {
             let [Seg2::Arc { sweep: whole, .. }] = path.as_slice() else { panic!("{path:?}") };
             assert_eq!(*whole, std::f64::consts::TAU * sense, "quarters of {sweep}");
         }
+    }
+
+    /// A base view of a multi-body assembly (with foreground/background occlusion) produces the
+    /// exact same lines under parallel prepare, parallel edge classification and parallel HLR as
+    /// under single-threaded HLR (#20484).
+    #[test]
+    fn base_view_lines_on_multi_body_assembly_match_serial_hlr() {
+        use solidcraft_geom::drawing_view::NamedView;
+
+        let mut s = crate::Session::default();
+        for row in 0..2 {
+            for col in 0..12 {
+                let x = col as f64 * 16.0 + if row == 1 { 4.0 } else { 0.0 };
+                let y = row as f64 * 25.0;
+                s.execute(
+                    "solid.box",
+                    &serde_json::json!({
+                        "length": 12,
+                        "width": 10,
+                        "height": 14 + (col % 3) * 4,
+                        "corner": [x, y, 0],
+                        "body_name": format!("Member {row}-{col}"),
+                        "operation": "new",
+                    }),
+                )
+                .unwrap();
+            }
+        }
+        let shown = crate::drawing_view::shown(&s).unwrap();
+        let basis = NamedView::Front.basis();
+        let extents = crate::drawing_view::measure(&shown, &basis).unwrap();
+        let frame = ViewFrame::new(basis, "1:2".parse().unwrap(), extents.model.center(), Vec2::new(210.0, 148.5)).unwrap();
+        let request = LineRequest {
+            shows: extents.model,
+            hidden: true,
+            reference_hidden: false,
+            reference_hides_model: false,
+            tangent_edges: false,
+            chord_mm: super::super::CHORD_MM,
+        };
+        let placed = mesh_lines::placed(&s, &shown.state, |_| true, "test").unwrap();
+        let ask = mesh_lines::Ask { tangent_edges: false, sources: true };
+        let edges = |item: &Placed| mesh_lines::drawn_edges(&item.body.mesh(), ask);
+
+        let parallel = super::lines(&placed, &shown, &frame, &request, &options(), &edges, &mut PreparedBodies::default()).unwrap();
+        let serial_opts = hlr::Options { threads: 1, ..options() };
+        let serial = super::lines(&placed, &shown, &frame, &request, &serial_opts, &edges, &mut PreparedBodies::default()).unwrap();
+
+        assert_eq!(parallel.drawn.len(), 24);
+        assert!(parallel.drawn.iter().all(Result::is_ok));
+        assert_eq!(parallel.drawn, serial.drawn);
+        assert_eq!(parallel.split, serial.split);
+        assert_eq!(parallel.covered, serial.covered);
+        assert_eq!(parallel.uncertain, serial.uncertain);
     }
 }

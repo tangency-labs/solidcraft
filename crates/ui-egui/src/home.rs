@@ -4,12 +4,11 @@
 
 use std::collections::HashMap;
 
-use egui::Color32;
 use solidcraft_engine::Session;
-use solidcraft_viewport::{Camera, StandardView};
 
 use crate::SolveApp;
 use crate::start_page;
+use crate::ui_kit::{PreviewImage, PreviewShadow, PreviewTextures};
 
 /// Recent designs kept.
 pub const MAX_RECENT: usize = 12;
@@ -47,7 +46,7 @@ const SAMPLE_PICTURES: [&[u8]; 6] = [
 
 /// What a background job makes: a key ("sample:N" or a path), the picture, and for samples the
 /// built design (opened at once when picked).
-type Made = (String, Option<egui::ColorImage>, Option<Session>);
+type Made = (String, Option<PreviewImage>, Option<Session>);
 
 #[derive(Default)]
 pub struct HomeState {
@@ -63,8 +62,7 @@ pub struct HomeState {
     /// The Start page's recovery banner was closed (×): hidden until the next launch, while
     /// Recover still lists the designs.
     pub recovery_banner_hidden: bool,
-    thumbs: HashMap<String, Option<egui::TextureHandle>>,
-    library_stamps: HashMap<String, crate::library::FileStamp>,
+    thumbs: HashMap<String, Option<PreviewTextures>>,
     /// Keys whose picture could not be made (an empty or unreadable design). Terminal: the card
     /// shows a placeholder instead of spinning forever. Cleared when the design is opened or saved
     /// (see `add_recent`), which asks for the picture again.
@@ -78,7 +76,9 @@ pub struct HomeState {
     #[cfg(not(target_arch = "wasm32"))]
     sample_rx: Option<std::sync::mpsc::Receiver<Made>>,
     #[cfg(not(target_arch = "wasm32"))]
-    remembering: Option<std::sync::mpsc::Receiver<Made>>,
+    /// The pictures of opened and saved designs being drawn, by key: one each, since a design
+    /// can be opened before the picture of the one before it is taken up.
+    remembering: Vec<(String, std::sync::mpsc::Receiver<Made>)>,
     /// Watches the designs the picture threads open and build, and stops them when the app
     /// closes ([`finish_pictures`]): closing must not wait for every cold recent file (#8398).
     #[cfg(not(target_arch = "wasm32"))]
@@ -170,26 +170,32 @@ impl HomeState {
     }
 }
 
-/// A picture of a design: iso view, fitted.
-pub fn thumbnail(s: &Session) -> Option<egui::ColorImage> {
+/// A picture of a design, drawn as every file preview is ([`solidcraft_engine::thumbnail`]).
+pub fn thumbnail(s: &Session) -> Option<PreviewImage> {
+    render(s).map(|picture| preview_image(&picture))
+}
+
+fn render(s: &Session) -> Option<solidcraft_engine::thumbnail::Picture> {
     // Decided before anything is placed: placing the world is what costs.
     if placed_bodies(s) > PICTURE_MAX_BODIES {
         return None;
     }
-    let mut cam = Camera::default();
-    cam.set_view(StandardView::Iso);
-    // No picture of a model that cannot be placed.
-    let b = solidcraft_engine::view::bounds(s).ok()?;
-    if b.is_empty() {
-        return None;
+    solidcraft_engine::thumbnail::render(s)
+}
+
+pub(crate) fn preview_image(picture: &solidcraft_engine::thumbnail::Picture) -> PreviewImage {
+    PreviewImage { picture: egui::ColorImage::from_rgba_unmultiplied(THUMB, &picture.rgba), shadow: picture.shadow.clone().map(footprint) }
+}
+
+/// The engine's footprint mask, placed as the preview takes it: in parts of the picture.
+fn footprint(mask: Vec<u8>) -> PreviewShadow {
+    let [left, top, width, height] = solidcraft_engine::thumbnail::SHADOW_AREA.map(|v| v as f32);
+    let [across, down] = THUMB.map(|v| v as f32);
+    PreviewShadow {
+        mask,
+        size: solidcraft_engine::thumbnail::SHADOW_SIZE,
+        area: egui::Rect::from_min_size(egui::pos2(left / across, top / down), egui::vec2(width / across, height / down)),
     }
-    cam.fit(&solidcraft_engine::render::view_bounds(&b));
-    // Fill the card: the fit leaves room for a whole window's margins.
-    cam.distance *= 0.7;
-    let scene = solidcraft_engine::view::scene(s, &cam).ok()?;
-    // Drawn on the GPU by the renderer the app installs; none (a browser): no picture.
-    let picture = solidcraft_engine::capture::rgba(&scene, &cam, THUMB[0] as u32, THUMB[1] as u32).ok()?;
-    Some(egui::ColorImage::from_rgba_unmultiplied(THUMB, &picture.rgba))
 }
 
 /// File identity, not just its path: saving or replacing a design invalidates its picture.
@@ -247,9 +253,9 @@ fn clean_old_pictures() {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn cached(key: &str) -> Option<egui::ColorImage> {
+fn cached(key: &str) -> Option<PreviewImage> {
     let path = cache_path(key)?;
-    if std::fs::metadata(&path).ok()?.len() > 512 * 1024 {
+    if std::fs::metadata(&path).ok()?.len() > MAX_PICTURE_BYTES as u64 {
         return None;
     }
     let bytes = std::fs::read(&path).ok()?;
@@ -259,11 +265,13 @@ fn cached(key: &str) -> Option<egui::ColorImage> {
     Some(img)
 }
 
-fn decode_thumbnail(bytes: Vec<u8>) -> Option<egui::ColorImage> {
-    if bytes.len() > 512 * 1024 {
+const MAX_PICTURE_BYTES: usize = 512 * 1024;
+
+fn decode_thumbnail(bytes: Vec<u8>) -> Option<PreviewImage> {
+    if bytes.len() > MAX_PICTURE_BYTES {
         return None;
     }
-    let mut reader = image::ImageReader::with_format(std::io::Cursor::new(bytes), image::ImageFormat::Png);
+    let mut reader = image::ImageReader::with_format(std::io::Cursor::new(&bytes), image::ImageFormat::Png);
     let mut limits = image::Limits::default();
     limits.max_image_width = Some(THUMB[0] as u32);
     limits.max_image_height = Some(THUMB[1] as u32);
@@ -272,12 +280,15 @@ fn decode_thumbnail(bytes: Vec<u8>) -> Option<egui::ColorImage> {
     let image = reader.decode().ok()?.to_rgba8();
     // A capture with no visible pixels is unusable: try the portable picture or rebuild it.
     (image.width() as usize == THUMB[0] && image.height() as usize == THUMB[1] && image.as_raw().iter().skip(3).step_by(4).any(|alpha| *alpha != 0))
-        .then(|| egui::ColorImage::from_rgba_unmultiplied(THUMB, image.as_raw()))
+        .then(|| PreviewImage {
+            picture: egui::ColorImage::from_rgba_unmultiplied(THUMB, image.as_raw()),
+            shadow: solidcraft_engine::thumbnail::shadow(&bytes).map(footprint),
+        })
 }
 
 /// Imported STEP/mesh files open as unsaved designs, with no session path. Cache their
 /// pictures under the source file identity too, so Home need not reimport them on each launch.
-pub(crate) fn remember_file(s: &Session, key: &str) -> Option<egui::ColorImage> {
+pub(crate) fn remember_file(s: &Session, key: &str) -> Option<PreviewImage> {
     #[cfg(not(target_arch = "wasm32"))]
     let identity = cache_path(key);
     remember_at(
@@ -288,24 +299,22 @@ pub(crate) fn remember_file(s: &Session, key: &str) -> Option<egui::ColorImage> 
     )
 }
 
-fn remember_at(s: &Session, key: &str, #[cfg(not(target_arch = "wasm32"))] identity: Option<std::path::PathBuf>) -> Option<egui::ColorImage> {
+fn remember_at(s: &Session, key: &str, #[cfg(not(target_arch = "wasm32"))] identity: Option<std::path::PathBuf>) -> Option<PreviewImage> {
     #[cfg(target_arch = "wasm32")]
     let _ = key;
     // Off the window's thread: the app may still be setting up the renderer that draws it (#1210).
     #[cfg(not(target_arch = "wasm32"))]
     solidcraft_engine::capture::wait_for_renderer(std::time::Duration::from_secs(60));
-    let img = thumbnail(s)?;
+    let drawn = render(s)?;
     #[cfg(not(target_arch = "wasm32"))]
-    if let Some(path) = identity.filter(|p| cache_path(key).as_ref() == Some(p)) {
-        let rgba: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
-        if let Some(bytes) = solidcraft_viewport::png(THUMB[0], THUMB[1], rgba)
-            && let Some(dir) = path.parent()
-            && std::fs::create_dir_all(dir).is_ok()
-        {
-            let _ = solidcraft_engine::io::write_atomic(&path, &bytes, false);
-        }
+    if let Some(path) = identity.filter(|p| cache_path(key).as_ref() == Some(p))
+        && let Some(bytes) = solidcraft_engine::thumbnail::encode(&drawn)
+        && let Some(dir) = path.parent()
+        && std::fs::create_dir_all(dir).is_ok()
+    {
+        let _ = solidcraft_engine::io::write_atomic(&path, &bytes, false);
     }
-    Some(img)
+    Some(preview_image(&drawn))
 }
 
 /// Waits up to `within` for the threads drawing Home pictures, and drops what they made: the
@@ -317,7 +326,8 @@ fn remember_at(s: &Session, key: &str, #[cfg(not(target_arch = "wasm32"))] ident
 pub(crate) fn finish_pictures(h: &mut HomeState, within: std::time::Duration) {
     h.stop.cancel();
     let end = std::time::Instant::now() + within;
-    for rx in [h.rx.take(), h.sample_rx.take(), h.remembering.take()].into_iter().flatten() {
+    let remembering = std::mem::take(&mut h.remembering).into_iter().map(|(_, rx)| rx);
+    for rx in [h.rx.take(), h.sample_rx.take()].into_iter().flatten().chain(remembering) {
         // Each thread sends what it made and ends; its channel closes when it has.
         while let Some(left) = end.checked_duration_since(std::time::Instant::now()) {
             if let Err(std::sync::mpsc::RecvTimeoutError::Disconnected) = rx.recv_timeout(left) {
@@ -330,7 +340,7 @@ pub(crate) fn finish_pictures(h: &mut HomeState, within: std::time::Duration) {
 /// A Home picture is being drawn off the UI thread.
 #[cfg(test)]
 pub(crate) fn remembering(h: &HomeState) -> bool {
-    h.remembering.is_some()
+    !h.remembering.is_empty()
 }
 
 pub(crate) fn remember_session(h: &mut HomeState, s: &Session) {
@@ -355,7 +365,9 @@ pub(crate) fn remember_source(h: &mut HomeState, s: &Session, key: &str) {
             })
             .is_ok()
         {
-            h.remembering = Some(rx);
+            // A newer picture of the same design replaces the one still being drawn.
+            h.remembering.retain(|(k, _)| k != key);
+            h.remembering.push((key.to_owned(), rx));
             h.queued.retain(|k| k != key);
             h.thumbs.insert(key.to_owned(), None);
         }
@@ -366,10 +378,10 @@ pub(crate) fn remember_source(h: &mut HomeState, s: &Session, key: &str) {
     }
 }
 
-pub(crate) fn install(h: &mut HomeState, ctx: &egui::Context, key: &str, img: Option<egui::ColorImage>) {
+pub(crate) fn install(h: &mut HomeState, ctx: &egui::Context, key: &str, img: Option<PreviewImage>) {
     match img {
         Some(i) => {
-            let tex = ctx.load_texture(format!("thumb:{key}"), i, egui::TextureOptions::LINEAR);
+            let tex = PreviewTextures::load(ctx, &format!("thumb:{key}"), i);
             h.thumbs.insert(key.to_string(), Some(tex));
             h.failed.remove(key);
         }
@@ -382,8 +394,26 @@ pub(crate) fn install(h: &mut HomeState, ctx: &egui::Context, key: &str, img: Op
     }
 }
 
+/// A file's picture for the parts library (on a worker thread): the one it already has, or,
+/// for a file without one, drawn by opening it.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn part_picture(key: &str) -> Option<PreviewImage> {
+    if let Some(img) = picture(key) {
+        return Some(img);
+    }
+    let mut s = Session::default();
+    s.execute("doc.open", &serde_json::json!({ "path": key })).ok()?;
+    remember_file(&s, key)
+}
+
+/// Upload a picture into a texture map (the parts library's).
+pub(crate) fn install_texture(map: &mut HashMap<String, Option<PreviewTextures>>, ctx: &egui::Context, key: &str, img: Option<PreviewImage>) {
+    let tex = img.map(|i| PreviewTextures::load(ctx, &format!("library:{key}"), i));
+    map.insert(key.to_string(), tex);
+}
+
 /// Read a disposable picture without evaluating, importing or meshing a model.
-fn picture(key: &str) -> Option<egui::ColorImage> {
+fn picture(key: &str) -> Option<PreviewImage> {
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(img) = cached(key) {
         return Some(img);
@@ -392,7 +422,7 @@ fn picture(key: &str) -> Option<egui::ColorImage> {
 }
 
 /// A sample's shipped picture. Its model is built only when the sample is selected.
-fn sample_picture(i: usize) -> Option<egui::ColorImage> {
+fn sample_picture(i: usize) -> Option<PreviewImage> {
     decode_thumbnail(SAMPLE_PICTURES.get(i)?.to_vec())
 }
 
@@ -529,7 +559,7 @@ fn start_sample(h: &mut HomeState) {
 fn poll(app: &mut SolveApp, ctx: &egui::Context) {
     let mut done: Vec<Made> = Vec::new();
     #[cfg(not(target_arch = "wasm32"))]
-    let mut remembered = None;
+    let mut remembered: Vec<Made> = Vec::new();
     #[cfg(not(target_arch = "wasm32"))]
     {
         start_sample(&mut app.home);
@@ -543,17 +573,16 @@ fn poll(app: &mut SolveApp, ctx: &egui::Context) {
                 Err(std::sync::mpsc::TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(16)),
             }
         }
-        if let Some(rx) = &app.home.remembering {
-            match rx.try_recv() {
-                Ok(m) => {
-                    remembered = Some(m);
-                    app.home.remembering = None;
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => app.home.remembering = None,
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    ctx.request_repaint_after(std::time::Duration::from_millis(16));
-                }
+        app.home.remembering.retain(|(_, rx)| match rx.try_recv() {
+            Ok(m) => {
+                remembered.push(m);
+                false
             }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
+            Err(std::sync::mpsc::TryRecvError::Empty) => true,
+        });
+        if !app.home.remembering.is_empty() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
         start_jobs(&mut app.home);
         if let Some(rx) = &app.home.rx {
@@ -573,9 +602,7 @@ fn poll(app: &mut SolveApp, ctx: &egui::Context) {
                 }
             }
         }
-        if let Some(m) = remembered {
-            done.push(m);
-        }
+        done.append(&mut remembered);
         if app.home.rx.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
@@ -627,67 +654,6 @@ fn want(h: &mut HomeState, key: &str) {
     }
 }
 
-/// Draw document-browser thumbnails with a neutral image tint.
-pub(crate) fn paint_document_thumbnail(painter: &egui::Painter, texture: &egui::TextureHandle, rect: egui::Rect, dim: bool) {
-    let tint = if dim { Color32::from_white_alpha(90) } else { Color32::WHITE };
-    painter.image(texture.id(), rect, egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)), tint);
-}
-
-/// Invalidate changed paths using metadata already read by the folder worker.
-pub(crate) fn refresh_document_thumbnails(h: &mut HomeState, identities: &std::collections::BTreeMap<std::path::PathBuf, crate::library::FileStamp>) {
-    let changed: Vec<_> = identities
-        .iter()
-        .filter_map(|(path, stamp)| {
-            let key = path.to_str()?;
-            (h.library_stamps.get(key) != Some(stamp) && h.thumbs.contains_key(key)).then(|| key.to_owned())
-        })
-        .collect();
-    if !changed.is_empty() {
-        // Dropped receivers reject late results from before this scan. Requeue interrupted
-        // placeholders on demand, while retaining ready pictures for unchanged files.
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            h.rx = None;
-            h.remembering = None;
-        }
-        h.queued.clear();
-        h.thumbs.retain(|key, image| image.is_some() || h.failed.contains(key) || key.starts_with("sample:"));
-        for key in changed {
-            h.thumbs.remove(&key);
-            h.failed.remove(&key);
-        }
-    }
-    h.library_stamps.retain(|key, _| h.thumbs.contains_key(key));
-    for (path, stamp) in identities {
-        if let Some(key) = path.to_str() {
-            h.library_stamps.insert(key.to_owned(), stamp.clone());
-        }
-    }
-}
-
-/// Share the existing background thumbnail cache with the document browser.
-pub(crate) fn document_thumbnail(app: &mut SolveApp, ctx: &egui::Context, path: &str) -> Option<egui::TextureHandle> {
-    poll(app, ctx);
-    if !app.home.thumbs.contains_key(path)
-        && let Some(i) = path.strip_prefix("sample:").and_then(|i| i.parse::<usize>().ok())
-    {
-        install(&mut app.home, ctx, path, sample_picture(i));
-    }
-    if !app.home.thumbs.contains_key(path) {
-        // Library browsing can visit many files; retain Home's recents and samples.
-        if app.home.thumbs.len() >= 256 {
-            let discard: Vec<_> =
-                app.home.thumbs.keys().filter(|key| !key.starts_with("sample:") && !app.home.recent.contains(key)).take(128).cloned().collect();
-            for key in discard {
-                app.home.thumbs.remove(&key);
-            }
-        }
-        want(&mut app.home, path);
-        ctx.request_repaint();
-    }
-    app.home.thumbs.get(path).and_then(Clone::clone)
-}
-
 /// Open a built-in sample (a copy of the design made for its picture).
 pub fn open_sample(app: &mut SolveApp, i: usize) {
     match app.home.samples.get(&i) {
@@ -716,7 +682,7 @@ pub fn open_recent(app: &mut SolveApp, path: &str) {
             restore(path);
             return;
         }
-        app.set_status(format!("{path} is no longer there"), true);
+        app.set_status(format!("{} is no longer there", crate::display_user_path(path)), true);
         return;
     }
     app.open_chosen_file(path);
@@ -1104,14 +1070,15 @@ fn recent_entry<'a>(app: &'a SolveApp, index: usize, path: &'a str) -> start_pag
     }
 }
 
-fn texture(texture: Option<&egui::TextureHandle>) -> Option<(egui::TextureId, egui::Vec2)> {
-    texture.map(|texture| (texture.id(), texture.size_vec2()))
+fn texture(textures: Option<&PreviewTextures>) -> Option<crate::ui_kit::PreviewArt> {
+    textures.map(PreviewTextures::art)
 }
 
 /// Abbreviate only an actual home-directory ancestor; the source path is kept for actions.
 pub(crate) fn friendly_path(path: &str) -> String {
+    let shown = crate::display_user_path(path);
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
-    abbreviated_path(path, home.as_deref().map(std::path::Path::new))
+    abbreviated_path(shown, home.as_deref().map(std::path::Path::new))
 }
 
 fn abbreviated_path(path: &str, home: Option<&std::path::Path>) -> String {
@@ -1206,6 +1173,7 @@ fn export_tiles(app: &SolveApp) -> start_page::Tiles<'_, FileAction> {
         ("usd", "OpenUSD", None, FileAction::Export("usd")),
         ("3dm", "Rhino", None, FileAction::Export("3dm")),
         ("urdf", "URDF", None, FileAction::Export("urdf")),
+        ("mjcf", "MJCF", None, FileAction::Export("mjcf")),
         ("sdf", "SDF", None, FileAction::Export("sdf")),
         ("json", "JSON", Some("home.export_json_hint"), FileAction::Export("json")),
     ];
@@ -1377,49 +1345,6 @@ mod tests {
         assert_ne!(cache_path(path.to_str().unwrap()).unwrap(), before);
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn library_refresh_invalidates_changed_previews_and_rejects_late_jobs() {
-        let mut h = crate::scenario::Harness::new();
-        let path = h.dir.join("changed.sc");
-        let key = path.to_str().unwrap();
-        let stamp = crate::library::FileStamp {
-            bytes: 1,
-            modified: None,
-            #[cfg(unix)]
-            changed: (1, 0),
-        };
-        let mut identities = std::collections::BTreeMap::from([(path.clone(), stamp.clone())]);
-        refresh_document_thumbnails(&mut h.app.home, &identities);
-        install(&mut h.app.home, &h.ctx, key, Some(egui::ColorImage::filled([2, 2], Color32::WHITE)));
-        let old = h.app.home.thumbs[key].as_ref().unwrap().id();
-        refresh_document_thumbnails(&mut h.app.home, &identities);
-        assert_eq!(h.app.home.thumbs[key].as_ref().unwrap().id(), old, "unchanged files retain their texture");
-        let (tx, rx) = std::sync::mpsc::channel();
-        h.app.home.rx = Some(rx);
-        want(&mut h.app.home, "interrupted.sc");
-        identities.insert(path.clone(), crate::library::FileStamp { bytes: 2, ..stamp });
-        refresh_document_thumbnails(&mut h.app.home, &identities);
-        assert!(!h.app.home.thumbs.contains_key(key));
-        assert!(!h.app.home.thumbs.contains_key("interrupted.sc"));
-        assert!(tx.send((key.into(), Some(egui::ColorImage::filled([2, 2], Color32::RED)), None)).is_err());
-        assert!(h.app.home.rx.is_none());
-        want(&mut h.app.home, key);
-        assert_eq!(h.app.home.queued, [key]);
-    }
-
-    #[test]
-    fn library_sample_previews_do_not_build_or_queue_models() {
-        let mut h = crate::scenario::Harness::new();
-        h.app.home = HomeState::default();
-        for i in 0..solidcraft_engine::sample::samples().len() {
-            assert!(document_thumbnail(&mut h.app, &h.ctx, &format!("sample:{i}")).is_some());
-        }
-        assert!(h.app.home.samples.is_empty());
-        assert!(h.app.home.queued.is_empty());
-        assert!(h.app.home.wanted.is_none());
-    }
-
     #[test]
     fn recent_paths_only_abbreviate_complete_home_ancestors() {
         let home = Some(std::path::Path::new("/Users/sample"));
@@ -1494,7 +1419,7 @@ mod tests {
         for (i, sample) in samples.iter().enumerate() {
             let script = serde_json::to_vec(&(sample.script)()).unwrap();
             assert_eq!(hashes.get(i).unwrap(), &format!("{:x}", Sha256::digest(script)), "regenerate the preview for {}", sample.name);
-            assert_eq!(sample_picture(i).unwrap().size, THUMB);
+            assert_eq!(sample_picture(i).unwrap().picture.size, THUMB);
         }
         assert!(sample_picture(samples.len()).is_none());
     }
@@ -1537,9 +1462,7 @@ mod tests {
             let script = (sample.script)();
             let mut session = Session::default();
             session.run_script(&script).unwrap();
-            let image = thumbnail(&session).unwrap();
-            let rgba = image.pixels.iter().flat_map(|p| p.to_srgba_unmultiplied()).collect();
-            let png = solidcraft_viewport::png(THUMB[0], THUMB[1], rgba).unwrap();
+            let png = solidcraft_engine::thumbnail::encode(&render(&session).unwrap()).unwrap();
             std::fs::write(dir.join(format!("{i}.png")), png).unwrap();
             hashes.push(format!("{:x}", Sha256::digest(serde_json::to_vec(&script).unwrap())));
             eprintln!("{}: {:.3} s", sample.name, began.elapsed().as_secs_f64());
@@ -1567,7 +1490,7 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), bytes);
         let (_, cached_image, session) = make(&key);
         assert!(session.is_none());
-        assert_eq!(cached_image.unwrap().pixels, image.pixels);
+        assert_eq!(cached_image.unwrap(), image);
         std::fs::write(&path, b"changed file identity").unwrap();
         assert!(cached(&key).is_none());
         std::fs::remove_file(path).unwrap();
@@ -1588,7 +1511,7 @@ mod tests {
         let bytes = session.design_container(solidcraft_engine::io::DesignCompression::Fast, false, true).unwrap();
         let png = solidcraft_engine::io::read_design_thumbnail(&bytes).unwrap();
         let image = decode_thumbnail(png).unwrap();
-        assert_eq!(image.size, THUMB);
+        assert_eq!(image.picture.size, THUMB);
         let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
         let path = std::env::temp_dir().join(format!("solidcraft-portable-thumb-{}-{nonce}.solidcraft", std::process::id()));
         std::fs::write(&path, bytes).unwrap();
@@ -1596,7 +1519,7 @@ mod tests {
         assert!(cached(&key).is_none());
         let (_, picture, rebuilt) = make(&key);
         assert!(rebuilt.is_none());
-        assert_eq!(picture.unwrap().pixels, image.pixels);
+        assert_eq!(picture.unwrap(), image);
         assert!(!cache_path(&key).unwrap().exists(), "fallback rebuilding would create a local picture");
         std::fs::remove_file(path).unwrap();
         assert!(decode_thumbnail(vec![0; 600_000]).is_none());
@@ -1614,7 +1537,7 @@ mod tests {
         rgba[..4].copy_from_slice(&[64, 128, 192, 128]);
         let png = solidcraft_viewport::png(THUMB[0], THUMB[1], rgba.clone()).unwrap();
         let image = decode_thumbnail(png).unwrap();
-        assert_eq!(image, egui::ColorImage::from_rgba_unmultiplied(THUMB, &rgba));
+        assert_eq!(image.picture, egui::ColorImage::from_rgba_unmultiplied(THUMB, &rgba));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1648,7 +1571,7 @@ mod tests {
             std::fs::write(&cache, &blank).unwrap();
             let (_, image, _) = make(&key);
             let image = image.unwrap();
-            assert!(image.pixels.iter().any(|pixel| pixel.a() != 0), "{name}: Home must show visible pixels");
+            assert!(image.picture.pixels.iter().any(|pixel| pixel.a() != 0), "{name}: Home must show visible pixels");
             assert_eq!(std::fs::read(&path).unwrap(), bytes, "recovering a picture must not change the design");
             if name == "visible" {
                 assert_eq!(image, decode_thumbnail(visible.clone()).unwrap());
@@ -1727,6 +1650,39 @@ mod tests {
         TEST_PICTURES.with(|d| *d.borrow_mut() = None);
     }
 
+    /// Designs opened one after another, before Start is shown again, each keep their picture.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn pictures_of_designs_opened_one_after_another_are_all_kept() {
+        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let mut session = Session::default();
+        session.execute("solid.box", &serde_json::json!({"length":10,"width":20,"height":30})).unwrap();
+        let keys: Vec<String> = (0..3)
+            .map(|i| {
+                let path = std::env::temp_dir().join(format!("solidcraft-each-thumb-{}-{nonce}-{i}.sc", std::process::id()));
+                std::fs::write(&path, b"identity only").unwrap();
+                path.to_string_lossy().into_owned()
+            })
+            .collect();
+        let mut app = crate::test_support::sample_app();
+        for key in &keys {
+            remember_source(&mut app.home, &session, key);
+        }
+        let ctx = crate::fonts::test_context();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !app.home.remembering.is_empty() && std::time::Instant::now() < deadline {
+            poll(&mut app, &ctx);
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        for key in &keys {
+            assert!(app.home.thumbs.get(key).is_some_and(Option::is_some), "{key}");
+            if let Some(png) = cache_path(key) {
+                let _ = std::fs::remove_file(png);
+            }
+            std::fs::remove_file(key).unwrap();
+        }
+    }
+
     /// STEP opens deliberately have no save path, but their source still gets a cache entry.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
@@ -1746,17 +1702,17 @@ mod tests {
         assert!(opened.path.is_none(), "an imported file is an unsaved design");
         let mut home = HomeState::default();
         remember_source(&mut home, &opened, &key);
-        let (made_key, image, rebuilt) = home.remembering.take().unwrap().recv_timeout(std::time::Duration::from_secs(30)).unwrap();
+        let (made_key, image, rebuilt) = home.remembering.pop().unwrap().1.recv_timeout(std::time::Duration::from_secs(30)).unwrap();
         assert_eq!(made_key, key);
         assert!(rebuilt.is_none());
         let image = image.unwrap();
         assert!(opened.path.is_none(), "caching must not turn Save into an overwrite of the STEP source");
         let png = cache_path(&key).unwrap();
-        assert_eq!(cached(&key).unwrap().pixels, image.pixels);
+        assert_eq!(cached(&key).unwrap(), image);
         assert_eq!(std::fs::read(&path).unwrap(), original);
         let (_, picture, rebuilt) = make(&key);
         assert!(rebuilt.is_none());
-        assert_eq!(picture.unwrap().pixels, image.pixels);
+        assert_eq!(picture.unwrap(), image);
         std::fs::write(&path, b"file replaced").unwrap();
         assert!(cached(&key).is_none());
         std::fs::remove_file(path).unwrap();
@@ -1928,6 +1884,18 @@ mod tests {
         assert_eq!(h.recent.iter().filter(|p| p.as_str() == "/d/5.solidcraft").count(), 1);
     }
 
+    /// Preferences that list a design twice (an older version, or two pages writing them) show it
+    /// once (#23033), and still hold no more than the list's size.
+    #[test]
+    fn saved_preferences_that_list_a_design_twice_show_it_once() {
+        let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let mut listed: Vec<String> = vec!["/d/a.sc".into(), "/d/b.sc".into(), "/d/a.sc".into()];
+        listed.extend((0..20).map(|i| format!("/d/{i}.sc")));
+        app.load_prefs(&serde_json::json!({ "recent": listed }).to_string());
+        assert_eq!(app.home.recent[..3], ["/d/a.sc", "/d/b.sc", "/d/0.sc"]);
+        assert_eq!(app.home.recent.len(), MAX_RECENT);
+    }
+
     /// Samples build in the background and make a picture; picking one opens its design.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
@@ -1938,7 +1906,7 @@ mod tests {
         let (key, img, session) = make("sample:0");
         assert_eq!(key, "sample:0");
         let img = img.unwrap();
-        assert_eq!(img.size, THUMB);
+        assert_eq!(img.picture.size, THUMB);
         let s = session.unwrap();
         assert_eq!(s.doc.name, "Sample Plate");
         assert!(!s.is_dirty() && s.undo.is_empty());

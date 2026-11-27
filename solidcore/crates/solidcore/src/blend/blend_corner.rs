@@ -72,6 +72,7 @@ use crate::topology::{edge, Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 pub mod ball;
 pub mod chamfer;
+pub mod crossing_ends;
 pub mod end;
 pub mod join_gap;
 pub mod mixed;
@@ -80,6 +81,7 @@ pub(crate) mod piece;
 pub mod rollover;
 pub mod separate_ends;
 pub mod setback;
+pub mod support_ball;
 pub mod swept;
 
 const OP_CLASSIFY: &str = "blend::blend_corner::classify";
@@ -242,6 +244,11 @@ pub enum BlendCornerEvent {
     /// Not the fork's (WR-716, #2345): chamfers meeting at a vertex where every edge is
     /// chamfered, closed by their planes ([`chamfer`]).
     Chamfer,
+    /// Not the fork's (#19089): three equal convex rounds at a vertex of four faces whose
+    /// fourth edge is a tangent seam from a plane into a cylinder, the ball rolling on across
+    /// the seam onto the cylinder until it touches the third face: a torus and the corner
+    /// ball's sphere ([`support_ball`]).
+    SupportBall,
 }
 
 /// `SmBlendEnd` (the fork's 53c47b8): how an End ends, chosen when the corner is made.
@@ -270,6 +277,22 @@ pub enum BlendTurn {
     Mitre,
     /// `SM_BT_SWEPT`: the blends' section revolved about the side edge (G1).
     Swept,
+}
+
+/// How a fillet session's blend corners make their Turns ([`BlendTurn`] is one corner's).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TurnChoice {
+    /// Every Turn is Mitred (the default).
+    #[default]
+    Mitre,
+    /// Every Turn is Swept (the fork's `SetSweptTurns`); a Turn the Swept construction does
+    /// not build ([`swept::classify_swept`]) is refused with its reason.
+    Swept,
+    /// Each Turn is Swept where [`swept::classify_swept`] builds it (the rolling ball kept on
+    /// the side edge: an exact torus) and Mitred where it does not. Decided once per corner,
+    /// by that classification, before anything is built: a Turn it builds is never refused
+    /// where a Mitre would have been made.
+    Auto,
 }
 
 /// The two ways the blend corner closes chamfers meeting at a vertex
@@ -355,6 +378,12 @@ impl BlendCorner {
     #[must_use]
     pub fn is_mixed(self) -> bool {
         self.event == BlendCornerEvent::Mixed
+    }
+
+    /// The support change ([`support_ball`]; #19089).
+    #[must_use]
+    pub fn is_support_ball(self) -> bool {
+        self.event == BlendCornerEvent::SupportBall
     }
 
     /// The chamfer event ([`chamfer`]; WR-716).

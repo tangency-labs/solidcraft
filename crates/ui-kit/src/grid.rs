@@ -123,7 +123,8 @@ impl GridColumn {
         &self.label
     }
 
-    fn layout(&self, manual: Option<f32>) -> Column<'_> {
+    /// The table column for this grid column, also used by a shared table of grid sections.
+    pub fn layout(&self, manual: Option<f32>) -> Column<'_> {
         let mut column = Column::new(&self.label, self.weight).min_content_width(self.min_content_width).manual_width(manual);
         if self.flex {
             column = column.flex();
@@ -218,6 +219,16 @@ pub trait GridSource {
     fn row_count(&self) -> usize;
     /// A key for the row that stays the same across sorting and filtering.
     fn row_key(&self, row: usize) -> Cow<'_, str>;
+    /// Optional caller-owned row selection, independent of the cell cursor.
+    fn row_selected(&self, _row: usize) -> bool {
+        false
+    }
+    /// Row gestures after its cells have been built. Controls retain their own input.
+    fn row_drawn(&mut self, _ui: &Ui, _row: usize, _response: &Response) {}
+    /// Keep the keyboard cell cursor but leave selection ranges to the owning rows.
+    fn cell_ranges(&self) -> bool {
+        true
+    }
     /// The cell's text: shown, copied and edited.
     fn text(&self, row: usize, col: usize) -> Cow<'_, str>;
     /// This cell's kind when it differs from its column's (a read-only cell in an editable column).
@@ -444,6 +455,30 @@ impl<'a> Grid<'a> {
     /// Draw the grid, with `footer` drawing extra rows (a draft row) inside the table after the
     /// last row and before the add-row control.
     pub fn show_with<S: GridSource>(self, ui: &mut Ui, source: &mut S, footer: impl FnOnce(&mut Ui, &mut Table<'_>, &mut S)) -> GridOutput {
+        self.show_impl(ui, source, None, footer)
+    }
+
+    /// Draw this grid's rows inside an existing table, sharing its columns and header. Each
+    /// section retains its own cursor, edit buffer and virtual rows; table row keys are prefixed
+    /// by the grid id so a row repeated in another section has independent widgets.
+    pub fn show_in<S: GridSource>(
+        self,
+        ui: &mut Ui,
+        table: &mut Table<'_>,
+        source: &mut S,
+        footer: impl FnOnce(&mut Ui, &mut Table<'_>, &mut S),
+    ) -> GridOutput {
+        self.show_impl(ui, source, Some(table), footer)
+    }
+
+    fn show_impl<S: GridSource>(
+        self,
+        ui: &mut Ui,
+        source: &mut S,
+        table: Option<&mut Table<'_>>,
+        footer: impl FnOnce(&mut Ui, &mut Table<'_>, &mut S),
+    ) -> GridOutput {
+        let embedded = table.is_some();
         let id = self.id;
         let sid = self.state.unwrap_or_else(|| Grid::state_of(id));
         let ctx = ui.ctx().clone();
@@ -455,6 +490,10 @@ impl<'a> Grid<'a> {
         let count = source.row_count();
         let shown = Shown(self.filter.map(|keep| (0..count).filter(|r| keep(*r)).collect()), count);
         resolve(&mut state, source, &shown, columns.len());
+        if !source.cell_ranges() {
+            state.anchor = state.cursor.clone();
+            state.dragging = false;
+        }
         let focus = focus_id(sid);
         // A press elsewhere takes egui's focus away at the end of its frame, so the grid takes the
         // keyboard it asked for on a later frame without one, before reading this frame's keys.
@@ -478,18 +517,21 @@ impl<'a> Grid<'a> {
         if focused && state.edit.is_none() && !egui::Popup::is_any_open(&ctx) {
             navigate(ui, &mut state, source, &shown, &columns, &mut out);
         }
+        if !source.cell_ranges() {
+            state.anchor = state.cursor.clone();
+        }
         let manual: Vec<Option<f32>> = self.resize.and_then(|key| ctx.data_mut(|m| m.get_persisted(key))).unwrap_or_default();
         let mut layout: Vec<Column<'_>> = columns.iter().enumerate().map(|(i, c)| c.layout(manual.get(i).copied().flatten())).collect();
         if adds_column {
             layout.push(Column::new("", 0.0).icon_only().min_content_width(Tokens::get().form_close_size));
             extra = layout.len() - 1;
         }
-        let range = range(&state, &shown, columns.len());
+        let range = source.cell_ranges().then(|| range(&state, &shown, columns.len())).flatten();
         let shows_focus = focused || editing_focused || state.focus;
         let mut clicks: Vec<Click> = Vec::new();
         let mut cells: Vec<(usize, usize, egui::Rect)> = Vec::new();
         let resize = self.resize;
-        table_custom(ui, id, &layout, self.empty, |ui, table| {
+        let draw = |ui: &mut Ui, table: &mut Table<'_>| {
             let header = |ui: &mut Ui, index: usize| {
                 if index == extra && adds_column {
                     super::add_column_button(ui, |ui| source.add_column(ui));
@@ -497,9 +539,11 @@ impl<'a> Grid<'a> {
                 }
                 source.header(ui, index)
             };
-            match resize {
-                Some(key) => table.headers_resizable(ui, key, header),
-                None => table.headers(ui, header),
+            if !embedded {
+                match resize {
+                    Some(key) => table.headers_resizable(ui, key, header),
+                    None => table.headers(ui, header),
+                }
             }
             // The focus target that holds the keyboard while no cell is edited. Arrows and Tab stay
             // with it rather than egui's focus order.
@@ -513,6 +557,9 @@ impl<'a> Grid<'a> {
             let rows = shown.len();
             let first = (((clip.top() - top) / height).floor().max(0.0) as usize).min(rows);
             let last = (((clip.bottom() - top) / height).ceil().max(0.0) as usize).min(rows);
+            if embedded && (first < last || source.add_row().is_some()) {
+                table.header_aliases(id);
+            }
             // Rows built off screen: the one being edited (its box keeps the keyboard and commits on
             // leaving) and the cursor's when it must scroll into view.
             let mut built: Vec<usize> = (first..last).collect();
@@ -531,10 +578,15 @@ impl<'a> Grid<'a> {
                 let Some(source_row) = shown.source(row) else { continue };
                 let key = source.row_key(source_row).into_owned();
                 let mut reveal = None;
-                table.row_visible(ui, &key, false, true, |table_row| {
+                let table_key = if embedded { format!("{id}:{key}") } else { key.clone() };
+                let selected = source.row_selected(source_row);
+                let response = table.row_visible(ui, &table_key, selected, true, |table_row| {
                     for (col, column) in columns.iter().enumerate() {
                         table_row.cell(|ui| {
                             let rect = ui.max_rect();
+                            if embedded {
+                                solidcraft_ui_registry::publish_rect(&format!("dialog:table:{id}:{key}:cell:{}", column.label), rect);
+                            }
                             cells.push((row, col, rect));
                             let cell = Cell { id, sid, row, source_row, col, key: &key, column, rect };
                             draw_cell(ui, &cell, &mut state, source, &shown, range, shows_focus, &mut clicks, &mut out);
@@ -547,6 +599,12 @@ impl<'a> Grid<'a> {
                         table_row.cell(|_| {});
                     }
                 });
+                source.row_drawn(ui, source_row, &response);
+                if embedded {
+                    // Embedding changes the table's widget namespace, not the grid's public
+                    // handles. Keep callers' row targets stable alongside the shared table's.
+                    solidcraft_ui_registry::publish_rect(&format!("dialog:table:{id}:{key}"), response.rect);
+                }
                 if let Some(rect) = reveal {
                     table.reveal_row(rect);
                     state.reveal = false;
@@ -558,12 +616,24 @@ impl<'a> Grid<'a> {
             footer(ui, table, source);
             if let Some(label) = source.add_row() {
                 let label = label.into_owned();
-                if table.add_prompt(ui, &label, &label).clicked() {
+                let response = table.add_prompt(ui, &label, &label);
+                if embedded {
+                    solidcraft_ui_registry::publish_target(&format!("dialog:table:{id}:add"), response.rect);
+                }
+                if response.clicked() {
                     out.add_row = true;
                 }
             }
-        });
+        };
+        match table {
+            Some(table) => draw(ui, table),
+            None => table_custom(ui, id, &layout, self.empty, draw),
+        }
         pointer(ui, &mut state, source, &shown, &columns, &cells, clicks, &mut out);
+        if !source.cell_ranges() {
+            state.anchor = state.cursor.clone();
+            state.dragging = false;
+        }
         take_focus(&ctx, &mut state, focus);
         state.held = ctx.memory(|m| m.has_focus(focus));
         state.keyed = ctx.input(|i| {
@@ -613,6 +683,17 @@ impl<'a> Grid<'a> {
         state.anchor = Some(spot);
         state.edit = None;
         state.focus = true;
+        store(ctx, id, state);
+    }
+
+    /// Open an existing text cell from an explicit action such as Rename.
+    pub fn edit(ctx: &egui::Context, id: egui::Id, row_key: &str, row: usize, col: usize, text: String) {
+        let mut state = load(ctx, id);
+        let at = Spot { key: row_key.to_owned(), row, col };
+        state.cursor = Some(at.clone());
+        state.anchor = Some(at.clone());
+        state.edit = Some(Editing { at, text, caret: Some(Caret::All), unfocused: 0, had_focus: false, message: None });
+        state.reveal = true;
         store(ctx, id, state);
     }
 
@@ -790,8 +871,9 @@ fn draw_cell<S: GridSource>(
     if error {
         ui.painter().rect_stroke(rect.shrink(0.5), t.control_radius, egui::Stroke::new(1.0, t.form_error), egui::StrokeKind::Inside);
     }
-    if is_cursor && shows_focus {
-        ui.painter().rect_stroke(rect, t.control_radius, egui::Stroke::new(t.space_2, t.accent), egui::StrokeKind::Inside);
+    if is_cursor && shows_focus && !error && !drawn.as_ref().is_some_and(|r| r.has_focus()) {
+        let focus_rect = drawn.as_ref().map_or(rect, |r| r.rect);
+        ui.painter().rect_stroke(focus_rect, t.control_radius, egui::Stroke::new(1.5, t.form_primary), egui::StrokeKind::Inside);
     }
     let enabled = ui.is_enabled();
     response.widget_info(|| {
@@ -860,7 +942,6 @@ fn single<S: GridSource>(cell: &Cell<'_>, state: &mut State, source: &mut S, tex
 
 /// The cell being edited: its box, and the keys and focus changes that end the edit.
 fn edit_cell<S: GridSource>(ui: &mut Ui, cell: &Cell<'_>, state: &mut State, source: &mut S, shown: &Shown, out: &mut GridOutput) {
-    let t = Tokens::get();
     let id = editor_id(cell.sid, cell.key, cell.col);
     let Some(edit) = state.edit.as_mut() else { return };
     if let Some(caret) = edit.caret.take() {
@@ -876,7 +957,11 @@ fn edit_cell<S: GridSource>(ui: &mut Ui, cell: &Cell<'_>, state: &mut State, sou
         text_state.store(ui.ctx(), id);
     }
     let mut text = std::mem::take(&mut edit.text);
-    let editor = source.editor(ui, cell.source_row, cell.col, id, &mut text);
+    let mut info = egui::UiStackInfo::default();
+    if edit.message.is_some() {
+        info = info.with_tag(super::fields::CELL_INVALID);
+    }
+    let editor = ui.scope_builder(egui::UiBuilder::new().ui_stack_info(info), |ui| source.editor(ui, cell.source_row, cell.col, id, &mut text)).inner;
     crate::keep_tab_in_cell(ui, &editor.response);
     let Some(edit) = state.edit.as_mut() else { return };
     edit.text = text;
@@ -889,10 +974,8 @@ fn edit_cell<S: GridSource>(ui: &mut Ui, cell: &Cell<'_>, state: &mut State, sou
         edit.unfocused = edit.unfocused.saturating_add(1);
     }
     if let Some(message) = &edit.message {
-        ui.painter().rect_stroke(cell.rect, t.control_radius, egui::Stroke::new(1.0, t.form_error), egui::StrokeKind::Outside);
         let _ = editor.response.clone().backing_on_hover_text(message.clone());
     }
-    ui.painter().rect_stroke(cell.rect, t.control_radius, egui::Stroke::new(t.space_2, t.accent), egui::StrokeKind::Outside);
     let name = cell_name(cell);
     solidcraft_ui_registry::publish_target(&format!("grid:{}:{}:{}", cell.id, cell.key, cell.column.key), editor.response.rect);
     editor.response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, true, &name));

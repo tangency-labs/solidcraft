@@ -134,6 +134,27 @@ fn piece(p: KPiece) -> AxialPiece {
     }
 }
 
+/// How far a line leaves the plane through `plane_origin` spanned by `plane_x` and `plane_y`:
+/// `(tilt, offset)`, the line's unit direction's component along the plane's unit normal, and the height of `line_point` above the plane (the kernel's
+/// [`k::line_plane_deviation`]). `None` for a number that is not finite, axes that do not span a
+/// plane or a direction of no length.
+#[must_use]
+pub fn line_plane_deviation(
+    plane_origin: [f64; 3],
+    plane_x: [f64; 3],
+    plane_y: [f64; 3],
+    line_point: [f64; 3],
+    line_dir: [f64; 3],
+) -> Option<(f64, f64)> {
+    k::line_plane_deviation(
+        vec(plane_origin),
+        vec(plane_x),
+        vec(plane_y),
+        vec(line_point),
+        vec(line_dir),
+    )
+}
+
 /// Whether the plane through `plane_point` square to `plane_normal` holds the axis of `on`
 /// within `tol` (the model's tolerance) wherever it passes `extent` (a box around the face), or
 /// a sphere's centre (the kernel's [`k::holds_axis`]): whether [`axial_section`] sections the

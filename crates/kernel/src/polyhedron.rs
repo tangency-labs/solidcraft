@@ -77,8 +77,18 @@ fn combinatorics(hs: &[HalfSpace]) -> Result<(Vec<Vec3>, Vec<(usize, Vec<usize>)
 
 /// The convex polyhedron bounded by the half-spaces.
 pub fn convex_polyhedron(hs: &[HalfSpace]) -> Result<Body> {
+    convex_polyhedron_sides(hs).map(|(b, _)| b)
+}
+
+/// [`convex_polyhedron`], with the half-space each of its faces lies on (an index into `hs`), face
+/// by face in the body's face order: a half-space that bounds no face of it has none.
+pub(crate) fn convex_polyhedron_sides(hs: &[HalfSpace]) -> Result<(Body, Vec<usize>)> {
     let (verts, faces) = combinatorics(hs)?;
-    crate::smlib_sweeps::body_from_record(&polyhedron_record(hs, &verts, &faces)?, "polyhedron")
+    let body = crate::smlib_sweeps::body_from_record(&polyhedron_record(hs, &verts, &faces)?, "polyhedron")?;
+    if body.record().faces.len() != faces.len() {
+        return Err(KernelError::Failed("polyhedron: the solid made has other faces than its planes".into()));
+    }
+    Ok((body, faces.iter().map(|(hi, _)| *hi).collect()))
 }
 
 /// The record of the closed polyhedron with corners `verts` whose faces are `faces` (the
@@ -193,6 +203,88 @@ fn polyhedron_record(hs: &[HalfSpace], verts: &[Vec3], faces: &[(usize, Vec<usiz
 pub fn shell(b: &Body, open: &[Vec3], thickness: f64) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "shell");
     crate::offset_backend::shell(b, open, thickness)?.inherit_split_lines(&[b]).with_shell_planar_sources(b, thickness, open)
+}
+
+/// Grow the closed solid `b` by `distance` along its faces' outward normals (negative: shrink it),
+/// SMLib's offset of the whole body: the convex edges are extended until the moved faces meet, or
+/// with `round` rounded with `distance` as the radius, so every point of the result's surface is
+/// `distance` from the body's.
+pub fn offset_solid(b: &Body, distance: f64, round: bool) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "offset_solid");
+    b.require_brep("offset")?;
+    crate::offset_backend::offset_solid(b, distance, round)
+}
+
+/// A tool grown for a cut's clearance: the faces of the closed solid `b` (every face, or the
+/// faces at the points `faces`) moved `distance` along their outward normals (negative: in), the
+/// faces around them extended or trimmed to meet them. With `round`, each edge between two moved
+/// faces that the move opens (convex for a tool grown, concave for one shrunk) is rounded with
+/// that radius; a radius equal to the distance makes every point of a moved face's surround the
+/// distance from the tool, as a rolling ball. A radius too large for the faces round an edge is
+/// the fillet's refusal ([`KernelError::TooLarge`]).
+pub fn offset_tool(b: &Body, faces: Option<&[Vec3]>, distance: f64, round: Option<f64>) -> Result<Body> {
+    let _span = solidcraft_profile::span("kernel", "offset_tool");
+    b.require_brep("offset")?;
+    if !(distance.is_finite() && distance.abs() > 1e-9 && distance.abs() <= 1e6) {
+        return Err(KernelError::Invalid("the offset distance must be non-zero and at most 1e6 mm".into()));
+    }
+    if let Some(r) = round
+        && !(r.is_finite() && r > 1e-9 && r <= 1e6)
+    {
+        return Err(KernelError::Invalid("the rounding radius must be positive and at most 1e6 mm".into()));
+    }
+    let (grown, moved) = match faces {
+        // Every face, rounded by the distance: the rolling offset itself.
+        None if round.is_some_and(|r| (r - distance.abs()).abs() <= 1e-9 * r.max(1.0)) => {
+            return crate::offset_backend::offset_solid(b, distance, true);
+        }
+        None => {
+            let grown = crate::offset_backend::offset_solid(b, distance, false)?;
+            let all = (0..grown.face_count()).collect::<Vec<_>>();
+            (grown, all)
+        }
+        Some(at) => {
+            let healed = crate::boolean_record::healed(b)?.with_split_lines(b.splits.clone());
+            let mut chosen: Vec<usize> = Vec::new();
+            for p in at {
+                match healed.nearest_face(*p) {
+                    Some((d, f)) if d <= healed.size() * 1e-3 + 1e-6 => {
+                        if !chosen.contains(&f) {
+                            chosen.push(f);
+                        }
+                    }
+                    _ => return Err(KernelError::Invalid(format!("no face of the tool at ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z))),
+                }
+            }
+            let chosen = crate::offset::with_same_surface(&healed, &chosen);
+            let step = crate::offset_backend::offset_faces(&healed, &chosen, distance)?;
+            if round.is_none() {
+                return Ok(crate::record::after(step, &healed, &crate::record::counts(&[b])));
+            }
+            // The moved faces, for the rounds: those still made from a chosen face.
+            let moved = step
+                .history()
+                .map(|h| {
+                    h.faces
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, f)| {
+                            f.origins.iter().any(|o| matches!(o, crate::history::FaceOrigin::Face { operand: 0, face } if chosen.contains(face)))
+                        })
+                        .map(|(i, _)| i)
+                        .collect::<Vec<_>>()
+                })
+                .ok_or_else(|| KernelError::Failed("offset: which faces moved is not known".into()))?;
+            (crate::record::after(step, &healed, &crate::record::counts(&[b])), moved)
+        }
+    };
+    let Some(r) = round else { return Ok(grown) };
+    let edges = crate::blend::offset_round_edges(&grown, &moved, distance > 0.0)?;
+    if edges.is_empty() {
+        return Ok(grown);
+    }
+    let rounded = crate::blend::fillet(&grown, &edges, r)?;
+    Ok(crate::record::after(rounded, &grown, &crate::record::counts(&[b])))
 }
 
 /// Tilt the faces near `faces` by `angle` about their line on the neutral plane, so that they

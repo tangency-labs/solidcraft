@@ -62,8 +62,8 @@ use std::f64::consts::FRAC_PI_4;
 
 /// SolidCraft's whole preset (`support/solidcraft_fixes.rs`). That includes the 5d2635d36 bump's
 /// other fixes (tangency-labs/solidcraft#11875: `closed_smooth_pole_tangent_limit`; its
-/// `fillet_chamfer_corner` and `face_swap_uv_transposes_trims` are no longer flags), and
-/// since the preset is `core::fixes()`, `brep_ray_classifies_current_trims`. Every value here is unchanged under it.
+/// `fillet_chamfer_corner` and `face_swap_uv_transposes_trims` are no longer flags).
+/// Every value here is unchanged under it.
 fn solidcraft_kernel() -> Kernel {
     Kernel {
         fixes: solidcraft_fixes::solidcraft_fixes(),
@@ -675,6 +675,15 @@ fn a_tangent_field_edge_at_the_smooth_vertex_keeps_the_cap() {
     let r = blend(&mut k, &mut b, Kind::Round, &[[0.0, 8.5, 20.0]], 1.0);
     assert_eq!(r, Ok(()), "the round builds");
     assert_eq!(b.faces().ids().count(), 9, "capped at the smooth vertex");
+    // A tangent-field value is a direction, not a position. It must not inflate
+    // vertex tolerances to the size of the part.
+    let max_tol = b
+        .vertices()
+        .ids()
+        .map(|id| b.vertex(id).unwrap().tolerance)
+        .fold(0.0_f64, f64::max);
+    assert!(max_tol < 1e-4, "vertex tolerance grew to {max_tol}");
+    eprintln!("maximum vertex tolerance: {max_tol}");
 }
 
 /// tangency-labs/solidcore#2680's review (the blend corner): the run-on check passes a

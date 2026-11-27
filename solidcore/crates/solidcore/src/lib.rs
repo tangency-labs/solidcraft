@@ -36,13 +36,14 @@
 //! Foundation: [`math`], [`error`], [`kernel`], [`limits`], [`topology`], [`geom`]. Algorithm layers (filled
 //! in as units are ported, see `plan/modules.toml`): [`nurbs`], [`curve`],
 //! [`surface`], [`intersect`], [`boolean`], [`blend`], [`offset`], [`heal`], [`mass`],
-//! [`query`], [`sweep`], [`primitive`].
+//! [`query`], [`sweep`], [`primitive`]; [`dogbone`], the reliefs a router cuts into inside corners.
 #![forbid(unsafe_code)]
 
 pub mod error;
 pub mod kernel;
 pub mod limits;
 pub mod math;
+pub mod mesh_reconstruction;
 pub mod topology;
 
 pub mod blend;
@@ -50,10 +51,11 @@ pub mod boolean;
 pub mod cell_grid;
 pub mod curve;
 pub mod develop;
+pub mod dogbone;
 pub mod eval;
+pub mod finger_joint;
+pub mod gap_wedge;
 pub mod geom;
-#[allow(missing_docs)]
-pub mod hatch;
 pub mod heal;
 pub mod hlr;
 pub mod intersect;
@@ -67,6 +69,8 @@ pub mod profile;
 pub mod query;
 pub mod surface;
 pub mod sweep;
+pub mod teeth;
+pub mod weld_symbol;
 
 pub use error::EntityRef;
 pub use error::Result;

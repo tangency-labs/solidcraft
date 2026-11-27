@@ -1693,7 +1693,8 @@ fn span_maxima_result(r: Result<SpanMaxima>) -> Result<Option<SpanMaxima>> {
             e @ (SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::Unported { .. }
-            | SolidError::Cancelled { .. }),
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
         ) => Err(e),
         Err(_) => Ok(None),
     }

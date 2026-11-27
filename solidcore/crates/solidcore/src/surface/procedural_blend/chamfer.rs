@@ -28,10 +28,12 @@
 //! at the chain's widest wedge, bounded from above by enclosures of the faces' normals along
 //! each edge (`blend::chamfer_side::widest_wedge_bound`), not by samples. The sizes drift. A rim whose wedge runs from 63.4 to
 //! 116.6 degrees, asked 1 and 2, is measured at 86.4 and has setbacks from 0.01 to 1.95 and
-//! from 1.73 to 2.61. Setbacks that hold at every station are another definition. Edges
-//! between planes of different wedges have no one pair. A chain of equal setbacks uses
-//! the local wedge on the intervening curved supports: if the signed unit normals at the
-//! feet have dot product q, the common offset is d sqrt((1 + q) / (1 - q)).
+//! from 1.73 to 2.61. Setbacks that hold at every station are another definition, a record
+//! kind not built yet (`record::ChamferKindRecord::Setbacks`, its station in
+//! `blend::fillet_section::setback_station`). Edges between planes of different wedges have
+//! no one pair. A chain of equal setbacks uses the local wedge on the intervening curved
+//! supports: if the signed unit normals at the feet have dot product q, the common offset is
+//! d sqrt((1 + q) / (1 - q)).
 //!
 //! Not upstream (solidcore's, #2486). Deviations: none. No recursion.
 
@@ -74,6 +76,33 @@ fn positive(x: f64) -> bool {
 }
 
 impl ChamferDefinition {
+    /// Not upstream (#20158): writes every field of this chamfer definition into `d`.
+    pub(crate) fn content(&self, d: &mut crate::geom::content::Digest) {
+        let Self {
+            size,
+            wedge,
+            stationwise,
+        } = self;
+        match size {
+            ChamferSize::Distances([a, b]) => {
+                d.tag(1);
+                d.f64(*a);
+                d.f64(*b);
+            }
+            ChamferSize::DistanceAngle { distance, angle } => {
+                d.tag(2);
+                d.f64(*distance);
+                d.f64(*angle);
+            }
+            ChamferSize::Chord(c) => {
+                d.tag(3);
+                d.f64(*c);
+            }
+        }
+        d.f64(*wedge);
+        d.bool(*stationwise);
+    }
+
     /// The sizes at the wedge `wedge`, checked: every size finite and positive, the wedge
     /// and the angle inside their ranges.
     ///

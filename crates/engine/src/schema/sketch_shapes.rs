@@ -797,6 +797,11 @@ pub struct RectTwoPointParams {
     /// it. Default: true.
     #[serde(default)]
     pub connect: Option<bool>,
+    /// Hold the sides parallel and perpendicular, with only the bottom side horizontal, so that
+    /// deleting that one constraint lets the rectangle turn (#21467). Default: false, each side
+    /// held horizontal or vertical.
+    #[serde(default)]
+    pub rotatable: Option<bool>,
 }
 
 /// Draw a rectangle from one edge and a point on the opposite edge, at any angle.
@@ -844,6 +849,11 @@ pub struct RectCenterParams {
     /// it. Default: true.
     #[serde(default)]
     pub connect: Option<bool>,
+    /// Hold the sides parallel and perpendicular, with only the bottom side horizontal, so that
+    /// deleting that one constraint lets the rectangle turn (#21467). Default: false, each side
+    /// held horizontal or vertical.
+    #[serde(default)]
+    pub rotatable: Option<bool>,
 }
 
 /// Draw a rectangle from the middle of one edge and a corner of the opposite edge (#4798). The

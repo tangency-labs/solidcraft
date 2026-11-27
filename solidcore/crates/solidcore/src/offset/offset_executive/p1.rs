@@ -9,6 +9,8 @@
 //! | [`OffsetExecutive`] accessors | `GetInset`, `GetTangencyTolDegrees`, `GetExtendConvexEdges`, `GetOffsetBrep`, `GetShellFaces`, setters |
 //! | `notify_edge_and_vertices` (private) | `sm_NotifyEdgeAndVertices` |
 //! | [`OffsetExecutive::replace_implicit_offsets`] | `ReplaceImplicitOffsets` |
+//! | `seams_onto_iso_curves`, `seam_iso_curve` (private) | none (a replaced face's seams onto its net's seam) |
+//! | [`certified_offset_surface`] | none (the net `ReplaceImplicitOffsets` puts in an offset face's place, certified; WR-718) |
 //! | [`OffsetExecutive::remove_excess_faces`] | `RemoveExcessFaces` |
 //! | `forget_seconds`, `forget_firsts`, `removed_faces_edgeuses` (private) | `sm_ForgetSeconds`, `sm_ForgetFirsts`, `RemoveExcessFaces`' `sGone` |
 //! | [`OffsetExecutive::get_create_extended_surface`] | `GetCreateExtendedSurface` |
@@ -27,7 +29,9 @@
 //! | `build_boolean_offset_faces` (private) | `BuildOffsetOfFaceuse` 2D-boolean branch |
 //! | [`OffsetExecutive::map_edgeuses`] | `MapEdgeuses` |
 //!
-//! Deviations: RAII replaces the destructor. Constructor scalars are an immutable snapshot
+//! Deviations: not upstream (#13685), a rounded offset's cap whose tube folds over itself is
+//! refused (`refuse_folding_tube`, the certificate `query::tangent_edge::tube_regularity`).
+//! RAII replaces the destructor. Constructor scalars are an immutable snapshot
 //! of `SmOffsetGeometryCreation` parameters, not a retained creator reference or its implementation. `Relation` uses deterministic id order
 //! instead of upstream hash/pointer order; bubble sorting remains stable, including unordered
 //! floating-point comparisons. Extension identity is a caller-supplied key, never an address.
@@ -87,7 +91,10 @@
 //! the offset B-rep alone (both upstream operands are that B-rep); it notifies under
 //! `DELETE_FACES_NAMESPACE` rather than the caller's offset keys.
 //! `ReplaceImplicitOffsets` replaces each implicit offset by its certified net
-//! (`certified_offset`, WR-718), not by NLib's `N_SrfOffset` fit checked at samples.
+//! (`certified_offset`, WR-718), not by NLib's `N_SrfOffset` fit checked at samples, and
+//! then gives each seam edge of a replaced face the net's iso curve along the seam, where
+//! upstream keeps the curve lifted from the exact offset (within the edge's tolerance of the
+//! net, but beside its seam).
 //!
 //! Cancellation: `replace_implicit_offsets` polls the kernel's cancel token (#2136, #2372) per face and inside each surface offset.
 
@@ -120,6 +127,7 @@ use crate::offset::offset_geometry_creation::{OffsetGeometryCreation, SsiData};
 
 use super::edgeuse::{CapNotifications, MarkSource};
 use super::p2::OffsetNotifications;
+use crate::surface::offset_surface::OffsetSurface;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::brep::p1::{self as bp1, SetRegionVoidType};
@@ -249,6 +257,14 @@ pub struct OffsetExecutive {
     /// edge uses ([`Self::keep_unmoved_edges`]).
     pub(super) kept_edges: BTreeSet<EdgeId>,
     pub(super) kept_edgeuses: BTreeSet<EdgeuseId>,
+    /// Not upstream: the original face uses of a local operation whose face keeps its
+    /// surface and every edge and vertex unchanged ([`Self::keep_unmoved_edges`]).
+    pub(super) kept_faceuses: BTreeSet<FaceuseId>,
+    /// Not upstream (#22806): the kept offset faces of a local operation whose
+    /// `extend_result_faces_prefix` extension exceeded the extended domain and restored
+    /// the original surface (with UV trims removed), so `resolve_crossing_loops_of_face`
+    /// skips them until `restore_kept_edges` puts the original edges and trims back.
+    pub(super) kept_extension_restored: BTreeSet<FaceId>,
     /// Not upstream: the uses of the original edges of a local operation where the two new
     /// surfaces cross ([`super::reach::LocalReach::crossing`]), tangent in the input or not.
     crossing_edgeuses: BTreeSet<EdgeuseId>,
@@ -276,11 +292,22 @@ pub struct OffsetExecutive {
     pub(super) unmated_edgeuses: BTreeSet<EdgeuseId>,
     /// Source uses whose paired edge curves were successfully installed.
     pub(super) mated_edgeuses: BTreeSet<EdgeuseId>,
+    /// Not upstream: the source uses whose mated offset reached no neighbour's offset at
+    /// either end (the trim took the drop of both its vertices): where both edges of a
+    /// face of two edges are such, the face's offset is empty (`eliminate_empty_lenses`).
+    pub(super) unreached_edgeuses: BTreeSet<EdgeuseId>,
+    /// Not upstream: the original faces of two edges whose offset is empty, their
+    /// neighbours' offsets mated across them (`eliminate_empty_lenses`).
+    pub(super) eliminated_lenses: BTreeSet<FaceId>,
     /// The faces of a local operation and the surfaces replacing theirs, in step (the
     /// part of `SmLocalOperationGeometryCreation` the executive reads: `m_vFaces`,
     /// `m_vSurfaces`).
     pub(super) local_faces: Vec<FaceId>,
     pub(super) local_surfaces: Vec<Surface>,
+    /// Not upstream (#21674): the steps the check for crossed planar insets of an unmerged
+    /// inset may take (`p2::refuse_crossing_planar_insets`), `p2::CROSSING_WITNESS_STEPS`
+    /// unless a test shrinks it ([`Self::set_crossing_witness_steps`]).
+    crossing_witness_steps: usize,
 }
 
 impl OffsetExecutive {
@@ -332,6 +359,8 @@ impl OffsetExecutive {
             moved_faces: Vec::new(),
             kept_edges: BTreeSet::new(),
             kept_edgeuses: BTreeSet::new(),
+            kept_faceuses: BTreeSet::new(),
+            kept_extension_restored: BTreeSet::new(),
             crossing_edgeuses: BTreeSet::new(),
             collapsed_faces: Vec::new(),
             collapsed_displacements: Vec::new(),
@@ -340,8 +369,11 @@ impl OffsetExecutive {
             wall_extensions: Vec::new(),
             unmated_edgeuses: BTreeSet::new(),
             mated_edgeuses: BTreeSet::new(),
+            unreached_edgeuses: BTreeSet::new(),
+            eliminated_lenses: BTreeSet::new(),
             local_faces: Vec::new(),
             local_surfaces: Vec::new(),
+            crossing_witness_steps: super::p2::CROSSING_WITNESS_STEPS,
         }
     }
 
@@ -423,6 +455,20 @@ impl OffsetExecutive {
         self.inset = value;
     }
 
+    /// Not upstream (#21674): sets the steps the check for crossed planar insets of an
+    /// unmerged inset may take, so a test can make them run out part way through its scan.
+    /// Only tests call this; every operation runs with the default.
+    #[doc(hidden)]
+    pub fn set_crossing_witness_steps(&mut self, steps: usize) {
+        self.crossing_witness_steps = steps;
+    }
+
+    /// The steps the check for crossed planar insets may take
+    /// ([`Self::set_crossing_witness_steps`]).
+    pub(super) const fn crossing_witness_steps(&self) -> usize {
+        self.crossing_witness_steps
+    }
+
     /// Sets `m_bExtendConvexEdges`.
     pub fn set_extend_convex_edges(&mut self, value: bool) {
         self.extend_convex_edges = value;
@@ -479,23 +525,50 @@ impl OffsetExecutive {
     pub(super) fn keep_unmoved_edges(&mut self, original: &Brep) -> Result<()> {
         self.kept_edges.clear();
         self.kept_edgeuses.clear();
+        self.kept_faceuses.clear();
+        self.kept_extension_restored.clear();
         if self.operation != OffsetOperation::LocalOperation {
             return Ok(());
         }
+        let local_faces = &self.local_faces;
+        let moved_faces = &self.moved_faces;
+        let keeps_surface = |f: &FaceId| local_faces.contains(f) && !moved_faces.contains(f);
         for e in bp1::edges(original, None)? {
             let mut faces = edge::faces(original, e, None)?;
             let (start, end) = vertex::edge_vertex_pair(original, e)?;
             for v in [start, end].into_iter().flatten() {
                 faces.extend(vertex::faces(original, v)?);
             }
-            let keeps_surface =
-                |f: &FaceId| self.local_faces.contains(f) && !self.moved_faces.contains(f);
             if faces.is_empty() || !faces.iter().all(keeps_surface) {
                 continue;
             }
             self.kept_edges.insert(e);
             self.kept_edgeuses
                 .extend(edge::edgeuses(original, e, None, None)?);
+        }
+        for f in bp1::faces(original, None)? {
+            if !keeps_surface(&f) {
+                continue;
+            }
+            if !face_edges(original, f)?
+                .iter()
+                .all(|e| self.kept_edges.contains(e))
+            {
+                continue;
+            }
+            let mut all_vertices_kept = true;
+            for v in face_vertices(original, f)? {
+                if !vertex::faces(original, v)?.iter().all(keeps_surface) {
+                    all_vertices_kept = false;
+                    break;
+                }
+            }
+            if !all_vertices_kept {
+                continue;
+            }
+            let (primary, mate) = face::faceuses(original, f)?;
+            self.kept_faceuses
+                .extend([primary, mate].into_iter().flatten());
         }
         Ok(())
     }
@@ -504,6 +577,25 @@ impl OffsetExecutive {
     /// own curves ([`Self::keep_unmoved_edges`]).
     pub(super) fn keeps_edgeuse(&self, edgeuse: EdgeuseId) -> bool {
         self.kept_edgeuses.contains(&edgeuse)
+    }
+
+    /// Not upstream: whether offset face `face` came wholly from original faces that keep
+    /// their surfaces and every edge and vertex unchanged ([`Self::keep_unmoved_edges`]),
+    /// so its original surface and edges are restored if extension fails with
+    /// [`OffsetFailure::TrimPastExtension`].
+    pub(super) fn is_kept_offset_face(&self, face: FaceId) -> bool {
+        if self.operation != OffsetOperation::LocalOperation || self.inverted_faces.contains(&face)
+        {
+            return false;
+        }
+        let sources = self.faceuse_to_faces.firsts(face);
+        !sources.is_empty() && sources.iter().all(|fu| self.kept_faceuses.contains(fu))
+    }
+
+    /// Not upstream (#22806): whether `extend_result_faces_prefix` restored kept offset
+    /// face `face` to its original surface after [`OffsetFailure::TrimPastExtension`].
+    pub(super) fn is_kept_extension_restored(&self, face: FaceId) -> bool {
+        self.kept_extension_restored.contains(&face)
     }
 
     /// Not upstream: whether the new surfaces of a local operation cross along the edge of
@@ -569,8 +661,12 @@ impl OffsetExecutive {
     /// beyond a collapsed face, seen from its edge use `edgeuse`. Across a rail (a
     /// tangent edge of a four-sided round) it is the radial of the opposite rail; across
     /// an end edge, seen from `from` (one of that edge's vertices), the radial of the
-    /// rail at the edge's other vertex. `None` when the edge use's face did not
-    /// collapse, the face across collapsed too, or the face has another shape.
+    /// rail at the edge's other vertex. A round of more or fewer sides (one that meets
+    /// another round at a corner, or ends on a sliver of a third face) has its rails
+    /// told from its ends by what they bound: across a rail it is the radial of the
+    /// loop's one other tangent edge onto a face that keeps an offset. `None` when the
+    /// edge use's face did not collapse, the face across collapsed too, or the face has
+    /// another shape.
     ///
     /// # Errors
     ///
@@ -592,11 +688,33 @@ impl OffsetExecutive {
         let tan_tol_deg = self.tangency_tol_degrees();
         let next = if eu2::is_tangent_sector(kernel, original, edgeuse, tan_tol_deg, false, true)? {
             let loopuse = present(eu::loopuse(original, edgeuse)?, EU_NO_LOOPUSE)?;
-            if eu::loopuse_edgeuses(original, loopuse)?.len() != 4 {
-                return Ok(None);
+            let uses = eu::loopuse_edgeuses(original, loopuse)?;
+            if uses.len() == 4 {
+                let ccw = present(eu::ccw_edgeuse(original, edgeuse)?, EU_NO_NEIGHBOUR)?;
+                eu::ccw_edgeuse(original, ccw)?
+            } else {
+                // a rail is a tangent edge onto a face that keeps an offset: an end met by
+                // another collapsed round (a seam's split, a corner's mitre) is not one
+                let mut rails = Vec::new();
+                for &u in &uses {
+                    if u == edgeuse
+                        || !eu2::is_tangent_sector(kernel, original, u, tan_tol_deg, false, true)?
+                    {
+                        continue;
+                    }
+                    let beyond = match eu::radial(original, u)? {
+                        Some(r) if r != u => eu::face(original, r)?,
+                        _ => None,
+                    };
+                    if beyond.is_some_and(|f| !self.is_collapsed_face(f)) {
+                        rails.push(u);
+                    }
+                }
+                match rails.as_slice() {
+                    [rail] => Some(*rail),
+                    _ => None,
+                }
             }
-            let ccw = present(eu::ccw_edgeuse(original, edgeuse)?, EU_NO_NEIGHBOUR)?;
-            eu::ccw_edgeuse(original, ccw)?
         } else {
             let Some(from) = from else {
                 return Ok(None);
@@ -673,7 +791,9 @@ impl OffsetExecutive {
         self.crossing_edgeuses.clear();
         self.periodic_boundary_ends.clear();
         self.mated_edgeuses.clear();
+        self.unreached_edgeuses.clear();
         self.wall_extensions.clear();
+        self.kept_extension_restored.clear();
     }
 
     /// Records how far the surface of original face `face` must be extended for its
@@ -965,7 +1085,9 @@ impl OffsetExecutive {
     /// changed; each face is then notified (`PRE_EDIT`), given the new surface's
     /// natural domain and the surface (`SmBrep::ReplaceSurface`, old surface to the
     /// deleted list, UV trim curves rebuilt) and notified again (`POST_EDIT`), in
-    /// face order. `notifications` must be keyed by `brep`'s identities.
+    /// face order. Not upstream: then each of those faces' seam edges gets the net's iso
+    /// curve along the seam as its curve ([`seams_onto_iso_curves`]). `notifications` must
+    /// be keyed by `brep`'s identities.
     ///
     /// # Errors
     ///
@@ -992,42 +1114,15 @@ impl OffsetExecutive {
             else {
                 continue;
             };
-            // get SmOffsetSurface base (use extended surface if there is one)
-            let base = offset
-                .extended_base_surface()
-                .unwrap_or_else(|| offset.base_surface());
-            // make sure base surface is an SmBSplineSurface (`SM_CAST_PTR`, which every
-            // subclass passes: plane, extrusion, revolution, cone, sphere, torus); its
-            // B-spline part with the NURB `GetOrCreateGwNurbPointer` makes when missing
-            let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, base)? else {
-                // a kind with no B-spline form (an offset surface: an offset of an offset)
-                return Err(failed(OffsetFailure::OffsetBaseKindUnsupported {
-                    surface_type: base.type_code(),
-                }));
-            };
-            // Not upstream (WR-718, #2350 S1): the offset certified within the tolerance
-            // at every parameter, in the base's parametrisation, where upstream fits
-            // NLib's `N_SrfOffset` and checks it at samples (the cancel token polled
-            // inside, #2136 / #2372)
-            let base_nurb = present(
-                nurb.gw_nurb(),
-                "the base's B-spline form has no NURB, though `with_nurb` makes it from the \
-                 surface's own exact definition where it is missing",
-            )?;
-            let made = crate::offset::construction::sheets::certified_offset(
-                kernel,
-                base_nurb,
-                offset.offset_distance(),
-                approximation_tol_3d,
-            )?;
-            let approximation =
-                crate::nurbs::b_spline_surface::p1::BSplineSurface::from_nurb(made.surface, false);
+            let (approximation, _) =
+                certified_offset_surface(kernel, offset, approximation_tol_3d)?;
             // remember face/surface pair
-            fix.push((f, Surface::from(approximation)));
+            fix.push((f, approximation));
         }
 
         // for every face that had an approximate surface built for an exact offset
         // surface
+        let mut replaced = Vec::new();
         let mut state = NotifyState::from_kernel_stores(notifications);
         for (f, new_surface) in fix {
             state.with_kernel_env(kernel, |kernel, env| {
@@ -1063,6 +1158,13 @@ impl OffsetExecutive {
                     [Some(face_ref), None, None],
                 ))
             })?;
+            replaced.push(f);
+        }
+
+        // not upstream: each replaced face's seams onto its net's seam
+        for f in replaced {
+            kernel.check_cancelled(OP)?;
+            seams_onto_iso_curves(kernel, brep, f, notifications)?;
         }
         Ok(())
     }
@@ -1109,6 +1211,52 @@ impl OffsetExecutive {
             }
             forget_seconds(&mut self.edgeuse_to_edgeuses, &gone, Some(&live))?;
             self.forget_faces(&gone_faces)?;
+        }
+        Ok(())
+    }
+
+    /// A face of the offset replaced by `fragments` (a cancellation's remainders, a
+    /// repaired face): each place of `old` in the face maps, and its closing role, passes
+    /// to every fragment, and `old` goes from them. With no fragment the face is only
+    /// forgotten.
+    pub(super) fn replace_face_relations(
+        &mut self,
+        old: FaceId,
+        fragments: &[FaceId],
+    ) -> Result<()> {
+        for original in self.faceuse_to_faces.firsts(old) {
+            self.faceuse_to_faces.remove_pair(original, old)?;
+            for &new in fragments {
+                self.faceuse_to_faces.relate_pair(original, new)?;
+            }
+        }
+        for original in self.edge_to_faces.firsts(old) {
+            self.edge_to_faces.remove_pair(original, old)?;
+            for &new in fragments {
+                self.edge_to_faces.relate_pair(original, new)?;
+            }
+        }
+        for original in self.vertex_to_faces.firsts(old) {
+            self.vertex_to_faces.remove_pair(original, old)?;
+            for &new in fragments {
+                self.vertex_to_faces.relate_pair(original, new)?;
+            }
+        }
+        for blended in self.blend_to_faces.seconds(old) {
+            self.blend_to_faces.remove_pair(old, blended)?;
+            for &new in fragments {
+                self.blend_to_faces.relate_pair(new, blended)?;
+            }
+        }
+        for blend in self.blend_to_faces.firsts(old) {
+            self.blend_to_faces.remove_pair(blend, old)?;
+            for &new in fragments {
+                self.blend_to_faces.relate_pair(blend, new)?;
+            }
+        }
+        if self.closing_faces.contains(&old) {
+            self.closing_faces.retain(|&f| f != old);
+            self.closing_faces.extend_from_slice(fragments);
         }
         Ok(())
     }
@@ -1400,6 +1548,7 @@ impl OffsetExecutive {
         };
         let creator = self.geometry_creator();
         let mut new_faces = Vec::new();
+        let mut tube_checked = false;
         // cpp:2918–3071: every mapped offset edge-use pair may need a cap face.
         for (index, offset) in synchronized.edgeuses.iter().copied().enumerate() {
             let mut other_offset = paired_other(&synchronized, index, edge)?;
@@ -1451,6 +1600,18 @@ impl OffsetExecutive {
             let Some(surface) = cap.surface else {
                 continue;
             };
+            // Not upstream (#13685): a rounded offset's cap is the tube of radius |d| about
+            // the edge; one that folds over itself is refused, naming the largest distance at
+            // which it is proved not to fold, never built into an unsound body. Checked once an edge, on the first cap
+            // built; a closing wall and a local operation's caps are no such tube.
+            if !tube_checked
+                && !cap.closing_wall
+                && self.local_faces.is_empty()
+                && self.operation() != OffsetOperation::LocalOperation
+            {
+                tube_checked = true;
+                self.refuse_folding_tube(kernel, original, edgeuse, edge)?;
+            }
             // Build a face in m_pOffsetBrep for the new cap surface; its own
             // `sLoopPoints` is empty.
             let new_face = self.make_cap_face(
@@ -1482,6 +1643,39 @@ impl OffsetExecutive {
             &new_faces,
             &mut notifications.rekey(offset_key_of),
         )
+    }
+
+    /// Not upstream (#13685): refuses the rounded offset when the tube of radius `|d|` its cap
+    /// about `edge` lies on folds over itself ([`crate::error::offset::OffsetFailure::TubeFolds`],
+    /// naming the largest distance at which it is proved not to fold) or is not proved regular
+    /// ([`crate::error::offset::OffsetFailure::TubeNotCertified`]). The tube runs along the
+    /// face use normals for an outset, against them for an inset: those on the side of
+    /// `edgeuse`, the use of `edge` the offset builds from.
+    fn refuse_folding_tube(
+        &self,
+        kernel: &Kernel,
+        original: &mut Brep,
+        edgeuse: EdgeuseId,
+        edge: EdgeId,
+    ) -> Result<()> {
+        use crate::error::offset::OffsetFailure;
+        use crate::error::Failure;
+        use crate::query::tangent_edge::{tube_regularity, TubeRegularity};
+        let d = self.offset_distance.abs();
+        let outward = (self.offset_distance >= 0.0) != self.inset();
+        let reason = match tube_regularity(kernel, original, edgeuse, d, outward)? {
+            TubeRegularity::Regular => return Ok(()),
+            TubeRegularity::Folds { largest } => OffsetFailure::TubeFolds {
+                edge,
+                distance: self.offset_distance,
+                largest,
+            },
+            TubeRegularity::NotCertified => OffsetFailure::TubeNotCertified {
+                edge,
+                distance: self.offset_distance,
+            },
+        };
+        Err(Failure::new(OP, reason).into_error())
     }
 
     /// The geometry creator this executive's scalars stand for
@@ -3198,6 +3392,52 @@ fn defect(why: &'static str, status: i32) -> SolidError {
         .into_error()
 }
 
+/// The certified B-spline of the implicit offset surface `offset`: a bicubic B-spline within
+/// `tolerance` of the exact offset of its extended (else its own) base at every parameter, in
+/// the base's parametrisation, with the certified bound of that distance
+/// ([`crate::offset::construction::sheets::certified_offset`]; not upstream, WR-718: upstream
+/// fits NLib's `N_SrfOffset` and checks it at samples). What
+/// [`OffsetExecutive::replace_implicit_offsets`] puts in an offset face's place, and what an
+/// export that cannot keep the offset writes for it (#21926). The base must have a B-spline
+/// form (`SM_CAST_PTR` to `SmBSplineSurface`, which every subclass passes: plane, extrusion,
+/// revolution, cone, sphere, torus); its NURB is made where it is missing
+/// (`GetOrCreateGwNurbPointer`).
+///
+/// # Errors
+///
+/// [`OffsetFailure::OffsetBaseKindUnsupported`] (`SM_ERR`) for a base with no B-spline form
+/// (an offset surface: an offset of an offset); those of `certified_offset` (the cancel token
+/// is polled inside, #2136 / #2372).
+pub fn certified_offset_surface(
+    kernel: &Kernel,
+    offset: &OffsetSurface,
+    tolerance: f64,
+) -> Result<(Surface, f64)> {
+    // get SmOffsetSurface base (use extended surface if there is one)
+    let base = offset
+        .extended_base_surface()
+        .unwrap_or_else(|| offset.base_surface());
+    let Some(nurb) = crate::topology::brep::p3::with_nurb(kernel, base)? else {
+        return Err(failed(OffsetFailure::OffsetBaseKindUnsupported {
+            surface_type: base.type_code(),
+        }));
+    };
+    let base_nurb = present(
+        nurb.gw_nurb(),
+        "the base's B-spline form has no NURB, though `with_nurb` makes it from the \
+         surface's own exact definition where it is missing",
+    )?;
+    let made = crate::offset::construction::sheets::certified_offset(
+        kernel,
+        base_nurb,
+        offset.offset_distance(),
+        tolerance,
+    )?;
+    let approximation =
+        crate::nurbs::b_spline_surface::p1::BSplineSurface::from_nurb(made.surface, false);
+    Ok((Surface::from(approximation), made.bound))
+}
+
 /// The failure of p1 for `cause`, with the cause's status (that of the site it replaced).
 #[track_caller]
 fn failed(cause: OffsetFailure) -> SolidError {
@@ -3789,6 +4029,99 @@ fn clear_offset_roles(b: &mut Brep) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Not upstream: each seam edge of face `f` (the face on both of its sides) whose UV trim
+/// curve on `f` is an iso line gets the iso curve of `f`'s surface along that line as its
+/// curve, exactly, where that curve runs between the edge's own vertices within the edge's
+/// tolerance ([`seam_iso_curve`]); then the face's missing UV trim curves are made again.
+/// Other edges are left as they are.
+///
+/// [`OffsetExecutive::replace_implicit_offsets`] runs it on each face it gives a net: the
+/// seam was lifted from the exact offset the net replaced, so it lies within its tolerance of
+/// the net but not on the net's seam (up to 8.5e-7 off on a thickened closed loft's offset),
+/// and an edge cut across it later ends at a vertex that far beside the seam, which the
+/// face's seam test refuses (`SmFace` test #36, "Face Near missing Seam").
+///
+/// # Errors
+///
+/// Those of the topology queries, the iso curve's extraction and evaluation,
+/// [`crate::topology::brep::p2::replace_curve`] and the UV trim curves' creation.
+fn seams_onto_iso_curves(
+    kernel: &mut Kernel,
+    brep: &mut Brep,
+    f: FaceId,
+    notifications: &mut NotificationStores<'_>,
+) -> Result<()> {
+    let mut seams: Vec<EdgeId> = Vec::new();
+    for e in face_edges(brep, f)? {
+        if !seams.contains(&e) && edge::face_on_both_sides(brep, e, f)? {
+            seams.push(e);
+        }
+    }
+    let mut replaced = false;
+    for e in seams {
+        let Some(iso) = seam_iso_curve(kernel, brep, f, e)? else {
+            continue;
+        };
+        crate::topology::brep::p2::replace_curve(kernel, brep, e, iso, notifications)?;
+        replaced = true;
+    }
+    if replaced {
+        // the seam's edge uses lost their UV trim curves with their old curve
+        NotifyState::from_kernel_stores(notifications).with_kernel_env(kernel, |kernel, env| {
+            face3::create_uv_trim_curves_notified(kernel, brep, f, true, None, Some(env))
+                .map(|_| ())
+        })?;
+    }
+    Ok(())
+}
+
+/// The iso curve of face `f`'s surface along the UV trim curve of seam edge `e`'s first edge
+/// use on `f`, over that trim curve's interval (`Surface::lift_curve`'s iso extraction,
+/// exact on a B-spline surface), where the trim curve is an iso line and the iso curve's ends
+/// lie within the edge's tolerance of the edge's start and end vertices; else `None`.
+///
+/// # Errors
+///
+/// Those of the topology queries and of the iso curve's extraction and evaluation.
+fn seam_iso_curve(kernel: &Kernel, brep: &Brep, f: FaceId, e: EdgeId) -> Result<Option<Curve>> {
+    let Some(surface) = face::surface(brep, f)? else {
+        return Ok(None);
+    };
+    let mut uv_curve = None;
+    for u in edge::edgeuses(brep, e, None, None)? {
+        if eu::face(brep, u)? == Some(f) {
+            if let Some(c) = brep.edgeuse(u)?.uv_trim_curve.as_ref() {
+                uv_curve = Some(c);
+                break;
+            }
+        }
+    }
+    let Some(uv_curve) = uv_curve else {
+        return Ok(None);
+    };
+    let (Some(start), Some(end)) = (edge::start_vertex(brep, e)?, edge::end_vertex(brep, e)?)
+    else {
+        return Ok(None);
+    };
+    let tolerance = edge::tolerance(brep, e)?;
+    let domain = surface.natural_uv_domain_with_nurb(kernel)?;
+    let interval = uv_curve.natural_interval();
+    let Some((iso, _)) = crate::surface::surface::p11::extract_iso_curve(
+        kernel, surface, &domain, uv_curve, &interval, tolerance,
+    )?
+    else {
+        return Ok(None);
+    };
+    let ends = iso.natural_interval();
+    let on_vertices = iso
+        .evaluate_point(kernel, ends.min())?
+        .closer_than(tolerance, vertex::point(brep, start)?)
+        && iso
+            .evaluate_point(kernel, ends.max())?
+            .closer_than(tolerance, vertex::point(brep, end)?);
+    Ok(on_vertices.then_some(iso))
 }
 
 #[cfg(test)]
@@ -4629,6 +4962,7 @@ mod tests {
         executive.keep_unmoved_edges(&brep).unwrap();
         assert!(executive.kept_edges.is_empty());
         assert!(executive.kept_edgeuses.is_empty());
+        assert!(executive.kept_faceuses.is_empty());
 
         let surfaces = faces
             .iter()
@@ -4654,6 +4988,8 @@ mod tests {
         assert_eq!(executive.kept_edges, expected);
         // each edge has four uses: two per face, one on each of its face uses
         assert_eq!(executive.kept_edgeuses.len(), 16);
+        // only the single face opposite `moved` keeps all its edges and vertices: 2 face uses
+        assert_eq!(executive.kept_faceuses.len(), 2);
     }
 
     /// The reach's edge bounds ([`super::super::reach::EdgeBounds`]) live for one local

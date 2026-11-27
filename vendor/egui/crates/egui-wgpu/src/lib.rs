@@ -291,9 +291,9 @@ impl DeviceLost {
 /// Dropping or reconfiguring that surface later (the window closing as the app restarts after the
 /// loss) then panics in wgpu-hal: "Trying to destroy a SwapchainAcquireSemaphore that is still in
 /// use by a SurfaceTexture". So the frame keeps a second handle to its texture, and once the frame
-/// is gone that handle is destroyed ([`FreeSurfaceTexture`]), which takes the image (and its
-/// semaphores) back from the surface, lost device or not. After a present or discard that worked,
-/// the image is already back and the destroy does nothing.
+/// is gone on a lost device that handle is destroyed ([`FreeSurfaceTexture`]), which takes the
+/// image (and its semaphores) back from the surface. On a working device the present or discard
+/// gives the image back, so nothing more is done.
 ///
 /// The order is the struct's: Rust drops fields in declaration order, so [`Self::frame`] always
 /// goes before the texture handle is destroyed, and [`Self::present`] presents before it.
@@ -304,11 +304,12 @@ pub struct AcquiredFrame<F, T: FreeSurfaceTexture> {
 }
 
 impl<F, T: FreeSurfaceTexture> AcquiredFrame<F, T> {
-    /// `texture` is a second handle to `frame`'s texture.
-    pub fn new(frame: F, texture: T) -> Self {
+    /// `texture` is a second handle to `frame`'s texture; `lost` is the device's
+    /// [`DeviceLost::flag`], read once the frame is gone.
+    pub fn new(frame: F, texture: T, lost: Arc<std::sync::atomic::AtomicBool>) -> Self {
         Self {
             frame,
-            texture: FreeOnDrop(texture),
+            texture: FreeOnDrop { texture, lost },
         }
     }
 
@@ -334,12 +335,17 @@ impl FreeSurfaceTexture for wgpu::Texture {
     }
 }
 
-/// Frees its texture when dropped, also while a panic unwinds.
-struct FreeOnDrop<T: FreeSurfaceTexture>(T);
+/// Frees its texture when dropped on a lost device, also while a panic unwinds.
+struct FreeOnDrop<T: FreeSurfaceTexture> {
+    texture: T,
+    lost: Arc<std::sync::atomic::AtomicBool>,
+}
 
 impl<T: FreeSurfaceTexture> Drop for FreeOnDrop<T> {
     fn drop(&mut self) {
-        self.0.free();
+        if self.lost.load(std::sync::atomic::Ordering::Acquire) {
+            self.texture.free();
+        }
     }
 }
 
@@ -1249,14 +1255,19 @@ mod device_lost_tests {
 
     /// A window's surface as wgpu-core treats the image of an acquired frame: a present or a
     /// discard gives it back only on a valid device, a destroy of the texture always (#7148).
+    /// `lost` is the device's lost flag.
     #[derive(Default)]
     struct Surface {
-        lost: std::cell::Cell<bool>,
+        lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
         image_held: std::cell::Cell<bool>,
         calls: std::cell::RefCell<Vec<&'static str>>,
     }
 
     impl Surface {
+        fn is_lost(&self) -> bool {
+            self.lost.load(std::sync::atomic::Ordering::Acquire)
+        }
+
         fn call(&self, name: &'static str, gives_back: bool) {
             self.calls.borrow_mut().push(name);
             if gives_back {
@@ -1274,7 +1285,7 @@ mod device_lost_tests {
     impl Drop for Frame<'_> {
         fn drop(&mut self) {
             if !self.presented {
-                self.surface.call("discard", !self.surface.lost.get());
+                self.surface.call("discard", !self.surface.is_lost());
             }
         }
     }
@@ -1303,11 +1314,12 @@ mod device_lost_tests {
                 presented: false,
             },
             Texture(surface),
+            surface.lost.clone(),
         );
         match end {
             End::Present => frame.present(|mut frame| {
                 frame.presented = true;
-                surface.call("present", !surface.lost.get());
+                surface.call("present", !surface.is_lost());
             }),
             End::Drop => drop(frame),
             End::Panic => {
@@ -1322,25 +1334,24 @@ mod device_lost_tests {
 
     /// However a frame ends, on a valid or a lost device, the surface has its image back by the
     /// time the frame is gone, so dropping or reconfiguring the surface can't meet a semaphore
-    /// still in use (#7148). The texture is freed only after the present or discard: freed first,
-    /// a valid device's present or discard would find it destroyed.
+    /// still in use (#7148). On a valid device the present or discard gives it back and the
+    /// texture is left alone; on a lost one the texture is freed, after the present or discard.
     #[test]
     fn a_frame_gives_its_image_back_however_it_ends_even_on_a_lost_device() {
         for lost in [false, true] {
             for end in [End::Present, End::Drop, End::Panic] {
                 let surface = Surface::default();
-                surface.lost.set(lost);
+                surface
+                    .lost
+                    .store(lost, std::sync::atomic::Ordering::Release);
                 run_frame(&surface, end);
                 let first = if matches!(end, End::Present) {
                     "present"
                 } else {
                     "discard"
                 };
-                assert_eq!(
-                    *surface.calls.borrow(),
-                    [first, "free"],
-                    "lost {lost}, {end:?}"
-                );
+                let expected: &[&str] = if lost { &[first, "free"] } else { &[first] };
+                assert_eq!(*surface.calls.borrow(), expected, "lost {lost}, {end:?}");
                 assert!(!surface.image_held.get(), "lost {lost}, {end:?}");
             }
         }

@@ -753,6 +753,20 @@ fn a_rim_round_partly_on_the_top_rolls_onto_the_foot_round_partway() {
 /// there, 1.66e-5 wide, did not skin (the rails' ends were not made to meet), and the pass
 /// failed internally with status 1001. The fit size is not pinned: it is named above the
 /// size asked (3.25 for 2), tangency-labs/solidcraft#16782.
+///
+/// With the offset's extension the default, the round on x = -36 and the foot round is
+/// refused before that judgement: the foot round is tangent to the plane x = -36 at
+/// (-36, -90, 10), the ball's two contacts meet there (the section has width 0), and the
+/// trace runs on through that point into both extensions. A section of width 0 is
+/// singular in the definition, so its certificate's enclosure there is unbounded and its
+/// work budget runs out ([`Error::BlendNotCertified`], 234 halvings over 316 stations; the
+/// same on main with every fix on). The part is still refused. The trace should end where
+/// the rails meet, and the refusal is then the rail leaving its face again.
+///
+/// That was so until tangency-labs/solidcraft#22796. Now only the rim edge beside the slot
+/// goes first: the corner's round edge overflows alone (running on past its ends), not with
+/// the other rim edges, which it runs on into, so it stays with them. Their pass is refused
+/// as too large, naming a radius below the one asked, and that radius builds a valid body.
 #[test]
 fn a_rim_round_whose_top_reaches_the_contact_between_sections_is_not_built() {
     let r4 = 9.0;
@@ -762,36 +776,24 @@ fn a_rim_round_whose_top_reaches_the_contact_between_sections_is_not_built() {
     let ys = v - 8.5 * step;
     let width = 0.04;
     assert!(width < step / 2.0, "the slot lies between two sections");
-    fixes();
-    let b = arm_boss_and_foot_round(r4);
-    let slot = make_box([-38.6, ys - width / 2.0, 5.0], [2.3, width, 2.0]).unwrap();
-    let b = boolean(b, slot, BooleanOp::Subtract).unwrap().unwrap();
+    let round = |d: f64| {
+        fixes();
+        let b = arm_boss_and_foot_round(r4);
+        let slot = make_box([-38.6, ys - width / 2.0, 5.0], [2.3, width, 2.0]).unwrap();
+        let b = boolean(b, slot, BooleanOp::Subtract).unwrap().unwrap();
+        assert!(b.check(CheckLevel::All).unwrap().is_valid());
+        let rim = top_rim(&b, r4);
+        session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
+        let result = blend(&b, Blend::Round, &rim, &[d], &[], Corners::Filled);
+        fixes();
+        result.map(|_| b)
+    };
+    let fit = match round(d) {
+        Err(Error::TooLarge { size, .. }) if size > 0.0 && size < d => size,
+        other => panic!("the slot between the sections: {:?}", other.err()),
+    };
+    let b = round(fit).unwrap();
     assert!(b.check(CheckLevel::All).unwrap().is_valid());
-    let rim = top_rim(&b, r4);
-    session::set_thread_fixes(std::iter::empty::<&str>()).unwrap();
-    let result = blend(&b, Blend::Round, &rim, &[d], &[], Corners::Filled);
-    fixes();
-    // the middle of the rim edge beside the slot, (-36, -74, 5) to (-36, w, 5)
-    let mid = [-36.0, 0.5 * (v + w), 5.0];
-    match result {
-        // the size waits on tangency-labs/solidcraft#16782
-        Err(Error::TooLarge {
-            at: Some(at),
-            why: Some(RoomReason::RailLeavesFace),
-            ..
-        }) => {
-            let off = at
-                .iter()
-                .zip(mid)
-                .map(|(a, m)| (a - m).abs())
-                .fold(0.0, f64::max);
-            assert!(
-                off < 1e-9,
-                "found for {at:?}, not the edge beside the slot {mid:?}"
-            );
-        }
-        other => panic!("the slot between the sections: {other:?}"),
-    }
 }
 
 /// The largest round at C that builds on the arm and boss, in closed form. The ball touches
@@ -1380,7 +1382,7 @@ fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
 ///   The rail and the lobe's edge END there, 3.9e-8 apart: the rounds meet, they do not cross
 ///   (the corner round's material is at x >= -36, z <= 5, the foot round's at x <= -36,
 ///   z >= 5; they share only the side's segment from R to W on z = 5).
-///   - Without the corpus's fixes the round builds, as it does past W by more
+///   - The round builds, with the corpus's fixes or without them, as it does past W by more
 ///     ([`a_corner_round_whose_rail_ends_past_the_top_under_the_foot_round_builds`]): valid at
 ///     the full check, its rails on edges and its cap edge on z = 5 next to R, and the
 ///     kernel's certified enclosure of its volume, at most [`NEXT_TO_W_ENCLOSURE`] wide, holds
@@ -1391,9 +1393,13 @@ fn corner_round(b: &Body, r4: f64, corpus: bool) -> Result<(), Error> {
 ///     from R) under the vertex's tolerance, and the lobe's edge kept 4.6e-5 under a trim that
 ///     upstream's corner fix (`sm_FixUVTrimCurves`) had moved 1e-3 off its curve, uncovered.
 ///     Its tolerance now covers its trim (#18166), and the joint at R is seen.
-///   - With them it is still refused as crossing at R, as on main. By the geometry above that
-///     refusal is a false one (the rounds meet at R); it is pinned here as main's outcome so
-///     that a change to it is seen, not as the right answer.
+///     The clean-up after filleting leaves the target's own edges and faces (WR-459, the
+///     default since #21270): the rail and the lobe's edge then keep their tolerances
+///     (4e-5, 4.6e-5) and end at that vertex, left at W with its tolerance 2e-3, 1e-3 from
+///     where they meet at R. They meet at the vertex all the same: within its tolerance, the
+///     zone in which the topology has its edges meet (`boundary_crossings`), so that is
+///     their joint, as the geometry above says, not a crossing (#21270: refused as crossing
+///     at R before, the false refusal this test pinned as main's outcome with the corpus).
 /// - 5e-6 past it, within the body's tolerance (1e-5), R is not past W: the rail ends on the
 ///   top's edge as on main, and the round builds valid (its volume, MEASURED, 1.4e-5 from the
 ///   closed form, which the end at W within the tolerance does not bound).
@@ -1406,8 +1412,7 @@ fn a_corner_round_whose_rail_meets_the_top_next_to_w_builds_where_the_rounds_mee
         let b = arm_boss_foot_only();
         let before = b.volume(1e-9).unwrap();
         match (corpus, corner_round(&b, r4, corpus)) {
-            (true, Err(Error::RoundsCross { .. })) => {}
-            (false, Ok(())) => {
+            (_, Ok(())) => {
                 let report = b.check(CheckLevel::All).unwrap();
                 assert!(report.is_valid(), "r4 {r4} corpus {corpus}: {report}");
                 let expected = before + 5.0 * r4 * r4 * (1.0 - PI / 4.0);
@@ -1682,6 +1687,281 @@ fn a_round_ending_at_a_block_across_its_edge_ends_on_the_block_s_side_below_its_
 
 /// The topology of [`box_and_block`] with its edge rounded past r = 2: faces, edges, vertices.
 const BLOCK_EDGE_ROUND_TOPOLOGY: (usize, usize, usize) = (13, 33, 22);
+
+/// #22188: chamfers on [`box_and_block`]'s edge y = -20, z = 30 past the side edge's end at
+/// z = 28 (equal, 45-degree distance-angle, and unequal two-distance): before the fix,
+/// `rail_passes_side_edge_end` rejected `FilletSurfaceGeneratorType::Linear` and the chamfer
+/// failed with status 1001. Each builds valid with the exact prism volume removed, the same
+/// 13 faces / 33 edges / 22 vertices topology as the round, and the cap edge on the side.
+#[test]
+fn a_chamfer_ending_at_a_block_across_its_edge_ends_on_the_block_s_side_below_its_bottom() {
+    use solidcore::query::api_queries::edge_closest_point;
+    use solidcore_ops::{chamfer_sides_facing, ChamferSecond};
+    for &(d_top, d_side, angle_45) in &[(2.5, 2.5, false), (2.5, 2.5, true), (1.5, 3.0, false)] {
+        for side in [-1.0, 1.0] {
+            let what = format!("d_top {d_top} d_side {d_side} angle_45 {angle_45} side {side}");
+            let b = box_and_block();
+            let before = b.volume(1e-9).unwrap();
+            let shells = common::kernel_copy(&b).1.shells().len();
+            let e = edge_at(&b, [30.0 * side, -20.0, 30.0]);
+            if angle_45 {
+                chamfer_sides_facing(
+                    &b,
+                    &[e],
+                    d_top,
+                    ChamferSecond::Angle(PI / 4.0),
+                    [0.0, 0.0, 1.0],
+                )
+                .unwrap_or_else(|err| panic!("{what}: {err:?}"));
+            } else if (d_top - d_side).abs() < 1e-12 {
+                blend(&b, Blend::Chamfer, &[e], &[d_top], &[], Corners::Filled)
+                    .unwrap_or_else(|err| panic!("{what}: {err:?}"));
+            } else {
+                chamfer_sides_facing(
+                    &b,
+                    &[e],
+                    d_top,
+                    ChamferSecond::Distance(d_side),
+                    [0.0, 0.0, 1.0],
+                )
+                .unwrap_or_else(|err| panic!("{what}: {err:?}"));
+            }
+            let report = b.check(CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{what}: {report}");
+            let (k, brep) = common::kernel_copy(&b);
+            let counts = (
+                brep.face_list().len(),
+                brep.edge_list().len(),
+                brep.vertex_list().len(),
+            );
+            assert_eq!(
+                counts, BLOCK_EDGE_ROUND_TOPOLOGY,
+                "{what}: faces, edges, vertices"
+            );
+            assert_eq!(brep.shells().len(), shells, "{what}: shells");
+            let on_edge = |p: [f64; 3]| {
+                let q = solidcore::Vec3::new(p[0], p[1], p[2]);
+                brep.edge_list().iter().any(|&edge_id| {
+                    edge_closest_point(&k, &brep, edge_id, q)
+                        .unwrap()
+                        .closest
+                        .distance
+                        < 1e-7
+                })
+            };
+            for along in [35.0, 20.0, 10.0] {
+                let x = along * side;
+                for p in [[x, -20.0 + d_top, 30.0], [x, -20.0, 30.0 - d_side]] {
+                    assert!(on_edge(p), "{what}: no rail through {p:?}");
+                }
+            }
+            let z = (30.0 - d_side + 28.0) / 2.0;
+            assert!(
+                on_edge([5.0 * side, -20.0, z]),
+                "{what}: no cap edge through z {z}"
+            );
+            let after = b.volume(1e-9).unwrap();
+            let expected = before - 35.0 * 0.5 * d_top * d_side;
+            assert!(
+                (after - expected).abs() < 1e-6,
+                "{what}: volume {after}, expected {expected}"
+            );
+        }
+    }
+}
+
+/// A body with a vertical convex edge `(10, 10, 5) -> (10, 10, 15)` meeting a recess floor at
+/// `z = 5` that drops down to `z = 2` at `y = 10 + side_edge_len`, so the side edge along `x = 10`
+/// on the floor has length `side_edge_len` while the wall `x = 10` continues past it to `y = 20`.
+fn widened_recess_floor_step(side_edge_len: f64) -> Body {
+    fixes();
+    let slab = make_box([0.0, 0.0, 0.0], [20.0, 20.0, 5.0]).unwrap();
+    let wall = make_box([10.0, 10.0, 5.0], [10.0, 10.0, 10.0]).unwrap();
+    let step = boolean(slab, wall, BooleanOp::Union).unwrap().unwrap();
+    let deeper = make_box(
+        [0.0, 10.0 + side_edge_len, 2.0],
+        [10.0, 10.0 - side_edge_len, 3.0],
+    )
+    .unwrap();
+    boolean(step, deeper, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// #22188: a 1.5 x 45-degree chamfer (and equal / unequal chamfers and a 1.5 round) on a vertical
+/// edge meeting a widened recess floor whose side edge stops at `W` shorter than 1.5 mm.
+/// At `side_edge_len = 1.0`, the chamfer failed because `rail_passes_side_edge_end` rejected
+/// `Linear`. At `side_edge_len = 0.2`, `past = 1.3 > 0.75 * 1.5 = 1.125`, so both chamfers and
+/// rounds also failed because `finish_nx1_end` scaled `ext_dist` by `0.1` when `extend_edge` was
+/// `None`. Both now build valid solids with the exact closed-form volume.
+#[test]
+fn a_chamfer_on_an_edge_meeting_a_widened_recess_floor_step_builds() {
+    use solidcore::query::api_queries::edge_closest_point;
+    use solidcore_ops::{chamfer_sides_facing, ChamferSecond};
+    for side_edge_len in [1.0, 0.2] {
+        let input_vol = 3000.0 - 30.0 * (10.0 - side_edge_len);
+        // 1.5 equal chamfer, 1.5 x 45 deg chamfer, 1.5 x 2.5 unequal chamfer, and 1.5 round
+        for case in 0..4 {
+            let b = widened_recess_floor_step(side_edge_len);
+            let before = b.volume(1e-9).unwrap();
+            assert!(
+                (before - input_vol).abs() < 1e-6,
+                "side_edge_len {side_edge_len}: input volume {before} vs {input_vol}"
+            );
+            let e = edge_at(&b, [10.0, 10.0, 10.0]);
+            let (d_x_wall, removed) = match case {
+                0 => {
+                    blend(&b, Blend::Chamfer, &[e], &[1.5], &[], Corners::Filled)
+                        .unwrap_or_else(|err| panic!("len {side_edge_len} equal: {err:?}"));
+                    (1.5, 10.0 * 0.5 * 1.5 * 1.5)
+                }
+                1 => {
+                    chamfer_sides_facing(
+                        &b,
+                        &[e],
+                        1.5,
+                        ChamferSecond::Angle(PI / 4.0),
+                        [-1.0, 0.0, 0.0],
+                    )
+                    .unwrap_or_else(|err| panic!("len {side_edge_len} 1.5x45: {err:?}"));
+                    (1.5, 10.0 * 0.5 * 1.5 * 1.5)
+                }
+                2 => {
+                    chamfer_sides_facing(
+                        &b,
+                        &[e],
+                        2.5,
+                        ChamferSecond::Distance(1.5),
+                        [-1.0, 0.0, 0.0],
+                    )
+                    .unwrap_or_else(|err| panic!("len {side_edge_len} 2.5x1.5: {err:?}"));
+                    (2.5, 10.0 * 0.5 * 2.5 * 1.5)
+                }
+                _ => {
+                    blend(&b, Blend::Round, &[e], &[1.5], &[], Corners::Filled)
+                        .unwrap_or_else(|err| panic!("len {side_edge_len} round: {err:?}"));
+                    (1.5, 10.0 * 1.5 * 1.5 * (1.0 - PI / 4.0))
+                }
+            };
+            let report = b.check(CheckLevel::All).unwrap();
+            assert!(
+                report.is_valid(),
+                "len {side_edge_len} case {case}: {report}"
+            );
+            let after = b.volume(1e-9).unwrap();
+            let expected = before - removed;
+            assert!(
+                (after - expected).abs() < 1e-6,
+                "len {side_edge_len} case {case}: volume {after}, expected {expected}"
+            );
+            let (k, brep) = common::kernel_copy(&b);
+            let mid_y = 10.0 + 0.5 * (side_edge_len + d_x_wall);
+            let q = solidcore::Vec3::new(10.0, mid_y, 5.0);
+            let has_cap_edge = brep.edge_list().iter().any(|&edge_id| {
+                edge_closest_point(&k, &brep, edge_id, q)
+                    .unwrap()
+                    .closest
+                    .distance
+                    < 1e-7
+            });
+            assert!(
+                has_cap_edge,
+                "len {side_edge_len} case {case}: missing cap edge through (10, {mid_y}, 5)"
+            );
+        }
+    }
+}
+
+/// An L-step `[0, 20] x [0, 20] x [0, 5]` + `[10, 20] x [0, 20] x [5, 10]` whose front-left corner
+/// below the recess floor `z = 5` is bevelled by a plane through `V = (10, 0, 5)` (or its mirror at
+/// `V = (10, 20, 5)` when `mirrored`), giving a four-edge vertex at `V` where one side edge lies on
+/// the recess floor (`same == false`) and the other has the same convexity as the vertical edge
+/// (`same == true`).
+fn four_edge_recess_floor_vertex(mirrored: bool) -> Body {
+    fixes();
+    let slab = make_box([0.0, 0.0, 0.0], [20.0, 20.0, 5.0]).unwrap();
+    let wall = make_box([10.0, 0.0, 5.0], [10.0, 20.0, 5.0]).unwrap();
+    let step = boolean(slab, wall, BooleanOp::Union).unwrap().unwrap();
+    let cutter = make_box([0.0, -30.0, -30.0], [30.0, 60.0, 60.0]).unwrap();
+    let s2 = 2.0_f64.sqrt();
+    let s3 = 3.0_f64.sqrt();
+    let s6 = 6.0_f64.sqrt();
+    let matrix = if mirrored {
+        [
+            [-1.0 / s3, 1.0 / s3, -1.0 / s3, 0.0],
+            [1.0 / s2, 1.0 / s2, 0.0, 0.0],
+            [1.0 / s6, -1.0 / s6, -2.0 / s6, 0.0],
+            [10.0, 20.0, 5.0, 1.0],
+        ]
+    } else {
+        [
+            [-1.0 / s3, -1.0 / s3, -1.0 / s3, 0.0],
+            [1.0 / s2, -1.0 / s2, 0.0, 0.0],
+            [-1.0 / s6, -1.0 / s6, 2.0 / s6, 0.0],
+            [10.0, 0.0, 5.0, 1.0],
+        ]
+    };
+    cutter.transform(&matrix).unwrap();
+    boolean(step, cutter, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+/// #22188: a 1.5 x 45-degree chamfer (and equal chamfer and 1.5 round) on a vertical edge meeting
+/// a four-edge vertex on a recess floor where one side edge is concave (on the recess floor) and
+/// the other is convex (same convexity as the blended edge). Tested in both orientations so both
+/// `same = [true, false]` and `same = [false, true]` are exercised. Before the fix, `finish_nx1_end`
+/// picked the same-convexity side (whose face is the fillet's own side face) and ran the early gap
+/// check on an unprocessed extended vertex, failing with status 1001.
+#[test]
+fn a_chamfer_on_an_edge_meeting_a_four_edge_recess_floor_vertex_builds() {
+    use solidcore_ops::{chamfer_sides_facing, ChamferSecond};
+    // Half-space x + y + z < 15 (or its mirror x - y + z < -5) touches the upper wall only at V
+    // and removes integral_0^5 (15 - z)^2 / 2 dz = (15^3 - 10^3) / 6 = 2375 / 6 from the slab.
+    let expected_input = 3000.0 - 2375.0 / 6.0;
+    for mirrored in [false, true] {
+        let edge_y = if mirrored { 20.0 } else { 0.0 };
+        for case in 0..3 {
+            let b = four_edge_recess_floor_vertex(mirrored);
+            let before = b.volume(1e-9).unwrap();
+            assert!(
+                (before - expected_input).abs() < 1e-6,
+                "mirrored {mirrored}: input volume {before} vs {expected_input}"
+            );
+            let e = edge_at(&b, [10.0, edge_y, 7.5]);
+            let removed = match case {
+                0 => {
+                    blend(&b, Blend::Chamfer, &[e], &[1.5], &[], Corners::Filled)
+                        .unwrap_or_else(|err| panic!("mirrored {mirrored} equal: {err:?}"));
+                    5.0 * 0.5 * 1.5 * 1.5
+                }
+                1 => {
+                    chamfer_sides_facing(
+                        &b,
+                        &[e],
+                        1.5,
+                        ChamferSecond::Angle(PI / 4.0),
+                        [-1.0, 0.0, 0.0],
+                    )
+                    .unwrap_or_else(|err| panic!("mirrored {mirrored} 1.5x45: {err:?}"));
+                    5.0 * 0.5 * 1.5 * 1.5
+                }
+                _ => {
+                    blend(&b, Blend::Round, &[e], &[1.5], &[], Corners::Filled)
+                        .unwrap_or_else(|err| panic!("mirrored {mirrored} round: {err:?}"));
+                    5.0 * 1.5 * 1.5 * (1.0 - PI / 4.0)
+                }
+            };
+            let report = b.check(CheckLevel::All).unwrap();
+            assert!(
+                report.is_valid(),
+                "mirrored {mirrored} case {case}: {report}"
+            );
+            let after = b.volume(1e-9).unwrap();
+            let expected = before - removed;
+            assert!(
+                (after - expected).abs() < 1e-6,
+                "mirrored {mirrored} case {case}: volume {after}, expected {expected}"
+            );
+        }
+    }
+}
 
 /// The box's edge y = -20, z = 30 of `input` rounded `r` on the side `side` of the boss (-1 its
 /// left, x < 0; 1 its mirror), with the corpus's fix set (`corpus`) or none: built, valid at the

@@ -33,6 +33,7 @@
 //! | [`Ellipse::global_point_solve_step`]               | `SmEllipse::GlobalPointSolveSTEP`                 |
 //! | [`Ellipse::join_with`]                             | `SmEllipse::JoinWith`                             |
 //! | [`Ellipse::make_nurb`], [`Ellipse::make_nurb_owned`], [`Ellipse::make_nurb_owned_with_edge_tol`] | `SmEllipse::MakeNurb` |
+//! | [`Ellipse::make_open_arc_nurb`]                    | not upstream (solidcore#3442)                     |
 //! | [`Ellipse::notify`]                                | `SmEllipse::Notify`                               |
 //! | [`Ellipse::reverse_parameterization`]              | `SmEllipse::ReverseParameterization`              |
 //! | [`Ellipse::trim`]                                  | `SmEllipse::Trim`                                 |
@@ -47,7 +48,10 @@
 //! Deviations:
 //! - **Collapsed STEP edits (#428, WR-211).** `AdjustSTEPInterval` refuses inverted
 //!   and non-finite STEP intervals and empty or non-finite converted NURBS intervals
-//!   before mutation, where upstream installs them.
+//!   before mutation, where upstream installs them. Not upstream (#17062): a STEP
+//!   interval or converted NURBS interval no longer than the conversion's own rounding
+//!   of its two ends (`gamma_8` of the magnitudes the conversion adds and subtracts,
+//!   [`Ellipse::adjust_step_interval`]) is empty too and refused the same way.
 //! - **Projected 2D semi-axes (#2140, WR-31).** `ConvertTo2D` passes the extremal
 //!   projected-radius quadratic to `SolveQuadraticEqn` in ascending `[C, B, A]`
 //!   order, evaluates the second semi-axis at `dThetaYRad` (`theta_x_rad + HALF_PI`
@@ -147,6 +151,17 @@ use crate::surface::surface::Surface;
 use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
 
 use super::p2::{Ellipse, EllipseOptions, PolarConversion};
+
+/// Not upstream (#17062): a STEP end converted by `Ellipse::step_to_nurbs_keeping_turns`,
+/// with the magnitudes its conversion's rounded additions and subtractions work at.
+struct ConvertedEnd {
+    /// The NURBS parameter.
+    t: f64,
+    /// `Θ`: the largest angle (degrees) the conversion adds or subtracts.
+    angle_scale: f64,
+    /// `P`: the largest NURBS parameter the conversion adds or subtracts.
+    param_scale: f64,
+}
 
 const OP_ADJUST: &str = "curve::ellipse::p1::Ellipse::adjust_step_interval";
 const OP_MAKE_NURB: &str = "curve::ellipse::p1::Ellipse::make_nurb";
@@ -1267,9 +1282,42 @@ impl Ellipse {
         polar_key: ObjectKey,
         trim_surface: Option<&Surface>,
     ) -> Result<bool> {
+        if !level_given {
+            self.ensure_nurb_for_assert(k)?;
+        }
+        self.assert_valid_on_prepared(k, list, level_given, key, polar_key, trim_surface)
+    }
+
+    /// Materializes the cached NURB representation if missing (the only mutation
+    /// [`Self::assert_valid_on`] performs).
+    pub(crate) fn ensure_nurb_for_assert(&mut self, k: &Kernel) -> Result<()> {
+        if self.base.nurb.is_none() {
+            ignore_status(self.make_nurb(k))?;
+        }
+        Ok(())
+    }
+
+    /// Read-only body of [`Self::assert_valid_on`], once [`Self::ensure_nurb_for_assert`]
+    /// has run (when `!level_given`).
+    pub(crate) fn assert_valid_on_prepared(
+        &self,
+        k: &Kernel,
+        list: Option<&mut AssertArray>,
+        level_given: bool,
+        key: ObjectKey,
+        polar_key: ObjectKey,
+        trim_surface: Option<&Surface>,
+    ) -> Result<bool> {
         let mut list = list;
         if !self.circle {
-            return self.ellipse_assert_valid(k, list, level_given, key, polar_key, trim_surface);
+            return self.ellipse_assert_valid_prepared(
+                k,
+                list,
+                level_given,
+                key,
+                polar_key,
+                trim_surface,
+            );
         }
 
         // init return value
@@ -1279,7 +1327,7 @@ impl Ellipse {
         rtn &= if level_given {
             true
         } else {
-            self.ellipse_assert_valid(
+            self.ellipse_assert_valid_prepared(
                 k,
                 list.as_deref_mut(),
                 level_given,
@@ -1303,9 +1351,10 @@ impl Ellipse {
         Ok(rtn)
     }
 
-    /// `SmEllipse::AssertValid` (see [`Self::assert_valid`]).
-    fn ellipse_assert_valid(
-        &mut self,
+    /// `SmEllipse::AssertValid` (see [`Self::assert_valid`]), assuming any missing NURB
+    /// was already materialized when `!level_given`.
+    fn ellipse_assert_valid_prepared(
+        &self,
         k: &Kernel,
         list: Option<&mut AssertArray>,
         level_given: bool,
@@ -1320,11 +1369,7 @@ impl Ellipse {
 
         // call the base class AssertValid
         if !level_given {
-            // SmBSplineCurve::AssertValid makes a missing NURB (virtual MakeNurb)
-            if self.base.nurb.is_none() {
-                ignore_status(self.make_nurb(k))?;
-            }
-            let this = &*self;
+            let this = self;
             let is_degenerate = |tol: f64| Ok(this.is_degenerate(tol));
             rtn &= this.base.assert_valid_with(
                 k,
@@ -1784,6 +1829,46 @@ impl Ellipse {
         self.make_nurb_owned_with_edge_tol(k, owner, None)
     }
 
+    /// Sets the STEP domain to `domain` (degrees) and makes the NURB of a free, not
+    /// inside-out ellipse over it, closing it only when the domain is a full turn to
+    /// within `closure_tol_deg` degrees (`N_CreateEllipticalArcTol` with that angle
+    /// tolerance), and sets it (rebuilding the polar converter). Not upstream
+    /// (solidcore#3442): [`Self::make_nurb`]'s fixed `0.01` degree tolerance closes an
+    /// arc that falls short of a full turn by less than that, its last point moved
+    /// onto its first, and its domain check turns an end within `1e-4` degrees of 360
+    /// into 360; [`Ellipse::arc`] asks for its own angular tolerance instead.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an inside-out ellipse or one not of dimension 3; `SM_ERR`
+    /// when NLib fails (the old NURB is kept).
+    pub(crate) fn make_open_arc_nurb(
+        &mut self,
+        k: &Kernel,
+        domain: Extent1d,
+        closure_tol_deg: f64,
+    ) -> Result<()> {
+        if self.inside_out || self.base.dim != 3 {
+            return Err(SolidError::invalid_input(
+                OP_MAKE_NURB,
+                "an open arc's NURB is made for a 3D ellipse the right way out",
+            ));
+        }
+        self.anal_domain = domain;
+        let arc = EllipseArc {
+            center: self.position.origin(),
+            x: self.position.x_axis(),
+            y: self.position.y_axis(),
+            r1: self.radius_x,
+            r2: self.radius_y,
+            start: self.start_angle_deg(),
+            end: self.end_angle_deg(),
+        };
+        let cur = elliptical_arc_tol(&arc, closure_tol_deg, ConicType::Quadratic)
+            .map_err(SolidError::nurbs_routine(OP_MAKE_NURB))?;
+        ignore_status(self.set_from_gw_nurb(k, Some(&cur)))
+    }
+
     /// [`Self::make_nurb_owned`] given the tolerance of the edge the ellipse's owner
     /// chain reaches (`GetEdge()->GetTolerance()`), resolved by a caller that holds it
     /// (`Some` means that edge exists, whatever `owner` says). Then the arc's angle
@@ -2025,7 +2110,23 @@ impl Ellipse {
     /// # Errors
     ///
     /// `InvalidInput` for a non-finite source interval, an inverted interval or
-    /// endpoints that map to one NURBS parameter (nothing changed; WR-211). Those of
+    /// endpoints that map to one NURBS parameter (nothing changed; WR-211), or whose
+    /// difference, in degrees or as converted, is no more than the rounding the
+    /// conversion makes of the two ends (nothing changed; #17062): each end's
+    /// conversion adds and subtracts at most `Θ = |s| + |a0| + 360 (|n| + 1)` degrees
+    /// (`s` the end, `a0` the old STEP start, `n` the whole turns it is taken back; the
+    /// `+ 360` also covers the polar converter's angle table inside the arc, whose
+    /// angles reach `|a0| + 360`) and `P = A + (|m| + 1) L` in NURBS parameter (`A` the
+    /// old NURBS interval's largest magnitude, `L` its length, `m` the turns or the
+    /// fraction of the arc it is continued by, `0` inside the arc). The few (at most
+    /// five) rounded additions and subtractions of the affine steps each err by up to
+    /// `u` of their magnitude, absolutely, so a difference no greater than
+    /// `gamma_8 (Θ0 + Θ1)` (or `gamma_8 (P0 + P1)`) may be rounding alone: zero in
+    /// exact arithmetic, or unresolved, and the next reparameterisation would divide by
+    /// it. Products and quotients err relatively and only scale a difference. This is a
+    /// floor, not a bound on the whole conversion: inside the arc the converter's
+    /// trigonometric span map and Newton refinement add an error this does not bound.
+    /// A NaN bound refuses. Those of
     /// [`PolarConversion::convert_to_nurbs_parameter`] (nothing changed) and
     /// [`Self::make_nurb_owned`] (the new domain is kept).
     pub fn adjust_step_interval(
@@ -2063,11 +2164,36 @@ impl Ellipse {
         let step_t1 = new_interval.max();
 
         // After these calls, the conversion may not be reciprocal.
-        let (nurbs_t0, nurbs_t1) = (
+        let (end0, end1) = (
             self.step_to_nurbs_keeping_turns(k, step_t0)?,
             self.step_to_nurbs_keeping_turns(k, step_t1)?,
         );
+        let (nurbs_t0, nurbs_t1) = (end0.t, end1.t);
+        // Not upstream (#17062): STEP ends closer than the conversion's rounding of
+        // them are not resolved by it, and converted ends closer than that rounding are
+        // one parameter (see the doc comment); both are refused before any change, as
+        // a zero-length interval is below
+        let step_gap = step_t1 - step_t0;
+        let angle_rounding = gamma(8) * (end0.angle_scale + end1.angle_scale);
+        // (a rounding bound that is not a number resolves nothing: refused too)
+        if step_gap > 0.0 && (step_gap <= angle_rounding || angle_rounding.is_nan()) {
+            return Err(SolidError::invalid_input(
+                OP_ADJUST,
+                "STEP interval is no longer than the rounding of converting its ends",
+            ));
+        }
         let new_nurbs_ivl = Extent1d::from_min_max(nurbs_t0, nurbs_t1);
+        let param_rounding = gamma(8) * (end0.param_scale + end1.param_scale);
+        if new_nurbs_ivl.length().is_finite()
+            && new_nurbs_ivl.length() > 0.0
+            && (new_nurbs_ivl.length() <= param_rounding || param_rounding.is_nan())
+        {
+            return Err(SolidError::invalid_input(
+                OP_ADJUST,
+                "STEP endpoints map to a NURBS interval no longer than the rounding of \
+                 converting them",
+            ));
+        }
         // The polar converter clamps out-of-arc angles to the old endpoints.
         // Distinct STEP angles can therefore map to one NURBS parameter. Do not
         // install that zero-length interval: the next edit divides by its length and
@@ -2104,20 +2230,36 @@ impl Ellipse {
     /// (negated when inside out); outside a partial arc, the arc's NURBS interval continued
     /// in proportion to the angle.
     ///
+    /// Not upstream (#17062): with the parameter, the magnitudes `Θ` (degrees) and `P`
+    /// (NURBS parameter) its rounded additions and subtractions work at, as
+    /// [`Self::adjust_step_interval`] bounds them.
+    ///
     /// # Errors
     ///
     /// Those of [`PolarConversion::convert_to_nurbs_parameter`].
-    fn step_to_nurbs_keeping_turns(&self, k: &Kernel, step_t: f64) -> Result<f64> {
+    fn step_to_nurbs_keeping_turns(&self, k: &Kernel, step_t: f64) -> Result<ConvertedEnd> {
         let old_step = self.anal_domain;
         let old_nurbs = self.base.natural_interval();
         let span = old_step.length();
+        // the magnitudes for `turns` whole turns, or a multiple `m` of the NURBS length
+        let scales = |turns: f64, m: f64| {
+            (
+                step_t.abs() + old_step.min().abs() + 360.0 * (turns.abs() + 1.0),
+                old_nurbs.max_dimension() + (m.abs() + 1.0) * old_nurbs.length(),
+            )
+        };
         if old_step.contains_value(step_t, EFF_ZERO_DEG)
             || span.partial_cmp(&EFF_ZERO_DEG) != Some(core::cmp::Ordering::Greater)
         {
-            return Ok(self
-                .polar
-                .convert_to_nurbs_parameter(k, self, step_t, 0.0)?
-                .0);
+            let (angle_scale, param_scale) = scales(0.0, 0.0);
+            return Ok(ConvertedEnd {
+                t: self
+                    .polar
+                    .convert_to_nurbs_parameter(k, self, step_t, 0.0)?
+                    .0,
+                angle_scale,
+                param_scale,
+            });
         }
         let sign = if self.inside_out { -1.0 } else { 1.0 };
         if (span - 360.0).abs() < EFF_ZERO_DEG {
@@ -2127,13 +2269,23 @@ impl Ellipse {
                 .polar
                 .convert_to_nurbs_parameter(k, self, inside, 0.0)?
                 .0;
-            return Ok(nurbs_t + sign * turns * old_nurbs.length());
+            let (angle_scale, param_scale) = scales(turns, turns);
+            return Ok(ConvertedEnd {
+                t: nurbs_t + sign * turns * old_nurbs.length(),
+                angle_scale,
+                param_scale,
+            });
         }
         let fraction = (step_t - old_step.min()) / span;
-        Ok(if self.inside_out {
-            old_nurbs.max() - fraction * old_nurbs.length()
-        } else {
-            old_nurbs.min() + fraction * old_nurbs.length()
+        let (angle_scale, param_scale) = scales(0.0, fraction);
+        Ok(ConvertedEnd {
+            t: if self.inside_out {
+                old_nurbs.max() - fraction * old_nurbs.length()
+            } else {
+                old_nurbs.min() + fraction * old_nurbs.length()
+            },
+            angle_scale,
+            param_scale,
         })
     }
 
@@ -2424,7 +2576,7 @@ impl Ellipse {
 
         // First ask SmBSplineCurve::Trim to compute the actual trim interval.
         self.base
-            .trim_with_zone_tol(k, trim_interval, TrimMode::IntervalOnly, zone_tol_3d)?;
+            .trim_with_zone_tol(trim_interval, TrimMode::IntervalOnly, zone_tol_3d)?;
 
         // all done when asked to stop here
         if mode == TrimMode::IntervalOnly {
@@ -2435,7 +2587,11 @@ impl Ellipse {
         let to_step = |e: &Self, t: f64| -> Result<f64> {
             match e.convert_t_from_nurbs_to_step(k, t) {
                 Ok(v) => Ok(v),
-                Err(err @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => Err(err),
+                Err(
+                    err @ (SolidError::Unported { .. }
+                    | SolidError::Cancelled { .. }
+                    | SolidError::OutOfFuel { .. }),
+                ) => Err(err),
                 Err(_) => Err(SolidError::invalid_input(
                     "curve::ellipse::p1::Ellipse::trim",
                     "trim end not convertible (upstream: uninitialised)",
@@ -2447,7 +2603,7 @@ impl Ellipse {
 
         // pass the call to Trim the BSpline - skip its Notify call
         self.base
-            .trim_with_zone_tol(k, trim_interval, TrimMode::Silent, zone_tol_3d)?;
+            .trim_with_zone_tol(trim_interval, TrimMode::Silent, zone_tol_3d)?;
 
         // store the angular interval paying attention to m_bInsideOut
         if self.inside_out {

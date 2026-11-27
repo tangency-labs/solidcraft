@@ -137,7 +137,7 @@ pub fn for_feature(
             && let Ok(plane) = app.session.doc.resolve_face_anchor(anchor, component, &state)
             && let Some(index) = app.session.doc.configuration_face_indices(body, &anchor.target).ok().and_then(|is| is.first().copied())
         {
-            let on_face = solidcore_ops::frame_gusset::support_pick(&plane, *at);
+            let on_face = solidcraft_kernel::gusset_support_pick(&plane, *at);
             let name = app.session.doc.world_body_name(&state, &body.name, anchor.component, &anchor.path);
             input.items = vec![Sel::Face { body: name, index, point: solidcraft_engine::doc::apply_point(frame, on_face) }];
         }

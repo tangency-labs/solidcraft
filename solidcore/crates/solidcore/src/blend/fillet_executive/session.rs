@@ -391,9 +391,13 @@ struct SessionObjects<'target> {
     /// session took them, put back by `Drop` if handing the session's back fails.
     attributes_before: (AttributeStore, AttributeStore),
     merge_attributes: Option<Vec<AttributeHandle>>,
-    /// WR-459: the target's edges, each with its end vertices, and faces before filleting,
-    /// kept by the clean-up.
-    cleanup_kept: Option<(CleanupKeptEdges, BTreeSet<FaceId>)>,
+    /// WR-459: the target's edges, each with its end vertices, before filleting, kept by
+    /// the clean-up.
+    cleanup_kept: Option<CleanupKeptEdges>,
+    /// WR-459 (#17169): the marks ([`ids::FILLET_TARGET_FACE`]) the session set on the
+    /// target's faces before filleting, which the clean-up reads to leave the target's own
+    /// faces, and which are removed when filleting ends.
+    cleanup_face_marks: Vec<AttributeHandle>,
     /// WR-661: the target's boundary (lamina edges) and faces before filleting, which an
     /// open result must keep to be kept ([`finish::OpenInput`]).
     open_input: finish::OpenInput,
@@ -406,9 +410,9 @@ struct SessionObjects<'target> {
     target_serial: u64,
     self_intersection_handler: Option<MakeSurfaceBlendSih>,
     curve_blend_self_intersection_handler: Option<MakeCurveBlendSih>,
-    /// The fork's `m_bSweptTurns` (`SetSweptTurns`; WR-697): a blend corner's Turn is
-    /// Swept, not Mitred.
-    swept_turns: bool,
+    /// How a blend corner's Turn is made ([`FilletSession::set_turns`]; the fork's
+    /// `m_bSweptTurns`, WR-697, is [`TurnChoice::Swept`]).
+    turns: crate::blend::blend_corner::TurnChoice,
     /// Not upstream (#10876): note the blend corner's Roll-over corners the corners step
     /// refuses ([`FilletSession::set_roll_over_classify`]).
     roll_over_classify: bool,
@@ -1314,6 +1318,20 @@ fn live_corner_vertices_geom(
         };
         crate::blend::blend_corner::ball::place_ball_contacts(k, target, pseudo, corner, &lookup)?;
     }
+    // Not the fork's (#19089): the support change's vertices at its balls' contacts, after
+    // the base's vertex geometry
+    if corner
+        .blend
+        .is_some_and(crate::blend::blend_corner::BlendCorner::is_support_ball)
+    {
+        let lookup = SweptSessionSolvers {
+            solvers: &*solvers,
+            executive: None,
+        };
+        crate::blend::blend_corner::support_ball::place_support_ball_vertices(
+            k, pseudo, corner, &lookup,
+        )?;
+    }
     // WR-716: the chamfer event's vertices at their exact points
     if corner
         .blend
@@ -1849,6 +1867,7 @@ impl<'target> FilletSession<'target> {
                 attributes_before,
                 merge_attributes: None,
                 cleanup_kept: None,
+                cleanup_face_marks: Vec::new(),
                 open_input: finish::OpenInput::default(),
                 vertices_before: BTreeSet::new(),
                 extended_surfaces: BTreeMap::new(),
@@ -1856,7 +1875,7 @@ impl<'target> FilletSession<'target> {
                 target_serial,
                 self_intersection_handler: None,
                 curve_blend_self_intersection_handler: None,
-                swept_turns: false,
+                turns: crate::blend::blend_corner::TurnChoice::Mitre,
                 roll_over_classify: false,
                 roll_overs: Vec::new(),
                 roll_over_ends: Vec::new(),
@@ -2379,7 +2398,7 @@ impl<'target> FilletSession<'target> {
             target,
             solvers,
             corners,
-            swept_turns,
+            turns,
             set_back_vertices,
             chamfer_corner,
             set_back_fills,
@@ -2388,7 +2407,7 @@ impl<'target> FilletSession<'target> {
             roll_over_ends,
             ..
         } = &mut self.objects;
-        let swept_turns = *swept_turns;
+        let turns = *turns;
         let roll_over_classify = *roll_over_classify;
         let roll_over_ends = &*roll_over_ends;
         let chamfer_corner = *chamfer_corner;
@@ -2492,6 +2511,42 @@ impl<'target> FilletSession<'target> {
                 // chain meets the cliff, looks for rail ends across the cliff's tangent seam;
                 // its other corners are made as in any pass
                 corner.roll_over = roll_over_ends.contains(&vertex);
+                // #22151: the Mixed corner of a round is a Coons fill, no rolling ball's
+                // surface: refused at its vertex until the Roll-over build takes it. Two
+                // chamfers meet their faces G0, and their Coons patches are the corner's
+                // faces (`calc_mixed_edge_geom`): they still build.
+                let round_at_mixed = corner
+                    .blend
+                    .is_some_and(crate::blend::blend_corner::BlendCorner::is_mixed)
+                    && edgeuses.iter().any(|&edgeuse| {
+                        let object =
+                            FilletObject::Topology(FilletBody::Target, EntityRef::Edgeuse(edgeuse));
+                        let Some(FilletObject::Solver(id)) =
+                            executive.fillet_solver_of_edgeuse(object)
+                        else {
+                            return false;
+                        };
+                        solvers
+                            .get(id.0 as usize)
+                            .and_then(Option::as_ref)
+                            .and_then(|s| s.base().fillet_surface_generator())
+                            .is_some_and(|g| {
+                                g.fillet_surface_generator_type()
+                                    != FilletSurfaceGeneratorType::Linear
+                            })
+                    });
+                if round_at_mixed {
+                    let location = crate::topology::vertex::point(target, vertex).ok();
+                    return Ok(CornerCreation::Refused {
+                        location,
+                        error: crate::blend::fillet_geom::p1::FilletErrorType::CornerUnsupported,
+                        comment: crate::blend::blend_corner::mixed::MIXED_ROUNDS_NOT_BUILT
+                            .to_owned(),
+                        fit_edge: None,
+                        fit: None,
+                        refusal: None,
+                    });
+                }
                 // Not the fork's (WR-716, #2345): chamfers meeting at a vertex where every
                 // edge is chamfered are the blend corner's chamfer event, closed by their
                 // planes, of the session's corner type; refused where that type does not
@@ -2532,6 +2587,7 @@ impl<'target> FilletSession<'target> {
                                     FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))
                                 }),
                                 fit: refusal.fit,
+                                refusal: None,
                             });
                         }
                         ChamferClass::MixedConvexity => {
@@ -2602,6 +2658,43 @@ impl<'target> FilletSession<'target> {
                         Ok(_) => {}
                     }
                 }
+                // Not the fork's (#19089): a 4x3 vertex whose edge not blended is a tangent
+                // seam from a plane into a cylinder, the ball of the round beside the seam
+                // rolling on across it onto the cylinder (a torus) to the ball touching the
+                // cylinder and the other two rounds' faces (a sphere): the support change.
+                // The rails beside the seam on the common face run apart there, so the 4x3
+                // corner's crossing does not exist.
+                if corner.blend.is_none()
+                    && corner.kind == FilletCornerKind::FourByThree
+                    && !corner.chamfer
+                {
+                    let lookup = SweptSessionSolvers {
+                        solvers: solvers.as_slice(),
+                        executive: Some(executive),
+                    };
+                    let all_eus = corner.all_eus.clone().unwrap_or_default();
+                    let solver_eus = corner.solver_eus.clone().unwrap_or_default();
+                    let classified =
+                        crate::blend::blend_corner::support_ball::classify_support_ball(
+                            k,
+                            target,
+                            vertex,
+                            &solver_eus,
+                            &all_eus,
+                            corner.tangency_tol_radians,
+                            &lookup,
+                        );
+                    match classified {
+                        Err(cause) => return unclassified_corner(target, vertex, cause),
+                        Ok(Some((ring, geometry))) => {
+                            corner =
+                                crate::blend::blend_corner::support_ball::support_ball_corner_of(
+                                    &corner, ring, &geometry,
+                                );
+                        }
+                        Ok(None) => {}
+                    }
+                }
                 // The fork's (smlib#104 61547af): a corner where every edge is blended,
                 // three or more, that the blend corner sets back and fills
                 // (SmBlendCorner::ClassifySetBack, in SmFilletCorner::Create's NxN case,
@@ -2663,19 +2756,22 @@ impl<'target> FilletSession<'target> {
                         comment: crate::blend::blend_corner::setback::SETBACK_NOT_BUILT.to_owned(),
                         fit_edge: None,
                         fit: None,
+                        refusal: None,
                     });
                 }
                 // The fork's (WR-697, e647dac): with GetSweptTurns() a blend corner's
-                // Turn is Swept, or refused with its reason (SmBlendCorner::Classify)
+                // Turn is Swept, or refused with its reason (SmBlendCorner::Classify); with
+                // Auto (not upstream) it is Swept where that classification builds it and
+                // stays Mitred where it does not
                 if let Some(blend) = corner.blend.as_mut().filter(|blend| {
-                    swept_turns && blend.event == crate::blend::blend_corner::BlendCornerEvent::Turn
+                    turns != crate::blend::blend_corner::TurnChoice::Mitre
+                        && blend.event == crate::blend::blend_corner::BlendCornerEvent::Turn
                 }) {
-                    blend.turn = crate::blend::blend_corner::BlendTurn::Swept;
                     let lookup = SweptSessionSolvers {
                         solvers: solvers.as_slice(),
                         executive: Some(executive),
                     };
-                    if let Some(refusal) = crate::blend::blend_corner::swept::classify_swept(
+                    let refusal = crate::blend::blend_corner::swept::classify_swept(
                         k,
                         target,
                         vertex,
@@ -2683,7 +2779,12 @@ impl<'target> FilletSession<'target> {
                         corner.all_eus.as_deref().unwrap_or_default(),
                         crate::math::rad_to_deg(corner.tangency_tol_radians),
                         &lookup,
-                    )? {
+                    )?;
+                    match refusal {
+                        None => blend.turn = crate::blend::blend_corner::BlendTurn::Swept,
+                        // Auto: the Turn the Swept construction does not build is Mitred
+                        Some(_) if turns == crate::blend::blend_corner::TurnChoice::Auto => {}
+                        Some(refusal) => {
                         let location = crate::topology::vertex::point(target, vertex).ok();
                         return Ok(CornerCreation::Refused {
                             location,
@@ -2693,7 +2794,9 @@ impl<'target> FilletSession<'target> {
                                 FilletObject::Topology(FilletBody::Target, EntityRef::Edge(e))
                             }),
                             fit: None,
+                            refusal: refusal.refusal,
                         });
+                    }
                     }
                 }
                 let id = FilletCornerId(
@@ -3066,7 +3169,19 @@ impl<'target> FilletSession<'target> {
     /// turn the blend corner does not build is refused with its reason. Set it before
     /// [`Self::do_fillet`] (the corners are made there).
     pub fn set_swept_turns(&mut self, swept: bool) {
-        self.objects.swept_turns = swept;
+        self.set_turns(if swept {
+            crate::blend::blend_corner::TurnChoice::Swept
+        } else {
+            crate::blend::blend_corner::TurnChoice::Mitre
+        });
+    }
+
+    /// How the blend corners' Turns are made ([`crate::blend::blend_corner::TurnChoice`]):
+    /// Mitred (the default), Swept (refused where the Swept construction does not build, as
+    /// [`Self::set_swept_turns`]), or Auto, each Turn Swept where it builds and Mitred where
+    /// not. Set it before [`Self::do_fillet`] (the corners are made there).
+    pub fn set_turns(&mut self, turns: crate::blend::blend_corner::TurnChoice) {
+        self.objects.turns = turns;
     }
 
     /// Not upstream (#10876): note the blend corner's Roll-over corners
@@ -3548,6 +3663,16 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
             };
             crate::blend::blend_corner::ball::ball_corner_edge_geom(
                 k, target, pseudo, corner, &lookup,
+            )?;
+        }
+        // Not the fork's (#19089): the support change's torus, its sphere's patch and the
+        // edges on them, before the edges' own kinds compute their curves
+        if corner
+            .blend
+            .is_some_and(crate::blend::blend_corner::BlendCorner::is_support_ball)
+        {
+            crate::blend::blend_corner::support_ball::support_ball_edge_geom(
+                k, target, pseudo, corner,
             )?;
         }
         // WR-716: the chamfer event's edges as exact lines and its facet's plane, before
@@ -5559,6 +5684,24 @@ impl FaceConstructionAccess<FilletObject> for SessionObjects<'_> {
                     };
                     return crate::blend::blend_corner::ball::create_ball_patch(corner, &mut env);
                 }
+                // Not the fork's (#19089): the support change's two faces
+                if corner
+                    .blend
+                    .is_some_and(crate::blend::blend_corner::BlendCorner::is_support_ball)
+                {
+                    let mut no_note = |_: &FilletCorner| {};
+                    let mut env = CornerPatchEnv {
+                        k,
+                        target,
+                        pseudo,
+                        solvers: &store,
+                        fillet: Some(&mut fillet),
+                        note_face_error: &mut no_note,
+                    };
+                    return crate::blend::blend_corner::support_ball::create_support_ball_patches(
+                        corner, &mut env,
+                    );
+                }
                 // The fork's (61547af, smlib#104): a Setback's patches are its fill's
                 // (SmBlendCorner::CreateSetBackPatches)
                 if corner
@@ -6529,6 +6672,35 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             ];
             edge_curves.push((curve, ivl, ends));
         }
+        // each blended edge's ends that other blended edges share (corners, #21749): the end
+        // of the edge's curve nearest the vertex, and the indices of those other edges
+        let mut corner_ends: Vec<Vec<(crate::math::Point3, Vec<usize>)>> = Vec::new();
+        for (b, &(edge_b, ends_b)) in edges.iter().enumerate() {
+            let mut at = Vec::new();
+            for v in ends_b.into_iter().flatten() {
+                let others: Vec<usize> = (0..edges.len())
+                    .filter(|&j| {
+                        edges.get(j).is_some_and(|&(edge_j, ends_j)| {
+                            edge_j != edge_b && ends_j.contains(&Some(v))
+                        })
+                    })
+                    .collect();
+                let Some((_, _, [q0, q1])) = edge_curves.get(b) else {
+                    continue;
+                };
+                if others.is_empty() {
+                    continue;
+                }
+                let at_v = crate::topology::vertex::point(self.target, v)?;
+                let end = if (at_v - *q0).length() <= (at_v - *q1).length() {
+                    *q0
+                } else {
+                    *q1
+                };
+                at.push((end, others));
+            }
+            corner_ends.push(at);
+        }
         // Pruning by boxes (#16645: the pair loop is quadratic in the blends). A pair
         // `(a, b)` can refuse only through a sample `p` of rail `a`'s kept part for which,
         // with `e` on edge `b` and `r` on rail `b`, `|p - e| < |e - r|`. So `p` lies
@@ -6624,6 +6796,7 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                 }
                 let edge_box_b = if every_box { run_box } else { None };
                 let edge_box_b = edge_box_b.as_ref();
+                let corners_b = corner_ends.get(b).map_or(&[][..], Vec::as_slice);
                 for (ia, (face_a, curve_a, kept_a)) in rails_a.iter().enumerate() {
                     for (ib, (face_b, curve_b, kept_b)) in rails_b.iter().enumerate() {
                         if face_a != face_b {
@@ -6883,6 +7056,31 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
                                     }
                                 };
                                 if inside && !sample_off_face(k, self.target, *face_a, p)? {
+                                    // Not the fork's (#21749): past a corner, where other
+                                    // blended edges meet edge `b` at this end, the blends take
+                                    // off only what neither side of the face keeps: the sample
+                                    // is in the band where it also lies on the edge's side of
+                                    // the rail of the edge that meets `b` there on this face
+                                    // (`inside_corner_wedge`).
+                                    if let Some((_, others)) =
+                                        corners_b.iter().find(|(q, _)| (e - *q).length() <= tol)
+                                    {
+                                        if !inside_corner_wedge(
+                                            k,
+                                            &CornerWedge {
+                                                rails: &rails,
+                                                edge_curves: &edge_curves,
+                                                others,
+                                                face: *face_a,
+                                            },
+                                            e,
+                                            p,
+                                            tol,
+                                            apart,
+                                        )? {
+                                            continue;
+                                        }
+                                    }
                                     return Ok(false);
                                 }
                                 continue;
@@ -7058,6 +7256,91 @@ fn inside_band_past_run_end(
     }
     let from_rail = (sample - r).dot(section * (1.0 / width));
     Ok(from_rail > tol && from_rail < width - apart && (sample - r).length() < width)
+}
+
+/// The blends that meet a band's edge at a corner, as [`inside_corner_wedge`] reads them.
+struct CornerWedge<'a> {
+    /// Every blend's rails, with the face each rolls on and its kept interval.
+    rails: &'a [SolverRails],
+    /// Every blended edge's curve, its interval and the ends of the curve.
+    edge_curves: &'a [(
+        crate::curve::curve::Curve,
+        crate::geom::extent1d::Extent1d,
+        [crate::math::Point3; 2],
+    )],
+    /// The indices of the other blended edges at the corner.
+    others: &'a [usize],
+    /// The face the sample lies on.
+    face: FaceId,
+}
+
+/// Whether a sample past a band's edge's end at a corner (#21749), already inside that band's
+/// run-on ([`inside_band_past_run_end`]), lies in the material the corner takes off. Past a
+/// corner where two edges meet on the face, each of the face's two sides keeps what lies
+/// beyond its blend's rail; the blends run on past the corner to their mitre and take off what
+/// neither side keeps. So the sample is inside where it also lies on the edge's side of the
+/// rail of another edge at the corner with a rail on `face`, that rail run on past the corner:
+/// further than `tol` from it in the direction of that band's section at `end`, however far
+/// (past that edge's line too). Where no edge at the corner has a rail on `face` (a blended
+/// side edge, whose blend rolls on other faces), or only a closed one, the end is judged as a
+/// free one: inside.
+///
+/// # Errors
+/// Those of the drops onto the rails and their evaluation; a drop that finds no point on a
+/// rail, which a bounded curve always has, is a defect ([`band_defect`]).
+fn inside_corner_wedge(
+    k: &Kernel,
+    wedge: &CornerWedge<'_>,
+    end: crate::math::Point3,
+    sample: crate::math::Point3,
+    tol: f64,
+    apart: f64,
+) -> Result<bool> {
+    use crate::geom::global_solver::SolverOperation;
+    let mut on_face = false;
+    for &c in wedge.others {
+        let Some((_, _, [c0, c1])) = wedge.edge_curves.get(c) else {
+            continue;
+        };
+        // a closed edge has no end at the corner to run on past
+        if (*c0 - *c1).length() <= tol {
+            continue;
+        }
+        let Some(own) = wedge.rails.get(c) else {
+            continue;
+        };
+        for (_, rail, _) in own.iter().filter(|(f, _, _)| *f == wedge.face) {
+            let ivl = rail.natural_interval();
+            let drop = |q| {
+                rail.drop_point(
+                    k,
+                    &ivl,
+                    q,
+                    None,
+                    crate::math::BIG_DOUBLE,
+                    None,
+                    SolverOperation::Minimize,
+                )
+            };
+            let across = drop(end)?;
+            let on_rail = drop(sample)?;
+            if !across.success || !on_rail.success {
+                return Err(band_defect("a bounded curve always has a closest point"));
+            }
+            let section = end - rail.evaluate_point(k, across.parameter)?;
+            let width = section.length();
+            // a rail on the corner itself takes no band there
+            if width <= 2.0 * apart {
+                continue;
+            }
+            on_face = true;
+            let r = rail.evaluate_point(k, on_rail.parameter)?;
+            if (sample - r).dot(section * (1.0 / width)) > tol {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(!on_face)
 }
 
 /// A step of the band check that found nothing where a point always exists (a drop onto a
@@ -7927,6 +8210,16 @@ impl SessionObjects<'_> {
 
         // set FilletSideEdge->Curves
         for edge in [gaps.edge1, gaps.edge2] {
+            // (not upstream) A cap edge along the extended side edge from a rail's end on the
+            // end face's surface waits for the blend's trace, which places that end
+            // (`calc_rail_int_end_surface`, the fork's WR-697); the corner's edges are computed
+            // again after it. Computing it now refused the corner ("an end vertex of the edge
+            // is not processed"): a chamfer on a slanted side's edge ending where an upright
+            // meets it. Left without a curve, the coincidence test below takes the whole edge,
+            // as upstream.
+            if self.pseudo.extended_edge_awaits_rail(edge)? {
+                continue;
+            }
             let SessionObjects {
                 target,
                 pseudo,
@@ -8043,6 +8336,16 @@ impl SessionObjects<'_> {
         {
             return self.make_ball_corner_topology(k, id, executive);
         }
+        // Not the fork's (#19089): the support change builds its own topology, with the
+        // solvers its classification found
+        if self
+            .corners
+            .get(id.0 as usize)
+            .and_then(|corner| corner.blend)
+            .is_some_and(crate::blend::blend_corner::BlendCorner::is_support_ball)
+        {
+            return self.make_support_ball_corner_topology(k, id);
+        }
         // The fork's (61547af, smlib#104): SmBlendCorner::MakeCornerTopology builds a
         // Setback its own way (MakeSetBackTopology)
         if self
@@ -8131,6 +8434,43 @@ impl SessionObjects<'_> {
             corner: id,
             solvers,
         })
+    }
+    /// The support change's topology (#19089) with the solvers of its three rounds, as its
+    /// classification found them.
+    fn make_support_ball_corner_topology(&mut self, k: &Kernel, id: FilletCornerId) -> Result<()> {
+        let SessionObjects {
+            target,
+            pseudo,
+            solvers,
+            corners,
+            ..
+        } = self;
+        let ids = corners
+            .get(id.0 as usize)
+            .and_then(|corner| corner.support_ball.as_ref())
+            .map(|sb| sb.ring.solvers)
+            .ok_or_else(|| invalid("support change corner without its ring"))?;
+        let live = |solver: FilletSolverId| {
+            solvers
+                .get(solver.0 as usize)
+                .and_then(Option::as_ref)
+                .map(SolverObject::base)
+                .ok_or_else(|| invalid("corner solver is not live"))
+        };
+        let [s_w, s_g, s_y] = ids;
+        let solvers = [live(s_w)?, live(s_g)?, live(s_y)?];
+        let corner = corners
+            .get_mut(id.0 as usize)
+            .ok_or_else(|| invalid("corner is not live"))?;
+        corner.make_support_ball_topology(
+            crate::blend::blend_corner::support_ball::SupportBallTopologyEnv {
+                k,
+                target,
+                pseudo,
+                corner: id,
+                solvers,
+            },
+        )
     }
     /// The fork's `SmBlendCorner::MakeBallTopology` (WR-697) with the solver of each of
     /// the corner's ring edge uses, else of its mate (`GetFilletSolverOfEdgeuse`).

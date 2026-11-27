@@ -27,13 +27,14 @@ pub(crate) mod spatial;
 mod wide_vertices;
 
 pub use assert_valid::{
-    assert_valid, assert_valid_scoped, check_brep, check_brep_scoped, check_brep_with_keys,
-    check_brep_with_keys_scoped, curve_assert_valid, validate_and_update_tolerances, BrepCheck,
-    CheckLevel, FailureClass, ToleranceGaps, ValidityScope,
+    assert_valid, assert_valid_scoped, check_brep, check_brep_full, check_brep_local,
+    check_brep_scoped, check_brep_with_keys, check_brep_with_keys_scoped, curve_assert_valid,
+    validate_and_update_tolerances, BrepCheck, CheckLevel, FailureClass, ToleranceGaps,
+    ValidityScope,
 };
 pub(crate) use pointers::validate_geometry;
 pub(crate) use pointers::GROWTH_PAST_RATIO;
-pub use pointers::{edge_tube_reaches, validate_pointers, vertex_ball_reaches};
+pub use pointers::{edge_tube_reaches, validate_pointers, vertex_ball_reaches, PointerCheck};
 pub(crate) use pointers::{validate_pointers_excluding, validate_pointers_traced};
 pub(crate) use soundness::lost_manifold;
 pub use soundness::{soundness, standing, volume_sign, Soundness, Standing};
@@ -46,8 +47,6 @@ use crate::topology::{Brep, BrepId, EdgeuseId, FaceId};
 
 const OP: &str = "topology::brep::validation";
 const BREP_TYPE: i64 = 16011;
-use crate::error::SM_ERR as ERROR;
-use crate::error::SM_SUCCESS as SUCCESS;
 
 fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)

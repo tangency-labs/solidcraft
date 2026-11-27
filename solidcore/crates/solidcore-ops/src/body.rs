@@ -272,6 +272,26 @@ impl Body {
         (std::mem::replace(&mut held.brep, Brep::new()), proof)
     }
 
+    /// `other`'s B-rep, proof and template put in this body's place (its own dropped), under
+    /// one lock: for an operation whose result was built as another body.
+    pub(crate) fn take_from(&self, other: &Body) {
+        let (brep, proof) = other.take_held();
+        let mut held = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        held.brep = brep;
+        held.outward = proof.outward;
+        held.primitive = proof.primitive;
+    }
+
+    /// Whether the body holds the proof that it is valid and faces out (tests only).
+    #[cfg(test)]
+    pub(crate) fn holds_proof(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .outward
+            .is_some()
+    }
+
     /// Whether a panic interrupted an edit of this body.
     #[must_use]
     pub(crate) fn is_poisoned(&self) -> bool {
@@ -310,6 +330,21 @@ impl Body {
             outward,
             primitive,
         })))
+    }
+
+    /// The order of the body's own lists: record face, edge and vertex `i` is the kernel's
+    /// `i`th, as the kernel holds them now (no edges split). An operation's result numbers its
+    /// entities afresh, so an order is the body's as it is when this is called; picks by point
+    /// ([`crate::pick::edges`], [`crate::pick::vertices`]) give indices into these lists.
+    #[must_use]
+    pub fn own_order(&self) -> Order {
+        let g = self.lock();
+        Order {
+            split_edges: 0,
+            faces: g.face_list().to_vec(),
+            edges: g.edge_list().to_vec(),
+            vertices: g.vertex_list().to_vec(),
+        }
     }
 
     /// A deep copy with `order` mapped to the copy's own entity IDs. The ordering of each
@@ -463,6 +498,15 @@ impl Body {
                 b.vertex_list().len(),
             ])
         })
+    }
+
+    /// The body's own tolerance, the kernel's: how near two of its points must be to be one
+    /// point.
+    ///
+    /// # Errors
+    /// Those of [`with_body`].
+    pub fn tolerance(&self) -> Result<f64> {
+        read_body("tolerance", self, |_, b| Ok(b.tolerance()))
     }
 
     /// The enclosed volume (`SmApiBrepComputeVolume`) at `relative_accuracy`, as the kernel's

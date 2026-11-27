@@ -44,12 +44,25 @@ impl Document {
 
     /// Remove component `root` with every component inside it, the features made in them, their
     /// occurrences, the joints, motion links, joint origins, contact sets, motion keys and
-    /// exploded moves that refer to those occurrences, the bodies' component assignments, and the
-    /// components' standard-part, link, appearance and configuration records.
+    /// exploded moves that refer to those occurrences, the bodies' component assignments, materials
+    /// and appearances, and the components' standard-part, link, appearance and configuration
+    /// records.
     ///
     /// Refused (nothing changes) for the design itself, an unknown component, or a tree that
     /// supplies a body transfer recorded outside it.
     pub fn remove_component_tree(&mut self, root: u64) -> Result<RemovedTree> {
+        self.remove_tree(root, false)
+    }
+
+    /// Remove everything inside component `root` as [`Self::remove_component_tree`] does, but keep
+    /// `root` itself, its placements, its link and its place in the design: the components and
+    /// features made in it, their occurrences, and the records that refer to them go. A linked
+    /// board that is read again is rebuilt in the component it had.
+    pub fn remove_component_contents(&mut self, root: u64) -> Result<RemovedTree> {
+        self.remove_tree(root, true)
+    }
+
+    fn remove_tree(&mut self, root: u64, keep_root: bool) -> Result<RemovedTree> {
         if root == 0 {
             return Err(DocError::Invalid("the design itself can't be deleted".into()));
         }
@@ -58,8 +71,14 @@ impl Document {
         }
         let tree: BTreeSet<u64> = self.components.iter().filter(|c| self.component_within(c.id, root)).map(|c| c.id).collect();
         let kept = self.components_kept_by_outside_placements(root, &tree);
-        let components: Vec<u64> = self.components.iter().map(|c| c.id).filter(|c| tree.contains(c) && !kept.contains(c)).collect();
-        let inside: BTreeSet<u64> = components.iter().copied().collect();
+        let components: Vec<u64> =
+            self.components.iter().map(|c| c.id).filter(|c| tree.contains(c) && !kept.contains(c) && !(keep_root && *c == root)).collect();
+        let removed_components: BTreeSet<u64> = components.iter().copied().collect();
+        // What the removal reaches into: the components that go and, when it stays, the root.
+        let mut inside: BTreeSet<u64> = removed_components.clone();
+        if keep_root {
+            inside.insert(root);
+        }
         if self.features.iter().any(|feature| {
             !inside.contains(&feature.component)
                 && matches!(&feature.kind, FeatureKind::BodyTransfer { from, to, .. } if inside.contains(from) || inside.contains(to))
@@ -69,10 +88,12 @@ impl Document {
             ));
         }
         let features: Vec<u64> = self.features.iter().filter(|f| inside.contains(&f.component)).map(|f| f.id).collect();
+        let feature_bodies: Vec<(u64, Vec<String>)> =
+            self.features.iter().filter(|f| !f.body_names.is_empty()).map(|f| (f.id, f.body_names.clone())).collect();
         let deleted = if features.is_empty() { Vec::new() } else { self.delete_features(&features)? };
 
         let occurrences: BTreeSet<u64> =
-            self.occurrences.iter().filter(|o| inside.contains(&o.component) || inside.contains(&o.parent)).map(|o| o.id).collect();
+            self.occurrences.iter().filter(|o| removed_components.contains(&o.component) || inside.contains(&o.parent)).map(|o| o.id).collect();
         // Linked parts this removal leaves without a placement: they go too.
         let orphans: Vec<u64> = self
             .links
@@ -86,19 +107,41 @@ impl Document {
             .collect();
         let joints = self.remove_occurrences(&occurrences);
 
-        let bodies: BTreeSet<String> = self.body_components.iter().filter(|(_, c)| inside.contains(*c)).map(|(name, _)| name.clone()).collect();
+        let mut bodies: BTreeSet<String> = self.body_components.iter().filter(|(_, c)| inside.contains(*c)).map(|(name, _)| name.clone()).collect();
         self.body_components.retain(|_, c| !inside.contains(c));
+        let surviving: BTreeSet<String> =
+            self.features.iter().flat_map(|f| f.body_names.iter().cloned()).chain(self.body_components.keys().cloned()).collect();
+        {
+            let deleted_ids: BTreeSet<u64> = deleted.iter().copied().collect();
+            for (id, names) in feature_bodies {
+                if deleted_ids.contains(&id) {
+                    for name in names {
+                        if !name.is_empty() && !surviving.contains(&name) {
+                            bodies.insert(name);
+                        }
+                    }
+                }
+            }
+        }
         self.body_offsets.retain(|name, _| !bodies.contains(name));
+        let gone = |name: &str| bodies.contains(name) && !surviving.contains(name);
+        self.materials.retain(|name, _| !gone(name));
+        self.appearances.bodies.retain(|name, _| !gone(name));
+        self.appearances.faces.retain(|face| !gone(&face.body));
+        self.collision_shapes.retain(|name, _| !gone(name));
+        self.edgeless_bodies.retain(|name| !gone(name));
+        self.print_faces.retain(|name, _| !gone(name));
+        self.plastic.assigned.retain(|name, _| !gone(name));
         // A kept component sat under the tree it was made in: it moves up to the component the
         // removed root sat in, which is left (read before the root goes).
-        let up = self.components.iter().find(|c| c.id == root).map_or(0, |c| c.parent);
-        self.components.retain(|c| !inside.contains(&c.id));
+        let up = if keep_root { root } else { self.components.iter().find(|c| c.id == root).map_or(0, |c| c.parent) };
+        self.components.retain(|c| !removed_components.contains(&c.id));
         for c in self.components.iter_mut().filter(|c| kept.contains(&c.id) && inside.contains(&c.parent)) {
             c.parent = up;
         }
         self.assembly.rigid_groups.retain(|g| !inside.contains(&g.component));
-        self.parts.retain(|c, _| !inside.contains(c));
-        self.links.retain(|c, _| !inside.contains(c));
+        self.parts.retain(|c, _| !removed_components.contains(c));
+        self.links.retain(|c, _| !removed_components.contains(c));
         self.remove_configuration_components(&components);
         let mut removed =
             RemovedTree { components, features, deleted, occurrences: occurrences.into_iter().collect(), joints: joints.into_iter().collect() };
