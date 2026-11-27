@@ -12,22 +12,29 @@ use crate::dialogs::Kind;
 /// At most this many drags of one dialog are kept.
 const KEPT: usize = 64;
 
+/// A dialog's values that a handle drag can change: its kind's fields, and the parameters it
+/// keeps beside them (a spline fillet's radii and knots).
+type Values = (Kind, serde_json::Map<String, serde_json::Value>);
+
 /// A dialog's handle drags: its values on the far side of each. UI state only, never saved or
 /// sent with a command.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct DragUndo {
     /// The values when the primary button went down, while that press lasts.
-    pressed: Option<Kind>,
+    pressed: Option<Values>,
     /// A handle was dragged since that press.
     dragged: bool,
-    undo: Vec<Kind>,
-    redo: Vec<Kind>,
+    undo: Vec<Values>,
+    redo: Vec<Values>,
 }
 
 impl DragUndo {
+    /// Forget every drag, the one under a press that still lasts too.
     fn forget(&mut self) {
         self.undo.clear();
         self.redo.clear();
+        self.pressed = None;
+        self.dragged = false;
     }
 }
 
@@ -47,7 +54,7 @@ pub(crate) fn track(app: &mut SolveApp, ctx: &egui::Context, pressed: bool, down
         track.forget();
     }
     if pressed {
-        track.pressed = Some(d.kind.clone());
+        track.pressed = Some((d.kind.clone(), d.extra.clone()));
         track.dragged = false;
         return;
     }
@@ -77,11 +84,12 @@ pub(crate) fn keys(app: &mut SolveApp, ctx: &egui::Context) -> bool {
     if focus.is_some() && focus != d.value_focus() {
         return false;
     }
+    // Any key: Undo and Redo may be bound to other keys than Z and Y.
     let presses: Vec<(egui::Key, egui::Modifiers)> = ctx.input(|i| {
         i.events
             .iter()
             .filter_map(|e| match e {
-                egui::Event::Key { key: key @ (egui::Key::Z | egui::Key::Y), pressed: true, modifiers, .. } => Some((*key, *modifiers)),
+                egui::Event::Key { key, pressed: true, modifiers, .. } => Some((*key, *modifiers)),
                 _ => None,
             })
             .collect()
@@ -106,7 +114,7 @@ fn step(app: &mut SolveApp, back: bool) -> bool {
         return false;
     }
     let (from, to) = if back { (&mut track.undo, &mut track.redo) } else { (&mut track.redo, &mut track.undo) };
-    let Some(values) = from.pop() else { return false };
-    to.push(std::mem::replace(&mut d.kind, values));
+    let Some((kind, extra)) = from.pop() else { return false };
+    to.push((std::mem::replace(&mut d.kind, kind), std::mem::replace(&mut d.extra, extra)));
     true
 }

@@ -1970,3 +1970,16 @@ fn undo_leaves_a_handle_drag_once_a_value_is_typed_after_it() {
     assert_eq!(distance, "7 mm");
     assert_eq!(h.app.session.undo.len(), depth - 1, "the key works as before");
 }
+
+// Undo moved to another key takes back the drag too (#22838 review).
+#[test]
+fn undo_on_another_key_takes_back_a_handle_drag() {
+    let mut h = new_extrude_over_a_box();
+    crate::keymap::bind(&mut h.app, "edit.undo", "Ctrl+U", true).unwrap();
+    let depth = h.app.session.undo.len();
+    drag_taper(&mut h);
+    assert_ne!(taper(&h).as_deref(), Some("0 deg"));
+    key(&mut h, "U");
+    assert_eq!(taper(&h).as_deref(), Some("0 deg"));
+    assert_eq!(h.app.session.undo.len(), depth);
+}
