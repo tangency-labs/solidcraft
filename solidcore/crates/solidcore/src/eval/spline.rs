@@ -349,6 +349,12 @@ impl Nurbs {
         Some([onto_knots(k0, p0, n0, u)?, onto_knots(k1, p1, n1, v)?])
     }
 
+    /// NLib's surface on the net as it is (a non-rational net carries no weights), `None` when
+    /// the data are malformed.
+    pub(crate) fn nl_surface(&self) -> Option<&NlSurface> {
+        self.nl.as_ref().map(|(s, _)| s)
+    }
+
     /// The degrees along u and v.
     #[must_use]
     pub fn degree(&self) -> [usize; 2] {

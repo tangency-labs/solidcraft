@@ -261,10 +261,10 @@ fn main() {
     let size = body.size();
     let (sc_tol, core_tol, chord) = if mode == "display" {
         let t = solidcraft_kernel::MeshTolerance::display_of(size);
-        (t, solidcraft_kernel::services::tess::MeshTolerance::display_of(size), t.chord)
+        (t, solidcraft_kernel::MeshTolerance::display_of(size), t.chord)
     } else {
         let t = solidcraft_kernel::MeshTolerance::export_of(size);
-        (t, solidcraft_kernel::services::tess::MeshTolerance::export_of(size), t.chord)
+        (t, solidcraft_kernel::MeshTolerance::export_of(size), t.chord)
     };
     let _ = bbox_diag(&rec);
     let head = serde_json::json!({"body": name, "mode": mode, "size": size, "chord": chord, "faces": rec.faces.len(), "angle_deg": sc_tol.angle.map(|a| a.to_degrees())});

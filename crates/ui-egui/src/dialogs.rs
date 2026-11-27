@@ -317,6 +317,10 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// in the dialog's extra parameters.
                 extent: String,
                 extent2: String,
+                /// Each direction's spacing list as typed, the gaps separated by semicolons
+                /// (`10 mm; 20 mm; 30 mm`), for Quantity and List.
+                list: String,
+                list2: String,
             },
             /// Circular pattern of bodies around an axis.
             PatternCirc {
@@ -1279,6 +1283,8 @@ impl Dialog {
                     spacing2: length_default(s, "20"),
                     extent: length_default(s, "100"),
                     extent2: length_default(s, "100"),
+                    list: default_spacing_list(s),
+                    list2: default_spacing_list(s),
                 },
                 vec![
                     SelInput::new("Objects", BODIES, true),
@@ -1776,6 +1782,8 @@ impl Dialog {
         let through_point = offset_through_point(self).is_some();
         // Quantity and Extent works out the spacing, so the canvas value is the extent (#8523).
         let pattern_extent = pattern_distance(&self.extra, 0) == PatternDistance::CountExtent;
+        // A spacing list is no single length to drag or type on the canvas.
+        let pattern_list = pattern_distance(&self.extra, 0) == PatternDistance::CountList;
         Some(match &mut self.kind {
             Kind::Extrude { to_offset, .. } if to_object_on(&self.inputs) => ("To Offset", ValueKind::Length, to_offset),
             Kind::Extrude { distance, .. } => ("Distance", ValueKind::Length, distance),
@@ -1815,6 +1823,7 @@ impl Dialog {
                     _ => ("X", ValueKind::Length, x),
                 },
             },
+            Kind::PatternRect { .. } if pattern_list => return None,
             Kind::PatternRect { extent, .. } if pattern_extent => ("ui.pattern_extent", ValueKind::Length, extent),
             Kind::PatternRect { spacing, .. } => ("Spacing", ValueKind::Length, spacing),
             Kind::PatternCirc { angle, .. } => ("Angle", ValueKind::Angle, angle),
@@ -3792,6 +3801,8 @@ fn placement_row(d: &mut Dialog, ui: &mut egui::Ui, app: &SolveApp) {
                         spacing2: length_default(session, "20"),
                         extent: length_default(session, "100"),
                         extent2: length_default(session, "100"),
+                        list: default_spacing_list(session),
+                        list2: default_spacing_list(session),
                     },
                     vec![
                         SelInput::new("Objects", BODIES, true),
@@ -4362,8 +4373,15 @@ pub(crate) fn pattern_distance(extra: &serde_json::Map<String, Value>, index: us
     extra.get(key).and_then(Value::as_str).and_then(PatternDistance::from_word).unwrap_or_default()
 }
 
-/// One rectangular pattern direction's values (`k` "1" or "2") as its distance type uses them.
-fn pattern_values(p: &mut Value, k: &str, distance: PatternDistance, count: &str, spacing: &str, extent: &str) {
+/// One rectangular pattern direction's values (`k` "1" or "2") as its distance type uses them:
+/// the count, the spacing, the extent and the spacing list as typed.
+fn pattern_values(
+    doc: &solidcraft_engine::doc::Document,
+    p: &mut Value,
+    k: &str,
+    distance: PatternDistance,
+    (count, spacing, extent, list): (&str, &str, &str, &str),
+) {
     if distance.uses_count() {
         p[format!("count{k}")] = json!(count);
     }
@@ -4373,6 +4391,27 @@ fn pattern_values(p: &mut Value, k: &str, distance: PatternDistance, count: &str
     if distance.uses_extent() {
         p[format!("extent{k}")] = json!(extent);
     }
+    if distance.uses_list() {
+        p[format!("spacing_list{k}")] = json!(spacing_list_values(doc, list));
+    }
+}
+
+/// A new pattern's spacing list: two gaps in the design unit.
+fn default_spacing_list(s: &Session) -> String {
+    format!("{}; {}", length_default(s, "10"), length_default(s, "20"))
+}
+
+/// The gaps of a spacing list typed in the dialog (separated by semicolons, so a decimal comma
+/// stays in its number), each with the design unit made explicit as other length fields are.
+pub(crate) fn spacing_list_values(doc: &solidcraft_engine::doc::Document, text: &str) -> Vec<String> {
+    text.split(';').map(str::trim).filter(|gap| !gap.is_empty()).map(|gap| crate::length_input::expression(doc, gap, ValueKind::Length)).collect()
+}
+
+/// A saved spacing list as the dialog shows it; a bare number reads as millimetres in a design
+/// with another unit, as other length fields do.
+fn spacing_list_text(doc: &solidcraft_engine::doc::Document, list: &[solidcraft_engine::doc::Expr]) -> String {
+    let shown = |gap: &str| if crate::length_input::unit(doc) != "mm" { crate::length_input::stored(doc, gap) } else { gap.to_string() };
+    list.iter().map(|gap| shown(gap)).collect::<Vec<_>>().join("; ")
 }
 
 /// Solid patterns use the same source-fixed slot ordering and controls as sketch patterns.
@@ -7535,7 +7574,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             pattern_objects(s, sels(d, 0), &mut p);
             ("solid.mirror", p)
         }
-        Kind::PatternRect { count, spacing, count2, spacing2, extent, extent2 } => {
+        Kind::PatternRect { count, spacing, count2, spacing2, extent, extent2, list, list2 } => {
             need(0, "objects")?;
             let kept = d.extra.get("dir1").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2]));
             let d1 = match (sels(d, 1).first(), kept) {
@@ -7547,7 +7586,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             // Each direction sends the values its distance type uses (#8523); the command keeps
             // a count or spacing it works out, so switching back shows what the copies had.
             let (distance1, distance2) = (pattern_distance(&d.extra, 0), pattern_distance(&d.extra, 1));
-            pattern_values(&mut p, "1", distance1, count, spacing, extent);
+            pattern_values(&s.doc, &mut p, "1", distance1, (count, spacing, extent, list));
             pattern_objects(s, sels(d, 0), &mut p);
             let kept2 = d.extra.get("dir2").and_then(|v| serde_json::from_value::<[f64; 3]>(v.clone()).ok()).map(|a| Vec3::new(a[0], a[1], a[2]));
             let d2 = match sels(d, 2).first() {
@@ -7556,7 +7595,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             if let Some(d2) = d2 {
                 p["dir2"] = pt(d2);
-                pattern_values(&mut p, "2", distance2, count2, spacing2, extent2);
+                pattern_values(&s.doc, &mut p, "2", distance2, (count2, spacing2, extent2, list2));
             }
             ("solid.pattern.rectangular", p)
         }
@@ -7788,13 +7827,23 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
         }
         Kind::AnglePlane { direction_only, .. } => {
-            need(0, "a plane")?;
-            let base = plane_arg(app, sels(d, 0).first())?;
+            // With no plane picked, a body edge as the axis is enough: the command measures the
+            // angle from a flat face along the edge (#20233).
+            let edge_only = sels(d, 0).is_empty() && matches!(sels(d, 1).first(), Some(Sel::Edge { .. }));
+            if !edge_only {
+                need(0, "a plane")?;
+            }
             let axis = match sels(d, 1).first() {
+                // The edge itself, so the command finds the face along it and the plane follows
+                // the edge (`axis_param` gives a straight edge as a fixed line).
+                Some(Sel::Edge { point, .. }) if edge_only => json!({"edge": pt(*point)}),
                 Some(x) => axis_param(app, x)?,
                 None => d.extra.get("axis").cloned().ok_or("pick an axis")?,
             };
-            let mut p = json!({"base": base, "axis": axis, "direction_only": direction_only});
+            let mut p = json!({"axis": axis, "direction_only": direction_only});
+            if !edge_only {
+                p["base"] = plane_arg(app, sels(d, 0).first())?;
+            }
             if *direction_only && let Some(pivot) = angle_pivot(d) {
                 p["pivot"] = construct_ref(app, pivot)?;
             }
@@ -8348,6 +8397,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     && let Some(height) = d.extra.get("coil_height").and_then(Value::as_str)
                 {
                     p.insert("height".into(), json!(height));
+                    // The height end to end (#20736); a sketch's section has only its centre line.
+                    if d.extra.get("height_measure").and_then(Value::as_str) == Some("overall") && !p.contains_key("sketch") {
+                        p.insert("height_measure".into(), json!("overall"));
+                    }
                 }
             }
             if let Some((point, normal)) = *at {
@@ -8508,7 +8561,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         let coil_profile = cmd == "solid.coil" && m.contains_key("sketch");
         for (k, v) in &d.extra {
             // The coil's size choice and height are put in the parameters by the command's own rows.
-            if k == "size_by" || k == "coil_height" {
+            if k == "size_by" || k == "coil_height" || k == "height_measure" {
                 continue;
             }
             // Saved selection mode is editor state, not a command parameter.
@@ -8962,6 +9015,11 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
         ProfileSel::Indices { indices } => indices.iter().copied().filter(|i| *i < ps.len()).collect(),
         ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
             solidcraft_engine::doc::profile_selection_indices(ss, sel).unwrap_or_default()
+        }
+        // The regions the feature builds, also those a change of the regions left to the closest
+        // match (#22548): re-saving the dialog must not drop them.
+        ProfileSel::SidedCurves { .. } => {
+            solidcraft_engine::doc::profile_selection_indices_lenient(ss, sel).map(|(found, _)| found).unwrap_or_default()
         }
         ProfileSel::Curves { loops } => loops
             .iter()
@@ -10298,6 +10356,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     extent2,
                     copy_at_end1,
                     copy_at_end2,
+                    spacing_list1,
+                    spacing_list2,
                 } => {
                     let mut d = start("solid.pattern.rectangular")?;
                     d.extra.insert("alignment".into(), json!(alignment));
@@ -10317,6 +10377,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         spacing2: spacing2.as_deref().map(str::to_string).unwrap_or_else(|| length_default(s, "20")),
                         extent: extent1.as_deref().map(str::to_string).unwrap_or_else(|| length_default(s, "100")),
                         extent2: extent2.as_deref().map(str::to_string).unwrap_or_else(|| length_default(s, "100")),
+                        list: if spacing_list1.is_empty() { default_spacing_list(s) } else { spacing_list_text(&s.doc, spacing_list1) },
+                        list2: if spacing_list2.is_empty() { default_spacing_list(s) } else { spacing_list_text(&s.doc, spacing_list2) },
                     };
                     // Directions along the origin axes show as those axes; others are kept as is.
                     for (i, (key, dir)) in [("dir1", Some(*dir1)), ("dir2", *dir2)].into_iter().enumerate() {
@@ -11010,6 +11072,26 @@ mod refused_ok_tests {
         .expect("the angled plane previews");
 
         assert!(!preview.scene.xray.is_empty(), "the preview contains the translucent construction plane");
+    }
+
+    /// #20233: with only a body edge picked as the axis, Plane at Angle makes its plane without a
+    /// reference plane (the command measures from a flat face along the edge); with neither a plane
+    /// nor an edge it still asks for a plane.
+    #[test]
+    fn an_edge_alone_builds_a_plane_at_angle() {
+        let mut session = Session::default();
+        session.execute("solid.box", &serde_json::json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        let app = SolveApp::new(session, Default::default());
+        let mut dialog = Dialog::for_command(&app, "construct.plane.at_angle").expect("the command has a dialog");
+        dialog.inputs[1].items = vec![Sel::Edge { body: "Body1".into(), index: 0, point: Vec3::new(20.0, 0.0, 20.0) }];
+        let commands = preview_commands(&app, &dialog).expect("an edge alone forms a command");
+        let (id, params) = commands.first().unwrap();
+        assert_eq!(id, "construct.plane.at_angle");
+        assert!(params.get("base").is_none(), "{params}");
+        let mut session = app.session.scratch();
+        session.execute(id, params).expect("the command makes the plane from the edge");
+        dialog.inputs[1].items = vec![Sel::Axis { name: "X".into() }];
+        assert_eq!(preview_commands(&app, &dialog).err().as_deref(), Some("select a plane first"));
     }
 
     /// A box, and a hole dialog with a position picked on its top.

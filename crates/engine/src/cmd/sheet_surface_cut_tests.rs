@@ -157,6 +157,44 @@ fn a_large_base_flange_keeps_a_small_corner_round_in_the_body_and_flat() {
     assert_eq!(dxf_entities(&mut s), (4, 1, 0));
 }
 
+/// A round in an inside corner of a cut-out through the sheet (#20612) gives the corner some of
+/// its material back: it is an arc of the cut-out in the flat, as a round on a corner of the
+/// sheet's outline is, and the sheet unfolds and folds again with it.
+#[test]
+fn a_round_in_an_inside_corner_of_a_cut_out_is_an_arc_of_the_cut_out() {
+    let want = (100.0 * 60.0 - 30.0 * 20.0 + (1.0 - PI / 4.0) * 9.0) * T;
+    // Folded, and with the sheet shown flat.
+    for flat in [false, true] {
+        let mut s = plate();
+        if flat {
+            run(&mut s, "sheet.unfold", json!({}));
+        }
+        engrave(&mut s, "Pocket", T, [30.0, 20.0], [60.0, 40.0], T, true);
+        run(&mut s, "solid.fillet", json!({"edges": [[30, 20, 1]], "radius": 3, "tangent_chain": false}));
+        assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "flat {flat}: {} vs {want}", exact_volume(&s));
+        assert_eq!(dxf_entities(&mut s), (8, 1, 0), "flat {flat}");
+        if !flat {
+            run(&mut s, "sheet.unfold", json!({}));
+        }
+        run(&mut s, "sheet.refold", json!({}));
+        assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "flat {flat}: {} vs {want}", exact_volume(&s));
+        assert_eq!(dxf_entities(&mut s), (8, 1, 0), "flat {flat}");
+    }
+}
+
+/// A round in an inside corner of a cut-out that widens through the sheet (a variable radius)
+/// gives material back with walls not square to the sheet: refused, and the sheet stays as it was.
+#[test]
+fn a_round_widening_through_the_sheet_in_an_inside_corner_of_a_cut_out_is_refused() {
+    let mut s = plate();
+    engrave(&mut s, "Pocket", T, [30.0, 20.0], [60.0, 40.0], T, true);
+    let v = exact_volume(&s);
+    let p = json!({"edges": [[30, 20, 1]], "type": "variable", "radius": 1, "radius2": 3, "start": [30, 20, 0], "tangent_chain": false});
+    let e = s.execute("solid.fillet", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.ends_with("can't be kept in the sheet yet: it reaches a bend or a seam"), "{e}");
+    assert!((exact_volume(&s) - v).abs() < 1e-9 * v, "the sheet changed");
+}
+
 /// What a sheet can't keep is refused, and the sheet stays as it was: a blind drill point and a
 /// chamfered face edge (walls not square to the sheet), a notch through a bend from the edge.
 #[test]
