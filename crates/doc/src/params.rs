@@ -172,18 +172,24 @@ impl Document {
     pub fn name_feature_inputs(&mut self, id: u64) {
         let Some(idx) = self.feature_index(id) else { return };
         let n = self.features.get(idx).map(|f| f.kind.inputs().len()).unwrap_or(0);
-        for k in 0..n {
-            let have = self.features.get(idx).and_then(|f| f.param_names.get(k)).is_some_and(|x| !x.is_empty());
-            if have {
-                continue;
-            }
-            let name = self.next_d_name();
+        let missing = self.features.get(idx).is_some_and(|f| (0..n).any(|k| f.param_names.get(k).is_none_or(|x| x.is_empty())));
+        if missing {
+            // Text parameters too, as `next_d_name` counts them: an input never takes a text parameter's name.
+            let taken = numbers_after("d", self.taken_names());
+            let mut next = 1u64;
             if let Some(f) = self.features.get_mut(idx) {
-                while f.param_names.len() <= k {
-                    f.param_names.push(String::new());
+                if f.param_names.len() < n {
+                    f.param_names.resize(n, String::new());
                 }
-                if let Some(slot) = f.param_names.get_mut(k) {
-                    *slot = name;
+                for slot in f.param_names.iter_mut().take(n) {
+                    if !slot.is_empty() {
+                        continue;
+                    }
+                    while taken.contains(&next) {
+                        next += 1;
+                    }
+                    *slot = format!("d{next}");
+                    next += 1;
                 }
             }
         }
@@ -848,21 +854,30 @@ impl Document {
     pub fn param_defs(&self) -> Vec<ParamDef> {
         let mut v: Vec<ParamDef> =
             self.params.iter().map(|p| ParamDef { name: p.name.clone(), expr: p.expr.clone(), unit: p.unit.clone() }).collect();
+        let design_unit = expr::unit_info(self.units.trim()).is_some_and(|(k, _)| k == Kind::Length).then(|| self.units.trim());
         for f in &self.features {
-            for (name, (_, e, k)) in f.param_names.iter().zip(f.kind.inputs()) {
-                if !name.is_empty() {
+            if f.param_names.is_empty() {
+                continue;
+            }
+            let mut slot = 0usize;
+            f.kind.walk_exprs(&mut |(_, e, k, role)| {
+                if role != ExprRole::Input {
+                    return;
+                }
+                if let Some(name) = f.param_names.get(slot)
+                    && !name.is_empty()
+                {
                     // A bare number stored in an input is mm (the design's units are written in
                     // when it is typed); anything else that comes out unit-less (a unit-less
                     // parameter used as a length) is in the design's units.
-                    let unit = match k {
-                        Kind::Length if !expr::is_literal(&e) && expr::unit_info(self.units.trim()).is_some_and(|(k, _)| k == Kind::Length) => {
-                            self.units.trim().to_string()
-                        }
+                    let unit = match (k, design_unit) {
+                        (Kind::Length, Some(u)) if !expr::is_literal(e) => u.to_string(),
                         _ => k.default_unit().to_string(),
                     };
-                    v.push(ParamDef { name: name.clone(), expr: e, unit });
+                    v.push(ParamDef { name: name.clone(), expr: e.to_string(), unit });
                 }
-            }
+                slot += 1;
+            });
         }
         v
     }

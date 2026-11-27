@@ -1152,7 +1152,9 @@ pub(super) fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, worl
     stable_profiles(s, &mut kind, exact_regions(p))?;
     // Blends remember where their edges sat, to find them again after upstream edits.
     let (refs, names) = match &kind {
-        FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } => {
+        FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } | FeatureKind::Dogbone { edges, body, .. }
+            if !edges.is_empty() =>
+        {
             let st = s.model.state();
             (
                 solidcraft_doc::edge_refs(&st, body, &solidcraft_doc::plain(edges)),
@@ -2312,9 +2314,9 @@ fn prim_cone(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// What [`edge_points`] found: a point on each edge, in its body's frame, and the body the
 /// feature keeps (`None`: each edge is looked up on its own).
-struct EdgePicks {
-    points: Vec<Vec3>,
-    body: Option<String>,
+pub(super) struct EdgePicks {
+    pub(super) points: Vec<Vec3>,
+    pub(super) body: Option<String>,
 }
 
 /// A body as a pick is looked up on: the model body, the name it is shown by, and the frame it
@@ -2360,12 +2362,16 @@ pub(crate) fn edge_reach(size: f64) -> f64 {
 /// whose edge is in the same place only in its own frame is not in the way, and two bodies
 /// with an edge there make it ambiguous. The polylines short-list the edges; which body a pick
 /// means is decided on the exact curves.
-fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
+pub(super) fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<EdgePicks> {
     let a = p.get("edges").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`edges` must be a list"))?;
     if a.is_empty() || a.len() > 1000 {
         return Err(bad(cmd, "select 1…1000 edges"));
     }
-    let verb = if cmd == "solid.chamfer" { "chamfer" } else { "round" };
+    let verb = match cmd {
+        "solid.chamfer" => "chamfer",
+        "solid.dogbone" => "relieve",
+        _ => "round",
+    };
     let st = s.model.state();
     // A picked point must lie on an edge (within the distance the kernel re-finds an edge from)
     // of the body the feature names, or of any body: a pick far from every edge would round
@@ -3522,6 +3528,15 @@ pub(super) fn copy_keeps_appearance_for(
                 s.doc_mut().appearances.bodies.insert(copy.clone(), look);
             } else if !same_source {
                 s.doc_mut().appearances.bodies.remove(&copy);
+            }
+        }
+        // A new copy, or one whose source changed, takes the source's edge lines; a copy rebuilt
+        // from the same body keeps what was set on it.
+        if !same_source {
+            if s.doc.edgeless_bodies.contains(&source) {
+                s.doc_mut().edgeless_bodies.insert(copy.clone());
+            } else {
+                s.doc_mut().edgeless_bodies.remove(&copy);
             }
         }
         if !same_source && s.doc.materials.contains_key(&copy) {
@@ -5497,7 +5512,7 @@ fn sketch_hole_points(s: &Session, sketch: u64) -> Vec<String> {
     ss.sketch.points.iter().enumerate().filter(|(i, p)| p.id != "origin" && !p.construction && !ends.contains(i)).map(|(_, p)| p.id.clone()).collect()
 }
 
-fn face_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
+pub(super) fn face_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
     let a = p.get("faces").and_then(Value::as_array).ok_or_else(|| bad(cmd, "`faces` must be a list of points or face names"))?;
     if a.is_empty() || a.len() > 1000 {
         return Err(bad(cmd, "select 1…1000 faces"));
@@ -5506,7 +5521,7 @@ fn face_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
 }
 
 /// The body the `faces` picks of `p` apply to: see [`super::face::faces_body`].
-fn faces_body(s: &Session, p: &Value, faces: &[Vec3]) -> super::face::FacesBody {
+pub(super) fn faces_body(s: &Session, p: &Value, faces: &[Vec3]) -> super::face::FacesBody {
     let refs = p.get("faces").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
     super::face::faces_body(s, p, refs, faces)
 }

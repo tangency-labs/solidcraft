@@ -1,1 +1,0 @@
-| assets/locales/pending/timeline-2d-banner-text.json | SolidCraft contributors | Original English UI messages and their Czech, Arabic, Hebrew, Japanese, Vietnamese and Chinese translations | MIT OR Apache-2.0 |
