@@ -6,6 +6,11 @@
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepOffsetAPI_DraftAngle.hxx>
+#include <BRepOffsetAPI_MakeThickSolid.hxx>
+#include <BRepOffset_MakeOffset.hxx>
+#include <TopTools_ListOfShape.hxx>
+#include <gp_Pln.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeRevol.hxx>
 #include <BRepPrimAPI_MakeTorus.hxx>
@@ -34,36 +39,119 @@ API uint32_t occt_make_torus_about(double x, double y, double z, double dx, doub
   });
 }
 
+namespace {
+
+// The sub-shapes of `kind` nearest each of `count` points (`points` is count * 3 doubles), each
+// once, in the order first picked.
+ShapeMap nearest(const TopoDS_Shape& shape, TopAbs_ShapeEnum kind, const void* points, size_t count) {
+  if (count == 0) throw std::invalid_argument("nothing picked");
+  ShapeMap all;
+  TopExp::MapShapes(shape, kind, all);
+  if (all.Extent() == 0) throw std::invalid_argument("the shape has nothing of the kind picked");
+  ShapeMap chosen;
+  for (size_t i = 0; i < count; ++i) {
+    const gp_Pnt p(read_unaligned<double>(points, 3 * i), read_unaligned<double>(points, 3 * i + 1),
+                   read_unaligned<double>(points, 3 * i + 2));
+    const TopoDS_Vertex at = BRepBuilderAPI_MakeVertex(p).Vertex();
+    int best = 0;
+    double least = std::numeric_limits<double>::infinity();
+    for (int e = 1; e <= all.Extent(); ++e) {
+      BRepExtrema_DistShapeShape d(at, all(e));
+      if (d.IsDone() && d.Value() < least) {
+        least = d.Value();
+        best = e;
+      }
+    }
+    if (best == 0) throw std::runtime_error("nothing is near a picked point");
+    chosen.Add(all(best));
+  }
+  return chosen;
+}
+
+}  // namespace
+
 // Constant-radius fillet of the edges nearest each point. `points` is count * 3 doubles. An edge
 // nearest two points is filleted once.
 API uint32_t occt_fillet_nearest(uint32_t h, const void* points, size_t count, double radius) {
   return guard_handle([&]() -> uint32_t {
-    if (count == 0) throw std::invalid_argument("no edges given");
     const TopoDS_Shape shape = get_shape(h);
-    ShapeMap edges;
-    TopExp::MapShapes(shape, TopAbs_EDGE, edges);
-    if (edges.Extent() == 0) throw std::invalid_argument("the shape has no edges");
+    const ShapeMap chosen = nearest(shape, TopAbs_EDGE, points, count);
     BRepFilletAPI_MakeFillet maker(shape);
-    ShapeMap chosen;
-    for (size_t i = 0; i < count; ++i) {
-      const gp_Pnt p(read_unaligned<double>(points, 3 * i), read_unaligned<double>(points, 3 * i + 1),
-                     read_unaligned<double>(points, 3 * i + 2));
-      const TopoDS_Vertex at = BRepBuilderAPI_MakeVertex(p).Vertex();
-      int best = 0;
-      double nearest = std::numeric_limits<double>::infinity();
-      for (int e = 1; e <= edges.Extent(); ++e) {
-        BRepExtrema_DistShapeShape d(at, edges(e));
-        if (d.IsDone() && d.Value() < nearest) {
-          nearest = d.Value();
-          best = e;
-        }
-      }
-      if (best == 0) throw std::runtime_error("no edge is near a picked point");
-      chosen.Add(edges(best));
-    }
     for (int e = 1; e <= chosen.Extent(); ++e) maker.Add(radius, TopoDS::Edge(chosen(e)));
     maker.Build();
     if (!maker.IsDone()) throw std::runtime_error("fillet failed");
+    return put_shape(maker.Shape());
+  });
+}
+
+// Equal-distance chamfer of the edges nearest each point (count * 3 doubles).
+API uint32_t occt_chamfer_nearest(uint32_t h, const void* points, size_t count, double distance) {
+  return guard_handle([&]() -> uint32_t {
+    const TopoDS_Shape shape = get_shape(h);
+    const ShapeMap chosen = nearest(shape, TopAbs_EDGE, points, count);
+    BRepFilletAPI_MakeChamfer maker(shape);
+    for (int e = 1; e <= chosen.Extent(); ++e) maker.Add(distance, TopoDS::Edge(chosen(e)));
+    maker.Build();
+    if (!maker.IsDone()) throw std::runtime_error("chamfer failed");
+    return put_shape(maker.Shape());
+  });
+}
+
+// The solid hollowed to walls `thickness` thick inside it, open at the faces nearest each point
+// (count * 3 doubles; none: a closed hollow is refused).
+API uint32_t occt_shell_nearest(uint32_t h, const void* points, size_t count, double thickness) {
+  return guard_handle([&]() -> uint32_t {
+    if (!(thickness > 0.0)) throw std::invalid_argument("the wall must be thicker than 0");
+    const TopoDS_Shape shape = get_shape(h);
+    const ShapeMap chosen = nearest(shape, TopAbs_FACE, points, count);
+    TopTools_ListOfShape open;
+    for (int f = 1; f <= chosen.Extent(); ++f) open.Append(chosen(f));
+    BRepOffsetAPI_MakeThickSolid maker;
+    maker.MakeThickSolidByJoin(shape, open, -thickness, 1e-7, BRepOffset_Skin, Standard_False, Standard_False, GeomAbs_Intersection);
+    maker.Build();
+    if (!maker.IsDone()) throw std::runtime_error("shell failed");
+    return put_shape(maker.Shape());
+  });
+}
+
+// The faces nearest each point (count * 3 doubles) tilted by `angle` radians about their line
+// on the neutral plane through (ox, oy, oz) square to (nx, ny, nz), leaning in going along the
+// pull (px, py, pz).
+API uint32_t occt_draft_nearest(uint32_t h, const void* points, size_t count, double ox, double oy, double oz, double nx, double ny,
+                                double nz, double px, double py, double pz, double angle) {
+  return guard_handle([&]() -> uint32_t {
+    const TopoDS_Shape shape = get_shape(h);
+    const ShapeMap chosen = nearest(shape, TopAbs_FACE, points, count);
+    BRepOffsetAPI_DraftAngle maker(shape);
+    const gp_Pln neutral(gp_Pnt(ox, oy, oz), gp_Dir(nx, ny, nz));
+    for (int f = 1; f <= chosen.Extent(); ++f) {
+      maker.Add(TopoDS::Face(chosen(f)), gp_Dir(px, py, pz), angle, neutral);
+      if (!maker.AddDone()) throw std::runtime_error("a face can't be drafted");
+    }
+    maker.Build();
+    if (!maker.IsDone()) throw std::runtime_error("draft failed");
+    return put_shape(maker.Shape());
+  });
+}
+
+// A sheet thickened into a solid by `thickness` along its normals (negative: against them; to
+// both sides, half each, when `symmetric`).
+API uint32_t occt_thicken(uint32_t h, double thickness, int32_t symmetric) {
+  return guard_handle([&]() -> uint32_t {
+    if (!(thickness != 0.0) || !std::isfinite(thickness)) throw std::invalid_argument("the thickness must not be 0");
+    TopoDS_Shape shape = get_shape(h);
+    if (symmetric != 0) {
+      thickness = std::fabs(thickness);
+      BRepOffset_MakeOffset back;
+      back.Initialize(shape, -thickness / 2.0, 1e-7, BRepOffset_Skin, Standard_False, Standard_False, GeomAbs_Intersection, Standard_False);
+      back.MakeOffsetShape();
+      if (!back.IsDone()) throw std::runtime_error("thicken failed");
+      shape = back.Shape();
+    }
+    BRepOffset_MakeOffset maker;
+    maker.Initialize(shape, thickness, 1e-7, BRepOffset_Skin, Standard_False, Standard_False, GeomAbs_Intersection, Standard_True);
+    maker.MakeOffsetShape();
+    if (!maker.IsDone()) throw std::runtime_error("thicken failed");
     return put_shape(maker.Shape());
   });
 }
