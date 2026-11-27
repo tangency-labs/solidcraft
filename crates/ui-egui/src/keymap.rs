@@ -401,8 +401,9 @@ pub(crate) fn user_key_holder(app: &SolveApp, id: &str, key: &str) -> Option<&'s
     app.keymap
         .custom
         .iter()
-        .find(|(other, keys)| other.as_str() != id && clash(other, id) && keys.iter().any(|k| k == key))
-        .and_then(|(other, _)| solidcraft_engine::find_command(other).map(|c| c.id))
+        .filter(|(other, keys)| other.as_str() != id && clash(other, id) && keys.iter().any(|k| k == key))
+        // A saved key can name a command that no longer exists; it holds nothing.
+        .find_map(|(other, _)| solidcraft_engine::find_command(other).map(|c| c.id))
 }
 
 /// The keys a command has with no keyboard profile: its registered shortcut, and for Redo also
@@ -2486,6 +2487,19 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn a_saved_key_of_a_command_that_no_longer_exists_does_not_hide_the_real_holder() {
+        let mut a = app();
+        // Sorts before Home View, and clashes with every command.
+        a.keymap.custom.insert("no.such.command".into(), vec!["F8".into()]);
+        bind(&mut a, "view.home", "F8", false).unwrap();
+        a.preferences.keyboard_profile = "nx".into();
+        assert_eq!(user_key_holder(&a, "view.normal_to", "F8"), Some("view.home"));
+        assert!(!keys(&a, "view.normal_to").contains(&"F8".to_string()));
+        let left = crate::keyboard_profiles::chosen(&a).unwrap().left_out(&a);
+        assert!(left.iter().any(|l| l.command == "view.normal_to" && l.key == "F8" && l.taken_by == Some("view.home")));
     }
 
     #[test]
