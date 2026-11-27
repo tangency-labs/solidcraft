@@ -6,6 +6,8 @@
 //!   no record of the cut is kept. Where it reaches an edge a rip cut the panel back to (the gap
 //!   that closes a corner), it runs on across the rip's lap to the rip's line: the panel's
 //!   outline runs to that line, past its material, and the rip cuts back what is left of it;
+//! - where it gives a panel material back within a cut-out, through the sheet with square walls
+//!   (a round in an inside corner of the cut-out), the panel's outline holds it;
 //! - where it stops inside the thickness on a floor parallel to the panel, the panel keeps a
 //!   recess, from its own face or the face one thickness into the material, to the floor's depth;
 //!   a later cut through a recess takes it with the material;
@@ -1781,6 +1783,21 @@ fn onto_panels(
             .transpose()
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
+        // What the feature gave back to the panel within its holes (a round in an inside corner
+        // of a cut-out) is the panel's own: its region grows by it, and its walls are read there.
+        let (region, here) = match rest.as_deref() {
+            Some(w) if plane => {
+                let others: Vec<usize> = w.iter().copied().filter(|f| !here.contains(f)).collect();
+                match given_back(sk, p, now, &qb, &slab, frame, &others, tol, sag)? {
+                    Some(grown) => {
+                        let here = within(&qb, &slab, &grown, w, tol * 100.0, sag).map_err(|e| e.to_string())?;
+                        (grown, here)
+                    }
+                    None => (panel.region.clone(), here),
+                }
+            }
+            _ => (panel.region.clone(), here),
+        };
         taken.claimed.extend(here.iter().copied());
         if !plane {
             // A roll: what went through it is its walls' shadow.
@@ -1805,7 +1822,7 @@ fn onto_panels(
         // surfaces too: a wall that leans is not square to the panel, whatever its faces show,
         // except a conical countersink opening square from either face, which the panel keeps.
         let (bands, bored) = lying(now, &qb, frame, t, &here, &panel.name, tol)?;
-        let read = |b: &Body, q: &Query| on_panel(b, q, frame, t, std::slice::from_ref(&panel.region), tol, drawn).map_err(|e| e.to_string());
+        let read = |b: &Body, q: &Query| on_panel(b, q, frame, t, std::slice::from_ref(&region), tol, drawn).map_err(|e| e.to_string());
         let (before, after) = (read(was, &qa)?, read(now, &qb)?);
         let cs_faces: BTreeSet<usize> = after.countersinks.iter().flat_map(|(_, faces)| faces.iter().copied()).collect();
         let others: Vec<usize> = here.iter().copied().filter(|f| !bored.contains(f) && !cs_faces.contains(f)).collect();
@@ -1920,6 +1937,11 @@ fn onto_panels(
             taken.shadowed = true;
             union(through.into_iter().chain(bands.iter().cloned()).collect(), tol).map_err(|e| e.to_string())?
         };
+        if region != panel.region
+            && let Some(x) = out.sheet.panels.get_mut(p)
+        {
+            x.region = region.clone();
+        }
         // These regions are the material the cut removed. The slack for comparing whole faces
         // above can exceed a real corner round on a large panel.
         if !through.is_empty() {
@@ -1939,7 +1961,7 @@ fn onto_panels(
             for g in through {
                 own.push(across_laps(sk, p, g, &rips, tol)?);
             }
-            match left(&panel.region, &own, &holders(sk, p), tol)? {
+            match left(&region, &own, &holders(sk, p), tol)? {
                 Left::Kept(kept, parted) => {
                     if let Some(x) = out.sheet.panels.get_mut(p) {
                         x.region = kept;
@@ -2010,6 +2032,54 @@ fn onto_panels(
         }
     }
     Ok((out, taken))
+}
+
+/// Panel `p` of `sk` grown by what `now` has of it within its holes, when that is what the
+/// feature's walls `others` (the ones not read in the panel's region, in its `slab`) lie on:
+/// material through the panel with square walls, joined to the panel (a round in an inside corner
+/// of a cut-out). None where the walls lie elsewhere, or what the holes hold is anything else
+/// (a recess, a piece apart from the panel): that is read, or refused, as before. A loose piece
+/// of the panel in a hole (see [`Loose`]) is its own, not the panel's.
+#[allow(clippy::too_many_arguments)]
+fn given_back(
+    sk: &SurfaceSheet,
+    p: usize,
+    now: &Body,
+    qb: &Query,
+    slab: &Slab,
+    frame: &Rigid3,
+    others: &[usize],
+    tol: f64,
+    sag: f64,
+) -> std::result::Result<Option<Region2>, String> {
+    let Some(panel) = sk.sheet.panels.get(p) else { return Ok(None) };
+    if others.is_empty() || panel.region.holes.is_empty() {
+        return Ok(None);
+    }
+    let outline = Region2 { outer: panel.region.outer.clone(), holes: Vec::new() };
+    if within(qb, slab, &outline, others, tol * 100.0, sag).map_err(|e| e.to_string())?.is_empty() {
+        return Ok(None);
+    }
+    let holes: Vec<Region2> = panel.region.holes.iter().map(|h| Region2 { outer: h.ccw(), holes: Vec::new() }).collect();
+    let loose: Vec<Region2> = sk.loose.iter().filter(|l| l.panel == p).map(|l| l.region.clone()).collect();
+    let holes = if loose.is_empty() { holes } else { planar_regions_boolean(&holes, &loose, BoolOp::Cut, tol).map_err(|e| e.to_string())? };
+    let t = sk.sheet.thickness;
+    let o = on_panel(now, qb, frame, t, &holes, tol, None).map_err(|e| e.to_string())?;
+    if o.near.is_empty() || !o.near_floors.is_empty() || !o.far_floors.is_empty() || !o.countersinks.is_empty() {
+        return Ok(None);
+    }
+    // Square walls: each face sees the material wherever the other does.
+    let slack = tol * 10.0 * perimeter(&o.near).max(1.0);
+    let off = |a: &[Region2], b: &[Region2]| planar_regions_boolean(a, b, BoolOp::Cut, tol).map(|r| area(&r)).map_err(|e| e.to_string());
+    if off(&o.near, &o.far)? > slack || off(&o.far, &o.near)? > slack {
+        return Ok(None);
+    }
+    // Not [`union`]: what was given back lies in a hole's box, which that reads as apart.
+    let grown = planar_regions_boolean(std::slice::from_ref(&panel.region), &o.near, BoolOp::Union, tol).map_err(|e| e.to_string())?;
+    Ok(match <[Region2; 1]>::try_from(grown) {
+        Ok([one]) => Some(one),
+        Err(_) => None,
+    })
 }
 
 /// Whether the panel on side `k` of a bend's `zone` (0 its `a` panel, 1 its `b` one) still holds

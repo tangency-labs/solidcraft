@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: explosion (look to be decided)</title>
+  <path d="M6 34L58 34L58 50L6 50Z" fill="#b8c3cf"/>
+  <path d="M6 34L58 34L58 50L6 50Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6 20L58 20L58 34L6 34Z" fill="#b8c3cf"/>
+  <path d="M6 20L58 20L58 34L6 34Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6 34Q14 28 22 34Q30 40 38 34Q46 28 54 34" fill="none" stroke="#236ead" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="5 4"/>
+</svg>

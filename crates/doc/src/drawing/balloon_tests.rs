@@ -43,7 +43,7 @@ fn ballooned() -> (Drawing, [u64; 2]) {
     let mut added = [0; 2];
     for ((path, at), id) in [(vec![3], [40.0, 25.0]), (vec![3, 7], [-35.5, 60.0])].into_iter().zip(&mut added) {
         *id = d.allocate_id(&mut id_source).unwrap();
-        d.balloons.add([Arc::new(Balloon { id: *id, view, edge: edge("F1:side|F2:head", path), at, parts_list: None })]);
+        d.balloons.add([Arc::new(Balloon { id: *id, view, edge: edge("F1:side|F2:head", path), at, parts_list: None, along: None })]);
     }
     d.validate().unwrap();
     (d, added)

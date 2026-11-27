@@ -551,18 +551,34 @@ impl Seg2 {
                 start,
                 sweep,
             } => {
-                // the chord's term from the arc's ends as `start` and `end` give them, plus the
-                // segment between the arc and its chord, `r^2 (θ - sin θ) / 2` (θ the sweep):
-                // the sums then hold terms of the size of the ends' coordinates squared, not the
-                // `r |c|` of the integral over `c + r u(t)`, whose terms cancel for a nearly
-                // straight arc of a large radius far from the origin
+                // Two readings of the term, each with its proved bound; the tighter is kept.
+                // About the centre: P = c + r u(t), P x P' = r^2 + r (c.x cos t + c.y sin t).
+                // Its terms are of the size `r |c|`: tight for a small arc far from the origin,
+                // but they cancel for a nearly straight arc of a large radius (its centre far
+                // off, the arc near the origin).
+                let end = start + sweep;
+                let (s0, c0, s1, c1) = (start.sin(), start.cos(), end.sin(), end.cos());
+                let terms = [r * r * sweep, r * c.x * (s1 - s0), -(r * c.y * (c1 - c0))];
+                let size = r * r * sweep.abs() + 2.0 * r * (c.x.abs() + c.y.abs());
+                // the end's angle `start + sweep` is rounded, by up to gamma(1) |start + sweep|;
+                // sin and cos move by no more than their angle, so `r (c.x s1 - c.y c1)` by up to
+                // `r (|c.x| + |c.y|)` times that (from 2^53 a sweep of 1 rounds away entirely)
+                let turn = gamma(1) * r * end.abs();
+                // libm's sin and cos within two ulps; gamma covers the products and the sums
+                let about_centre = (
+                    terms.iter().sum::<f64>() * 0.5,
+                    (gamma(16) * size + turn * (c.x.abs() + c.y.abs())) * 0.5,
+                );
+                // From the chord: the chord's term from the arc's ends as `start` and `end` give
+                // them, plus the segment between the arc and its chord, `r^2 (θ - sin θ) / 2`
+                // (θ the sweep). Its terms are of the size of the ends' coordinates squared:
+                // tight for that nearly straight arc, loose for a small arc far from the origin.
                 let (a, b) = (self.start(), self.end());
                 let (p, q) = (a.x * b.y, a.y * b.x);
                 // each end within gamma(4) (|c| + r) of the exact one in each coordinate (libm's
                 // sin and cos within two ulps, the product and the sum one each); the end's
                 // angle `start + sweep` is rounded too, by up to gamma(1) |start + sweep|
                 let (ax, ay) = (gamma(4) * (c.x.abs() + r), gamma(4) * (c.y.abs() + r));
-                let turn = gamma(1) * r * (start + sweep).abs();
                 let (bx, by) = (ax + turn, ay + turn);
                 // (A + dA) x (B + dB) - A x B, the ends' errors dA, dB
                 let ends = ax * b.y.abs()
@@ -581,13 +597,18 @@ impl Seg2 {
                     * 0.5
                     * (g.abs() + if direct { sweep.abs() + 1.0 } else { 0.0 });
                 let value = (p - q) * 0.5 + segment;
-                Some((
+                let from_chord = (
                     value,
                     gamma(3) * (p.abs() + q.abs()) * 0.5
                         + ends * 0.5
                         + seg_err
                         + gamma(2) * value.abs(),
-                ))
+                );
+                Some(if from_chord.1 < about_centre.1 {
+                    from_chord
+                } else {
+                    about_centre
+                })
             }
             Seg2::Conic { a, apex, b, w } => {
                 // Green of a conic arc = the chord's term + T f(w), T the signed area of the
