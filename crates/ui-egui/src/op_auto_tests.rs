@@ -23,8 +23,11 @@ fn rect_sketch(h: &mut Harness, p0: [f64; 2], p1: [f64; 2]) {
     h.app.run("select.clear", json!({})).unwrap();
 }
 
-/// Frames until the window's check is in.
+/// Frames until the window's check for its current inputs is in. A test sets the window's fields
+/// directly, so one frame runs first: until the window has drawn a frame with them, `pending` and
+/// `busy` still describe the inputs before (as `extrude_auto_to_object_tests` does).
 fn checked(h: &mut Harness) {
+    h.frames(1);
     let began = Instant::now();
     while (h.app.op_check.busy() || h.app.dialog.as_ref().is_some_and(|d| d.op_auto.pending)) && began.elapsed() < Duration::from_secs(60) {
         h.frames(1);
