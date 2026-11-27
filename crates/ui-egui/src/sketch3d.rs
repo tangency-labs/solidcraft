@@ -269,9 +269,9 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) -> 
     true
 }
 
-/// Is `p` the point the chain already ends at?
+/// Is `p` the point the chain already ends at? The same click gives the very same point.
 fn repeats(chain: &[Vec3], p: Vec3) -> bool {
-    chain.last().is_some_and(|last| last.dist(p) < 1e-9)
+    chain.last() == Some(&p)
 }
 
 fn report(app: &mut SolveApp, r: Result<Value, String>) {

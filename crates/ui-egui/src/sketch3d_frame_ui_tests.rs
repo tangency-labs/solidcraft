@@ -842,7 +842,7 @@ fn a_repeated_click_adds_no_point_to_a_3d_curve() {
         let status = h.app.status.as_ref().map(|s| &s.0);
         assert!(!wires.is_empty(), "{cmd}: {status:?}");
         // A line chain is a wire for each segment, so neighbours are compared within a wire.
-        assert!(wires.iter().all(|w| w.fit.windows(2).all(|w| w[0].dist(w[1]) > 1e-6)), "{cmd}: {wires:?}");
+        assert!(wires.iter().all(|w| w.fit.windows(2).all(|w| w[0] != w[1])), "{cmd}: {wires:?}");
         let end = wires.last().and_then(|w| w.fit.last());
         assert!(end.is_some_and(|p| p.dist(Vec3::new(c[0], c[1], c[2])) < 1e-5), "{cmd}: {end:?}");
     }
