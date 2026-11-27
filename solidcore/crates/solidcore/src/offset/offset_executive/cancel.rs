@@ -199,7 +199,7 @@ fn keep_orientation(b: &mut Brep, normal: Vec3) -> Result<()> {
                 .iter()
                 .skip(1)
                 .chain(members.iter().take(1))
-                .cloned()
+                .copied()
                 .collect();
             *members = rotated;
         } else if p.normal != normal {
