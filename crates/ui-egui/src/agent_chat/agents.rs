@@ -92,6 +92,48 @@ impl Protocol {
             Protocol::Anthropic => Kind::Anthropic,
         }
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn service_tiers(self, base_url: &str, responses: bool) -> &'static [ServiceTier] {
+        match self {
+            Protocol::OpenAi if responses && !is_opencode_go(base_url) => &[ServiceTier::Default, ServiceTier::Fast, ServiceTier::Ultrafast],
+            Protocol::OpenAi if base_url.trim().trim_end_matches('/').eq_ignore_ascii_case(OPENAI_API_BASE) => {
+                &[ServiceTier::Default, ServiceTier::Fast]
+            }
+            _ => &[],
+        }
+    }
+}
+
+const OPENAI_API_BASE: &str = "https://api.openai.com/v1";
+
+/// The service tier requested for an endpoint turn. Default lets the provider choose.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ServiceTier {
+    #[default]
+    Default,
+    Fast,
+    Ultrafast,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl ServiceTier {
+    pub(super) fn id(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::Fast => "fast",
+            Self::Ultrafast => "ultrafast",
+        }
+    }
+
+    pub(super) fn label(self) -> &'static str {
+        solidcraft_ui_text::tr(match self {
+            Self::Default => "ui.agent_chat_service_tier_default",
+            Self::Fast => "ui.agent_chat_service_tier_fast",
+            Self::Ultrafast => "ui.agent_chat_service_tier_ultrafast",
+        })
+    }
 }
 
 /// Whether `base_url` is an OpenCode Go endpoint: model requests to all of them
@@ -227,6 +269,10 @@ impl Entry {
             install: "",
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) fn service_tiers(&self) -> &'static [ServiceTier] {
+        self.kind.protocol().map_or(&[], |protocol| protocol.service_tiers(&self.base_url, self.openai_responses))
+    }
     /// A short line under the name: the version, the model, the command, or why it can't start.
     pub fn detail(&self) -> String {
         match self.kind {
@@ -345,7 +391,7 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "Ollama", base_url: "http://localhost:11434/v1" },
     ApiPreset { name: "LM Studio", base_url: "http://localhost:1234/v1" },
     ApiPreset { name: "OpenClaw", base_url: "http://localhost:18789/v1" },
-    ApiPreset { name: "OpenAI", base_url: "https://api.openai.com/v1" },
+    ApiPreset { name: "OpenAI", base_url: OPENAI_API_BASE },
     ApiPreset { name: "Mistral AI", base_url: "https://api.mistral.ai/v1" },
     ApiPreset { name: "Google Gemini", base_url: "https://generativelanguage.googleapis.com/v1beta/openai" },
     ApiPreset { name: "Mammouth AI", base_url: "https://api.mammouth.ai/v1" },

@@ -371,6 +371,12 @@ pub(super) fn prefetch_components(
             blocked_components.insert(f.component);
             continue;
         }
+        if same_ctx && prev_results.get(i).is_some_and(|old| old.id == f.id && !old.skipped && !old.stale && !old.unkept && old.error.is_none()) {
+            // Components whose results are already cached from the previous evaluation (such as
+            // valid components after a failing feature in a partial model cache) are skipped.
+            blocked_components.insert(f.component);
+            continue;
+        }
         if blocked_components.contains(&f.component) {
             continue;
         }

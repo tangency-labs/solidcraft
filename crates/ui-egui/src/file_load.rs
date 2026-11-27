@@ -1017,6 +1017,10 @@ fn start(app: &mut SolveApp) {
     } else {
         Session::default()
     };
+    // A view DXF without planes of its own is cut by the Section Analysis on show (#22913).
+    if request.kind == Kind::ExportDxf {
+        scratch.set_section_state(app.session.section_state());
+    }
     // A design opened or recovered here is run through the host's pre-command check too, and
     // evaluated under the user's validation mode.
     scratch.set_command_check(app.session.command_check());

@@ -1079,14 +1079,22 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
     if bodies.iter().any(|b| st.body(b).is_none()) {
         return Err(bad(cmd, "`bodies` must list existing bodies"));
     }
-    // Faces: a point on each, on the named body or the nearest one.
+    // Faces: a point on each, on the named body or the nearest one, or a face's name (#22984).
     let mut faces: Vec<(String, solidcore_record::Vec3)> = Vec::new();
     if let Some(list) = p.get("faces") {
-        let list = list.as_array().filter(|a| a.len() <= 10_000).ok_or_else(|| bad(cmd, "`faces` must list points [x, y, z]"))?;
+        let wrong = || bad(cmd, "`faces` must list points [x, y, z] or face names");
+        let list = list.as_array().filter(|a| a.len() <= 10_000).ok_or_else(wrong)?;
         for v in list {
-            let pt = crate::params::vec3(v)
-                .or_else(|| v.get("point").and_then(crate::params::vec3))
-                .ok_or_else(|| bad(cmd, "`faces` must list points [x, y, z]"))?;
+            if let Some(name) = v.as_str() {
+                crate::cmd::face_ref_form(v).map_err(|why| bad(cmd, why))?;
+                let body = str_(p, "body");
+                let hit = solidcraft_doc::naming::locate_one(&st, body, name).map_err(|why| bad(cmd, why))?;
+                let on = st.bodies.get(hit.body).ok_or_else(wrong)?.name.clone();
+                let pt = solidcraft_doc::naming::named_face_point(&st, Some(&on), name).map_err(|why| bad(cmd, why))?;
+                faces.push((on, pt));
+                continue;
+            }
+            let pt = crate::params::vec3(v).or_else(|| v.get("point").and_then(crate::params::vec3)).ok_or_else(wrong)?;
             let on = |b: &solidcraft_doc::ModelBody| solidcraft_doc::appearance::face_index_at(b, pt).is_some();
             let body = match v.get("body").and_then(Value::as_str).or_else(|| str_(p, "body")) {
                 Some(n) => st.body(n).filter(|b| on(b)).map(|b| b.name.clone()),

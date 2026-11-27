@@ -173,6 +173,19 @@ point, its x and y running along the two edges into the face. The edge, the face
 are found again by name, so a bracket set 40 mm in from a panel's corner (a planar joint with
 values `[40, 40, 0]`) stays 40 mm in from that corner when the panel changes size.
 
+To center a slider in a slot, open **Constrain** and turn on **Center between two faces**.
+Pick the two parallel walls of the slot, then pick the reference on the slider. Pick a plane
+that marks the slider's middle, or turn on **Center the part by two faces** and pick its two
+parallel faces. For a round part, pick its cylindrical face or axis instead. The rule follows
+the named faces when the design changes. A slider can still slide along the walls and turn
+about their normal; a round part's axis stays in the halfway plane.
+
+Scripts pass `"faces": [[x, y, z], [x, y, z]]` as a joint origin, with one point on each of two
+parallel faces of the same occurrence. Use `assembly.constraint.create` with `"type": "center"`
+for the plane or two-face case, or `joint.create` with `"type": "line_on_plane"` for an axis.
+For a part with a datum at its middle, **Construct → Midplane** followed by a mate to that
+datum is also an option.
+
 A joint's Z offset, angle, values and the minimum and maximum of its limits can be typed as
 expressions over the design's parameters (`"offset": "gap + 2"`, `"values": ["travel"]`,
 `"limits": [[0, "travel"]]`). The joint keeps them and works them out again whenever the design

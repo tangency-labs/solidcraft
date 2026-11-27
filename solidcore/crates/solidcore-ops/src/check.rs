@@ -133,11 +133,13 @@ impl Body {
     /// The tests [`Body::check`] runs of some of the body's entities and of no other
     /// ([`check_brep_local`]): the faces record indices `faces` name through `order` (the
     /// [`Order`] of this body's record), with their loops, and the edges `edges` names, with the
-    /// vertices at their ends; not the pointer check, the tolerance pass or the body's, regions'
-    /// and shells' own tests. For an edit of a body that passed [`Body::check`], with `faces` the
-    /// faces it changed (and those beside an edge it changed) and `edges` the edges it changed, it
-    /// is the whole check's verdict on what the edit made, in the time those entities take rather
-    /// than the body's; it proves nothing of the rest.
+    /// vertices at their ends and the tolerance pass on their uses (the gaps between each edge,
+    /// its vertices and its faces); not the pointer check, the tolerance pass on other edges or
+    /// the body's, regions' and shells' own tests. For an edit of a body that passed
+    /// [`Body::check`], with `faces` the faces it changed (and those beside an edge it changed)
+    /// and `edges` the edges it changed, it runs every test of the whole check on what the edit
+    /// made but those body-wide ones, in the time those entities take rather than the body's; it
+    /// proves nothing of the rest.
     ///
     /// # Errors
     /// [`Error::Argument`] for an index past the record's faces or edges, or naming one the body

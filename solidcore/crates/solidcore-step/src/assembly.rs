@@ -1286,6 +1286,7 @@ impl<'t> Assembly<'t> {
         // the whole body mutable, can its crossed cuts become edges and its trim pieces be
         // moved into the base period. An internal seam used on both sides is replaced rather
         // than retained as a boundary that would divide the same material into sliver faces.
+        seat_seam_trims(&mut brep);
         let (completion, skipped) = pcurve::complete_periodic_seams_noted(&brep).map_err(|e| e.to_string())?;
         if let Some(why) = skipped {
             // The body keeps its imported trims, which passed every check; say so rather than
@@ -2448,6 +2449,241 @@ pub(crate) fn reverse(uses: &mut [(u32, bool)]) {
     for u in uses {
         u.1 = !u.1;
     }
+}
+
+/// How far, as a share of the period, a seam's trim may lie off its surface's boundary line and
+/// still be put on it ([`seat_seam_trims`]); within that the edge's tolerance decides.
+const SEAM_SLIVER: f64 = 1e-3;
+
+/// The control points of `pcurve` in (u, v), a rational one's divided out (none of weight 0).
+fn pcurve_points(pcurve: &Curve2) -> Vec<[f64; 2]> {
+    match pcurve {
+        Curve2::Spline { points, .. } => points.clone(),
+        Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().filter(|h| h[2] != 0.0).map(|h| [h[0] / h[2], h[1] / h[2]]).collect(),
+    }
+}
+
+/// Coordinate `d` of the control points of `pcurve` at `which` (all, or only its first or last)
+/// set to `x`, a rational one's weights kept.
+fn set_pcurve_coordinate(pcurve: &mut Curve2, d: usize, x: f64, which: Option<bool>) {
+    fn set(points: &mut [[f64; 3]], d: usize, x: f64) {
+        for h in points {
+            let w = h[2];
+            if let Some(c) = h.get_mut(d) {
+                *c = x * w;
+            }
+        }
+    }
+    let pick = |n: usize| -> std::ops::Range<usize> {
+        match which {
+            None => 0..n,
+            Some(true) => 0..n.min(1),
+            Some(false) => n.saturating_sub(1)..n,
+        }
+    };
+    match pcurve {
+        Curve2::Spline { points, .. } => {
+            let r = pick(points.len());
+            for p in points.get_mut(r).into_iter().flatten() {
+                if let Some(c) = p.get_mut(d) {
+                    *c = x;
+                }
+            }
+        }
+        Curve2::RationalSpline { homogeneous, .. } => {
+            let r = pick(homogeneous.len());
+            if let Some(points) = homogeneous.get_mut(r) {
+                set(points, d, x);
+            }
+        }
+    }
+}
+
+/// An enclosed bound, rounded up, on how far the surface under `pcurve` moves, at any parameter,
+/// when `which` of its control points (all, or only its first or last) have their coordinate `d`
+/// set to `line`: `None` where it is not decided (a surface that is not a spline, a weight that is
+/// not positive, anything not finite) or where a moved coordinate lies further than
+/// [`SEAM_SLIVER`] of the period from `line`; the move is then not made.
+///
+/// A B-spline (a rational one with positive weights) is a convex combination of its control
+/// points, so its point at each parameter has its coordinate `d` within `o` of where it is moved
+/// to (`o` the largest move of a control point), and both lie in the hull of the coordinates of
+/// the control points that count there (all of them, or the pcurve's degree and one more at the
+/// end that moves: the other ones' B-splines are zero there) and `line`. Across, the hull is the
+/// same points' other coordinate and does not change. The surface moves by at most `o` times its
+/// partial along `d` over that strip, which [`SurfaceEval::strip_shift_bound`] encloses with its
+/// rounding. Where `d` is the surface's period the strip is cut at the base period's ends and each
+/// part taken on the range, the part past an end one period on (the surface is closed there); the
+/// parts' bounds are added, as a move crosses the boundary at most once and each part's bound is
+/// for the whole of `o`. The sum and `o` are rounded up.
+fn seating_shift(eval: &SurfaceEval, d: usize, [lo, hi]: [f64; 2], period: f64, pcurve: &Curve2, which: Option<bool>, line: f64) -> Option<f64> {
+    let (knots, count) = match pcurve {
+        Curve2::Spline { knots, points } => (knots.len(), points.len()),
+        Curve2::RationalSpline { knots, homogeneous } => (knots.len(), homogeneous.len()),
+    };
+    let degree = knots.checked_sub(count.checked_add(1)?)?;
+    if let Curve2::RationalSpline { homogeneous, .. } = pcurve
+        && !homogeneous.iter().all(|h| h[2] > 0.0 && h[2].is_finite())
+    {
+        return None;
+    }
+    let points = pcurve_points(pcurve);
+    let n = points.len();
+    let reach = degree.checked_add(1)?;
+    // The control points whose B-splines move the pcurve, and the ones moved.
+    let (window, moved) = match which {
+        None => (points.get(..)?, points.get(..)?),
+        Some(true) => (points.get(..reach.min(n))?, points.get(..1)?),
+        Some(false) => (points.get(n.saturating_sub(reach)..)?, points.get(n.checked_sub(1)?..)?),
+    };
+    let coordinate = |ps: &[[f64; 2]], e: usize| -> Option<Vec<f64>> { ps.iter().map(|p| p.get(e).copied()).collect() };
+    let (xs, ys, moved) = (coordinate(window, d)?, coordinate(window, 1 - d)?, coordinate(moved, d)?);
+    if !(line.is_finite() && period > 0.0 && period.is_finite() && lo.is_finite() && hi.is_finite() && xs.iter().chain(&ys).all(|x| x.is_finite())) {
+        return None;
+    }
+    let o = moved.iter().map(|x| (x - line).abs()).fold(0.0, f64::max);
+    if !(o <= SEAM_SLIVER * period) {
+        return None;
+    }
+    let ulp = f64::EPSILON;
+    let o = o * (1.0 + 4.0 * ulp);
+    let a = xs.iter().copied().fold(line, f64::min);
+    let b = xs.iter().copied().fold(line, f64::max);
+    let across = [ys.iter().copied().fold(f64::INFINITY, f64::min), ys.iter().copied().fold(f64::NEG_INFINITY, f64::max)];
+    // The strip's parts on the base period, each widened past the rounding of its ends.
+    let mut parts: Vec<[f64; 2]> = Vec::new();
+    if b >= lo && a <= hi {
+        parts.push([a.max(lo), b.min(hi)]);
+    }
+    if a < lo {
+        parts.push([a + period, b.min(lo) + period]);
+    }
+    if b > hi {
+        parts.push([a.max(hi) - period, b - period]);
+    }
+    let pad = 8.0 * ulp * (lo.abs() + hi.abs() + period + a.abs() + b.abs());
+    let mut shift = 0.0;
+    for [x0, x1] in parts {
+        // A part of no width holds no stretch of the move.
+        if !(x0 < x1) {
+            continue;
+        }
+        shift += eval.strip_shift_bound(d, [x0 - pad, x1 + pad], across, o).ok()?;
+    }
+    let shift = shift * (1.0 + 4.0 * ulp);
+    shift.is_finite().then_some(shift)
+}
+
+/// Seam trims put on their surface's boundary line: on a face closed in u or v, an edge its loop
+/// uses twice (a seam the file writes) whose two trims lie along the two boundary lines of the
+/// surface's base period, each within a sliver of its line and, by an enclosed bound rounded up
+/// over the whole trim ([`seating_shift`]), within the edge's tolerance of it on the surface, has
+/// each trim made the line itself (its coordinate across the line set to the line's, along it
+/// kept), and the ends of the uses on either side that meet it there put on the line too, by the
+/// same test; a trim whose bound is not decided or is past the tolerance stays as it is. An edge
+/// fitted to a little off the surface's own boundary (a wire's
+/// seam written on its exact tube, the surface fitted 0.2 % off it) is projected a sliver across
+/// the line, its trims then crossing the base period; the seam completion takes such a seam for
+/// one to delete and insert again, and that insertion, which projects the face's other edges
+/// afresh, can put a trim of an edge that passes close to another part of the surface there
+/// (a cut almost touching the next turn of a coil) and leave the loop a period short. On the line,
+/// the seam stands as the file wrote it. Returns how many trims were moved.
+fn seat_seam_trims(brep: &mut Brep) -> usize {
+    let tolerances: Vec<f64> = brep.edges.iter().map(|e| e.tolerance).collect();
+    let mut seated = 0;
+    for face in &mut brep.faces {
+        let Ok(eval) = SurfaceEval::new(face.parameters()) else { continue };
+        let dom = eval.domain();
+        let seated_before = seated;
+        for d in 0..2 {
+            let (Some(Some(period)), Some(Some((lo, hi)))) = (dom.period.get(d).copied(), dom.range.get(d).copied()) else { continue };
+            if !(period > 0.0) {
+                continue;
+            }
+            // Whether putting `which` of `pcurve`'s control points on `line` is proved, by an enclosed
+            // bound over the whole pcurve ([`seating_shift`]), to move the surface under it by no more
+            // than `tol`.
+            let near = |pcurve: &Curve2, which: Option<bool>, line: f64, tol: f64| -> bool {
+                seating_shift(&eval, d, [lo, hi], period, pcurve, which, line).is_some_and(|shift| shift <= tol)
+            };
+            for l in &mut face.loops {
+                let Loop::Edges { edges } = l else { continue };
+                // Each seam use and the boundary line its trim lies along.
+                let mut lines: Vec<(usize, u32, f64)> = Vec::new();
+                for (i, u) in edges.iter().enumerate() {
+                    if edges.iter().filter(|o| o.edge == u.edge).count() != 2 {
+                        continue;
+                    }
+                    let tol = tolerances.get(u.edge as usize).copied().unwrap_or(0.0);
+                    let points = pcurve_points(&u.pcurve);
+                    let Some(x) = points.first().and_then(|p| p.get(d)).copied() else { continue };
+                    let line = if (x - lo).abs() <= (x - hi).abs() { lo } else { hi };
+                    if near(&u.pcurve, None, line, tol) {
+                        lines.push((i, u.edge, line));
+                    }
+                }
+                // Only a seam whose two uses lie on the two lines, one each.
+                let seams: Vec<(usize, f64)> = lines
+                    .iter()
+                    .filter(|(i, e, line)| lines.iter().any(|(j, f, other)| j != i && f == e && other != line))
+                    .map(|(i, _, line)| (*i, *line))
+                    .collect();
+                let n = edges.len();
+                for (i, line) in seams {
+                    let on_line = |u: &OrientedEdge| pcurve_points(&u.pcurve).iter().all(|p| p.get(d) == Some(&line));
+                    if let Some(u) = edges.get_mut(i)
+                        && !on_line(u)
+                    {
+                        set_pcurve_coordinate(&mut u.pcurve, d, line, None);
+                        seated += 1;
+                    }
+                    // The use before ends where the seam's starts; the use after starts where it ends.
+                    for (k, at_loop_end) in [(i + n - 1, true), (i + 1, false)] {
+                        let Some(k) = k.checked_rem(n) else { continue };
+                        if seams_at(&lines, k) {
+                            continue;
+                        }
+                        let Some(u) = edges.get_mut(k) else { continue };
+                        let tol = tolerances.get(u.edge as usize).copied().unwrap_or(0.0);
+                        // The pcurve runs along its edge; the loop runs it backwards on a reversed use.
+                        let first = at_loop_end != u.forward;
+                        let points = pcurve_points(&u.pcurve);
+                        let end = if first { points.first() } else { points.last() };
+                        if let Some(p) = end
+                            && p.get(d) != Some(&line)
+                            && near(&u.pcurve, Some(first), line, tol)
+                        {
+                            set_pcurve_coordinate(&mut u.pcurve, d, line, Some(first));
+                            seated += 1;
+                        }
+                    }
+                }
+            }
+        }
+        if seated > seated_before {
+            // The face's domain is around every loop (`Face::domain`), and a trim moved to the
+            // base period's boundary can lie a sliver outside the box taken before: take it again
+            // from the moved pcurves, by the rule that made it. `face_domain` refuses only a face
+            // without finite pcurves, which the record check rejects; the box then stays as it was.
+            let pcs: Vec<Vec<Curve2>> = face
+                .loops
+                .iter()
+                .filter_map(|l| match l {
+                    Loop::Edges { edges } => Some(edges.iter().map(|u| u.pcurve.clone()).collect()),
+                    Loop::Vertex { .. } => None,
+                })
+                .collect();
+            if let Ok(domain) = face_domain(face.parameters(), &pcs) {
+                face.domain = domain;
+            }
+        }
+    }
+    seated
+}
+
+/// Whether use `k` of a loop is one of the seam uses in `lines`.
+fn seams_at(lines: &[(usize, u32, f64)], k: usize) -> bool {
+    lines.iter().any(|(i, _, _)| *i == k)
 }
 
 fn natural_periods(s: &BSurface) -> [bool; 2] {
