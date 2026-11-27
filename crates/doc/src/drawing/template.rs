@@ -29,8 +29,11 @@ use solidcraft_geom::drawing_sheet::{self, DrawingBorderProfile, Orientation, Pa
 use solidcraft_geom::revision::RevisionRecord;
 use solidcraft_geom::title_block::{self, CellKind, TitleBlock};
 
-use super::Drawing;
 use super::image::ImageFile;
+use super::note::Anchor;
+use super::sketch::Owner;
+use super::table::Kind;
+use super::{Drawing, FillPaint, SheetComponent};
 use crate::format::DRAWING;
 use crate::ids::{self, IdSource};
 use crate::{DocError, Document, Result};
@@ -108,16 +111,72 @@ pub fn check(template: &Drawing) -> Result<()> {
 /// `id_source`.
 pub fn instantiate(template: &Drawing, name: &str, taken: &BTreeSet<u64>, id_source: &mut IdSource) -> Result<Drawing> {
     check(template)?;
-    let id = id_source.next(taken)?;
-    let mut in_use = BTreeSet::from([id]);
-    let mut sheets = Vec::with_capacity(template.sheets.len());
-    for sheet in &template.sheets {
-        let sheet_id = id_source.next(&in_use)?;
-        in_use.insert(sheet_id);
-        sheets.push(Arc::new(super::Sheet { id: sheet_id, ..(**sheet).clone() }));
+    let mut in_use: BTreeSet<_> = template.object_ids().collect();
+    in_use.extend(taken);
+    // Allocate in record order, starting with the drawing and its sheets as for a built-in.
+    let ids: BTreeMap<_, _> = template.object_ids().map(|old| Ok((old, id_source.next(&in_use)?))).collect::<Result<_>>()?;
+    let fresh = |id: u64| ids.get(&id).copied().ok_or_else(|| DocError::Invalid(format!("the template has no object {}", ids::encode(id))));
+    let mut drawing = Drawing {
+        format: DRAWING.format_string(DRAWING.current()),
+        format_pending: DRAWING.pending_names(),
+        id: fresh(template.id)?,
+        name: name.into(),
+        ..template.clone()
+    };
+    for sheet in &mut drawing.sheets {
+        let sheet = Arc::make_mut(sheet);
+        sheet.id = fresh(sheet.id)?;
+        if let Some(block) = &mut sheet.title_block {
+            for cell in &mut block.cells {
+                if let CellKind::Text(text) = &mut cell.kind {
+                    text.image = text.image.map(fresh).transpose()?;
+                }
+            }
+        }
     }
-    let format = DRAWING.format_string(DRAWING.current());
-    let drawing = Drawing { format, format_pending: DRAWING.pending_names(), id, name: name.into(), sheets, ..template.clone() };
+    for image in drawing.images.iter_mut() {
+        let image = Arc::make_mut(image);
+        image.id = fresh(image.id)?;
+    }
+    for table in drawing.tables.iter_mut() {
+        let table = Arc::make_mut(table);
+        table.id = fresh(table.id)?;
+        table.sheet = fresh(table.sheet)?;
+    }
+    for note in drawing.notes.iter_mut() {
+        let note = Arc::make_mut(note);
+        note.id = fresh(note.id)?;
+        if let Anchor::Sheet(sheet) = &mut note.anchor {
+            *sheet = fresh(*sheet)?;
+        }
+    }
+    for sketch in &mut drawing.sketches {
+        let sketch = Arc::make_mut(sketch);
+        sketch.id = fresh(sketch.id)?;
+        if let Owner::Sheet(sheet) = &mut sketch.owner {
+            *sheet = fresh(*sheet)?;
+        }
+    }
+    for fill in &mut drawing.fills {
+        let fill = Arc::make_mut(fill);
+        fill.id = fresh(fill.id)?;
+        fill.sketch = fresh(fill.sketch)?;
+        if let FillPaint::Hatch { pattern, .. } = &mut fill.paint {
+            *pattern = fresh(*pattern)?;
+        }
+    }
+    for pattern in &mut drawing.patterns {
+        let pattern = Arc::make_mut(pattern);
+        pattern.id = fresh(pattern.id)?;
+    }
+    for symbol in drawing.symbols.iter_mut() {
+        let symbol = Arc::make_mut(symbol);
+        symbol.id = fresh(symbol.id)?;
+    }
+    drawing.images.put_in_order();
+    drawing.tables.put_in_order();
+    drawing.notes.put_in_order();
+    drawing.symbols.put_in_order();
     drawing.validate()?;
     Ok(drawing)
 }
@@ -131,6 +190,19 @@ pub fn instantiate(template: &Drawing, name: &str, taken: &BTreeSet<u64>, id_sou
 pub fn from_drawing(drawing: &Drawing) -> Result<Drawing> {
     let mut template = drawing.clone();
     template.sources.clear();
+    template.notes.retain(|note| matches!(note.anchor, Anchor::Sheet(_)));
+    for table in template.tables.iter_mut() {
+        let table = Arc::make_mut(table);
+        // Overrides name rows from this specific bill of materials or revision record.
+        table.table.overrides.clear();
+        if let Kind::PartsList(list) = &mut table.kind {
+            list.of = SheetComponent::UNBOUND;
+        }
+    }
+    // A sketch drawn on a view goes with that view; a fill of a sketch that went goes too.
+    template.sketches.retain(|sketch| matches!(sketch.owner, Owner::Sheet(_)));
+    let kept: BTreeSet<u64> = template.sketches.iter().map(|sketch| sketch.id).collect();
+    template.fills.retain(|fill| kept.contains(&fill.sketch));
     template.views.clear();
     template.dimensions.clear();
     template.balloons.clear();

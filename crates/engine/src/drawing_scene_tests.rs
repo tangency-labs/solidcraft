@@ -3191,7 +3191,7 @@ fn a_sheet_note_paints_over_view_annotations_whatever_order_they_join_in() {
         id_in(run(&mut s, "drawing.note.add", json!({"anchor": {"view": ids::encode(front)}, "at": [0, -20], "content": "Front"})), "note");
     let note = id_in(run(&mut s, "drawing.note.add", json!({"anchor": {"sheet": ids::encode(sheet)}, "at": [20, 40], "content": "General"})), "note");
     let d = s.drawing("test").unwrap().clone();
-    let (record, on) = (sheet_of(&d, sheet).unwrap(), views_on(&d, sheet).unwrap());
+    let (record, on) = (sheet_of(&d, sheet).unwrap(), views_on(&s, &d, sheet).unwrap());
     let shown = crate::drawing_view::shown(&s);
     let lettering = Lettering::of(&s, &d);
     let (text, _) = block_text(record, &lettering, &[], true).unwrap();
@@ -3977,7 +3977,7 @@ fn closed_drawing_tiles_release_live_requests_and_parked_exports_use_their_own_l
     s.open_drawing = Some(first);
     let copied = s.scratch_as_shown();
     let view = s.doc.drawing(first).unwrap().views[0].id;
-    assert_eq!(copied.drawing_scenes.views.get(&view).unwrap().view, s.doc.drawing(first).unwrap().resolve_view(view).unwrap());
+    assert_eq!(copied.drawing_scenes.views.get(&view).unwrap().view.view, s.doc.drawing(first).unwrap().resolve_view(view).unwrap());
     assert!(copied.drawing_scenes.parked.is_empty());
     extract(&mut s, first_sheet).unwrap();
     // A changed view supplies a fresh request without changing its owning tile.
@@ -5192,7 +5192,10 @@ fn automatic_marks_distinguish_placed_occurrences_and_exclusions() {
         s.drawing("test").unwrap().views.iter().find(|v| matches!(v.kind, ViewKind::Projected { parent, .. } if parent == front)).unwrap().id;
     let resolved = s.drawing("test").unwrap().resolve_view(projected).unwrap();
     let shown = crate::drawing_view::shown(&s).unwrap();
-    assert_eq!(shown.of_view(&resolved).bodies.iter().map(|body| body.path.clone()).collect::<Vec<_>>(), vec![vec![first]]);
+    assert_eq!(
+        shown.of_view(&crate::drawing_view::DrawnView::own(resolved)).bodies.iter().map(|body| body.path.clone()).collect::<Vec<_>>(),
+        vec![vec![first]]
+    );
     assert!(s.execute("drawing.auto_center_mark.exclude", &json!({"view": view, "edge": {"point": [166,0,10], "path": [second]}})).is_err());
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(automatic(&settled(&mut s, sheet).scene).len(), 2);
@@ -6344,7 +6347,7 @@ fn a_views_sketch_is_drawn_through_its_view_and_goes_with_it_without_solving_aga
         let shown = settled(s, sheet);
         assert_eq!(bytes(&shown.scene), bytes(&built(s, sheet).scene));
         let d = s.drawing("test").unwrap().clone();
-        let centre = views_on(&d, sheet).unwrap().into_iter().find(|(view, ..)| *view == front).unwrap().2;
+        let centre = views_on(s, &d, sheet).unwrap().into_iter().find(|(view, ..)| *view == front).unwrap().2;
         let origin = s.drawing_scenes.views[&front].drawn.frame.unwrap().paper_map().apply(Vec2::ZERO) + centre;
         let (path, _, width) = stroke_path(&cached_sketch_group(&shown.scene, id).items[0]);
         let order: Vec<_> = shown.scene.groups.iter().map(|group| (group.object, group.kind)).collect();
@@ -8409,4 +8412,99 @@ fn a_view_leaves_out_a_hidden_body_of_a_part() {
     let (lo, hi, length) = across(&one.scene);
     assert!((lo - 150.0).abs() < 1e-6 && (hi - 250.0).abs() < 1e-6 && (length - 240.0).abs() < 1e-6, "{lo} {hi} {length}");
     assert_eq!(bytes(&one.scene), bytes(&built(&s, sheet).scene));
+}
+
+/// A view that shows only what the design shows (#22107) follows the browser's eyes through the
+/// provider's cache, as the window reads it: hiding the door leaves that one view of four out of date
+/// (the other three draw every body), and once drawn it is the carcass alone; showing the door again
+/// puts it out of date again and brings the door back. A change that moves the revision alone (here
+/// as a selection does) keeps the set the view was drawn from, so the view stays up to date.
+#[test]
+fn only_a_view_that_shows_the_design_follows_an_eye_toggle() {
+    let mut s = carcass_and_door();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    let base = |s: &mut Session, at: [f64; 2], shows: &str| {
+        let made = run(s, "drawing.view.base", json!({"sheet": ids::encode(sheet), "scale": "1:2", "position_mm": at, "shows": shows}));
+        ids::decode(made["view"].as_str().unwrap()).unwrap()
+    };
+    let design = base(&mut s, [100.0, 200.0], "design");
+    let others = [base(&mut s, [300.0, 200.0], "all"), base(&mut s, [100.0, 80.0], "all"), base(&mut s, [300.0, 80.0], "all")];
+    let across = |scene: &Scene, view: u64| {
+        let group = scene.groups.iter().find(|g| g.object == view && g.kind == ObjectKind::View).unwrap();
+        let (lo, hi, _) = reach(group);
+        hi.x - lo.x
+    };
+    let both = settled(&mut s, sheet);
+    assert!(both.stale.is_empty());
+    assert!((across(&both.scene, design) - 110.0).abs() < 1e-6, "220 mm at 1:2");
+
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": false}));
+    assert_eq!(extract(&mut s, sheet).unwrap().stale, vec![design], "only the view that follows the design");
+    let one = settled(&mut s, sheet);
+    assert!((across(&one.scene, design) - 50.0).abs() < 1e-6, "the carcass alone");
+    for other in others {
+        assert!((across(&one.scene, other) - 110.0).abs() < 1e-6, "every body");
+    }
+    assert_eq!(bytes(&one.scene), bytes(&built(&s, sheet).scene));
+
+    let drawn_from = s.design_hidden();
+    s.refresh_display();
+    assert!(Arc::ptr_eq(&drawn_from, &s.design_hidden()), "the same set, the same Arc");
+    assert!(extract(&mut s, sheet).unwrap().stale.is_empty(), "a revision alone redraws nothing");
+
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": true}));
+    assert_eq!(extract(&mut s, sheet).unwrap().stale, vec![design]);
+    let again = settled(&mut s, sheet);
+    assert!((across(&again.scene, design) - 110.0).abs() < 1e-6, "the door is back");
+}
+
+/// A drawing whose views all draw every body never works out what the design hides (#22107), however
+/// much the browser hides: following the eyes costs a sheet of "all" views nothing.
+#[test]
+fn a_sheet_of_views_of_every_body_never_reads_the_eyes() {
+    let mut s = carcass_and_door();
+    run(&mut s, "drawing.create", json!({}));
+    let sheet = s.drawing("test").unwrap().sheets[0].id;
+    run(&mut s, "drawing.view.base", json!({"sheet": ids::encode(sheet), "scale": "1:1", "position_mm": [200, 150]}));
+    run(&mut s, "browser.visibility", json!({"items": ["Door"], "visible": false}));
+    crate::occurrences::DESIGN_HIDDEN_BUILDS.with(|n| n.set(0));
+    let scene = settled(&mut s, sheet);
+    built(&s, sheet);
+    assert_eq!(crate::occurrences::DESIGN_HIDDEN_BUILDS.with(std::cell::Cell::get), 0);
+    let group = scene.scene.groups.iter().find(|g| g.kind == ObjectKind::View).unwrap();
+    let (lo, hi, _) = reach(group);
+    assert!((hi.x - lo.x - 220.0).abs() < 1e-6, "the eye counts for nothing");
+}
+
+/// What the design hides for a drawing follows the eyes of bodies, placements and folders, and never
+/// an open sketch (#22107): a body a sketch being edited rolls off stays drawn, so a drawing doesn't
+/// change while someone sketches. A hidden placement hides the bodies under it, by their path.
+#[test]
+fn what_the_design_hides_leaves_an_open_sketch_alone() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Kept"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new", "body_name": "Gone"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "30 mm", "name": "Edited"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [5, 5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.remove", json!({"bodies": ["Gone"]}));
+    run(&mut s, "browser.visibility", json!({"items": ["Kept"], "visible": false}));
+    let before = s.design_hidden();
+    assert!(before.hides(&[], "Kept") && !before.hides(&[], "Gone"));
+    run(&mut s, "timeline.roll_to", json!({"feature": "Edited"}));
+    run(&mut s, "sketch.edit", json!({"sketch": "Edited"}));
+    assert!(s.body_removed_later("Gone") && !s.body_visible("Gone"), "the viewport leaves it out");
+    let sketching = s.design_hidden();
+    assert!(sketching.hides(&[], "Kept") && !sketching.hides(&[], "Gone"), "a drawing doesn't");
+    assert_eq!(*sketching, *before);
+
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let placed = s.doc.occurrences[0].id;
+    run(&mut s, "browser.visibility", json!({"paths": [[placed]], "visible": false}));
+    let hidden = s.design_hidden();
+    assert!(hidden.hides(&[placed], "Plate") && !hidden.hides(&[], "Plate"), "by its placement's path");
 }

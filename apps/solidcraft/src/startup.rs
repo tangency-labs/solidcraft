@@ -623,10 +623,12 @@ impl BackendGuard {
     }
 
     /// `backends` are about to be started: say so on disk first, flushed. It takes the place of
-    /// an attempt named only while the instance started ([`Self::attempt_while_the_instance_starts`]),
-    /// which the adapter's choice then leaves alone.
+    /// this file's attempt named only while the instance started
+    /// ([`Self::attempt_while_the_instance_starts`]), which the adapter's choice then leaves alone.
     pub fn attempt(&self, backends: eframe::wgpu::Backends) {
-        if let Ok(mut instance) = INSTANCE_ATTEMPT.lock() {
+        if let Ok(mut instance) = INSTANCE_ATTEMPT.lock()
+            && instance.as_ref().is_some_and(|named| named.marker == self.marker)
+        {
             instance.take();
         }
         let text = attempt_text(backends, &self.version);
@@ -1232,8 +1234,101 @@ pub fn no_window_message(error: &str, settings: Option<&Path>) -> String {
     )
 }
 
+/// `solidcraft --open-url LINK`, as the system starts SolidCraft for a `solidcraft://` link
+/// (Windows' `--open-url "%1"`, the Linux handler entry's `--open-url %u`). `None`: no
+/// `--open-url`, an ordinary launch. `Some(link)`: the argument right after the first
+/// `--open-url` (`None` when there is none, or it isn't text). Every other argument is ignored,
+/// so a link holding quotes or spaces, which a shell or the Windows command line may split into
+/// more arguments, can never add an option (`--control`, `--theme-file`) or a file.
+pub fn open_url_argument(args: impl IntoIterator<Item = std::ffi::OsString>) -> Option<Option<String>> {
+    let mut args = args.into_iter();
+    args.by_ref().find(|a| a == "--open-url")?;
+    Some(args.next().and_then(|link| link.into_string().ok()))
+}
+
+/// The path a `file:` URL names. Only `file:///path` and `file://localhost/path`; `None` for
+/// anything else (another host, a bad escape, a NUL), which is dropped rather than taken as a
+/// path. On unix the escapes decode to bytes, so a name that isn't UTF-8 comes through as it is.
+pub fn file_url_path(url: &str) -> Option<PathBuf> {
+    let rest = url.strip_prefix("file://")?;
+    let path = rest.strip_prefix("localhost").unwrap_or(rest);
+    if !path.starts_with('/') || path.contains(['?', '#']) {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(path.len());
+    let mut it = path.bytes();
+    while let Some(b) = it.next() {
+        if b == b'%' {
+            let hex = [it.next()?, it.next()?];
+            bytes.push(u8::from_str_radix(std::str::from_utf8(&hex).ok()?, 16).ok()?);
+        } else {
+            bytes.push(b);
+        }
+    }
+    if bytes.contains(&0) {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        Some(PathBuf::from(std::ffi::OsStr::from_bytes(&bytes)))
+    }
+    #[cfg(not(unix))]
+    {
+        let path = String::from_utf8(bytes).ok()?;
+        // Windows: `file:///C:/designs/part.sc` names `C:/designs/part.sc`.
+        let drive = path.as_bytes().get(1..3).is_some_and(|d| d.first().is_some_and(u8::is_ascii_alphabetic) && d.get(1) == Some(&b':'));
+        Some(PathBuf::from(if cfg!(windows) && drive { path.get(1..).unwrap_or(&path) } else { path.as_str() }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn file_urls_name_local_paths() {
+        use super::file_url_path;
+        use std::path::Path;
+        assert_eq!(file_url_path("file:///home/me/My%20part.sc").as_deref(), Some(Path::new("/home/me/My part.sc")));
+        assert_eq!(file_url_path("file://localhost/tmp/a.step").as_deref(), Some(Path::new("/tmp/a.step")));
+        assert_eq!(file_url_path("file:///tmp/%C3%A9.sc").as_deref(), Some(Path::new("/tmp/é.sc")));
+        assert_eq!(file_url_path("file://server/share/a.sc"), None);
+        assert_eq!(file_url_path("file:///tmp/a%2"), None);
+        assert_eq!(file_url_path("file:///tmp/a%00.sc"), None);
+        assert_eq!(file_url_path("file:///tmp/a.sc?x"), None);
+        assert_eq!(file_url_path("https://example.com/a.sc"), None);
+        #[cfg(unix)]
+        {
+            // Latin-1 `é`: not UTF-8, still the file's name.
+            use std::os::unix::ffi::OsStrExt;
+            let path = file_url_path("file:///tmp/caf%E9.sc").unwrap();
+            assert_eq!(path.as_os_str().as_bytes(), b"/tmp/caf\xe9.sc");
+        }
+        #[cfg(windows)]
+        assert_eq!(file_url_path("file:///C:/designs/a.sc").as_deref(), Some(Path::new("C:/designs/a.sc")));
+    }
+
+    #[test]
+    fn an_open_url_launch_takes_the_link_and_nothing_else() {
+        use super::open_url_argument;
+        let args = |list: &[&str]| list.iter().map(std::ffi::OsString::from).collect::<Vec<_>>();
+        // A link holding a quote, spaces and an option arrives as one argument and stays one.
+        let crafted = r#"solidcraft://workshop/plugin/maker/gears" --control 1234 --theme-file /tmp/x.json "#;
+        assert_eq!(open_url_argument(args(&["--open-url", crafted])), Some(Some(crafted.to_string())));
+        // Split into more arguments (the Windows command line ends `"%1"` at the quote): only the
+        // first is the link, and the rest is never read as options or files.
+        let split =
+            args(&["--open-url", "solidcraft://workshop/plugin/maker/gears", "--control", "1234", "--theme-file", "/tmp/x.json", "/etc/passwd"]);
+        assert_eq!(open_url_argument(split), Some(Some("solidcraft://workshop/plugin/maker/gears".to_string())));
+        // Options before it are ignored too, and a second `--open-url` is only text.
+        let before = args(&["--control", "1234", "--open-url", "solidcraft://workshop/model/a/b", "--open-url", "solidcraft://workshop/model/c/d"]);
+        assert_eq!(open_url_argument(before), Some(Some("solidcraft://workshop/model/a/b".to_string())));
+        assert_eq!(open_url_argument(args(&["--open-url"])), Some(None));
+        // Not an open-url launch: the ordinary parser reads the arguments.
+        assert_eq!(open_url_argument(args(&["--control", "1234", "part.sc"])), None);
+        // The crafted text is refused by the link parser, so nothing is looked up.
+        assert!(solidcraft_ui_egui::workshop::link::parse(crafted).is_none());
+    }
+
     use super::*;
 
     fn cards() -> Vec<AdapterChoice> {

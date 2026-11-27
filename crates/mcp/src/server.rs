@@ -10,7 +10,7 @@ use std::sync::{Mutex, mpsc};
 
 use serde_json::{Value, json};
 use solidcraft_engine::io::vfs::{self, PathScope};
-use solidcraft_mcp_server::{Contents, Info, ProgressReporter, Tools};
+use solidcraft_mcp_server::{Contents, Info, ProgressReporter, Reference, Tools};
 #[cfg(not(target_arch = "wasm32"))]
 use solidcraft_mcp_server::{Incoming, cancelled_notification, read_message, response};
 
@@ -227,6 +227,28 @@ impl Agent {
     }
 }
 
+/// `--structured`: the result's reply as data, `structuredContent: {"result", "notes"?}`, for a
+/// program calling the tools. `result` is the first text block read as JSON (the text itself when
+/// it is not JSON: a message); `notes` are the text blocks after it (a notice, the selection). It
+/// is built from what every tool already returns, so a new tool is covered without a change here.
+/// Keys a result already carries (`panel_error`, `plugin_error`) stay.
+pub(crate) fn structure(result: &mut Value) {
+    let texts: Vec<&str> =
+        result["content"].as_array().into_iter().flatten().filter(|c| c["type"] == "text").filter_map(|c| c["text"].as_str()).collect();
+    let Some((first, rest)) = texts.split_first() else { return };
+    let reply = serde_json::from_str::<Value>(first).unwrap_or_else(|_| Value::String((*first).to_string()));
+    let notes: Vec<Value> = rest.iter().map(|t| Value::String((*t).to_string())).collect();
+    let mut data = match result.get_mut("structuredContent").map(Value::take) {
+        Some(Value::Object(m)) => m,
+        _ => serde_json::Map::new(),
+    };
+    data.insert("result".into(), reply);
+    if !notes.is_empty() {
+        data.insert("notes".into(), Value::Array(notes));
+    }
+    result["structuredContent"] = Value::Object(data);
+}
+
 impl Tools for Agent {
     fn instructions(&self) -> String {
         format!("{INSTRUCTIONS} Backend: {}.", self.backend.describe())
@@ -271,7 +293,8 @@ impl Tools for Agent {
         // So does the folder of each design file the call opened or saved: the call reached it,
         // so it was one of the agent's folders already. Only paths given in full: a running app
         // resolves a relative one against its own working folder.
-        if result["isError"] != true {
+        let dry_run_batch = name == "batch" && args.get("dry_run").and_then(Value::as_bool) == Some(true);
+        if result["isError"] != true && !dry_run_batch {
             for file in design_files(name, args).iter().filter(|f| std::path::Path::new(f).is_absolute()) {
                 self.scope = self.scope.take().map(|s| s.with_design_file(file));
             }
@@ -288,6 +311,9 @@ impl Tools for Agent {
         {
             content.push(json!({"type": "text", "text": block}));
         }
+        if self.options.structured {
+            structure(&mut result);
+        }
         result
     }
 
@@ -298,13 +324,28 @@ impl Tools for Agent {
         ]
     }
 
+    fn resource_templates(&self) -> Vec<Value> {
+        crate::resources::templates()
+    }
+
     fn read_resource(&mut self, uri: &str) -> Option<Result<Contents, String>> {
-        let read = match uri {
-            "solidcraft://design" => self.backend.call("document.inspect", json!({"measure": true})),
-            "solidcraft://commands" => self.backend.call("engine.commands", json!({})),
-            _ => return None,
-        };
-        Some(read.map(|v| Contents::json(&v)))
+        match uri {
+            "solidcraft://design" => Some(self.backend.call("document.inspect", json!({"measure": true})).map(|v| Contents::json(&v))),
+            "solidcraft://commands" => Some(self.backend.call("engine.commands", json!({})).map(|v| Contents::json(&v))),
+            _ => crate::resources::read_template(self.backend.as_mut(), uri),
+        }
+    }
+
+    fn prompts(&self) -> Vec<Value> {
+        crate::prompts::definitions()
+    }
+
+    fn get_prompt(&mut self, name: &str, args: &Value) -> Result<Value, String> {
+        crate::prompts::get(name, args)
+    }
+
+    fn complete(&mut self, reference: Reference<'_>, argument: &str, value: &str) -> Vec<String> {
+        crate::resources::complete(self.backend.as_mut(), reference, argument, value)
     }
 }
 

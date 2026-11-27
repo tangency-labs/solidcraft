@@ -420,15 +420,16 @@ fn plate_cut_counts(n: u32) -> (u64, u64) {
     (marked, solves)
 }
 
-/// The cut deletes the two discs each cylinder cuts out of the plate's top and bottom,
-/// and each deletion asks whether the disc's one vertex is still joined to the shell.
-/// It is, through the first face at that vertex: one face marked for each face deleted,
-/// 2 N for N holes. Walking on over the rest of the shell marked
+/// The cut deletes the two discs each cylinder cuts out of the plate's top and bottom
+/// (plus the cylinders' end caps) in one batch per operand, then reconciles each
+/// surviving shell once: 6 surviving plate faces plus N surviving cylinder walls = N + 6
+/// faces marked (31 for 25 holes, 106 for 100 holes). Per-face BFS early-exit marked
+/// 2 N (50 and 200), and walking on over the rest of the shell marked
 /// (7/2) N^2 + (23/2) N faces: 2475 for 25 holes and 36150 for 100.
 #[test]
 fn plate_cut_marks_one_face_for_each_face_it_deletes() {
     let marked = (plate_cut_counts(5).0, plate_cut_counts(10).0);
-    assert_eq!(marked, (2 * 25, 2 * 100));
+    assert_eq!(marked, (25 + 6, 100 + 6));
 }
 
 /// Each cylinder meets the plate's top and bottom in a circle: a closed proto edge that

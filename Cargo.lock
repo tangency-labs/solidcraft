@@ -4367,6 +4367,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "occt-capi"
+version = "0.1.0"
+
+[[package]]
 name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6436,6 +6440,7 @@ version = "0.51.0"
 dependencies = [
  "cadmpeg-ir",
  "log",
+ "occt-capi",
  "proptest",
  "rayon",
  "serde",
@@ -6616,6 +6621,8 @@ version = "0.51.0"
 dependencies = [
  "arboard",
  "craft-plugin",
+ "ed25519-dalek",
+ "eframe",
  "egui",
  "egui-wgpu",
  "flate2",
