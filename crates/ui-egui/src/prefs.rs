@@ -3348,9 +3348,15 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         Some(_) => return Err("`forget_stand_up` must be true".into()),
     };
     // Importing or following a theme turns it on, which the organization's policy has set.
-    let follows = rest.get("theme_follow").and_then(serde_json::Value::as_str).is_some_and(|path| !path.trim().is_empty());
-    if app.policy.locks("theme") && (rest.contains_key("theme_import") || follows) {
+    // The saved path written back unchanged is not a change: it starts nothing and is kept.
+    let theme_locked = app.policy.locks("theme");
+    let saved_follow = rest.get("theme_follow").and_then(serde_json::Value::as_str) == Some(app.preferences.theme_follow.as_str());
+    let follows = rest.get("theme_follow").and_then(serde_json::Value::as_str).is_some_and(|path| !path.trim().is_empty()) && !saved_follow;
+    if theme_locked && (rest.contains_key("theme_import") || follows) {
         return Err("`theme` is set by your organization's policy and cannot be changed here".into());
+    }
+    if theme_locked && saved_follow && !app.policy.locks("theme_follow") {
+        rest.remove("theme_follow");
     }
     let mut staged = app.preferences.clone();
     let mut follow = app.prefs_window.follow.clone();
@@ -3399,7 +3405,8 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
             follow.launch = None;
             let _ = follow.poll(&staged.theme_follow, f64::NEG_INFINITY, true);
         }
-        None if rest.contains_key("theme") && !follow_locked => {
+        // Picking a theme stops following one; the organization's theme, which no pick changes, does not.
+        None if rest.contains_key("theme") && !follow_locked && !theme_locked => {
             staged.theme_follow.clear();
             follow.launch = None;
             let _ = follow.poll("", f64::NEG_INFINITY, true);

@@ -1315,6 +1315,14 @@ mod tests {
         }
         assert!(crate::prefs::import_theme(&mut h.app, &json!({"format": crate::theme_files::FORMAT, "name": "ACME", "base": "light"})).is_err());
         assert!(h.app.preferences.custom_themes.is_empty(), "nothing was imported");
+        // The person's followed file, written back unchanged, is kept for when the policy goes.
+        h.app.preferences.theme_follow = "acme.json".into();
+        for echo in [json!({"theme": "light"}), json!({"theme": "light", "theme_follow": "acme.json"})] {
+            let out = h.call("ui.prefs", echo);
+            assert_eq!(out["ok"], json!(true), "{out}");
+            assert_eq!(h.app.preferences.theme_follow, "acme.json", "{out}");
+        }
+        assert_eq!(h.call("ui.prefs", json!({"theme_follow": "other.json"}))["ok"], json!(false));
         assert_eq!(h.app.preferences.theme, "nord");
         // Preferences shows the theme greyed out with who set it.
         let _language = solidcraft_ui_text::scope("en");
