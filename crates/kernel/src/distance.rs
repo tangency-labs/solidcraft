@@ -518,6 +518,21 @@ pub fn point_closest(p: Vec3, b: &Body, to: Members) -> Result<Option<BodyDistan
     Ok(Some(BodyDistance { distance: c.distance, from: Vec3::from(c.from), to: Vec3::from(c.to), exact: true }))
 }
 
+/// The closest points of a bounded line segment and the selected faces or edges of a body.
+/// `from` lies on the segment, including its ends. A mesh body gives `None`.
+///
+/// # Errors
+///
+/// [`KernelError::Failed`] when the kernel cannot take the body or measure the segment.
+pub fn segment_closest(start: Vec3, end: Vec3, body: &Body, to: Members) -> Result<Option<BodyDistance>> {
+    let Some(form) = exact_body(body)? else { return Ok(None) };
+    let (ops, order) = &*form;
+    let (faces, edges) = members(to);
+    let c = ops.closest_to_segment(order, faces, edges, start.into(), end.into()).map_err(|e| failed(&e))?;
+    let c = c.ok_or_else(|| KernelError::Failed("measure: the kernel found no closest points".into()))?;
+    Ok(Some(BodyDistance { distance: c.distance, from: Vec3::from(c.from), to: Vec3::from(c.to), exact: true }))
+}
+
 /// Certified non-boolean test for whether two solid B-rep bodies share no interior volume
 /// (pure contact or disjoint, never penetrating).
 ///

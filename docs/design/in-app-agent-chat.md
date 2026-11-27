@@ -135,7 +135,12 @@ requests, for a backend that runs tools in process). Two backends exist:
   for the connection only and is refused over plain HTTP to another computer. The two protocols
   differ only in their wire shape: OpenAI sends the system note as a message, function tools
   and one `tool` message per result; Anthropic sends it as `system`, `input_schema` tools and
-  all of a round's `tool_result` blocks in one user message.
+  all of a round's `tool_result` blocks in one user message. Validated MCP tool-result images
+  (from `screenshot` and `compare_picture`) are passed through to the model in each protocol's
+  image format (native `image` blocks inside Anthropic `tool_result`, `input_image` inside
+  OpenAI Responses `function_call_output`, `inlineData` alongside Gemini `functionResponse`,
+  and an immediately following `user` message with `image_url` data URIs for OpenAI Chat
+  Completions), with older views pruned to `MAX_HISTORY_IMAGES`.
 
 Another kind of backend slots in the same way without reshaping the panel.
 
@@ -288,4 +293,4 @@ returns the whole state, for tests and screenshots.
 | Discovery | Read the ACP registry; keychain-aware login check on macOS |
 | Packaging | Make sure every desktop package ships `solidcraft-cli` next to `solidcraft` (Flatpak, AppImage, macOS bundle, Windows zip), or serve MCP from the app binary itself |
 | Windows | Job objects instead of `taskkill /T` once there's a safe API for them |
-| API backend | Streaming answers; images in tool results |
+| API backend | Streaming answers |
