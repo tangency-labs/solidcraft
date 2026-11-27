@@ -1,0 +1,66 @@
+{
+  "ar": {
+    "Unfold": "الفرد",
+    "Bend Deduction": "خصم الثني",
+    "Bend Allowance": "سماحية الثني",
+    "Bend Deduction at 90°": "خصم الثني عند 90°",
+    "Bend Allowance at 90°": "سماحية الثني عند 90°",
+    "sheet.library.export_needs_design": "تُركت، لأن قيمة 90° فيها تحتاج إلى معاملات تصميم لحسابها: {names}."
+  },
+  "de": {
+    "Unfold": "Abwicklung",
+    "Bend Deduction": "Biegeabzug",
+    "Bend Allowance": "Biegezugabe",
+    "Bend Deduction at 90°": "Biegeabzug bei 90°",
+    "Bend Allowance at 90°": "Biegezugabe bei 90°",
+    "sheet.library.export_needs_design": "Ausgelassen, da ihr 90°-Wert nur mit den Parametern eines Entwurfs berechnet werden kann: {names}."
+  },
+  "en": {
+    "Unfold": "Unfold",
+    "Bend Deduction": "Bend Deduction",
+    "Bend Allowance": "Bend Allowance",
+    "Bend Deduction at 90°": "Bend Deduction at 90°",
+    "Bend Allowance at 90°": "Bend Allowance at 90°",
+    "sheet.library.export_needs_design": "Left out, as their 90° value needs a design's parameters to work out: {names}."
+  },
+  "he": {
+    "Unfold": "פריסה",
+    "Bend Deduction": "ניכוי כיפוף",
+    "Bend Allowance": "תוספת כיפוף",
+    "Bend Deduction at 90°": "ניכוי כיפוף ב־90°",
+    "Bend Allowance at 90°": "תוספת כיפוף ב־90°",
+    "sheet.library.export_needs_design": "הושמטו, כי ערך ה־90° שלהם דורש פרמטרים של תכנון כדי לחשבו: {names}."
+  },
+  "ja": {
+    "Unfold": "展開方法",
+    "Bend Deduction": "曲げ控除",
+    "Bend Allowance": "曲げ代",
+    "Bend Deduction at 90°": "90° の曲げ控除",
+    "Bend Allowance at 90°": "90° の曲げ代",
+    "sheet.library.export_needs_design": "90° の値の計算に設計のパラメータが必要なため書き出さなかったもの: {names}。"
+  },
+  "ko": {
+    "Unfold": "전개 방식",
+    "Bend Deduction": "벤딩 공제",
+    "Bend Allowance": "벤딩 여유",
+    "Bend Deduction at 90°": "90° 벤딩 공제",
+    "Bend Allowance at 90°": "90° 벤딩 여유",
+    "sheet.library.export_needs_design": "90° 값을 계산하려면 설계의 매개변수가 필요하여 제외됨: {names}."
+  },
+  "vi": {
+    "Unfold": "Trải phẳng",
+    "Bend Deduction": "Lượng khấu trừ uốn",
+    "Bend Allowance": "Lượng bù uốn",
+    "Bend Deduction at 90°": "Lượng khấu trừ uốn ở 90°",
+    "Bend Allowance at 90°": "Lượng bù uốn ở 90°",
+    "sheet.library.export_needs_design": "Bỏ qua, vì giá trị 90° cần tham số của thiết kế mới tính được: {names}."
+  },
+  "zh": {
+    "Unfold": "展开方式",
+    "Bend Deduction": "折弯扣除",
+    "Bend Allowance": "折弯补偿",
+    "Bend Deduction at 90°": "90° 折弯扣除",
+    "Bend Allowance at 90°": "90° 折弯补偿",
+    "sheet.library.export_needs_design": "未导出（其 90° 值要用到设计中的参数才能算出）：{names}。"
+  }
+}

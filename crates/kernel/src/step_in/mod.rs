@@ -1146,6 +1146,10 @@ impl Reader {
     /// Convert the next batch of planned solids into bodies; false once every one is done.
     /// `single`: one solid at a time (the caller wants short steps and has no worker threads).
     fn convert_next(&mut self, single: bool) -> bool {
+        self.convert_window(single, None)
+    }
+
+    fn convert_window(&mut self, single: bool, queue: Option<&mut parallel::Queue>) -> bool {
         if self.converted >= self.plan.len() {
             return false;
         }
@@ -1191,7 +1195,16 @@ impl Reader {
             jobs.push(parallel::Job { source, placement, check_mesh: !self.unmeshed_checked.contains(&item) });
         }
         // Reading and orienting new parts is shared out between the workers.
-        let mut prepared: Vec<Option<_>> = parallel::bodies(&ex, &jobs, self.workers).into_iter().map(Some).collect();
+        let mut prepared: Vec<Option<_>> = match queue {
+            Some(queue) => jobs
+                .iter()
+                .map(|job| {
+                    queue.fill(self);
+                    Some(queue.take(&ex, job))
+                })
+                .collect(),
+            None => parallel::bodies(&ex, &jobs, self.workers).into_iter().map(Some).collect(),
+        };
         for (i, item, placement, job) in sources {
             let made = match job {
                 Some(j) => match prepared.get_mut(j).and_then(Option::take) {
@@ -1736,9 +1749,7 @@ pub fn step_import(text: &str) -> Result<StepImport> {
 
 fn step_import_with_workers(text: &str, workers: usize) -> Result<StepImport> {
     let _span = solidcraft_profile::span("import", "step.import");
-    let mut reading = StepReading::with_workers(text, workers)?;
-    while reading.step() {}
-    reading.finish()
+    StepReading::with_workers(text, workers)?.finish()
 }
 
 /// A STEP file being read a piece at a time, for a caller that can't wait for the whole read
@@ -1877,6 +1888,23 @@ impl StepReading {
     /// The import, once [`Self::step`] has converted every solid, with SMLib's check of its parts
     /// started (under `over` too, when given): [`ImportReport::checks`].
     fn finish_checking(mut self, over: Option<solidcraft_smlib::stop::Stop>) -> Result<StepImport> {
+        // Explicit frame-by-frame reads keep their original step size. A desktop caller
+        // finishing the whole read can start independent parts across the next window boundary.
+        #[cfg(not(target_arch = "wasm32"))]
+        if !self.single && self.rd.plan.len() - self.rd.converted > MAX_WINDOW {
+            let parent = solidcraft_smlib::stop::current();
+            parallel::with_queue(&self.rd.ex.clone(), self.rd.workers, self.rd.converted, |mut queue| {
+                loop {
+                    if parent.as_ref().is_some_and(|token| token.is_stopped()) {
+                        self.rd.cancelled = true;
+                        break;
+                    }
+                    if !solidcraft_profile::scope("import", "step.convert_batch", || self.rd.convert_window(false, queue.as_deref_mut())) {
+                        break;
+                    }
+                }
+            });
+        }
         while self.step() {}
         let _span = solidcraft_profile::span("import", "step.finish");
         let rd = &mut self.rd;

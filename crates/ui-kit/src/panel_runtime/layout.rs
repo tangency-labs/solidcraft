@@ -286,6 +286,10 @@ pub(super) const DOCKED_GRAB_WIDTH: f32 = 8.0;
 /// A floating card's handles reach this far out of its border, and inward as far
 /// as the content inset on that axis, so content and scrollbars keep their presses.
 pub const FLOATING_GRAB_REACH: f32 = 4.0;
+/// A floating card's corner handles reach this far along both edges from the
+/// corner, so a diagonal resize does not take pixel aim. Header controls and the
+/// edges' own handles keep the rest.
+pub const FLOATING_CORNER_GRAB: f32 = 14.0;
 
 impl Default for HostMetrics {
     fn default() -> Self {
@@ -1724,15 +1728,17 @@ fn floating_resize_handles(outer: LogicalRect, header: LogicalRect, reach: f32) 
     let along_w = (outer.size.width - 2.0 * in_x).max(0.0);
     let along_h = (b - in_y - side_top).max(0.0);
     let (wide, high) = (reach + in_x, reach + in_y);
+    let corner = FLOATING_CORNER_GRAB.min(outer.size.width / 3.0).min(outer.size.height / 3.0).max(wide.max(high));
+    let span = reach + corner;
     [
         (HostResizeEdge::Left, rect(x - reach, side_top, wide, along_h)),
         (HostResizeEdge::Right, rect(r - in_x, side_top, wide, along_h)),
         (HostResizeEdge::Top, rect(x + in_x, y - reach, along_w, 2.0 * reach)),
         (HostResizeEdge::Bottom, rect(x + in_x, b - in_y, along_w, high)),
-        (HostResizeEdge::TopLeft, rect(x - reach, y - reach, wide, 2.0 * reach)),
-        (HostResizeEdge::TopRight, rect(r - in_x, y - reach, wide, 2.0 * reach)),
-        (HostResizeEdge::BottomLeft, rect(x - reach, b - in_y, wide, high)),
-        (HostResizeEdge::BottomRight, rect(r - in_x, b - in_y, wide, high)),
+        (HostResizeEdge::TopLeft, rect(x - reach, y - reach, span, span)),
+        (HostResizeEdge::TopRight, rect(r - corner, y - reach, span, span)),
+        (HostResizeEdge::BottomLeft, rect(x - reach, b - corner, span, span)),
+        (HostResizeEdge::BottomRight, rect(r - corner, b - corner, span, span)),
     ]
 }
 

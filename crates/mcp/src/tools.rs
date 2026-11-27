@@ -1,7 +1,8 @@
 //! MCP tool definitions and dispatch. Every tool is a thin wrapper over engine commands
 //! (`engine.execute`) and the inspection / rendering control methods.
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use serde_json::{Map, Value, json};
 use solidcraft_engine::io::vfs;
@@ -329,6 +330,7 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
                     "bodies": {"type": "array", "items": {"type": "string"}, "description": "Body names to outline (default: the visible bodies)"},
                     "crop_px": {"type": "array", "items": {"type": "number"}, "description": "[x, y, w, h] in pixels"},
                     "crop_fraction": {"type": "array", "items": {"type": "number"}, "description": "[x, y, w, h] as fractions 0..1 of the picture"},
+                    "part_fills_crop": {"type": "boolean", "description": "true: the crop box is the part itself and no background search runs, for a crop that tightly frames it (default false)"},
                     "fit": {"type": "string", "enum": ["width", "height", "both"], "description": "The dimension the one uniform scale comes from (default width); both scales by width and reports aspect_mismatch"},
                     "rows": {"type": "integer", "description": "The model outline's height in pixels (default 240)"},
                 }),
@@ -559,12 +561,13 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
             "skill_reference",
             "Skill reference",
             "Read a document of SolidCraft's bundled agent skills (solidcraft-modeling, solidcraft-mechanisms, \
-             solidcraft-editing, solidcraft-checking, solidcraft-sheetmetal) from the copy built into SolidCraft. `file` defaults to reference.md; \
-             each skill also has SKILL.md. Unknown skills or files are refused with the available ones.",
+             solidcraft-editing, solidcraft-checking, solidcraft-reporting, solidcraft-sheetmetal) from the copy built into SolidCraft. \
+             `file` defaults to reference.md, or SKILL.md for skills without reference.md; each skill also has SKILL.md. \
+             Unknown skills or files are refused with the available ones.",
             object(
                 json!({
                     "skill": string("Skill name, such as solidcraft-modeling"),
-                    "file": {"type": "string", "description": "Document of that skill", "default": "reference.md"},
+                    "file": {"type": "string", "description": "Document of that skill (defaults to reference.md, or SKILL.md when the skill has none)", "default": "reference.md"},
                 }),
                 &["skill"],
             ),
@@ -694,12 +697,41 @@ fn text_result(v: &Value, is_error: bool, opts: Options) -> Value {
 const AGENT_PREFERENCES: &[&str] =
     &["default_units", "theme", "language", "up_axis", "ui_scale", "zoom_to_cursor", "smooth_wheel_zoom", "show_frame_rate"];
 
+/// Per-call MCP execution context: an optional progress reporter (`_meta.progressToken`) and an
+/// out-of-band cancellation flag (`notifications/cancelled`).
+#[derive(Clone, Default)]
+pub struct CallContext {
+    pub progress: Option<solidcraft_mcp_server::ProgressReporter>,
+    pub cancel: Option<Arc<AtomicBool>>,
+}
+
+impl CallContext {
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.as_ref().is_some_and(|flag| flag.load(Ordering::SeqCst))
+    }
+
+    pub fn report_progress(&self, progress: f64, total: Option<f64>, message: Option<&str>) {
+        if let Some(reporter) = &self.progress {
+            reporter.report(progress, total, message);
+        }
+    }
+}
+
 pub fn call_tool(b: &mut dyn Backend, name: &str, args: &Value) -> Value {
     call_tool_with(b, name, args, Options::default())
 }
 
 /// [`call_tool`] with these [`Options`].
 pub fn call_tool_with(b: &mut dyn Backend, name: &str, args: &Value, opts: Options) -> Value {
+    call_tool_with_context(b, name, args, opts, &CallContext::default())
+}
+
+/// [`call_tool_with`] carrying an MCP [`CallContext`] (progress reporting and out-of-band
+/// cancellation).
+pub fn call_tool_with_context(b: &mut dyn Backend, name: &str, args: &Value, opts: Options, ctx: &CallContext) -> Value {
+    if ctx.is_cancelled() {
+        return text_result(&Value::String(format!("cancelled: `{name}` was cancelled by client")), true, opts);
+    }
     let empty = Map::new();
     let a = args.as_object().unwrap_or(&empty);
     let r = match name {
@@ -709,7 +741,7 @@ pub fn call_tool_with(b: &mut dyn Backend, name: &str, args: &Value, opts: Optio
         },
         "screenshot" => return screenshot(b, a),
         "compare_picture" => return compare_picture(b, a, opts),
-        "batch" => return batch(b, a, opts),
+        "batch" => return batch(b, a, opts, ctx),
         "check_parameters" => return check_parameters(b, a, opts),
         "execute" => return execute(b, a, opts),
         "inspect_design" if opts.compact => inspect_design_compact(b, a),
@@ -1366,6 +1398,9 @@ fn pending(b: &mut dyn Backend) -> Result<Value, String> {
         return Ok(json!({"pending": null, "note": "nothing is running"}));
     }
     let name = what.as_str().unwrap_or("the request").to_string();
+    if p.get("cancelled").and_then(Value::as_bool) == Some(true) {
+        return Err(format!("cancelled: {name} was cancelled by client"));
+    }
     if p.get("lost").and_then(Value::as_bool) == Some(true) {
         return Err(format!(
             "the connection to the app was lost while {name} was running, and its result with it: inspect the design (inspect_design) \
@@ -1445,9 +1480,10 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
             None => Ok(("inspect.measure".into(), measure_params(a), measure_summary_wanted(a).then_some(Narrow::MeasureSummary))),
         },
         // A batch step gets the numbers; the overlay picture is the `compare_picture` tool's.
-        "compare_picture" => {
-            mapped("inspect.compare_picture", pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]))
-        }
+        "compare_picture" => mapped(
+            "inspect.compare_picture",
+            pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "part_fills_crop", "fit", "rows"]),
+        ),
         "inspect_design" => {
             let keys: &[&str] = if a.get("bodies").is_some_and(Value::is_array) { &["timeline"] } else { &["timeline", "bodies"] };
             mapped("document.inspect", inspect_params(a, a.get("measure").and_then(Value::as_bool).unwrap_or(true), keys))
@@ -1931,7 +1967,7 @@ fn finish_dry_run(b: &mut dyn Backend, checkpoint_id: u64, mut reply: Value, ste
 /// design as it was before the batch. With `dry_run: true`, all steps run and then the design
 /// and undo/redo history are unconditionally rolled back. A batch that went through is checked
 /// against its `expect` (before rollback in `dry_run: true` mode).
-fn batch(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options) -> Value {
+fn batch(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options, ctx: &CallContext) -> Value {
     let expect = match Expect::parse(a) {
         Ok(e) => e,
         Err(e) => return text_result(&Value::String(e), true, opts),
@@ -1946,7 +1982,7 @@ fn batch(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options) -> Value {
     // Discovery can change the backend while the headless session is still empty. Use one
     // session for preflight, every step, and the final expectation or checkpoint restore.
     let b = if let Some(active) = b.batch_backend() { active } else { b };
-    let outcome = batch_run(b, a, dry_run, expect.as_ref());
+    let outcome = batch_run(b, a, dry_run, expect.as_ref(), ctx);
     if outcome.is_error {
         return text_result(&outcome.reply, true, opts);
     }
@@ -1997,7 +2033,7 @@ fn preflight_refusal(refusal: solidcraft_engine::batch_preflight::Refusal, count
 }
 
 /// The batch itself: its reply and whether it failed.
-fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>, dry_run: bool, expect: Option<&Expect>) -> BatchOutcome {
+fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>, dry_run: bool, expect: Option<&Expect>, ctx: &CallContext) -> BatchOutcome {
     let from_file = match script_file(a) {
         Ok(f) => f,
         Err(e) => return BatchOutcome::err(json!(e)),
@@ -2154,10 +2190,18 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>, dry_run: bool, expect:
                         failed.insert("error".into(), Value::String(error));
                     }
                 }
-                let (reply, failed) = batch_reply(&r, steps.len(), rollback, verbose, &narrow);
+                let (reply, is_err) = batch_reply(&r, steps.len(), rollback, verbose, &narrow);
+                if let Some(reporter) = &ctx.progress
+                    && reporter.count() == 0
+                {
+                    let done = reply["completed"].as_u64().unwrap_or(steps.len() as u64) as usize;
+                    let total = steps.len();
+                    let message = if is_err { format!("batch stopped at step {done}/{total}") } else { format!("completed {done}/{total} steps") };
+                    reporter.report(done as f64, Some(total as f64), Some(&message));
+                }
                 return match dry_checkpoint {
-                    Some(id) => finish_dry_run(b, id, reply, failed, expect),
-                    None => BatchOutcome { reply, is_error: failed, expectation: None },
+                    Some(id) => finish_dry_run(b, id, reply, is_err, expect),
+                    None => BatchOutcome { reply, is_error: is_err, expectation: None },
                 };
             }
             // A newer app may know about tab-switching commands this server cannot preflight.
@@ -2177,8 +2221,8 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>, dry_run: bool, expect:
             Err(e) if e.starts_with(crate::backend::NOT_RUNNING) || e.starts_with(STILL_RUNNING) || e.contains(crate::backend::REFUSED_UNRUN) => {
                 return BatchOutcome::err(Value::String(e));
             }
-            // The app said it ran nothing (the user declined the call): not "it may have run".
-            Err(e) if e.starts_with(solidcraft_control::NOT_RUN) => {
+            // The app said it ran nothing (the user declined the call), or the call was cancelled.
+            Err(e) if e.starts_with(solidcraft_control::NOT_RUN) || e.starts_with("cancelled:") || e.starts_with("stopped:") => {
                 forget_checkpoint(b, dry_checkpoint);
                 return BatchOutcome::err(Value::String(e));
             }
@@ -2228,12 +2272,17 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>, dry_run: bool, expect:
     let clock = timing::Clock::start();
     // The kernel's share can only be measured where the commands run: in this process.
     let profile = profile && b.in_process();
+    let total = steps.len() as f64;
     // With `coalesce_parameters`, each run of plain parameter edits as one edit (#5822); a run
     // whose combined edit is refused goes step by step.
     for run in solidcraft_engine::batch_params::plan(steps, coalesce) {
         let singles = match run {
             solidcraft_engine::batch_params::BatchRun::Step(i) => vec![i],
             solidcraft_engine::batch_params::BatchRun::Params { steps: indices, changes } => {
+                if ctx.is_cancelled() {
+                    let at = indices.first().copied().unwrap_or(results.len());
+                    return cancel_batch(b, start, dry_checkpoint, rollback, timed, rows, clock.ms(), steps, results, at);
+                }
                 let (r, took) = timing::time(profile, || exec(b, "parameters.change", solidcraft_engine::batch_params::combined_params(&changes)));
                 match r {
                     Ok(v) => {
@@ -2242,6 +2291,8 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>, dry_run: bool, expect:
                         }
                         let rows = solidcraft_engine::batch_params::step_results(steps, &indices, &v);
                         results.extend(rows.into_iter().map(|v| if verbose { v } else { compact(v) }));
+                        let done = results.len();
+                        ctx.report_progress(done as f64, Some(total), Some(&format!("step {done}/{}: parameters.change", steps.len())));
                         continue;
                     }
                     Err(_) => indices,
@@ -2249,6 +2300,9 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>, dry_run: bool, expect:
             }
         };
         for i in singles {
+            if ctx.is_cancelled() {
+                return cancel_batch(b, start, dry_checkpoint, rollback, timed, rows, clock.ms(), steps, results, i);
+            }
             let Some(step) = steps.get(i) else { continue };
             let command = step.get("command").or_else(|| step.get("id")).and_then(Value::as_str);
             let (r, took) = timing::time(profile, || match command {
@@ -2261,7 +2315,10 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>, dry_run: bool, expect:
             match r {
                 Ok(v) => {
                     let v = narrow(i, v);
-                    results.push(if verbose { v } else { compact(v) })
+                    results.push(if verbose { v } else { compact(v) });
+                    let done = i + 1;
+                    let label = command.unwrap_or("step");
+                    ctx.report_progress(done as f64, Some(total), Some(&format!("step {done}/{}: {label}", steps.len())));
                 }
                 Err(e) => {
                     // A step still running in the app was not cancelled: the rollback first waits for
@@ -2318,6 +2375,54 @@ fn batch_run(b: &mut dyn Backend, a: &Map<String, Value>, dry_run: bool, expect:
     }
     start.finish(b);
     BatchOutcome::ok(reply)
+}
+
+/// Abort a per-step `batch` cleanly when MCP `notifications/cancelled` arrives mid-batch,
+/// rolling back completed steps when `rollback` is enabled.
+#[allow(clippy::too_many_arguments)]
+fn cancel_batch(
+    b: &mut dyn Backend,
+    start: Undo,
+    dry_checkpoint: Option<u64>,
+    rollback: bool,
+    timed: bool,
+    rows: Vec<Value>,
+    total_ms: f64,
+    steps: &[Value],
+    results: Vec<Value>,
+    at: usize,
+) -> BatchOutcome {
+    let completed = results.len();
+    let command = steps.get(at).and_then(|s| s.get("command").or_else(|| s.get("id"))).and_then(Value::as_str);
+    if let Some(id) = dry_checkpoint {
+        let reply = json!({
+            "ok": false,
+            "cancelled": true,
+            "completed": completed,
+            "failed": {"index": at, "command": command, "error": "cancelled: batch was cancelled by client"},
+            "rolled_back": false,
+            "undone": 0,
+            "applied": (0..completed).collect::<Vec<_>>(),
+            "not_run": (at..steps.len()).collect::<Vec<_>>(),
+            "results": results,
+        });
+        return finish_dry_run(b, id, with_timings(reply, timed, rows, total_ms), true, None);
+    }
+    let (went_back, undone) = start.rollback(b, completed);
+    let rolled_back = rollback && went_back;
+    let applied: Vec<usize> = if rolled_back { Vec::new() } else { (0..completed).collect() };
+    let reply = json!({
+        "ok": false,
+        "cancelled": true,
+        "completed": completed,
+        "failed": {"index": at, "command": command, "error": "cancelled: batch was cancelled by client"},
+        "rolled_back": rolled_back,
+        "undone": undone,
+        "applied": applied,
+        "not_run": (at..steps.len()).collect::<Vec<_>>(),
+        "results": results,
+    });
+    BatchOutcome::err(with_timings(reply, timed, rows, total_ms))
 }
 
 /// `reply` with `timings` and `total_ms` when they were asked for.
@@ -2903,7 +3008,7 @@ fn compare_picture(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options) -
     let n = SHOT.fetch_add(1, Ordering::Relaxed);
     let dir = crate::scratch_dir().unwrap_or_else(vfs::temp_dir);
     let path = dir.join(format!("compare-{n}.png")).to_string_lossy().to_string();
-    let mut params = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "fit", "rows"]);
+    let mut params = pick(a, &["reference", "view", "camera", "bodies", "crop_px", "crop_fraction", "part_fills_crop", "fit", "rows"]);
     params["overlay"] = json!(path);
     let ran = exec(b, "inspect.compare_picture", params);
     let png = vfs::read(&path, MAX_IMAGE_BYTES);
