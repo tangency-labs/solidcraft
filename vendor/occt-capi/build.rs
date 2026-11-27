@@ -10,12 +10,7 @@ use std::process::{Command, Stdio};
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=capi");
-    for var in [
-        "OCCT_CAPI_LIB_DIR",
-        "OCCT_SOURCE_DIR",
-        "OCCT_BUILD_JOBS",
-        "CMAKE_TOOLCHAIN_FILE",
-    ] {
+    for var in ["OCCT_CAPI_LIB_DIR", "OCCT_SOURCE_DIR", "OCCT_BUILD_JOBS", "CMAKE_TOOLCHAIN_FILE"] {
         println!("cargo:rerun-if-env-changed={var}");
     }
 
@@ -34,18 +29,12 @@ fn main() {
 
 fn build_module() -> PathBuf {
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("cargo sets OUT_DIR")).join("occt_capi");
-    let script =
-        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"))
-            .join("capi")
-            .join("build.cmake");
+    let script = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR")).join("capi").join("build.cmake");
 
     let mut cmake = Command::new("cmake");
     cmake.arg(format!("-DOUT_DIR={}", out.display()));
     if let Some(dir) = env::var_os("OCCT_SOURCE_DIR") {
-        cmake.arg(format!(
-            "-DOCCT_SOURCE_DIR={}",
-            PathBuf::from(dir).display()
-        ));
+        cmake.arg(format!("-DOCCT_SOURCE_DIR={}", PathBuf::from(dir).display()));
     }
     if let Some(file) = env::var_os("CMAKE_TOOLCHAIN_FILE") {
         cmake.arg(format!("-DTOOLCHAIN={}", PathBuf::from(file).display()));
@@ -88,8 +77,8 @@ fn stage_prebuilt(dir: PathBuf) -> PathBuf {
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_owned();
         if name.contains("occt_capi") {
             let dest = out.join(&name);
-            let stale = std::fs::metadata(&dest).and_then(|d| Ok((d.len(), d.modified()?)))
-                .ok() != std::fs::metadata(&path).and_then(|s| Ok((s.len(), s.modified()?))).ok();
+            let stale = std::fs::metadata(&dest).and_then(|d| Ok((d.len(), d.modified()?))).ok()
+                != std::fs::metadata(&path).and_then(|s| Ok((s.len(), s.modified()?))).ok();
             if stale {
                 std::fs::copy(&path, &dest).expect("copy prebuilt occt_capi");
                 if let Ok(t) = std::fs::metadata(&path).and_then(|m| m.modified()) {
