@@ -64,3 +64,31 @@ fn transparent_pixels_come_back_as_zeros() {
         assert_eq!(bitmap.bgra[bitmap.bgra.len() - 4..], [0, 0, 0, 0], "{tag} at {cx}: the bottom-right pixel");
     }
 }
+
+#[test]
+fn every_size_explorer_asks_for_fits_without_enlarging() {
+    let v2 = support::design(V2, 512, 384);
+    let v1 = support::design(V1, 240, 150);
+    for (cx, want_v2, want_v1) in [
+        (1, (1, 1), (1, 1)),
+        (16, (16, 12), (16, 10)),
+        (32, (32, 24), (32, 20)),
+        (96, (96, 72), (96, 60)),
+        (256, (256, 192), (240, 150)),
+        (384, (384, 288), (240, 150)),
+        (512, (512, 384), (240, 150)),
+        (1024, (512, 384), (240, 150)),
+        (u32::MAX, (512, 384), (240, 150)),
+    ] {
+        assert_eq!(size(&v2, cx), Some(want_v2), "format 2 at {cx}");
+        assert_eq!(size(&v1, cx), Some(want_v1), "format 1 at {cx}");
+    }
+}
+
+#[test]
+fn every_truncation_of_a_format_1_design_gives_none() {
+    let good = support::design(V1, 240, 150);
+    for n in 0..good.len() {
+        assert_eq!(std::panic::catch_unwind(|| size(&good[..n], 96)).unwrap(), None, "cut at {n}");
+    }
+}

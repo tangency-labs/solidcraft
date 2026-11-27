@@ -137,3 +137,114 @@ fn a_fully_transparent_pixel_is_all_zeros() {
     let faint = encode(2, 2, ColorType::Rgba, BitDepth::Eight, &[255, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], None);
     assert_eq!(thumbnail_from_png(&faint, 2, 2, 1).unwrap().bgra, vec![0, 0, 0, 0]);
 }
+
+/// The CRC-32 a PNG chunk carries (ISO 3309, as the PNG specification gives it).
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = !0_u32;
+    for &byte in bytes {
+        crc ^= u32::from(byte);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+        }
+    }
+    !crc
+}
+
+/// A PNG written by hand: 8-bit RGBA, `width` x `height`, `interlace` 0 or 1 (Adam7), with
+/// `scanlines` (filter bytes included) stored uncompressed in one zlib stream.
+fn raw_png(width: u32, height: u32, interlace: u8, scanlines: &[u8]) -> Vec<u8> {
+    let chunk = |out: &mut Vec<u8>, kind: &[u8], data: &[u8]| {
+        out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        let start = out.len();
+        out.extend_from_slice(kind);
+        out.extend_from_slice(data);
+        let crc = crc32(&out[start..]);
+        out.extend_from_slice(&crc.to_be_bytes());
+    };
+    let mut ihdr = width.to_be_bytes().to_vec();
+    ihdr.extend_from_slice(&height.to_be_bytes());
+    ihdr.extend_from_slice(&[8, 6, 0, 0, interlace]);
+    let (mut a, mut b) = (1_u32, 0_u32);
+    for &byte in scanlines {
+        a = (a + u32::from(byte)) % 65_521;
+        b = (b + a) % 65_521;
+    }
+    let mut zlib = vec![0x78, 0x01, 0x01];
+    zlib.extend_from_slice(&(scanlines.len() as u16).to_le_bytes());
+    zlib.extend_from_slice(&(!(scanlines.len() as u16)).to_le_bytes());
+    zlib.extend_from_slice(scanlines);
+    zlib.extend_from_slice(&((b << 16) | a).to_be_bytes());
+    let mut out = b"\x89PNG\r\n\x1a\n".to_vec();
+    chunk(&mut out, b"IHDR", &ihdr);
+    chunk(&mut out, b"IDAT", &zlib);
+    chunk(&mut out, b"IEND", &[]);
+    out
+}
+
+#[test]
+fn an_interlaced_picture_decodes_as_a_plain_one() {
+    // 3 x 3 pixels, each its own colour: pixel (x, y) is [x * 80, y * 80, 7, 255].
+    let p = |x: u8, y: u8| [x * 80, y * 80, 7, 255];
+    let plain: Vec<u8> = (0..3).flat_map(|y| std::iter::once(0).chain((0..3).flat_map(move |x| p(x, y)))).collect();
+    let rgba: Vec<u8> = (0..3).flat_map(|y| (0..3).flat_map(move |x| p(x, y))).collect();
+    assert_eq!(decode(&raw_png(3, 3, 0, &plain), 3, 3), Some(rgba.clone()));
+    // Adam7 on 3 x 3: pass 1 (0,0); pass 4 (2,0); pass 5 (0,2) (2,2); pass 6 (1,0), then (1,2);
+    // pass 7 the middle row. Passes 2 and 3 are empty and have no scanlines.
+    let mut adam7 = Vec::new();
+    for row in [vec![p(0, 0)], vec![p(2, 0)], vec![p(0, 2), p(2, 2)], vec![p(1, 0)], vec![p(1, 2)], vec![p(0, 1), p(1, 1), p(2, 1)]] {
+        adam7.push(0);
+        adam7.extend(row.into_iter().flatten());
+    }
+    assert_eq!(decode(&raw_png(3, 3, 1, &adam7), 3, 3), Some(rgba));
+}
+
+#[test]
+fn picture_data_that_is_short_or_long_is_never_misread() {
+    let row = [0, 10, 20, 30, 255];
+    assert_eq!(decode(&raw_png(1, 1, 0, &row), 1, 1), Some(vec![10, 20, 30, 255]));
+    assert_eq!(decode(&raw_png(1, 2, 0, &row), 1, 2), None, "one row of two");
+    assert_eq!(decode(&raw_png(1, 1, 0, &row[..3]), 1, 1), None, "half a row");
+    let long = [row, [0, 99, 99, 99, 99]].concat();
+    assert_eq!(decode(&raw_png(1, 1, 0, &long), 1, 1), Some(vec![10, 20, 30, 255]), "data past the last row is ignored");
+}
+
+#[test]
+fn low_and_high_bit_depths_decode_to_eight_bits() {
+    assert_eq!(decode(&encode(2, 1, ColorType::Grayscale, BitDepth::One, &[0b1000_0000], None), 2, 1), Some(vec![255, 255, 255, 255, 0, 0, 0, 255]));
+    assert_eq!(
+        decode(&encode(2, 1, ColorType::Grayscale, BitDepth::Two, &[0b1101_0000], None), 2, 1),
+        Some(vec![255, 255, 255, 255, 85, 85, 85, 255])
+    );
+    assert_eq!(decode(&encode(2, 1, ColorType::Grayscale, BitDepth::Four, &[0x0F], None), 2, 1), Some(vec![0, 0, 0, 255, 255, 255, 255, 255]));
+    let palette: (&[u8], &[u8]) = (&[10, 20, 30, 40, 50, 60], &[128]);
+    assert_eq!(decode(&encode(2, 1, ColorType::Indexed, BitDepth::Four, &[0x01], Some(palette)), 2, 1), Some(vec![10, 20, 30, 128, 40, 50, 60, 255]));
+    assert_eq!(
+        decode(&encode(1, 1, ColorType::GrayscaleAlpha, BitDepth::Sixteen, &[0x12, 0x34, 0x56, 0x78], None), 1, 1),
+        Some(vec![0x12, 0x12, 0x12, 0x56])
+    );
+    assert_eq!(decode(&encode(1, 1, ColorType::Rgb, BitDepth::Sixteen, &[1, 2, 3, 4, 5, 6], None), 1, 1), Some(vec![1, 3, 5, 255]));
+}
+
+#[test]
+fn an_animated_picture_gives_its_first_frame() {
+    let mut out = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut out, 1, 1);
+        encoder.set_color(ColorType::Rgba);
+        encoder.set_depth(BitDepth::Eight);
+        encoder.set_animated(2, 0).unwrap();
+        let mut writer = encoder.write_header().unwrap();
+        writer.write_image_data(&[1, 2, 3, 255]).unwrap();
+        writer.write_image_data(&[9, 9, 9, 255]).unwrap();
+    }
+    assert_eq!(thumbnail_from_png(&out, 1, 1, 256).map(|b| b.bgra), Some(vec![3, 2, 1, 255]));
+}
+
+#[test]
+fn the_decoder_stops_at_its_allocation_limit() {
+    // 2048 x 1024 RGBA is exactly 8 MiB decoded; one more row is past the limit.
+    let at_limit = encode(2048, 1024, ColorType::Rgba, BitDepth::Eight, &vec![0; 2048 * 1024 * 4], None);
+    assert_eq!(decode(&at_limit, 2048, 1024).map(|rgba| rgba.len()), Some(DECODE_LIMIT));
+    let over = encode(2048, 1025, ColorType::Rgba, BitDepth::Eight, &vec![0; 2048 * 1025 * 4], None);
+    assert_eq!(decode(&over, 2048, 1025), None);
+}
