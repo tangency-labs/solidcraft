@@ -6335,6 +6335,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-explorer"
+version = "0.51.1"
+dependencies = [
+ "png",
+ "solidcraft-design-preview",
+]
+
+[[package]]
 name = "solidcraft-format"
 version = "0.51.1"
 dependencies = [
