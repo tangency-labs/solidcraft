@@ -201,12 +201,21 @@ fn a_file_without_a_whole_record_is_refused() {
 
 #[test]
 fn the_path_reader_shares_the_directory_checks() {
-    let bytes = with_field(&with_field(&good(), 8, &0xFFFF_u16.to_le_bytes()), 10, &0xFFFF_u16.to_le_bytes());
-    let path = std::env::temp_dir().join(format!("solidcraft-design-preview-directory-{}.sc", std::process::id()));
-    std::fs::write(&path, &bytes).unwrap();
-    assert_eq!(picture(&path), None);
-    assert_eq!(model(&path), None);
-    let _ = std::fs::remove_file(&path);
+    let path = |what: &str| std::env::temp_dir().join(format!("solidcraft-design-preview-directory-{what}-{}.sc", std::process::id()));
+    let many = with_field(&with_field(&good(), 8, &0xFFFF_u16.to_le_bytes()), 10, &0xFFFF_u16.to_le_bytes());
+    // Archives the zip crate opens on its own, which only the directory checks refuse.
+    let zip64 = as_zip64(&good());
+    assert!(zip_crate_opens(&zip64));
+    let large = large_directory(130);
+    assert!(zip::ZipArchive::new(std::io::Cursor::new(large.clone())).is_ok());
+    for (what, bytes) in [("many", many), ("zip64", zip64), ("large", large)] {
+        let file = path(what);
+        std::fs::write(&file, &bytes).unwrap();
+        let (picture, model) = (picture(&file), model(&file));
+        let _ = std::fs::remove_file(&file);
+        assert_eq!(picture, None, "{what}");
+        assert_eq!(model, None, "{what}");
+    }
 }
 
 /// `bytes`, a container written without a comment, as a ZIP64 archive the `zip` crate opens: the
