@@ -2177,10 +2177,12 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.discard_end |= running;
     chat.model_revert = None;
     #[cfg(not(target_arch = "wasm32"))]
-    if chat.api_service_tier.take().is_some()
-        && let Some(b) = chat.backend.as_mut()
     {
-        b.set_service_tier(agents::ServiceTier::Default);
+        // The running endpoint can still hold a tier after its saved URL changes.
+        chat.api_service_tier = None;
+        if let Some(b) = chat.backend.as_mut() {
+            b.set_service_tier(agents::ServiceTier::Default);
+        }
     }
     if matches!(chat.state(), State::Ready | State::Busy) {
         chat.restore_mode = Some(chat.mode.clone()).filter(|m| !m.is_empty());

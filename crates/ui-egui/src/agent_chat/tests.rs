@@ -1096,6 +1096,8 @@ struct Script {
     /// Every prompt in full (its text and pictures).
     prompts: Arc<Mutex<Vec<Vec<PromptPart>>>>,
     allow_paths: Arc<Mutex<Vec<Vec<std::path::PathBuf>>>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    service_tier: Arc<Mutex<agents::ServiceTier>>,
 }
 
 impl Script {
@@ -1133,6 +1135,10 @@ impl ChatBackend for Script {
     }
     fn set_model(&mut self, model: &str) {
         self.calls.lock().unwrap().push(format!("set_model: {model}"));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn set_service_tier(&mut self, tier: agents::ServiceTier) {
+        *self.service_tier.lock().unwrap() = tier;
     }
     fn answer_permission(&mut self, key: u64, option: Option<&str>) {
         self.calls.lock().unwrap().push(format!("permission: {key} {option:?}"));
@@ -2495,6 +2501,32 @@ fn endpoint_with_script() -> (SolveApp, Script, egui::Context) {
     script.report(models_reply("fast"));
     poll(&mut app, &ctx);
     (app, script, ctx)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn new_chat_resets_the_running_service_tier_after_the_endpoint_url_changes() {
+    use agents::ServiceTier;
+
+    let (mut app, script, ctx) = endpoint_with_script();
+    app.preferences.agents[0].openai_responses = true;
+    app.agent_chat.agent_id = Some("api-1".into());
+    set_service_tier(&mut app, ServiceTier::Fast);
+    assert_eq!(*script.service_tier.lock().unwrap(), ServiceTier::Fast);
+
+    control(
+        &mut app,
+        &ctx,
+        &json!({"add_agent": {"id": "api-1", "kind": "api", "base_url": "http://localhost:11435/v1", "model": "fast", "openai_responses": true}}),
+    )
+    .unwrap();
+    set_service_tier(&mut app, ServiceTier::Ultrafast);
+    set_service_tier(&mut app, ServiceTier::Default);
+    assert!(app.agent_chat.api_service_tier.is_none());
+    assert_eq!(*script.service_tier.lock().unwrap(), ServiceTier::Fast);
+
+    new_chat(&mut app);
+    assert_eq!(*script.service_tier.lock().unwrap(), ServiceTier::Default);
 }
 
 /// A typed model goes straight to an endpoint, joins the list for the next connection and becomes
