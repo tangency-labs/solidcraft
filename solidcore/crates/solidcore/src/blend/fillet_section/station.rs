@@ -1437,6 +1437,7 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
     /// Consumes the evaluator after [`Self::evaluate_final`], masking and moving out
     /// `(f, v, n)` with zero allocations.
     #[must_use]
+    #[allow(clippy::type_complexity)]
     pub fn into_fv(
         self,
         tr: Trunc,
@@ -1459,6 +1460,7 @@ impl<'s, 'a, T: GnScalar + PartialEq> GnIncremental<'s, 'a, T> {
 
     /// Completes the incremental evaluation at `tr` with full unit normals and moves
     /// `(f, v, n)` out without cloning.
+    #[allow(clippy::type_complexity)]
     pub(crate) fn finish_vn(
         mut self,
         x: &[Ser<T>; 4],
@@ -1857,6 +1859,7 @@ impl<T: GnScalar> V3Dual<T> {
 fn offset_taylor_deg0<T: GnScalar>(pf: &Partials<T>, d0: T) -> Result<V3<T>> {
     let zero = T::of(0.0);
     let one = T::of(1.0);
+    #[allow(clippy::eq_op)]
     let sf = one / one;
     let scale = |p: V3<T>, f: T| V3 {
         x: p.x * f,
@@ -1904,6 +1907,7 @@ pub(crate) fn gn_evaluate_point_ref<T: GnScalar>(
         y: zero,
         z: zero,
     };
+    #[allow(clippy::eq_op)]
     let sf = one / one;
     let mono0 = zero + one * one;
     let mut v_out = [vz; 2];
@@ -2029,6 +2033,7 @@ fn eval_face_dual<T: GnScalar>(
 ) -> Result<(V3Dual<T>, V3Dual<T>, V3Dual<T>)> {
     let zero = T::of(0.0);
     let one = T::of(1.0);
+    #[allow(clippy::eq_op)]
     let sf = one / one;
     let pu1 = zero + one * du1;
     let pv1 = zero + one * dv1;
@@ -3881,9 +3886,6 @@ mod tests {
 
     #[test]
     fn incremental_evaluate_g_and_into_fv_match_whole_bit_for_bit() {
-        let tm = |v: f64| {
-            crate::blend::fillet_section::feet_tm::Ft::from_points(&[v, 0.01 * v, -0.005 * v])
-        };
         fn run<T: GnScalar + PartialEq + core::fmt::Debug>(
             mk: impl Fn(f64) -> T,
             s: usize,
@@ -3980,6 +3982,9 @@ mod tests {
             assert_eq!(got_f, want_f);
             assert_eq!(got_v, want_v);
         }
+        let tm = |v: f64| {
+            crate::blend::fillet_section::feet_tm::Ft::from_points(&[v, 0.01 * v, -0.005 * v])
+        };
         for (s, e, n) in [(4, 0, 0), (3, 2, 2), (2, 3, 3)] {
             for r in [[0.5, 0.75], [8.0, 12.0]] {
                 run(|v| v, s, e, n, r);
