@@ -538,6 +538,9 @@ pub use solidcore_ops::MaterialSides;
 pub use solidcore_ops::dome::DomeRefusal;
 pub use solidcore_ops::dome::DomeShape;
 pub use solidcore_ops::measure::ParallelTurnError;
+pub use solidcore_ops::measure::directions_aligned;
+pub use solidcore_ops::measure::frame_z_deviation;
+pub use solidcore_ops::measure::rigid_pose_delta;
 pub use solidcore_ops::measure::turn_to_parallel;
 pub use solidcore_ops::measure::{Straight, StraightBy};
 /// SolidCraft's kernel interface: the trait each kernel's adapter implements, its operations,
