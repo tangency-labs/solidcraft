@@ -40,7 +40,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "tools: [bodies]; cells: [[x,y,z] a point inside each cell to fill (a cell: inside some tools, outside the rest)]; operation?: new|join|cut|intersect; remove_tools?: bool",
         ),
     CommandSpec::new("solid.coil", "Coil", crate::checked!("solid.coil", coil)).begins_edit().at("SOLID", "CREATE").icon("coil").contract(&COIL_CONTRACT).output(output_schema_for::<FeatureResult>).params(
-        "diameter; two of revolutions (or turns), height, pitch; section_size; section?: circular|square; section_position?: inside|center|outside; \
+        "diameter; two of revolutions (or turns), height, pitch; height_measure?: center_line|overall (what height measures: the helix's centre line, the default, or end to end; overall with square ends needs pitch); section_size; section?: circular|square; section_position?: inside|center|outside; \
          base?: [x,y,z] (numbers in mm or length expressions; default: the origin); axis?: X|Y|Z|[x,y,z]|revolve axis reference (default Z; use {type: sketch_axis, axis: x|y} for the profile sketch's axis; picked references supply their base and stay linked); start_angle?; clockwise?: bool; reversed?: bool (grow against the axis; the hand set by clockwise is kept); \
          end_cut?: axial|square (the wire's ends in a plane through the axis, the default, or square to the wire); \
          sketch? (a sketch; its plane is the section plane, so its placement sets the radius and start phase), profiles? (default: all; one closed profile without holes); \
@@ -128,6 +128,7 @@ fn coil(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let turns = expr(p, "revolutions").or_else(|| expr(p, "turns"));
     let (height, pitch) = (expr(p, "height"), expr(p, "pitch"));
+    let height = overall_height(s, p, cmd, profile_mode, height.clone(), pitch.as_ref())?.or(height);
     // The pitch or the revolutions from the height keep the units the lengths were given in.
     let unit = typed_length_unit(s);
     let (turns, pitch) = match (turns, height, pitch) {
@@ -904,6 +905,44 @@ fn boundary_fill(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// A Coil axis saved as the edge of a picked placement (`{type: placed_edge, …}`), checked to
 /// resolve as the Coil reads it; `None` for any other form of `axis`.
+/// With `height_measure: overall`, the centre-line height that gives the coil that height end
+/// to end (#20736). The section reaches past the helix's centre line at both ends by as much as it
+/// reaches along the axis: in a plane through the axis (axial ends) that is the section's size; across
+/// the wire (square ends) it is the size times the cosine of the pitch angle, the wire's slope at the
+/// section's centre. `None` for the centre-line height, as `height` gives it.
+fn overall_height(s: &Session, p: &Value, cmd: &str, profile_mode: bool, height: Option<Expr>, pitch: Option<&Expr>) -> Result<Option<Expr>> {
+    match str_(p, "height_measure").map(str::to_ascii_lowercase).as_deref() {
+        None | Some("center_line" | "centre_line") => return Ok(None),
+        Some("overall") => {}
+        Some(o) => return Err(bad(cmd, format!("unknown height measure `{o}` (center_line or overall)"))),
+    }
+    if profile_mode {
+        return Err(bad(cmd, "`height_measure: overall` does not apply with `sketch`: give the sketch's coil its centre-line height"));
+    }
+    let Some(h) = height else { return Err(bad(cmd, "`height_measure: overall` needs `height`")) };
+    let unit = typed_length_unit(s);
+    let size = req_expr(cmd, p, "section_size")?;
+    let square = str_(p, "end_cut").is_some_and(|c| c.eq_ignore_ascii_case("square"));
+    if !square {
+        let [h, size] = length_operands(s, [(&h, &unit), (&size, &unit)]);
+        return Ok(Some(format!("({h}) - ({size})").into()));
+    }
+    // Square ends: the pitch angle needs the pitch, which with `revolutions` would itself come from
+    // the height this works out.
+    let Some(pitch) = pitch else {
+        return Err(bad(cmd, "`height_measure: overall` with square ends needs `pitch` beside `height`"));
+    };
+    let diameter = req_expr(cmd, p, "diameter")?;
+    let position = match str_(p, "section_position").map(str::to_ascii_lowercase).as_deref() {
+        Some("inside") => "-1",
+        Some("outside") => "1",
+        _ => "0",
+    };
+    let [h, size, pitch, diameter] = length_operands(s, [(&h, &unit), (&size, &unit), (pitch, &unit), (&diameter, &unit)]);
+    // The section's centre runs round a circle of diameter `diameter + position * size`.
+    Ok(Some(format!("({h}) - ({size}) / sqrt(1 + (({pitch}) / (pi * (({diameter}) + {position} * ({size}))))^2)").into()))
+}
+
 pub(crate) fn coil_placed_edge(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<solidcraft_doc::construct::GeoRef>> {
     let Some(value) = v.filter(|axis| str_(axis, "type") == Some("placed_edge")) else { return Ok(None) };
     let geo = super::construct::geo(s, Some(value), cmd, "axis")?;
