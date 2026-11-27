@@ -1278,12 +1278,21 @@ fn show_delete(app: &mut SolveApp, ctx: &egui::Context) {
         match app.run(command, params) {
             // The drawing's panels and drafts go with it once it is gone. A delete the engine
             // refuses (a sheet sketch started meanwhile) leaves them as they were.
-            Ok(_) if row == MenuRow::Drawing => match beside {
-                Some(id) => open_drawing(app, id),
-                None => {
-                    close_panel(app);
+            Ok(_) if row == MenuRow::Drawing => {
+                // The delete has already closed the drawing's Sheet view (`sheet_views::drop_deleted`),
+                // and the focus moved on: to another drawing's Sheet view, which opens that drawing,
+                // or with none left to a Model view, which leaves Drawing. So the panels close here
+                // whatever opened, and with no drawing left Drawing comes back on the page that makes one.
+                close_panel(app);
+                match beside {
+                    Some(id) => open_drawing(app, id),
+                    None => {
+                        if let Err(error) = crate::workspace::enter(app, "drawing") {
+                            app.set_status(error, true);
+                        }
+                    }
                 }
-            },
+            }
             Ok(_) => {}
             Err(error) => app.set_status(error, true),
         }
