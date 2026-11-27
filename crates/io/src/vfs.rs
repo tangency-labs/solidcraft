@@ -846,6 +846,12 @@ pub fn allowing_hosts<T>(hosts: &[String], f: impl FnOnce() -> T) -> T {
     f()
 }
 
+/// The network hosts temporarily allowed on this thread via [`allowing_hosts`], to propagate to
+/// worker threads started for the same action.
+pub fn current_allowed_hosts() -> Vec<String> {
+    ONCE_HOSTS.with(|h| h.borrow().clone())
+}
+
 /// The network host of a path, when it names one (`\\host\share\x` → `host`).
 pub fn network_host(path: &str) -> Option<String> {
     match remote(path) {
@@ -906,9 +912,15 @@ pub fn design_path_stamp(path: &str, design: Option<&str>) -> Option<(std::time:
 }
 
 /// The checks the layers below ask before reading a file a design names (sketch text's font
-/// files). Done once; every session and agent scope does it.
+/// files), and how the worker threads an evaluation starts keep this thread's scope and the
+/// servers allowed for its action. Done once; every session and agent scope does it.
 pub fn install_checks() {
     solidcraft_doc::sketch::set_font_file_check(|p| check_design_path(&p.to_string_lossy(), None).map_err(|e| e.to_string()));
+    solidcraft_doc::worker_scope::set_carrier(|| {
+        let scope = current_scope();
+        let hosts = current_allowed_hosts();
+        std::sync::Arc::new(move |f: &mut dyn FnMut()| scoped(scope.clone(), || allowing_hosts(&hosts, &mut *f)))
+    });
 }
 
 /// File system calls made on this thread through this module (tests: a refused path made none).
@@ -1022,6 +1034,26 @@ pub fn scoped<T>(scope: Option<PathScope>, f: impl FnOnce() -> T) -> T {
 /// The scope active on this thread.
 pub fn current_scope() -> Option<PathScope> {
     SCOPE.with(|s| s.borrow().clone())
+}
+
+/// Thread-local file access rules (`PathScope` and one-action allowed network hosts) captured
+/// from a calling thread so helper threads running parallel reads enforce the exact same rules.
+#[derive(Clone, Default)]
+pub struct ThreadContext {
+    scope: Option<PathScope>,
+    once_hosts: Vec<String>,
+}
+
+impl ThreadContext {
+    /// Capture this thread's active scope and one-action allowed network hosts.
+    pub fn current() -> Self {
+        Self { scope: current_scope(), once_hosts: ONCE_HOSTS.with(|h| h.borrow().clone()) }
+    }
+
+    /// Run `f` under this captured context on the current thread.
+    pub fn run<T>(&self, f: impl FnOnce() -> T) -> T {
+        scoped(self.scope.clone(), || if self.once_hosts.is_empty() { f() } else { allowing_hosts(&self.once_hosts, f) })
+    }
 }
 
 /// Refuse `path` if a scope is active and it lies outside. Code that reaches the disk without
@@ -1748,6 +1780,44 @@ mod tests {
         let e = solidcraft_doc::sketch::font_data(Some(r"\\evil.example\fonts\x.ttf")).err().map(|e| e.to_string()).unwrap_or_default();
         assert!(e.contains(r"network location \\evil.example"), "{e}");
         assert_eq!(super::file_calls(), calls);
+    }
+
+    /// Components evaluated side by side on worker threads keep the caller's scope: in an empty
+    /// one, the font file each component's sketch text names is refused on every worker, as it
+    /// is on the calling thread.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn worker_threads_keep_the_callers_file_scope() {
+        use solidcraft_doc::{Document, FeatureKind, Model, PlaneRef};
+        let dir = std::env::temp_dir().join(format!("solidcraft-vfs-worker-scope-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let font = dir.join("Outside.ttf");
+        let bundled = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../sketch/assets/fonts/liberation-sans/LiberationSans-Regular.ttf");
+        std::fs::copy(&bundled, &font).unwrap();
+        let font = font.to_string_lossy().replace('\\', "/");
+        let mut doc = Document::new("worker scope");
+        for k in 0..4 {
+            let comp = doc.add_component(Some(&format!("C{k}")), 0).unwrap();
+            let json = format!(
+                r#"{{"points": [], "curves": [], "constraints": [], "links": [{{"id": "j1", "kind": "text", "source": {{"type": "text", "text": "A{k}", "at": [0, 0], "height": 6, "angle": 0, "font": "{font}"}}}}]}}"#
+            );
+            let sketch = serde_json::from_str(&json).unwrap();
+            let id =
+                doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch }, Some(&format!("Text{k}"))).unwrap();
+            doc.feature_mut(id).unwrap().component = comp;
+        }
+        let said = |m: &Model| m.results.iter().map(|r| format!("{:?} {:?}", r.error, r.warning)).collect::<Vec<_>>();
+        // Unconfined, the font is read.
+        let mut open = Model::new();
+        open.evaluate(&doc);
+        assert!(said(&open).iter().all(|s| !s.contains("font file")), "{:?}", said(&open));
+        // In an empty scope, no worker reads it.
+        let mut confined = Model::new();
+        super::scoped(Some(super::PathScope::default()), || confined.evaluate(&doc));
+        let said = said(&confined);
+        assert_eq!(said.len(), 4, "{said:?}");
+        assert!(said.iter().all(|s| s.contains("font file")), "a worker read a file outside the scope: {said:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A directory is not a file either.

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="580" viewBox="0 0 1000 580">
+  <title>develop.contour--long-arc-cut-short-at-its-corners</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect id="background" x="0" y="0" width="1000" height="580" fill="#ffffff"/>
+    <text transform="matrix(1 0 0 1 500 42)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000" text-anchor="middle"><tspan x="0" y="0">A long arc cut short at both its corners</tspan></text>
+    <text transform="matrix(1 0 0 1 500 64)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">Circle of radius 10 cut by the chord y = −6, the closed profile moved 7.875 inside; angles in radians</tspan></text>
+    <path id="drawn_arc_L" data-name="drawn arc L" d="M394 408 C449.695 333.74 439.786 229.305 371.119 166.845 C302.452 104.385 197.548 104.385 128.881 166.845 C60.214 229.305 50.305 333.74 106 408" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line id="drawn_chord_L" data-name="drawn chord L" x1="106" y1="408" x2="394" y2="408" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path id="moved_circle_L" data-name="moved circle L" d="M211.75 300 C211.75 278.875 228.875 261.75 250 261.75 C271.125 261.75 288.25 278.875 288.25 300 C288.25 321.125 271.125 338.25 250 338.25 C228.875 338.25 211.75 321.125 211.75 300 Z" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line id="moved_chord_L" data-name="moved chord L" x1="124" y1="266.25" x2="376" y2="266.25" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <circle id="result_arc_L__whole_turn_and_more_" data-name="result arc L (whole turn and more)" cx="250" cy="300" r="38.25" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="result_chord_L" data-name="result chord L" x1="232" y1="266.25" x2="268" y2="266.25" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <circle id="crossing_L-" data-name="crossing L-" cx="232" cy="266.25" r="3" fill="#555555"/>
+    <circle id="crossing_L_" data-name="crossing L+" cx="268" cy="266.25" r="3" fill="#555555"/>
+    <circle id="centre_L" data-name="centre L" cx="250" cy="300" r="2.5" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 250 95)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">main: both end moves wrapped together</tspan></text>
+    <text transform="matrix(1 0 0 1 250 213)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">result: sweep 7.26</tspan></text>
+    <line id="leader_result_L" data-name="leader result L" x1="250" y1="218" x2="250" y2="258" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 320 258)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">moved chord</tspan></text>
+    <text transform="matrix(1 0 0 1 320 284)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">y = 1.875</tspan></text>
+    <text transform="matrix(1 0 0 1 250 362)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">moved circle</tspan></text>
+    <text transform="matrix(1 0 0 1 250 378)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">radius 2.125</tspan></text>
+    <line id="leader_circle_L" data-name="leader circle L" x1="250" y1="349" x2="250" y2="341" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 400 450)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">drawn profile</tspan></text>
+    <line id="leader_drawn_L" data-name="leader drawn L" x1="400" y1="438" x2="396" y2="412" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 250 515)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">Both end moves wrapped as one: 0.98 − 4.43 = −3.45, past half a turn,</tspan></text>
+    <text transform="matrix(1 0 0 1 250 533)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">so a turn was added: 4.43 − 3.45 + 2π = 7.26.</tspan></text>
+    <path id="drawn_arc_R" data-name="drawn arc R" d="M894 408 C949.695 333.74 939.786 229.305 871.119 166.845 C802.452 104.385 697.548 104.385 628.881 166.845 C560.214 229.305 550.305 333.74 606 408" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <line id="drawn_chord_R" data-name="drawn chord R" x1="606" y1="408" x2="894" y2="408" fill="none" stroke="#555555" stroke-width="1.5" stroke-miterlimit="10"/>
+    <path id="moved_circle_R" data-name="moved circle R" d="M711.75 300 C711.75 278.875 728.875 261.75 750 261.75 C771.125 261.75 788.25 278.875 788.25 300 C788.25 321.125 771.125 338.25 750 338.25 C728.875 338.25 711.75 321.125 711.75 300 Z" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line id="moved_chord_R" data-name="moved chord R" x1="624" y1="266.25" x2="876" y2="266.25" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line id="ray_drawn_start_R" data-name="ray drawn start R" x1="750" y1="300" x2="894" y2="408" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line id="ray_drawn_end_R" data-name="ray drawn end R" x1="750" y1="300" x2="606" y2="408" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line id="ray_new_start_R" data-name="ray new start R" x1="750" y1="300" x2="782.94" y2="238.23" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line id="ray_new_end_R" data-name="ray new end R" x1="750" y1="300" x2="717.06" y2="238.23" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <path id="start_move_R" data-name="start move R" d="M794 333 C803.634 320.155 807.173 303.742 803.69 288.068 C800.206 272.394 790.048 259.025 775.88 251.47" fill="none" stroke="#000000" stroke-miterlimit="10"/>
+    <path id="end_move_R" data-name="end move R" d="M706 333 C696.366 320.155 692.827 303.742 696.31 288.068 C699.794 272.394 709.952 259.025 724.12 251.47" fill="none" stroke="#000000" stroke-miterlimit="10"/>
+    <path id="result_arc_R" data-name="result arc R" d="M768 266.25 C756.75 260.25 743.25 260.25 732 266.25" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <line id="result_chord_R" data-name="result chord R" x1="732" y1="266.25" x2="768" y2="266.25" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <circle id="crossing_R-" data-name="crossing R-" cx="732" cy="266.25" r="3" fill="#555555"/>
+    <circle id="crossing_R_" data-name="crossing R+" cx="768" cy="266.25" r="3" fill="#555555"/>
+    <circle id="centre_R" data-name="centre R" cx="750" cy="300" r="2.5" fill="#000000"/>
+    <text transform="matrix(1 0 0 1 750 95)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">this change: each end move wrapped alone</tspan></text>
+    <text transform="matrix(1 0 0 1 750 213)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">result: sweep 0.98</tspan></text>
+    <line id="leader_result_R" data-name="leader result R" x1="750" y1="218" x2="750" y2="258" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 820 258)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">moved chord</tspan></text>
+    <text transform="matrix(1 0 0 1 820 284)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">y = 1.875</tspan></text>
+    <text transform="matrix(1 0 0 1 810 312)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">start +1.72</tspan></text>
+    <text transform="matrix(1 0 0 1 690 312)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="end"><tspan x="0" y="0">end −1.72</tspan></text>
+    <text transform="matrix(1 0 0 1 750 362)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">moved circle</tspan></text>
+    <text transform="matrix(1 0 0 1 750 378)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000" text-anchor="middle"><tspan x="0" y="0">radius 2.125</tspan></text>
+    <line id="leader_circle_R" data-name="leader circle R" x1="750" y1="349" x2="750" y2="341" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 900 450)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">drawn profile</tspan></text>
+    <line id="leader_drawn_R" data-name="leader drawn R" x1="900" y1="438" x2="896" y2="412" fill="none" stroke="#000000" stroke-width="0.75" stroke-miterlimit="10"/>
+    <text transform="matrix(1 0 0 1 750 515)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">Each end move wrapped alone: start +1.72, end −1.72,</tspan></text>
+    <text transform="matrix(1 0 0 1 750 533)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000" text-anchor="middle"><tspan x="0" y="0">each under half a turn: 4.43 − 1.72 − 1.72 = 0.98.</tspan></text>
+  </g>
+</svg>

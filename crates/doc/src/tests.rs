@@ -1899,6 +1899,215 @@ fn a_body_reads_the_material_its_mass_is_computed_with() {
     }
 }
 
+/// An older design's parameters and feature inputs named after what are now units (#4811) are
+/// renamed to the first free `<name>_param…`; what uses them follows as the older build read
+/// it, and the comment says why without losing what it said.
+#[test]
+fn parameters_named_after_units_are_renamed_as_an_older_build_read_them() {
+    let mut doc = Document::new("old");
+    let id = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "4".into(),
+                height: "2".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    // Names no build lets you choose now, as an older design could have them.
+    doc.feature_mut(id).unwrap().param_names[0] = "deg".into();
+    doc.param_comments.insert("deg".into(), "tilt".into());
+    doc.params.push(Param { name: "mm".into(), expr: "3".into(), unit: String::new(), comment: "x".repeat(4096), model: false });
+    doc.set_param("mm_param", "1", Some(""), None).unwrap();
+    doc.params.push(Param { name: "turn".into(), expr: "deg / 2 + mm".into(), unit: "mm".into(), comment: String::new(), model: false });
+    doc.favorites.insert("mm".into());
+    // An equation curve's formula too: `2 mm * t` was 2 × the parameter `mm` times t.
+    let mut sketch = Sketch::new();
+    let (x, y) = (Some("t".to_string()), "2 mm * t".to_string());
+    let (start, end) = ("0".to_string(), "1".to_string());
+    sketch.equations.push(solidcraft_sketch::EquationCurve {
+        curve: "c1".into(),
+        x,
+        y,
+        start,
+        end,
+        tolerance: 0.01,
+        variable_unit: Default::default(),
+        radians_trig: false,
+    });
+    let curve = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+    let names = ["mm".to_string(), "deg".into(), "mm".into(), "width".into()];
+    doc.rename_unit_word_params(&names).unwrap();
+    let FeatureKind::Sketch { sketch, .. } = &doc.feature(curve).unwrap().kind else { panic!("a sketch") };
+    assert_eq!(sketch.equations[0].y, "2 mm_param2 * t");
+    assert_eq!(doc.feature(id).unwrap().param_names[0], "deg_param");
+    assert!(doc.param("mm").is_none() && doc.param("mm_param2").is_some(), "the next free name");
+    assert_eq!(doc.param("turn").map(|p| p.expr.as_str()), Some("deg_param / 2 + mm_param2"));
+    assert_eq!(doc.param_values().0["turn"].v, 8.0);
+    assert!(doc.favorites.contains("mm_param2"));
+    assert_eq!(doc.param_comments.get("deg_param").map(String::as_str), Some("tilt (renamed from `deg`, which is now a unit)"));
+    assert_eq!(doc.param("mm_param2").map(|p| p.comment.len()), Some(4096), "a comment at its longest keeps its text");
+    assert!(doc.param_values().1.is_empty(), "{:?}", doc.param_values().1);
+}
+
+/// Text parameters' names are taken too: a new `dN` name and a renamed parameter skip them.
+#[test]
+fn new_and_renamed_names_skip_text_parameters() {
+    let mut doc = Document::new("names");
+    doc.set_text_param("d1", "label", None).unwrap();
+    doc.set_text_param("mm_param", "label", None).unwrap();
+    assert_eq!(doc.next_d_name(), "d2");
+    doc.params.push(Param { name: "mm".into(), expr: "3".into(), unit: String::new(), comment: String::new(), model: false });
+    doc.rename_unit_word_params(&["mm".to_string()]).unwrap();
+    assert!(doc.param("mm").is_none() && doc.param("mm_param2").is_some());
+}
+
+#[test]
+fn copy_lineage_resolves_seed_material_and_respects_overrides() {
+    let mut doc = Document::new("copy lineage");
+    let seed_id = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(seed_id).unwrap().body_names = vec!["Seed".into()];
+    let pat_id = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: Vec::new(),
+                pattern: PatternKind::Rectangular {
+                    dir1: crate::points::Dir(Vec3::X),
+                    count1: "3".into(),
+                    spacing1: "20 mm".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: Default::default(),
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
+                },
+                bodies: vec!["Seed".into()],
+                placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(pat_id).unwrap().body_names = vec!["Seed (2)".into(), "Seed (3)".into()];
+    let mir_id = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "YZ".into() },
+                bodies: vec!["Seed (2)".into()],
+                combine: false,
+                placements: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(mir_id).unwrap().body_names = vec!["Seed (2) (2)".into()];
+
+    doc.materials.insert("Seed".into(), "Steel".into());
+    assert!(!doc.has_copy_material_lineage("Seed"));
+    assert_eq!(doc.copy_seed_body("Seed (2)"), Some("Seed"));
+    assert_eq!(doc.copy_seed_body("Seed (3)"), Some("Seed"));
+    assert_eq!(doc.copy_seed_body("Seed (2) (2)"), Some("Seed (2)"));
+    assert!(doc.has_copy_material_lineage("Seed (2)"));
+    for body in ["Seed", "Seed (2)", "Seed (3)", "Seed (2) (2)"] {
+        assert_eq!(doc.body_material(body), "Steel", "{body}");
+        assert!((doc.density(body) - 7.85).abs() < 1e-9, "{body}");
+    }
+
+    // Explicit override on an intermediate copy wins for itself and its downstream copies,
+    // and survives even if the seed temporarily acquires the same material and changes again.
+    doc.materials.insert("Seed (2)".into(), "Copper".into());
+    assert_eq!(doc.body_material("Seed (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (2) (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (3)"), "Steel");
+    doc.materials.insert("Seed".into(), "Copper".into());
+    doc.materials.insert("Seed".into(), "Aluminum".into());
+    assert_eq!(doc.body_material("Seed (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (2) (2)"), "Copper");
+    assert_eq!(doc.body_material("Seed (3)"), "Aluminum");
+
+    // Explicit Default on a copy stops lineage inheritance instead of falling back to the seed.
+    doc.materials.insert("Seed (3)".into(), DEFAULT_MATERIAL.into());
+    assert_eq!(doc.resolved_body_material("Seed (3)"), Some(DEFAULT_MATERIAL));
+    assert_eq!(doc.body_material("Seed (3)"), DEFAULT_MATERIAL);
+    assert!((doc.density("Seed (3)") - DEFAULT_DENSITY).abs() < 1e-9);
+
+    // Multi-seed joined pattern: unmerged copies inherit unanimous seed material, do not guess
+    // when seeds disagree, and respect an explicit Default override.
+    let join_id = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: Vec::new(),
+                pattern: PatternKind::Rectangular {
+                    dir1: crate::points::Dir(Vec3::X),
+                    count1: "2".into(),
+                    spacing1: "30 mm".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: Default::default(),
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
+                },
+                bodies: vec!["A".into(), "B".into()],
+                placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: true,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(join_id).unwrap().body_names = vec!["A (2)".into()];
+    assert_eq!(doc.copy_seed_body("A (2)"), None);
+    assert!(doc.has_copy_material_lineage("A (2)"));
+    doc.materials.insert("A".into(), "Steel".into());
+    doc.materials.insert("B".into(), "Steel".into());
+    assert_eq!(doc.body_material("A (2)"), "Steel");
+    doc.materials.insert("B".into(), "Brass".into());
+    assert_eq!(doc.body_material("A (2)"), DEFAULT_MATERIAL);
+    doc.materials.insert("B".into(), "Steel".into());
+    doc.materials.insert("A (2)".into(), DEFAULT_MATERIAL.into());
+    assert_eq!(doc.body_material("A (2)"), DEFAULT_MATERIAL);
+}
+
 #[test]
 fn primitives_and_combine() {
     let mut doc = Document::new("p");
@@ -1979,6 +2188,10 @@ fn hostile_expressions_never_panic() {
         "in",
         "nan",
         "9999999999999999999999",
+        "g",
+        "kg",
+        "m³",
+        "mm²",
     ];
     let mut state: u64 = 0x9e3779b97f4a7c15;
     let mut next = || {
@@ -3242,7 +3455,7 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
 fn reconstructed_mesh_roles_keep_the_versioned_binary_identity() {
     let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(1., 1., 1.)).unwrap();
     let positions = [Vec3::new(0., -0., 0.), Vec3::X, Vec3::Y];
-    use solidcraft_kernel::services::mesh::ReconstructionKind::{Analytic, Faceted};
+    use solidcraft_kernel::mesh::ReconstructionKind::{Analytic, Faceted};
     for (kind, digest) in [
         (Analytic, "2b85ddcdb826582a9d392dd981499209eb69c06ae3f6ebacaca0c02a4e29a278"),
         (Faceted, "3cbe2d7ca4e75f8b65845f9d84844cfe94e5236c8235692f6badf053aa649856"),
@@ -4220,6 +4433,8 @@ fn capture_position_invalidates_construction_axis_point_move_rotate_about_and_sk
                 origin: Some(crate::point_expr(Vec3::new(10.0, 0.0, 0.0))),
                 angle: Some("90 deg".into()),
                 copy: false,
+                carry: Vec::new(),
+                leave: Vec::new(),
                 copy_frames: Vec::new(),
             },
             Some("MoveAbout"),
@@ -4832,6 +5047,8 @@ fn capture_position_20644_isolation_for_to_object_mirror_pattern_plane_and_joint
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: vec!["BodyB".into()],
                 placements: vec![vec![occ_b]],
