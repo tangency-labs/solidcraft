@@ -508,14 +508,17 @@ fn surfaces_of_other_kinds(primary: &Brep, pf: FaceId, other: &Brep, of: FaceId)
 /// with lies on it only over a tangent patch within the tolerance, so within the tolerance it is
 /// a copy of that part of its partner. The operation keeps one copy of coincident faces or none
 /// ([`coincident_keep`]). With one, the copy is the partner's when the partner is kept, so the
-/// patch goes, and the patch's when the partner is deleted. With none, a deleted partner takes
-/// the patch with it. A kept partner still covers the patch, since the imprint drew no edge
-/// round the patch in it, so the material between the two, a film thinner than the tolerance,
-/// is part of the result and the patch is kept to bound it: a wedge less a part whose round
-/// grazes the wedge's plane keeps that plane (it lies outside the part), and the round's sliver
-/// on it closes the leftover beside it. A patch whose partner is classified by a later patch is
-/// visited again, so the order of the list does not matter; a patch whose partner is still
-/// unclassified when a pass classifies nothing more is left to the ray, as before.
+/// patch goes, and the patch's when the partner is deleted. With none (a difference of faces
+/// facing the same way, a union or intersection of faces facing opposite ways), a deleted
+/// partner takes the patch with it. A kept partner still covers the patch, since the imprint
+/// drew no edge round the patch in it, so the space between the two, thinner than the
+/// tolerance, lies against a face of the result, and the patch is kept to close it: a wedge
+/// less a part whose round grazes the wedge's plane keeps that plane (it lies outside the
+/// part), and the round's sliver on it closes the leftover beside it. Which side of the partner
+/// the patch lies on is below the tolerance, so it is not read. A patch whose partner is
+/// classified by a later patch is visited again, so the order of the list does not matter; a
+/// patch whose partner is still unclassified when a pass classifies nothing more is left to the
+/// ray, as before.
 fn resolve_tangent_patches(
     kernels: &BooleanKernels<'_>,
     state: &mut ManifoldState,
@@ -1610,6 +1613,11 @@ fn repair_lists(
         faces.keep.retain(|f| actual.contains(f));
         faces.delete.retain(|f| actual.contains(f));
     }
+    // a patch whose partner is gone (a last coincidence repair that changed the topology) has
+    // no side to be made on
+    faces
+        .kept_patches
+        .retain(|(_, partner)| actual.contains(partner));
     let actual = bp::faces(other, None)?;
     if operation != BooleanOperation::PartialMerge
         && actual.len() as i128 - faces.other_keep.len() as i128 - faces.other_delete.len() as i128
