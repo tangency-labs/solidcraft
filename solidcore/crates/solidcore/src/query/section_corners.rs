@@ -264,7 +264,8 @@ pub fn reach_through_rounds(
             }
         }
     }
-    Ok(reach.clamp(0.0, most))
+    // `most` is finite and not negative (checked above).
+    Ok(reach.max(0.0).min(most))
 }
 
 /// Two unit axes square to `d`, `x × y` along `d`: a plane on them has `d` as its normal.
