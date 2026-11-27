@@ -96,13 +96,54 @@ fn solidcore_evaluated(path: &str) -> bool {
 }
 
 /// What in the working tree computes models, relative to the workspace root: the build script
-/// reruns when any of it changes, and its uncommitted changes are part of the git digest. Wider
-/// than the committed scope where that is simpler (a test or a note there only rebuilds this
-/// crate), never narrower.
-pub(crate) fn watched() -> Vec<String> {
-    let mut paths: Vec<String> = EVALUATION_CRATES.iter().map(|c| format!("crates/{c}")).collect();
+/// reruns when any of it changes, and its uncommitted changes are part of the git digest.
+pub(crate) fn watched(root: &Path) -> Vec<String> {
+    let mut paths: Vec<String> = Vec::new();
+    for c in EVALUATION_CRATES {
+        let crate_path = root.join(format!("crates/{c}"));
+        if let Some(entries) = sorted_dir(&crate_path) {
+            let mut added = false;
+            for (name, _) in entries {
+                if !name.starts_with('.') && !DIRECTORY_OUTSIDE.contains(&name.as_str()) {
+                    paths.push(format!("crates/{c}/{name}"));
+                    added = true;
+                }
+            }
+            if !added {
+                paths.push(format!("crates/{c}"));
+            }
+        } else {
+            paths.push(format!("crates/{c}"));
+        }
+    }
     paths.extend(EVALUATION_FILES.iter().map(|f| (*f).to_string()));
-    paths.extend(["solidcore/crates", "solidcore/Cargo.toml", "solidcore/Cargo.lock", "vendor", "Cargo.lock", "Cargo.toml"].map(String::from));
+
+    let solidcore_crates = root.join("solidcore/crates");
+    if let Some(crates) = sorted_dir(&solidcore_crates) {
+        let mut added = false;
+        for (krate, krate_path) in crates {
+            if krate.starts_with('.') || DIRECTORY_OUTSIDE.contains(&krate.as_str()) {
+                continue;
+            }
+            if let Some(sub_entries) = sorted_dir(&krate_path) {
+                for (name, _) in sub_entries {
+                    if !name.starts_with('.') && !DIRECTORY_OUTSIDE.contains(&name.as_str()) {
+                        paths.push(format!("solidcore/crates/{krate}/{name}"));
+                        added = true;
+                    }
+                }
+            }
+        }
+        if !added {
+            paths.push("solidcore/crates".into());
+        }
+    } else {
+        paths.push("solidcore/crates".into());
+    }
+
+    paths.extend(["solidcore/Cargo.toml", "solidcore/Cargo.lock", "vendor", "Cargo.lock", "Cargo.toml"].map(String::from));
+    paths.sort();
+    paths.dedup();
     paths
 }
 
@@ -117,7 +158,7 @@ fn git_bytes(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
 /// an untracked file until it is added). Nothing is added for a clean tree, so it keeps the
 /// commit's digest; `None` when git cannot say.
 fn working_changes(root: &Path, digest: &mut Sha256) -> Option<()> {
-    let paths = watched();
+    let paths = watched(root);
     let mut diff = vec!["diff", "HEAD", "--binary", "--no-ext-diff", "--no-textconv", "--no-color", "--"];
     diff.extend(paths.iter().map(String::as_str));
     let changed = git_bytes(root, &diff)?;
@@ -285,7 +326,7 @@ fn main() {
     if let Some(dir) = has_git.then(|| git(&crate_dir, &["rev-parse", "--git-dir"])).flatten() {
         println!("cargo:rerun-if-changed={}/logs/HEAD", dir.trim());
         // An edit to what computes models restamps it too: the digest carries uncommitted changes.
-        for path in watched() {
+        for path in watched(&root) {
             println!("cargo:rerun-if-changed={}", root.join(path).display());
         }
     }

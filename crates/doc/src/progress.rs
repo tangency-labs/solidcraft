@@ -252,7 +252,13 @@ impl Evaluation {
     /// The outer evaluation has built the model up to feature `features`: a watcher that wants
     /// partial models gets it, placed by `doc`, at most every [`PARTIAL_EVERY`] (the first one
     /// after one interval, so a design that opens quickly offers none).
+    #[cfg(test)]
     pub(crate) fn offer(&self, features: usize, doc: &crate::Document, state: &Arc<crate::ModelState>) {
+        self.offer_with(features, || crate::world_state(doc, state).ok().map(Arc::new));
+    }
+
+    /// Like [`Self::offer`], building the preview world lazily only when a partial update is due.
+    pub(crate) fn offer_with(&self, features: usize, world: impl FnOnce() -> Option<Arc<crate::ModelState>>) {
         if !self.outer {
             return;
         }
@@ -273,7 +279,7 @@ impl Evaluation {
             return;
         }
         // A world that cannot be placed is shown with the evaluation's own error, at its end.
-        let Ok(world) = crate::world_state(doc, state).map(Arc::new) else { return };
+        let Some(world) = world() else { return };
         if let Ok(mut p) = progress.partial.lock() {
             *p = (Some(Partial { features, world }), Some(web_time::Instant::now()));
         }

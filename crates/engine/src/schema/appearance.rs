@@ -311,7 +311,7 @@ pub struct StarterAppearance {
     pub future_texture_recipe: Value,
 }
 
-/// `appearance.list` takes one parameter, `body`, optional.
+/// `appearance.list` takes two optional parameters: `body` and `active_only`.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct AppearanceListParams {
@@ -319,6 +319,10 @@ pub struct AppearanceListParams {
     /// `body`, its resolved look and its faces' looks.
     #[serde(default)]
     pub body: Option<String>,
+    /// When `true`, include only overrides whose body or component exists in the active model
+    /// (excluding removed, suppressed, rolled-back or orphaned targets). Default: `false`.
+    #[serde(default)]
+    pub active_only: Option<bool>,
 }
 
 /// What `appearance.list` returns: the looks the design assigns, by look and by target.
@@ -332,6 +336,10 @@ pub struct AppearanceListResult {
     pub faces: Vec<FaceLookReply>,
     /// The components with a look of their own.
     pub components: Vec<ComponentLookReply>,
+    /// Body names with saved overrides that are not in the active model (removed, suppressed,
+    /// rolled back or orphaned); `appearance.chain` cannot target them while inactive.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inactive_bodies: Vec<String>,
     /// With `body`: that body's resolved look and its faces'.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<BodyLooks>,

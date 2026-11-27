@@ -1036,6 +1036,26 @@ pub fn current_scope() -> Option<PathScope> {
     SCOPE.with(|s| s.borrow().clone())
 }
 
+/// Thread-local file access rules (`PathScope` and one-action allowed network hosts) captured
+/// from a calling thread so helper threads running parallel reads enforce the exact same rules.
+#[derive(Clone, Default)]
+pub struct ThreadContext {
+    scope: Option<PathScope>,
+    once_hosts: Vec<String>,
+}
+
+impl ThreadContext {
+    /// Capture this thread's active scope and one-action allowed network hosts.
+    pub fn current() -> Self {
+        Self { scope: current_scope(), once_hosts: ONCE_HOSTS.with(|h| h.borrow().clone()) }
+    }
+
+    /// Run `f` under this captured context on the current thread.
+    pub fn run<T>(&self, f: impl FnOnce() -> T) -> T {
+        scoped(self.scope.clone(), || if self.once_hosts.is_empty() { f() } else { allowing_hosts(&self.once_hosts, f) })
+    }
+}
+
 /// Refuse `path` if a scope is active and it lies outside. Code that reaches the disk without
 /// going through this module calls it first. In the browser files are the host's, never the
 /// disk, so there is nothing to confine.

@@ -15,7 +15,7 @@
 //! faces can also be taken off together where the kernel can restore their sharp edges.
 
 use solidcraft_geom::prelude::*;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use solidcore_ops::cap::{is_face_on_plane, is_point_on_plane};
 use solidcore_record::Vec3;
@@ -24,7 +24,7 @@ use solidcraft_geom::Aabb3;
 
 use crate::assemble::{AFace, AUse, Assembly};
 use crate::body::Body;
-use crate::history::{Change, FaceProv};
+use crate::history::{Change, EdgeOrigin, EdgeProv, FaceOrigin, FaceProv, History, Side};
 use crate::offset::{Surf, surf_of};
 use crate::{KernelError, Result, guard};
 
@@ -715,7 +715,8 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
             log::debug!("delete_faces assembly finish failed: {e}");
             fail("the neighbouring faces do not close the gap")
         })?;
-        crate::assemble::body_with_history(finished, &asm, body, history.into_iter().map(|(_, h)| h).collect()).map(Ok)
+        let healed = crate::assemble::body_with_history(finished, &asm, body, history.into_iter().map(|(_, h)| h).collect())?;
+        Ok(confirm_planar_heal(body, &rec, &del, &planes, healed))
     });
     match planar {
         Err(e @ KernelError::Invalid(_)) if del.len() >= 2 && del.iter().all(|&f| !matches!(surf_of(&rec, f), Some(Surf::Plane { .. }))) => {
@@ -723,6 +724,189 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
         }
         outcome => outcome?,
     }
+}
+
+/// The planar heal moves the neighbours' corners and stretches their edges by the gap alone, not
+/// looking at the rest of the body. Where the sharp corner it closes at lies past another face
+/// of the part (a pocket's corner beyond the part's side, T-2531), the grown faces run through
+/// that face: a loop of one face crosses another of its loops, which SMLib's check finds
+/// (SmFace test #38). The check runs on every planar heal, as the heal's own test of its
+/// result, under every validation mode: the result is made here, by no step whose check a
+/// feature's validation would run. It is the check of the faces and edges the heal changed
+/// ([`checked_locally`]), all the heal can break, so it takes their time and not the body's. A
+/// result that fails it is closed instead by taking the gap's wedge away from the body (or adding
+/// it) where the gap is one face between two walls ([`heal_by_wedge`]); any other is refused,
+/// saying why.
+fn confirm_planar_heal(
+    body: &Body,
+    rec: &solidcore_record::brep::Brep,
+    del: &BTreeSet<usize>,
+    planes: &HashMap<usize, (Vec3, f64)>,
+    healed: Body,
+) -> Result<Body> {
+    // A check that cannot run says nothing against the heal.
+    let Ok(Some(failure)) = checked_locally(body, &healed) else { return Ok(healed) };
+    if let Some(wedged) = heal_by_wedge(body, rec, del, planes)? {
+        return Ok(wedged);
+    }
+    let f = del.first().copied().unwrap_or(0);
+    Err(fail(format!(
+        "closing the gap left by face {f} would run its neighbouring faces through the rest of the part ({failure}). Edit the feature that made the face in the timeline instead"
+    )))
+}
+
+/// SMLib's check of what an edit of `input` changed in `result`
+/// ([`crate::validation::failing_check_local`]): the faces it changed and those beside an edge it
+/// changed, and the edges it changed. A face is changed unless its history keeps it from `input`
+/// (the edit's first operand) as it was; an edge unless its history takes it whole from one edge
+/// of `input` with the same curve, interval, tolerance, number of uses and end vertices. An
+/// unchanged edge between faces whose surfaces the edit keeps passes the check again. The whole
+/// check where `result` has no history to say which.
+fn checked_locally(input: &Body, result: &Body) -> Result<Option<crate::validation::CheckFailure>> {
+    let Some(history) = result.history() else { return crate::validation::failing_check(result) };
+    let (before, after) = (input.record(), result.record());
+    let mut faces: BTreeSet<usize> = history
+        .faces
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| f.change != Change::Kept || f.origins.iter().any(|o| operand_of(o) != Some(0)))
+        .map(|(i, _)| i)
+        .collect();
+    let vertex = |r: &solidcore_record::brep::Brep, v: u32| r.vertices.get(v as usize).map(|v| (v.point, v.tolerance));
+    let kept = |i: usize, e: &solidcore_record::brep::Edge| {
+        let Some(EdgeProv { origins, .. }) = history.edges.get(i) else { return false };
+        let [EdgeOrigin::Edge { operand: 0, edge }] = origins[..] else { return false };
+        let Some(was) = before.edges.get(edge) else { return false };
+        was.curve == e.curve
+            && was.nurbs == e.nurbs
+            && was.interval == e.interval
+            && was.tolerance == e.tolerance
+            && was.uses.len() == e.uses.len()
+            && was.vertices.iter().zip(&e.vertices).all(|(&a, &b)| vertex(before, a).is_some_and(|a| vertex(after, b) == Some(a)))
+    };
+    let mut edges = Vec::new();
+    for (i, e) in after.edges.iter().enumerate() {
+        if !kept(i, e) {
+            edges.push(i);
+            faces.extend(crate::history::faces_of(e));
+        }
+    }
+    let faces: Vec<usize> = faces.into_iter().collect();
+    crate::validation::failing_check_local(result, &faces, &edges)
+}
+
+/// The operand of an origin that has one.
+fn operand_of(o: &FaceOrigin) -> Option<usize> {
+    match *o {
+        FaceOrigin::Face { operand, .. } | FaceOrigin::Edge { operand, .. } | FaceOrigin::Offset { operand, .. } => Some(operand),
+        FaceOrigin::Profile { .. } | FaceOrigin::Cap { .. } => None,
+    }
+}
+
+/// Close the gap of one deleted face between two walls (a round or chamfer along an edge whose
+/// ends lie on planes) with a boolean: the wedge between the face, the walls' planes and the
+/// planes its ends lie on, as far as the sharp corner where the walls meet, is taken away from
+/// the body where the face's material side faces the corner (a pocket's round), or added where
+/// its outward side does (a round on a block's edge). Unlike the planar heal, the boolean trims
+/// the wedge against every other face of the body, so the walls stop at the part's side where
+/// the corner lies past it.
+///
+/// The wedge, its planes and which side of each, is the kernel's
+/// ([`solidcore_ops::gap_wedge::wedge`]); here it is confirmed against the body (its middle on
+/// the body's boundary, and for a round the segment it also holds already as the boolean leaves
+/// it) and applied. `None` where the selection is not that shape, or the boolean or its check
+/// fails.
+fn heal_by_wedge(
+    body: &Body,
+    rec: &solidcore_record::brep::Brep,
+    del: &BTreeSet<usize>,
+    planes: &HashMap<usize, (Vec3, f64)>,
+) -> Result<Option<Body>> {
+    use solidcore_ops::gap_wedge::{GapFace, wedge};
+    let mut picked = del.iter().copied();
+    let (Some(face), None) = (picked.next(), picked.next()) else { return Ok(None) };
+    let tol = body.size().max(1e-9) * 1e-6;
+    let arr = |p: Vec3| [p.x, p.y, p.z];
+    let point = |v: u32| rec.vertices.get(v as usize).map(|v| v.point);
+    let mut lines: Vec<([f64; 3], [f64; 3])> = Vec::new();
+    for e in crate::offset::face_edges(rec, face) {
+        let Some(edge) = rec.edges.get(e as usize) else { return Ok(None) };
+        if matches!(edge.curve, Curve::Line { .. }) {
+            let (Some(a), Some(b)) = (point(edge.vertices[0]), point(edge.vertices[1])) else { return Ok(None) };
+            lines.push((a, b));
+        }
+    }
+    let [a, b] = lines[..] else { return Ok(None) };
+    let gap = match surf_of(rec, face) {
+        Some(Surf::Plane { n, .. }) => GapFace::Plane { n: arr(n) },
+        Some(Surf::Cylinder { o, a, r, convex }) => GapFace::Cylinder { o: arr(o), a: arr(a), r, convex },
+        _ => return Ok(None),
+    };
+    // the planes in face order, so the wedge is the same on every run
+    let ordered: BTreeMap<usize, (Vec3, f64)> = planes.iter().map(|(f, pl)| (*f, *pl)).collect();
+    let listed: Vec<(usize, [f64; 3], f64)> = ordered.iter().map(|(f, (n, d))| (*f, arr(*n), *d)).collect();
+    let Some(w) = wedge([a, b], gap, &listed, tol) else { return Ok(None) };
+    if body.classify_point(Vec3::from(w.middle))? != crate::PointClass::OnBoundary {
+        return Ok(None);
+    }
+    // The corner on the outward side: the wedge is air, and is added.
+    let op = if w.add { crate::BoolOp::Union } else { crate::BoolOp::Cut };
+    let sides: Vec<crate::HalfSpace> = w.sides.iter().map(|(n, d)| crate::HalfSpace { n: Vec3::from(*n), d: *d }).collect();
+    let Ok((wedge_body, side_of)) = crate::polyhedron::convex_polyhedron_sides(&sides) else { return Ok(None) };
+    if let Some(p) = w.segment {
+        let air_or_material = if w.add { crate::PointClass::Inside } else { crate::PointClass::Outside };
+        if body.classify_point(Vec3::from(p))? != air_or_material {
+            return Ok(None);
+        }
+    }
+    let Ok(Some(result)) = crate::boolean(body, &wedge_body, op) else { return Ok(None) };
+    if !matches!(checked_locally(body, &result), Ok(None)) {
+        return Ok(None);
+    }
+    let Some(history) = result.history().cloned() else { return Ok(None) };
+    // The wedge's faces lie on the neighbours' planes: their pieces are those neighbours.
+    let neighbour = |g: usize| side_of.get(g).and_then(|&s| w.faces.get(s).copied().flatten());
+    let map = |o: FaceOrigin| match o {
+        FaceOrigin::Face { operand: 1, face } => neighbour(face).map(|face| FaceOrigin::Face { operand: 0, face }),
+        o if operand_of(&o).is_some_and(|op| op != 0) => None,
+        o => Some(o),
+    };
+    let faces = history
+        .faces
+        .into_iter()
+        .map(|f| {
+            let mut origins: Vec<FaceOrigin> = f.origins.into_iter().filter_map(map).collect();
+            origins.sort_unstable();
+            origins.dedup();
+            let change = match (origins.len(), f.change) {
+                (0, _) => Change::Generated,
+                (2.., Change::Kept) => Change::Merged,
+                (_, change) => change,
+            };
+            FaceProv { origins, change }
+        })
+        .collect();
+    let edges = history
+        .edges
+        .into_iter()
+        .map(|e| {
+            let origins = e
+                .origins
+                .into_iter()
+                .filter_map(|o| match o {
+                    EdgeOrigin::Edge { operand: 0, .. } => Some(o),
+                    EdgeOrigin::Edge { .. } => None,
+                    EdgeOrigin::Meet { a, b } => {
+                        let (a, b) =
+                            (Side::new(a.origins().iter().copied().filter_map(map))?, Side::new(b.origins().iter().copied().filter_map(map))?);
+                        (a != b).then(|| EdgeOrigin::meet(a, b))
+                    }
+                })
+                .collect();
+            EdgeProv { faces: e.faces, origins }
+        })
+        .collect();
+    Ok(Some(result.with_history(History { operands: 1, faces, edges }, &[body])?))
 }
 
 /// Retain the identity of every surviving face, including supports that ran on to the sharp
@@ -820,7 +1004,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .map(|hit| match hit {
-                solidcore_ops::ClassifiedPoint::On { face, .. } => face,
+                crate::points::ClassifiedPoint::On { face, .. } => face,
                 other => panic!("expected a point on the face, got {other:?}"),
             })
             .collect()
@@ -1279,5 +1463,110 @@ mod tests {
         assert!(msg.contains("the neighbouring faces do not close the gap"), "{msg}");
         assert!(!msg.contains("rebuilding the B-rep"), "{msg}");
         assert!(!msg.contains("outer loop"), "{msg}");
+    }
+
+    /// A plate 40 x 20 x 4 with its corner at (0, 20) rounded r5 (centre (5, 15)), and a pocket
+    /// x 1..30, y 1..19, 1 deep from the top, its corners rounded r2.
+    fn plate_with_a_pocket() -> crate::Body {
+        let plate = box_solid(Vec3::ZERO, Vec3::new(40.0, 20.0, 4.0)).unwrap();
+        let plate = fillet(&plate, &[Vec3::new(0.0, 20.0, 2.0)], 5.0).unwrap();
+        let pocket = box_solid(Vec3::new(1.0, 1.0, 3.0), Vec3::new(30.0, 19.0, 5.0)).unwrap();
+        let corners = [Vec3::new(1.0, 1.0, 4.0), Vec3::new(30.0, 1.0, 4.0), Vec3::new(30.0, 19.0, 4.0), Vec3::new(1.0, 19.0, 4.0)];
+        let pocket = fillet(&pocket, &corners, 2.0).unwrap();
+        boolean(&plate, &pocket, BoolOp::Cut).unwrap().unwrap()
+    }
+
+    /// The pocket's r2 round about the vertical axis at (`cx`, `cy`).
+    fn pocket_round(b: &crate::Body, cx: f64, cy: f64) -> Vec<usize> {
+        let round = faces_where(b, |p| ((p.x - cx).hypot(p.y - cy) - 2.0).abs() < 1e-2 && p.z > 3.0 - 1e-6);
+        assert_eq!(round.len(), 1, "{round:?}");
+        round
+    }
+
+    /// The plate of [`plate_with_a_pocket`] in closed form: the block, less the round's corner
+    /// (5² - π 5²/4 over 4 high) and the pocket 29 x 18 x 1, its four rounds giving back 2² - π 2²/4
+    /// each over 1 high.
+    fn pocket_plate_volume() -> f64 {
+        use std::f64::consts::PI;
+        3200.0 - (25.0 - 25.0 * PI / 4.0) * 4.0 - 29.0 * 18.0 + 4.0 * (4.0 - PI)
+    }
+
+    /// T-2531 (#22905): the pocket's corner at (1, 19) made sharp lies outside the plate, past its
+    /// r5 round: the pocket breaks through the plate's side there. Delete Face moved the
+    /// pocket's walls out to that corner and kept the plate's side, so the pocket's rim crossed
+    /// the top face's outer boundary (SmFace test #38) and the walls ran through the round,
+    /// a body every feature after it built on. It now takes the corner's wedge away from the
+    /// plate where the plate has material, and the plate keeps the rest of its side.
+    ///
+    /// Closed form: the wedge between the pocket's walls x = 1, y = 19 and the round about
+    /// (3, 17) is 1 deep; at each x in 1..3 it runs in y from the round, 17 + √(4 - (x-3)²), up
+    /// to the pocket's wall y = 19 or the plate's round about (5, 15), 15 + √(25 - (x-5)²), the
+    /// lower. The plate loses that area times 1, integrated here by Simpson's rule.
+    #[test]
+    fn deleting_a_pocket_round_whose_sharp_corner_breaks_through_the_side() {
+        let pocketed = plate_with_a_pocket();
+        assert!((pocketed.volume_at(1e-8).unwrap() - pocket_plate_volume()).abs() < 1e-6, "{}", pocketed.volume_at(1e-8).unwrap());
+        let round = pocket_round(&pocketed, 3.0, 17.0);
+        let healed = delete_faces(&pocketed, &round).unwrap();
+        assert!(crate::failing_check(&healed).unwrap().is_none(), "{:?}", crate::failing_check(&healed));
+
+        let width = |x: f64| {
+            let top = (15.0 + (25.0 - (x - 5.0).powi(2)).max(0.0).sqrt()).min(19.0);
+            (top - 17.0 - (4.0 - (x - 3.0).powi(2)).max(0.0).sqrt()).max(0.0)
+        };
+        let n = 1_000_000;
+        let h = 2.0 / f64::from(n);
+        let lost: f64 = (0..=n)
+            .map(|i| {
+                let w = if i == 0 || i == n {
+                    1.0
+                } else if i % 2 == 1 {
+                    4.0
+                } else {
+                    2.0
+                };
+                w * width(1.0 + f64::from(i) * h)
+            })
+            .sum::<f64>()
+            * h
+            / 3.0;
+        let want = pocket_plate_volume() - lost;
+        assert!((healed.volume_at(1e-8).unwrap() - want).abs() < 1e-6, "{} against {want}", healed.volume_at(1e-8).unwrap());
+        // The wedge is gone where the plate had it, and the plate's side past the pocket stays.
+        assert_eq!(healed.classify_point(Vec3::new(1.2, 18.0, 3.5)).unwrap(), crate::PointClass::Outside);
+        assert_eq!(healed.classify_point(Vec3::new(0.5, 17.0, 3.5)).unwrap(), crate::PointClass::Inside);
+        assert_eq!(healed.classify_point(Vec3::new(1.2, 18.0, 2.5)).unwrap(), crate::PointClass::Inside);
+    }
+
+    /// The pocket's corner at (1, 1) made sharp stays inside the plate: the neighbouring walls
+    /// extend to it as before, and the plate gains nothing but loses the wedge, 2² - π 2²/4 over
+    /// 1 deep.
+    #[test]
+    fn deleting_a_pocket_round_inside_the_plate_extends_its_walls() {
+        let pocketed = plate_with_a_pocket();
+        let round = pocket_round(&pocketed, 3.0, 3.0);
+        let healed = delete_faces(&pocketed, &round).unwrap();
+        assert!(crate::failing_check(&healed).unwrap().is_none(), "{:?}", crate::failing_check(&healed));
+        assert_eq!(healed.face_count() + 1, pocketed.face_count());
+        let want = pocket_plate_volume() - (4.0 - std::f64::consts::PI);
+        assert!((healed.volume_at(1e-8).unwrap() - want).abs() < 1e-6, "{} against {want}", healed.volume_at(1e-8).unwrap());
+    }
+
+    /// Both rounds at the pocket's end x = 1 taken off at once: the planar heal makes the corner
+    /// at (1, 19) sharp past the plate's side as before, and the wedge closes one face only.
+    /// The result is never the body whose faces cross (SmFace test #38).
+    #[test]
+    fn deleting_two_pocket_rounds_when_one_breaks_through_is_never_a_crossed_body() {
+        let pocketed = plate_with_a_pocket();
+        let mut rounds = pocket_round(&pocketed, 3.0, 17.0);
+        rounds.extend(pocket_round(&pocketed, 3.0, 3.0));
+        match delete_faces(&pocketed, &rounds) {
+            Err(e) => {
+                let why = e.to_string();
+                assert!(why.contains("would run its neighbouring faces through the rest of the part"), "{why}");
+                assert!(why.contains("SmFace::Test #38"), "{why}");
+            }
+            Ok(b) => panic!("PROBE-OK check={:?} volume={:?}", crate::failing_check(&b), b.volume_at(1e-8)),
+        }
     }
 }

@@ -619,6 +619,7 @@ pub fn says_newer(text: &str) -> bool {
 
 /// The checks of a design's JSON that need nothing outside the part of it they are given.
 pub(crate) fn check_raw(v: &Value, version: u32) -> Result<Vec<(usize, usize)>> {
+    validate_top_level_counts(v)?;
     check_design_numbers(v)?;
     crate::config::validate_rules_json(v)?;
     crate::config::validate_styles_json(v)?;
@@ -630,6 +631,21 @@ pub(crate) fn check_raw(v: &Value, version: u32) -> Result<Vec<(usize, usize)>> 
     validate_sketch_sizes(v)?;
     crate::format_offsets::validate_raw(v)?;
     validate_wires(v, version)
+}
+
+/// Bound top-level record lists before format upgrades run, so crafted older designs with
+/// oversized feature, parameter, component, occurrence or folder lists fail in O(1).
+fn validate_top_level_counts(value: &Value) -> Result<()> {
+    let too_many = |key: &str, max: usize| value.get(key).and_then(Value::as_array).is_some_and(|list| list.len() > max);
+    if too_many("features", crate::document::MAX_FEATURES)
+        || too_many("params", crate::document::MAX_PARAMS)
+        || too_many("components", crate::document::MAX_FEATURES)
+        || too_many("occurrences", crate::assembly::MAX_OCCURRENCES)
+        || too_many("timeline_groups", crate::document::MAX_FEATURES)
+    {
+        return Err(DocError::Invalid("document too large".into()));
+    }
+    Ok(())
 }
 
 /// [`check_raw`], the upgrade and the typed record alone: what a piece of a design must pass by
@@ -2144,6 +2160,7 @@ mod tests {
             corner_relief: size.map(Into::into),
             height_from: None,
             bend_relief_shape: None,
+            corners: Vec::new(),
         };
         let saved = |document: &Document| -> Value { serde_json::from_str(&document.to_json()).unwrap() };
         // A flange that follows the rule saves neither key, and a design of format 23 opens as it was.
@@ -2157,7 +2174,7 @@ mod tests {
         let opened = read(&file.to_string()).unwrap();
         assert_eq!(opened.format, format_string(FORMAT));
         let mut kept = plain.features.clone();
-        kept.iter_mut().for_each(|f| f.kernel_piece_order = true);
+        kept.iter_mut().for_each(|f| (f.kernel_piece_order, f.least_face_piece_order) = (true, true));
         assert_eq!(opened.features, kept);
         // One that chooses its relief says so in the file, which is stamped 24 and keeps it.
         let mut own = Document::new("A");
@@ -2366,6 +2383,8 @@ mod tests {
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,
+                        to_ref: None,
+                        from_ref: None,
                     },
                     operation: Operation::NewBody,
                     targets: vec![],
@@ -3677,5 +3696,28 @@ mod tests {
         assert_eq!(serde_json::to_value(&k).unwrap(), new);
         let parallel: SweepOrientation = serde_json::from_value(serde_json::json!("parallel")).unwrap();
         assert_eq!(parallel, SweepOrientation::Parallel);
+    }
+
+    #[test]
+    fn pre_upgrade_bounds_reject_oversized_legacy_designs_and_u64_max_occurrence_id() {
+        let too_many_components: Vec<Value> = (1..=crate::document::MAX_FEATURES + 1).map(|i| serde_json::json!({"id": i, "name": "C"})).collect();
+        let v = serde_json::json!({
+            "format": "solidcraft/56",
+            "name": "oversized",
+            "params": [],
+            "components": too_many_components,
+            "features": [],
+        });
+        assert!(check_raw(&v, 56).unwrap_err().to_string().contains("document too large"));
+
+        let u64_max_legacy = serde_json::json!({
+            "format": "solidcraft/56",
+            "name": "exhausted",
+            "params": [],
+            "components": [{"id": 1, "name": "A", "parent": 0}, {"id": 2, "name": "B", "parent": 0}],
+            "occurrences": [{"id": u64::MAX, "component": 1, "parent": 0, "name": "A:1"}],
+            "features": [],
+        });
+        assert!(read(&u64_max_legacy.to_string()).is_err());
     }
 }
