@@ -90,17 +90,17 @@ fn unit(v: P3, what: &str) -> R<P3> {
 }
 
 /// The unit axes `[X, Y, Z]` of a CARTESIAN_TRANSFORMATION_OPERATOR_3D from its `axis1`, `axis2`
-/// and `axis3`: `Z` from `axis3` (default +Z), `X` from `axis1` made orthogonal to `Z` (default +X,
-/// or +Y when `Z` is along X, as ISO 10303-42 `first_proj_axis`), `Y` = `Z` x `X`, or its opposite
-/// (a mirror) when `axis2` points that way.
+/// and `axis3`, as ISO 10303-42 `base_axis` derives them: `Z` from `axis3` (default +Z), `X` from
+/// `axis1` made orthogonal to `Z` (default +X, or +Y when `Z` is along X: `first_proj_axis`), `Y`
+/// from `axis2` (default +Y) made orthogonal to `Z` and then to `X` (`second_proj_axis`), so the
+/// frame is a mirror when that `Y` is opposite `Z` x `X`. Where nothing is left of `axis2` (or of
+/// +Y) the standard derives no `Y`, and it stays `Z` x `X`, as this reader has always taken it.
 pub fn operator_axes(axis1: Option<P3>, axis2: Option<P3>, axis3: Option<P3>, what: &str) -> R<[P3; 3]> {
     let z = unit(axis3.unwrap_or([0.0, 0.0, 1.0]), what)?;
     let a = axis1.unwrap_or(if z == [1.0, 0.0, 0.0] || z == [-1.0, 0.0, 0.0] { [0.0, 1.0, 0.0] } else { [1.0, 0.0, 0.0] });
     let x = unit(sub(a, scale(z, dot(a, z))), what)?;
-    let mut y = cross(z, x);
-    if axis2.is_some_and(|a| dot(a, y) < 0.0) {
-        y = scale(y, -1.0);
-    }
+    let b = axis2.unwrap_or([0.0, 1.0, 0.0]);
+    let y = unit(sub(sub(b, scale(z, dot(b, z))), scale(x, dot(b, x))), what).unwrap_or_else(|_| cross(z, x));
     Ok([x, y, z])
 }
 
@@ -378,8 +378,8 @@ impl<'a> Reader<'a> {
     }
 
     /// CARTESIAN_TRANSFORMATION_OPERATOR_3D, its axes made orthonormal as STEP derives them:
-    /// `Z` from `axis3` (default +Z), `X` from `axis1` made orthogonal to `Z`, `Y` = `Z` × `X`,
-    /// or its opposite (a mirror) when `axis2` points that way.
+    /// `Z` from `axis3` (default +Z), `X` from `axis1` made orthogonal to `Z`, `Y` from `axis2`
+    /// (default +Y) made orthogonal to `Z` and `X`, so the frame may be a mirror.
     pub fn transform(&self, id: u64) -> R<Transform> {
         let e = entity(self.ex, id)?;
         if e.name() != "CARTESIAN_TRANSFORMATION_OPERATOR_3D" {

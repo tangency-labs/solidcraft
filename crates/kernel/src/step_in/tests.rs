@@ -7294,21 +7294,26 @@ fn a_mapped_item_placed_by_an_operator_without_its_description_comes_in() {
     }
 }
 
-/// An operator that gives `axis1` and `axis3` and leaves `axis2` out has `axis2` = `axis3` x
-/// `axis1` (a right-handed frame), not the global Y: `axis1` = +Y, `axis3` = +Z turns the cube a
-/// quarter turn about Z at x = 60, so it spans x 59..60 and y 0..1.
+/// An operator that leaves `axis2` out takes +Y for it, made orthogonal to `axis3` and `axis1`
+/// (ISO 10303-42 `second_proj_axis`), not `axis3` x `axis1`: `axis1` = -X, `axis3` = +Z keeps
+/// +Y (a mirror), so the cube at x = 60 spans x 59..60 and y 0..1, as `axis1` = +Y with
+/// `axis2` = -X (a quarter turn about Z) places it. `axis1` = +Y with no `axis2` leaves nothing of
+/// +Y, where the standard derives no Y: it stays `axis3` x `axis1`, the same quarter turn.
 #[test]
-fn a_mapped_item_placed_by_an_operator_without_axis2_is_turned_by_its_axes() {
-    for op in ["('','',#5091,$,#5020,1.,#5092)", "('',#5091,$,#5020,1.,#5092)"] {
-        let text = mapped_cube_row("#5091=DIRECTION('',(0.,1.,0.));\n#5092=DIRECTION('',(0.,0.,1.));\n")
-            .replace("#5021=AXIS2_PLACEMENT_3D('',#5020,$,$)", &format!("#5021=CARTESIAN_TRANSFORMATION_OPERATOR_3D{op}"));
+fn a_mapped_item_placed_by_an_operator_without_axis2_takes_the_standard_y() {
+    let axes = "#5091=DIRECTION('',(0.,1.,0.));\n#5092=DIRECTION('',(0.,0.,1.));\n#5093=DIRECTION('',(-1.,0.,0.));\n";
+    let ops =
+        ["('','',#5093,$,#5020,1.,#5092)", "('',#5093,$,#5020,1.,#5092)", "('','',#5091,#5093,#5020,1.,#5092)", "('','',#5091,$,#5020,1.,#5092)"];
+    for op in ops {
+        let text =
+            mapped_cube_row(axes).replace("#5021=AXIS2_PLACEMENT_3D('',#5020,$,$)", &format!("#5021=CARTESIAN_TRANSFORMATION_OPERATOR_3D{op}"));
         let imp = step_import(&text).unwrap();
         let mut boxes: Vec<_> = imp.bodies.iter().map(|b| measure(&b.body).unwrap().bbox).collect();
         boxes.sort_by(|a, b| a.min.x.total_cmp(&b.min.x));
         assert_eq!(boxes.len(), 3, "{op}: {boxes:?} {:?}", imp.warnings);
-        let turned = &boxes[2];
-        assert!((turned.min.x - 59.0).abs() < 1e-6 && (turned.max.x - 60.0).abs() < 1e-6, "{op}: {turned:?}");
-        assert!(turned.min.y.abs() < 1e-6 && (turned.max.y - 1.0).abs() < 1e-6, "{op}: {turned:?}");
+        let placed = &boxes[2];
+        assert!((placed.min.x - 59.0).abs() < 1e-6 && (placed.max.x - 60.0).abs() < 1e-6, "{op}: {placed:?}");
+        assert!(placed.min.y.abs() < 1e-6 && (placed.max.y - 1.0).abs() < 1e-6, "{op}: {placed:?}");
     }
 }
 
