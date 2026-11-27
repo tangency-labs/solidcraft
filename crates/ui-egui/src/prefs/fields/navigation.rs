@@ -83,8 +83,9 @@ macro_rules! navigation_preferences {
             /// under the cursor). [`migrate`] folds it into `orbit_around` when saved preferences are
             /// read, so an existing choice survives the upgrade; this version only writes `false`.
             orbit_cursor: bool = false, PAGE_NAVIGATION;
-            /// An orbit drag that reaches the edge of the view moves the cursor to the opposite edge and
-            /// keeps turning; false stops the drag at the edge of the screen, as before.
+            /// An orbit drag that reaches the edge of the view, or a drag on a value row's label that
+            /// reaches the edge of the window (#22495), moves the cursor to the opposite edge and keeps
+            /// going; false stops the drag at the edge of the screen, as before.
             orbit_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.orbit_cursor_wrap.label");
             /// Shift with two-finger trackpad scrolling orbits the view the other way, both ways at once,
             /// as natural scrolling turns it (#8410).
@@ -100,10 +101,6 @@ macro_rules! navigation_preferences {
             radial_context_menu: bool = false, PAGE_NAVIGATION => check("Radial context menu");
             /// Off: a right drag that the mouse mapping would orbit leaves the camera alone (#6492).
             right_drag_orbits: bool = true, PAGE_NAVIGATION => check_tr("nav.right_drag_orbits.label");
-            /// Dragging a value row's label sideways past the edge of the window moves the cursor to
-            /// the opposite edge and keeps changing the value (#22495); false stops the drag at the
-            /// edge of the screen, as before.
-            scrub_cursor_wrap: bool = true, PAGE_NAVIGATION => check_tr("nav.scrub_cursor_wrap.label");
             /// Spread discrete wheel input across frames (off: apply each event immediately).
             smooth_wheel_zoom: bool = true, PAGE_NAVIGATION => check("Smooth wheel zoom", "Turn off to apply each wheel event immediately, without a smoothing tail");
             /// Touchscreen drags orbit/pan; off preserves the mouse mapping's selection behavior.

@@ -390,8 +390,9 @@ pub fn scrub_text(number: f64, step: f64, literal: &Literal) -> String {
 }
 
 /// An ongoing label drag: the value and pointer x it is measured from, and the speed in use.
-/// `last` is the pointer x the previous frame saw, and `jump` a cursor wrap asked for and not yet
-/// reported by the pointer.
+/// `last` is the pointer x the previous frame saw, `jump` a cursor wrap asked for and not yet
+/// reported by the pointer, `waited` the frames since it was asked for, and `stuck` that a jump
+/// never came, so this drag asks for no more.
 #[derive(Clone)]
 struct Scrub {
     anchor: f64,
@@ -399,7 +400,13 @@ struct Scrub {
     step: f64,
     last: f32,
     jump: Option<f32>,
+    waited: u8,
+    stuck: bool,
 }
+
+/// Frames a label scrub waits for the pointer to report a cursor wrap. A host that moves the
+/// cursor reports it within a frame or two; one that doesn't (Wayland, the browser) never does.
+const SCRUB_WRAP_WAIT: u8 = 10;
 
 /// Dragging a row's label sideways changes the literal value in its field: Shift for a tenth of
 /// the speed, Ctrl (Cmd on a Mac) for ten times. The text changes as if typed, so previews
@@ -442,28 +449,40 @@ pub(super) fn scrub(ui: &Ui, label: &Response, value: &mut String, clamp_positiv
     let base = ui.ctx().data(|data| data.get_temp::<Scrub>(id));
     let base_step = expr.scrub_step(&now.unit, viewport_half_height(ui.ctx()), now.number);
     let target_step = base_step * factor;
-    // A new drag starts from where it was pressed; a changed modifier starts over from here.
-    let mut state = match base {
-        Some(state) if (state.step - target_step).abs() <= state.step * 1e-9 => state,
-        Some(state) => Scrub { anchor: now.number, origin: x, step: target_step, last: x, jump: state.jump },
-        None => Scrub { anchor: now.number, origin: pressed, step: target_step, last: x, jump: None },
-    };
+    // A new drag starts from where it was pressed.
+    let mut state = base.unwrap_or(Scrub { anchor: now.number, origin: pressed, step: target_step, last: x, jump: None, waited: 0, stuck: false });
     // The frame that reports a cursor wrap moves the origin with it, so the value changes only by
     // what the hand did. Where the cursor can't be moved (Wayland, the browser) the jump never
-    // arrives and the drag stops at the edge, as without wrapping.
-    if let Some(jump) = state.jump
-        && ((x - state.last) - jump).abs() < jump.abs() * 0.5
-    {
-        state.origin += jump;
-        state.jump = None;
+    // arrives: after a few frames this drag stops asking, so no later fast move is taken for the
+    // jump, and it stops at the edge as without wrapping.
+    if let Some(jump) = state.jump {
+        if ((x - state.last) - jump).abs() < jump.abs() * 0.5 {
+            state.origin += jump;
+            state.jump = None;
+        } else {
+            state.waited = state.waited.saturating_add(1);
+            if state.waited > SCRUB_WRAP_WAIT {
+                state.jump = None;
+                state.stuck = true;
+            }
+        }
     }
     state.last = x;
+    // A changed modifier starts over from here, after any jump this frame reported is taken in.
+    let same_step = (state.step - target_step).abs() <= state.step * 1e-9;
+    if !same_step {
+        state.anchor = now.number;
+        state.origin = x;
+        state.step = target_step;
+    }
     if state.jump.is_none()
+        && !state.stuck
         && scrub_cursor_wrap(ui.ctx())
         && let (Some(to), Some(y)) = (scrub_wrapped(ui.ctx().content_rect(), x), ui.input(|i| i.pointer.latest_pos().map(|p| p.y)))
     {
         ui.ctx().send_viewport_cmd(egui::ViewportCommand::CursorPosition(egui::pos2(to, y)));
         state.jump = Some(to - x);
+        state.waited = 0;
     }
     let points = x - state.origin;
     let text = scrub_text(scrubbed(state.anchor, if points.is_finite() { points } else { 0.0 }, state.step, clamp_positive), state.step, &now);

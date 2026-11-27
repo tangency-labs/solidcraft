@@ -529,7 +529,9 @@ mod fields {
 
     /// A label drag that reaches the window's edge moves the cursor to the opposite edge and goes
     /// on scrubbing, and the frame that reports the jump changes the value only by what the hand
-    /// did (#22495). Off, the cursor is never moved and the drag stops at the edge.
+    /// did (#22495). Off, the cursor is never moved and the drag stops at the edge. Where the host
+    /// can't move the cursor, the drag stops asking after a few frames, and a later fast move back
+    /// is not taken for the jump.
     #[test]
     fn a_label_drag_at_the_window_edge_wraps_the_cursor_and_keeps_scrubbing() {
         fn frame(ctx: &egui::Context, events: Vec<egui::Event>, value: &mut String) -> Vec<egui::Pos2> {
@@ -553,7 +555,8 @@ mod fields {
                 .collect()
         }
         let button = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
-        for wrap in [true, false] {
+        // (wrap, the host moves the cursor)
+        for (wrap, moves) in [(true, true), (false, true), (true, false)] {
             let ctx = crate::ui_kit::test_support::context();
             crate::params_dialog::install_expressions(&ctx);
             crate::ui_kit::set_scrub_cursor_wrap(&ctx, wrap);
@@ -571,6 +574,22 @@ mod fields {
                 continue;
             }
             let [to] = moved.as_slice() else { panic!("one cursor move at the edge: {moved:?}") };
+            if !moves {
+                // The pointer stays at the edge: the jump never comes.
+                for _ in 0..12 {
+                    let again = frame(&ctx, vec![egui::Event::PointerMoved(edge)], &mut value);
+                    assert!(again.is_empty(), "no second move while the first is unreported: {again:?}");
+                }
+                let back = egui::pos2(100.0, start.y);
+                let again = frame(&ctx, vec![egui::Event::PointerMoved(back)], &mut value);
+                assert!(again.is_empty(), "{again:?}");
+                let there = 20.0 + f64::from(back.x - start.x) * 0.1;
+                assert_eq!(value, format!("{there:.1} mm"), "a fast move back after the jump never came is the hand's");
+                let again = frame(&ctx, vec![egui::Event::PointerMoved(edge)], &mut value);
+                assert!(again.is_empty(), "the drag asks no more: {again:?}");
+                frame(&ctx, vec![button(edge, false)], &mut value);
+                continue;
+            }
             assert!(to.x < 40.0 && (to.y - start.y).abs() < 1e-3, "the cursor goes to the left edge, at the same height: {to:?}");
             // The pointer reports the jump together with 5 points of the hand's motion.
             let moved = frame(&ctx, vec![egui::Event::PointerMoved(*to + egui::vec2(5.0, 0.0))], &mut value);
