@@ -4135,3 +4135,20 @@ fn a_free_form_span_that_bows_out_of_plane_between_samples_has_no_plane() {
     assert!(n.cross(normal).len() < 1e-9, "{n:?}");
     assert_eq!(PathSeg::plane_normal(&path(1e-3), 1e-6), None);
 }
+
+/// A drawing leader on an edge's polyline (#22195): the fraction of its length nearest a picked
+/// point, and the point a fraction along it, are each other's inverse and measure by length.
+#[test]
+fn polyline_fraction_and_point_measure_by_length() {
+    let line = [Vec3::new(0.0, 0.0, 0.0), Vec3::new(10.0, 0.0, 0.0), Vec3::new(10.0, 30.0, 0.0)];
+    let f = polyline_fraction_at(&line, Vec3::new(12.0, 10.0, 5.0)).unwrap();
+    assert!((f - 0.5).abs() < 1e-12, "{f}");
+    let p = polyline_point_at(&line, f).unwrap();
+    assert!(p.dist(Vec3::new(10.0, 10.0, 0.0)) < 1e-12, "{p:?}");
+    assert_eq!(polyline_fraction_at(&line, Vec3::new(-5.0, 1.0, 0.0)), Some(0.0));
+    assert_eq!(polyline_point_at(&line, 2.0), Some(line[2]));
+    let still = [Vec3::new(1.0, 1.0, 1.0); 2];
+    assert_eq!(polyline_fraction_at(&still, Vec3::new(0.0, 0.0, 0.0)), None);
+    assert_eq!(polyline_point_at(&still, 0.5), None);
+    assert_eq!(polyline_point_at(&line, f64::NAN), None);
+}

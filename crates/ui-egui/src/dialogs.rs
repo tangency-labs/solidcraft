@@ -567,6 +567,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             Frame(crate::dialogs_frame::Member),
             /// End caps on frame members (`dialogs_end_cap`).
             EndCap(crate::dialogs_end_cap::EndCap),
+            /// Weld tool (`dialogs_weld`).
+            Weld(Box<crate::dialogs_weld::WeldDialog>),
             /// Dogbone reliefs in inside corners (`dialogs_dogbone`).
             Dogbone(crate::dialogs_dogbone::Dogbone),
             /// Cell Grid (`dialogs_cell_grid`).
@@ -1417,6 +1419,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_frame::start(app, id))
                     .or_else(|| crate::dialogs_shaft_spline::start(app, id))
                     .or_else(|| crate::dialogs_end_cap::start(app, id))
+                    .or_else(|| crate::dialogs_weld::start(app, id))
                     .or_else(|| crate::dialogs_dogbone::start(app, id))
                     .or_else(|| crate::dialogs_cell_grid::start(app, id))
                     .or_else(|| crate::dialogs_rotate_member::start(app, id))
@@ -3564,6 +3567,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
         Kind::EndCap(_) => "ui.end_cap_title",
+        Kind::Weld(_) => "cmd.weld.create",
         Kind::Dogbone(_) => "ui.dogbone_title",
         Kind::CellGrid(_) => "ui.cell_grid_title",
         Kind::RotateMember(_) => "ui.rotate_member_title",
@@ -4491,7 +4495,7 @@ fn command_disabled(app: &SolveApp, d: &Dialog, error: &str) -> bool {
     spec.disabled_refusal(&app.session).is_some_and(|refusal| refusal == error)
 }
 
-fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) {
+pub(crate) fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) {
     if matches!(d.kind, Kind::SketchModify(_))
         && d.previews()
         && let Err(error) = apply_commands(app, d)
@@ -5309,6 +5313,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     // Physical materials: the library's, then the design's own (material.create).
+    if matches!(d.kind, Kind::Weld(_)) {
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !app.esc_handled && escape_routed_here {
+            app.esc_handled = true;
+        } else {
+            crate::dialogs_weld::show(app, ctx, d);
+        }
+        return;
+    }
     let t = Tokens::get();
     let vp = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
     let placement = crate::shell::editor_space(app, vp);
@@ -8587,6 +8599,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
         Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),
+        Kind::Weld(k) => return crate::dialogs_weld::params(k).map(|p| vec![("weld.create".into(), p)]),
         Kind::Dogbone(k) => return crate::dialogs_dogbone::commands(app, k, &d.inputs, &d.extra),
         Kind::CellGrid(k) => return crate::dialogs_cell_grid::commands(app, k, &d.inputs, &d.extra),
         Kind::RotateMember(k) => return crate::dialogs_rotate_member::commands(app, k, &d.inputs, &d.extra, d.editing.is_some()),
@@ -11910,27 +11923,15 @@ mod refused_ok_tests {
     fn create_sketch_on_a_face_that_cannot_keep_an_attachment_waits_for_use_fixed_plane() {
         let mut h = Harness::new();
         let run = |h: &mut Harness, command: &str, params: Value| h.app.run(command, params).unwrap();
-        run(&mut h, "solid.box", json!({"length":40,"width":20,"height":5,"corner":[0,0,0],"body_name":"L"}));
-        run(&mut h, "solid.box", json!({"length":5,"width":20,"height":40,"corner":[0,0,0],"operation":"join"}));
-        run(&mut h, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"RibSketch"}));
-        run(&mut h, "sketch.line", json!({"points":[[5,25],[25,5]],"ids":["l1"]}));
-        run(&mut h, "sketch.finish", json!({}));
-        run(&mut h, "solid.rib", json!({"sketch":"RibSketch","curves":["l1"],"thickness":4}));
+        // A coil's flat end has no history name: a coil reports no roles for the faces it sweeps.
+        run(&mut h, "solid.coil", json!({"diameter":40,"revolutions":1.5,"pitch":8,"section":"square","section_size":4,"body_name":"Coil"}));
         let (index, point) = {
             let world = h.app.session.world_state().unwrap();
-            let face = world
-                .body("L")
-                .unwrap()
-                .body
-                .faces(0.01)
-                .unwrap()
-                .into_iter()
-                .find(|face| face.plane_normal.is_some_and(|n| n.dot(solidcore_record::Vec3::Y) > 0.999) && (face.centroid.y - 12.0).abs() < 1e-6)
-                .unwrap();
+            let face = world.body("Coil").unwrap().body.faces(0.01).unwrap().into_iter().find(|face| face.plane_normal.is_some()).unwrap();
             (face.index, face.centroid)
         };
         let before = h.app.session.doc.to_json();
-        let sel = Sel::Face { body: "L".into(), index, point };
+        let sel = Sel::Face { body: "Coil".into(), index, point };
         let error = start_sketch(&mut h.app, &sel).unwrap_err();
         assert!(error.contains("fixed"), "{error}");
         assert_eq!(h.app.session.doc.to_json(), before, "no sketch is made until the user chooses a fixed plane");

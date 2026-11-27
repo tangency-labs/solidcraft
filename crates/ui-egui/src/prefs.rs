@@ -4452,6 +4452,9 @@ fn prepare_preferences(
         return Err("`dimension_colour` must be null or three numbers 0…255".into());
     }
     let mut new: Prefs = serde_json::from_value(cur).map_err(|e| e.to_string())?;
+    if !solidcraft_engine::doc::weld::SYMBOL_STANDARDS.contains(&new.weld_symbol_standard.as_str()) {
+        return Err("unknown weld_symbol_standard".into());
+    }
     new.retain_legacy_panel_fields(base);
     migrate_gruvbox(&mut new);
     if let Some(update) = p.get("theme_options") {
