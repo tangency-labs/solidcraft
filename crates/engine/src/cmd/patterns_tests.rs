@@ -4785,3 +4785,22 @@ fn a_body_pattern_redefined_to_picked_placements_says_why_it_is_refused() {
     assert_eq!(s.doc, doc, "the refused edit leaves the design as it was");
     assert_eq!(s.doc.occurrences.len(), occurrences, "no placement is added");
 }
+
+#[test]
+fn a_mirror_across_a_picked_face_follows_the_source_parameter() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name":"height", "expression":"10 mm"}));
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":"height","body_name":"Block"}));
+    run(&mut s, "solid.mirror", json!({"bodies":["Block"],"plane":{"face":[10,10,10]},"combine":true}));
+    let feature = s.doc.features.last().unwrap();
+    assert!(matches!(&feature.kind, solidcraft_doc::FeatureKind::Mirror { plane: solidcraft_doc::PlaneRef::Face { .. }, .. }));
+    let max_z = |s: &Session| {
+        let state = s.model.state();
+        assert_eq!(state.bodies.len(), 1);
+        state.bodies[0].body.exact_bounds().unwrap().max.z
+    };
+    assert!((max_z(&s) - 20.).abs() < 1e-6);
+    run(&mut s, "parameters.change", json!({"name":"height","expression":"15 mm"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    assert!((max_z(&s) - 30.).abs() < 1e-6);
+}
