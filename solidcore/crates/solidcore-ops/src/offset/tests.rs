@@ -140,6 +140,59 @@ fn a_shell_keeps_its_rounds_as_blends_of_the_moved_radius() {
     );
 }
 
+/// A cylinder r `r` from `z = bottom` to 40, cut by the plane through `(0, 0, 25 - drop)`
+/// tilted 20° about the x axis (its normal `(0, -sin 20°, cos 20°)`, `drop` along it), its
+/// slanted rim rounded `round`. The round between the plane and the cylinder at a slant
+/// is of an exact class whose net is a rational B-spline (its spine an ellipse).
+#[allow(clippy::disallowed_methods)] // the fixture's placement, not ops geometry
+fn slanted_rim_cylinder(r: f64, bottom: f64, drop: f64, round: f64) -> Body {
+    let tilt = 20f64.to_radians();
+    let cylinder = make_cylinder([0.0, 0.0, bottom], r, 40.0 - bottom).unwrap();
+    let cap = make_box([-60.0, -60.0, 25.0 - drop], [120.0, 120.0, 60.0 + drop]).unwrap();
+    cap.transform(&crate::affine::rotation([0.0, 0.0, 25.0], [1.0, 0.0, 0.0], tilt).unwrap())
+        .unwrap();
+    let body = crate::boolean::boolean(cylinder, cap, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    // the rim where it crosses y = 0 on the tilted plane, at x = -r: away from the
+    // cylinder's seam at x = r
+    let rim = edge_at(&body, [-r, 0.0, 25.0 - drop / tilt.cos()]);
+    blend(&body, Blend::Round, &[rim], &[round], &[], Corners::Filled).unwrap();
+    body
+}
+
+/// A shell offsets a round of an exact class whose net is a B-spline (solidcore#3424: a
+/// round on a slanted rim refused every wall since the shell kept the rounds' definitions).
+/// That round's own offset is an offset surface of its net, with no NURBS form to certify
+/// the moved definition on; it is the exact offset all the same and is kept without one.
+/// The body is convex, so a closed shell of wall 1 leaves the cavity of its points at least
+/// 1 inside: the same construction on the faces moved in by 1, the cylinder r 9 from z = 1,
+/// the plane moved 1 along its normal and the rim's round 2 - 1. The shell's volume is the
+/// body's less that cavity's, each volume within its relative accuracy 1e-8, and the walls
+/// placed within the body's tolerance over both boundaries, each of less area than the
+/// uncut cylinder's side and two of its slanted ends, 2 pi 10 40 + 2 pi 10² / cos 20°.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_round_on_a_slanted_rim_shells_by_its_offset_surface() {
+    all_fixes();
+    let body = slanted_rim_cylinder(10.0, 0.0, 0.0, 2.0);
+    let cavity = slanted_rim_cylinder(9.0, 1.0, 1.0, 1.0);
+    let (outer, inner) = (volume(&body), volume(&cavity));
+    shell(&body, &order(&body), &[], -1.0).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    body.check_solid().unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert_eq!(report.failures, 0, "{}", report.text);
+    let measured = volume(&body);
+    let area = 2.0 * PI * 10.0 * 40.0 + 2.0 * PI * 100.0 / 20f64.to_radians().cos();
+    let bound = 1e-8 * (outer + inner + measured) + body.tolerance().unwrap() * 2.0 * area;
+    assert!(
+        (measured - (outer - inner)).abs() <= bound,
+        "{measured} vs {} within {bound}",
+        outer - inner
+    );
+}
+
 #[test]
 fn a_cylinder_shells_open_at_its_top() {
     all_fixes();

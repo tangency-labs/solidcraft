@@ -5163,6 +5163,13 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.placed_body(st, tool);
             }
         }
+        FeatureKind::FingerJoint { bodies, .. } => {
+            frame = bodies.first().and_then(|name| st.and_then(|st| st.body(name))).map(|b| body_world(doc, b));
+            for body in bodies {
+                reads.placed_body(st, body);
+                reads.body(doc, st, body);
+            }
+        }
         // A pattern of bodies copies them along its directions or about its axis in its own
         // component's frame, so it follows where each body it copies is placed relative to that
         // frame: copies of a root block, patterned in a component, move with the component.
@@ -7399,17 +7406,17 @@ pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region
         }
         // A curve loop that no longer bounds a profile exactly falls back to the best match; the
         // feature's warning says so (`profile_fallback_notes`).
-        ProfileSel::Curves { .. } | ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } | ProfileSel::SidedCurves { .. } => {
-            crate::profile_selection_indices_lenient(ss, sel)?
-                .0
-                .into_iter()
-                .map(|index| {
-                    ps.get(index)
-                        .map(|profile| profile.region.clone())
-                        .ok_or_else(|| DocError::Invalid("profile index changed during resolution".into()))
-                })
-                .collect::<Result<Vec<_>>>()?
-        }
+        ProfileSel::Curves { .. }
+        | ProfileSel::OffsetBoundaries { .. }
+        | ProfileSel::WholeBoundaries { .. }
+        | ProfileSel::TextRegions { .. }
+        | ProfileSel::SidedCurves { .. } => crate::profile_selection_indices_lenient(ss, sel)?
+            .0
+            .into_iter()
+            .map(|index| {
+                ps.get(index).map(|profile| profile.region.clone()).ok_or_else(|| DocError::Invalid("profile index changed during resolution".into()))
+            })
+            .collect::<Result<Vec<_>>>()?,
         ProfileSel::Points { points } => {
             let mut v = Vec::new();
             let mut taken = std::collections::BTreeSet::new();
@@ -17024,7 +17031,35 @@ pub(crate) fn lost_sheet_face(plane: &PlaneRef) -> DocError {
 fn face_plane(st: &ModelState, picked: &Plane, at: Vec3, name: Option<&str>) -> Result<(Plane, Option<String>)> {
     let n = picked.normal();
     if let Some(name) = name {
-        let hit = crate::naming::locate_face(st, name, at).ok_or_else(|| DocError::reselect(name))?;
+        let Some(hit) = crate::naming::locate_face(st, name, at) else {
+            // A name worked out from geometry when the design was saved (an Align that kept no
+            // history guessed the names of the faces it moved, #20308) finds nothing once the same
+            // face has its exact name (#22919). When the saved point still lies on a flat face
+            // that is exactly the picked plane (same normal, no farther along it than rounding),
+            // the plane the sketch sits on is unchanged, and so is the sketch. A face that moved,
+            // turned or is gone from under the point still fails, asking for it to be picked again.
+            let same_plane = crate::name_lookup::refound_at_saved_point(name, &st.bodies)
+                && at.is_finite()
+                && st.bodies.iter().filter(|b| !b.body.is_mesh()).any(|b| {
+                    let rounding = (b.body.size() * 1e-6).max(1e-6);
+                    let Ok(faces) = b.body.faces((b.body.size() * 1e-3).max(1e-3)) else { return false };
+                    crate::name_lookup::faces_at_saved_point(b, at).into_iter().any(|(index, _)| {
+                        faces.iter().any(|f| {
+                            f.index == index
+                                && f.plane_normal.is_some_and(|fnrm| fnrm.dot(n) > 1.0 - 1e-9)
+                                && (f.centroid.dot(n) - picked.origin.dot(n)).abs() <= rounding
+                        })
+                    })
+                });
+            if !same_plane {
+                return Err(DocError::reselect(name));
+            }
+            let note = format!(
+                "face `{}` has a new name; the sketch stays on the same plane, found again at its saved point",
+                crate::name_lookup::quoted(name)
+            );
+            return Ok((*picked, Some(note)));
+        };
         let b = st.bodies.get(hit.body).ok_or_else(|| DocError::reselect(name))?;
         let tol = (b.body.size() * 1e-3).max(1e-3);
         let face = b.body.faces(tol)?.into_iter().find(|f| f.index == hit.face).ok_or_else(|| DocError::reselect(name))?;
@@ -17152,6 +17187,175 @@ fn chamfer_with(
             other => other?,
         },
     })
+}
+
+#[cfg(test)]
+type FingerJointInterval = solidcraft_kernel::services::finger_joint::Interval;
+
+/// Generate logical intervals without constructing geometry or applying allowances.
+#[cfg(test)]
+fn finger_joint_pattern(span: (f64, f64), count: usize) -> Result<Vec<FingerJointInterval>> {
+    solidcraft_kernel::services::finger_joint::pattern([span.0, span.1], count).map_err(|error| DocError::Invalid(error.to_string()))
+}
+
+/// Apply edge offsets and validate clearance without changing the interval sequence.
+#[cfg(test)]
+fn finger_joint_allowances(pattern: &mut [FingerJointInterval], span: (f64, f64), edge_offset: f64, clearance: f64) -> Result<()> {
+    solidcraft_kernel::services::finger_joint::allowances(pattern, [span.0, span.1], edge_offset, clearance)
+        .map_err(|error| DocError::Invalid(error.to_string()))
+}
+
+fn eval_finger_joint_pair(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &mut ModelState,
+    bodies: &[crate::BodyName],
+    count: usize,
+    clearance: &crate::Expr,
+    inverted: bool,
+    edge_offset: Option<&crate::Expr>,
+    warning: &mut Option<String>,
+) -> Result<()> {
+    if bodies.len() != 2 || bodies.first() == bodies.get(1) {
+        return Err(DocError::Invalid("a finger joint needs two different bodies".into()));
+    }
+    if !(1..=64).contains(&count) {
+        return Err(DocError::Invalid("finger count must be between 1 and 64".into()));
+    }
+    let first_name = bodies.first().map(|body| body.0.as_str()).ok_or_else(|| DocError::Invalid("a finger joint needs two bodies".into()))?;
+    let second_name = bodies.get(1).map(|body| body.0.as_str()).ok_or_else(|| DocError::Invalid("a finger joint needs two bodies".into()))?;
+    let named = [first_name, second_name];
+    let first = st.body(first_name).ok_or_else(|| DocError::Unknown(format!("body `{first_name}`")))?;
+    let second = st.body(second_name).ok_or_else(|| DocError::Unknown(format!("body `{second_name}`")))?;
+    if first.component != f.component || second.component != f.component {
+        return Err(DocError::Invalid("both finger-joint bodies must be in the feature's active component".into()));
+    }
+    let feature_world = doc.component_transform(f.component);
+    let first_world = body_world(doc, first);
+    let second_world = body_world(doc, second);
+    let skipped = |warning: &mut Option<String>, why: String| {
+        append_warning(warning, format!("finger joint left both bodies unchanged: {why}"));
+        Ok(())
+    };
+    let clearance = val(vals, clearance, Kind::Length)?;
+    let edge_offset = match edge_offset {
+        Some(edge_offset) => val(vals, edge_offset, Kind::Length)?,
+        None => 0.0,
+    };
+    if !edge_offset.is_finite() || edge_offset < 0.0 {
+        return Err(DocError::Invalid("edge offset must be a non-negative length".into()));
+    }
+    if !clearance.is_finite() || clearance < 0.0 {
+        return Err(DocError::Invalid("clearance must be a non-negative length".into()));
+    }
+    let Some((first_tool, second_tool)) = kernel::finger_joint::pair_tools(
+        &first.body,
+        &second.body,
+        first_world,
+        second_world,
+        feature_world,
+        count,
+        clearance,
+        edge_offset,
+        inverted,
+    )?
+    else {
+        return skipped(warning, "the bodies are not unambiguous crossing plates with a usable overlap".into());
+    };
+    if first_tool.is_none() && second_tool.is_none() {
+        return skipped(warning, "the pattern has no material to cut".into());
+    }
+    for (name, tool) in named.into_iter().zip([first_tool, second_tool]) {
+        if let Some(tool) = tool {
+            apply_traced(doc, st, f, vec![Traced::unnamed(tool)], Operation::Cut, &[name.to_owned()])?;
+        }
+    }
+    let first_result = st.body(first_name).ok_or_else(|| DocError::Unknown(format!("body `{first_name}`")))?;
+    let second_result = st.body(second_name).ok_or_else(|| DocError::Unknown(format!("body `{second_name}`")))?;
+    if kernel::finger_joint::pair_intersects(&first_result.body, &second_result.body, first_world, second_world, feature_world)? {
+        return Err(DocError::Invalid("the finger joint leaves an intersection between its bodies".into()));
+    }
+    Ok(())
+}
+
+fn eval_finger_joint(
+    doc: &Document,
+    vals: &BTreeMap<String, Value>,
+    f: &Feature,
+    st: &mut ModelState,
+    bodies: &[crate::BodyName],
+    count: usize,
+    clearance: &crate::Expr,
+    inverted: bool,
+    edge_offset: Option<&crate::Expr>,
+    warning: &mut Option<String>,
+) -> Result<()> {
+    if bodies.len() < 2 || bodies.len() > crate::MAX_FINGER_JOINT_BODIES {
+        return Err(DocError::Invalid(format!("a finger joint needs 2 to {} different bodies", crate::MAX_FINGER_JOINT_BODIES)));
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for name in bodies {
+        if !seen.insert(&name.0) {
+            return Err(DocError::Invalid(format!("body `{name}` appears more than once in the finger joint")));
+        }
+        let body = st.body(&name.0).ok_or_else(|| DocError::Unknown(format!("body `{name}`")))?;
+        if body.component != f.component {
+            return Err(DocError::Invalid("finger-joint bodies must be in the feature's active component".into()));
+        }
+    }
+    if bodies.len() == 2 {
+        return eval_finger_joint_pair(doc, vals, f, st, bodies, count, clearance, inverted, edge_offset, warning);
+    }
+    if !(1..=64).contains(&count) {
+        return Err(DocError::Invalid("finger count must be between 1 and 64".into()));
+    }
+    let clearance_value = val(vals, clearance, Kind::Length)?;
+    let offset_value = match edge_offset {
+        Some(offset) => val(vals, offset, Kind::Length)?,
+        None => 0.0,
+    };
+    if !clearance_value.is_finite() || clearance_value < 0.0 {
+        return Err(DocError::Invalid("clearance must be a non-negative length".into()));
+    }
+    if !offset_value.is_finite() || offset_value < 0.0 {
+        return Err(DocError::Invalid("edge offset must be a non-negative length".into()));
+    }
+    let feature_world = doc.component_transform(f.component);
+    let inverse = crate::mat_inverse(&feature_world).ok_or_else(|| DocError::Invalid("the active component has an invalid placement".into()))?;
+    let mut applied = 0usize;
+    let anchor = bodies.first().ok_or_else(|| DocError::Invalid("a finger joint needs at least two bodies".into()))?;
+    for second in bodies.iter().skip(1) {
+        let pair = [anchor.clone(), second.clone()];
+        let result = (|| -> Result<Option<ModelState>> {
+            let a = st.body(&anchor.0).ok_or_else(|| DocError::Unknown(format!("body `{anchor}`")))?;
+            let b = st.body(&second.0).ok_or_else(|| DocError::Unknown(format!("body `{second}`")))?;
+            let a = kernel::transform_matrix(&a.body, crate::mat_mul(&inverse, &body_world(doc, a)))?;
+            let b = kernel::transform_matrix(&b.body, crate::mat_mul(&inverse, &body_world(doc, b)))?;
+            if kernel::boolean(&a, &b, BoolOp::Intersect)?.is_none() {
+                return Ok(None);
+            }
+            let mut trial = st.clone();
+            let mut pair_warning = None;
+            eval_finger_joint_pair(doc, vals, f, &mut trial, &pair, count, clearance, inverted, edge_offset, &mut pair_warning)?;
+            if let Some(why) = pair_warning {
+                return Err(DocError::Invalid(why));
+            }
+            Ok(Some(trial))
+        })();
+        match result {
+            Ok(Some(trial)) => {
+                *st = trial;
+                applied += 1;
+            }
+            Ok(None) => {}
+            Err(error) => append_warning(warning, format!("finger joint `{anchor}` / `{second}` was not applied: {error}")),
+        }
+    }
+    if applied == 0 && warning.is_none() {
+        append_warning(warning, "finger joint found no intersecting body pairs".into());
+    }
+    Ok(())
 }
 
 /// Adapt the one SolidCore converter's record to the document body. Recognition and faceted
@@ -18550,6 +18754,9 @@ fn eval_feature_kind(
                 st.bodies.retain(|b| !tools.iter().any(|t| *t == b.name));
             }
             Ok(())
+        }
+        FeatureKind::FingerJoint { bodies, count, clearance, inverted, edge_offset } => {
+            eval_finger_joint(doc, vals, f, st, bodies, *count, clearance, *inverted, edge_offset.as_ref(), warning)
         }
         FeatureKind::Scale { bodies, origin, about, factor, factors } => {
             let k = match factors {
@@ -20113,6 +20320,28 @@ pub fn world_body_paths(doc: &Document, st: &ModelState) -> Vec<Vec<u64>> {
         out.extend((0..owned.get(&comp).copied().unwrap_or(0)).map(|_| path.clone()));
     }
     out
+}
+
+#[cfg(test)]
+mod finger_joint_pattern_tests {
+    use super::{finger_joint_allowances, finger_joint_pattern};
+
+    #[test]
+    fn pattern_and_allowances_keep_alternating_intervals() {
+        let span = (10.0, 60.0);
+        let mut pattern = finger_joint_pattern(span, 2).unwrap();
+        assert_eq!(
+            pattern.iter().map(|interval| (interval.start, interval.end, interval.retained_by_first)).collect::<Vec<_>>(),
+            vec![(10.0, 20.0, true), (20.0, 30.0, false), (30.0, 40.0, true), (40.0, 50.0, false), (50.0, 60.0, true)]
+        );
+        finger_joint_allowances(&mut pattern, span, 5.0, 0.2).unwrap();
+        assert_eq!(
+            pattern.iter().map(|interval| (interval.start, interval.end, interval.retained_by_first)).collect::<Vec<_>>(),
+            vec![(10.0, 23.0, true), (23.0, 31.0, false), (31.0, 39.0, true), (39.0, 47.0, false), (47.0, 60.0, true)]
+        );
+        assert!(finger_joint_allowances(&mut pattern, span, 25.0, 0.0).is_err());
+        assert!(finger_joint_allowances(&mut pattern, span, 5.0, 8.0).is_err());
+    }
 }
 
 #[cfg(test)]
