@@ -10,10 +10,9 @@
 //! | `rolled_rail_turns_back`, `rail_passes_side_edge_end` (crate) | none (solidcore-native) |
 //!
 //! Deviations: the solver is the caller's concrete solver object instead of a
-//! `GetSolverType` cast. A failed variable-radius law evaluation yields its status
-//! code as the radius, as upstream's `SER` inside the `double`
-//! `SmVariableRadiusFS::GetFilletRadius` does (an `Unported` callee and a law refused
-//! past its curve, #2706, still propagate). The gap checks of a multi-neighbour end
+//! `GetSolverType` cast. A failed variable-radius law evaluation is returned as its
+//! error, where upstream's `SER` inside the `double` `SmVariableRadiusFS::GetFilletRadius`
+//! yields its status code (1001, 1007) as the radius (#21908). The gap checks of a multi-neighbour end
 //! face (vertex and side-edge geometry, extended-surface coincidence), the last statements of
 //! `MakeCornerTopology`, are returned as an [`Nx1GapCheck`] for the caller, which
 //! holds the corner table and solver store they need, to run before anything else.
@@ -26,6 +25,7 @@
 
 use std::collections::BTreeMap;
 
+use super::shape_not_built;
 use crate::blend::fillet_corner::p1::face_by_two_edgeuses;
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_executive::session::{FilletBody, FilletObject, SolverObject};
@@ -36,6 +36,7 @@ use crate::blend::fillet_geom::p1::{
 use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::blend::fillet_standard_solver::p1::VariableRadiusFs;
 use crate::blend::fillet_tangent_rollover::planar_section;
+use crate::error::blend::CornerShape;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
@@ -147,7 +148,8 @@ fn edge_leaves_in_face(
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for an edge use without vertex use or edge (upstream
-/// dereferences them); [`SolidError::Unported`] from the variable-radius law evaluation.
+/// dereferences them); those of the variable-radius law evaluation
+/// ([`variable_radius_at_vertex`]).
 pub fn find_surface_extension_dist_at_corner(
     target: &Brep,
     fillet_edgeuse: EdgeuseId,
@@ -183,14 +185,13 @@ pub fn find_surface_extension_dist_at_corner(
 
 /// `SmVariableRadiusFS::GetFilletRadius` at the corner end of `fillet_edgeuse`: the law's
 /// radius at the end of the filleted edge that lies on `corner_vertex`, by
-/// [`FilletLaw::fillet_radius`](crate::blend::fillet_executive::p1::FilletLaw): a failed
-/// law evaluation yields its status code as the radius.
+/// [`FilletLaw::fillet_radius`](crate::blend::fillet_executive::p1::FilletLaw).
 ///
 /// # Errors
 /// [`SolidError::InvalidInput`] for an edge use without vertex use or edge (upstream
-/// dereferences them); those [`FilletLaw::fillet_radius`] propagates: an unported callee,
-/// and the refusal of a law continued past its curve to an unusable radius (the corner may
-/// have narrowed the law to its setback, so the edge's end can be past the law's curve).
+/// dereferences them); those of [`FilletLaw::fillet_radius`], among them the refusal of a
+/// law continued past its curve to an unusable radius (the corner may have narrowed the
+/// law to its setback, so the edge's end can be past the law's curve).
 ///
 /// [`FilletLaw::fillet_radius`]: crate::blend::fillet_executive::p1::FilletLaw::fillet_radius
 pub fn variable_radius_at_vertex(
@@ -345,9 +346,10 @@ pub(crate) fn rolled_rail_turns_back(
 /// the side edge E (`side`, at the corner's vertex `vertex`); E's other face is the end face
 /// P. The rail ends where it crosses P's surface, on E's curve continued past E's far vertex
 /// W, when all of these hold:
-/// - the round is a constant one of circular section (`constant`) between two planes along a
-///   straight edge, and E is a line: the rail is then the line along the edge through the
-///   ball's contact on S, in closed form ([`planar_section`]), and it crosses E's line at R;
+/// - the blend is a constant round or chamfer (`constant`, circular or linear section) between
+///   two planes along a straight edge, and E is a line: the rail is then the line along the edge
+///   through the section's contact on S, in closed form ([`planar_section`]), and it crosses E's
+///   line at R;
 /// - R lies past W along E, by more than the body's tolerance;
 /// - at W, an open edge N with a tangent there, between P and a face other than S, leaves W,
 ///   and every such N leaves it more than 45 degrees from running on along E's arriving
@@ -364,7 +366,9 @@ pub(crate) fn rolled_rail_turns_back(
 ///
 /// The cap's edge then runs from the rail's end along E's continuation on S to W, then along
 /// E: [`TurnedBack`] with E as its edge (whose continuation past W leaves W against E's own
-/// tangent leaving W) and S as its face. `None` otherwise (the corner is as before).
+/// tangent leaving W) and S as its face, together with how far past W along E the rail meets
+/// P's surface (`past > tol`, so the end face can be extended to cover R). `None` otherwise
+/// (the corner is as before).
 ///
 /// # Errors
 /// Those of the topology walks, the closed form's evaluations and drops, the curve's
@@ -378,12 +382,15 @@ pub(crate) fn rail_passes_side_edge_end(
     rail: usize,
     side: EdgeuseId,
     vertex: VertexId,
-) -> Result<Option<TurnedBack>> {
+) -> Result<Option<(TurnedBack, f64)>> {
     use crate::blend::fillet_solver::p1::FilletSurfaceGeneratorType;
-    let circular = solver.fsg.as_ref().map(
-        crate::blend::fillet_solver::p1::FilletSurfaceGenerator::fillet_surface_generator_type,
-    ) == Some(FilletSurfaceGeneratorType::Circular);
-    if !constant || !circular || rail > 1 {
+    let constant_section = matches!(
+        solver.fsg.as_ref().map(
+            crate::blend::fillet_solver::p1::FilletSurfaceGenerator::fillet_surface_generator_type,
+        ),
+        Some(FilletSurfaceGeneratorType::Circular | FilletSurfaceGeneratorType::Linear)
+    );
+    if !constant || !constant_section || rail > 1 {
         return Ok(None);
     }
     let tol = target.tolerance();
@@ -562,11 +569,14 @@ pub(crate) fn rail_passes_side_edge_end(
             return Ok(None);
         }
     }
-    Ok(Some(TurnedBack {
-        far,
-        edge: e,
-        face: s_face,
-    }))
+    Ok(Some((
+        TurnedBack {
+            far,
+            edge: e,
+            face: s_face,
+        },
+        past,
+    )))
 }
 
 /// The open segment from W to R on S's plane, in its own frame: `along` from W towards R,
@@ -898,6 +908,9 @@ pub(crate) struct Nx1End<'a> {
     pub total: usize,
     pub mixed: bool,
     pub same: [bool; 2],
+    /// Each side edge that is a tangent seam separated from the other side edge by a face
+    /// between them (#2843): the end face is picked from the other side edge.
+    pub seam_side: [bool; 2],
     /// `bTangentSide` (the fork's tangency-labs/smlib@856b54e): each side edge that is a
     /// tangent seam the rail on its side crosses; `false` without WR-600's fix.
     pub tangent_side: [bool; 2],
@@ -907,6 +920,158 @@ pub(crate) struct Nx1End<'a> {
     /// Not upstream: each rail rolled onto a face whose foot edge turns back at the rolled-over
     /// edge's vertex ([`TurnedBack`]); `None` for every other rail.
     pub turned_back: [Option<TurnedBack>; 2],
+    /// Largest distance past its side edge's far vertex reached by a [`TurnedBack`] rail from
+    /// [`rail_passes_side_edge_end`] (`0.0` when none).
+    pub turned_back_past: f64,
+}
+
+/// A candidate end face of an `NByOne` corner: the face across side edge use `side` (0 or 1
+/// of the pair passed) from the blend.
+struct AcrossFace {
+    side: usize,
+    face: FaceId,
+}
+
+/// The unit tangent of `e`'s curve at its end on `vertex`, pointing away from it.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for an edge without a curve; those of the evaluation.
+fn tangent_leaving_vertex(k: &Kernel, target: &Brep, e: EdgeId, vertex: VertexId) -> Result<Vec3> {
+    let curve = need(edge::curve(target, e)?, "side edge without curve")?;
+    let ivl = edge::interval(target, e)?;
+    let at_start = edge::start_vertex(target, e)? == Some(vertex);
+    let t = if at_start { ivl.min() } else { ivl.max() };
+    let d = need(
+        curve.evaluate(k, t, 1, true, true)?.get(1).copied(),
+        "edge without derivative",
+    )?;
+    let d = if at_start { d } else { -d };
+    d.unitize()
+}
+
+/// Of the faces across the two side edge uses `sides` from the blend on `filleted`, at a
+/// corner of four edges, the one the blended edge crosses most squarely at `vertex`. Each
+/// such face holds its side edge and the corner's fourth edge (the edge between the two
+/// faces), so its normal there is the cross product of their tangents. `None` where the
+/// corner has not four edges, a face is missing, or a normal cannot be found.
+///
+/// # Errors
+/// Those of the topology lookups and curve evaluations.
+fn squarest_end_face(
+    k: &Kernel,
+    target: &Brep,
+    filleted: EdgeuseId,
+    sides: [EdgeuseId; 2],
+    vertex: VertexId,
+) -> Result<Option<AcrossFace>> {
+    let blended = need(
+        eu1::edge(target, filleted)?,
+        "filleted edge use without edge",
+    )?;
+    let mut side_edges = [blended; 2];
+    for (slot, &side) in side_edges.iter_mut().zip(sides.iter()) {
+        *slot = need(eu1::edge(target, side)?, "side edge use without edge")?;
+    }
+    let at_vertex = crate::topology::vertex::edges(target, vertex, None)?;
+    let mut rest = at_vertex
+        .iter()
+        .copied()
+        .filter(|&e| e != blended && !side_edges.contains(&e));
+    let (Some(middle), None) = (rest.next(), rest.next()) else {
+        return Ok(None);
+    };
+    if at_vertex.len() != 4 {
+        return Ok(None);
+    }
+    let along = tangent_leaving_vertex(k, target, blended, vertex)?;
+    let t_mid = tangent_leaving_vertex(k, target, middle, vertex)?;
+    let mut best: Option<(f64, AcrossFace)> = None;
+    for (i, (&side, &e)) in sides.iter().zip(side_edges.iter()).enumerate() {
+        let near = eu1::face(target, side)?;
+        let face = if super::is_fillet_side_face(target, filleted, near)? {
+            eu1::face(target, super::radial(target, side)?)?
+        } else {
+            near
+        };
+        let Some(face) = face else {
+            return Ok(None);
+        };
+        let t_side = tangent_leaving_vertex(k, target, e, vertex)?;
+        let Ok(normal) = t_side.cross(t_mid).unitize() else {
+            return Ok(None);
+        };
+        let square = along.dot(normal).abs();
+        if square.is_nan() {
+            return Ok(None);
+        }
+        if best.as_ref().is_none_or(|(b, _)| square > *b) {
+            best = Some((square, AcrossFace { side: i, face }));
+        }
+    }
+    Ok(best.map(|(_, a)| a))
+}
+
+/// Not upstream: at a multi-neighbour end, the rail on side `pair[1]` (the other side
+/// edge use) that ends where it crosses its side edge is made to end on `end_face`'s
+/// extended surface instead ([`FilletVertexType::RailXExtendedEdgeuse`]) when that edge
+/// leaves `vertex` off the end face's surface: its crossing is then off the end face, which
+/// the cap lies on. `pair[0]` is the picked side edge use, whose edge the end face holds.
+/// `vertices` holds the two rail-end vertices first, in the order of `sides`.
+///
+/// # Errors
+/// Those of the topology lookups.
+#[allow(clippy::too_many_arguments)]
+fn rail_ends_on_end_face(
+    k: &Kernel,
+    target: &mut Brep,
+    pseudo: &mut FilletBrep,
+    vertices: &[VertexId],
+    sides: &mut [EdgeuseId; 2],
+    turned_back: [Option<TurnedBack>; 2],
+    pair: [EdgeuseId; 2],
+    end_face: Option<FaceId>,
+    filleted: EdgeuseId,
+    vertex: VertexId,
+    tangency_tol_radians: f64,
+) -> Result<()> {
+    let [pick, other] = pair;
+    let Some(rail) = sides.iter().position(|&s| s == other) else {
+        return Ok(());
+    };
+    if turned_back.get(rail).copied().flatten().is_some() {
+        return Ok(());
+    }
+    let Some(&fv) = vertices.get(rail) else {
+        return Ok(());
+    };
+    if pseudo.fillet_vertex(fv)?.fillet_vertex_type() != FilletVertexType::RailXEdgeuse {
+        return Ok(());
+    }
+    // the picked edge's use on the end face, whose normal at the vertex is the end face's
+    let on_end = if eu1::face(target, pick)? == end_face {
+        pick
+    } else {
+        let across = super::radial(target, pick)?;
+        if eu1::face(target, across)? != end_face {
+            return Ok(());
+        }
+        across
+    };
+    let tol_deg = crate::math::rad_to_deg(tangency_tol_radians);
+    if edge_leaves_in_face(k, target, on_end, other, vertex, tol_deg)? {
+        return Ok(());
+    }
+    pseudo
+        .fillet_vertex_mut(fv)?
+        .set_fillet_vertex_type(FilletVertexType::RailXExtendedEdgeuse);
+    // the cap's edge from the rail's end runs on the rail's face, as at a side of the
+    // blend's convexity: the side's use on the blend's face
+    if !super::is_fillet_side_face(target, filleted, eu1::face(target, other)?)? {
+        if let Some(slot) = sides.get_mut(rail) {
+            *slot = super::radial(target, other)?;
+        }
+    }
+    Ok(())
 }
 
 /// The gap checks `SmFilletNx1Corner::MakeCornerTopology` ends with when the end face
@@ -1011,11 +1176,13 @@ impl FilletCorner {
             total,
             mixed,
             same,
+            seam_side,
             tangent_side,
-            sides,
+            mut sides,
             mut end_face,
             mut extend_edge,
             turned_back,
+            turned_back_past,
         } = env;
 
         // compute how much to extend the endSurface to make sure it covers the 'hole'
@@ -1085,23 +1252,47 @@ impl FilletCorner {
         }
 
         // In the mixed-cvxty case, pEndFace will be NULL when we arrive here
-        // if both side edges have opposite convexity to the filleted edge.
+        // if both side edges have opposite convexity to the filleted edge, or
+        // when the side edges lie on different faces at a multi-edge vertex.
         let mut multi_neighbor_end_face = false;
         let mut other_side_edgeuse = None;
         if end_face.is_none() {
             let [first, second] = sides;
             end_face = face_by_two_edgeuses(target, Some(first), Some(second), None)?;
             if end_face.is_none() {
-                multi_neighbor_end_face = true;
                 if total > 3 {
-                    // Use the side edge that is a cliff edge.
-                    let (pick, other) = if same[0] {
-                        (first, second)
-                    } else if same[1] {
-                        (second, first)
-                    } else if face_holds_edge(k, target, first, second, self.approx_tol_3d)? {
-                        (first, second)
-                    } else if face_holds_edge(k, target, second, first, self.approx_tol_3d)? {
+                    if seam_side[0] || seam_side[1] {
+                        multi_neighbor_end_face = true;
+                        // Pick the end face from the side edge that is not the seam (#2843).
+                        let (pick, other) = if seam_side[0] {
+                            (second, first)
+                        } else {
+                            (first, second)
+                        };
+                        end_face = eu1::face(target, pick)?;
+                        extend_edge = eu1::edge(target, pick)?;
+                        other_side_edgeuse = Some(other);
+                    } else if same[0] || same[1] {
+                        // A cusp side edge leaves the vertex along the filleted edge's tangent:
+                        // the face between them narrows to a point there and the cliff face
+                        // behind the cusp meets the other blend face tangentially, so there is
+                        // no valid cap to build (#13156, #14134). Leave the caller's cusp
+                        // handler to report NoRoom.
+                        if super::cusp_side_edge(k, target, self)?.is_some() {
+                            return Err(shape_not_built(OP, CornerShape::EndSideEdgesShareNoFace));
+                        }
+                        // Use the side edge that is a cliff edge (same == false): its edge use
+                        // lies on the end face P, while the same-convexity side's edge use lies
+                        // on the fillet's own side face S and its cap edge is OnExtendEdge along
+                        // S ∩ P. Setting extend_edge to the cliff edge makes
+                        // calc_edge_on_extended_edge intersect S with corner.end_face (P). No
+                        // early gap check is run: the extended cap edge lies on extended P by
+                        // construction and its rail vertex is computed after the trace.
+                        let pick = if same[0] { second } else { first };
+                        end_face = eu1::face(target, pick)?;
+                        extend_edge = eu1::edge(target, pick)?;
+                    } else {
+                        multi_neighbor_end_face = true;
                         // Both are cliff edges. The cap lies on the end face's surface
                         // between the end rib and both side edges, so the end face is the
                         // one whose surface holds the other side edge (the gap check asks
@@ -1109,37 +1300,89 @@ impl FilletCorner {
                         // End beside two faces meeting tangentially (a bore's flat wall
                         // and its round bottom) depend on which of them came first round
                         // the vertex: the mirror image built and the part did not (#15768).
-                        (second, first)
-                    } else {
-                        // Neither surface holds the whole other side edge (a wall whose slanted
-                        // end overhangs a plate: the plate's corner edge runs on past the wall's
-                        // end face, the wall's edge leaves the plate's end plane). The cap's edge
-                        // along it, from the vertex to the rail's end, lies on the end face's
-                        // surface only if the edge leaves the vertex in it: on the first face's
-                        // surface, picked whatever, the cap was left off the result, refused as
-                        // no closed solid (#17617, WR-783). Where both or neither leave so, the
-                        // first, as upstream.
-                        let tol_deg = crate::math::rad_to_deg(self.tangency_tol_radians);
-                        if !edge_leaves_in_face(k, target, first, second, vertex, tol_deg)?
-                            && edge_leaves_in_face(k, target, second, first, vertex, tol_deg)?
-                        {
-                            (second, first)
-                        } else {
-                            (first, second)
+                        let (pick, other) =
+                            if face_holds_edge(k, target, first, second, self.approx_tol_3d)? {
+                                (first, second)
+                            } else if face_holds_edge(k, target, second, first, self.approx_tol_3d)?
+                            {
+                                (second, first)
+                            } else {
+                                // Neither surface holds the whole other side edge (a wall whose
+                                // slanted end overhangs a plate: the plate's corner edge runs on
+                                // past the wall's end face, the wall's edge leaves the plate's end
+                                // plane). The cap's edge along it, from the vertex to the rail's
+                                // end, lies on the end face's surface only if the edge leaves the
+                                // vertex in it: on the first face's surface, picked whatever, the
+                                // cap was left off the result, refused as no closed solid (#17617,
+                                // WR-783). Where both or neither leave so, the first, as upstream.
+                                let tol_deg = crate::math::rad_to_deg(self.tangency_tol_radians);
+                                if !edge_leaves_in_face(k, target, first, second, vertex, tol_deg)?
+                                    && edge_leaves_in_face(
+                                        k, target, second, first, vertex, tol_deg,
+                                    )?
+                                {
+                                    (second, first)
+                                } else {
+                                    (first, second)
+                                }
+                            };
+                        let (mut pick, mut other) = (pick, other);
+                        end_face = eu1::face(target, pick)?;
+                        // (not upstream) The end face lies across a side edge from the blend.
+                        // Where the picked edge use runs on the blend's own face instead (the
+                        // rail's face: a slanted side whose top edge meets an upright standing on
+                        // the part), the rail lay in the end face's surface, its end was found far
+                        // off along it and the corner was refused. The end face is then the face
+                        // across one of the two side edges: the one the blended edge crosses most
+                        // squarely at the vertex, which closes the blend's section. The face
+                        // across the other side can run almost along the blended edge (the
+                        // upright's back face, nearly flush with the slanted side), so the rail
+                        // would meet it far off.
+                        if super::is_fillet_side_face(target, filleted, end_face)? {
+                            if let Some(across) =
+                                squarest_end_face(k, target, filleted, [pick, other], vertex)?
+                            {
+                                if across.side == 1 {
+                                    core::mem::swap(&mut pick, &mut other);
+                                }
+                                end_face = Some(across.face);
+                            } else {
+                                end_face = eu1::face(target, super::radial(target, pick)?)?;
+                            }
                         }
-                    };
-                    end_face = eu1::face(target, pick)?;
-                    extend_edge = eu1::edge(target, pick)?;
-                    other_side_edgeuse = Some(other);
+                        extend_edge = eu1::edge(target, pick)?;
+                        // (not upstream) The rail on the other side ends where it crosses that
+                        // side's edge. Where the edge leaves the vertex off the end face's
+                        // surface (a slanted side's top edge under an upright standing on the
+                        // part, the end face the upright's side), that crossing lies off the end
+                        // face, and the cap through it, the vertex and the other rail's end was
+                        // left open: the result was refused as not a closed solid. The rail then
+                        // ends on the end face's extended surface, as one beside a side edge of
+                        // the blend's convexity does.
+                        rail_ends_on_end_face(
+                            k,
+                            target,
+                            pseudo,
+                            &self.vertices,
+                            &mut sides,
+                            turned_back,
+                            [pick, other],
+                            end_face,
+                            filleted,
+                            vertex,
+                            self.tangency_tol_radians,
+                        )?;
+                        other_side_edgeuse = Some(other);
+                    }
                 } else {
-                    // Invalid brep topology
-                    return Err(SolidError::blend_failed(
-                        OP,
-                        "the brep's topology at the corner is not valid",
-                    ));
+                    // Invalid brep topology (upstream): at most three edges, whose side edges
+                    // share no face, as where an edge meeting the vertex twice is in the ring
+                    // once
+                    return Err(shape_not_built(OP, CornerShape::EndSideEdgesShareNoFace));
                 }
             }
         }
+        self.end_face = end_face;
         for &(piece, face) in &ribs {
             pseudo
                 .fillet_edge_mut(piece)?
@@ -1147,10 +1390,17 @@ impl FilletCorner {
         }
 
         // compute how much to extend the sideSurface to make sure it covers the 'hole'
-        let mut do_extend = extend_edge.is_some();
+        let has_turned_back = turned_back.iter().any(Option::is_some);
+        let mut do_extend = extend_edge.is_some() || has_turned_back;
         if ext_dist > EFF_ZERO && !do_extend && matches!(solver, SolverObject::ConstantRadius(_)) {
             ext_dist *= 0.1; // use only a small extension
             do_extend = true; // for constant radius only
+        }
+        if has_turned_back && turned_back_past > EFF_ZERO {
+            let needed = 2.0 * turned_back_past;
+            if needed > ext_dist {
+                ext_dist = needed;
+            }
         }
 
         // When a surface extension is needed to define the endFace shape,

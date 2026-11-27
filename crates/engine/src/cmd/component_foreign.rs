@@ -2,7 +2,8 @@
 //! imported body each, without their history (that stays with the design they were made in), at
 //! the same world coordinates as in their design, in one Import base feature in the target
 //! component. Components come as a Paste New does: an independent copy of each with what it
-//! holds, its history, appearances, joints and motion, where it is in the world.
+//! holds, its history, appearances, joints and motion, where it is in the world, or with
+//! `placement: "origin"` at the target component's origin (#17621).
 
 use super::*;
 
@@ -12,6 +13,14 @@ pub(super) fn paste_from_design(s: &mut Session, p: &Value) -> Result<Value> {
     if copy.bodies.is_empty() && copy.placed.is_empty() {
         return Err(bad(cmd, "nothing was copied in another design"));
     }
+    let at_origin = match p.get("placement") {
+        None | Some(Value::Null) => false,
+        Some(v) => match v.as_str() {
+            Some("world") => false,
+            Some("origin") => true,
+            _ => return Err(bad(cmd, "`placement` must be \"world\" or \"origin\"")),
+        },
+    };
     let to = if p.get("component").is_some() { component(s, p, "component", cmd)? } else { s.active_component };
     let given = match p.get("component_path") {
         None => None,
@@ -31,6 +40,14 @@ pub(super) fn paste_from_design(s: &mut Session, p: &Value) -> Result<Value> {
     let frame = s.design_document().path_transform(to, &path).ok_or_else(|| bad(cmd, "that path is not a placement of the target"))?;
     let into_target = solidcraft_doc::mat_inverse(&frame).ok_or_else(|| bad(cmd, "the target's frame is not invertible"))?;
     if copy.bodies.is_empty() {
+        // At the origin: the first copied component's origin goes on the target's origin, the
+        // others keeping where they are from it.
+        let into_target = if at_origin {
+            let first = copy.placed.first().map(|(_, _, world)| *world).unwrap_or(solidcraft_doc::IDENTITY);
+            solidcraft_doc::mat_inverse(&first).ok_or_else(|| bad(cmd, "the copied component's frame is not invertible"))?
+        } else {
+            into_target
+        };
         return paste_components(s, &copy, to, path, into_target, p);
     }
     // Each body at its world coordinates in its design, in the target's frame, named as in its
@@ -53,7 +70,8 @@ pub(super) fn paste_from_design(s: &mut Session, p: &Value) -> Result<Value> {
     let header = solidcraft_kernel::StepHeader { organization: "SolidCraft".into(), ..Default::default() };
     let step = solidcraft_kernel::step_export_bodies(&list, &header)?;
     let mut scratch = s.scratch();
-    let kind = FeatureKind::Import { file: format!("{} (pasted)", copy.design), step: step.into(), components: Vec::new(), skip: Vec::new() };
+    let kind =
+        FeatureKind::Import { file: format!("{} (pasted)", copy.design), step: step.into(), components: Vec::new(), skip: Vec::new(), records: None };
     // Named as any import is ("Import1"); the design they came from stays on it as its file.
     let id = scratch.doc_mut().add_feature(kind, None)?;
     let feature = scratch.doc.feature(id).map(|f| f.name.clone()).unwrap_or_default();
@@ -66,13 +84,13 @@ pub(super) fn paste_from_design(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, format!("the pasted bodies didn't import: {error}")));
     }
     scratch.selection = names.iter().map(|name| crate::Sel::Body { name: name.clone() }).collect();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     Ok(json!({"bodies": names, "feature": feature, "component": to}))
 }
 
 /// Independent copies of the components copied in another design, each with what it holds, in
-/// `to` (placed by `path`; `into_target` takes world coordinates into it), where each is in the
-/// world; one step to undo. They are selected.
+/// `to` (placed by `path`; `into_target` takes their world placements in the copied design to
+/// placements in `to`); one step to undo. They are selected.
 fn paste_components(
     s: &mut Session,
     copy: &crate::ForeignCopy,
@@ -99,7 +117,7 @@ fn paste_components(
     }
     let Some(mut scratch) = computed else { return Err(bad("component.paste_from_design", "the copied components are gone")) };
     scratch.selection = made.iter().map(|path| crate::Sel::Occurrence { path: path.clone() }).collect();
-    s.accept_computed(scratch);
+    s.accept_computed(scratch)?;
     Ok(json!({"paths": made, "component": to}))
 }
 

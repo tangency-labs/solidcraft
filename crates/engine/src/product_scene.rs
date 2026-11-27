@@ -261,6 +261,7 @@ mod tests {
                     step: step.into(),
                     components: Vec::new(),
                     skip: Vec::new(),
+                    records: None,
                 },
                 None,
             )

@@ -2354,3 +2354,56 @@ impl UnitDiff for Runner {
         rust(k, &case.parse()?)
     }
 }
+
+#[cfg(test)]
+mod bstuv {
+    #![allow(clippy::unwrap_used, clippy::panic, clippy::print_stderr)]
+    use super::*;
+
+    /// WR-441 (`crate::bstuv_trim_rows`): `trim_rail_mouse_rebuild_edge7`, whose rail's UV
+    /// trim keeps its short end spans. `sm_TrimRail` trims the rail's 3D curve and its UV
+    /// trim to the same interval. The mate holds no trim, so it reads the primary's. After
+    /// the trim, the UV trim is certified on the trimmed rail within the edge's tolerance:
+    /// a rounded-interval Hausdorff bound between `C` and `S(W)`, over the whole interval
+    /// and over each end span.
+    #[test]
+    fn bstuv_trim_rail_keeps_its_rail_on_the_edge() {
+        use solidcore::curve::curve::CurveKind;
+        use solidcore::query::curve_surface_gap::trim_image_gap_bound;
+        use solidcore::topology::edgeuse::p1 as eu1;
+        let name = "trim_rail_mouse_rebuild_edge7";
+        let case = crate::case::regression_case(&Runner, name);
+        let i: Inputs = case.parse().unwrap();
+        let Inputs::TrimRail { brep, t, .. } = &i else {
+            panic!("{name}: not a trim_rail case")
+        };
+        let mut c = own_case(brep).unwrap().unwrap();
+        let r = resolve(&i, &c);
+        let e = EdgeId::from_index(eid(r[0]).unwrap());
+        let [t0, t1] = trim_interval(&c, r[0], *t).unwrap();
+        let prim = eu::primary_edgeuse(&c.brep, e).unwrap().unwrap();
+        let k = Kernel::default();
+        trim_rail(&k, &mut c.brep, e, &Extent1d::from_min_max(t0, t1)).unwrap();
+        let (w, owner) = eu1::uv_trim_curve(&c.brep, prim).unwrap();
+        assert_eq!(owner, Some(prim), "the primary holds the trim");
+        let w = w.unwrap();
+        let face = eu1::face(&c.brep, prim).unwrap().unwrap();
+        let s = c.brep.face(face).unwrap().surface.as_ref().unwrap();
+        let rec = c.brep.edge(e).unwrap();
+        let (curve, tol) = (rec.curve.as_ref().unwrap(), rec.tolerance);
+        let ends = crate::bstuv_trim_rows::trim_end_spans(&k, s, curve, w, tol);
+        let CurveKind::BSpline(bw) = w.kind() else {
+            panic!("the trim is not a B-spline")
+        };
+        let knots = bw.gw_nurb().unwrap().knots().to_vec();
+        let range = [knots[0], knots[knots.len() - 1]];
+        let full = trim_image_gap_bound(&k, s, curve, w, range, 0.0)
+            .unwrap()
+            .unwrap();
+        eprintln!("BSTUV {name}: {ends:?}, whole trim {full:e} (tolerance {tol:e})");
+        assert_eq!(ends.n, 48, "the row's trim");
+        for b in ends.bound.into_iter().chain(ends.degen.iter().map(|d| d.1)).chain([full]) {
+            assert!(b <= tol, "the trim is {b:e} off the rail");
+        }
+    }
+}

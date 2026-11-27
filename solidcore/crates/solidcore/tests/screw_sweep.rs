@@ -30,8 +30,10 @@ use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::surface::procedural_blend::NetScope;
 use solidcore::surface::procedural_sweep::{ProceduralSweep, MAX_HALF_ANGLE};
 use solidcore::surface::surface::{Surface, SurfaceKind};
+use solidcore::sweep::screw::MAX_STATIONS;
 use solidcore::sweep::screw::{
-    screw_sweep, screw_sweep_body, screw_sweep_radial, screw_sweep_radial_body,
+    screw_sweep, screw_sweep_body, screw_sweep_radial, screw_sweep_radial_body, screw_sweep_with,
+    Walls,
 };
 use solidcore::topology::brep::{p1, p2};
 use solidcore::topology::face;
@@ -315,6 +317,83 @@ fn out_of_range_inputs_are_refused() {
     assert!(screw_sweep_radial(&mut k, &c, O, Z, 1.0, 3.0, &late, 1e-4).is_err());
 }
 
+/// #22577: a thread along a whole rod, 202 turns of pitch 1.25 (the fork stopped at 200).
+/// Its section is a V 1 wide at radius 8.5 with its point at 7.2; the top line runs along
+/// the axis, so every wall comes in half turns.
+fn rod_thread() -> Meridian {
+    Meridian::Polygon(vec![(7.2, 0.5), (8.5, 0.0), (8.5, 1.0)])
+}
+
+#[test]
+fn issue_22577_a_thread_of_202_turns_builds() {
+    let mut k = Kernel::default();
+    let (p, turns) = (1.25, 202.0);
+    // SolidCraft's tolerance: a ten-thousandth of the pitch
+    let tol = p * 1e-4;
+    let m = rod_thread();
+    let mut b = screw_sweep(&mut k, &m.curves(), O, Z, p, turns, tol).unwrap();
+    assert!(p2::is_manifold_solid(&b).unwrap());
+    // 404 half turns of three walls and two caps; a section of three vertices and three
+    // edges at each of the 405 breaks and ends, three edges along each half turn
+    let halves = 2 * turns as usize;
+    assert_eq!(p1::faces(&b, None).unwrap().len(), 3 * halves + 2);
+    assert_eq!(
+        p1::edges(&b, None).unwrap().len(),
+        3 * (halves + 1) + 3 * halves
+    );
+    assert_eq!(p1::vertices(&b, None).unwrap().len(), 3 * (halves + 1));
+    // one closed boundary: the solid's region and the infinite one, a shell each
+    assert_eq!(p1::regions(&b, None).unwrap().len(), 2);
+    assert_eq!(p1::shells(&mut k, &b, None).unwrap().len(), 2);
+    // Pappus: the section's area times 2 pi times its centroid's radius, per turn. Each
+    // wall lies within `tol` of its screw surface, so the volume is off by at most `tol`
+    // times the walls' area; a wall of a line of length l is at most l times the helix at
+    // its outer end, turn for turn.
+    let (area, centroid) = (0.5 * 1.0 * 1.3, (7.2 + 8.5 + 8.5) / 3.0);
+    let expected = area * 2.0 * PI * centroid * turns;
+    let flank = 0.5f64.hypot(1.3);
+    let helix = (2.0 * PI * 8.5).hypot(p) * turns;
+    let bound = tol * (1.0 + 2.0 * flank) * helix;
+    let v = volume(&k, &mut b);
+    assert!(
+        (v - expected).abs() <= bound,
+        "volume {v}, expected {expected} within {bound}"
+    );
+}
+
+#[test]
+fn issue_22577_more_turns_than_the_spans_hold_are_refused_by_the_spans() {
+    // At this tolerance a half turn takes eight spans: 1000 turns take 16000, more than
+    // `MAX_STATIONS`, and the refusal says so.
+    let mut k = Kernel::default();
+    let tol = 1.25e-4;
+    let refusal = screw_sweep(&mut k, &rod_thread().curves(), O, Z, 1.25, 1000.0, tol);
+    assert!(
+        matches!(
+            refusal,
+            Err(SolidError::InvalidInput {
+                reason: "too many turns for the tolerance: more spans than a screw sweep takes",
+                ..
+            })
+        ),
+        "{refusal:?}"
+    );
+    // past what the span bound can ever hold (a span turns at most an eighth of a turn), the
+    // turns themselves are refused, before any span is counted
+    let past = MAX_STATIONS / 8.0 + 1.0;
+    let early = screw_sweep(&mut k, &rod_thread().curves(), O, Z, 1.25, past, 1.0);
+    assert!(
+        matches!(
+            early,
+            Err(SolidError::InvalidInput {
+                reason: "origin, pitch, turns or tolerance out of range",
+                ..
+            })
+        ),
+        "{early:?}"
+    );
+}
+
 #[test]
 fn body_variants_stop_before_the_solid_check() {
     // The `_body` variants give the same body as the checked entry points where it is a
@@ -410,6 +489,7 @@ fn check_wall(wall: &Surface, pitch: f64, law: &[(f64, f64)]) -> WallCheck {
     assert_eq!(d.screw().unwrap().origin(), O);
     assert_eq!(d.screw().unwrap().law().is_some(), !law.is_empty());
     assert!(d.half_angle() > 0.0 && d.half_angle() <= MAX_HALF_ANGLE);
+    assert_eq!(d.half_angles().len() + 1, d.stations().len());
     let ([_, a1], [_, b1], swapped) = d.definition_map();
     // the definition's stations are the net's knots across the turns, through the map
     let can = net.canonical().unwrap();
@@ -428,10 +508,10 @@ fn check_wall(wall: &Surface, pitch: f64, law: &[(f64, f64)]) -> WallCheck {
     let profile = d.profile().natural_interval();
     let r = 1.0 / 3f64.sqrt();
     let mut farthest: f64 = 0.0;
-    for span in d.stations().windows(2) {
+    for (span, &half) in d.stations().windows(2).zip(d.half_angles()) {
         for s in [-0.93, -r, -0.31, 0.0, 0.17, r, 0.88] {
             let t = span[0] + 0.5 * (s + 1.0) * (span[1] - span[0]);
-            let theta = arc_angle(span[0], span[1], d.half_angle(), t);
+            let theta = arc_angle(span[0], span[1], half, t);
             assert_eq!(d.turn_at(t).0, theta);
             for a in [0.13, 0.5, 0.87] {
                 let w = profile.min() + a * (profile.max() - profile.min());
@@ -485,6 +565,77 @@ fn issue_2572_m10_groove_walls_are_their_definitions() {
         bounds.push(c.bound);
     }
     println!("M10x1.5 groove walls: bounds {bounds:?}");
+}
+
+/// Joined walls: each flank of an M10 groove is one face across its half turns (the
+/// cylinders keep theirs), its net the pieces' spans joined, so spans of the last, shorter
+/// piece keep their own half angle; every wall is still its definition within the
+/// tolerance, and the solid is the pieces' (the same volume, the same cylinders).
+#[test]
+fn joined_walls_run_on_across_the_half_turns() {
+    let mut k = Kernel::default();
+    // 2.7 turns: five half turns, then a shorter piece of 0.2 turns
+    let (p, turns) = (1.5, 2.7);
+    let tol = p * 1e-4;
+    let m = m10_groove(p);
+    let mut pieces = screw_sweep(&mut k, &m.curves(), O, Z, p, turns, tol).unwrap();
+    let mut joined = screw_sweep_with(
+        &mut k,
+        &m.curves(),
+        O,
+        Z,
+        p,
+        turns,
+        None,
+        tol,
+        Walls::Joined,
+    )
+    .unwrap();
+    assert!(p2::is_manifold_solid(&joined).unwrap());
+    let flanks = walls(&joined);
+    assert_eq!(flanks.len(), 2, "one face per flank");
+    for wall in &flanks {
+        let c = check_wall(wall, p, &[]);
+        assert!(c.bound <= tol, "bound {} past the tolerance {tol}", c.bound);
+        let d = wall.procedural_sweep().unwrap();
+        let mut halves = d.definition().half_angles().to_vec();
+        halves.dedup();
+        assert_eq!(
+            halves.len(),
+            2,
+            "the half turns' spans and the last piece's: {halves:?}"
+        );
+        let (first, last) = (
+            d.definition().stations()[0],
+            *d.definition().stations().last().unwrap(),
+        );
+        assert!(first == 0.0 && (last - turns * 2.0 * PI).abs() <= 1e-12);
+    }
+    let (dev, cylinders) = screw_deviation(&k, &joined, &m, p, turns, &[]);
+    assert!(dev <= tol, "a wall strays {dev}, {tol} asked");
+    let (_, piece_cylinders) = screw_deviation(&k, &pieces, &m, p, turns, &[]);
+    assert_eq!(cylinders.len(), piece_cylinders.len());
+    let (vj, vp) = (volume(&k, &mut joined), volume(&k, &mut pieces));
+    assert!((vj - vp).abs() <= 1e-9 * vp, "joined {vj}, pieces {vp}");
+    // a law's angle still ends a face: over the first turn, where the offset changes, the
+    // axial lines sweep B-spline walls too (four), then the two flanks run on (two)
+    let law = [(0.0, -0.3), (1.0, 0.0)];
+    let b = screw_sweep_with(
+        &mut k,
+        &m.curves(),
+        O,
+        Z,
+        p,
+        turns,
+        Some(&law),
+        tol,
+        Walls::Joined,
+    )
+    .unwrap();
+    assert!(p2::is_manifold_solid(&b).unwrap());
+    assert_eq!(walls(&b).len(), 6);
+    let (dev, _) = screw_deviation(&k, &b, &m, p, turns, &law);
+    assert!(dev <= tol, "a wall strays {dev}, {tol} asked");
 }
 
 /// A caller reads through the net at a tolerance of at least the bound, and through the

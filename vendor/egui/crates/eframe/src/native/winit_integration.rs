@@ -18,27 +18,39 @@ pub fn is_invisible_or_minimized(window: &Window) -> bool {
 }
 
 /// The repaint an event asks for, after the app's [`crate::App::repaint_on_window_event`]
-/// override: `default` unless the app says otherwise.
+/// override: `default` unless the app says otherwise. Only the root viewport's events are put
+/// to the app (`viewport`, `None` when the window is unknown): the event carries no window, so
+/// the app would read another window's pointer position as the root's.
 pub(crate) fn repaint_for_event(
     app: &mut dyn crate::App,
     event: &winit::event::WindowEvent,
     default: bool,
+    viewport: Option<ViewportId>,
 ) -> bool {
+    if viewport != Some(ViewportId::ROOT) {
+        return default;
+    }
     app.repaint_on_window_event(event).unwrap_or(default)
 }
 
-/// [`repaint_for_event`] for a device event ([`crate::App::repaint_on_device_event`]).
+/// [`repaint_for_event`] for a device event ([`crate::App::repaint_on_device_event`]), with
+/// `viewport` the one the event was delivered to.
 pub(crate) fn repaint_for_device_event(
     app: &mut dyn crate::App,
     event: &winit::event::DeviceEvent,
     default: bool,
+    viewport: Option<ViewportId>,
 ) -> bool {
+    if viewport != Some(ViewportId::ROOT) {
+        return default;
+    }
     app.repaint_on_device_event(event).unwrap_or(default)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{repaint_for_device_event, repaint_for_event};
+    use egui::ViewportId;
 
     struct TestApp {
         answer: Option<bool>,
@@ -56,8 +68,8 @@ mod tests {
         }
     }
 
-    /// An app can suppress or force the repaint a window or device event asks for; `None` keeps
-    /// the default.
+    /// An app can suppress or force the repaint a window or device event of the root viewport
+    /// asks for; `None` keeps the default. Another window's events keep the default.
     #[test]
     fn the_app_can_override_the_repaint_an_event_asks_for() {
         let window_event = winit::event::WindowEvent::Focused(true);
@@ -69,16 +81,29 @@ mod tests {
             (Some(true), false, true),
         ] {
             let mut app = TestApp { answer };
+            let root = Some(ViewportId::ROOT);
             assert_eq!(
-                repaint_for_event(&mut app, &window_event, default),
+                repaint_for_event(&mut app, &window_event, default, root),
                 expected,
                 "{answer:?} over {default} for a window event"
             );
             assert_eq!(
-                repaint_for_device_event(&mut app, &device_event, default),
+                repaint_for_device_event(&mut app, &device_event, default, root),
                 expected,
                 "{answer:?} over {default} for a device event"
             );
+            for other in [Some(ViewportId::from_hash_of("panel")), None] {
+                assert_eq!(
+                    repaint_for_event(&mut app, &window_event, default, other),
+                    default,
+                    "{answer:?} for a window event of {other:?}"
+                );
+                assert_eq!(
+                    repaint_for_device_event(&mut app, &device_event, default, other),
+                    default,
+                    "{answer:?} for a device event of {other:?}"
+                );
+            }
         }
     }
 }
@@ -156,6 +181,21 @@ pub enum UserEvent {
     /// A request related to [`accesskit`](https://accesskit.dev/).
     #[cfg(feature = "accesskit")]
     AccessKitActionRequest(accesskit_winit::Event),
+
+    /// SolidCraft: run this viewport's logic pass now, without waiting for a compositor frame
+    /// callback and without the GPU paint (the compositor's next frame presents the result).
+    ///
+    /// The app may send this through [`EventLoopProxy`](winit::event_loop::EventLoopProxy)
+    /// from another thread (it receives the proxy from
+    /// [`NativeOptions::event_loop_ready`](crate::NativeOptions)). On Wayland a window the
+    /// compositor has stopped giving frames to (off-screen, on another workspace) only
+    /// receives its frame callbacks from a slow fallback timer, so a request served in the
+    /// app's logic pass would stall once per second. Running the pass directly answers it at
+    /// once; the compositor's frames then present the result whenever they come.
+    RunLogicNow {
+        /// What to run.
+        viewport_id: ViewportId,
+    },
 }
 
 #[cfg(feature = "accesskit")]

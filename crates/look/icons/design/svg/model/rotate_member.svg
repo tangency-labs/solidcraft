@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Rotate Member</title>
+  <path d="M5.37 15.42L39.47 35.1L39.47 50.36L5.37 30.67Z" fill="#b8c3cf"/>
+  <path d="M18.58 7.79L52.68 27.47L39.47 35.1L5.37 15.42Z" fill="#e2e8ef"/>
+  <path d="M52.68 27.47L39.47 35.1L39.47 50.36L52.68 42.73ZM50.12 31.9L42.02 36.58L42.02 45.93L50.12 41.25Z" fill="#8e9faf" fill-rule="evenodd"/>
+  <defs><clipPath id="rm_hole"><path d="M50.12 31.9L42.02 36.58L42.02 45.93L50.12 41.25Z" fill="none"/></clipPath></defs>
+  <g clip-path="url(#rm_hole)">
+  <path d="M50.12 31.9L42.02 36.58L42.02 45.93L50.12 41.25Z" fill="#34465b"/>
+  <path d="M50.12 41.25L42.02 45.93L10.06 27.47L18.16 22.8Z" fill="#e2e8ef"/>
+  <path d="M50.12 31.9L50.12 41.25L18.16 22.8L18.16 13.45Z" fill="#b8c3cf"/>
+  </g>
+  <path d="M50.12 31.9L42.02 36.58L42.02 45.93L50.12 41.25Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18.58 7.79L52.68 27.47L52.68 42.73L39.47 50.36L5.37 30.67L5.37 15.42Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M5.37 15.42L39.47 35.1L52.68 27.47" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M39.47 35.1L39.47 50.36" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M56.69 37.25C55.41 42.06 52.46 46.83 48.83 49.98C45.19 53.13 41.34 54.26 38.54 52.99C35.75 51.71 34.38 48.21 34.88 43.63C35.39 39.05 37.7 33.99 41.05 30.13" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M48.04 24.94L43.57 33.96L38.14 26.77Z" fill="#ffffff" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M56.69 37.25C55.41 42.06 52.46 46.83 48.83 49.98C45.19 53.13 41.34 54.26 38.54 52.99C35.75 51.71 34.38 48.21 34.88 43.63C35.39 39.05 37.7 33.99 41.05 30.13" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M48.04 24.94L43.57 33.96L38.14 26.77Z" fill="#236ead"/>
+</svg>

@@ -52,6 +52,11 @@ class Synthetic(unittest.TestCase):
     def test_reverse_dependencies_are_added(self):
         self.assertEqual(affected.select(SYNTH, ["crates/base/src/lib.rs"]), (False, ["base", "mid", "top"]))
 
+    def test_owners_leave_out_the_dependents(self):
+        self.assertEqual(affected.owners(SYNTH, ["crates/base/src/lib.rs", "docs/x.md"]), (False, {"base"}))
+        self.assertEqual(affected.owners(SYNTH, ["Cargo.lock", "crates/base/src/lib.rs"]), (True, {"base"}))
+        self.assertEqual(affected.select(SYNTH, ["Cargo.lock", "crates/base/src/lib.rs"]), (True, []))
+
     def test_unrelated_package_is_not_selected(self):
         full, pk = affected.select(SYNTH, ["crates/mid/Cargo.toml"])
         self.assertEqual((full, pk), (False, ["mid", "top"]))
@@ -127,7 +132,8 @@ class RealWorkspace(unittest.TestCase):
     def test_embedded_root_files_select_their_crate(self):
         for path, pkg in [("ATTRIBUTION.md", "solidcraft-ui-egui"), ("LICENSE-MIT", "solidcraft-engine"),
                           ("NOTICE", "solidcraft-engine"), ("THIRD-PARTY-LICENSES.txt", "solidcraft-engine"),
-                          ("skills/solidcraft-modeling/SKILL.md", "solidcraft-mcp")]:
+                          ("skills/solidcraft-modeling/SKILL.md", "solidcraft-mcp"),
+                          (".agents/skills/solidcraft-tests/SKILL.md", "xtask"), (".claude/skills", "xtask")]:
             full, pk = affected.select(self.meta, [path])
             self.assertFalse(full, path)
             self.assertIn(pkg, pk, path)

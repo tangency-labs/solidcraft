@@ -15,9 +15,18 @@ view.
 - **Title bar.** On Windows and Linux the application bar is the window's title bar. On the left:
   the File menu (New, Open, Save, Save As, Export…), undo and redo, the Home tab (the start page)
   and one tab per open design (each with its own undo history, selection and camera; a dot marks
-  unsaved changes). Double-click a design's tab to rename the design: type the name, then press
-  Enter or click elsewhere to keep it, or Esc to leave the old one (Preferences › Interface turns
-  this off, for a double-click that maximizes the window instead). On the right: Report a bug,
+  unsaved changes). Files dragged from a file manager onto the tabs open there, each as a design
+  in a new tab: a mark shows the place between the tabs. A CAD, mesh, drawing or point cloud file
+  dropped there becomes a design of its own; dropped on the view instead, it is inserted into a
+  design that has features. Double-click a design's tab, or right-click it and choose **Rename**, to
+  rename the design: type the name, then press Enter or click elsewhere to keep it, or Esc to leave
+  the old one (Preferences › Interface turns the double-click off, for a double-click that maximizes
+  the window instead; **Rename** stays in the menu). **Duplicate** in a design tab's right-click menu
+  opens a copy of the design in a new tab next to it, named "… copy" and not saved yet. **Save**
+  and **Save As…** in the same menu save that tab's design (it is shown first), as the File menu's
+  do. With a design's views shown as tabs inside its tab, the chevron right after its + folds them
+  away to save room, leaving the design's name and how many views it has; the chevron brings them
+  back. On the right: Report a bug,
   Help (?), Preferences (which hold the theme) and the window's buttons. On Linux, to have your
   desktop's own title bar and window buttons instead, set
   `SOLIDCRAFT_TITLEBAR=system` or put `"titlebar": "system"` in `graphics.json` in the settings
@@ -194,6 +203,11 @@ view.
   different folders, the sketch keeps a row of its own. The timeline along the bottom always lists
   features in creation order.
   Feature Folders can contain joints as well as features; closing a folder hides both behind one tile.
+  Click the view button in the History's header, with History placed at the **Bottom**, for a multi-track
+  component matrix view that maps features across their owning components, visualizes cross-component actions
+  with vertical connectors, highlights topological dependency corridors `[ ... ]` for safe reordering,
+  and supports folder grouping and cascading suppression (the 2D Timeline applies only to bottom placement;
+  placing History at the left or in the browser activates the 1D view). See [2D Timeline](timeline-2d.md).
 - **Status bar** (off by default: Preferences › Interface › **Status bar**). A thin bar along
   the window's bottom edge, below the timeline. From the right: the design's units (click them
   to change the design's units, one undo step), the open sketch's state in its colour (under
@@ -265,6 +279,11 @@ shortcut and help; the arrow keys move across and between rows. Rest the pointer
 two seconds and a pin in its corner can be clicked to pin it to the ribbon or remove it (a
 quicker click anywhere on the icon starts the command). Right-clicking the icon, or dragging it
 onto the ribbon, also pins it; a pinned command always shows its pin.
+
+To change the order of a section's menu, drag a command to another place in it (list or large
+icons): a line shows where it will go. A command stays within its group (Edges, Faces, …). The
+order is kept with the toolbar, and **Reset Toolbar** restores it. Two menus keep their built-in
+order and can't be rearranged: Sketch › **Create** and the **»** overflow menu.
 
 Interface › **Leave pinned commands out of the drop-down menus** (off by default) lists in a
 section's menu only the commands that are not already buttons on the ribbon. When the window is
@@ -531,6 +550,18 @@ A choice comparison must name a declared choice. Unknown option ids, mixed compa
 malformed values are refused with the overlay's one-based position. An overlay may override
 `colors`, `radii`, `borders` and `icon_palette`; all their existing key and value checks apply.
 Overlays only select literal tables: there are no scripts, expressions or interpolation.
+
+The optional boolean `accepts_accent` (default `false`) lets the Accent preference apply over the
+theme. Under the themes, **Accent** then puts another accent colour over it: the theme's own (the
+default), one of eight presets, or any colour from the colour picker. It recolours the accent, the
+selected row, the primary buttons, the selection in the view and the File view's primary action;
+the Sketch, Surface and other tabs keep their own colours. A theme without the field shows the
+row disabled, with the reason "This theme keeps its own accent", and ignores a saved accent, which
+is kept for a theme that accepts one. The built-in Light and Dark accept an accent, as do the
+built-in themes Akari, Blueprint, Catppuccin Mocha, Clay, Clay Dark, Cupertino, Graphite, Gruvbox
+Dark and Light, Nord, Nosferatu, Okibi, One Dark, Onyx and Tokyo Night. The others keep their own
+accent: the 1-bit themes, CGA, High Contrast, the green and amber phosphor themes, Platinum 9,
+SolidCraft 95 and the Solarized themes, whose colours are the theme's identity or a fixed standard.
 
 The optional integer `requires` defaults to 1; this app supports levels through 2. A larger level
 loads the authored base value tables, disables options and overlays, and exposes a

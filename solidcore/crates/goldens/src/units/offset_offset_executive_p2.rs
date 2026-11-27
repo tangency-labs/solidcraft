@@ -1655,6 +1655,19 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         .as_ref()
         .map(|fixture| build(&mut kernel, fixture, input.tolerance, NAMESPACE_FOREIGN))
         .transpose()?;
+    // (a probe's input, for the result's soundness: capture off, nothing). Named only where
+    // the call promises a finished solid of a solid: a shell, or a merged and stitched
+    // offset of the whole body (no shell faces kept); a member call left unmerged, unstitched
+    // or keeping shell faces hands back pieces, not a solid (#13685)
+    let promises_solid = match input.operation {
+        Operation::StaticShell | Operation::ApiShell => true,
+        _ => {
+            input.config.merge_results
+                && !input.config.skip_stitch_merge
+                && input.faces.is_empty()
+        }
+    };
+    crate::soundness::input(source.as_ref().filter(|_| promises_solid));
     let mut records = solidcore::topology::topology::NotifyRecords::new();
     let mut attributes = AttributeStore::default();
     if let Some(brep) = source.as_mut() {
@@ -1779,12 +1792,19 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         ),
     };
     let (status, mut result) = operation(result)?;
+    if let Some(brep) = result.as_ref() {
+        crate::dump::body(&kernel, "result", brep);
+    }
     let result_projection = result.as_ref().map(rust_result_projection).transpose()?;
     let offset_projection = exec
         .as_ref()
         .and_then(OffsetExecutive::offset_brep)
         .map(rust_result_projection)
         .transpose()?;
+    // (a probe's copies of the bodies the projections read: capture off, none)
+    if let Some(b) = exec.as_ref().and_then(OffsetExecutive::offset_brep) {
+        crate::dump::body(&kernel, "executive_offset", b);
+    }
     // A consumed source that comes back as the result (a Difference assigns its
     // result to the inset's primary operand, the original) keeps the source's
     // identity: native lifetime/origin 2 (`result == source`). Any other result is
@@ -2068,6 +2088,51 @@ fn generated(rng: &mut Rng) -> Inputs {
 mod tests {
     use super::*;
 
+    /// tangency-labs/solidcraft#18634: the `review_box_translated_*_null` rows' 1e-3 box
+    /// at (1e6, 1e6, 1e6) was refused by its constructor (status 1001), as main's
+    /// position-scaled degeneracy floor refused sides up to about 1e-9 times the
+    /// coordinate. It now builds a 6/12/8 box, and each case's result is the one the same
+    /// box gets at the origin (the fixture's valid-box controls: built, status 1007 for
+    /// a null selection), with the moved box's coordinates translated by (1e6, 1e6, 1e6).
+    #[test]
+    fn far_review_boxes_answer_as_at_the_origin() {
+        let shift = 1e6;
+        for name in ["review_box_translated_source_null", "review_box_translated_foreign_null"] {
+            let far = crate::case::regression_case(&Runner, name);
+            let mut near = far.clone();
+            let mut moved = Vec::new();
+            for role in ["source", "foreign"] {
+                if near.inputs[role]["origin"] == serde_json::json!([shift, shift, shift]) {
+                    near.inputs[role]["origin"] = serde_json::json!([0.0, 0.0, 0.0]);
+                    moved.push(role);
+                }
+            }
+            assert!(!moved.is_empty(), "{name}");
+            let (f, n) = (Runner.run_rust(&far).unwrap(), Runner.run_rust(&near).unwrap());
+            assert_eq!(f.rejected, None, "{name}");
+            assert_eq!(f.ints["status"], [1007], "{name}");
+            assert_eq!((&f.ints, &f.error, &f.rejected), (&n.ints, &n.error, &n.rejected), "{name}");
+            assert_eq!(f.values.keys().collect::<Vec<_>>(), n.values.keys().collect::<Vec<_>>());
+            for (key, fv) in &f.values {
+                let nv = &n.values[key];
+                let translated = key.ends_with(".geometry")
+                    && moved.iter().any(|role| key.starts_with(&format!("{role}.")));
+                if !translated {
+                    assert_eq!(fv, nv, "{name} {key}");
+                    continue;
+                }
+                // [tolerance, box min xyz, box max xyz]: the tolerance is kept and every
+                // coordinate is the origin box's moved by `shift`: `EPS/2 |a|` is under one
+                // ulp of the far value, so this asserts `a` is the rounded sum itself
+                assert_eq!(fv.len(), 7, "{name} {key}");
+                assert_eq!(fv[0], nv[0], "{name} {key}");
+                for (a, b) in fv[1..].iter().zip(&nv[1..]) {
+                    assert!((a - (b + shift)).abs() <= f64::EPSILON / 2.0 * a.abs(), "{name} {key}: {a} {b}");
+                }
+            }
+        }
+    }
+
     /// The Rust result bodies of the cases named in `$SC_SOUNDNESS_CASES`, measured on their own
     /// ([`crate::soundness::probe`]).
     #[test]
@@ -2080,6 +2145,12 @@ mod tests {
     /// removed): the rounded outward offsets of `extrudeHoles1` at k 0.36, with the result
     /// bodies the soundness probe measures. `None` for a case that builds no body.
     fn wr533_overlap_offsets() -> Vec<(String, i64, Option<crate::soundness::Soundness>, i64)> {
+        overlap_offsets("0.36")
+    }
+
+    /// The rounded outward offsets of `extrudeHoles1` at `k`, each with its status, the
+    /// result body the soundness probe measures (`None` without one) and `result.present`.
+    fn overlap_offsets(k: &str) -> Vec<(String, i64, Option<crate::soundness::Soundness>, i64)> {
         let ctx = CaseContext {
             root: repo_root(),
             seeds: 0,
@@ -2088,7 +2159,7 @@ mod tests {
         [0, 2, 3, 4, 5]
             .into_iter()
             .map(|f| {
-                let name = format!("overlap_pc_extrudeHoles1_f{f}_k0.36_out_rnd");
+                let name = format!("overlap_pc_extrudeHoles1_f{f}_k{k}_out_rnd");
                 let case = cases.iter().find(|c| c.name == name).unwrap();
                 crate::soundness::start();
                 let out = Runner.run_rust(case).unwrap();
@@ -2147,6 +2218,23 @@ mod tests {
             eprintln!("{name}: built, gap {offset} against {tolerance}");
             assert!(offset > 1000.0 * tolerance, "{name}: {gap}");
             assert_eq!(body.manifold, Some(false), "{name}");
+        }
+    }
+
+    /// #18927's moved rows here (`ssi_proto_topology_statuses_pass_on` removed): the same
+    /// offsets at k 0.35 reach `resolve_overlapping_proto_edges`, whose replacement of an
+    /// overlap group fails (`find_interval`: the parameter is before the start) after the
+    /// group's proto edges and edge definitions were taken out of the intersection. Each is
+    /// refused (1001) and builds no result body. Measured on main 6ea034c437 (before
+    /// #18927, with `moved_cases_results_measured`): each returned success with a body
+    /// that `check_brep` level 2 refuses (faces with partially coincident edges, or a loop
+    /// of bad orientation), four of them not manifold.
+    #[test]
+    fn k035_overlap_offsets_are_refused() {
+        for (name, status, body, present) in overlap_offsets("0.35") {
+            assert_eq!(status, 1001, "{name}");
+            assert!(body.is_none(), "{name}: a refused case builds no result body");
+            assert_eq!(present, 0, "{name}");
         }
     }
 
@@ -2703,11 +2791,12 @@ mod tests {
                 continue;
             }
             let rust = Runner.run_rust(&case).unwrap();
-            // #15350: a box too small for its tolerance (1e-6 at the origin, 1e-3 at 1e6) is
-            // refused by `create_box` itself (the fork's `AddBoxFace`, WR-596): constructor
-            // rejected, status 1001
-            let refused = !case.name.ends_with("_selected")
-                && (case.name.contains("_tiny_") || case.name.contains("_translated_"));
+            // #15350: a box too small for its tolerance (1e-6 at the origin) is refused by
+            // `create_box` itself (the fork's `AddBoxFace`, WR-596): constructor rejected,
+            // status 1001. #18634: the 1e-3 box at (1e6, 1e6, 1e6) now builds and answers as
+            // at the origin (see `far_review_boxes_answer_as_at_the_origin`), so the
+            // `_translated_` null rows take the null-selection branch below (status 1007).
+            let refused = !case.name.ends_with("_selected") && case.name.contains("_tiny_");
             if refused {
                 assert!(rust.rejected.is_some() && rust.error.is_none(), "{}", case.name);
                 assert_eq!(rust.ints["status"], [1001], "{}", case.name);
@@ -3063,8 +3152,16 @@ mod tests {
                 });
             assert!(closed_form.is_some() != half_pipe.is_some(), "{name}");
 
-            // the half pipes' refinement ends at its cell budget long before 1e-9 (below)
-            crate::soundness::start_enclosing(if closed_form.is_some() { 1e-9 } else { 1e-6 });
+            // the enclosure is asked for a quarter of the relative width accepted below on the
+            // closed forms, half on the half pipes: a tighter ask only refines past it, to the
+            // cell budget (the half pipes, and the 2e-6 slab at 1e-8). Not the width itself:
+            // the ask is relative to the sign's enclosure's upper end, the acceptance to the
+            // final one's, which is lower (MEASURED: asked 2e-4, the R 12 inner half pipe ends
+            // 2.01e-4 of its upper end wide; asked half, the cylinder sheets end 9.8e-8 wide,
+            // within 2% of the 1e-7 accepted; asked a quarter, 4.7e-8, at no extra time; a
+            // quarter on the half pipes doubles the test's time)
+            let width = if closed_form.is_some() { 1e-7 } else { 2e-4 };
+            crate::soundness::start_enclosing(width / if closed_form.is_some() { 4.0 } else { 2.0 });
             let output = Runner.run_rust(case).unwrap();
             let found = crate::soundness::take();
             assert!(output.deferred.is_none() && output.error.is_none(), "{name}");
@@ -3100,20 +3197,20 @@ mod tests {
                 "{name}: {:?}",
                 body.volume
             );
-            // the certified enclosure, asked for 1e-9 of the volume (1e-6 on the half pipes)
+            // the certified enclosure, asked for `width` of the volume
             let Some(Ok(e)) = &body.enclosure else {
                 panic!("{name}: {:?}", body.enclosure);
             };
             eprintln!("WR564 {name}: [{:e}, {:e}]", e.lo, e.hi);
-            // measured: the plane and cylinder sheets refine to 1.5e-8 of the volume or
-            // below (the 2e-6 slab is the widest); the half pipes' refinement ends at its
-            // cell budget, near 2e-6 (R 12) and 1e-4 (R 20) of it, on main as here. On the
-            // half pipes the closed form inside the enclosure so certifies the body's
-            // volume only to 2e-4 of it: acceptance slack set from the measured R 20 width.
-            // It is enough here (argued) because a wall is replaced only where its control
-            // points lie within SM_EFF_ZERO of the new plane, so the replacement moves the
-            // volume by at most the replaced walls' area times SM_EFF_ZERO
-            let width = if closed_form.is_some() { 1e-7 } else { 2e-4 };
+            // measured, asked 1e-9 (1e-6 on the half pipes): the plane and cylinder sheets
+            // refine to 1.5e-8 of the volume or below (the 2e-6 slab is the widest); the half
+            // pipes' refinement ends at its cell budget, near 2e-6 (R 12) and 1e-4 (R 20) of
+            // it, on main as here. On the half pipes the closed form inside the enclosure so
+            // certifies the body's volume only to 2e-4 of it: acceptance slack set from the
+            // measured R 20 width. It is enough here (argued) because a wall is replaced only
+            // where its control points lie within SM_EFF_ZERO of the new plane, so the
+            // replacement moves the volume by at most the replaced walls' area times
+            // SM_EFF_ZERO
             assert!(e.lo > 0.0 && e.hi - e.lo <= width * e.hi, "{name}: [{}, {}]", e.lo, e.hi);
             if let Some(v) = closed_form {
                 assert!(e.lo <= v && v <= e.hi, "{name}: {v} not in [{}, {}]", e.lo, e.hi);

@@ -53,6 +53,22 @@ pub fn face_surface(b: &Body, face: usize) -> Option<FaceSurface> {
     surface_of(b.record(), face).or_else(|| torus_of_face(b, face))
 }
 
+/// Whether `a` and `b` are one surface within `tol` inside `region`, the box of the faces
+/// compared ([`solidcore_ops::face_surface::same_surface`]). A surface or box the kernel
+/// refuses (a number that is not finite, an empty box) is not one surface with any.
+pub fn same_surface(a: &FaceSurface, b: &FaceSurface, tol: f64, region: &solidcraft_geom::Aabb3) -> bool {
+    use solidcore_ops::face_surface::{Analytic, same_surface};
+    let arr = |v: Vec3| [v.x, v.y, v.z];
+    let ops = |s: &FaceSurface| match *s {
+        FaceSurface::Plane { normal, point } => Analytic::Plane { point: arr(point), normal: arr(normal.vec()) },
+        FaceSurface::Cylinder { origin, axis, radius } => Analytic::Cylinder { origin: arr(origin), axis: arr(axis.vec()), radius },
+        FaceSurface::Cone { apex, axis, half_angle } => Analytic::Cone { apex: arr(apex), axis: arr(axis.vec()), half_angle },
+        FaceSurface::Sphere { center, radius } => Analytic::Sphere { centre: arr(center), radius },
+        FaceSurface::Torus { center, axis, major, minor } => Analytic::Torus { centre: arr(center), axis: arr(axis.vec()), major, minor },
+    };
+    same_surface(ops(a), ops(b), tol, arr(region.min), arr(region.max)).unwrap_or(false)
+}
+
 /// What torus face `face` lies on, if its surface is a torus held as a spline (such as a
 /// constant-radius fillet).
 fn torus_of_face(b: &Body, face: usize) -> Option<FaceSurface> {

@@ -141,12 +141,15 @@ pub trait ChatBackend {
     fn prompt(&mut self, parts: &[PromptPart]);
     /// Stop the message being answered; open permission questions count as cancelled.
     fn cancel(&mut self);
-    /// Start a fresh conversation on the running backend (no restart); [`Event::Ready`] follows.
-    /// A message being answered is cancelled first.
+    /// Release the old conversation and start a fresh one; [`Event::Ready`] follows.
+    /// A message being answered is cancelled first. Process backends may restart their agent.
     fn new_session(&mut self);
     /// The user's custom instructions (#8220), added to the system note of every session that
     /// starts after this call. The panel sets them before the first session and before New chat.
     fn set_instructions(&mut self, _text: &str) {}
+    /// The user's configured allowed folders (#20326), forwarded to the MCP bridge of every
+    /// session that starts after this call. The panel updates them before New chat.
+    fn set_allow_paths(&mut self, _paths: &[std::path::PathBuf]) {}
     /// Answer an [`Event::Permission`] with one of its options (`None`: cancelled).
     fn answer_permission(&mut self, key: u64, option: Option<&str>);
     /// Ask the backend to sign in by itself with one of its methods (it opens the browser).

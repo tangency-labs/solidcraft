@@ -55,10 +55,11 @@ jobs:
           }
       - name: XML, desktop entry, AppStream, Flatpak manifest
         run: |
-          xmllint --noout assets/platforms/windows/solidcraft.wxs assets/platforms/windows/solidcraft.en-us.wxl assets/platforms/macos/*.plist* assets/platforms/linux/*.xml* packaging/windows/policies/*.admx packaging/windows/policies/*/*.adml
+          xmllint --noout assets/platforms/windows/solidcraft.wxs assets/platforms/windows/solidcraft.en-us.wxl assets/platforms/macos/*.plist* assets/platforms/linux/*.xml* packaging/windows/policies/*.admx packaging/windows/policies/*/*.adml packaging/macos/policies/*.mobileconfig
           # An MSI update installs before it removes the old version, so Start menu pins survive (#9366).
           grep -q 'Schedule="afterInstallExecute"' assets/platforms/windows/solidcraft.wxs
           grep -q 'Id="REINSTALLMODE" Value="amus"' assets/platforms/windows/solidcraft.wxs
+          grep -q 'Id="REBOOT" Value="ReallySuppress"' assets/platforms/windows/solidcraft.wxs || { echo '::error file=assets/platforms/windows/solidcraft.wxs::the MSI must set REBOOT=ReallySuppress, so no install or update restarts the PC (#18774)'; exit 1; }
           # No advertised shortcuts: their Start menu app ID follows the ProductCode, which changes every build, so pins are dropped on update (#9366).
           ! grep -q 'Advertise="yes"' assets/platforms/windows/solidcraft.wxs || { echo '::error file=assets/platforms/windows/solidcraft.wxs::Advertise="yes": an advertised shortcut loses its Start menu pin on every update; use Advertise="no" (#9366)'; exit 1; }
           # The Start menu shortcut is named "SolidCraft"; a leftover "SolidCraft CAD.lnk" from 0.42 is removed on install. Upgrading straight from 0.30.1 or older can lose the entry until a repair: accepted.

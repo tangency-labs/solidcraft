@@ -396,6 +396,49 @@ fn layout_picture_choices_wrap_inside_the_indexed_row_and_keep_real_targets() {
 }
 
 #[test]
+fn row_label_tooltips_override_full_label_text_only_inside_their_scope() {
+    let label = "A long parameter label that must elide";
+    let tip = "What this parameter controls";
+    let ctx = crate::test_support::context();
+    ctx.global_style_mut(|style| style.interaction.tooltip_delay = 0.0);
+    let draw = |ui: &mut Ui| {
+        with_row_label_tooltip(ui, tip, |ui| row(ui, label, |ui| ui.label("Value")));
+        row(ui, "Radius", |ui| ui.label("Value"));
+    };
+    let paint = |events| {
+        raw_frame(
+            &ctx,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(320.0, 400.0))),
+                time: Some(ctx.cumulative_frame_nr() as f64 / 15.0),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| {
+                ui.set_width(280.0);
+                scope(ui, draw);
+            },
+        )
+    };
+    for _ in 0..3 {
+        paint(vec![]);
+    }
+    for (name, expected) in [(label, tip), ("Radius", "Radius")] {
+        let output = paint(vec![egui::Event::PointerGone]);
+        let text = text_shapes(&output).find(|text| text.galley.text() == name).expect("painted row label");
+        let at = text.pos + text.galley.size() / 2.0;
+        paint(vec![egui::Event::PointerMoved(at)]);
+        for _ in 0..3 {
+            paint(vec![]);
+        }
+        let output = paint(vec![]);
+        let count = text_shapes(&output).filter(|text| text.galley.text() == expected).count();
+        assert_eq!(count, if name == "Radius" { 2 } else { 1 }, "{name}: only the intended tooltip is painted");
+    }
+}
+
+#[test]
 fn row_height_and_label_column_are_fixed_for_long_labels_and_expressions() {
     let ctx = crate::test_support::context();
     let mut value = "width / 2 + 10 mm".to_string();
@@ -543,4 +586,43 @@ fn an_action_row_is_a_button_in_the_control_column_that_says_when_it_is_clicked(
     frame(&ctx, pointer(at, false), &mut draw);
     frame(&ctx, vec![], &mut draw);
     assert_eq!(clicks, [false, false, true, false]);
+}
+
+/// Scrubbing a row's label is pointer-only: a single Tab moves directly from one expression
+/// field to the next without stopping on the scrub drag region, and Shift+Tab moves directly back.
+#[test]
+fn tab_moves_directly_between_adjacent_expr_rows() {
+    let ctx = crate::test_support::context();
+    let mut distance = "10 mm".to_string();
+    let mut distance2 = "20 mm".to_string();
+    let ids = std::cell::Cell::new((None, None));
+    let mut draw = |ui: &mut Ui| {
+        let egui_ctx = ui.ctx().clone();
+        scope(ui, |ui| {
+            let (_, fields) = value_fields(&egui_ctx, || {
+                expr_row(ui, "Distance", &mut distance);
+                expr_row(ui, "Distance 2", &mut distance2);
+                false
+            });
+            if fields.len() == 2 {
+                ids.set((Some(fields[0].0), Some(fields[1].0)));
+            }
+        });
+    };
+    frame(&ctx, vec![], &mut draw);
+    let (first, second) = (ids.get().0.expect("first editor id"), ids.get().1.expect("second editor id"));
+    ctx.memory_mut(|m| m.request_focus(first));
+    frame(&ctx, vec![], &mut draw);
+    assert_eq!(ctx.memory(|m| m.focused()), Some(first));
+
+    // One Tab lands directly on Distance 2, never on its scrub label.
+    frame(&ctx, key(egui::Key::Tab), &mut draw);
+    assert_eq!(ctx.memory(|m| m.focused()), Some(second), "Tab should move directly to Distance 2");
+
+    // One Shift+Tab moves directly back to Distance (egui applies FocusDirection::Previous on the next pass).
+    let shift_tab =
+        vec![egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::SHIFT }];
+    frame(&ctx, shift_tab, &mut draw);
+    frame(&ctx, vec![], &mut draw);
+    assert_eq!(ctx.memory(|m| m.focused()), Some(first), "Shift+Tab should move directly back to Distance");
 }

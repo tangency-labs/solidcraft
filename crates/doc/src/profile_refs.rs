@@ -2,13 +2,30 @@
 use solidcraft_geom::prelude::*;
 use std::collections::BTreeSet;
 
-use crate::{DocError, ProfileSel, Result, SolvedSketch, WholeProfileBoundary};
+use crate::{CurveSide, DocError, ProfileSel, Result, SidedCurve, SolvedSketch, WholeProfileBoundary};
 
 const MAX_SELECTIONS: usize = 128;
+/// An exact model profile may have many independent spline-drawn holes (#18759). Its
+/// curve count and per-boundary sizes are still bounded below.
+const MAX_MODEL_WHOLE_HOLES: usize = 1024;
+/// Drawing fills retain their separate 128-hole policy until their own limits are reviewed.
 pub(crate) const WHOLE_MAX_HOLES: usize = 128;
 pub(crate) const WHOLE_MAX_BOUNDARY_CURVES: usize = 512;
 pub(crate) const WHOLE_MAX_TOTAL_CURVES: usize = 20_000;
 pub(crate) const WHOLE_MAX_ID_BYTES: usize = 512;
+
+/// The most curves one loop of a whole-source profile reference names: as many as a sketch read
+/// from a design may hold, so the outline of a long line of script text or its offset can be
+/// picked (it used to stop at 512).
+pub(crate) const MAX_WHOLE_LOOP_CURVES: usize = solidcraft_sketch::limits::CEILING_POINTS;
+/// The most curves all loops of one whole-source reference name together: a curve bounds at
+/// most the regions on its two sides, so twice what one sketch holds.
+pub(crate) const MAX_WHOLE_CURVES: usize = 2 * solidcraft_sketch::limits::CEILING_POINTS;
+
+/// What a whole-source profile pick past [`MAX_WHOLE_LOOP_CURVES`] or [`MAX_WHOLE_CURVES`]
+/// says. The interface translates it by this exact text.
+pub const WHOLE_PROFILE_TOO_MANY_CURVES: &str =
+    "the picked profiles have too many curves to keep track of; pick fewer profiles at once, or draw their outlines with fewer curves";
 
 fn whole_boundary(profile: &solidcraft_sketch::Profile) -> Option<WholeProfileBoundary> {
     let (outer, holes) = profile.whole_curve_boundaries()?;
@@ -22,16 +39,22 @@ pub(crate) fn validate_whole(profiles: &[WholeProfileBoundary]) -> Result<()> {
     let mut total = 0usize;
     let mut identities = BTreeSet::new();
     for profile in profiles {
-        if profile.holes.len() > WHOLE_MAX_HOLES || !identities.insert((&profile.outer, &profile.holes)) {
-            return Err(DocError::Invalid("invalid whole-source profile holes or duplicate identity".into()));
+        if profile.holes.len() > MAX_MODEL_WHOLE_HOLES {
+            return Err(DocError::Invalid(format!("whole-source profile exceeds {MAX_MODEL_WHOLE_HOLES} holes")));
+        }
+        if !identities.insert((&profile.outer, &profile.holes)) {
+            return Err(DocError::Invalid("whole-source profile has a duplicate identity".into()));
         }
         // Holes may share a curve: a curve that splits an island bounds two of its regions, and
         // both are holes of the profile around the island (#17613). No hole shares the outer's.
         let mut outer = BTreeSet::new();
         for (hole, boundary) in std::iter::once(&profile.outer).chain(&profile.holes).enumerate() {
-            total += boundary.len();
-            if boundary.is_empty() || boundary.len() > WHOLE_MAX_BOUNDARY_CURVES || total > WHOLE_MAX_TOTAL_CURVES {
-                return Err(DocError::Invalid("whole-source boundary exceeds its identity budget".into()));
+            total = total.saturating_add(boundary.len());
+            if boundary.is_empty() {
+                return Err(DocError::Invalid("whole-source boundary needs canonical disjoint curve identities".into()));
+            }
+            if boundary.len() > MAX_WHOLE_LOOP_CURVES || total > MAX_WHOLE_CURVES {
+                return Err(DocError::Invalid(WHOLE_PROFILE_TOO_MANY_CURVES.into()));
             }
             let mut previous = None;
             for curve in boundary {
@@ -85,6 +108,41 @@ fn same_ids(a: &[String], b: &[String]) -> bool {
     a == b
 }
 
+/// A migrated whole projection names its source's entire single loop, independently of the
+/// number and kinds of curves used to represent it. Complete graph coverage certifies the
+/// regenerated region; a cut loop, holes or multiple loops cannot stand for the saved outline.
+/// No mesh, nearest region or shared-identifier score participates in this resolution.
+fn projected_boundary(ss: &SolvedSketch, curves: &[String]) -> Option<Result<usize>> {
+    use solidcraft_sketch::{CurvePick, LinkKind, LinkSource};
+
+    let mut links = ss.sketch.links.iter().filter(|link| !link.profile_boundary.is_empty() && same_ids(curves, &link.profile_boundary));
+    let link = links.next()?;
+    let missing = || crate::curve_pick_error(CurvePick::Missing, curves, &ss.name);
+    if links.next().is_some() || link.lost || link.kind != LinkKind::Project || !matches!(link.source, LinkSource::Body { .. }) {
+        return Some(Err(missing()));
+    }
+    let output: Vec<String> =
+        ss.sketch.curves.iter().filter(|curve| curve.link.as_deref() == Some(link.id.as_str())).map(|curve| curve.id.clone()).collect();
+    if output.is_empty() || output.len() > solidcraft_sketch::MAX_LINK_ENTITIES {
+        return Some(Err(missing()));
+    }
+    // Cached profiles do not serialize their complete-coverage certificates. Re-find them
+    // from the exact sketch curves, and refuse an incomplete search rather than guessing.
+    let search = solidcraft_sketch::find_profiles_checked(&ss.sketch);
+    if search.incomplete {
+        return Some(Err(missing()));
+    }
+    let mut matches = search.profiles.iter().filter_map(|profile| {
+        let (outer, holes) = profile.whole_curve_boundaries()?;
+        (holes.is_empty() && same_ids(&outer, &output)).then_some(outer)
+    });
+    let Some(boundary) = matches.next() else { return Some(Err(missing())) };
+    if matches.next().is_some() {
+        return Some(Err(missing()));
+    }
+    Some(solidcraft_sketch::profile_by_curves(&ss.profiles, &boundary).map_err(|error| crate::curve_pick_error(error, curves, &ss.name)))
+}
+
 fn unique_profile(ss: &SolvedSketch, curves: &[String]) -> Result<usize> {
     let mut matches = ss.profiles.iter().enumerate().filter(|(_, profile)| same_ids(curves, &profile.outer_curves));
     let (index, _) = matches.next().ok_or_else(|| DocError::Unknown(format!("profile bounded by {curves:?} in {}", ss.name)))?;
@@ -126,7 +184,7 @@ pub fn profile_selection_indices_lenient(ss: &SolvedSketch, selection: &ProfileS
 /// What a feature's profile selection falls back to when evaluated: one note per curve loop that
 /// no longer bounds a profile exactly; empty when everything matched exactly (or nothing did).
 pub fn profile_fallback_notes(ss: &SolvedSketch, selection: &ProfileSel) -> Vec<String> {
-    if !matches!(selection, ProfileSel::Curves { .. }) || profile_selection_indices(ss, selection).is_ok() {
+    if !matches!(selection, ProfileSel::Curves { .. } | ProfileSel::SidedCurves { .. }) || profile_selection_indices(ss, selection).is_ok() {
         return Vec::new();
     }
     profile_selection_indices_lenient(ss, selection).map(|(_, notes)| notes).unwrap_or_default()
@@ -141,6 +199,7 @@ fn is_analytic(sketch: &solidcraft_sketch::Sketch, id: &str) -> bool {
                 solidcraft_sketch::CurveKind::Line { .. } | solidcraft_sketch::CurveKind::Arc { .. } | solidcraft_sketch::CurveKind::Circle { .. }
             )
     }) && !sketch.freeform_offsets.iter().any(|offset| offset.output == id)
+        && !sketch.freeform_chain_offsets.iter().any(|offset| offset.outputs.iter().any(|out| out == id))
 }
 
 /// A loop made only of analytic curves: how many pieces each is cut into does not matter.
@@ -184,7 +243,10 @@ fn fallback_loop(ss: &SolvedSketch, curves: &[String]) -> Option<(Vec<usize>, St
     if stored.is_empty() || stored.len() != curves.len() || curves.len() > 512 || ss.profiles.len() > 10_000 {
         return None;
     }
-    if stored.iter().any(|id| sketch.freeform_offsets.iter().any(|offset| offset.output == *id)) {
+    if stored.iter().any(|id| {
+        sketch.freeform_offsets.iter().any(|offset| offset.output == *id)
+            || sketch.freeform_chain_offsets.iter().any(|offset| offset.outputs.iter().any(|out| out == *id))
+    }) {
         return None;
     }
     let from_offset = stored.iter().any(|id| sketch.offsets.iter().any(|offset| offset.owns_output(id)));
@@ -269,6 +331,10 @@ fn selection_indices(ss: &SolvedSketch, selection: &ProfileSel, mut notes: Optio
             let boundaries = reserved_boundaries(ss)?;
             let mut indices = Vec::with_capacity(loops.len());
             for curves in loops {
+                if let Some(index) = projected_boundary(ss, curves) {
+                    indices.push(index?);
+                    continue;
+                }
                 let mut key = curves.clone();
                 key.sort();
                 if let Some(id) = boundaries.get(&key) {
@@ -320,6 +386,7 @@ fn selection_indices(ss: &SolvedSketch, selection: &ProfileSel, mut notes: Optio
             associations.iter().map(|id| unique_profile(ss, &ss.sketch.offset_boundary(id)?)).collect::<Result<Vec<_>>>()?
         }
         ProfileSel::WholeBoundaries { profiles } => whole_profile_indices(ss, profiles)?,
+        ProfileSel::SidedCurves { loops } => sided_indices(ss, loops, notes)?,
         ProfileSel::Points { points } => {
             let mut indices = Vec::with_capacity(points.len());
             for point in points {
@@ -339,6 +406,193 @@ fn selection_indices(ss: &SolvedSketch, selection: &ProfileSel, mut notes: Optio
         return Err(DocError::Invalid(format!("out-of-range profile selection in {}", ss.name)));
     }
     Ok(indices)
+}
+
+/// How far, relative to its size, a piece of a profile's loop may lie from a curve's line or
+/// circle and still be a piece of it: the pieces are made from the curves, so only rounding
+/// separates them.
+const SIDE_TOL: f64 = 1e-9;
+
+/// The side of each curve of `profile`'s outer loop that the profile lies on. The outer loop
+/// runs counter-clockwise, with the region on its left; each piece is matched to the one curve of
+/// the loop whose line or circle it lies on, and the kernel says which side of that curve the
+/// region is on (`planar::left_side_along_line`, `left_side_inside_circle`). `None` when a
+/// curve is not a line, an arc or a circle, a piece lies on no curve of the loop or on several, or
+/// the region lies on both sides of one curve.
+fn curve_sides(sketch: &solidcraft_sketch::Sketch, profile: &solidcraft_sketch::Profile) -> Option<std::collections::BTreeMap<String, CurveSide>> {
+    use solidcore_record::Seg2;
+    use solidcraft_kernel::planar;
+    use solidcraft_sketch::CurveKind;
+    enum Carrier {
+        Line([f64; 2], [f64; 2]),
+        Circle([f64; 2], f64),
+    }
+    let ids = solidcraft_sketch::distinct_curves(&profile.outer_curves);
+    if ids.is_empty() || ids.len() > 512 || profile.region.outer.segs.len() > 4096 {
+        return None;
+    }
+    let at = |i: usize| sketch.points.get(i).map(|p| <[f64; 2]>::from(p.pos));
+    let carriers = ids
+        .iter()
+        .map(|id| {
+            if !is_analytic(sketch, id) {
+                return None;
+            }
+            let curve = sketch.curves.iter().find(|curve| &curve.id == id)?;
+            let carrier = match curve.kind {
+                CurveKind::Line { a, b } => Carrier::Line(at(a)?, at(b)?),
+                CurveKind::Circle { c, r } => Carrier::Circle(at(c)?, r),
+                CurveKind::Arc { c, a, .. } => {
+                    let center = at(c)?;
+                    Carrier::Circle(center, planar::distance(center, at(a)?))
+                }
+                _ => return None,
+            };
+            Some((id, carrier))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let mut sides = std::collections::BTreeMap::new();
+    for seg in &profile.region.outer.segs {
+        let mut on = carriers.iter().filter_map(|(id, carrier)| {
+            let side = match (seg, carrier) {
+                (Seg2::Line { a, b }, Carrier::Line(p, q)) => {
+                    if planar::left_side_along_line((*a).into(), (*b).into(), *p, *q, SIDE_TOL)? {
+                        CurveSide::Left
+                    } else {
+                        CurveSide::Right
+                    }
+                }
+                (Seg2::Arc { center, radius, sweep, .. }, Carrier::Circle(c, r)) => {
+                    if planar::left_side_inside_circle((*center).into(), *radius, *sweep, *c, *r, SIDE_TOL)? {
+                        CurveSide::Inside
+                    } else {
+                        CurveSide::Outside
+                    }
+                }
+                _ => return None,
+            };
+            Some((*id, side))
+        });
+        let (id, side) = on.next()?;
+        if on.next().is_some() || *sides.entry(id.clone()).or_insert(side) != side {
+            return None;
+        }
+    }
+    (sides.len() == ids.len()).then_some(sides)
+}
+
+/// Twins picked by index (regions the curves around them can't tell apart) saved by the sides
+/// of those curves each lies on, when every picked region has them and they name it alone.
+fn sided_capture(ss: &SolvedSketch, picked: &[usize]) -> Option<ProfileSel> {
+    if picked.is_empty() || picked.len() > MAX_SELECTIONS {
+        return None;
+    }
+    let loops = picked
+        .iter()
+        .map(|index| {
+            let sides = curve_sides(&ss.sketch, ss.profiles.get(*index)?)?;
+            Some(sides.into_iter().map(|(curve, side)| SidedCurve { curve, side }).collect::<Vec<_>>())
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (sided_indices(ss, &loops, None).ok()? == picked).then_some(ProfileSel::SidedCurves { loops })
+}
+
+fn sided_names(want: &std::collections::BTreeMap<&str, CurveSide>) -> String {
+    let side = |side: &CurveSide| match side {
+        CurveSide::Inside => "inside",
+        CurveSide::Outside => "outside",
+        CurveSide::Left => "left of",
+        CurveSide::Right => "right of",
+    };
+    want.iter().map(|(curve, s)| format!("{} `{curve}`", side(s))).collect::<Vec<_>>().join(", ")
+}
+
+/// The profiles saved by the sides of their curves ([`ProfileSel::SidedCurves`]). Each saved loop
+/// takes the one profile with the same curves on the same sides. When there is none (the
+/// regions changed) and `notes` is given (evaluating a feature), the profile that shares the most
+/// of the saved curves on the same sides, at least half of them, and lies on the other side of
+/// none; of those, the one with the fewest curves the loop did not have. A tie is an error. Two
+/// loops that land in one profile take it once.
+fn sided_indices(ss: &SolvedSketch, loops: &[Vec<SidedCurve>], mut notes: Option<&mut Vec<String>>) -> Result<Vec<usize>> {
+    use std::collections::BTreeMap;
+    if loops.is_empty() || loops.len() > MAX_SELECTIONS || ss.profiles.len() > 10_000 {
+        return Err(DocError::Invalid("a sided profile selection needs 1 to 128 profiles".into()));
+    }
+    let sides: Vec<Option<BTreeMap<String, CurveSide>>> = ss.profiles.iter().map(|profile| curve_sides(&ss.sketch, profile)).collect();
+    let mut indices = Vec::with_capacity(loops.len());
+    for stored in loops {
+        let want: BTreeMap<&str, CurveSide> = stored.iter().map(|sided| (sided.curve.as_str(), sided.side)).collect();
+        if want.is_empty() || want.len() != stored.len() || want.len() > 512 {
+            return Err(DocError::Invalid("a sided profile lists no curve, or a curve twice".into()));
+        }
+        let same =
+            |found: &BTreeMap<String, CurveSide>| found.len() == want.len() && found.iter().all(|(id, side)| want.get(id.as_str()) == Some(side));
+        let exact: Vec<usize> = sides.iter().enumerate().filter(|(_, found)| found.as_ref().is_some_and(same)).map(|(index, _)| index).collect();
+        let index = match exact.as_slice() {
+            [index] => *index,
+            [] => {
+                let lost = || DocError::Unknown(format!("profile {} in {}", sided_names(&want), ss.name));
+                let Some(notes) = notes.as_deref_mut() else { return Err(lost()) };
+                let (index, shared) = sided_fallback(&sides, &want).ok_or_else(lost)?;
+                notes.push(format!(
+                    "no profile of {} lies {} any more; using the profile that lies the same way on {shared} of those {} curves",
+                    ss.name,
+                    sided_names(&want),
+                    want.len()
+                ));
+                index
+            }
+            more => {
+                return Err(DocError::Invalid(format!(
+                    "{} profiles of {} lie {}; pick by point, or add a curve that tells them apart",
+                    more.len(),
+                    ss.name,
+                    sided_names(&want)
+                )));
+            }
+        };
+        if !indices.contains(&index) {
+            indices.push(index);
+        }
+    }
+    Ok(indices)
+}
+
+/// [`sided_indices`]'s match after a change of the regions: the profile index and how many of the
+/// saved curves it shares on the same sides.
+fn sided_fallback(
+    sides: &[Option<std::collections::BTreeMap<String, CurveSide>>],
+    want: &std::collections::BTreeMap<&str, CurveSide>,
+) -> Option<(usize, usize)> {
+    // (index, curves shared on the same side, curves the saved loop did not have); none when the
+    // profile lies on the other side of a saved curve.
+    let scored: Vec<(usize, usize, usize)> = sides
+        .iter()
+        .enumerate()
+        .filter_map(|(index, found)| {
+            let found = found.as_ref()?;
+            let mut shared = 0usize;
+            for (id, side) in found {
+                match want.get(id.as_str()) {
+                    Some(saved) if saved != side => return None,
+                    Some(_) => shared += 1,
+                    None => {}
+                }
+            }
+            Some((index, shared, found.len() - shared))
+        })
+        .collect();
+    let best = scored.iter().map(|(_, shared, _)| *shared).max()?;
+    if best == 0 || best.saturating_mul(2) < want.len() {
+        return None;
+    }
+    let fewest = scored.iter().filter(|(_, shared, _)| *shared == best).map(|(_, _, new)| *new).min()?;
+    let mut chosen = scored.iter().filter(|(_, shared, new)| *shared == best && *new == fewest);
+    let (index, ..) = *chosen.next()?;
+    if chosen.next().is_some() {
+        return None;
+    }
+    Some((index, best))
 }
 
 /// Persist selected complete offset boundaries by association identity. Mixed selections
@@ -375,6 +629,7 @@ pub fn capture_profile_selection(ss: &SolvedSketch, indices: &[usize]) -> Result
     }
     let mut associations = Vec::new();
     let mut loops = Vec::new();
+    let picked = checked.clone();
     for index in checked {
         let curves = &ss.profiles.get(index).ok_or_else(|| DocError::Invalid("profile index changed during capture".into()))?.outer_curves;
         if curves.is_empty() {
@@ -398,7 +653,8 @@ pub fn capture_profile_selection(ss: &SolvedSketch, indices: &[usize]) -> Result
             associations.push(id);
         } else {
             if ss.profiles.iter().filter(|profile| same_ids(curves, &profile.outer_curves)).count() != 1 {
-                return Ok(ProfileSel::Indices { indices: indices.to_vec() });
+                // Twins: the curves can't tell them apart, the sides of those curves may (#22548).
+                return Ok(sided_capture(ss, &picked).unwrap_or_else(|| ProfileSel::Indices { indices: indices.to_vec() }));
             }
             loops.push(curves.clone());
         }
@@ -501,6 +757,7 @@ mod tests {
                         direction: crate::Direction::Positive,
                         distance2: None,
                         start_offset: None,
+                        symmetric_offset: false,
                         through_all: false,
                         second_follows_first: false,
                         taper: None,
@@ -509,6 +766,9 @@ mod tests {
                         to_offset: None,
                         from: None,
                         to_body_apart: false,
+                        through_all2: false,
+                        to2: None,
+                        to_offset2: None,
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,
@@ -584,6 +844,29 @@ mod tests {
         assert!(profile_selection_indices(&ss, &ProfileSel::Indices { indices: vec![1] }).is_err());
     }
 
+    /// An SVG-traced sketch can have hundreds of spline-bounded holes. The total curve
+    /// budget still bounds the validator, and drawing fills keep their separate limit.
+    #[test]
+    fn whole_source_accepts_many_spline_holes_within_curve_budget() {
+        let profile = |count: usize, edges: usize| WholeProfileBoundary {
+            outer: vec!["outer".to_string()],
+            holes: (0..count).map(|i| (0..edges).map(|edge| format!("h{i:04}-{edge:03}")).collect()).collect(),
+        };
+        assert_eq!(WHOLE_MAX_HOLES, 128, "the drawing-fill hole cap stays unchanged");
+        for count in [128, 129, 707, MAX_MODEL_WHOLE_HOLES] {
+            let large = profile(count, 4);
+            validate_whole(std::slice::from_ref(&large)).unwrap_or_else(|e| panic!("{count} holes should be accepted: {e}"));
+            let duplicate = validate_whole(&[large.clone(), large]).unwrap_err().to_string();
+            assert!(duplicate.contains("duplicate identity"), "{duplicate}");
+        }
+        let exceeded = validate_whole(&[profile(MAX_MODEL_WHOLE_HOLES + 1, 4)]).unwrap_err().to_string();
+        assert!(exceeded.contains("1024 holes"), "{exceeded}");
+        assert!(validate_whole(&[profile(MAX_MODEL_WHOLE_HOLES, 20)]).is_ok(), "20 curves per hole is far under the curve budget");
+        let edges = MAX_WHOLE_CURVES / MAX_MODEL_WHOLE_HOLES + 1;
+        let too_many_curves = validate_whole(&[profile(MAX_MODEL_WHOLE_HOLES, edges)]).unwrap_err().to_string();
+        assert_eq!(too_many_curves, DocError::Invalid(WHOLE_PROFILE_TOO_MANY_CURVES.into()).to_string());
+    }
+
     #[test]
     fn a_whole_source_selection_loads_in_any_curve_order() {
         let ss = solved_square(&[]);
@@ -601,6 +884,45 @@ mod tests {
             assert_eq!(profile_selection_indices(&ss, &loaded).unwrap(), vec![0]);
             assert_eq!(crate::select_profiles(&ss, &loaded).unwrap().len(), 1);
         }
+    }
+
+    #[test]
+    fn a_whole_source_profile_with_hundreds_of_curves_can_be_picked() {
+        // The outline of a line of script text, or its offset, has hundreds of curves around one
+        // profile. Picking it used to fail with "whole-source boundary exceeds its identity
+        // budget" past 512 curves.
+        let mut sketch = Sketch::new();
+        let sides = 600;
+        let points: Vec<_> = (0..sides)
+            .map(|index| {
+                let angle = std::f64::consts::TAU * index as f64 / sides as f64;
+                sketch.add_point(Vec2::new(50. * angle.cos(), 50. * angle.sin()), None).unwrap()
+            })
+            .collect();
+        for index in 0..sides {
+            sketch.add_line_pts(points[index], points[(index + 1) % sides], Some(&format!("side{index:03}"))).unwrap();
+        }
+        let report = solve(&mut sketch);
+        let profiles = find_profiles(&sketch);
+        let ss = SolvedSketch {
+            feature: 1,
+            name: "S".into(),
+            plane: Plane::XY,
+            sketch,
+            report,
+            profiles,
+            profiles_3d: Vec::new(),
+            ends: Default::default(),
+        };
+        assert_eq!(ss.profiles.len(), 1);
+        let (outer, holes) = ss.profiles[0].whole_curve_boundaries().unwrap();
+        assert_eq!(outer.len(), sides);
+        let picked = ProfileSel::WholeBoundaries { profiles: vec![WholeProfileBoundary { outer, holes }] };
+        assert_eq!(profile_selection_indices(&ss, &picked).unwrap(), vec![0]);
+        // Past what a sketch may hold, the refusal says what to do in words the interface translates.
+        let huge = (0..=MAX_WHOLE_LOOP_CURVES).map(|index| format!("c{index:06}")).collect::<Vec<_>>();
+        let refused = ProfileSel::WholeBoundaries { profiles: vec![WholeProfileBoundary { outer: huge, holes: Vec::new() }] };
+        assert_eq!(profile_selection_indices(&ss, &refused).unwrap_err().to_string(), WHOLE_PROFILE_TOO_MANY_CURVES);
     }
 
     fn solved_square(extra: &[(&str, [f64; 4])]) -> SolvedSketch {
@@ -698,6 +1020,7 @@ mod tests {
                         direction: crate::Direction::Positive,
                         distance2: None,
                         start_offset: None,
+                        symmetric_offset: false,
                         through_all: false,
                         second_follows_first: false,
                         taper: None,
@@ -706,6 +1029,9 @@ mod tests {
                         to_offset: None,
                         from: None,
                         to_body_apart: false,
+                        through_all2: false,
+                        to2: None,
+                        to_offset2: None,
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,

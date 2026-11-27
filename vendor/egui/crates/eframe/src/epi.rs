@@ -23,7 +23,10 @@ use static_assertions::assert_not_impl_any;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(any(feature = "glow", feature = "wgpu_no_default_features"))]
-pub use winit::{event_loop::EventLoopBuilder, window::WindowAttributes};
+pub use winit::{
+    event_loop::{EventLoopBuilder, EventLoopProxy},
+    window::WindowAttributes,
+};
 
 /// Hook into the building of an event loop before it is run
 ///
@@ -32,6 +35,16 @@ pub use winit::{event_loop::EventLoopBuilder, window::WindowAttributes};
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(any(feature = "glow", feature = "wgpu_no_default_features"))]
 pub type EventLoopBuilderHook = Box<dyn FnOnce(&mut EventLoopBuilder<UserEvent>)>;
+
+/// SolidCraft: hook run with the event loop's proxy just before the loop starts, so the app can
+/// wake the loop for its own events from other threads (e.g. a control channel that must be
+/// served while the window is off-screen).
+///
+/// The callback receives the proxy once, and should keep a clone for its threads. Not called on
+/// the web. A [`NativeOptions`] clone will not include any `event_loop_ready` hook.
+#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(feature = "glow", feature = "wgpu_no_default_features"))]
+pub type EventLoopReadyHook = Box<dyn FnOnce(&EventLoopProxy<UserEvent>) + Send>;
 
 /// Hook into the building of a the native window.
 ///
@@ -291,6 +304,9 @@ pub trait App {
     /// This lets an app ignore pointer motion that cannot change anything it shows, instead of
     /// painting every frame the pointer moves.
     ///
+    /// Only the root viewport's events are put to the app: the event does not say which window
+    /// it came from, so another window's keep eframe's default.
+    ///
     /// Only native windows have winit events; the web backend never calls this.
     #[cfg(not(target_arch = "wasm32"))]
     fn repaint_on_window_event(&mut self, _event: &winit::event::WindowEvent) -> Option<bool> {
@@ -301,7 +317,8 @@ pub trait App {
     /// frame. This is [`Self::repaint_on_window_event`] for events that come from a device
     /// rather than a window; on some platforms pointer motion arrives here
     /// ([`winit::event::DeviceEvent::MouseMotion`]) instead of as a window event, so an app that
-    /// ignores pointer motion must answer both.
+    /// ignores pointer motion must answer both. Only motion delivered to the root viewport is put
+    /// to the app.
     ///
     /// Only native windows have winit events; the web backend never calls this.
     #[cfg(not(target_arch = "wasm32"))]
@@ -380,6 +397,16 @@ pub struct NativeOptions {
     /// Note: A [`NativeOptions`] clone will not include any `event_loop_builder` hook.
     #[cfg(any(feature = "glow", feature = "wgpu_no_default_features"))]
     pub event_loop_builder: Option<EventLoopBuilderHook>,
+
+    /// SolidCraft: hook into the start of the event loop with its proxy.
+    ///
+    /// Specify a callback here to keep the loop's proxy, so your threads can wake it with their
+    /// own [`UserEvent`]s (see [`UserEvent::RunLogicNow`]). The app's logic pass then runs for
+    /// the request at once, instead of waiting for the compositor's next frame.
+    ///
+    /// Note: A [`NativeOptions`] clone will not include any `event_loop_ready` hook.
+    #[cfg(any(feature = "glow", feature = "wgpu_no_default_features"))]
+    pub event_loop_ready: Option<EventLoopReadyHook>,
 
     /// Hook into the building of a window.
     ///
@@ -471,6 +498,9 @@ impl Clone for NativeOptions {
             event_loop_builder: None, // Skip any builder callbacks if cloning
 
             #[cfg(any(feature = "glow", feature = "wgpu_no_default_features"))]
+            event_loop_ready: None, // Skip the ready hook if cloning
+
+            #[cfg(any(feature = "glow", feature = "wgpu_no_default_features"))]
             window_builder: None, // Skip any builder callbacks if cloning
 
             #[cfg(feature = "glow")]
@@ -506,6 +536,9 @@ impl Default for NativeOptions {
 
             #[cfg(any(feature = "glow", feature = "wgpu_no_default_features"))]
             event_loop_builder: None,
+
+            #[cfg(any(feature = "glow", feature = "wgpu_no_default_features"))]
+            event_loop_ready: None,
 
             #[cfg(any(feature = "glow", feature = "wgpu_no_default_features"))]
             window_builder: None,

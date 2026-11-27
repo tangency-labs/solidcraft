@@ -1,7 +1,7 @@
 //! #2091 (WR-670): each iso-u integral of `SmODEAreaIFEO` runs knot span by knot span
 //! (WR-494), but every piece's last point was evaluated in the knot span above it (upstream's
 //! `bVFromLeft = TRUE`). Where the surface's derivatives jump at a v knot (a G2 but
-//! not C2 section, merged into one face under `geometric_g2_continuity`), the integrand
+//! not C2 section, merged into one face by the geometric G2 test), the integrand
 //! jumped at each piece's end and the Runge-Kutta steps shrank toward every knot; at the
 //! C0 double knot of #1435's multi-span patch they underflowed at accuracies 1e-9 and
 //! tighter. Each piece's end is now evaluated from the piece's own span (the one-sided
@@ -64,13 +64,11 @@ fn section(z: f64) -> Vec<Curve> {
 }
 
 fn kernel() -> Kernel {
-    let mut k = Kernel::default();
-    k.fixes.geometric_g2_continuity = true;
-    k
+    Kernel::default()
 }
 
 /// The capped prism lofted between the two sections: one side face across all six
-/// spans under `geometric_g2_continuity`.
+/// spans.
 fn prism(k: &mut Kernel) -> Brep {
     let curves: Vec<Curve> = section(0.0).into_iter().chain(section(HEIGHT)).collect();
     let refs: Vec<_> = curves.iter().map(Some).collect();

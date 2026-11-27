@@ -168,14 +168,22 @@ impl<'app> WgpuWinitApp<'app> {
             ..
         } = &mut *shared;
 
-        for viewport in viewports.values_mut() {
-            viewport.initialize_window(
-                event_loop,
-                &running.integration.egui_ctx,
-                viewport_from_window,
-                painter,
-                *clipboard_shortcuts,
-            );
+        let pending: Vec<_> = viewports
+            .iter()
+            .filter(|(_, viewport)| viewport.window.is_none())
+            .map(|(&id, viewport)| (id, native_owner_window(viewports, &viewport.builder)))
+            .collect();
+        for (id, owner) in pending {
+            if let Some(viewport) = viewports.get_mut(&id) {
+                viewport.initialize_window(
+                    event_loop,
+                    &running.integration.egui_ctx,
+                    viewport_from_window,
+                    painter,
+                    *clipboard_shortcuts,
+                    owner.as_ref(),
+                );
+            }
         }
     }
 
@@ -204,6 +212,7 @@ impl<'app> WgpuWinitApp<'app> {
             viewport_from_window,
             painter,
             *clipboard_shortcuts,
+            None,
         );
     }
 
@@ -526,7 +535,12 @@ impl WinitApp for WgpuWinitApp<'_> {
                         .values_mut()
                         .find_map(|viewport| viewport.on_mouse_motion(*delta))
                 })
-                && winit_integration::repaint_for_device_event(running.app.as_mut(), &event, true)
+                && winit_integration::repaint_for_device_event(
+                    running.app.as_mut(),
+                    &event,
+                    true,
+                    shared.viewport_from_window.get(&window_id).copied(),
+                )
             {
                 return Ok(EventResult::RepaintNext(window_id));
             }
@@ -1068,8 +1082,12 @@ impl WgpuWinitRunning<'_> {
             })
             .unwrap_or_default();
 
-        let repaint =
-            winit_integration::repaint_for_event(app.as_mut(), event, event_response.repaint);
+        let repaint = winit_integration::repaint_for_event(
+            app.as_mut(),
+            event,
+            event_response.repaint,
+            viewport_id,
+        );
 
         if integration.should_close() {
             EventResult::CloseRequested
@@ -1122,6 +1140,7 @@ impl Viewport {
         windows_id: &mut HashMap<WindowId, ViewportId>,
         painter: &mut egui_wgpu::winit::Painter,
         clipboard_shortcuts: bool,
+        native_owner: Option<&Arc<Window>>,
     ) {
         if self.window.is_some() {
             return; // we already have one
@@ -1131,7 +1150,19 @@ impl Viewport {
 
         let viewport_id = self.ids.this;
 
-        match egui_winit::create_window(egui_ctx, event_loop, &self.builder) {
+        let owner = if viewport_id != ViewportId::ROOT
+            && self.builder.native_owner.is_some_and(|id| id != viewport_id)
+        {
+            // Keep this viewport pending until we can create it with its owner.
+            let Some(owner) = native_owner else {
+                return;
+            };
+            Some(owner)
+        } else {
+            None
+        };
+
+        match egui_winit::create_window_with_owner(egui_ctx, event_loop, &self.builder, owner) {
             Ok(window) => {
                 windows_id.insert(window.id(), viewport_id);
 
@@ -1205,6 +1236,10 @@ fn is_viewport_or_descendant_visible(viewports: &Viewports, viewport_id: Viewpor
     })
 }
 
+fn native_owner_window(viewports: &Viewports, builder: &ViewportBuilder) -> Option<Arc<Window>> {
+    viewports.get(&builder.native_owner?)?.window.clone()
+}
+
 fn render_immediate_viewport(
     beginning: Instant,
     shared: &RefCell<SharedState>,
@@ -1228,6 +1263,7 @@ fn render_immediate_viewport(
             ..
         } = &mut *shared.borrow_mut();
 
+        let owner = native_owner_window(viewports, &builder);
         let viewport = initialize_or_update_viewport(
             viewports,
             ids,
@@ -1244,6 +1280,7 @@ fn render_immediate_viewport(
                     viewport_from_window,
                     painter,
                     *clipboard_shortcuts,
+                    owner.as_ref(),
                 );
             });
         }

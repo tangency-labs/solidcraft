@@ -18,6 +18,11 @@
 //! Not upstream (#16935): `MarkCommon` goes on to the next single vertex after a loop
 //! closure that deleted no topology and left the vertex with two common edges, instead of
 //! starting a new pass, so the ten passes are not a limit of ten gaps.
+//! Not upstream (#17118): in a union, difference or intersection, a face found coincident at a
+//! common edge with a face of the other body on a surface of another analytic kind, when the
+//! pair is not made (the partner already classified, or `FixFoundFaceCoincidence` pairing
+//! nothing), is classified once every common edge has been visited, as a copy of that part of
+//! its partner (`resolve_tangent_patches`), instead of being left to a ray.
 //! Global cache queue limits are absent (the port has no global caches).
 //! The temporary origin shift goes through `merge_p1`, before any topology
 //! mutation. Its inverse token spans the entire operation,
@@ -47,7 +52,7 @@
 use std::collections::BTreeSet;
 
 use super::p1::{self, MergeOptions};
-use crate::error::boolean::BooleanFailure;
+use crate::error::boolean::{BooleanFailure, BooleanStage};
 use crate::error::{Failure, Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
 use crate::geom::attribute::{
@@ -379,8 +384,17 @@ pub enum MergeEntity {
     Vertex(VertexId),
 }
 
-fn required<T>(value: Option<T>) -> Result<T> {
-    value.ok_or_else(|| SolidError::entity_missing(OP, "a topology entity the Boolean needs"))
+/// `value`, or a defect naming the link `why` the kernel failed to keep (each call names
+/// its own link; no shared phrase).
+#[track_caller]
+fn linked<T>(value: Option<T>, stage: BooleanStage, why: &'static str) -> Result<T> {
+    value.ok_or_else(|| SolidError::boolean_null_defect(OP, stage, why))
+}
+
+/// The operand in `slot`, which the caller passes (an empty slot is the caller's).
+fn operand(slot: &mut Option<Brep>) -> Result<&mut Brep> {
+    slot.as_mut()
+        .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::MergeWithoutOperands))
 }
 
 fn ignored<T>(result: Result<T>) -> Result<Option<T>> {
@@ -409,6 +423,21 @@ struct Faces {
     other_delete: Vec<FaceId>,
     primary_sets: Vec<Vec<FaceId>>,
     other_sets: Vec<Vec<FaceId>>,
+    /// Not upstream (#17118): the tangent patches found at common edges, resolved by
+    /// [`resolve_tangent_patches`] once every common edge has been visited.
+    tangent_patches: Vec<TangentPatch>,
+}
+
+/// Not upstream (#17118): a face found coincident at a common edge with a face of the other
+/// body on a surface of another analytic kind, which the coincidence repair did not pair with
+/// it (or whose partner was classified first). The source face is `of` when `reverse`, `pf`
+/// otherwise; `keep` is what [`coincident_keep`] gives the pair.
+#[derive(Clone, Copy)]
+struct TangentPatch {
+    reverse: bool,
+    pf: FaceId,
+    of: FaceId,
+    keep: Option<bool>,
 }
 
 // `slice_same` (`Slice` with a primary face bounding material only; WR-254): that
@@ -455,10 +484,405 @@ fn region_keep(
     }
 }
 
+/// Whether the surfaces of the two faces are of different analytic kinds
+/// ([`crate::surface::surface::Surface::is_other_analytic_kind`]): such faces coincide
+/// only over a patch on which they stay within the tolerance.
+fn surfaces_of_other_kinds(primary: &Brep, pf: FaceId, other: &Brep, of: FaceId) -> Result<bool> {
+    fn surface(b: &Brep, f: FaceId) -> Result<&crate::surface::surface::Surface> {
+        b.face(f)?
+            .surface
+            .as_ref()
+            .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::FaceWithoutSurface))
+    }
+    Ok(surface(primary, pf)?.is_other_analytic_kind(surface(other, of)?))
+}
+
+/// Not upstream (#17118): classifies each tangent patch still unclassified once every common
+/// edge has been visited. A face on a surface of another kind than the face it coincides with
+/// lies on it only over a tangent patch within the tolerance, so within the tolerance it is a
+/// copy of that part of its partner. The operation keeps one copy of coincident faces or none
+/// ([`coincident_keep`]). With none, the patch goes. With one, the copy is the partner's when
+/// the partner is kept, so the patch goes, and the patch's when the partner is deleted. A
+/// patch whose partner is classified by a later patch is visited again, so the order of the
+/// list does not matter; a patch whose partner is still unclassified when a pass classifies
+/// nothing more is left to the ray, as before.
+fn resolve_tangent_patches(
+    kernels: &BooleanKernels<'_>,
+    state: &mut ManifoldState,
+    faces: &mut Faces,
+    marks: (MarkType, MarkType),
+) {
+    let mut pending = std::mem::take(&mut faces.tangent_patches);
+    loop {
+        let count = pending.len();
+        pending.retain(|&patch| !resolve_tangent_patch(kernels, state, faces, marks, patch));
+        if pending.len() == count {
+            break;
+        }
+    }
+}
+
+/// One patch of [`resolve_tangent_patches`]: whether it is settled (classified, or never to be
+/// classified here); `false` while its partner is unclassified.
+fn resolve_tangent_patch(
+    kernels: &BooleanKernels<'_>,
+    state: &mut ManifoldState,
+    faces: &mut Faces,
+    marks: (MarkType, MarkType),
+    patch: TangentPatch,
+) -> bool {
+    let TangentPatch {
+        reverse,
+        pf,
+        of,
+        keep,
+    } = patch;
+    let Some(keep_copy) = keep else {
+        return true;
+    };
+    let (source_marked, partner_kept, partner_deleted) = if reverse {
+        (
+            state
+                .other_marks
+                .is_marked(kernels.other(), Entity::Face(of), marks.1),
+            faces.keep.contains(&pf),
+            faces.delete.contains(&pf),
+        )
+    } else {
+        (
+            state
+                .primary_marks
+                .is_marked(kernels.primary, Entity::Face(pf), marks.0),
+            faces.other_keep.contains(&of),
+            faces.other_delete.contains(&of),
+        )
+    };
+    if source_marked {
+        return true;
+    }
+    if keep_copy && !partner_kept && !partner_deleted {
+        return false;
+    }
+    let keep_source = keep_copy && partner_deleted;
+    if reverse {
+        state
+            .other_marks
+            .mark(kernels.other(), Entity::Face(of), marks.1);
+        if keep_source {
+            faces.other_keep.push(of);
+        } else {
+            faces.other_delete.push(of);
+        }
+    } else {
+        state
+            .primary_marks
+            .mark(kernels.primary, Entity::Face(pf), marks.0);
+        if keep_source {
+            faces.keep.push(pf);
+        } else {
+            faces.delete.push(pf);
+        }
+    }
+    true
+}
+
+/// Not upstream (#17118): a bound on how far any point of `f` lies from the plane of
+/// `partner_face`, proved rather than sampled, for a face on a cylinder or cone; `None` for any
+/// other pair of kinds, or where the bound below does not apply.
+///
+/// Every point of the cone is `O + h A + R(h) (cos t E1 + sin t E2)` with `R(h) = r + h tan(a)`,
+/// and the plane's signed distance `n . (X - P)` there is `C + D h + R(h) S(t)` with `S` a
+/// sinusoid. With `R` positive, that is linear in `h` for each `t`, so over a box
+/// `[t0, t1] x [h0, h1]` it is extreme at `h0` or `h1` and at `S`'s extremes over `[t0, t1]`,
+/// which are at the ends or at `S`'s crest or trough. The box comes from the face's boundary:
+/// its vertices, each line edge's ends and every control point of each B-spline edge's Bezier
+/// segments (a B-spline with positive weights lies in the convex hull of those). `h` is linear,
+/// so the hull's `h` range holds the boundary's. The angles are measured from the points' mean
+/// direction about the axis and must all lie within a quarter turn of it, so the hull lies in a
+/// half-space bounded by a plane through the axis and its angles lie between the points'. A face
+/// with one loop that does not wind round the axis is the region inside that loop, so it lies in
+/// the box of its boundary. The box is widened by the face's edge tolerances, since the edges
+/// lie only within those of the cone.
+fn cone_face_gap_to_plane(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+    partner: &Brep,
+    partner_face: FaceId,
+) -> Result<Option<f64>> {
+    use crate::curve::curve::CurveKind;
+    use crate::surface::implicit::{AnalyticSupport, Implicit};
+    let implicit = |b: &Brep, f: FaceId| -> Result<Option<Implicit>> {
+        Ok(b.face(f)?
+            .surface
+            .as_ref()
+            .and_then(AnalyticSupport::of)
+            .map(|support| support.implicit()))
+    };
+    let (
+        Some(Implicit::Cone {
+            origin,
+            axis,
+            radius,
+            tan_angle,
+        }),
+        Some(Implicit::Plane {
+            origin: plane_origin,
+            normal,
+        }),
+    ) = (implicit(b, f)?, implicit(partner, partner_face)?)
+    else {
+        return Ok(None);
+    };
+    if face::loops(b, f, false, None)?.len() != 1 {
+        return Ok(None);
+    }
+    // the boundary's hull points, and the widest edge tolerance
+    let mut points = Vec::new();
+    let mut widen = 0.0_f64;
+    for v in crate::topology::face::p4::vertices(b, f, None, false, None)? {
+        points.push(vertex::point(b, v)?);
+    }
+    for e in crate::topology::face::p4::edges(b, f, None, false, None)? {
+        let edge = b.edge(e)?;
+        widen = widen.max(edge.tolerance);
+        let Some(curve) = edge.curve.as_ref() else {
+            return Ok(None);
+        };
+        match curve.kind() {
+            CurveKind::Line(_) => {
+                for t in [0.0, 1.0] {
+                    points.push(curve.evaluate_point(k, edge.interval.evaluate(t))?);
+                }
+            }
+            CurveKind::BSpline(spline) => {
+                let Some(nurb) = spline.nurb.as_ref() else {
+                    return Ok(None);
+                };
+                for segment in nurb.decompose_bez()? {
+                    for c in segment.cpts() {
+                        let w = if c.w == crate::nurbs::math::NOW {
+                            1.0
+                        } else {
+                            c.w
+                        };
+                        if w.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
+                            return Ok(None);
+                        }
+                        points.push(Vec3::new(c.x / w, c.y / w, c.z / w));
+                    }
+                }
+            }
+            _ => return Ok(None),
+        }
+    }
+    Ok(cone_box_gap(
+        (origin, axis, radius, tan_angle),
+        (plane_origin, normal),
+        &points,
+        widen,
+    ))
+}
+
+/// The bound of [`cone_face_gap_to_plane`] for a face whose boundary lies in the convex hull of
+/// `points`, within `widen` of the cone `(O, A, r, tan(a))`, against the plane `(P, n)`.
+///
+/// Rounding, with `g(m)` the bound `m u / (1 - m u)` on `m` roundings (`u` the unit roundoff)
+/// and `s` the size of every coordinate, `|O| + |P| + max |X|`:
+///
+/// - Each point's height `(X - O) . A` and radial vector take at most 8 roundings of terms
+///   below `s`, so they are within `g(8) s`. The frame `E1` (the normalised mean) and
+///   `E2 = A x E1` are within `g(8)` of an orthonormal frame, which turns each point's angle
+///   by at most `g(16) s / rho` with its components' error, `rho` the least radial distance,
+///   plus two units in the last place of `atan2`. The box is widened by those margins, so it
+///   holds the exact heights and angles.
+/// - The distance `C + D h + R(h) S(t)` is computed from `C` (5 roundings), `D` (3), `R(h)` (3),
+///   and `S(t)`, whose coefficients carry the frame's `g(16)` and whose sine and cosine are
+///   within one unit in the last place each; with the sum's own 3 roundings, each value is
+///   within `g(32)` of the sizes of its terms, at most `|O| + |P| + max |h| + max R(h)`.
+///   That is added to the bound.
+/// - A crest or trough is counted whenever it falls within `1e-9` of the box. Counting one
+///   that falls just outside only raises the bound, since `|S|` never exceeds its amplitude.
+fn cone_box_gap(
+    (origin, axis, radius, tan_angle): (Vec3, Vec3, f64, f64),
+    (plane_origin, normal): (Vec3, Vec3),
+    points: &[Vec3],
+    widen: f64,
+) -> Option<f64> {
+    use crate::nurbs::math::gamma;
+    use std::cmp::Ordering;
+    use std::f64::consts::PI;
+    // each point's height and radial vector about the axis
+    let about = |x: Vec3| {
+        let v = x - origin;
+        let h = v.dot(axis);
+        (h, v - axis * h)
+    };
+    let mean = points
+        .iter()
+        .fold(Vec3::new(0.0, 0.0, 0.0), |m, &x| m + about(x).1);
+    if points.is_empty() || mean.length() == 0.0 {
+        return None;
+    }
+    let s = origin.length()
+        + plane_origin.length()
+        + points.iter().map(|x| x.length()).fold(0.0_f64, f64::max);
+    let e1 = mean * (1.0 / mean.length());
+    let e2 = axis.cross(e1);
+    let (mut h0, mut h1, mut t0, mut t1) = (f64::MAX, f64::MIN, 0.0_f64, 0.0_f64);
+    let mut rho = f64::MAX;
+    for &x in points {
+        let (h, v) = about(x);
+        let t = v.dot(e2).atan2(v.dot(e1));
+        if t.abs().partial_cmp(&(0.5 * PI)) != Some(Ordering::Less) {
+            return None;
+        }
+        (h0, h1, t0, t1) = (h0.min(h), h1.max(h), t0.min(t), t1.max(t));
+        rho = rho.min(v.length());
+    }
+    let r_at = |h: f64| radius + tan_angle * h;
+    let r_min = r_at(h0).min(r_at(h1));
+    if r_min.partial_cmp(&widen) != Some(Ordering::Greater)
+        || rho.partial_cmp(&(gamma(16) * s)) != Some(Ordering::Greater)
+    {
+        return None;
+    }
+    // a point within `widen` of the cone where its radius is `R` turns by at most this
+    let spread = (widen / (r_min - widen)).min(1.0).asin();
+    let margin_h = widen + gamma(8) * s;
+    let margin_t = spread + gamma(16) * s / rho + 4.0 * f64::EPSILON;
+    let (h0, h1, t0, t1) = (h0 - margin_h, h1 + margin_h, t0 - margin_t, t1 + margin_t);
+    let (r0, r1) = (r_at(h0), r_at(h1));
+    if !(r0 > 0.0 && r1 > 0.0 && t1 - t0 < PI) {
+        return None;
+    }
+    // the signed distance C + D h + R(h) (alpha cos t + beta sin t)
+    let c = normal.dot(origin - plane_origin);
+    let d = normal.dot(axis);
+    let (alpha, beta) = (normal.dot(e1), normal.dot(e2));
+    let sine = |t: f64| alpha * t.cos() + beta * t.sin();
+    let crest = beta.atan2(alpha);
+    let (mut s_min, mut s_max) = (sine(t0).min(sine(t1)), sine(t0).max(sine(t1)));
+    let amplitude = alpha.hypot(beta);
+    for (peak, value) in [(crest, amplitude), (crest + PI, -amplitude)] {
+        // the peak's turn nearest the box
+        let at = peak + 2.0 * PI * ((0.5 * (t0 + t1) - peak) / (2.0 * PI)).round();
+        if t0 - 1e-9 <= at && at <= t1 + 1e-9 {
+            s_min = s_min.min(value);
+            s_max = s_max.max(value);
+        }
+    }
+    let mut gap = 0.0_f64;
+    for (h, r) in [(h0, r0), (h1, r1)] {
+        gap = gap
+            .max((c + d * h + r * s_max).abs())
+            .max((c + d * h + r * s_min).abs());
+    }
+    let size = origin.length() + plane_origin.length() + h0.abs().max(h1.abs()) + r0.max(r1);
+    Some(gap + gamma(32) * size)
+}
+
+/// Not upstream (#17118): whether every one of `points` (the source face's vertices and three
+/// points along each of its edges) classifies to the partner face `f` of `b`, its inside, an
+/// edge or a vertex, within `tol`, so that the source face lies within the partner face's
+/// trimmed extent, not only on its surface. The classification builds the face's UV trim
+/// curves, so it runs on a scratch copy of `b`. A point the classification cannot place
+/// counts as outside.
+fn points_in_face(k: &Kernel, b: &Brep, f: FaceId, points: &[Vec3], tol: f64) -> Result<bool> {
+    use crate::intersect::point_class::PointClassification;
+    use crate::query::face::p1::{point_3d_classify, Point3dClassifyOptions};
+    let mut scratch = b.clone_sharing_surface_caches();
+    for &point in points {
+        let mut pc = PointClassification::new(tol);
+        match point_3d_classify(
+            k,
+            &mut scratch,
+            f,
+            point,
+            tol,
+            false,
+            &mut pc,
+            Point3dClassifyOptions::default(),
+        ) {
+            Ok(()) => {}
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(false),
+        }
+        if !matches!(
+            pc.point_class(),
+            PointClassType::Face | PointClassType::Edge | PointClassType::Vertex
+        ) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// The points of face `f` that [`points_in_face`] classifies: its vertices and the points a
+/// quarter, half and three quarters along each edge.
+fn face_boundary_points(k: &Kernel, b: &Brep, f: FaceId) -> Result<Vec<Vec3>> {
+    let mut points = Vec::new();
+    for v in crate::topology::face::p4::vertices(b, f, None, false, None)? {
+        points.push(vertex::point(b, v)?);
+    }
+    for e in crate::topology::face::p4::edges(b, f, None, false, None)? {
+        let edge = b.edge(e)?;
+        if let Some(curve) = edge.curve.as_ref() {
+            for t in [0.25, 0.5, 0.75] {
+                points.push(curve.evaluate_point(k, edge.interval.evaluate(t))?);
+            }
+        }
+    }
+    Ok(points)
+}
+
+/// Not upstream (#17118): whether the source face of a tangent patch (`of` when `reverse`, `pf`
+/// otherwise) is a copy of part of its partner face: it lies within the tolerance of the
+/// partner's surface everywhere, which is proved only for a face on a cylinder or cone against
+/// a plane ([`cone_face_gap_to_plane`]), and its boundary lies within the partner face's trimmed
+/// extent ([`points_in_face`]). Any other face is left to the ray.
+fn within_partner(
+    kernels: &BooleanKernels<'_>,
+    primary: &Brep,
+    pf: FaceId,
+    other: &Brep,
+    of: FaceId,
+    reverse: bool,
+) -> Result<bool> {
+    let (sk, sb, sf, pk, pb, ppf) = if reverse {
+        (kernels.other(), other, of, &*kernels.primary, primary, pf)
+    } else {
+        (&*kernels.primary, primary, pf, kernels.other(), other, of)
+    };
+    let tol = face::tolerance(sb, sf)?.max(face::tolerance(pb, ppf)?);
+    if !cone_face_gap_to_plane(sk, sb, sf, pb, ppf)?.is_some_and(|g| g <= tol) {
+        return Ok(false);
+    }
+    points_in_face(pk, pb, ppf, &face_boundary_points(sk, sb, sf)?, tol)
+}
+
 fn region_pair(b: &Brep, fu: FaceuseId) -> Result<(RegionId, RegionId)> {
     Ok((
-        required(eu::faceuse_region(b, fu)?)?,
-        required(eu::faceuse_region(b, required(eu::faceuse_mate(b, fu)?)?)?)?,
+        linked(
+            eu::faceuse_region(b, fu)?,
+            BooleanStage::Classify,
+            "a face use of a face lies in no region, though the kernel keeps every face \
+             use's shell in a region",
+        )?,
+        linked(
+            eu::faceuse_region(
+                b,
+                linked(
+                    eu::faceuse_mate(b, fu)?,
+                    BooleanStage::Classify,
+                    "a face use has no mate, though the kernel makes every face with a pair \
+                     of face uses",
+                )?,
+            )?,
+            BooleanStage::Classify,
+            "a face use's mate lies in no region, though the kernel keeps every face use's \
+             shell in a region",
+        )?,
     ))
 }
 
@@ -729,7 +1153,12 @@ fn classify_edge_faces(
         if eu::is_shell_edgeuse(source, edgeuse)? {
             continue;
         }
-        let source_face = required(eu::face(source, edgeuse)?)?;
+        let source_face = linked(
+            eu::face(source, edgeuse)?,
+            BooleanStage::Classify,
+            "an edge use that is not a shell edge use has no face, though only shell edge \
+             uses lie outside a face",
+        )?;
         if source_marks.is_marked(source_k, Entity::Face(source_face), mark) {
             continue;
         }
@@ -760,10 +1189,20 @@ fn classify_edge_faces(
             continue;
         };
         if let Some(found) = sector.coincident_faceuse {
-            let source_fu = required(eu::faceuse(if reverse { other } else { primary }, edgeuse)?)?;
+            let source_fu = linked(
+                eu::faceuse(if reverse { other } else { primary }, edgeuse)?,
+                BooleanStage::Classify,
+                "an edge use of a face has no face use, though the kernel links every edge use \
+                 of a face to its face use",
+            )?;
             let (pf, of, pf_regions, of_regions) = if reverse {
                 (
-                    required(eu::faceuse_face(primary, found)?)?,
+                    linked(
+                        eu::faceuse_face(primary, found)?,
+                        BooleanStage::Classify,
+                        "the coincident face use the radial sector found has no face, though \
+                         the kernel links every face use to its face",
+                    )?,
                     source_face,
                     region_pair(primary, found)?,
                     region_pair(other, source_fu)?,
@@ -771,7 +1210,12 @@ fn classify_edge_faces(
             } else {
                 (
                     source_face,
-                    required(eu::faceuse_face(other, found)?)?,
+                    linked(
+                        eu::faceuse_face(other, found)?,
+                        BooleanStage::Classify,
+                        "the coincident face use the radial sector found has no face, though \
+                         the kernel links every face use to its face",
+                    )?,
                     region_pair(primary, source_fu)?,
                     region_pair(other, found)?,
                 )
@@ -798,6 +1242,24 @@ fn classify_edge_faces(
             } else {
                 None
             };
+            // Not upstream (#17118): a face on a surface of another kind than the face it
+            // coincides with lies on it only over a tangent patch within the tolerance,
+            // whose boundary the imprint need not draw in that face. Such a pair is often
+            // not one `FixFoundFaceCoincidence` accepts (it pairs nothing), or the partner
+            // was classified at another edge first. The patch is classified once every
+            // common edge has been visited (`resolve_tangent_patches`). Left to the ray
+            // instead, it was classified from a point within the tolerance of the other
+            // boundary, where the answer can go either way: a sliver of a groove's round
+            // lying in a wedge thinner than the tolerance was kept by a cut, and the result
+            // was not closed.
+            let tangent_patch = matches!(
+                operation,
+                BooleanOperation::Union
+                    | BooleanOperation::Difference
+                    | BooleanOperation::Intersection
+            ) && surfaces_of_other_kinds(primary, pf, other, of)?
+                && within_partner(kernels, primary, pf, other, of, reverse)?;
+            let keep = coincident_keep(operation, same_side, non_solid, None);
             if if reverse {
                 state
                     .primary_marks
@@ -807,12 +1269,33 @@ fn classify_edge_faces(
                     .other_marks
                     .is_marked(kernels.other(), Entity::Face(of), marks.1)
             } {
+                if tangent_patch {
+                    faces.tangent_patches.push(TangentPatch {
+                        reverse,
+                        pf,
+                        of,
+                        keep,
+                    });
+                }
                 continue;
             }
             let (compatible, other_compatible, modified) =
                 intersector.fix_face_coincidence(kernels, primary, other, attributes, pf, of)?;
             if modified {
                 return Ok(false);
+            }
+            let source_paired = if reverse {
+                other_compatible.contains(&of)
+            } else {
+                compatible.contains(&pf)
+            };
+            if tangent_patch && !source_paired {
+                faces.tangent_patches.push(TangentPatch {
+                    reverse,
+                    pf,
+                    of,
+                    keep,
+                });
             }
             pairs(&compatible, &other_compatible)?;
             if operation == BooleanOperation::ExtractSeparate {
@@ -866,14 +1349,31 @@ fn classify_edge_faces(
                 }
             }
             let opposite = if reverse { &*primary } else { &*other };
-            let r = required(eu::shell_region(
-                opposite,
-                required(eu::shell(opposite, found)?)?,
-            )?)?;
+            let r = linked(
+                eu::shell_region(
+                    opposite,
+                    linked(
+                        eu::shell(opposite, found)?,
+                        BooleanStage::Classify,
+                        "the radial edge use the sector found has no shell, though the sector \
+                         walks only the edge uses of faces, each of which lies in a shell",
+                    )?,
+                )?,
+                BooleanStage::Classify,
+                "the shell of the radial edge use the sector found lies in no region, though \
+                 the kernel keeps every shell in a region",
+            )?;
             let slice_same = if !reverse && operation == BooleanOperation::Slice {
                 Some(
-                    eu::faceuse_orientation(opposite, required(eu::faceuse(opposite, found)?)?)?
-                        == OrientType::Same,
+                    eu::faceuse_orientation(
+                        opposite,
+                        linked(
+                            eu::faceuse(opposite, found)?,
+                            BooleanStage::Classify,
+                            "the radial edge use the sector found has no face use, though the \
+                             sector walks only the edge uses of faces",
+                        )?,
+                    )? == OrientType::Same,
                 )
             } else {
                 None
@@ -888,10 +1388,7 @@ fn classify_edge_faces(
                 }
             }
         } else {
-            return Err(SolidError::stage_failed(
-                OP,
-                "the faces are neither in a shell nor classified",
-            ));
+            return Err(SolidError::boolean(OP, BooleanFailure::NoRadialEdgeUse));
         }
     }
     Ok(true)
@@ -966,15 +1463,17 @@ fn classify_remaining(
             for &edge_id in &edges {
                 // Upstream deliberately/repeatedly uses sFaceEdges[0] in the
                 // primary pass; the other pass uses j and a different fraction.
+                // (inside the loop over `edges`, so the list has a first edge)
                 let selected = if reverse {
                     edge_id
                 } else {
-                    *edges.first().ok_or_else(|| {
-                        SolidError::entity_missing(OP, "the edge list has an edge")
-                    })?
+                    edges.first().copied().unwrap_or(edge_id)
                 };
                 let e = source.edge(selected)?;
-                let curve = required(e.curve.as_ref())?;
+                let curve = e
+                    .curve
+                    .as_ref()
+                    .ok_or_else(|| SolidError::boolean(OP, BooleanFailure::EdgeWithoutCurve))?;
                 let point = curve.evaluate_point(
                     source_k,
                     e.interval
@@ -1151,8 +1650,24 @@ fn remember_split(
     new_face: FaceId,
     other_face: FaceId,
 ) -> Result<()> {
-    let (r1, r2) = region_pair(primary, required(face::upward_faceuse(primary, new_face)?)?)?;
-    let (o1, o2) = region_pair(other, required(face::upward_faceuse(other, other_face)?)?)?;
+    let (r1, r2) = region_pair(
+        primary,
+        linked(
+            face::upward_faceuse(primary, new_face)?,
+            BooleanStage::Merge,
+            "the face made from the other face has no upward face use, though the kernel \
+             makes every face with its face uses",
+        )?,
+    )?;
+    let (o1, o2) = region_pair(
+        other,
+        linked(
+            face::upward_faceuse(other, other_face)?,
+            BooleanStage::Merge,
+            "the other face kept by the Boolean has no upward face use, though the kernel \
+             keeps every face with its face uses",
+        )?,
+    )?;
     let key = |r| intersector.object_key(false, MergeEntity::Region(r));
     // Capture both handles before either AddAttribute, even when r1 == r2.
     let handle1 = attributes.find_attribute(key(r1), ids::OTHER_REGION_ID);
@@ -1174,12 +1689,20 @@ fn remember_split(
         let this_type = source_type(primary, r, this_infinite)?;
         let other_type = source_type(other, o, Some(o) == other.infinite_region())?;
         if let Some(handle) = handle {
-            let data = required(
+            let data = linked(
                 attributes
                     .get_mut(handle)
                     .and_then(Attribute::merge_region_data_mut),
+                BooleanStage::Merge,
+                "the region's merge-region attribute is not in the attribute table with its \
+                 data, though the handle was just found by that attribute's id",
             )?;
-            let first = required(data.this_region(0))?;
+            let first = linked(
+                data.this_region(0),
+                BooleanStage::Merge,
+                "the region's merge-region attribute records no first region, though the \
+                 Boolean makes that attribute with its first region",
+            )?;
             // (fork e7ebc8d passes this status on: `SER`)
             data.set_regions(0, first, this_type, other_key, other_type)?;
         } else {
@@ -1206,8 +1729,15 @@ fn make_other_faces(
 ) -> Result<()> {
     for &f in &faces.other_keep {
         let (fu1, fu2) = face::faceuses(other, f)?;
-        let fu1 = required(fu1)?;
-        let fu2 = required(fu2)?;
+        let [fu1, fu2] = [fu1, fu2].map(|fu| {
+            linked(
+                fu,
+                BooleanStage::Merge,
+                "an other face kept by the Boolean has not both of its face uses, though the \
+                 kernel keeps every face with a pair",
+            )
+        });
+        let (fu1, fu2) = (fu1?, fu2?);
         let original =
             intersector.find_region_of_other_face(kernels.primary, primary, other, fu1)?;
         let original_void = if let Some(r) = original {
@@ -1230,15 +1760,28 @@ fn make_other_faces(
             MadeFaceuse::default()
         };
         if let (Some(new_region), Some(_)) = (made.new_region, original) {
-            let old = required(made.old_region)?;
+            let old = linked(
+                made.old_region,
+                BooleanStage::Merge,
+                "the face made from the other face split a region but names no old region, \
+                 though making the face reports the region it splits",
+            )?;
             if void(primary, new_region)? != original_void || void(primary, old)? != original_void {
                 let changed = if void(primary, old)? == original_void {
                     new_region
                 } else {
                     old
                 };
-                let other_void1 = void(other, required(eu::faceuse_region(other, fu1)?)?)?;
-                let other_void2 = void(other, required(eu::faceuse_region(other, fu2)?)?)?;
+                let [region1, region2] = [fu1, fu2].map(|fu| {
+                    linked(
+                        eu::faceuse_region(other, fu)?,
+                        BooleanStage::Merge,
+                        "a face use of an other face kept by the Boolean lies in no region, \
+                         though the kernel keeps every face use's shell in a region",
+                    )
+                });
+                let other_void1 = void(other, region1?)?;
+                let other_void2 = void(other, region2?)?;
                 if other_void1 != other_void2 || (other_void1 == 1 && other_void2 == 1) {
                     primary.region_mut(changed)?.set_is_void(original_void);
                 }
@@ -1251,7 +1794,12 @@ fn make_other_faces(
                     other,
                     intersector,
                     attributes,
-                    required(made.old_region)?,
+                    linked(
+                        made.old_region,
+                        BooleanStage::Merge,
+                        "the face made from the other face split a region but names no old \
+                         region, though making the face reports the region it splits",
+                    )?,
                     new_face,
                     f,
                 )?;
@@ -1266,7 +1814,12 @@ fn update_infinite(
     intersector: &impl ManifoldIntersector,
     attributes: &AttributeStore,
 ) -> Result<bool> {
-    let infinite = required(primary.infinite_region())?;
+    let infinite = linked(
+        primary.infinite_region(),
+        BooleanStage::Classify,
+        "the primary B-rep has no infinite region, though the kernel keeps one in every \
+         B-rep",
+    )?;
     if merge_data(
         attributes,
         intersector.object_key(false, MergeEntity::Region(infinite)),
@@ -1500,6 +2053,7 @@ fn editing_stages(
         faces.other_keep.clear();
         faces.delete.clear();
         faces.other_delete.clear();
+        faces.tangent_patches.clear();
         mark_common(
             kernels,
             primary,
@@ -1568,6 +2122,7 @@ fn editing_stages(
             break;
         }
     }
+    resolve_tangent_patches(kernels, state, faces, marks);
     classify_remaining(kernels, primary, other, state, operation, marks, faces)?;
     if operation != BooleanOperation::ExtractSeparate {
         repair_lists(primary, other, operation, faces)?;
@@ -1640,7 +2195,17 @@ fn editing_stages(
             primary.region_mut(r)?.set_is_void(i32::from(!solid));
         }
     }
-    if !infinite_current || void(primary, required(primary.infinite_region())?)? == 0 {
+    if !infinite_current
+        || void(
+            primary,
+            linked(
+                primary.infinite_region(),
+                BooleanStage::Classify,
+                "the primary B-rep has no infinite region, though the kernel keeps one in \
+                 every B-rep",
+            )?,
+        )? == 0
+    {
         find_and_set_infinite(
             kernels,
             primary,
@@ -1729,8 +2294,8 @@ fn manifold_boolean_transformed(
     operation: BooleanOperation,
     caller_lock: Option<&mut MarkLock>,
 ) -> Result<bool> {
-    let a = required(primary.as_mut())?;
-    let b = required(other.as_mut())?;
+    let a = operand(primary)?;
+    let b = operand(other)?;
     kernels.primary.check_cancelled(OP)?;
     if let Some(other_kernel) = kernels.other.as_deref() {
         other_kernel.check_cancelled(OP)?;
@@ -1782,21 +2347,33 @@ fn manifold_boolean_translated(
     operation: BooleanOperation,
     caller_lock: Option<&mut MarkLock>,
 ) -> Result<bool> {
-    let a = required(primary.as_mut())?;
-    let b = required(other.as_mut())?;
+    let a = linked(
+        primary.as_mut(),
+        BooleanStage::Merge,
+        "the primary operand is gone after the temporary transform, though the transform \
+         hands on the operands checked on entry",
+    )?;
+    let b = linked(
+        other.as_mut(),
+        BooleanStage::Merge,
+        "the other operand is gone after the temporary transform, though the transform \
+         hands on the operands checked on entry",
+    )?;
     kernels.primary.check_cancelled(OP)?;
     if let Some(other_kernel) = kernels.other.as_deref() {
         other_kernel.check_cancelled(OP)?;
     }
     if operation == BooleanOperation::Slice {
         if !is_sheet(kernels, b)? {
-            return Err(SolidError::stage_failed(
-                OP,
-                "a slice needs a sheet, and the B-rep is not one",
-            ));
+            return Err(SolidError::boolean(OP, BooleanFailure::SliceNeedsSheet));
         }
         if !is_oriented_sheet(kernels, b)? {
-            let first = required(bp::faces(b, None)?.first().copied())?;
+            let first = linked(
+                bp::faces(b, None)?.first().copied(),
+                BooleanStage::Merge,
+                "the sheet to slice with has no face, though a sheet is one only when its \
+                 edges are manifold or lamina edges, each of which borders a face",
+            )?;
             orient_sheet_surfaces(kernels, b, first, true)?;
         }
     }
@@ -1859,7 +2436,13 @@ fn manifold_boolean_translated(
         } else {
             kernels.mark_action(|contexts| lock.release(contexts))
         };
-        required(primary.as_mut())?.set_editing_enabled(edit_a);
+        linked(
+            primary.as_mut(),
+            BooleanStage::Merge,
+            "the primary operand is gone after the Boolean, though the Boolean drops only the \
+             other operand",
+        )?
+        .set_editing_enabled(edit_a);
         released?;
         return Ok(true);
     }
@@ -1877,13 +2460,23 @@ fn manifold_boolean_translated(
     if operation == BooleanOperation::ExtractSeparate {
         for (source, reverse, sets, components) in [
             (
-                required(primary.as_mut())?,
+                linked(
+                    primary.as_mut(),
+                    BooleanStage::Merge,
+                    "the primary operand is gone after the extraction, though the Boolean \
+                     drops only the other operand",
+                )?,
                 false,
                 &faces.primary_sets,
                 &mut state.primary_components,
             ),
             (
-                required(other.as_mut())?,
+                linked(
+                    other.as_mut(),
+                    BooleanStage::Merge,
+                    "the other operand is gone after the extraction, though the Boolean drops \
+                     it only on the path that returned before",
+                )?,
                 true,
                 &faces.other_sets,
                 &mut state.other_components,
@@ -2073,6 +2666,148 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// #17118: the bound on how far a cylinder or cone face strays from a plane covers the
+    /// whole face, not only its boundary points. `on` gives points of the cone over a box of
+    /// angles (radians from the x axis) and heights; `exact` is the largest distance from the
+    /// plane over that box.
+    #[test]
+    fn a_cone_face_bound_covers_the_face_between_its_boundary_points() {
+        let z = Vec3::new(0.0, 0.0, 1.0);
+        let on = |r: f64, tan: f64, ts: &[f64], hs: &[f64]| -> Vec<Vec3> {
+            let mut out = Vec::new();
+            for &t in ts {
+                for &h in hs {
+                    let rh = r + tan * h;
+                    out.push(Vec3::new(rh * t.cos(), rh * t.sin(), h));
+                }
+            }
+            out
+        };
+        let x = Vec3::new(1.0, 0.0, 0.0);
+        // a sliver of a cylinder of radius 5 beside the plane x = 5, tangent along y = 0
+        let sliver = on(5.0, 0.0, &[0.0, 1e-3], &[0.0, 10.0]);
+        let cylinder = (Vec3::new(0.0, 0.0, 0.0), z, 5.0, 0.0);
+        let tangent = (Vec3::new(5.0, 0.0, 0.0), x);
+        let exact = 5.0 * (1.0 - 1e-3_f64.cos());
+        let bound = cone_box_gap(cylinder, tangent, &sliver, 0.0).unwrap();
+        assert!(bound >= exact && bound < exact + 1e-12, "{bound} {exact}");
+        // the plane x = 4.99 cuts into the cylinder: the face's corners lie on it, but the
+        // face's middle, at y = 0, lies 0.01 beyond it
+        let t = (4.99_f64 / 5.0).acos();
+        let chord = on(5.0, 0.0, &[-t, t], &[0.0, 10.0]);
+        let cutting = (Vec3::new(4.99, 0.0, 0.0), x);
+        assert!(chord
+            .iter()
+            .all(|&p| (p - cutting.0).dot(cutting.1).abs() < 1e-12));
+        let bound = cone_box_gap(cylinder, cutting, &chord, 0.0).unwrap();
+        assert!(bound >= 0.01 - 1e-12, "{bound}");
+        // the edges' tolerance widens the box
+        let widened = cone_box_gap(cylinder, tangent, &sliver, 1e-5).unwrap();
+        assert!(widened > exact, "{widened}");
+        // a cone of radius 5 + h / 2 beside its tangent plane along y = 0
+        let cone = (Vec3::new(0.0, 0.0, 0.0), z, 5.0, 0.5);
+        let normal = Vec3::new(1.0, 0.0, -0.5) * (1.0 / 1.25_f64.sqrt());
+        let sliver = on(5.0, 0.5, &[0.0, 1e-3], &[0.0, 4.0]);
+        let exact = 7.0 * (1.0 - 1e-3_f64.cos()) / 1.25_f64.sqrt();
+        let bound = cone_box_gap(cone, (Vec3::new(5.0, 0.0, 0.0), normal), &sliver, 0.0).unwrap();
+        assert!(bound >= exact && bound < exact + 1e-12, "{bound} {exact}");
+        // a boundary that reaches a quarter turn from its mean direction is not bounded
+        let wide = on(5.0, 0.0, &[-1.6, 0.0, 1.6], &[0.0, 10.0]);
+        assert_eq!(cone_box_gap(cylinder, tangent, &wide, 0.0), None);
+    }
+
+    /// #17118: a face counts as a copy of part of its partner only when its boundary lies within
+    /// the partner face's edges, not only on its plane. The partner here is the top face of a
+    /// 10 mm cube; a strip whose points run 2 mm past its edge, still on its plane, is refused.
+    #[test]
+    fn a_tangent_patch_must_lie_within_its_partner_faces_edges() {
+        use crate::math::Point3;
+        use crate::primitive::api_primitives::create_box;
+        let mut k = Kernel::default();
+        let b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0).unwrap();
+        let top = b
+            .faces()
+            .ids()
+            .find(|&f| {
+                crate::topology::face::p4::vertices(&b, f, None, false, None)
+                    .unwrap()
+                    .iter()
+                    .all(|&v| (vertex::point(&b, v).unwrap().z - 10.0).abs() < 1e-9)
+            })
+            .unwrap();
+        let tol = face::tolerance(&b, top).unwrap();
+        let at = |x: f64, y: f64| Vec3::new(x, y, 10.0);
+        // inside, on an edge and at a corner
+        let within = [at(5.0, 5.0), at(10.0, 5.0), at(10.0, 10.0), at(1.0, 9.0)];
+        assert!(points_in_face(&k, &b, top, &within, tol).unwrap());
+        // the same strip running on past the edge at x = 10
+        let past = [at(5.0, 5.0), at(10.0, 5.0), at(12.0, 5.0)];
+        assert!(!points_in_face(&k, &b, top, &past, tol).unwrap());
+    }
+
+    /// #17118: a tangent patch waiting for its partner is revisited once a later patch
+    /// classifies that partner. `P1` waits for `Q`; the next patch deletes `Q`, because its
+    /// partner `P2` is kept; on the second pass `P1` is kept, as the copy of a deleted face.
+    /// A single pass in list order would leave `P1` to the ray.
+    #[test]
+    fn a_tangent_patch_waiting_for_its_partner_is_resolved_on_a_later_pass() {
+        let mut first = Kernel::default();
+        let mut second = Kernel::default();
+        first.context.set_doing_boolean(true);
+        let mut kernels = BooleanKernels {
+            primary: &mut first,
+            other: Some(&mut second),
+        };
+        let mut lock = kernels
+            .mark_action(|contexts| MarkLock::new_pair(contexts, 0, 1))
+            .unwrap();
+        kernels
+            .mark_action(|contexts| lock.new_mark(contexts))
+            .unwrap();
+        let marks = (lock.mark_type1(), lock.mark_type2());
+        let (p1, p2, q) = (
+            FaceId::from_index(1),
+            FaceId::from_index(2),
+            FaceId::from_index(3),
+        );
+        let mut state = ManifoldState::default();
+        state
+            .primary_marks
+            .mark(kernels.primary, Entity::Face(p2), marks.0);
+        let mut faces = Faces {
+            keep: vec![p2],
+            tangent_patches: vec![
+                TangentPatch {
+                    reverse: false,
+                    pf: p1,
+                    of: q,
+                    keep: Some(true),
+                },
+                TangentPatch {
+                    reverse: true,
+                    pf: p2,
+                    of: q,
+                    keep: Some(true),
+                },
+            ],
+            ..Faces::default()
+        };
+        resolve_tangent_patches(&kernels, &mut state, &mut faces, marks);
+        assert!(state
+            .primary_marks
+            .is_marked(kernels.primary, Entity::Face(p1), marks.0));
+        assert!(state
+            .other_marks
+            .is_marked(kernels.other(), Entity::Face(q), marks.1));
+        assert_eq!(faces.keep, [p2, p1]);
+        assert_eq!(faces.other_delete, [q]);
+        assert!(faces.delete.is_empty() && faces.other_keep.is_empty());
+        assert!(faces.tangent_patches.is_empty());
+        kernels
+            .mark_action(|contexts| lock.release(contexts))
+            .unwrap();
     }
 
     #[test]

@@ -1524,7 +1524,7 @@ fn chain(sys: &System, ys: &[Vec<f64>], open: bool) -> Result<Vec<KBox>, String>
                         return Err(format!("no joined boxes at {:?}", sg.a));
                     }
                     // reopen the box before: both pieces again, the earlier one halved
-                    let (_, psg) = boxes.pop().expect("a box before");
+                    let psg = reopen(&mut boxes).expect("a box before");
                     stack.push(Seg {
                         depth: sg.depth + 1,
                         ..sg
@@ -1561,6 +1561,18 @@ fn chain(sys: &System, ys: &[Vec<f64>], open: bool) -> Result<Vec<KBox>, String>
     }
     covered(sys, &boxes, open)?;
     Ok(boxes)
+}
+
+/// Takes the last box off the chain to cover its piece again, and returns the piece; a
+/// knot line's pair goes whole ([`across`] makes it over one piece): [`covered`] takes
+/// each end on the line as met by the pair's other box, so a box left without it would
+/// leave that end unchecked.
+fn reopen(boxes: &mut Vec<(KBox, Seg)>) -> Option<Seg> {
+    let (b, sg) = boxes.pop()?;
+    if b.on_face.contains(&true) {
+        boxes.pop();
+    }
+    Some(sg)
 }
 
 /// The sign of a cone's `a_y` along box `b`'s arc, where it has one strict sign: over the
@@ -2285,25 +2297,23 @@ mod tests {
         );
     }
 
-    #[test]
-    fn two_boxes_cross_a_knot_line_each_on_its_own_piece() {
-        let k = Kernel::default();
-        let e = extruded_polyline(&k, &[[0.0, 0.0], [1.0, 1.0], [2.0, -1.0], [3.0, 0.0]]);
+    /// The plane across the extruded profile with corners, and its zeros nearest the corner
+    /// at u = 1 (the extrusion's u is unknown 0) on either side.
+    fn zeros_by_a_corner(k: &Kernel) -> (System, Vec<f64>, Vec<f64>) {
+        let e = extruded_polyline(k, &[[0.0, 0.0], [1.0, 1.0], [2.0, -1.0], [3.0, 0.0]]);
         let p = plane(
             [0.0, 0.0, 0.5],
             [1.0, 0.0, 0.25],
             [0.0, 1.0, 0.0],
             [5.0, 3.0],
         );
-        let (d, r) = answer(&k, [&e, &p]);
-        let sys = System::new(&k, [&e, &p], [&d[0], &d[1]]);
-        // the zeros nearest the corner at u = 1 (the extrusion's u is unknown 0) on
-        // either side
+        let (d, r) = answer(k, [&e, &p]);
+        let sys = System::new(k, [&e, &p], [&d[0], &d[1]]);
         let zeros: Vec<Vec<f64>> = of_type(&r, TsectCurveType::Crossing)
             .into_iter()
             .flat_map(|c| (1..10).map(move |j| (c, f64::from(j) / 10.0)))
             .filter_map(|(c, f)| {
-                let y = uv_point(&k, &sys, c, f).ok()?;
+                let y = uv_point(k, &sys, c, f).ok()?;
                 newton(&sys, &y, Some(choose_t(&sys, &y)), None)
             })
             .collect();
@@ -2316,10 +2326,43 @@ mod tests {
                 .clone()
         };
         let (a, b) = (near(true), near(false));
+        (sys, a, b)
+    }
+
+    #[test]
+    fn two_boxes_cross_a_knot_line_each_on_its_own_piece() {
+        let k = Kernel::default();
+        let (sys, a, b) = zeros_by_a_corner(&k);
         let [x, y] = across(&sys, &a, &b, 0).expect("two boxes across the knot line");
         assert_eq!([x.t.hi, y.t.lo], [1.0, 1.0]);
         assert_eq!([x.on_face, y.on_face], [[false, true], [true, false]]);
         assert_ne!(x.force[0], y.force[0], "each box on its own span");
+    }
+
+    #[test]
+    fn reopening_a_knot_line_pair_takes_both_boxes() {
+        let k = Kernel::default();
+        let (sys, a, b) = zeros_by_a_corner(&k);
+        // a box before the pair, over the arc from a zero further down the first piece
+        let mut c = a.clone();
+        c[0] -= 0.5;
+        let c = newton(&sys, &c, Some(0), None).expect("a zero before the corner");
+        let before = segment(&sys, &c, &a, 0).expect("a box before the corner");
+        let [x, y] = across(&sys, &a, &b, 0).expect("two boxes across the knot line");
+        let sg = |a: &[f64], b: &[f64]| Seg {
+            a: a.to_vec(),
+            b: b.to_vec(),
+            depth: 0,
+            outer: [false; 2],
+        };
+        // as the chain holds them: the pair shares its piece
+        let mut boxes = vec![(before, sg(&c, &a)), (x, sg(&a, &b)), (y, sg(&a, &b))];
+        let piece = reopen(&mut boxes).expect("a box to reopen");
+        assert_eq!([piece.a, piece.b], [a, b]);
+        // the pair's first box would keep its end on the knot line without its partner,
+        // and `covered` takes such an end as met
+        let left: Vec<[bool; 2]> = boxes.iter().map(|(bx, _)| bx.on_face).collect();
+        assert_eq!(left, [[false; 2]], "only the box before the pair is left");
     }
 
     #[test]

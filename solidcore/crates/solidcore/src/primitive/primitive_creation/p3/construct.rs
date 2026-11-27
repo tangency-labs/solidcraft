@@ -32,6 +32,9 @@
 //! Not upstream (#15263): turning planar sections carry their winding along the
 //! centroid travel and align their cyclic seams by exact curve evaluations before
 //! joining. Parallel sections with coherent winding retain their correspondence.
+//! Not upstream: [`PrimitiveCreation::create_skin_from_faces_traced`] takes how the skin
+//! leaves its end sections ([`SkinEnd`]); a free end is the skin as it always was, a square
+//! one is skinned by [`crate::sweep::skin_ends`].
 //! **Statuses pass on** (WR-662; SolidCraft change, tangency-labs/smlib c8f6a31): the
 //! statuses upstream drops here are returned (`SER`).
 
@@ -43,6 +46,7 @@ use crate::curve::composite_curve::CompositeCurve;
 use crate::curve::curve::p2::CurvePropertyType;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::Curve;
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::tol::ZONE_TOL_3D;
@@ -57,6 +61,7 @@ use crate::surface::surface::{
     p2::{BlendEndType, CurvatureType, DerivSurfDefinition},
     Surface,
 };
+use crate::sweep::skin_ends::{end_tangents_of, skinned_surface_with_end_tangents, SkinEnd};
 use crate::sweep::topology_sweep::access::{FaceRef, RegionRef};
 use crate::topology::{BrepId, EdgeuseId, FaceId};
 
@@ -109,9 +114,9 @@ fn linear_section_centroid(
         .iter()
         .all(|v| v.is_finite())
     {
-        return Err(SolidError::primitive_failed(
+        return Err(SolidError::primitive(
             OP,
-            "a section centroid is non-finite",
+            PrimitiveFailure::SectionNotFinite,
         ));
     }
     Ok(Some(centroid))
@@ -199,9 +204,9 @@ fn align_section_loop(
         let domain = joined.natural_interval();
         let range = domain.max() - domain.min();
         if !range.is_finite() || range <= 0.0 {
-            return Err(SolidError::primitive_failed(
+            return Err(SolidError::primitive(
                 OP,
-                "a section loop has no finite parameter interval",
+                PrimitiveFailure::SectionLoopNoInterval,
             ));
         }
         let (knots, _) = joined.knots(None)?;
@@ -217,9 +222,9 @@ fn align_section_loop(
             }
         }
         if !score.is_finite() {
-            return Err(SolidError::primitive_failed(
+            return Err(SolidError::primitive(
                 OP,
-                "section correspondence has a non-finite distance",
+                PrimitiveFailure::SectionNotFinite,
             ));
         }
         if score < best_score {
@@ -249,12 +254,25 @@ pub(super) fn target(primitive: &PrimitiveCreation, brep: BrepId) -> Result<Regi
         brep,
         primitive
             .region()
-            .ok_or_else(|| SolidError::primitive_missing(OP, "the target region"))?,
+            .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::NoRegion))?,
     ))
 }
-fn face_surface(a: &impl PrimitiveAccess, face: FaceRef) -> Result<&Surface> {
+/// The surface of a section face of the caller's skin
+/// ([`PrimitiveFailure::FaceWithoutSurface`] without one).
+fn section_surface(a: &impl PrimitiveAccess, face: FaceRef) -> Result<&Surface> {
     crate::topology::face::p2::surface(a.brep(face.0)?, face.1)?
-        .ok_or_else(|| SolidError::primitive_missing(OP, "the face's surface"))
+        .ok_or_else(|| SolidError::primitive(OP, PrimitiveFailure::FaceWithoutSurface))
+}
+
+/// The surface of a side face the sweep made: each is made on its swept surface, so one
+/// without a surface is the kernel's fault.
+fn side_surface(a: &impl PrimitiveAccess, face: FaceRef) -> Result<&Surface> {
+    crate::topology::face::p2::surface(a.brep(face.0)?, face.1)?.ok_or_else(|| {
+        SolidError::primitive_broken_link(
+            OP,
+            "a side face the sweep made has no surface, though each is made on its swept surface",
+        )
+    })
 }
 
 /// Not upstream: section faces that are planes, three or more, all parallel to the first
@@ -286,7 +304,7 @@ impl SectionPlanes {
         }
         let mut planes = Vec::new();
         for &face in faces {
-            match face_surface(a, face)?.kind() {
+            match section_surface(a, face)?.kind() {
                 SurfaceKind::Plane(p) => {
                     let (point, normal, _) = p.is_planar();
                     planes.push((point, normal));
@@ -486,7 +504,15 @@ impl PrimitiveCreation {
         new_faces: &mut Vec<FaceId>,
     ) -> Result<()> {
         self.create_skin_from_faces_traced(
-            a, brep, faces, profiles, approx_tol, degree, new_faces, None,
+            a,
+            brep,
+            faces,
+            profiles,
+            approx_tol,
+            degree,
+            [SkinEnd::Free; 2],
+            new_faces,
+            None,
         )
     }
 
@@ -495,10 +521,18 @@ impl PrimitiveCreation {
     /// [`super::skin_sources`], tangency-labs/solidcore#3139). The faces and surfaces are
     /// those `create_skin_from_faces` makes; the trace adds no failure.
     ///
+    /// `ends` says how the skin leaves its first section and arrives at its last (not
+    /// upstream). With both [`SkinEnd::Free`] the skin is `create_skin_from_faces`'s; a
+    /// [`SkinEnd::Square`] end leaves square to its section's plane
+    /// ([`crate::sweep::skin_ends::end_tangents_of`]), every loop of the section alike.
+    ///
     /// # Errors
     ///
-    /// Those of [`PrimitiveCreation::create_skin_from_faces`].
-    #[allow(clippy::too_many_arguments)] // upstream's arguments and the trace
+    /// Those of [`PrimitiveCreation::create_skin_from_faces`]; for a square end, those of
+    /// [`crate::sweep::skin_ends::end_tangents_of`] (sections that are not planar faces, an
+    /// end with no side to leave to) and of
+    /// [`crate::sweep::skin_ends::skin_with_end_tangents`].
+    #[allow(clippy::too_many_arguments)] // upstream's arguments, the ends and the trace
     pub fn create_skin_from_faces_traced(
         &mut self,
         a: &mut impl PrimitiveAccess,
@@ -507,6 +541,7 @@ impl PrimitiveCreation {
         profiles: &[BSplineCurve],
         approx_tol: f64,
         degree: usize,
+        ends: [SkinEnd; 2],
         new_faces: &mut Vec<FaceId>,
         mut trace: Option<&mut SkinTrace>,
     ) -> Result<()> {
@@ -521,16 +556,18 @@ impl PrimitiveCreation {
         let mut untraced: Option<NotTraced> = None;
         let mut previous_section: Option<(Point3, Vec3)> = None;
         let mut previous_loops: Vec<BSplineCurve> = Vec::new();
+        // (the ends: each section's plane as its faces give it, before any turning)
+        let mut section_planes: Vec<Option<(Point3, Vec3)>> = Vec::new();
         for (i, &face) in faces.iter().enumerate() {
             let domain = crate::topology::face::p2::uv_domain(a.brep(face.0)?, face.1)?;
-            let normal = face_surface(a, face)?.evaluate_normal(
+            let normal = section_surface(a, face)?.evaluate_normal(
                 a.kernel(brep)?,
                 domain.evaluate(0.5, 0.5),
                 Side::Left,
                 Side::Left,
             )?;
             let planar = matches!(
-                face_surface(a, face)?.kind(),
+                section_surface(a, face)?.kind(),
                 crate::surface::surface::SurfaceKind::Plane(_)
             );
             let composites = a.face_composites_with_edges(face)?;
@@ -550,6 +587,7 @@ impl PrimitiveCreation {
             } else {
                 None
             };
+            section_planes.push(section);
             let mut reverse = false;
             let mut align = false;
             if let (Some((point, previous_normal)), Some((centroid, normal))) =
@@ -570,9 +608,12 @@ impl PrimitiveCreation {
             if i == 0 {
                 layer_count = composites.len();
             } else if layer_count != composites.len() {
-                return Err(SolidError::primitive_failed(
+                return Err(SolidError::primitive(
                     OP,
-                    "the faces have different numbers of layers",
+                    PrimitiveFailure::SectionLayersDiffer {
+                        first: layer_count,
+                        this: composites.len(),
+                    },
                 ));
             }
             let mut current_loops = Vec::new();
@@ -617,8 +658,25 @@ impl PrimitiveCreation {
         // (the trace: where each section's knots went, when asked; the surface is the same
         // either way)
         let want_maps = trace.is_some() && untraced.is_none();
+        // Not upstream: the directions square ends leave along, every layer alike. Free ends
+        // ask nothing of the sections.
+        let end_tangents = if ends == [SkinEnd::Free; 2] {
+            [None, None]
+        } else {
+            end_tangents_of(&section_planes, ends, a.brep(brep)?.tolerance())?
+        };
         // Each layer's skin at chord-length parameters, as upstream.
         let skin = |k: &crate::kernel::Kernel, curves: &[BSplineCurve], params: Option<&[f64]>| {
+            if end_tangents.iter().any(Option::is_some) {
+                return skinned_surface_with_end_tangents(
+                    curves,
+                    end_tangents,
+                    degree,
+                    approx_tol,
+                    params,
+                    want_maps,
+                );
+            }
             BSplineSurface::create_skinned_surface_mapped(
                 k,
                 curves,
@@ -862,7 +920,7 @@ impl PrimitiveCreation {
         self.init_entity_maps();
         side_faces.clear();
         if profiles.is_empty() {
-            return Err(SolidError::primitive_failed(OP, "no profiles to sweep"));
+            return Err(SolidError::primitive(OP, PrimitiveFailure::NoProfiles));
         }
         // SolidCraft fork (5d3939e): a scaled sweep's sections are no rigid images of the
         // profile.
@@ -1073,7 +1131,7 @@ fn sweep_end_curves(
         let mut spans = Vec::new();
         for &face in side_faces.get(group.clone()).unwrap_or_default() {
             let domain =
-                face_surface(a, (brep, face))?.natural_uv_domain_with_nurb(a.kernel(brep)?)?;
+                side_surface(a, (brep, face))?.natural_uv_domain_with_nurb(a.kernel(brep)?)?;
             let span = if translational {
                 (domain.min().y, domain.max().y)
             } else {
@@ -1088,7 +1146,7 @@ fn sweep_end_curves(
             .fold(f64::NEG_INFINITY, f64::max);
         let tol = EFF_ZERO_SQRT * (1.0 + first.abs().max(last.abs()));
         for &(face, (low, high)) in &spans {
-            let surface = face_surface(a, (brep, face))?;
+            let surface = side_surface(a, (brep, face))?;
             for (at, keep, out) in [
                 (low, low - first <= tol, &mut starts),
                 (high, last - high <= tol, &mut ends),

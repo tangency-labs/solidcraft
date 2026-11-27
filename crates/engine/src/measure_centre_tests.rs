@@ -453,6 +453,108 @@ fn edges_measure_between_their_exact_arcs_within_the_arcs() {
     assert!(p.dist(Vec3::new(end[0], end[1], 0.0) * (10.0 / reach) + Vec3::new(0.0, 0.0, 5.0)) < 1e-9, "{r}");
 }
 
+/// The report's concentric half-cylinder faces are 35 - 20 = 15 mm apart (#19061).
+/// Both witnesses must lie on the exact cylinders, throughout their trimmed height.
+#[test]
+fn faces_measure_between_their_exact_half_cylinders() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0, -20], "end": [0, 20], "through": [20, 0]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0, -35], "end": [0, 35], "through": [35, 0]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, -20], [0, -35]]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 20], [0, 35]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": "5 mm", "operation": "new_body"}));
+    let name = body(&s);
+    for (inner, outer) in [([20.0, 0.0, 2.5], [35.0, 0.0, 2.5]), ([14.142, 14.142, 2.5], [24.749, 24.749, 2.5])] {
+        let pick = |p| json!({"type": "face", "body": name, "point": p});
+        for items in [vec![pick(inner), pick(outer)], vec![pick(outer), pick(inner)]] {
+            let r = measure(&mut s, items);
+            assert!(close(&r["distance_mm"], 15.0, 1e-9), "{r}");
+            assert!(close(&r["min"], 15.0, 1e-9), "{r}");
+            let from: Vec3 = serde_json::from_value(r["from"].clone()).unwrap();
+            let to: Vec3 = serde_json::from_value(r["to"].clone()).unwrap();
+            assert!((from.dist(to) - 15.0).abs() < 1e-9, "{r}");
+            for (key, radius) in [("from", r["items"][0]["radius"].as_f64().unwrap()), ("to", r["items"][1]["radius"].as_f64().unwrap())] {
+                let p: Vec3 = serde_json::from_value(r[key].clone()).unwrap();
+                assert!((p.x.hypot(p.y) - radius).abs() < 1e-9 && p.x >= -1e-9 && p.z >= -1e-9 && p.z <= 5.0 + 1e-9, "{r}");
+            }
+        }
+    }
+    // A failed face solve must report its error instead of substituting display triangles.
+    let _failing = crate::cmd::measure_sel::forced::fail();
+    let error = s
+        .execute(
+            "inspect.measure",
+            &json!({"items": [
+                {"type": "face", "body": name, "point": [20, 0, 2.5]},
+                {"type": "face", "body": name, "point": [35, 0, 2.5]}
+            ]}),
+        )
+        .unwrap_err();
+    assert!(error.to_string().contains("made to fail"), "{error}");
+}
+
+/// A vertex and a curved face measure to the face's exact surface, not its display mesh
+/// (#16262): the report's bar of radius 20 along X and a block's corner at (0, 10, 50), which is
+/// sqrt(10² + 50²) - 20 from the bar's side, the nearest point on the radius through it. The
+/// same corner and a sphere of radius 20 about (60, 0, 0) give |(-60, 10, 50)| - 20.
+#[test]
+fn a_vertex_measures_to_the_exact_curved_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 60, "base": [-30, 0, 0], "axis": "X", "body_name": "Bar"}));
+    run(&mut s, "solid.sphere", json!({"radius": 20, "center": [60, 0, 0], "body_name": "Ball", "operation": "new_body"}));
+    run(&mut s, "solid.box", json!({"corner": [0, 10, 50], "length": 1, "width": 1, "height": 1, "body_name": "Block", "operation": "new_body"}));
+    let corner = Vec3::new(0.0, 10.0, 50.0);
+    let vertex = json!({"type": "vertex", "body": "Block", "point": [0, 10, 50]});
+    let bar = json!({"type": "face", "body": "Bar", "point": [0, 0, 20]});
+    let ball = json!({"type": "face", "body": "Ball", "point": [60, 0, 20]});
+    for (face, centre) in [(bar, Vec3::new(0.0, 0.0, 0.0)), (ball, Vec3::new(60.0, 0.0, 0.0))] {
+        let reach = corner.dist(centre);
+        for items in [vec![vertex.clone(), face.clone()], vec![face.clone(), vertex.clone()]] {
+            let swapped = items[0]["type"] == "face";
+            let r = measure(&mut s, items);
+            assert!(close(&r["min"], reach - 20.0, 1e-9) && close(&r["distance_mm"], reach - 20.0, 1e-9), "{r}");
+            let (from, to): (Vec3, Vec3) = (serde_json::from_value(r["from"].clone()).unwrap(), serde_json::from_value(r["to"].clone()).unwrap());
+            let (at_vertex, on_face) = if swapped { (to, from) } else { (from, to) };
+            assert!(at_vertex.dist(corner) < 1e-9, "{r}");
+            assert!(on_face.dist(centre + (corner - centre) * (20.0 / reach)) < 1e-9, "{r}");
+        }
+    }
+}
+
+/// At y = 10 the radius-20 cylinder crosses the sketch line at z = √300. When the
+/// segment starts at z = 25, its closest point is that endpoint, at radius √725.
+#[test]
+fn sketch_lines_measure_to_the_exact_cylinder_face() {
+    let face = json!({"type": "face", "body": "Bar", "point": [0, 10, 17.3205]});
+    for (z, line_3d) in [(0.0_f64, false), (25.0, false), (25.0, true)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 60, "base": [-30, 0, 0], "axis": "X", "body_name": "Bar"}));
+        run(&mut s, "sketch.create", json!({"plane": "YZ"}));
+        let id = if line_3d {
+            run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+            run(&mut s, "sketch.line3d", json!({"points": [[0, 10, z], [0, 10, 50]]}));
+            "w1"
+        } else {
+            run(&mut s, "sketch.line", json!({"points": [[10, z], [10, 50]]}));
+            "l1"
+        };
+        let line = json!({"type": "sketch_curve", "id": id});
+        let on_line = Vec3::new(0.0, 10.0, z.max(300f64.sqrt()));
+        let radius = 10f64.hypot(on_line.z);
+        let on_face = on_line * (20.0 / radius);
+        for (items, from, to) in [(vec![line.clone(), face.clone()], on_line, on_face), (vec![face.clone(), line.clone()], on_face, on_line)] {
+            let r = measure(&mut s, items);
+            assert!(close(&r["min"], radius - 20.0, 1e-9), "{r}");
+            assert!(close(&r["distance_mm"], radius - 20.0, 1e-9), "{r}");
+            let p: Vec3 = serde_json::from_value(r["from"].clone()).unwrap();
+            let q: Vec3 = serde_json::from_value(r["to"].clone()).unwrap();
+            assert!(p.dist(from) < 1e-9 && q.dist(to) < 1e-9, "{r}");
+        }
+    }
+}
+
 /// Where the kernel's exact solve can't answer for two edges, they still measure, on the display
 /// mesh, and the reply says the distance is approximate: the issue's concentric arcs (#17823),
 /// whose mesh chords run up to the chord tolerance inside the arcs, so a little under 15.

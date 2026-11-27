@@ -167,8 +167,16 @@ fn encoded_text(e: &Entity) -> String {
 
 /// All loops of the flat pattern (outlines, cut-outs, islands).
 fn loops(s: &Session) -> Vec<solidcore_record::Loop2> {
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = s.model.state().surface_sheets[0].shown().regions;
     regions.iter().flat_map(|r| std::iter::once(r.outer.clone()).chain(r.holes.clone())).collect()
+}
+
+/// The cuts a sheet's flat makes along split edges' junctions (`SurfaceSheet::slits`), as the flat
+/// shows them: each as a loop out along the cut and back, as the flat model spliced them into its
+/// outline.
+fn junction_cuts(s: &Session) -> Vec<solidcore_record::Region2> {
+    let slits = s.model.state().surface_sheets.first().map(|sk| sk.shown().slits).unwrap_or_default();
+    slits.iter().map(|&[a, b]| solidcore_record::Region2 { outer: solidcore_record::Loop2::polygon(&[a, b]), holes: Vec::new() }).collect()
 }
 
 /// The profiles of the DXF read into a new sketch: their areas, largest first.
@@ -224,7 +232,7 @@ fn a_spline_cut_out_is_the_splines_it_was() {
     }
     // The same plate comes back.
     let areas = reimported_areas(&dxf);
-    let plate = s.model.state().sheets[0].flat_regions().unwrap_or_default()[0].area();
+    let plate = s.model.state().surface_sheets[0].shown().regions[0].area();
     assert!((areas[0] - plate).abs() < 1e-6, "{areas:?} {plate}");
 }
 
@@ -258,7 +266,7 @@ fn a_g4_blend_cut_out_is_one_spline_of_degree_nine_and_closes() {
 
     // The cut-out closes, so the same plate and the same cut-out come back.
     let areas = reimported_areas(&dxf);
-    let plate = s.model.state().sheets[0].flat_regions().unwrap_or_default()[0].area();
+    let plate = s.model.state().surface_sheets[0].shown().regions[0].area();
     assert!(areas.len() == 2 && (areas[0] - plate).abs() < 1e-6 && (areas[1] - (6000.0 - plate)).abs() < 1e-6, "{areas:?} {plate}");
 }
 
@@ -283,7 +291,7 @@ fn text_is_splines_and_lines_not_chords() {
     // The plate with the letters cut out comes back from the file with its area (the largest region; the islands inside the
     // letters come in no fixed order).
     let areas = reimported_areas(&dxf);
-    let plate = s.model.state().sheets[0].flat_regions().unwrap_or_default().iter().map(|r| r.area()).fold(0.0, f64::max);
+    let plate = s.model.state().surface_sheets[0].shown().regions.iter().map(|r| r.area()).fold(0.0, f64::max);
     assert!((areas[0] - plate).abs() < 1e-3, "{areas:?} {plate}");
 }
 
@@ -393,7 +401,7 @@ fn the_flat_pattern_is_on_layers_by_role_and_inner_contours_come_first() {
     let es = entities(dxf);
     let on = |layer: &str| es.iter().filter(|e| layer_of(e) == layer).collect::<Vec<_>>();
     // OUTLINE: the tray's outer contour alone, one entity for each of its segments (lines and arcs).
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = s.model.state().surface_sheets[0].shown().regions;
     let plate =
         regions.iter().max_by(|a, b| a.area().total_cmp(&b.area())).map(|r| r.outer.clone()).unwrap_or(solidcore_record::Loop2 { segs: Vec::new() });
     assert_eq!(
@@ -524,6 +532,144 @@ fn a_bend_note_sits_beside_each_bend_line_when_asked_for() {
     assert!(note.is_some_and(|e| note_layout(e).0 == 5.0));
 }
 
+/// The value of a header variable.
+fn header_var(dxf: &str, var: &str) -> String {
+    let lines: Vec<&str> = dxf.lines().collect();
+    let pairs: Vec<(i32, &str)> = lines.chunks(2).filter_map(|c| Some((c.first()?.trim().parse().ok()?, c.get(1)?.trim()))).collect();
+    pairs[pairs.iter().position(|(c, v)| *c == 9 && *v == var).unwrap_or_default() + 1].1.to_string()
+}
+
+/// The drawing's units: `mm` (the default) is unchanged, and `inches` writes every coordinate,
+/// the extents, the DASHED pattern, the bend-note radii and the pocket layers in inches.
+/// The lengths a shape holds, in a stable order, so two drawings of the same part compare by
+/// geometry: the reader brings both back to millimetres, and the inch file's 1e-9 inch grid
+/// stays within 3e-8 mm of the millimetre one.
+fn lengths(s: &DxfShape) -> Vec<f64> {
+    let mut out = Vec::new();
+    let pt = |p: Vec2, o: &mut Vec<f64>| {
+        o.push(p.x);
+        o.push(p.y);
+    };
+    match s {
+        DxfShape::Insert { at, scale, column_spacing, row_spacing, .. } => {
+            pt(*at, &mut out);
+            pt(*scale, &mut out);
+            out.extend([*column_spacing, *row_spacing]);
+        }
+        DxfShape::SourceEllipse { c, major, major_radius, .. } => {
+            pt(*c, &mut out);
+            pt(*major, &mut out);
+            out.push(*major_radius);
+        }
+        DxfShape::SourceSpline { ctrl, fit, .. } => {
+            for p in ctrl {
+                pt(*p, &mut out);
+            }
+            for p in fit {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::SourcePolyline { vertices, .. } => {
+            for v in vertices {
+                pt(v.at, &mut out);
+            }
+        }
+        DxfShape::SourceOmitted { .. } => {}
+        DxfShape::Point(p) => pt(*p, &mut out),
+        DxfShape::Line(a, b) => {
+            pt(*a, &mut out);
+            pt(*b, &mut out);
+        }
+        DxfShape::Polyline { points } => {
+            for p in points {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::LwPolyline { verts, .. } => {
+            for (p, _) in verts {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::BulgedPolyline { vertices, .. } => {
+            for v in vertices {
+                pt(v.at, &mut out);
+            }
+        }
+        DxfShape::Circle { c, r } | DxfShape::Arc { c, r, .. } => {
+            pt(*c, &mut out);
+            out.push(*r);
+        }
+        DxfShape::Ellipse { c, major, .. } => {
+            pt(*c, &mut out);
+            pt(*major, &mut out);
+        }
+        DxfShape::Spline { ctrl, .. } => {
+            for p in ctrl {
+                pt(*p, &mut out);
+            }
+        }
+        DxfShape::Text { at, height, .. } | DxfShape::AlignedText { at, height, .. } => {
+            pt(*at, &mut out);
+            out.push(*height);
+        }
+    }
+    out
+}
+
+#[test]
+fn the_drawing_writes_its_coordinates_in_the_units_it_is_asked_for() {
+    let mut s = tray_with(&[]);
+    let mm = export(&mut s, json!({}));
+    assert_eq!(export(&mut s, json!({"units": "mm"})), mm);
+    assert_eq!((header_var(&mm, "$INSUNITS"), header_var(&mm, "$MEASUREMENT")), ("4".to_string(), "1".to_string()));
+    let inches = export(&mut s, json!({"units": "inches"}));
+    assert_eq!((header_var(&inches, "$INSUNITS"), header_var(&inches, "$MEASUREMENT")), ("1".to_string(), "0".to_string()));
+    assert!(s.execute("sheet.export_dxf", &json!({"units": "feet"})).is_err());
+    // The same entities in the same order: the inch file's lengths, read back in millimetres,
+    // are the millimetre file's to the grid.
+    let (mm_es, in_es) = (entities(&mm), entities(&inches));
+    assert_eq!(mm_es.len(), in_es.len());
+    for (m, i) in mm_es.iter().zip(&in_es) {
+        assert_eq!(m.0, i.0, "the files must hold the same entities in the same order");
+        assert_eq!(m.2, i.2, "{}", m.0);
+        let (want, got) = (lengths(&m.1), lengths(&i.1));
+        assert_eq!(want.len(), got.len(), "{}", m.0);
+        assert!(want.iter().zip(&got).all(|(a, b)| (a - b).abs() < 3e-8), "{}: {want:?} vs {got:?}", m.0);
+    }
+    // The file's DASHED pattern is half and quarter inches.
+    let types: Vec<(i32, &str)> =
+        inches.lines().collect::<Vec<_>>().chunks(2).filter_map(|c| Some((c.first()?.trim().parse().ok()?, c.get(1)?.trim()))).collect();
+    let at = types.iter().position(|(c, v)| *c == 2 && *v == "DASHED").unwrap();
+    let pattern: Vec<f64> = types[at..].iter().take_while(|(c, _)| *c != 0).filter(|(c, _)| *c == 49).map(|(_, v)| v.parse().unwrap()).collect();
+    assert_eq!(pattern, vec![0.5, -0.25]);
+    // The bend notes read their radii in inches too: 1 mm is 0.0394 of them.
+    let mut notes = |params: Value| -> Vec<String> {
+        entities(&export(&mut s, params))
+            .iter()
+            .filter(|e| e.0 == "TEXT")
+            .map(|e| {
+                let DxfShape::Text { text, .. } = &e.1 else { panic!("{e:?}") };
+                text.clone()
+            })
+            .collect()
+    };
+    let plain_notes = notes(json!({"bend_notes": true}));
+    let inch_notes = notes(json!({"bend_notes": true, "units": "inches"}));
+    assert_eq!(inch_notes.len(), plain_notes.len());
+    for (plain, inch) in plain_notes.iter().zip(&inch_notes) {
+        let text = plain.replacen("R1", "R0.0394", 1);
+        assert_eq!(inch.as_str(), text.as_str(), "{plain} -> {inch}");
+    }
+    // A pocket layer names its depth in the drawing's units.
+    let mut s = plate_with(&[]);
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [70, 40], "p1": [90, 45]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Marks", "distance": 1, "operation": "cut"}));
+    let dxf = export(&mut s, json!({"units": "inches"}));
+    assert!(dxf.contains("POCKET_BOTTOM_Z0.000000_TO_0.039370_IN"), "1 mm deep, in inches");
+}
+
 #[test]
 fn a_bend_note_gives_the_included_angle_when_the_rule_reads_it_so() {
     // The included angle is 180° less the bend angle: 122° for a 58° bend, 90° for a 90° one.
@@ -543,6 +689,42 @@ fn a_bend_note_gives_the_included_angle_when_the_rule_reads_it_so() {
         // Without notes the setting changes nothing in the file.
         assert_eq!(plain.first(), plain.get(1), "{deg}°");
     }
+}
+
+/// `markings: false` leaves the letter contours and the bend notes out; the outline, the cut-outs
+/// and the bends stay, and a letter's pocket is no longer etched.
+#[test]
+fn the_markings_option_leaves_the_letters_and_the_notes_out() {
+    let mut s = tray_with(&marks());
+    let plain = entities(&export(&mut s, json!({})));
+    assert!(plain.iter().any(|e| layer_of(e) == "TEXT"), "the default export has the letters");
+    // The letters and their counters are gone, as are the notes when asked for together.
+    let bare = export(&mut s, json!({"markings": false}));
+    let es = entities(&bare);
+    assert!(
+        !es.iter().any(|e| layer_of(e) == "TEXT" || layer_of(e) == "ETCH"),
+        "{:?}",
+        es.iter().filter(|e| layer_of(e) == "TEXT" || layer_of(e) == "ETCH").map(|e| (e.0.clone(), layer_of(e))).collect::<Vec<_>>()
+    );
+    assert!(es.iter().any(|e| layer_of(e) == "OUTLINE") && es.iter().any(|e| layer_of(e) == "BEND_UP"));
+    assert!(entities(&export(&mut s, json!({"markings": false, "bend_notes": true}))).iter().all(|e| e.0 != "TEXT"));
+    // The hole and the slot are no letters: they stay on CUT.
+    let cut = es.iter().filter(|e| layer_of(e) == "CUT").collect::<Vec<_>>();
+    assert_eq!((count_of(&cut, "CIRCLE"), count_of(&cut, "LINE")), (1, 4), "{cut:?}");
+    assert_eq!(export(&mut s, json!({"markings": true})), export(&mut s, json!({})));
+    assert!(s.execute("sheet.export_dxf", &json!({"markings": "no"})).is_err());
+    // A pocket that is letters (a shallow text cut) is a marking and goes with them.
+    let mut p = Session::default();
+    run(&mut p, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut p, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut p, "sketch.finish", json!({}));
+    run(&mut p, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut p, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut p, "sketch.text", json!({"text": "AB", "at": [40, 28], "height": 8}));
+    run(&mut p, "sketch.finish", json!({}));
+    run(&mut p, "solid.extrude", json!({"sketch": "Marks", "distance": 1, "operation": "cut"}));
+    assert!(export(&mut p, json!({})).contains("ETCH"));
+    assert!(!export(&mut p, json!({"markings": false})).contains("ETCH"));
 }
 
 /// A body whose base flange names its rule keeps that rule's notes whichever rule is active when
@@ -668,6 +850,161 @@ fn bend_lines_can_be_left_out_and_everything_put_on_layer_0() {
     }
 }
 
+/// A shop's DXF profile (`docs/formats/dxf-profiles.md`): the outline and the cut-outs on one
+/// layer, both bend directions on another with short dashes, the notes renamed, cut letters left
+/// out.
+fn shop_profile() -> Value {
+    json!({
+        "format": "solidcraft-dxf-profile",
+        "version": 1,
+        "name": "Example laser",
+        "roles": {
+            "outline": {"layer": "CUT", "color": 7},
+            "cut": {"layer": "CUT", "color": 7},
+            "cut_text": {"on": false},
+            "etch": {"layer": "MARK", "color": 2},
+            "bend_up": {"layer": "FOLD", "color": 3, "linetype": "hidden"},
+            "bend_down": {"layer": "FOLD", "color": 3, "linetype": "hidden"},
+            "bend_notes": {"layer": "NOTES", "color": 9},
+            "pockets": {"layer": "MILL", "color": 6}
+        }
+    })
+}
+
+/// The layers of a DXF as `layer_table` reads them.
+fn layers_are(dxf: &str, want: &[(&str, i64, &str)]) {
+    assert_eq!(layer_table(dxf), want.iter().map(|(n, c, l)| (n.to_string(), (*c, l.to_string()))).collect());
+}
+
+/// Without a profile the export writes what it always wrote; the neutral profile is those layers
+/// written out, and gives the same bytes. A shop's profile changes the layers and nothing else:
+/// the same entities in the same order, less the roles it turns off.
+#[test]
+fn a_dxf_profile_gives_each_role_its_layer_colour_and_linetype() {
+    let mut s = tray_with(&marks());
+    let standard_dxf = export(&mut s, json!({"bend_notes": true}));
+    layers_are(
+        &standard_dxf,
+        &[
+            ("0", 7, "Continuous"),
+            ("OUTLINE", 7, "Continuous"),
+            ("CUT", 4, "Continuous"),
+            ("TEXT", 2, "Continuous"),
+            ("BEND_UP", 1, "DASHED"),
+            ("BEND_DOWN", 5, "DASHED"),
+            ("BEND_NOTES", 8, "Continuous"),
+        ],
+    );
+    let neutral = solidcraft_io::DxfExportProfile::neutral().to_json();
+    assert_eq!(export(&mut s, json!({"bend_notes": true, "profile": neutral})), standard_dxf);
+    assert_eq!(export(&mut s, json!({"bend_notes": true, "profile": {"format": "solidcraft-dxf-profile"}})), standard_dxf);
+    for options in [json!({}), json!({"curves": "arcs", "text": "etch", "bend_lines": false})] {
+        let mut with = options.clone();
+        with["profile"] = neutral.clone();
+        assert_eq!(export(&mut s, with), export(&mut s, options.clone()), "{options}");
+    }
+
+    let dxf = export(&mut s, json!({"bend_notes": true, "profile": shop_profile()}));
+    layers_are(&dxf, &[("0", 7, "Continuous"), ("CUT", 7, "Continuous"), ("FOLD", 3, "HIDDEN"), ("NOTES", 9, "Continuous")]);
+    let (standard, es) = (entities(&standard_dxf), entities(&dxf));
+    let kept: Vec<&Entity> = standard.iter().filter(|e| layer_of(e) != "TEXT").collect();
+    assert!(kept.len() < standard.len(), "the tray has cut letters");
+    assert_eq!(es.len(), kept.len());
+    for (written, was) in es.iter().zip(&kept) {
+        assert_eq!((&written.0, &written.1, written.3, &written.4), (&was.0, &was.1, was.3, &was.4));
+        let layer = match layer_of(was).as_str() {
+            "OUTLINE" | "CUT" => "CUT",
+            "BEND_UP" | "BEND_DOWN" => "FOLD",
+            "BEND_NOTES" => "NOTES",
+            other => panic!("{other}"),
+        };
+        assert_eq!(layer_of(written), layer);
+    }
+    // The export's own options still hold: a role is written when both they and the profile
+    // allow it. No notes unless asked for, no bend lines when they are turned off, and `text`
+    // chooses the letters' role, which this profile writes on MARK.
+    let plain = export(&mut s, json!({"profile": shop_profile()}));
+    layers_are(&plain, &[("0", 7, "Continuous"), ("CUT", 7, "Continuous"), ("FOLD", 3, "HIDDEN")]);
+    let no_bends = export(&mut s, json!({"bend_lines": false, "profile": shop_profile()}));
+    assert!(entities(&no_bends).iter().all(|e| layer_of(e) == "CUT"));
+    let etched = entities(&export(&mut s, json!({"text": "etch", "profile": shop_profile()})));
+    assert_eq!(on_layer(&etched, "MARK"), on_layer(&standard, "TEXT"));
+
+    // A profile file is the same profile. Every sheet body's file is written with it.
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-dxf-profile-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap_or_default();
+    let file = dir.join("example-laser.json").to_string_lossy().to_string();
+    std::fs::write(&file, shop_profile().to_string()).unwrap_or_default();
+    assert_eq!(export(&mut s, json!({"bend_notes": true, "profile": file})), dxf);
+    let mut bodies = lid_and_wall();
+    let r = run(&mut bodies, "sheet.export_dxf", json!({"per_body": true, "profile": file}));
+    let files = r["files"].as_array().cloned().unwrap_or_default();
+    assert_eq!(files.len(), 2);
+    for f in &files {
+        let layers = layer_table(f["dxf"].as_str().unwrap_or_default());
+        assert!(layers.contains_key("CUT") && !layers.contains_key("OUTLINE"), "{}: {layers:?}", f["body"]);
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn a_dxf_profile_keeps_a_pockets_depth_in_its_layer_name() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [70, 40], "p1": [90, 45]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Marks", "distance": 1, "operation": "cut"}));
+    assert!(layer_table(&export(&mut s, json!({}))).contains_key("POCKET_BOTTOM_Z0.000000_TO_1.000000_MM"));
+    // The profile's name stands where POCKET stood; the side and the depth are the pocket's.
+    let dxf = export(&mut s, json!({"profile": shop_profile()}));
+    layers_are(
+        &dxf,
+        &[("0", 7, "Continuous"), ("CUT", 7, "Continuous"), ("FOLD", 3, "HIDDEN"), ("MILL_BOTTOM_Z0.000000_TO_1.000000_MM", 6, "Continuous")],
+    );
+    assert_eq!(on_layer(&entities(&dxf), "MILL_BOTTOM_Z0.000000_TO_1.000000_MM").len(), 4);
+}
+
+#[test]
+fn a_dxf_profile_that_cannot_be_used_is_refused_and_writes_nothing() {
+    let mut s = tray_with(&[]);
+    let dir = solidcraft_io::vfs::temp_dir().join(format!("solidcraft-dxf-profile-refused-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap_or_default();
+    let out = dir.join("flat.dxf").to_string_lossy().to_string();
+    let missing = dir.join("no-such-profile.json").to_string_lossy().to_string();
+    let not_a_profile = dir.join("rules.json").to_string_lossy().to_string();
+    std::fs::write(&not_a_profile, r#"{"format": "solidcraft-sheet-rules", "rules": []}"#).unwrap_or_default();
+    let profile = |roles: Value| json!({"format": "solidcraft-dxf-profile", "roles": roles});
+    for (given, why) in [
+        (profile(json!({"bend_sideways": {"layer": "FOLD"}})), "role `bend_sideways` is not known; the roles are outline, cut,"),
+        (profile(json!({"cut": {"color": 300}})), "role `cut`: `color` must be an AutoCAD colour index, a whole number from 1 to 255, not 300"),
+        (profile(json!({"cut": {"color": "red"}})), "role `cut`: `color` must be"),
+        (profile(json!({"bend_up": {"linetype": "center"}})), "role `bend_up`: `linetype` must be continuous, dashed or hidden"),
+        (profile(json!({"outline": {"layer": "CUT"}})), "roles `outline` and `cut` share layer \"CUT\" but give it different colours or linetypes"),
+        (json!({"format": "solidcraft-dxf-profile", "version": 2}), "the profile is version 2"),
+        (json!({"roles": {}}), "format"),
+        (json!(7), "`profile` must be a DXF profile file's path or a profile object"),
+        (json!(""), "`profile` must be a DXF profile file's path or a profile object"),
+        (json!(missing), "no-such-profile.json"),
+        (json!(not_a_profile), "`format` must be \"solidcraft-dxf-profile\""),
+    ] {
+        let error = s.execute("sheet.export_dxf", &json!({"profile": given, "path": out})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(error.contains(why), "{given}: {error}");
+        assert!(!std::path::Path::new(&out).exists(), "{given}");
+    }
+    // Everything on layer 0 and a layer for each role are two answers to one question.
+    let neutral = solidcraft_io::DxfExportProfile::neutral().to_json();
+    let error = s.execute("sheet.export_dxf", &json!({"layers": "single", "profile": neutral})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("`layers: single`"), "{error}");
+    assert!(s.execute("sheet.export_dxf", &json!({"layers": "roles", "profile": neutral})).is_ok());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// The DXF of a sheet folded across a curved outer outline has the curve as drawn, not arcs fitted
 /// to it, and no seams where the fold cut it: the blank, with its bend line where the bend is.
 #[test]
@@ -756,7 +1093,7 @@ fn segments_on_opposite_sides_cut_the_blank_at_the_junction() {
         assert!(errors.is_empty(), "unfold: {errors:?}");
     };
     // The flat pattern: the outline runs out along the junction and back.
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     assert!(
         regions.iter().any(|r| cut(&r.outer, from, to) && cut(&r.outer, to, from)),
         "the blank is cut at the junction: {:?}",
@@ -774,7 +1111,7 @@ fn segments_on_opposite_sides_cut_the_blank_at_the_junction() {
     let mut differ = plate_in(sheet_of_2mm(), &[]);
     run(&mut differ, "sheet.flange", flange([false, true], ["20 mm", "15 mm"]));
     let step = Vec2::new(50.0, 3.0 - (PI + 12.0));
-    let regions = differ.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&differ);
     assert!(
         regions.iter().any(|r| cut(&r.outer, from, step) && cut(&r.outer, step, from)),
         "the blank is not cut at the differing-height junction: {:?}",
@@ -787,7 +1124,7 @@ fn segments_on_opposite_sides_cut_the_blank_at_the_junction() {
     // Same-side stretches of different heights: two bends, one piece, no cut at the junction.
     let mut same = plate_in(sheet_of_2mm(), &[]);
     run(&mut same, "sheet.flange", flange([false, false], ["20 mm", "15 mm"]));
-    let regions = same.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&same);
     assert!(!regions.iter().any(|r| cut(&r.outer, from, to) && cut(&r.outer, to, from)), "a same-side junction stays joined");
 }
 
@@ -820,7 +1157,7 @@ fn a_notch_through_a_junctions_far_edge_still_parts_the_blank() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     assert!(
         regions.iter().any(|r| cut(&r.outer, bend, left) && cut(&r.outer, left, bend)),
         "the blank is not cut from the bend line to the notch's edge: {:?}",
@@ -873,7 +1210,7 @@ fn a_round_notch_over_a_junctions_far_edge_ends_the_cut_on_the_arc() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     assert!(
         regions.iter().any(|r| cut(&r.outer, bend, on_arc) && cut(&r.outer, on_arc, bend)),
         "the blank is not cut from the bend line to the arc: {:?}",
@@ -947,7 +1284,7 @@ fn every_surviving_bridge_of_a_junction_is_cut() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     for (a, b) in bridges {
         assert!(
             regions.iter().any(|r| cut(&r.outer, a, b) && cut(&r.outer, b, a)),
@@ -1008,7 +1345,7 @@ fn a_junction_cut_stops_at_its_own_tip_on_a_c_shaped_blank() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     assert!(
         regions.iter().any(|r| cut(&r.outer, bend, left) && cut(&r.outer, left, bend)),
         "the blank is not cut from the bend line to the notch's edge: {:?}",
@@ -1084,7 +1421,7 @@ fn opposite_side_stretches_of_different_angles_cut_from_the_inner_bend_line() {
     let cut = |lp: &solidcore_record::Loop2, a: Vec2, b: Vec2| {
         lp.segs.iter().any(|s| matches!(s, Seg2::Line { a: p, b: q } if p.dist(a) < 1e-6 && q.dist(b) < 1e-6))
     };
-    let regions = s.model.state().sheets[0].flat_regions().unwrap_or_default();
+    let regions = junction_cuts(&s);
     assert!(
         regions.iter().any(|r| cut(&r.outer, inner, nearer_far) && cut(&r.outer, nearer_far, inner)),
         "the flat loop has no cut from the inner bend line {inner:?} to the nearer far edge {nearer_far:?}          ({offset} mm apart from the farther-out bend line {farther_out:?}): {:?}",
@@ -1118,11 +1455,14 @@ fn opposite_side_stretches_of_different_angles_cut_from_the_inner_bend_line() {
     assert!(errors.is_empty(), "unfold: {errors:?}");
 }
 
-// Outputs first recorded from upstream main at c0fb2cbce93b1e040bcbc73a917e5b5c262889e4, where
-// independent upstream and integrated-writer runs matched all 53 payloads byte for byte.
-// Re-recorded once for the DXF number rule (#5321): lengths on a 1e-9 grid, other values at
-// twelve decimals. 45 files changed; the JSON, text and Unicode cases did not. The main set was
-// captured on Windows. These byte pins are fixed expectations, never regenerated by the test.
+// Outputs first recorded from upstream main at c0fb2cbce93b1e040bcbc73a917e5b5c262889e4, then
+// re-recorded on #9245 (the flat derived from the part's surfaces), on x86_64 Windows with main's
+// #16617 and #16825 merged in. The exact-curve outputs are byte for byte those of #9245 before the
+// merge, so the shared converter and the owned layer file keep its output; the arc-fitted ones
+// follow the platform's math library (see UBUNTU_MATH_OUTPUTS). Fixtures and semantic assertions
+// are unchanged. Re-recorded again for main's DXF number rule (#5321): lengths on a 1e-9 grid,
+// other values at twelve decimals; 45 files changed, the JSON, text and Unicode cases did not.
+// These byte pins are fixed expectations, never regenerated by the test.
 #[cfg(not(target_arch = "wasm32"))]
 mod byte_regressions {
     use super::*;
@@ -1136,47 +1476,47 @@ mod byte_regressions {
         ("circle-two-halves-arcs.dxf", 5964, "40a43a719bac03a9cbbbdc2db260ee17b182364704285b7a397e4428e3bd59df"),
         ("round-ended-slot-exact.dxf", 6339, "5401b80f7510c84bc693d7652a13c422d75495d3411c79afafe34fb911b0d794"),
         ("round-ended-slot-arcs.dxf", 6339, "5401b80f7510c84bc693d7652a13c422d75495d3411c79afafe34fb911b0d794"),
-        ("ellipse-exact.dxf", 6053, "db0f0821313e35398ff562d6108241ef6dc482f92554ddc716f7fd25f045b881"),
-        ("ellipse-arcs.dxf", 16674, "96fd043c9c15322a24540481afb08def7ec9255d2d9ea68977f1924877c6457c"),
+        ("ellipse-exact.dxf", 6052, "067f2525d46c82b8780ea2adcaa5aaea81ea8b818c71bc59e1653e943161715d"),
+        ("ellipse-arcs.dxf", 16674, "840afe486860bf12e3fe922e77e61886433b18064ccb53fffbab9bba48e9d7f7"),
         ("cubic-spline-exact.dxf", 6929, "23cb6844af9f0e3f3291ed81b73ef723f81655bfdbaf414ea1046156f583bd9e"),
-        ("cubic-spline-arcs.dxf", 13558, "c66d5b5cf52109e2dc6ddf0038c36d336738e0c25c0bebad7c2cfc4474c7edcb"),
-        ("degree-nine-exact.dxf", 6803, "87b5787a6827c59dbad0a4ee69bf2962c0c86d5b0698aa5a05be99ecba26c9df"),
-        ("degree-nine-arcs.dxf", 14321, "963dadae0fda38ab745e17bdf771e1d6132b1d7e1c908edf9e4e54caaf7afd16"),
-        ("text-outlines-exact.dxf", 13638, "5a4f73514a843788737077c20d1ab4bb995de13511c724b42eea4afa4d53b8e1"),
-        ("text-outlines-arcs.dxf", 25324, "f06e6b94b68674fa636de32dc56ba989c460946e061c8c0b74ad42d8e7bf10b6"),
-        ("tray-default.dxf", 25815, "51470dbc1911837c816a45072a00eb4bb5208338a05c80360808ebd7953f8ab9"),
-        ("tray-exact-cut-bends-true-roles.dxf", 26724, "8a3c211a370725fa974c8b8d0cd3aacfd3dcc0532eb4b8b3020d3d551b48c059"),
-        ("tray-exact-cut-bends-true-single.dxf", 25519, "b5554936cde102b0befba82c73ebaa4603598354a0aac8f52875c564bec9847a"),
-        ("tray-exact-cut-bends-false-roles.dxf", 26206, "542a3da95c4a79dbf1f518c86ac33aea6c787d5c7cdf5ac10f7e13c36233b7e1"),
-        ("tray-exact-cut-bends-false-single.dxf", 25027, "b6d6bb5df5eb941c2ea4dab854852ba031f31b6f5b92d72280a3b30ea7a77c59"),
-        ("tray-exact-etch-bends-true-roles.dxf", 26724, "f5ae4eeeb79007f1e45fd0f5f67bdd61ceffff5c6bfb012980f4b26d52e8de8c"),
-        ("tray-exact-etch-bends-true-single.dxf", 25519, "9f8d53b896f8d556642d800a613f4d6552d3e1391c42e379b4c74d33cf8b7bcf"),
-        ("tray-exact-etch-bends-false-roles.dxf", 26206, "fdc4c67fae681177e65b66655e700e53f123cce46e3b50a3de069e8ee43f2c0f"),
-        ("tray-exact-etch-bends-false-single.dxf", 25027, "5b3faa2323038cacca9fa9b89202b1d62288383e2854637bb8d946f7e9b92af8"),
-        ("tray-arcs-cut-bends-true-roles.dxf", 43152, "c8b50566f1ee45d926010b1383adfefc3833b405f41fedb6dc4ab03e38407923"),
-        ("tray-arcs-cut-bends-true-single.dxf", 41578, "d82ff89a9350162e0b8ba9add7439ecc2fdcd7ae1af23277a1b2e18bb5944cf2"),
-        ("tray-arcs-cut-bends-false-roles.dxf", 42630, "0732aee3742209c1f339844497f7a87ad592870bfbb84d758ebd9f77924b3044"),
-        ("tray-arcs-cut-bends-false-single.dxf", 41082, "01e2926d5771b5c54a584670c58b76c370a2fab30ad6dbcde2ab9c83ec610f59"),
-        ("tray-arcs-etch-bends-true-roles.dxf", 43152, "d71a2cd93c03c0a53d71f9a1ccc7d02689063036149d788211ae6aee901d40dc"),
-        ("tray-arcs-etch-bends-true-single.dxf", 41578, "146a7206fe943a298755fc4fd38edab9457c50f169626369a062034c490f27d8"),
-        ("tray-arcs-etch-bends-false-roles.dxf", 42630, "b33eb08720d88c5019df77a36dcc8396296bcdf55b659654b4bdffb00aa7b1f1"),
-        ("tray-arcs-etch-bends-false-single.dxf", 41082, "5d508d3eeaa95f64df2fc275f4fab8c871933e5b57abb2d37f7777c4fe558c17"),
-        ("rule-bend-down-exact-bends-true-roles.dxf", 6391, "067c212558876ffc79a7071c396e12266e5e277b542ea9b3bfcf36f60ac89aec"),
-        ("rule-bend-down-exact-bends-false-single.dxf", 5594, "557739d4068c69d0dba01420b72303eecfd89f4046c5e96913d9b9b4b87a433d"),
-        ("rule-bend-down-arcs-bends-true-roles.dxf", 6391, "067c212558876ffc79a7071c396e12266e5e277b542ea9b3bfcf36f60ac89aec"),
-        ("rule-bend-down-arcs-bends-false-single.dxf", 5594, "557739d4068c69d0dba01420b72303eecfd89f4046c5e96913d9b9b4b87a433d"),
-        ("rule-included-down-exact-bends-true-roles.dxf", 6392, "0b8ce4cefdab58b1ffbda2fb3d56c6412c88c04664b36953d21bf30b8b3c8e1f"),
-        ("rule-included-down-exact-bends-false-single.dxf", 5595, "1ea25efa78ac93885a1d50ccda8bfcf446422bc86c6efd5f1a86fd594957f3c1"),
-        ("rule-included-down-arcs-bends-true-roles.dxf", 6392, "0b8ce4cefdab58b1ffbda2fb3d56c6412c88c04664b36953d21bf30b8b3c8e1f"),
-        ("rule-included-down-arcs-bends-false-single.dxf", 5595, "1ea25efa78ac93885a1d50ccda8bfcf446422bc86c6efd5f1a86fd594957f3c1"),
-        ("pocket-and-engraved-text-exact.dxf", 22682, "5473834ce979d04c2084a390c50f1fb44c2010298cb06dc87e57377d0b702160"),
-        ("pocket-and-engraved-text-arcs.dxf", 39082, "de135de98da888d7df8216266740a6787e22468c3cc3f17a73d5c48be7f894fe"),
+        ("cubic-spline-arcs.dxf", 13552, "5811b66a77a1bfd421ed71db738baed456d13839838a084d6450a52b966d4ecf"),
+        ("degree-nine-exact.dxf", 6803, "70a55a086e2a7d4feb198174155cbd889cb6aad693a1a0b4af7cd2fba28c5f7a"),
+        ("degree-nine-arcs.dxf", 14320, "f2c93d198e789b6c21120dc02ff332510ff1e03884cedd44352a7489b4871296"),
+        ("text-outlines-exact.dxf", 13638, "41723dc58a73570726bdbcb260f45f9937d47cc6b1ab6023421755b8d298952a"),
+        ("text-outlines-arcs.dxf", 25311, "505175f5297a6d43a5def8f5399647a419262362538b5631779c04d135d62105"),
+        ("tray-default.dxf", 25299, "f85c3373d0930e8097c4123be4a9d767b9b4ba1d672c3d591849727474327fa1"),
+        ("tray-exact-cut-bends-true-roles.dxf", 26208, "68d383ada43f98c31a92847f3f9b3b32b83a31b0585d02029d112d95aa54163c"),
+        ("tray-exact-cut-bends-true-single.dxf", 25027, "9acb9220246b5caf35cc7b9d0b2e23b3ff6837961884748a6efa2a3fe412232a"),
+        ("tray-exact-cut-bends-false-roles.dxf", 25690, "5ca0ca25c2bf31bdd9b7df22f7ba7f407e8064ae41e9ad3e33b79aa6bb6b10bf"),
+        ("tray-exact-cut-bends-false-single.dxf", 24535, "6aab380c007bfae85d9da2d05c3a001cfe63adda17df5827f127835e20cc4664"),
+        ("tray-exact-etch-bends-true-roles.dxf", 26208, "cb5b159282810c31d2c2dc458e2b070011af73ff14f7184afa1e55db9fcff785"),
+        ("tray-exact-etch-bends-true-single.dxf", 25027, "9acb9220246b5caf35cc7b9d0b2e23b3ff6837961884748a6efa2a3fe412232a"),
+        ("tray-exact-etch-bends-false-roles.dxf", 25690, "e28f584e54d8d758caa58961eea5a915d3026b7f0265b1073d6809cedcf5b120"),
+        ("tray-exact-etch-bends-false-single.dxf", 24535, "6aab380c007bfae85d9da2d05c3a001cfe63adda17df5827f127835e20cc4664"),
+        ("tray-arcs-cut-bends-true-roles.dxf", 42626, "82c3eb0931a213b0e76d86bf7c5e5d1b36f1641f6b11e5ab045c3bf4d6892bad"),
+        ("tray-arcs-cut-bends-true-single.dxf", 41076, "248b29fe4f5fde255fe746609289f617ec9b53ff9cfd489a3b2e217be3d79e70"),
+        ("tray-arcs-cut-bends-false-roles.dxf", 42104, "fb036b96f843dad73bfbf31ed7e29555ce7ac53e953b4f856b9fcaf35a432d9b"),
+        ("tray-arcs-cut-bends-false-single.dxf", 40580, "5bfb406e95429d82b69fcd445340b6d8cf58d241d6571fb9c3df3c9bccdebd5b"),
+        ("tray-arcs-etch-bends-true-roles.dxf", 42626, "a5264746d1b89fd12c439f84545aa58e9b3e64c0876ea4ca45f2cd37d3aa2b6f"),
+        ("tray-arcs-etch-bends-true-single.dxf", 41076, "248b29fe4f5fde255fe746609289f617ec9b53ff9cfd489a3b2e217be3d79e70"),
+        ("tray-arcs-etch-bends-false-roles.dxf", 42104, "593cd9d43b801c2b99d01bc00498af5481424c3c7809bd9d542a9e04eebc16f0"),
+        ("tray-arcs-etch-bends-false-single.dxf", 40580, "5bfb406e95429d82b69fcd445340b6d8cf58d241d6571fb9c3df3c9bccdebd5b"),
+        ("rule-bend-down-exact-bends-true-roles.dxf", 6391, "ee6762b7787eda81ac0b7abd6eaf3e431fd01b94df59d37aa71a9f115e0189ed"),
+        ("rule-bend-down-exact-bends-false-single.dxf", 5594, "214a4e1b608e0cc9ec3d086205f62abe8b6e0ef40bbf63ea364b6cfafe69c86c"),
+        ("rule-bend-down-arcs-bends-true-roles.dxf", 6391, "ee6762b7787eda81ac0b7abd6eaf3e431fd01b94df59d37aa71a9f115e0189ed"),
+        ("rule-bend-down-arcs-bends-false-single.dxf", 5594, "214a4e1b608e0cc9ec3d086205f62abe8b6e0ef40bbf63ea364b6cfafe69c86c"),
+        ("rule-included-down-exact-bends-true-roles.dxf", 6392, "39633cd4bc64acd74b780555a34bc82f69e18a488e6f235af83b18997afc80a8"),
+        ("rule-included-down-exact-bends-false-single.dxf", 5595, "a140e086be2f71ab5f444ac1d6391ca07dc7b95bb2daadd95cb82d9690047410"),
+        ("rule-included-down-arcs-bends-true-roles.dxf", 6392, "39633cd4bc64acd74b780555a34bc82f69e18a488e6f235af83b18997afc80a8"),
+        ("rule-included-down-arcs-bends-false-single.dxf", 5595, "a140e086be2f71ab5f444ac1d6391ca07dc7b95bb2daadd95cb82d9690047410"),
+        ("pocket-and-engraved-text-exact.dxf", 22682, "38fc4126615bd9d16e36879e02a817403e7ad0224e271d8cb3fb6d75c05366d0"),
+        ("pocket-and-engraved-text-arcs.dxf", 39082, "39681b0c88211c04aff5ca864e7a5410523c77e18d77f3722778a884f881a321"),
         ("perforation-exact.dxf", 9347, "2c5e585c5c7f61078304c1c1f7ba28395b28192b4c0131e90402967e9878ca7e"),
         ("perforation-arcs.dxf", 9347, "2c5e585c5c7f61078304c1c1f7ba28395b28192b4c0131e90402967e9878ca7e"),
         ("per-body-0-exact.dxf", 5867, "2cf53293bc9c3a146de20cc97ed04e2b3100bdca27dc08828727ff9e8bda0a67"),
-        ("per-body-1-exact.dxf", 6079, "a75e6c959f13e17584d7ad3462c8267efc91ad3ed0b9a68ebb27b318a40500fc"),
+        ("per-body-1-exact.dxf", 6079, "f6e471d43ef61f1659b8c939f2291d8dc4fd91536ec0a99c1b52ec19f1449764"),
         ("per-body-0-arcs.dxf", 5867, "2cf53293bc9c3a146de20cc97ed04e2b3100bdca27dc08828727ff9e8bda0a67"),
-        ("per-body-1-arcs.dxf", 6079, "a75e6c959f13e17584d7ad3462c8267efc91ad3ed0b9a68ebb27b318a40500fc"),
+        ("per-body-1-arcs.dxf", 6079, "f6e471d43ef61f1659b8c939f2291d8dc4fd91536ec0a99c1b52ec19f1449764"),
         ("writer-bmp-controls.dxf", 5259, "8237d6edba93809ec56483e99368a166b944ad463a449e8fc268218d97b7a4af"),
         ("writer-bmp-cap.dxf", 6954, "637acb429ecc45551e53b3bce16ffee95030f16e94347f6428541ff1b8a2c2ef"),
         ("unicode-early.txt", 159, "90c374179d2388832a9bbcafbbabd4c3887edde4989eedd9cfcbd48b4199b4f1"),
@@ -1186,23 +1526,24 @@ mod byte_regressions {
         ("unicode-far-after-cap.txt", 163, "87709acb08a4e729b4480182419ad843ab2c7887fc73dd23bc86a3e86f35beaa"),
     ];
 
-    // Files whose arc-fit last decimals differ under another platform's math functions, captured
-    // there as complete byte streams: CI's Ubuntu 24.04 (glibc 2.39). The main set above is
-    // Windows (MSVC), which needed its own set before the re-recording (#18073, #18088). The
-    // glibc 2.44 set of the first recording was not re-captured. Keep exact (length, SHA-256)
-    // pairs: no numeric normalization or loose tolerance.
-    const UBUNTU_MATH_OUTPUTS: &[ExpectedOutput] = &[
-        ("ellipse-arcs.dxf", 16674, "b85882adb682ef4b317d401f369ebb4da50229a0927b8fa7d560cef4a556c98a"),
-        ("text-outlines-arcs.dxf", 25324, "0edcf6e207c586623964ae923d5f5e840b43ee91881c813dd68d91735efeb522"),
-        ("tray-arcs-cut-bends-true-roles.dxf", 43149, "739272a05f099899508184acf72e635d0ce693f170735d5b66f69922bf4a63aa"),
-        ("tray-arcs-cut-bends-true-single.dxf", 41575, "1210571398f89a0dfee572599ff33b801fbce967f2acc1fa9aced346aba67d29"),
-        ("tray-arcs-cut-bends-false-roles.dxf", 42627, "38091fc035d512b5763ba9e106e2fb2a158d4ed97755144acce104302ea8c31e"),
-        ("tray-arcs-cut-bends-false-single.dxf", 41079, "f51192bf3d3758062cb490b6bb14221bfa226d79332f94df9f6c3d647d687f09"),
-        ("tray-arcs-etch-bends-true-roles.dxf", 43149, "a678be43519ad0ee2bd474b1d8666a2e2b62cc6b366fb60e171f467db79f45c8"),
-        ("tray-arcs-etch-bends-true-single.dxf", 41575, "d55f2de65ca3a08c1688e7af1fdcd0c0cb596f9e41c776dd2f153cf4f713933c"),
-        ("tray-arcs-etch-bends-false-roles.dxf", 42627, "7d73520ff3b3b0ca58e98594b809421b438856f231f296b635c2324acd33478a"),
-        ("tray-arcs-etch-bends-false-single.dxf", 41079, "ebf1d836d92b6a54ec026ebb63831711648e3942405d0e83a48422de7d376d6d"),
-        ("pocket-and-engraved-text-arcs.dxf", 39080, "fdaad9b32f5df58bf0448957c597572ee53ad1f1a517791e11b00c2bc6acdc8c"),
+    // The arc-fitted outputs whose last decimals differ on Ubuntu 24.04's glibc 2.39, the math
+    // library of CI's Native Linux tests: captured there in the ci profile (tangency-labs/solidcraft Actions run
+    // 44139450763, after #5321's nine-decimal numbers). The other 40 are the same
+    // on both. Keep exact (length, SHA-256) pairs: no numeric normalization or loose tolerance.
+    const UBUNTU_MATH_OUTPUTS: [ExpectedOutput; 13] = [
+        ("cubic-spline-arcs.dxf", 13550, "a8a828d9825d454b05b07a31f2aacbd83a93174acde634ff694131b8595c6398"),
+        ("degree-nine-arcs.dxf", 14320, "d084dab80a8da5d22f3b61dbe6e5fab94677e14da5eec4bde927a1fd27d31625"),
+        ("ellipse-arcs.dxf", 16674, "2042450483bee76a36d2e5b37e3a54511b97efab479a1fce8a0e8b9c220d0331"),
+        ("pocket-and-engraved-text-arcs.dxf", 39080, "0732cbc0dc9533c5eb27833ed78ed5db18cf0299d599a8c7cba062017913e41d"),
+        ("text-outlines-arcs.dxf", 25311, "300f58b5681ffe089b1f900f548da740b9aa16ba2f10f21a5e4b3a5c0bb8a7fb"),
+        ("tray-arcs-cut-bends-false-roles.dxf", 42104, "9c16c793111306b3ff290c1df312e74b0ccd984ff27a64f73c3152d32717ff88"),
+        ("tray-arcs-cut-bends-false-single.dxf", 40580, "82967c0891b4530b7d5baf7b7348eb1ef93a404d3e69324083b4609fce144bb3"),
+        ("tray-arcs-cut-bends-true-roles.dxf", 42626, "f650a184c9795df766c4c917a6617f4000eee6a7f6f779c67604b86c97ca706a"),
+        ("tray-arcs-cut-bends-true-single.dxf", 41076, "eee0e2d5a25faf63942bfa408257aad8c65f894bed6f65bb98cf4b96e13a7906"),
+        ("tray-arcs-etch-bends-false-roles.dxf", 42104, "7808677679865a0191f4a51a0591e640cc2d4b153633c9a0bcaa418490d856e6"),
+        ("tray-arcs-etch-bends-false-single.dxf", 40580, "82967c0891b4530b7d5baf7b7348eb1ef93a404d3e69324083b4609fce144bb3"),
+        ("tray-arcs-etch-bends-true-roles.dxf", 42626, "85f4af3fdf6d6818af84a466850642a2158de48ce5678e7629b4072607650eed"),
+        ("tray-arcs-etch-bends-true-single.dxf", 41076, "eee0e2d5a25faf63942bfa408257aad8c65f894bed6f65bb98cf4b96e13a7906"),
     ];
 
     struct BytePins {
@@ -1477,7 +1818,7 @@ mod caller_circle_compatibility {
     }
     fn expect_arcs(lp: &Loop2) {
         assert!(super::super::loop_circle(lp).is_none());
-        assert!(solidcore_ops::prism::loop_circle(lp).is_none(), "generic recognition must remain strict");
+        assert!(solidcraft_kernel::affine::loop_circle(lp).is_none(), "generic recognition must remain strict");
         let json = serde_json::to_value(super::super::loop_shape(lp)).unwrap();
         assert!(json.get("circle").is_none());
         let segments = json["segments"].as_array().unwrap();
@@ -1499,7 +1840,7 @@ mod caller_circle_compatibility {
         assert!(center.dist(second) > 0.0 && center.dist(second) < 1e-9);
         assert!(other_radius > radius && other_radius - radius < 1e-9);
         let lp = halves(center, radius, second, other_radius);
-        assert!(solidcore_ops::prism::loop_circle(&lp).is_none(), "unequal stored supports remain unequal in generic geom");
+        assert!(solidcraft_kernel::affine::loop_circle(&lp).is_none(), "unequal stored supports remain unequal in generic geom");
         expect_circle(&lp, center, radius);
     }
     #[test]
@@ -1593,19 +1934,21 @@ fn legacy_caller_circle_keeps_an_admitted_sub_writer_precision_arc() {
         ],
     };
     assert_eq!(super::loop_circle(&lp), Some((center, 8.0)));
-    assert!(solidcore_ops::prism::loop_circle(&lp).is_none(), "the generic recognizer must retain exact centre identity");
+    assert!(solidcraft_kernel::affine::loop_circle(&lp).is_none(), "the generic recognizer must retain exact centre identity");
     let error = path_shapes(DxfPath::Closed(&lp), DxfPathStyle::Exact).unwrap_err();
     assert!(error.to_string().contains("arc endpoints collapse"));
 
-    // Start with a real command-produced sheet's admitted rule/frame and replace only
-    // its public source outline. This tests the SheetBody/flat_regions/export API,
-    // not a claim about ordinary sketch-command or saved-design reachability.
+    // Start with a real command-produced sheet and replace only the outline of its flat region
+    // (the flat is derived from the part's surfaces; this changes the derived data the exporter
+    // is handed, it is never written back). This tests the surface_dxf export route, not a
+    // claim about ordinary sketch-command or saved-design reachability.
     let session = plate_with(&[]);
-    let mut sheet = session.model.state().sheets[0].clone();
-    sheet.base.outer = lp.clone();
-    let flat = sheet.flat_regions().expect("the public sheet flat-region route admits this outline");
+    let mut sheet = session.model.state().surface_sheets[0].clone();
+    assert_eq!(sheet.regions.len(), 1);
+    sheet.regions[0].outer = lp.clone();
+    let flat = sheet.shown().regions;
     assert_eq!(flat.len(), 1);
-    assert_eq!(flat[0].outer.segs, lp.segs, "flat-region admission must preserve the actual witness pieces");
+    assert_eq!(flat[0].outer.segs.len(), lp.segs.len(), "the shown flat keeps every witness piece");
     assert_eq!(super::loop_circle(&flat[0].outer), Some((center, 8.0)));
 
     // Cam's written caller contract promises the same CIRCLE here. These are
@@ -1614,7 +1957,87 @@ fn legacy_caller_circle_keeps_an_admitted_sub_writer_precision_arc() {
         let shapes = super::flat_loop_shapes(&flat[0].outer, style).expect("admitted legacy whole circle remains exportable");
         assert!(matches!(shapes.as_slice(), [DxfShape::Circle { c, r }] if *c == center && *r == 8.0));
     }
-    let dxf = super::flat_dxf(&sheet, &super::DxfOptions::default()).expect("the real default flat-pattern exporter retains its whole-circle result");
+    let dxf = super::surface_dxf(&session, &sheet, &super::DxfOptions::default(), None)
+        .expect("the real default flat-pattern exporter retains its whole-circle result");
     let es = entities(&dxf);
     assert_eq!((count(&es, "CIRCLE"), count(&es, "ARC"), count(&es, "LINE")), (1, 0, 0));
+}
+
+/// #17752: with `hardware_notes`, each press-in hardware hole is named in the DXF by a note beside
+/// it on layer HARDWARE (`M3 nut`, a stud's length after it), 3 mm high, level with the hole and
+/// just clear of its rim; layers on a single layer leave the notes out, and a sheet with no
+/// hardware has no such layer. Without the option there are no notes and no layer.
+#[test]
+fn a_press_in_hardware_hole_is_noted_beside_it_on_its_own_layer() {
+    let mut s = plate_with(&[]);
+    assert!(!layer_table(&export(&mut s, json!({"hardware_notes": true}))).contains_key("HARDWARE"), "no hardware, no layer");
+    run(&mut s, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [30, 30, 2.5]}));
+    run(&mut s, "sheet.hardware", json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": [70, 30, 2.5]}));
+    run(&mut s, "solid.hole", json!({"position": [50, 10, 2.5], "diameter": 3}));
+    let unasked = export(&mut s, json!({}));
+    assert!(!layer_table(&unasked).contains_key("HARDWARE") && entities(&unasked).iter().all(|e| e.0 != "TEXT"), "notes are asked for");
+    let dxf = export(&mut s, json!({"hardware_notes": true}));
+    let all = entities(&dxf);
+    let notes: Vec<&Entity> = all.iter().filter(|e| e.0 == "TEXT").collect();
+    assert!(notes.iter().all(|e| layer_of(e) == "HARDWARE"), "{notes:?}");
+    let mut texts: Vec<String> = notes.iter().map(|e| encoded_text(e)).collect();
+    texts.sort();
+    assert_eq!(texts, ["M3 nut", "M4 stud 10 mm"], "the plain hole has no note");
+    assert_eq!(layer_table(&dxf).get("HARDWARE"), Some(&(8, "Continuous".to_string())));
+    let circles: Vec<(Vec2, f64)> = all.iter().filter_map(|e| if let DxfShape::Circle { c, r } = &e.1 { Some((*c, *r)) } else { None }).collect();
+    assert_eq!(circles.len(), 3);
+    for note in &notes {
+        assert_eq!(note_layout(note), (3.0, 0.0));
+        let at = second_point(note);
+        let beside = circles.iter().any(|(c, r)| at.dist(*c + Vec2::new(r + 1.5, -1.5)) < 1e-9);
+        assert!(beside, "{} is beside no hole: {at:?} {circles:?}", encoded_text(note));
+    }
+    // The note's height is the caller's, as a bend note's is.
+    let tall = entities(&export(&mut s, json!({"hardware_notes": true, "note_height": 5})));
+    assert!(tall.iter().filter(|e| e.0 == "TEXT").all(|e| note_layout(e).0 == 5.0));
+    // On a single layer a note would sit with the cut contours: none.
+    let single = export(&mut s, json!({"hardware_notes": true, "layers": "single"}));
+    assert!(entities(&single).iter().all(|e| e.0 != "TEXT") && !layer_table(&single).contains_key("HARDWARE"));
+}
+
+/// The file for a shop (#17752): a sheet with press-in hardware, exported with the default options,
+/// gives what the same sheet gives with plain holes of the hardware's size and nothing else: the
+/// same layers and entities, the mounting holes as circles, no HARDWARE layer and no note texts.
+/// The hardware is only a property of the hole, so the sheet's STEP is the same too.
+#[test]
+fn a_sheet_with_press_in_hardware_exports_only_the_sheet_and_its_holes() {
+    let mut with = plate_with(&[]);
+    run(&mut with, "sheet.hardware", json!({"kind": "nut", "thread": "M3", "position": [30, 30, 2.5]}));
+    run(&mut with, "sheet.hardware", json!({"kind": "stud", "thread": "M4", "length": "10 mm", "position": [70, 30, 2.5]}));
+    let listed = run(&mut with, "sheet.flat_pattern", json!({}))["hardware"].as_array().cloned().unwrap_or_default();
+    let diameters: Vec<f64> = listed.iter().filter_map(|h| h["hole_diameter"].as_f64()).collect();
+    assert_eq!(diameters.len(), 2, "{listed:?}");
+    let mut without = plate_with(&[]);
+    for (d, at) in diameters.iter().zip([[30.0, 30.0, 2.5], [70.0, 30.0, 2.5]]) {
+        run(&mut without, "solid.hole", json!({"position": at, "diameter": d}));
+    }
+    let (dxf, plain) = (export(&mut with, json!({})), export(&mut without, json!({})));
+    assert_eq!(layer_table(&dxf), layer_table(&plain));
+    assert!(!layer_table(&dxf).contains_key("HARDWARE"));
+    let (a, b) = (entities(&dxf), entities(&plain));
+    let shapes = |es: &[Entity]| es.iter().map(|e| (e.0.clone(), e.1.clone(), e.2.clone())).collect::<Vec<_>>();
+    assert_eq!(shapes(&a), shapes(&b));
+    assert_eq!(count(&a, "CIRCLE"), 2, "the mounting holes are plain circles");
+    assert!(a.iter().all(|e| e.0 != "TEXT"), "no note texts");
+    assert!(!dxf.contains("nut") && !dxf.contains("stud") && !dxf.contains("HARDWARE"));
+    // STEP: the bodies are all it writes, and the hardware is not a body or a part of one. Its data
+    // section (the header holds the time) is the same as the plain sheet's.
+    let step = |s: &mut Session, name: &str| {
+        // The same file name in a folder of its own: the STEP product is named after the file.
+        let dir = std::env::temp_dir().join(format!("solidcraft-pih-{}-{name}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("sheet.step");
+        run(s, "file.export_step", json!({"path": path.to_string_lossy()}));
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dir);
+        text.split_once("DATA;").map(|(_, data)| data.to_string()).unwrap_or(text)
+    };
+    let (with_step, plain_step) = (step(&mut with, "with"), step(&mut without, "plain"));
+    assert!(!with_step.is_empty());
+    assert_eq!(with_step, plain_step);
 }
