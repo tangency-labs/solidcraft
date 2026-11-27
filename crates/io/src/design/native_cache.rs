@@ -275,6 +275,48 @@ fn decode_cached_body(bytes: &[u8]) -> Option<solidcraft_kernel::Body> {
     if bytes.starts_with(MESH_TAG) { decode_mesh_body(bytes) } else { solidcraft_kernel::decode_native_body(bytes).ok() }
 }
 
+/// Pre-encode identity key for deduplicating identical bodies (same record/mesh, size, colour,
+/// paint and encoded metadata pointers) before running native encode + round-trip decode + SHA-256.
+/// Paired with [`solidcraft_kernel::Body::same`] so differences in boundary protection are never
+/// collapsed.
+#[derive(PartialEq, Eq, Hash)]
+struct BodyEncodeKey<'a> {
+    is_mesh: bool,
+    record_ptr: usize,
+    mesh_ptr: usize,
+    size_bits: u64,
+    color_bits: Option<[u32; 3]>,
+    paint_bits: Option<(u32, Option<&'a str>, Vec<(usize, [u32; 3], u32, Option<&'a str>)>)>,
+    splits_ptr: usize,
+    face_sources_ptr: usize,
+    history_ptr: usize,
+}
+
+impl<'a> BodyEncodeKey<'a> {
+    fn of(b: &'a solidcraft_kernel::Body) -> Self {
+        Self {
+            is_mesh: b.is_mesh(),
+            record_ptr: std::ptr::from_ref(b.record()).addr(),
+            mesh_ptr: b.triangle_mesh().map_or(0, |(p, _)| p.as_ptr() as usize),
+            size_bits: b.size().to_bits(),
+            color_bits: b.color().map(|[r, g, bl]| [r.to_bits(), g.to_bits(), bl.to_bits()]),
+            paint_bits: b.paint().map(|p| {
+                (
+                    p.opacity.to_bits(),
+                    p.name.as_deref(),
+                    p.faces
+                        .iter()
+                        .map(|f| (f.face, [f.color[0].to_bits(), f.color[1].to_bits(), f.color[2].to_bits()], f.opacity.to_bits(), f.name.as_deref()))
+                        .collect(),
+                )
+            }),
+            splits_ptr: b.split_lines().map_or(0, |s| std::sync::Arc::as_ptr(s) as usize),
+            face_sources_ptr: b.face_sources().map_or(0, |s| s.as_ptr() as usize),
+            history_ptr: b.history().map_or(0, |h| std::ptr::from_ref(h).addr()),
+        }
+    }
+}
+
 impl Encoded {
     fn of(model: &SavedModel, document: &[u8]) -> Result<Self> {
         // What to encode: every body, and the part every placed copy shows.
@@ -291,10 +333,36 @@ impl Encoded {
             }));
         }
         let bodies: Vec<&solidcraft_kernel::Body> = model.bodies.iter().chain(shares.iter().map(|s| s.original())).collect();
+        // Deduplicate identical bodies before encoding, round-trip decoding and hashing: repeated
+        // body instances (and shared display parts) then encode once instead of once per record,
+        // while preserving first-seen slice order and refusal attribution byte for byte.
+        let mut unique_bodies: Vec<&solidcraft_kernel::Body> = Vec::new();
+        let mut unique_first_idx: Vec<usize> = Vec::new();
+        let mut body_to_unique: Vec<usize> = Vec::with_capacity(bodies.len());
+        {
+            let mut by_key: std::collections::HashMap<BodyEncodeKey<'_>, Vec<usize>> = std::collections::HashMap::with_capacity(bodies.len());
+            for (idx, &b) in bodies.iter().enumerate() {
+                let bucket = by_key.entry(BodyEncodeKey::of(b)).or_default();
+                let found = bucket.iter().copied().find(|&u| unique_bodies.get(u).is_some_and(|other| b.same(other)));
+                let u = match found {
+                    Some(existing) => existing,
+                    None => {
+                        let u = unique_bodies.len();
+                        unique_bodies.push(b);
+                        unique_first_idx.push(idx);
+                        bucket.push(u);
+                        u
+                    }
+                };
+                body_to_unique.push(u);
+            }
+        }
+        #[cfg(test)]
+        ENCODED_UNIQUE.with(|n| n.set(n.get() + unique_bodies.len()));
         // A body is kept only when it decodes to itself: one the codec gave back with other
         // topology (two loose vertices more on a pattern copy cut by an extrude) would open as
         // another body. Then the model isn't kept, and opening the design evaluates it.
-        let encoded = solidcraft_kernel::map_on_threads(&bodies, 16, |b| {
+        let encoded = solidcraft_kernel::map_on_threads(&unique_bodies, 16, |b| {
             if b.is_mesh() {
                 let Some(bytes) = encode_mesh_body(b) else {
                     return Err("mesh body could not be encoded".into());
@@ -320,8 +388,8 @@ impl Encoded {
         });
         let mut slices = Vec::new();
         let mut by_digest = std::collections::HashMap::new();
-        let mut index = Vec::with_capacity(encoded.len());
-        for (idx, res) in encoded.into_iter().enumerate() {
+        let mut unique_slices = Vec::with_capacity(encoded.len());
+        for (u, res) in encoded.into_iter().enumerate() {
             let detail = match res {
                 Some(Ok(bytes)) => {
                     let next = slices.len();
@@ -329,12 +397,13 @@ impl Encoded {
                     if i == next {
                         slices.push(bytes);
                     }
-                    index.push(i);
+                    unique_slices.push(i);
                     continue;
                 }
                 Some(Err(d)) => d,
                 None => "body encoding worker failed".to_string(),
             };
+            let idx = unique_first_idx.get(u).copied().unwrap_or(u);
             let body_index = if idx < model.bodies.len() {
                 Some(idx)
             } else {
@@ -377,6 +446,7 @@ impl Encoded {
             set_last_cache_refusal(refusal.clone());
             return Err(invalid(refusal));
         }
+        let index: Vec<usize> = body_to_unique.iter().filter_map(|&u| unique_slices.get(u).copied()).collect();
         let (body_slices, part_slices) = index.split_at_checked(model.bodies.len()).ok_or_else(|| invalid("cached body count"))?;
         Ok(Encoded { slices, bodies: body_slices.iter().copied().zip(placed).collect(), parts: part_slices.to_vec() })
     }
@@ -493,6 +563,8 @@ fn current(manifest: &Value, document: &[u8]) -> bool {
 thread_local! {
     /// How often reading a model cache validated its document (tests count it).
     pub(super) static VALIDATED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// How many unique bodies `Encoded::of` sent through native/mesh encoding (tests count it).
+    pub(super) static ENCODED_UNIQUE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// A build whose evaluation source could not be hashed (`"unknown"`) never trusts a cache,

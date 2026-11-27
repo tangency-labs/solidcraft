@@ -81,7 +81,8 @@ pub fn admit_path(path: DxfPath<'_>, style: DxfPathStyle) -> Result<()> {
     geometry::admit_path(parts(path).0, style).map_err(refusal)
 }
 
-/// Convert a bounded path without dropping, reordering or modifying its pieces.
+/// Convert a bounded path without dropping, reordering or modifying its pieces, except that the
+/// polyline style merges a piece written as one point on the 1e-9 grid into its neighbours.
 /// The kernel owns exact geometry; the existing bounded fitter is the one arc fitter.
 pub fn path_shapes(path: DxfPath<'_>, style: DxfPathStyle) -> Result<Vec<DxfShape>> {
     admit_path(path, style)?;

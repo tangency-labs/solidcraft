@@ -1414,16 +1414,23 @@ fn relink_keeps_joint_definitions_and_reports_solver_diagnostics() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// #12227: relinking one placement of several leaves the others on the old source. The placement
-/// shows a component linked to the new design, made once and reused for the next placement.
+/// #21536 / #21378: relinking one placement of several to a design whose bodies cannot be
+/// unambiguously matched to the copied body still names every pattern and mirror it breaks.
 #[test]
 fn relink_of_one_placement_names_the_patterns_and_mirrors_it_breaks() {
     let dir = folder("placement-copies");
-    let (original, taller) = (dir.join("original.solidcraft"), dir.join("taller.solidcraft"));
-    for (path, height, name) in [(&original, 10, "Block"), (&taller, 20, "Tall")] {
+    let (original, split) = (dir.join("original.solidcraft"), dir.join("split.solidcraft"));
+    {
         let mut part = Session::default();
-        run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": height, "corner": [0,0,0], "body_name": name}));
-        run(&mut part, "file.save", json!({"path": path}));
+        run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0,0,0], "body_name": "Block"}));
+        run(&mut part, "file.save", json!({"path": original}));
+    }
+    {
+        // Two differently named bodies: `Block` has no unambiguous 1-to-1 match.
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 20, "corner": [0,0,0], "body_name": "Left"}));
+        run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 20, "corner": [30,0,0], "body_name": "Right"}));
+        run(&mut part, "file.save", json!({"path": split}));
     }
     // Two placements of one design; a body pattern and a mirror copy the body at the first.
     let relink = |which: usize| -> Vec<String> {
@@ -1433,7 +1440,7 @@ fn relink_of_one_placement_names_the_patterns_and_mirrors_it_breaks() {
         run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Block"], "dir1": [1,0,0], "count1": 2, "spacing1": 20}));
         run(&mut s, "solid.mirror", json!({"bodies": ["Block"], "plane": "YZ"}));
         let occurrence = [&first, &second][which]["occurrence"].clone();
-        let reply = run(&mut s, "component.relink", json!({"component": first["component"], "occurrence": occurrence, "path": taller}));
+        let reply = run(&mut s, "component.relink", json!({"component": first["component"], "occurrence": occurrence, "path": split}));
         reply["warnings"]
             .as_array()
             .unwrap()
@@ -1453,6 +1460,175 @@ fn relink_of_one_placement_names_the_patterns_and_mirrors_it_breaks() {
         let w = warned.iter().find(|w| w.starts_with(&format!("`{name}`"))).unwrap_or_else(|| panic!("{name}: {warned:?}"));
         assert!(w.contains("fails now: the placement `Block` was copied from no longer shows it"), "{w}");
     }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// #21378: relinking a single placement positions the new Import feature before downstream body
+/// patterns (rectangular, circular) and mirrors and retargets them to the new part's body,
+/// preserving all patterned and mirrored copies with the new geometry and zero warnings.
+#[test]
+fn relink_of_one_placement_preserves_rectangular_circular_and_mirror_copies() {
+    let dir = folder("placement-retarget-copies");
+    let original = dir.join("original.solidcraft");
+    let renamed = dir.join("taller.solidcraft");
+    let same_name = dir.join("taller_same_name.solidcraft");
+    for (path, height, name) in [(&original, 10, "Block"), (&renamed, 20, "Tall"), (&same_name, 20, "Block")] {
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": height, "corner": [0,0,0], "body_name": name}));
+        run(&mut part, "file.save", json!({"path": path}));
+    }
+
+    for (label, replacement) in [("different body name", &renamed), ("same body name", &same_name)] {
+        let mut s = Session::default();
+        let first = run(&mut s, "component.insert_design", json!({"path": original, "reuse": true, "translate": [20, 0, 0]}));
+        let orig_comp = first["component"].as_u64().unwrap();
+        let orig_import = s.doc.links[&orig_comp].feature;
+        let first_occ = first["occurrence"].as_u64().unwrap();
+        run(&mut s, "component.insert_design", json!({"path": original, "reuse": true, "translate": [120, 0, 0]}));
+
+        let rect = run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Block"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 25}));
+        let circ = run(&mut s, "solid.pattern.circular", json!({"bodies": ["Block"], "axis": "Z", "count": 3, "angle": "360 deg"}));
+        let mir = run(&mut s, "solid.mirror", json!({"bodies": ["Block"], "plane": "YZ"}));
+        let rect_id = rect["feature"].as_u64().unwrap();
+        let circ_id = circ["feature"].as_u64().unwrap();
+        let mirror_id = mir["feature"].as_u64().unwrap();
+
+        // 2 placements + 1 rectangular copy + 2 circular copies + 1 mirror copy = 6 bodies (6,000 mm³).
+        assert_eq!(s.world_state().unwrap().bodies.len(), 6, "{label}: before relink");
+        assert!((volume(&mut s) - 6000.0).abs() < 1e-3, "{label}: before volume {}", volume(&mut s));
+        let before_doc = serde_json::to_value(&*s.doc).unwrap();
+
+        let reply = run(&mut s, "component.relink", json!({"component": orig_comp, "occurrence": first_occ, "path": replacement}));
+        assert_eq!(reply["warnings"], json!([]), "{label}: expected zero warnings, got {reply}");
+        for r in &s.model.results {
+            assert!(r.error.is_none(), "{label}: `{}` failed: {:?}", r.name, r.error);
+            assert!(r.warning.is_none(), "{label}: `{}` warned: {:?}", r.name, r.warning);
+        }
+
+        // The new Import feature must sit right after the original Import and before every pattern/mirror.
+        let new_import = reply["feature"].as_u64().unwrap();
+        let orig_idx = s.doc.feature_index(orig_import).unwrap();
+        let new_idx = s.doc.feature_index(new_import).unwrap();
+        assert_eq!(new_idx, orig_idx + 1, "{label}: new import should follow original import");
+        for (name, id) in [("RectangularPattern1", rect_id), ("CircularPattern1", circ_id), ("Mirror1", mirror_id)] {
+            let consumer_idx = s.doc.feature_index(id).unwrap();
+            assert!(new_idx < consumer_idx, "{label}: new import ({new_idx}) must precede {name} ({consumer_idx})");
+        }
+
+        // Untouched placement stays 1,000 mm³; relinked placement + 4 copies each become 2,000 mm³ -> 11,000 mm³.
+        assert_eq!(s.world_state().unwrap().bodies.len(), 6, "{label}: all 6 bodies preserved");
+        assert!((volume(&mut s) - 11_000.0).abs() < 1e-3, "{label}: after volume {}", volume(&mut s));
+
+        // Undo/redo round-trip restores exact pre-relink and post-relink state.
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(serde_json::to_value(&*s.doc).unwrap(), before_doc, "{label}: undo restores doc");
+        assert!((volume(&mut s) - 6000.0).abs() < 1e-3, "{label}: undo volume {}", volume(&mut s));
+        run(&mut s, "edit.redo", json!({}));
+        assert!((volume(&mut s) - 11_000.0).abs() < 1e-3, "{label}: redo volume {}", volume(&mut s));
+        assert!(s.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{label}: redo clean");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// #21378: relinking a placement to a design that is already linked later in the timeline moves
+/// that reused Import earlier without renumbering existing bodies, and multi-body relinks
+/// retarget matched bodies while warning about genuinely removed ones.
+#[test]
+fn relink_of_one_placement_reuses_later_link_and_handles_partial_multi_body_match() {
+    let dir = folder("placement-reuse-and-partial");
+    let original = dir.join("original.solidcraft");
+    let taller = dir.join("taller.solidcraft");
+    for (path, height, name) in [(&original, 10, "Block"), (&taller, 20, "Block")] {
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": height, "corner": [0,0,0], "body_name": name}));
+        run(&mut part, "file.save", json!({"path": path}));
+    }
+
+    // Part A: `taller` is already inserted AFTER the pattern and mirror; relinking `first` reuses
+    // that component and moves its Import feature ahead of the pattern and mirror.
+    let mut s = Session::default();
+    let first = run(&mut s, "component.insert_design", json!({"path": original, "reuse": true, "translate": [20, 0, 0]}));
+    let orig_comp = first["component"].as_u64().unwrap();
+    let first_occ = first["occurrence"].as_u64().unwrap();
+    run(&mut s, "component.insert_design", json!({"path": original, "reuse": true, "translate": [120, 0, 0]}));
+    let rect = run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Block"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 25}));
+    let mir = run(&mut s, "solid.mirror", json!({"bodies": ["Block"], "plane": "YZ"}));
+    let existing = run(&mut s, "component.insert_design", json!({"path": taller, "reuse": true, "translate": [200, 0, 0]}));
+    let reused_comp = existing["component"].as_u64().unwrap();
+    let reused_import = s.doc.links[&reused_comp].feature;
+    assert!(s.doc.feature_index(reused_import).unwrap() > s.doc.feature_index(mir["feature"].as_u64().unwrap()).unwrap());
+
+    let reply = run(&mut s, "component.relink", json!({"component": orig_comp, "occurrence": first_occ, "path": taller}));
+    assert_eq!(reply["component"].as_u64(), Some(reused_comp), "existing link is reused: {reply}");
+    assert_eq!(reply["warnings"], json!([]), "{reply}");
+    assert!(s.doc.feature_index(reused_import).unwrap() < s.doc.feature_index(rect["feature"].as_u64().unwrap()).unwrap());
+    assert!(s.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()));
+    // second(1000) + first(2000) + rect copy(2000) + mirror copy(2000) + existing(2000) = 9,000 mm³.
+    assert!((volume(&mut s) - 9000.0).abs() < 1e-3, "volume {}", volume(&mut s));
+
+    // Part B: 2-body source (`Plate`, `Bolt`) relinked to 1-body target (`Plate`, taller).
+    // The pattern of `Plate` survives; the mirror of removed `Bolt` fails and warns.
+    let v1 = dir.join("multi_v1.solidcraft");
+    let v2 = dir.join("multi_v2.solidcraft");
+    {
+        let mut p = Session::default();
+        run(&mut p, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0,0,0], "body_name": "Plate"}));
+        run(&mut p, "solid.box", json!({"length": 5, "width": 5, "height": 10, "corner": [20,0,0], "body_name": "Bolt"}));
+        run(&mut p, "file.save", json!({"path": v1}));
+    }
+    {
+        let mut p = Session::default();
+        run(&mut p, "solid.box", json!({"length": 10, "width": 10, "height": 20, "corner": [0,0,0], "body_name": "Plate"}));
+        run(&mut p, "file.save", json!({"path": v2}));
+    }
+    let mut m = Session::default();
+    let p_first = run(&mut m, "component.insert_design", json!({"path": v1, "reuse": true, "translate": [20, 0, 0]}));
+    let p_comp = p_first["component"].as_u64().unwrap();
+    let p_occ = p_first["occurrence"].as_u64().unwrap();
+    run(&mut m, "component.insert_design", json!({"path": v1, "reuse": true, "translate": [120, 0, 0]}));
+    let plate_pat = run(&mut m, "solid.pattern.rectangular", json!({"bodies": ["Plate"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 25}));
+    let bolt_mir = run(&mut m, "solid.mirror", json!({"bodies": ["Bolt"], "plane": "YZ"}));
+    let reply = run(&mut m, "component.relink", json!({"component": p_comp, "occurrence": p_occ, "path": v2}));
+    assert!(m.model.result(plate_pat["feature"].as_u64().unwrap()).unwrap().error.is_none(), "Plate pattern must survive");
+    assert!(m.model.result(bolt_mir["feature"].as_u64().unwrap()).unwrap().error.is_some(), "Bolt mirror must fail");
+    let warned: Vec<&str> = reply["warnings"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+    assert_eq!(warned.len(), 1, "{warned:?}");
+    assert!(
+        warned[0].starts_with("`Mirror1`") && warned[0].contains("fails now: the placement `Bolt` was copied from no longer shows it"),
+        "{warned:?}"
+    );
+    // Surviving volume: untouched v1 (1000 + 250) + relinked v2 Plate (2000) + Plate pattern copy (2000) = 5,250 mm³.
+    assert!((volume(&mut m) - 5250.0).abs() < 1e-3, "volume {}", volume(&mut m));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// #21378: inserting the replacement Import feature before a pattern inside a timeline folder
+/// keeps every timeline folder contiguous.
+#[test]
+fn relink_of_one_placement_keeps_timeline_groups_contiguous_and_patterns_intact() {
+    let dir = folder("placement-timeline-group");
+    let (original, taller) = (dir.join("original.solidcraft"), dir.join("taller.solidcraft"));
+    for (path, height, name) in [(&original, 10, "Block"), (&taller, 20, "Tall")] {
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": height, "corner": [0,0,0], "body_name": name}));
+        run(&mut part, "file.save", json!({"path": path}));
+    }
+    let mut s = Session::default();
+    let first = run(&mut s, "component.insert_design", json!({"path": original, "reuse": true}));
+    let orig_comp = first["component"].as_u64().unwrap();
+    let orig_import = s.doc.links[&orig_comp].feature;
+    let first_occ = first["occurrence"].as_u64().unwrap();
+    run(&mut s, "component.insert_design", json!({"path": original, "reuse": true, "translate": [100, 0, 0]}));
+    let rect = run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Block"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 25}));
+    let rect_id = rect["feature"].as_u64().unwrap();
+    run(&mut s, "timeline.group", json!({"name": "Parts", "features": [orig_import, rect_id]}));
+
+    let reply = run(&mut s, "component.relink", json!({"component": orig_comp, "occurrence": first_occ, "path": taller}));
+    assert_eq!(reply["warnings"], json!([]), "{reply}");
+    assert_eq!(solidcraft_doc::non_contiguous_timeline_group(&s.doc.features, &s.doc.timeline_groups), None);
+    assert!(s.model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()));
+    // untouched(1000) + relinked(2000) + pattern copy(2000) = 5,000 mm³.
+    assert!((volume(&mut s) - 5000.0).abs() < 1e-3, "volume {}", volume(&mut s));
     let _ = std::fs::remove_dir_all(dir);
 }
 
