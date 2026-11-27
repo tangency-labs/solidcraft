@@ -548,6 +548,14 @@ pub fn are_same_curve<O: Copy + PartialEq>(
     Ok(midpoint_drop_distance(k, geometry, crv1, ivl1, crv2, ivl2, tol)?.is_some_and(|d| d < tol))
 }
 
+/// Not upstream (#18475): how many times the two curves' tolerances together a midpoint of a
+/// definition must lie from an incoming curve between the same two proto vertices for the
+/// two to be different edges ([`ProtoTopologyManager::is_same_edge_definition`]). The two arcs
+/// of the nearly aligned crossing holes are 850 reaches apart, the halves of a loop in
+/// `boolean.api_brep`'s `more0068` 33, and the two circles of a shaft's built-twice end chamfer
+/// 1.5 (one offset along their whole lengths, one edge).
+const TWO_BRANCHES_BEYOND_REACH: f64 = 10.0;
+
 /// The distance [`are_same_curve`] reads: the midpoint of the first curve's interval dropped
 /// onto the second curve (an intersecting drop within `tol`, guessed at the second interval's
 /// middle). `None` when the midpoint cannot be evaluated or the drop does not succeed.
@@ -3730,17 +3738,20 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             mid_pc1.object() == Some(d.src_topo1) && mid_pc2.object() == Some(d.src_topo2);
 
         // Not upstream (#18475): two curves of one face pair between the same two proto
-        // vertices are one edge only where they are one curve within their tolerances. The
-        // capture distance above only says where to look (docs/booleans.md, "One edge or
-        // two"): where two equal holes cross with their axes 1e-5 apart, the walls meet in one
-        // loop that the second hole's seam cuts into two arcs with the same two ends, one over
-        // the top of the first hole and one under it, their midpoints 0.0085 apart on the
-        // first hole's far side. Taken for one edge, the lower arc made no edge, the arc kept
-        // had ends of one edge each, and a piece of the second hole's wall inside the first
-        // stayed in the result. An identical definition whose midpoint lies farther from the
-        // incoming curve than the two curves' tolerances (the stored definition's and the
-        // manager's, which the intersection curves are approximated to) together, and outside
-        // both end proto vertices' balls, is another branch of the intersection.
+        // vertices are one edge unless they are plainly two branches. The capture distance above
+        // only says where to look (docs/booleans.md, "One edge or two"): where two equal holes
+        // cross with their axes 1e-5 apart, the walls meet in one loop that the second hole's
+        // seam cuts into two arcs with the same two ends, one over the top of the first hole and
+        // one under it, their midpoints 0.0085 apart on the first hole's far side. Taken for one
+        // edge, the lower arc made no edge, the arc kept had ends of one edge each, and a piece
+        // of the second hole's wall inside the first stayed in the result. A curve's midpoint
+        // that lies farther than `TWO_BRANCHES_BEYOND_REACH` times the two curves' tolerances
+        // (the stored definition's and the manager's, which the intersection curves are
+        // approximated to) together from the incoming curve, and outside both end proto
+        // vertices' balls, is another branch. Nearer, two curves of one loop are one edge as
+        // before: the end chamfer of a shaft, built twice, has its two circles 1.5e-5 apart
+        // along their whole lengths (a gap of 1.5 reaches), and splitting them into two edges
+        // changed the volume of the solid.
         if identical && d.xsect_curve_3d != tgt_curve {
             let reach = d.tolerance(k) + self.tolerance(k);
             let gap = midpoint_drop_distance(
@@ -3752,7 +3763,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 tgt_domain,
                 tol,
             )?;
-            if gap.is_some_and(|g| g > reach)
+            if gap.is_some_and(|g| g > TWO_BRANCHES_BEYOND_REACH * reach)
                 && !self.midpoint_in_end_ball(k, geometry, d, start, end)?
             {
                 return Ok((false, false));
