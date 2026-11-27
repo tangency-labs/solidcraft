@@ -1978,8 +1978,16 @@ fn window_plate(d: f64) -> (Body, [usize; 2], f64) {
 /// L + 2 pi c, so the round takes A L + 2 pi M. A join of angle t, mitred, takes
 /// 2 M tan(t / 2) where the sweep takes M t: they differ by M t^3 / 12, under 1e-9 here, and
 /// the two joins turn opposite ways.
+///
+/// Every trim of the result maps onto its edge within the tolerance the corners are built to
+/// here, 4e-5 (their solvers' 3D tolerance on this plate), proved over the whole edge
+/// ([`Body::edge_trim_gap_bound`]). A Join's section runs across the second round a radius
+/// times the sine of the angle from that round's own end at one rail and through it at the
+/// other; joined by its two ends only, its trim stood up to 1e-3 from the edge at these
+/// angles, which a closed solid and its volume do not show.
 #[test]
 fn a_window_rim_round_runs_through_its_near_tangent_joins() {
+    const TRIM_TOL: f64 = 4e-5;
     all_fixes();
     let r: f64 = 1.0;
     for d in [0.0, 0.002, 0.02, 0.05, 0.1, 0.2] {
@@ -1993,6 +2001,16 @@ fn a_window_rim_round_runs_through_its_near_tangent_joins() {
             (1.0 - PI / 4.0) * r * r * outline + 2.0 * PI * (5.0 / 6.0 - PI / 4.0) * r.powi(3);
         let off = before - volume(&b);
         assert!(rel(off, want) < 1e-6, "d {d}: {off} off, want {want}");
+        // every trim maps onto its edge: the section a Join shares runs across the second
+        // round, and a mitre ends where its two rounds touch
+        let order = b.own_order();
+        for edge in 0..order.edges.len() {
+            let gap = b.edge_trim_gap_bound(&order, edge, TRIM_TOL).unwrap();
+            assert!(
+                gap.is_some(),
+                "d {d}: edge {edge}'s trim is not proved on its edge"
+            );
+        }
     }
 }
 

@@ -6,7 +6,9 @@
 //!
 //! | Rust                      | Upstream |
 //! |---------------------------|----------|
+//! | [`section_pair`]          | none     |
 //! | [`section_mitre_curve`]   | none     |
+//! | [`SectionPair`]           | none     |
 //! | `Station` (private)       | none     |
 //! | `meet` (private)          | none     |
 //!
@@ -14,50 +16,60 @@
 //! share, to S on the side edge between their other faces. Both rounds are tangent to the
 //! shared face along their rails, so at X they are tangent to each other, and beside X they
 //! stand `a x d / r` apart: `a` the angle the rails cross at, `x` the distance along the
-//! rails and `d` the height over the face. A trace of their intersection is not determined
-//! there: at a kink of 0.115 degrees (`a = 2e-3`) it ended 6.9e-4 from X, the face of one
+//! rails and `d` the height over the face. X is a tangential intersection point, where the
+//! two normals do not give a marching trace its step (`docs/generic-blend.md` [2], [34]):
+//! at a kink of 0.115 degrees (`a = 2e-3`) the trace ended 6.9e-4 from X, the face of one
 //! round did not close and the result was open.
 //!
 //! **The construction.** A round of radius `r` on a plane is the envelope of the balls of
-//! radius `r` centred on its spine, a curve in the plane `r` over the shared one. Its points
-//! at the height `h` over the shared plane are the spine's offset by `rho(h) = sqrt(r^2 - (r -
-//! h)^2)` in that plane, so two such rounds meet, at each height, where the two spines'
-//! offsets by one distance cross: over the bisector of the spines, from X (`rho = 0`, under
-//! the spines' crossing) to S. Two rounds made the same way give one height to one value of
-//! their parameter across, `v`, so the mitre's point at `v` is where
-//! `S1(u1, v) = S2(u2, v)`: two unknowns, whose directions `dS1/du` and `dS2/du` make the
-//! rails' angle `a` at every `v`, X included. The solve is conditioned by `1 / a` along the
-//! whole mitre, where the intersection's is by `1 / (a d)`.
+//! radius `r` centred on its spine, a curve in the plane `r` over the shared one
+//! (`docs/generic-blend.md` [37], [6]). Its points at the height `h` over the shared plane
+//! are the spine's offset by `rho(h) = sqrt(r^2 - (r - h)^2)` in that plane, so two such
+//! rounds meet, at each height, where the two spines' offsets by one distance cross: over
+//! the bisector of the two spines, the points equally far from both, from X (`rho = 0`,
+//! under the spines' crossing) to S. Where both walls stand upright on the plane, both
+//! sections are quarter circles made the same way and give one height to one value of the
+//! parameter across, `v`, so the mitre's point at `v` is where `S1(u1, v) = S2(u2, v)`: two
+//! unknowns, whose directions `dS1/du` and `dS2/du` make the rails' angle `a` at every `v`,
+//! X included. The solve is conditioned by `1 / a` along the whole mitre, where the
+//! intersection's is by `1 / (a d)`.
 //!
-//! **What is verified, not assumed.** That the rounds are of this kind is read off the
-//! result: at every station the two points must agree within [`AGREE`] of the part's size
-//! (three equations hold for two unknowns only where both rounds give `v` the same height
-//! and offset), the stations at `v`'s ends must be the vertices X and S within the corner's
-//! tolerance, and the curves fitted through the stations must pass every station between
-//! them within a hundredth of that tolerance. Where any of this fails nothing is changed and
-//! the edge is left to the traced intersection, as before.
+//! **Which mitres take it** is read off the two rounds' definitions before anything is
+//! solved ([`section_pair`]): circular sections of one constant radius, one plane among
+//! their faces, and each one's other face a plane or an extrusion square to it. Cylinders
+//! keep their plane conic ([`super::exact_mitre_curve`]), every other pair its trace.
+//!
+//! **What is proved.** At every station the two rounds' points agree within [`AGREE`] of
+//! the part's size, and the end stations are the vertices X and S within the corner's
+//! tolerance. The edge's curve and its two trims are fitted through the stations, each trim
+//! held in its round's domain, and the distance between each round at its trim and the
+//! edge is enclosed over the whole edge ([`proved_trim_gap`]); the stations are doubled
+//! until both are proved within the corner's tolerance. A mitre of this kind that is not
+//! proved is refused, naming what failed; it is not handed to the trace.
 //!
 //! Deviations: none (no upstream counterpart). No recursion.
 
 use super::foot_on_surface;
+use super::proved_trim::{held_in_domain, proved_trim_gap};
 use crate::blend::fillet_corner::p3::FilletCorner;
-use crate::blend::fillet_geom::p1::{FilletBrep, FilletEdgeType, FilletVertexType};
+use crate::blend::fillet_geom::p1::{FilletBrep, FilletEdgeType, FilletGeomId, FilletVertexType};
 use crate::blend::fillet_geom::p4::set_edge_curve;
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::global_solver::SolverOperation;
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, EFF_ZERO};
+use crate::math::{Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::nurbs::knots::Side;
-use crate::surface::procedural_blend::NetScope;
+use crate::surface::procedural_blend::{BlendDefinition, NetScope};
+use crate::surface::surf_of_extrusion::SurfOfExtrusion;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::edgeuse::p1 as eu1;
-use crate::topology::{edge, Brep, EdgeId};
+use crate::topology::{edge, Brep, EdgeId, EdgeuseId, VertexId};
 
 /// How closely the two rounds' points at one station must agree, as a fraction of the
 /// part's size (1 + the largest coordinate at X + the mitre's length): the rounding of the
@@ -134,29 +146,107 @@ fn meet(
 
 const OP: &str = "blend::blend_corner::section_mitre::section_mitre_curve";
 
-/// The mitre `mitre` of `corner` (a Mitre turn) between the rails' crossing X and the side
-/// vertex S, where its two rounds are kept as their definitions and meet section by section
-/// (module docs): the edge's curve through the stations, its UV curves on both rounds, and X
-/// and S at the end stations. `false`, with nothing changed, where the rounds are not of
-/// that kind or the stations do not verify; the edge is then left to its own kind.
+/// A refusal of a mitre that is of this kind and is not proved.
+const fn refused(reason: &'static str) -> SolidError {
+    SolidError::Unsupported {
+        operation: OP,
+        reason,
+    }
+}
+
+const NO_ENDS: &str = "two rounds meeting at an angle on one flat face: the ends of their \
+                       mitre are not on the sides of both rounds";
+const NO_STATION: &str = "two rounds meeting at an angle on one flat face: they do not meet \
+                          at one of the mitre's sections";
+const NOT_PROVED: &str = "two rounds meeting at an angle on one flat face: their mitre is \
+                          not proved within the tolerance of both rounds";
+
+/// Two rounds whose mitre is built section by section, and the mitre's ends
+/// ([`section_pair`]).
+pub struct SectionPair {
+    /// S, on the side edge between the rounds' other faces.
+    s: VertexId,
+    /// X, the rails' crossing.
+    x: VertexId,
+    /// Whether the edge starts at S.
+    from_s: bool,
+    /// The edge's two uses, on the first round and on the second.
+    eus: [EdgeuseId; 2],
+    /// The two rounds.
+    geoms: [FilletGeomId; 2],
+    /// Their surfaces.
+    surfaces: [Surface; 2],
+}
+
+/// The plane a round of constant radius rolls on with a circular section, where its
+/// other face stands upright on that plane: the plane's point and unit normal, and the
+/// radius, for the plane of support `flat`. `None` for any other round.
+fn upright_round(
+    k: &Kernel,
+    def: &BlendDefinition,
+    flat: usize,
+) -> Result<Option<(Point3, Vec3, f64)>> {
+    let [r0, r1] = def.offsets;
+    if def.law.is_some()
+        || def.chamfer.is_some()
+        || def.order != 1
+        || def.swapped
+        || r0.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater)
+        || (r0 - r1).abs() > EFF_ZERO * r0
+    {
+        return Ok(None);
+    }
+    let (Some(floor), Some(wall)) = (def.supports.get(flat), def.supports.get(1 - flat)) else {
+        return Ok(None);
+    };
+    let SurfaceKind::Plane(plane) = floor.kind() else {
+        return Ok(None);
+    };
+    let (origin, normal, _) = plane.is_planar();
+    let length = normal.length();
+    if length.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
+        return Ok(None);
+    }
+    let normal = normal * (1.0 / length);
+    // square to the plane: a plane whose normal lies in it, or an extrusion along its normal
+    let upright = match wall.kind() {
+        SurfaceKind::Plane(other) => {
+            let (_, n, _) = other.is_planar();
+            n.dot(normal).abs() <= AGREE * n.length()
+        }
+        SurfaceKind::SurfOfExtrusion(extrusion) => {
+            let along = extrusion.extrusion_vector();
+            along.cross(normal).length() <= AGREE * along.length()
+        }
+        SurfaceKind::BSpline(net) => {
+            match SurfOfExtrusion::is_nurb_surface_surf_of_extrusion(k, net, 1.0)? {
+                Some(extrusion) => {
+                    let along = extrusion.extrusion_vector();
+                    along.cross(normal).length() <= AGREE * along.length()
+                }
+                None => false,
+            }
+        }
+        _ => false,
+    };
+    Ok(upright.then_some((origin, normal, r0)))
+}
+
+/// Whether the mitre `mitre` is one this module builds, read off the two rounds before
+/// anything is solved (module docs): a Mitre turn's edge between the rails' crossing X and
+/// the side vertex S, on two rounds kept as their definitions, of one constant radius with
+/// circular sections, rolling on one plane, each one's other face square to that plane.
+/// `None` for every other edge, which keeps its own construction.
 ///
 /// # Errors
 ///
-/// [`crate::error::SolidError::NotFound`] for a dangling id; those of the evaluations, the
-/// drops and the curve fits; cancellation.
-#[allow(clippy::too_many_lines)] // one construction
-pub fn section_mitre_curve(
-    k: &Kernel,
-    target: &Brep,
-    pseudo: &mut FilletBrep,
-    corner: &FilletCorner,
-    mitre: EdgeId,
-) -> Result<bool> {
+/// [`crate::error::SolidError::NotFound`] for a dangling id; those of reading the faces.
+pub fn section_pair(k: &Kernel, pseudo: &FilletBrep, mitre: EdgeId) -> Result<Option<SectionPair>> {
     let Some(start) = edge::vertex(pseudo.brep(), mitre)? else {
-        return Ok(false);
+        return Ok(None);
     };
     let Some(end) = edge::other_vertex(pseudo.brep(), mitre, Some(start))? else {
-        return Ok(false);
+        return Ok(None);
     };
     let from_s = pseudo.fillet_vertex(start)?.vertex_type == FilletVertexType::RailXEdgeuse;
     let (s, x) = if from_s { (start, end) } else { (end, start) };
@@ -168,38 +258,93 @@ pub fn section_mitre_curve(
             || !sv.is_processed()
             || !xv.is_processed()
         {
-            return Ok(false);
+            return Ok(None);
         }
     }
     let Some(prim) = eu1::primary_edgeuse(pseudo.brep(), mitre)? else {
-        return Ok(false);
+        return Ok(None);
     };
     let Some(mate) = eu1::mate(pseudo.brep(), prim)? else {
-        return Ok(false);
+        return Ok(None);
     };
-    let eus = [prim, mate];
     let (Some(g0), Some(g1)) = (
         pseudo.fillet_edgeuse(prim)?.fillet_geom(),
         pseudo.fillet_edgeuse(mate)?.fillet_geom(),
     ) else {
-        return Ok(false);
+        return Ok(None);
     };
     if g0 == g1 {
-        return Ok(false);
+        return Ok(None);
     }
-    let geoms = [g0, g1];
     let (Some(surface0), Some(surface1)) = (
-        pseudo.geom(g0)?.fillet_surface(None)?.cloned(),
-        pseudo.geom(g1)?.fillet_surface(None)?.cloned(),
+        pseudo.geom(g0)?.fillet_surface(None)?,
+        pseudo.geom(g1)?.fillet_surface(None)?,
     ) else {
-        return Ok(false);
+        return Ok(None);
     };
-    // rounds kept as their definitions: each evaluates as itself here, not as its net
-    if !matches!(surface0.kind(), SurfaceKind::ProceduralBlend(_))
-        || !matches!(surface1.kind(), SurfaceKind::ProceduralBlend(_))
-    {
-        return Ok(false);
+    let (SurfaceKind::ProceduralBlend(blend0), SurfaceKind::ProceduralBlend(blend1)) =
+        (surface0.kind(), surface1.kind())
+    else {
+        return Ok(None);
+    };
+    // one plane among the faces of both, each one's other face square to it
+    let mut shared = false;
+    for (flat0, flat1) in [(0, 0), (0, 1), (1, 0), (1, 1)] {
+        let (Some((o0, n0, r0)), Some((o1, n1, r1))) = (
+            upright_round(k, blend0.definition(), flat0)?,
+            upright_round(k, blend1.definition(), flat1)?,
+        ) else {
+            continue;
+        };
+        let size = 1.0 + o0.max_dimension() + o1.max_dimension();
+        shared = (r0 - r1).abs() <= EFF_ZERO * r0
+            && n0.cross(n1).length() <= AGREE
+            && (o1 - o0).dot(n0).abs() <= AGREE * size;
+        if shared {
+            break;
+        }
     }
+    if !shared {
+        return Ok(None);
+    }
+    Ok(Some(SectionPair {
+        s,
+        x,
+        from_s,
+        eus: [prim, mate],
+        geoms: [g0, g1],
+        surfaces: [surface0.clone(), surface1.clone()],
+    }))
+}
+
+/// The mitre `mitre` of `corner` between the two rounds of `pair` ([`section_pair`]), built
+/// section by section and proved (module docs): the edge's curve through the stations, its
+/// trims on both rounds, and X and S at the end stations.
+///
+/// # Errors
+///
+/// `Unsupported`, naming what failed, where the mitre's ends are not on the rounds' sides,
+/// the rounds do not meet at a section or the curve is not proved within the corner's
+/// tolerance of both rounds; [`crate::error::SolidError::NotFound`] for a dangling id;
+/// those of the evaluations, the drops, the curve fits and the enclosure; cancellation.
+#[allow(clippy::too_many_lines)] // one construction
+pub fn section_mitre_curve(
+    k: &Kernel,
+    target: &Brep,
+    pseudo: &mut FilletBrep,
+    corner: &FilletCorner,
+    mitre: EdgeId,
+    pair: SectionPair,
+) -> Result<()> {
+    let SectionPair {
+        s,
+        x,
+        from_s,
+        eus,
+        geoms,
+        surfaces: [surface0, surface1],
+    } = pair;
+    // rounds kept as their definitions: each evaluates as itself here, not as its net
     let _scope = NetScope::exact(k);
     let surfaces = [&surface0, &surface1];
     let tol = corner.approx_tol_3d;
@@ -228,19 +373,19 @@ pub fn section_mitre_curve(
             let dropped =
                 surface.drop_point::<NoObject>(k, p, &domain, &DropPointOptions::default())?;
             if !dropped.success || dropped.gap > tol {
-                return Ok(false);
+                return Err(refused(NO_ENDS));
             }
             let Some(uv) = foot_on_surface(k, surface, p, dropped.result_uv)? else {
-                return Ok(false);
+                return Err(refused(NO_ENDS));
             };
             let Some(v) = side(uv.y) else {
-                return Ok(false);
+                return Err(refused(NO_ENDS));
             };
             *slot = Point2::new(uv.x, v);
         }
         let [x_uv, s_uv] = found;
         if x_uv.y == s_uv.y {
-            return Ok(false);
+            return Err(refused(NO_ENDS));
         }
         if let (Some(x_slot), Some(s_slot)) = (at_x.get_mut(ii), at_s.get_mut(ii)) {
             *x_slot = x_uv;
@@ -263,13 +408,13 @@ pub fn section_mitre_curve(
     };
     let (Some(first), Some(last)) = (station(0.0, [x0.x, x1.x])?, station(1.0, [s0.x, s1.x])?)
     else {
-        return Ok(false);
+        return Err(refused(NO_STATION));
     };
     if first.point.distance(x_pnt) > tol || last.point.distance(s_pnt) > tol {
-        return Ok(false);
+        return Err(refused(NO_ENDS));
     }
 
-    // the stations, doubled until the curves through every other one pass the rest
+    // the stations, doubled until the curves through them are proved on both rounds
     let mut count = 8;
     let (curve, uvs) = loop {
         let mut stations = vec![first];
@@ -278,7 +423,7 @@ pub fn section_mitre_curve(
             let prev = stations.last().copied().unwrap_or(first);
             let guess = between(t, &prev, &last, (ii - 1) as f64 / count as f64, 1.0);
             let Some(found) = station(t, guess)? else {
-                return Ok(false);
+                return Err(refused(NO_STATION));
             };
             stations.push(found);
         }
@@ -299,11 +444,8 @@ pub fn section_mitre_curve(
             ordered
         };
         let through = |pick: &dyn Fn(&Station) -> Point3, dim: u64| -> Result<BSplineCurve> {
-            let (params, points): (Vec<f64>, Vec<Point3>) = ordered
-                .iter()
-                .step_by(2)
-                .map(|(t, st)| (*t, pick(st)))
-                .unzip();
+            let (params, points): (Vec<f64>, Vec<Point3>) =
+                ordered.iter().map(|(t, st)| (*t, pick(st))).unzip();
             BSplineCurve::create_interpolating_curve_with_params(
                 ParamMethod::ChordLength,
                 dim,
@@ -315,28 +457,29 @@ pub fn section_mitre_curve(
                 Some(&params),
             )
         };
-        let curve = through(&|st| st.point, 3)?;
-        let uv0 = through(&|st| Point3::new(st.uv[0].x, st.uv[0].y, 0.0), 2)?;
-        let uv1 = through(&|st| Point3::new(st.uv[1].x, st.uv[1].y, 0.0), 2)?;
-        // the stations left out, against the curves: in space, and each UV curve's point
-        // on its round
-        let mut off = 0.0_f64;
-        for (t, st) in ordered.iter().skip(1).step_by(2) {
-            off = off.max(curve.evaluate_point(*t)?.distance(st.point));
-            for (uv, surface) in [&uv0, &uv1].into_iter().zip(surfaces) {
-                let w = uv.evaluate_point(*t)?;
-                off = off.max(
-                    surface
-                        .evaluate_point(k, Point2::new(w.x, w.y))?
-                        .distance(st.point),
-                );
+        let curve = Curve::from(through(&|st| st.point, 3)?);
+        let mut trims = Vec::with_capacity(2);
+        for (ii, surface) in surfaces.into_iter().enumerate() {
+            let mut trim = through(
+                &|st| {
+                    let uv = st.uv.get(ii).copied().unwrap_or_default();
+                    Point3::new(uv.x, uv.y, 0.0)
+                },
+                2,
+            )?;
+            held_in_domain(&mut trim, &surface.natural_uv_domain_with_nurb(k)?)?;
+            let trim = Curve::from(trim);
+            let ivl = curve.natural_interval();
+            if proved_trim_gap(k, surface, &trim, &curve, ivl, tol)?.is_none() {
+                break;
             }
+            trims.push(trim);
         }
-        if off <= 0.01 * tol {
-            break (curve, [uv0, uv1]);
+        if let Ok(both) = <[Curve; 2]>::try_from(trims) {
+            break (curve, both);
         }
         if count >= MOST {
-            return Ok(false);
+            return Err(refused(NOT_PROVED));
         }
         count *= 2;
     };
@@ -365,16 +508,16 @@ pub fn section_mitre_curve(
             }
         }
     }
-    set_edge_curve(pseudo.brep_mut(), mitre, Some(Curve::from(curve)))?;
+    set_edge_curve(pseudo.brep_mut(), mitre, Some(curve))?;
     pseudo.set_vertex_point(x, first.point)?;
     pseudo.set_vertex_point(s, last.point)?;
     let [uv0, uv1] = uvs;
     for ((eu, g), uv) in eus.into_iter().zip(geoms).zip([uv0, uv1]) {
-        pseudo.set_edgeuse_uv_curve(eu, Some(Curve::from(uv)), true, true)?;
+        pseudo.set_edgeuse_uv_curve(eu, Some(uv), true, true)?;
         pseudo.geom_mut(g)?.add_side_fillet_edgeuse(eu);
     }
     pseudo
         .fillet_edge_mut(mitre)?
         .set_fillet_edge_type(FilletEdgeType::Precomputed);
-    Ok(true)
+    Ok(())
 }

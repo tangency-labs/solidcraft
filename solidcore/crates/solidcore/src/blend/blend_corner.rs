@@ -78,6 +78,7 @@ pub mod join_gap;
 pub mod mixed;
 pub mod on_face;
 pub(crate) mod piece;
+pub(crate) mod proved_trim;
 pub mod rollover;
 pub mod section_mitre;
 pub mod separate_ends;

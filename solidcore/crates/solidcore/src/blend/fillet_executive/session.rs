@@ -3612,13 +3612,16 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
                 let exact = crate::blend::blend_corner::exact_mitre_curve(
                     k, target, pseudo, corner, e, &mut live,
                 )?;
-                // Not the fork's (#23151): two rounds kept as their definitions that meet
-                // section by section take their mitre from those sections, which ends at
-                // the rails' crossing, where the rounds touch and a trace is not determined
+                // Not the fork's (#23151): which construction a mitre takes is read off its
+                // two rounds. Cylinders take the plane conic above. Two rounds of one radius
+                // on one plane, their other faces square to it, take the mitre section by
+                // section, which ends at the rails' crossing, where the rounds touch and a
+                // trace is not determined; it is proved or refused. Any other pair is traced.
                 if !exact {
-                    crate::blend::blend_corner::section_mitre::section_mitre_curve(
-                        k, target, pseudo, corner, e,
-                    )?;
+                    use crate::blend::blend_corner::section_mitre;
+                    if let Some(pair) = section_mitre::section_pair(k, pseudo, e)? {
+                        section_mitre::section_mitre_curve(k, target, pseudo, corner, e, pair)?;
+                    }
                 }
             }
         }
