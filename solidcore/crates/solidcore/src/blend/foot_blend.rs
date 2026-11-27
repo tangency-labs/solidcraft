@@ -1300,8 +1300,9 @@ impl FootBlend {
 
     /// Checks that each toe lies on its face of `target` at the legs `legs`: at
     /// [`FootBlend::check_stations`] of `within` (sampled), each foot's parameters
-    /// classified on its face (trims included). Stations not made are skipped (the build
-    /// refuses them). `target` is only read.
+    /// classified on its face (trims included; `weld_bead`'s `face_holds`, on a copy of the
+    /// part where the classification would make a trim curve in it). Stations not made are
+    /// skipped (the build refuses them). `target` is left as it came in.
     ///
     /// # Errors
     ///
@@ -1316,7 +1317,7 @@ impl FootBlend {
     pub fn toes_on_faces(
         &self,
         k: &Kernel,
-        target: &Brep,
+        target: &mut Brep,
         legs: [f64; 2],
         within: &[[f64; 2]],
     ) -> Result<()> {
@@ -1334,7 +1335,7 @@ impl FootBlend {
     pub(crate) fn toes_on_faces_except(
         &self,
         k: &Kernel,
-        target: &Brep,
+        target: &mut Brep,
         legs: [f64; 2],
         within: &[[f64; 2]],
         excused: &dyn Fn(Point3) -> bool,
@@ -1352,12 +1353,11 @@ impl FootBlend {
             let periods = periods_of(k, &side.surface, &domain)?;
             frames.push((domain, periods));
         }
-        let on_face = |target: &Brep, i: usize, face: FaceId, uv: Point2| -> Result<bool> {
-            let (Some((domain, periods)), Some(side)) = (frames.get(i), self.sides.get(i)) else {
+        let on_face = |target: &mut Brep, i: usize, face: FaceId, uv: Point2| -> Result<bool> {
+            let Some((domain, periods)) = frames.get(i) else {
                 return Ok(true);
             };
-            let uv = wrapped(domain, *periods, uv);
-            face_holds(k, target, face, &side.surface, domain, *periods, uv)
+            face_holds(k, target, face, wrapped(domain, *periods, uv))
         };
         // the stations, each from the one before; and the first toe off its face
         let mut off: Option<(usize, Point3)> = None;
@@ -1384,7 +1384,7 @@ impl FootBlend {
         let face = self.sides.get(i).and_then(|s| s.face);
         let z = legs.get(i).copied().unwrap_or(0.0);
         // the largest leg on that side whose toes stay on the face, halved down from the leg
-        let holds = |leg: f64| -> Result<bool> {
+        let holds = |target: &mut Brep, leg: f64| -> Result<bool> {
             let Some(face) = face else {
                 return Ok(true);
             };
@@ -1422,7 +1422,7 @@ impl FootBlend {
                 break;
             }
             let mid = 0.5 * (lo + hi);
-            if holds(mid)? {
+            if holds(target, mid)? {
                 lo = mid;
             } else {
                 hi = mid;
