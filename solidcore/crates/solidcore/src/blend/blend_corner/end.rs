@@ -1284,12 +1284,18 @@ pub fn side_edgeuse_across_seam_vertex(
 }
 
 /// Not the fork's (solidcore-native, [`crate::blend::fillet_tangent_rollover`]): the side edge of `eu` continued across
-/// its end `at` where a smooth (tangent) edge T leaves it: `eu`'s edge E lies between a face F
-/// and the end face P, T between F and a face X it meets tangentially, and the third edge N at
-/// `at` between X and P. A rail rolled over T onto X the whole length ends on N, not on F's
-/// side edge, as a rail continues across a seam's vertex ([`side_edgeuse_across_seam_vertex`]).
-/// Given `rolled`, X must be that face. Returns N's edge use on P (the face E and N share).
-/// `None` otherwise, and for a closed edge or an `at` that is not E's end.
+/// its end `at` where a smooth (tangent) edge T leaves it:
+/// - At a 3-edge vertex: `eu`'s edge E lies between a face F and the end face P, T between F and
+///   a face X it meets tangentially, and the third edge N at `at` between X and P. Returns N's
+///   edge use on P (the face E and N share, so its radial is on X).
+/// - At a 4-edge grid vertex (when `rolled` is `Some(X0)`): E lies between F0 and F1, smooth
+///   tangent edges T0 (F0/X0) and T1 (F1/X1) leave `at`, and the fourth edge N lies between X0
+///   and X1 (as where two adjacent chain rounds both roll over narrow strips onto adjacent
+///   smooth faces). Returns N's edge use on X1 (so its radial is on X0 = `rolled`).
+///
+/// A rail rolled over T onto X the whole length ends on N, not on F's side edge, as a rail
+/// continues across a seam's vertex ([`side_edgeuse_across_seam_vertex`]). Given `rolled`, X must
+/// be that face. `None` otherwise, and for a closed edge or an `at` that is not E's end.
 ///
 /// # Errors
 /// Those of the topology walks and the tangency test.
@@ -1311,13 +1317,66 @@ pub fn side_edgeuse_across_rolled_edge(
     }
     let e_faces = edge::faces(target, e, None)?;
     let edges = vertex::edges(target, at, None)?;
-    if edges.len() != 3 || e_faces.len() != 2 {
+    if e_faces.len() != 2 {
         return Ok(None);
     }
     let others: Vec<EdgeId> = edges.iter().copied().filter(|&x| x != e).collect();
-    // the vertex's three edges hold E, so two others are left unless the body's vertex
-    // does not list E among its edges
-    let &[a, b] = others.as_slice() else {
+    if edges.len() == 3 {
+        // the vertex's three edges hold E, so two others are left unless the body's vertex
+        // does not list E among its edges
+        let &[a, b] = others.as_slice() else {
+            return Err(bad_input_with(
+                OP,
+                CornerInput::TopologyMismatch,
+                Some(EntityRef::Vertex(at)),
+                SM_ERR_NULL_POINTER,
+            ));
+        };
+        for (t, n) in [(a, b), (b, a)] {
+            let t_faces = edge::faces(target, t, None)?;
+            let n_faces = edge::faces(target, n, None)?;
+            // T: F (a face of E) and X; N: X and P (E's other face)
+            let Some(&f) = t_faces.iter().find(|f| e_faces.contains(f)) else {
+                continue;
+            };
+            let Some(&x) = t_faces.iter().find(|&&g| g != f) else {
+                continue;
+            };
+            let Some(&p) = e_faces.iter().find(|&&g| g != f) else {
+                continue;
+            };
+            if !n_faces.contains(&x)
+                || !n_faces.contains(&p)
+                || x == p
+                || rolled.is_some_and(|r| r != x)
+                || edge::is_closed(target, n)?
+            {
+                continue;
+            }
+            let (tangent, _) = crate::blend::fillet_solver::p1::test_manifold_tangent_rollover(
+                k,
+                target,
+                t,
+                tangency_tol_rad,
+            )?;
+            if !tangent {
+                continue;
+            }
+            for y in edge::edgeuses(target, n, None, None)? {
+                if eu1::face(target, y)? == Some(p) {
+                    return Ok(Some(y));
+                }
+            }
+        }
+        return Ok(None);
+    }
+    let Some(rolled_face) = rolled else {
+        return Ok(None);
+    };
+    if edges.len() != 4 {
+        return Ok(None);
+    }
+    let &[a, b, c] = others.as_slice() else {
         return Err(bad_input_with(
             OP,
             CornerInput::TopologyMismatch,
@@ -1325,38 +1384,66 @@ pub fn side_edgeuse_across_rolled_edge(
             SM_ERR_NULL_POINTER,
         ));
     };
-    for (t, n) in [(a, b), (b, a)] {
-        let t_faces = edge::faces(target, t, None)?;
-        let n_faces = edge::faces(target, n, None)?;
-        // T: F (a face of E) and X; N: X and P (E's other face)
-        let Some(&f) = t_faces.iter().find(|f| e_faces.contains(f)) else {
-            continue;
-        };
-        let Some(&x) = t_faces.iter().find(|&&g| g != f) else {
-            continue;
-        };
-        let Some(&p) = e_faces.iter().find(|&&g| g != f) else {
-            continue;
-        };
-        if !n_faces.contains(&x)
-            || !n_faces.contains(&p)
-            || x == p
-            || rolled.is_some_and(|r| r != x)
-            || edge::is_closed(target, n)?
-        {
+    let &[f_a, f_b] = e_faces.as_slice() else {
+        return Ok(None);
+    };
+    // Four-edge grid vertex: E (F0/F1), smooth T0 (F0/X0) and T1 (F1/X1), continuation N (X0/X1)
+    // with X0 == rolled_face. Return N's edgeuse on X1 so its radial lies on rolled_face.
+    let triples = [
+        (a, b, c),
+        (b, a, c),
+        (a, c, b),
+        (c, a, b),
+        (b, c, a),
+        (c, b, a),
+    ];
+    for (t0, t1, n) in triples {
+        if edge::is_closed(target, n)? {
             continue;
         }
-        let (tangent, _) = crate::blend::fillet_solver::p1::test_manifold_tangent_rollover(
+        let n_faces = edge::faces(target, n, None)?;
+        if n_faces.len() != 2 || !n_faces.contains(&rolled_face) {
+            continue;
+        }
+        let Some(&x1) = n_faces.iter().find(|&&g| g != rolled_face) else {
+            continue;
+        };
+        if x1 == f_a || x1 == f_b || rolled_face == f_a || rolled_face == f_b {
+            continue;
+        }
+        let t0_faces = edge::faces(target, t0, None)?;
+        let t1_faces = edge::faces(target, t1, None)?;
+        let matches_sides = [(f_a, f_b), (f_b, f_a)].iter().any(|&(f0, f1)| {
+            t0_faces.len() == 2
+                && t1_faces.len() == 2
+                && t0_faces.contains(&f0)
+                && t0_faces.contains(&rolled_face)
+                && t1_faces.contains(&f1)
+                && t1_faces.contains(&x1)
+        });
+        if !matches_sides {
+            continue;
+        }
+        let (tan0, _) = crate::blend::fillet_solver::p1::test_manifold_tangent_rollover(
             k,
             target,
-            t,
+            t0,
             tangency_tol_rad,
         )?;
-        if !tangent {
+        if !tan0 {
+            continue;
+        }
+        let (tan1, _) = crate::blend::fillet_solver::p1::test_manifold_tangent_rollover(
+            k,
+            target,
+            t1,
+            tangency_tol_rad,
+        )?;
+        if !tan1 {
             continue;
         }
         for y in edge::edgeuses(target, n, None, None)? {
-            if eu1::face(target, y)? == Some(p) {
+            if eu1::face(target, y)? == Some(x1) {
                 return Ok(Some(y));
             }
         }

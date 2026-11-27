@@ -216,7 +216,7 @@ impl FilletSession<'_> {
                 None
             };
             let rollovers = match closed {
-                Some(rollovers) if rollovers.iter().any(Option::is_some) => {
+                Some(rollovers) => {
                     // the section is every section only on a face beyond that is prismatic
                     // along the edge too; elsewhere the rolled rails are proved after the trace
                     // (a lone round's as on main)
@@ -229,7 +229,7 @@ impl FilletSession<'_> {
                     // with its rolled rail by the bands' check (#19242)
                     rollovers
                 }
-                Some(_) | None => {
+                None => {
                     let Some(solver) = self
                         .objects
                         .solvers
@@ -1281,6 +1281,7 @@ fn rail_within_face(
         return Ok(false);
     };
     let surface = surface.clone_for_evaluation()?;
+    let face_domain = crate::topology::face::p2::uv_domain(target, face)?;
     let domain = surface.natural_uv_domain_with_nurb(k)?;
     let middle = curve.evaluate_point(k, ivl.evaluate(0.5))?;
     if !point_on_face(
@@ -1288,6 +1289,7 @@ fn rail_within_face(
         target,
         face,
         &surface,
+        &face_domain,
         &domain,
         middle,
         surface_tol,
@@ -1296,7 +1298,7 @@ fn rail_within_face(
     )? {
         return Ok(false);
     }
-    let Some(pieces) = rail_pieces(&curve, ivl.min(), ivl.max())? else {
+    let Some(pieces) = rail_pieces_with_kernel(Some(k), &curve, ivl.min(), ivl.max())? else {
         return Ok(false);
     };
     let mut others: Vec<FaceId> = Vec::new();
@@ -1333,6 +1335,7 @@ fn rail_within_face(
         face,
         orig_face,
         surface: &surface,
+        face_domain: &face_domain,
         domain: &domain,
         curve: &curve,
         lo: ivl.min(),
@@ -1358,6 +1361,7 @@ struct RailEndCheck<'a> {
     face: FaceId,
     orig_face: Option<FaceId>,
     surface: &'a crate::surface::surface::Surface,
+    face_domain: &'a crate::geom::extent2d::Extent2d,
     domain: &'a crate::geom::extent2d::Extent2d,
     curve: &'a Curve,
     lo: f64,
@@ -1368,7 +1372,8 @@ struct RailEndCheck<'a> {
 }
 
 /// Whether `point` drops onto `surface` within `surface_tol` and classifies on `face` (strictly
-/// interior when `interior_only`, else interior or boundary).
+/// interior when `interior_only`, else interior or boundary). Tries `face_domain` first so points
+/// on a periodic seam land in the face's own period, falling back to `natural_domain`.
 ///
 /// # Errors
 /// Those of the drop, evaluation and classification.
@@ -1378,32 +1383,39 @@ fn point_on_face(
     target: &mut Brep,
     face: FaceId,
     surface: &crate::surface::surface::Surface,
-    domain: &crate::geom::extent2d::Extent2d,
+    face_domain: &crate::geom::extent2d::Extent2d,
+    natural_domain: &crate::geom::extent2d::Extent2d,
     point: Point3,
     surface_tol: f64,
     tolerance: f64,
     interior_only: bool,
 ) -> Result<bool> {
-    let dropped = surface.drop_point::<crate::surface::surface::p4::NoObject>(
-        k,
-        point,
-        domain,
-        &crate::surface::surface::p5::DropPointOptions::default(),
-    )?;
-    if !dropped.success {
-        return Ok(false);
+    for search in [face_domain, natural_domain] {
+        let dropped = surface.drop_point::<crate::surface::surface::p4::NoObject>(
+            k,
+            point,
+            search,
+            &crate::surface::surface::p5::DropPointOptions::default(),
+        )?;
+        if !dropped.success {
+            continue;
+        }
+        let foot = surface.evaluate_point(k, dropped.result_uv)?;
+        let off_surface = (foot - point).length();
+        if off_surface.is_nan() || off_surface > surface_tol {
+            continue;
+        }
+        let class = classify(k, target, face, dropped.result_uv, tolerance)?;
+        let on = if interior_only {
+            class == PointClassType::Face
+        } else {
+            !off(class)
+        };
+        if on {
+            return Ok(true);
+        }
     }
-    let foot = surface.evaluate_point(k, dropped.result_uv)?;
-    let off_surface = (foot - point).length();
-    if off_surface.is_nan() || off_surface > surface_tol {
-        return Ok(false);
-    }
-    let class = classify(k, target, face, dropped.result_uv, tolerance)?;
-    Ok(if interior_only {
-        class == PointClassType::Face
-    } else {
-        !off(class)
-    })
+    Ok(false)
 }
 
 /// Whether the fillet vertex `vertex` in `pseudo` classifies on a target entity incident to
@@ -1449,7 +1461,7 @@ fn end_inset_clear_of(
     const FRACTIONS: [f64; 7] = [1e-5, 1e-4, 1e-3, 5e-3, 1e-2, 2.5e-2, 5e-2];
     const STUB_STEPS: [f64; 4] = [0.25, 0.5, 0.75, 1.0];
     let span = ctx.hi - ctx.lo;
-    if !(span > 0.0) {
+    if !span.is_finite() || span <= 0.0 {
         return Ok(None);
     }
     let clear_want = 1.5 * ctx.gap;
@@ -1465,7 +1477,7 @@ fn end_inset_clear_of(
         let lower = crate::query::distance_bound::face_distance_lower_bound(
             k, target, other, q, bound_want,
         )?;
-        if !(lower > clear_want) {
+        if lower.is_nan() || lower <= clear_want {
             continue;
         }
         for step in STUB_STEPS {
@@ -1480,6 +1492,7 @@ fn end_inset_clear_of(
                 target,
                 ctx.face,
                 ctx.surface,
+                ctx.face_domain,
                 ctx.domain,
                 pt,
                 ctx.surface_tol,
@@ -1518,6 +1531,7 @@ fn rail_clear_with_end_touches(
             target,
             ctx.face,
             ctx.surface,
+            ctx.face_domain,
             ctx.domain,
             pt,
             ctx.surface_tol,
@@ -1578,10 +1592,10 @@ fn rail_clear_with_end_touches(
     } else {
         ctx.hi
     };
-    if !(lo_in < hi_in) {
+    if lo_in.is_nan() || hi_in.is_nan() || lo_in >= hi_in {
         return Ok(false);
     }
-    let Some(interior) = rail_pieces(ctx.curve, lo_in, hi_in)? else {
+    let Some(interior) = rail_pieces_with_kernel(Some(k), ctx.curve, lo_in, hi_in)? else {
         return Ok(false);
     };
     rail_clear_of(k, target, other, &interior, ctx.gap)
@@ -1599,19 +1613,69 @@ struct RailPiece {
     depth: u32,
 }
 
-/// The Bézier pieces of `curve` between its parameters `lo` and `hi`, from its NURB (a
-/// B-spline curve's parameter is its NURB's): the segment extracted and decomposed by knot
-/// insertion. Each coefficient goes through at most `p` insertions at each end of its piece,
-/// each `alpha P + (1 - alpha) Q` within `8 u M` of exact for `|P|, |Q| <= M` (as
-/// [`crate::query::distance_bound`] counts them), so every coordinate is within `gamma_16(p +
-/// 1)` of the NURB's largest. `None` for a curve of another kind, without its NURB, in 2D, or
-/// over an interval outside its knots.
+/// The Bézier pieces of `curve` between its parameters `lo` and `hi` without creating a NURB.
+#[cfg(test)]
+fn rail_pieces(curve: &Curve, lo: f64, hi: f64) -> Result<Option<Vec<RailPiece>>> {
+    rail_pieces_with_kernel(None, curve, lo, hi)
+}
+
+/// The Bézier pieces of `curve` between its parameters `lo` and `hi`: a degree-1 segment for a
+/// line, or the NURB's segment extracted and decomposed by knot insertion for a B-spline or
+/// conic (whose parameter is its NURB's). Each NURB coefficient goes through at most `p`
+/// insertions at each end of its piece, each `alpha P + (1 - alpha) Q` within `8 u M` of exact
+/// for `|P|, |Q| <= M` (as [`crate::query::distance_bound`] counts them), so every coordinate is
+/// within `gamma_16(p + 1)` of the NURB's largest. `None` for a curve of another kind, without
+/// its NURB, in 2D, or over an interval outside its knots.
 ///
 /// # Errors
-/// Those of the extraction and the decomposition.
-fn rail_pieces(curve: &Curve, lo: f64, hi: f64) -> Result<Option<Vec<RailPiece>>> {
-    let crate::curve::curve::CurveKind::BSpline(base) = curve.kind() else {
+/// Those of making the NURB, the extraction and the decomposition.
+fn rail_pieces_with_kernel(
+    k: Option<&Kernel>,
+    curve: &Curve,
+    lo: f64,
+    hi: f64,
+) -> Result<Option<Vec<RailPiece>>> {
+    use crate::curve::curve::CurveKind;
+    use std::borrow::Cow;
+    if !lo.is_finite() || !hi.is_finite() || lo >= hi {
         return Ok(None);
+    }
+    if let CurveKind::Line(line) = curve.kind() {
+        let p0 = line.evaluate_point(lo);
+        let p1 = line.evaluate_point(hi);
+        let anchor = line.line_point().length();
+        let scale = anchor + p0.length().max(p1.length());
+        let h0 = [p0.x, p0.y, p0.z, 1.0];
+        let h1 = [p1.x, p1.y, p1.z, 1.0];
+        if !scale.is_finite()
+            || !h0.iter().all(|v| v.is_finite())
+            || !h1.iter().all(|v| v.is_finite())
+        {
+            return Ok(None);
+        }
+        let err = 4.0 * crate::nurbs::math::gamma(16) * scale;
+        return Ok(Some(vec![RailPiece {
+            h: vec![h0, h1],
+            err,
+            depth: 0,
+        }]));
+    }
+    let base: Cow<'_, crate::nurbs::b_spline_curve::BSplineCurve> = match curve.kind() {
+        CurveKind::BSpline(c) => Cow::Borrowed(c),
+        CurveKind::Ellipse(c) if c.base().nurb.is_none() => {
+            let Some(k) = k else {
+                return Ok(None);
+            };
+            let mut copy = c.clone();
+            if probe(copy.make_nurb(k))?.is_none() {
+                return Ok(None);
+            }
+            Cow::Owned(copy.base().clone())
+        }
+        CurveKind::Ellipse(c) => Cow::Borrowed(c.base()),
+        CurveKind::Hyperbola(c) => Cow::Borrowed(&c.base),
+        CurveKind::Parabola(c) => Cow::Borrowed(c.base()),
+        _ => return Ok(None),
     };
     let Some(nurb) = base.nurb.as_ref() else {
         return Ok(None);
