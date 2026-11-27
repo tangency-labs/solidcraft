@@ -296,7 +296,11 @@ fn target_plane(
     warning: &mut Option<String>,
 ) -> Result<Plane> {
     let Some(anchor) = crate::face_anchor::plane_face_anchor(plane) else { return doc.resolve_plane_in(vals, plane, 0, f.component, Some(st)) };
-    let fst = crate::state_in_face_anchor_frame(doc, st, anchor, f.component)?;
+    let fst = if crate::eval::plane_outer_reads_geometry(plane) {
+        crate::state_in_face_anchor_frame(doc, st, anchor, f.component)?
+    } else {
+        crate::anchor_frame::state_for_face_anchor_only(doc, st, anchor, f.component)?
+    };
     let (pl, note) = doc.resolve_attached_plane_noted(vals, plane, f.component, st, &fst)?;
     if let Some(note) = note {
         crate::eval::append_warning(warning, note);
