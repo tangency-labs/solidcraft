@@ -4956,6 +4956,29 @@ fn a_draft_of_a_spline_side_is_refused_naming_what_the_face_is() {
     assert_eq!(body_volume(&s, "Base"), volume);
 }
 
+/// #22807: drafting an Ø20 x 100 mm cylinder by 6° about XY closes the cone to a point at
+/// z = 10 / tan(6°) ≈ 95.14 mm < 100 mm. The refusal explains that the cone would close within
+/// the face instead of saying "not supported yet: SMLib draft for this geometry", and leaves the
+/// body unchanged.
+#[test]
+fn a_cylinder_drafted_until_it_closes_is_refused_with_the_reason() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 100, "body_name": "Pin"}));
+    let shape = |s: &Session| {
+        let state = s.model.state();
+        let b = &state.body("Pin").unwrap().body;
+        [b.shell_count(), b.face_count(), b.edge_count(), b.vertex_count()]
+    };
+    let (before, volume) = (shape(&s), body_volume(&s, "Pin"));
+    let draft = json!({"faces": [[10, 0, 50]], "angle": "6 deg", "neutral": "XY", "body": "Pin"});
+    let e = s.execute("solid.draft", &draft).unwrap_err().to_string();
+    assert!(e.contains("a drafted cone would close within the face"), "{e}");
+    assert!(!e.contains("not supported yet"), "{e}");
+    assert!(!e.contains("for this geometry"), "{e}");
+    assert_eq!(shape(&s), before);
+    assert_eq!(body_volume(&s, "Pin"), volume);
+}
+
 #[test]
 fn draft_invalid_neutral_errors_name_neutral() {
     let mut s = Session::default();

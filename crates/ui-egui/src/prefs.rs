@@ -1943,7 +1943,8 @@ pub(crate) fn held_panel_layout(app: &SolveApp) -> Option<Option<serde_json::Val
 /// ones, with Import…, Export… (the theme on now as a complete file, to start a new one from)
 /// and Remove (an imported theme). Like the other preferences, a choice applies at once.
 fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
-    theme_picker::row(app, ui);
+    let locked = app.policy.locks("theme");
+    crate::policy::row(ui, locked, |ui| theme_picker::row(app, ui));
 }
 
 fn theme_action(app: &mut SolveApp, ui: &mut egui::Ui, action: Option<&str>, action_theme: Option<String>) {
@@ -3370,6 +3371,17 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         Some(serde_json::Value::Bool(true)) => true,
         Some(_) => return Err("`forget_stand_up` must be true".into()),
     };
+    // Importing or following a theme turns it on, which the organization's policy has set.
+    // The saved path written back unchanged is not a change: it starts nothing and is kept.
+    let theme_locked = app.policy.locks("theme");
+    let saved_follow = rest.get("theme_follow").and_then(serde_json::Value::as_str) == Some(app.preferences.theme_follow.as_str());
+    let follows = rest.get("theme_follow").and_then(serde_json::Value::as_str).is_some_and(|path| !path.trim().is_empty()) && !saved_follow;
+    if theme_locked && (rest.contains_key("theme_import") || follows) {
+        return Err("`theme` is set by your organization's policy and cannot be changed here".into());
+    }
+    if theme_locked && saved_follow && !app.policy.locks("theme_follow") {
+        rest.remove("theme_follow");
+    }
     let mut staged = app.preferences.clone();
     let mut follow = app.prefs_window.follow.clone();
     let imported = rest
@@ -3417,7 +3429,8 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
             follow.launch = None;
             let _ = follow.poll(&staged.theme_follow, f64::NEG_INFINITY, true);
         }
-        None if rest.contains_key("theme") && !follow_locked => {
+        // Picking a theme stops following one; the organization's theme, which no pick changes, does not.
+        None if rest.contains_key("theme") && !follow_locked && !theme_locked => {
             staged.theme_follow.clear();
             follow.launch = None;
             let _ = follow.poll("", f64::NEG_INFINITY, true);
@@ -3715,6 +3728,10 @@ pub fn import_theme_bytes(app: &mut SolveApp, bytes: Vec<u8>) {
 }
 
 pub fn import_theme(app: &mut SolveApp, v: &serde_json::Value) -> Result<String, String> {
+    // Importing turns the theme on, which the organization's policy has set.
+    if app.policy.locks("theme") {
+        return Err(solidcraft_ui_text::tr("policy.set_by_organization").to_string());
+    }
     let theme = match v {
         serde_json::Value::String(text) => crate::theme_files::parse(text)?,
         other => crate::theme_files::from_value(other)?,
@@ -3750,7 +3767,9 @@ fn current_theme_file(app: &SolveApp) -> serde_json::Value {
 }
 
 fn active_theme_file(app: &SolveApp) -> Option<&crate::theme_files::ThemeFile> {
-    followed_theme(&app.preferences, &app.prefs_window.follow).or_else(|| {
+    // A theme the organization's policy sets wins over a followed file.
+    let followed = (!app.policy.locks("theme")).then(|| followed_theme(&app.preferences, &app.prefs_window.follow)).flatten();
+    followed.or_else(|| {
         crate::theme_files::find(
             theme_picker::active_id(&app.preferences, app.prefs_window.system_theme_dark.unwrap_or(app.ui.dark)),
             &app.preferences.custom_themes,

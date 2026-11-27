@@ -1206,7 +1206,8 @@ fn touched<'a>(ctx: &Ctx<'a>, g: &GeoRef) -> Result<Touched<'a>> {
             let (b, fi, _) = face_of(ctx.st, *at, name)?;
             Ok(kernel::face_surface(&b.body, fi).map_or(Touched::Face(b, fi), Touched::Surface))
         }
-        GeoRef::Plane { .. } => {
+        // A construction or origin plane, or a component's origin plane (#23006).
+        GeoRef::Plane { .. } | GeoRef::Datum { .. } => {
             let pl = plane(ctx, g)?;
             Ok(Touched::Surface(FaceSurface::Plane { normal: pl.normal().unit().ok_or_else(|| bad("degenerate plane"))?, point: pl.origin }))
         }

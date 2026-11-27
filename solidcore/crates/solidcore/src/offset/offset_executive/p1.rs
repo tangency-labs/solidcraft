@@ -9,6 +9,7 @@
 //! | [`OffsetExecutive`] accessors | `GetInset`, `GetTangencyTolDegrees`, `GetExtendConvexEdges`, `GetOffsetBrep`, `GetShellFaces`, setters |
 //! | `notify_edge_and_vertices` (private) | `sm_NotifyEdgeAndVertices` |
 //! | [`OffsetExecutive::replace_implicit_offsets`] | `ReplaceImplicitOffsets` |
+//! | `seams_onto_iso_curves`, `seam_iso_curve` (private) | none (a replaced face's seams onto its net's seam) |
 //! | [`certified_offset_surface`] | none (the net `ReplaceImplicitOffsets` puts in an offset face's place, certified; WR-718) |
 //! | [`OffsetExecutive::remove_excess_faces`] | `RemoveExcessFaces` |
 //! | `forget_seconds`, `forget_firsts`, `removed_faces_edgeuses` (private) | `sm_ForgetSeconds`, `sm_ForgetFirsts`, `RemoveExcessFaces`' `sGone` |
@@ -90,7 +91,10 @@
 //! the offset B-rep alone (both upstream operands are that B-rep); it notifies under
 //! `DELETE_FACES_NAMESPACE` rather than the caller's offset keys.
 //! `ReplaceImplicitOffsets` replaces each implicit offset by its certified net
-//! (`certified_offset`, WR-718), not by NLib's `N_SrfOffset` fit checked at samples.
+//! (`certified_offset`, WR-718), not by NLib's `N_SrfOffset` fit checked at samples, and
+//! then gives each seam edge of a replaced face the net's iso curve along the seam, where
+//! upstream keeps the curve lifted from the exact offset (within the edge's tolerance of the
+//! net, but beside its seam).
 //!
 //! Cancellation: `replace_implicit_offsets` polls the kernel's cancel token (#2136, #2372) per face and inside each surface offset.
 
@@ -1024,7 +1028,9 @@ impl OffsetExecutive {
     /// changed; each face is then notified (`PRE_EDIT`), given the new surface's
     /// natural domain and the surface (`SmBrep::ReplaceSurface`, old surface to the
     /// deleted list, UV trim curves rebuilt) and notified again (`POST_EDIT`), in
-    /// face order. `notifications` must be keyed by `brep`'s identities.
+    /// face order. Not upstream: then each of those faces' seam edges gets the net's iso
+    /// curve along the seam as its curve ([`seams_onto_iso_curves`]). `notifications` must
+    /// be keyed by `brep`'s identities.
     ///
     /// # Errors
     ///
@@ -1059,6 +1065,7 @@ impl OffsetExecutive {
 
         // for every face that had an approximate surface built for an exact offset
         // surface
+        let mut replaced = Vec::new();
         let mut state = NotifyState::from_kernel_stores(notifications);
         for (f, new_surface) in fix {
             state.with_kernel_env(kernel, |kernel, env| {
@@ -1094,6 +1101,13 @@ impl OffsetExecutive {
                     [Some(face_ref), None, None],
                 ))
             })?;
+            replaced.push(f);
+        }
+
+        // not upstream: each replaced face's seams onto its net's seam
+        for f in replaced {
+            kernel.check_cancelled(OP)?;
+            seams_onto_iso_curves(kernel, brep, f, notifications)?;
         }
         Ok(())
     }
@@ -3912,6 +3926,99 @@ fn clear_offset_roles(b: &mut Brep) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Not upstream: each seam edge of face `f` (the face on both of its sides) whose UV trim
+/// curve on `f` is an iso line gets the iso curve of `f`'s surface along that line as its
+/// curve, exactly, where that curve runs between the edge's own vertices within the edge's
+/// tolerance ([`seam_iso_curve`]); then the face's missing UV trim curves are made again.
+/// Other edges are left as they are.
+///
+/// [`OffsetExecutive::replace_implicit_offsets`] runs it on each face it gives a net: the
+/// seam was lifted from the exact offset the net replaced, so it lies within its tolerance of
+/// the net but not on the net's seam (up to 8.5e-7 off on a thickened closed loft's offset),
+/// and an edge cut across it later ends at a vertex that far beside the seam, which the
+/// face's seam test refuses (`SmFace` test #36, "Face Near missing Seam").
+///
+/// # Errors
+///
+/// Those of the topology queries, the iso curve's extraction and evaluation,
+/// [`crate::topology::brep::p2::replace_curve`] and the UV trim curves' creation.
+fn seams_onto_iso_curves(
+    kernel: &mut Kernel,
+    brep: &mut Brep,
+    f: FaceId,
+    notifications: &mut NotificationStores<'_>,
+) -> Result<()> {
+    let mut seams: Vec<EdgeId> = Vec::new();
+    for e in face_edges(brep, f)? {
+        if !seams.contains(&e) && edge::face_on_both_sides(brep, e, f)? {
+            seams.push(e);
+        }
+    }
+    let mut replaced = false;
+    for e in seams {
+        let Some(iso) = seam_iso_curve(kernel, brep, f, e)? else {
+            continue;
+        };
+        crate::topology::brep::p2::replace_curve(kernel, brep, e, iso, notifications)?;
+        replaced = true;
+    }
+    if replaced {
+        // the seam's edge uses lost their UV trim curves with their old curve
+        NotifyState::from_kernel_stores(notifications).with_kernel_env(kernel, |kernel, env| {
+            face3::create_uv_trim_curves_notified(kernel, brep, f, true, None, Some(env))
+                .map(|_| ())
+        })?;
+    }
+    Ok(())
+}
+
+/// The iso curve of face `f`'s surface along the UV trim curve of seam edge `e`'s first edge
+/// use on `f`, over that trim curve's interval (`Surface::lift_curve`'s iso extraction,
+/// exact on a B-spline surface), where the trim curve is an iso line and the iso curve's ends
+/// lie within the edge's tolerance of the edge's start and end vertices; else `None`.
+///
+/// # Errors
+///
+/// Those of the topology queries and of the iso curve's extraction and evaluation.
+fn seam_iso_curve(kernel: &Kernel, brep: &Brep, f: FaceId, e: EdgeId) -> Result<Option<Curve>> {
+    let Some(surface) = face::surface(brep, f)? else {
+        return Ok(None);
+    };
+    let mut uv_curve = None;
+    for u in edge::edgeuses(brep, e, None, None)? {
+        if eu::face(brep, u)? == Some(f) {
+            if let Some(c) = brep.edgeuse(u)?.uv_trim_curve.as_ref() {
+                uv_curve = Some(c);
+                break;
+            }
+        }
+    }
+    let Some(uv_curve) = uv_curve else {
+        return Ok(None);
+    };
+    let (Some(start), Some(end)) = (edge::start_vertex(brep, e)?, edge::end_vertex(brep, e)?)
+    else {
+        return Ok(None);
+    };
+    let tolerance = edge::tolerance(brep, e)?;
+    let domain = surface.natural_uv_domain_with_nurb(kernel)?;
+    let interval = uv_curve.natural_interval();
+    let Some((iso, _)) = crate::surface::surface::p11::extract_iso_curve(
+        kernel, surface, &domain, uv_curve, &interval, tolerance,
+    )?
+    else {
+        return Ok(None);
+    };
+    let ends = iso.natural_interval();
+    let on_vertices = iso
+        .evaluate_point(kernel, ends.min())?
+        .closer_than(tolerance, vertex::point(brep, start)?)
+        && iso
+            .evaluate_point(kernel, ends.max())?
+            .closer_than(tolerance, vertex::point(brep, end)?);
+    Ok(on_vertices.then_some(iso))
 }
 
 #[cfg(test)]

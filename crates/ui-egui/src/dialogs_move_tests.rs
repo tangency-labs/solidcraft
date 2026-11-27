@@ -3119,3 +3119,47 @@ mod keep_axes {
         assert_eq!(p["leave"], json!([rim]), "{p}");
     }
 }
+
+/// #22900: Point to Point with several To points makes a copy at each, moved from From to it,
+/// and the original stays where it was. Create Copy ticks itself.
+#[test]
+fn point_to_point_copies_to_each_to_point() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    h.app.start("solid.move");
+    {
+        let d = h.app.dialog.as_mut().unwrap();
+        d.kind = kind(POINT_TO_POINT, &h.app.session.doc);
+        d.inputs = inputs(POINT_TO_POINT);
+        d.inputs[0].items = vec![Sel::Body { name: "Body1".into() }];
+        let at = |x: f64, y: f64| Sel::Vertex { body: String::new(), point: Vec3::new(x, y, 0.0) };
+        d.inputs[1].items = vec![at(0.0, 0.0)];
+        // Two places on one face, as two clicks on the ground plate pick them.
+        let on_face = |x: f64, y: f64| Sel::Face { body: "Body1".into(), index: 0, point: Vec3::new(x, y, 0.0) };
+        d.inputs[2].toggle(vec![on_face(30.0, 0.0)]);
+        d.inputs[2].toggle(vec![on_face(0.0, 40.0)]);
+        assert_eq!(d.inputs[2].items.len(), 2, "a second click on the same face adds a To point");
+    }
+    let d = h.app.dialog.clone().unwrap();
+    assert!(several_destinations(&d));
+    let cmds = commands(&h.app, &d).unwrap();
+    let moves: Vec<_> = cmds.iter().filter(|(id, _)| id == "solid.move").map(|(_, p)| (p["translate"].clone(), p["copy"].clone())).collect();
+    assert_eq!(
+        moves,
+        vec![(json!([mm(30.0), mm(0.0), mm(0.0)]), json!(true)), (json!([mm(0.0), mm(40.0), mm(0.0)]), json!(true))],
+        "one copy per To point"
+    );
+    crate::dialogs::confirm(&mut h.app);
+    h.settle();
+    assert!(h.app.dialog.is_none(), "OK ran");
+    let st = h.app.session.model.state();
+    let mut mins: Vec<(i64, i64)> = st.bodies.iter().map(|b| b.mesh().bounds().min).map(|m| (m.x.round() as i64, m.y.round() as i64)).collect();
+    mins.sort();
+    assert_eq!(mins, vec![(0, 0), (0, 40), (30, 0)], "the original stays and a copy stands at each To point");
+
+    // One To point is still a plain move unless Create Copy is ticked.
+    let mut one = d.clone();
+    one.inputs[2].items.truncate(1);
+    one.extra.remove("copy");
+    assert!(!several_destinations(&one));
+}

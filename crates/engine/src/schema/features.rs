@@ -2038,7 +2038,8 @@ pub struct ThreadParams {
     #[serde(default, deserialize_with = "thread_form")]
     #[schemars(schema_with = "thread_form_schema")]
     pub form: Option<String>,
-    /// The size, as its standard writes it: metric "M8", "M8x1", "M16xPh3P1.5"; unified
+    /// The size, as its standard writes it: metric "M8", "M8x1", "M16xPh3P1.5", with an optional
+    /// ISO 965-1 tolerance class kept in the callout ("M8-6g" on a shaft, "M8-6H" in a hole); unified
     /// "1/4-20 UNC-2A", "#10-32 UNF"; trapezoidal "Tr20x4", "Tr40x14(P7)"; buttress "S20x4"; acme
     /// "1/2-10 ACME"; buttress_asme "2.5-8 BUTT"; bspp "G 1/2"; rp "Rp 1/2"; bspt "R 1/2"
     /// (external) or "Rc 1/2" (internal); npt "1/2-14 NPT". Blank text is the same as left out.
