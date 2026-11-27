@@ -897,3 +897,13 @@ fn offset_face_moves_the_top_of_a_hollowed_periodic_spline_extrusion() {
         );
     }
 }
+
+#[test]
+fn extruding_a_curved_face_points_to_offset_face() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20}));
+    let features = s.doc.features.len();
+    let error = s.execute("solid.extrude", &json!({"face": [10, 0, 10], "distance": 2})).unwrap_err();
+    assert!(error.to_string().contains("use Offset Face"), "{error}");
+    assert_eq!(s.doc.features.len(), features);
+}

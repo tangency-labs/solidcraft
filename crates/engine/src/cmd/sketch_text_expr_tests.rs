@@ -502,6 +502,88 @@ fn a_texts_words_follow_its_text_parameters_and_so_does_its_cut() {
     }
 }
 
+/// #727: a cut that picked every region of a text by index (`profiles: [0, 1]`) follows
+/// the text's new words when its text parameter changes, as the whole-sketch cut does: the
+/// same number of glyphs (`22` to `25`), a glyph with a counter (`30`) and more glyphs (`177`).
+#[test]
+fn a_cut_of_a_texts_regions_picked_by_index_follows_its_new_words() {
+    let whole = |words: &str| {
+        let mut s = Session::default();
+        block_with_text(&mut s, json!({"text": words}));
+        no_trouble(&s);
+        volume(&mut s)
+    };
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Label", "expression": "22", "unit": "text"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": -10}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let link = run(&mut s, "sketch.text", json!({"text_expression": "Label", "at": [5, 10], "height": 8}))["link"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S", "profiles": [0, 1], "distance": -1, "operation": "cut"}));
+    no_trouble(&s);
+    let first = volume(&mut s);
+    assert!((first - whole("22")).abs() < 1e-6, "22: {first} against {} by the whole sketch", whole("22"));
+
+    for w in ["25", "30", "177"] {
+        run(&mut s, "parameters.change", json!({"name": "Label", "expression": w}));
+        assert_eq!(words(&s, &link), w);
+        no_trouble(&s);
+        let (got, want) = (volume(&mut s), whole(w));
+        assert!((got - want).abs() < 1e-6, "{w}: {got} against {want} by the whole sketch");
+    }
+
+    // Saved as the text, not its curves: it reopens and still follows the words.
+    let saved = |s: &Session| serde_json::to_value(&s.doc.find_feature("Extrude2").unwrap().kind).unwrap().to_string();
+    assert!(saved(&s).contains(r#""text_regions""#), "{}", saved(&s));
+    let mut again = reopened(&s);
+    run(&mut again, "parameters.change", json!({"name": "Label", "expression": "22"}));
+    no_trouble(&again);
+    assert!((volume(&mut again) - first).abs() < 1e-6, "22 after a save");
+
+    // One letter of two stays one letter: a part of a text never grows into the whole text.
+    let mut one = Session::default();
+    run(&mut one, "parameters.add", json!({"name": "Label", "expression": "22", "unit": "text"}));
+    run(&mut one, "sketch.create", json!({"plane": "XY"}));
+    run(&mut one, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 30]}));
+    run(&mut one, "sketch.finish", json!({}));
+    run(&mut one, "solid.extrude", json!({"distance": -10}));
+    run(&mut one, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut one, "sketch.text", json!({"text_expression": "Label", "at": [5, 10], "height": 8}));
+    run(&mut one, "sketch.finish", json!({}));
+    run(&mut one, "solid.extrude", json!({"sketch": "S", "profiles": [0], "distance": -1, "operation": "cut"}));
+    no_trouble(&one);
+    assert!(!saved(&one).contains(r#""text_regions""#), "{}", saved(&one));
+    let half = 30000.0 - volume(&mut one);
+    assert!(half > 0.0 && (half - (30000.0 - first) / 2.0).abs() < 1e-6, "one 2 of 22 cuts half of what both do: {half}");
+}
+
+/// #727: a cut of two whole texts picked by index is saved as both texts. When new words run
+/// one text into the other, the letters they cut apart are an error, not a pick of their pieces.
+#[test]
+fn a_cut_of_two_texts_that_new_words_run_together_is_an_error() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Label", "expression": "1", "unit": "text"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": -10}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let first = run(&mut s, "sketch.text", json!({"text_expression": "Label", "at": [5, 10], "height": 8}))["link"].as_str().unwrap().to_string();
+    let second = run(&mut s, "sketch.text", json!({"text": "7", "at": [40, 10], "height": 8}))["link"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S", "profiles": [0, 1], "distance": -1, "operation": "cut"}));
+    no_trouble(&s);
+    let saved = serde_json::to_value(&s.doc.find_feature("Extrude2").unwrap().kind).unwrap().to_string();
+    assert!(saved.contains(r#""text_regions""#) && saved.contains(&first) && saved.contains(&second), "{saved}");
+
+    run(&mut s, "parameters.change", json!({"name": "Label", "expression": "1111111111111"}));
+    let cut = s.model.results.iter().find(|r| r.name == "Extrude2").unwrap();
+    assert!(cut.error.as_deref().is_some_and(|e| e.contains("cut into")), "{:?}", cut.error);
+}
+
 /// #9281: a number parameter in a text's words shows its value in the design's units
 /// (`number()` without the unit, with chosen decimals); a parameter edit rewrites the words
 /// and the cut follows in the same rebuild, also after a save; a rename reaches the words and

@@ -1,6 +1,6 @@
 //! The router's cell grids ([`solidcraft_kernel_api::CellGrid`]).
 
-use solidcore_record::cell_grid::{CellGridPlan, CellGridSpec, GridCell};
+use solidcore_record::cell_grid::{CellGridPlan, CellGridSpec, GridCell, SketchCell};
 use solidcore_record::{Loop2, Region2};
 use solidcraft_kernel_api::{CellGrid, CellGridLimits, OpKind};
 
@@ -24,6 +24,14 @@ pub fn default_cell_grid() -> CellGridSpec {
 pub fn plan_cell_grid(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan> {
     match which(OpKind::CellGrid) {
         Which::Solidcore => Solidcore.plan_cell_grid(field, spec),
+    }
+}
+
+/// The cells of a grid of the sketched cell `cell` over `field`, nested as for [`plan_cell_grid`].
+/// A refusal is [`crate::KernelError::Invalid`] with the kernel's words.
+pub fn plan_sketch_cell_grid(field: &[Loop2], cell: &SketchCell, spec: &CellGridSpec) -> Result<CellGridPlan> {
+    match which(OpKind::CellGrid) {
+        Which::Solidcore => Solidcore.plan_sketch_cell_grid(field, cell, spec),
     }
 }
 
@@ -60,5 +68,22 @@ mod tests {
         let bad = CellGridSpec { size: f64::NAN, ..spec };
         let words = ops::plan_cell_grid(&field, &bad).unwrap_err().to_string();
         assert_eq!(plan_cell_grid(&field, &bad).unwrap_err(), crate::KernelError::Invalid(words));
+    }
+
+    #[test]
+    fn the_routed_sketched_grid_is_solidcores() {
+        use solidcore_ops::cell_grid as ops;
+        use solidcore_record::cell_grid::{Clip, SketchCell};
+        // a sketched cell has no chords of its own to snap along, so it takes whole cells
+        let spec = CellGridSpec { clip: Clip::Whole, ..default_cell_grid() };
+        let field = [square(60.0)];
+        let cell = SketchCell { profile: square(8.0), origin: None, pitch_x: 12.0, pitch_y: 12.0, stagger: 0.5, cell_angle: 0.0, flip: false };
+        let plan = plan_sketch_cell_grid(&field, &cell, &spec).unwrap();
+        assert!(!plan.cells.is_empty());
+        assert_eq!(plan, ops::plan_sketch_cell_grid(&field, &cell, &spec).unwrap());
+        // a refusal carries solidcore's words whole
+        let bad = SketchCell { pitch_x: f64::NAN, ..cell };
+        let words = ops::plan_sketch_cell_grid(&field, &bad, &spec).unwrap_err().to_string();
+        assert_eq!(plan_sketch_cell_grid(&field, &bad, &spec).unwrap_err(), crate::KernelError::Invalid(words));
     }
 }
