@@ -163,6 +163,36 @@ fn the_body_a_sketch_is_drawn_on_stays_lit_while_the_sketch_is_edited() {
     assert!(!super::outside_work(&app, super::WorkItem::Sketch(sketch)), "A's own sketch never fades while A is active");
 }
 
+/// With two placements of B, drawing on the second one's box keeps that box lit and leaves the
+/// first placement's box faded: the host is the placement the sketch sits on, not every body
+/// with its definition name (#12896 review).
+#[test]
+fn only_the_placement_a_sketch_is_drawn_on_stays_lit() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    let b = app.run("component.create", json!({"name": "B"})).unwrap()["component"].as_u64().unwrap();
+    app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Base"})).unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+    app.run("occurrence.copy", json!({"component": b, "translate": [40, 0, 0]})).unwrap();
+    app.run("component.create", json!({"name": "A"})).unwrap();
+    // B's two boxes, the first at x 0..20 and the copy at x 40..60, each faded or not.
+    let boxes = |app: &SolveApp| {
+        let world = app.session.world_state().unwrap();
+        let active = super::active_body_names(app);
+        let mut found: Vec<(f64, bool)> = world
+            .bodies
+            .iter()
+            .filter(|body| body.definition_name() == "Base")
+            .map(|body| (body.mesh_bounds().min.x, super::body_faded(app, body, &active)))
+            .collect();
+        found.sort_by(|l, r| l.0.total_cmp(&r.0));
+        found.into_iter().map(|(_, faded)| faded).collect::<Vec<_>>()
+    };
+    assert_eq!(boxes(&app), [true, true], "both of B's boxes lie outside the active component A");
+
+    app.run("sketch.create", json!({"plane": {"face": [50, 10, 10]}, "name": "On the copy", "project_edges": false})).unwrap();
+    assert_eq!(boxes(&app), [true, false], "only the copy being drawn on is lit");
+}
+
 #[test]
 fn placed_step_body_uses_imported_opacity_until_a_design_look_overrides_it() {
     let body = kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 10.0))

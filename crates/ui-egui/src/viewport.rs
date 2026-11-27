@@ -1331,7 +1331,7 @@ pub(crate) fn outside_work(app: &SolveApp, item: WorkItem) -> bool {
                 Some(names) => !names.contains(&b.name),
                 None => outside_component(b.component),
             };
-            outside && edited_sketch_host(app).is_none_or(|host| host != b.name)
+            outside && !edited_sketch_host(app, b)
         }
         WorkItem::Sketch(sid) => {
             app.preferences.fade_other_component_sketches
@@ -1341,16 +1341,19 @@ pub(crate) fn outside_work(app: &SolveApp, item: WorkItem) -> bool {
     }
 }
 
-/// The body whose face the sketch being edited is attached to, by its name: the body you are
-/// drawing on, so [`outside_work`] keeps it lit. `None` with no sketch open, or one on a plane.
-fn edited_sketch_host(app: &SolveApp) -> Option<&str> {
-    let sid = crate::sketch_view::active_sketch(app)?;
-    match &app.session.doc.feature(sid)?.kind {
-        solidcraft_engine::doc::FeatureKind::Sketch { plane, .. } => {
-            solidcraft_engine::doc::face_anchor::plane_face_anchor(plane).map(|anchor| anchor.target.body.as_str())
-        }
-        _ => None,
-    }
+/// Is `b` the body whose face the sketch being edited is attached to: the body you are drawing
+/// on, so [`outside_work`] keeps it lit. Only the placement the sketch sits on counts, not the
+/// other placements of the same body. False with no sketch open, or one on a plane.
+fn edited_sketch_host(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> bool {
+    let Some(sid) = crate::sketch_view::active_sketch(app) else { return false };
+    let Some(solidcraft_engine::doc::FeatureKind::Sketch { plane, .. }) = app.session.doc.feature(sid).map(|f| &f.kind) else {
+        return false;
+    };
+    let Some(anchor) = solidcraft_engine::doc::face_anchor::plane_face_anchor(plane) else { return false };
+    // The definition first: naming the placement scans the design, so only a body that could be
+    // the host pays for it.
+    b.definition_name() == anchor.target.body
+        && app.session.doc.world_body_name(&app.session.model.state(), &anchor.target.body, anchor.component, &anchor.path) == b.name
 }
 
 /// How opaque the view draws what lies outside what you are working in ([`outside_work`]).
