@@ -17,7 +17,7 @@ A sheet metal part is a flat sheet plus bends: base first, then flanges. Work th
 4. Plan the flat size, bend fractions, flat area times thickness (the volume you check) and the stock.
 
 ## Build
-- **Rule:** `sheet.manage_rules {"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}`. Ask the shop for the K-factor or chart value, `unfold_method`; never invent it.
+- **Rule:** `sheet.manage_rules {"name":"AL2","thickness":"2 mm","k_factor":0.5,"bend_radius":"1 mm","active":true}`. Ask the shop for K-factor or chart value, `unfold_method`; never invent it.
 - **Base:** a closed sketch profile, then `sheet.flange {"sketch":"Base"}`.
 - **Edge:** `sheet.flange {"type":"edge","edges":[...],"height":...,"angle":...}`; `{point, angle, height, segments}` gives one edge its own values.
 - **Segments:** stretches `{from, to}` tiling the stretch the sheet still has, each a bend with its own angle, height and side; opposite sides are cut in the flat.
