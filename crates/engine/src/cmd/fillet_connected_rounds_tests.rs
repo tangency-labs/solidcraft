@@ -287,3 +287,34 @@ fn inside_round_at_a_pocket_opening_passes_the_face_geometry_check() {
     let gained = measure(&mut s) - before;
     assert!((gained - 65.0 * (4.0 - std::f64::consts::PI)).abs() < 1e-5, "{gained}");
 }
+
+/// Synthetic 3-edge notch corner case: a 16 mm thick block with a bottom notch (x = 0..16,
+/// height 6 mm, top corners R = 2.5) gets R = 1 outline fillets on both front (y = 0) and
+/// back (y = 16) faces, then R = 1 fillets on the two straight bottom notch edges along y.
+/// The tangent chain passes across the four R = 1 end arcs on the existing R = 1 cylinders
+/// and must close cleanly into corner balls rather than refusing as a collapsed offset.
+#[test]
+fn bottom_notch_edges_fillet_at_matching_radius_between_outline_fillets() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-10, 0, 0], "length": 36, "width": 16, "height": 20, "body_name": "Block"}));
+    // Sketch on y = 16 with x_dir = +X, y_dir = +Z (normal = -Y) so a +16 mm cut spans y = 0..16.
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 16, 0], "x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+    let offset = 2.5 * std::f64::consts::FRAC_1_SQRT_2;
+    run(&mut s, "sketch.line", json!({"points": [[0.0, 0.0], [0.0, 3.5]]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [0.0, 3.5], "end": [2.5, 6.0], "through": [2.5 - offset, 3.5 + offset]}));
+    run(&mut s, "sketch.line", json!({"points": [[2.5, 6.0], [13.5, 6.0]]}));
+    run(&mut s, "sketch.arc.three_point", json!({"start": [13.5, 6.0], "end": [16.0, 3.5], "through": [13.5 + offset, 3.5 + offset]}));
+    run(&mut s, "sketch.line", json!({"points": [[16.0, 3.5], [16.0, 0.0]]}));
+    run(&mut s, "sketch.line", json!({"points": [[16.0, 0.0], [0.0, 0.0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 16, "operation": "cut"}));
+
+    // Step 1: R = 1 notch outline fillets on both y = 0 and y = 16 faces.
+    run(&mut s, "solid.fillet", json!({"body": "Block", "edges": [[0.0, 0.0, 1.75], [0.0, 16.0, 1.75]], "radius": 1}));
+    let before = volume(&mut s);
+
+    // Step 2: R = 1 on the two straight bottom notch edges along y.
+    run(&mut s, "solid.fillet", json!({"body": "Block", "edges": [[0.0, 8.0, 0.0], [16.0, 8.0, 0.0]], "radius": 1}));
+    let after = volume(&mut s);
+    assert!(after < before, "expected fillet material removal: {after} < {before}");
+}

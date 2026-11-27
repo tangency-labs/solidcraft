@@ -4783,6 +4783,33 @@ impl BrepCreationAccess<FilletObject> for SessionObjects<'_> {
         )
     }
 
+    fn creation_ball_zone_closed_point(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+    ) -> Result<bool> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let joined = self.other_blends_edges(id)?;
+        let current = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        let (rolls, law) = ball_regular::rolls_a_ball(current);
+        if !rolls || law {
+            return Ok(false);
+        }
+        Ok(crate::blend::fillet_exact::ball_zone_state(
+            ball_regular::ops_of(current),
+            k,
+            self.target,
+            None,
+            &joined,
+        )? == crate::blend::fillet_exact::CollapsedBallZone::ClosedPointBall)
+    }
+
     fn creation_ball_past_an_end(
         &mut self,
         k: &mut Kernel,

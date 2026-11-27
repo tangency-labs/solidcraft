@@ -2071,6 +2071,19 @@ pub struct CollapsedOffset {
     pub partial: bool,
 }
 
+/// Classification of a constant ball's collapsed offset zone along an open edge
+/// ([`ball_zone_state`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum CollapsedBallZone {
+    /// No offset collapses in a form this check classifies (or the edge is closed).
+    Unclassified,
+    /// The collapsed offset's zone is open at an end of the edge, or partial along it.
+    Open(CollapsedOffset),
+    /// An open edge whose collapsed offset crosses the other surface quadric in one fixed
+    /// point and whose zone closes at both ends (`#2403` corner ball).
+    ClosedPointBall,
+}
+
 /// Not the fork's (#2401): for a constant ball of
 /// `radius` (`None`: the solver's own) whose offset of one of its faces collapses (the face
 /// a cylinder or sphere as wide as the ball, the ball inside it: its offset is the axis or
@@ -2127,6 +2140,25 @@ pub fn ball_zone_open_at_an_end(
     radius: Option<f64>,
     joined: &[EdgeId],
 ) -> Result<Option<CollapsedOffset>> {
+    Ok(match ball_zone_state(ops, k, b, radius, joined)? {
+        CollapsedBallZone::Open(open) => Some(open),
+        CollapsedBallZone::Unclassified | CollapsedBallZone::ClosedPointBall => None,
+    })
+}
+
+/// Classifies a collapsed-offset edge into open zone, closed point-ball (`#2403`), or
+/// unclassified. See [`ball_zone_open_at_an_end`].
+///
+/// # Errors
+///
+/// Same as [`ball_zone_open_at_an_end`].
+pub fn ball_zone_state(
+    ops: &mut dyn FilletSolverOps,
+    k: &Kernel,
+    b: &Brep,
+    radius: Option<f64>,
+    joined: &[EdgeId],
+) -> Result<CollapsedBallZone> {
     use crate::surface::surface::p4::NoObject;
     use crate::surface::surface::p5::DropPointOptions;
     use crate::topology::edge;
@@ -2143,7 +2175,7 @@ pub fn ball_zone_open_at_an_end(
         )
     })?;
     if edge::is_closed(b, e)? {
-        return Ok(None);
+        return Ok(CollapsedBallZone::Unclassified);
     }
     let curve = edge::evaluation_curve(b, e)?
         .ok_or_else(|| {
@@ -2177,7 +2209,7 @@ pub fn ball_zone_open_at_an_end(
             let dropped =
                 base.drop_point::<NoObject>(k, mid, &domain, &DropPointOptions::default())?;
             if !dropped.success {
-                return Ok(None);
+                return Ok(CollapsedBallZone::Unclassified);
             }
             let uv = dropped.result_uv;
             let face = BlendQuadric::from_surface(k, base, uv, tol)?;
@@ -2195,7 +2227,7 @@ pub fn ball_zone_open_at_an_end(
                 // as wide as the ball along part of the edge only: refused, naming the face's
                 // least radius there (hub #2243)
                 EdgeMatch::Partial(least) => {
-                    return Ok(Some(CollapsedOffset {
+                    return Ok(CollapsedBallZone::Open(CollapsedOffset {
                         radius: least,
                         partial: true,
                     }))
@@ -2206,7 +2238,7 @@ pub fn ball_zone_open_at_an_end(
                         focal_offset(k, base, uv, off, tol)?,
                         bending_toward_ball(k, base, uv, off)?,
                     ) else {
-                        return Ok(None);
+                        return Ok(CollapsedBallZone::Unclassified);
                     };
                     // the face's radius there, the one named
                     if let Some(slot) = focal.get_mut(i) {
@@ -2225,7 +2257,7 @@ pub fn ball_zone_open_at_an_end(
     }
     let collapsed = |q: &BlendQuadric| matches!(q.kind, QuadricKind::Line | QuadricKind::Point);
     let Some(c) = offsets.iter().position(collapsed) else {
-        return Ok(None);
+        return Ok(CollapsedBallZone::Unclassified);
     };
     let (Some(&axis), Some(&other), Some(face), Some(focal)) = (
         offsets.get(c),
@@ -2233,11 +2265,11 @@ pub fn ball_zone_open_at_an_end(
         faces.get(c),
         focal.get(c),
     ) else {
-        return Ok(None);
+        return Ok(CollapsedBallZone::Unclassified);
     };
     // the other face's offset must be read to judge the ends
     if other.kind == QuadricKind::None {
-        return Ok(None);
+        return Ok(CollapsedBallZone::Unclassified);
     }
     let face_radius = focal.as_ref().map_or(face.radius, |(_, rho, _)| *rho);
 
@@ -2245,10 +2277,10 @@ pub fn ball_zone_open_at_an_end(
     for t in [ivl.min(), ivl.max()] {
         let pv = curve.evaluate(k, t, 1, true, false)?;
         let (Some(&v), Some(&d)) = (pv.first(), pv.get(1)) else {
-            return Ok(None);
+            return Ok(CollapsedBallZone::Unclassified);
         };
         let Ok(along) = d.unitize() else {
-            return Ok(None);
+            return Ok(CollapsedBallZone::Unclassified);
         };
         if end_runs_on(b, e, v, tol, joined)? {
             continue;
@@ -2260,10 +2292,10 @@ pub fn ball_zone_open_at_an_end(
             let dropped =
                 base.drop_point::<NoObject>(k, v, &domain, &DropPointOptions::default())?;
             if !dropped.success {
-                return Ok(None);
+                return Ok(CollapsedBallZone::Unclassified);
             }
             let Some(at_end) = focal_offset(k, base, dropped.result_uv, *off, tol)? else {
-                return Ok(None);
+                return Ok(CollapsedBallZone::Unclassified);
             };
             at_end
         } else {
@@ -2308,13 +2340,17 @@ pub fn ball_zone_open_at_an_end(
             }
         };
         if !closes {
-            return Ok(Some(CollapsedOffset {
+            return Ok(CollapsedBallZone::Open(CollapsedOffset {
                 radius: face_radius,
                 partial: false,
             }));
         }
     }
-    Ok(None)
+    if focal.is_none() && touches_at_one_point(&other) && fixed_centre(&axis, &other, mid).is_some()
+    {
+        return Ok(CollapsedBallZone::ClosedPointBall);
+    }
+    Ok(CollapsedBallZone::Unclassified)
 }
 
 /// Not the fork's (#18190): whether a ball touching a face whose offset is `other` (not
