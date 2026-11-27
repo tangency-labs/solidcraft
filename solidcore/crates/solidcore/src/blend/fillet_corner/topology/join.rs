@@ -515,21 +515,26 @@ fn rolled_sides(
     Ok(out)
 }
 
-/// Not the fork's (tangency-labs/solidcraft#21940): on each side whose one edge between the
-/// blends is a seam of the face the blends roll on there (both its edge uses on that face) that
-/// runs from the corner's `vertex` into the face and ends there, at a vertex no other edge
-/// reaches (the surface's pole, as on a sphere turned so that its pole lies near the rim), and
-/// where the ball touching that face at the seam's far end and touching the blends' other face
-/// is smaller than the round (`ball_touching_with`: `within`), the seam ends inside the band
-/// the round takes off the face: the round's contact line passes beyond its end and never
-/// crosses it. Nothing stands between the blends there, so the seam is taken out of `between`
-/// and the section's end on that side lies on the face, through the vertex, as where no edge
-/// runs from it. (Where the ball at the far end is the round's or larger, the contact line
-/// crosses the seam and the section ends there, as before.) The ball's radius grows along such
-/// a seam from nothing at the vertex, where the seam meets the other face, to the far end: on a
-/// sphere against a plane it is `h r / (r - h)`, h the point's distance from the plane.
+/// Not the fork's (tangency-labs/solidcraft#21940): on the closed blend's side whose one edge
+/// between its ends is a seam of a sphere face F there (both its edge uses on F) that runs
+/// from the corner's `vertex` into F and ends at a vertex no other edge reaches (the sphere's
+/// pole, as on a sphere turned so that its pole lies near the rim), where the blend's other
+/// face G is a plane and every ball touching F along the seam and touching G is smaller than
+/// the round: the seam lies inside the band the round takes off F, the round's contact line
+/// never crosses it, and nothing stands between the blend's ends there. The seam is taken out
+/// of `between`, so the section's end on that side lies on F, through the vertex, as where no
+/// edge runs from it.
 ///
-/// Returns whether a seam was taken out (the corner's `seam_short_of_rails`).
+/// Decided exactly: the seam is the arc of a great circle of the sphere from the vertex to the
+/// pole, and the ball touching the sphere at a point and the plane grows with the point's
+/// distance from the plane (`h r / (r - h)` for a round outside the sphere, its like inside);
+/// so the largest ball along the seam is the one at the arc's point farthest from the plane
+/// ([`seam_point_farthest_from_plane`], in closed form), and `ball_touching_with` there decides.
+/// A seam that runs over the sphere's top and back down (a sphere turned so that its seam leaves
+/// the rim across the face) reaches the contact line there and stays a side edge. Other surfaces
+/// are left as they were.
+///
+/// Returns the face whose seam was taken out (the corner's `seam_short_of_rails`).
 ///
 /// # Errors
 /// Those of the topology queries, the seam test, the solver lookup and `ball_touching_with`.
@@ -542,10 +547,11 @@ fn seams_short_of_rails(
     vertex: Option<crate::topology::VertexId>,
     side: &[[Option<FaceId>; 2]; 2],
     between: &mut [Vec<EdgeuseId>; 2],
-) -> Result<bool> {
-    let mut removed = false;
-    let Some(&Some(id)) = ids.first() else {
-        return Ok(removed);
+) -> Result<Option<FaceId>> {
+    use crate::surface::surface::p2::SurfaceKind;
+    // one closed blend meeting itself
+    let (1, Some(&Some(id)), Some(vertex)) = (ids.len(), ids.first(), vertex) else {
+        return Ok(None);
     };
     for s in 0..2 {
         let Some(&[only]) = between.get(s).map(Vec::as_slice) else {
@@ -560,22 +566,43 @@ fn seams_short_of_rails(
         if faces_of(target, only)? != [Some(face); 2] {
             continue;
         }
+        let (Some(SurfaceKind::Sphere(sphere)), Some(SurfaceKind::Plane(plane))) = (
+            crate::topology::face::p2::surface(target, face)?
+                .map(crate::surface::surface::Surface::kind),
+            crate::topology::face::p2::surface(target, other_face)?
+                .map(crate::surface::surface::Surface::kind),
+        ) else {
+            continue;
+        };
+        let centre = sphere.base().position().origin();
+        let radius = sphere.radius;
+        let plane_origin = plane.position().origin();
+        let plane_normal = plane.evaluate_normal();
         let Some(edge) = eu1::edge(target, only)? else {
             continue;
         };
         if !crate::topology::edge::is_seam(k, target, edge)? {
             continue;
         }
-        let Some(far) = crate::topology::edge::other_vertex(target, edge, vertex)? else {
+        let Some(far) = crate::topology::edge::other_vertex(target, edge, Some(vertex))? else {
             continue;
         };
-        if Some(far) == vertex || crate::topology::vertex::edges(target, far, None)? != [edge] {
+        if far == vertex || crate::topology::vertex::edges(target, far, None)? != [edge] {
             continue;
         }
         let Some(side_eu) = find_side_edgeuse(target, blended, only)? else {
             continue;
         };
-        let at = crate::topology::vertex::point(target, far)?;
+        let Some(at) = seam_point_farthest_from_plane(
+            centre,
+            radius,
+            crate::topology::vertex::point(target, vertex)?,
+            crate::topology::vertex::point(target, far)?,
+            plane_origin,
+            plane_normal,
+        ) else {
+            continue;
+        };
         let (on_g, within, _) = crate::blend::blend_corner::end::ball_touching_with(
             k,
             target,
@@ -588,11 +615,44 @@ fn seams_short_of_rails(
         if within && !on_g {
             if let Some(b) = between.get_mut(s) {
                 b.clear();
-                removed = true;
+                return Ok(Some(face));
             }
         }
     }
-    Ok(removed)
+    Ok(None)
+}
+
+/// Not the fork's (tangency-labs/solidcraft#21940): the point of the arc of the great circle of
+/// the sphere about `centre` of radius `radius` from its point `from` to its point `to` (less
+/// than half a turn: a seam from a rim's vertex to a pole) farthest from the plane through
+/// `plane_origin` square to `plane_normal`. On the arc `p(t) = c + r (cos t e1 + sin t e2)`,
+/// `t` in `[0, phi]`, the distance `n . (p - o)` is `a + r (A cos t + B sin t)`, whose extrema
+/// lie at `atan2(B, A)` and half a turn from it; the farthest of those inside the arc and the
+/// arc's ends is taken. `None` where the arc is not defined (`to` on the line of `centre` and
+/// `from`).
+fn seam_point_farthest_from_plane(
+    centre: crate::math::Point3,
+    radius: f64,
+    from: crate::math::Point3,
+    to: crate::math::Point3,
+    plane_origin: crate::math::Point3,
+    plane_normal: crate::math::Vec3,
+) -> Option<crate::math::Point3> {
+    let e1 = (from - centre).unitize().ok()?;
+    let w = to - centre;
+    let e2 = (w - e1 * w.dot(e1)).unitize().ok()?;
+    let phi = w.dot(e2).atan2(w.dot(e1));
+    let (a, b) = (plane_normal.dot(e1), plane_normal.dot(e2));
+    let point = |t: f64| centre + (e1 * t.cos() + e2 * t.sin()) * radius;
+    let distance = |t: f64| plane_normal.dot(point(t) - plane_origin).abs();
+    let peak = b.atan2(a);
+    let mut best = (0.0, distance(0.0));
+    for t in [phi, peak, peak + crate::math::PI, peak - crate::math::PI] {
+        if (0.0..=phi).contains(&t) && distance(t) > best.1 {
+            best = (t, distance(t));
+        }
+    }
+    Some(point(best.0))
 }
 
 /// Not the fork's (#17224): where the Join's section ends on a side edge `side_eu`

@@ -745,9 +745,13 @@ pub enum RailEndNames {
     /// not: the ball's contact crosses the seam between the rail's ends.
     #[default]
     TrimCurveSide,
-    /// In the base's natural domain: the rails never cross the seam, which ends short of them
-    /// (a Join's side seam ending inside the band, `FilletCorner::seam_short_of_rails`).
-    InDomain,
+    /// On the base of rail `rail` (0 or 1), in its natural domain: the rails never cross its
+    /// seam, which ends short of them (a closed blend's Join whose side seam ends inside the
+    /// band, `FilletCorner::seam_short_of_rails`); the other base as [`Self::TrimCurveSide`].
+    InDomain {
+        /// The rail whose base's seam ends short of the rails.
+        rail: usize,
+    },
 }
 
 impl FilletSolver {

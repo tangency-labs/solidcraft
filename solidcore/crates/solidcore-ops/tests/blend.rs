@@ -6769,19 +6769,24 @@ fn a_round_on_a_turned_spheres_rim_builds_whatever_the_turn() {
     use solidcore_ops::BooleanOp;
     all_fixes();
     let (r, f) = (0.975, 0.3);
-    for radians in [1e-5_f64, 3e-5, 5e-4, 1e-3, 1e-2, 0.1, 0.2, 0.3] {
-        for op in [BooleanOp::Union, BooleanOp::Subtract] {
-            let case = format!("sphere turned {radians} rad about x, {op:?}");
-            round_sphere_rim(
-                &case,
-                r,
-                f,
-                1,
-                1.0,
-                &[turn_about(0, radians.to_degrees())],
-                op,
-            );
+    // the plate on the face's positive side (#21940's part); turned the other way, or with
+    // the plate on the other side, the rim is split otherwise and still fails (a later change)
+    let nub_and_socket = [(BooleanOp::Union, 1.0), (BooleanOp::Subtract, 1.0)];
+    for radians in [1e-5_f64, 3e-5, 5e-4, 1e-3, 1e-2, 0.1, 0.2, 0.23, 0.245, 0.3] {
+        for (op, side) in nub_and_socket {
+            let case = format!("sphere turned {radians} rad about x, {op:?} on {side}");
+            let moves = [turn_about(0, radians.to_degrees())];
+            round_sphere_rim(&case, r, f, 1, side, &moves, op);
         }
+    }
+    // the sphere first turned a quarter about z: its seam leaves the rim's vertex across the
+    // face, over the sphere's top and back down to the pole, and crosses the contact line, so
+    // it stays the Join's side edge (`seams_short_of_rails`' farthest point): the socket builds
+    // as before (the nub still fails there, as on main: a later change)
+    for radians in [1e-2_f64, 0.1] {
+        let case = format!("sphere turned 90 about z then {radians} rad about x, socket");
+        let moves = [turn_about(2, 90.0), turn_about(0, radians.to_degrees())];
+        round_sphere_rim(&case, r, f, 1, 1.0, &moves, BooleanOp::Subtract);
     }
 }
 

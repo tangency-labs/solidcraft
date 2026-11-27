@@ -4081,7 +4081,7 @@ impl FilletBrep {
         let cp_vertex = owner
             .filleted_vertex()
             .ok_or_else(|| missing_set_up(OP, FilletSetUp::CornerVertex))?;
-        let seam_short = owner.seam_short_of_rails;
+        let seam_face = owner.seam_short_of_rails;
 
         let geoms = self.vertex_fillet_geoms(v)?;
         if geoms.is_empty() {
@@ -4131,9 +4131,15 @@ impl FilletBrep {
 
             // the ball's feet at the vertex, on each of the blend's faces
             let mut uvs = [Point2::new(0.0, 0.0); 2];
+            // (#21940) the solver's rail on the face whose seam ends inside the band
+            let mut seam_rail = None;
             for (ii, slot) in uvs.iter_mut().enumerate() {
                 let fs = solvers.solver(sid)?;
                 let side_eu = solver_edgeuse(fs, ii, OP)?;
+                let on_seam_face = seam_face.is_some() && eu1::face(target, side_eu)? == seam_face;
+                if on_seam_face {
+                    seam_rail = Some(ii);
+                }
                 let offset = solver_surface(fs, ii, OP)?;
                 let distance = offset.offset_distance().abs();
                 let base = offset.base_surface().clone();
@@ -4222,14 +4228,14 @@ impl FilletBrep {
                     b.uv,
                 )?;
                 // Not the fork's (tangency-labs/solidcraft#21940): at a Join whose side seam ends
-                // inside the band (`FilletCorner::seam_short_of_rails`: a sphere turned so that
-                // its seam runs from a closed rim's vertex into the face, ending at a pole short
-                // of the rails), the rails never cross the seam, and the name nearest the edge
+                // inside the band (`FilletCorner::seam_short_of_rails`, this foot's face: a sphere
+                // turned so that its seam runs from a closed rim's vertex into the face, ending at
+                // a pole short of the rails), the rails never cross the seam, and the name nearest the edge
                 // use's parameters, on the seam's other side, lies past the domain's end: the
                 // foot's name in the domain is taken (the same point of the surface, moved by
                 // whole periods only). Where the rails do cross the seam at the vertex, the
                 // name on the edge use's side stays, as above.
-                let foot = if seam_short
+                let foot = if on_seam_face
                     && !domain.contains_point(foot, 0.0)
                     && domain.contains_point(dropped.result_uv, 0.0)
                 {
@@ -4249,12 +4255,14 @@ impl FilletBrep {
                 domain1.add_point(uv0);
                 domain2.add_point(uv1);
             }
-            // (#21940) the blend's rails never cross the seam that ends inside the band: its
-            // rail ends' feet keep their names in the domain (`c1_collect_points`)
-            if seam_short {
-                solvers.solver_ops_mut(sid)?.solver_mut().rail_end_names =
-                    crate::blend::fillet_solver::p1::RailEndNames::InDomain;
-            }
+            // (#21940) the blend's rails never cross the seam that ends inside the band: its rail
+            // ends' feet on that face keep their names in the domain (`c1_collect_points`). Set
+            // each time the section is solved, so a corner rebuilt without such a seam (another
+            // size, another pass) names them as upstream again.
+            solvers.solver_ops_mut(sid)?.solver_mut().rail_end_names = match seam_rail {
+                Some(rail) => crate::blend::fillet_solver::p1::RailEndNames::InDomain { rail },
+                None => crate::blend::fillet_solver::p1::RailEndNames::TrimCurveSide,
+            };
             let (found, tsect) = point_on_plane_solve(
                 k,
                 solvers.solver_ops_mut(sid)?,
