@@ -59,6 +59,7 @@ use solidcore::topology::brep_data_write::FromBrepEnv;
 use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, ShellId, VertexId, edge, shell, vertex};
 use solidcore::{EntityRef, Kernel, Point2, Point3, SolidError, Vec3};
+use solidcore_record::brep::approximation_tolerance;
 
 use crate::flat::*;
 use crate::import::Arrays;
@@ -745,19 +746,6 @@ fn max_zone_tol(b: &Brep) -> Result<f64> {
     Ok(max)
 }
 
-/// The tolerance a face's stand-in surface is fitted to: half the least tolerance the record can
-/// state for the face. [`own_tolerances`] gives an imported face the least of its edges' and
-/// loop vertices' written tolerances and the B-rep's (`xsect / 2`); each of the former is at least
-/// the face's own ([`zone_tol_with_faces`] takes the largest of the faces round the entity), so
-/// the face's own tolerance, where it has one, or `xsect / 2`, whichever is less, is never more
-/// than the record states. Half of it, as SMLib's approximation tolerance is half its zone
-/// tolerance, leaves the face's edges room within it.
-fn face_approx_tol(b: &Brep, f: FaceId, xsect: f64) -> Result<f64> {
-    let body = xsect / 2.0;
-    let own = face_tolerance(b, f)?;
-    Ok(if own.is_finite() && own > 0.0 { own.min(body) } else { body } / 2.0)
-}
-
 /// The B-spline written for a face surface with no B-spline form, within `tol` of it (#21926).
 /// An implicit offset surface gets the kernel's certified net of it, proved within `tol` at
 /// every parameter ([`solidcore_ops::offset::certified_offset_net`], the net a shell or a thicken
@@ -881,7 +869,7 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
     // `FlatFromBrep` does, makes it every entity's on import (MakeTopologyFromData raises each
     // entity to the B-rep's), so every crossing between the kernels spread the largest tolerance
     // over the body. Curves are still approximated to the largest; a face's surface is
-    // approximated to its own tolerance ([`face_approx_tol`]).
+    // approximated to its own tolerance ([`solidcore_record::brep::approximation_tolerance`]).
     let zone = max_zone_tol(b)?;
     let brep_tol = b.tolerance();
     let xsect = 2.0 * if brep_tol.is_finite() && brep_tol > 0.0 && brep_tol < zone { brep_tol } else { zone };
@@ -1072,13 +1060,17 @@ fn flat_from_brep(k: &mut Kernel, b: &mut Brep) -> Result<Arrays> {
         if nurbs_form || nurbs_kind {
             // Every analytic class is an SmBSplineSurface: its own NURBS, in face order with the
             // NURBS faces' surfaces. Another surface (an offset) is approximated within half the
-            // tolerance the record states for the face ([`face_approx_tol`]), never the body's
+            // tolerance the record states for the face ([`solidcore_record::brep::approximation_tolerance`]), never the body's
             // largest (#21926); see [`approximate_face_surface`].
             let approximated;
             let part = match bspline_surface_part(k, surface)? {
                 Some(part) => part,
                 None => {
-                    approximated = approximate_face_surface(k, surface, face_approx_tol(b, f, xsect)?)?;
+                    approximated = approximate_face_surface(
+                        k,
+                        surface,
+                        approximation_tolerance(face_tolerance(b, f)?, xsect),
+                    )?;
                     bspline_surface_part(k, &approximated)?.ok_or_else(|| bad("an approximated face surface that is not a B-spline"))?
                 }
             };

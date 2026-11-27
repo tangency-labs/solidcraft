@@ -1206,6 +1206,8 @@ pub enum DefinitionRef<'a> {
     Blend(BlendRef<'a>),
     /// A sweep's.
     Sweep(SweepRef<'a>),
+    /// A certified offset sheet's.
+    Offset(&'a crate::surface::offset_definition::OffsetDefinition),
 }
 
 impl<'a> DefinitionRef<'a> {
@@ -1215,6 +1217,7 @@ impl<'a> DefinitionRef<'a> {
         match self {
             Self::Blend(b) => b.bound(),
             Self::Sweep(s) => s.bound(),
+            Self::Offset(o) => o.bound(),
         }
     }
 
@@ -1223,7 +1226,7 @@ impl<'a> DefinitionRef<'a> {
     pub const fn sweep(&self) -> Option<SweepRef<'a>> {
         match *self {
             Self::Sweep(s) => Some(s),
-            Self::Blend(_) => None,
+            Self::Blend(_) | Self::Offset(_) => None,
         }
     }
 }

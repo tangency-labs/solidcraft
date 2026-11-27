@@ -129,7 +129,7 @@ impl FaceSurface {
                                 minor: t.minor,
                             },
                             None => Exact::Blend {
-                                bound: made.surface.procedural_blend().map_or(0.0, |b| b.bound()),
+                                bound: made.surface.certified_bound(),
                             },
                         }
                     }

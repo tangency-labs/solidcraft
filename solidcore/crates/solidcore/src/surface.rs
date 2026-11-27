@@ -25,6 +25,7 @@ pub mod implicit;
 pub mod mid_joint;
 pub mod mid_sheet;
 pub mod normal_cone;
+pub mod offset_definition;
 pub mod offset_surface;
 pub mod plane;
 pub mod procedural_blend;

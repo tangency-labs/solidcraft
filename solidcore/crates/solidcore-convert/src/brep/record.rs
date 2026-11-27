@@ -6,7 +6,10 @@
 //!   ([`record_of`], [`record_face`]): a line as the kernel holds it, a conic by its own frame and
 //!   its NURBS form, proved on each other; an analytic face by its label and its NURBS form,
 //!   proved (`lies_on`); a plane by its placement, its parameters its kernel ones times its
-//!   scales. Nothing is sampled. A curve or surface with no NURBS form (an offset) is refused.
+//!   scales. Nothing is sampled. A curve with no NURBS form is refused; an implicit offset surface is
+//!   written as its certified net within the face's approximation tolerance
+//!   ([`solidcore_record::brep::approximation_tolerance`]),
+//!   which keeps the offset as the face's definition.
 //!   A blend face goes as its definition and its net ([`face_definition`]: a procedural blend, a
 //!   round of an exact class whose net has no analytic label); a use with no UV trim gets one the
 //!   kernel makes by fitting.
@@ -34,8 +37,10 @@ use solidcore::curve::from_parameters::{intersection_tolerance, record_of, recor
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::kernel::Kernel;
+use solidcore::offset::offset_executive::p1::certified_offset_surface;
 use solidcore::surface::face_surface::record_face;
 use solidcore::surface::procedural_blend::convert::face_definition;
+use solidcore::surface::surface::p2::SurfaceKind;
 use solidcore::topology::brep::create_missing_uv_trim_curves;
 use solidcore::topology::brep::outer_shells::outer_shells;
 use solidcore::topology::brep::p1 as bl;
@@ -47,6 +52,7 @@ use solidcore::topology::EdgeuseId;
 use solidcore::topology::{edge, vertex};
 use solidcore::{Brep, EdgeId, FaceId};
 use solidcore_record::brep as r;
+use solidcore_record::brep::approximation_tolerance;
 
 use super::{Order, Unsupported, R};
 
@@ -59,6 +65,7 @@ fn with_definition(
     surface: &solidcore::surface::surface::Surface,
     label: r::Surface,
     form: Option<r::Surface>,
+    tol: f64,
 ) -> R<(r::Surface, Option<r::Surface>)> {
     let net = form.as_ref().unwrap_or(&label);
     if !matches!(
@@ -70,6 +77,16 @@ fn with_definition(
     let Some(definition) = face_definition(k, surface)? else {
         return Ok((label, form));
     };
+    // an offset is written with the bound it proves from the numbers it writes, and only within the
+    // face's approximation tolerance: a net the face cannot take is refused, not written
+    if let solidcore::surface::procedural_blend::record::FaceDefinition::Offset(o) = &definition {
+        #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+        if !(o.bound <= tol) {
+            return Err(Unsupported::Invalid(
+                "an offset's certified net is not within the face's approximation tolerance",
+            ));
+        }
+    }
     let net = form.unwrap_or(label);
     let definition = Box::new(crate::blend::record_blend(definition));
     Ok((r::Surface::Blend { definition }, Some(net)))
@@ -187,12 +204,27 @@ pub fn to_record(k: &mut Kernel, b: &mut Brep) -> R<(r::Brep, Order)> {
             .surface
             .as_ref()
             .ok_or(Unsupported::Invalid("a face without a surface"))?;
+        // an implicit offset surface has no exact record: its certified net stands in for it,
+        // within the face's approximation tolerance, and keeps the offset as its definition
+        let certified;
+        let tol = approximation_tolerance(
+            solidcore::topology::face::p2::tolerance(b, f)?,
+            tolerances.body,
+        );
+        let surface = match surface.kind() {
+            SurfaceKind::OffsetSurface(offset) => {
+                certified = certified_offset_surface(k, offset, tol)?.0;
+                &certified
+            }
+            _ => surface,
+        };
         let made = record_face(k, surface, &fd.uv_domain)?;
         let (label, form) = with_definition(
             k,
             surface,
             crate::record_surface(made.surface)?,
             made.nurbs.map(crate::record_surface).transpose()?,
+            tol,
         )?;
         let mut face = Face {
             surface: label,

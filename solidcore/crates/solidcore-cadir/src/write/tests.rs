@@ -2221,7 +2221,8 @@ fn a_procedural_blends_net_is_written_with_its_bound_as_its_tolerance() {
     let bound = |f: &solidcore_record::brep::Face| match &f.surface {
         S::Blend { definition } => match definition.as_ref() {
             BlendDefinition::Procedural(d) => Some(d.bound),
-            BlendDefinition::ExactRound(_) => None,
+            BlendDefinition::Offset(o) => Some(o.bound),
+            BlendDefinition::ExactRound(_) | BlendDefinition::BlendOffset(_) => None,
         },
         _ => None,
     };

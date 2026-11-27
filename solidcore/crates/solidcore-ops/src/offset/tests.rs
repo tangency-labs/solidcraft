@@ -120,6 +120,9 @@ fn a_shell_keeps_its_rounds_as_blends_of_the_moved_radius() {
                 | solidcore_record::brep::blend::RadiusRecord::EqualSetback => continue,
             },
             solidcore_record::brep::blend::BlendDefinition::ExactRound(d) => d.radius,
+            // an offset sheet is no round: it has no radius
+            solidcore_record::brep::blend::BlendDefinition::Offset(_)
+            | solidcore_record::brep::blend::BlendDefinition::BlendOffset(_) => continue,
         });
     }
     radii.sort_by(|a, b| a.partial_cmp(b).unwrap());

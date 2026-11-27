@@ -33,6 +33,22 @@ const OFFSET_VERSION: u32 = 5;
 /// ([`Brep::validate_built`]) has no such cap.
 pub const MAX_ITEMS: usize = 4_000_000;
 pub const MAX_SHELLS: usize = 1024;
+
+/// The tolerance a face's stand-in surface is fitted to, from the tolerances the record states:
+/// half the least tolerance the record can state for the face. A face with its own positive,
+/// finite tolerance takes the least of it and the body's, else the body's; the body's is half its
+/// zone (the record's tolerance), and the fit takes half of that, so the face's edges keep room
+/// within it.
+#[must_use]
+pub fn approximation_tolerance(face_tolerance: f64, body_tolerance: f64) -> f64 {
+    let body = body_tolerance / 2.0;
+    let least = if face_tolerance.is_finite() && face_tolerance > 0.0 {
+        face_tolerance.min(body)
+    } else {
+        body
+    };
+    least / 2.0
+}
 /// Maximum number of nested geometry edges, with the root at depth zero.
 pub const MAX_DEPTH: usize = 16;
 /// The highest spline degree a record may carry.
