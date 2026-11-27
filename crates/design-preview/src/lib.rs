@@ -117,8 +117,33 @@ fn open_archive<R: Read + Seek>(mut source: R) -> Option<zip::ZipArchive<R>> {
 /// record, and no ZIP64 (a container never uses it). Checked before the `zip` crate reads the
 /// directory, so a hostile one cannot make it allocate or loop beyond these bounds.
 fn directory_fits<R: Read + Seek>(source: &mut R, len: u64) -> Option<()> {
-    let _ = (source, len);
-    Some(())
+    const RECORD: &[u8] = b"PK\x05\x06";
+    const ZIP64_LOCATOR: &[u8] = b"PK\x06\x07";
+    // The record is 22 bytes plus a comment of at most 65,535.
+    let tail_len = len.min(22 + 0xFFFF);
+    source.seek(SeekFrom::Start(len - tail_len)).ok()?;
+    let mut tail = Vec::with_capacity(usize::try_from(tail_len).ok()?);
+    source.by_ref().take(tail_len).read_to_end(&mut tail).ok()?;
+    let u16_at = |at: usize| tail.get(at..at + 2).and_then(|b| b.try_into().ok()).map(u16::from_le_bytes);
+    let u32_at = |at: usize| tail.get(at..at + 4).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes);
+    // The last signature whose comment length reaches exactly to the end of the file.
+    let at = (0..tail.len().checked_sub(21)?)
+        .rev()
+        .find(|&i| tail.get(i..i + 4) == Some(RECORD) && u16_at(i + 20).map(usize::from) == tail.len().checked_sub(i + 22))?;
+    let (disk, directory_disk, here, total) = (u16_at(at + 4)?, u16_at(at + 6)?, u16_at(at + 8)?, u16_at(at + 10)?);
+    let (size, offset) = (u64::from(u32_at(at + 12)?), u64::from(u32_at(at + 16)?));
+    let record_at = (len - tail_len).checked_add(u64::try_from(at).ok()?)?;
+    let zip64 = at.checked_sub(20).and_then(|s| tail.get(s..s + 4)) == Some(ZIP64_LOCATOR);
+    (disk == 0
+        && directory_disk == 0
+        && here == total
+        && usize::from(total) <= MAX_ENTRIES
+        && total != 0xFFFF
+        && size <= MAX_DIRECTORY
+        && offset != 0xFFFF_FFFF
+        && offset.checked_add(size)? <= record_at
+        && !zip64)
+        .then_some(())
 }
 
 /// One entry's bytes, read in full only when its declared and actual sizes are within `limit`.

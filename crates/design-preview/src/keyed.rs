@@ -47,8 +47,16 @@ struct Key {
 /// digests are those of the container's `document.json` and of the PNG. Reads from the start of
 /// `source` whatever its position. Anything else is `None`.
 pub fn keyed_picture<R: Read + Seek>(source: R) -> Option<Picture> {
-    let _ = source;
-    None
+    let mut archive = open_archive(source)?;
+    let key: Key = serde_json::from_slice(&part(&mut archive, "cache/thumbnail.json", MAX_KEY)?).ok()?;
+    let format = FORMATS.iter().find(|f| f.tag == key.format)?;
+    let document = part(&mut archive, "document.json", MAX_DOCUMENT)?;
+    if sha256_hex(&document) != key.document {
+        return None;
+    }
+    let png = part(&mut archive, "cache/thumbnail.png", format.max_bytes)?;
+    let (width, height) = png_size(&png)?;
+    ((width, height) == format.size && sha256_hex(&png) == key.payload).then_some(Picture { png, width, height })
 }
 
 /// Lowercase hexadecimal SHA-256, as the writer keys it.
