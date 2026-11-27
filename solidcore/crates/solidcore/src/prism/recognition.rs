@@ -794,13 +794,14 @@ fn corner_combination(terms: &[(f64, Vec2)]) -> Option<EllipsePoint> {
 /// corners' local semiextent plus the rounding of u and v (once for a corner, twice for a
 /// control). It is widened by the rounding of a producer that stores each corner as one
 /// f64 sum and each control as the f64 a + b - c of its quarter's corners, as a turned
-/// sketch ellipse does (#18399), and by the rounding of the returned centre: the largest
-/// half ULP of the stored coordinates for a corner; twice that, plus the half ULP of
-/// |a| + |b|, for a control. With c = c* + mean(e) for stored corner errors e, a corner
-/// is off by (e0 - e1 + e2 - e3) / 4 and a control by mean(e) plus its two roundings.
-/// The widening applies only while the control cell stays within sqrt(EPSILON) of the
-/// minor semi-axis: half of the significand still resolves the ellipse's thinnest
-/// direction, so no point in a cell can fold a quarter or flip its turn. Beyond that the
+/// sketch ellipse does (#18399), and by the rounding of the returned centre. With
+/// c = c* + mean(e) for stored corner errors e, a corner is off by (e0 - e1 + e2 - e3) / 4,
+/// within the corners' largest half ULP; a control by mean(e) plus its two roundings, the
+/// half ULPs of |a| + |b| and of the control itself.
+/// The widening applies only while the control cell's reach along each axis of the
+/// ellipse stays within sqrt(EPSILON) of that semi-axis: half of the significand still
+/// resolves the ellipse's thinnest direction, so no point in a cell can fold a quarter or
+/// flip its turn. Beyond that the
 /// world spacing, not the curve, would decide the shape (a 4/3 split at x = 2^52), and
 /// only the local cell applies; a loop that does not resolve even that is refused.
 /// Joins are exact.
@@ -849,27 +850,32 @@ fn loop_as_quarter_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
         ellipse_local_resolution(min.x, max.x)?,
         ellipse_local_resolution(min.y, max.y)?,
     );
-    let add = |a: Vec2, b: Vec2| Vec2::new(ellipse_bound_add(a.x, b.x), ellipse_bound_add(a.y, b.y));
+    let add =
+        |a: Vec2, b: Vec2| Vec2::new(ellipse_bound_add(a.x, b.x), ellipse_bound_add(a.y, b.y));
     let larger = |a: Vec2, b: Vec2| Vec2::new(a.x.max(b.x), a.y.max(b.y));
     let rounding = |p: Vec2| Vec2::new(rounding_radius(p.x), rounding_radius(p.y));
-    let stored = [p0, p1, p2, p3, h0, h1, h2, h3]
-        .into_iter()
-        .fold(Vec2::ZERO, |cell, p| larger(cell, rounding(p)));
-    let sums =
-        [(p0, p1), (p1, p2), (p2, p3), (p3, p0)]
+    let largest = |points: [Vec2; 4]| {
+        points
             .into_iter()
-            .fold(Vec2::ZERO, |cell, (a, b)| {
-                let sum = Vec2::new(a.x.abs() + b.x.abs(), a.y.abs() + b.y.abs());
-                larger(cell, rounding(sum))
-            });
+            .fold(Vec2::ZERO, |cell, p| larger(cell, rounding(p)))
+    };
+    let sums = [(p0, p1), (p1, p2), (p2, p3), (p3, p0)]
+        .map(|(a, b)| Vec2::new(a.x.abs() + b.x.abs(), a.y.abs() + b.y.abs()));
+    let (corners_rounding, controls_rounding) = (largest(corners), largest([h0, h1, h2, h3]));
     // The returned half diagonals' rounding is local; a corner uses one, a control two.
     let offsets = larger(rounding(u), rounding(v));
     let (corner_local, control_local) = (add(local, offsets), add(local, add(offsets, offsets)));
     // The producer's rounding, and the returned centre's.
-    let corner_rounding = add(stored, rounding(center));
-    let control_rounding = add(add(add(stored, stored), sums), rounding(center));
-    let resolution = minor.length_hypot() * f64::EPSILON.sqrt();
-    let resolves = |cell: Vec2| cell.x.max(cell.y) <= resolution;
+    let corner_rounding = add(corners_rounding, rounding(center));
+    let control_rounding = add(add(corner_rounding, controls_rounding), largest(sums));
+    // A cell's reach along each axis of the ellipse, against sqrt(EPSILON) of that axis.
+    let resolves = |cell: Vec2| {
+        [major, minor].into_iter().all(|axis| {
+            let length = axis.length_hypot();
+            let reach = (cell.x * axis.x.abs() + cell.y * axis.y.abs()) / length;
+            reach <= length * f64::EPSILON.sqrt()
+        })
+    };
     let widened = add(control_local, control_rounding);
     let (corner_cell, control_cell) = if resolves(widened) {
         (add(corner_local, corner_rounding), widened)

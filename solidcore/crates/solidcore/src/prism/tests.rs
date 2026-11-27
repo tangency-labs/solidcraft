@@ -1995,6 +1995,14 @@ mod recognition {
         let far = Vec2::new(2.0_f64.powi(40), 2.0_f64.powi(40));
         let turned = sketch_ellipse_quarters(far, far + Vec2::new(-25.0, -20.0), 8.0);
         assert_eq!(turned.as_ellipse(), None);
+        // An exact turned circle at 2^52 keeps its answer: its points need no widening.
+        let c = Vec2::new(2.0_f64.powi(52) + 2.0, 0.0);
+        let circle = ellipse_quarters(c, Vec2::new(1.0, 1.0), Vec2::new(-1.0, 1.0));
+        assert_eq!(
+            circle.as_ellipse(),
+            Some((c, Vec2::new(1.0, 1.0), 1.0)),
+            "{circle:?}"
+        );
         let quarters = |c: Vec2, corners: [Vec2; 4], controls: [Vec2; 4]| Loop2 {
             segs: (0..4)
                 .map(|i| Seg2::Conic {
