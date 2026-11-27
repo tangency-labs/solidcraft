@@ -16677,7 +16677,22 @@ fn replay(
             if topology_changed {
                 *st = saved;
                 for entry in batch.entries {
-                    apply_single_entry(doc, vals, f_outer, st, named_from, own, entry.src, entry.mats, entry.first, None, missed, total, warning, sources)?;
+                    apply_single_entry(
+                        doc,
+                        vals,
+                        f_outer,
+                        st,
+                        named_from,
+                        own,
+                        entry.src,
+                        entry.mats,
+                        entry.first,
+                        None,
+                        missed,
+                        total,
+                        warning,
+                        sources,
+                    )?;
                 }
                 return Ok(());
             }
@@ -16969,7 +16984,8 @@ fn replay(
                 (op, targets, scoped) = resolve_replay_targets(st, f, src);
                 can_batch = plan.len() > 1 && batch_limit > 1 && batchable_cut_source(src, &scoped, op);
                 extra_tol = if can_batch { target_tol(st, &scoped, &targets) } else { 0.0 };
-                built = build_replay_copies(doc, vals, st, named_from.as_ref(), own, &scoped, src, mats, *first, &targets, extra_tol, false, sources)?;
+                built =
+                    build_replay_copies(doc, vals, st, named_from.as_ref(), own, &scoped, src, mats, *first, &targets, extra_tol, false, sources)?;
                 new_boxes = if can_batch && !built.copies.is_empty() && built.copies.len() < batch_limit {
                     built.copies.iter().map(|t| tool_cut_box(&t.body, extra_tol)).collect()
                 } else {
