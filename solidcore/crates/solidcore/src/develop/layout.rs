@@ -687,6 +687,39 @@ fn check_joint(sheet: &Sheet, j: usize, joint: &Joint) -> Result<(), Refusal> {
             }
             let fine = match rip.lap {
                 Lap::Miter { gap } => gap >= 0.0 && gap.is_finite(),
+                Lap::Overlap { amount, gap, .. } => {
+                    let overlap = amount.unwrap_or(sheet.thickness);
+                    if !(gap > 0.0
+                        && gap.is_finite()
+                        && overlap > 0.0
+                        && overlap <= sheet.thickness
+                        && overlap.is_finite())
+                    {
+                        return Err(Refusal::Joint {
+                            joint: j,
+                            why: JointRefusal::OverlapRange,
+                        });
+                    }
+                    if !rip
+                        .turns
+                        .iter()
+                        .all(|turn| turn.abs() > UNIT_TOL && turn.abs() < PI - UNIT_TOL)
+                        || rip.turns.windows(2).any(|pair| {
+                            matches!(pair, [first, second] if first.is_sign_positive() != second.is_sign_positive())
+                        })
+                    {
+                        return Err(Refusal::Joint {
+                            joint: j,
+                            why: JointRefusal::OverlapTurn,
+                        });
+                    }
+                    // A cut below 0 runs its panel on past the edge, so only its being a
+                    // number is asked here.
+                    rip.turns.iter().all(|turn| {
+                        let (a, b) = rip.lap.cuts(*turn, sheet.thickness);
+                        a.is_finite() && b.is_finite()
+                    })
+                }
                 Lap::Cut(a, b) => a >= 0.0 && b >= 0.0 && a.is_finite() && b.is_finite(),
             };
             if !fine {
@@ -741,7 +774,8 @@ fn rip_bands(
             .iter()
             .map(|c| if side > 0.0 { c.0 } else { c.1 })
             .collect();
-        if !depth.iter().any(|d| *d > 0.0) {
+        // An overlap's cut below 0 moves the edge too: out, past where it was.
+        if depth.iter().all(|d| *d == 0.0) {
             continue;
         }
         let (Some(surface), Some(map)) =
@@ -768,7 +802,23 @@ fn rip_bands(
             .first()
             .filter(|d0| depth.iter().all(|d| (*d - **d0).abs() <= RIP_TOL));
         let exact = match (surface, even) {
-            (Surface::Plane, Some(d)) => moved(curve, side * d),
+            (Surface::Plane, Some(d)) => {
+                let offset = side * d;
+                if matches!(rip.lap, Lap::Overlap { amount: None, .. }) {
+                    for span in curve {
+                        if let Seg2::Arc { radius, sweep, .. } = *span {
+                            let shifted = radius - offset * sweep.signum();
+                            if shifted <= 0.0 {
+                                return Err(Refusal::Joint {
+                                    joint: j,
+                                    why: JointRefusal::OverlapArcRadius,
+                                });
+                            }
+                        }
+                    }
+                }
+                moved(curve, offset)
+            }
             _ => None,
         };
         if let Some(inner) = exact {
@@ -1176,6 +1226,12 @@ fn portion(segs: &[Seg2], from: f64, to: f64) -> Vec<(Seg2, usize)> {
 
 /// The part of `s` from parameter `t0` to `t1`.
 fn part(s: &Seg2, t0: f64, t1: f64) -> Seg2 {
+    if let Seg2::Line { .. } = s {
+        return Seg2::Line {
+            a: s.point_at(t0),
+            b: s.point_at(t1),
+        };
+    }
     let right = if t0 > 0.0 { s.split_at(t0).1 } else { *s };
     let t = if t0 < 1.0 {
         (t1 - t0) / (1.0 - t0)
@@ -1900,8 +1956,10 @@ fn add_zone(
         };
         let across = panel_across(sheet, other, if depth > 0.0 { &joint.b } else { &joint.a })?;
         for (relief, u, out_dir) in [(bend.relief.0, u0, -1.0), (bend.relief.1, u1, 1.0)] {
-            let Relief::Slot { width: w, depth: d } = relief else {
-                continue;
+            let (w, d, round) = match relief {
+                Relief::Slot { width, depth } => (width, depth, false),
+                Relief::Obround { width, depth } => (width, depth, true),
+                _ => continue,
             };
             let runs_on = if out_dir < 0.0 {
                 lo < u - w - EDGE_TOL
@@ -1934,8 +1992,13 @@ fn add_zone(
                 frame.at(s1, l1),
                 frame.at(s0, l1),
             ];
+            let outer = if round {
+                obround(frame, (s0, s1), (l0, l1), depth.signum())
+            } else {
+                polygon(&corners)
+            };
             let region = Region2 {
-                outer: ccw(polygon(&corners)),
+                outer: ccw(outer),
                 holes: Vec::new(),
             };
             out.trims.push(Trim {
@@ -1947,6 +2010,53 @@ fn add_zone(
         }
     }
     Ok(())
+}
+
+/// An obround bend relief's outline: the slot `s0`…`s1` along the joint and `l0`…`l1` across
+/// it (`sign` the way from `l0` toward `l1`), its `l0` end a half round as wide as the slot that
+/// reaches `l0` at its deepest. A slot no longer than its half width is left square: there is
+/// no straight part for the round to end.
+fn obround(frame: &JointFrame, (s0, s1): (f64, f64), (l0, l1): (f64, f64), sign: f64) -> Loop2 {
+    let r = (s1 - s0).abs() / 2.0;
+    let mid = l0 + sign * r;
+    if !(r > 0.0 && (l1 - mid) * sign > EDGE_TOL) {
+        return polygon(&[
+            frame.at(s0, l0),
+            frame.at(s1, l0),
+            frame.at(s1, l1),
+            frame.at(s0, l1),
+        ]);
+    }
+    let along = (s0 + s1) / 2.0;
+    let (c, a, b, deep) = (
+        frame.at(along, mid),
+        frame.at(s0, mid),
+        frame.at(s1, mid),
+        frame.at(along, l0),
+    );
+    let start = (b.y - c.y).atan2(b.x - c.x);
+    // The half turn from `b` to `a` through the slot's deepest point.
+    let halfway =
+        |sweep: f64| c + Vec2::new((start + sweep / 2.0).cos(), (start + sweep / 2.0).sin()) * r;
+    let sweep = if halfway(PI).dist(deep) <= halfway(-PI).dist(deep) {
+        PI
+    } else {
+        -PI
+    };
+    let (a1, b1) = (frame.at(s0, l1), frame.at(s1, l1));
+    Loop2 {
+        segs: vec![
+            Seg2::Arc {
+                center: c,
+                radius: r,
+                start,
+                sweep,
+            },
+            Seg2::Line { a, b: a1 },
+            Seg2::Line { a: a1, b: b1 },
+            Seg2::Line { a: b1, b },
+        ],
+    }
 }
 
 /// A torn end of a bend's zone in the flat, from `from` along the joint on the `a` panel's tangent

@@ -46,6 +46,7 @@ mod control_joint_pose;
 mod control_params;
 pub mod control_switch;
 pub mod crash_ui;
+mod cut_bodies;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;
@@ -55,8 +56,11 @@ mod dialog_descriptor;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
+pub mod dialogs_capture;
+pub mod dialogs_cell_grid;
 pub mod dialogs_constrain;
 pub mod dialogs_coupling;
+pub mod dialogs_dogbone;
 pub mod dialogs_end_cap;
 pub mod dialogs_frame;
 pub mod dialogs_frame_plate;
@@ -70,14 +74,17 @@ pub mod dialogs_move;
 pub mod dialogs_part_size;
 pub mod dialogs_parts;
 pub mod dialogs_plastic;
+pub mod dialogs_pulley;
 pub mod dialogs_rotate_member;
 pub mod dialogs_save_mesh;
+pub mod dialogs_shaft_spline;
 pub mod dialogs_sheet;
 pub mod dialogs_surface;
 pub mod dialogs_sweep;
 mod dialogs_thread;
 pub mod dialogs_urdf;
 pub mod dialogs_view_dxf;
+pub mod dialogs_weld;
 pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;
@@ -90,6 +97,7 @@ pub mod easyprint_ui;
 pub mod edit_clipboard;
 pub mod edit_in_place;
 mod feature_edit;
+mod finish_field;
 #[cfg(test)]
 mod font_literals_tests;
 pub mod fonts;
@@ -131,6 +139,7 @@ pub mod issue_report;
 pub mod joint_drag;
 pub(crate) mod joint_handles;
 pub(crate) mod joint_symbols;
+pub(crate) mod keyboard_profiles;
 pub mod keymap;
 #[cfg(test)]
 mod kit_gallery_tests;
@@ -444,9 +453,14 @@ mod viewport_details;
 mod viewport_layout;
 mod viewport_status;
 mod viewport_status_fixture;
+mod weld_figures;
+#[doc(hidden)]
+pub mod weld_panel;
+pub mod weld_symbol_paint;
 pub mod wheel_hint;
 pub use solidcraft_ui_kit::window_chrome;
 mod wireframe_silhouettes;
+pub mod workshop;
 pub mod workspace;
 
 use std::sync::mpsc::Receiver;
@@ -496,6 +510,10 @@ pub struct UiState {
     pub view_angles_lock_pitch: bool,
     pub view_angles_lock_roll: bool,
     pub palette_open: bool,
+    /// Which camera to reuse when reopening an existing sketch; chosen in the Sketch Palette.
+    /// The saved design and Preferences remain unchanged.
+    #[serde(skip)]
+    pub sketch_open_view: sketch_palette::SketchOpenView,
     /// Dark theme (the default); a preference kept between runs.
     pub dark: bool,
     /// Selection filter: kinds a click doesn't pick (`vertices`, `edges`, `faces`, `sketch`).
@@ -545,6 +563,7 @@ impl Default for UiState {
             view_angles_lock_pitch: false,
             view_angles_lock_roll: false,
             palette_open: false,
+            sketch_open_view: Default::default(),
             dark: true,
             pick_off: Vec::new(),
             render_pick: "face".into(),
@@ -639,6 +658,9 @@ pub struct Services {
     pub usage_http: Option<tickets::Http>,
     /// Linux: the window system this run uses, `wayland` or `x11` (Preferences shows it, #3083).
     pub window_system: Option<&'static str>,
+    /// HTTPS GET to workshop.solidcraft.io with the signature headers, for Workshop links
+    /// (`workshop`); None: links are not opened (browser, tests).
+    pub workshop_get: Option<workshop::HttpGet>,
 }
 
 /// The view before a sketch opened and the view that faced the sketch then (#7038).
@@ -648,6 +670,43 @@ pub struct PreSketchView {
     pub view: u64,
     pub before: Camera,
     pub facing: Camera,
+}
+
+/// Cameras left by each sketch in the active design tab. Kept in that design's slot on tab
+/// switches, never shared with a different design's same-numbered feature (#18998).
+#[derive(Default)]
+pub(crate) struct SketchLastViews {
+    /// Most recent exit, including Cancel.
+    last: std::collections::BTreeMap<u64, Camera>,
+    /// Most recent Finish: cancelling a later edit must not replace this camera.
+    finished: std::collections::BTreeMap<u64, Camera>,
+}
+
+impl SketchLastViews {
+    fn to_open(&self, sketch: u64, mode: sketch_palette::SketchOpenView) -> Option<Camera> {
+        match mode {
+            sketch_palette::SketchOpenView::Face => None,
+            sketch_palette::SketchOpenView::Last => self.last.get(&sketch).copied(),
+            sketch_palette::SketchOpenView::LastFinished => self.finished.get(&sketch).copied(),
+        }
+    }
+
+    fn closed(&mut self, sketch: u64, cam: Camera, finished: bool) {
+        self.last.insert(sketch, cam);
+        if finished {
+            self.finished.insert(sketch, cam);
+        }
+    }
+
+    fn forget(&mut self, sketch: u64) {
+        self.last.remove(&sketch);
+        self.finished.remove(&sketch);
+    }
+
+    fn retain_existing(&mut self, exists: impl Fn(u64) -> bool) {
+        self.last.retain(|id, _| exists(*id));
+        self.finished.retain(|id, _| exists(*id));
+    }
 }
 
 /// The active component (and placement) before a sketch opened inside another one (#8127), and
@@ -689,6 +748,16 @@ pub struct WgpuBuilt {
     msaa_fallback: bool,
 }
 
+/// The portable preferences last built for a save ([`SolveApp::try_prefs`]), with what they
+/// were built from.
+pub(crate) struct PortablePrefs {
+    layout: Option<Value>,
+    inputs: panel_runtime::PortableInputs,
+    portable: Option<Value>,
+    /// How many times they have been built (a reused build does not count).
+    pub(crate) builds: u64,
+}
+
 pub struct SolveApp {
     /// Common panel foundation, internal opt-in; stays on the app across document tabs.
     pub(crate) panel_runtime: Option<panel_runtime::AppPanelRuntime>,
@@ -727,6 +796,8 @@ pub struct SolveApp {
     /// The views around opening the open sketch. Leaving it goes back to the earlier one as the
     /// "When a sketch ends" preference says (#7038).
     pub pre_sketch_cam: Option<PreSketchView>,
+    /// Per-sketch last and last-finished views of this design tab (not saved into the model).
+    pub(crate) sketch_last_views: SketchLastViews,
     /// The command now running named the view to open its sketch in, so that view turns to face it.
     sketch_view_named: bool,
     /// The view from before Extrude turned it to isometric (#9176); the view goes back to it when
@@ -753,6 +824,8 @@ pub struct SolveApp {
     pub(crate) plugin_install: plugin_install::State,
     /// Plugin updates found at start, and the one being downloaded or reviewed.
     pub(crate) plugin_updates: plugin_updates::State,
+    /// A Workshop link being looked up, downloaded or asked about (`workshop`).
+    pub(crate) workshop: workshop::State,
     /// What an importer plugin could not carry over from the file it just opened.
     pub(crate) import_report: Option<import_report::Shown>,
     /// A Save or Save As being written on a worker (see [`save_job`]).
@@ -763,6 +836,11 @@ pub struct SolveApp {
     verifying: Option<verify_job::Verifying>,
     /// A drawing view being drawn on a worker (see [`drawing_jobs`]).
     drawing_job: Option<drawing_jobs::Drawing>,
+    /// A drawing being read for the Insert SVG/DXF window, on a worker (see
+    /// [`dialogs_insert_drawing`]); the operations panel shows it while it runs.
+    pub(crate) insert_read: Option<dialogs_insert_drawing::InsertRead>,
+    /// That drawing being measured again for a new Resolution, also on a worker.
+    pub(crate) insert_remeasure: Option<dialogs_insert_drawing::Remeasure>,
     pub viewport: viewport::ViewportState,
     pub render_workspace: render_workspace::State,
     pub drawing_workspace: drawing_workspace::State,
@@ -1066,6 +1144,10 @@ pub struct SolveApp {
     pub(crate) open_meshing_next: bool,
     /// How long each frame takes on the window thread, by phase.
     pub(crate) frame_watch: frame_watch::Watch,
+    /// The panel layout the last portable preferences were built from, and that result: the
+    /// host's auto-save (eframe's 30 s `App::save`) otherwise decodes every retained command
+    /// record again on the window thread, which took ~0.9 s on a large design.
+    pub(crate) portable_prefs: std::sync::Mutex<Option<PortablePrefs>>,
     /// The other open designs (tabs).
     pub docs: documents::Documents,
     /// Where the control channel's design events go ([`control::publish_design`]): the shared
@@ -1166,6 +1248,7 @@ impl SolveApp {
             view_gizmo: view_gizmo::State::default(),
             now: 0.0,
             pre_sketch_cam: None,
+            sketch_last_views: Default::default(),
             sketch_view_named: false,
             pre_extrude_cam: None,
             pre_command_cam: None,
@@ -1178,12 +1261,15 @@ impl SolveApp {
             easyprint: Default::default(),
             plugin_install: Default::default(),
             plugin_updates: Default::default(),
+            workshop: Default::default(),
             import_report: None,
             saving: None,
             host_saves: Vec::new(),
             host_save_left_dirty: Default::default(),
             verifying: None,
             drawing_job: None,
+            insert_read: None,
+            insert_remeasure: None,
             viewport: viewport::ViewportState::default(),
             render_workspace,
             drawing_workspace: Default::default(),
@@ -1301,6 +1387,7 @@ impl SolveApp {
             safe_graphics_next: false,
             frame_ms: 0.0,
             frame_rate: frame_rate::FrameRate::default(),
+            portable_prefs: std::sync::Mutex::new(None),
             operations: operations::Panel::default(),
             synthetic: Vec::new(),
             synthetic_mods: egui::Modifiers::default(),
@@ -1530,7 +1617,23 @@ impl SolveApp {
     /// Portable preferences for storage. On refusal the host retains its stored panel record.
     pub fn try_prefs(&self) -> Result<String, String> {
         let layout = prefs::held_panel_layout(self).unwrap_or_else(|| panel_runtime::preferences_value(self));
-        let portable = panel_runtime::portable_preferences_value(self, layout).map_err(solidcraft_engine::panels::commands::error_text)?;
+        // Rebuilding decodes every retained command record in the layout, which is expensive and
+        // only necessary when the layout changed: an auto-save with the same layout reuses it.
+        // Keyed on every input of the conversion (recovery can keep a saved record, and panels
+        // can register), so a reused build is the one a fresh conversion would make.
+        let inputs = panel_runtime::portable_inputs(self);
+        let mut cache = self.portable_prefs.lock().unwrap_or_else(|e| e.into_inner());
+        let portable = match cache.as_ref().filter(|c| c.layout == layout && c.inputs == inputs) {
+            Some(c) => c.portable.clone(),
+            None => {
+                let portable =
+                    panel_runtime::portable_preferences_value(self, layout.clone()).map_err(solidcraft_engine::panels::commands::error_text)?;
+                let builds = cache.as_ref().map_or(0, |c| c.builds) + 1;
+                *cache = Some(PortablePrefs { layout, inputs, portable: portable.clone(), builds });
+                portable
+            }
+        };
+        drop(cache);
         Ok(self.prefs_with_panel_layout(portable))
     }
 
@@ -1678,6 +1781,12 @@ impl SolveApp {
             self.ui.layout = p.layout;
             self.preferences = p;
         }
+        // 0.43 removed the cube navigator (#17003), and a cube saved before reads as the signed
+        // axes. Said once: the next save keeps the axes, so the note doesn't come back (#19749).
+        if v.pointer("/preferences/navigator_style").and_then(Value::as_str) == Some("cube") {
+            let note = self.tr("ui.navigator.cube_removed").to_string();
+            self.set_status(note, false);
+        }
         // Before a design given at start opens: its paths follow the network preferences.
         prefs::sync_surface_analysis(self);
         crate::plugins::sync_policy(self);
@@ -1736,7 +1845,7 @@ impl SolveApp {
         crate::sketch_view::sync(self)?;
         self.sketch_view_named = params.get("view").is_some_and(|view| !view.is_null());
         let finished_sketch = crate::sketch_view::prepare_edit(self, id, &params)?;
-        if matches!(id, "sketch.create" | "sketch.edit") {
+        if matches!(id, "sketch.create" | "sketch.create3d" | "sketch.edit") {
             let explicit = match params.get("view") {
                 None | Some(Value::Null) => None,
                 Some(value) => Some(value.as_u64().ok_or_else(|| "view must be an unsigned integer identifying an open Model view".to_string())?),
@@ -1922,6 +2031,10 @@ impl SolveApp {
             // `queued`: it waits for the end of the agent's turn.
             Some("component.edit_in_place") => r.and_then(|v| edit_in_place::command_ran(self, &v).map(|queued| with_queued(v, queued))),
             Some("component.finish_edit") => r.and_then(|v| edit_in_place::finish_command(self).map(|queued| with_queued(v, queued))),
+            Some("edit.undo" | "edit.redo") if r.is_ok() => {
+                self.agent_chat.clear_model_changes();
+                r
+            }
             Some(layout) if layout.starts_with("tab.layout.") => r.and_then(|v| view_setups::command(self, layout, v)),
             Some("view.set_compass") => r.and_then(|v| documents::set_compass(self, v)),
             Some(view) if view.starts_with("tab.view.") => r.and_then(|v| documents::view_command(self, view, v)),
@@ -1933,6 +2046,11 @@ impl SolveApp {
         // A grant taken back here that the shared store still holds is not taken back: say so.
         let r = match r {
             Ok(v) if matches!(id.to_ascii_lowercase().as_str(), "plugin.install" | "plugin.remove" | "plugin.revoke") => {
+                if id.eq_ignore_ascii_case("plugin.remove")
+                    && let Some(plugin) = v.get("id").and_then(Value::as_str)
+                {
+                    plugin_menu::forget_options(self, plugin);
+                }
                 self.plugin_themes.signature = None;
                 let saved = plugins::persist_grants(self);
                 plugin_slots::invalidate(self);
@@ -1942,6 +2060,17 @@ impl SolveApp {
         };
         if let Ok(v) = &r {
             sheet_views::command_opened(self, id, v);
+            // A sketch id can be reused after undo or deletion. Its predecessor's view
+            // must never become the starting camera of the newly created sketch.
+            if id == "sketch.create"
+                && let Some(sketch) = v.get("sketch").and_then(Value::as_u64)
+            {
+                self.sketch_last_views.forget(sketch);
+            }
+            if matches!(id, "edit.undo" | "edit.redo" | "timeline.delete") {
+                let doc = &self.session.doc;
+                self.sketch_last_views.retain_existing(|sketch| doc.feature(sketch).is_some());
+            }
             if id.eq_ignore_ascii_case("plugin.inspect")
                 && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
             {
@@ -1954,7 +2083,7 @@ impl SolveApp {
                     let named = std::mem::take(&mut self.sketch_view_named);
                     self.open_sketch_camera(before, named);
                 }
-                "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
+                "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64), id == "sketch.finish"),
                 // The sketch being edited has all new contents: a tool's picks named the old ones.
                 "sketch.replace" if v.get("sketch_id").and_then(Value::as_u64).is_some_and(|id| self.session.active_sketch == Some(id)) => {
                     if let Some(tool) = self.tool.as_mut() {
@@ -2026,7 +2155,9 @@ impl SolveApp {
                 // The command and the preference are one setting.
                 "diagnostics.validation" => self.preferences.validation = self.session.validation(),
                 "view.grid" => self.ui.show_grid = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.show_grid),
-                "view.ground_shadow" => self.ui.ground_shadow = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.ground_shadow),
+                "view.ground_shadow" if v.get("mode").is_none() => {
+                    self.ui.ground_shadow = v.get("on").and_then(Value::as_bool).unwrap_or(!self.ui.ground_shadow);
+                }
                 "view.navigation_bar" => {
                     self.ui.show_navigation_bar = v.get("visible").and_then(Value::as_bool).unwrap_or(!self.ui.show_navigation_bar)
                 }
@@ -2159,6 +2290,17 @@ impl SolveApp {
             if id == "view.angle_readout" {
                 self.preferences.show_view_angles = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             }
+            if id == "view.ground_shadow" {
+                match v.get("mode").and_then(Value::as_str) {
+                    Some("off") => self.ui.ground_shadow = false,
+                    Some(mode) => {
+                        self.ui.ground_shadow = true;
+                        self.preferences.ground_shadow_style =
+                            if mode == "projected" { prefs::GroundShadowStyle::Projected } else { prefs::GroundShadowStyle::Ellipse };
+                    }
+                    None => {}
+                }
+            }
             if id == "view.origin_axes_across_view" {
                 self.preferences.origin_axes_across_view = v.get("enabled").and_then(Value::as_bool).unwrap_or(false);
             }
@@ -2272,11 +2414,17 @@ impl SolveApp {
                     let name = std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
                     self.set_status(language.format("drawing.template_saved_as_scdwg", &[("name", &name)]), false);
                 }
+                if matches!(id, "joint.create" | "joint.as_built" | "joint.edit" | "assembly.constraint.create" | "assembly.constraint.edit") {
+                    joint_conflict_status(self, language, v);
+                }
                 if id == "file.new" {
                     // `file.new` starts from millimetres. Units of new designs still apply (#1205).
                     prefs::apply_new_design(self);
                 }
                 if matches!(id, "file.new" | "doc.open" | "doc.recover" | "file.revert_saved") {
+                    // Commands can replace the document inside this tab without switching
+                    // tabs. Its feature ids must not inherit views from the old design.
+                    self.sketch_last_views = Default::default();
                     documents::reset_chat(self);
                     self.edit_in_place.active = None;
                     render_workspace::reset_document(self);
@@ -2317,6 +2465,7 @@ impl SolveApp {
                         // an earlier signature is in the file but does not cover this save.
                         let signature = v.get("signature").and_then(Value::as_object);
                         let earlier = signature.is_none() && self.session.provenance_chain.as_ref().is_some_and(|chain| !chain.records.is_empty());
+                        let shown = display_user_path(&p);
                         let saved = match signature {
                             Some(signature) => {
                                 let key = signature
@@ -2324,10 +2473,10 @@ impl SolveApp {
                                     .and_then(Value::as_str)
                                     .or_else(|| signature.get("fingerprint").and_then(Value::as_str))
                                     .unwrap_or("");
-                                self.tr("ui.design_saved_signed").replace("{path}", &p).replace("{key}", key)
+                                self.tr("ui.design_saved_signed").replace("{path}", shown).replace("{key}", key)
                             }
-                            None if earlier => self.tr("ui.design_saved_earlier_signature").replace("{path}", &p),
-                            None => self.tr("ui.design_saved").replace("{path}", &p),
+                            None if earlier => self.tr("ui.design_saved_earlier_signature").replace("{path}", shown),
+                            None => self.tr("ui.design_saved").replace("{path}", shown),
                         };
                         self.set_status(saved, false);
                     }
@@ -2413,6 +2562,55 @@ impl SolveApp {
         }
     }
 
+    /// The innermost linked component on a placement's path: the placement's own component, or
+    /// the nearest one above it that is linked to a file.
+    fn linked_component_on(&self, path: &[u64]) -> Option<u64> {
+        (1..=path.len()).rev().find_map(|n| {
+            let placement = self.session.occurrence_placement(path.get(..n)?).ok()?;
+            self.session.doc.links.contains_key(&placement.component).then_some(placement.component)
+        })
+    }
+
+    /// Break the link of each linked component among what is selected: a selected placement, or
+    /// a body, face, edge or vertex picked in the view, stands for the innermost linked
+    /// component on its path (a linked component inside one that is not linked is found, where
+    /// Ground's outermost placement would be the one around it), and a component picked in the
+    /// Browser for itself. Its bodies stay, and it no longer follows its file. The status line
+    /// says which links were broken, as nothing else on the screen changes. With no linked
+    /// component among them it says what to pick.
+    fn break_links_of_selected_components(&mut self) {
+        let frames = self.session.doc.body_frames(&self.session.model.state());
+        let mut components: Vec<u64> = Vec::new();
+        for sel in &self.session.selection {
+            use solidcraft_engine::Sel;
+            let path = match sel {
+                Sel::Occurrence { path } => Some(path.clone()),
+                Sel::Body { name: body } | Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => {
+                    frames.iter().find(|frame| frame.0 == *body).map(|frame| frame.2.clone())
+                }
+                _ => None,
+            };
+            components.extend(path.and_then(|path| self.linked_component_on(&path)));
+        }
+        components.extend(self.tree.picked_components.iter().copied());
+        let mut seen = std::collections::BTreeSet::new();
+        components.retain(|component| self.session.doc.links.contains_key(component) && seen.insert(*component));
+        if components.is_empty() {
+            self.set_status(self.tr("ui.break_link_select_first"), false);
+            return;
+        }
+        let mut broken: Vec<String> = Vec::new();
+        for component in components {
+            let name = self.session.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default();
+            if let Err(why) = self.run("component.break_link", json!({ "component": component })) {
+                self.set_status(why, true);
+                return;
+            }
+            broken.push(name);
+        }
+        self.set_status(solidcraft_ui_text::format("ui.break_link_done", &[("name", &broken.join(", "))]), false);
+    }
+
     /// Ground (or, when every one is already grounded, unground) the selected placements, the
     /// placements owning the bodies or faces picked in the view, and the components picked in the
     /// Browser, the way the Browser's Ground row toggles one. With
@@ -2475,6 +2673,7 @@ impl SolveApp {
         // A tool can be started outside the frame's scope (a direct `start`, a shortcut in
         // `logic`): build its hint in the user's language, not the thread default.
         let _language = solidcraft_ui_text::scope(&self.preferences.language);
+        self.viewport.edit_dimensions = None;
         if solidcraft_engine::panels::commands::is_command(id) {
             if let Err(why) = self.run(id, json!({})) {
                 self.set_status(why, true);
@@ -2711,6 +2910,13 @@ impl SolveApp {
             self.ground_selected_occurrences();
             return;
         }
+        // The ribbon's Break Link acts on the linked components among what is selected, as
+        // Ground does on the placements. It used to run with no component and the engine
+        // answered "`component` must be a component id or name".
+        if id == "component.break_link" {
+            self.break_links_of_selected_components();
+            return;
+        }
         if render_workspace::start_interactive(self, id) {
             return;
         }
@@ -2868,6 +3074,13 @@ impl SolveApp {
             sketch_palette::toggle_construction(self);
             return;
         }
+        if id == "sketch.merge_lines" {
+            sketch_modify_ui::merge_selected_lines(self);
+            return;
+        }
+        if id == "doc.open" {
+            self.file_load.home_at_start = self.home.open;
+        }
         dim_view::cancel();
         self.tool = None;
         self.home.open = false;
@@ -2892,7 +3105,7 @@ impl SolveApp {
             let command = id.to_string();
             self.pick_open_for(&[ext], move |app, path| {
                 if let Some(path) = path {
-                    dialogs_insert_drawing::open(app, &command, path);
+                    dialogs_insert_drawing::start(app, &command, path);
                 }
             });
             return;
@@ -3128,8 +3341,25 @@ impl SolveApp {
             self.dialog = Some(d);
             return;
         }
+        // 3D Sketch has no plane to pick (#19426): the sketch opens at once with 3D Line running
+        // in it. The view stays as it is, as there is no plane to turn to.
+        if id == "sketch.create3d" {
+            if self.run(id, json!({})).is_ok() {
+                // A person started it, so an empty one goes when it finishes, as after Create Sketch.
+                self.session.mark_sketch_entered_by_person();
+                self.start("sketch.line3d");
+                if self.tool.as_ref().is_some_and(|tool| tool.cmd == "sketch.line3d") {
+                    let hint = self.tr("sketch.hint.create3d").to_owned();
+                    self.set_tool_hint(hint);
+                }
+            } else {
+                self.restore_command_tab();
+            }
+            return;
+        }
         if let Some(mut t) = tools::Tool::for_command(id) {
             t.classic = self.preferences.construction_line_classic;
+            t.arc_modes = self.preferences.sketch_arc_tangent_snap;
             if t.classic && solidcraft_engine::cmd::construction_line_mode(id).is_some() {
                 // The classic switch starts at Construction, whatever the palette chose last.
                 t.line_type = 3;
@@ -3248,8 +3478,19 @@ impl SolveApp {
     }
 
     /// Does starting `id` open a tool or a dialog?
-    fn interactive(&self, id: &str) -> bool {
+    pub(crate) fn interactive(&self, id: &str) -> bool {
         tools::Tool::for_command(id).is_some() || dialogs::Dialog::for_command(self, id).is_some()
+    }
+
+    /// Does `start` do something of its own with `id`, rather than run it with no values: open a
+    /// tool or a dialog, go to its settings in the Render workspace, or give it its values (a
+    /// toggle's new state, the selection)? Command search lists such a command (#9734).
+    pub(crate) fn starts_its_own_way(&self, id: &str) -> bool {
+        STARTED_WITH_VALUES.contains(&id)
+            || STARTED_BY_PREFIX.iter().any(|prefix| id.starts_with(prefix))
+            || toolbar::file_menu_row(id).is_some()
+            || render_workspace::ribbon_starts(id)
+            || self.interactive(id)
     }
 
     /// The ribbon has no sketch argument: use one unambiguous sketch pick, otherwise ask.
@@ -3416,6 +3657,7 @@ impl SolveApp {
                         FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),
                         FeatureKind::ConstructionAxis { .. } => language.text("ui.feature_kind.construction_axis"),
                         FeatureKind::ConstructionPoint { .. } => language.text("ui.feature_kind.construction_point"),
+                        FeatureKind::CapturePosition { .. } => language.text("cmd.component_capture_position"),
                         _ => f.kind.base_name(),
                     };
                     self.set_status(language.format("ui.feature_nothing_to_edit", &[("kind", kind)]), false);
@@ -3513,10 +3755,16 @@ impl SolveApp {
             return false;
         }
         let painted = self.viewport.compass_view.unwrap_or_else(|| self.docs.views.active().id);
-        let turn = turn && self.preferences.sketch_open_look_at;
+        // The Palette choice only changes how a person opens an existing sketch.
+        // Scripted edits and new sketches retain the previous view behaviour.
+        let remembered =
+            if turn { self.sketch_last_views.to_open(sketch, self.ui.sketch_open_view).filter(|camera| camera.up == self.ui.up_axis) } else { None };
+        let turn = turn && (remembered.is_some() || self.preferences.sketch_open_look_at);
         let _ = documents::with_sketch_camera(self, view, |app| {
             let before = if painted == view { before } else { app.settled_cam() };
-            if turn {
+            if let Some(to) = remembered {
+                app.animate_to(to);
+            } else if turn {
                 dialogs::look_at_sketch(app);
             }
             let facing = app.settled_cam();
@@ -3600,7 +3848,17 @@ impl SolveApp {
     }
 
     /// Successful UI and programmatic exits share the same window cleanup.
-    fn sketch_closed(&mut self, open: Option<u64>) {
+    fn sketch_closed(&mut self, open: Option<u64>, finished: bool) {
+        // Capture the actual editing tile before the existing exit preference restores
+        // its earlier camera. A cancelled new sketch has no surviving feature to remember.
+        if let Some(sketch) = open.filter(|sketch| self.session.doc.feature(*sketch).is_some())
+            && let Some(view) = self.pre_sketch_cam.as_ref().filter(|pre| pre.sketch == sketch).map(|pre| pre.view)
+        {
+            let _ = documents::with_sketch_camera(self, view, |app| {
+                let camera = app.settled_cam();
+                app.sketch_last_views.closed(sketch, camera, finished);
+            });
+        }
         self.sketch_closed_in(open, None);
     }
 
@@ -3644,22 +3902,36 @@ impl SolveApp {
         self.session.body_visible(name) || self.dialog.as_ref().is_some_and(|d| d.edit_source_bodies.iter().any(|source| source == name))
     }
 
-    /// Everything shown as selected: the selection plus the open dialog's inputs.
+    /// Everything shown as selected, including the Assistant's temporary highlights.
     pub fn highlighted(&self) -> Vec<solidcraft_engine::Sel> {
         let mut v = self.session.selection.clone();
         if let Some(d) = &self.dialog {
             v.extend(d.highlighted(&self.session));
         }
         v.extend(agent_chat::hovered_chip(self).iter().cloned());
+        v.extend(agent_chat::model_changes_targets(self));
         v.extend(sketch_text::highlighted(self));
         v.extend(sketch_text_move::highlighted(self));
         v
     }
 
     /// Is the browser's Origin folder shown? The design keeps it once it is toggled; until then
-    /// the Hide Origin by Default preference decides.
+    /// the Origin visibility preference decides. Automatic follows the model as shown, so it saves
+    /// nothing in the design: undoing the first body, or rolling back before it, shows the Origin
+    /// again. While a dialog edits a feature it follows the design from before that edit's own
+    /// rollback, so editing the first body leaves the Origin hidden.
     pub fn origin_shown(&self) -> bool {
-        !self.session.visibility.origin_hidden.unwrap_or(self.preferences.hide_origin)
+        if let Some(hidden) = self.session.visibility.origin_hidden {
+            return !hidden;
+        }
+        match self.preferences.hide_origin {
+            prefs::OriginDisplay::Shown => true,
+            prefs::OriginDisplay::Automatic => {
+                let session = self.editing_state.as_ref().map_or(&self.session, |editing| &editing.original);
+                session.model.state().bodies.is_empty()
+            }
+            prefs::OriginDisplay::Hidden => false,
+        }
     }
 
     /// Show or hide the browser's Origin folder (saved with the design).
@@ -3902,6 +4174,7 @@ impl SolveApp {
     /// Open `path` as [`Self::open_path_async`] does, for a caller that has more to do once the
     /// design is in (the web app's design links, #10198): the receiver gets `{"ok": true, ...}`
     /// when it is, or `{"ok": false, "error"}`; it is dropped unanswered when the load is.
+    /// Importer refusals also include `plugin_error` with `kind`, `plugin` and `reason`.
     pub fn open_path_answered(&mut self, path: &str) -> std::sync::mpsc::Receiver<Value> {
         let (tx, rx) = std::sync::mpsc::channel();
         let mut request = file_load::Request::new(path, file_load::Kind::Open);
@@ -3926,6 +4199,8 @@ impl SolveApp {
         self.pick_open(|app, path| {
             if let Some(path) = path {
                 app.open_chosen_file(&path);
+            } else {
+                app.file_load.home_at_start = false;
             }
         });
     }
@@ -4227,10 +4502,10 @@ impl SolveApp {
         }
         let (_, up, back) = animation.from.basis();
         let (_, to_up, to_back) = animation.to.basis();
-        if !matches!(solidcraft_kernel::services::measure::points_meet(up.into(), to_up.into(), 1e-9), Ok(true)) {
+        if !matches!(solidcraft_kernel::points::points_meet(up.into(), to_up.into(), 1e-9), Ok(true)) {
             return animation.around_screen_up(None);
         }
-        let angle = solidcraft_kernel::services::affine::signed_unit_angle(up.into(), back.into(), to_back.into()).ok();
+        let angle = solidcraft_kernel::affine::signed_unit_angle(up.into(), back.into(), to_back.into()).ok();
         animation.around_screen_up(angle)
     }
 
@@ -4287,17 +4562,6 @@ impl SolveApp {
         self.pending_fit = Some((to, bounds, true, shared));
     }
 
-    /// A view chosen on a navigator (a face, corner or arrow, an axis tip): the view turns
-    /// in place, or frames the whole model from the new direction when Preferences › Navigation
-    /// asks for it (`navigator_fit`, #10091).
-    pub fn animate_turn(&mut self, to: Camera) {
-        if self.preferences.navigator_fit {
-            self.animate_to_fitted(to);
-        } else {
-            self.animate_to(to);
-        }
-    }
-
     /// Animated view changes for the axis view and navigation bar.
     pub fn animate_view(&mut self, v: &str) {
         if drawing_workspace::active(self) && !dialogs_sheet::flat_active(self) && matches!(v, "fit" | "home") {
@@ -4336,6 +4600,12 @@ impl SolveApp {
         // The sheet page: Fit and Home both show the whole sheet.
         if drawing_workspace::active(self) {
             drawing_sheet_page::fit(self);
+            return;
+        }
+        // The design's own Home view: its camera as it was set, not fitted again (#19972).
+        if home && let Some(to) = solidcraft_engine::view::home_view(&self.session) {
+            self.pending_fit = None;
+            self.animate_to(to);
             return;
         }
         if render_workspace::active(self) {
@@ -4470,6 +4740,7 @@ impl SolveApp {
         render_workspace::tick(self, ctx);
         parts_library::tick(self, ctx);
         file_load::tick(self, ctx);
+        dialogs_insert_drawing::tick(self);
         save_job::tick(self, false);
         verify_job::tick(self);
         timeline::tick_import_checks(self, ctx);
@@ -4480,7 +4751,7 @@ impl SolveApp {
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
             edit_in_place::back(self);
         }
-        if self.saving.is_some() || self.verifying.is_some() || self.edit_in_place.refreshing() {
+        if self.saving.is_some() || self.verifying.is_some() || self.edit_in_place.refreshing() || self.insert_read.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
         open_meshing::tick(self, ctx);
@@ -4546,11 +4817,15 @@ impl SolveApp {
         #[cfg(feature = "usage-stats")]
         usage_stats::tick(self, ctx);
         plugin_updates::tick(self, ctx);
+        workshop::tick(self, ctx);
         if self.issue_report.draft.is_none() && self.file_picker.is_none() {
             // Files dropped on the theme Import tile are themes (#8226).
             prefs::take_theme_drops(self, ctx);
             // Files dropped on the agent chat attach to its next message instead.
             agent_chat::take_drops(self, ctx);
+            // Files dropped on the tab bar open in tabs of their own there.
+            #[cfg(not(target_arch = "wasm32"))]
+            documents::take_file_drops(self, ctx);
             for f in ctx.input(|i| i.raw.dropped_files.clone()) {
                 let p = f.path().to_string_lossy().to_string();
                 if !p.is_empty() {
@@ -4705,7 +4980,7 @@ impl SolveApp {
     fn apply_look(&mut self, ctx: &egui::Context) {
         // The view's own dark or light only changes tokens, not egui's visuals: no restyle.
         solidcraft_theme::set_viewport_dark(self.preferences.viewport_theme.dark());
-        solidcraft_theme::set_viewport_background(self.preferences.viewport_background);
+        solidcraft_theme::set_viewport_background(self.preferences.viewport_background_colours());
         if !self.styled || solidcraft_theme::is_dark() != self.ui.dark || solidcraft_theme::vision() != self.preferences.color_vision {
             solidcraft_theme::set_dark(self.ui.dark);
             solidcraft_theme::set_vision(self.preferences.color_vision);
@@ -4742,6 +5017,13 @@ impl SolveApp {
         let host = self.view_windows.current_window();
         let opening_host = self.view_windows.opening_host(Some(host));
         plugins::tick(self, ui.ctx(), false);
+        // The folders the user allowed linked files to be read from (Preferences, General): an importer
+        // plugin's link outside its design's folder is read only from one of them. The user's own
+        // setting, never the design's.
+        let allowed: Vec<std::path::PathBuf> = self.preferences.linked_file_folders.iter().map(std::path::PathBuf::from).collect();
+        if self.session.plugin_state.link_folders != allowed {
+            self.session.plugin_state.link_folders = allowed;
+        }
         documents::give_up_renames_of_other_designs(self);
         params_dialog::install_expressions(ui.ctx());
         ui_kit::set_viewport_half_height(ui.ctx(), self.cam.half_height());
@@ -4849,6 +5131,7 @@ impl SolveApp {
         if self.home.open {
             let workspace = ui.available_rect_before_wrap();
             panel_runtime::hide_app_host(self);
+            self.agent_chat.clear_model_changes();
             app_bar_custom::home_escape(self, ui.ctx());
             home::show(self, ui);
             if self.home.open {
@@ -4871,6 +5154,8 @@ impl SolveApp {
                 browser::editors(self, ui);
                 // File › Install plugin… is offered on Home too: its question must show there.
                 plugin_install::show(self, ui.ctx());
+                // A Workshop link can arrive while Home shows: its question shows there too.
+                workshop::show(self, ui.ctx());
                 // The recovery banner's Discard all asks here (File view lists the designs inline).
                 recovery_ui::show(self, ui.ctx());
                 // Entry dialogs from every plugin slot are available on Home too.
@@ -4878,6 +5163,7 @@ impl SolveApp {
                 // The unit of an imported mesh is asked on the screen the import starts: the
                 // start page asks it too, or the file would wait for an answer nobody sees (#15598).
                 mesh_units::show(self, ui.ctx());
+                file_load::show_refusal(self, ui.ctx());
                 return;
             }
         }
@@ -4908,11 +5194,13 @@ impl SolveApp {
         plugin_menu::show(self, ui.ctx());
         stand_up::show(self, ui.ctx());
         prefs_notice::show(self, ui.ctx());
+        file_load::show_refusal(self, ui.ctx());
         context_menu::show(self, ui.ctx());
         mouse_gesture::show(self, ui.ctx());
         delete::show(self, ui.ctx());
         easyprint_ui::show(self, ui.ctx());
         plugin_install::show(self, ui.ctx());
+        workshop::show(self, ui.ctx());
         import_report::show(self, ui.ctx());
         linked_source::show_copies(self, ui.ctx());
         joint_handles::show_warning(self, ui.ctx());
@@ -4956,19 +5244,17 @@ impl SolveApp {
             dim_view::set_model_drawn(Vec::new());
             let id = self.docs.views.active().id;
             drawing_sheet_page::show_view(self, ui, id);
-            view_tiles::single_sketch_chrome(self, ui);
         } else if drawing_workspace::active(self) {
             if dialogs_sheet::flat_active(self) {
                 viewport::show(self, ui);
             } else {
                 dim_view::set_model_drawn(Vec::new());
                 drawing_workspace::show(self, ui);
-                view_tiles::single_sketch_chrome(self, ui);
             }
         } else if view_window_drag::unanchored(self, ui.ctx(), self.docs.views.active().id) {
             self.viewport.rect = Some(ui.max_rect());
             let t = solidcraft_theme::Tokens::get();
-            solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_bottom);
+            solidcraft_viewport_egui::paint_background(ui.painter(), ui.max_rect(), t.viewport_top, t.viewport_middle, t.viewport_bottom);
         } else if render_workspace::active(self) {
             // The model view is not drawn, so no shown dimension can be double-clicked.
             dim_view::set_model_drawn(Vec::new());
@@ -5180,6 +5466,35 @@ fn unground_joint_status(app: &mut SolveApp, language: solidcraft_ui_text::Local
     }
 }
 
+/// A joint just made or changed that doesn't hold says why in Messages, as an error: the joint
+/// is kept, but nothing moved (#12867). Between two grounded parts, or a grounded part and the
+/// root, it says so, and how to let it place one; any other conflict gives the solver's reason.
+fn joint_conflict_status(app: &mut SolveApp, language: solidcraft_ui_text::Locale, v: &Value) {
+    use i18n::LocaleNames;
+
+    let Some(id) = v.get("joint").and_then(Value::as_u64) else { return };
+    let Some(conflict) =
+        v.get("conflicts").and_then(Value::as_array).into_iter().flatten().find(|c| c.get("joint").and_then(Value::as_u64) == Some(id))
+    else {
+        return;
+    };
+    let doc = &app.session.doc;
+    let Some(joint) = doc.assembly.joints.iter().find(|j| j.id == id) else { return };
+    let grounded = |o: u64| doc.occurrences.iter().find(|x| x.id == o && x.grounded).map(|x| language.given_name(&x.name));
+    let name = language.given_name(&joint.name);
+    let (a, b) = (joint.a.occurrence, joint.b.occurrence);
+    let msg = match (grounded(a), grounded(b)) {
+        (Some(ga), Some(gb)) if a != b => language.format("joint.moves_neither", &[("joint", &name), ("a", &ga), ("b", &gb)]),
+        // The root's own bodies never move: a grounded part joined to them is held the same way.
+        (Some(g), None) | (None, Some(g)) if a == 0 || b == 0 => language.format("joint.moves_neither_root", &[("joint", &name), ("occurrence", &g)]),
+        _ => {
+            let reason = conflict.get("why").and_then(Value::as_str).unwrap_or_default();
+            language.format("joint.does_not_hold", &[("joint", &name), ("reason", &language.diagnostic(reason))])
+        }
+    };
+    app.set_status(msg, true);
+}
+
 /// An edit in place command's result, saying when it waits for the end of the agent's turn.
 fn with_queued(mut result: Value, queued: bool) -> Value {
     if queued && let Some(o) = result.as_object_mut() {
@@ -5191,6 +5506,31 @@ fn with_queued(mut result: Value, queued: bool) -> Value {
 /// A command's name as people see it (its label), for the status bar.
 pub fn command_label(id: &str) -> &str {
     solidcraft_engine::find_command(id).map_or(id, |c| c.label)
+}
+
+/// Format a file path for user-facing notices and labels.
+///
+/// Native OS paths are returned unchanged. Browser virtual-filesystem mount
+/// prefixes (`/disk/<id>/...`, `/opfs/...`, `/downloads/...`, `/upload/...`)
+/// are stripped so internal mount tokens never appear in save or export toasts.
+pub fn display_user_path(path: &str) -> &str {
+    if let Some(rest) = path.strip_prefix("/disk/")
+        && let Some((id, tail)) = rest.split_once('/')
+        && !id.is_empty()
+        && !tail.is_empty()
+        && !tail.starts_with('/')
+    {
+        return tail;
+    }
+    for prefix in ["/opfs/", "/downloads/", "/upload/"] {
+        if let Some(tail) = path.strip_prefix(prefix)
+            && !tail.is_empty()
+            && !tail.starts_with('/')
+        {
+            return tail;
+        }
+    }
+    path
 }
 
 /// An engine error with the command's label instead of its id: "Shell: offset must be …".
@@ -5212,3 +5552,34 @@ pub fn now_ms() -> f64 {
 mod picker_test_support;
 #[cfg(test)]
 mod test_support;
+
+/// Commands that `SolveApp::start` runs with values it works out itself (a toggle's new state,
+/// the selected component or body), or offers a menu of (the selection filter's mode), although
+/// their schema requires them. Command search lists
+/// them (#9734); `start_special_cases_stay_in_command_search` keeps this list in step with
+/// `start`.
+const STARTED_WITH_VALUES: &[&str] = &[
+    "body.print_face",
+    "browser.visibility",
+    "component.move_features",
+    "component.relink",
+    "drawing.sketch.create",
+    "occurrence.properties",
+    "select.filter",
+    "select.mode",
+    "sketch.toggle_diameter",
+    "sketch.toggle_driven",
+    "tab.view.move_to_window",
+    "view.ambient_occlusion",
+    "view.angle_readout",
+    "view.layout",
+    "view.origin_axes_across_view",
+    "view.perspective",
+    "view.render_focus",
+    "view.scale_bar",
+    "view.shots_strip",
+];
+
+/// Command id prefixes `SolveApp::start` handles as a group (Settings profiles open Preferences
+/// on their page), so command search lists their commands too (#9734).
+const STARTED_BY_PREFIX: &[&str] = &["settings.profile."];

@@ -93,11 +93,25 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<RemoveParams>(), &["bodies", "body_name", "body_names", "name", "participants"]);
     assert_keys(
         input_schema_for::<EmbossParams>(),
-        &["body_name", "body_names", "depth", "face", "mode", "name", "participants", "profiles", "sketch", "targets"],
+        &[
+            "angle",
+            "body_name",
+            "body_names",
+            "depth",
+            "face",
+            "mode",
+            "name",
+            "offset_x",
+            "offset_y",
+            "participants",
+            "profiles",
+            "sketch",
+            "targets",
+        ],
     );
     assert_keys(
         input_schema_for::<BoundaryFillParams>(),
-        &["body_name", "body_names", "cells", "name", "operation", "participants", "remove_tools", "tools", "touching"],
+        &["body_name", "body_names", "cells", "name", "operation", "participants", "planes", "remove_tools", "tools", "touching"],
     );
     assert_keys(
         input_schema_for::<CoilParams>(),
@@ -110,6 +124,7 @@ fn schemas_and_the_key_check_agree() {
             "diameter",
             "end_cut",
             "height",
+            "height_measure",
             "name",
             "operation",
             "participants",
@@ -364,6 +379,12 @@ fn emboss_contract_keeps_the_handlers_errors() {
             ("solid.emboss", with(&emboss(), "sketch", json!("Nope"))),
             ("solid.emboss", with(&emboss(), "targets", json!(5))),
             ("solid.emboss", with(&emboss(), "profiles", json!(true))),
+            ("solid.emboss", with(&emboss(), "offset_x", json!("2 deg"))),
+            ("solid.emboss", with(&emboss(), "offset_y", json!("nope"))),
+            ("solid.emboss", with(&emboss(), "angle", json!("2 mm"))),
+            ("solid.emboss", with(&emboss(), "offset_x", json!(true))),
+            ("solid.emboss", with(&emboss(), "offset_y", json!({"mm": 2}))),
+            ("solid.emboss", with(&emboss(), "angle", json!(""))),
         ],
     );
     assert!(!crate::schema::issues("solid.emboss", &with(&emboss(), "mode", json!(5))).is_empty());
@@ -427,6 +448,13 @@ fn the_schemas_take_what_the_handlers_take() {
             with(&emboss(), "profiles", json!("all")),
             with(&emboss(), "targets", json!(["Sleeve"])),
             with(&emboss(), "face", json!({"x": 0, "y": 10, "z": 7.5})),
+            with(&emboss(), "offset_x", json!(1)),
+            with(&emboss(), "offset_y", json!("2 mm")),
+            with(&emboss(), "angle", json!("10 deg")),
+            with(&emboss(), "offset_x", json!(null)),
+            with(&emboss(), "offset_x", json!(true)),
+            with(&emboss(), "offset_y", json!({"mm": 2})),
+            with(&emboss(), "angle", json!("")),
             with(&emboss(), "depth", json!("")),
             with(&emboss(), "mode", json!("glue")),
             with(&emboss(), "face", json!([0, 10])),
@@ -537,4 +565,15 @@ fn replace_face_checks_its_keys() {
     let p = json!({"faces": [[10, 10, 10]], "target": "XY", "flp": true});
     let error = low_and_high(ParamCheck::Strict).execute("solid.replace_face", &p).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(error.contains("`flp`"), "{error}");
+}
+
+/// Boundary Fill's `planes` may be empty (the handler reads `[]` as none); its `tools` may not.
+#[test]
+fn boundary_fill_schema_takes_an_empty_planes_list_but_not_empty_tools() {
+    let schema = input_schema_for::<BoundaryFillParams>();
+    let schema = schema.as_value();
+    let call = |tools: Value, planes: Value| json!({"tools": tools, "planes": planes, "cells": [[1, 2, 3]]});
+    assert!(conforms(schema, schema, &call(json!(["A"]), json!([]))));
+    assert!(conforms(schema, schema, &call(json!(["A"]), json!(["XY"]))));
+    assert!(!conforms(schema, schema, &call(json!([]), json!([]))));
 }

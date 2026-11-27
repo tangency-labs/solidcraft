@@ -12,7 +12,7 @@ use solidcraft_doc::Occurrence;
 
 use super::check::{located, whole};
 use super::component_link::{ComponentRef, component_key, require};
-use super::types::{IdOrName, LengthExpr, Point3, PointExpr3, not_blank_pattern, present};
+use super::types::{AngleExpr, IdOrName, LengthExpr, Point3, PointExpr3, not_blank_pattern, present};
 use crate::params;
 
 /// Edit a linked component's design in place. In the app window: open the design it links in a
@@ -749,7 +749,14 @@ impl JsonSchema for ActivateParams {
     }
 }
 
-/// What `component.activate` returns.
+/// Make the parent of the active component the active one, at the placement the active one sits
+/// in: one level up a call, the design at the top. Refused while the design itself is active. A
+/// change of what is active, not an undo step. Replies as `component.activate` does.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ActivateParentParams {}
+
+/// What `component.activate` and `component.activate.parent` return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ActivateResult {
     /// The active component now, by id.
@@ -1627,12 +1634,65 @@ fn sketch_names_schema(_: &mut SchemaGenerator) -> Schema {
     })
 }
 
-/// Make every pending occurrence move the occurrence's placement, and save every moving joint's
-/// current values for Revert Position. The exploded view is shown, never captured: it stays
-/// shown, and the design keeps its placements.
+/// One occurrence move in explicit [`CapturePositionParams::moves`] (used by `timeline.redefine`).
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CapturedMoveParam {
+    /// The occurrence, by id.
+    pub occurrence: u64,
+    /// Frame for `translate` and `rotate_axis`: `local` (default) or `world`.
+    #[serde(default)]
+    pub space: Option<MoveSpace>,
+    /// Translation [x, y, z] as length numbers (design unit) or expressions.
+    #[serde(default)]
+    pub translate: Option<[LengthExpr; 3]>,
+    /// Optional rotation pivot [x, y, z] as length numbers or expressions.
+    #[serde(default)]
+    pub origin: Option<[LengthExpr; 3]>,
+    /// Optional rotation axis `[x, y, z]` (default `[0, 0, 1]`).
+    #[serde(default)]
+    pub rotate_axis: Option<Point3>,
+    /// Optional rotation angle (degrees if numeric, or angle expression like `"30 deg"`).
+    #[serde(default)]
+    pub angle: Option<AngleExpr>,
+    /// Optional column-major 4×4 pure rotation matrix (`col 3 == [0, 0, 0, 1]`).
+    #[serde(default)]
+    pub rotation: Option<[[f64; 4]; 4]>,
+    /// Optional placement path from root to `occurrence` for nested `world` moves.
+    #[serde(default)]
+    pub path: Option<OccurrencePath>,
+}
+
+/// One non-rigid joint snapshot in explicit [`CapturePositionParams::joints`] (used by `timeline.redefine`).
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CapturedJointParam {
+    /// The non-rigid joint, by id.
+    pub joint: u64,
+    /// Captured DOF values (mm for translations, radians for angles).
+    #[serde(default)]
+    pub values: Vec<f64>,
+    /// Optional expressions per DOF.
+    #[serde(default)]
+    pub exprs: Vec<Option<String>>,
+}
+
+/// Make every pending occurrence move a timeline `CapturePosition` feature and save every moving
+/// joint's current values for Revert Position, or record explicit moves and joints (`timeline.redefine`).
+/// The exploded view is shown, never captured: it stays shown, and the design keeps its placements.
+#[derive(Debug, Default, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
-pub struct CapturePositionParams {}
+pub struct CapturePositionParams {
+    /// Explicit occurrence moves to record instead of draining pending moves.
+    #[serde(default)]
+    pub moves: Option<Vec<CapturedMoveParam>>,
+    /// Explicit non-rigid joint snapshots to record instead of reading current joints.
+    #[serde(default)]
+    pub joints: Option<Vec<CapturedJointParam>>,
+    /// Optional timeline feature name.
+    #[serde(default)]
+    pub name: Option<String>,
+}
 
 /// What `component.capture_position` returns.
 #[derive(Debug, Serialize, JsonSchema)]
@@ -1641,6 +1701,9 @@ pub struct CapturePositionResult {
     pub captured: usize,
     /// How many joints had their current values saved, for Revert Position to put back.
     pub joints: usize,
+    /// The timeline feature created, when at least one move or joint was captured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feature: Option<u64>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -2131,6 +2194,29 @@ pub struct OccurrencePropertiesParams {
     pub about: Option<Point3>,
 }
 
+/// Where an occurrence sits in one frame, in the forms `occurrence.move` takes.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PlacementPose {
+    /// Its origin, in mm.
+    pub position: [f64; 3],
+    /// The unit axis of its turn from the frame's axes. No turn: +Z.
+    pub axis: [f64; 3],
+    /// The turn about `axis`, in degrees, from 0 to 180.
+    pub angle_deg: f64,
+    /// The same placement as three rows of four: the rotation, with the translation in the last
+    /// column of each row.
+    pub matrix: [[f64; 4]; 3],
+}
+
+/// Where an occurrence sits: in its parent component and in the world.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OccurrencePlacement {
+    /// Its own placement, in the component it is placed in.
+    pub in_parent: PlacementPose,
+    /// Its placement in the world: every placement above it applied.
+    pub world: PlacementPose,
+}
+
 /// What `occurrence.properties` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct OccurrencePropertiesResult {
@@ -2140,6 +2226,9 @@ pub struct OccurrencePropertiesResult {
     pub name: Option<String>,
     #[serde(flatten)]
     pub properties: PhysicalProperties,
+    /// Where it sits, in its parent and in the world, pending moves included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<OccurrencePlacement>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -2264,6 +2353,34 @@ pub struct BodyCollisionParams {
     pub component: Option<IdOrName>,
     /// `auto` (the export decides), `mesh`, `box`, `cylinder`, `sphere` or `none`.
     pub shape: String,
+}
+
+/// Draw bodies with or without their edge lines, whatever the visual style.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BodyEdgeLinesParams {
+    /// The body, by name. Give this or `bodies`.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Several bodies, by name. Give this or `body`.
+    #[serde(default)]
+    pub bodies: Option<Vec<String>>,
+    /// `false` draws the bodies without their edge lines; `true` (the default) draws them as the
+    /// visual style says.
+    #[serde(default)]
+    pub show: Option<bool>,
+}
+
+/// What `body.edge_lines` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BodyEdgeLinesResult {
+    /// The bodies set.
+    pub bodies: Vec<String>,
+    /// Whether they now draw their edge lines.
+    pub show: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What `body.collision` returns.

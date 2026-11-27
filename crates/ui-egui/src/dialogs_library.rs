@@ -21,6 +21,8 @@ pub struct LocalLibrary {
     pub overwrite: bool,
     pub materials: bool,
     pub material_name: String,
+    /// The remembered library (`Prefs::appearance_library`) was looked at when the panel opened.
+    pub restored: bool,
 }
 
 fn display_order(mut catalog: Catalog) -> Catalog {
@@ -108,6 +110,41 @@ fn export(app: &mut SolveApp, k: &mut Ap, path: String, overwrite: bool) {
     });
 }
 
+/// The first time the panel draws, the library it was asked to keep (`Prefs::appearance_library`) is
+/// loaded again, unless a library is already named. A library that no longer reads says why in the note.
+#[cfg(not(target_arch = "wasm32"))]
+fn restore(app: &mut SolveApp, k: &mut Ap) {
+    if std::mem::replace(&mut k.local.restored, true) || !k.local.path.is_empty() || app.preferences.appearance_library.is_empty() {
+        return;
+    }
+    k.local.path = app.preferences.appearance_library.clone();
+    k.note = Some(load(app, &mut k.local).unwrap_or_else(|error| error));
+}
+
+/// The appearances of the loaded local library, as the panel's swatches show them.
+pub(crate) fn local_looks(k: &Ap) -> Vec<crate::dialogs_appearance::Look> {
+    k.local
+        .catalog
+        .iter()
+        .flat_map(|catalog| &catalog.entries)
+        .filter_map(|entry| match &entry.definition {
+            solidcraft_engine::io::catalog::Definition::Appearance(look) => Some(crate::dialogs_appearance::Look {
+                preset: None,
+                name: look.name.clone(),
+                category: catalog_name(k),
+                color: look.color,
+                opacity: look.opacity,
+                pbr: look.pbr,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn catalog_name(k: &Ap) -> String {
+    k.local.catalog.as_ref().map(|c| c.name.clone()).unwrap_or_default()
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn load(app: &mut SolveApp, library: &mut LocalLibrary) -> Result<String, String> {
     let result = app.run("library.inspect", json!({"path":library.path}))?;
@@ -120,6 +157,10 @@ fn load(app: &mut SolveApp, library: &mut LocalLibrary) -> Result<String, String
 }
 
 pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &[SelInput]) {
+    // Before the section: a collapsed section skips its body, and Favorites still needs the
+    // remembered library's looks.
+    #[cfg(not(target_arch = "wasm32"))]
+    restore(app, k);
     ui_kit::section(ui, "local_library", "Local library", true, |ui| {
         #[cfg(not(target_arch = "wasm32"))]
         import_rows(app, ui, k, inputs);
@@ -173,6 +214,13 @@ fn import_rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Ap, inputs: &[SelI
             k.note = Some(load(app, &mut k.local).unwrap_or_else(|error| error));
         }
     });
+    let mut keep = !k.local.path.is_empty() && app.preferences.appearance_library == k.local.path;
+    let label = app.tr("appearance.keep_library").to_owned();
+    let keep_box = ui.add_enabled_ui(k.local.catalog.is_some() || keep, |ui| ui_kit::checkbox(ui, &label, &mut keep)).inner;
+    crate::scenario::publish_handle("library:keep", keep_box.rect.center());
+    if keep_box.changed() {
+        app.preferences.appearance_library = if keep { k.local.path.clone() } else { String::new() };
+    }
     if let Some(catalog) = &k.local.catalog {
         ui_kit::text(ui, &catalog.name, ui_kit::Text::Report("library_name", false));
         let mode = ui_kit::checkbox(ui, solidcraft_ui_text::tr_label("Physical material definitions"), &mut k.local.materials);

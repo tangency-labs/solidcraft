@@ -38,6 +38,22 @@ pub fn panels(tab: &str) -> Vec<&'static str> {
     crate::workspace::panels(tab)
 }
 
+/// The groups that leave what is open (the sketch, the active component, the edit), pinned at
+/// the ribbon's right end when last: labelled Exit, their own buttons never shown pressed.
+fn exit_panel(tab: &str, panel: &str) -> bool {
+    matches!((tab, panel), ("SKETCH", "FINISH SKETCH") | ("MODEL", "ACTIVE COMPONENT" | "FINISH EDITING"))
+}
+
+/// Whether a panel of `tab` is on the ribbon now: an exit group only while there is something
+/// to leave.
+pub(crate) fn panel_shown(app: &SolveApp, tab: &str, panel: &str) -> bool {
+    match (tab, panel) {
+        ("MODEL", "ACTIVE COMPONENT") => app.session.active_component != 0,
+        ("MODEL", "FINISH EDITING") => app.edit_in_place.active.is_some(),
+        _ => true,
+    }
+}
+
 pub use crate::ribbon::TAB_ROW_HEIGHT;
 pub const RIBBON_HEIGHT: f32 = TAB_ROW_HEIGHT + GROUP_HEIGHT + 1.0;
 pub(crate) const WORKSPACE_WIDTH: f32 = 88.0;
@@ -234,7 +250,11 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         // or the caption buttons take its ends. In full screen macOS shows the traffic lights in
         // its own title bar that slides down over the window, not in the bar: no room for them.
         let fullscreen = ui.ctx().input(|i| i.viewport().fullscreen.unwrap_or(false));
-        let chrome = crate::window_chrome::TitleBar { traffic_lights: app.integrated_titlebar && !fullscreen, caption_buttons: app.custom_titlebar };
+        let chrome = crate::window_chrome::TitleBar {
+            traffic_lights: app.integrated_titlebar && !fullscreen,
+            caption_buttons: app.custom_titlebar,
+            hide_caption_buttons: !app.preferences.show_window_controls,
+        };
         let action = chrome.show(ui, r, |ui, content| {
             // While a file loads the design waits: no menus or commands from the bar.
             let idle = !app.file_load_holds();
@@ -378,12 +398,8 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         crate::links::run(ui.ctx(), id);
                     }
                     app_bar::BarAction::HidePill { id } => {
-                        // A pill the organization's policy shows stays: say why instead.
-                        if crate::links::by_id(id).is_some_and(|link| app.policy.locks(link.pref)) {
-                            app.set_status(solidcraft_ui_text::tr("policy.set_by_organization").to_string(), false);
-                        } else {
-                            crate::app_bar_custom::run(app, &json!({"item":if id == "kofi" { "donate" } else { id },"action":"hide"}));
-                        }
+                        // `run` refuses a pill the organization's policy shows, and says why.
+                        crate::app_bar_custom::run(app, &json!({"item":if id == "kofi" { "donate" } else { id },"action":"hide"}));
                     }
                     app_bar::BarAction::Version => ui.ctx().open_url(egui::OpenUrl::new_tab(&url)),
                     app_bar::BarAction::App { id } => run_overflow_control(app, id),
@@ -732,7 +748,8 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
         .enumerate()
         .map(|(i, path)| {
             let missing = !crate::home::available(app, path);
-            button(&format!("recent:{i}"), &format!("{path}{}", if missing { " (missing)" } else { "" }), "open", None)
+            let shown = crate::display_user_path(path);
+            button(&format!("recent:{i}"), &format!("{shown}{}", if missing { " (missing)" } else { "" }), "open", None)
         })
         .collect();
     recent.push(FileRow::Separator);
@@ -768,6 +785,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
     rows.push(row("export_usd", &format!("{}…", app.tr("ui.export_usd")), "", "export", shown));
     rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
+    rows.push(row("file.export_mjcf", app.tr_label("Export MJCF…"), &key("file.export_mjcf"), "export", shown));
     rows.push(row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown));
     rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
     // Each installed export slot is a format of its own, labelled with the plugin's name.
@@ -803,6 +821,22 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
         rows.push(row(&item.command, &item.label, "", &item.icon, shown || item.importer));
     }
     rows
+}
+
+/// The File menu row that starts command `id` the way the menu does (a picker for the file), for
+/// commands that need a path or a format and so can't start with no values. Command search starts
+/// these through the menu (#9734).
+pub(crate) fn file_menu_row(id: &str) -> Option<&'static str> {
+    Some(match id {
+        "file.export_stl" => "file.export_stl",
+        "file.export_3mf" => "file.export_3mf",
+        "file.export_step" => "file.export_step",
+        "file.export_obj" => "file.export_obj",
+        "file.export_urdf" => "file.export_urdf",
+        "file.save_as" => "save_as",
+        "doc.open" => "open",
+        _ => return None,
+    })
 }
 
 /// The File menu row of an export slot: this, then its `plugin_id.entry`.
@@ -844,6 +878,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "file.export_view_dxf" => FileAction::Command("file.export_view_dxf").run(app),
         "file.export_obj" => FileAction::Command("file.export_obj").run(app),
         "file.export_urdf" => FileAction::Command("file.export_urdf").run(app),
+        "file.export_mjcf" => FileAction::Command("file.export_mjcf").run(app),
         "file.export_sdf" => FileAction::Command("file.export_sdf").run(app),
         "document.metadata" => FileAction::Command("document.metadata").run(app),
         "drawing.print" => app.start(id),
@@ -994,7 +1029,11 @@ pub(crate) fn download_design(app: &mut SolveApp) {
 }
 
 pub(crate) fn export(app: &mut SolveApp, ext: &str) {
-    export_as(app, ext, None);
+    match ext {
+        // MJCF is saved as the usual `.xml`, which alone does not name the format.
+        "mjcf" => export_as(app, "xml", Some("mjcf")),
+        _ => export_as(app, ext, None),
+    }
 }
 
 /// Each format's own export command, started from its key, command search or the File menu,
@@ -1011,6 +1050,7 @@ pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
         "file.export_step" => ("step", false),
         "file.export_obj" => ("obj", false),
         "file.export_urdf" => ("urdf", false),
+        "file.export_mjcf" => ("mjcf", false),
         "file.export_sdf" => ("sdf", false),
         "file.export_stl" => ("stl", true),
         "file.export_3mf" => ("3mf", true),
@@ -1074,7 +1114,8 @@ pub(crate) fn exported(app: &mut SolveApp, path: &str, result: &Value) {
         let text = crate::i18n::tr_diagnostic(warning);
         app.messages.push(&text, false, crate::now_ms());
     }
-    let mut line = format!("Exported {path}");
+    let shown = crate::display_user_path(path);
+    let mut line = format!("Exported {shown}");
     if let Some(first) = warnings.first() {
         line.push_str(&format!(" with {} warning(s): {first}", warnings.len()));
     }
@@ -1570,7 +1611,7 @@ struct Panel {
     more: Vec<PanelMoreRow>,
 }
 
-/// The ribbon's Plugins group (Model tab): one button per command of each plugin turned on.
+/// The ribbon's Plugins group (Model tab): commands and explicitly declared plugin menus.
 struct PluginGroup {
     label: String,
     tip: String,
@@ -1583,7 +1624,7 @@ struct RibbonPanels {
     panels: Vec<Panel>,
     /// The Plugins group after the ordinary panels and before the exit panel, when present.
     plugins: Option<PluginGroup>,
-    /// The last panel leaves the sketch or the edit.
+    /// The last panel is an exit group, pinned at the right.
     exit: bool,
     running: Option<String>,
 }
@@ -1591,14 +1632,13 @@ struct RibbonPanels {
 impl RibbonPanels {
     fn new(app: &SolveApp, ui: &egui::Ui, tab: &str, lists: &[PanelList], painter: &egui::Painter, running: Option<String>) -> Self {
         let labels = app.preferences.ribbon_labels;
-        let editing_in_place = app.edit_in_place.active.is_some();
         let open_menu = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")));
         let panels = lists
             .iter()
             .map(|(panel, cmds, shown)| {
                 let panel: &'static str = panel;
                 let sketch_create = tab == "SKETCH" && panel == "CREATE";
-                let finish = (tab == "SKETCH" && panel == "FINISH SKETCH") || (tab == "MODEL" && panel == "FINISH EDITING");
+                let finish = exit_panel(tab, panel);
                 let in_gallery = |c: &&'static solidcraft_engine::CommandSpec| crate::toolbar_custom::in_gallery(app, tab, panel, c.id);
                 let button = |c: &'static solidcraft_engine::CommandSpec| {
                     // Only the family's default pin follows the part's choice. Explicitly pinned
@@ -1630,7 +1670,14 @@ impl RibbonPanels {
                         // The buttons that leave the sketch or the edit never show pressed; a
                         // tool pinned into their group does.
                         exit: finish
-                            && matches!(selected.id, "sketch.finish" | "sketch.finish_auto_constrain" | "sketch.cancel" | "component.finish_edit"),
+                            && matches!(
+                                selected.id,
+                                "sketch.finish"
+                                    | "sketch.finish_auto_constrain"
+                                    | "sketch.cancel"
+                                    | "component.activate.parent"
+                                    | "component.finish_edit"
+                            ),
                         persistent,
                         disabled: info.disabled_reason,
                         coming_soon: coming_soon(app, selected),
@@ -1695,10 +1742,9 @@ impl RibbonPanels {
                 }
             })
             .collect::<Vec<_>>();
-        // The Sketch exit group follows the last sketch panel (Finish Edit the last panel while
-        // editing in place).
-        let exit = (tab == "SKETCH" || (tab == "MODEL" && editing_in_place))
-            && panels.last().is_some_and(|p| matches!(p.panel, "FINISH SKETCH" | "FINISH EDITING"));
+        // An exit group shown last is pinned at the right; the caller leaves out the ones with
+        // nothing to leave (`panel_shown`).
+        let exit = panels.last().is_some_and(|p| exit_panel(tab, p.panel));
         let buttons = if tab == "MODEL" { crate::plugin_menu::ribbon_buttons(app) } else { Vec::new() };
         let plugins = (!buttons.is_empty()).then(|| PluginGroup {
             label: app.tr("ui.plugins").to_string(),
@@ -1767,7 +1813,11 @@ impl RibbonPanels {
                         enabled: true,
                         pressed: false,
                         exit: false,
-                        split: None,
+                        split: b.id.starts_with(crate::plugin_menu::RIBBON_GROUP_PREFIX).then_some(ribbon::Split {
+                            key: &b.id,
+                            title: &b.label,
+                            name: &b.name,
+                        }),
                         app_paints: false,
                         covers: &[],
                     };
@@ -1985,10 +2035,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             && !ribbon::dragging(ui.ctx());
         // Every panel with all its buttons (the user's pins have no cap); a toolbar too narrow
         // for them narrows the buttons, then trims panels into their drop-down and the » menu.
-        let editing_in_place = app.edit_in_place.active.is_some();
         let lists: Vec<_> = crate::toolbar_custom::panel_lists_for(app, &tab)
             .into_iter()
-            .filter(|(panel, _, _)| editing_in_place || !(tab == "MODEL" && *panel == "FINISH EDITING"))
+            .filter(|(panel, _, _)| panel_shown(app, &tab, panel))
             .map(|(panel, mut cmds, promote)| {
                 let promote = if tab == "SKETCH" && panel == "CREATE" && !app.preferences.sketch_construction_lines {
                     promote.saturating_sub(1)
@@ -2055,6 +2104,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             let deferred = d.deferred.take();
             if let Some(b) = panels.plugin_button(d) {
                 let _ = d.response.clone().backing_on_hover_text(&b.name);
+                if d.split.as_ref().is_some_and(|arrow| arrow.clicked()) {
+                    out.actions.push(ribbon::Action::Run { id: b.id.clone(), rect: d.whole, place: ribbon::Place::Button });
+                }
                 continue;
             }
             let Some(b) = panels.panel_button(d) else {
@@ -2111,6 +2163,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             }
             match action {
                 ribbon::Action::Run { id, rect, place } => {
+                    if crate::plugin_menu::toggle_ribbon_group(app, ui.ctx(), &id, rect) {
+                        continue;
+                    }
                     // A plugin command's button opens that command's dialog, and nothing else.
                     if crate::plugin_menu::choose_ribbon(app, &id) {
                         continue;
@@ -2162,7 +2217,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 }
                 ribbon::Action::Drop { id, group, before } => {
                     // Plugin buttons stay in their own group; they are not pinned commands.
-                    if id.starts_with(crate::plugin_menu::RIBBON_PREFIX) {
+                    if id.starts_with(crate::plugin_menu::RIBBON_PREFIX) || id.starts_with(crate::plugin_menu::RIBBON_GROUP_PREFIX) {
                         continue;
                     }
                     if let Some((panel, _, _)) = panels.panel_index(group).and_then(|i| lists.get(i)) {
@@ -2769,6 +2824,7 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
         // The tool's own help, when it has one (#2758).
         if let Some(help) = crate::command_help::help(command.id) {
             ui.add(egui::Label::new(egui::RichText::new(help).color(t.text_dim)).wrap());
+            crate::command_help::illustration(ui, command.id);
         }
         let reason = if crate::drawing_workspace::active(app) && command.planned.is_some() {
             coming_soon(app, command).then(|| app.tr("ui.drawing_ribbon.planned"))
@@ -3352,6 +3408,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 } else if app.session.has_selection() || app.session.active_sketch.is_none() {
                     crate::edit_clipboard::drop_cut(app);
                     app.tree.picked_joints.clear();
+                    app.viewport.edit_dimensions = None;
                     let _ = app.run("select.clear", json!({}));
                 }
                 // A single Esc with nothing left to cancel keeps the sketch open (#1804); a quick
@@ -3681,6 +3738,27 @@ mod header_report_tests {
         crate::keymap::press(&mut h.app, "Alt+Shift+F8", false);
         assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("file.save_mesh"), "STL opens Save As Mesh");
         crate::dialogs::cancel(&mut h.app);
+    }
+
+    /// File › Export MJCF… offers the usual `.xml` name and writes MuJoCo's format there, which a
+    /// `.xml` path alone would not pick (#20786).
+    #[test]
+    fn file_menu_exports_mjcf_as_an_xml_file() {
+        let mut h = crate::scenario::Harness::new();
+        let offered = std::rc::Rc::new(std::cell::RefCell::new(Vec::<(String, Vec<String>)>::new()));
+        let (seen, dir) = (offered.clone(), h.dir.clone());
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            seen.borrow_mut().push((name.to_string(), extensions.iter().map(|e| e.to_string()).collect()));
+            Box::pin(std::future::ready(Some(dir.join(name).to_string_lossy().into_owned())))
+        }));
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+        h.app.session.doc_mut().name = "Bracket".into();
+        run_file_row(&mut h.app, "file.export_mjcf");
+        h.frames(3);
+        h.settle();
+        assert_eq!(offered.borrow().last().cloned(), Some(("Bracket.xml".to_string(), vec!["xml".to_string()])));
+        let xml = std::fs::read_to_string(h.dir.join("Bracket.xml")).unwrap();
+        assert!(xml.contains("<mujoco"), "an MJCF model is written: {xml}");
     }
 
     /// What an exporter leaves out is said on the status line, and each warning stays in Messages
@@ -5026,8 +5104,9 @@ mod dropdown_tests {
             assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_none(), "grid {grid}: unpinned");
             pick(&mut h, "Pin to Shortcuts");
             assert!(h.app.sbox.pinned.iter().any(|p| p == "solid.box"), "grid {grid}: a shortcut");
-            // The pin shown on the pointed-at row or icon pins it, and again unpins it. A grid
-            // icon's pin takes clicks only after the pointer has rested on it for ribbon::PIN_DELAY.
+            // The pin shown on the pointed-at icon pins it and again unpins it. A grid icon's pin
+            // takes clicks only after the pointer has rested on it for ribbon::PIN_DELAY. A row has
+            // no pin (#11853): its ⋯ menu does it.
             for pinned in [true, false] {
                 h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
                 h.frames(4);
@@ -5037,10 +5116,19 @@ mod dropdown_tests {
                     assert!(crate::scenario::handle_at("dropdown_pin:solid.box").is_none(), "no pin to click straight away");
                     h.frames((ribbon::PIN_DELAY * 60.0) as usize + 5);
                 }
-                h.step(&json!({"click":{"handle":"dropdown_pin:solid.box"}})).unwrap();
+                if grid {
+                    h.step(&json!({"click":{"handle":"dropdown_pin:solid.box"}})).unwrap();
+                } else {
+                    h.frames((ribbon::PIN_DELAY * 60.0) as usize + 5);
+                    assert!(crate::scenario::handle_at("dropdown_pin:solid.box").is_none(), "a row never shows a pin by default");
+                    h.step(&json!({"click":{"handle":"dropdown_more:solid.box"}})).unwrap();
+                    h.frames(3);
+                    let item = if pinned { "Pin to Toolbar" } else { "Remove from Toolbar" };
+                    h.step(&json!({"widget": item})).unwrap_or_else(|e| panic!("{item} in the row's ⋯ menu: {e}"));
+                }
                 h.frames(3);
                 h.step(&json!({"key":"Escape"})).unwrap();
-                assert_eq!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_some(), pinned, "grid {grid}: the hover pin");
+                assert_eq!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_some(), pinned, "grid {grid}");
             }
             assert!(h.app.session.doc.features.is_empty(), "grid {grid}: pinning does not run the command");
         }
@@ -6124,6 +6212,75 @@ mod app_bar_tests {
     }
 
     #[test]
+    fn a_pill_the_policy_shows_stays_on_the_bar_through_every_hide() {
+        let _language = solidcraft_ui_text::scope("en");
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        h.call("ui.resize", json!({"width":1920,"height":720}));
+        h.app.preferences.show_discord_button = true;
+        h.app.policy = crate::policy::Policy::from_json(r#"{"ShowDonateButton": 1}"#);
+        crate::policy::enforce(&mut h.app);
+        h.app.toolbar_custom.reset_app_bar();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("titlebar:kofi").is_some(), "the policy shows the pill");
+        let refused = "Set by your organization";
+        let hide_row = |app: &crate::SolveApp, id: &str| {
+            crate::app_bar_custom::items(app, Some(id))
+                .into_iter()
+                .find(|row| row.params == Some(json!({"item":id,"action":"hide"})))
+                .unwrap()
+                .enabled
+        };
+        assert!(!hide_row(&h.app, "donate"), "the right-click Hide row is off");
+        assert!(hide_row(&h.app, "discord"));
+        // The pill's ×, the edit menu's Hide (also Delete and dragging it off) and a preset that
+        // leaves it out: each keeps the pill and says why.
+        h.step(&json!({"click":{"handle":"titlebar:kofi:hide"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("titlebar:kofi").is_some());
+        assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains(refused)), "{:?}", h.app.status);
+        h.app.status = None;
+        crate::app_bar_custom::run(&mut h.app, &json!({"item":"donate","action":"hide"}));
+        assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains(refused)), "{:?}", h.app.status);
+        assert!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "donate").unwrap().shown, "the saved layout is unchanged");
+        crate::app_bar_custom::preset(&mut h.app, ui_kit::app_bar_items::Preset::Minimal);
+        h.frames(3);
+        assert!(crate::scenario::rect_of("titlebar:kofi").is_some(), "a preset that hides it does not");
+        assert!(crate::scenario::rect_of("titlebar:discord").is_none(), "the preset still hides the unlocked pill");
+        // In customize mode, Delete on the focused pill and dragging it off the bar keep it too.
+        h.app.toolbar_custom.reset_app_bar();
+        h.app.start("ui.appBarCustomize");
+        h.frames(4);
+        let at = crate::scenario::handle_at("appbar:edit:donate").unwrap();
+        h.step(&json!({"click":[at.x,at.y]})).unwrap();
+        h.step(&json!({"key":"Delete"})).unwrap();
+        h.frames(3);
+        assert!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "donate").unwrap().shown, "Delete keeps it");
+        let at = crate::scenario::rect_of("appbar:edit:donate").unwrap().center();
+        let press =
+            |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        h.frame_with(vec![press(at, true)]);
+        let away = pos2(at.x, 650.0);
+        h.frame_with(vec![egui::Event::PointerMoved(away)]);
+        h.frame_with(vec![press(away, false)]);
+        h.frames(30);
+        assert!(h.app.toolbar_custom.app_bar.items.iter().find(|p| p.id == "donate").unwrap().shown, "dragging it off keeps it");
+        assert!(crate::scenario::rect_of("appbar:edit:donate").is_some(), "it is back on the bar");
+        h.step(&json!({"click":{"handle":"appbar:done"}})).unwrap();
+        h.frames(3);
+        // A pill the policy does not lock hides as before.
+        h.app.toolbar_custom.reset_app_bar();
+        h.frames(3);
+        h.app.status = None;
+        h.step(&json!({"click":{"handle":"titlebar:discord:hide"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("titlebar:discord").is_none());
+        assert!(h.app.status.as_ref().is_none_or(|s| !s.0.contains(refused)), "{:?}", h.app.status);
+        assert!(h.app.preferences.show_discord_button, "bar hiding edits the placement only");
+    }
+
+    #[test]
     fn app_bar_layout_and_legacy_visibility_switches_both_gate_drawing() {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
@@ -6886,6 +7043,31 @@ mod ribbon_gallery_tests {
         assert!(rect_of("button:sketch.constraint.midpoint").unwrap().height() > first.height());
         assert_eq!(rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[5])).map(|r| r.size()), Some(last.size()));
     }
+
+    #[test]
+    fn re_pinned_concentric_returns_to_the_small_constraint_grid() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1800,"height":900}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(3);
+        let id = "sketch.constraint.concentric";
+        let cell = format!("ribbon:constraint:{id}");
+        crate::toolbar_custom::pin(&mut h.app, "SKETCH", id).unwrap();
+        h.frames(3);
+        let first = rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[0])).unwrap();
+        let small = rect_of(&cell).unwrap();
+        assert_eq!(small.size(), first.size());
+
+        // Drag it out to a full-size button, remove it, then pin it again.
+        crate::toolbar_custom::reorder(&mut h.app, "SKETCH", id, "CONSTRAIN", None);
+        h.frames(3);
+        assert!(rect_of(&cell).is_none());
+        assert!(rect_of(&format!("button:{id}")).unwrap().height() > small.height());
+        crate::toolbar_custom::remove(&mut h.app, "SKETCH", id);
+        crate::toolbar_custom::pin(&mut h.app, "SKETCH", id).unwrap();
+        h.frames(3);
+        assert_eq!(rect_of(&cell).map(|r| r.size()), Some(first.size()));
+    }
 }
 
 #[cfg(test)]
@@ -6950,8 +7132,9 @@ mod fill_width_tests {
                 let right = bar.right() - 4.0 - finish.map_or(0.0, |f| f.width() + 4.0);
                 let count = |name: &str| crate::scenario::count_of(name).unwrap_or(-1.0);
                 let (collapsed, trimmed, more) = (count("toolbar_collapsed"), count("toolbar_trimmed"), count("toolbar_more"));
-                // FINISH EDITING is shown only while a linked design is edited in place.
-                let lists: Vec<_> = crate::toolbar_custom::panel_lists(tab).into_iter().filter(|(panel, _, _)| *panel != "FINISH EDITING").collect();
+                // The exit groups with nothing to leave are not on the toolbar.
+                let lists: Vec<_> =
+                    crate::toolbar_custom::panel_lists(tab).into_iter().filter(|(panel, _, _)| panel_shown(&h.app, tab, panel)).collect();
                 let mut end = bar.left();
                 let mut on_bar = 0;
                 for (panel, cmds, promote) in &lists {
@@ -7200,6 +7383,147 @@ mod command_start_tab_tests {
         h.app.session.selection = vec![face];
         h.app.start("occurrence.ground");
         assert!(!grounded(&h), "a picked face toggles its placement back: {:?}", h.app.status);
+    }
+
+    /// A design with a 40 x 30 x 20 box, saved as a file and inserted into a new design as a
+    /// linked component: the app, the component, its placement and the folder the file is in.
+    fn with_a_linked_component(name: &str) -> (Harness, u64, u64, std::path::PathBuf) {
+        let folder = std::env::temp_dir().join(format!("solidcraft-break-link-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let source = folder.join("part.solidcraft");
+        let mut part = solidcraft_engine::Session::default();
+        part.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        part.execute("file.save", &json!({"path": source})).unwrap();
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        let inserted = h.app.run("component.insert_design", json!({"path": source})).unwrap();
+        h.app.ui.tab = "INSERT".into();
+        h.app.status = None;
+        let (component, occurrence) = (inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+        (h, component, occurrence, folder)
+    }
+
+    /// The ribbon's Break Link ran `component.break_link` with no component, so it always
+    /// failed with "`component` must be a component id or name". With a linked component's
+    /// placement selected in the Browser it breaks that component's link, and the body stays.
+    #[test]
+    fn ribbon_break_link_breaks_the_link_of_the_selected_placement() {
+        let (mut h, component, occurrence, folder) = with_a_linked_component("placement");
+        assert!(h.app.session.doc.links.contains_key(&component));
+        let bodies = h.app.session.model.state().bodies.len();
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [occurrence]}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "the link is broken: {:?}", h.app.status);
+        assert_eq!(h.app.session.model.state().bodies.len(), bodies, "its bodies stay");
+        let (status, _, error) = h.app.status.clone().expect("the status line says which link was broken");
+        assert_eq!(status, solidcraft_ui_text::format("ui.break_link_done", &[("name", "part")]));
+        assert!(!error);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// A body of the linked component picked in the view stands for its placement, as it does
+    /// for Ground; so does the component picked in the Browser.
+    #[test]
+    fn ribbon_break_link_takes_the_component_of_a_picked_body_or_browser_row() {
+        let (mut h, component, _, folder) = with_a_linked_component("body");
+        let body = h.app.session.model.state().bodies.first().map(|b| b.name.clone()).unwrap();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "the picked body's component: {:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(folder);
+
+        let (mut h, component, _, folder) = with_a_linked_component("row");
+        h.app.tree.picked_components = vec![component];
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "the component picked in the Browser: {:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// A linked component inside a component that is not linked: a body of it picked in the view
+    /// breaks its link (the placement a drag or Ground takes for that body is the outer one,
+    /// which has no link), and so does its own placement's row. The outer component selected
+    /// breaks nothing: it is not linked.
+    #[test]
+    fn ribbon_break_link_finds_a_linked_component_inside_one_that_is_not_linked() {
+        let nested = |name: &str| {
+            let folder = std::env::temp_dir().join(format!("solidcraft-break-link-{name}-{}", std::process::id()));
+            std::fs::create_dir_all(&folder).unwrap();
+            let source = folder.join("part.solidcraft");
+            let mut part = solidcraft_engine::Session::default();
+            part.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
+            part.execute("file.save", &json!({"path": source})).unwrap();
+            let mut h = Harness::new();
+            h.app.home.open = false;
+            let holder = h.app.run("component.create", json!({"name": "Holder"})).unwrap();
+            let inserted = h.app.run("component.insert_design", json!({"path": source})).unwrap();
+            h.app.run("component.activate", json!({"component": 0})).unwrap();
+            h.app.status = None;
+            let ids = (holder["occurrence"].as_u64().unwrap(), inserted["component"].as_u64().unwrap(), inserted["occurrence"].as_u64().unwrap());
+            (h, ids, folder)
+        };
+        let (mut h, (holder, component, occurrence), folder) = nested("nested-body");
+        assert_eq!(
+            h.app.session.occurrence_placement(&[holder, occurrence]).ok().map(|p| p.component),
+            Some(component),
+            "the linked part is inside Holder"
+        );
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [holder]}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(h.app.session.doc.links.contains_key(&component), "Holder is not linked: nothing is broken");
+        let body = h.app.session.model.state().bodies.first().map(|b| b.name.clone()).unwrap();
+        h.app.run("select.set", json!({"items": [{"type": "body", "name": body}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "the picked body's linked component: {:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(folder);
+
+        let (mut h, (holder, component, occurrence), folder) = nested("nested-row");
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [holder, occurrence]}]})).unwrap();
+        h.app.start("component.break_link");
+        assert!(!h.app.session.doc.links.contains_key(&component), "its own placement's row: {:?}", h.app.status);
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// With no linked component among what is selected, Break Link says what to pick and changes
+    /// nothing: nothing selected, or a component that is not linked.
+    #[test]
+    fn ribbon_break_link_without_a_linked_component_says_what_to_pick() {
+        let (mut h, component, _, folder) = with_a_linked_component("nothing");
+        h.app.start("component.break_link");
+        let (status, _, error) = h.app.status.clone().expect("it says what to pick");
+        assert_eq!(status, h.app.tr("ui.break_link_select_first"));
+        assert!(!error);
+        assert!(h.app.session.doc.links.contains_key(&component), "nothing selected: the link stays");
+        let own = h.app.run("component.create", json!({"name": "Own"})).unwrap()["occurrence"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("select.set", json!({"items": [{"type": "occurrence", "path": [own]}]})).unwrap();
+        h.app.status = None;
+        h.app.start("component.break_link");
+        assert_eq!(h.app.status.clone().map(|(status, _, _)| status), Some(h.app.tr("ui.break_link_select_first").to_string()));
+        assert!(h.app.session.doc.links.contains_key(&component), "a component that is not linked: the link stays");
+        let _ = std::fs::remove_dir_all(folder);
+    }
+
+    /// A right-click on a linked component offers Break Link, beside Relink Source, and it
+    /// breaks that component's link; a component that is not linked does not offer it.
+    #[test]
+    fn a_linked_components_menu_offers_break_link() {
+        use crate::context_menu::{self, Target};
+        let (mut h, component, occurrence, folder) = with_a_linked_component("menu");
+        let own = h.app.run("component.create", json!({"name": "Own"})).unwrap()["component"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        // Break Link sits in the menu's Component flyout, after Relink Source.
+        fn find(items: Vec<crate::ui_kit::Item>) -> Option<crate::ui_kit::Item> {
+            items.into_iter().find_map(|item| if item.id == "component.break_link" { Some(item) } else { find(item.children) })
+        }
+        let offered = |app: &SolveApp, target: Target| find(context_menu::items(app, &target));
+        assert!(offered(&h.app, Target::Component { id: own }).is_none(), "not for a component that is not linked");
+        assert!(offered(&h.app, Target::Occurrence { path: vec![occurrence] }).is_some(), "on its placement's row too");
+        let item = offered(&h.app, Target::Component { id: component }).expect("a linked component offers Break Link");
+        assert!(item.enabled);
+        context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        assert!(!h.app.session.doc.links.contains_key(&component), "the link is broken: {:?}", h.app.status);
+        assert!(offered(&h.app, Target::Component { id: component }).is_none(), "and no longer offered");
+        let _ = std::fs::remove_dir_all(folder);
     }
 
     /// #10540: View Fit, Home and the other view display commands act on the view the same way

@@ -20,11 +20,13 @@
 use std::collections::BTreeMap;
 use std::f64::consts::PI;
 
+use solidcore::boolean::api_brep as kboolean;
 use solidcore::curve::arc::{self, ArcDefinition};
 use solidcore::curve::curve::{Curve as KCurve, CurveKind};
 use solidcore::curve::from_parameters::record_of;
 use solidcore::curve::line::Line;
 use solidcore::curve::path::{self, PathDoubt, PathPiece, PathShape, PathTolerances};
+use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::tol::{context_zone_tol_3d, SmallTopoType, USE_DEFAULT};
 use solidcore::geom::vector3d::{Point3, Vec3};
@@ -62,6 +64,7 @@ use solidcore::topology::brep::p8::{
     create_planar_faces_with_3d_curves, FaceBuildEnv,
 };
 use solidcore::topology::brep::planar_section::{PlanarSectionOptions, SectionOutputs};
+use solidcore::topology::brep::validation::update_tolerances_after_boolean;
 use solidcore::topology::{Brep, FaceId};
 use solidcore::SolidError;
 use solidcore_convert as convert;
@@ -74,7 +77,7 @@ pub use solidcore::geom::certified::Verdict;
 /// kernel's own reasons.
 pub use solidcore::sweep::api_brep::TaperCornerRefusal as CornerRefusal;
 
-use crate::body::{finish, Body, Expect};
+use crate::body::{finish, finish_proved, finish_under, Body, Contract, Expect, Outward};
 use crate::error::status;
 use crate::order::{self, Order};
 use crate::session::{read_body, run, with_body};
@@ -124,8 +127,9 @@ const DRAFT_LIMIT: f64 = PI / 2.0 - 1e-6;
 )]
 const TURN_LIMIT: f64 = std::f64::consts::TAU * (1.0 + 1e-12);
 
-/// Most turns of a screw sweep.
-pub const SCREW_MAX_TURNS: f64 = 200.0;
+/// Most turns of a screw sweep: the kernel's, as many as its spans hold
+/// (`sweep::screw::MAX_TURNS`).
+pub const SCREW_MAX_TURNS: f64 = screw::MAX_TURNS;
 
 /// Most pairs of a screw sweep's radial law.
 pub const SCREW_MAX_LAW: usize = 1024;
@@ -558,6 +562,15 @@ fn making(
     run(call, f)?.map(Body::new)
 }
 
+/// [`making`], the new body keeping the proof its result test made ([`finish_proved`],
+/// [`finish_under`]), so the next proved operation that takes it does not prove it again.
+fn making_held(
+    call: &'static str,
+    f: impl FnOnce(&mut Kernel) -> solidcore::Result<Out<(Brep, Option<Outward>)>>,
+) -> Result<Body> {
+    run(call, f)?.map(|(b, proof)| Body::held(b, proof))
+}
+
 /// A curve list's own refusal inside a kernel call.
 macro_rules! parsed {
     ($e:expr) => {
@@ -904,19 +917,30 @@ fn bspline(c: &KCurve) -> solidcore::Result<Option<BSplineCurve>> {
     })
 }
 
-/// A path of end-to-end curves as one B-spline (the curve sweep takes one curve).
-fn joined(path: &[KCurve]) -> solidcore::Result<Out<BSplineCurve>> {
+/// A path of end-to-end curves as one B-spline (the curve sweep takes one curve); `None` for a
+/// curve with no B-spline form. The kernel's error of the join is returned as it is.
+fn one_bspline(path: &[KCurve]) -> solidcore::Result<Option<BSplineCurve>> {
     let mut parts = Vec::new();
     for c in path {
         let Some(b) = bspline(c)? else {
-            return Ok(Err(Error::Argument));
+            return Ok(None);
         };
         parts.push(b);
     }
     if parts.len() == 1 {
-        return Ok(parts.pop().ok_or(Error::Argument));
+        return Ok(parts.pop());
     }
-    Ok(called(BSplineCurve::create_by_joining(&mut parts, None)))
+    BSplineCurve::create_by_joining(&mut parts, None).map(Some)
+}
+
+/// [`one_bspline`], a curve with no B-spline form [`Error::Argument`] and the join's error its
+/// status.
+fn joined(path: &[KCurve]) -> Out<BSplineCurve> {
+    match one_bspline(path) {
+        Ok(Some(b)) => Ok(b),
+        Ok(None) => Err(Error::Argument),
+        Err(e) => Err(status(e)),
+    }
 }
 
 /// The identity placements of a sweep that has not run.
@@ -963,7 +987,7 @@ pub fn sweep_placed(
     let mut placed = unplaced();
     let mut route = SweepRoute::Curve(frame);
     let expect = if cap { Expect::SOLID } else { Expect::FACES };
-    let body = making("sweep", |k| {
+    let body = making_held("sweep", |k| {
         let (made, along) = match (parse(k, profile), parse(k, path)) {
             (Ok(c), Ok(p)) => (c, p),
             (Err(e), _) | (_, Err(e)) => return Ok(Err(e)),
@@ -980,7 +1004,7 @@ pub fn sweep_placed(
                 };
                 placed = line_placements(l.direction, l.length).map(|t| Affine::of(&t));
                 route = SweepRoute::Line;
-                return finish(k, r, expect);
+                return finish_proved(k, r, expect);
             }
             PathShape::Undecided(d) => doubt = Some(d),
             PathShape::Not => {}
@@ -1001,7 +1025,7 @@ pub fn sweep_placed(
                         Err(_) => return Ok(Err(Error::Argument)),
                     };
                     route = SweepRoute::Arc;
-                    return finish(k, r, expect);
+                    return finish_proved(k, r, expect);
                 }
                 PathShape::Undecided(d) => doubt = doubt.or(Some(d)),
                 PathShape::Not => {}
@@ -1012,7 +1036,7 @@ pub fn sweep_placed(
                         Ok((b, motions)) => {
                             placed = motions.map(|t| Affine::of(&t));
                             route = SweepRoute::Segments;
-                            finish(k, b, expect)
+                            finish_proved(k, b, expect)
                         }
                         Err(e) => Ok(Err(status(e))),
                     };
@@ -1036,7 +1060,7 @@ pub fn sweep_placed(
                 return Ok(Err(Error::PathGap { join: i }));
             }
         }
-        let path_curve = match joined(&along.curves)? {
+        let path_curve = match joined(&along.curves) {
             Ok(b) => KCurve::from(b),
             Err(e) => return Ok(Err(e)),
         };
@@ -1066,34 +1090,224 @@ pub fn sweep_placed(
             },
             ..SweepOptions::default()
         };
-        let r = match create_curve_sweep_with_placements(
-            k,
-            &refs,
-            Some(&path_curve),
-            None,
-            None,
-            Some(&options),
-        ) {
-            Ok(r) => r,
-            Err(e) => return Ok(Err(status(e))),
+        Ok(
+            match curve_swept(k, &made.curves, &path_curve, closed, cap, &options) {
+                Ok(Ok((b, motions))) => {
+                    placed = motions;
+                    finish_proved(k, b, expect)?
+                }
+                Ok(Err(e)) => Err(e),
+                Err(e) => Err(status(e)),
+            },
+        )
+    })?;
+    Ok((body, placed, route))
+}
+
+/// The kernel's curve sweep of the profile `curves` along `path` (one curve), with the
+/// placements of the profile's first loop at the start, half way and the end
+/// ([`SweepRoute::Curve`]), before the result contract; a kernel error of any step as it is.
+///
+/// Round a `closed` path the walls close on each other: each tube is stitched along where
+/// they meet, and a solid asked for (`cap`) must have no free edge left. There, capped, each
+/// loop of the profile is swept on its own: the curve sweep makes every loop's tube bound a
+/// solid of its own, so a hole's tube would add its volume instead of taking it away. The
+/// holes' tubes, the loops after the first as a region lists them ([`path::loop_runs`], to
+/// [`PathTolerances::closed`]), are subtracted from the first loop's ([`subtracted`]).
+fn curve_swept(
+    k: &mut Kernel,
+    curves: &[KCurve],
+    path: &KCurve,
+    closed: bool,
+    cap: bool,
+    options: &SweepOptions,
+) -> solidcore::Result<Out<(Brep, [Affine; 3])>> {
+    let mut placed = unplaced();
+    let runs = if closed && cap {
+        path::loop_runs(k, curves, PATH.closed)?
+    } else {
+        std::iter::once(0..curves.len()).collect()
+    };
+    let mut whole: Option<Brep> = None;
+    for (i, run) in runs.into_iter().enumerate() {
+        let Some(curves) = curves.get(run) else {
+            return Ok(Err(Error::Argument));
         };
-        for (m, p) in placed.iter_mut().zip(&r.placements) {
-            *m = Affine::of(&Transform::of_placement(p));
+        let refs: Vec<Option<&KCurve>> = curves.iter().map(Some).collect();
+        let r =
+            create_curve_sweep_with_placements(k, &refs, Some(path), None, None, Some(options))?;
+        if i == 0 {
+            for (m, p) in placed.iter_mut().zip(&r.placements) {
+                *m = Affine::of(&Transform::of_placement(p));
+            }
         }
         let mut b = r.sweep.brep;
         if closed {
             let tol = b.tolerance();
-            match stitch_faces(k, &mut b, tol, None, false) {
-                // a solid asked for has no free edge left; a sheet (an open profile, or one
-                // not capped) keeps the profile's own ends free
-                Ok(s) if cap && s.lamina_edges != 0 => return Ok(Err(Error::NotSolid)),
-                Ok(_) => b.refresh_cached_topology(),
-                Err(e) => return Ok(Err(status(e))),
+            let s = stitch_faces(k, &mut b, tol, None, false)?;
+            // a solid asked for has no free edge left; a sheet (an open profile, or one not
+            // capped) keeps the profile's own ends free
+            if cap && s.lamina_edges != 0 {
+                return Ok(Err(Error::NotSolid));
             }
+            b.refresh_cached_topology();
         }
-        finish(k, b, expect)
+        whole = Some(match whole {
+            None => b,
+            Some(outer) => subtracted(k, outer, b)?,
+        });
+    }
+    Ok(whole.map(|b| (b, placed)).ok_or(Error::Argument))
+}
+
+/// `a` less `b`, the kernel's boolean (both consumed), as [`curve_swept`] takes a hole's tube
+/// from the outer loop's: the tubes are swept in one kernel along one path, so no tolerance
+/// matching first; then the tolerance update a boolean's result gets
+/// ([`update_tolerances_after_boolean`]).
+fn subtracted(k: &mut Kernel, a: Brep, b: Brep) -> solidcore::Result<Brep> {
+    let mut r = kboolean::boolean(k, a, b, BooleanOperation::Difference)?.result;
+    update_tolerances_after_boolean(k, &mut r)?;
+    Ok(r)
+}
+
+/// How near a [`curve_sweep`] path's last end must come to its first start for the path to
+/// be closed (the plain distance, [`path::ends_meet`]).
+pub const CURVE_SWEEP_CLOSED: f64 = 1e-6;
+
+/// `profile` swept along `path` by the kernel's curve sweep alone ([`SweepRoute::Curve`]),
+/// whatever shape the path has, with the rigid motions that placed the profile (its first
+/// loop) at the start, half way and the end; the result under `contract`. For a caller that
+/// picks the exact routes itself (the linear, rotational and piecewise sweeps
+/// [`sweep_placed`] tries first), or wants the curve sweep where [`sweep_placed`] would take
+/// one of them.
+///
+/// The path's curves are joined end to end into one B-spline as given, with no join proved
+/// to meet first: [`sweep_placed`] refuses a path whose joins it cannot prove
+/// ([`Error::PathGap`]), this takes the join the kernel makes. The path is closed when its
+/// last end lies within [`CURVE_SWEEP_CLOSED`] of its first start; round a closed path the
+/// result has no caps, the walls closing on each other, and a capped profile of several loops
+/// has its holes (the loops after the first) taken away, each loop swept on its own, as
+/// [`sweep_placed`] does round a closed path.
+///
+/// # Errors
+/// [`Error::Argument`] for a curve list refused, a path curve the sweep cannot join, or an up
+/// direction not finite; the kernel's status; [`Error::Empty`]; [`Error::NotSolid`] (with
+/// `cap`: a result that is not a solid under `contract`, or round a closed path a tube left
+/// with a free edge); under [`Contract::Proved`], [`Error::NotSolidBecause`] too.
+///
+/// # Examples
+///
+/// A 4 x 2 rectangle with a 2 x 1 hole swept round a closed rounded rectangle (60 x 40,
+/// corners of radius 8): the hole's tube is taken from the outer one's.
+///
+/// ```
+/// use solidcore_ops::body::Contract;
+/// use solidcore_ops::sweep::{curve_sweep, Curve, SweepFrame};
+///
+/// let line = |a: [f64; 2], b: [f64; 2]| Curve::Line { start: [a[0], a[1], 0.0], end: [b[0], b[1], 0.0] };
+/// let corner = |c: [f64; 2], r: [f64; 3]| Curve::Arc {
+///     center: [c[0], c[1], 0.0], axis: [0.0, 0.0, 1.0], reference: r, radius: 8.0,
+///     start: 0.0, end: std::f64::consts::FRAC_PI_2,
+/// };
+/// let path = vec![
+///     line([0.0, -20.0], [22.0, -20.0]), corner([22.0, -12.0], [0.0, -1.0, 0.0]),
+///     line([30.0, -12.0], [30.0, 12.0]), corner([22.0, 12.0], [1.0, 0.0, 0.0]),
+///     line([22.0, 20.0], [-22.0, 20.0]), corner([-22.0, 12.0], [0.0, 1.0, 0.0]),
+///     line([-30.0, 12.0], [-30.0, -12.0]), corner([-22.0, -12.0], [-1.0, 0.0, 0.0]),
+///     line([-22.0, -20.0], [0.0, -20.0]),
+/// ];
+/// // a rectangle square to the path where it starts, (0, -20, 0)
+/// let rect = |w: f64, h: f64| {
+///     let p = [[0.0, -20.0 - w, -h], [0.0, -20.0 + w, -h], [0.0, -20.0 + w, h], [0.0, -20.0 - w, h]];
+///     (0..4).map(|i| Curve::Line { start: p[i], end: p[(i + 1) % 4] }).collect::<Vec<_>>()
+/// };
+/// let sweep = |p: &[Curve]| curve_sweep(p, &path, SweepFrame::Follow, true, Contract::Closed);
+/// let (holed, _placed) = sweep(&[rect(2.0, 1.0), rect(1.0, 0.5)].concat())?;
+/// let (outer, _) = sweep(&rect(2.0, 1.0))?;
+/// let (hole, _) = sweep(&rect(1.0, 0.5))?;
+/// let (h, o, i) = (holed.volume(1e-8)?, outer.volume(1e-8)?, hole.volume(1e-8)?);
+/// assert!((h - (o - i)).abs() < 1e-6 * o, "{h} = {o} - {i}");
+/// # Ok::<(), solidcore_ops::Error>(())
+/// ```
+pub fn curve_sweep(
+    profile: &[Curve],
+    path: &[Curve],
+    frame: SweepFrame,
+    cap: bool,
+    contract: Contract,
+) -> Result<(Body, [Affine; 3])> {
+    let mut placed = unplaced();
+    let expect = if cap { Expect::SOLID } else { Expect::FACES };
+    let body = making_held("curve_sweep", |k| {
+        let (made, along) = match (parse(k, profile), parse(k, path)) {
+            (Ok(c), Ok(p)) => (c, p),
+            (Err(e), _) | (_, Err(e)) => return Ok(Err(e)),
+        };
+        Ok(
+            match curve_sweep_in(k, &made.curves, &along.curves, frame, cap) {
+                Ok(Ok((b, motions))) => {
+                    placed = motions;
+                    finish_under(k, b, expect, contract)?
+                }
+                Ok(Err(e)) => Err(e),
+                Err(e) => Err(status(e)),
+            },
+        )
     })?;
-    Ok((body, placed, route))
+    Ok((body, placed))
+}
+
+/// [`curve_sweep`] in the kernel `k`, of the curves made from its lists, before the result
+/// contract: the swept B-rep and the placements.
+///
+/// # Errors
+/// The kernel's error of any step, as it is (the outer error). Inside: [`Error::Argument`]
+/// for no profile or path, a path curve with no B-spline form or an up direction not finite;
+/// [`Error::NotSolid`] for a capped tube round a closed path left with a free edge.
+fn curve_sweep_in(
+    k: &mut Kernel,
+    profile: &[KCurve],
+    path: &[KCurve],
+    frame: SweepFrame,
+    cap: bool,
+) -> solidcore::Result<Result<(Brep, [Affine; 3])>> {
+    if let SweepFrame::Upright(u) = frame {
+        if !u.iter().all(|x| x.is_finite()) {
+            return Ok(Err(Error::Argument));
+        }
+    }
+    if profile.is_empty() || path.is_empty() {
+        return Ok(Err(Error::Argument));
+    }
+    let Some(path_curve) = one_bspline(path)? else {
+        return Ok(Err(Error::Argument));
+    };
+    let path_curve = KCurve::from(path_curve);
+    let closed = path::ends_meet(k, path, CURVE_SWEEP_CLOSED)?;
+    let options = SweepOptions {
+        cap_ends: cap && !closed,
+        translational_sweep: frame == SweepFrame::Translate,
+        profile_at_path_start: true,
+        up: match frame {
+            SweepFrame::Upright(u) => Some(v3(u)),
+            SweepFrame::Follow | SweepFrame::Translate => None,
+        },
+        ..SweepOptions::default()
+    };
+    curve_swept(k, profile, &path_curve, closed, cap, &options)
+}
+
+/// Whether an ordered sketch chain's last and first endpoints meet within `tol`.
+/// Empty chains do not close; interior joins are not rechecked here.
+#[must_use]
+pub fn loft_section_closed(chain: &[solidcore_record::Seg2], tol: f64) -> bool {
+    use solidcore::sweep::loft_sections::section_ends_meet;
+    chain
+        .first()
+        .zip(chain.last())
+        .is_some_and(|(first, last)| {
+            section_ends_meet(&convert::seg2(first), &convert::seg2(last), tol)
+        })
 }
 
 /// A closed loft section for [`match_loft_sections`]: its sketch plane and its loop in the
@@ -1157,6 +1371,25 @@ pub fn match_loft_sections(
             })
             .collect(),
     ))
+}
+
+/// For a loft's sections as its walls are built through them (each section's segments in its
+/// plane's coordinates, the same number in every section, in the order [`loft`] takes their
+/// curves), which segments the skin should take joined to the segment before them, as one curve
+/// (the kernel's `sweep::loft_sections::one_curve_runs`): `true` at `i` for segment `i` of every
+/// section. Those are the free-form segments that in every section carry on the one before them
+/// with one first derivative on the spans that keep the first section's speed, in a run with a
+/// joint where the speeds differ. A caller that hands such a run to [`loft`] as one B-spline on
+/// those spans, every section on the first section's knots, gets the same walls without a jump
+/// of their first derivative where the segments meet.
+#[must_use]
+pub fn loft_one_curve_runs(sections: &[Vec<solidcore_record::Seg2>]) -> Vec<bool> {
+    use solidcore::sweep::loft_sections as kl;
+    let given: Vec<Vec<kp::Seg2>> = sections
+        .iter()
+        .map(|s| s.iter().map(convert::seg2).collect())
+        .collect();
+    kl::one_curve_runs(&given)
 }
 
 /// A skin through `sections` (`SmApiCreateSkinPrimitive`), `degree` (1 to 3) across them.
@@ -1406,6 +1639,49 @@ pub fn loft_sheet(sections: &[Vec<Curve>], degree: u32) -> Result<(Body, Option<
         .collect::<Option<Vec<_>>>()
         .ok_or(Error::Exception)?;
     Ok((body, Some(faces)))
+}
+
+/// An exported sheet through two closed planar sections, tangent at one end along their centre connector.
+/// `tangent_at` selects the section (0 or 1); `crown` scales the derivative at that end only.
+/// With `faced`, orient the walls out of the sectioned region. The source lists are in the
+/// returned record's face order, indexing the original curves flattened in section order.
+///
+/// # Errors
+/// The kernel's refusals for invalid sections, a degenerate tangent or an invalid sheet.
+pub fn loft_sheet_planar_g1(
+    sections: &[LoftSection; 2],
+    tangent_at: usize,
+    crown: f64,
+    faced: bool,
+) -> Result<(solidcore_record::brep::Brep, Vec<Vec<usize>>)> {
+    use solidcore::sweep::{loft_sections::LoftSection as Input, skin_planar_g1::skin_planar_g1};
+    let given = sections.each_ref().map(|s| Input {
+        origin: convert::vec3(s.plane.origin),
+        x: convert::vec3(s.plane.x),
+        y: convert::vec3(s.plane.y),
+        segs: s.segs.iter().map(convert::seg2).collect(),
+    });
+    let made = run("loft_sheet_planar_g1", |k| {
+        match skin_planar_g1(k, &given, tangent_at, crown, faced, MAX_CURVES) {
+            Ok(skin) => Ok(finish(k, skin.brep, Expect::FACES)?.map(|b| (b, skin.sources))),
+            Err(e) => Ok(Err(status(e))),
+        }
+    })??;
+    let (brep, sources) = made;
+    let body = Body::new(brep);
+    let report = body.check(crate::CheckLevel::All)?;
+    if !report.is_valid() {
+        return Err(Error::Internal(format!("loft_sheet_planar_g1: {report}")));
+    }
+    let (record, order) = body.to_record()?;
+    let mut sources: BTreeMap<FaceId, Vec<usize>> = sources.into_iter().collect();
+    let faces = order
+        .faces
+        .iter()
+        .map(|f| sources.remove(f))
+        .collect::<Option<Vec<_>>>()
+        .ok_or(Error::Exception)?;
+    Ok((record, faces))
 }
 
 /// `c` as [`loft_sheet`] skins it: a line as a NURBS line over [0, 1], any other curve as it is.
@@ -1803,11 +2079,14 @@ pub fn sweep_stations(profile: &[Curve], stations: &[Affine], end: Ends) -> Resu
 /// The screw sweep of `profile` about the axis through `origin` along `axis`: `turns` turns
 /// rising `pitch` each, the walls within `tolerance` of their screw surfaces, capped; with a
 /// `law`, the section moved off the axis by the piecewise linear offset of its (turn, offset)
-/// pairs as it turns (`sweep::screw`).
+/// pairs as it turns (`sweep::screw`). Its walls are laid out a face per piece
+/// ([`ScrewWalls::Pieces`]); [`screw_sweep_with`] chooses.
 ///
 /// # Errors
-/// [`Error::Argument`] for a number, law or curve list refused (and the kernel's refusals of
-/// them); the kernel's status; [`Error::Empty`], [`Error::NotSolid`].
+/// [`Error::Argument`] for a number, law or curve list refused; [`Error::Refused`] for the
+/// kernel's refusals, in its words (an axis without a usable length, a profile on the axis,
+/// more turns than the spans hold at the tolerance); the kernel's status; [`Error::Empty`],
+/// [`Error::NotSolid`].
 pub fn screw_sweep(
     profile: &[Curve],
     origin: [f64; 3],
@@ -1817,6 +2096,82 @@ pub fn screw_sweep(
     law: Option<&[(f64, f64)]>,
     tolerance: f64,
 ) -> Result<Body> {
+    screw_sweep_with(
+        profile,
+        origin,
+        axis,
+        pitch,
+        turns,
+        &ScrewSweepOptions {
+            law,
+            tolerance,
+            walls: ScrewWalls::Pieces,
+        },
+    )
+}
+
+/// How a screw sweep lays its B-spline walls out in faces (`sweep::screw::Walls`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ScrewWalls {
+    /// A face per piece: every wall breaks at a radial law's angles and, when a profile line
+    /// along the axis sweeps a cylinder, every half turn.
+    #[default]
+    Pieces,
+    /// A B-spline wall runs on as one face across the half turns only the cylinders need,
+    /// breaking at a law's angles only: a thread's flanks as one continuous face each. The
+    /// surface and its edges are the same curves as the pieces'; cylinder walls keep their
+    /// half-turn faces.
+    Joined,
+}
+
+/// The options of [`screw_sweep_with`].
+#[derive(Debug, Clone, Copy)]
+pub struct ScrewSweepOptions<'a> {
+    /// The radial law as (turn, offset) pairs, turns ascending within `[0, turns]`; `None`
+    /// for none.
+    pub law: Option<&'a [(f64, f64)]>,
+    /// How far a wall may stray from its screw surface, mm (`1e-6` up to `1e3`).
+    pub tolerance: f64,
+    /// The walls' faces.
+    pub walls: ScrewWalls,
+}
+
+/// [`screw_sweep`] with its options: the law, the tolerance and the walls' layout.
+///
+/// ```
+/// use solidcore_ops::sweep::{screw_sweep_with, Curve, ScrewSweepOptions, ScrewWalls};
+/// // a square thread 1 x 1 from radius 5 to 6, two turns of pitch 2: its inner and outer
+/// // walls are cylinders, which come in half turns
+/// let corners = [[5.0, 0.0, 0.0], [6.0, 0.0, 0.0], [6.0, 0.0, 1.0], [5.0, 0.0, 1.0]];
+/// let profile: Vec<Curve> = (0..4)
+///     .map(|i| Curve::Line { start: corners[i], end: corners[(i + 1) % 4] })
+///     .collect();
+/// let thread = |walls| {
+///     let options = ScrewSweepOptions { law: None, tolerance: 1e-5, walls };
+///     screw_sweep_with(&profile, [0.0; 3], [0.0, 0.0, 1.0], 2.0, 2.0, &options)
+/// };
+/// // four half turns of four walls, and two caps
+/// assert_eq!(thread(ScrewWalls::Pieces)?.counts()?[0], 18);
+/// // the flanks run on as one face each; the cylinders keep their half turns
+/// assert_eq!(thread(ScrewWalls::Joined)?.counts()?[0], 12);
+/// # Ok::<(), solidcore_ops::Error>(())
+/// ```
+///
+/// # Errors
+/// Those of [`screw_sweep`].
+pub fn screw_sweep_with(
+    profile: &[Curve],
+    origin: [f64; 3],
+    axis: [f64; 3],
+    pitch: f64,
+    turns: f64,
+    options: &ScrewSweepOptions<'_>,
+) -> Result<Body> {
+    let ScrewSweepOptions {
+        law,
+        tolerance,
+        walls,
+    } = *options;
     let ok = coord_ok(&origin)
         && pitch.is_finite()
         && pitch.abs() > 1e-6
@@ -1847,32 +2202,26 @@ pub fn screw_sweep(
     } else {
         "screw_sweep"
     };
+    let walls = match walls {
+        ScrewWalls::Pieces => screw::Walls::Pieces,
+        ScrewWalls::Joined => screw::Walls::Joined,
+    };
     making(call, |k| {
         let made = parsed!(parse(k, profile));
-        let built = match law {
-            None => screw::screw_sweep_body(
-                k,
-                &made.curves,
-                v3(origin),
-                v3(axis),
-                pitch,
-                turns,
-                tolerance,
-            ),
-            Some(l) => screw::screw_sweep_radial_body(
-                k,
-                &made.curves,
-                v3(origin),
-                v3(axis),
-                pitch,
-                turns,
-                l,
-                tolerance,
-            ),
-        };
+        let built = screw::screw_sweep_with_body(
+            k,
+            &made.curves,
+            v3(origin),
+            v3(axis),
+            pitch,
+            turns,
+            law,
+            tolerance,
+            walls,
+        );
         match built {
             Ok(b) => finish(k, b, Expect::SOLID),
-            Err(e) => Ok(Err(argument_or_status(e))),
+            Err(e) => Ok(Err(status(e))),
         }
     })
 }
@@ -2196,6 +2545,103 @@ mod tests {
 
     use super::*;
     use solidcore_record::profile::Seg2;
+
+    /// A 60 x 40 rounded rectangle (corner radius 8), closed, from the middle of its bottom
+    /// line: Pappus' length 2 (44 + 24) + 4 (pi/2) 8.
+    fn rounded_rectangle() -> (Vec<Curve>, f64) {
+        let line = |a: [f64; 3], b: [f64; 3]| Curve::Line { start: a, end: b };
+        let arc = |c: [f64; 3], r: [f64; 3]| Curve::Arc {
+            center: c,
+            axis: [0.0, 0.0, 1.0],
+            reference: r,
+            radius: 8.0,
+            start: 0.0,
+            end: std::f64::consts::FRAC_PI_2,
+        };
+        let path = vec![
+            line([0.0, -20.0, 0.0], [22.0, -20.0, 0.0]),
+            arc([22.0, -12.0, 0.0], [0.0, -1.0, 0.0]),
+            line([30.0, -12.0, 0.0], [30.0, 12.0, 0.0]),
+            arc([22.0, 12.0, 0.0], [1.0, 0.0, 0.0]),
+            line([22.0, 20.0, 0.0], [-22.0, 20.0, 0.0]),
+            arc([-22.0, 12.0, 0.0], [0.0, 1.0, 0.0]),
+            line([-30.0, 12.0, 0.0], [-30.0, -12.0, 0.0]),
+            arc([-22.0, -12.0, 0.0], [-1.0, 0.0, 0.0]),
+            line([-22.0, -20.0, 0.0], [0.0, -20.0, 0.0]),
+        ];
+        (path, 2.0 * (44.0 + 24.0) + 16.0 * PI)
+    }
+
+    /// A `w` x `h` rectangle round the path's start (0, -20, 0), square to it, either way round.
+    fn rectangle(w: f64, h: f64, backwards: bool) -> Vec<Curve> {
+        let (y, z) = (w / 2.0, h / 2.0);
+        let mut p = [
+            [0.0, -20.0 - y, -z],
+            [0.0, -20.0 + y, -z],
+            [0.0, -20.0 + y, z],
+            [0.0, -20.0 - y, z],
+        ];
+        if backwards {
+            p.reverse();
+        }
+        (0..4)
+            .map(|i| Curve::Line {
+                start: p[i],
+                end: p[(i + 1) % 4],
+            })
+            .collect()
+    }
+
+    /// A 4 x 3 rectangle with a 2 x 1 hole swept round a closed path, which takes the curve
+    /// sweep: each loop is swept on its own and the hole's tube taken from the outer one's, so
+    /// the solid is the area between them times the path's length (Pappus: both loops are
+    /// centred on the path). Until each loop was swept on its own, every loop's tube bounded a
+    /// solid of its own and the hole's added its volume; `curve_sweep` takes the holes the same
+    /// way.
+    #[test]
+    fn a_profile_s_holes_are_taken_away_round_a_closed_path() {
+        let (path, length) = rounded_rectangle();
+        let expected = (12.0 - 2.0) * length;
+        for backwards in [false, true] {
+            let profile = [rectangle(4.0, 3.0, false), rectangle(2.0, 1.0, backwards)].concat();
+            let (body, _, route) = sweep_placed(&profile, &path, SweepFrame::Follow, true).unwrap();
+            assert_eq!(route, SweepRoute::Curve(SweepFrame::Follow));
+            let v = body.volume(1e-8).unwrap();
+            assert!(
+                (v - expected).abs() < 1e-4 * expected,
+                "sweep_placed: {v}, not {expected}"
+            );
+            let (body, _) =
+                curve_sweep(&profile, &path, SweepFrame::Follow, true, Contract::Closed).unwrap();
+            let v = body.volume(1e-8).unwrap();
+            assert!(
+                (v - expected).abs() < 1e-4 * expected,
+                "curve_sweep: {v}, not {expected}"
+            );
+        }
+        // one loop is swept as before, whole
+        let (body, ..) =
+            sweep_placed(&rectangle(4.0, 3.0, false), &path, SweepFrame::Follow, true).unwrap();
+        let v = body.volume(1e-8).unwrap();
+        assert!((v - 12.0 * length).abs() < 1e-4 * 12.0 * length, "{v}");
+    }
+
+    /// A swept solid keeps the proof its result test made: `sweep_placed`'s, and `curve_sweep`'s
+    /// under [`Contract::Proved`], so the next proved operation does not prove it again. Under
+    /// [`Contract::Closed`] no proof is made, so none is held.
+    #[test]
+    fn a_proved_sweep_keeps_its_proof() {
+        let (path, _) = rounded_rectangle();
+        let profile = rectangle(4.0, 3.0, false);
+        let (body, ..) = sweep_placed(&profile, &path, SweepFrame::Follow, true).unwrap();
+        assert!(body.holds_proof(), "sweep_placed");
+        let (body, _) =
+            curve_sweep(&profile, &path, SweepFrame::Follow, true, Contract::Proved).unwrap();
+        assert!(body.holds_proof(), "curve_sweep, proved");
+        let (body, _) =
+            curve_sweep(&profile, &path, SweepFrame::Follow, true, Contract::Closed).unwrap();
+        assert!(!body.holds_proof(), "curve_sweep, closed");
+    }
 
     /// The four lines of a square profile with the given half-width, in order.
     fn square(half: f64) -> Vec<Seg2> {

@@ -1543,6 +1543,18 @@
       ]
     },
     {
+      "case": "sweeps/20499-revolve-two-sided-130-40",
+      "why": [
+        "no kernel operation made a body the case ends with"
+      ]
+    },
+    {
+      "case": "sweeps/20499-revolve-two-sided-40-130",
+      "why": [
+        "no kernel operation made a body the case ends with"
+      ]
+    },
+    {
       "case": "sweeps/2183-revolve-profile-crosses-the-axis-refused",
       "why": [
         "no kernel operation ran before the failure: step 4 (solid.revolve): invalid input: the profile crosses the revolve axis"
