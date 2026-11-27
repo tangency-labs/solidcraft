@@ -124,3 +124,16 @@ fn the_largest_saved_picture_scales_to_every_cache_size() {
 fn a_private_chunk_does_not_stop_decoding() {
     assert_eq!(decode(&encode(1, 1, ColorType::Rgba, BitDepth::Eight, &[1, 2, 3, 4], None), 1, 1), Some(vec![1, 2, 3, 4]));
 }
+
+#[test]
+fn a_fully_transparent_pixel_is_all_zeros() {
+    // Kept at its size: a transparent pixel's colour is dropped.
+    let png = encode(2, 1, ColorType::Rgba, BitDepth::Eight, &[200, 100, 50, 0, 1, 2, 3, 255], None);
+    assert_eq!(thumbnail_from_png(&png, 2, 1, 2).unwrap().bgra, vec![0, 0, 0, 0, 3, 2, 1, 255]);
+    let palette: (&[u8], &[u8]) = (&[10, 20, 30, 40, 50, 60], &[0, 255]);
+    let indexed = encode(2, 1, ColorType::Indexed, BitDepth::Eight, &[0, 1], Some(palette));
+    assert_eq!(thumbnail_from_png(&indexed, 2, 1, 2).unwrap().bgra, vec![0, 0, 0, 0, 60, 50, 40, 255]);
+    // Scaled: a nearly transparent pixel among transparent ones averages to alpha 0.
+    let faint = encode(2, 2, ColorType::Rgba, BitDepth::Eight, &[255, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], None);
+    assert_eq!(thumbnail_from_png(&faint, 2, 2, 1).unwrap().bgra, vec![0, 0, 0, 0]);
+}

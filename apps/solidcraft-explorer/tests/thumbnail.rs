@@ -53,3 +53,14 @@ fn hostile_files_give_none_without_a_panic() {
     assert_eq!(size(&support::bomb(), 256), None, "decompression bomb");
     assert_eq!(size(&support::many_entries(&good), 256), None, "65,535 entries claimed");
 }
+
+#[test]
+fn transparent_pixels_come_back_as_zeros() {
+    // The test picture's right half is transparent blue.
+    for (tag, w, h, cx) in [(V2, 512, 384, 512), (V2, 512, 384, 256), (V1, 240, 150, 256), (V1, 240, 150, 96)] {
+        let bitmap = solidcraft_explorer::thumbnail(Cursor::new(support::design(tag, w, h)), cx).unwrap();
+        let row = bitmap.width as usize * 4;
+        assert_eq!(bitmap.bgra[row - 4..row], [0, 0, 0, 0], "{tag} at {cx}: the top-right pixel");
+        assert_eq!(bitmap.bgra[bitmap.bgra.len() - 4..], [0, 0, 0, 0], "{tag} at {cx}: the bottom-right pixel");
+    }
+}
