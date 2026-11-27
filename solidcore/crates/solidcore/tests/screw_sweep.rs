@@ -26,10 +26,10 @@ use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::math::{Point2, Point3, Vec3};
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, NurbCircleParam};
 use solidcore::nurbs::b_spline_surface::SurfParamType;
+use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::query::curve_surface_gap::{
     trim_image_gap_bound_within, trim_same_parameter_gap_bound_within,
 };
-use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::surface::procedural_blend::NetScope;
 use solidcore::surface::procedural_sweep::{ProceduralSweep, MAX_HALF_ANGLE};
 use solidcore::surface::surface::{Surface, SurfaceKind};
@@ -1001,9 +1001,17 @@ fn issue_22930_a_cylinder_pieces_path_trims_are_proved_at_once() {
             let floor = 1e-3 * tol;
             let set = trim_image_gap_bound_within(&k, s, curve, trim, range, floor, limits, None)
                 .unwrap();
-            let same =
-                trim_same_parameter_gap_bound_within(&k, s, curve, trim, range, floor, limits, None)
-                    .unwrap();
+            // (at once: the same-parameter query does not bisect)
+            let before = k.work_counters.same_parameter_bisections();
+            let same = trim_same_parameter_gap_bound_within(
+                &k, s, curve, trim, range, floor, limits, None,
+            )
+            .unwrap();
+            assert_eq!(
+                k.work_counters.same_parameter_bisections(),
+                before,
+                "edge {e:?}: its same-parameter bound bisected"
+            );
             for g in [set, same] {
                 assert!(g.is_some_and(|g| g <= 1e-9), "edge {e:?}: {g:?}");
             }

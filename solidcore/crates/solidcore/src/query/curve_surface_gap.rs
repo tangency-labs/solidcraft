@@ -2289,6 +2289,7 @@ pub(crate) fn plane_gap_bound(cn: &NurbsCurve, net: &Nurbs, [lo, hi]: [f64; 2]) 
 ///
 /// Every quantity is enclosed in outward-rounded interval arithmetic from the stored data, so
 /// the bound counts the rounding. `None` (the caller bisects) for any other structure.
+/// (On a kernel that is never cancelled, so its only error does not arise.)
 #[cfg(test)]
 pub(crate) fn structured_trim_gap_bound(
     cn: &NurbsCurve,
@@ -2296,7 +2297,9 @@ pub(crate) fn structured_trim_gap_bound(
     net: &Nurbs,
     range: [f64; 2],
 ) -> Option<f64> {
-    structured_trim_gap_bound_as(cn, wn, net, range, false)
+    structured_trim_gap_bound_as(&Kernel::default(), cn, wn, net, range, false)
+        .ok()
+        .flatten()
 }
 
 /// [`structured_trim_gap_bound`], or with `same_parameter` (#22034) a bound on the gap at
@@ -2304,23 +2307,28 @@ pub(crate) fn structured_trim_gap_bound(
 /// [`trim_same_parameter_gap_bound_within`] bounds): the first case's `ψ` is the identity, so
 /// its bound is that gap's already; the second case adds how far its `ψ` moves the curve's
 /// parameter ([`iso_row_gap_bound`]).
+///
+/// # Errors
+///
+/// The kernel's cancelled status (the third case polls it on each segment).
 fn structured_trim_gap_bound_as(
+    k: &Kernel,
     cn: &NurbsCurve,
     wn: &NurbsCurve,
     net: &Nurbs,
     [lo, hi]: [f64; 2],
     same_parameter: bool,
-) -> Option<f64> {
+) -> Result<Option<f64>> {
     if !(lo.is_finite() && hi.is_finite() && lo < hi) {
-        return None;
+        return Ok(None);
     }
     if cn.pw.len() != 4 * cn.n || wn.pw.len() != 4 * wn.n {
-        return None;
+        return Ok(None);
     }
     // (a plane net: the curve's own structure; where that does not apply, the iso case below
     // may)
     if let Some(bound) = bilinear_trim_gap_bound(cn, wn, net, [lo, hi]) {
-        return Some(bound);
+        return Ok(Some(bound));
     }
     // (an iso line along the `u` side of a net of degree 1 in `v`, or along the `v` side of
     // one of degree 1 in `u`: the same line on the net with `u` and `v` swapped; at equal
@@ -2328,19 +2336,19 @@ fn structured_trim_gap_bound_as(
     // across it, [`end_row`])
     if net.q == 1 || same_parameter {
         if let Some(bound) = iso_row_gap_bound(cn, wn, net, [lo, hi], same_parameter) {
-            return Some(bound);
+            return Ok(Some(bound));
         }
     }
     if net.p == 1 || same_parameter {
         if let Some((swapped, sw)) = swapped_uv(net, wn) {
             if let Some(bound) = iso_row_gap_bound(cn, &sw, &swapped, [lo, hi], same_parameter) {
-                return Some(bound);
+                return Ok(Some(bound));
             }
         }
     }
     // (#22930: a trim that is its curve taken back through the net, a Bézier chain on the
     // curve's breakpoints, at equal parameters, so for either question)
-    composed_trim_gap_bound(cn, wn, net, [lo, hi])
+    composed_trim_gap_bound(k, cn, wn, net, [lo, hi])
 }
 
 /// Not upstream (#22273): at equal parameters, a trim along a piece of a row, under a curve
@@ -3090,7 +3098,7 @@ fn bezier_chain(k: &[f64], p: usize, n: usize) -> bool {
 /// composes (its work grows with the square of it).
 const COMPOSED_MAX_DEGREE: usize = 32;
 
-/// Not upstream (#22930): the third case of [`structured_trim_gap_bound`], a bound at equal
+/// Not upstream (#22930): the third case of [`structured_trim_gap_bound_as`], a bound at equal
 /// parameters, `max |C(s) - S(W(s))|` over `range` (with `ψ` the identity, also one of the
 /// trim image gap), for a curve and a trim that are chains of rational Bézier segments on the
 /// same breakpoints ([`bezier_chain`]), on a net that is a chain of rational Bézier patches in
@@ -3118,18 +3126,59 @@ const COMPOSED_MAX_DEGREE: usize = 32;
 /// segment is bounded for the trim scaled into the patch about its middle `m`,
 /// `W~ = m + λ (W - m)` with `λ < 1` (the same weights), plus
 /// `|S(W) - S(W~)| <= L_u |u - u~| + L_v |v - v~|`, where `|u - u~| <= (1 - λ) max |u_i - m|`:
-/// the net is continuous across its knots, and `L_u`, `L_v` bound its speed over the patches
-/// either reaches ([`patch_speeds`]). A trim past the net's ends is not bounded.
+/// `u~` lies between `u` and `m`, so the move runs through the spans from the trim's hull to
+/// the patch's; the net is continuous across its knots, and `L_u`, `L_v` bound its speed over
+/// those patches ([`patch_speeds`]). Only a hull within the patch's neighbours is moved, so
+/// that the speeds are taken over a few patches; a trim past the net's ends is not bounded.
 ///
-/// `None` (the caller bisects) for any other structure, a degree past
+/// `Ok(None)` (the caller bisects) for any other structure, a degree past
 /// [`COMPOSED_MAX_DEGREE`], or a bound not enclosed.
+///
+/// # Errors
+///
+/// The kernel's cancelled status, polled on each segment.
 fn composed_trim_gap_bound(
+    k: &Kernel,
+    cn: &NurbsCurve,
+    wn: &NurbsCurve,
+    net: &Nurbs,
+    range: [f64; 2],
+) -> Result<Option<f64>> {
+    let Some((breaks, knots)) = composed_inputs(cn, wn, net, range) else {
+        return Ok(None);
+    };
+    let [lo, hi] = range;
+    let mut worst = 0.0_f64;
+    let mut any = false;
+    for (j, ends) in breaks.windows(2).enumerate() {
+        let &[a, b] = ends else {
+            return Ok(None);
+        };
+        // (only the segments that meet `range`)
+        if !(a < hi && lo < b) {
+            continue;
+        }
+        k.check_cancelled(OP)?;
+        let Some(bound) = composed_segment_bound(cn, wn, net, &knots, j) else {
+            return Ok(None);
+        };
+        worst = worst.max(bound);
+        any = true;
+    }
+    Ok((any && worst.is_finite()).then_some(worst))
+}
+
+/// The structure [`composed_trim_gap_bound`] asks of its data: the curve's breakpoints and
+/// the net's distinct knots in `u` and `v`, or `None` where it does not apply.
+fn composed_inputs(
     cn: &NurbsCurve,
     wn: &NurbsCurve,
     net: &Nurbs,
     [lo, hi]: [f64; 2],
-) -> Option<f64> {
-    let degree = wn.p.checked_mul(net.p.checked_add(net.q)?)?.checked_add(cn.p)?;
+) -> Option<(Vec<f64>, [Vec<f64>; 2])> {
+    let degree =
+        wn.p.checked_mul(net.p.checked_add(net.q)?)?
+            .checked_add(cn.p)?;
     if degree > COMPOSED_MAX_DEGREE || !(lo.is_finite() && hi.is_finite() && lo < hi) {
         return None;
     }
@@ -3151,28 +3200,13 @@ fn composed_trim_gap_bound(
         return None;
     }
     let positive = |pw: &[f64]| {
-        pw.chunks_exact(4).all(|c| {
-            c.iter().all(|x| x.is_finite()) && c.get(3).is_some_and(|&w| w > 0.0)
-        })
+        pw.chunks_exact(4)
+            .all(|c| c.iter().all(|x| x.is_finite()) && c.get(3).is_some_and(|&w| w > 0.0))
     };
     if !(positive(&cn.pw) && positive(&wn.pw) && positive(&net.pw)) {
         return None;
     }
-    let knots = [distinct_knots(&net.u), distinct_knots(&net.v)];
-    let mut worst = 0.0_f64;
-    let mut any = false;
-    for (j, ends) in breaks.windows(2).enumerate() {
-        let [a, b] = *ends else {
-            return None;
-        };
-        // (only the segments that meet `range`)
-        if !(a < hi && lo < b) {
-            continue;
-        }
-        worst = worst.max(composed_segment_bound(cn, wn, net, &knots, j)?);
-        any = true;
-    }
-    (any && worst.is_finite()).then_some(worst)
+    Some((breaks, [distinct_knots(&net.u), distinct_knots(&net.v)]))
 }
 
 /// The distinct values of the (non-decreasing) knots `k`.
@@ -3271,7 +3305,12 @@ fn composed_segment_bound(
     for dim in 0..3 {
         let left = bernstein_product(x.get(dim)?, hw)?;
         let right = bernstein_product(h.get(dim)?, xw)?;
-        g.push(left.iter().zip(right.iter()).map(|(&l, &r)| l - r).collect());
+        g.push(
+            left.iter()
+                .zip(right.iter())
+                .map(|(&l, &r)| l - r)
+                .collect(),
+        );
     }
     let den = bernstein_product(xw, hw)?;
     let least = den.iter().map(|c| c.lo).fold(f64::INFINITY, f64::min);
@@ -3297,8 +3336,10 @@ const FIT_MARGIN: f64 = 1.0e-12;
 /// reach, and how far at most they were moved into it (0 where they lie in it). Points past it
 /// are scaled into it about its middle `m`, `x~ = m + λ (x - m)` in each homogeneous point
 /// (`λ` rounded down, the result checked in the span), which moves each point of the segment
-/// by `(1 - λ) |x - m|`, at most `(1 - λ) max_i |x_i - m|`. `None` past the net's ends, or
-/// where the scaled points are not shown in the span.
+/// by `(1 - λ) |x - m|`, at most `(1 - λ) max_i |x_i - m|`, through the spans between the
+/// points and the span. `None` past the net's ends, where the points reach past the span's
+/// neighbours (the move would run through spans whose speed is not taken), or where the
+/// scaled points are not shown in the span.
 fn fit_in_span(tw: &mut [[Ivl; 3]], c: usize, k: &[f64]) -> Option<(usize, [usize; 2], f64)> {
     let (&first, &last) = (k.first()?, k.last()?);
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
@@ -3312,13 +3353,19 @@ fn fit_in_span(tw: &mut [[Ivl; 3]], c: usize, k: &[f64]) -> Option<(usize, [usiz
     }
     let spans = k.len().checked_sub(1)?;
     let middle = 0.5 * (lo + hi);
-    let a = k.get(..spans)?.iter().rposition(|&x| x <= middle)?;
+    // (the last span that starts at or below the middle: the knots are distinct and ascending)
+    let a = k
+        .get(..spans)?
+        .partition_point(|&x| x <= middle)
+        .checked_sub(1)?;
     let (ka, kb) = (*k.get(a)?, *k.get(a + 1)?);
     let reach = [
         if lo < ka { a.checked_sub(1)? } else { a },
         if hi > kb { a + 1 } else { a },
     ];
-    if reach[1] >= spans {
+    // (every point moves between where it is and the span, so the hull must lie in the spans
+    // `reach` names, whose speeds bound the move)
+    if reach[1] >= spans || lo < *k.get(reach[0])? || hi > *k.get(reach[1] + 1)? {
         return None;
     }
     if ka <= lo && hi <= kb {
@@ -3412,30 +3459,28 @@ fn patch_speeds(
     (lu.is_finite() && lv.is_finite()).then_some((lu, lv))
 }
 
-/// Pascal's triangle up to [`COMPOSED_MAX_DEGREE`] (`C(32, 16)` is below `2^53`, so each is
-/// exact as an `f64`).
-#[allow(clippy::indexing_slicing)] // const evaluation: an index out of range fails the build
-const BINOMIALS: [[u64; COMPOSED_MAX_DEGREE + 1]; COMPOSED_MAX_DEGREE + 1] = {
-    let mut t = [[0_u64; COMPOSED_MAX_DEGREE + 1]; COMPOSED_MAX_DEGREE + 1];
-    let mut n = 0;
-    while n <= COMPOSED_MAX_DEGREE {
-        t[n][0] = 1;
-        let mut k = 1;
-        while k <= n {
-            t[n][k] = t[n - 1][k - 1] + t[n - 1][k];
-            k += 1;
-        }
-        n += 1;
-    }
-    t
-};
+/// Pascal's triangle up to [`COMPOSED_MAX_DEGREE`] (0 past each row's end), made once. Each
+/// `C(n, k)` is the product `Π_{i=1..k} (n - k + i) / i` in integers: after `i` factors it is
+/// `C(n - k + i, i)`, so each division is exact, and the largest value before one,
+/// `i C(n - k + i, i)`, is at most `32 C(32, 16)`, far below `2^53` (each is exact as an `f64`).
+static BINOMIALS: std::sync::LazyLock<[[f64; COMPOSED_MAX_DEGREE + 1]; COMPOSED_MAX_DEGREE + 1]> =
+    std::sync::LazyLock::new(|| {
+        core::array::from_fn(|n| {
+            core::array::from_fn(|k| {
+                if k > n {
+                    return 0.0;
+                }
+                (1..=k).fold(1_u64, |c, i| c * (n - k + i) as u64 / i as u64) as f64
+            })
+        })
+    });
 
 /// `C(n, k)`, exactly; `None` past [`COMPOSED_MAX_DEGREE`] or for `k > n`.
 fn binomial(n: usize, k: usize) -> Option<f64> {
     if k > n {
         return None;
     }
-    BINOMIALS.get(n)?.get(k).map(|&c| c as f64)
+    BINOMIALS.get(n)?.get(k).copied()
 }
 
 /// The Bernstein coefficients over `[0, 1]` of the product of two polynomials given by
@@ -4895,6 +4940,7 @@ impl TrimPair {
 /// applies; `same_parameter` bounds the gap at equal parameters
 /// ([`structured_trim_gap_bound_as`], #22034).
 fn structured_pair_bound(
+    k: &Kernel,
     cn: &NurbsCurve,
     c_slack: f64,
     wn: &NurbsCurve,
@@ -4907,7 +4953,7 @@ fn structured_pair_bound(
     if net.offset.is_some() {
         return Ok(None);
     }
-    let Some(g) = structured_trim_gap_bound_as(cn, wn, &net.net, range, same_parameter) else {
+    let Some(g) = structured_trim_gap_bound_as(k, cn, wn, &net.net, range, same_parameter)? else {
         return Ok(None);
     };
     // (the bound is on the net's image: the net's own distance to the surface added)
@@ -4974,7 +5020,7 @@ pub(crate) fn structured_trim_image_gap_bound(
     let Some(p) = TrimPair::of(k, surface, curve, uv, range)? else {
         return Ok(None);
     };
-    structured_pair_bound(&p.cn, p.c_slack, &p.wn, &p.net, range, false, || {
+    structured_pair_bound(k, &p.cn, p.c_slack, &p.wn, &p.net, range, false, || {
         net_to_surface_bound_within(k, surface, &p.net.net, nurbs_uv_box(&p.wn))
     })
 }
@@ -5482,7 +5528,7 @@ fn bound_trim_pair(
     };
     if enough.is_finite() {
         let meets = |bound: f64| bound <= enough && bound <= over;
-        let structured = structured_pair_bound(cn, c_slack, wn, net, range, !fitted, || {
+        let structured = structured_pair_bound(k, cn, c_slack, wn, net, range, !fitted, || {
             Ok(Some(to_surface))
         })?;
         if let Some(bound) = structured {
@@ -5496,7 +5542,9 @@ fn bound_trim_pair(
         // identically so exact bound values for other callers stay bit-for-bit unchanged.)
         if fitted && any_within_enough {
             if let Some(bound) =
-                structured_pair_bound(cn, c_slack, wn, net, range, true, || Ok(Some(to_surface)))?
+                structured_pair_bound(k, cn, c_slack, wn, net, range, true, || {
+                    Ok(Some(to_surface))
+                })?
             {
                 if meets(bound) {
                     return Ok(TrimBoundOutcome::Proved(bound));
@@ -8170,7 +8218,10 @@ mod tests {
             // trims too (#22930), their boxes on the seam itself, clear of the circles' seam
             // tear `assert_trim_answered` looks for)
             if matches!(curve.kind(), crate::curve::curve::CurveKind::Line(_)) {
-                assert!(matches!(s.kind(), SurfaceKind::Cone(_)) && g <= 1e-9, "{g:e}");
+                assert!(
+                    matches!(s.kind(), SurfaceKind::Cone(_)) && g <= 1e-9,
+                    "{g:e}"
+                );
                 continue;
             }
             match s.kind() {
@@ -8428,7 +8479,7 @@ mod tests {
     /// gap sampled at equal parameters.
     #[test]
     fn a_trim_that_is_its_curve_taken_back_through_the_net_is_bounded_by_the_composition() {
-        let (_, _, net, row) = side_row();
+        let (k, _, net, row) = side_row();
         let v1 = net.v[net.v.len() - 1];
         let row = Curve::from(row);
         let (cn, _) = exact_curve_data(&row, false).unwrap().unwrap();
@@ -8447,14 +8498,29 @@ mod tests {
             }
         };
         let range = [0.0, 1.0];
+        let composed = |c: &NurbsCurve, w: &NurbsCurve| {
+            composed_trim_gap_bound(&k, c, w, &net, range).unwrap()
+        };
         let wn = polyline(&us);
-        let g = composed_trim_gap_bound(&cn, &wn, &net, range).unwrap();
+        let g = composed(&cn, &wn).unwrap();
         assert!(g <= 1e-9, "{g:e}");
         assert!(g >= sampled_data_gap(&cn, &wn, &net, range, 1000));
         assert_eq!(structured_trim_gap_bound(&cn, &wn, &net, range), Some(g));
         assert_eq!(
-            structured_trim_gap_bound_as(&cn, &wn, &net, range, true),
+            structured_trim_gap_bound_as(&k, &cn, &wn, &net, range, true).unwrap(),
             Some(g)
+        );
+        // (a cancelled kernel stops it: cancellation, not a trim it cannot bound)
+        let token = crate::kernel::CancelToken::default();
+        token.cancel();
+        let cancelled = Kernel {
+            cancel: Some(token),
+            ..Kernel::default()
+        };
+        let stopped = composed_trim_gap_bound(&cancelled, &cn, &wn, &net, range);
+        assert!(
+            matches!(&stopped, Err(e) if e.is_cancelled()),
+            "{stopped:?}"
         );
         // (the inner points 8 roundings past their knots, either way)
         for sign in [1.0, -1.0] {
@@ -8463,7 +8529,7 @@ mod tests {
             for x in &mut past[1..last] {
                 *x += sign * 8.0 * f64::EPSILON * x.abs();
             }
-            let h = composed_trim_gap_bound(&cn, &polyline(&past), &net, range).unwrap();
+            let h = composed(&cn, &polyline(&past)).unwrap();
             assert!(h <= 1e-9, "{h:e}");
         }
         // (no pass-over: the curve 1e-3 off the side, a trim point 1e-3 of a span along it)
@@ -8472,7 +8538,7 @@ mod tests {
         let mut along = us.clone();
         along[2] += 1e-3 * (us[2] - us[1]);
         for (c, w) in [(&mn, &wn), (&cn, &polyline(&along))] {
-            let h = composed_trim_gap_bound(c, w, &net, range).unwrap();
+            let h = composed(c, w).unwrap();
             let seen = sampled_data_gap(c, w, &net, range, 1000);
             assert!(seen > 1e-5 && h >= seen, "{h:e} against {seen:e}");
         }
@@ -8480,14 +8546,61 @@ mod tests {
         // breakpoints, a weight that is not positive, a trim past the net's end)
         let mut other = wn.clone();
         other.u = vec![0.0, 0.0, 0.3, 0.5, 0.75, 1.0, 1.0];
-        assert_eq!(composed_trim_gap_bound(&cn, &other, &net, range), None);
+        assert_eq!(composed(&cn, &other), None);
         let mut weightless = wn.clone();
         weightless.pw[7] = 0.0;
-        assert_eq!(composed_trim_gap_bound(&cn, &weightless, &net, range), None);
+        assert_eq!(composed(&cn, &weightless), None);
         let mut beyond = us.clone();
         let end = beyond.len() - 1;
         beyond[end] += 1e-3;
-        assert_eq!(composed_trim_gap_bound(&cn, &polyline(&beyond), &net, range), None);
+        assert_eq!(composed(&cn, &polyline(&beyond)), None);
+    }
+
+    /// #22930 (CodeRabbit on #23045): a trim whose hull passes its patch's neighbours would be
+    /// moved through spans whose speed the bound does not take, so it is not bounded. On a
+    /// degree 1 net in the plane `x = 0`, `u` knots `0, 1, 2, 3, 10`, `z` rising by 100 over
+    /// `[0, 1]` and flat after, a trim from `u = 0.25` to `9.75` would be moved into
+    /// `[3, 10]`, some 2.75, at the flat spans' speed (a bound near 5.5), where the curve on
+    /// the flat part lies 75 from the trim's first point. A hull within the neighbours is
+    /// still bounded, at least the gap.
+    #[test]
+    fn a_composed_trim_past_its_patchs_neighbours_is_not_bounded() {
+        let k = Kernel::default();
+        let net = |z: [f64; 5]| {
+            let mut pw = Vec::new();
+            for z in z {
+                for v in [0.0, 1.0] {
+                    pw.extend_from_slice(&[0.0, v, z, 1.0]);
+                }
+            }
+            Nurbs {
+                p: 1,
+                q: 1,
+                nu: 5,
+                nv: 2,
+                u: vec![0.0, 0.0, 1.0, 2.0, 3.0, 10.0, 10.0],
+                v: vec![0.0, 0.0, 1.0, 1.0],
+                pw,
+            }
+        };
+        let range = [0.0, 1.0];
+        let on_flat = segment([[0.0, 0.5, 100.0, 1.0], [0.0, 0.5, 100.0, 1.0]]);
+        let rising = net([0.0, 100.0, 100.0, 100.0, 100.0]);
+        let far = segment([[0.25, 0.5, 0.0, 1.0], [9.75, 0.5, 0.0, 1.0]]);
+        let seen = sampled_data_gap(&on_flat, &far, &rising, range, 1000);
+        assert!(seen >= 75.0 - 1e-9, "{seen:e}");
+        let g = composed_trim_gap_bound(&k, &on_flat, &far, &rising, range).unwrap();
+        assert_eq!(g, None, "a bound {g:?} under the gap {seen:e}");
+        // (from `u = 2.5`, in `[3, 10]`'s neighbour, on a net rising over `[2, 3]`: moved
+        // through that span, whose speed is taken)
+        let late = net([0.0, 0.0, 0.0, 100.0, 100.0]);
+        let near = segment([[2.5, 0.5, 0.0, 1.0], [9.75, 0.5, 0.0, 1.0]]);
+        let seen = sampled_data_gap(&on_flat, &near, &late, range, 1000);
+        assert!(seen >= 50.0 - 1e-9, "{seen:e}");
+        let g = composed_trim_gap_bound(&k, &on_flat, &near, &late, range)
+            .unwrap()
+            .unwrap();
+        assert!(g >= seen, "{g:e} under the gap {seen:e}");
     }
 
     /// #20373: the extrudes' other side trims run against the side's `u` (from its end to an
@@ -8841,7 +8954,9 @@ mod tests {
         assert!(free <= 1e-9, "{free:e}");
         let sampled = sampled_same_parameter_gap(&k, &s, &slipped, &trim, [0.0, 1.0]);
         assert!(sampled > 1e-2, "{sampled:e}");
-        let same = structured_trim_gap_bound_as(&cn, &wn, &probed, [0.0, 1.0], true).unwrap();
+        let same = structured_trim_gap_bound_as(&k, &cn, &wn, &probed, [0.0, 1.0], true)
+            .unwrap()
+            .unwrap();
         assert!(same >= sampled, "{same:e} under the sampled {sampled:e}");
         let gate = trim_same_parameter_gap_bound_within(
             &k,
@@ -9017,7 +9132,9 @@ mod tests {
         let along = trim(0.5, 1.5);
         // (the full row's check applies and misses the cutoff)
         let (cn, wn, probed) = trim_data(&k, &s, &curve, &along, range);
-        let full = structured_trim_gap_bound_as(&cn, &wn, &probed, range, true).unwrap();
+        let full = structured_trim_gap_bound_as(&k, &cn, &wn, &probed, range, true)
+            .unwrap()
+            .unwrap();
         assert!(full > 1.0, "{full:e}");
         let before = k.work_counters.same_parameter_bisections();
         let g = bound(&along);
