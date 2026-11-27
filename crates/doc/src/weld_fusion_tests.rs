@@ -5,7 +5,7 @@
 
 use std::f64::consts::{FRAC_PI_2, PI};
 
-use solidcraft_kernel::services::{CheckLevel, ExactBody as Body};
+use solidcraft_kernel::{Body, SmlibCheck, validity};
 
 use super::*;
 use crate::weld_seam::Turn;
@@ -15,12 +15,19 @@ const T2: f64 = 1.5;
 const W: f64 = 3.0;
 
 fn volume(b: &Body) -> f64 {
-    b.volume(1e-9).unwrap()
+    b.volume_at(1e-9).unwrap()
 }
 
+/// The record's check, and the kernel's own at its strictest level.
 fn check(b: &Body, what: &str) {
-    let report = b.check(CheckLevel::All).unwrap();
-    assert!(report.is_valid(), "{what}: {}", report.text);
+    let v = validity(b);
+    assert!(v.record.is_ok() && matches!(v.smlib, Some(SmlibCheck::Valid)), "{what}: {v:?}");
+}
+
+/// A body's box, lowest and highest corner.
+fn bounds(b: &Body) -> ([f64; 3], [f64; 3]) {
+    let bb = b.exact_bounds().unwrap();
+    ([bb.min.x, bb.min.y, bb.min.z], [bb.max.x, bb.max.y, bb.max.z])
 }
 
 fn close(got: f64, want: f64, what: &str) {
@@ -84,9 +91,9 @@ fn a_fusion_spot_has_its_cap_its_zone_and_a_root_only_when_melted_through() {
             let got = fusion_weld(&weld(vec![], shape, depth)).unwrap();
             assert!(got.notices.is_empty());
             volumes_are(&got, shape, depth, 0.0, &format!("spot {shape:?} {depth}"));
-            let (lo, hi) = got.pieces[1].body.bounds().unwrap();
+            let (lo, hi) = bounds(&got.pieces[1].body);
             assert!((lo[2] + T1).abs() < 1e-9 && (hi[2] - depth * T2).abs() < 1e-9, "zone {lo:?}..{hi:?}");
-            let (lo, _) = got.pieces[0].body.bounds().unwrap();
+            let (lo, _) = bounds(&got.pieces[0].body);
             assert!((lo[2] + T1 + 0.08 * W).abs() < 1e-9, "cap {lo:?}");
         }
     }

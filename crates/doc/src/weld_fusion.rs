@@ -4,7 +4,7 @@
 //! ([`crate::weld_seam`]). Where they sit is a spot site ([`crate::weld_spot::spot_site`]) or a
 //! seam site ([`crate::weld_seam::seam_site`]) of the weld's width.
 //!
-//! SolidCraft's own, as the spot and the seam are: every body is an ops call; this module adds the
+//! SolidCraft's own, as the spot and the seam are: every body comes from the kernel interface; this module adds the
 //! weld's rules and sizes. The commands and their storage come with #15131.
 //!
 //! # The geometry
@@ -28,10 +28,9 @@
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use solidcore_record::brep::Curve as RecordCurve;
-use solidcraft_kernel::affine;
 use solidcraft_kernel::curves as curve;
-use solidcraft_kernel::services::boolean;
-use solidcraft_kernel::services::sweep::{self, Curve, DraftCorner};
+use solidcraft_kernel::profiles::{self, ProfileCurve as Curve};
+use solidcraft_kernel::{KernelError, affine};
 
 use crate::weld_seam::{Laid, SeamNotice, SeamPiece, SeamRefusal, add, corners, lay, scale};
 use crate::weld_spot::{SpotPiece, SpotSide, SpotZone, check_sheets, positive};
@@ -50,9 +49,12 @@ pub enum FusionRefusal {
     /// it takes.
     #[error("arc {piece} of the fusion seam turns tighter than the seam is wide; at most {fits} fits")]
     ArcTighterThanSeam { piece: usize, fits: f64 },
-    /// An ops call failed.
+    /// A profile call the kernel refused, in the kernel's words.
     #[error(transparent)]
-    Ops(#[from] solidcraft_kernel::services::Error),
+    Profile(#[from] profiles::ProfileRefused),
+    /// A kernel call failed.
+    #[error(transparent)]
+    Kernel(#[from] KernelError),
     /// A placement call refused its numbers, in the kernel's words.
     #[error(transparent)]
     Placement(#[from] affine::AffineRefused),
@@ -151,7 +153,7 @@ pub fn fusion_weld(weld: &FusionWeld) -> Result<Fusion> {
     if weld.normal == [0.0; 3] || !weld.normal.iter().chain(&weld.start).all(|v| v.is_finite()) {
         return bad("a fusion weld normal that is zero, or a start or normal that is not finite");
     }
-    let tol = sweep::zone_tolerance()?;
+    let tol = profiles::zone_tolerance()?;
     let w = weld.width;
     let (top, bottom) = match weld.shape {
         FusionShape::Straight => (0.35 * w, 0.35 * w),
@@ -165,7 +167,7 @@ pub fn fusion_weld(weld: &FusionWeld) -> Result<Fusion> {
     let [n, x] = affine::orthonormal_axes(weld.normal, [1.0, 0.0, 0.0])?;
     let laid = if weld.path.is_empty() { Vec::new() } else { lay(weld.start, &weld.path, n, tol)? };
     let reach = laid.iter().flat_map(|p| [p.ends().0, p.ends().1]).chain([weld.start]).flatten().fold(0.0_f64, |m, c| m.max(c.abs())) + w + t1 + t2;
-    if !reach.is_finite() || reach > sweep::MAX_COORD {
+    if !reach.is_finite() || reach > profiles::MAX_COORD {
         return bad("a fusion weld so large that it passes the model's size limit");
     }
     let widest = sizes.cap.0.max(top).max(sizes.root.map_or(0.0, |r| r.0));
@@ -184,7 +186,7 @@ pub fn fusion_weld(weld: &FusionWeld) -> Result<Fusion> {
         let mut bodies = Vec::new();
         for &at in &joints {
             let plane = Plane { origin: at, side: x, up: n };
-            bodies.push(sweep::revolve(&sizes.profile(kind, plane, false, tol)?, at, n, TAU, true)?);
+            bodies.push(profiles::revolve_curves(&sizes.profile(kind, plane, false, tol)?, at, n, TAU, true, None)?);
         }
         for (i, piece) in laid.iter().enumerate() {
             let (a, _) = piece.ends();
@@ -192,16 +194,16 @@ pub fn fusion_weld(weld: &FusionWeld) -> Result<Fusion> {
             let plane = Plane { origin: a, side: affine::apply_point(&quarter, t0), up: n };
             let across = sizes.profile(kind, plane, true, tol)?;
             bodies.push(match *piece {
-                Laid::Line { t, length, .. } => sweep::extrude(&across, t, length, 0.0, DraftCorner::default(), true)?,
+                Laid::Line { t, length, .. } => profiles::extrude_curves(&across, t, length, true)?,
                 Laid::Arc { c, axis, radius, sweep, .. } => {
                     if radius - widest <= tol {
                         return Err(FusionRefusal::ArcTighterThanSeam { piece: i, fits: radius * w / widest });
                     }
-                    sweep::revolve(&across, c, axis, sweep, true)?
+                    profiles::revolve_curves(&across, c, axis, sweep, true, None)?
                 }
             });
         }
-        pieces.push(SpotPiece { body: boolean::union_all(bodies)?, zone, side });
+        pieces.push(SpotPiece { body: solidcraft_kernel::union_all(&bodies.iter().collect::<Vec<_>>())?, zone, side });
     }
     let notices = if laid.is_empty() { Vec::new() } else { corners(&laid, n, tol / w)? };
     Ok(Fusion { pieces, notices })
@@ -264,7 +266,7 @@ impl Sizes {
         let (ta, za) = param_at(&arc, plane, from, face, sense, tol)?;
         let (tb, _) = param_at(&arc, plane, r, face, sense, tol)?;
         let mut curves = vec![Curve::Line { start: plane.at(from, face), end: plane.at(r, face) }];
-        curves.extend(Curve::from_record(&arc, [ta.min(tb), ta.max(tb)])?);
+        curves.extend(profiles::curve_pieces(&arc, [ta.min(tb), ta.max(tb)])?);
         if !whole {
             curves.push(Curve::Line { start: za, end: plane.at(0.0, face) });
         }
