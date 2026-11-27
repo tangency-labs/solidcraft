@@ -4370,9 +4370,9 @@ fn freeze_offset_profiles(doc: &mut solidcraft_doc::Document, sketch: u64, bound
                         }
                         loops.push(roles.clone());
                     }
-                    *selection = ProfileSel::Curves { loops };
+                    *selection = ProfileSel::Curves { loops, sides: Vec::new() };
                 }
-                ProfileSel::Curves { loops } => {
+                ProfileSel::Curves { loops, sides } => {
                     for ids in loops {
                         work = work.saturating_add(ids.len());
                         if work > 1_000_000 {
@@ -4383,6 +4383,8 @@ fn freeze_offset_profiles(doc: &mut solidcraft_doc::Document, sketch: u64, bound
                             sorted.sort();
                             if sorted == reserved_sorted {
                                 *ids = active.clone();
+                                // The saved sides name the old roles.
+                                sides.clear();
                             }
                         }
                     }

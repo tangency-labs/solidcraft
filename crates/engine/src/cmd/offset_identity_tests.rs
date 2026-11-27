@@ -48,12 +48,13 @@ fn legacy_offset_capture_persists_reserved_curves_without_a_transient_associatio
     let state = session.model.state();
     let solved = state.sketch(sketch).unwrap();
     assert!(solved.sketch.offsets[0].topology.is_some(), "legacy upgrade belongs only to the evaluated copy");
-    let index = solidcraft_doc::profile_selection_indices(solved, &ProfileSel::Curves { loops: vec![reserved.clone()] }).unwrap()[0];
+    let index =
+        solidcraft_doc::profile_selection_indices(solved, &ProfileSel::Curves { loops: vec![reserved.clone()], sides: Vec::new() }).unwrap()[0];
     let extrusion = run(&mut session, "solid.extrude", json!({"sketch":sketch,"profiles":[index],"distance":2,"name":"Legacy inner"}))["feature"]
         .as_u64()
         .unwrap();
     assert!(
-        matches!(&session.doc.feature(extrusion).unwrap().kind,FeatureKind::Extrude {profiles:ProfileSel::Curves {loops},..} if loops == &vec![reserved.clone()])
+        matches!(&session.doc.feature(extrusion).unwrap().kind,FeatureKind::Extrude {profiles:ProfileSel::Curves {loops,..},..} if loops == &vec![reserved.clone()])
     );
     assert!(session.doc.sketch(sketch).unwrap().offsets[0].topology.is_none());
     run(&mut session, "parameters.change", json!({"name":radius,"expression":"1 mm"}));

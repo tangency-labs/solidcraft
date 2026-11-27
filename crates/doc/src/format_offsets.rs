@@ -86,6 +86,17 @@ fn validate_sided_reference(value: &Value) -> Result<()> {
     Ok(())
 }
 
+/// Validate the sides saved with a curve pick (`curves` with `sides`, #23291): one list per loop,
+/// each as a `sided_curves` loop is written.
+fn validate_curve_sides(value: &Value, sides: &Value) -> Result<()> {
+    let loops = value.get("loops").and_then(Value::as_array).ok_or_else(invalid)?;
+    let sides = sides.as_array().ok_or_else(invalid)?;
+    if sides.len() != loops.len() || sides.len() > 128 {
+        return Err(invalid());
+    }
+    validate_sided_reference(&serde_json::json!({"type": "sided_curves", "loops": sides}))
+}
+
 fn validate_whole_reference(value: &Value) -> Result<()> {
     exact_keys(value, &["type", "profiles"])?;
     if value.get("type").and_then(Value::as_str) != Some("whole_boundaries") {
@@ -250,6 +261,11 @@ pub(crate) fn validate_raw(value: &Value) -> Result<()> {
         }
         if value.get("type").and_then(Value::as_str) == Some("sided_curves") {
             return validate_sided_reference(value);
+        }
+        if value.get("type").and_then(Value::as_str) == Some("curves")
+            && let Some(sides) = value.get("sides")
+        {
+            return validate_curve_sides(value, sides);
         }
         if value.get("type").and_then(Value::as_str) == Some("offset_boundaries") {
             exact_keys(value, &["type", "associations"])?;
