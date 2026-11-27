@@ -10,7 +10,7 @@
 //! merge gives the target copies of the fillet faces and drops the fillet B-rep, so the
 //! surfaces are noted before it (with the pieces kept for them, where a corner dips or
 //! peaks) and found again after it by their equality: each face on one is split at its
-//! surface's C0 knots, its surface cut back to the side it lies on, and the new edges
+//! law's corners, its surface cut back to the side it lies on, and the new edges
 //! along the turn given the iso curve of the surface they lie on, exactly. Where a corner
 //! dips or peaks, the faces are then rebuilt as the union of the balls (`BuildLawCorners`,
 //! 7babe17 with 62fcc82 and 58d03ef): each side its exact piece, the corner ball's zone a
@@ -25,15 +25,24 @@
 //! | `faces_of_pieces` (private) | `sm_PieceOfFace`, in `BuildLawCorners`' two loops |
 //! | `edge_between` (private) | `sm_EdgeBetween` |
 //!
-//! Deviations: the noted copies and their pieces are one list of triples
+//! Deviations: the noted copies and their pieces are one list
 //! (`m_vRadiusCornerSurfaces`, `m_vRadiusCornerPieces`), owned by the session and emptied
-//! by the split. Not the fork's (#16651): a chamfer by its definition whose chord creases
+//! by the split. Not the fork's (#22141): a round is noted where pieces are kept for it,
+//! and its faces split at the pieces' joints, the law's corners exactly, where the fork
+//! splits them at the C0 knots its continuity search finds
+//! (`SmBrep::SubdivideFaceAtDiscontinuities`). That search samples the surface and takes a
+//! kink whose normals are within one degree for G1; both sides of a law corner touch the
+//! corner ball, so their normals there differ only by the angle between the two touch
+//! circles, and a corner where the law's slope jumps a little was missed: one face turning
+//! inside, its exact pieces dropped. Not the fork's (#16651): a chamfer by its definition whose chord creases
 //! where a foot crosses a face's G1-only knot line
 //! ([`crate::surface::procedural_blend::ProceduralBlend::chord_creases`]) is noted too,
 //! with those knots, and split at them alone; each side keeps the definition, its net
 //! trimmed to the side. The split's loop passes over a face the rebuild of an earlier one removed
 //! (the fork's list would hold a deleted face there). With `Kernel::blend_face_log` on, a
-//! dip's zone is marked as a corner ball's patch (#2489; not the fork's). No recursion.
+//! dip's zone is marked as a corner ball's patch (#2489; not the fork's). Not the fork's
+//! (#22021): a dip's zone is made through its circles' points taken onto the corner ball's
+//! sphere, so that it lies on the sphere its definition names. No recursion.
 
 use super::trim_at_creases::with_target_env_of;
 use super::{FilletSession, SolverObject};
@@ -47,7 +56,6 @@ use crate::error::blend::{BlendFailure, LawCornerSearch};
 use crate::error::{EntityRef, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
-use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::object::ObjectRef;
 use crate::kernel::Kernel;
 use crate::math::{Point3, EFF_ZERO_SQRT};
@@ -89,25 +97,30 @@ fn not_found(corner: usize, what: LawCornerSearch) -> SolidError {
 const SPLIT_FACE_SURFACE: &str = "a face split from a round at its law corners has no surface: \
      the split gives each face a piece of the round's surface";
 
-/// A fillet surface noted before the merge (a copy), with its kept pieces where a law
-/// corner dips or peaks, and (not the fork's, #16651) the knots `(u, v)` to split it at
-/// where they are a chamfer's creases rather than the surface's C0 knots.
-pub(super) type RadiusCornerSurface = (
-    Surface,
-    Option<LawCornerPieces>,
-    Option<(Vec<f64>, Vec<f64>)>,
-);
+/// A fillet surface noted before the merge to be split where it turns.
+#[derive(Debug)]
+pub(super) struct RadiusCornerSurface {
+    /// A copy of the surface, to find its faces again after the merge.
+    surface: Surface,
+    /// Its kept pieces where a law corner dips or peaks: the faces are rebuilt there.
+    pieces: Option<LawCornerPieces>,
+    /// The knots `(u, v)` it turns at: a round's law corners (#22141) or (#16651) a
+    /// chamfer's creases.
+    knots: (Vec<f64>, Vec<f64>),
+    /// A chamfer noted at its creases (#16651), found again by its definition too.
+    chord_creases: bool,
+}
 
 impl FilletSession<'_> {
     /// `NoteRadiusCornerSurfaces` (the fork's 6eecf04, 58d03ef): copies of the fillet
-    /// surfaces of the solvers whose radius has a corner, where those surfaces turn (a C0
-    /// knot), each with a copy of the pieces kept for it (matched by its corners,
-    /// [`find_law_corner_pieces`]) where a corner dips or peaks.
+    /// surfaces of the solvers whose radius has a corner, those skinned piece by piece
+    /// (matched to their kept pieces by their corners, [`find_law_corner_pieces`]), each
+    /// with the corners as the knots to split it at (#22141) and a copy of its pieces where
+    /// a corner dips or peaks.
     ///
     /// # Errors
     ///
-    /// Those of the solvers' corners, the geometries' surfaces, the knot search and the
-    /// pieces' match.
+    /// Those of the solvers' corners, the geometries' surfaces and the pieces' match.
     pub(super) fn note_radius_corner_surfaces(&mut self, k: &Kernel) -> Result<()> {
         let mut noted = Vec::new();
         for index in 0..self.objects.solvers.len() {
@@ -126,13 +139,8 @@ impl FilletSession<'_> {
                 let Some(surface) = self.objects.fillet_surface(geom)? else {
                     continue;
                 };
-                let (u, v) = surface.find_knots_by_max_continuity(k, ContinuityType::C0, false)?;
-                if u.is_empty() && v.is_empty() {
-                    continue;
-                }
                 let copy = surface.clone();
-                // the exact pieces where a law corner dips or peaks: those kept with the
-                // same corners
+                // the pieces kept with the same corners: the surface turns at their joints
                 let base = self
                     .objects
                     .solvers
@@ -146,11 +154,19 @@ impl FilletSession<'_> {
                         )
                     })?
                     .base_mut();
-                let pieces = find_law_corner_pieces(k, &mut base.law_corner_pieces, &copy)?
+                let Some(kept) = find_law_corner_pieces(k, &mut base.law_corner_pieces, &copy)?
                     .and_then(|i| base.law_corner_pieces.get(i))
-                    .filter(|kept| kept.has_dip_or_peak())
-                    .cloned();
-                noted.push((copy, pieces, None));
+                else {
+                    // (skinned whole: no corner inside it)
+                    continue;
+                };
+                noted.push(RadiusCornerSurface {
+                    surface: copy,
+                    knots: (kept.corner_knots(), Vec::new()),
+                    // the exact round where a law corner dips or peaks
+                    pieces: kept.has_dip_or_peak().then(|| kept.clone()),
+                    chord_creases: false,
+                });
             }
         }
         // (not the fork's, #16651) a chamfer by its definition whose feet's s-derivatives
@@ -173,7 +189,12 @@ impl FilletSession<'_> {
                 if creases.0.is_empty() && creases.1.is_empty() {
                     continue;
                 }
-                noted.push((surface.clone(), None, Some(creases)));
+                noted.push(RadiusCornerSurface {
+                    surface: surface.clone(),
+                    pieces: None,
+                    knots: creases,
+                    chord_creases: true,
+                });
             }
         }
         self.objects.radius_corner_surfaces.extend(noted);
@@ -181,8 +202,9 @@ impl FilletSession<'_> {
     }
 
     /// `SplitFilletFacesAtRadiusCorners` (the fork's 6eecf04): each face of the target on
-    /// a surface noted by [`Self::note_radius_corner_surfaces`] split at its surface's C0
-    /// knots (`SmBrep::SubdivideFaceAtDiscontinuities`), each resulting face's surface cut
+    /// a surface noted by [`Self::note_radius_corner_surfaces`] split at its noted knots
+    /// (the fork's `SmBrep::SubdivideFaceAtDiscontinuities` at the surface's C0 knots; here
+    /// the law's corners exactly, #22141), each resulting face's surface cut
     /// at the turns to the side the face lies on and the face shrunk back to it, and the
     /// split's edges given the iso curves they lie along. Empties the noted list.
     ///
@@ -229,11 +251,11 @@ impl FilletSession<'_> {
                 continue;
             };
             let mut fillet = None;
-            for (index, (copy, _, creases)) in noted.iter().enumerate() {
+            for (index, entry) in noted.iter().enumerate() {
                 // (a chamfer noted at its creases, #16651, by its net and definition: only
                 // those, a round by its definition is matched as before)
-                if copy.approx_eq(k, surface)?
-                    || (creases.is_some() && same_procedural_blend(k, copy, surface)?)
+                if entry.surface.approx_eq(k, surface)?
+                    || (entry.chord_creases && same_procedural_blend(k, &entry.surface, surface)?)
                 {
                     fillet = Some(index);
                     break;
@@ -245,26 +267,19 @@ impl FilletSession<'_> {
             if let Some(slot) = found.get_mut(index) {
                 *slot = true;
             }
-            let creases = noted.get(index).and_then(|(_, _, c)| c.as_ref());
+            let Some(entry) = noted.get(index) else {
+                continue;
+            };
+            let (u_knots, v_knots) = &entry.knots;
             let mut pieces = with_target_env_of(&mut self.objects, k, |k, b, env, _| {
                 let key_of = env.key_of;
                 let curve_ref = |e: EdgeId, kind: i64| ObjectRef {
                     key: key_of(EntityRef::Edge(e)).key,
                     type_code: kind,
                 };
-                match creases {
-                    Some((u, v)) => crate::topology::brep::p10::subdivide_face_at_knots(
-                        k, b, env, &curve_ref, face, u, v,
-                    ),
-                    None => crate::topology::brep::p10::subdivide_face_at_discontinuities(
-                        k,
-                        b,
-                        env,
-                        &curve_ref,
-                        face,
-                        ContinuityType::C0,
-                    ),
-                }
+                crate::topology::brep::p10::subdivide_face_at_knots(
+                    k, b, env, &curve_ref, face, u_knots, v_knots,
+                )
             })?;
             if !pieces.contains(&face) {
                 pieces.push(face);
@@ -282,11 +297,7 @@ impl FilletSession<'_> {
                     .ok_or_else(|| defect(SPLIT_FACE_SURFACE, SM_ERR_NULL_POINTER))?;
                 let domain = surface.natural_uv_domain_with_nurb(k)?;
                 let (mut lo, mut hi) = (domain.min(), domain.max());
-                let (u, v) = match creases {
-                    Some(c) => c.clone(),
-                    None => surface.find_knots_by_max_continuity(k, ContinuityType::C0, false)?,
-                };
-                for knot in u {
+                for &knot in u_knots {
                     if knot <= lo.x || knot >= hi.x {
                         continue;
                     }
@@ -296,7 +307,7 @@ impl FilletSession<'_> {
                         hi.x = knot;
                     }
                 }
-                for knot in v {
+                for &knot in v_knots {
                     if knot <= lo.y || knot >= hi.y {
                         continue;
                     }
@@ -344,15 +355,15 @@ impl FilletSession<'_> {
             }
 
             // where the law dips or peaks, the exact round there (the faces are rebuilt)
-            if let Some(kept) = noted.get(index).and_then(|(_, kept, _)| kept.as_ref()) {
+            if let Some(kept) = entry.pieces.as_ref() {
                 self.build_law_corners(k, &pieces, kept)?;
             }
         }
         // (#16651) a chamfer noted at its creases whose face is not found again would keep
         // its crease inside one face: the split stage failed (a typed cause), not left for
         // the check to find
-        for ((_, _, creases), found) in noted.iter().zip(&found) {
-            if creases.is_some() && !found {
+        for (entry, found) in noted.iter().zip(&found) {
+            if entry.chord_creases && !found {
                 return Err(defect(
                     "a chamfer noted at its creases is not found again after the merge, so \
                      the split would leave its crease inside one face: the merge gives the \
@@ -562,13 +573,35 @@ impl FilletSession<'_> {
             // own: the sphere through both circles, which share their ends (the rails'
             // points at the corner)
             let [first, second] = &curves;
+            // (not the fork's, #22021) each point the zone is made through is taken onto the
+            // corner ball's sphere along its radius: the circles are the pieces' nets' end
+            // sections, which lie within the pieces' accuracy of the ball's circles, not on
+            // them (a piece by its definition evaluates its net), and the zone through them
+            // would lie on another sphere than the definition it keeps. Each point moves by
+            // its distance from the sphere, at most that accuracy (`kept.tol_3d`, else the
+            // section is not the ball's circle and the corner is refused); the zone's edges
+            // take the corner's tolerance, at least that, below.
+            let on_ball = |p: Point3| -> Result<Point3> {
+                let d = p - corner.centre;
+                let length = d.length();
+                // (a NaN fails the comparison as well)
+                if !(length > 0.0 && (length - corner.radius).abs() <= kept.tol_3d) {
+                    return Err(defect(
+                        "a dip's touch circle lies off its corner ball by more than the \
+                         pieces' accuracy: each piece's end section is the ball's circle \
+                         within it",
+                        SM_ERR,
+                    ));
+                }
+                Ok(corner.centre + d * (corner.radius / length))
+            };
             let middle = |c: &Curve| -> Result<Point3> {
                 let ivl = c.natural_interval();
-                c.evaluate_point(k, 0.5 * (ivl.min() + ivl.max()))
+                on_ball(c.evaluate_point(k, 0.5 * (ivl.min() + ivl.max()))?)
             };
             let ivl = first.natural_interval();
-            let two = first.evaluate_point(k, ivl.min())?;
-            let one = first.evaluate_point(k, ivl.max())?;
+            let two = on_ball(first.evaluate_point(k, ivl.min())?)?;
+            let one = on_ball(first.evaluate_point(k, ivl.max())?)?;
             let mut zone = Surface::from(sphere_zone(
                 corner.centre,
                 corner.radius,

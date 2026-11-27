@@ -1030,3 +1030,134 @@ fn a_watcher_sees_the_bodies_measured_and_can_stop_them() {
     let stopped = solidcraft_doc::progress::watch(progress, || s.execute("component.properties", &json!({"component": "root"})));
     assert!(stopped.unwrap_err().to_string().contains("cancelled"));
 }
+
+/// Parallel body measurement and off-axis placement bounding in `component.properties` produce
+/// bit-for-bit identical physical properties (totals, tensors, per-body figures and order)
+/// compared to measuring every body sequentially beforehand.
+#[test]
+fn parallel_component_properties_matches_sequential_bit_for_bit() {
+    let build = || -> Session {
+        let mut s = Session::default();
+        for i in 0..10u32 {
+            run(&mut s, "component.activate", json!({"component": "root"}));
+            let c = run(&mut s, "component.create", json!({"name": format!("Part{i:02}"), "grounded": false}));
+            let len = 8.0 + f64::from(i) * 2.0;
+            if i % 2 == 0 {
+                run(&mut s, "solid.box", json!({"length": len, "width": 10, "height": 6, "corner": [0, 0, 0]}));
+            } else {
+                run(&mut s, "solid.cylinder", json!({"radius": 3.0 + f64::from(i) * 0.25, "height": len}));
+            }
+            let body = s.model.state().bodies.last().unwrap().name.clone();
+            let material = if i % 3 == 0 { "Steel" } else { "Aluminum" };
+            run(&mut s, "material.assign", json!({"bodies": [body], "material": material}));
+            // Off-axis rotation on several placements exercises parallel per-placement exact bounds.
+            let angle = if i % 2 == 1 { "30 deg" } else { "90 deg" };
+            run(
+                &mut s,
+                "occurrence.move",
+                json!({"occurrence": c["occurrence"], "translate": [f64::from(i) * 25.0, f64::from(i) * 5.0, 0], "axis": [0, 1, 1], "angle": angle}),
+            );
+            if i < 4 {
+                let copy = run(&mut s, "occurrence.copy", json!({"component": c["component"], "translate": [0, 60, 0]}));
+                run(&mut s, "occurrence.move", json!({"occurrence": copy["occurrence"], "axis": [1, 0, 1], "angle": "25 deg"}));
+            }
+        }
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        s
+    };
+
+    // Cold session: component.properties measures all distinct bodies and off-axis placements in parallel.
+    let mut par_session = build();
+    let par = run(&mut par_session, "component.properties", json!({"component": "root", "about": [10, 20, 30]}));
+
+    // Fresh session where every body is measured sequentially before component.properties runs.
+    let mut seq_session = build();
+    {
+        let st = seq_session.model.state();
+        for b in &st.bodies {
+            let _ = b.measure().unwrap();
+            let _ = b.is_closed();
+        }
+    }
+    let seq = run(&mut seq_session, "component.properties", json!({"component": "root", "about": [10, 20, 30]}));
+
+    assert_eq!(par["body_count"], 14);
+    assert_eq!(par, seq, "parallel component.properties must match sequential output bit-for-bit");
+}
+
+/// #12721: an occurrence's properties name where it sits, in its parent and in the world, as the
+/// 3×4 matrix `occurrence.move` takes. A move that is still pending is included.
+#[test]
+fn occurrence_properties_report_the_placement_in_the_parent_and_in_the_world() {
+    let mut s = Session::default();
+    let arm = run(&mut s, "component.create", json!({"name": "arm", "grounded": false}))["occurrence"].as_u64().unwrap();
+    let bracket = run(&mut s, "component.create", json!({"name": "bracket", "parent": "arm"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 8, "name": "Plate", "body_name": "bracket"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.move", json!({"occurrence": arm, "matrix": [[1, 0, 0, 116], [0, 1, 0, 235], [0, 0, 1, 1492]]}));
+    run(&mut s, "occurrence.move", json!({"occurrence": bracket, "matrix": [[0, 0, 1, 0], [0, 1, 0, -120], [-1, 0, 0, 0]]}));
+    let r = run(&mut s, "occurrence.properties", json!({"occurrence": bracket, "path": [arm, bracket]}));
+    let parent = &r["placement"]["in_parent"];
+    let world = &r["placement"]["world"];
+    close(&parent["position"][0], 0.0);
+    close(&parent["position"][1], -120.0);
+    close(&parent["position"][2], 0.0);
+    close(&parent["axis"][1], 1.0);
+    close(&parent["angle_deg"], 90.0);
+    assert_eq!(parent["matrix"][0][2], 1.0);
+    assert_eq!(parent["matrix"][1][3], -120.0);
+    close(&world["position"][0], 116.0);
+    close(&world["position"][1], 115.0);
+    close(&world["position"][2], 1492.0);
+    close(&world["angle_deg"], 90.0);
+    let stored = s.doc.occurrences.iter().find(|o| o.id == arm).map(|o| o.transform[3][0]).expect("stored");
+    run(&mut s, "occurrence.move", json!({"occurrence": arm, "translate": [4, 0, 0], "capture": false}));
+    let pending = run(&mut s, "occurrence.properties", json!({"occurrence": bracket, "path": [arm, bracket]}));
+    close(&pending["placement"]["world"]["position"][0], 120.0);
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == arm).map(|o| o.transform[3][0]), Some(stored));
+}
+
+/// #12721: the matrix `occurrence.properties` reports goes back into `occurrence.move` as
+/// `to_matrix`, in the same frame, and puts a second occurrence where the first one is. No turn
+/// reads as 0° about +Z, and a half turn names its axis.
+#[test]
+fn a_reported_placement_goes_back_into_occurrence_move() {
+    let mut s = Session::default();
+    let arm = run(&mut s, "component.create", json!({"name": "arm", "grounded": false}))["occurrence"].as_u64().unwrap();
+    let a = run(&mut s, "component.create", json!({"name": "a", "parent": "arm"}))["occurrence"].as_u64().unwrap();
+    let b = run(&mut s, "component.create", json!({"name": "b", "parent": "arm"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let still = run(&mut s, "occurrence.properties", json!({"occurrence": a, "path": [arm, a]}));
+    close(&still["placement"]["in_parent"]["angle_deg"], 0.0);
+    close(&still["placement"]["in_parent"]["axis"][2], 1.0);
+    run(&mut s, "occurrence.move", json!({"occurrence": arm, "matrix": [[0, -1, 0, 10], [1, 0, 0, 20], [0, 0, 1, 30]]}));
+    // A half turn about +X, then moved.
+    run(&mut s, "occurrence.move", json!({"occurrence": a, "matrix": [[1, 0, 0, 5], [0, -1, 0, 6], [0, 0, -1, 7]]}));
+    let read = run(&mut s, "occurrence.properties", json!({"occurrence": a, "path": [arm, a]}));
+    let (local, world) = (&read["placement"]["in_parent"], &read["placement"]["world"]);
+    close(&local["angle_deg"], 180.0);
+    close(&local["axis"][0], 1.0);
+    // The arm turns +X to +Y: (5, 6, 7) in it is (-6, 5, 7) from its origin.
+    for (i, expected) in [4.0, 25.0, 37.0].into_iter().enumerate() {
+        close(&world["position"][i], expected);
+    }
+    run(&mut s, "occurrence.move", json!({"occurrence": b, "to_matrix": local["matrix"], "space": "local"}));
+    let copy = run(&mut s, "occurrence.properties", json!({"occurrence": b, "path": [arm, b]}));
+    assert_eq!(copy["placement"]["in_parent"]["matrix"], local["matrix"]);
+    for (row, expected) in copy["placement"]["world"]["matrix"].as_array().unwrap().iter().zip(world["matrix"].as_array().unwrap()) {
+        for (x, y) in row.as_array().unwrap().iter().zip(expected.as_array().unwrap()) {
+            close(x, y.as_f64().unwrap());
+        }
+    }
+    run(&mut s, "occurrence.move", json!({"occurrence": b, "to_matrix": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]], "space": "local"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": b, "to_matrix": world["matrix"], "space": "world"}));
+    let back = run(&mut s, "occurrence.properties", json!({"occurrence": b, "path": [arm, b]}));
+    for (row, expected) in back["placement"]["in_parent"]["matrix"].as_array().unwrap().iter().zip(local["matrix"].as_array().unwrap()) {
+        for (x, y) in row.as_array().unwrap().iter().zip(expected.as_array().unwrap()) {
+            close(x, y.as_f64().unwrap());
+        }
+    }
+}

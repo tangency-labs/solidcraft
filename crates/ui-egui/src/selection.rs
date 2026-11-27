@@ -12,6 +12,51 @@ use crate::viewport::Hit;
 pub(crate) use solidcraft_engine::pick_pieces::polyline_mid;
 pub(crate) use solidcraft_engine::selection_context::same_item;
 
+/// A set of picks by [`same_item`] identity: model edges and faces by body and index in a hash
+/// set, anything else in a list.
+#[derive(Default)]
+pub(crate) struct ItemSet {
+    keyed: std::collections::HashSet<(bool, String, usize)>,
+    other: Vec<Sel>,
+}
+
+impl ItemSet {
+    pub(crate) fn of<'a>(items: impl IntoIterator<Item = &'a Sel>) -> ItemSet {
+        let mut set = ItemSet::default();
+        for x in items {
+            set.insert(x);
+        }
+        set
+    }
+
+    fn key(x: &Sel) -> Option<(bool, &str, usize)> {
+        match x {
+            Sel::Edge { body, index, .. } => Some((true, body.as_str(), *index)),
+            Sel::Face { body, index, .. } => Some((false, body.as_str(), *index)),
+            _ => None,
+        }
+    }
+
+    /// Add `x`; whether it was not in the set yet.
+    pub(crate) fn insert(&mut self, x: &Sel) -> bool {
+        match ItemSet::key(x) {
+            Some((edge, body, index)) => self.keyed.insert((edge, body.to_owned(), index)),
+            None if self.other.iter().any(|y| same_item(x, y)) => false,
+            None => {
+                self.other.push(x.clone());
+                true
+            }
+        }
+    }
+
+    pub(crate) fn contains(&self, x: &Sel) -> bool {
+        match ItemSet::key(x) {
+            Some((edge, body, index)) => self.keyed.contains(&(edge, body.to_owned(), index)),
+            None => self.other.iter().any(|y| same_item(x, y)),
+        }
+    }
+}
+
 /// Whether the selection holds the body `body`: selected on its own, or through a selected
 /// occurrence (the bodies its placement shows, as its Browser row lists them).
 pub(crate) fn holds_body(session: &solidcraft_engine::Session, body: &str) -> bool {
@@ -111,16 +156,44 @@ pub struct SelInput {
     /// (#11476): a corner, an edge's middle or a hole's centre of that face, with the face, its
     /// outward normal and the edge. A joint origin there lies on the face and follows it by name.
     pub from_face: Vec<(Sel, solidcraft_engine::snap::SnapKind, solidcraft_engine::snap::SnapSource)>,
+    /// Whether the input offers Tangent Chain, and whether it is on: `None` for no switch. On,
+    /// an edge picked into it brings every edge that continues it smoothly as a curve (a path,
+    /// rail or boundary to run along: [`crate::dialogs::Dialog::sync_input_chains`]).
+    pub chain: Option<bool>,
+    /// While Tangent Chain is on: each pick, with the edges its chain brought in. `None` for a
+    /// pick that lies in an earlier pick's chain: its own chain lies in that one too, so it is
+    /// walked only when that earlier pick goes ([`crate::dialogs::Dialog::sync_input_chains`]).
+    pub(crate) chain_seeds: Vec<(Sel, Option<Vec<Sel>>)>,
+    /// The items as the chains last wrote them: a difference is a pick or a removal to follow.
+    pub(crate) chain_written: Vec<Sel>,
 }
 
 impl SelInput {
     pub fn new(label: &'static str, accept: Accept, multi: bool) -> SelInput {
-        SelInput { label, accept, multi, places: false, tip: None, ordered_points: false, items: Vec::new(), from_face: Vec::new() }
+        SelInput {
+            label,
+            accept,
+            multi,
+            places: false,
+            tip: None,
+            ordered_points: false,
+            items: Vec::new(),
+            from_face: Vec::new(),
+            chain: None,
+            chain_seeds: Vec::new(),
+            chain_written: Vec::new(),
+        }
     }
 
     /// This input with face picks as places (see [`SelInput::places`]).
     pub fn places(mut self) -> SelInput {
         self.places = true;
+        self
+    }
+
+    /// This input with a Tangent Chain switch, off (see [`SelInput::chain`]).
+    pub fn chains(mut self) -> SelInput {
+        self.chain = Some(false);
         self
     }
 
@@ -180,6 +253,9 @@ impl SelInput {
             Hit::SketchPoint { sketch, id, .. } if a & EXTERNAL_POINTS != 0 => Some(Sel::ExternalSketchPoint { sketch: *sketch, id: id.clone() }),
             Hit::SketchPoint { id, .. } if a & SKETCH_POINTS != 0 => Some(Sel::SketchPoint { id: id.clone() }),
             Hit::SketchPoint { sketch, id, .. } if a & POINTS != 0 => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
+            Hit::PlacedSketchPoint { sketch, id, path, .. } if a & POINTS != 0 => {
+                Some(Sel::PlacedSketchPoint { sketch: *sketch, id: id.clone(), path: path.clone() })
+            }
             // The origin, or a snap point of a sketch curve (a line's middle).
             Hit::Vertex { body, point } if body.is_empty() && a & (ORIGIN | SNAP_POINTS) != 0 => {
                 Some(Sel::Vertex { body: String::new(), point: *point })

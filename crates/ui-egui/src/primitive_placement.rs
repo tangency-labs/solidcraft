@@ -189,13 +189,13 @@ pub(crate) fn dropped(s: &Session, extra: &mut Map<String, Value>, p: Vec3, n: V
 }
 
 /// A picked plane places a primitive at its origin along its normal, using the same exact
-/// world plane that the Browser and viewport show.
-pub(crate) fn plane_params(s: &Session, sel: Option<&Sel>, p: &mut Map<String, Value>) -> Result<(), String> {
+/// world plane that the Browser and viewport show, unless Direction was edited after the pick.
+pub(crate) fn plane_params(s: &Session, sel: Option<&Sel>, direction: Option<&Value>, p: &mut Map<String, Value>) -> Result<(), String> {
     let Some(Sel::Plane { name }) = sel else { return Ok(()) };
-    let plane = crate::dialogs::plane_by_name(s, name).ok_or("unknown plane")?;
+    let plane = crate::dialogs::plane_by_name(s, name).ok_or_else(|| solidcraft_ui_text::tr("coil.plane_unavailable").to_string())?;
     let normal = plane.normal();
     p.insert("base".into(), json!({"x": plane.origin.x, "y": plane.origin.y, "z": plane.origin.z}));
-    p.insert("axis".into(), json!({"x": normal.x, "y": normal.y, "z": normal.z}));
+    p.insert("axis".into(), direction.cloned().unwrap_or_else(|| json!({"x": normal.x, "y": normal.y, "z": normal.z})));
     Ok(())
 }
 

@@ -13,10 +13,10 @@ use std::sync::OnceLock;
 use crate::{Error, Result};
 
 /// A surface with its UV domain: the description it was made from, from which solidcore makes its
-/// own ([`crate::core::split`]).
+/// own ([`crate::core::ssi`]).
 pub struct Surface {
     /// solidcore's, made when it is first needed.
-    core: OnceLock<Result<crate::core::split::Tool>>,
+    core: OnceLock<Result<crate::core::ssi::Tool>>,
     spec: Spec,
 }
 
@@ -128,7 +128,7 @@ impl Spec {
 
 impl Surface {
     /// solidcore's surface, made the first time it is needed.
-    fn core(&self) -> Result<&crate::core::split::Tool> {
+    fn core(&self) -> Result<&crate::core::ssi::Tool> {
         self.core.get_or_init(|| crate::stop::unstoppable(|| crate::core::ssi::surface(&self.spec))).as_ref().map_err(Clone::clone)
     }
 
@@ -334,37 +334,6 @@ pub struct SsiResult {
     pub points: Vec<SsiPoint>,
 }
 
-/// A (rational) B-spline's coordinates, weights and knots, as the capi hands an intersection curve
-/// out: `points` 3 (or 2, in UV) reals each.
-pub(crate) struct Nurbs {
-    pub points: Vec<f64>,
-    pub weights: Vec<f64>,
-    pub knots: Vec<f64>,
-}
-
-/// The 3D B-spline: polynomial where every weight is 1.
-pub(crate) fn curve3(c: Nurbs) -> b::Curve {
-    let points = c.points.as_chunks::<3>().0;
-    if c.weights.iter().all(|w| *w == 1.0) {
-        b::Curve::Spline { knots: c.knots, points: points.to_vec() }
-    } else {
-        b::Curve::RationalSpline {
-            knots: c.knots,
-            homogeneous: points.iter().zip(&c.weights).map(|(p, w)| [p[0] * w, p[1] * w, p[2] * w, *w]).collect(),
-        }
-    }
-}
-
-/// A UV B-spline, as [`curve3`].
-pub(crate) fn curve2(c: Nurbs) -> b::Curve2 {
-    let points = c.points.as_chunks::<2>().0;
-    if c.weights.iter().all(|w| *w == 1.0) {
-        b::Curve2::Spline { knots: c.knots, points: points.to_vec() }
-    } else {
-        b::Curve2::RationalSpline { knots: c.knots, homogeneous: points.iter().zip(&c.weights).map(|(p, w)| [p[0] * w, p[1] * w, *w]).collect() }
-    }
-}
-
 /// Intersects `a` and `b` within their domains with `method` at approximation tolerance
 /// `approx_tol` (<= 0: SMLib's default, 1/1000 of the surfaces' size). An intersector failure is
 /// SMLib's status; a curve SMLib does not hold as a B-spline is [`Error::Unsupported`].
@@ -446,5 +415,78 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The adapter is solidcore-ops' surface/surface intersection with nothing changed: each
+    /// pair's domains, points and intersections through [`Surface`] and [`intersect`] are bit
+    /// for bit what [`solidcore_ops::surface_intersection`] gives for the same numbers, by both
+    /// methods, at a given tolerance and at the default one.
+    #[test]
+    fn routed_intersections_are_solidcore_ops() {
+        use solidcore_ops::surface_intersection as ops;
+        let (x, y, z) = ([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]);
+        let bits = |v: &[f64]| v.iter().map(|f| f.to_bits()).collect::<Vec<_>>();
+        let net: Vec<[f64; 3]> = (0..16).map(|i| [f64::from(i / 4) - 1.5, f64::from(i % 4) - 1.5, 0.2 * f64::from((i * 7) % 5) - 0.4]).collect();
+        let weights: Vec<f64> = (0..16).map(|i| 1.0 + 0.1 * f64::from(i % 3)).collect();
+        let knots = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let specs = [
+            Spec::Plane { origin: [0.0, 0.0, 0.1], xaxis: x, yaxis: [0.0, 2.0, 0.0], u: [-2.0, 2.0], v: [-3.0, 3.0] },
+            Spec::Cylinder { origin: [0.2, 0.0, -1.0], xaxis: x, yaxis: y, radius: 0.8, angle_deg: [0.0, 360.0], height: [-1.0, 2.0] },
+            Spec::Cone { apex: [0.0, 0.0, -2.0], xaxis: x, yaxis: y, half_angle_deg: 30.0, height: [0.5, 4.0] },
+            Spec::Sphere { center: [0.1, 0.2, 0.3], xaxis: x, yaxis: z, radius: 1.0, lon_deg: [0.0, 360.0], lat_deg: [-90.0, 90.0] },
+            Spec::Torus {
+                center: [0.0; 3],
+                xaxis: x,
+                yaxis: y,
+                major_radius: 1.5,
+                minor_radius: 0.4,
+                major_deg: [0.0, 360.0],
+                minor_deg: [0.0, 360.0],
+            },
+            Spec::Nurbs { degree: [3, 3], nu: 4, nv: 4, knots_u: knots.to_vec(), knots_v: knots.to_vec(), points: net.clone(), weights: None },
+            Spec::Nurbs { degree: [3, 3], nu: 4, nv: 4, knots_u: knots.to_vec(), knots_v: knots.to_vec(), points: net, weights: Some(weights) },
+        ];
+        let made: Vec<(Surface, ops::Patch)> =
+            specs.iter().map(|spec| (Surface::made(spec.clone()).unwrap(), ops::Patch::new(&crate::core::ssi::patch_spec(spec)).unwrap())).collect();
+        for (routed, direct) in &made {
+            let d = routed.domain().unwrap();
+            assert_eq!(bits(&d), bits(&direct.domain()));
+            for (fu, fv) in [(0.0, 0.0), (0.3, 0.7), (1.0, 1.0), (1.25, -0.5)] {
+                let (u, v) = (d[0] + (d[1] - d[0]) * fu, d[2] + (d[3] - d[2]) * fv);
+                assert_eq!(bits(&routed.evaluate(u, v).unwrap()), bits(&direct.point(u, v).unwrap()));
+            }
+        }
+        let mut compared = 0;
+        for (i, (ra, da)) in made.iter().enumerate() {
+            for (rb, db) in made.iter().skip(i + 1) {
+                for (method, m) in [(Method::Global, ops::Method::Global), (Method::Advanced, ops::Method::Advanced)] {
+                    for tol in [1e-6, 0.0] {
+                        let routed = intersect(ra, rb, method, tol);
+                        let direct = ops::intersect(da, db, m, (tol > 0.0).then_some(tol));
+                        let (routed, direct) = match (routed, direct) {
+                            (Ok(r), Ok(d)) => (r, d),
+                            (Err(_), Err(_)) => continue,
+                            (r, d) => panic!("one of them failed: routed {:?}, direct {:?}", r.err(), d.err()),
+                        };
+                        assert_eq!(routed.curves.len(), direct.curves.len());
+                        for (r, d) in routed.curves.iter().zip(&direct.curves) {
+                            assert_eq!(r.curve_type, crate::core::ssi::curve_type(d.curve_type));
+                            assert_eq!(bits(&[r.deviation]), bits(&[d.deviation]));
+                            assert_eq!(bits(&r.interval), bits(&d.interval));
+                            assert_eq!(format!("{:?}", r.curve), format!("{:?}", d.curve));
+                            assert_eq!(format!("{:?}", r.uv_a), format!("{:?}", d.uv_a));
+                            assert_eq!(format!("{:?}", r.uv_b), format!("{:?}", d.uv_b));
+                        }
+                        assert_eq!(routed.points.len(), direct.points.len());
+                        for (r, d) in routed.points.iter().zip(&direct.points) {
+                            assert_eq!([bits(&r.xyz), bits(&r.uv_a), bits(&r.uv_b)], [bits(&d.xyz), bits(&d.uv_a), bits(&d.uv_b)]);
+                        }
+                        compared += 1;
+                    }
+                }
+            }
+        }
+        // every pair, by both methods at both tolerances: 7 patches make 21 pairs
+        assert_eq!(compared, 21 * 2 * 2, "an intersection failed both ways");
     }
 }

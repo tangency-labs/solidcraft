@@ -187,6 +187,7 @@
 //! | [`TopologyFailure::TooFewEdgeuses`] | `SM_ERR` |
 //! | [`TopologyFailure::TooFewSurfaces`] | `SM_ERR_NULL_POINTER` |
 //! | [`TopologyFailure::TooManyOutputSlots`] | `SM_ERR_OUT_OF_MEMORY` |
+//! | [`TopologyFailure::TouchPointNotClassified`] | `SM_ERR` |
 //! | [`TopologyFailure::TrimBoundaryNotBuilt`] | `SM_ERR` |
 //! | [`TopologyFailure::TrimCurveOffEnd`] | `SM_ERR` |
 //! | [`TopologyFailure::UnknownShellType`] | `SM_ERR` |
@@ -206,6 +207,7 @@
 //! | [`TopologyFailure::VertexusesOnDifferentFaces`] | `SM_ERR` |
 //! | [`TopologyFailure::VerticesNotJoinable`] | `SM_ERR_INVALID_INPUT` |
 //! | [`TopologyFailure::VerticesShareNoRegion`] | `SM_ERR_NULL_POINTER` |
+//! | [`TopologyFailure::VoidOwnerUndecided`] | `SM_ERR` (not upstream, #17678) |
 //! | [`TopologyFailure::WireEndSqueezed`] | `SM_ERR` |
 //! | [`TopologyFailure::ZeroLengthVector`] | `SM_ERR_INVALID_INPUT` |
 //! | [`TopologyFailure::ZeroSurfaceTangent`] | `SM_ERR` |
@@ -886,6 +888,10 @@ pub enum TopologyFailure {
         /// A number of slots below this fits.
         fits_below: u64,
     },
+    /// A planar section's touch point (the plane touching a face at a point) could not be
+    /// classified on its face; the classification's error is kept as the cause. Class
+    /// `failed`.
+    TouchPointNotClassified,
     /// The face's oriented trim boundary could not be built; the builder's error is kept as the
     /// cause.
     TrimBoundaryNotBuilt,
@@ -962,6 +968,11 @@ pub enum TopologyFailure {
     /// The two vertices to glue have no region in common: no shell of one is in a region
     /// with a shell of the other. [`ErrorKind::InvalidInput`].
     VerticesShareNoRegion,
+    /// A void part of a shell the Boolean split lies in a region with more than one solid,
+    /// lies directly inside none of them, and a nesting test against one of them was
+    /// unsure: which solid the cavity bounds is not decided, so the region is not
+    /// regrouped on a guess. [`ErrorKind::Unsupported`]; not upstream (#17678).
+    VoidOwnerUndecided,
     /// The edge to squeeze ends a wire at the vertex to delete, so no other edge there can
     /// take the head of the wire's shell. [`ErrorKind::Unsupported`].
     WireEndSqueezed,
@@ -1165,6 +1176,7 @@ impl TopologyFailure {
             | Self::SurfaceNotTransformable { .. }
             | Self::TestVectorZero
             | Self::TooFewEdgeuses { .. }
+            | Self::TouchPointNotClassified
             | Self::TrimBoundaryNotBuilt
             | Self::TrimCurveOffEnd { .. }
             | Self::UnknownShellType { .. }
@@ -1179,6 +1191,7 @@ impl TopologyFailure {
             | Self::VertexuseWithoutVertex
             | Self::VertexusesNotGiven
             | Self::VertexusesOnDifferentFaces
+            | Self::VoidOwnerUndecided
             | Self::WireEndSqueezed
             | Self::ZeroSurfaceTangent => SM_ERR,
             Self::AttributeSlotEmpty
@@ -1401,6 +1414,7 @@ impl TopologyFailure {
             | Self::SurfaceWithoutNurbs { .. }
             | Self::UnorientedLoopsOnNonG1Surface
             | Self::VertexLoopInSharedFace
+            | Self::VoidOwnerUndecided
             | Self::WireEndSqueezed => ErrorKind::Unsupported,
             Self::Defect { .. } => ErrorKind::StageFailed,
             Self::EdgeEndOffVertex { .. } | Self::TrimCurveOffEnd { .. } => {
@@ -1823,6 +1837,9 @@ impl core::fmt::Display for TopologyFailure {
                 f,
                 "{asked} curve output slots were asked for; fewer than {fits_below} fit"
             ),
+            Self::TouchPointNotClassified => {
+                f.write_str("the section's touch point could not be classified on its face")
+            }
             Self::TrimBoundaryNotBuilt => {
                 f.write_str("the face's trim boundary could not be built")
             }
@@ -1878,6 +1895,9 @@ impl core::fmt::Display for TopologyFailure {
                 f.write_str("the vertices are the same, apart, not in the B-rep or share an edge")
             }
             Self::VerticesShareNoRegion => f.write_str("the vertices share no region"),
+            Self::VoidOwnerUndecided => f.write_str(
+                "a cavity touches more than one solid, and the nesting tests do not decide which                  solid it belongs to",
+            ),
             Self::WireEndSqueezed => {
                 f.write_str("the edge to squeeze ends its wire at the vertex to delete")
             }
@@ -2116,6 +2136,7 @@ mod tests {
                 K::Unsupported,
             ),
             (TopologyFailure::FaceWithoutEdges, SM_ERR, K::Unsupported),
+            (TopologyFailure::VoidOwnerUndecided, SM_ERR, K::Unsupported),
             (TopologyFailure::WireEndSqueezed, SM_ERR, K::Unsupported),
             (
                 TopologyFailure::TrimCurveOffEnd {
@@ -2744,6 +2765,11 @@ mod tests {
             (TopologyFailure::RayHitsAtStart, SM_ERR, ErrorKind::Failed),
             (
                 TopologyFailure::TrimBoundaryNotBuilt,
+                SM_ERR,
+                ErrorKind::Failed,
+            ),
+            (
+                TopologyFailure::TouchPointNotClassified,
                 SM_ERR,
                 ErrorKind::Failed,
             ),

@@ -32,7 +32,10 @@ impl SolveApp {
     /// Keep the target design and editors unchanged until the picker answers.
     /// (A save being written keeps it unchanged too, see [`crate::save_job`].)
     pub fn file_picker_busy(&self) -> bool {
-        self.file_picker.is_some() || self.saving.is_some() || self.disk_prompt
+        self.file_picker.is_some()
+            || self.saving.is_some()
+            || self.disk_prompt
+            || (crate::documents::saving_to_close(self) && crate::save_job::host_pending(self, self.session.uid))
     }
 
     pub(crate) fn pick_open(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
@@ -280,12 +283,17 @@ mod tests {
     fn sheet_exports_wait_for_a_path_and_write_only_on_completion() {
         for (command, extension, field) in [("sheet.export_dxf", "dxf", "dxf"), ("sheet.export_bend_table", "csv", "text")] {
             let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
             for (id, params) in [
                 ("sketch.create", json!({"plane": "XY", "name": "Base"})),
                 ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})),
                 ("sketch.finish", json!({})),
                 ("sheet.flange", json!({"sketch": "Base"})),
                 ("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": "20 mm", "position": "outside"})),
+                ("sketch.create", json!({"plane": "XY", "name": "Marks"})),
+                ("sketch.text", json!({"text": "AB", "at": [40, 28], "height": 8})),
+                ("sketch.finish", json!({})),
+                ("solid.extrude", json!({"sketch": "Marks", "distance": 1, "operation": "cut"})),
             ] {
                 h.app.run(id, params).unwrap();
             }
@@ -296,9 +304,31 @@ mod tests {
             let text = expected[field].as_str().unwrap();
             assert!(text.contains(if extension == "dxf" { "BEND_UP" } else { "Body1" }));
             let path = h.dir.join(format!("flat.{extension}"));
+            let custom = if extension == "dxf" {
+                assert!(text.contains("ETCH"), "fixture includes a shallow marking");
+                h.app.start(command);
+                h.frames(2);
+                h.step(&json!({"click": {"handle": "dialog:sheet_dxf:markings"}})).unwrap();
+                h.step(&json!({"click": {"handle": "dialog:cancel"}})).unwrap();
+                assert!(!h.app.file_picker_busy());
+                assert!(h.app.dialog.is_none());
+                Some(h.app.session.execute(command, &json!({"units":"inches", "bend_lines":false, "markings":false})).unwrap())
+            } else {
+                None
+            };
             for outcome in ["cancel", "fail", "save"] {
                 h.app.start(command);
                 h.frames(2);
+                if extension == "dxf" {
+                    assert!(!h.app.file_picker_busy(), "DXF options are shown before the save picker");
+                    if outcome == "save" {
+                        h.step(&json!({"click": {"handle": "dialog:sheet_dxf:units"}})).unwrap();
+                        h.step(&json!({"click": {"handle": "dialog:Units:in"}})).unwrap();
+                        h.step(&json!({"click": {"handle": "dialog:sheet_dxf:bend_lines"}})).unwrap();
+                        h.step(&json!({"click": {"handle": "dialog:sheet_dxf:markings"}})).unwrap();
+                    }
+                    h.step(&json!({"click": {"handle": "dialog:Export DXF…"}})).unwrap();
+                }
                 assert!(h.app.file_picker_busy(), "{command} must open the save picker");
                 assert!(!path.exists());
                 assert_eq!(h.app.session.doc.to_json(), before);
@@ -314,7 +344,7 @@ mod tests {
                 }
                 assert_eq!(h.app.session.doc.to_json(), before);
             }
-            assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), custom.as_ref().map_or(text, |v| v[field].as_str().unwrap()));
             assert!(h.app.status.as_ref().is_some_and(|(text, _, error)| text.starts_with("Exported ") && !error));
         }
     }

@@ -188,8 +188,31 @@ pub fn install_cpu_picture_renderer() {
 }
 
 fn cpu_picture(scene: &solidcraft_viewport::Scene, cam: &solidcraft_viewport::Camera, w: u32, h: u32) -> solidcraft_engine::capture::Picture {
-    let canvas = solidcraft_viewport::render(scene, cam, w as usize, h as usize);
+    // A scene with no backdrop (a parts library card) comes back premultiplied, as from the GPU.
+    let canvas = solidcraft_viewport::render_picture(scene, cam, w as usize, h as usize);
     solidcraft_engine::capture::Picture { rgba: canvas.rgba, renderer: "cpu" }
+}
+
+#[cfg(test)]
+mod cpu_picture_tests {
+    /// The CPU stand-in for the GPU (device lost, or no GPU at all) draws a picture with no
+    /// backdrop over transparent pixels, as the GPU does: a part's library card shows no backdrop.
+    #[test]
+    fn a_cpu_picture_with_no_backdrop_is_clear_around_the_part() {
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("solid.box", &serde_json::json!({"length": 20, "width": 20, "height": 20})).unwrap();
+        let cam = solidcraft_engine::view::home_camera(&s).unwrap();
+        // As a library card draws it (`home::cutout`): no grid or axes.
+        let guides = solidcraft_engine::view::Guides { grid: false, axes: false };
+        let mut scene = solidcraft_engine::view::scene_with_guides(&s, &cam, &s.section, guides).unwrap();
+        let backdrop = super::cpu_picture(&scene, &cam, 64, 64);
+        assert_eq!(backdrop.rgba[3], 255, "with a backdrop, every pixel is opaque");
+        scene.transparent = true;
+        let p = super::cpu_picture(&scene, &cam, 64, 64);
+        assert_eq!(&p.rgba[..4], &[0, 0, 0, 0], "a corner is clear");
+        let centre = (32 * 64 + 32) * 4;
+        assert_eq!(p.rgba[centre + 3], 255, "the part is opaque");
+    }
 }
 
 #[cfg(test)]
@@ -714,10 +737,62 @@ pub(crate) fn render_offscreen_ao(
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-// Test-only (`allow-print-in-tests` does not see a `cfg(all(test, ..))`).
-#[allow(clippy::print_stderr)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_offscreen_layers(
+    scene: GpuScene,
+    sketch: GpuScene,
+    view_proj: [[f32; 4]; 4],
+    back: [f32; 3],
+    eye: [f32; 4],
+    size: u32,
+    tess: Option<&str>,
+    analysis: [f32; 8],
+    colors: [f32; 36],
+) -> Option<Vec<u8>> {
+    offscreen_layers(
+        scene,
+        Some(sketch),
+        None,
+        view_proj,
+        back,
+        eye,
+        size,
+        Offscreen {
+            tess,
+            product_lights: None,
+            product: false,
+            srgb: false,
+            analysis,
+            analysis_colors: colors,
+            ssaa: 1.0,
+            ao_radius: 0.0,
+            ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            preview: None,
+            moving: None,
+        },
+    )
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
 fn offscreen(
     scene: GpuScene,
+    highlight: Option<GpuScene>,
+    view_proj: [[f32; 4]; 4],
+    back: [f32; 3],
+    eye: [f32; 4],
+    size: u32,
+    options: Offscreen<'_>,
+) -> Option<Vec<u8>> {
+    offscreen_layers(scene, None, highlight, view_proj, back, eye, size, options)
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[allow(clippy::too_many_arguments)]
+// Test-only (`allow-print-in-tests` does not see a `cfg(all(test, ..))`).
+#[allow(clippy::print_stderr)]
+fn offscreen_layers(
+    scene: GpuScene,
+    sketch: Option<GpuScene>,
     highlight: Option<GpuScene>,
     view_proj: [[f32; 4]; 4],
     back: [f32; 3],
@@ -736,17 +811,17 @@ fn offscreen(
     let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: compute.is_some(), oit: false, edges: false };
     let mut resources = egui_wgpu::CallbackResources::default();
     resources.insert(Renderer::new(&device, target, compute));
-    let none = || Arc::new(Mutex::new(None));
     let cb = solidcraft_viewport_egui::ViewportCallback(Frame {
         // A preview frame with no session: no whole-body selection.
         selection_all: false,
+        hover_body: None,
         product_lights,
         product,
         upload_error: None,
         key: 1,
         slot: Arc::new(Mutex::new(Some(scene))),
-        sketch_key: 0,
-        sketch_slot: none(),
+        sketch_key: u64::from(sketch.is_some()),
+        sketch_slot: Arc::new(Mutex::new(sketch)),
         hl_key: u64::from(highlight.is_some()),
         hl_slot: Arc::new(Mutex::new(highlight)),
         pv_key: u64::from(preview.is_some()),

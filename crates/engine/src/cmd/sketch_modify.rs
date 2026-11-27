@@ -52,7 +52,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("sketch_fillet")
         .enabled(in_sketch)
-        .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal; a corner is a point reference or {a, b}, the two curves meeting there) | a, b: two curves meeting at a corner: lines, arcs, conics and open control point splines (two lines that share no end are first brought to where they meet: the nearer end of a line that stops short moves there, and a line that runs past is cut there, losing its shorter piece); radius: expr. A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`). A conic or control point spline side is cut back exactly to the tangent point and keeps its id (a conic's apex point moves with it; a spline keeps its degree and its knots past the cut, which becomes a knot). Refused: such a corner where it would have to stay as a virtual sharp corner (measured to, or a third curve ends there), a constraint on the cut curve other than a tangency at its far end, a held conic apex or a held spline control point that the cut moves, and a fit point spline (not supported yet). An ellipse's axis line is never a side of a corner (also for the chamfers). A corner of an offset's lines and arcs first releases that offset (also for the chamfers): its curves keep following their sources at the offset's distance, held by dimensions that keep its parameter (`offset_released`: curve ids)", created_doc!())),
+        .params(concat!("point: corner shared by two curves (\"l1.end\") | points: [corners] (all rounded alike: one radius, the rest equal; a corner is a point reference or {a, b}, the two curves meeting there) | a, b: two curves meeting at a corner: lines, arcs, conics and open control point splines (two lines that share no end are first brought to where they meet: the nearer end of a line that stops short moves there, and a line that runs past is cut there, losing its shorter piece); radius: expr (two parallel lines `a`, `b` that share no end are joined by a half circle instead, alone and not in `points`: its radius is half their spacing, so `radius` is only checked and otherwise ignored; `end`: \"start\" (default) or \"end\" picks which end of line `a`'s direction it closes, and both lines are cut back to its ends; lines that do not overlap are refused, and lines on one line are refused as parallel). A corner that dimensions or constraints measure to stays as a virtual sharp corner on both curves' extensions (`virtual_corners`; the moved ones in `moved_to_virtual_corner`). A conic or control point spline side is cut back exactly to the tangent point and keeps its id (a conic's apex point moves with it; a spline keeps its degree and its knots past the cut, which becomes a knot). Refused: such a corner where it would have to stay as a virtual sharp corner (measured to, or a third curve ends there), a constraint on the cut curve other than a tangency at its far end, a held conic apex or a held spline control point that the cut moves, and a fit point spline (not supported yet). An ellipse's axis line is never a side of a corner (also for the chamfers). A corner of an offset's lines and arcs first releases that offset (also for the chamfers): its curves keep following their sources at the offset's distance, held by dimensions that keep its parameter (`offset_released`: curve ids) In a 3D sketch, `a` and `b` (alone or as `points` entries) may be two drawn 3D lines that share an end point, for a tube bend: both are shortened and a 3D arc in their plane joins them, tangent to both, its radius a dimension with a parameter of its own; what held the sharp corner holds a 3D point kept there on both lines (`virtual_corners`). Refused there, with the reason: lines that share no end point or lie in one straight line, a radius that needs a whole line, 3D arcs, 3D splines and linked curves, and 3D corners mixed with planar ones", created_doc!())),
     CommandSpec::new("sketch.chamfer.equal_distance", "Equal Distance Chamfer", crate::checked!("sketch.chamfer.equal_distance", chamfer_equal))
         .in_sketch_part()
         .contract(&CHAMFER_EQUAL_CONTRACT)
@@ -205,6 +205,9 @@ fn curve_arg(sk: &Sketch, p: &Value, cmd: &str) -> Result<usize> {
 
 fn curve_by_id(sk: &Sketch, id: &str, cmd: &str) -> Result<usize> {
     let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+    if sk.is_control_polygon_segment(c) {
+        return Err(bad(cmd, "control polygon sides cannot be trimmed, split, or extended"));
+    }
     if sk.curves.get(c).is_some_and(|curve| curve.spline_handle_of.is_some()) {
         return Err(bad(cmd, "spline tangent construction lines cannot be trimmed, split, or extended"));
     }
@@ -358,6 +361,7 @@ fn split_at(sk: &mut Sketch, ci: usize, ts: &[f64], cmd: &str) -> Result<(Vec<us
             fixed: false,
             infinite: false,
             spline_handle_of: None,
+            spline_control_polygon_of: None,
         });
         pieces.push(sk.curves.len() - 1);
         Ok(())
@@ -1172,6 +1176,26 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
             separate_end(sk, ci, end)?;
             return Ok(ids_of(sk, &[ci]));
         }
+        let points = match &points {
+            Some(list) => {
+                let mut rest = Vec::new();
+                let mut separated = false;
+                for q in list {
+                    match break_shared_end(sk, ci, *q) {
+                        Some(end) => {
+                            separate_end(sk, ci, end)?;
+                            separated = true;
+                        }
+                        None => rest.push(*q),
+                    }
+                }
+                if separated && rest.is_empty() {
+                    return Ok(ids_of(sk, &[ci]));
+                }
+                Some(rest)
+            }
+            None => None,
+        };
         loosen_along(sk, ci);
         if sk.curves.get(ci).is_some_and(|c| c.kind.is_freeform()) {
             let r = if let Some(points) = &points {
@@ -1326,7 +1350,7 @@ fn line_end(sk: &Sketch, ci: usize, toward: Vec2) -> Result<Option<LineEnd>> {
 
     // A neighbour running on the same way as the extension has it nowhere to go.
     for (oi, c) in sk.curves.iter().enumerate() {
-        if oi == ci || c.spline_handle_of.is_some() || !uses(c, end) {
+        if oi == ci || c.spline_guide_owner().is_some() || !uses(c, end) {
             continue;
         }
         // Arcs do not block a line: the line runs past the point they share.
@@ -1353,7 +1377,7 @@ fn line_aim(sk: &Sketch, ci: usize, at: Vec2) -> Result<Option<LineAim>> {
     let mut budget = 1_000_000usize;
     let mut segment_count = 0usize;
     for (oi, other) in sk.curves.iter().enumerate() {
-        if oi == ci || other.spline_handle_of.is_some() {
+        if oi == ci || other.spline_guide_owner().is_some() {
             continue;
         }
         let mut pieces = sk.exact_segs(oi).unwrap_or_else(|| sk.segs(oi));
@@ -1487,7 +1511,7 @@ fn arc_aim(sk: &Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<Option<ArcAim>
     let mut budget = 1_000_000usize;
     let mut segment_count = 0usize;
     for (oi, curve) in sk.curves.iter().enumerate() {
-        if oi == ci || curve.spline_handle_of.is_some() {
+        if oi == ci || curve.spline_guide_owner().is_some() {
             continue;
         }
         // A circle passes over arcs lying on it, so no intersection reports them: an arc on the
@@ -1597,7 +1621,7 @@ fn stop_point(sk: &Sketch, ci: usize, q: Vec2) -> Option<usize> {
     sk.curves
         .iter()
         .enumerate()
-        .filter(|(i, c)| *i != ci && c.spline_handle_of.is_none())
+        .filter(|(i, c)| *i != ci && c.spline_guide_owner().is_none())
         .find_map(|(_, c)| {
             let (a, b) = c.kind.ends()?;
             [a, b].into_iter().find(|p| sk.point(*p).is_some_and(|pt| pt.dist(q) <= TOL * 10.0))
@@ -1744,7 +1768,7 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
 fn grow_line(sk: &mut Sketch, ci: usize, aim: LineAim) -> Result<String> {
     let end = aim.end;
     let (q, cutter, stop) = (aim.hit, aim.cutter, aim.stop);
-    let neighbors: Vec<_> = sk.curves.iter().enumerate().filter(|(i, c)| *i != ci && c.spline_handle_of.is_none() && uses(c, end)).collect();
+    let neighbors: Vec<_> = sk.curves.iter().enumerate().filter(|(i, c)| *i != ci && c.spline_guide_owner().is_none() && uses(c, end)).collect();
 
     // The end joined to other geometry stays where it is: add a line from it.
     if !neighbors.is_empty() {
@@ -2102,8 +2126,10 @@ fn weld_corner(sk: &mut Sketch, p: &Value) {
 
 fn refuse_spatial_corner(sk: &Sketch, p: &Value, cmd: &str) -> Result<()> {
     if ["a", "b"].iter().any(|key| str_(p, key).is_some_and(|id| sk.is_spatial_corner_curve(id))) {
-        let action = if cmd == "sketch.fillet" { "filleting" } else { "chamfering" };
-        return Err(bad(cmd, format!("not supported yet: {action} 3D or linked sketch curves")));
+        if cmd == "sketch.fillet" {
+            return Err(bad(cmd, "not supported yet: filleting 3D or linked sketch curves, other than two drawn 3D lines that share an end point"));
+        }
+        return Err(bad(cmd, "not supported yet: chamfering 3D or linked sketch curves"));
     }
     Ok(())
 }
@@ -2471,8 +2497,9 @@ struct CornerKept {
 /// of either line, a fixed or expression-driven position, or it is the origin or still ends another
 /// curve. It stays as a virtual sharp corner, held on both curves' extensions (their
 /// intersection), and the line lengths become distances from the far end to it, so the part
-/// keeps its size. Otherwise None: the caller removes the point.
-fn keep_corner(sk: &mut Sketch, c: usize, [(ca, na), (cb, nb)]: [(usize, usize); 2]) -> Result<Option<CornerKept>> {
+/// keeps its size. `retain` also keeps an unmeasured corner for new chamfer dimensions.
+/// Otherwise None: the caller removes the point.
+fn keep_corner(sk: &mut Sketch, c: usize, [(ca, na), (cb, nb)]: [(usize, usize); 2], retain: bool) -> Result<Option<CornerKept>> {
     let used = sk.curves.iter().any(|x| uses(x, c));
     let mut moved: Vec<String> = sk.constraints.iter().filter(|k| k.kind.refers_to_point(c)).map(|k| k.id.clone()).collect();
     for k in sk.constraints.iter_mut() {
@@ -2490,7 +2517,7 @@ fn keep_corner(sk: &mut Sketch, c: usize, [(ca, na), (cb, nb)]: [(usize, usize);
         moved.push(k.id.clone());
     }
     let positioned = sk.points.get(c).is_some_and(|pt| pt.fixed || pt.exprs.is_some());
-    if moved.is_empty() && !used && c != 0 && !positioned {
+    if !retain && moved.is_empty() && !used && c != 0 && !positioned {
         return Ok(None);
     }
     for cu in [ca, cb] {
@@ -2522,6 +2549,7 @@ fn cut_corner(
     fb: usize,
     da: f64,
     db: f64,
+    retain: bool,
     cmd: &str,
 ) -> Result<(usize, usize, Vec2, CornerKept)> {
     let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
@@ -2536,7 +2564,7 @@ fn cut_corner(
     moved.extend(keep_side_relations(sk, lb)?);
     reattach(sk, la, c, ta);
     reattach(sk, lb, c, tb);
-    let mut kept = keep_corner(sk, c, [(la, ta), (lb, tb)])?;
+    let mut kept = keep_corner(sk, c, [(la, ta), (lb, tb)], retain)?;
     if let Some(k) = &mut kept {
         k.moved.extend(moved);
     }
@@ -2682,11 +2710,29 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.fillet";
     let r_expr = req_expr(cmd, p, "radius")?;
     let corners = corner_list(p, cmd)?;
+    // For two parallel lines: which end of line `a` the half circle joins.
+    let far_end = match str_(p, "end") {
+        None | Some("start") => false,
+        Some("end") => true,
+        Some(_) => return Err(bad(cmd, "`end` must be \"start\" or \"end\"")),
+    };
+    // Corners of two drawn 3D lines are rounded with 3D arcs (#21319).
+    if let Some(rounded) = super::sketch_3d::fillet_3d(s, p, cmd, &r_expr, &corners)? {
+        return reply(cmd, rounded);
+    }
     let on_sheet = s.sheet_sketching();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         let r = doc.eval(&r_expr, solidcraft_doc::expr::Kind::Length).map_err(|e| bad(cmd, format!("radius: {e}")))?;
         if !(r > 1e-9 && r < 1e8) {
             return Err(bad(cmd, "radius must be positive"));
+        }
+        // Two parallel lines are joined by a half circle, whose radius their spacing fixes (#16238).
+        if let [q] = &corners[..]
+            && let Some((la, lb)) = parallel_pair(sk, q, cmd)?
+        {
+            let (arc, cons) = fillet_semicircle(sk, la, lb, far_end, cmd)?;
+            let arc_id = sk.curves.get(arc).map(|c| c.id.clone()).unwrap_or_default();
+            return Ok((vec![arc_id], cons, String::new(), kept_json(Vec::new()), Vec::new()));
         }
         // A corner symmetric to another is rounded with it (#18075).
         let corners = symmetric_corners(sk, &corners, cmd);
@@ -2713,8 +2759,8 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
         FilletResult {
             curves,
             constraints,
-            param: (!on_sheet).then_some(param),
-            expression: on_sheet.then_some(r_expr.to_string()),
+            expression: (on_sheet && !param.is_empty()).then_some(r_expr.to_string()),
+            param: (!on_sheet && !param.is_empty()).then_some(param),
             virtual_corners,
             moved_to_virtual_corner,
             offset_released,
@@ -2723,6 +2769,106 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
             param_warnings: Vec::new(),
         },
     )
+}
+
+/// The two lines of a corner given as `{a, b}` when they are parallel, share no end and lie
+/// apart: a pair a half circle joins (#16238). None for anything else, so lines lying on each
+/// other and every other corner go the ordinary way (and are refused there as before).
+fn parallel_pair(sk: &Sketch, p: &Value, cmd: &str) -> Result<Option<(usize, usize)>> {
+    if str_(p, "point").is_some() {
+        return Ok(None);
+    }
+    let (Some(la), Some(lb)) = (str_(p, "a").and_then(|i| sk.curve_index(i)), str_(p, "b").and_then(|i| sk.curve_index(i))) else {
+        return Ok(None);
+    };
+    let ends = |l: usize| match sk.curves.get(l).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => Some((*a, *b)),
+        _ => None,
+    };
+    let (Some((a0, a1)), Some((b0, b1))) = (ends(la), ends(lb)) else { return Ok(None) };
+    if la == lb || [a0, a1].iter().any(|x| *x == b0 || *x == b1) {
+        return Ok(None);
+    }
+    let (Some(p0), Some(p1), Some(q0), Some(q1)) = (sk.point(a0), sk.point(a1), sk.point(b0), sk.point(b1)) else { return Ok(None) };
+    let (da, db) = (p1 - p0, q1 - q0);
+    if da.len() <= TOL || db.len() <= TOL || da.cross(db).abs() > 1e-9 * da.len() * db.len() {
+        return Ok(None);
+    }
+    // Lying on one line: no corner, no half circle.
+    if (q0 - p0).cross(da).abs() / da.len() <= TOL * 10.0 {
+        return Ok(None);
+    }
+    for l in [la, lb] {
+        let plain = sk.curves.get(l).is_some_and(|c| !c.infinite && sk.offset_distance(&c.id).is_none());
+        if sk.is_ellipse_axis(l) || sk.is_linked_curve(l) || !plain {
+            return Err(bad(cmd, "a half circle cannot join an infinite line, an offset's line, or a linked or axis line"));
+        }
+    }
+    Ok(Some((la, lb)))
+}
+
+/// Join two parallel lines with a half circle tangent to both: its diameter is their spacing,
+/// its centre is on the mid-line between them, and it bulges away from the lines at their `start`
+/// (`far` false: the end at the lower side along line `a`'s direction) or `end` side. Both lines
+/// are cut back to where the half circle meets them: the inner of the two ends on that side, so
+/// the longer line loses its overhang. Returns the arc and its tangent constraints (#16238).
+fn fillet_semicircle(sk: &mut Sketch, la: usize, lb: usize, far: bool, cmd: &str) -> Result<(usize, Vec<String>)> {
+    let ends = |l: usize| match sk.curves.get(l).map(|c| &c.kind) {
+        Some(CurveKind::Line { a, b }) => Some((*a, *b)),
+        _ => None,
+    };
+    let (Some((a0, a1)), Some((b0, b1))) = (ends(la), ends(lb)) else { return Err(bad(cmd, "a half circle joins two lines")) };
+    let (Some(p0), Some(p1), Some(q0), Some(q1)) = (sk.point(a0), sk.point(a1), sk.point(b0), sk.point(b1)) else {
+        return Err(bad(cmd, "a line's end is missing"));
+    };
+    let u = (p1 - p0).normalized().ok_or_else(|| bad(cmd, "degenerate line"))?;
+    let spacing = (q0 - p0).cross(u).abs();
+    if spacing <= TOL * 10.0 {
+        return Err(bad(cmd, "the lines lie on each other: there is no gap for a half circle"));
+    }
+    // Positions along `u`, from line a's first end.
+    let (ta0, ta1) = (0.0, (p1 - p0).dot(u));
+    let (tb0, tb1) = ((q0 - p0).dot(u), (q1 - p0).dot(u));
+    // Each line's end at the low and at the high side, with its position.
+    let (low_a, high_a) = if ta0 <= ta1 { ((a0, ta0), (a1, ta1)) } else { ((a1, ta1), (a0, ta0)) };
+    let (low_b, high_b) = if tb0 <= tb1 { ((b0, tb0), (b1, tb1)) } else { ((b1, tb1), (b0, tb0)) };
+    let (lo, hi) = (low_a.1.max(low_b.1), high_a.1.min(high_b.1));
+    if hi - lo <= TOL * 10.0 {
+        return Err(bad(cmd, "the lines do not overlap, so there is no end of both for a half circle to join"));
+    }
+    let x = if far { hi } else { lo };
+    let (end_a, end_b) = if far { (high_a.0, high_b.0) } else { (low_a.0, low_b.0) };
+    let (pa, pb) = (p0 + u * x, q0 + u * (x - tb0));
+    // A line whose end moves must not be held by anything that moving would break.
+    for (l, e, to) in [(la, end_a, pa), (lb, end_b, pb)] {
+        if sk.point(e).is_some_and(|q| q.dist(to) <= TOL * 10.0) {
+            continue;
+        }
+        let id = sk.curves.get(l).map(|c| c.id.clone()).unwrap_or_default();
+        let other_curve = sk.curves.iter().enumerate().any(|(i, c)| i != l && c.kind.uses(e));
+        let positioned = sk.points.get(e).is_some_and(|q| q.fixed || q.exprs.is_some() || q.link.is_some());
+        let sized = sk.constraints.iter().any(|k| {
+            matches!(k.kind, ConstraintKind::Length { l: y, .. } | ConstraintKind::Midpoint { l: y, .. } if y == l)
+                || matches!(k.kind, ConstraintKind::Equal { a, b } if a == l || b == l)
+        });
+        if e == 0 || other_curve || positioned || sized || sk.constraints.iter().any(|k| k.kind.refers_to_point(e)) {
+            return Err(bad(cmd, format!("`{id}` must be cut back to the half circle, and its end or its length is held by other geometry")));
+        }
+    }
+    for (e, to) in [(end_a, pa), (end_b, pb)] {
+        if let Some(q) = sk.points.get_mut(e) {
+            q.pos = to;
+        }
+    }
+    let center = (pa + pb) * 0.5;
+    // The half circle bulges to the low side for `start`, the high side for `end`; run
+    // counter-clockwise from the end whose offset from the centre is the turn of the bulge.
+    let w = if far { u } else { u * -1.0 };
+    let n = Vec2::new(w.y, -w.x);
+    let (first, second, p_first) = if (pa - center).dot(n) > 0.0 { (end_a, end_b, pa) } else { (end_b, end_a, pb) };
+    let arc = sk.add_arc(center, p_first, center * 2.0 - p_first, [None, Some(first), Some(second)], None)?;
+    let cons = vec![add_c(sk, ConstraintKind::Tangent { a: la, b: arc })?, add_c(sk, ConstraintKind::Tangent { a: lb, b: arc })?];
+    Ok((arc, cons))
 }
 
 /// The virtual corners kept and the constraints moved to them, for a response.
@@ -2756,9 +2902,12 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
             return round_corner(sk, p, r, cmd)?.ok_or(e);
         }
     };
+    if [la, lb].into_iter().any(|line| sk.is_control_polygon_segment(line)) {
+        return Err(bad(cmd, "control polygon sides cannot be filleted"));
+    }
     // A spline's tangent handle is a construction line from a fit point, never a side. Where one
     // ends at the corner, the spline has handles (#9178).
-    if let Some(spline) = [la, lb].into_iter().find_map(|l| sk.curves.get(l).and_then(|c| c.spline_handle_of.clone())) {
+    if let Some(spline) = [la, lb].into_iter().find_map(|l| sk.curves.get(l).and_then(|c| c.spline_handle_of.as_deref())) {
         return Err(bad(cmd, format!("`{spline}` has tangent handles: reset them first (sketch.spline.reset_handles)")));
     }
     let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
@@ -2783,7 +2932,7 @@ fn fillet_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<(usize
     let bis = (u + v).normalized().ok_or_else(|| bad(cmd, "the lines are parallel"))?;
     let center = pc + bis * (r / half.sin());
     let (da, db) = (if spent_a { short(len_a) } else { d }, if spent_b { short(len_b) } else { d });
-    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd)?;
+    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, false, cmd)?;
     let (qa, qb) = (sk.point(ta).unwrap_or_default(), sk.point(tb).unwrap_or_default());
     let ccw = (qa - center).cross(qb - center) > 0.0;
     let arc = if ccw {
@@ -2912,7 +3061,7 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
     let arc =
         if ccw { sk.add_arc(cen, ta, tb, [None, Some(na), Some(nb)], None)? } else { sk.add_arc(cen, tb, ta, [None, Some(nb), Some(na)], None)? };
     let cons = vec![add_c(sk, ConstraintKind::Tangent { a: ca, b: arc })?, add_c(sk, ConstraintKind::Tangent { a: cb, b: arc })?];
-    match keep_corner(sk, q, [(ca, na), (cb, nb)])? {
+    match keep_corner(sk, q, [(ca, na), (cb, nb)], false)? {
         Some(kept) => Ok(Some((arc, cons, kept))),
         None => {
             let arc_id = sk.curves.get(arc).map(|c| c.id.clone()).unwrap_or_default();
@@ -2923,8 +3072,35 @@ fn round_corner(sk: &mut Sketch, p: &Value, r: f64, cmd: &str) -> Result<Option<
     }
 }
 
-fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<(f64, f64)>) -> Result<Value> {
+#[derive(Clone, Copy)]
+enum ChamferSecond {
+    Equal,
+    Distance(f64),
+    Angle(f64), // Degrees, as entered.
+}
+
+fn chamfer_dimension_binding(doc: &mut solidcraft_doc::Document, on_sheet: bool, base: &str, value: f64, unit: &str, cmd: &str) -> Result<String> {
+    let expression = format!("{value} {unit}");
+    if on_sheet {
+        return Ok(expression);
+    }
+    let taken: std::collections::BTreeSet<_> = doc
+        .params
+        .iter()
+        .map(|p| p.name.as_str())
+        .chain(doc.text_params.iter().map(|p| p.name.as_str()))
+        .chain(doc.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str)))
+        .collect();
+    let name = (1..=taken.len() + 1)
+        .map(|index| if index == 1 { base.to_string() } else { format!("{base}_{index}") })
+        .find(|name| !taken.contains(name.as_str()))
+        .ok_or_else(|| bad(cmd, "no free chamfer parameter name"))?;
+    Ok(doc.new_named_model_param(&name, &expression, unit)?)
+}
+
+fn chamfer(s: &mut Session, p: &Value, cmd: &str, distance: f64, second: ChamferSecond) -> Result<Value> {
     let corners = corner_list(p, cmd)?;
+    let on_sheet = s.sheet_sketching();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
         // A corner symmetric to another is cut with it (#18075).
         let corners = symmetric_corners(sk, &corners, cmd);
@@ -2942,9 +3118,17 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<
                 return Err(bad(cmd, "a corner is listed twice"));
             }
         }
+        // A drawing stores the expressions on the sheet. A model shares named parameters across the selected corners.
+        let first = chamfer_dimension_binding(doc, on_sheet, "chamfer_distance", distance, "mm", cmd)?;
+        let other = match second {
+            ChamferSecond::Equal => first.clone(),
+            ChamferSecond::Distance(value) => chamfer_dimension_binding(doc, on_sheet, "chamfer_second_distance", value, "mm", cmd)?,
+            ChamferSecond::Angle(value) => chamfer_dimension_binding(doc, on_sheet, "chamfer_angle", value, "deg", cmd)?,
+        };
+        let params = [first, other];
         let (mut lines, mut kept) = (Vec::new(), Vec::new());
         for q in &corners {
-            let (l, k) = chamfer_corner(sk, q, cmd, &dists)?;
+            let (l, k) = chamfer_corner(sk, q, cmd, distance, second, &params)?;
             lines.push(l);
             kept.push(k);
         }
@@ -2957,9 +3141,9 @@ fn chamfer(s: &mut Session, p: &Value, cmd: &str, dists: impl Fn(f64) -> Result<
     )
 }
 
-/// Cut one corner (`point` or `a`, `b`) of two lines with a straight line, `dists` giving how
-/// far back along each line from the corner's angle: the new line and what became of the corner.
-fn chamfer_corner(sk: &mut Sketch, p: &Value, cmd: &str, dists: &impl Fn(f64) -> Result<(f64, f64)>) -> Result<(usize, CornerKept)> {
+/// Cut one corner (`point` or `a`, `b`) of two lines and dimension its inputs from the sharp
+/// corner: the new line and what became of the corner.
+fn chamfer_corner(sk: &mut Sketch, p: &Value, cmd: &str, distance: f64, second: ChamferSecond, params: &[String; 2]) -> Result<(usize, CornerKept)> {
     prepare_corner(sk, p, cmd)?;
     let (la, lb, c, fa, fb) = corner(sk, p, cmd)?;
     let (pc, pa, pb) = (sk.point(c).unwrap_or_default(), sk.point(fa).unwrap_or_default(), sk.point(fb).unwrap_or_default());
@@ -2971,9 +3155,35 @@ fn chamfer_corner(sk: &mut Sketch, p: &Value, cmd: &str, dists: &impl Fn(f64) ->
     if !(2e-6..=std::f64::consts::PI - 2e-9).contains(&corner_angle) {
         return Err(bad(cmd, "the lines are parallel"));
     }
-    let (da, db) = dists(corner_angle)?;
-    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, da, db, cmd)?;
-    Ok((sk.add_line_pts(ta, tb, None)?, kept))
+    let db = match second {
+        ChamferSecond::Equal => distance,
+        ChamferSecond::Distance(value) => value,
+        ChamferSecond::Angle(value) => {
+            // Triangle corner–Ta–Tb: the entered angle is at Ta.
+            let angle = value.to_radians();
+            let opposite = PI - angle - corner_angle;
+            if !(angle > 1e-6 && opposite > 1e-6) {
+                return Err(bad(cmd, "that angle does not meet the other line"));
+            }
+            distance * angle.sin() / opposite.sin()
+        }
+    };
+    // Keep the sharp corner even when no existing dimension measures to it. Its index stays
+    // stable, and PointOnCurve constraints hold it at the intersection of the two sides.
+    let (ta, tb, _, kept) = cut_corner(sk, la, lb, c, fa, fb, distance, db, true, cmd)?;
+    let line = sk.add_line_pts(ta, tb, None)?;
+    sk.add_constraint(ConstraintKind::Distance { p: c, q: ta, value: distance }, Some(params[0].clone()))?;
+    let other = match second {
+        ChamferSecond::Angle(value) => {
+            let (a, b) = if u.cross(v) > 0.0 { (line, la) } else { (la, line) };
+            // The entered angle looks toward the corner, opposite a side stored from Ta out.
+            let flip = matches!(sk.curves.get(la).map(|c| &c.kind), Some(CurveKind::Line { a, .. }) if *a == ta);
+            ConstraintKind::Angle { a, b, value: value.to_radians(), flip }
+        }
+        _ => ConstraintKind::Distance { p: c, q: tb, value: db },
+    };
+    sk.add_constraint(other, Some(params[1].clone()))?;
+    Ok((line, kept))
 }
 
 /// The checks and joins before a chamfer cuts a corner. Running them again on a corner already
@@ -2989,28 +3199,21 @@ fn prepare_corner(sk: &mut Sketch, p: &Value, cmd: &str) -> Result<()> {
 fn chamfer_equal(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.chamfer.equal_distance";
     let d = num(p, "distance").ok_or_else(|| bad(cmd, "`distance` must be a number"))?;
-    chamfer(s, p, cmd, |_| Ok((d, d)))
+    chamfer(s, p, cmd, d, ChamferSecond::Equal)
 }
 
 fn chamfer_two(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.chamfer.two_distance";
     let d = num(p, "distance").ok_or_else(|| bad(cmd, "`distance` must be a number"))?;
     let d2 = num(p, "distance2").ok_or_else(|| bad(cmd, "`distance2` must be a number"))?;
-    chamfer(s, p, cmd, |_| Ok((d, d2)))
+    chamfer(s, p, cmd, d, ChamferSecond::Distance(d2))
 }
 
 fn chamfer_dist_angle(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.chamfer.distance_angle";
     let d = num(p, "distance").ok_or_else(|| bad(cmd, "`distance` must be a number"))?;
-    let a = num(p, "angle").ok_or_else(|| bad(cmd, "`angle` must be a number (degrees)"))?.to_radians();
-    chamfer(s, p, cmd, |phi| {
-        // Triangle corner–Ta–Tb: angle phi at the corner, `a` at Ta.
-        let opp = std::f64::consts::PI - a - phi;
-        if !(a > 1e-6 && opp > 1e-6) {
-            return Err(bad(cmd, "that angle does not meet the other line"));
-        }
-        Ok((d, d * a.sin() / opp.sin()))
-    })
+    let a = num(p, "angle").ok_or_else(|| bad(cmd, "`angle` must be a number (degrees)"))?;
+    chamfer(s, p, cmd, d, ChamferSecond::Angle(a))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -4292,7 +4495,7 @@ fn copy_through(
         sk.curves
             .iter()
             .enumerate()
-            .filter_map(|(index, curve)| curve.spline_handle_of.as_ref().is_some_and(|parent| spline_ids.contains(parent)).then_some(index)),
+            .filter_map(|(index, curve)| curve.spline_guide_owner().is_some_and(|parent| spline_ids.contains(parent)).then_some(index)),
     );
     let mut seen = std::collections::BTreeSet::new();
     sources.retain(|source| seen.insert(*source));
@@ -4314,7 +4517,7 @@ fn copy_through(
         let Some(cu) = sk.curves.get(*c).cloned() else { continue };
         let mut kind = cu.kind.clone();
         kind.map_points(&m);
-        let helper_line = cu.spline_handle_of.is_some();
+        let helper_line = cu.spline_guide_owner().is_some();
         let (kind, prefix) = match cu.kind {
             CurveKind::Ellipse { r, .. } => {
                 if let CurveKind::Ellipse { r: slot, .. } = &mut kind {
@@ -4346,13 +4549,16 @@ fn copy_through(
             centerline: false,
             fixed: false,
             infinite,
-            spline_handle_of: cu.spline_handle_of.clone(),
+            spline_handle_of: cu.spline_handle_of,
+            spline_control_polygon_of: cu.spline_control_polygon_of,
         };
         curve_map.insert(cu.id, clone.id.clone());
         clones.push(clone);
     }
     for clone in &mut clones {
-        clone.spline_handle_of = clone.spline_handle_of.as_ref().and_then(|parent| curve_map.get(parent).cloned());
+        for owner in [&mut clone.spline_handle_of, &mut clone.spline_control_polygon_of] {
+            *owner = owner.as_ref().and_then(|parent| curve_map.get(parent).cloned());
+        }
         sk.curves.push(clone.clone());
         made.push(sk.curves.len() - 1);
     }
