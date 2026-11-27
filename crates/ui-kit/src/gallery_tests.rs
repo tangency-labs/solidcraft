@@ -1483,11 +1483,6 @@ pub const ELEMENTS: &[Element] = &[
     element!("table_row_height", |ui, _| {
         ui.allocate_space(vec2(table_row_height(), table_row_height()));
     }),
-    element!("summary_row", |ui, s| {
-        summary_row(ui, "Rule", "Drives width = 120 mm", &mut s.checked, ContentWidth::button(ui, "Edit"), |ui| {
-            button(ui, "Edit", Button::Normal);
-        });
-    }),
     element!("compact_button", |ui, _| {
         compact_button(ui, "▲", "Move up", true, false);
     }),
