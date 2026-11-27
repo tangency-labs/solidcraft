@@ -2045,6 +2045,9 @@ struct Growth<'a> {
     /// an asked setback, the least certified rail reach less ease across the corner's edges
     /// (at least its base), or `BIG_DOUBLE` where no far corner cuts a round's rails.
     most: Vec<f64>,
+    /// The least rail reach (less ease) that holds a setback below twice it, where one does
+    /// (#13647).
+    rail_bound: Option<f64>,
 }
 
 impl Growth<'_> {
@@ -2146,150 +2149,22 @@ impl Growth<'_> {
     }
 }
 
-/// Safe upper bound for thousandth-grid indices so `(lo + hi) / 2` in [`bisect_thousandths`]
-/// never overflows `i32`.
-const MAX_GRID_TOP: i32 = 1_000_000_000;
-
-/// Convert `hi_scale` into a safe upper index on the grid of thousandths in
-/// `[1000, MAX_GRID_TOP]`. Non-finite values or scales `<= 1.0` fall back to `1000`.
-fn hi_scale_thousandths(hi_scale: f64) -> i32 {
-    if !(hi_scale.is_finite() && hi_scale > 1.0) {
-        return 1000;
-    }
-    let scaled = (hi_scale * 1000.0).floor();
-    if !scaled.is_finite() || scaled >= f64::from(MAX_GRID_TOP) {
-        MAX_GRID_TOP
-    } else if scaled <= 1000.0 {
-        1000
-    } else {
-        scaled as i32
-    }
-}
-
-/// Largest integer grid index `k` in `[1000, top]` such that
-/// `(f64::from(k) / 1000.0) * base <= cap`, checked outward-safely so a named asked setback
-/// never exceeds `cap` by rounding. Returns `1000` for non-finite or non-positive inputs, or
-/// whenever `cap <= base`.
-fn cap_thousandths(base: f64, cap: f64, top: i32) -> i32 {
-    if !(base.is_finite() && base > 0.0 && cap.is_finite() && top >= 1000) || cap <= base {
-        return 1000;
-    }
-    if (f64::from(top) / 1000.0) * base <= cap {
-        return top;
-    }
-    let ratio = cap / base;
-    let scaled = (ratio * 1000.0).floor();
-    let mut k = if !scaled.is_finite() || scaled >= f64::from(top) {
-        top
-    } else if scaled <= 1000.0 {
-        1000
-    } else {
-        scaled as i32
-    };
-    if k > 1000 && (f64::from(k) / 1000.0) * base > cap {
-        k -= 1;
-    } else if k < top && (f64::from(k + 1) / 1000.0) * base <= cap {
-        k += 1;
-    }
-    k
-}
-
-/// Smallest integer grid index `k` in `[1000, top]` such that for every edge
-/// `(f64::from(k) / 1000.0) * base[i] >= most[i]`. Every index `>= k` clamps every edge to
-/// `most[i]` (identical to the already-certified `hi_scale` trial), so bisecting `[1000, k]`
-/// finds the exact same minimal certifying index with no wasted trials above `k`. Returns
-/// `top` if any edge stays uncapped below `top` or is non-finite.
-fn rule_top_thousandths(base: &[f64], most: &[f64], top: i32) -> i32 {
-    if top <= 1000 || base.len() != most.len() || base.is_empty() {
-        return top;
-    }
-    let mut need = 1000;
-    let top_scale = f64::from(top) / 1000.0;
-    for (&b, &m) in base.iter().zip(most) {
-        if !(b.is_finite() && b > 0.0 && m.is_finite()) {
-            return top;
-        }
-        if m <= b {
-            continue;
-        }
-        if top_scale * b < m {
-            return top;
-        }
-        let scaled = ((m / b) * 1000.0).ceil();
-        let mut k = if !scaled.is_finite() || scaled >= f64::from(top) {
-            top
-        } else if scaled <= 1000.0 {
-            1000
-        } else {
-            scaled as i32
-        };
-        if k < top && (f64::from(k) / 1000.0) * b < m {
-            k += 1;
-        } else if k > 1000 && (f64::from(k - 1) / 1000.0) * b >= m {
-            k -= 1;
-        }
-        if k > need {
-            need = k;
-        }
-    }
-    need
-}
-
-/// Given that `hi_scale` already certified for an `asked` setback (with every edge held at
-/// `rail_bound` when `Some(cap)`), find the certifying `(place_scale, builds, ratio_label)`
-/// on the grid of thousandths up to `top` without exceeding `cap`.
-///
-/// When `rail_bound = Some(cap)` and `cap_i = cap_thousandths(asked, cap, top)`:
-/// - if `cap_i <= 1000`, no grid step strictly above 1 fits within `cap`, so `cap` itself
-///   (already certified at `hi_scale`) is returned;
-/// - else if `cap_i / 1000` certifies (or hits `cap` exactly), bisects `[1000, cap_i]`;
-/// - else `cap` lies strictly between `cap_i / 1000 * asked` and `(cap_i + 1) / 1000 * asked`
-///   and is itself the certifying setback.
-fn search_asked_scale<E>(
-    asked: f64,
-    hi_scale: f64,
-    top: i32,
-    rail_bound: Option<f64>,
-    mut trial: impl FnMut(f64) -> core::result::Result<bool, E>,
-) -> core::result::Result<(f64, f64, f64), E> {
-    if let Some(cap) = rail_bound {
-        let cap_i = cap_thousandths(asked, cap, top);
-        if cap_i <= 1000 {
-            return Ok((hi_scale, cap, cap / asked));
-        }
-        let cap_grid = f64::from(cap_i) / 1000.0;
-        if cap_grid * asked == cap || trial(cap_grid)? {
-            let hi = bisect_thousandths(1000, cap_i, |i| trial(f64::from(i) / 1000.0))?;
-            let s = f64::from(hi) / 1000.0;
-            Ok((s, s * asked, s))
-        } else {
-            Ok((hi_scale, cap, cap / asked))
-        }
-    } else {
-        let hi = bisect_thousandths(1000, top, |i| trial(f64::from(i) / 1000.0))?;
-        let s = f64::from(hi) / 1000.0;
-        Ok((s, s * asked, s))
-    }
-}
-
 /// The fork's growth in `BuildSetBackFill` (37c9e1d; #85 C, the owner's section 28): beside
 /// a curved face, the rule's setbacks, or the one asked for, grow to the least scale at which
 /// the fill is certified, with the real rounds: each trial moves the setback vertices
-/// ([`SetbackSolvers::calc_set_back_vert`] at the scaled setbacks, each held at its `most` —
-/// room less a quarter radius and, where a far corner cuts a round's rail, that rail's
-/// certified reach less ease, #13647) and fills the hole from the least degree up. `hi_scale`
-/// first, then the planar search's bisection on the grid of thousandths (`certified_scale`,
-/// the fork's 20b1c01, where 37c9e1d bisected to `1e-2`): the smallest certifying scale whose
-/// neighbour below fails. A trial is certified only by more than its certificate's rounding
-/// bound (`Probe::rounding_margin`, #2243), so that the corner built afresh there, as the
-/// caller builds it or a caller asking that setback would, is certified too. When no fill up
-/// to `hi_scale` certifies: if growth was stopped by a round's rail reach (`rail_bound`),
-/// refused as [`BlendRefusal::SetbackUncertifiedWithinRails`] naming that reach and reason
-/// (`fit_setback = Some(0.0)`); otherwise refused naming none. One asked for that certifies
-/// only grown: refused as [`BlendRefusal::SetbackTooShort`], naming the setback that builds
-/// (within the rails' reach and rooms, or none where it does not fit with its ease). Returns
-/// the blends' ends where the setbacks found put them.
-#[allow(clippy::too_many_arguments)]
+/// ([`SetbackSolvers::calc_set_back_vert`] at the scaled setbacks, each held at its `most`:
+/// its room less a quarter radius, and its rails' certified reach less the ease where a far
+/// corner cuts them, #13647) and fills the hole from the least degree up. Twice them first,
+/// then the planar search's bisection on the grid of thousandths (`certified_scale`, the
+/// fork's 20b1c01, where 37c9e1d bisected to `1e-2`): the smallest certifying scale whose
+/// neighbour below fails, in at most 11 trials. A trial is certified only by more than its
+/// certificate's rounding bound (`Probe::rounding_margin`, #2243), so that the corner built
+/// afresh there, as the caller builds it or a caller asking that setback would, is certified
+/// too. None up to twice them: refused, naming none; where the rails' reach
+/// (`Growth::rail_bound`) held the growth, refused as [`BlendRefusal::SetbackUncertifiedWithinRails`] naming that
+/// reach. One asked for that certifies only grown: refused, naming the setback that builds,
+/// held at its `most` (or none, where that one does not fit with its ease). Returns the
+/// blends' ends where the setbacks found put them.
 fn grow_curved<S: SetbackSolvers>(
     growth: &Growth<'_>,
     pseudo: &mut FilletBrep,
@@ -2298,12 +2173,9 @@ fn grow_curved<S: SetbackSolvers>(
     asked: Option<SetBackFill>,
     curved: bool,
     hi_scale: f64,
-    rail_bound: Option<f64>,
 ) -> Result<core::result::Result<Ends, SetbackRefusal>> {
-    let can_grow = growth.most.iter().zip(&growth.base).any(|(&m, &b)| m > b);
-    let top_certified = can_grow && growth.trial(pseudo, corner, solvers, hi_scale)?.is_some();
-    if !top_certified {
-        if let Some(reach) = rail_bound {
+    if growth.trial(pseudo, corner, solvers, 2.0)?.is_none() {
+        if let Some(reach) = growth.rail_bound {
             let why = if let Some(a) = asked {
                 format!(
                     "Fillet Error: no setback from {} up to {} (where a far corner cuts a round) keeps the setback corner's fill no more concave than its faces",
@@ -2338,28 +2210,15 @@ fn grow_curved<S: SetbackSolvers>(
     }
     // The planar search's (`certified_scale`, #2382, the fork's 20b1c01): the smallest
     // certifying scale on the grid of thousandths whose neighbour below fails, by bisection
-    // from 1 (the fill at the setbacks themselves, refused) up to `top` (or the largest grid
-    // step within the rails' reach).
-    let top = hi_scale_thousandths(hi_scale);
-    let (place_scale, builds_asked, ratio_label) = if let Some(a) = asked {
-        search_asked_scale(a.setback, hi_scale, top, rail_bound, |scale| {
-            let at = growth.trial(pseudo, corner, solvers, scale)?;
-            Ok::<bool, SolidError>(at.is_some())
-        })?
-    } else {
-        let rule_top = rule_top_thousandths(&growth.base, &growth.most, top);
-        let s = if rule_top <= 1000 {
-            hi_scale
-        } else {
-            let hi = bisect_thousandths(1000, rule_top, |i| {
-                let at = growth.trial(pseudo, corner, solvers, f64::from(i) / 1000.0)?;
-                Ok::<bool, SolidError>(at.is_some())
-            })?;
-            f64::from(hi) / 1000.0
-        };
-        (s, 0.0, s)
-    };
-    let Some(ends) = growth.place(pseudo, corner, solvers, place_scale)? else {
+    // from 1 (the fill at the setbacks themselves, refused) and 2. Each trial holds every
+    // setback at its `most`, so a scale past the rails' reach tries the fill at that reach.
+    let top = (hi_scale * 1000.0) as i32;
+    let hi = bisect_thousandths(1000, top, |i| {
+        let at = growth.trial(pseudo, corner, solvers, f64::from(i) / 1000.0)?;
+        Ok::<bool, SolidError>(at.is_some())
+    })?;
+    let hi = f64::from(hi) / 1000.0;
+    let Some(ends) = growth.place(pseudo, corner, solvers, hi)? else {
         return Err(unbuildable(OP_FILL, CornerStep::SetbackGrowthUnplaced));
     };
     // the setbacks the fill needs keep every spring curve on its face, or none is taken
@@ -2387,7 +2246,7 @@ fn grow_curved<S: SetbackSolvers>(
         return Ok(Err(SetbackRefusal::no_room(
             format!(
                 "Fillet Error: the setback corner's fill stays no more concave than its faces only from {} times its setbacks, where {what}: no setback builds",
-                fmt_g(ratio_label)
+                fmt_g(hi)
             ),
             Some(0.0),
         )));
@@ -2398,8 +2257,10 @@ fn grow_curved<S: SetbackSolvers>(
             .as_ref()
             .ok_or_else(|| defect(OP_FILL, WHY_CHECKED))?
             .room;
-        let fits_room = room.iter().all(|&r| builds_asked + a.ease < r);
-        let builds = if fits_room { builds_asked } else { 0.0 };
+        // the setback the trial at `hi` placed: held at its `most`, the rails' reach (#13647)
+        let grown = growth.most.iter().fold(hi * a.setback, |g, &m| smin(g, m));
+        let fits_room = room.iter().all(|&r| grown + a.ease < r);
+        let builds = if fits_room { grown } else { 0.0 };
         let why = if fits_room {
             format!(
                 "Fillet Error: a setback of {} is too short for the setback corner's fill to stay no more concave than its faces: a setback of {} builds it",
@@ -2410,7 +2271,7 @@ fn grow_curved<S: SetbackSolvers>(
             format!(
                 "Fillet Error: a setback of {} is too short for the setback corner's fill to stay no more concave than its faces, and the {} that would be does not fit on its edges",
                 fmt_g(a.setback),
-                fmt_g(builds_asked)
+                fmt_g(grown)
             )
         };
         let refusal = SetbackRefusal::no_room(why, Some(builds));
@@ -2964,6 +2825,7 @@ fn springs_refusal<S: SetbackSolvers>(
         most: vec![BIG_DOUBLE; base.len()],
         base,
         ordered_planar_g1: false,
+        rail_bound: None,
     };
     let fit = largest_clear_scale(&growth, least_scale, |scale| {
         Ok(match growth.place(pseudo, corner, solvers, scale)? {
@@ -3211,29 +3073,27 @@ pub fn build_setback_fill<S: SetbackSolvers>(
             } else {
                 room_scale
             };
-            // Bound growth by each round's certified rail reach (less ease) where a far
-            // corner cuts a rail (#13647), just as `most` bounds it by room.
+            // the rails' reach bounds the growth as the room does (#13647): each edge's
+            // certified reach from a far corner that cuts its round's rails, less the ease
+            // (the least of them for every edge where the setback is asked for, one setback);
+            // `rail_bound` is the least of those that holds a setback below twice it
             let mut rail_bound: Option<f64> = None;
-            if let Some(a) = asked {
-                let min_reach = rail_reaches.iter().copied().fold(BIG_DOUBLE, smin);
-                if min_reach.is_finite() && min_reach < BIG_DOUBLE && ease.is_finite() {
-                    let cap = smax(0.0, min_reach - ease);
-                    if cap.is_finite() && cap < hi_scale * a.setback {
+            if ease.is_finite() {
+                if let Some(a) = asked {
+                    let reach = rail_reaches.iter().copied().fold(BIG_DOUBLE, smin);
+                    let cap = smax(0.0, reach - ease);
+                    if reach < BIG_DOUBLE && cap < hi_scale * a.setback {
                         rail_bound = Some(cap);
                         most.fill(smax(a.setback, cap));
                     }
-                }
-            } else if ease.is_finite() {
-                for ((m, &b), &reach) in most.iter_mut().zip(&base).zip(&rail_reaches) {
-                    if reach.is_finite() && reach < BIG_DOUBLE {
-                        let limit = smax(0.0, reach - ease);
-                        if limit.is_finite() {
-                            let room_most = *m;
-                            if limit < hi_scale * b && limit <= room_most {
-                                rail_bound =
-                                    Some(rail_bound.map_or(limit, |prev| smin(prev, limit)));
+                } else {
+                    for ((m, &b), &reach) in most.iter_mut().zip(&base).zip(&rail_reaches) {
+                        if reach < BIG_DOUBLE {
+                            let limit = smax(0.0, reach - ease);
+                            if limit < hi_scale * b && limit <= *m {
+                                rail_bound = Some(rail_bound.map_or(limit, |r| smin(r, limit)));
                             }
-                            *m = smin(room_most, smax(b, limit));
+                            *m = smin(*m, smax(b, limit));
                         }
                     }
                 }
@@ -3246,10 +3106,9 @@ pub fn build_setback_fill<S: SetbackSolvers>(
                 ordered_planar_g1: mixed_planar_g1,
                 base,
                 most,
+                rail_bound,
             };
-            match grow_curved(
-                &growth, pseudo, corner, solvers, asked, curved, hi_scale, rail_bound,
-            )? {
+            match grow_curved(&growth, pseudo, corner, solvers, asked, curved, hi_scale)? {
                 // the fill where the grown setbacks put the blends' ends, made as a corner
                 // asked for those setbacks would make it
                 Ok((grown_surfaces, grown_sides)) => {
@@ -3827,129 +3686,5 @@ mod tests {
                 );
             }
         }
-    }
-
-    #[test]
-    fn rail_reach_grid_bounds_handle_boundaries_and_non_finite_inputs() {
-        // hi_scale_thousandths
-        assert_eq!(hi_scale_thousandths(2.0), 2000);
-        assert_eq!(hi_scale_thousandths(1.5), 1500);
-        assert_eq!(hi_scale_thousandths(1.0), 1000);
-        assert_eq!(hi_scale_thousandths(0.5), 1000);
-        assert_eq!(hi_scale_thousandths(f64::NAN), 1000);
-        assert_eq!(hi_scale_thousandths(f64::INFINITY), 1000);
-        assert_eq!(hi_scale_thousandths(f64::NEG_INFINITY), 1000);
-        assert_eq!(hi_scale_thousandths(1e20), MAX_GRID_TOP);
-
-        // cap_thousandths: exact outward-safe bound
-        let k = cap_thousandths(2.0, 3.564_568, 2000);
-        assert_eq!(k, 1782);
-        assert!((f64::from(k) / 1000.0) * 2.0 <= 3.564_568);
-        assert!((f64::from(k + 1) / 1000.0) * 2.0 > 3.564_568);
-        assert_eq!(cap_thousandths(2.0, 3.0, 2000), 1500);
-        assert_eq!(cap_thousandths(2.0, 2.0, 2000), 1000);
-        assert_eq!(cap_thousandths(2.0, 1.5, 2000), 1000);
-        assert_eq!(cap_thousandths(2.0, 5.0, 2000), 2000);
-        // ULP boundary where `floor((cap / base) * 1000)` lands on `k` while
-        // `(k / 1000) * base > cap` by 1 ULP, exercising the outward-safe `k -= 1` guard.
-        let base_13 = 1.0 / 13.0;
-        let exact = (f64::from(1004) / 1000.0) * base_13;
-        assert_eq!(cap_thousandths(base_13, exact, 2000), 1004);
-        let just_below = f64::from_bits(exact.to_bits() - 1);
-        assert_eq!(((just_below / base_13) * 1000.0).floor(), 1004.0);
-        let k_below = cap_thousandths(base_13, just_below, 2000);
-        assert_eq!(k_below, 1003);
-        assert!((f64::from(k_below) / 1000.0) * base_13 <= just_below);
-        // Non-finite, non-positive, huge/tiny overflow/underflow pairs
-        assert_eq!(cap_thousandths(f64::NAN, 3.0, 2000), 1000);
-        assert_eq!(cap_thousandths(2.0, f64::NAN, 2000), 1000);
-        assert_eq!(cap_thousandths(2.0, f64::INFINITY, 2000), 1000);
-        assert_eq!(cap_thousandths(0.0, 3.0, 2000), 1000);
-        assert_eq!(cap_thousandths(-2.0, 3.0, 2000), 1000);
-        assert_eq!(cap_thousandths(1e-200, 1e200, 2000), 2000);
-        assert_eq!(cap_thousandths(1e308, 1.5e308, 2000), 1500);
-        assert_eq!(cap_thousandths(1e-308, 1.5e-308, 2000), 1500);
-
-        // rule_top_thousandths
-        assert_eq!(
-            rule_top_thousandths(&[2.0, 3.0, 2.5], &[3.0, 4.2, 3.0], 2000),
-            1500
-        );
-        assert_eq!(
-            rule_top_thousandths(&[2.0, 3.0, 2.5], &[3.0, BIG_DOUBLE, 3.0], 2000),
-            2000
-        );
-        assert_eq!(rule_top_thousandths(&[2.0, 3.0], &[2.0, 3.0], 2000), 1000);
-        assert_eq!(
-            rule_top_thousandths(&[1e-200, 2.0], &[1e200, 3.0], 2000),
-            2000
-        );
-        assert_eq!(
-            rule_top_thousandths(&[f64::NAN, 2.0], &[3.0, 3.0], 2000),
-            2000
-        );
-        assert_eq!(rule_top_thousandths(&[2.0], &[f64::INFINITY], 2000), 2000);
-
-        // search_asked_scale: all four branches
-        // 1. cap_i <= 1000: returns cap directly without extra trials
-        let mut calls = 0usize;
-        let (ps, b, r_lbl) = search_asked_scale::<()>(2.0, 2.0, 2000, Some(2.001), |_| {
-            calls += 1;
-            Ok(false)
-        })
-        .unwrap();
-        assert_eq!(calls, 0);
-        assert_eq!(ps, 2.0);
-        assert_eq!(b, 2.001);
-        assert!((r_lbl - 2.001 / 2.0).abs() <= 1e-15);
-
-        // 2. cap_grid certifies -> bisects [1000, cap_i] and stays <= cap
-        let mut max_tried = 0.0f64;
-        let (ps, b, r_lbl) = search_asked_scale::<()>(2.0, 2.0, 2000, Some(3.564_568), |s| {
-            max_tried = max_tried.max(s * 2.0);
-            Ok(s * 2.0 >= 2.217)
-        })
-        .unwrap();
-        assert!(max_tried <= 3.564_568);
-        assert_eq!(ps, 1.109);
-        assert_eq!(b, 1.109 * 2.0);
-        assert_eq!(r_lbl, 1.109);
-
-        // 3. cap_grid fails while cap certified at hi_scale -> returns cap itself (1 trial)
-        let mut tried = Vec::new();
-        let (ps, b, r_lbl) = search_asked_scale::<()>(2.0, 2.0, 2000, Some(3.564_568), |s| {
-            tried.push(s);
-            Ok(s * 2.0 >= 3.564_2)
-        })
-        .unwrap();
-        assert_eq!(tried, vec![1.782]);
-        assert_eq!(ps, 2.0);
-        assert_eq!(b, 3.564_568);
-        assert!((r_lbl - 3.564_568 / 2.0).abs() <= 1e-15);
-
-        // 4. exact grid hit skips redundant cap_grid trial
-        let mut tried_exact = Vec::new();
-        let (ps, b, _) = search_asked_scale::<()>(2.0, 2.0, 2000, Some(3.0), |s| {
-            tried_exact.push(s);
-            Ok(s >= 1.250)
-        })
-        .unwrap();
-        assert!(!tried_exact.contains(&1.5));
-        assert_eq!(ps, 1.250);
-        assert_eq!(b, 2.5);
-
-        // 5. uncapped (rail_bound = None) bisects [1000, top]
-        let (ps, b, _) =
-            search_asked_scale::<()>(2.0, 2.0, 2000, None, |s| Ok(s >= 1.750)).unwrap();
-        assert_eq!(ps, 1.750);
-        assert_eq!(b, 3.5);
-
-        // BlendRefusal::SetbackUncertifiedWithinRails::entity()
-        let (_, _, v) = box_with_curveless_edge();
-        let r = BlendRefusal::SetbackUncertifiedWithinRails {
-            vertex: v,
-            reach: 3.5,
-        };
-        assert_eq!(r.entity(), EntityRef::Vertex(v));
     }
 }
