@@ -7,10 +7,10 @@
 //!
 //! With it, an operation goes to the other kernel when that kernel takes it
 //! ([`solidcraft_kernel_api::Backend::supports`]). One it doesn't take runs on solidcore as it
-//! would without the feature, and so does one it answers with [`BackendError::Unsupported`], or
+//! would without the feature, and so does one it answers with [`BackendError::Unsupported`],
 //! with [`BackendError::Exchange`] (a body it can't take, or a result it can't give back as a
-//! record). Any other failure is the other kernel's answer and reaches the caller, so a
-//! measurement sees it.
+//! record), or with any other failure but a stop: each is logged with its reason and counted
+//! ([`fell_back`]), so a measurement sees it, and the user gets solidcore's result or words.
 //!
 //! `SOLIDCRAFT_KERNEL=solidcore` keeps every operation on solidcore in such a build, and
 //! [`set_kernel`] changes the choice while the program runs, so one build can compare both.
@@ -145,8 +145,17 @@ pub(crate) fn run<B: Backend>(
             FELL_BACK.fetch_add(1, Ordering::Relaxed);
             None
         }
-        Ok(Err(e)) => Some(Err(KernelError::from(e))),
-        Err(e) => Some(Err(e)),
+        Ok(Err(BackendError::Cancelled(why))) => Some(Err(KernelError::from(BackendError::Cancelled(why)))),
+        Ok(Err(e)) => {
+            log::warn!("{what}: {} failed ({e}); solidcore runs it", B::ID);
+            FELL_BACK.fetch_add(1, Ordering::Relaxed);
+            None
+        }
+        Err(e) => {
+            log::warn!("{what}: {} failed ({e}); solidcore runs it", B::ID);
+            FELL_BACK.fetch_add(1, Ordering::Relaxed);
+            None
+        }
     }
 }
 
@@ -199,8 +208,17 @@ pub(crate) fn run_each<B: Backend>(
             FELL_BACK.fetch_add(1, Ordering::Relaxed);
             None
         }
-        Ok(Err(e)) => Some(Err(KernelError::from(e))),
-        Err(e) => Some(Err(e)),
+        Ok(Err(BackendError::Cancelled(why))) => Some(Err(KernelError::from(BackendError::Cancelled(why)))),
+        Ok(Err(e)) => {
+            log::warn!("{what}: {} failed ({e}); solidcore runs it", B::ID);
+            FELL_BACK.fetch_add(1, Ordering::Relaxed);
+            None
+        }
+        Err(e) => {
+            log::warn!("{what}: {} failed ({e}); solidcore runs it", B::ID);
+            FELL_BACK.fetch_add(1, Ordering::Relaxed);
+            None
+        }
     }
 }
 
