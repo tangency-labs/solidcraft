@@ -15,12 +15,12 @@
 //! solidcraft-cli snapshot <script|design> [--in design|part.step] --out shot.png [--width W] [--height H] [--view iso|front|top|…|NAME | --camera JSON] [--no-grid] [--no-axes] [--transparent] [--quality LEVEL]
 //!                                                             [--body NAME:opacity=0.3,color=#rrggbb]... [--tool NAME]... [--section z=27]
 //! solidcraft-cli exec <command> [json-params]                 run one command on an empty design
-//! solidcraft-cli commands                                     the command registry as JSON
+//! solidcraft-cli commands [FILTER] [--schemas]              the command registry as JSON, with --schemas each command's JSON Schemas
 //! solidcraft-cli recipe <recipe.json>                         translate an oracle recipe to a script
 //! solidcraft-cli oracle <case-dir>...                         replay recipes and compare with expected.json
 //! solidcraft-cli kernel-cases [--json] [--dumps=DIR] [--validation=MODE] <case-dir>... the kernel regression rig (tests/kernel-cases)
 //! solidcraft-cli mcp [--headless] [--in design|script] [--connect HOST:PORT [--token T]] [--allow-path DIR]... [--allow-any-path] [--require-allow-path]
-//!                    [--param-check off|warn|strict] [--compact]
+//!                    [--param-check off|warn|strict] [--compact] [--structured]
 //!                                                             MCP server on stdio (docs/mcp.md)
 //! solidcraft-cli mcp setup [--dry-run] [--client NAME] [--live] (alias: mcp install) add it to OpenCode, Claude Desktop, Claude Code, Cursor
 //! solidcraft-cli plugin check <folder|plugin.zip> [--json]    what Install and a call would refuse, with fixes
@@ -94,7 +94,7 @@ const USAGE_RENDER: &str = "  solidcraft-cli render <script|design> --out image.
 /// `exec`'s lines in the usage.
 const USAGE_EXEC: &str = "  solidcraft-cli exec <command> [json-params]\n";
 /// `commands`'s lines in the usage.
-const USAGE_COMMANDS: &str = "  solidcraft-cli commands [FILTER | --id COMMAND]\n      (the command registry as JSON; FILTER keeps the commands whose id contains it, in any case, e.g. `commands config`;\n       --id COMMAND prints that one command's documentation and its input and output schemas, as MCP's describe_command does)\n";
+const USAGE_COMMANDS: &str = "  solidcraft-cli commands [FILTER] [--schemas] | --id COMMAND\n      (the command registry as JSON; FILTER keeps the commands whose id contains it, in any case, e.g. `commands config`;\n       --schemas adds each command's input and output JSON Schemas (`input`, `output`; null for a command without one yet),\n         for generating bindings: the output depends only on the build, so the same build always prints the same bytes;\n       --id COMMAND prints that one command's documentation and its input and output schemas, as MCP's describe_command does)\n";
 /// `recipe`'s lines in the usage.
 const USAGE_RECIPE: &str = "  solidcraft-cli recipe <recipe.json>\n";
 /// `oracle`'s lines in the usage.
@@ -105,7 +105,7 @@ const USAGE_KERNEL_CASES: &str = "  solidcraft-cli kernel-cases <case-dir>... [-
 const USAGE_FUZZ: &str =
     "  solidcraft-cli fuzz [--from N] [--count N] [--jobs J] [--timeout S] [--steps N] [--minimise] [--out DIR] [--report FILE]\n";
 /// `mcp`'s lines in the usage.
-const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.sc|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path] [--require-allow-path]\n                     [--param-check off|warn|strict] [--render-gpu] [--compact]\n      (--compact, SOLIDCRAFT_MCP_COMPACT=1 or the app's Preferences › AI (with --connect): compact tool output for\n       agents: inspect_design summarises sketches and takes `sketches` by name and a `bodies` filter, and tool JSON\n       is not pretty-printed; off by default)\n  solidcraft-cli mcp setup [--dry-run] [--client opencode|claude-desktop|claude-code|cursor] [--live]\n      (adds a `solidcraft` server, with this program's path, to each installed AI client; --live adds `solidcraft-live` for the running app; alias: mcp install)\n";
+const USAGE_MCP: &str = "  solidcraft-cli mcp [--headless] [--in design.sc|script.json] [--connect 127.0.0.1:PORT [--token T]] [--allow-path DIR]... [--allow-any-path] [--require-allow-path]\n                     [--param-check off|warn|strict] [--render-gpu] [--compact] [--structured]\n      (--compact, SOLIDCRAFT_MCP_COMPACT=1 or the app's Preferences › AI (with --connect): compact tool output for\n       agents: inspect_design summarises sketches and takes `sketches` by name and a `bodies` filter, and tool JSON\n       is not pretty-printed; off by default)\n      (--structured: every tool result also carries its reply as data, structuredContent {result, notes?}, for\n       programs that call the tools, such as a Python client; chat clients leave it off; off by default)\n  solidcraft-cli mcp setup [--dry-run] [--client opencode|claude-desktop|claude-code|cursor] [--live]\n      (adds a `solidcraft` server, with this program's path, to each installed AI client; --live adds `solidcraft-live` for the running app; alias: mcp install)\n";
 /// The plugin operations' lines in the usage. The macro holds one text for each operation, so
 /// `plugin --help` prints both and an operation's own `--help` prints its own lines alone
 /// (#19237): what the operation does, its arguments and its exit codes.
@@ -639,6 +639,7 @@ fn positional_index(args: &[String]) -> Option<usize> {
                     | "--allow-errors"
                     | "--no-grid"
                     | "--no-axes"
+                    | "--schemas"
                     | "--script-relative"
                     | "--transparent"
             ) {
@@ -1100,18 +1101,22 @@ fn timeline_ok(s: &Session, skip_newer_features: bool, what_now: &str) -> Result
 /// instead, as the MCP server's `describe_command` does (#20923).
 fn cmd_commands(args: &[String]) -> Result<(), String> {
     use std::io::Write as _;
-    known_args("commands", args, &["--id"], &[], true)?;
+    known_args("commands", args, &["--id"], &["--schemas"], true)?;
     let ids = args.iter().filter(|a| *a == "--id").count();
     if ids > 1 {
         return Err("commands takes one --id".into());
     }
-    if args.len().saturating_sub(2 * ids) > 1 {
+    let schemas = args.iter().any(|a| a == "--schemas");
+    if args.len().saturating_sub(2 * ids + usize::from(schemas)) > 1 {
         return Err("commands takes one filter word".into());
     }
     let filter = positional(args);
     let id = flag(args, "--id");
     if filter.is_some() && id.is_some() {
         return Err("commands: give a filter or --id, not both".into());
+    }
+    if schemas && id.is_some() {
+        return Err("commands: --id already prints the command's schemas; leave out --schemas".into());
     }
     let mut s = Session::default();
     let v = match id {
@@ -1134,6 +1139,7 @@ fn cmd_commands(args: &[String]) -> Result<(), String> {
             }
         }
     };
+    let v = if schemas { with_schemas(&mut s, v)? } else { v };
     // A pipeline consumer may stop early (e.g. `commands | head`).
     // Unlike println!, writing explicitly lets us handle that without a panic.
     match writeln!(std::io::stdout().lock(), "{}", pretty(&v)) {
@@ -1141,6 +1147,24 @@ fn cmd_commands(args: &[String]) -> Result<(), String> {
         Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
         Err(e) => Err(format!("stdout: {e}")),
     }
+}
+
+/// `commands --schemas`: each registry entry with `input` and `output`, the command's JSON
+/// Schemas from `engine.describe` (null for a command without one yet), so a binding generator
+/// reads every command from one call.
+fn with_schemas(s: &mut Session, list: Value) -> Result<Value, String> {
+    let Value::Array(list) = list else { return Err("commands: the registry is not a list".into()) };
+    let mut out = Vec::with_capacity(list.len());
+    for mut entry in list {
+        let id = entry["id"].as_str().ok_or("commands: a registry entry has no id")?.to_string();
+        let described = s.execute("engine.describe", &json!({"command": id})).map_err(|e| format!("commands: describing `{id}`: {e}"))?;
+        let Value::Object(fields) = &mut entry else { return Err(format!("commands: the entry for `{id}` is not an object")) };
+        for key in ["input", "output"] {
+            fields.insert(key.into(), described.get(key).cloned().unwrap_or(Value::Null));
+        }
+        out.push(entry);
+    }
+    Ok(Value::Array(out))
 }
 
 /// Runs `solidcraft-cli eval` (and its `inspect` alias), opening the input design or script with the requested `--validation` mode and reporting both `inspect.measure` and `document.inspect`.

@@ -42,6 +42,79 @@ Picking screenshot `pixels` requires a connection to the running SolidCraft app;
 "model"` chooses the pixels of a rendered model image and does not enable headless pixel picks.
 See `ui.pick` in the [control protocol](control-protocol.md) for pixel and ray parameters.
 
+### Reuse a headless session from another program
+
+For a program that makes many parts, keep one `solidcraft-cli mcp --headless`
+process running and use its stdio connection for successive tool calls. The
+server holds one active design, including its parameters and history, until
+the process exits. Use `new_design` or `open` between independent jobs,
+and save each result before replacing the active design. Use separate server
+processes for independent concurrent jobs; do not interleave edits to different
+designs on one connection.
+
+For example, install the Python MCP SDK (`pip install mcp==2.3.0` for this example) in your application's
+environment and run this script with the CLI on your PATH. It creates two
+independent parts, measures them, and saves a design and STEP file for each:
+
+```python
+import asyncio
+import json
+from pathlib import Path
+
+from mcp import ClientSession, StdioServerParameters
+from mcp.client.stdio import stdio_client
+
+
+async def main():
+    output = Path("headless-parts").resolve()
+    output.mkdir()  # A fresh directory: do not overwrite an earlier job.
+    server = StdioServerParameters(
+        command="solidcraft-cli",
+        args=["mcp", "--headless", "--allow-path", str(output),
+              "--require-allow-path"],
+    )
+    async with stdio_client(server) as (read, write):
+        async with ClientSession(read, write) as session:
+            info = await session.initialize()
+            print("SolidCraft version:", info.server_info.version)
+
+            async def call(name, arguments):
+                result = await session.call_tool(name, arguments)
+                if result.is_error:
+                    raise RuntimeError(result.content)
+                return result
+
+            # Both parts use the same server process and connection.
+            for length in (10, 20):
+                name = f"Part-{length}"
+                await call("new_design", {"name": name})
+                await call("execute", {
+                    "command": "solid.box",
+                    "params": {"length": length, "width": 5, "height": 2},
+                })
+                measured = await call("measure", {})
+                print(json.loads(measured.content[0].text)["total"]["volume_mm3"])
+                await call("save", {"path": str(output / f"{name}.sc")})
+                await call("export", {"path": str(output / f"{name}.step")})
+
+
+asyncio.run(main())
+```
+
+Expected volumes are 100 and 200 mm³. The output directory is explicitly
+allowed; see [file access rules](#which-files-the-agent-can-reach).
+For sheet-metal jobs, call the flat-pattern and bend-table commands through
+`execute`, using `describe_command` to discover their inputs.
+
+The MCP protocol revision is negotiated at initialization. For production
+integrations, record the server version, pin the SolidCraft release used for
+your jobs, and test your command inputs and result handling before upgrading.
+Use `tools/list`, `list_commands` and `describe_command` to discover the
+available tools and command contracts. Check tool errors before proceeding.
+A negotiated MCP revision does not pin SolidCraft's command schemas or CAD
+results across releases. This example uses the process interface; it does not
+require Python bindings to the Rust engine.
+
 ### The app listens when turned on
 
 The desktop app opens its control channel on `127.0.0.1:27878` (or the next free port when that
@@ -208,6 +281,25 @@ solidcraft-cli mcp --connect 127.0.0.1:7878 --compact
 SOLIDCRAFT_MCP_COMPACT=1 solidcraft-cli mcp --connect 127.0.0.1:7878
 ```
 
+### Structured results
+
+`solidcraft-cli mcp --structured` is for programs that call the tools, such as a Python client,
+rather than for chat clients. Every tool result then also carries its reply as data, in MCP's
+`structuredContent`:
+
+```json
+{"result": <the reply as JSON, or its text when the reply is a message>, "notes": ["<a notice>", "<the selection>"]}
+```
+
+`result` is read from the first text block, the one the tool itself returns; `notes` holds the
+text blocks the server adds after it and is left out when there are none. An image result keeps
+its image block, and its text block is the `result`. An error keeps `isError: true`, and keys an
+error already carries (`panel_error`, `plugin_error`) stay. The text blocks are unchanged, so the
+same tools, current and future, reach a program and an agent alike.
+
+It is off by default, and only the command line turns it on: some chat clients show the model both
+the text and the structured copy, which would double what it reads.
+
 ### Desktop app management
 
 External MCP clients connected to the desktop app can also use:
@@ -373,7 +465,7 @@ The `skill_reference` tool returns these documents from the copies built into So
 | `list_commands` | `filter?`, `prefix?`, `panel?`, `compact?`, `fields?`, `limit?`, `offset?` | The command catalog: id, label, tab/panel, shortcut, parameter docs, enabled now. `filter` matches id, label, tab and panel. `prefix` keeps the ids that start with it (`"sketch."`) and `panel` the commands of one whole toolbar panel or tab (`"Modify"`), both ignoring case. `compact: true` keeps only `id` and `label` of each entry, about an eighth of the size; `fields` keeps the keys it lists instead. `limit` and `offset` page the matches, and the reply becomes `{commands, total, offset, next_offset}` (`next_offset` is null on the last page). With none of these the reply is the whole catalog, about 350 KB. |
 | `describe_command` | `id` | One command's parameter docs (`params`) and, for commands with a typed contract (every new command, and more of the older ones as they are converted), the JSON Schemas (2020-12) of its parameters (`input`) and of a successful result (`output`); `null` for the others. The same as `execute` `engine.describe {command}`. |
 | `execute` | `command`, `params?`, `verbose?` (default true), `expect?` | Run any command with JSON parameters (`list_commands` shows them). Failures leave the design unchanged. A feature command replies with the feature (`feature`, `name`), every body (`bodies`) and the bodies it created, changed and removed (`created_bodies`, `changed_bodies`, `removed_bodies`). `verbose: false` uses the same compact reply as `batch`. `expect` checks the design after the command, as it does for `batch` (see below). |
-| `batch` | `commands: [{command, params}]` or `path` (a script file, see below), `rollback?` (default true), `verbose?` (default true), `timings?`, `profile?`, `coalesce_parameters?` (default false), `expect?` | Run steps in order, stop at the first error and undo the completed steps. The reply names the failing step (`failed.index`, `failed.command`, `failed.error`), every result before it, `rolled_back` (true only when a rollback was asked for and the design is where the batch started: its completed steps were undone, or nothing ran; false when `rollback: false` or when the design could not go back), `undone`, `applied` (the indices of the steps whose changes are in the design) and `not_run` (the steps never sent). A step may name a tool instead of a command, with that tool's arguments as `params`: `set_parameter` (runs `parameters.change`; `value` or `expression`), `list_commands` (`engine.commands`, narrowed by its arguments as the tool narrows it), `describe_command` (`engine.describe`), `execute` (`{command, params}`), `measure` (`summary: true` summarised as the tool summarises it), `compare_picture` (`inspect.compare_picture`, numbers only: no overlay PNG), `inspect_design` (`document.inspect` with its `measure`, `timeline` and `bodies`: each sketch as its counts, not its full contents, and no joints), `undo`, `redo`, `export`, `save`, `open`, `new_design` and `crash_reports`. `screenshot`, `body_topology` (use `model.edges` and `model.faces`), `batch`, `check_parameters`, `pending`, `running` and `skill_reference` can't be steps, nor can `component.edit_in_place` and `component.finish_edit`, however a step names them. Run those two commands on their own. A desktop rollback batch stays within one design tab. It refuses `document.activate`, `view.next_tab`, `view.previous_tab`, `file.import`, `doc.open` (including the `open` tool with or without `new_tab: true`), and `file.new` with `new_tab: true` (including the `new_design` tool) before any steps run. Run these commands separately or use `rollback: false` to keep completed steps. A headless session or an app that receives the whole batch checks for missing or unknown command IDs before the first step (#5853). The MCP server also checks IDs before sending desktop steps one by one with rollback enabled. With `rollback: false` on that path, a command the app does not recognize stops the batch at its turn, and earlier steps stay applied. With `--param-check strict`, parameters that break a command's contract also fail preflight. A bridged server checks those contracts before it sends the batch. `verbose: false` keeps the reply small in large designs: feature steps leave out the full body list (`created_bodies`, `changed_bodies`, `removed_bodies` stay) and sketch steps the ids they repeat outside `created`. Bridged to an app that has `engine.batch`, the whole batch is one control request (one frame of the app). Older apps, and apps showing the agent cursor, get the steps one by one. `timings: true` adds `timings: [{index, command, ms}]` for every step run, the failing one included, and `total_ms`. `profile: true` also adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`, its time in kernel booleans, in tessellation and the rest. Steps are timed where they run: in the app when bridged. An app without `engine.batch` is timed step by step, without `profile`. `coalesce_parameters: true` sets each run of consecutive plain parameter edits (`parameters.change` or `set_parameter` with a name and a value, or `changes`) together, so the design rebuilds once per run instead of once per edit. Steps between runs see the design up to date. Each step keeps its own result (`coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits, so an edit refused on its own can go through with the run's later ones. A refused run goes step by step, naming the refused step. |
+| `batch` | `commands: [{command, params}]` or `path` (a script file, see below), `rollback?` (default true), `dry_run?` (default false), `verbose?` (default true), `timings?`, `profile?`, `coalesce_parameters?` (default false), `expect?` | Run steps in order, stop at the first error and undo the completed steps. The reply names the failing step (`failed.index`, `failed.command`, `failed.error`), every result before it, `rolled_back` (true only when a rollback was asked for and the design is where the batch started: its completed steps were undone, or nothing ran; false when `rollback: false` or when the design could not go back), `undone`, `applied` (the indices of the steps whose changes are in the design) and `not_run` (the steps never sent). With `dry_run: true`, every step runs normally (so `measure`, `inspect.clearance`, `inspect.interference` and other inspection steps see the simulated edits, and `expect` checks the simulated result before rollback) and then all document, model and undo/redo history changes are unconditionally rolled back via `edit.checkpoint` / `edit.restore_checkpoint`, leaving zero undo entry behind and adding `dry_run: true` and `rolled_back: true` to the reply (works both headless and bridged to the desktop app). Disk-writing and external commands (`save`, `export`, `file.save*`, `file.export*`, `file.send_to_slicer`, `file.open_in_easyprint`, `render.start`/`render.export`, `plugin.*`, `parameters.export`/`timeline.export_script`/`assembly.bom` with a `path`, and similar), application layout commands (`panel.*`/`layout.*`), `edit.restore_checkpoint` and `rollback: false` are refused before any step runs. If the checkpoint cannot be restored after a dry run, the call fails loudly with `dry_run: true`, `rolled_back: false` and `restore_error`. A step may name a tool instead of a command, with that tool's arguments as `params`: `set_parameter` (runs `parameters.change`; `value` or `expression`), `list_commands` (`engine.commands`, narrowed by its arguments as the tool narrows it), `describe_command` (`engine.describe`), `execute` (`{command, params}`), `measure` (`summary: true` summarised as the tool summarises it), `compare_picture` (`inspect.compare_picture`, numbers only: no overlay PNG), `inspect_design` (`document.inspect` with its `measure`, `timeline` and `bodies`: each sketch as its counts, not its full contents, and no joints), `undo`, `redo`, `export`, `save`, `open`, `new_design` and `crash_reports`. `screenshot`, `body_topology` (use `model.edges` and `model.faces`), `batch`, `check_parameters`, `pending`, `running` and `skill_reference` can't be steps, nor can `component.edit_in_place` and `component.finish_edit`, however a step names them. Run those two commands on their own. A desktop rollback batch stays within one design tab. It refuses `document.activate`, `view.next_tab`, `view.previous_tab`, `file.import`, `doc.open` (including the `open` tool with or without `new_tab: true`), and `file.new` with `new_tab: true` (including the `new_design` tool) before any steps run. Run these commands separately or use `rollback: false` to keep completed steps. A headless session or an app that receives the whole batch checks for missing or unknown command IDs before the first step (#5853). The MCP server also checks IDs before sending desktop steps one by one with rollback enabled. With `rollback: false` on that path, a command the app does not recognize stops the batch at its turn, and earlier steps stay applied. With `--param-check strict`, parameters that break a command's contract also fail preflight. A bridged server checks those contracts before it sends the batch. `verbose: false` keeps the reply small in large designs: feature steps leave out the full body list (`created_bodies`, `changed_bodies`, `removed_bodies` stay) and sketch steps the ids they repeat outside `created`. Bridged to an app that has `engine.batch`, the whole batch is one control request (one frame of the app). Older apps, and apps showing the agent cursor, get the steps one by one. `timings: true` adds `timings: [{index, command, ms}]` for every step run, the failing one included, and `total_ms`. `profile: true` also adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`, its time in kernel booleans, in tessellation and the rest. Steps are timed where they run: in the app when bridged. An app without `engine.batch` is timed step by step, without `profile`. `coalesce_parameters: true` sets each run of consecutive plain parameter edits (`parameters.change` or `set_parameter` with a name and a value, or `changes`) together, so the design rebuilds once per run instead of once per edit. Steps between runs see the design up to date. Each step keeps its own result (`coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits, so an edit refused on its own can go through with the run's later ones. A refused run goes step by step, naming the refused step. |
 
 **Plugin tools.** After the built-in tools, `tools/list` lists every installed, enabled plugin's
 entries as tools named `<plugin>.<entry>`, read afresh at each listing: a command entry with its

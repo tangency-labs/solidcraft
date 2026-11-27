@@ -514,6 +514,9 @@ pub struct ViewportState {
     /// turns in the other orbit style than `free_orbit` says until it ends (#20917). None between
     /// drags.
     pub(crate) orbit_flip: Option<bool>,
+    /// Set when a mouse orbit drag starts: whether the `roll_key` was held, so the drag rolls the
+    /// view about the line of sight until it ends (#22691). None between drags.
+    pub(crate) orbit_roll: Option<bool>,
     pub build_ms: f64,
     /// Adaptive supersampling (#1288) and ambient occlusion while moving (#7165): the view drawn
     /// last (its view-projection and pixels) and since when it has held still (app time, s).
@@ -2207,6 +2210,9 @@ struct BodyDraw {
     edges_shared: bool,
     /// Drawn as its edges alone, whatever the style: what an Isolate hid, shown as wireframe.
     wire: bool,
+    /// Drawn without its edge lines in every style (`body.edge_lines`): an overlay body such as
+    /// a thin label keeps no outline while the others keep theirs.
+    no_edges: bool,
 }
 
 impl BodyDraw {
@@ -2231,6 +2237,7 @@ impl BodyDraw {
             self.wire,
         )
             .hash(&mut h);
+        self.no_edges.hash(&mut h);
         // The block holds the slot its box is tested under: another slot is another block.
         self.motion.hash(&mut h);
         h.finish()
@@ -2238,7 +2245,7 @@ impl BodyDraw {
 
     fn build(&self, out: &mut crate::gpu::BlockBuilder, shaded: bool, edges: bool, hidden_edges: bool, markers: bool) {
         // A body drawn as its edges: no faces, and every edge, as the wireframe style draws.
-        let (shaded, edges) = if self.wire { (false, true) } else { (shaded, edges) };
+        let (shaded, edges) = if self.wire { (false, true) } else { (shaded, edges && !self.no_edges) };
         let m = &self.mesh;
         let color = |ti: usize| m.tri_face.get(ti).and_then(|f| self.face_colors.get(*f as usize)).copied().unwrap_or(self.body_color);
         let class = |ti: usize| {
@@ -3385,7 +3392,11 @@ fn body_scene(
         // (alike faces share a colour): only while every face has a slot of its own.
         let own_slots = slots.faces != u32::MAX && slots.face_capacity as usize >= faces;
         let edge_colours = (slots.edge, slots.hidden_edge);
-        let instanced = if on_gpu || wire {
+        // A body set to draw no edge lines (`body.edge_lines`), unless an Isolate shows it as them.
+        // It is drawn from its own triangles: an instance draws its mesh's shared edges, which
+        // every copy of that mesh shares.
+        let no_edges = !wire && s.doc.edgeless_bodies.contains(&b.name);
+        let instanced = if on_gpu || wire || no_edges {
             None
         } else if face_looks.is_empty() {
             instances.place(b, slots.instance, edge_colours, look, oit, slots.motion)
@@ -3403,7 +3414,7 @@ fn body_scene(
         // a copy shares with the others and which name no motion (with none, the arena full, its
         // faces are drawn in its own colour slot, which does).
         arena.drawn_in_shared(&name, instanced.is_none() && slots.faces != u32::MAX);
-        let edge_tol = if edges || wire { app.viewport.lod.lock().map_or(0.0, |l| l.edge_tolerance(b)) } else { 0.0 };
+        let edge_tol = if (edges && !no_edges) || wire { app.viewport.lod.lock().map_or(0.0, |l| l.edge_tolerance(b)) } else { 0.0 };
         if edges_shared && let Some((mesh, place)) = &instanced {
             edge_placements.insert(b.name.clone(), (mesh.clone(), *place));
         }
@@ -3427,6 +3438,7 @@ fn body_scene(
                 simplified: app.viewport.simplified_edges.clone(),
                 edges_shared,
                 wire,
+                no_edges,
             },
             None => BodyDraw {
                 name,
@@ -3447,6 +3459,7 @@ fn body_scene(
                 simplified: app.viewport.simplified_edges.clone(),
                 edges_shared: false,
                 wire,
+                no_edges,
             },
         };
         let key = body.key(shaded, edges, hidden_edges, markers);
@@ -6650,9 +6663,13 @@ fn seen_edge_lines(sc: &mut GpuScene, e: &[Vec3], cols: EdgeColours, w: f32, nor
 /// over a face seen at a grazing angle (`GpuScene::lifted_line`). One pass over the mesh's
 /// vertices: the tessellation shares the edge's points with the faces on either side.
 fn edge_normals(m: &solidcraft_engine::geom::Mesh, e: &[Vec3]) -> Vec<[[f32; 3]; 2]> {
+    edge_normal_lookup(m, [e])(e)
+}
+
+fn edge_normal_lookup<'a>(m: &solidcraft_engine::geom::Mesh, edges: impl IntoIterator<Item = &'a [Vec3]>) -> impl Fn(&[Vec3]) -> Vec<[[f32; 3]; 2]> {
     let tol = m.bounds().diagonal().max(1.0) * 1e-7;
-    let key = |p: Vec3| ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64);
-    let mut at: std::collections::HashMap<(i64, i64, i64), Vec<Vec3>> = e.iter().map(|p| (key(*p), Vec::new())).collect();
+    let key = move |p: Vec3| ((p.x / tol).round() as i64, (p.y / tol).round() as i64, (p.z / tol).round() as i64);
+    let mut at: std::collections::HashMap<(i64, i64, i64), Vec<Vec3>> = edges.into_iter().flatten().map(|p| (key(*p), Vec::new())).collect();
     for (p, n) in m.positions.iter().zip(&m.normals) {
         if let Some(list) = at.get_mut(&key(*p))
             && list.len() < 8
@@ -6660,17 +6677,19 @@ fn edge_normals(m: &solidcraft_engine::geom::Mesh, e: &[Vec3]) -> Vec<[[f32; 3];
             list.push(*n);
         }
     }
-    e.windows(2)
-        .map(|w| {
-            let mut found: Vec<Vec3> = Vec::new();
-            for p in w {
-                found.extend(at.get(&key(*p)).into_iter().flatten().copied());
-            }
-            let Some(first) = found.first().copied() else { return [[0.0; 3]; 2] };
-            let other = found.iter().copied().min_by(|a, b| a.dot(first).total_cmp(&b.dot(first))).unwrap_or(first);
-            [first.to_f32(), other.to_f32()]
-        })
-        .collect()
+    move |edge| {
+        edge.windows(2)
+            .map(|w| {
+                let mut found: Vec<Vec3> = Vec::new();
+                for p in w {
+                    found.extend(at.get(&key(*p)).into_iter().flatten().copied());
+                }
+                let Some(first) = found.first().copied() else { return [[0.0; 3]; 2] };
+                let other = found.iter().copied().min_by(|a, b| a.dot(first).total_cmp(&b.dot(first))).unwrap_or(first);
+                [first.to_f32(), other.to_f32()]
+            })
+            .collect()
+    }
 }
 
 /// The outline of a highlighted face where the model hides it (dimmed).
@@ -6999,6 +7018,7 @@ fn highlight_geometry_key_with(app: &SolveApp, model_key: u64, selected: &[Sel])
     }
     app.preview.key.hash(&mut h);
     app.preview.rolled_back.hash(&mut h);
+    app.preview.corner_hover().map(|_| (app.preview.key, app.preview.hovered_corner)).hash(&mut h);
     app.viewport.refused_ring.hash(&mut h);
     // Where a Move dialog has moved its bodies; while its triad is dragged, only that it is.
     if crate::dialogs_move::dragging(app) {
@@ -7753,6 +7773,33 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     let mut lit_shared = EdgeHighlights::default();
     let mut lit_shared_hidden = EdgeHighlights::default();
     let mut selected_instances = HighlightInstances::default();
+    if app.dialog.as_ref().is_some_and(|dialog| matches!(dialog.kind, crate::dialogs::Kind::Sheet(crate::dialogs_sheet::Sm::Flange { ty: 1, .. })))
+        && let Some(corner) = app.preview.corner_hover()
+        && app.body_visible(&corner.body)
+    {
+        let faces: std::collections::BTreeSet<usize> = corner.faces.iter().flatten().copied().collect();
+        let lift = t.hover_face_lift;
+        let (r, g, b) = body_rgb(app, &corner.body);
+        mesh_tris(&mut feedback, &corner.mesh, [r.saturating_add(lift), g.saturating_add(lift), b.saturating_add(lift), 255], true, |face| {
+            faces.contains(&(face as usize))
+        });
+        let edges = || {
+            corner
+                .mesh
+                .edges
+                .iter()
+                .enumerate()
+                .filter(|(index, _)| {
+                    corner.mesh.edge_pickable(*index)
+                        && corner.mesh.edge_faces.get(*index).is_some_and(|adjacent| adjacent.iter().any(|face| faces.contains(&(*face as usize))))
+                })
+                .map(|(_, edge)| edge.as_slice())
+        };
+        let normals = edge_normal_lookup(&corner.mesh, edges());
+        for edge in edges() {
+            edge_lines(&mut feedback, edge, hover_edge, 1.5, &normals(edge));
+        }
+    }
     // Print faces (#8429): tinted towards the colour section views give cut faces, and outlined,
     // so the face a slicer export lays its body on shows at a glance. Drawn before the selection,
     // which lights over it.
@@ -8607,6 +8654,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::tool_modifiers::set_manipulator_free(crate::prefs::manipulator_free_held(app, mods));
     let manipulator_dragging = crate::tool_modifiers::manipulator_dragging();
     crate::tool_modifiers::set_manipulator_dragging(false);
+    crate::dialog_drag_undo::track(app, ui.ctx(), primary_pressed, primary_down, manipulator_dragging);
     {
         let platform = crate::tool_modifiers::Platform::of(ui.ctx());
         let held = crate::tool_modifiers::Held::new(mods, platform);
@@ -8679,17 +8727,19 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // An appearance swatch uses this frame's hover as its drop target.
     let swatch_released =
         ui.input(|i| i.pointer.any_released()) && egui::DragAndDrop::has_payload_of_type::<solidcraft_engine::doc::appearance::Look>(ui.ctx());
-    let hits = hover
-        .filter(|_| {
-            inside
-                && app.viewport.boxsel.is_none()
-                && !crate::joint_drag::active(app)
-                && !joint_handle_pointer
-                && !navigating
-                && !dragging_layer
-                // A part dragged in from the parts library lands in the design, not on a face.
-                && !design_dragged
-        })
+    // Where the pick under the pointer runs: nowhere while something else owns the pointer. An
+    // empty `hits` means empty space only where it ran (`picked`).
+    let picked = hover.filter(|_| {
+        inside
+            && app.viewport.boxsel.is_none()
+            && !crate::joint_drag::active(app)
+            && !joint_handle_pointer
+            && !navigating
+            && !dragging_layer
+            // A part dragged in from the parts library lands in the design, not on a face.
+            && !design_dragged
+    });
+    let hits = picked
         .map(|p| {
             if primary_down || swatch_released || resp.clicked() || resp.secondary_clicked() {
                 pick_cached(app, &proj, p)
@@ -9282,6 +9332,24 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             app.edit_feature_of_face(&body, index, point);
         }
+        // Double-click empty space with a component active: go back to its parent, as the
+        // ribbon's Activate Parent does. The same preference as a double-click on a face.
+        if resp.double_clicked()
+            && picked.is_some()
+            && hits.is_empty()
+            && !pen_select
+            && !held
+            && !dim_edit
+            && !reference_pick
+            && mods.is_none()
+            && app.tool.is_none()
+            && app.dialog.is_none()
+            && app.session.active_sketch.is_none()
+            && app.session.active_component != 0
+            && app.preferences.double_click_components
+        {
+            let _ = app.run("component.activate.parent", json!({}));
+        }
         // A right-click, unless the same press opened the mouse gestures' ring: it finishes a
         // tool, confirms a dialog's input (when that preference is on), or opens the menu. egui's
         // click already allows the pointer a few points of travel, as a mouse moves while it is
@@ -9291,7 +9359,9 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         let chord = ui.input(|i| i.pointer.middle_down()) && crate::prefs::nav_chord(app, crate::prefs::NavButton::Right).is_some();
         if resp.secondary_clicked() && !crate::mouse_gesture::took_press(app) && !chord {
             if app.tool.is_some() {
-                crate::tools::finish(app);
+                if !crate::sketch_tools::keep_on_right_click(app) {
+                    crate::tools::finish(app);
+                }
             } else if app.dialog.is_none() {
                 if crate::sketch_tools::detach_simulated_at(app, p) {
                     // Right-clicking a simulated break-off glyph detaches the curve endpoint immediately.
@@ -14330,6 +14400,7 @@ mod tests {
             simplified: simplified.clone(),
             edges_shared: false,
             wire: false,
+            no_edges: false,
         };
         let lines = |d: &BodyDraw| {
             let block = build_block(std::slice::from_ref(d), true, &|d, out| d.build(out, true, true, false, false));
@@ -19332,6 +19403,37 @@ mod tests {
     /// A two-finger twist turns the view about the up axis (#6286): counter-clockwise turns the
     /// model counter-clockwise as seen from above, pitch and roll stay, the Orbit around point
     /// keeps its place, and noise or the preference off (the default) leave the camera still.
+    /// With "Roll about the line of sight" on (#22691), the same twist rolls the picture the way the
+    /// fingers turn in any view, keeps heading and pitch, and keeps the Orbit around point on screen;
+    /// it does nothing while the twist itself is off.
+    #[test]
+    fn trackpad_twist_rolls_the_view_about_the_line_of_sight_when_asked() {
+        let mut h = crate::scenario::Harness::new();
+        assert!(!h.app.preferences.trackpad_twist_rolls, "rolling is opt-in");
+        h.call("ui.move", json!({"x":800,"y":500}));
+        h.frame();
+        h.app.preferences.trackpad_twist_rolls = true;
+        let untouched = h.app.cam;
+        h.app.synthetic.push(egui::Event::Rotate(-0.3));
+        h.frame();
+        assert_eq!(h.app.cam, untouched, "with the twist off, its roll option does nothing");
+        h.app.preferences.trackpad_twist_turns = true;
+        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
+        // A view looking along neither axis: the roll must not depend on which way Z points.
+        h.app.cam = solidcraft_viewport::Camera { target: Vec3::new(30.0, -20.0, 5.0), yaw: 0.7, pitch: 0.4, ..h.app.cam };
+        let before = h.app.cam;
+        let origin = before.frame_coords(Vec3::ZERO);
+        // egui counts clockwise: -0.3 is a counter-clockwise twist, which turns the picture
+        // counter-clockwise (a negative roll).
+        h.app.synthetic.push(egui::Event::Rotate(-0.3));
+        h.frame();
+        let rolled = h.app.cam;
+        let turned = (rolled.roll - before.roll + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        assert!((turned + 0.3).abs() < 1e-6, "counter-clockwise rolls the picture counter-clockwise: {turned}");
+        assert_eq!((rolled.yaw, rolled.pitch, rolled.distance), (before.yaw, before.pitch, before.distance), "nothing turns towards or away");
+        assert!((rolled.frame_coords(Vec3::ZERO) - origin).len() < 1e-6, "the origin keeps its place on screen");
+    }
+
     #[test]
     fn trackpad_twist_turns_the_view_about_the_up_axis() {
         let mut h = crate::scenario::Harness::new();

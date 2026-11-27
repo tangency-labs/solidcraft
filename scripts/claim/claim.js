@@ -196,6 +196,12 @@ async function claim(github, context, now) {
       if (status.release) held = false;
     }
     if (held) {
+      // GitHub doesn't assign people who aren't collaborators: with nobody assigned, the bot's
+      // "Claimed by" reply is the record of who holds the issue, and it may name the commenter.
+      if (!assignees.length && recordedClaimant(await getTimeline(github, context, n)) === user) {
+        await react(github, context, '+1'); // already theirs
+        return;
+      }
       await react(github, context, 'eyes');
       const who = assignees.length ? assignees.map((a) => '@' + a).join(', ') + ' has' : 'Someone has';
       const when = maintained || !status ? '' : ` The claim lapses on ${fmt(status.expires)} unless there's progress.`;
@@ -312,6 +318,8 @@ async function handlePull({ github, context }) {
       continue;
     }
     if (assignees.length || hasLabel(issue)) {
+      // The author may hold the issue without being assigned (see recordedClaimant): their own PR.
+      if (!assignees.length && recordedClaimant(await getTimeline(github, context, n)) === author) continue;
       const who = assignees.length ? assignees.map((a) => '@' + a).join(', ') : 'someone else';
       await github.rest.issues.createComment({
         ...repoArgs(context),

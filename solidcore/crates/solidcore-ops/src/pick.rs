@@ -62,7 +62,7 @@ pub type Picked = std::result::Result<Vec<usize>, Miss>;
 impl Answer for Picked {}
 
 /// The points as the kernel's, and the tolerance, checked.
-fn checked(points: &[[f64; 3]], tolerance: f64) -> Result<Vec<Point3>> {
+pub(crate) fn checked(points: &[[f64; 3]], tolerance: f64) -> Result<Vec<Point3>> {
     let tolerance_ok = tolerance.is_finite() && tolerance > 0.0 && tolerance < MAX_TOLERANCE;
     let points_ok = points.iter().flatten().all(|x| x.is_finite());
     if !(tolerance_ok && points_ok) {
@@ -129,13 +129,24 @@ fn apart(nearest: f64, second: f64) -> f64 {
 pub fn edges(body: &Body, points: &[[f64; 3]], tolerance: f64) -> Result<Picked> {
     let points = checked(points, tolerance)?;
     read_body("pick::edges", body, |k: &mut Kernel, b: &Brep| {
-        let list = b.edge_list();
-        nearest(list.len(), &points, tolerance, b.tolerance(), |x, p| {
-            let Some(&e) = list.get(x) else {
-                return Ok(None);
-            };
-            Ok(answer(q::edge_closest_point(k, b, e, p))?.map(|c| c.closest.distance))
-        })
+        edges_of(k, b, &points, tolerance)
+    })
+}
+
+/// [`edges`] on a B-rep already in hand (an operation's, inside its call), the points checked
+/// ([`checked`]).
+pub(crate) fn edges_of(
+    k: &mut Kernel,
+    b: &Brep,
+    points: &[Point3],
+    tolerance: f64,
+) -> solidcore::Result<Picked> {
+    let list = b.edge_list();
+    nearest(list.len(), points, tolerance, b.tolerance(), |x, p| {
+        let Some(&e) = list.get(x) else {
+            return Ok(None);
+        };
+        Ok(answer(q::edge_closest_point(k, b, e, p))?.map(|c| c.closest.distance))
     })
 }
 

@@ -48,7 +48,9 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use solidcore::blend::fillet_section::definition::StationMemo;
 use solidcore::kernel::{CancelToken, Kernel, KernelOptions, UpstreamFixes};
-use solidcore::topology::brep::p3::brep_copy;
+use solidcore::topology::brep::p3::{brep_copy, brep_copy_mapped};
+use solidcore::topology::proto_topology::p1::CopyBrepMap;
+use solidcore::EntityRef;
 use solidcore::{Brep, SolidError};
 
 use crate::body::Body;
@@ -268,6 +270,176 @@ fn give_back(k: Kernel) {
     };
     // dropped with no lock held
     drop(surplus);
+}
+
+/// Runs `work` over `items` in parallel using up to [`most_idle`] pooled kernels on native
+/// targets (or serially on `k` when `items.len() <= 1`, on `wasm32`, on single-core hosts,
+/// when collecting a call profile, or when counting exact fuel/cancellation polls), returning
+/// results in the exact input order.
+///
+/// Every worker kernel starts clean ([`start_clean`]) with the same `fixes`, `cancel` token, and
+/// `memoize_curve_caches` flag as `k`, and is returned to the idle pool only if it finishes
+/// without cancellation or panic. On error, unstarted items are skipped and the first error in
+/// deterministic input order is returned once in-flight workers complete.
+pub(crate) fn run_parallel<T, R, F>(
+    k: &mut Kernel,
+    items: Vec<T>,
+    work: F,
+) -> solidcore::Result<Vec<R>>
+where
+    T: Send,
+    R: Send,
+    F: Fn(&mut Kernel, T) -> solidcore::Result<R> + Sync,
+{
+    #[cfg(target_arch = "wasm32")]
+    {
+        return items.into_iter().map(|item| work(k, item)).collect();
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+
+        struct WorkerDepth;
+        impl Drop for WorkerDepth {
+            fn drop(&mut self) {
+                CURRENT.with(|c| c.set(None));
+                IN_CALL.with(|d| d.set(0));
+            }
+        }
+
+        let n = items.len();
+        let workers = n.min(most_idle());
+        #[cfg(feature = "profile")]
+        let force_serial = PROFILES.with(|p| p.borrow().is_some());
+        #[cfg(not(feature = "profile"))]
+        let force_serial = false;
+        let counting_polls = TANK.with(|t| t.borrow().is_some())
+            || k.cancel.as_ref().is_some_and(|c| c.polls().is_some());
+        if workers <= 1 || force_serial || counting_polls {
+            return items.into_iter().map(|item| work(k, item)).collect();
+        }
+        let inputs: Vec<Mutex<Option<T>>> = items
+            .into_iter()
+            .map(|item| Mutex::new(Some(item)))
+            .collect();
+        let outputs: Vec<Mutex<Option<solidcore::Result<R>>>> =
+            (0..n).map(|_| Mutex::new(None)).collect();
+        let next = AtomicUsize::new(0);
+        let stop = AtomicBool::new(false);
+        let fixes = k.fixes;
+        let cancel = k.cancel.clone();
+        let memoize = k.memoize_curve_caches;
+        let call = CURRENT.with(Cell::get);
+        #[cfg(test)]
+        let counter_fn = COUNTED.with(Cell::get).map(|(counter, _)| counter);
+
+        let run_loop = |wk: &mut Kernel| loop {
+            if stop.load(Ordering::Acquire) {
+                break;
+            }
+            let idx = next.fetch_add(1, Ordering::AcqRel);
+            let Some(slot) = inputs.get(idx) else {
+                break;
+            };
+            let Some(item) = slot.lock().unwrap_or_else(PoisonError::into_inner).take() else {
+                continue;
+            };
+            let res = work(wk, item);
+            if res.is_err() {
+                stop.store(true, Ordering::Release);
+            }
+            if let Some(out) = outputs.get(idx) {
+                *out.lock().unwrap_or_else(PoisonError::into_inner) = Some(res);
+            }
+        };
+
+        #[cfg(test)]
+        let mut workers_grew = 0_u64;
+        std::thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(workers - 1);
+            for _ in 1..workers {
+                let run_loop = &run_loop;
+                let stop = &stop;
+                let cancel = cancel.clone();
+                handles.push(scope.spawn(move || {
+                    CURRENT.with(|c| c.set(call));
+                    IN_CALL.with(|d| d.set(1));
+                    let _depth = WorkerDepth;
+                    let mut wk = take();
+                    start_clean(&mut wk);
+                    wk.fixes = fixes;
+                    wk.cancel.clone_from(&cancel);
+                    wk.memoize_curve_caches = memoize;
+                    #[cfg(test)]
+                    let w_start = counter_fn.map(|counter| counter(&wk.work_counters));
+                    run_loop(&mut wk);
+                    #[cfg(test)]
+                    let w_grew = match (counter_fn, w_start) {
+                        (Some(counter), Some(s)) => counter(&wk.work_counters).saturating_sub(s),
+                        _ => 0,
+                    };
+                    let unfit = stop.load(Ordering::Acquire)
+                        || wk.cancel.as_ref().is_some_and(CancelToken::is_cancelled);
+                    wk.cancel = None;
+                    if !unfit {
+                        give_back(wk);
+                    }
+                    #[cfg(test)]
+                    return w_grew;
+                }));
+            }
+            // The calling thread participates using its own kernel `k`.
+            run_loop(k);
+            for h in handles {
+                match h.join() {
+                    Ok(grew) => {
+                        #[cfg(test)]
+                        {
+                            workers_grew = workers_grew.saturating_add(grew);
+                        }
+                        #[cfg(not(test))]
+                        let () = grew;
+                    }
+                    Err(payload) => resume_unwind(payload),
+                }
+            }
+        });
+
+        #[cfg(test)]
+        if workers_grew > 0 {
+            COUNTED.with(|c| {
+                if let Some((counter, n)) = c.get() {
+                    c.set(Some((counter, n.saturating_add(workers_grew))));
+                }
+            });
+        }
+
+        let mut results = Vec::with_capacity(n);
+        let mut first_err = None;
+        for slot in outputs {
+            match slot.lock().unwrap_or_else(PoisonError::into_inner).take() {
+                Some(Ok(v)) if first_err.is_none() => results.push(v),
+                Some(Err(e)) if first_err.is_none() => first_err = Some(e),
+                Some(Ok(_) | Err(_)) | None => {}
+            }
+        }
+        if let Some(e) = first_err {
+            return Err(e);
+        }
+        if results.len() != n {
+            return Err(
+                if k.cancel.as_ref().is_some_and(CancelToken::is_cancelled) {
+                    SolidError::cancelled("solidcore_ops::session::run_parallel")
+                } else {
+                    SolidError::invalid_input(
+                        "solidcore_ops::session::run_parallel",
+                        "parallel worker stopped without producing a result",
+                    )
+                },
+            );
+        }
+        Ok(results)
+    }
 }
 
 /// A call's fuel as [`with_body`] found it: `(spent, limit)` when the tank was empty.
@@ -899,6 +1071,28 @@ pub(crate) fn measure_body<T: Answer>(
         drop(b);
         let mut copy = copy.unwrap_or_else(|p| resume_unwind(p))?;
         f(k, &mut copy)
+    })
+}
+
+/// [`measure_body`] on a copy that maps the body's entities to their copies
+/// ([`brep_copy_mapped`]): `f` gets the map from each of the body's entities to its copy.
+///
+/// # Errors
+/// Those of [`measure_body`].
+pub(crate) fn measure_body_mapped<T: Answer>(
+    call: &'static str,
+    body: &Body,
+    f: impl FnOnce(&mut Kernel, &mut Brep, &CopyBrepMap<EntityRef>) -> solidcore::Result<T>,
+) -> Result<T> {
+    if body.is_poisoned() {
+        return Err(unfinished(call));
+    }
+    run_on(call, &[("brep", body)], |k| {
+        let b = body.lock();
+        let copy = catch_unwind(AssertUnwindSafe(|| brep_copy_mapped(k, &b)));
+        drop(b);
+        let (mut copy, map) = copy.unwrap_or_else(|p| resume_unwind(p))?;
+        f(k, &mut copy, &map)
     })
 }
 

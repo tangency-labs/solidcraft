@@ -80,9 +80,8 @@ impl Product {
         match self {
             Self::Browser => app.ui.show_browser,
             Self::RenderBrowser => app.render_workspace.view.browser_open,
-            // One of the two holds the shared bottom row, whose height they would otherwise both bound.
-            Self::History => app.ui.show_timeline && !timeline_2d(app),
-            Self::Timeline2d => app.ui.show_timeline && timeline_2d(app),
+            Self::History => app.ui.show_timeline,
+            Self::Timeline2d => false,
             Self::Assistant => app.agent_chat.open,
             Self::RenderLibrary => true,
             Self::RenderInspector => crate::render_workspace::inspector_visible(app),
@@ -98,10 +97,8 @@ impl Product {
         match self {
             Self::Browser => app.ui.show_browser = open,
             Self::RenderBrowser => app.render_workspace.view.browser_open = open,
-            // Only the one in use follows Show History: closing the other in the swap leaves it alone.
-            Self::History if !timeline_2d(app) => app.ui.show_timeline = open,
-            Self::Timeline2d if timeline_2d(app) => app.ui.show_timeline = open,
-            Self::History | Self::Timeline2d => {}
+            Self::History => app.ui.show_timeline = open,
+            Self::Timeline2d => {}
             Self::Assistant => app.agent_chat.open = open,
             Self::RenderLibrary => {}
             Self::RenderInspector => crate::render_workspace::set_inspector_visible(app, open),
@@ -185,8 +182,8 @@ impl Product {
         let render = crate::render_workspace::active(app);
         match self {
             Self::Browser => !render && !crate::render_ui::focused(app),
-            Self::History => !render && !crate::drawing_workspace::active(app) && !app.preferences.history_in_browser && !timeline_2d(app),
-            Self::Timeline2d => !render && !crate::drawing_workspace::active(app) && !app.preferences.history_in_browser && timeline_2d(app),
+            Self::History => !render && !crate::drawing_workspace::active(app) && !app.preferences.history_in_browser,
+            Self::Timeline2d => false,
             Self::Assistant => crate::agent_chat::shown(app) && !app.preferences.agent_chat_popped,
             Self::RenderBrowser | Self::RenderLibrary | Self::RenderInspector | Self::RenderShots => render && !crate::render_ui::focused(app),
             Self::SketchOptions => !render && (crate::sketch_palette::editing(app) || crate::sketch_palette::image_tool(app)),
@@ -232,12 +229,13 @@ impl Product {
                     ("forward", "ui.history_forward", "timeline_forward"),
                     ("last", "ui.history_last", "timeline_last"),
                 ];
-                // The switch shows the view it switches to, at the header's right end in both.
-                entries.extend(if self == Self::History {
-                    vec![(TIMELINE_VIEW, "ui.timeline_2d_show", "timeline_2d")]
-                } else {
-                    vec![(TIMELINE_SETTINGS, "ui.timeline_2d_settings", "display"), (TIMELINE_VIEW, "ui.timeline_2d_hide", "timeline_1d")]
-                });
+                // At the header's right end: the 2D options, then the view icon that raises the row to the 2D timeline or lowers it to the 1D strip.
+                // The app shows the one that fits the height (`sync_timeline_header`).
+                entries.extend([
+                    (TIMELINE_SETTINGS, "ui.timeline_2d_settings", "display"),
+                    (TIMELINE_EXPAND, "ui.timeline_2d_show", "timeline_2d"),
+                    (TIMELINE_COLLAPSE, "ui.timeline_2d_hide", "timeline_1d"),
+                ]);
                 entries
             }
             Self::Assistant => vec![("new-chat", "ui.agent_chat_new", "new")],
@@ -298,15 +296,18 @@ impl Product {
                         pressed: (*control == crate::ui_kit::HistoryTransport::Play).then_some(app.timeline_playback.is_some()),
                     }
                 })
-                .chain(self.header_actions().into_iter().filter(|spec| [TIMELINE_SETTINGS, TIMELINE_VIEW].contains(&spec.id.0.as_str())).map(
-                    |spec| RuntimeAction {
-                        id: spec.id,
-                        label: solidcraft_ui_text::tr(&spec.label_key).into(),
-                        enabled: true,
-                        disabled_reason: None,
-                        pressed: None,
-                    },
-                ))
+                .chain(
+                    self.header_actions()
+                        .into_iter()
+                        .filter(|spec| [TIMELINE_SETTINGS, TIMELINE_EXPAND, TIMELINE_COLLAPSE].contains(&spec.id.0.as_str()))
+                        .map(|spec| RuntimeAction {
+                            id: spec.id,
+                            label: solidcraft_ui_text::tr(&spec.label_key).into(),
+                            enabled: true,
+                            disabled_reason: None,
+                            pressed: None,
+                        }),
+                )
                 .collect(),
             Self::Assistant => vec![RuntimeAction {
                 id: ControlId("new-chat".into()),
@@ -582,8 +583,6 @@ fn enable_production_for(app: &mut crate::SolveApp, window: &str, pop_out: Optio
     let mut options = HostOptions { content_header_height: 0.0, ..Default::default() };
     options.geometry.default_opaque = false;
     options.metrics.footer_height = 0.0;
-    // The 2D Timeline is tall and wide, so the corner would cover the Browser.
-    options.float_in_place = vec![InstanceId::new(Product::Timeline2d.id())?];
     integration.enable_host(options)?;
     let mut catalogue = commands::InMemoryCatalogue::default();
     for (id, name, suffix) in WORKSPACES {
@@ -669,9 +668,8 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
         }
         match action.product {
             Product::History | Product::Timeline2d => {
-                if action.action.0 == TIMELINE_VIEW {
-                    let on = !app.preferences.timeline_2d;
-                    crate::prefs::set(app, &json!({ "timeline_2d": on })).map_err(|reason| error(Rule::Availability, reason))?;
+                if [TIMELINE_EXPAND, TIMELINE_COLLAPSE].contains(&action.action.0.as_str()) {
+                    set_timeline_tall(app, action.action.0 == TIMELINE_EXPAND)?;
                 } else if let Some(control) = crate::ui_kit::HistoryTransport::WITH_PLAY.into_iter().find(|control| control.id() == action.action.0) {
                     crate::timeline::run_transport(app, control);
                 }
@@ -939,6 +937,14 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
                 if inspector_visibility == Some(false) && instance.requested_open {
                     mutations.push(Mutation::Close { instance: id });
                 }
+            } else if product == Product::History
+                && visible
+                && !instance.requested_open
+                && layout.instance(&InstanceId::new(Product::Timeline2d.id())?).is_ok_and(|panel| panel.requested_open)
+            {
+                // A layout saved when the 2D Timeline was its own panel: the History takes its place, taller (`sync_timeline_view`).
+                mutations.push(Mutation::Close { instance: InstanceId::new(Product::Timeline2d.id())? });
+                mutations.push(Mutation::Open { kind: instance.kind.clone(), instance: id, destination: None });
             } else if snapshot.visible.get(product.index()).copied() != Some(visible)
                 && instance.requested_open != visible
                 && (!visible || product.available(app))
@@ -1117,25 +1123,96 @@ fn sync_sketch_options(app: &mut crate::SolveApp) -> PanelResult<()> {
     }
 }
 
-/// The header button that switches between the 1D History and the 2D Timeline.
-pub(crate) const TIMELINE_VIEW: &str = "timeline-view";
+/// The History header's view icon that raises the bottom row to the 2D Timeline's standard height (the 2D icon).
+pub(crate) const TIMELINE_EXPAND: &str = "timeline-expand";
+/// The view icon that lowers the row back to the one-row strip (the 1D icon).
+pub(crate) const TIMELINE_COLLAPSE: &str = "timeline-collapse";
 /// The 2D Timeline's header button that opens its options.
 pub(crate) const TIMELINE_SETTINGS: &str = "settings";
 
-/// The 2D Timeline replaces History while History would be a bottom strip (`timeline_2d`).
-fn timeline_2d(app: &crate::SolveApp) -> bool {
-    app.preferences.timeline_2d && !app.preferences.timeline_left
+/// The bottom History as a one-row strip: a 28-point chip and six-point inset on each side, plus the
+/// shared content slot's own symmetric two-point inset.
+fn strip_height() -> f32 {
+    let tokens = solidcraft_theme::Tokens::get();
+    tokens.form_header_height.max(tokens.space_24 + tokens.space_4 + 2.0 * tokens.space_6 + 2.0 * tokens.space_2)
+}
+
+/// The 2D Timeline's grid heights plus the host's header and content inset above and below it.
+fn chrome_2d() -> f32 {
+    super::HostMetrics::default().header_height + 2.0 * solidcraft_theme::Tokens::get().space_2
+}
+
+/// The smallest bottom height that shows the 2D Timeline: History's own panel, tall.
+pub(crate) fn tall_min_height() -> f32 {
+    crate::timeline_2d::canvas::MIN_DOCK_HEIGHT + chrome_2d()
+}
+
+/// The height the 2D icon raises the bottom History to.
+fn tall_standard_height() -> f32 {
+    crate::timeline_2d::canvas::DOCK_TOTAL_HEIGHT + chrome_2d()
+}
+
+/// Whether a bottom row of this height shows the 2D Timeline. Heights between the strip and the 2D
+/// minimum do not occur: the layout snaps a resize to the nearer side of that gap.
+pub(crate) fn tall_height(height: f32) -> bool {
+    height >= tall_min_height() - 0.5
+}
+
+/// Whether the History sits in the bottom row (where it can be raised), and whether that row is tall
+/// enough to be the 2D Timeline. The layout decides, as it does for the side History's names and strip.
+pub(super) fn history_row(integration: &AppPanelRuntime) -> (bool, bool) {
+    integration.runtime().layout().layout().containing(&InstanceId(Product::History.id().into())).ok().map_or((false, false), |section| {
+        let bottom = section.location.zone() == Zone::Bottom;
+        (bottom, bottom && !section.collapsed && tall_height(section.size.height))
+    })
+}
+
+/// Whether the History is a bottom row tall enough to be the 2D Timeline.
+#[cfg(test)]
+pub(crate) fn timeline_tall(app: &crate::SolveApp) -> bool {
+    app.panel_runtime.as_ref().is_some_and(|integration| history_row(integration).1)
+}
+
+/// Keep the `timeline_2d` preference and the bottom History's height in step. Setting the preference
+/// (the control channel, a script) raises or lowers the row; a resize or the icon shows in the preference.
+pub(crate) fn sync_timeline_view(app: &mut crate::SolveApp) -> PanelResult<()> {
+    let Some(integration) = app.panel_runtime.as_ref() else { return Ok(()) };
+    let (bottom, tall) = history_row(integration);
+    if !bottom {
+        return Ok(());
+    }
+    let wanted = app.preferences.timeline_2d;
+    let asked = integration.timeline_2d_seen != Some(wanted) && wanted != tall;
+    if let Some(integration) = app.panel_runtime.as_mut() {
+        integration.timeline_2d_seen = Some(if asked { wanted } else { tall });
+    }
+    if asked {
+        set_timeline_tall(app, wanted)
+    } else {
+        app.preferences.timeline_2d = tall;
+        Ok(())
+    }
+}
+
+/// Raise the bottom History to the 2D Timeline's standard height, or lower it to the strip.
+pub(crate) fn set_timeline_tall(app: &mut crate::SolveApp, tall: bool) -> PanelResult<()> {
+    let integration = app.panel_runtime.as_ref().ok_or_else(|| error(Rule::Lifecycle, "application panel runtime unavailable"))?;
+    let section = integration.runtime().layout().layout().containing(&InstanceId::new(Product::History.id())?)?;
+    if section.location.zone() != Zone::Bottom {
+        return Ok(());
+    }
+    let section = section.id.clone();
+    let height = if tall { tall_standard_height() } else { strip_height() };
+    app.dispatch_panel_layout(LayoutAction::Apply { expected_revision: None, mutations: vec![Mutation::SetBottomHeight { section, height }] })
+        .map(drop)
 }
 
 fn registry() -> PanelResult<PanelRegistry> {
     use crate::timeline_2d::canvas::{DOCK_TOTAL_HEIGHT, MIN_DOCK_HEIGHT};
     let mut registry = PanelRegistry::default();
     let tokens = solidcraft_theme::Tokens::get();
-    // The 2D Timeline's grid heights plus the host's header and content inset above and below it.
-    let chrome_2d = super::HostMetrics::default().header_height + 2.0 * tokens.space_2;
-    // The existing strip has a 28-point chip and six-point inset on each side;
-    // the shared content slot adds its own symmetric two-point inset.
-    let bottom_height = tokens.form_header_height.max(tokens.space_24 + tokens.space_4 + 2.0 * tokens.space_6 + 2.0 * tokens.space_2);
+    let chrome_2d = chrome_2d();
+    let bottom_height = strip_height();
     for product in Product::ALL.iter().copied() {
         let history = product == Product::History;
         let assistant = product == Product::Assistant;
@@ -1200,13 +1277,19 @@ fn registry() -> PanelResult<PanelRegistry> {
                 ..Default::default()
             },
             side_height_policy: if assistant { SideHeightPolicy::Fill } else { SideHeightPolicy::Content },
-            fixed_bottom_height: (history || shots).then_some(bottom_height),
+            fixed_bottom_height: shots.then_some(bottom_height),
+            bottom_always_open: history,
             header_actions: product.header_actions(),
             text_heavy: assistant || bom || sketch,
         })?;
         if history {
             let strip = crate::ui_kit::history_width(false);
             registry.set_side_widths(&PanelKind::new(product.kind())?, vec![(strip, strip), (crate::ui_kit::history_width(true), MAX_LOGICAL)])?;
+            // At the bottom: the one-row strip, or from the 2D Timeline's minimum up; between is a deadzone.
+            registry.set_bottom_heights(
+                &PanelKind::new(product.kind())?,
+                vec![(bottom_height, bottom_height), (MIN_DOCK_HEIGHT + chrome_2d, MAX_LOGICAL)],
+            )?;
         }
     }
     Ok(registry)
@@ -1614,7 +1697,7 @@ impl FramePanelContent for ProductionFrame<'_> {
     }
 
     fn header_action_clicked(&mut self, instance: &InstanceId, action: &ControlId, button: egui::Rect) {
-        if instance.0 == Product::Timeline2d.id() && action.0 == TIMELINE_SETTINGS {
+        if instance.0 == Product::History.id() && action.0 == TIMELINE_SETTINGS {
             crate::context_menu::open_for(self.app, button.left_bottom(), crate::context_menu::Target::Timeline2dOptions);
         }
     }
@@ -1689,6 +1772,10 @@ impl FramePanelContent for ProductionFrame<'_> {
             Product::DrawingSheets => crate::drawing_workspace::sheets_section(self.app, ui),
             Product::DrawingInspector => crate::drawing_workspace::inspector_contents(self.app, ui),
             Product::RenderBrowser => crate::browser::panel_contents(self.app, ui),
+            // A bottom row tall enough for the 2D Timeline shows it in place of the strip.
+            Product::History if context.flow == Flow::Wide && tall_height(context.outer.size.height) => {
+                crate::timeline_2d::panel_contents(self.app, ui)
+            }
             Product::History if context.flow == Flow::Wide => crate::timeline::panel_inline(self.app, ui),
             Product::History => crate::timeline_left::panel_contents(self.app, ui),
             Product::Timeline2d => crate::timeline_2d::panel_contents(self.app, ui),

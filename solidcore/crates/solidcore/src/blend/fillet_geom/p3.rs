@@ -870,6 +870,7 @@ impl FilletBrep {
                     skip_two_pnts_intersection: false,
                     ref_point: None,
                     closed_by_start_direction: false,
+                    heading_side_only: false,
                 },
             );
             let (curve_3d, uv_curve1, uv_curve2) = match xsect {
