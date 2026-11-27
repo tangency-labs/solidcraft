@@ -18585,14 +18585,16 @@ fn eval_feature_kind(
                     }
                     match ids.as_slice() {
                         [] => return Err(DocError::Invalid("a sketch tool needs its line or its curves".into())),
-                        [one] if *extend && sketch_curve_is_line(st, sketch.0, one)? => split_by_plane_traced(&input, &sketch_line_plane(st, sketch.0, one)?)?,
+                        [one] if *extend && !mb.is_surface() && sketch_curve_is_line(st, sketch.0, one)? => split_by_plane_traced(&input, &sketch_line_plane(st, sketch.0, one)?)?,
                         _ => {
                             // In the sketch's own frame, as a straight line's plane is read, so a
                             // line cuts at the same place whatever `extend` says.
                             let ss = st.sketch(sketch.0).ok_or_else(|| DocError::Unknown(format!("sketch {sketch}")))?;
                             let sheet = sketch_curve_sheet(ss, &ids, &mb.body, *extend)?;
-                            // A surface body is cut into its regions, each a surface body, as by a
-                            // whole surface body tool (#22525): a sheet has no sides to keep.
+                            // A surface body, even split by one straight line, is cut into its
+                            // regions, each a surface body, as by a whole surface body tool
+                            // (#22525): a sheet has no sides to keep, so its regions come in the
+                            // kernel's order, not the sheet's sides.
                             let parts = if mb.is_surface() {
                                 kernel::split_sheet_where_it_cuts(&mb.body, &sheet)?
                             } else {
@@ -18601,7 +18603,10 @@ fn eval_feature_kind(
                             .ok_or_else(|| DocError::Invalid(format!("the sketch curves do not cut `{body}` through")))?;
                             parts
                                 .into_iter()
-                                .map(|part| Ok(Traced::step(part.with_preserved_planar_sources(&mb.body)?, &[&input])))
+                                .map(|part| {
+                                    let part = part.with_preserved_planar_sources(&mb.body)?;
+                                    Ok(if mb.is_surface() { input.then(part) } else { Traced::step(part, &[&input]) })
+                                })
                                 .collect::<Result<Vec<_>>>()?
                         }
                     }
