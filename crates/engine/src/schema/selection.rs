@@ -66,6 +66,7 @@ impl JsonSchema for SelectionItem {
             "external_sketch_curve",
             "external_sketch_point",
             "sketch_constraint",
+            "sketch_pattern",
             "profile",
             "plane",
             "construction_point",

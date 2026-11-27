@@ -572,8 +572,8 @@ pub struct ConstructionResult {
     pub param_warnings: Vec<String>,
 }
 
-/// Delete curves, points and constraints (dimensions too) from a sketch, by id; a sketch's
-/// wires and linked geometry too. The sketch origin cannot be deleted. One undo step.
+/// Delete curves, points, constraints (dimensions too) and sketch patterns from a sketch, by id;
+/// a sketch's wires and linked geometry too. The sketch origin cannot be deleted. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = entities_required)]
 pub struct DeleteParams {
@@ -581,7 +581,7 @@ pub struct DeleteParams {
     #[serde(default)]
     pub preserve_projection_link: bool,
     // Optional in the type and required in the schema (`entities_required`).
-    /// What to delete: curve, point, constraint, wire or link ids.
+    /// What to delete: curve, point, constraint, wire, link or sketch pattern ids.
     #[serde(default, deserialize_with = "entities", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "EntityIds")]
     pub entities: Option<EntityIds>,

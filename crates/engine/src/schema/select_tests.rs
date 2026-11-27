@@ -302,6 +302,7 @@ fn every_selection_kind_is_taken() {
         json!({"type": "external_sketch_curve", "sketch": 2, "id": "c1"}),
         json!({"type": "external_sketch_point", "sketch": 2, "id": "p1"}),
         json!({"type": "sketch_constraint", "id": "k1"}),
+        json!({"type": "sketch_pattern", "id": "pat1"}),
         json!({"type": "profile", "sketch": 2, "index": 0}),
         json!({"type": "plane", "name": "XY"}),
         json!({"type": "construction_point", "name": "P"}),

@@ -71,14 +71,16 @@ fn delete_in_drawing(s: &mut Session, p: &Value, items: &[Sel]) -> Result<Value>
     }
     if s.sheet_sketching()
         && !items.is_empty()
-        && items.iter().all(|item| matches!(item, Sel::SketchCurve { .. } | Sel::SketchPoint { .. } | Sel::SketchConstraint { .. }))
+        && items
+            .iter()
+            .all(|item| matches!(item, Sel::SketchCurve { .. } | Sel::SketchPoint { .. } | Sel::SketchConstraint { .. } | Sel::SketchPattern { .. }))
     {
         let sketch = s.active_sheet_sketch.as_ref().map(|entry| entry.sketch);
         let entities = items
             .iter()
             .map(|item| match item {
                 Sel::SketchCurve { id, sketch: target } if target.is_none() || *target == sketch => Ok(id.clone()),
-                Sel::SketchPoint { id } | Sel::SketchConstraint { id } => Ok(id.clone()),
+                Sel::SketchPoint { id } | Sel::SketchConstraint { id } | Sel::SketchPattern { id } => Ok(id.clone()),
                 _ => Err(bad(cmd, "sketch geometry must belong to the active sheet sketch")),
             })
             .collect::<Result<Vec<_>>>()?;
@@ -280,7 +282,9 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             Sel::Occurrence { path } => {
                 selected_occurrences.push(s.occurrence_placement(path)?.occurrence.to_string());
             }
-            Sel::SketchCurve { id, .. } | Sel::SketchPoint { id } | Sel::SketchConstraint { id } => entities.push(id.clone()),
+            Sel::SketchCurve { id, .. } | Sel::SketchPoint { id } | Sel::SketchConstraint { id } | Sel::SketchPattern { id } => {
+                entities.push(id.clone())
+            }
             Sel::Feature { id } => {
                 if s.doc.feature(*id).is_none() {
                     return Err(bad(cmd, format!("no feature {id}")));
@@ -1363,6 +1367,35 @@ mod tests {
         assert_clean_delete(&mut raw, "Session::new legacy");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #12081: a sketch pattern picked as a whole goes with Delete, also with a count of 1 (no
+    /// copies). A pattern with copies takes its copies and their relations; the sources stay.
+    #[test]
+    fn a_sketch_pattern_deletes_with_or_without_copies_and_keeps_its_sources() {
+        let mut s = Session::default();
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.line", json!({"points": [[10, 5], [15, 5]], "ids": ["source"]}));
+        let single = run(&mut s, "sketch.pattern.rectangular", json!({"entities": ["source"], "count": 1, "spacing": 20}))["pattern"].clone();
+        let triple = run(&mut s, "sketch.pattern.rectangular", json!({"entities": ["source"], "count": 3, "spacing": 20}))["pattern"].clone();
+        let patterns = |s: &Session| s.doc.sketch(sk).unwrap().patterns.iter().map(|p| p.id.clone()).collect::<Vec<_>>();
+        let constraints = |s: &Session| s.doc.sketch(sk).unwrap().constraints.len();
+        assert_eq!(curves(&s, sk).len(), 3, "the source and two copies");
+        let sketch = |s: &Session| serde_json::to_value(s.doc.sketch(sk).unwrap()).unwrap();
+        let (before, relations) = (sketch(&s), constraints(&s));
+
+        run(&mut s, "selection.delete", json!({"items": [{"type": "sketch_pattern", "id": single}]}));
+        assert_eq!(patterns(&s), vec![triple.as_str().unwrap().to_string()], "only the pattern with no copies goes");
+        assert_eq!((curves(&s, sk).len(), constraints(&s)), (3, relations), "nothing else changes");
+        run(&mut s, "selection.delete", json!({"items": [{"type": "sketch_pattern", "id": triple}]}));
+        assert!(patterns(&s).is_empty());
+        assert_eq!(curves(&s, sk), vec!["source".to_string()], "the copies go, the source stays");
+        assert!(constraints(&s) < relations, "the copies' relations go too");
+        run(&mut s, "edit.undo", json!({}));
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(sketch(&s), before, "undo brings both patterns back");
+        let err = s.execute("sketch.delete", &json!({"entities": ["pat404"]})).unwrap_err().to_string();
+        assert!(err.contains("unknown sketch entity"), "{err}");
     }
 
     fn curves(s: &Session, sk: u64) -> Vec<String> {

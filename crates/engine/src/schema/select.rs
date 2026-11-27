@@ -97,6 +97,7 @@ impl JsonSchema for SelectItem {
                 variant("external_sketch_curve", "A curve of another sketch.", serde_json::json!({"sketch": count(), "id": text()}), &["sketch", "id"]),
                 variant("external_sketch_point", "A point of another sketch.", serde_json::json!({"sketch": count(), "id": text()}), &["sketch", "id"]),
                 variant("sketch_constraint", "A constraint or dimension of the active sketch, by id.", serde_json::json!({"id": text()}), &["id"]),
+                variant("sketch_pattern", "A pattern of the active sketch, by id.", serde_json::json!({"id": text()}), &["id"]),
                 variant("profile", "A closed profile of a sketch, by sketch id and index.", serde_json::json!({"sketch": count(), "index": count()}), &["sketch", "index"]),
                 variant("plane", "An origin plane (XY, XZ, YZ) or a construction plane, by name.", serde_json::json!({"name": text()}), &["name"]),
                 variant("construction_point", "A construction point, by feature name.", serde_json::json!({"name": text()}), &["name"]),

@@ -236,7 +236,7 @@ fn rank(s: &Sel, sketching: bool) -> (u8, u8) {
     let kind = match s {
         Sel::SketchPoint { .. } | Sel::SketchMidpoint { .. } | Sel::ExternalSketchPoint { .. } | Sel::PlacedSketchPoint { .. } => 0,
         Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. } => 1,
-        Sel::SketchConstraint { .. } => 2,
+        Sel::SketchConstraint { .. } | Sel::SketchPattern { .. } => 2,
         Sel::Vertex { .. } | Sel::ConstructionPoint { .. } | Sel::PointCloudPoint { .. } => 3,
         Sel::Edge { .. } => 4,
         Sel::Face { .. } | Sel::Feature { .. } => 5,
@@ -336,6 +336,7 @@ pub fn label(app: &SolveApp, sel: &Sel) -> String {
         }
         Sel::ExternalSketchCurve { sketch, id } => format!("{} · {}", in_sketch(*sketch, &|sk| curve_label(sk, id)), sketch_name(app, *sketch)),
         Sel::SketchConstraint { id } => format!("Constraint {id}"),
+        Sel::SketchPattern { id } => crate::sketch_pattern_tree::active_label(&app.session, id),
         Sel::Vertex { body, .. } => format!("Vertex · {body}"),
         Sel::PointCloudPoint { cloud, index, .. } => {
             let name = app.session.doc.point_clouds.iter().find(|c| c.id == *cloud).map(|c| c.name.as_str()).unwrap_or("Point Cloud");
@@ -380,6 +381,7 @@ fn icon(app: &SolveApp, sel: &Sel) -> &'static str {
         Sel::SketchCurve { id, .. } => curve(app.session.active_sketch, id),
         Sel::ExternalSketchCurve { sketch, id } => curve(Some(*sketch), id),
         Sel::SketchConstraint { .. } => "dimension",
+        Sel::SketchPattern { .. } => "sketch_rect_pattern",
         Sel::Edge { .. } => "fillet",
         Sel::Face { .. } | Sel::Feature { .. } => "presspull",
         Sel::Body { .. } => "body",

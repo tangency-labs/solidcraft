@@ -123,6 +123,7 @@ fn the_schema_takes_every_selection_item() {
         Sel::ExternalSketchCurve { sketch: 2, id: "c1".into() },
         Sel::ExternalSketchPoint { sketch: 2, id: "p1".into() },
         Sel::SketchConstraint { id: "k1".into() },
+        Sel::SketchPattern { id: "pat1".into() },
         Sel::Profile { sketch: 2, index: 0 },
         Sel::Plane { name: "XY".into() },
         Sel::ConstructionPoint { name: "P".into() },
