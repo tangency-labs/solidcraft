@@ -2120,10 +2120,10 @@ mod tests {
         h.step(&json!({"click":{"handle":"button:parameters.change"}})).unwrap();
         assert!(h.app.params.is_some(), "the ordinary Parameters button opens the editor");
         assert!(h.app.dialog.is_none());
-        assert!(h.widget("User Parameters").is_some());
-        assert!(h.widget("Model Parameters").is_none(), "model groups are bands in the shared table");
+        assert!(crate::scenario::handle_at("params:view:named").is_some());
+        assert!(crate::scenario::handle_at("params:view:dimensions").is_some());
         // Exercise the inline draft row through the public add prompt and Enter.
-        h.step(&json!({"click":{"handle":"dialog:table:parameters:add"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:table:user:add"}})).unwrap();
         let parameters = h.app.params.as_mut().unwrap();
         parameters.new_name = "width".into();
         parameters.new_expr = "25 mm".into();

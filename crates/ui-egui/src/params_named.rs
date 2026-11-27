@@ -527,7 +527,9 @@ pub(super) fn row_menu(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDial
     }
     let response = ui_kit::compact_button(ui, "…", tr("parameters.redesign.actions"), true, false);
     crate::scenario::publish_handle(&format!("param:menu:{}", r.name), response.rect.center());
-    ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Popup).menu(&response).show(|ui| {
+    // Editing a comment keeps the menu open; commands close it explicitly.
+    let menu = ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Popup).menu(&response).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    menu.show(|ui| {
         if !r.group.is_empty() && ui_kit::menu::button(ui, tr("parameters.redesign.show_model"), "select").clicked() {
             show_feature(app, &r.group);
             ui.close();
@@ -565,13 +567,18 @@ pub(super) fn row_menu(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDial
         if d.redesign.narrow {
             let _ = used_by(app, ui, r);
             if r.source == "user" {
-                let mut unit = UNITS.iter().position(|u| *u == r.unit).unwrap_or(0);
-                let labels: Vec<_> = UNITS.iter().map(|u| unit_label(u)).collect();
-                if ui_kit::dropdown(ui, "menu_unit", &mut unit, &labels).changed()
-                    && let Some(unit) = UNITS.get(unit)
-                {
-                    edit_cell(app, ui.ctx(), d, r, "user", UNIT, unit.to_string());
-                }
+                // A combo popup replaces the parent popup in egui's memory. Use the kit's
+                // nested menu so the row remains available while choosing a unit.
+                ui_kit::Menu::button(ui, unit_label(&r.unit), |ui| {
+                    for unit in UNITS {
+                        let mut item = ui_kit::menu::MenuItem::new(unit, unit_label(unit), "");
+                        item.checked = Some(*unit == r.unit);
+                        if item.show(ui).clicked() {
+                            edit_cell(app, ui.ctx(), d, r, "user", UNIT, unit.to_string());
+                            ui.close();
+                        }
+                    }
+                });
             }
             let mut comment = d.comments.get(&r.name).cloned().unwrap_or_else(|| r.comment.clone());
             let id = ui.make_persistent_id("menu_comment");

@@ -2015,6 +2015,7 @@ mod tests {
     #[test]
     fn params_redesign_measures_comes_from_the_constraint_and_entity() {
         use solidcraft_engine::sketch::{ConstraintKind, Sketch};
+        crate::i18n::install();
         let mut sketch = Sketch::default();
         sketch.add_circle(solidcore_record::Vec2::new(0.0, 0.0), 2.0, None, Some("Circle2")).unwrap();
         assert_eq!(redesign::measure(&sketch, &ConstraintKind::Radius { c: 0, value: 2.0 }), "Radius, Circle2");
