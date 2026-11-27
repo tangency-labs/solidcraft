@@ -240,20 +240,30 @@ impl Net {
             if !d.is_finite() || matches!(base.kind(), SurfaceKind::OffsetSurface(_)) {
                 return Ok(None);
             }
-            return Ok(Self::of_bare(k, base, tolerance)?.map(|n| Self {
+            return Ok(Self::of_bare(k, base, tolerance, true)?.map(|n| Self {
                 offset: Some(d),
                 ..n
             }));
         }
-        Self::of_bare(k, surface, tolerance)
+        Self::of_bare(k, surface, tolerance, false)
     }
 
-    /// [`Net::of`] for a surface that is no offset surface.
+    /// [`Net::of`] for a surface that is no offset surface. A swept wall's definition
+    /// ([`Surface::procedural_sweep`]) rides on its net, which is only within the
+    /// definition's bound of the swept surface, so the net itself stands for a wall only
+    /// where the net is what is used: `as_offset_base`, for the base of an offset surface,
+    /// which the executive offsets and extends as that net (the offset keeps no definition)
+    /// whatever the definition beside it says.
     ///
     /// # Errors
     ///
     /// As [`Net::of`].
-    fn of_bare(k: &Kernel, surface: &Surface, tolerance: f64) -> Result<Option<Self>> {
+    fn of_bare(
+        k: &Kernel,
+        surface: &Surface,
+        tolerance: f64,
+        as_offset_base: bool,
+    ) -> Result<Option<Self>> {
         if !matches!(
             surface.kind(),
             SurfaceKind::BSpline(_)
@@ -261,7 +271,7 @@ impl Net {
                 | SurfaceKind::SurfOfRevolution(_)
         ) || crate::surface::implicit::AnalyticSupport::of(surface).is_some()
             || surface.procedural_blend().is_some()
-            || surface.procedural_sweep().is_some()
+            || (!as_offset_base && surface.procedural_sweep().is_some())
         {
             return Ok(None);
         }
