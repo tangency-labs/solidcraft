@@ -289,12 +289,12 @@ fn analytic_shells_keep_their_closed_forms() {
 /// of a 20 mm block cut down to z14 beside a 1 mm rib, chamfered 1 mm at its top.
 /// Its area is 20*14 + 1*5 + 1/2 = 285.5 mm2, swept 20 mm along y.
 fn chamfered_rib(k: &mut Kernel) -> Brep {
-    k.fixes = solidcore::kernel::UpstreamFixes::all();
     use solidcore::curve::curve::Curve;
     use solidcore::math::Vec3;
     use solidcore::primitive::api_curves::create_line_segment;
     use solidcore::sweep::api_brep::create_linear_sweep;
 
+    k.fixes = solidcore::kernel::UpstreamFixes::all();
     let outline = [
         (0.0, 0.0),
         (20.0, 0.0),
@@ -397,8 +397,10 @@ fn shell_removes_a_rounded_ribs_vanished_cavity() {
     use solidcore::primitive::api_primitives::create_box;
 
     for t in [1.0_f64, 2.0] {
-        let mut k = Kernel::default();
-        k.fixes = solidcore::kernel::UpstreamFixes::all();
+        let mut k = Kernel {
+            fixes: solidcore::kernel::UpstreamFixes::all(),
+            ..Default::default()
+        };
         let mut body = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
         let edge = body
             .edges()
