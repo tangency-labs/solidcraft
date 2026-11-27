@@ -2158,13 +2158,13 @@ mod tests {
         let mut h = Harness::new();
         assert!(!h.app.preferences.browser_history_without_folder, "off by default");
         assert!(
-            crate::browser::menu_toggles(&h.app).iter().any(|row| *row == ("history-without-folder", "prefs.browser_history_without_folder", false)),
+            crate::browser::menu_toggles(&h.app).contains(&("history-without-folder", "prefs.browser_history_without_folder", false)),
             "a row of the menu, unticked"
         );
         crate::browser::menu_action(&mut h.app, "history-without-folder").unwrap();
         assert!(h.app.preferences.browser_history_without_folder, "a click turns it on");
         assert!(
-            crate::browser::menu_toggles(&h.app).iter().any(|row| *row == ("history-without-folder", "prefs.browser_history_without_folder", true)),
+            crate::browser::menu_toggles(&h.app).contains(&("history-without-folder", "prefs.browser_history_without_folder", true)),
             "ticked"
         );
         crate::browser::menu_action(&mut h.app, "history-without-folder").unwrap();

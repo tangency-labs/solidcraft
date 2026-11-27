@@ -4052,3 +4052,37 @@ fn new_section_identity(service: &LayoutService, instance: &InstanceId, reservat
     }
     Ok((next_host_section_id(service.layout(), reservations)?, index))
 }
+
+#[cfg(test)]
+mod menu_geometry_tests {
+    use super::*;
+
+    fn area(width: f32, height: f32) -> LogicalRect {
+        LogicalRect { origin: Point { x: 0.0, y: 0.0 }, size: Size { width, height } }
+    }
+
+    /// A panel's ⋯ menu is the list width, wider for a long row, and no wider than the window.
+    #[test]
+    fn a_panel_menu_widens_for_a_long_row_within_the_window() {
+        let anchor = area(20.0, 20.0);
+        let plain = menu_geometry(area(1280.0, 720.0), anchor, 4, 1, 0.0).unwrap();
+        assert_eq!(plain.width(), ui_kit::LIST_W);
+        let wide = menu_geometry(area(1280.0, 720.0), anchor, 4, 1, ui_kit::LIST_W + 60.0).unwrap();
+        assert_eq!(wide.width(), ui_kit::LIST_W + 60.0, "the long row fits");
+        let narrow = menu_geometry(area(200.0, 720.0), anchor, 4, 1, ui_kit::LIST_W + 60.0).unwrap();
+        assert_eq!(narrow.width(), 200.0, "never wider than the window");
+    }
+
+    /// Up to 16 rows show at once: the Browser's panel actions, its View heading and four options
+    /// (13 rows and four separators) need no scrolling in a 1280x720 window.
+    #[test]
+    fn a_panel_menu_shows_sixteen_rows_before_it_scrolls() {
+        let t = solidcraft_theme::Tokens::get();
+        let row = t.control_height + t.space_2;
+        let anchor = area(20.0, 20.0);
+        let menu = menu_geometry(area(1280.0, 720.0), anchor, 13, 3, 0.0).unwrap();
+        assert!(menu.height() >= 13.0 * row + 3.0 * (t.space_10 + 1.0), "every row of the Browser menu shows");
+        let long = menu_geometry(area(1280.0, 2000.0), anchor, 40, 0, 0.0).unwrap();
+        assert_eq!(long.height(), 16.0 * row + t.space_12, "a longer menu scrolls after 16 rows");
+    }
+}
