@@ -3538,8 +3538,9 @@ fn socket_reach_lists_the_rib_in_the_sockets_way_and_shows_its_space() {
             input.items = vec![Sel::Edge { body: "Head".into(), index: 0, point: Vec3::new(36.5, 30.0, 10.0) }];
         }
         let c = socket_reach(app, app.dialog.as_ref().map_or(&[][..], |d| &d.inputs[..]), "19", "30", false);
-        if let Some(Kind::Assembly(Asm::SocketReach { result, shown, check, .. })) = app.dialog.as_mut().map(|d| &mut d.kind) {
+        if let Some(Kind::Assembly(Asm::SocketReach { diameter, length, flip, result, shown, asked, check, .. })) = app.dialog.as_mut().map(|d| &mut d.kind) {
             (*result, *shown, *check) = (None, Vec::new(), Some(c));
+            *asked = (diameter.clone(), length.clone(), *flip);
         }
         for _ in 0..3000 {
             let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| crate::dialogs::show(app, ui.ctx()));
@@ -3555,6 +3556,16 @@ fn socket_reach_lists_the_rib_in_the_sockets_way_and_shows_its_space() {
     let (clear, shown) = check(&mut app);
     assert_eq!(clear["clear"], json!(true), "{clear}");
     assert_eq!(shown, 1, "the socket's space only");
+    // The result is for a 19 mm socket: a wider one makes it stale, and it goes with its shape.
+    if let Some(Kind::Assembly(Asm::SocketReach { diameter, .. })) = app.dialog.as_mut().map(|d| &mut d.kind) {
+        *diameter = "40".into();
+    }
+    let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(screen), ..Default::default() }, |ui| crate::dialogs::show(&mut app, ui.ctx()));
+    out.textures_delta.clear();
+    assert!(
+        matches!(app.dialog.as_ref().map(|d| &d.kind), Some(Kind::Assembly(Asm::SocketReach { result: None, shown, .. })) if shown.is_empty()),
+        "a result for another diameter is dropped"
+    );
     app.dialog = None;
     app.run("solid.box", json!({"corner": [39, 26, 5], "length": 3, "width": 8, "height": 40, "operation": "new", "body_name": "Rib"})).unwrap();
     let (blocked, shown) = check(&mut app);

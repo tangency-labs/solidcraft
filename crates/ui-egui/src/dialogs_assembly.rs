@@ -222,6 +222,8 @@ pub enum Asm {
         shown: Vec<Mesh>,
         /// The picks the result is for.
         of: Vec<Sel>,
+        /// The diameter, length and flip the result, or the check under way, is for.
+        asked: (String, String, bool),
         check: Option<Check>,
     },
     /// Motion Trace: a picked point's path, previewed; OK keeps it as a 3D sketch spline.
@@ -477,6 +479,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
                 result: None,
                 shown: Vec::new(),
                 of: Vec::new(),
+                asked: Default::default(),
                 check: None,
             },
             vec![SelInput::new("Circular edge", EDGES, false), SelInput::new("Bodies to ignore", BODIES, true)],
@@ -1903,7 +1906,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
                 interference_rows(app, ui, r);
             }
         }
-        Asm::SocketReach { diameter, length, flip, result, shown, of, check } => {
+        Asm::SocketReach { diameter, length, flip, result, shown, of, asked, check } => {
             let picked: Vec<Sel> = inputs.iter().flat_map(|i| i.items.clone()).collect();
             if let Some(c) = check.take() {
                 match c.reply.lock().map(|mut r| r.take()).map_err(|_| ()) {
@@ -1926,12 +1929,17 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
             form_row(ui, "", |ui| {
                 crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("Flip"), flip);
             });
+            // A result for other picks, another diameter, length or side is not this socket's:
+            // dropped with its shapes, so the dialog never shows it beside inputs it wasn't for.
+            let stale = result.is_some() && (*of != picked || *asked != (diameter.clone(), length.clone(), *flip));
+            if stale {
+                (*result, *shown) = (None, Vec::new());
+            }
             form_row(ui, "", |ui| {
                 if check.is_some() {
                     ui.add(egui::Spinner::new().size(Tokens::get().font_small));
                     return;
                 }
-                let stale = result.is_some() && *of != picked;
                 if crate::ui_kit::button(
                     ui,
                     solidcraft_ui_text::tr(if stale { "dialog.compute_again" } else { "dialog.compute" }),
@@ -1940,6 +1948,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
                 .clicked()
                 {
                     (*result, *shown) = (None, Vec::new());
+                    *asked = (diameter.clone(), length.clone(), *flip);
                     *check = Some(socket_reach(app, inputs, diameter, length, *flip));
                     ui.ctx().request_repaint();
                 }
@@ -2032,8 +2041,12 @@ fn socket_reach_rows(app: &SolveApp, ui: &mut egui::Ui, r: &Value) {
         return;
     }
     let blocked = r["blocked"].as_array().cloned().unwrap_or_default();
-    if blocked.is_empty() {
+    let unchecked = r["unchecked"].as_array().is_some_and(|u| !u.is_empty());
+    // Clear only as the check says so; with bodies left unchecked it says so instead.
+    if blocked.is_empty() && !unchecked && r["clear"].as_bool() == Some(true) {
         crate::ui_kit::status_line(ui, solidcraft_ui_text::tr("dialog.socket_reach_clear"), crate::ui_kit::StatusTone::Dim);
+    } else if blocked.is_empty() && unchecked {
+        crate::ui_kit::status_line(ui, solidcraft_ui_text::tr("dialog.socket_reach_incomplete"), crate::ui_kit::StatusTone::Warning);
     }
     for b in &blocked {
         form_row(ui, b["body"].as_str().unwrap_or(""), |ui| {

@@ -65,7 +65,7 @@ pub struct SocketReach {
     pub diameter_mm: f64,
     /// The length checked, in mm.
     pub length_mm: f64,
-    /// Whether nothing blocks the socket.
+    /// Whether nothing blocks the socket and no body that may reach into it went unchecked.
     pub clear: bool,
     /// The bodies in the socket's space, the largest overlap first.
     pub blocked: Vec<Blocker>,
