@@ -186,3 +186,24 @@ compile-job limit and combine the regression with its existing test file (exit
 130, not validation results). Two initial fmt calls were refused while two jobs
 were waiting (exit 2); the fmt retries above passed. No workspace test suite,
 `cargo xtask ci`, golden blessing, commit, or push ran.
+
+## Built: the support change corner (2026-11-27)
+
+The construction above is now a blend corner event of its own,
+`BlendCornerEvent::SupportBall` (`blend/blend_corner/support_ball.rs`). A 4x3
+vertex is classified as one where its one edge not blended is a straight seam
+along which a plane W runs tangent into a cylinder Y, the face G beside W is a
+plane square to Y's axis, the face H past Y is a plane, all three rounds are
+equal constant convex rounds, and the ball on G and H reaches Y on Y's side of
+the seam. The corner keeps the solvers as they are and owns two exact faces:
+
+- the torus about Y's axis from the bottom/wall round's section through the
+  seam's line to the ball C touching G, H and Y (a `Torus` keeping the Swept
+  turn's definition: the section revolved about the axis, on G);
+- the sphere's patch on C's ball between its contacts (the Ball's patch and
+  definition).
+
+Its topology: `Pc` (the two rounds' rails crossing on H), `Pb` and `Py` (their
+sections' other ends on G and Y, placed in closed form), `Vs` (the wall rail's
+crossing with the seam) and its mate `Vb`; three end sections, the torus's two
+contacts on G and Y as precomputed edges, and the arc the two faces share.

@@ -1317,7 +1317,6 @@ fn a_block_s_rounds_between_planes_take_their_closed_forms() {
 }
 
 #[test]
-#[ignore = "#19089: missing support-change corner topology"]
 fn rounds_meet_a_chord_round_at_a_chamfered_notch() {
     all_fixes();
     let b = built(|k| {
