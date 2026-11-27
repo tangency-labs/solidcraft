@@ -240,6 +240,7 @@ impl Net {
             if !d.is_finite() || matches!(base.kind(), SurfaceKind::OffsetSurface(_)) {
                 return Ok(None);
             }
+            // (the net only bounds the reach; the offset surface is built by `create_offset_surface`)
             let Some(net) = Self::of_bare(k, base, tolerance, true)? else {
                 return Ok(None);
             };
