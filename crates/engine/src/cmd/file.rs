@@ -5908,7 +5908,7 @@ mod tests {
 
         let mut reopened = Session::default();
         reopened.execute("doc.open", &json!({"path":path})).unwrap();
-        assert_eq!(reopened.model.last_recomputed, 1, "reopening re-evaluates only Round, reusing Block and Extra");
+        assert_eq!(reopened.model.recomputed, 1, "reopening re-evaluates only Round, reusing Block and Extra");
         let block_id = s.doc.find_feature("Block").unwrap().id;
         let round_id = s.doc.find_feature("Round").unwrap().id;
         let extra_id = s.doc.find_feature("Extra").unwrap().id;
