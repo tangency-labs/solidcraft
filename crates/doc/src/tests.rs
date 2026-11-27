@@ -970,6 +970,130 @@ fn a_pattern_reads_the_bodies_its_source_cuts() {
     assert_eq!(summary(&m.state()), from_scratch(&doc));
 }
 
+/// The cap the pattern tests share: a disc with a conical hollow in its top, a bore through it
+/// clear of the hollow, a post in the hollow up to the hollow's wall joined to the disc, and a
+/// circular pattern that holds the bore and the post. The post's own join takes the face its To
+/// Object points at, so a copy of it has to be built where the post was built (#14305).
+fn cap_with_a_pattern(doc: &mut Document, component: u64) {
+    // A disc with a conical hollow in its top.
+    add_in(
+        doc,
+        component,
+        "Body1",
+        serde_json::json!({"type": "cylinder", "base": ["0", "0", "0"], "axis": [0.0, 0.0, 1.0], "radius": "20", "height": "20", "operation": "new_body"}),
+    );
+    add_in(
+        doc,
+        component,
+        "Hollow",
+        serde_json::json!({"type": "cone", "base": ["0", "0", "20"], "axis": [0.0, 0.0, -1.0], "radius": "5", "top_radius": "0", "height": "10", "operation": "cut"}),
+    );
+    // A bore through the disc, clear of the hollow.
+    let mut sk = Sketch::new();
+    sk.add_circle(Vec2::new(15.0, 0.0), 1.0, None, None).unwrap();
+    let bore_sketch =
+        doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some("Bore sketch")).unwrap();
+    add_in(
+        doc,
+        component,
+        "Bore",
+        serde_json::json!({"type": "extrude", "sketch": bore_sketch, "profiles": {"type": "all"}, "extent": {"distance": "30", "through_all": true}, "operation": "cut"}),
+    );
+    // A post in the hollow, up to the hollow's conical wall, joined to the disc.
+    let mut sk = Sketch::new();
+    sk.add_circle(Vec2::new(3.0, 0.0), 0.6, None, None).unwrap();
+    let post_sketch = doc
+        .add_feature(
+            FeatureKind::Sketch {
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "18".into() },
+                sketch: sk,
+            },
+            Some("Post sketch"),
+        )
+        .unwrap();
+    add_in(
+        doc,
+        component,
+        "Post",
+        serde_json::json!({"type": "extrude", "sketch": post_sketch, "profiles": {"type": "all"}, "extent": {"convention": "total_distance", "direction": "negative", "distance": "4", "to": [3.0, 0.0, 14.0]}, "operation": "join", "targets": ["Body1"]}),
+    );
+    for f in doc.features.iter_mut().filter(|f| f.name == "Body1") {
+        f.body_names = vec!["Body1".into()];
+    }
+    let bore = doc.find_feature("Bore").map_or(0, |f| f.id);
+    let post = doc.find_feature("Post").map_or(0, |f| f.id);
+    add_in(
+        doc,
+        component,
+        "Pattern",
+        serde_json::json!({"type": "pattern", "features": [bore, post], "pattern": {"type": "circular", "origin": [0.0, 0.0, 0.0], "axis": [0.0, 0.0, 1.0], "count": "4", "angle": "360 deg"}}),
+    );
+}
+
+/// A pattern that holds several features builds with all of them (#14305): the bore it holds is
+/// cut at each of its copies, and the post it holds stands at each of its copies. The copy of a
+/// feature that points at a face with its To Object is built where the feature was built, so the
+/// face that the feature's own join took is still there and the copy is that feature's own tool,
+/// moved.
+#[test]
+fn a_pattern_that_holds_several_features_builds_with_all_of_them() {
+    let mut doc = Document::new("cap with a pattern of several features");
+    cap_with_a_pattern(&mut doc, 0);
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    assert_eq!(summary(&m.state()), from_scratch(&doc));
+    // One body: the disc with the hollow in it, the four bores the pattern cut and the four
+    // posts it added.
+    let st = m.state();
+    assert_eq!(st.bodies.len(), 1);
+    let pi = std::f64::consts::PI;
+    let disc = pi * 400.0 * 20.0;
+    let hollow = pi * 25.0 * 10.0 / 3.0;
+    let bores = 4.0 * pi * 20.0;
+    let v = measure(&st.bodies[0].body).unwrap().volume;
+    assert!(v < disc - hollow - bores + 100.0, "the bores are cut and the posts are added: {v} mm³");
+    assert!(v > disc - hollow - bores, "the bores are cut and the posts are added: {v} mm³");
+}
+
+/// The same pattern in a document with two components: a cold rebuild prefetches each component's
+/// chain in parallel, and a pattern's copies are built against the model as it was before the
+/// feature they copy ran, there as in the sequential loop (#14305).
+///
+/// The prefetch runs here (the document has two components and the evaluation is cold), and it
+/// stops before the pattern: a pattern whose source points at a face with its To Object reads
+/// bodies it cannot name, so it is no relative change and the parallel chain does not take it
+/// (`Feature::reads` in `crates/doc/src/eval.rs`). The sequential loop evaluates the pattern,
+/// against the states its copies are built on, and gives the model the user sees.
+#[test]
+fn a_pattern_in_a_component_of_many_builds_with_all_of_its_features() {
+    let mut doc = Document::new("two components with a pattern of several features");
+    let cap = doc.add_component(Some("Cap"), 0).unwrap();
+    let other = doc.add_component(Some("Other"), 0).unwrap();
+    cap_with_a_pattern(&mut doc, cap);
+    // A second component, so the document has more than one and the prefetch runs.
+    add_in(
+        &mut doc,
+        other,
+        "Block",
+        serde_json::json!({"type": "box", "corner": ["100", "0", "0"], "length": "10", "width": "10", "height": "10", "operation": "new_body"}),
+    );
+    let mut m = Model::new();
+    m.evaluate(&doc);
+    no_errors(&m);
+    // The same model as an evaluation without the prefetch gives.
+    assert_eq!(summary(&m.state()), from_scratch(&doc));
+    let st = m.state();
+    assert_eq!(st.bodies.len(), 2);
+    let pi = std::f64::consts::PI;
+    let disc = pi * 400.0 * 20.0;
+    let hollow = pi * 25.0 * 10.0 / 3.0;
+    let bores = 4.0 * pi * 20.0;
+    let v = measure(&st.body("Body1").unwrap().body).unwrap().volume;
+    assert!(v < disc - hollow - bores + 100.0, "the bores are cut and the posts are added: {v} mm³");
+    assert!(v > disc - hollow - bores, "the bores are cut and the posts are added: {v} mm³");
+}
+
 /// A cut of several bodies cuts again only those that changed: the rod, which `w` does not
 /// move, keeps the very body its earlier cut gave, while the cap `w` sizes is cut again.
 #[test]
