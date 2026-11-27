@@ -318,10 +318,12 @@ cache with `cache: true` on warm saves; saving never rebuilds cold geometry just
 create one. Ordinary saves and browser downloads default to `cache: false`. An additional display-mesh cache remains opt-in
 with `preview: true`. Unsupported or mismatched caches are ignored. Browser opening
 still rebuilds synchronously.
-Warm saves with explicit `cache: true` can also include a small PNG thumbnail. It travels with the file, so
-Home can show the recent design without reconstructing it when no local picture
-is available. Missing or incompatible pictures use the usual thumbnail generation.
-The default `cache: false` omits the portable thumbnail too.
+A save also includes a picture of the design, from the window, the command line or a script. It
+travels with the file, so Home and the parts library can show the design without rebuilding it.
+It shows the model alone from the isometric view. SolidCraft draws a grid under it in your theme's
+3D view colours, and the model lifts off the grid while the pointer is on its card. If your system
+turns animations off, it stays still. A missing picture is drawn again, and saving with
+`cache: false` omits it.
 The repository's `docs/design-container.md` describes limits and encoding details.
 
 Designs are saved in the newest format this version of SolidCraft knows (`"format": "solidcraft/N"`

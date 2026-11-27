@@ -839,6 +839,27 @@ mod tests {
         assert!(imp::blend(&b, "fillet", Kind::Round(FilletTurn::Mitre), &[], &[]).is_err());
     }
 
+    /// A convex and a concave round that meet at a vertex of four edges: the slab [0, 10] x
+    /// [-10, 10] x [-10, 0] with the riser [-5, 10] x [0, 10] x [0, 10] on it, rounded along
+    /// the slab's convex top edge on its wall x = 0 and the concave edge under the riser's front
+    /// y = 0. Each round alone builds; together they are refused with the kernel's own reason,
+    /// not a refusal that says only that SMLib cannot build them.
+    #[test]
+    fn a_convex_and_a_concave_round_at_a_vertex_of_four_edges_are_refused_saying_why() {
+        let slab = box_solid(Vec3::new(0.0, -10.0, -10.0), Vec3::new(10.0, 10.0, 0.0)).unwrap();
+        let riser = box_solid(Vec3::new(-5.0, 0.0, 0.0), Vec3::new(10.0, 10.0, 10.0)).unwrap();
+        let b = crate::boolean(&slab, &riser, crate::BoolOp::Union).unwrap().unwrap();
+        let picks = [Vec3::new(0.0, -5.0, 0.0), Vec3::new(5.0, 0.0, 0.0)];
+        for p in picks {
+            let alone = fillet(&b, &[p], 1.0, FilletTurn::Mitre).unwrap();
+            assert!(volume(&alone) != volume(&b), "{p:?}");
+        }
+        let e = fillet(&b, &picks, 1.0, FilletTurn::Mitre).unwrap_err();
+        let KernelError::Invalid(text) = &e else { panic!("{e:?}") };
+        assert!(text.contains("not supported yet: a convex and a concave round meeting at a vertex of four edges"), "{text}");
+        assert!(text.contains("at any size (#10876)"), "{text}");
+    }
+
     /// A smooth edge (a round's seam with the face it runs into) has nothing to round: refused
     /// before SMLib, saying so. An edge that runs on tangentially into one left out is SMLib's to
     /// end: the end face's top edge into the round's end arc builds, its round run on through the
