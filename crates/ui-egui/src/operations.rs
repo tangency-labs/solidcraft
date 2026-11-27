@@ -102,6 +102,10 @@ enum Cancel {
     DeleteCheck,
     /// An import's SMLib check of its parts, or the heal of the parts it failed.
     ImportCheck(u64),
+    /// The SMLib checks of the last features' bodies.
+    FeatureChecks,
+    /// A saved design's signature check.
+    Verify,
     /// Opening a feature's editor.
     FeatureEdit,
     /// An agent's command.
@@ -205,6 +209,15 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
         let Some(progress) = checks.progress() else { continue };
         let Some(run) = checks.run_id() else { continue };
         rows.push(import_check_row(id, run, progress));
+    }
+    if let Some(check) = app.session.model.running_feature_checks() {
+        rows.push(feature_check_row(check));
+    }
+    if let Some(verifying) = &app.verifying {
+        rows.push(Row {
+            cancel: Some(Cancel::Verify),
+            ..Row::new(format!("verify:{}", verifying.serial), solidcraft_ui_text::tr("operations.verify_signature").to_string())
+        });
     }
     if let Some(saving) = &app.saving {
         let command = saving.command();
@@ -325,6 +338,18 @@ fn import_check_row(id: u64, run: u64, progress: solidcraft_engine::kernel::Impo
     }
 }
 
+/// The operations panel's row for the SMLib checks of the last features' bodies: one row for the
+/// batch, how many feature checks ended of how many started.
+fn feature_check_row(progress: solidcraft_engine::doc::FeatureChecksProgress) -> Row {
+    Row {
+        // One check: the bar's stripe says it is running.
+        steps: (progress.total > 1).then_some((progress.done, progress.total)),
+        cancelling: progress.cancelling,
+        cancel: Some(Cancel::FeatureChecks),
+        ..Row::new(format!("feature-check:{}", progress.serial), solidcraft_ui_text::tr("operations.feature_check").to_string())
+    }
+}
+
 /// Long work's steps (a file read or written), and whether they are bytes ([`Row::percent`]).
 fn work_steps(progress: &solidcraft_engine::doc::progress::Progress) -> Option<((usize, usize), bool)> {
     progress.work().map(|(stage, done, total)| ((done, total), bytes_stage(stage)))
@@ -391,6 +416,18 @@ pub fn cancel(app: &mut SolveApp, key: &str) -> Result<(), String> {
         // It stops at its next check: the import stays as read, nothing it found is kept.
         Cancel::ImportCheck(id) => {
             if !app.session.model.cancel_import_check(id) {
+                return Err(format!("no operation `{}` is under way", row.key));
+            }
+        }
+        Cancel::FeatureChecks => {
+            if !app.session.model.cancel_feature_checks() {
+                return Err(format!("no operation `{}` is under way", row.key));
+            }
+        }
+        // Dropping the check's answer is the cancel: the worker's read cannot be cut short, and
+        // nothing it finds is applied.
+        Cancel::Verify => {
+            if app.verifying.take().is_none() {
                 return Err(format!("no operation `{}` is under way", row.key));
             }
         }
@@ -890,6 +927,9 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
         h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 20})).unwrap();
+        // The boxes' own SMLib checks are not the rows this test is about.
+        h.app.session.settle_feature_checks(true);
+        assert!(!h.app.session.model.checking_features());
         let features = h.app.session.doc.features.len();
         h.app.apply_off_thread = Some(std::time::Duration::ZERO);
         h.app.run_heavy("edit.undo", json!({})).unwrap();
@@ -996,6 +1036,20 @@ mod tests {
         drop(release);
     }
 
+    /// The feature checks' batch shows as one row: its count, the stripe while one check runs,
+    /// and X cancels the batch.
+    #[test]
+    fn a_feature_check_is_an_operation_with_progress_and_cancel() {
+        use solidcraft_engine::doc::FeatureChecksProgress;
+        let row = feature_check_row(FeatureChecksProgress { serial: 9, done: 2, total: 5, cancelling: false });
+        assert_eq!((row.key.as_str(), row.label.as_str()), ("feature-check:9", solidcraft_ui_text::tr("operations.feature_check")));
+        assert_eq!(row.steps, Some((2, 5)));
+        assert!(row.cancellable() && !row.cancelling);
+        let one = feature_check_row(FeatureChecksProgress { serial: 9, done: 0, total: 1, cancelling: true });
+        assert_eq!(one.steps, None, "one check: the stripe says it runs");
+        assert!(one.cancelling && !one.cancellable());
+    }
+
     /// An import's SMLib check of its parts, then the heal of the parts it fails, run beside the
     /// window after a large import has shown: each is a row of the operations panel with its
     /// progress and Cancel, and Cancel stops it without keeping what it found.
@@ -1025,6 +1079,27 @@ mod tests {
         end(Vec::new());
         assert!(current(&app).iter().all(|r| !r.key.starts_with("import-check:")), "gone");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A running batch of feature checks is an operation the window cancels; settling marks the
+    /// features stale and takes the row away.
+    #[test]
+    fn a_running_feature_check_is_cancelled_from_the_panel() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        let end = h.app.session.model.running_feature_checks_for_tests();
+        let progress = h.app.session.model.running_feature_checks().expect("the check is an operation");
+        let key = format!("feature-check:{}", progress.serial);
+        let row = current(&h.app).into_iter().find(|r| r.key == key).expect("the check's row");
+        assert_eq!(row.label, solidcraft_ui_text::tr("operations.feature_check"));
+        assert!(row.cancellable() && row.fraction().is_none());
+        control(&mut h.app, &json!({"cancel": key.clone()})).unwrap();
+        assert!(h.app.session.model.running_feature_checks().expect("still running").cancelling);
+        h.app.session.settle_feature_checks(true);
+        assert!(!h.app.session.model.checking_features());
+        assert!(h.app.session.model.is_stale(), "the feature is checked again");
+        assert!(current(&h.app).iter().all(|r| r.key != key), "the row goes");
+        drop(end);
     }
 
     /// The two stages are two rows: the check with its parts, the heal with its own (one item at a

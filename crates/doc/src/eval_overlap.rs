@@ -15,9 +15,16 @@
 //! every result after it stale and is carried into the next evaluation ([`Carried`]), which fails
 //! that feature, on the same inputs, with the check's error and warnings, as the evaluation that
 //! waited would have.
+//!
+//! A window shows the checks as one operation with how far they are ([`Pending::progress`]) and a
+//! Cancel ([`Pending::cancel`]). A cancelled batch keeps nothing it found and holds no cache entry
+//! for the results that waited on it: the next evaluation checks those features again.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU64, AtomicUsize, Ordering},
+};
 
 use solidcraft_kernel as kernel;
 
@@ -25,6 +32,7 @@ use super::{CacheEntry, EvalCache, FeatureResult, KeptSlot, ModelBody, ModelStat
 
 /// The evaluation's loop state just before a feature was evaluated: what a refusal of its check
 /// puts back before evaluating it again.
+#[derive(Default)]
 pub(super) struct Saved {
     pub state: Arc<ModelState>,
     pub reserved: std::collections::BTreeSet<String>,
@@ -74,6 +82,70 @@ struct Running {
     done: std::thread::JoinHandle<kernel::Result<()>>,
 }
 
+/// What settling a batch of feature checks found.
+pub(super) enum Settlement {
+    /// The first check that refused its feature's bodies.
+    Refused(Box<Refused>),
+    /// The window cancelled the checks: what they found is not kept, and the features are
+    /// checked again by the next evaluation.
+    Cancelled { from: usize },
+}
+
+/// What a batch of checks ended with, as the model takes it: nothing wrong, a refusal to carry
+/// into the next evaluation, or a cancel that makes those features be checked again.
+#[derive(Clone)]
+pub(super) enum Outcome {
+    Passed,
+    Refused(Box<Carried>),
+    Cancelled { from: usize },
+}
+
+/// A batch of checks' stop and progress, shared by the checks and the window's operations row.
+struct CheckCancel {
+    serial: u64,
+    stop: kernel::Stop,
+    done: AtomicUsize,
+    total: AtomicUsize,
+}
+
+/// A new check batch's number, which names its row in the operations panel.
+static NEXT_CHECK_RUN: AtomicU64 = AtomicU64::new(1);
+
+impl CheckCancel {
+    fn new() -> CheckCancel {
+        CheckCancel {
+            serial: NEXT_CHECK_RUN.fetch_add(1, Ordering::Relaxed),
+            stop: kernel::Stop::new(),
+            done: AtomicUsize::new(0),
+            total: AtomicUsize::new(0),
+        }
+    }
+
+    /// One feature's check started.
+    fn started(&self) {
+        self.total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// One feature's check ended.
+    fn finished(&self) {
+        self.done.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn cancel(&self) {
+        self.stop.stop();
+    }
+
+    fn cancelled(&self) -> bool {
+        self.stop.is_stopped()
+    }
+
+    /// (run number, checks done, checks started, cancelling).
+    fn progress(&self) -> (u64, usize, usize, bool) {
+        let total = self.total.load(Ordering::Relaxed);
+        (self.serial, self.done.load(Ordering::Relaxed).min(total), total, self.cancelled())
+    }
+}
+
 pub(super) struct Checks {
     on: bool,
     /// Most checks running at once: the cores beside the evaluation's own.
@@ -83,6 +155,8 @@ pub(super) struct Checks {
     held: Vec<(usize, CacheEntry)>,
     /// Features whose check refused their bodies, to fail again as it did.
     refused: HashMap<usize, Failure>,
+    /// The batch's stop and progress, shared with the window once the evaluation returns.
+    cancel: Arc<CheckCancel>,
 }
 
 impl Checks {
@@ -94,32 +168,37 @@ impl Checks {
             running: VecDeque::new(),
             held: Vec::new(),
             refused: HashMap::new(),
+            cancel: Arc::new(CheckCancel::new()),
         }
     }
 
     /// The check of the bodies `after` adds to `before`, detached from them so it can run beside
     /// the features after it ([`kernel::detach_kept`]); `None` when it runs in line.
     pub fn detach(&self, before: &ModelState, after: &ModelState) -> Option<Vec<(String, kernel::KeptCheck)>> {
+        // The detached checks keep this token, so the window's Cancel stops them too (and the
+        // evaluation's own token still does).
         self.on.then(|| {
-            let prior = super::ShapeIndex::new(&before.bodies);
-            after
-                .bodies
-                .iter()
-                .filter(|b| !prior.contains(&b.body))
-                .filter(|b| {
-                    let reused = super::checked_thread_output(&b.body);
-                    #[cfg(test)]
-                    if reused {
-                        super::cost_tests::count(|c| c.reused_checks += 1);
-                    }
-                    !reused
-                })
-                .map(|b| {
-                    #[cfg(test)]
-                    super::cost_tests::count(|c| c.detached_checks += 1);
-                    (b.name.clone(), kernel::detach_kept(&b.body))
-                })
-                .collect()
+            self.cancel.stop.within(|| {
+                let prior = super::ShapeIndex::new(&before.bodies);
+                after
+                    .bodies
+                    .iter()
+                    .filter(|b| !prior.contains(&b.body))
+                    .filter(|b| {
+                        let reused = super::checked_thread_output(&b.body);
+                        #[cfg(test)]
+                        if reused {
+                            super::cost_tests::count(|c| c.reused_checks += 1);
+                        }
+                        !reused
+                    })
+                    .map(|b| {
+                        #[cfg(test)]
+                        super::cost_tests::count(|c| c.detached_checks += 1);
+                        (b.name.clone(), kernel::detach_kept(&b.body))
+                    })
+                    .collect()
+            })
         })
     }
 
@@ -145,22 +224,26 @@ impl Checks {
         failure: Failure,
         check: impl FnOnce() -> kernel::Result<()> + Send + 'static,
     ) -> kernel::Result<()> {
+        self.cancel.started();
         // Taken by whichever runs it: the thread, or this one when the thread cannot start.
         let shared = Arc::new(Mutex::new(Some(check)));
         let taken = shared.clone();
-        let started = kernel::kernel_thread("feature-check").spawn(move || match taken.lock().ok().and_then(|mut c| c.take()) {
-            Some(check) => check(),
-            None => Ok(()),
+        let stop = self.cancel.stop.clone();
+        let started = kernel::kernel_thread("feature-check").spawn(move || {
+            stop.within(|| match taken.lock().ok().and_then(|mut c| c.take()) {
+                Some(check) => check(),
+                None => Ok(()),
+            })
         });
         match started {
             Ok(done) => {
                 self.running.push_back(Running { index, id, key, saved, failure, done });
                 Ok(())
             }
-            Err(_) => match shared.lock().ok().and_then(|mut c| c.take()) {
+            Err(_) => self.cancel.stop.within(|| match shared.lock().ok().and_then(|mut c| c.take()) {
                 Some(check) => check(),
                 None => Ok(()),
-            },
+            }),
         }
     }
 
@@ -176,7 +259,21 @@ impl Checks {
     /// Takes the checks that ended (all of them with `wait`, or while too many run), in order:
     /// the first that refused, with what it puts back. Cache entries are stored as the checks
     /// before them pass.
-    pub fn settle(&mut self, wait: bool, cache: &Mutex<EvalCache>, kept: &KeptSlot) -> Option<Refused> {
+    pub fn settle(&mut self, wait: bool, cache: &Mutex<EvalCache>, kept: &KeptSlot) -> Option<Settlement> {
+        // Cancelled: wait for the checks to notice (when the caller waits, or once they have all
+        // ended), drop what they held, and tell the model to check those features again.
+        if self.cancel.cancelled() {
+            if !(wait || self.ended()) {
+                return None;
+            }
+            let from = self.running.front().map_or(0, |r| r.index);
+            while let Some(r) = self.running.pop_front() {
+                let _ = r.done.join();
+                self.cancel.finished();
+            }
+            self.held.clear();
+            return Some(Settlement::Cancelled { from });
+        }
         while let Some(front) = self.running.front() {
             if !(wait || self.running.len() > self.most || front.done.is_finished()) {
                 break;
@@ -186,12 +283,25 @@ impl Checks {
                 Ok(check) => check,
                 Err(_) => Err(kernel::KernelError::Internal(format!("{}: the check's thread stopped", r.index))),
             };
+            self.cancel.finished();
+            // A cancel that arrived while the check was being joined: it wins over a refusal.
+            if self.cancel.cancelled() {
+                self.running.clear();
+                self.held.clear();
+                return Some(Settlement::Cancelled { from: r.index });
+            }
             if let Err(error) = passed {
                 // What came after it was evaluated on bodies the check refuses: none of it stands.
                 // The checks still running are left to end on their own.
                 self.running.clear();
                 self.held.retain(|(i, _)| *i < r.index);
-                return Some(Refused { index: r.index, id: r.id, key: r.key, saved: r.saved, failure: Failure { error, ..r.failure } });
+                return Some(Settlement::Refused(Box::new(Refused {
+                    index: r.index,
+                    id: r.id,
+                    key: r.key,
+                    saved: r.saved,
+                    failure: Failure { error, ..r.failure },
+                })));
             }
             let upto = self.running.front().map_or(usize::MAX, |next| next.index);
             for (i, entry) in std::mem::take(&mut self.held) {
@@ -203,6 +313,36 @@ impl Checks {
             }
         }
         None
+    }
+
+    /// A batch of one check that waits until the returned function runs, or the batch is
+    /// cancelled: for callers' tests of what happens while feature checks are under way.
+    #[doc(hidden)]
+    pub fn running_for_tests() -> (Checks, impl FnOnce() + Send) {
+        let mut checks = Checks::new(kernel::Validation::EachFeature);
+        checks.on = true;
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        let end = move || {
+            let _ = tx.send(());
+        };
+        let stop = checks.cancel.stop.clone();
+        let _ = checks.start(
+            0,
+            0,
+            0,
+            Saved::default(),
+            Failure { error: kernel::KernelError::Failed("test check".into()), warning: None, import_report: None, repair: None, ms: 0.0 },
+            move || loop {
+                if stop.is_stopped() {
+                    return Err(kernel::KernelError::Failed("the check was stopped".into()));
+                }
+                match rx.recv_timeout(std::time::Duration::from_millis(5)) {
+                    Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                }
+            },
+        );
+        (checks, end)
     }
 
     /// Feature `index`'s check refused its bodies: it ends with `failure` when evaluated again.
@@ -243,14 +383,16 @@ pub(super) struct Pending {
     state: Mutex<PendingState>,
     /// Woken when the settling ends ([`PendingState::Settling`]).
     settled: std::sync::Condvar,
+    /// The batch's stop and progress, reachable while `Checks` is being settled outside the lock.
+    cancel: Arc<CheckCancel>,
 }
 
 enum PendingState {
     Running(Checks),
     /// A caller is settling them, outside the lock (it waits for checks still running).
     Settling,
-    /// Every check ended: the first refusal, if one refused.
-    Ended(Option<Carried>),
+    /// Every check ended: what they found.
+    Ended(Outcome),
 }
 
 impl std::fmt::Debug for Pending {
@@ -261,7 +403,27 @@ impl std::fmt::Debug for Pending {
 
 impl Pending {
     pub fn new(checks: Checks) -> Arc<Pending> {
-        Arc::new(Pending { state: Mutex::new(PendingState::Running(checks)), settled: std::sync::Condvar::new() })
+        let cancel = checks.cancel.clone();
+        Arc::new(Pending { state: Mutex::new(PendingState::Running(checks)), settled: std::sync::Condvar::new(), cancel })
+    }
+
+    /// (run number, checks done, checks started, cancelling), or `None` once the batch ended
+    /// (its outcome is taken by [`Pending::outcome`]).
+    pub fn progress(&self) -> Option<(u64, usize, usize, bool)> {
+        match &*self.state.lock().unwrap_or_else(|e| e.into_inner()) {
+            PendingState::Ended(_) => None,
+            PendingState::Running(_) | PendingState::Settling => Some(self.cancel.progress()),
+        }
+    }
+
+    /// Stop the batch at its next check: what it found is not kept, and the model checks those
+    /// features again by the next evaluation.
+    pub fn cancel(&self) {
+        self.cancel.cancel();
+    }
+
+    pub fn cancelled(&self) -> bool {
+        self.cancel.cancelled()
     }
 
     /// Once every check has ended (waiting for them with `wait`): `Some` of the first refusal, if
@@ -272,7 +434,7 @@ impl Pending {
     /// checks out and settles them outside it. Meanwhile a caller that does not wait is answered
     /// at once (`None`), and one that waits waits for that settling to end, then takes its
     /// outcome.
-    pub fn outcome(&self, wait: bool, cache: &Mutex<EvalCache>, kept: &KeptSlot) -> Option<Option<Carried>> {
+    pub fn outcome(&self, wait: bool, cache: &Mutex<EvalCache>, kept: &KeptSlot) -> Option<Outcome> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         loop {
             let settling = match &*state {
@@ -298,11 +460,18 @@ impl Pending {
                 return None;
             };
             drop(state);
-            let refused = checks.settle(true, cache, kept).map(|r| Carried { id: r.id, key: r.key, failure: r.failure });
+            let outcome = match checks.settle(true, cache, kept) {
+                Some(Settlement::Refused(r)) => {
+                    let r = *r;
+                    Outcome::Refused(Box::new(Carried { id: r.id, key: r.key, failure: r.failure }))
+                }
+                Some(Settlement::Cancelled { from }) => Outcome::Cancelled { from },
+                None => Outcome::Passed,
+            };
             let mut done = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            *done = PendingState::Ended(refused.clone());
+            *done = PendingState::Ended(outcome.clone());
             self.settled.notify_all();
-            return Some(refused);
+            return Some(outcome);
         }
     }
 }
@@ -354,7 +523,7 @@ mod tests {
     }
 
     fn checks() -> Checks {
-        Checks { on: true, most: 4, running: VecDeque::new(), held: Vec::new(), refused: HashMap::new() }
+        Checks { on: true, most: 4, running: VecDeque::new(), held: Vec::new(), refused: HashMap::new(), cancel: Arc::new(CheckCancel::new()) }
     }
 
     /// Only an exact checked shape is excluded before detaching can copy its native form.
@@ -418,7 +587,10 @@ mod tests {
         c.store(1, entry(11), &cache, &kept);
         c.store(2, entry(12), &cache, &kept);
         assert!(cache.lock().unwrap().is_empty(), "held while the checks run");
-        let refused = c.settle(true, &cache, &kept).expect("the second check refuses");
+        let Settlement::Refused(refused) = c.settle(true, &cache, &kept).expect("the second check refuses") else {
+            panic!("the second check refuses")
+        };
+        let refused = *refused;
         assert_eq!(refused.index, 1);
         assert_eq!(refused.failure.error, KernelError::Failed("refused".into()));
         assert_eq!(refused.failure.warning.as_deref(), Some("kept"));
@@ -429,6 +601,51 @@ mod tests {
         c.refuse(1, refused.failure);
         assert!(c.refused(1).is_some() && c.refused(1).is_none());
         assert!(c.settle(true, &cache, &kept).is_none());
+    }
+
+    /// The batch counts the checks started and ended, for the operations panel's row.
+    #[test]
+    fn progress_counts_started_and_finished_checks() {
+        let (cache, kept) = (Mutex::new(EvalCache::default()), KeptSlot(None));
+        let mut c = checks();
+        let (serial, done, total, cancelling) = c.cancel.progress();
+        assert!(serial > 0);
+        assert_eq!((done, total, cancelling), (0, 0, false));
+        assert!(c.start(0, 100, 10, saved(), failure(), later(Ok(()))).is_ok());
+        assert!(c.start(1, 101, 11, saved(), failure(), later(Ok(()))).is_ok());
+        let (_, done, total, cancelling) = c.cancel.progress();
+        assert_eq!((done, total, cancelling), (0, 2, false), "started, not ended");
+        assert!(c.settle(true, &cache, &kept).is_none());
+        let (_, done, total, cancelling) = c.cancel.progress();
+        assert_eq!((done, total, cancelling), (2, 2, false));
+    }
+
+    /// A cancelled batch is not a refusal: it stops the checks, drops what they held for the
+    /// features after them, and says from which feature the results are to be checked again.
+    #[test]
+    fn a_cancelled_batch_is_not_a_refusal_and_drops_held_results() {
+        let (cache, kept) = (Mutex::new(EvalCache::default()), KeptSlot(None));
+        let mut c = checks();
+        let stop = c.cancel.stop.clone();
+        assert!(
+            c.start(0, 100, 10, saved(), failure(), move || {
+                while !stop.is_stopped() {
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+                Err(KernelError::Failed("the check was stopped".into()))
+            })
+            .is_ok()
+        );
+        c.store(0, entry(10), &cache, &kept);
+        assert!(c.running());
+        assert_eq!((c.cancel.progress().1, c.cancel.progress().2, c.cancel.progress().3), (0, 1, false));
+        c.cancel.cancel();
+        assert!(c.cancel.cancelled(), "the row says it is stopping");
+        let Settlement::Cancelled { from } = c.settle(true, &cache, &kept).expect("cancelled") else { panic!("cancelled") };
+        assert_eq!(from, 0);
+        assert!(cache.lock().unwrap().is_empty(), "the held result is dropped, to be checked again");
+        assert!(!c.running());
+        assert_eq!((c.cancel.progress().1, c.cancel.progress().2), (1, 1));
     }
 
     /// Checks an evaluation left running ([`Pending`]): nothing is settled while they run unless
@@ -454,7 +671,7 @@ mod tests {
         let pending = Pending::new(c);
         assert!(pending.outcome(false, &cache, &kept).is_none(), "still running: nothing settled");
         assert!(cache.lock().unwrap().is_empty());
-        let refused = pending.outcome(true, &cache, &kept).expect("ended").expect("the second check refuses");
+        let Outcome::Refused(refused) = pending.outcome(true, &cache, &kept).expect("ended") else { panic!("the second check refuses") };
         assert_eq!((refused.id, refused.key), (101, 11));
         assert_eq!(refused.failure.error, KernelError::Failed("refused".into()));
         assert_eq!(refused.failure.warning.as_deref(), Some("kept"));
@@ -463,7 +680,7 @@ mod tests {
             assert!(m.states.map.contains_key(&10) && !m.states.map.contains_key(&11) && !m.states.map.contains_key(&12));
         }
         // A copy sharing them takes the same outcome.
-        let again = pending.outcome(false, &cache, &kept).expect("ended").expect("refused");
+        let Outcome::Refused(again) = pending.outcome(false, &cache, &kept).expect("ended") else { panic!("refused") };
         assert_eq!((again.id, again.key), (101, 11));
     }
 

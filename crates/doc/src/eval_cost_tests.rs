@@ -4692,6 +4692,28 @@ fn a_cancelled_import_check_keeps_nothing_it_found() {
     assert!(!r.stale, "the import is the one that was read");
 }
 
+/// The operations panel's Cancel of the SMLib checks of the last features' bodies: the batch
+/// stops, its held results are dropped, and the features are marked stale to be checked again,
+/// so no model is kept until then.
+#[test]
+fn a_cancelled_feature_check_marks_the_features_stale_and_keeps_no_model() {
+    let mut doc = Document::new("cancelled feature check");
+    block(&mut doc, "A", Vec3::ZERO, [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(!model.checking_features(), "the evaluation waited for its check");
+    let end = model.running_feature_checks_for_tests();
+    let progress = model.running_feature_checks().expect("the check is an operation");
+    assert_eq!((progress.done, progress.total, progress.cancelling), (0, 1, false));
+    assert!(model.cancel_feature_checks());
+    assert!(model.running_feature_checks().expect("still running").cancelling, "the row says it is stopping");
+    model.settle_feature_checks(true);
+    assert!(!model.checking_features());
+    assert!(model.is_stale(), "the feature is checked again");
+    assert!(model.saved_if_checked(&doc).is_none(), "no model until it is checked again");
+    drop(end);
+}
+
 /// #20633: a window is woken once when an import's check of its parts ends, and not at all while
 /// it runs, so an untouched window draws nothing for the minutes a large import's check takes.
 #[test]
