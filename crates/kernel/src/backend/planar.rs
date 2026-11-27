@@ -1,7 +1,7 @@
 //! solidcore's planar helpers ([`Planar`]): each the solidcore-ops call this crate's callers made
 //! before the interface existed, its refusal's words kept whole.
 
-use solidcore_ops::{board_drill, constraint, joint_turn, paper_gaps, section_corners, sketch_arc, stroke_runs};
+use solidcore_ops::{board_drill, constraint, footprint, joint_turn, paper_gaps, section_corners, sketch_arc, stroke_runs};
 use solidcore_record::{Loop2, Plane, Vec2, Vec3};
 use solidcraft_kernel_api::planar::{Planar, PlanarRefused, StrokeRun};
 
@@ -97,6 +97,10 @@ impl Planar for Solidcore {
 
     fn side_on_hole_wall(&self, center: [f64; 2], size: [f64; 2], angle: f64, points: &[[f64; 2]], chord: f64) -> bool {
         board_drill::side_on_hole_wall(center, size, angle, points, chord)
+    }
+
+    fn path_runs_inside(&self, path: &[[f64; 2]], regions: &[Vec<Vec<[f64; 2]>>], margin: f64) -> bool {
+        footprint::path_runs_inside(path, regions, margin)
     }
 
     fn circle_points(&self, c: Vec3, x: Vec3, y: Vec3, radius: f64, from: f64) -> [Vec3; 3] {

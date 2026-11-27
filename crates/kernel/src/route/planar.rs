@@ -1,7 +1,8 @@
 //! The router's planar helpers ([`solidcraft_kernel_api::Planar`]), as `solidcraft_kernel::planar`:
 //! the arcs a sketch tool draws from its picks, the side of a sketch curve a region lies on, the turn
 //! between two path directions, a frame section's corners, paper strokes and the runs a round-joined
-//! line is stroked in, where a board's drilled hole reaches, and a sketch plane's normal and points
+//! line is stroked in, where a board's drilled hole reaches, whether a path runs through a
+//! profile's inside, and a sketch plane's normal and points
 //! as a sketch solver holds them.
 
 use solidcore_record::{Loop2, Plane, Vec2, Vec3};
@@ -219,6 +220,18 @@ pub fn side_on_hole_wall(center: [f64; 2], size: [f64; 2], angle: f64, points: &
     }
 }
 
+/// Whether the polyline `path` runs through the inside of one of `regions` (each its outer
+/// loop and then its holes, each loop a list of corners that closes back to its first), not
+/// only along their outline or through one of its corners: a piece of it lies in a region
+/// farther than `margin` from every loop, or it crosses a profile thinner than that from one
+/// side to the other.
+#[must_use]
+pub fn path_runs_inside(path: &[[f64; 2]], regions: &[Vec<Vec<[f64; 2]>>], margin: f64) -> bool {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.path_runs_inside(path, regions, margin),
+    }
+}
+
 /// The three points a sketch solver holds a circle by, in the orthonormal frame `x`, `y` about
 /// `c`, at `radius` and starting `from` radians.
 #[must_use]
@@ -264,7 +277,7 @@ pub fn plane_point(plane: &Plane, point: Vec2) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solidcore_ops::{board_drill, constraint, joint_turn as turn, paper_gaps, sketch_arc, stroke_runs as stroke};
+    use solidcore_ops::{board_drill, constraint, footprint, joint_turn as turn, paper_gaps, sketch_arc, stroke_runs as stroke};
 
     #[test]
     fn routed_planar_helpers_are_solidcores() {
@@ -287,6 +300,10 @@ mod tests {
             assert_eq!(hole_reaches_loops(c, [2.0, 1.0], 0.0, &square), board_drill::hole_reaches_loops(c, [2.0, 1.0], 0.0, &square));
             let side = [[c[0] + 1.0, c[1]], [c[0], c[1] + 0.5]];
             assert_eq!(side_on_hole_wall(c, [2.0, 1.0], 0.0, &side, 0.02), board_drill::side_on_hole_wall(c, [2.0, 1.0], 0.0, &side, 0.02));
+        }
+        let region = std::slice::from_ref(&square);
+        for path in [vec![[5.0, 5.0]], vec![[-5.0, 5.0], [15.0, 5.0]], vec![[0.0, -5.0], [0.0, 15.0]]] {
+            assert_eq!(path_runs_inside(&path, region, 0.1), footprint::path_runs_inside(&path, region, 0.1));
         }
         let xy = Plane::XY;
         let tilted = Plane { origin: Vec3::new(1.0, 2.0, 3.0), x: Vec3::new(0.0, 1.0, 0.0), y: Vec3::new(0.0, 0.0, 1.0) };
