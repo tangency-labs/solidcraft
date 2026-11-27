@@ -1,6 +1,12 @@
 //! `cargo xtask python [--cli PATH] [--out DIR]`: the Python client's generated bindings
 //! (`python/src/solidcraft/_generated/`, not committed; docs/python-api.md).
 //!
+//! `cargo xtask python wheel --platform TAG --version VERSION [--cli PATH] [--out DIR]`: a wheel of
+//! the package as it stands (generate the bindings first), with `solidcraft-cli` from `--cli` under
+//! `solidcraft/bin/` for a platform wheel, or none for `--platform any`. The release workflow runs
+//! it on each platform's own released binary (`packaging/python/wheels.sh`), so a wheel carries
+//! the bytes `SHA256SUMS.txt` lists, signed where the release is.
+//!
 //! Two listings, both from the build, are the only input, so the bindings cannot drift from what
 //! the program does:
 //!
@@ -43,6 +49,9 @@ const ALIASES: &[(&str, &str)] = &[
 ];
 
 pub fn run(root: &Path, args: &[&str]) -> Result<(), String> {
+    if args.first() == Some(&"wheel") {
+        return wheel(root, &args[1..]);
+    }
     let mut cli: Option<PathBuf> = None;
     let mut out = root.join("python/src/solidcraft/_generated");
     let mut i = 0;
@@ -419,6 +428,166 @@ pub fn generate(commands: &[Value], tools: &[Value], version: &str) -> Result<Ve
     Ok(vec![("commands.py".into(), commands_py), ("tools.py".into(), tools_py), ("__init__.py".into(), init_py)])
 }
 
+// ---------------------------------------------------------------- wheels
+
+/// A Cargo version as a PEP 440 version: `0.51.0` stays, `0.51.0-rc.1` is `0.51.0rc1` (`alpha`,
+/// `beta` likewise `a`, `b`), and a nightly `0.51.0-nightly.20261127.123.1` is
+/// `0.51.0.dev202611271231`, a development release that sorts by date and run.
+pub fn pep440(version: &str) -> Result<String, String> {
+    let (base, pre) = version.split_once('-').unwrap_or((version, ""));
+    if base.split('.').count() != 3 || !base.split('.').all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit())) {
+        return Err(format!("python wheel: `{version}` is not a version like 0.51.0"));
+    }
+    if pre.is_empty() {
+        return Ok(base.to_string());
+    }
+    let parts: Vec<&str> = pre.split('.').collect();
+    let digits = |p: &[&str]| -> Option<String> {
+        (!p.is_empty() && p.iter().all(|x| !x.is_empty() && x.bytes().all(|b| b.is_ascii_digit()))).then(|| p.concat())
+    };
+    let (kind, n) = (parts[0], digits(&parts[1..]));
+    match (kind, n) {
+        ("rc", Some(n)) if parts.len() == 2 => Ok(format!("{base}rc{n}")),
+        ("alpha", Some(n)) if parts.len() == 2 => Ok(format!("{base}a{n}")),
+        ("beta", Some(n)) if parts.len() == 2 => Ok(format!("{base}b{n}")),
+        ("nightly", Some(n)) => Ok(format!("{base}.dev{n}")),
+        _ => Err(format!("python wheel: no PEP 440 form for the version suffix `-{pre}`")),
+    }
+}
+
+/// Standard base64 without padding, URL-safe, as a wheel's RECORD writes hashes.
+fn b64url(data: &[u8]) -> String {
+    const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
+    for chunk in data.chunks(3) {
+        let b = [chunk.first().copied().unwrap_or(0), chunk.get(1).copied().unwrap_or(0), chunk.get(2).copied().unwrap_or(0)];
+        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for (i, shift) in [18u32, 12, 6, 0].into_iter().enumerate() {
+            if i <= chunk.len() {
+                out.push(char::from(T[((n >> shift) & 63) as usize]));
+            }
+        }
+    }
+    out
+}
+
+/// The files of a wheel, as (path in the wheel, bytes, executable).
+type Entries = Vec<(String, Vec<u8>, bool)>;
+
+/// The wheel's files: the package, the binary, and the `.dist-info` metadata (RECORD last).
+pub fn wheel_entries(root: &Path, version: &str, platform: &str, cli: Option<(&str, Vec<u8>)>) -> Result<Entries, String> {
+    let pkg = root.join("python/src/solidcraft");
+    if !pkg.join("_generated/commands.py").exists() {
+        return Err("python wheel: the bindings are missing: run `cargo xtask python` first".into());
+    }
+    let mut files: Entries = Vec::new();
+    let mut stack = vec![pkg.clone()];
+    while let Some(dir) = stack.pop() {
+        let mut entries: Vec<PathBuf> =
+            std::fs::read_dir(&dir).map_err(|e| format!("python wheel: {}: {e}", dir.display()))?.filter_map(|e| e.ok().map(|e| e.path())).collect();
+        entries.sort();
+        for path in entries {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            if path.is_dir() {
+                if name != "__pycache__" && name != "bin" {
+                    stack.push(path);
+                }
+            } else if name.ends_with(".py") {
+                let rel = path.strip_prefix(root.join("python/src")).map_err(|e| e.to_string())?.to_string_lossy().replace('\\', "/");
+                files.push((rel, std::fs::read(&path).map_err(|e| format!("python wheel: {}: {e}", path.display()))?, false));
+            }
+        }
+    }
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    let binary = cli.is_some();
+    if let Some((name, bytes)) = cli {
+        files.push((format!("solidcraft/bin/{name}"), bytes, true));
+    }
+    let info = format!("solidcraft-{version}.dist-info");
+    let mut licences = vec!["LICENSE-MIT", "LICENSE-APACHE", "NOTICE"];
+    if binary {
+        licences.push("THIRD-PARTY-LICENSES.txt"); // the binary carries third-party code
+    }
+    let readme = std::fs::read_to_string(root.join("python/README.md")).map_err(|e| format!("python wheel: python/README.md: {e}"))?;
+    let mut metadata = format!(
+        "Metadata-Version: 2.4\nName: solidcraft\nVersion: {version}\nSummary: Drive SolidCraft, the parametric CAD app, from Python: every command and MCP tool, typed.\n\
+         License-Expression: MIT OR Apache-2.0\nRequires-Python: >=3.10\nProject-URL: Source, https://github.com/tangency-labs/solidcraft\n"
+    );
+    for l in &licences {
+        metadata += &format!("License-File: {l}\n");
+        let bytes = std::fs::read(root.join(l)).map_err(|e| format!("python wheel: {l}: {e}"))?;
+        files.push((format!("{info}/licenses/{l}"), bytes, false));
+    }
+    metadata += &format!("Description-Content-Type: text/markdown\n\n{readme}");
+    files.push((format!("{info}/METADATA"), metadata.into_bytes(), false));
+    let wheel_meta = format!(
+        "Wheel-Version: 1.0\nGenerator: cargo xtask python wheel\nRoot-Is-Purelib: {}\nTag: py3-none-{platform}\n",
+        if binary { "false" } else { "true" }
+    );
+    files.push((format!("{info}/WHEEL"), wheel_meta.into_bytes(), false));
+    files.push((format!("{info}/entry_points.txt"), b"[console_scripts]\nsolidcraft-session = solidcraft.__main__:main\n".to_vec(), false));
+    let mut record = String::new();
+    for (path, bytes, _) in &files {
+        use sha2::Digest as _;
+        record += &format!("{path},sha256={},{}\n", b64url(&sha2::Sha256::digest(bytes)), bytes.len());
+    }
+    record += &format!("{info}/RECORD,,\n");
+    files.push((format!("{info}/RECORD"), record.into_bytes(), false));
+    Ok(files)
+}
+
+fn wheel(root: &Path, args: &[&str]) -> Result<(), String> {
+    let (mut platform, mut version, mut cli, mut out) = (None, None, None, root.join("dist/python"));
+    let mut i = 0;
+    while let Some(a) = args.get(i) {
+        let value = args.get(i + 1).copied();
+        match (*a, value) {
+            ("--platform", Some(v)) => platform = Some(v.to_string()),
+            ("--version", Some(v)) => version = Some(v.to_string()),
+            ("--cli", Some(v)) => cli = Some(PathBuf::from(v)),
+            ("--out", Some(v)) => out = PathBuf::from(v),
+            (other, _) => {
+                return Err(format!(
+                    "python wheel: unknown or incomplete argument `{other}` (it takes --platform TAG, --version V, --cli PATH, --out DIR)"
+                ));
+            }
+        }
+        i += 2;
+    }
+    let platform = platform.ok_or("python wheel: --platform is required (a wheel platform tag such as manylinux_2_35_x86_64, or any)")?;
+    let version = pep440(&version.ok_or("python wheel: --version is required")?)?;
+    if platform.is_empty() || !platform.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+        return Err(format!("python wheel: `{platform}` is not a wheel platform tag"));
+    }
+    let binary = match (&cli, platform.as_str()) {
+        (Some(_), "any") => return Err("python wheel: a wheel for any platform carries no binary; leave out --cli".into()),
+        (None, p) if p != "any" => return Err(format!("python wheel: a {p} wheel needs --cli, the release's solidcraft-cli for it")),
+        (Some(path), _) => {
+            let name = if platform.starts_with("win") { "solidcraft-cli.exe" } else { "solidcraft-cli" };
+            Some((name, std::fs::read(path).map_err(|e| format!("python wheel: {}: {e}", path.display()))?))
+        }
+        (None, _) => None,
+    };
+    let files = wheel_entries(root, &version, &platform, binary)?;
+    std::fs::create_dir_all(&out).map_err(|e| format!("python wheel: {}: {e}", out.display()))?;
+    let path = out.join(format!("solidcraft-{version}-py3-none-{platform}.whl"));
+    let file = std::fs::File::create(&path).map_err(|e| format!("python wheel: {}: {e}", path.display()))?;
+    let mut zip = zip::ZipWriter::new(file);
+    for (name, bytes, exec) in &files {
+        use std::io::Write as _;
+        let opts = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated).unix_permissions(if *exec {
+            0o755
+        } else {
+            0o644
+        });
+        zip.start_file(name.as_str(), opts).map_err(|e| format!("python wheel: {name}: {e}"))?;
+        zip.write_all(bytes).map_err(|e| format!("python wheel: {name}: {e}"))?;
+    }
+    zip.finish().map_err(|e| format!("python wheel: {}: {e}", path.display()))?;
+    println!("python wheel: {} ({} files)", path.display(), files.len());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -461,6 +630,24 @@ mod tests {
         assert!(!commands.contains("solid.future"), "planned commands are left out");
         assert!(files[1].1.contains("def measure(self, *, summary: bool | None = None, **extra: Any)"), "{}", files[1].1);
         assert!(files[2].1.contains("VERSION = \"1.2.3\""));
+    }
+
+    #[test]
+    fn cargo_versions_become_pep_440() {
+        assert_eq!(pep440("0.51.0").unwrap(), "0.51.0");
+        assert_eq!(pep440("0.51.0-rc.2").unwrap(), "0.51.0rc2");
+        assert_eq!(pep440("1.0.0-beta.1").unwrap(), "1.0.0b1");
+        assert_eq!(pep440("0.51.0-nightly.20261127.123.1").unwrap(), "0.51.0.dev202611271231");
+        assert!(pep440("0.51").is_err());
+        assert!(pep440("0.51.0-weird").is_err());
+        assert!(pep440("0.51.0-rc.x").is_err());
+    }
+
+    #[test]
+    fn record_hashes_are_unpadded_url_safe_base64() {
+        // sha256("") in a wheel RECORD, as pip writes it.
+        use sha2::Digest as _;
+        assert_eq!(b64url(&sha2::Sha256::digest(b"")), "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU");
     }
 
     #[test]

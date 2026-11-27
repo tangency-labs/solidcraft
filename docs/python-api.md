@@ -1,8 +1,9 @@
 # A Python API for SolidCraft
 
-Status: the client, its generated bindings and the benchmark are built and measured. Packaging and
-publishing are planned, not built, and need the maintainer's decisions
-([Decisions needed](#decisions-needed)).
+Status: the client, its generated bindings and the benchmark are built and measured. Every release
+builds the client's wheels from its own binaries, and `pypi.yml` uploads them once the maintainer
+turns it on. The conda package is planned. The decisions this needs are in
+[Decisions needed](#decisions-needed).
 
 ## Findings in short
 
@@ -169,6 +170,35 @@ At 0.51.0 this gives 898 commands and 27 tools.
 - `apps/solidcraft-cli/tests/commands_output.rs` and `crates/mcp/src/tests.rs`: `--schemas` and
   `--structured`.
 
+### Packaging: wheels on every release, uploaded when it is published
+
+The release workflow already builds `solidcraft-cli` for every platform and signs it on macOS and
+Windows. Its `python` job repackages those exact binaries into wheels rather than rebuilding them,
+so a wheel carries the bytes `SHA256SUMS.txt` lists, signed where the app is
+([releasing.md](releasing.md#python-packages)):
+
+- **Platform wheels** carry `solidcraft-cli` under `solidcraft/bin/`, which the client finds before
+  `PATH`. There are wheels for manylinux x86_64 and aarch64 (tagged with the newest glibc the binary
+  needs), macOS universal2, and Windows x64, x86 and arm64.
+- **A `py3-none-any` wheel** has no binary. It finds `solidcraft-cli` on `PATH` or through
+  `SOLIDCRAFT_CLI`, which covers FreeBSD and the platforms without a wheel.
+- **`cargo xtask python wheel`** writes each wheel: the package with its generated bindings, the
+  `.dist-info` with `METADATA`, `WHEEL`, `RECORD` (SHA-256 of each file) and the `solidcraft-session`
+  entry point, and the licences (`THIRD-PARTY-LICENSES.txt` too when the binary is inside). The
+  packaging scripts gain no Python dependency. There is no sdist, since building one would mean
+  building the whole workspace.
+- **Versions** follow PEP 440: `0.52.0`, `0.52.0rc1`, and `0.52.0.dev<date><run><attempt>` for a
+  nightly.
+- **Checks:** the release job installs the Linux x86_64 wheel into a clean environment and runs the
+  client's tests with the binary inside it. Locally, a macOS wheel installed with `uv pip` passed
+  the same tests with `SOLIDCRAFT_CLI` unset.
+- **Upload:** `pypi.yml` uploads a published release's wheels with PyPI trusted publishing (no
+  stored token). A stable release goes to PyPI, and a pre-release to TestPyPI. It stays off until
+  the owner registers the publishers and sets `PYTHON_PUBLISH`.
+- **Size:** a platform wheel holds the whole `solidcraft-cli`. PyPI's default limit is 100 MB per
+  file, and the universal macOS wheel may come close to it; PyPI raises the limit for a project on
+  request.
+
 ## Planned, not built
 
 ### The vocabulary in the package
@@ -176,24 +206,11 @@ At 0.51.0 this gives 898 commands and 27 tools.
 scx's vocabulary, rebuilt on the session as `solidcraft.build`, so the words the experiment
 measured ship with the API. The bench's `scx_vocab.py` shows that it runs unchanged on the session.
 
-### Packaging
+### conda and pixi
 
-The release workflow already builds `solidcraft-cli` for every platform, and on macOS and Windows it
-signs it. The wheels would repackage those exact binaries rather than rebuild them, so the package
-contains the bytes `SHA256SUMS.txt` lists and is signed where the app is.
-
-- **pip and uv:** platform wheels named `solidcraft` carrying `solidcraft-cli` under `solidcraft/bin/`
-  (manylinux x86_64 and aarch64, macOS universal2, Windows x64, x86 and arm64). A pure
-  `py3-none-any` wheel would cover other platforms and find `solidcraft-cli` on `PATH` or through
-  `SOLIDCRAFT_CLI`. `cargo xtask python wheel` would write the wheels, so packaging gains no Python
-  dependency. There would be no sdist: building one means building the whole workspace.
-- **conda and pixi:** a rattler-build recipe with two outputs: `solidcraft-cli`, the binary per
-  platform, and `solidcraft`, `noarch: python`. They would go on a project channel first, then a
-  conda-forge feedstock that builds from the source tag.
-- **Versions and publishing:** `0.50.0-rc.1` would become `0.50.0rc1`. Publishing would happen only
-  as a step of publishing a GitHub release, through PyPI trusted publishing, with no stored token.
-  Nightlies would go to TestPyPI only. Each package would carry the licences and
-  `THIRD-PARTY-LICENSES.txt`.
+A rattler-build recipe with two outputs: `solidcraft-cli`, the binary for each platform, and
+`solidcraft`, `noarch: python`. They would go on a project channel first, then to a conda-forge
+feedstock that builds from the source tag. `pixi add solidcraft` would then work from either.
 
 ### Recording, and the agent skill
 
@@ -447,15 +464,17 @@ whether the project hosts and publishes the client.
    only `--schemas` and `--structured` here and move the client to a separate repository.
 2. **The vocabulary:** the experiment's rule is met (E beat D by at least 5% with no lost pass, on
    every model), and the owner's review agrees. Port it into the package as `solidcraft.build`.
-3. **Distribution:** PyPI and a conda channel, with their accounts. `solidcraft` and `solidcraft-cli`
-   were free on both PyPI and conda-forge on 2026-11-25.
+3. **Distribution:** turn on `pypi.yml` by registering its trusted publishers on PyPI and TestPyPI
+   and setting `PYTHON_PUBLISH` ([releasing.md](releasing.md#python-packages)), and later choose a
+   conda channel. `solidcraft` and `solidcraft-cli` were free on both PyPI and conda-forge on
+   2026-11-25.
 4. **CI:** a Python job, as above.
 
 ## Next steps, one pull request each
 
 1. The vocabulary in the package, and the agent skill.
 2. A Python CI job.
-3. Packaging: wheels from the release binaries, the conda recipe, publishing nightlies to TestPyPI.
+3. The conda recipe and channel.
 4. Repeated assembly runs, to separate the setups on open-ended work. The harness is ready:
    `run.py --sets assembly --tasks quadruped_buildready --reps 3`, about $2-5 a run.
 5. Recording sessions as command scripts.
