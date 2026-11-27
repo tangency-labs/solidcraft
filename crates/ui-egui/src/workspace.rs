@@ -1661,6 +1661,7 @@ mod tests {
         h.call("ui.resize", json!({"width":1280.0,"height":800.0}));
         h.app.home.open = false;
         let mut plugin = workspace_plugin();
+        plugin.entries[0].input_schema = json!({"type":"object","properties":{"depth":{"type":"integer","title":"Depth","default":5}}});
         plugin.entries[0].slots.push(solidcraft_engine::plugin::UiSlot::Menu { name: "Pocket Milling".into(), label: None });
         h.app.plugin_menu.listed = vec![plugin.clone()];
         h.app.plugin_menu.loaded = true;
@@ -1682,9 +1683,12 @@ mod tests {
         let shown: Vec<String> = crate::test_support::text_shapes(&output).map(|shape| shape.galley.text().to_owned()).collect();
         assert!(shown.iter().any(|text| text.contains("Pocket")), "the button carries the entry's title, not its raw name: {shown:?}");
         assert!(!shown.iter().any(|text| text == "pocket"), "{shown:?}");
+        let before = (h.app.plugin_menu.dialogs.len(), h.app.messages.iter().count(), h.app.status.clone());
         h.step(&json!({"click":{"handle":"button:plugin_entry:manufacture:pocket"}})).unwrap();
         h.frames(3);
-        assert!(!h.app.plugin_menu.dialogs.is_empty(), "a click starts the entry like the Model tab's button does");
+        let after = (h.app.plugin_menu.dialogs.len(), h.app.messages.iter().count(), h.app.status.clone());
+        assert_ne!(before, after, "a click starts the entry through the Model tab's plugin button path");
+        assert_eq!(after.0, before.0 + 1, "an entry with parameters opens its dialog");
     }
 
     #[test]
