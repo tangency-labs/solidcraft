@@ -301,3 +301,27 @@ fn a_catalogue_of_hundreds_of_rows_inserts_any_row_and_the_limit_is_stated() {
     }
     assert!(full.doc_mut().add_configuration_row("one too many".into(), Vec::new()).is_err());
 }
+
+/// A rule names its feature by name, and a limit or a suppression needs no configured column.
+#[test]
+fn a_rule_names_a_feature_and_a_limit_needs_no_column() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "4 mm"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": "w", "height": 5, "body_name": "Bar"}));
+    let (id, name) = (s.doc.features[0].id, s.doc.features[0].name.clone());
+    run(
+        &mut s,
+        "config.rule",
+        json!({"rule": {"id": "hide", "name": "Hide wide bars", "condition": {"type": "parameter", "parameter": "w", "operator": "gt", "expression": "5 mm"},
+            "effect": {"type": "drive_suppression", "feature": name, "value": true}}}),
+    );
+    run(
+        &mut s,
+        "config.rule",
+        json!({"rule": {"id": "range", "name": "Width range", "condition": {"type": "always"},
+            "effect": {"type": "parameter_range", "parameter": "w", "minimum": "2 mm", "maximum": "9 mm"}}}),
+    );
+    assert!(matches!(s.doc.configs.rules[0].effect, solidcraft_doc::config::RuleEffect::DriveSuppression { feature, value: true } if feature == id));
+    assert!(s.execute("config.rule", &json!({"rule": {"id": "x", "name": "x", "condition": {"type": "always"},
+        "effect": {"type": "drive_suppression", "feature": "No such feature", "value": true}}})).is_err());
+}

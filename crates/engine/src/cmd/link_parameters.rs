@@ -107,7 +107,12 @@ pub(super) fn set_link_parameters(s: &mut Session, p: &Value) -> Result<Value> {
     if p.get("parameters").is_none() {
         return Err(bad(cmd, "`parameters` is required (an object, or null to clear them)"));
     }
-    let values = link_parameters(p, &BTreeMap::new(), cmd)?;
+    let mut values = link_parameters(p, &BTreeMap::new(), cmd)?;
+    if p.get("merge").and_then(Value::as_bool).unwrap_or(false) {
+        let mut merged = link.parameters.clone();
+        merged.extend(values);
+        values = merged;
+    }
     if let Some(stored) = s.doc_mut().links.get_mut(&component) {
         stored.parameters = values.clone();
     }

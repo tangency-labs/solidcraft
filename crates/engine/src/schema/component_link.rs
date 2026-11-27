@@ -899,6 +899,11 @@ pub struct SetLinkParametersParams {
     /// the limits the design declares are refused and nothing changes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parameters: Option<serde_json::Map<String, Value>>,
+    /// Change only the parameters given and keep the link's other values (default false: the
+    /// given ones replace them all). `parameters: {"length": "800 mm"}` with `merge: true` is a
+    /// change of the part's length alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub merge: Option<bool>,
 }
 
 /// What `component.set_link_parameters` returns.

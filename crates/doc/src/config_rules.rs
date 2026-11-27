@@ -327,13 +327,12 @@ impl Document {
             }
             // Targets must remain configured, including disabled rules, so dormant rules
             // cannot silently become invalid and surprise a subsequent activation.
-            let target = match &rule.effect {
-                RuleEffect::DriveParameter { parameter, .. }
-                | RuleEffect::ParameterRange { parameter, .. }
-                | RuleEffect::AllowParameterValues { parameter, .. } => Column::Param(parameter.clone()),
-                RuleEffect::DriveSuppression { feature, .. } => Column::Suppress(*feature),
-            };
-            if !self.configs.columns.contains(&target) {
+            // Only a drive of a parameter needs its column (it is restored from the row); a
+            // range, an allowed list or a suppression holds without one (generators' limits and
+            // optional features need no table).
+            if let RuleEffect::DriveParameter { parameter, .. } = &rule.effect
+                && !self.configs.columns.contains(&Column::Param(parameter.clone()))
+            {
                 return Err(invalid(&format!("rule `{}` target is not configured", rule.name)));
             }
             let matched = rule.enabled

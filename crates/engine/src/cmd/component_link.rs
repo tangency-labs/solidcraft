@@ -98,7 +98,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     .contract(&SET_LINK_PARAMETERS_CONTRACT)
     .output(output_schema_for::<SetLinkParametersResult>)
     .params(
-        "component: id or name of a component linked to a design; parameters: the design's parameter names to expressions ({\"length\": \"800 mm\"}; null or {} clears them) → component, parameters, updated. Replaces the link's parameters and builds the part again with them on top of its configuration row, as one undo step; a value outside the limits the design declares (a parameter_range or allowed-values configuration rule) is refused naming the rule and nothing changes",
+        "component: id or name of a component linked to a design; parameters: the design's parameter names to expressions ({\"length\": \"800 mm\"}; null or {} clears them); merge?: bool (default false: the given parameters replace the link's; true: change only these) → component, parameters, updated. Replaces the link's parameters and builds the part again with them on top of its configuration row, as one undo step; a value outside the limits the design declares (a parameter_range or allowed-values configuration rule) is refused naming the rule and nothing changes",
     ),
     CommandSpec::new("component.break_link", "Break Link", crate::checked!("component.break_link", break_link))
         .icon("break")

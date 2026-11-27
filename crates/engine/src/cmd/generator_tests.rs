@@ -89,7 +89,7 @@ fn parse_code_and_template_answer_without_changing_the_design() {
     let mut s = Session::default();
     let r = run(&mut s, "generator.parse", json!({"generator": path(&dir), "code": "TN-M5-20-S"}));
     assert_eq!(r["ok"], true);
-    assert_eq!(r["fields"], json!({"size": "M5", "length": 20, "grade": "steel"}));
+    assert_eq!(r["fields"], json!({"size": "M5", "length": 20, "grade": "steel", "grade_code": "S"}));
     assert_eq!(r["configuration"], "M5");
     assert_eq!(r["warnings"].as_array().unwrap().len(), 1);
     let refused = run(&mut s, "generator.parse", json!({"generator": path(&dir), "code": "TN-M8-40"}));
@@ -150,4 +150,23 @@ fn list_answers_with_the_installed_generators_and_what_it_skipped() {
     let mut s = Session::default();
     let r = run(&mut s, "generator.list", json!({}));
     assert!(r["generators"].is_array() && r["skipped"].is_array(), "{r}");
+}
+
+#[test]
+fn merge_changes_one_parameter_and_keeps_the_others() {
+    let dir = nut_package(None);
+    let mut s = Session::default();
+    let r = run(&mut s, "generator.insert", json!({"generator": path(&dir), "code": "TN-M4-40"}));
+    let component = r["component"].as_u64().unwrap();
+    // An unknown name is refused with the design's own words, whether it replaces or merges.
+    for merge in [false, true] {
+        let e = s
+            .execute("component.set_link_parameters", &json!({"component": component, "parameters": {"nope": "1 mm"}, "merge": merge}))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("nope"), "{e}");
+    }
+    let r = run(&mut s, "component.set_link_parameters", json!({"component": component, "parameters": {"length": "60 mm"}, "merge": true}));
+    assert_eq!(r["parameters"], json!({"length": "60 mm"}));
+    assert!(close(volume(&mut s), 7.0 * 3.2 * 60.0 + 3.0 * 8.0));
 }

@@ -46,7 +46,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .read_only()
         .contract(&PARSE_CONTRACT)
         .output(output_schema_for::<GeneratorParseResult>)
-        .params("generator: an installed package's id or its folder; code: the ordering code → ok, reason? (invalid | not_modelled | limit | error), message? (the generator's own words), generator, code (in the template's spelling), template?, fields?, configuration? (the row to select), parameters (name: expression), description?, provenance? ({row, source, page?, status}), warnings. A refused code is an answer, not an error. Never changes the design"),
+        .params("generator: an installed package's id or its folder; code: the ordering code; options?: choices the code does not carry, passed to the script as fields.options → ok, reason? (invalid | not_modelled | limit | error), message? (the generator's own words), generator, code (in the template's spelling), template?, fields?, configuration? (the row to select), parameters (name: expression), description?, provenance? ({row, source, page?, status}), warnings. A refused code is an answer, not an error. Never changes the design"),
     CommandSpec::new("generator.code", "Print Ordering Code", crate::checked!("generator.code", code))
         .any_part()
         .icon("list")
@@ -142,7 +142,7 @@ fn parse(_s: &mut Session, p: &Value) -> Result<Value> {
     let q: GeneratorParseParams = params(cmd, p)?;
     let g = load(cmd, &q.generator)?;
     let typed: String = q.code.trim().chars().take(128).collect();
-    let out = match g.parse(&q.code) {
+    let out = match g.parse_with(&q.code, q.options.as_ref()) {
         Ok(r) => GeneratorParseResult {
             ok: true,
             reason: None,
@@ -285,10 +285,10 @@ fn run_insert(s: &mut Session, cmd: &str, g: &Package, r: &Resolved, placement: 
     Ok(Inserted { component, occurrence, bodies, volume_mm3, bbox_mm, faces })
 }
 
-fn resolve_for_insert(cmd: &str, g: &Package, code: Option<&str>, fields: Option<Map<String, Value>>) -> Result<Resolved> {
+fn resolve_for_insert(cmd: &str, g: &Package, code: Option<&str>, fields: Option<Map<String, Value>>, options: Option<&Map<String, Value>>) -> Result<Resolved> {
     let refused = |r: Refusal| bad(cmd, r.message);
     match (code, fields) {
-        (Some(c), None) => g.parse(c).map_err(refused),
+        (Some(c), None) => g.parse_with(c, options).map_err(refused),
         (None, Some(m)) => {
             let fields = to_params(m);
             let (i, _) = g.code_for(&fields, None).map_err(|e| bad(cmd, e.to_string()))?;
@@ -302,7 +302,7 @@ fn insert(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "generator.insert";
     let q: GeneratorInsertParams = params(cmd, p)?;
     let g = load(cmd, &q.generator)?;
-    let r = resolve_for_insert(cmd, &g, q.code.as_deref(), q.parameters)?;
+    let r = resolve_for_insert(cmd, &g, q.code.as_deref(), q.parameters, q.options.as_ref())?;
     let made = run_insert(s, cmd, &g, &r, q.placement.as_ref())?;
     reply(
         cmd,

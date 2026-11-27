@@ -605,6 +605,12 @@ impl Matcher<'_> {
                 let at = if matches!(kind, FieldKind::Rest) { pos } else { self.skip(pos) };
                 for (len, value) in self.candidates(kind, at) {
                     let mut f = fields.clone();
+                    // A letter map also keeps the letters as typed (`block_code`), next to the value.
+                    if let FieldKind::Map(pairs) = kind
+                        && let Some((code, _)) = pairs.iter().find(|(_, v)| value.as_str() == Some(v.as_str()))
+                    {
+                        f.insert(format!("{name}_code"), Json::String(code.clone()));
+                    }
                     f.insert(name.clone(), value);
                     if let Some(done) = self.run(tail, rest, at + len, f)? {
                         return Ok(Some(done));

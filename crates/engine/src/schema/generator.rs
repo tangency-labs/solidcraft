@@ -23,6 +23,10 @@ pub struct GeneratorParseParams {
     pub generator: String,
     /// The ordering code, at most 128 characters. Case and separators are ignored.
     pub code: String,
+    /// Choices the code does not carry (the caps a rail is ordered with, say), as an object. They
+    /// reach the generator's script as `fields.options`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<Map<String, Value>>,
 }
 
 /// Print parameters as an ordering code.
@@ -67,6 +71,9 @@ pub struct GeneratorInsertParams {
     /// Field values, as a parse gives them, instead of a code.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parameters: Option<Map<String, Value>>,
+    /// With `code`: choices the code does not carry, as `generator.parse` takes them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub options: Option<Map<String, Value>>,
     /// Where to put it: any of `parent`, `translate`, `axis`, `angle`, `origin`, `matrix`,
     /// `to_matrix`, `tolerance`, as `component.insert_design` takes them.
     #[serde(default, skip_serializing_if = "Option::is_none")]

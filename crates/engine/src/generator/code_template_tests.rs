@@ -23,7 +23,7 @@ fn params(v: Json) -> Params {
 fn a_code_reads_into_typed_parameters_and_prints_back() {
     let t = Template::parse(MGN, &declared()).unwrap();
     let p = t.match_code("MGN15C2R600").unwrap().unwrap();
-    assert_eq!(p, params(json!({"size": "15", "block": "standard", "long": false, "blocks": 2, "length": 600})));
+    assert_eq!(p, params(json!({"size": "15", "block": "standard", "block_code": "C", "long": false, "blocks": 2, "length": 600})));
     assert_eq!(t.print(&p).unwrap(), "MGN15C2R600");
 }
 

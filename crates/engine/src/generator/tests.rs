@@ -225,3 +225,32 @@ fn installed_generators_are_listed_by_folder_and_a_broken_one_is_skipped() {
     assert_eq!(found[0].package.templates[0].template.prefixes(), ["TNM4", "TNM5", "TNM6", "TNM8"].map(String::from).to_vec());
     assert_eq!(skipped.len(), 1, "{skipped:?}");
 }
+
+#[test]
+fn options_outside_the_code_reach_the_script_and_a_tables_columns_are_the_provenance() {
+    let dir = nut_package(None);
+    std::fs::create_dir(dir.path().join("tables")).unwrap();
+    std::fs::write(dir.path().join("tables/sizes.csv"), "key,row,source,page,status\n6,M6,Fixture catalogue,7,needs_review\n").unwrap();
+    std::fs::write(
+        dir.path().join("generator.rhai"),
+        r#"
+        fn resolve(f) {
+            let t = table("sizes", 6);
+            let caps = if f.options == () { 0 } else { f.options.caps };
+            #{ configuration: t.row, parameters: #{ length: f.length.to_string() + " mm" }, description: "caps " + caps }
+        }
+        "#,
+    )
+    .unwrap();
+    let g = load(&dir);
+    let options = json!({"caps": 2});
+    let r = g.parse_with("TN-M6-30", options.as_object()).unwrap();
+    assert_eq!(r.description.as_deref(), Some("caps 2"));
+    assert_eq!(r.fields["options"], options);
+    let row = r.row.unwrap();
+    assert_eq!((row.source.as_str(), row.page.as_deref(), row.status.as_str()), ("Fixture catalogue", Some("7"), "needs_review"));
+    assert_eq!(r.warnings.len(), 1);
+    assert_eq!(g.parse("TN-M6-30").unwrap().description.as_deref(), Some("caps 0"));
+    // The letters of a letter map are kept next to its value.
+    assert_eq!(g.parse("TN-M6-30-S").unwrap().fields["grade_code"], json!("S"));
+}

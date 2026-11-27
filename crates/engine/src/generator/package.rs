@@ -553,7 +553,7 @@ impl Package {
         {
             description = s.describe(&fields).map_err(Self::script_refusal)?;
         }
-        let row = configuration.as_ref().and_then(|c| self.rows.get(c)).cloned();
+        let row = configuration.as_ref().and_then(|c| self.rows.get(c).cloned().or_else(|| self.table_row_info(c)));
         let mut warnings = Vec::new();
         if let Some(r) = &row {
             let name = configuration.clone().unwrap_or_default();
@@ -574,9 +574,44 @@ impl Package {
         Ok(Resolved { template, fields, code, configuration, parameters, description, row, warnings })
     }
 
+    /// Where a row's numbers come from, when a table has a row of that key with `source`, `page`,
+    /// `status`, `note` or `description` columns: the table's own columns are the provenance.
+    fn table_row_info(&self, key: &str) -> Option<RowInfo> {
+        for table in self.tables.values() {
+            let Some(row) = table.row(key) else { continue };
+            let get = |name: &str| row.iter().find(|(n, _)| *n == name).and_then(|(_, v)| super::csv_table::key_text(v));
+            let (source, status) = (get("source"), get("status"));
+            if source.is_none() && status.is_none() {
+                continue;
+            }
+            let status = match status.as_deref() {
+                Some(s @ ("verified" | "needs_review" | "not_modelled")) => s.to_string(),
+                Some(_) => "needs_review".to_string(),
+                None => "verified".to_string(),
+            };
+            return Some(RowInfo {
+                source: source.unwrap_or_default(),
+                page: get("page"),
+                status,
+                note: get("note").unwrap_or_default(),
+                description: get("description"),
+            });
+        }
+        None
+    }
+
     /// Read a code all the way.
     pub fn parse(&self, code: &str) -> Result<Resolved, Refusal> {
-        let (template, fields) = self.read_code(code)?;
+        self.parse_with(code, None)
+    }
+
+    /// Read a code with options that are not in the code (for example the caps a rail is ordered
+    /// with): they reach `resolve` as `fields.options`.
+    pub fn parse_with(&self, code: &str, options: Option<&serde_json::Map<String, Json>>) -> Result<Resolved, Refusal> {
+        let (template, mut fields) = self.read_code(code)?;
+        if let Some(o) = options {
+            fields.entry("options".to_string()).or_insert_with(|| Json::Object(o.clone()));
+        }
         self.resolve_fields(template, fields)
     }
 

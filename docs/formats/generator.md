@@ -17,10 +17,10 @@ has today and what this work adds; sections 2 to 8 define the new pieces.
 | Pattern COUNT from a parameter | **Yes.** `solid.pattern.rectangular` stores `count1`/`count2` as expressions; `pattern_count` evaluates them with `eval_count` (unitless, must be a whole number 1..MAX_INSTANCES). `floor`, `ceil`, `round`, `min`, `max` exist, so `floor((length - 20 mm) / 25 mm) + 1` works. A fractional or unit-carrying result is refused, so always wrap in `floor/ceil/round`. Sketch-pattern count has not been verified; use feature patterns. | `crates/doc/src/eval.rs` (`pattern_count`), `crates/doc/src/expr.rs` (`eval_count`) |
 | Configuration table | Yes: `config.configure {params, suppress, materials, appearances}` creates columns, `config.row {name, values, from, rename, index, delete}` rows, `config.column`, `config.activate`, `config.preview`, `config.table`. Cells are parameter expressions, feature suppression, material, appearance. | `crates/engine/src/cmd/config.rs`, `docs/configurations.md` |
 | Rules (limits, drives, suppression) | Yes: `config.rule {rule: {id, name, condition, effect}}`. Conditions: `always`, `parameter` (`eq ne lt le gt ge`), compound `all/any/not`. Effects: `drive_parameter`, `drive_suppression`, `parameter_range {parameter, minimum, maximum}` (inclusive), allowed values. A range rule with `condition: always` expresses "length within 40..2000 mm". "Suppress when length > 500 mm" is a `drive_suppression` rule with a `parameter` condition. | `crates/doc/src/config_rules.rs` |
-| Per-row source/page note | **Missing** in the table (`ConfigRow` has `id`, `name`, `cells` only). Provenance lives in the generator sidecar (section 4), so no design-format change is needed. | `crates/doc/src/config.rs` |
+| Per-row source/page note | Not in the table (`ConfigRow` has `id`, `name`, `cells` only). Provenance lives in the generator: `[rows.*]` in `generator.toml`, or the `source`, `page`, `status`, `note` and `description` columns of a `tables/*.csv` row whose first column is the configuration row's name (section 6). No design-format change is needed. | `crates/doc/src/config.rs` |
 | `component.insert_design {path, configuration}` | Yes. The link stores the resolved row id. | `crates/engine/src/cmd/component_link.rs` |
-| `insert_design` with FREE parameter values beyond a row | **Missing.** The link stores only the row. This work adds `parameters` (a map name -> expression) to `component.insert_design`, `component.relink` and the link, saved with the design through ONE pending format file; `component.update_links` and a later `component.set_link_parameters` (same map) rebuild the linked component. | `crates/engine/src/schema/component_link.rs`, `crates/doc/src/document.rs` (`DesignLink`) |
-| Limits on a linked part | **Missing** for ordinary edits: range rules are checked at row activation/preview, and an ordinary `parameters.change` does not enforce them (`docs/configurations.md`, "Ordered rules"). This work checks the source's range rules and allowed values against the link's `parameters` when a link is inserted, relinked or updated, and refuses out-of-range values with the rule's name. | new, in `component_link.rs` |
+| `insert_design` with FREE parameter values beyond a row | **Added by this work** (before it, `parameters` was accepted and ignored). The link stored only the row; it now has `parameters` (a map name -> expression) to `component.insert_design`, `component.relink` and the link, saved with the design through ONE pending format file; `component.update_links` and a later `component.set_link_parameters` (same map) rebuild the linked component. | `crates/engine/src/schema/component_link.rs`, `crates/doc/src/document.rs` (`DesignLink`) |
+| Limits on a linked part | Range rules are checked at row activation/preview and an ordinary `parameters.change` in the source design still does not enforce them (`docs/configurations.md`, "Ordered rules"); enforcing them there would change a default and needs a preference, so it is left as a decision for the maintainers. This work checks the source's range rules and allowed values against the link's `parameters` when a link is inserted, relinked or updated, and refuses out-of-range values with the rule's name. | new, in `component_link.rs` |
 | Suppress-if | Yes, through `drive_suppression` rules (the source's rules run while the link's row and overrides are applied). There is no inline `suppress_if` expression on a feature. | `config_rules.rs` |
 | Measurement | `measure` (tool; command form in `crates/engine/src/cmd/measure_*.rs`): per body `volume_mm3`, `area`, `bbox {min,max}`, `faces`/edges/vertices, `closed`; `summary: true` keeps it short. `document.inspect` lists bodies with the same numbers. `check_parameters {set: {name: value}, report: [measure, errors]}` tries values and restores. | `docs/mcp.md` |
 | Rhai, field templates, ordering-code commands | **Added by this work** (sections 3 to 7). A first draft of `generator.parse|build|check|list` over a JSON package exists on this branch and is rewritten onto the new design. | `crates/engine/src/generator/` |
@@ -202,3 +202,31 @@ Measurement for a `generator.check` or a harness: `measure {body, summary: true}
 The engine ships a tiny hand-made generator (metric T-nut: `.sc` with `length`, a 4-row
 configuration table, a range rule) used to test: parse, print round trip, insert from a code,
 then edit `length` and see it rebuild; out-of-range refusal; hostile input and runaway scripts.
+
+## 9. Details the parts session asked about
+
+- **`fields` holds the mapped value, and the letter next to it.** For `{block: C=standard, H=heavy}`
+  a code with `C` gives `fields.block = "standard"` and `fields.block_code = "C"`. Printing reads the
+  value (`block`); `block_code` is for scripts and display only.
+- **Flags and absent parts.** `[E:long]` sets `fields.long = true` when the part is typed and `false` when
+  it is not. A field inside an optional part that is left out gets its `[parameters]` `default`; with no
+  default the key is absent (a script reads it as `()`). An option set always gives an object (`{}` when
+  none was typed).
+- **Options outside the code** (the caps of a rail set, say): `generator.parse {generator, code, options}`
+  and `generator.insert {generator, code, options}` take an `options` object. It reaches the script as
+  `fields.options` (a key named `options` that a template itself sets wins). The printed code does not
+  contain them.
+- **`table()`** takes a text or an integer key: `table("rails", 15)` and `table("rails", "15")` are the same
+  row, and the key is matched ignoring case.
+- **Provenance from the CSV.** If a configuration row named `K` has no `[rows.K]` in `generator.toml`, the
+  first table with a row keyed `K` that has `source` or `status` columns supplies it (`source`, `page`,
+  `status`, `note`, `description`). A `[rows.K]` entry wins.
+- **Limits on a linked part.** `component.insert_design {parameters}`, `component.relink {parameters}` and
+  `component.set_link_parameters` refuse a value outside the source's `parameter_range` or allowed-values
+  rules, naming the rule, and refuse a name the source does not have. A range, allowed-values or
+  suppression rule no longer needs its parameter to be a column of the configuration table. Rules may
+  name a feature by its name (`"feature": "Rail cap 1"`).
+- **Changing one value later.** `component.set_link_parameters {component, parameters, merge: true}` changes
+  only the given parameters. `parameters.change` in the assembly does not reach into a linked part.
+- **Not done in this change** (follow-ups): `body_names` for pattern copies, a thread designation driven by a
+  parameter, and `model.threads` on every copy of a patterned thread.
