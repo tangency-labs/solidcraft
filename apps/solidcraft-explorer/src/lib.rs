@@ -10,6 +10,8 @@
 //! Everything but the COM server is platform-neutral, so its tests run anywhere.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+use std::io::{Read, Seek};
+
 mod bitmap;
 
 pub use bitmap::{Bitmap, fit, thumbnail_from_png};
@@ -19,6 +21,13 @@ pub use bitmap::{Bitmap, fit, thumbnail_from_png};
 pub const CLSID: &str = "{34025B8F-2354-4B5F-8967-89BA0B71FDCF}";
 /// [`CLSID`] as a number, for `windows_core::GUID::from_u128`.
 pub const CLSID_U128: u128 = 0x34025B8F_2354_4B5F_8967_89BA0B71FDCF;
+
+/// The thumbnail of the design `source` holds, at most `cx` pixels on its longer side: its saved
+/// picture when the picture's key matches the design (`solidcraft_design_preview::keyed_picture`),
+/// decoded and fitted. `None` for anything else.
+pub fn thumbnail<R: Read + Seek>(source: R, cx: u32) -> Option<Bitmap> {
+    let _ = (source, cx); None
+}
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]

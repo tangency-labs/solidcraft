@@ -6339,7 +6339,11 @@ name = "solidcraft-explorer"
 version = "0.51.1"
 dependencies = [
  "png",
+ "sha2 0.10.9",
  "solidcraft-design-preview",
+ "windows",
+ "windows-core",
+ "zip",
 ]
 
 [[package]]
