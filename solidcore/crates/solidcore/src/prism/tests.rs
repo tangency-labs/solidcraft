@@ -1919,12 +1919,34 @@ mod recognition {
                 Some((center, Vec2::new(15.0, 0.0), 8.0 / 15.0))
             );
         }
-        // The control a + b - c also rounds the sum a + b, here by more than its corners.
         assert_turned_sketch_quarters_are_one_ellipse(
             Vec2::new(-4.0, -17.0),
             Vec2::new(0.0, -14.0),
             1.4,
         );
+        // The control a + b - c also rounds the sum a + b. Here the corners are exact and
+        // the first control is 3 * 2^-43 off, more than the corners' and its own rounding.
+        let c = Vec2::new(1020.0 + 3.0 * 2.0_f64.powi(-43), 0.0);
+        let u = Vec2::new(12.0 + 3.0 * 2.0_f64.powi(-43), 0.0);
+        let v = Vec2::new(12.0 + 2.0_f64.powi(-43), 8.0);
+        let corners = [c + u, c + v, c - u, c - v];
+        let rounded = Loop2 {
+            segs: (0..4)
+                .map(|i| {
+                    let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                    Seg2::Conic {
+                        a,
+                        apex: a + b - c,
+                        b,
+                        w: FRAC_1_SQRT_2,
+                    }
+                })
+                .collect(),
+        };
+        let (center, _, _) = rounded
+            .as_ellipse()
+            .expect("controls rounded as a + b - c");
+        assert_eq!(center, c);
     }
 
     fn assert_turned_sketch_quarters_are_one_ellipse(center: Vec2, end: Vec2, minor: f64) {
