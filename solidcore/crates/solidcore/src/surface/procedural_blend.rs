@@ -1764,6 +1764,8 @@ pub enum KeptDefinition {
     Draft(crate::offset::draft::DraftDefinition),
     /// A multi-section blend's ([`crate::sweep::section_blend`], #3140).
     SectionBlend(crate::sweep::section_blend::SectionBlendDefinition),
+    /// A certified offset sheet's definition `S + d n` ([`crate::surface::offset_definition`]).
+    Offset(crate::surface::offset_definition::OffsetDefinition),
 }
 
 impl KeptDefinition {
@@ -1776,6 +1778,7 @@ impl KeptDefinition {
     pub fn follows(&self, scale: Option<Vec3>) -> bool {
         match self {
             Self::Sweep(_) => crate::surface::procedural_sweep::ProceduralSweep::follows(scale),
+            Self::Offset(_) => crate::surface::offset_definition::OffsetDefinition::follows(scale),
             Self::Round(_) | Self::Corner(_) | Self::Draft(_) | Self::SectionBlend(_) => true,
         }
     }
@@ -1805,6 +1808,7 @@ impl KeptDefinition {
                 b.transform(rotate_n_move, scale);
                 Ok(())
             }
+            Self::Offset(o) => o.transform(k, rotate_n_move, scale, depth),
         }
     }
 
@@ -1815,7 +1819,7 @@ impl KeptDefinition {
     /// its net's own parametrisation, compared in any orientation: it has none.
     #[must_use]
     pub const fn has_parameter_map(&self) -> bool {
-        matches!(self, Self::Round(_) | Self::Sweep(_))
+        matches!(self, Self::Round(_) | Self::Sweep(_) | Self::Offset(_))
     }
 
     /// The net's parameter in `u` (or v) became `w'` with `w = alpha + beta w'`: the map
@@ -1824,6 +1828,7 @@ impl KeptDefinition {
         match self {
             Self::Round(r) => r.reparametrize_map(u, alpha, beta),
             Self::Sweep(s) => s.reparametrize_map(u, alpha, beta),
+            Self::Offset(o) => o.reparametrize_map(u, alpha, beta),
             Self::Corner(_) | Self::Draft(_) | Self::SectionBlend(_) => {}
         }
     }
@@ -1833,6 +1838,7 @@ impl KeptDefinition {
         match self {
             Self::Round(r) => r.swap_map(),
             Self::Sweep(s) => s.swap_map(),
+            Self::Offset(o) => o.swap_map(),
             Self::Corner(_) | Self::Draft(_) | Self::SectionBlend(_) => {}
         }
     }

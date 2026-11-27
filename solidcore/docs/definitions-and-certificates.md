@@ -531,7 +531,11 @@ A reviewer checks each of these on a change that touches a definition, a net or 
 8. **Records are files.** A definition persists as plain data: the database type
    (`PROCEDURAL_BLEND_TYPE`, `ProceduralBlend::read_from_db`) and the serde records of
    `surface::procedural_blend::record` (`ProceduralBlendRecord`, `ExactRoundRecord`,
-   `CornerRecord`), every number as stored. A chord with a sagitta (a weld bead's) has no record
+   `CornerRecord`, `OffsetDefinitionRecord`, `BlendOffsetRecord`), every number as stored.
+   An offset sheet's definition (`S + d n` of its base, its bound and its map) is rebuilt and
+   certified again on read (`OffsetDefinition::recertify`, the net's bound proved from the stored
+   numbers alone); a net the certificate refuses refuses the read, and the bound a writer stores
+   is the one a reader proves from the same numbers. A chord with a sagitta (a weld bead's) has no record
    yet: `exact_to_record` refuses it (`Unsupported`) rather than write it as the flat chord.
    A chamfer whose setbacks hold at every station has a record (`ChamferKindRecord::Setbacks`)
    but no construction yet: reading one is refused, never read as offsets.

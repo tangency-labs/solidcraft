@@ -230,10 +230,20 @@ fn one(name: &str, record: &Record, trusted: bool, fixes: &UpstreamFixes, t: &mu
             return;
         }
     };
-    let (a, z) = (
+    let (mut a, mut z) = (
         serde_json::to_value(record).unwrap(),
         serde_json::to_value(&back).unwrap(),
     );
+    // The version is the record's schema number, not its geometry: the stored corpus carries
+    // the version it was written at, and the conversion writes the current one. The schema is
+    // checked on its own, and the geometric classes compare without it.
+    assert_eq!(
+        z["version"],
+        serde_json::json!(solidcore_record::brep::VERSION),
+        "{name}: the conversion writes the record's version"
+    );
+    a.as_object_mut().unwrap().remove("version");
+    z.as_object_mut().unwrap().remove("version");
     // `PARITY_DUMP=<dir>` and `PARITY_ONLY=<part of a name>`: both records written there
     if let (Ok(dir), Ok(only)) = (std::env::var("PARITY_DUMP"), std::env::var("PARITY_ONLY")) {
         if name.contains(&only) {

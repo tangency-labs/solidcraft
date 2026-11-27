@@ -160,6 +160,8 @@ impl Rigid {
         }
         Some(match d {
             BlendDefinition::Procedural(r) => BlendDefinition::Procedural(Box::new(self.procedural(r)?)),
+            // A definition the record does not move: the body is moved by the kernel instead.
+            BlendDefinition::Offset(_) | BlendDefinition::BlendOffset(_) => return None,
             BlendDefinition::ExactRound(r) => {
                 let mut r = r.clone();
                 r.supports = [self.support(&r.supports[0])?, self.support(&r.supports[1])?];

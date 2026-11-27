@@ -3330,9 +3330,24 @@ pub fn certified_offset_surface(
         offset.offset_distance(),
         tolerance,
     )?;
-    let approximation =
-        crate::nurbs::b_spline_surface::p1::BSplineSurface::from_nurb(made.surface, false);
-    Ok((Surface::from(approximation), made.bound))
+    // the sheet keeps its definition: the base it was certified on, offset by the distance. Its
+    // bound is the one a reader proves from the stored numbers, so a written sheet reads back with
+    // the bound it was stored with.
+    let base_surface = Surface::from(
+        crate::nurbs::b_spline_surface::p1::BSplineSurface::from_nurb(base_nurb.clone(), false),
+    );
+    let net =
+        crate::nurbs::b_spline_surface::p1::BSplineSurface::from_nurb(made.surface.clone(), false);
+    let distance = offset.offset_distance();
+    let bound =
+        crate::surface::offset_definition::sheet_bound(kernel, &base_surface, &net, distance)?;
+    let sheet = crate::surface::offset_definition::certified_sheet_surface(
+        made.surface,
+        base_surface,
+        distance,
+        bound,
+    )?;
+    Ok((sheet, bound))
 }
 
 /// The failure of p1 for `cause`, with the cause's status (that of the site it replaced).

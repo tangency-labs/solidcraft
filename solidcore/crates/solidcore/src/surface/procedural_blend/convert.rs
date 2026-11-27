@@ -45,6 +45,7 @@ use crate::nurbs::math::{CPoint, NOW, NOZ};
 use crate::nurbs::srf_basic::Surface as NurbSurface;
 use crate::surface::ball_patch::BallPatch;
 use crate::surface::implicit::{AnalyticSupport, LeaderMap, SupportKind};
+use crate::surface::offset_definition::OffsetDefinition;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::FaceId;
 
@@ -328,7 +329,7 @@ fn curve_record(c: &BSplineCurve) -> Result<NurbsCurveRecord> {
 }
 
 /// A NURBS surface's stored numbers.
-fn surface_record(s: &BSplineSurface) -> Result<NurbsSurfaceRecord> {
+pub(crate) fn surface_record(s: &BSplineSurface) -> Result<NurbsSurfaceRecord> {
     let nurb = s.gw_nurb().ok_or_else(|| {
         Failure::new(OP_TO, SurfaceFailure::NoNurb)
             .with_status(SM_ERR)
@@ -572,7 +573,7 @@ fn curve_of(r: &NurbsCurveRecord) -> Result<BSplineCurve> {
 }
 
 /// The surface a record holds, its NURB as stored (no knot fix-up).
-fn surface_of(r: &NurbsSurfaceRecord) -> Result<BSplineSurface> {
+pub(crate) fn surface_of(r: &NurbsSurfaceRecord) -> Result<BSplineSurface> {
     let p = degree_of(r.u_degree)?;
     let q = degree_of(r.v_degree)?;
     non_decreasing(&r.u_knots)?;
@@ -820,6 +821,13 @@ const OP_ADOPT: &str = "surface::procedural_blend::convert::adopt_definitions";
 ///
 /// Those of [`to_record`] and [`exact_to_record`] other than `Unsupported`.
 pub fn face_definition(k: &Kernel, surface: &Surface) -> Result<Option<FaceDefinition>> {
+    if let (Some(offset), SurfaceKind::BSpline(net)) = (surface.offset_definition(), surface.kind())
+    {
+        // the bound written is the one proved from the numbers written, so a reader proves the same
+        let mut record = offset.to_record(k)?;
+        record.bound = offset.recertify(k, net)?;
+        return Ok(Some(FaceDefinition::Offset(Box::new(record))));
+    }
     let unrecorded = |e: SolidError| match e {
         SolidError::Unsupported { .. } => Ok(None),
         other => Err(other),
@@ -915,6 +923,26 @@ pub fn definition_surface(
                 None => Ok(()),
             };
             proved.map(|()| made)
+        }
+        FaceDefinition::Offset(d) => {
+            let definition = OffsetDefinition::from_record(k, d)?;
+            let sheet = form.into_owned();
+            // a net the certificate refuses for its own reason (a rational one) refuses typed; a net
+            // proved past the stored bound is not certified within it
+            let proved = definition.recertify(k, &sheet)?;
+            #[allow(clippy::neg_cmp_op_on_partial_ord)] // refuses NaN too
+            if !(proved <= d.bound) {
+                return Ok(Err(proved));
+            }
+            let mut surface = Surface::from(sheet);
+            surface.set_offset_definition(definition);
+            Ok(surface)
+        }
+        FaceDefinition::BlendOffset(_) => {
+            return Err(SolidError::Unsupported {
+                operation: OP_ADOPT,
+                reason: "an offset of a blend by its definition needs the first-order certificate, which this kernel does not have",
+            });
         }
     })
 }

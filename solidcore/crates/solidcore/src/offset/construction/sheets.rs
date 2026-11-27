@@ -141,6 +141,10 @@ struct Patch {
     w: Option<Bernstein2>,
 }
 
+/// A net's parameter map in one direction: the base's parameter is `a + b t` for the net's `t`
+/// (`b > 0`).
+pub(crate) type AxisMap = (f64, f64);
+
 /// The distinct breakpoints of the knots `k` of degree `deg` over the domain, with the
 /// multiplicity of each interior one.
 fn breakpoints(k: &[f64], deg: usize) -> Result<(Vec<f64>, Vec<usize>)> {
@@ -881,6 +885,136 @@ fn offset_patches(g: &Nurb) -> Result<Vec<Vec<Bernstein3>>> {
     Ok(out)
 }
 
+/// The base patch `spatch` restricted to the range `sub = [u0, u1, v0, v1]` of the
+/// surface's domain, in its own local coordinates.
+fn restrict_patch(spatch: &Patch, sub: [f64; 4]) -> Patch {
+    let [a, bb, c, e] = sub;
+    let (s0, t0) = local(spatch.range, a, c);
+    let (s1, t1) = local(spatch.range, bb, e);
+    Patch {
+        range: sub,
+        p: restrict3(&spatch.p, s0, s1, t0, t1),
+        w: spatch.w.as_ref().map(|w| w.restrict(s0, s1, t0, t1)),
+    }
+}
+
+/// The certified bound of one offset patch `gpatch` (local coordinates over `sub`) against
+/// the base patch `spatch` restricted to `sub`, and the splits a patch above `tol` asks for:
+/// the u breakpoint at `mid.0` and/or the v breakpoint at `mid.1`, returned per direction.
+/// The bound is the sheet's own certificate on the patch, or the smaller of it and the
+/// quarter patches' when the patch is above `tol`.
+fn patch_bound(
+    spatch: &Patch,
+    sub: [f64; 4],
+    gpatch: &Bernstein3,
+    d: f64,
+    tol: f64,
+    b: &Binomials,
+    mid: (f64, f64),
+) -> Result<(f64, [Option<f64>; 2])> {
+    let restricted = restrict_patch(spatch, sub);
+    let forms = ErrorForms::new(&restricted, gpatch, d, b)?;
+    let mut bound = forms.bound(d);
+    let mut splits = [None, None];
+    if bound > tol {
+        let (quarters, by_u, by_v) = forms.split_bounds(d);
+        bound = bound.min(quarters);
+        if bound > tol {
+            if by_u <= by_v {
+                splits[0] = Some(mid.0);
+            } else {
+                splits[1] = Some(mid.1);
+            }
+            if !by_u.is_finite() && !by_v.is_finite() {
+                splits = [Some(mid.0), Some(mid.1)];
+            }
+        }
+    }
+    Ok((bound, splits))
+}
+
+/// `offset_net_bound`: the distance of the net `g` from the offset `S + d n` of the base `s`,
+/// proved from the two numbers alone: the sheet's certificate on each patch, the smaller of the
+/// patch's bound and its quarter patches' (no tolerance, so a writer and a reader that hold the
+/// same numbers prove the same value). `g`'s parameters reach `s`'s by `map` (the affine map of
+/// each direction, `(a, b)` with `b > 0`, the orientation the offset definition gives the net).
+/// Each patch of `g` must lie in one patch of `s` once mapped; a net whose patch crosses a base
+/// breakpoint is refused, not certified.
+///
+/// # Errors
+///
+/// `InvalidInput` for a rational net, a net not bicubic, a non-finite or zero distance, or a
+/// patch that crosses a breakpoint of the base; `Degenerate` where a normal vanishes; a
+/// cancel.
+pub(crate) fn offset_net_bound(
+    k: &Kernel,
+    s: &Nurb,
+    g: &Nurb,
+    map: [AxisMap; 2],
+    d: f64,
+) -> Result<f64> {
+    if !(d.is_finite() && d != 0.0) {
+        return Err(invalid("an offset distance is finite and not zero"));
+    }
+    if g.is_rational() || g.degrees() != (DEGREE, DEGREE) {
+        return Err(invalid("a net is a bicubic spline"));
+    }
+    let b = Binomials::new();
+    let (ub, vb, ps) = patches(s)?;
+    let gp = offset_patches(g)?;
+    let (gub, _) = breakpoints(g.u_knots(), DEGREE)?;
+    let (gvb, _) = breakpoints(g.v_knots(), DEGREE)?;
+    // The map `a + scale x` is enclosed with the rounding of computing it. A net breakpoint whose
+    // enclosure holds a breakpoint of the base is that breakpoint: the map sends a stored knot to the
+    // joint it was made at, and the rounding must not read as a patch crossing it.
+    let to_base = |(a, scale): AxisMap, x: f64, breaks: &[f64]| {
+        let at = Ivl::from(a) + Ivl::from(scale) * Ivl::from(x);
+        breaks
+            .iter()
+            .copied()
+            .find(|&t| at.lo <= t && t <= at.hi)
+            .unwrap_or(0.5 * (at.lo + at.hi))
+    };
+    let mut worst: f64 = 0.0;
+    for (iu, row) in gp.iter().enumerate() {
+        let (Some(&a), Some(&bb)) = (gub.get(iu), gub.get(iu + 1)) else {
+            return Err(invalid("net u breakpoint"));
+        };
+        let (a, bb) = (to_base(map[0], a, &ub), to_base(map[0], bb, &ub));
+        for (iv, gpatch) in row.iter().enumerate() {
+            k.check_cancelled(OP)?;
+            let (Some(&c), Some(&e)) = (gvb.get(iv), gvb.get(iv + 1)) else {
+                return Err(invalid("net v breakpoint"));
+            };
+            let (c, e) = (to_base(map[1], c, &vb), to_base(map[1], e, &vb));
+            let (ui, vi) = (span_of(&ub, a), span_of(&vb, c));
+            let piece_fits = matches!(
+                (ub.get(ui), ub.get(ui + 1), vb.get(vi), vb.get(vi + 1)),
+                (Some(&u0), Some(&u1), Some(&v0), Some(&v1))
+                    if u0 <= a && bb <= u1 && v0 <= c && e <= v1
+            );
+            if !piece_fits {
+                return Err(invalid("a net patch crosses a breakpoint of the base"));
+            }
+            let spatch = ps
+                .get(ui)
+                .and_then(|r| r.get(vi))
+                .ok_or_else(|| invalid("no base patch under a net patch"))?;
+            // Both are certified upper bounds of one quantity, the distance of this patch of the net
+            // from the offset: the patch's own certificate, and the certificate over its four quarter
+            // patches. The minimum of two upper bounds is an upper bound, so the smaller is taken
+            // rigorously, not as a tuning. No tolerance enters, so a writer and a reader prove the
+            // same value.
+            let restricted = restrict_patch(spatch, [a, bb, c, e]);
+            let forms = ErrorForms::new(&restricted, gpatch, d, &b)?;
+            let (quarters, _, _) = forms.split_bounds(d);
+            let bound = forms.bound(d).min(quarters);
+            worst = worst.max(bound);
+        }
+    }
+    Ok(worst)
+}
+
 /// The certified offset of `s` by `d` along its normal (`S_u x S_v`, as the NURB's),
 /// to within `tol` at every parameter, over `s`'s whole domain and in its
 /// parametrisation (`O(u, v) = S(u, v) + d n(u, v)`).
@@ -956,30 +1090,10 @@ pub fn certified_offset(k: &Kernel, s: &Nurb, d: f64, tol: f64) -> Result<Certif
                     .get(span_of(&ub, um))
                     .and_then(|r| r.get(span_of(&vb, vm)))
                     .ok_or_else(|| invalid("no base patch under an offset patch"))?;
-                let (s0, t0) = local(spatch.range, a, c);
-                let (s1, t1) = local(spatch.range, bb, e);
-                let restricted = Patch {
-                    range: [a, bb, c, e],
-                    p: restrict3(&spatch.p, s0, s1, t0, t1),
-                    w: spatch.w.as_ref().map(|w| w.restrict(s0, s1, t0, t1)),
-                };
-                let forms = ErrorForms::new(&restricted, gpatch, d, &b)?;
-                let mut bound = forms.bound(d);
-                if bound > tol {
-                    let (quarters, by_u, by_v) = forms.split_bounds(d);
-                    bound = bound.min(quarters);
-                    if bound > tol {
-                        if by_u <= by_v {
-                            split_u.push(um);
-                        } else {
-                            split_v.push(vm);
-                        }
-                        if !by_u.is_finite() && !by_v.is_finite() {
-                            split_u.push(um);
-                            split_v.push(vm);
-                        }
-                    }
-                }
+                let (bound, splits) =
+                    patch_bound(spatch, [a, bb, c, e], gpatch, d, tol, &b, (um, vm))?;
+                split_u.extend(splits[0]);
+                split_v.extend(splits[1]);
                 worst = worst.max(bound);
             }
         }

@@ -28,6 +28,104 @@ pub enum BlendDefinition {
     Procedural(Box<BlendDefinitionRecord>),
     /// A round of an exact class: its net is S.
     ExactRound(Box<ExactRoundDefinition>),
+    /// A certified offset sheet's definition: its net within the definition's bound of
+    /// `S + d n` (record version 5).
+    Offset(Box<OffsetDefinitionRecord>),
+    /// An offset of a procedural blend by its definition, `S + d n_S` (record version 5): its
+    /// net within a bound the kernel computes on read.
+    BlendOffset(Box<BlendOffsetRecord>),
+}
+
+/// The definition a certified offset sheet keeps: `O = S + d n` of its base `S` (`n` the base's
+/// NURB normal `S_u x S_v / |S_u x S_v|`), the bound `bound` its net is certified within, and the
+/// map from the net's parameters to the base's. The face's `nurbs` is the net.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OffsetDefinitionRecord {
+    /// The base S, as stored.
+    pub base: NurbsSurfaceRecord,
+    /// The signed distance d along the base's normal.
+    pub distance: f64,
+    /// The certified bound of the net from `S + d n` at the same parameters.
+    pub bound: f64,
+    /// The map from the net's (u, v) to the base's.
+    pub map: ParameterMapRecord,
+}
+
+impl OffsetDefinitionRecord {
+    /// The structural check: the base as its own check, and the distance, bound and map
+    /// finite (the kernel's rebuild checks what they mean and certifies the net again).
+    ///
+    /// # Errors
+    ///
+    /// The first [`RecordError`] met.
+    pub fn validate(&self) -> Result<(), RecordError> {
+        self.base.validate("offset.base")?;
+        let numbers = [
+            self.distance,
+            self.bound,
+            self.map.a[0],
+            self.map.a[1],
+            self.map.b[0],
+            self.map.b[1],
+        ];
+        if !all_finite(&numbers) {
+            return Err(refuse("offset", "a definition's numbers are finite"));
+        }
+        Ok(())
+    }
+
+    /// How many numbers it holds, for the record's item budget.
+    pub fn items(&self) -> usize {
+        self.base.items()
+    }
+}
+
+/// An offset of a procedural blend by its definition: `O = S + d n_S` of the blend's definition
+/// S (`n_S` its unit normal), the blend kept whole (its definition and its net B), and the bound
+/// `net_bound` the face's net G is certified within of `B + d n_B`. The face's `nurbs` is G.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BlendOffsetRecord {
+    /// The blend whose definition is offset: its definition S and its net B.
+    pub blend: ProceduralBlendRecord,
+    /// The signed distance d along S's normal.
+    pub distance: f64,
+    /// The bound G is certified within of `B + d n_B`, proved again on read.
+    pub net_bound: f64,
+}
+
+impl BlendOffsetRecord {
+    /// The structural check: the blend as a nested blend's (its supports nested at most
+    /// [`RECORD_MAX_DEPTH`] deep with it), the distance finite and not zero (the offset by zero
+    /// is the blend itself), and the bound finite and not negative.
+    ///
+    /// # Errors
+    ///
+    /// The first [`RecordError`] met.
+    pub fn validate(&self) -> Result<(), RecordError> {
+        self.blend.validate()?;
+        if !(self.distance.is_finite() && self.distance != 0.0) {
+            return Err(refuse(
+                "blend_offset.distance",
+                "an offset's distance is finite and not zero",
+            ));
+        }
+        if !(self.net_bound.is_finite() && self.net_bound >= 0.0) {
+            return Err(refuse(
+                "blend_offset.net_bound",
+                "a bound is finite and not negative",
+            ));
+        }
+        Ok(())
+    }
+
+    /// How many numbers it holds, the blend's definition and net included, for the record's
+    /// item budget.
+    pub fn items(&self) -> usize {
+        self.blend
+            .definition
+            .items()
+            .saturating_add(self.blend.net.items())
+    }
 }
 
 /// A NURBS curve of a definition (the leader, a seed, a radius law), as stored.
@@ -755,6 +853,8 @@ impl BlendDefinition {
         match self {
             BlendDefinition::Procedural(d) => d.validate(),
             BlendDefinition::ExactRound(r) => r.validate(),
+            BlendDefinition::Offset(o) => o.validate(),
+            BlendDefinition::BlendOffset(o) => o.validate(),
         }
     }
 
@@ -763,6 +863,8 @@ impl BlendDefinition {
         match self {
             BlendDefinition::Procedural(d) => d.items(),
             BlendDefinition::ExactRound(r) => r.items(),
+            BlendDefinition::Offset(o) => o.items(),
+            BlendDefinition::BlendOffset(o) => o.items(),
         }
     }
 }

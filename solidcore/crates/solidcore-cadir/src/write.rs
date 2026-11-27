@@ -741,7 +741,7 @@ impl Writer<'_> {
             loops,
             name: None,
             color: None,
-            tolerance: certified(face),
+            tolerance: certified(face)?,
         });
         if let Some(slot) = self.faces.get_mut(f as usize) {
             *slot = Some(id.clone());
@@ -823,17 +823,27 @@ impl Writer<'_> {
 /// The deviation a face written as its NURBS form carries: a procedural blend's net is within
 /// its definition's certified bound ε of the definition, which CADIR cannot hold, so ε is the
 /// face's tolerance (CADIR's `Face::tolerance`, the most its geometry is off the face). An exact
-/// round's net is its definition, and every other face is written exactly: `None`.
-fn certified(face: &solidcore_record::brep::Face) -> Option<PositiveReal> {
-    match &face.surface {
+/// round's net is its definition, and every other face is written exactly: `None`. An offset
+/// sheet states its own bound. An offset of a blend by its definition stores only the bound of
+/// its net against its own offset of the blend's net, not the bound from the offset surface the
+/// kernel derives on read, so CADIR cannot state its deviation and the write is refused.
+fn certified(face: &solidcore_record::brep::Face) -> Result<Option<PositiveReal>, WriteError> {
+    Ok(match &face.surface {
         solidcore_record::brep::Surface::Blend { definition } => match definition.as_ref() {
             solidcore_record::brep::blend::BlendDefinition::Procedural(d) => {
                 PositiveReal::new(d.bound)
             }
+            solidcore_record::brep::blend::BlendDefinition::Offset(o) => PositiveReal::new(o.bound),
+            solidcore_record::brep::blend::BlendDefinition::BlendOffset(_) => {
+                return Err(WriteError::Unsupported(
+                    "an offset of a blend by its definition has no deviation CADIR can state"
+                        .to_string(),
+                ));
+            }
             solidcore_record::brep::blend::BlendDefinition::ExactRound(_) => None,
         },
         _ => None,
-    }
+    })
 }
 
 /// Record edge `edge`'s interval on its named curve (a line, circle or ellipse its NURBS form

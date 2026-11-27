@@ -141,7 +141,7 @@ Natural normals are ∂S/∂u × ∂S/∂v.
 | `sphere` {frame, radius} | origin + r (cos v (cos u x + sin u y) + sin v z) | longitude, periodic | latitude, [−π/2, π/2] |
 | `torus` {frame, major_radius, minor_radius} | origin + (R + r cos v)(cos u x + sin u y) + r sin v z | longitude, periodic | meridian angle, periodic |
 | `ball_patch` {center, radius} | its `nurbs`: a label with no (u, v) of its own | its form's | its form's |
-| `blend` {definition} | its `nurbs`: a round by its definition, with no (u, v) of its own | its form's | its form's |
+| `blend` {definition} | its `nurbs`: the net of its definition, with no (u, v) of its own: a round by its definition, a procedural blend, an offset sheet (`offset`: `S + d n` of its base within its bound), or an offset of a blend by its definition (`blend_offset`, read only until the kernel has its certificate) | its form's | its form's |
 | `spline` {u_knots, v_knots, points} | tensor-product B-spline, `points[i][j]` with i along u | u knot domain | v knot domain |
 | `rational_spline` {u_knots, v_knots, homogeneous} | the same, homogeneous coefficients | u knot domain | v knot domain |
 | `placed_revolution` {profile, origin, axis, matrix, forward} | M · R(angle) · profile(s): the profile revolved about origin and unit axis by the right-hand rule, then mapped by the column-major affine matrix M | `forward`: s, the profile's parameter; else the angle | `forward`: the angle, [0, 2π); else s |
@@ -161,6 +161,13 @@ then in the NURBS's (u, v), its natural normal is the NURBS's, and `surface`
 only says what the face is (axis, radius). Pcurves on such a face are SMLib's
 own trims, with nothing fitted. A STEP writer writes the analytic surface and
 the face's edges without pcurves.
+
+A certified offset sheet, the kernel's net of an offset surface, is written as a
+`blend` face whose definition is `offset` (its base as a `spline`, the distance,
+the bound and the parameter map) and whose `nurbs` is the net. A reader rebuilds
+the definition and certifies the net again from the stored numbers; the bound it
+stores is the one it proves, and a writer writes the definition only where that
+bound is within the face's tolerance.
 
 A face whose surface has no kind here, SMLib's implicit offset surface, is
 written as a `spline` that stands in for it, as SMLib's export writes it. The
@@ -298,6 +305,15 @@ floating-point comparisons. A decoded cache remains provisional until
 authoritative re-evaluation finishes. The document and original blobs remain
 sufficient to reopen when a cache, representation, producer or adapter is
 unsupported.
+
+## Record versions
+
+The body record declares its version. Version 4 is the record before offset
+definitions; version 5 adds the two offset definitions, `offset` and
+`blend_offset`, as `blend` face definitions. A version 4 reader refuses a
+version 5 record by its version, and a version 5 reader reads a version 4 record
+unchanged. Versions below 4 and above 5 are refused (`OLDEST_VERSION` and
+`VERSION` in `solidcore-record`).
 
 ## Body binary envelope, version 5
 

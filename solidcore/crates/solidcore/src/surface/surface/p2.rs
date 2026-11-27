@@ -289,6 +289,7 @@ use crate::nurbs::knots::Side;
 use crate::surface::ball_patch::{BallPatch, BALL_PATCH_TYPE};
 use crate::surface::cone::Cone;
 use crate::surface::curve_bounded_surface::CurveBoundedSurface;
+use crate::surface::offset_definition::OffsetDefinition;
 use crate::surface::offset_surface::OffsetSurface;
 use crate::surface::plane::p2::PlaneIntersectWarning;
 use crate::surface::plane::Plane;
@@ -838,6 +839,7 @@ pub(crate) fn any_nested_geometry(
                         // a section blend's definition holds frames, no geometry
                         KeptDefinition::Sweep(_) | KeptDefinition::SectionBlend(_) => {}
                         KeptDefinition::Draft(draft) => push(Geometry::Surface(&draft.source)),
+                        KeptDefinition::Offset(offset) => push(Geometry::Surface(&offset.base)),
                     }
                 }
                 match &surface.kind {
@@ -1298,7 +1300,7 @@ impl Surface {
             Some(KeptDefinition::SectionBlend(blend)) => {
                 return Some(BlendRef::SectionBlend { blend, net: self })
             }
-            Some(KeptDefinition::Sweep(_)) | None => {}
+            Some(KeptDefinition::Sweep(_) | KeptDefinition::Offset(_)) | None => {}
         }
         match self.kind() {
             SurfaceKind::ProceduralBlend(p) => Some(BlendRef::Procedural(p)),
@@ -1340,7 +1342,31 @@ impl Surface {
         if let Some(blend) = self.procedural_blend() {
             return Some(DefinitionRef::Blend(blend));
         }
+        if let Some(offset) = self.offset_definition() {
+            return Some(DefinitionRef::Offset(offset));
+        }
         self.procedural_sweep().map(DefinitionRef::Sweep)
+    }
+
+    /// The offset sheet's definition this surface is the net of: a B-spline net keeping
+    /// `S + d n` ([`crate::surface::offset_definition`]); `None` for any other surface.
+    #[must_use]
+    pub fn offset_definition(&self) -> Option<&OffsetDefinition> {
+        match (self.definition.as_deref(), self.kind()) {
+            (Some(KeptDefinition::Offset(offset)), SurfaceKind::BSpline(_)) => Some(offset),
+            _ => None,
+        }
+    }
+
+    /// The certified bound of the net from the definition it keeps, 0 when it keeps none.
+    #[must_use]
+    pub fn certified_bound(&self) -> f64 {
+        self.procedural_definition().map_or(0.0, |d| d.bound())
+    }
+
+    /// Keeps `offset` as the definition of this surface, a certified offset sheet's net.
+    pub(crate) fn set_offset_definition(&mut self, offset: OffsetDefinition) {
+        self.definition = Some(Box::new(KeptDefinition::Offset(offset)));
     }
 
     /// Keeps `sweep` as the definition of this surface, its net (#2572).
@@ -1396,7 +1422,10 @@ impl Surface {
     /// is carried too: a copy or piece of such a copy is still a fitted net.
     fn carry_definition(&self, mut piece: Self) -> Self {
         piece.fitted_net = self.fitted_net;
-        let sweep = matches!(self.definition.as_deref(), Some(KeptDefinition::Sweep(_)));
+        let sweep = matches!(
+            self.definition.as_deref(),
+            Some(KeptDefinition::Sweep(_) | KeptDefinition::Offset(_))
+        );
         if sweep && !matches!(piece.kind(), SurfaceKind::BSpline(_)) {
             piece.definition = None;
             // (the definition goes, what it says of the net stays)
@@ -3730,6 +3759,12 @@ impl Surface {
             (self.definition.as_deref_mut(), &self.kind)
         {
             sweep.add_motion_rounding(net)?;
+        }
+        // and an offset sheet's, as a sweep's
+        if let (Some(KeptDefinition::Offset(offset)), SurfaceKind::BSpline(net)) =
+            (self.definition.as_deref_mut(), &self.kind)
+        {
+            offset.add_motion_rounding(net)?;
         }
         Ok(())
     }
