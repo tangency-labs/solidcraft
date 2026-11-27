@@ -2357,13 +2357,13 @@ fn c3_make_intersector<'s>(
     let [domain1, domain2] = &st.trace.domains;
     // the solver (`*this`) is passed to each intersector call instead
     let mut fi = TraceIntersector::new(k, surface1, domain1, surface2, domain2, None)?;
-    // Not upstream (#2500): with `offset_extension_as_itself` an offset extends a surface
+    // Not upstream (#2500): an offset continuing as itself extends a surface
     // of revolution round its axis past the closure of its turn, so the offsets'
     // intersection can be closed (a round run onto a torus's tube meets its offset in a
     // closed oval) without repeating its UV: an extension stops where it comes back onto
     // the curve traced, compared in 3D, or it runs round past the trace's own span and the
     // fillet surface covers that span twice.
-    fi.base.base.extension_stops_on_closure = k.fixes.offset_extension_as_itself;
+    fi.base.base.extension_stops_on_closure = true;
 
     // If we need to trace beyond the end and we are tracing along an arc, put a stop
     // tracing criterion to avoid possible infinite looping (`IsArc` only runs when an
@@ -5079,13 +5079,13 @@ pub(crate) fn point_intersection_on_surfaces(
     let [surface1, surface2] = surfaces;
     let [domain1, domain2] = &domains;
     let mut fi = TraceIntersector::new(k, surface1, domain1, surface2, domain2, None)?;
-    // Not upstream (#2500): with `offset_extension_as_itself` an offset extends a surface
+    // Not upstream (#2500): an offset continuing as itself extends a surface
     // of revolution round its axis past the closure of its turn, so the offsets'
     // intersection can be closed (a round run onto a torus's tube meets its offset in a
     // closed oval) without repeating its UV: an extension stops where it comes back onto
     // the curve traced, compared in 3D, or it runs round past the trace's own span and the
     // fillet surface covers that span twice.
-    fi.base.base.extension_stops_on_closure = k.fixes.offset_extension_as_itself;
+    fi.base.base.extension_stops_on_closure = true;
     let mut cx = Cx {
         k,
         target,

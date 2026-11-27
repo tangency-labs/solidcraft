@@ -79,6 +79,46 @@ pub fn trim_sheet_keep(body: &Body, sheet: &Body, keep: TrimKeep) -> Result<Body
     })
 }
 
+/// A surface body split by the complete bounded surface body `sheet` into its connected regions,
+/// each region its own body: the faces are cut where the sheet's faces meet them, as they are
+/// and never extended, as [`trim_sheet_keep`] cuts them. Every region is kept, so together the
+/// parts are the whole of `body`. `None` when the sheet separates no region of `body` (it
+/// misses it, only touches it, or ends inside a face): one of several tools may cross only some
+/// of the pieces the others leave. Each part's history is over `[body]`, each face the face of
+/// `body` it is a piece of. `body` may be closed: a closed sheet (a full turn of a surface, which
+/// [`Body::is_surface`] cannot tell from a solid) splits into open regions the same way, so the
+/// caller decides that `body` is a surface.
+pub fn split_sheet_where_it_cuts(body: &Body, sheet: &Body) -> Result<Option<Vec<Body>>> {
+    let _span = solidcraft_profile::span("kernel", "split_sheet_where_it_cuts");
+    body.require_brep("split")?;
+    sheet.require_brep("a split tool")?;
+    if std::ptr::eq(body, sheet) {
+        return Err(KernelError::Invalid("a surface cannot split itself".into()));
+    }
+    if !sheet.is_surface() {
+        return Err(KernelError::Invalid("a surface body splits only along other surface bodies".into()));
+    }
+    crate::guard("split sheet", || {
+        let (target, order) = crate::splitface::tagged("split sheet", body)?;
+        let tool = crate::native::smlib_body(sheet)?;
+        let parts = match target.split_sheet(&tool) {
+            Ok(parts) => parts,
+            Err(solidcraft_smlib::Error::Refused(solidcore_ops::Error::CurveDoesNotCut)) => return Ok(None),
+            Err(e) => return Err(KernelError::smlib("split sheet", e)),
+        };
+        let counts = crate::record::counts(&[body]);
+        parts
+            .iter()
+            .map(|part| {
+                let (mut out, history) = crate::splitface::brought_back("split sheet", body, &order, part)?;
+                out.regularization_protected = true;
+                Ok(out.with_checked_history(Some(history), &counts))
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(Some)
+    })
+}
+
 /// A surface body trimmed by a tool, keeping what `keep` says. Each kept face is the face it is
 /// a piece of (its history is over `[body]`).
 ///
