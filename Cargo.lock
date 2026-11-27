@@ -6616,6 +6616,7 @@ version = "0.51.0"
 dependencies = [
  "arboard",
  "craft-plugin",
+ "ed25519-dalek",
  "egui",
  "egui-wgpu",
  "flate2",
