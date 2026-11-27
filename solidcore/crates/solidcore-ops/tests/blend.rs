@@ -3507,6 +3507,66 @@ fn the_tangent_chain_runs_round_the_slot() {
     assert_eq!(chain(&[], 0.01), Err(Error::Argument));
 }
 
+/// A plate with a through slot 1.8 wide: its small end arc (radius 0.9) and the straight
+/// next to it, both on the top face, take a 1 mm chamfer together. SolidCraft #22092: the
+/// chamfer is wider than the slot is half-wide and the bands meet on the arc's tangent
+/// seams, which refused with "Fillet Corner Error: Unable to Compute Geometry"; the
+/// straight edge alone and the pair at 0.5 mm built. The slot is a run 8 long with a
+/// half-cylinder end, so the top rim is a straight 8 long and a half circle of radius 0.9
+/// that meet on the arc's tangent seams.
+fn slotted_plate() -> Body {
+    use solidcore_ops::boolean::boolean;
+    use solidcore_ops::BooleanOp;
+
+    let plate = make_box([-10.0, -10.0, 0.0], [20.0, 20.0, 10.0]).unwrap();
+    let run = make_box([-0.9, 0.0, 0.0], [1.8, 8.0, 12.0]).unwrap();
+    let end = make_cylinder([0.0, 8.0, 0.0], 0.9, 12.0).unwrap();
+    let slot = boolean(run, end, BooleanOp::Union).unwrap().unwrap();
+    boolean(plate, slot, BooleanOp::Subtract).unwrap().unwrap()
+}
+
+fn slotted_plate_top_rim(body: &Body) -> [usize; 2] {
+    [
+        edge_at(body, [0.9, 4.0, 10.0]),
+        edge_at(body, [0.0, 8.9, 10.0]),
+    ]
+}
+
+/// The pair builds, valid, one solid, nothing dropped, at 1 mm — the reported refusal —
+/// and at 0.5 mm; the straight edge alone removes its bands' exact volume: a 45° chamfer
+/// of distance d takes a d²/2 section along a straight rim, here 8 d²/2.
+#[test]
+fn a_chamfer_wider_than_half_the_slot_builds_on_the_arc_and_its_straight() {
+    all_fixes();
+    let before = volume(&slotted_plate());
+    assert!(rel(before, 4000.0 - (1.8 * 8.0 + PI * 0.81 / 2.0) * 10.0) < 1e-9);
+    for (edges, size) in [(&[0][..], 1.0), (&[0, 1][..], 0.5), (&[0, 1][..], 1.0)] {
+        let body = slotted_plate();
+        let rim = slotted_plate_top_rim(&body);
+        let picked: Vec<usize> = edges.iter().map(|&i| rim[i]).collect();
+        let made = blend(
+            &body,
+            Blend::Chamfer,
+            &picked,
+            &[size],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap();
+        assert_eq!(made.dropped, [false; 2][..edges.len()]);
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+        assert_eq!(body.solid_count().unwrap(), 1);
+        let after = volume(&body);
+        assert!(after < before, "{edges:?} at {size}: nothing removed");
+        if edges.len() == 1 {
+            assert!(
+                rel(after, before - 0.5 * size * size * 8.0) < 1e-9,
+                "{edges:?} at {size}"
+            );
+        }
+    }
+}
+
 /// The slot's seam, where its straight side runs into its round end, has no blend: its faces
 /// meet tangentially all along it. Refused with its index, the body as it came in.
 #[test]
