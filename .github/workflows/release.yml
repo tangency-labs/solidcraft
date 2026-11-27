@@ -718,6 +718,8 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/wheel-check"
           "$RUNNER_TEMP/wheel-check/bin/pip" install --quiet --require-hashes --only-binary :all: -r python/tests/requirements.txt
           "$RUNNER_TEMP/wheel-check/bin/pip" install --quiet --no-deps dist/python/solidcraft-*-manylinux_*_x86_64.whl
+          # `solidcraft` (what `uvx solidcraft` runs) reaches the bundled binary.
+          env -u SOLIDCRAFT_CLI "$RUNNER_TEMP/wheel-check/bin/solidcraft" --version
           cd "$RUNNER_TEMP" && env -u SOLIDCRAFT_CLI "$RUNNER_TEMP/wheel-check/bin/python" -m pytest -q -p no:cacheprovider "$GITHUB_WORKSPACE/python/tests"
 
   release:
