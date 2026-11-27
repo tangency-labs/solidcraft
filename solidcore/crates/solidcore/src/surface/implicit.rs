@@ -2219,11 +2219,20 @@ impl AnalyticSupport {
         // and the sweep converter carry, so that `of` reads the support back unchanged
         match (surface.kind_mut(), *self) {
             (SurfaceKind::Cone(c), Self::Cylinder { placement, radius }) => {
-                on_axis_from(&mut c.rev, placement, axial_anchors.ok_or_else(not_form)?)?;
+                on_axis_from(
+                    &mut c.rev,
+                    c.inside_out,
+                    placement,
+                    &form,
+                    axial_anchors.ok_or_else(not_form)?,
+                )?;
                 c.base_radius = radius;
                 c.semi_angle_deg = 0.0;
                 c.cylinder = true;
                 c.rev.base = form.copy();
+                // the sweep converter's circle about the support's axis too, as a torus's
+                // (#16297): recognition's was its own fitted circle
+                c.rebuild_cone_polar_converter(k)?;
             }
             (
                 SurfaceKind::Cone(c),
@@ -2233,10 +2242,17 @@ impl AnalyticSupport {
                     semi_angle_deg,
                 },
             ) => {
-                on_axis_from(&mut c.rev, placement, axial_anchors.ok_or_else(not_form)?)?;
+                on_axis_from(
+                    &mut c.rev,
+                    c.inside_out,
+                    placement,
+                    &form,
+                    axial_anchors.ok_or_else(not_form)?,
+                )?;
                 c.base_radius = base_radius;
                 c.semi_angle_deg = semi_angle_deg;
                 c.rev.base = form.copy();
+                c.rebuild_cone_polar_converter(k)?;
             }
             (SurfaceKind::Sphere(sp), Self::Sphere { placement, radius }) => {
                 sp.base.position = placement;
@@ -2262,10 +2278,14 @@ fn not_form() -> SolidError {
 /// axial rounding in either the height datum or span. The original converted heights
 /// determine their order for inside-out surfaces. The generator line is reparameterised
 /// with the same affine map, keeping its NURBS points and matching the surface interval.
-/// A placement off the axis or turned about it is still refused by `evaluates_as`.
+/// The sweep's angles are read off the form's end meridians about the same axis
+/// ([`sweep_about`]), not taken from the fitted circle. A placement off the axis or turned
+/// about it is still refused by `evaluates_as`.
 fn on_axis_from(
     rev: &mut crate::surface::surf_of_revolution::SurfOfRevolution,
+    inside_out: bool,
     placement: Axis2Placement,
+    form: &BSplineSurface,
     anchors: [(Vec3, f64); 2],
 ) -> Result<()> {
     use crate::curve::curve::CurveKind;
@@ -2291,7 +2311,14 @@ fn on_axis_from(
     if !offset.is_finite() {
         return Err(not_form());
     }
-    rev.anal_uv_domain = Extent2d::from_bounds(d.u_min(), lo, d.u_max(), hi);
+    let (u0, u1) = sweep_about(
+        &placement,
+        rev.swap_uv,
+        inside_out,
+        form,
+        (d.u_min(), d.u_max()),
+    )?;
+    rev.anal_uv_domain = Extent2d::from_bounds(u0, lo, u1, hi);
     rev.position = placement;
     match rev
         .gen_curve
@@ -2313,6 +2340,88 @@ fn on_axis_from(
             "a recognised cylinder or cone has no generator line",
         )),
     }
+}
+
+/// Not upstream (#3383): the sweep interval, in degrees, that a cone or cylinder's `form`
+/// spans about `placement`'s axis, measured from `placement`'s x axis towards its y axis.
+/// Recognition fits the circle of the form's first sweep row through three of its points,
+/// and on a short arc that circle's centre is off the axis by the points' rounding over the
+/// square of the arc (2.3e-7 on a 0.1 degree arc of radius 1000), and the angles it gives the
+/// sweep's ends are read about that centre: the end of that arc came out 2.3e-11 degrees
+/// short, 4e-10 along the surface, 30 times the rounding the label's proof allows.
+///
+/// A meridian lies in a half-plane through the axis, so each of its control points has the
+/// meridian's angle about it; each end's angle is read at its control point farthest from
+/// the axis (`atan2` in the placement's frame). The form's first meridian is the sweep's
+/// start, its last the end, the other way round for an inside-out cone (whose NURBS
+/// parameter runs against its angle). Each angle is taken in the period nearest the
+/// `fitted` end it replaces.
+///
+/// The fitted ends are kept where the form has no net or a meridian lies on the axis, and
+/// where a reading is more than `SM_EFF_ZERO_DEG` from its fitted end: then the reading is
+/// not of this sweep (a cone's nappe past its apex), and the proof decides on the fit as
+/// before.
+///
+/// # Errors
+///
+/// Those of the form's control net.
+fn sweep_about(
+    placement: &Axis2Placement,
+    swap_uv: bool,
+    inside_out: bool,
+    form: &BSplineSurface,
+    fitted: (f64, f64),
+) -> Result<(f64, f64)> {
+    use crate::math::EFF_ZERO_DEG;
+    if form.gw_nurb().is_none() {
+        return Ok(fitted);
+    }
+    let (net, _, _) = euclidean_net(form)?;
+    let (origin, x, y, z) = (
+        placement.origin(),
+        placement.x_axis(),
+        placement.y_axis(),
+        placement.z_axis(),
+    );
+    // a meridian's angle about the axis, at its control point farthest from it, in degrees
+    let angle = |column: &mut dyn Iterator<Item = Vec3>| -> Option<f64> {
+        let r = column
+            .map(|p| {
+                let s = p - origin;
+                s - z * s.dot(z)
+            })
+            .max_by(|a, b| a.length().total_cmp(&b.length()))?;
+        (r.length() > 0.0).then(|| r.dot(y).atan2(r.dot(x)) * 180.0 / PI)
+    };
+    let meridian = |end: bool| -> Option<f64> {
+        if swap_uv {
+            angle(&mut net.iter().filter_map(|row| {
+                if end {
+                    row.last().copied()
+                } else {
+                    row.first().copied()
+                }
+            }))
+        } else {
+            let column = if end { net.last() } else { net.first() }?;
+            angle(&mut column.iter().copied())
+        }
+    };
+    let (Some(first), Some(last)) = (meridian(false), meridian(true)) else {
+        return Ok(fitted);
+    };
+    let (start, end) = if inside_out {
+        (last, first)
+    } else {
+        (first, last)
+    };
+    // the angle's representative in the period nearest the fitted end
+    let near = |a: f64, to: f64| a + 360.0 * ((to - a) / 360.0).round();
+    let (u0, u1) = (near(start, fitted.0), near(end, fitted.1));
+    if (u0 - fitted.0).abs() > EFF_ZERO_DEG || (u1 - fitted.1).abs() > EFF_ZERO_DEG || u0 >= u1 {
+        return Ok(fitted);
+    }
+    Ok((u0, u1))
 }
 
 /// The cylinder, cone, sphere or torus of kind `kind` the kernel recognises in `form`
