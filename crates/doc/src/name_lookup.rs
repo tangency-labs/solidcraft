@@ -1887,6 +1887,57 @@ fn on_face(body: &ModelBody, face: usize, pick: Vec3) -> Option<(usize, Vec3)> {
     Some((face, point))
 }
 
+/// How close, relative to a body's size, a saved pick must lie to a face for
+/// [`faces_at_saved_point`]: a pick is a point the face had, so only rounding separates them.
+const SAVED_POINT_TOL: f64 = 1e-7;
+
+/// Whether a stored face name that finds nothing may be found again at its saved point
+/// ([`faces_at_saved_point`]): the feature and role that made the named face still make a face
+/// of one of `bodies` (the name's root, before its first `@` or `#`: `F73:side:l47` of
+/// `F73:side:l47@F90.1@F174.1`), so only how the face was told apart changed, as when its name
+/// was worked out from geometry before Align kept history (#20308, #22919). A face whose own
+/// root is gone (its sketch curve deleted and drawn again) is still lost, and so are a name
+/// saved before format 14 ([`LEGACY_MARK`]), whose faces were cut differently, and a sheet's
+/// face name.
+pub(crate) fn refound_at_saved_point<'b>(name: &str, bodies: impl IntoIterator<Item = &'b ModelBody>) -> bool {
+    if name.is_empty() || legacy_name(name).is_some() || crate::sheet::split_sheet_face_name(name).is_some() {
+        return false;
+    }
+    let root = name_root(name);
+    if root.is_empty() {
+        return false;
+    }
+    bodies.into_iter().filter(|b| !b.body.is_mesh()).any(|b| face_names(b).iter().any(|own| name_root(own) == root))
+}
+
+/// A face name up to its first `@` (a copy or a move) or `#` (a piece) outside brackets.
+fn name_root(name: &str) -> &str {
+    let mut depth = 0usize;
+    for (i, c) in name.char_indices() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = depth.saturating_sub(1),
+            '@' | '#' if depth == 0 => return &name[..i],
+            _ => {}
+        }
+    }
+    name
+}
+
+/// The faces of `body` that a saved pick `p` lies on, to within a ten-millionth of the body's
+/// size (at least a micrometre), each with the point on it. A stored face name can find nothing
+/// although the face is still there, unchanged: the name was worked out from geometry when it
+/// was saved (an Align that kept no history, #20308) and the face has its exact name now
+/// (#22919). The faces under the pick are only candidates: the caller takes one only when what
+/// it reads from it is exactly what it read before (the same plane, the same projected edges).
+pub(crate) fn faces_at_saved_point(body: &ModelBody, p: Vec3) -> Vec<(usize, Vec3)> {
+    if body.body.is_mesh() || !p.is_finite() || body.body.face_count() > MAX_PROJECTION_RECOVERY_FACES {
+        return Vec::new();
+    }
+    let tolerance = (body.body.size() * SAVED_POINT_TOL).max(1e-3 * 1e-3);
+    (0..body.body.face_count()).filter_map(|face| Some((face, body.body.point_lies_on_face(face, p, tolerance).ok()??))).collect()
+}
+
 /// The one face a name `model.faces` lists finds, on the body called `body` or, without one, on
 /// any body. `Err` says why there is no such face, or why the name does not name just one (the
 /// pieces of a split face, or the same face on several bodies): a command that takes a face by
