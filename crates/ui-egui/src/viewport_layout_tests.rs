@@ -965,31 +965,24 @@ fn turn_around_is_only_offered_to_the_focused_tiled_view() {
 fn screen_up_policy_leaves_other_view_animations_unchanged() {
     use crate::SolveApp;
     use solidcraft_viewport::{CameraAnim, ease_in_out};
-    // Sampling at `duration * fraction` divides by the duration again, so the fraction the sample
-    // eases by can differ from `fraction` in its last bit, and the angles then differ in their last
-    // digits (#23130: yaw -0.8568017405868527 against -0.8568017405868524 on Apple Silicon). The
-    // ordinary path is the same camera to well within 1e-12.
-    let same = |a: Camera, b: Camera| {
-        let near = |x: f64, y: f64| (x - y).abs() <= 1e-12 * x.abs().max(y.abs()).max(1.0);
-        a.up == b.up
-            && a.target.dist(b.target) <= 1e-12 * a.distance.abs().max(1.0)
-            && [(a.yaw, b.yaw), (a.pitch, b.pitch), (a.roll, b.roll), (a.distance, b.distance), (a.fov, b.fov)].iter().all(|&(x, y)| near(x, y))
-    };
     let from = Camera { roll: 0.4, ..Default::default() };
     let mut to = from;
     to.rotate_in_view(Vec3::new(0.0, 0.8, 0.0));
     let generic = CameraAnim::new(from, to, 0.0);
     assert!(!generic.is_screen_up_turn());
     for fraction in [0.0, 0.2, 0.5, 0.8] {
-        let (sampled, expected) = (generic.sample(generic.duration * fraction).0, Camera::interpolate(&from, &to, ease_in_out(fraction)));
-        assert!(same(sampled, expected), "{sampled:?} against {expected:?}");
+        assert_eq!(generic.sample(generic.duration * fraction).0, Camera::interpolate(&from, &to, ease_in_out(fraction)));
     }
     for to in [Camera { up: solidcraft_viewport::UpAxis::Y, ..to }, Camera { roll: to.roll + 0.3, ..to }, Camera { yaw: f64::NAN, ..to }] {
         let fallback = SolveApp::screen_up_turn(CameraAnim::new(from, to, 0.0));
         assert!(!fallback.is_screen_up_turn(), "different or invalid screen-up directions keep the ordinary path");
         if to.is_valid() {
-            let (sampled, expected) = (fallback.sample(fallback.duration * 0.4).0, Camera::interpolate(&from, &to, ease_in_out(0.4)));
-            assert!(same(sampled, expected), "{sampled:?} against {expected:?}");
+            // Compared with the same animation left alone, sampled at the same moment: both take
+            // the same arithmetic, so they match exactly. Against `Camera::interpolate` at the
+            // fraction itself, the time round trip can change the last digits (#23130).
+            let reference = CameraAnim::new(from, to, 0.0);
+            let now = reference.duration * 0.4;
+            assert_eq!(fallback.sample(now), reference.sample(now), "the fallback is the ordinary animation");
         }
     }
 }
