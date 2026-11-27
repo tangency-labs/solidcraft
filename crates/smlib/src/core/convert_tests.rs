@@ -422,6 +422,115 @@ fn a_hole_cut_a_hair_across_a_torus_seam_comes_back() {
     assert!(rel(v, want) < 1e-9, "joined: {v} vs {want}");
 }
 
+/// The tool that ends a tooth space in a cutter's curve: a section in the plane z = 40 whose floor
+/// is `arc_deg` degrees of the circle of radius 13.725 about the z axis, with two walls up to 16
+/// from that axis and a top, turned a quarter turn about a line in its plane `cutter_radius` above
+/// the floor. The floor sweeps a torus of which the tube shows only those degrees.
+fn run_out_tool(arc_deg: f64, cutter_radius: f64) -> Body {
+    use std::f64::consts::FRAC_PI_2;
+
+    use crate::sweeps::Curve;
+    let (root, out_to, z) = (13.725_f64, 16.0_f64, 40.0);
+    let half = (0.5 * arc_deg).to_radians();
+    let at = |a: f64| [root * a.cos(), root * a.sin(), z];
+    let (after, before) = (at(FRAC_PI_2 + half), at(FRAC_PI_2 - half));
+    let (high_before, high_after) = ([before[0], out_to, z], [after[0], out_to, z]);
+    let line = |start, end| Curve::Line { start, end };
+    let profile = [
+        // from the corner after the space to the one before it: clockwise seen from +z
+        Curve::Arc {
+            center: [0.0, 0.0, z],
+            axis: [0.0, 0.0, -1.0],
+            reference: [(FRAC_PI_2 + half).cos(), (FRAC_PI_2 + half).sin(), 0.0],
+            radius: root,
+            start: 0.0,
+            end: 2.0 * half,
+        },
+        line(before, high_before),
+        line(high_before, high_after),
+        line(high_after, after),
+    ];
+    super::sweep::revolve(&profile, [0.0, root + cutter_radius, z], [1.0, 0.0, 0.0], FRAC_PI_2, true).unwrap()
+}
+
+/// What [`a_torus_showing_a_short_arc_of_its_tube_comes_back_a_valid_body`] says of the floor that
+/// comes back, beside the body passing its own check.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Floor {
+    /// Nothing more: the arc is near where one reading gives way to another.
+    Any,
+    /// The torus of the arrays' own frame and radii, to rounding.
+    ItsOwnTorus,
+    /// No torus but its own: its exact NURBS form (the arrays that come back name no torus), or the
+    /// torus of the arrays' own frame and radii where the kernel can lay that one on the form.
+    ItsFormOrItsOwnTorus,
+}
+
+/// A torus of which the tube shows a short arc comes back from its arrays as a body that passes its
+/// own check, alone and cut out of a shaft, however short the arc. SMLib's test works a torus back
+/// out of the NURBS form, which a short arc does not fix: a 1.2 degree arc came back 1e-10 to 1e-9
+/// off its form and the check refused it in some places ("Bad Analytic and NURB Evaluate"), and one
+/// under about 0.3 degrees was refused outright ("a NURBS form that is not its analytic surface").
+/// Where the form is off the torus found (1.2 degrees), the face is the torus of the arrays' own
+/// frame and radii, to rounding. Where none is found (0.05 degrees), the face is no torus but its
+/// own: it is its exact form, or the arrays' torus where the kernel can lay that one on so short a
+/// form.
+#[test]
+fn a_torus_showing_a_short_arc_of_its_tube_comes_back_a_valid_body() {
+    use crate::check::CheckLevel;
+    use crate::flat::{FACE_TORUS_AXIS, FACE_TORUS_MAJOR_RADIUS, FACE_TORUS_MINOR_RADIUS, FACE_TORUS_ORIGIN, FACE_TORUS_REF_DIRECTION};
+    let cases = [
+        (5.0, 25.0, Floor::Any),
+        (2.0, 25.0, Floor::Any),
+        (1.2, 25.0, Floor::ItsOwnTorus),
+        (1.2, 40.0, Floor::ItsOwnTorus),
+        (0.6, 25.0, Floor::Any),
+        (0.3, 25.0, Floor::Any),
+        (0.1, 25.0, Floor::Any),
+        (0.05, 40.0, Floor::ItsFormOrItsOwnTorus),
+    ];
+    for (arc_deg, cutter_radius, floor) in cases {
+        let at = format!("a {arc_deg} degree arc, cutter radius {cutter_radius}");
+        let tool = run_out_tool(arc_deg, cutter_radius);
+        let arrays = to_arrays(&tool).unwrap();
+        let made = &arrays.reals[&FACE_TORUS_MAJOR_RADIUS];
+        assert_eq!(made.len(), 1, "{at}: the floor is one torus");
+        assert!(rel(made[0], 13.725 + cutter_radius) < 1e-12, "{at}: major radius {}", made[0]);
+        let back = from_arrays(&arrays).unwrap();
+        let again = to_arrays(&back).unwrap();
+        // how many tori the arrays that come back name: the floor, or none where it is its form
+        let named = again.reals.get(&FACE_TORUS_MAJOR_RADIUS).map_or(0, Vec::len);
+        if floor == Floor::ItsOwnTorus || (floor == Floor::ItsFormOrItsOwnTorus && named > 0) {
+            for id in [FACE_TORUS_ORIGIN, FACE_TORUS_AXIS, FACE_TORUS_REF_DIRECTION, FACE_TORUS_MAJOR_RADIUS, FACE_TORUS_MINOR_RADIUS] {
+                let (was, is) = (&arrays.reals[&id], &again.reals[&id]);
+                assert_eq!(was.len(), is.len(), "{at}: array {id}");
+                for (a, b) in was.iter().zip(is) {
+                    assert!((a - b).abs() <= 8.0 * f64::EPSILON * (1.0 + a.abs()), "{at}: array {id}: {a} came back {b}");
+                }
+            }
+        }
+        assert!(super::check(&back, CheckLevel::All).unwrap().is_valid(), "{at}: the tool");
+        let shaft = make_cylinder([0.0; 3], 15.75, 60.0).unwrap();
+        let cut = boolean(&shaft, &back, BooleanOp::Subtract).unwrap().unwrap();
+        let cut = from_arrays(&to_arrays(&cut).unwrap()).unwrap();
+        assert!(super::check(&cut, CheckLevel::All).unwrap().is_valid(), "{at}: the shaft cut with it");
+    }
+}
+
+/// Arrays that name a torus a thousandth off its NURBS form do not put that torus on the form: the
+/// body comes back with the torus its form is (major radius 10), as before.
+#[test]
+fn a_torus_named_off_its_form_is_not_put_on_the_form() {
+    use crate::flat::FACE_TORUS_MAJOR_RADIUS;
+    let mut arrays = to_arrays(&make_torus([1.0, -1.0, 0.5], 10.0, 3.0).unwrap()).unwrap();
+    for r in arrays.reals.get_mut(&FACE_TORUS_MAJOR_RADIUS).unwrap() {
+        *r += 1e-3;
+    }
+    let again = to_arrays(&from_arrays(&arrays).unwrap()).unwrap();
+    let radii = &again.reals[&FACE_TORUS_MAJOR_RADIUS];
+    assert!(!radii.is_empty() && radii.iter().all(|r| (r - 10.0).abs() < 1e-9), "{radii:?}");
+}
+
 /// What the record of `body` writes for each face on an implicit offset surface, which it cannot
 /// hold (#21926).
 #[derive(Debug)]
@@ -538,4 +647,71 @@ fn an_offset_face_is_written_within_the_tolerance_its_record_states() {
     // the shell raised edge tolerances past twice the face's: half the largest is past the face's
     let largest = largest_edge_tolerance(&shelled);
     assert!(largest > 2.0 * 1e-5 && largest_edge_tolerance(&fin) == 1e-5, "{largest}");
+}
+
+/// A rotated cuboid keeps its geometry when each plane origin moves within its plane.
+/// Once imported, its record must be a fixed point, including the UV trims and domains.
+#[test]
+fn a_planar_body_record_stabilizes_after_one_import() {
+    use crate::Brep;
+    let (s, c) = 0.37_f64.sin_cos();
+    let matrix = [[c, s, 0., 0.], [-s, c, 0., 0.], [0., 0., 1., 0.], [0., 0., 0., 1.]];
+    let body = Brep::make_box([1., -2., 3.], [10., 20., 30.]).unwrap().transformed(&matrix).unwrap();
+    let mut rec = body.to_native().unwrap();
+    for f in &mut rec.faces {
+        let b::Surface::Plane { origin, u_axis, v_axis } = &mut f.surface else { panic!("expected a plane") };
+        // O' = O + 2U - 3V, (u',v') = (u-2,v+3): exactly the same affine surface.
+        for i in 0..3 {
+            origin[i] += 2.0 * u_axis[i] - 3.0 * v_axis[i];
+        }
+        f.domain[0] = f.domain[0].map(|t| t - 2.0);
+        f.domain[1] = f.domain[1].map(|t| t + 3.0);
+        for l in &mut f.loops {
+            let b::Loop::Edges { edges } = l else { panic!("expected edges") };
+            for e in edges {
+                match &mut e.pcurve {
+                    b::Curve2::Spline { points, .. } => {
+                        for p in points {
+                            p[0] -= 2.0;
+                            p[1] += 3.0;
+                        }
+                    }
+                    b::Curve2::RationalSpline { homogeneous, .. } => {
+                        for p in homogeneous {
+                            p[0] -= 2.0 * p[2];
+                            p[1] += 3.0 * p[2];
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let first = Brep::from_record(&rec, true).unwrap().to_native().unwrap();
+    let first_bytes = serde_json::to_vec(&first).unwrap();
+    rec = first;
+    for round in 1..=8 {
+        let back = Brep::from_record(&rec, true).unwrap();
+        let next = back.to_native().unwrap();
+        assert!(serde_json::to_vec(&next).unwrap() == first_bytes, "round {round}: record changed");
+        assert_eq!(back.counts().unwrap(), [6, 12, 8]);
+        let m = back.mass_properties(1e-8).unwrap();
+        assert!(rel(m.volume, 6000.0) < 1e-9);
+        assert!(rel(m.area, 2200.0) < 1e-9);
+        let centroid = [6.0 * c - 8.0 * s, 6.0 * s + 8.0 * c, 18.0];
+        let moments = [650000.0 * c * c + 500000.0 * s * s, 650000.0 * s * s + 500000.0 * c * c, 250000.0];
+        let products = [0.0, 0.0, -150000.0 * c * s];
+        for i in 0..3 {
+            assert!((m.centroid[i] - centroid[i]).abs() < 1e-7);
+            assert!((m.moments[i] - moments[i]).abs() / 650000.0 < 1e-9);
+            assert!((m.products[i] - products[i]).abs() / 650000.0 < 1e-9);
+        }
+        let (lo, hi) = back.bounds().unwrap();
+        let expected_lo = [c - 18.0 * s, s - 2.0 * c, 3.0];
+        let expected_hi = [11.0 * c + 2.0 * s, 11.0 * s + 18.0 * c, 33.0];
+        for i in 0..3 {
+            assert!((lo[i] - expected_lo[i]).abs() < 1e-7);
+            assert!((hi[i] - expected_hi[i]).abs() < 1e-7);
+        }
+        rec = next;
+    }
 }

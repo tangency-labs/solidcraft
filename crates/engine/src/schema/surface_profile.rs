@@ -11,15 +11,14 @@ use serde::Deserialize;
 
 use super::config::NameList;
 use super::types::{
-    AngleExpr, ConventionParam, DirectionParam, FeatureCommon, IdOrName, LengthExpr, ProfilesParam, RevolveAxis, RevolveDirection, ToPoint,
-    feature_common, present,
+    AngleExpr, ConventionParam, DirectionParam, DraftCornerParam, FeatureCommon, IdOrName, LengthExpr, ProfilesParam, RevolveAxis, RevolveDirection,
+    ToPoint, feature_common, present,
 };
 
 /// Extrude a sketch's curves or profiles into a surface body: walls only, no caps.
 ///
-/// The extent keys `solid.extrude` has beyond these (`through_all`, `extent`, `taper`, `corner`
-/// and `from`) are left out: a surface extrude refuses the first ones as "not supported yet" and
-/// does nothing with the others.
+/// The extent keys `solid.extrude` has beyond these (`through_all`, `extent` and `from`) are left
+/// out: a surface extrude refuses them as "not supported yet".
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct SurfaceExtrudeParams {
@@ -55,6 +54,16 @@ pub struct SurfaceExtrudeParams {
     /// Start this far from the sketch plane, along its normal.
     #[serde(default)]
     pub start_offset: Option<LengthExpr>,
+    /// Draft angle of the walls, the profile being the section at the start (positive: outward,
+    /// so the far end is larger; negative: inward). Closed profiles and closed loops of curves
+    /// only; a profile's holes lean the other way, as on `solid.extrude`'s solid, whose side walls
+    /// these are. One side only, and not with `to` or `to_next`.
+    #[serde(default)]
+    pub taper: Option<AngleExpr>,
+    /// How the taper closes a sharp corner of the profile.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "DraftCornerParam")]
+    pub corner: Option<DraftCornerParam>,
     /// How a symmetric distance is read. Default: total_distance.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "ConventionParam")]

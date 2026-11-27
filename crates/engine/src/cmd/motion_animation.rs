@@ -147,12 +147,14 @@ pub(super) fn export_with(s: &Session, p: &Value, renderer: Option<&Renderer>) -
         }
     }
     let fps = if gif {
-        // GIF counts in hundredths of a second, and viewers slow anything under 2 down.
-        let delay = (100.0 / fps).round().clamp(2.0, 100.0) as u16;
-        let gif = crate::render::gif(width as usize, height as usize, &frames, delay).ok_or_else(|| bad(cmd, "GIF encoding failed"))?;
+        // GIF counts in hundredths of a second: frame lengths that add up to the rate asked for.
+        let delays = crate::render::gif_delays(frames.len(), fps);
+        let gif = crate::render::gif(width as usize, height as usize, &frames, &delays).ok_or_else(|| bad(cmd, "GIF encoding failed"))?;
         solidcraft_io::write_atomic(std::path::Path::new(path), &gif, false).map_err(io)?;
         bytes = gif.len();
-        Some(100.0 / f64::from(delay))
+        // The rate it plays at: its frames over the time they last.
+        let total: u32 = delays.iter().map(|&d| u32::from(d)).sum();
+        Some(if total == 0 { fps } else { frames.len() as f64 * 100.0 / f64::from(total) })
     } else {
         None
     };
