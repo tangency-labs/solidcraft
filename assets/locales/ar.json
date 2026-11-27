@@ -1448,7 +1448,7 @@
   "cmd.construct.plane.square_to_line": "مستوى عبر نقطة، عمودي على خط",
   "cmd.construct.point": "نقطة",
   "cmd.construct_axis_edge": "محور عبر حافة",
-  "cmd.construct_axis_normal_to_face": "محور عمودي على وجه",
+  "cmd.construct_axis_normal_to_face": "محور عمودي على وجه أو مستوى",
   "cmd.construct_axis_through_cylinder": "محور عبر أسطوانة/مخروط/طارة",
   "cmd.construct_axis_two_planes": "محور عبر مستويين",
   "cmd.construct_axis_two_points": "محور عبر نقطتين",

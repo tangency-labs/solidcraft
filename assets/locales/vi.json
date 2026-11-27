@@ -1448,7 +1448,7 @@
   "cmd.construct.plane.square_to_line": "Mặt phẳng qua điểm, vuông góc với đường thẳng",
   "cmd.construct.point": "Điểm",
   "cmd.construct_axis_edge": "Trục đi qua cạnh",
-  "cmd.construct_axis_normal_to_face": "Trục vuông góc với bề mặt",
+  "cmd.construct_axis_normal_to_face": "Trục vuông góc với bề mặt hoặc mặt phẳng",
   "cmd.construct_axis_through_cylinder": "Trục qua hình trụ/nón/xuyến",
   "cmd.construct_axis_two_planes": "Trục giao giữa hai mặt phẳng",
   "cmd.construct_axis_two_points": "Trục đi qua hai điểm",

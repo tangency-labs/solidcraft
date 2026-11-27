@@ -1448,7 +1448,7 @@
   "cmd.construct.plane.square_to_line": "מישור דרך נקודה, ניצב לקו",
   "cmd.construct.point": "נקודה",
   "cmd.construct_axis_edge": "ציר דרך מקצוע",
-  "cmd.construct_axis_normal_to_face": "ציר ניצב לפאה",
+  "cmd.construct_axis_normal_to_face": "ציר ניצב לפאה או למישור",
   "cmd.construct_axis_through_cylinder": "ציר דרך גליל/חרוט/טורוס",
   "cmd.construct_axis_two_planes": "ציר דרך שני מישורים",
   "cmd.construct_axis_two_points": "ציר דרך שתי נקודות",

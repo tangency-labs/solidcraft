@@ -1448,7 +1448,7 @@
   "cmd.construct.plane.square_to_line": "过点且垂直于直线的平面",
   "cmd.construct.point": "点",
   "cmd.construct_axis_edge": "过边的轴",
-  "cmd.construct_axis_normal_to_face": "垂直于面的轴",
+  "cmd.construct_axis_normal_to_face": "垂直于面或平面的轴",
   "cmd.construct_axis_through_cylinder": "过圆柱/圆锥/圆环的轴",
   "cmd.construct_axis_two_planes": "过两个平面的轴",
   "cmd.construct_axis_two_points": "过两点的轴",

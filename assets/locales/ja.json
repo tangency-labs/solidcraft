@@ -1448,7 +1448,7 @@
   "cmd.construct.plane.square_to_line": "点を通り直線に垂直な平面",
   "cmd.construct.point": "点",
   "cmd.construct_axis_edge": "エッジを通る軸",
-  "cmd.construct_axis_normal_to_face": "面に垂直な軸",
+  "cmd.construct_axis_normal_to_face": "面または平面に垂直な軸",
   "cmd.construct_axis_through_cylinder": "円柱/円錐/トーラスを通る軸",
   "cmd.construct_axis_two_planes": "2平面を通る軸",
   "cmd.construct_axis_two_points": "2点を通る軸",
