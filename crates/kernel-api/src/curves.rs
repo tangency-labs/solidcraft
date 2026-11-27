@@ -7,7 +7,7 @@
 use solidcore_record::brep::{Curve, Curve2};
 use solidcore_record::curve_query::{Crossing, CubicPiece, CurvePoint, CurveRayPoint, FitSplineBounds, PlaneSection};
 use solidcore_record::projection::PlanarSpline;
-use solidcore_record::{Plane, Vec2};
+use solidcore_record::{Plane, Seg2, Vec2};
 
 use crate::Backend;
 
@@ -81,4 +81,8 @@ pub trait Curves: Backend {
     fn ordered_nearby_points(&self, old: &[Vec2], new: &[Vec2], within: f64, work: usize) -> Result<bool, CurveRefused>;
     /// The point of pcurve `c` at `t`; `None` outside its interval or for a malformed record.
     fn pcurve_eval(&self, c: &Curve2, t: f64) -> Option<[f64; 2]>;
+    /// Sketch segment `seg` placed in space on `plane` (sketch x, y and zero) as the record's
+    /// curve; `None` for a zero-sweep arc, a conic whose weight is not finite and positive, or a
+    /// Bézier of a degree the record does not hold.
+    fn seg_curve(&self, seg: &Seg2, plane: &Plane) -> Result<Option<Curve>, CurveRefused>;
 }

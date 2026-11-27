@@ -1665,6 +1665,27 @@ pub struct Distance {
     pub bound: f64,
 }
 
+/// Whether the endless line through `origin` along `dir` meets the box with corners `min` and
+/// `max` (in any order), each side counting `share` of the box's size beyond it
+/// ([`Extent3d::meets_line`]). Never for a zero `dir`.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a coordinate, or a `share`, that is not finite.
+pub fn line_meets_box(
+    min: Point3,
+    max: Point3,
+    origin: Point3,
+    dir: Vec3,
+    share: f64,
+) -> Result<bool> {
+    let finite = |p: Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if ![min, max, origin, dir].into_iter().all(finite) || !share.is_finite() {
+        return Err(SolidError::invalid_input(OP, "non-finite line or box"));
+    }
+    Ok(Extent3d::from_points(min, max).meets_line(origin, dir, share))
+}
+
 /// The distance between `a` and `b` with a proved bound on its rounding (not
 /// upstream). The value is `a.distance(b)` bit for bit; the bound comes from the same
 /// sum of squares in rounded interval arithmetic

@@ -72,10 +72,21 @@ pub(crate) struct State {
     /// Trusted folder consent keyed by an internal request serial, never by JSON arguments.
     folder_consents: std::collections::BTreeMap<u64, solidcraft_engine::plugin::folders::DialogFolders>,
     panel_pick: Option<PanelPick>,
-    panel_runs: Vec<std::sync::mpsc::Receiver<Value>>,
+    panel_runs: Vec<PanelRun>,
     /// The dialog the viewport previews this pass, found before the dialogs are taken out of
     /// `dialogs` to be drawn (`preview_commands` cannot find a dialog that is out of the list).
     previewed: Option<u64>,
+}
+
+/// A docked panel's action in the control queue (#22032): the design it was queued on, and that
+/// design's revision when it ran, which a form the action asks for with `forms.open` opens against.
+struct PanelRun {
+    serial: u64,
+    session: u64,
+    reply: std::sync::mpsc::Receiver<Value>,
+    source_guard: Option<solidcraft_engine::schema::plugin::FormGuard>,
+    /// A successful reply held until its design is in front again.
+    received: Option<Value>,
 }
 
 #[cfg(test)]
@@ -2665,7 +2676,7 @@ pub(crate) fn run_panel(app: &mut SolveApp, command: String, params: Value) -> R
     }
     let (request, reply) = solidcraft_control::ControlRequest::new("engine.execute", json!({"command":command,"params":params}));
     app.plugin_menu.pending.push((request.serial, app.session.uid));
-    app.plugin_menu.panel_runs.push(reply);
+    app.plugin_menu.panel_runs.push(PanelRun { serial: request.serial, session: app.session.uid, reply, source_guard: None, received: None });
     app.control_held.push_back(request);
     Ok(())
 }
@@ -2680,6 +2691,9 @@ pub(crate) fn check_dispatch(app: &mut SolveApp, req: &solidcraft_control::Contr
         // validation and the unchanged live design share the same revision token.
         let guard =
             solidcraft_engine::schema::plugin::FormGuard { document_id: app.session.document_id.clone(), revision: app.session.design_revision() };
+        if let Some(run) = app.plugin_menu.panel_runs.iter_mut().find(|run| run.serial == req.serial) {
+            run.source_guard = Some(guard.clone());
+        }
         if let Some(running) = app.plugin_menu.dialogs.iter_mut().filter_map(|d| d.running.as_mut()).find(|r| Arc::ptr_eq(&r.ticket, &req.ticket)) {
             running.source_guard = Some(guard);
         }
@@ -2697,19 +2711,38 @@ pub(crate) fn take_folder_consent(app: &mut SolveApp, serial: u64) -> Option<sol
 }
 
 /// Take the finished runs' replies: an edit closes its dialog, a read shows its result, an error
-/// stays in its dialog.
+/// stays in its dialog. A panel action's run opens the forms it asked for, as a dialog's does.
 pub(crate) fn poll(app: &mut SolveApp) {
-    for reply in std::mem::take(&mut app.plugin_menu.panel_runs) {
-        match reply.try_recv() {
-            Ok(value) => {
-                if value.get("ok") != Some(&Value::Bool(true)) {
-                    let error = value.get("error").and_then(Value::as_str).unwrap_or_else(|| solidcraft_ui_text::tr("ui.plugin_no_result"));
-                    app.set_status(solidcraft_ui_text::format("ui.plugin_dialog_failed", &[("error", error)]), true);
+    for mut run in std::mem::take(&mut app.plugin_menu.panel_runs) {
+        let value = match run.received.take() {
+            Some(value) => value,
+            None => match run.reply.try_recv() {
+                Ok(value) => value,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    app.plugin_menu.panel_runs.push(run);
+                    continue;
                 }
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => app.plugin_menu.panel_runs.push(reply),
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => app.set_status(app.tr("ui.plugin_no_result").to_owned(), true),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    app.set_status(app.tr("ui.plugin_no_result").to_owned(), true);
+                    continue;
+                }
+            },
+        };
+        if value.get("ok") != Some(&Value::Bool(true)) {
+            let error = value.get("error").and_then(Value::as_str).unwrap_or_else(|| solidcraft_ui_text::tr("ui.plugin_no_result"));
+            app.set_status(solidcraft_ui_text::format("ui.plugin_dialog_failed", &[("error", error)]), true);
+            continue;
         }
+        // A requested form can hold picks from the action's own design: it opens once that design
+        // is in front, and not at all once that design is closed.
+        if run.session != app.session.uid {
+            if crate::documents::render_owner(app, run.session).is_some() {
+                run.received = Some(value);
+                app.plugin_menu.panel_runs.push(run);
+            }
+            continue;
+        }
+        open_requested_forms(app, &value, run.source_guard.take());
     }
     let ids: Vec<u64> = app.plugin_menu.dialogs.iter().map(|d| d.id).collect();
     for id in ids {
@@ -2781,7 +2814,7 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         let notes: Vec<String> =
             reply.pointer("/result/warnings").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(String::from).collect();
         app.plugin_menu.dialogs.remove(at);
-        let mut done = solidcraft_ui_text::format("plugin_export.done", &[("path", &path)]);
+        let mut done = solidcraft_ui_text::format("plugin_export.done", &[("path", crate::display_user_path(&path))]);
         for note in notes {
             done = std::format!("{done} · {note}");
         }
