@@ -994,16 +994,19 @@ fn a_fillet_on_a_pocket_corner_survives_upstream_edit_changing_its_face_qualifie
 /// fillet on an untouched edge of one piece resolve cleanly at its pick point.
 #[test]
 fn a_fillet_survives_when_a_still_split_face_loses_its_distinguishing_neighbour() {
+    let mut sharp = Session::default();
+    run(&mut sharp, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 30, "height": 20, "body_name": "Body1"}));
+    run(&mut sharp, "solid.cylinder", json!({"base": [0, -35, 22], "axis": "Y", "radius": 6, "height": 70, "operation": "cut", "name": "Groove"}));
+    let sharp_volume = volume(&mut sharp, "Body1");
+
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "radius": 30, "height": 20, "body_name": "Body1"}));
-    // A horizontal cylindrical groove across the top splits F1:top into two halves (-X and +X)
-    // that touch the exact same neighbours ({F1:side, F2:side}), while leaving F1:side whole.
-    run(&mut s, "solid.cylinder", json!({"base": [0, -35, 22], "axis": "Y", "radius": 6, "height": 70, "operation": "cut", "name": "Groove"}));
-    let sharp_volume = volume(&mut s, "Body1");
-    // A blind hole on the -X half (opposite the cylinder's +X seam) gives only that piece a unique
-    // neighbour, qualifying it as F1:top#[F3:bore:side:0].
+    // Place TagHole on the -X side BEFORE Groove splits F1:top, so when Groove splits F1:top into
+    // two halves (-X and +X), only the -X half touches TagHole and gets qualified as
+    // `F1:top#[F2:bore:side:0]`.
     run(&mut s, "solid.hole", json!({"position": [-18, 0, 20], "direction": [0, 0, -1], "diameter": 6, "depth": 5, "name": "TagHole"}));
-    // Fillet the unbroken outer top rim of the -X half at (-30, 0, 20).
+    run(&mut s, "solid.cylinder", json!({"base": [0, -35, 22], "axis": "Y", "radius": 6, "height": 70, "operation": "cut", "name": "Groove"}));
+    // Fillet the unbroken outer top rim of the -X half at (-30, 0, 20) (opposite the +X seam).
     run(&mut s, "solid.fillet", json!({"edges": [[-30, 0, 20]], "radius": 1, "name": "RimRound"}));
     let tag_id = s.doc.find_feature("TagHole").unwrap().id;
     let round_id = s.doc.find_feature("RimRound").unwrap().id;
@@ -1018,8 +1021,11 @@ fn a_fillet_survives_when_a_still_split_face_loses_its_distinguishing_neighbour(
     let res = s.model.result(round_id).unwrap();
     assert_eq!(res.error, None, "fillet must survive still-split face losing its qualifier");
     assert_eq!(res.warning, None);
-    let top_names: Vec<String> =
-        faces(&mut s, "Body1").iter().filter_map(|f| f["name"].as_str().map(str::to_string)).filter(|n| n.starts_with("F1:top#")).collect();
+    let top_names: Vec<String> = faces(&mut s, "Body1")
+        .iter()
+        .filter_map(|f| f["name"].as_str().map(str::to_string))
+        .filter(|n| n.starts_with("F1:top#") && !n.contains("#["))
+        .collect();
     assert_eq!(top_names.len(), 2, "both top halves should now be numbered pieces: {top_names:?}");
     assert!(volume(&mut s, "Body1") < sharp_volume - 1.0, "the -X rim should still be filleted");
 }
