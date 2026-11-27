@@ -243,31 +243,17 @@ const SURFACE_BALL_PATCH_I: i64 = SURFACE_BALL_PATCH as i64;
 
 /// The `SmBSplineCurve` part of a curve that is one (`IsKindOf(SmBSplineCurve_TYPE)`), with its
 /// NURB (`GetOrCreateGwNurbPointer`: a lazy line or conic makes it on a copy); `None` for the
-/// other kinds.
+/// other kinds. The kernel's [`Curve::bspline_part`], its failure named by the call that made
+/// the NURB.
 pub(super) fn bspline_curve_part<'c>(k: &Kernel, c: &'c Curve) -> Result<Option<Cow<'c, BSplineCurve>>> {
-    Ok(Some(match c.kind() {
-        CurveKind::BSpline(b) => Cow::Borrowed(b),
-        CurveKind::Line(l) => l.base_with_nurb().map_err(sc("SmLine::GetOrCreateGwNurbPointer"))?,
-        CurveKind::Ellipse(e) if e.base().gw_nurb().is_none() => {
-            let mut made = e.clone();
-            made.make_nurb(k).map_err(sc("SmEllipse::MakeNurb"))?;
-            Cow::Owned(made.base().clone_exact())
-        }
-        CurveKind::Ellipse(e) => Cow::Borrowed(e.base()),
-        CurveKind::Hyperbola(h) if h.base().gw_nurb().is_none() => {
-            let mut made = h.clone();
-            made.make_nurb(None).map_err(sc("SmHyperbola::MakeNurb"))?;
-            Cow::Owned(made.base().clone_exact())
-        }
-        CurveKind::Hyperbola(h) => Cow::Borrowed(h.base()),
-        CurveKind::Parabola(p) if p.base().gw_nurb().is_none() => {
-            let mut made = p.clone();
-            made.make_nurb(None).map_err(sc("SmParabola::MakeNurb"))?;
-            Cow::Owned(made.base().clone_exact())
-        }
-        CurveKind::Parabola(p) => Cow::Borrowed(p.base()),
-        _ => return Ok(None),
-    }))
+    let call = match c.kind() {
+        CurveKind::Line(_) => "SmLine::GetOrCreateGwNurbPointer",
+        CurveKind::Ellipse(_) => "SmEllipse::MakeNurb",
+        CurveKind::Hyperbola(_) => "SmHyperbola::MakeNurb",
+        CurveKind::Parabola(_) => "SmParabola::MakeNurb",
+        _ => "SmCurve::GetOrCreateGwNurbPointer",
+    };
+    c.bspline_part(k).map_err(sc(call))
 }
 
 /// The `SmBSplineSurface` part of a surface that is one (`IsKindOf(SmBSplineSurface_TYPE)`), its

@@ -4293,7 +4293,9 @@ mod importers {
         let file = put(&root, "bracket.smp", &design());
         let importer = importer_for(&s, &file, None).unwrap().unwrap();
         let params = json!({"library":library});
-        assert!(import_file(&mut s, &importer, &file, &params).is_err());
+        let refused = s.execute("file.import", &json!({"path": file, "options": params})).unwrap_err();
+        assert!(matches!(refused.host_error(), Some(HostError::PermissionDenied { .. })), "{refused}");
+        assert!(refused.to_string().contains("the option library needs read approval for its folder"), "{refused}");
         s.plugin_state.user.dialog_folders = Some(folders::DialogFolders {
             plugin: "smp".into(),
             approval: package.approval,

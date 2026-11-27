@@ -1,9 +1,46 @@
 //! The 2D arithmetic of a sketch's arc snaps, on plain `[f64; 2]` points and directions: the
 //! circle through three points, the arc a typed radius or sweep gives, the tangent arc, the
-//! perpendicular bisector's centre and the direction a curve leaves a point in. The numbers are
-//! the kernel's (`solidcore::math`, `*_2d`); ops passes them on, so an application computes none.
+//! perpendicular bisector's centre and the direction a curve leaves a point in, and the side of a
+//! sketch curve a profile lies on. The numbers are the kernel's (`solidcore::math`, `*_2d`); ops
+//! passes them on, so an application computes none.
 
 use solidcore::math;
+
+/// The distance between two points (an arc's radius, from its centre and an end).
+#[must_use]
+pub fn distance(a: [f64; 2], b: [f64; 2]) -> f64 {
+    math::distance_2d(a, b)
+}
+
+/// Whether the region on the left of the piece from `a` to `b` of a counter-clockwise loop
+/// lies left of the line from `p` to `q` (`Some(true)`) or right of it (`Some(false)`); `None`
+/// when the piece is not on that line, within `tol` times its size.
+#[must_use]
+pub fn left_side_along_line(
+    a: [f64; 2],
+    b: [f64; 2],
+    p: [f64; 2],
+    q: [f64; 2],
+    tol: f64,
+) -> Option<bool> {
+    math::left_side_along_line_2d(a, b, p, q, tol)
+}
+
+/// Whether the region on the left of an arc piece of a counter-clockwise loop (about `centre`
+/// with `radius`, sweeping `sweep` radians) lies inside the circle about `c` of radius `r`
+/// (`Some(true)`) or outside it (`Some(false)`); `None` when the piece is not on that circle,
+/// within `tol` times its size.
+#[must_use]
+pub fn left_side_inside_circle(
+    centre: [f64; 2],
+    radius: f64,
+    sweep: f64,
+    c: [f64; 2],
+    r: f64,
+    tol: f64,
+) -> Option<bool> {
+    math::left_side_inside_circle_2d(centre, radius, sweep, c, r, tol)
+}
 
 /// The unit direction from `from` to `to`; `None` where they coincide or are not finite.
 #[must_use]
@@ -41,6 +78,13 @@ pub fn bisector_centre(start: [f64; 2], end: [f64; 2], p: [f64; 2]) -> Option<[f
 #[must_use]
 pub fn is_square_to_radius(centre: [f64; 2], p: [f64; 2], dir: [f64; 2]) -> bool {
     math::is_square_to_radius_2d(centre, p, dir)
+}
+
+/// Whether `p` lies on the line through `origin` along `dir`, within `tol` of it; `false` where
+/// `dir` is of no length.
+#[must_use]
+pub fn on_line(p: [f64; 2], origin: [f64; 2], dir: [f64; 2], tol: f64) -> bool {
+    math::on_line_2d(p, origin, dir, tol)
 }
 
 /// The centre of the circle through `a`, `b` and `c`; `None` for points on one line.
@@ -152,5 +196,19 @@ mod tests {
         assert!(is_square_to_radius([0.0, 0.0], [1.0, 0.0], [0.0, 1.0]));
         assert!(!is_square_to_radius([0.0, 0.0], [1.0, 0.0], [1.0, 0.0]));
         assert!(!is_square_to_radius([1.0, 0.0], [1.0, 0.0], [0.0, 1.0]));
+    }
+
+    #[test]
+    fn a_point_is_on_a_line_within_the_tolerance_of_it() {
+        // The line through (1, 1) along (3, 4), a length 5 direction: (4, 5) is on it, and the
+        // points 0.01 to its side of it are 0.01 off whichever way the direction is given.
+        let (o, d) = ([1.0, 1.0], [3.0, 4.0]);
+        assert!(on_line([4.0, 5.0], o, d, 1e-9));
+        assert!(on_line([4.0, 5.0], o, [-0.6, -0.8], 1e-9));
+        assert!(!on_line([4.008, 4.994], o, d, 0.009));
+        assert!(on_line([4.008, 4.994], o, d, 0.011));
+        assert!(on_line([-1.992, -3.006], o, d, 0.011));
+        // A direction of no length gives no line.
+        assert!(!on_line(o, o, [0.0, 0.0], 1.0));
     }
 }

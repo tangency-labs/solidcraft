@@ -528,6 +528,28 @@ mod tests {
         }
     }
 
+    /// An outside lip on a shelled cylinder of radius 40 (#20625) left a body SMLib's check
+    /// refused ("Edge endpoints within face domain"), so the next join failed. The join under
+    /// the floor builds and adds its 20 × 10 × 1.
+    #[test]
+    fn a_join_after_an_outside_lip_on_a_shelled_cylinder_builds() {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S1"}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 40}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "S1", "distance": 20, "body_name": "Body1"}));
+        run(&mut s, "solid.shell", json!({"faces": [[0, 0, 20]], "thickness": 4}));
+        run(&mut s, "plastic.lip", json!({"face": [38, 0, 20], "width": 2, "height": 4, "side": "outside"}));
+        let before = volume(&mut s);
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S2"}));
+        run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [10, 5]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"sketch": "S2", "distance": 1, "direction": "negative", "operation": "join"}));
+        assert!(s.model.state().body("Body1").is_some_and(|b| b.body.validity().is_empty()));
+        let after = volume(&mut s);
+        assert!(rel(after, before + 200.0) < 1e-6, "{after} vs {}", before + 200.0);
+    }
+
     #[test]
     fn lip_on_a_face_that_is_not_a_rim_says_so() {
         // The Sample Plate's top face (#892): two holes through it and the boss standing on it.
