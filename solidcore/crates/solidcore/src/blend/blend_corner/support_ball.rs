@@ -62,12 +62,13 @@ use crate::error::blend::{CornerInput, CornerStep, FilletSetUp, SolverFailure};
 use crate::error::{EntityRef, Result};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent2d::Extent2d;
-use crate::intersect::point_class::PointClassType;
+use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::intersect::surface_intersector::p1::SrfIndex;
 use crate::kernel::Kernel;
 use crate::math::{rad_to_deg, Point2, Point3, Vec3, EFF_ZERO};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::face::p1::{point_3d_classify, Point3dClassifyOptions};
 use crate::surface::procedural_blend::corner::CornerDefinition;
 use crate::surface::surface::Surface;
 use crate::surface::torus::{Torus, TorusOptions};
@@ -192,6 +193,47 @@ fn face_quadric(k: &Kernel, b: &Brep, face: FaceId, tol: f64) -> Result<BlendQua
     BlendQuadric::from_surface(k, surface, face2::uv_domain(b, face)?.mid(), tol)
 }
 
+/// Whether `point`, on `face`'s surface, lies in the face's trimmed domain (on its edges
+/// too), not past them.
+fn contact_in_face(k: &Kernel, b: &mut Brep, face: FaceId, point: Point3) -> Result<bool> {
+    let zone = face2::tolerance(b, face)?;
+    let mut class = PointClassification::new(zone);
+    point_3d_classify(
+        k,
+        b,
+        face,
+        point,
+        zone,
+        true,
+        &mut class,
+        Point3dClassifyOptions::default(),
+    )?;
+    Ok(class.point_class() != PointClassType::Unknown)
+}
+
+/// The radius the rounds `(radius, tolerance)` share and the least tolerance: each radius
+/// within that tolerance of the first, the radius placement measures every rail against
+/// (neighbours within the tolerance of each other can drift apart by more). `None` for
+/// rounds of different radii or no rounds.
+fn common_radius(rounds: &[(f64, f64)]) -> Option<(f64, f64)> {
+    let &(first, _) = rounds.first()?;
+    let mut tol = f64::MAX;
+    for &(_, t) in rounds {
+        tol = smin(tol, t);
+    }
+    for &(r, _) in rounds {
+        // !(|r - first| <= tol), NaN included
+        if (r - first)
+            .abs()
+            .partial_cmp(&tol)
+            .is_none_or(|o| o.is_gt())
+        {
+            return None;
+        }
+    }
+    Some((first, tol))
+}
+
 /// The edge of `eu`.
 fn edge_of(b: &Brep, eu: EdgeuseId, op: &'static str) -> Result<EdgeId> {
     eu1::edge(b, eu)?.ok_or_else(|| edge_use_without_edge(op, eu))
@@ -309,22 +351,23 @@ pub fn classify_support_ball(
     };
 
     // three equal constant convex rounds
-    let mut radius = -1.0;
-    let mut tol = f64::MAX;
-    for (id, eu) in [(s_w, eu_w), (s_g, eu_g), (s_y, eu_y)] {
-        let Some((r, t)) = round_radius(solvers, id)? else {
+    let mut rounds = [(0.0, 0.0); 3];
+    for ((id, eu), slot) in [(s_w, eu_w), (s_g, eu_g), (s_y, eu_y)]
+        .into_iter()
+        .zip(rounds.iter_mut())
+    {
+        let Some(round) = round_radius(solvers, id)? else {
             return Ok(None);
         };
-        tol = smin(tol, t);
-        if radius >= 0.0 && (r - radius).abs() > tol {
-            return Ok(None);
-        }
-        radius = r;
+        *slot = round;
         let e = edge_of(b, eu, OP_CLASSIFY)?;
         if is_concave_edge(k, b, e)? {
             return Ok(None);
         }
     }
+    let Some((radius, tol)) = common_radius(&rounds) else {
+        return Ok(None);
+    };
     let r = radius;
     // !(r > tol), NaN included
     if r.partial_cmp(&tol) != Some(std::cmp::Ordering::Greater) {
@@ -461,6 +504,20 @@ pub fn classify_support_ball(
         on_between: centre + n_between * r,
         on_cylinder: foot + out * big_r,
     };
+    // each contact lies inside its face's trim, not only on its surface: a contact past
+    // the face's edge would put a boundary outside the face's domain
+    let contacts = [
+        (floor, geometry.on_floor),
+        (floor, geometry.seam_on_floor),
+        (between, geometry.on_between),
+        (wall_face, geometry.seam_on_wall),
+        (cyl_face, geometry.on_cylinder),
+    ];
+    for (face, point) in contacts {
+        if !contact_in_face(k, b, face, point)? {
+            return Ok(None);
+        }
+    }
     let ring = SupportRing {
         floor,
         between,
@@ -1110,4 +1167,34 @@ pub fn create_support_ball_patches(
         corner.surface_faces.push(face);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::common_radius;
+
+    #[test]
+    fn rounds_each_within_tolerance_of_the_first_share_a_radius() {
+        let got = common_radius(&[(2.0, 1e-3), (2.0005, 1e-3), (1.9995, 1e-3)]);
+        assert_eq!(got, Some((2.0, 1e-3)));
+    }
+
+    #[test]
+    fn a_chain_of_near_radii_that_drifts_past_the_tolerance_is_not_one_radius() {
+        // adjacent radii differ by 0.8 tol, the first and last by 1.6 tol
+        assert_eq!(
+            common_radius(&[(2.0, 1e-3), (2.0008, 1e-3), (2.0016, 1e-3)]),
+            None
+        );
+    }
+
+    #[test]
+    fn the_least_tolerance_decides() {
+        assert_eq!(
+            common_radius(&[(2.0, 1e-3), (2.0005, 1e-4), (2.0, 1e-3)]),
+            None
+        );
+        assert_eq!(common_radius(&[(2.0, 1e-3), (f64::NAN, 1e-3)]), None);
+        assert_eq!(common_radius(&[]), None);
+    }
 }

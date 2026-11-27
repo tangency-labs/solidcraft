@@ -1351,10 +1351,56 @@ fn rounds_meet_a_chord_round_at_a_chamfered_notch() {
         edge_at(&b, [(10.0 + r) / 2.0, 0.0, 0.0]),
         edge_at(&b, [(-10.0 + r) / 2.0, 0.0, 0.0]),
     ];
+    let (before_volume, before_faces) = (volume(&b), b.counts().unwrap()[0]);
     let made = blend(&b, Blend::Round, &edges, &[2.0], &[], Corners::Filled).unwrap();
     assert_eq!(made.dropped, vec![false; edges.len()]);
     assert!(made.holes.is_empty());
     assert!(b.check(CheckLevel::All).unwrap().is_valid());
+    // the four rounds and the corner's two faces are new, and the body changed by about the
+    // rounds' slivers: (1 - pi/4) r^2 a length, under 4 of them at most 12 long
+    assert!(
+        b.counts().unwrap()[0] >= before_faces + 6,
+        "{before_faces} faces before"
+    );
+    let change = (volume(&b) - before_volume).abs();
+    assert!(
+        change > 1e-3 && change < 4.0 * (1.0 - PI / 4.0) * 4.0 * 12.0,
+        "{change}"
+    );
+    // the corner's faces, as the kernel reads the body back: the support torus of the
+    // 2 mm round on the floor and the chord round's cylinder (R = 6/sqrt 2: major radius
+    // R -+ 2, the ball beyond or within the cylinder), and the sphere patch on the ball
+    // that touches floor, chamfer and cylinder (radius 2)
+    let (_, made) = kernel_copy(&b);
+    let (mut tori, mut balls) = (0, 0);
+    for &f in made.face_list().iter() {
+        let surface = made.face(f).unwrap().surface.as_ref().unwrap();
+        match surface.kind() {
+            SurfaceKind::Torus(t) if (t.minor_radius() - 2.0).abs() < 1e-6 => {
+                assert!(
+                    [r - 2.0, r + 2.0]
+                        .iter()
+                        .any(|major| (t.major_radius() - major).abs() < 1e-6),
+                    "a support torus of major radius {}",
+                    t.major_radius()
+                );
+                tori += 1;
+            }
+            SurfaceKind::BallPatch(bp) if (bp.radius() - 2.0).abs() < 1e-6 => {
+                assert!(BallPatch::is_on_sphere(
+                    bp.net(),
+                    bp.centre(),
+                    bp.radius(),
+                    ON_SPHERE_REL_TOL
+                )
+                .unwrap());
+                balls += 1;
+            }
+            _ => {}
+        }
+    }
+    assert!(tori >= 1, "no support torus");
+    assert!(balls >= 1, "no sphere patch");
 }
 
 #[test]
