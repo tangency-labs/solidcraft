@@ -809,6 +809,21 @@ mod tests {
         h.frames(3);
     }
 
+    /// The marker's line ends in a down arrowhead while component rows are out of sight below,
+    /// and in the flat cap otherwise.
+    #[test]
+    fn test_marker_foot_points_down_at_hidden_rows() {
+        let color = egui::Color32::from_rgb(59, 130, 246);
+        let egui::Shape::Path(arrow) = canvas::marker_foot(100.0, 80.0, color, true) else { panic!("an arrowhead while rows are hidden") };
+        assert_eq!(arrow.points.len(), 3);
+        assert!(arrow.points.contains(&egui::pos2(100.0, 80.0)), "its tip ends the line: {:?}", arrow.points);
+        assert!(arrow.points.iter().all(|p| p.y <= 80.0));
+        assert!(matches!(canvas::marker_foot(100.0, 80.0, color, false), egui::Shape::Rect(_)), "the flat cap when all rows show");
+        // The line ends inside both feet: below the arrowhead's base and the 4-point cap's top, above their bottom.
+        let base = arrow.points.iter().map(|p| p.y).fold(f32::MAX, f32::min);
+        assert!(80.0 - canvas::MARKER_FOOT_OVERLAP > base && canvas::MARKER_FOOT_OVERLAP > 0.0 && canvas::MARKER_FOOT_OVERLAP < 4.0);
+    }
+
     #[test]
     fn test_timeline_2d_custom_options_and_cell_dots() {
         let mut h = Harness::new();
