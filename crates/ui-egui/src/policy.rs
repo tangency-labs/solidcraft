@@ -103,6 +103,13 @@ pub const ORGANIZATION_NAME: &str = "OrganizationName";
 /// The longest organization name shown, in characters; a longer one is cut.
 pub const MAX_NAME: usize = 64;
 
+/// The folder SolidCraft writes its log in (`crate::log_file`), in place of
+/// `<data folder>/logs`: a `REG_SZ` full path. Mandatory only; it locks nothing.
+pub const LOG_FOLDER: &str = "LogFolder";
+
+/// The longest [`LOG_FOLDER`] read, in bytes; a longer one is not set.
+pub const MAX_LOG_FOLDER: usize = 4096;
+
 /// The macOS preference domain of the managed values: the app's bundle identifier.
 pub const MACOS_DOMAIN: &str = "io.tangencylabs.solidcraft";
 
@@ -142,6 +149,8 @@ pub struct Layer {
     /// [`ORGANIZATION_NAME`], cleaned: one line, no control or direction characters, at most
     /// [`MAX_NAME`] characters, never empty.
     pub organization: Option<String>,
+    /// [`LOG_FOLDER`]: a full path on one line, at most [`MAX_LOG_FOLDER`] bytes.
+    pub log_folder: Option<std::path::PathBuf>,
 }
 
 impl Layer {
@@ -191,7 +200,14 @@ impl Layer {
                 on
             }
         };
-        Layer { settings, allowed, usage_statistics, organization: text(ORGANIZATION_NAME) }
+        let log_folder = get(LOG_FOLDER).and_then(|value| {
+            let folder = log_folder(&value);
+            if folder.is_none() {
+                log::warn!("policy: {LOG_FOLDER} is {value:?}, not a full path on one line; ignored");
+            }
+            folder
+        });
+        Layer { settings, allowed, usage_statistics, organization: text(ORGANIZATION_NAME), log_folder }
     }
 
     /// [`CHECK_FOR_UPDATES`]: whether update checks run.
@@ -204,7 +220,11 @@ impl Layer {
 
     /// Whether any value is set.
     fn any(&self) -> bool {
-        !self.settings.is_empty() || !self.allowed.is_empty() || self.usage_statistics.is_some() || self.organization.is_some()
+        !self.settings.is_empty()
+            || !self.allowed.is_empty()
+            || self.usage_statistics.is_some()
+            || self.organization.is_some()
+            || self.log_folder.is_some()
     }
 
     /// `self`, with `under` for the values `self` leaves unset.
@@ -220,6 +240,7 @@ impl Layer {
             allowed: self.allowed,
             usage_statistics: self.usage_statistics.or(under.usage_statistics),
             organization: self.organization.or(under.organization),
+            log_folder: self.log_folder.or(under.log_folder),
         }
     }
 }
@@ -246,6 +267,15 @@ fn parse(kind: Kind, value: &Value) -> Option<Setting> {
         (Kind::ThemeFile, Value::Text(text)) => crate::theme_files::follow_path(text).ok().filter(|path| !path.is_empty()).map(Setting::Text),
         _ => None,
     }
+}
+
+/// `value` as a [`LOG_FOLDER`]: a full path (a relative one would depend on where SolidCraft
+/// was started), trimmed, without control characters; None for anything else.
+fn log_folder(value: &Value) -> Option<std::path::PathBuf> {
+    let Value::Text(text) = value else { return None };
+    let text = text.trim();
+    let path = std::path::Path::new(text);
+    (text.len() <= MAX_LOG_FOLDER && !text.chars().any(char::is_control) && path.is_absolute()).then(|| path.to_path_buf())
 }
 
 /// The preference `pref` of `p` (None: not one of [`LOCKS`]).
@@ -328,6 +358,11 @@ impl Policy {
     /// The administrator set a mandatory value: SolidCraft says it is managed.
     pub fn managed(&self) -> bool {
         self.mandatory.any()
+    }
+
+    /// The folder the administrator gave for SolidCraft's log, if any.
+    pub fn log_folder(&self) -> Option<&std::path::Path> {
+        self.mandatory.log_folder.as_deref()
     }
 
     /// The organization's name, when the administrator gave one.
@@ -818,6 +853,34 @@ mod tests {
     }
 
     #[test]
+    fn the_log_folder_is_a_full_path_on_one_line_and_anything_else_is_not_set() {
+        let folder = |v: Value| layer(&[(LOG_FOLDER, v)]).log_folder;
+        let full = if cfg!(windows) { r"C:\ProgramData\ACME\SolidCraft logs" } else { "/var/log/acme/solidcraft" };
+        assert_eq!(folder(Value::Text(format!("  {full} "))).as_deref(), Some(std::path::Path::new(full)));
+        for hostile in [
+            Value::Text(String::new()),
+            Value::Text("  ".into()),
+            Value::Text("logs".into()),
+            Value::Text("../logs".into()),
+            Value::Text(format!("{full}\nother")),
+            Value::Text(format!("{full}\u{0}")),
+            Value::Text(format!("{full}{}", "x".repeat(MAX_LOG_FOLDER))),
+            Value::Number(1),
+        ] {
+            assert_eq!(folder(hostile.clone()), None, "{hostile:?}");
+        }
+        let json = serde_json::json!({ LOG_FOLDER: full }).to_string();
+        let set = Policy::from_json(&json);
+        assert_eq!(set.log_folder(), Some(std::path::Path::new(full)));
+        assert!(set.managed(), "a log folder alone makes the computer managed");
+        assert_eq!(set.locked(), Vec::<&str>::new(), "it locks no preference");
+        let recommended = serde_json::json!({ RECOMMENDED: { LOG_FOLDER: full } }).to_string();
+        assert_eq!(Policy::from_json(&recommended).log_folder(), None, "only a mandatory value moves the log");
+        let under = Policy::from_json(&json);
+        assert_eq!(Policy::default().or(under).log_folder(), Some(std::path::Path::new(full)), "the user's value when the machine sets none");
+    }
+
+    #[test]
     fn the_theme_file_is_one_line_path_and_anything_else_is_not_set() {
         assert_eq!(one(THEME_FILE, Value::Text(r"  C:\ProgramData\ACME\theme.json ".into())), text(r"C:\ProgramData\ACME\theme.json"));
         assert_eq!(one(THEME_FILE, Value::Text("/etc/solidcraft/acme-theme.json".into())), text("/etc/solidcraft/acme-theme.json"));
@@ -1052,7 +1115,7 @@ mod tests {
     fn the_templates_offer_every_policy_the_app_reads() {
         let admx = include_str!("../../../packaging/windows/policies/solidcraft.admx");
         let adml = include_str!("../../../packaging/windows/policies/en-US/solidcraft.adml");
-        for name in LOCKS.iter().map(|lock| lock.policy).chain(ALLOWS.iter().map(|(policy, _)| *policy)).chain([ORGANIZATION_NAME, USAGE_STATISTICS])
+        for name in LOCKS.iter().map(|lock| lock.policy).chain(ALLOWS.iter().map(|(policy, _)| *policy)).chain([LOG_FOLDER, ORGANIZATION_NAME, USAGE_STATISTICS])
         {
             assert!(admx.contains(&format!(r#"valueName="{name}""#)), "{name} is missing from solidcraft.admx");
             assert!(adml.contains(&format!(r#"<string id="{name}">"#)), "{name} is missing from solidcraft.adml");

@@ -38,6 +38,7 @@ can run it. People without administrator rights can install it just for themselv
 | Allow problem reports | `AllowProblemReports` | `REG_DWORD` | `0`: no problem report opens or is sent, to SolidCraft's ticket server or GitHub. Help, About SolidCraft, **Copy diagnostic information** still copies the details. `1` or not set: people can send reports. SolidCraft 0.46 or later. |
 | Add SolidCraft to AI apps | `ConnectAiApps` | `REG_DWORD` | `1`: SolidCraft adds its MCP server to the AI apps on the computer at start. `0`: it adds none and takes out the entries it added. SolidCraft 0.46 or later. |
 | Theme file | `ThemeFile` | `REG_SZ` | The full path of a SolidCraft theme file (`.json`) everyone follows, up to 4096 characters on one line. See [A theme for everyone](#a-theme-for-everyone). SolidCraft 0.51 or later. |
+| Log folder | `LogFolder` | `REG_SZ` | The full path of a folder on the computer SolidCraft writes its log (`solidcraft.log`, and the run before's `solidcraft.previous.log`) in, in place of the `logs` folder of its data folder; up to 4096 characters on one line. Use a local folder everyone can write to; two people running SolidCraft at once share the one log. If the folder can't be written, the log stays in the data folder and says why. SolidCraft 0.51 or later. |
 
 On Windows the values live in the key `Software\Policies\SolidCraft`:
 

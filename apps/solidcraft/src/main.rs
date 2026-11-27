@@ -1812,8 +1812,18 @@ fn main() -> eframe::Result {
     // The log on disk, which a problem report attaches the end of (`log_file`); the run
     // before's log is kept beside it. After the hand-off above: a launch that only passes its
     // files to the running window must not move that window's log aside.
-    if let Some(dir) = solidcraft_engine::recovery::data_dir() {
-        solidcraft_ui_egui::log_file::install(&dir.join("logs"));
+    // An organization's `LogFolder` policy moves it; when that folder can't be written the log
+    // stays in the data folder and says so. Read here because the logger comes first: the app's
+    // own read of the policy later logs any value it ignores.
+    let managed = solidcraft_ui_egui::policy::load().log_folder().map(std::path::Path::to_path_buf);
+    let moved = managed.as_deref().and_then(solidcraft_ui_egui::log_file::install);
+    if moved.is_none() {
+        if let Some(dir) = solidcraft_engine::recovery::data_dir() {
+            solidcraft_ui_egui::log_file::install(&dir.join("logs"));
+        }
+        if let Some(folder) = &managed {
+            log::warn!("policy: LogFolder {} can't be written; the log stays in the data folder", folder.display());
+        }
     }
     log::info!("SolidCraft {} ({}) started", solidcraft_ui_egui::help::VERSION, solidcraft_ui_egui::help::COMMIT);
     // `--max-file-size 2GB`: the largest files this run reads, over Preferences, never saved (#4086).
