@@ -1752,7 +1752,17 @@ impl SolveApp {
         self.home.recent = v
             .get("recent")
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(Value::as_str).take(home::MAX_RECENT).map(str::to_string).collect())
+            .map(|a| {
+                // A path listed twice (saved by an older version, or written by two pages) is
+                // shown once (#23033).
+                let mut recent: Vec<String> = Vec::new();
+                for p in a.iter().filter_map(Value::as_str) {
+                    if recent.len() < home::MAX_RECENT && !recent.iter().any(|r| r == p) {
+                        recent.push(p.to_string());
+                    }
+                }
+                recent
+            })
             .unwrap_or_default();
         self.home.forgotten = keys("recent_forgotten");
         if let Some(s) = v.get("shortcut_box") {
