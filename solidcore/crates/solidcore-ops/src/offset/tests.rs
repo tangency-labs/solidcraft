@@ -115,7 +115,9 @@ fn a_shell_keeps_its_rounds_as_blends_of_the_moved_radius() {
                 solidcore_record::brep::blend::RadiusRecord::Constant { offsets } => {
                     offsets[0].abs()
                 }
-                solidcore_record::brep::blend::RadiusRecord::Law(_) => continue,
+                solidcore_record::brep::blend::RadiusRecord::Law(_)
+                | solidcore_record::brep::blend::RadiusRecord::Edge
+                | solidcore_record::brep::blend::RadiusRecord::EqualSetback => continue,
             },
             solidcore_record::brep::blend::BlendDefinition::ExactRound(d) => d.radius,
         });
@@ -135,6 +137,59 @@ fn a_shell_keeps_its_rounds_as_blends_of_the_moved_radius() {
         (radii[1] - 10.3).abs() < 1e-9,
         "outer round radius {} for 10.3",
         radii[1]
+    );
+}
+
+/// A cylinder r `r` from `z = bottom` to 40, cut by the plane through `(0, 0, 25 - drop)`
+/// tilted 20° about the x axis (its normal `(0, -sin 20°, cos 20°)`, `drop` along it), its
+/// slanted rim rounded `round`. The round between the plane and the cylinder at a slant
+/// is of an exact class whose net is a rational B-spline (its spine an ellipse).
+#[allow(clippy::disallowed_methods)] // the fixture's placement, not ops geometry
+fn slanted_rim_cylinder(r: f64, bottom: f64, drop: f64, round: f64) -> Body {
+    let tilt = 20f64.to_radians();
+    let cylinder = make_cylinder([0.0, 0.0, bottom], r, 40.0 - bottom).unwrap();
+    let cap = make_box([-60.0, -60.0, 25.0 - drop], [120.0, 120.0, 60.0 + drop]).unwrap();
+    cap.transform(&crate::affine::rotation([0.0, 0.0, 25.0], [1.0, 0.0, 0.0], tilt).unwrap())
+        .unwrap();
+    let body = crate::boolean::boolean(cylinder, cap, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    // the rim where it crosses y = 0 on the tilted plane, at x = -r: away from the
+    // cylinder's seam at x = r
+    let rim = edge_at(&body, [-r, 0.0, 25.0 - drop / tilt.cos()]);
+    blend(&body, Blend::Round, &[rim], &[round], &[], Corners::Filled).unwrap();
+    body
+}
+
+/// A shell offsets a round of an exact class whose net is a B-spline (solidcore#3424: a
+/// round on a slanted rim refused every wall since the shell kept the rounds' definitions).
+/// That round's own offset is an offset surface of its net, with no NURBS form to certify
+/// the moved definition on; it is the exact offset all the same and is kept without one.
+/// The body is convex, so a closed shell of wall 1 leaves the cavity of its points at least
+/// 1 inside: the same construction on the faces moved in by 1, the cylinder r 9 from z = 1,
+/// the plane moved 1 along its normal and the rim's round 2 - 1. The shell's volume is the
+/// body's less that cavity's, each volume within its relative accuracy 1e-8, and the walls
+/// placed within the body's tolerance over both boundaries, each of less area than the
+/// uncut cylinder's side and two of its slanted ends, 2 pi 10 40 + 2 pi 10² / cos 20°.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_round_on_a_slanted_rim_shells_by_its_offset_surface() {
+    all_fixes();
+    let body = slanted_rim_cylinder(10.0, 0.0, 0.0, 2.0);
+    let cavity = slanted_rim_cylinder(9.0, 1.0, 1.0, 1.0);
+    let (outer, inner) = (volume(&body), volume(&cavity));
+    shell(&body, &order(&body), &[], -1.0).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    body.check_solid().unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert_eq!(report.failures, 0, "{}", report.text);
+    let measured = volume(&body);
+    let area = 2.0 * PI * 10.0 * 40.0 + 2.0 * PI * 100.0 / 20f64.to_radians().cos();
+    let bound = 1e-8 * (outer + inner + measured) + body.tolerance().unwrap() * 2.0 * area;
+    assert!(
+        (measured - (outer - inner)).abs() <= bound,
+        "{measured} vs {} within {bound}",
+        outer - inner
     );
 }
 
@@ -185,6 +240,255 @@ fn a_half_torus_with_a_blind_hole_shells_open_at_its_bottom() {
         rel(actual, 3_607.142_961_425_14) < 1e-9,
         "shell volume {actual:.17}"
     );
+}
+
+/// `f` integrated over `[a, b]` by 5-point Gauss-Legendre on 400 pieces, after
+/// `x = a + (b - a) (3 u^2 - 2 u^3)`, which makes an integrand vanishing as a power 3/2 at
+/// either end (a lens opening from, or closing to, a point) smooth in `u`.
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn integral(a: f64, b: f64, f: impl Fn(f64) -> f64) -> f64 {
+    let inner = (5.0 - 2.0 * (10.0_f64 / 7.0).sqrt()).sqrt() / 3.0;
+    let outer = (5.0 + 2.0 * (10.0_f64 / 7.0).sqrt()).sqrt() / 3.0;
+    let w_inner = (322.0 + 13.0 * 70.0_f64.sqrt()) / 900.0;
+    let w_outer = (322.0 - 13.0 * 70.0_f64.sqrt()) / 900.0;
+    let nodes = [
+        (0.0, 128.0 / 225.0),
+        (inner, w_inner),
+        (-inner, w_inner),
+        (outer, w_outer),
+        (-outer, w_outer),
+    ];
+    let pieces = 400;
+    let h = 1.0 / f64::from(pieces);
+    let mut sum = 0.0;
+    for i in 0..pieces {
+        let mid = (f64::from(i) + 0.5) * h;
+        for (x, w) in nodes {
+            let u = mid + 0.5 * h * x;
+            let at = a + (b - a) * u * u * (3.0 - 2.0 * u);
+            sum += 0.5 * h * w * f(at) * (b - a) * 6.0 * u * (1.0 - u);
+        }
+    }
+    sum
+}
+
+/// The area of the disc of radius `r` beyond a chord `d` from its centre (none when `d >= r`).
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn disc_segment(r: f64, d: f64) -> f64 {
+    if d >= r {
+        return 0.0;
+    }
+    r * r * (d / r).acos() - d * (r * r - d * d).sqrt()
+}
+
+/// The area of the rectangle `|x| <= a`, `|y| <= b` inside the disc of radius `r` about its
+/// centre: the disc less its segments beyond the four sides, each corner's part beyond two
+/// sides taken twice and given back, `F(x) = (x sqrt(r^2 - x^2) + r^2 asin(x / r)) / 2` the
+/// area under the circle from 0 to x.
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn rectangle_in_disc(r: f64, a: f64, b: f64) -> f64 {
+    let under = |x: f64| 0.5 * (x * (r * r - x * x).sqrt() + r * r * (x / r).asin());
+    let corner = if r * r > a * a + b * b {
+        let reach = (r * r - b * b).sqrt();
+        under(reach) - under(a) - b * (reach - a)
+    } else {
+        0.0
+    };
+    PI * r * r - 2.0 * disc_segment(r, a) - 2.0 * disc_segment(r, b) + 4.0 * corner
+}
+
+/// A 40 x 38 x 100 block (|x| <= 20, |y| <= 19, 0 <= z <= 100) cut by the ball of r 55 about
+/// (0, 0, 50), which takes its eight vertical corners at the bottom and the top, with the
+/// sixteen edges where the sphere meets the sides rounded r 1, shelled 1 in and open at the
+/// top. Each round collapses onto its spine (an inset by its radius), and the faces beside it
+/// meet across it. At each corner the two rounds meet each other along a mitre, and the block
+/// not being square, a round there also touches the side beyond its own on a sliver: a round of
+/// five edges, whose rails are its two edges tangent to the sphere and its side (not opposite
+/// in a loop of four, as a lone round's are).
+///
+/// Every rounded edge is convex and the wall is the rounds' radius, so the cavity is the inset
+/// of the sharp body: the points with |x| < 19, |y| < 18 and z > 1 inside the ball of r 54,
+/// up to the open top. The shell takes that much away: the integral over z in (1, 100) of the
+/// area of the 38 x 36 rectangle inside the circle of radius sqrt(54^2 - (z - 50)^2)
+/// (`rectangle_in_disc`), split where the circle passes the rectangle's corners.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle and edge picks, not ops geometry
+fn an_inset_by_the_rounds_radius_mates_across_rounds_that_meet_at_a_corner() {
+    crate::test_corpus::rig_fixes();
+    let block = make_box([-20.0, -19.0, 0.0], [40.0, 38.0, 100.0]).unwrap();
+    let ball = make_sphere([0.0, 0.0, 50.0], 55.0).unwrap();
+    let body = crate::boolean::boolean(block, ball, crate::BooleanOp::Intersect)
+        .unwrap()
+        .unwrap();
+    // a point of each sphere-to-side edge, on x = +-20 or y = +-19, at the bottom and the top
+    let mut edges = Vec::new();
+    for (sx, sy) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+        for [x, y] in [[20.0 * sx, 17.0 * sy], [18.0 * sx, 19.0 * sy]] {
+            let h = (55.0_f64 * 55.0 - x * x - y * y).sqrt();
+            edges.push(edge_at(&body, [x, y, 50.0 - h]));
+            edges.push(edge_at(&body, [x, y, 50.0 + h]));
+        }
+    }
+    blend(
+        &body,
+        Blend::Round,
+        &edges,
+        &[1.0; 16],
+        &[],
+        Corners::Filled,
+    )
+    .unwrap();
+    let before = volume(&body);
+    let o = order(&body);
+    let open = face(&body, &o, |bx| {
+        (bx.min().z - 100.0).abs() < 1e-9 && (bx.max().z - 100.0).abs() < 1e-9
+    });
+    shell(&body, &o, &[open], -1.0).unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    let section = |z: f64| {
+        rectangle_in_disc(
+            (54.0_f64 * 54.0 - (z - 50.0) * (z - 50.0)).sqrt(),
+            19.0,
+            18.0,
+        )
+    };
+    // the circle passes the rectangle's corners, sqrt(19^2 + 18^2) out, at z = 50 -+ sqrt(54^2 - 685)
+    let corners = (54.0_f64 * 54.0 - 685.0).sqrt();
+    let cavity = integral(1.0, 50.0 - corners, section)
+        + integral(50.0 - corners, 50.0 + corners, section)
+        + integral(50.0 + corners, 100.0, section);
+    let removed = before - volume(&body);
+    assert!(
+        rel(removed, cavity) < 1e-9,
+        "the shell took {removed:.17} away, the cavity is {cavity:.17}"
+    );
+}
+
+/// The area two discs of radii `big` and `r`, centres `d` apart, share.
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn discs_overlap(big: f64, r: f64, d: f64) -> f64 {
+    if d >= big + r {
+        return 0.0;
+    }
+    if d <= (big - r).abs() {
+        return PI * big.min(r).powi(2);
+    }
+    let a = r * r * ((d * d + r * r - big * big) / (2.0 * d * r)).acos();
+    let b = big * big * ((d * d + big * big - r * r) / (2.0 * d * big)).acos();
+    let c = 0.5 * ((-d + r + big) * (d + r - big) * (d - r + big) * (d + r + big)).sqrt();
+    a + b - c
+}
+
+/// A frustum about +Z, r 100 at z = 0 to r 100 - 200 tan 18° at z = 200 (its side 18° off the
+/// axis), with a hole of r 5 from z = 150 up through the top, its axis 32 out at 85° from +X:
+/// it reaches r 37, past the rim's 35.02, so it breaks out through the side near the top. The
+/// hole's wall is one periodic face whose seam, at +X from its axis, is 85° round from the
+/// hole's outermost line. Shelled 2 in, open at the bottom.
+///
+/// The edge where the side meets the hole's wall is a U from the top down to z ~ 194 and back.
+/// Its offset, where the side's offset meets the wall's (r 7), runs from the top's offset
+/// (z = 198) at 83° either way round the hole from its outermost line, down to z ~ 181; on the
+/// extended surfaces it goes on up past the top's offset and crosses the wall's seam at 85°,
+/// z ~ 198.7. The seam cuts the intersection there into the whole U and a short piece beyond the
+/// seam, above the top's offset, whose middle lies nearer the edge's middle than the U's. No
+/// neighbour's offset cuts that piece: its ends are the edge's vertices dropped onto it. Taken
+/// for the edge, it left the loops of the side's and the wall's offsets open (`LoopGapUncertified`).
+///
+/// Every edge but the open bottom's moves with its faces, so the cavity is bounded by the
+/// faces' offsets alone: inside the side's offset, r 100 - z tan 18° - 2 / cos 18°, from the
+/// bottom up to z = 198, less, from z = 148, the r 7 disc 32 off the axis. The shell takes
+/// away the integral over z of that section's area.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle and face picks, not ops geometry
+fn a_cones_side_broken_through_by_a_hole_past_its_seam_shells_to_its_closed_form() {
+    crate::test_corpus::rig_fixes();
+    let t18 = 18.0_f64.to_radians().tan();
+    let top = 100.0 - 200.0 * t18;
+    let (c, s) = (85.0_f64.to_radians().cos(), 85.0_f64.to_radians().sin());
+    let cone = crate::make_cone([0.0; 3], 100.0, top, 200.0).unwrap();
+    let hole = make_cylinder([32.0 * c, 32.0 * s, 150.0], 5.0, 51.0).unwrap();
+    let body = crate::boolean::boolean(cone, hole, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let before = volume(&body);
+    let o = order(&body);
+    let bottom = face(&body, &o, |bx| {
+        bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+    });
+    shell(&body, &o, &[bottom], -2.0).unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{}", report.text);
+    let inside = |z: f64| 100.0 - z * t18 - 2.0 / 18.0_f64.to_radians().cos();
+    // the r 7 disc leaves the side's offset where 32 + 7 = inside(z), z ~ 181.3: split there
+    let out = (100.0 - 2.0 / 18.0_f64.to_radians().cos() - 39.0) / t18;
+    let section = |z: f64| PI * inside(z).powi(2);
+    let notch = |z: f64| discs_overlap(inside(z), 7.0, 32.0);
+    let cavity =
+        integral(0.0, 198.0, section) - integral(148.0, out, notch) - integral(out, 198.0, notch);
+    let removed = before - volume(&body);
+    assert!(
+        rel(removed, cavity) < 1e-9,
+        "the shell took {removed:.17} away, the cavity is {cavity:.17}"
+    );
+}
+
+/// A frustum on the z axis, r 10 at z = 0 to r 4 at z = 20 (its side falls 0.3 per mm), with
+/// everything at y > 6.8 cut away from below up to z = 10: a slot whose wall, the plane
+/// y = 6.8, runs along the frustum's side. The slot's ceiling, z = 10, is a lens of two edges
+/// between the wall's line and the side's circle (r 7 there): 0.2 across at x = 0, its two
+/// vertices the only places the side, the wall and the ceiling meet. The side meets the wall
+/// along a hyperbola.
+fn slotted_frustum() -> Body {
+    let frustum = crate::make_cone([0.0; 3], 10.0, 4.0, 20.0).unwrap();
+    let slot = make_box([-20.0, 6.8, -1.0], [40.0, 20.0, 11.0]).unwrap();
+    crate::boolean::boolean(frustum, slot, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// acid-1's notch ceiling where it breaks out through the torus, on a frustum: the slotted
+/// frustum shelled closed. The void is the core: the frustum with its side moved in t along
+/// its normal (its radius at z is 10 - 0.3 z - t sqrt(1.09)) between z = t and 20 - t, less the
+/// slot grown by t (its wall at y = 6.8 - t, its ceiling at 10 + t). At t = 1 the side and the
+/// wall no longer meet on the ceiling's plane, z = 11 (the side is there at 10 - 3.3 - 1.044 =
+/// 5.656, the wall at 5.8): the lens's offset is empty (the offset eliminates it), and the
+/// wall meets the side directly up to z* = (10 - 1.044 - 5.8) / 0.3 = 10.52, where they part.
+/// At t = 0.1 the lens's offset is still there (the wall at 6.7 against the side at 6.866 on
+/// z = 10.1). The shell is the body less the core, each a frustum less its slot: at each
+/// height z the slot takes the disc's segment beyond the wall (`disc_segment`), up to the
+/// ceiling or to where the side and the wall part, whichever comes first.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_lens_whose_offset_is_empty_leaves_the_shell() {
+    crate::test_corpus::rig_fixes();
+    // the frustum moved in by `t` less its slot moved out by `t`
+    let core = |t: f64| {
+        let radius = |z: f64| 10.0 - 0.3 * z - t * 1.09_f64.sqrt();
+        let (bottom, top) = (radius(t), radius(20.0 - t));
+        let wall = 6.8 - t;
+        let parts = (10.0 - t * 1.09_f64.sqrt() - wall) / 0.3;
+        PI / 3.0 * (20.0 - 2.0 * t) * (bottom * bottom + bottom * top + top * top)
+            - integral(t, (10.0 + t).min(parts), |z| disc_segment(radius(z), wall))
+    };
+    let body_volume = core(0.0);
+    for t in [1.0, 0.1] {
+        let body = slotted_frustum();
+        assert!(
+            rel(volume(&body), body_volume) < 1e-9,
+            "body {}",
+            volume(&body)
+        );
+        shell(&body, &order(&body), &[], -t).unwrap_or_else(|e| panic!("t {t}: {e:?}"));
+        let report = body.check(crate::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "t {t}: {}", report.text);
+        let want = body_volume - core(t);
+        let actual = volume(&body);
+        assert!(
+            rel(actual, want) < 1e-9,
+            "t {t}: shell volume {actual:.17}, want {want:.17}"
+        );
+    }
 }
 
 /// The same incidence graph before the seam disappears: the outer rim is
@@ -240,6 +544,87 @@ fn a_half_torus_keeps_a_periodic_seam_when_its_offsets_still_meet() {
         .collect();
     assert_eq!(seam_edges.len(), 1, "one retained outer-rim seam");
     assert_eq!(query.edge_faces(seam_edges[0]), [cavity, cavity]);
+}
+
+/// A cylinder r 12.7 to z = 7.9375 whose cap is split by the plane y = 0 and whose rim's two
+/// arcs are chamfered 1.5875, with a cylinder r 11.1125 standing 11.1125 on what is left of
+/// the cap and its top rim rounded r 11: a dome on a chamfered base (T-1504's power dome).
+/// The dome's seam runs from a vertex of the chamfer's arcs to the round's rim, which is
+/// tangent to the dome's side.
+#[allow(clippy::disallowed_methods)] // the fixture's placement, not ops geometry
+fn dome_on_a_chamfered_base() -> Body {
+    let (r, h, c, dome) = (12.7, 7.9375, 1.5875, 11.1125);
+    let base = make_cylinder([0.0; 3], r, h).unwrap();
+    let base = split_by_plane(
+        &base,
+        [1.0, 1.0, h],
+        ([0.0; 3], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+    );
+    let arcs = [edge_at(&base, [0.0, r, h]), edge_at(&base, [0.0, -r, h])];
+    blend(&base, Blend::Chamfer, &arcs, &[c, c], &[], Corners::Filled).unwrap();
+    let side = make_cylinder([0.0, 0.0, h], dome, dome).unwrap();
+    let body = crate::boolean::boolean(base, side, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let rim = edge_at(&body, [0.0, dome, h + dome]);
+    blend(&body, Blend::Round, &[rim], &[11.0], &[], Corners::Filled).unwrap();
+    body
+}
+
+/// T-1504 (solidcore#3424): the dome on a chamfered base shells open at its bottom. Since the
+/// periodic-seam construction (#18885) it was refused, "the body built is not a manifold
+/// solid": at the dome's seam, the support beyond it is the round's offset, whose extension
+/// past its tangent rim is the dome's own offset cylinder. It contains the whole intersection
+/// of the chamfer's offset with that cylinder, so it bounds none of it, and the seam's
+/// ordinary trim applies, as where there is no support at all.
+///
+/// Every face moves in t = 1.5875 and the moved faces meet where they cross, so the cavity is
+/// the solid of revolution of the moved profile: the cylinder r 11.1125 up to the chamfer's
+/// line r + z = 19.05 moved in, r + z = 19.05 - t sqrt 2, which it meets at z1 = 5.69244; the
+/// frustum along that line to r 9.525 at z2 = 7.27994; the cylinder r 9.525 to the round's
+/// centre z = 8.05; the round r 11 - t about the circle r 0.1125 there, to z = 17.4625. The
+/// body is the same construction unmoved: cylinder r 12.7 to 6.35, frustum to r 11.1125 at
+/// 7.9375, cylinder to 8.05, round r 11. A cylinder is pi R² L, a frustum pi L (R1² + R1 R2 +
+/// R2²) / 3, and a round r a about the circle r b over a quarter turn
+/// pi (a b² + pi a² b / 2 + 2 a³ / 3).
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_dome_on_a_chamfered_base_shells_open_at_its_bottom() {
+    all_fixes();
+    let cylinder = |r: f64, l: f64| PI * r * r * l;
+    let frustum = |r1: f64, r2: f64, l: f64| PI * l * (r1 * r1 + r1 * r2 + r2 * r2) / 3.0;
+    let round = |a: f64, b: f64| PI * (a * b * b + PI * a * a * b / 2.0 + 2.0 * a * a * a / 3.0);
+    let (r, h, c, dome, t) = (12.7, 7.9375, 1.5875, 11.1125, 1.5875);
+    let (centre, b) = (h + dome - 11.0, dome - 11.0);
+    let outer =
+        cylinder(r, h - c) + frustum(r, dome, c) + cylinder(dome, centre - h) + round(11.0, b);
+    let line = r + h - c - t * 2f64.sqrt();
+    let (z1, z2) = (line - (r - t), line - (dome - t));
+    let cavity = cylinder(r - t, z1)
+        + frustum(r - t, dome - t, z2 - z1)
+        + cylinder(dome - t, centre - z2)
+        + round(11.0 - t, b);
+    let body = dome_on_a_chamfered_base();
+    assert!(
+        rel(volume(&body), outer) < 1e-9,
+        "{} vs {outer}",
+        volume(&body)
+    );
+    let o = order(&body);
+    let bottom = face(&body, &o, |bx| {
+        bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+    });
+    shell(&body, &o, &[bottom], -t).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    body.check_solid().unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert_eq!(report.failures, 0, "{}", report.text);
+    let measured = volume(&body);
+    assert!(
+        rel(measured, outer - cavity) < 1e-9,
+        "{measured} vs {}",
+        outer - cavity
+    );
 }
 
 /// A 30 x 30 x 20 block with a conical recess from its bottom (radius 7.2 at z = 0, falling
@@ -324,6 +709,113 @@ fn a_feature_narrower_than_twice_the_wall_stays_solid() {
     assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
     assert!(b.is_manifold_solid().unwrap());
     assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+}
+
+/// Three pins r 0.5, 2 high, on the top of the 30 x 20 x 10 block, shelled closed with a wall
+/// of their radius (solidcore#3353, acid-8 stage 5's seven bosses): each pin's side collapses
+/// onto its axis, so all three come off together, what is left is shelled once (two shells in
+/// all, counted) and the pins are joined back on, solid.
+///
+/// Closed form: 6000 + 3 pi 0.5^2 2 - (30 - 1)(20 - 1)(10 - 1).
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn pins_as_thin_as_the_wall_come_off_together_and_stay_solid() {
+    all_fixes();
+    let mut b = block();
+    for x in [8.0, 15.0, 22.0] {
+        let pin = make_cylinder([x, 10.0, 10.0], 0.5, 2.0).unwrap();
+        b = crate::boolean::boolean(b, pin, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+    }
+    let (r, shells) = session::counted(solidcore::kernel::WorkCounters::shells, || {
+        shell(&b, &order(&b), &[], -0.5)
+    });
+    r.unwrap();
+    // the first shell, refused for the pins, and one of the block with all three off (one
+    // at a time it was one more for each pin)
+    assert_eq!(shells, 2);
+    let want = ABC + 3.0 * PI * 0.25 * 2.0 - 29.0 * 19.0 * 9.0;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+}
+
+/// The stress corpus's cut spheres and tori with a thin feature (S6226, S2226): a pin r 2,
+/// 10 high, on the cut ball's cap, shelled closed with a 3 wall. The cap is the cutting box's
+/// bottom, so its surface normal points into the ball, and only its other face use faces out
+/// of the material. Read from the side along the normal, every edge of the cap read the
+/// wrong way round: the pin's foot convex and the rim concave. So the walks from the ball and
+/// from the cap both took the pin in, no feature was found, and the pin's collapse refused the
+/// shell.
+///
+/// The hollow is the cut ball's: the ball r 47 below z = 27, V = pi (R + h)² (2R - h) / 3 for
+/// R 50, h 30 less R 47, h 27, with the pin, pi 2² 10, solid on it.
+#[test]
+fn a_thin_pin_on_a_cut_balls_cap_stays_solid() {
+    all_fixes();
+    let pin = make_cylinder([0.0, 0.0, 30.0], 2.0, 10.0).unwrap();
+    let b = crate::boolean::boolean(cut_ball(), pin, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    shell(&b, &order(&b), &[], -3.0).unwrap();
+    let want = PI * 6400.0 * 70.0 / 3.0 + PI * 4.0 * 10.0 - PI * 5476.0 * 67.0 / 3.0;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+}
+
+/// A 1200 x 2400 cylinder (r 600) with a 140 x 140 boss (r 70) on its top whose side touches
+/// the top's rim from inside (its axis 530 from the cylinder's: 530 + 70 = 600), shelled
+/// closed with a 72 wall (stress corpus S6050, S0837). The boss's side offset by 72 passes its
+/// radius, 70, and collapses: the shell is refused for it, naming that radius. The retry
+/// with the boss taken off caps its footprint, a circle split where it touches the rim and at
+/// the boss's seam. The footprint's two arcs run between the cap and the top, on one plane,
+/// and at both vertices their offsets take the vertex's image as an end. Their extended UV
+/// curves, each wound round the circle many times, coincide: their thousands of crossings
+/// within the tolerance had some five thousand stretches certified for moving to a curve end
+/// (over 90 s). The base's shell is still refused, so the first refusal stands, unchanged.
+#[test]
+#[allow(clippy::disallowed_methods)] // the seams' turn places the test body, not ops geometry
+fn a_thin_boss_touching_its_faces_rim_is_refused_without_winding_its_footprint() {
+    all_fixes();
+    // each circle's seam turned 0.6131 rad about its axis, as SolidCraft's cylinders have it
+    let (s, c) = 0.6131_f64.sin_cos();
+    let turned = |x: f64, z: f64| {
+        [
+            [c, s, 0.0, 0.0],
+            [-s, c, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [x, 0.0, z, 1.0],
+        ]
+    };
+    let base = make_cylinder([0.0; 3], 600.0, 2400.0).unwrap();
+    base.transform(&turned(0.0, 0.0)).unwrap();
+    let boss = make_cylinder([0.0; 3], 70.0, 140.0).unwrap();
+    boss.transform(&turned(530.0, 2400.0)).unwrap();
+    let b = crate::boolean::boolean(base, boss, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let o = order(&b);
+    let before = volume(&b);
+    let (r, certified) = session::counted(
+        solidcore::kernel::WorkCounters::contact_stretch_certifications,
+        || shell(&b, &o, &[], -72.0),
+    );
+    match r {
+        Err(Error::OffsetRefused {
+            why: crate::OffsetRefusal::Collapses { distance, radius },
+            ..
+        }) => {
+            assert!((distance.abs() - 72.0).abs() < 1e-9, "{distance}");
+            assert!((radius - 70.0).abs() < 1e-9, "{radius}");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(rel(volume(&b), before) < 1e-12);
+    // the shells' own intersections certify under a hundred stretches; the footprint's wound
+    // extensions certified thousands
+    assert!(certified < 1_000, "{certified} stretches certified");
 }
 
 /// A basin: a 100 x 60 x 30 slab less a ruled pocket (60 x 46 at the top, 4 from the front, 40 x
@@ -1920,6 +2412,229 @@ fn a_box_with_a_lofted_tunnel_shelled_passes_the_full_check() {
     }
 }
 
+/// The rounded rectangle `x` in [x0, x1], `z` in [z0, z1] with corners of radius 8 on the plane
+/// y = `y`, counter-clockwise about -y from its bottom side's start, as SolidCraft places a
+/// sketch on x = (1, 0, 0), y = (0, 0, 1).
+fn rounded_section(x0: f64, x1: f64, z0: f64, z1: f64, y: f64) -> Vec<crate::sweep::Curve> {
+    use crate::sweep::Curve;
+    let r = 8.0;
+    let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
+        start: [a[0], y, a[1]],
+        end: [b[0], y, b[1]],
+    };
+    let arc = |c: [f64; 2], start: f64| Curve::Arc {
+        center: [c[0], y, c[1]],
+        axis: [0.0, -1.0, 0.0],
+        reference: [1.0, 0.0, 0.0],
+        radius: r,
+        start,
+        end: start + PI / 2.0,
+    };
+    vec![
+        line([x0 + r, z0], [x1 - r, z0]),
+        arc([x1 - r, z0 + r], -PI / 2.0),
+        line([x1, z0 + r], [x1, z1 - r]),
+        arc([x1 - r, z1 - r], 0.0),
+        line([x1 - r, z1], [x0 + r, z1]),
+        arc([x0 + r, z1 - r], PI / 2.0),
+        line([x0, z1 - r], [x0, z0 + r]),
+        arc([x0 + r, z0 + r], PI),
+    ]
+}
+
+/// #21215's sections: the tube's, x in [0, 100], z in [0, 100], and the flare's far end,
+/// x in [-28, 100], z in [0, 128], both with corners of radius 8.
+const TUBE: [f64; 4] = [0.0, 100.0, 0.0, 100.0];
+const FLARE: [f64; 4] = [-28.0, 100.0, 0.0, 128.0];
+
+/// #21215's flare: the ruled loft from [`TUBE`]'s section at y = -80 to [`FLARE`]'s at y = -150.
+fn flare() -> Body {
+    let [a, b, c, d] = TUBE;
+    let [e, f, g, h] = FLARE;
+    crate::sweep::loft(
+        &[
+            rounded_section(a, b, c, d, -80.0),
+            rounded_section(e, f, g, h, -150.0),
+        ],
+        1,
+        true,
+    )
+    .unwrap()
+}
+
+/// #21215: [`TUBE`]'s section extruded from y = 0 to y = -80, joined to [`flare`]: one body,
+/// the round corners of the tube and the flare meeting at the crease y = -80.
+fn tube_joined_to_a_flare() -> Body {
+    let [a, b, c, d] = TUBE;
+    let tube = crate::sweep::extrude(
+        &rounded_section(a, b, c, d, 0.0),
+        [0.0, -1.0, 0.0],
+        80.0,
+        0.0,
+        crate::sweep::DraftCorner::Curvature,
+        true,
+    )
+    .unwrap();
+    crate::boolean::boolean(tube, flare(), crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap()
+}
+
+/// The volume of the part of the tube's erosion by `t` (its inset section, swept along y) past
+/// y = -80 that lies outside the flare's erosion: per slice y, the inset section's area outside
+/// the flare's erosion section, integrated by Simpson's rule from y = -80 to y = -80 - 0.4 t
+/// (past every crease's wedge, t tan(lean / 2) deep: under 0.27 t for the steepest lean,
+/// atan(0.4 sqrt 2), where the round between the two flared sides leans both ways). Both
+/// are convex: a section of an erosion is the intersection of the half-planes the supporting
+/// planes moved in by t cut from it, here those at the outward normals of 65 angles a quarter
+/// turn (each straight side's among them). A ruling of the flare joins its sections' points of
+/// one outward normal angle phi, and its supporting plane's normal is (cos phi, a, sin phi),
+/// square to the ruling.
+#[allow(clippy::disallowed_methods)] // the oracle's own arithmetic, not ops geometry
+fn erosion_wedge(t: f64) -> f64 {
+    const STEPS: usize = 64;
+    const SLICES: usize = 64;
+    // the point of section `s` (x0, x1, z0, z1) whose outward normal is at angle phi
+    let support = |s: [f64; 4], phi: f64| -> [f64; 2] {
+        let (sin, cos) = phi.sin_cos();
+        let pick = |c: f64, lo: f64, hi: f64| {
+            if c > 1e-12 {
+                hi - 8.0
+            } else if c < -1e-12 {
+                lo + 8.0
+            } else {
+                (lo + hi) / 2.0
+            }
+        };
+        [
+            pick(cos, s[0], s[1]) + 8.0 * cos,
+            pick(sin, s[2], s[3]) + 8.0 * sin,
+        ]
+    };
+    let angles: Vec<f64> = (0..4)
+        .flat_map(|q| (0..=STEPS).map(move |i| (q * STEPS + i) as f64 * PI / (2 * STEPS) as f64))
+        .collect();
+    // the half-planes a x + b z <= c
+    let tube: Vec<[f64; 3]> = angles
+        .iter()
+        .map(|&phi| {
+            let p = support(TUBE, phi);
+            [
+                phi.cos(),
+                phi.sin(),
+                phi.cos() * p[0] + phi.sin() * p[1] - t,
+            ]
+        })
+        .collect();
+    let flare_at = |y: f64| -> Vec<[f64; 3]> {
+        angles
+            .iter()
+            .map(|&phi| {
+                let (p, q) = (support(TUBE, phi), support(FLARE, phi));
+                let (cos, sin) = (phi.cos(), phi.sin());
+                let a = (cos * (q[0] - p[0]) + sin * (q[1] - p[1])) / 70.0;
+                let n = (1.0 + a * a).sqrt();
+                let at = (cos * p[0] + a * -80.0 + sin * p[1]) / n - t - a / n * y;
+                [cos / n, sin / n, at]
+            })
+            .collect()
+    };
+    let clip = |poly: Vec<[f64; 2]>, [a, b, c]: [f64; 3]| -> Vec<[f64; 2]> {
+        let mut out = Vec::new();
+        for (k, &p) in poly.iter().enumerate() {
+            let q = poly[(k + 1) % poly.len()];
+            let (fp, fq) = (a * p[0] + b * p[1] - c, a * q[0] + b * q[1] - c);
+            if fp <= 0.0 {
+                out.push(p);
+            }
+            if (fp < 0.0 && fq > 0.0) || (fq < 0.0 && fp > 0.0) {
+                let u = fp / (fp - fq);
+                out.push([p[0] + u * (q[0] - p[0]), p[1] + u * (q[1] - p[1])]);
+            }
+        }
+        out
+    };
+    let shoelace = |poly: &[[f64; 2]]| -> f64 {
+        (0..poly.len())
+            .map(|k| {
+                let (p, q) = (poly[k], poly[(k + 1) % poly.len()]);
+                p[0] * q[1] - q[0] * p[1]
+            })
+            .sum::<f64>()
+            / 2.0
+    };
+    let big = vec![[-1e3, -1e3], [1e3, -1e3], [1e3, 1e3], [-1e3, 1e3]];
+    let inset = tube.iter().fold(big, |poly, &h| clip(poly, h));
+    let outside = |y: f64| {
+        let both = flare_at(y).into_iter().fold(inset.clone(), |poly, h| {
+            if poly.is_empty() {
+                poly
+            } else {
+                clip(poly, h)
+            }
+        });
+        shoelace(&inset) - shoelace(&both)
+    };
+    let h = 0.4 * t / SLICES as f64;
+    (0..=SLICES)
+        .map(|k| {
+            let weight = if k == 0 || k == SLICES {
+                1.0
+            } else if k % 2 == 1 {
+                4.0
+            } else {
+                2.0
+            };
+            weight * outside(-80.0 - k as f64 * h)
+        })
+        .sum::<f64>()
+        * h
+        / 3.0
+}
+
+/// #21215: [`tube_joined_to_a_flare`] shelled t inward, open at both ends (y = 0 and
+/// y = -150), is a valid solid. At the crease the flare's top and its side x = 0 lean out
+/// atan 0.4 from the tube's, and the round between them runs along (-28, -70, 28): the
+/// offsets of the tube's round and side and of the flare's round and side, each pair tangent,
+/// cross the tube's side's offset at two points, the flare's round's offset meeting it along
+/// a curve between them. Each wall is convex, so its inward offset is its erosion, and the
+/// cavity at the crease, which is concave from outside, is the union of the two. The
+/// material is then the tube's shell (open at y = 0, with a wall t thick at y = -80) and the
+/// flare's (open at both ends), less that wall (t times the tube's inset section) and less
+/// the part of the tube's erosion past y = -80 outside the flare's ([`erosion_wedge`]).
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_tube_joined_to_a_flared_loft_shells_open_at_both_ends() {
+    all_fixes();
+    let inset = |t: f64| (100.0 - 2.0 * t).powi(2) - (4.0 - PI) * (8.0 - t).powi(2);
+    for t in [2.0, 6.0] {
+        let b = tube_joined_to_a_flare();
+        let o = order(&b);
+        let ends = [
+            through(&b, &o, [50.0, 0.0, 50.0]),
+            through(&b, &o, [50.0, -150.0, 50.0]),
+        ];
+        shell(&b, &o, &ends, -t).unwrap_or_else(|e| panic!("t {t}: {e:?}"));
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "t {t}: {}", report.text);
+
+        let alone = flare();
+        let fo = order(&alone);
+        let flare_ends = [
+            through(&alone, &fo, [50.0, -80.0, 50.0]),
+            through(&alone, &fo, [50.0, -150.0, 50.0]),
+        ];
+        shell(&alone, &fo, &flare_ends, -t).unwrap();
+        let tube = 80.0 * inset(0.0) - (80.0 - t) * inset(t);
+        let want = tube + volume(&alone) - t * inset(t) - erosion_wedge(t);
+        assert!(
+            rel(volume(&b), want) < 1e-7,
+            "t {t}: {} vs {want}",
+            volume(&b)
+        );
+    }
+}
+
 /// Drafts against closed forms (SolidCraft's `draft_*` cases, on record face indices), the oblique
 /// neutral plane's, and the refusals.
 mod drafts {
@@ -2583,6 +3298,296 @@ mod drafts {
         let report = b.check(crate::CheckLevel::All).unwrap();
         assert_eq!(report.failures, 0, "{}", report.text);
     }
+
+    /// #1126's body: the prism of the trapezoid (-15, 0) (15, 0) (5, 10) (-5, 10), 20 tall,
+    /// whose slanted sides x = +-(15 - y) converge on the line x = 0, y = 15.
+    fn converging_prism() -> crate::Body {
+        use crate::sweep::Curve;
+        let p = [[-15.0, 0.0], [15.0, 0.0], [5.0, 10.0], [-5.0, 10.0]];
+        let profile: Vec<Curve> = (0..4)
+            .map(|i| Curve::Line {
+                start: [p[i][0], p[i][1], 0.0],
+                end: [p[(i + 1) % 4][0], p[(i + 1) % 4][1], 0.0],
+            })
+            .collect();
+        crate::sweep::extrude(
+            &profile,
+            Z,
+            20.0,
+            0.0,
+            crate::sweep::DraftCorner::Curvature,
+            true,
+        )
+        .unwrap()
+    }
+
+    /// Points rounded to 1e-9 and sorted, to compare vertex sets.
+    fn rounded(points: impl IntoIterator<Item = [f64; 3]>) -> Vec<[i64; 3]> {
+        let mut out: Vec<[i64; 3]> = points
+            .into_iter()
+            .map(|q| q.map(|c| (c * 1e9).round() as i64))
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
+    /// The short wall y = 10 of [`converging_prism`] drafted by `angle` about the top
+    /// (z = 20), pulled up, so that below the hinge it leans out, checked against the closed
+    /// form `volume`, the face, edge and vertex `counts` and the vertices `points`, as a sound
+    /// solid. The outcome, printed, and whether it is as derived.
+    fn draft_the_short_wall(
+        angle: f64,
+        volume_cf: f64,
+        counts: [usize; 3],
+        points: &[[f64; 3]],
+    ) -> bool {
+        let b = converging_prism();
+        let o = order(&b);
+        let wall = face(&b, &o, |bx| {
+            (bx.min().y - 10.0).abs() < 1e-9 && (bx.max().y - 10.0).abs() < 1e-9
+        });
+        let got = draft(&b, &o, &[wall], [0.0, 0.0, 20.0], Z, Z, angle).and_then(|()| {
+            let report = b.check(crate::CheckLevel::All)?;
+            Ok((
+                volume(&b),
+                b.counts()?,
+                b.is_manifold_solid()?,
+                report.failures,
+            ))
+        });
+        println!("#1126 angle {angle}: {got:?} (closed form {volume_cf}, {counts:?})");
+        let Ok((measured, c, manifold, failures)) = got else {
+            return false;
+        };
+        let corners = {
+            let brep = b.lock();
+            rounded(brep.vertex_list().iter().map(|&v| {
+                let q = brep.vertex(v).unwrap().point;
+                [q.x, q.y, q.z]
+            }))
+        };
+        rel(measured, volume_cf) < 1e-9
+            && c == counts
+            && manifold
+            && failures == 0
+            && corners == rounded(points.iter().copied())
+    }
+
+    /// The prism's top corners, which the draft keeps (its hinge is the top edge).
+    const CONVERGING_TOP: [[f64; 3]; 4] = [
+        [-15.0, 0.0, 20.0],
+        [15.0, 0.0, 20.0],
+        [5.0, 10.0, 20.0],
+        [-5.0, 10.0, 20.0],
+    ];
+
+    /// At depth d = 20 - z the drafted wall stands at y = 10 + d t, t = tan(angle), and the
+    /// section at height z is the trapezoid's slab 0 <= y <= Y = min(10 + d t, 15) between
+    /// the sides, of area 30 Y - Y^2. For t = 1/8 the wall's foot, y = 12.5, stays short of
+    /// the sides' meeting line: V = 8 [15 Y^2 - Y^3/3] from 10 to 12.5 = 12625/3, with the
+    /// prism's 6 faces, 12 edges and 8 vertices, the foot's ends at x = +-2.5.
+    #[test]
+    fn a_short_wall_drafted_short_of_where_its_sides_converge() {
+        // atan(1/8), the double nearest it
+        const EIGHTH: f64 = 0.124_354_994_546_761_44;
+        all_fixes();
+        let mut points = CONVERGING_TOP.to_vec();
+        points.extend([
+            [-15.0, 0.0, 0.0],
+            [15.0, 0.0, 0.0],
+            [2.5, 12.5, 0.0],
+            [-2.5, 12.5, 0.0],
+        ]);
+        assert!(draft_the_short_wall(
+            EIGHTH,
+            12625.0 / 3.0,
+            [6, 12, 8],
+            &points
+        ));
+    }
+
+    /// #1126 at the critical angle atan(1/4), where the wall's foot reaches the line
+    /// x = 0, y = 15 the sides meet on: the wall's bottom edge closes to the point
+    /// (0, 15, 0), where four faces meet (the wall, the bottom and both sides), and no new
+    /// edge. V = 4 [15 Y^2 - Y^3/3] from 10 to 15 = 13000/3; 6 faces, 11 edges, 7 vertices.
+    #[test]
+    fn a_short_wall_drafted_onto_where_its_sides_converge() {
+        // atan(1/4), the double nearest it
+        const QUARTER: f64 = 0.244_978_663_126_864_14;
+        all_fixes();
+        let mut points = CONVERGING_TOP.to_vec();
+        points.extend([[-15.0, 0.0, 0.0], [15.0, 0.0, 0.0], [0.0, 15.0, 0.0]]);
+        assert!(draft_the_short_wall(
+            QUARTER,
+            13000.0 / 3.0,
+            [6, 11, 7],
+            &points
+        ));
+    }
+
+    /// #1126 past the critical angle, t = 1/2: the wall ends in a point on the line x = 0,
+    /// y = 15 at z = 20 - 5/t = 10 (a triangle), and below that point the two sides meet
+    /// along a new edge on the line, down to the bottom, whose outline becomes the triangle
+    /// (-15, 0) (15, 0) (0, 15). V = 2 [15 Y^2 - Y^3/3] from 10 to 15, plus
+    /// 10 (30 15 - 15^2) = 6500/3 + 2250 = 13250/3 (for any t >= 1/4,
+    /// V = 4500 - 125 / (3 t)); 6 faces, 12 edges, 8 vertices.
+    #[test]
+    fn a_short_wall_drafted_past_where_its_sides_converge() {
+        // atan(1/2), the double nearest it
+        const HALF: f64 = 0.463_647_609_000_806_1;
+        all_fixes();
+        let mut points = CONVERGING_TOP.to_vec();
+        points.extend([
+            [-15.0, 0.0, 0.0],
+            [15.0, 0.0, 0.0],
+            [0.0, 15.0, 0.0],
+            [0.0, 15.0, 10.0],
+        ]);
+        assert!(draft_the_short_wall(
+            HALF,
+            13250.0 / 3.0,
+            [6, 12, 8],
+            &points
+        ));
+    }
+
+    /// #1126 further past the critical angle, t = 1: the wall ends in a point on the line
+    /// x = 0, y = 15 at z = 20 - 5/t = 15, and the sides meet along a new edge from there
+    /// down to the bottom, as at t = 1/2. V = 4500 - 125 / (3 t) = 13375/3; 6 faces,
+    /// 12 edges, 8 vertices.
+    #[test]
+    fn a_short_wall_drafted_at_45_degrees_past_where_its_sides_converge() {
+        all_fixes();
+        let mut points = CONVERGING_TOP.to_vec();
+        points.extend([
+            [-15.0, 0.0, 0.0],
+            [15.0, 0.0, 0.0],
+            [0.0, 15.0, 0.0],
+            [0.0, 15.0, 15.0],
+        ]);
+        assert!(draft_the_short_wall(
+            std::f64::consts::FRAC_PI_4,
+            13375.0 / 3.0,
+            [6, 12, 8],
+            &points
+        ));
+    }
+
+    /// #1126's flip takes plane neighbours only: with the right side an arc about
+    /// (0, -5, 0) through (15, 0) and (5, 10) instead of a line, drafting the short wall
+    /// by atan(1/2) is refused, as before the flip, by a typed refusal (the arc's
+    /// cylinder tops out at y = 5 sqrt(10) - 5, short of the wall's foot at y = 15, so
+    /// the wall's loop gap on that side has no certified closure).
+    #[test]
+    fn a_short_wall_drafted_past_a_curved_side_is_refused() {
+        use crate::sweep::Curve;
+        const HALF: f64 = 0.463_647_609_000_806_1;
+        all_fixes();
+        let line = |a: [f64; 2], b: [f64; 2]| Curve::Line {
+            start: [a[0], a[1], 0.0],
+            end: [b[0], b[1], 0.0],
+        };
+        let profile = vec![
+            line([-15.0, 0.0], [15.0, 0.0]),
+            Curve::Arc {
+                center: [0.0, -5.0, 0.0],
+                axis: Z,
+                reference: [1.0, 0.0, 0.0],
+                // sqrt(250), atan(1/3), atan(3): the doubles nearest them
+                radius: 15.811_388_300_841_896,
+                start: 0.321_750_554_396_642_2,
+                end: 1.249_045_772_398_254_4,
+            },
+            line([5.0, 10.0], [-5.0, 10.0]),
+            line([-5.0, 10.0], [-15.0, 0.0]),
+        ];
+        let b = crate::sweep::extrude(
+            &profile,
+            Z,
+            20.0,
+            0.0,
+            crate::sweep::DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        let o = order(&b);
+        let wall = face(&b, &o, |bx| {
+            (bx.min().y - 10.0).abs() < 1e-9 && (bx.max().y - 10.0).abs() < 1e-9
+        });
+        let got = draft(&b, &o, &[wall], [0.0, 0.0, 20.0], Z, Z, HALF);
+        println!("#1126 curved side: {got:?}");
+        assert!(
+            matches!(
+                got,
+                Err(Error::OffsetRefused {
+                    why: crate::OffsetRefusal::LoopGapUncertified,
+                    ..
+                })
+            ),
+            "{got:?}"
+        );
+    }
+
+    /// A frustum r 100 at z = 0 to r 40 at z = 200 (its side leaning atan 0.3, 16.70 degrees,
+    /// inward) with six blind holes r 5, from z = 150 up through the top, their centres on the
+    /// circle r 32 (each reaching out to r 37). Its side drafted to lean 18 degrees, about its
+    /// base, is r(z) = 100 - z tan 18 degrees, which passes r 37 at z0 = 193.89 and is r 35.02
+    /// at the top: every hole breaks out through the drafted side near the top, its wall and
+    /// the cone's passing through each other between the two points where the hole's rim
+    /// crosses the top's new rim. The body is the frustum less the holes: pi int r^2 less
+    /// 6 int lens(r(z), 5, 32) over z 150 to 200, the lens the discs' closed-form overlap,
+    /// 25 pi below z0. The lens integral above z0, after z = z0 + s^2 (which makes it
+    /// analytic), by Gauss-Legendre: 20, 40 and 80 nodes agree to every digit printed,
+    /// 3061182.2920648409. (At this size the drafted cone's stored top height, recovered from
+    /// its net, is 200 plus a rounding, though its top row lies in the top's plane.)
+    #[test]
+    fn a_cones_side_drafted_through_blind_holes_near_its_top_breaks_them_out() {
+        /// 18 degrees less atan 0.3, radians: the turn that leaves the side at 18 degrees.
+        const TURN: f64 = 0.022_702_470_881_112_213;
+        /// The drafted frustum less the six holes (the quadrature above).
+        const DRAFTED: f64 = 3_061_182.292_064_841;
+        /// sqrt 3, the double nearest it (ops computes no geometry, its tests included).
+        const SQRT_3: f64 = 1.732_050_807_568_877_2;
+        all_fixes();
+        let mut b = make_cone([0.0; 3], 100.0, 40.0, 200.0).unwrap();
+        let s = SQRT_3;
+        for (x, y) in [
+            (32.0, 0.0),
+            (16.0, 16.0 * s),
+            (-16.0, 16.0 * s),
+            (-32.0, 0.0),
+            (-16.0, -16.0 * s),
+            (16.0, -16.0 * s),
+        ] {
+            let hole = make_cylinder([x, y, 150.0], 5.0, 51.0).unwrap();
+            b = crate::boolean::boolean(b, hole, crate::BooleanOp::Subtract)
+                .unwrap()
+                .unwrap();
+        }
+        let o = order(&b);
+        let side = face(&b, &o, |bx| {
+            bx.min().x < 0.0 && bx.max().x > 0.0 && bx.max().z > bx.min().z
+        });
+        draft(&b, &o, &[side], [0.0; 3], Z, Z, TURN).unwrap();
+        let got = volume(&b);
+        assert!(rel(got, DRAFTED) < 1e-9, "{got} vs {DRAFTED}");
+        // r(190) = 38.27 and the old side's r(190) = 43: (40 cos 30, 40 sin 30, 190), between
+        // two holes, is cut away; r 30 there stays; the hole's centre line and its outer reach
+        // past the new side near the top are void.
+        for (point, wanted) in [
+            ([20.0 * s, 20.0, 190.0], crate::PointClass::Outside),
+            ([15.0 * s, 15.0, 195.0], crate::PointClass::Inside),
+            ([32.0, 0.0, 170.0], crate::PointClass::Outside),
+            ([36.0, 0.0, 199.5], crate::PointClass::Outside),
+            ([30.0, 0.0, 100.0], crate::PointClass::Inside),
+        ] {
+            assert_eq!(b.classify_point(point).unwrap(), wanted, "{point:?}");
+        }
+        assert!(b.is_manifold_solid().unwrap());
+        b.check_solid().unwrap();
+        let report = b.check(crate::CheckLevel::All).unwrap();
+        assert_eq!(report.failures, 0, "{}", report.text);
+    }
 }
 
 /// Kernel diagnostics cross the application seam here; the app receives only ops
@@ -2811,6 +3816,10 @@ fn a_countersinks_cone_moves_into_the_material_over_the_well() {
 /// V + 12 pi δ√2. Past δ = 2 sin 45° = √2 the moved cone's apex, z = 5.5 - δ√2, is below
 /// the hole's old edge at z = 3.5, and the meeting there was sought from the edge on the
 /// cone's other nappe: +1.5 and +2 were refused for a reach with no certified bound (#20935).
+/// Past δ = 2 / cos 45° = 2√2 the moved cone's apex is past the image the cone's own
+/// parameters give the hole's circle, r = 2 - δ cos 45°: the face lost that edge and was
+/// refused as unsound, though the well's wall is still a band 4.5 - δ√2 high, 0.26 at 3 and
+/// 0.0027 at 3.18 (#21188).
 /// Moved 3.5, past the foot, the well's wall between the cone and the block's underside
 /// closes at 4.5 / √2 and is refused, naming it.
 #[test]
@@ -2818,6 +3827,20 @@ fn a_countersinks_cone_moves_into_the_material_over_the_well() {
 fn a_countersinks_cone_moves_off_the_material_past_its_apex_over_the_hole() {
     all_fixes();
     for delta in [1.0, 1.4, 1.5, 2.0] {
+        let b = countersunk_block(4.0);
+        let o = order(&b);
+        let cone = countersink_cone(&b, &o, 4.0);
+        offset_faces(&b, &o, &[cone], delta).unwrap();
+        let expected = countersunk_volume(4.0) + 12.0 * PI * delta * 2.0_f64.sqrt();
+        assert!(
+            rel(volume(&b), expected) < 1e-9,
+            "{delta}: {} vs {expected}",
+            volume(&b)
+        );
+        b.check_solid().unwrap();
+    }
+    // past 2√2, up to just short of the foot at 4.5 / √2 = 3.182
+    for delta in [2.9, 3.0, 3.1, 3.18] {
         let b = countersunk_block(4.0);
         let o = order(&b);
         let cone = countersink_cone(&b, &o, 4.0);

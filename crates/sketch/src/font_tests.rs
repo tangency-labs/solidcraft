@@ -266,6 +266,28 @@ fn fonts_resolve_by_file_by_installed_name_or_to_the_built_in_one() {
 }
 
 #[test]
+fn registry_files_are_searchable_and_listed_without_their_parent_folder() {
+    let folder = Folder::new("registry-file");
+    let file = PathBuf::from(folder.font());
+    let sources = [file.clone(), file];
+    assert_eq!(crate::families_in(&sources), ["Tiny Block"]);
+    let full = find_family_in(&sources, "Tiny Block Regular").unwrap().expect("registry file full name");
+    assert_eq!(full.bytes(), tiny_font().as_slice());
+}
+
+#[test]
+fn a_warm_family_cache_still_resolves_full_names() {
+    let folder = Folder::new("warm-full-name");
+    let dirs = std::slice::from_ref(&folder.0);
+    assert!(find_family_in(dirs, "Tiny Block").unwrap().is_some());
+    assert_eq!(crate::families_in(dirs), ["Tiny Block"]);
+    for _ in 0..2 {
+        let full = find_family_in(dirs, "Tiny Block Regular").unwrap().expect("full name after family cache warmup");
+        assert_eq!(full.bytes(), tiny_font().as_slice());
+    }
+}
+
+#[test]
 fn unknown_fonts_and_unreadable_files_are_errors() {
     let folder = Folder::new("errors");
     let message = |name: &str| font_data(Some(name)).err().unwrap().to_string();
@@ -433,6 +455,30 @@ fn a_font_is_kept_in_the_design_and_old_designs_read_without_one() {
     let json = serde_json::to_string(&source(Some("C:/fonts/Some Font.ttf"))).unwrap();
     assert!(json.contains(r#""font":"C:/fonts/Some Font.ttf""#), "{json}");
     assert_eq!(serde_json::from_str::<LinkSource>(&json).unwrap(), source(Some("C:/fonts/Some Font.ttf")));
+}
+
+#[test]
+fn installed_families_skip_names_the_family_api_cannot_use() {
+    let folder = Folder::new("invalid-family-names");
+    // The family API accepts at most 1024 bytes on one line, and treats paths and font
+    // extensions as files. Such name-table entries must not become picker choices.
+    for (index, name) in ["Bad/Family".to_owned(), "Bad.ttf".to_owned(), "Bad\nFamily".to_owned(), "a".repeat(1025)].iter().enumerate() {
+        std::fs::write(folder.0.join(format!("invalid-{index}.ttf")), build_font(name, &[])).unwrap();
+    }
+    assert_eq!(crate::families_in(std::slice::from_ref(&folder.0)), ["Tiny Block"]);
+}
+
+#[test]
+fn installed_families_skip_faces_without_outlines() {
+    let folder = Folder::new("no-outlines");
+    let file = folder.0.join("bitmap-only.ttf");
+    let mut bytes = build_font("No Outlines", &[]);
+    // Remove the glyf directory entry's identity, leaving its name table intact. There is
+    // no CFF/CFF2 table either, so this face cannot supply sketch outlines.
+    let table = bytes[12..].as_chunks_mut::<16>().0.iter_mut().find(|record| record.starts_with(b"glyf")).unwrap();
+    table[..4].copy_from_slice(b"none");
+    std::fs::write(&file, bytes).unwrap();
+    assert!(crate::families_in(&[file]).is_empty());
 }
 
 #[test]

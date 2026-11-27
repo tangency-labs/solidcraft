@@ -16,7 +16,11 @@
 //! - [`Mesh`]: an indexed triangle mesh with its edge polylines and their display flags;
 //! - [`curve_points`]: a free curve's points at a [`MeshTolerance`], by the edge rules;
 //! - [`simplify`]: display levels of detail of a large mesh;
-//! - [`preview`]: a bounded coarse mesh of a decoded body.
+//! - [`preview`]: a bounded coarse mesh of a decoded body;
+//! - [`eval`]: the plan evaluator's basis, partials and parameters, for clients that evaluate a
+//!   plan's forms themselves.
+//! - [`weld_symbol`]: a welding symbol's contour mark and V groove depth, the kernel's
+//!   ([`solidcore::weld_symbol`]) on the record's plane types.
 //!
 //! A display mesh decides nothing a model depends on: it is drawn, never measured.
 //!
@@ -24,6 +28,7 @@
 //! cannot mesh is named in its [`PlanStats`], and the rest of the body is meshed.
 
 mod curve;
+pub mod eval;
 #[cfg(test)]
 mod fixtures;
 mod hash;
@@ -43,6 +48,7 @@ mod spec;
 mod stats;
 mod tolerance;
 mod vec;
+pub mod weld_symbol;
 
 pub use curve::curve_points;
 pub use iso::MAX_ISOPARMS;

@@ -72,7 +72,18 @@ or a law r(t).
   tangent chain are one chamfer, so their rails meet: measured at the wedge of its edges between
   planes, where the sizes then hold all along, else at the narrowest wedge of their middles, moved
   up as far as unequal sizes need so that no station folds at the widest wedge, enclosed along
-  each edge. Where the wedge varies the sizes hold only where it was measured.
+  each edge. Where the wedge varies, those sizes hold at the reference wedge.
+  A smooth chain can also connect planar edges with different wedges. Each planar strip keeps
+  its requested setbacks. For equal setbacks the curved strips solve for the rolling radius
+  at each pair of support feet. The local tangent planes give the radius from their wedge and
+  the requested distance. As the normals approach those of an adjacent planar strip, both
+  constructions give the same radius and the same end chord.
+  A second chamfer kind, setbacks held at every station (each foot a straight line of its size
+  from the edge, in the plane square to it), is defined but not built: its record
+  (`ChamferKindRecord::Setbacks`, its radius `RadiusRecord::Edge`, the edge as its leader) is
+  refused when read. Its station, and the definitions it is built under (where stations
+  cross, which root is the foot, ends and corners), are in
+  `blend::fillet_section::setback_station`.
 
 Every geometric quantity downstream (rails, sections, events, corner boundaries) is built from the
 same exact spine points.
@@ -168,14 +179,13 @@ value (a support as its NURBS form, the one its stations are solved on, labelled
 plane, cylinder, cone, sphere, torus or free; a round on a round as its own record, three deep at
 most), sides, radius or law, order, thumbweight, leader, seeds, ε, the
 map from the net's parameters, and the net, every number as stored. The record holds no maths and
-moves into `solidcore-record` as it is (`docs/layers.md`). The record keeps no analytic parameters:
-rebuilding derives a labelled support's analytic surface from its form (its corners for a plane,
-the circles of its rational quadratic rows for a surface of revolution: exact, as rational NURBS
-represent these surfaces exactly), refusing a form whose implicit equation does not vanish on it,
-coefficient by coefficient on each Bézier patch, naming the face. So a support is written with its
-label only where that reading derives its surface back from the form written: a form whose
-control rows give the numbers only to more than the evaluation's rounding (a cone's short arc
-span) goes unlabelled, as its form, and is read as a free support. A corner's net and a draft's
+moves into `solidcore-record` as it is (`docs/layers.md`). If a labelled support has no stored analytic
+parameters, the reader derives its surface from the NURBS form. For example, it uses a plane's
+corners or the circles of a revolved surface's rational quadratic rows. A cone or cylinder can
+also store its placement, radius and semi-angle, since recovering the centre from a short arc can
+amplify rounding error. The reader verifies that the NURBS form lies on the resulting surface.
+On each Bézier patch, every coefficient of the implicit equation must vanish within rounding.
+If the writer cannot prove the analytic surface by either method, it stores the form as a free support. A corner's net and a draft's
 surfaces keep their label, which their records require. Rebuilding is exact, and the
 net is certified again (§2.4) before the round is an operand; a net not proved within ε is
 refused, naming its face. Evaluating S is a pure function of the definition: the station memo
@@ -350,6 +360,15 @@ ball's sphere. Setback: the rounds stop short and a 2n-sided hole is filled.*
   that the points where they meet are not determined to the part's rounding are refused, naming
   that. Three chamfers of both convexities between planes are refused, naming the vertex, until
   their mitre is built. The corner keeps its definition: its chamfers and the points they meet in (opt-in, WR-716).
+- **Chamfer Ends meeting across an edge.** Two chamfers on one face can end at the two
+  vertices of an unchamfered edge of it, each an End on the face beyond that edge (a box's
+  top edges after its upright edges were chamfered). Where their bands reach past each other
+  across the edge, the End ribs cross and the chamfer planes meet the end face in a point no
+  per-vertex End makes. A chamfer between planes keeps a half-space near the corner, and
+  intersections commute, so such a selection is built in two passes, no two picks of a pass
+  meeting this way and picks that share a vertex in one pass: each End of the second pass is
+  the single-edge End on the first pass's chamfer (`blend_corner/crossing_ends.rs`, #17026).
+  Parallel or converging picks, whose bands overlap along their length, are not split.
 - **Setback** [44, 43]. Each blend stops at a setback distance from the vertex. The hole has 2n
   sides: n profile curves (the blends' end sections) alternating with n spring curves on the faces.
   Plain trimlines that simply meet give poor shapes for unequal radii, edges far from 90° and

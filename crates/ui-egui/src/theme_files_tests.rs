@@ -920,3 +920,27 @@ const ORIGINAL_BUILTIN_IDS: &[&str] = &[
     "clay-dark",
     "cga",
 ];
+
+#[test]
+fn shipped_themes_keep_menu_separators_visible_on_dialog_body() {
+    crate::test_support::host_data();
+    let check = |label: &str, t: &Tokens| {
+        let stroke = crate::ui_kit::Menu::separator_stroke(t);
+        let visible = solidcraft_theme::composite(stroke.color, t.dialog_body);
+        assert!(
+            stroke.width > 0.0 && solidcraft_theme::contrast_ratio(visible, t.dialog_body) >= crate::ui_kit::Menu::SEPARATOR_MIN_CONTRAST,
+            "{label}: {stroke:?} on {:?}",
+            t.dialog_body
+        );
+    };
+    check("light", &Tokens::light());
+    check("dark", &Tokens::dark());
+    for file in builtin() {
+        let gruvbox = matches!(file.id.as_str(), "gruvbox-dark" | "gruvbox-light");
+        let contrasts: &[&str] = if gruvbox { &["soft", "standard", "hard"] } else { &["standard"] };
+        for contrast in contrasts {
+            let options = if gruvbox { BTreeMap::from([("contrast".into(), OptionValue::Choice((*contrast).into()))]) } else { BTreeMap::new() };
+            check(&format!("{} ({contrast})", file.id), &resolve_with(file, &options));
+        }
+    }
+}

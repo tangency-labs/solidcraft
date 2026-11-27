@@ -26,6 +26,21 @@ fn scene(size: Vec2, items: Vec<Item>) -> Scene {
     Scene::new(size, vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items }])
 }
 
+/// Asserts that `banded`, drawn in bands, is `whole` but for tiny-skia's edge clipping where a band
+/// cuts a curved edge: at most 32 pixels off, each by one AA step (16 grey levels) for each of at
+/// most two edges through it, as where a round cap's outline crosses its line's (in black and white
+/// a pixel may cross the threshold). The module's notes, and #4890 B2b.
+fn within_one_aa_step(banded: &[u8], whole: &[u8], colour: PngColour, what: &str) {
+    let (banded, whole) = (read(banded), read(whole));
+    let channels = whole.samples.len() / (whole.info.width as usize * whole.info.height as usize).max(1);
+    let off: Vec<u8> = banded.samples.iter().zip(&whole.samples).map(|(a, b)| a.abs_diff(*b)).filter(|d| *d > 0).collect();
+    let step = if colour == PngColour::BlackWhite { u8::MAX } else { 2 * 16 };
+    assert!(
+        off.len() <= 32 * channels.max(1) && off.iter().all(|d| *d <= step),
+        "{what}: at most 32 pixels, each two AA steps, off the whole sheet: {off:?}"
+    );
+}
+
 /// A 20 × 10 mm sheet: a 1 mm line along y = 5 from x = 2 to 18, and a 6 × 3 mm fill at (2, 1)
 /// with a 2 × 1 mm hole at (4, 2). At 254 dpi a millimetre is 10 pixels.
 fn small() -> Scene {
@@ -106,8 +121,10 @@ fn a_sheet_is_its_size_at_the_dpi_and_records_it() {
     assert!(e.to_string().contains("over the limit of 65536 px"), "{e}");
 }
 
-/// The line and the fill land on their pixels: the line 10 rows deep round row 50 with butt ends,
-/// the fill's ring black and its hole white.
+/// The line and the fill land on their pixels: the line 10 rows deep round row 50 with round ends
+/// 5 px past its ends at x 20 and 180, the fill's ring black and its hole white. On row 50, next to
+/// the cap's centre row, pixel 16 lies wholly in the cap (its far corner 4.1 px from the end) and
+/// pixel 14 wholly outside it (5 px and more).
 #[test]
 fn lines_and_fills_land_on_their_pixels() {
     let image = image(&small(), AT_254);
@@ -118,10 +135,10 @@ fn lines_and_fills_land_on_their_pixels() {
         (100, 54, 0, "its bottom row"),
         (100, 44, 255, "above it"),
         (100, 55, 255, "below it"),
-        (20, 50, 0, "its first column"),
-        (19, 50, 255, "before its butt end"),
-        (179, 50, 0, "its last column"),
-        (180, 50, 255, "after it"),
+        (16, 50, 0, "inside its first round end"),
+        (14, 50, 255, "before its round end"),
+        (183, 50, 0, "inside its last round end"),
+        (185, 50, 255, "after it"),
         (30, 75, 0, "the fill's ring"),
         (50, 75, 255, "the fill's hole"),
         (90, 75, 255, "beside the fill"),
@@ -142,8 +159,8 @@ fn each_colour_has_its_type_ink_and_paper() {
         let image = image(&small(), PngOptions { dpi: 254.0, colour });
         assert_eq!((image.info.color_type, image.info.bit_depth), (kind, depth), "{colour:?}");
         assert_eq!(image.at(100, 50), ink, "{colour:?}: the line");
-        // Either side of its butt end, bits 3 and 4 of a 1-bit row's third byte.
-        assert_eq!((image.at(19, 50), image.at(20, 50)), (paper, ink), "{colour:?}: the line's start");
+        // Either side of its round end, 5 px before x 20 (lines_and_fills_land_on_their_pixels).
+        assert_eq!((image.at(14, 50), image.at(16, 50)), (paper, ink), "{colour:?}: the line's start");
         assert_eq!(image.at(100, 20), paper, "{colour:?}: the paper");
     }
 }
@@ -173,13 +190,14 @@ fn a_hairline_stays_a_pixel_wide_in_black_and_white() {
     assert_eq!(image(&bar, PngOptions { dpi: 254.0, colour: PngColour::BlackWhite }).at(100, 50), [0], "its centre is inside");
 }
 
-/// A closed outline is joined where it starts, like its other corners, not left with two butt ends.
+/// A closed outline is joined where it starts, like its other corners, not left with two caps.
 #[test]
 fn a_closed_outline_joins_at_its_start() {
     let square = rectangle(p(2.0, 2.0), p(8.0, 8.0)).segs;
     let outline = scene(p(10.0, 10.0), vec![Item::Stroke { path: square, closed: true, width_mm: 1.0, pattern: None }]);
     let image = image(&outline, AT_254);
-    // A quarter of a millimetre outside each corner, inside the 1 mm line's mitred corner.
+    // A quarter of a millimetre outside each corner on both axes (0.35 mm from it), inside the 1 mm
+    // line's round corner.
     for (x, y, what) in [(17, 82, "the start"), (82, 82, "the second corner"), (82, 17, "the third"), (17, 17, "the fourth")] {
         assert_eq!(image.at(x, y), [0], "{what}, ({x}, {y})");
     }
@@ -206,8 +224,9 @@ fn a_large_circle_is_round_to_the_pixel() {
     }
 }
 
-/// Drawn a few rows at a time or all at once, the file is the same bytes, pictures and all, and
-/// each picture row is asked for once; and again the same bytes.
+/// Drawn a few rows at a time or all at once, the file is the same pixels, pictures and all, but
+/// for one AA step at a few curved edges a band cuts, and each picture row is asked for once; and
+/// again the same bytes.
 #[test]
 fn bands_change_nothing_and_the_bytes_repeat() {
     let mut items = small().groups.remove(0).items;
@@ -238,7 +257,8 @@ fn bands_change_nothing_and_the_bytes_repeat() {
         for band_rows in [1, 3, 7] {
             let (rows, banded) = (&mut Vec::new(), Provider::default());
             write(&prepared, options, &banded, &mut *rows, band_rows * width * 4).unwrap();
-            assert_eq!(whole, rows, "{colour:?}, {band_rows} rows a band");
+            // The round caps' edges, like text's, may be one AA step off where a band cuts them.
+            within_one_aa_step(rows, whole, colour, &format!("{colour:?}, {band_rows} rows a band"));
             assert_eq!(rows_asked(&banded), rows_asked(&once), "{colour:?}, {band_rows} rows a band: each picture row once");
         }
         let again = &mut Vec::new();
@@ -276,7 +296,9 @@ fn a_watched_sheet_png_reports_its_rows_and_stops_when_cancelled() {
         (written.map(|_| out), reports)
     };
     let (whole, reports) = run(usize::MAX);
-    assert_eq!(whole.unwrap(), plain, "a watch changes no byte");
+    // Three rows a band against the default's one band: a band's cut may move a round cap's edge
+    // pixel one AA step, and a watch changes nothing else.
+    within_one_aa_step(&whole.unwrap(), &plain, PngColour::Grey, "a watched sheet in bands of three rows");
     assert_eq!(reports.len(), 34);
     assert!(reports.iter().enumerate().all(|(i, r)| *r == ("sheet_png", 3 * i, 100)), "{reports:?}");
     let (stopped, reports) = run(2);
@@ -506,13 +528,15 @@ fn svg_dashes(dash: f64, gap: f64, offset: f64, length: f64) -> Vec<(f64, f64)> 
     dashes
 }
 
-/// A 100 mm stroke dashed 4.2 and 1.05 mm (ISO 128-2's dashed line at d = 0.35 mm) has 20
-/// dashes, 19 whole and the first 0.25 mm of the 20th, at the SVG's positions to the pixel; the
-/// phase moves them, and one inside a gap starts the line in it. At 508 dpi a millimetre is 20
-/// pixels, and these ends fall between pixels.
+/// A 100 mm stroke 1 mm wide dashed 4.2 and 1.05 mm (ISO 128-2's dashed line at d = 0.35 mm) is
+/// stroked [3.2, 2.05] under its round caps, each dash's caps reaching 0.5 mm past its ends, at the
+/// SVG's positions to the pixel. From phase 0 the dashes start 0.5 + 5.25k mm along: 19 of them,
+/// as the 20th, of which the scene gives the line only its first 0.25 mm, now starts past the end.
+/// From 0.5 they start at 5.25k: 20. From 4.5, at 1.25 + 5.25k: 19. At 508 dpi a millimetre is
+/// 20 pixels, and these ends fall between pixels.
 #[test]
 fn a_dashed_line_has_the_svgs_dashes_to_the_pixel() {
-    for (phase_mm, count) in [(0.0, 20), (0.5, 20), (4.5, 19)] {
+    for (phase_mm, count) in [(0.0, 19), (0.5, 20), (4.5, 19)] {
         let pattern = Some(Dashes { lengths_mm: vec![4.2, 1.05], phase_mm });
         let sheet =
             scene(p(110.0, 20.0), vec![Item::Stroke { path: vec![line(p(5.0, 10.0), p(105.0, 10.0))], closed: false, width_mm: 1.0, pattern }]);
@@ -523,7 +547,7 @@ fn a_dashed_line_has_the_svgs_dashes_to_the_pixel() {
         let offset: f64 = number("stroke-dashoffset").map_or(0.0, |n| n.parse().unwrap());
         let expected: Vec<(usize, usize)> = svg_dashes(array[0], array[1], offset, 100.0)
             .iter()
-            .map(|(a, b)| (((5.0 + a) * 20.0).round() as usize, ((5.0 + b) * 20.0).round() as usize))
+            .map(|(a, b)| (((5.0 + a - 0.5) * 20.0).round() as usize, ((5.0 + b + 0.5) * 20.0).round() as usize))
             .collect();
         assert_eq!(expected.len(), count, "{phase_mm}");
         let image = image(&sheet, PngOptions { dpi: 508.0, colour: PngColour::Grey });
@@ -549,6 +573,32 @@ fn a_closed_strokes_dashes_run_round_its_corners() {
     assert!(!dark(15.0, 10.0) && dark(15.0, 13.0) && dark(13.5, 15.0) && !dark(12.0, 15.0));
     // The last dash, 32-38, ends 2 mm above the start; the gap 38-40 reaches it.
     assert!(dark(5.0, 12.0) && !dark(5.0, 6.0));
+}
+
+#[test]
+fn weld_identification_renders_end_dashes_and_a_real_gap_in_png() {
+    use solidcraft_geom::weld::{Convention, IdentificationLine, Kind, Style, Weld, WeldSide};
+    let weld = Weld {
+        arrow_side: Some(WeldSide { kind: Kind::Fillet, size: None, length_mm: None, intermittent: None, contour: None }),
+        other_side: None,
+        all_round: false,
+        field: false,
+        tail: None,
+    };
+    let drawing = weld
+        .draw(
+            Convention::Iso2553_2019A { identification: IdentificationLine::Above },
+            Style { height_mm: 1.0, width_mm: 0.2 },
+            |value| Ok((value.to_string(), value)),
+            |text, h| text.len() as f64 * h,
+        )
+        .unwrap();
+    let carrier = drawing.items.into_iter().find(|item| matches!(item, Item::Stroke { pattern: Some(_), .. })).unwrap();
+    let (data, _) = bytes(&scene(p(10.0, 6.0), vec![carrier]), RGB_254);
+    let image = read(&data);
+    for (x, expected) in [(10, [0, 0, 0]), (20, [255, 255, 255]), (35, [0, 0, 0]), (50, [255, 255, 255]), (60, [0, 0, 0]), (80, [255, 255, 255])] {
+        assert_eq!(image.at(x, 40), expected, "column {x}, on the reference line");
+    }
 }
 
 /// A line that falls in a gap draws nothing; one past tiny-skia's million dashes is refused, not
@@ -686,14 +736,7 @@ fn real_text_lands_inside_its_outlines_whatever_the_band() {
             for rows in [1, 3, 7] {
                 let banded = drawn(&sheet, options, 200 * 4 * rows);
                 assert_eq!(drawn(&sheet, options, 200 * 4 * rows), banded, "{line}: {colour:?} the same bytes again in bands of {rows} rows");
-                // tiny-skia's edge clipping where a band cuts a path can move an edge pixel one AA step.
-                let off: Vec<u8> = read(&banded).samples.iter().zip(&read(&whole).samples).map(|(a, b)| a.abs_diff(*b)).filter(|d| *d > 0).collect();
-                // One step is 16 grey levels; in black and white such a pixel may cross the threshold.
-                let step = if colour == PngColour::BlackWhite { u8::MAX } else { 16 };
-                assert!(
-                    off.len() <= 32 && off.iter().all(|d| *d <= step),
-                    "{line}: {colour:?} in bands of {rows} rows: at most 32 samples, each one AA step, off the whole sheet: {off:?}"
-                );
+                within_one_aa_step(&banded, &whole, colour, &format!("{line}: {colour:?} in bands of {rows} rows"));
             }
         }
         let pixels = |grey: &[u8]| -> Vec<(usize, usize)> {
@@ -795,11 +838,13 @@ fn one_prepared_scene_keeps_paper_lengths_and_fixed_pens_in_svg_and_png() {
             let row = (80 - y) * per_mm;
             let start = 10 * per_mm;
             let end = (10 + length) * per_mm;
-            assert_eq!(physical_ink_runs(&image, row), [(start, end)], "{dpi}: {length} mm paper length, independent of the fixed pen");
+            // The pen's round caps reach its half width, a fifth of a millimetre, past each end.
+            let cap = per_mm / 5;
+            assert_eq!(physical_ink_runs(&image, row), [(start - cap, end + cap)], "{dpi}: {length} mm paper length, independent of the fixed pen");
             let pen: Vec<_> = (row - per_mm..row + per_mm).filter(|r| image.at((start + end) / 2, *r)[0] < 128).collect();
             assert_eq!(pen, (row - per_mm / 5..row + per_mm / 5).collect::<Vec<_>>(), "{dpi}: every scale uses the same 0.4 mm pen");
-            assert_eq!(image.at(start - 1, row), [255]);
-            assert_eq!(image.at(end, row), [255], "butt ends do not extend paper length");
+            assert_eq!(image.at(start - cap - 1, row), [255]);
+            assert_eq!(image.at(end + cap, row), [255], "round ends reach only the pen's half width past the paper length");
         }
     }
 }
@@ -819,8 +864,9 @@ fn svg_and_png_share_the_paper_origin_on_a_fractional_pixel_sheet() {
     let image = read(&png);
     assert_eq!(report.pixels, [400, 101]);
     let ink_rows: Vec<_> = (0..101).filter(|row| image.at(150, *row)[0] < 128).collect();
-    assert_eq!(ink_rows, (20..80).collect::<Vec<_>>(), "6 mm at 10 px/mm, anchored at the physical top edge rather than the rounded image bottom");
+    // 2 px of round cap past each end of the 0.4 mm line.
+    assert_eq!(ink_rows, (18..82).collect::<Vec<_>>(), "6 mm at 10 px/mm, anchored at the physical top edge rather than the rounded image bottom");
     assert_eq!(physical_ink_runs(&image, 50), [(148, 152)], "the 0.4 mm pen is four pixels wide");
-    assert_eq!(image.at(150, 19), [255]);
-    assert_eq!(image.at(150, 80), [255]);
+    assert_eq!(image.at(150, 17), [255]);
+    assert_eq!(image.at(150, 82), [255]);
 }

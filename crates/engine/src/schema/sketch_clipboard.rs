@@ -2,6 +2,7 @@
 //! and pasting sketch geometry (#10963).
 
 use std::borrow::Cow;
+use std::collections::BTreeMap;
 
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::de::Error as _;
@@ -116,7 +117,9 @@ pub struct Pasted {
 }
 
 /// Replace the contents of a sketch with a copy of another sketch's, in one undo step. The sketch
-/// keeps its plane, its place in the timeline and the features built on it.
+/// keeps its plane, its place in the timeline and the features built on it. Its new curves and
+/// points get new ids, so a feature that names an old curve or point (such as an extrude side
+/// face `<Extrude>:side:l6`) must be reselected, unless `keep_ids` is true.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct ReplaceParams {
@@ -128,6 +131,11 @@ pub struct ReplaceParams {
     /// A design file `from` is in (default: this design).
     #[serde(default)]
     pub file: Option<String>,
+    /// Give the new curves and points the ids they have in `from` (default: new ids, so nothing
+    /// that named the old contents finds a new, unrelated curve). Use it to bring an edited copy
+    /// of the same sketch back, so the features built on its curves still find them.
+    #[serde(default)]
+    pub keep_ids: bool,
 }
 
 /// What `sketch.replace` returns.
@@ -146,6 +154,8 @@ pub struct Replaced {
     pub points: Vec<String>,
     /// Its new constraints' and dimensions' ids.
     pub constraints: Vec<String>,
+    /// Each curve and point id of `from` with the id its copy has in this sketch.
+    pub ids: BTreeMap<String, String>,
     /// The sketch's solve: `{solved, dof}`.
     pub sketch: Value,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

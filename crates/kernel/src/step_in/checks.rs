@@ -158,7 +158,8 @@ impl Outcome {
 
 /// Check `job`'s body under the token and validation mode of this thread.
 pub(super) fn check(job: &Job) -> Outcome {
-    let _span = solidcraft_profile::span("import", "step.check");
+    // On a worker thread: the span says which part it checks (#22473).
+    let _span = solidcraft_profile::span("import", "step.check").arg("part", &job.label);
     check_body(&job.body)
 }
 
@@ -216,7 +217,12 @@ fn to_heal(jobs: &[Job], outcomes: &[Outcome]) -> Vec<(u64, Vec<usize>)> {
 /// for display (the file's colours and names, a shared mesh: nothing the check reads); with no
 /// such job it is checked here, on `part.body`.
 fn heal_item(jobs: &[Job], outcomes: &[Outcome], item: u64, of: &[usize], heals: &Heals) -> ItemHeal {
-    let _span = solidcraft_profile::span("import", "step.heal");
+    // On a worker thread: the span says which item and part it heals (#22473).
+    let span = solidcraft_profile::span("import", "step.heal").arg("item", format_args!("#{item}"));
+    let _span = match of.first().and_then(|k| jobs.get(*k)) {
+        Some(first) => span.arg("part", &first.label),
+        None => span,
+    };
     let Some(first) = of.first().and_then(|k| jobs.get(*k)) else { return ItemHeal::default() };
     let part = &first.source;
     let own = match of.iter().find(|k| jobs.get(**k).is_some_and(|j| j.m == IDENTITY)) {
@@ -402,6 +408,8 @@ fn run(
     over: Option<solidcraft_smlib::stop::Stop>,
 ) {
     let own = shared.stop.clone();
+    // A test that holds the runs open ([`ImportChecks::hold_open_for_tests`]) lets this one end.
+    drop(HOLD_OPEN.read().unwrap_or_else(PoisonError::into_inner));
     // Whatever happens here, a waiter is woken: a panic outside the per-check guard ends the run
     // as stopped (its list incomplete) instead of leaving `wait` blocked.
     let settled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -420,17 +428,41 @@ fn run(
     shared.finish(settled.unwrap_or_else(|_| Settled { issues: Arc::default(), stopped: true, heals: None }));
 }
 
+/// Held for writing by a test that keeps the check runs open ([`ImportChecks::hold_open_for_tests`]).
+static HOLD_OPEN: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
 struct Shared {
     /// Stops the checks when nobody holds the import any more.
     stop: solidcraft_smlib::stop::Stop,
     settled: Mutex<Option<Settled>>,
     done: Condvar,
+    /// Called once when the run ends ([`Shared::finish`]): a window's request for the frame its
+    /// result needs, instead of polling [`ImportChecks::is_running`] while it runs.
+    wake: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl Shared {
     fn finish(&self, settled: Settled) {
+        // The lock is released before `wake` is taken: `set_wake` locks them in the other order.
         *self.settled.lock().unwrap_or_else(PoisonError::into_inner) = Some(settled);
+        let wake = self.wake.lock().unwrap_or_else(PoisonError::into_inner).take();
         self.done.notify_all();
+        if let Some(wake) = wake {
+            wake();
+        }
+    }
+
+    /// Keep `wake` for [`Shared::finish`], unless the run ended already: `false` then, and the
+    /// caller wakes itself.
+    fn set_wake(&self, wake: Arc<dyn Fn() + Send + Sync>) -> bool {
+        let mut slot = self.wake.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.settled.lock().unwrap_or_else(PoisonError::into_inner).is_some() {
+            return false;
+        }
+        if slot.is_none() {
+            *slot = Some(wake);
+        }
+        true
     }
 
     fn settled(&self) -> Option<Settled> {
@@ -484,7 +516,12 @@ impl PartialEq for ImportChecks {
 
 impl ImportChecks {
     fn shared(settled: Option<Settled>) -> (ImportChecks, Arc<Shared>) {
-        let shared = Arc::new(Shared { stop: solidcraft_smlib::stop::Stop::new(), settled: Mutex::new(settled), done: Condvar::new() });
+        let shared = Arc::new(Shared {
+            stop: solidcraft_smlib::stop::Stop::new(),
+            settled: Mutex::new(settled),
+            done: Condvar::new(),
+            wake: Mutex::new(None),
+        });
         (ImportChecks(Some(Arc::new(Handle(shared.clone())))), shared)
     }
 
@@ -502,6 +539,14 @@ impl ImportChecks {
     pub fn running_for_tests() -> (ImportChecks, impl FnOnce(Vec<ImportIssue>) + Send) {
         let (checks, shared) = ImportChecks::shared(None);
         (checks, move |issues: Vec<ImportIssue>| shared.finish(Settled { issues: Arc::new(issues), stopped: false, heals: None }))
+    }
+
+    /// Keep every check run started from now on from ending until the returned guard is
+    /// dropped: for callers' tests of what happens while an import's check still runs after the
+    /// import has shown (a check of a few boxes otherwise ends at once).
+    #[doc(hidden)]
+    pub fn hold_open_for_tests() -> impl Drop {
+        HOLD_OPEN.write().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Checks that have already run, with these outcomes (a read with no threads ran them in its
@@ -550,6 +595,16 @@ impl ImportChecks {
     /// The checks are still running.
     pub fn is_running(&self) -> bool {
         self.issues().is_none()
+    }
+
+    /// Call `wake` once when the checks end, or at once if they have ended: a window asks for the
+    /// one frame the result needs, instead of asking [`Self::is_running`] every frame while they
+    /// run. A report with no run (nothing to check, or read from a saved design) wakes nothing.
+    pub fn on_end(&self, wake: Arc<dyn Fn() + Send + Sync>) {
+        let Some(handle) = &self.0 else { return };
+        if !handle.0.set_wake(wake.clone()) {
+            wake();
+        }
     }
 
     /// What the checks found, `None` while they run: a `NeedsRepair` issue for each part a check

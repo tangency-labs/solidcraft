@@ -24,7 +24,7 @@
 //! | [`closest_between_faces`] | not upstream: selected-shape minimum on trimmed faces and their boundaries |
 //! | [`point_distance`], [`vertex_distance`], [`edge_face_gap_samples`], [`edgeuse_face_frame`] | not upstream: certified distances (the last on `SmCrvSrfGapFunction`'s samples) |
 //! | [`FacePointCandidates`] | not upstream: cached kernel face boxes for narrowing point queries |
-//! | [`face_normal_at_point`], [`face_parameters_at_point`], [`face_normal_at_uv`] | not upstream: trimmed-face membership and the normal in the chosen use's sense |
+//! | [`face_normal_at_point`], [`face_parameters_at_point`], [`face_normal_at_uv`], [`face_normal_at_clamped_uv`], [`face_normal_at_vertex`] | not upstream: trimmed-face membership and the normal in the chosen use's sense |
 //! | [`box_max_distance_to_point`] | not upstream: [`Extent3d::max_distance_to_point`] of a box given by two corners |
 //! | `count_contained_samples`, `edge_piece_points`, `point_in_solid`, `target_curve_crossings` (private) | `sm_CountContainedSamples`, `sm_PointInSolid`, its `BrepCurveSolve` |
 //! | `solution_point` (private) | `SmSolution::GetPoint` |
@@ -1665,6 +1665,27 @@ pub struct Distance {
     pub bound: f64,
 }
 
+/// Whether the endless line through `origin` along `dir` meets the box with corners `min` and
+/// `max` (in any order), each side counting `share` of the box's size beyond it
+/// ([`Extent3d::meets_line`]). Never for a zero `dir`.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a coordinate, or a `share`, that is not finite.
+pub fn line_meets_box(
+    min: Point3,
+    max: Point3,
+    origin: Point3,
+    dir: Vec3,
+    share: f64,
+) -> Result<bool> {
+    let finite = |p: Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if ![min, max, origin, dir].into_iter().all(finite) || !share.is_finite() {
+        return Err(SolidError::invalid_input(OP, "non-finite line or box"));
+    }
+    Ok(Extent3d::from_points(min, max).meets_line(origin, dir, share))
+}
+
 /// The distance between `a` and `b` with a proved bound on its rounding (not
 /// upstream). The value is `a.distance(b)` bit for bit; the bound comes from the same
 /// sum of squares in rounded interval arithmetic
@@ -1695,72 +1716,6 @@ pub fn point_distance(a: Point3, b: Point3) -> Result<Distance> {
     Ok(Distance {
         value,
         bound: cmax(bound, 0.0),
-    })
-}
-
-/// A point set's arithmetic centroid and mean Euclidean distance from that centroid.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PointSetSummary {
-    /// The arithmetic mean of the input points.
-    pub centroid: Point2,
-    /// The arithmetic mean of each point's distance from `centroid`.
-    pub mean_distance: f64,
-}
-
-/// The arithmetic centroid and mean radial distance of a non-empty point set.
-///
-/// # Errors
-/// [`SolidError::InvalidInput`] for an empty set, a non-finite point, or a non-finite
-/// intermediate or result.
-pub fn point_set_summary(points: &[Point2]) -> Result<PointSetSummary> {
-    if points.is_empty() {
-        return Err(SolidError::invalid_input(OP, "empty point set"));
-    }
-    if points.iter().any(|p| !p.x.is_finite() || !p.y.is_finite()) {
-        return Err(SolidError::invalid_input(OP, "non-finite point"));
-    }
-
-    let (mut x, mut y) = (0.0, 0.0);
-    for point in points {
-        x += point.x;
-        y += point.y;
-        if !x.is_finite() || !y.is_finite() {
-            return Err(SolidError::invalid_input(OP, "point centroid overflows"));
-        }
-    }
-    let count = points.len() as f64;
-    let centroid = Point2::new(x / count, y / count);
-    if !centroid.x.is_finite() || !centroid.y.is_finite() {
-        return Err(SolidError::invalid_input(
-            OP,
-            "point centroid is not finite",
-        ));
-    }
-
-    let mut total_distance = 0.0;
-    for point in points {
-        let distance = point.distance(centroid);
-        if !distance.is_finite() {
-            return Err(SolidError::invalid_input(OP, "point distance overflows"));
-        }
-        total_distance += distance;
-        if !total_distance.is_finite() {
-            return Err(SolidError::invalid_input(
-                OP,
-                "mean point distance overflows",
-            ));
-        }
-    }
-    let mean_distance = total_distance / count;
-    if !mean_distance.is_finite() {
-        return Err(SolidError::invalid_input(
-            OP,
-            "mean point distance is not finite",
-        ));
-    }
-    Ok(PointSetSummary {
-        centroid,
-        mean_distance,
     })
 }
 
@@ -2189,6 +2144,34 @@ pub fn face_normal_at_uv(
     certify_normal(k, surface, uv, n * (sign / len), sense)
 }
 
+/// [`face_normal_at_uv`] after clamping a finite solver parameter `uv` to the face
+/// surface's natural UV domain (classification drops may accept a parameter up to UV
+/// tolerance past a domain boundary).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an uninitialised or non-finite `uv`, or a missing
+/// surface; those of [`face_normal_at_uv`] and the surface's natural UV domain.
+pub fn face_normal_at_clamped_uv(
+    k: &Kernel,
+    brep: &Brep,
+    f: FaceId,
+    uv: Point2,
+    faceuse: FaceuseId,
+) -> Result<UnitVector> {
+    if !uv.is_initialized() || !uv.x.is_finite() || !uv.y.is_finite() {
+        return Err(SolidError::invalid_input(OP, "parameter is not finite"));
+    }
+    let surface = brep
+        .face(f)?
+        .surface
+        .as_ref()
+        .ok_or_else(|| SolidError::invalid_input(OP, "face without a surface"))?;
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let uv = domain.clamp_point(uv);
+    face_normal_at_uv(k, brep, f, uv, faceuse)
+}
+
 /// Cached kernel face boxes for narrowing point queries in the supplied face order.
 /// A box hit is only a candidate: callers still test the face's exact trimmed area.
 /// The cache is valid while the faces' geometry and topology stay unchanged.
@@ -2350,6 +2333,67 @@ pub fn face_normal_at_edge(
     edgeuse_face_frame(k, brep, eu, t, faceuse)
 }
 
+/// The unit normal of face `f` at vertex `v` (one of `f`'s boundary or loop vertices),
+/// in the sense of `faceuse`, evaluated at [`crate::topology::vertexuse::compute_uv_point`]'s
+/// parameter point clamped to the surface's natural UV domain.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a vertex that does not bound `f`; those of
+/// [`crate::topology::vertex::vertexuse_of_face`],
+/// [`crate::topology::vertexuse::compute_uv_point`] and [`face_normal_at_clamped_uv`].
+pub fn face_normal_at_vertex(
+    k: &Kernel,
+    brep: &mut Brep,
+    v: VertexId,
+    f: FaceId,
+    faceuse: FaceuseId,
+) -> Result<UnitVector> {
+    let vu = crate::topology::vertex::vertexuse_of_face(brep, v, Some(f))?
+        .ok_or_else(|| SolidError::invalid_input(OP, "the vertex does not bound the face"))?;
+    let uv = crate::topology::vertexuse::compute_uv_point(k, brep, vu, true)?;
+    face_normal_at_clamped_uv(k, brep, f, uv, faceuse)
+}
+
+/// The unit direction into face `f` from the middle of its edge `e`'s interval: in the face's
+/// tangent plane there, square to the edge, pointing into the face (not upstream: the side a
+/// face lies on from its edge, read from its loop). It is the binormal of the face's use of the
+/// edge ([`evaluate_binormal`]: the face use's normal crossed with the edge use's tangent), so the
+/// side comes from the loop's orientation and the normal, not from where the face's points lie.
+/// The vector is rounded, not certified.
+///
+/// A seam (an edge a use of `f` runs along twice, such as a cylinder's) has the face on both of
+/// its sides, so it has no one direction into the face; it is refused.
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for an edge that does not bound `f`, a seam of `f`, or an edge
+/// interval that is not finite; those of [`evaluate_binormal`].
+pub fn edge_inward(k: &Kernel, brep: &mut Brep, e: EdgeId, f: FaceId) -> Result<Vec3> {
+    let eu = edge::edgeuse_of_face(brep, e, Some(f))?
+        .ok_or_else(|| SolidError::invalid_input(OP, "the edge does not bound the face"))?;
+    let mut uses: Vec<Option<FaceuseId>> = Vec::new();
+    for u in edge::edgeuses(brep, e, None, None)? {
+        if eu::face(brep, u)? == Some(f) {
+            let fu = eu::faceuse(brep, u)?;
+            if uses.contains(&fu) {
+                return Err(SolidError::invalid_input(
+                    OP,
+                    "a seam: the face lies on both sides",
+                ));
+            }
+            uses.push(fu);
+        }
+    }
+    let ivl = brep.edge(e)?.interval;
+    // halves first: no overflow for a huge finite interval (brett19 on #22066)
+    let t = 0.5 * ivl.min() + 0.5 * ivl.max();
+    if !t.is_finite() {
+        return Err(SolidError::invalid_input(OP, "edge interval not finite"));
+    }
+    Ok(evaluate_binormal(k, brep, eu, t, true, &BinormalOptions::default())?.binormal)
+}
+
 /// Where a planar face lies along `direction` when it is square to it: the signed distance from
 /// `origin` to the face's plane along the unit `direction`, measured at `on_face`, a point of the
 /// face (its centroid). `normal` is the face's unit normal with its proved `normal_bound`.
@@ -2402,6 +2446,103 @@ mod face_square_level_tests {
             None
         );
         assert!(face_square_level(n, 1e-16, c, Vec3::new(0.0, 0.0, 0.0), o).is_err());
+    }
+}
+
+/// How far from unit length a unit direction may be.
+const UNIT_AXIS_TOL: f64 = 1e-9;
+
+/// Whether `v` is a unit direction: finite, its squared length within [`UNIT_AXIS_TOL`] of 1.
+fn is_unit_direction(v: Vec3) -> bool {
+    [v.x, v.y, v.z].iter().all(|c| c.is_finite())
+        && (v.length_squared() - 1.0).abs() <= UNIT_AXIS_TOL
+}
+
+/// The unit direction along `v`, of any length (not upstream: an application's direction, as a
+/// sketch plane's normal carries it).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a `v` that is not finite or has no length.
+pub fn unit_direction(v: Vec3) -> Result<Vec3> {
+    let refused =
+        || SolidError::invalid_input(OP, "a direction that is not finite or has no length");
+    if ![v.x, v.y, v.z].iter().all(|c| c.is_finite()) {
+        return Err(refused());
+    }
+    let unit = v.unitize().map_err(|_| refused())?;
+    if is_unit_direction(unit) {
+        Ok(unit)
+    } else {
+        Err(refused())
+    }
+}
+
+/// The distance within which a point given by an application matches a vertex of a body:
+/// ten times the larger of the body's largest tolerance (`largest_tolerance`, its own or an
+/// edge's) and 1e-9 of its `size` (not upstream: the matching of a surface extrude's start
+/// corners to the vertices of its walls).
+pub fn vertex_match_tolerance(largest_tolerance: f64, size: f64) -> f64 {
+    largest_tolerance.max(size * 1e-9) * 10.0
+}
+
+/// The part of edge use `eu`'s binormal (pointing into its face) that leads away from `foot`, at
+/// the fraction `fraction` of its edge's interval: along the unit direction from `foot` to the
+/// edge's point there ([`evaluate_binormal`], 3D only). `None` where that point is `foot`, so
+/// nothing leads away from it. Not upstream (whether a face runs on away from a point across one
+/// of its edges).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a `fraction` or `foot` that is not finite, or a binormal that
+/// is not; those of [`evaluate_binormal`].
+pub fn edgeuse_binormal_away_from(
+    k: &Kernel,
+    brep: &mut Brep,
+    eu: EdgeuseId,
+    fraction: f64,
+    foot: Point3,
+) -> Result<Option<f64>> {
+    if !(fraction.is_finite() && [foot.x, foot.y, foot.z].iter().all(|c| c.is_finite())) {
+        return Err(SolidError::invalid_input(
+            OP,
+            "a fraction or point that is not finite",
+        ));
+    }
+    let e = brep
+        .edgeuse(eu)?
+        .edge
+        .ok_or_else(|| SolidError::invalid_input(OP, "edge use without an edge"))?;
+    let t = brep.edge(e)?.interval.evaluate(fraction);
+    let at = evaluate_binormal(k, brep, eu, t, true, &BinormalOptions::default())?;
+    let Ok(away) = unit_direction(at.point - foot) else {
+        return Ok(None);
+    };
+    let part = at.binormal.dot(away);
+    if !part.is_finite() {
+        return Err(SolidError::invalid_input(OP, "binormal not finite"));
+    }
+    Ok(Some(part))
+}
+
+#[cfg(test)]
+mod unit_direction_tests {
+    use super::*;
+
+    /// A direction of any length is made unit; one of no length or not finite is refused. The
+    /// match tolerance is ten times the larger of the body's tolerance and 1e-9 of its size.
+    #[test]
+    fn unit_directions_and_the_match_tolerance() {
+        for v in [Vec3::new(0.0, 0.0, 1.0), Vec3::new(0.0, 0.0, 2.0)] {
+            let unit = unit_direction(v).unwrap();
+            assert!((unit - Vec3::Z).length_squared() < 1e-30, "{unit:?}");
+        }
+        assert!(unit_direction(Vec3::ZERO).is_err());
+        assert!(unit_direction(Vec3::new(f64::NAN, 0.0, 1.0)).is_err());
+        assert!(unit_direction(Vec3::new(f64::INFINITY, 0.0, 1.0)).is_err());
+        assert!(!is_unit_direction(Vec3::new(0.0, 0.0, 2.0)));
+        assert!((vertex_match_tolerance(1e-6, 10.0) - 1e-5).abs() < 1e-18);
+        assert!((vertex_match_tolerance(0.0, 1e3) - 1e-5).abs() < 1e-18);
     }
 }
 
@@ -2791,69 +2932,6 @@ mod tests {
     }
 
     #[test]
-    fn point_set_summary_uses_the_arithmetic_mean_radius() {
-        let points = [
-            Point2::new(0.0, 0.0),
-            Point2::new(6.0, 0.0),
-            Point2::new(0.0, 6.0),
-        ];
-        let summary = point_set_summary(&points).unwrap();
-        assert_eq!(summary.centroid, Point2::new(2.0, 2.0));
-        let expected = (2.0 * 2.0_f64.sqrt() + 4.0 * 5.0_f64.sqrt()) / 3.0;
-        assert!((summary.mean_distance - expected).abs() <= 2.0 * f64::EPSILON * expected);
-        assert_ne!(
-            summary.mean_distance, 4.0,
-            "the RMS radius is not the mean radius"
-        );
-
-        let moved = [
-            Point2::new(0.0, 0.0),
-            Point2::new(6.0, 0.0),
-            Point2::new(0.0, 12.0),
-        ];
-        let moved_summary = point_set_summary(&moved).unwrap();
-        assert_eq!(moved_summary.centroid, Point2::new(2.0, 4.0));
-        let moved_expected =
-            (2.0 * 5.0_f64.sqrt() + 4.0 * 2.0_f64.sqrt() + 2.0 * 17.0_f64.sqrt()) / 3.0;
-        assert!(
-            (moved_summary.mean_distance - moved_expected).abs()
-                <= 2.0 * f64::EPSILON * moved_expected
-        );
-    }
-
-    #[test]
-    fn point_set_summary_accepts_single_and_duplicate_points() {
-        let one = Point2::new(3.0, -4.0);
-        assert_eq!(
-            point_set_summary(&[one]).unwrap(),
-            PointSetSummary {
-                centroid: one,
-                mean_distance: 0.0,
-            }
-        );
-        assert_eq!(
-            point_set_summary(&[one, one, one]).unwrap(),
-            PointSetSummary {
-                centroid: one,
-                mean_distance: 0.0,
-            }
-        );
-    }
-
-    #[test]
-    fn point_set_summary_refuses_empty_non_finite_and_overflowing_sets() {
-        assert!(point_set_summary(&[]).is_err());
-        assert!(point_set_summary(&[Point2::new(f64::NAN, 0.0)]).is_err());
-        assert!(point_set_summary(&[Point2::new(0.0, f64::INFINITY)]).is_err());
-        assert!(
-            point_set_summary(&[Point2::new(f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),]).is_err()
-        );
-        assert!(
-            point_set_summary(&[Point2::new(-f64::MAX, 0.0), Point2::new(f64::MAX, 0.0),]).is_err()
-        );
-    }
-
-    #[test]
     fn point_displacement_is_from_first_point_to_second_and_refuses_bad_values() {
         assert_eq!(
             point_displacement(Point2::new(2.0, 2.0), Point2::new(5.0, 6.0)).unwrap(),
@@ -3108,6 +3186,55 @@ mod tests {
             }
         }
         assert_eq!(found, 1);
+    }
+
+    #[test]
+    fn face_normal_at_vertex_and_clamped_uv_match_face_sense() {
+        let mut k = Kernel::default();
+        let mut b =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        let faces = get_faces(&b).unwrap();
+        let vertices: Vec<VertexId> = b.vertices().ids().collect();
+        let (mut on_count, mut off_count) = (0usize, 0usize);
+        for &f in &faces {
+            let (a, c) = face::faceuses(&b, f).unwrap();
+            let (a, c) = (a.unwrap(), c.unwrap());
+            for &v in &vertices {
+                if crate::topology::vertex::vertexuse_of_face(&b, v, Some(f))
+                    .unwrap()
+                    .is_some()
+                {
+                    let n = face_normal_at_vertex(&k, &mut b, v, f, a).unwrap();
+                    let rev = face_normal_at_vertex(&k, &mut b, v, f, c).unwrap();
+                    assert_eq!(n.value, -rev.value);
+                    assert!(n.bound <= 1e-12, "{n:?}");
+                    on_count += 1;
+                } else {
+                    assert!(face_normal_at_vertex(&k, &mut b, v, f, a).is_err());
+                    off_count += 1;
+                }
+            }
+        }
+        assert_eq!((on_count, off_count), (24, 24));
+
+        let f0 = faces[0];
+        let (a, _) = face::faceuses(&b, f0).unwrap();
+        let a = a.unwrap();
+        let domain = b
+            .face(f0)
+            .unwrap()
+            .surface
+            .as_ref()
+            .unwrap()
+            .natural_uv_domain_with_nurb(&k)
+            .unwrap();
+        let n_max = face_normal_at_uv(&k, &b, f0, domain.max(), a).unwrap();
+        let overshoot = Point2::new(domain.max().x + 1e-12, domain.max().y + 1e-12);
+        let n_clamped = face_normal_at_clamped_uv(&k, &b, f0, overshoot, a).unwrap();
+        assert_eq!(n_clamped.value, n_max.value);
+        assert!(face_normal_at_clamped_uv(&k, &b, f0, Point2::UNDEF, a).is_err());
+        assert!(face_normal_at_clamped_uv(&k, &b, f0, Point2::new(f64::NAN, 0.0), a).is_err());
     }
 
     #[test]

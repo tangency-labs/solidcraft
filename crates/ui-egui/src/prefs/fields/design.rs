@@ -10,7 +10,8 @@ macro_rules! design_preferences {
         $next! { $($rest),* ; $($fields)*
             angle_decimals: u8 = 1, PAGE_DESIGN;
             /// The template new drawings of an assembly start from: an assembly's built-in, by name (ISO A2
-            /// when not set, or set to one this version doesn't have for an assembly).
+            /// when not set, or set to one this version doesn't have for an assembly), or a template
+            /// file's path (#22120).
             assembly_drawing_template: String = template::default_for(true).into(), PAGE_DESIGN;
             /// Hovering an Origin plane, axis or point row in the Browser shows that item in the view,
             /// for the design's Origin and each part's, also while it is hidden (#15658): a hidden item
@@ -22,6 +23,9 @@ macro_rules! design_preferences {
             default_projection: Projection = Projection::Third, PAGE_DESIGN;
             /// Units of new designs.
             default_units: String = "mm".into(), PAGE_DESIGN;
+            /// The folder Save and Save As open in for a design that has never been saved (#5522). Empty:
+            /// the folder last used, as before. The desktop app reads it; the web app has no folders.
+            designs_folder: String = String::new(), PAGE_DESIGN;
             /// A double-click on a component, in the browser or on its face in the view, opens a linked
             /// one's design with the assembly around it (`edit_in_place`) and activates any other. Off:
             /// a double-click in the browser activates every component and one in the view does nothing,
@@ -41,8 +45,12 @@ macro_rules! design_preferences {
             drawing_sheets_visibility: String = "multiple".into(), PAGE_DESIGN;
             /// The file name File › Export and Save As Mesh offer: `{design}` and `{body}` stand for the
             /// design's and the exported body's names (`export_name`). Empty: each export offers the name
-            /// it did before (the design's, or the first body's for a mesh).
+            /// it needs: the design name for the whole design, the body name for a subset. The body-first
+            /// default can be kept by specifying the body template explicitly.
             export_name: String = String::new(), PAGE_DESIGN;
+            /// The folder export dialogs (File › Export, Save As Mesh, drawings and other saved files)
+            /// open in, until another folder is chosen in one (#5522). Empty: the folder last used.
+            exports_folder: String = String::new(), PAGE_DESIGN;
             /// GLB export writes each component occurrence as a named node holding its part's bodies, so a
             /// viewer can move each part on its own (#5296). Off: every body under the root in world
             /// coordinates, named as the model names it, as SolidCraft 0.40 wrote it.
@@ -52,8 +60,8 @@ macro_rules! design_preferences {
             /// background once it is imported, and Repair heals a part first (#17689). Off: the part
             /// stays as read, with its check's warning, and Repair does not heal first, as before.
             heal_tolerance_defects: bool = true, PAGE_DESIGN => check_id("prefs.heal_tolerance_defects");
-            /// The browser's Origin folder starts hidden in designs that don't keep its eye themselves.
-            hide_origin: bool = false, PAGE_DESIGN => check_tr("ui.hide_origin_by_default");
+            /// Whether the browser's Origin folder shows in designs that don't keep its eye themselves.
+            hide_origin: OriginDisplay = OriginDisplay::default(), PAGE_DESIGN;
             /// Insert Design lists the designs open in other tabs, each inserted with one click, then
             /// Browse… for a file (#8570). Off: it opens the file picker at once, as before.
             insert_lists_open_designs: bool = true, PAGE_DESIGN => check_id("settings.insert_lists_open_designs");
@@ -76,12 +84,22 @@ macro_rules! design_preferences {
             origin_axes_across_view: bool = false, PAGE_DESIGN => check_id("prefs.origin_axes_across_view");
             /// The names the browser, dialogs and lists show for the origin planes (#6491).
             origin_plane_names: OriginPlaneNames = OriginPlaneNames::default(), PAGE_DESIGN;
+            /// The size of the origin planes' squares in the view, as a factor of the size they take on
+            /// screen by default (#21191). 1 draws them as before; the origin axes keep their length. A
+            /// saved value outside the accepted range (a hand edit) reads as 1.
+            origin_plane_scale: f32 = 1.0, PAGE_DESIGN, accept(ORIGIN_PLANE_SCALE);
             /// The most parameters Down arrow lists in an empty expression box (#9246): fewer keeps the
             /// list light in a large design.
             parameter_list_rows: u16 = 50, PAGE_DESIGN;
             /// The template new drawings of a part start from: a part's built-in, by name (ISO A3 when not set,
-            /// or set to one this version doesn't have for a part).
+            /// or set to one this version doesn't have for a part), or a template file's path (#22120).
             part_drawing_template: String = template::default_for(false).into(), PAGE_DESIGN;
+            /// Components pasted from another design (tab) go to the origin of the component they are
+            /// pasted into, the first one's origin on it and the others kept where they are from it,
+            /// each one's contents where they are from its own origin; a whole design copied and pasted
+            /// as a linked component goes there too (#17621). Off: copied components go where they were
+            /// in the world in their design, and a copied design under the pointer, as before.
+            paste_components_at_origin: bool = false, PAGE_DESIGN => check_id_help("prefs.paste_components_at_origin", "prefs.paste_components_at_origin_help");
             /// Reapply a file's stand-up answer when its original bytes have not changed.
             remember_stand_up: bool = true, PAGE_DESIGN => check_id("prefs.remember_stand_up");
             /// Reopen an unchanged CAD import from the existing saved-design model cache.
@@ -105,6 +123,8 @@ macro_rules! design_preferences {
             /// view (`canvas::boxes_shown`). Off: it is typed in the command window only, which takes the
             /// keyboard after a pick instead, and nothing covers the model (#9479).
             value_boxes_in_view: bool = true, PAGE_DESIGN => check_id("prefs.value_boxes_in_view");
+            /// Convention for new Weld graphics; existing weld settings keep their convention.
+            weld_symbol_standard: String = "iso2553_2019_a".into(), PAGE_DESIGN;
         }
     };
 }

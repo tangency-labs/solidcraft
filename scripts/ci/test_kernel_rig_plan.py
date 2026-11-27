@@ -144,6 +144,15 @@ class Real(unittest.TestCase):
             with self.subTest(glob=g):
                 self.assertTrue(any(t.match(sample(g)) for t in triggers), f"{g}: not under the workflow's trigger paths")
 
+    def test_mesh_conversion_in_solidcore_runs_every_area(self):
+        expected = ([*plan.areas(ROOT), plan.LADDER], True)
+        for path in (
+            "solidcore/crates/solidcore/src/mesh_reconstruction/mod.rs",
+            "solidcore/crates/solidcore-ops/src/mesh.rs",
+        ):
+            with self.subTest(path=path):
+                self.assertEqual(plan.select(ROOT, [path]), expected)
+
     def test_a_ui_change_runs_nothing(self):
         self.assertEqual(plan.select(ROOT, ["crates/ui-egui/src/app.rs", "docs/kernel-cases.md", "README.md"]), ([], False))
 

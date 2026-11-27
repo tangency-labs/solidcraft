@@ -20,6 +20,7 @@
 //! | [`Caches`]                             | `SmCacheMgr`, `SmCacheMgrCrv/Srf/TSrf/Brep` |
 //! | [`Kernel::upstream_ub_passed`], [`Kernel::note_upstream_ub`] | (none: upstream undefined behaviour the port went past) |
 //! | [`CancelToken`], [`Kernel::cancel`], [`Kernel::set_cancel_token`], [`Kernel::check_cancelled`] | (none: cooperative cancellation for worker-thread jobs) |
+//! | [`CancelToken::with_fuel`], [`CancelToken::out_of_fuel`] | (none: a deterministic work budget, [`SolidError::OutOfFuel`]) |
 //! | [`WorkCounters`], [`Kernel::work_counters`] | the SolidCraft fork's `SmWorkCounters` (process-wide there) |
 //!
 //! Upstream seeds `rand()` from the clock in a few places; the port replaces that with an
@@ -37,7 +38,7 @@
 
 use core::cell::{Cell, RefCell};
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::error::SolidError;
 use crate::geom::context::Context;
@@ -139,6 +140,11 @@ pub struct Caches {
     /// is not solved again. A [`RefCell`] so the check can fill it through the `&Kernel`
     /// it takes (the kernel stays `Send`; it is not shared between threads).
     pub(crate) curve_analysis: RefCell<crate::nurbs::b_spline_curve::analysis::AnalysisMemo>,
+    /// Not upstream (#22467): exact-input memo of trim-image gap outcomes
+    /// (`query::curve_surface_gap::TrimBoundMemo`), keyed by the pair's data and bound
+    /// parameters bit for bit. Off when [`Kernel::memoize_curve_caches`] is false; clearing it
+    /// changes no result, only speed.
+    pub(crate) trim_move_bounds: RefCell<crate::query::curve_surface_gap::TrimBoundMemo>,
     /// Not upstream (#18166): whether a lazily built UV trim raises its edge's tolerance by
     /// the trim's proved distance from the edge (`topology::edgeuse::p3::trim_raise_distance`),
     /// as it does by default, or by upstream's sampled distance, as a file's translation asks
@@ -146,23 +152,42 @@ pub struct Caches {
     /// option, only the import's narrow seam. (tangency-labs/solidcore#3368 makes the proved
     /// raise fast enough for import and removes the sampled path.)
     pub(crate) prove_lazy_trim_raise: bool,
+    /// Not upstream (#21105): whether a UV trim built now leaves its edge's tolerance as
+    /// it is, as `SetUVTrimCurve` does on a B-rep marked `m_bValidateOnly`. Set only for
+    /// the duration of a validate-only tolerance pass ([`Kernel::with_held_trim_raise`]),
+    /// which so takes `bValidateOnly` as its argument instead of setting and restoring the
+    /// flag on the body it checks. Crate-private: not a kernel option.
+    pub(crate) hold_trim_raise: bool,
+    /// Not upstream (tangency-labs/solidcore#3399): whether a UV trim built now that would
+    /// raise its edge's tolerance is fitted again, tighter, before it does
+    /// (`topology::edgeuse::p3::refit_raising_trim`). Set only while a boolean's cleanup tests
+    /// whether two faces cover each other without growing a tolerance
+    /// (`topology::edge::is_topological_without_growth`), and builds their trims to measure
+    /// their domains. A [`Cell`] so that test can set it through the `&Kernel` it takes.
+    /// Crate-private: not a kernel option.
+    pub(crate) refit_raising_trims: Cell<bool>,
 }
 
 impl Default for Caches {
     fn default() -> Self {
         Self {
             curve_analysis: RefCell::default(),
+            trim_move_bounds: RefCell::default(),
             prove_lazy_trim_raise: true,
+            hold_trim_raise: false,
+            refit_raising_trims: Cell::new(false),
         }
     }
 }
 
 impl Caches {
-    /// Drops all cached data. The trim raise's mode stays: clearing a kernel's caches must
+    /// Drops all cached data. The trim raise's modes stay: clearing a kernel's caches must
     /// change no result.
     pub fn clear(&mut self) {
         *self = Self {
             prove_lazy_trim_raise: self.prove_lazy_trim_raise,
+            hold_trim_raise: self.hold_trim_raise,
+            refit_raising_trims: Cell::new(self.refit_raising_trims.get()),
             ..Self::default()
         };
     }
@@ -182,6 +207,7 @@ pub struct WorkCounters {
     face_pairs: Cell<u64>,
     loops_classified: Cell<u64>,
     wall_body_copies: Cell<u64>,
+    keep_feature_creases: Cell<u64>,
     proto_edge_intersections: Cell<u64>,
     shell_traversal_faces: Cell<u64>,
     proto_vertex_point_solves: Cell<u64>,
@@ -190,6 +216,7 @@ pub struct WorkCounters {
     face_extreme_control_points: Cell<u64>,
     feet_tm_coefficients: Cell<u64>,
     mass_iso_evaluations: Cell<u64>,
+    mass_closure_evaluations: Cell<u64>,
     coincident_curves_classified: Cell<u64>,
     containment_edge_drops: Cell<u64>,
     loop_walks: Cell<u64>,
@@ -201,8 +228,36 @@ pub struct WorkCounters {
     blends_recertified: Cell<u64>,
     vertex_drops: Cell<u64>,
     seam_tests: Cell<u64>,
+    line_scratch_boxes: Cell<u64>,
+    line_roots_added: Cell<u64>,
+    line_leaves_not_run: Cell<u64>,
+    line_leaves_finished: Cell<u64>,
+    line_leaves_at_limit: Cell<u64>,
+    line_roots_unshown: Cell<u64>,
+    line_exclusion_boxes: Cell<u64>,
+    line_exclusions_out_of_budget: Cell<u64>,
+    line_solves: Cell<u64>,
+    line_solves_at_limit: Cell<u64>,
+    line_searches_reused: Cell<u64>,
+    line_components: Cell<u64>,
+    line_strips: Cell<u64>,
+    line_strip_boxes: Cell<u64>,
+    line_strips_at_limit: Cell<u64>,
+    line_drop_enclosures: Cell<u64>,
+    line_boxes_dropped: Cell<u64>,
+    line_boxes_dropped_across: Cell<u64>,
+    contact_stretch_certifications: Cell<u64>,
     uv_trim_builds: Cell<u64>,
     trim_deviation_bounds: Cell<u64>,
+    split_face_classifications: Cell<u64>,
+    face_intersections: Cell<u64>,
+    same_parameter_bisections: Cell<u64>,
+    band_face_solves: Cell<u64>,
+    band_edge_solves: Cell<u64>,
+    shells: Cell<u64>,
+    booleans: Cell<u64>,
+    apart_unions: Cell<u64>,
+    move_trim_bisection_pieces: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -228,6 +283,13 @@ impl WorkCounters {
     #[must_use]
     pub fn wall_body_copies(&self) -> u64 {
         self.wall_body_copies.get()
+    }
+
+    /// Creases keep features computes, each the section of a sheet face of rounds by a
+    /// feature's wall (a planar section, or a surface intersection). Not the fork's.
+    #[must_use]
+    pub fn keep_feature_creases(&self) -> u64 {
+        self.keep_feature_creases.get()
     }
 
     /// Curve intersections a boolean ran to split its proto edges where they cross
@@ -304,6 +366,14 @@ impl WorkCounters {
         self.mass_iso_evaluations.get()
     }
 
+    /// Integrand evaluations of the ruled strips the precise mass properties close a face
+    /// onto its edges' curves with (`gap_closure`): each point of a strip's trim the
+    /// strip's integration samples. Not the fork's.
+    #[must_use]
+    pub fn mass_closure_evaluations(&self) -> u64 {
+        self.mass_closure_evaluations.get()
+    }
+
     /// Edge curves of two coincident faces that `FaceIntersect` classifies on both: those
     /// of each face within reach of the other face's box. Not upstream (the fork's counters
     /// have none).
@@ -363,6 +433,134 @@ impl WorkCounters {
         self.ball_certified_roots.get()
     }
 
+    /// Parameter boxes the certified pass of the line/surface leaf solve enclosed
+    /// (`surface::surface::certified_line`), over all leaves. Not the fork's.
+    #[must_use]
+    pub fn line_scratch_boxes(&self) -> u64 {
+        self.line_scratch_boxes.get()
+    }
+
+    /// Crossings the certified pass of the line/surface leaf solve added: certified
+    /// roots that the leaf solve's guesses had not found. Not the fork's.
+    #[must_use]
+    pub fn line_roots_added(&self) -> u64 {
+        self.line_roots_added.get()
+    }
+
+    /// Leaves whose certified pass did not run: nothing could be proved of the line or the
+    /// leaf's domain (`certified_line::Stop::NotRun`). Not the fork's.
+    #[must_use]
+    pub fn line_leaves_not_run(&self) -> u64 {
+        self.line_leaves_not_run.get()
+    }
+
+    /// Leaves whose certified pass decided, excluded or left every box
+    /// (`certified_line::Stop::Finished`). Not the fork's.
+    #[must_use]
+    pub fn line_leaves_finished(&self) -> u64 {
+        self.line_leaves_finished.get()
+    }
+
+    /// Leaves whose certified pass stopped at its bound on boxes
+    /// (`certified_line::MAX_SCRATCH_BOXES`) with boxes still to visit
+    /// (`certified_line::Stop::AtLimit`). Not the fork's.
+    #[must_use]
+    pub fn line_leaves_at_limit(&self) -> u64 {
+        self.line_leaves_at_limit.get()
+    }
+
+    /// Certified roots the pass did not report because the gap at the point to report
+    /// was not enclosed within the tolerance. Not the fork's.
+    #[must_use]
+    pub fn line_roots_unshown(&self) -> u64 {
+        self.line_roots_unshown.get()
+    }
+
+    /// Enclosures the exclusion phases of the certified line pass made, over all leaves
+    /// (`certified_line`, "The exclusion phase"). Not the fork's.
+    #[must_use]
+    pub fn line_exclusion_boxes(&self) -> u64 {
+        self.line_exclusion_boxes.get()
+    }
+
+    /// Exclusion phases that stopped at their budget, keeping what they had not decided.
+    /// Not the fork's.
+    #[must_use]
+    pub fn line_exclusions_out_of_budget(&self) -> u64 {
+        self.line_exclusions_out_of_budget.get()
+    }
+
+    /// Line/surface solves the certified pass searched (a solve of a kind whose net is the
+    /// surface, its line not of zero length). Not the fork's.
+    #[must_use]
+    pub fn line_solves(&self) -> u64 {
+        self.line_solves.get()
+    }
+
+    /// Of [`WorkCounters::line_solves`], those with a leaf whose pass stopped at its bound.
+    /// Not the fork's.
+    #[must_use]
+    pub fn line_solves_at_limit(&self) -> u64 {
+        self.line_solves_at_limit.get()
+    }
+
+    /// Line/surface solves that took the certified pass's search their operation had made
+    /// on the same inputs (`certified_line::LinePasses`) instead of searching: not counted
+    /// in [`WorkCounters::line_solves`]. Not the fork's.
+    #[must_use]
+    pub fn line_searches_reused(&self) -> u64 {
+        self.line_searches_reused.get()
+    }
+
+    /// Components of what the certified passes of a solve kept (`certified_line`,
+    /// "Components"), over all solves. Not the fork's.
+    #[must_use]
+    pub fn line_components(&self) -> u64 {
+        self.line_components.get()
+    }
+
+    /// Culled strips the certified line pass enclosed: leaves and subtrees the traversal
+    /// culled by the line's distance or parameter (`certified_line`, "Culled strips"). Not
+    /// the fork's.
+    #[must_use]
+    pub fn line_strips(&self) -> u64 {
+        self.line_strips.get()
+    }
+
+    /// Enclosures the culled strips made, over all strips. Not the fork's.
+    #[must_use]
+    pub fn line_strip_boxes(&self) -> u64 {
+        self.line_strip_boxes.get()
+    }
+
+    /// Culled strips that ran out of their budget, keeping what they left undecided. Not the
+    /// fork's.
+    #[must_use]
+    pub fn line_strips_at_limit(&self) -> u64 {
+        self.line_strips_at_limit.get()
+    }
+
+    /// Side enclosures the solves' drops made (`certified_line`, "The drop"). Not the
+    /// fork's.
+    #[must_use]
+    pub fn line_drop_enclosures(&self) -> u64 {
+        self.line_drop_enclosures.get()
+    }
+
+    /// Boxes with no root the solves' drops proved farther than the tolerance and dropped.
+    /// Not the fork's.
+    #[must_use]
+    pub fn line_boxes_dropped(&self) -> u64 {
+        self.line_boxes_dropped.get()
+    }
+
+    /// Of [`WorkCounters::line_boxes_dropped`], those in sets that read another leaf's
+    /// records across a leaf's border. Not the fork's.
+    #[must_use]
+    pub fn line_boxes_dropped_across(&self) -> u64 {
+        self.line_boxes_dropped_across.get()
+    }
+
     /// Curved intersection pieces classified as running along a face edge
     /// (`CurveClassification::classify_edge_interval`, WR-305): each one certified within the
     /// intersection tolerance of it as a whole (`curve_runs_along`, or the worst-first bound of
@@ -402,6 +600,17 @@ impl WorkCounters {
         self.seam_tests.get()
     }
 
+    /// Stretches a curve intersection certified to keep its two curves within the
+    /// tolerance, from a point solution to an end of either curve, to learn whether the
+    /// solution moves to that end (`move_contacts_to_curve_ends`): each certificate
+    /// subdivides the stretch. The count grows with the point solutions near an end, so
+    /// two curves that coincide within the tolerance along many turns, crossing at
+    /// thousands of points, show here. Not the fork's.
+    #[must_use]
+    pub fn contact_stretch_certifications(&self) -> u64 {
+        self.contact_stretch_certifications.get()
+    }
+
     /// UV trim curves built for an edge use
     /// (`topology::edgeuse::p3::create_uv_trim_curve`): each build, whether it
     /// attaches its curve or fails. Not the fork's (#21105).
@@ -411,11 +620,92 @@ impl WorkCounters {
     }
 
     /// Certified bounds on a new UV trim's distance from its edge
-    /// (`topology::edgeuse::p3::trim_deviation_bound`): each bisection the bound starts, the
-    /// costly part of building a trim. Not the fork's (#21105).
+    /// (`topology::edgeuse::p3::trim_deviation_bound`, and its same-parameter form
+    /// `trim_same_parameter_deviation_bound` that gates a boolean's carried trims): each
+    /// bisection the bound starts, the costly part of building a trim. Not the fork's (#21105).
     #[must_use]
     pub fn trim_deviation_bounds(&self) -> u64 {
         self.trim_deviation_bounds.get()
+    }
+
+    /// Points a boolean's imprint classifies on the two faces a face was just split into,
+    /// to tell which of them a definition still to be imprinted lies on
+    /// (`ProtoTopologyManager::update_faces`): one for each classification past the faces'
+    /// domain boxes. Upstream's `UpdateFaces` also classified every coincident proto edge
+    /// of every proto face on the split face, at every split of it, which grew with the
+    /// cube of the coincident edges of a union of crossing strips on one plane. Not the
+    /// fork's.
+    #[must_use]
+    pub fn split_face_classifications(&self) -> u64 {
+        self.split_face_classifications.get()
+    }
+
+    /// Pairs of faces of the two B-reps a boolean intersected (`FaceIntersect`): the
+    /// pairs of [`WorkCounters::face_pairs`] that neither the box test nor the exact tests
+    /// of `intersect_topology` showed apart: a planar face's plane, the edges of two planar
+    /// faces near each other's plane, the spans of a curved face's control net. Not the
+    /// fork's.
+    #[must_use]
+    pub fn face_intersections(&self) -> u64 {
+        self.face_intersections.get()
+    }
+
+    /// Same-parameter bounds on a carried trim's distance from its edge
+    /// (`query::curve_surface_gap::trim_same_parameter_gap_bound_within`, which gates a
+    /// boolean's carried trims) that the trim's structure did not answer at once, so that its
+    /// bisection ran: the costly ones. Not the fork's (#22034).
+    #[must_use]
+    pub fn same_parameter_bisections(&self) -> u64 {
+        self.same_parameter_bisections.get()
+    }
+
+    /// Intersections of a convex blend's section with a face of the part, run to learn whether
+    /// the blend cuts the part or breaks through it
+    /// (`blend::fillet_executive::session::band_cuts`). Not the fork's (#21434).
+    #[must_use]
+    pub fn band_face_solves(&self) -> u64 {
+        self.band_face_solves.get()
+    }
+
+    /// Intersections of an edge of the part with a station's plane, run to learn whether a
+    /// convex blend cuts the part (`blend::fillet_executive::session::band_cuts`). Not the
+    /// fork's (#21434).
+    #[must_use]
+    pub fn band_edge_solves(&self) -> u64 {
+        self.band_edge_solves.get()
+    }
+
+    /// Shells made of a whole body (`offset::offset_executive::p2::shell_brep_simple`), built
+    /// or refused: an inward shell refused for a thin feature makes one more for each step
+    /// that takes features off (`offset::thin_features`), each as costly as the first. Not
+    /// the fork's (solidcore#3353).
+    #[must_use]
+    pub fn shells(&self) -> u64 {
+        self.shells.get()
+    }
+
+    /// Booleans of two B-reps run (`boolean::api_brep`'s `merge_boolean_by`, under every
+    /// two-B-rep entry point): a union of many bodies runs one for each pair of operands it
+    /// intersects. Not the fork's.
+    #[must_use]
+    pub fn booleans(&self) -> u64 {
+        self.booleans.get()
+    }
+
+    /// Unions of two solids proved apart made side by side, without a boolean
+    /// (`boolean::apart::union_apart`). Not the fork's.
+    #[must_use]
+    pub fn apart_unions(&self) -> u64 {
+        self.apart_unions.get()
+    }
+
+    /// Bisection pieces evaluated while certifying trim-image gaps across rigid moves
+    /// (`topology::edgeuse::p3::cover_moved_trims`, through `query::curve_surface_gap`),
+    /// so a far-origin boolean test can catch regressions back to `MAX_PIECES` pole-trim
+    /// bisections or repeated `reparametrisation` work (#22467). Not the fork's.
+    #[must_use]
+    pub fn move_trim_bisection_pieces(&self) -> u64 {
+        self.move_trim_bisection_pieces.get()
     }
 
     /// Zeroes every count (`SmWorkCounters::Reset`).
@@ -423,6 +713,7 @@ impl WorkCounters {
         self.face_pairs.set(0);
         self.loops_classified.set(0);
         self.wall_body_copies.set(0);
+        self.keep_feature_creases.set(0);
         self.proto_edge_intersections.set(0);
         self.shell_traversal_faces.set(0);
         self.proto_vertex_point_solves.set(0);
@@ -431,6 +722,7 @@ impl WorkCounters {
         self.face_extreme_control_points.set(0);
         self.feet_tm_coefficients.set(0);
         self.mass_iso_evaluations.set(0);
+        self.mass_closure_evaluations.set(0);
         self.coincident_curves_classified.set(0);
         self.containment_edge_drops.set(0);
         self.loop_walks.set(0);
@@ -438,12 +730,74 @@ impl WorkCounters {
         self.classification_snapshots.set(0);
         self.orient_boxes.set(0);
         self.ball_certified_roots.set(0);
+        self.line_scratch_boxes.set(0);
+        self.line_roots_added.set(0);
+        self.line_leaves_not_run.set(0);
+        self.line_leaves_finished.set(0);
+        self.line_leaves_at_limit.set(0);
+        self.line_roots_unshown.set(0);
+        self.line_exclusion_boxes.set(0);
+        self.line_exclusions_out_of_budget.set(0);
+        self.line_solves.set(0);
+        self.line_solves_at_limit.set(0);
+        self.line_searches_reused.set(0);
+        self.line_components.set(0);
+        self.line_strips.set(0);
+        self.line_strip_boxes.set(0);
+        self.line_strips_at_limit.set(0);
+        self.line_drop_enclosures.set(0);
+        self.line_boxes_dropped.set(0);
+        self.line_boxes_dropped_across.set(0);
         self.curved_edge_runs.set(0);
         self.blends_recertified.set(0);
         self.vertex_drops.set(0);
         self.seam_tests.set(0);
+        self.contact_stretch_certifications.set(0);
         self.uv_trim_builds.set(0);
         self.trim_deviation_bounds.set(0);
+        self.split_face_classifications.set(0);
+        self.face_intersections.set(0);
+        self.same_parameter_bisections.set(0);
+        self.band_face_solves.set(0);
+        self.band_edge_solves.set(0);
+        self.shells.set(0);
+        self.booleans.set(0);
+        self.apart_unions.set(0);
+        self.move_trim_bisection_pieces.set(0);
+    }
+
+    /// Counts `pieces` bisection pieces evaluated while certifying a moved trim's gap.
+    pub(crate) fn add_move_trim_bisection_pieces(&self, pieces: u64) {
+        self.move_trim_bisection_pieces
+            .set(self.move_trim_bisection_pieces.get().saturating_add(pieces));
+    }
+
+    /// Counts one intersection of a blend's section with a face.
+    pub(crate) fn add_band_face_solve(&self) {
+        self.band_face_solves
+            .set(self.band_face_solves.get().saturating_add(1));
+    }
+
+    /// Counts one intersection of an edge with a station's plane.
+    pub(crate) fn add_band_edge_solve(&self) {
+        self.band_edge_solves
+            .set(self.band_edge_solves.get().saturating_add(1));
+    }
+
+    /// Counts one shell of a whole body.
+    pub(crate) fn add_shell(&self) {
+        self.shells.set(self.shells.get().saturating_add(1));
+    }
+
+    /// Counts one boolean of two B-reps.
+    pub(crate) fn add_boolean(&self) {
+        self.booleans.set(self.booleans.get().saturating_add(1));
+    }
+
+    /// Counts one union of two solids made side by side.
+    pub(crate) fn add_apart_union(&self) {
+        self.apart_unions
+            .set(self.apart_unions.get().saturating_add(1));
     }
 
     /// Counts one UV trim curve built.
@@ -458,9 +812,33 @@ impl WorkCounters {
             .set(self.trim_deviation_bounds.get().saturating_add(1));
     }
 
+    /// Counts one point classified on the two faces a face was split into.
+    pub(crate) fn add_split_face_classification(&self) {
+        self.split_face_classifications
+            .set(self.split_face_classifications.get().saturating_add(1));
+    }
+
+    /// Counts one pair of faces intersected.
+    pub(crate) fn add_face_intersection(&self) {
+        self.face_intersections
+            .set(self.face_intersections.get().saturating_add(1));
+    }
+
+    /// Counts one same-parameter bound that runs its bisection.
+    pub(crate) fn add_same_parameter_bisection(&self) {
+        self.same_parameter_bisections
+            .set(self.same_parameter_bisections.get().saturating_add(1));
+    }
+
     /// Counts one edge or vertex asked whether it is a seam or a pole of a face.
     pub(crate) fn add_seam_test(&self) {
         self.seam_tests.set(self.seam_tests.get().saturating_add(1));
+    }
+
+    /// Counts one stretch certified for a contact's move to a curve end.
+    pub(crate) fn add_contact_stretch_certification(&self) {
+        self.contact_stretch_certifications
+            .set(self.contact_stretch_certifications.get().saturating_add(1));
     }
 
     /// Counts one vertex a classified curve is solved against.
@@ -484,6 +862,12 @@ impl WorkCounters {
     pub(crate) fn add_wall_body_copy(&self) {
         self.wall_body_copies
             .set(self.wall_body_copies.get().saturating_add(1));
+    }
+
+    /// Counts one crease keep features computes between a sheet face and a wall.
+    pub(crate) fn add_keep_feature_crease(&self) {
+        self.keep_feature_creases
+            .set(self.keep_feature_creases.get().saturating_add(1));
     }
 
     /// Counts one curve intersection of two proto edges.
@@ -526,6 +910,12 @@ impl WorkCounters {
     pub(crate) fn add_mass_iso_evaluation(&self) {
         self.mass_iso_evaluations
             .set(self.mass_iso_evaluations.get().saturating_add(1));
+    }
+
+    /// Counts one evaluation of a mass-property closure strip's integrand.
+    pub(crate) fn add_mass_closure_evaluation(&self) {
+        self.mass_closure_evaluations
+            .set(self.mass_closure_evaluations.get().saturating_add(1));
     }
 
     /// Counts `n` series coefficients a feet Taylor model computed.
@@ -573,6 +963,101 @@ impl WorkCounters {
     pub(crate) fn add_ball_certified_root(&self) {
         self.ball_certified_roots
             .set(self.ball_certified_roots.get().saturating_add(1));
+    }
+
+    /// Counts one leaf's certified line pass: the boxes it enclosed, the roots it left
+    /// unreported, and how it ended.
+    pub(crate) fn add_line_pass(
+        &self,
+        boxes: u64,
+        unshown: u64,
+        stop: crate::surface::surface::certified_line::Stop,
+    ) {
+        use crate::surface::surface::certified_line::Stop;
+        self.line_scratch_boxes
+            .set(self.line_scratch_boxes.get().saturating_add(boxes));
+        self.line_roots_unshown
+            .set(self.line_roots_unshown.get().saturating_add(unshown));
+        let leaves = match stop {
+            Stop::NotRun => &self.line_leaves_not_run,
+            Stop::Finished => &self.line_leaves_finished,
+            Stop::AtLimit => &self.line_leaves_at_limit,
+        };
+        leaves.set(leaves.get().saturating_add(1));
+    }
+
+    /// Counts one leaf's exclusion phase: the enclosures it made, and whether it stopped
+    /// at its budget.
+    pub(crate) fn add_line_exclusion(&self, boxes: u64, out_of_budget: bool) {
+        self.line_exclusion_boxes
+            .set(self.line_exclusion_boxes.get().saturating_add(boxes));
+        if out_of_budget {
+            self.line_exclusions_out_of_budget
+                .set(self.line_exclusions_out_of_budget.get().saturating_add(1));
+        }
+    }
+
+    /// Counts one culled strip: the enclosures it made, and whether it ran out of its
+    /// budget.
+    pub(crate) fn add_line_strip(
+        &self,
+        boxes: u64,
+        stop: crate::surface::surface::certified_line::Stop,
+    ) {
+        use crate::surface::surface::certified_line::Stop;
+        self.line_strips
+            .set(self.line_strips.get().saturating_add(1));
+        self.line_strip_boxes
+            .set(self.line_strip_boxes.get().saturating_add(boxes));
+        if stop == Stop::AtLimit {
+            self.line_strips_at_limit
+                .set(self.line_strips_at_limit.get().saturating_add(1));
+        }
+    }
+
+    /// Counts one solve's drop: its side enclosures and the boxes it dropped.
+    pub(crate) fn add_line_drops(&self, drops: &crate::surface::surface::certified_line::Drops) {
+        let n = |x: usize| u64::try_from(x).unwrap_or(u64::MAX);
+        self.line_drop_enclosures.set(
+            self.line_drop_enclosures
+                .get()
+                .saturating_add(n(drops.enclosures)),
+        );
+        self.line_boxes_dropped.set(
+            self.line_boxes_dropped
+                .get()
+                .saturating_add(n(drops.no_root.saturating_add(drops.edge))),
+        );
+        self.line_boxes_dropped_across.set(
+            self.line_boxes_dropped_across
+                .get()
+                .saturating_add(n(drops.across)),
+        );
+    }
+
+    /// Counts one solve the certified line pass searched: its components, and whether a
+    /// leaf of it stopped at its bound.
+    pub(crate) fn add_line_solve(&self, components: u64, at_limit: bool) {
+        self.line_solves
+            .set(self.line_solves.get().saturating_add(1));
+        self.line_components
+            .set(self.line_components.get().saturating_add(components));
+        if at_limit {
+            self.line_solves_at_limit
+                .set(self.line_solves_at_limit.get().saturating_add(1));
+        }
+    }
+
+    /// Counts one solve that took a kept search of the certified line pass.
+    pub(crate) fn add_line_search_reused(&self) {
+        self.line_searches_reused
+            .set(self.line_searches_reused.get().saturating_add(1));
+    }
+
+    /// Counts one crossing the certified line pass added.
+    pub(crate) fn add_line_root(&self) {
+        self.line_roots_added
+            .set(self.line_roots_added.get().saturating_add(1));
     }
 
     /// Counts one curved piece certified to run along a face edge.
@@ -693,10 +1178,18 @@ impl Default for KernelOptions {
     }
 }
 
+/// The error of a token found stopped in `operation`: out of fuel, unless it was cancelled.
 #[cold]
 #[inline(never)]
-const fn cancelled_error(operation: &'static str) -> SolidError {
-    SolidError::cancelled(operation)
+fn stopped_error(token: &CancelToken, operation: &'static str) -> SolidError {
+    match token.out_of_fuel() {
+        Some((spent, limit)) if !token.flagged() => SolidError::OutOfFuel {
+            operation,
+            spent,
+            limit,
+        },
+        _ => SolidError::cancelled(operation),
+    }
 }
 
 /// Shared cooperative cancellation flag for cancelling a [`Kernel`] operation from
@@ -714,6 +1207,15 @@ const fn cancelled_error(operation: &'static str) -> SolidError {
 /// operation stops where it is cancelled, and for an application's progress or abort UI
 /// (SolidCraft's), which can read how far an operation got ([`Self::polls`]) or stop it after
 /// a budget of work. A token made by [`Self::new`] counts nothing and pays nothing for it.
+///
+/// Not upstream: a token made by [`Self::with_fuel`] is a *fuel* budget. It counts its polls
+/// as [`Self::after_polls`] does and stops the operation after `limit` of them, but the stop
+/// is [`SolidError::OutOfFuel`] (the operation spent the work it was given), not
+/// [`SolidError::Cancelled`] (someone asked it to stop). A poll is one unit of work: the
+/// checks sit at the kernel's outer loops (intersection marching and tracing, the fillet
+/// solver and its corners, the boolean's classification and merge, offset, stitch and heal,
+/// integration), so the count is a function of the input and never of the clock: the same
+/// call spends the same fuel on every machine. Polling changes nothing an operation computes.
 #[derive(Clone, Debug, Default)]
 pub struct CancelToken {
     flag: Arc<AtomicBool>,
@@ -724,13 +1226,16 @@ pub struct CancelToken {
     polls: Option<Arc<PollCount>>,
 }
 
-/// The polls a [`CancelToken::after_polls`] token counts.
+/// The polls a [`CancelToken::after_polls`] or [`CancelToken::with_fuel`] token counts.
 #[derive(Debug)]
 struct PollCount {
     /// The poll the token is cancelled from (1: the first).
     from: u64,
     /// The polls made so far.
     made: AtomicU64,
+    /// Whether the count is a fuel budget ([`CancelToken::with_fuel`]): its stop is
+    /// [`SolidError::OutOfFuel`].
+    fuel: bool,
 }
 
 impl PollCount {
@@ -771,9 +1276,38 @@ impl CancelToken {
             polls: Some(Arc::new(PollCount {
                 from: n,
                 made: AtomicU64::new(0),
+                fuel: false,
             })),
             ..Self::default()
         }
+    }
+
+    /// Not upstream: an uncancelled token with `limit` units of fuel. Each poll spends one;
+    /// the poll after the `limit`-th finds it empty, and from then on the token is cancelled
+    /// and [`Self::check`] returns [`SolidError::OutOfFuel`]. [`Self::cancel`] still stops it
+    /// at once, as [`SolidError::Cancelled`]. Clones share the tank; [`Self::reset`] fills it.
+    #[must_use]
+    pub fn with_fuel(limit: u64) -> Self {
+        Self {
+            polls: Some(Arc::new(PollCount {
+                from: limit.saturating_add(1),
+                made: AtomicU64::new(0),
+                fuel: true,
+            })),
+            ..Self::default()
+        }
+    }
+
+    /// Not upstream: `(spent, limit)` when the fuel of this token, or of a token it was
+    /// joined with ([`Self::either`]), has run out ([`Self::with_fuel`]); `None` while every
+    /// tank in the chain has fuel left, or none is one. Reading it spends nothing.
+    #[must_use]
+    pub fn out_of_fuel(&self) -> Option<(u64, u64)> {
+        let own = self.polls.as_deref().and_then(|p| {
+            let made = p.made.load(Ordering::Relaxed);
+            (p.fuel && made >= p.from).then(|| (made, p.from.saturating_sub(1)))
+        });
+        own.or_else(|| self.also.as_deref().and_then(CancelToken::out_of_fuel))
     }
 
     /// Not upstream: how many times this token has been polled since it was made or last
@@ -804,9 +1338,16 @@ impl CancelToken {
         }
     }
 
+    /// Whether [`Self::cancel`] was called on this token or one it was joined with, without
+    /// polling (spending) anything.
+    fn flagged(&self) -> bool {
+        self.flag.load(Ordering::Relaxed) || self.also.as_deref().is_some_and(CancelToken::flagged)
+    }
+
     /// Whether [`Self::cancel`] has been called since construction or the last
     /// [`Self::reset`] (on this token, or on a token it was joined with by [`Self::either`]),
-    /// or, for a token made by [`Self::after_polls`], this is its `n`-th poll or a later one.
+    /// or, for a token made by [`Self::after_polls`], this is its `n`-th poll or a later one
+    /// (for one made by [`Self::with_fuel`], a poll past its `limit`).
     /// Every call is one poll of each counting token in the chain: none is skipped because
     /// an earlier one is already cancelled.
     #[must_use]
@@ -818,15 +1359,17 @@ impl CancelToken {
     }
 
     /// Returns `Err(SolidError::Cancelled { operation })` when [`Self::is_cancelled`] is
-    /// `true`, else `Ok(())`.
+    /// `true`, else `Ok(())`; `Err(SolidError::OutOfFuel { .. })` instead when what stopped it
+    /// is a fuel budget that ran out ([`Self::with_fuel`]) and no [`Self::cancel`].
     ///
     /// # Errors
     ///
-    /// [`SolidError::Cancelled`] when [`Self::cancel`] has been signalled.
+    /// [`SolidError::Cancelled`] when [`Self::cancel`] has been signalled;
+    /// [`SolidError::OutOfFuel`] when the token's fuel ran out.
     #[inline]
     pub fn check(&self, operation: &'static str) -> crate::Result<()> {
         if self.is_cancelled() {
-            return Err(cancelled_error(operation));
+            return Err(stopped_error(self, operation));
         }
         Ok(())
     }
@@ -857,9 +1400,11 @@ pub struct Kernel {
     pub upstream_ub_passed: Vec<&'static str>,
     /// Not upstream: whether `make_curve_cache` keeps a memo of each curve cache in the
     /// curve value, and `CoincidenceCheck` a memo of each surface's boundary curves in
-    /// the surface value (`true` unless the `curve-memo-off` feature is on), and whether
+    /// the surface value (`true` by default; a caller sets it), and whether
     /// the check's other result-invariant shortcuts are taken (the B-spline curve
-    /// analyses' bounds and memo, #2568; face test 37's winding hulls). The memos and
+    /// analyses' bounds and memo, #2568; face test 37's winding hulls), and whether a
+    /// line solve takes the certified pass's search its operation kept on the same inputs
+    /// (`surface::surface::certified_line::LinePasses`). The memos and
     /// shortcuts never change a result, only the time; `false` builds and runs
     /// everything in full, to check that.
     pub memoize_curve_caches: bool,
@@ -916,12 +1461,19 @@ pub struct Kernel {
     /// A [`RefCell`]: the certificate runs through `&Kernel`; it is never borrowed across a
     /// certificate, and a hit returns what certifying the loop again returns.
     pub loop_area_memo: RefCell<crate::mass::loop_area::LoopAreaMemo>,
+    /// Not upstream: the memo of the vertex use parameters and edge use binormals worked
+    /// out on one unchanged B-rep value ([`crate::geom::check_memo::CheckMemo`]), on with
+    /// [`Kernel::memoize_curve_caches`]. A [`RefCell`]: it is never borrowed across a
+    /// computation, and a hit returns what working it out again returns.
+    pub check_memo: RefCell<crate::geom::check_memo::CheckMemo>,
     /// Not upstream: the memo of the procedural blends this kernel recertified as it gave a
     /// record's faces their definitions back
     /// ([`crate::surface::procedural_blend::convert::RecertifyMemo`]), on with
-    /// [`Kernel::memoize_curve_caches`]. A [`RefCell`]: it is never borrowed across a
-    /// certificate, and a hit returns what recertifying the same blend again returns.
-    pub recertify_memo: RefCell<crate::surface::procedural_blend::convert::RecertifyMemo>,
+    /// [`Kernel::memoize_curve_caches`]. Shared through an [`Arc`] (a kernel a boolean
+    /// copies for its workers keeps the certificates the parent finished: a hit returns
+    /// what recertifying the same blend again returns, so sharing it changes no answer),
+    /// and a [`Mutex`], as the copies run on their own threads.
+    pub recertify_memo: Arc<Mutex<crate::surface::procedural_blend::convert::RecertifyMemo>>,
     /// Not upstream: the fork's `thread_local` count of open blend operation scopes
     /// (`t_lOperationScopes`; [`crate::blend::fillet_section::section::OperationScope`]).
     /// Shared, so that a scope can outlive a borrow of the kernel (a fillet session holds
@@ -956,13 +1508,7 @@ pub struct Kernel {
     /// Test-only seam of the curved coincident strip's drop ([`StripProbe`]); shared with
     /// the kernel copies an operation makes.
     #[cfg(test)]
-    pub(crate) strip_probe: Arc<std::sync::Mutex<StripProbe>>,
-    /// Not upstream, test only (feature `wr57-replay`): the seam of the goldens' WR-57
-    /// substitution replay ([`crate::surface::surface::replay`]). No hook by default, and
-    /// then it changes nothing. Shared with the kernel copies an operation makes for its
-    /// caches, which call through the same seam.
-    #[cfg(feature = "wr57-replay")]
-    pub replay: crate::surface::surface::replay::ReplaySeam,
+    pub(crate) strip_probe: Arc<Mutex<StripProbe>>,
 }
 
 /// Test-only seam of `boolean::topology_intersector::curved_strip`
@@ -1012,7 +1558,7 @@ impl Kernel {
             caches: Caches::default(),
             context: Context::default(),
             upstream_ub_passed: Vec::new(),
-            memoize_curve_caches: !cfg!(feature = "curve-memo-off"),
+            memoize_curve_caches: true,
             fixes: UpstreamFixes::default(),
             cancel: None,
             notify_records: crate::topology::topology::NotifyRecords::new(),
@@ -1027,7 +1573,8 @@ impl Kernel {
             ),
             blend_w_memo: RefCell::default(),
             loop_area_memo: RefCell::default(),
-            recertify_memo: RefCell::default(),
+            check_memo: RefCell::default(),
+            recertify_memo: Arc::default(),
             blend_operation_scopes: Arc::default(),
             work_counters: WorkCounters::default(),
             blend_face_log: None,
@@ -1036,8 +1583,6 @@ impl Kernel {
             profiler: crate::profile::Profiler::default(),
             #[cfg(test)]
             strip_probe: Arc::default(),
-            #[cfg(feature = "wr57-replay")]
-            replay: crate::surface::surface::replay::ReplaySeam::default(),
         }
     }
 
@@ -1060,6 +1605,18 @@ impl Kernel {
         self.caches.prove_lazy_trim_raise = false;
         let out = f(self);
         self.caches.prove_lazy_trim_raise = proved;
+        out
+    }
+
+    /// Runs `f` with every UV trim it builds leaving its edge's tolerance as it is (see
+    /// [`Caches::hold_trim_raise`]), then restores the previous mode, whether `f` returns a
+    /// value or an error: the validate-only tolerance pass's `bValidateOnly`, carried for the
+    /// pass instead of written to the B-rep it checks (#21105).
+    pub(crate) fn with_held_trim_raise<T>(&mut self, f: impl FnOnce(&mut Kernel) -> T) -> T {
+        let held = self.caches.hold_trim_raise;
+        self.caches.hold_trim_raise = true;
+        let out = f(self);
+        self.caches.hold_trim_raise = held;
         out
     }
 
@@ -1170,6 +1727,55 @@ mod tests {
         b.reset();
         ab.cancel();
         assert!(a.is_cancelled() && !b.is_cancelled() && abc.is_cancelled());
+    }
+
+    #[test]
+    fn fuel_runs_out_after_its_limit_as_out_of_fuel_and_cancel_stays_cancel() {
+        let t = CancelToken::with_fuel(2);
+        assert_eq!(t.out_of_fuel(), None);
+        assert_eq!(t.check("kernel::a"), Ok(()));
+        assert_eq!(t.check("kernel::b"), Ok(()));
+        assert_eq!(
+            t.check("kernel::c"),
+            Err(SolidError::OutOfFuel {
+                operation: "kernel::c",
+                spent: 3,
+                limit: 2,
+            })
+        );
+        assert!(t.is_cancelled() && t.check("kernel::d").is_err_and(|e| e.is_out_of_fuel()));
+        assert_eq!(t.out_of_fuel(), Some((5, 2)), "reading spends nothing");
+        // sub-kernels share the tank through clones and joined tokens
+        t.reset();
+        let app = CancelToken::new();
+        let joined = t.either(&app);
+        let mut k = Kernel::default();
+        k.set_cancel_token(joined.clone());
+        assert_eq!(k.check_cancelled("kernel::e"), Ok(()));
+        assert!(!k.is_cancelled());
+        assert!(k
+            .check_cancelled("kernel::f")
+            .is_err_and(|e| e.is_out_of_fuel() && e.is_cancelled()));
+        assert_eq!(joined.out_of_fuel(), Some((3, 2)));
+        // the application's cancel is a cancel, even with the tank empty
+        app.cancel();
+        assert_eq!(
+            k.check_cancelled("kernel::g"),
+            Err(SolidError::cancelled("kernel::g"))
+        );
+        // an after_polls token is no fuel: its stop stays a cancel
+        let p = CancelToken::after_polls(1);
+        assert_eq!(p.out_of_fuel(), None);
+        assert_eq!(
+            p.check("kernel::h"),
+            Err(SolidError::cancelled("kernel::h"))
+        );
+        assert_eq!(
+            CancelToken::with_fuel(0)
+                .check("kernel::i")
+                .map_err(|e| e.kind()),
+            Err(crate::error::ErrorKind::OutOfFuel)
+        );
     }
 
     #[test]

@@ -3762,12 +3762,13 @@ mod tests {
             side(&narrow, on_curve),
             Ok(p1::SideOfCurve::Undecided(_))
         ));
-        let not_once = SolidError::topology_failed(
-            "topology::brep::p1",
-            "the point does not project onto the curve exactly once",
-        );
-        let status = p1::find_side_of_curve(&k, &narrow, below, Vec3::Z, 1e-6);
-        assert_eq!(status, Err(not_once));
+        // the projection's miss is a reviewed defect, of the status it had
+        let status = p1::find_side_of_curve(&k, &narrow, below, Vec3::Z, 1e-6).unwrap_err();
+        assert_eq!(status.sm_status(), Some(crate::error::SM_ERR));
+        assert!(matches!(
+            status.topology_failure(),
+            Some(TopologyFailure::Defect { .. })
+        ));
         assert!(p1::find_side_of_curve(&k, &narrow, on_curve, Vec3::Z, 1e-6).is_err());
         assert_eq!(side_vote(&k, &narrow, on_curve, Vec3::Z, 1e-6), Ok(None));
         assert_eq!(side_vote(&k, &wide, below, Vec3::Z, 1e-6), Ok(Some(1)));

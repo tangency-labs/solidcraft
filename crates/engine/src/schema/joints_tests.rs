@@ -53,7 +53,27 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<SolveJointsParams>(), &["dof_free_only", "quiet"]);
     assert_keys(
         input_schema_for::<MakeJointOriginParams>(),
-        &["axis", "body", "circle", "corner", "edge", "end", "face", "frame", "name", "occurrence", "on", "path", "plane", "point", "x", "z"],
+        &[
+            "axis",
+            "body",
+            "circle",
+            "corner",
+            "curve",
+            "edge",
+            "end",
+            "export_frame",
+            "face",
+            "frame",
+            "name",
+            "occurrence",
+            "on",
+            "path",
+            "plane",
+            "point",
+            "sketch",
+            "x",
+            "z",
+        ],
     );
     assert_keys(input_schema_for::<RigidGroupParams>(), &["occurrences"]);
     assert_keys(input_schema_for::<ReachParams>(), &["at", "axis", "continuous", "from", "joints", "occurrence", "point", "quiet", "z"]);
@@ -1471,6 +1491,7 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
             (json!({"circle": [1, 2, 3], "z": [0, 0, 1], "x": null}), true),
             (json!({"edge": [1, 2, 3], "on": [0, 0, 0], "corner": {"x": 1, "y": 2, "z": 3}, "z": [1, 0, 0]}), true),
             (json!({"point": [1, 2, 3], "z": [0, 0, 1], "x": [1, 0, 0]}), true),
+            (json!({"face": [1, 2, 3], "export_frame": true}), true),
             (json!({"frame": {"origin": [0, 0, 0], "z": [0, 0, 1], "x": [1, 0, 0]}}), true),
             (json!({"plane": "XY"}), true),
             (json!({"plane": "o:2/origin/XY"}), true),
@@ -1489,6 +1510,7 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
             (json!({"face": [1, 2, 3], "path": null}), true),
             (json!({"face": [1, 2, 3], "path": []}), false),
             (json!({"face": [1, 2, 3], "path": (0..65).collect::<Vec<u64>>()}), false),
+            (json!({"face": [1, 2, 3], "export_frame": "yes"}), false),
         ],
     );
     takes(
@@ -1589,8 +1611,8 @@ fn the_remaining_schemas_take_what_the_handlers_read() {
     let screw = input_schema_for::<ScrewParams>();
     assert_eq!(screw.as_value()["anyOf"], json!([{"required": ["joint"]}, {"required": ["a", "b"]}]));
     assert_eq!(input_schema_for::<ReachParams>().as_value()["dependentRequired"], json!({"axis": ["z"]}));
-    // face, circle, edge, point, plane, axis and frame: the forms the handler reads.
-    assert_eq!(input_schema_for::<MakeJointOriginParams>().as_value()["anyOf"].as_array().map(Vec::len), Some(7));
+    // face, circle, edge, point, sketch, plane, axis and frame: the forms the handler reads.
+    assert_eq!(input_schema_for::<MakeJointOriginParams>().as_value()["anyOf"].as_array().map(Vec::len), Some(8));
 }
 
 /// A design with the pieces the couplings join, and a tray with a hole for the joint origins by
