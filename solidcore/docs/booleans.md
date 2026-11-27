@@ -374,13 +374,26 @@ rounding of that calculation is bounded too (the comment on `cone_box_gap`). The
 within the other face's edges, not only on its plane: its vertices and three points along each of its
 edges must classify to the other face (`points_in_face`). That part is sampled, not proved. Any
 other pair of kinds, and a face that leaves the plane or the other face anywhere, is only possibly a
-copy and goes to the ray. Where the operation keeps no copy of coincident faces (a
-difference of faces facing the same way), the patch goes. Where it keeps one, the copy is the other
-face's when that face is kept, so the patch goes, and the patch's when the other face is deleted.
-This replaces a ray cast from a point within the tolerance of the other boundary, whose answer there
-can go either way. The patches are visited again until a pass classifies none, so a patch whose
-other face is classified by a later patch follows it; one whose other face is still unclassified
-then is left to the ray. Two faces of one kind are left as before.
+copy and goes to the ray. Where the operation keeps one copy of coincident faces, the copy is the
+other face's when that face is kept, so the patch goes, and the patch's when the other face is
+deleted. Where it keeps none (a difference of faces facing the same way, a union or an
+intersection of faces facing opposite ways), a deleted other face takes the patch with it. A kept
+other face still covers the patch, since the imprint drew no edge round the patch in it, so the
+space between the two, thinner than the tolerance, lies against a face of the result, and the
+patch stays to close it: a thin wedge less a part whose round grazes the wedge's plane keeps that
+plane, which lies outside the part, and the sliver of the round on it closes what is left of the
+wedge beside it. Which side of the other face the patch lies on is below the tolerance and is not
+read. A patch of the other operand that stays is copied into
+the primary like the other operand's kept faces, but not in the region its edges' radial sectors
+find: lying on the other face within the tolerance, it can be put on either side of that face, and
+on the wrong side it splits no region with the faces it bounds the result with, so the result has
+no solid region. It is made in the region on the side of the other face where the operation keeps
+the other operand's faces (`kept_patch_region`): the solid side for a difference or an
+intersection, the void side for a union. This replaces a ray cast from a point within the tolerance
+of the other boundary, whose answer there can go either way. The patches are visited again until a
+pass classifies none, so a patch whose other face is classified by a later patch follows it; one
+whose other face is still unclassified then is left to the ray. Two faces of one kind are left as
+before.
 
 This is the problem Segal's tolerant modeller and Jackson's local tolerances address [9, 10]: two
 entities within tolerance are one, and a decision across that band has to be made once and kept by
