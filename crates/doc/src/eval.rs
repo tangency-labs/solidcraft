@@ -10680,16 +10680,20 @@ fn hole_tools_reaching(
         let prism = more::PrimitivePrism::Cylinder { base: *position + axis * lo, axis, radius: rad, height: hi - lo, reach: hi - lo, part };
         Ok((crate::lineage::part_tool(tool, part), Some(prism)))
     };
-    // Turn the revolve profile plane off `up.any_perp()` so a full-turn tool's seam does not land
-    // on a principal axis (for any horizontal radial hole `up.any_perp()` is `±Z`, putting the
-    // countersink's rim seam vertex on a Z-axis cylinder's tangent crest) or line up with the bore
-    // cylinder's seam.
+    // For horizontal radial holes (`up.any_perp()` along `±Z`), turn the revolve profile plane
+    // off `±Z` so a full-turn countersink's rim seam vertex does not land directly on a Z-axis
+    // cylinder's tangent crest; keep `up.any_perp()` for vertical holes so their seam alignment
+    // with the bore cylinder is unchanged.
     let revolve_plane = || -> Result<Plane> {
         let up = (-dir).normalized().ok_or_else(|| DocError::Invalid("hole axis".into()))?;
         let side0 = up.any_perp();
-        let side1 = up.cross(side0);
-        let (sin, cos) = 0.613_f64.sin_cos();
-        let side = side0 * cos + side1 * sin;
+        let side = if side0.z.abs() > 0.5 {
+            let side1 = up.cross(side0);
+            let (sin, cos) = 0.613_f64.sin_cos();
+            side0 * cos + side1 * sin
+        } else {
+            side0
+        };
         Plane::new(*position, side, up).ok_or_else(|| DocError::Invalid("hole axis".into()))
     };
     // Reuse the existing drill-point tool for the narrow bore, independently of its entry.
