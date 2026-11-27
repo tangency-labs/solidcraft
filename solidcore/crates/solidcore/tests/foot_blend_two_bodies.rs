@@ -1,18 +1,19 @@
 //! A weld bead between two separate bodies (#15130): `FootBlend::of_faces` reads each foot's
 //! side from its own face (the side along which the face holds a step from the root) and
-//! refuses faces that do not meet in an inside corner, and `FootBlend::toes_on_bodies`
-//! proves the strip from the root to each toe on its own body's face over the whole joint. A
-//! plate standing on a plate (T joint), a plate lapped on a plate, a rod standing on a plate,
-//! a plate standing on a pocket's floor (a face whose outer use runs against its surface) and
-//! one on a cavity's floor (a face whose outer side is a void inside the body), each two
-//! bodies, 6 mm legs: the flat bead's volume is the closed form, its edges lie in the joint's
-//! corner, and both bodies are the same after, in their file bytes and in memory. Small legs
-//! on the tee are proved too, and so is a rod sunk into the plate, whose face's edge past the
-//! root is in the leg's reach but off the strip. A toe in a notch of the base, a hole in the
-//! base between the stations, a pocket in the rod's face on the strip, and a web too low for
-//! the leg (a station with no toe) are refused with the leg that fits; two plates butted flush, and a face that leaves the joint
-//! away from the corner, meet in no corner; a joint off one of the faces, or over a hole in
-//! it, the same face twice, and a face on a region the kernel is unsure of are refused.
+//! refuses faces that do not meet in an inside corner, and `FootBlend::toes_on_bodies` proves
+//! the strip from the root to each toe on its own body's face over the whole joint. A plate
+//! standing on a plate (T joint), a plate lapped on a plate, a rod standing on a plate, a plate
+//! standing on a pocket's floor (a face whose outer use runs against its surface) and one on a
+//! cavity's floor (a face whose outer side is a void inside the body), each two bodies, 6 mm
+//! legs: the flat bead's volume is the closed form, its edges lie in the joint's corner, and
+//! both bodies are the same after, in their file bytes and in memory. Small legs on the tee are
+//! proved too, and so is a rod sunk into the plate, whose face's edge past the root is in the
+//! leg's reach but off the strip. A toe in a notch of the base, a hole in the base between the
+//! stations, a pocket in the rod's face on the strip (also where the first leg the fit's search
+//! tries is left unproved), and a web too low for the leg (a station with no toe) are refused
+//! with the leg that fits; two plates butted flush, and a face that leaves the joint away from
+//! the corner, meet in no corner; a joint off one of the faces, or over a hole in it, the same
+//! face twice, and a face on a region the kernel is unsure of are refused.
 //!
 //! The tolerances: a bead's edges lie within [`WELD_FIT_TOLERANCE`] of the exact toes and
 //! root (its section face is fitted to it); the plates' beads are planes, on which the
@@ -582,16 +583,33 @@ fn an_edge_of_a_curved_face_beyond_the_root_is_not_on_the_strip() {
 /// 14): its edges on the rod's face, fitted where the pocket's walls meet the cylinder, lie on the
 /// strip between 1 and 4 from the root. On a curved support the strip's enclosure clears only an
 /// edge outside it, so these stay on it and the strip is refused, naming no face (two bodies), with
-/// a leg that fits: at most 1 past the margins, to the pocket's lower edge, and at least 1 less the
-/// strip's margin (the fit tolerance), where the proof on that fitted edge, an arc beside the
-/// joint's arc, may stop deciding; that leg passes.
+/// a leg that fits: at most 1 past the margins, to the pocket's lower edge, and at least 1 less
+/// twice the strip's margin (the fit tolerance): where the proof on that fitted edge, an arc beside
+/// the joint's arc, stops deciding, the search for the fit goes on below it down to the margin;
+/// that leg passes.
 #[test]
 fn a_pocket_in_a_curved_face_on_the_strip_is_refused_with_the_leg_that_fits() {
+    pocket_refused_with_the_leg_that_fits(11.0);
+}
+
+/// The same pocket with its lower edge 2.99 from the root: the first leg the search for the fit
+/// tries, half the leg asked (3), reaches it within the strip's margin, where the proof does not
+/// finish. That leg is taken as not holding and the search goes on below it, so the strip is
+/// refused with the leg that fits (about 2.99), not as not proved.
+#[test]
+fn a_pocket_at_the_first_leg_tried_is_refused_with_the_leg_that_fits() {
+    pocket_refused_with_the_leg_that_fits(12.99);
+}
+
+/// The rod of the tests above with a pocket cut into its face from `bottom` to 14 (x from 48 to
+/// 52, y from 62 to 68), legs 6: refused as off the face, naming no face, with a leg within the
+/// margins of `bottom - 10` (the pocket's lower edge's distance from the root) that passes.
+fn pocket_refused_with_the_leg_that_fits(bottom: f64) {
     use solidcore::boolean::api_brep::boolean_difference;
     let mut k = kernel();
     let plate = block(&mut k, [0.0; 3], [100.0, 100.0, 10.0]);
     let rod = create_cylinder(&mut k, Point3::new(50.0, 50.0, 10.0), 15.0, 50.0).unwrap();
-    let pocket = block(&mut k, [48.0, 62.0, 11.0], [4.0, 6.0, 3.0]);
+    let pocket = block(&mut k, [48.0, 62.0, bottom], [4.0, 6.0, 14.0 - bottom]);
     let rod = boolean_difference(&mut k, rod, pocket).unwrap();
     let side = face_at(&k, &rod, [35.0, 50.0, 10.0], [35.0, 50.0, 60.0]);
     let top = face_at(&k, &plate, [50.0, 0.0, 10.0], [0.0, 50.0, 10.0]);
@@ -609,8 +627,9 @@ fn a_pocket_in_a_curved_face_on_the_strip_is_refused_with_the_leg_that_fits() {
     );
     let fit = err.fit().unwrap();
     assert_eq!(fit.measure, FitMeasure::Leg, "{err}");
+    let edge = bottom - 10.0;
     assert!(
-        fit.size >= 1.0 - SLACK - ZONE && fit.size <= 1.0 + ZONE + SLACK,
+        fit.size >= edge - 2.0 * SLACK - ZONE && fit.size <= edge + ZONE + SLACK,
         "{}",
         fit.size
     );

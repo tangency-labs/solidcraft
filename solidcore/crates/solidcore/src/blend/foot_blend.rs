@@ -1421,8 +1421,9 @@ impl FootBlend {
     /// point of the face's boundary found in it), each leg tried for the fit checked so too,
     /// the smallest leg a body builds being that of the body the toe is off. Where the proof
     /// does not finish at a leg the search for the fit tries (the face's boundary at about
-    /// that leg's reach), the fit is the largest leg proved to hold before it; with none,
-    /// the strip is refused as not proved. Where the faces
+    /// that leg's reach), that leg is taken as not holding and the search goes on below it,
+    /// down to the strip's margin; with no leg proved to hold, the strip is refused as not
+    /// proved. Where the faces
     /// are of two bodies the refusal names no face (a face id does not say whose): its point
     /// is the toe's, or the boundary's, on the support refused.
     pub fn toes_on_bodies(
@@ -1558,21 +1559,31 @@ impl FootBlend {
         // of the leg found, not of the leg asked: a face far shorter than the leg asked still
         // gets its fit
         let (mut lo, mut hi) = (0.0_f64, z);
+        // where the strip's proof did not finish at a leg tried (an edge of the face at about
+        // that leg's reach, enclosed no tighter within the budget): that leg is not shown to
+        // hold, and the halving goes on below it; it stops once the bracket is within the
+        // strip's margin, as each such leg spends the whole budget
+        let mut unproved: Option<Point3> = None;
         for _ in 0..FIT_STEPS {
             if hi - lo <= 1e-7 * (1.0 + hi) {
+                break;
+            }
+            if unproved.is_some() && hi - lo <= strip_margin(hi) {
                 break;
             }
             let mid = 0.5 * (lo + hi);
             match holds(mid)? {
                 Ok(true) => lo = mid,
                 Ok(false) => hi = mid,
-                // the strip's proof does not finish this near the leg where the strip leaves
-                // the face (an edge of the face at about the leg's reach, enclosed no tighter
-                // within the budget): the fit is the largest leg proved to hold, and with none
-                // the strip is refused as not proved
-                Err(_) if lo > 0.0 => break,
-                Err(at) => return Err(self.strip_not_proved(i, at)),
+                Err(at) => {
+                    unproved = Some(at);
+                    hi = mid;
+                }
             }
+        }
+        // no leg proved to hold, and one left unproved: the strip is refused as not proved
+        if let Some(at) = unproved.filter(|_| lo <= 0.0) {
+            return Err(self.strip_not_proved(i, at));
         }
         // a toe holds up to the face's tolerance past its edge: the fit named is that much
         // less, as the exact bead's (`weld_bead`'s `toes_on_faces`), which puts the toe on the
@@ -1674,6 +1685,47 @@ enum StripPair {
 #[derive(Debug, Default)]
 struct StripCover {
     boxes: Vec<([f64; 2], crate::blend::fillet_section::series::V3<Ivl>)>,
+    /// How far the support's form, whose strip the boxes enclose, may be from the support:
+    /// a procedural blend's net is within its certified bound of the definition the face's
+    /// edges lie on ([`crate::surface::procedural_blend::ProceduralBlend::bound`]); every
+    /// other form the proof takes is the surface itself (0).
+    widen: f64,
+}
+
+impl StripCover {
+    /// Whether points `p`, each within `pad` of an edge's curve (the edge's and the face's
+    /// tolerances), lie outside every box over the stations `ts`, the points taken that far
+    /// and the form's distance from the support ([`StripCover::widen`]) farther about them.
+    /// Not where no box is over `ts`: a gap clears nothing. One box over `ts` is enough to
+    /// ask, because the boxes cover the whole joint: the pieces they are made over run from
+    /// station to station ([`FootBlend::check_stations`]), each starting where the one
+    /// before it ends. Not for a pad that is not finite and non-negative.
+    fn clears(&self, p: crate::blend::fillet_section::series::V3<Ivl>, ts: Ivl, pad: f64) -> bool {
+        use crate::blend::fillet_section::series::V3;
+        let pad = pad + self.widen;
+        if !(pad.is_finite() && pad >= 0.0) {
+            return false;
+        }
+        let grow = Ivl::new(-pad, pad);
+        let p = V3 {
+            x: p.x + grow,
+            y: p.y + grow,
+            z: p.z + grow,
+        };
+        let apart = |a: Ivl, b: Ivl| a.hi < b.lo || b.hi < a.lo;
+        let mut over = false;
+        for (_, b) in self
+            .boxes
+            .iter()
+            .filter(|([t0, t1], _)| *t0 <= ts.hi && ts.lo <= *t1)
+        {
+            over = true;
+            if !(apart(b.x, p.x) || apart(b.y, p.y) || apart(b.z, p.z)) {
+                return false;
+            }
+        }
+        over
+    }
 }
 
 /// What [`FootBlend::strip_off_face`] proved of a support's strip.
@@ -1810,17 +1862,17 @@ impl FootBlend {
         }
         // a curved support's strip enclosed over the whole joint, made the first time a pair
         // needs it ([`FootBlend::strip_cover`]); a cover refused for a reason not the kernel's
-        // fault is not made (no pair is then cleared by it), a defect is reported
+        // fault is not made (no pair is then cleared by it), a defect or a cancel is reported
         let face_tolerance = crate::topology::face::p2::tolerance(target, face)?;
         let cover: std::cell::RefCell<Option<Option<StripCover>>> = std::cell::RefCell::new(None);
         // whether the edge's points `p`, each within `pad` of the edge's curve, lie outside
-        // every box of the strip's enclosure over the stations `ts`; not where no box is over
-        // them (a gap in the cover clears nothing)
+        // the strip's enclosure over the stations `ts` ([`StripCover::clears`])
         let outside_strip = |p: V3<Ivl>, ts: Ivl, pad: f64| -> Result<bool> {
             let mut slot = cover.borrow_mut();
             if slot.is_none() {
                 *slot = Some(match self.strip_cover(k, i, legs) {
                     Ok(c) => c,
+                    Err(e) if e.is_cancelled() => return Err(e),
                     Err(e) if !e.is_defect() => None,
                     Err(e) => return Err(e),
                 });
@@ -1828,28 +1880,7 @@ impl FootBlend {
             let Some(Some(c)) = slot.as_ref() else {
                 return Ok(false);
             };
-            if !(pad.is_finite() && pad >= 0.0) {
-                return Ok(false);
-            }
-            let grow = Ivl::new(-pad, pad);
-            let p = V3 {
-                x: p.x + grow,
-                y: p.y + grow,
-                z: p.z + grow,
-            };
-            let apart = |a: Ivl, b: Ivl| a.hi < b.lo || b.hi < a.lo;
-            let mut over = false;
-            for (_, b) in c
-                .boxes
-                .iter()
-                .filter(|([t0, t1], _)| *t0 <= ts.hi && ts.lo <= *t1)
-            {
-                over = true;
-                if !(apart(b.x, p.x) || apart(b.y, p.y) || apart(b.z, p.z)) {
-                    return Ok(false);
-                }
-            }
-            Ok(over)
+            Ok(c.clears(p, ts, pad))
         };
         let mut pairs = 0_usize;
         for (e, uses) in edges {
@@ -2083,6 +2114,11 @@ impl FootBlend {
         let Some(support) = ProofSupport::of(k, &side.surface)? else {
             return Ok(None);
         };
+        // the form's distance from the support (`StripCover::widen`)
+        let widen = match side.surface.kind_with_nurb(k)? {
+            crate::surface::surface::SurfaceKind::ProceduralBlend(pb) => pb.bound(),
+            _ => 0.0,
+        };
         let leader = NurbsCurve::of(&self.leader)?;
         // the stations and pieces made, against the budget
         let mut made = 0_usize;
@@ -2121,7 +2157,10 @@ impl FootBlend {
             }
         }
         work.reverse();
-        let mut cover = StripCover::default();
+        let mut cover = StripCover {
+            boxes: Vec::new(),
+            widen,
+        };
         let mut guess: Option<Point2> = None;
         while let Some((a, b, depth)) = work.pop() {
             made += 1;
@@ -3554,7 +3593,60 @@ impl FootBlendDefinition {
 
 #[cfg(test)]
 mod tests {
-    use super::{on_rim, wrapped};
+    use super::{on_rim, wrapped, StripCover};
+    use crate::blend::fillet_section::interval::Ivl;
+    use crate::blend::fillet_section::series::V3;
+
+    /// The strip's enclosure clears an edge's points only where they lie farther than the pad
+    /// (the edge's and the face's tolerances) and the form's distance from the support
+    /// outside every box over their stations, and never where no box is over them: one box
+    /// `[0, 1]^3` over the stations `[0, 1]`, pad `1e-3`, a point past its face at `x = 1`.
+    #[test]
+    fn the_strip_s_enclosure_clears_a_point_only_past_the_pad() {
+        let unit = Ivl::new(0.0, 1.0);
+        let cover = |widen: f64| StripCover {
+            boxes: vec![(
+                [0.0, 1.0],
+                V3 {
+                    x: unit,
+                    y: unit,
+                    z: unit,
+                },
+            )],
+            widen,
+        };
+        let at = |x: f64| V3 {
+            x: Ivl::new(x, x),
+            y: Ivl::new(0.5, 0.5),
+            z: Ivl::new(0.5, 0.5),
+        };
+        let (pad, ts) = (1e-3, Ivl::new(0.25, 0.5));
+        assert!(
+            !cover(0.0).clears(at(1.0 + 0.5 * pad), ts, pad),
+            "within the pad"
+        );
+        assert!(
+            cover(0.0).clears(at(1.0 + 2.0 * pad), ts, pad),
+            "past the pad"
+        );
+        assert!(
+            !cover(0.0).clears(at(1.0 + 2.0 * pad), ts, 3.0 * pad),
+            "a wider pad"
+        );
+        assert!(
+            !cover(2.0 * pad).clears(at(1.0 + 2.0 * pad), ts, pad),
+            "the form's distance"
+        );
+        assert!(
+            !cover(0.0).clears(at(5.0), Ivl::new(2.0, 3.0), pad),
+            "no box over the stations"
+        );
+        assert!(
+            !cover(0.0).clears(at(5.0), ts, f64::NAN),
+            "a pad not finite"
+        );
+        assert!(!cover(0.0).clears(at(5.0), ts, -pad), "a negative pad");
+    }
     use crate::geom::extent2d::Extent2d;
     use crate::geom::vector2d::Point2;
 
