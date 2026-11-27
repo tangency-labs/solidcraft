@@ -433,7 +433,9 @@ mod tests {
             shown_bodies.push(Shown { index: i, path: Vec::new(), body: name, reference: false });
             cut_map.insert(i, telling);
         }
-        let state = Arc::new(ModelState { bodies: model_bodies, ..ModelState::default() });
+        let mut state = ModelState::default();
+        state.bodies = model_bodies;
+        let state = Arc::new(state);
         let set = ShownSet { state, bodies: shown_bodies, uncut: None, cut: cut_map };
         let frame = ViewFrame::new(plane, "1:1".parse().unwrap(), Vec2::new(150.0, 10.0), Vec2::new(200.0, 150.0)).unwrap();
 
