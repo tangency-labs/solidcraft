@@ -49,6 +49,10 @@ pub(super) fn paint_text_aligned(ui: &Ui, rect: egui::Rect, text: &str, font: eg
     if spaced {
         format.extra_letter_spacing = size * Tokens::get().font_section_tracking;
     }
+    // Optical centring: egui centres the row box, but this font's capitals sit low in it (the
+    // ascent exceeds the cap height, and a descent hangs under the baseline), so the row box
+    // goes up by the measured offset and the ink reads centred (#22642).
+    let rise = cap_rise(ui.painter(), &font);
     let shown = if middle { ellipsize_middle(ui, text, font, rect.width().max(0.0)) } else { text.to_owned() };
     let mut job = egui::text::LayoutJob::single_section(shown, format);
     job.wrap.max_width = rect.width().max(0.0);
@@ -57,7 +61,29 @@ pub(super) fn paint_text_aligned(ui: &Ui, rect: egui::Rect, text: &str, font: eg
     // Snap to whole device pixels: a fractional origin blurs every glyph edge.
     let ppp = ui.ctx().pixels_per_point().max(0.5);
     let snap = |v: f32| (v * ppp).round() / ppp;
-    let at = egui::pos2(snap(rect.left()), snap(rect.center().y - galley.size().y / 2.0));
+    let at = egui::pos2(snap(rect.left()), snap(rect.center().y - galley.size().y / 2.0 - rise));
     let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
     painter.galley(at, galley, ink);
+}
+
+/// How far above the geometric middle a single line in `font` must sit so its capitals read
+/// centred, in points. Measured from one fixed probe glyph, so it follows the font, its size
+/// and the pixels-per-point, and never moves with the text shown (#22642).
+pub(crate) fn cap_rise(painter: &egui::Painter, font: &egui::FontId) -> f32 {
+    egui::cap_ink_rise(painter, font)
+}
+
+/// Where to paint `galley` so its capitals read centred on `centre` (#22642): egui's geometric
+/// centre of the row box, lifted by the font's measured offset.
+pub(crate) fn centred_in(painter: &egui::Painter, galley: &egui::Galley, centre: egui::Pos2) -> egui::Pos2 {
+    centre - galley.size() / 2.0 - egui::vec2(0.0, galley_cap_rise(painter, galley))
+}
+
+/// The [`cap_rise`] of the font `galley` is laid out in; zero unless `galley` is one row, whose
+/// whole placement is about to be centred (#22642).
+pub(crate) fn galley_cap_rise(painter: &egui::Painter, galley: &egui::Galley) -> f32 {
+    match (galley.rows.len(), galley.job.sections.first()) {
+        (1, Some(section)) => cap_rise(painter, &section.format.font_id),
+        _ => 0.0,
+    }
 }

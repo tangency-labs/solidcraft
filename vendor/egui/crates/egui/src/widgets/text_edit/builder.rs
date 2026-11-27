@@ -5,10 +5,10 @@ use epaint::text::{Galley, LayoutJob, TextWrapMode, cursor::CCursor};
 
 use crate::{
     Align, Align2, AsIdSalt, AtomExt as _, AtomKind, Atoms, Color32, Context, CursorIcon, Event,
-    EventFilter, FontSelection, Frame, IMEPurpose, Id, IdSalt, ImeEvent, IntoAtoms,
-    IntoSizedResult, Key, KeyboardShortcut, Margin, Modifiers, NumExt as _, Response, Sense,
-    SizedAtomKind, TextBuffer, TextStyle, Ui, Vec2, Widget, WidgetAtom, WidgetInfo,
-    WidgetWithState,
+    EventFilter, FontId, FontSelection, Frame, IMEPurpose, Id, IdSalt, ImeEvent, IntoAtoms,
+    IntoSizedResult, Key, KeyboardShortcut, Margin, Modifiers, NumExt as _, Painter, Response,
+    Sense, SizedAtomKind, TextBuffer, TextStyle, TextFormat, Ui, Vec2, Widget, WidgetAtom,
+    WidgetInfo, WidgetWithState,
     class::{ClassName, Classes, HasClasses},
     epaint,
     os::OperatingSystem,
@@ -830,6 +830,9 @@ impl<'t> TextEdit<'t> {
                 })
                 .sense(sense)
                 .align2(align)
+                // SolidCraft: hint, prefix and suffix atoms must read on the same centred
+                // baseline as the text painted below (SolidCraft #22642).
+                .optical_center_y(align.y() == Align::Center)
                 .wrap_mode(wrap_mode)
                 .allocate(ui);
 
@@ -936,6 +939,20 @@ impl<'t> TextEdit<'t> {
             .align_size_within_rect(galley.size(), inner_rect)
             .intersect(inner_rect) // limit pos to the response rect area
             .min;
+        // SolidCraft: optical vertical centring. `align_size_within_rect` centres the row box,
+        // but that is not where a centred line of text should read: a font's capitals sit low
+        // in their row box (the ascent exceeds the cap height, and a descent hangs under the
+        // baseline), so a vertically centred field's text reads low in its frame. Lift the row
+        // by the distance from the middle of its row box to the middle of a capital's ink,
+        // measured from a fixed probe glyph rather than the text itself, so the baseline never
+        // moves while one types (SolidCraft #22642).
+        if align.y() == Align::Center && galley.rows.len() == 1 {
+            let font = galley.job.sections.first().map_or_else(
+                || ui.style().text_styles[&TextStyle::Body].clone(),
+                |section| section.format.font_id.clone(),
+            );
+            galley_pos.y -= cap_ink_rise(ui.painter(), &font);
+        }
         let align_offset = inner_rect.left_top() - galley_pos;
 
         // Visual clipping for singleline text editor with text larger than width
@@ -1631,4 +1648,17 @@ fn check_for_mutating_key_press(
 
         _ => None,
     }
+}
+
+/// How far the middle of a capital's ink sits below the middle of its row box, in points, for
+/// `font`. Used to lift vertically centred single-row text so its capitals read centred; see
+/// its use in [`crate::TextEdit`]'s paint (SolidCraft #22642). Lays out one fixed probe glyph
+/// rather than reading the laid-out text, so the result follows the font, its size and the
+/// pixels-per-point, and never moves with what is typed.
+pub fn cap_ink_rise(painter: &Painter, font: &FontId) -> f32 {
+    let job =
+        LayoutJob::single_section("H".to_owned(), TextFormat::simple(font.clone(), Color32::WHITE));
+    let probe = painter.layout_job(job);
+    let row = &probe.rows[0];
+    row.visuals.mesh_bounds.center().y - 0.5 * row.size.y
 }

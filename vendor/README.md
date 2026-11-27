@@ -121,6 +121,19 @@ SolidCraft changes to egui and eframe:
   the handle each window, the main one and every pop-out, publishes its own bar for one window
   procedure to answer from (`crates/ui-kit/src/window_chrome/caption.rs`, #13996).
 
+- `crates/egui/src/widgets/text_edit/{builder.rs,mod.rs}`, `crates/egui/src/widgets/mod.rs`,
+  `crates/egui/src/atomics/container_atom.rs`, `crates/egui/src/lib.rs`: a vertically centred
+  `TextEdit` lifts its single row of text so the middle of a capital's ink lands in the middle of
+  the field, not the middle of the font's row box (SolidCraft #22642). A row box is not where
+  capitals sit: the ascent exceeds the cap height and a descent hangs below the baseline, so
+  centring the row box puts the text low in the frame — 1.5 pt with egui's own font. The lift
+  comes from `cap_ink_rise`, exported for SolidCraft's ui-kit to centre hand-drawn pills the same
+  way; it lays out one fixed probe glyph, so it follows the font, its size and the
+  pixels-per-point, and the baseline never moves while one types. `TextEdit` opts the atom
+  container in with `optical_center_y` so hint, prefix and suffix atoms share the lifted
+  baseline; no other atom-layout user is touched. Only `Align::Center` rows are touched; top-
+  and bottom-aligned edits are unchanged. Tests: `crates/egui/tests/text_edit_centering.rs`.
+
 The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
 draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).
 

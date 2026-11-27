@@ -1,11 +1,11 @@
 use crate::{
-    AtomKind, AtomPaintArgs, Atoms, Direction, FontSelection, Frame, IdSalt, Image, IntoAtoms,
-    Response, SizedAtom, SizedAtomKind, Stroke, Ui, WidgetAtom,
+    AtomKind, AtomPaintArgs, Atoms, Direction, FontSelection, Frame, IdSalt, Image,
+    IntoAtoms, Response, SizedAtom, SizedAtomKind, Stroke, TextStyle, Ui, WidgetAtom, cap_ink_rise,
     text_selection::LabelSelectionState,
 };
 use alloc::sync::Arc;
 use core::ops::{Deref, DerefMut};
-use emath::{Align2, GuiRounding as _, NumExt as _, Rect, Vec2};
+use emath::{Align, Align2, GuiRounding as _, NumExt as _, Rect, Vec2};
 use epaint::text::TextWrapMode;
 use epaint::{Color32, Galley};
 use smallvec::SmallVec;
@@ -72,6 +72,8 @@ pub struct ContainerAtom<'a> {
     wrap_mode: Option<TextWrapMode>,
     align2: Option<Align2>,
     direction: Direction,
+    /// SolidCraft: see [`Self::optical_center_y`].
+    optical_center_y: bool,
 }
 
 impl Default for ContainerAtom<'_> {
@@ -93,6 +95,7 @@ impl<'a> ContainerAtom<'a> {
             wrap_mode: None,
             align2: None,
             direction: Direction::LeftToRight,
+            optical_center_y: false,
         }
     }
 
@@ -119,6 +122,7 @@ impl<'a> ContainerAtom<'a> {
             align2,
             fallback_font,
             direction,
+            optical_center_y,
         } = self;
 
         let fallback_font = fallback_font.unwrap_or_default();
@@ -270,6 +274,7 @@ impl<'a> ContainerAtom<'a> {
             align2,
             gap,
             direction,
+            optical_center_y,
         }
     }
 }
@@ -395,6 +400,14 @@ shared_container_builders! {
     fn align2(self, align2: Align2) {
         self.align2 = Some(align2);
     }
+
+    /// SolidCraft: lift [`crate::AtomKind::Text`] atoms that are vertically centred, so a
+    /// capital's ink reads centred in the field rather than the font's row box.
+    /// [`crate::TextEdit`] sets this for its hint, prefix and suffix atoms so they share the
+    /// baseline of the centred text it paints itself (SolidCraft #22642).
+    fn optical_center_y(self, optical_center_y: bool) {
+        self.optical_center_y = optical_center_y;
+    }
 }
 
 /// A measured [`ContainerAtom`], ready to be painted at a [`Rect`].
@@ -437,6 +450,9 @@ pub struct SizedContainerAtom<'a> {
 
     /// The axis the atoms are laid out along. The main axis carries `grow`/`shrink`/`gap`.
     direction: Direction,
+
+    /// SolidCraft: see [`ContainerAtom::optical_center_y`].
+    optical_center_y: bool,
 }
 
 impl<'atom> SizedContainerAtom<'atom> {
@@ -539,6 +555,7 @@ impl<'atom> SizedContainerAtom<'atom> {
             align2,
             gap,
             direction,
+            optical_center_y,
             ..
         } = self;
 
@@ -598,6 +615,20 @@ impl<'atom> SizedContainerAtom<'atom> {
 
             match sized.kind {
                 SizedAtomKind::Text(galley) => {
+                    // SolidCraft: optical vertical centring. [`crate::TextEdit`] lifts its own
+                    // text the same way (see `cap_ink_rise`); lift its hint, prefix and suffix
+                    // atoms here so they keep the same baseline (SolidCraft #22642).
+                    let mut pos = item_rect.min;
+                    if optical_center_y
+                        && sized.align.y() == Align::Center
+                        && galley.rows.len() == 1
+                    {
+                        let font = galley.job.sections.first().map_or_else(
+                            || ui.style().text_styles[&TextStyle::Body].clone(),
+                            |section| section.format.font_id.clone(),
+                        );
+                        pos.y -= cap_ink_rise(ui.painter(), &font);
+                    }
                     if let Some(response) = selection_response {
                         // Route through the label selection machinery, which also
                         // paints the galley. `Stroke::NONE` keeps the rendering
@@ -605,14 +636,13 @@ impl<'atom> SizedContainerAtom<'atom> {
                         LabelSelectionState::label_text_selection(
                             ui,
                             response,
-                            item_rect.min,
+                            pos,
                             galley,
                             fallback_text_color,
                             Stroke::NONE,
                         );
                     } else {
-                        ui.painter()
-                            .galley(item_rect.min, galley, fallback_text_color);
+                        ui.painter().galley(pos, galley, fallback_text_color);
                     }
                 }
                 SizedAtomKind::Image { image, size: _ } => {
