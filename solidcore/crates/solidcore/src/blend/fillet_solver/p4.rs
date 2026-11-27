@@ -2398,11 +2398,7 @@ fn c3_make_intersector<'s>(
 /// edge between the solver's two faces — e.g. a figure-8 tangent seam where tracing out of
 /// the vertex admits competing branches. A single-branch degenerate cusp keeps upstream's
 /// rule of tracing out of the tangent point toward the regular end.
-fn on_vertex_has_multiple_branches(
-    solver: &super::p1::FilletSolver,
-    cx: &Cx<'_>,
-    tip: TsRef,
-) -> Result<bool> {
+fn on_vertex_has_multiple_branches(solver: &FilletSolver, cx: &Cx<'_>, tip: TsRef) -> Result<bool> {
     use crate::blend::fillet_geom::p1::FilletVertexType;
     use crate::error::EntityRef;
     use crate::topology::{edge as topo_edge, edgeuse::p1 as topo_eu, vertex as topo_vertex};
