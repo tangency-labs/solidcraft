@@ -296,6 +296,7 @@ mod plugin_themes_tests;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod plugin_tint;
 pub(crate) mod plugin_updates;
+pub(crate) mod plugin_workspaces;
 pub(crate) mod plugins;
 pub mod point_clouds;
 pub mod policy;
@@ -1116,6 +1117,7 @@ pub struct SolveApp {
     /// Plugin state kept between frames. New plugin state goes in [`app_plugins::State`].
     pub(crate) plugins: app_plugins::State,
     plugin_slots: plugin_slots::State,
+    pub(crate) plugin_workspaces: plugin_workspaces::State,
     /// The agent cursor acting out control requests.
     pub agent: agent_cursor::AgentCursor,
     /// The agent chat panel (docs/design/in-app-agent-chat.md).
@@ -1411,6 +1413,7 @@ impl SolveApp {
             control_answering: Vec::new(),
             plugins: Default::default(),
             plugin_slots: Default::default(),
+            plugin_workspaces: Default::default(),
             agent: Default::default(),
             shots: solidcraft_control_egui::screenshot::Shots::new("no frame was presented (window hidden?); use ui.render"),
             styled: false,

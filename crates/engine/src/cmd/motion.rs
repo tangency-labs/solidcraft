@@ -228,7 +228,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&EXPLODE_CREATE_CONTRACT)
         .output(output_schema_for::<ExplodeCreated>)
         .params(
-            "name?; scale? (automatic: each occurrence pushed away from the assembly's centre by scale × its offset, default 1); \
+            "name?; scale? (automatic: occupied sibling groups pushed away from their mean centre by scale × their offset, default 1); \
              moves?: [{occurrence, translate: [x,y,z]}] (instead of automatic)",
         ),
     CommandSpec::new("explode.show", "Show Exploded View", crate::checked!("explode.show", explode_show))
@@ -1559,7 +1559,7 @@ fn explode_create(s: &mut Session, p: &Value) -> Result<Value> {
             };
             let c = centres(s);
             if c.len() < 2 {
-                return Err(bad(cmd, "an exploded view needs two or more occurrences"));
+                return Err(bad(cmd, "an automatic exploded view needs at least two occupied sibling groups to separate"));
             }
             let mid = c.iter().fold(Vec3::ZERO, |a, (_, p)| a + *p) * (1.0 / c.len() as f64);
             c.iter().map(|(o, p)| (*o, (*p - mid) * scale)).collect()

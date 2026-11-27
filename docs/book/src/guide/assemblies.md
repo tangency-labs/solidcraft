@@ -432,6 +432,11 @@ are drawn by the same renderer as `solidcraft-cli snapshot`, on a copy of the de
 changed. A GIF keeps one palette for all its frames, so colours don't flicker, and stores only
 what changed from one frame to the next. Frames are capped: at most 1000, and a GIF holds at most
 2^26 pixels of frames (about 160 frames of 800 × 500).
+An automatic exploded view moves the occupied sibling groups immediately below their common
+enclosing occurrence. If all the parts are inside one subassembly, the view separates those parts
+rather than moving the enclosing subassembly as a whole. Each group's centre moves away from the
+mean of their centres by the chosen scale times its offset. At least two occupied groups are needed.
+
 An exploded view animates the same way: give its name or id as `view` (instead of a `study` or a
 `joint`) and the parts come apart at a steady pace, from the assembled placement to where the view
 shows them; `back: true` brings them back together, exploded at the middle frame. That takes 41
