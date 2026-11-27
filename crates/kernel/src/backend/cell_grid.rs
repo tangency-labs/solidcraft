@@ -17,6 +17,17 @@ fn refused(e: ops::CellGridError) -> KernelError {
     KernelError::Invalid(e.to_string())
 }
 
+/// Why solidcore gave no wall: a face that is no such wall, or an argument it refuses (a face
+/// index past the faces), is the caller's input in solidcore's words; anything else the kernel's
+/// failure.
+fn wall_refused(e: wall_ops::WallError) -> KernelError {
+    match e {
+        wall_ops::WallError::Wall(e) => refused(e),
+        wall_ops::WallError::Ops(e @ solidcore_ops::Error::Argument) => KernelError::Invalid(format!("cylinder wall: {e}")),
+        wall_ops::WallError::Ops(e) => KernelError::Failed(format!("cylinder wall: {e}")),
+    }
+}
+
 impl CellGrid for Solidcore {
     const LIMITS: CellGridLimits = CellGridLimits { min_size: ops::MIN_SIZE, max_sides: ops::MAX_SIDES, max_snap_inset: ops::MAX_SNAP_INSET };
 
@@ -37,7 +48,7 @@ impl CellGrid for Solidcore {
     }
 
     fn cylinder_wall(&self, body: &Brep, face: usize) -> Result<CylinderWall> {
-        wall_ops::cylinder_wall(body, face, body.tolerance).map_err(refused)
+        wall_ops::cylinder_wall(body, face, body.tolerance).map_err(wall_refused)
     }
 
     fn plan_wall_cell_grid(&self, wall: &CylinderWall, spec: &CellGridSpec, depth: WallDepth) -> Result<WallCellPlan> {
