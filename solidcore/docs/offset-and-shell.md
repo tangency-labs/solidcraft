@@ -123,6 +123,14 @@ such a round is the offset of its net. That breaks the one rule, and the ledger
 drops its bound: the face gets `BSplineSurface::from_nurb(made.surface, false)`, a bare net with no
 stored ε (`p1.rs`). Both are open (§9).
 
+The face's edges were built on the implicit offset and stay within their tolerances of the net,
+but a seam edge must lie on the net's own seam line: the check's seam test flags a vertex more
+than 1e-9 beside it, and a later cut across the seam puts its vertex on the edge. So each seam
+edge of a face given its net (its UV trim curve an iso line) gets the net's iso curve along the
+seam, exactly, where that curve runs between the edge's own vertices within its tolerance
+(`seams_onto_iso_curves`, `p1.rs`). The seam lifted from the implicit offset lay up to 8.5e-7 off
+the net's seam line on a thickened closed loft.
+
 ## 4. Folds, collapses and the largest wall
 
 ![Left: a parabolic face whose least radius of curvature is 10 at its apex, its offset by 10 towards the centre of curvature with a cusp on the focal curve, and the wall between them. Right: the same face offset by 14, a curve that crosses itself between two cusps.](offset-and-shell/fold.svg)
