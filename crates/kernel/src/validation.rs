@@ -299,7 +299,7 @@ pub(crate) fn failing_check_local(body: &Body, faces: &[usize], edges: &[usize])
 /// What SMLib's check failed in a body: how many tests failed, and each test that failed, where
 /// the check reports it (its site: the test's number and name, and the kind of entity it failed
 /// on), with how many times. Shown in a line ([`std::fmt::Display`]): `3 failed tests: SmEdge::Test
-/// #7 Bad Edge Length: less than edge tolerance (×2); SmLoop::Test #2 Bad Loop Orient`, in the
+/// #7 Bad Edge Length: less than edge tolerance (×2) on edges 3, 7; SmLoop::Test #2 Bad Loop Orient`, in the
 /// order the check first reported them. Each failure's own values stay in the check's text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckFailure {
@@ -319,6 +319,9 @@ pub struct FailedTest {
     pub number: Option<u32>,
     /// The kinds of entity it failed on (`SmVertex`), each once, when the check names them.
     pub owners: Vec<String>,
+    /// The edges it failed on, each once, by the index the check's `[edge N]` tag gives, in the
+    /// order the check first reported them.
+    pub edges: Vec<u32>,
     /// How many times it failed.
     pub times: usize,
 }
@@ -341,6 +344,7 @@ impl CheckFailure {
                 .trim_end();
             let owner =
                 line.rsplit_once("[owner ").and_then(|(_, rest)| rest.split_once(']')).map(|(owner, _)| owner.trim()).filter(|o| !o.is_empty());
+            let edge = line.rsplit_once("[edge ").and_then(|(_, rest)| rest.split_once(']')).and_then(|(n, _)| n.trim().parse::<u32>().ok());
             let i = match tests.iter().position(|t| t.name == name) {
                 Some(i) => i,
                 None => {
@@ -348,7 +352,7 @@ impl CheckFailure {
                         let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
                         digits.parse().ok()
                     });
-                    tests.push(FailedTest { name: name.to_string(), number, owners: Vec::new(), times: 0 });
+                    tests.push(FailedTest { name: name.to_string(), number, owners: Vec::new(), edges: Vec::new(), times: 0 });
                     tests.len() - 1
                 }
             };
@@ -356,6 +360,9 @@ impl CheckFailure {
                 t.times += 1;
                 if let Some(owner) = owner.filter(|o| !t.owners.iter().any(|known| known == o)) {
                     t.owners.push(owner.to_string());
+                }
+                if let Some(edge) = edge.filter(|e| !t.edges.contains(e)) {
+                    t.edges.push(edge);
                 }
             }
         }
@@ -369,7 +376,15 @@ impl std::fmt::Display for CheckFailure {
         write!(f, "{} failed test{s}: ", self.failures)?;
         for (i, t) in self.tests.iter().enumerate() {
             let sep = if i == 0 { "" } else { "; " };
-            if t.times > 1 { write!(f, "{sep}{} (×{})", t.name, t.times)? } else { write!(f, "{sep}{}", t.name)? }
+            if t.times > 1 {
+                write!(f, "{sep}{} (×{})", t.name, t.times)?
+            } else {
+                write!(f, "{sep}{}", t.name)?
+            }
+            if !t.edges.is_empty() {
+                let list: Vec<String> = t.edges.iter().map(u32::to_string).collect();
+                write!(f, " on edge{} {}", if t.edges.len() == 1 { "" } else { "s" }, list.join(", "))?;
+            }
         }
         Ok(())
     }
@@ -499,6 +514,8 @@ mod tests {
         let test = &failure.tests[0];
         assert_eq!((test.number, test.times, test.owners.as_slice()), (Some(61), 2, &["SmEdge".to_string()][..]));
         assert_eq!(test.name, "SmEdge::Test #61 Valid: Bad Edge fails pE->ValidateGeometry(FALSE) check");
+        assert_eq!(test.edges, [4, 17]);
+        assert!(failure.to_string().ends_with("(×2) on edges 4, 17"), "{failure}");
     }
 
     #[test]

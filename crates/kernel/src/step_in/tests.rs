@@ -1564,7 +1564,7 @@ fn heal_run(body: &Body, placements: &[M4], workers: usize) -> (Vec<ImportIssue>
 fn failed_as_read() -> crate::CheckFailure {
     crate::CheckFailure {
         failures: 1,
-        tests: vec![crate::validation::FailedTest { name: "as read".into(), number: None, owners: Vec::new(), times: 1 }],
+        tests: vec![crate::validation::FailedTest { name: "as read".into(), number: None, owners: Vec::new(), edges: Vec::new(), times: 1 }],
     }
 }
 
