@@ -11165,6 +11165,13 @@ fn feature_tools_with_constructor(
                     "not supported yet: a taper to a plane at a slant to the sketch; use a plane parallel to the sketch or a point".into(),
                 ));
             }
+            // The run between the two planes has no second side.
+            if to_slanted.is_some() && extent.distance2.is_some() {
+                return Err(DocError::Invalid(
+                    "not supported yet: two sides with a plane at a slant to the sketch; use one side, or a plane parallel to the sketch or a point"
+                        .into(),
+                ));
+            }
             let ends = ExtrudeEnds {
                 to: extent.to.map(|_| to_end_plane.is_some()),
                 through_all: extent.through_all,
@@ -19178,7 +19185,12 @@ pub fn world_state_moved_reusing(
 /// (`construction_axis_in`), so a plane read as it is would fall in the wrong place for a feature
 /// of a component placed differently. A captured construction plane is resolved directly in its
 /// saved frame by `resolve_plane_in`, keeping assembly motion out of the sketch's definition.
-fn construction_planes_in_frame<'a>(doc: &Document, st: &ModelState, comp: u64, plane: &'a PlaneRef) -> Result<std::borrow::Cow<'a, PlaneRef>> {
+pub(crate) fn construction_planes_in_frame<'a>(
+    doc: &Document,
+    st: &ModelState,
+    comp: u64,
+    plane: &'a PlaneRef,
+) -> Result<std::borrow::Cow<'a, PlaneRef>> {
     use std::borrow::Cow;
     // The component of a feature, read from the timeline without `Document::feature`'s search counter.
     fn owner_of(doc: &Document, id: u64) -> Option<u64> {

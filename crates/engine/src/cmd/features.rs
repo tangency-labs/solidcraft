@@ -1911,7 +1911,7 @@ fn object_point(s: &Session, v: &Value, base: Vec3, n: Vec3) -> Option<Vec3> {
         ObjectAt::Plane(pl) => {
             let sketch = solidcore_record::Plane::from_normal(base, n)?;
             let level = solidcraft_kernel::level_on_plane(&sketch, base, &pl).ok()?;
-            Some(base + n * level)
+            Some(sketch.offset(level).origin)
         }
     }
 }

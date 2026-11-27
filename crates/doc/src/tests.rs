@@ -3385,6 +3385,39 @@ fn a_sketch_on_the_construction_plane_of_another_component_lies_on_it() {
     close(crate::apply_point(&m, end), want.origin + want.x * 10.0 + want.y * 5.0, "line end");
 }
 
+/// An extrude To Object on the construction plane of another component ends where that
+/// component puts the plane, not where the plane's numbers fall in the extrude's own, placed
+/// component (#8527, as #11734 for sketches).
+#[test]
+fn an_extrude_to_the_construction_plane_of_another_component_ends_on_it() {
+    let (mut doc, sketch) = plate_doc();
+    let owner = doc.add_component(Some("Owner"), 0).unwrap();
+    let part = doc.add_component(Some("Part"), 0).unwrap();
+    doc.occurrences.iter_mut().find(|o| o.component == part).unwrap().transform = rigid(Vec3::new(0.0, 0.0, 10.0), Vec3::ZERO, Vec3::Z, 0.0);
+    let offset = PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "25 mm".into() };
+    let plane = doc.add_feature(FeatureKind::ConstructionPlane { plane: offset }, Some("Target")).unwrap();
+    doc.feature_mut(plane).unwrap().component = owner;
+    // The plane comes first in the timeline, then the sketch and the extrude of the part.
+    let at = doc.features.iter().position(|f| f.id == plane).unwrap();
+    let moved = doc.features.remove(at);
+    doc.features.insert(0, moved);
+    let extrude = doc.features.iter().find(|f| matches!(f.kind, FeatureKind::Extrude { .. })).unwrap().id;
+    doc.feature_mut(sketch).unwrap().component = part;
+    let f = doc.feature_mut(extrude).unwrap();
+    f.component = part;
+    let FeatureKind::Extrude { extent, .. } = &mut f.kind else { panic!("an extrude") };
+    extent.to = Some(crate::FacePick(Vec3::new(0.0, 0.0, 25.0)));
+    extent.to_ref =
+        Some(crate::ObjectRef(crate::construct::GeoRef::Plane { plane: PlaneRef::Construction { feature: plane.into(), placement: None } }));
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    // The part sits 10 mm up, so the plane at 25 mm is 15 mm above its sketch.
+    let body = &model.state().bodies[0];
+    assert!(rel(measure(&body.body).unwrap().volume, 1200.0 * 15.0) < 1e-9, "{}", measure(&body.body).unwrap().volume);
+}
+
 /// Freeze the persisted v6 face-role encoding independently of display-mesh fields and serde layout.
 #[test]
 fn reconstructed_mesh_roles_keep_the_versioned_binary_identity() {

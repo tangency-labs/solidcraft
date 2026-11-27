@@ -1018,3 +1018,33 @@ fn an_edit_that_sends_the_stored_to_point_keeps_the_plane() {
         assert_block(&mut s, "Post", (20.0 * 10.0 * top, 0.0, top));
     }
 }
+
+/// `timeline.edit` merges what it sets into the stored extrude: a new To point ends the extrude
+/// there, and an edit that clears the reference keeps the stored point, not the plane (#8527).
+#[test]
+fn an_edit_that_sets_another_to_point_or_clears_the_plane_ends_at_the_point() {
+    for (set, top) in [(json!({"extent.to_offset": "0 mm"}), 40.0), (json!({"extent.to": [0, 0, 30]}), 30.0), (json!({"extent.to_ref": null}), 25.0)]
+    {
+        let mut s = base_rectangle();
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+        let id = run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"plane": "Target"}, "body_name": "Post"}))["feature"].clone();
+        run(&mut s, "timeline.edit", json!({"feature": id, "set": set}));
+        run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+        assert_block(&mut s, "Post", (20.0 * 10.0 * top, 0.0, top));
+    }
+}
+
+/// The run between a slanted To plane and the start has no second side: two sides are refused,
+/// not dropped (#8527).
+#[test]
+fn two_sides_to_a_slanted_construction_plane_are_refused() {
+    let mut s = base_rectangle();
+    run(
+        &mut s,
+        "construct.plane.three_points",
+        json!({"a": {"point": [0, 0, 20]}, "b": {"point": [20, 0, 30]}, "c": {"point": [0, 10, 20]}, "name": "Slope"}),
+    );
+    let p = json!({"sketch": "Base", "to": {"plane": "Slope"}, "distance2": 5});
+    let e = s.execute("solid.extrude", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("two sides with a plane at a slant"), "{e}");
+}

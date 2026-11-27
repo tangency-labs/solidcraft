@@ -974,7 +974,11 @@ pub(crate) fn object_at(ctx: &Ctx, r: &crate::ObjectRef) -> Result<ObjectAt> {
         return Err(bad(format!("the plane `{name}` must come before the extrude in the timeline")));
     }
     match &r.0 {
-        g @ GeoRef::Plane { .. } => Ok(ObjectAt::Plane(plane(ctx, g)?)),
+        // A construction plane of another component, where that component puts it (#11734).
+        GeoRef::Plane { plane } => {
+            let plane = crate::eval::construction_planes_in_frame(ctx.doc, ctx.st, ctx.component, plane)?;
+            Ok(ObjectAt::Plane(ctx.doc.resolve_plane_in(ctx.vals, &plane, ctx.depth + 1, ctx.component, Some(ctx.st))?))
+        }
         g @ (GeoRef::ConstructPoint { .. } | GeoRef::Origin) => Ok(ObjectAt::Point(point(ctx, g)?)),
         _ => Err(bad("not supported yet: To / From Object on this reference; give a plane or a construction point")),
     }

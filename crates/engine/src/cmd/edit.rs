@@ -1930,7 +1930,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // A one-sided extrude made symmetric remembers the way it went, so what was picked on its
     // start cap is still found on the cap facing the same way.
     solidcraft_doc::keep_one_sided_direction(&s.model, &f, &mut nf);
-    keep_object_refs(&f, &mut nf);
+    keep_object_refs(&f, &mut nf, [sets_path(set, "extent.to_ref"), sets_path(set, "extent.from_ref")]);
     let copy_sources_of = |kind: &FeatureKind| match kind {
         FeatureKind::Pattern { bodies, components, occurrences, join, .. }
             if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() && (!*join || bodies.len() == 1) =>
@@ -3097,18 +3097,19 @@ fn input_keys(kind: &FeatureKind, edge_names: &[String]) -> Vec<(String, solidcr
     keys
 }
 
-/// An edit that sends the To or From point stored with a plane or construction point keeps
-/// that reference, so the extrude still follows it (#8527). The Extrude dialog reopens a
-/// reference as that point and sends it back unchanged; another point replaces the reference.
-fn keep_object_refs(old: &Feature, new: &mut Feature) {
+/// An extrude's To and From references (#8527) through an edit. The Extrude dialog reopens a
+/// reference as the point stored with it and sends that point back unchanged: the same point
+/// keeps the reference, so the extrude still follows it. Another point replaces it. An edit that
+/// gives a reference itself, or clears it, says what it is: `given` holds that for To and From.
+fn keep_object_refs(old: &Feature, new: &mut Feature, given: [bool; 2]) {
     let (FeatureKind::Extrude { extent: a, .. }, FeatureKind::Extrude { extent: b, .. }) = (&old.kind, &mut new.kind) else { return };
     let same =
         |x: Option<solidcraft_doc::FacePick>, y: Option<solidcraft_doc::FacePick>| matches!((x, y), (Some(x), Some(y)) if x.0.dist(y.0) < 1e-6);
-    if b.to_ref.is_none() && same(a.to, b.to) {
-        b.to_ref = a.to_ref.clone();
+    if !given[0] {
+        b.to_ref = if same(a.to, b.to) { a.to_ref.clone() } else { None };
     }
-    if b.from_ref.is_none() && same(a.from, b.from) {
-        b.from_ref = a.from_ref.clone();
+    if !given[1] {
+        b.from_ref = if same(a.from, b.from) { a.from_ref.clone() } else { None };
     }
 }
 
@@ -3503,7 +3504,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     keep_from_level_on_the_same_face(s, &old, &mut new);
     solidcraft_doc::keep_one_sided_direction(&s.model, &old, &mut new);
-    keep_object_refs(&old, &mut new);
+    let given = match &new.kind {
+        FeatureKind::Extrude { extent, .. } => [extent.to_ref.is_some(), extent.from_ref.is_some()],
+        _ => [false; 2],
+    };
+    keep_object_refs(&old, &mut new, given);
     // A boundary surface's loop of sketch curves and its curve network are one command's two
     // forms: an edit may turn one into the other.
     let boundary = |k: &FeatureKind| matches!(k, FeatureKind::SurfaceBoundary { .. } | FeatureKind::SurfaceNetwork { .. });
