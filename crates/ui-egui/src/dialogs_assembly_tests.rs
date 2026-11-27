@@ -2150,6 +2150,58 @@ fn component_picks_become_occurrences() {
     assert_eq!(c[0].0, "component.create");
 }
 
+/// Once the first instance of a component has a joint, a face picked on a further instance still
+/// joints that instance at the face picked, and the preview moves it (#5406, #5653).
+#[test]
+fn joint_on_a_further_instance_after_the_first_is_jointed() {
+    let mut app = two_boxes();
+    let run_dialog = |app: &mut SolveApp, picks: [Vec3; 2]| {
+        app.start("joint.create");
+        let mut d = app.dialog.take().unwrap();
+        for p in picks {
+            d.pick(&app.session, face_sel(&app.session, p).unwrap());
+        }
+        d
+    };
+    // B:1's bottom on A's top: B:1 sits on A, 10 to 20 high.
+    let d = run_dialog(&mut app, [Vec3::new(10.0, 10.0, 10.0), Vec3::new(40.0, 10.0, 0.0)]);
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    let first = occ(&app, "B");
+    let component = app.session.doc.find_component("B").unwrap();
+    let copy = app.run("occurrence.copy", json!({"component": component, "translate": [0, 40, 0]})).unwrap()["occurrence"].as_u64().unwrap();
+    assert_ne!(copy, first);
+    // Component 1 is the copy's bottom, component 2 A's +X side, as in the report.
+    let bottom = Vec3::new(10.0, 50.0, 10.0);
+    let pick = face_sel(&app.session, bottom).unwrap();
+    assert!(matches!(&pick, Sel::Face { body, .. } if body.contains("B:2")), "{pick:?}");
+    let d = run_dialog(&mut app, [bottom, Vec3::new(20.0, 10.0, 5.0)]);
+    let Kind::Assembly(k) = &d.kind else { panic!("{:?}", d.kind) };
+    assert_eq!(joint_problem(&app, k, &d.inputs), None);
+    let preview = preview_commands(&app, &d).unwrap();
+    let params = &preview[0].1;
+    let side_on_copy = |p: &Value| ["a", "b"].into_iter().find(|s| p[*s]["occurrence"] == copy);
+    assert!(side_on_copy(params).is_some(), "the copy is a side: {params}");
+    assert!(["a", "b"].iter().all(|s| params[*s]["occurrence"] != first), "B:1 is not a side: {params}");
+    for (id, p) in apply_commands(&app, &d).unwrap() {
+        app.run(&id, p).unwrap();
+    }
+    let joint = app.session.doc.assembly.joints.last().unwrap();
+    let side = if joint.a.occurrence == copy { &joint.a } else { &joint.b };
+    assert_eq!(side.occurrence, copy, "{joint:?}");
+    let solve = app.run("joint.solve", json!({})).unwrap();
+    assert_eq!(solve["conflicts"], json!([]), "{solve}");
+    assert_eq!(solve["errors"], json!([]), "{solve}");
+    // The copy moved: its bottom now lies on A's +X side, at x = 20.
+    let frames = app.session.doc.body_frames(&app.session.model.state());
+    let body = frames.iter().find(|f| f.2.last() == Some(&copy)).map(|f| f.0.clone()).unwrap();
+    let bb = app.run("inspect.measure", json!({})).unwrap();
+    let measured = bb["bodies"].as_array().unwrap().iter().find(|b| b["name"] == body.as_str()).unwrap();
+    let min_x = measured["bbox"]["min"][0].as_f64().unwrap();
+    assert!((min_x - 20.0).abs() < 1e-6, "{bb}");
+}
+
 /// A body of a further instance of a component belongs to that instance, not the first (#3857).
 #[test]
 fn body_of_a_further_instance_is_its_own_occurrence() {
