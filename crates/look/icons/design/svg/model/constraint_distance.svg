@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Distance constraint</title>
+  <path d="M8.62 35.38L32 48.88L32 55.62L8.62 42.12Z" fill="#b8c3cf"/>
+  <path d="M55.38 35.38L32 48.88L32 55.62L55.38 42.12Z" fill="#8e9faf"/>
+  <path d="M32 21.88L55.38 35.38L32 48.88L8.62 35.38Z" fill="#e2e8ef"/>
+  <path d="M32 21.88L55.38 35.38L55.38 42.12L32 55.62L8.62 42.12L8.62 35.38Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.62 35.38L32 48.88L55.38 35.38" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 48.88L32 55.62" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20.31 15.12L32 21.88L32 33.12L20.31 26.38Z" fill="#b8c3cf"/>
+  <path d="M43.69 15.12L32 21.88L32 33.12L43.69 26.38Z" fill="#8e9faf"/>
+  <path d="M32 8.38L43.69 15.12L32 21.88L20.31 15.12Z" fill="#e2e8ef"/>
+  <path d="M32 8.38L43.69 15.12L43.69 26.38L32 33.12L20.31 26.38L20.31 15.12Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M20.31 15.12L32 21.88L43.69 15.12" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 21.88L32 33.12" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.62 37.62L12.62 30.12" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.62 25.12L16.12 31.12L9.12 31.12Z" fill="#ffffff" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.62 37.62L12.62 30.12" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.62 25.12L16.12 31.12L9.12 31.12Z" fill="#236ead"/>
+  <path d="M12.62 37.62L12.62 45.12" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.62 50.12L9.12 44.12L16.12 44.12Z" fill="#ffffff" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.62 37.62L12.62 45.12" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.62 50.12L9.12 44.12L16.12 44.12Z" fill="#236ead"/>
+</svg>

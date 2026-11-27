@@ -146,7 +146,7 @@ impl Capturer {
     /// ([`crate::select`]).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn headless(policy: crate::select::Policy) -> Result<Self> {
-        let (adapter, device, queue) = crate::open_headless(policy)?;
+        let (adapter, device, queue) = open_headless(policy)?;
         // Errors are caught per picture (error scopes); anything else is logged, never a panic.
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
         let lost = watch_lost(&device);
@@ -156,7 +156,7 @@ impl Capturer {
     /// As [`Capturer::headless`], drawing with the depth format `depth` ([`Capturer::with_depth`]).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn headless_with_depth(policy: crate::select::Policy, depth: wgpu::TextureFormat) -> Result<Self> {
-        let (adapter, device, queue) = crate::open_headless(policy)?;
+        let (adapter, device, queue) = open_headless(policy)?;
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
         let lost = watch_lost(&device);
         Ok(Self::with_depth(&adapter, device, queue, depth)?.watching(lost))
@@ -166,7 +166,7 @@ impl Capturer {
     /// draws where 4× isn't available (some browsers and devices, or MSAA turned off).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn headless_single_sample(policy: crate::select::Policy) -> Result<Self> {
-        let (adapter, device, queue) = crate::open_headless(policy)?;
+        let (adapter, device, queue) = open_headless(policy)?;
         device.on_uncaptured_error(Arc::new(|e: wgpu::Error| log::error!("GPU: {e}")));
         let depth = crate::depth_format(&device, true);
         let lost = watch_lost(&device);
@@ -250,7 +250,7 @@ impl Capturer {
         // is built), so the previous picture's highlight would show in this one.
         frame.hl_key = state.key;
         frame.hl_slot = Arc::new(Mutex::new(Some(highlight.unwrap_or_default())));
-        let result = self.picture(state, &frame, scene.background.unwrap_or(BACKGROUND), [width, height]);
+        let result = self.picture(state, &frame, scene.background.unwrap_or(BACKGROUND), scene.background_middle, scene.transparent, [width, height]);
         // Each capture uploads its own scene. Release the picture's buffers after readback or
         // error so a long-lived capturer keeps its pipelines without holding the last mesh.
         if let Some(gpu) = &mut state.gpu {
@@ -259,9 +259,18 @@ impl Capturer {
         result
     }
 
-    /// `frame` drawn over the `background` gradient, read back as straight RGBA, and what it
-    /// drew (read while the caller holds `state`).
-    fn picture(&self, state: &mut State, frame: &Frame, (top, bottom): (Rgb, Rgb), [width, height]: [u32; 2]) -> Result<(Vec<u8>, DrawStats)> {
+    /// `frame` drawn over the `background` gradient (through `middle` halfway when given, #9230;
+    /// none when `transparent`: the parts library's cards), read back as straight RGBA, and what
+    /// it drew (read while the caller holds `state`).
+    fn picture(
+        &self,
+        state: &mut State,
+        frame: &Frame,
+        (top, bottom): (Rgb, Rgb),
+        middle: Option<Rgb>,
+        transparent: bool,
+        [width, height]: [u32; 2],
+    ) -> Result<(Vec<u8>, DrawStats)> {
         let Gpu { device, queue, renderer, background: background_pipeline } = state.gpu.as_mut().ok_or_else(closed)?;
         let (device, queue) = (&*device, &*queue);
         let scopes = error_scopes(device);
@@ -283,7 +292,7 @@ impl Capturer {
         let depth = texture("sc_capture_depth", self.depth, self.samples, wgpu::TextureUsages::RENDER_ATTACHMENT);
         let (resolved_view, depth_view) = (resolved.create_view(&Default::default()), depth.create_view(&Default::default()));
         let multisampled_view = multisampled.as_ref().map(|t| t.create_view(&Default::default()));
-        let background = match background_vertices(device, top, bottom) {
+        let (background, background_count) = match background_vertices(device, top, middle, bottom) {
             Ok(b) => b,
             Err(e) => {
                 let _ = caught(scopes);
@@ -331,10 +340,13 @@ impl Capturer {
                     multiview_mask: None,
                 })
                 .forget_lifetime();
-            // The background first, as the viewport paints it before the model.
-            pass.set_pipeline(background_pipeline);
-            pass.set_vertex_buffer(0, background.slice(..));
-            pass.draw(0..6, 0..1);
+            // The background first, as the viewport paints it before the model (none for a
+            // transparent picture: the pass cleared to transparent black).
+            if !transparent {
+                pass.set_pipeline(background_pipeline);
+                pass.set_vertex_buffer(0, background.slice(..));
+                pass.draw(0..background_count, 0..1);
+            }
             renderer.paint(frame, &mut pass, [0.0, 0.0, width as f32, height as f32]);
         }
         let row = width * 4;
@@ -405,16 +417,12 @@ pub fn shared(policy: crate::select::Policy) -> std::result::Result<&'static Cap
     SHARED.get_or_init(|| Capturer::headless(policy)).as_ref()
 }
 
-/// For a process about to exit on Linux with NVIDIA's own driver: close the device of [`shared`],
-/// if one was opened ([`Capturer::close`]). Without a display that driver's Vulkan runs on its EGL
-/// library, whose exit handler unloads `libnvidia-eglcore` while an open device's threads still
-/// run in it, and the process then ends with a segmentation fault after its work is done (#19431).
-/// Every other system and driver exits with the device open, as before.
+/// For a process about to exit: close the device of [`shared`], if one was opened
+/// ([`Capturer::close`]), so no driver's exit handler runs while the device's threads still do.
+/// One such handler ended a process with a segmentation fault after its work was done (#19431).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn close_shared_before_exit() {
-    if crate::select::nvidia_linux_driver()
-        && let Some(Ok(capturer)) = SHARED.get()
-    {
+    if let Some(Ok(capturer)) = SHARED.get() {
         capturer.close();
     }
 }
@@ -512,10 +520,13 @@ fn frame(scene: &Scene, cam: &Camera, [width, height]: [u32; 2], key: u64, acces
         eye: [eye[0], eye[1], eye[2], if cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
         ao_samples: crate::view::AO_SAMPLES,
+        occlusion: false,
         edge_px: crate::view::EDGE_PX,
         sky: [0.0; 4],
         ssaa: 1.0,
         hover_tint: [0.0; 3],
+        selection_all: false,
+        hover_body: None,
         selection_tint: [0.0; 3],
         hatch: scene.part_hatch.map_or_else(Default::default, |c| c.map(|Rgb(r, g, b)| [r, g, b].map(|x| f32::from(x) / 255.0))),
         moving: None,
@@ -598,6 +609,21 @@ pub fn scene_geometry(scene: &Scene) -> GpuScene {
     sc
 }
 
+/// A headless capturer's adapter and device ([`crate::open_headless`]). In this crate's own tests
+/// the capturers share a device apart from the other tests' one (`test_env::Sharers`): a capturer
+/// logs its device's uncaptured errors, where the other tests rely on wgpu's handler, which panics.
+#[cfg(not(target_arch = "wasm32"))]
+fn open_headless(policy: crate::select::Policy) -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
+    #[cfg(test)]
+    {
+        crate::test_env::shared_headless(crate::test_env::Sharers::Capturers, policy)
+    }
+    #[cfg(not(test))]
+    {
+        crate::open_headless(policy)
+    }
+}
+
 /// A flag `device`'s lost callback sets (a device of this crate's own: a device has one lost
 /// callback, and the app's window device has egui-wgpu's).
 #[cfg(not(target_arch = "wasm32"))]
@@ -644,15 +670,24 @@ fn fs(i: O) -> @location(0) vec4<f32> {
 /// Background vertex: NDC position (2 × f32) and sRGB colour (4 × u8).
 const BACKGROUND_VERTEX: u64 = 12;
 
-fn background_vertices(device: &wgpu::Device, top: Rgb, bottom: Rgb) -> Result<wgpu::Buffer> {
-    let mut bytes = Vec::with_capacity(6 * BACKGROUND_VERTEX as usize);
-    let corner = |x: f32, y: f32| (x, y, if y > 0.0 { top } else { bottom });
-    for (x, y, c) in [corner(-1.0, 1.0), corner(1.0, 1.0), corner(1.0, -1.0), corner(-1.0, 1.0), corner(1.0, -1.0), corner(-1.0, -1.0)] {
-        bytes.extend_from_slice(&x.to_le_bytes());
-        bytes.extend_from_slice(&y.to_le_bytes());
-        bytes.extend_from_slice(&[c.0, c.1, c.2, 255]);
+/// The background's vertices and how many there are: one band of two triangles from top to
+/// bottom, or with a colour halfway (#9230) two, top → middle and middle → bottom.
+fn background_vertices(device: &wgpu::Device, top: Rgb, middle: Option<Rgb>, bottom: Rgb) -> Result<(wgpu::Buffer, u32)> {
+    let bands = match middle {
+        Some(m) => vec![(1.0, top, 0.0, m), (0.0, m, -1.0, bottom)],
+        None => vec![(1.0, top, -1.0, bottom)],
+    };
+    let count = 6 * bands.len() as u32;
+    let mut bytes = Vec::with_capacity(count as usize * BACKGROUND_VERTEX as usize);
+    for (y0, c0, y1, c1) in bands {
+        let quad = [(-1.0, y0, c0), (1.0, y0, c0), (1.0, y1, c1), (-1.0, y0, c0), (1.0, y1, c1), (-1.0, y1, c1)];
+        for (x, y, c) in quad {
+            bytes.extend_from_slice(&f32::to_le_bytes(x));
+            bytes.extend_from_slice(&f32::to_le_bytes(y));
+            bytes.extend_from_slice(&[c.0, c.1, c.2, 255]);
+        }
     }
-    crate::buffer_init(device, "sc_capture_background", &bytes, wgpu::BufferUsages::VERTEX)
+    Ok((crate::buffer_init(device, "sc_capture_background", &bytes, wgpu::BufferUsages::VERTEX)?, count))
 }
 
 fn background_pipeline(device: &wgpu::Device, samples: u32, depth: wgpu::TextureFormat) -> wgpu::RenderPipeline {
@@ -798,8 +833,8 @@ mod tests {
     }
 
     /// A closed capturer has dropped its device and everything it drew with, and a picture asked
-    /// of it afterwards fails and says so. A host on NVIDIA's Linux driver closes the shared
-    /// capturer before it exits ([`close_shared_before_exit`]).
+    /// of it afterwards fails and says so. A host closes the shared capturer before it exits
+    /// ([`close_shared_before_exit`]).
     #[test]
     fn a_closed_capturer_drops_its_device_and_draws_no_more_pictures() {
         let Ok(capturer) = Capturer::headless(crate::test_env::policy()) else {
@@ -842,18 +877,18 @@ mod tests {
         let Ok(mut state) = capturer.state.lock() else { panic!("capturer state") };
         // Drawn where it was moved to.
         let moved = frame(&at(shift), &cam, size, 1, None);
-        let expected = capturer.picture(&mut state, &moved, BACKGROUND, size).unwrap().0;
+        let expected = capturer.picture(&mut state, &moved, BACKGROUND, None, false, size).unwrap().0;
         assert!(expected.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count() > 50, "the body shows");
         // Drawn where it was, moved by the layer; the model scene empty.
         let mut layered = frame(&Scene::default(), &cam, size, 2, None);
         let transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [shift.x as f32, shift.y as f32, shift.z as f32, 1.0]];
         layered.moving = Some(crate::view::MovingLayer { key: 3, slot: slot(scene_geometry(&at(Vec3::ZERO))), transform });
-        let drawn = capturer.picture(&mut state, &layered, BACKGROUND, size).unwrap().0;
+        let drawn = capturer.picture(&mut state, &layered, BACKGROUND, None, false, size).unwrap().0;
         let differ = expected.chunks(4).zip(drawn.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
         assert!(differ <= 4, "{differ} pixels differ from the body drawn where it was moved to");
         // The drag over: the model scene draws it, and nothing is drawn twice or left behind.
         let after = frame(&at(shift), &cam, size, 4, None);
-        let back = capturer.picture(&mut state, &after, BACKGROUND, size).unwrap().0;
+        let back = capturer.picture(&mut state, &after, BACKGROUND, None, false, size).unwrap().0;
         assert_eq!(back, expected);
     }
 
@@ -877,7 +912,7 @@ mod tests {
         let mut picture = |model: u64, moving: Option<(u64, Option<GpuScene>)>| {
             let mut f = frame(&Scene::default(), &cam, size, model, None);
             f.moving = moving.map(|(key, scene)| crate::view::MovingLayer { key, slot: Arc::new(Mutex::new(scene)), transform });
-            let drawn = capturer.picture(&mut state, &f, BACKGROUND, size).unwrap().0;
+            let drawn = capturer.picture(&mut state, &f, BACKGROUND, None, false, size).unwrap().0;
             let red = drawn.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count();
             (drawn, red)
         };
@@ -928,16 +963,44 @@ mod tests {
             // The model scene with the placement where it was moved to.
             let mut moved = frame(&Scene::default(), &cam, size, key + 1, None);
             moved.slot = placed_at(shift);
-            let expected = capturer.picture(&mut state, &moved, BACKGROUND, size).unwrap().0;
+            let expected = capturer.picture(&mut state, &moved, BACKGROUND, None, false, size).unwrap().0;
             assert!(expected.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count() > 50, "the part shows");
             // Placed where it was, in the layer moved by the drag; the model scene empty.
             let mut layered = frame(&Scene::default(), &cam, size, key + 2, None);
             let transform = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [shift[0], shift[1], shift[2], 1.0]];
             layered.moving = Some(crate::view::MovingLayer { key: key + 3, slot: placed_at([0.0; 3]), transform });
-            let drawn = capturer.picture(&mut state, &layered, BACKGROUND, size).unwrap().0;
+            let drawn = capturer.picture(&mut state, &layered, BACKGROUND, None, false, size).unwrap().0;
             let differ = expected.chunks(4).zip(drawn.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
             assert!(differ <= 4, "flat {}: {differ} pixels differ from the part placed where it was moved to", k == 0);
         }
+    }
+
+    /// A background with a middle colour (#9230) is two bands: the top colour at the top, the
+    /// middle one halfway and the bottom one at the bottom, each band blending only its own two
+    /// (on this machine's GPU, skipped without one).
+    #[test]
+    fn a_background_with_a_middle_colour_is_two_bands_through_it() {
+        let Ok(capturer) = Capturer::headless_single_sample(crate::test_env::policy()) else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let size = [64, 64];
+        let cam = Camera::default();
+        let Ok(mut state) = capturer.state.lock() else { panic!("capturer state") };
+        let (red, green, blue) = (Rgb(255, 0, 0), Rgb(0, 255, 0), Rgb(0, 0, 255));
+        let empty = frame(&Scene::default(), &cam, size, 1, None);
+        let px = capturer.picture(&mut state, &empty, (red, blue), Some(green), false, size).unwrap().0;
+        let row = |y: usize| -> [u8; 4] { px[(y * 64 + 32) * 4..][..4].try_into().unwrap() };
+        let (top, upper, mid, lower, bottom) = (row(0), row(16), row(32), row(48), row(63));
+        assert!(top[0] > 230 && top[1] < 30 && top[2] < 10, "top {top:?}");
+        assert!(upper[0] > 40 && upper[1] > 40 && upper[2] < 10, "top band blends red and green only: {upper:?}");
+        assert!(mid[1] > 200 && mid[0] < 60 && mid[2] < 60, "green halfway: {mid:?}");
+        assert!(lower[0] < 10 && lower[1] > 40 && lower[2] > 40, "bottom band blends green and blue only: {lower:?}");
+        assert!(bottom[2] > 230 && bottom[1] < 30 && bottom[0] < 10, "bottom {bottom:?}");
+        // Without it, halfway is red and blue, no green.
+        let plain = capturer.picture(&mut state, &empty, (red, blue), None, false, size).unwrap().0;
+        let half = &plain[(32 * 64 + 32) * 4..][..4];
+        assert!(half[1] < 10 && half[0] > 40 && half[2] > 40, "no middle colour: {half:?}");
     }
 
     /// A model scene of one block: for each of `bodies` (where it is built, its colour, its
@@ -1005,7 +1068,7 @@ mod tests {
             let mut f = frame(&Scene::default(), &cam, size, key, None);
             f.slot = slot;
             f.motions = motions;
-            capturer.picture(&mut state, &f, BACKGROUND, size).unwrap().0
+            capturer.picture(&mut state, &f, BACKGROUND, None, false, size).unwrap().0
         };
         let none = crate::view::Motions::default;
         // Both built where they are moved to, in no slot.
@@ -1069,13 +1132,13 @@ mod tests {
             let key = 10 * k as u64;
             let mut there = frame(&Scene::default(), &cam, size, key + 1, None);
             there.slot = placed([[1.0, 0.0, 0.0, 0.6], [0.0, c, -s, 0.0], [0.0, s, c, 0.3]], 0);
-            let expected = capturer.picture(&mut state, &there, BACKGROUND, size).unwrap().0;
+            let expected = capturer.picture(&mut state, &there, BACKGROUND, None, false, size).unwrap().0;
             assert!(expected.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count() > 50, "the part shows");
             // Placed far outside the view, and moved into it by its slot's motion.
             let mut moved = frame(&Scene::default(), &cam, size, key + 2, None);
             moved.slot = placed([[1.0, 0.0, 0.0, -40.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]], 7);
             moved.motions = crate::view::Motions::new([(7, [[1.0, 0.0, 0.0, 40.6], [0.0, c, -s, 0.0], [0.0, s, c, 0.3]])]);
-            let drawn = capturer.picture(&mut state, &moved, BACKGROUND, size).unwrap().0;
+            let drawn = capturer.picture(&mut state, &moved, BACKGROUND, None, false, size).unwrap().0;
             let differ = expected.chunks(4).zip(drawn.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
             assert!(differ <= 4, "flat {}: {differ} pixels differ from the part placed where its motion moves it", k == 0);
         }
@@ -1122,14 +1185,14 @@ mod tests {
         let mut there = frame(&Scene::default(), &cam, size, 1, None);
         there.slot = scene(&[([[1.0, 0.0, 0.0, 0.6], [0.0, c, -s, 0.0], [0.0, s, c, 0.3]], crate::view::UNMOVED_SLOT)]);
         there.motions = crate::view::Motions::new([(9, crate::view::UNMOVED)]);
-        let expected = capturer.picture(&mut state, &there, BACKGROUND, size).unwrap().0;
+        let expected = capturer.picture(&mut state, &there, BACKGROUND, None, false, size).unwrap().0;
         assert!(expected.chunks(4).filter(|p| p[0] > p[1].saturating_add(60)).count() > 50, "the part shows");
         // Three copies far outside the view: the first moved into it by its own motion 7, the
         // second by the entry's motion 9 and the third by its own motion 8, both left outside.
         let mut moved = frame(&Scene::default(), &cam, size, 2, None);
         moved.slot = scene(&[(at(-40.0), 7), (at(40.0), crate::view::UNMOVED_SLOT), (at(-40.0), 8)]);
         moved.motions = crate::view::Motions::new([(7, into_view), (8, crate::view::UNMOVED), (9, crate::view::UNMOVED)]);
-        let drawn = capturer.picture(&mut state, &moved, BACKGROUND, size).unwrap().0;
+        let drawn = capturer.picture(&mut state, &moved, BACKGROUND, None, false, size).unwrap().0;
         let differ = expected.chunks(4).zip(drawn.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 8)).count();
         assert!(differ <= 4, "{differ} pixels differ from the one copy placed where its own motion moves it");
     }
