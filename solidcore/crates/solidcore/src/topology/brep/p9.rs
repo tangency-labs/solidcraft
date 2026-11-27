@@ -2075,6 +2075,13 @@ fn farthest_end_gap(k: &Kernel, b: &Brep, v: VertexId) -> Result<f64> {
         let Some(curve) = record.curve.as_ref() else {
             continue;
         };
+        // A tangent field evaluates to a direction, not a position on the edge.
+        if matches!(
+            curve.kind(),
+            crate::curve::curve::CurveKind::TangentField(_)
+        ) {
+            continue;
+        }
         let interval = edge::interval(b, e)?;
         for (at_v, t) in [(start, interval.min()), (end, interval.max())] {
             if at_v == Some(v) {

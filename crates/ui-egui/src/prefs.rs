@@ -36,6 +36,7 @@ mod mouse3d;
 mod navbar;
 mod navigation;
 mod panel_layout;
+mod platform;
 mod privacy;
 mod security;
 mod sketch;
@@ -1507,6 +1508,11 @@ impl FreeOrbitKey {
         Self::parse(&app.preferences.free_orbit_key).unwrap_or(FreeOrbitKey::Off)
     }
 
+    /// The Roll key (`roll_key`, #22691), from the same keys (no key for an unknown one).
+    pub fn roll_of(app: &SolveApp) -> FreeOrbitKey {
+        Self::parse(&app.preferences.roll_key).unwrap_or(FreeOrbitKey::Off)
+    }
+
     pub fn parse(id: &str) -> Option<FreeOrbitKey> {
         Self::ALL.iter().find(|(_, i)| *i == id).map(|(k, _)| *k)
     }
@@ -1938,7 +1944,8 @@ pub(crate) fn held_panel_layout(app: &SolveApp) -> Option<Option<serde_json::Val
 /// ones, with Import…, Export… (the theme on now as a complete file, to start a new one from)
 /// and Remove (an imported theme). Like the other preferences, a choice applies at once.
 fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
-    theme_picker::row(app, ui);
+    let locked = app.policy.locks("theme");
+    crate::policy::row(ui, locked, |ui| theme_picker::row(app, ui));
 }
 
 fn theme_action(app: &mut SolveApp, ui: &mut egui::Ui, action: Option<&str>, action_theme: Option<String>) {
@@ -3358,6 +3365,17 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
         Some(serde_json::Value::Bool(true)) => true,
         Some(_) => return Err("`forget_stand_up` must be true".into()),
     };
+    // Importing or following a theme turns it on, which the organization's policy has set.
+    // The saved path written back unchanged is not a change: it starts nothing and is kept.
+    let theme_locked = app.policy.locks("theme");
+    let saved_follow = rest.get("theme_follow").and_then(serde_json::Value::as_str) == Some(app.preferences.theme_follow.as_str());
+    let follows = rest.get("theme_follow").and_then(serde_json::Value::as_str).is_some_and(|path| !path.trim().is_empty()) && !saved_follow;
+    if theme_locked && (rest.contains_key("theme_import") || follows) {
+        return Err("`theme` is set by your organization's policy and cannot be changed here".into());
+    }
+    if theme_locked && saved_follow && !app.policy.locks("theme_follow") {
+        rest.remove("theme_follow");
+    }
     let mut staged = app.preferences.clone();
     let mut follow = app.prefs_window.follow.clone();
     let imported = rest
@@ -3405,7 +3423,8 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
             follow.launch = None;
             let _ = follow.poll(&staged.theme_follow, f64::NEG_INFINITY, true);
         }
-        None if rest.contains_key("theme") && !follow_locked => {
+        // Picking a theme stops following one; the organization's theme, which no pick changes, does not.
+        None if rest.contains_key("theme") && !follow_locked && !theme_locked => {
             staged.theme_follow.clear();
             follow.launch = None;
             let _ = follow.poll("", f64::NEG_INFINITY, true);
@@ -3703,6 +3722,10 @@ pub fn import_theme_bytes(app: &mut SolveApp, bytes: Vec<u8>) {
 }
 
 pub fn import_theme(app: &mut SolveApp, v: &serde_json::Value) -> Result<String, String> {
+    // Importing turns the theme on, which the organization's policy has set.
+    if app.policy.locks("theme") {
+        return Err(solidcraft_ui_text::tr("policy.set_by_organization").to_string());
+    }
     let theme = match v {
         serde_json::Value::String(text) => crate::theme_files::parse(text)?,
         other => crate::theme_files::from_value(other)?,
@@ -3738,7 +3761,9 @@ fn current_theme_file(app: &SolveApp) -> serde_json::Value {
 }
 
 fn active_theme_file(app: &SolveApp) -> Option<&crate::theme_files::ThemeFile> {
-    followed_theme(&app.preferences, &app.prefs_window.follow).or_else(|| {
+    // A theme the organization's policy sets wins over a followed file.
+    let followed = (!app.policy.locks("theme")).then(|| followed_theme(&app.preferences, &app.prefs_window.follow)).flatten();
+    followed.or_else(|| {
         crate::theme_files::find(
             theme_picker::active_id(&app.preferences, app.prefs_window.system_theme_dark.unwrap_or(app.ui.dark)),
             &app.preferences.custom_themes,
@@ -4445,6 +4470,9 @@ fn prepare_preferences(
         return Err("`dimension_colour` must be null or three numbers 0…255".into());
     }
     let mut new: Prefs = serde_json::from_value(cur).map_err(|e| e.to_string())?;
+    if !solidcraft_engine::doc::weld::SYMBOL_STANDARDS.contains(&new.weld_symbol_standard.as_str()) {
+        return Err("unknown weld_symbol_standard".into());
+    }
     new.retain_legacy_panel_fields(base);
     migrate_gruvbox(&mut new);
     if let Some(update) = p.get("theme_options") {
@@ -4632,6 +4660,12 @@ fn prepare_preferences(
     }
     if FreeOrbitKey::parse(&new.free_orbit_key).is_none() {
         return Err("`free_orbit_key` must be none, alt or ctrl".into());
+    }
+    // The same key as `free_orbit_key` is allowed here, so a profile that sets the two one at a
+    // time never trips over the other's current value; the free-orbit key then wins and the
+    // Roll key does nothing (`decide_orbit_roll`), and Preferences greys the clash out.
+    if FreeOrbitKey::parse(&new.roll_key).is_none() {
+        return Err("`roll_key` must be none, alt or ctrl".into());
     }
     if MiddleDoubleClick::parse(&new.middle_double_click).is_none() {
         return Err("`middle_double_click` must be home, fit or off".into());
@@ -12242,6 +12276,35 @@ mod tests {
             h.call("ui.prefs", json!({"button":"cancel"}));
             assert_eq!(h.app.preferences.orbit_around, OrbitAround::Cursor);
         }
+    }
+
+    /// #22848: the twist and the cursor wrap are drawn only where the platform delivers them
+    /// (`platform::available`), and a hidden option keeps its saved value.
+    #[test]
+    fn navigation_shows_the_twist_and_the_cursor_wrap_only_where_they_work() {
+        use platform::{Facts, Needs, available};
+        let rows = [("prefs:trackpad_twist_turns", Needs::TrackpadTwist), ("prefs:orbit_cursor_wrap", Needs::CursorWarp)];
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.trackpad_twist_turns = true;
+        h.call("ui.prefs", json!({"open":"Navigation"}));
+        h.frames(2);
+        for (handle, needs) in rows {
+            assert_eq!(crate::scenario::handle_at(handle).is_some(), available(needs, Facts::of(&h.app)), "{handle}");
+        }
+        if cfg!(target_os = "windows") {
+            assert!(crate::scenario::handle_at("prefs:trackpad_twist_turns").is_none(), "no twist reaches the app on Windows");
+            assert!(crate::scenario::handle_at("prefs:orbit_cursor_wrap").is_some());
+        }
+        // On Linux the window system this run uses decides.
+        for window_system in ["wayland", "x11"] {
+            h.app.services.window_system = Some(window_system);
+            h.frames(2);
+            for (handle, needs) in rows {
+                assert_eq!(crate::scenario::handle_at(handle).is_some(), available(needs, Facts::of(&h.app)), "{handle} on {window_system}");
+            }
+        }
+        h.call("ui.prefs", json!({"button":"apply"}));
+        assert!(h.app.preferences.trackpad_twist_turns, "a hidden option keeps its value");
     }
 
     #[test]

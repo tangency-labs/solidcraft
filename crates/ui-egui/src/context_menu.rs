@@ -273,6 +273,9 @@ pub struct MenuState {
     /// The construction axis under the cursor when the viewport menu opened. A right-click leaves
     /// it unselected, as it does a plane; the menu offers Find in Browser for it (#15355).
     pub axis: Option<String>,
+    /// The model line under the cursor when the sheet's menu opened: its view and the body that
+    /// drew it, which Hide in This View leaves out of that view (#22107).
+    pub drawing_line: Option<(u64, solidcraft_engine::drawing_view::Shown)>,
     /// Where the viewport menu opened and the keys held at that click (Select Other adds with
     /// them).
     opened: Option<(Pos2, crate::tool_modifiers::Held)>,
@@ -1027,6 +1030,13 @@ fn drawing_items(app: &SolveApp) -> Vec<Item> {
                 tool(app, "drawing.view.projected.planned", "Projected View", drawing.can_project_from(*one).is_ok())
                     .with(json!({"parent": encode(*one)})),
             );
+            // A right-click on one of the view's model lines leaves that line's body out of it.
+            if let Some((view, shown)) = app.menu.drawing_line.as_ref().filter(|(view, _)| view == one) {
+                v.push(
+                    act("ui.drawingHideBody", "Hide in This View", "eye")
+                        .with(json!({"view": encode(*view), "path": shown.path, "body": shown.body})),
+                );
+            }
         } else if drawing.dimension(*one).is_some() {
             v.push(act("ui.drawingEdit", "Edit Text", "edit").with(object));
         } else if drawing.notes.by_id(*one).is_some() {
@@ -1627,7 +1637,8 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             }
         }
         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => {
-            item.params = Some(json!({"bodies": bodies}));
+            item.params =
+                Some(if item.id == "ui.export" { json!({"bodies": bodies, "component": placement.component}) } else { json!({"bodies": bodies}) });
             item.enabled = has_bodies && (item.id != "ui.sendToSlicer" || crate::dialogs_save_mesh::available(app));
         }
         // A flyout's row is on while any of its entries is, as `group` made it; the entries
@@ -1798,7 +1809,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         "Export",
         "export",
         vec![
-            act("ui.export", "Export…", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()),
+            act("ui.export", "Export…", "export").with(json!({ "bodies": names, "component": id })).on(!bodies.is_empty()),
             act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()),
             act("ui.sendToSlicer", "Send to Slicer", "export")
                 .with(json!({ "bodies": names }))
@@ -2405,6 +2416,15 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::drawing_workspace::edit(app, object, at);
             }
         }
+        "ui.drawingHideBody" => {
+            if let Some(view) = p.get("view").and_then(Value::as_str).and_then(solidcraft_engine::doc::ids::decode)
+                && let Ok(body) =
+                    serde_json::from_value::<solidcraft_engine::doc::drawing_view::HiddenBody>(json!({"path": p["path"], "body": p["body"]}))
+                && let Err(error) = crate::drawing_workspace::hide_body_in_view(app, view, body)
+            {
+                app.set_status(error, true);
+            }
+        }
         "drawing.view.projected.planned" if item.params.is_some() => {
             if let Some(parent) = p.get("parent").and_then(Value::as_str).and_then(solidcraft_engine::doc::ids::decode) {
                 crate::drawing_workspace::start_projected(app, parent);
@@ -2553,7 +2573,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.export" => {
             let body = bodies.first().map(String::as_str);
             let default_name = crate::export_name::default_for_bodies(app, &bodies);
-            let name = crate::export_name::offered(app, body, &default_name);
+            let name = crate::export_name::offered_for_component(app, body, id_of(&p, "component"), &default_name);
             // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
             let formats: Vec<&str> = ["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm"]
                 .into_iter()
@@ -3363,7 +3383,15 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     }
     if crate::drawing_workspace::active(app) {
         let under = crate::drawing_sheet_page::hovered(app);
-        return open_on_sheet(app, at, held, under);
+        // Over a view on the sheet, the model line under the cursor (Hide in This View, #22107).
+        let over_view = match &under {
+            Some(Sel::Drawing { object, .. }) => app.session.drawing("drawing.inspect").is_ok_and(|drawing| drawing.view(*object).is_some()),
+            _ => false,
+        };
+        let line = if over_view { crate::drawing_sheet_page::line_under(app, at) } else { None };
+        open_on_sheet(app, at, held, under);
+        app.menu.drawing_line = line;
+        return;
     }
     if crate::viewport::view_gizmo_at(app, at) {
         return open_for(app, at, Target::ViewGizmo);
@@ -3430,6 +3458,7 @@ pub(crate) fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modi
     app.menu.section_plane = None;
     app.menu.face = None;
     app.menu.plane = None;
+    app.menu.drawing_line = None;
     crate::select_other::close(app);
     if let Some(sel) = under {
         let before = app.session.selection.clone();

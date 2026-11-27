@@ -829,3 +829,49 @@ fn a_leaning_boss_beside_one_chain_is_not_reached_by_another_chain_s_round() {
         frustum(2.0, 1.0, 1.0),
     );
 }
+
+/// A hole of radius 5 drilled across (along y, clear of the seam) a 20-radius, 60-tall cylinder at mid-height, one of its
+/// two rims rounded 2. The other rim is an inner loop of the outer face the round rolls on,
+/// so keep features takes it for a cut; its wall is the hole, which the round rolls on too:
+/// tangent to it along the rail, crossing it nowhere. Keep features computes no crease
+/// there (it was a tangent surface intersection whose only result was the rail, most of the
+/// fillet's work), and the body is as before: valid, 5 faces, its volume unchanged.
+#[test]
+fn a_cut_whose_wall_the_round_rolls_on_gets_no_crease() {
+    use solidcore::math::Vec3;
+    use solidcore::topology::proto_topology::p1::api_transform::{api_rotate, TransformObject};
+    let mut k = fork_kernel();
+    let body = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 60.0).unwrap();
+    let mut drill = create_cylinder(&mut k, Point3::new(0.0, 0.0, 5.0), 5.0, 50.0).unwrap();
+    let mid = Point3::new(0.0, 0.0, 30.0);
+    api_rotate(
+        &mut k,
+        Some(TransformObject::Brep(&mut drill)),
+        mid,
+        Vec3::new(1.0, 0.0, 0.0),
+        90.0,
+    )
+    .unwrap();
+    let mut b = boolean_difference(&mut k, body, drill).unwrap();
+    // the near rim, 45 degrees round from the drill's seam
+    let c = 5.0 * 0.5f64.sqrt();
+    let e = pick(&k, &b, Point3::new(c, (400.0 - c * c).sqrt(), 30.0 + c));
+    k.work_counters.reset();
+    fillet_edges(&mut k, &mut b, &[e], 2.0, 1, 1, 1.0).unwrap();
+    let creases = k.work_counters.keep_feature_creases();
+    assert!(solidcore::topology::brep::p2::is_manifold_solid(&b).unwrap());
+    let lines = check_brep(&mut k, &mut b, CheckLevel::Level2)
+        .unwrap()
+        .lines();
+    assert!(lines.is_empty(), "{lines:?}");
+    let v = volume_of(&k, &mut b);
+    // SolidCraft's measured volume of the same part before the change, at its accuracy
+    let want = 72235.52478404697;
+    println!(
+        "volume {v:.17}; {} faces; {creases} creases",
+        b.face_list().len()
+    );
+    assert!((v - want).abs() <= 1e-6 * want, "volume {v}, want {want}");
+    assert_eq!(b.face_list().len(), 5);
+    assert_eq!(creases, 0);
+}

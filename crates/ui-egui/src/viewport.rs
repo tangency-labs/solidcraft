@@ -514,6 +514,9 @@ pub struct ViewportState {
     /// turns in the other orbit style than `free_orbit` says until it ends (#20917). None between
     /// drags.
     pub(crate) orbit_flip: Option<bool>,
+    /// Set when a mouse orbit drag starts: whether the `roll_key` was held, so the drag rolls the
+    /// view about the line of sight until it ends (#22691). None between drags.
+    pub(crate) orbit_roll: Option<bool>,
     pub build_ms: f64,
     /// Adaptive supersampling (#1288) and ambient occlusion while moving (#7165): the view drawn
     /// last (its view-projection and pixels) and since when it has held still (app time, s).
@@ -5174,10 +5177,46 @@ struct PickOptions<'a> {
     include_midpoints: bool,
     through: bool,
     feedback: Option<&'a egui::Context>,
+    #[cfg(test)]
+    linear_bodies: bool,
+}
+
+impl PickOptions<'_> {
+    fn use_body_tree(&self) -> bool {
+        #[cfg(test)]
+        {
+            !self.linear_bodies
+        }
+        #[cfg(not(test))]
+        {
+            true
+        }
+    }
+}
+
+enum BodyIndices {
+    All(std::ops::Range<usize>),
+    Some(std::vec::IntoIter<usize>),
+}
+
+impl Iterator for BodyIndices {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<usize> {
+        match self {
+            BodyIndices::All(range) => range.next(),
+            BodyIndices::Some(iter) => iter.next(),
+        }
+    }
 }
 
 fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -> Option<Vec<Hit>> {
-    let PickOptions { other_sketch_points, all, include_midpoints, through, feedback } = options;
+    let use_tree = options.use_body_tree();
+    let other_sketch_points = options.other_sketch_points;
+    let all = options.all;
+    let include_midpoints = options.include_midpoints;
+    let through = options.through;
+    let feedback = options.feedback;
     // Select Other and tool picks share the same visible-image boundary as ordinary picks.
     if crate::render_workspace::active(app) && !app.preferences.render_legacy_image_defaults && !proj.rect.contains(pos) {
         return Some(Vec::new());
@@ -5448,9 +5487,16 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     // Nearest face along the ray (hides what is behind it); with `all`, every body's nearest.
     let mut bestf: Option<(f64, Hit)> = None;
     let mut faces = Near::new(all);
-    // Bounds retain the state's body order. Looking each one up by name made both passes
-    // quadratic for assemblies with many small parts.
-    for (i, b) in st.bodies.iter().enumerate() {
+    // Bounds retain the state's body order. When no chained Move transform shifts body boxes,
+    // query the cached `BodyTree` BVH (which yields matching indices in strictly ascending order,
+    // preserving tie-breaking identically to a linear scan).
+    let tree = (use_tree && chained.is_none() && bounds.len() == st.bodies.len()).then(|| body_tree(app, &bounds));
+    let face_bodies = match &tree {
+        Some(t) => BodyIndices::Some(t.candidates(&bounds, |bb| ray_box(o, d, bb, bb.diagonal() * 1e-6 + 1e-9).is_some()).into_iter()),
+        None => BodyIndices::All(0..st.bodies.len()),
+    };
+    for i in face_bodies {
+        let Some(b) = st.bodies.get(i) else { continue };
         // A ghosted frame member's faces don't stop a click: it goes through to what is behind.
         // Nor do the faces of what an Isolate hid shown as wireframe: only its edges are drawn.
         if (!through && !crate::viewport::body_shown(app, &b.name)) || frame_ghosted(app, b) || wire_ghost(app, b) {
@@ -5526,7 +5572,14 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     let edge_reach = if app.dialog.as_ref().is_some_and(crate::dialogs_assembly::takes_snaps) { JOINT_EDGE_REACH } else { 6.0 };
     let mut bestv = Near::new(all);
     let mut beste = Near::new(all);
-    for (i, b) in st.bodies.iter().enumerate() {
+    // Conservative 8.01 px margin on the BVH screen-box query avoids f32 projection rounding
+    // misses on ancestor boxes; the exact 8.0 px check still runs per body below.
+    let edge_bodies = match &tree {
+        Some(t) => BodyIndices::Some(t.candidates(&bounds, |bb| screen_box(proj, bb, 8.01).is_none_or(|r| r.contains(pos))).into_iter()),
+        None => BodyIndices::All(0..st.bodies.len()),
+    };
+    for i in edge_bodies {
+        let Some(b) = st.bodies.get(i) else { continue };
         if !through && !crate::viewport::body_shown(app, &b.name) {
             continue;
         }
@@ -8651,6 +8704,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::tool_modifiers::set_manipulator_free(crate::prefs::manipulator_free_held(app, mods));
     let manipulator_dragging = crate::tool_modifiers::manipulator_dragging();
     crate::tool_modifiers::set_manipulator_dragging(false);
+    crate::dialog_drag_undo::track(app, ui.ctx(), primary_pressed, primary_down, manipulator_dragging);
     {
         let platform = crate::tool_modifiers::Platform::of(ui.ctx());
         let held = crate::tool_modifiers::Held::new(mods, platform);
@@ -9355,7 +9409,9 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         let chord = ui.input(|i| i.pointer.middle_down()) && crate::prefs::nav_chord(app, crate::prefs::NavButton::Right).is_some();
         if resp.secondary_clicked() && !crate::mouse_gesture::took_press(app) && !chord {
             if app.tool.is_some() {
-                crate::tools::finish(app);
+                if !crate::sketch_tools::keep_on_right_click(app) {
+                    crate::tools::finish(app);
+                }
             } else if app.dialog.is_none() {
                 if crate::sketch_tools::detach_simulated_at(app, p) {
                     // Right-clicking a simulated break-off glyph detaches the curve endpoint immediately.
@@ -12639,6 +12695,150 @@ mod tests {
             }
             assert!(near.ends_with(&[boxes.len() - 2, boxes.len() - 1]), "boxes the hierarchy leaves out are always candidates");
         }
+    }
+
+    /// The screen-space candidate bodies returned by `BodyTree` include every body whose screen
+    /// box (or behind-the-eye fallback) can contain the cursor, in strictly ascending order, for
+    /// both perspective and orthographic projections.
+    #[test]
+    fn screen_box_candidate_bodies_include_every_matching_box() {
+        let mut seed = 98765u64;
+        let mut rnd = move || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 11) as f64 / (1u64 << 53) as f64) * 200.0 - 100.0
+        };
+        let mut boxes: Vec<(String, solidcraft_engine::geom::Aabb3)> = (0..300)
+            .map(|i| {
+                let lo = Vec3::new(rnd(), rnd(), rnd());
+                let size = Vec3::new(rnd().abs() * 0.15 + 0.5, rnd().abs() * 0.15 + 0.5, rnd().abs() * 0.15 + 0.5);
+                (format!("B{i}"), solidcraft_engine::geom::Aabb3 { min: lo, max: lo + size })
+            })
+            .collect();
+        boxes.push(("Empty".into(), solidcraft_engine::geom::Aabb3::EMPTY));
+        boxes.push(("Odd".into(), solidcraft_engine::geom::Aabb3 { min: Vec3::new(f64::NAN, 0.0, 0.0), max: Vec3::new(1.0, 1.0, 1.0) }));
+        let tree = BodyTree::new(&boxes);
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800., 600.));
+        for perspective in [true, false] {
+            let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+            app.ui.perspective = perspective;
+            if perspective {
+                app.preferences.perspective_fov = 45_f64.to_radians();
+            }
+            app.cam.target = Vec3::ZERO;
+            app.cam.distance = 60.0;
+            app.cam.yaw = 0.7;
+            app.cam.pitch = 0.4;
+            let proj = projection(&app, rect);
+            if perspective {
+                assert!(proj.cam.fov > 0.0, "expected perspective projection");
+            } else {
+                assert_eq!(proj.cam.fov, 0.0, "expected orthographic projection");
+            }
+            for gx in 0..5 {
+                for gy in 0..4 {
+                    let pos = pos2(80.0 + gx as f32 * 160.0, 60.0 + gy as f32 * 150.0);
+                    let near = tree.candidates(&boxes, |bb| screen_box(&proj, bb, 8.01).is_none_or(|r| r.contains(pos)));
+                    assert!(near.windows(2).all(|w| w[0] < w[1]), "ascending, each once (perspective={perspective})");
+                    for (i, (_, b)) in boxes.iter().enumerate() {
+                        if screen_box(&proj, b, 8.0).is_none_or(|r| r.contains(pos)) {
+                            assert!(near.contains(&i), "body {i} must be a candidate at {pos:?} (perspective={perspective})");
+                        }
+                    }
+                    assert!(near.ends_with(&[boxes.len() - 2, boxes.len() - 1]), "loose boxes are always candidates");
+                }
+            }
+        }
+    }
+
+    /// `pick_hits` accelerated by `BodyTree` returns 100% identical face, edge, and vertex hits
+    /// (and tie-breaking) to a brute-force linear scan across many bodies, including overlapping
+    /// bodies, bodies behind the camera eye, and both perspective and orthographic views.
+    #[test]
+    fn pick_hits_with_body_tree_matches_linear_scan() {
+        let mut s = solidcraft_engine::Session::default();
+        // A 3x3x3 grid of boxes plus overlapping duplicates (tie-breaking) and boxes near/behind
+        // the camera eye.
+        let mut centers = Vec::new();
+        for ix in -1..=1 {
+            for iy in -1..=1 {
+                for iz in -1..=1 {
+                    centers.push([ix as f64 * 25.0, iy as f64 * 25.0, iz as f64 * 25.0]);
+                }
+            }
+        }
+        // Overlapping box at the exact same position as the centre box to verify tie-breaking.
+        centers.push([0.0, 0.0, 0.0]);
+        // Partially overlapping box shifted slightly along +X/+Y.
+        centers.push([4.0, 4.0, 0.0]);
+        // Boxes that sit behind/around the eye in the close-up perspective view below.
+        centers.push([0.0, 0.0, 90.0]);
+        centers.push([45.0, 45.0, 45.0]);
+        for (i, [x, y, z]) in centers.iter().copied().enumerate() {
+            s.execute(
+                "solid.box",
+                &json!({"length": 10.0, "width": 10.0, "height": 10.0, "center": [x, y, z], "operation": "new", "name": format!("Box{i}")}),
+            )
+            .unwrap();
+        }
+        let mut app = SolveApp::new(s, crate::Services::default());
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800., 600.));
+        let mut saw_face = false;
+        let mut saw_edge = false;
+        let mut saw_vertex = false;
+
+        // Test three camera setups: fitted perspective, close-up perspective (putting some boxes
+        // behind the eye), and orthographic.
+        let views = [(true, None), (true, Some((Vec3::ZERO, 40.0, 0.65, 0.45))), (false, None)];
+        for (perspective, custom) in views {
+            app.ui.perspective = perspective;
+            if perspective {
+                app.preferences.perspective_fov = 45_f64.to_radians();
+            }
+            if let Some((target, distance, yaw, pitch)) = custom {
+                app.cam.target = target;
+                app.cam.distance = distance;
+                app.cam.yaw = yaw;
+                app.cam.pitch = pitch;
+            } else {
+                app.fit_view();
+            }
+            let proj = projection(&app, rect);
+            if perspective {
+                assert!(proj.cam.fov > 0.0, "expected perspective projection");
+            } else {
+                assert_eq!(proj.cam.fov, 0.0, "expected orthographic projection");
+            }
+            // Probe face centres, edge midpoints, vertices of several boxes, plus empty pixels.
+            let mut probes = vec![pos2(10.0, 10.0), pos2(790.0, 590.0)];
+            for [x, y, z] in [[0.0, 0.0, 0.0], [25.0, 0.0, 0.0], [-25.0, 25.0, -25.0], [4.0, 4.0, 0.0], [0.0, 0.0, 25.0]] {
+                for delta in [
+                    Vec3::new(0.0, 0.0, 5.0), // top face centre
+                    Vec3::new(5.0, 0.0, 5.0), // top edge midpoint
+                    Vec3::new(5.0, 5.0, 5.0), // corner vertex
+                    Vec3::new(5.0, 0.0, 0.0), // +X face centre
+                ] {
+                    if let Some(sp) = proj.to_screen(Vec3::new(x, y, z) + delta)
+                        && rect.contains(sp)
+                    {
+                        probes.push(sp);
+                    }
+                }
+            }
+            for all in [false, true] {
+                for &pos in &probes {
+                    let bvh = pick_hits(&app, &proj, pos, PickOptions { all, include_midpoints: true, ..PickOptions::default() });
+                    let linear =
+                        pick_hits(&app, &proj, pos, PickOptions { all, include_midpoints: true, linear_bodies: true, ..PickOptions::default() });
+                    assert_eq!(bvh, linear, "BVH pick must match linear scan (perspective={perspective}, all={all}, pos={pos:?})");
+                    if let Some(hits) = &bvh {
+                        saw_face |= hits.iter().any(|h| matches!(h, Hit::Face { .. }));
+                        saw_edge |= hits.iter().any(|h| matches!(h, Hit::Edge { .. }));
+                        saw_vertex |= hits.iter().any(|h| matches!(h, Hit::Vertex { .. }));
+                    }
+                }
+            }
+        }
+        assert!(saw_face && saw_edge && saw_vertex, "probes must exercise faces ({saw_face}), edges ({saw_edge}), and vertices ({saw_vertex})");
     }
 
     /// The origin point hides behind bodies under the same rule as the axes and planes (#10050):
@@ -19397,6 +19597,37 @@ mod tests {
     /// A two-finger twist turns the view about the up axis (#6286): counter-clockwise turns the
     /// model counter-clockwise as seen from above, pitch and roll stay, the Orbit around point
     /// keeps its place, and noise or the preference off (the default) leave the camera still.
+    /// With "Roll about the line of sight" on (#22691), the same twist rolls the picture the way the
+    /// fingers turn in any view, keeps heading and pitch, and keeps the Orbit around point on screen;
+    /// it does nothing while the twist itself is off.
+    #[test]
+    fn trackpad_twist_rolls_the_view_about_the_line_of_sight_when_asked() {
+        let mut h = crate::scenario::Harness::new();
+        assert!(!h.app.preferences.trackpad_twist_rolls, "rolling is opt-in");
+        h.call("ui.move", json!({"x":800,"y":500}));
+        h.frame();
+        h.app.preferences.trackpad_twist_rolls = true;
+        let untouched = h.app.cam;
+        h.app.synthetic.push(egui::Event::Rotate(-0.3));
+        h.frame();
+        assert_eq!(h.app.cam, untouched, "with the twist off, its roll option does nothing");
+        h.app.preferences.trackpad_twist_turns = true;
+        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
+        // A view looking along neither axis: the roll must not depend on which way Z points.
+        h.app.cam = solidcraft_viewport::Camera { target: Vec3::new(30.0, -20.0, 5.0), yaw: 0.7, pitch: 0.4, ..h.app.cam };
+        let before = h.app.cam;
+        let origin = before.frame_coords(Vec3::ZERO);
+        // egui counts clockwise: -0.3 is a counter-clockwise twist, which turns the picture
+        // counter-clockwise (a negative roll).
+        h.app.synthetic.push(egui::Event::Rotate(-0.3));
+        h.frame();
+        let rolled = h.app.cam;
+        let turned = (rolled.roll - before.roll + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        assert!((turned + 0.3).abs() < 1e-6, "counter-clockwise rolls the picture counter-clockwise: {turned}");
+        assert_eq!((rolled.yaw, rolled.pitch, rolled.distance), (before.yaw, before.pitch, before.distance), "nothing turns towards or away");
+        assert!((rolled.frame_coords(Vec3::ZERO) - origin).len() < 1e-6, "the origin keeps its place on screen");
+    }
+
     #[test]
     fn trackpad_twist_turns_the_view_about_the_up_axis() {
         let mut h = crate::scenario::Harness::new();
