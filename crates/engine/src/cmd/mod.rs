@@ -39,6 +39,7 @@ mod construct;
 mod construct_auto;
 pub(crate) mod delete;
 pub(crate) mod diagnostics;
+mod dogbone;
 mod drawing;
 mod drawing_auto_mark;
 mod drawing_balloon;
@@ -326,6 +327,7 @@ mod tab_views;
 mod view_dxf;
 mod view_navigation;
 mod view_pick;
+mod weld;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -661,6 +663,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_project::COMMANDS.iter());
     v.extend(sketch_links::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
+    v.extend(dogbone::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
     v.extend(cell_grid::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
@@ -674,6 +677,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(frame_end_cap::COMMANDS.iter());
     v.extend(frame_gusset::COMMANDS.iter());
     v.extend(frame_rotate_member::COMMANDS.iter());
+    v.extend(weld::COMMANDS.iter());
     v.extend(component::COMMANDS.iter());
     v.extend(component_link::COMMANDS.iter());
     v.extend(joints::COMMANDS.iter());
