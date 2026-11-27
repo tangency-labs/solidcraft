@@ -903,7 +903,7 @@ What the port does today:
   them 3e-5 to 2.5e-4 from the cusp, within the tolerance of both of the tool's edges, and
   a vertex there split one edge while the intersection ran along the other (the imprint
   failed with no vertex at an edge definition's end, or the merge with a vertex that is no
-  end of its edge; #15049). Three sites now read each such contact as one touch:
+  end of its edge; #15049). Five sites now read each such contact as one touch:
   - Two surfaces of revolution about one axis meet in one circle per meeting of their
     generators in a plane through the axis (`intersect_revolved_into`,
     `surface/surf_of_revolution/p3.rs`). Where both are faces' surfaces the generators are
@@ -923,6 +923,28 @@ What the port does today:
   - A point with no curve classified onto a circle edge of one body and a line edge of the
     other in its plane, the line a hair inside the circle, is their touch
     (`touch_of_edges`, `line_touch`, `proto_topology/p3.rs`), as two such circles' is.
+  - Where the cut ends on a face that holds its axis (a floor, the face the cut started
+    from), that plane meets the tool's swept arc in a meridian, the arc turned into the
+    plane, which runs tangentially into the plane's side at the cusp a hair outside it:
+    trimmed to the plane's domain it crossed the side once, `√(2rδ)` from the cusp (2.5e-4
+    mm at r = 30 and δ = 1e-9), and the two pieces met at a vertex of no contact; the result
+    was not a solid. Where both surfaces are faces', the meridian is trimmed without a break
+    at a point where it lies inside the domain on both sides
+    (`Plane::trim_curve_to_plane_domain_joined`, `surface/plane/p2.rs`, from
+    `surface/surf_of_revolution/p1.rs`), as a graze already is: one curve, which the
+    boundary rules above end at the cusp.
+  - A point with no curve classified onto a circle edge and a line edge in its plane that
+    meet at one point by the contact rule, the point beside that meeting within the band
+    where the two edges lie within the tolerance of each other, is that meeting
+    (`meeting_beside`, `proto_topology/p3.rs`). The surface intersection of the block's arc
+    face swept to the start plane and the tool's face swept from its line touches at the
+    cusp, and found that touch 1.5e-4 from it: a vertex there split the tool's line edge and
+    not the block's arc edge, and the merge failed in `make_faceuse`. The meeting is taken
+    where it lies more than the tolerance and at most a thousand times it from the point,
+    and the point and the meeting lie within the tolerance of both edges and so does the
+    whole stretch between them, by enclosure and not by sampling: the line's distance is
+    convex, so its two ends bound it, and the circle's out-of-plane and radial deviations
+    along the stretch are bounded in outward-rounded intervals (`stretch_within_circle`).
 
   Bare surfaces and curves keep upstream's zero contact.
 
