@@ -464,7 +464,7 @@ pub struct RuleValues {
 const MAX_SHEET_THICKNESS: f64 = 1e4;
 
 /// The smallest gap closed corners are given: closer than this the flanges' ends would touch.
-const MIN_CORNER_GAP: f64 = 0.01;
+pub(crate) const MIN_CORNER_GAP: f64 = 0.01;
 
 impl Document {
     /// A rule by name, the active one, or the default steel rule.

@@ -282,6 +282,16 @@ impl Body {
         held.primitive = proof.primitive;
     }
 
+    /// Whether the body holds the proof that it is valid and faces out (tests only).
+    #[cfg(test)]
+    pub(crate) fn holds_proof(&self) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .outward
+            .is_some()
+    }
+
     /// Whether a panic interrupted an edit of this body.
     #[must_use]
     pub(crate) fn is_poisoned(&self) -> bool {
