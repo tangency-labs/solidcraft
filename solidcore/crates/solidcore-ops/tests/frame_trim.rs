@@ -173,3 +173,25 @@ fn the_kernels_refusal_names_the_target_it_is_about() {
         }
     );
 }
+
+#[test]
+fn a_members_data_makes_it_again_and_other_data_is_refused() {
+    use solidcore_ops::frame_trim::MemberData;
+    for m in [rail(100.0, 300.0), post()] {
+        let data = m.data();
+        let again = Member::from_data(&data).unwrap();
+        assert_eq!(again, m);
+        assert_eq!(again.data(), data);
+    }
+    let data = post().data();
+    let long = MemberData {
+        dir: Vec3::new(0.0, 2.0, 0.0),
+        ..data
+    };
+    assert_eq!(Member::from_data(&long), Err(Refusal::Degenerate));
+    let flat = MemberData {
+        hi: Vec2::new(-30.0, 22.5),
+        ..data
+    };
+    assert_eq!(Member::from_data(&flat), Err(Refusal::Degenerate));
+}

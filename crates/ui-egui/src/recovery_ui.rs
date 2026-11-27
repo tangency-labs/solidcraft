@@ -154,13 +154,17 @@ pub fn ago_between(now: u64, secs: u64) -> String {
 }
 
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    // File view presents the same entries inline, without a second window covering them.
-    if app.home.open || app.recoverable.is_empty() {
+    if app.recoverable.is_empty() {
         app.recovery_discard_all = false;
         return;
     }
+    // Asked from this window or from File view's recovery banner.
     if app.recovery_discard_all {
         confirm_discard_all(app, ctx);
+        return;
+    }
+    // File view presents the same entries inline, without a second window covering them.
+    if app.home.open {
         return;
     }
     let mut act: Option<(Entry, bool)> = None;
@@ -187,10 +191,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 act = Some((e.clone(), false));
                             }
                         });
-                        let file = e.path.clone().unwrap_or_else(|| solidcraft_ui_text::tr("recovery.never_saved").to_string());
+                        let file = e.path.as_deref().map_or_else(|| solidcraft_ui_text::tr("recovery.never_saved"), crate::display_user_path);
                         let detail = solidcraft_ui_text::format(
                             "recovery.detail",
-                            &[("file", &file), ("features", &e.features.to_string()), ("when", &ago(e.saved_at))],
+                            &[("file", file), ("features", &e.features.to_string()), ("when", &ago(e.saved_at))],
                         );
                         ui_kit::text(ui, &detail, ui_kit::Text::Note(&format!("detail:{index}")));
                     }

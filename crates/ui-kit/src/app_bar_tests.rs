@@ -1075,6 +1075,8 @@ const TAB_HANDLES: TabHandles<'static> = TabHandles {
     view_new: "t:vnew",
     view_more: "t:vmore",
     switcher: "t:switcher",
+    view_collapse: "t:vcollapse",
+    file_drop: "t:file_drop",
 };
 
 const VIEW_MENU: [TabMenuRow<'static>; 4] = [
@@ -1174,6 +1176,8 @@ struct TabsRig {
     rename: Option<usize>,
     text: std::cell::RefCell<String>,
     focused: std::cell::Cell<bool>,
+    /// The first design's sub-tabs are folded into its tab.
+    collapsed: std::cell::Cell<bool>,
 }
 
 impl TabsRig {
@@ -1205,6 +1209,7 @@ impl TabsRig {
             rename: rename.map(|(k, _)| k),
             text: std::cell::RefCell::new(text),
             focused: std::cell::Cell::new(false),
+            collapsed: std::cell::Cell::new(false),
         };
         rig.frame(Vec::new());
         rig
@@ -1224,7 +1229,8 @@ impl TabsRig {
             focused: true,
             ..Default::default()
         };
-        let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None, views: &[] };
+        let tab =
+            |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None, views: &[], collapsed: false };
         let mut views = VIEWS;
         if self.detached {
             views[1].to_window = Some(1);
@@ -1238,7 +1244,7 @@ impl TabsRig {
         } else {
             &[]
         };
-        let first = DocTab { views, ..tab(self.name) };
+        let first = DocTab { views, collapsed: self.collapsed.get(), ..tab(self.name) };
         let layout = self.layout.map(|(visible, window_count)| layout_test_data(visible, window_count));
         let (mut text, mut focused) = (self.text.borrow().clone(), self.focused.get());
         let mut strip = TabStrip {
@@ -1265,6 +1271,8 @@ impl TabsRig {
                 new_view: "Open another view",
                 more: "{n} more",
                 switch_view: "Switch view",
+                collapse_views: "Hide views",
+                expand_views: "Show views",
             },
             view_menu: &VIEW_MENU,
             view_right_row: "vright",
@@ -1323,6 +1331,20 @@ fn app_bar_document_and_view_tabs_use_the_shared_hover_and_held_cursors() {
         let (_, dragged) = rig.frame_output(vec![egui::Event::PointerMoved(at + vec2(20.0, 0.0))]);
         assert_eq!(dragged.platform_output.cursor_icon, drag_cursor(true));
         rig.frame(vec![event(false)]);
+    }
+}
+
+/// The × on a design tab is a button, not part of the tab's drag handle: over it the pointer is the
+/// plain arrow, on the shown design's tab and on the others alike.
+#[test]
+fn a_design_tabs_close_button_shows_the_arrow_not_the_drag_hand() {
+    for close in ["t:close:0", "t:close:1"] {
+        let rig = TabsRig::new();
+        let at = rig.at(close);
+        for _ in 0..3 {
+            let (_, output) = rig.frame_output(vec![egui::Event::PointerMoved(at)]);
+            assert_eq!(output.platform_output.cursor_icon, egui::CursorIcon::Default, "{close}");
+        }
     }
 }
 
@@ -1631,6 +1653,45 @@ fn a_view_drop_slot_shifts_only_neighbours_at_or_after_the_local_index() {
     assert_eq!(rig.at("t:view:1"), second);
     assert_eq!(rig.at("t:vnew"), plus);
     assert!(view_drag_gap(&rig.ctx, strip, 1).is_none());
+}
+
+/// The chevron right after the selected design's + folds its sub-tabs into its tab, in both
+/// sub-tab styles: folded, the tab is a plain tab with its count, its + and the chevron (now
+/// between the + and ×), which shows them again. A pop-out's strip has no chevron.
+#[test]
+fn the_chevron_folds_a_designs_sub_tabs_into_its_tab() {
+    for clear in [false, true] {
+        let mut rig = TabsRig::with(Some(true));
+        rig.clear = clear;
+        rig.frame(Vec::new());
+        let plus = solidcraft_ui_registry::rect_of("t:vnew").expect("the + is drawn");
+        let chevron = solidcraft_ui_registry::rect_of("t:vcollapse").expect("clear={clear}: the chevron is drawn");
+        assert!(chevron.left() >= plus.right() - 0.5, "clear={clear}: the chevron is right after the +");
+        assert_eq!(rig.press(chevron.center(), egui::PointerButton::Primary), vec![TabAction::CollapseViews(true)]);
+        rig.collapsed.set(true);
+        rig.frame(Vec::new());
+        assert!(solidcraft_ui_registry::rect_of("t:view:0").is_none(), "clear={clear}: folded, no sub-tabs");
+        let tab = solidcraft_ui_registry::rect_of("t:tab:0").expect("the design's tab");
+        let chevron = solidcraft_ui_registry::rect_of("t:vcollapse").expect("folded, the chevron stays to show them again");
+        let plus = solidcraft_ui_registry::rect_of("t:vnew").expect("and its +");
+        let close = solidcraft_ui_registry::rect_of("t:close:0").expect("and its ×");
+        assert!(tab.contains_rect(chevron) && plus.right() <= chevron.left() + 0.5 && chevron.right() <= close.left() + 0.5, "between the + and ×");
+        assert_eq!(rig.press(chevron.center(), egui::PointerButton::Primary), vec![TabAction::CollapseViews(false)]);
+    }
+    // In a narrow strip the folded tab keeps the room for its +, chevron and ×.
+    let mut rig = TabsRig::with(Some(true));
+    rig.room = Some(260.0);
+    rig.collapsed.set(true);
+    rig.frame(Vec::new());
+    let tab = solidcraft_ui_registry::rect_of("t:tab:0").expect("the design's tab");
+    for handle in ["t:vnew", "t:vcollapse", "t:close:0"] {
+        let rect = solidcraft_ui_registry::rect_of(handle).unwrap_or_else(|| panic!("{handle} is drawn"));
+        assert!(tab.contains_rect(rect), "{handle} fits in the folded tab {tab:?}: {rect:?}");
+    }
+    let mut rig = TabsRig::with(Some(true));
+    rig.pop_out = true;
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:vcollapse").is_none(), "a pop-out's strip has no chevron");
 }
 
 /// With a view switcher the views list in a menu: a row picks a view, the footer's rows are the app's.
@@ -2995,38 +3056,4 @@ fn layout_menu_keeps_glyph_choices_open_and_escape_restores_the_button() {
     assert!(rig.frame(vec![key(egui::Key::Enter)]).is_empty());
     rig.frame(Vec::new());
     assert!(solidcraft_ui_registry::rect_of("layout.side_by_side").is_some());
-}
-
-#[test]
-fn sketch_header_keeps_the_editing_chip_inside_its_control_free_room() {
-    let ctx = crate::test_support::context();
-    for width in [240.0, 100.0, 70.0, 60.0, 42.0, 16.0] {
-        let rect = Rect::from_min_size(pos2(10.0, 10.0), vec2(width, 28.0));
-        let output = crate::test_support::raw_frame(&ctx, egui::RawInput::default(), |ui| {
-            paint_sketch_header(ui.painter(), rect, "Model · Sketch 1", "Editing");
-        });
-        let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text().to_string()).collect();
-        if width == 240.0 {
-            assert!(texts.iter().any(|text| text == "Model · Sketch 1"));
-        }
-        if width >= 70.0 {
-            assert!(texts.iter().any(|text| text == "Editing"), "width={width}: the state remains readable");
-        }
-        let chip = output
-            .shapes
-            .iter()
-            .find_map(|shape| match &shape.shape {
-                egui::Shape::Rect(shape) if shape.fill == Tokens::get().chip => Some(shape.rect),
-                _ => None,
-            })
-            .unwrap();
-        assert_eq!(chip.height(), 18.0);
-        assert!(rect.contains_rect(chip), "width={width}: {chip:?} must leave header controls free");
-    }
-    for t in [Tokens::light(), Tokens::dark()] {
-        assert!(
-            solidcraft_theme::contrast_ratio(t.sketch_ink, t.sketch_soft) >= 4.5,
-            "sketch titles follow the theme's small-text contrast policy on their actual header surface"
-        );
-    }
 }

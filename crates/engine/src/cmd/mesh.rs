@@ -24,7 +24,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("import")
         .contract(&MESH_CONVERT_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
-        .params("body?: mesh body name (default: the selected mesh body); tolerance?: length expression (default 0.05 mm): rebuild a closed mesh as an editable solid — a constant-section part as planar and cylindrical faces, any other closed mesh as the faceted solid its triangles describe — with a parametric timeline feature in the mesh body's owning component (the active component must be that component or an ancestor; otherwise activate the named component first); the active component is unchanged; name?"),
+        .params("body?: mesh body name (default: the selected mesh body); tolerance?: length expression (default 0.05 mm): rebuild a closed mesh as an editable solid — supported straight-extrusion parts and planar shoulders as planar and cylindrical faces, other closed meshes as the faceted solid their triangles describe — with a parametric timeline feature in the mesh body's owning component (the active component must be that component or an ancestor; otherwise activate the named component first); the active component is unchanged; name?"),
     CommandSpec::new("mesh.reduce", "Reduce Mesh", crate::checked!("mesh.reduce", reduce))
         .icon("mesh_reduce")
         .contract(&MESH_REDUCE_CONTRACT)
@@ -37,14 +37,15 @@ fn target(s: &Session, p: &Value, cmd: &str) -> Result<String> {
     if let Some(name) = str_(p, "body").filter(|b| !b.trim().is_empty()) {
         return Ok(name.to_owned());
     }
-    let selected: Vec<&str> = s.selection.iter().filter_map(|x| if let Sel::Body { name } = x { Some(name.as_str()) } else { None }).collect();
+    let selected: Vec<String> = s.selected_items()?.into_iter().filter_map(|x| if let Sel::Body { name } = x { Some(name) } else { None }).collect();
     match selected.as_slice() {
-        [name] => Ok((*name).to_owned()),
+        [name] => Ok(name.clone()),
         [] => Err(bad(cmd, "select a mesh body")),
         _ => Err(bad(cmd, "select one mesh body")),
     }
 }
 
+/// Create the conversion feature in its owning component and restore the original authoring context.
 fn convert(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "mesh.convert";
     let state = s.model.state();

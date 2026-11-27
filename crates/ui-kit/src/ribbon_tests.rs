@@ -497,6 +497,8 @@ fn menu_style() -> MenuStyle<'static> {
         focus: egui::Id::unique("test_menu"),
         entry: &["t:entry:"],
         pin: "t:pin:",
+        more: "t:more:",
+        more_tip: "More",
         hot: "t:hot:",
         reveal: "t:reveal",
     }
@@ -563,7 +565,8 @@ impl MenuRig {
 }
 
 /// A row or grid icon is hot under the pointer, runs its command when clicked, opens its menu on
-/// a right-click, runs nothing when disabled, and pins or unpins from its pin.
+/// a right-click, runs nothing when disabled; a grid icon pins or unpins from its pin, a row
+/// opens its menu from its ⋯.
 #[test]
 fn a_menu_entry_returns_what_was_chosen() {
     for grid in [false, true] {
@@ -575,13 +578,32 @@ fn a_menu_entry_returns_what_was_chosen() {
         let chosen = rig.press(on, egui::PointerButton::Secondary, 0.0);
         assert!(matches!(chosen.as_slice(), [(id, MenuAction::Menu(_))] if id == "m.on"), "grid {grid}: {chosen:?}");
         assert_eq!(rig.press(rig.at("t:entry:m.off"), egui::PointerButton::Primary, 0.0), Vec::new(), "grid {grid}: a disabled entry runs nothing");
+        if !grid {
+            rig.frame(vec![egui::Event::PointerMoved(on)], 0.0);
+            let chosen = rig.press(rig.at("t:more:m.on"), egui::PointerButton::Primary, 0.0);
+            assert!(matches!(chosen.as_slice(), [(id, MenuAction::More(_))] if id == "m.on"), "{chosen:?}");
+            continue;
+        }
         // A grid icon's pin takes clicks once the pointer has rested on the icon.
-        let wait = if grid { PIN_DELAY + 0.1 } else { 0.0 };
-        rig.press(on, egui::PointerButton::Primary, wait);
-        rig.frame(vec![egui::Event::PointerMoved(on)], wait);
+        rig.press(on, egui::PointerButton::Primary, PIN_DELAY + 0.1);
+        rig.frame(vec![egui::Event::PointerMoved(on)], PIN_DELAY + 0.1);
         let pin = rig.at("t:pin:m.on");
         let chosen = rig.press(pin, egui::PointerButton::Primary, 0.0);
-        assert_eq!(chosen, vec![("m.on".to_string(), MenuAction::TogglePin)], "grid {grid}");
+        assert_eq!(chosen, vec![("m.on".to_string(), MenuAction::TogglePin)]);
+    }
+}
+
+/// A list row has no pin of its own (#11853): its ⋯ sits at the row's end, where the pin was.
+#[test]
+fn a_list_row_shows_its_more_button_at_its_end_and_no_pin() {
+    let rig = MenuRig::new(false);
+    let on = rig.at("t:entry:m.on");
+    for wait in [0.0, 2.0] {
+        rig.frame(vec![egui::Event::PointerMoved(on)], wait);
+        rig.frame(vec![egui::Event::PointerMoved(on)], 0.0);
+        assert!(solidcraft_ui_registry::handle_at("t:pin:m.on").is_none(), "a row publishes no pin, even after a rest");
+        // MenuRig rows are 220 wide; the entry handle is the row's centre.
+        assert_eq!(rig.at("t:more:m.on"), pos2(on.x + 110.0 - MORE_INSET, on.y), "the ⋯ is at the row's end");
     }
 }
 

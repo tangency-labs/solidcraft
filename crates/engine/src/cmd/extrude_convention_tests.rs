@@ -240,6 +240,122 @@ fn through_all_on_either_side_with_a_distance_on_the_other() {
     }
 }
 
+/// The second side takes the extent types of the first (#18691): Through All, or To Object with
+/// its own offset. A 40 mm cube round the origin, and an r5 hole sketched 10 mm above its
+/// middle: the first side goes up and the second down, so the removed depth is how far each
+/// reaches added together.
+#[test]
+fn the_second_side_takes_through_all_and_to_object() {
+    let hole = std::f64::consts::PI * 25.0;
+    for (settings, depth) in [
+        // Both sides through all: 10 mm up to the top face and 30 mm down to the bottom one.
+        (json!({"through_all":true,"through_all2":true}), 40.0),
+        // A distance up and through all down.
+        (json!({"distance":"5 mm","through_all2":true}), 35.0),
+        // To the bottom face, picked at a point on it; the offset carries the end 5 mm short.
+        (json!({"distance":"5 mm","to2":[0,0,-20]}), 35.0),
+        (json!({"distance":"5 mm","to2":[0,0,-20],"to_offset2":"-5 mm"}), 30.0),
+        // Through all up, to an object down.
+        (json!({"through_all":true,"to2":[0,0,-20]}), 40.0),
+        // To an object up and through all down.
+        (json!({"to":[0,0,20],"through_all2":true}), 40.0),
+        // To an object on both sides.
+        (json!({"to":[0,0,20],"to2":[0,0,-20]}), 40.0),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":40,"width":40,"height":40,"corner":[-20,-20,-20],"body_name":"Box"}));
+        run(&mut s, "construct.plane.offset", json!({"base":"XY","offset":10,"name":"Above"}));
+        run(&mut s, "sketch.create", json!({"plane":"Above","name":"Hole"}));
+        run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":5}));
+        run(&mut s, "sketch.finish", json!({}));
+        let mut p = json!({"sketch":"Hole","operation":"cut","targets":["Box"],"name":"Bore"});
+        p.as_object_mut().unwrap().extend(settings.as_object().unwrap().clone());
+        run(&mut s, "solid.extrude", p);
+        let removed = |s: &Session| {
+            assert!(s.model.results.iter().all(|r| r.error.is_none()), "{settings}: {:?}", s.model.results);
+            let st = s.model.state();
+            (64000.0 - solidcraft_kernel::measure(&st.body("Box").unwrap().body).unwrap().volume) / hole
+        };
+        let deep = removed(&s);
+        assert!((deep - depth).abs() < 0.05, "{settings}: {deep} deep, want {depth}");
+        // Saved and opened again, it keeps both extents.
+        let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+        let deep = removed(&reopened);
+        assert!((deep - depth).abs() < 0.05, "{settings} reopened: {deep} deep, want {depth}");
+    }
+}
+
+/// A Join whose two To Object sides end on different bodies joins both of them, and the second
+/// side is for Two Sides: a symmetric extrude refuses it (#18691).
+#[test]
+fn a_join_to_objects_on_both_sides_joins_both_bodies() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":5,"corner":[-10,-10,5],"body_name":"Up"}));
+    run(&mut s, "solid.box", json!({"length":20,"width":20,"height":5,"corner":[-10,-10,-10],"body_name":"Down"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY","name":"Pin"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":2}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch":"Pin","to":[0,0,5],"to2":[0,0,-5],"operation":"join","name":"Pin"}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let st = s.model.state();
+    assert_eq!(st.bodies.len(), 1, "the pin, Up and Down are one body: {:?}", st.bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>());
+    let volume = solidcraft_kernel::measure(&st.bodies[0].body).unwrap().volume;
+    let want = 2.0 * 20.0 * 20.0 * 5.0 + std::f64::consts::PI * 4.0 * 10.0;
+    assert!((volume - want).abs() < 0.5, "{volume} mm3, want {want}");
+    for second in [json!({"through_all2":true}), json!({"to2":[0,0,-5]})] {
+        let mut p = json!({"sketch":"Pin","distance":"3 mm","direction":"symmetric","operation":"new","name":"Sym"});
+        p.as_object_mut().unwrap().extend(second.as_object().unwrap().clone());
+        assert!(s.execute("solid.extrude", &p).is_err(), "{second}: a symmetric extrude has no second extent");
+    }
+}
+
+/// The second side's To Object ends on a level, so it takes a plane parallel to the sketch, a vertex
+/// or a point; a curved or slanted face is refused, not flattened (#18691). A pin 10 mm above a
+/// plate's middle goes down: the flank of a horizontal cylinder and the slope of a wedge are
+/// refused with the reason, the plate's top face is not.
+#[test]
+fn the_second_side_refuses_a_to_object_that_is_curved_or_slanted() {
+    let cases: Vec<(&str, Box<dyn Fn(&mut Session)>, serde_json::Value)> = vec![
+        (
+            "a cylinder's flank",
+            Box::new(|s: &mut Session| {
+                run(s, "sketch.create", json!({"plane":"YZ","name":"Round"}));
+                run(s, "sketch.circle.center", json!({"center":[0,-30],"radius":10}));
+                run(s, "sketch.finish", json!({}));
+                run(s, "solid.extrude", json!({"sketch":"Round","distance":40,"direction":"symmetric","name":"Target","body_name":"Target"}));
+            }),
+            json!([0, 0, -20]),
+        ),
+        (
+            "a slanted plane",
+            Box::new(|s: &mut Session| {
+                // An XZ sketch's y runs along -Z: the wedge is at Z -40 up to a slope from -30 to -20.
+                run(s, "sketch.create", json!({"plane":"XZ","name":"Wedge"}));
+                run(s, "sketch.line", json!({"points": [[-20,40],[20,40],[20,20],[-20,30]], "closed": true}));
+                run(s, "sketch.finish", json!({}));
+                run(s, "solid.extrude", json!({"sketch":"Wedge","distance":30,"direction":"symmetric","name":"Target","body_name":"Target"}));
+            }),
+            json!([0, 0, -25]),
+        ),
+    ];
+    for (what, build, pick) in cases {
+        let mut s = Session::default();
+        build(&mut s);
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{what} target: {:?}", s.model.results);
+        run(&mut s, "construct.plane.offset", json!({"base":"XY","offset":10,"name":"Above"}));
+        run(&mut s, "sketch.create", json!({"plane":"Above","name":"Pin"}));
+        run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":2}));
+        run(&mut s, "sketch.finish", json!({}));
+        let refused = s.execute("solid.extrude", &json!({"sketch":"Pin","distance":"5 mm","to2":pick,"operation":"new","name":"Pin"}));
+        let mut errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+        errors.extend(refused.err().map(|e| e.to_string()));
+        assert!(
+            errors.iter().any(|e| e.contains("not supported yet") && e.contains("second side")),
+            "{what}: want a typed refusal naming the second side, got {errors:?}"
+        );
+    }
+}
+
 /// Through all keeps the side a saved negative distance points to (#10415): switching an inward
 /// cut to Through All must not turn it to the plane's positive side. A 40 mm cube round the
 /// origin, and an r5 hole sketched 10 mm above its middle: positive reaches 10 mm up to the

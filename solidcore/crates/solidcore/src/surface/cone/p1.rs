@@ -262,7 +262,11 @@ pub struct Cone {
 /// unbounded cone's NURB runs over the STEP heights reversed, so negation holds only for
 /// an interval symmetric about 0 (the infinite cylinder's), where it is kept. Upstream
 /// negates every inside-out unbounded height, which names another height on the NURB.
-fn unbounded_maps_linearly(inside_out: bool, step_ivl: &Extent1d, nurb_ivl: &Extent1d) -> bool {
+pub(crate) fn unbounded_maps_linearly(
+    inside_out: bool,
+    step_ivl: &Extent1d,
+    nurb_ivl: &Extent1d,
+) -> bool {
     inside_out
         && (nurb_ivl.min().to_bits() != (-step_ivl.max()).to_bits()
             || nurb_ivl.max().to_bits() != (-step_ivl.min()).to_bits())
@@ -2234,6 +2238,26 @@ pub fn total_coincidence_checker(
         coincident: true,
         reversed: Some(rev),
     })
+}
+
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Cone {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            rev,
+            base_radius,
+            semi_angle_deg,
+            inside_out,
+            cylinder,
+        } = self;
+        d.tag(0xC0E);
+        rev.content(d)?;
+        d.f64(*base_radius);
+        d.f64(*semi_angle_deg);
+        d.bool(*inside_out);
+        d.bool(*cylinder);
+        Some(())
+    }
 }
 
 #[cfg(test)]

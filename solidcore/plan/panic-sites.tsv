@@ -1021,6 +1021,8 @@ crates/solidcore/src/sweep/loft_rails.rs	certify	with_capacity	1	proven	Vec::wit
 crates/solidcore/src/sweep/loft_rails.rs	certify	with_capacity	2	proven	Vec::with_capacity(wires.len())	the length of an existing Vec (the wires made)
 crates/solidcore/src/sweep/loft_rails.rs	interpolate_g	f64::clamp	1	proven	clamp(0.0, n)	n is a usize cast to f64: never NaN and never below 0.0, so min <= max
 crates/solidcore/src/sweep/loft_rails.rs	skin_and_certify	Vec::drain	1	proven	drain(..)	a full range, never out of bounds
+crates/solidcore/src/sweep/loft_rails/warp.rs	solve	split_at	1	proven	split_at_mut(c + 1)	c < n == rows.len() (the loop runs c in 0..n), so c + 1 <= rows.len()
+crates/solidcore/src/sweep/loft_rails/warp.rs	solve	swap	1	proven	swap(c, p)	c < n and p is in c..n, with n == rows.len()
 crates/solidcore/src/nurbs/certificate.rs	interval_bound	f64::clamp	1	proven	clamp(0.0, 1.0)	constant bounds, min <= max
 crates/solidcore/src/nurbs/certificate.rs	interval_bound	with_capacity	1	proven	Vec::with_capacity(4)	constant capacity
 crates/solidcore/src/nurbs/certificate.rs	interval_bound	with_capacity	2	proven	Vec::with_capacity(4)	constant capacity
@@ -1130,9 +1132,9 @@ crates/solidcore/src/topology/edge.rs	reset_primary_edgeuse	rotate	1	proven	rota
 crates/solidcore/src/topology/edge.rs	set_orientation	chunks	1	proven	chunks_exact(2)	constant non-zero size
 crates/solidcore/src/topology/edgeuse/p1.rs	edgeuse_last	int-rem	1	proven	(i + list.len() - 1) % list.len()	list_of returns Some only after position() finds i in that list, so len() > 0
 crates/solidcore/src/topology/edgeuse/p1.rs	edgeuse_next	int-rem	1	proven	(i + 1) % list.len()	list_of returns Some only after position() finds i in that list, so len() > 0
-crates/solidcore/src/topology/edgeuse/p3.rs	create_uv_trim_curve	Vec::remove	1	proven	remove(0)	guarded by uv_curves.len() == 2; branches remove at most one curve
-crates/solidcore/src/topology/edgeuse/p3.rs	create_uv_trim_curve	Vec::remove	2	proven	remove(1)	guarded by uv_curves.len() == 2; branches remove at most one curve
-crates/solidcore/src/topology/edgeuse/p3.rs	create_uv_trim_curve	Vec::swap_remove	1	proven	swap_remove(kkk)	kkk comes from uv_curves.iter().enumerate(), with no intervening Vec mutation
+crates/solidcore/src/topology/edgeuse/p3.rs	create_uv_trim_curve_fitted	Vec::remove	1	proven	remove(0)	guarded by uv_curves.len() == 2; branches remove at most one curve
+crates/solidcore/src/topology/edgeuse/p3.rs	create_uv_trim_curve_fitted	Vec::remove	2	proven	remove(1)	guarded by uv_curves.len() == 2; branches remove at most one curve
+crates/solidcore/src/topology/edgeuse/p3.rs	create_uv_trim_curve_fitted	Vec::swap_remove	1	proven	swap_remove(kkk)	kkk comes from uv_curves.iter().enumerate(), with no intervening Vec mutation
 crates/solidcore/src/topology/edgeuse/p3.rs	evaluate_binormal_uv	int-rem	1	proven	steps % 2	constant non-zero divisor
 crates/solidcore/src/topology/edgeuse/p3.rs	longest_drop_run	with_capacity	1	proven	Vec::with_capacity(pieces.len())	pieces.len() counts existing Curve elements, no smaller than (Extent1d, Point3, Point3) via CurveKind::Line
 crates/solidcore/src/topology/edgeuse/p3.rs	longest_drop_run	with_capacity	2	proven	Vec::with_capacity(run_pieces.len())	run_pieces.len() counts existing Curve elements, which contain the BSplineCurve variant inline

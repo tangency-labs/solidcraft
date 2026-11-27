@@ -295,6 +295,51 @@ fn extrude_to_a_named_face_keeps_it_when_another_part_touches_it() {
     assert!(rel(v, 36.0 * 20.0) < 1e-6, "the extrude ended at the plate: {v}");
 }
 
+/// A body built in a component from a sketch of the root keeps the place its component was moved
+/// to when the move is captured (#14513): the body belongs to its component, so it moves with it.
+#[test]
+fn extrude_from_root_sketch_keeps_the_captured_position_of_its_component() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.create", json!({"name": "A", "activate": false}));
+    run(&mut s, "component.create", json!({"name": "B", "activate": false}));
+    run(&mut s, "component.activate", json!({"component": "A"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": 10, "body_name": "PartA"}));
+    run(&mut s, "component.activate", json!({"component": "B"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": 10, "body_name": "PartB"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "B:1", "translate": [40, 0, 0], "capture": false}));
+    run(&mut s, "component.capture_position", json!({}));
+    let near = |a: f64, e: f64| (a - e).abs() < 1e-5;
+    let b = s.world_state().unwrap().body("PartB").unwrap().mesh().bounds();
+    assert!(near(b.min.x, 40.0) && near(b.max.x, 50.0), "PartB must keep the captured position: {b:?}");
+    let a = s.world_state().unwrap().body("PartA").unwrap().mesh().bounds();
+    assert!(near(a.min.x, 0.0) && near(a.max.x, 10.0), "PartA stays where its component stands: {a:?}");
+}
+
+/// A sweep in a component, from a profile and a path of the root, is built where they are shown.
+/// When the component is moved and the move is captured, the swept body keeps the place the
+/// component was moved to, as an extrude from the same sketch does (#14513).
+#[test]
+fn sweep_from_root_sketches_keeps_the_captured_position_of_its_component() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-2, -2], "p1": [2, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -40]], "ids": ["down"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let made = run(&mut s, "component.create", json!({"name": "Rail", "grounded": false, "activate": true}));
+    let occurrence = made["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.sweep", json!({"sketch": "Profile", "path_sketch": "Path", "path": ["down"], "operation": "new", "body_name": "Tube"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [40, 0, 0], "capture": false}));
+    run(&mut s, "component.capture_position", json!({}));
+    let near = |a: f64, e: f64| (a - e).abs() < 1e-5;
+    let b = s.world_state().unwrap().body("Tube").unwrap().mesh().bounds();
+    assert!(near(b.min.x, 38.0) && near(b.max.x, 42.0), "the swept body must keep the captured position: {b:?}");
+}
+
 /// An extrude in a child component from a shared root sketch captures the relative sketch frame
 /// at creation time, so joining or moving that component later moves the extruded body rigidly
 /// with the component instead of pulling it back to the root sketch's world placement.

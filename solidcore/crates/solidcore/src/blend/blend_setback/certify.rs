@@ -13,8 +13,10 @@
 //! two binomials per coefficient of every factor and product.
 
 use super::{
-    binomial, el, el_mut, el_ref, euclid, sm_err, smax, tensor_elevate, Face, Net, Tensor,
+    binomial, corner_step, el, el_mut, el_ref, euclid, past_table, smax, tensor_elevate, Face, Net,
+    Tensor,
 };
+use crate::error::blend::CornerStep;
 use crate::error::Result;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_curve::KnotType;
@@ -158,7 +160,7 @@ impl Binomials {
             self.evaluations = self.evaluations.saturating_add(row.len());
             self.rows.push(row);
         }
-        self.rows.get(n).map(Vec::as_slice).ok_or_else(sm_err)
+        self.rows.get(n).map(Vec::as_slice).ok_or_else(past_table)
     }
 }
 
@@ -174,7 +176,7 @@ pub(super) struct ScaledTensor {
 pub(super) fn t_scaled(a: &Tensor, binomials: &mut Binomials) -> Result<ScaledTensor> {
     let width = a.q + 1;
     if a.c.len() != (a.p + 1) * width {
-        return Err(sm_err());
+        return Err(past_table());
     }
     let bq = binomials.row(a.q)?.to_vec();
     let bp = binomials.row(a.p)?;
@@ -190,7 +192,7 @@ pub(super) fn t_scaled(a: &Tensor, binomials: &mut Binomials) -> Result<ScaledTe
 /// Row `i` of coefficients `c` stored `width` to a row.
 fn row(c: &[f64], i: usize, width: usize) -> Result<&[f64]> {
     let start = i * width;
-    c.get(start..start + width).ok_or_else(sm_err)
+    c.get(start..start + width).ok_or_else(past_table)
 }
 
 /// The product of two scaled polynomials, convolved and unscaled (`sm_SbTMulFast`'s
@@ -209,7 +211,7 @@ pub(super) fn t_mul_scaled(
             }
             for k in 0..=b.p {
                 let start = (i + k) * cw + j;
-                let out = c.c.get_mut(start..start + bw).ok_or_else(sm_err)?;
+                let out = c.c.get_mut(start..start + bw).ok_or_else(past_table)?;
                 for (cv, &bv) in out.iter_mut().zip(row(&b.c, k, bw)?) {
                     *cv += av * bv;
                 }
@@ -220,7 +222,7 @@ pub(super) fn t_mul_scaled(
     let bp = binomials.row(c.p)?;
     for (i, &bpi) in bp.iter().enumerate() {
         let start = i * cw;
-        let out = c.c.get_mut(start..start + cw).ok_or_else(sm_err)?;
+        let out = c.c.get_mut(start..start + cw).ok_or_else(past_table)?;
         for (x, &bqj) in out.iter_mut().zip(&bq) {
             let f = bpi * bqj;
             *x /= f;
@@ -271,7 +273,7 @@ pub(super) fn t_nonneg(a: &Tensor, eps: f64, depth: usize) -> Result<i32> {
         el(&a.c, 0)?,
         el(&a.c, a.q)?,
         el(&a.c, a.p * (a.q + 1))?,
-        *a.c.last().ok_or_else(sm_err)?,
+        *a.c.last().ok_or_else(past_table)?,
     ];
     for corner in corners {
         if corner < -eps {
@@ -368,8 +370,9 @@ pub(super) fn minor_without<'a>(
             }
         }
     }
-    let get =
-        |r: usize, c: usize| -> Result<&'a Tensor> { el(el_ref(&m, r)?, c)?.ok_or_else(sm_err) };
+    let get = |r: usize, c: usize| -> Result<&'a Tensor> {
+        el(el_ref(&m, r)?, c)?.ok_or_else(past_table)
+    };
     Ok([
         [get(0, 0)?, get(0, 1)?, get(0, 2)?],
         [get(1, 0)?, get(1, 1)?, get(1, 2)?],
@@ -463,7 +466,7 @@ pub(super) fn net_surface(net: &Net) -> Result<BSplineSurface> {
     let mut rational = false;
     for h in &net.pts {
         if !(h[3] > 0.0) {
-            return Err(sm_err());
+            return Err(corner_step(CornerStep::SetbackPatchWeightNotPositive));
         }
         pts.push(euclid(h));
         ws.push(h[3]);
@@ -553,7 +556,7 @@ fn affine_fundamentals_with(
             cof_scaled.push(t_scaled(c, binomials)?);
         }
         let [c0, c1, c2, c3] = cof_scaled.as_slice() else {
-            return Err(sm_err());
+            return Err(past_table());
         };
         let out = el_mut(&mut qj, k)?;
         out.clear();

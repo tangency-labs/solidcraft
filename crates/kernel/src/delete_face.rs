@@ -1,5 +1,6 @@
 //! Delete Face with healing extends the neighbours of the selected faces to close the gap.
-//! SolidCore closes a ring groove across both circular rims.
+//! SolidCore closes a ring groove across both circular rims and trims intersecting sphere
+//! and plane extensions to their common circle.
 //!
 //! For a planar gap the body is rebuilt from its own schema 4 record. Faces away from the gap
 //! are kept as they are. Each neighbouring face keeps its plane and its edges outside the gap.
@@ -29,6 +30,92 @@ use crate::{KernelError, Result, guard};
 
 fn fail(m: impl Into<String>) -> KernelError {
     KernelError::Invalid(format!("Delete Face: {}", m.into()))
+}
+
+/// Extend the supports of a recognized feature. Carry the original face and edge names into the repaired body.
+fn heal_from_extensions(body: &Body, selected: &BTreeSet<usize>, neighbours: &BTreeSet<usize>, round_junction: bool) -> Result<Option<Body>> {
+    let Some(form) = body.ops_body() else { return Ok(None) };
+    let (operand, order) = &*form;
+    let picks: Vec<_> = selected.iter().copied().collect();
+    drop(solidcore_ops::session::take_failure_detail());
+    let heal = || -> solidcore_ops::Result<_> {
+        let removed = if round_junction {
+            solidcore_ops::trim::remove_round_junction(operand, order, &picks)?
+        } else {
+            solidcore_ops::trim::remove_feature_with_crossing_patches(operand, order, &picks)?
+        };
+        let Some((healed, history)) = removed else {
+            return Ok(None);
+        };
+        Ok(Some((healed.to_record()?.0, history)))
+    };
+    let result = match solidcraft_smlib::stop::token() {
+        Some(token) => solidcore_ops::cancel::within(&token, heal),
+        None => heal(),
+    }
+    .map_err(|e| match e {
+        solidcore_ops::Error::Internal(message) => KernelError::Internal(format!("Delete Face: {message}")),
+        other => {
+            let reason = solidcore_ops::session::take_failure_detail().unwrap_or_else(|| other.to_string());
+            KernelError::Failed(format!("Delete Face: {reason}"))
+        }
+    })?;
+    let Some((record, history)) = result else { return Ok(None) };
+    let history = crate::record::from_ops_edit(&record, history, neighbours);
+    Ok(Some(Body::from_record(record)?.with_history_counts(history, &crate::record::counts(&[body]))?))
+}
+
+/// A ball between three round strips is tangent along each whole boundary when
+/// its centre is on each cylinder axis and its radius and outward side agree.
+fn ball_end(rec: &solidcore_record::brep::Brep, face: usize, adjacent: &impl Fn(usize) -> BTreeSet<usize>) -> bool {
+    let Some(Surf::Sphere { c, r, convex }) = surf_of(rec, face) else { return false };
+    let around = adjacent(face);
+    around.len() == 3
+        && around.into_iter().all(|side| {
+            matches!(surf_of(rec, side), Some(Surf::Cylinder { o, a, r: sr, convex: outward })
+            if outward == convex && (sr - r).abs() <= rec.tolerance && (c - o).cross(a).len() <= rec.tolerance)
+        })
+}
+
+/// Removing a straight round growing into rolling-ball corners also removes its end
+/// patches. The other strips at each corner remain supports and extend to meet.
+fn round_junction_faces(
+    rec: &solidcore_record::brep::Brep,
+    selected: &BTreeSet<usize>,
+    adjacent: &impl Fn(usize) -> BTreeSet<usize>,
+) -> Option<BTreeSet<usize>> {
+    let mut removed = selected.clone();
+    let mut has_corner = false;
+    for &face in selected {
+        if ball_end(rec, face, adjacent) {
+            has_corner = true;
+            continue;
+        }
+        let Some(Surf::Cylinder { o, a, r, .. }) = surf_of(rec, face) else { return None };
+        let around = adjacent(face);
+        if around.len() != 4 {
+            return None;
+        }
+        let supports = around
+            .iter()
+            .filter(|&&f| {
+                matches!(surf_of(rec, f), Some(Surf::Plane { n, d })
+            if n.dot(a).abs() * r <= rec.tolerance && ((n.dot(o) - d).abs() - r).abs() <= rec.tolerance)
+            })
+            .count();
+        if supports != 2 {
+            return None;
+        }
+        for end in around {
+            if ball_end(rec, end, adjacent) {
+                removed.insert(end);
+                has_corner = true;
+            } else if !matches!(surf_of(rec, end), Some(Surf::Plane { .. })) {
+                return None;
+            }
+        }
+    }
+    has_corner.then_some(removed)
 }
 
 type Key = (i64, i64, i64);
@@ -291,9 +378,6 @@ fn fill_on_planes(
 /// Remove a groove between two turned faces, with its history over the original body. The
 /// kernel decides whether the rims bound a band and records the identity of the surfaces it joins.
 fn heal_ring_groove(body: &Body, selected: &BTreeSet<usize>, neighbours: &BTreeSet<usize>) -> Result<Option<Body>> {
-    use crate::history::FaceOrigin;
-    use solidcore_ops::history::{Change as OpsChange, FaceOrigin as OpsOrigin};
-
     let Some(form) = body.ops_body() else { return Ok(None) };
     let (operand, order) = &*form;
     let picks: Vec<_> = selected.iter().copied().collect();
@@ -301,32 +385,7 @@ fn heal_ring_groove(body: &Body, selected: &BTreeSet<usize>, neighbours: &BTreeS
         return Ok(None);
     };
     let (record, _) = healed.to_record().map_err(|e| fail(e.to_string()))?;
-    let faces = history
-        .faces
-        .into_iter()
-        .map(|f| {
-            let change = match f.change {
-                OpsChange::Kept if matches!(f.origins.as_slice(), [OpsOrigin::Face(i)] if neighbours.contains(i)) => Change::Modified,
-                OpsChange::Kept => Change::Kept,
-                OpsChange::Modified => Change::Modified,
-                OpsChange::Split => Change::Split,
-                OpsChange::Merged => Change::Merged,
-                OpsChange::Generated => Change::Generated,
-            };
-            let origins = f
-                .origins
-                .into_iter()
-                .map(|o| match o {
-                    OpsOrigin::Face(face) => FaceOrigin::Face { operand: 0, face },
-                    OpsOrigin::OffsetOf(face) => FaceOrigin::Offset { operand: 0, face },
-                    OpsOrigin::AlongEdge(edge) => FaceOrigin::Edge { operand: 0, edge },
-                })
-                .collect();
-            FaceProv { change, origins }
-        })
-        .collect();
-    let edges: Vec<_> = history.edges.into_iter().map(|e| crate::record::pieces_of(0, e)).collect();
-    let history = crate::record::of_faces(&record, 1, faces, &edges);
+    let history = crate::record::from_ops_edit(&record, history, neighbours);
     Ok(Some(Body::from_record(record)?.with_history_counts(history, &crate::record::counts(&[body]))?))
 }
 
@@ -386,23 +445,48 @@ pub fn delete_faces(body: &Body, faces: &[usize]) -> Result<Body> {
             // Carry the groove result, including any refusal, past the planar fallback.
             return Ok(groove);
         }
+        let adjacent = |face| {
+            crate::offset::face_edges(&rec, face)
+                .into_iter()
+                .filter_map(|edge| efaces.get(&edge))
+                .flatten()
+                .copied()
+                .filter(|&f| f != face)
+                .collect::<BTreeSet<_>>()
+        };
+        if let Some(removed) = round_junction_faces(&rec, &del, &adjacent) {
+            let supports = removed.iter().flat_map(|&face| adjacent(face)).filter(|f| !removed.contains(f)).collect();
+            if let Some(healed) = heal_from_extensions(body, &removed, &supports, true).transpose() {
+                return Ok(healed);
+            }
+        }
         let mut planes: HashMap<usize, (Vec3, f64)> = HashMap::new();
         for &f in &neighbours {
             match surf_of(&rec, f) {
                 Some(Surf::Plane { n, d }) => {
                     planes.insert(f, (n, d));
                 }
-                _ => {
+                other => {
+                    if matches!(other, Some(Surf::Sphere { .. }))
+                        && neighbours.len() == 2
+                        && neighbours.iter().any(|&g| matches!(surf_of(&rec, g), Some(Surf::Plane { .. })))
+                        && let Some(healed) = heal_from_extensions(body, &del, &neighbours, false).transpose()
+                    {
+                        return Ok(healed);
+                    }
                     let by = efaces
                         .values()
                         .find(|fs| fs.contains(&f) && fs.iter().any(|x| del.contains(x)))
                         .and_then(|fs| fs.iter().find(|x| del.contains(x)).copied())
                         .unwrap_or(0);
-                    return Err(fail(format!(
-                        "face {by} ({}), borders face {f}, {}: to remove a tangent chain of rounds, select all the round faces. Include face {f} if it should go too, or take off the feature that made it in the timeline",
-                        surface_kind(&rec, by),
-                        surface_kind(&rec, f),
-                    )));
+                    let reason = if matches!(surf_of(&rec, by), Some(Surf::Plane { .. })) {
+                        "healing this selection requires planar neighbours to close the gap. If a feature created the selected face, edit that feature in the timeline".to_owned()
+                    } else {
+                        format!(
+                            "to remove a tangent chain of rounds, select all the round faces. Include face {f} if it should go too, or take off the feature that made it in the timeline"
+                        )
+                    };
+                    return Err(fail(format!("face {by} ({}), borders face {f}, {}: {reason}", surface_kind(&rec, by), surface_kind(&rec, f))));
                 }
             }
         }
@@ -736,10 +820,56 @@ mod tests {
             .unwrap()
             .into_iter()
             .map(|hit| match hit {
-                solidcore_ops::ClassifiedPoint::On { face, .. } => face,
+                crate::points::ClassifiedPoint::On { face, .. } => face,
                 other => panic!("expected a point on the face, got {other:?}"),
             })
             .collect()
+    }
+
+    #[test]
+    fn delete_one_round_or_its_ball_corner_on_a_rounded_housing() {
+        use solidcraft_geom::Vec3Geom;
+
+        let origin = Vec3::new(11.0, -7.0, 4.0);
+        let size = Vec3::new(36.0, 29.0, 24.0);
+        let radius = 3.0;
+        let block = box_solid(origin, origin + size).unwrap();
+        let edges: Vec<_> = block.edges(0.001).unwrap().into_iter().map(|edge| edge.mid).collect();
+        let rounded = fillet(&block, &edges, radius).unwrap();
+        let input = crate::Body::from_record(rounded.record().clone()).unwrap();
+        let strip_at = origin + Vec3::new(0.0, size.y / 2.0, 0.0);
+        let remaining: Vec<_> = edges.into_iter().filter(|p| p.dist(strip_at) > 0.001).collect();
+        assert_eq!(remaining.len(), 11);
+        let control = fillet(&block, &remaining, radius).unwrap();
+
+        let d = radius * (1.0 - std::f64::consts::FRAC_1_SQRT_2);
+        let strip = picked_faces(&input, &[strip_at + Vec3::new(d, 0.0, d)]);
+        let healed = delete_faces(&input, &strip).unwrap();
+        assert_eq!(healed.face_count(), control.face_count());
+        assert!((healed.volume_at(1e-8).unwrap() - control.volume_at(1e-8).unwrap()).abs() < 1e-4);
+        assert!(healed.edges(0.001).unwrap().iter().any(|edge| edge.mid.dist(strip_at) < 0.001));
+
+        let d = radius * (1.0 - 1.0 / 3.0_f64.sqrt());
+        let ball = picked_faces(&input, &[origin + Vec3::new(d, d, d)]);
+        let healed = delete_faces(&input, &ball).unwrap();
+        assert_eq!(healed.face_count() + 1, input.face_count());
+        // The corner gains an octant of three intersecting cylinders less the ball octant.
+        let gained = radius.powi(3) * (2.0 - 2.0_f64.sqrt() - std::f64::consts::PI / 6.0);
+        assert!((healed.volume_at(1e-8).unwrap() - input.volume_at(1e-8).unwrap() - gained).abs() < 1e-4);
+    }
+
+    #[test]
+    fn deleting_a_planar_cylinder_cap_explains_the_healing_limit() {
+        let body = step_roundtrip(&cylinder(Vec3::ZERO, Vec3::Z, 10.0, 20.0).unwrap());
+        let cap = picked_faces(&body, &[Vec3::new(0.0, 0.0, 20.0)])[0];
+        let wall = picked_faces(&body, &[Vec3::new(6.0, 8.0, 10.0)])[0];
+
+        let Err(crate::KernelError::Invalid(why)) = delete_faces(&body, &[cap]) else {
+            panic!("expected Delete Face to refuse healing a planar cylinder cap");
+        };
+        assert!(why.contains(&format!("face {cap} (a plane), borders face {wall}, a cylinder")), "{why}");
+        assert!(why.contains("healing this selection requires planar neighbours"), "{why}");
+        assert!(!why.contains("tangent chain"), "{why}");
     }
 
     #[test]
@@ -944,6 +1074,37 @@ mod tests {
         assert_ne!(bottom[0], 0);
         let refused = delete_faces(&plate, &bottom).unwrap_err().to_string();
         assert!(refused.contains(&format!("the gap left by face {} cannot close", bottom[0])), "{refused}");
+    }
+
+    #[test]
+    fn deleting_a_bevel_keeps_the_ball_and_plate_face_origins() {
+        use crate::history::{Change, FaceOrigin};
+        use solidcore_ops::boolean::{BooleanOp, boolean as join};
+
+        let plate = solidcore_ops::make_cylinder([0.0, 0.0, -2.0], 8.0, 2.0).unwrap();
+        let ball = solidcore_ops::make_sphere([0.0, 0.0, 1.0], 3.0).unwrap();
+        let bevel = solidcore_ops::make_cone([0.0; 3], 4.0, 3.0, 1.0).unwrap();
+        let sharp = join(plate, ball, BooleanOp::Union).unwrap().unwrap();
+        let beveled = join(sharp, bevel, BooleanOp::Union).unwrap().unwrap();
+        let part = crate::Body::from_record(beveled.to_record().unwrap().0).unwrap();
+        let offset = Vec3::new(11.0, -6.0, 9.0);
+        let original = crate::transform(&part, offset, Vec3::ZERO, Vec3::Y, std::f64::consts::FRAC_PI_2).unwrap();
+        let placed = |p: Vec3| offset + Vec3::new(p.z, p.y, -p.x);
+        let (_, picked) = original.nearest_face(placed(Vec3::new(0.0, 3.5, 0.5))).unwrap();
+        let healed = delete_faces(&original, &[picked]).unwrap();
+        let history = healed.history().unwrap();
+        assert_eq!(healed.face_count(), 4);
+        for (point, change) in [
+            (Vec3::new(6.0, 0.0, 0.0), Change::Modified),
+            (Vec3::new(0.0, 5.0_f64.sqrt(), 3.0), Change::Modified),
+            (Vec3::new(1.0, 0.0, -2.0), Change::Kept),
+            (Vec3::new(8.0, 0.0, -1.0), Change::Kept),
+        ] {
+            let (_, parent) = original.nearest_face(placed(point)).unwrap();
+            let (_, face) = healed.nearest_face(placed(point)).unwrap();
+            assert_eq!(history.faces[face].origins, [FaceOrigin::Face { operand: 0, face: parent }]);
+            assert_eq!(history.faces[face].change, change);
+        }
     }
 
     /// A half-space `n · x <= d` with `n` made unit.

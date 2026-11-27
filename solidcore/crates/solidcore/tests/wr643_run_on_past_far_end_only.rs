@@ -3,7 +3,7 @@
 //! `RailEdgeuseIntersect` widens a straight side edge's interval past both of its ends.
 //! Behind the corner's vertex, the side edge's line lies on the far side of the filleted
 //! edge, where no rail of the blend can be. Once the faces continue as themselves (WR-633,
-//! `offset_extension_as_itself`), the mirror image of the ball lies there.
+//! the only path since #18921), the mirror image of the ball lies there.
 //!
 //! The part is WR-570's knife edge (`wr_570_knife_edge_rounds.rs`: a 62 1/6 x 21 plate whose
 //! corner is cut by a circle of radius 21 tangent to the back face at the tip, extruded 10).
@@ -113,8 +113,6 @@ fn round(s: f64, r: f64) -> Result<(usize, f64, bool), i32> {
     let mut k = Kernel::default();
     k.fixes.fillet_knife_edge_rounds = true;
     k.fixes.fillet_trace_reaches_rails = true;
-    k.fixes.offset_extension_from_base = true;
-    k.fixes.offset_extension_as_itself = true;
     let mut b = part(&mut k, s);
     let e = knife_edge(&k, &b, s);
     {

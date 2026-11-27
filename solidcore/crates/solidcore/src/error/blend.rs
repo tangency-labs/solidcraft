@@ -2800,7 +2800,8 @@ impl crate::SolidError {
 
     /// [`crate::SolidError::Failed`] for a blend routine that could not continue, as the
     /// phrase says, with status [`SM_ERR`] (upstream `return SE(SM_ERR)`): a phrase
-    /// cause.
+    /// cause. Only tests build it now: no site in the kernel keeps the phrase.
+    #[cfg(test)]
     #[must_use]
     #[track_caller]
     pub(crate) fn blend_failed(operation: &'static str, what: &'static str) -> Self {

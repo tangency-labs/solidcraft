@@ -5785,7 +5785,7 @@
   "ui.ribbon_exit": "Esci",
   "ui.ribbon_labels": "Mostra il testo sotto le icone della barra multifunzione",
   "ui.ribbon_menus_skip_pinned": "Escludi i comandi fissati dai menu a discesa",
-  "ui.ribbon_pin_footer": "I comandi fissati compaiono sulla barra multifunzione. Passa sopra una riga per fissarla o rimuoverla.",
+  "ui.ribbon_pin_footer": "I comandi fissati compaiono sulla barra multifunzione. Fissa o rimuovi un comando dal suo menu ⋯.",
   "ui.ribbon_workspace": "Area di lavoro",
   "ui.right": "Destra",
   "ui.right_click_confirms": "Il clic destro conferma gli input della finestra di dialogo",
