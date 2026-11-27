@@ -5927,3 +5927,241 @@ fn inspect_design_lists_repeated_body_placements_and_filters_their_world_names()
         assert_eq!(after, before, "no document/history mutation: {opts:?}");
     }
 }
+
+#[test]
+fn initialize_advertises_resources_prompts_and_completions_capabilities() {
+    let mut s = server();
+    let init =
+        call(&mut s, 1, "initialize", json!({"protocolVersion": PROTOCOL_VERSION, "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}));
+    let caps = &init["result"]["capabilities"];
+    assert_eq!(caps["tools"], json!({"listChanged": false}), "{caps}");
+    assert_eq!(caps["resources"], json!({"listChanged": false}), "{caps}");
+    assert_eq!(caps["prompts"], json!({"listChanged": false}), "{caps}");
+    assert_eq!(caps["completions"], json!({}), "{caps}");
+}
+
+#[test]
+fn resource_templates_list_and_read_body_sketch_feature_command_and_skill() {
+    let mut s = server();
+
+    // Verify all resource templates are listed with their expected MIME types.
+    let listed = call(&mut s, 1, "resources/templates/list", json!({}));
+    let templates = listed["result"]["resourceTemplates"].as_array().unwrap();
+    let pairs: Vec<(&str, &str)> = templates.iter().map(|t| (t["uriTemplate"].as_str().unwrap(), t["mimeType"].as_str().unwrap())).collect();
+    assert_eq!(
+        pairs,
+        [
+            ("solidcraft://body/{name}", "application/json"),
+            ("solidcraft://sketch/{name}", "application/json"),
+            ("solidcraft://feature/{id}", "application/json"),
+            ("solidcraft://command/{id}", "application/json"),
+            ("solidcraft://skill/{skill}/{file}", "text/markdown"),
+        ],
+        "{listed}"
+    );
+
+    // Build a small parametric design: a component with a box body (and placed copy) plus a sketch.
+    let exec = |s: &mut Server, command: &str, params: Value| tool(s, "execute", json!({"command": command, "params": params}));
+    let comp = exec(&mut s, "component.create", json!({"name": "Housing", "grounded": false}));
+    exec(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 20, "height": 30, "body_name": "MainBox", "name": "BaseBox"}));
+    exec(&mut s, "component.activate", json!({"component": 0}));
+    exec(&mut s, "occurrence.copy", json!({"component": comp["component"], "translate": [40, 0, 0]}));
+    exec(&mut s, "sketch.create", json!({"plane": "XY", "name": "BaseSketch"}));
+    exec(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 30]}));
+    exec(&mut s, "sketch.finish", json!({}));
+
+    let design = tool(&mut s, "inspect_design", json!({"measure": false, "sketches": false, "joints": false}));
+    let box_feature_id = design["timeline"].as_array().unwrap().iter().find(|f| f["name"] == "BaseBox").unwrap()["id"].as_u64().unwrap();
+
+    let read_json = |s: &mut Server, id: u64, uri: &str| -> Value {
+        let r = call(s, id, "resources/read", json!({"uri": uri}));
+        assert!(r.get("error").is_none(), "{uri}: {r}");
+        let block = &r["result"]["contents"][0];
+        assert_eq!(block["uri"], uri);
+        assert_eq!(block["mimeType"], "application/json");
+        serde_json::from_str(block["text"].as_str().unwrap()).unwrap()
+    };
+
+    // solidcraft://body/{name} (plain name and percent-encoded occurrence name)
+    let body = read_json(&mut s, 2, "solidcraft://body/MainBox");
+    assert_eq!(body["name"], "MainBox", "{body}");
+    assert_eq!(body["faces"], 6, "{body}");
+    assert_eq!(body["edges"], 12, "{body}");
+    assert!((body["volume_mm3"].as_f64().unwrap() - 6000.0).abs() < 1e-6, "{body}");
+    assert!(body["mass_g"].as_f64().unwrap() > 0.0, "{body}");
+    assert_eq!(body["bbox"]["min"], json!([0.0, 0.0, 0.0]), "{body}");
+    assert_eq!(body["bbox"]["max"], json!([10.0, 20.0, 30.0]), "{body}");
+    assert_eq!(body["component"], "Housing", "{body}");
+
+    let copy = read_json(&mut s, 3, "solidcraft://body/MainBox%20(Housing%3A2)");
+    assert_eq!(copy["name"], "MainBox (Housing:2)", "{copy}");
+    assert_eq!(copy["definition"], "MainBox", "{copy}");
+    assert_eq!(copy["component"], "Housing", "{copy}");
+    assert_eq!(copy["bbox"]["min"], json!([40.0, 0.0, 0.0]), "{copy}");
+
+    // solidcraft://sketch/{name}
+    let sketch = read_json(&mut s, 4, "solidcraft://sketch/BaseSketch");
+    assert_eq!(sketch["name"], "BaseSketch", "{sketch}");
+    assert_eq!(sketch["curves"].as_array().unwrap().len(), 4, "{sketch}");
+    assert_eq!(sketch["profiles"].as_array().unwrap().len(), 1, "{sketch}");
+
+    // solidcraft://feature/{id} by numeric id and by name
+    let feat_by_id = read_json(&mut s, 5, &format!("solidcraft://feature/{box_feature_id}"));
+    assert_eq!(feat_by_id["id"], box_feature_id, "{feat_by_id}");
+    assert_eq!(feat_by_id["name"], "BaseBox", "{feat_by_id}");
+    assert!(feat_by_id["definition"].is_object(), "{feat_by_id}");
+    assert!(feat_by_id["inputs"].is_array(), "{feat_by_id}");
+
+    let feat_by_name = read_json(&mut s, 6, "solidcraft://feature/BaseBox");
+    assert_eq!(feat_by_name["id"], box_feature_id, "{feat_by_name}");
+    assert_eq!(feat_by_name["name"], "BaseBox", "{feat_by_name}");
+
+    // solidcraft://command/{id}
+    let cmd = read_json(&mut s, 7, "solidcraft://command/solid.box");
+    assert_eq!(cmd["id"], "solid.box", "{cmd}");
+    assert!(cmd["label"].as_str().is_some_and(|l| !l.is_empty()), "{cmd}");
+    assert!(cmd["input"].is_object(), "{cmd}");
+
+    // solidcraft://skill/{skill}/{file} (top-level and nested file path)
+    let skill_reply = call(&mut s, 8, "resources/read", json!({"uri": "solidcraft://skill/solidcraft-modeling/SKILL.md"}));
+    let skill_block = &skill_reply["result"]["contents"][0];
+    assert_eq!(skill_block["mimeType"], "text/markdown");
+    assert_eq!(skill_block["text"], include_str!("../../../skills/solidcraft-modeling/SKILL.md"));
+
+    let nested_reply = call(&mut s, 9, "resources/read", json!({"uri": "solidcraft://skill/solidcraft-checking/reference/porting.md"}));
+    let nested_block = &nested_reply["result"]["contents"][0];
+    assert_eq!(nested_block["mimeType"], "text/markdown");
+    assert_eq!(nested_block["text"], include_str!("../../../skills/solidcraft-checking/reference/porting.md"));
+
+    // Existing static resources remain intact.
+    let static_design = read_json(&mut s, 10, "solidcraft://design");
+    assert!(static_design["timeline"].is_array(), "{static_design}");
+    let static_commands = read_json(&mut s, 11, "solidcraft://commands");
+    assert!(static_commands.as_array().is_some_and(|c| !c.is_empty()), "{static_commands}");
+
+    // Unknown targets across every template return RESOURCE_NOT_FOUND (-32002).
+    for uri in [
+        "solidcraft://body/DoesNotExist",
+        "solidcraft://body/",
+        "solidcraft://sketch/DoesNotExist",
+        "solidcraft://sketch/BaseBox",
+        "solidcraft://feature/999999",
+        "solidcraft://feature/DoesNotExist",
+        "solidcraft://command/no.such.command",
+        "solidcraft://skill/unknown-skill/SKILL.md",
+        "solidcraft://skill/solidcraft-modeling/missing.md",
+        "solidcraft://skill/solidcraft-modeling",
+    ] {
+        let err = call(&mut s, 12, "resources/read", json!({"uri": uri}));
+        assert_eq!(err["error"]["code"], -32002, "{uri}: {err}");
+    }
+}
+
+#[test]
+fn prompts_list_and_get_cover_cad_workflows_and_validate_arguments() {
+    let mut s = server();
+    let listed = call(&mut s, 1, "prompts/list", json!({}));
+    let prompts = listed["result"]["prompts"].as_array().unwrap();
+    let names: Vec<&str> = prompts.iter().map(|p| p["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["model-part", "edit-design", "check-parameters", "diagnose-feature", "assembly-clearance"], "{listed}");
+
+    for prompt in prompts {
+        let name = prompt["name"].as_str().unwrap();
+        assert!(prompt["description"].as_str().is_some_and(|d| !d.is_empty()), "{prompt}");
+        // Every prompt can be requested with no arguments (all arguments are optional).
+        let filled = call(&mut s, 2, "prompts/get", json!({"name": name, "arguments": {}}));
+        assert!(filled.get("error").is_none(), "{name}: {filled}");
+        assert!(filled["result"]["description"].as_str().is_some_and(|d| !d.is_empty()), "{name}: {filled}");
+        let msg = &filled["result"]["messages"][0];
+        assert_eq!(msg["role"], "user", "{name}: {filled}");
+        assert_eq!(msg["content"]["type"], "text", "{name}: {filled}");
+        assert!(msg["content"]["text"].as_str().is_some_and(|t| t.len() > 80), "{name}: {filled}");
+    }
+
+    // Optional arguments are woven into the returned workflow instructions.
+    let model = call(&mut s, 3, "prompts/get", json!({"name": "model-part", "arguments": {"part": "L-bracket 60x40x5", "material": "sheet metal"}}));
+    let model_text = model["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(model_text.contains("L-bracket 60x40x5"), "{model_text}");
+    assert!(model_text.contains("solidcraft-sheetmetal"), "{model_text}");
+
+    let edit = call(&mut s, 4, "prompts/get", json!({"name": "edit-design", "arguments": {"goal": "widen slot by 2 mm", "target": "MainBox"}}));
+    let edit_text = edit["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(edit_text.contains("widen slot by 2 mm") && edit_text.contains("MainBox"), "{edit_text}");
+
+    let check =
+        call(&mut s, 5, "prompts/get", json!({"name": "check-parameters", "arguments": {"parameters": "width, wall", "ranges": "width 40..120 mm"}}));
+    let check_text = check["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(check_text.contains("width, wall") && check_text.contains("width 40..120 mm"), "{check_text}");
+
+    let diag = call(&mut s, 6, "prompts/get", json!({"name": "diagnose-feature", "arguments": {"feature": "Fillet1"}}));
+    let diag_text = diag["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(diag_text.contains("Fillet1"), "{diag_text}");
+
+    let clearance =
+        call(&mut s, 7, "prompts/get", json!({"name": "assembly-clearance", "arguments": {"occurrences": "Arm:1, Frame:1", "joint": "Hinge"}}));
+    let clearance_text = clearance["result"]["messages"][0]["content"]["text"].as_str().unwrap();
+    assert!(clearance_text.contains("Arm:1, Frame:1") && clearance_text.contains("Hinge"), "{clearance_text}");
+
+    // Unknown prompt names and undeclared arguments are rejected with INVALID_PARAMS (-32602).
+    let unknown_prompt = call(&mut s, 8, "prompts/get", json!({"name": "no-such-prompt"}));
+    assert_eq!(unknown_prompt["error"]["code"], -32602, "{unknown_prompt}");
+    let bad_arg = call(&mut s, 9, "prompts/get", json!({"name": "diagnose-feature", "arguments": {"bogus": "1"}}));
+    assert_eq!(bad_arg["error"]["code"], -32602, "{bad_arg}");
+}
+
+#[test]
+fn completion_suggests_bodies_sketches_features_commands_skills_and_prompt_args() {
+    let mut s = server();
+    let exec = |s: &mut Server, command: &str, params: Value| tool(s, "execute", json!({"command": command, "params": params}));
+
+    tool(&mut s, "set_parameter", json!({"name": "plate_w", "value": "50 mm"}));
+    tool(&mut s, "set_parameter", json!({"name": "plate_h", "value": "30 mm"}));
+    exec(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Bracket", "name": "MainBox"}));
+    exec(&mut s, "solid.box", json!({"corner": [30, 0, 0], "length": 5, "width": 5, "height": 5, "body_name": "Boss", "name": "TopBoss"}));
+    exec(&mut s, "sketch.create", json!({"plane": "XY", "name": "BaseSketch"}));
+    exec(&mut s, "sketch.finish", json!({}));
+
+    let complete = |s: &mut Server, reference: Value, arg: &str, value: &str| -> Vec<String> {
+        let r = call(s, 1, "completion/complete", json!({"ref": reference, "argument": {"name": arg, "value": value}}));
+        assert!(r.get("error").is_none(), "{r}");
+        r["result"]["completion"]["values"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_owned()).collect()
+    };
+
+    // ref/resource completions for bodies, sketches, features, commands and skills
+    assert_eq!(complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://body/{name}"}), "name", ""), ["Boss", "Bracket"]);
+    assert_eq!(complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://body/{name}"}), "name", "br"), ["Bracket"]);
+    assert_eq!(complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://sketch/{name}"}), "name", "Base"), ["BaseSketch"]);
+
+    let feat_matches = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://feature/{id}"}), "id", "Main");
+    assert_eq!(feat_matches, ["MainBox"]);
+    let all_feats = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://feature/{id}"}), "id", "");
+    assert!(all_feats.iter().any(|f| f == "MainBox") && all_feats.iter().any(|f| f == "TopBoss"), "{all_feats:?}");
+    assert!(all_feats.iter().any(|f| f.chars().all(|c| c.is_ascii_digit())), "numeric feature ids included: {all_feats:?}");
+
+    let cmd_prefix = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://command/{id}"}), "id", "solid.b");
+    assert!(cmd_prefix.iter().any(|c| c == "solid.box"), "{cmd_prefix:?}");
+    assert!(cmd_prefix.iter().all(|c| c.starts_with("solid.b")), "{cmd_prefix:?}");
+    let cmd_sub = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://command/{id}"}), "id", "fillet");
+    assert!(cmd_sub.iter().any(|c| c == "solid.fillet"), "{cmd_sub:?}");
+
+    let skills = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://skill/{skill}/{file}"}), "skill", "solidcraft-m");
+    assert_eq!(skills, ["solidcraft-mechanisms", "solidcraft-modeling"]);
+    let all_files = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://skill/{skill}/{file}"}), "file", "");
+    assert_eq!(all_files, ["SKILL.md", "reference.md", "reference/porting.md"]);
+    let scoped_files = complete(&mut s, json!({"type": "ref/resource", "uri": "solidcraft://skill/solidcraft-checking/{file}"}), "file", "ref");
+    assert_eq!(scoped_files, ["reference/porting.md"]);
+
+    // ref/prompt argument completions
+    let edit_targets = complete(&mut s, json!({"type": "ref/prompt", "name": "edit-design"}), "target", "Br");
+    assert_eq!(edit_targets, ["Bracket"]);
+    let params = complete(&mut s, json!({"type": "ref/prompt", "name": "check-parameters"}), "parameters", "plate_");
+    assert_eq!(params, ["plate_h", "plate_w"]);
+    let params_csv = complete(&mut s, json!({"type": "ref/prompt", "name": "check-parameters"}), "parameters", "plate_w, p");
+    assert_eq!(params_csv, ["plate_w, plate_h"]);
+    let diag_feats = complete(&mut s, json!({"type": "ref/prompt", "name": "diagnose-feature"}), "feature", "Top");
+    assert_eq!(diag_feats, ["TopBoss"]);
+    let materials = complete(&mut s, json!({"type": "ref/prompt", "name": "model-part"}), "material", "sheet");
+    assert_eq!(materials, ["sheet metal"]);
+    let occs = complete(&mut s, json!({"type": "ref/prompt", "name": "assembly-clearance"}), "occurrences", "Bo");
+    assert_eq!(occs, ["Boss"]);
+}

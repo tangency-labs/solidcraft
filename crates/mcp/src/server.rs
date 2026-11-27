@@ -8,7 +8,7 @@ use std::sync::{Mutex, mpsc};
 
 use serde_json::{Value, json};
 use solidcraft_engine::io::vfs::{self, PathScope};
-use solidcraft_mcp_server::{Contents, Info, Tools};
+use solidcraft_mcp_server::{Contents, Info, Reference, Tools};
 #[cfg(not(target_arch = "wasm32"))]
 use solidcraft_mcp_server::{Incoming, read_message, response};
 
@@ -209,13 +209,28 @@ impl Tools for Agent {
         ]
     }
 
+    fn resource_templates(&self) -> Vec<Value> {
+        crate::resources::templates()
+    }
+
     fn read_resource(&mut self, uri: &str) -> Option<Result<Contents, String>> {
-        let read = match uri {
-            "solidcraft://design" => self.backend.call("document.inspect", json!({"measure": true})),
-            "solidcraft://commands" => self.backend.call("engine.commands", json!({})),
-            _ => return None,
-        };
-        Some(read.map(|v| Contents::json(&v)))
+        match uri {
+            "solidcraft://design" => Some(self.backend.call("document.inspect", json!({"measure": true})).map(|v| Contents::json(&v))),
+            "solidcraft://commands" => Some(self.backend.call("engine.commands", json!({})).map(|v| Contents::json(&v))),
+            _ => crate::resources::read_template(self.backend.as_mut(), uri),
+        }
+    }
+
+    fn prompts(&self) -> Vec<Value> {
+        crate::prompts::definitions()
+    }
+
+    fn get_prompt(&mut self, name: &str, args: &Value) -> Result<Value, String> {
+        crate::prompts::get(name, args)
+    }
+
+    fn complete(&mut self, reference: Reference<'_>, argument: &str, value: &str) -> Vec<String> {
+        crate::resources::complete(self.backend.as_mut(), reference, argument, value)
     }
 }
 
