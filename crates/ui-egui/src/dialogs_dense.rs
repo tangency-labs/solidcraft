@@ -1567,7 +1567,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::Thread { designation, length, suggested, of, options, .. } => {
             let mut modeled = d.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false);
             let before = modeled;
-            let (submitted, reset) = crate::dialogs_thread::rows(ui, designation, suggested, length, options, &mut modeled);
+            let (submitted, reset) = crate::dialogs_thread::rows(ui, &app.session.doc, designation, suggested, length, options, &mut modeled);
             if modeled != before {
                 d.extra.insert("modeled".into(), json!(modeled));
             }
@@ -1575,7 +1575,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             if reset {
                 of.clear();
             }
-            crate::dialogs_thread::sync_inputs(&mut d.inputs, &mut d.active, options);
+            crate::dialogs_thread::sync_inputs(&mut d.inputs, &mut d.active, options, &app.session.doc);
         }
         Kind::Loft { operation, rail_fit } => {
             crate::op_auto::op_row(ui, "lf_op", operation);

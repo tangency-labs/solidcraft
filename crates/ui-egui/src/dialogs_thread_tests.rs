@@ -511,7 +511,7 @@ fn thread_box_selection_keeps_one_face_until_explicit_add() {
         // Start/Up To inputs keep their existing single-selection contract.
         let Kind::Thread { options, .. } = &mut d.kind else { panic!("Thread") };
         options.extent = UP_TO_EXTENT;
-        sync_inputs(&mut d.inputs, &mut d.active, options);
+        sync_inputs(&mut d.inputs, &mut d.active, options, &h.app.session.doc);
         let up_to = d.inputs.iter().position(|i| i.label == UP_TO).unwrap();
         d.active = up_to;
         d.take_box(&h.app.session, picks[..2].to_vec(), false);
@@ -937,19 +937,52 @@ fn a_thread_can_be_chamfered_at_both_ends() {
 }
 
 /// #23145: a typed offset goes into the command and a blank one stays out, and with one the end to
-/// start from can be picked even on a Full thread.
+/// start from can be picked even on a Full thread. An offset that comes to 0 is none, as the
+/// command takes it; one that can't be worked out, or is negative, counts as given.
 #[test]
 fn an_offset_is_sent_only_when_typed_and_asks_for_the_start_end() {
+    let mut doc = Document::default();
+    doc.set_param("lead_in", "0 mm", Some("mm"), None).unwrap();
     let mut o = Options::default();
     let mut p = json!({});
     put_params(&mut p, "", &o, &[]);
     assert_eq!(p.get("offset"), None, "{p}");
-    assert!(!o.starts_at_an_end());
-    o.offset = "  ".into();
-    assert!(!o.starts_at_an_end(), "a blank offset is none");
+    assert!(!o.starts_at_an_end(&doc));
+    for none in ["  ", "0", "0 mm", "0 in", "lead_in"] {
+        o.offset = none.into();
+        assert!(!o.has_offset(&doc) && !o.starts_at_an_end(&doc), "`{none}` is no offset");
+    }
+    for given in ["4 mm", "-1 mm", "no_such_param"] {
+        o.offset = given.into();
+        assert!(o.has_offset(&doc) && o.starts_at_an_end(&doc), "`{given}` is an offset");
+    }
     o.offset = "4 mm".into();
     let mut p = json!({});
     put_params(&mut p, "", &o, &[]);
     assert_eq!(p["offset"], "4 mm");
-    assert!(o.starts_at_an_end(), "a Full thread with an offset starts at one end");
+}
+
+/// Review of #23145: with an offset the start lies inside the face, so the Start row's Chamfer is
+/// the command's `tip: both`, the far end, as the refusal of `tip: start` advises; "Chamfer both
+/// ends" is then fixed on (the tip sent is `both`). The stud it makes builds, the far end its free one. An offset of 0 is
+/// none: the start-end pick stays away and Chamfer is the start again.
+#[test]
+fn a_chamfer_with_an_offset_is_the_far_ends_and_a_zero_offset_is_none() {
+    let inputs = |h: &Harness| h.app.dialog.as_ref().unwrap().inputs.iter().map(|i| i.label).collect::<Vec<_>>();
+    let mut h = shaft();
+    type_in(&mut h, "Offset", "0 mm");
+    assert_eq!(inputs(&h), ["Cylindrical face"], "an offset of 0 starts at no end in particular");
+    choose(&mut h, "Start", "Chamfer");
+    assert_eq!(params(&h)["tip"], "start");
+    choose(&mut h, "Start", "None");
+    type_in(&mut h, "Offset", "2 mm");
+    assert_eq!(inputs(&h), ["Cylindrical face", START_END], "an offset starts at an end");
+    choose(&mut h, "Start", "Chamfer");
+    assert!(shown("Chamfer Angle") && shown("Chamfer Depth"));
+    click(&mut h, &["dialog:Modeled"]);
+    let (cmd, mut p) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    assert_eq!((&p["tip"], &p["offset"]), (&json!("both"), &json!("2 mm")), "{p}");
+    // From the top of the 10 mm shaft: the thread runs z 8 down to 0, whose end is free.
+    p["from"] = json!([0, 0, 10]);
+    h.app.session.execute(&cmd, &p).unwrap_or_else(|e| panic!("{p}: {e}"));
 }
