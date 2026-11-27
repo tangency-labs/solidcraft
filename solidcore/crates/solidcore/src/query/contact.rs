@@ -788,13 +788,13 @@ pub fn boundary_distance(k: &Kernel, a: &mut Brep, b: &mut Brep, width: f64) -> 
 /// 0. Certified body-box separation before building Bézier pieces.
 /// 1. Strict separation via [`meets`] at `1e-9`: proves disjointness when boundaries stay
 ///    apart and every boundary shell of each solid lies outside the other.
-/// 2a. Certified separating plane from planar face normals and each body's Bézier hulls:
-///     proves strictly zero hull overlap along a separating normal.
-/// 2b. Exact analytic half-space separation along candidate planar faces (handles flush
-///     contact with holes, fillets, 180-degree rotations, or tangent cylinders).
-/// 2c. Exact analytic coaxial-cylinder separation (handles a cylindrical pin seated flush
-///     inside a matching cylindrical bore).
-/// 3. Exact planar-overlap-region proof when every face meeting the overlap box is a plane
+/// 2. Certified separating plane from planar face normals and each body's Bézier hulls:
+///    proves strictly zero hull overlap along a separating normal.
+/// 3. Exact analytic half-space separation along candidate planar faces (handles flush
+///    contact with holes, fillets, 180-degree rotations, or tangent cylinders).
+/// 4. Exact analytic coaxial-cylinder separation (handles a cylindrical pin seated flush
+///    inside a matching cylindrical bore).
+/// 5. Exact planar-overlap-region proof when every face meeting the overlap box is a plane
 ///    with straight edges inside the other body's inflated box (covers multi-face flush
 ///    contacts such as a tenon in a window on a plate with bolt holes elsewhere).
 ///
