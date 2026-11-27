@@ -137,6 +137,7 @@ pub mod issue_report;
 pub mod joint_drag;
 pub(crate) mod joint_handles;
 pub(crate) mod joint_symbols;
+pub(crate) mod keyboard_profiles;
 pub mod keymap;
 #[cfg(test)]
 mod kit_gallery_tests;
