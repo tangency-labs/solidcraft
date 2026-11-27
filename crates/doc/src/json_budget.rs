@@ -936,7 +936,7 @@ pub(crate) fn peek_header<'de>(family: &Family<'_>, s: &'de str, capture_drawing
             })
         }
         fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Self::Value, A::Error> {
-            while seq.next_element::<IgnoredAny>()?.is_some() {}
+            while seq.next_element_seed(DepthCheckedSkip(1))?.is_some() {}
             Ok(RawHeader {
                 is_object: false,
                 format: FormatField::Absent,
@@ -957,14 +957,64 @@ pub(crate) fn peek_header<'de>(family: &Family<'_>, s: &'de str, capture_drawing
                     "drawings" if self.capture_drawings => drawings = Some(map.next_value::<&'de RawValue>()?),
                     "unit_word_params" => {
                         has_unit_word_params = true;
-                        map.next_value::<IgnoredAny>()?;
+                        map.next_value_seed(DepthCheckedSkip(1))?;
                     }
                     _ => {
-                        map.next_value::<IgnoredAny>()?;
+                        map.next_value_seed(DepthCheckedSkip(1))?;
                     }
                 }
             }
             Ok(RawHeader { is_object: true, format, pending, drawings, has_unit_word_params })
+        }
+    }
+
+    struct DepthCheckedSkip(usize);
+    impl<'de> DeserializeSeed<'de> for DepthCheckedSkip {
+        type Value = ();
+        fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> std::result::Result<(), D::Error> {
+            if self.0 > 128 {
+                return Err(de::Error::custom("recursion limit exceeded"));
+            }
+            deserializer.deserialize_any(self)
+        }
+    }
+    impl<'de> Visitor<'de> for DepthCheckedSkip {
+        type Value = ();
+        fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str("any JSON value within recursion limit")
+        }
+        fn visit_bool<E: de::Error>(self, _: bool) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_i64<E: de::Error>(self, _: i64) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_u64<E: de::Error>(self, _: u64) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_f64<E: de::Error>(self, _: f64) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_str<E: de::Error>(self, _: &str) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_none<E: de::Error>(self) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_unit<E: de::Error>(self) -> std::result::Result<(), E> {
+            Ok(())
+        }
+        fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+            let next = self.0 + 1;
+            while seq.next_element_seed(DepthCheckedSkip(next))?.is_some() {}
+            Ok(())
+        }
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<(), A::Error> {
+            let next = self.0 + 1;
+            while map.next_key::<IgnoredAny>()?.is_some() {
+                map.next_value_seed(DepthCheckedSkip(next))?;
+            }
+            Ok(())
         }
     }
 
