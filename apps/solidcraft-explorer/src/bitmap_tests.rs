@@ -79,10 +79,7 @@ fn scaling_averages_in_premultiplied_alpha() {
     // Straight averaging would give a dark [128, 0, 0, 128].
     assert_eq!(scale(&[255, 0, 0, 255, 0, 0, 0, 0], 2, 1, 1, 1), Some(vec![255, 0, 0, 128]));
     assert_eq!(scale(&[0; 8], 2, 1, 1, 1), Some(vec![0, 0, 0, 0]));
-    assert_eq!(
-        scale(&quadrants(), 4, 4, 2, 2),
-        Some(vec![255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 255, 255, 255, 0, 0, 255])
-    );
+    assert_eq!(scale(&quadrants(), 4, 4, 2, 2), Some(vec![255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 255, 255, 255, 0, 0, 255]));
 }
 
 #[test]
