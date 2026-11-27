@@ -7094,13 +7094,14 @@ fn a_coil_spring_wire_with_a_surface_off_its_edges_measures_the_wire_below_its_e
 /// #20575 (`17-step-spring-wire-hang-b.step`): the closely wound wire cut where its flat end
 /// stands all but tangent to the tube of the turn above (the end plane touches the tube at the
 /// cut's last vertex) comes in as one closed body of the volume of the wire below that plane, about
-/// 68 mm³, not as surfaces with the wire's wall left out for an edge "4.78 mm off the face's
-/// surface". The kernel's drop of the cut's second piece onto the surface settled on another
+/// 64 mm³ (the plane is at z = 1.61 mm), not as surfaces with the wire's wall left out for an edge
+/// "4.78 mm off the face's surface". The kernel's drop of the cut's second piece onto the surface settled on another
 /// part of the surface for stretches of the edge; the trim is followed along the surface instead.
-/// The surface on the tube, 0.2 % inside it and 0.2 % outside it all read. Outside it, the file's
-/// seam on the exact tube is projected a sliver across the surface's boundary line; the seam
-/// completion took it for a seam to put back, and putting it back projected the cut afresh onto
-/// the turn it almost touches, leaving the body with its imported trims and some 7 % short.
+/// The surface on the tube, 0.2 % inside it and 0.2 % outside it all read, their seams completed:
+/// off the tube, the file's seam on the exact tube is projected a sliver across the surface's
+/// boundary line, and the seam completion took it for a seam to put back; putting it back
+/// projected the cut afresh onto the turn it almost touches and left the loop a period short, so
+/// the body kept its imported trims with a warning that it had not been tidied.
 #[test]
 fn a_coil_spring_wire_cut_by_a_plane_tangent_to_its_tube_imports_closed() {
     let (pitch, cut) = (1.125_f64, 8.995_466_109_045_587_f64);
@@ -7110,6 +7111,7 @@ fn a_coil_spring_wire_cut_by_a_plane_tangent_to_its_tube_imports_closed() {
         assert_eq!(imported.bodies.len(), 1, "{scale}: {:?}", imported.warnings);
         let body = &imported.bodies[0];
         assert!(body.closed && body.refused.is_none(), "{scale}: {:?}", imported.warnings);
+        assert!(!imported.warnings.iter().any(|w| w.contains("were not completed")), "{scale}: {:?}", imported.warnings);
         let volume = measure(&body.body).unwrap().volume;
         assert!(rel(volume, expected) < 0.01, "{scale}: {volume} against {expected}");
     }
@@ -7244,7 +7246,6 @@ fn a_coil_spring_wire_bounded_by_two_closed_edges_and_no_seam_imports_closed() {
                 let body = imported.bodies.first();
                 let closed = imported.bodies.len() == 1 && body.is_some_and(|b| b.closed && b.refused.is_none());
                 let volume = body.and_then(|b| measure(&b.body).ok()).map(|m| m.volume);
-                eprintln!("{case}: closed {closed}, volume {volume:?} against {expected}: {:?}", imported.warnings);
                 if !closed || !volume.is_some_and(|v| rel(v, expected) < 0.01) {
                     failed.push(format!("{case}: closed {closed}, volume {volume:?} against {expected}: {:?}", imported.warnings));
                 }

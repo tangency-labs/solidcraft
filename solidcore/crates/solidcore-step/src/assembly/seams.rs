@@ -2109,8 +2109,9 @@ impl Assembly<'_> {
 
     /// The use of loop `li` of face `fi` that starts on the closed spline's boundary line at
     /// `start` (the column at u = `start`, or the row at v = `start` for one closed in v), or on a
-    /// revolution's meridian at angle `start`: a vertex there within the tolerance, else one made
-    /// by splitting the loop's edge that crosses it.
+    /// revolution's meridian at angle `start`: a vertex there within the tolerance (or one whose
+    /// foot on the surface is there, within the vertex's own distance from the surface), else one
+    /// made by splitting the loop's edge that crosses it.
     fn seam_start(&mut self, fi: usize, li: usize, start: f64, ax: &Axis, eval: &SurfaceEval) -> R<usize> {
         let Some(Bound::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else { return Err("loop reference".into()) };
         let es = es.clone();
