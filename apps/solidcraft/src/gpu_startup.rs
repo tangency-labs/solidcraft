@@ -384,8 +384,9 @@ mod tests {
                 assert!(!started.unwrap().contains(gl));
             }
         }
-        // Nothing recorded: wgpu's own set, exactly as before.
-        assert_eq!(standard_backends(true, false, false, None, Backends::empty()), None);
+        // Nothing recorded: D3D12 alone on Windows, wgpu's own set elsewhere.
+        assert_eq!(standard_backends(true, false, false, None, Backends::empty(), Backends::empty()), Some(Backends::DX12));
+        assert_eq!(standard_backends(false, false, false, None, Backends::empty(), Backends::empty()), None);
     }
 
     #[test]
