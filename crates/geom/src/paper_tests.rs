@@ -677,8 +677,10 @@ fn a_pattern_round_trips_and_a_solid_stroke_has_none() {
     assert!(solid["groups"][0]["items"][0].get("pattern").is_none());
 }
 
-/// On the grid a pattern is in whole steps: a length under half a step is one step, counted, and
-/// the phase, rounded on its own, is taken within the rounded pattern.
+/// On the grid a pattern is the one its round caps need, in whole steps: a gap under half a step is
+/// one step, counted, a dash may round to 0 (a dot), and the phase, rounded on its own, is taken
+/// within the rounded pattern. The strokes are 0.35 mm wide: each dash loses 0.35, each gap gains
+/// 0.35 (half from the dash on each side), and the phase moves back 0.175.
 #[test]
 fn a_pattern_on_the_grid_is_in_whole_steps() {
     let stroke = |lengths: &[f64], phase, grid| {
@@ -688,9 +690,35 @@ fn a_pattern_on_the_grid_is_in_whole_steps() {
     };
     let millimetre = Grid::new(1.0).unwrap();
     let grid_dashes = |lengths: &[i64], phase| GridDashes { lengths: lengths.to_vec(), phase };
-    assert_eq!(stroke(&[4.2, 1.05], 0.5, Grid::NANOMETRE), (grid_dashes(&[4_200_000, 1_050_000], 500_000), 0));
-    assert_eq!(stroke(&[4.2, 1.05], 0.5, millimetre), (grid_dashes(&[4, 1], 1), 0));
-    assert_eq!(stroke(&[0.4, 0.3, 2.0, 0.5], 0.0, millimetre), (grid_dashes(&[1, 1, 2, 1], 0), 2));
-    // 2.7 rounds to 3, past the rounded pattern's 2: a step into it.
-    assert_eq!(stroke(&[1.4, 1.4], 2.7, millimetre), (grid_dashes(&[1, 1], 1), 0));
+    // [3.85, 1.4] from 0.325.
+    assert_eq!(stroke(&[4.2, 1.05], 0.5, Grid::NANOMETRE), (grid_dashes(&[3_850_000, 1_400_000], 325_000), 0));
+    assert_eq!(stroke(&[4.2, 1.05], 0.5, millimetre), (grid_dashes(&[4, 1], 0), 0));
+    // [0.05, 0.45, 1.65, 0.85] from 3.0 - 0.175 = 2.825: the 0.45 gap is snapped, the 0.05 dash is 0.
+    assert_eq!(stroke(&[0.4, 0.1, 2.0, 0.5], 0.0, millimetre), (grid_dashes(&[0, 1, 2, 1], 3), 1));
+    // [1.25, 1.35] from 2.325, which rounds to 2, the rounded pattern's whole length: its start.
+    assert_eq!(stroke(&[1.6, 1.0], 2.5, millimetre), (grid_dashes(&[1, 1], 0), 0));
+}
+
+/// Under round caps `w` wide each dash is `w` shorter about its middle, or 0 (a dot) when it is no
+/// longer than `w`; each gap grows by half of each dash beside it, so the period stays; the
+/// first dash starts `cut / 2` later. ISO 128's chain line with a dot one width long: the dot
+/// becomes a dot of width `w` exactly where it was.
+#[test]
+fn a_pattern_under_round_caps_keeps_each_dash_where_it_was() {
+    let under = |lengths: &[f64], phase_mm, w| Dashes { lengths_mm: lengths.to_vec(), phase_mm }.under_round_caps(w);
+    let close = |a: &Dashes, b: &[f64], phase: f64| {
+        assert_eq!(a.lengths_mm.len(), b.len(), "{a:?}");
+        assert!(a.lengths_mm.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-12) && (a.phase_mm - phase).abs() < 1e-12, "{a:?} vs {b:?} from {phase}");
+    };
+    close(&under(&[4.2, 1.05], 0.5, 0.35), &[3.85, 1.4], 0.325);
+    // A chain line 0.5 wide: 12, 1.5, 0.5, 1.5 becomes 11.5, 2, 0, 2.
+    close(&under(&[12.0, 1.5, 0.5, 1.5], 0.0, 0.5), &[11.5, 2.0, 0.0, 2.0], 15.5 - 0.25);
+    // Six lengths: the last gap takes half of the last dash and half of the first.
+    close(&under(&[2.0, 1.0, 3.0, 1.0, 4.0, 1.0], 1.0, 1.0), &[1.0, 2.0, 2.0, 2.0, 3.0, 2.0], 0.5);
+    // Width 0 or not a number changes nothing; a pattern that isn't one is returned as it is.
+    close(&under(&[2.0, 1.0], 0.5, 0.0), &[2.0, 1.0], 0.5);
+    close(&under(&[2.0, 1.0], 0.5, f64::NAN), &[2.0, 1.0], 0.5);
+    close(&under(&[2.0, 1.0, 3.0], 0.5, 1.0), &[2.0, 1.0, 3.0], 0.5);
+    // A width past every dash leaves only dots, and the period whole.
+    close(&under(&[1.0, 1.0], 0.0, 5.0), &[0.0, 2.0], 1.5);
 }

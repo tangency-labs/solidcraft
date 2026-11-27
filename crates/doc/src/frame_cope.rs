@@ -1,10 +1,10 @@
 //! Retained round-tube end cuts and their cylindrical developments: the record and its
 //! certificate. Every quantity (how a mate fits an end, how far a cut reaches, the unwrapped cut)
-//! is the kernel's, through `solidcore_ops::tube_cope`. No display mesh is used.
+//! is the kernel's, through `solidcraft_kernel::tube_cope`. No display mesh is used.
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Vec2, Vec3};
-use solidcraft_kernel::services::tube_cope::{self as ops, Refusal, TemplateRefusal};
+use solidcraft_kernel::tube_cope::{self as ops, Refusal, TemplateRefusal};
 
 use crate::{DocError, ModelBody, Result};
 

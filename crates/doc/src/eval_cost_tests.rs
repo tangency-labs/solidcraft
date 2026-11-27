@@ -2528,6 +2528,7 @@ fn marking(p: Vec3) -> FeatureKind {
         hand: crate::thread_forms::ThreadHand::Right,
         starts: 1,
         ease_out: None,
+        to_bottom: false,
         tip: Default::default(),
         chamfer_angle: None,
         chamfer_depth: None,
@@ -2614,6 +2615,8 @@ fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -2671,6 +2674,8 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -4678,6 +4683,15 @@ fn a_healed_import_keeps_its_model_cache_across_save_and_open() {
     // Settle the heal and evaluate so the model carries the healed body.
     assert!(model.settle_import_checks_under(true));
     model.evaluate(&doc);
+    // That evaluation reads the import again with its heal, which starts a fresh SMLib check of
+    // its parts on a kernel thread; a save keeps no model while one runs (#20133). Wait for it
+    // to end, as a save once the check ends would.
+    for r in &model.results {
+        if let Some(report) = &r.import_report {
+            report.checks.wait();
+        }
+    }
+    assert!(!model.checking_imports());
     assert!(model.has_import_heals());
     assert!(model.cache_skip_reason(&doc).is_none(), "{:?}", model.cache_skip_reason(&doc));
     let healed_fp = model.result(import).unwrap().fingerprint;
@@ -5688,6 +5702,8 @@ fn unrelated_earlier_edits_keep_downstream_cosmetic_threads_and_pattern_cached()
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -5921,6 +5937,8 @@ fn unrelated_earlier_edits_keep_downstream_shell_scale_mirror_and_extrude_patter
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -6042,6 +6060,8 @@ fn editing_external_sketch_line_axis_invalidates_revolve_and_pattern_cache() {
             extent2: None,
             copy_at_end1: false,
             copy_at_end2: false,
+            spacing_list1: Vec::new(),
+            spacing_list2: Vec::new(),
         },
         bodies: Vec::new(),
         placements: Vec::new(),
@@ -6426,4 +6446,389 @@ fn mirroring_cuts_that_consume_the_target_matches_sequential_refusal() {
     let err_seq = run(1);
     assert!(err_batch.as_deref().is_some_and(|e| e.contains("no body to cut")), "{err_batch:?}");
     assert_eq!(err_batch, err_seq);
+}
+
+/// Multi-body `join` pre-filters targets by inflated exact bounds before calling `Body::meets`,
+/// so distant untouched bodies never run fine contact tests or get meshed.
+#[test]
+fn join_with_distant_bodies_skips_contact_tests_and_meshing_for_distant_targets() {
+    let mut doc = Document::new("distant join");
+    for i in 0..5 {
+        block(&mut doc, &format!("B{i}"), Vec3::new(50.0 * i as f64, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    assert!(model.state().bodies.iter().all(|b| b.cached_mesh().is_none()));
+
+    // A single boss standing on B2 must only contact-test B2, leaving B0/B1/B3/B4 unmeshed.
+    let boss = FeatureKind::Box {
+        corner: point_expr(Vec3::new(102.0, 2.0, 10.0)),
+        length: "4".into(),
+        width: "4".into(),
+        height: "4".into(),
+        operation: Operation::Join,
+        centred: false,
+    };
+    let f1 = doc.add_feature(boss, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(f1).is_some_and(|r| r.error.is_none()), "{:?}", model.result(f1));
+    assert_eq!(work.contact_tests, 1, "only the touching target B2 should run Body::meets: {work:?}");
+    assert_eq!(work.join_unions, 1, "{work:?}");
+    for name in ["B0", "B1", "B3", "B4"] {
+        assert!(model.state().body(name).unwrap().cached_mesh().is_none(), "distant target {name} must not be meshed");
+    }
+    assert!((volume(&model, "B2") - 1064.0).abs() < 1e-6, "{}", volume(&model, "B2"));
+    for name in ["B0", "B1", "B3", "B4"] {
+        assert!((volume(&model, name) - 1000.0).abs() < 1e-6, "{name}: {}", volume(&model, name));
+    }
+
+    // Two bosses standing on B1 and B3: one contact test per tool, distant targets stay unmeshed.
+    let f2 = join_rects(&mut doc, &[(52.0, 2.0, 4.0, 4.0), (152.0, 2.0, 4.0, 4.0)], 14.0);
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(f2).is_some_and(|r| r.error.is_none()), "{:?}", model.result(f2));
+    assert_eq!(work.contact_tests, 2, "each tool should contact-test only its own target: {work:?}");
+    assert_eq!(work.join_unions, 2, "{work:?}");
+    for name in ["B0", "B2", "B4"] {
+        assert!(model.state().body(name).unwrap().cached_mesh().is_none(), "untouched target {name} must stay unmeshed");
+    }
+    assert!((volume(&model, "B1") - 1064.0).abs() < 1e-6, "{}", volume(&model, "B1"));
+    assert!((volume(&model, "B3") - 1064.0).abs() < 1e-6, "{}", volume(&model, "B3"));
+}
+
+/// `join_pattern_copies` uses batched union (`join_union_batch`) for overlapping copies and
+/// `union_all_apart` for disjoint copies, matching the exact union volume.
+#[test]
+fn join_pattern_copies_matches_exact_union_volume() {
+    // Five overlapping 10x10x10 cubes spaced 6 mm along X span 0..34 -> exact volume 3400 mm^3.
+    let mut doc = Document::new("pattern join overlap");
+    block(&mut doc, "Bar", Vec3::ZERO, [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let pat_kind: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern",
+        "features": [],
+        "bodies": ["Bar"],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "5", "spacing1": "6"},
+        "join": true,
+    }))
+    .unwrap();
+    let pat = doc.add_feature(pat_kind, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(pat).is_some_and(|r| r.error.is_none()), "{:?}", model.result(pat));
+    assert_eq!(work.join_unions, 1, "overlapping pattern copies must batch into one union: {work:?}");
+    assert_eq!(model.state().bodies.len(), 1);
+    assert_eq!(model.state().bodies[0].name, "Bar");
+    assert!((volume(&model, "Bar") - 3400.0).abs() < 1e-4, "{}", volume(&model, "Bar"));
+
+    // Four disjoint 10x10x10 cubes spaced 25 mm along X fast-path via `union_all_apart` and stay
+    // four separate bodies totaling 4000 mm^3.
+    let mut doc = Document::new("pattern join apart");
+    block(&mut doc, "Peg", Vec3::ZERO, [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let pat_kind: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern",
+        "features": [],
+        "bodies": ["Peg"],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "4", "spacing1": "25"},
+        "join": true,
+    }))
+    .unwrap();
+    let pat = doc.add_feature(pat_kind, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(pat).is_some_and(|r| r.error.is_none()), "{:?}", model.result(pat));
+    assert_eq!(work.joined_apart, 1, "disjoint pattern copies should fast-path via union_all_apart: {work:?}");
+    assert_eq!(work.join_unions, 0, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 4);
+    assert_eq!(st.bodies[0].name, "Peg");
+    let total: f64 = st.bodies.iter().map(|b| kernel::measure(&b.body).unwrap().volume).sum();
+    assert!((total - 4000.0).abs() < 1e-4, "{total}");
+}
+
+/// Parallel multi-body `Pattern`, `Mirror`, `Fillet`, `Scale`, `Move` (with composed `copy_frames`),
+/// and `Cut` produce deterministic body names, ordering, and exact geometry across repeated runs.
+#[test]
+fn parallel_pattern_mirror_fillet_scale_move_and_cut_are_deterministic() {
+    let eval_snapshot = |doc: &Document| -> Vec<(String, usize, f64, solidcraft_geom::Aabb3)> {
+        let mut model = Model::new();
+        model.evaluate(doc);
+        assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+        model
+            .state()
+            .bodies
+            .iter()
+            .map(|b| (b.name.clone(), b.body.face_count(), kernel::measure(&b.body).unwrap().volume, b.body.exact_bounds().unwrap()))
+            .collect()
+    };
+
+    // 1. Multi-body Pattern (2 sources x 4 instances = 8 bodies).
+    let mut doc = Document::new("par pattern");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(0.0, 20.0, 0.0), [10.0, 10.0, 10.0]);
+    let pat: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern",
+        "features": [],
+        "bodies": ["A", "B"],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "4", "spacing1": "20"},
+    }))
+    .unwrap();
+    doc.add_feature(pat, None).unwrap();
+    let run1 = eval_snapshot(&doc);
+    let run2 = eval_snapshot(&doc);
+    assert_eq!(run1.len(), 8);
+    assert_eq!(run1, run2, "parallel body pattern must be deterministic");
+    assert!(run1.iter().all(|(_, f, v, _)| *f == 6 && (*v - 1000.0).abs() < 1e-6));
+
+    // 2. Multi-body Mirror across YZ (3 bodies -> 6 bodies).
+    let mut doc = Document::new("par mirror");
+    for i in 0..3 {
+        block(&mut doc, &format!("M{i}"), Vec3::new(10.0 + 20.0 * i as f64, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    }
+    doc.add_feature(
+        FeatureKind::Mirror {
+            features: Vec::new(),
+            plane: PlaneRef::Origin { name: "YZ".into() },
+            bodies: vec![BodyName("M0".into()), BodyName("M1".into()), BodyName("M2".into())],
+            combine: false,
+            placements: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    let run1 = eval_snapshot(&doc);
+    let run2 = eval_snapshot(&doc);
+    assert_eq!(run1.len(), 6);
+    assert_eq!(run1, run2, "parallel mirror must be deterministic");
+    assert!((run1[3].3.min.x - (-20.0)).abs() < 1e-6 && (run1[3].3.max.x - (-10.0)).abs() < 1e-6);
+    assert!((run1[4].3.min.x - (-40.0)).abs() < 1e-6 && (run1[4].3.max.x - (-30.0)).abs() < 1e-6);
+    assert!((run1[5].3.min.x - (-60.0)).abs() < 1e-6 && (run1[5].3.max.x - (-50.0)).abs() < 1e-6);
+
+    // 3. Multi-body Fillet across 3 bodies in one feature.
+    let mut doc = Document::new("par fillet");
+    for i in 0..3 {
+        block(&mut doc, &format!("F{i}"), Vec3::new(30.0 * i as f64, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    }
+    doc.add_feature(
+        FeatureKind::Fillet {
+            edges: vec![Position(Vec3::new(5.0, 0.0, 10.0)), Position(Vec3::new(35.0, 0.0, 10.0)), Position(Vec3::new(65.0, 0.0, 10.0))],
+            radius: "1".into(),
+            body: None,
+            style: Default::default(),
+            fit: Default::default(),
+            corner: Default::default(),
+            setbacks: Vec::new(),
+            turn: Default::default(),
+            tangent_chain: false,
+            edge_radii: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    let run1 = eval_snapshot(&doc);
+    let run2 = eval_snapshot(&doc);
+    assert_eq!(run1, run2, "parallel fillet must be deterministic");
+    let names: Vec<&str> = run1.iter().map(|(n, ..)| n.as_str()).collect();
+    assert_eq!(names, vec!["F0", "F1", "F2"]);
+    let expected_fillet_v = 1000.0 - 10.0 * (1.0 - std::f64::consts::FRAC_PI_4);
+    for (_, faces, vol, _) in &run1 {
+        assert_eq!(*faces, 7);
+        assert!((*vol - expected_fillet_v).abs() < 1e-3, "{vol} vs {expected_fillet_v}");
+    }
+
+    // 4. Multi-body Cut (3 surviving targets cut in parallel, 1 distant target pruned).
+    let mut doc = Document::new("par cut");
+    for i in 0..3 {
+        block(&mut doc, &format!("C{i}"), Vec3::new(20.0 * i as f64, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    }
+    block(&mut doc, "Far", Vec3::new(200.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::new(-5.0, 3.0, 3.0)),
+            length: "60".into(),
+            width: "4".into(),
+            height: "4".into(),
+            operation: Operation::Cut,
+            centred: false,
+        },
+        None,
+    )
+    .unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    assert_eq!(work.cut, 3, "only the 3 intersecting bodies should be cut: {work:?}");
+    let run1 = eval_snapshot(&doc);
+    let run2 = eval_snapshot(&doc);
+    assert_eq!(run1, run2, "parallel cut must be deterministic");
+    for (i, item) in run1.iter().enumerate().take(3) {
+        assert!((item.2 - 840.0).abs() < 1e-4, "C{i}: {}", item.2);
+    }
+    assert!((run1[3].2 - 1000.0).abs() < 1e-6, "Far: {}", run1[3].2);
+
+    // 5. Multi-body Scale and Move (copy + non-identity copy_frames composed into one transform).
+    let mut doc = Document::new("par scale move");
+    block(&mut doc, "S0", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "S1", Vec3::new(30.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    doc.add_feature(
+        FeatureKind::Scale {
+            bodies: vec![BodyName("S0".into()), BodyName("S1".into())],
+            origin: Position(Vec3::ZERO),
+            about: None,
+            factor: "2".into(),
+            factors: None,
+        },
+        None,
+    )
+    .unwrap();
+    let frame = rigid(Vec3::new(0.0, 0.0, 20.0), Vec3::ZERO, Vec3::Z, 0.0);
+    doc.add_feature(
+        FeatureKind::Move {
+            bodies: vec![BodyName("S0".into()), BodyName("S1".into())],
+            translate: ["0".into(), "50".into(), "0".into()],
+            rotate_axis: None,
+            rotate_about: None,
+            origin: None,
+            angle: None,
+            copy: true,
+            copy_frames: vec![frame, frame],
+            carry: Vec::new(),
+            leave: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    let run1 = eval_snapshot(&doc);
+    let run2 = eval_snapshot(&doc);
+    assert_eq!(run1.len(), 4);
+    assert_eq!(run1, run2, "parallel scale + move copy must be deterministic");
+    for (_, _, vol, _) in &run1 {
+        assert!((*vol - 8000.0).abs() < 1e-4, "{vol}");
+    }
+    assert!(run1[2].3.min.dist(Vec3::new(0.0, 50.0, 20.0)) < 1e-6, "{:?}", run1[2].3);
+    assert!(run1[2].3.max.dist(Vec3::new(20.0, 70.0, 40.0)) < 1e-6, "{:?}", run1[2].3);
+    assert!(run1[3].3.min.dist(Vec3::new(60.0, 50.0, 20.0)) < 1e-6, "{:?}", run1[3].3);
+    assert!(run1[3].3.max.dist(Vec3::new(80.0, 70.0, 40.0)) < 1e-6, "{:?}", run1[3].3);
+}
+
+/// `world_state_moved_reusing` and `body_frames_with_source` with nested multi-occurrence
+/// subassemblies, sketches, constructions, and cosmetic threads produce exact placements and
+/// identical outputs across cache reuse and occurrence moves.
+#[test]
+fn world_state_moved_reusing_and_body_frames_match_nested_assembly() {
+    let mut doc = Document::new("nested world");
+    let sub = doc.add_component(Some("Sub"), 0).unwrap();
+    let part = doc.add_component(Some("Part"), sub).unwrap();
+
+    // Place Sub at x = 10 and a second instance at x = 100.
+    let occ_sub1 = doc.occurrence_of(sub).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_sub1).unwrap().transform = rigid(Vec3::new(10.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    let occ_sub2 = doc.add_occurrence(sub, 0, rigid(Vec3::new(100.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+
+    // Place Part inside Sub at y = 10 and a second instance at y = 40.
+    let occ_part1 = doc.occurrence_of(part).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_part1).unwrap().transform = rigid(Vec3::new(0.0, 10.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    let _occ_part2 = doc.add_occurrence(part, sub, rigid(Vec3::new(0.0, 40.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+
+    // Root body, sketch, and construction plane.
+    block(&mut doc, "RootBox", Vec3::ZERO, [5.0, 5.0, 5.0]);
+    let root_sk = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(5.0, 0.0)), Some("RootSk")).unwrap();
+    let offset_xy = |d: &str| FeatureKind::ConstructionPlane {
+        plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: d.into() },
+    };
+    let root_cp = doc.add_feature(offset_xy("1"), Some("RootCP")).unwrap();
+
+    // Sub sketch and construction plane.
+    let sub_sk = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(6.0, 0.0)), Some("SubSk")).unwrap();
+    doc.feature_mut(sub_sk).unwrap().component = sub;
+    let sub_cp = doc.add_feature(offset_xy("3"), Some("SubCP")).unwrap();
+    doc.feature_mut(sub_cp).unwrap().component = sub;
+
+    // Part sketch, construction plane, cylinder, and cosmetic thread.
+    let part_sk = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(7.0, 0.0)), Some("PartSk")).unwrap();
+    doc.feature_mut(part_sk).unwrap().component = part;
+    let part_cp = doc.add_feature(offset_xy("5"), Some("PartCP")).unwrap();
+    doc.feature_mut(part_cp).unwrap().component = part;
+    let cyl = doc
+        .add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::ZERO),
+                axis: crate::dir_expr(Vec3::Z),
+                radius: "3".into(),
+                height: "12".into(),
+                operation: Operation::NewBody,
+                references: Vec::new(),
+            },
+            Some("Pin"),
+        )
+        .unwrap();
+    doc.feature_mut(cyl).unwrap().component = part;
+    let tap = doc.add_feature(marking(Vec3::new(3.0, 0.0, 6.0)), Some("Tap")).unwrap();
+    doc.feature_mut(tap).unwrap().component = part;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 2);
+    assert_eq!(st.sketches.len(), 3);
+    assert_eq!(st.construct.len(), 3);
+    assert_eq!(st.threads.len(), 1);
+
+    let frames = doc.body_frames_with_source(&st);
+    let mut cache = PlacedBodies::default();
+    let empty_moves = BTreeMap::new();
+    let world = world_state_moved_reusing(&doc, &st, &empty_moves, &mut cache).unwrap();
+
+    // 1 root body + 2*2 nested Part placements = 5 world bodies.
+    assert_eq!(frames.len(), 5);
+    assert_eq!(world.bodies.len(), 5);
+    for ((wname, def, comp, _, mat), wb) in frames.iter().zip(&world.bodies) {
+        assert_eq!(wname, &wb.name);
+        assert_eq!(def, wb.definition_name());
+        assert_eq!(*comp, wb.component);
+        assert_eq!(*mat, wb.source_transform);
+    }
+
+    // Sketches and constructions belong only to each component's primary (first) placement.
+    assert_eq!(world.sketches.len(), 3);
+    assert_eq!(world.construct.len(), 3);
+    let find_sk = |feat: u64| world.sketches.iter().find(|s| s.feature == feat).unwrap();
+    assert!(find_sk(root_sk).plane.origin.dist(Vec3::ZERO) < 1e-9);
+    assert!(find_sk(sub_sk).plane.origin.dist(Vec3::new(10.0, 0.0, 0.0)) < 1e-9);
+    assert!(find_sk(part_sk).plane.origin.dist(Vec3::new(10.0, 10.0, 0.0)) < 1e-9);
+
+    let cp_origin = |feat: u64| match &world.construct.iter().find(|c| c.feature == feat).unwrap().geom {
+        crate::construct::ConstructGeom::Plane(p) => p.origin,
+        other => panic!("expected plane, got {other:?}"),
+    };
+    assert!(cp_origin(root_cp).dist(Vec3::new(0.0, 0.0, 1.0)) < 1e-9);
+    assert!(cp_origin(sub_cp).dist(Vec3::new(10.0, 0.0, 3.0)) < 1e-9);
+    assert!(cp_origin(part_cp).dist(Vec3::new(10.0, 10.0, 5.0)) < 1e-9);
+
+    // Cosmetic threads appear on all 4 placements of Part, with matching body names and world axes.
+    assert_eq!(world.threads.len(), 4);
+    let mut thread_xy: Vec<(f64, f64)> = world.threads.iter().map(|t| (t.axis_point.x, t.axis_point.y)).collect();
+    thread_xy.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    let expected_xy = [(10.0, 10.0), (10.0, 40.0), (100.0, 10.0), (100.0, 40.0)];
+    for ((ax, ay), (ex, ey)) in thread_xy.iter().zip(expected_xy) {
+        assert!((ax - ex).abs() < 1e-9 && (ay - ey).abs() < 1e-9, "({ax}, {ay}) vs ({ex}, {ey})");
+    }
+    for t in &world.threads {
+        assert!(world.body(&t.body).is_some(), "thread body `{}` missing from world state", t.body);
+    }
+
+    // Reusing `PlacedBodies` with a moved second Sub occurrence shifts only its placements.
+    let mut moves = BTreeMap::new();
+    moves.insert(occ_sub2, rigid(Vec3::new(200.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    let moved_world = world_state_moved_reusing(&doc, &st, &moves, &mut cache).unwrap();
+    assert_eq!(moved_world.bodies.len(), 5);
+    assert_eq!(moved_world.threads.len(), 4);
+    let mut moved_xy: Vec<(f64, f64)> = moved_world.threads.iter().map(|t| (t.axis_point.x, t.axis_point.y)).collect();
+    moved_xy.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    for ((ax, ay), (ex, ey)) in moved_xy.iter().zip([(10.0, 10.0), (10.0, 40.0), (200.0, 10.0), (200.0, 40.0)]) {
+        assert!((ax - ex).abs() < 1e-9 && (ay - ey).abs() < 1e-9, "({ax}, {ay}) vs ({ex}, {ey})");
+    }
 }
