@@ -193,7 +193,15 @@ fn keep_orientation(b: &mut Brep, normal: Vec3) -> Result<()> {
                     Some(f),
                 ));
             };
-            members.rotate_left(1);
+            // The first member moves to the end, as `rotate_left(1)` would, without its panic on
+            // an empty list.
+            let rotated: Vec<_> = members
+                .iter()
+                .skip(1)
+                .chain(members.iter().take(1))
+                .cloned()
+                .collect();
+            *members = rotated;
         } else if p.normal != normal {
             return Err(defect(
                 "a sheet fragment has a normal that is neither side of its source's \
