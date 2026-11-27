@@ -169,6 +169,10 @@ tiny-skia = { version = "0.12", default-features = false, features = ["std", "si
 resvg = { version = "0.50", default-features = false }
 # build scripts: reads the icon palette (MIT OR Apache-2.0)
 toml = "1"
+# generator scripts (crates/engine/src/generator/script.rs): a small sandboxed scripting
+# language (MIT OR Apache-2.0, pure Rust, builds for wasm). No time (the clock panics on wasm),
+# no modules (no import), no closures and no custom syntax; the engine adds its own limits.
+rhai = { version = "1", default-features = false, features = ["std", "sync", "no_time", "no_module", "no_closure", "no_custom_syntax"] }
 
 # ui
 # default_fonts: the built-in Hack is the UI's symbol fallback (#2955); 0.37 no longer turns it on.

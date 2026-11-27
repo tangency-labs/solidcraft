@@ -12,6 +12,8 @@ use serde::Deserialize;
 use serde_json::Value as Json;
 
 pub mod code_template;
+pub mod csv_table;
+pub mod script;
 pub mod expr;
 mod grammar;
 pub mod installed;
@@ -19,6 +21,8 @@ mod table;
 mod template;
 #[cfg(test)]
 mod code_template_tests;
+#[cfg(test)]
+mod script_tests;
 
 use expr::{Budget, EvalError, Expr, Scope, Value};
 use grammar::Tok;
