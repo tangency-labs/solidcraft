@@ -3708,6 +3708,51 @@ fn copies_of_a_plain_hole_move_its_tools_and_a_drill_point_drills_each() {
     assert_eq!(work.hole_tools, 90, "{work:?}");
 }
 
+/// A 200 x 100 x 1 plate with a 2 mm through hole at (4, 4) in a `count1` x `count2` grid on a
+/// 6 mm pitch: the plate's volume, the holes' and the work.
+fn plate_with_hole_pattern(count1: usize, count2: usize) -> (f64, f64, Counts) {
+    let mut doc = Document::new("vents");
+    let plate: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "box", "corner": [0, 0, 0], "length": "200", "width": "100", "height": "1",
+    }))
+    .unwrap();
+    doc.add_feature(plate, Some("Plate")).unwrap();
+    let hole: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "hole", "position": [4, 4, 1], "direction": [0, 0, -1], "diameter": "2",
+    }))
+    .unwrap();
+    let hole = doc.add_feature(hole, Some("Hole")).unwrap();
+    let pattern: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern", "features": [hole],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": count1.to_string(), "spacing1": "6",
+            "dir2": [0, 1, 0], "count2": count2.to_string(), "spacing2": "6"},
+    }))
+    .unwrap();
+    doc.add_feature(pattern, Some("Vents")).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    (disc_volume(&model), std::f64::consts::PI, work)
+}
+
+/// 512 identical through holes from a feature pattern of one hole (#261): each copy was cut into
+/// an ever more complex plate, so 128 took 30 s and 512 did not finish in 150 s. The copies are
+/// apart, so they are joined into tools of at most [`super::MAX_JOINED_TOOLS`] pieces and the
+/// plate is cut once for each tool: the 127 copies of a 16 x 8 grid in 4 cuts and the 511 of a
+/// 32 x 16 grid in 16, four times the cuts for four times the copies (a cut for each copy would
+/// be 127 and 511). Counted, not timed (#14587): each of those cuts still works on the whole
+/// plate, so their time grows with the holes cut before them, and a load on the machine moves
+/// the ratio of two times past any limit that still tells a cut a copy from a cut a tool.
+#[test]
+fn a_pattern_of_512_holes_cuts_the_plate_once_for_each_joined_tool() {
+    for (count1, count2, cuts) in [(16, 8, 4), (32, 16, 16)] {
+        let (v, hole, work) = plate_with_hole_pattern(count1, count2);
+        let n = (count1 * count2) as f64;
+        assert!((v - (20_000.0 - n * hole)).abs() < 1e-6 * n * hole, "{n} holes: {v}");
+        assert_eq!((work.cut_tools, work.miss_intersects), (cuts, 0), "{n} holes: {work:?}");
+    }
+}
+
 /// A copy of a hole with material just above its spot, which is cut out of its tools there, has
 /// its own tools built: the moved tools of a copy in the clear would cut that material (#7942).
 #[test]
