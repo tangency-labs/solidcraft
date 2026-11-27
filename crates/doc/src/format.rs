@@ -2030,6 +2030,7 @@ mod tests {
             name: "r".into(),
             enabled: true,
             length_unit: None,
+            enforce_on_edit: false,
             condition: RuleCondition::Parameter { parameter: "qqg".into(), operator: RuleOperator::Gt, expression: "1".into() },
             effect: RuleEffect::DriveParameter { parameter: "qqlb".into(), expression: "qqg * 2 mm".into() },
         });

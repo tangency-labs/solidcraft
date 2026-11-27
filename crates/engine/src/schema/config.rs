@@ -501,6 +501,7 @@ fn rule_value_schema() -> Value {
             "id": {"description": "The rule's id: 1 to 64 characters, not only spaces. A rule with an id the table has replaces it.", "type": "string", "minLength": 1, "maxLength": 64},
             "name": {"description": "A name to show: 1 to 128 characters, not only spaces.", "type": "string", "minLength": 1, "maxLength": 128},
             "enabled": {"description": "Whether the rule runs. Default: true.", "type": "boolean"},
+            "enforce_on_edit": {"description": "Also hold a parameter_range or allow_parameter_values restriction when a parameter is changed by an ordinary edit (parameters.change), refusing the edit and naming the rule. Default: false (checked at activation and preview only). Generators set it on the limits they declare.", "type": "boolean"},
             "length_unit": {"description": "The unit of plain numbers in the rule's length expressions. Default: the replaced rule's, or the design's unit.", "enum": ["mm", "cm", "m", "in", "ft"]},
             "condition": {
                 "description": "When the rule applies, by `type`: `always`; `all` or `any` of `conditions` (1 to 64); `not` (`condition`); `parameter`, a parameter compared (`operator`) with an `expression`; or `suppression`, whether a feature (`feature`, by id) is suppressed (`value`). At most 64 conditions, 8 deep.",

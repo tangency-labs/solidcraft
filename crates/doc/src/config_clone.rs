@@ -157,6 +157,7 @@ mod tests {
                 name: "Rule1".into(),
                 enabled: true,
                 length_unit: Some("mm".into()),
+                enforce_on_edit: false,
                 condition: RuleCondition::Suppression { feature: 3, value: false },
                 effect: RuleEffect::DriveParameter { parameter: "d1".into(), expression: "d2 * 2 + d1".into() },
             }],

@@ -348,6 +348,7 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc_mut().set_favorite(&name, f)?;
     }
     let switched = switch_by_rules(s, &before);
+    s.doc.check_edit_limits()?;
     if let Some(expr) = e.as_deref()
         && let Some(flipped) = normalize_negative_dimension(s, &name, expr)
     {
@@ -570,6 +571,7 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
     let before = s.doc.param_values().0;
     s.doc_mut().change_params_atomic(&list)?;
     let switched = switch_by_rules(s, &before);
+    s.doc.check_edit_limits()?;
     for (name, expr) in &list {
         normalize_negative_dimension(s, name, expr);
         keep_dimension_start(s, name);

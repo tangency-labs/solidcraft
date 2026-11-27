@@ -38,6 +38,7 @@ impl Default for Editor {
                 name: "New rule".into(),
                 enabled: true,
                 length_unit: None,
+                enforce_on_edit: false,
                 condition: RuleCondition::Always,
                 effect: RuleEffect::DriveParameter { parameter: String::new(), expression: "10".into() },
             },

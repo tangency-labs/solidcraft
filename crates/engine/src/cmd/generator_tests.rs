@@ -170,3 +170,25 @@ fn merge_changes_one_parameter_and_keeps_the_others() {
     assert_eq!(r["parameters"], json!({"length": "60 mm"}));
     assert!(close(volume(&mut s), 7.0 * 3.2 * 60.0 + 3.0 * 8.0));
 }
+
+#[test]
+fn a_limit_marked_enforce_on_edit_holds_on_an_ordinary_parameter_change() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "10 mm"}));
+    run(&mut s, "solid.box", json!({"length": "w", "width": 5, "height": 5, "body_name": "Bar"}));
+    run(&mut s, "config.configure", json!({"params": ["w"]}));
+    let rule = |on: bool| {
+        json!({"rule": {"id": "range", "name": "Width range", "enforce_on_edit": on, "condition": {"type": "always"},
+            "effect": {"type": "parameter_range", "parameter": "w", "minimum": "5 mm", "maximum": "40 mm"}}})
+    };
+    run(&mut s, "config.rule", rule(false));
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "90 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "20 mm"}));
+    run(&mut s, "config.rule", rule(true));
+    let e = s.execute("parameters.change", &json!({"name": "w", "expression": "90 mm"})).unwrap_err().to_string();
+    assert!(e.contains("Width range"), "{e}");
+    let e = s.execute("parameters.change", &json!({"changes": {"w": "99 mm"}})).unwrap_err().to_string();
+    assert!(e.contains("Width range"), "{e}");
+    assert_eq!(s.doc.param_values().0["w"].v, 20.0, "a refused edit leaves the value");
+    run(&mut s, "parameters.change", json!({"name": "w", "expression": "30 mm"}));
+}
