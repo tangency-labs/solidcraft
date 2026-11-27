@@ -3734,6 +3734,61 @@ fn an_old_cell_grid_has_no_sketched_cell_and_is_saved_as_it_was() {
     assert_eq!(kind.input_sketches(), vec![1, 2], "deleting the cell's sketch deletes the grid");
 }
 
+#[test]
+fn an_old_cell_grid_has_no_wall_and_is_saved_byte_identical() {
+    // A design from before the grid on a cylinder wall (#23010): a sketch, no `face`, no `body`.
+    // It reads with both absent, writes neither back, and its saved text reads and saves again
+    // to the same bytes.
+    let old = serde_json::json!({
+        "type": "cell_grid", "sketch": 1, "profiles": {"type": "all"}, "shape": "square",
+        "size": "10", "web": "2", "clip": "whole", "depth": "1.5"
+    });
+    let kind: FeatureKind = serde_json::from_value(old.clone()).unwrap();
+    let FeatureKind::CellGrid { sketch, face, body, .. } = &kind else {
+        panic!("a cell grid");
+    };
+    assert_eq!(sketch.as_ref().map(|s| s.0), Some(1));
+    assert!(face.is_none() && body.is_none());
+    let saved = serde_json::to_value(&kind).unwrap();
+    for key in ["face", "body"] {
+        assert!(saved.get(key).is_none(), "{key} in {saved}");
+    }
+    for key in ["sketch", "profiles", "size", "web", "depth"] {
+        assert_eq!(saved.get(key), old.get(key), "{key}");
+    }
+    let text = serde_json::to_string(&kind).unwrap();
+    let again: FeatureKind = serde_json::from_str(&text).unwrap();
+    assert_eq!(again, kind);
+    assert_eq!(serde_json::to_string(&again).unwrap(), text, "saved again, the same bytes");
+    assert_eq!(kind.input_sketches(), vec![1]);
+}
+
+#[test]
+fn a_cell_grid_on_a_wall_saves_and_reopens_unchanged() {
+    // A grid on a cylinder wall (#23010) has a face pick and its body, and no sketch: no sketch
+    // key is written, and the face and the body come back as they went.
+    let wall = serde_json::json!({
+        "type": "cell_grid", "shape": "square", "size": "8.47198", "web": "1.5", "clip": "whole",
+        "through_all": true, "face": [30.0, 0.0, 20.0], "body": "Tube", "targets": ["Tube"]
+    });
+    let kind: FeatureKind = serde_json::from_value(wall.clone()).unwrap();
+    let FeatureKind::CellGrid { sketch, profiles, face, body, .. } = &kind else {
+        panic!("a cell grid");
+    };
+    assert!(sketch.is_none(), "a wall grid has no sketch");
+    assert_eq!(*profiles, ProfileSel::All, "a wall grid may leave its profiles out");
+    assert!(face.is_some() && body.is_some());
+    let saved = serde_json::to_value(&kind).unwrap();
+    assert!(saved.get("sketch").is_none(), "no sketch key in {saved}");
+    for key in ["face", "body", "targets", "through_all", "size", "web"] {
+        assert_eq!(saved.get(key), wall.get(key), "{key}");
+    }
+    let reopened: FeatureKind = serde_json::from_value(saved.clone()).unwrap();
+    assert_eq!(reopened, kind);
+    assert_eq!(serde_json::to_value(&reopened).unwrap(), saved);
+    assert!(kind.input_sketches().is_empty(), "no sketch to depend on");
+}
+
 /// #17752: a Hole may name the press-in hardware it is the mounting hole of. It is saved only when
 /// set (a hole without it saves as before), with the kind as its name, and an older design reads
 /// with none. The hardware's length is an expression a parameter rename follows.
