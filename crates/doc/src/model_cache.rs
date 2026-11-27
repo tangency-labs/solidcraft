@@ -836,6 +836,7 @@ impl SavedModel {
             }
             let mut st = ModelState {
                 frame_bodies: Default::default(),
+                dogbones: Default::default(),
                 origin_frames: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
                 sketches: ids("sketches", sketches.len())?.into_iter().filter_map(|i| sketches.get(i).cloned()).collect(),
@@ -1233,6 +1234,7 @@ impl Model {
             }
         }
         let marker = doc.marker.unwrap_or(usize::MAX);
+        let constructions = super::construction_indices(doc);
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let shared = shared_context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let mut before = Arc::new(ModelState::default());
@@ -1252,7 +1254,8 @@ impl Model {
             // A fingerprint reads the state before its feature (where the bodies it takes lie).
             // After a state the file left out, the saved one is taken: `evaluate` works that state
             // out, checks the fingerprints after it, and evaluates again from one that differs.
-            prev = if exact { chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &import_digests, Some(&before)) } else { saved };
+            prev =
+                if exact { chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &import_digests, Some(&before), &constructions) } else { saved };
             if r.get("id").and_then(Json::as_u64) != Some(f.id) || saved != prev {
                 return Err(bad("saved model: the document changed"));
             }
@@ -1364,6 +1367,7 @@ impl Model {
         let mut before = Arc::new(ModelState::default());
         let mut cache_step_doc = super::init_capture_step_doc(doc, &vals);
         let mut cache_joints = std::collections::BTreeMap::new();
+        let component_digests = super::ComponentDigests::of(doc);
         if let Ok(mut cache) = model.cache.lock() {
             for (i, (f, r)) in doc.features.iter().zip(&model.results).enumerate().filter(|(_, (_, r))| !r.skipped && r.error.is_none()) {
                 let eval_doc = cache_step_doc.as_ref().unwrap_or(doc);
@@ -1377,7 +1381,9 @@ impl Model {
                     }
                     continue;
                 }
-                let key = EvalKey::new(eval_doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests);
+                let key =
+                    EvalKey::new(eval_doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests, &constructions, &component_digests);
+                model.component_keys.insert(f.id, key.reached);
                 let whole = CachedEval {
                     error: None,
                     error_code: None,

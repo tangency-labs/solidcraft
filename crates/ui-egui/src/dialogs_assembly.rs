@@ -74,6 +74,69 @@ pub(crate) fn kind_label(kind: JointKind) -> &'static str {
     TYPES.iter().position(|t| JointKind::parse(t) == Some(kind)).and_then(|i| TYPE_LABELS.get(i)).copied().unwrap_or("")
 }
 
+/// What a joint type does, in the language of the UI. The id matches `TYPES`.
+fn kind_body(name: &str) -> &'static str {
+    match name {
+        "rigid" => solidcraft_ui_text::tr("joint.kind.rigid"),
+        "revolute" => solidcraft_ui_text::tr("joint.kind.revolute"),
+        "slider" => solidcraft_ui_text::tr("joint.kind.slider"),
+        "cylindrical" => solidcraft_ui_text::tr("joint.kind.cylindrical"),
+        "pin_slot" => solidcraft_ui_text::tr("joint.kind.pin_slot"),
+        "planar" => solidcraft_ui_text::tr("joint.kind.planar"),
+        "ball" => solidcraft_ui_text::tr("joint.kind.ball"),
+        "parallel" => solidcraft_ui_text::tr("joint.kind.parallel"),
+        "perpendicular" => solidcraft_ui_text::tr("joint.kind.perpendicular"),
+        "angle" => solidcraft_ui_text::tr("joint.kind.angle"),
+        "point_on_plane" => solidcraft_ui_text::tr("joint.kind.point_on_plane"),
+        "point_on_line" => solidcraft_ui_text::tr("joint.kind.point_on_line"),
+        "line_on_plane" => solidcraft_ui_text::tr("joint.kind.line_on_plane"),
+        _ => "",
+    }
+}
+
+/// The pictogram of `kind` in `rect`, upright, in the same strokes as the viewport badge.
+fn paint_kind_icon(painter: &egui::Painter, rect: egui::Rect, kind: JointKind, color: Color32) {
+    let symbol = crate::joint_symbols::symbol(kind);
+    // The strokes reach a little past 1, so the half-size leaves a margin inside the square.
+    let half = rect.width() * 0.38;
+    let c = rect.center();
+    let place = |p: [f32; 2]| c + vec2(p[0], -p[1]) * half;
+    let stroke = Stroke::new(1.5, color);
+    for line in &symbol.lines {
+        painter.add(egui::Shape::line(line.iter().copied().map(place).collect(), stroke));
+    }
+    for (centre, r) in &symbol.dots {
+        painter.circle_filled(place(*centre), r * half, color);
+    }
+}
+
+/// Every joint type, between the Type list and the name. A click writes the same index the list does.
+fn kind_icons(ui: &mut egui::Ui, selected: &mut usize) {
+    let t = Tokens::get();
+    let side = t.control_height;
+    ui.add_space(t.space_2);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = vec2(t.space_4, t.space_4);
+        for (i, name) in TYPES.iter().enumerate() {
+            let (rect, response) = ui.allocate_exact_size(vec2(side, side), egui::Sense::click());
+            crate::scenario::publish_handle(&format!("joint-kind:{name}"), rect.center());
+            if response.hovered() {
+                ui.painter().rect_filled(rect, t.radius_sm, t.hover);
+            }
+            if let Some(kind) = JointKind::parse(name) {
+                let color = if i == *selected { t.accent } else { t.text };
+                paint_kind_icon(ui.painter(), rect, kind, color);
+            }
+            let label = TYPE_LABELS.get(i).copied().unwrap_or("");
+            let tip = format!("{}\n{}", solidcraft_ui_text::tr_label(label), kind_body(name));
+            let response = response.on_hover_cursor(egui::CursorIcon::PointingHand).backing_on_hover_text(tip);
+            if response.clicked() && *selected != i {
+                *selected = i;
+            }
+        }
+    });
+}
+
 /// A joint as the joint lists name it: its name, and its type in the user's language.
 pub(crate) fn joint_choice(name: &str, kind: JointKind) -> String {
     format!("{name} ({})", solidcraft_ui_text::tr_label(kind_label(kind)))
@@ -1489,6 +1552,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut Vec
             });
             let was = f.kind;
             choice_row(ui, "Type", "jt_type", &mut f.kind, &TYPE_LABELS);
+            kind_icons(ui, &mut f.kind);
             if f.kind != was {
                 // What Find Limits found was for the other type's values.
                 (f.search, f.found_note, f.searched) = (None, None, None);

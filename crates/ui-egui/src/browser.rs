@@ -1723,16 +1723,10 @@ fn model_children(app: &SolveApp, component: u64) -> Vec<u64> {
 fn model_body_indices(app: &SolveApp, component: u64) -> Vec<usize> {
     match app.tree.model.as_ref().filter(|model| model.matches(&app.session)) {
         Some(model) => model.bodies.get(&component).cloned().unwrap_or_default(),
-        None => app
-            .session
-            .model
-            .state()
-            .bodies
-            .iter()
-            .enumerate()
-            .filter(|(_, b)| app.session.doc.model_body_component(b) == component)
-            .map(|(i, _)| i)
-            .collect(),
+        None => {
+            let state = app.session.model.state();
+            app.session.doc.model_body_components(&state).into_iter().enumerate().filter_map(|(i, owner)| (owner == component).then_some(i)).collect()
+        }
     }
 }
 

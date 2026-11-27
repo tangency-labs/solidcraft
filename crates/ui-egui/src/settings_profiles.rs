@@ -71,6 +71,7 @@ const PROFILE_KEYS: &[&str] = &[
     "invert_navigator_arrows",
     "keep_hover_while_navigating",
     "keep_work_on_tab_switch",
+    "keyboard_profile",
     "language",
     "layout",
     "line_drag_draws_one",

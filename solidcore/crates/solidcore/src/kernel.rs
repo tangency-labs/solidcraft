@@ -38,7 +38,7 @@
 
 use core::cell::{Cell, RefCell};
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::error::SolidError;
 use crate::geom::context::Context;
@@ -140,6 +140,11 @@ pub struct Caches {
     /// is not solved again. A [`RefCell`] so the check can fill it through the `&Kernel`
     /// it takes (the kernel stays `Send`; it is not shared between threads).
     pub(crate) curve_analysis: RefCell<crate::nurbs::b_spline_curve::analysis::AnalysisMemo>,
+    /// Not upstream (#22467): exact-input memo of trim-image gap outcomes
+    /// (`query::curve_surface_gap::TrimBoundMemo`), keyed by the pair's data and bound
+    /// parameters bit for bit. Off when [`Kernel::memoize_curve_caches`] is false; clearing it
+    /// changes no result, only speed.
+    pub(crate) trim_move_bounds: RefCell<crate::query::curve_surface_gap::TrimBoundMemo>,
     /// Not upstream (#18166): whether a lazily built UV trim raises its edge's tolerance by
     /// the trim's proved distance from the edge (`topology::edgeuse::p3::trim_raise_distance`),
     /// as it does by default, or by upstream's sampled distance, as a file's translation asks
@@ -167,6 +172,7 @@ impl Default for Caches {
     fn default() -> Self {
         Self {
             curve_analysis: RefCell::default(),
+            trim_move_bounds: RefCell::default(),
             prove_lazy_trim_raise: true,
             hold_trim_raise: false,
             refit_raising_trims: Cell::new(false),
@@ -248,6 +254,9 @@ pub struct WorkCounters {
     band_face_solves: Cell<u64>,
     band_edge_solves: Cell<u64>,
     shells: Cell<u64>,
+    booleans: Cell<u64>,
+    apart_unions: Cell<u64>,
+    move_trim_bisection_pieces: Cell<u64>,
 }
 
 impl WorkCounters {
@@ -667,6 +676,30 @@ impl WorkCounters {
         self.shells.get()
     }
 
+    /// Booleans of two B-reps run (`boolean::api_brep`'s `merge_boolean_by`, under every
+    /// two-B-rep entry point): a union of many bodies runs one for each pair of operands it
+    /// intersects. Not the fork's.
+    #[must_use]
+    pub fn booleans(&self) -> u64 {
+        self.booleans.get()
+    }
+
+    /// Unions of two solids proved apart made side by side, without a boolean
+    /// (`boolean::apart::union_apart`). Not the fork's.
+    #[must_use]
+    pub fn apart_unions(&self) -> u64 {
+        self.apart_unions.get()
+    }
+
+    /// Bisection pieces evaluated while certifying trim-image gaps across rigid moves
+    /// (`topology::edgeuse::p3::cover_moved_trims`, through `query::curve_surface_gap`),
+    /// so a far-origin boolean test can catch regressions back to `MAX_PIECES` pole-trim
+    /// bisections or repeated `reparametrisation` work (#22467). Not the fork's.
+    #[must_use]
+    pub fn move_trim_bisection_pieces(&self) -> u64 {
+        self.move_trim_bisection_pieces.get()
+    }
+
     /// Zeroes every count (`SmWorkCounters::Reset`).
     pub fn reset(&self) {
         self.face_pairs.set(0);
@@ -719,6 +752,15 @@ impl WorkCounters {
         self.band_face_solves.set(0);
         self.band_edge_solves.set(0);
         self.shells.set(0);
+        self.booleans.set(0);
+        self.apart_unions.set(0);
+        self.move_trim_bisection_pieces.set(0);
+    }
+
+    /// Counts `pieces` bisection pieces evaluated while certifying a moved trim's gap.
+    pub(crate) fn add_move_trim_bisection_pieces(&self, pieces: u64) {
+        self.move_trim_bisection_pieces
+            .set(self.move_trim_bisection_pieces.get().saturating_add(pieces));
     }
 
     /// Counts one intersection of a blend's section with a face.
@@ -736,6 +778,17 @@ impl WorkCounters {
     /// Counts one shell of a whole body.
     pub(crate) fn add_shell(&self) {
         self.shells.set(self.shells.get().saturating_add(1));
+    }
+
+    /// Counts one boolean of two B-reps.
+    pub(crate) fn add_boolean(&self) {
+        self.booleans.set(self.booleans.get().saturating_add(1));
+    }
+
+    /// Counts one union of two solids made side by side.
+    pub(crate) fn add_apart_union(&self) {
+        self.apart_unions
+            .set(self.apart_unions.get().saturating_add(1));
     }
 
     /// Counts one UV trim curve built.
@@ -1401,9 +1454,11 @@ pub struct Kernel {
     /// Not upstream: the memo of the procedural blends this kernel recertified as it gave a
     /// record's faces their definitions back
     /// ([`crate::surface::procedural_blend::convert::RecertifyMemo`]), on with
-    /// [`Kernel::memoize_curve_caches`]. A [`RefCell`]: it is never borrowed across a
-    /// certificate, and a hit returns what recertifying the same blend again returns.
-    pub recertify_memo: RefCell<crate::surface::procedural_blend::convert::RecertifyMemo>,
+    /// [`Kernel::memoize_curve_caches`]. Shared through an [`Arc`] (a kernel a boolean
+    /// copies for its workers keeps the certificates the parent finished: a hit returns
+    /// what recertifying the same blend again returns, so sharing it changes no answer),
+    /// and a [`Mutex`], as the copies run on their own threads.
+    pub recertify_memo: Arc<Mutex<crate::surface::procedural_blend::convert::RecertifyMemo>>,
     /// Not upstream: the fork's `thread_local` count of open blend operation scopes
     /// (`t_lOperationScopes`; [`crate::blend::fillet_section::section::OperationScope`]).
     /// Shared, so that a scope can outlive a borrow of the kernel (a fillet session holds
@@ -1438,7 +1493,7 @@ pub struct Kernel {
     /// Test-only seam of the curved coincident strip's drop ([`StripProbe`]); shared with
     /// the kernel copies an operation makes.
     #[cfg(test)]
-    pub(crate) strip_probe: Arc<std::sync::Mutex<StripProbe>>,
+    pub(crate) strip_probe: Arc<Mutex<StripProbe>>,
 }
 
 /// Test-only seam of `boolean::topology_intersector::curved_strip`
@@ -1504,7 +1559,7 @@ impl Kernel {
             blend_w_memo: RefCell::default(),
             loop_area_memo: RefCell::default(),
             check_memo: RefCell::default(),
-            recertify_memo: RefCell::default(),
+            recertify_memo: Arc::default(),
             blend_operation_scopes: Arc::default(),
             work_counters: WorkCounters::default(),
             blend_face_log: None,

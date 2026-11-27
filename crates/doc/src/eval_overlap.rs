@@ -34,9 +34,10 @@ pub(super) struct Saved {
     pub recomputed: usize,
     pub restored: usize,
     pub poses: HashMap<u64, u64>,
+    pub component_keys: HashMap<u64, u64>,
     pub moved: Vec<(u64, Vec<ModelBody>)>,
     pub failed: HashMap<u64, (String, String)>,
-    pub rolled_results: HashMap<u64, (u64, FeatureResult)>,
+    pub rolled_results: HashMap<u64, (u64, Option<u64>, FeatureResult)>,
     pub occurrence_transforms: Option<Vec<crate::Mat>>,
     pub joint_states: Option<Vec<(Vec<f64>, Vec<Option<String>>)>>,
     pub resolved_joints: std::collections::BTreeMap<u64, crate::CapturedJoint>,
@@ -98,10 +99,11 @@ impl Checks {
     /// the features after it ([`kernel::detach_kept`]); `None` when it runs in line.
     pub fn detach(&self, before: &ModelState, after: &ModelState) -> Option<Vec<(String, kernel::KeptCheck)>> {
         self.on.then(|| {
+            let prior = super::ShapeIndex::new(&before.bodies);
             after
                 .bodies
                 .iter()
-                .filter(|b| !before.bodies.iter().any(|old| old.body.same_shape(&b.body)))
+                .filter(|b| !prior.contains(&b.body))
                 .filter(|b| {
                     let reused = super::checked_thread_output(&b.body);
                     #[cfg(test)]
@@ -319,6 +321,7 @@ mod tests {
             recomputed: 0,
             restored: 0,
             poses: HashMap::new(),
+            component_keys: HashMap::new(),
             moved: Vec::new(),
             failed: HashMap::new(),
             rolled_results: HashMap::new(),
