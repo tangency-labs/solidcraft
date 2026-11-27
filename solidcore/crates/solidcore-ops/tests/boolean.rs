@@ -896,10 +896,11 @@ fn two_large_cylinders_touching_along_a_line_union() {
 /// along z, the other along y with its axis `d` off the first's along x
 /// (tangency-labs/solidcraft#18475). At d = 0 the walls cross in two ellipses; for nonzero d
 /// they cross in one loop. For negative `d`, its crossings of the y cylinder's +x seam are
-/// 2√(2 · 0.9 |d| − d²) apart. The second cut is refused as not a closed solid for
-/// d = −1e-5 and −2e-5. Each cut should be one valid
-/// solid of the block less both holes plus what they share, 16/3 · 0.9³ (the miss changes that
-/// by under 3e-5).
+/// 2√(2 · 0.9 |d| − d²) apart, and the seam cuts the loop into two arcs with the same two
+/// ends whose midpoints are 2√(2 · 0.9 |d| − d²) apart on the first hole's far side. The second
+/// cut was refused for d = −1e-5 and −2e-5, where those two arcs were taken for one edge. Each
+/// cut is one valid solid of the block less both holes plus what they share, 16/3 · 0.9³ (the
+/// miss changes that by under 3e-5).
 #[test]
 #[allow(clippy::disallowed_methods)] // the test's operand geometry, not ops computing it
 fn a_hole_whose_axis_misses_an_equal_crossing_holes_by_a_hair_cuts() {
