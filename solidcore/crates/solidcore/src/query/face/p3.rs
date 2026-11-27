@@ -751,7 +751,7 @@ fn cone_tight_box_complete(
         if !(pt.x.is_finite() && pt.y.is_finite() && pt.z.is_finite()) {
             return Ok(false);
         }
-        if face_bbox.contains_point(pt, 0.0) {
+        if face_bbox.contains_point(pt, EFF_ZERO_SQRT) {
             return Ok(true);
         }
         let Some(nurb_uv) = ignored(cone.convert_uv_from_step_to_nurbs(k, step_uv))? else {
@@ -781,7 +781,10 @@ fn cone_tight_box_complete(
         if !classified {
             return Ok(false);
         }
-        if pt_class.point_class() != PointClassType::Unknown {
+        // Inside the face only (`SM_PC_FACE`), matching `cell_directed_max`:
+        // boundary extrema already come from the vertices and edges, and a
+        // tolerance-only `Edge`/`Vertex` hit outside the trim must not enlarge the box.
+        if pt_class.point_class() == PointClassType::Face {
             face_bbox.add_point(pt);
         }
         Ok(true)
