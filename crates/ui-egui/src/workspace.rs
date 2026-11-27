@@ -447,7 +447,10 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                     "face.delete",
                 ],
             },
-            CommandGroup { label: "Bodies", ids: &["solid.shell", "solid.combine", "solid.split_body", "solid.scale", "solid.remove"] },
+            CommandGroup {
+                label: "Bodies",
+                ids: &["solid.shell", "solid.combine", "solid.finger_joint", "solid.split_body", "solid.scale", "solid.remove"],
+            },
             CommandGroup { label: "Specialise", ids: &["sheet.convert"] },
         ],
         _ => &[],
@@ -610,7 +613,12 @@ pub const SECTIONS: &[Section] = &[
         promoted: 4,
         ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft", "surface.thicken"],
     },
-    Section { tab: "SURFACE", panel: "EDIT", promoted: 4, ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch"] },
+    Section {
+        tab: "SURFACE",
+        panel: "EDIT",
+        promoted: 4,
+        ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch", "solid.split_body"],
+    },
     Section { tab: "SURFACE", panel: "MESH", promoted: 2, ids: &["mesh.reduce", "mesh.convert", "file.insert_mesh", "file.save_mesh"] },
     Section {
         tab: "ASSEMBLE",
@@ -1051,7 +1059,7 @@ pub(crate) fn legacy_render_destination(c: &CommandSpec) -> Option<(&'static str
         "assembly.bom" => Some(("INSPECT", "CHECK")),
         "sheet.flat_pattern" => Some(("SHEET METAL", "FLAT")),
         "sheet.manage_rules" => Some(("MANAGE", "RULES")),
-        "sheet.convert" => Some(("MODEL", "MODIFY")),
+        "sheet.convert" | "solid.split_body" => Some(("MODEL", "MODIFY")),
         "parameters.change" => Some(("MANAGE", "PARAMETERS")),
         "file.insert_mesh" | "file.save_mesh" => Some(("INSERT", "FILES")),
         "config.table" | "config.configure" => Some(("MANAGE", "CONFIGURATIONS")),
@@ -1652,6 +1660,7 @@ mod tests {
                 "face.delete",
                 "solid.shell",
                 "solid.combine",
+                "solid.finger_joint",
                 "solid.split_body",
                 "solid.scale",
                 "solid.remove",
@@ -1748,6 +1757,8 @@ mod tests {
             ("SURFACE", "SKETCH", "sketch.create"),
             ("MODEL", "SKETCH", "sketch.create3d"),
             ("SKETCH", "REFERENCE", "canvas.insert"),
+            ("MODEL", "MODIFY", "solid.split_body"),
+            ("SURFACE", "EDIT", "solid.split_body"),
         ] {
             assert!(layout(tab, panel, &specs).unwrap().0.iter().any(|c| c.id == id));
         }

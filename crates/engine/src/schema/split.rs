@@ -19,7 +19,8 @@ use super::check::whole;
 use super::types::{FaceRefs, FeatureCommon, PlaneParam, Point3, SketchRef, ToolFace, feature_common};
 
 /// Cut a body into pieces along a plane, a face of another body (its surface extended), or a
-/// straight sketch line (along the sketch's normal). Each piece becomes a body.
+/// straight sketch line (along the sketch's normal). Each piece becomes a body. A surface body
+/// split with `tool_sheet` `body` is cut into its connected regions, each a surface body.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct SplitBodyParams {
@@ -36,7 +37,8 @@ pub struct SplitBodyParams {
     pub tool_plane: Option<bool>,
     /// With `tool`: what of the tool body cuts. `extended` (the default): the face's surface
     /// extended. `faces`: the `tool` face and the faces at `tool_faces`, exactly as they are, not
-    /// extended. `body`: every face of the tool's surface body, exactly as it is.
+    /// extended. `body`: every face of the tool's surface body, exactly as it is; it also splits
+    /// a surface body, into the regions the tool bodies cut it into.
     #[serde(default)]
     pub tool_sheet: Option<ToolSheet>,
     /// With `tool_sheet` `faces`: a point on each other face of the tool body that cuts.

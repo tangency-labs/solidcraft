@@ -222,3 +222,97 @@ fn drop_unreached_shell_faces(b: &mut Brep) -> SolidResult<()> {
     }
     Ok(())
 }
+
+/// WR-458, WR-633 and WR-650 (#18921): the 4 rows the offset surface's extension from its
+/// base moves (generated boxes filleted on every edge, then cut). Each moves only its graph
+/// record (and `gen0056` its geometry samples): the corner blends now solve on the rails'
+/// extensions from their bases. Each row is replayed as its record is, and the cut body the
+/// golden records is certified: `check_brep` Level 2 reports nothing, it is the kept
+/// side's one shell open only along the plane (as `SmApiCut` leaves it), its counts are unchanged, and every blend face that is a definition
+/// re-certifies its net within its bound (at least one does).
+#[cfg(test)]
+mod wr458_moved_rows {
+    use super::*;
+    use solidcore::surface::surface::Surface;
+    use solidcore::topology::brep::p1;
+    use solidcore::topology::edge;
+    use solidcore::topology::brep::validation::{check_brep, CheckLevel};
+
+    /// Row, and its vertex, edge and face counts (the golden's, before and after).
+    const MOVED: [(&str, [usize; 3]); 4] = [
+        ("gen0056", [20, 36, 17]),
+        ("gen0060", [28, 52, 25]),
+        ("gen0065", [20, 36, 17]),
+        ("gen0070", [28, 51, 24]),
+    ];
+
+    #[test]
+    fn each_moved_row_cuts_a_valid_body_of_certified_blends() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let (mut seen, mut wrong) = (0, Vec::new());
+        for c in Runner.cases(&ctx).unwrap() {
+            let Some(&(name, after)) = MOVED.iter().find(|r| r.0 == c.name) else {
+                continue;
+            };
+            seen += 1;
+            let i: Inputs = c.parse().unwrap();
+            assert!(matches!(i.body, Body::Box { fillet, .. } if fillet > 0.0), "{name}");
+            let mut k = Kernel::default();
+            let mut b = build(&mut k, &i).unwrap().unwrap();
+            let st = status(cut(&mut k, &mut b, v(i.point), v(i.normal))).unwrap();
+            assert_eq!(st, 0.0, "{name}: the cut succeeds");
+            let got = [b.vertices().ids().count(), b.edges().ids().count(), b.faces().ids().count()];
+            eprintln!("{name}: counts {got:?}");
+            if got != after {
+                wrong.push(name);
+            }
+            let lines = check_brep(&mut k, &mut b, CheckLevel::Level2).unwrap().lines();
+            assert!(lines.is_empty(), "{name}: Level 2: {lines:?}");
+            // `SmApiCut` removes the normal's side without capping it, so the body left
+            // is one shell open along the plane: every vertex lies on the kept side (or on
+            // the plane) within its tolerance, every edge is manifold except the cut's own,
+            // and each of those is a lamina edge (one face, two uses) whose ends lie on
+            // the plane within their tolerances.
+            let n = v(i.normal);
+            let n = n * (1.0 / n.length());
+            let o = v(i.point);
+            let side = |x: solidcore::topology::VertexId| {
+                let vx = b.vertex(x).unwrap();
+                ((vx.point - o).dot(n), vx.tolerance)
+            };
+            for x in b.vertices().ids() {
+                let (d, tol) = side(x);
+                assert!(d <= tol, "{name}: {x:?} lies {d:e} past the plane (tolerance {tol:e})");
+            }
+            let mut open = 0;
+            for e in b.edges().ids() {
+                if edge::is_manifold(&b, e).unwrap() {
+                    continue;
+                }
+                let uses = b.edge(e).unwrap().edgeuses.len();
+                assert_eq!(uses, 2, "{name}: {e:?} is neither manifold nor a lamina edge");
+                for x in edge::vertices(&b, e, None).unwrap().into_iter().flatten() {
+                    let (d, tol) = side(x);
+                    assert!(d.abs() <= tol, "{name}: open {e:?} ends {d:e} off the plane");
+                }
+                open += 1;
+            }
+            assert!(open > 0, "{name}: the cut left no open edge on the plane");
+            let mut blends = 0;
+            for f in p1::faces(&b, None).unwrap() {
+                let surface = b.face(f).unwrap().surface.clone();
+                let Some(blend) = surface.as_ref().and_then(Surface::procedural_blend) else {
+                    continue;
+                };
+                let d = blend
+                    .recertify(&k)
+                    .unwrap_or_else(|e| panic!("{name}: {f:?} does not re-certify: {e}"));
+                assert!(d <= blend.bound(), "{name}: {f:?} proved {d:e} past its bound");
+                blends += 1;
+            }
+            assert!(blends > 0, "{name}: no blend face is a definition");
+        }
+        assert!(wrong.is_empty(), "counts differ: {wrong:?}");
+        assert_eq!(seen, MOVED.len());
+    }
+}

@@ -3599,3 +3599,53 @@ fn capture_position_session_new_syncs_unsynced_document_moves_and_joints() {
     assert_eq!(joint.captured, Some(vec![20.0]));
     assert_eq!(joint.values, vec![20.0]);
 }
+
+/// A mesh body has one face, the whole body. A look given to that face (a pick on the mesh in
+/// the view selects its face) hid every body look from then on: a mesh in a component painted
+/// red from the top of the design stayed in the face's grey, and its opacity stayed at the
+/// face's 0.41 (#22573). A body look on a mesh now replaces its face look; a solid keeps its own.
+#[test]
+fn a_body_look_on_a_mesh_in_a_component_replaces_the_look_on_its_one_face() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-22573-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let stl = dir.join("Chip.stl");
+    // A tetrahedron with 10 mm legs; its slanted side is x + y + z = 10.
+    let facet = |[a, b, c]: [[i32; 3]; 3]| {
+        let v = |p: [i32; 3]| format!("vertex {} {} {}\n", p[0], p[1], p[2]);
+        format!("facet normal 0 0 0\nouter loop\n{}{}{}endloop\nendfacet\n", v(a), v(b), v(c))
+    };
+    let corners = [
+        [[0, 0, 0], [0, 10, 0], [10, 0, 0]],
+        [[0, 0, 0], [10, 0, 0], [0, 0, 10]],
+        [[0, 0, 0], [0, 0, 10], [0, 10, 0]],
+        [[10, 0, 0], [0, 10, 0], [0, 0, 10]],
+    ];
+    std::fs::write(&stl, format!("solid t\n{}endsolid t\n", corners.into_iter().map(facet).collect::<String>())).unwrap();
+    let mut s = Session::default();
+    created(&mut s, "Door");
+    // Insert Mesh puts the mesh in a component of its own, here inside Door.
+    run(&mut s, "file.insert_mesh", json!({"path": stl}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[30,0,0],"body_name":"Block"}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let world = s.world_state().unwrap();
+    let mesh = world.bodies.iter().find(|b| b.body.is_mesh()).unwrap().name.clone();
+    assert_eq!(world.body(&mesh).unwrap().body.face_count(), 1);
+    // The grey and opacity the reporter's mesh face kept, then the face of the solid.
+    run(&mut s, "appearance.assign", json!({"faces":[{"body":mesh,"point":[3,3,4]}],"color":"#c4c7cc","opacity":0.41}));
+    run(&mut s, "appearance.assign", json!({"faces":[{"body":"Block","point":[35,5,10]}],"color":"#00ff00"}));
+    let look = |s: &Session, name: &str| {
+        let world = s.world_state().unwrap();
+        let b = world.body(name).unwrap();
+        (s.doc.model_face_look(b, 0).map(|l| (l.color, l.opacity)), s.doc.face_colors(b).len())
+    };
+    assert_eq!(look(&s, &mesh), (Some(([196, 199, 204], 0.41)), 1));
+    for opacity in [1.0, 0.5, 1.0] {
+        run(&mut s, "appearance.assign", json!({"bodies":[mesh],"color":"#ff0000","opacity":opacity}));
+        assert_eq!(look(&s, &mesh), (Some(([255, 0, 0], opacity)), 0), "the mesh shows its body look at opacity {opacity}");
+    }
+    run(&mut s, "appearance.assign", json!({"bodies":["Block"],"color":"#0000ff"}));
+    let world = s.world_state().unwrap();
+    let block = world.body("Block").unwrap();
+    assert_eq!(s.doc.face_colors(block).iter().map(|(_, l)| l.color).collect::<Vec<_>>(), [[0, 255, 0]], "a solid keeps its face look");
+    let _ = std::fs::remove_dir_all(dir);
+}
