@@ -89,6 +89,21 @@ fn unit(v: P3, what: &str) -> R<P3> {
     if m > 1e-12 && m.is_finite() { Ok(scale(v, 1.0 / m)) } else { Err(format!("{what}: zero direction")) }
 }
 
+/// The unit axes `[X, Y, Z]` of a CARTESIAN_TRANSFORMATION_OPERATOR_3D from its `axis1`, `axis2`
+/// and `axis3`, as ISO 10303-42 `base_axis` derives them: `Z` from `axis3` (default +Z), `X` from
+/// `axis1` made orthogonal to `Z` (default +X, or +Y when `Z` is along X: `first_proj_axis`), `Y`
+/// from `axis2` (default +Y) made orthogonal to `Z` and then to `X` (`second_proj_axis`), so the
+/// frame is a mirror when that `Y` is opposite `Z` x `X`. Where nothing is left of `axis2` (or of
+/// +Y) the standard derives no `Y`, and it stays `Z` x `X`, as this reader has always taken it.
+pub fn operator_axes(axis1: Option<P3>, axis2: Option<P3>, axis3: Option<P3>, what: &str) -> R<[P3; 3]> {
+    let z = unit(axis3.unwrap_or([0.0, 0.0, 1.0]), what)?;
+    let a = axis1.unwrap_or(if z == [1.0, 0.0, 0.0] || z == [-1.0, 0.0, 0.0] { [0.0, 1.0, 0.0] } else { [1.0, 0.0, 0.0] });
+    let x = unit(sub(a, scale(z, dot(a, z))), what)?;
+    let b = axis2.unwrap_or([0.0, 1.0, 0.0]);
+    let y = unit(sub(sub(b, scale(z, dot(b, z))), scale(x, dot(b, x))), what).unwrap_or_else(|_| cross(z, x));
+    Ok([x, y, z])
+}
+
 fn any_perpendicular(z: P3) -> P3 {
     let a = if z[0].abs() < 0.9 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
     let x = sub(a, scale(z, dot(a, z)));
@@ -363,8 +378,8 @@ impl<'a> Reader<'a> {
     }
 
     /// CARTESIAN_TRANSFORMATION_OPERATOR_3D, its axes made orthonormal as STEP derives them:
-    /// `Z` from `axis3` (default +Z), `X` from `axis1` made orthogonal to `Z`, `Y` = `Z` × `X`,
-    /// or its opposite (a mirror) when `axis2` points that way.
+    /// `Z` from `axis3` (default +Z), `X` from `axis1` made orthogonal to `Z`, `Y` from `axis2`
+    /// (default +Y) made orthogonal to `Z` and `X`, so the frame may be a mirror.
     pub fn transform(&self, id: u64) -> R<Transform> {
         let e = entity(self.ex, id)?;
         if e.name() != "CARTESIAN_TRANSFORMATION_OPERATOR_3D" {
@@ -373,19 +388,7 @@ impl<'a> Reader<'a> {
         // (axis1, axis2, local_origin, scale, axis3), after the name and the description when written.
         let p = solidcore_record::step::product::operator_attributes(e);
         let axis = |i: usize| p.get(i).and_then(Param::as_ref_id).map(|d| self.direction(d)).transpose();
-        let z = axis(4)?.unwrap_or([0.0, 0.0, 1.0]);
-        let x = match axis(0)? {
-            Some(a) => sub(a, scale(z, dot(a, z))),
-            None => {
-                let a = if z == [0.0, 0.0, 1.0] { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
-                sub(a, scale(z, dot(a, z)))
-            }
-        };
-        let x = unit(x, &format!("#{id} axes"))?;
-        let mut y = cross(z, x);
-        if axis(1)?.is_some_and(|a| dot(a, y) < 0.0) {
-            y = scale(y, -1.0);
-        }
+        let [x, y, z] = operator_axes(axis(0)?, axis(1)?, axis(4)?, &format!("#{id} axes"))?;
         let origin = self.point(reference(p.get(2), "transformation origin")?)?;
         let k = match p.get(3) {
             Some(v) if v.as_f64().is_some() => num(Some(v), "transformation scale")?,

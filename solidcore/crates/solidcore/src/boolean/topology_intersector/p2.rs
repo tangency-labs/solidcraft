@@ -688,20 +688,50 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         faces: &[O],
         opt_keep_as_wires: Option<&[O]>,
     ) -> Result<()> {
+        if faces.is_empty() {
+            return Ok(());
+        }
+        if let Some((deleted_edges, deleted_vertices)) =
+            brep.brep_delete_faces_batch(k, faces, opt_keep_as_wires)?
+        {
+            for &f in faces {
+                if let Some(o_face) = self.other_mate(Some(f)) {
+                    self.remove_relationship(Some(f), Some(o_face))?;
+                }
+            }
+            for e in deleted_edges {
+                if let Some(o_e) = self.other_mate(Some(e)) {
+                    self.remove_relationship(Some(e), Some(o_e))?;
+                }
+            }
+            for v in deleted_vertices {
+                if let Some(o_v) = self.other_mate(Some(v)) {
+                    self.remove_relationship(Some(v), Some(o_v))?;
+                }
+            }
+            return Ok(());
+        }
+
         let mut faces_vertices: Vec<O> = Vec::new();
+        let mut seen_vertices: std::collections::BTreeSet<O> = std::collections::BTreeSet::new();
         let mut faces_edges: Vec<O> = Vec::new();
+        let mut seen_edges: std::collections::BTreeSet<O> = std::collections::BTreeSet::new();
         let mut face_brep_h: Option<O> = None;
 
         // iter every face saving all face vertices and edges and calling DeleteFace()
         for &f in faces {
             // Accumulate DeletedFace unique EdgeList for later
             for e in brep.face_edges(f)? {
-                add_unique(&mut faces_edges, e);
+                if seen_edges.insert(e) {
+                    faces_edges.push(e);
+                }
             }
 
             // Accumulate DeletedFace unique VertexList for later
             for v in brep.face_vertices(f)? {
-                add_unique(&mut faces_vertices, v);
+                if seen_vertices.insert(v) {
+                    faces_vertices.push(v);
+                }
             }
 
             // remove TargetFace<->OtherFace relationship if it exists (status unchecked
