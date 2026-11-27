@@ -12,6 +12,7 @@
 
 const SKIP_LABEL = 'not-a-duplicate';
 const DEFAULT_LABEL = 'changes-default';
+const OWNER_APPROVED_LABEL = 'owner-approved';
 // PRs opened before this predate the template line; they pass the defaults check with a notice.
 const DEFAULTS_ENFORCED_FROM = Date.parse('2026-10-25T00:00:00Z');
 // PRs opened before this predate the picture rule; they pass the picture check with a notice.
@@ -46,24 +47,42 @@ function parseClosing(body, repoFullName) {
 }
 
 // -> { status: 'missing' | 'malformed' | 'no' | 'yes', preference?, detail? }
-function parseDefaults(body) {
-  const m = stripNoise(body, { inlineCode: false }).replace(/\*\*/g, '').match(/^[ \t]*(?:[-*][ \t]+)?Changes a default:[ \t]*(.*?)[ \t]*$/im);
+// `ownerApproved`: the PR carries the owner-approved label, which stands for "approved by the owner" on any `yes`.
+function parseDefaults(body, { ownerApproved = false } = {}) {
+  const text = stripNoise(body, { inlineCode: false }).replace(/\*\*/g, '');
+  // The line form `Changes a default: no`, or a heading `## Changes a default` with the value on the
+  // first non-blank line under it.
+  const m = text.match(/^[ \t]*(?:[-*][ \t]+)?Changes a default:[ \t]*(.*?)[ \t]*$/im)
+    || text.match(/^[ \t]*#{1,6}[ \t]*Changes a default[ \t]*:?[ \t]*#*[ \t]*\r?\n(?:[ \t]*\r?\n)*[ \t]*(?:[-*][ \t]+)?(.*?)[ \t]*$/im);
   if (!m) return { status: 'missing' };
-  const value = m[1].replace(/\*\*/g, '').trim();
-  if (/^no\.?$/i.test(value)) return { status: 'no' };
-  const yes = value.match(/^yes\b[ \t]*(?:—|–|->|→|-{1,2}|:)[ \t]*(.+)$/i);
+  const value = m[1].replace(/\*\*/g, '').trim().replace(/^`([^`]*)`$/, '$1').trim();
+  // `no` may end in a full stop or be followed by a note after any punctuation: `no.`, `no, only a fix`,
+  // `no — a new button`, `no. Only a fix.`, `no (only a fix)`, `no) …`. `yes` likewise takes any punctuation
+  // before what changes.
+  if (/^no\b[ \t]*(?:[.!]*|[\p{P}\p{S}]+[ \t]*\S.*)$/iu.test(value)) return { status: 'no' };
+  const yes = value.match(/^yes\b[ \t]*[\p{P}\p{S}]+[ \t]*(.+)$/iu);
   if (yes) {
     const pref = yes[1].match(/^(.*?)[ ,;]*\bold (?:behaviou?r|value) kept behind (?:preference|pref|setting)[ \t]+`?([\w.:/-]+)`?\.?$/i);
     if (pref && pref[1].trim() && !/^<.*>$/.test(pref[2])) {
       return { status: 'yes', detail: pref[1].trim(), preference: pref[2] };
     }
+    // No setting restores the old behaviour, but the owner approved the change; checkDefaults
+    // requires the `owner-approved` label for this form.
+    const owner = yes[1].match(/^(.*?)[ ,;]*\bapproved by the owner\.?$/i);
+    if (owner && owner[1].trim()) return { status: 'yes', detail: owner[1].trim(), approvedByOwner: true };
+  }
+  // The owner-approved label is the owner's approval: any `yes` line passes with it, whatever follows.
+  if (ownerApproved && /^yes\b/i.test(value)) {
+    const detail = value.replace(/^yes\b[ \t]*[\p{P}\p{S}]*[ \t]*/iu, '').replace(/[ \t.]+$/, '');
+    return { status: 'yes', detail, approvedByOwner: true };
   }
   return { status: 'malformed', detail: value };
 }
 
 const DEFAULTS_HELP =
   'Add one line to the description: `Changes a default: no`, or ' +
-  '`Changes a default: yes — <what>, old behaviour kept behind preference <name>`. ' +
+  '`Changes a default: yes — <what>, old behaviour kept behind preference <name>`, or ' +
+  '`Changes a default: yes — <what>, approved by the owner` (needs the owner-approved label). ' +
   '(UX defaults only; a kernel result change is \'no\'.)';
 
 function isBot(user) {
@@ -254,11 +273,13 @@ async function checkDefaults({ github, context, core }) {
     ...context.repo, pull_number: pull.number, per_page: 100,
   })).map((f) => f.filename);
   if (isDocsOnly(files)) return { skipped: 'docs only' };
-  const result = parseDefaults(pull.body);
+  const result = parseDefaults(pull.body, { ownerApproved: hasLabel(pull, OWNER_APPROVED_LABEL) });
   if (result.status === 'missing') {
     core.setFailed(`The description has no "Changes a default:" line. ${DEFAULTS_HELP}`);
   } else if (result.status === 'malformed') {
     core.setFailed(`Could not read "Changes a default: ${result.detail}". ${DEFAULTS_HELP}`);
+  } else if (result.approvedByOwner && !hasLabel(pull, OWNER_APPROVED_LABEL)) {
+    core.setFailed(`approved by the owner needs the ${OWNER_APPROVED_LABEL} label. ${DEFAULTS_HELP}`);
   }
   return result;
 }
@@ -266,7 +287,7 @@ async function checkDefaults({ github, context, core }) {
 // Separate job (it needs write access, which fork PRs don't get): best effort.
 async function syncDefaultLabel({ github, context, core }) {
   const pull = context.payload.pull_request;
-  const { status } = parseDefaults(pull.body);
+  const { status } = parseDefaults(pull.body, { ownerApproved: hasLabel(pull, OWNER_APPROVED_LABEL) });
   const has = hasLabel(pull, DEFAULT_LABEL);
   const args = { ...context.repo, issue_number: pull.number };
   try {

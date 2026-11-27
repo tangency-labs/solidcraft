@@ -1,9 +1,100 @@
 use serde_json::{Value, json};
 
-use super::{Bom, BomParams, ComponentMetadataParams, ComponentMetadataResult, ComponentMetadataSetParams, ComponentMetadataSetResult};
+use super::{
+    Bom, BomParams, ComponentMetadataParams, ComponentMetadataResult, ComponentMetadataSetParams, ComponentMetadataSetResult,
+    OccurrenceBomTypeParams, OccurrenceBomTypeResult,
+};
 use crate::Session;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
+
+#[test]
+fn schemas_and_the_key_check_agree() {
+    assert_keys(input_schema_for::<OccurrenceBomTypeParams>(), &["bom_type", "occurrence", "path"]);
+    assert_keys(
+        input_schema_for::<BomParams>(),
+        &["component", "format", "group_by", "group_children", "levels", "mass", "path", "show_purchased_contents", "show_suppressed_parts"],
+    );
+    assert_keys(input_schema_for::<ComponentMetadataParams>(), &["component"]);
+    assert_keys(
+        input_schema_for::<ComponentMetadataSetParams>(),
+        &[
+            "bom_quantity",
+            "bom_type",
+            "component",
+            "description",
+            "finish",
+            "material",
+            "name_split",
+            "part_number",
+            "properties",
+            "revision",
+            "values",
+            "virtual",
+        ],
+    );
+}
+
+/// A design with one placed component, `Part:1`.
+fn placed(level: ParamCheck) -> (Session, u64) {
+    let mut s = Session { param_check: level, ..Session::default() };
+    s.execute("component.create", &json!({"name": "Part"})).unwrap_or_else(|e| panic!("{e}"));
+    let id = s.doc.occurrences.first().map(|o| o.id).unwrap_or_default();
+    (s, id)
+}
+
+#[test]
+fn strict_keeps_todays_errors() {
+    assert_strict_keeps_todays_errors(&[
+        ("occurrence.bom_type", json!({"occurrence": true, "bom_type": "normal"})),
+        ("occurrence.bom_type", json!({"occurrence": null, "bom_type": "normal"})),
+        ("occurrence.bom_type", json!({"occurrence": [1], "bom_type": "normal"})),
+    ]);
+    // With an occurrence there, a malformed path or type is refused in the handler's words.
+    let (_, id) = placed(ParamCheck::Off);
+    for p in [
+        json!({"occurrence": id, "path": [], "bom_type": "normal"}),
+        json!({"occurrence": id, "path": "1", "bom_type": "normal"}),
+        json!({"occurrence": id, "path": null, "bom_type": "normal"}),
+        json!({"occurrence": id, "path": vec![id; 65], "bom_type": "normal"}),
+        json!({"occurrence": id, "path": [-1], "bom_type": "normal"}),
+        json!({"occurrence": id, "bom_type": "bought"}),
+        json!({"occurrence": id, "bom_type": "Normal"}),
+        json!({"occurrence": id, "bom_type": 3}),
+    ] {
+        let error = |level| placed(level).0.execute("occurrence.bom_type", &p).err().map(|e| e.to_string());
+        let off = error(ParamCheck::Off);
+        assert!(off.is_some(), "{p} should fail today");
+        assert_eq!(error(ParamCheck::Strict), off, "{p}");
+    }
+}
+
+#[test]
+fn replies_match_the_output_schema() {
+    let schema = output_schema_for::<OccurrenceBomTypeResult>();
+    let schema = schema.as_value();
+    let (mut s, id) = placed(ParamCheck::Warn);
+    for p in [
+        json!({"occurrence": id, "bom_type": "purchased"}),
+        json!({"occurrence": "Part:1", "path": [id], "bom_type": "reference"}),
+        json!({"occurrence": id.to_string(), "bom_type": "same_as_component"}),
+        json!({"occurrence": id, "bom_type": null}),
+    ] {
+        let r = s.execute("occurrence.bom_type", &p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        assert!(r.get("param_warnings").is_none(), "{p}: {r}");
+        assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    }
+    let r = s.execute("occurrence.bom_type", &json!({"occurrence": id, "bom_type": "phantom", "type": "x"})).unwrap_or_else(|e| panic!("{e}"));
+    assert!(r.get("param_warnings").is_some(), "{r}");
+    assert!(conforms(schema, schema, &r), "{r} doesn't match {schema}");
+    let ok = json!({"occurrence": id, "bom_type": "phantom", "effective": "phantom", "changed": false});
+    assert!(conforms(schema, schema, &ok));
+    for (k, v) in [("occurrence", json!("1")), ("changed", json!(1)), ("effective", Value::Null)] {
+        let mut bad = ok.clone();
+        bad[k] = v;
+        assert!(!conforms(schema, schema, &bad), "{bad}");
+    }
+}
 
 fn run(s: &mut Session, id: &str, p: Value) -> Value {
     s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"))
@@ -29,17 +120,7 @@ fn assembly(s: &mut Session) {
 }
 
 #[test]
-fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<BomParams>(), &["component", "format", "group_by", "group_children", "levels", "path"]);
-    assert_keys(input_schema_for::<ComponentMetadataParams>(), &["component"]);
-    assert_keys(
-        input_schema_for::<ComponentMetadataSetParams>(),
-        &["bom_type", "component", "description", "part_number", "properties", "revision", "values"],
-    );
-}
-
-#[test]
-fn strict_keeps_todays_errors() {
+fn strict_keeps_todays_errors_of_a_bill_of_materials() {
     let file = std::env::temp_dir().join(format!("solidcraft-bom-schema-{}.csv", std::process::id()));
     let file = file.to_string_lossy();
     assert_strict_keeps_todays_errors(&[
@@ -53,6 +134,9 @@ fn strict_keeps_todays_errors() {
         ("assembly.bom", json!({"group_by": [5]})),
         ("assembly.bom", json!({"group_by": 5})),
         ("assembly.bom", json!({"group_children": "yes"})),
+        ("assembly.bom", json!({"mass": "yes"})),
+        ("assembly.bom", json!({"show_purchased_contents": 1})),
+        ("assembly.bom", json!({"show_suppressed_parts": "yes"})),
         ("assembly.bom", json!({"path": file.replace(".csv", ".txt")})),
         ("assembly.bom", json!({"path": file, "format": "xml"})),
         ("component.metadata", json!({})),
@@ -101,6 +185,42 @@ fn strict_keeps_todays_errors() {
     }
 }
 
+#[test]
+fn an_optional_name_split_is_checked_and_reported_without_creating_authored_properties() {
+    let (mut s, _) = placed(ParamCheck::Strict);
+    let read = |s: &mut Session| run(s, "component.metadata", json!({"component": "Part"}));
+    assert!(read(&mut s).get("name_split").is_none());
+    let rule = json!({"separator": "::", "left_property": "Number", "right_property": "Name"});
+    let set = json!({"component": "Part", "name_split": rule});
+    let undo = s.undo.len();
+    let reply = run(&mut s, "component.metadata.set", set.clone());
+    matches(output_schema_for::<ComponentMetadataSetResult>(), "component.metadata.set", &reply, false);
+    assert_eq!(reply["changed"], json!(["name_split"]));
+    assert_eq!(reply["properties"], json!({}));
+    assert_eq!(s.undo.len(), undo + 1);
+    let reply = read(&mut s);
+    matches(output_schema_for::<ComponentMetadataResult>(), "component.metadata", &reply, false);
+    assert_eq!(reply["name_split"], rule);
+    assert_eq!(run(&mut s, "component.metadata.set", set)["changed"], json!([]));
+    assert_eq!(s.undo.len(), undo + 1, "setting the same rule does nothing");
+
+    for invalid in [
+        json!("::"),
+        json!({"separator": "::", "left_property": "Number"}),
+        json!({"separator": "::", "left_property": "Number", "right_property": "Name", "extra": true}),
+        json!({"separator": "", "left_property": "Number", "right_property": "Name"}),
+        json!({"separator": "::", "left_property": "Number", "right_property": "Number"}),
+    ] {
+        let params = json!({"component": "Part", "properties": {"Number": "manual"}, "name_split": invalid});
+        assert!(s.execute("component.metadata.set", &params).is_err(), "{params}");
+    }
+    assert_eq!(s.undo.len(), undo + 1, "refusals change nothing");
+    assert_eq!(read(&mut s)["properties"], json!({}));
+    let cleared = run(&mut s, "component.metadata.set", json!({"component": "Part", "name_split": null}));
+    assert_eq!(cleared["changed"], json!(["name_split"]));
+    assert!(cleared.get("name_split").is_none());
+}
+
 /// #11075: a bill of materials replies as its output schema says, in Warn without warnings for
 /// good calls and with them for a misspelt key: flat and top, grouped by definition, with the
 /// hinge keeping its pin as children, and written to a JSON and a CSV file.
@@ -118,6 +238,9 @@ fn a_bill_of_materials_replies_with_its_schema() {
     matches(&r, false);
     assert!(r.get("path").is_none() && r["rows"].as_array().is_some_and(|rows| rows.iter().all(|row| row.get("children").is_none())), "{r}");
     matches(&run(&mut s, "assembly.bom", json!({"component": 0, "levels": "top", "group_by": "definition"})), false);
+    matches(&run(&mut s, "assembly.bom", json!({"levels": "all", "show_purchased_contents": true, "mass": true})), false);
+    matches(&run(&mut s, "assembly.bom", json!({"show_suppressed_parts": true})), false);
+    matches(&run(&mut s, "assembly.bom", json!({"group_children": true, "mass": true})), false);
     let r = run(&mut s, "assembly.bom", json!({"levels": "flat", "group_by": ["part_number"], "group_children": true}));
     matches(&r, false);
     let hinge = r["rows"].as_array().and_then(|rows| rows.iter().find(|row| row["part_number"] == "HG-1")).cloned().unwrap_or_default();

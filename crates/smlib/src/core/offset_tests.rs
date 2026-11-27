@@ -16,13 +16,85 @@ use solidcore::geom::vector3d::Vec3;
 use solidcore::primitive::api_curves::create_line_segment;
 use solidcore::sweep::api_brep::create_linear_sweep;
 
-use super::offset::{draft, mark_moved, moved_faces, offset_faces, offset_sheet, shell, thicken};
+use super::offset::{draft, mark_moved, moved_faces, offset_faces, offset_sheet, offset_solid, refused, shell, thicken};
 use super::{Body, area, bounds, counts, make_box, make_cylinder, make_sphere, run, to_arrays, volume};
 use crate::export::native;
 use crate::{BooleanOp, Error};
 
 /// A case longer than this is a hang.
 const TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Stress corpus S0790 (#18802): the rim hole leaves a 0.00002 mm web at the
+/// frustum's top. Inward shelling preserves that web. Moving the drill to x = 8.8
+/// makes its rim touch the top boundary at (10, 0, 50), which keeps the diagnosed
+/// outline-touch refusal and its nested kernel cause (#18568).
+#[test]
+fn shell_of_a_drilled_frustum_keeps_its_failure_reason() {
+    let shelled = |x| {
+        timed("S0790", move || {
+            let cone = super::make_cone([0.0; 3], 25.0, 10.0, 50.0).unwrap();
+            let rim_hole = make_cylinder([x, 0.0, 40.0], 1.2, 10.0).unwrap();
+            let centre_hole = make_cylinder([0.0, 0.0, 42.0], 1.0, 8.0).unwrap();
+            let drilled = super::boolean::boolean(&cone, &rim_hole, BooleanOp::Subtract).unwrap().unwrap();
+            let drilled = super::boolean::boolean(&drilled, &centre_hole, BooleanOp::Subtract).unwrap().unwrap();
+            shell(&drilled, &[], TOL, -1.2)
+        })
+    };
+
+    let body = shelled(8.79998).expect("the positive-width web survives shelling");
+    let check = super::check(&body, crate::check::CheckLevel::All).unwrap();
+    assert!(check.is_valid(), "{check}");
+    assert_eq!(super::solid_count(&body).unwrap(), 1);
+    let (record, _) = native(&to_arrays(&body).unwrap()).unwrap();
+    solidcore_ops::record_check::validate(&record).unwrap();
+    let top: Vec<_> = record
+        .faces
+        .iter()
+        .filter(|face| match &face.surface {
+            solidcore_record::brep::Surface::Plane { origin, .. } | solidcore_record::brep::Surface::PlaneThrough { origin, .. } => {
+                (origin[2] - 50.0).abs() < 1e-8
+            }
+            _ => false,
+        })
+        .collect();
+    assert_eq!(top.len(), 1);
+    assert_eq!(top[0].loops.len(), 3, "one outer boundary and two separate blind holes");
+    // The outer drilled volume is 16227.6*pi. The inward cavity has radius
+    // R(z) = 25 - 0.3*z - 1.2*sqrt(1.09), for z in [1.2, 48.8]. Its excluded
+    // central hole has radius 2.2 above z=40.8. Its eccentric hole has radius
+    // 2.4 above z=38.8, clipped to that circular section. Integrating these
+    // independent sections gives this material volume.
+    let want = 9243.7803299802;
+    let got = volume(&body, 1e-8).unwrap();
+    assert!(rel(got, want) < 1e-9, "volume {got}, independently derived {want}");
+
+    let error = shelled(8.8).expect_err("the hole actually touches the top outline");
+    let words = error.to_string();
+    let Error::OutlineTouches { at, .. } = &error else { panic!("{words}") };
+    assert!((at[0] - 10.0).abs() < 1e-4 && at[1].abs() < 1e-4 && (at[2] - 50.0).abs() < 1e-4, "at {at:?}");
+    assert!(!words.contains("upstream status"), "{words}");
+    assert!(words.contains("an offset edge could not be split where a loop gap or a step corner needs it"), "{words}");
+    eprintln!("{words}");
+}
+
+#[test]
+fn typed_offset_refusals_keep_their_nested_kernel_cause() {
+    use solidcore_ops::{Error as Ops, OffsetRefusal};
+
+    let refusal = Ops::OffsetRefused { face: None, why: OffsetRefusal::ExactCurveUncut };
+    let diagnostic = "offset::trim: exact_curve_uncut; caused by intersect::clip: the exact trim does not cross the face boundary".to_owned();
+    let error = refused(refusal.clone(), diagnostic.clone());
+    let words = error.to_string();
+    assert!(words.contains(&refusal.to_string()), "{words}");
+    assert!(words.contains(&diagnostic), "{words}");
+    assert_eq!(error, Error::RefusedWithDiagnostic { refusal, diagnostic });
+}
+
+#[test]
+fn offset_folds_keep_the_largest_wall() {
+    let refusal = solidcore_ops::Error::WallFolds { largest: Some(1.0) };
+    assert_eq!(refused(refusal, "offset::face: a folded wall".into()), Error::WallFolds { largest: Some(1.0) });
+}
 
 /// How near a pick point must be.
 const TOL: f64 = 0.01;
@@ -89,6 +161,8 @@ enum Op {
     Thicken(Shape, f64, bool),
     /// `Brep::offset_sheet`: distance.
     OffsetSheet(Shape, f64),
+    /// `Brep::offset_solid`: distance, round.
+    OffsetSolid(Shape, f64, bool),
     /// `Brep::draft`: faces, neutral origin, neutral normal, pull, angle.
     Draft(Shape, Vec<[f64; 3]>, [f64; 3], [f64; 3], [f64; 3], f64),
 }
@@ -169,6 +243,32 @@ fn case(name: &str) -> Case {
         // each face moved out 1 along its normal, the convex edges extended, gives the block
         // (a + 2d)(b + 2d)(c + 2d) of six planes, from -d to (a, b, c) + d.
         "offset_sheet_a_solid" => c(Op::OffsetSheet(BLOCK, 1.0), Expect::Solid(32.0 * 22.0 * 12.0, [-1.0, -1.0, -1.0], [31.0, 21.0, 11.0])),
+        // A closed solid grown 1, the convex edges extended: the block (a + 2d)(b + 2d)(c + 2d),
+        // from -d to (a, b, c) + d.
+        "offset_solid_sharp" => c(Op::OffsetSolid(BLOCK, 1.0, false), Expect::Solid(32.0 * 22.0 * 12.0, [-1.0, -1.0, -1.0], [31.0, 21.0, 11.0])),
+        // Shrunk 1, sharp: (a - 2d)(b - 2d)(c - 2d), from d to (a, b, c) - d.
+        "offset_solid_shrunk" => c(Op::OffsetSolid(BLOCK, -1.0, false), Expect::Solid(28.0 * 18.0 * 8.0, [1.0, 1.0, 1.0], [29.0, 19.0, 9.0])),
+        // Grown 1 with the convex edges rounded: every point within d of the block (Steiner's
+        // formula for a box): abc + 2(ab + bc + ca) d + π (a + b + c) d² + (4/3) π d³; the six
+        // faces moved out, a quarter cylinder along each edge, an eighth of the ball at each
+        // corner. Its bounds are the sharp offset's.
+        "offset_solid_round" => c(
+            Op::OffsetSolid(BLOCK, 1.0, true),
+            Expect::Solid(ABC + 2.0 * 1100.0 + PI * 60.0 + 4.0 / 3.0 * PI, [-1.0, -1.0, -1.0], [31.0, 21.0, 11.0]),
+        ),
+        // A cylinder r 5, h 10 grown d = 1, rounded: the side moved out, π (r + d)² h; the caps
+        // moved out, 2 π r² d; at each rim a quarter disc of radius d (area π d² / 4, centroid
+        // 4d / (3π) out from the rim) turned about the axis, 2 π (r + 4d / (3π)) π d² / 4 by Pappus.
+        "offset_solid_round_cylinder" => {
+            let (r, h, d) = (5.0, 10.0, 1.0);
+            let rim = 2.0 * PI * (r + 4.0 * d / (3.0 * PI)) * PI * d * d / 4.0;
+            c(
+                Op::OffsetSolid(Shape::Cylinder([0.0; 3], r, h), d, true),
+                Expect::Solid(PI * (r + d) * (r + d) * h + 2.0 * PI * r * r * d + 2.0 * rim, [-6.0, -6.0, -1.0], [6.0, 6.0, 11.0]),
+            )
+        }
+        // A sheet is not a closed solid.
+        "offset_solid_of_a_sheet" => c(Op::OffsetSolid(PLATE, 1.0, false), Expect::Fails(Error::Argument)),
         // The top moved out 2: abc + d·ab.
         "offset_faces_top_out" => c(Op::OffsetFaces(BLOCK, vec![TOP], 2.0), Expect::Volume(ABC + 2.0 * 600.0)),
         // The top moved in 10, as deep as the block: nothing left behind it.
@@ -224,9 +324,52 @@ fn case(name: &str) -> Case {
             )
         }
         // The top is square to the pull, not along it.
-        "draft_a_face_across_the_pull" => {
-            c(Op::Draft(BLOCK, vec![TOP], [0.0; 3], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], 0.1), Expect::Fails(Error::Unsupported))
-        }
+        "draft_a_face_across_the_pull" => c(
+            Op::Draft(BLOCK, vec![TOP], [0.0; 3], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0], 0.1),
+            Expect::Fails(draft_refused("a drafted plane is not parallel to the pull")),
+        ),
+        // A sphere is neither a plane nor a cone or cylinder (#18541).
+        "draft_a_sphere" => c(
+            Op::Draft(BALL, vec![[10.0, 0.0, 0.0]], [0.0; 3], Z, Z, 0.1),
+            Expect::Fails(draft_refused("a drafted face is neither a plane nor a cone or cylinder")),
+        ),
+        // The cylinder's axis is z, the pull x.
+        "draft_a_cylinder_across_its_axis" => c(
+            Op::Draft(Shape::Cylinder([0.0; 3], 5.0, 10.0), vec![[5.0, 0.0, 5.0]], [0.0; 3], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0], 0.1),
+            Expect::Fails(draft_refused("a drafted cone or cylinder's axis is not along the pull")),
+        ),
+        // The pull runs along the cylinder's axis z, but the neutral plane x = 0 holds that axis.
+        "draft_a_cylinder_about_a_plane_through_its_axis" => c(
+            Op::Draft(Shape::Cylinder([0.0; 3], 5.0, 10.0), vec![[5.0, 0.0, 5.0]], [0.0; 3], [1.0, 0.0, 0.0], Z, 0.1),
+            Expect::Fails(draft_refused("a drafted cone or cylinder's axis is parallel to the neutral plane")),
+        ),
+        // The neutral plane x = 10 misses the axis x = 0 but runs along it: the same refusal,
+        // without claiming the axis lies in the plane.
+        "draft_a_cylinder_about_a_plane_along_its_axis" => c(
+            Op::Draft(Shape::Cylinder([0.0; 3], 5.0, 10.0), vec![[5.0, 0.0, 5.0]], [10.0, 0.0, 0.0], [1.0, 0.0, 0.0], Z, 0.1),
+            Expect::Fails(draft_refused("a drafted cone or cylinder's axis is parallel to the neutral plane")),
+        ),
+        // The cone r 10 at its base to 8 at its top, 20 tall, drafted 0.5 rad about its base:
+        // its top radius would be 10 + 20 tan(atan(-0.1) - 0.5) = -3.68, so it closes on the way up.
+        "draft_a_cone_until_it_closes" => c(
+            Op::Draft(Shape::Frustum([0.0; 3], 10.0, 8.0, 20.0), vec![[0.0, 9.0, 10.0]], [0.0; 3], Z, Z, 0.5),
+            Expect::Fails(Error::Refused(solidcore_ops::Error::OffsetRefused { face: None, why: solidcore_ops::OffsetRefusal::DraftConeCloses })),
+        ),
+        // #22807: Ø20 x 100 cylinder drafted 6° about its base closes at z = 10 / tan(6°) ~ 95.14 < 100.
+        "draft_a_cylinder_until_it_closes" => c(
+            Op::Draft(Shape::Cylinder([0.0; 3], 10.0, 100.0), vec![[10.0, 0.0, 50.0]], [0.0; 3], Z, Z, 6f64.to_radians()),
+            Expect::Fails(Error::Refused(solidcore_ops::Error::OffsetRefused { face: None, why: solidcore_ops::OffsetRefusal::DraftConeCloses })),
+        ),
+        // The same cone about the plane z = 150, past its apex at z = 100: its radius there,
+        // 10 - 0.1 * 150 = -5, is not positive. The face itself does not close: the refusal names
+        // the neutral plane.
+        "draft_a_cone_about_a_plane_past_its_apex" => c(
+            Op::Draft(Shape::Frustum([0.0; 3], 10.0, 8.0, 20.0), vec![[0.0, 9.0, 10.0]], [0.0, 0.0, 150.0], Z, Z, 0.1),
+            Expect::Fails(Error::Refused(solidcore_ops::Error::OffsetRefused {
+                face: None,
+                why: solidcore_ops::OffsetRefusal::DraftNeutralPlanePastApex,
+            })),
+        ),
         _ => panic!("{name}"),
     }
 }
@@ -269,6 +412,7 @@ fn on_core(name: &str, c: &Case) -> crate::Result<Body> {
         Op::OffsetFaces(s, points, d) => offset_faces(&s.core(), points, tol, *d),
         Op::Thicken(s, t, sym) => thicken(&s.core(), *t, *sym),
         Op::OffsetSheet(s, d) => offset_sheet(&s.core(), *d),
+        Op::OffsetSolid(s, d, round) => offset_solid(&s.core(), *d, *round),
         Op::Draft(s, points, o, n, pull, angle) => draft(&s.core(), points, tol, *o, *n, *pull, *angle),
     }
 }
@@ -365,6 +509,11 @@ cases!(
     offset_sheet_a_solid,
     offset_sheet_a_sphere,
     offset_sheet_a_sphere_to_its_centre,
+    offset_solid_sharp,
+    offset_solid_shrunk,
+    offset_solid_round,
+    offset_solid_round_cylinder,
+    offset_solid_of_a_sheet,
     offset_faces_top_out,
     offset_faces_through,
     draft_box_sides,
@@ -374,7 +523,19 @@ cases!(
     draft_a_curved_face,
     draft_a_cone_about_the_pull,
     draft_a_face_across_the_pull,
+    draft_a_sphere,
+    draft_a_cylinder_across_its_axis,
+    draft_a_cylinder_about_a_plane_through_its_axis,
+    draft_a_cylinder_about_a_plane_along_its_axis,
+    draft_a_cone_until_it_closes,
+    draft_a_cylinder_until_it_closes,
+    draft_a_cone_about_a_plane_past_its_apex,
 );
+
+/// A draft the kernel refuses for what the face is, in solidcore-ops' words for the same refusal.
+fn draft_refused(why: &'static str) -> Error {
+    Error::Refused(solidcore_ops::Error::Unsupported(why))
+}
 
 /// The capi's argument checks, before any kernel call.
 #[test]
@@ -664,7 +825,69 @@ fn a_draft_past_the_neighbours_meeting_is_refused_as_an_edge_that_vanishes() {
     let prism = super::sweep::extrude(&profile, [0.0, 0.0, 1.0], 10.0, 0.0, DraftCorner::default(), true).unwrap();
     let (tip, z, origin, angle) = ([[10.0, 18.0, 5.0]], [0.0, 0.0, 1.0], [0.0, 0.0, -100.0], (-2f64).to_radians());
     let vanishes = solidcore_ops::Error::OffsetRefused { face: None, why: solidcore_ops::OffsetRefusal::EdgeVanishes };
-    assert_eq!(draft(&prism, &tip, TOL, origin, z, z, angle).err(), Some(Error::Refused(vanishes)));
+    assert!(matches!(
+        draft(&prism, &tip, TOL, origin, z, z, angle).err(),
+        Some(Error::RefusedWithDiagnostic { refusal, .. }) if refusal == vanishes
+    ));
+}
+
+/// Stress corpus S8188 (#20767): a cone r 2 at z = 0 to r 1 at z = 3, shelled 0.12 in to a closed
+/// cavity, its side drafted 3 degrees about its base, leaning in going up, through the kernel
+/// wrapper's draft. The kernel's test (solidcore-ops `offset/tests.rs`,
+/// `a_shelled_cones_side_drafted_into_its_cavity_is_refused_naming_the_largest_angle`) derives
+/// the closed forms used here: the side reaches the cavity's rim at
+/// atan((2 - rim) / 2.88) - atan(1/3) = 0.038994633885685748 rad (2.234 degrees), rim =
+/// 2 - 0.04 sqrt(10) - 0.96, so 3 degrees is refused naming that angle, not as a body that fails
+/// its check. With a 0.5 wall the rim is reached only at 10.118 degrees, and 3 degrees builds the
+/// drafted cone less the cavity, 13.675559992581547.
+#[test]
+fn a_draft_into_a_shelled_cones_cavity_is_refused_naming_the_largest_angle() {
+    const LARGEST: f64 = 0.038_994_633_885_685_75;
+    const DRAFTED: f64 = 13.675_559_992_581_547;
+    // 3 degrees, radians
+    const THREE: f64 = 0.052_359_877_559_829_89;
+    let z = [0.0, 0.0, 1.0];
+    for wall in [0.12, 0.5] {
+        let cone = super::make_cone([0.0; 3], 2.0, 1.0, 3.0).unwrap();
+        let shelled = shell(&cone, &[], TOL, -wall).unwrap();
+        let drafted = draft(&shelled, &[[0.0, -1.5, 1.5]], TOL, [0.0; 3], z, z, THREE);
+        if wall == 0.12 {
+            let Some(Error::RefusedWithDiagnostic { refusal, diagnostic }) = drafted.as_ref().err() else { panic!("{drafted:?}") };
+            let solidcore_ops::Error::OffsetRefused { why: solidcore_ops::OffsetRefusal::DraftClosesWall { largest }, .. } = refusal else {
+                panic!("{refusal}")
+            };
+            assert!((largest - LARGEST).abs() < 1e-12, "{largest}: {diagnostic}");
+        } else {
+            let got = volume(&drafted.unwrap(), 1e-8).unwrap();
+            assert!(rel(got, DRAFTED) < 1e-9, "{got}");
+        }
+    }
+}
+
+/// A frustum r 100 at z = 0 to r 40 at z = 200 with six blind holes r 5 from z = 150 up through
+/// the top on the circle r 32, its side drafted about its base to lean 18 degrees, through the
+/// kernel wrapper's draft (the cone solidcore's draft gives, carrying its definition). The drafted
+/// side, r(z) = 100 - z tan 18 degrees, is r 35.02 at the top and passes the holes' outer reach,
+/// r 37, at z = 193.89, so every hole breaks out through it. The kernel's test (solidcore-ops
+/// `offset/tests.rs`, `a_cones_side_drafted_through_blind_holes_near_its_top_breaks_them_out`)
+/// derives the volume: the frustum less the holes, the discs' closed-form overlap integrated
+/// over z, 3061182.2920648409. Here the side's cone comes back from the hole cuts with its
+/// frame at the top of its axis, so the drafted cone's frame and stored heights differ from it.
+#[test]
+fn a_cones_side_drafted_through_blind_holes_near_its_top_breaks_them_out() {
+    // 18 degrees less atan 0.3, radians
+    const TURN: f64 = 0.022_702_470_881_112_213;
+    const DRAFTED: f64 = 3_061_182.292_064_841;
+    let z = [0.0, 0.0, 1.0];
+    let s = 3.0_f64.sqrt();
+    let mut body = super::make_cone([0.0; 3], 100.0, 40.0, 200.0).unwrap();
+    for (x, y) in [(32.0, 0.0), (16.0, 16.0 * s), (-16.0, 16.0 * s), (-32.0, 0.0), (-16.0, -16.0 * s), (16.0, -16.0 * s)] {
+        let hole = make_cylinder([x, y, 150.0], 5.0, 51.0).unwrap();
+        body = super::boolean::boolean(&body, &hole, BooleanOp::Subtract).unwrap().unwrap();
+    }
+    let drafted = draft(&body, &[[70.0, 0.0, 100.0]], TOL, [0.0; 3], z, z, TURN).unwrap();
+    let got = volume(&drafted, 1e-8).unwrap();
+    assert!(rel(got, DRAFTED) < 1e-8, "{got}");
 }
 
 /// A flat L of two faces thickened by 2 with mitred walls: 2 x 10 x (20 + 22).
@@ -698,4 +921,114 @@ fn a_wall_thicker_than_its_face_curves_is_refused_naming_the_largest() {
     let largest: f64 = largest.parse().unwrap();
     assert!((largest - 10.0).abs() < 1e-9, "{largest}");
     assert!(thicken(&sheet, 2.0, false).is_ok() && thicken(&sheet, -2.0, false).is_ok());
+}
+
+/// A thread's flank moved along its normal (#15661, #15715, #16866): an M12 x 1.75 groove, its
+/// walls joined across the turns as a modelled thread's are, cut one pitch deep into a 6 rod; the
+/// lower flank, one B-spline face between the root and crest cylinders and the caps, moves out
+/// and in. Its new surface is the offset of the flank's net, and how far the root and crest must
+/// reach to meet it is proved: the move is no longer refused for want of that bound. The body
+/// builds once the offset's loops close across the moved flank's ends (still refused there: "a
+/// gap in its offset's loops cannot be bridged"); then it must pass the check and gain the
+/// volume of the closed form below.
+///
+/// The flank is the screw surface `z = f(r) + c ψ` (`c = P / 2π`, `ψ` the turn from the
+/// profile's plane), `f(r) = low − t (r − root)` with `t = tan 30°`. Its unit normal out of the
+/// body is `(−f′ e_r − (c / r) e_ψ + e_z) / L`, `L = √(1 + t² + c² / r²)`, so the point at radius
+/// `s` moves to radius `r′ = √(a² + b²)`, `a = s + d t / L`, `b = d c / (s L)`, turned by
+/// `−atan2(b, a)` and raised by `d / L`: the offset is the screw surface
+/// `z = g(r′) + c ψ` with `g(r′) = f(s) + d / L + c atan2(b, a)`. Between the caps, `H` apart,
+/// each radius's strip `f ≤ z − c ψ ≤ g` turns through `H / c`, so the volume gained is
+/// `(H / c) ∫ (g − f) r dr` from the root to the crest. Each flank, the old and the moved, lies
+/// within the sweep's tolerance of its screw surface, so the volume is within twice that times
+/// the flank's area `(H / c) ∫ L r dr` (the screw surface's area element is `L r dr dψ`).
+#[test]
+fn a_thread_flank_moves_beside_its_root_and_crest() {
+    use super::sweep::screw_sweep;
+    use crate::check::CheckLevel;
+    use crate::sweeps::Curve as Profile;
+    use std::f64::consts::TAU;
+    let (pitch, crest, height) = (1.75, 6.0, 1.75);
+    // H = √3 / 2 P; the root at 6 − 5H/8 and the profile out past the crest at 6 + P/20, the
+    // flanks at 30° to the radius: each rises (out − root) tan 30° across them
+    let tooth = 3f64.sqrt() / 2.0 * pitch;
+    let (root, out, t) = (crest - 5.0 * tooth / 8.0, crest + pitch / 20.0, (PI / 6.0).tan());
+    let flank = (out - root) * t;
+    let (low, high) = (-pitch - pitch / 8.0, -pitch + pitch / 8.0);
+    let corners = [[0.0, root, low], [0.0, out, low - flank], [0.0, out, high + flank], [0.0, root, high]];
+    let groove: Vec<Profile> = (0..4).map(|i| Profile::Line { start: corners[i], end: corners[(i + 1) % 4] }).collect();
+    // three turns from z below -0.9 carry the groove past both caps (its top above 2.6)
+    let tolerance = pitch * 1e-4;
+    let tool = screw_sweep(&groove, [0.0; 3], [0.0, 0.0, 1.0], pitch, 3.0, None, tolerance, true).unwrap();
+    let rod = make_cylinder([0.0; 3], crest, height).unwrap();
+    let thread = super::boolean::boolean(&rod, &tool, BooleanOp::Subtract).unwrap().unwrap();
+    let before = volume(&thread, 1e-8).unwrap();
+    let c = pitch / TAU;
+    let f = |r: f64| low - t * (r - root);
+    let normal_length = |r: f64| (1.0 + t * t + c * c / (r * r)).sqrt();
+    // a point of the lower flank halfway across it, at mid height: turned by ψ about +z from
+    // the profile's plane (the +y half of x = 0)
+    let r = 0.5 * (root + crest);
+    let psi = (0.5 * height - f(r)) / c;
+    let pick = [-r * psi.sin(), r * psi.cos(), 0.5 * height];
+    // composite Simpson's rule over [a, b] in 2n steps
+    let simpson = |g: &dyn Fn(f64) -> f64, a: f64, b: f64| {
+        let n = 2000;
+        let h = (b - a) / f64::from(2 * n);
+        let inner: f64 = (1..2 * n).map(|i| g(a + h * f64::from(i)) * if i % 2 == 1 { 4.0 } else { 2.0 }).sum();
+        (g(a) + g(b) + inner) * h / 3.0
+    };
+    let area = height / c * simpson(&|r| normal_length(r) * r, root, crest);
+    for d in [0.3, -0.2] {
+        // the moved point's radius, height above `c ψ` and `r′²/2`'s rate along `s`
+        let moved = |s: f64| {
+            let l = normal_length(s);
+            let l_s = -c * c / (s * s * s) / l;
+            let (a, b) = (s + d * t / l, d * c / (s * l));
+            let a_s = 1.0 - d * t * l_s / (l * l);
+            let b_s = -d * c * (l + s * l_s) / (s * l * s * l);
+            ((a * a + b * b).sqrt(), f(s) + d / l + c * b.atan2(a), a * a_s + b * b_s)
+        };
+        // the radius whose point moves to `r`, by bisection (`r′` rises with `s`)
+        let from = |r: f64| {
+            let (mut lo, mut hi) = (r - 2.0 * d.abs(), r + 2.0 * d.abs());
+            for _ in 0..200 {
+                let m = 0.5 * (lo + hi);
+                if moved(m).0 < r { lo = m } else { hi = m }
+            }
+            0.5 * (lo + hi)
+        };
+        let gained = simpson(&|s| moved(s).1 * moved(s).2, from(root), from(crest));
+        let lost = (low + t * root) * (crest * crest - root * root) / 2.0 - t * (crest.powi(3) - root.powi(3)) / 3.0;
+        let want = height / c * (gained - lost);
+        let body = match offset_faces(&thread, &[pick], TOL, d) {
+            Ok(body) => body,
+            Err(e) => {
+                // only the stages after the reach may refuse (a pick that misses, a cancel
+                // or the reach itself would not): the offset's loops or its vanishing edges
+                let why = e.to_string();
+                let later = ["cannot be bridged", "closes to nothing", "could not be split"];
+                assert!(later.iter().any(|stage| why.contains(stage)), "d {d}: {why}");
+                eprintln!("d {d}: refused after the reach: {why}");
+                continue;
+            }
+        };
+        let report = super::check(&body, CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "d {d}: {report}");
+        let after = volume(&body, 1e-8).unwrap();
+        let bound = 2.0 * tolerance * area + 1e-8 * (before + after);
+        let got = after - before;
+        assert!((got - want).abs() <= bound, "d {d}: the volume changed by {got}, the closed form {want} (within {bound})");
+    }
+}
+
+/// A draft direction of no length is refused as an argument before any face is picked, even with
+/// a point that would pick no face: the direction is the first thing wrong.
+#[test]
+fn a_draft_with_no_neutral_normal_is_refused_before_its_pick() {
+    let b = make_box([0.0; 3], [10.0; 3]).unwrap();
+    let z = [0.0, 0.0, 1.0];
+    for (normal, pull) in [([0.0; 3], z), (z, [0.0; 3])] {
+        assert_eq!(draft(&b, &[[50.0, 50.0, 50.0]], TOL, [0.0; 3], normal, pull, 0.1).err(), Some(Error::Argument));
+    }
 }

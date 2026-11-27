@@ -52,14 +52,12 @@ use solidcore::topology::topology::NotifyRecords;
 use solidcore::topology::{edge, EdgeId, EdgeuseId, FaceId};
 use solidcore::{Brep, Kernel};
 
-/// Every fix but `geometric_g2_continuity`.
+/// Every fix.
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -628,7 +626,7 @@ fn round_trip(k: &mut Kernel, b: &Brep, trip: Trip) -> Brep {
     let mut out = match trip {
         Trip::None => return b.clone_standing_for_self().unwrap(),
         Trip::Data | Trip::BareNets => {
-            let mut data = BrepData::from_brep(b, &env, &mut Vec::new()).unwrap();
+            let mut data = BrepData::from_brep(k, b, &env, &mut Vec::new()).unwrap();
             if matches!(trip, Trip::BareNets) {
                 for s in &mut data.surfaces {
                     if let SurfaceKind::BallPatch(p) = s.object.kind() {

@@ -9,7 +9,16 @@ use crate::profiles3d::find_planar_3d_profiles;
 use crate::wire::WireSpace;
 
 fn wire(id: &str, pts: &[Vec3]) -> crate::wire::Wire {
-    crate::wire::Wire { id: id.into(), pts: pts.to_vec(), space: WireSpace::Component, link: None, fit: Vec::new(), arc: None, exact: Vec::new() }
+    crate::wire::Wire {
+        id: id.into(),
+        pts: pts.to_vec(),
+        space: WireSpace::Component,
+        link: None,
+        fit: Vec::new(),
+        arc: None,
+        control: None,
+        exact: Vec::new(),
+    }
 }
 
 /// The issue's pyramid: a 20×20 square on XY, 3D lines from its corners to an apex at (0,0,15).
@@ -210,6 +219,174 @@ fn a_closed_wire_whose_quarter_points_line_up_is_a_profile() {
     // The 30 × 20 triangle (300 mm²) and three notches of 10 × 3 / 2 below it.
     assert!((ps[0].area - 345.0).abs() < 1e-6, "area {}", ps[0].area);
     assert!(dist_to_plane(&ps[0].plane, v(15.0, 20.0)) < 1e-6);
+}
+
+#[test]
+fn every_tooth_of_a_zigzag_wire_is_a_profile() {
+    // One 3D polyline zigzags from base points on the x axis to apexes leaning out to both sides,
+    // and in-plane lines join the base points. Each tooth is a triangle in a plane of its own,
+    // which holds an apex that is none of the wire's key points (ends, quarters, farthest), so a
+    // sketch this small spans planes by all its points.
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let lean = [5.0, -5.0, 8.0, -8.0];
+    let mut pts = Vec::new();
+    let mut base = Vec::new();
+    for k in 0..=4 {
+        let x = 10.0 * k as f64;
+        base.push(sk.add_point(Vec2 { x, y: 0.0 }, None).unwrap());
+        pts.push(Vec3 { x, y: 0.0, z: 0.0 });
+        if let Some(&y) = lean.get(k) {
+            pts.push(Vec3 { x: x + 5.0, y, z: 10.0 });
+        }
+    }
+    for k in 0..4 {
+        sk.add_curve(CurveKind::Line { a: base[k], b: base[k + 1] }, None).unwrap();
+    }
+    sk.wires.push(wire("w", &pts));
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert_eq!(ps.len(), 4, "one triangle per tooth: {:?}", ps.iter().map(|p| (&p.outer_curves, p.area)).collect::<Vec<_>>());
+    // Base 10; the apex is sqrt(lean² + 10²) from the base line.
+    let mut want: Vec<f64> = lean.iter().map(|y: &f64| 5.0 * (y * y + 100.0).sqrt()).collect();
+    let mut got: Vec<f64> = ps.iter().map(|p| p.area).collect();
+    want.sort_by(f64::total_cmp);
+    got.sort_by(f64::total_cmp);
+    for (g, w) in got.iter().zip(&want) {
+        assert!((g - w).abs() < 1e-6, "areas {got:?} vs {want:?}");
+    }
+}
+
+#[test]
+fn many_curves_in_a_planar_3d_loop_finds_profile() {
+    for n in [20, 40] {
+        let mut sk = Sketch::new();
+        sk.view.three_d = true;
+        let r = 50.0;
+        for i in 0..n {
+            let t0 = 2.0 * std::f64::consts::PI * (i as f64) / (n as f64);
+            let t1 = 2.0 * std::f64::consts::PI * ((i + 1) as f64) / (n as f64);
+            let tm = 0.5 * (t0 + t1);
+            let p0 = Vec3 { x: r * t0.cos(), y: 0.0, z: r * t0.sin() };
+            let pm = Vec3 { x: r * tm.cos(), y: 0.0, z: r * tm.sin() };
+            let p1 = Vec3 { x: r * t1.cos(), y: 0.0, z: r * t1.sin() };
+            sk.add_drawn_wire_in(&[p0, pm, p1], WireSpace::Component).unwrap();
+        }
+        let ps = find_planar_3d_profiles(&sk, Plane::XY);
+        assert_eq!(ps.len(), 1, "profile should be found even with {n} curves: {:?}", ps.iter().map(|p| p.area).collect::<Vec<_>>());
+        let expected_area = std::f64::consts::PI * r * r;
+        assert!((ps[0].area - expected_area).abs() < 0.01 * expected_area, "area {} vs expected {expected_area}", ps[0].area);
+    }
+}
+
+#[test]
+fn tilted_non_circular_loop_with_many_curves_is_a_profile() {
+    // Reporter case from #19093 requested by maintainer @raykholo: a 3-lobed loop
+    // r = 60(1 + 0.3 cos 3t) in a tilted plane (x_dir (0, 1, 0), y_dir (0.287, 0, 0.958))
+    // with 5 fit points per curve, which failed on 14..20 curves before downsampling.
+    for n in [16, 20] {
+        let mut sk = Sketch::new();
+        sk.view.three_d = true;
+        let x_dir = Vec3 { x: 0.0, y: 1.0, z: 0.0 };
+        let y_raw = Vec3 { x: 0.287, y: 0.0, z: 0.958 };
+        let y_dir = y_raw / y_raw.len();
+        for i in 0..n {
+            let t0 = 2.0 * std::f64::consts::PI * (i as f64) / (n as f64);
+            let t1 = 2.0 * std::f64::consts::PI * ((i + 1) as f64) / (n as f64);
+            let pts: Vec<Vec3> = (0..5)
+                .map(|s| {
+                    let t = t0 + (t1 - t0) * (s as f64) / 4.0;
+                    let r = 60.0 * (1.0 + 0.3 * (3.0 * t).cos());
+                    let (u, v) = (r * t.cos(), r * t.sin());
+                    x_dir * u + y_dir * v
+                })
+                .collect();
+            sk.add_drawn_wire_in(&pts, WireSpace::Component).unwrap();
+        }
+        let ps = find_planar_3d_profiles(&sk, Plane::XY);
+        assert_eq!(ps.len(), 1, "tilted loop profile should be found with {n} curves");
+        let expected_area = 1800.0 * std::f64::consts::PI * (2.0 + 0.3 * 0.3);
+        assert!((ps[0].area - expected_area).abs() < 0.01 * expected_area, "area {} vs expected {expected_area}", ps[0].area);
+    }
+}
+
+#[test]
+fn planar_loop_of_over_two_thousand_segments_is_a_profile() {
+    // #19464: 11 curves of 9 fit points round a circle of R 50 in y = 0, 24 segments a span.
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let (curves, fit, per_span) = (11usize, 9usize, 24usize);
+    let steps = curves * (fit - 1) * per_span;
+    let at = |k: usize| {
+        let t = 2.0 * std::f64::consts::PI * (k % steps) as f64 / steps as f64;
+        Vec3 { x: 50.0 * t.cos(), y: 0.0, z: 50.0 * t.sin() }
+    };
+    let per_curve = (fit - 1) * per_span;
+    for c in 0..curves {
+        let pts: Vec<Vec3> = (0..=per_curve).map(|s| at(c * per_curve + s)).collect();
+        sk.wires.push(wire(&format!("w{c}"), &pts));
+    }
+    assert!(sk.wires.iter().map(|w| w.pts.len() - 1).sum::<usize>() > 2000);
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert_eq!(ps.len(), 1);
+    let expected = std::f64::consts::PI * 2500.0;
+    assert!((ps[0].area - expected).abs() < 0.01 * expected, "area {}", ps[0].area);
+}
+
+#[test]
+fn closed_triangle_survives_many_short_wires_elsewhere() {
+    // #19464 review: 100 short wires at z = 100 push the node count past `MAX_NODES`; the
+    // triangle in z = 0 is still a profile.
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let v = |x: f64, y: f64, z: f64| Vec3 { x, y, z };
+    sk.wires.push(wire("tri", &[v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 0.0)]));
+    for i in 0..100 {
+        let x = 10.0 + 3.0 * i as f64;
+        sk.wires.push(wire(&format!("s{i}"), &[v(x, 0.0, 100.0), v(x + 1.0, 0.0, 100.0)]));
+    }
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert_eq!(ps.len(), 1);
+    assert!((ps[0].area - 0.5).abs() < 1e-9, "area {}", ps[0].area);
+}
+
+#[test]
+fn closed_triangle_survives_many_wires_joined_to_it() {
+    // #19464 review: 100 wires from the triangle's corner (0,0,0) to points at z = 100 make one
+    // chain with over 100 key points; thinning dropped (0,1,0) and the z = 0 plane was lost.
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let v = |x: f64, y: f64, z: f64| Vec3 { x, y, z };
+    sk.wires.push(wire("tri", &[v(0.0, 0.0, 0.0), v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0), v(0.0, 0.0, 0.0)]));
+    for i in 0..100 {
+        sk.wires.push(wire(&format!("s{i}"), &[v(0.0, 0.0, 0.0), v(10.0 + 3.0 * i as f64, 0.0, 100.0)]));
+    }
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert_eq!(ps.len(), 1);
+    assert!((ps[0].area - 0.5).abs() < 1e-9, "area {}", ps[0].area);
+}
+
+#[test]
+fn a_loop_after_a_long_open_wire_still_spans_its_plane() {
+    // A helix of 40 points comes first: the planes its own points span are more than the planes
+    // budget. A closed triangle wire after it, in a plane of its own, is still found, as the
+    // curves' key points span planes before every other point does.
+    let mut sk = Sketch::new();
+    sk.view.three_d = true;
+    let helix: Vec<Vec3> = (0..40)
+        .map(|i| {
+            let t = f64::from(i) * 0.3;
+            Vec3 { x: 10.0 * t.cos(), y: 10.0 * t.sin(), z: 2.0 * t }
+        })
+        .collect();
+    sk.wires.push(wire("helix", &helix));
+    let a = Vec3 { x: 50.0, y: 0.0, z: 30.0 };
+    sk.wires.push(wire("tri", &[a, Vec3 { x: 60.0, y: 0.0, z: 30.0 }, Vec3 { x: 55.0, y: 8.0, z: 30.0 }, a]));
+    let ps = find_planar_3d_profiles(&sk, Plane::XY);
+    assert!(
+        ps.iter().any(|p| p.outer_curves == ["tri"] && (p.area - 40.0).abs() < 1e-6),
+        "the triangle (area 40): {:?}",
+        ps.iter().map(|p| (&p.outer_curves, p.area)).collect::<Vec<_>>()
+    );
 }
 
 #[test]

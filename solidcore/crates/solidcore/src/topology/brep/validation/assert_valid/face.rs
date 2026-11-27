@@ -17,13 +17,25 @@
 //! pairs a box search over the edges' curve boxes leaves possible, in the all-pairs
 //! order (#431, fork `ef9041d`): the pairs it skips are those whose boxes
 //! `GlobalCoincidenceChecker` itself rejects, so the result is upstream's.
+//! `sm_AssertTestFace34` does not count a range that is one point at the tolerance
+//! on either edge (its tight box's diagonal is shorter than the tolerance; #18212,
+//! WR-18212): two edges that leave a shared vertex at an angle stay within the
+//! tolerance for a short way, and when one is split there (a hook at its start makes
+//! every piece holding it half closed), `GlobalCoincidenceChecker` returned a piece
+//! inside that way as a range or not depending on where the splits fell, so a
+//! smaller tolerance could fail the test. A piece that misses the vertex is at most
+//! about 0.4 of that way (`split_in_three` cuts at 0.375 and 0.625), and the way is
+//! about `tol / sin(angle)`, so this covers edges meeting at about 24 degrees or
+//! more. `GlobalCoincidenceChecker` itself keeps upstream's answer: other callers
+//! rely on those ranges.
 
 use std::collections::BTreeMap;
 
 use super::{base, class, geometry_key, seams, Cx};
-use crate::curve::curve::CurveKind;
+use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{EntityRef, Result};
-use crate::geom::extent2d::SS_NONE;
+use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::{Extent2d, SS_NONE};
 use crate::geom::solution_array::SolutionType;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
@@ -79,6 +91,10 @@ pub(super) fn face(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, f: FaceId) -> 
         rtn &= base::topology(b, cx, this)?;
     }
 
+    // not upstream: the geometric tests of a face whose neighbourhood passed them on a
+    // body before are skipped ([`crate::geom::check_memo`]); the structural ones run
+    let geo = !crate::geom::check_memo::face_clean(k, f);
+
     // locals
     let face_zone_tol = fp2::tolerance(b, f)?;
     let domain = fp2::uv_domain(b, f)?;
@@ -122,11 +138,15 @@ pub(super) fn face(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, f: FaceId) -> 
             .this_value(b, C, this, 23, ok, 0.0, || UNDEF_DOUBLE)?;
 
         // Get Face->Surface->Poles (if any)
-        let singular = surface.get_singularities(k, true, false)?;
+        let singular = if geo {
+            Some(surface.get_singularities(k, true, false)?)
+        } else {
+            None
+        };
 
         // When the surface has singularities (poles) - they must be marked by vertices
         // or out of the model
-        if singular.singular != SS_NONE {
+        if let Some(singular) = singular.filter(|s| s.singular != SS_NONE) {
             // for every possible pole:[UMinPole, VMinPole, UMaxPole, VMaxPole]
             for pole in singular
                 .pole_points
@@ -175,6 +195,9 @@ pub(super) fn face(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, f: FaceId) -> 
                 }
                 // count the number of times the vertex connects to this face
                 connections += 1;
+                if !geo {
+                    break;
+                }
                 let mut pc = PointClassification::new(face_zone_tol);
                 // side effect: builds the UV trim curve
                 match tvu::compute_uv_point(k, b, vu, true) {
@@ -229,7 +252,35 @@ pub(super) fn face(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, f: FaceId) -> 
         rtn &= faceuse(b, cx, fu)?;
     }
 
+    if geo {
+        rtn &= face_shape(k, b, cx, f, &domain, has_surface)?;
+    }
+    // 39: no Vertex may be shared by two Face Loops
+    let ok = !need || assert_test_face39(b, f)?;
+    rtn &= cx.rep.this_bool(b, C, this, 39, ok)?;
+    if geo {
+        rtn &= face_seams(k, b, cx, f, has_surface)?;
+    }
+
+    // all done
+    Ok(rtn)
+}
+
+/// The geometric tests of [`face`] on its shape: degenerate faces (27, 28), coincident
+/// vertices and edges (32-34), the loops' nesting and overlaps (37, 38).
+fn face_shape(
+    k: &mut Kernel,
+    b: &mut Brep,
+    cx: &mut Cx<'_>,
+    f: FaceId,
+    domain: &Extent2d,
+    has_surface: bool,
+) -> Result<bool> {
+    let this = EntityRef::Face(f);
+    let mut rtn = true;
+    let need = cx.rep.need(0);
     let face_tol = fp2::tolerance(b, f)?;
+    let domain = *domain;
 
     // 27: Zero Area Face degenerates to a point location
     let ok = !need || {
@@ -265,9 +316,19 @@ pub(super) fn face(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, f: FaceId) -> 
     // no UVSpace to check - AssertTest 3 reports it
     let ok = !cx.rep.need(2) || !has_surface || seams::assert_test_face38(k, b, f)?;
     rtn &= cx.rep.this_bool(b, C, this, 38, ok)?;
-    // 39: no Vertex may be shared by two Face Loops
-    let ok = !need || assert_test_face39(b, f)?;
-    rtn &= cx.rep.this_bool(b, C, this, 39, ok)?;
+    Ok(rtn)
+}
+
+/// The geometric tests of [`face`] on its seams (29, 31, 36) and its surface's own check.
+fn face_seams(
+    k: &mut Kernel,
+    b: &mut Brep,
+    cx: &mut Cx<'_>,
+    f: FaceId,
+    has_surface: bool,
+) -> Result<bool> {
+    let this = EntityRef::Face(f);
+    let mut rtn = true;
 
     // Test = FALSE when pFace->Edges intersects pFace->PeriodicSurface->Seam (run at
     // every level; status ignored)
@@ -387,32 +448,71 @@ fn assert_test_face34(k: &Kernel, b: &Brep, f: FaceId) -> Result<bool> {
             let i2 = b.edge(e2)?.interval;
             let t2 = b.edge(e2)?.tolerance;
             let t = if t1 > t2 { t1 } else { t2 };
-            // status ignored
-            let Some(found) = crate::error::ignored(
-                c1.global_coincidence_checker::<crate::topology::ObjectHandle>(
-                    k,
-                    &i1,
-                    c2,
-                    &i2,
-                    t,
-                    true,
-                    [None, None],
-                ),
-            )?
-            else {
-                continue;
-            };
-            // Check solutions for range intersections
-            if found
-                .solutions
-                .iter()
-                .any(|s| s.solution_type == SolutionType::RangeOfValues)
-            {
+            if partially_coincident(k, c1, &i1, c2, &i2, t)? {
                 return Ok(false);
             }
         }
     }
     Ok(true)
+}
+
+/// Test 34's verdict for one edge pair: whether `GlobalCoincidenceChecker` (with
+/// `snap_to_ends`) finds the curves over `i1` and `i2` coincident over a range at `t`
+/// that is longer than a point at `t` on both (not upstream, #18212). A failed check
+/// counts as no range (its status is ignored).
+pub(super) fn partially_coincident(
+    k: &Kernel,
+    c1: &Curve,
+    i1: &Extent1d,
+    c2: &Curve,
+    i2: &Extent1d,
+    t: f64,
+) -> Result<bool> {
+    let Some(found) = crate::error::ignored(
+        c1.global_coincidence_checker::<crate::topology::ObjectHandle>(
+            k,
+            i1,
+            c2,
+            i2,
+            t,
+            true,
+            [None, None],
+        ),
+    )?
+    else {
+        return Ok(false);
+    };
+    // Check solutions for range intersections
+    for s in &found.solutions {
+        if s.solution_type != SolutionType::RangeOfValues {
+            continue;
+        }
+        // Not upstream (#18212): a range that is one point at t on either curve is a
+        // touch, not a stretch the edges share; one that cannot be measured counts
+        let point = |c: &Curve, a: f64, b: f64| -> Result<bool> {
+            Ok(crate::error::ignored(is_one_point_at(k, c, a, b, t))?.unwrap_or(false))
+        };
+        if !point(c1, s.start.param(0)?, s.end.param(0)?)?
+            && !point(c2, s.start.param(1)?, s.end.param(1)?)?
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Whether `c` between the parameters `a` and `b` (either order) is one point at `t`:
+/// its ends are closer than `t` and its tight box (the ends, the tangent
+/// discontinuous knots and the turning points) has a diagonal shorter than `t`, so
+/// every two of its points are closer than `t`.
+fn is_one_point_at(k: &Kernel, c: &Curve, a: f64, b: f64, t: f64) -> Result<bool> {
+    let end = c.evaluate_point(k, b)?;
+    if c.evaluate_point(k, a)?.distance(end) >= t {
+        return Ok(false);
+    }
+    let stretch = Extent1d::from_min_max(a.min(b), a.max(b));
+    let tight = c.calculate_tight_bounding_box(k, &stretch)?;
+    Ok(!tight.has_negative_volume() && tight.size().length() < t)
 }
 
 /// `sm_AssertTestFace39`: `false` when a vertex is used by two loops of the face.

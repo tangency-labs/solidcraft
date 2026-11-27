@@ -36,6 +36,85 @@ fn reopened(s: &Session) -> Session {
     Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap())
 }
 
+/// A point placed by an expression that reads another point's coordinate follows it (#19232):
+/// the expression names the point and the coordinate (`p1.x`).
+#[test]
+fn a_point_expression_reads_another_points_coordinate() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "W", "expression": "40 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    // A base point, placed by a parameter.
+    run(&mut s, "sketch.point", json!({"point": ["W", 0], "id": "base"}));
+    // A point derived from it: 10 mm to its right, and at its height.
+    run(&mut s, "sketch.point", json!({"point": ["base.x + 10 mm", "base.y"], "id": "derived"}));
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    assert_eq!(solved(&s, "base"), Vec2::new(40.0, 0.0));
+    assert_eq!(solved(&s, "derived"), Vec2::new(50.0, 0.0));
+    // The base point moves with its parameter: the derived point follows it.
+    run(&mut s, "parameters.change", json!({"name": "W", "expression": "70 mm"}));
+    no_trouble(&s);
+    assert_eq!(solved(&s, "base"), Vec2::new(70.0, 0.0));
+    assert_eq!(solved(&s, "derived"), Vec2::new(80.0, 0.0));
+    // The design file keeps the expressions, and the points follow after it is opened again.
+    let r = reopened(&s);
+    no_trouble(&r);
+    assert_eq!(solved(&r, "derived"), Vec2::new(80.0, 0.0));
+}
+
+/// A point that reads another point's coordinate is placed where that point is, and the two
+/// are worked out in the order the names allow: a point read by another waits for it.
+#[test]
+fn a_point_reads_a_point_that_reads_another_one() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 20], "id": "a"}));
+    run(&mut s, "sketch.point", json!({"point": ["a.x + 5 mm", "a.y - 5 mm"], "id": "b"}));
+    // The last point reads the one before it, whatever the order they were made in.
+    run(&mut s, "sketch.point", json!({"point": ["b.x - 5 mm", "b.y + 5 mm"], "id": "c"}));
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    assert_eq!(solved(&s, "b"), Vec2::new(15.0, 15.0));
+    assert_eq!(solved(&s, "c"), Vec2::new(10.0, 20.0));
+}
+
+/// An expression that names no point is refused, and the point is not made.
+#[test]
+fn a_point_expression_that_names_no_point_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 0], "id": "a"}));
+    for bad in [json!(["nope.x", 0]), json!(["a.z", 0]), json!([0, "nope.y"])] {
+        let e = s.execute("sketch.point", &json!({"point": bad})).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(!e.is_empty(), "{bad}");
+    }
+    let f = s.doc.find_feature("S").unwrap().id;
+    assert_eq!(s.doc.sketch(f).unwrap().points.len(), 2, "the origin and the one point");
+}
+
+/// Two points whose expressions read each other's coordinate are a cycle: the sketch is in
+/// error, naming the points in it.
+#[test]
+fn two_points_reading_each_other_are_refused() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut s, "sketch.point", json!({"point": [10, 0], "id": "a"}));
+    run(&mut s, "sketch.point", json!({"point": [20, 0], "id": "b"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let mut doc = (*s.doc).clone();
+    let f = doc.find_feature("S").unwrap().id;
+    {
+        let sk = doc.sketch_mut(f).unwrap();
+        let a = sk.points.iter_mut().find(|p| p.id == "a").unwrap();
+        a.exprs = Some(Box::new(solidcraft_sketch::PointExprs { x: Some("b.x".into()), y: None }));
+        let b = sk.points.iter_mut().find(|p| p.id == "b").unwrap();
+        b.exprs = Some(Box::new(solidcraft_sketch::PointExprs { x: Some("a.x".into()), y: None }));
+    }
+    let r = Session::new(doc);
+    let errors: Vec<String> = r.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    assert!(errors.iter().any(|e| e.contains("circular reference")), "{errors:?}");
+}
+
 #[test]
 fn an_outline_through_points_typed_as_expressions_follows_its_parameters() {
     let mut s = Session::default();

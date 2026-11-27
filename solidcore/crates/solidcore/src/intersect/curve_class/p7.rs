@@ -133,6 +133,7 @@ use crate::blend::fillet_section::station::{span, Nurbs};
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::{Curve, CurveKind};
 use crate::curve::native_affine::{exact_four_products_zero, of_line};
+use crate::error::intersect::IntersectFailure;
 use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::expansion;
 use crate::geom::extent1d::Extent1d;
@@ -157,8 +158,9 @@ use crate::surface::surface::{Surface, SurfaceKind};
 use crate::topology::{edge, vertex, Brep, EdgeId, FaceId, VertexId};
 
 use super::p1::{
-    get_curve_curve_angle, src_zone_tol_3d_of, xsect_tol_2d_or_3d_for_classify_pair,
-    CurveClassification, CurveInterval, IntervalPosition, TouchData,
+    get_curve_curve_angle, missing_defect, src_zone_tol_3d_of,
+    xsect_tol_2d_or_3d_for_classify_pair, CurveClassification, CurveInterval, IntervalPosition,
+    TouchData, PC_NO_OBJECT,
 };
 
 const OP_INDEX: &str = "intersect::curve_class::p7::point_class_by_index";
@@ -368,17 +370,20 @@ impl<O: ClassObject> CurveClassification<O> {
     ) -> Result<()> {
         // check input - lInterval index is valid
         if index >= self.size() {
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP_COLLAPSE,
-                "the interval index is past the end of the classification",
+                IntersectFailure::IntervalIndexPastEnd {
+                    index,
+                    size: self.size(),
+                },
             ));
         }
 
         // Do not squeeze out the only interval.  [B232]
         if self.size() < 2 {
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP_COLLAPSE,
-                "the only interval of the classification is not squeezed out",
+                IntersectFailure::OnlyInterval,
             ));
         }
 
@@ -401,9 +406,9 @@ impl<O: ClassObject> CurveClassification<O> {
 
         // no work and an error - CurveClassification interval is not degenerate
         if !curve_is_degenerate(k, Some(curve), &ivl.interval, xsect_tol_2d_or_3d)? {
-            return Err(SolidError::intersect_failed(
+            return Err(SolidError::intersect(
                 OP_COLLAPSE,
-                "the interval to collapse is not degenerate",
+                IntersectFailure::IntervalNotDegenerate,
             ));
         }
 
@@ -620,6 +625,19 @@ impl<O: ClassObject> CurveClassification<O> {
     /// [`SolidError::Unported`] for an interval end on an edge (`SmEdge::GetInterval`,
     /// unit `topology.edge`).
     pub fn is_crossed_by_edge(&self, geometry: &impl ClassGeometry<O>) -> Result<bool> {
+        self.is_crossed_by_edge_unless(geometry, |_| Ok(false))
+    }
+
+    /// The same topological crossing candidates, excluding only edges for which the
+    /// caller proves geometric separation from the classification curve.
+    ///
+    /// # Errors
+    /// Those of the edge intervals and the separation proof.
+    pub(crate) fn is_crossed_by_edge_unless(
+        &self,
+        geometry: &impl ClassGeometry<O>,
+        mut separated: impl FnMut(Option<O>) -> Result<bool>,
+    ) -> Result<bool> {
         let size = self.size();
 
         // for every classification interval
@@ -656,7 +674,9 @@ impl<O: ClassObject> CurveClassification<O> {
                 }
 
                 // an Edge was found crossing the Classification Curve
-                return Ok(true);
+                if !separated(edge)? {
+                    return Ok(true);
+                }
             }
 
             // When Interval ends on an Edge
@@ -689,7 +709,9 @@ impl<O: ClassObject> CurveClassification<O> {
                 }
 
                 // an Edge was found crossing the Classification Curve
-                return Ok(true);
+                if !separated(edge)? {
+                    return Ok(true);
+                }
             }
         }
 
@@ -1176,6 +1198,29 @@ impl<O: ClassObject> CurveClassification<O> {
                 {
                     continue;
                 }
+                // Not upstream (tangency-labs/solidcore#3339): an interval from a vertex that
+                // runs along a seam within the intersection tolerance over its whole length,
+                // by enclosure (`Curve::proved_near`), and inside the other face, is
+                // coincident with the seam, not mislabelled. The
+                // heuristics below remove a short run beside its edge because the face on the
+                // edge's other side meets the curve too; across a seam that face is this one,
+                // so the removal lost the run: a tool wall through a cut ball's rim within the
+                // tolerance of the rim's seam vertex was left open there.
+                if !on_surface
+                    && tgt_end.point_class() == PointClassType::Vertex
+                    && mate_mid.point_class() == PointClassType::Face
+                    && seam_edge(geometry, edge_obj)?
+                    && tgt_curve_3d.proved_near(
+                        k,
+                        &tgt_ivl.interval,
+                        edge_curve,
+                        &edge_ivl,
+                        xsect_tol_3d,
+                        &[],
+                    )?
+                {
+                    continue;
+                }
                 let tgt_curve: Cow<'_, Curve> = if on_surface {
                     Cow::Owned(crv_on_surf(
                         k,
@@ -1350,6 +1395,7 @@ impl<O: ClassObject> CurveClassification<O> {
         let mut ivl = *self.at(index)?;
         let src_zone_tol_3d = src_zone_tol_3d_of(k, Some(&*self));
         let ctx = FaceIntervalContext {
+            doing_fillets: self.doing_fillets(),
             curve: self.curve(),
             uv_curve1: self.uv_curve1(),
             src_zone_tol_3d,
@@ -1623,14 +1669,16 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
         {
             return Ok(());
         }
-        let this_v = this_ivl.start.vertex_object().ok_or_else(|| {
-            SolidError::intersect_missing(OP_FILLET, "the vertex at this interval's start")
-        })?;
-        let other_v = other_ivl.start.vertex_object().ok_or_else(|| {
-            SolidError::intersect_missing(OP_FILLET, "the vertex at the other interval's start")
-        })?;
+        let this_v = this_ivl
+            .start
+            .vertex_object()
+            .ok_or_else(|| missing_defect(OP_FILLET, PC_NO_OBJECT))?;
+        let other_v = other_ivl
+            .start
+            .vertex_object()
+            .ok_or_else(|| missing_defect(OP_FILLET, PC_NO_OBJECT))?;
         let point = vertex_point(access.geometry(), other_v)?;
-        access.set_vertex_point(this_v, point)?;
+        access.set_vertex_point(k, this_v, point)?;
     }
 
     // when asked - set EndVertex Geometry
@@ -1640,14 +1688,16 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
         {
             return Ok(());
         }
-        let this_v = this_ivl.end.vertex_object().ok_or_else(|| {
-            SolidError::intersect_missing(OP_FILLET, "the vertex at this interval's end")
-        })?;
-        let other_v = other_ivl.end.vertex_object().ok_or_else(|| {
-            SolidError::intersect_missing(OP_FILLET, "the vertex at the other interval's end")
-        })?;
+        let this_v = this_ivl
+            .end
+            .vertex_object()
+            .ok_or_else(|| missing_defect(OP_FILLET, PC_NO_OBJECT))?;
+        let other_v = other_ivl
+            .end
+            .vertex_object()
+            .ok_or_else(|| missing_defect(OP_FILLET, PC_NO_OBJECT))?;
         let point = vertex_point(access.geometry(), other_v)?;
-        access.set_vertex_point(this_v, point)?;
+        access.set_vertex_point(k, this_v, point)?;
     }
 
     // when asked - set MidEdge Geometry
@@ -1659,16 +1709,18 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
         }
 
         // this mid edge
-        let this_edge = this_ivl.mid.edge_object().ok_or_else(|| {
-            SolidError::intersect_missing(OP_FILLET, "the edge of this interval's middle")
-        })?;
+        let this_edge = this_ivl
+            .mid
+            .edge_object()
+            .ok_or_else(|| missing_defect(OP_FILLET, PC_NO_OBJECT))?;
         let this_edge_curve = edge_curve(access.geometry(), this_edge)?;
         let this_edge_ivl = edge_interval(access.geometry(), Some(this_edge))?;
 
         // other mid edge
-        let other_edge = other_ivl.mid.edge_object().ok_or_else(|| {
-            SolidError::intersect_missing(OP_FILLET, "the edge of the other interval's middle")
-        })?;
+        let other_edge = other_ivl
+            .mid
+            .edge_object()
+            .ok_or_else(|| missing_defect(OP_FILLET, PC_NO_OBJECT))?;
         let other_edge_curve = edge_curve(access.geometry(), other_edge)?;
         let other_edge_ivl = edge_interval(access.geometry(), Some(other_edge))?;
 
@@ -1779,6 +1831,7 @@ fn set_do_filleting_geometry_with<O: ClassObject>(
 
 /// The classification data `ClassifyFaceInterval` reads besides the interval.
 struct FaceIntervalContext<O> {
+    doing_fillets: bool,
     curve: Option<O>,
     uv_curve1: Option<O>,
     src_zone_tol_3d: f64,
@@ -1874,9 +1927,10 @@ fn classify_face_interval_on<O: ClassObject>(
     match ivl.start.point_class() {
         PointClassType::Vertex => {
             did_min = true;
-            let v = ivl.start.object().ok_or_else(|| {
-                SolidError::intersect_missing(OP_FACE, "the vertex at the interval's start")
-            })?;
+            let v = ivl
+                .start
+                .object()
+                .ok_or_else(|| missing_defect(OP_FACE, PC_NO_OBJECT))?;
             let (curve, uv_curve) = context_curves(access.geometry(), ctx)?;
             min = access.find_vertex_sector(
                 k,
@@ -1893,9 +1947,10 @@ fn classify_face_interval_on<O: ClassObject>(
         }
         PointClassType::Edge => {
             did_min = true;
-            let e = ivl.start.object().ok_or_else(|| {
-                SolidError::intersect_missing(OP_FACE, "the edge at the interval's start")
-            })?;
+            let e = ivl
+                .start
+                .object()
+                .ok_or_else(|| missing_defect(OP_FACE, PC_NO_OBJECT))?;
             let curve = context_curve(access.geometry(), ctx)?.clone();
             min = access.edge_curve_on_classify(
                 k,
@@ -1917,9 +1972,10 @@ fn classify_face_interval_on<O: ClassObject>(
     match ivl.end.point_class() {
         PointClassType::Vertex => {
             did_max = true;
-            let v = ivl.end.object().ok_or_else(|| {
-                SolidError::intersect_missing(OP_FACE, "the vertex at the interval's end")
-            })?;
+            let v = ivl
+                .end
+                .object()
+                .ok_or_else(|| missing_defect(OP_FACE, PC_NO_OBJECT))?;
             let (curve, uv_curve) = context_curves(access.geometry(), ctx)?;
             max = access.find_vertex_sector(
                 k,
@@ -1936,9 +1992,10 @@ fn classify_face_interval_on<O: ClassObject>(
         }
         PointClassType::Edge => {
             did_max = true;
-            let e = ivl.end.object().ok_or_else(|| {
-                SolidError::intersect_missing(OP_FACE, "the edge at the interval's end")
-            })?;
+            let e = ivl
+                .end
+                .object()
+                .ok_or_else(|| missing_defect(OP_FACE, PC_NO_OBJECT))?;
             let curve = context_curve(access.geometry(), ctx)?.clone();
             max = access.edge_curve_on_classify(
                 k,
@@ -1956,9 +2013,52 @@ fn classify_face_interval_on<O: ClassObject>(
         _ => {}
     }
 
+    // If a curve leaves a vertex tangent to a boundary, that vertex's sector
+    // alone may vote outside while its unclassified opposite end lies strictly
+    // inside the face (including fillet rails classified by `rails_fit` and
+    // `TestRollOver`, which run with `doing_fillets = false`). Confirm that
+    // unclassified end on the actual trim before testing the interval's interior.
+    let opposite_end = match (did_min, did_max) {
+        (true, false)
+            if !min.inside
+                && ivl.start.point_class() == PointClassType::Vertex
+                && ivl.end.point_class() == PointClassType::Unknown =>
+        {
+            Some(ivl.interval.max())
+        }
+        (false, true)
+            if !max.inside
+                && ivl.end.point_class() == PointClassType::Vertex
+                && ivl.start.point_class() == PointClassType::Unknown =>
+        {
+            Some(ivl.interval.min())
+        }
+        _ => None,
+    };
+    let mut opposite_inside = false;
+    if ctx.do_point_classify && ctx.uv_space_okay {
+        if let Some(t) = opposite_end {
+            if let Some(curve) = context_uv_curve1(access.geometry(), ctx)? {
+                let p = curve.evaluate_point(k, t)?;
+                let mut sample = PointClassification::new(ctx.src_zone_tol_3d);
+                access.point_classify(
+                    k,
+                    face,
+                    Point2::new(p.x, p.y),
+                    ctx.src_zone_tol_3d,
+                    false,
+                    true,
+                    &mut sample,
+                )?;
+                opposite_inside =
+                    sample.point_class() == PointClassType::Face && sample.object() == Some(face);
+            }
+        }
+    }
+
     // 4. Do a PointClassification when interval couldn't be classified through
     // endPoint classifications
-    if ctx.do_point_classify && !did_min && !did_max {
+    if ctx.do_point_classify && ((!did_min && !did_max) || opposite_inside) {
         did_mid = true;
 
         // pick a near interval mid-point curve parameter
@@ -1975,7 +2075,12 @@ fn classify_face_interval_on<O: ClassObject>(
             // Don't put this face's classification directly into m_vMid [B97]
             let mut temp = PointClassification::new(ctx.src_zone_tol_3d);
             access.point_classify(k, face, uv, ctx.src_zone_tol_3d, false, true, &mut temp)?;
-            if temp.point_class() != PointClassType::Unknown {
+            let accept = if opposite_inside {
+                temp.point_class() == PointClassType::Face && temp.object() == Some(face)
+            } else {
+                temp.point_class() != PointClassType::Unknown
+            };
+            if accept {
                 ivl.mid = temp;
             }
         } else {
@@ -2007,6 +2112,28 @@ fn classify_face_interval_on<O: ClassObject>(
             } else if start_dev < end_dev - 1.0E-10 {
                 max.inside = min.inside;
             } else {
+                // Boundary intersections already delimit this open interval. If the
+                // endpoint sectors disagree equally, classify its interior on the trim.
+                if ctx.doing_fillets && ctx.do_point_classify && ctx.uv_space_okay {
+                    if let Some(curve) = context_uv_curve1(access.geometry(), ctx)? {
+                        let p = curve.evaluate_point(k, ivl.interval.evaluate(0.4567))?;
+                        let mut sample = PointClassification::new(ctx.src_zone_tol_3d);
+                        access.point_classify(
+                            k,
+                            face,
+                            Point2::new(p.x, p.y),
+                            ctx.src_zone_tol_3d,
+                            false,
+                            true,
+                            &mut sample,
+                        )?;
+                        if sample.point_class() == PointClassType::Face
+                            && sample.object() == Some(face)
+                        {
+                            ivl.mid = sample;
+                        }
+                    }
+                }
                 return Ok(());
             }
         }
@@ -2095,12 +2222,12 @@ fn partial_coincidence<O: ClassObject>(
     o_mid: &PointClassification<O>,
     check: CoinCheck,
 ) -> Result<Option<PartialCoincidence>> {
-    let edge = mid.object().ok_or_else(|| {
-        SolidError::intersect_missing(OP_PARTIAL, "the edge of the interval's middle")
-    })?;
-    let o_edge = o_mid.object().ok_or_else(|| {
-        SolidError::intersect_missing(OP_PARTIAL, "the edge of the other interval's middle")
-    })?;
+    let edge = mid
+        .object()
+        .ok_or_else(|| missing_defect(OP_PARTIAL, PC_NO_OBJECT))?;
+    let o_edge = o_mid
+        .object()
+        .ok_or_else(|| missing_defect(OP_PARTIAL, PC_NO_OBJECT))?;
     let curve = edge_curve(geometry, edge)?;
     let o_curve = edge_curve(geometry, o_edge)?;
     let edge_ivl = edge_interval(geometry, Some(edge))?;
@@ -2300,7 +2427,8 @@ fn connect_target<O: ClassObject>(
 /// `SmEdge::GetCurve`; a `NULL` curve is dereferenced by every caller.
 fn edge_curve<O: ClassObject>(geometry: &impl ClassGeometry<O>, edge: O) -> Result<&Curve> {
     let (b, e) = edge_of(geometry, edge, "SmEdge::GetCurve")?;
-    edge::curve(b, e)?.ok_or_else(|| SolidError::intersect_missing(OP_GEOM, "the edge's curve"))
+    edge::curve(b, e)?
+        .ok_or_else(|| SolidError::intersect(OP_GEOM, IntersectFailure::EdgeWithoutCurve))
 }
 
 /// `SmEdge::GetInterval` (of the edge object of a classification; a `NULL` edge is
@@ -2309,8 +2437,8 @@ fn edge_interval<O: ClassObject>(
     geometry: &impl ClassGeometry<O>,
     edge: Option<O>,
 ) -> Result<Extent1d> {
-    let edge =
-        edge.ok_or_else(|| SolidError::intersect_missing(OP_GEOM, "the classification's edge"))?;
+    // every caller passes the object of a point classified to an edge
+    let edge = edge.ok_or_else(|| missing_defect(OP_GEOM, PC_NO_OBJECT))?;
     let (b, e) = edge_of(geometry, edge, "SmEdge::GetInterval")?;
     edge::interval(b, e)
 }
@@ -2439,11 +2567,130 @@ trait FaceQueries<O: ClassObject> {
     ) -> Result<()>;
 }
 
+/// Not upstream (#21421): `point`, the fillet's vertex position that
+/// [`set_do_filleting_geometry_with`] gives the body's vertex `v`, put on a seam of a face of
+/// `v` when its point on that seam lies within the vertex's tolerance of `point` and
+/// `1000 * EFF_ZERO` or more from it; otherwise `point` as it is. A `point` nearer the seam
+/// than that is on it as the seam check sees it, and keeps upstream's bits.
+///
+/// The seams are those `v` is on now (its point within `1000 * EFF_ZERO` of the face's seam,
+/// `IsOnSeam`), so that taking the fillet's position does not move the vertex off a seam it
+/// is on whenever that seam passes within the vertex's tolerance of the position. When it is on none, they are the seams of the edges at `v` (an edge use's UV trim curve
+/// an iso curve on the face's seam, [`iso_curve_seam`](crate::topology::trimming_tools::iso_curve_seam)):
+/// the body's vertex is where the fillet's rail split such an edge. Of these the nearest
+/// seam point wins, the first in `GetFaces` (then `GetEdges`, `GetEdgeuses`) order on a tie.
+/// A seam's point is the surface's point at the seam's exact bound and the parameter along
+/// the seam of `point` dropped onto the surface.
+///
+/// The fillet's position is computed from the fillet's own surfaces (a round's end-cap corner)
+/// and lies off the seam by the round's solve error. Off any other edge that offset is covered
+/// by the vertex's tolerance and means nothing more; off a seam it is the face's boundary
+/// leaving the seam by a sliver, which the seam check reports as a near miss
+/// (`has_near_misses`: a vertex `1000 * EFF_ZERO` or more off it). The fillet's vertex is glued
+/// into the body's later and the body's point is kept, so the fillet's edges then end within
+/// the vertex's tolerance of it, as they do of any vertex the stitch glues. Two faces' seams
+/// through one vertex can disagree by more than that (#21421's input: an exact sphere's seam,
+/// and B-spline seams 2^-20 off it); the seam the vertex is on is kept, and the nearest one is
+/// picked otherwise, so the vertex is never moved further than the nearest seam. Keeping the
+/// seam the vertex is on keeps such a disagreement on the face the input has it on: #21421's
+/// input vertex lies on the sphere's seam and its B-spline face already reports the near miss,
+/// and upstream's position (on the B-spline's seam) would hand that near miss to the sphere.
+///
+/// # Errors
+///
+/// Those of the topology queries, of `IsIsoCurve`, `IsClosed` and `IsOnSeam`, and of the
+/// surfaces' `DropPoint` and evaluation.
+fn onto_seam(k: &Kernel, b: &Brep, v: VertexId, point: Point3) -> Result<Point3> {
+    use crate::nurbs::b_spline_surface::p1::SurfParamType;
+    use crate::surface::surface::p4::NoObject;
+    use crate::surface::surface::p5::DropPointOptions;
+    use crate::topology::edgeuse::p1 as eu1;
+    use crate::topology::trimming_tools::iso_curve_seam;
+    let near_miss = 1000.0 * EFF_ZERO;
+    let tolerance = vertex::tolerance(b, v)?;
+    let old = b.vertex(v)?.point;
+    // The seams, as (face, constant direction).
+    let mut seams: Vec<(FaceId, SurfParamType)> = Vec::new();
+    for f in vertex::faces(b, v)? {
+        let Some(surface) = b.face(f)?.surface.as_ref() else {
+            continue;
+        };
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
+        let was = surface.drop_point::<NoObject>(k, old, &domain, &DropPointOptions::default())?;
+        // Written to accept: a NaN gap is not within the near miss.
+        let on_surface = was.success && was.gap < near_miss;
+        if !on_surface {
+            continue;
+        }
+        let seam = surface.is_on_seam(k, was.result_uv, Some(near_miss))?;
+        if seam.on_seam && matches!(seam.seam_dir, SurfParamType::U | SurfParamType::V) {
+            seams.push((f, seam.seam_dir));
+        }
+    }
+    if seams.is_empty() {
+        for e in vertex::edges(b, v, None)? {
+            for eu in edge::edgeuses(b, e, None, None)? {
+                let Some(f) = eu1::face(b, eu)? else {
+                    continue;
+                };
+                let (Some(surface), Some(uv)) =
+                    (b.face(f)?.surface.as_ref(), eu1::uv_trim_curve(b, eu)?.0)
+                else {
+                    continue;
+                };
+                if let Some((side, _)) = iso_curve_seam(k, surface, uv)? {
+                    if !seams.contains(&(f, side)) {
+                        seams.push((f, side));
+                    }
+                }
+            }
+        }
+    }
+    let mut best: Option<(f64, Point3)> = None;
+    for (f, side) in seams {
+        let Some(surface) = b.face(f)?.surface.as_ref() else {
+            continue;
+        };
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
+        let dropped =
+            surface.drop_point::<NoObject>(k, point, &domain, &DropPointOptions::default())?;
+        if !dropped.success {
+            continue;
+        }
+        let at = dropped.result_uv;
+        let (lo, hi) = (domain.min(), domain.max());
+        let nearer = |x: f64, lo: f64, hi: f64| {
+            if (x - lo).abs() <= (x - hi).abs() {
+                lo
+            } else {
+                hi
+            }
+        };
+        let on = if side == SurfParamType::U {
+            Point2::new(nearer(at.x, lo.x, hi.x), at.y)
+        } else {
+            Point2::new(at.x, nearer(at.y, lo.y, hi.y))
+        };
+        let on = surface.evaluate_point(k, on)?;
+        let d = on.distance(point);
+        // Written to accept: a NaN distance is not within the tolerance.
+        if d <= tolerance && best.is_none_or(|(c, _)| d < c) {
+            best = Some((d, on));
+        }
+    }
+    // A point already within the near miss of the seam is on it as the seam check sees it,
+    // and stays as it is: its vertex is then the fillet's exactly, as upstream's.
+    Ok(match best {
+        Some((d, on)) if d >= near_miss => on,
+        _ => point,
+    })
+}
+
 /// The mutable and read-only topology operations of [`set_do_filleting_geometry_with`].
 trait FilletAccess<O: ClassObject> {
     type Geometry: ClassGeometry<O>;
     fn geometry(&self) -> &Self::Geometry;
-    fn set_vertex_point(&mut self, vertex: O, point: Point3) -> Result<()>;
+    fn set_vertex_point(&mut self, k: &Kernel, vertex: O, point: Point3) -> Result<()>;
     fn set_edge_curve(&mut self, edge: O, curve: Curve) -> Result<()>;
 }
 
@@ -2458,7 +2705,7 @@ impl<O: ClassObject, G: ClassGeometry<O>> FilletAccess<O> for ReadOnly<'_, G> {
     fn geometry(&self) -> &G {
         self.0
     }
-    fn set_vertex_point(&mut self, _vertex: O, _point: Point3) -> Result<()> {
+    fn set_vertex_point(&mut self, _k: &Kernel, _vertex: O, _point: Point3) -> Result<()> {
         // DISPATCH GAP: SmVertex::SetPoint (topology.vertex, green)
         // Proof (unreachable): the ReadOnly view serves queries that only make caches, and
         // 0 hits in the green difftest sweep show none met this; Mutable and the B-rep
@@ -2809,13 +3056,16 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> FilletAccess<O> for Mutable<'_, G> 
     fn geometry(&self) -> &G {
         self.0
     }
-    fn set_vertex_point(&mut self, vertex: O, point: Point3) -> Result<()> {
+    fn set_vertex_point(&mut self, k: &Kernel, vertex: O, point: Point3) -> Result<()> {
         match self.0.topology_entity_mut(vertex) {
             Some((b, EntityRef::Vertex(v))) => {
+                // `onto_seam` only refines upstream's `point`: a query it cannot answer
+                // leaves `point` as upstream sets it (cancellation still propagates).
+                let point = ignored(onto_seam(k, b, v, point))?.unwrap_or(point);
                 b.vertex_mut(v)?.point = point;
                 Ok(())
             }
-            _ => ReadOnly(&*self.0).set_vertex_point(vertex, point),
+            _ => ReadOnly(&*self.0).set_vertex_point(k, vertex, point),
         }
     }
     fn set_edge_curve(&mut self, edge: O, curve: Curve) -> Result<()> {
@@ -3721,6 +3971,21 @@ fn native_curve_in_strip(
     }
 }
 
+/// Not upstream (tangency-labs/solidcore#3339): whether edge handle `edge` is a seam, an
+/// edge with the same face on both sides (`topology::edge::face_on_both_sides`); `false`
+/// for a handle the adapter does not resolve to a B-rep edge.
+fn seam_edge<O: ClassObject>(geometry: &impl ClassGeometry<O>, edge: O) -> Result<bool> {
+    let Some((b, EntityRef::Edge(e))) = geometry.topology_entity(edge) else {
+        return Ok(false);
+    };
+    for f in edge::faces(b, e, None)? {
+        if edge::face_on_both_sides(b, e, f)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4052,11 +4317,25 @@ mod tests {
         let geo = Geo {
             curves: vec![line([0.0; 3], [1.0, 0.0, 0.0])],
         };
+        let cause = |r: Result<()>| r.unwrap_err().intersect_failure().copied();
         let mut cc = classification(&k, &[0.0, 0.5, 0.5, 1.0]);
-        assert!(cc.collapse_interval(&k, &geo, 0).is_err());
+        assert_eq!(
+            cause(cc.collapse_interval(&k, &geo, 0)),
+            Some(IntersectFailure::IntervalNotDegenerate)
+        );
         cc.collapse_interval(&k, &geo, 1).unwrap();
         assert_eq!(cc.size(), 2);
-        assert!(cc.collapse_interval(&k, &geo, 5).is_err());
+        let e = cc.collapse_interval(&k, &geo, 5).unwrap_err();
+        assert_eq!(
+            e.intersect_failure(),
+            Some(&IntersectFailure::IntervalIndexPastEnd { index: 5, size: 2 })
+        );
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+        let mut only = classification(&k, &[0.0, 1.0]);
+        assert_eq!(
+            cause(only.collapse_interval(&k, &geo, 0)),
+            Some(IntersectFailure::OnlyInterval)
+        );
     }
 
     #[test]

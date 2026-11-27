@@ -15,25 +15,40 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
 
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, dashed: &mut bool, tolerance: &mut f64, zero_origin: &mut bool) {
     crate::ui_kit::text(ui, app.tr_label("Hidden edges"), crate::ui_kit::Text::Note("hidden"));
-    for (value, key, label) in [(false, "omit", "Do not export hidden edges"), (true, "dashed", "Export hidden edges as dashed lines")] {
-        let r = crate::ui_kit::list_picker(ui, key, app.tr_label(label), *dashed == value);
-        crate::scenario::publish_handle(&format!("dialog:dxf:{key}"), r.rect.center());
-        if r.clicked() {
-            *dashed = value;
-        }
-    }
+    // An organization's DxfDashedHiddenLines policy sets the choice: shown, greyed out and noted.
+    let locked = app.policy.locks("view_dxf_dashed");
+    crate::policy::row_below(ui, locked, |ui| {
+        ui.vertical(|ui| {
+            for (value, key, label) in [(false, "omit", "Do not export hidden edges"), (true, "dashed", "Export hidden edges as dashed lines")] {
+                let r = crate::ui_kit::list_picker(ui, key, app.tr_label(label), *dashed == value);
+                crate::scenario::publish_handle(&format!("dialog:dxf:{key}"), r.rect.center());
+                if r.clicked() && !locked {
+                    *dashed = value;
+                }
+            }
+        });
+    });
     crate::ui_kit::text(ui, app.tr("dxf.zero"), crate::ui_kit::Text::Note("zero"));
-    for (value, key, label) in [(false, "zero_target", "dxf.zero_target"), (true, "zero_origin", "dxf.zero_origin")] {
-        let r = crate::ui_kit::list_picker(ui, key, app.tr(label), *zero_origin == value);
-        crate::scenario::publish_handle(&format!("dialog:dxf:{key}"), r.rect.center());
-        if r.clicked() {
-            *zero_origin = value;
-        }
-    }
+    // DxfOrigin sets the zero point the same way.
+    let zero_locked = app.policy.locks("view_dxf_zero");
+    crate::policy::row_below(ui, zero_locked, |ui| {
+        ui.vertical(|ui| {
+            for (value, key, label) in [(false, "zero_target", "dxf.zero_target"), (true, "zero_origin", "dxf.zero_origin")] {
+                let r = crate::ui_kit::list_picker(ui, key, app.tr(label), *zero_origin == value);
+                crate::scenario::publish_handle(&format!("dialog:dxf:{key}"), r.rect.center());
+                if r.clicked() && !zero_locked {
+                    *zero_origin = value;
+                }
+            }
+        });
+    });
     crate::ui_kit::text(ui, app.tr("dxf.zero_help"), crate::ui_kit::Text::Note("zero help"));
-    form_row(ui, "dxf.tolerance", |ui| {
-        let r = crate::ui_kit::bounded_length_field(ui, tolerance, &app.session.doc.units, 8, 0.0001..=1.0, 0.001);
-        crate::scenario::publish_handle("dialog:dxf:tolerance", r.rect.center());
+    // DxfTolerance sets the tolerance the same way.
+    crate::policy::row_below(ui, app.policy.locks("view_dxf_tolerance"), |ui| {
+        form_row(ui, "dxf.tolerance", |ui| {
+            let r = crate::ui_kit::bounded_length_field(ui, tolerance, &app.session.doc.units, 8, 0.0001..=1.0, 0.001);
+            crate::scenario::publish_handle("dialog:dxf:tolerance", r.rect.center());
+        });
     });
     crate::ui_kit::text(
         ui,
@@ -44,7 +59,9 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, dashed: &mut bool, tolerance: &mu
 }
 
 pub fn run(app: &mut SolveApp, dashed: bool, tolerance: f64, zero_origin: bool) -> Result<(), String> {
-    if crate::viewport::section_plane(app).is_some() {
+    let tolerance_locked = app.policy.locks("view_dxf_tolerance");
+    let tolerance = if tolerance_locked { app.preferences.view_dxf_tolerance } else { tolerance };
+    if !crate::viewport::section_planes(app).is_empty() {
         return Err(app.tr_label("Turn off section analysis before exporting the view.").into());
     }
     if !solidcraft_engine::cmd::view_dxf_exportable(&app.session) {
@@ -53,13 +70,20 @@ pub fn run(app: &mut SolveApp, dashed: bool, tolerance: f64, zero_origin: bool) 
     if !tolerance.is_finite() || !(0.0001..=1.0).contains(&tolerance) {
         return Err(app.tr_label("dxf.invalid_tolerance").into());
     }
-    app.preferences.view_dxf_dashed = dashed;
-    app.preferences.view_dxf_tolerance = tolerance;
-    app.preferences.view_dxf_zero = if zero_origin { "origin" } else { "target" }.into();
+    // A locked choice stays the organization's; the person's own one is kept by the policy.
+    if !app.policy.locks("view_dxf_dashed") {
+        app.preferences.view_dxf_dashed = dashed;
+    }
+    if !tolerance_locked {
+        app.preferences.view_dxf_tolerance = tolerance;
+    }
+    if !app.policy.locks("view_dxf_zero") {
+        app.preferences.view_dxf_zero = if zero_origin { "origin" } else { "target" }.into();
+    }
     let camera = app.cam;
     app.pick_save(&format!("{}-view.dxf", app.session.doc.name), &["dxf"], move |app, path| {
         if let Some(path) = path {
-            let params = json!({"camera":camera,"hidden":if dashed {"dashed"} else {"omit"},"tolerance":tolerance,"zero":if zero_origin {"origin"} else {"target"},"path":path});
+            let params = json!({"camera":camera,"hidden":if dashed {"dashed"} else {"omit"},"tolerance":tolerance,"zero":if zero_origin {"origin"} else {"target"},"curves":"arcs","path":path});
             let mut request = crate::file_load::Request::new(&path, crate::file_load::Kind::ExportDxf);
             request.options = params.as_object().cloned().unwrap_or_default();
             let _ = crate::file_load::begin_request(app, request);
@@ -177,6 +201,24 @@ mod tests {
         h.app.start("file.export_view_dxf");
         h.frames(3);
         assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(Kind::ViewDxf { zero_origin: true, .. })));
+    }
+
+    /// #17917: the dialog writes a round hole as one `CIRCLE`, not as a ring of line chords, and has
+    /// no setting for it.
+    #[test]
+    fn view_dxf_writes_round_holes_as_circles() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":10})).unwrap();
+        h.app.run("solid.cylinder", json!({"radius":5,"height":10,"base":[20,15,0],"operation":"cut"})).unwrap();
+        h.app.cam.fov = 0.0;
+        h.app.cam.set_view(StandardView::Top);
+        h.frames(3);
+        h.app.start("file.export_view_dxf");
+        h.frames(3);
+        assert!(crate::scenario::handle_at("dialog:dxf:curves").is_none(), "no setting for it");
+        export_to(&mut h, "circles.dxf");
+        let circles = std::fs::read_to_string(h.dir.join("circles.dxf")).unwrap();
+        assert!(circles.lines().any(|l| l.trim() == "CIRCLE"), "the hole is one circle");
     }
 
     /// Export the open dialog's drawing into the scenario's folder under this name.

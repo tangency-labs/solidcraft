@@ -34,6 +34,7 @@
 //! | [`Sphere::intersect_with_cone`]              | `IntersectWithCone`                          |
 //! | [`Sphere::create_trimmed_circle_segments`]   | `CreateTrimmedCircleSegments`                |
 //! | [`Sphere::is_nurb_surface_sphere`]           | `IsNurbSurfaceSphere`                        |
+//! | [`Sphere::fitted_nurb_surface_sphere`]       | `IsNurbSurfaceSphere` as upstream returns it (the fitted circles' NURB) |
 //! | [`Sphere::rebuild_step_from_nurb_parameters`] | `RebuildSTEPFromNURBParameters`             |
 //! | [`Sphere::is_closed`], [`Sphere::is_closed_u`], [`Sphere::is_closed_v`] | `IsClosed`, `IsClosedU`, `IsClosedV` |
 //! | [`Sphere::step_inversion`]                   | `STEPInversion`                              |
@@ -105,10 +106,13 @@
 //!   point a whole radius from them. A circle whose cap lies within the tolerance is
 //!   still a touch for a B-rep at that tolerance: `FaceIntersect` makes it one
 //!   (`topology::face::p3`). No input-driven recursion.
-//! - **Opt-in fix** ([`UpstreamFixes::found_torus_sphere_keep_tested_nurb`](crate::kernel::UpstreamFixes::found_torus_sphere_keep_tested_nurb),
-//!   WR-493, the SolidCraft fork's tangency-labs/smlib@7ea6a96): `IsNurbSurfaceSphere`
-//!   tests the half meridian within `180 + 360 * SM_EFF_ZERO` degrees and the sphere it
-//!   finds keeps the tested NURB (`SetFromGwNurb`). Off by default (upstream).
+//! - **Found spheres keep the tested NURB** (WR-493, the SolidCraft fork's
+//!   tangency-labs/smlib@7ea6a96): the sphere `IsNurbSurfaceSphere` finds keeps the
+//!   tested NURB (`SetFromGwNurb`), its sweep and generator intervals the polar and
+//!   generator curves'.
+//!   Upstream keeps the NURB made from the fitted circles. The fork also widens the
+//!   half-meridian test to `180 + 360 * SM_EFF_ZERO` degrees; that is not taken, since
+//!   the angles' rounding (far spheres, below) already covers it and no more.
 //! - **Far spheres** (#3131, by default): `IsNurbSurfaceSphere` and
 //!   `RebuildSTEPFromNURBParameters` add to their fixed half-meridian tolerances, and
 //!   `IsNurbSurfaceSphere` to its generator's STEP interval test, the angles' rounding at
@@ -122,7 +126,10 @@
 
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::surface::{AnalyticCheck, SurfaceFailure};
+use crate::error::{
+    ignore_status, ignored, Failure, Result, SolidError, SM_ERR, SM_ERR_NULL_POINTER,
+};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -139,7 +146,7 @@ use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{asin, sqrt, Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{
-    max2, min2, rad_to_deg, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE,
+    max2, min2, rad_to_deg, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_PARAM, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE,
 };
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::p2::EditNotify;
@@ -246,9 +253,9 @@ fn gen_circle<'a>(gen: Option<&'a Curve>, op: &'static str) -> Result<&'a Ellips
     match gen.map(Curve::kind) {
         Some(CurveKind::Ellipse(e)) => Ok(e),
         Some(_) => Err(SolidError::invalid_input(op, "generator is not a circle")),
-        None => Err(SolidError::surface_missing(
+        None => Err(SolidError::surface(
             op,
-            "the sphere's generator circle",
+            SurfaceFailure::SurfaceWithoutGenerator,
         )),
     }
 }
@@ -323,7 +330,9 @@ impl Sphere {
                 if e.is_unported_or_cancelled() {
                     e
                 } else {
-                    SolidError::surface_missing(OP_NEW, "the sphere's generator circle")
+                    Failure::new(OP_NEW, SurfaceFailure::GeneratorNotMade)
+                        .caused_by(e)
+                        .into_error()
                 }
             })?;
             base.gen_curve = Some(Curve::from(circle));
@@ -351,9 +360,9 @@ impl Sphere {
         let inside_out = radius < 0.0;
         let abs_radius = radius.abs();
         if abs_radius.is_nan() || abs_radius <= EFF_ZERO {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_CANONICAL,
-                "the sphere's radius is not above zero",
+                SurfaceFailure::RadiusNotPositive,
             ));
         }
 
@@ -378,18 +387,22 @@ impl Sphere {
         // Build NURB; fail cleanly rather than leak a null-NURB object.
         match sphere.make_nurb(k) {
             Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => {
-                return Err(SolidError::surface_failed(
+            Err(e) => {
+                return Err(SolidError::surface_nurb_not_made(
                     OP_CANONICAL,
-                    "the sphere's NURB could not be made",
+                    SM_ERR,
+                    Err(e),
                 ))
             }
             Ok(()) => {}
         }
         if sphere.base.base.gw_nurb().is_none() {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_CANONICAL,
-                "the sphere has no NURB",
+                SurfaceFailure::Defect {
+                    why: "the sphere's make_nurb returned success yet left no NURB, though on \
+                          success it sets the NURB of the revolution it builds",
+                },
             ));
         }
         Ok(sphere)
@@ -637,13 +650,24 @@ impl Sphere {
 
         // rebuild the underlying Nurb Surface: just move the Nurb Points
         // (GetOrCreateGwNurbPointer: the virtual MakeNurb when missing)
+        let mut made = Ok(());
         if off.base.base.nurb.is_none() {
-            ignore_status(off.make_nurb(k))?;
+            made = off.make_nurb(k);
+            ignore_status(made.clone())?;
         }
-        let off_nurb =
-            off.base.base.nurb.as_mut().ok_or_else(|| {
-                SolidError::surface_missing(OP_OFFSET, "the offset sphere's NURB")
-            })?;
+        let off_nurb = off.base.base.nurb.as_mut().ok_or_else(|| match made {
+            // the copy had no NURB and its make failed: the make's error is the cause
+            Err(e) => SolidError::surface_nurb_not_made(OP_OFFSET, SM_ERR_NULL_POINTER, Err(e)),
+            Ok(()) => Failure::new(
+                OP_OFFSET,
+                SurfaceFailure::Defect {
+                    why: "the offset sphere's make_nurb returned success yet left no NURB, \
+                          though on success it sets the NURB of the revolution it builds",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error(),
+        })?;
         let ix = off_nurb.indices();
 
         // for every m_pNurb Control Point
@@ -768,9 +792,9 @@ impl Sphere {
     ) -> Result<()> {
         // check input
         if hu > 3 || hv > 3 {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_EVAL_STEP,
-                "the STEP form evaluates derivatives up to order 3 only",
+                SurfaceFailure::DerivativeOrderTooHigh { max: 3 },
             ));
         }
         if hu != hv {
@@ -948,7 +972,17 @@ impl Sphere {
             .base
             .calculate_bounding_box(k, uv_domain, &req)?
             .normal
-            .ok_or_else(|| SolidError::surface_missing(OP_PLANE, "the sphere's bounding box"))
+            .ok_or_else(|| {
+                Failure::new(
+                    OP_PLANE,
+                    SurfaceFailure::Defect {
+                        why: "the B-spline bounding box routine, asked for the normal box, \
+                              returned without one, though it returns every box it is asked for",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })
     }
 
     /// The intersection curves of this sphere over `uv_domain` with `other` over
@@ -1006,6 +1040,7 @@ impl Sphere {
     ) -> Result<SurfaceIntersection> {
         let mut out = SurfaceIntersection::default();
         self.global_surface_intersect_with_into(
+            None,
             k,
             uv_domain,
             other,
@@ -1024,10 +1059,14 @@ impl Sphere {
 
     /// [`Self::global_surface_intersect_with`] into `out`, with `general` filling it.
     /// On an error `out` keeps what the failing special case appended before it, as
-    /// upstream leaves its output arrays.
+    /// upstream leaves its output arrays. `this` is the surface that holds this sphere,
+    /// when there is one: with `other` it decides the contact tolerance of the coaxial
+    /// intersection with a surface of revolution (`revolved_contact_tol`, #15049), as that
+    /// surface's own dispatch decides it, so the two orders agree.
     #[allow(clippy::too_many_arguments)] // upstream's argument list
     pub(crate) fn global_surface_intersect_with_into(
         &self,
+        this: Option<&Surface>,
         k: &Kernel,
         uv_domain: &Extent2d,
         other: &Surface,
@@ -1079,6 +1118,10 @@ impl Sphere {
                     self,
                     uv_domain,
                     approx_tol_3d,
+                    crate::surface::surf_of_revolution::p3::revolved_contact_tol(
+                        k,
+                        [this, Some(other)],
+                    ),
                     out,
                 );
                 core::mem::swap(&mut out.surface1_uv_curves, &mut out.surface2_uv_curves);
@@ -1928,7 +1971,17 @@ impl Sphere {
             .base
             .calculate_bounding_box(k, other_uv_domain, &req)?
             .normal
-            .ok_or_else(|| SolidError::surface_missing(OP_CONE, "the cone's bounding box"))?;
+            .ok_or_else(|| {
+                Failure::new(
+                    OP_CONE,
+                    SurfaceFailure::Defect {
+                        why: "the B-spline bounding box routine, asked for the cone's normal box, \
+                              returned without one, though it returns every box it is asked for",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
+            })?;
         bbox2.expand_absolute(tol);
         if bbox1.are_disjoint(&bbox2, 0.0) {
             return Ok(false);
@@ -1964,9 +2017,9 @@ impl Sphere {
         let mut circle_norm = vec.cross(cone_axis);
         let length = circle_norm.length();
         if length < EFF_ZERO {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_CONE,
-                "the middle of the cone's boundary is on its axis",
+                SurfaceFailure::ConeBoundaryOnAxis,
             )); // Should never happen.
         }
         circle_norm /= length;
@@ -2062,12 +2115,9 @@ impl Sphere {
     /// domain of `test` (through [`Self::reparameterize`]). `None` when `test` is not
     /// a sphere.
     ///
-    /// With the opt-in
-    /// [`UpstreamFixes::found_torus_sphere_keep_tested_nurb`](crate::kernel::UpstreamFixes::found_torus_sphere_keep_tested_nurb)
-    /// (WR-493) the half turn is tested within `180 + 360 * SM_EFF_ZERO` degrees and the
+    /// The half turn is tested within `180 + SM_EFF_ZERO` degrees, as upstream, and the
     /// sphere then keeps a copy of `test`'s NURB, its analytic data rebuilt from it
-    /// (`SetFromGwNurb`); by default `180 + SM_EFF_ZERO` and the NURB made from the
-    /// fitted circles, as upstream. Not upstream: in both modes the half-meridian test, and
+    /// (`SetFromGwNurb`; WR-493: upstream keeps the NURB made from the fitted circles). Not upstream: the half-meridian test, and
     /// the test of the generator's STEP interval against the sphere's (within `SM_EFF_ZERO`
     /// upstream), also allow the angles' rounding at the points' size,
     /// [`meridian_rounding`] of the corner points' size and the circle's radius: `4
@@ -2096,6 +2146,35 @@ impl Sphere {
     ///
     /// As [`Self::is_nurb_surface_sphere`].
     pub(crate) fn is_nurb_surface_sphere_on(
+        k: &Kernel,
+        test: &BSplineSurface,
+        tolerance_scale: f64,
+        this: Option<&Surface>,
+    ) -> Result<Option<Self>> {
+        Self::keep_tested_nurb_on(k, test, tolerance_scale, this)
+    }
+
+    /// The sphere `IsNurbSurfaceSphere` fits to `test` as upstream returns it: its NURB
+    /// the one made from the fitted circles (reparameterised to `test`'s NURB domain),
+    /// ~1e-11 off `test`'s, where [`Self::is_nurb_surface_sphere`] keeps `test`'s own
+    /// (WR-493). Public only for the goldens' replays of rows against the fitted NURB
+    /// (hidden from the docs); the kernel itself does not call it.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::is_nurb_surface_sphere`].
+    #[doc(hidden)]
+    pub fn fitted_nurb_surface_sphere(
+        k: &Kernel,
+        test: &BSplineSurface,
+        tolerance_scale: f64,
+    ) -> Result<Option<Self>> {
+        Self::fit_on(k, test, tolerance_scale, None)
+    }
+
+    /// [`Self::fitted_nurb_surface_sphere`] with `this` evaluating the corners (as
+    /// [`Self::is_nurb_surface_sphere_on`]).
+    fn fit_on(
         k: &Kernel,
         test: &BSplineSurface,
         tolerance_scale: f64,
@@ -2144,13 +2223,10 @@ impl Sphere {
         // see if we have a U or a V oriented sphere
         let angles_u = iso_u.angles.unwrap_or(Extent1d::new());
         let angles_v = iso_v.angles.unwrap_or(Extent1d::new());
-        // not upstream (WR-493, opt-in; tangency-labs/smlib@7ea6a96): the half-meridian
-        // tolerance compensates for degrees, as RebuildSTEPFromNURBParameters [B279]
-        let half_meridian_tol = if k.fixes.found_torus_sphere_keep_tested_nurb {
-            360.0 * EFF_ZERO
-        } else {
-            EFF_ZERO
-        };
+        // upstream's half-meridian tolerance. The fork (WR-493, tangency-labs/smlib@7ea6a96)
+        // widens it to `360 * SM_EFF_ZERO` degrees; the angles' rounding below already
+        // covers what that compensated for, and no more (`far_sphere_recognised`).
+        let half_meridian_tol = EFF_ZERO;
         // not upstream: the angles' rounding at the points' size (`meridian_rounding`)
         let corners = min_pnt.max_dimension().max(max_pnt.max_dimension());
         let (p, q) = (test.degree(SurfParamType::U), test.degree(SurfParamType::V));
@@ -2305,25 +2381,45 @@ impl Sphere {
             Err(_) => return Ok(None), // [B414]
             Ok(()) => {}
         }
+        Ok(Some(sphere))
+    }
 
-        // not upstream (WR-493, opt-in; tangency-labs/smlib@7ea6a96): the sphere keeps
-        // the NURB tested (SetFromGwNurb, whose rebuild's status is ignored)
-        if k.fixes.found_torus_sphere_keep_tested_nurb {
-            let nurb = test
-                .gw_nurb()
-                .ok_or_else(|| SolidError::surface_missing(OP_NURB_SPHERE, "the tested NURB"))?;
-            sphere.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
-            sphere.base.base.nurb_is_borrowed = false;
-            ignore_status(sphere.rebuild_step_from_nurb_parameters(k))?;
-            // (not in the fork) the rebuild takes the sweep interval from one iso circle
-            // and the polar curve from another; they differ beyond the check's 1e-12 on a
-            // small sphere. The interval is the polar curve's (#2073).
-            if let Some(ivl) = sphere.base.polar_curve().map(Ellipse::step_interval) {
-                let d = sphere.base.anal_uv_domain;
-                sphere.base.anal_uv_domain =
-                    Extent2d::from_bounds(ivl.min(), d.min().y, ivl.max(), d.max().y);
-            }
-        }
+    /// [`Self::fitted_nurb_surface_sphere`] of `test` as `this` evaluates its corners
+    /// ([`Self::is_nurb_surface_sphere_on`]), then the sphere keeps a copy of `test`'s NURB.
+    fn keep_tested_nurb_on(
+        k: &Kernel,
+        test: &BSplineSurface,
+        tolerance_scale: f64,
+        this: Option<&Surface>,
+    ) -> Result<Option<Self>> {
+        let Some(mut sphere) = Self::fit_on(k, test, tolerance_scale, this)? else {
+            return Ok(None);
+        };
+        // not upstream (WR-493; tangency-labs/smlib@7ea6a96): the sphere keeps the NURB
+        // tested (SetFromGwNurb, whose rebuild's status is ignored). (`test` has a NURB:
+        // without one its degrees are 0 and the fit returned `None`; the error is kept
+        // for a NURB-less surface all the same.)
+        let nurb = test.gw_nurb().ok_or_else(|| {
+            Failure::new(
+                OP_NURB_SPHERE,
+                SurfaceFailure::Defect {
+                    why: "the tested surface has no NURB after the sphere was fitted to it, \
+                              though without one its degrees are 0 and the fit's degree test \
+                              returns no sphere",
+                },
+            )
+            .with_status(SM_ERR_NULL_POINTER)
+            .into_error()
+        })?;
+        sphere.base.base.nurb = Some(copy_nurb_surface(nurb)).into();
+        sphere.base.base.nurb_is_borrowed = false;
+        ignore_status(sphere.rebuild_step_from_nurb_parameters(k))?;
+        // (not in the fork) the rebuild takes the sweep interval from one iso circle and
+        // the polar curve from another, and the V interval from 3D pole angles while the
+        // generator circle's polar setup reads its endpoints in the meridian plane; they
+        // can differ beyond the check's 1e-12 on a small or far sphere. Keep the STEP
+        // domain aligned with the finalized polar and generator curves.
+        sphere.sync_domain_with_converters();
 
         // (Notify(SM_NO_COPY) copies the test surface's attributes: not modelled)
         Ok(Some(sphere))
@@ -2350,9 +2446,11 @@ impl Sphere {
             || srf.degree(SurfParamType::V) != 2
             || !srf.is_rational()
         {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_REBUILD,
-                "the NURB is not a rational surface of degree 2",
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::DegreeAndRationality,
+                },
             ));
         }
 
@@ -2408,9 +2506,11 @@ impl Sphere {
 
         // quit when not a properly oriented sphere
         if !is_sphere_with_swap_uv && !is_sphere_no_swap_uv {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_REBUILD,
-                "the NURB is not a properly oriented sphere",
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::IsoCirclesNotOfKind,
+                },
             ));
         }
 
@@ -2507,9 +2607,11 @@ impl Sphere {
 
         // no work - GenCurve is degenerate
         if circle.is_degenerate(scaled_zero) {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_REBUILD,
-                "the generator circle is degenerate",
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::GeneratorDegenerate,
+                },
             ));
         }
 
@@ -2529,7 +2631,37 @@ impl Sphere {
 
         // Set PolarConverter from Nurb midPoint rotation isoParamCurve (status ignored)
         ignore_status(self.rebuild_polar_converter(k))?;
+        self.sync_domain_with_converters();
         Ok(())
+    }
+
+    /// Aligns the sphere's STEP UV domain with the intervals finalized by its polar
+    /// converter (U) and generator circle (V) against the retained NURB, so
+    /// `SmSurfOfRevolution::Test #2/#7` and `SmSphere::Test #1` agree with them.
+    fn sync_domain_with_converters(&mut self) {
+        let d = self.base.anal_uv_domain;
+        let mut u_ivl = d.u_interval();
+        let mut v_ivl = d.v_interval();
+
+        if let Some(ivl) = self.base.polar_curve().map(Ellipse::step_interval) {
+            if ivl.length() > EFF_ZERO && ivl.length() <= 360.0 + EFF_ZERO_DEG {
+                u_ivl = ivl;
+            }
+        }
+        if let Some(CurveKind::Ellipse(circle)) = self.base.gen_curve.as_ref().map(Curve::kind) {
+            let ivl = circle.step_interval();
+            if circle.polar_converter().is_polar_conversion_possible()
+                && ivl.length() > EFF_ZERO
+                && ivl.length() <= 180.0 + EFF_ZERO_DEG
+                && ivl.min() >= -90.0 - EFF_ZERO_DEG
+                && ivl.max() <= 90.0 + EFF_ZERO_DEG
+            {
+                v_ivl = ivl;
+            }
+        }
+
+        self.base.anal_uv_domain =
+            Extent2d::from_bounds(u_ivl.min(), v_ivl.min(), u_ivl.max(), v_ivl.max());
     }
 
     // ---- closed directions ----------------------------------------------------------
@@ -2627,9 +2759,9 @@ impl Sphere {
     ) -> Result<LocationType> {
         let inv = self.step_inversion(anal_domain, point, tol, None);
         if !inv.answered {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_SPHERE_STEP_INV,
-                "the point is the centre of a sphere within the tolerance and has no parameters",
+                SurfaceFailure::CentreHasNoParameters,
             ));
         }
         Ok(inv.location)
@@ -2789,9 +2921,9 @@ impl Sphere {
         if let Some(s) = scale {
             if !are_same(s.x, s.y) || !are_same(s.x, s.z) || s.x < EFF_ZERO {
                 // Unable to scale analytical surfaces non-uniformly
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_TRANSFORM,
-                    "an analytic surface cannot be scaled non-uniformly",
+                    SurfaceFailure::ScaleNotUniform,
                 ));
             }
             d_scale = s.x;
@@ -3118,6 +3250,22 @@ pub(crate) fn meridian_rounding(
     rad_to_deg(radians) * (1.0 + gamma(16))
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]).
+impl crate::geom::content::Content for Sphere {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            base,
+            radius,
+            inside_out,
+        } = self;
+        d.tag(0x5F);
+        base.content(d)?;
+        d.f64(*radius);
+        d.bool(*inside_out);
+        Some(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3332,14 +3480,13 @@ mod tests {
         let k = Kernel::default();
         for r in [0.0, 1e-13, f64::NAN, -1e-13] {
             let e = Sphere::create_canonical(&k, &frame(), r).unwrap_err();
-            assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+            assert_eq!(e.upstream_status(), Some(SM_ERR));
             assert_eq!(e.operation(), OP_CANONICAL);
             assert_eq!(
                 e.surface_failure(),
-                Some(&SurfaceFailure::Failed(
-                    "the sphere's radius is not above zero"
-                ))
+                Some(&SurfaceFailure::RadiusNotPositive)
             );
+            assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         }
     }
 
@@ -3350,14 +3497,12 @@ mod tests {
         let k = Kernel::default();
         let mut s = canonical(&k, 2.0);
         let e = s.evaluate_step(Point2::new(0.0, 0.0), 4, 4).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_EVAL_STEP);
-        assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(
             e.surface_failure(),
-            Some(&SurfaceFailure::Failed(
-                "the STEP form evaluates derivatives up to order 3 only"
-            ))
+            Some(&SurfaceFailure::DerivativeOrderTooHigh { max: 3 })
         );
         let e = s
             .transform(
@@ -3366,21 +3511,21 @@ mod tests {
                 Some(Vec3::new(1.0, 2.0, 1.0)),
             )
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_TRANSFORM);
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::ScaleNotUniform));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
+        let e = gen_circle(None, OP_NEW).unwrap_err();
+        assert_eq!(e.upstream_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(e.operation(), OP_NEW);
         assert_eq!(
             e.surface_failure(),
-            Some(&SurfaceFailure::Failed(
-                "an analytic surface cannot be scaled non-uniformly"
-            ))
+            Some(&SurfaceFailure::SurfaceWithoutGenerator)
         );
-        let e = gen_circle(None, OP_NEW).unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR_NULL_POINTER));
-        assert_eq!(e.operation(), OP_NEW);
-        assert_eq!(e.kind(), crate::error::ErrorKind::Missing);
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(
             e.to_string(),
-            format!("{OP_NEW}: the sphere's generator circle is missing")
+            format!("{OP_NEW}: the surface has no generator curve")
         );
     }
 
@@ -3457,10 +3602,14 @@ mod tests {
         let e = s
             .inversion_location(&d, frame().origin(), 1e-3)
             .unwrap_err();
-        assert_eq!(e.upstream_status(), Some(crate::error::SM_ERR));
+        assert_eq!(e.upstream_status(), Some(SM_ERR));
         assert_eq!(e.operation(), OP_SPHERE_STEP_INV);
         assert_eq!(e.kind(), crate::error::ErrorKind::Failed);
-        assert!(e.surface_failure().is_some(), "{e:?}");
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::CentreHasNoParameters),
+            "{e:?}"
+        );
         // an off-sphere answer reads its location
         let big = canonical(&k, 2.0);
         let off = frame().origin() + 3.0 * frame().z_axis();
@@ -3522,12 +3671,11 @@ mod tests {
         }
     }
 
-    /// tangency-labs/smlib@7ea6a96 (WR-493): with `found_torus_sphere_keep_tested_nurb`
-    /// the sphere found in a NURB keeps exactly that NURB.
+    /// tangency-labs/smlib@7ea6a96 (WR-493): the sphere found in a NURB keeps exactly
+    /// that NURB (upstream keeps the one made from the fitted circles, ~1e-11 off).
     #[test]
     fn wr493_sphere_found_in_its_nurb_keeps_it() {
-        let mut k = Kernel::default();
-        k.fixes.found_torus_sphere_keep_tested_nurb = true;
+        let k = Kernel::default();
         for radius in [2.0, -2.0, 1e-3, 500.0] {
             let s = canonical(&k, radius);
             let nurbs = BSplineSurface::from_gw_nurb(s.base().base().gw_nurb().unwrap());
@@ -3536,6 +3684,55 @@ mod tests {
                 .expect("a sphere");
             assert!(same_nurb(found.base().base(), &nurbs));
             assert!((found.radius() - radius.abs()).abs() < 1e-9 * radius.abs());
+        }
+    }
+
+    /// A small or far sphere recognized from its retained NURB keeps its STEP U and V
+    /// intervals aligned with its polar converter and generator circle, passing
+    /// `Surface::assert_valid` (including `SmSurfOfRevolution::Test #2/#7` and
+    /// `SmSphere::Test #1`).
+    #[test]
+    fn far_small_sphere_keeps_matching_generator_and_polar_domains() {
+        use crate::geom::assert_array::{AssertArray, ObjectKey};
+
+        let k = Kernel::default();
+        for (center, radius) in [
+            (Point3::new(0.0, 0.0, 6000.0), 0.1),
+            (Point3::new(0.0, 0.0, 6000.0), 10.0),
+            (Point3::new(0.0, 0.0, 6000.0), 2500.0),
+            (Point3::new(1.0e5, 1.0e5, 1.0e5 + 10.0), 2.5),
+        ] {
+            let placement =
+                Axis2Placement::new(center, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0));
+            let s = Sphere::create_canonical(&k, &placement, radius).expect("sphere");
+            let nurbs = BSplineSurface::from_gw_nurb(s.base().base().gw_nurb().unwrap());
+            let found = Sphere::is_nurb_surface_sphere(&k, &nurbs, 1.0)
+                .unwrap()
+                .expect("a sphere");
+            let step = found.step_uv_domain();
+            let polar_ivl = found
+                .base()
+                .polar_curve()
+                .expect("polar curve")
+                .step_interval();
+            let Some(CurveKind::Ellipse(gen_circle)) = found.base().gen_curve().map(Curve::kind)
+            else {
+                panic!("generator circle");
+            };
+            let gen_ivl = gen_circle.step_interval();
+            assert_eq!(step.u_interval(), polar_ivl, "{center:?} r={radius}");
+            assert_eq!(step.v_interval(), gen_ivl, "{center:?} r={radius}");
+
+            let surface = Surface::from(found);
+            let mut reports = AssertArray::new();
+            let valid = surface
+                .assert_valid(&k, Some(&mut reports), 2, ObjectKey(1))
+                .unwrap();
+            let failed: Vec<_> = reports.reports().iter().filter(|r| !r.ok).collect();
+            assert!(
+                valid && failed.is_empty(),
+                "{center:?} r={radius}: {failed:?}"
+            );
         }
     }
 }

@@ -9,22 +9,37 @@ use solidcraft_doc::naming::legacy_name;
 use solidcraft_doc::persistent_name::{Base, EdgeName, FaceName, Role};
 use solidcraft_doc::{Document, MAX_PLACEMENT_DEPTH, ModelState};
 
-use super::{component_of, joint_id, link_info, named_value_list, occurrence_name, reply};
+use super::filter::{Row, RowFilter, contents_groups, omit};
+use super::{active_joint_values, component_of, joint_id, link_info, named_value_list, occurrence_name, reply};
 use crate::schema::joints::{
-    EdgeReference, FaceReference, InspectJointResult, InspectedJoint, JointLink, JointSide, LinkRole, MadeBy, Reference, ReferenceRole, Referent,
-    SweptFrom, WorldFrame,
+    EdgeReference, FaceReference, InspectJointResult, InspectedJoint, JointLink, JointSide, LinkRole, MadeBy, Omitted, Reference, ReferenceRole,
+    Referent, SketchPointReference, SweptFrom, WorldFrame,
 };
 use crate::{Result, Session};
 
 pub(super) fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.inspect";
+    let mut omitted = Omitted::default();
     let ids: Vec<u64> = match p.get("joint") {
-        None | Some(Value::Null) => s.doc.assembly.joints.iter().map(|j| j.id).collect(),
+        None | Some(Value::Null) => {
+            let rows = RowFilter::read(s, p, cmd)?;
+            let groups = if rows.needs_groups() { contents_groups(&s.doc) } else { Default::default() };
+            let mut ids = Vec::new();
+            for j in &s.doc.assembly.joints {
+                let ends = super::filter::ends(j);
+                if rows.keeps(&Row { kind: j.kind, suppressed: j.suppressed, ends: &ends, holds_contents: groups.contains_key(&j.id) }) {
+                    ids.push(j.id);
+                } else {
+                    omit(&mut omitted, j.kind);
+                }
+            }
+            ids
+        }
         v => vec![joint_id(s, v, cmd)?],
     };
     let st = s.model.state();
     let sol = joints::solve(&s.doc, &st);
-    let vals = joints::joint_values(&s.doc.assembly);
+    let vals = active_joint_values(&s.doc);
     let out: Vec<InspectedJoint> = ids
         .iter()
         .filter_map(|id| s.doc.assembly.joints.iter().find(|j| j.id == *id))
@@ -33,7 +48,7 @@ pub(super) fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
             joint_json(s, &st, &sol, j, q)
         })
         .collect();
-    reply(cmd, InspectJointResult { joints: out, param_warnings: Vec::new() })
+    reply(cmd, InspectJointResult { joints: out, omitted: omitted.some(), param_warnings: Vec::new() })
 }
 
 fn joint_json(s: &Session, st: &ModelState, sol: &joints::Solution, j: &Joint, q: &[f64]) -> InspectedJoint {
@@ -120,23 +135,23 @@ fn occurrence_path(doc: &Document, occurrence: u64) -> String {
 /// Every persistent name the snap holds, with what it refers to.
 fn references(doc: &Document, snap: &Snap) -> Vec<Reference> {
     let mut out = Vec::new();
-    let mut face = |role: ReferenceRole, name: &Option<String>| {
+    let mut face = |role: ReferenceRole, name: Option<&str>| {
         if let Some(n) = name {
             out.push(Reference { role, to: Referent::Face(face_ref(doc, n)) });
         }
     };
     match snap {
         Snap::FaceCenter { face: f, x, .. } => {
-            face(ReferenceRole::Face, f);
+            face(ReferenceRole::Face, f.as_deref());
             if let Some(XRef::Face { face: n, .. }) = x {
-                face(ReferenceRole::X, &Some(n.clone()));
+                face(ReferenceRole::X, Some(n));
             }
         }
         Snap::CircleCenter { face: f, end, x, .. } => {
-            face(ReferenceRole::Face, f);
-            face(ReferenceRole::End, end);
+            face(ReferenceRole::Face, f.as_deref());
+            face(ReferenceRole::End, end.as_deref());
             if let Some(XRef::Face { face: n, .. }) = x {
-                face(ReferenceRole::X, &Some(n.clone()));
+                face(ReferenceRole::X, Some(n));
             }
         }
         Snap::Edge { edge, face: f, corner, .. } => {
@@ -150,12 +165,50 @@ fn references(doc: &Document, snap: &Snap) -> Vec<Reference> {
                 out.push(Reference { role: ReferenceRole::Corner, to: Referent::Edge(edge_ref(doc, e)) });
             }
         }
+        Snap::BetweenFaces { a, b } => {
+            face(ReferenceRole::Face, Some(&a.face));
+            face(ReferenceRole::Face, Some(&b.face));
+        }
         Snap::Plane { x, .. } | Snap::Axis { x, .. } => {
             if let Some(XRef::Face { face: n, .. }) = x {
-                face(ReferenceRole::X, &Some(n.clone()));
+                face(ReferenceRole::X, Some(n));
             }
         }
+        Snap::SketchPoint { sketch, point, x } => {
+            let (sketch_name, error) = match doc.feature(*sketch) {
+                Some(f) => (f.name.clone(), None),
+                None => (String::new(), Some(format!("sketch {sketch} is gone"))),
+            };
+            if let Some(XRef::Face { face: n, .. }) = x {
+                face(ReferenceRole::X, Some(n));
+            }
+            out.push(Reference {
+                role: ReferenceRole::SketchPoint,
+                to: Referent::SketchPoint(SketchPointReference { sketch: *sketch, sketch_name, point: point.clone(), error }),
+            });
+        }
         Snap::Frame { .. } | Snap::Point { .. } => {}
+    }
+    let x = match snap {
+        Snap::FaceCenter { x, .. } | Snap::CircleCenter { x, .. } | Snap::Plane { x, .. } | Snap::Axis { x, .. } | Snap::SketchPoint { x, .. } => {
+            x.as_ref()
+        }
+        _ => None,
+    };
+    use joints::AlignmentRef;
+    match x {
+        Some(XRef::Planar { planar_face: name, .. } | XRef::Reference { reference: AlignmentRef::Cylinder { name }, .. }) => {
+            out.push(Reference { role: ReferenceRole::X, to: Referent::Face(face_ref(doc, name)) });
+        }
+        Some(XRef::Reference { reference: AlignmentRef::Edge { name }, .. }) => {
+            out.push(Reference { role: ReferenceRole::X, to: Referent::Edge(edge_ref(doc, name)) });
+        }
+        Some(XRef::Reference { reference: AlignmentRef::CircleCenter(rim), .. }) => {
+            for name in [&rim.name, &rim.end] {
+                out.push(Reference { role: ReferenceRole::X, to: Referent::Face(face_ref(doc, name)) });
+            }
+        }
+        _ => {}
     }
     out
 }

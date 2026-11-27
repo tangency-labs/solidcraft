@@ -395,4 +395,88 @@ mod tests {
         }
         assert!(seam_twins(&a, Boundary::Left, &b, Boundary::Left, f64::NAN).is_err());
     }
+
+    /// A panel's knots across the seam not clamped at its seam side (a linear on `[0, 1, 2, 3]`):
+    /// its boundary row is not its boundary curve, named for whichever side it is.
+    #[test]
+    fn a_row_whose_knots_across_are_not_clamped_is_named() {
+        let clamped = panel(1.0, &CUBIC);
+        let far: Vec<[f64; 3]> = seam_row().iter().map(|p| [p[0], -1.0, p[2]]).collect();
+        let unclamped = surface(&[seam_row(), far], &[0.0, 1.0, 2.0, 3.0], &CUBIC);
+        assert_eq!(
+            seam_twins(&unclamped, Boundary::Left, &clamped, Boundary::Left, 1e-9).unwrap(),
+            Seam::Mismatched(SeamMismatch::Unclamped { a: true })
+        );
+        assert_eq!(
+            seam_twins(&clamped, Boundary::Left, &unclamped, Boundary::Left, 1e-9).unwrap(),
+            Seam::Mismatched(SeamMismatch::Unclamped { a: false })
+        );
+    }
+
+    /// A rational panel: the seam row (its `u = 0` side) with the weights `w`, the far row
+    /// (moved by `dy` in y) with weight 1.
+    fn weighted_panel(dy: f64, w: [f64; 4]) -> Surface {
+        let at = |c: [f64; 3], w: f64| CPoint::weighted(Vec3::new(c[0], c[1], c[2]), w);
+        let seam: Vec<CPoint> = seam_row()
+            .into_iter()
+            .zip(w)
+            .map(|(c, w)| at(c, w))
+            .collect();
+        let far: Vec<CPoint> = seam_row()
+            .into_iter()
+            .map(|c| at([c[0], dy, c[2]], 1.0))
+            .collect();
+        Surface::new(vec![seam, far], 1, 3, LINEAR.to_vec(), CUBIC.to_vec()).unwrap()
+    }
+
+    /// Rows of one rational curve: weights that are one common factor apart pair (the same
+    /// curve), weights that are not are named at the first point where they part.
+    #[test]
+    fn rational_rows_pair_up_to_one_weight_factor() {
+        let a = weighted_panel(1.0, [1.0, 2.0, 2.0, 1.0]);
+        let thrice = weighted_panel(-1.0, [3.0, 6.0, 6.0, 3.0]);
+        let want: Vec<(Index, Index)> = (0..4).map(|j| ((0, j), (0, j))).collect();
+        assert_eq!(
+            seam_twins(&a, Boundary::Left, &thrice, Boundary::Left, 1e-9).unwrap(),
+            Seam::Tied(want)
+        );
+        let other = weighted_panel(-1.0, [1.0, 2.0, 3.0, 1.0]);
+        assert_eq!(
+            seam_twins(&a, Boundary::Left, &other, Boundary::Left, 1e-9).unwrap(),
+            Seam::Mismatched(SeamMismatch::Weights { index: 2 })
+        );
+    }
+
+    /// A closed seam row (its first point its last), a linear round a unit square on knots
+    /// symmetric about their middle: `b`'s row running the same way pairs each point with
+    /// itself, and running the other way pairs reversed, decided by the first two points
+    /// (the ends alone pair both ways).
+    #[test]
+    fn a_closed_row_pairs_the_way_it_runs() {
+        let square = vec![
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0],
+        ];
+        let knots = [0.0, 0.0, 0.25, 0.5, 0.75, 1.0, 1.0];
+        let lifted = |r: &[[f64; 3]], dz: f64| -> Vec<[f64; 3]> {
+            r.iter().map(|p| [p[0], p[1], dz]).collect()
+        };
+        let a = surface(&[square.clone(), lifted(&square, 1.0)], &LINEAR, &knots);
+        let same = surface(&[square.clone(), lifted(&square, -1.0)], &LINEAR, &knots);
+        let want: Vec<(Index, Index)> = (0..5).map(|j| ((0, j), (0, j))).collect();
+        assert_eq!(
+            seam_twins(&a, Boundary::Left, &same, Boundary::Left, 1e-9).unwrap(),
+            Seam::Tied(want)
+        );
+        let back: Vec<[f64; 3]> = square.iter().rev().copied().collect();
+        let other_way = surface(&[back.clone(), lifted(&back, -1.0)], &LINEAR, &knots);
+        let want: Vec<(Index, Index)> = (0..5).map(|j| ((0, j), (0, 4 - j))).collect();
+        assert_eq!(
+            seam_twins(&a, Boundary::Left, &other_way, Boundary::Left, 1e-9).unwrap(),
+            Seam::Tied(want)
+        );
+    }
 }

@@ -27,14 +27,9 @@ fn slab_less_loft() -> f64 {
     900.0 * 480.0 * 160.0 - 4.0 / 6.0 * (top + 4.0 * middle + bottom)
 }
 
-/// SolidCraft's set: every fix but one.
+/// SolidCraft's set: every fix.
 fn fixes() {
-    let off = ["fillet_round_ends_on_outline"];
-    let on = solidcore::kernel::UpstreamFixes::NAMES
-        .iter()
-        .copied()
-        .filter(|n| !off.contains(n));
-    session::set_thread_fixes(on).unwrap();
+    session::set_thread_fixes(solidcore::kernel::UpstreamFixes::NAMES.iter().copied()).unwrap();
 }
 
 fn operand() -> Body {

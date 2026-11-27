@@ -52,6 +52,7 @@ use solidcore::surface::surface::p2::SurfaceKind;
 use solidcore::surface::surface::p4::NoObject;
 use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep::create_linear_sweep;
+use solidcore::topology::brep::p1 as brep1;
 use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
 use solidcore::topology::brep::validation::{check_brep, CheckLevel};
 use solidcore::topology::face::p4 as face4;
@@ -59,14 +60,12 @@ use solidcore::topology::{edge, EdgeId, FaceId, VertexId};
 use solidcore::{Brep, Kernel};
 use std::f64::consts::PI;
 
-/// Every fix but `geometric_g2_continuity`.
+/// Every fix.
 fn all_fixes() -> Kernel {
     let mut k = Kernel::default();
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -1322,6 +1321,69 @@ fn a_setback_set_on_the_corner_beside_a_curved_face_is_the_setback() {
     springs_are_the_fills(&k, &b, &rounded, case.name, 3);
 }
 
+/// #16408: the D prism's corner of unequal rounds (2, 2.5, 3), the Setback by the rule before
+/// any setback is set, set back on the made corner (`add_set_back_vertex`, then
+/// `set_corner_setback`) by the setback the growth names (3.05 x 1.06, `the_named_setback_builds`).
+/// Before, the Setback read only the fills asked (`set_set_back_fill`) and built the rule's
+/// setbacks, [3, 4.5, 3.75], dropping the one set; now it builds the one set on every edge,
+/// graded as above.
+#[test]
+fn a_setback_set_on_an_unequal_corner_beside_a_curved_face_builds_as_asked() {
+    let (mut k, mut b, edges, case) = d_prism_case();
+    let named = 3.05 * 1.06;
+    let r = round_set_back(
+        &mut k,
+        &mut b,
+        &edges,
+        &[2.0, 2.5, 3.0],
+        case.v,
+        Some(named),
+        true,
+    );
+    assert_eq!(r.event, Some(BlendCornerEvent::Setback), "{}", r.reason);
+    assert!(r.ok, "asked {named}: {}", r.reason);
+    assert_eq!(r.setbacks, vec![named; 3]);
+    graded(&mut k, &mut b, &case, 3);
+    springs_are_the_fills(&k, &b, &r, case.name, 3);
+}
+
+/// #16408: the same corner set back 4 on the made corner over an ease of 1. Beside a curved
+/// face the Setback's fill is G1 only, so it cannot take the ease: the corner is refused
+/// (`CornerUnsupported`, naming why) rather than built with the rule's setbacks and no ease,
+/// which is not what was asked.
+#[test]
+fn an_eased_setback_set_on_an_unequal_corner_beside_a_curved_face_is_refused() {
+    let (mut k, mut b, edges, case) = d_prism_case();
+    let xs = vec![FilletSurfaceGeneratorType::Circular; edges.len()];
+    let vid = vertex_at(&b, case.v);
+    let mut s = FilletSession::new(&mut k, &mut b).unwrap();
+    s.prepare_per_edge_constant_radius(&mut k, &edges, &[2.0, 2.5, 3.0], &xs, 1, 1.0)
+        .unwrap();
+    s.add_set_back_vertex(vid);
+    s.create_corners(&k, None).unwrap();
+    let mut set = 0;
+    for c in s.fillet_corners().unwrap() {
+        if s.corner(c).unwrap().vertex == Some(vid) {
+            assert!(s
+                .corner(c)
+                .unwrap()
+                .blend
+                .is_some_and(solidcore::blend::blend_corner::BlendCorner::is_setback));
+            s.set_corner_setback(c, 4.0).unwrap();
+            s.set_corner_ease(c, 1.0).unwrap();
+            set += 1;
+        }
+    }
+    assert_eq!(set, 1);
+    assert!(s.do_filleting(&mut k, None).is_err());
+    let info = s.error_info();
+    assert_eq!(info.code, 9, "{}", info.comment);
+    assert_eq!(
+        info.comment,
+        "Fillet Error: a setback with an ease is asked for at a setback corner beside a curved face, whose fill is G1 only, so it would not be built as asked"
+    );
+}
+
 /// The D prism with flat a 8 (R 10, H 20), bored about its axis with radius `bore` where
 /// given (the bore R 6.9 leaves the top a strip 1.1 wide beside the chord), and its top corner
 /// V = (8, 6, 20), where the top, the flat and the convex cylinder meet: the chord, the upright
@@ -2021,5 +2083,421 @@ fn cone_frustum_named_and_twice_asked_setbacks_build() {
         assert!(r.ok, "asked {placed}: {}", r.reason);
         graded(&mut k, &mut b, &case, 3);
         springs_are_the_fills(&k, &b, &r, case.name, 3);
+    }
+}
+
+/// A symmetric double-D prism: the cylinder of radius `rr` about `(ox, oy)` cut by the
+/// parallel flats `y = oy - d`, `y = oy + d` and the square back `x = ox + x_back`, extruded
+/// from `z = oz` to `oz + height`. Its outer arc runs over `[-asin(d / rr), +asin(d / rr)]`
+/// from `V` (`y = oy - d`) to `W` (`y = oy + d`), meeting both flats at an obtuse solid angle
+/// `pi/2 + asin(d / rr)` so that an upright round there stays under a quarter turn (one
+/// Bezier span).
+fn double_d_prism(
+    k: &mut Kernel,
+    origin: [f64; 3],
+    rr: f64,
+    d: f64,
+    x_back: f64,
+    height: f64,
+) -> Brep {
+    let [ox, oy, oz] = origin;
+    let alpha = (d / rr).asin();
+    let x_end = (rr * rr - d * d).sqrt();
+    let p0 = Point3::new(ox + x_back, oy - d, oz);
+    let p1 = Point3::new(ox + x_end, oy - d, oz);
+    let p2 = Point3::new(ox + x_end, oy + d, oz);
+    let p3 = Point3::new(ox + x_back, oy + d, oz);
+    let flat_neg = line(p0, p1);
+    let outer_arc = arc(k, Point3::new(ox, oy, oz), rr, -alpha, alpha);
+    let flat_pos = line(p2, p3);
+    let back = line(p3, p0);
+    create_linear_sweep(
+        k,
+        &[
+            Some(&flat_neg),
+            Some(&outer_arc),
+            Some(&flat_pos),
+            Some(&back),
+        ],
+        Vec3::Z,
+        height,
+        true,
+    )
+    .unwrap()
+}
+
+/// #13646: a far Mitre cutting a round along an arc edge (`gather_ends` in
+/// `blend/blend_corner/setback.rs`), where the dropped foot lies strictly inside the arc's
+/// interval and the reach is an arc length.
+///
+/// On a single-flat D prism the straight chord and the arc share both endpoints, and
+/// `R (phi + psi) > R sin phi + (R - r_a) sin psi` for every `phi, psi in (0, pi)`, so the
+/// straight chord always binds first. Cutting a symmetric double-D prism with parallel flats
+/// `y = +-d` and a square back `x = x_back` decouples the near and far flats so that only the
+/// outer arc connects the Setback corner to the far Mitre, and the arc is the shortest edge at
+/// the corner.
+///
+/// Closed form: at the Setback corner (`y = -d` for `from_start` true, `y = +d` for false),
+/// the near flat, the upright and the outer arc are rounded `1.0`, `1.5` and `2.0`; at the
+/// arc's far end, the far flat is rounded `r_far` while the far upright stays unrounded (a far
+/// Mitre). On the top plane `z = oz + H`, the arc's rail `rho = R - r_arc` meets the far
+/// flat's rail `y = +-(d - r_far)` at angle `phi_x = asin((d - r_far) / (R - r_arc))`,
+/// strictly inside `(-alpha, +alpha)` with `alpha = asin(d / R)` whenever
+/// `(d - r_far) / (R - r_arc) < d / R`. The radial foot on the circle `rho = R` lies at
+/// `phi_x`, an arc length `L_cut = R * (alpha + phi_x)` from the Setback corner:
+/// - `R = 30, d = 10, r_far = 3`: `30 * (asin(1/3) + asin(1/4)) = 17.775515` (chord `17.5166`),
+/// - `R = 30, d = 10, r_far = 2`: `30 * (asin(1/3) + asin(2/7)) = 18.887658` (chord `18.5773`),
+/// - `R = 30, d = 22, r_far = 15`: `30 * (asin(11/15) + asin(1/4)) = 32.276767` (chord
+///   `30.7424`, and on the `94.33 deg` arc from `W` back to `X` the interval `[32.69 deg,
+///   94.33 deg]` crosses the circle's `90 deg` interior knot).
+///
+/// The arc's other far rail vertex (on the cylinder) drops at the arc's far end, and the near
+/// flat and upright end squarely on `x = x_back` and `z = oz` (both longer than the arc), so
+/// the arc's top-rail Mitre crossing is the unique binding cut. Asking past `L_cut` (and
+/// within every edge's room) refuses as `SetbackTooLong { why: PastRails }` naming
+/// `L_cut - 1000 * tol_arc` (certified lower bound: `largest <= want`, within `1e-9`); asking
+/// `L_cut` or `largest + 2 * tol` refuses the same way; asking `largest` builds cleanly and
+/// passes `graded`, `kept_definitions` (all four rounds exact, six setback patches
+/// re-certified), `springs_are_the_fills` and exact topology counts (`16 F, 39 E, 25 V, 2 S`
+/// unequal far Mitre; `16 F, 38 E, 24 V, 2 S` equal).
+#[test]
+fn arc_edge_far_mitre_cut_names_arc_length_reach_and_builds() {
+    struct Variant {
+        label: &'static str,
+        origin: [f64; 3],
+        rr: f64,
+        d: f64,
+        x_back: f64,
+        hh: f64,
+        at_end: bool,
+        r_far: f64,
+        asked: f64,
+        marked: bool,
+        edges_want: usize,
+        verts_want: usize,
+        crosses_90_knot: bool,
+    }
+    let variants = [
+        Variant {
+            label: "start end, unequal far mitre",
+            origin: [0.0, 0.0, 0.0],
+            rr: 30.0,
+            d: 10.0,
+            x_back: 4.0,
+            hh: 25.0,
+            at_end: false,
+            r_far: 3.0,
+            asked: 19.5,
+            marked: false,
+            edges_want: 39,
+            verts_want: 25,
+            crosses_90_knot: false,
+        },
+        Variant {
+            label: "end end, unequal far mitre",
+            origin: [0.0, 0.0, 0.0],
+            rr: 30.0,
+            d: 10.0,
+            x_back: 4.0,
+            hh: 25.0,
+            at_end: true,
+            r_far: 3.0,
+            asked: 19.5,
+            marked: false,
+            edges_want: 39,
+            verts_want: 25,
+            crosses_90_knot: false,
+        },
+        Variant {
+            label: "start end, equal far mitre",
+            origin: [0.0, 0.0, 0.0],
+            rr: 30.0,
+            d: 10.0,
+            x_back: 4.0,
+            hh: 25.0,
+            at_end: false,
+            r_far: 2.0,
+            asked: 19.8,
+            marked: false,
+            edges_want: 38,
+            verts_want: 24,
+            crosses_90_knot: false,
+        },
+        Variant {
+            label: "marked corner door",
+            origin: [0.0, 0.0, 0.0],
+            rr: 30.0,
+            d: 10.0,
+            x_back: 4.0,
+            hh: 25.0,
+            at_end: false,
+            r_far: 3.0,
+            asked: 19.5,
+            marked: true,
+            edges_want: 39,
+            verts_want: 25,
+            crosses_90_knot: false,
+        },
+        Variant {
+            label: "multi-knot arc across 90 deg knot, end end",
+            origin: [0.0, 0.0, 0.0],
+            rr: 30.0,
+            d: 22.0,
+            x_back: -35.0,
+            hh: 60.0,
+            at_end: true,
+            r_far: 15.0,
+            asked: 36.0,
+            marked: false,
+            edges_want: 39,
+            verts_want: 25,
+            crosses_90_knot: true,
+        },
+        Variant {
+            label: "far from origin +1000",
+            origin: [1000.0, 1000.0, 1000.0],
+            rr: 30.0,
+            d: 10.0,
+            x_back: 4.0,
+            hh: 25.0,
+            at_end: false,
+            r_far: 3.0,
+            asked: 19.5,
+            marked: false,
+            edges_want: 39,
+            verts_want: 25,
+            crosses_90_knot: false,
+        },
+    ];
+    let (r_flat, r_up, r_arc) = (1.0f64, 1.5f64, 2.0f64);
+    for v_cfg in &variants {
+        let [ox, oy, oz] = v_cfg.origin;
+        let (rr, d, x_back, hh, r_far) = (v_cfg.rr, v_cfg.d, v_cfg.x_back, v_cfg.hh, v_cfg.r_far);
+        let alpha = (d / rr).asin();
+        let x_end = (rr * rr - d * d).sqrt();
+        let y_up_c = d - r_up;
+        let x_up_c = ((rr - r_up) * (rr - r_up) - y_up_c * y_up_c).sqrt();
+        let phi_cut = ((d - r_far) / (rr - r_arc)).asin();
+        let l_cut = rr * (alpha + phi_cut);
+        let s = if v_cfg.at_end { 1.0f64 } else { -1.0f64 };
+        let build_case = || {
+            let mut k = all_fixes();
+            let b = double_d_prism(&mut k, v_cfg.origin, rr, d, x_back, hh);
+            let x_pick = 0.5 * (x_back + x_end);
+            let p_flat_near = [ox + x_pick, oy + s * d, oz + hh];
+            let p_flat_far = [ox + x_pick, oy - s * d, oz + hh];
+            let p_up_near = [ox + x_end, oy + s * d, oz + 0.5 * hh];
+            let p_arc = [ox + rr, oy, oz + hh];
+            let edges: Vec<EdgeId> = [p_flat_near, p_up_near, p_arc, p_flat_far]
+                .iter()
+                .map(|&p| pick(&k, &b, p))
+                .collect();
+            let phi_mid = -s * (phi_cut - 1.5e-4);
+            let on_rounds = vec![
+                middle(
+                    [ox + x_back + 2.0, oy + s * (d - r_flat), oz + hh - r_flat],
+                    [0.0, s, 0.0],
+                    [0.0, 0.0, 1.0],
+                    r_flat,
+                ),
+                middle(
+                    [ox + x_up_c, oy + s * y_up_c, oz + 3.0],
+                    [0.0, s, 0.0],
+                    [x_up_c / (rr - r_up), s * y_up_c / (rr - r_up), 0.0],
+                    r_up,
+                ),
+                middle(
+                    [
+                        ox + (rr - r_arc) * phi_mid.cos(),
+                        oy + (rr - r_arc) * phi_mid.sin(),
+                        oz + hh - r_arc,
+                    ],
+                    [0.0, 0.0, 1.0],
+                    [phi_mid.cos(), phi_mid.sin(), 0.0],
+                    r_arc,
+                ),
+                middle(
+                    [ox + x_back + 6.0, oy - s * (d - r_far), oz + hh - r_far],
+                    [0.0, -s, 0.0],
+                    [0.0, 0.0, 1.0],
+                    r_far,
+                ),
+            ];
+            let case = Case {
+                name: v_cfg.label,
+                v: Point3::new(ox + x_end, oy + s * d, oz + hh),
+                reach: l_cut + 2.0,
+                convex: true,
+                inside: Point3::new(ox + x_pick, oy, oz + 0.5 * hh),
+                faces: vec![
+                    CurvedFace::plane([ox, oy, oz + hh], [0.0, 0.0, 1.0]),
+                    CurvedFace::plane([ox, oy + s * d, oz], [0.0, s, 0.0]),
+                    CurvedFace {
+                        kind: Kind::Cylinder,
+                        at: Point3::new(ox, oy, oz),
+                        axis: Vec3::Z,
+                        radius: rr,
+                        slope: 0.0,
+                        side: 1.0,
+                    },
+                ],
+                on_rounds,
+                k: 0.0,
+                faces_want: 16,
+            };
+            (k, b, edges, case)
+        };
+
+        let (mut k, mut b, edges, case) = build_case();
+        let v = vertex_at(&b, case.v);
+        assert_eq!(
+            edge::start_vertex(&b, edges[2]).unwrap() == Some(v),
+            !v_cfg.at_end,
+            "{}: arc orientation",
+            v_cfg.label
+        );
+        if v_cfg.crosses_90_knot {
+            let ivl = edge::interval(&b, edges[2]).unwrap();
+            let curve = edge::evaluation_curve(&b, edges[2]).unwrap().unwrap();
+            let knots = match curve.kind() {
+                solidcore::curve::curve::CurveKind::Ellipse(el) => el.base().knots(None).unwrap().0,
+                solidcore::curve::curve::CurveKind::BSpline(c) => c.knots(None).unwrap().0,
+                other => panic!("{}: unexpected arc curve {other:?}", v_cfg.label),
+            };
+            let cut_param = ivl.min() + ivl.length() * (alpha - phi_cut) / (2.0 * alpha);
+            let interior = knots
+                .iter()
+                .filter(|&&u| u > cut_param && u < ivl.max())
+                .count();
+            assert!(
+                interior >= 1,
+                "{}: [{cut_param}, {}] crosses no interior knot in {knots:?}",
+                v_cfg.label,
+                ivl.max()
+            );
+        }
+        let arc_tol = edge::tolerance(&b, edges[2]).unwrap();
+        let want = l_cut - 1000.0 * arc_tol;
+        let r = round_set_back(
+            &mut k,
+            &mut b,
+            &edges,
+            &[r_flat, r_up, r_arc, r_far],
+            case.v,
+            Some(v_cfg.asked),
+            v_cfg.marked,
+        );
+        assert_eq!(
+            r.event,
+            Some(BlendCornerEvent::Setback),
+            "{}: {}",
+            v_cfg.label,
+            r.reason
+        );
+        assert!(!r.ok, "{}: asked {} built", v_cfg.label, v_cfg.asked);
+        let named = match r.refusal {
+            Some(BlendRefusal::SetbackTooLong {
+                vertex,
+                largest,
+                why,
+            }) => {
+                assert_eq!(vertex, v, "{}", v_cfg.label);
+                assert_eq!(why, SetbackTooLongWhy::PastRails, "{}", v_cfg.label);
+                // certified lower bound: never above the closed form, and within 1e-9 below it
+                assert!(
+                    largest <= want && want - largest <= 1e-9,
+                    "{}: largest {largest:.12} against closed form {want:.12} (diff {:+.3e})",
+                    v_cfg.label,
+                    largest - want
+                );
+                largest
+            }
+            other => panic!("{}: {other:?}, {}", v_cfg.label, r.reason),
+        };
+        assert!(r.tol > 0.0, "{}: corner tolerance", v_cfg.label);
+
+        // Both the unmargined open bound (`l_cut`) and `named + 2 * tol` are refused the same way.
+        for (tag, over) in [("l_cut", l_cut), ("named+2tol", named + 2.0 * r.tol)] {
+            let (mut k2, mut b2, edges2, case2) = build_case();
+            let v2 = vertex_at(&b2, case2.v);
+            let r2 = round_set_back(
+                &mut k2,
+                &mut b2,
+                &edges2,
+                &[r_flat, r_up, r_arc, r_far],
+                case2.v,
+                Some(over),
+                v_cfg.marked,
+            );
+            assert!(!r2.ok, "{} ({tag}): built", v_cfg.label);
+            assert!(
+                matches!(
+                    r2.refusal,
+                    Some(BlendRefusal::SetbackTooLong {
+                        vertex,
+                        largest,
+                        why: SetbackTooLongWhy::PastRails,
+                    }) if vertex == v2 && (largest - named).abs() <= 1e-12
+                ),
+                "{} ({tag}): {:?}, {}",
+                v_cfg.label,
+                r2.refusal,
+                r2.reason
+            );
+        }
+
+        // Asked the named size, the corner builds with exact topology, G1 seams, exact round
+        // definitions and re-certified Setback patches.
+        let (mut k3, mut b3, edges3, case3) = build_case();
+        let r3 = round_set_back(
+            &mut k3,
+            &mut b3,
+            &edges3,
+            &[r_flat, r_up, r_arc, r_far],
+            case3.v,
+            Some(named),
+            v_cfg.marked,
+        );
+        assert_eq!(
+            r3.event,
+            Some(BlendCornerEvent::Setback),
+            "{}: {}",
+            v_cfg.label,
+            r3.reason
+        );
+        assert!(r3.ok, "{}, asked {named}: {}", v_cfg.label, r3.reason);
+        assert_eq!(
+            r3.setbacks,
+            vec![named; 3],
+            "{}: built setbacks",
+            v_cfg.label
+        );
+        assert_eq!(
+            get_faces(&b3).unwrap().len(),
+            case3.faces_want,
+            "{}: faces",
+            v_cfg.label
+        );
+        assert_eq!(
+            get_edges(&b3).unwrap().len(),
+            v_cfg.edges_want,
+            "{}: edges",
+            v_cfg.label
+        );
+        assert_eq!(
+            brep1::vertices(&b3, None).unwrap().len(),
+            v_cfg.verts_want,
+            "{}: vertices",
+            v_cfg.label
+        );
+        assert_eq!(
+            brep1::shells(&mut k3, &b3, None).unwrap().len(),
+            2,
+            "{}: shells",
+            v_cfg.label
+        );
+        graded(&mut k3, &mut b3, &case3, 3);
+        kept_definitions(&k3, &b3, &case3, 3);
+        springs_are_the_fills(&k3, &b3, &r3, case3.name, 3);
     }
 }

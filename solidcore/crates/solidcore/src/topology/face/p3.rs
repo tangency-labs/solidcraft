@@ -87,6 +87,11 @@
 //!   surfaces as a touching point at the cap's centre (`cap_centre_within_tolerance`):
 //!   upstream's sphere closed forms collapsed such circles in the intersector itself,
 //!   which loses them for every other caller.
+//! - **A crossing beside a tangent curve** (not upstream; #15049). A crossing or
+//!   near-tangent curve of a face pair that runs beside the pair's tangent curve, with the
+//!   surfaces' separation between them within `zone_tol` by the quadratic bound of the
+//!   cap rule, is the other edge of the same contact and is dropped
+//!   (`crossing_beside_tangent_contact`).
 //! - **`Notify`** takes the face surface's trimmed surface cache (if any) for
 //!   `SM_NO_PRE_EDIT` (`SmCacheMgr::GetObjectCache(SM_OC_TRIMSRF, ..)` has no counterpart:
 //!   B-rep surfaces carry no object cache) and the notification state of
@@ -154,6 +159,7 @@ use crate::topology::vertexuse as vu1;
 use crate::topology::{
     Brep, BrepId, EdgeId, EdgeuseId, FaceId, LoopId, LoopuseId, VertexId, VertexuseId,
 };
+use std::collections::BTreeMap;
 
 pub use crate::topology::topology_traverser::has_lamina_edge;
 
@@ -262,8 +268,10 @@ fn coincidence_check(
 /// `pFace->Point3DClassify(sPoint, tol, TRUE, sPC)` of a face of a B-rep lent mutably
 /// (the classification makes the face's trimmed cache and UV trim curves on it): the
 /// point's class. A failed classification is returned (upstream ignores its status and
-/// reads `SM_PC_UNKNOWN`; the fork passes it on, tangency-labs/smlib 6997962).
-fn point_3d_classify(
+/// reads `SM_PC_UNKNOWN`; the fork passes it on, tangency-labs/smlib 6997962). Also the
+/// test of a planar section's touch points
+/// ([`crate::topology::brep::planar_section::create_planar_section_curves`]).
+pub(crate) fn point_3d_classify(
     k: &Kernel,
     b: &mut Brep,
     f: FaceId,
@@ -298,10 +306,18 @@ fn intersection_curve_reach(
     curve: &Curve,
     interval: &Extent1d,
     tolerance: f64,
+    seams: [Option<bool>; 2],
 ) -> Result<SourceReach> {
+    // (#18705) the faces' seams as found once for the face pair; a face whose edges
+    // could not be read is scanned here, failing as before
     let mut seam = false;
-    for (b, f) in faces {
+    for ((b, f), known) in faces.into_iter().zip(seams) {
+        if let Some(known) = known {
+            seam = seam || known;
+            continue;
+        }
         for e in face_edges(b, f)? {
+            k.work_counters.add_seam_test();
             seam = seam || edge::face_on_both_sides(b, e, f)?;
         }
     }
@@ -1298,6 +1314,7 @@ fn create_uv_trim_curves_body(
     let mut max_cc_gap = 0.0_f64;
     let mut mean_3d_gap = 0.0;
     let mut max_3d_gap = 0.0_f64;
+    let mut count_3d: u64 = 0;
     let mut total_dropped: u64 = 0;
 
     let PreRescue {
@@ -1445,16 +1462,25 @@ fn create_uv_trim_curves_body(
                 }
             }
 
-            let pnt_3d0 = normalized_evaluate(k, b, eu, 0.0, false, false)?.0;
-            let gap_3d = pnt_3d0.distance(b.vertex(v)?.point);
-
             mean_cc_gap += if gap_at_pole { 0.0 } else { uv_gap_size };
             max_cc_gap = smos_max(max_cc_gap, uv_gap_size);
-            mean_3d_gap += gap_3d;
-            max_3d_gap = smos_max(max_3d_gap, gap_3d);
 
-            if adjust_tolerances && b.vertex(v)?.tolerance < 2.0 * gap_3d {
-                vertex::set_tolerance(b, v, 2.0 * gap_3d, true, true)?;
+            // A tangent field has no positional endpoint to compare with a vertex.
+            let e = eu1::edge(b, eu)?
+                .ok_or_else(|| null("CreateUVTrimCurves: edge use without edge"))?;
+            if !matches!(
+                edge_curve(b, e)?.kind(),
+                crate::curve::curve::CurveKind::TangentField(_)
+            ) {
+                let pnt_3d0 = normalized_evaluate(k, b, eu, 0.0, false, false)?.0;
+                let gap_3d = pnt_3d0.distance(b.vertex(v)?.point);
+                mean_3d_gap += gap_3d;
+                count_3d += 1;
+                max_3d_gap = smos_max(max_3d_gap, gap_3d);
+
+                if adjust_tolerances && b.vertex(v)?.tolerance < 2.0 * gap_3d {
+                    vertex::set_tolerance(b, v, 2.0 * gap_3d, true, true)?;
+                }
             }
         }
     }
@@ -1463,7 +1489,11 @@ fn create_uv_trim_curves_body(
     Ok(UvTrimCurveGaps {
         mean_curve_surface_gap: mean_cs_gap / n,
         max_curve_surface_gap: max_cs_gap,
-        mean_3d_vertex_gap: mean_3d_gap / n,
+        mean_3d_vertex_gap: if count_3d == 0 {
+            0.0
+        } else {
+            mean_3d_gap / count_3d as f64
+        },
         max_3d_vertex_gap: max_3d_gap,
         mean_ps_curve_curve_gap: mean_cc_gap / n,
         max_ps_curve_curve_gap: max_cc_gap,
@@ -1786,6 +1816,9 @@ pub fn is_degenerate(
                         o
                     },
                     nodes: sol.nodes,
+                    contact: sol.contact,
+                    unique: sol.unique,
+                    shared_contact: sol.shared_contact,
                 })
                 .collect();
 
@@ -2476,6 +2509,130 @@ fn cap_centre_samples(
     Ok(Some(centre))
 }
 
+/// Not upstream (#15049): whether the crossing curve `crossing` of two faces' surfaces runs
+/// beside their tangent curve `tangent` as the other edge of one contact, so that the two
+/// are one contact at the tolerance `tol` and the crossing is no event.
+///
+/// Two surfaces tangent along a curve stay within the tolerance of each other across a
+/// band about it, about `√(2ρτ)` wide for their relative radius of curvature `ρ`, and
+/// a hair's overlap makes them cross again inside that band: the intersector then gives
+/// the tangent curve and a crossing beside it, wherever the rounding of the surfaces puts
+/// it (a cut whose profile has an arc running tangentially into a line, swept onto a face
+/// that line sweeps onto, crossed it 9.4e-5 from the tangent curve, and the imprint failed).
+/// Between two zeros of the surfaces' separation `g` a distance `D` apart, to second order
+/// `g` is a quadratic, no larger than `θ D / 4` with `θ` the angle of the surfaces'
+/// normals at the zeros (its slope there); where that is within `tol` the surfaces are
+/// within the tolerance of each other all across the band, one contact, as the cap rule
+/// reads a closed crossing ([`cap_centre_within_tolerance`]).
+///
+/// `D` is the curves' distance as wholes, proved on enclosures
+/// ([`curve_runs_along`](crate::intersect::curve_class::p3::curve_runs_along)) at one and
+/// a half times the largest distance of [`CAP_SAMPLES`] points of either from the other,
+/// and at most a thousand times `tol` (the largest a local tolerance may be). `θ` is read
+/// at the same samples of both curves, as the cap rule reads it, and at each sample the
+/// band's middle (halfway to the other curve) must lie within `tol` of both surfaces
+/// together, which a separation larger between the curves than the quadratic refuses.
+/// These are readings, not an enclosure of the separation over the whole band (open). `false`
+/// when a curve cannot be evaluated or a point dropped, or either reading fails.
+///
+/// # Errors
+///
+/// The unported and cancelled statuses of the evaluations and drops.
+fn crossing_beside_tangent_contact(
+    k: &Kernel,
+    crossing: &Curve,
+    tangent: &Curve,
+    surfaces: &[(&Surface, Extent2d); 2],
+    tol: f64,
+) -> Result<bool> {
+    match crossing_beside_tangent_samples(k, crossing, tangent, surfaces, tol) {
+        Ok(beside) => Ok(beside),
+        Err(e) if e.is_unported_or_cancelled() => Err(e),
+        Err(_) => Ok(false),
+    }
+}
+
+/// The readings of [`crossing_beside_tangent_contact`], with every failure an error.
+fn crossing_beside_tangent_samples(
+    k: &Kernel,
+    crossing: &Curve,
+    tangent: &Curve,
+    surfaces: &[(&Surface, Extent2d); 2],
+    tol: f64,
+) -> Result<bool> {
+    if tol.is_nan() || tol <= 0.0 {
+        return Ok(false);
+    }
+    let mut apart: f64 = 0.0;
+    let mut theta: f64 = 0.0;
+    for (from, to) in [(crossing, tangent), (tangent, crossing)] {
+        let ivl = from.natural_interval();
+        let to_ivl = to.natural_interval();
+        for i in 0..CAP_SAMPLES {
+            let s = (f64::from(i) + 0.5) / f64::from(CAP_SAMPLES);
+            let point = from.evaluate_point(k, ivl.min() + (ivl.max() - ivl.min()) * s)?;
+            let near = to.drop_point(
+                k,
+                &to_ivl,
+                point,
+                None,
+                0.0,
+                None,
+                crate::geom::global_solver::SolverOperation::Minimize,
+            )?;
+            if !near.success {
+                return Ok(false);
+            }
+            apart = apart.max(near.distance);
+            // the band's middle: the surfaces there within `tol` of each other (a point of
+            // one within the sum of the two gaps of the other), so a separation that is not
+            // quadratic across the band (larger between the curves than at them) refuses
+            let mid = (point + to.evaluate_point(k, near.parameter)?) * 0.5;
+            let mut band = 0.0;
+            for (surface, domain) in surfaces {
+                let drop =
+                    surface.drop_point::<NoObject>(k, mid, domain, &DropPointOptions::default())?;
+                if !drop.success {
+                    return Ok(false);
+                }
+                band += drop.gap;
+            }
+            if band.is_nan() || band > tol {
+                return Ok(false);
+            }
+            let mut normals = [Vec3::new(0.0, 0.0, 0.0); 2];
+            for ((surface, domain), normal) in surfaces.iter().zip(normals.iter_mut()) {
+                let drop = surface.drop_point::<NoObject>(
+                    k,
+                    point,
+                    domain,
+                    &DropPointOptions::default(),
+                )?;
+                if !drop.success {
+                    return Ok(false);
+                }
+                *normal = surface.evaluate_normal(k, drop.result_uv, Side::Left, Side::Left)?;
+            }
+            let [n1, n2] = normals;
+            theta = theta.max(n1.cross(n2).length());
+        }
+    }
+    let reach = 1.5 * apart;
+    // (a NaN reading refuses: every comparison below is false for it)
+    let within = reach > 0.0 && reach <= 1000.0 * tol && theta * reach / 4.0 <= tol;
+    if !within {
+        return Ok(false);
+    }
+    crate::intersect::curve_class::p3::curve_runs_along(
+        k,
+        crossing,
+        &crossing.natural_interval(),
+        tangent,
+        &tangent.natural_interval(),
+        reach,
+    )
+}
+
 /// Removes entry `ii` of each of the intersector's parallel lists that has one.
 fn remove_intersection_entry(
     curves: &mut Vec<Curve>,
@@ -2574,12 +2731,69 @@ pub fn face_intersect_breps(
     )
 }
 
-/// [`face_intersect_breps`] keeping the trimmed surface caches the surface
-/// intersection makes on the lent B-reps in `face_caches` (this face's B-rep's, then
-/// the other face's; the second is unused with [`FaceBreps::One`]) for the next call
-/// on the same unchanged B-reps, as upstream keeps each face's cache on its surface.
-/// The caches must have been made on the B-rep they are given with, and the B-rep
-/// must not have changed since.
+/// What [`face_intersect_breps_cached`] learns of one B-rep's faces and keeps for its next
+/// call on the same unchanged B-rep.
+#[derive(Default)]
+pub struct FaceIntersectCaches {
+    /// The trimmed surface caches the surface intersection makes on the faces
+    /// (`smsurf_GetSurfaceCache`; upstream keeps them on the surfaces).
+    surfaces: FaceCaches,
+    /// Not upstream: whether each face has a seam edge ([`qf2::face_has_seam`]), so that
+    /// a face is scanned once for all the faces it meets, not once for each (#18705).
+    seams: BTreeMap<FaceId, Option<bool>>,
+}
+
+impl core::fmt::Debug for FaceIntersectCaches {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("FaceIntersectCaches")
+            .field("surfaces", &self.surfaces.len())
+            .field("seams", &self.seams)
+            .finish()
+    }
+}
+
+impl FaceIntersectCaches {
+    /// No caches.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Drops every cache: the B-rep they were made on may have changed.
+    pub fn clear(&mut self) {
+        self.surfaces.clear();
+        self.seams.clear();
+    }
+
+    /// Whether face `f` of `b` has a seam edge, kept for the next ask.
+    fn face_has_seam(&mut self, k: &Kernel, b: &Brep, f: FaceId) -> Option<bool> {
+        *self
+            .seams
+            .entry(f)
+            .or_insert_with(|| qf2::face_has_seam(k, b, f))
+    }
+}
+
+/// Whether face `f` of `b` has a seam edge: from `caches` when they hold it, and kept
+/// there when they are given.
+fn cached_face_has_seam(
+    k: &Kernel,
+    caches: Option<&mut FaceIntersectCaches>,
+    b: &Brep,
+    f: FaceId,
+) -> Option<bool> {
+    match caches {
+        Some(c) => c.face_has_seam(k, b, f),
+        None => qf2::face_has_seam(k, b, f),
+    }
+}
+
+/// [`face_intersect_breps`] keeping what it learns of the lent B-reps' faces in
+/// `face_caches` (this face's B-rep's, then the other face's; the second is unused with
+/// [`FaceBreps::One`]) for the next call on the same unchanged B-reps: the trimmed
+/// surface caches the surface intersection makes, as upstream keeps each face's cache on
+/// its surface, and whether each face has a seam edge. The caches must have been made on
+/// the B-rep they are given with, and the B-rep must not have changed since.
 ///
 /// # Errors
 ///
@@ -2594,7 +2808,7 @@ pub fn face_intersect_breps_cached(
     approx_tol_3d: f64,
     crv_ang_tol_deg: f64,
     options: &FaceIntersectOptions,
-    mut face_caches: [Option<&mut FaceCaches>; 2],
+    mut face_caches: [Option<&mut FaceIntersectCaches>; 2],
 ) -> Result<FaceIntersection> {
     let (this_brep, mut other_brep) = match breps {
         FaceBreps::One(b) => (b, None),
@@ -2683,6 +2897,18 @@ pub fn face_intersect_breps_cached(
     // (not upstream) the curves are the faces' own edge curves, known to their tolerance;
     // an intersection curve is known as far as the two surfaces' angle fixes it
     let curves_are_edges = have_curves;
+    let [this_native_support, other_native_support] = if curves_are_edges {
+        [None, None]
+    } else {
+        [
+            crate::surface::implicit::AnalyticSupport::of(surface_of(b, f)?),
+            crate::surface::implicit::AnalyticSupport::of(surface_of(ob, other)?),
+        ]
+    };
+    // (not upstream, #18705) whether each face has a seam edge, read once from the kept
+    // caches (scanned once for each face while its B-rep is unchanged) and again only
+    // after an edit of the B-reps
+    let mut seams: Option<[Option<bool>; 2]> = None;
     if !have_curves {
         // the surfaces reach their faces' caches through the B-reps
         // (smsurf_GetSurfaceCache); exact evaluation copies, as the caches are made
@@ -2703,8 +2929,10 @@ pub fn face_intersect_breps_cached(
         let (domain, other_domain) = (face2::uv_domain(b, f)?, face2::uv_domain(ob, other)?);
         let r = {
             let [this_caches, other_caches] = &mut face_caches;
-            let taken = |slot: &mut Option<&mut FaceCaches>| {
-                slot.as_deref_mut().map(core::mem::take).unwrap_or_default()
+            let taken = |slot: &mut Option<&mut FaceIntersectCaches>| {
+                slot.as_deref_mut()
+                    .map(|c| core::mem::take(&mut c.surfaces))
+                    .unwrap_or_default()
             };
             let mut services = vec![BrepFaceServices::with_caches(this_brep, taken(this_caches))];
             if let Some(ob) = other_brep.as_deref_mut() {
@@ -2729,7 +2957,7 @@ pub fn face_intersect_breps_cached(
             // hand the caches back for the next call
             for (service, slot) in sided.0.into_iter().zip(face_caches.iter_mut()) {
                 if let Some(slot) = slot.as_deref_mut() {
-                    *slot = service.into_caches();
+                    slot.surfaces = service.into_caches();
                 }
             }
             r?
@@ -2797,6 +3025,48 @@ pub fn face_intersect_breps_cached(
             ii += 1;
         }
     }
+    // (not upstream, #15049) a crossing beside a tangent curve of the same contact goes
+    if !curves_are_edges {
+        let b: &Brep = this_brep;
+        let ob: &Brep = other_brep.as_deref().unwrap_or(b);
+        let surfaces = [
+            (surface_of(b, f)?, face2::uv_domain(b, f)?),
+            (surface_of(ob, other)?, face2::uv_domain(ob, other)?),
+        ];
+        let mut ii = 0;
+        while ii < curves_3d.len() {
+            let crossing = matches!(
+                curve_types.get(ii),
+                Some(TsectCurveType::Crossing | TsectCurveType::NearTangent)
+            );
+            let mut beside = false;
+            if crossing {
+                for (jj, keep) in curves_3d.iter().enumerate() {
+                    if jj == ii || curve_types.get(jj) != Some(&TsectCurveType::Tangent) {
+                        continue;
+                    }
+                    let Some(drop) = curves_3d.get(ii) else {
+                        break;
+                    };
+                    if crossing_beside_tangent_contact(k, drop, keep, &surfaces, zone_tol)? {
+                        beside = true;
+                        break;
+                    }
+                }
+            }
+            if beside {
+                remove_intersection_entry(
+                    &mut curves_3d,
+                    &mut uv_curves1,
+                    &mut uv_curves2,
+                    &mut curve_types,
+                    ii,
+                );
+                continue;
+            }
+            ii += 1;
+        }
+    }
     for (ii, curve) in curves_3d.iter().enumerate() {
         let curve_type = curve_types
             .get(ii)
@@ -2835,7 +3105,32 @@ pub fn face_intersect_breps_cached(
         let ivl = curve.natural_interval();
         let mut cc1 = curve_classification(k, IntersectObject::Curve(ii), &ivl, uv1, zone_tol)?;
         let mut cc2 = curve_classification(k, IntersectObject::Curve(ii), &ivl, uv2, zone_tol)?;
+        if seams.is_none() {
+            // the other face's caches are its own B-rep's, or this one's for one B-rep
+            let [this_caches, other_caches] = &mut face_caches;
+            let this_seam = cached_face_has_seam(k, this_caches.as_deref_mut(), this_brep, f);
+            let other_seam = match other_brep.as_deref() {
+                Some(ob) => cached_face_has_seam(k, other_caches.as_deref_mut(), ob, other),
+                None => cached_face_has_seam(k, this_caches.as_deref_mut(), this_brep, other),
+            };
+            seams = Some([this_seam, other_seam]);
+        }
+        let face_seams = seams.unwrap_or([None, None]);
         if !curves_are_edges {
+            if let Some(support) = other_native_support {
+                cc1.set_native_foreign_support(
+                    IntersectObject::Topology(EntityRef::Face(f), false),
+                    support,
+                    other_zone_tol,
+                );
+            }
+            if let Some(support) = this_native_support {
+                cc2.set_native_foreign_support(
+                    IntersectObject::Topology(EntityRef::Face(other), other_side),
+                    support,
+                    this_zone_tol,
+                );
+            }
             let reach = intersection_curve_reach(
                 k,
                 [
@@ -2845,6 +3140,7 @@ pub fn face_intersect_breps_cached(
                 curve,
                 &ivl,
                 xsect_tol3d(k, zone_tol),
+                face_seams,
             )?;
             cc1.set_source_reach(reach);
             cc2.set_source_reach(reach);
@@ -2862,9 +3158,38 @@ pub fn face_intersect_breps_cached(
             uv2: &uv_curves2,
             edited: false,
         };
-        qf2::curve_on_classify_mut(k, f, &mut objects, true, &mut cc1, false, false, true)?;
+        // (WR-647) each classification names the other face, whose surface with the
+        // classifying face's neighbours across an edge decides a tangency on that edge
+        cc1.set_tangency_partner(Some(IntersectObject::Topology(
+            EntityRef::Face(other),
+            other_side,
+        )));
+        cc2.set_tangency_partner(Some(IntersectObject::Topology(EntityRef::Face(f), false)));
+        qf2::curve_on_classify_mut_with_seams(
+            k,
+            f,
+            &mut objects,
+            true,
+            &mut cc1,
+            false,
+            false,
+            true,
+            face_seams[0],
+        )?;
         objects.side = other_side;
-        qf2::curve_on_classify_mut(k, other, &mut objects, true, &mut cc2, false, false, true)?;
+        qf2::curve_on_classify_mut_with_seams(
+            k,
+            other,
+            &mut objects,
+            true,
+            &mut cc2,
+            false,
+            false,
+            true,
+            face_seams[1],
+        )?;
+        cc1.set_tangency_partner(None);
+        cc2.set_tangency_partner(None);
 
         let extract = ExtractOptions {
             uv_curves1: true,
@@ -2890,6 +3215,7 @@ pub fn face_intersect_breps_cached(
                 for slot in face_caches.iter_mut().flatten() {
                     slot.clear();
                 }
+                seams = None;
             }
             ex?
         };
