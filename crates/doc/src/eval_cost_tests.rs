@@ -4515,9 +4515,57 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
     assert_eq!(fingerprints(&other), before);
 }
 
-/// #17708 review: the evaluation that brings an import's healed parts in reads the file again,
-/// and that read's checks heal it again. When they end with the heals the model already has,
-/// the import is not news: the window is told of the heal once, and nothing goes stale.
+/// The evaluation that brings a large import's healed parts in takes them from the read the
+/// import made, without reading the file again: the model holds the read until what its check
+/// found is settled. Read again, a 240 MB assembly was parsed, converted and checked a second
+/// time on the window thread while the first read's bodies were still shown, and the system
+/// killed the app for its memory. Once a check ends with nothing to bring in, the read is let go.
+#[test]
+fn an_imports_healed_parts_come_from_the_read_it_made() {
+    // the heal preference held on for the whole test, on its thread
+    let _on = kernel::heal_preference_for_tests(true);
+    let mut doc = placed_imports(1);
+    // Larger than the cache of recent reads keeps once nothing uses them (1 MB), as such a file is.
+    let FeatureKind::Import { step, .. } = &mut doc.features[0].kind else { panic!("import fixture") };
+    *step = step.replacen("DATA;", &format!("DATA;\n/* {} */", "x".repeat(2 << 20)), 1).into();
+    let import = doc.features[0].id;
+    let mut model = Model::new();
+    let read_run = {
+        // The check of the read still runs after the import shows, as a large file's does.
+        let _open = kernel::ImportChecks::hold_open_for_tests();
+        model.evaluate(&doc);
+        let run = model.result(import).and_then(|r| r.import_report.clone()).expect("the read's report").checks.clone();
+        assert!(run.is_running(), "the check runs on after the import");
+        assert!(model.holds_import_read(import), "the model holds the read while its check runs");
+        // The check ends having healed the first part.
+        let healed = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0)).unwrap();
+        let n = healed.face_count();
+        let checks = kernel::ImportChecks::ended_for_tests(
+            Vec::new(),
+            vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
+        );
+        let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+        r.import_report =
+            Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
+        assert!(model.settle_import_checks(), "the heal is owed");
+        assert!(model.holds_import_read(import), "held for the evaluation that brings the heal in");
+        model.evaluate(&doc);
+        let mut volumes: Vec<f64> = model.state().bodies.iter().map(|b| b.body.volume_at(1e-6).unwrap().round()).collect();
+        volumes.sort_by(f64::total_cmp);
+        assert_eq!(volumes, [27.0, 125.0], "the healed part replaces the file's");
+        let now = model.result(import).and_then(|r| r.import_report.clone()).expect("the report").checks.clone();
+        assert!(now == run, "the healed parts came from the read the import made: the file was not read again");
+        run
+    };
+    // The read's check ends (its boxes pass): nothing more to bring in, so the read is let go.
+    assert!(read_run.wait().is_some());
+    assert!(!model.settle_import_checks());
+    assert!(!model.holds_import_read(import), "let go once its check is settled");
+}
+
+/// #17708 review: when the checks of the import's read end with the heals the model already has
+/// (a file read again, whose checks heal it again), the import is not news: the window is told
+/// of the heal once, and nothing goes stale.
 #[test]
 fn a_heal_the_next_read_finds_again_is_told_once() {
     // the heal preference held on for the whole test, on its thread

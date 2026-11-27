@@ -20,12 +20,19 @@ A host that draws SolidCraft's icons plus a few masters of its own installs
 
 The workspace tab table is the app's, not the look's. The accent ramps are in `solidcraft-theme`.
 
-Licences: the code and artwork are MIT OR Apache-2.0; the IBM Plex faces are SIL OFL 1.1, with the
-licence text beside each (`fonts/*/OFL.txt`). Every file has a row in the repository's
-ATTRIBUTION.md. Read `icons/AGENTS.md` and `icons/STYLE_GUIDE.md` before icon work.
+Read `icons/AGENTS.md` and `icons/STYLE_GUIDE.md` before icon work.
 
 ## Licence
 
-This crate is part of SolidCraft's brand and interface, under the SolidCraft Brand and Interface
-Licence ([LICENSE](LICENSE)). Use it as part of SolidCraft; using it in another program or product
-needs the maintainers' written permission first.
+The crate's licence expression is `(MIT OR Apache-2.0) AND LicenseRef-SolidCraft-Brand AND OFL-1.1`,
+because it ships three kinds of file:
+
+- **Code** (`src/`, `build.rs`, the icon tools in `icons/design/tools/`), the palette and alias
+  tables and the built-in themes (`themes/*.json`): MIT OR Apache-2.0, like the rest of SolidCraft.
+- **Interface icon artwork**, the SVG masters in `icons/design/svg/`: the SolidCraft Brand Licence
+  ([LICENSE-BRAND](../../LICENSE-BRAND)), except masters whose row in ATTRIBUTION.md names another
+  licence. Use them as part of SolidCraft; using them in another program needs the maintainers'
+  written permission first. A host that installs the kit with its own icon set uses none of them.
+- **IBM Plex faces** (`fonts/`): SIL OFL 1.1, with the licence text beside each (`fonts/*/OFL.txt`).
+
+Every file has a row in the repository's ATTRIBUTION.md naming its licence.
