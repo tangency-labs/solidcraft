@@ -329,6 +329,16 @@ fn a_round_ends_on_a_procedural_cylinder_beyond_its_rational_charts_reach() {
             })
             .unwrap();
         fillet_edges(k, &mut b, &[upright], old_radius, 1, 1, 0.0)?;
+        Ok(b)
+    });
+    let top = edge_at(&b, [0.0, -l / 2.0, h]);
+    let mut k = Kernel {
+        fixes: solidcore::kernel::UpstreamFixes::all(),
+        ..Kernel::default()
+    };
+    // The round is replaced in the body itself: a copy through `.smb` bytes certifies a hand-made
+    // net against its definition, which this cylinder's net is not.
+    let install = |k: &mut Kernel, b: &mut solidcore::Brep| -> solidcore::Result<()> {
         let round = b
             .face_list()
             .iter()
@@ -432,22 +442,19 @@ fn a_round_ends_on_a_procedural_cylinder_beyond_its_rational_charts_reach() {
                 ..
             }
         ));
-        // the face owns its surface, as the kernel's own blends leave it (a surface with no
-        // owner is not written with the body)
-        let owner = b.face(round)?.surface.as_ref().unwrap().owner();
-        let mut replacement = Surface::from(procedural);
-        *replacement.owner_mut() = owner;
-        b.face_mut(round)?.surface = Some(replacement);
-        Ok(b)
-    });
-    let (_, before) = kernel_copy(&b);
-    assert!(before.face_list().iter().any(|&f| {
-        matches!(
-            before.face(f).unwrap().surface.as_ref().unwrap().kind(),
-            SurfaceKind::ProceduralBlend(_)
-        )
-    }));
-    let top = edge_at(&b, [0.0, -l / 2.0, h]);
+        b.face_mut(round)?.surface = Some(Surface::from(procedural));
+        Ok(())
+    };
+    install(&mut k, &mut b.kernel()).unwrap();
+    {
+        let held = b.kernel();
+        assert!(held.face_list().iter().any(|&f| {
+            matches!(
+                held.face(f).unwrap().surface.as_ref().unwrap().kind(),
+                SurfaceKind::ProceduralBlend(_)
+            )
+        }));
+    }
     blend(&b, Blend::Round, &[top], &[r], &[], Corners::Filled).unwrap();
     assert!(b.check(CheckLevel::All).unwrap().is_valid());
     // With old radius R and r=2R, the end removes the integral over x in [0,R]
