@@ -231,6 +231,21 @@ pub enum SolidError {
         reason: &'static str,
     },
 
+    /// A source triangle mesh has invalid edge uses after welding and orientation.
+    #[error("mesh must be closed and consistently oriented, with two triangles per edge; found {open} open edges, {nonmanifold} non-manifold edges and {inconsistent} inconsistently oriented edges; first invalid edge joins {start:?} and {end:?}")]
+    MeshTopology {
+        /// Edges used by just one triangle.
+        open: usize,
+        /// Edges used by more than two triangles.
+        nonmanifold: usize,
+        /// Edges used twice in the same direction after orientation.
+        inconsistent: usize,
+        /// First invalid edge's start in source coordinates.
+        start: [f64; 3],
+        /// First invalid edge's end in source coordinates.
+        end: [f64; 3],
+    },
+
     /// A typed id did not refer to a live entity of the B-rep it was used with.
     #[error("{operation}: {entity} not found")]
     NotFound {
@@ -1840,6 +1855,7 @@ impl SolidError {
             | Self::RoundRefused { code, .. } => Some(*code),
             Self::Failed(f) => Some(f.status),
             Self::InvalidInput { .. }
+            | Self::MeshTopology { .. }
             | Self::NotFound { .. }
             | Self::Degenerate { .. }
             | Self::NotConverged { .. }
@@ -1968,9 +1984,9 @@ impl SolidError {
     #[must_use]
     pub fn kind(&self) -> ErrorKind {
         match self {
-            Self::InvalidInput { .. } | Self::DefinitionNotCertified { .. } => {
-                ErrorKind::InvalidInput
-            }
+            Self::InvalidInput { .. }
+            | Self::MeshTopology { .. }
+            | Self::DefinitionNotCertified { .. } => ErrorKind::InvalidInput,
             Self::NotFound { .. } => ErrorKind::NotFound,
             Self::Degenerate { .. } => ErrorKind::Degenerate,
             Self::NotConverged { .. } => ErrorKind::NotConverged,
@@ -2196,6 +2212,7 @@ impl SolidError {
             | Self::Cancelled { operation }
             | Self::OutOfFuel { operation, .. } => operation,
             Self::Failed(f) => f.operation,
+            Self::MeshTopology { .. } => "reconstruct mesh",
             Self::Unported { upstream, .. } => upstream,
         }
     }
@@ -2214,6 +2231,7 @@ impl SolidError {
             Self::BlendRefused { refusal, .. } => Some(refusal.entity()),
             Self::Failed(f) => f.entity,
             Self::InvalidInput { .. }
+            | Self::MeshTopology { .. }
             | Self::NotConverged { .. }
             | Self::Unsupported { .. }
             | Self::PortInvariant { .. }

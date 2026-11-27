@@ -270,6 +270,55 @@ fn assert_exact_circle(fitted: &Loop2, center: Vec2, radius: f64) {
 }
 
 #[test]
+fn invalid_mesh_reports_edge_counts_and_a_location() {
+    let mut k = Kernel::default();
+    let open = [Vec3::ZERO, Vec3::X, Vec3::Y];
+    let error = reconstruct(&mut k, &open, &[[0, 1, 2]], 0.05).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            SolidError::MeshTopology { open: 3, nonmanifold: 0, inconsistent: 0, start, end }
+                if start == [0., 0., 0.] && end == [1., 0., 0.]
+        ),
+        "{error}"
+    );
+    let mesh = prism(&[&rectangle(0., 0., 10., 10.)], 10.);
+    let mut duplicate = mesh.clone();
+    duplicate.triangles.push(duplicate.triangles[0]);
+    let error = convert(&mut k, &duplicate, 0.05).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            SolidError::MeshTopology {
+                open: 0,
+                nonmanifold: 3,
+                ..
+            }
+        ),
+        "{error}"
+    );
+    // Exercise a same-direction pair without depending on the earlier orientation repair.
+    let edges = BTreeMap::from([((0, 1), (2, 2)), ((0, 2), (2, 0))]);
+    let mesh = TriMesh {
+        positions: open.to_vec(),
+        triangles: vec![],
+    };
+    let error = check_edge_uses(&mesh, &edges).unwrap_err();
+    assert!(
+        matches!(
+            error,
+            SolidError::MeshTopology {
+                open: 0,
+                nonmanifold: 0,
+                inconsistent: 1,
+                ..
+            }
+        ),
+        "{error}"
+    );
+}
+
+#[test]
 fn refuses_open_and_hostile_inputs() {
     let mut k = Kernel::default();
     let open = [Vec3::ZERO, Vec3::X, Vec3::Y];
