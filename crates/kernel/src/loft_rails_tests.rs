@@ -720,6 +720,27 @@ fn three_or_four_rails_to_the_apex_of_a_pyramid() {
     }
 }
 
+/// Three straight rails from a circle of radius 20 to the point 30 mm above its centre, a third
+/// of a turn apart, leave the cone, π r² h / 3 = 4000π; one of them ending 1 mm beside the apex
+/// is refused.
+#[test]
+fn three_rails_up_a_cone_leave_it_and_one_missing_the_apex_is_refused() {
+    let apex = Vec3::new(0.0, 0.0, 30.0);
+    let up = |a: f64, end: Vec3| -> Vec<Vec3> {
+        let foot = Vec3::new(20.0 * a.cos(), 20.0 * a.sin(), 0.0);
+        (0..=60).map(|i| f64::from(i) / 60.0).map(|t| foot + (end - foot) * t).collect()
+    };
+    let turns = [0.0, 2.0 * PI / 3.0, 4.0 * PI / 3.0];
+    let rails: Vec<Vec<Vec3>> = turns.iter().map(|a| up(*a, apex)).collect();
+    let b = crate::loft_to_point_with_rails(&at(0.0), &circle(20.0), apex, &rails, RailFit::Scale).unwrap();
+    let want = 4000.0 * PI;
+    assert!(close(volume(&b), want, 1e-4), "volume {} vs {want}", volume(&b));
+    let mut missing = rails.clone();
+    missing[2] = up(turns[2], apex + Vec3::new(1.0, 0.0, 0.0));
+    let e = crate::loft_to_point_with_rails(&at(0.0), &circle(20.0), apex, &missing, RailFit::Scale).unwrap_err();
+    assert!(matches!(e, KernelError::Invalid(_)), "{e:?}");
+}
+
 /// A rail that ends beside the apex does not reach the point the loft goes to: refused.
 #[test]
 fn a_rail_that_misses_the_apex_is_refused() {

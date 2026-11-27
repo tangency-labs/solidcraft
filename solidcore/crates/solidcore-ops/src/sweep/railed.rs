@@ -4,8 +4,8 @@
 
 use solidcore::geom::tol::USE_DEFAULT;
 use solidcore::sweep::loft_rails::{
-    loft_rails as kernel_loft_rails, loft_rails_to_point as kernel_loft_rails_to_point, polyline, RailLoftOptions, RailSection as KernelSection,
-    DEFAULT_MAX_WIRES,
+    loft_rails as kernel_loft_rails, loft_rails_to_point as kernel_loft_rails_to_point, polyline,
+    RailLoftOptions, RailSection as KernelSection, DEFAULT_MAX_WIRES,
 };
 use solidcore::sweep::section_blend::{section_blend_surface, EndOrder, SectionFrame};
 use solidcore::sweep::stations::RailFit as KernelRailFit;

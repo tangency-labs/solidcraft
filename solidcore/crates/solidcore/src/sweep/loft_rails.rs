@@ -1,4 +1,4 @@
-//! A loft guided by one or two rails: stations between its sections, each the plain loft there
+//! A loft guided by rails: stations between its sections, each the plain loft there
 //! moved so the points the rails guide land on them, skinned, with every guided edge certified
 //! within the caller's tolerance of its rail.
 //!
@@ -10,6 +10,7 @@
 //! | Rust                 | Upstream |
 //! |----------------------|----------|
 //! | [`loft_rails`]       | (none; SolidCraft's `railed`, then the loft) |
+//! | [`loft_rails_to_point`] | (none; SolidCraft's `railed_to_point`, then the loft to a point) |
 //! | [`sweep_two_rails`]  | (none; the two-rail sweep, The NURBS Book §10.4) |
 //! | [`RailSection`]      | (none; SolidCraft's `Section`) |
 //! | [`RailLoftOptions`]  | (none) |
@@ -62,6 +63,14 @@
 //! (the station shrinks to nothing, within `1e-6` of the loft's size, SolidCraft's convention);
 //! a tolerance not finite and positive.
 //!
+//! **To a point ([`loft_rails_to_point`]).** The apex is a last section whose curves are the
+//! base's with every control point on it; each rail guides there the point it guided at the
+//! base, and must end on the apex within the body tolerance. Each column of wires is skinned on
+//! its own, as a loft to a point makes its walls, and the rails are certified against those
+//! walls. A wall's edge at the apex closes to a point, where any foot along it is a foot: each
+//! rail's foot there is taken on the line of the wall's parameters its foot at the wire before
+//! lies on. Refused besides: an apex not finite or within the body tolerance of the base's plane.
+//!
 //! **One profile along two rails ([`sweep_two_rails`]).** The two-rail sweep (Piegl and
 //! Tiller, *The NURBS Book*, 2nd ed., §10.4: a sweep as a skin through placed sections): an open
 //! profile whose ends lie on the two rails' starts (within the body tolerance) is placed at
@@ -97,12 +106,12 @@ use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::SkinnedSurfaceOptions;
-use crate::surface::surface::Surface;
 use crate::nurbs::certificate;
 use crate::nurbs::crv_basic::Curve as NurbCurve;
 use crate::nurbs::crv_fit::p1::{interp_given_params, interp_knot_vector};
 use crate::nurbs::knots::{KnotVector, Side};
 use crate::nurbs::math::{CPoint, NOW};
+use crate::surface::surface::Surface;
 use crate::sweep::api_surfaces::{create_skin_primitive, SkinPrimitive};
 use crate::sweep::stations::{apply, rail_crossing, rail_frame, Map, RailFit};
 
@@ -793,12 +802,19 @@ impl<'a> Loft<'a> {
     fn anchor_rails(&self, k: &Kernel) -> Result<Vec<Vec<Anchor>>> {
         let tol = k.tolerances.zone_tol_3d;
         let mut out = Vec::new();
-        let tip = self.to_point.then(|| self.sources.len() - 1);
+        let tip = self
+            .to_point
+            .then(|| self.sources.len().saturating_sub(1));
         for rail in self.rails {
             let mut anchors: Vec<Anchor> = Vec::new();
             for (si, (s, curves)) in self.sources.iter().zip(&self.sections).enumerate() {
                 let (_, hit) = rail_crossing(k, rail, s.origin, s.normal)?;
                 if Some(si) == tip {
+                    if hit.distance(s.origin) > tol {
+                        return Err(invalid(
+                            "a guide rail does not end on the apex: a rail has to pass through every section",
+                        ));
+                    }
                     let g = anchors.last().ok_or_else(|| invalid("sections"))?.g;
                     anchors.push(Anchor {
                         g,
@@ -1032,7 +1048,8 @@ pub struct RailedToPoint {
 ///
 /// # Errors
 ///
-/// `InvalidInput` for an apex not finite, and those of [`loft_rails`].
+/// `InvalidInput` for an apex not finite or within the body tolerance of the base's plane, a
+/// rail not ending on the apex, and those of [`loft_rails`].
 pub fn loft_rails_to_point(
     k: &mut Kernel,
     base: &RailSection<'_>,
@@ -1042,6 +1059,13 @@ pub fn loft_rails_to_point(
 ) -> Result<RailedToPoint> {
     if !(apex.x.is_finite() && apex.y.is_finite() && apex.z.is_finite()) {
         return Err(invalid("the apex of a loft to a point is not finite"));
+    }
+    let normal = base
+        .normal
+        .unitize()
+        .map_err(|_| invalid("a section plane's normal of no length"))?;
+    if (apex - base.origin).dot(normal).abs() <= k.tolerances.zone_tol_3d {
+        return Err(invalid("the apex of a loft to a point lies in the base's plane"));
     }
     let tip_curves = base
         .curves
@@ -1093,7 +1117,7 @@ pub fn loft_rails_to_point(
         true,
     )?;
     let params: Vec<f64> = wires.iter().map(|w| w.f).collect();
-    let mut rows = Vec::with_capacity(wires.len());
+    let mut rows = Vec::new();
     for w in wires.iter().take(wires.len().saturating_sub(1)) {
         rows.push(w.curves.iter().map(Plain::curve).collect::<Result<Vec<_>>>()?);
     }
@@ -1104,7 +1128,7 @@ pub fn loft_rails_to_point(
     })
 }
 
-/// Each column of `wires` skinned on its own through the wires' parameters (one span, `f`).
+/// A loft to a point's walls, one per column.
 struct Walls(Vec<Surface>);
 
 impl Walls {
@@ -1113,6 +1137,7 @@ impl Walls {
     }
 }
 
+/// Each column of `wires` skinned on its own through the wires' parameters (one span, `f`).
 fn walls_of(k: &mut Kernel, wires: &[Wire]) -> Result<Walls> {
     let params: Vec<f64> = wires.iter().map(|w| w.f).collect();
     let degree = wires.len().saturating_sub(1).min(3);
@@ -1394,7 +1419,7 @@ impl Birail<'_> {
 ///
 /// [`crate::error::sweep::SweepFailure::RailPastStationCap`] past the wire cap; those of
 /// `station`, the skin and the bound.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)] // the loop's inputs, each a different kind
 fn skin_and_certify<S>(
     k: &mut Kernel,
     mut wires: Vec<Wire>,

@@ -161,9 +161,9 @@ pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
     crate::smlib_sweeps::loft_to_point(plane, &crate::smlib_sweeps::pieces([&base]), apex)
 }
 
-/// [`loft_to_point`] following one or two guide `rails` (polylines from the loop to the apex),
-/// `fit` saying how they reshape the section on the way (#20985). Without rails, the plain loft to
-/// a point.
+/// [`loft_to_point`] following 1…[`crate::MAX_LOFT_RAILS`] guide `rails` (polylines from the loop
+/// to the apex), `fit` saying how they reshape the section on the way (#20985). Without rails, the
+/// plain loft to a point.
 pub fn loft_to_point_with_rails(plane: &Plane, lp: &Loop2, apex: Vec3, rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<Body> {
     if rails.is_empty() {
         return loft_to_point(plane, lp, apex);

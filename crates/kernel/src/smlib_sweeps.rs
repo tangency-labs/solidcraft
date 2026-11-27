@@ -2520,7 +2520,13 @@ mod imp {
 
     /// The solidcore loft from the section `pieces` on `plane` to `apex` guided by `rails`, as its
     /// record, certified as [`railed_skin`] is.
-    fn railed_skin_to_point(plane: &Plane, pieces: &[Piece], apex: Vec3, rails: &[Vec<Vec3>], fit: crate::RailFit) -> Result<solidcore_record::brep::Brep> {
+    fn railed_skin_to_point(
+        plane: &Plane,
+        pieces: &[Piece],
+        apex: Vec3,
+        rails: &[Vec<Vec3>],
+        fit: crate::RailFit,
+    ) -> Result<solidcore_record::brep::Brep> {
         let sections = skin_sections(&matched(&[(*plane, pieces.to_vec())])?)?;
         let section = sections.first().ok_or_else(|| KernelError::Invalid("loft to a point: the section".into()))?;
         let rail_curves: Vec<SkinCurve> = rails

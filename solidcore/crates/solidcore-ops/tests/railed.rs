@@ -13,8 +13,8 @@ mod common;
 use common::edge_at;
 use solidcore_ops::make_cylinder;
 use solidcore_ops::sweep::railed::{
-    loft_blend, loft_rails, loft_rails_to_point, open_section_turns, point_frames, polyline_rail, section_frames,
-    BlendFrame, Continuity, RailFit, RailLoft, RailSection,
+    loft_blend, loft_rails, loft_rails_to_point, open_section_turns, point_frames, polyline_rail,
+    section_frames, BlendFrame, Continuity, RailFit, RailLoft, RailSection,
 };
 use solidcore_ops::sweep::Curve;
 use solidcore_ops::Error;
@@ -107,7 +107,10 @@ fn three_or_four_straight_rails_to_an_apex_make_the_pyramid() {
         .unwrap();
         let v = body.volume(1e-10).unwrap();
         let want = 40.0 / 3.0;
-        assert!((v - want).abs() <= 1e-6 * want, "{n} rails: {v} against {want}");
+        assert!(
+            (v - want).abs() <= 1e-6 * want,
+            "{n} rails: {v} against {want}"
+        );
     }
 }
 
