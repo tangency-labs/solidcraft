@@ -2241,7 +2241,10 @@ fn a_revolved_circle_turns_on_no_farther_than_a_quarter_of_its_open_turn() {
         let Some(SideExtension::UpToLimit(a)) = done else {
             panic!("{side:?}: {:?}", e.sides);
         };
-        assert!((a.enclosure.mid() - cap).abs() <= 1e-9 * cap, "{a:?} vs {cap}");
+        assert!(
+            (a.enclosure.mid() - cap).abs() <= 1e-9 * cap,
+            "{a:?} vs {cap}"
+        );
     }
 }
 

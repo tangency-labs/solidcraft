@@ -260,9 +260,10 @@ impl Surface {
                     (*done, *turned) = (by, true);
                 }
             }
-            if t.sides.iter().any(|s| {
-                matches!(s, SideExtension::Extended(_) | SideExtension::UpToLimit(_))
-            }) {
+            if t.sides
+                .iter()
+                .any(|s| matches!(s, SideExtension::Extended(_) | SideExtension::UpToLimit(_)))
+            {
                 extension = t.extension;
                 current = Some(t.surface);
             }
