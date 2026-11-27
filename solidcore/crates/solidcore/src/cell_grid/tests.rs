@@ -4577,3 +4577,48 @@ fn hostile_sketched_cells_are_refused_and_never_panic() {
         Err(CellGridError::Field(_))
     ));
 }
+
+#[test]
+fn a_voronoi_keep_out_too_near_the_outline_keeps_its_cells_whole_and_the_rest_filled() {
+    // 1.5 from the left edge, between one and two webs: moved out it would cross the outline
+    // moved in.
+    let (c, r) = (v(6.0, 20.0), 4.5);
+    let field = [rect(0.0, 0.0, 60.0, 40.0), circle(c.x, c.y, r)];
+    for (seed, irregularity) in [(9, 0.5), (0, 0.7), (3, 1.0)] {
+        let plan = run(&field, &voronoi(seed, irregularity, Clip::Snap));
+        assert!(
+            !plan
+                .warnings
+                .iter()
+                .any(|w| w.contains("could not be moved in")),
+            "{:?}",
+            plan.warnings
+        );
+        assert!(
+            plan.warnings
+                .iter()
+                .any(|w| w.contains("a keep-out could not be moved out")),
+            "{:?}",
+            plan.warnings
+        );
+        assert!(plan.partial > 0);
+        let (mut right, mut top, mut bottom) = (false, false, false);
+        for cell in &plan.cells {
+            let rim = dense_rim(cell, &field);
+            assert!(rim >= W - 1e-6, "cell ({}, {}): {rim}", cell.i, cell.j);
+            for p in cell_points(cell, 32) {
+                assert!(
+                    p.distance(c) >= r + W - 1e-6,
+                    "{seed}: cell ({}, {}) at {p:?}",
+                    cell.i,
+                    cell.j
+                );
+                right |= p.x >= 60.0 - 1.5 * W;
+                top |= p.x > 30.0 && p.y >= 40.0 - 1.5 * W;
+                bottom |= p.x > 30.0 && p.y <= 1.5 * W;
+            }
+        }
+        // Far from the keep-out the field is filled up to a rim of one web.
+        assert!(right && top && bottom, "{seed} {irregularity}");
+    }
+}

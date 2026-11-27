@@ -352,28 +352,91 @@ fn inset_loop(lp: &Loop, w: f64) -> Option<Loop> {
 }
 
 /// The loops with the fields' outlines (`fields`) and the keep-outs' (`keepouts`) moved by `w`
-/// into the field, each as asked; the others as they are. `None` when one cannot be moved.
-fn inset_loops(loops: &[Loop], (fields, keepouts): (bool, bool), w: f64) -> Option<Vec<Loop>> {
+/// into the field, each as asked; the others as they are. A keep-out that cannot be moved, or
+/// whose moved loop would cross another or nest differently, is left as drawn and returned again
+/// in the second list (see the module docs). `None` when an outline cannot be moved, or the loops
+/// still cross with every keep-out left as drawn.
+fn inset_loops(
+    loops: &[Loop],
+    (fields, keepouts): (bool, bool),
+    w: f64,
+) -> Option<(Vec<Loop>, Vec<Loop>)> {
     let roles = keepout_loops(loops);
-    let moved: Vec<Loop> = loops
-        .iter()
-        .zip(&roles)
-        .map(|(lp, &keepout)| {
-            if !(if keepout { keepouts } else { fields }) {
-                return Some(lp.clone());
-            }
-            // The field is on the left of a counter-clockwise outline and of a clockwise keep-out.
-            let moved = inset_loop(&lp.clone().oriented(!keepout), w)?;
+    let mut moved: Vec<Option<Loop>> = Vec::with_capacity(loops.len());
+    for (lp, &keepout) in loops.iter().zip(&roles) {
+        if !(if keepout { keepouts } else { fields }) {
+            moved.push(None);
+            continue;
+        }
+        // The field is on the left of a counter-clockwise outline and of a clockwise keep-out.
+        let m = inset_loop(&lp.clone().oriented(!keepout), w)
             // An outline that turns inside out has no field left.
-            ((moved.signed_area() > 0.0) != keepout).then_some(moved)
-        })
-        .collect::<Option<_>>()?;
-    // A moved loop that crosses another, or nests differently, would turn a keep-out into field.
-    let crossed = moved
+            .filter(|m| (m.signed_area() > 0.0) != keepout);
+        match m {
+            Some(m) => moved.push(Some(m)),
+            None if keepout => moved.push(None),
+            None => return None,
+        }
+    }
+    // Keep-outs left as drawn although asked to move.
+    let mut stuck: Vec<bool> = roles
         .iter()
-        .enumerate()
-        .any(|(i, a)| moved.iter().skip(i + 1).any(|b| loops_cross(a, b)));
-    (!crossed && keepout_loops(&moved) == roles).then_some(moved)
+        .zip(&moved)
+        .map(|(&k, m)| k && keepouts && m.is_none())
+        .collect();
+    loop {
+        let now: Vec<Loop> = loops
+            .iter()
+            .zip(&moved)
+            .zip(&stuck)
+            .map(|((lp, m), &s)| match m {
+                Some(m) if !s => m.clone(),
+                _ => lp.clone(),
+            })
+            .collect();
+        let role = |k: usize| roles.get(k).copied().unwrap_or(false);
+        let is_moved = |k: usize| {
+            moved.get(k).is_some_and(Option::is_some) && !stuck.get(k).copied().unwrap_or(true)
+        };
+        // A moved keep-out that crosses another loop, or nests differently, would turn a
+        // keep-out into field: it is left as drawn.
+        let mut blame: Vec<usize> = Vec::new();
+        for (i, a) in now.iter().enumerate() {
+            for (j, b) in now.iter().enumerate().skip(i + 1) {
+                if loops_cross(a, b) {
+                    let mine = [i, j].into_iter().filter(|&k| role(k) && is_moved(k));
+                    let before = blame.len();
+                    blame.extend(mine);
+                    if blame.len() == before {
+                        return None;
+                    }
+                }
+            }
+        }
+        if blame.is_empty() {
+            let nested = keepout_loops(&now);
+            if nested == roles {
+                let left = (0..loops.len())
+                    .filter(|&i| stuck.get(i).copied().unwrap_or(false))
+                    .filter_map(|i| loops.get(i).cloned())
+                    .collect();
+                return Some((now, left));
+            }
+            let changed = |k: &usize| nested.get(*k) != roles.get(*k);
+            blame = (0..loops.len()).filter(|&k| role(k) && is_moved(k)).collect();
+            if blame.iter().any(changed) {
+                blame.retain(changed);
+            }
+            if blame.is_empty() {
+                return None;
+            }
+        }
+        for k in blame {
+            if let Some(s) = stuck.get_mut(k) {
+                *s = true;
+            }
+        }
+    }
 }
 
 /// Whether two loops cross or touch.
@@ -444,11 +507,21 @@ pub(crate) fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan,
     // in by the web (see the module docs).
     let fills = (field_clip == Clip::Snap, keepout_clip == Clip::Snap);
     let mut rim = None;
+    // The keep-outs left as drawn: no cell comes within a web of them.
+    let mut stuck = None;
     let mut loops = loops;
     if (fills.0 || fills.1) && lat.w > 0.0 {
-        if let Some(moved) = inset_loops(&loops, fills, lat.w) {
+        if let Some((moved, left)) = inset_loops(&loops, fills, lat.w) {
             rim = Some(Region::from_loops(loops, lat.p));
             loops = moved;
+            if !left.is_empty() {
+                warnings.push(
+                    "a keep-out could not be moved out by the web, so the cells near it were \
+                     left solid"
+                        .into(),
+                );
+                stuck = Some(Region::from_loops(left, lat.p));
+            }
             if spec.margin > 0.0 {
                 warnings.push(
                     "the margin is not used where the field is filled up to a rim of one web"
@@ -503,9 +576,20 @@ pub(crate) fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan,
             Some((_, _, prims, area)) => (vec![prims.clone()], *area),
             None => (vec![points_to_prims(&convex.pts)], poly_area(&convex.pts)),
         };
+        // Keeps a web clear of every keep-out left as drawn, or is dropped.
+        let clear = |pieces: &[(Vec<Prim>, f64)]| {
+            stuck
+                .as_ref()
+                .is_none_or(|s| keeps_rim(s, (true, true), pieces, lat.w))
+        };
         if hits.is_empty() {
             if region.contains(poly_centroid(&convex.pts)) {
                 let (loops, area) = whole();
+                let pieces: Vec<(Vec<Prim>, f64)> =
+                    loops.iter().map(|l| (l.clone(), 0.0)).collect();
+                if !clear(&pieces) {
+                    continue;
+                }
                 push(&mut out, spec, (i, j, c), CellKind::Whole, loops, area);
             }
             continue;
@@ -541,6 +625,9 @@ pub(crate) fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan,
             None => FreeCell::Polygon(&convex),
         };
         let mut pieces = free::clip_cell(&region, &cell);
+        if pieces.as_ref().is_some_and(|p| !clear(p)) {
+            continue;
+        }
         if let (Clip::Snap, Some(outline)) = (clip, &rim) {
             // A corner the rim cut is rounded like the others when the piece allows it.
             if round.is_some() {
@@ -552,6 +639,9 @@ pub(crate) fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan,
                         pieces = Some(vec![(prims, area)]);
                     }
                 }
+            }
+            if pieces.as_ref().is_some_and(|p| !clear(p)) {
+                continue;
             }
             if pieces
                 .as_ref()
