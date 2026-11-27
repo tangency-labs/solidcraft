@@ -1373,7 +1373,7 @@ fn rounds_meet_a_chord_round_at_a_chamfered_notch() {
     // that touches floor, chamfer and cylinder (radius 2)
     let (_, made) = kernel_copy(&b);
     let (mut tori, mut balls) = (0, 0);
-    for &f in made.face_list().iter() {
+    for &f in made.face_list() {
         let surface = made.face(f).unwrap().surface.as_ref().unwrap();
         match surface.kind() {
             SurfaceKind::Torus(t) if (t.minor_radius() - 2.0).abs() < 1e-6 => {
