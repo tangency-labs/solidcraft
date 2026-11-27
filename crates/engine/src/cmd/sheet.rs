@@ -7,7 +7,7 @@ use solidcraft_doc::expr::Kind;
 use solidcraft_doc::hardware_catalog::{HOLE_TOLERANCE, HardwareKind, hardware_size, hardware_sizes_of};
 use solidcraft_doc::sheet::{self, SheetRule};
 use solidcraft_doc::sheet_library as library;
-use solidcraft_doc::{BodyName, SketchId};
+use solidcraft_doc::{BodyName, CornerJoinKind, SheetEdgeName, SketchId};
 use solidcraft_doc::{FacePick, Position};
 use solidcraft_doc::{FeatureKind, FlangeEdge, FlangeSegment};
 use solidcraft_geom::prelude::*;
@@ -18,16 +18,17 @@ use super::features::{add_feature, check_expr, default_extrude_profiles, feature
 use crate::params::{bad, bool_, expr, expr_problem, req_expr, str_, string_list, vec3};
 use crate::schema::features::FeatureResult;
 use crate::schema::sheet::{
-    BeadParams, BendTableFormat, BendTableParams, BendTableResult, ConvertParams, DxfFile, ExportDxfParams, ExportDxfResult, FlangeParams,
-    FlatCircle, FlatHardware, FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HardwareInfo, HardwareKindParam,
-    HardwareParams, HardwareResult, HemParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams, ManageRulesResult, MeasureBodyParams,
-    PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleLibraryParams, RuleLibraryResult, RuleReply, RulesParams, RulesResult,
-    SheetBodyMeasure, TabParams, UnfoldParams,
+    BeadParams, BendTableFormat, BendTableParams, BendTableResult, ConvertParams, CornerJoinParams, DxfFile, ExportDxfParams, ExportDxfResult,
+    FlangeParams, FlatCircle, FlatHardware, FlatPatternParams, FlatPatternResult, FlatSegment, FlatShape, FoldParams, HardwareInfo,
+    HardwareKindParam, HardwareParams, HardwareResult, HemParams, LibraryRule, LibrarySource, ListedRule, ManageRulesParams, ManageRulesResult,
+    MeasureBodyParams, PathFlangeParams, PerforateParams, RecognizeParams, RuleFeatureError, RuleLibraryParams, RuleLibraryResult, RuleReply,
+    RulesParams, RulesResult, SheetBodyMeasure, TabParams, UnfoldParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const FLANGE_CONTRACT: TypedContract<FlangeParams> = TypedContract::new();
+const CORNER_JOIN_CONTRACT: TypedContract<CornerJoinParams> = TypedContract::new();
 const PERFORATE_CONTRACT: TypedContract<PerforateParams> = TypedContract::new();
 const HARDWARE_CONTRACT: TypedContract<HardwareParams> = TypedContract::new();
 const HEM_CONTRACT: TypedContract<HemParams> = TypedContract::new();
@@ -96,6 +97,15 @@ pub static COMMANDS: &[CommandSpec] = &[
              unfolds with its panel, and later flanges, hems and folds can use its edges. Refused when the profile doesn't meet the \
              face, adds nothing, reaches into a bend zone, would overlap another panel once folded or flat or would join more than one panel, \
              or the sheet is unfolded",
+    ),
+    CommandSpec::new("sheet.corner_join", "Corner Join", crate::checked!("sheet.corner_join", corner_join))
+        .at("SHEET METAL", "MODIFY")
+        .icon("corner_join")
+        .contract(&CORNER_JOIN_CONTRACT)
+        .output(output_schema_for::<FeatureResult>)
+        .params(
+            "covering, covered: central edge names <face>|<face>, e.g. F3:bend.inner:F2:side:l1|F3:bottom:F2:side:l1; kind?: butt (default), partial_overlap or full_overlap; \
+             overlap: length expression for partial_overlap only; gap?: length expression (default: sheet rule); body?: sheet body; name?",
         ),
     CommandSpec::new("sheet.perforate", "Perforate", crate::checked!("sheet.perforate", perforate)).begins_edit()
         .at("SHEET METAL", "CREATE")
@@ -208,6 +218,8 @@ pub static COMMANDS: &[CommandSpec] = &[
          tear removes nothing and cuts the flat pattern along the bend's end); \
          angle_display?: bend|included (how the DXF bend notes read the bend angles: the bend angle, default, or the included angle \
          left between the bend's sides, 180° less it; the bend table gives both, and a flange's `angle` is always the bend angle); \
+         unfold_method?: k_factor|deduction|allowance (where the bends' K-factor comes from: k_factor, default, or worked out from \
+         unfold_value, a press brake chart's 90° bend deduction or allowance for this thickness and radius); unfold_value? (length expression); \
          active?: bool; delete?: bool; material?: text (the material the rule is for, a label saved with it); \
          gauge?: with material, a gauge (16 ga) or metric thickness (1.5 mm) of the standard library (sheet.rule_library): the rule takes its thickness and keeps its own bend radius; \
          its K-factor is the bend model's estimate at the rule's R/T for bend_method?: air|bottoming|coining (default air), said in notes, \
@@ -476,8 +488,19 @@ fn rule_param(s: &Session, p: &Value, cmd: &str) -> Result<Option<String>> {
 
 /// Sheet values a flange takes from its rule. Passing one to `sheet.flange` is refused rather
 /// than ignored, so a script never gets a part of another thickness than it asked for.
-const RULE_ONLY: [&str; 9] =
-    ["thickness", "k_factor", "bend_radius", "relief_width", "relief_depth", "corner_relief", "corner_relief_shape", "bend_relief_shape", "hem_gap"];
+const RULE_ONLY: &[&str] = &[
+    "thickness",
+    "k_factor",
+    "bend_radius",
+    "relief_width",
+    "relief_depth",
+    "corner_relief",
+    "corner_relief_shape",
+    "bend_relief_shape",
+    "hem_gap",
+    "unfold_method",
+    "unfold_value",
+];
 
 /// The rule values an edge flange may set for itself: the corner relief and the bend relief's shape.
 const EDGE_RELIEF: [&str; 3] = ["corner_relief", "corner_relief_shape", "bend_relief_shape"];
@@ -511,6 +534,9 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
     // item, and saying so is better than a flange that quietly ignores it.
     if ty == "edge" && p.get("segments").is_some_and(|v| !v.is_null()) {
         return Err(bad(cmd, "`segments` belongs inside an `edges` item: edges [{point, segments}]"));
+    }
+    if ty != "edge" && p.get("corners").is_some_and(|v| !v.is_null()) {
+        return Err(bad(cmd, "`corners` is only for edge flanges"));
     }
     match flange_type(&ty).map_err(|why| bad(cmd, why))? {
         FlangeType::Base => {
@@ -564,6 +590,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
         }
         FlangeType::Edge => {
             let edges = flange_edges(s, p, cmd)?;
+            let corners = flange_corners(s, p, cmd)?;
             let then = then_steps(s, p, cmd)?;
             if !then.is_empty() && edges.iter().any(|e| !e.segments.is_empty()) {
                 return Err(bad(cmd, "not supported yet: then on a segmented edge (bend each segment's far edge in its own feature)"));
@@ -629,6 +656,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                     corner_relief,
                     height_from: height_from.clone(),
                     bend_relief_shape: bend_relief_shape.clone(),
+                    corners,
                 },
             )?;
             // The first bend owns the supplied name. Keep its identity and report the completed chain's result.
@@ -653,6 +681,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
                         corner_relief: None,
                         height_from: height_from.clone(),
                         bend_relief_shape: bend_relief_shape.clone(),
+                        corners: Vec::new(),
                     },
                 )?;
             }
@@ -663,6 +692,57 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
             Ok(reply)
         }
     }
+}
+
+pub(super) fn flange_corners(s: &Session, p: &Value, cmd: &str) -> Result<Vec<solidcraft_doc::CornerJoinParams>> {
+    let Some(value) = p.get("corners").filter(|value| !value.is_null()) else {
+        return Ok(Vec::new());
+    };
+    let items =
+        value.as_array().filter(|items| items.len() <= 2000).ok_or_else(|| bad(cmd, "corners: expected an array of at most 2000 corner choices"))?;
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            serde_json::from_value::<crate::schema::sheet::FlangeCornerParams>(item.clone())
+                .map_err(|error| bad(cmd, format!("corner {}: {error}", index + 1)))?;
+            read_corner_join(s, item, cmd)
+        })
+        .collect()
+}
+
+fn corner_join(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sheet.corner_join";
+    let corner = read_corner_join(s, p, cmd)?;
+    add_feature(s, p, FeatureKind::SheetCornerJoin { body: str_(p, "body").map(|name| BodyName(name.to_string())), corner })
+}
+
+fn read_corner_join(s: &Session, p: &Value, cmd: &str) -> Result<solidcraft_doc::CornerJoinParams> {
+    let source = |key| {
+        let text = str_(p, key).ok_or_else(|| bad(cmd, format!("{key}: a central sheet edge name is required")))?;
+        SheetEdgeName::parse(text).map_err(|error| bad(cmd, format!("{key}: {error}")))
+    };
+    let covering = source("covering")?;
+    let covered = source("covered")?;
+    let kind = match p.get("kind").filter(|value| !value.is_null()) {
+        Some(value) => serde_json::from_value::<CornerJoinKind>(value.clone()).map_err(|error| bad(cmd, format!("kind: {error}")))?,
+        None => CornerJoinKind::default(),
+    };
+    let overlap = if kind == CornerJoinKind::PartialOverlap {
+        let length = req_expr(cmd, p, "overlap")?;
+        check_expr(s, &length, Kind::Length, cmd, "overlap")?;
+        Some(length)
+    } else {
+        None
+    };
+    let gap = if p.get("gap").is_some_and(|value| !value.is_null()) {
+        let length = req_expr(cmd, p, "gap")?;
+        check_expr(s, &length, Kind::Length, cmd, "gap")?;
+        Some(length)
+    } else {
+        None
+    };
+    Ok(solidcraft_doc::CornerJoinParams { covering, covered, kind, overlap, gap })
 }
 
 /// The three kinds of flange.
@@ -1279,10 +1359,29 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
             *slot = e.into();
         }
     }
+    let unfold_given = p.get("unfold_method").filter(|v| !v.is_null());
+    if let Some(method) = unfold_given {
+        let method = method.as_str().and_then(sheet::UnfoldMethod::parse);
+        rule.unfold_method = method.ok_or_else(|| bad(cmd, "`unfold_method` must be k_factor, deduction or allowance"))?.name().into();
+    }
     let mut notes = Vec::new();
     if let Some(entry) = picked {
+        // A library pick gives the rule a new thickness, and a 90° bend deduction or allowance is a
+        // chart's value for one thickness: the rule goes back to its K-factor (the pick's), unless
+        // the call says how it unfolds (#6794).
+        let by_chart = sheet::UnfoldMethod::parse(&rule.unfold_method).is_some_and(|m| m != sheet::UnfoldMethod::KFactor);
+        if by_chart && unfold_given.is_none() && expr(p, "unfold_value").is_none() {
+            rule.unfold_method = sheet::UnfoldMethod::KFactor.name().into();
+            rule.unfold_value.clear();
+            notes.push("the rule now unfolds from its K-factor: its 90° bend deduction or allowance was for the thickness it had".to_string());
+        }
         let (vals, _) = s.doc.param_values();
         library_k_and_radius(s, cmd, p, entry, &vals, &mut rule, &mut notes)?;
+    }
+    // A rule that unfolds from its K-factor keeps no 90° value: it saves as a rule did before the
+    // setting existed, and a later switch to a chart method starts from the K-factor it has then.
+    if sheet::UnfoldMethod::parse(&rule.unfold_method) == Some(sheet::UnfoldMethod::KFactor) {
+        rule.unfold_value.clear();
     }
     if let Some(shape) = p.get("corner_relief_shape").filter(|v| !v.is_null()) {
         let shape = shape.as_str().and_then(solidcraft_doc::sheet::ReliefShape::parse);
@@ -1342,8 +1441,11 @@ fn library_k_and_radius(
         Some(m) => library::BendMethod::parse(m).ok_or_else(|| bad(cmd, "`bend_method` must be air, bottoming or coining"))?,
     };
     let v = s.doc.rule_values(vals, rule).map_err(|e| bad(cmd, e.to_string()))?;
+    // No estimate for a rule that unfolds from a 90° bend deduction or allowance: its K-factor is
+    // that value's, not the rule's `k_factor`.
     if expr(p, "k_factor").is_none()
         && !entry.given.k_factor
+        && sheet::UnfoldMethod::parse(&rule.unfold_method) == Some(sheet::UnfoldMethod::KFactor)
         && let Some(hardness) = entry.hardness
     {
         let r_over_t = v.bend_radius / v.thickness;

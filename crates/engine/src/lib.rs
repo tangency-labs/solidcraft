@@ -4870,6 +4870,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         materials,
         print_faces,
         collision_shapes,
+        edgeless_bodies,
         user_materials,
         appearances,
         body_components,
@@ -4917,6 +4918,7 @@ fn same_but_features(a: &Document, b: &Document) -> bool {
         && *materials == b.materials
         && *print_faces == b.print_faces
         && *collision_shapes == b.collision_shapes
+        && *edgeless_bodies == b.edgeless_bodies
         && *user_materials == b.user_materials
         && *appearances == b.appearances
         && *body_components == b.body_components

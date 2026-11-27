@@ -2277,6 +2277,40 @@ fn marks_draw_each_item_of_the_scene() {
     assert!(marks.marks.is_empty() && marks.error.is_some());
 }
 
+/// A closed line that turns back on itself is drawn within its miter limit, as the paper draws it
+/// (#21787). The bottom edge of an 80 mm disc seen 0.0001 rad off edge-on is a loop 80 mm long and
+/// 0.004 mm tall, drawn 0.5 mm wide and filled: egui's closed line joined its two ends by miter with
+/// no limit, spikes some 120 half widths long out past each end. Every vertex painted lies within
+/// a round join's reach of the loop.
+#[test]
+fn a_closed_line_that_turns_back_stays_within_its_miter_limit() {
+    let sliver: Vec<Vec2> =
+        (0..16).map(|i| f64::from(i) * std::f64::consts::TAU / 16.0).map(|t| Vec2::new(40.0 * t.cos(), 0.002 * t.sin())).collect();
+    let ring = Loop2::polygon(&sliver);
+    let stroke = Item::Stroke { path: ring.segs.clone(), closed: true, width_mm: 0.5, pattern: None };
+    let fill = Item::Fill { region: Region2 { outer: ring, holes: vec![] } };
+    let scene = Scene {
+        size_mm: Vec2::new(100.0, 100.0),
+        groups: vec![Group { object: 1, kind: ObjectKind::View, items: vec![stroke, fill] }],
+        fonts: Vec::new(),
+        clips: Vec::new(),
+    };
+    let marks = Marks::of(&scene, 7, 0.01);
+    assert!(marks.error.is_none(), "{:?}", marks.error);
+    let shapes = painted(&egui::Context::default(), &marks, &PictureTextures::default());
+    let mut tess = egui::epaint::Tessellator::new(1.0, egui::epaint::TessellationOptions::default(), [1, 1], vec![]);
+    let mut mesh = egui::Mesh::default();
+    shapes.into_iter().for_each(|clipped| tess.tessellate_shape(clipped.shape, &mut mesh));
+    assert!(!mesh.vertices.is_empty());
+    // 10 points a millimetre: the loop spans x ±400 and y ±0.02; the line is 5 wide, drawn in runs
+    // cut at every turn past 30° with round ends, so it reaches at most a half width past a point
+    // (1 / cos 15° of it at a join), a feather's pixel more.
+    let reach = 2.5 / 15f32.to_radians().cos() + 1.0;
+    for v in &mesh.vertices {
+        assert!(v.pos.x.abs() <= 400.0 + reach && v.pos.y.abs() <= 0.02 + reach, "{:?} lies off the loop", v.pos);
+    }
+}
+
 /// A chain line whose dot is one line width long keeps its dots: under round caps the dot is a
 /// dash 0 long, drawn as a disc. 0.5 mm wide, 12, 1.5, 0.5, 1.5 is stroked 11.5, 2, 0, 2 from
 /// 15.25: along 31 mm, dashes from 0.25 and 15.75 and dots at 13.75 and 29.25.

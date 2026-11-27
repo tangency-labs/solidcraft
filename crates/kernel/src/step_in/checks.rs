@@ -408,6 +408,8 @@ fn run(
     over: Option<solidcraft_smlib::stop::Stop>,
 ) {
     let own = shared.stop.clone();
+    // A test that holds the runs open ([`ImportChecks::hold_open_for_tests`]) lets this one end.
+    drop(HOLD_OPEN.read().unwrap_or_else(PoisonError::into_inner));
     // Whatever happens here, a waiter is woken: a panic outside the per-check guard ends the run
     // as stopped (its list incomplete) instead of leaving `wait` blocked.
     let settled = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -425,6 +427,9 @@ fn run(
     }));
     shared.finish(settled.unwrap_or_else(|_| Settled { issues: Arc::default(), stopped: true, heals: None }));
 }
+
+/// Held for writing by a test that keeps the check runs open ([`ImportChecks::hold_open_for_tests`]).
+static HOLD_OPEN: std::sync::RwLock<()> = std::sync::RwLock::new(());
 
 struct Shared {
     /// Stops the checks when nobody holds the import any more.
@@ -534,6 +539,14 @@ impl ImportChecks {
     pub fn running_for_tests() -> (ImportChecks, impl FnOnce(Vec<ImportIssue>) + Send) {
         let (checks, shared) = ImportChecks::shared(None);
         (checks, move |issues: Vec<ImportIssue>| shared.finish(Settled { issues: Arc::new(issues), stopped: false, heals: None }))
+    }
+
+    /// Keep every check run started from now on from ending until the returned guard is
+    /// dropped: for callers' tests of what happens while an import's check still runs after the
+    /// import has shown (a check of a few boxes otherwise ends at once).
+    #[doc(hidden)]
+    pub fn hold_open_for_tests() -> impl Drop {
+        HOLD_OPEN.write().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Checks that have already run, with these outcomes (a read with no threads ran them in its

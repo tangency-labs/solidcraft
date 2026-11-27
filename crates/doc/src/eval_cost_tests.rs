@@ -3393,6 +3393,7 @@ fn a_flange_lays_its_sheet_out_once() {
         corner_relief: None,
         height_from: None,
         bend_relief_shape: None,
+        corners: Vec::new(),
     };
     for p in [Vec3::new(75.0, 0.0, 2.5), Vec3::new(75.0, 100.0, 2.5), Vec3::new(0.0, 50.0, 2.5), Vec3::new(150.0, 50.0, 2.5)] {
         // The pick is named as the engine names it, on the model as it is.
@@ -4364,6 +4365,78 @@ fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 20.0).abs() < 1e-9);
 }
 
+/// Multi-target joins and `Touching::Separate` keep exact results when AABB prefiltering and mesh
+/// caching skip meshing disjoint pairs.
+#[test]
+fn multi_target_join_and_separate_touching_preserve_exact_results() {
+    let mut doc = Document::new("multi-target join");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(50.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "C", Vec3::new(100.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    // Boss on B joins B only; A and C stay untouched.
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::new(52.0, 2.0, 10.0)),
+            length: "4".into(),
+            width: "4".into(),
+            height: "5".into(),
+            operation: Operation::Join,
+            centred: false,
+        },
+        None,
+    )
+    .unwrap();
+    // Boss bridging B and C merges B and C into one body while A stays separate.
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::new(58.0, 2.0, 2.0)),
+            length: "44".into(),
+            width: "4".into(),
+            height: "4".into(),
+            operation: Operation::Join,
+            centred: false,
+        },
+        None,
+    )
+    .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().bodies.len(), 2);
+    assert!((volume(&model, "A") - 1000.0).abs() < 1e-6);
+    // B (1000) + boss (80) + C (1000) + bridge (44*4*4 = 704) - 2 overlaps (2*4*4 = 32 each)
+    let expected_bc = 1000.0 + 80.0 + 1000.0 + 704.0 - 64.0;
+    assert!((volume(&model, "B") - expected_bc).abs() < 1e-6, "{} vs {expected_bc}", volume(&model, "B"));
+}
+
+/// A single multi-tool join that warms a target's contact-mesh cache, bridges two targets while a
+/// third stays live, and then joins a later tool touching only the new bridge geometry must
+/// invalidate the remade target's cache so the later tool joins the remade target rather than
+/// missing it and falling back to the first live target.
+#[test]
+fn multi_target_join_invalidates_target_mesh_cache_after_bridge() {
+    let mut doc = Document::new("multi-tool bridge cache invalidation");
+    // Put C first in `live` so a stale cache on A would cause tool 3 to miss A and fall back to C.
+    block(&mut doc, "C", Vec3::new(100.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(20.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    // One multi-tool extrude (3 profiles in order):
+    // 1. (1..5, 1..5): touches A only -> warms `target_meshes["A"]`
+    // 2. (8..22, 1..5): bridges A and B while C stays live -> remakes A, invalidating its cache
+    // 3. (13..17, 5..9): lies strictly in the gap x=13..17 between original A (x<=10) and B
+    //    (x>=20), touching only the bridge from tool 2 along y=5.
+    join_rects(&mut doc, &[(1.0, 1.0, 4.0, 4.0), (8.0, 1.0, 14.0, 4.0), (13.0, 5.0, 4.0, 4.0)], 10.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().bodies.len(), 2);
+    assert!((volume(&model, "C") - 1000.0).abs() < 1e-6, "tool 3 must not fall back to C: {}", volume(&model, "C"));
+    // A (1000) + B (1000) + gap span of bridge (10*4*10 = 400) + tool 3 (4*4*10 = 160);
+    // tool 1 lies inside A and the bridge ends overlap A and B.
+    let expected_a = 1000.0 + 1000.0 + 400.0 + 160.0;
+    assert!((volume(&model, "A") - expected_a).abs() < 1e-6, "{} vs {expected_a}", volume(&model, "A"));
+}
+
 /// When an import's background checks end having healed a part, the model takes the healed
 /// body in the import's place: settling marks the import and what follows it stale, the next
 /// evaluation reads the healed body under another fingerprint, and settling the same heal again
@@ -4443,9 +4516,57 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
     assert_eq!(fingerprints(&other), before);
 }
 
-/// #17708 review: the evaluation that brings an import's healed parts in reads the file again,
-/// and that read's checks heal it again. When they end with the heals the model already has,
-/// the import is not news: the window is told of the heal once, and nothing goes stale.
+/// The evaluation that brings a large import's healed parts in takes them from the read the
+/// import made, without reading the file again: the model holds the read until what its check
+/// found is settled. Read again, a 240 MB assembly was parsed, converted and checked a second
+/// time on the window thread while the first read's bodies were still shown, and the system
+/// killed the app for its memory. Once a check ends with nothing to bring in, the read is let go.
+#[test]
+fn an_imports_healed_parts_come_from_the_read_it_made() {
+    // the heal preference held on for the whole test, on its thread
+    let _on = kernel::heal_preference_for_tests(true);
+    let mut doc = placed_imports(1);
+    // Larger than the cache of recent reads keeps once nothing uses them (1 MB), as such a file is.
+    let FeatureKind::Import { step, .. } = &mut doc.features[0].kind else { panic!("import fixture") };
+    *step = step.replacen("DATA;", &format!("DATA;\n/* {} */", "x".repeat(2 << 20)), 1).into();
+    let import = doc.features[0].id;
+    let mut model = Model::new();
+    let read_run = {
+        // The check of the read still runs after the import shows, as a large file's does.
+        let _open = kernel::ImportChecks::hold_open_for_tests();
+        model.evaluate(&doc);
+        let run = model.result(import).and_then(|r| r.import_report.clone()).expect("the read's report").checks.clone();
+        assert!(run.is_running(), "the check runs on after the import");
+        assert!(model.holds_import_read(import), "the model holds the read while its check runs");
+        // The check ends having healed the first part.
+        let healed = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0)).unwrap();
+        let n = healed.face_count();
+        let checks = kernel::ImportChecks::ended_for_tests(
+            Vec::new(),
+            vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
+        );
+        let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+        r.import_report =
+            Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
+        assert!(model.settle_import_checks(), "the heal is owed");
+        assert!(model.holds_import_read(import), "held for the evaluation that brings the heal in");
+        model.evaluate(&doc);
+        let mut volumes: Vec<f64> = model.state().bodies.iter().map(|b| b.body.volume_at(1e-6).unwrap().round()).collect();
+        volumes.sort_by(f64::total_cmp);
+        assert_eq!(volumes, [27.0, 125.0], "the healed part replaces the file's");
+        let now = model.result(import).and_then(|r| r.import_report.clone()).expect("the report").checks.clone();
+        assert!(now == run, "the healed parts came from the read the import made: the file was not read again");
+        run
+    };
+    // The read's check ends (its boxes pass): nothing more to bring in, so the read is let go.
+    assert!(read_run.wait().is_some());
+    assert!(!model.settle_import_checks());
+    assert!(!model.holds_import_read(import), "let go once its check is settled");
+}
+
+/// #17708 review: when the checks of the import's read end with the heals the model already has
+/// (a file read again, whose checks heal it again), the import is not news: the window is told
+/// of the heal once, and nothing goes stale.
 #[test]
 fn a_heal_the_next_read_finds_again_is_told_once() {
     // the heal preference held on for the whole test, on its thread

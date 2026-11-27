@@ -4,7 +4,7 @@
 //! ([`proposed_projection`]).
 //!
 //! SolidCraft's own, as [`crate::weld_spot`] and [`crate::weld_seam`] are: every measurement and
-//! every body is an ops call; this module adds the weld's rules and sizes. The `weld.projection`
+//! every body is a kernel call; this module adds the weld's rules and sizes. The `weld.projection`
 //! command and its storage come with #15131.
 //!
 //! # The geometry
@@ -32,12 +32,11 @@
 
 use std::f64::consts::{FRAC_PI_2, TAU};
 
+use solidcore_record::Vec3;
 use solidcore_record::brep::Curve as RecordCurve;
-use solidcraft_kernel::affine;
 use solidcraft_kernel::curves as curve;
-use solidcraft_kernel::services::boolean::{self, BooleanOp};
-use solidcraft_kernel::services::sweep::{self, Curve, DraftCorner};
-use solidcraft_kernel::services::{ExactBody as Body, Order, make_box};
+use solidcraft_kernel::profiles::{self, ProfileCurve as Curve};
+use solidcraft_kernel::{Body, BoolOp, KernelError, affine, box_solid, transform_matrix};
 
 use crate::weld_seam::{SeamPiece, SeamRefusal, seam_site};
 use crate::weld_spot::{
@@ -61,9 +60,12 @@ pub enum ProjectionRefusal {
     /// Projection `projection` lies on other sheets or faces than the first.
     #[error("projection {projection} lies on other sheets or faces than the first")]
     OnOtherSheets { projection: usize },
-    /// An ops call failed.
+    /// The kernel refused a profile's body, in its words.
     #[error(transparent)]
-    Ops(#[from] solidcraft_kernel::services::Error),
+    Profile(#[from] profiles::ProfileRefused),
+    /// A kernel call on a body failed.
+    #[error(transparent)]
+    Kernel(#[from] KernelError),
     /// A placement call refused its numbers, in the kernel's words.
     #[error(transparent)]
     Placement(#[from] affine::AffineRefused),
@@ -119,7 +121,7 @@ pub struct ProjectionWeld {
 /// finite and positive, a ring whose inner diameter is not under its outer, an oval not longer
 /// than wide, a dimple on no outer face, and sizes the model cannot hold;
 /// [`ProjectionRefusal::AtProjection`] for a round projection the spot refuses. The errors of the
-/// ops calls otherwise.
+/// kernel calls otherwise.
 pub fn projection_weld(weld: &ProjectionWeld) -> Result<Vec<Vec<SpotPiece>>> {
     if weld.projections.is_empty() {
         return bad("a projection weld with no projections");
@@ -133,7 +135,7 @@ pub fn projection_weld(weld: &ProjectionWeld) -> Result<Vec<Vec<SpotPiece>>> {
         return bad("a dimple on no outer face");
     }
     let t_u: f64 = weld.thicknesses.iter().skip(1).sum();
-    let tol = sweep::zone_tolerance()?;
+    let tol = profiles::zone_tolerance()?;
     let mut out = Vec::new();
     for (i, p) in weld.projections.iter().enumerate() {
         if !p.at.iter().all(|v| v.is_finite()) {
@@ -240,7 +242,7 @@ impl Laid {
             return bad("projection marks that are not flat");
         };
         let reach = self.at.iter().fold(0.0_f64, |m, c| m.max(c.abs())) + self.d + self.t_u + self.t_l;
-        if !reach.is_finite() || reach > sweep::MAX_COORD {
+        if !reach.is_finite() || reach > profiles::MAX_COORD {
             return bad("a projection so large that it passes the model's size limit");
         }
         if thickness * self.d < self.tol {
@@ -278,24 +280,26 @@ impl Laid {
             for (k, zone) in [SpotZone::Core, SpotZone::Band, SpotZone::Edge].into_iter().enumerate() {
                 let mut bodies = Vec::new();
                 for (a, b) in across(r, k) {
-                    bodies.push(sweep::extrude(
-                        &self.profile(strip, a, b, face, sense, top)?,
-                        [1.0, 0.0, 0.0],
-                        2.0 * c,
-                        0.0,
-                        DraftCorner::default(),
-                        true,
-                    )?);
+                    bodies.push(profiles::extrude_curves(&self.profile(strip, a, b, face, sense, top)?, [1.0, 0.0, 0.0], 2.0 * c, true)?);
                 }
                 for (x, out, corner) in ends {
                     let end = Plane { base: [x, 0.0, 0.0], side: [out, 0.0, 0.0] };
-                    let disc = sweep::revolve(&self.profile(end, r[k], r[k + 1], face, sense, top)?, [x, 0.0, 0.0], [0.0, 0.0, 1.0], TAU, true)?;
-                    let straight = make_box(corner, [span, 2.0 * span, height])?;
-                    bodies
-                        .push(boolean::boolean(disc, straight, BooleanOp::Subtract)?.ok_or(ProjectionRefusal::Invalid("an oval's end left empty"))?);
+                    let disc = profiles::revolve_curves(
+                        &self.profile(end, r[k], r[k + 1], face, sense, top)?,
+                        [x, 0.0, 0.0],
+                        [0.0, 0.0, 1.0],
+                        TAU,
+                        true,
+                        None,
+                    )?;
+                    let lo = Vec3::from(corner);
+                    let straight = box_solid(lo, lo + Vec3::new(span, 2.0 * span, height))?;
+                    bodies.push(
+                        solidcraft_kernel::boolean(&disc, &straight, BoolOp::Cut)?.ok_or(ProjectionRefusal::Invalid("an oval's end left empty"))?,
+                    );
                 }
                 for body in bodies {
-                    body.transform(frame)?;
+                    let body = transform_matrix(&body, *frame)?;
                     pieces.push(SpotPiece { body, zone, side });
                 }
             }
@@ -316,7 +320,14 @@ impl Laid {
             for (k, zone) in [SpotZone::Core, SpotZone::Band, SpotZone::Edge].into_iter().enumerate() {
                 let mut bodies = Vec::new();
                 for (a, b) in across(r, k) {
-                    bodies.push(sweep::revolve(&self.profile(across_ring, a, b, face, sense, top)?, [0.0; 3], [0.0, 0.0, 1.0], TAU, true)?);
+                    bodies.push(profiles::revolve_curves(
+                        &self.profile(across_ring, a, b, face, sense, top)?,
+                        [0.0; 3],
+                        [0.0, 0.0, 1.0],
+                        TAU,
+                        true,
+                        None,
+                    )?);
                 }
                 pieces.push(self.placed(bodies, frame, zone, side)?);
             }
@@ -326,8 +337,8 @@ impl Laid {
 
     /// One zone's bodies united and placed.
     fn placed(&self, bodies: Vec<Body>, frame: &affine::Matrix, zone: SpotZone, side: SpotSide) -> Result<SpotPiece> {
-        let body = boolean::union_all(bodies)?;
-        body.transform(frame)?;
+        let body = solidcraft_kernel::union_all(&bodies.iter().collect::<Vec<_>>())?;
+        let body = transform_matrix(&body, *frame)?;
         Ok(SpotPiece { body, zone, side })
     }
 
@@ -348,7 +359,7 @@ impl Laid {
                 let (ta, za) = where_at(&arc, plane, a, face, sense, self.tol)?;
                 let (tb, zb) = where_at(&arc, plane, b, face, sense, self.tol)?;
                 curves.push(line(b, face, b, zb));
-                curves.extend(Curve::from_record(&arc, [ta.min(tb), ta.max(tb)])?);
+                curves.extend(profiles::curve_pieces(&arc, [ta.min(tb), ta.max(tb)])?);
                 curves.push(line(a, za, a, face));
             }
         }
@@ -394,9 +405,9 @@ pub struct ProjectionSite {
 /// # Errors
 /// [`ProjectionRefusal::Invalid`] for no projections or a size or direction out of range;
 /// [`ProjectionRefusal::AtProjection`] and [`ProjectionRefusal::AlongProjection`] with the spot's
-/// or the seam's refusal; [`ProjectionRefusal::OnOtherSheets`]. The errors of the ops calls
+/// or the seam's refusal; [`ProjectionRefusal::OnOtherSheets`]. The errors of the kernel calls
 /// otherwise.
-pub fn projection_site(sheets: &[(&Body, &Order)], picked: usize, face: usize, projections: &[Projection]) -> Result<ProjectionSite> {
+pub fn projection_site(sheets: &[&Body], picked: usize, face: usize, projections: &[Projection]) -> Result<ProjectionSite> {
     let mut first: Option<(Vec<SpotSheet>, [f64; 3])> = None;
     let mut moved = Vec::new();
     for (i, p) in projections.iter().enumerate() {
