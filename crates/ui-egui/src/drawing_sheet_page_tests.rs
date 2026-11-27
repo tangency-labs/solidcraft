@@ -2854,3 +2854,169 @@ fn dragging_a_detail_view_leaves_its_callout_in_place() {
     assert!((moved.x - by.x).abs() < 1.0 && (moved.y - by.y).abs() < 1.0, "the detail moved by {moved:?}, not {by:?}");
     assert_eq!(callout(&mut h), before, "the callout stays where it was");
 }
+
+/// One part with two bodies (#22107), as woodwork makes a cabinet's boards: Carcass, 100 x 50 x 20 mm
+/// from the origin, and Door, a 20 mm cube from (200, 0, 0). The front view at 1:1 is centred at
+/// (200, 150) on the A3 sheet: on paper the carcass spans x 90 to 190 and the door x 290 to 310, both
+/// y 140 to 160. Returns the view.
+fn carcass_and_door_sheet() -> (Harness, u64) {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1400, "height": 900}));
+    h.app.run("solid.box", json!({"length": 100, "width": 50, "height": 20, "body_name": "Carcass"})).unwrap();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "corner": [200, 0, 0], "body_name": "Door", "operation": "new"})).unwrap();
+    h.app.run("drawing.create", json!({})).unwrap();
+    let made = h.app.run("drawing.view.base", json!({"sheet": "Sheet 1", "scale": "1:1", "position_mm": [200, 150]})).unwrap();
+    let view = solidcraft_engine::doc::ids::decode(made["view"].as_str().unwrap()).unwrap();
+    crate::drawing_workspace::enter(&mut h.app, true).unwrap();
+    settle(&mut h);
+    (h, view)
+}
+
+/// The bodies view `view` leaves out one by one, as it draws.
+fn hidden_bodies(h: &Harness, view: u64) -> Option<Vec<solidcraft_engine::doc::drawing_view::HiddenBody>> {
+    let drawing = h.app.session.drawing("drawing.inspect").unwrap();
+    drawing.resolve_view(view).unwrap().hide_bodies.value.map(|bodies| bodies.to_vec())
+}
+
+fn menu_labels(h: &Harness) -> Vec<String> {
+    crate::context_menu::describe(&h.app)["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item["label"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// A right-click on a model line of a view offers Hide in This View (#22107): it leaves the line's
+/// body out of that view in one undo step, and Undo draws it again. Inside a face, or off the view,
+/// there is no line, and no such row.
+#[test]
+fn right_click_on_a_line_hides_its_body_in_that_view() {
+    let (mut h, view) = carcass_and_door_sheet();
+    let door = solidcraft_engine::doc::drawing_view::HiddenBody { path: Vec::new(), body: "Door".into() };
+
+    // Inside the carcass's face: the view's menu, without the row.
+    h.step(&json!({"click": on_screen(140.0, 150.0), "button": "right"})).unwrap();
+    h.frames(3);
+    let rows = menu_labels(&h);
+    assert_eq!(&rows[..3], ["Edit View", "Projected View", "Delete"], "{rows:?}");
+    h.call("ui.menu", json!({"close": true}));
+
+    // On the door's left edge.
+    h.step(&json!({"click": on_screen(290.0, 150.0), "button": "right"})).unwrap();
+    h.frames(3);
+    let rows = menu_labels(&h);
+    assert_eq!(&rows[..4], ["Edit View", "Projected View", "Hide in This View", "Delete"], "{rows:?}");
+    let undo = h.app.session.undo.len();
+    crate::context_menu::pick(&mut h.app, "Hide in This View").unwrap();
+    settle(&mut h);
+    assert_eq!(hidden_bodies(&h, view), Some(vec![door.clone()]));
+    assert_eq!(h.app.session.undo.len(), undo + 1, "in one undo step");
+
+    // The door has gone and the view centres on what is left: the carcass now spans x 150 to 250, so
+    // the door's old place is off the view, and the carcass's left edge is a line of the redrawn view.
+    h.step(&json!({"click": on_screen(290.0, 150.0), "button": "right"})).unwrap();
+    h.frames(3);
+    assert!(!menu_labels(&h).iter().any(|label| label == "Hide in This View"));
+    h.call("ui.menu", json!({"close": true}));
+    h.step(&json!({"click": on_screen(150.0, 150.0), "button": "right"})).unwrap();
+    h.frames(3);
+    assert!(menu_labels(&h).iter().any(|label| label == "Hide in This View"), "the carcass's edge, where the sheet draws it now");
+    crate::context_menu::pick(&mut h.app, "Undo").unwrap();
+    settle(&mut h);
+    assert_eq!(hidden_bodies(&h, view), None, "Undo draws the door again");
+    h.step(&json!({"click": on_screen(290.0, 150.0), "button": "right"})).unwrap();
+    h.frames(3);
+    assert!(menu_labels(&h).iter().any(|label| label == "Hide in This View"), "the door's line is back");
+    h.call("ui.menu", json!({"close": true}));
+
+    // `ui.menu` at a point opens the same menu on what is there.
+    let [x, y] = on_screen(290.0, 150.0);
+    h.call("ui.menu", json!({"x": x, "y": y}));
+    h.frames(4);
+    assert!(menu_labels(&h).iter().any(|label| label == "Hide in This View"), "{:?}", menu_labels(&h));
+    h.call("ui.menu", json!({"close": true}));
+}
+
+/// Edit View lists the bodies of a view's source with a tick each (#22107). A projected view shows
+/// its parent's choice as the parent's; ticking a body there and Apply draws it again in that view
+/// only, in one undo step, and the view's own list hides none. Unticking a body leaves it out on
+/// its own; with every body unticked Apply is off and the panel says why.
+#[test]
+fn edit_view_lists_the_bodies_and_a_tick_chooses_what_it_draws() {
+    let (mut h, view) = carcass_and_door_sheet();
+    let encode = solidcraft_engine::doc::ids::encode;
+    let door = solidcraft_engine::doc::drawing_view::HiddenBody { path: Vec::new(), body: "Door".into() };
+    h.app.run("drawing.view.edit", json!({"view": encode(view), "set": {"hide_bodies": [{"body": "Door"}]}})).unwrap();
+    let made = h.app.run("drawing.view.projected", json!({"parent": encode(view), "side": "above"})).unwrap();
+    let top = solidcraft_engine::doc::ids::decode(made["view"].as_str().unwrap()).unwrap();
+    settle(&mut h);
+    assert_eq!(hidden_bodies(&h, top), Some(vec![door.clone()]), "the projected view takes its parent's list");
+
+    crate::drawing_workspace::edit_object(&mut h.app, "view", top);
+    h.frames(4);
+    assert!(h.widget("Untick a body or a component to leave it out of this view.").is_some(), "the list shows");
+    assert!(h.widget("Carcass").is_some(), "with every body of the source, the drawn ones too");
+    assert!(h.widget("ⓘ From the parent view").is_some(), "and says the list is the parent's");
+    let tick = h.widget("Door").expect("the door has a row");
+    h.step(&json!({"click": tick})).unwrap();
+    h.frames(2);
+    let undo = h.app.session.undo.len();
+    let apply = h.widget("Apply").unwrap();
+    h.step(&json!({"click": apply})).unwrap();
+    settle(&mut h);
+    assert_eq!(hidden_bodies(&h, top), Some(Vec::new()), "the projected view's own list hides none");
+    assert_eq!(hidden_bodies(&h, view), Some(vec![door]), "its parent still leaves the door out");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "in one undo step");
+    assert!(h.widget("ⓘ From the parent view").is_none(), "the list is the view's own now");
+
+    // Unticking the carcass in the base view leaves it out on its own, the door already being out.
+    crate::drawing_workspace::edit_object(&mut h.app, "view", view);
+    h.frames(4);
+    let tick = h.widget("Carcass").expect("the carcass has a row");
+    h.step(&json!({"click": tick})).unwrap();
+    h.frames(2);
+    assert!(h.widget("Tick at least one body.").is_some(), "with nothing ticked the panel says why");
+    let undo = h.app.session.undo.len();
+    let apply = h.widget("Apply").unwrap();
+    h.step(&json!({"click": apply})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.undo.len(), undo, "and Apply is off");
+    let tick = h.widget("Door").unwrap();
+    h.step(&json!({"click": tick})).unwrap();
+    h.frames(2);
+    let apply = h.widget("Apply").unwrap();
+    h.step(&json!({"click": apply})).unwrap();
+    settle(&mut h);
+    let carcass = solidcraft_engine::doc::drawing_view::HiddenBody { path: Vec::new(), body: "Carcass".into() };
+    assert_eq!(hidden_bodies(&h, view), Some(vec![carcass]), "the carcass is left out, the door drawn again");
+
+    // Shows: As shown in the design follows the Browser, its list still on top; All bodies leaves
+    // nothing out.
+    let shows = |h: &Harness| h.app.session.drawing("drawing.inspect").unwrap().resolve_view(view).unwrap().shows.value;
+    let choose = |h: &mut Harness, option: &str| {
+        let row = crate::scenario::rect_of("dialog:widget:Shows").expect("Shows is drawn").center();
+        h.step(&json!({"click": [row.x, row.y]})).unwrap();
+        h.frames(3);
+        let at = solidcraft_ui_registry::handle_at(&format!("dialog:Shows:{option}")).expect(option);
+        h.step(&json!({"click": [at.x, at.y]})).unwrap();
+        h.frames(3);
+    };
+    let apply = |h: &mut Harness| {
+        let at = h.widget("Apply").unwrap();
+        h.step(&json!({"click": at})).unwrap();
+        settle(h);
+    };
+    assert_eq!(shows(&h), solidcraft_engine::doc::drawing_view::Shows::All);
+    choose(&mut h, "As shown in the design");
+    assert!(h.widget("Carcass").is_some(), "the list stays, on top of the Browser");
+    apply(&mut h);
+    assert_eq!(shows(&h), solidcraft_engine::doc::drawing_view::Shows::Design);
+    assert_eq!(hidden_bodies(&h, view).map(|bodies| bodies.len()), Some(1), "its own list is kept");
+    choose(&mut h, "All bodies");
+    assert!(h.widget("Carcass").is_none(), "All bodies has no list");
+    apply(&mut h);
+    assert_eq!(shows(&h), solidcraft_engine::doc::drawing_view::Shows::All);
+    assert_eq!(hidden_bodies(&h, view), Some(Vec::new()), "and leaves nothing out");
+}

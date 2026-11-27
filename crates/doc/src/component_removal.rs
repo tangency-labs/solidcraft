@@ -129,6 +129,7 @@ impl Document {
         self.appearances.bodies.retain(|name, _| !gone(name));
         self.appearances.faces.retain(|face| !gone(&face.body));
         self.collision_shapes.retain(|name, _| !gone(name));
+        self.edgeless_bodies.retain(|name| !gone(name));
         self.print_faces.retain(|name, _| !gone(name));
         self.plastic.assigned.retain(|name, _| !gone(name));
         // A kept component sat under the tree it was made in: it moves up to the component the
