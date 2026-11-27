@@ -4249,6 +4249,12 @@ impl FilletBrep {
                 domain1.add_point(uv0);
                 domain2.add_point(uv1);
             }
+            // (#21940) the blend's rails never cross the seam that ends inside the band: its
+            // rail ends' feet keep their names in the domain (`c1_collect_points`)
+            if seam_short {
+                solvers.solver_ops_mut(sid)?.solver_mut().rail_end_names =
+                    crate::blend::fillet_solver::p1::RailEndNames::InDomain;
+            }
             let (found, tsect) = point_on_plane_solve(
                 k,
                 solvers.solver_ops_mut(sid)?,
