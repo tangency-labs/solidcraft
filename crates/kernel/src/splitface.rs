@@ -536,15 +536,11 @@ pub(crate) fn tagged(name: &str, body: &Body) -> Result<(solidcraft_smlib::Brep,
     Ok((sb.tagged(0).map_err(|e| failed(name, e))?, ob))
 }
 
-/// Split the given faces (indices in `body`'s face order) where the tool meets them. The solid
-/// is unchanged. A listed face the tool misses is an error naming it; a tool that runs into the
-/// faces and ends inside them, cutting none through, is an error saying so. The result's history is
-/// over `[body]`: each piece of a split face is Split from it, every other face Kept.
-pub fn split_faces(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<Body> {
-    split_faces_with_map(body, faces, tool).map(|(b, _)| b)
-}
-
-/// Like [`split_faces`], with the body face each face of the result came from (in face order).
+/// Split the given faces (indices in `body`'s face order) where the tool meets them, with the
+/// body face each face of the result came from (in face order). The solid is unchanged. A listed
+/// face the tool misses is an error naming it; a tool that runs into the faces and ends inside
+/// them, cutting none through, is an error saying so. The result's history is over `[body]`: each
+/// piece of a split face is Split from it, every other face Kept.
 pub fn split_faces_with_map(body: &Body, faces: &[usize], tool: &SplitTool) -> Result<(Body, Vec<usize>)> {
     let _span = solidcraft_profile::span("kernel", "split_faces_with_map");
     let (b, map, made) = split(body, faces, tool)?;
