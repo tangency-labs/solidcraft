@@ -46,6 +46,13 @@
 //!   `SmFace::SetSurface` (ported in `topology.face_p1`, which moves an owned
 //!   `Surface`): the swap takes the surface out of the deleted face and hands the
 //!   replaced one back.
+//! - **Same-face loop merge.** Upstream `SmBrep::DeleteEdge` assumes `pLU != pLURad`
+//!   implies `pFace != pFaceRad`; deleting a second internal seam of a single-face
+//!   doubly-periodic body (whose first seam split the loop into two loops of that same
+//!   face) sets `pDelF = pSurvF` and destroys the surviving face (#21218). When
+//!   `face == face_rad`, `delete_manifold_edge` merges the two loops on that face
+//!   (promoting the surviving loop to `OrientType::Same` if the removed loop was outer)
+//!   without notifying a face merge, swapping surfaces, or destroying the face.
 //! - **`SmLockBrepBox`** is RAII upstream; `StitchFaces` holds `topology.brep_p1`'s
 //!   [`LockBrepBox`] guard (unlocked on drop, on every path). Its lock
 //!   (`SmBrep::LockBoundingBox`, unit `query.brep`) is not ported yet.
@@ -973,8 +980,9 @@ fn delete_manifold_edge(
     // mark which side of face primaryEdgeuse is on
     let eu_on_primary_side = face2::upward_faceuse(b, face)? == Some(faceuse);
 
-    // note when removed edge splits a loop
+    // note when removed edge splits a loop or joins two loops of one face
     let split_loop = lu == lu_rad;
+    let same_face = face == face_rad;
 
     // mark when face and radial face have same orientation
     let mut same_orientation_faces =
@@ -987,20 +995,25 @@ fn delete_manifold_edge(
     let both_inner = loopuse::orientation(b, lu)? == OrientType::Opposite
         && loopuse::orientation(b, lu_rad)? == OrientType::Opposite;
 
-    // determine when faces are to be merged
-    let merge_face = !split_loop && !v_is_strut && !v_rad_is_strut && !both_inner;
+    // determine when two loops are merged (and two distinct faces when !same_face)
+    let merge_loops = !split_loop && !v_is_strut && !v_rad_is_strut && !both_inner;
+    let merge_face = merge_loops && !same_face;
 
-    // When merging faces - pick the surviving and delete faces.
+    // When merging loops/faces - pick the surviving and delete loop/face.
     let mut surv_lu = None;
     let mut del_lu = None;
     let mut surv_f = None;
     let mut del_f = None;
-    if merge_face {
+    if merge_loops {
         let swap_del_face = if loopuse::orientation(b, lu)? != loopuse::orientation(b, lu_rad)? {
             // one outer, one inner: choose inner loop to survive
             loopuse::orientation(b, lu)? == OrientType::Same
-        } else if let Some(keep) = surface_to_keep {
-            surface_of(b, face)? != Some(keep)
+        } else if !same_face {
+            if let Some(keep) = surface_to_keep {
+                surface_of(b, face)? != Some(keep)
+            } else {
+                false
+            }
         } else {
             false
         };
@@ -1034,14 +1047,16 @@ fn delete_manifold_edge(
 
     // notify the face and the radial face of the upcoming edit
     ignore_status(face_notify(k, b, env, face, NotifyOperation::PreEdit, body))?;
-    ignore_status(face_notify(
-        k,
-        b,
-        env,
-        face_rad,
-        NotifyOperation::PreEdit,
-        body,
-    ))?;
+    if !same_face {
+        ignore_status(face_notify(
+            k,
+            b,
+            env,
+            face_rad,
+            NotifyOperation::PreEdit,
+            body,
+        ))?;
+    }
 
     if merge_face {
         // inform the public about this upcoming merge in Brep
@@ -1068,7 +1083,7 @@ fn delete_manifold_edge(
     }
 
     // When merging two faces - see if Face Surfaces need to be swapped
-    if !split_loop && !both_inner {
+    if !split_loop && !both_inner && !same_face {
         if let Some(keep) = surface_to_keep {
             // UB-210: upstream reads pSurvF->GetSurface() here although pSurvF is set
             // only when merging faces; unreachable on well-formed topology (a strut end
@@ -1290,12 +1305,13 @@ fn delete_manifold_edge(
         }
     }
 
+    let del_lu_was_outer = loopuse::orientation(b, del_lu)? == OrientType::Same;
     let del_loop = loopuse::loop_(b, del_lu)?;
     let del_lu_mate = loopuse::other_loopuse(b, del_lu)?;
 
     face_remove_loop(b, del_f, del_loop)?;
 
-    if surface_of(b, del_f)? == surface_of(b, surv_f)? {
+    if !same_face && surface_of(b, del_f)? == surface_of(b, surv_f)? {
         let uv_union = face2::uv_domain(b, del_f)?.union(&face2::uv_domain(b, surv_f)?);
         face2::set_uv_domain(b, surv_f, &uv_union)?;
     }
@@ -1307,6 +1323,17 @@ fn delete_manifold_edge(
         b.remove_loopuse_record(l)?;
     }
     b.remove_loopuse_record(del_lu)?;
+
+    if same_face {
+        // Merging two loops of one face keeps that face alive; preserve the outer
+        // orientation when the removed loop carried it.
+        if del_lu_was_outer {
+            let surv_lu_other = deref(loopuse::other_loopuse(b, surv_lu)?, OP)?;
+            b.loopuse_mut(surv_lu)?.orientation = OrientType::Same;
+            b.loopuse_mut(surv_lu_other)?.orientation = OrientType::Same;
+        }
+        return Ok(());
+    }
 
     // move the remaining loops of the deleted face to the surviving face
     for move_loop in face2::loops(b, del_f, false, None)? {

@@ -174,6 +174,16 @@ struct Axis {
     period: f64,
 }
 
+/// How an edge of a seam-only loop sits on a pole-closed surface of revolution.
+enum SeamEdgeKind {
+    /// Runs monotonically in `v` along a single meridian (`forward` = increasing `v`).
+    Meridian { forward: bool, v_mid: f64 },
+    /// Runs along a constant interior `v` strictly off both poles.
+    Parallel,
+    /// Neither a meridian nor an interior parallel.
+    Other,
+}
+
 #[derive(Clone, PartialEq)]
 enum Kind {
     Ruled,
@@ -1242,14 +1252,222 @@ impl Assembly<'_> {
     }
 
     /// The slit made the meridian seam of `surface` when it is a surface of revolution closed
-    /// at both poles ([`Assembly::meridian_slit`]); `None` for any other surface.
+    /// at both poles ([`Assembly::meridian_slit`]); `None` for any other surface, or for a closed
+    /// meridian slit on a horn torus (coincident poles) left for [`Assembly::split_at_poles`] and
+    /// [`Assembly::reduce_pole_closed_seams`].
     fn closed_at_poles(&mut self, path: &[(u32, bool)], surface: &BSurface) -> R<Option<Option<Vec<(u32, bool)>>>> {
         let eval = SurfaceEval::new(surface).map_err(|e| e.to_string())?;
         match axis(surface).or_else(|| spline_axis(surface, &eval)) {
             // Meridians run in v: a spline closed in v has none.
-            Some(ax) if ax.kind.winds_in() == 0 && ax.poles.iter().all(Option::is_some) => Ok(Some(self.meridian_slit(path, &ax, &eval)?)),
+            Some(ax) if ax.kind.winds_in() == 0 && ax.poles.iter().all(Option::is_some) => {
+                if let [Some(south), Some(north)] = ax.poles
+                    && south.dist(north) <= self.tol
+                    && let (Some(&first), Some(&last)) = (path.first(), path.last())
+                    && self.start(first)? == self.end(last)?
+                    && self.on_meridian(path, &ax, &eval)?
+                {
+                    return Ok(None);
+                }
+                Ok(Some(self.meridian_slit(path, &ax, &eval)?))
+            }
             _ => Ok(None),
         }
+    }
+
+    /// Normalize seam-only loops on pole-closed surfaces of revolution (notably full horn tori,
+    /// where a STEP `TOROIDAL_SURFACE` with `R = r` carries both a meridian seam and an interior
+    /// parallel seam such as the outer equator). On the `PlacedRevolution` form `v` runs from
+    /// pole to pole, so an interior parallel circle is a redundant cut inside `(v_min, v_max)`
+    /// that pushes lifted pcurves outside the form's knot range. Dropping interior parallel seam
+    /// edges used solely by that loop, ordering the remaining meridian edges from the lower pole
+    /// to the upper and back, and aligning `u = 0` with the meridian gives a clean pole-to-pole
+    /// seam loop covering the whole surface without an internal pole. Returns how many loops were
+    /// normalized.
+    pub(crate) fn reduce_pole_closed_seams(&mut self) -> R<usize> {
+        let mut edge_uses: HashMap<u32, usize> = HashMap::new();
+        for face in &self.faces {
+            for l in &face.loops {
+                if let Bound::Edges(es) = l {
+                    for &(e, _) in es {
+                        *edge_uses.entry(e).or_default() += 1;
+                    }
+                }
+            }
+        }
+        let mut reduced = 0;
+        for fi in 0..self.faces.len() {
+            let Some(surface) = self.faces.get(fi).map(|f| f.surface.clone()) else { continue };
+            let Some(ax) = axis(&surface) else { continue };
+            if ax.kind.winds_in() != 0 {
+                continue;
+            }
+            let [Some(south), Some(north)] = ax.poles else { continue };
+            let eval = SurfaceEval::new(&surface).map_err(|e| e.to_string())?;
+            let Some((v_min, v_max)) = eval.domain().range.get(1).copied().flatten().filter(|(a, b)| a < b) else {
+                continue;
+            };
+            let loop_count = self.faces.get(fi).map_or(0, |f| f.loops.len());
+            for li in 0..loop_count {
+                let Some(Bound::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else {
+                    continue;
+                };
+                if !super::seam_only(es) || !es.iter().all(|(e, _)| edge_uses.get(e).copied() == Some(2)) {
+                    continue;
+                }
+                let mut unique = Vec::new();
+                for &(e, _) in es {
+                    if !unique.contains(&e) {
+                        unique.push(e);
+                    }
+                }
+                let mut u_ref: Option<f64> = None;
+                let mut meridians: Vec<(u32, bool, f64)> = Vec::new();
+                let mut parallels: Vec<u32> = Vec::new();
+                let mut valid = true;
+                for &e in &unique {
+                    match self.classify_pole_closed_seam_edge(e, &ax, &eval, (v_min, v_max), &mut u_ref)? {
+                        SeamEdgeKind::Meridian { forward, v_mid } => meridians.push((e, forward, v_mid)),
+                        SeamEdgeKind::Parallel => parallels.push(e),
+                        SeamEdgeKind::Other => {
+                            valid = false;
+                            break;
+                        }
+                    }
+                }
+                let Some(u_meridian) = u_ref else { continue };
+                if !valid || meridians.is_empty() {
+                    continue;
+                }
+                meridians.sort_by(|a, b| a.2.total_cmp(&b.2));
+                let up: Vec<(u32, bool)> = meridians.iter().map(|&(e, fwd, _)| (e, fwd)).collect();
+                let (Some(&first), Some(&last)) = (up.first(), up.last()) else { continue };
+                if !self.at(self.start(first)?, south)? || !self.at(self.end(last)?, north)? {
+                    continue;
+                }
+                let mut chained = true;
+                for pair in up.windows(2) {
+                    let [a, b] = pair else { continue };
+                    let mid = self.end(*a)?;
+                    if mid != self.start(*b)? || self.at(mid, south)? || self.at(mid, north)? {
+                        chained = false;
+                        break;
+                    }
+                }
+                if !chained {
+                    continue;
+                }
+                let mut down = up.clone();
+                super::reverse(&mut down);
+                let mut merged = down.clone();
+                merged.extend(&up);
+                let mut up_first = up;
+                up_first.extend(down);
+                let needs_turn = wrap(u_meridian).abs() > 1e-12;
+                if parallels.is_empty() && !needs_turn && (*es == merged || *es == up_first) {
+                    continue;
+                }
+                let turned_surface = if needs_turn {
+                    match &surface {
+                        BSurface::PlacedRevolution { profile, origin, axis, matrix, forward } => {
+                            let rotated = meridian(profile, ax.origin, ax.z, u_meridian)?;
+                            Some(BSurface::PlacedRevolution {
+                                profile: Box::new(rotated),
+                                origin: *origin,
+                                axis: *axis,
+                                matrix: *matrix,
+                                forward: *forward,
+                            })
+                        }
+                        BSurface::Sphere { .. } => crate::kernel::form::turned(&surface, u_meridian),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+                if let Some(face) = self.faces.get_mut(fi) {
+                    if let Some(s) = turned_surface {
+                        face.surface = s;
+                        face.extent = None;
+                    }
+                    if let Some(Bound::Edges(slot)) = face.loops.get_mut(li) {
+                        *slot = merged;
+                    }
+                    reduced += 1;
+                }
+                break;
+            }
+        }
+        Ok(reduced)
+    }
+
+    /// Classifies an edge of a seam-only loop on a pole-closed surface as lying along the single
+    /// meridian `u_ref` (strictly monotone in `v`), along an interior constant-`v` parallel off
+    /// both poles, or neither.
+    fn classify_pole_closed_seam_edge(
+        &self,
+        e: u32,
+        ax: &Axis,
+        eval: &SurfaceEval,
+        (v_min, v_max): (f64, f64),
+        u_ref: &mut Option<f64>,
+    ) -> R<SeamEdgeKind> {
+        let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+        let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
+        let ([lo, hi], reach) = (edge.interval, self.tol.max(edge.tolerance));
+        let mut samples = Vec::with_capacity(SAMPLES + 1);
+        for k in 0..=SAMPLES {
+            let t = lo + (hi - lo) * k as f64 / SAMPLES as f64;
+            let p = c.point(t).ok_or("edge point")?;
+            let at_pole = ax.poles.iter().flatten().any(|q| q.dist(p) <= reach);
+            samples.push((p, at_pole));
+        }
+
+        // First check whether all non-pole samples lie on a single meridian `u_cand` and move
+        // strictly monotonically in `v`.
+        let mut u_cand = *u_ref;
+        let mut vs = Vec::with_capacity(SAMPLES + 1);
+        let mut on_meridian = true;
+        for &(p, at_pole) in &samples {
+            if at_pole {
+                continue;
+            }
+            let Some(q) = eval.project(p, None, f64::INFINITY) else {
+                on_meridian = false;
+                break;
+            };
+            let u = *u_cand.get_or_insert(q[0]);
+            if !eval.point([u, q[1]]).is_some_and(|m| m.dist(p) <= reach) {
+                on_meridian = false;
+                break;
+            }
+            vs.push(q[1]);
+        }
+        if on_meridian && vs.len() >= 2 {
+            let inc = vs.windows(2).all(|w| matches!(w, [a, b] if a < b));
+            let dec = vs.windows(2).all(|w| matches!(w, [a, b] if a > b));
+            if inc || dec {
+                let v_mid = vs.get(vs.len() / 2).copied().ok_or("meridian midpoint")?;
+                *u_ref = u_cand;
+                return Ok(SeamEdgeKind::Meridian { forward: inc, v_mid });
+            }
+        }
+
+        // Otherwise check whether all samples lie off both poles on a single interior parallel
+        // `v = v_const` strictly inside `(v_min, v_max)`.
+        if samples.iter().any(|&(_, at_pole)| at_pole) {
+            return Ok(SeamEdgeKind::Other);
+        }
+        let mut v_const: Option<f64> = None;
+        for &(p, _) in &samples {
+            let Some(q) = eval.project(p, None, f64::INFINITY) else {
+                return Ok(SeamEdgeKind::Other);
+            };
+            let v = *v_const.get_or_insert(q[1]);
+            if !(v > v_min && v < v_max) || !eval.point([q[0], v]).is_some_and(|m| m.dist(p) <= reach) {
+                return Ok(SeamEdgeKind::Other);
+            }
+        }
+        Ok(if v_const.is_some() { SeamEdgeKind::Parallel } else { SeamEdgeKind::Other })
     }
 
     /// The sphere about `frame`'s centre with its upper pole at the slit's start and its x axis
