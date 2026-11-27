@@ -81,9 +81,11 @@ name alike and every stored name finds its face or edge. Of the 14 more that fai
 The naming gate takes no new failure, so it fails too.
 
 **The kernel's own tests** (`cargo test -p solidcraft-kernel --lib --features backend-occt`, the
-tests that switch kernels left out): 1240 of 1245 pass on solidcore and 1099 on OCCT. Most of
-the 146 that fail on OCCT ask for history, which OCCT results don't carry yet. The rest fail in
-OCCT fillets, or in solidcore operations on OCCT-made bodies.
+tests that switch kernels left out, at 058b6c9807): 1264 of 1269 pass on solidcore (the five
+others fail on `main` too, https://github.com/tangency-labs/solidcore/issues/3445) and 1110 on
+OCCT. Most of the 159 that fail on OCCT ask for the history of a boolean or a fillet, which OCCT
+results don't carry yet; the rest fail in OCCT fillets, or in solidcore operations on OCCT-made
+bodies.
 
 So the interface took a second kernel without changes to the trait, and the gaps are in what the
 adapter carries back: history, construction sources and apart solids.
