@@ -1999,7 +1999,9 @@ impl<'s> SurfaceIntersector<'s> {
     /// `SM_EFF_ZERO`) within `4 * this_approx_tol_3d` of its start; another within
     /// `this_approx_tol_3d` of its drop point (`DropPoint`, `SM_SO_INTERSECT` with
     /// `10 * this_approx_tol_3d`), or within ten times that when the surfaces do not
-    /// diverge between the point and the curve point.
+    /// diverge between the point and the curve point. Not upstream (#18488): the drop
+    /// within `this_approx_tol_3d` is asked for first at that tolerance, since the one at
+    /// ten times it need not answer with the nearest curve point.
     ///
     /// A failing `EvaluatePoint` (`:7376`) or `DropPoint` (`:7391`) status propagates
     /// as `Err(...)` (`WR-52`); upstream maps it to `TRUE` (`SER` inside `SmBoolean`).
@@ -2044,7 +2046,27 @@ impl<'s> SurfaceIntersector<'s> {
             } else {
                 let ivl = curve.natural_interval();
 
-                // Find nearest point on curve to test point within 10*tolerance.
+                // Not upstream (#18488): a curve point within the tolerance, asked for at
+                // the tolerance. The drop at ten times it answers with the first curve
+                // point it finds within that, not the nearest: beside a sharp corner of a
+                // curve (a C0 knot line it crosses) that can be a point on the other branch
+                // while the point lies on this one
+                let near = curve.drop_point_in(
+                    k,
+                    &ivl,
+                    point,
+                    None,
+                    self.this_approx_tol_3d,
+                    None,
+                    SolverOperation::Intersect,
+                    caches,
+                    jj,
+                )?;
+                if near.success && near.distance < self.this_approx_tol_3d {
+                    return Ok(true);
+                }
+
+                // Find a point on curve to test point within 10*tolerance.
                 let drop = curve.drop_point_in(
                     k,
                     &ivl,

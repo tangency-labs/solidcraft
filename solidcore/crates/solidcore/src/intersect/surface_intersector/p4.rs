@@ -640,9 +640,11 @@ impl SurfaceIntersector<'_> {
     /// True when `point` is within `this_approx_tol_3d` of one of `curves_3d`: of the
     /// start of a degenerate curve (`IsDegenerate()`, tolerance `SM_EFF_ZERO`), or of
     /// the drop point of another (`DropPoint`, `SM_SO_INTERSECT` with
-    /// `10 * this_approx_tol_3d`): the first two tests of
+    /// `this_approx_tol_3d`): the first two tests of
     /// [`SurfaceIntersector::is_point_on_curve`] at the tolerance itself, without its
-    /// ten-times-the-tolerance acceptance (fix WR-76).
+    /// ten-times-the-tolerance acceptance (fix WR-76). The drop is asked for at the
+    /// tolerance (not upstream, #18488): at ten times it, it answers with the first curve
+    /// point it finds within that, not the nearest.
     ///
     /// # Errors
     ///
@@ -668,7 +670,7 @@ impl SurfaceIntersector<'_> {
                 &ivl,
                 point,
                 None,
-                tol * 10.0,
+                tol,
                 None,
                 SolverOperation::Intersect,
                 &mut caches,
