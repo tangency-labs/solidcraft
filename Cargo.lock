@@ -6616,6 +6616,7 @@ version = "0.50.0"
 dependencies = [
  "arboard",
  "craft-plugin",
+ "eframe",
  "egui",
  "egui-wgpu",
  "flate2",
