@@ -15,7 +15,7 @@
 //!   pieces (each about a quarter turn, never a half) cut into cubics that stay within [`ARC_TOLERANCE_MM`],
 //!   their rounding onto the grid included.
 //! - **Paint:** strokes at their width `w` (the walk never gives 0, which 8.4.3.2 says is a device
-//!   pixel and shouldn't be used), butt caps, miter joins and a miter limit of 4, dashed by `d`;
+//!   pixel and shouldn't be used), round caps and round joins, dashed by `d`;
 //!   fills black, even-odd (`f*`). Black on no background, as SVG.
 //! - **Text** is real text by default ([`PdfText::Text`], `text.rs`): each run is set with `Tj` in an
 //!   embedded Type 3 font made of its glyph outlines, with a `ToUnicode` map, so it looks the same,
@@ -435,7 +435,7 @@ fn page_content<'a>(
 ) -> Result<(String, Vec<Image>)> {
     let mut w = Content::new(max_bytes)?;
     let mut images: Vec<Image> = Vec::new();
-    w.append(&format!("q {PT_PER_MM:.9} 0 0 {PT_PER_MM:.9} 0 0 cm 0 J 0 j 4 M\n"))?;
+    w.append(&format!("q {PT_PER_MM:.9} 0 0 {PT_PER_MM:.9} 0 0 cm 1 J 1 j\n"))?;
     let mut active_kind = None;
     for (gi, group) in groups.into_iter().enumerate() {
         if let Some(layers) = layers {

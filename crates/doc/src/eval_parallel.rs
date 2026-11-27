@@ -21,8 +21,8 @@ use std::sync::{Arc, Mutex};
 use solidcraft_kernel as kernel;
 
 use super::{
-    CachedEval, Change, Document, EvalCache, EvalKey, EvalValidationGuard, Feature, FeatureKind, FeatureResult, FrameBodies, IMPORT_HEALS,
-    ImportDigests, ModelState, Primed, Value, absorb_sheet_cuts, append_warning, check_kept, copy_instances, eval_feature, fingerprint,
+    CachedEval, Change, ComponentDigests, Document, EvalCache, EvalKey, EvalValidationGuard, Feature, FeatureKind, FeatureResult, FrameBodies,
+    IMPORT_HEALS, ImportDigests, ModelState, Primed, Value, absorb_sheet_cuts, append_warning, check_kept, copy_instances, eval_feature, fingerprint,
     naming_feature, note_cut_cavity, note_join_apart, now, overlap, own_copies, own_inputs, param_names, track_altered_sheets,
     with_named_face_points,
 };
@@ -151,7 +151,7 @@ pub(super) fn prefetch_imports(
     import_digests: &ImportDigests,
     cache: &Mutex<EvalCache>,
     primed: &[Primed],
-    rolled_results: &HashMap<u64, (u64, FeatureResult)>,
+    rolled_results: &HashMap<u64, (u64, Option<u64>, FeatureResult)>,
     ctx: u64,
     previous_context: u64,
     shared_ctx: u64,
@@ -191,7 +191,7 @@ pub(super) fn prefetch_imports(
         if prev_reusable {
             continue;
         }
-        if primed.iter().any(|p| p.results.contains_key(&f.id)) || rolled_results.get(&f.id).is_some_and(|(c, _)| *c == ctx) {
+        if primed.iter().any(|p| p.results.contains_key(&f.id)) || rolled_results.get(&f.id).is_some_and(|(c, _, _)| *c == ctx) {
             continue;
         }
         let reads_key = import_reads_key(doc, vals, f, shared_ctx, import_digests);
@@ -309,7 +309,8 @@ pub(super) fn prefetch_components(
     frame_bodies: &Arc<Mutex<FrameBodies>>,
     cache: &Mutex<EvalCache>,
     import_digests: &ImportDigests,
-    feature_component: &HashMap<u64, u64>,
+    constructions: &[usize],
+    component_digests: &ComponentDigests,
     envelopes: &HashSet<u64>,
     carried: Option<&overlap::Carried>,
     prepared_imports: &PreparedImports,
@@ -352,7 +353,7 @@ pub(super) fn prefetch_components(
     if first_cold >= limit {
         return PrefetchedComponents::default();
     }
-    let carried_component = carried.and_then(|c| feature_component.get(&c.id).copied());
+    let carried_component = carried.and_then(|c| component_digests.feature_component.get(&c.id).copied());
     let mut blocked_components: HashSet<u64> = HashSet::new();
     if let Some(c) = carried_component {
         blocked_components.insert(c);
@@ -367,6 +368,12 @@ pub(super) fn prefetch_components(
         if i < first_cold {
             // Components that already have prefix state before `first_cold` are excluded so every
             // worker chain starts cleanly from an empty component state.
+            blocked_components.insert(f.component);
+            continue;
+        }
+        if same_ctx && prev_results.get(i).is_some_and(|old| old.id == f.id && !old.skipped && !old.stale && !old.unkept && old.error.is_none()) {
+            // Components whose results are already cached from the previous evaluation (such as
+            // valid components after a failing feature in a partial model cache) are skipped.
             blocked_components.insert(f.component);
             continue;
         }
@@ -405,7 +412,8 @@ pub(super) fn prefetch_components(
                     frame_bodies,
                     cache,
                     import_digests,
-                    feature_component,
+                    constructions,
+                    component_digests,
                     envelopes,
                     prepared_imports,
                     validation,
@@ -435,7 +443,8 @@ fn eval_component_chain(
     frame_bodies: &Arc<Mutex<FrameBodies>>,
     cache: &Mutex<EvalCache>,
     import_digests: &ImportDigests,
-    feature_component: &HashMap<u64, u64>,
+    constructions: &[usize],
+    component_digests: &ComponentDigests,
     envelopes: &HashSet<u64>,
     prepared_imports: &PreparedImports,
     validation: kernel::Validation,
@@ -445,6 +454,7 @@ fn eval_component_chain(
     chain: &ComponentChain<'_>,
 ) -> Vec<((u64, u64), PrefetchedChange)> {
     let mut emitted = Vec::new();
+    let feature_component = &component_digests.feature_component;
     let mut state = Arc::new(ModelState { reserved_body_names: doc.reserved_body_names.clone(), ..(**empty).clone() });
     for step in &chain.steps {
         if kernel::watch::cancelled() || crate::progress::cancelled() {
@@ -457,7 +467,7 @@ fn eval_component_chain(
         if state.reserved_body_names != step.reserved {
             Arc::make_mut(&mut state).reserved_body_names.clone_from(&step.reserved);
         }
-        let key = EvalKey::new(doc, vals, f, 0, ctx, shared_ctx, &state, import_digests);
+        let key = EvalKey::new(doc, vals, f, 0, ctx, shared_ctx, &state, import_digests, constructions, component_digests);
         let Some((reads_key, read)) = key.reads.as_ref() else {
             break;
         };

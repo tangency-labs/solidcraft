@@ -77,8 +77,18 @@ fn combinatorics(hs: &[HalfSpace]) -> Result<(Vec<Vec3>, Vec<(usize, Vec<usize>)
 
 /// The convex polyhedron bounded by the half-spaces.
 pub fn convex_polyhedron(hs: &[HalfSpace]) -> Result<Body> {
+    convex_polyhedron_sides(hs).map(|(b, _)| b)
+}
+
+/// [`convex_polyhedron`], with the half-space each of its faces lies on (an index into `hs`), face
+/// by face in the body's face order: a half-space that bounds no face of it has none.
+pub(crate) fn convex_polyhedron_sides(hs: &[HalfSpace]) -> Result<(Body, Vec<usize>)> {
     let (verts, faces) = combinatorics(hs)?;
-    crate::smlib_sweeps::body_from_record(&polyhedron_record(hs, &verts, &faces)?, "polyhedron")
+    let body = crate::smlib_sweeps::body_from_record(&polyhedron_record(hs, &verts, &faces)?, "polyhedron")?;
+    if body.record().faces.len() != faces.len() {
+        return Err(KernelError::Failed("polyhedron: the solid made has other faces than its planes".into()));
+    }
+    Ok((body, faces.iter().map(|(hi, _)| *hi).collect()))
 }
 
 /// The record of the closed polyhedron with corners `verts` whose faces are `faces` (the

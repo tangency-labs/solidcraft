@@ -219,6 +219,15 @@ pub fn record_joint(j: &k::Joint) -> r::Joint {
 pub fn lap(l: r::Lap) -> k::Lap {
     match l {
         r::Lap::Miter { gap } => k::Lap::Miter { gap },
+        r::Lap::Overlap {
+            covering_a,
+            amount,
+            gap,
+        } => k::Lap::Overlap {
+            covering_a,
+            amount,
+            gap,
+        },
         r::Lap::Cut(a, b) => k::Lap::Cut(a, b),
     }
 }
@@ -228,6 +237,15 @@ pub fn lap(l: r::Lap) -> k::Lap {
 pub fn record_lap(l: k::Lap) -> r::Lap {
     match l {
         k::Lap::Miter { gap } => r::Lap::Miter { gap },
+        k::Lap::Overlap {
+            covering_a,
+            amount,
+            gap,
+        } => r::Lap::Overlap {
+            covering_a,
+            amount,
+            gap,
+        },
         k::Lap::Cut(a, b) => r::Lap::Cut(a, b),
     }
 }

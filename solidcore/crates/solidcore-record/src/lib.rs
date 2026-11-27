@@ -6,8 +6,8 @@
 //! its Part 42 curves and surfaces ([`step`]), a sheet metal part's surfaces and its flat
 //! pattern ([`develop`]), frame-stock paths, trimmed members and gussets ([`frame`]), hole stacks
 //! through touching bodies ([`hole_stacks`]), curve queries' answers ([`curve_query`]), planar
-//! projections and outlines ([`projection`]), and how exactly a drawn curve stands for its source
-//! ([`CurveAccuracy`]).
+//! projections and outlines ([`projection`]), round-tube copes ([`tube_cope`]), and how exactly
+//! a drawn curve stands for its source ([`CurveAccuracy`]).
 //!
 //! The record computes no geometric quantity: no square roots, trigonometry, dot or cross
 //! products, normalising or solves (clippy `disallowed-methods`, this crate's `clippy.toml`). It
@@ -41,6 +41,7 @@ pub mod projection;
 pub mod round_face;
 pub mod shaft_spline;
 pub mod step;
+pub mod tube_cope;
 pub mod vec;
 
 pub use accuracy::CurveAccuracy;
