@@ -1451,3 +1451,90 @@ fn a_root_cut_splitting_a_placed_parts_body_leaves_both_pieces_where_the_part_is
     xs.sort_by(|a, b| a.partial_cmp(b).unwrap());
     assert_eq!(xs, [(-10.0, 8.0), (12.0, 30.0)]);
 }
+
+/// Adding primitives after a Combine (which marks `placement_local` false) evaluates the timeline
+/// once per command instead of twice, skips `param_rename_from` when feature counts differ, and
+/// avoids building `world_state()` in `frames::to_local` for identity active-frame primitives
+/// while still mapping primitives accurately inside a moved component.
+#[test]
+fn adding_primitives_after_combine_evaluates_once_and_skips_world_placement() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 0, 0], "body_name": "A"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [5, 0, 0], "body_name": "B"}));
+    run(&mut s, "solid.combine", json!({"target": "A", "tools": ["B"]}));
+    run(&mut s, "component.create", json!({"name": "Moved", "grounded": false}));
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [0, 0, 0], "body_name": "M0"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Moved:1", "translate": [100, 0, 0]}));
+    assert!(super::placed(&s));
+
+    for k in 0..5 {
+        let prev_doc = s.doc.clone();
+        let evals_before = s.evaluations;
+        let cyl = json!({"radius": 2, "height": 10, "base": [0, 30 + k * 15, 0], "axis": "Z", "body_name": format!("Pin {k}")});
+        assert!(super::to_local(&s, "solid.cylinder", &cyl).unwrap().is_none());
+        assert!(s.cached_world_state().is_none(), "identity active-frame primitive must not build world_state in to_local");
+        run(&mut s, "solid.cylinder", cyl);
+        assert_eq!(s.evaluations, evals_before + 1, "step {k}: add_feature must evaluate once, not twice");
+        assert!(s.doc.param_rename_from(&prev_doc).is_none());
+    }
+
+    // Inside the moved component, `to_local` maps world coordinates without building `world_state()`.
+    run(&mut s, "component.activate", json!({"component": "Moved"}));
+    assert!(s.cached_world_state().is_none());
+    let moved_cyl = json!({"radius": 2, "height": 10, "base": [110, 20, 0], "axis": "Z", "body_name": "MovedPin"});
+    let mapped = super::to_local(&s, "solid.cylinder", &moved_cyl).unwrap().expect("moved active component maps base");
+    assert!(s.cached_world_state().is_none(), "active-frame-only primitive must not force world_state");
+    assert_eq!(mapped["base"], json!([10.0, 20.0, 0.0]));
+    run(&mut s, "solid.cylinder", moved_cyl);
+    let world = s.world_state().unwrap();
+    let moved_pin = world.body("MovedPin").expect("MovedPin body");
+    let center = solidcraft_doc::kernel::measure_mass(&moved_pin.body).unwrap().centroid;
+    assert!((center.x - 110.0).abs() < 1e-6 && (center.y - 20.0).abs() < 1e-6 && (center.z - 5.0).abs() < 1e-6, "{center:?}");
+}
+
+/// `Session::already_refreshed` must not skip a post-command refresh while an import check is
+/// still running or has finished without being settled yet.
+#[test]
+fn already_refreshed_is_guarded_against_pending_and_unsettled_import_checks() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "A"}));
+    let fid = s.doc.features[0].id;
+    s.refresh();
+    assert!(s.already_refreshed());
+
+    // A running import check attached after a refresh invalidates refresh reuse both while
+    // running and once it finishes with an unsettled issue.
+    let end = s.model.running_import_check_for_tests(fid);
+    assert!(s.model.checking_imports());
+    assert!(s.model.has_pending_import_checks());
+    assert!(!s.already_refreshed(), "running import check must prevent refresh reuse");
+    end(vec![solidcraft_doc::kernel::ImportIssue {
+        kind: solidcraft_doc::kernel::IssueKind::NeedsRepair,
+        item: None,
+        part: "A".into(),
+        paths: Vec::new(),
+        faces: 0,
+        times: 1,
+        detail: "solid 'A': needs repair".into(),
+    }]);
+    assert!(!s.model.checking_imports());
+    assert!(s.model.has_pending_import_checks(), "unsettled import issue must keep import checks pending");
+    assert!(!s.already_refreshed(), "ended but unsettled import check must prevent refresh reuse");
+
+    // Refreshing settles the check's findings and restores refresh reuse.
+    s.refresh();
+    assert!(!s.model.has_pending_import_checks());
+    assert!(s.already_refreshed());
+    assert!(s.model.result(fid).and_then(|r| r.warning.as_deref()).is_some_and(|w| w.contains("needs repair")));
+
+    // A refresh that completes while an import check is still running does not record
+    // `refreshed_doc`, so even a clean completion afterward does not falsely skip a refresh.
+    let end2 = s.model.running_import_check_for_tests(fid);
+    s.refresh();
+    assert!(!s.already_refreshed());
+    end2(Vec::new());
+    assert!(!s.already_refreshed());
+    s.refresh();
+    assert!(s.already_refreshed());
+}

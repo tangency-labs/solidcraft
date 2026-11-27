@@ -13,7 +13,9 @@ writes nothing, and it sends nothing about the policy anywhere.
 
 The Windows installer (`solidcraft-windows-x64.msi`, also arm64 and x86) installs for all users.
 `msiexec /i solidcraft-windows-x64.msi /qn` installs it without questions, so a deployment tool
-can run it.
+can run it. People without administrator rights can install it just for themselves instead
+([Getting started](getting-started.md#installing-on-windows)); policies under
+`HKLM\Software\Policies\SolidCraft` apply to that copy too.
 
 ## The policies
 

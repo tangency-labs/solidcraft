@@ -2858,6 +2858,34 @@ mod drafts {
         assert!(rel(volume(&c), v) < 1e-9, "{} {v}", volume(&c));
     }
 
+    /// #22807: an R 10, height 100 cylinder drafted 6 degrees about XY closes at z ~ 95.14 < 100.
+    /// The refusal is a typed geometric refusal (`OffsetRefusal::DraftConeCloses`), not
+    /// `Error::Unsupported`, and leaves the body untouched.
+    #[test]
+    fn a_cylinder_drafted_until_it_closes_is_refused_with_the_reason() {
+        // 6 degrees in radians (6 * pi / 180)
+        const SIX: f64 = 0.104_719_755_119_659_78;
+        all_fixes();
+        let c = make_cylinder([0.0; 3], 10.0, 100.0).unwrap();
+        let o = order(&c);
+        let before = c.to_smb(false).unwrap();
+        let err = draft(&c, &o, &[curved(&c, &o)], [0.0; 3], Z, Z, SIX).unwrap_err();
+        assert_eq!(
+            err,
+            Error::OffsetRefused {
+                face: None,
+                why: crate::OffsetRefusal::DraftConeCloses,
+            }
+        );
+        let text = err.to_string();
+        assert!(
+            text.contains("a drafted cone would close within the face"),
+            "{text}"
+        );
+        assert!(!text.contains("not supported yet"), "{text}");
+        assert_eq!(c.to_smb(false).unwrap(), before);
+    }
+
     /// Refused before the kernel or by its draft, the body as it came in: no neutral normal, no
     /// angle, a right angle, an origin not finite or past 1e9, no faces, an index past the faces
     /// or twice, the pull in the neutral plane (Argument); the top across the pull (Unsupported).

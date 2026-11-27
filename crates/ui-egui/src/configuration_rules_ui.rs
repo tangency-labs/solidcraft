@@ -13,6 +13,7 @@ pub struct Editor {
     preview: Option<Value>,
 
     preview_revision: u64,
+    preview_bands: [bool; 3],
     pub(super) new_values: std::collections::BTreeMap<String, String>,
     pub(super) adding_row: bool,
     pub(super) focus_new_row: bool,
@@ -44,6 +45,7 @@ impl Default for Editor {
             preview: None,
 
             preview_revision: 0,
+            preview_bands: [true; 3],
             new_values: Default::default(),
             adding_row: false,
             focus_new_row: false,
@@ -70,7 +72,8 @@ fn choose(ui: &mut Ui, id: &str, value: &mut String, options: &[String]) {
         "preview_configuration" => "Configuration",
         _ => id,
     };
-    ui_kit::row(ui, label, |ui| ui_kit::dropdown(ui, id, &mut selected, &labels));
+    let response = ui_kit::row(ui, label, |ui| ui_kit::dropdown(ui, id, &mut selected, &labels));
+    crate::scenario::publish_handle(&format!("config:choice:{id}"), response.rect.center());
     if before != selected
         && let Some(choice) = selected.checked_sub(1).and_then(|i| options.get(i))
     {
@@ -106,46 +109,54 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
         ui_kit::Text::Note("rules_drives"),
     );
     ui_kit::text(ui, solidcraft_ui_text::tr_label("Matched restrictions check the final values."), ui_kit::Text::Note("rules_restrictions"));
-    for (index, rule) in rules.iter().enumerate() {
-        ui.push_id(&rule.id, |ui| {
-            let summary = match &rule.effect {
-                RuleEffect::DriveParameter { parameter, expression } => format!("Drives {parameter} = {expression}"),
-                RuleEffect::DriveSuppression { feature, value } => format!(
-                    "Drives suppression {} = {value}",
-                    features.iter().find(|f| f.0 == *feature).map(|f| f.1.as_str()).unwrap_or("missing feature")
-                ),
-                RuleEffect::ParameterRange { parameter, minimum, maximum } => format!("Restricts {parameter}: {minimum} through {maximum}"),
-                RuleEffect::AllowParameterValues { parameter, expressions } => format!("Restricts {parameter}: {}", expressions.join(", ")),
-            };
-            let actions_width = ["Edit", "↑", "↓", "Delete"].iter().map(|label| ui_kit::ContentWidth::button(ui, label)).sum::<f32>()
-                + solidcraft_theme::Tokens::get().space_4 * 3.0;
+    let t = solidcraft_theme::Tokens::get();
+    let columns = [
+        ui_kit::Column::new("Enabled", 0.0).min_content_width(t.form_close_size),
+        ui_kit::Column::new("Rule name", 0.8).flex().min_content_width(t.form_label_width),
+        ui_kit::Column::new("Then", 1.4).flex().min_content_width(t.form_label_width),
+        ui_kit::Column::new("Actions", 0.0)
+            .icon_only()
+            .min_content_width(ui_kit::ContentWidth::button(ui, "Edit") + 3.0 * t.control_height + 3.0 * ui.spacing().item_spacing.x),
+    ];
+    ui_kit::table_custom(ui, "configuration_rules", &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
+        table.headers(ui, |_, _| false);
+        for (index, rule) in rules.iter().enumerate() {
             let mut enabled = rule.enabled;
-            if ui_kit::summary_row(ui, &rule.name, &summary, &mut enabled, actions_width, |ui| {
-                if ui_kit::button(ui, solidcraft_ui_text::tr_label("Edit"), ui_kit::Button::Normal).clicked() {
-                    editor.rule = rule.clone();
-                }
-                let up =
-                    ui_kit::button(ui, "↑", ui_kit::Button::Enabled(index > 0)).backing_on_hover_text(solidcraft_ui_text::tr_label("Move earlier"));
-                crate::scenario::publish_handle(&format!("config:rule:{}:up", rule.id), up.rect.center());
-                if up.clicked() {
-                    *error = app.run("config.rule", json!({"id":rule.id,"index":index-1})).err();
-                }
-                if ui_kit::button(ui, "↓", ui_kit::Button::Enabled(index + 1 < rules.len()))
-                    .backing_on_hover_text(solidcraft_ui_text::tr_label("Move later"))
-                    .clicked()
-                {
-                    *error = app.run("config.rule", json!({"id":rule.id,"index":index+1})).err();
-                }
-                if ui_kit::button(ui, solidcraft_ui_text::tr_label("Delete"), ui_kit::Button::Normal).clicked() {
-                    *error = app.run("config.rule", json!({"id":rule.id,"delete":true})).err();
-                }
-            }) {
+            table.row(ui, &rule.id, false, |row| {
+                row.cell(|ui| {
+                    let response = ui_kit::checkbox(ui, "", &mut enabled).backing_on_hover_text(solidcraft_ui_text::tr_label("Enable rule"));
+                    crate::scenario::publish_handle(&format!("config:rule:{}:enabled", rule.id), response.rect.center());
+                });
+                row.cell(|ui| ui_kit::text(ui, &rule.name, ui_kit::Text::NameCell(true)));
+                row.cell(|ui| ui_kit::text(ui, &effect_summary(&rule.effect, &features), ui_kit::Text::Cell));
+                row.cell(|ui| {
+                    if ui_kit::button(ui, solidcraft_ui_text::tr_label("Edit"), ui_kit::Button::Normal).clicked() {
+                        editor.rule = rule.clone();
+                    }
+                    for (glyph, tip, side, target) in [
+                        (ui_kit::MOVE_UP, "Move earlier", "up", index.checked_sub(1)),
+                        (ui_kit::MOVE_DOWN, "Move later", "down", (index + 1 < rules.len()).then_some(index + 1)),
+                    ] {
+                        let response = ui_kit::compact_button(ui, glyph, tip, target.is_some(), false);
+                        crate::scenario::publish_handle(&format!("config:rule:{}:{side}", rule.id), response.rect.center());
+                        if response.clicked()
+                            && let Some(target) = target
+                        {
+                            *error = app.run("config.rule", json!({"id":rule.id,"index":target})).err();
+                        }
+                    }
+                    if ui_kit::bin_button(ui, "Delete").clicked() {
+                        *error = app.run("config.rule", json!({"id":rule.id,"delete":true})).err();
+                    }
+                });
+            });
+            if enabled != rule.enabled {
                 let mut updated = rule.clone();
                 updated.enabled = enabled;
                 *error = app.run("config.rule", json!({"rule":updated})).err();
             }
-        });
-    }
+        }
+    });
     ui_kit::section(ui, "rule_editor", "Add or edit rule", false, |ui| {
         ui.vertical(|ui| {
             expression(ui, "Rule name", &mut editor.rule.name);
@@ -265,67 +276,82 @@ pub(super) fn show(ui: &mut Ui, app: &mut SolveApp, error: &mut Option<String>, 
             editor.preview = None;
         }
         if let Some(preview) = &editor.preview {
-            ui_kit::section(ui, "rule_preview", &format!("Preview: {}", preview["active"].as_str().unwrap_or("row")), false, |ui| {
-                report(ui, solidcraft_ui_text::tr_label("Preview leaves the current design unchanged."));
-                if let Some(styles) = preview["styles"].as_array() {
-                    for style in styles {
-                        report(
-                            ui,
-                            format!(
-                                "{}: {} (shared definition)",
-                                style["target"].as_str().unwrap_or("Appearance"),
-                                if style["dormant"].as_bool() == Some(true) { "dormant" } else { "resolved" }
-                            ),
-                        );
-                    }
-                }
-                if let Some(trace) = preview["trace"].as_array() {
-                    for entry in trace {
-                        report(
-                            ui,
-                            format!(
-                                "{} — {}",
-                                entry["name"].as_str().unwrap_or("rule"),
-                                if entry["matched"].as_bool() == Some(true) { "matched" } else { "skipped" }
-                            ),
-                        );
-                        if entry["matched"].as_bool() == Some(true)
-                            && let Ok(effect) = serde_json::from_value::<RuleEffect>(entry["effect"].clone())
-                        {
-                            report(
-                                ui,
-                                match effect {
-                                    RuleEffect::DriveParameter { parameter, expression } => format!("Driven: {parameter} = {expression}"),
-                                    RuleEffect::DriveSuppression { feature, value } => format!(
-                                        "Driven: {} is {}",
-                                        features.iter().find(|f| f.0 == feature).map(|f| f.1.as_str()).unwrap_or("feature"),
-                                        if value { "suppressed" } else { "unsuppressed" }
-                                    ),
-                                    RuleEffect::ParameterRange { parameter, minimum, maximum } => {
-                                        format!("Restricted: {parameter}, {minimum} through {maximum}")
+            let title = solidcraft_ui_text::format("config.rules.preview", &[("row", preview["active"].as_str().unwrap_or_default())]);
+            ui_kit::section(ui, "rule_preview", &title, false, |ui| {
+                ui_kit::text(ui, solidcraft_ui_text::tr_label("Preview leaves the current design unchanged."), ui_kit::Text::Note("rule_report"));
+                let columns = [
+                    ui_kit::Column::new("Name", 1.0).flex().min_content_width(t.form_label_width),
+                    ui_kit::Column::new("Status", 0.6).flex().min_content_width(t.form_close_size * 3.0),
+                    ui_kit::Column::new("Result", 1.4).flex().min_content_width(t.form_label_width),
+                ];
+                ui_kit::table_custom(ui, "configuration_preview", &columns, solidcraft_ui_text::tr("manage.empty"), |ui, table| {
+                    table.headers(ui, |_, _| false);
+                    for ((key, label), open) in [
+                        ("styles", solidcraft_ui_text::tr("render.appearances")),
+                        ("trace", solidcraft_ui_text::tr_label("Rules")),
+                        ("parameters", solidcraft_ui_text::tr("ui.parameters")),
+                    ]
+                    .into_iter()
+                    .zip(&mut editor.preview_bands)
+                    {
+                        let entries: Vec<_> = preview[key]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .filter(|entry| {
+                                key != "parameters" || entry["name"].as_str().is_some_and(|name| all_parameters.iter().any(|p| p == name))
+                            })
+                            .collect();
+                        if entries.is_empty() {
+                            continue;
+                        }
+                        table.group(ui, key, label, entries.len(), open);
+                        if !*open {
+                            continue;
+                        }
+                        for (index, entry) in entries.into_iter().enumerate() {
+                            let (name, status, result) = match key {
+                                "styles" => (
+                                    entry["target"].as_str().unwrap_or_else(|| solidcraft_ui_text::tr_label("Appearance")),
+                                    solidcraft_ui_text::tr(if entry["dormant"].as_bool() == Some(true) {
+                                        "config.rules.dormant"
+                                    } else {
+                                        "config.rules.resolved"
+                                    }),
+                                    solidcraft_ui_text::tr("config.rules.shared_definition").to_owned(),
+                                ),
+                                "trace" => {
+                                    let matched = entry["matched"].as_bool() == Some(true);
+                                    let result = if matched {
+                                        serde_json::from_value::<RuleEffect>(entry["effect"].clone())
+                                            .ok()
+                                            .map(|effect| effect_summary(&effect, &features))
+                                            .unwrap_or_default()
+                                    } else {
+                                        String::new()
+                                    };
+                                    (
+                                        entry["name"].as_str().unwrap_or_else(|| solidcraft_ui_text::tr_label("Rule")),
+                                        solidcraft_ui_text::tr(if matched { "config.rules.matched" } else { "config.rules.skipped" }),
+                                        result,
+                                    )
+                                }
+                                _ => (entry["name"].as_str().unwrap_or_default(), "", entry["expression"].as_str().unwrap_or_default().to_owned()),
+                            };
+                            table.row(ui, &format!("{key}:{index}"), false, |row| {
+                                row.cell(|ui| ui_kit::text(ui, name, ui_kit::Text::NameCell(false)));
+                                row.cell(|ui| ui_kit::text(ui, status, ui_kit::Text::Cell));
+                                row.cell(|ui| {
+                                    let response =
+                                        ui_kit::text(ui, &result, if key == "parameters" { ui_kit::Text::MonoCell } else { ui_kit::Text::Cell });
+                                    if key == "parameters" {
+                                        crate::scenario::publish_handle(&format!("config:preview:param:{name}"), response.rect.center());
                                     }
-                                    RuleEffect::AllowParameterValues { parameter, expressions } => {
-                                        format!("Restricted: {parameter}, {}", expressions.join("; "))
-                                    }
-                                },
-                            );
+                                });
+                            });
                         }
                     }
-                }
-                if let Some(parameters) = preview["parameters"].as_array() {
-                    for parameter in parameters {
-                        if let Some(name) = parameter["name"].as_str()
-                            && all_parameters.iter().any(|p| p == name)
-                        {
-                            let response = ui_kit::text(
-                                ui,
-                                &format!("{name} = {}", parameter["expression"].as_str().unwrap_or("")),
-                                ui_kit::Text::Report("preview_parameter", false),
-                            );
-                            crate::scenario::publish_handle(&format!("config:preview:param:{name}"), response.rect.center());
-                        }
-                    }
-                }
+                });
             });
         }
     });
@@ -337,8 +363,27 @@ fn columns_note(ui: &mut Ui, unlisted: bool, message: &'static str) {
         ui_kit::text(ui, solidcraft_ui_text::tr(message), ui_kit::Text::Note(message));
     }
 }
-fn report(ui: &mut Ui, text: impl AsRef<str>) {
-    ui_kit::text(ui, solidcraft_ui_text::tr_label(text.as_ref()), ui_kit::Text::Report("rule_report", false));
+fn effect_summary(effect: &RuleEffect, features: &[(u64, String)]) -> String {
+    use solidcraft_ui_text::format;
+    match effect {
+        RuleEffect::DriveParameter { parameter, expression } => format("config.rules.drive", &[("parameter", parameter), ("expression", expression)]),
+        RuleEffect::DriveSuppression { feature, value } => format(
+            "config.rules.suppression",
+            &[
+                (
+                    "feature",
+                    features.iter().find(|f| f.0 == *feature).map(|f| f.1.as_str()).unwrap_or_else(|| solidcraft_ui_text::tr_label("Feature")),
+                ),
+                ("value", &value.to_string()),
+            ],
+        ),
+        RuleEffect::ParameterRange { parameter, minimum, maximum } => {
+            format("config.rules.range", &[("parameter", parameter), ("minimum", minimum), ("maximum", maximum)])
+        }
+        RuleEffect::AllowParameterValues { parameter, expressions } => {
+            format("config.rules.allowed", &[("parameter", parameter), ("values", &expressions.join(", "))])
+        }
+    }
 }
 
 fn feature_choice(ui: &mut Ui, id: &str, feature: &mut u64, features: &[(u64, String)]) {
