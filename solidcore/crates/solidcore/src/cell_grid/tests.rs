@@ -9,7 +9,7 @@
     clippy::float_cmp
 )]
 
-use std::f64::consts::{FRAC_PI_2, FRAC_PI_6, PI, TAU};
+use std::f64::consts::{FRAC_PI_2, FRAC_PI_6, PI};
 
 use crate::math::Vec2;
 use crate::prism::profile::{Loop2, Seg2};
@@ -2660,7 +2660,7 @@ fn square_and_hexagon_cells_keep_their_margin_from_a_cubic_within_the_chords_bou
     let ngon = |c: Vec2, r: f64, n: usize, turn: f64| -> Vec<Vec2> {
         (0..n)
             .map(|k| {
-                let a = turn + TAU * k as f64 / n as f64;
+                let a = turn + std::f64::consts::TAU * k as f64 / n as f64;
                 c + v(a.cos(), a.sin()) * r
             })
             .collect()
@@ -2725,7 +2725,7 @@ fn a_segment_far_from_the_origin_keeps_its_clearance_from_an_arc() {
         center: v(0.0, 0.0),
         radius: 1.0,
         start: 0.0,
-        sweep: TAU,
+        sweep: std::f64::consts::TAU,
     })
     .unwrap();
     let quarter = Edge::of(&Seg2::Arc {
@@ -3320,7 +3320,7 @@ fn a_filled_voronoi_grid_leaves_no_rim_wider_than_one_web() {
             probes.push(v(d + (40.0 - 2.0 * d) * f, 30.0 - d));
             probes.push(v(d, d + (30.0 - 2.0 * d) * f));
             probes.push(v(40.0 - d, d + (30.0 - 2.0 * d) * f));
-            let t = TAU * f;
+            let t = std::f64::consts::TAU * f;
             probes.push(v(20.0, 15.0) + v(t.cos(), t.sin()) * (4.0 + d));
         }
         // Just inside the rim's inner edge: on a cell or in a web between two.
@@ -3494,7 +3494,7 @@ fn a_filled_voronoi_grid_keeps_a_rim_inside_a_corner_that_turns_away_and_round_a
             center: v(15.0, 30.0),
             radius: 6.0,
             start: 0.0,
-            sweep: TAU,
+            sweep: std::f64::consts::TAU,
         }],
     };
     let field = [l, hole];
