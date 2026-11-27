@@ -7084,7 +7084,7 @@ fn markdown_snapshot_keeps_attachments_and_filters_chat_cards() {
         Item::Plan(vec![("secret-plan".into(), "pending".into())]),
         Item::Permission { key: 1, title: "secret-permission".into(), options: Vec::new(), answer: Some("Allow".into()) },
         Item::Approval { id: 2, title: "secret-approval".into(), tool: "file.save".into(), answer: None },
-        Item::Changes { steps: 4, summary: Vec::new(), revision: revision.clone(), history: revision, undone: false },
+        Item::Changes { steps: 4, summary: Vec::new(), features: Vec::new(), revision: revision.clone(), history: revision, undone: false },
         Item::Tool {
             id: "tool-id".into(),
             title: "Read dimensions".into(),
