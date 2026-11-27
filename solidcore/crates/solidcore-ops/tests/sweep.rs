@@ -25,10 +25,10 @@ mod solidcraft_fixes;
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
 use solidcore_ops::sweep::{
-    arcs_on_one_circle, curves_meet, extrude, face_section, join_arcs, loft, loft_sheet,
-    loft_to_point, loft_to_point_through, planar_faces, project_curves, revolve, screw_sweep,
-    sweep_placed, sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends, Join, PathCheck,
-    SweepFrame, SweepRoute, Verdict,
+    arcs_on_one_circle, curves_meet, extrude, face_section, join_arcs, join_profile_arcs, loft,
+    loft_sheet, loft_to_point, loft_to_point_through, planar_faces, project_curves, revolve,
+    screw_sweep, sweep_placed, sweep_stations, Affine, CornerRefusal, Curve, DraftCorner, Ends,
+    Join, PathCheck, SweepFrame, SweepRoute, Verdict,
 };
 use solidcore_ops::sweep::{
     loft_with_ends, screw_sweep_with, LoftEnd, ScrewSweepOptions, ScrewWalls,
@@ -590,6 +590,26 @@ fn screw_sweep_joined_walls_are_the_pieces_solid() {
     assert!(rel(vp, vj) < 1e-9, "pieces {vp}, joined {vj}");
 }
 
+/// #22577: a thread's V along a whole rod, pitch 1.25 at SolidCraft's tolerance (a
+/// ten-thousandth of the pitch). 1000 turns are within the turns' bound but take more spans
+/// than the kernel allows (eight a half turn at this tolerance), and the refusal is the
+/// kernel's, with its reason, not a bare argument error.
+#[test]
+fn screw_sweep_turns_are_bounded_by_its_spans() {
+    let thread = polygon(&[[7.2, 0.0, 0.5], [8.5, 0.0, 0.0], [8.5, 0.0, 1.0]]);
+    let refusal = screw_sweep(&thread, [0.0; 3], Z, 1.25, 1000.0, None, 1.25e-4).err();
+    assert!(
+        matches!(
+            refusal,
+            Some(Error::Refused {
+                reason: "too many turns for the tolerance: more spans than a screw sweep takes",
+                ..
+            })
+        ),
+        "{refusal:?}"
+    );
+}
+
 macro_rules! cases {
     ($($m:ident),* $(,)?) => {$(
         #[test]
@@ -639,6 +659,97 @@ fn faces(b: &Body) -> usize {
 
 /// The tolerance arcs are joined to here.
 const JOIN: f64 = 1e-6;
+
+#[test]
+fn joining_profile_arcs_preserves_a_single_circles_seam() {
+    let profile = vec![arc5([1.0, 0.0, 0.0], 0.7, 0.7 + TAU)];
+    assert_eq!(join_profile_arcs(&profile).unwrap(), profile);
+}
+
+#[test]
+fn joining_profile_arcs_preserves_nurbs_data() {
+    let profile = vec![
+        Curve::Nurbs {
+            degree: 2,
+            points: vec![
+                [0.0, 0.0, 0.0, 1.0],
+                [2.0, 3.0, 0.0, 0.5],
+                [4.0, 0.0, 0.0, 1.0],
+            ],
+            knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        },
+        line([4.0, 0.0, 0.0], [0.0, 0.0, 0.0]),
+    ];
+    assert_eq!(join_profile_arcs(&profile).unwrap(), profile);
+}
+
+#[test]
+fn joining_profile_arcs_keeps_closed_loops_separate() {
+    // Both separated and coincident loops keep their own complete turn.
+    for x in [0.0, 20.0] {
+        let mut second = halves();
+        for c in &mut second {
+            if let Curve::Arc { center, .. } = c {
+                center[0] = x;
+            }
+        }
+        let profile = [halves(), second].concat();
+        let expected = vec![
+            circle([0.0; 3], Z, [1.0, 0.0, 0.0], 5.0),
+            circle([x, 0.0, 0.0], Z, [1.0, 0.0, 0.0], 5.0),
+        ];
+        assert_eq!(join_profile_arcs(&profile).unwrap(), expected);
+    }
+}
+
+#[test]
+fn joining_profile_arcs_preserves_circles_that_drift_between_pieces() {
+    let tol = solidcore_ops::sweep::zone_tolerance().unwrap();
+    let profile: Vec<_> = (0..6)
+        .map(|i| Curve::Arc {
+            center: [0.9 * tol * f64::from(i), 0.0, 0.0],
+            axis: Z,
+            reference: [1.0, 0.0, 0.0],
+            radius: 1.0,
+            start: 0.5 * f64::from(i),
+            end: 0.5 * f64::from(i + 1),
+        })
+        .collect();
+    assert_eq!(join_profile_arcs(&profile).unwrap(), profile);
+}
+
+#[test]
+fn an_uncertified_wraparound_join_keeps_the_original_profile_order() {
+    // Valid arcs with identical definitions can have an accumulated-angle error bound
+    // larger than the zone tolerance. An optional join must leave that profile alone.
+    let start: f64 = 999_999.0;
+    let radius = 100_000.0;
+    let arc = |a, b| Curve::Arc {
+        center: [0.0; 3],
+        axis: Z,
+        reference: [1.0, 0.0, 0.0],
+        radius,
+        start: a,
+        end: b,
+    };
+    let arcs = vec![arc(start, start + 0.25), arc(start + 0.25, start + 0.5)];
+    let tol = solidcore_ops::sweep::zone_tolerance().unwrap();
+    assert!(join_arcs(&arcs, Join::Open, tol).is_err());
+    let point = |t: f64| [radius * t.cos(), radius * t.sin(), 0.0];
+    let profile = vec![
+        arcs[1].clone(),
+        line(point(start + 0.5), point(start)),
+        arcs[0].clone(),
+    ];
+    for i in 0..profile.len() {
+        assert!(
+            curves_meet(&profile[i], &profile[(i + 1) % profile.len()], tol)
+                .unwrap()
+                .is_yes()
+        );
+    }
+    assert_eq!(join_profile_arcs(&profile).unwrap(), profile);
+}
 
 #[test]
 fn a_circle_in_pieces_joins_into_one_circle_that_sweeps_one_wall() {
@@ -1082,6 +1193,102 @@ fn a_closed_path_whose_ends_are_almost_meeting_is_refused() {
     );
 }
 
+/// The closed foot profile in the plane y = 21 (x across the path at x = -0.25, z up): a
+/// pentagon, drawn as its five sides or, `split`, as ten lines with the bottom split three times
+/// and the two 45 degree chamfers split once and twice (the upper chamfer's points sit 0.25 along
+/// it either side of the path, as a sketch offset leaves them).
+fn foot_profile(split: bool) -> Vec<Curve> {
+    let s = 0.25 * std::f64::consts::FRAC_1_SQRT_2;
+    let c = 0.7 + 0.25 * (2f64.sqrt() - 1.0);
+    let pts: Vec<[f64; 2]> = if split {
+        vec![
+            [-1.25, 0.0],
+            [-0.25, 0.0],
+            [2.6, 0.0],
+            [2.15 + c, 0.0],
+            [2.15 + c - s, s],
+            [2.15, c],
+            [2.15, c + 1.8],
+            [-0.25 + s, c + 4.2 - s],
+            [-0.25, c + 4.2],
+            [-1.25, c + 5.2],
+        ]
+    } else {
+        vec![
+            [-1.25, 0.0],
+            [2.15 + c, 0.0],
+            [2.15, c],
+            [2.15, c + 1.8],
+            [-1.25, c + 5.2],
+        ]
+    };
+    let pts: Vec<[f64; 3]> = pts.iter().map(|p| [p[0], 21.0, p[1]]).collect();
+    polygon(&pts)
+}
+
+/// The 42 mm square with corners of radius 4 about (3.75, 3.75) and the other three corners
+/// of a 34 mm square from it, z = 0, starting half way along its side x = -0.25 and running
+/// counter-clockwise seen from below (down that side first).
+fn rounded_square_path() -> Vec<Curve> {
+    let arc = |center: [f64; 2], reference: [f64; 2]| Curve::Arc {
+        center: [center[0], center[1], 0.0],
+        axis: Z,
+        reference: [reference[0], reference[1], 0.0],
+        radius: 4.0,
+        start: 0.0,
+        end: FRAC_PI_2,
+    };
+    vec![
+        line([-0.25, 21.0, 0.0], [-0.25, 3.75, 0.0]),
+        arc([3.75, 3.75], [-1.0, 0.0]),
+        line([3.75, -0.25, 0.0], [37.75, -0.25, 0.0]),
+        arc([37.75, 3.75], [0.0, -1.0]),
+        line([41.75, 3.75, 0.0], [41.75, 37.75, 0.0]),
+        arc([37.75, 37.75], [1.0, 0.0]),
+        line([37.75, 41.75, 0.0], [3.75, 41.75, 0.0]),
+        arc([3.75, 37.75], [0.0, 1.0]),
+        line([-0.25, 37.75, 0.0], [-0.25, 21.0, 0.0]),
+    ]
+}
+
+/// A 41.5 x 41.5 x 35 box cut by the foot profile swept round its rounded square path.
+fn box_cut_by_the_foot(split: bool) -> Body {
+    let (tool, _, route) = sweep_placed(
+        &foot_profile(split),
+        &rounded_square_path(),
+        SweepFrame::Follow,
+        true,
+    )
+    .unwrap();
+    assert_eq!(route, SweepRoute::Curve(SweepFrame::Follow));
+    let bin = make_box([0.0; 3], [41.5, 41.5, 35.0]).unwrap();
+    solidcore_ops::boolean::boolean(bin, tool, solidcore_ops::boolean::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap()
+}
+
+/// T-2272: a profile's run of collinear lines sweeps as one line. The curve sweep joins the
+/// profile with one knot span per line and makes a face only where it turns a corner, so the
+/// upper chamfer's three lines (3.14, 0.25 and 1.41 mm) were one face whose parameter speed
+/// jumped 12.6 and 5.7 times at its hidden knots. Round each corner the box's side crosses that
+/// face from where it grazes it (the chamfer's circle of radius 3.75 about the corner's centre,
+/// the distance to the side) to its top, across both creases, and the boolean fitted that trim
+/// with near-kinks: SMLib's check refused 8 of them (test 13, a radius of curvature of 9e-6
+/// against 1.2e-4). Split or not, the profile is the same pentagon, so the cut is the same
+/// solid: it passes the check and has the volume and the faces of the unsplit profile's cut.
+#[test]
+fn a_run_of_collinear_profile_lines_sweeps_as_one_line() {
+    rig_fixes();
+    let split = box_cut_by_the_foot(true);
+    let report = split.check(CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    let whole = box_cut_by_the_foot(false);
+    assert!(whole.check(CheckLevel::All).unwrap().is_valid());
+    let (v_split, v_whole) = (split.volume(1e-12).unwrap(), whole.volume(1e-12).unwrap());
+    assert!(rel(v_split, v_whole) < 1e-9, "{v_split} against {v_whole}");
+    assert_eq!(split.counts().unwrap(), whole.counts().unwrap());
+}
+
 /// The faces of a 10 mm box named by record index through its `Order`: the plane z = 5 (its
 /// normal at length 2) sections the four side faces in one curve each, at z = 5, and misses the
 /// top and bottom; an index past the record's faces and a normal of no length are refused.
@@ -1308,6 +1515,218 @@ fn lofted(sections: &[Vec<Curve>], ends: [LoftEnd; 2]) -> Body {
     let b = loft_with_ends(sections, true, ends).unwrap();
     assert!(b.check(CheckLevel::All).unwrap().is_valid());
     b
+}
+
+/// A circle-to-slot loft has exact, mixed-degree rims. The match splits the circle
+/// over the four original slot segments; it must close with independent planar caps.
+#[test]
+fn planar_g1_circle_to_slot_keeps_the_original_caps() {
+    use solidcore_ops::stitch::{open_edges, sew};
+    use solidcore_ops::sweep::{loft_sheet_planar_g1, LoftSection};
+    use solidcore_record::{Loop2, Plane, Seg2, Vec2, Vec3};
+
+    rig_fixes();
+    let section = |y, z, segs| LoftSection {
+        plane: Plane {
+            origin: Vec3::new(0.0, y, z),
+            x: Vec3::new(1.0, 0.0, 0.0),
+            y: Vec3::new(0.0, 1.0, 0.0),
+        },
+        segs,
+    };
+    let v = Vec2::new;
+    let a = section(0.0, 0.0, Loop2::circle(v(0.0, 0.0), 10.0).segs);
+    let b = section(
+        6.0,
+        30.0,
+        vec![
+            Seg2::Line {
+                a: v(-10.0, -8.0),
+                b: v(10.0, -8.0),
+            },
+            Seg2::Arc {
+                center: v(10.0, 0.0),
+                radius: 8.0,
+                start: -FRAC_PI_2,
+                sweep: PI,
+            },
+            Seg2::Line {
+                a: v(10.0, 8.0),
+                b: v(-10.0, 8.0),
+            },
+            Seg2::Arc {
+                center: v(-10.0, 0.0),
+                radius: 8.0,
+                start: FRAC_PI_2,
+                sweep: PI,
+            },
+        ],
+    );
+    let cap = |s: &LoftSection| {
+        let curves = s
+            .segs
+            .iter()
+            .map(|seg| Curve::from_seg2(seg, &s.plane).unwrap())
+            .collect::<Vec<_>>();
+        planar_faces(&curves).unwrap()
+    };
+    let caps = [cap(&a), cap(&b)];
+    for (end, sections) in [(0, [a.clone(), b.clone()]), (1, [b, a])] {
+        let (record, sources) = loft_sheet_planar_g1(&sections, end, 0.0, true).unwrap();
+        assert_eq!(record.faces.len(), 4);
+        assert_eq!(sources.len(), record.faces.len());
+        let mut seen = [false; 4];
+        for (face, sources) in record.faces.iter().zip(sources) {
+            let [solidcore_record::brep::Loop::Edges { edges }] = face.loops.as_slice() else {
+                panic!("expected one edge loop per wall");
+            };
+            let mut slot_rims = edges.iter().filter_map(|edge| {
+                let [a, b] = record.edges[edge.edge as usize]
+                    .vertices
+                    .map(|v| record.vertices[v as usize].point);
+                ((a[2] - 30.0).abs() < 1e-10 && (b[2] - 30.0).abs() < 1e-10).then_some((a, b))
+            });
+            let (a, b) = slot_rims.next().unwrap();
+            assert!(slot_rims.next().is_none());
+            // The slot's four endpoint pairs uniquely identify its source segments.
+            let slot = [(0.0, -2.0), (10.0, 6.0), (0.0, 14.0), (-10.0, 6.0)]
+                .iter()
+                .position(|&(x, y)| {
+                    (a[0] + b[0] - 2.0 * x).abs() < 1e-10 && (a[1] + b[1] - 2.0 * y).abs() < 1e-10
+                })
+                .unwrap();
+            assert!(!std::mem::replace(&mut seen[slot], true));
+            let expected = if end == 0 { [0, slot + 1] } else { [slot, 4] };
+            assert_eq!(sources, expected, "sources for slot segment {slot}");
+        }
+        let (sheet, _) = Body::from_record(&record, true).unwrap();
+        assert_slot_rims(&sheet, &open_edges(&sheet).unwrap());
+        let sewn = sew(&[&sheet, &caps[0], &caps[1]], 1e-5).unwrap();
+        assert!(sewn.closed && sewn.open_edges.is_empty());
+        assert!(sewn.body.check(CheckLevel::All).unwrap().is_valid());
+    }
+}
+
+/// Supporting planes may intersect the other rim even when both finite caps
+/// are separate. Do not require a nonzero projection on the free plane's normal.
+#[test]
+fn planar_g1_keeps_caps_when_their_supporting_planes_cross() {
+    use solidcore_ops::stitch::sew;
+    use solidcore_ops::sweep::{loft_sheet_planar_g1, LoftSection};
+    use solidcore_record::{Loop2, Plane, Vec2, Vec3};
+
+    rig_fixes();
+    let rect = |w: f64| {
+        Loop2::polygon(&[
+            Vec2::new(-2.0, -w),
+            Vec2::new(2.0, -w),
+            Vec2::new(2.0, w),
+            Vec2::new(-2.0, w),
+        ])
+        .segs
+    };
+    let a = LoftSection {
+        plane: Plane {
+            origin: Vec3::ZERO,
+            x: Vec3::new(1.0, 0.0, 0.0),
+            y: Vec3::new(0.0, 1.0, 0.0),
+        },
+        segs: rect(2.0),
+    };
+    let cap = |s: &LoftSection| {
+        planar_faces(
+            &s.segs
+                .iter()
+                .map(|g| Curve::from_seg2(g, &s.plane).unwrap())
+                .collect::<Vec<_>>(),
+        )
+        .unwrap()
+    };
+    let ca = cap(&a);
+    for z in [18.749, 18.751] {
+        let b = LoftSection {
+            plane: Plane {
+                origin: Vec3::new(0.0, 25.0, z),
+                x: Vec3::new(1.0, 0.0, 0.0),
+                y: Vec3::new(0.0, 0.8, 0.6),
+            },
+            segs: rect(2.5),
+        };
+        let cb = cap(&b);
+        for crown in [0.0, 3.0] {
+            let (record, _) =
+                loft_sheet_planar_g1(&[a.clone(), b.clone()], 0, crown, true).unwrap();
+            let (sheet, _) = Body::from_record(&record, true).unwrap();
+            let sewn = sew(&[&sheet, &ca, &cb], 1e-5).unwrap();
+            assert!(sewn.closed && sewn.open_edges.is_empty());
+            assert!(sewn.body.check(CheckLevel::All).unwrap().is_valid());
+        }
+    }
+}
+
+/// Check the entire exported rim, not just the vertices that met during stitching.
+fn assert_slot_rims(sheet: &Body, rims: &[usize]) {
+    use solidcore::curve::curve::CurveKind;
+    use solidcore::curve::from_parameters::from_parameters;
+    use solidcore::nurbs::certificate::{on_circle, turn_about_axis, OnCircle};
+    use solidcore::{Kernel, Vec3};
+
+    let k = Kernel::default();
+    let (r, _) = sheet.to_record().unwrap();
+    assert_eq!(r.shells.len(), 1);
+    let mut angles = [0.0_f64; 3];
+    let mut line_levels = Vec::new();
+    for &i in rims {
+        let e = &r.edges[i];
+        let input = solidcore_convert::curve(e.parameters()).unwrap();
+        let edge = from_parameters(&k, &input, e.interval).unwrap();
+        let CurveKind::BSpline(spline) = edge.curve.kind() else {
+            panic!("expected a spline rim")
+        };
+        let curve = spline.gw_nurb().unwrap();
+        let [a, b] = e.vertices.map(|j| {
+            let [x, y, z] = r.vertices[j as usize].point;
+            Vec3::new(x, y, z)
+        });
+        if (a.z - 30.0).abs() < 1e-10 && (a.y - b.y).abs() < 1e-10 && (a.x - b.x).abs() > 19.0 {
+            // Positive weights put the entire trim in this segment's capsule.
+            assert!(curve.cpts().iter().all(|q| {
+                let p = q.to_euclid();
+                q.w > 0.0
+                    && (p.y - a.y).abs() < 1e-10
+                    && (p.z - 30.0).abs() < 1e-10
+                    && p.x.abs() <= 10.0 + 1e-10
+            }));
+            assert!((a.x.abs() - 10.0).abs() < 1e-10 && (b.x.abs() - 10.0).abs() < 1e-10);
+            line_levels.push(a.y);
+        } else {
+            let (j, c, radius) = if a.z.abs() < 1e-10 {
+                (0, Vec3::ZERO, 10.0)
+            } else if a.x > 0.0 {
+                (1, Vec3::new(10.0, 6.0, 30.0), 8.0)
+            } else {
+                (2, Vec3::new(-10.0, 6.0, 30.0), 8.0)
+            };
+            assert_eq!(
+                on_circle(&k, curve, c, Vec3::Z, radius, 1e-10).unwrap(),
+                OnCircle::Within
+            );
+            let turn = turn_about_axis(curve, c, Vec3::Z, e.interval)
+                .unwrap()
+                .unwrap();
+            let (da, db) = (a - c, b - c);
+            angles[j] += (turn * da.cross(db).z.atan2(da.dot(db))).rem_euclid(TAU);
+        }
+    }
+    assert_eq!(rims.len(), 8);
+    line_levels.sort_by(f64::total_cmp);
+    assert_eq!(line_levels.len(), 2);
+    for (got, want) in line_levels.into_iter().zip([-2.0, 14.0]) {
+        assert!((got - want).abs() < 1e-10);
+    }
+    for (got, want) in angles.into_iter().zip([TAU, PI, PI]) {
+        assert!((got - want).abs() < 1e-10, "sweep {got} != {want}");
+    }
 }
 
 /// Two equal squares, one above the other: every point's straight way to the next section is

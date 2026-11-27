@@ -154,7 +154,7 @@ impl SketchClip {
         }
         for (src, _) in &mut clip.texts {
             if let LinkSource::Text { exprs, .. } = src {
-                *exprs = Default::default();
+                **exprs = Default::default();
             }
         }
         clip

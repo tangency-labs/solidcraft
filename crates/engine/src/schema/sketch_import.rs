@@ -40,7 +40,7 @@ fn some<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = source_required)]
 pub struct InsertDrawingKeys {
-    /// The drawing itself, as text. Wins over `path`. At most 16 MiB (`MAX_DRAWING_BYTES`).
+    /// The drawing itself, as text. Wins over `path`. At most 64 MiB (`MAX_DRAWING_BYTES`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<DrawingText>,
     /// The drawing file to read (not blank, fewer than 4096 UTF-8 bytes). Used when `text` is
@@ -80,10 +80,24 @@ pub struct InsertDrawingKeys {
     /// height). Default: geometry. "viewbox" is for SVG drawings that have a sheet; a DXF has none.
     #[serde(default)]
     pub size_from: Option<DrawingSizeFrom>,
+    /// The dots per inch an SVG's pixels (its user units, and lengths without a unit) are read at,
+    /// 1 to 10000: a file drawn at 72 dpi comes in at the size it was drawn at with 72. Lengths
+    /// with their own unit (`mm`, `in`, `pt`) keep it. Default: 96, as CSS has it. For SVG
+    /// drawings; a DXF has no pixels.
+    #[serde(default)]
+    pub dpi: Option<f64>,
     /// The distance in mm within which ends join into one point, 1e-9 to 10 (a value outside is
     /// brought inside; one that is not above 0 reads as the default). Default: 0.0001.
     #[serde(default)]
     pub tolerance: Option<f64>,
+    /// How far in mm a removed vertex may lie from the outline kept, measured on the drawing as
+    /// it is drawn (the same at any `scale`), 0 to 100 (a value outside is brought inside, and
+    /// never more than a hundredth of the drawing). Runs of consecutive lines that meet end to
+    /// end are replaced by fewer lines that follow them within it, so a dense drawing comes in
+    /// with fewer curves; arcs, circles, ellipses, splines, conics and text stay as drawn.
+    /// Default: 0, every edge as drawn.
+    #[serde(default)]
+    pub simplify: Option<f64>,
     /// `true` puts a Fix constraint on every point the drawing adds (as `sketch.constraint.fix`
     /// does), so it stays where it is put; a circle's or ellipse's radius stays free, and text and
     /// the points the sketch already had are not touched. Default: false.
@@ -807,6 +821,14 @@ pub struct DrawingBoundsParams {
     #[serde(default, deserialize_with = "drawing_format", skip_serializing_if = "Option::is_none")]
     #[schemars(schema_with = "drawing_format_schema")]
     pub format: Option<String>,
+    /// The dots per inch an SVG's pixels are read at, 1 to 10000, as `sketch.insert_svg`'s
+    /// `dpi`. Default: 96. For SVG drawings; a DXF has no pixels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dpi: Option<f64>,
+    /// Whether to also work out the smallest Simplify distance at which the insert fits a
+    /// sketch, as `auto_simplify`. Default: false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fit: Option<bool>,
 }
 
 /// The `anyOf` saying a drawing must come from `text` or from a `path` the handler reads.
@@ -815,7 +837,7 @@ fn source_any_of() -> Value {
     serde_json::json!([{"required": ["text"]}, {"required": ["path"], "properties": {"path": read_path}}])
 }
 
-/// `sketch.drawing_bounds` reads no key but these three, so only the source rule applies.
+/// `sketch.drawing_bounds` has no rule across its keys but the source one.
 fn bounds_source_required(schema: &mut Schema) {
     schema.insert("anyOf".into(), source_any_of());
 }
@@ -862,6 +884,16 @@ pub struct DrawingBoundsResult {
     /// SVG that names no sheet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sheet: Option<DrawingBox>,
+    /// How many drawn entities the file has (lines, arcs, circles, ellipses, splines, conics and
+    /// texts): about what the insert adds curves for, so a window can tell whether the sketch
+    /// takes the drawing as drawn.
+    pub edges: usize,
+    /// With `fit`: the smallest Simplify distance, mm on the drawing to 0.01, at which the insert
+    /// adds it to a sketch without running out of points or curves: 0 when it fits as drawn.
+    /// Left out when no distance up to the cap (a hundredth of the drawing's span, and 100 mm)
+    /// does, and when `fit` is not given.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_simplify: Option<f64>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,

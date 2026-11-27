@@ -32,7 +32,11 @@ fn info(focused: bool) -> egui::ViewportInfo {
 /// What eframe does for an immediate viewport: a pass of the shared context with that window's
 /// own input, inside the main window's frame.
 fn install_renderer() {
-    egui::Context::set_immediate_viewport_renderer(|ctx, viewport| {
+    install_renderer_with_output(|_, _| {});
+}
+
+fn install_renderer_with_output(observe: impl Fn(egui::ViewportId, &egui::PlatformOutput) + 'static) {
+    egui::Context::set_immediate_viewport_renderer(move |ctx, viewport| {
         let id = viewport.ids.this;
         assert_eq!(viewport.builder.native_owner, Some(egui::ViewportId::ROOT), "immediate view has the main window as its owner");
         SEEN.with(|seen| {
@@ -62,6 +66,7 @@ fn install_renderer() {
                 }
             });
         });
+        observe(id, &out.platform_output);
         out.textures_delta.clear();
     });
 }
@@ -279,6 +284,84 @@ fn a_right_click_in_the_popped_out_browser_opens_its_menu_in_that_window() {
     assert!(h.app.viewport.context_menu.is_none(), "a click elsewhere closes the menu");
 }
 
+#[test]
+fn a_collapsed_native_assistant_header_opens_an_interactive_export_dialog() {
+    use egui::accesskit::{Action, Role, Toggled};
+    use solidcraft_engine::panels::InstanceId;
+    use std::rc::Rc;
+
+    SEEN.with(|seen| seen.borrow_mut().clear());
+    PENDING.with(|pending| pending.borrow_mut().clear());
+    FOCUSED.with(|focused| *focused.borrow_mut() = None);
+    let mut h = Harness::new();
+    h.ctx.set_embed_viewports(false);
+    h.app.home.open = false;
+    h.app.preferences.language = "en".into();
+    h.app.preferences.ai_features = true;
+    h.app.preferences.agent_chat_popped = false;
+    h.app.agent_chat.open = true;
+    h.app.agent_chat.items.push(crate::agent_chat::Item::Agent { thought: false, text: "A retained conversation".into() });
+    let controls = Rc::new(RefCell::new(HashMap::new()));
+    let capture = controls.clone();
+    let header = "Export conversation as Markdown…";
+    let checkbox = "Include tool details";
+    install_renderer_with_output(move |id, output| {
+        let mut controls = capture.borrow_mut();
+        controls.retain(|(window, _), _| *window != id);
+        for (_, node) in output.accesskit_update.iter().flat_map(|update| &update.nodes) {
+            let label = match (node.role(), node.label()) {
+                (Role::Button, Some(label)) if label == header => header,
+                (Role::CheckBox, Some(label)) if label == checkbox => checkbox,
+                _ => continue,
+            };
+            if let Some(bounds) = node.bounds().filter(|bounds| bounds.x0 < bounds.x1 && bounds.y0 < bounds.y1)
+                && node.supports_action(Action::Click)
+            {
+                let at = egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32);
+                controls.insert((id, label), (at, node.toggled()));
+            }
+        }
+    });
+
+    for _ in 0..3 {
+        frame(&mut h, Vec::new());
+    }
+    pop_out(&mut h, "assistant");
+    h.app.run("panel.collapse", json!({"target": {"type": "instance", "id": "assistant"}, "collapsed": true})).unwrap();
+    let layout = h.app.panel_runtime().unwrap().layout().layout();
+    let assistant = InstanceId::new("assistant").unwrap();
+    assert!(layout.containing(&assistant).unwrap().collapsed, "the native header is the only Assistant surface");
+    let windows = SEEN.with(|seen| seen.borrow().clone());
+    let [window] = windows[..] else { panic!("the Assistant has exactly one native viewport: {windows:?}") };
+    FOCUSED.with(|focused| *focused.borrow_mut() = Some(window));
+    frame(&mut h, Vec::new());
+
+    let click_control = |h: &mut Harness, label| {
+        let (at, _) = controls.borrow().get(&(window, label)).copied().expect(label);
+        send(window, click(at, egui::PointerButton::Primary));
+        frame(h, Vec::new());
+        send(window, release(at, egui::PointerButton::Primary));
+        frame(h, Vec::new());
+    };
+    click_control(&mut h, header);
+    for _ in 0..3 {
+        frame(&mut h, Vec::new());
+        assert!(!crate::ui_kit::Container::modal_input_blocked(&h.ctx), "the root viewport did not draw the native Assistant's modal");
+    }
+    let tools_checked = || controls.borrow().get(&(window, checkbox)).and_then(|(_, state)| *state);
+    assert_eq!(tools_checked(), Some(Toggled::False));
+    click_control(&mut h, checkbox);
+    frame(&mut h, Vec::new());
+    assert_eq!(tools_checked(), Some(Toggled::True));
+    assert!(!h.app.file_picker_busy());
+
+    send(window, type_key(egui::Key::Escape, ""));
+    frame(&mut h, Vec::new());
+    frame(&mut h, Vec::new());
+    assert!(!controls.borrow().contains_key(&(window, checkbox)), "Escape closes the modal in its own viewport");
+    assert_eq!(h.app.agent_chat.items.len(), 1);
+}
+
 /// The popped-out Browser's menu closes on a click in another popped-out panel's window, as it
 /// does on a click in the main window.
 #[test]
@@ -322,4 +405,37 @@ fn find_in_timeline_from_the_popped_out_browser_shows_the_history_tab() {
     frame(&mut h, Vec::new());
     assert!(h.app.viewport.context_menu.is_none(), "the pick closes the menu");
     assert!(history_shown(&h), "Find in Timeline brings the History tab to the front");
+}
+
+#[test]
+fn a_macos_pop_out_window_keeps_its_native_frame_in_both_top_bar_modes_and_hides_the_traffic_lights_with_the_bar() {
+    use crate::view_windows::{os_title_bar_is_custom, traffic_lights_hidden};
+    use solidcraft_views::TopBar;
+    // The OS window never changes with the mode, so it is never recreated (round corners, traffic lights).
+    assert!(!os_title_bar_is_custom(true), "macOS keeps its frame and traffic lights");
+    assert!(os_title_bar_is_custom(false), "other systems draw their own caption buttons");
+    // The traffic lights follow an At top edge bar that has slid away; nothing else hides them.
+    assert!(traffic_lights_hidden(true, TopBar::Edge, 0.0));
+    assert!(!traffic_lights_hidden(true, TopBar::Edge, 0.01), "visible as soon as the bar starts to appear");
+    assert!(!traffic_lights_hidden(true, TopBar::Always, 0.0));
+    assert!(!traffic_lights_hidden(false, TopBar::Edge, 0.0));
+}
+
+#[test]
+fn choosing_at_top_edge_in_a_pop_out_window_keeps_it_open_and_its_icons_drawn() {
+    let (mut h, children) = windows(1);
+    let (_, window) = crate::documents::view_window_ids(&h.app)[0];
+    h.app.run("tab.window.set_options", json!({"window": window, "top_bar": "edge"})).unwrap();
+    for _ in 0..8 {
+        frame(&mut h, Vec::new());
+    }
+    assert_eq!(crate::documents::view_window_ids(&h.app).len(), 1, "the window is still open");
+    assert_eq!(SEEN.with(|s| s.borrow().clone()), children, "no other window appeared");
+    // The icon cache every window shares still draws.
+    let mut out = h.ctx.run_ui(egui::RawInput::default(), |ui| {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(16.0, 16.0));
+        crate::icons::paint_ink(ui.painter(), rect, "window_here", egui::Color32::WHITE);
+    });
+    assert!(out.shapes.iter().any(|s| matches!(s.shape, egui::Shape::Mesh(_))), "an icon still paints");
+    out.textures_delta.clear();
 }

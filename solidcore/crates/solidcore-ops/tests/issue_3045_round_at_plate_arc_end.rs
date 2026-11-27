@@ -2,9 +2,9 @@
 //! cylinder of radius R tangent to the side and inside the arc's cylinder; it removes 8 times
 //! (the thickness) the area between the corner and that circle.
 //!
-//! The failing configuration needs three of the fixes together: the arc face a cylinder
-//! (`linear_sweep_arc_is_cylinder`) and its offsets continued as themselves
-//! (`offset_extension_from_base`, `offset_extension_as_itself`). The continued cylinder is a
+//! The failing configuration needs the arc face a cylinder (`linear_sweep_arc_is_cylinder`),
+//! whose offsets continue as themselves (once two fixes, now the only path, WR-633/650;
+//! #18921). The continued cylinder is a
 //! whole circle, so the drop of the rail's end onto it found the circle's far side, where the
 //! solve has a second root outside the face. Measured on this plate (arc 16.25, bisected to
 //! 0.01): without the fix the round failed with status 1001 for R from 6.26 to 11.8 and built
@@ -182,7 +182,7 @@ fn check_straight_end(flags: &str) {
 const SCALE_1: [f64; 10] = [3.0, 6.0, 6.25, 6.3, 6.5, 7.0, 10.0, 11.8, 11.9, 12.0];
 const SCALE_2: [f64; 4] = [6.0, 12.5, 13.0, 20.0];
 
-/// Without the guard the three fixes fail with status 1001 for R from 6.26 to 11.8 on the scale-1
+/// Without the guard the cylinder arc face fails with status 1001 for R from 6.26 to 11.8 on the scale-1
 /// plate (and the same fractions of the arc's radius on the scale-2 plate); with none of them
 /// it always built. The radii bracket both ends of the band (6.25 and 6.3, 11.8 and 11.9) and
 /// sit inside it (6.5, 7, 10). One test: the fixes are one process-wide setting.
@@ -192,12 +192,8 @@ fn the_round_builds_for_every_radius() {
     for (flags, names) in [
         ("default flags", &[][..]),
         (
-            "the three fixes",
-            &[
-                "linear_sweep_arc_is_cylinder",
-                "offset_extension_from_base",
-                "offset_extension_as_itself",
-            ][..],
+            "linear_sweep_arc_is_cylinder",
+            &["linear_sweep_arc_is_cylinder"][..],
         ),
     ] {
         session::set_fixes(names.iter().copied()).unwrap();

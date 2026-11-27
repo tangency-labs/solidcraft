@@ -12,8 +12,8 @@
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
-use solidcraft_geom::Aabb2;
 use solidcraft_geom::prelude::*;
+use solidcraft_geom::{Aabb2, Ring};
 
 use crate::expr::{self, Kind, Value};
 use crate::{DocError, Document, Result};
@@ -21,7 +21,7 @@ use crate::{DocError, Document, Result};
 #[path = "sheet_face_names.rs"]
 mod face_names;
 pub use crate::sheet_surface_convert::bend_edge_names;
-pub(crate) use face_names::{FaceNamer, FaceRole, carried, carried_from, ranked};
+pub(crate) use face_names::{FOLD_ROLE, FaceNamer, FaceRole, carried, carried_from, fold_cap_roles, ranked};
 
 /// The most work one sheet's flat may take (see [`FlatWork`]).
 const MAX_FLAT_WORK: usize = 500_000_000;
@@ -38,6 +38,11 @@ pub const TAB_OVERLAPS: &str = "the tab would overlap another panel of the sheet
 pub const TAB_SEVERAL: &str = "not supported yet: a tab that would join more than one panel; draw it out from an edge of one panel only";
 /// A tab lies inside the face already.
 pub const TAB_ADDS_NOTHING: &str = "the tab adds no material: it lies inside the face already; draw it out past an edge of the face";
+/// A tab fills where a cut took a bend away, out past where the bend's other side began.
+pub const TAB_PAST_BEND: &str = "not supported yet: a tab that fills where a cut took a bend away must end before the far side of that bend; past it, the tab would run into the next panel in the flat pattern";
+/// Part of what a tab fills where a cut took material away would still be cut away.
+pub const TAB_CUT_AWAY: &str =
+    "not supported yet: part of the tab would still be cut away in the flat pattern, by another cut or a relief; keep the tab clear of them";
 
 fn flat_budget_error() -> DocError {
     DocError::Invalid("sheet metal flat geometry exceeds the bounded processing budget".into())
@@ -101,12 +106,23 @@ pub struct SheetRule {
     /// computed from it. Saved only when it is set (#18304).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub material: String,
+    /// Where the rule's bends get their K-factor: `k_factor` (the rule's `k_factor`), or
+    /// `deduction` or `allowance` (worked out from `unfold_value`, the 90° bend deduction or
+    /// allowance a press brake chart gives for this thickness and bend radius). A choice, not an
+    /// expression; saved only when it isn't `k_factor`.
+    #[serde(default = "rule_unfold_method", skip_serializing_if = "is_k_factor_unfold")]
+    pub unfold_method: String,
+    /// The 90° bend deduction or allowance (a length expression), read only when `unfold_method`
+    /// is `deduction` or `allowance`. Saved only when it isn't empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub unfold_value: String,
 }
 
 impl SheetRule {
     /// The expressions, by field name (as commands name them), with the kind each evaluates to.
-    /// (`corner_relief_shape` is a choice, not an expression.)
-    pub fn fields(&self) -> [(&'static str, &String, Kind); 8] {
+    /// (`corner_relief_shape`, `angle_display` and `unfold_method` are choices, not expressions.)
+    /// `unfold_value` may be empty: only a `deduction` or `allowance` rule reads it.
+    pub fn fields(&self) -> [(&'static str, &String, Kind); 9] {
         [
             ("thickness", &self.thickness, Kind::Length),
             ("k_factor", &self.k_factor, Kind::Unitless),
@@ -116,11 +132,12 @@ impl SheetRule {
             ("corner_relief", &self.corner_relief, Kind::Length),
             ("hem_gap", &self.hem_gap, Kind::Length),
             ("gap", &self.gap, Kind::Length),
+            ("unfold_value", &self.unfold_value, Kind::Length),
         ]
     }
 
     /// The expressions to change, by field name, in the order of [`SheetRule::fields`].
-    pub fn fields_mut(&mut self) -> [(&'static str, &mut String); 8] {
+    pub fn fields_mut(&mut self) -> [(&'static str, &mut String); 9] {
         [
             ("thickness", &mut self.thickness),
             ("k_factor", &mut self.k_factor),
@@ -130,6 +147,7 @@ impl SheetRule {
             ("corner_relief", &mut self.corner_relief),
             ("hem_gap", &mut self.hem_gap),
             ("gap", &mut self.gap),
+            ("unfold_value", &mut self.unfold_value),
         ]
     }
 }
@@ -188,6 +206,14 @@ fn rule_angle_display() -> String {
 fn is_bend_display(s: &str) -> bool {
     AngleDisplay::parse(s) == Some(AngleDisplay::Bend)
 }
+fn rule_unfold_method() -> String {
+    UnfoldMethod::KFactor.name().into()
+}
+/// A rule that unfolds from its K-factor leaves the setting out of the design, which then saves
+/// as it did before the setting existed.
+fn is_k_factor_unfold(s: &str) -> bool {
+    UnfoldMethod::parse(s) == Some(UnfoldMethod::KFactor)
+}
 
 impl SheetRule {
     /// Default: Steel (mm), 2.5 mm, K 0.44, bend radius = Thickness.
@@ -206,6 +232,8 @@ impl SheetRule {
             gap: rule_gap(),
             angle_display: rule_angle_display(),
             material: String::new(),
+            unfold_method: rule_unfold_method(),
+            unfold_value: String::new(),
         }
     }
 
@@ -353,6 +381,69 @@ impl AngleDisplay {
     }
 }
 
+/// Where a rule's bends get their K-factor (a rule's `unfold_method`). Every bend still unfolds
+/// from one K-factor: a deduction or allowance rule only works that K out from its 90° value.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum UnfoldMethod {
+    /// The rule's `k_factor`.
+    #[default]
+    KFactor,
+    /// The 90° bend deduction: how much shorter the flat blank is than the two flange lengths
+    /// measured to the outside of the bend (the outer sharp).
+    Deduction,
+    /// The 90° bend allowance: the flat length of the bend itself, along the neutral axis.
+    Allowance,
+}
+
+impl UnfoldMethod {
+    /// Reads `k_factor`, `deduction` or `allowance`, ignoring case and blanks around it, and the
+    /// longer spellings `k-factor`, `k factor`, `kfactor`, `bend_deduction` and `bend_allowance`.
+    pub fn parse(s: &str) -> Option<UnfoldMethod> {
+        match s.trim().to_ascii_lowercase().replace([' ', '-'], "_").as_str() {
+            "k_factor" | "kfactor" => Some(UnfoldMethod::KFactor),
+            "deduction" | "bend_deduction" => Some(UnfoldMethod::Deduction),
+            "allowance" | "bend_allowance" => Some(UnfoldMethod::Allowance),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            UnfoldMethod::KFactor => "k_factor",
+            UnfoldMethod::Deduction => "deduction",
+            UnfoldMethod::Allowance => "allowance",
+        }
+    }
+
+    /// The K-factor a 90° bend deduction or allowance `value` gives for a sheet `thickness` thick
+    /// bent at inner radius `radius` (all mm). `None` for [`UnfoldMethod::KFactor`], which has no
+    /// such value.
+    ///
+    /// At 90° the bend allowance is BA = π/2 · (R + K·T), and the outside setback (from the outer
+    /// sharp to where the bend starts) is (R + T)·tan 45° = R + T, so the bend deduction is
+    /// BD = 2·(R + T) − BA. Hence K = (2·BA/π − R) / T.
+    pub fn k_factor(self, value: f64, thickness: f64, radius: f64) -> Option<f64> {
+        let allowance = match self {
+            UnfoldMethod::KFactor => return None,
+            UnfoldMethod::Allowance => value,
+            UnfoldMethod::Deduction => 2.0 * (radius + thickness) - value,
+        };
+        Some((allowance / std::f64::consts::FRAC_PI_2 - radius) / thickness)
+    }
+
+    /// The 90° bend deduction or allowance (mm) that gives `k_factor` for a sheet `thickness`
+    /// thick bent at inner radius `radius`: the inverse of [`UnfoldMethod::k_factor`]. `None` for
+    /// [`UnfoldMethod::KFactor`].
+    pub fn value(self, k_factor: f64, thickness: f64, radius: f64) -> Option<f64> {
+        let allowance = std::f64::consts::FRAC_PI_2 * (radius + k_factor * thickness);
+        match self {
+            UnfoldMethod::KFactor => None,
+            UnfoldMethod::Allowance => Some(allowance),
+            UnfoldMethod::Deduction => Some(2.0 * (radius + thickness) - allowance),
+        }
+    }
+}
+
 /// A rule's values (mm, unit-less K).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct RuleValues {
@@ -373,7 +464,7 @@ pub struct RuleValues {
 const MAX_SHEET_THICKNESS: f64 = 1e4;
 
 /// The smallest gap closed corners are given: closer than this the flanges' ends would touch.
-const MIN_CORNER_GAP: f64 = 0.01;
+pub(crate) const MIN_CORNER_GAP: f64 = 0.01;
 
 impl Document {
     /// A rule by name, the active one, or the default steel rule.
@@ -406,10 +497,50 @@ impl Document {
             let f = |n: &str| if n == "Thickness" { Ok(Value::length(t)) } else { look(n) };
             expr::eval_with(e, &f)?.to_kind(k)
         };
+        let method = UnfoldMethod::parse(&r.unfold_method)
+            .ok_or_else(|| DocError::Invalid(format!("unknown unfold method `{}` (k_factor, deduction or allowance)", r.unfold_method)))?;
+        let bend_radius = with_t(&r.bend_radius, Kind::Length)?;
+        // Before the K-factor: a deduction or allowance rule reads the radius to work it out.
+        if !(bend_radius >= 0.0) {
+            return Err(DocError::Invalid("the bend radius must not be negative".into()));
+        }
+        let k_factor = match method {
+            UnfoldMethod::KFactor => with_t(&r.k_factor, Kind::Unitless)?,
+            UnfoldMethod::Deduction | UnfoldMethod::Allowance => {
+                let what = if method == UnfoldMethod::Deduction { "deduction" } else { "allowance" };
+                if r.unfold_value.trim().is_empty() {
+                    return Err(DocError::Invalid(format!("a rule that unfolds by bend {what} needs its 90° bend {what} (`unfold_value`)")));
+                }
+                let value = with_t(&r.unfold_value, Kind::Length)?;
+                let k = method.k_factor(value, t, bend_radius).unwrap_or(f64::NAN);
+                // Said in the chart's terms: which K the value gave, and the range it must be in.
+                if !(0.0..=1.0).contains(&k) {
+                    let (lo, hi) = match method {
+                        UnfoldMethod::Deduction => (
+                            2.0 * (bend_radius + t) - std::f64::consts::FRAC_PI_2 * (bend_radius + t),
+                            2.0 * (bend_radius + t) - std::f64::consts::FRAC_PI_2 * bend_radius,
+                        ),
+                        _ => (std::f64::consts::FRAC_PI_2 * bend_radius, std::f64::consts::FRAC_PI_2 * (bend_radius + t)),
+                    };
+                    // Lengths in the design's unit, rounded as a chart reads (4 decimals): an inch
+                    // design reads inches, and float noise such as 1.5875000000000001 never shows.
+                    let len = |mm: f64| crate::display_units::format_length(mm, &self.units, 4);
+                    return Err(DocError::Invalid(format!(
+                        "the 90° bend {what} {} gives a K-factor of {k:.4}, outside 0 to 1: for {} thick at bend radius {} it must be from {} to {}",
+                        len(value),
+                        len(t),
+                        len(bend_radius),
+                        len(lo),
+                        len(hi)
+                    )));
+                }
+                k
+            }
+        };
         let v = RuleValues {
             thickness: t,
-            k_factor: with_t(&r.k_factor, Kind::Unitless)?,
-            bend_radius: with_t(&r.bend_radius, Kind::Length)?,
+            k_factor,
+            bend_radius,
             relief_width: with_t(&r.relief_width, Kind::Length)?,
             relief_depth: with_t(&r.relief_depth, Kind::Length)?,
             corner_relief: with_t(&r.corner_relief, Kind::Length)?,
@@ -426,9 +557,6 @@ impl Document {
         // Each value named on its own (#9625). A radius of 0 is refused (see [`KNIFE_EDGE`]).
         if !(0.0..=1.0).contains(&v.k_factor) {
             return Err(DocError::Invalid("the K-factor must be between 0 and 1".into()));
-        }
-        if !(v.bend_radius >= 0.0) {
-            return Err(DocError::Invalid("the bend radius must not be negative".into()));
         }
         if v.bend_radius == 0.0 {
             return Err(DocError::Invalid(KNIFE_EDGE.into()));
@@ -553,6 +681,26 @@ pub struct SheetPerforation {
     /// edges, on a grid that starts from their bounding box. None: the whole flat.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outline: Option<Vec<Region2>>,
+}
+
+/// The mounting hole of press-in hardware (a self-clinching nut, stud or standoff) in the flat
+/// (#17752): the hardware the hole is for, and the hole's circle, in the flat's own coordinates as
+/// the sheet keeps them (`SurfaceSheet::shown` reads them as the flat pattern is read).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SheetHardware {
+    /// The hole feature that cut it (or the pattern or mirror that copied it).
+    pub feature: u64,
+    pub kind: crate::hardware_catalog::HardwareKind,
+    /// The thread as written (`M3`).
+    pub thread: String,
+    /// A stud's or standoff's length (mm); none for a nut.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length: Option<f64>,
+    /// The id of the part that stands for it (`nut.m3`).
+    pub part: String,
+    pub center: Vec2,
+    /// The hole's radius (mm).
+    pub radius: f64,
 }
 
 /// A pocket in the flat: `region` recessed from `z0` to `z1` through the thickness, z 0 the
@@ -684,6 +832,28 @@ pub fn sheet_edge_names(st: &crate::ModelState, pts: &[Vec3]) -> Vec<String> {
         .collect()
 }
 
+/// A [`Region2`] pre-tessellated at `1e-3` mm with per-loop bounding boxes (inflated by `1e-9`)
+/// for fast repeated point-in-region queries identical to [`Region2Geom::contains`].
+pub(crate) struct PolyRegion {
+    outer: (Aabb2, Ring<Vec2>),
+    holes: Vec<(Aabb2, Ring<Vec2>)>,
+}
+
+impl PolyRegion {
+    pub(crate) fn from_region(r: &Region2) -> Self {
+        let loop_ring = |l: &Loop2| {
+            let ring = l.polyline(1e-3);
+            let bounds = ring.iter().copied().collect::<Aabb2>().inflated(1e-9);
+            (bounds, ring)
+        };
+        Self { outer: loop_ring(&r.outer), holes: r.holes.iter().map(loop_ring).collect() }
+    }
+
+    pub(crate) fn contains(&self, p: Vec2) -> bool {
+        self.outer.0.contains(p) && self.outer.1.contains(p) && !self.holes.iter().any(|(b, h)| b.contains(p) && h.contains(p))
+    }
+}
+
 /// Hole centers of a perforation field (#732) on a flat `regions`: a staggered (60°, odd rows
 /// shifted half a pitch) or square grid from the flat's lower-left corner plus margin + radius; a
 /// hole is kept where it is at least margin clear of the material's edges and cut-outs, and of
@@ -694,35 +864,57 @@ pub fn perforation_grid(regions: &[Region2], avoid: &[Region2], p: &SheetPerfora
     let zones = avoid;
     let clear = p.diameter / 2.0 + p.margin;
     let mut segs: Vec<(Vec2, Vec2)> = Vec::new();
-    let mut add = |l: &Loop2| {
-        let pts = l.polyline(1e-3);
+    fn push_ring(segs: &mut Vec<(Vec2, Vec2)>, pts: &Ring<Vec2>) {
         for (&a, &b) in pts.edges() {
             segs.push((a, b));
         }
-    };
-    for r in regions {
-        add(&r.outer);
-        r.holes.iter().for_each(&mut add);
     }
-    zones.iter().for_each(|z| add(&z.outer));
+    let poly_regions: Vec<PolyRegion> = regions
+        .iter()
+        .map(|r| {
+            let pr = PolyRegion::from_region(r);
+            push_ring(&mut segs, &pr.outer.1);
+            for (_, h) in &pr.holes {
+                push_ring(&mut segs, h);
+            }
+            pr
+        })
+        .collect();
+    let poly_zones: Vec<PolyRegion> = zones
+        .iter()
+        .map(|z| {
+            let pz = PolyRegion::from_region(z);
+            push_ring(&mut segs, &pz.outer.1);
+            pz
+        })
+        .collect();
     let Aabb2 { min: lo, max: hi } = segs.iter().map(|(a, _)| *a).collect();
     if !(lo.x <= hi.x) || !(p.pitch > 0.0) {
         return Vec::new();
     }
     // The rows and columns span the flat, or the outline's part of it; the bucket grid below stays the flat's.
     let mut field = Aabb2 { min: lo, max: hi };
-    if let Some(outline) = &p.outline {
+    let poly_outline: Option<Vec<PolyRegion>> = if let Some(outline) = &p.outline {
         let n = segs.len();
-        for r in outline {
-            for l in std::iter::once(&r.outer).chain(&r.holes) {
-                segs.extend(l.polyline(1e-3).edges().map(|(&a, &b)| (a, b)));
-            }
-        }
+        let out_polys: Vec<PolyRegion> = outline
+            .iter()
+            .map(|r| {
+                let pr = PolyRegion::from_region(r);
+                push_ring(&mut segs, &pr.outer.1);
+                for (_, h) in &pr.holes {
+                    push_ring(&mut segs, h);
+                }
+                pr
+            })
+            .collect();
         field = field.intersection(&segs.get(n..).unwrap_or(&[]).iter().map(|(a, _)| *a).collect::<Aabb2>());
         if !(field.min.x <= field.max.x && field.min.y <= field.max.y) {
             return Vec::new();
         }
-    }
+        Some(out_polys)
+    } else {
+        None
+    };
     // Segments bucketed in a grid, so each hole only checks the edges near it.
     let cell = (2.0 * clear).max(p.pitch).max(1.0);
     let (nx, ny) = (((hi.x - lo.x) / cell) as usize + 1, ((hi.y - lo.y) / cell) as usize + 1);
@@ -763,9 +955,9 @@ pub fn perforation_grid(regions: &[Region2], avoid: &[Region2], p: &SheetPerfora
             let c = Vec2::new(x, y);
             let (i, j) = idx(x, y);
             let near = grid.get(j * nx + i).map(Vec::as_slice).unwrap_or(&[]);
-            if regions.iter().any(|r| r.contains(c))
-                && p.outline.as_ref().is_none_or(|o| o.iter().any(|r| r.contains(c)))
-                && !zones.iter().any(|z| z.contains(c))
+            if poly_regions.iter().any(|r| r.contains(c))
+                && poly_outline.as_ref().is_none_or(|o| o.iter().any(|r| r.contains(c)))
+                && !poly_zones.iter().any(|z| z.contains(c))
                 && near.iter().all(|&k| segs.get(k).is_none_or(|&s| dist(c, s) >= clear - 1e-9))
             {
                 out.push(c);
@@ -894,6 +1086,85 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_rule_unfolds_by_k_factor_bend_deduction_or_bend_allowance() {
+        // A rule saved before the setting existed unfolds from its K-factor, and saves as it did.
+        let old: SheetRule = serde_json::from_str(r#"{"name":"Old","thickness":"2 mm","k_factor":"0.44","bend_radius":"2 mm"}"#).unwrap();
+        assert_eq!((old.unfold_method.as_str(), old.unfold_value.as_str()), ("k_factor", ""));
+        assert_eq!(SheetRule::steel().unfold_method, "k_factor");
+        let saved = serde_json::to_value(&old).unwrap();
+        assert!(saved.get("unfold_method").is_none() && saved.get("unfold_value").is_none(), "{saved}");
+        let (doc, vals) = (Document::default(), std::collections::BTreeMap::new());
+        let k = |rule: &SheetRule| doc.rule_values(&vals, rule).map(|v| v.k_factor);
+        assert_eq!(k(&old).unwrap(), 0.44);
+        // Hand-worked for T 2, R 2, K 0.44: BA90 = π/2·(R + K·T) = π/2·2.88 = 4.523893421169302,
+        // and BD90 = 2·(R + T) − BA90 = 8 − BA90 = 3.4761065788306977. Each gives back K 0.44.
+        let by = |method: &str, value: &str| SheetRule { unfold_method: method.into(), unfold_value: value.into(), ..old.clone() };
+        for (method, value) in
+            [("allowance", "4.523893421169302 mm"), ("deduction", "3.4761065788306977 mm"), (" Bend_Deduction ", "3.4761065788306977")]
+        {
+            let got = k(&by(method, value)).unwrap();
+            assert!((got - 0.44).abs() < 1e-12, "{method} {value}: K {got}");
+        }
+        // A chart's round value: BD90 3.5 mm makes BA90 4.5 mm, K = (4.5/(π/2) − 2)/2.
+        let chart = by("deduction", "Thickness * 1.75");
+        assert!((k(&chart).unwrap() - 0.432394487827058).abs() < 1e-12);
+        // A deduction rule ignores its K-factor expression, which may even no longer evaluate.
+        assert!((k(&SheetRule { k_factor: "Missing".into(), ..chart.clone() }).unwrap() - 0.432394487827058).abs() < 1e-12);
+        // The setting and value are saved, and read back the same.
+        let saved = serde_json::to_value(&chart).unwrap();
+        assert_eq!((saved["unfold_method"].as_str(), saved["unfold_value"].as_str()), (Some("deduction"), Some("Thickness * 1.75")));
+        assert_eq!(serde_json::from_value::<SheetRule>(saved).unwrap(), chart);
+        for method in [UnfoldMethod::KFactor, UnfoldMethod::Deduction, UnfoldMethod::Allowance] {
+            assert_eq!(UnfoldMethod::parse(method.name()), Some(method));
+        }
+        assert_eq!(UnfoldMethod::KFactor.k_factor(1.0, 2.0, 2.0), None);
+        // `value` is the inverse: K 0.44 gives back the chart values above, and those give K 0.44.
+        assert_eq!(UnfoldMethod::KFactor.value(0.44, 2.0, 2.0), None);
+        for (method, want) in [(UnfoldMethod::Allowance, 4.523893421169302), (UnfoldMethod::Deduction, 3.4761065788306977)] {
+            let value = method.value(0.44, 2.0, 2.0).unwrap();
+            assert!((value - want).abs() < 1e-12, "{method:?}: {value}");
+            assert!((method.k_factor(value, 2.0, 2.0).unwrap() - 0.44).abs() < 1e-12, "{method:?}");
+        }
+        // A value whose K falls outside 0…1 is refused, naming the range the chart value must be in:
+        // BA90 from π/2·R = 3.1416 to π/2·(R + T) = 6.2832 mm, BD90 from 8 − 6.2832 to 8 − 3.1416.
+        // Lengths read in the design's unit with 4 decimals, as the shared display formatter gives them.
+        let err = k(&by("allowance", "10 mm")).unwrap_err().to_string();
+        assert!(
+            err.contains(
+                "the 90° bend allowance 10.0000 mm gives a K-factor of 2.1831, outside 0 to 1: for 2.0000 mm thick at bend radius 2.0000 mm"
+            ) && err.contains("it must be from 3.1416 mm to 6.2832 mm"),
+            "{err}"
+        );
+        let err = k(&by("deduction", "1 mm")).unwrap_err().to_string();
+        assert!(err.contains("the 90° bend deduction 1.0000 mm gives a K-factor of") && err.contains("from 1.7168 mm to 4.8584 mm"), "{err}");
+        // An inch design reads inches: 1/16 in sheet and radius (1.5875 mm, no float noise shown), BA90
+        // 0.5 in gives K 4.0930, and BA90 must be from π/2·R = 0.0982 in to π/2·(R + T) = 0.1963 in.
+        let inch = Document { units: "in".into(), ..Document::default() };
+        let sixteenth = SheetRule { thickness: "0.0625 in".into(), bend_radius: "Thickness".into(), ..by("allowance", "0.5 in") };
+        let err = inch.rule_values(&vals, &sixteenth).unwrap_err().to_string();
+        assert!(
+            err.contains("the 90° bend allowance 0.5000 in gives a K-factor of 4.0930, outside 0 to 1: for 0.0625 in thick at bend radius 0.0625 in")
+                && err.contains("it must be from 0.0982 in to 0.1963 in"),
+            "{err}"
+        );
+        // Without a value, or with a method no one knows, the rule says what is missing.
+        let err = k(&by("deduction", " ")).unwrap_err().to_string();
+        assert!(err.contains("needs its 90° bend deduction (`unfold_value`)"), "{err}");
+        for text in ["neutral", "y_factor", ""] {
+            let err = k(&by(text, "3 mm")).unwrap_err().to_string();
+            assert!(err.contains(&format!("unknown unfold method `{text}` (k_factor, deduction or allowance)")), "{err}");
+        }
+        // Hostile values never panic: they are refused or give a K in range.
+        for value in ["0 mm", "-5 mm", "1e308 mm", "1e-308 mm", "(1/0) * 1 mm"] {
+            for method in ["deduction", "allowance"] {
+                if let Ok(got) = k(&by(method, value)) {
+                    assert!((0.0..=1.0).contains(&got), "{method} {value}: {got}");
+                }
+            }
+        }
+    }
+
     /// The included angle is what a bend leaves between its sides: 180° less the bend angle, so a
     /// 90° bend reads the same both ways. The bend's other numbers do not enter.
     #[test]
@@ -913,6 +1184,125 @@ mod tests {
             assert!((bend.included_angle_deg() - included).abs() < 1e-9, "{bend:?}");
             assert!((AngleDisplay::Bend.of(bend.angle_deg) - deg).abs() < 1e-9);
             assert!((AngleDisplay::Included.of(bend.angle_deg) - included).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn perforation_grid_matches_uncached_region_contains_bit_for_bit() {
+        fn ref_perforation_grid(regions: &[Region2], avoid: &[Region2], p: &SheetPerforation) -> Vec<Vec2> {
+            let zones = avoid;
+            let clear = p.diameter / 2.0 + p.margin;
+            let mut segs: Vec<(Vec2, Vec2)> = Vec::new();
+            let mut add = |l: &Loop2| {
+                let pts = l.polyline(1e-3);
+                for (&a, &b) in pts.edges() {
+                    segs.push((a, b));
+                }
+            };
+            for r in regions {
+                add(&r.outer);
+                r.holes.iter().for_each(&mut add);
+            }
+            zones.iter().for_each(|z| add(&z.outer));
+            let Aabb2 { min: lo, max: hi } = segs.iter().map(|(a, _)| *a).collect();
+            if !(lo.x <= hi.x) || !(p.pitch > 0.0) {
+                return Vec::new();
+            }
+            let mut field = Aabb2 { min: lo, max: hi };
+            if let Some(outline) = &p.outline {
+                let n = segs.len();
+                for r in outline {
+                    for l in std::iter::once(&r.outer).chain(&r.holes) {
+                        segs.extend(l.polyline(1e-3).edges().map(|(&a, &b)| (a, b)));
+                    }
+                }
+                field = field.intersection(&segs.get(n..).unwrap_or(&[]).iter().map(|(a, _)| *a).collect::<Aabb2>());
+                if !(field.min.x <= field.max.x && field.min.y <= field.max.y) {
+                    return Vec::new();
+                }
+            }
+            let cell = (2.0 * clear).max(p.pitch).max(1.0);
+            let (nx, ny) = (((hi.x - lo.x) / cell) as usize + 1, ((hi.y - lo.y) / cell) as usize + 1);
+            let mut grid: Vec<Vec<usize>> = vec![Vec::new(); nx.saturating_mul(ny)];
+            let idx = |x: f64, y: f64| -> (usize, usize) {
+                (((x - lo.x) / cell).floor().clamp(0.0, (nx - 1) as f64) as usize, ((y - lo.y) / cell).floor().clamp(0.0, (ny - 1) as f64) as usize)
+            };
+            for (i, (a, b)) in segs.iter().enumerate() {
+                let (i0, j0) = idx(a.x.min(b.x) - clear, a.y.min(b.y) - clear);
+                let (i1, j1) = idx(a.x.max(b.x) + clear, a.y.max(b.y) + clear);
+                for j in j0..=j1 {
+                    for ii in i0..=i1 {
+                        if let Some(c) = grid.get_mut(j * nx + ii) {
+                            c.push(i);
+                        }
+                    }
+                }
+            }
+            let dist = |c: Vec2, (a, b): (Vec2, Vec2)| -> f64 {
+                let (d, l) = (b - a, (b - a).dot(b - a));
+                let t = if l > 0.0 { ((c - a).dot(d) / l).clamp(0.0, 1.0) } else { 0.0 };
+                c.dist(a + d * t)
+            };
+            let dy = if p.square { p.pitch } else { p.pitch * 3f64.sqrt() / 2.0 };
+            let mut out = Vec::new();
+            let mut row = 0usize;
+            let Aabb2 { min: flo, max: fhi } = field;
+            loop {
+                let y = flo.y + clear + row as f64 * dy;
+                if y > fhi.y - clear + 1e-9 {
+                    break;
+                }
+                let shift = if !p.square && row % 2 == 1 { p.pitch / 2.0 } else { 0.0 };
+                let mut step = 0.0;
+                while flo.x + clear + shift + step <= fhi.x - clear + 1e-9 {
+                    let x = if p.from_right { fhi.x - clear - shift - step } else { flo.x + clear + shift + step };
+                    let c = Vec2::new(x, y);
+                    let (i, j) = idx(x, y);
+                    let near = grid.get(j * nx + i).map(Vec::as_slice).unwrap_or(&[]);
+                    if regions.iter().any(|r| r.contains(c))
+                        && p.outline.as_ref().is_none_or(|o| o.iter().any(|r| r.contains(c)))
+                        && !zones.iter().any(|z| z.contains(c))
+                        && near.iter().all(|&k| segs.get(k).is_none_or(|&s| dist(c, s) >= clear - 1e-9))
+                    {
+                        out.push(c);
+                    }
+                    step += p.pitch;
+                }
+                row += 1;
+            }
+            out
+        }
+
+        let rect = |x0: f64, y0: f64, x1: f64, y1: f64| Loop2::polygon(&[Vec2::new(x0, y0), Vec2::new(x1, y0), Vec2::new(x1, y1), Vec2::new(x0, y1)]);
+        let panel = Region2 {
+            outer: rect(0.0, 0.0, 120.0, 80.0),
+            holes: vec![
+                Loop2::circle(Vec2::new(25.0, 25.0), 8.0).reversed(),
+                Loop2::circle(Vec2::new(60.0, 40.0), 10.0).reversed(),
+                Loop2::circle(Vec2::new(95.0, 55.0), 7.0).reversed(),
+                rect(85.0, 12.0, 105.0, 28.0).reversed(),
+            ],
+        };
+        let avoid = vec![
+            Region2 { outer: rect(0.0, 36.0, 120.0, 44.0), holes: Vec::new() },
+            Region2 { outer: rect(45.0, 0.0, 52.0, 80.0), holes: vec![Loop2::circle(Vec2::new(48.5, 65.0), 1.5).reversed()] },
+        ];
+        let outline = vec![Region2 { outer: rect(8.0, 8.0, 112.0, 72.0), holes: vec![Loop2::circle(Vec2::new(30.0, 60.0), 6.0).reversed()] }];
+
+        for (square, from_right, with_outline) in [(false, false, false), (true, false, false), (false, true, true), (true, true, true)] {
+            let perf = SheetPerforation {
+                feature: 1,
+                diameter: 3.0,
+                pitch: 6.0,
+                margin: 2.0,
+                square,
+                from_right,
+                outline: with_outline.then(|| outline.clone()),
+            };
+            let got = perforation_grid(std::slice::from_ref(&panel), &avoid, &perf);
+            let want = ref_perforation_grid(std::slice::from_ref(&panel), &avoid, &perf);
+            assert!(!got.is_empty(), "expected non-empty perforation grid");
+            assert_eq!(got, want, "square={square} from_right={from_right} with_outline={with_outline}");
         }
     }
 }

@@ -8,6 +8,7 @@
 //! | [`SheetClass`], [`classify_radius`] | the three-way split of `OffsetCollapses` (§1.1) |
 //! | [`certified_offset`]         | replaces `N_SrfOffset` in `ReplaceImplicitOffsets`    |
 //! | [`certify_regular`]          | replaces `FaceuseOffset`'s self-intersection fold check |
+//! | [`certify_regular_on`]       | the same over the face's own part of its box (#20961) |
 //!
 //! **The certified offset.** `O(u, v) = S(u, v) + d n(u, v)` of a (rational) B-spline
 //! surface `S` is approximated by a bicubic B-spline `G` that interpolates exact points
@@ -1019,6 +1020,145 @@ struct RegularityForms {
     x2: Bounded,
 }
 
+/// A patch's net and the form that bounds its tangents ([`Geometry::reach`]), for a region
+/// that places patches by them ([`FaceRegion::needs_reach`]).
+#[derive(Debug, Clone)]
+struct Geometry {
+    /// `P` in the surface's own coordinates, and `w` (`None`: polynomial), with their
+    /// rounding bounds.
+    p: Bounded3,
+    w: Option<Bounded>,
+    /// `A_u . A_u + A_v . A_v`.
+    frob: Bounded,
+}
+
+/// What a region learns of a parameter box from the surface over it ([`FaceRegion::place`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Reach {
+    /// A lower bound on the surface's least stretch over the box, `|S_u a + S_v b| / |(a, b)|`
+    /// in the surface's parameters (0 where none is proved).
+    pub stretch: f64,
+    /// A box in space `[x0, x1, y0, y1, z0, z1]` holding the surface over the box (`None`
+    /// where it is not bounded).
+    pub hull: Option<[f64; 6]>,
+}
+
+impl Reach {
+    /// Nothing known.
+    pub const NONE: Reach = Reach {
+        stretch: 0.0,
+        hull: None,
+    };
+}
+
+impl Geometry {
+    /// Patch `s`'s net and `A_u . A_u + A_v . A_v` (in its own frame, as
+    /// [`RegularityForms::new`] builds its tangents).
+    fn of(s: &Patch, b: &Binomials) -> Result<Self> {
+        let (p, w) = own_frame(s)?;
+        let (au, av) = homogeneous_tangents_bounded(&p, w.as_ref(), b)?;
+        let frob = dot_bounded(&au, &au, b)?.add(&dot_bounded(&av, &av, b)?, b)?;
+        Ok(Self {
+            p: s.p.clone().map(Bounded::exact),
+            w: s.w.clone().map(Bounded::exact),
+            frob,
+        })
+    }
+
+    /// The four quarters, in [`RegularityForms::quarters`]' order.
+    fn quarters(&self) -> [Self; 4] {
+        let r = |upper_u: bool, upper_v: bool| Self {
+            p: self.p.each_ref().map(|c| c.quarter(upper_u, upper_v)),
+            w: self.w.as_ref().map(|w| w.quarter(upper_u, upper_v)),
+            frob: self.frob.quarter(upper_u, upper_v),
+        };
+        [
+            r(false, false),
+            r(true, false),
+            r(false, true),
+            r(true, true),
+        ]
+    }
+
+    /// The patch's [`Reach`], `x2` its [`RegularityForms`]' `X'^2`, `scale` the larger side of the parameter box its forms were
+    /// first built on (they are restricted since, so their derivatives are in that box's
+    /// parameters). With `A = [A_u, A_v]` the homogeneous tangents, `S_u = A_u / w^2`, ...,
+    /// and `A_u x A_v = w N'` (`|N'| = X'`): the least singular value of `A` is at least its
+    /// area `|A_u x A_v|` over its Frobenius norm, so the stretch is at least
+    /// `X' / (w sqrt(E' + G'))`, bounded below by the forms' least and largest coefficients
+    /// less and plus their rounding bounds (the convex hull property; `w > 0` proved
+    /// likewise), then divided by `scale` for the surface's own parameters, and by `1 + 1e-9`
+    /// for the rounding of these few operations. The hull is the box of the net's points
+    /// `P_i / w_i`, widened by their rounding bounds and the same share.
+    fn reach(&self, x2: &Bounded, scale: f64) -> Reach {
+        let g = self;
+        let (w_lo, w_hi, w_err) = g.w.as_ref().map_or((1.0, 1.0, 0.0), |w| {
+            (w.f.min_coefficient(), w.f.max_coefficient(), w.err)
+        });
+        let (w_lo, w_hi) = (w_lo - w_err, w_hi + w_err);
+        if !(positive(w_lo) && w_hi.is_finite()) {
+            return Reach::NONE;
+        }
+        let x_lo = (x2.f.min_coefficient() - x2.err).max(0.0).sqrt();
+        let f_hi = (g.frob.f.max_coefficient() + g.frob.err).max(0.0).sqrt();
+        let stretch = if positive(f_hi) && positive(scale) {
+            x_lo / (w_hi * f_hi) / scale / (1.0 + 1e-9)
+        } else {
+            0.0
+        };
+        let stretch = if stretch.is_finite() { stretch } else { 0.0 };
+        let mut hull = [
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        let [px, py, pz] = &g.p;
+        let p_err = px.err.max(py.err).max(pz.err);
+        let (cx, cy, cz) = (
+            px.f.coefficients(),
+            py.f.coefficients(),
+            pz.f.coefficients(),
+        );
+        for i in 0..cx.len() {
+            let w =
+                g.w.as_ref()
+                    .map_or(Some(1.0), |w| w.f.coefficients().get(i).copied());
+            let (Some(x), Some(y), Some(z), Some(w)) = (cx.get(i), cy.get(i), cz.get(i), w) else {
+                return Reach {
+                    stretch,
+                    hull: None,
+                };
+            };
+            if !positive(w - w_err) {
+                return Reach {
+                    stretch,
+                    hull: None,
+                };
+            }
+            let (x, y, z) = (x / w, y / w, z / w);
+            // |P / w - P' / w'| for P, w within their errors of P', w'
+            let pad = (p_err + x.abs().max(y.abs()).max(z.abs()) * w_err) / (w - w_err);
+            let pad = pad + 1e-9 * (pad + x.abs().max(y.abs()).max(z.abs()));
+            let [x0, x1, y0, y1, z0, z1] = hull;
+            hull = [
+                x0.min(x - pad),
+                x1.max(x + pad),
+                y0.min(y - pad),
+                y1.max(y + pad),
+                z0.min(z - pad),
+                z1.max(z + pad),
+            ];
+        }
+        Reach {
+            stretch,
+            hull: hull.iter().all(|x| x.is_finite()).then_some(hull),
+        }
+    }
+}
+
 impl RegularityForms {
     fn new(s: &Patch, d: f64, b: &Binomials) -> Result<Self> {
         let (p, w) = own_frame(s)?;
@@ -1247,18 +1387,107 @@ pub fn certify_regular_knowing(
     uv_box: Option<[f64; 4]>,
     least: Option<f64>,
 ) -> Result<Regularity> {
+    certify_regular_on(k, s, d, uv_box, &WholeBox, least)
+}
+
+/// Where a face lies in its surface's parameters, for [`certify_regular_on`]: a trimmed face
+/// is only part of its parameter box, and its offset is only that part's.
+pub trait FaceRegion {
+    /// Where the parameter box `[u0, u1, v0, v1]` lies against the face: [`Place::Outside`]
+    /// and [`Place::Inside`] only where proved, [`Place::Unknown`] otherwise. `reach` bounds
+    /// the surface over the box ([`Reach::NONE`] unless [`FaceRegion::needs_reach`]).
+    fn place(&self, range: [f64; 4], reach: &Reach) -> Place;
+    /// Whether [`FaceRegion::place`] reads its `reach`.
+    fn needs_reach(&self) -> bool {
+        true
+    }
+    /// Whether the parameter point `(u, v)` is proved on the face (inside it or on its
+    /// boundary); `false` where that is not proved.
+    fn contains(&self, u: f64, v: f64) -> bool;
+}
+
+/// Where a parameter box lies against a face ([`FaceRegion::place`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// No point of the box is on the face.
+    Outside,
+    /// Every point of the box is on the face.
+    Inside,
+    /// Neither is proved: the box may cross the face's boundary.
+    Unknown,
+}
+
+/// The whole parameter box is the face ([`certify_regular`]).
+struct WholeBox;
+
+impl FaceRegion for WholeBox {
+    fn place(&self, _: [f64; 4], _: &Reach) -> Place {
+        Place::Inside
+    }
+    fn needs_reach(&self) -> bool {
+        false
+    }
+    fn contains(&self, _: f64, _: f64) -> bool {
+        true
+    }
+}
+
+/// A patch waiting in [`certify_regular_on`]: `Q` at its middle, its forms and geometry, its
+/// parameter box, whether it lies on the face whole, and its first box's larger side.
+type RegularityEntry = (f64, RegularityForms, Option<Geometry>, [f64; 4], bool, f64);
+
+/// [`certify_regular_knowing`] over the part of the parameter box `uv_box` that `face`
+/// covers: the patches proved off the face are left out, a fold counts only at a point
+/// proved on the face, and the largest wall is the smallest radius of curvature on the face
+/// (#20961: a fill's height field runs past its trimmed loop, where nothing holds its
+/// curvature, so a fold there says nothing of the face's offset). `least`, when given, is
+/// that radius over the face, found before. A patch the region cannot place is kept, so an
+/// unknown region only makes the test as strict as over the whole box.
+///
+/// # Errors
+///
+/// Those of [`certify_regular`].
+pub fn certify_regular_on(
+    k: &Kernel,
+    s: &Nurb,
+    d: f64,
+    uv_box: Option<[f64; 4]>,
+    face: &dyn FaceRegion,
+    least: Option<f64>,
+) -> Result<Regularity> {
     let b = Binomials::new();
-    let region = patches_in(s, uv_box)?;
+    let keep = face.needs_reach();
+    let mut region = Vec::new();
+    // each patch with whether it lies on the face whole, and its first box's larger side
+    let reach = |forms: &RegularityForms, g: &Option<Geometry>, scale: f64| {
+        g.as_ref()
+            .map_or(Reach::NONE, |g| g.reach(&forms.x2, scale))
+    };
+    let mut stack: Vec<RegularityEntry> = Vec::new();
+    for patch in patches_in(s, uv_box)? {
+        k.check_cancelled(OP)?;
+        let forms = RegularityForms::new(&patch, d, &b)?;
+        let geometry = if keep {
+            Some(Geometry::of(&patch, &b)?)
+        } else {
+            None
+        };
+        let [u0, u1, v0, v1] = patch.range;
+        let scale = (u1 - u0).max(v1 - v0);
+        let inside = match face.place(patch.range, &reach(&forms, &geometry, scale)) {
+            Place::Outside => continue,
+            Place::Inside => true,
+            Place::Unknown => false,
+        };
+        stack.push((forms.middle(), forms, geometry, patch.range, inside, scale));
+        region.push((patch, inside));
+    }
     // the face's net, for the fold witness (none: no fold is proved)
     let net = witness_net(s).ok();
-    let mut stack: Vec<(f64, RegularityForms, [f64; 4])> = Vec::new();
-    for patch in &region {
-        let forms = RegularityForms::new(patch, d, &b)?;
-        stack.push((forms.middle(), forms, patch.range));
-    }
     let mut examined = 0usize;
-    let mut folds = false;
-    while let Some((middle, forms, range)) = stack.pop() {
+    // the point of the face where a fold is proved
+    let mut fold: Option<[f64; 2]> = None;
+    while let Some((middle, forms, geometry, range, inside, scale)) = stack.pop() {
         k.check_cancelled(OP)?;
         examined += 1;
         if forms.certified(&b)? {
@@ -1266,9 +1495,12 @@ pub fn certify_regular_knowing(
         }
         let [u0, u1, v0, v1] = range;
         let (um, vm) = (0.5 * (u0 + u1), 0.5 * (v0 + v1));
-        if middle < 0.0 && net.as_ref().is_some_and(|n| proved_fold(n, d, um, vm)) {
-            // a point where the offset folds, proved
-            folds = true;
+        if middle < 0.0
+            && net.as_ref().is_some_and(|n| proved_fold(n, d, um, vm))
+            && (inside || face.contains(um, vm))
+        {
+            // a point of the face where the offset folds, proved
+            fold = Some([um, vm]);
             break;
         }
         if examined > MAX_REGULARITY_PATCHES {
@@ -1281,22 +1513,31 @@ pub fn certify_regular_knowing(
             [u0, um, vm, v1],
             [um, u1, vm, v1],
         ];
-        let mut quarters: Vec<(f64, RegularityForms, [f64; 4])> = forms
-            .quarters()
-            .into_iter()
-            .zip(ranges)
-            .map(|(q, r)| (q.middle(), q, r))
-            .collect();
+        let mut quarters: Vec<RegularityEntry> = Vec::with_capacity(4);
+        let parts = geometry
+            .as_ref()
+            .map(|g| g.quarters().map(Some))
+            .unwrap_or_default();
+        for ((q, g), r) in forms.quarters().into_iter().zip(parts).zip(ranges) {
+            let place = if inside {
+                Place::Inside
+            } else {
+                face.place(r, &reach(&q, &g, scale))
+            };
+            if place != Place::Outside {
+                quarters.push((q.middle(), q, g, r, place == Place::Inside, scale));
+            }
+        }
         // the least middle first: a fold is found before the budget runs out along Q = 0
         quarters.sort_by(|a, b| b.0.total_cmp(&a.0));
         stack.extend(quarters);
     }
-    if !folds {
+    let Some(fold) = fold else {
         return Ok(Regularity::Regular);
-    }
+    };
     let largest = match least {
         Some(largest) => largest,
-        None => largest_wall(&region, d.signum())?,
+        None => largest_wall_on(&region, d.signum(), face, fold)?,
     };
     Ok(if largest.is_finite() {
         Regularity::Folds { largest }
@@ -1558,32 +1799,77 @@ impl Derivatives {
 /// grid per patch, then a pattern search about the smallest sample. A point where the
 /// normal vanishes says nothing of the curvature; infinite where no sample bends that way.
 fn largest_wall(region: &[Patch], side: f64) -> Result<f64> {
-    let mut best: Option<(f64, Derivatives, f64, f64)> = None;
-    for patch in region {
+    let whole: Vec<(&Patch, bool)> = region.iter().map(|p| (p, true)).collect();
+    largest_wall_among(&whole, side, &WholeBox, None)
+}
+
+/// [`largest_wall`] over the points of `region` on `face`: each patch with whether it lies
+/// on the face whole; the samples of the others are taken where `face` contains them. Where
+/// none of them is on the face (a sliver between the samples), the search starts from
+/// `fold`, the point of the face where a fold was proved.
+fn largest_wall_on(
+    region: &[(Patch, bool)],
+    side: f64,
+    face: &dyn FaceRegion,
+    fold: [f64; 2],
+) -> Result<f64> {
+    let patches: Vec<(&Patch, bool)> = region.iter().map(|(p, inside)| (p, *inside)).collect();
+    largest_wall_among(&patches, side, face, Some(fold))
+}
+
+fn largest_wall_among(
+    region: &[(&Patch, bool)],
+    side: f64,
+    face: &dyn FaceRegion,
+    seed: Option<[f64; 2]>,
+) -> Result<f64> {
+    // whether the point (s, t) of a patch is on the face
+    let on = |patch: &Patch, inside: bool, s: f64, t: f64| {
+        let [u0, u1, v0, v1] = patch.range;
+        inside || face.contains(u0 + s * (u1 - u0), v0 + t * (v1 - v0))
+    };
+    let mut best: Option<(f64, Derivatives, &Patch, bool, f64, f64)> = None;
+    for &(patch, inside) in region {
         let nets = Derivatives::of(patch);
         let mut here = (f64::INFINITY, 0.5, 0.5);
         for a in 0..=8 {
             for c in 0..=8 {
                 let (s, t) = (f64::from(a) / 8.0, f64::from(c) / 8.0);
                 let r = nets.wall(side, s, t);
-                if r < here.0 {
+                if r < here.0 && on(patch, inside, s, t) {
                     here = (r, s, t);
                 }
             }
         }
         let smallest = best.as_ref().map_or(f64::INFINITY, |b| b.0);
         if best.is_none() || here.0 < smallest {
-            best = Some((here.0, nets, here.1, here.2));
+            best = Some((here.0, nets, patch, inside, here.1, here.2));
         }
     }
-    let (mut r, nets, mut s, mut t) = best.ok_or_else(|| invalid("no patch"))?;
+    // no sample on the face bends that way: the search starts from the seed, a point of
+    // the face
+    if best.as_ref().is_none_or(|b| !b.0.is_finite()) {
+        if let Some([u, v]) = seed {
+            let holder = region.iter().find(|(p, _)| {
+                let [u0, u1, v0, v1] = p.range;
+                u0 < u1 && v0 < v1 && (u0..=u1).contains(&u) && (v0..=v1).contains(&v)
+            });
+            if let Some(&(patch, inside)) = holder {
+                let [u0, u1, v0, v1] = patch.range;
+                let (s, t) = ((u - u0) / (u1 - u0), (v - v0) / (v1 - v0));
+                let nets = Derivatives::of(patch);
+                best = Some((nets.wall(side, s, t), nets, patch, inside, s, t));
+            }
+        }
+    }
+    let (mut r, nets, patch, inside, mut s, mut t) = best.ok_or_else(|| invalid("no patch"))?;
     let mut step = 1.0 / 16.0;
     for _ in 0..60 {
         let mut moved = false;
         for (ds, dt) in [(step, 0.0), (-step, 0.0), (0.0, step), (0.0, -step)] {
             let (s2, t2) = ((s + ds).clamp(0.0, 1.0), (t + dt).clamp(0.0, 1.0));
             let r2 = nets.wall(side, s2, t2);
-            if r2 < r {
+            if r2 < r && on(patch, inside, s2, t2) {
                 (r, s, t, moved) = (r2, s2, t2, true);
             }
         }
@@ -1837,6 +2123,92 @@ mod tests {
                 panic!("t11 towards the centre folds");
             };
             assert!((largest - 10.0).abs() < 1e-9, "{largest}");
+        }
+    }
+
+    /// The part `u <= 1/4` of a parameter box (x <= -5 on the parabola).
+    struct FirstQuarter;
+
+    impl FaceRegion for FirstQuarter {
+        fn place(&self, range: [f64; 4], _: &Reach) -> Place {
+            if range[1] <= 0.25 {
+                Place::Inside
+            } else if range[0] > 0.25 {
+                Place::Outside
+            } else {
+                Place::Unknown
+            }
+        }
+        fn contains(&self, u: f64, _: f64) -> bool {
+            u <= 0.25
+        }
+    }
+
+    /// #20961: a fold off the face says nothing of the face's offset. On the parabola
+    /// `y = (100 - x^2) / 20` (x = 20u - 10) the radius of curvature is
+    /// `10 (1 + x^2 / 100)^(3/2)`, 10 at the apex and `10 * 1.25^(3/2) = 13.975...` at
+    /// x = -5, the least over `u <= 1/4`: there an 11 offset, which folds at the apex, is
+    /// regular, and a 15 one folds, naming that radius.
+    #[test]
+    fn a_fold_off_the_face_is_not_the_faces() {
+        let at_quarter = 10.0 * 1.25f64.powf(1.5);
+        for two in [false, true] {
+            let s = parabola(two);
+            let k = Kernel::default();
+            assert!(matches!(
+                certify_regular(&k, &s, 11.0, None).unwrap(),
+                Regularity::Folds { .. }
+            ));
+            assert_eq!(
+                certify_regular_on(&k, &s, 11.0, None, &FirstQuarter, None).unwrap(),
+                Regularity::Regular
+            );
+            let Regularity::Folds { largest } =
+                certify_regular_on(&k, &s, 15.0, None, &FirstQuarter, None).unwrap()
+            else {
+                panic!("a 15 offset folds on u <= 1/4");
+            };
+            assert!(
+                (largest - at_quarter).abs() < 1e-9,
+                "{largest} vs {at_quarter}"
+            );
+        }
+    }
+
+    /// The part `0.30 <= u <= 0.31` of a parameter box: no sample of the 9 x 9 grid of a
+    /// patch over `[0, 1]` or `[0, 1/2]` falls on it.
+    struct Sliver;
+
+    impl FaceRegion for Sliver {
+        fn place(&self, range: [f64; 4], _: &Reach) -> Place {
+            if range[0] >= 0.30 && range[1] <= 0.31 {
+                Place::Inside
+            } else if range[1] < 0.30 || range[0] > 0.31 {
+                Place::Outside
+            } else {
+                Place::Unknown
+            }
+        }
+        fn contains(&self, u: f64, _: f64) -> bool {
+            (0.30..=0.31).contains(&u)
+        }
+    }
+
+    /// A face between the sizing's samples is still sized from the point where its fold was
+    /// proved: on the parabola over `0.30 <= u <= 0.31` (x from -4 to -3.8) the radius of
+    /// curvature `10 (1 + x^2 / 100)^(3/2)` is least at x = -3.8, `10 * 1.1444^(3/2)`, and a
+    /// 15 offset folds there.
+    #[test]
+    fn a_sliver_between_the_samples_is_sized() {
+        let least = 10.0 * 1.1444f64.powf(1.5);
+        for two in [false, true] {
+            let s = parabola(two);
+            let Regularity::Folds { largest } =
+                certify_regular_on(&Kernel::default(), &s, 15.0, None, &Sliver, None).unwrap()
+            else {
+                panic!("a 15 offset folds on the sliver");
+            };
+            assert!((largest - least).abs() < 1e-9, "{largest} vs {least}");
         }
     }
 

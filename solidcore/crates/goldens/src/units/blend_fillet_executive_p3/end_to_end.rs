@@ -3342,6 +3342,12 @@ mod corner_patch_certificates;
 #[path = "wr646_certificates.rs"]
 mod wr646_certificates;
 
+/// WR-458, WR-633 and WR-650 (#18921): the real-solid rows the offset surface's
+/// extension from its base moves, each certified on the body the golden records.
+#[cfg(test)]
+#[path = "wr458_certificates.rs"]
+mod wr458_certificates;
+
 #[cfg(test)]
 mod wr664_near_knot_trims {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -3840,13 +3846,16 @@ mod found_sphere_certificates {
 /// patches on one surface; the round splits one patch and the clean-up now keeps both, so
 /// their boundary (the input's own same-surface edge) stays. These tests check, row by
 /// row, that this is the only change: every face but the round's has a target face's
-/// surface, the round's surface is main's, the near-seam vertices and the other Level 2
-/// failures are main's (constants printed on main a2b7ec60e2 by a one-off probe of the
-/// same rows, not a recorder kept here), and the kept boundary adds exactly one
-/// `check_brep` Level 2 failure, a
-/// "Face Near missing Seam" whose cause is a vertex the round places a few nanometres off
-/// the sphere's seam on main too (bit-identical), well inside that vertex's tolerance
-/// (that placement is #21421). The volume is certified in `round_definition_rows`.
+/// surface, the round's surface is main's, and the Level 2 failures are main's (constants
+/// printed on main a2b7ec60e2 by a one-off probe of the same rows, not a recorder kept
+/// here) less its "Face Near missing Seam" on the sphere. On main a2b7ec60e2 the round
+/// placed a vertex a few nanometres off the sphere's seam, well inside that vertex's
+/// tolerance, which the kept boundary exposed as one more such failure; since #21421 a
+/// fillet's body vertex stays on the seam it is on, so main's near-seam vertices are
+/// checked on the seam at the closed-form seam point of main's position, and the kept
+/// boundary adds no failure. On e4 the round's rail cone (the target's face 5, whose B-spline
+/// seam lies 2^-20 off the sphere's) keeps the target's own seam near miss, a failure main's
+/// e4 result did not have. The volume is certified in `round_definition_rows`.
 #[cfg(test)]
 mod wr459_sphere_rows {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
@@ -3870,12 +3879,15 @@ mod wr459_sphere_rows {
     /// One row: the case; main's (a2b7ec60e2) Level 2 failures of its result, less the three
     /// of edgeuse 142's trim that the clamped-sliver drop rule (#21353) took out of the
     /// target itself (the target's own failures are checked in `check`); the sphere
-    /// face whose seam failure the kept boundary adds; the round's vertex near the seam,
-    /// with main's coordinate bits and the bound on its distance from the seam (the
-    /// measured distance rounded up); the other vertices within 1e-4 of the seam that the
-    /// check may be reporting, each with main's bits; and the hash of main's round surface
-    /// (`fnv1a64` of its `Debug` form) and of main's other faces (`fnv1a64` of their
-    /// sorted `geometry_text`s, joined by newlines); and main's one sphere face.
+    /// patch the kept boundary adds (whose seam main's placement failed before #21421); the
+    /// round's vertex near the seam, with main's coordinate bits and the bound on its
+    /// distance from the seam (the measured distance rounded up); the other vertices within
+    /// 1e-4 of the seam that the check reported, each with main's bits; the hash of the round surface
+    /// (`fnv1a64` of its `Debug` form: main's, but for e1 r0.1, e1 r0.5 and e4 r0.5, whose
+    /// definitions' leader and seed curves and nets moved by at most 1.03e-13 relative when
+    /// the offset's extension became the default, each round re-certified against its
+    /// definition) and of main's other faces (`fnv1a64` of their sorted `geometry_text`s,
+    /// joined by newlines); and main's one sphere face.
     struct Row {
         name: &'static str,
         main_failures: &'static [Failure],
@@ -3919,7 +3931,7 @@ mod wr459_sphere_rows {
     ];
 
     /// e4's vertex 2, the target's patch corner on the seam (4.4e-14 off it in the
-    /// target), which the round leaves 9.5e-7 off the seam on main too.
+    /// target), which the round left 9.5e-7 off the seam on main a2b7ec60e2 too.
     const E4_V2: (usize, [u64; 3]) = (2, [0x4036026500000000, 0x3eafffffffc57405, 0x4045540c8e2b6b68]);
 
     const ROWS: [Row; 4] = [
@@ -3929,7 +3941,7 @@ mod wr459_sphere_rows {
             added_on: 8,
             vertex: (27, [0x403627cf90d5c75d, 0xbe31ee9f830c0a25, 0xc0454a5b0aeac7b9], 4.2e-9),
             others: &[],
-            round_surface: 13763335099436623647,
+            round_surface: 17087500646884337043,
             main_faces: 14750437352760065621,
             main_sphere: 8,
         },
@@ -3939,7 +3951,7 @@ mod wr459_sphere_rows {
             added_on: 8,
             vertex: (27, [0x4036bf0d23081593, 0xbe56aa7ba247c332, 0xc0452256756ad4f1], 2.12e-8),
             others: &[],
-            round_surface: 14051174420061070167,
+            round_surface: 4904801595854769515,
             main_faces: 14750437352760065621,
             main_sphere: 8,
         },
@@ -3959,7 +3971,7 @@ mod wr459_sphere_rows {
             added_on: 1,
             vertex: (25, [0x4036bf0d230815a1, 0xbe56aa7bab70d538, 0x40452256756ad4ed], 2.12e-8),
             others: &[E4_V2],
-            round_surface: 744541229302824343,
+            round_surface: 12247167273146979092,
             main_faces: 16065100554185304934,
             main_sphere: 0,
         },
@@ -3976,9 +3988,14 @@ mod wr459_sphere_rows {
     }
 
     /// The face's whole surface object, as `Debug` prints it (its kind and its owner,
-    /// tolerance and cache state).
+    /// tolerance and cache state), less the `fitted_net` field of every `Surface` in it
+    /// (the round's and its supports': whether the stored net is a fitted approximation
+    /// of a definition, which the certified line pass reads). The text main hashed
+    /// (a2b7ec60e2) has no such field, and it says nothing of the geometry.
     fn surface_text(b: &Brep, f: FaceId) -> String {
         format!("{:?}", b.face(f).unwrap().surface.as_ref().unwrap())
+            .replace(", fitted_net: false", "")
+            .replace(", fitted_net: true", "")
     }
 
     /// The face's surface geometry, as `Debug` prints its kind (the surface's type and
@@ -4217,23 +4234,71 @@ mod wr459_sphere_rows {
             row.main_faces,
             "{name}: the faces but the round's and the added patch are not main's"
         );
-        assert_eq!(rounds, [row.round_surface], "{name}: the round's surface is not main's");
+        assert_eq!(rounds, [row.round_surface], "{name}: the round's surface is not the row's");
+        // and the round is its definition, its net re-certified within its bound of it
+        round_definition_proof::certified_blends(&Kernel::default(), &mut body, name);
 
-        // the round's vertex near the seam is main's, bit for bit, within its bound of the
-        // seam and inside its own tolerance
+        // main's vertices near the seam (the round's, within its bound, and on e4 the
+        // target's patch corner) are on the seam now (#21421: a fillet's body vertex stays
+        // on the seam it is on): the patch has no vertex between the near-miss distance and
+        // 1e-4 of the seam, and each of main's (by arena index) lies on the seam's side,
+        // closer to its plane than the near-miss distance, and within its own tolerance of
+        // main's point (main's constants are checked against that tolerance and the row's
+        // bound, as on main); the closed form below then pins where on the seam it is
         let added = FaceId::from_index(row.added_on as u32);
         let near = near_seam(&body, added);
+        assert!(near.is_empty(), "{name}: vertices near the seam of {added:?}: {near:?}");
+        let surface = body.face(added).unwrap().surface.as_ref().unwrap();
+        let SurfaceKind::Sphere(sphere) = surface.kind() else {
+            panic!("{name}: {added:?} is not a sphere face")
+        };
+        let frame = sphere.base().position();
         let (vertex, bits, bound) = row.vertex;
-        let mut expected: Vec<(usize, [u64; 3])> = row.others.to_vec();
-        expected.push((vertex, bits));
-        expected.sort_by_key(|n| n.0);
-        let found: Vec<(usize, [u64; 3])> = near.iter().map(|n| (n.0, n.3)).collect();
-        assert_eq!(found, expected, "{name}: the vertices near the seam of {added:?}");
-        for &(v, d, tol, _) in &near {
+        let mut main_near: Vec<(usize, [u64; 3])> = row.others.to_vec();
+        main_near.push((vertex, bits));
+        for (v, bits) in main_near {
+            let id = VertexId::from_index(v as u32);
+            let p = vertex::point(&body, id).unwrap();
+            let tol = vertex::tolerance(&body, id).unwrap();
+            let [x, y, z] = bits.map(f64::from_bits);
+            let main_point = Vec3::new(x, y, z);
+            let local = p - frame.origin();
+            let main_local = main_point - frame.origin();
+            let (d, d_main) = (local.dot(frame.y_axis()).abs(), main_local.dot(frame.y_axis()).abs());
+            // Written to accept: a NaN distance fails.
+            assert!(
+                local.dot(frame.x_axis()) > 0.0 && d < EFF_ZERO * 1000.0,
+                "{name}: vertex {v} is {d:e} off the seam"
+            );
+            assert!(d_main <= tol, "{name}: vertex {v} was {d_main:e} off the seam, past its tolerance {tol:e}");
             if v == vertex {
-                assert!(d <= bound, "{name}: vertex {v} is {d:e} off the seam, past {bound:e}");
+                assert!(d_main <= bound, "{name}: vertex {v} was {d_main:e} off the seam, past {bound:e}");
             }
-            assert!(d <= tol, "{name}: vertex {v} is {d:e} off the seam, past its tolerance {tol:e}");
+            let moved = (p - main_point).length();
+            assert!(moved <= tol, "{name}: vertex {v} moved {moved:e}, past its tolerance {tol:e}");
+            // the closed form of the fix (`onto_seam`): main's point is the fillet's position,
+            // and the vertex is the sphere's point S(0, v) = O + r (cos v X + sin v Z) at the
+            // latitude v of that position dropped onto the sphere, cos v = rho / n and
+            // sin v = z / n in the frame (rho the distance from the axis, n from the centre).
+            // Both evaluations round each coordinate of O + r (...), a few ulp of |O| + r
+            // apiece; 64 ulp of it bounds their difference (measured: at most 6.3e-14 at r 48,
+            // where the moves are 4.2e-9, 2.1e-8 and 9.5e-7)
+            let r = sphere.radius();
+            let (mx, my, mz) = (
+                main_local.dot(frame.x_axis()),
+                main_local.dot(frame.y_axis()),
+                main_local.dot(frame.z_axis()),
+            );
+            let n = (mx * mx + my * my + mz * mz).sqrt();
+            let on_seam = frame.origin()
+                + r * ((mx * mx + my * my).sqrt() / n * frame.x_axis() + mz / n * frame.z_axis());
+            let allowance = 64.0 * f64::EPSILON * (frame.origin().length() + r);
+            let off = (p - on_seam).length();
+            assert!(
+                off <= allowance && d <= allowance,
+                "{name}: vertex {v} is {off:e} from the seam point of main's {main_point:?} \
+                 ({d:e} off the seam), past {allowance:e}"
+            );
         }
 
         shares_the_target_boundary(name, &target, &body);
@@ -4247,11 +4312,41 @@ mod wr459_sphere_rows {
             "{name}: the target's Level 2 failures"
         );
 
-        // the kept boundary adds exactly one failure: the seam near miss on that patch
-        let mut with_one: Vec<Failure> = row.main_failures.to_vec();
-        with_one.push((SEAM, Some((FACE, row.added_on as u64))));
-        with_one.sort();
-        assert_eq!(failures(&mut body), with_one, "{name}: Level 2 failures");
+        // the kept boundary adds no failure: main's, less every seam near miss on a sphere
+        // face (the vertices above, now on the seam; on e4 main's sphere face 0 is one of
+        // the two patches), and no seam near miss on the added patch. On e4 the round's
+        // rail runs on the target's cone face 5 (face 9 here), whose B-spline seam lies
+        // 2^-20 off the sphere's: the target near-misses it, and with the rail's end vertex
+        // on the sphere's seam the result keeps that near miss of the target (on e1 it is
+        // the `cone` of `shared`, on main too); so the body near-misses no more faces than
+        // the target does
+        let mut want: Vec<Failure> = row
+            .main_failures
+            .iter()
+            .copied()
+            .filter(|&(label, key)| {
+                !(label == SEAM
+                    && key.is_some_and(|(space, i)| {
+                        space == FACE && is_sphere(&body, FaceId::from_index(i as u32))
+                    }))
+            })
+            .collect();
+        want.sort();
+        let removed = row.main_failures.len() - want.len();
+        assert_eq!(removed, usize::from(name.contains("-e4-")), "{name}: main's sphere failures");
+        if name.contains("-e4-") {
+            let (cone, target_cone) = (FaceId::from_index(9), FaceId::from_index(5));
+            assert_eq!(
+                geometry_text(&body, cone).replace("swap_uv: true", "swap_uv: false"),
+                geometry_text(&target, target_cone).replace("swap_uv: true", "swap_uv: false"),
+                "{name}: face 9 is not the target's face 5"
+            );
+            assert!(target_failures.contains(&(SEAM, Some((FACE, 5)))), "{name}");
+            want.push((SEAM, Some((FACE, 9))));
+            want.sort();
+        }
+        let got = failures(&mut body);
+        assert_eq!(got, want, "{name}: Level 2 failures");
 
         // on main the two patches were one face (main_sphere, holding the same vertices
         // at the same bits: printed by a one-off probe on main a2b7ec60e2); on e4
@@ -4281,3 +4376,205 @@ mod wr459_sphere_rows {
         check(&ROWS[3]);
     }
 }
+
+/// #21421: rounding an edge of `sphere_diff_3cylinders` whose rail ends on the sphere's seam
+/// edge places the round's end vertex on that seam. The seam is the meridian at the start of
+/// the sphere's closed u range (the half-plane of local x > 0, y = 0). On main the vertex sat
+/// 4.2e-9 (r 0.1) and 2.1e-8 (r 0.5) off it, inside its 4.1e-5 tolerance but past the
+/// `1000 * EFF_ZERO` beyond which `CurveClassification::has_near_misses` counts a vertex as a
+/// near miss of the seam, so `check_brep` Level 2 reported "Face Near missing Seam" on the
+/// rows' sphere patches (on e1 since WR-459's clean-up keeps both patches; `wr459_sphere_rows`
+/// checks main's near-seam vertices on the seam).
+///
+/// The cylinder faces' near misses on these rows come from the input body
+/// (`sphere_diff_3cylinders.smb` reports three of them at Level 2 before the round) and are
+/// not checked here.
+#[cfg(test)]
+mod issue_21421_round_ends_on_the_sphere_seam {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+    use super::round_definition_rows::{counts, inputs};
+    use super::*;
+    use solidcore::math::EFF_ZERO;
+    use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
+    use solidcore::surface::surface::p2::SurfaceKind;
+    use solidcore::topology::brep::p1::HealLoopHandle;
+    use solidcore::topology::face::p4::{has_seam_problem_in_brep_mut, HasSeamProblemOptions};
+    use solidcore::topology::vertex;
+
+    /// The rows, whose golden status and vertex, edge and face counts (`[0, 29, 46, 11]`, WR-459's kept target faces)
+    /// placing the vertex on the seam leaves as they were.
+    const ROWS: [&str; 4] = [
+        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.1",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e1-r0.5",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.1",
+        "stubs4-delete-edge-sphere_diff_3cylinders-e4-r0.5",
+    ];
+
+    /// The number of faces of `body` whose seam check reports a near miss.
+    fn near_missed_faces(k: &Kernel, body: &mut Brep) -> usize {
+        let mut n = 0;
+        for f in p1::faces(body, None).unwrap() {
+            let check =
+                has_seam_problem_in_brep_mut::<HealLoopHandle>(k, body, f, HasSeamProblemOptions::default())
+                    .unwrap();
+            if check.problem.near_miss != SurfParamType::Neither {
+                n += 1;
+            }
+        }
+        n
+    }
+
+    /// `name` builds with the golden's counts; every vertex of a sphere face that lies within
+    /// its own tolerance of the sphere's seam lies closer to it than `1000 * EFF_ZERO`, the
+    /// near-miss distance of the seam check; no sphere face has a near-missed seam; and no
+    /// more faces near-miss a seam than in the input.
+    fn check(name: &str) {
+        let input = inputs(name).real_solid.expect("a real solid");
+        let mut k = Kernel::default();
+        let mut body = build(&mut k, &input).unwrap().unwrap();
+        let (selected, _) = select_edges(&k, &body, &input).ok().unwrap();
+        let near_missed_before = near_missed_faces(&k, &mut body);
+        let result = fillet_selected(&mut k, &mut body, &selected, &input).ok().unwrap();
+        assert!(result.is_ok(), "{name}: {result:?}");
+        assert_eq!(counts(&body, 0), [0, 29, 46, 11], "{name}");
+        // The input's near misses (its B-spline faces' seams lie 2^-20 off the sphere's) stay
+        // where they are: the round adds none.
+        let near_missed_after = near_missed_faces(&k, &mut body);
+        assert!(
+            near_missed_after <= near_missed_before,
+            "{name}: {near_missed_after} faces near-miss a seam, {near_missed_before} before"
+        );
+        let near_miss = 1000.0 * EFF_ZERO;
+        let mut on_seam = Vec::new();
+        let mut spheres = 0;
+        for f in p1::faces(&body, None).unwrap() {
+            let Some(surface) = face::surface(&body, f).unwrap() else {
+                continue;
+            };
+            let SurfaceKind::Sphere(sphere) = surface.kind() else {
+                continue;
+            };
+            spheres += 1;
+            // S(u, v) = O + r (cos v (cos u X + sin u Y) + sin v Z), u in degrees: the seam
+            // is the meridian at the start of u's range, in the half-plane through the axis
+            // along `out`, whose normal is `across`
+            let rev = sphere.base();
+            let frame = rev.position();
+            let (centre, x, y) = (frame.origin(), frame.x_axis(), frame.y_axis());
+            let u0 = rev.step_uv_domain().min().x.to_radians();
+            let out = x * u0.cos() + y * u0.sin();
+            let across = y * u0.cos() - x * u0.sin();
+            for v in p1::vertices(&body, None).unwrap() {
+                if !vertex::faces(&body, v).unwrap().contains(&f) {
+                    continue;
+                }
+                let p = vertex::point(&body, v).unwrap();
+                let tol = vertex::tolerance(&body, v).unwrap();
+                let d = (p - centre).dot(across).abs();
+                // Written to accept: a NaN distance counts as off the seam.
+                if (p - centre).dot(out) > 0.0 && (d.is_nan() || d <= tol) {
+                    println!(
+                        "21421 {name}: face {f:?} vertex {v:?} at {p:?} is {d:e} off the seam"
+                    );
+                    on_seam.push((f, v, d));
+                }
+            }
+            let check = has_seam_problem_in_brep_mut::<HealLoopHandle>(
+                &k,
+                &mut body,
+                f,
+                HasSeamProblemOptions::default(),
+            )
+            .unwrap();
+            assert_eq!(
+                check.problem.near_miss,
+                SurfParamType::Neither,
+                "{name}: face {f:?} {:?}",
+                check.problem
+            );
+        }
+        assert!(spheres > 0, "{name}: no sphere face");
+        assert!(!on_seam.is_empty(), "{name}: no vertex on the sphere's seam");
+        for &(f, v, d) in &on_seam {
+            // Written to accept: a NaN distance fails.
+            assert!(d < near_miss, "{name}: face {f:?} vertex {v:?} is {d:e} off the seam");
+        }
+    }
+
+    /// The certificate of `name`'s blessed row, whose only moved values are mass properties
+    /// (centroid `x`, products `zx` and `xy`: values the integrator estimates at `1e-4` of
+    /// their scale, which the vertex now on the seam moves, as any change of a face's trims
+    /// does): the golden's line holds this body's estimates bit for bit, and each of the
+    /// body's 12 mass values (density 1, about the origin) lies within the golden's
+    /// accuracy of its certified band (`round_definition_proof`'s `volume_band` and
+    /// `mass_bands`: certified enclosures of the body as stored, widened by its blend faces'
+    /// proved distance from their definitions), so of the exact value.
+    fn mass_certified(name: &str) {
+        use super::round_definition_proof::{certified_blends, mass_bands, volume_band};
+        let golden = crate::golden::read(
+            &crate::golden::default_dir(),
+            "blend.fillet_executive_p3",
+        )
+        .unwrap();
+        let row: Vec<f64> = golden[name]["values"]["mass_properties"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|x| x.as_f64().unwrap())
+            .collect();
+        let mut k = Kernel::default();
+        let mut body = result_body_of(&mut k, name);
+        let blends = certified_blends(&k, &mut body, name);
+        let estimates = volume_band(&k, &mut body, &blends, name);
+        let m = &estimates.golden;
+        let at = |p: Vec3| [p.x, p.y, p.z];
+        let mut ours = vec![m.properties.area, m.properties.volume, m.properties.mass];
+        ours.extend(at(m.centroid));
+        ours.extend(at(m.inertia));
+        ours.extend(at(m.products));
+        let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&ours), bits(&row), "{name}: not the golden's estimates");
+        mass_bands(&k, &mut body, &estimates, name);
+    }
+
+    #[test]
+    fn e1_r0_1_mass() {
+        mass_certified(ROWS[0]);
+    }
+
+    #[test]
+    fn e1_r0_5_mass() {
+        mass_certified(ROWS[1]);
+    }
+
+    #[test]
+    fn e4_r0_1_mass() {
+        mass_certified(ROWS[2]);
+    }
+
+    #[test]
+    fn e4_r0_5_mass() {
+        mass_certified(ROWS[3]);
+    }
+
+    #[test]
+    fn e1_r0_1() {
+        check(ROWS[0]);
+    }
+
+    #[test]
+    fn e1_r0_5() {
+        check(ROWS[1]);
+    }
+
+    #[test]
+    fn e4_r0_1() {
+        check(ROWS[2]);
+    }
+
+    #[test]
+    fn e4_r0_5() {
+        check(ROWS[3]);
+    }
+}
+

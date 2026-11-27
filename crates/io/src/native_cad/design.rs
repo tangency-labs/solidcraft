@@ -418,9 +418,14 @@ impl Builder {
                 second_follows_first: false,
                 corner: None,
                 to_body_apart: false,
+                through_all2: false,
+                to2: None,
+                to_offset2: None,
                 from_level: false,
                 picked_placements: Vec::new(),
                 one_sided_direction: None,
+                to_ref: None,
+                from_ref: None,
             },
             operation,
             targets,
@@ -561,11 +566,14 @@ impl Builder {
                         extent2: None,
                         copy_at_end1: false,
                         copy_at_end2: false,
+                        spacing_list1: Vec::new(),
+                        spacing_list2: Vec::new(),
                     },
                     bodies: Vec::new(),
                     placements: Vec::new(),
                     components: Vec::new(),
                     occurrences: Vec::new(),
+                    join: false,
                 }
             }
             Some("circular") => {
@@ -593,6 +601,7 @@ impl Builder {
                     placements: Vec::new(),
                     components: Vec::new(),
                     occurrences: Vec::new(),
+                    join: false,
                 }
             }
             other => return Err(format!("{name}: a {} pattern is not rebuilt yet", other.unwrap_or("unknown").replace('_', " "))),
@@ -644,6 +653,7 @@ impl Builder {
             angle2: second.map(deg),
             symmetric,
             convention: RevolveConvention::SketchNormal,
+            join_profile_arcs: false,
             to: None,
         };
         let id = self.add(kind, name)?;

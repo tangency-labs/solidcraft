@@ -523,28 +523,37 @@ fn lift_point(s: &mut Session, p: &Value, cmd: &str, point: &str) -> Result<Valu
     reply(cmd, Move3dResult { moved: n, curves, wire, index: Some(k), sketch: info, param_warnings: Vec::new() })
 }
 
-/// `sketch.constraint.coincident` on 3D refs: two drawn 3D points, or a 3D point and a drawn 3D
-/// line (the point on the line). `None` when neither operand is 3D, for the planar command.
+/// `sketch.constraint.coincident` on 3D refs, including model edges and projected vertices.
+/// `None` when neither operand is 3D, for the planar command.
 pub(super) fn coincident_3d(s: &mut Session, p: &Value, cmd: &str) -> Result<Option<Value>> {
     if s.sheet_sketching() {
         return Ok(None);
     }
-    let a = p.get("a").and_then(Value::as_str).map(str::to_string);
-    let b = p.get("b").and_then(Value::as_str).map(str::to_string);
-    let (Some(a), Some(b)) = (a, b) else { return Ok(None) };
+    let pick = |key| p.get(key).filter(|v| v.is_string() || v.get("edge").is_some() || v.get("vertex").is_some());
+    let (Some(a), Some(b)) = (pick("a"), pick("b")) else { return Ok(None) };
     let id = sketch_store::target(s, p, cmd)?;
     let sk = sketch_store::read(&s.doc, id)?;
-    if !is_3d(sk, &a) && !is_3d(sk, &b) {
+    if ![a, b].iter().any(|v| v.as_str().is_some_and(|r| is_3d(sk, r))) {
         return Ok(None);
     }
+    let projected;
+    let (a, b) = match (a.as_str(), b.as_str()) {
+        (Some(a), Some(b)) => (a, b),
+        _ => {
+            projected = super::sketch_project::project_3d_coincident_operands(s, p, cmd)?;
+            let operand = |key| projected.get(key).and_then(Value::as_str).ok_or_else(|| bad(cmd, format!("`{key}` must be a point or curve")));
+            (operand("a")?, operand("b")?)
+        }
+    };
+    let sk = sketch_store::read(&s.doc, id)?;
     // Either side may be fixed geometry the drawn 3D one is held to (#10616): a model curve
     // included in the sketch (its ends, its line or its circle), or a 2D point or curve.
     let line = |r: &str| sk.is_line_operand(r).then(|| r.to_string());
     let curve = |r: &str| (!sk.is_line_operand(r) && sk.is_curve_operand(r)).then(|| r.to_string());
-    let kind = match (sk.point_operand(&a), sk.point_operand(&b)) {
+    let kind = match (sk.point_operand(a), sk.point_operand(b)) {
         (Some(x), Some(y)) => WireConstraintKind::Coincident { a: x, b: y },
         (Some(x), None) | (None, Some(x)) => {
-            let other = if sk.point_operand(&a).is_some() { &b } else { &a };
+            let other = if sk.point_operand(a).is_some() { b } else { a };
             match (line(other), curve(other)) {
                 (Some(l), _) => WireConstraintKind::PointOnLine { p: x, line: l },
                 (None, Some(c)) => WireConstraintKind::PointOnCurve { p: x, curve: c },
