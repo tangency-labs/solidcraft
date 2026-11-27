@@ -328,7 +328,8 @@ pub fn hold_ok(d: &mut Dialog, ok: bool, again: &mut bool, cancel: bool) -> bool
 }
 
 /// The shown bodies as the `targets` of a new feature's Join, Cut or Intersect that names none,
-/// when some bodies are hidden: a hidden body is left alone. With none shown, such a feature has
+/// when some bodies are hidden: a hidden body is left alone. An Emboss or Deboss joins or cuts
+/// with no `operation`, so it is scoped the same way. With none shown, such a feature has
 /// nothing to change.
 pub fn scope_targets(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -> Result<(), String> {
     if !scoped(&d.kind) || d.editing.is_some() {
@@ -336,16 +337,18 @@ pub fn scope_targets(app: &SolveApp, d: &Dialog, cmds: &mut [(String, Value)]) -
     }
     let Some(shown) = solidcraft_engine::shown_scope(&app.session) else { return Ok(()) };
     for (_, p) in cmds {
-        // An Emboss or Deboss joins or cuts with no `operation`; with a Target Face it changes
-        // only that face's body.
-        let embosses = matches!(d.kind, Kind::Emboss { .. }) && p.get("face").is_none();
-        let changes = embosses || p.get("operation").and_then(Value::as_str).is_some_and(|o| OPS.contains(&o) && o != "new");
+        // An Emboss or Deboss joins or cuts with no `operation`. With a Target Face it names
+        // that face's body as its target, so `named` leaves it as it is.
+        let emboss = matches!(d.kind, Kind::Emboss { .. });
+        let changes = emboss || p.get("operation").and_then(Value::as_str).is_some_and(|o| OPS.contains(&o) && o != "new");
         let named = ["targets", "participants"].iter().any(|k| p.get(*k).and_then(Value::as_array).is_some_and(|a| !a.is_empty()));
         if !changes || named {
             continue;
         }
         if shown.is_empty() {
-            return Err(solidcraft_ui_text::tr("dialog.no_shown_body").to_string());
+            // Emboss has no New Body to choose instead.
+            let refusal = if emboss { "dialog.no_shown_body_show_one" } else { "dialog.no_shown_body" };
+            return Err(solidcraft_ui_text::tr(refusal).to_string());
         }
         if let Some(map) = p.as_object_mut() {
             map.insert("targets".into(), Value::from(shown.clone()));
