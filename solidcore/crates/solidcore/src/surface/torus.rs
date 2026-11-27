@@ -529,6 +529,7 @@ impl Torus {
             other_uv_domain,
             approx_tol_3d,
             &|s, k, p, t| Ok(iso_curve(s, shape, k, p, t, None, false)?.curve),
+            0.0,
             out,
         )
     }
@@ -870,6 +871,56 @@ impl Torus {
         self.minor_radius = minor;
         self.base.base = form;
         self.rebuild_polar_converter(k)
+    }
+
+    /// Not upstream: the torus of a label's own numbers (a placement and two radii) on the
+    /// face's NURBS form `form`, for a reader that works a torus back out of the form
+    /// ([`Self::is_nurb_surface_torus`], as SMLib's flat arrays are read) and has `found` that
+    /// one, where such a reader needs the label: `found` is missing, or `form` does not lie
+    /// on it ([`crate::surface::implicit::lies_on`], the test of
+    /// `AnalyticSupport::label_stands`).
+    ///
+    /// A torus worked back out of its form is good only to the form's rounding over the square
+    /// of the arc its tube shows. A 1.2 degree arc of a tube of radius 13.7 comes back 3e-10
+    /// to 5e-10 off the form it was found in, which a body's own check then refuses, and
+    /// under about 0.3 degrees none is found. The label's numbers are the ones the torus was
+    /// made with. They are taken as the record's reader takes a label
+    /// ([`crate::surface::face_surface`], owner 22254): only where the kernel proves the form
+    /// on them (`AnalyticSupport::build`: the form lies on the torus, and the torus evaluates
+    /// as the form at the form's own parameters).
+    ///
+    /// `None` where `form` lies on `found` (the reader keeps `found`, to the last bit) and
+    /// where the form does not prove the label (the label gives the reader no torus).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`crate::surface::implicit::lies_on`]. From the proof of the label only an
+    /// unported path or a cancellation ([`SolidError::is_unported_or_cancelled`]): a label
+    /// its form does not prove is no torus, as it is none for the record's reader.
+    pub fn from_label_unless_found_stands(
+        k: &Kernel,
+        placement: Axis2Placement,
+        major: f64,
+        minor: f64,
+        form: &BSplineSurface,
+        found: Option<&crate::surface::surface::Surface>,
+    ) -> Result<Option<crate::surface::surface::Surface>> {
+        use crate::surface::implicit::{lies_on, AnalyticSupport};
+        if let Some(of_found) = found.and_then(AnalyticSupport::of) {
+            if lies_on(form, &of_found.implicit())? {
+                return Ok(None);
+            }
+        }
+        let label = AnalyticSupport::Torus {
+            placement,
+            major_radius: major,
+            minor_radius: minor,
+        };
+        match label.build(k, form.copy()) {
+            Ok(torus) => Ok(Some(torus)),
+            Err(e) if e.is_unported_or_cancelled() => Err(e),
+            Err(_) => Ok(None),
+        }
     }
 
     /// `RebuildPolarConverter` with the torus's iso circles.

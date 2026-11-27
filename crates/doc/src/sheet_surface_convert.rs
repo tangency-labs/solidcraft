@@ -720,6 +720,20 @@ pub(crate) fn crossings_across(r: &Region2, (p, u): (Vec2, Vec2)) -> Vec<f64> {
     out
 }
 
+/// The stretches of a joint's anchor `an`, `length` long, that none of `cuts` (in its panel's
+/// chart) takes, as lengths along it from its origin: what a cut across a bend leaves of it. A
+/// stretch no longer than `tol` is none.
+pub(crate) fn left_along(an: &Anchor, length: f64, cuts: &[Region2], tol: f64) -> Vec<(f64, f64)> {
+    let mut left: Vec<(f64, f64)> = vec![(0.0, length)];
+    for c in cuts {
+        let inside = crossings_across(c, (an.origin, an.dir));
+        for &[lo, hi] in inside.as_chunks::<2>().0 {
+            left = left.into_iter().flat_map(|(a, b)| [(a, b.min(lo)), (a.max(hi), b)]).filter(|(a, b)| b - a > tol).collect();
+        }
+    }
+    left
+}
+
 /// The point where two lines, each a point and a direction, cross.
 fn crossing((p, u): (Vec2, Vec2), (q, w): (Vec2, Vec2)) -> Option<Vec2> {
     let cross = u.cross(w);
@@ -1221,20 +1235,46 @@ fn read_surfaces(
         }
         engraved.insert(g);
     }
-    // The two faces each edge is between (one face twice for a roll's own seam), and which faces
-    // meet at an edge.
-    let pair = |e: usize| match q.edge_faces(e).as_slice() {
-        [x, y] => Some((*x, *y)),
-        _ => None,
-    };
-    let meeting: BTreeSet<(usize, usize)> = (0..edge_count).filter_map(pair).flat_map(|(x, y)| [(x, y), (y, x)]).collect();
+    // The two faces each edge is between (one face twice for a roll's own seam), per-face
+    // incident edges in ascending edge order, and which faces meet at an edge.
+    let mut edge_pair: Vec<Option<(usize, usize)>> = Vec::with_capacity(edge_count);
+    let mut face_edges: Vec<Vec<(usize, usize)>> = vec![Vec::new(); count];
+    let mut meeting: BTreeSet<(usize, usize)> = BTreeSet::new();
+    for e in 0..edge_count {
+        let p = match q.edge_faces(e).as_slice() {
+            [x, y] => Some((*x, *y)),
+            _ => None,
+        };
+        edge_pair.push(p);
+        if let Some((x, y)) = p {
+            meeting.insert((x, y));
+            meeting.insert((y, x));
+            if let Some(fe) = face_edges.get_mut(x) {
+                fe.push((e, y));
+            }
+            if y != x
+                && let Some(fe) = face_edges.get_mut(y)
+            {
+                fe.push((e, x));
+            }
+        }
+    }
+    let pair = |e: usize| edge_pair.get(e).copied().flatten();
+    let edges_of = |f: usize| face_edges.get(f).map(Vec::as_slice).unwrap_or(&[]);
     let touches = |g: usize, h: usize| meeting.contains(&(g, h));
 
     // Each face as modelled, in its chart: a point inside it with its outward normal there, and
-    // how far it spans.
+    // how far it spans. Only needed when recognizing a solid sheet or reading picked engravings.
+    let surface = mb.is_surface();
     let modelled: Vec<Option<Shape>> = (0..count).map(|f| Shape::of(b, &q, f, false, tol).ok()).collect();
     let probe = |f: usize| modelled.get(f).copied().flatten();
-    let charts: Vec<Option<(Region2, Vec<UseChart>)>> = (0..count).map(|f| probe(f).and_then(|s| face_chart(b, &q, &s, f, sag, tol).ok())).collect();
+    let charts: Vec<Option<(Region2, Vec<UseChart>)>> = if (recognizing && !surface) || !engraved.is_empty() {
+        (0..count).map(|f| probe(f).and_then(|s| face_chart(b, &q, &s, f, sag, tol).ok())).collect()
+    } else {
+        (0..count).map(|_| None).collect()
+    };
+    let chart_boxes: Vec<Option<solidcraft_geom::Aabb2>> =
+        charts.iter().map(|c| c.as_ref().map(|(r, _)| crate::sheet_surface_cuts::loop_box(&r.outer))).collect();
     let extent = |f: usize| -> f64 {
         let Some(Some((_, uses))) = charts.get(f) else { return 0.0 };
         let (big, small) =
@@ -1252,8 +1292,10 @@ fn read_surfaces(
         let rf = &charts.get(f)?.as_ref()?.0;
         let (twin, shift) = charted_on(&sf, &sg)?;
         let (rg, _) = face_chart(b, &q, &twin, g, sag, tol).ok()?;
-        let turns: &[f64] = if sf.angular() { &[0.0, -std::f64::consts::TAU, std::f64::consts::TAU] } else { &[0.0] };
-        turns
+        if !sf.angular() {
+            return Some(Rigid2 { cos: 1.0, sin: 0.0, shift }.region(&rg));
+        }
+        [0.0, -std::f64::consts::TAU, std::f64::consts::TAU]
             .iter()
             .map(|k| Rigid2 { cos: 1.0, sin: 0.0, shift: shift + Vec2::new(0.0, *k) }.region(&rg))
             .map(|r| {
@@ -1263,6 +1305,36 @@ fn read_surfaces(
             .max_by(|x, y| x.0.total_cmp(&y.0))
             .map(|(_, r)| r)
     };
+    // Conservative 2D projected AABB pre-filter for `behinds`: skips re-charting and planar
+    // booleans for parallel/coaxial faces whose projected extent cannot reach `open_box`.
+    let pad = tol * 100.0 + sag;
+    let may_overlap = |sf: &Shape, sg: &Shape, g: usize, open_box: &solidcraft_geom::Aabb2| -> bool {
+        let Some(gb) = chart_boxes.get(g).copied().flatten() else { return true };
+        if gb.is_empty() || open_box.is_empty() {
+            return true;
+        }
+        match (*sf, *sg) {
+            (Shape::Plane { plane: pf, .. }, Shape::Plane { plane: pg, .. }) => {
+                let mut mapped = solidcraft_geom::Aabb2::EMPTY;
+                for c in [Vec2::new(gb.min.x, gb.min.y), Vec2::new(gb.max.x, gb.min.y), Vec2::new(gb.max.x, gb.max.y), Vec2::new(gb.min.x, gb.max.y)]
+                {
+                    mapped.add(pf.to_local(pg.to_world(c)));
+                }
+                mapped.is_empty() || open_box.meets(&mapped.inflated(pad))
+            }
+            (Shape::Cylinder { origin: of, axis: af, .. }, Shape::Cylinder { origin: og, axis: ag, .. }) => {
+                let (s, shift) = (af.dot(ag), (og - of).dot(af));
+                let (x0, x1) = (gb.min.x * s + shift, gb.max.x * s + shift);
+                let (lo, hi) = (x0.min(x1), x0.max(x1));
+                !(open_box.max.x < lo - pad || hi + pad < open_box.min.x)
+            }
+            (Shape::Cone { apex: af, axis, half, .. }, Shape::Cone { apex: ag, .. }) => {
+                let dx = (ag - af).dot(axis) * half.cos();
+                !(open_box.max.x < gb.min.x + dx - pad || gb.max.x + dx + pad < open_box.min.x)
+            }
+            _ => true,
+        }
+    };
     // Recognizing, behind face `f`: of the faces level with it that face back at it from inside
     // its material, the one it meets first over the most of its area (a shell's or a plate's other
     // side), and how far behind it lies; with `true`, that it faces back. Found from the faces'
@@ -1271,7 +1343,6 @@ fn read_surfaces(
     // side takes only its own small part.
     // Converting, no face has one: every face is a panel of the sheet, however near another faces
     // back at it, as a surface body's faces always are (it has no thickness of its own).
-    let surface = mb.is_surface();
     // A boolean of what is left of `f` that fails is the error: read as nothing left, the faces
     // farther behind would go unread, and the nearer side could be taken for none.
     let behinds: Vec<Option<(f64, usize)>> = (0..count)
@@ -1287,11 +1358,25 @@ fn read_surfaces(
             found.sort_by(|x, y| x.0.total_cmp(&y.0).then(x.1.cmp(&y.1)));
             let Some(Some((chart, _))) = charts.get(f) else { return Ok(None) };
             let mut open = vec![chart.clone()];
+            let mut open_area = area(&open);
+            let mut open_box = chart_boxes.get(f).copied().flatten().unwrap_or(solidcraft_geom::Aabb2::EMPTY);
             let mut best: Option<(f64, f64, usize)> = None;
             for (depth, g) in found {
+                if best.is_some_and(|(best_area, ..)| open_area <= best_area) {
+                    break;
+                }
+                if let Some(sg) = probe(g)
+                    && !may_overlap(&sf, &sg, g, &open_box)
+                {
+                    continue;
+                }
                 let Some(p) = projected(f, g) else { continue };
                 let p = std::slice::from_ref(&p);
-                let first = area(&solidcraft_kernel::planar_regions_boolean(&open, p, solidcraft_kernel::BoolOp::Intersect, tol)?);
+                let inter = solidcraft_kernel::planar_regions_boolean(&open, p, solidcraft_kernel::BoolOp::Intersect, tol)?;
+                if inter.is_empty() {
+                    continue;
+                }
+                let first = area(&inter);
                 if first > tol * tol && best.is_none_or(|(a, ..)| first > a) {
                     best = Some((first, depth, g));
                 }
@@ -1299,6 +1384,11 @@ fn read_surfaces(
                 if open.is_empty() {
                     break;
                 }
+                open_area = area(&open);
+                if best.is_some_and(|(best_area, ..)| open_area <= best_area) {
+                    break;
+                }
+                open_box = open.iter().fold(solidcraft_geom::Aabb2::EMPTY, |b, r| b.union(&crate::sheet_surface_cuts::loop_box(&r.outer)));
             }
             Ok(best.map(|(_, depth, g)| (depth, g)))
         })
@@ -1417,7 +1507,7 @@ fn read_surfaces(
     // Recognizing, what each loop of a shell's or a plate's face opens onto (see `Opening`),
     // followed across the faces round it to the first faces level with it.
     let mut around: Vec<BTreeSet<usize>> = vec![BTreeSet::new(); count];
-    for (x, y) in (0..edge_count).filter_map(pair) {
+    for (x, y) in edge_pair.iter().copied().flatten() {
         if x != y {
             around.get_mut(x).map(|a| a.insert(y));
             around.get_mut(y).map(|a| a.insert(x));
@@ -1488,15 +1578,7 @@ fn read_surfaces(
         let mut side = BTreeSet::from([from]);
         let mut queue = VecDeque::from([from]);
         while let Some(f) = queue.pop_front() {
-            for e in 0..edge_count {
-                let Some((x, y)) = pair(e) else { continue };
-                let g = if x == f {
-                    y
-                } else if y == f {
-                    x
-                } else {
-                    continue;
-                };
+            for &(e, g) in edges_of(f) {
                 if g == f || side.contains(&g) {
                     continue;
                 }
@@ -1579,9 +1661,11 @@ fn read_surfaces(
             return Some(e);
         }
         let (hx, hy, m) = (on_side(x)?, on_side(y)?, middle_of(e)?);
-        (0..edge_count)
-            .filter(|f| pair(*f).is_some_and(|(u, v)| (u, v) == (hx, hy) || (u, v) == (hy, hx)))
-            .filter_map(|f| middle_of(f).map(|n| (f, n.dist(m))))
+        edges_of(hx)
+            .iter()
+            .copied()
+            .filter(|&(_, other)| other == hy)
+            .filter_map(|(f, _)| middle_of(f).map(|n| (f, n.dist(m))))
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(f, _)| f)
     };
@@ -1599,16 +1683,13 @@ fn read_surfaces(
     // The planes a cylinder meets smoothly along its edges.
     let planes_beside = |g: usize| -> BTreeSet<usize> {
         let Ok(sg) = shape(g) else { return BTreeSet::new() };
-        (0..edge_count)
-            .filter_map(|e| {
-                let (x, y) = pair(e)?;
-                let h = if x == g && y != g {
-                    y
-                } else if y == g && x != g {
-                    x
-                } else {
+        edges_of(g)
+            .iter()
+            .copied()
+            .filter_map(|(e, h)| {
+                if h == g {
                     return None;
-                };
+                }
                 let sh = shape(h).ok()?;
                 (matches!(sh, Shape::Plane { .. }) && smooth(e, &sg, &sh)).then_some(h)
             })
@@ -1627,18 +1708,10 @@ fn read_surfaces(
     // The faces that run on smoothly from face `g` at its edges.
     let joined = |g: usize| -> BTreeSet<usize> {
         let Ok(sg) = shape(g) else { return BTreeSet::new() };
-        (0..edge_count)
-            .filter_map(|e| {
-                let (x, y) = pair(e)?;
-                let h = if x == g && y != g {
-                    y
-                } else if y == g && x != g {
-                    x
-                } else {
-                    return None;
-                };
-                (side.contains(&h) && shape(h).is_ok_and(|sh| smooth(e, &sg, &sh))).then_some(h)
-            })
+        edges_of(g)
+            .iter()
+            .copied()
+            .filter_map(|(e, h)| (h != g && side.contains(&h) && shape(h).is_ok_and(|sh| smooth(e, &sg, &sh))).then_some(h))
             .collect()
     };
     // A modelled bend picked on its roll across the thickness from the faces picked: its outside
@@ -1711,15 +1784,7 @@ fn read_surfaces(
             }
             for &g in &rolled {
                 faces.insert(g);
-                for e in 0..edge_count {
-                    let Some((x, y)) = pair(e) else { continue };
-                    let h = if x == g {
-                        y
-                    } else if y == g {
-                        x
-                    } else {
-                        continue;
-                    };
+                for &(e, h) in edges_of(g) {
                     if let (Ok(sg), Ok(sh)) = (shape(g), shape(h))
                         && side.contains(&h)
                         && smooth(e, &sg, &sh)
@@ -1855,15 +1920,10 @@ fn read_surfaces(
             continue;
         }
         let mut sides: Vec<(usize, usize)> = Vec::new();
-        for e in 0..edge_count {
-            let Some((x, y)) = pair(e) else { continue };
-            let g = if x == f && y != f {
-                y
-            } else if y == f && x != f {
-                x
-            } else {
+        for &(e, g) in edges_of(f) {
+            if g == f {
                 continue;
-            };
+            }
             let Some(sg @ Shape::Plane { .. }) = shaped.get(&g) else { continue };
             let Some([t0, t1]) = q.edge_interval(e) else { continue };
             let (Some((p0, _)), Some((p1, _))) = (q.edge_at(e, t0), q.edge_at(e, t1)) else { continue };
@@ -2401,7 +2461,11 @@ fn read_surfaces(
                 .ccw(),
                 holes: Vec::new(),
             };
+            let band_box = crate::sheet_surface_cuts::loop_box(&band.outer).inflated(1e-9);
             for h in &panel.region.holes {
+                if !band_box.meets(&crate::sheet_surface_cuts::loop_box(h)) {
+                    continue;
+                }
                 let hole = Region2 { outer: h.ccw(), holes: Vec::new() };
                 let met = solidcraft_kernel::planar_regions_boolean(
                     std::slice::from_ref(&hole),
@@ -3393,6 +3457,10 @@ pub struct SurfaceSheet {
     /// it, as a press brake bends perforated stock.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub perforation_joints: Vec<(u64, usize)>,
+    /// The mounting holes of press-in hardware in the flat (#17752), as the hardware's features
+    /// cut them: what the flat pattern lists and the DXF notes beside each hole.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hardware: Vec<crate::sheet::SheetHardware>,
     /// The sketch lines that made panels' edges: the panel (by its key, `Panel::name`), each line's
     /// id and its ends in that panel's chart. Any panel a sketch made has its own (a base flange's);
     /// a rim on one is made by that line (see [`RimEdge::Sketch`]).
@@ -3777,6 +3845,7 @@ impl SurfaceSheet {
             frames: Vec::new(),
             perforations: Vec::new(),
             perforation_joints: Vec::new(),
+            hardware: Vec::new(),
             sketch_curves: Vec::new(),
             parts: Vec::new(),
             recipes,
@@ -3997,6 +4066,7 @@ impl SurfaceSheet {
             frames: Vec::new(),
             perforations: Vec::new(),
             perforation_joints: Vec::new(),
+            hardware: Vec::new(),
             sketch_curves,
             parts: Vec::new(),
             recipes,
@@ -4170,6 +4240,9 @@ impl SurfaceSheet {
             }
         }
         out.labels = self.labels.iter().map(r).collect();
+        for h in &mut out.hardware {
+            h.center = f(h.center);
+        }
         out
     }
 
@@ -4793,6 +4866,7 @@ mod tests {
     use std::f64::consts::PI;
 
     use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+    use solidcraft_geom::PlaneGeom;
 
     use super::extent_across;
 
@@ -4955,5 +5029,89 @@ mod tests {
             assert!(solid.validity().is_empty(), "sheet {deg}° outward={outward}: {:?}", solid.validity());
             assert_eq!(sheet.regions.len(), 1, "sheet {deg}° outward={outward}: expected 1 flat region");
         }
+    }
+
+    #[test]
+    fn multi_cutout_bent_bracket_recognizes_and_converts_with_exact_flat_area() {
+        use solidcore_record::{Plane, Vec3};
+        use solidcraft_geom::Region2Geom;
+        use solidcraft_kernel::{BoolOp, boolean, extrude};
+
+        use super::{ConvertRule, ReliefShape, SheetFaces, SurfaceSheet, convert_surfaces, measure_sheet_body};
+        use crate::{IDENTITY, ModelBody};
+
+        // 2 mm thick 90° L-bracket (80 x 120 horizontal leg, 60 x 120 vertical leg) with 6 through-holes.
+        let l_profile = Region2 {
+            outer: Loop2::polygon(&[
+                Vec2::new(0.0, 0.0),
+                Vec2::new(80.0, 0.0),
+                Vec2::new(80.0, 2.0),
+                Vec2::new(2.0, 2.0),
+                Vec2::new(2.0, 60.0),
+                Vec2::new(0.0, 60.0),
+            ]),
+            holes: Vec::new(),
+        };
+        let mut body = extrude(&Plane::XY, std::slice::from_ref(&l_profile), 0.0, 120.0).unwrap().remove(0);
+
+        let horiz = Plane::new(Vec3::ZERO, Vec3::Z, Vec3::X).unwrap();
+        for (z, x) in [(30.0, 25.0), (90.0, 25.0), (30.0, 55.0), (90.0, 55.0)] {
+            let circle = Region2 { outer: Loop2::circle(Vec2::new(z, x), 4.0), holes: Vec::new() };
+            let hole = extrude(&horiz, std::slice::from_ref(&circle), -5.0, 10.0).unwrap().remove(0);
+            body = boolean(&body, &hole, BoolOp::Cut).unwrap().unwrap();
+        }
+        let vert = Plane::new(Vec3::ZERO, Vec3::Y, Vec3::Z).unwrap();
+        for (y, z) in [(30.0, 40.0), (30.0, 80.0)] {
+            let circle = Region2 { outer: Loop2::circle(Vec2::new(y, z), 4.0), holes: Vec::new() };
+            let hole = extrude(&vert, std::slice::from_ref(&circle), -5.0, 10.0).unwrap().remove(0);
+            body = boolean(&body, &hole, BoolOp::Cut).unwrap().unwrap();
+        }
+
+        let mb = ModelBody::new("Bracket".into(), body, 1);
+        let measured = measure_sheet_body(&mb, None, &[], &IDENTITY).unwrap();
+        assert!((measured.thickness - 2.0).abs() < 1e-9, "measured thickness {}", measured.thickness);
+
+        let rule = ConvertRule {
+            thickness: 2.0,
+            k_factor: 0.5,
+            bend_radius: 2.0,
+            gap: 0.1,
+            corner_relief: ReliefShape::Notch,
+            corner_relief_size: 1.0,
+            relief_width: 1.0,
+            relief_depth: 1.0,
+            bend_relief: crate::sheet::BendReliefShape::Rectangular,
+        };
+        let bend_pick = [Vec3::new(0.0, 0.0, 60.0)];
+
+        // Recognize mode (`SheetFaces::Sheet`): exercises `behinds`, adjacency tables, and hole-vs-bend-band filter.
+        let recognized =
+            convert_surfaces(&mb, &|_| Ok(rule), &bend_pick, SheetFaces::Sheet { face: None, skip: &[] }, &[], false, &IDENTITY).unwrap();
+        assert_eq!(recognized.own_thickness, Some(2.0));
+        assert!((recognized.thickness - 2.0).abs() < 1e-9);
+        assert_eq!(recognized.sheet.panels.len(), 2);
+        assert_eq!(recognized.sheet.joints.len(), 1);
+        let (rec_sheet, rec_solid) = SurfaceSheet::converted("Bracket", "T1", &recognized, 1).unwrap();
+        assert!(rec_solid.validity().is_empty(), "{:?}", rec_solid.validity());
+        assert_eq!(rec_sheet.regions.len(), 1);
+        assert_eq!(rec_sheet.regions[0].holes.len(), 6);
+        assert_eq!(rec_sheet.bends.len(), 1);
+
+        // Flat length = (80 - 4) + (2 + 0.5 * 2) * PI / 2 + (60 - 4) = 132 + 1.5 * PI; width = 120; minus 6 * PI * 4^2.
+        let expected_flat_area = (132.0 + 1.5 * PI) * 120.0 - 6.0 * PI * 16.0;
+        let rec_flat_area = rec_sheet.regions[0].area();
+        assert!((rec_flat_area - expected_flat_area).abs() < 0.05, "got flat area {rec_flat_area:.6}, expected {expected_flat_area:.6}");
+
+        // Convert mode (`SheetFaces::Picked`, no engravings): exercises the skipped-`charts` fast path.
+        let picked_faces = [Vec3::new(40.0, 0.0, 60.0), Vec3::new(0.0, 30.0, 60.0)];
+        let converted = convert_surfaces(&mb, &|_| Ok(rule), &bend_pick, SheetFaces::Picked(&picked_faces), &[], false, &IDENTITY).unwrap();
+        assert_eq!(converted.sheet.panels.len(), 2);
+        assert_eq!(converted.sheet.joints.len(), 1);
+        let (conv_sheet, conv_solid) = SurfaceSheet::converted("Bracket", "T1", &converted, 2).unwrap();
+        assert!(conv_solid.validity().is_empty(), "{:?}", conv_solid.validity());
+        assert_eq!(conv_sheet.regions.len(), 1);
+        assert_eq!(conv_sheet.regions[0].holes.len(), 6);
+        assert_eq!(conv_sheet.bends.len(), 1);
+        assert!((conv_sheet.regions[0].area() - rec_flat_area).abs() < 1e-6);
     }
 }

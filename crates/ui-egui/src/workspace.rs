@@ -439,8 +439,11 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                 label: "Faces",
                 ids: &["solid.press_pull", "solid.draft", "solid.offset_face", "solid.replace_face", "solid.split_face", "face.delete"],
             },
-            CommandGroup { label: "Bodies", ids: &["solid.shell", "solid.combine", "solid.split_body", "solid.scale", "solid.remove"] },
-            CommandGroup { label: "Specialise", ids: &["sheet.convert"] },
+            CommandGroup {
+                label: "Bodies",
+                ids: &["solid.shell", "solid.combine", "solid.finger_joint", "solid.split_body", "solid.scale", "solid.remove"],
+            },
+            CommandGroup { label: "Specialise", ids: &["sheet.convert", "solid.dogbone"] },
         ],
         _ => &[],
     }
@@ -570,7 +573,8 @@ pub const SECTIONS: &[Section] = &[
             "sketch.point3d",
         ],
     },
-    Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole"] },
+    // Cell Grid cuts a sketch's area into a part, as Hole and Emboss do: it follows Hole in the menu.
+    Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole", "solid.cell_grid"] },
     Section {
         tab: "MODEL",
         panel: "MODIFY",
@@ -591,6 +595,9 @@ pub const SECTIONS: &[Section] = &[
         promoted: 3,
         ids: &["construct.plane", "construct.axis", "construct.point", "construct.plane.offset"],
     },
+    // Only while a component other than the design is active (`toolbar::panel_shown`), pinned at
+    // the right as FINISH SKETCH is. The next group comes after it when both show.
+    Section { tab: "MODEL", panel: "ACTIVE COMPONENT", promoted: 1, ids: &["component.activate.parent"] },
     // Only while a linked design is edited in place, pinned at the right as FINISH SKETCH is.
     Section { tab: "MODEL", panel: "FINISH EDITING", promoted: 1, ids: &["component.finish_edit"] },
     // Sketches drive surfaces too: New Sketch leads the tab, as on MODEL and SHEET METAL.
@@ -601,7 +608,12 @@ pub const SECTIONS: &[Section] = &[
         promoted: 4,
         ids: &["surface.extrude", "surface.revolve", "surface.sweep", "surface.loft", "surface.thicken"],
     },
-    Section { tab: "SURFACE", panel: "EDIT", promoted: 4, ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch"] },
+    Section {
+        tab: "SURFACE",
+        panel: "EDIT",
+        promoted: 4,
+        ids: &["surface.trim", "surface.untrim", "surface.extend", "surface.stitch", "solid.split_body"],
+    },
     Section { tab: "SURFACE", panel: "MESH", promoted: 2, ids: &["mesh.reduce", "mesh.convert", "file.insert_mesh", "file.save_mesh"] },
     Section {
         tab: "ASSEMBLE",
@@ -759,6 +771,9 @@ pub const SECTIONS: &[Section] = &[
             "sketch.constraint.equal",
             "sketch.constraint.parallel",
             "sketch.constraint.perpendicular",
+            // Horizontal or Vertical alone, whichever way the line runs now: in the drop-down.
+            "sketch.constraint.horizontal",
+            "sketch.constraint.vertical",
             "sketch.construction",
             "sketch.constrainer",
         ],
@@ -792,7 +807,17 @@ pub const SECTIONS: &[Section] = &[
         tab: "SHEET METAL",
         panel: "CREATE",
         promoted: 4,
-        ids: &["sheet.flange", "sheet.path_flange", "sheet.hem", "sheet.fold", "sheet.tab", "sheet.perforate", "sheet.convert", "sheet.recognize"],
+        ids: &[
+            "sheet.flange",
+            "sheet.path_flange",
+            "sheet.hem",
+            "sheet.fold",
+            "sheet.tab",
+            "sheet.perforate",
+            "sheet.hardware",
+            "sheet.convert",
+            "sheet.recognize",
+        ],
     },
     Section { tab: "SHEET METAL", panel: "FLAT", promoted: 3, ids: &["sheet.unfold", "sheet.refold", "sheet.flat_pattern"] },
     Section { tab: "SHEET METAL", panel: "OUTPUT", promoted: 2, ids: &["sheet.export_dxf", "sheet.export_bend_table"] },
@@ -889,6 +914,7 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("render.settings.apply", "Saved Camera"),
     ("render.preflight", "Check"),
     ("appearance.assign", "Appearance"),
+    ("component.activate.parent", "Parent"),
     ("component.capture_position", "Capture Pos."),
     ("component.create", "New Comp."),
     ("component.from_bodies", "From Bodies"),
@@ -1029,7 +1055,7 @@ pub(crate) fn legacy_render_destination(c: &CommandSpec) -> Option<(&'static str
         "assembly.bom" => Some(("INSPECT", "CHECK")),
         "sheet.flat_pattern" => Some(("SHEET METAL", "FLAT")),
         "sheet.manage_rules" => Some(("MANAGE", "RULES")),
-        "sheet.convert" => Some(("MODEL", "MODIFY")),
+        "sheet.convert" | "solid.split_body" => Some(("MODEL", "MODIFY")),
         "parameters.change" => Some(("MANAGE", "PARAMETERS")),
         "file.insert_mesh" | "file.save_mesh" => Some(("INSERT", "FILES")),
         "config.table" | "config.configure" => Some(("MANAGE", "CONFIGURATIONS")),
@@ -1097,6 +1123,7 @@ pub fn legacy_panel(tab: &str, panel: &str) -> Option<(&'static str, &'static st
 pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
     Some(match k {
         FeatureKind::SheetBase { .. } | FeatureKind::SheetContour { .. } | FeatureKind::SheetFlange { .. } => "flange",
+        FeatureKind::SheetCornerJoin { .. } => "corner_join",
         FeatureKind::SheetHem { .. } => "hem",
         FeatureKind::SheetFold { .. } => "fold",
         FeatureKind::SheetPath { .. } => "path_flange",
@@ -1629,10 +1656,12 @@ mod tests {
                 "face.delete",
                 "solid.shell",
                 "solid.combine",
+                "solid.finger_joint",
                 "solid.split_body",
                 "solid.scale",
                 "solid.remove",
                 "sheet.convert",
+                "solid.dogbone",
                 "timeline.delete",
             ]
         );
@@ -1725,6 +1754,8 @@ mod tests {
             ("SURFACE", "SKETCH", "sketch.create"),
             ("MODEL", "SKETCH", "sketch.create3d"),
             ("SKETCH", "REFERENCE", "canvas.insert"),
+            ("MODEL", "MODIFY", "solid.split_body"),
+            ("SURFACE", "EDIT", "solid.split_body"),
         ] {
             assert!(layout(tab, panel, &specs).unwrap().0.iter().any(|c| c.id == id));
         }
@@ -2129,6 +2160,9 @@ mod tests {
         assert!(ids("MANAGE", "RULES").contains(&"plastic.manage_rules"));
         let create = ids("MODEL", "CREATE");
         assert!(create.contains(&"plastic.boss") && create.contains(&"solid.rib") && create.contains(&"plastic.lip"));
+        // Cell Grid cuts a sketch's area into a part, as Hole does: it comes right after Hole.
+        let hole = create.iter().position(|id| *id == "solid.hole");
+        assert_eq!(hole.and_then(|i| create.get(i + 1)).copied(), Some("solid.cell_grid"), "{create:?}");
         assert!(ids("MODEL", "MODIFY").contains(&"solid.shell"));
         assert_eq!(panels("MANAGE"), ["PARAMETERS", "CONFIGURATIONS", "MATERIALS", "RULES", "DESIGN"]);
         // The former sketch/solid INSPECT panels now share a global INSPECT tab.

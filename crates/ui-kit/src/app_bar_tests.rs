@@ -1075,6 +1075,7 @@ const TAB_HANDLES: TabHandles<'static> = TabHandles {
     view_new: "t:vnew",
     view_more: "t:vmore",
     switcher: "t:switcher",
+    view_collapse: "t:vcollapse",
     file_drop: "t:file_drop",
 };
 
@@ -1175,6 +1176,8 @@ struct TabsRig {
     rename: Option<usize>,
     text: std::cell::RefCell<String>,
     focused: std::cell::Cell<bool>,
+    /// The first design's sub-tabs are folded into its tab.
+    collapsed: std::cell::Cell<bool>,
 }
 
 impl TabsRig {
@@ -1206,6 +1209,7 @@ impl TabsRig {
             rename: rename.map(|(k, _)| k),
             text: std::cell::RefCell::new(text),
             focused: std::cell::Cell::new(false),
+            collapsed: std::cell::Cell::new(false),
         };
         rig.frame(Vec::new());
         rig
@@ -1225,7 +1229,8 @@ impl TabsRig {
             focused: true,
             ..Default::default()
         };
-        let tab = |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None, views: &[] };
+        let tab =
+            |name: &'static str| DocTab { name, list_name: name, dirty: false, place: "Not saved yet", security: None, views: &[], collapsed: false };
         let mut views = VIEWS;
         if self.detached {
             views[1].to_window = Some(1);
@@ -1239,7 +1244,7 @@ impl TabsRig {
         } else {
             &[]
         };
-        let first = DocTab { views, ..tab(self.name) };
+        let first = DocTab { views, collapsed: self.collapsed.get(), ..tab(self.name) };
         let layout = self.layout.map(|(visible, window_count)| layout_test_data(visible, window_count));
         let (mut text, mut focused) = (self.text.borrow().clone(), self.focused.get());
         let mut strip = TabStrip {
@@ -1266,6 +1271,8 @@ impl TabsRig {
                 new_view: "Open another view",
                 more: "{n} more",
                 switch_view: "Switch view",
+                collapse_views: "Hide views",
+                expand_views: "Show views",
             },
             view_menu: &VIEW_MENU,
             view_right_row: "vright",
@@ -1646,6 +1653,45 @@ fn a_view_drop_slot_shifts_only_neighbours_at_or_after_the_local_index() {
     assert_eq!(rig.at("t:view:1"), second);
     assert_eq!(rig.at("t:vnew"), plus);
     assert!(view_drag_gap(&rig.ctx, strip, 1).is_none());
+}
+
+/// The chevron right after the selected design's + folds its sub-tabs into its tab, in both
+/// sub-tab styles: folded, the tab is a plain tab with its count, its + and the chevron (now
+/// between the + and ×), which shows them again. A pop-out's strip has no chevron.
+#[test]
+fn the_chevron_folds_a_designs_sub_tabs_into_its_tab() {
+    for clear in [false, true] {
+        let mut rig = TabsRig::with(Some(true));
+        rig.clear = clear;
+        rig.frame(Vec::new());
+        let plus = solidcraft_ui_registry::rect_of("t:vnew").expect("the + is drawn");
+        let chevron = solidcraft_ui_registry::rect_of("t:vcollapse").expect("clear={clear}: the chevron is drawn");
+        assert!(chevron.left() >= plus.right() - 0.5, "clear={clear}: the chevron is right after the +");
+        assert_eq!(rig.press(chevron.center(), egui::PointerButton::Primary), vec![TabAction::CollapseViews(true)]);
+        rig.collapsed.set(true);
+        rig.frame(Vec::new());
+        assert!(solidcraft_ui_registry::rect_of("t:view:0").is_none(), "clear={clear}: folded, no sub-tabs");
+        let tab = solidcraft_ui_registry::rect_of("t:tab:0").expect("the design's tab");
+        let chevron = solidcraft_ui_registry::rect_of("t:vcollapse").expect("folded, the chevron stays to show them again");
+        let plus = solidcraft_ui_registry::rect_of("t:vnew").expect("and its +");
+        let close = solidcraft_ui_registry::rect_of("t:close:0").expect("and its ×");
+        assert!(tab.contains_rect(chevron) && plus.right() <= chevron.left() + 0.5 && chevron.right() <= close.left() + 0.5, "between the + and ×");
+        assert_eq!(rig.press(chevron.center(), egui::PointerButton::Primary), vec![TabAction::CollapseViews(false)]);
+    }
+    // In a narrow strip the folded tab keeps the room for its +, chevron and ×.
+    let mut rig = TabsRig::with(Some(true));
+    rig.room = Some(260.0);
+    rig.collapsed.set(true);
+    rig.frame(Vec::new());
+    let tab = solidcraft_ui_registry::rect_of("t:tab:0").expect("the design's tab");
+    for handle in ["t:vnew", "t:vcollapse", "t:close:0"] {
+        let rect = solidcraft_ui_registry::rect_of(handle).unwrap_or_else(|| panic!("{handle} is drawn"));
+        assert!(tab.contains_rect(rect), "{handle} fits in the folded tab {tab:?}: {rect:?}");
+    }
+    let mut rig = TabsRig::with(Some(true));
+    rig.pop_out = true;
+    rig.frame(Vec::new());
+    assert!(solidcraft_ui_registry::rect_of("t:vcollapse").is_none(), "a pop-out's strip has no chevron");
 }
 
 /// With a view switcher the views list in a menu: a row picks a view, the footer's rows are the app's.

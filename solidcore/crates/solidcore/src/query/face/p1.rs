@@ -668,6 +668,20 @@ pub fn calculate_bounding_box_in(
     Ok(face_box)
 }
 
+/// (not upstream) The value of a step of a proof that is only ever a saving (a box that rules a
+/// pair out): `Some` on success, `None` on any failure but a cancellation, which gives up the
+/// proof rather than the operation ([`proved_bounding_box`], `boolean::apart`).
+///
+/// # Errors
+/// A cancellation.
+pub(crate) fn probe<T>(r: Result<T>) -> Result<Option<T>> {
+    match r {
+        Ok(v) => Ok(Some(v)),
+        Err(e) if e.is_cancelled() => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
 /// Not upstream: a box that provably holds every point of the face within its zone
 /// tolerance, or `None` when none is known; for ruling out pairs of faces that cannot meet
 /// (the boolean's face pairs). [`calculate_bounding_box`]'s box of a curved face is its
@@ -700,13 +714,6 @@ pub fn proved_bounding_box(
     scratch: &mut Option<Brep>,
 ) -> Result<Option<Extent3d>> {
     // a box is only ever a saving: every failure but a cancellation gives none
-    fn probe<T>(r: Result<T>) -> Result<Option<T>> {
-        match r {
-            Ok(v) => Ok(Some(v)),
-            Err(e) if e.is_cancelled() => Err(e),
-            Err(_) => Ok(None),
-        }
-    }
     let Some(Some(surface)) = probe(fp2::surface(b, f))? else {
         return Ok(None);
     };

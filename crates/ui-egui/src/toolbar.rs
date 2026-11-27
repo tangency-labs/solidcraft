@@ -38,6 +38,22 @@ pub fn panels(tab: &str) -> Vec<&'static str> {
     crate::workspace::panels(tab)
 }
 
+/// The groups that leave what is open (the sketch, the active component, the edit), pinned at
+/// the ribbon's right end when last: labelled Exit, their own buttons never shown pressed.
+fn exit_panel(tab: &str, panel: &str) -> bool {
+    matches!((tab, panel), ("SKETCH", "FINISH SKETCH") | ("MODEL", "ACTIVE COMPONENT" | "FINISH EDITING"))
+}
+
+/// Whether a panel of `tab` is on the ribbon now: an exit group only while there is something
+/// to leave.
+pub(crate) fn panel_shown(app: &SolveApp, tab: &str, panel: &str) -> bool {
+    match (tab, panel) {
+        ("MODEL", "ACTIVE COMPONENT") => app.session.active_component != 0,
+        ("MODEL", "FINISH EDITING") => app.edit_in_place.active.is_some(),
+        _ => true,
+    }
+}
+
 pub use crate::ribbon::TAB_ROW_HEIGHT;
 pub const RIBBON_HEIGHT: f32 = TAB_ROW_HEIGHT + GROUP_HEIGHT + 1.0;
 pub(crate) const WORKSPACE_WIDTH: f32 = 88.0;
@@ -732,7 +748,8 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
         .enumerate()
         .map(|(i, path)| {
             let missing = !crate::home::available(app, path);
-            button(&format!("recent:{i}"), &format!("{path}{}", if missing { " (missing)" } else { "" }), "open", None)
+            let shown = crate::display_user_path(path);
+            button(&format!("recent:{i}"), &format!("{shown}{}", if missing { " (missing)" } else { "" }), "open", None)
         })
         .collect();
     recent.push(FileRow::Separator);
@@ -768,6 +785,7 @@ pub(crate) fn file_rows(app: &SolveApp) -> Vec<app_bar::FileRow> {
     rows.push(row("export_glb", &format!("{}…", app.tr("ui.export_glb")), "", "export", shown));
     rows.push(row("export_usd", &format!("{}…", app.tr("ui.export_usd")), "", "export", shown));
     rows.push(row("file.export_urdf", app.tr_label("Export URDF…"), &key("file.export_urdf"), "export", shown));
+    rows.push(row("file.export_mjcf", app.tr_label("Export MJCF…"), &key("file.export_mjcf"), "export", shown));
     rows.push(row("file.export_sdf", app.tr_label("Export SDF Model…"), &key("file.export_sdf"), "export", shown));
     rows.push(row("export_json", app.tr_label("Export Design as JSON…"), "", "export", true));
     // Each installed export slot is a format of its own, labelled with the plugin's name.
@@ -860,6 +878,7 @@ pub(crate) fn run_file_row(app: &mut SolveApp, id: &str) {
         "file.export_view_dxf" => FileAction::Command("file.export_view_dxf").run(app),
         "file.export_obj" => FileAction::Command("file.export_obj").run(app),
         "file.export_urdf" => FileAction::Command("file.export_urdf").run(app),
+        "file.export_mjcf" => FileAction::Command("file.export_mjcf").run(app),
         "file.export_sdf" => FileAction::Command("file.export_sdf").run(app),
         "document.metadata" => FileAction::Command("document.metadata").run(app),
         "drawing.print" => app.start(id),
@@ -1010,7 +1029,11 @@ pub(crate) fn download_design(app: &mut SolveApp) {
 }
 
 pub(crate) fn export(app: &mut SolveApp, ext: &str) {
-    export_as(app, ext, None);
+    match ext {
+        // MJCF is saved as the usual `.xml`, which alone does not name the format.
+        "mjcf" => export_as(app, "xml", Some("mjcf")),
+        _ => export_as(app, ext, None),
+    }
 }
 
 /// Each format's own export command, started from its key, command search or the File menu,
@@ -1027,6 +1050,7 @@ pub(crate) fn start_export(app: &mut SolveApp, id: &str) -> bool {
         "file.export_step" => ("step", false),
         "file.export_obj" => ("obj", false),
         "file.export_urdf" => ("urdf", false),
+        "file.export_mjcf" => ("mjcf", false),
         "file.export_sdf" => ("sdf", false),
         "file.export_stl" => ("stl", true),
         "file.export_3mf" => ("3mf", true),
@@ -1090,7 +1114,8 @@ pub(crate) fn exported(app: &mut SolveApp, path: &str, result: &Value) {
         let text = crate::i18n::tr_diagnostic(warning);
         app.messages.push(&text, false, crate::now_ms());
     }
-    let mut line = format!("Exported {path}");
+    let shown = crate::display_user_path(path);
+    let mut line = format!("Exported {shown}");
     if let Some(first) = warnings.first() {
         line.push_str(&format!(" with {} warning(s): {first}", warnings.len()));
     }
@@ -1599,7 +1624,7 @@ struct RibbonPanels {
     panels: Vec<Panel>,
     /// The Plugins group after the ordinary panels and before the exit panel, when present.
     plugins: Option<PluginGroup>,
-    /// The last panel leaves the sketch or the edit.
+    /// The last panel is an exit group, pinned at the right.
     exit: bool,
     running: Option<String>,
 }
@@ -1607,14 +1632,13 @@ struct RibbonPanels {
 impl RibbonPanels {
     fn new(app: &SolveApp, ui: &egui::Ui, tab: &str, lists: &[PanelList], painter: &egui::Painter, running: Option<String>) -> Self {
         let labels = app.preferences.ribbon_labels;
-        let editing_in_place = app.edit_in_place.active.is_some();
         let open_menu = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::unique("sc_panel_open")));
         let panels = lists
             .iter()
             .map(|(panel, cmds, shown)| {
                 let panel: &'static str = panel;
                 let sketch_create = tab == "SKETCH" && panel == "CREATE";
-                let finish = (tab == "SKETCH" && panel == "FINISH SKETCH") || (tab == "MODEL" && panel == "FINISH EDITING");
+                let finish = exit_panel(tab, panel);
                 let in_gallery = |c: &&'static solidcraft_engine::CommandSpec| crate::toolbar_custom::in_gallery(app, tab, panel, c.id);
                 let button = |c: &'static solidcraft_engine::CommandSpec| {
                     // Only the family's default pin follows the part's choice. Explicitly pinned
@@ -1646,7 +1670,14 @@ impl RibbonPanels {
                         // The buttons that leave the sketch or the edit never show pressed; a
                         // tool pinned into their group does.
                         exit: finish
-                            && matches!(selected.id, "sketch.finish" | "sketch.finish_auto_constrain" | "sketch.cancel" | "component.finish_edit"),
+                            && matches!(
+                                selected.id,
+                                "sketch.finish"
+                                    | "sketch.finish_auto_constrain"
+                                    | "sketch.cancel"
+                                    | "component.activate.parent"
+                                    | "component.finish_edit"
+                            ),
                         persistent,
                         disabled: info.disabled_reason,
                         coming_soon: coming_soon(app, selected),
@@ -1711,10 +1742,9 @@ impl RibbonPanels {
                 }
             })
             .collect::<Vec<_>>();
-        // The Sketch exit group follows the last sketch panel (Finish Edit the last panel while
-        // editing in place).
-        let exit = (tab == "SKETCH" || (tab == "MODEL" && editing_in_place))
-            && panels.last().is_some_and(|p| matches!(p.panel, "FINISH SKETCH" | "FINISH EDITING"));
+        // An exit group shown last is pinned at the right; the caller leaves out the ones with
+        // nothing to leave (`panel_shown`).
+        let exit = panels.last().is_some_and(|p| exit_panel(tab, p.panel));
         let buttons = if tab == "MODEL" { crate::plugin_menu::ribbon_buttons(app) } else { Vec::new() };
         let plugins = (!buttons.is_empty()).then(|| PluginGroup {
             label: app.tr("ui.plugins").to_string(),
@@ -2005,10 +2035,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             && !ribbon::dragging(ui.ctx());
         // Every panel with all its buttons (the user's pins have no cap); a toolbar too narrow
         // for them narrows the buttons, then trims panels into their drop-down and the » menu.
-        let editing_in_place = app.edit_in_place.active.is_some();
         let lists: Vec<_> = crate::toolbar_custom::panel_lists_for(app, &tab)
             .into_iter()
-            .filter(|(panel, _, _)| editing_in_place || !(tab == "MODEL" && *panel == "FINISH EDITING"))
+            .filter(|(panel, _, _)| panel_shown(app, &tab, panel))
             .map(|(panel, mut cmds, promote)| {
                 let promote = if tab == "SKETCH" && panel == "CREATE" && !app.preferences.sketch_construction_lines {
                     promote.saturating_sub(1)
@@ -3715,6 +3744,27 @@ mod header_report_tests {
         crate::dialogs::cancel(&mut h.app);
     }
 
+    /// File › Export MJCF… offers the usual `.xml` name and writes MuJoCo's format there, which a
+    /// `.xml` path alone would not pick (#20786).
+    #[test]
+    fn file_menu_exports_mjcf_as_an_xml_file() {
+        let mut h = crate::scenario::Harness::new();
+        let offered = std::rc::Rc::new(std::cell::RefCell::new(Vec::<(String, Vec<String>)>::new()));
+        let (seen, dir) = (offered.clone(), h.dir.clone());
+        h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+            seen.borrow_mut().push((name.to_string(), extensions.iter().map(|e| e.to_string()).collect()));
+            Box::pin(std::future::ready(Some(dir.join(name).to_string_lossy().into_owned())))
+        }));
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+        h.app.session.doc_mut().name = "Bracket".into();
+        run_file_row(&mut h.app, "file.export_mjcf");
+        h.frames(3);
+        h.settle();
+        assert_eq!(offered.borrow().last().cloned(), Some(("Bracket.xml".to_string(), vec!["xml".to_string()])));
+        let xml = std::fs::read_to_string(h.dir.join("Bracket.xml")).unwrap();
+        assert!(xml.contains("<mujoco"), "an MJCF model is written: {xml}");
+    }
+
     /// What an exporter leaves out is said on the status line, and each warning stays in Messages
     /// once the chip has faded; an export with nothing left out still says just where it went.
     #[test]
@@ -5058,8 +5108,9 @@ mod dropdown_tests {
             assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_none(), "grid {grid}: unpinned");
             pick(&mut h, "Pin to Shortcuts");
             assert!(h.app.sbox.pinned.iter().any(|p| p == "solid.box"), "grid {grid}: a shortcut");
-            // The pin shown on the pointed-at row or icon pins it, and again unpins it. A grid
-            // icon's pin takes clicks only after the pointer has rested on it for ribbon::PIN_DELAY.
+            // The pin shown on the pointed-at icon pins it and again unpins it. A grid icon's pin
+            // takes clicks only after the pointer has rested on it for ribbon::PIN_DELAY. A row has
+            // no pin (#11853): its ⋯ menu does it.
             for pinned in [true, false] {
                 h.step(&json!({"click":{"handle":"panel:MODEL:CREATE"}})).unwrap();
                 h.frames(4);
@@ -5069,10 +5120,19 @@ mod dropdown_tests {
                     assert!(crate::scenario::handle_at("dropdown_pin:solid.box").is_none(), "no pin to click straight away");
                     h.frames((ribbon::PIN_DELAY * 60.0) as usize + 5);
                 }
-                h.step(&json!({"click":{"handle":"dropdown_pin:solid.box"}})).unwrap();
+                if grid {
+                    h.step(&json!({"click":{"handle":"dropdown_pin:solid.box"}})).unwrap();
+                } else {
+                    h.frames((ribbon::PIN_DELAY * 60.0) as usize + 5);
+                    assert!(crate::scenario::handle_at("dropdown_pin:solid.box").is_none(), "a row never shows a pin by default");
+                    h.step(&json!({"click":{"handle":"dropdown_more:solid.box"}})).unwrap();
+                    h.frames(3);
+                    let item = if pinned { "Pin to Toolbar" } else { "Remove from Toolbar" };
+                    h.step(&json!({"widget": item})).unwrap_or_else(|e| panic!("{item} in the row's ⋯ menu: {e}"));
+                }
                 h.frames(3);
                 h.step(&json!({"key":"Escape"})).unwrap();
-                assert_eq!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_some(), pinned, "grid {grid}: the hover pin");
+                assert_eq!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "solid.box").is_some(), pinned, "grid {grid}");
             }
             assert!(h.app.session.doc.features.is_empty(), "grid {grid}: pinning does not run the command");
         }
@@ -6987,6 +7047,31 @@ mod ribbon_gallery_tests {
         assert!(rect_of("button:sketch.constraint.midpoint").unwrap().height() > first.height());
         assert_eq!(rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[5])).map(|r| r.size()), Some(last.size()));
     }
+
+    #[test]
+    fn re_pinned_concentric_returns_to_the_small_constraint_grid() {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1800,"height":900}));
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.frames(3);
+        let id = "sketch.constraint.concentric";
+        let cell = format!("ribbon:constraint:{id}");
+        crate::toolbar_custom::pin(&mut h.app, "SKETCH", id).unwrap();
+        h.frames(3);
+        let first = rect_of(&format!("ribbon:constraint:{}", crate::workspace::CONSTRAINT_GALLERY[0])).unwrap();
+        let small = rect_of(&cell).unwrap();
+        assert_eq!(small.size(), first.size());
+
+        // Drag it out to a full-size button, remove it, then pin it again.
+        crate::toolbar_custom::reorder(&mut h.app, "SKETCH", id, "CONSTRAIN", None);
+        h.frames(3);
+        assert!(rect_of(&cell).is_none());
+        assert!(rect_of(&format!("button:{id}")).unwrap().height() > small.height());
+        crate::toolbar_custom::remove(&mut h.app, "SKETCH", id);
+        crate::toolbar_custom::pin(&mut h.app, "SKETCH", id).unwrap();
+        h.frames(3);
+        assert_eq!(rect_of(&cell).map(|r| r.size()), Some(first.size()));
+    }
 }
 
 #[cfg(test)]
@@ -7051,8 +7136,9 @@ mod fill_width_tests {
                 let right = bar.right() - 4.0 - finish.map_or(0.0, |f| f.width() + 4.0);
                 let count = |name: &str| crate::scenario::count_of(name).unwrap_or(-1.0);
                 let (collapsed, trimmed, more) = (count("toolbar_collapsed"), count("toolbar_trimmed"), count("toolbar_more"));
-                // FINISH EDITING is shown only while a linked design is edited in place.
-                let lists: Vec<_> = crate::toolbar_custom::panel_lists(tab).into_iter().filter(|(panel, _, _)| *panel != "FINISH EDITING").collect();
+                // The exit groups with nothing to leave are not on the toolbar.
+                let lists: Vec<_> =
+                    crate::toolbar_custom::panel_lists(tab).into_iter().filter(|(panel, _, _)| panel_shown(&h.app, tab, panel)).collect();
                 let mut end = bar.left();
                 let mut on_bar = 0;
                 for (panel, cmds, promote) in &lists {

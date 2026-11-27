@@ -384,6 +384,7 @@ table. Panel/Window/Confirm compositions also have dedicated geometry and intera
 | `figure_rows`, `FigureSlot` | A caller-painted figure in the label column beside a stack of captioned expression fields (the Hole dialog's section); the caller gets each field's rect and hover/focus state to draw leaders and light the part it sizes. Fields keep their `dialog:<label>` handles; the block publishes `dialog:figure:<id>` and its picture `dialog:figure_picture:<id>` | `control_height`, `form_label_width`, `font_small`, `form_dim`, `space_2/4`, label gap |
 | `linear_color_field` | Linear RGB swatch with precise channel fields; clips only the preview to display gamut and preserves HDR values until edited | `control_height`, `space_4`, shared colour popover |
 | `section`, `section_count`, `section_method`, `search_fold`, `divider` | Persisted small-caps disclosure with chevron, optional count or method tag and trailing hairline; `search_fold` is that row for shortcut matches during Preferences search, closed until opened; full-width rule | `control_height`, `dialog_rule`, `font_caption`, tracking, spacing |
+| `card_section` | Bordered disclosure for repeated form groups. Remembers open state and shows an optional palette-colored icon while closed. Publishes `dialog:card:{title}` and `dialog:card_header:{title}`. | `control_height`, `dialog_rule`, `control_radius`, `space_6/8`, `form_ink/dim` |
 | `icon_action` | Icon-only action with an accessible name, tooltip, enabled state and danger variant | Shared icon-label action geometry and ink tokens |
 | `list_row` | Picked item with a remove target | `control_height`, `font_label`, icon/spacing tokens |
 | `text`, `Text` | Hint, note, report, inline or cell text; see variants below | `font_small/label`, `text/dim/error`, `control_height`, `space_4` |
@@ -841,7 +842,7 @@ committed usable region or the render projection.
 ## File/start presentation
 
 `FileView` owns File surfaces and controls. It accepts translated strings, existing
-icon ids and cached thumbnail textures; callers retain commands, document state,
+icon ids and `PreviewArt` pictures; callers retain commands, document state,
 persistence, thumbnail jobs and recovery decisions.
 
 - `page`, `content` and `rail` own the page background, responsive insets and
@@ -868,6 +869,27 @@ persistence, thumbnail jobs and recovery decisions.
   at narrow widths. Discard is optional for summaries; the return value is
   `(recover_response, optional_discard_response)`. `recovery_review` uses the same
   geometry with per-design Discard. Callers provide truthful metadata.
+
+### File previews
+
+`file_preview(ui, id, rect, art, hovered, opacity)` is the only way the app pictures a
+file or a part. Recent rows, sample cards, parts library cards, the parts dialog and the
+loading card all use it, and any new browser, picker or panel that shows files must too.
+It draws:
+
+- a backdrop and an isometric ground grid in the theme's 3D view colours
+  (`viewport_top`, `viewport_bottom`, `grid`, `grid_major`);
+- the cut-out picture, and the shadow of its footprint, when `art` is there (without it,
+  the grid alone: the caller adds its placeholder icon);
+- the lift while `hovered`: the model springs off the grid, its shadow softens and the
+  grid lights up around it in the accent. It asks for frames only while it moves, and
+  stays still when egui's animation time is zero.
+
+`hovered` is the whole card's pointer or keyboard focus, not only the picture's. The host
+decodes pixels into a `PreviewImage` and keeps the `PreviewTextures` it loads; `art()`
+gives the handle to draw. Pictures come from `solidcraft_engine::thumbnail`, which draws
+every one from the same isometric orthographic view, so the grid fits them all. A host
+does not draw its own backdrop, scale the picture or animate it.
 
 The exported `file_*` colour tokens provide readable light/dark foreground and
 background pairs, including File-specific secondary text. Thumbnails retain the

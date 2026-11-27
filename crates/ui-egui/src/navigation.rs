@@ -14,7 +14,7 @@ use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_kernel::services::{centroid_and_mean_radius, point_displacement, point_distance};
+use solidcraft_kernel::points::{centroid_and_mean_radius, point_displacement, point_distance};
 use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
@@ -3641,6 +3641,41 @@ mod tests {
     }
 
     #[test]
+    fn right_drag_orbit_preset_pans_with_modified_right_or_middle_drag() {
+        for (button, ctrl, cmd, pans) in
+            [("right", false, false, false), ("right", true, false, true), ("right", false, true, true), ("middle", false, false, true)]
+        {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            crate::prefs::choose_nav_preset(&mut h.app.preferences, crate::prefs::nav_preset("solidworks"));
+            crate::prefs::choose_nav_preset(&mut h.app.preferences, crate::prefs::nav_preset("right-drag-orbit"));
+            h.app.preferences.orbit_cursor_wrap = false;
+            let before = h.app.cam;
+            let at = h.app.viewport.rect.expect("viewport").center();
+            let button_key = if button == "right" { egui::PointerButton::Secondary } else { egui::PointerButton::Middle };
+            let modifiers = egui::Modifiers { ctrl, command: ctrl || cmd, mac_cmd: cmd, ..Default::default() };
+            // Use native modifier state: the control channel's drag helper only carries Ctrl.
+            h.app.synthetic.push(egui::Event::PointerMoved(at));
+            h.app.synthetic.push(egui::Event::PointerButton { pos: at, button: button_key, pressed: true, modifiers });
+            let end = at + egui::vec2(50.0, 40.0);
+            for step in 1..=20 {
+                h.app.synthetic.push(egui::Event::PointerMoved(at + (end - at) * (step as f32 / 20.0)));
+            }
+            h.app.synthetic.push(egui::Event::PointerButton { pos: end, button: button_key, pressed: false, modifiers });
+            h.frames(30);
+            if pans {
+                assert_eq!(h.app.cam.back(), before.back(), "{button}, Ctrl={ctrl}, Cmd={cmd}: pan preserves orientation");
+                assert_ne!(h.app.cam.target, before.target, "{button}, Ctrl={ctrl}, Cmd={cmd}: pan moves the target");
+            } else {
+                assert_ne!(h.app.cam.back(), before.back(), "a plain right drag orbits after switching from SolidWorks");
+            }
+            assert_eq!(h.app.cam.distance, before.distance);
+            assert!(h.app.viewport.context_menu.is_none(), "a navigation drag does not open the context menu");
+            assert!(h.app.session.undo.is_empty() && h.app.session.selection.is_empty());
+        }
+    }
+
+    #[test]
     fn right_drag_orbits_off_leaves_the_camera_to_the_middle_button() {
         use serde_json::json;
         let mut h = crate::scenario::Harness::new();
@@ -5168,7 +5203,7 @@ mod tests {
         let legacy_centre = points.iter().fold(egui::Vec2::ZERO, |sum, point| sum + point.to_vec2()) / points.len() as f32;
         let legacy_mean = points.iter().map(|point| point.distance(legacy_centre.to_pos2())).sum::<f32>() / points.len() as f32;
         let kernel_points: Vec<_> = points.iter().map(|point| super::screen_point(*point)).collect();
-        let kernel_mean = solidcraft_kernel::services::centroid_and_mean_radius(&kernel_points).unwrap().mean_distance;
+        let kernel_mean = solidcraft_kernel::points::centroid_and_mean_radius(&kernel_points).unwrap().mean_distance;
         assert!(
             (f64::from(legacy_mean) - kernel_mean).abs() <= f64::from(f32::EPSILON) * kernel_mean.max(1.0),
             "legacy f32 {legacy_mean} vs f64 query {kernel_mean}"

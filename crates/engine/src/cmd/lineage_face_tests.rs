@@ -219,6 +219,90 @@ fn the_end_faces_of_a_pipe_take_a_sketch_that_follows_the_pipe() {
     }
 }
 
+/// #20622: a rib's walls take a sketch, as a thin extrude's walls do: a 2 mm rib along a line
+/// across a shelled box (the issue's steps). Each wall is named by the line and its side, so the
+/// sketches follow the rib when its line moves and keep their faces after a save.
+#[test]
+fn the_walls_of_a_rib_take_a_sketch_that_follows_the_rib() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10}));
+    run(&mut s, "solid.shell", json!({"faces": [[30, 20, 10]], "thickness": "1mm"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "RibLine"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 1], [30, 39]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "RibLine", "curves": ["l1"], "thickness": "2 mm", "direction": "normal"}));
+    no_errors(&s);
+    sketch_on(&mut s, [31., 20., 5.], "PlusX");
+    sketch_on(&mut s, [29., 20., 5.], "MinusX");
+    let wall_x = |s: &Session, name: &str| {
+        let (plane, certificate) = healthy(s, name);
+        assert_eq!(certificate, Some(FaceCertificate::Lineage), "{name}");
+        plane.origin.x
+    };
+    assert!((wall_x(&s, "PlusX") - 31.).abs() < 1e-9 && (wall_x(&s, "MinusX") - 29.).abs() < 1e-9);
+    // The rib's line moves 5 mm along x: the sketches on its walls go with it.
+    run(&mut s, "sketch.edit", json!({"sketch": "RibLine"}));
+    run(&mut s, "sketch.move_point", json!({"point": "l1.start", "to": [35, 1]}));
+    run(&mut s, "sketch.move_point", json!({"point": "l1.end", "to": [35, 39]}));
+    run(&mut s, "sketch.finish", json!({}));
+    no_errors(&s);
+    for t in [&s, &reopened(&s)] {
+        assert!((wall_x(t, "PlusX") - 36.).abs() < 1e-9, "{:?}", healthy(t, "PlusX"));
+        assert!((wall_x(t, "MinusX") - 34.).abs() < 1e-9, "{:?}", healthy(t, "MinusX"));
+    }
+}
+
+/// #21724: builds before #20622 named every face of a rib by its number among the faces the rib
+/// made (`F5:face:2`). A design saved so, with a fillet on the edge between a rib wall and the
+/// floor, opens with the fillet on that edge, and a face saved so is the rib's face its saved
+/// point lies on: the saved points say which face of the rib each name was.
+#[test]
+fn a_fillet_and_a_sketch_on_rib_walls_saved_under_numbered_names_open() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 60, "width": 40, "height": 10}));
+    run(&mut s, "solid.shell", json!({"faces": [[30, 20, 10]], "thickness": "1mm"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 10], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "RibLine"}));
+    run(&mut s, "sketch.line", json!({"points": [[30, 1], [30, 39]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.rib", json!({"sketch": "RibLine", "curves": ["l1"], "thickness": "2 mm", "direction": "normal"}));
+    sketch_on(&mut s, [31., 20., 5.], "PlusX");
+    sketch_on(&mut s, [29., 20., 5.], "MinusX");
+    run(&mut s, "solid.fillet", json!({"edges": [[31, 20, 1]], "radius": 0.5, "name": "Round"}));
+    no_errors(&s);
+    let volume = s.model.state().bodies[0].volume().unwrap();
+
+    // Save, then name the walls as the earlier builds did.
+    let mut doc: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    let anchor = |doc: &Value, sketch: &str| {
+        let f = doc["features"].as_array().unwrap().iter().find(|f| f["name"] == sketch).unwrap();
+        f["plane"]["anchor"]["target"]["name"].as_str().unwrap().to_string()
+    };
+    let (plus, minus) = (anchor(&doc, "PlusX"), anchor(&doc, "MinusX"));
+    let rib = plus.split_once(':').unwrap().0.to_string();
+    assert!(minus.starts_with(&format!("{rib}:")) && plus != minus, "{plus} {minus}");
+    let (old_plus, old_minus) = (format!("{rib}:face:3"), format!("{rib}:face:4"));
+    let features = doc["features"].as_array_mut().unwrap();
+    let round = features.iter_mut().find(|f| f["name"] == "Round").unwrap();
+    let edge = round["edge_names"][0].as_str().unwrap().to_string();
+    assert!(edge.contains(plus.as_str()), "the fillet's edge is on the +x wall: {edge}");
+    round["edge_names"][0] = json!(edge.replace(plus.as_str(), &old_plus));
+
+    let mut t = Session::new(solidcraft_doc::Document::from_json(&doc.to_string()).unwrap());
+    t.refresh();
+    no_errors(&t);
+    let round = t.doc.find_feature("Round").map(|f| f.id).unwrap();
+    let result = t.model.results.iter().find(|r| r.id == round).unwrap();
+    assert!(result.warning.is_none(), "{:?}", result.warning);
+    assert!((t.model.state().bodies[0].volume().unwrap() - volume).abs() < 1e-6, "the same edge is rounded");
+    let state = t.model.state();
+    let hit = solidcraft_doc::naming::locate_face(&state, &old_minus, solidcore_record::Vec3::new(29., 20., 5.)).expect("the -x wall");
+    assert_eq!(solidcraft_doc::naming::face_names(&state.bodies[hit.body])[hit.face], minus);
+    assert!(
+        solidcraft_doc::naming::locate_face(&state, &old_minus, solidcore_record::Vec3::new(10., 20., 1.)).is_none(),
+        "the floor is no face of the rib"
+    );
+}
+
 /// A plate with a boss patterned 3 times along x, `pitch` apart.
 fn patterned_bosses(sketch_on_seed_first: bool) -> Session {
     let mut s = Session::default();

@@ -128,6 +128,7 @@ const ANSWERED_ON_A_COPY: &[&str] = &[
     "file.export_urdf",
     "file.export_urdf_options",
     "file.save_mesh",
+    "frame.export_cope_dxf",
 ];
 
 /// Commands that only read the design, which can take long on a large one (a measure of every
@@ -952,7 +953,7 @@ impl SolveApp {
             let result = result.and_then(|reply| {
                 if let Some(exits) = reply.get("sketch_exits").and_then(Value::as_array) {
                     for sketch in exits {
-                        self.sketch_closed(sketch.as_u64());
+                        self.sketch_closed(sketch.as_u64(), false);
                     }
                 }
                 if let Some(messages) = reply.get("messages").and_then(Value::as_array) {
