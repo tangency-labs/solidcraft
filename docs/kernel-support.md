@@ -63,21 +63,21 @@ that name their faces find them by geometry only; unequal chamfers, chamfers tha
 and closed hollows stay on solidcore.
 
 **Naming corpus** (`cargo test --profile ci -p solidcraft-cli --test naming_corpus --features
-solidcraft-kernel/backend-occt`, with `SOLIDCRAFT_KERNEL` set to each kernel, at 08384f5361): 182
-of 185 designs pass on solidcore, whose route runs the code a build without the feature runs. 178
+solidcraft-kernel/backend-occt`, with `SOLIDCRAFT_KERNEL` set to each kernel, at 650f436b37): 182
+of 185 designs pass on solidcore, whose route runs the code a build without the feature runs. 179
 pass on OCCT, with every primitive, extrude, revolve, boolean, constant fillet, equal chamfer,
 shell, thicken and face offset they make built there, and there their two builds name alike and
 every stored name finds its face or edge. OCCT cylinders, spheres and tori carry solidcore's face
 history and construction sources (a cylinder is solidcore's circle extruded on OCCT and named by
-solidcore's cylinder naming). Of the 4 more that fail on OCCT:
+solidcore's cylinder naming). Two designs solidcore can't build (a shell and a thicken its offset
+refuses) build on OCCT. Five fail on OCCT only:
 
 - 2 variable fillets (solidcore's) fail on a body OCCT made;
 - 1 rectangular pattern's boolean (solidcore's) fails on OCCT-made bodies;
+- 1 join is handed a surface body where solidcore's build has a solid;
 - 1 sketch on a face can't keep its attachment without history.
 
-Two more failed there at that commit and now run on solidcore: an OCCT shell that failed, and an
-OCCT thicken that made no solid. Since then any OCCT failure but a stop falls back to solidcore
-with the reason logged.
+Any OCCT failure but a stop falls back to solidcore with the reason logged.
 
 The naming gate takes no new failure, so it fails too.
 
