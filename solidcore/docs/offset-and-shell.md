@@ -161,6 +161,7 @@ job (§5.1).
 | `OffsetFailure::Folds`, `NotCertified` | the offset of a NURB-based face is not certified regular over its parameter box; `NotCertified` when neither regularity nor a fold is proved within the patch budget (a fold counts only once proved on the face's own partials, in interval arithmetic), or no radius on the displaced side bounds the wall | the face, the distance and, for `Folds`, `largest`, the least radius on the displaced side | always but in the local operation, after the collapse test, naming the radius the collapse test found | `p2.rs`, `refuse_singular_or_folding_offset`; `sheets.rs`, `certify_regular_knowing` |
 | `OffsetFailure::TubeFolds`, `TubeNotCertified` | a rounded offset's cap is the tube of radius \|d\| about a convex edge, `c + d u` with `u` on the arc between the faces' normals turned to the offset's side; it folds where `d (u · k) ≥ 1` (`k` the edge's curvature vector); `TubeNotCertified` when that is neither proved nor ruled out (#13685) | the edge, the distance and, for `TubeFolds`, `largest`, the largest distance at which the edge's tube is proved not to fold (none if none is; only the tube is proved there, so other defects can still appear at or near it) | on the first cap built for each edge, in every offset but the local operation (not a closing wall) | `offset_executive/p1.rs`, `refuse_folding_tube`; `query/tangent_edge.rs`, `tube_regularity` |
 | `DistanceUnresolved`, `ToleranceUnresolved` | \|d\| below the input's tolerance; an approximation tolerance in (0, 1e-12] | the distance and the tolerance | always | `p2.rs`, `check_resolvable` |
+| `OffsetFailure::WallsMeetAcross` | an inset's two opposite planar walls meet: their faces are exactly twice the distance apart across material, capped by a protrusion (a square boss inset by half its width), while the body keeps a cavity; or, in an unmerged inset (the merge alone changes topology, keeping the cavity's regions), a point of an offset face is closer than the distance to an opposite planar face, so the two insets crossed (a floor under a blind hole thinner than two walls); the points tested, both ways round, are each face's interior point, its vertices and the middles of its edges cut where, seen along the normal, they meet the other face's boundary, classified on the exact trims, within a budget past which nothing is refused | the face, the distance and `largest`, half the narrowest such gap | in the extended inset but the local operation: the meeting before the faces are offset, the crossing on the built faces before the stitch | `offset_executive/p2.rs`, `refuse_meeting_planar_insets`, `refuse_crossing_planar_insets` |
 | `OffsetFailure::WallsTouch`, `LoopsCross` | an offset face's loops touch or cross | the face | per their flags | `error/offset.rs` |
 | `OffsetFailure::EdgeVanishes` | a vertex moves to or past its edge's end and the edge cannot be squeezed out | the original edge, or the face when available | during loop-gap closure | `offset_executive/step_gaps.rs` |
 | `OffsetFailure::FaceCloses` | in a local operation, a band bounded by two faces (a ring, or a cone between a ring and a hole) whose surface and its two neighbours' are planes, cylinders and cones about one axis would close: its two sides, where the meridians of the new surfaces cross, pass over each other | the face, its two neighbours and the largest move, the fraction of the move at which the edges meet times the move | before the executive, decided in closed form | `topology/brep/local_operation.rs`, `closing_band` |
@@ -284,13 +285,18 @@ supporting planes. The first scope requires
 simple vertices and strict convex facet cycles, distinct vertices and independent edge planes.
 Every reconstructed vertex must lie on the support's outward side and in every exposed face's
 material halfspace. Toleranced stored vertices and trims do not decide this certificate.
-Opposite exposed planes whose actual offset definitions have crossed certify that their halfspaces have empty
-intersection. The branch contributes no cavity, so both its offset sheets and the support's
+Two exposed planes whose normals are opposite within the angular tolerance pair; their actual offset
+definitions (each sheet's stored origin and axes, its normal the exact cross product of the axes)
+certify that their material halfspaces have no common point in the cell: the sum of the two
+sheets' exact plane functions is positive at every reconstructed vertex (a Farkas certificate
+with unit multipliers), hence on their convex hull. For exactly opposite normals that sum is the
+constant crossing of the two planes; a branch turned by a rotation, whose normals are opposite only
+up to rounding, is decided the same way (#22784). The branch contributes no cavity, so both its offset sheets and the support's
 attachment loop are removed. The attachment is an artificial cut, not an exposed face: it
 supplies no additional offset halfspace. Thus a short, wide boss can still contain cavity.
 
-This is an empty-cell certificate within the mitred construction, using outward-rounded
-interval inequalities and exact opposite normals, without a tolerance or an alternate
+This is an empty-cell certificate within the mitred construction, using exact expansion
+inequalities on the cell's vertices, without a distance tolerance or an alternate
 construction. The source body remains intact for the shell difference. Curved or nonconvex
 branches, multiple attachments, cavity-shell branches, and infeasibility without an opposite
 plane pair still require the general arrangement and cavity rule. This event does not complete

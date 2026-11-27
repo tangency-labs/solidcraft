@@ -344,7 +344,9 @@ pub(crate) fn twist_radians(input: &egui::InputState) -> f64 {
 /// centre that Orbit around names: the view's centre, the world origin, or the model point under
 /// the cursor, chosen when the twist begins. A counter-clockwise twist turns the model
 /// counter-clockwise as seen from above, so the model follows the fingers. Pitch and roll stay
-/// as they are.
+/// as they are. With "Roll about the line of sight" on (`trackpad_twist_rolls`, #22691) the view
+/// rolls instead, about the line of sight through that centre: the picture turns the way the
+/// fingers do, whichever way the view looks, and heading and pitch stay.
 pub(crate) fn twist_turn(app: &mut SolveApp, rect: Rect, radians: f64, hover: Option<Pos2>) {
     if !radians.is_finite() {
         return;
@@ -362,7 +364,13 @@ pub(crate) fn twist_turn(app: &mut SolveApp, rect: Rect, radians: f64, hover: Op
         }),
     };
     let keep = pivot.map(|p| (p, app.cam.frame_coords(p)));
-    app.cam.yaw = (app.cam.yaw + radians) % std::f64::consts::TAU;
+    if app.preferences.trackpad_twist_rolls {
+        // `roll_by` turns the picture clockwise for a positive angle; the twist counts
+        // counter-clockwise.
+        app.cam.roll_by(-radians);
+    } else {
+        app.cam.yaw = (app.cam.yaw + radians) % std::f64::consts::TAU;
+    }
     if let Some((p, coords)) = keep {
         app.cam.place(p, coords);
     }
@@ -1276,11 +1284,24 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
                 None => app.viewport.nav.is_some(),
             };
         decide_orbit_flip(app, button, mods);
-        let free = mouse_free_orbit(app);
-        orbit_drag_styled(app, rect, f64::from(delta.x), f64::from(delta.y), press, snap, true, free);
-        wrap_cursor(app, ui, rect);
+        decide_orbit_roll(app, button, mods);
+        if app.viewport.orbit_roll == Some(true) {
+            // A dial: the cursor isn't wrapped, which would jump it across the centre.
+            let now = ui.input(|i| i.pointer.latest_pos());
+            roll_drag(app, rect, press, now, delta);
+        } else {
+            let free = mouse_free_orbit(app);
+            orbit_drag_styled(app, rect, f64::from(delta.x), f64::from(delta.y), press, snap, true, free);
+            wrap_cursor(app, ui, rect);
+        }
     } else {
-        app.viewport.orbit_flip = None;
+        // A drag that pans for a while (Space held) and orbits again is still one drag: with
+        // "A drag keeps the navigation it started with" on, it keeps the free-orbit and roll
+        // choices it began with. They are let go when the drag ends (below).
+        if !(app.preferences.nav_drag_keeps_mode && dragging) {
+            app.viewport.orbit_flip = None;
+            app.viewport.orbit_roll = None;
+        }
         if app.viewport.axis_drag.is_none() {
             app.viewport.orbit_free = None;
         }
@@ -1314,6 +1335,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         app.viewport.orbit_mark = None;
         app.viewport.orbit_from = None;
         app.viewport.orbit_flip = None;
+        app.viewport.orbit_roll = None;
         app.viewport.cursor_wrap = None;
     }
     if app.viewport.spin {
@@ -2218,8 +2240,15 @@ fn decide_orbit_flip(app: &mut SolveApp, button: Option<crate::prefs::NavButton>
     if app.preferences.nav_drag_keeps_mode && app.viewport.orbit_flip.is_some() {
         return;
     }
-    let key = crate::prefs::FreeOrbitKey::of(app);
-    let spare = key.held(mods) && {
+    let spare = spare_orbit_key(app, crate::prefs::FreeOrbitKey::of(app), button, mods);
+    app.viewport.orbit_flip = Some(spare);
+}
+
+/// Whether `key` is held in `mods` and spare for this orbit drag: the drag would still orbit with it
+/// let go, so the binding itself doesn't need it (Alt for an Alt+left orbit). `button` is none for the
+/// left button.
+fn spare_orbit_key(app: &SolveApp, key: crate::prefs::FreeOrbitKey, button: Option<crate::prefs::NavButton>, mods: egui::Modifiers) -> bool {
+    key.held(mods) && {
         let rest = key.released(mods);
         match button {
             Some(b) => crate::prefs::nav_mode(app, b, mods) == Some(NavMode::Orbit) && crate::prefs::nav_mode(app, b, rest) == Some(NavMode::Orbit),
@@ -2227,8 +2256,46 @@ fn decide_orbit_flip(app: &mut SolveApp, button: Option<crate::prefs::NavButton>
                 app.viewport.nav == Some(NavMode::Orbit) || crate::prefs::nav_mode(app, crate::prefs::NavButton::Left, rest) == Some(NavMode::Orbit)
             }
         }
-    };
-    app.viewport.orbit_flip = Some(spare);
+    }
+}
+
+/// Decides, as a mouse orbit drag starts, whether the `roll_key` held then makes it a roll
+/// ([`roll_drag`], #22691); the drag keeps that until it ends (every frame instead, with
+/// `nav_drag_keeps_mode` off). Like the free-orbit key, a key the binding needs for the orbit does
+/// nothing, and so does a Roll key that is also the free-orbit key.
+fn decide_orbit_roll(app: &mut SolveApp, button: Option<crate::prefs::NavButton>, mods: egui::Modifiers) {
+    if app.preferences.nav_drag_keeps_mode && app.viewport.orbit_roll.is_some() {
+        return;
+    }
+    let key = crate::prefs::FreeOrbitKey::roll_of(app);
+    let roll = key != crate::prefs::FreeOrbitKey::of(app) && spare_orbit_key(app, key, button, mods);
+    app.viewport.orbit_roll = Some(roll);
+}
+
+/// Pointer travel (points) from the roll's centre inside which a roll drag turns nothing: so close,
+/// a step of a few points would swing the view through a large angle.
+const ROLL_DEAD_ZONE: f64 = 12.0;
+
+/// One step of a mouse orbit drag begun with the Roll key held (#22691): the view turns about the
+/// line of sight through the orbit point, as far as the pointer went around that point on screen,
+/// so whatever is under the pointer goes round with it, like a dial. Nothing tumbles.
+fn roll_drag(app: &mut SolveApp, rect: Rect, press: Option<Pos2>, now: Option<Pos2>, delta: egui::Vec2) {
+    let (pivot, kept) = orbit_pivot(app, rect, (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at), press.unwrap_or(rect.center()));
+    (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at) = kept;
+    app.viewport.orbit_mark = orbit_mark(app, pivot);
+    app.viewport.orbit_from = None;
+    app.viewport.orbit_free = None;
+    let Some(now) = now else { return };
+    let about = pivot.unwrap_or(app.cam.target);
+    let centre = projection(app, rect).to_screen(about).filter(|c| c.is_finite()).unwrap_or(rect.center());
+    let from = now - delta;
+    let point = |p: Pos2| [f64::from(p.x), f64::from(p.y)];
+    let turn = solidcraft_viewport::dial_turn(point(centre), point(from), point(now), ROLL_DEAD_ZONE);
+    if turn != 0.0 {
+        let coords = app.cam.frame_coords(about);
+        app.cam.roll_by(turn);
+        app.cam.place(about, coords);
+    }
 }
 
 fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
@@ -3510,6 +3577,135 @@ mod tests {
         }
     }
 
+    /// A quarter circle dragged with `button` and `mods` held, from right of the origin's place on
+    /// screen to below it, 120 points out, for the Roll key tests. Returns the view before and after
+    /// and the origin's screen point at both.
+    fn quarter_circle_round_the_origin(
+        h: &mut crate::scenario::Harness,
+        button: egui::PointerButton,
+        mods: egui::Modifiers,
+    ) -> ((solidcraft_viewport::Camera, egui::Pos2), (solidcraft_viewport::Camera, egui::Pos2)) {
+        use super::{OrbitAround, Pos2, Vec3};
+        use egui::{Event, vec2};
+        h.app.home.open = false;
+        h.app.preferences.orbit_around = OrbitAround::Origin;
+        h.frames(2);
+        let mut cam = solidcraft_viewport::Camera { target: Vec3::ZERO, distance: 200.0, ..Default::default() };
+        cam.set_view(solidcraft_viewport::StandardView::Iso);
+        h.app.cam = cam;
+        let rect = h.app.viewport.rect.unwrap_or(egui::Rect::from_min_size(Pos2::ZERO, vec2(1200.0, 800.0)));
+        let origin = |app: &crate::SolveApp| super::projection(app, rect).to_screen(Vec3::ZERO).unwrap_or(rect.center());
+        let before = (h.app.cam, origin(&h.app));
+        let centre = before.1;
+        let on_arc = |i: usize| {
+            let a = std::f32::consts::FRAC_PI_2 * i as f32 / 16.0;
+            centre + vec2(a.cos(), a.sin()) * 120.0
+        };
+        let press = |pressed, pos, modifiers| Event::PointerButton { pos, button, pressed, modifiers };
+        h.frame_with(vec![Event::ModifiersChanged(mods), Event::PointerMoved(on_arc(0))]);
+        h.frame_with(vec![press(true, on_arc(0), mods)]);
+        for i in 1..=16 {
+            h.frame_with(vec![Event::PointerMoved(on_arc(i))]);
+        }
+        h.frame_with(vec![press(false, on_arc(16), mods)]);
+        h.frame_with(vec![Event::ModifiersChanged(egui::Modifiers::NONE)]);
+        h.frames(2);
+        (before, (h.app.cam, origin(&h.app)))
+    }
+
+    #[test]
+    fn the_roll_key_rolls_one_drag_like_a_dial_about_the_orbit_point() {
+        use egui::{Modifiers, PointerButton::Secondary};
+        assert_eq!(crate::prefs::Prefs::default().roll_key, "none");
+        for (key, mods) in [("alt", Modifiers::ALT), ("ctrl", Modifiers::CTRL)] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.nav = "fusion".into();
+            h.app.preferences.roll_key = key.into();
+            let ((start, at), (end, now)) = quarter_circle_round_the_origin(&mut h, Secondary, mods);
+            assert!(same_view(&start, &end), "{key}: rolling turns nothing towards or away from the eye");
+            let turned = (end.roll - start.roll).rem_euclid(std::f64::consts::TAU);
+            assert!((turned - std::f64::consts::FRAC_PI_2).abs() < 1e-3, "{key}: a quarter turn clockwise follows the pointer: {turned}");
+            assert!(at.distance(now) < 0.5, "{key}: the orbit point stays where it was on screen: {at:?} -> {now:?}");
+            assert_eq!(h.app.viewport.orbit_roll, None, "nothing is left set after the drag");
+        }
+        // The same drag without the key, or with no Roll key chosen, orbits as before.
+        for (key, mods) in [("alt", Modifiers::NONE), ("none", Modifiers::ALT)] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.nav = "fusion".into();
+            h.app.preferences.roll_key = key.into();
+            let ((start, _), (end, _)) = quarter_circle_round_the_origin(&mut h, Secondary, mods);
+            assert!(!same_view(&start, &end), "{key} with {mods:?}: the drag orbits");
+        }
+    }
+
+    /// A roll drag that pans for a while with Space held is still one drag: once Space is let go
+    /// it rolls again, with the Roll key long released (CodeRabbit on #22847).
+    #[test]
+    fn a_roll_drag_keeps_rolling_after_a_space_pan_in_the_middle() {
+        use super::{NavMode, Pos2};
+        use egui::{Event, Key, Modifiers, PointerButton, vec2};
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.roll_key = "alt".into();
+        h.app.home.open = false;
+        h.frames(2);
+        h.app.viewport.nav = Some(NavMode::Orbit);
+        let at = h.app.viewport.rect.map_or(Pos2::new(600.0, 400.0), |r| r.center()) + vec2(150.0, 0.0);
+        let button = |pressed, pos, modifiers| Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers };
+        let space = |pressed| Event::Key { key: Key::Space, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
+        h.frame_with(vec![Event::ModifiersChanged(Modifiers::ALT), Event::PointerMoved(at)]);
+        h.frame_with(vec![button(true, at, Modifiers::ALT)]);
+        h.frame_with(vec![Event::PointerMoved(at + vec2(0.0, 20.0))]);
+        assert_eq!(h.app.viewport.orbit_roll, Some(true), "the drag began as a roll");
+        h.frame_with(vec![Event::ModifiersChanged(Modifiers::NONE), space(true)]);
+        h.frame_with(vec![Event::PointerMoved(at + vec2(0.0, 40.0))]);
+        h.frame_with(vec![space(false)]);
+        h.frame_with(vec![Event::PointerMoved(at + vec2(0.0, 60.0))]);
+        assert_eq!(h.app.viewport.orbit_roll, Some(true), "after the pan the same drag rolls again");
+        h.frame_with(vec![button(false, at + vec2(0.0, 60.0), Modifiers::NONE)]);
+        h.frames(2);
+        assert_eq!(h.app.viewport.orbit_roll, None, "the end of the drag lets the choice go");
+    }
+
+    #[test]
+    fn the_roll_key_does_nothing_where_the_binding_needs_it_or_the_free_orbit_key_has_it() {
+        use crate::prefs::NavButton;
+        use egui::Modifiers;
+        let roll = |nav: &str, key: &str, free_key: &str, button: Option<NavButton>, mods: Modifiers| {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.nav = nav.into();
+            h.app.preferences.roll_key = key.into();
+            h.app.preferences.free_orbit_key = free_key.into();
+            super::decide_orbit_roll(&mut h.app, button, mods);
+            h.app.viewport.orbit_roll
+        };
+        assert_eq!(roll("fusion", "alt", "none", Some(NavButton::Right), Modifiers::ALT), Some(true));
+        assert_eq!(roll("fusion", "ctrl", "alt", Some(NavButton::Right), Modifiers::CTRL), Some(true));
+        assert_eq!(roll("fusion", "alt", "none", Some(NavButton::Right), Modifiers::NONE), Some(false));
+        // Alt+left is the Maya orbit itself, and Ctrl+middle pans in Solidworks.
+        assert_eq!(roll("maya", "alt", "none", None, Modifiers::ALT), Some(false));
+        assert_eq!(roll("solidworks", "ctrl", "none", Some(NavButton::Middle), Modifiers::CTRL), Some(false));
+        // One key can't do both jobs; the free-orbit key keeps it.
+        assert_eq!(roll("fusion", "alt", "alt", Some(NavButton::Right), Modifiers::ALT), Some(false));
+    }
+
+    #[test]
+    fn a_bad_roll_key_is_refused_and_the_free_orbit_keys_own_is_kept_but_does_nothing() {
+        let mut h = crate::scenario::Harness::new();
+        for bad in ["shift", "meta", ""] {
+            let reply = h.call("ui.prefs", serde_json::json!({"roll_key": bad}));
+            assert_eq!(reply["ok"], false, "{bad}: {reply}");
+        }
+        assert_eq!(h.app.preferences.roll_key, "none");
+        // Settings applied one at a time (a profile) never trip over the other key's current
+        // value: the same key is kept, and the free-orbit key wins at the drag
+        // (`the_roll_key_does_nothing_where_the_binding_needs_it_or_the_free_orbit_key_has_it`).
+        for (key, value) in [("roll_key", "alt"), ("free_orbit_key", "alt"), ("roll_key", "ctrl"), ("roll_key", "none")] {
+            let reply = h.call("ui.prefs", serde_json::json!({key: value}));
+            assert_eq!(reply["ok"], true, "{key} {value}: {reply}");
+        }
+        assert_eq!((h.app.preferences.free_orbit_key.as_str(), h.app.preferences.roll_key.as_str()), ("alt", "none"));
+    }
+
     #[test]
     fn side_buttons_do_nothing_until_a_drag_is_chosen_and_the_presets_are_unchanged() {
         use crate::prefs::{NAV_PRESETS, NavButton, nav_mode};
@@ -3637,6 +3833,41 @@ mod tests {
         assert!(h.app.preferences.nav_button_map.is_empty());
         for choice in ["orbit", "pan", "zoom", "none", "shift+ctrl+orbit", "alt+zoom"] {
             assert_eq!(crate::prefs::NavChoice::parse(choice).map(|c| c.text()).as_deref(), Some(choice));
+        }
+    }
+
+    #[test]
+    fn right_drag_orbit_preset_pans_with_modified_right_or_middle_drag() {
+        for (button, ctrl, cmd, pans) in
+            [("right", false, false, false), ("right", true, false, true), ("right", false, true, true), ("middle", false, false, true)]
+        {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            crate::prefs::choose_nav_preset(&mut h.app.preferences, crate::prefs::nav_preset("solidworks"));
+            crate::prefs::choose_nav_preset(&mut h.app.preferences, crate::prefs::nav_preset("right-drag-orbit"));
+            h.app.preferences.orbit_cursor_wrap = false;
+            let before = h.app.cam;
+            let at = h.app.viewport.rect.expect("viewport").center();
+            let button_key = if button == "right" { egui::PointerButton::Secondary } else { egui::PointerButton::Middle };
+            let modifiers = egui::Modifiers { ctrl, command: ctrl || cmd, mac_cmd: cmd, ..Default::default() };
+            // Use native modifier state: the control channel's drag helper only carries Ctrl.
+            h.app.synthetic.push(egui::Event::PointerMoved(at));
+            h.app.synthetic.push(egui::Event::PointerButton { pos: at, button: button_key, pressed: true, modifiers });
+            let end = at + egui::vec2(50.0, 40.0);
+            for step in 1..=20 {
+                h.app.synthetic.push(egui::Event::PointerMoved(at + (end - at) * (step as f32 / 20.0)));
+            }
+            h.app.synthetic.push(egui::Event::PointerButton { pos: end, button: button_key, pressed: false, modifiers });
+            h.frames(30);
+            if pans {
+                assert_eq!(h.app.cam.back(), before.back(), "{button}, Ctrl={ctrl}, Cmd={cmd}: pan preserves orientation");
+                assert_ne!(h.app.cam.target, before.target, "{button}, Ctrl={ctrl}, Cmd={cmd}: pan moves the target");
+            } else {
+                assert_ne!(h.app.cam.back(), before.back(), "a plain right drag orbits after switching from SolidWorks");
+            }
+            assert_eq!(h.app.cam.distance, before.distance);
+            assert!(h.app.viewport.context_menu.is_none(), "a navigation drag does not open the context menu");
+            assert!(h.app.session.undo.is_empty() && h.app.session.selection.is_empty());
         }
     }
 

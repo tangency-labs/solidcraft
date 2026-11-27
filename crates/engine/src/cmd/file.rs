@@ -1,8 +1,5 @@
 //! Documents and files: new, open designs, CAD files and drawings, insert STEP, save, export.
 
-#[path = "file_thumbnail.rs"]
-mod thumbnail;
-
 #[path = "file_easyprint.rs"]
 mod easyprint;
 
@@ -86,6 +83,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "components?: bool (default true); ",
             "copper?: \"overlay\" (default: flat copper just above the board), \"none\" (leave the traces out) or \"mesh\" (modelled with thickness; true also means mesh; pads are included whenever copper is enabled); ",
             "silkscreen?: bool (default true: the silk shapes and text); ",
+            "holes?: none|mounting|pads|all (default mounting: the board's mounting holes, every unplated hole and each hole of a MountingHole footprint; pads adds the plated holes of through-hole pads, all adds vias; a hole left out is solid board and closed copper, and a hole that reaches the board's edge or a cutout is always kept); ",
             "color?: \"#rrggbb\" or [r, g, b] (board substrate colour); ",
             "representation?: mesh|brep (the board itself; default brep: a solid whose faces can be picked); ",
             "read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere); ",
@@ -343,7 +341,7 @@ pub static COMMANDS: &[CommandSpec] = &[
             "bodies?: [names] (default: the selected bodies); ",
             "wait?: block|return|no (default block: a slicer that drops a file at a cold start is started alone and the call waits up to 10 s for it to be ready, then sends; return: start it and answer {starting}; no: send now); ",
             "single_instance?: bool (default true: PrusaSlicer, SuperSlicer and Cura load the file in the window that is open); ",
-            "format?: 3mf|stl|3mf-tagged (default 3mf, in millimetres; STL if that can't be written); ",
+            "format?: 3mf|stl|3mf-tagged|step (default 3mf, in millimetres; a 3MF that can't be written goes as STL; step: the bodies as exact B-rep with their colours, which the slicer meshes itself, for slicers that read STEP); ",
             "copy_to?: a folder to keep the file in instead (made if missing): it is named after the design with the next free -v<N>, and the reply has `version` and `copy`; ",
             "copy_overwrite?: bool (default false; with copy_to: one file named after the design, replaced each time) → saves the bodies in this user's slicer folder and opens the file in the slicer. The file name stays the same for the same design and bodies, so sending again replaces it (use the slicer's Reload from disk); with copy_to the slicer opens the file in that folder instead",
         )),
@@ -1380,6 +1378,10 @@ fn kicad_options(p: &Value, cmd: &str) -> Result<solidcraft_io::KicadOptions> {
             }
         };
     }
+    if let Some(v) = p.get("holes").filter(|v| !v.is_null()) {
+        let refused = || bad(cmd, "`holes` must be \"none\", \"mounting\", \"pads\" or \"all\"");
+        options.holes = solidcraft_io::KicadHoles::parse(v.as_str().ok_or_else(refused)?).ok_or_else(refused)?;
+    }
     if let Some(v) = p.get("color").filter(|v| !v.is_null()) {
         options.color = Some(parse_kicad_color(v).ok_or_else(|| bad(cmd, "`color` must be \"#rrggbb\" or [r, g, b] with values 0-255"))?);
     }
@@ -1433,6 +1435,7 @@ fn kicad_options_record(options: &solidcraft_io::KicadOptions) -> Value {
         "components": options.components,
         "copper": options.copper.as_str(),
         "silkscreen": options.silkscreen,
+        "holes": options.holes.as_str(),
     });
     if let Some(thickness) = options.thickness {
         record["thickness"] = json!(thickness);
@@ -3099,7 +3102,7 @@ impl Session {
         let cache = cache && !(design.linked_bodies_left_out && !design.links.is_empty());
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
-        let thumbnail = cache.then(|| thumbnail::saved(self)).flatten();
+        let thumbnail = cache.then(|| crate::thumbnail::png(self)).flatten();
         match provenance {
             Some(save) => solidcraft_io::write_design_container_with_provenance(
                 &design,
@@ -3429,7 +3432,7 @@ fn skipped_from_warnings(warnings: &[String]) -> Vec<String> {
 
 /// A picture of the part, drawn only for a format that has a place for it.
 fn export_thumbnail(s: &Session, format: Format, bodies: &[String]) -> Option<Vec<u8>> {
-    matches!(format, Format::ThreeMf | Format::ThreeMfTagged).then(|| thumbnail::exported(s, bodies)).flatten()
+    matches!(format, Format::ThreeMf | Format::ThreeMfTagged).then(|| crate::thumbnail::exported(s, bodies)).flatten()
 }
 
 /// `physics` as `file.export` reads it: true writes the joints, grounding and each component's
@@ -4367,7 +4370,8 @@ fn send_to_slicer(s: &mut Session, p: &Value) -> Result<Value> {
             None | Some("3mf") => Format::ThreeMf,
             Some("stl") => Format::StlBinary,
             Some("3mf-tagged") => Format::ThreeMfTagged,
-            Some(other) => return Err(bad(cmd, format!("unknown mesh format `{other}` (stl, 3mf, 3mf-tagged)"))),
+            Some("step" | "stp") => Format::Step,
+            Some(other) => return Err(bad(cmd, format!("unknown format `{other}` (stl, 3mf, 3mf-tagged, step)"))),
         };
         let spec = str_(p, "slicer").ok_or_else(|| bad(cmd, "give `slicer` (see file.slicers)"))?;
         let wait = send::Wait::parse(str_(p, "wait")).ok_or_else(|| bad(cmd, "`wait` is block, return or no"))?;
@@ -6096,8 +6100,10 @@ mod tests {
         session.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
         let world = session.world_state().unwrap();
         assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()));
-        let bytes = session.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
+        assert!(saved_geometry(&session, &session.doc).is_some());
         assert!(world.bodies.iter().all(|b| b.cached_mesh().is_none()), "saving the model must not triangulate");
+        // The save as a whole also draws the design's picture, which does mesh.
+        let bytes = session.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
         assert!(solidcraft_io::read_design_geometry(&bytes).is_some());
         assert!(
             solidcraft_io::read_design_geometry(&session.design_container(solidcraft_io::DesignCompression::Fast, false, false).unwrap()).is_none()

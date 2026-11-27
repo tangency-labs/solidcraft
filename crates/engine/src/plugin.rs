@@ -114,6 +114,9 @@ pub struct AppState {
     pub file_grants: Vec<FileGrant>,
     /// Legacy embedding state. Runtime permissions come exclusively from grants bound to package hashes.
     pub command_groups: BTreeSet<String>,
+    /// This session runs a plugin dialog's live preview, whose result is thrown away: what
+    /// `plugin.preview` answers to the plugin.
+    pub preview: bool,
     /// Where `plugin.install` writes and `plugin.list` looks; `None`: the per-user
     /// `plugins` folder ([`crate::recovery::data_dir`]).
     pub plugins_dir: Option<PathBuf>,
@@ -370,6 +373,10 @@ fn resolve_grant_paths(params: &Value, grants: &[(&str, &Path)]) -> std::io::Res
 
 /// The sensitive group of a command, or `None` when it acts on the open design alone.
 pub fn command_group(id: &str) -> Option<&'static str> {
+    // Whether the run is a preview: it reads nothing past the run itself.
+    if id == "plugin.preview" {
+        return None;
+    }
     let family = id.split_once('.').map_or(id, |(family, _)| family);
     match family {
         "plugin" => Some("plugin"),
@@ -1100,16 +1107,20 @@ pub fn require_folder_grant(grants: &[FileGrant], path: &Path) -> craft_plugin::
     if grant_covers(grants, path, false).is_ok() || grant_covers(grants, path, true).is_ok() { Ok(()) } else { grant_covers(grants, path, false) }
 }
 
+fn grant_covers(grants: &[FileGrant], path: &Path, write: bool) -> craft_plugin::Result<()> {
+    grant_covers_or(grants, path, write, || "file path has no applicable folder grant".into())
+}
+
 /// The approved root and its ancestors are explicit, even in AppData or a hidden folder.
 /// Inspect only names beneath the most specific grant for this operation.
-fn grant_covers(grants: &[FileGrant], path: &Path, write: bool) -> craft_plugin::Result<()> {
+fn grant_covers_or(grants: &[FileGrant], path: &Path, write: bool, missing: impl FnOnce() -> String) -> craft_plugin::Result<()> {
     let relative = grants
         .iter()
         .filter(|grant| if write { grant.write } else { grant.read })
         .filter_map(|grant| path.strip_prefix(&grant.folder).ok().map(|relative| (grant.folder.components().count(), relative)))
         .max_by_key(|(depth, _)| *depth)
         .map(|(_, relative)| relative)
-        .ok_or_else(|| HostError::PermissionDenied { permission: "file path has no applicable folder grant".into() })?;
+        .ok_or_else(|| HostError::PermissionDenied { permission: missing() })?;
     if relative.components().any(|c| {
         let name = c.as_os_str().to_string_lossy();
         name.starts_with('.') || (cfg!(windows) && name.eq_ignore_ascii_case("AppData"))

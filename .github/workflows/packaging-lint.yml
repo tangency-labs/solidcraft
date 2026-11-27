@@ -66,6 +66,12 @@ jobs:
           grep -q 'Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="SolidCraft"' assets/platforms/windows/solidcraft.wxs || { echo '::error file=assets/platforms/windows/solidcraft.wxs::the Start menu shortcut must stay Name="SolidCraft"'; exit 1; }
           grep -q 'RemoveFile Id="RemoveStartMenuShortcutCad".*Name="SolidCraft CAD.lnk"' assets/platforms/windows/solidcraft.wxs
           desktop-file-validate assets/platforms/linux/io.tangencylabs.solidcraft.desktop
+          desktop-file-validate assets/platforms/linux/io.tangencylabs.solidcraft.workshop-links.desktop
+          # Double-clicking a file runs the visible entry as it always has; solidcraft:// links have the hidden entry of their own.
+          grep -qx 'Exec=solidcraft %f' assets/platforms/linux/io.tangencylabs.solidcraft.desktop
+          ! grep -q 'x-scheme-handler' assets/platforms/linux/io.tangencylabs.solidcraft.desktop || { echo '::error file=assets/platforms/linux/io.tangencylabs.solidcraft.desktop::solidcraft:// links belong to the hidden workshop-links entry, not the visible one'; exit 1; }
+          grep -qx 'Exec=solidcraft --open-url %u' assets/platforms/linux/io.tangencylabs.solidcraft.workshop-links.desktop
+          grep -qx 'NoDisplay=true' assets/platforms/linux/io.tangencylabs.solidcraft.workshop-links.desktop
           # The window's X11 class is its app id; the old ids stay only as the rename shims.
           grep -qx 'StartupWMClass=io.tangencylabs.solidcraft' assets/platforms/linux/io.tangencylabs.solidcraft.desktop
           grep -q '<id>ai.storyteller.solidcraft</id>' assets/platforms/linux/io.tangencylabs.solidcraft.metainfo.xml.in
