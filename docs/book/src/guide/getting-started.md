@@ -351,9 +351,9 @@ The gestures this blocks in Firefox, and what to use instead:
 
 - **Shift+right drag** to snap to the nearest standard or diagonal view (every preset): click an
   axis on the axis view, or drag the axis view with Shift held, which snaps the same way.
-- **Shift+right drag** to pan in the Tinkercad preset: middle drag pans too.
-- **Shift+right drag** to zoom in the OpenSCAD preset: Shift+middle drag or the wheel zooms too.
-- **Shift+Alt+right drag** to zoom in the Alias preset: the wheel zooms too.
+- **Shift+right drag** to pan with **Right orbit, Shift pan**: middle drag pans too.
+- **Shift+right drag** to zoom with **Left-drag orbit**: Shift+middle drag or the wheel zooms too.
+- **Shift+Alt+right drag** to zoom with **Shift+Alt mouse navigation**: the wheel zooms too.
 
 To have Firefox pass Shift+right-click to the page, open `about:config`, search for
 `dom.event.contextmenu.shift_suppresses_event` and set it to `false`. It takes effect at once,
