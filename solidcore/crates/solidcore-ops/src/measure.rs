@@ -726,6 +726,26 @@ pub fn turn_to_parallel(
     Ok(m.turn)
 }
 
+/// Whether the endless line through `origin` along `dir` meets the box with corners `min` and
+/// `max`, each side counting `share` of the box's size beyond it
+/// (`query::api_queries::line_meets_box`). Never for a zero `dir`.
+///
+/// # Errors
+/// [`Error::Argument`] for a coordinate, or a `share`, that is not finite.
+pub fn line_meets_box(
+    min: [f64; 3],
+    max: [f64; 3],
+    origin: [f64; 3],
+    dir: [f64; 3],
+    share: f64,
+) -> Result<bool> {
+    if !share.is_finite() {
+        return Err(Error::Argument);
+    }
+    let (min, max, origin, dir) = (point(min)?, point(max)?, point(origin)?, point(dir)?);
+    q::line_meets_box(min, max, origin, dir, share).map_err(status)
+}
+
 impl Body {
     /// Mass properties at `relative_accuracy` (the kernel's rule: finite and positive, clamped
     /// to [1e-8, 1e-1]): the sum over the body's material regions, so several lumps, or lumps
@@ -3017,6 +3037,13 @@ pub(crate) mod tests {
         assert!(points_meet([1.0, 2.0, 3.0], [4.0, 6.0, 15.0], 13.0).unwrap());
         assert!(!points_meet([1.0, 2.0, 3.0], [4.0, 6.0, 15.0], 12.9).unwrap());
         assert!(points_meet([f64::NAN, 0.0, 0.0], [0.0; 3], 1.0).is_err());
+        // A line through the box, along its side or a share of its size off meets it; a line
+        // farther off does not, and a coordinate that is not finite is refused.
+        let (lo, hi, up) = ([0.0, 0.0, 0.0], [20.0, 20.0, 10.0], [0.0, 0.0, 1.0]);
+        assert!(line_meets_box(lo, hi, [10.0, 10.0, -5.0], up, 1e-6).unwrap());
+        assert!(line_meets_box(lo, hi, [20.0, 10.0, 0.0], up, 1e-6).unwrap());
+        assert!(!line_meets_box(lo, hi, [20.1, 10.0, 0.0], up, 1e-6).unwrap());
+        assert!(line_meets_box(lo, hi, [f64::NAN, 10.0, 0.0], up, 1e-6).is_err());
         // the outward normal of each face at each of its edges is an axis, pointing away from the
         // box's middle
         let mut normals = 0;

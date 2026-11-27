@@ -15,6 +15,7 @@ use solidcraft_engine::doc::hardware_catalog::{HardwareKind, hardware_size, hard
 use solidcraft_engine::doc::sheet::SheetRule;
 use solidcraft_engine::doc::{FeatureKind, FoldSide, ProfileSel};
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_engine::io::{DxfExportProfile, DxfLinetype, DxfRole, DxfRoleStyle};
 
 use crate::SolveApp;
 use crate::dialogs::{Dialog, HOLE_FACES, Kind, edge_sel, face_sel, form_row, profile_indices};
@@ -71,6 +72,166 @@ const FLANGE_RELIEF_LABELS: [&str; 5] = ["Rule", "Notch", "Round", "Rectangular"
 /// The bend relief shapes an edge flange offers: the rule's (index 0, nothing of its own), then
 /// the shapes of `BEND_RELIEF_SHAPES` in order.
 const FLANGE_BEND_RELIEF_LABELS: [&str; 4] = ["Rule", "Rectangular", "Obround", "Tear"];
+
+/// The DXF profile chosen in the Flat Pattern panel: the file, and what reading it gave (the
+/// reader's message when the file cannot be used). Export DXF passes the file to
+/// `sheet.export_dxf` as its `profile`, and the command reads it again.
+#[derive(Clone, Debug)]
+pub struct DxfProfileChoice {
+    pub path: String,
+    pub read: Result<DxfExportProfile, String>,
+}
+
+impl DxfProfileChoice {
+    pub(crate) fn open(path: String) -> Self {
+        let read = solidcraft_engine::io::vfs::read(&path, solidcraft_engine::io::MAX_DXF_PROFILE_BYTES)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| DxfExportProfile::read(&bytes).map_err(|e| e.to_string()));
+        Self { path, read }
+    }
+
+    /// The profile's own name, or its file's name when it has none or cannot be read.
+    fn shown(&self) -> &str {
+        match &self.read {
+            Ok(profile) if !profile.name().is_empty() => profile.name(),
+            _ => self.path.rsplit(['/', '\\']).next().unwrap_or(&self.path),
+        }
+    }
+}
+
+/// The message of each role of a DXF profile.
+fn dxf_role_label(role: DxfRole) -> &'static str {
+    match role {
+        DxfRole::Outline => "sheet.dxf_profile.role.outline",
+        DxfRole::Cut => "sheet.dxf_profile.role.cut",
+        DxfRole::CutText => "sheet.dxf_profile.role.cut_text",
+        DxfRole::Etch => "sheet.dxf_profile.role.etch",
+        DxfRole::BendUp => "sheet.dxf_profile.role.bend_up",
+        DxfRole::BendDown => "sheet.dxf_profile.role.bend_down",
+        DxfRole::BendNotes => "sheet.dxf_profile.role.bend_notes",
+        DxfRole::Pockets => "sheet.dxf_profile.role.pockets",
+        DxfRole::Perforation => "sheet.dxf_profile.role.perforation",
+        DxfRole::Roll => "sheet.dxf_profile.role.roll",
+        DxfRole::FormUp => "sheet.dxf_profile.role.form_up",
+        DxfRole::FormDown => "sheet.dxf_profile.role.form_down",
+    }
+}
+
+/// The roles `profile` writes otherwise than the standard layers do, each with how it is written
+/// (`None`: left out of the file).
+pub(crate) fn dxf_profile_changes(profile: &DxfExportProfile) -> Vec<(DxfRole, Option<&DxfRoleStyle>)> {
+    let standard = DxfExportProfile::neutral();
+    DxfRole::ALL
+        .iter()
+        .copied()
+        .filter_map(|role| {
+            let style = profile.role(role)?;
+            (standard.role(role) != Some(style)).then_some((role, style.on.then_some(style)))
+        })
+        .collect()
+}
+
+/// The Flat Pattern panel's DXF profile rows: the chosen profile, the buttons that choose a file
+/// or go back to the standard layers, and why a profile cannot be used. What a profile changes
+/// is listed by `dxf_profile_change_rows`, below the export buttons.
+/// True when the profile was dropped here: what the last export said no longer applies.
+fn dxf_profile_rows(app: &mut SolveApp, ui: &mut egui::Ui, profile: &mut Option<DxfProfileChoice>) -> bool {
+    let mut dropped = false;
+    use solidcraft_ui_text::tr;
+    let t = Tokens::get();
+    form_row(ui, tr("sheet.dxf_profile.label"), |ui| match profile.as_ref() {
+        Some(choice) => {
+            ui.add(egui::Label::new(choice.shown()).truncate()).backing_on_hover_text(choice.path.as_str());
+        }
+        None => {
+            ui.label(tr("sheet.dxf_profile.none"));
+        }
+    });
+    ui.horizontal_wrapped(|ui| {
+        let choose = crate::ui_kit::button(ui, tr("sheet.dxf_profile.choose"), crate::ui_kit::Button::Normal)
+            .backing_on_hover_text(tr("sheet.dxf_profile.hint"));
+        if choose.clicked() {
+            app.pick_file(tr("sheet.dxf_profile.label"), &["json"], |app, path| {
+                if let Some(path) = path {
+                    choose_dxf_profile(app, path);
+                }
+            });
+        }
+        if profile.is_some() && crate::ui_kit::button(ui, tr("sheet.dxf_profile.clear"), crate::ui_kit::Button::Normal).clicked() {
+            *profile = None;
+            dropped = true;
+        }
+    });
+    if let Some(DxfProfileChoice { read: Err(e), .. }) = profile.as_ref() {
+        ui.vertical(|ui| {
+            let text = solidcraft_ui_text::format("sheet.dxf_profile.error", &[("error", e.as_str())]);
+            ui.add(egui::Label::new(RichText::new(text).color(t.error)).wrap());
+        });
+    }
+    dropped
+}
+
+/// What the chosen profile changes, one row for each role it writes otherwise than the standard
+/// layers do. A foldable section drawn below the export buttons: however long the list, it never
+/// pushes Export DXF… out of reach.
+fn dxf_profile_change_rows(ui: &mut egui::Ui, profile: Option<&DxfProfileChoice>) {
+    use solidcraft_ui_text::tr;
+    let Some(DxfProfileChoice { read: Ok(read), .. }) = profile else { return };
+    let t = Tokens::get();
+    let changes = dxf_profile_changes(read);
+    if changes.is_empty() {
+        ui.vertical(|ui| {
+            ui.add(egui::Label::new(RichText::new(tr("sheet.dxf_profile.same")).color(t.text_dim)).wrap());
+        });
+        return;
+    }
+    crate::ui_kit::section_count(ui, "dxf_profile_changes", tr("sheet.dxf_profile.changes"), true, Some(changes.len()), |ui| {
+        for (role, style) in changes {
+            let text = match style {
+                Some(style) => {
+                    let linetype = tr(match style.linetype {
+                        DxfLinetype::Continuous => "sheet.dxf_profile.linetype.continuous",
+                        DxfLinetype::Dashed => "sheet.dxf_profile.linetype.dashed",
+                        DxfLinetype::Hidden => "sheet.dxf_profile.linetype.hidden",
+                    });
+                    solidcraft_ui_text::format(
+                        "sheet.dxf_profile.style",
+                        &[("layer", style.layer.as_str()), ("color", &style.color.to_string()), ("linetype", linetype)],
+                    )
+                }
+                None => tr("sheet.dxf_profile.off").to_string(),
+            };
+            // The value wraps: a long layer name is never cut short.
+            crate::ui_kit::value_row(ui, tr(dxf_role_label(role)), &text);
+        }
+    });
+}
+
+/// The chosen profile's file for an export, read again first: the file may have been edited since
+/// it was chosen, and the panel shows what is exported. `None`: no profile, the standard layers.
+/// An error is the message for a profile that cannot be used: nothing is exported with the
+/// standard layers for a cutter that expects its own.
+fn dxf_profile_checked(profile: &mut Option<DxfProfileChoice>) -> Result<Option<&str>, String> {
+    if let Some(choice) = profile.as_mut() {
+        *choice = DxfProfileChoice::open(std::mem::take(&mut choice.path));
+    }
+    match profile.as_ref() {
+        Some(DxfProfileChoice { read: Err(_), .. }) => Err(solidcraft_ui_text::tr("sheet.dxf_profile.fix_first").to_string()),
+        choice => Ok(choice.map(|c| c.path.as_str())),
+    }
+}
+
+/// The file picked for the Flat Pattern panel's DXF profile: read now, so the panel shows what
+/// it changes or why it cannot be used before anything is exported.
+pub(crate) fn choose_dxf_profile(app: &mut SolveApp, path: String) {
+    if let Some(d) = app.dialog.as_mut()
+        && let Kind::Sheet(Sm::FlatPattern { profile, status, .. }) = &mut d.kind
+    {
+        *profile = Some(DxfProfileChoice::open(path));
+        // What the last export said was about the profile before this one.
+        *status = None;
+    }
+}
 
 /// Choices for one export. They are never saved in Preferences or in the design.
 #[derive(Clone, Copy, Debug)]
@@ -238,6 +399,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// Export DXF also writes a note beside each press-in hardware hole (#17752). Off:
                 /// the file has the sheet and its mounting holes only.
                 hardware_notes: bool,
+                /// The DXF profile Export DXF writes with (`None`: the standard layers).
+                profile: Option<DxfProfileChoice>,
             },
             ExportDxf {
                 body: String,
@@ -337,7 +500,7 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
             vec![SelInput::new("ui.hardware_place", HOLE_FACES, true)],
         ),
         "sheet.flat_pattern" => (
-            Sm::FlatPattern { data: None, key: None, status: None, export: None, hardware_notes: false },
+            Sm::FlatPattern { data: None, key: None, status: None, export: None, hardware_notes: false, profile: None },
             vec![SelInput::new("Body (last if none)", BODIES, false)],
         ),
         _ => Sm::simple_start(id)?,
@@ -799,7 +962,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
             }
         }
         Sm::ExportDxf { options, .. } => dxf_options_rows(ui, options),
-        Sm::FlatPattern { data, key, status, export, hardware_notes } => {
+        Sm::FlatPattern { data, key, status, export, hardware_notes, profile } => {
             let body = inputs.first().and_then(|i| i.items.first()).and_then(|x| if let Sel::Body { name } = x { Some(name.clone()) } else { None });
             let want = (app.session.revision, body.clone());
             if key.as_ref() != Some(&want) {
@@ -866,6 +1029,9 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                     if v["hardware"].as_array().is_some_and(|h| !h.is_empty()) {
                         crate::ui_kit::options(ui, "sheet_flat_options", &mut [("ui.hardware_notes", &mut *hardware_notes)]);
                     }
+                    if dxf_profile_rows(app, ui, profile) {
+                        *status = None;
+                    }
                     if let Some(options) = export {
                         dxf_options_rows(ui, options);
                         let (save, cancel) = ui
@@ -877,17 +1043,24 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                             })
                             .inner;
                         if save {
-                            *status = Some(export_flat(
-                                app,
-                                v["body"].as_str().unwrap_or(""),
-                                Some(DxfExportOptions { hardware_notes: *hardware_notes, ..*options }),
-                            ));
+                            *status = Some(match dxf_profile_checked(profile) {
+                                Err(refusal) => refusal,
+                                Ok(file) => export_flat_with_profile(
+                                    app,
+                                    v["body"].as_str().unwrap_or(""),
+                                    Some(DxfExportOptions { hardware_notes: *hardware_notes, ..*options }),
+                                    file,
+                                ),
+                            });
                         }
                         if save || cancel {
                             *export = None;
                         }
                     } else if export_button(ui, "dialog:sheet_dxf:options") {
-                        *export = Some(DxfExportOptions::default());
+                        match dxf_profile_checked(profile) {
+                            Err(refusal) => *status = Some(refusal),
+                            Ok(_) => *export = Some(DxfExportOptions::default()),
+                        }
                     }
                     ui.vertical(|ui| {
                         if crate::ui_kit::button(ui, solidcraft_ui_text::tr_label("Export Bend Table…"), crate::ui_kit::Button::Normal).clicked() {
@@ -899,6 +1072,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Sm, inputs: &mut [Sel
                             ui.add(egui::Label::new(RichText::new(s.as_str()).color(t.text_dim)).wrap());
                         });
                     }
+                    dxf_profile_change_rows(ui, profile.as_ref());
                 }
                 Some(Err(e)) => {
                     ui.vertical(|ui| {
@@ -966,6 +1140,13 @@ pub fn start_export(app: &mut SolveApp, id: &str) -> bool {
 /// `dxf`: the DXF's choices (with `hardware_notes`, a note beside each press-in hardware hole);
 /// none: the bend table.
 pub(crate) fn export_flat(app: &mut SolveApp, body: &str, dxf: Option<DxfExportOptions>) -> String {
+    export_flat_with_profile(app, body, dxf, None)
+}
+
+/// As `export_flat`. `profile` is the DXF profile file the Flat Pattern panel chose
+/// (`sheet.export_dxf`'s `profile`); the bend table has none.
+fn export_flat_with_profile(app: &mut SolveApp, body: &str, dxf: Option<DxfExportOptions>, profile: Option<&str>) -> String {
+    let profile = profile.filter(|_| dxf.is_some()).map(str::to_string);
     let (extension, command) = if dxf.is_some() { ("dxf", "sheet.export_dxf") } else { ("csv", "sheet.export_bend_table") };
     let name = format!("{}-{body}.{extension}", app.session.doc.name);
     let body = body.to_string();
@@ -980,10 +1161,17 @@ pub(crate) fn export_flat(app: &mut SolveApp, body: &str, dxf: Option<DxfExportO
                     params["hardware_notes"] = json!(true);
                 }
             }
+            if let Some(profile) = &profile {
+                params["profile"] = json!(profile);
+            }
+            if let Some(profile) = &profile {
+                params["profile"] = json!(profile);
+            }
             match app.run(command, params) {
                 Ok(_) => {
-                    app.set_status(format!("Exported {path}"), false);
-                    format!("Saved {path}")
+                    let shown = crate::display_user_path(&path);
+                    app.set_status(format!("Exported {shown}"), false);
+                    format!("Saved {shown}")
                 }
                 Err(e) => e,
             }

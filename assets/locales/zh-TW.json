@@ -6910,7 +6910,7 @@
   "ui.ribbon_exit": "退出",
   "ui.ribbon_labels": "顯示功能區圖標下的文字",
   "ui.ribbon_menus_skip_pinned": "下拉選單中不再列出已固定的命令",
-  "ui.ribbon_pin_footer": "固定的命令顯示在功能區中。將指針懸停在行上可固定或取消固定。",
+  "ui.ribbon_pin_footer": "固定的命令顯示在功能區中。可從命令的 ⋯ 選單中固定或取消固定。",
   "ui.ribbon_workspace": "工作區",
   "ui.right": "右視",
   "ui.right_click_confirms": "右鍵確定對話框輸入",
