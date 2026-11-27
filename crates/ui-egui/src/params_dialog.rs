@@ -18,6 +18,7 @@ use crate::ui_kit::BackingTooltipExt as _;
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+use solidcraft_engine::doc::expr;
 
 use crate::SolveApp;
 use crate::ui_kit;
@@ -26,7 +27,20 @@ use crate::ui_kit;
 /// can't be picked (#3216).
 pub(crate) const IMPORT_TYPES: &[&str] = &["csv", "json"];
 
-const UNITS: [&str; 10] = ["mm", "cm", "m", "in", "ft", "deg", "rad", "", "um", "text"];
+/// The units a user parameter's Unit cell offers and reads back: every unit expressions know, in
+/// their table's order (lengths, angles, masses, volumes, areas: `expr::UNITS`, so the first is
+/// mm), then none and text. The cell still shows a row's own unit when it is a spelling the table
+/// doesn't have (`degrees`, set by a command).
+const UNITS: [&str; expr::UNITS.len() + 2] = {
+    let mut names = [""; expr::UNITS.len() + 2];
+    let mut i = 0;
+    while i < expr::UNITS.len() {
+        names[i] = expr::UNITS[i].0;
+        i += 1;
+    }
+    names[i + 1] = "text";
+    names
+};
 
 /// Dialog state (what is being typed; the parameters themselves live in the document).
 #[derive(Default)]
@@ -1501,8 +1515,16 @@ pub fn publish(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let mut all: Vec<Suggestion> = Vec::new();
-    // Every name (no prefix), then the units (offered only after a letter is typed).
-    for prefix in ["", "m", "c", "i", "f", "d", "r", "u", "y", "k", "n"] {
+    // Every name (no prefix), then the units, which are offered only after a letter is typed:
+    // once for each letter a unit starts with.
+    let mut prefixes = vec![String::new()];
+    for (unit, _, _) in expr::UNITS {
+        let first: String = unit.chars().take(1).collect();
+        if !prefixes.contains(&first) {
+            prefixes.push(first);
+        }
+    }
+    for prefix in prefixes {
         if let Ok(v) = app.session.execute("parameters.complete", &json!({ "prefix": prefix })) {
             for s in v["suggestions"].as_array().into_iter().flatten() {
                 let text = s["text"].as_str().unwrap_or_default().to_string();
@@ -1610,7 +1632,12 @@ impl ui_kit::Expressions for DocExpressions {
 
     fn unit_is_prefix(&self, unit: &str) -> bool {
         let unit = if unit == "μ" { "µ" } else { unit };
-        !unit.is_empty() && solidcraft_engine::doc::expr::UNITS.iter().any(|(name, _, _)| *name != unit && name.starts_with(unit))
+        // Only a unit the typing can still reach with letters counts: `mm` is complete although
+        // `mm²` and `mm³` start with it.
+        !unit.is_empty()
+            && solidcraft_engine::doc::expr::UNITS
+                .iter()
+                .any(|(name, _, _)| name.strip_prefix(unit).is_some_and(|rest| !rest.is_empty() && rest.chars().all(char::is_alphabetic)))
     }
 
     fn complete(&self, ui: &mut egui::Ui, response: &egui::Response, text: &mut String) -> bool {
@@ -2222,6 +2249,33 @@ mod tests {
         assert!(r.iter().any(|x| x.name == "width" && x.source == "user"));
         assert!(check(&mut app, "width / 2", "mm").is_ok());
         assert!(check(&mut app, "width + 1 deg", "mm").is_err());
+    }
+
+    /// #4811: a mass parameter's row shows its value in its unit, a check reads the unit picked,
+    /// every unit is offered once its first letter is typed (`µm` too), and the Unit cell lists
+    /// every unit there is, then none, and reads the new ones back.
+    #[test]
+    fn mass_volume_and_area_units_in_the_dialog() {
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.run("parameters.add", json!({"name": "grease", "expression": "50 g"})).unwrap();
+        app.run("parameters.add", json!({"name": "span", "expression": "90", "unit": "degrees"})).unwrap();
+        let names: Vec<&str> = expr::UNITS.iter().map(|(name, _, _)| *name).chain(["", "text"]).collect();
+        assert_eq!((UNITS.to_vec(), UNITS.first().copied()), (names, Some("mm")));
+        let r = rows(&mut app);
+        let row = |n: &str| r.iter().find(|x| x.name == n).cloned().unwrap_or_default();
+        assert_eq!(show_value(&row("grease")), "0.0500 kg");
+        assert_eq!(check(&mut app, "grease * 4", "kg"), Ok("0.2000 kg".to_string()));
+        assert_eq!(check(&mut app, "500 ml", "cm³"), Ok("500.0000 cm³".to_string()));
+        assert!(check(&mut app, "grease", "mm").is_err());
+        publish(&mut app, &ctx);
+        for (typed, unit) in [("k", "kg"), ("l", "lb"), ("c", "cm²"), ("µ", "µm")] {
+            assert!(suggestions(&ctx, typed).iter().any(|s| s.text == unit && s.kind == "unit"), "{typed} offers {unit}");
+        }
+        for unit in ["kg", "lb", "cm³", "m²"] {
+            assert_eq!(unit_from(unit), Ok(unit), "the Unit cell reads {unit}");
+        }
+        assert_eq!(row("span").unit, "degrees");
     }
 
     /// #2757: typing part of a parameter's name offers it, not only its start; names that start

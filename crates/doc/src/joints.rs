@@ -4340,6 +4340,8 @@ mod tests {
                         extent2: None,
                         copy_at_end1: false,
                         copy_at_end2: false,
+                        spacing_list1: Vec::new(),
+                        spacing_list2: Vec::new(),
                     },
                     bodies: Vec::new(),
                     placements: Vec::new(),

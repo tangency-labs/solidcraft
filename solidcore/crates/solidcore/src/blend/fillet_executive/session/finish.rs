@@ -58,6 +58,9 @@ use crate::topology::brep::{p1, p3};
 use crate::topology::{Brep, BrepId, EdgeId};
 use std::collections::BTreeSet;
 
+mod separate_ends;
+pub(crate) use separate_ends::OP as SEPARATE_ENDS_OP;
+
 const OP: &str = "blend::fillet_executive::session::finish";
 
 /// The operation, status and entity of a failure the executive turns into a
@@ -889,6 +892,8 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
 impl FilletSession<'_> {
     /// `DoFillet`: refuse uninitialized parameters, create the corners, then
     /// [`Self::do_filleting`], as the generic [`FilletExecutive::do_fillet`].
+    /// A complete constant-section blend can classify the independent Ends
+    /// first and build their groups with these same stages.
     ///
     /// # Errors
     /// The first stage error, with the executive's error info recorded as upstream.
@@ -908,6 +913,9 @@ impl FilletSession<'_> {
     /// [`Self::create_corners`] as solidcore-ops does, opens the same scope.
     pub fn do_fillet(&mut self, k: &mut Kernel) -> Result<()> {
         crate::profile::profile_scope!(k, "blend::session::do_fillet");
+        if self.finish_separate_ends(k)? {
+            return Ok(());
+        }
         let tolerance = self.net_tolerance(k);
         NetScope::within_mut(k, tolerance, |k| self.do_fillet_within(k))
     }
