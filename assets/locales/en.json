@@ -2741,7 +2741,7 @@
   "help.solid.cell_grid": "Cuts a grid of hexagon, square, triangle, circle or polygon cells out of a part, inside a sketch's profiles. Use it for vents, speaker grilles and lighter plates.",
   "help.solid.chamfer": "Cuts the selected edges with a flat bevel of the distance you set. Use it to break sharp edges or to ease the entry of a pin or screw.",
   "help.solid.coil": "Creates a helical body, such as a spring, from a diameter, turns, height or pitch and a round or square section. Use it for springs, coils and helical ridges.",
-  "help.solid.combine": "Joins bodies, cuts them out of a target body, or keeps only the volume they share, and can keep the tool bodies. Use it to merge parts, to cut one shape with another or to find where two bodies overlap.",
+  "help.solid.combine": "Joins bodies, cuts them out of a target body, or keeps only the volume they share, and can keep the tool bodies. Use it to merge parts, to cut one shape with another or to find where two bodies overlap. Join can keep disconnected pieces in one body under one name.",
   "help.solid.cone": "Creates a cone from a base circle and a height, or a truncated cone when the top has a radius too. Use it for tapers, funnels, countersinks and points.",
   "help.solid.cylinder": "Creates a cylinder from a radius or diameter and a height, standing on a point along an axis. Use it for shafts, pins, bosses and round blanks.",
   "help.solid.dome": "Raises a flat face of a body into a dome cap of the height you set. Use it for lids, caps and rounded tops.",

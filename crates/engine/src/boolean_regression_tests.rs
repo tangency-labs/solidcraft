@@ -1665,8 +1665,8 @@ fn spherical_shell_cuts_and_joins_a_block_crossing_its_hollow() {
 
 /// #4434: a Join whose profile stands apart from the body still joins it, as a second piece of
 /// `Body1`, and says so; scripts read it from the reply as History shows it. A join that meets
-/// the body, one that closes a cavity (a void is not a piece) and a Combine of bodies chosen
-/// apart say nothing.
+/// the body or closes a cavity (a void is not a piece) says nothing. Combine of bodies
+/// chosen apart explicitly reports the disconnected result (#18974).
 #[test]
 fn join_that_meets_no_body_keeps_the_piece_and_says_so() {
     let apart = "`Body1` is now in 2 separate pieces";
@@ -1716,12 +1716,29 @@ fn join_that_meets_no_body_keeps_the_piece_and_says_so() {
     assert_eq!(s.model.state().body("Body1").map(|b| b.body.shell_count()), Some(2));
     assert!(lid["warning"].is_null(), "{lid}");
 
-    // Combine joins the bodies it is given, apart or not.
+    // Combine keeps the disconnected pieces in one body and reports them.
     let mut s = Session::default();
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "center": [0, 0, 5], "operation": "new", "body_name": "A"})).unwrap();
     s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10, "center": [30, 0, 5], "operation": "new", "body_name": "B"})).unwrap();
     let combine = s.execute("solid.combine", &json!({"target": "A", "tools": ["B"], "operation": "join"})).unwrap();
-    assert!(combine["warning"].is_null(), "{combine}");
+    assert!(combine["warning"].as_str().is_some_and(|w| w.contains("2 separate pieces")), "{combine}");
+    assert_eq!(s.model.state().bodies.len(), 1);
+    assert!((volume(&s, "A") - 2000.0).abs() < 1e-6);
+}
+
+#[test]
+fn combine_join_reports_disconnected_pieces_but_not_a_connected_union() {
+    for keep_tools in [false, true] {
+        for (x, disconnected) in [(5.0, false), (30.0, true)] {
+            let mut s = Session::default();
+            s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"corner":[0,0,0],"body_name":"A"})).unwrap();
+            s.execute("solid.box", &json!({"length":10,"width":10,"height":10,"corner":[x,0,0],"operation":"new","body_name":"B"})).unwrap();
+            let reply = s.execute("solid.combine", &json!({"target":"A","tools":["B"],"operation":"join","keep_tools":keep_tools})).unwrap();
+            assert_eq!(reply["warning"].as_str().is_some_and(|w| w.contains("2 separate pieces")), disconnected, "{reply}");
+            assert_eq!(s.model.state().bodies.len(), if keep_tools { 2 } else { 1 });
+            assert!((volume(&s, "A") - if disconnected { 2000.0 } else { 1500.0 }).abs() < 1e-6);
+        }
+    }
 }
 
 /// #12996: a circular pattern of an untargeted cut made in a component, run with another

@@ -87,8 +87,10 @@ off: each window then keeps the operation it opens with, Extrude its own Join or
 
 A Join you pick whose material touches none of its target bodies still joins it, to the first
 one as a separate piece, and the feature's warning says so: "`Body1` is now in 2 separate
-pieces". Combine joins the bodies it is given without that warning. Changing the default does not
-alter operations already saved in a design.
+pieces". Combine Join also reports when disconnected pieces remain in one body. It keeps their
+shared body name and does not split the pieces into separate Browser entries. Undo the Combine to
+keep the original bodies separate. Changing the default does not alter operations already saved
+in a design.
 
 **A clearance round a Combine cut.** Parts that fit into each other, such as a pin in a hole
 or a slider in a slot, need a small gap. With the operation Cut, Combine's **Offset** grows each
