@@ -1884,7 +1884,7 @@ impl RibbonPanels {
 }
 
 /// Where SolidCraft's ribbon publishes its parts (scripts and scenarios use these names).
-const RIBBON_HANDLES: ribbon::Handles<'static> = ribbon::Handles {
+pub(crate) const RIBBON_HANDLES: ribbon::Handles<'static> = ribbon::Handles {
     button: &["toolbar:", "button:"],
     button_rect: "button:",
     split: "family:",
@@ -1941,8 +1941,11 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
         }
         let render = crate::render_workspace::active(app);
         let drawing = crate::drawing_workspace::active(app) || crate::workspace::sheet_scope(app);
+        let plugin_workspace = app.plugin_workspaces.active_label();
         let switcher = app_bar::Switcher {
-            name: if render {
+            name: if let Some((name, _)) = plugin_workspace.as_ref() {
+                name
+            } else if render {
                 app.tr("ui.render")
             } else if drawing {
                 app.tr_label("Drawing")
@@ -1950,7 +1953,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                 app.tr("ui.design")
             },
             caption: app.tr("ui.ribbon_workspace"),
-            icon: if render {
+            icon: if let Some((_, icon)) = plugin_workspace.as_ref() {
+                icon
+            } else if render {
                 "ws_render"
             } else if drawing {
                 "ws_drawing"
@@ -1971,6 +1976,9 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
             crate::context_menu::toggle_for(app, ws, ws.left_bottom(), crate::context_menu::Target::Workspace);
         }
         crate::scenario::publish_rect("toolbar", r);
+        if crate::plugin_workspaces::active_id(app).is_some() {
+            return crate::plugin_workspaces::ribbon(app, ui, Rect::from_min_max(pos2(ribbon_left, r.top()), r.max), folded);
+        }
         if render {
             crate::render_ui::stage_bar(app, ui, cards.ribbon);
             return None;
