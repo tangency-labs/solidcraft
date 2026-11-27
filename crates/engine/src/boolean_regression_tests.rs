@@ -2241,7 +2241,7 @@ fn outer_top_fillet_after_the_inner_round_builds_one_closed_body() {
     assert_eq!(body.shell_count(), 1);
     assert!(body.validity().is_empty(), "{:?}", body.validity());
     // a recorded volume: the rim is seven tapered lobes, and its round has no closed form
-    let (got, want) = (volume(&s, "Body1"), 323_074.2236);
+    let (got, want) = (volume(&s, "Body1"), 323_074.223_6);
     assert!((got - want).abs() < 1e-6 * want, "volume {got}, want {want}");
 }
 
