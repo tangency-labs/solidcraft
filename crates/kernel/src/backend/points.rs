@@ -46,4 +46,8 @@ impl Points for Solidcore {
         let (tool, _) = solidcore_ops::Body::from_record(tool, true).ok()?;
         solidcore_ops::flush_contact_points(&target, &tool).ok()
     }
+
+    fn unit_direction(&self, direction: [f64; 3]) -> Option<[f64; 3]> {
+        measure::unit_direction(direction)
+    }
 }
