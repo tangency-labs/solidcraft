@@ -119,6 +119,22 @@ pub enum FieldKind {
     Decimal { min: f64, max: f64, step: f64, digits: usize },
     /// Letters and digits, plus the characters of `extra`.
     Text { min: usize, max: usize, extra: CharSet },
+    /// Options in any order, each at most once, some with an argument (`-LTP`, `-SC12`). The value
+    /// is an object: the option's key (its code without separators) to `true` or its argument.
+    Set(Vec<SetOption>),
+    /// Everything left of the code, as typed (a free tail such as `+SPECIAL`). Always last.
+    Rest,
+}
+
+/// One option of a [`FieldKind::Set`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct SetOption {
+    /// The code as written, separators included (`-SC`).
+    pub code: String,
+    /// The key in the value: the code's letters and digits (`SC`).
+    pub key: String,
+    /// What follows the code, when the option takes an argument.
+    pub arg: Option<Box<FieldKind>>,
 }
 
 /// A declared parameter: what its field accepts and the value an omitted optional part gives.
@@ -133,8 +149,9 @@ pub type Declared = BTreeMap<String, Decl>;
 
 #[derive(Clone, Debug)]
 enum Node {
-    /// Fixed text, case ignored; its separators match any run of separators.
-    Lit(Vec<char>),
+    /// Fixed text, case ignored; its separators match any run of separators, except one written
+    /// `\-` (the `true` here), which must be present as it is.
+    Lit(Vec<(char, bool)>),
     Field { name: String, kind: FieldKind },
     /// A part that may be left out. `flag` is a boolean parameter that says whether it is there;
     /// `absent` are the values set when it is left out.
@@ -207,6 +224,8 @@ fn spec_kind(spec: &str) -> Result<FieldKind, TemplateError> {
             }
             Ok(FieldKind::Decimal { min, max, step, digits })
         }
+        "rest" if rest.trim().is_empty() => Ok(FieldKind::Rest),
+        _ if spec.starts_with("set(") => set_kind(spec),
         "text" => {
             let (lo, hi, extra) = range_text(rest)?;
             let (min, max): (usize, usize) = (number(lo, "length")?, number(hi, "length")?);
@@ -243,10 +262,42 @@ fn spec_kind(spec: &str) -> Result<FieldKind, TemplateError> {
     }
 }
 
-fn flush(out: &mut Vec<Node>, lit: &mut Vec<char>) {
+fn flush(out: &mut Vec<Node>, lit: &mut Vec<(char, bool)>) {
     if !lit.is_empty() {
         out.push(Node::Lit(std::mem::take(lit)));
     }
+}
+
+fn set_kind(spec: &str) -> Result<FieldKind, TemplateError> {
+    let Some(inner) = spec.strip_prefix("set(").and_then(|r| r.trim_end().strip_suffix(')')) else {
+        return syntax("an option set is written `set(-A, -B:int 0..99)`");
+    };
+    let mut options: Vec<SetOption> = Vec::new();
+    for part in inner.split(',') {
+        let (code, arg) = match part.split_once(':') {
+            Some((c, a)) => (c.trim(), Some(a)),
+            None => (part.trim(), None),
+        };
+        let key: String = code.chars().filter(char::is_ascii_alphanumeric).collect();
+        if key.is_empty() || code.chars().count() > 16 || code.chars().any(char::is_whitespace) {
+            return syntax(format!("`{code}` is not an option code of 1 to 16 characters with a letter or digit"));
+        }
+        if options.iter().any(|o| o.key.eq_ignore_ascii_case(&key)) {
+            return syntax(format!("the option `{key}` is listed twice"));
+        }
+        let arg = match arg {
+            Some(a) => match spec_kind(a)? {
+                FieldKind::Set(_) | FieldKind::Rest => return syntax("an option's argument is a number, a choice or text"),
+                k => Some(Box::new(k)),
+            },
+            None => None,
+        };
+        options.push(SetOption { code: code.to_string(), key, arg });
+        if options.len() > 16 {
+            return syntax("an option set lists at most 16 options");
+        }
+    }
+    Ok(FieldKind::Set(options))
 }
 
 impl Parser<'_> {
@@ -274,7 +325,7 @@ impl Parser<'_> {
 
     fn nodes(&mut self, depth: usize, inside: bool) -> Result<(Vec<Node>, Option<String>), TemplateError> {
         let mut out = Vec::new();
-        let mut lit: Vec<char> = Vec::new();
+        let mut lit: Vec<(char, bool)> = Vec::new();
         let mut flag = None;
         loop {
             let Some(&c) = self.chars.get(self.at) else {
@@ -339,8 +390,15 @@ impl Parser<'_> {
                     }
                     flag = Some(name);
                 }
+                '\\' => match self.chars.get(self.at) {
+                    Some(&e) if !e.is_control() => {
+                        self.at += 1;
+                        lit.push((e, true));
+                    }
+                    _ => return syntax("a `\\` needs the character it marks"),
+                },
                 c if c.is_control() => return syntax("a template has no control characters"),
-                c => lit.push(c),
+                c => lit.push((c, false)),
             }
         }
         flush(&mut out, &mut lit);
@@ -419,6 +477,27 @@ impl Template {
         &self.source
     }
 
+    /// What every code of this template starts with, for an index: the leading fixed text in
+    /// capitals, with each value of a leading choice or letter map appended (at most 64).
+    pub fn prefixes(&self) -> Vec<String> {
+        let mut lit = String::new();
+        let mut next = None;
+        for n in &self.nodes {
+            match n {
+                Node::Lit(t) => lit.extend(t.iter().filter(|(c, _)| !is_separator(*c)).map(|(c, _)| c.to_ascii_uppercase())),
+                other => {
+                    next = Some(other);
+                    break;
+                }
+            }
+        }
+        match next {
+            Some(Node::Field { kind: FieldKind::Choice(v), .. }) => v.iter().take(64).map(|x| format!("{lit}{}", x.to_ascii_uppercase())).collect(),
+            Some(Node::Field { kind: FieldKind::Map(p), .. }) => p.iter().take(64).map(|(c, _)| format!("{lit}{}", c.to_ascii_uppercase())).collect(),
+            _ => vec![lit],
+        }
+    }
+
     /// The parameter names this template sets.
     pub fn fields(&self) -> &[String] {
         &self.fields
@@ -480,6 +559,21 @@ impl Matcher<'_> {
         self.input.get(pos..pos + text.len()).is_some_and(|s| s.iter().zip(text).all(|(a, b)| a.eq_ignore_ascii_case(b)))
     }
 
+    /// Where fixed text `text` ends when it is read at `pos`, if it is there.
+    fn literal(&self, pos: usize, text: &[(char, bool)]) -> Option<usize> {
+        let mut p = if text.first().is_some_and(|(_, required)| *required) { pos } else { self.skip(pos) };
+        for (c, required) in text {
+            if is_separator(*c) && !required {
+                p = self.skip(p);
+            } else if self.input.get(p).is_some_and(|i| i.eq_ignore_ascii_case(c)) {
+                p += 1;
+            } else {
+                return None;
+            }
+        }
+        Some(p)
+    }
+
     fn run(&mut self, nodes: &[Node], rest: &[&[Node]], pos: usize, fields: Params) -> Result<Option<Params>, TemplateError> {
         if *self.budget == 0 {
             return Err(TemplateError::Limit { what: "matching steps", limit: MATCH_BUDGET as usize });
@@ -492,22 +586,21 @@ impl Matcher<'_> {
             };
         };
         match first {
-            Node::Lit(text) => {
-                let mut p = self.skip(pos);
-                for c in text {
-                    if is_separator(*c) {
-                        p = self.skip(p);
-                    } else if self.input.get(p).is_some_and(|i| i.eq_ignore_ascii_case(c)) {
-                        p += 1;
-                    } else {
-                        return Ok(None);
+            Node::Lit(text) => match self.literal(pos, text) {
+                Some(p) => self.run(tail, rest, p, fields),
+                None => Ok(None),
+            },
+            Node::Field { name, kind } => {
+                // A free tail keeps the separators it starts with.
+                let at = if matches!(kind, FieldKind::Rest) { pos } else { self.skip(pos) };
+                for (len, value) in self.candidates(kind, at) {
+                    let mut f = fields.clone();
+                    f.insert(name.clone(), value);
+                    if let Some(done) = self.run(tail, rest, at + len, f)? {
+                        return Ok(Some(done));
                     }
                 }
-                self.run(tail, rest, p, fields)
-            }
-            Node::Field { name, kind } => {
-                let at = self.skip(pos);
-                self.field(name, kind, at, tail, rest, fields)
+                Ok(None)
             }
             Node::Optional { nodes: inner, flag, absent } => {
                 let mut chain: Vec<&[Node]> = Vec::with_capacity(rest.len() + 1);
@@ -529,34 +622,25 @@ impl Matcher<'_> {
         }
     }
 
-    fn field(&mut self, name: &str, kind: &FieldKind, at: usize, tail: &[Node], rest: &[&[Node]], fields: Params) -> Result<Option<Params>, TemplateError> {
-        let take = |this: &mut Self, len: usize, value: Json| -> Result<Option<Params>, TemplateError> {
-            let mut f = fields.clone();
-            f.insert(name.to_string(), value);
-            this.run(tail, rest, at + len, f)
-        };
+    /// The readings of a field at `at`, best first: how many characters each takes and its value.
+    fn candidates(&self, kind: &FieldKind, at: usize) -> Vec<(usize, Json)> {
+        let mut out = Vec::new();
         match kind {
             FieldKind::Choice(values) => {
                 let list = sorted_longest(values.iter().map(|v| (v.chars().collect(), v.clone())).collect());
                 for (chars, canonical) in &list {
-                    if self.starts(at, chars)
-                        && let Some(done) = take(self, chars.len(), Json::String(canonical.clone()))?
-                    {
-                        return Ok(Some(done));
+                    if self.starts(at, chars) {
+                        out.push((chars.len(), Json::String(canonical.clone())));
                     }
                 }
-                Ok(None)
             }
             FieldKind::Map(pairs) => {
                 let list = sorted_longest(pairs.iter().map(|(c, v)| (c.chars().collect(), v.clone())).collect());
                 for (chars, value) in &list {
-                    if self.starts(at, chars)
-                        && let Some(done) = take(self, chars.len(), Json::String(value.clone()))?
-                    {
-                        return Ok(Some(done));
+                    if self.starts(at, chars) {
+                        out.push((chars.len(), Json::String(value.clone())));
                     }
                 }
-                Ok(None)
             }
             FieldKind::Int { min, max, step } => {
                 let digits = self.input.get(at..).unwrap_or_default().iter().take(15).take_while(|c| c.is_ascii_digit()).count();
@@ -569,11 +653,8 @@ impl Matcher<'_> {
                     if n < *min || n > *max || (n - min).checked_rem(*step) != Some(0) {
                         continue;
                     }
-                    if let Some(done) = take(self, len, Json::from(n))? {
-                        return Ok(Some(done));
-                    }
+                    out.push((len, Json::from(n)));
                 }
-                Ok(None)
             }
             FieldKind::Decimal { min, max, step, digits } => {
                 let run = self.input.get(at..).unwrap_or_default().iter().take(24).take_while(|c| c.is_ascii_digit() || **c == '.').count();
@@ -596,24 +677,59 @@ impl Matcher<'_> {
                             continue;
                         }
                     }
-                    if let Some(done) = take(self, len, Json::from(n))? {
-                        return Ok(Some(done));
-                    }
+                    out.push((len, Json::from(n)));
                 }
-                Ok(None)
             }
             FieldKind::Text { min, max, extra } => {
                 let ok = |c: &char| c.is_ascii_alphanumeric() || extra.contains(*c);
                 let run = self.input.get(at..).unwrap_or_default().iter().take(*max).take_while(|c| ok(c)).count();
                 for len in (*min..=run).rev() {
                     let text: String = self.input.get(at..at + len).unwrap_or_default().iter().collect();
-                    if let Some(done) = take(self, len, Json::String(text))? {
-                        return Ok(Some(done));
+                    out.push((len, Json::String(text)));
+                }
+            }
+            FieldKind::Rest => {
+                let left = self.input.get(at..).unwrap_or_default();
+                if !left.is_empty() && left.len() <= 64 {
+                    out.push((left.len(), Json::String(left.iter().collect())));
+                }
+            }
+            FieldKind::Set(options) => out.push(self.options(options, at)),
+        }
+        out
+    }
+
+    /// Read options in any order, each once, the longest code first; stops at the first thing that is none.
+    fn options(&self, options: &[SetOption], at: usize) -> (usize, Json) {
+        let mut order: Vec<&SetOption> = options.iter().collect();
+        order.sort_by_key(|o| std::cmp::Reverse(o.code.chars().count()));
+        let mut found = serde_json::Map::new();
+        let mut p = at;
+        'more: loop {
+            for o in &order {
+                if found.contains_key(&o.key) {
+                    continue;
+                }
+                let code: Vec<(char, bool)> = o.code.chars().map(|c| (c, false)).collect();
+                let Some(after) = self.literal(p, &code) else { continue };
+                match &o.arg {
+                    None => {
+                        found.insert(o.key.clone(), Json::Bool(true));
+                        p = after;
+                        continue 'more;
+                    }
+                    Some(kind) => {
+                        if let Some((len, value)) = self.candidates(kind, after).into_iter().next() {
+                            found.insert(o.key.clone(), value);
+                            p = after + len;
+                            continue 'more;
+                        }
                     }
                 }
-                Ok(None)
             }
+            break;
         }
+        (p - at, Json::Object(found))
     }
 }
 
@@ -643,9 +759,14 @@ fn present(nodes: &[Node], params: &Params, declared_default: &dyn Fn(&str) -> O
 fn print_nodes(nodes: &[Node], params: &Params, out: &mut String) -> Result<(), TemplateError> {
     for n in nodes {
         match n {
-            Node::Lit(text) => out.extend(text.iter()),
+            Node::Lit(text) => out.extend(text.iter().map(|(c, _)| c)),
             Node::Field { name, kind } => {
-                let Some(v) = params.get(name) else { return bad_field(name, "has no value") };
+                let Some(v) = params.get(name) else {
+                    if matches!(kind, FieldKind::Set(_)) {
+                        continue;
+                    }
+                    return bad_field(name, "has no value");
+                };
                 out.push_str(&print_field(name, kind, v)?);
             }
             Node::Optional { nodes, flag, absent } => {
@@ -711,6 +832,30 @@ fn print_field(name: &str, kind: &FieldKind, v: &Json) -> Result<String, Templat
                 s = s.trim_end_matches('0').trim_end_matches('.').to_string();
             }
             Ok(s)
+        }
+        FieldKind::Rest => match v.as_str() {
+            Some(t) if !t.is_empty() && t.chars().count() <= 64 && !t.chars().any(char::is_control) => Ok(t.to_string()),
+            _ => bad_field(name, "must be 1 to 64 characters of text"),
+        },
+        FieldKind::Set(options) => {
+            let Some(map) = v.as_object() else { return bad_field(name, "must be an object of options") };
+            if let Some(k) = map.keys().find(|k| !options.iter().any(|o| &o.key == *k)) {
+                return bad_field(name, format!("`{k}` is not one of the options"));
+            }
+            let mut out = String::new();
+            for o in options {
+                let Some(given) = map.get(&o.key) else { continue };
+                match (&o.arg, given) {
+                    (None, Json::Bool(true)) => out.push_str(&o.code),
+                    (None, Json::Bool(false)) => {}
+                    (None, _) => return bad_field(name, format!("`{}` takes no value", o.key)),
+                    (Some(kind), value) => {
+                        out.push_str(&o.code);
+                        out.push_str(&print_field(&o.key, kind, value)?);
+                    }
+                }
+            }
+            Ok(out)
         }
         FieldKind::Text { min, max, extra } => {
             let Some(t) = text_of(v) else { return bad_field(name, "must be text") };

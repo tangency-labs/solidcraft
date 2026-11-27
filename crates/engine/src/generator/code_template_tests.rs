@@ -119,3 +119,38 @@ fn hostile_input_is_refused_not_run_away_with() {
     assert!(matches!(r, Ok(None) | Err(TemplateError::Limit { .. })));
     assert!(MATCH_BUDGET > 0);
 }
+
+#[test]
+fn an_option_set_reads_in_any_order_and_prints_in_the_declared_one() {
+    let t = Template::parse("HFS5-{w: int 20..100}{o: set(-LTP, -RTP, -SC:int 0..99)}", &Declared::new()).unwrap();
+    let a = t.match_code("HFS5-30-RTP-LTP-SC12").unwrap().unwrap();
+    let b = t.match_code("hfs5 30 sc12 ltp rtp").unwrap().unwrap();
+    assert_eq!(a, b);
+    assert_eq!(a["o"], json!({"LTP": true, "RTP": true, "SC": 12}));
+    assert_eq!(t.print(&a).unwrap(), "HFS5-30-LTP-RTP-SC12");
+    assert_eq!(t.match_code("HFS5-30").unwrap().unwrap()["o"], json!({}));
+    assert!(t.match_code("HFS5-30-LTP-LTP").unwrap().is_none());
+    assert!(matches!(t.print(&params(json!({"w": 30, "o": {"NOPE": true}}))), Err(TemplateError::Field { .. })));
+}
+
+#[test]
+fn a_free_tail_keeps_what_is_typed() {
+    let t = Template::parse("MGN{n: int 1..9}[+{tail: rest}]", &Declared::new()).unwrap();
+    assert_eq!(t.match_code("MGN5+SPECIAL-X").unwrap().unwrap()["tail"], json!("SPECIAL-X"));
+    assert!(t.match_code("MGN5").unwrap().is_some());
+    assert_eq!(t.print(&params(json!({"n": 5, "tail": "A-1"}))).unwrap(), "MGN5+A-1");
+}
+
+#[test]
+fn a_required_separator_must_be_there() {
+    let t = Template::parse(r"E-SFJ{d: int 1..99}\-{l: int 1..99}", &Declared::new()).unwrap();
+    assert_eq!(t.match_code("e sfj 12-5").unwrap().unwrap(), params(json!({"d": 12, "l": 5})));
+    assert!(t.match_code("E-SFJ125").unwrap().is_none());
+    assert_eq!(t.print(&params(json!({"d": 12, "l": 5}))).unwrap(), "E-SFJ12-5");
+}
+
+#[test]
+fn a_template_names_its_literal_prefixes_for_an_index() {
+    let t = Template::parse(MGN, &declared()).unwrap();
+    assert_eq!(t.prefixes(), ["MGN7", "MGN9", "MGN12", "MGN15"].map(String::from).to_vec());
+}
