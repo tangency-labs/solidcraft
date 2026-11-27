@@ -774,6 +774,14 @@ fn emboss_on_a_face_refuses_a_profile_off_it_and_leaves_the_design() {
     assert_eq!(volume(&mut s), v);
 }
 
+/// The point an Emboss feature saved for its face.
+fn saved_emboss_face(s: &Session, name: &str) -> solidcore_record::Vec3 {
+    match s.doc.find_feature(name).map(|f| &f.kind) {
+        Some(solidcraft_doc::FeatureKind::Emboss { face: Some(face), .. }) => *face.at,
+        other => panic!("{name} saved no face: {other:?}"),
+    }
+}
+
 #[test]
 fn emboss_on_a_face_picked_elsewhere_on_a_tangent_ring_takes_the_face_under_the_text() {
     // #22845: a slot-shaped side (two half cylinders joined by two flat sides, all tangent) is one
@@ -790,9 +798,13 @@ fn emboss_on_a_face_picked_elsewhere_on_a_tangent_ring_takes_the_face_under_the_
         run(&mut s, "sketch.text", json!({"text": "CD", "at": [-4, 4], "height": 5}));
         run(&mut s, "sketch.finish", json!({}));
         let before = volume(&mut s);
-        let done = s.execute("solid.emboss", &json!({"sketch": "Back", "depth": "0.2 mm", "targets": ["b"], "face": face}));
+        let done = s.execute("solid.emboss", &json!({"sketch": "Back", "depth": "0.2 mm", "targets": ["b"], "face": face, "name": "E"}));
         assert!(done.is_ok(), "{face:?}: {:?}", done.err().map(|e| e.to_string()));
         assert_eq!(measure(&mut s)["body_count"], 1, "{face:?}");
+        // The saved face is the back half cylinder under the text (axis x = 0, y = 15, radius
+        // 10), not the front one, which has the same radius and would give the same volume.
+        let at = saved_emboss_face(&s, "E");
+        assert!(((at.x * at.x + (at.y - 15.0).powi(2)).sqrt() - 10.0).abs() < 1e-9 && at.y > 15.0 + 1e-6, "{face:?}: saved {at:?}");
         let state = s.model.state();
         let body = &state.body("b").unwrap().body;
         assert!(body.validity().is_empty(), "{face:?}: {:?}", body.validity());
@@ -831,9 +843,12 @@ fn emboss_on_a_round_of_a_tangent_ring_takes_the_flat_side_the_text_lies_on() {
         run(&mut s, "sketch.text", json!({"text": "CD", "at": [-4, 4], "height": 5}));
         run(&mut s, "sketch.finish", json!({}));
         let before = volume(&mut s);
-        let done = s.execute("solid.emboss", &json!({"sketch": "Side", "depth": "0.2 mm", "targets": ["b"], "face": face}));
+        let done = s.execute("solid.emboss", &json!({"sketch": "Side", "depth": "0.2 mm", "targets": ["b"], "face": face, "name": "E"}));
         assert!(done.is_ok(), "{face:?}: {:?}", done.err().map(|e| e.to_string()));
         assert_eq!(measure(&mut s)["body_count"], 1, "{face:?}");
+        // The saved face is the flat side at x = 10 the text lies on, not either half cylinder.
+        let at = saved_emboss_face(&s, "E");
+        assert!((at.x - 10.0).abs() < 1e-9 && at.y.abs() <= 15.0, "{face:?}: saved {at:?}");
         let state = s.model.state();
         let body = &state.body("b").unwrap().body;
         assert!(body.validity().is_empty(), "{face:?}: {:?}", body.validity());
