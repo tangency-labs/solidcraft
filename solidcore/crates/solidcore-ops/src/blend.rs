@@ -51,7 +51,6 @@ use solidcore::blend::blend_corner::{BlendCornerEvent, TurnChoice};
 use solidcore::blend::blend_refusal::{BlendRefusal, NotBlendable, SetbackTooShortWhy};
 use solidcore::blend::chamfer_side::{faces_along, wedge_at_middle};
 use solidcore::blend::definition_check::{BlendFaceKind, BlendFaceLog, MadeBlendFace};
-use solidcore::blend::fillet_corner::p3::FACE_CLOSES_TO_A_POINT;
 use solidcore::blend::fillet_executive::p3::{
     ErrorInfo, FitKind as KernelFit, FitSize as KernelFitSize, NoRoomReason,
 };
@@ -660,10 +659,26 @@ fn blend_failure(
         // a failure the kernel states in words says what the session noted of the step too
         Err(e) => (session_failure(s, &e).unwrap_or_else(|| status(e)), None),
     };
+    let error = narrowed(s, error);
     (
         crate::session::noted_as(kind, operation, class, error),
         edge,
     )
+}
+
+/// Not upstream (#16404): a failure that gives no other reason (an unsupported corner or step,
+/// a bare status) where the corners step found a face beside a blended edge closing to a point
+/// is that face: no blend of any size fits there. A refusal that names its own reason (a blend
+/// too large, no room, a setback too short) keeps it.
+fn narrowed(s: &FilletSession<'_>, error: Error) -> Error {
+    match (s.narrowing_vertex(), &error) {
+        (Some(p), Error::Status(..) | Error::Unsupported(..) | Error::CornerUnsupported { .. }) => {
+            Error::FaceClosesToPoint {
+                at: Some([p.x, p.y, p.z]),
+            }
+        }
+        _ => error,
+    }
 }
 
 /// The refusal of a swept turn the corners step noted at its vertex (the blend corner's
@@ -719,22 +734,6 @@ fn turn_refusal(s: &FilletSession<'_>, e: &SolidError) -> Option<Error> {
         at: info.location.map(|p| [p.x, p.y, p.z]),
         side_edge,
         least_radius,
-    })
-}
-
-/// The corners step refused a face beside a blended edge that narrows to a point, with
-/// the vertex's point; `None` for a note of another kind.
-fn face_closes_refusal(s: &FilletSession<'_>) -> Option<Error> {
-    let info = s.error_info();
-    if info.code != FilletErrorType::CornerUnsupported as i32 {
-        return None;
-    }
-    let why = info.comment.trim();
-    let why = why
-        .strip_prefix("Fillet Error:")
-        .map_or(why, str::trim_start);
-    (why == FACE_CLOSES_TO_A_POINT).then(|| Error::FaceClosesToPoint {
-        at: info.location.map(|p| [p.x, p.y, p.z]),
     })
 }
 
@@ -1098,15 +1097,9 @@ fn pass(
         let mut step = prepared
             .and_then(|()| s.create_corners(k, None))
             .map(|()| Ok(Vec::new()));
-        // A face narrowing to a point takes precedence over a swept turn's refusal.
+        // a swept turn the corners step refused, with the kernel's reason
         let refused_turn = match &step {
-            Err(e) if prepared_ok => face_closes_refusal(&s).or_else(|| {
-                if p.turn == Turn::Swept {
-                    turn_refusal(&s, e)
-                } else {
-                    None
-                }
-            }),
+            Err(e) if p.turn == Turn::Swept && prepared_ok => turn_refusal(&s, e),
             _ => None,
         };
         stopped.roll_overs = s.roll_overs().to_vec();

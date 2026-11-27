@@ -2792,10 +2792,6 @@ fn mixed_corner_rails_cross(
     Ok(ang.is_some_and(|a| rad_to_deg(a) < ang_tol_deg))
 }
 
-/// The comment noted at a vertex whose corner [`face_closes_to_a_point`] refuses (#16404).
-pub const FACE_CLOSES_TO_A_POINT: &str = "a face beside the blended edge narrows to a point here, \
-     where the edge touches another edge of that face tangentially, so no blend of any size fits";
-
 /// An endpoint tangent for the face-closing test: an unevaluable tangent cannot match,
 /// but cancellation stops the walk.
 fn face_closing_tangent(
@@ -2823,13 +2819,11 @@ fn face_closing_tangent(
 /// blended whose faces are tangent (no convexity), and a tangent that cannot be evaluated or is
 /// shorter than `SM_EFF_ZERO`.
 ///
-/// A pair both blended and of one convexity closes the face to a cusp too, where the corner
-/// factory built no corner (`corner_built` false): the two blends' contact lines on that face
-/// are each set back from their own edge, and between two edges leaving the vertex along one
-/// tangent the face has no width for either near it (a tangent chain from a hole's rim on to the
-/// bottom edge the hole wall touches, #1390). Where the factory builds a corner there, it is
-/// left to build. A pair both blended and of the two convexities is the mixed-convexity corner,
-/// with its own refusal.
+/// A pair both blended and of one convexity closes the face to a cusp too: the two blends'
+/// contact lines on that face are each set back from their own edge, and between two edges
+/// leaving the vertex along one tangent the face has no width for either near it (a tangent
+/// chain from a hole's rim on to the bottom edge the hole wall touches, #1390). A pair both
+/// blended and of the two convexities is the mixed-convexity corner, with its own refusal.
 ///
 /// Convexity is the blend's own ([`crate::blend::fillet_solver::p5::is_concave_edge`]). The walk
 /// is [`FilletCorner::create_noting_roll_overs`]': each step is one face's corner at the vertex,
@@ -2846,7 +2840,6 @@ pub fn face_closes_to_a_point(
     b: &mut Brep,
     solver_eus: &[EdgeuseId],
     tangency_tol_radians: f64,
-    corner_built: bool,
 ) -> Result<bool> {
     let Some(&start_eu) = solver_eus.first() else {
         return Ok(false);
@@ -2878,15 +2871,9 @@ pub fn face_closes_to_a_point(
         let arriving = eu1::cw_edgeuse(b, leaving)?
             .ok_or_else(|| invalid(OP_CREATE, "edge use without clockwise neighbour"))?;
         let (e0, e1) = (edge_of(b, leaving)?, edge_of(b, arriving)?);
-        // which of the pair the test reads: one blended, or both where no corner was built
         let (blended0, blended1) = (blended.contains(&e0), blended.contains(&e1));
         let both = blended0 && blended1;
-        let read = if both {
-            !corner_built
-        } else {
-            blended0 || blended1
-        };
-        if e0 != e1 && read {
+        if e0 != e1 && (blended0 || blended1) {
             // both pointing away from the vertex
             let cusp = match (tangent(b, leaving, 0.0)?, tangent(b, arriving, 1.0)?) {
                 (Some(d0), Some(d1)) => {
