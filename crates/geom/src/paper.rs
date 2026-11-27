@@ -13,12 +13,13 @@
 //!   angles are radians, anticlockwise. A line's width is its width on paper, centred on its path.
 //! - Paint goes on in order: the groups in turn, then the items of each group in turn, each over
 //!   what is already there.
-//! - A stroke has butt caps and miter joins with a miter limit of 4 (a join sharper than about 29°
-//!   is bevelled). A closed stroke joins at its start instead of having two caps. A fill is
-//!   painted even-odd, so a hole is a hole whichever way its loop runs.
+//! - A stroke has round caps and round joins, so lines that meet at a corner close it whatever
+//!   their angle, and a sharp turn has no spike. A closed stroke joins at its start instead of
+//!   having two caps. A fill is painted even-odd, so a hole is a hole whichever way its loop runs.
 //! - A dashed stroke's pattern ([`Dashes`]) runs along its whole path, round a closed one, in
 //!   paper millimetres: a dashed line looks the same at any view scale. Each dash has the
-//!   stroke's caps and joins.
+//!   stroke's caps and joins, and its length includes its caps: a writer strokes the pattern
+//!   [`Dashes::under_round_caps`] gives.
 //! - Each group says which object on the sheet drew it, by an id, and what kind of object that is.
 //!   The id is opaque here: it names one object within the sheet, and several groups may come from
 //!   the same object. DXF and PDF put a group on the layer its kind names ([`ObjectKind::layer`]).
@@ -154,6 +155,10 @@ pub enum ObjectKind {
     Dimension,
     /// A note's text, with its leader when it points at the model.
     Note,
+    /// A centre mark attached to a circular feature.
+    CentreMark,
+    /// A centre line joining two named model points.
+    CentreLine,
     /// A view's label: its letter, name and scale, above the view unless moved (#13044).
     ViewLabel,
     /// A balloon's circle and number, with its leader to the part it numbers.
@@ -180,6 +185,8 @@ impl ObjectKind {
             ObjectKind::View => "VIEW",
             ObjectKind::Dimension => "DIMENSION",
             ObjectKind::Note => "NOTE",
+            ObjectKind::CentreMark => "CENTRE_MARK",
+            ObjectKind::CentreLine => "CENTRE_LINE",
             ObjectKind::ViewLabel => "VIEW_LABEL",
             ObjectKind::Balloon => "BALLOON",
             ObjectKind::RevisionTag => "REVISION_TAG",
@@ -198,7 +205,7 @@ impl ObjectKind {
             ObjectKind::SheetBorder | ObjectKind::DrawingBorder => 0,
             ObjectKind::SheetImage => 1,
             ObjectKind::View => 2,
-            ObjectKind::Dimension | ObjectKind::ViewLabel | ObjectKind::Balloon => 3,
+            ObjectKind::Dimension | ObjectKind::CentreMark | ObjectKind::CentreLine | ObjectKind::ViewLabel | ObjectKind::Balloon => 3,
             ObjectKind::Note => match of {
                 DrawnFor::View => 3,
                 DrawnFor::Sheet => 5,
@@ -321,6 +328,29 @@ impl Dashes {
         // Counted as writers that cut a line into its dashes count them: pairs along the length.
         let length: f64 = path.iter().map(Seg2::length).sum();
         require(length / period * (n / 2) as f64 <= MAX_DASHES, "a dashed line needs at most 1,000,000 dashes")
+    }
+
+    /// The pattern to stroke with round caps `width_mm` wide so that each dash, caps included,
+    /// covers the length this pattern gives it. Each dash is a width shorter and keeps its middle;
+    /// a dash no longer than the width becomes 0 long, a dot one width across. The gaps grow by
+    /// what their dashes lose, so the pattern's length stays the same.
+    pub fn under_round_caps(&self, width_mm: f64) -> Dashes {
+        let n = self.lengths_mm.len();
+        if n < 2 || !n.is_multiple_of(2) {
+            return self.clone();
+        }
+        let width = if width_mm.is_finite() { width_mm.max(0.0) } else { 0.0 };
+        // What each dash (an even index) loses; a gap loses nothing.
+        let cut = |i: usize| if i.is_multiple_of(2) { self.lengths_mm.get(i).map_or(0.0, |l| l.min(width).max(0.0)) } else { 0.0 };
+        let lengths_mm: Vec<f64> = (0..n)
+            .zip(&self.lengths_mm)
+            .map(|(i, l)| if i.is_multiple_of(2) { l - cut(i) } else { l + (cut(i - 1) + cut((i + 1) % n)) / 2.0 })
+            .collect();
+        let period: f64 = lengths_mm.iter().sum();
+        // The first dash now starts half its cut later along the line.
+        let phase_mm = if period > 0.0 { (self.phase_mm - cut(0) / 2.0).rem_euclid(period) } else { 0.0 };
+        // rem_euclid can round up to the period itself, which a pattern's phase never reaches.
+        Dashes { lengths_mm, phase_mm: if phase_mm < period { phase_mm } else { 0.0 } }
     }
 }
 

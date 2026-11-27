@@ -47,6 +47,13 @@ pub(super) enum Dest<'a> {
     Path(&'a str),
 }
 
+/// A folder the user chose to keep the sent file in (#18311), in place of the slicer folder.
+pub(super) struct Copy {
+    pub dir: std::path::PathBuf,
+    /// Replace one file named after the design each time, rather than a new `-v<N>` each time.
+    pub overwrite: bool,
+}
+
 pub(super) struct Send<'a> {
     /// The command, for its error messages.
     pub cmd: &'static str,
@@ -60,6 +67,8 @@ pub(super) struct Send<'a> {
     /// Only for [`Dest::Path`]; the slicer folder's file is always standard.
     pub quality: solidcraft_io::MeshQuality,
     pub dest: Dest<'a>,
+    /// Only for [`Dest::Folder`].
+    pub copy: Option<Copy>,
     pub single_instance: bool,
     pub wait: Wait,
 }
@@ -68,6 +77,7 @@ fn format_name(f: Format) -> &'static str {
     match f {
         Format::StlBinary | Format::StlAscii => "stl",
         Format::ThreeMfTagged => "3mf-tagged",
+        Format::Step => "step",
         _ => "3mf",
     }
 }
@@ -94,6 +104,25 @@ pub(super) fn send(s: &mut Session, r: Send<'_>) -> Result<Value> {
 fn write_in_folder(s: &mut Session, r: &Send<'_>) -> Result<Value> {
     use crate::slicer_files;
     let Exported { bytes, ext, fell_back, bodies, laid } = export_bodies(s, r.cmd, &r.bodies, r.format)?;
+    if let Some(copy) = &r.copy {
+        // The file the user keeps: named after the design, in their folder, and the slicer opens it.
+        let stem = slicer_files::copy_stem(&s.doc.name);
+        let (file, numbered, version) = if copy.overwrite {
+            let (file, numbered) =
+                slicer_files::write_copy(&copy.dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", copy.dir.display())))?;
+            (file, numbered, None)
+        } else {
+            let (file, n) =
+                slicer_files::write_version(&copy.dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", copy.dir.display())))?;
+            (file, false, Some(n))
+        };
+        let mut out = json!({"path": file.to_string_lossy(), "bytes": bytes.len(), "format": ext, "numbered": numbered, "stl_fallback": fell_back, "copy": true});
+        if let Some(n) = version {
+            out["version"] = json!(n);
+        }
+        laid.report(&mut out);
+        return Ok(out);
+    }
     let dir = slicer_files::dir().ok_or_else(|| bad(r.cmd, "no per-user folder on this system"))?;
     let stem = slicer_files::stem(&s.doc.name, s.path.as_deref(), s.uid, &bodies);
     let (file, numbered) = slicer_files::write(&dir, &stem, ext, &bytes).map_err(|e| EngineError::Other(format!("{}: {e}", dir.display())))?;

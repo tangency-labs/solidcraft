@@ -26,6 +26,7 @@
 //! marker reads it from there and moves it by replacing the item, as a click on the input does.
 
 mod boss;
+pub(crate) mod frame_anchor;
 mod hole;
 mod look;
 mod primitive;

@@ -20,7 +20,8 @@ use super::projection::{Drawing, Line, Origin, Owner, Part, Path, View, bounds, 
 const MAX_LINES: usize = 1_000_000;
 const MAX_SEGMENTS: usize = 4_000_000;
 const MAX_SHARED_TRIANGLES: usize = 2_000_000;
-const MAX_VIEW_NODES: usize = 256 * 1024 * 1024 / std::mem::size_of::<Aabb3>();
+const VIEW_NODES_MIB: usize = 256;
+const MAX_VIEW_NODES: usize = VIEW_NODES_MIB * 1024 * 1024 / std::mem::size_of::<Aabb3>();
 const WORK: usize = 200_000_000;
 /// The cosine under which a surface normal (or a facet's) counts as square to the view: well above
 /// the rounding of an exactly side-on view and the lean a mesh's chord error gives a thin facet.
@@ -508,7 +509,7 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
     // scratch space as well as the retained mesh bytes before starting parallel builders.
     let unique_triangles = scene.meshes.iter().try_fold(0usize, |n, m| n.checked_add(m.triangles.len()));
     if unique_triangles.is_none_or(|n| n > MAX_SHARED_TRIANGLES) {
-        return Err(Refused::Memory);
+        return Err(Refused::MeshTriangles(MAX_SHARED_TRIANGLES));
     }
     let progress = Stage::new("dxf_index", scene.meshes.len());
     let shared = parallel(&scene.meshes, |m| {
@@ -519,7 +520,7 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
     })?;
     let count = scene.placements.iter().try_fold(0usize, |n, p| n.checked_add(shared.get(p.mesh)?.tree.nodes.len()));
     if count.is_none_or(|n| n > MAX_VIEW_NODES) {
-        return Err(Refused::Memory);
+        return Err(Refused::ViewNodes(VIEW_NODES_MIB));
     }
     let count = AtomicUsize::new(0);
     let progress = Stage::new("dxf_projection", scene.placements.len());

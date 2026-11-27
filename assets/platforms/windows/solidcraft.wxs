@@ -42,6 +42,11 @@
          of the same X.Y.Z, whose file version is the same. "a" replaces every file; all of them
          are SolidCraft's own. -->
     <Property Id="REINSTALLMODE" Value="amus" />
+    <!-- Never restart the computer at the end of an install or update, whoever starts it: the
+         in-app updater of an older SolidCraft runs `msiexec /passive` without REBOOT, and Windows
+         then restarted the PC by itself when a file was in use (#18774). A file that is in use is
+         replaced at the next restart instead. -->
+    <Property Id="REBOOT" Value="ReallySuppress" />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <!-- This MSI icon is only for Programs and Features. A shortcut must use the installed

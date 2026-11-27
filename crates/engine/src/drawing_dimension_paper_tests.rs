@@ -1,7 +1,7 @@
 use solidcore_record::Vec3;
-use solidcraft_doc::drawing::dimension::{Member, ModelEdge, ModelFace, Silhouette, Status};
+use solidcraft_doc::drawing::dimension::{Member, ModelEdge, ModelFace, ModelPoint, Silhouette, Status};
+use solidcraft_doc::drawing::measure::{Measured, Reading, SilhouetteSide};
 use solidcraft_geom::Aabb2;
-use solidcraft_geom::drawing_measure::{Measured, Reading, SilhouetteSide};
 use solidcraft_geom::drawing_view::{NamedView, Scale};
 use solidcraft_geom::paper::Scene;
 use solidcraft_geom::paper::line::LineGroup;
@@ -22,6 +22,10 @@ fn dimension(kind: DimensionKind, offset_mm: f64, text: TextPlace) -> Dimension 
 
 fn edge() -> ModelEdge {
     ModelEdge { body: "B".into(), origin_feature: 1, name: "e".into(), path: Vec::new() }
+}
+
+fn corner() -> ModelPoint {
+    ModelPoint { body: "B".into(), origin_feature: 1, edges: vec!["e".into(), "f".into()], centre: false, path: Vec::new() }
 }
 
 fn face() -> ModelFace {
@@ -360,6 +364,121 @@ fn a_chain_is_one_line_with_each_extension_line_once() {
     assert_eq!(tips.len(), 6);
     let upright = lines.iter().filter(|l| close(l[0].x, l[1].x)).count();
     assert_eq!(upright, 4, "one for each point: {lines:?}");
+}
+
+/// A baseline set from (0, 0) to holes at x = 30, 10 and 60 (y = 15), seen at 1:1 with an offset of
+/// 10: one dimension from the origin to each, nearest first, their lines at y = 15 + 10 (the
+/// outermost point, then the offset), 32 and 39, 7 mm apart, each text a gap above its own line
+/// and centred on its span. The origin's extension lines lie along each other: drawn once, the
+/// longest. Two targets at one distance stack as two members.
+#[test]
+fn a_baseline_set_stacks_its_members_nearest_first() {
+    let kind = DimensionKind::Baseline { origin: corner(), targets: Vec::new(), direction: LinearDirection::Horizontal };
+    let member = |value: f64| Member { measured: Measured { value, foreshortened: false }, text: format!("{value:.2}") };
+    let mut r = read(&[[0.0, 0.0], [30.0, 15.0], [10.0, 15.0], [60.0, 15.0]], "60");
+    r.text = None;
+    r.members = vec![member(30.0), member(10.0), member(60.0)];
+    let group = laid(&dimension(kind.clone(), 10.0, TextPlace::Centred), &r, &view_at("1:1")).unwrap().group;
+    let texts = runs(&group);
+    assert_eq!(texts.iter().map(|run| run.text.as_str()).collect::<Vec<_>>(), ["10.00", "30.00", "60.00"]);
+    for (run, (x, line_y)) in texts.iter().zip([(10.0, 25.0), (30.0, 32.0), (60.0, 39.0)]) {
+        let start = Vec2::new(x * 0.5 - measured(&run.text) * 0.5, line_y + SIZES.gap);
+        assert!(run.origin.dist(start) < 1e-9, "{}: {:?} for {start:?}", run.text, run.origin);
+    }
+    let (lines, tips) = parts(&group);
+    let mut heights: Vec<f64> = tips.iter().map(|t| t.y).collect();
+    heights.sort_by(f64::total_cmp);
+    assert!(heights.iter().zip([25.0, 25.0, 32.0, 32.0, 39.0, 39.0]).all(|(y, at)| close(*y, at)) && heights.len() == 6, "{tips:?}");
+    let upright = |x: f64| lines.iter().filter(|l| l.len() == 2 && close(l[0].x, x) && close(l[1].x, x)).count();
+    assert_eq!([upright(0.0), upright(10.0), upright(30.0), upright(60.0)], [1, 1, 1, 1], "{lines:?}");
+    let origin_line = lines.iter().find(|l| close(l[0].x, 0.0) && close(l[1].x, 0.0)).unwrap();
+    assert!(origin_line.iter().any(|p| p.y > 39.0), "the longest is kept: {origin_line:?}");
+
+    // Below the points: the lines step down from the lowest, the origin.
+    let below = laid(&dimension(kind.clone(), -10.0, TextPlace::Centred), &r, &view_at("1:1")).unwrap().group;
+    let mut heights: Vec<f64> = parts(&below).1.iter().map(|t| t.y).collect();
+    heights.sort_by(f64::total_cmp);
+    assert!(heights.iter().zip([-24.0, -24.0, -17.0, -17.0, -10.0, -10.0]).all(|(y, at)| close(*y, at)), "{heights:?}");
+
+    // Two targets at one distance: two members, 7 mm apart, in their order.
+    let mut twice = read(&[[0.0, 0.0], [30.0, 15.0], [30.0, 5.0]], "30");
+    twice.text = None;
+    twice.members = vec![member(30.0), member(30.0)];
+    let tips = parts(&laid(&dimension(kind, 10.0, TextPlace::Centred), &twice, &view_at("1:1")).unwrap().group).1;
+    let mut heights: Vec<f64> = tips.iter().map(|t| t.y).collect();
+    heights.sort_by(f64::total_cmp);
+    assert!(heights.iter().zip([25.0, 25.0, 32.0, 32.0]).all(|(y, at)| close(*y, at)) && heights.len() == 4, "{tips:?}");
+}
+
+/// An ordinate set from (0, 0) to holes at x = 30, 10 and 60 (y = 15), seen at 1:1 with an offset of
+/// 10: no arrows, a leader for each of the four places from a gap off its point up to y = 25 (the
+/// outermost point, then the offset), and past each leader's end its number, reading up: 0, 10.00,
+/// 30.00 and 60.00, each centred on its leader. None is moved, so none jogs.
+#[test]
+fn an_ordinate_set_shows_each_number_at_its_leaders_end() {
+    let kind = DimensionKind::Ordinate { origin: corner(), targets: Vec::new(), direction: LinearDirection::Horizontal };
+    let member = |value: f64| Member { measured: Measured { value, foreshortened: false }, text: format!("{value:.2}") };
+    let mut r = read(&[[0.0, 0.0], [30.0, 15.0], [10.0, 15.0], [60.0, 15.0]], "60");
+    r.text = None;
+    r.members = vec![member(30.0), member(10.0), member(60.0)];
+    let group = laid(&dimension(kind.clone(), 10.0, TextPlace::Centred), &r, &view_at("1:1")).unwrap().group;
+    let (lines, tips) = parts(&group);
+    assert!(tips.is_empty(), "no arrows: {tips:?}");
+    let leaders = [(0.0, 0.0), (10.0, 15.0), (30.0, 15.0), (60.0, 15.0)].map(|(x, y)| vec![Vec2::new(x, y + SIZES.gap), Vec2::new(x, 25.0)]);
+    assert_eq!(lines.len(), 4, "{lines:?}");
+    for leader in &leaders {
+        assert!(lines.iter().any(|line| line.len() == 2 && line.iter().zip(leader).all(|(p, q)| p.dist(*q) < 1e-9)), "{leader:?} in {lines:?}");
+    }
+    let texts = runs(&group);
+    assert_eq!(texts.iter().map(|run| run.text.as_str()).collect::<Vec<_>>(), ["0", "10.00", "30.00", "60.00"]);
+    for (run, x) in texts.iter().zip([0.0, 10.0, 30.0, 60.0]) {
+        assert!(close(run.angle, std::f64::consts::FRAC_PI_2), "{}: reads up, {}", run.text, run.angle);
+        // Reading up, its baseline is on its right: a text's height, then the run's start, from the
+        // leader's end a gap on.
+        let start = Vec2::new(x + TEXT_MM * 0.5, 25.0 + SIZES.gap);
+        assert!(run.origin.dist(start) < 1e-9, "{}: {:?} for {start:?}", run.text, run.origin);
+    }
+
+    // Below, its leaders run down from a gap under each point to 10 under the lowest, the origin.
+    let below = laid(&dimension(kind.clone(), -10.0, TextPlace::Centred), &r, &view_at("1:1")).unwrap().group;
+    let ends: Vec<f64> = parts(&below).0.iter().filter_map(|line| line.last().map(|p| p.y)).collect();
+    assert!(ends.len() == 4 && ends.iter().all(|y| close(*y, -10.0)), "{ends:?}");
+}
+
+/// Two targets 1 mm apart, and two at one distance: their numbers are moved apart until none overlap,
+/// and the leader of each moved one jogs, straight up to 2 mm short of the line, then on a slant to
+/// its number. A number that has room stays on its leader.
+#[test]
+fn ordinate_numbers_that_would_overlap_move_apart_and_their_leaders_jog() {
+    let kind = DimensionKind::Ordinate { origin: corner(), targets: Vec::new(), direction: LinearDirection::Horizontal };
+    let member = |value: f64| Member { measured: Measured { value, foreshortened: false }, text: format!("{value:.2}") };
+    let mut r = read(&[[0.0, 0.0], [30.0, 15.0], [31.0, 15.0], [60.0, 15.0], [60.0, 5.0]], "60");
+    r.text = None;
+    r.members = vec![member(30.0), member(31.0), member(60.0), member(60.0)];
+    let group = laid(&dimension(kind, 10.0, TextPlace::Centred), &r, &view_at("1:1")).unwrap().group;
+    // In order along the line: 0, 30, 31, 60 and 60 less their 4.5 mm spacing pool as 23.75 for the
+    // first pair and 44.25 for the second, so the numbers stand at 0, 28.25, 32.75, 57.75 and 62.25,
+    // each reading up from a text's half height to the right of its place.
+    let texts = runs(&group);
+    assert_eq!(texts.iter().map(|run| run.text.as_str()).collect::<Vec<_>>(), ["0", "30.00", "31.00", "60.00", "60.00"]);
+    for (run, x) in texts.iter().zip([0.0, 28.25, 32.75, 57.75, 62.25]) {
+        assert!(close(run.origin.x, x + TEXT_MM * 0.5), "{}: {:?} for {x}", run.text, run.origin);
+    }
+    let (lines, _) = parts(&group);
+    let jogged: Vec<&Vec<Vec2>> = lines.iter().filter(|line| line.len() == 3).collect();
+    assert_eq!(jogged.len(), 4, "the two pairs' leaders: {lines:?}");
+    for line in &jogged {
+        let (start, knee, end) = (line[0], line[1], line[2]);
+        assert!(close(start.x, knee.x) && close(knee.y, 23.0) && close(end.y, 25.0) && !close(end.x, knee.x), "{line:?}");
+    }
+    // The pair 1 mm apart is centred on the middle of their two places, 30.5.
+    let middle = |x0: f64, x1: f64| {
+        let ends: Vec<f64> = jogged.iter().filter(|l| close(l[0].x, x0) || close(l[0].x, x1)).map(|l| l[2].x).collect();
+        (ends.iter().sum::<f64>() / ends.len() as f64, ends.len())
+    };
+    let (centre, two) = middle(30.0, 31.0);
+    assert!(two == 2 && close(centre, 30.5), "{centre} of {two}");
+    assert!(lines.iter().any(|l| l.len() == 2 && close(l[0].x, 0.0)), "the origin's has room: {lines:?}");
 }
 
 /// A chain as long as a chain goes, with tight spans between its points, stays in one group.
@@ -851,6 +970,8 @@ fn hostile_points_and_offsets_never_panic() {
             DimensionKind::Angle { a: edge(), b: edge(), reading: Reading::Projected, other_side: next() % 2 == 0 },
             DimensionKind::Radial { edge: edge(), diameter: next() % 2 == 0 },
             DimensionKind::Chain { points: Vec::new(), direction: LinearDirection::Aligned },
+            DimensionKind::Baseline { origin: corner(), targets: Vec::new(), direction: LinearDirection::Horizontal },
+            DimensionKind::Ordinate { origin: corner(), targets: Vec::new(), direction: LinearDirection::Aligned },
             DimensionKind::Cylinder { face: face() },
             DimensionKind::Sphere { face: face() },
             DimensionKind::Cone { face: face() },
@@ -872,5 +993,19 @@ fn hostile_points_and_offsets_never_panic() {
                 }
             }
         }
+    }
+}
+
+/// A line inside a longer one along it leaves the longer one alone, whichever is drawn first: no
+/// layout sends the shorter one second today, so only this shows that order.
+#[test]
+fn a_line_inside_a_longer_one_is_drawn_once_whichever_comes_first() {
+    let p = |x: f64, y: f64| Vec2::new(x, y);
+    let (long, short) = (vec![p(0.0, 1.0), p(0.0, 20.0)], vec![p(0.0, 1.0), p(0.0, 13.0)]);
+    for order in [[long.clone(), short.clone()], [short, long.clone()]] {
+        let mut drawn = Drawn::default();
+        order.into_iter().for_each(|line| drawn.line(LineRole::Extension, line));
+        assert_eq!(drawn.lines, std::slice::from_ref(&long));
+        assert_eq!(drawn.laid.lines, [(LineRole::Extension, long.clone())], "the layout keeps the longer line too");
     }
 }

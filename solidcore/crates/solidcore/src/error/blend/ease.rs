@@ -67,6 +67,12 @@ pub enum EaseStop {
     EasePastEdgeEnd,
     /// The start of the ease does not drop onto the rail ([`ErrorKind::NotFound`]).
     EaseStartOffRail,
+    /// A weight of the eased surface is not above `SM_EFF_ZERO` ([`ErrorKind::Degenerate`]).
+    EasedWeightNotPositive,
+    /// The two surfaces, raised to common degrees and knots, do not have one net structure
+    /// (their knots matched only to the parameter tolerance), or an interior knot along the
+    /// rails is below full multiplicity ([`ErrorKind::NotWithinTolerance`]).
+    NetsNotOneStructure,
     /// Neither direction of the round's surface runs along its rails
     /// ([`ErrorKind::Unsupported`]).
     NoDirectionAlongRails,
@@ -76,14 +82,21 @@ pub enum EaseStop {
     /// The origin of the plane at the eased setback has other than one closest point on an
     /// offset surface of the round ([`ErrorKind::NotFound`]).
     PlaneOriginNotOneClosest,
+    /// The two surfaces' rails run over different intervals ([`ErrorKind::Unsupported`]).
+    RailIntervalsDiffer,
     /// A rail does not drop onto its face's surface as one UV curve
     /// ([`ErrorKind::Unsupported`]).
     RailNotOneUvCurve,
+    /// A ramp ends outside the surface's rail interval ([`ErrorKind::OutsideDomain`]).
+    RampPastSurface,
+    /// Two ramps disagree over one span: both ease there, or one eases where another is
+    /// already through ([`ErrorKind::Unsupported`]).
+    RampsOverlap,
     /// The round's sections are neither circular nor curvature-continuous: the ease eases
     /// a circular round only ([`ErrorKind::Unsupported`]).
     SectionsNotCircular,
-    /// The face a setback vertex classifies on carries neither of the round's rails
-    /// ([`ErrorKind::NotFound`]).
+    /// The face a setback vertex classifies on carries neither of the round's rails (in the
+    /// ease, or where the setback fill gathers its rounds' ends) ([`ErrorKind::NotFound`]).
     SetbackFaceCarriesNoRail,
     /// A setback vertex lies on other than exactly one fillet geometry: the ease eases one
     /// round per setback vertex ([`ErrorKind::Unsupported`]).
@@ -91,8 +104,12 @@ pub enum EaseStop {
     /// A setback vertex of the eased corner is not yet placed (not processed): the ease
     /// does not place it ([`ErrorKind::Unsupported`]).
     SetbackVertexNotPlaced,
-    /// The setback vertex does not drop onto the round's rail ([`ErrorKind::NotFound`]).
+    /// The setback vertex does not drop onto the round's rail (in the ease, or where the
+    /// setback fill places it) ([`ErrorKind::NotFound`]).
     SetbackVertexOffRail,
+    /// The target surface, turned across to run the way the other does, still runs the
+    /// other way at its start ([`ErrorKind::NotWithinTolerance`]).
+    TurnedSurfaceNotTurned,
     /// A rail's UV curve does not run over the rail's own interval
     /// ([`ErrorKind::Unsupported`]).
     UvCurveOffRailInterval,
@@ -110,15 +127,21 @@ impl EaseStop {
             Self::EaseHasNoLength => ErrorKind::Degenerate,
             Self::EasePastEdgeEnd => ErrorKind::OutsideDomain,
             Self::EaseStartOffRail => ErrorKind::NotFound,
+            Self::EasedWeightNotPositive => ErrorKind::Degenerate,
+            Self::NetsNotOneStructure => ErrorKind::NotWithinTolerance,
             Self::NoDirectionAlongRails => ErrorKind::Unsupported,
             Self::NoSectionInPlane => ErrorKind::NotFound,
             Self::PlaneOriginNotOneClosest => ErrorKind::NotFound,
+            Self::RailIntervalsDiffer => ErrorKind::Unsupported,
             Self::RailNotOneUvCurve => ErrorKind::Unsupported,
+            Self::RampPastSurface => ErrorKind::OutsideDomain,
+            Self::RampsOverlap => ErrorKind::Unsupported,
             Self::SectionsNotCircular => ErrorKind::Unsupported,
             Self::SetbackFaceCarriesNoRail => ErrorKind::NotFound,
             Self::SetbackNotOnOneRound => ErrorKind::Unsupported,
             Self::SetbackVertexNotPlaced => ErrorKind::Unsupported,
             Self::SetbackVertexOffRail => ErrorKind::NotFound,
+            Self::TurnedSurfaceNotTurned => ErrorKind::NotWithinTolerance,
             Self::UvCurveOffRailInterval => ErrorKind::Unsupported,
         }
     }
@@ -132,6 +155,10 @@ impl EaseStop {
                 "the setback plus the ease runs past the end of the filleted edge"
             }
             Self::EaseStartOffRail => "the ease's start does not drop onto the rail",
+            Self::EasedWeightNotPositive => "a weight of the eased surface is not positive",
+            Self::NetsNotOneStructure => {
+                "the eased surfaces, raised to common degrees and knots, do not share one net"
+            }
             Self::NoDirectionAlongRails => {
                 "neither direction of the round's surface runs along its rails"
             }
@@ -142,9 +169,12 @@ impl EaseStop {
                 "the plane's origin at the eased setback has no single closest point on an \
                  offset surface"
             }
+            Self::RailIntervalsDiffer => "the eased surfaces' rails run over different intervals",
             Self::RailNotOneUvCurve => {
                 "a rail does not drop onto its face's surface as one UV curve"
             }
+            Self::RampPastSurface => "an ease ramp ends outside the surface's rail interval",
+            Self::RampsOverlap => "two ease ramps disagree over one span",
             Self::SectionsNotCircular => {
                 "an eased round's sections are neither circular nor curvature-continuous"
             }
@@ -156,6 +186,9 @@ impl EaseStop {
             }
             Self::SetbackVertexNotPlaced => "a setback vertex of an eased corner is not placed",
             Self::SetbackVertexOffRail => "a setback vertex does not drop onto the round's rail",
+            Self::TurnedSurfaceNotTurned => {
+                "the eased target, turned across, still runs the other way"
+            }
             Self::UvCurveOffRailInterval => {
                 "a rail's UV curve does not run over the rail's own interval"
             }

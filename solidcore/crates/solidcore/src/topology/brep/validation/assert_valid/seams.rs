@@ -21,7 +21,7 @@
 //! | `assert_test_vertex1`        | `sm_AssertTestVertex1`                    |
 //!
 //! Deviations: one function per upstream callee, so each package replaces exactly one
-//! body. Until a callee is ported its seam returns [`SolidError::Unported`]; a
+//! body. Until a callee is ported its seam returns [`crate::SolidError::Unported`]; a
 //! difftest case reaching it is deferred, never passed. Upstream evaluates the level-2
 //! seams (Face 32/33/38, Edge 13) only at `SM_LEVEL_2`; `sm_AssertTestVertex1` runs at
 //! every level (only its report is level 2).
@@ -30,7 +30,7 @@
 //! replace a body with the call into the ported function.
 
 use crate::curve::curve::Curve;
-use crate::error::{Result, SolidError};
+use crate::error::Result;
 use crate::geom::assert_array::{AssertArray, ObjectKey};
 use crate::geom::extent2d::Extent2d;
 use crate::kernel::Kernel;
@@ -114,10 +114,15 @@ pub(super) fn surface_assert_valid(
         .surface
         .as_ref()
         .ok_or_else(|| {
-            SolidError::topology_missing(
+            crate::error::Failure::new(
                 "topology::brep::validation::assert_valid",
-                "the face's surface",
+                crate::error::topology::TopologyFailure::Defect {
+                    why: "the face has no surface, though the assert calls this only for a face \
+                          with one",
+                },
             )
+            .with_status(crate::error::SM_ERR_NULL_POINTER)
+            .into_error()
         })?
         .clone_for_evaluation()?;
     let mut services = BrepFaceServices::new(&mut *b);
