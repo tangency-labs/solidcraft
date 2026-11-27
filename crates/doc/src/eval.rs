@@ -7091,7 +7091,10 @@ impl CaptureStepper {
                         }
                         match &o.snap {
                             crate::joints::Snap::Frame { .. } | crate::joints::Snap::Point { .. } => {}
-                            crate::joints::Snap::FaceCenter { .. } | crate::joints::Snap::CircleCenter { .. } | crate::joints::Snap::Edge { .. } => {
+                            crate::joints::Snap::FaceCenter { .. }
+                            | crate::joints::Snap::CircleCenter { .. }
+                            | crate::joints::Snap::Edge { .. }
+                            | crate::joints::Snap::BetweenFaces { .. } => {
                                 note_comp(&mut joint_components, &mut any_component_dirty);
                             }
                             crate::joints::Snap::SketchPoint { sketch, x, .. } => {
