@@ -64,7 +64,11 @@ as unavailable. Each new graphic saves `symbol_standard`, so changing the
 preference does not reinterpret existing graphics. The panel uses the same
 convention: ISO A puts the identification line above for arrow side and below
 for other side. All conventions keep the arrow leader. The symbol and shared
-Cancel / New weld bead / OK bar remain pinned below the scrolling form.
+action bar remain pinned below the scrolling form. **New weld bead** is a framed
+icon-and-label button at the left, using the existing weld bead icon; **Cancel**
+and **OK** form the normal pair on the right. At narrow widths the left label
+truncates without overlapping the pair. The button retains the `dialog:apply`
+automation target and its tooltip; saving a bead keeps the tool open.
 
 Butt `groove` is `square`, `v` (default), `bevel`, `u`, `j`, `y`, `hy`, `x`
 or `k`. Only square and V have supported symbols; other grooves save a null

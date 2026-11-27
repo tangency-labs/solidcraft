@@ -672,14 +672,17 @@ pub(super) fn show_contents_measured(
         event = WeldPanelEvent::DefineSymbol;
     }
     // One pinned section: the symbol row and the shared bar share the fill, with no rule between.
-    // New weld bead is the shared Apply slot (OK / Apply / Cancel), so it too stays at the bottom.
-    let footer = kit::footer(
-        ui,
-        tr("OK"),
-        tr("ui.weld.cancel"),
-        true,
-        kit::Footer { apply: Some(tr("ui.weld.new_bead")), no_rule: true, ..Default::default() },
-    );
+    // New weld bead occupies the left slot; the normal Cancel / OK pair stays on the right.
+    let footer = kit::footer_with_left(ui, tr("OK"), tr("ui.weld.cancel"), true, kit::Footer { no_rule: true, ..Default::default() }, |ui| {
+        let response =
+            kit::icon_label_button(ui, tr("ui.weld.new_bead"), "weld_new_bead", true, false).backing_on_hover_text(tr("ui.weld.new_bead_tip"));
+        solidcraft_ui_registry::publish_target("dialog:apply", response.rect);
+        solidcraft_ui_registry::publish_handle(&format!("dialog:{}", tr("ui.weld.new_bead")), response.rect.center());
+        solidcraft_ui_registry::publish_count("dialog:apply:enabled", f64::from(response.enabled()));
+        if response.clicked() {
+            event = WeldPanelEvent::NewBead;
+        }
+    });
     measured.apply = solidcraft_ui_registry::rect_of("dialog:apply");
     measured.footer = solidcraft_ui_registry::rect_of("dialog:footer");
     measured.cancel = solidcraft_ui_registry::rect_of("dialog:cancel");
@@ -688,8 +691,6 @@ pub(super) fn show_contents_measured(
         event = WeldPanelEvent::Cancel;
     } else if footer == kit::Action::Ok {
         event = WeldPanelEvent::Done;
-    } else if footer == kit::Action::Apply {
-        event = WeldPanelEvent::NewBead;
     }
     (event, measured)
 }

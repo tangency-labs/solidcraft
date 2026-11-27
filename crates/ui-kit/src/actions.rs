@@ -336,7 +336,9 @@ pub(super) fn stacked_footer_height(ui: &Ui, ok: &str, cancel: &str, apply: Opti
     Some(t.form_footer_height - t.form_button_height + buttons + gaps)
 }
 
-pub(super) fn footer_with_left(
+/// Pinned actions with custom content at the left. The left slot is clipped to the space
+/// remaining beside the normal actions; icon-label buttons truncate to that width.
+pub fn footer_with_left(
     ui: &mut Ui,
     ok_label: &str,
     cancel_label: &str,
@@ -436,6 +438,8 @@ pub(super) fn draw_footer(
                 action = Action::Apply;
             }
         }
+        ui.set_clip_rect(ui.clip_rect().intersect(left_rect));
+        ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
         left(ui);
     });
     if let Some(status) = status {
@@ -878,6 +882,7 @@ pub fn compact_button(ui: &mut Ui, glyph: &str, tooltip: &str, enabled: bool, se
 }
 
 /// Secondary action with an existing icon, optionally using the danger ink. Keeps button handles.
+/// In a truncating layout (such as a footer's left slot), fits the available width.
 pub fn icon_label_button(ui: &mut Ui, label: &str, icon: &str, enabled: bool, danger: bool) -> Response {
     icon_label_presentation(ui, solidcraft_ui_text::tr_label(label), Some(icon), enabled, false, danger, false)
 }
@@ -951,6 +956,7 @@ pub fn selection_actions(ui: &mut Ui, name: &str, actions: &[super::StageAction<
 fn icon_label_presentation(ui: &mut Ui, label: &str, icon: Option<&str>, enabled: bool, primary: bool, danger: bool, dense: bool) -> Response {
     let t = Tokens::get();
     let width = icon_label_width(ui, label, icon, primary);
+    let width = if ui.style().wrap_mode == Some(egui::TextWrapMode::Truncate) { width.min(dimension(ui.available_width())) } else { width };
     let paint = |ui: &mut Ui| {
         let (rect, response) =
             ui.allocate_exact_size(vec2(width, if dense { t.control_height - t.space_2 } else { t.control_height }), egui::Sense::click());
@@ -961,7 +967,8 @@ fn icon_label_presentation(ui: &mut Ui, label: &str, icon: Option<&str>, enabled
         } else {
             t.form_ink
         };
-        ui.painter().rect(
+        let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
+        painter.rect(
             rect,
             t.control_radius,
             if primary {
@@ -984,7 +991,7 @@ fn icon_label_presentation(ui: &mut Ui, label: &str, icon: Option<&str>, enabled
             };
         if let Some(icon) = icon {
             crate::icons::paint_ink(
-                ui.painter(),
+                &painter,
                 egui::Rect::from_center_size(egui::pos2(left + t.space_14 / 2.0, rect.center().y), vec2(t.space_14, t.space_14)),
                 icon,
                 ink,

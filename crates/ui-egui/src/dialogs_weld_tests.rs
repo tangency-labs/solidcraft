@@ -38,6 +38,27 @@ fn weld_new_bead_preserves_settings_and_cancel_does_not_run() {
 }
 
 #[test]
+fn weld_dialog_left_new_bead_target_saves_and_keeps_the_tool_open() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.start("weld.create");
+    h.frames(3);
+    let apply = crate::scenario::rect_of("dialog:apply").expect("left New weld bead target");
+    let cancel = crate::scenario::rect_of("dialog:cancel").unwrap();
+    assert!(apply.right() <= cancel.left());
+    h.step(&json!({"click":[apply.center().x, apply.center().y]})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.session.doc.welds.len(), 1);
+    let dialog = h.app.dialog.as_ref().expect("New weld bead keeps the tool open");
+    let Kind::Weld(state) = &dialog.kind else { panic!("Weld dialog remains active") };
+    assert_eq!(state.panel.number, "W2");
+    let cancel = crate::scenario::rect_of("dialog:cancel").unwrap();
+    h.step(&json!({"click":[cancel.center().x, cancel.center().y]})).unwrap();
+    h.frames(2);
+    assert!(h.app.dialog.is_none());
+    assert_eq!(h.app.session.doc.welds.len(), 1);
+}
+
+#[test]
 fn weld_done_errors_stay_in_the_dialog_and_programmatic_calls_do_not_open_it() {
     let mut app = app();
     let mut d = Dialog::for_command(&app, "weld.create").unwrap();
@@ -80,6 +101,7 @@ fn weld_dialog_host_fills_available_tool_height_with_pinned_actions() {
     let define = crate::scenario::rect_of("weld:define_symbol").expect("Define symbol");
     let ok = crate::scenario::rect_of("dialog:ok").expect("OK");
     let cancel = crate::scenario::rect_of("dialog:cancel").expect("Cancel");
+    let apply = crate::scenario::rect_of("dialog:apply").expect("New weld bead");
     let t = Tokens::get();
     let vp = crate::agent_chat::tool_space(&h.app, crate::shell::content_rect(&h.app, h.app.viewport.rect.unwrap()));
     let drag_bounds = crate::shell::tool_drag_rect(&h.app, vp);
@@ -89,7 +111,7 @@ fn weld_dialog_host_fills_available_tool_height_with_pinned_actions() {
     assert!((footer.bottom() - card.bottom()).abs() <= 1.0);
     assert!(header.bottom() <= body.top());
     assert!(body.bottom() <= footer.top() + 0.5);
-    for button in [cancel, ok] {
+    for button in [apply, cancel, ok] {
         assert!(footer.contains_rect(button));
     }
     assert!(define.bottom() <= footer.top() + 0.5, "the symbol row is above the Cancel / OK bar");
@@ -97,6 +119,7 @@ fn weld_dialog_host_fills_available_tool_height_with_pinned_actions() {
         assert!((button.height() - t.form_button_height).abs() <= 0.5);
     }
     assert!(!define.intersects(cancel));
+    assert!(apply.right() <= cancel.left(), "New weld bead is at the left of the normal Cancel / OK pair");
     assert!(!cancel.intersects(ok));
     println!(
         "live dialog headless host: card {card:?}; header {header:?}; body {body:?}; footer {footer:?}; Define {define:?}; Cancel {cancel:?}; OK {ok:?}"

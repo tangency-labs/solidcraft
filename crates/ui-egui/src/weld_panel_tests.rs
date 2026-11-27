@@ -194,7 +194,10 @@ fn weld_panel_new_bead_and_advanced_keep_the_local_edits() {
     let mut state = WeldPanelState::specimen(WeldType::Fillet, false);
     state.size.a = "plate_thickness / 2".into();
     let (_, m) = render(&ctx, &mut state, false, vec![]);
-    assert_eq!(click(&ctx, &mut state, m.apply.expect("New weld bead is the footer Apply button").center()), WeldPanelEvent::NewBead);
+    assert_eq!(
+        click(&ctx, &mut state, m.apply.expect("New weld bead keeps the dialog:apply target in the left slot").center()),
+        WeldPanelEvent::NewBead
+    );
     click(&ctx, &mut state, section(&m, "advanced").center());
     assert!(state.advanced_open);
     let (_, advanced) = render(&ctx, &mut state, false, vec![]);
@@ -414,6 +417,34 @@ fn symbol_frame(state: &WeldPanelState, dark: bool) -> (bool, Rect, Vec<egui::Sh
 }
 
 #[test]
+fn weld_panel_left_new_bead_button_fits_narrow_cards_in_both_themes() {
+    assert!(!solidcraft_look::icons::SET.resolve("weld_new_bead").placeholder);
+    for dark in [false, true] {
+        for width in [344.0, 240.0, 180.0] {
+            let ctx = context();
+            solidcraft_theme::set_dark(dark);
+            solidcraft_theme::apply(&ctx);
+            let mut state = WeldPanelState::default();
+            let mut measured = None;
+            let mut output = ctx.run_ui(RawInput::default(), |ui| {
+                ui.set_width(width);
+                measured = Some(sections::show_contents_measured(ui, &mut state, &Tokens::get(), 700.0, |_| {}).1);
+            });
+            output.textures_delta.clear();
+            let m = measured.unwrap();
+            let footer = m.footer.unwrap();
+            let apply = m.apply.unwrap();
+            let cancel = m.cancel.unwrap();
+            let ok = m.ok.unwrap();
+            assert!(footer.contains_rect(apply) && footer.contains_rect(cancel) && footer.contains_rect(ok), "dark={dark}, width={width}");
+            close(apply.left(), footer.left() + Tokens::get().space_12, 0.5);
+            assert!(apply.right() <= cancel.left() && cancel.right() <= ok.left(), "dark={dark}, width={width}");
+            assert_eq!(solidcraft_ui_registry::count_of("dialog:apply:enabled"), Some(1.0));
+        }
+    }
+}
+
+#[test]
 fn weld_panel_700_point_card_pins_chrome_while_only_body_scrolls() {
     for dark in [false, true] {
         let ctx = context();
@@ -466,7 +497,7 @@ fn weld_panel_700_point_card_pins_chrome_while_only_body_scrolls() {
         assert_eq!(after.define, after.preview);
         let apply = after.apply.expect("New weld bead button");
         assert!(footer.contains_rect(apply), "New weld bead stays in the pinned bottom bar");
-        assert!(after.cancel.expect("Cancel").right() <= apply.left() && apply.right() <= after.ok.expect("OK").left());
+        assert!(apply.right() <= after.cancel.expect("Cancel").left());
         let buttons = [after.cancel.expect("Cancel"), after.ok.expect("OK")];
         for button in buttons {
             assert!(footer.contains_rect(button));
@@ -766,6 +797,7 @@ fn weld_standards_use_the_decided_identification_position_and_keep_the_arrow() {
 
 #[test]
 fn weld_equal_leg_hint_uses_the_parsed_number_and_hides_for_expressions() {
+    crate::i18n::install();
     let mut state = WeldPanelState::default();
     state.size.a = "5".into();
     assert_eq!(sections::size::leg_hint(&state).unwrap(), "z = 7.071 mm (equal legs)");
