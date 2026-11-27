@@ -2560,8 +2560,10 @@ fn ray_fire_selects_nearest_hit_over_farther_face_with_smaller_u_param() {
     };
 
     for rot180 in [false, true] {
-        let mut k = Kernel::default();
-        k.fixes = solidcraft_fixes::solidcraft_fixes();
+        let mut k = Kernel {
+            fixes: solidcraft_fixes::solidcraft_fixes(),
+            ..Kernel::default()
+        };
         let mut housing = make_housing(&mut k, true, rot180);
         let query = BrepQuery::of_brep(&housing);
         let (dx, dy) = if rot180 { (-cx, -cy) } else { (cx, cy) };
