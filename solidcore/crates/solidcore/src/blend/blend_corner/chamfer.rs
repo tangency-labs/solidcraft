@@ -459,6 +459,20 @@ fn mitre_rows(planes: &[ChamferPlane]) -> Option<[Vec3; 3]> {
     Some([planes.first()?.n, planes.get(1)?.n, planes.get(2)?.n])
 }
 
+/// The index before `i` in a ring of `n`: `n - 1` before 0 (0 in an empty ring).
+fn before(i: usize, n: usize) -> usize {
+    i.checked_sub(1).unwrap_or_else(|| n.saturating_sub(1))
+}
+
+/// The index after `i` in a ring of `n`: 0 after the last.
+fn after(i: usize, n: usize) -> usize {
+    if i.saturating_add(1) < n {
+        i.saturating_add(1)
+    } else {
+        0
+    }
+}
+
 /// The unit part of `v` square to the unit `t`, `None` where it has none.
 fn square_to(v: Vec3, t: Vec3) -> Option<Vec3> {
     (v - t * v.dot(t)).unitize().ok()
@@ -493,12 +507,11 @@ fn chamfer_planes_at(
     let n = t.len();
     let mut out = Vec::new();
     for (i, width) in widths.iter().enumerate() {
-        let (Some(&ti), Some(&tp), Some(&tn)) =
-            (t.get(i), t.get((i + n - 1) % n), t.get((i + 1) % n))
+        let (Some(&ti), Some(&tp), Some(&tn)) = (t.get(i), t.get(before(i, n)), t.get(after(i, n)))
         else {
             return Err("the ring is incomplete");
         };
-        let (Some(&ra), Some(&rb)) = (reflex.get(i), reflex.get((i + 1) % n)) else {
+        let (Some(&ra), Some(&rb)) = (reflex.get(i), reflex.get(after(i, n))) else {
             return Err("the ring is incomplete");
         };
         // into each face, away from the edge: towards the face's other edge, or away from it
@@ -719,11 +732,11 @@ fn mixed_forms(
         return None;
     }
     let odd = (0..n).find(|&i| {
-        concave.get((i + 1) % n) == concave.get((i + 2) % n)
-            && concave.get(i) != concave.get((i + 1) % n)
+        concave.get(after(i, n)) == concave.get(before(i, n))
+            && concave.get(i) != concave.get(after(i, n))
     })?;
     // the face between the pair: between chamfers odd + 1 and odd + 2
-    let pair_face = (odd + 2) % n;
+    let pair_face = before(odd, n);
     if !reflex.get(pair_face).copied()? || reflex.iter().filter(|&&r| r).count() != 1 {
         return None;
     }
@@ -736,12 +749,12 @@ fn mixed_forms(
     let [odd_a, odd_b] = rails(odd)?;
     // chamfer p = pair_face - 1 has its rail b on the pair's face (its other rail is a), and
     // chamfer q = pair_face has its rail a there (its other rail is b)
-    let [p_a, _] = rails((pair_face + n - 1) % n)?;
+    let [p_a, _] = rails(before(pair_face, n))?;
     let [_, q_b] = rails(pair_face)?;
     Some(MitreForms {
         sides: vec![
             form(odd, odd_b)?,
-            form((odd + 1) % n, odd_a)?,
+            form(after(odd, n), odd_a)?,
             form(pair_face, p_a)?,
             form(pair_face, q_b)?,
         ],
@@ -1092,7 +1105,7 @@ pub fn classify_chamfer(
     let mut reflex = vec![false; n];
     if mixed {
         for (i, slot) in reflex.iter_mut().enumerate() {
-            let (Some(&prev), Some(&this)) = (all_eus.get((i + n - 1) % n), all_eus.get(i)) else {
+            let (Some(&prev), Some(&this)) = (all_eus.get(before(i, n)), all_eus.get(i)) else {
                 return Ok(ChamferClass::Declined("the ring is incomplete"));
             };
             *slot = check_face_complimentary_corner_concavity(k, b, vertex, prev, this, None)?;

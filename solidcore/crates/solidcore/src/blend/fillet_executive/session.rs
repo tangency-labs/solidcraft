@@ -3210,7 +3210,10 @@ impl<'target> FilletSession<'target> {
     /// meet each other) or the Facet (one plane through the rails' crossings), refused
     /// where the asked type does not exist. Unset, the corner is the Mitre where it exists,
     /// at four or more chamfers the patch or (crossings in one plane) the Facet, and
-    /// otherwise the pinned corner, never a refusal of the type (`classify_chamfer`). It
+    /// otherwise the pinned corner, never a refusal of the type (`classify_chamfer`). Three
+    /// chamfers of both convexities are the exception: the pinned corner builds nothing
+    /// there, so where their mitre point is outside the corner they are refused with the fit
+    /// whether a type was set or not. It
     /// overrides the corner's bevel flag ([`Self::set_corner_bevel`]) at
     /// such a corner. Set it before [`Self::do_fillet`] (the corners are made there).
     pub fn set_chamfer_corner(&mut self, corner: crate::blend::blend_corner::BlendChamferCorner) {
