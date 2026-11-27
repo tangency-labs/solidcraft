@@ -396,6 +396,442 @@ fn post_foot_blends_stop_at_a_through_cut_corner() {
 }
 
 #[test]
+fn post_foot_blends_end_separately_with_auto_turns() {
+    all_fixes();
+    let size = 2.0_f64;
+    for (kind, area) in [(Blend::Chamfer, 0.5), (Blend::Round, 1.0 - PI / 4.0)] {
+        let body = post_foot(true);
+        let made = blend_with(
+            &body,
+            kind,
+            &post_foot_edges(&body),
+            &[size],
+            &[],
+            Corners::Filled,
+            BlendOptions {
+                turn: Turn::Auto,
+                ..BlendOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(made.dropped, [false; 2]);
+        assert!(made.holes.is_empty());
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+        assert_eq!(body.solid_count().unwrap(), 1);
+        let expected = 12_900.0 + 20.0 * area * size.powi(2);
+        assert!(rel(volume(&body), expected) < 1e-9, "{kind:?}");
+    }
+}
+
+#[test]
+fn post_foot_blends_at_a_triangular_opening() {
+    use solidcore_ops::{boolean::boolean, BooleanOp, PointClass};
+
+    all_fixes();
+    let [a, b, c] = [[10.0, 10.0, -1.0], [15.0, 10.0, -1.0], [10.0, 15.0, -1.0]];
+    let profile = [(a, b), (b, c), (c, a)].map(|(start, end)| Curve::Line { start, end });
+    let original = boolean(
+        post_foot(false),
+        extrude(
+            &profile,
+            [0.0, 0.0, 1.0],
+            6.0,
+            0.0,
+            DraftCorner::default(),
+            true,
+        )
+        .unwrap(),
+        BooleanOp::Subtract,
+    )
+    .unwrap()
+    .unwrap();
+    let record = original.to_record().unwrap().0;
+    let base = 50.0 * 50.0 * 4.0 + 10.0 * 10.0 * 30.0 - 5.0 * 5.0 * 4.0 / 2.0;
+    let to_blend = 4.2_f64;
+    for (kind, area) in [
+        (Blend::Chamfer, to_blend.powi(2) / 2.0),
+        (Blend::Round, to_blend.powi(2) * (1.0 - PI / 4.0)),
+    ] {
+        let (body, _) = Body::from_record(&record, true).unwrap();
+        let edges = post_foot_edges(&body);
+        let result = blend(&body, kind, &edges, &[to_blend], &[], Corners::Filled).unwrap();
+        assert_eq!(result.dropped, [false, false]);
+        assert_eq!(body.solid_count().unwrap(), 1);
+        assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+        assert!(rel(volume(&body), base + 20.0 * area) < 1e-9, "{kind:?}");
+        assert_eq!(
+            body.classify_point([11.0, 11.0, 2.0]).unwrap(),
+            PointClass::Outside
+        );
+    }
+}
+
+#[test]
+fn post_foot_blends_keep_their_clearance_after_rotation() {
+    use solidcore_ops::affine::{apply_point, rotation};
+    use solidcore_ops::{boolean::boolean, BooleanOp};
+
+    all_fixes();
+    let map = rotation([0.0; 3], [0.0, 0.0, 1.0], PI / 6.0).unwrap();
+    let query = [[10.0, 5.0, 4.0], [5.0, 10.0, 4.0]].map(|p| apply_point(&map, p));
+    for (kind, section) in [(Blend::Chamfer, 0.5), (Blend::Round, 1.0 - PI / 4.0)] {
+        for width in [2.0_f64, 4.2] {
+            let clear = post_foot(true);
+            clear.transform(&map).unwrap();
+            let record = clear.to_record().unwrap().0;
+            let (clear, _) = Body::from_record(&record, true).unwrap();
+            let edges = query.map(|p| edge_at(&clear, p));
+            let result = blend(&clear, kind, &edges, &[width], &[], Corners::Filled).unwrap();
+            assert_eq!(result.dropped, [false, false]);
+            assert_eq!(clear.to_record().unwrap().0.shells.len(), 1);
+            assert!(clear.check(CheckLevel::All).unwrap().is_valid());
+            assert!(
+                rel(volume(&clear), 12_900.0 + 20.0 * section * width.powi(2)) < 1e-9,
+                "{kind:?}"
+            );
+        }
+
+        let boss = make_box([10.5, 4.0, 4.0], [1.0, 2.0, 2.0]).unwrap();
+        let blocked = boolean(post_foot(true), boss, BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        blocked.transform(&map).unwrap();
+        let record = blocked.to_record().unwrap().0;
+        let edges = query.map(|p| edge_at(&blocked, p));
+        let refused = blend(&blocked, kind, &edges, &[4.2], &[], Corners::Filled);
+        assert_eq!(blocked.to_record().unwrap().0, record);
+        let evidence = solidcore::error::blend::BlendFailure::CornerRefused;
+        assert!(
+            matches!(&refused, Err(Error::BlendFailed { class, status, phrase })
+            if *class == evidence.class() && *status == solidcore::error::SM_ERR && phrase == &evidence.to_string()),
+            "{kind:?}: {refused:?}"
+        );
+    }
+}
+
+#[test]
+fn post_foot_blends_refuse_a_floor_trim_shifted_into_the_sweep() {
+    use solidcore_ops::affine::{apply_point, rotation};
+    use solidcore_record::brep::{Curve2, Loop, OrientedEdge, Surface};
+
+    fn floor_loop(record: &mut Record) -> (&mut [OrientedEdge], usize) {
+        record
+            .faces
+            .iter_mut()
+            .filter(|face| {
+                matches!(&face.surface, Surface::Plane { origin, u_axis, v_axis }
+                if origin[2] == 4.0 && u_axis[2] == 0.0 && v_axis[2] == 0.0)
+            })
+            .flat_map(|face| &mut face.loops)
+            .find_map(|ring| {
+                let Loop::Edges { edges } = ring else {
+                    return None;
+                };
+                let index = edges.iter().position(|occurrence| {
+                    matches!(&occurrence.pcurve, Curve2::Spline { points, .. }
+                        if matches!(points.as_slice(), [a, z] if a[0] == 0.0 && z[0] == 10.0))
+                })?;
+                Some((edges.as_mut_slice(), index))
+            })
+            .expect("the floor loop at the foot of the post")
+    }
+
+    fn uv(occurrence: &mut OrientedEdge) -> &mut [[f64; 2]] {
+        let Curve2::Spline { points, .. } = &mut occurrence.pcurve else {
+            panic!("the floor trim is a spline");
+        };
+        points.as_mut_slice()
+    }
+
+    all_fixes();
+    let map = rotation([0.0; 3], [0.0, 0.0, 1.0], PI / 6.0).unwrap();
+    let picks = [[10.0, 5.0, 4.0], [5.0, 10.0, 4.0]].map(|point| apply_point(&map, point));
+    let original = post_foot(true);
+    original.transform(&map).unwrap();
+    let record = original.to_record().unwrap().0;
+    for (count, join_neighbors, target_last) in [
+        (1, false, false),
+        (2, false, false),
+        (2, true, false),
+        (2, true, true),
+    ] {
+        let mut shifted = record.clone();
+        let rotated_by = if join_neighbors {
+            let (loop_edges, index) = floor_loop(&mut shifted);
+            let start = (index + usize::from(target_last)) % loop_edges.len();
+            loop_edges.rotate_left(start);
+            start
+        } else {
+            0
+        };
+        let (loop_edges, index) = floor_loop(&mut shifted);
+        let moved = if join_neighbors {
+            10.0 + 1e-8
+        } else {
+            10.0_f64.next_up()
+        };
+        let trim = uv(&mut loop_edges[index]);
+        assert_eq!(trim, [[0.0, 10.0], [10.0, 10.0]]);
+        for point in trim.iter_mut().take(count) {
+            point[1] = moved;
+        }
+        let expected = trim.to_vec();
+        if join_neighbors {
+            assert!(loop_edges[index].forward);
+            let count = loop_edges.len();
+            let previous = index.checked_sub(1).unwrap_or(count - 1);
+            let next = (index + 1) % count;
+            let neighbors = [(previous, true, 0.0), (next, false, 10.0)];
+            for (neighbor, before, u) in neighbors {
+                let occurrence = &mut loop_edges[neighbor];
+                let slot = usize::from(occurrence.forward == before);
+                let endpoint = &mut uv(occurrence)[slot];
+                assert_eq!(endpoint[0], u);
+                assert!((endpoint[1] - 10.0).abs() < 1e-13);
+                endpoint[1] = moved;
+            }
+            // Records are stored in canonical order. Only the test's edit
+            // accesses the circular neighbors from an arbitrary start.
+            loop_edges.rotate_right(rotated_by);
+        }
+        assert_eq!(shifted.edges, record.edges);
+        for kind in [Blend::Chamfer, Blend::Round] {
+            let (body, _) = Body::from_record(&shifted, true).unwrap();
+            let mut before = body.to_record().unwrap().0;
+            let (loop_edges, index) = floor_loop(&mut before);
+            assert_eq!(uv(&mut loop_edges[index]), expected);
+            let edges = picks.map(|point| edge_at(&body, point));
+            let result = blend(&body, kind, &edges, &[4.2], &[], Corners::Filled);
+            assert!(
+                matches!(result, Err(Error::CornerUnsupported { .. })),
+                "{kind:?}, shifted endpoints={count}, joined={join_neighbors}: {result:?}"
+            );
+            assert_eq!(body.to_record().unwrap().0, before);
+        }
+    }
+}
+
+#[test]
+fn post_foot_blends_report_a_usable_limit_after_rotation() {
+    use solidcore_ops::affine::{apply_point, rotation};
+
+    all_fixes();
+    let map = rotation([0.0; 3], [0.0, 0.0, 1.0], PI / 6.0).unwrap();
+    let query = [[10.0, 5.0, 4.0], [5.0, 10.0, 4.0]].map(|p| apply_point(&map, p));
+    for (kind, fit_kind, section) in [
+        (Blend::Chamfer, FitKind::Distance, 0.5),
+        (Blend::Round, FitKind::Radius, 1.0 - PI / 4.0),
+    ] {
+        let original = post_foot(true);
+        original.transform(&map).unwrap();
+        let (body, _) = Body::from_record(&original.to_record().unwrap().0, true).unwrap();
+        let edges = query.map(|p| edge_at(&body, p));
+        let before = body.to_record().unwrap().0;
+        let refused = blend(&body, kind, &edges, &[6.0], &[], Corners::Filled);
+        let Err(Error::TooLarge {
+            size,
+            kind: reported,
+            ..
+        }) = refused
+        else {
+            panic!("{kind:?}: {refused:?}");
+        };
+        assert_eq!(reported, fit_kind);
+        // Rotation preserves the 5 mm support length. The placed certificate
+        // can reduce the suggestion by its rounding and tolerance margin.
+        assert!(size > 4.2 && size <= 5.0, "{kind:?}: {size}");
+        assert_eq!(body.to_record().unwrap().0, before);
+        let made = blend(&body, kind, &edges, &[size], &[], Corners::Filled).unwrap();
+        assert_eq!(made.dropped, [false; 2]);
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+        assert!(rel(volume(&body), 12_900.0 + 20.0 * section * size.powi(2)) < 1e-9);
+    }
+}
+
+#[test]
+fn post_foot_blends_clear_a_distant_cylindrical_bore_after_rotation() {
+    use solidcore_ops::affine::{apply_point, rotation};
+    use solidcore_ops::{boolean::boolean, BooleanOp, PointClass};
+
+    all_fixes();
+    let map = rotation([0.0; 3], [0.0, 0.0, 1.0], PI / 6.0).unwrap();
+    let query = [[10.0, 5.0, 4.0], [5.0, 10.0, 4.0]].map(|p| apply_point(&map, p));
+    let radius = 1.5_f64;
+    let width = 4.2_f64;
+    for with_bore in [false, true] {
+        let original = post_foot(true);
+        let original = if with_bore {
+            // Its two circular rims belong to the same plate faces as the cutout.
+            let drill = make_cylinder([34.0, 30.0, -1.0], radius, 6.0).unwrap();
+            boolean(original, drill, BooleanOp::Subtract)
+                .unwrap()
+                .unwrap()
+        } else {
+            original
+        };
+        original.transform(&map).unwrap();
+        let record = original.to_record().unwrap().0;
+        let bore_volume = if with_bore {
+            4.0 * PI * radius.powi(2)
+        } else {
+            0.0
+        };
+        for (kind, section) in [(Blend::Chamfer, 0.5), (Blend::Round, 1.0 - PI / 4.0)] {
+            let (body, _) = Body::from_record(&record, true).unwrap();
+            let edges = query.map(|p| edge_at(&body, p));
+            let result = blend(&body, kind, &edges, &[width], &[], Corners::Filled).unwrap();
+            assert_eq!(result.dropped, [false, false], "{kind:?}, bore={with_bore}");
+            assert_eq!(body.solid_count().unwrap(), 1);
+            assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
+            assert!(body.check(CheckLevel::All).unwrap().is_valid());
+            let expected = 12_900.0 - bore_volume + 20.0 * section * width.powi(2);
+            assert!(
+                rel(volume(&body), expected) < 1e-9,
+                "{kind:?}, bore={with_bore}"
+            );
+            let bore_center = if with_bore {
+                PointClass::Outside
+            } else {
+                PointClass::Inside
+            };
+            let offset = width / 8.0;
+            for (point, expected) in [
+                ([34.0, 30.0, 2.0], bore_center),
+                ([37.0, 30.0, 2.0], PointClass::Inside),
+                ([10.0 + offset, 5.0, 4.0 + offset], PointClass::Inside),
+                ([5.0, 10.0 + offset, 4.0 + offset], PointClass::Inside),
+            ] {
+                let point = apply_point(&map, point);
+                assert_eq!(body.classify_point(point).unwrap(), expected, "{point:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn post_foot_blends_clear_distant_pockets_at_the_same_level_after_rotation() {
+    use solidcore_ops::affine::{apply_point, rotation};
+    use solidcore_ops::{boolean::boolean, BooleanOp, PointClass};
+
+    all_fixes();
+    let map = rotation([0.0; 3], [0.0, 0.0, 1.0], PI / 6.0).unwrap();
+    let query = [[10.0, 5.0, 4.0], [5.0, 10.0, 4.0]].map(|p| apply_point(&map, p));
+    let width = 4.2_f64;
+    for with_pockets in [false, true] {
+        for (kind, section) in [(Blend::Chamfer, 0.5), (Blend::Round, 1.0 - PI / 4.0)] {
+            let mut original = post_foot(true);
+            if with_pockets {
+                // The two blind floors lie at z = 2, with no shared vertices or walls.
+                for (origin, size) in [
+                    ([28.0, 30.0, 2.0], [4.0, 4.0, 3.0]),
+                    ([39.0, 37.0, 2.0], [3.0, 5.0, 3.0]),
+                ] {
+                    let pocket = make_box(origin, size).unwrap();
+                    original = boolean(original, pocket, BooleanOp::Subtract)
+                        .unwrap()
+                        .unwrap();
+                }
+            }
+            original.transform(&map).unwrap();
+            let pocket_volume = if with_pockets {
+                2.0 * (4.0 * 4.0 + 3.0 * 5.0)
+            } else {
+                0.0
+            };
+            let body = original;
+            let edges = query.map(|point| edge_at(&body, point));
+            let result = blend(&body, kind, &edges, &[width], &[], Corners::Filled)
+                .unwrap_or_else(|error| panic!("{kind:?}, pockets={with_pockets}: {error:?}"));
+            assert_eq!(
+                result.dropped,
+                [false, false],
+                "{kind:?}, pockets={with_pockets}"
+            );
+            assert_eq!(body.solid_count().unwrap(), 1);
+            assert_eq!(body.to_record().unwrap().0.shells.len(), 1);
+            assert!(body.check(CheckLevel::All).unwrap().is_valid());
+            let expected = 12_900.0 - pocket_volume + 20.0 * section * width.powi(2);
+            assert!(
+                rel(volume(&body), expected) < 1e-9,
+                "{kind:?}, pockets={with_pockets}"
+            );
+            for [x, y] in [[30.0, 32.0], [40.5, 39.5]] {
+                for (z, class) in [
+                    (1.0, PointClass::Inside),
+                    (
+                        3.0,
+                        if with_pockets {
+                            PointClass::Outside
+                        } else {
+                            PointClass::Inside
+                        },
+                    ),
+                ] {
+                    let point = apply_point(&map, [x, y, z]);
+                    assert_eq!(
+                        body.classify_point(point).unwrap(),
+                        class,
+                        "{kind:?}: {point:?}"
+                    );
+                }
+            }
+            let offset = width / 8.0;
+            for point in [
+                [10.0 + offset, 5.0, 4.0 + offset],
+                [5.0, 10.0 + offset, 4.0 + offset],
+            ] {
+                let point = apply_point(&map, point);
+                assert_eq!(body.classify_point(point).unwrap(), PointClass::Inside);
+            }
+        }
+    }
+}
+
+#[test]
+fn post_foot_blends_clear_a_distant_ramped_pocket_after_rotation() {
+    use solidcore_ops::affine::{apply_point, rotation};
+    use solidcore_ops::{boolean::boolean, BooleanOp};
+
+    all_fixes();
+    // A shallow ramp meets the plate top and has the same dominant normal
+    // axis. The pocket is well outside both blend arms.
+    let a = [30.0, 30.0, 2.0];
+    let b = [35.0, 30.0, 3.0];
+    let c = [35.0, 30.0, 5.0];
+    let d = [30.0, 30.0, 5.0];
+    let profile = [(a, b), (b, c), (c, d), (d, a)].map(|(start, end)| Curve::Line { start, end });
+    let pocket = extrude(
+        &profile,
+        [0.0, 1.0, 0.0],
+        4.0,
+        0.0,
+        DraftCorner::default(),
+        true,
+    )
+    .unwrap();
+    let original = boolean(post_foot(true), pocket, BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    let cut_volume = 5.0 * 4.0 * (2.0 + 1.0) / 2.0;
+    assert!(rel(volume(&original), 12_900.0 - cut_volume) < 1e-9);
+    let map = rotation([0.0; 3], [0.0, 0.0, 1.0], PI / 6.0).unwrap();
+    original.transform(&map).unwrap();
+    let width = 4.2_f64;
+    for (kind, section) in [(Blend::Chamfer, 0.5), (Blend::Round, 1.0 - PI / 4.0)] {
+        let body = original.copy().unwrap();
+        let edges =
+            [[10.0, 5.0, 4.0], [5.0, 10.0, 4.0]].map(|p| edge_at(&body, apply_point(&map, p)));
+        let result = blend(&body, kind, &edges, &[width], &[], Corners::Filled)
+            .unwrap_or_else(|error| panic!("{kind:?}: {error:?}"));
+        assert_eq!(result.dropped, [false, false]);
+        assert!(body.check(CheckLevel::All).unwrap().is_valid());
+        let expected = 12_900.0 - cut_volume + 20.0 * section * width.powi(2);
+        assert!(rel(volume(&body), expected) < 1e-9, "{kind:?}");
+    }
+}
+
+#[test]
 fn post_foot_blends_leave_the_body_intact_when_the_opening_is_too_short() {
     all_fixes();
     for (kind, fit_kind, section) in [
@@ -537,21 +973,114 @@ fn post_foot_blends_do_not_report_a_limit_with_an_obstructed_sweep() {
 }
 
 #[test]
+fn post_foot_blends_check_clearance_when_the_rail_coordinate_rounds() {
+    use solidcore_ops::{boolean::boolean, BooleanOp};
+
+    all_fixes();
+    let width = 4.2_f64;
+    for (kind, section) in [
+        (Blend::Chamfer, width.powi(2) / 2.0),
+        (Blend::Round, width.powi(2) * (1.0 - PI / 4.0)),
+    ] {
+        let clear = post_foot(true);
+        blend(
+            &clear,
+            kind,
+            &post_foot_edges(&clear),
+            &[width],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap();
+        assert!(rel(volume(&clear), 12_900.0 + 20.0 * section) < 1e-9);
+        assert_eq!(clear.to_record().unwrap().0.shells.len(), 1);
+        assert!(clear.check(CheckLevel::All).unwrap().is_valid());
+
+        let raised = make_box([10.5, 4.0, 4.0], [1.0, 2.0, 2.0]).unwrap();
+        let blocked = boolean(post_foot(true), raised, BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        let original = blocked.to_record().unwrap().0;
+        let result = blend(
+            &blocked,
+            kind,
+            &post_foot_edges(&blocked),
+            &[width],
+            &[],
+            Corners::Filled,
+        );
+        let expected = solidcore::error::blend::BlendFailure::CornerRefused;
+        let Err(Error::BlendFailed {
+            class,
+            status,
+            phrase,
+        }) = result
+        else {
+            panic!("{kind:?}: {result:?}");
+        };
+        assert_eq!(class, expected.class());
+        assert_eq!(status, solidcore::error::SM_ERR);
+        assert_eq!(phrase, expected.to_string());
+        assert_eq!(blocked.to_record().unwrap().0, original);
+        assert!(rel(volume(&blocked), 12_904.0) < 1e-9);
+    }
+}
+
+#[test]
 fn post_foot_blends_do_not_report_a_fit_below_section_resolution() {
     all_fixes();
-    for (kind, zone) in [(Blend::Chamfer, 1.0), (Blend::Round, 3.0)] {
+    for (kind, zone, requests) in [
+        (Blend::Chamfer, 1.0, [6.0, 9.0]),
+        (Blend::Round, 1.0, [8.5, 9.0]),
+    ] {
         // The plate still has exact supports. Its coarse B-rep zone puts the
         // 5 mm cross section below the preparation's resolution for this kind.
         let body = post_foot(true);
         body.kernel().set_tolerance(zone);
         let picks = post_foot_edges(&body);
         let before = body.to_record().unwrap().0;
-        for asked in [6.0, 9.0] {
+        for asked in requests {
             let result = blend(&body, kind, &picks, &[asked], &[], Corners::Filled);
-            assert!(
-                result.is_err() && !matches!(result, Err(Error::TooLarge { .. })),
-                "{kind:?} with zone {zone}, {asked} mm: {result:?}",
-            );
+            match (kind, result) {
+                (
+                    Blend::Chamfer,
+                    Err(Error::BlendFailed {
+                        class,
+                        status,
+                        phrase,
+                    }),
+                ) => {
+                    use solidcore::error::blend::BlendFailure;
+                    let expected = BlendFailure::SizeBelowResolution {
+                        size: 5.0,
+                        tolerance: zone,
+                    };
+                    assert_eq!(class, expected.class());
+                    assert_eq!(status, solidcore::error::SM_ERR_INVALID_INPUT);
+                    assert_eq!(phrase, expected.to_string());
+                }
+                (
+                    Blend::Round,
+                    Err(Error::RoundTooSmall {
+                        edge,
+                        turn,
+                        tolerance,
+                        smallest,
+                    }),
+                ) => {
+                    assert!(picks.contains(&edge));
+                    assert!((turn - PI / 2.0).abs() < 1e-12);
+                    assert_eq!(tolerance, zone);
+                    // At a right angle the chord is sqrt(2) times the section
+                    // radius. The minimum width is eight zones plus the
+                    // kernel's one-part-per-million construction margin.
+                    let chord_limit = 8.0 * zone * 1.000_001 / std::f64::consts::SQRT_2;
+                    let sagitta_limit = zone / (std::f64::consts::SQRT_2 - 1.0);
+                    assert!((smallest - chord_limit.max(sagitta_limit)).abs() < 1e-12);
+                    assert!(5.0 < smallest && smallest < asked);
+                }
+                (_, other) => panic!("{kind:?} with zone {zone}, {asked} mm: {other:?}"),
+            }
             assert_eq!(body.to_record().unwrap().0, before);
             assert_eq!(body.kernel().tolerance(), zone);
         }
@@ -663,14 +1192,43 @@ fn post_foot_blends_stop_at_two_independent_cutout_corners_in_one_call() {
         let body = boolean(joined, aperture, BooleanOp::Subtract)
             .unwrap()
             .unwrap();
-        let edges = [
-            [10.0, 5.0, 4.0],
-            [40.0, 5.0, 4.0],
-            [5.0, 10.0, 4.0],
-            [45.0, 10.0, 4.0],
-        ]
-        .map(|point| edge_at(&body, point));
-        let made = blend(&body, kind, &edges, &[size], &[], Corners::Filled).unwrap();
+        let (input, _) = body.to_record().unwrap();
+        let pick = |body: &Body| {
+            [
+                [10.0, 5.0, 4.0],
+                [40.0, 5.0, 4.0],
+                [5.0, 10.0, 4.0],
+                [45.0, 10.0, 4.0],
+            ]
+            .map(|point| edge_at(body, point))
+        };
+        let (reversed, _) = Body::from_record(&input, true).unwrap();
+        let (ordered, _) = Body::from_record(&input, true).unwrap();
+        let mut reversed_picks = pick(&reversed);
+        reversed_picks.reverse();
+        blend(
+            &ordered,
+            kind,
+            &pick(&ordered),
+            &[size],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap();
+        blend(
+            &reversed,
+            kind,
+            &reversed_picks,
+            &[size],
+            &[],
+            Corners::Filled,
+        )
+        .unwrap();
+        assert_eq!(
+            reversed.to_record().unwrap().0,
+            ordered.to_record().unwrap().0
+        );
+        let made = blend(&body, kind, &pick(&body), &[size], &[], Corners::Filled).unwrap();
         assert_eq!(made.dropped, [false; 4]);
         assert!(made.holes.is_empty());
         assert_eq!(body.solid_count().unwrap(), 1);
