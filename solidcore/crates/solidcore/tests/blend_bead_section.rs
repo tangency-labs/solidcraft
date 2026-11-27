@@ -2949,9 +2949,10 @@ fn walls_on_a_floor(k: &mut Kernel) -> Brep {
     boolean_union(k, floor, walls).unwrap()
 }
 
-/// The toes are checked on their faces by reading the part only: a part saved without some
-/// edge uses' uv curves (the walls on a floor: the classification would make them in the
-/// part) keeps its file byte for byte, whether its bead is built or refused for a toe past
+/// The toes are checked on their faces and the part is left as it was: a part saved without
+/// some edge uses' uv curves (the walls on a floor: the classification would make them in the
+/// part, so such a toe is classified on a copy of the part, which is dropped) keeps its file
+/// byte for byte, whether its bead is built or refused for a toe past
 /// its face (the wall runs 40 mm up from the joint here, so the refusal names 40 mm). Toes on
 /// a face's boundary (the bead's last station, where the wall ends) count as on the face.
 #[test]

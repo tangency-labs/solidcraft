@@ -108,7 +108,7 @@ const TOE_PIECES: u32 = 32;
 /// on that side builds; those of the drop and of the classification.
 fn toes_on_faces(
     k: &Kernel,
-    target: &Brep,
+    target: &mut Brep,
     edge_id: EdgeId,
     sides: [(FaceId, &Surface, Vec3, f64); 2],
     start: Point3,
@@ -116,7 +116,7 @@ fn toes_on_faces(
 ) -> Result<()> {
     for (face, surface, u, d) in sides {
         let domain = surface.natural_uv_domain_with_nurb(k)?;
-        let holds = |leg: f64| -> Result<bool> {
+        let holds = |target: &mut Brep, leg: f64| -> Result<bool> {
             for j in 0..=TOE_PIECES {
                 let p = start + run * (f64::from(j) / f64::from(TOE_PIECES)) + u * leg;
                 if !toe_on_face(k, target, face, surface, &domain, p)? {
@@ -125,7 +125,7 @@ fn toes_on_faces(
             }
             Ok(true)
         };
-        if holds(d)? {
+        if holds(target, d)? {
             continue;
         }
         // the largest leg that holds, halved down until the bracket is a ten-millionth of its
@@ -137,7 +137,7 @@ fn toes_on_faces(
                 break;
             }
             let mid = 0.5 * (lo + hi);
-            if holds(mid)? {
+            if holds(target, mid)? {
                 lo = mid;
             } else {
                 hi = mid;
@@ -173,7 +173,7 @@ fn toes_on_faces(
 /// Whether the point `p` on the plane of `face` (its `surface`, over `domain`) lies on `face`
 /// of `target`, its boundary included ([`face_holds`]). A point past the surface's own domain
 /// drops onto the domain's rim, so it holds only where the surface there is `p` itself (to
-/// the face's tolerance). `target` is only read.
+/// the face's tolerance). `target` is left as it came in.
 ///
 /// # Errors
 ///
@@ -181,7 +181,7 @@ fn toes_on_faces(
 /// those of [`face_holds`].
 fn toe_on_face(
     k: &Kernel,
-    target: &Brep,
+    target: &mut Brep,
     face: FaceId,
     surface: &Surface,
     domain: &Extent2d,
@@ -211,7 +211,7 @@ fn toe_on_face(
     if on.distance(p) > target.face(face)?.tolerance {
         return Ok(false);
     }
-    face_holds(k, target, face, surface, domain, [None, None], uv)
+    face_holds(k, target, face, uv)
 }
 
 /// The parameters of `surface` (over `domain`) nearest `point`, from `near` when given;
@@ -239,155 +239,52 @@ fn dropped(
     Ok(d.success.then_some(d.result_uv))
 }
 
-/// Whether `uv` of `surface` (the support of `face`, over `domain` with `periods`) lies on
-/// `face` of `target`, its boundary included, reading `target` only: the kernel's
-/// classification where every trim curve it visits is already made
-/// ([`crate::query::face::p2::point_classify_prepared`]); where one is not (a part saved
-/// without some edge uses' uv curves), the classification would make it in the part, so
-/// [`boundary_holds`] decides instead.
+/// Whether `uv`, parameters of the support of `face`, lies on `face` of `target`, its boundary
+/// included, by the kernel's classification, leaving `target` as it came in. Where every trim
+/// curve the classification visits is already made it reads the part
+/// ([`crate::query::face::p2::point_classify_prepared`]). Where one is not (a part saved
+/// without some edge uses' uv curves), the classification would make it in the part, so it
+/// runs on an exact copy of the part, which is then dropped
+/// ([`Brep::with_rollback_untouched`], [`crate::query::face::p2::point_classify`]): one copy
+/// per point classified, so each answer is the same whatever was classified before it (a copy
+/// kept between points would carry the trims and the trim cache the earlier points made, which
+/// the classification reads first).
 ///
 /// # Errors
 ///
-/// Those of the classification other than a trim curve it would have to make, and those of
-/// [`boundary_holds`].
-pub(crate) fn face_holds(
-    k: &Kernel,
-    target: &Brep,
-    face: FaceId,
-    surface: &Surface,
-    domain: &Extent2d,
-    periods: [Option<f64>; 2],
-    uv: Point2,
-) -> Result<bool> {
+/// Those of the classification and of the copy.
+pub(crate) fn face_holds(k: &Kernel, target: &mut Brep, face: FaceId, uv: Point2) -> Result<bool> {
     use crate::intersect::point_class::{PointClassType as C, PointClassification};
-    use crate::query::face::p2::{point_classify_prepared, PointClassifyOptions};
+    use crate::query::face::p2::{point_classify, point_classify_prepared, PointClassifyOptions};
     let tolerance = crate::geom::tol::zone_tol3d(k, crate::geom::tol::USE_DEFAULT);
-    let mut classification = PointClassification::new(tolerance);
-    let options = PointClassifyOptions {
-        src_zone_tol_3d: target.face(face)?.tolerance,
+    let zone = target.face(face)?.tolerance;
+    let options = || PointClassifyOptions {
+        src_zone_tol_3d: zone,
         use_uv_classification: true,
         ..PointClassifyOptions::default()
     };
-    match point_classify_prepared(k, target, face, uv, &mut classification, options) {
-        Ok(()) => Ok(matches!(
-            classification.point_class(),
-            C::Face | C::Edge | C::Vertex | C::Edgeuse
-        )),
-        Err(e) if e.is_unported() => boundary_holds(k, target, face, surface, domain, periods, uv),
-        Err(e) => Err(e),
-    }
-}
-
-/// How many points [`boundary_holds`] samples on each edge of a face's boundary.
-const BOUNDARY_SAMPLES: usize = 32;
-
-/// Whether `uv` lies inside `face` of `target` by its boundary dropped onto `surface`: each
-/// loop's edges, each at [`BOUNDARY_SAMPLES`] points in its edge use's direction, dropped onto
-/// the surface (a periodic direction unwrapped along the loop), and `uv` inside by the
-/// even-odd rule over all loops (an outer loop and its holes), moved by whole periods to the
-/// loops' range; on the boundary (within a millionth of the loops' size) counts as on the face,
-/// as the kernel's classification counts an edge or a vertex. Sampled, not exact: it decides only where the kernel's classification would
-/// have to make a trim curve in the part ([`face_holds`]). `target` is only read.
-///
-/// # Errors
-///
-/// A defect where an edge has no curve or a boundary point does not drop onto the surface;
-/// those of the topology and the evaluations.
-fn boundary_holds(
-    k: &Kernel,
-    target: &Brep,
-    face: FaceId,
-    surface: &Surface,
-    domain: &Extent2d,
-    periods: [Option<f64>; 2],
-    uv: Point2,
-) -> Result<bool> {
-    use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-    use crate::topology::edgeuse::p1 as eu1;
-    let unwrap = |x: f64, near: f64, period: Option<f64>| match period {
-        Some(p) if p > 0.0 && p.is_finite() => x + p * ((near - x) / p).round(),
-        _ => x,
-    };
-    let mut polygons: Vec<Vec<Point2>> = Vec::new();
-    for l in crate::topology::face::p2::loops(target, face, false, None)? {
-        let mut polygon: Vec<Point2> = Vec::new();
-        for eu in crate::topology::loopuse::loop_edgeuses(target, l)? {
-            let e = eu1::edge(target, eu)?.ok_or_else(|| {
-                SolidError::invalid_input(OP, "an edge use of a face loop with no edge")
-            })?;
-            let curve = edge::curve(target, e)?
-                .ok_or_else(|| SolidError::invalid_input(OP, "an edge with no curve"))?;
-            let ivl = edge::interval(target, e)?;
-            let reversed = eu1::orientation(target, eu)? == OrientType::Opposite;
-            for j in 0..BOUNDARY_SAMPLES {
-                let f = j as f64 / BOUNDARY_SAMPLES as f64;
-                let f = if reversed { 1.0 - f } else { f };
-                let t = ivl.min() + (ivl.max() - ivl.min()) * f;
-                let p = curve.evaluate_point(k, t)?;
-                let near = polygon.last().copied();
-                let q = dropped(k, surface, domain, p, near)?.ok_or_else(|| SolidError::blend(OP, BlendFailure::Defect { why: "dropping a point of the face's own boundary edge onto the face's surface found no parameter, though the edge lies on that face" }))?;
-                let [pu, pv] = periods;
-                let q = match near {
-                    Some(n) => Point2::new(unwrap(q.x, n.x, pu), unwrap(q.y, n.y, pv)),
-                    None => q,
-                };
-                polygon.push(q);
-            }
+    let mut classification = PointClassification::new(tolerance);
+    match point_classify_prepared(k, target, face, uv, &mut classification, options()) {
+        Ok(()) => {
+            return Ok(matches!(
+                classification.point_class(),
+                C::Face | C::Edge | C::Vertex | C::Edgeuse
+            ));
         }
-        if polygon.len() >= 3 {
-            polygons.push(polygon);
-        }
+        Err(e) if e.is_unported() => {}
+        Err(e) => return Err(e),
     }
-    // the point moved by whole periods to the middle of the loops' range
-    let (mut lo, mut hi) = (
-        Point2::new(f64::INFINITY, f64::INFINITY),
-        Point2::new(f64::NEG_INFINITY, f64::NEG_INFINITY),
-    );
-    for q in polygons.iter().flatten() {
-        lo = Point2::new(lo.x.min(q.x), lo.y.min(q.y));
-        hi = Point2::new(hi.x.max(q.x), hi.y.max(q.y));
-    }
-    let [pu, pv] = periods;
-    let at = Point2::new(
-        unwrap(uv.x, 0.5 * (lo.x + hi.x), pu),
-        unwrap(uv.y, 0.5 * (lo.y + hi.y), pv),
-    );
-    // on the boundary (to a millionth of the loops' size, in the parameters): on the face, as
-    // the kernel's classification counts an edge or a vertex
-    let near = 1e-6 * (hi.x - lo.x).max(hi.y - lo.y).max(f64::MIN_POSITIVE);
-    for polygon in &polygons {
-        for (j, &a) in polygon.iter().enumerate() {
-            let Some(&b) = (j + 1)
-                .checked_rem(polygon.len())
-                .and_then(|n| polygon.get(n))
-            else {
-                continue;
-            };
-            let (ab, aq) = (b - a, at - a);
-            let t = (aq.dot(ab) / ab.dot(ab).max(f64::MIN_POSITIVE)).clamp(0.0, 1.0);
-            if (aq - ab * t).length() <= near {
-                return Ok(true);
-            }
-        }
-    }
-    let mut inside = false;
-    for polygon in &polygons {
-        for (j, &a) in polygon.iter().enumerate() {
-            let Some(&b) = (j + 1)
-                .checked_rem(polygon.len())
-                .and_then(|n| polygon.get(n))
-            else {
-                continue;
-            };
-            if (a.y > at.y) != (b.y > at.y) {
-                let x = a.x + (at.y - a.y) / (b.y - a.y) * (b.x - a.x);
-                if at.x < x {
-                    inside = !inside;
-                }
-            }
-        }
-    }
-    Ok(inside)
+    target.with_rollback_untouched(
+        |copy| {
+            let mut classification = PointClassification::new(tolerance);
+            point_classify(k, copy, face, uv, &mut classification, options())?;
+            Ok(matches!(
+                classification.point_class(),
+                C::Face | C::Edge | C::Vertex | C::Edgeuse
+            ))
+        },
+        |_| false,
+    )
 }
 
 /// How a bead's span ends.
