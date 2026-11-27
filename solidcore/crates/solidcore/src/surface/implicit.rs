@@ -3244,13 +3244,12 @@ impl AnalyticSupport {
             };
             match evaluates_as(k, &candidate, form) {
                 Ok(true) => return Ok(candidate),
-                Ok(false) => continue,
                 Err(
                     e @ (SolidError::Unported { .. }
                     | SolidError::Cancelled { .. }
                     | SolidError::OutOfFuel { .. }),
                 ) => return Err(e),
-                Err(_) => continue,
+                Ok(false) | Err(_) => {}
             }
         }
         Err(not_kind())
@@ -3297,7 +3296,8 @@ impl AnalyticSupport {
             let w = if c.w == NOW { 1.0 } else { c.w };
             (Vec3::new(c.x, c.y, c.z) * (1.0 / w), w)
         };
-        let patches: Vec<Vec<Vec<Vec<(Vec3, f64)>>>> = decompose_to_bez(nurb)?
+        type WeightedPatch = Vec<Vec<(Vec3, f64)>>;
+        let patches: Vec<Vec<WeightedPatch>> = decompose_to_bez(nurb)?
             .iter()
             .map(|row| {
                 row.iter()
