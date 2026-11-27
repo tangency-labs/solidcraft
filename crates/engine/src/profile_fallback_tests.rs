@@ -298,3 +298,34 @@ fn twin_regions_picked_by_points_follow_a_change_of_the_regions() {
     assert!((changed - built).abs() < 1e-3, "{changed} after the change, {built} built so (before {before})");
     assert!(changed > before, "the regions grew with r: {before} to {changed}");
 }
+
+/// The profile indices of the regions under `points` in sketch `s`, as a script or an importer
+/// that matched the regions itself gives them.
+fn indices_at(s: &Session, points: &[[f64; 2]]) -> Vec<usize> {
+    let id = s.doc.find_feature("s").unwrap().id;
+    let st = s.model.state();
+    let profiles = &st.sketch(id).unwrap().profiles;
+    points.iter().map(|p| solidcraft_sketch::profile_at_point(profiles, solidcore_record::Vec2::new(p[0], p[1])).unwrap()).collect()
+}
+
+/// The same twins picked by their indices, as Maverick's translator picks them: after the change
+/// the extrude builds the regions an extrude made on the new radius builds, with no error.
+#[test]
+fn twin_regions_picked_by_index_follow_a_change_of_the_regions() {
+    let mut s = twin_sketch("3.04 mm");
+    let indices = indices_at(&s, &TWIN_PICKS);
+    assert_eq!(indices.iter().collect::<std::collections::BTreeSet<_>>().len(), 4, "four regions: {indices:?}");
+    run(&mut s, "solid.extrude", json!({"sketch": "s", "profiles": indices, "distance": 2, "name": "E"}));
+    assert_eq!(result(&s, "E").0, None);
+    let saved = serde_json::to_value(&s.doc.find_feature("E").unwrap().kind).unwrap().to_string();
+    assert!(saved.contains("\"sided_curves\""), "the picks are saved by the sides of their curves: {saved}");
+    assert_eq!(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap(), *s.doc, "the saved picks reopen");
+    let before = volume(&s);
+    let by_points = volume(&twin_regions("3.04 mm", &TWIN_PICKS));
+    assert!((before - by_points).abs() < 1e-3, "{before} by index, {by_points} by points");
+    run(&mut s, "parameters.change", json!({"name": "r", "expression": "3.45 mm"}));
+    assert_eq!(result(&s, "E").0, None);
+    let changed = volume(&s);
+    let built = volume(&twin_regions("3.45 mm", &TWIN_PICKS[1..]));
+    assert!((changed - built).abs() < 1e-3, "{changed} after the change, {built} built so (before {before})");
+}

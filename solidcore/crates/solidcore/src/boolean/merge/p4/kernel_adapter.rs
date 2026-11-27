@@ -62,6 +62,7 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         tolerances: k.tolerances,
         seed: k.seed,
         caches: crate::kernel::Caches {
+            fit_gap_memo: std::sync::Arc::clone(&k.caches.fit_gap_memo),
             prove_lazy_trim_raise: k.caches.prove_lazy_trim_raise,
             ..crate::kernel::Caches::default()
         },
@@ -82,7 +83,9 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         blend_w_memo: core::cell::RefCell::default(),
         loop_area_memo: core::cell::RefCell::default(),
         check_memo: core::cell::RefCell::default(),
-        recertify_memo: core::cell::RefCell::default(),
+        // (shared with the parent: a hit returns what recertifying the same blend again
+        // returns, so the certificates the parent finished serve the copy's workers too)
+        recertify_memo: std::sync::Arc::clone(&k.recertify_memo),
         // (inside the caller's operation: a scope opened on the copy keeps its memo)
         blend_operation_scopes: std::sync::Arc::new(core::sync::atomic::AtomicU32::new(
             k.blend_operation_scopes

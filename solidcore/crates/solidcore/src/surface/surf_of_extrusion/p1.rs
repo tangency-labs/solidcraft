@@ -2397,6 +2397,34 @@ fn translated_trimmed(
     Ok(copied)
 }
 
+/// Not upstream: the content digest ([`crate::geom::content`]). The generator curve is
+/// written through its own digest, so an extrusion of a curve with none has none.
+impl crate::geom::content::Content for SurfOfExtrusion {
+    fn content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        let Self {
+            base,
+            gen_curve,
+            origin,
+            extrusion_vec,
+            anal_uv_domain,
+            orientation,
+            swap_uv,
+            curve_point,
+            curve_vec,
+        } = self;
+        d.tag(0x5E8);
+        base.content(d)?;
+        gen_curve.content(d)?;
+        origin.content(d)?;
+        extrusion_vec.content(d)?;
+        anal_uv_domain.content(d)?;
+        d.u64(*orientation as u64);
+        d.bool(*swap_uv);
+        curve_point.content(d)?;
+        curve_vec.content(d)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1592,6 +1592,23 @@ mod tests {
         assert!(draft_surface(&k, &b, f, &below).unwrap().is_ok());
     }
 
+    /// #22807: an R 10, height 100 cylinder drafted 6 degrees about its base closes to a point at
+    /// z = 10 / tan(6 deg) ~ 95.14 < 100, so it is refused as `DraftRefusal::ConeCloses`; 5 degrees
+    /// stays open past the top (apex at ~114.3) and succeeds.
+    #[test]
+    fn a_cylinder_that_closes_before_its_top_is_refused_as_cone_closes() {
+        let mut k = Kernel::default();
+        let b = create_cylinder(&mut k, Point3::ZERO, 10.0, 100.0).unwrap();
+        let f = curved_face(&k, &b);
+        let steep = Draft::new(Point3::ZERO, Vec3::Z, Vec3::Z, 6.0_f64.to_radians()).unwrap();
+        assert_eq!(
+            draft_surface(&k, &b, f, &steep).unwrap().unwrap_err(),
+            DraftRefusal::ConeCloses
+        );
+        let open = Draft::new(Point3::ZERO, Vec3::Z, Vec3::Z, 5.0_f64.to_radians()).unwrap();
+        assert!(draft_surface(&k, &b, f, &open).unwrap().is_ok());
+    }
+
     #[test]
     fn a_cylinder_off_the_pull_is_refused() {
         let mut k = Kernel::default();
