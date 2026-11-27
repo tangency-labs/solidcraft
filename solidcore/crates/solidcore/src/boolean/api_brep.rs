@@ -1190,7 +1190,9 @@ fn reduce_pairwise_morton<F>(
 where
     F: FnMut(&mut Kernel, Vec<(Brep, Brep)>) -> Result<Vec<Brep>>,
 {
-    sort_morton(&mut level);
+    if level.len() >= 5 {
+        sort_morton(&mut level);
+    }
     while level.len() > 1 {
         let mut next: Vec<UnionItem> = Vec::new();
         let mut bool_indices: Vec<usize> = Vec::new();
