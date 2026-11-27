@@ -226,7 +226,7 @@ fn common_radius(rounds: &[(f64, f64)]) -> Option<(f64, f64)> {
         if (r - first)
             .abs()
             .partial_cmp(&tol)
-            .is_none_or(|o| o.is_gt())
+            .is_none_or(std::cmp::Ordering::is_gt)
         {
             return None;
         }
