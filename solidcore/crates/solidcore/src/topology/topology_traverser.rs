@@ -517,11 +517,7 @@ pub fn faceuse_shell_replacement(
 ) -> Result<()> {
     lock.new_mark(std::slice::from_mut(&mut k.context))?;
     faceuse_traversal(k, b, marks, start, lock.mark_type(), Some(replaced))?;
-    for &fu in replaced.iter() {
-        if b.faceuse(fu)?.shell != Some(new_shell) {
-            shell::move_faceuse(b, fu, new_shell)?;
-        }
-    }
+    shell::move_faceuses_to_shell(b, replaced, new_shell)?;
     Ok(())
 }
 
