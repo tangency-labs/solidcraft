@@ -12956,19 +12956,6 @@ mod tests {
     }
 
     #[test]
-    fn transform_face_shortcut_opt_in_persists_and_resets_on_the_shortcuts_page() {
-        let old: Prefs = serde_json::from_value(json!({})).unwrap();
-        assert!(!old.move_shortcut_transforms_face);
-        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        control(&mut app, &json!({"open":"Keyboard Shortcuts", "move_shortcut_transforms_face":true, "button":"ok"})).unwrap();
-        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
-        restored.load_prefs(&app.prefs());
-        assert!(restored.preferences.move_shortcut_transforms_face);
-        control(&mut restored, &json!({"open":"Keyboard Shortcuts", "button":"defaults"})).unwrap();
-        assert!(!restored.preferences.move_shortcut_transforms_face);
-    }
-
-    #[test]
     fn preview_modifier_persists_and_follows_shortcut_dialog_buttons() {
         use crate::tool_modifiers::PreviewModifier;
         let old: Prefs = serde_json::from_value(json!({})).unwrap();

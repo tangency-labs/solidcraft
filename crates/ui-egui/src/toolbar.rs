@@ -3212,10 +3212,8 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // The keys that ran a command: the character each one typed is dropped below.
     let mut ran = Vec::new();
-    let mut consumed = Vec::new();
     for (index, (k, repeat, mods)) in keys.into_iter().enumerate() {
         use egui::Key;
-        let mut press = |app: &mut SolveApp, key: &str| crate::keymap::dispatch(app, key, repeat, || consumed.push(index));
         if drawing && k == Key::S && !mods.command && !mods.shift && !mods.alt {
             app.start("ui.palette");
             continue;
@@ -3263,7 +3261,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
             if crate::keymap::commands_for(app, &key).is_empty() {
                 drop(app.run("tab.view.activate", json!({"index": place})));
             } else {
-                press(app, &key);
+                crate::keymap::press(app, &key, repeat);
             }
             continue;
         }
@@ -3284,7 +3282,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 _ if !shown && !(drawing_history && matches!(k, Key::Z | Key::Y)) => {
                     let key = crate::keymap::key_name(k, mods);
                     if drawing_history && crate::keymap::command_for(app, &key) == Some("select.all") {
-                        press(app, &key);
+                        crate::keymap::press(app, &key, repeat);
                     } else if let Some(tool) = sheet_tool(app, drawing_history, &key) {
                         app.start(tool);
                     }
@@ -3295,7 +3293,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 Key::W if !mods.alt => {
                     let key = crate::keymap::key_name(k, mods);
                     if mods.shift && !crate::keymap::commands_for(app, &key).is_empty() {
-                        press(app, &key);
+                        crate::keymap::press(app, &key, repeat);
                     } else if !mods.shift && app.docs.views.len() < 2 && app.view_windows.close_current() {
                         continue;
                     } else if mods.shift || app.docs.views.len() < 2 {
@@ -3314,7 +3312,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                     match crate::keymap::command_for(app, &key) {
                         Some(id @ ("edit.undo" | "edit.redo")) => drop(app.run(id, json!({}))),
-                        _ => press(app, &key),
+                        _ => crate::keymap::press(app, &key, repeat),
                     }
                 }
                 // Copy, Cut and Paste, and Paste New with Shift (`edit_clipboard::handle`).
@@ -3323,7 +3321,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 // Ctrl+Shift+S is Save As; Ctrl+S keeps saving over the current file (#6558).
                 Key::S if mods.shift && !mods.alt => save_as(app),
                 Key::S => save(app),
-                _ => press(app, &crate::keymap::key_name(k, mods)),
+                _ => crate::keymap::press(app, &crate::keymap::key_name(k, mods), repeat),
             }
             continue;
         }
@@ -3341,7 +3339,7 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
             Key::Escape => {
                 app.esc_handled = true;
                 if crate::render_workspace::result_active(app) {
-                    press(app, "Escape");
+                    crate::keymap::press(app, "Escape", repeat);
                     continue;
                 }
                 // End navigation before the underlying tool or dialog; sketch double-Escape
@@ -3422,29 +3420,27 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
                 if !crate::keymap::commands_for(app, &key).is_empty() {
                     ran.push(index);
                 }
-                press(app, &key);
+                crate::keymap::press(app, &key, repeat);
             }
         }
     }
-    drop_shortcut_events(ctx, &ran, &consumed);
+    drop_shortcut_text(ctx, &ran);
 }
 
 /// A key that ran a command is not typing: the character it typed goes nowhere. Else the field
 /// the command opens could take it later in the frame, as a window drawn after this one does.
-/// `ran` and `consumed` count the frame's key presses from 0, in order. A consumed
-/// press also drops its key event; a logic-only tick still sees the last painted frame's input.
-fn drop_shortcut_events(ctx: &egui::Context, ran: &[usize], consumed: &[usize]) {
-    if ran.is_empty() && consumed.is_empty() {
+/// `ran` counts the frame's key presses from 0, in order.
+fn drop_shortcut_text(ctx: &egui::Context, ran: &[usize]) {
+    if ran.is_empty() {
         return;
     }
     let strip = |events: &mut Vec<egui::Event>| {
         let (mut presses, mut typed_by_shortcut) = (0, false);
         events.retain(|event| match event {
             egui::Event::Key { pressed: true, .. } => {
-                let keep = !consumed.contains(&presses);
-                typed_by_shortcut = !keep || ran.contains(&presses);
+                typed_by_shortcut = ran.contains(&presses);
                 presses += 1;
-                keep
+                true
             }
             egui::Event::Text(_) if typed_by_shortcut => {
                 typed_by_shortcut = false;
