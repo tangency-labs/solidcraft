@@ -278,10 +278,6 @@ fn main() {
     let has_git = root.join(".git").exists();
     let commit = has_git.then(|| git(&crate_dir, &["rev-parse", "HEAD"])).flatten().map(|s| s.trim().to_string()).unwrap_or_else(|| "unknown".into());
     println!("cargo:rustc-env=SOLIDCRAFT_SOURCE_COMMIT={commit}");
-    // Known limitation: the digest hashes source only, not cargo features or `SOLIDCRAFT_KERNEL`,
-    // so it doesn't record the active kernel backend. That is fine for the builds we ship, but the
-    // opt-in `backend-occt` build gets the same digest as a normal build and can share cached
-    // bodies with it; see #23125 (https://github.com/tangency-labs/solidcraft/issues/23125).
     let source = evaluation_source(&root).or_else(|| evaluation_source_from_disk(&root, true)).unwrap_or_else(|| "unknown".into());
     println!("cargo:rustc-env=SOLIDCRAFT_EVALUATION_SOURCE={source}");
     println!("cargo:rustc-env=SOLIDCRAFT_EVALUATION_CRATES={}", EVALUATION_CRATES.join(","));

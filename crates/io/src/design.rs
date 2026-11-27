@@ -9,6 +9,11 @@ use std::sync::Arc;
 
 mod drawing;
 mod import_cache;
+// Known limitation: the model cache key (`native_cache::KERNEL`, a constant, and the evaluation
+// digest from `build.rs`, which hashes source only) doesn't record the active kernel backend.
+// That is fine for the builds we ship, but the opt-in `backend-occt` build can share cached bodies
+// with a normal build; see #23125 (https://github.com/tangency-labs/solidcraft/issues/23125).
+// The note lives here because comments in those two files change the digest itself.
 mod native_cache;
 mod provenance;
 mod text;
