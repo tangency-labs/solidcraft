@@ -2346,8 +2346,7 @@ mod tests {
         }
         // 58 wide and 10 deep, past the ring's inner circle (r 28) on the overlap side: it builds.
         let (w, d) = (29., 10.);
-        let rect =
-            Region2 { outer: Loop2::polygon(&[Vec2::new(-w, -2.), Vec2::new(w, -2.), Vec2::new(w, 2.), Vec2::new(-w, 2.)]), holes: vec![] };
+        let rect = Region2 { outer: Loop2::polygon(&[Vec2::new(-w, -2.), Vec2::new(w, -2.), Vec2::new(w, 2.), Vec2::new(-w, 2.)]), holes: vec![] };
         let want = 4. * 2. * (quarter(30. + d, w) - quarter(30., w));
         let result = emboss_project_face(&cyl, wall, Vec3::new(30., 0., 10.), &sketch, &[rect], d).unwrap();
         let added = volume(&result) - volume(&cyl);
