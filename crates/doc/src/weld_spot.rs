@@ -14,8 +14,11 @@
 //! | [`SpotZone`], [`SpotSide`] | Which part of the style a body is, and where it lies        |
 //! | [`spot_weld`]              | The spot's bodies                                           |
 //! | [`spot_site`]              | The spot's frame and sheets, from a point picked on a face  |
+//! | [`spot_site_as_found`]     | The same, taking gaps, overlaps and tilts with a notice     |
+//! | [`spot_weld_fitted`]       | The spot's bodies on the sheets as found ([`SpotFit`])      |
 //! | [`proposed_spot_diameter`] | The diameter a weld tool proposes, `5 √t`                   |
 //! | [`SpotRefusal`]            | Why a spot is refused                                       |
+//! | [`SpotNotice`]             | What was off in a stack that still takes the spot           |
 //!
 //! # The geometry
 //!
@@ -37,11 +40,27 @@
 //! revolved about Z, or a sphere, then placed at the spot. A dish is the arc through its rim and
 //! its middle ([`curve::arc_through`]), cut where each zone ends ([`curve::closest_to_ray`]).
 //!
+//! # Sheets as found
+//!
+//! Real models are a little off: sheets a hair apart, pressed into each other, or tilted. Weld
+//! tolerances are per weld type and kind of deviation, from the standards (tracker Q135, Q190).
+//! [`spot_site`] keeps the rule agreed on #21144: anything past the zone tolerance is refused.
+//! [`spot_site_as_found`] builds instead: every gap, overlap and tilt past the zone tolerance comes
+//! back as a [`SpotNotice`] with its size, and [`spot_weld_fitted`] puts the marks on the faces as
+//! they are (a gap within the tolerance included, so no mark is buried).
+//!
+//! Provisional: ISO 14373:2024 (clauses 7 and 8.2, as far as its preview shows) asks for good
+//! contact between the sheets and no excessive parallelism error, but names no number, and no other
+//! standard value was found. Until one is, the silent band is the zone tolerance and no gap is too
+//! large to build.
+//!
 //! # Not covered
 //!
-//! Flat sheets only: the marks are flat or revolved and the pins straight, so the outer faces must
-//! be planes square to `normal` at the spot. A ball only for two sheets: in a stack every faying
-//! face has its own nugget, which no look draws.
+//! Flat faces only: a face under the spot must be a plane (a curved one is refused; the curved spot,
+//! #21144, builds it). Where the last sheet's outer face tilts, its marks are drawn tilted on it,
+//! but a pin's end there stays square to the spot's line (off the face by at most its radius times
+//! the tilt's tangent). A ball only for two sheets: in a stack every faying face has its own nugget,
+//! which no look draws.
 
 use std::f64::consts::{FRAC_PI_2, TAU};
 
@@ -78,8 +97,9 @@ pub enum SpotRefusal {
     /// more than the zone tolerance.
     #[error("sheet {sheet} lies {gap} from the sheet before it along the spot's line")]
     SheetsApart { sheet: usize, gap: f64 },
-    /// Record face `face` of sheet `sheet`, under the spot, is not flat.
-    #[error("face {face} of sheet {sheet} under the spot is not flat")]
+    /// Record face `face` of sheet `sheet`, under the spot, is not flat. The fix: a curved spot
+    /// (#21144).
+    #[error("face {face} of sheet {sheet} under the spot is not flat: place a curved spot there")]
     FaceNotFlat { sheet: usize, face: usize },
     /// Record face `face` of sheet `sheet` is flat but not square to the spot's line.
     #[error("face {face} of sheet {sheet} is not square to the spot's line")]
@@ -305,7 +325,36 @@ pub(crate) fn check_sheets(thicknesses: &[f64]) -> Result<(f64, f64)> {
 /// ends meet, and sizes the model cannot hold: a piece thinner than the zone tolerance, or a spot
 /// past [`profiles::MAX_COORD`]. The errors of the kernel calls otherwise.
 pub fn spot_weld(spot: &SpotWeld) -> Result<Vec<SpotPiece>> {
+    spot_weld_fitted(spot, &SpotFit::default())
+}
+
+/// How the sheets under a spot differ from flush sheets square to its line, as
+/// [`spot_site_as_found`] measured them. The default is flush and square.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SpotFit {
+    /// One per faying face, in stack order along `normal`: how far the next sheet starts past the
+    /// end of the one before, along the spot's line; negative where they overlap. Empty for none.
+    pub gaps: Vec<f64>,
+    /// Where the last sheet's outer face is not square to the line: the point where the line
+    /// meets it and its outward unit normal. The marks there are drawn on it.
+    pub upper: Option<([f64; 3], [f64; 3])>,
+}
+
+/// The bodies of `spot` on sheets as found: [`spot_weld`]'s, with the outer face beyond each gap
+/// moved by it (back by an overlap), a ball centred in the first gap, and the last sheet's marks
+/// laid on its tilted face where `fit.upper` says so.
+///
+/// # Errors
+/// [`spot_weld`]'s, and [`SpotRefusal::Invalid`] for gaps that are not finite or not one per
+/// faying face, or a tilted face whose point or normal is not finite or whose normal has no length.
+pub fn spot_weld_fitted(spot: &SpotWeld, fit: &SpotFit) -> Result<Vec<SpotPiece>> {
     let (first, last) = check_sheets(&spot.thicknesses)?;
+    if !(fit.gaps.is_empty() || fit.gaps.len() + 1 == spot.thicknesses.len()) || !fit.gaps.iter().all(|g| g.is_finite()) {
+        return bad("spot gaps that are not finite or not one per faying face");
+    }
+    if fit.upper.is_some_and(|(p, n)| !p.iter().chain(&n).all(|v| v.is_finite()) || n == [0.0; 3]) {
+        return bad("a tilted spot face whose point or normal is not finite or zero");
+    }
     if !positive(spot.diameter) {
         return bad("a spot diameter that is not finite and positive");
     }
@@ -319,11 +368,12 @@ pub fn spot_weld(spot: &SpotWeld) -> Result<Vec<SpotPiece>> {
     if spot.style.ball.is_some() && spot.thicknesses.len() > 2 {
         return bad("a spot ball on more than two sheets");
     }
-    let layout = Layout::of(spot, first, last);
+    let layout = Layout::of(spot, first, last, &fit.gaps);
     let tol = profiles::zone_tolerance()?;
     check_sizes(spot, &layout, tol)?;
-    let placement = placement(spot.at, spot.normal)?;
-    local_pieces(&layout, tol, &placement)
+    let place = placement(spot.at, spot.normal)?;
+    let upper = fit.upper.map(|(p, n)| placement(p, n)).transpose()?;
+    local_pieces(&layout, tol, &place, upper.as_ref())
 }
 
 /// Refuses a style with no piece, or a fraction out of its range.
@@ -364,12 +414,15 @@ enum Top {
     Dish { rim: f64, middle: f64 },
 }
 
-/// Every size of a spot in model units, local frame: the first faying face `z = 0`, the last
-/// sheet's outer face `z = t_u`, the first sheet's outer face `z = -t_l`.
+/// Every size of a spot in model units, local frame: the first faying face `z = 0` (where the line
+/// leaves the first sheet), the last sheet's outer face `z = t_u` (every gap included), the first
+/// sheet's outer face `z = -t_l`.
 struct Layout {
     t_u: f64,
     t_l: f64,
     thinnest: f64,
+    /// Where the ball is centred: the middle of the first gap, `0` for touching sheets.
+    ball_at: f64,
     /// Zone radii: core, band, edge.
     zones: Option<[f64; 3]>,
     top: Option<Top>,
@@ -381,10 +434,13 @@ struct Layout {
 }
 
 impl Layout {
-    /// `first` and `last` are the outer sheets' thicknesses.
-    fn of(spot: &SpotWeld, first: f64, last: f64) -> Self {
+    /// `first` and `last` are the outer sheets' thicknesses; `gaps` one per faying face, or empty.
+    fn of(spot: &SpotWeld, first: f64, last: f64, gaps: &[f64]) -> Self {
         let (d, style) = (spot.diameter, &spot.style);
+        let t_u = spot.thicknesses.iter().skip(1).sum::<f64>() + gaps.iter().sum::<f64>();
+        let ball_at = gaps.first().map_or(0.0, |g| g / 2.0);
         let ball = style.ball.map(|b| b.diameter * d / 2.0);
+        // the ball reaches an outer face `t` from its centre
         let shows = |t: f64| ball.is_some_and(|r| r > t);
         let pin = style.pin.map(|p| {
             let r = p.diameter * d / 2.0;
@@ -392,9 +448,10 @@ impl Layout {
             (r, [end(last), end(first)])
         });
         Self {
-            t_u: spot.thicknesses.iter().skip(1).sum(),
+            t_u,
             t_l: first,
             thinnest: spot.thicknesses.iter().fold(f64::INFINITY, |m, &v| m.min(v)),
+            ball_at,
             zones: style.marks.map(|m| [m.core * d / 2.0, m.band * d / 2.0, m.edge * d / 2.0]),
             top: style.marks.map(|m| match m.top {
                 MarkTop::Flat { thickness } => Top::Flat(thickness * d),
@@ -403,7 +460,7 @@ impl Layout {
             marks_on: match style.marks.map(|m| m.faces) {
                 None => [false, false],
                 Some(MarkFaces::Both) => [true, true],
-                Some(MarkFaces::WhereBallHidden) => [!shows(last), !shows(first)],
+                Some(MarkFaces::WhereBallHidden) => [!shows(t_u - ball_at), !shows(first + ball_at)],
                 Some(MarkFaces::Upper) => [true, false],
                 Some(MarkFaces::Lower) => [false, true],
             },
@@ -461,19 +518,23 @@ fn placement(at: [f64; 3], normal: [f64; 3]) -> Result<affine::Matrix> {
     Ok([[u[0], u[1], u[2], 0.0], [w[0], w[1], w[2], 0.0], [n[0], n[1], n[2], 0.0], [at[0], at[1], at[2], 1.0]])
 }
 
-/// The pieces, each made in the local frame and moved by `place` to the spot.
-fn local_pieces(layout: &Layout, tol: f64, place: &affine::Matrix) -> Result<Vec<SpotPiece>> {
+/// The pieces, each made in the local frame and moved by `place` to the spot; the upper marks,
+/// where `tilted` is given, made on the local `z = 0` and moved by it onto the tilted face.
+fn local_pieces(layout: &Layout, tol: f64, place: &affine::Matrix, tilted: Option<&affine::Matrix>) -> Result<Vec<SpotPiece>> {
     let (t_u, t_l) = (layout.t_u, layout.t_l);
     let mut pieces = Vec::new();
     let inside = |body| SpotPiece { body, zone: SpotZone::Inside, side: SpotSide::Through };
     if let Some(r) = layout.ball {
-        pieces.push(inside(profiles::ball([0.0; 3], r, Some(place))?));
+        pieces.push(inside(profiles::ball([0.0, 0.0, layout.ball_at], r, Some(place))?));
     }
     if let Some((r, [upper, lower])) = layout.pin {
         pieces.push(inside(pin(r, t_u, t_l, upper, lower, tol, place)?));
     }
     if let (Some(zones), Some(top)) = (layout.zones, layout.top) {
-        for ((side, face, sense), on) in [(SpotSide::Upper, t_u, 1.0), (SpotSide::Lower, -t_l, -1.0)].into_iter().zip(layout.marks_on) {
+        let upper = tilted.map_or((t_u, place), |m| (0.0, m));
+        for ((side, (face, place), sense), on) in
+            [(SpotSide::Upper, upper, 1.0), (SpotSide::Lower, (-t_l, place), -1.0)].into_iter().zip(layout.marks_on)
+        {
             if !on {
                 continue;
             }
@@ -601,7 +662,8 @@ pub struct SpotSite {
 /// Each listed sheet must be crossed exactly once, the sheets must follow one another along the
 /// line without a gap or an overlap, every face crossed must be flat and square to the line, and
 /// the spot's footprint must lie inside every such face. The sheets are read, never changed: the
-/// solves run on each body's kernel form, never on its record.
+/// solves run on each body's kernel form, never on its record. [`spot_site_as_found`] builds where
+/// this refuses a gap, an overlap or a tilt.
 ///
 /// # Errors
 /// [`SpotRefusal::Invalid`] for fewer than two sheets, a picked sheet not in the list, a face the
@@ -609,6 +671,46 @@ pub struct SpotSite {
 /// positive. The other [`SpotRefusal`]s where the stack does not take the spot. The errors of the
 /// kernel calls otherwise.
 pub fn spot_site(sheets: &[&Body], picked: usize, face: usize, point: [f64; 3], diameter: f64) -> Result<SpotSite> {
+    site_of(sheets, picked, face, point, diameter, true).map(|found| found.site)
+}
+
+/// Something off in a stack that still takes the spot, past the zone tolerance; sheets by their
+/// place in the list given to [`spot_site_as_found`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SpotNotice {
+    /// Along the spot's line, sheet `sheet` starts `gap` past the end of the sheet before it.
+    Gap { sheet: usize, gap: f64 },
+    /// Along the spot's line, sheet `sheet` starts `overlap` before the sheet before it ends.
+    Overlap { sheet: usize, overlap: f64 },
+    /// Record face `face` of sheet `sheet` is tilted `angle` (radians) off square to the line.
+    Tilted { sheet: usize, face: usize, angle: f64 },
+}
+
+/// A spot's site on sheets as found: the site, how the sheets differ from flush and square, and
+/// what to tell the user.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpotFound {
+    pub site: SpotSite,
+    /// For [`spot_weld_fitted`].
+    pub fit: SpotFit,
+    pub notices: Vec<SpotNotice>,
+}
+
+/// [`spot_site`] on sheets as found: a gap or an overlap between sheets, or a flat face tilted off
+/// square to the line, builds and comes back as a [`SpotNotice`] past the zone tolerance; every gap
+/// measured, however small, is in [`SpotFound::fit`]. The sheets' thicknesses are measured along
+/// the line.
+///
+/// # Errors
+/// [`spot_site`]'s, but for [`SpotRefusal::SheetsApart`], [`SpotRefusal::SheetsOverlap`] between
+/// sheets crossed whole and [`SpotRefusal::FaceNotSquare`]. A point inside another sheet is still
+/// [`SpotRefusal::SheetsOverlap`]: that sheet covers the picked face.
+pub fn spot_site_as_found(sheets: &[&Body], picked: usize, face: usize, point: [f64; 3], diameter: f64) -> Result<SpotFound> {
+    site_of(sheets, picked, face, point, diameter, false)
+}
+
+/// [`spot_site`] when `strict`, else [`spot_site_as_found`].
+fn site_of(sheets: &[&Body], picked: usize, face: usize, point: [f64; 3], diameter: f64, strict: bool) -> Result<SpotFound> {
     if sheets.len() < 2 {
         return bad("fewer than two sheets");
     }
@@ -630,6 +732,7 @@ pub fn spot_site(sheets: &[&Body], picked: usize, face: usize, point: [f64; 3], 
     let tol = profiles::zone_tolerance()?;
     let out = flat_normal(body, picked, face)?;
     let normal = out.map(|v| -v);
+    let mut notices = Vec::new();
 
     // the point on the picked face first, then every sheet crossed once
     let on_face = body.face_hits_by_ray(point, normal)?.first().is_some_and(|h| h.face == face && h.distance <= tol);
@@ -651,29 +754,49 @@ pub fn spot_site(sheets: &[&Body], picked: usize, face: usize, point: [f64; 3], 
         }
     }
     crossed.sort_by(|a, b| a.1.distance.total_cmp(&b.1.distance));
+    let mut gaps = Vec::new();
     for pair in crossed.windows(2) {
         let [(_, _, before), (sheet, next, _)] = pair else {
             continue;
         };
         let gap = next.distance - before.distance;
-        if gap < -tol {
-            return Err(SpotRefusal::SheetsOverlap { sheet: *sheet });
+        gaps.push(gap);
+        let notice = if gap < -tol {
+            SpotNotice::Overlap { sheet: *sheet, overlap: -gap }
+        } else if gap > tol {
+            SpotNotice::Gap { sheet: *sheet, gap }
+        } else {
+            continue;
+        };
+        if strict {
+            return Err(match notice {
+                SpotNotice::Gap { sheet, gap } => SpotRefusal::SheetsApart { sheet, gap },
+                _ => SpotRefusal::SheetsOverlap { sheet: *sheet },
+            });
         }
-        if gap > tol {
-            return Err(SpotRefusal::SheetsApart { sheet: *sheet, gap });
-        }
+        notices.push(notice);
     }
 
-    // every face crossed flat and square, and the footprint inside it
+    // every face crossed flat (square, or tilted with a notice), and the footprint inside it
+    let mut upper = None;
+    let last = crossed.last().map(|(sheet, _, far)| (*sheet, far.face));
     let mut tightest: Option<(f64, usize, usize)> = None;
     for &(sheet, near, far) in &crossed {
         let Some(b) = sheets.get(sheet) else {
             continue;
         };
         for hit in [near, far] {
-            flat_normal(b, sheet, hit.face)?;
+            let n = flat_normal(b, sheet, hit.face)?;
             if b.face_square_level(hit.face, v3(normal), v3(point))?.is_none() {
-                return Err(SpotRefusal::FaceNotSquare { sheet, face: hit.face });
+                if strict {
+                    return Err(SpotRefusal::FaceNotSquare { sheet, face: hit.face });
+                }
+                // arithmetic on the kernel's two unit normals: the angle between their lines
+                let cos = n.iter().zip(normal).map(|(a, b)| a * b).sum::<f64>().abs().min(1.0);
+                notices.push(SpotNotice::Tilted { sheet, face: hit.face, angle: cos.acos() });
+                if last == Some((sheet, hit.face)) {
+                    upper = Some((hit.point, n));
+                }
             }
             let edges = b.rim_edges(&[hit.face])?;
             if edges.is_empty() {
@@ -691,7 +814,7 @@ pub fn spot_site(sheets: &[&Body], picked: usize, face: usize, point: [f64; 3], 
         return Err(SpotRefusal::PastFaceEdge { sheet, face, diameter, fits: 2.0 * room });
     }
 
-    Ok(SpotSite {
+    let site = SpotSite {
         // where the line leaves the picked sheet
         at: crossed.first().map_or(point, |(_, _, far)| far.point),
         normal,
@@ -699,7 +822,8 @@ pub fn spot_site(sheets: &[&Body], picked: usize, face: usize, point: [f64; 3], 
             .into_iter()
             .map(|(sheet, near, far)| SpotSheet { sheet, near: near.face, far: far.face, thickness: far.distance - near.distance })
             .collect(),
-    })
+    };
+    Ok(SpotFound { site, fit: SpotFit { gaps, upper }, notices })
 }
 
 /// The outward unit normal of flat record face `face` of sheet `sheet`.
