@@ -33,7 +33,7 @@ pub fn reconstruct_mesh(
     if triangles.len() > MAX_TRIANGLES {
         return Err(Error::Mesh(
             format!(
-                "the mesh has {} triangles, more than the {MAX_TRIANGLES} conversion can take",
+                "the mesh has {} triangles, more than the {MAX_TRIANGLES} conversion can take; reduce the mesh to {MAX_TRIANGLES} triangles or fewer before converting",
                 triangles.len()
             )
             .into(),
@@ -134,6 +134,23 @@ mod tests {
         );
         let (body, _) = Body::from_record(&faceted.body, true).unwrap();
         assert!((body.mass_properties(1e-7).unwrap().volume - 4. / 3.).abs() < 1e-7);
+    }
+
+    #[test]
+    fn oversized_mesh_refusal_names_the_reduction_target() {
+        let error = reconstruct_mesh(&[], &vec![[0, 0, 0]; MAX_TRIANGLES + 1], 0.05)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains(&format!("{} triangles", MAX_TRIANGLES + 1)),
+            "{error}"
+        );
+        assert!(
+            error.contains(&format!(
+                "reduce the mesh to {MAX_TRIANGLES} triangles or fewer before converting"
+            )),
+            "{error}"
+        );
     }
 
     #[test]
