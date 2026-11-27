@@ -434,7 +434,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&PLANE_AT_ANGLE_CONTRACT)
         .output(output_schema_for::<FeatureResult>)
         .params(concat!(
-            "base: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?}; ",
+            "base?: XY|XZ|YZ|plane name, or a planar face {face: [x,y,z], body?, index?, path?} (omitted with a body edge as axis: a flat face that meets the edge, so the plane goes through it); ",
             "axis: X|Y|Z|construction axis name (followed: the plane moves with the axis)|{origin, dir} (origin: [x,y,z] of numbers or length expressions, followed as the parameters change) | {edge|face: [x,y,z]} (a straight or circular edge, or a cylinder, cone or torus face: about its axis, followed as the model changes); ",
             "angle: expr; ",
             "direction_only?: bool (default false: turn about the axis as a line; true: project the axis direction onto base and turn about the line through pivot, or the base origin); ",
@@ -4498,14 +4498,33 @@ fn plane_angle(s: &mut Session, p: &Value) -> Result<Value> {
         direction_only,
         pivot: pivot.clone(),
     };
+    // No reference plane, with a body edge as the axis: a flat face that meets the edge, so the
+    // plane goes through the edge and the angle is measured from that face (#20233).
+    let found;
+    let base = match p.get("base").filter(|b| !b.is_null()) {
+        Some(base) => base,
+        None => {
+            let face = match line.as_deref() {
+                Some(edge @ solidcraft_doc::construct::GeoRef::Edge { .. }) => {
+                    solidcraft_doc::construct::flat_face_at_edge(&s.model.state(), edge).map_err(|e| bad(cmd, e.to_string()))?
+                }
+                _ => return Err(bad(cmd, "`base` is required unless `axis` is a body edge: give the plane the angle is measured from")),
+            };
+            let (body, index, at) =
+                face.ok_or_else(|| bad(cmd, "no flat face runs along this edge: give `base`, the plane the angle is measured from"))?;
+            found = json!({"face": [at.x, at.y, at.z], "body": body, "index": index});
+            &found
+        }
+    };
     // A planar body face: attached exactly, as a sketch on that face is, so the plane follows it.
-    if let Some(face) = p.get("base").filter(|b| b.get("face").is_some()) {
+    if base.get("face").is_some() {
+        let face = base;
         let base = super::sketch::face::capture(s, face, cmd)?;
         super::sketch::face::capture_positions(s, &base)?;
         // The capture is already in the authoring frame.
         return add_feature_in(s, p, FeatureKind::ConstructionPlane { plane: at_angle(base) }, false);
     }
-    let base = plane_param(s, p.get("base"), cmd)?;
+    let base = plane_param(s, Some(base), cmd)?;
     add_feature(s, p, FeatureKind::ConstructionPlane { plane: at_angle(base) })
 }
 

@@ -867,8 +867,10 @@ pub struct OffsetPlaneParams {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct PlaneAtAngleParams {
-    /// The plane to turn.
-    pub base: PlaneOrFace,
+    /// The plane to turn. Omitted with a body edge as `axis`: a flat face that meets the edge, so
+    /// the plane goes through the edge and `angle` is measured from that face (#20233).
+    #[serde(default)]
+    pub base: Option<PlaneOrFace>,
     /// The axis it turns about. A picked edge's or face's axis points the way its largest
     /// component is positive.
     pub axis: AxisLine,
