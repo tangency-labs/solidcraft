@@ -830,9 +830,6 @@ impl<'t> TextEdit<'t> {
                 })
                 .sense(sense)
                 .align2(align)
-                // SolidCraft: hint, prefix and suffix atoms must read on the same centred
-                // baseline as the text painted below (SolidCraft #22642).
-                .optical_center_y(align.y() == Align::Center)
                 .wrap_mode(wrap_mode)
                 .allocate(ui);
 
@@ -946,12 +943,8 @@ impl<'t> TextEdit<'t> {
         // by the distance from the middle of its row box to the middle of a capital's ink,
         // measured from a fixed probe glyph rather than the text itself, so the baseline never
         // moves while one types (SolidCraft #22642).
-        if align.y() == Align::Center && galley.rows.len() == 1 {
-            let font = galley.job.sections.first().map_or_else(
-                || ui.style().text_styles[&TextStyle::Body].clone(),
-                |section| section.format.font_id.clone(),
-            );
-            galley_pos.y -= cap_ink_rise(ui.painter(), &font);
+        if align.y() == Align::Center {
+            galley_pos.y -= galley_cap_ink_rise(ui.painter(), &galley);
         }
         let align_offset = inner_rect.left_top() - galley_pos;
 
@@ -1661,4 +1654,22 @@ pub fn cap_ink_rise(painter: &Painter, font: &FontId) -> f32 {
     let probe = painter.layout_job(job);
     let row = &probe.rows[0];
     row.visuals.mesh_bounds.center().y - 0.5 * row.size.y
+}
+
+/// How far to lift `galley` so a vertically centred line of text reads centred in its row
+/// box: [`cap_ink_rise`] for the font `galley` was laid out with, or `0.0` for a multi-row
+/// galley, which is centred as a block rather than on one baseline. Use with
+/// [`Align::Center`] on the cross axis of whatever contains the text (SolidCraft #22642).
+pub fn galley_cap_ink_rise(painter: &Painter, galley: &Galley) -> f32 {
+    if galley.rows.len() != 1 {
+        return 0.0;
+    }
+    let font = galley.job.sections.first().map_or_else(
+        || {
+            let ctx = painter.ctx();
+            TextStyle::Body.resolve(&ctx.style_of(ctx.theme()))
+        },
+        |section| section.format.font_id.clone(),
+    );
+    cap_ink_rise(painter, &font)
 }

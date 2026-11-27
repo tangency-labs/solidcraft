@@ -3704,7 +3704,7 @@ pub fn tabs_with_view_drop_zones(ui: &mut egui::Ui, strip: &mut TabStrip, r: Rec
                 actions.extend(rename_field(ui, field, rename, &h));
             }
             None => {
-                let rise = super::text::galley_cap_rise(ui.painter(), &g);
+                let rise = egui::galley_cap_ink_rise(ui.painter(), &g);
                 ui.painter().with_clip_rect(clip).galley(pos2(text_x, tr.center().y - text_size.y / 2.0 - rise), g, ink);
             }
         }

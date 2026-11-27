@@ -127,12 +127,14 @@ SolidCraft changes to egui and eframe:
   the field, not the middle of the font's row box (SolidCraft #22642). A row box is not where
   capitals sit: the ascent exceeds the cap height and a descent hangs below the baseline, so
   centring the row box puts the text low in the frame — 1.5 pt with egui's own font. The lift
-  comes from `cap_ink_rise`, exported for SolidCraft's ui-kit to centre hand-drawn pills the same
-  way; it lays out one fixed probe glyph, so it follows the font, its size and the
-  pixels-per-point, and the baseline never moves while one types. `TextEdit` opts the atom
-  container in with `optical_center_y` so hint, prefix and suffix atoms share the lifted
-  baseline; no other atom-layout user is touched. Only `Align::Center` rows are touched; top-
-  and bottom-aligned edits are unchanged. Tests: `crates/egui/tests/text_edit_centering.rs`.
+  comes from `cap_ink_rise`; it lays out one fixed probe glyph, so it follows the font, its size
+  and the pixels-per-point, and the baseline never moves while one types. `galley_cap_ink_rise`
+  applies it to a laid-out galley (zero for multi-row galleys, which centre as a block); both are
+  exported for SolidCraft's ui-kit to centre hand-drawn pills the same way. The atom layout
+  applies the lift to every [`AtomKind::Text`] atom whose cross-axis alignment is centred, so
+  `TextEdit`'s hint, prefix and suffix atoms share its lifted baseline and centred labels in
+  other atom containers read centred too. Only `Align::Center` rows are touched; top- and
+  bottom-aligned edits are unchanged. Tests: `crates/egui/tests/text_edit_centering.rs`.
 
 The SolidCraft 3D view uses both to skip frames for pointer motion that changes nothing it
 draws (`viewport::follow_pointer_without_frame` in `crates/ui-egui`).

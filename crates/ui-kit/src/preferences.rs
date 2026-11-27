@@ -761,7 +761,7 @@ fn centred_text_rows(p: &egui::Painter, rect: Rect, label: &str, font: FontId, i
     job.wrap.max_rows = rows;
     job.halign = egui::Align::Center;
     let galley = p.layout_job(job);
-    let rise = super::text::galley_cap_rise(p, &galley);
+    let rise = egui::galley_cap_ink_rise(p, &galley);
     p.with_clip_rect(rect).galley(rect.center() - galley.rect.center().to_vec2() - egui::vec2(0.0, rise), galley, ink);
 }
 
