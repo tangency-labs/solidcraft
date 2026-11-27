@@ -1010,12 +1010,13 @@ mod tests {
         assert!((v(&cut.slot_plate) - (96000.0 - slots)).abs() < 1e-6);
     }
 
-    /// Request 3, per stretch: a bridge (legs x 20..60 and 100..140 on P, joined above) meets
-    /// Bottom along two stretches of one pair. Each stretch's widths are keyed on where it lies,
-    /// not on its index: the right leg alone (its stretch now the first) draws the same widths.
+    /// Request 3, per stretch: Wall with a 40 x 2 slit (x 60..100, 10 high) up into its foot
+    /// meets Bottom along two stretches of one pair, x 20..60 and 100..140. Each stretch's widths
+    /// are keyed on where it lies, not on its index: with the slit run out past the wall's end (x
+    /// 19..100) only 100..140 is left, now the first stretch, and it draws the same widths.
     #[test]
     fn a_stretch_keeps_its_widths_when_another_stretch_goes() {
-        let (s, p) = bottom();
+        let p = bottom().1;
         let spec = TabSlotSpec {
             layout: Layout::Count(2),
             width: 8.0,
@@ -1028,23 +1029,21 @@ mod tests {
             width_jitter: 3.0,
             tip_chamfer: 0.0,
         };
-        let top = || make_box([20.0, 30.0, 20.0], [120.0, 6.0, 46.0]).unwrap();
-        let leg = |x: f64| make_box([x, 30.0, 6.0], [40.0, 6.0, 14.0]).unwrap();
-        let plan = |t: &Body| {
-            let (_, plan) = t.tab_slot_plan(&s, p, spec, TOL).unwrap().unwrap();
+        let s = bottom().0;
+        let plan = |from: f64| {
+            let wall = make_box([20.0, 30.0, 6.0], [120.0, 6.0, 60.0]).unwrap();
+            let slit = make_box([from, 32.0, 5.0], [100.0 - from, 2.0, 11.0]).unwrap();
+            let wall = boolean(wall, slit, BooleanOp::Subtract).unwrap().unwrap();
+            let (_, plan) = wall.tab_slot_plan(&s, p, spec, TOL).unwrap().unwrap();
             plan.iter()
                 .map(|st| {
-                    st.tabs
-                        .as_ref()
-                        .unwrap()
-                        .iter()
-                        .map(|t| (t.start, t.width))
-                        .collect::<Vec<_>>()
+                    let tabs = st.tabs.as_ref().unwrap();
+                    tabs.iter().map(|t| (t.start, t.width)).collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>()
         };
-        let both = plan(&union_all(vec![top(), leg(20.0), leg(100.0)]).unwrap());
-        let right = plan(&union_all(vec![top(), leg(100.0)]).unwrap());
+        let both = plan(60.0);
+        let right = plan(19.0);
         assert_eq!((both.len(), right.len()), (2, 1), "{both:?} {right:?}");
         assert!(both[1].iter().any(|t| (t.1 - 8.0).abs() > 1e-9), "{both:?}");
         assert_eq!(both[1], right[0]);
