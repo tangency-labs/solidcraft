@@ -5516,6 +5516,13 @@ impl Model {
         self.import_heals_owed
     }
 
+    /// How many imports' reads the model holds until what their checks found is settled
+    /// ([`HeldReads`]): for callers' tests.
+    #[doc(hidden)]
+    pub fn held_import_reads(&self) -> usize {
+        self.held_reads.0.len()
+    }
+
     /// The model holds import `feature`'s read until what its check found is settled
     /// ([`HeldReads`]).
     #[cfg(test)]
