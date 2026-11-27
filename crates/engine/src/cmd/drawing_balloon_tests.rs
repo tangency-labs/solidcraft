@@ -1,8 +1,8 @@
 use serde_json::json;
+use solidcraft_doc::drawing::table_layout::BALLOONED;
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
 use solidcraft_geom::drawing_view::NamedView;
-use solidcraft_geom::table::BALLOONED;
 use solidcraft_sketch::PaperFonts;
 
 use super::*;

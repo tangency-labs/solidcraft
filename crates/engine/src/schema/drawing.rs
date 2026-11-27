@@ -5,9 +5,9 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
+use solidcraft_doc::drawing::revision::Numbering;
 use solidcraft_doc::drawing::{Units, Updates};
 use solidcraft_geom::cell::Projection;
-use solidcraft_geom::revision::Numbering;
 
 use super::check::whole;
 use super::drawing_view::{LineGroupParam, SheetParam};

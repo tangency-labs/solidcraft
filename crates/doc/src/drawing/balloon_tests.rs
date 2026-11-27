@@ -255,7 +255,7 @@ fn a_balloon_reads_the_list_it_names_else_the_only_one() {
 /// balloons read counts only those on its sheet.
 #[test]
 fn a_list_counts_only_the_balloons_that_read_it() {
-    use solidcraft_geom::table::Ballooned;
+    use crate::drawing::table_layout::Ballooned;
     let (mut d, [one, two]) = ballooned();
     let sheet = d.sheets[0].id;
     let other = 1 << 40;

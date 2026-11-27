@@ -1,6 +1,6 @@
 //! A drawing's revision rows (#3874, W31): add, edit and delete them, each one undo step of the
 //! drawing (none when nothing changes); `drawing.inspect` lists them. One revision record covers the whole drawing
-//! ([`solidcraft_geom::revision`]): a new row gets the next revision, after the highest the record
+//! ([`solidcraft_doc::drawing::revision`]): a new row gets the next revision, after the highest the record
 //! has given, and people type the rest. The newest row is the drawing's revision, hidden or not.
 //!
 //! `drawing.revise` (#3874 R1) issues a revision: it appends a copy of a row to the issued history
@@ -10,8 +10,8 @@
 use std::sync::Arc;
 
 use serde_json::Value;
+use solidcraft_doc::drawing::revision::{Field, ModelVersion, RevisionRecord, RevisionRow, Tag};
 use solidcraft_doc::ids;
-use solidcraft_geom::revision::{Field, ModelVersion, RevisionRecord, RevisionRow, Tag};
 
 use super::CommandSpec;
 use crate::params::bad;

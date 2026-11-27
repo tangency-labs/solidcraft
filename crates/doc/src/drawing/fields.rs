@@ -27,10 +27,10 @@
 //! - **prompt:** any key; answers come with templates, so a prompt shows [`MISSING`] until then.
 
 use solidcraft_geom::cell::{Content, MISSING, Part, Source};
-use solidcraft_geom::revision::{Field, RevisionRow};
 use solidcraft_geom::title_block::{CellKind, TitleBlock};
 
 use super::Drawing;
+use super::revision::{Field, RevisionRow};
 use crate::display_units::format_length;
 use crate::{ComponentNameSplit, DocError, Metadata, Result};
 

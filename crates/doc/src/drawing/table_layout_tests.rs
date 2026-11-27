@@ -1,8 +1,8 @@
-use crate::prelude::*;
 use serde_json::json;
+use solidcraft_geom::cell::Format;
+use solidcraft_geom::prelude::*;
 
 use super::*;
-use crate::cell::Format;
 
 /// Every character 0.6 cap heights wide: 1.5 mm at the tests' 2.5 mm text.
 fn fixed(text: &str, cap_mm: f64) -> f64 {
@@ -535,6 +535,6 @@ fn a_table_at_its_limits_is_a_valid_paper_group() {
 }
 
 /// An A3 landscape sheet with these groups.
-fn sheet(groups: Vec<Group>) -> crate::paper::Scene {
-    crate::paper::Scene::new(Vec2::new(420.0, 297.0), groups)
+fn sheet(groups: Vec<Group>) -> solidcraft_geom::paper::Scene {
+    solidcraft_geom::paper::Scene::new(Vec2::new(420.0, 297.0), groups)
 }

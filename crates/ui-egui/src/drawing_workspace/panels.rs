@@ -3,12 +3,12 @@ use solidcraft_engine::doc::drawing::{
     Drawing, MAX_DPI, MAX_NAME_BYTES, MIN_DPI, Sheet,
     dimension::DimensionKind,
     table::{Kind, MassFormat, PartsList},
+    table_layout::Heading,
 };
 use solidcraft_engine::doc::ids;
 use solidcraft_engine::geom::{
     drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet as Paper, SheetSize},
     drawing_view::Scale,
-    table::Heading,
     title_block::{self, TitleBlock},
 };
 use solidcraft_engine::render::VisualStyle;

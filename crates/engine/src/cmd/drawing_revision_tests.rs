@@ -163,7 +163,7 @@ fn hostile_revision_calls_are_refused() {
         refused(&mut s, cmd, p);
     }
     // A record holds at most 1000 rows.
-    for _ in 1..solidcraft_geom::revision::MAX_ROWS {
+    for _ in 1..solidcraft_doc::drawing::revision::MAX_ROWS {
         add(&mut s, json!({}));
     }
     assert!(refused(&mut s, ADD, json!({})).contains("at most 1000 rows"));

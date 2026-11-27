@@ -24,12 +24,12 @@ use solidcore_record::Vec2;
 use solidcraft_doc::bom::{self, Tree};
 use solidcraft_doc::drawing::balloon::balloons_by_row;
 use solidcraft_doc::drawing::table::{Corner, Kind, Place, SheetTable};
+use solidcraft_doc::drawing::table_layout::{BALLOONED, Heading, Row, Table, TableLayout};
 use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_geom::Aabb2;
 use solidcraft_geom::cell::{HAlign, Part};
 use solidcraft_geom::paper::text::Font;
 use solidcraft_geom::paper::{Group, Item, ObjectKind};
-use solidcraft_geom::table::{BALLOONED, Heading, Row, Table, TableLayout};
 use solidcraft_sketch::{Outcome, PaperFonts, PaperLines, TextStyle};
 
 use crate::Session;

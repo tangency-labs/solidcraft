@@ -2178,7 +2178,7 @@ impl Session {
 
     /// The open design's version, for an issued revision to name: nothing in the browser, for an
     /// unsaved design, and until version control gives versions (#2869), which fills this in.
-    pub(crate) fn design_version(&self) -> Option<solidcraft_geom::revision::ModelVersion> {
+    pub(crate) fn design_version(&self) -> Option<solidcraft_doc::drawing::revision::ModelVersion> {
         None
     }
 
