@@ -653,6 +653,7 @@ impl Builder {
             angle2: second.map(deg),
             symmetric,
             convention: RevolveConvention::SketchNormal,
+            join_profile_arcs: false,
             to: None,
         };
         let id = self.add(kind, name)?;

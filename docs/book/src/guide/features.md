@@ -63,7 +63,10 @@ the same for any feature.
 faces, sketch curves or points selected, the view's bottom right corner, above History, shows
 what they measure: an edge's length (Ø and R for a round one), a face's area and perimeter, a point's
 position, two items' distance and angle, several edges' or faces' total. A click copies it. The Measure tool
-(I) does more.
+(I) does more. With its **Spacing of several holes** option ticked, three or more round edges or
+holes measure together: the gap between each neighbouring pair in order along the row, the span,
+whether the spacing is even (and the gap that differs when a hole is left out), and for a bolt
+circle its pitch-circle diameter and the angle between holes.
 
 **Scale bar** (off by default; turn it on in the View menu at the right end of the navigation bar): the view's
 bottom left corner shows a bar and the length it stands for, such as `20 mm`. The length is a round

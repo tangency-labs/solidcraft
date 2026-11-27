@@ -4559,6 +4559,118 @@ fn multi_seed_joined_pattern_separate_copies_inherit_unanimous_seed_material() {
     assert_eq!(s.doc.body_material(&copies[1]), "Steel");
 }
 
+/// Renaming or deleting an input body of a multi-body pattern (with no placement) must fail the
+/// pattern with an unknown-body error instead of silently skipping the missing entries.
+#[test]
+fn pattern_reports_error_when_input_body_is_renamed_or_deleted() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [10, -5, 0], "length": 10, "width": 10, "height": 10, "body_name": "Bracket"}));
+    let p1 = run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Bracket"], "dir1": [0, 1, 0], "count1": 3, "spacing1": 20, "name": "GridPat"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    let p2 = run(
+        &mut s,
+        "solid.pattern.circular",
+        json!({"bodies": ["Bracket", "Bracket (2)", "Bracket (3)"], "axis": "Z", "count": 2, "name": "CircPat"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    let p3 = run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Bracket", "Bracket (2)"], "dir1": [0, 0, 1], "count1": 2, "spacing1": 25, "name": "StackPat"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+
+    assert!(s.model.result(p2).unwrap().error.is_none());
+    assert!(s.model.result(p3).unwrap().error.is_none());
+
+    // Rename P1's copies so Bracket (2) and Bracket (3) no longer exist.
+    run(&mut s, "timeline.edit", json!({"feature": p1, "set": {"body_names": ["Renamed_1", "Renamed_2"]}}));
+    let computed = run(&mut s, "timeline.compute_all", json!({}));
+    assert_eq!(computed["errors"].as_u64(), Some(2), "{computed}");
+
+    let err_p2 = s.model.result(p2).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(
+        err_p2.contains("unknown body `Bracket (2)`") && err_p2.contains("2 missing") && err_p2.contains("`Bracket (3)`"),
+        "expected missing-bodies error on CircPat, got: {err_p2:?}"
+    );
+    let err_p3 = s.model.result(p3).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_p3.contains("unknown body `Bracket (2)`"), "expected unknown-body error on StackPat, got: {err_p3:?}");
+
+    let inspected = run(&mut s, "document.inspect", json!({"bodies": false, "sketches": false}));
+    let timeline = inspected["timeline"].as_array().unwrap();
+    for name in ["CircPat", "StackPat"] {
+        let row = timeline.iter().find(|r| r["name"] == name).unwrap();
+        assert!(row["error"].as_str().is_some_and(|e| e.contains("unknown body")), "{name}: {row}");
+    }
+
+    // Deleting one seed body of a two-body pattern also fails the pattern cleanly.
+    let mut del = Session::default();
+    run(&mut del, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(&mut del, "solid.box", json!({"corner": [30, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Spacer", "name": "SpacerBox"}));
+    let pat = run(
+        &mut del,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Pin", "Spacer"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20, "name": "PairPat"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut del, "timeline.delete", json!({"feature": "SpacerBox"}));
+    let err_del = del.model.result(pat).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_del.contains("unknown body `Spacer`"), "expected unknown-body error after delete, got: {err_del:?}");
+}
+
+/// An explicit placement on a body pattern must resolve strictly within that placement instead of
+/// falling back to a same-named body in the root component (whether a plain root body or an
+/// unrelated root pattern copy).
+#[test]
+fn pattern_explicit_placement_is_not_shadowed_by_same_named_root_body() {
+    let mut s = Session::default();
+    let sub = run(&mut s, "component.create", json!({"name": "SubAsm", "grounded": false}));
+    let occ = sub["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner": [50, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, 100, 0]}));
+
+    run(&mut s, "solid.box", json!({"corner": [0, -80, 0], "length": 10, "width": 10, "height": 10, "body_name": "Housing"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Housing"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 25, "name": "RootPat"}));
+
+    let circ = run(&mut s, "solid.pattern.circular", json!({"bodies": ["Pin", "Housing"], "axis": "Z", "count": 2, "name": "CircPat"}))["feature"]
+        .as_u64()
+        .unwrap();
+    assert!(s.model.result(circ).unwrap().error.is_none());
+
+    // 1) Plain root body ("Housing") paired with occurrence placement `[occ]` must fail instead
+    //    of silently falling back to the root body.
+    if let Some(f) = Arc::make_mut(&mut s.doc).feature_mut(circ)
+        && let solidcraft_doc::FeatureKind::Pattern { bodies, placements, .. } = &mut f.kind
+    {
+        *bodies = vec!["Housing".into(), "Pin".into()];
+        *placements = vec![vec![occ], vec![occ]];
+    }
+    s.refresh();
+    let err_root = s.model.result(circ).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_root.contains("no longer shows it"), "plain root body must not shadow explicit placement: {err_root:?}");
+
+    // 2) Unrelated root pattern copy ("Housing (2)") paired with `[occ]` must also fail instead
+    //    of matching `migrated_copy_placement`'s root prefix `&[]`.
+    if let Some(f) = Arc::make_mut(&mut s.doc).feature_mut(circ)
+        && let solidcraft_doc::FeatureKind::Pattern { bodies, placements, .. } = &mut f.kind
+    {
+        *bodies = vec!["Housing (2)".into(), "Pin".into()];
+        *placements = vec![vec![occ], vec![occ]];
+    }
+    s.refresh();
+    let err_copy = s.model.result(circ).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_copy.contains("no longer shows it"), "root pattern copy must not shadow explicit placement: {err_copy:?}");
+}
+
 #[test]
 fn pattern_edit_without_body_names_preserves_copy_names_and_overrides_with_left_out_entries() {
     let mut s = Session::default();
@@ -4646,4 +4758,30 @@ fn mirror_combine_unmerged_copies_inherit_seed_material() {
     for copy in &multi_copies {
         assert_eq!(s.doc.body_material(copy), solidcraft_doc::DEFAULT_MATERIAL, "{copy}");
     }
+}
+
+/// A pattern of picked placements adds them again once and keeps no timeline feature, so a body
+/// pattern redefined into one says so instead of "did not make a feature" (#22942).
+#[test]
+fn a_body_pattern_redefined_to_picked_placements_says_why_it_is_refused() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name": "Part"}));
+    let occurrence = part["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[0,0,0],"body_name":"PartBox"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[30,0,0],"body_name":"Block"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies":["Block"],"dir1":[0,0,1],"count1":3,"spacing1":20,"name":"Pattern"}));
+    let (doc, occurrences) = (s.doc.clone(), s.doc.occurrences.len());
+    let err = s
+        .execute(
+            "timeline.redefine",
+            &json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+                "occurrences":[[occurrence]],"dir1":[0,0,1],"count1":3,"spacing1":20}}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("not kept in the timeline"), "{err}");
+    assert!(!err.contains("did not make a feature"), "{err}");
+    assert_eq!(s.doc, doc, "the refused edit leaves the design as it was");
+    assert_eq!(s.doc.occurrences.len(), occurrences, "no placement is added");
 }

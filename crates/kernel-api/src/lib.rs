@@ -52,7 +52,7 @@ pub use exchange::{CadirBodies, CadirFailure, CadirRead, CadirRefused, CadirWrit
 pub use frames::{Frames, GussetFailure, MemberRefusal, PathFailure, PathRefusal, TrimRefusal, TrimTarget};
 pub use hole_stacks::{HoleStacks, HoleStacksRefused};
 pub use mesh::{MeshRebuilt, MeshRefused, Meshes, ReconstructionKind};
-pub use modelling::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
+pub use modelling::{Axis2, BoolOp, ChamferSide, DraftCorner, ExtrudeSides, FilletTurn, Modelling, OneCurve, Primitive, RevolveSides, Taper};
 pub use planar::{Planar, PlanarRefused};
 pub use points::{ClassifiedPoint, Distance, PointNormalFace, PointSetSummary, Points, PointsRefused, UnitNormal};
 pub use profiles::{ProfileCurve, ProfileRefused, Profiles};

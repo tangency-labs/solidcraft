@@ -4588,7 +4588,8 @@ impl Session {
         Ok((self, replies))
     }
 
-    /// Measure one or two selections (see `inspect.measure` with `items`); errors come back as
+    /// Measure one or two selections, or three or more round ones for their spacing (see
+    /// `inspect.measure` with `items`); errors come back as
     /// `{"error": …}`.
     pub fn measure_items(&self, items: &[Sel]) -> Value {
         let v = serde_json::to_value(items).unwrap_or(Value::Null);

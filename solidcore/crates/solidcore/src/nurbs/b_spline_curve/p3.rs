@@ -377,7 +377,7 @@ fn global_property_analysis(
             .ok()
             .and_then(|memo| memo.get(key))
         {
-            return Ok(hit);
+            return Ok((*hit).clone());
         }
     }
     let result = global_property_analysis_run(k, curve, domain, property, min_sep)?;
@@ -387,17 +387,120 @@ fn global_property_analysis(
     Ok(result)
 }
 
-/// The kernel settings an analysis depends on, for [`analysis_key`]: its tolerances (by
-/// their debug text, which writes each double so that it reads back exactly) and its
-/// fixes.
+/// The kernel settings an analysis depends on, for [`analysis_key`]: every field of
+/// [`crate::kernel::Tolerances`] bit for bit (destructuring exhaustively so new fields
+/// cannot be missed) plus [`crate::kernel::UpstreamFixes`] packed as a bitmask.
 fn analysis_settings(k: &Kernel) -> Vec<u64> {
-    let mut settings: Vec<u64> = format!("{:?}", k.tolerances)
-        .bytes()
-        .map(u64::from)
-        .collect();
-    settings.push(u64::MAX);
-    settings.extend(k.fixes.flags().map(|(_, on)| u64::from(on)));
+    let crate::kernel::Tolerances {
+        zone_tol_3d,
+        xsect_tol_3d,
+        approx_tol_3d,
+        ang_tol_deg,
+        tol_gap_gain,
+        model_size_estimate,
+        large_small_size_ratio,
+    } = k.tolerances;
+    let mut settings = Vec::new();
+    let _ = settings.try_reserve(9);
+    settings.extend_from_slice(&[
+        zone_tol_3d.to_bits(),
+        xsect_tol_3d.to_bits(),
+        approx_tol_3d.to_bits(),
+        ang_tol_deg.to_bits(),
+        tol_gap_gain.to_bits(),
+        model_size_estimate.to_bits(),
+        large_small_size_ratio.to_bits(),
+    ]);
+    let mut word = 0u64;
+    let mut bit = 0u32;
+    for (_, on) in k.fixes.flags() {
+        if on {
+            word |= 1u64 << bit;
+        }
+        bit += 1;
+        if bit == 64 {
+            settings.push(word);
+            word = 0;
+            bit = 0;
+        }
+    }
+    if bit > 0 {
+        settings.push(word);
+    }
     settings
+}
+
+/// Exact minimum first-derivative speed over a clamped, non-rational, strictly increasing
+/// degree-1 B-spline curve over its full natural domain `domain` (not upstream).
+///
+/// On every span `[u_i, u_{i+1}]` of such a curve, `C'(t) = (P_i - P_{i-1}) / (u_{i+1} - u_i)`
+/// is constant and `C''(t) == 0 == C'''(t)`. Returns `Some(min_speed)` only when every span
+/// has finite positive parameter length `> EFF_ZERO`, finite non-zero speed `>= EFF_ZERO`,
+/// finite positive `speed^3`, and finite `speed^2 < BIG_DOUBLE` so `GlobalPropertyAnalysis`
+/// cannot fail and `MinimizeRadiusOfCurvature` yields no solutions.
+#[allow(clippy::float_cmp)] // exact bit equality of clamped knots and equal weights
+fn linear_bspline_min_speed(curve: &BSplineCurve, domain: &Extent1d) -> Option<f64> {
+    let cur = curve.nurb.as_ref()?;
+    if cur.degree() != 1 {
+        return None;
+    }
+    let cpts = cur.cpts();
+    let knots = cur.knots();
+    let n_cpts = cpts.len();
+    if n_cpts < 2 || knots.len() != n_cpts + 2 {
+        return None;
+    }
+    let u0 = *knots.first()?;
+    let u1 = *knots.get(1)?;
+    let un = *knots.get(n_cpts)?;
+    let un1 = *knots.get(n_cpts + 1)?;
+    if !u0.is_finite()
+        || !un.is_finite()
+        || u0 != u1
+        || un != un1
+        || u0 != domain.min()
+        || un != domain.max()
+    {
+        return None;
+    }
+    let w0 = cpts.first()?.w;
+    if !w0.is_finite() || w0 <= 0.0 {
+        return None;
+    }
+    for c in cpts {
+        if c.w != w0 || !c.x.is_finite() || !c.y.is_finite() || !c.z.is_finite() {
+            return None;
+        }
+    }
+    let mut min_speed = f64::INFINITY;
+    for i in 0..(n_cpts - 1) {
+        let ta = *knots.get(i + 1)?;
+        let tb = *knots.get(i + 2)?;
+        if !ta.is_finite() || !tb.is_finite() || tb <= ta {
+            return None;
+        }
+        let dt = tb - ta;
+        if !dt.is_finite() || dt <= EFF_ZERO {
+            return None;
+        }
+        let p0 = to_euclid(*cpts.get(i)?);
+        let p1 = to_euclid(*cpts.get(i + 1)?);
+        let d = (p1 - p0) / dt;
+        let speed_sq = d.dot(d);
+        let speed = speed_sq.sqrt();
+        let speed3 = speed * speed * speed;
+        if !speed.is_finite()
+            || !speed_sq.is_finite()
+            || !speed3.is_finite()
+            || speed < EFF_ZERO
+            || speed3 <= 0.0
+            || speed_sq >= BIG_DOUBLE
+        {
+            return None;
+        }
+        min_speed = min_speed.min(speed);
+    }
+    min_speed.is_finite().then_some(min_speed)
 }
 
 /// [`global_property_analysis`] without the memo.
@@ -2424,11 +2527,16 @@ impl BSplineCurve {
             };
 
             // the search reports its own status (as the fork, tangency-labs/smlib
-            // 8843967), so it always runs on a sized curve
+            // 8843967), so it always runs on a sized curve; a regular clamped degree-1
+            // non-rational B-spline has constant speed >= tol on every span, so the
+            // global search succeeds with no below-tolerance solution.
             let solutions = if sized {
                 // Not upstream (#11574): a curve proved to move faster than `tol` everywhere
                 // has no solution the test below could fail, so the search is not run
                 let (first_derivs_ok, sols) = if bounds.is_some_and(|b| bound_clears(b.speed, tol))
+                    || (k.memoize_curve_caches
+                        && linear_bspline_min_speed(self, &domain)
+                            .is_some_and(|s| bound_clears(s, tol)))
                 {
                     (true, Vec::new())
                 } else {
@@ -2537,11 +2645,12 @@ impl BSplineCurve {
                 // Not upstream (#11574): a curve proved to have no radius of curvature below
                 // `radius_tol` has no solution the test below could fail
                 let clears = k.memoize_curve_caches
-                    && copy_curve
+                    && (copy_curve
                         .nurb
                         .as_ref()
                         .and_then(span_bounds)
-                        .is_some_and(|b| bound_clears(b.radius, radius_tol));
+                        .is_some_and(|b| bound_clears(b.radius, radius_tol))
+                        || linear_bspline_min_speed(copy_curve, &domain).is_some());
                 let (radii_ok, sols) = if clears {
                     (true, Vec::new())
                 } else {

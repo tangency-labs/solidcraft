@@ -44,9 +44,9 @@ macro_rules! design_preferences {
             /// Where the Drawing workspace shows its sheet chooser.
             drawing_sheets_visibility: String = "multiple".into(), PAGE_DESIGN;
             /// The file name File › Export and Save As Mesh offer: `{design}` and `{body}` stand for the
-            /// design's and the exported body's names (`export_name`). Empty: each export offers the name
-            /// it needs: the design name for the whole design, the body name for a subset. The body-first
-            /// default can be kept by specifying the body template explicitly.
+            /// design's and the exported body's names (`export_name`). `{component}` names an explicitly
+            /// exported component (otherwise the usual export name). Empty: the design name for the
+            /// whole design, the body name for a subset. Existing defaults are unchanged.
             export_name: String = String::new(), PAGE_DESIGN;
             /// The folder export dialogs (File › Export, Save As Mesh, drawings and other saved files)
             /// open in, until another folder is chosen in one (#5522). Empty: the folder last used.

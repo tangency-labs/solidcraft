@@ -6,18 +6,16 @@
 //! others: several constraints between one pair add up, and b keeps every motion they leave free.
 
 use serde_json::{Map, Value, json};
-use solidcraft_doc::joints::{Constraint, Fit, Joint, JointKind, JointOrigin, RefShape};
+use solidcraft_doc::joints::{Constraint, Fit, Joint, JointKind, JointOrigin, RefShape, Snap};
 
 use super::{CommandSpec, add_joint, joint_id, new_joint, origin_param, value};
 use crate::params::{bad, bool_, str_};
-use crate::schema::joints::{CreateConstraintParams, EditConstraintParams, EditJointResult, JointAddedResult};
+use crate::schema::joints::{CONSTRAINT_MESSAGE, CreateConstraintParams, EditConstraintParams, EditJointResult, JointAddedResult};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 const CREATE_CONTRACT: TypedContract<CreateConstraintParams> = TypedContract::new();
 const EDIT_CONTRACT: TypedContract<EditConstraintParams> = TypedContract::new();
-
-const TYPE_MESSAGE: &str = "`type` must be mate, flush, distance, concentric, insert, parallel, perpendicular, angle, tangent or point_on_axis";
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("assembly.constraint.create", "Constrain", crate::checked!("assembly.constraint.create", create))
@@ -26,10 +24,10 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CREATE_CONTRACT)
         .output(output_schema_for::<JointAddedResult>)
         .params(
-            "type: mate|flush|distance|concentric|insert|parallel|perpendicular|angle|tangent|point_on_axis; a, b: references, as joint.create's \
+            "type: mate|flush|distance|concentric|insert|parallel|perpendicular|angle|tangent|point_on_axis|center (a between-faces reference midway between two faces); a, b: references, as joint.create's \
          origins (a planar face or a datum plane for a plane, a round face, circle or axis for an axis, a point; b moves); offset?: the gap (mm or an expression; needed for distance); \
          angle?: deg or an expression (needed for angle); flip?: turn b over; name? (default: the rule and a number, Mate1); quiet?. \
-         Kept as a joint of the kind the rule needs (mate and flush planar, distance planar or point on plane, concentric cylindrical, \
+         Kept as a joint of the kind the rule needs (mate, flush and center planar, distance planar or point on plane, concentric cylindrical, \
          insert revolute, tangent line on plane, point on axis point on line), made where the parts are, so b moves no further than the \
          rule needs → joint, name, dof, conflicts, fixed as joint.create",
         ),
@@ -46,14 +44,17 @@ pub static COMMANDS: &[CommandSpec] = &[
         ),
 ];
 
-/// The shape of a joint origin, for the table of rules (`Constraint::fit`).
-fn shape(o: &JointOrigin) -> RefShape {
-    RefShape::of(&o.snap)
+/// How rule `c` is kept between these references, or why it is refused.
+fn kept(c: Constraint, a: &JointOrigin, b: &JointOrigin, cmd: &str) -> Result<Fit> {
+    if c == Constraint::Center && !matches!((&a.snap, &b.snap), (Snap::BetweenFaces { .. }, _) | (_, Snap::BetweenFaces { .. })) {
+        return Err(bad(cmd, "center takes a between-faces reference: two faces of one part, as `faces`"));
+    }
+    c.fit(RefShape::of(&a.snap), RefShape::of(&b.snap)).ok_or_else(|| bad(cmd, format!("{} needs {}", c.name(), needs(c))))
 }
 
-/// How rule `c` is kept between references of shapes `a` and `b`, or why it is refused.
-fn kept(c: Constraint, a: RefShape, b: RefShape, cmd: &str) -> Result<Fit> {
-    c.fit(a, b).ok_or_else(|| bad(cmd, format!("{} needs {}", c.name(), needs(c))))
+/// A plain joint edit that keeps the Center tag must also keep valid Center references.
+pub(super) fn check_center_sides(a: &JointOrigin, b: &JointOrigin, cmd: &str) -> Result<()> {
+    kept(Constraint::Center, a, b, cmd).map(|_| ())
 }
 
 /// The references a rule takes, for its refusal.
@@ -66,6 +67,7 @@ fn needs(c: Constraint) -> &'static str {
         Constraint::Parallel | Constraint::Perpendicular | Constraint::Angle => "two faces, edges or axes (a point has no direction)",
         Constraint::Tangent => "a planar face and a round face",
         Constraint::PointOnAxis => "a round face or edge (its axis) or an axis, and a point",
+        Constraint::Center => "a between-faces reference (two faces of one part, as `faces`) and a plane",
     }
 }
 
@@ -117,7 +119,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, format!("{} was made as a joint, not as a constraint: change it with joint.edit", j.name)));
     };
     let c = match str_(p, "type") {
-        Some(t) => Some(Constraint::parse(t).ok_or_else(|| bad(cmd, TYPE_MESSAGE))?),
+        Some(t) => Some(Constraint::parse(t).ok_or_else(|| bad(cmd, CONSTRAINT_MESSAGE))?),
         None => None,
     };
     for (key, angle) in [("offset", false), ("angle", true)] {
@@ -136,7 +138,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     let turn = bool_(p, "flip") == Some(true);
     let mut swap = false;
     if let Some(c) = c {
-        let rule = kept(c, shape(&j.a), shape(&j.b), cmd)?;
+        let rule = kept(c, &j.a, &j.b, cmd)?;
         let (a, b) = if rule.swap { (&j.b, &j.a) } else { (&j.a, &j.b) };
         if c == Constraint::Angle && p.get("angle").is_none() && j.kind != JointKind::Angle {
             return Err(bad(cmd, "angle needs `angle`"));
@@ -179,7 +181,7 @@ fn default_name(s: &Session, c: Constraint) -> String {
 
 fn create(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "assembly.constraint.create";
-    let c = str_(p, "type").and_then(Constraint::parse).ok_or_else(|| bad(cmd, TYPE_MESSAGE))?;
+    let c = str_(p, "type").and_then(Constraint::parse).ok_or_else(|| bad(cmd, CONSTRAINT_MESSAGE))?;
     let a = origin_param(s, p.get("a"), cmd)?;
     let b = origin_param(s, p.get("b"), cmd)?;
     // The numbers are read before the references are checked, in the order the contract reads them.
@@ -188,7 +190,7 @@ fn create(s: &mut Session, p: &Value) -> Result<Value> {
             value(s, v, angle, cmd)?;
         }
     }
-    let rule = kept(c, shape(&a), shape(&b), cmd)?;
+    let rule = kept(c, &a, &b, cmd)?;
     let (a, b) = if rule.swap { (b, a) } else { (a, b) };
     if c == Constraint::Distance && p.get("offset").is_none() {
         return Err(bad(cmd, "distance needs `offset`"));

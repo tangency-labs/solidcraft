@@ -149,6 +149,13 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
             other => other.to_string(),
         })
         .collect();
+    for workspace in plugin.get("workspaces").and_then(Value::as_array).into_iter().flatten() {
+        let name = workspace.get("name").and_then(Value::as_str).unwrap_or_default();
+        lines.push(format("ui.plugin_workspace.install", &[("name", name)]));
+        if workspace.get("on_enter").and_then(Value::as_str).is_some() || workspace.get("on_exit").and_then(Value::as_str).is_some() {
+            lines.push(tr("ui.plugin_workspace.hooks").to_owned());
+        }
+    }
     for folder in permissions.and_then(|p| p.get("files")).and_then(Value::as_array).into_iter().flatten() {
         let name = folder.get("name").and_then(Value::as_str).unwrap_or_default();
         let read = folder.get("read").and_then(Value::as_bool).unwrap_or(false);
@@ -210,6 +217,16 @@ pub(crate) fn permission_lines(plugin: &Value) -> Vec<String> {
     let themes: Vec<&str> = themes.collect();
     if !themes.is_empty() {
         lines.push(format("plugin_install.themes", &[("names", &themes.join(", "))]));
+    }
+    // Review every declaration, including capabilities a newer host might grant.
+    let granted = list(plugin.get("granted_capabilities"));
+    for capability in list(plugin.get("optional_capabilities")) {
+        let key = if granted.contains(&capability) {
+            "plugin_install.optional_capability_supported"
+        } else {
+            "plugin_install.optional_capability_unavailable"
+        };
+        lines.push(format(key, &[("capability", &capability)]));
     }
     lines
 }
@@ -419,6 +436,18 @@ mod tests {
     }
 
     #[test]
+    fn plugin_install_lists_workspaces_and_read_only_hooks_before_approval() {
+        crate::i18n::install();
+        let lines = permission_lines(&json!({"workspaces":[
+            {"name":"Machining", "on_enter":"refresh"}, {"name":"Review"}
+        ]}));
+        assert!(lines.iter().any(|line| line.contains("Machining")));
+        assert!(lines.iter().any(|line| line.contains("Review")));
+        assert!(lines.iter().any(|line| line == tr("ui.plugin_workspace.hooks")));
+        assert!(permission_lines(&json!({})).is_empty());
+    }
+
+    #[test]
     fn install_review_shows_swatch_warnings_and_keeps_install_available() {
         let mut h = crate::scenario::Harness::new();
         let warning = "x-solidcraft-swatch bad.png: invalid image; swatch omitted";
@@ -466,6 +495,24 @@ mod tests {
                 "Refresh after design changes (refresh); cannot edit, write files or start jobs"
             ]
         );
+    }
+
+    #[test]
+    fn plugin_install_review_names_all_optional_capabilities() {
+        crate::i18n::install();
+        let plugin = json!({
+            "capabilities": ["commands@0.2"],
+            "optional_capabilities": ["user-storage@0.1", "future@0.1"],
+            "granted_capabilities": ["commands@0.2", "user-storage@0.1"]
+        });
+        assert_eq!(
+            permission_lines(&plugin),
+            [
+                "Optional capability: user-storage@0.1 (supported by this app)",
+                "Optional capability: future@0.1 (not supported by this app; may be enabled by a later version)",
+            ]
+        );
+        assert!(permission_lines(&json!({"capabilities":["commands@0.2"]})).is_empty());
     }
 
     #[test]

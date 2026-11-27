@@ -2,7 +2,7 @@
 //! interface existed.
 
 use solidcore_record::{Plane, Region2, Vec3};
-use solidcraft_kernel_api::{Axis2, BoolOp, ChamferSide, FilletTurn, Modelling, Primitive};
+use solidcraft_kernel_api::{Axis2, BoolOp, ChamferSide, ExtrudeSides, FilletTurn, Modelling, Primitive, RevolveSides, Taper};
 
 use super::Solidcore;
 use crate::Result;
@@ -18,15 +18,28 @@ impl Modelling for Solidcore {
         }
     }
 
-    fn extrude(&self, plane: &Plane, regions: &[Region2], start: f64, end: f64) -> Result<Vec<Body>> {
-        crate::build::extrude(plane, regions, start, end)
+    fn extrude(&self, plane: &Plane, regions: &[Region2], start: f64, end: f64, sides: ExtrudeSides<'_>) -> Result<Vec<Body>> {
+        match sides {
+            ExtrudeSides::AsDrawn => crate::build::extrude(plane, regions, start, end),
+            ExtrudeSides::Whole(one_curve) => crate::build::extrude_whole_sides(plane, regions, start, end, one_curve),
+        }
     }
 
-    fn revolve(&self, plane: &Plane, regions: &[Region2], axis: Axis2, angle: f64, whole: bool) -> Result<Vec<Body>> {
-        if whole {
-            crate::build::revolve_whole(plane, regions, axis.origin, axis.dir, angle)
-        } else {
-            crate::build::revolve(plane, regions, axis.origin, axis.dir, angle)
+    fn extrude_material(&self, plane: &Plane, regions: &[Region2], start: f64, end: f64) -> Result<Body> {
+        crate::prism::extrude_planar_regions(plane, regions, start, end)
+    }
+
+    fn extrude_tapered(&self, plane: &Plane, region: &Region2, t: &Taper) -> Result<Body> {
+        crate::build::extrude_tapered_between(plane, region, t.from, t.to, t.foot, t.dir_sign, t.angle, t.corner)
+    }
+
+    fn revolve(&self, plane: &Plane, regions: &[Region2], axis: Axis2, angle: f64, whole: bool, sides: RevolveSides<'_>) -> Result<Vec<Body>> {
+        let (o, d) = (axis.origin, axis.dir);
+        match sides {
+            RevolveSides::AsDrawn if whole => crate::build::revolve_whole(plane, regions, o, d, angle),
+            RevolveSides::AsDrawn => crate::build::revolve(plane, regions, o, d, angle),
+            RevolveSides::JoinArcs => crate::build::revolve_joining_arcs(plane, regions, o, d, angle),
+            RevolveSides::JoinFreeForm(one_curve) => crate::build::revolve_whole_sides(plane, regions, o, d, angle, one_curve),
         }
     }
 
@@ -38,8 +51,28 @@ impl Modelling for Solidcore {
         crate::blend::fillet_turning(body, edges, radius, turn)
     }
 
+    fn fillet_removing(&self, body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Body, Vec<Vec3>)> {
+        crate::blend::fillet_removing(body, edges, radius, turn)
+    }
+
+    fn fillet_each(&self, body: &Body, edges: &[Vec3], radii: &[f64], turn: FilletTurn) -> Result<Body> {
+        crate::blend::fillet_each(body, edges, radii, turn)
+    }
+
+    fn fillet_setback(&self, body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)]) -> Result<Body> {
+        crate::blend::fillet_setback(body, edges, radius, setbacks)
+    }
+
     fn chamfer(&self, body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
         crate::blend::chamfer(body, edges, distance)
+    }
+
+    fn chamfer_carrying_face(&self, body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
+        crate::blend::chamfer_carrying_face(body, edges, distance)
+    }
+
+    fn chamfer_sides_carrying_face(&self, body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Body> {
+        crate::blend::chamfer_sides_carrying_face(body, edges, d1, side, flip)
     }
 
     fn chamfer_sides(&self, body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Body> {
