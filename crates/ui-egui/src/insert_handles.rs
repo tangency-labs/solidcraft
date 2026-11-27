@@ -199,8 +199,13 @@ mod tests {
             scale: 1.0,
             angle: 0.0,
             natural: Some((20.0, 10.0)),
+            dpi: 96.0,
+            measured_dpi: 96.0,
             middle: Some((40.0, 25.0)),
             align: Align::Middle,
+            simplify: 0.0,
+            auto: false,
+            auto_value: None,
         }
     }
 

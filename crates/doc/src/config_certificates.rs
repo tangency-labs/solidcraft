@@ -444,9 +444,10 @@ impl<'a> ExactSketchCurves<'a> {
         let reversed = generated.reversed();
         let mut found: Option<Option<&str>> = None;
         for (id, originals) in &self.free_form {
-            if originals.iter().any(|original| {
-                *original == *generated || *original == reversed || solidcraft_kernel::services::prism::cubic_contains(original, generated)
-            }) {
+            if originals
+                .iter()
+                .any(|original| *original == *generated || *original == reversed || solidcraft_kernel::affine::cubic_contains(original, generated))
+            {
                 found = Some(if found.is_some() { None } else { Some(*id) });
             }
         }
@@ -843,6 +844,12 @@ impl Document {
         let mut candidates = vec![stem];
         if full != stem {
             candidates.push(full);
+        }
+        // Where its name stands for other faces too (the two caps of an extrude from an offset
+        // start share their role), the face by another name of its own (`F7:cap:low`), made by the
+        // same feature. Only a name that finds this face, with its pieces, on one plane is taken.
+        if let Some(info) = names.info.get(index) {
+            candidates.extend(info.synonyms.iter().map(String::as_str).filter(|name| crate::persistent_name::made_by(name) == Some(origin)));
         }
         candidates.into_iter().find_map(|name| {
             let target = crate::config::ConfigFaceTarget {

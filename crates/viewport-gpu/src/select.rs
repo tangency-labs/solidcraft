@@ -152,6 +152,11 @@ fn rank(t: wgpu::DeviceType) -> u8 {
     }
 }
 
+/// Keep enumeration order for adapters of equal rank.
+fn rank_adapters<T>(found: &mut [T], device_type: impl Fn(&T) -> wgpu::DeviceType) {
+    found.sort_by_key(|a| std::cmp::Reverse(rank(device_type(a))));
+}
+
 fn report(info: &wgpu::AdapterInfo) -> AdapterReport {
     AdapterReport {
         name: info.name.clone(),
@@ -219,7 +224,7 @@ fn adapters(instance: &wgpu::Instance) -> (Vec<wgpu::Adapter>, wgpu::Backends) {
         all = pollster::block_on(start_instance(desc).enumerate_adapters(wgpu::Backends::GL));
         searched |= wgpu::Backends::GL;
     }
-    all.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
+    rank_adapters(&mut all, |a| a.get_info().device_type);
     (all, searched)
 }
 
@@ -264,7 +269,7 @@ pub fn pick_path(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> O
     let mut all = pollster::block_on(instance.enumerate_adapters(backends));
     #[cfg(target_os = "windows")]
     retain_vulkan_instance(&instance, &all);
-    all.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
+    rank_adapters(&mut all, |a| a.get_info().device_type);
     all.into_iter()
         .filter(|a| keep(&a.get_info()))
         .map(|a| {
@@ -284,8 +289,9 @@ pub fn pick(policy: Policy) -> Option<(wgpu::Adapter, AdapterReport)> {
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn open_headless_device(policy: Policy) -> crate::Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue)> {
     let found = adapters(&instance()).0.into_iter().map(|adapter| {
-        let report = report(&adapter.get_info());
-        (adapter, report)
+        let info = adapter.get_info();
+        let device_type = info.device_type;
+        (adapter, device_type, report(&info))
     });
     let (adapter, (device, queue)) = open_first(policy, found, crate::open_device)?;
     Ok((adapter, device, queue))
@@ -294,11 +300,13 @@ pub(crate) fn open_headless_device(policy: Policy) -> crate::Result<(wgpu::Adapt
 #[cfg(any(not(target_arch = "wasm32"), test))]
 fn open_first<T, U>(
     policy: Policy,
-    found: impl IntoIterator<Item = (T, AdapterReport)>,
+    found: impl IntoIterator<Item = (T, wgpu::DeviceType, AdapterReport)>,
     mut open: impl FnMut(&T) -> crate::Result<U>,
 ) -> crate::Result<(T, U)> {
+    let mut found: Vec<_> = found.into_iter().collect();
+    rank_adapters(&mut found, |(_, device_type, _)| *device_type);
     let mut failures = Vec::new();
-    for (adapter, info) in found {
+    for (adapter, _, info) in found {
         if !policy.admits(info.tier) {
             continue;
         }
@@ -322,7 +330,7 @@ fn open_first<T, U>(
 /// first, the first whose tier the policy admits), with its report; `None` when none qualifies.
 /// For a caller with an instance of its own, such as the UI's offscreen tests.
 pub fn pick_among(mut found: Vec<wgpu::Adapter>, policy: Policy) -> Option<(wgpu::Adapter, AdapterReport)> {
-    found.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
+    rank_adapters(&mut found, |a| a.get_info().device_type);
     found
         .into_iter()
         .map(|a| {
@@ -336,13 +344,42 @@ pub fn pick_among(mut found: Vec<wgpu::Adapter>, policy: Policy) -> Option<(wgpu
 mod tests {
     use super::*;
 
-    fn candidate(name: &'static str, tier: Tier) -> (&'static str, AdapterReport) {
-        (name, AdapterReport { name: name.into(), backend: "Vulkan".into(), device_type: String::new(), driver: String::new(), tier })
+    use wgpu::DeviceType;
+
+    fn candidate(name: &'static str, device_type: DeviceType) -> (&'static str, DeviceType, AdapterReport) {
+        let info = AdapterReport {
+            name: name.into(),
+            backend: "Vulkan".into(),
+            device_type: format!("{device_type:?}"),
+            driver: String::new(),
+            tier: tier_of(device_type),
+        };
+        (name, device_type, info)
+    }
+
+    #[test]
+    fn headless_open_uses_existing_preference_order() {
+        let found = [candidate("integrated", DeviceType::IntegratedGpu), candidate("discrete", DeviceType::DiscreteGpu)];
+        let mut attempted = Vec::new();
+        let opened = open_first(Policy::Hardware, found.clone(), |name| {
+            attempted.push(*name);
+            Ok(())
+        });
+        assert_eq!(opened.unwrap(), ("discrete", ()));
+        assert_eq!(attempted, ["discrete"]);
+
+        attempted.clear();
+        let opened = open_first(Policy::Hardware, found, |name| {
+            attempted.push(*name);
+            if *name == "discrete" { Err(crate::GpuError::Device("out of memory".into())) } else { Ok(()) }
+        });
+        assert_eq!(opened.unwrap(), ("integrated", ()));
+        assert_eq!(attempted, ["discrete", "integrated"]);
     }
 
     #[test]
     fn auto_tries_software_after_hardware_device_failure() {
-        let found = [candidate("hardware", Tier::Hardware), candidate("software", Tier::Software)];
+        let found = [candidate("hardware", DeviceType::IntegratedGpu), candidate("software", DeviceType::Cpu)];
         let mut attempted = Vec::new();
         let opened = open_first(Policy::Auto, found, |name| {
             attempted.push(*name);
@@ -354,7 +391,7 @@ mod tests {
 
     #[test]
     fn device_failures_respect_policy_and_report_each_eligible_adapter() {
-        let found = [candidate("first", Tier::Hardware), candidate("second", Tier::Hardware), candidate("software", Tier::Software)];
+        let found = [candidate("first", DeviceType::DiscreteGpu), candidate("second", DeviceType::DiscreteGpu), candidate("software", DeviceType::Cpu)];
         let mut attempted = Vec::new();
         let result: crate::Result<(&str, ())> = open_first(Policy::Hardware, found, |name| {
             attempted.push(*name);
@@ -365,7 +402,7 @@ mod tests {
         assert!(message.contains("hardware") && message.contains("first") && message.contains("second") && message.contains("out of memory"));
         assert!(!message.contains("software"));
 
-        let result = open_first(Policy::Cpu, [candidate("hardware", Tier::Hardware)], |_| Ok(()));
+        let result = open_first(Policy::Cpu, [candidate("hardware", DeviceType::IntegratedGpu)], |_| Ok(()));
         assert!(matches!(result, Err(crate::GpuError::NoAdapter("cpu"))));
     }
 

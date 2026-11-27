@@ -615,6 +615,7 @@ pub(crate) fn turned_back_arc(
             skip_two_pnts_intersection: false,
             ref_point: None,
             closed_by_start_direction: true,
+            heading_side_only: false,
         },
     )?
     .curve_3d;
@@ -832,6 +833,29 @@ impl FilletBrep {
         let end = edge::other_vertex(self.brep(), e, Some(start))?
             .ok_or_else(|| broken_link(op, FE_NO_VERTEX))?;
         Ok((start, end))
+    }
+
+    /// Whether fillet edge `e` runs along an extended edge (`SM_FE_ON_EXTEND_EDGE`) from a
+    /// vertex not yet placed: a rail's end on the end face's surface
+    /// (`SM_FV_RAIL_X_EXTENDED_EDGEUSE`), which [`Self::calc_rail_int_end_surface`] places
+    /// only once the blend is traced. Its curve cannot be computed before then.
+    ///
+    /// # Errors
+    /// `SM_ERR_NULL_POINTER` for an edge without both vertices; those of the lookups.
+    pub(crate) fn extended_edge_awaits_rail(&self, e: EdgeId) -> Result<bool> {
+        if self.fillet_edge(e)?.fillet_edge_type() != FilletEdgeType::OnExtendEdge {
+            return Ok(false);
+        }
+        let (start, end) = self.edge_ends(e, OP_EXT_EDGE)?;
+        for v in [start, end] {
+            let fv = self.fillet_vertex(v)?;
+            if !fv.is_processed()
+                && fv.fillet_vertex_type() == FilletVertexType::RailXExtendedEdgeuse
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     /// `pEdgeuse->SetUVCurve(pCurve)` with its defaults.

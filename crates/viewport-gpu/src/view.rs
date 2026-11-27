@@ -26,6 +26,7 @@ mod gpu_cull;
 mod hiz;
 mod indirect;
 pub use clouds::{CELL_SIZE, Cell, CloudFilter, CloudStyle, ColorMode, FILTERS, GpuCloud, cloud_cell};
+pub mod ground_shadow;
 mod motions;
 use motions::MotionTable;
 pub use motions::{MAX_MOTIONS, MOTIONS_PER_ROW, MotionRows, Motions, UNMOVED, UNMOVED_SLOT};
@@ -119,20 +120,39 @@ pub struct Material {
     /// Lit on both sides: where the eye sees the face's back, it is lit as its front (an open
     /// sheet's back would otherwise be black). Off for solids, which never show their back.
     pub two_sided: bool,
+    /// The axis a turned face was cut about, as a lathe leaves it: a point on it and its
+    /// direction, in the scene's frame. Brushed metal's grooves run around it (rings on a round
+    /// face, circles on a flat face across it). `None`: the shader picks a world axis.
+    pub turn: Option<[[f32; 3]; 2]>,
 }
+
+/// Texel rows a palette row of materials takes in the material texture ([`Material::texels`]).
+const MATERIAL_TEXEL_ROWS: u32 = 4;
 
 impl Material {
     /// The surface `s` as the shader takes it.
     pub fn of(s: &solidcraft_viewport::surface::OpaqueSurface) -> Material {
         let base = s.base_color().to_f32();
-        Material { base, metallic: s.metallic() as f32, roughness: s.roughness() as f32, ior: s.dielectric_ior() as f32, pbr: true, two_sided: false }
+        Material {
+            base,
+            metallic: s.metallic() as f32,
+            roughness: s.roughness() as f32,
+            ior: s.dielectric_ior() as f32,
+            pbr: true,
+            two_sided: false,
+            turn: None,
+        }
     }
 
-    /// Its two texels in the material texture: base and flag, then the optical parameters.
-    fn texels(&self) -> [[f32; 4]; 2] {
+    /// Its texels in the material texture: base and flag, the optical parameters, then the turn
+    /// axis's point (w 1 when there is one) and direction.
+    fn texels(&self) -> [[f32; 4]; MATERIAL_TEXEL_ROWS as usize] {
+        let [at, along] = self.turn.unwrap_or_default();
         [
             [self.base[0], self.base[1], self.base[2], if self.pbr { 1.0 } else { 0.0 }],
             [self.metallic, self.roughness, self.ior, if self.two_sided { 1.0 } else { 0.0 }],
+            [at[0], at[1], at[2], if self.turn.is_some() { 1.0 } else { 0.0 }],
+            [along[0], along[1], along[2], 0.0],
         ]
     }
 }
@@ -870,6 +890,7 @@ pub struct GpuScene {
     pub instance_rows: Arc<std::collections::HashMap<String, (u32, u32)>>,
     /// Non-selectable virtual ground receiving viewport AO, separate from model triangles.
     pub ground_ao: Option<GroundAo>,
+    pub projected_shadow: Option<Arc<ground_shadow::Projection>>,
     /// Opaque triangles. A zero normal draws the colour flat (unlit).
     pub tris: Vec<u8>,
     /// Opaque triangles of open bodies, drawn as `tris` but left out of a section's crossing
@@ -2145,7 +2166,7 @@ fn class_gpu(
 }
 
 impl BlockGpu {
-    fn update(device: &wgpu::Device, old: Option<BlockGpu>, bytes: Arc<BlockBytes>, uploaded: &mut u64) -> BlockGpu {
+    fn update(device: &wgpu::Device, queue: &wgpu::Queue, old: Option<BlockGpu>, bytes: Arc<BlockBytes>, uploaded: &mut u64) -> BlockGpu {
         let fits = bytes.vertices.len() as u64 <= device.limits().max_buffer_size;
         let same_vertices = old.as_ref().is_some_and(|o| Arc::ptr_eq(&o.bytes.vertices, &bytes.vertices));
         let vertices = if !fits || bytes.vertices.is_empty() {
@@ -2158,7 +2179,7 @@ impl BlockGpu {
             *uploaded += bytes.vertices.len() as u64;
             // A buffer the device refuses (the product preview's upload error scope reports it)
             // leaves the block undrawn rather than panicking.
-            buffer_init(device, "sc_block_vertices", &bytes.vertices, wgpu::BufferUsages::VERTEX)
+            buffer_write(device, queue, "sc_block_vertices", &bytes.vertices, wgpu::BufferUsages::VERTEX)
         };
         let mut class = |class: TriClass| {
             let old_pair = old.as_ref().and_then(|o| o.class(class).map(|c| (c, o.bytes.runs(class))));
@@ -2176,7 +2197,7 @@ impl BlockGpu {
         };
         let mut fresh = |data: &[u8], label: &str| {
             *uploaded += data.len() as u64;
-            upload(device, label, data, LINE_SIZE)
+            upload_write(device, queue, label, data, LINE_SIZE)
         };
         let lines = keep(old.as_ref(), |b| &b.lines, |b| b.lines.as_ref()).or_else(|| fresh(&bytes.lines, "sc_block_lines"));
         let hidden = keep(old.as_ref(), |b| &b.hidden, |b| b.hidden.as_ref()).or_else(|| fresh(&bytes.hidden, "sc_block_hidden"));
@@ -2288,7 +2309,7 @@ struct PaletteGpu {
     palette: Arc<Palette>,
     /// Held for the bind group, which views it.
     _texture: wgpu::Texture,
-    /// The PBR materials ([`Material`]): two texel rows for each palette row that has any.
+    /// The PBR materials ([`Material`]): `MATERIAL_TEXEL_ROWS` texel rows for each palette row that has any.
     materials: wgpu::Texture,
     material_rows: u32,
     bind: wgpu::BindGroup,
@@ -2298,11 +2319,11 @@ struct PaletteGpu {
 /// Bytes of one palette texel.
 const PALETTE_TEXEL: u32 = 8;
 
-/// The material texture for `rows` palette rows of materials (two texel rows each).
+/// The material texture for `rows` palette rows of materials (`MATERIAL_TEXEL_ROWS` texel rows each).
 fn material_texture(device: &wgpu::Device, rows: u32) -> wgpu::Texture {
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some("sc_materials"),
-        size: wgpu::Extent3d { width: PALETTE_WIDTH, height: 2 * rows.max(1), depth_or_array_layers: 1 },
+        size: wgpu::Extent3d { width: PALETTE_WIDTH, height: MATERIAL_TEXEL_ROWS * rows.max(1), depth_or_array_layers: 1 },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
@@ -2312,15 +2333,15 @@ fn material_texture(device: &wgpu::Device, rows: u32) -> wgpu::Texture {
     })
 }
 
-/// Palette rows `first..last` of `materials` as the material texture's texels: for each, a row
-/// of base colours and flags, then a row of optical parameters.
+/// Palette rows `first..last` of `materials` as the material texture's texels: for each palette
+/// row, one texel row per entry of [`Material::texels`].
 fn material_bytes(materials: &[Material], first: u32, last: u32) -> Vec<u8> {
     let width = PALETTE_WIDTH as usize;
-    let mut out = Vec::with_capacity((last - first) as usize * 2 * width * 16);
+    let mut out = Vec::with_capacity((last - first) as usize * MATERIAL_TEXEL_ROWS as usize * width * 16);
     for row in first..last {
-        for half in 0..2 {
+        for half in 0..MATERIAL_TEXEL_ROWS as usize {
             for col in 0..width {
-                let texels = materials.get(row as usize * width + col).map_or([[0.0; 4]; 2], Material::texels);
+                let texels = materials.get(row as usize * width + col).map_or(Default::default(), Material::texels);
                 for v in texels[half] {
                     out.extend_from_slice(&v.to_le_bytes());
                 }
@@ -2340,10 +2361,19 @@ fn write_materials(queue: &wgpu::Queue, texture: &wgpu::Texture, materials: &[Ma
     let bytes = material_bytes(materials, first, last);
     *written += bytes.len() as u64;
     queue.write_texture(
-        wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d { x: 0, y: 2 * first, z: 0 }, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d { x: 0, y: MATERIAL_TEXEL_ROWS * first, z: 0 },
+            aspect: wgpu::TextureAspect::All,
+        },
         &bytes,
-        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(PALETTE_WIDTH * 16), rows_per_image: Some(2 * (last - first)) },
-        wgpu::Extent3d { width: PALETTE_WIDTH, height: 2 * (last - first), depth_or_array_layers: 1 },
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(PALETTE_WIDTH * 16),
+            rows_per_image: Some(MATERIAL_TEXEL_ROWS * (last - first)),
+        },
+        wgpu::Extent3d { width: PALETTE_WIDTH, height: MATERIAL_TEXEL_ROWS * (last - first), depth_or_array_layers: 1 },
     );
 }
 
@@ -2487,6 +2517,7 @@ struct GlassSource {
 
 #[derive(Default, Clone)]
 struct Batches {
+    projection: Option<Arc<ground_shadow::Projection>>,
     /// The last scene upload failed (and was logged): a retry that fails again is not.
     upload_failed: bool,
     /// What the last scene taken uploaded.
@@ -2510,6 +2541,7 @@ struct Batches {
     selected_face_instanced: Vec<InstancedDraw>,
     ground_ao: Option<Batch>,
     ground_input: Option<GroundAo>,
+    shadow_fallback: Option<Batch>,
     pbr: Option<Batch>,
     trans: Option<Batch>,
     shadow: Option<Batch>,
@@ -2664,8 +2696,10 @@ impl Batches {
     ) {
         {
             self.uploads = UploadStats::default();
+            self.projection = sc.projected_shadow.clone();
+            self.shadow_fallback = sc.projected_shadow.as_ref().and_then(|p| upload(device, "sc_shadow_fallback", &p.fallback, TRI_SIZE));
             self.planned = match tess {
-                Some((tess, encoder)) => self.planned(device, tess, encoder, &sc.planned, donor.as_deref_mut()),
+                Some((tess, encoder)) => self.planned(device, queue, tess, encoder, &sc.planned, donor.as_deref_mut()),
                 None => Vec::new(),
             };
             // On a device that draws them indirectly, the meshes go into the arena (only those it
@@ -2756,7 +2790,7 @@ impl Batches {
                         shared.or(mine)
                     }
                 };
-                self.blocks.insert(block.key, BlockGpu::update(device, old, block.bytes.clone(), &mut geometry));
+                self.blocks.insert(block.key, BlockGpu::update(device, queue, old, block.bytes.clone(), &mut geometry));
                 order.push(block.key);
             }
             self.block_order = order;
@@ -3025,10 +3059,14 @@ impl Batches {
             g.run(device, queue, encoder, vp, size, hidden, changed, &self.instanced, indirect, self.edges.as_mut(), hover);
             return;
         }
-        if changed && let Some(indirect) = self.indirect.as_mut() {
+        if let Some(indirect) = self.indirect.as_mut()
+            && (changed || indirect.args_missing())
+        {
             indirect.write(device, queue, &self.instanced);
         }
-        if edges_changed && let Some(edges) = self.edges.as_mut() {
+        if let Some(edges) = self.edges.as_mut()
+            && (edges_changed || edges.args_missing())
+        {
             edges.write(device, queue, &edges::Part::of_draws(&self.instanced));
         }
     }
@@ -3166,6 +3204,7 @@ impl Batches {
     fn planned(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         tess: &crate::TessGpu,
         encoder: &mut wgpu::CommandEncoder,
         bodies: &[PlannedBody],
@@ -3193,18 +3232,19 @@ impl Batches {
             std::hash::Hash::hash(&(Arc::as_ptr(&b.plan) as usize), &mut h);
             open = !std::hash::Hasher::finish(&h).is_multiple_of(CHUNK_SPLIT) && chunks.last().is_some_and(|c| c.len() < MAX_CHUNK_BODIES);
         }
-        let key = |c: &[&PlannedBody]| c.iter().map(|b| Arc::as_ptr(&b.plan) as usize).collect::<Vec<usize>>();
-        self.resident.retain(|k, _| chunks.iter().any(|c| key(c) == *k));
-        self.chunk_colors.retain(|k, _| chunks.iter().any(|c| key(c) == *k));
+        // Looked up, not searched for: a large model has thousands of chunks.
+        let chunk_keys: Vec<Vec<usize>> = chunks.iter().map(|c| c.iter().map(|b| Arc::as_ptr(&b.plan) as usize).collect()).collect();
+        let live: std::collections::HashSet<&[usize]> = chunk_keys.iter().map(Vec::as_slice).collect();
+        self.resident.retain(|k, _| live.contains(k.as_slice()));
+        self.chunk_colors.retain(|k, _| live.contains(k.as_slice()));
         let mut out = Vec::with_capacity(chunks.len());
-        for chunk in &chunks {
-            let k = key(chunk);
+        for (chunk, k) in chunks.iter().zip(chunk_keys) {
             if !self.resident.contains_key(&k)
                 && let Some(shared) = donor.as_deref_mut().and_then(|d| d.resident.remove(&k))
             {
-                self.resident.insert(k, shared);
+                self.resident.insert(k.clone(), shared);
             }
-            let mesh = match self.resident.get(&key(chunk)) {
+            let mesh = match self.resident.get(&k) {
                 Some((_, m)) => m.clone(),
                 None => {
                     let plans: Vec<&solidcore_tess::TessPlan> = chunk.iter().map(|b| &*b.plan).collect();
@@ -3213,7 +3253,7 @@ impl Batches {
                             self.uploads.evaluated += plans.iter().map(|p| p.vertex_count() as u64).sum::<u64>();
                             tess.record(encoder, &m);
                             let m = Arc::new(m);
-                            self.resident.insert(key(chunk), (chunk.iter().map(|b| b.plan.clone()).collect(), m.clone()));
+                            self.resident.insert(k.clone(), (chunk.iter().map(|b| b.plan.clone()).collect(), m.clone()));
                             m
                         }
                         Err(e) => {
@@ -3231,9 +3271,9 @@ impl Batches {
                 }
                 std::hash::Hasher::finish(&h)
             };
-            if let Some((_, colors)) = self.chunk_colors.get(&key(chunk)).filter(|(l, _)| *l == looks) {
+            if let Some((_, colors)) = self.chunk_colors.get(&k).filter(|(l, _)| *l == looks) {
                 let (class, closed) = chunk.first().map_or((TriClass::Opaque, true), |b| (b.class, b.closed));
-                out.push(PlannedDraw { mesh, colors: colors.clone(), class, closed, plans: key(chunk) });
+                out.push(PlannedDraw { mesh, colors: colors.clone(), class, closed, plans: k });
                 continue;
             }
             let mut bytes = Vec::with_capacity(mesh.vertex_face.len() * 4);
@@ -3245,10 +3285,10 @@ impl Batches {
                 }
             }
             self.uploads.planned += bytes.len() as u64;
-            if let Some((colors, _)) = upload(device, "sc_planned_colors", &bytes, 4).and_then(|c| c.parts.into_iter().next()) {
+            if let Some((colors, _)) = upload_write(device, queue, "sc_planned_colors", &bytes, 4).and_then(|c| c.parts.into_iter().next()) {
                 let (class, closed) = chunk.first().map_or((TriClass::Opaque, true), |b| (b.class, b.closed));
-                self.chunk_colors.insert(key(chunk), (looks, colors.clone()));
-                out.push(PlannedDraw { mesh, colors, class, closed, plans: key(chunk) });
+                self.chunk_colors.insert(k.clone(), (looks, colors.clone()));
+                out.push(PlannedDraw { mesh, colors, class, closed, plans: k });
             }
         }
         out
@@ -3491,6 +3531,9 @@ struct Picture {
     ground_ao_key: Option<(u64, u64, bool, u32, bool)>,
     /// The frame's own ground ([`Frame::ground`]) the receiver was last built for.
     ground_ao_for: Option<GroundAo>,
+    /// This view's cached projected coverage, independent of its viewing camera.
+    shadow: Option<ground_shadow::Resources>,
+    shadow_key: Option<u64>,
     /// What the frame `prepare` drew offscreen (supersampled, or for see-through surfaces),
     /// published when `paint` copies it into the view.
     ss_stats: DrawStats,
@@ -4770,6 +4813,17 @@ fn upload(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize) -> Op
 }
 
 fn upload_with(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize, usage: wgpu::BufferUsages) -> Option<Batch> {
+    batch(device, bytes, stride, |part| buffer_init(device, label, part, usage))
+}
+
+/// As [`upload`], written through `queue` ([`buffer_write`]): for what a scene uploads again and
+/// again as the view changes.
+fn upload_write(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, bytes: &[u8], stride: usize) -> Option<Batch> {
+    batch(device, bytes, stride, |part| buffer_write(device, queue, label, part, wgpu::BufferUsages::VERTEX))
+}
+
+/// `bytes` of `stride` in as many buffers made by `buffer` as the device's limit takes.
+fn batch(device: &wgpu::Device, bytes: &[u8], stride: usize, buffer: impl Fn(&[u8]) -> Option<wgpu::Buffer>) -> Option<Batch> {
     if bytes.len() < stride || stride == 0 {
         return None;
     }
@@ -4777,7 +4831,7 @@ fn upload_with(device: &wgpu::Device, label: &str, bytes: &[u8], stride: usize, 
     let parts = bytes
         .chunks(chunk)
         .filter(|part| part.len() >= stride)
-        .map(|part| Some((buffer_init(device, label, part, usage)?, u32::try_from(part.len() / stride).unwrap_or(0))))
+        .map(|part| Some((buffer(part)?, u32::try_from(part.len() / stride).unwrap_or(0))))
         .collect::<Option<Vec<_>>>()?;
     Some(Batch { parts, chunk })
 }
@@ -4846,6 +4900,17 @@ fn spilled_lines(sc: &GpuScene, spill: Spill) -> Option<(Vec<u8>, Vec<u8>)> {
 /// upload can fail and leave the previous picture in place.
 fn buffer_init(device: &wgpu::Device, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> Option<wgpu::Buffer> {
     match crate::buffer_init(device, label, contents, usage) {
+        Ok(buffer) => Some(buffer),
+        Err(error) => {
+            refused(error.to_string());
+            None
+        }
+    }
+}
+
+/// As [`buffer_init`], written through `queue` ([`crate::buffer_write`]).
+fn buffer_write(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> Option<wgpu::Buffer> {
+    match crate::buffer_write(device, queue, label, contents, usage) {
         Ok(buffer) => Some(buffer),
         Err(error) => {
             refused(error.to_string());
@@ -5156,8 +5221,10 @@ impl Renderer {
             self.pic.ss_key = None;
         }
         self.timing = time;
-        if let Some(timer) = &mut self.timer {
-            timer.begin(device, time);
+        // A timed frame whose timestamps came back without times (a new query set's first frame
+        // on Apple's GPUs) is drawn and timed once more: a still view times no other frame.
+        if self.timer.as_mut().is_some_and(|timer| timer.begin(device, time)) {
+            self.pic.ss_key = None;
         }
         self.prepare_frame(device, queue, encoder, frame, isolated);
         // The times cover the passes recorded here, in `prepare`. A frame drawn straight into the
@@ -5317,6 +5384,7 @@ impl Renderer {
             res.pic.ground_ao_key = Some(ground_key);
             res.pic.ground_ao_for = cb.ground;
         }
+        res.prepare_shadow(device, queue, encoder, cb);
         queue.write_buffer(&res.uniform, 0, &uniform_bytes(cb, cb.size_px[0], cb.size_px[1], res.linear_out, res.target.reversed_depth()));
         if let Some(a) = &cb.access
             && a.version != res.access_version
@@ -5463,6 +5531,35 @@ impl Renderer {
             let gpu = if s.time_passes { self.timer.as_ref().and_then(|t| t.last) } else { None };
             *s = DrawStats { lowered: self.lowered, time_passes: s.time_passes, gpu, ..drawn };
         }
+    }
+
+    /// Refresh the camera-independent coverage only when its casters change.
+    fn prepare_shadow(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, cb: &Frame) {
+        use std::hash::{Hash, Hasher};
+        let Some(original) = self.pic.sketch.projection.clone().or_else(|| self.pic.model.projection.clone()) else {
+            self.pic.shadow = None;
+            self.pic.shadow_key = None;
+            return;
+        };
+        let motion = cb.moving.as_ref().map(|moving| (moving.key, moving.transform.map(|column| column.map(f32::to_bits))));
+        let mut hash = std::collections::hash_map::DefaultHasher::new();
+        (cb.key, cb.pv_key, cb.pv_hide, cb.clip.map(|p| p.map(f32::to_bits)), Arc::as_ptr(&original) as usize, motion, cb.motions.key())
+            .hash(&mut hash);
+        let key = hash.finish();
+        if self.pic.shadow_key == Some(key) {
+            return;
+        }
+        if self.pic.shadow.is_none() {
+            self.pic.shadow = ground_shadow::Resources::new(device, &self.image_bgl, &self.uniform_bgl.layout);
+        }
+        let projection = original.with_preview(if cb.pv_hide { None } else { cb.preview_bounds });
+        let projection = projection.as_ref().unwrap_or(&original);
+        let preview = if cb.pv_hide { &self.empty } else { &self.preview };
+        if let Some(shadow) = &mut self.pic.shadow {
+            let moving = cb.moving.as_ref().map(|moving| (&self.pic.moving, moving.transform));
+            shadow.prepare(device, queue, encoder, projection, cb.clip, [&self.pic.model, preview], moving, &self.bind, &cb.motions);
+        }
+        self.pic.shadow_key = Some(key);
     }
 
     /// The target the pipelines draw into.
@@ -5685,6 +5782,11 @@ impl Renderer {
         tris(pass, &res.pbr, &m.pbr);
         if !cb.product {
             res.clouds.paint(pass, &res.cloud_pipes, tally);
+            // Clouds use a pipeline layout with only 2 bind groups, which invalidates groups 1 and 2
+            // for the lit pipeline that follows. Rebind access and AO maps so later triangles read
+            // valid data (#16048).
+            pass.set_bind_group(1, &res.access_bind, &[]);
+            pass.set_bind_group(2, &res.ao.maps.bind, &[]);
         }
         in_moving(pass, &|pass, mv| tris(pass, &res.pbr, &mv.pbr));
         block_class(pass, &res.pbr_palette, TriClass::Pbr);
@@ -5803,6 +5905,24 @@ impl Renderer {
         tris(pass, &res.guide_trans, &m.shadow);
         pass.set_bind_group(0, scene_bind(sk, &res.bind), &[]);
         tris(pass, &res.guide_trans, &sk.shadow);
+        pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
+        let shadow_source = if sk.projection.is_some() { sk } else { m };
+        pass.set_bind_group(0, scene_bind(shadow_source, &res.bind), &[]);
+        if shadow_source.projection.as_ref().is_some_and(|p| p.visible(cb.back)) {
+            if let Some(shadow) = &res.pic.shadow {
+                pass.set_pipeline(&res.image);
+                pass.set_bind_group(1, &shadow.bind, &[]);
+                if let Some(quad) = &shadow.quad {
+                    for (buffer, count) in &quad.parts {
+                        pass.set_vertex_buffer(0, buffer.slice(..));
+                        pass.draw(0..*count, 0..1);
+                        tally.triangles(*count, 1);
+                    }
+                }
+            } else {
+                tris(pass, &res.guide_trans, &shadow_source.shadow_fallback);
+            }
+        }
         pass.set_bind_group(0, scene_bind(m, &res.bind), &[]);
         // The model's edges' depth, so the see-through faces drawn next do not blend over an edge
         // in front of them (they write no depth, and the edges were drawn before them). Only
@@ -7636,7 +7756,7 @@ mod glass_tests {
             let mut b = BlockBuilder::default();
             // In z = 0, its normal away from the eye at +Z.
             b.triangle([[-20.0, -20.0, 0.0], [20.0, -20.0, 0.0], [0.0, 20.0, 0.0]], [[0.0, 0.0, -1.0]; 3], PaletteIndex(0), TriClass::Pbr);
-            let material = Material { base: [0.6, 0.6, 0.6], metallic: 0.0, roughness: 0.6, ior: 1.5, pbr: true, two_sided };
+            let material = Material { base: [0.6, 0.6, 0.6], metallic: 0.0, roughness: 0.6, ior: 1.5, pbr: true, two_sided, turn: None };
             GpuScene {
                 palette: Arc::new(Palette::with_stable(vec![[150, 150, 150, 255]]).with_materials(vec![material])),
                 blocks: vec![SceneBlock { key: 3, bytes: b.freeze() }],
@@ -7684,7 +7804,8 @@ mod glass_tests {
         let mut b = BlockBuilder::default();
         b.triangle([[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], [[0.0, 0.0, 1.0]; 3], PaletteIndex(0), TriClass::Pbr);
         let bytes = b.freeze();
-        let material = |roughness: f32| Material { base: [0.5, 0.3, 0.2], metallic: 1.0, roughness, ior: 1.5, pbr: true, two_sided: false };
+        let material =
+            |roughness: f32| Material { base: [0.5, 0.3, 0.2], metallic: 1.0, roughness, ior: 1.5, pbr: true, two_sided: false, turn: None };
         let scene = |m: Material| GpuScene {
             palette: Arc::new(Palette::with_stable(vec![[180, 120, 70, 255]]).with_materials(vec![m])),
             blocks: vec![SceneBlock { key: 3, bytes: bytes.clone() }],
@@ -7700,7 +7821,7 @@ mod glass_tests {
         assert!(first.geometry > 0 && first.palette > 0, "the first scene uploads its block and tables: {first:?}");
         let edited = take(&mut r, 2, scene(material(0.6)));
         assert_eq!(edited.geometry, 0, "a material edit uploads no geometry: {edited:?}");
-        assert_eq!(edited.palette, u64::from(2 * PALETTE_WIDTH * 16), "one row of materials (two texel rows): {edited:?}");
+        assert_eq!(edited.palette, u64::from(MATERIAL_TEXEL_ROWS * PALETTE_WIDTH * 16), "one row of materials (its texel rows): {edited:?}");
     }
 
     /// Without order-independent transparency, the sorted glass stream is kept while the blocks'
@@ -8822,7 +8943,8 @@ mod glass_tests {
         }
         assert_eq!(frames(&mut timed), None, "the times go once the readout stops asking");
         // A still view: the same frame again shows the picture already drawn, which records no
-        // passes. Timing asked for over it draws a frame once, so its times come all the same.
+        // passes. Timing asked for over it draws a frame once, so its times come all the same; and
+        // once more where that frame's timestamps read back empty (a new query set's on Metal).
         let mut still = Renderer::new(&device, target, None);
         let frame = test_frame(two_layers([220, 40, 40, 128], [40, 40, 220, 128], true), 1.0);
         render_frame(&mut still, &device, &queue, &frame, true);

@@ -125,6 +125,30 @@ pub fn buffer_init(device: &wgpu::Device, label: &str, contents: &[u8], usage: w
     Ok(buffer)
 }
 
+/// As [`buffer_init`], written through `queue` ahead of its next submit, so the contents are written
+/// to upload memory once. A buffer mapped at creation is first filled with zeros there (wgpu-core's
+/// `create_buffer`) and then written. Upload memory can be slow for the CPU to write (#7663). The
+/// buffer also gets `COPY_DST`; command buffers submitted to `queue` from now on read the contents.
+pub fn buffer_write(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, contents: &[u8], usage: wgpu::BufferUsages) -> Result<wgpu::Buffer> {
+    let align = wgpu::COPY_BUFFER_ALIGNMENT as usize;
+    let size = (contents.len().div_ceil(align) * align).max(align) as u64;
+    let scopes = error_scopes(device);
+    let usage = usage | wgpu::BufferUsages::COPY_DST;
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: Some(label), size, usage, mapped_at_creation: false });
+    // Whole words; the rest padded with zeros, as `buffer_init` leaves it.
+    let (words, rest) = contents.split_at(contents.len() - contents.len() % align);
+    if !words.is_empty() {
+        queue.write_buffer(&buffer, 0, words);
+    }
+    if !rest.is_empty() {
+        let mut last = [0u8; wgpu::COPY_BUFFER_ALIGNMENT as usize];
+        last.iter_mut().zip(rest).for_each(|(to, from)| *to = *from);
+        queue.write_buffer(&buffer, words.len() as u64, &last);
+    }
+    // A refused buffer makes the writes to it fail too: the scopes tell which came first.
+    caught(scopes).map_or(Ok(buffer), |error| Err(GpuError::Render(error)))
+}
+
 /// The D3D12 shader compiler every wgpu instance starts with (#6756). `WGPU_DX12_COMPILER` names
 /// one as wgpu reads it; unset, `auto` or a value wgpu does not know leave the choice to this
 /// crate: DXC from the `dxcompiler.dll` beside the program, by its full path, else FXC.
@@ -270,8 +294,6 @@ pub struct Part {
 pub struct TessGpu {
     adapter: String,
     device: wgpu::Device,
-    /// For the blocking [`TessGpu::evaluate`] (native only).
-    #[cfg(not(target_arch = "wasm32"))]
     queue: wgpu::Queue,
     pipeline: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
@@ -302,17 +324,7 @@ impl TessGpu {
         if let Some(e) = failed {
             return Err(GpuError::Pipeline(e));
         }
-        // A viewport records the evaluation into its own frame (see `TessGpu::record`).
-        #[cfg(target_arch = "wasm32")]
-        let _ = queue;
-        Ok(TessGpu {
-            adapter: adapter.into(),
-            device,
-            #[cfg(not(target_arch = "wasm32"))]
-            queue,
-            pipeline,
-            layout,
-        })
+        Ok(TessGpu { adapter: adapter.into(), device, queue, pipeline, layout })
     }
 
     fn build(device: &wgpu::Device, shader: &str) -> (wgpu::ComputePipeline, wgpu::BindGroupLayout) {
@@ -432,14 +444,14 @@ impl TessGpu {
         if packed.count > MAX_BATCH {
             return Err(GpuError::Unsupported(format!("{} vertices in one dispatch", packed.count)));
         }
-        let d = &self.device;
+        let (d, queue) = (&self.device, &self.queue);
         let count = word(packed.count)?;
         let words = |v: &[u32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
         let floats = |v: &[f32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
-        let params = tess_buffer::<[u32; 4]>(d, "tess params", words(&[count, 0, 0, 0]), wgpu::BufferUsages::UNIFORM)?;
-        let surfaces = tess_buffer::<[u32; SURFACE_WORDS]>(d, "tess surfaces", words(&packed.surfaces), wgpu::BufferUsages::STORAGE)?;
-        let data = tess_buffer::<f32>(d, "tess data", floats(&packed.data), wgpu::BufferUsages::STORAGE)?;
-        let verts = tess_buffer::<[u32; VERTEX_WORDS]>(d, "tess vertices", words(&packed.vertices), wgpu::BufferUsages::STORAGE)?;
+        let params = tess_buffer::<[u32; 4]>(d, queue, "tess params", words(&[count, 0, 0, 0]), wgpu::BufferUsages::UNIFORM)?;
+        let surfaces = tess_buffer::<[u32; SURFACE_WORDS]>(d, queue, "tess surfaces", words(&packed.surfaces), wgpu::BufferUsages::STORAGE)?;
+        let data = tess_buffer::<f32>(d, queue, "tess data", floats(&packed.data), wgpu::BufferUsages::STORAGE)?;
+        let verts = tess_buffer::<[u32; VERTEX_WORDS]>(d, queue, "tess vertices", words(&packed.vertices), wgpu::BufferUsages::STORAGE)?;
         let vertices = d.create_buffer(&wgpu::BufferDescriptor {
             label: Some("tess mesh vertices"),
             size: (packed.count.max(1) as u64) * VERTEX_STRIDE,
@@ -462,7 +474,7 @@ impl TessGpu {
             }
             parts.push(Part { vertices: v0..offset, indices: i0..word(tri.len())? });
         }
-        let indices = tess_buffer::<u32>(d, "tess mesh indices", words(&tri), wgpu::BufferUsages::INDEX)?;
+        let indices = tess_buffer::<u32>(d, queue, "tess mesh indices", words(&tri), wgpu::BufferUsages::INDEX)?;
         let bind = d.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("tess mesh"),
             layout: &self.layout,
@@ -508,10 +520,11 @@ impl TessGpu {
         let bytes_u32 = |v: &[u32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
         let bytes_f32 = |v: &[f32]| v.iter().flat_map(|x| x.to_le_bytes()).collect::<Vec<u8>>();
         let count = u32::try_from(n).map_err(|_| GpuError::Failed("batch too large".into()))?;
-        let params = tess_buffer::<[u32; 4]>(d, "tess params", bytes_u32(&[count, 0, 0, 0]), wgpu::BufferUsages::UNIFORM)?;
-        let surfaces = tess_buffer::<[u32; SURFACE_WORDS]>(d, "tess surfaces", bytes_u32(&packed.surfaces), wgpu::BufferUsages::STORAGE)?;
-        let data = tess_buffer::<f32>(d, "tess data", bytes_f32(&packed.data), wgpu::BufferUsages::STORAGE)?;
-        let verts = tess_buffer::<[u32; VERTEX_WORDS]>(d, "tess vertices", bytes_u32(vertices), wgpu::BufferUsages::STORAGE)?;
+        let queue = &self.queue;
+        let params = tess_buffer::<[u32; 4]>(d, queue, "tess params", bytes_u32(&[count, 0, 0, 0]), wgpu::BufferUsages::UNIFORM)?;
+        let surfaces = tess_buffer::<[u32; SURFACE_WORDS]>(d, queue, "tess surfaces", bytes_u32(&packed.surfaces), wgpu::BufferUsages::STORAGE)?;
+        let data = tess_buffer::<f32>(d, queue, "tess data", bytes_f32(&packed.data), wgpu::BufferUsages::STORAGE)?;
+        let verts = tess_buffer::<[u32; VERTEX_WORDS]>(d, queue, "tess vertices", bytes_u32(vertices), wgpu::BufferUsages::STORAGE)?;
         let size = (n as u64) * VERTEX_STRIDE;
         let out = d.create_buffer(&wgpu::BufferDescriptor {
             label: Some("tess out"),
@@ -566,9 +579,9 @@ pub const VERTEX_WORDS: usize = 8;
 pub const SURFACE_WORDS: usize = 12;
 
 // Each empty binding still needs a whole element of its packed shader representation.
-fn tess_buffer<T>(device: &wgpu::Device, label: &str, mut contents: Vec<u8>, usage: wgpu::BufferUsages) -> Result<wgpu::Buffer> {
+fn tess_buffer<T>(device: &wgpu::Device, queue: &wgpu::Queue, label: &str, mut contents: Vec<u8>, usage: wgpu::BufferUsages) -> Result<wgpu::Buffer> {
     contents.resize(contents.len().max(std::mem::size_of::<T>()), 0);
-    buffer_init(device, label, &contents, usage)
+    buffer_write(device, queue, label, &contents, usage)
 }
 
 /// Plans as the tessellation shader reads them: exactly what [`TessGpu::prepare_many`] uploads

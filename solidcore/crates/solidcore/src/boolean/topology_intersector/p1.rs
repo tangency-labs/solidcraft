@@ -204,6 +204,7 @@ use crate::math::{max2, min2, Point2, Point3, BIG_DOUBLE, EFF_ZERO, PI};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::math::gamma;
+use crate::surface::surface::certified_line::LinePasses;
 use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::p2::SurfaceKind;
@@ -587,6 +588,23 @@ pub trait IntersectorBrep<O>:
     ///
     /// Those of the edit; [`SolidError::InvalidInput`] for a vertex of another B-rep.
     fn brep_delete_vertex(&mut self, k: &mut Kernel, brep: O, vertex: O) -> Result<()>;
+    /// Batch deletion of `faces`, together with any edges of those faces that become wire
+    /// edges (except those in `keep_wires`) and any vertices that become shell vertices,
+    /// reconciling affected shells once at the end. Returns `Ok(Some((edges, vertices)))`
+    /// with the deleted wire edges and shell vertices when handled in batch, or `Ok(None)`
+    /// to use the per-entity `brep_delete_*` path.
+    ///
+    /// # Errors
+    ///
+    /// Those of the batch edit.
+    fn brep_delete_faces_batch(
+        &mut self,
+        _k: &mut Kernel,
+        _faces: &[O],
+        _keep_wires: Option<&[O]>,
+    ) -> Result<Option<(Vec<O>, Vec<O>)>> {
+        Ok(None)
+    }
     /// `SmBrep::GlueEdgesGeneral(pSurvivingEdge, eRelativeOrientation, dEdgeGap,
     /// bDoRegionNesting, pEdgeToDelete, pInsideFaceuses)` on B-rep `brep`
     /// (`topology::brep::p7::glue_edges_general`; `pInsideFaceuses` defaults to `NULL`).
@@ -4262,6 +4280,11 @@ struct FaceCaches<O> {
     /// The faces the classifications of the attempt resolved to B-rep entities, from
     /// which the face owning a trim request's edge use is found.
     classified_faces: RefCell<Vec<O>>,
+    /// (not upstream) The searches of the certified line pass the solve has made, kept
+    /// over its attempts: an attempt after a cache is built or a trim made runs the solve
+    /// again from its start, and its line solves repeat the searches of the attempts before
+    /// it on the same inputs ([`LinePasses`]).
+    line_passes: RefCell<LinePasses>,
 }
 
 /// The intersector's topology objects with the face caches of [`FaceCaches`]: the
@@ -4355,6 +4378,10 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Surf
 
     fn face_queries(&self) -> Option<&dyn FaceQueries<O>> {
         Some(self)
+    }
+
+    fn line_passes(&self) -> Option<&RefCell<LinePasses>> {
+        Some(&self.0.caches.line_passes)
     }
 }
 
@@ -4783,6 +4810,7 @@ where
         tree_requested: RefCell::new(BTreeSet::new()),
         trims: crate::query::brep::RayPreparation::default(),
         classified_faces: RefCell::new(Vec::new()),
+        line_passes: RefCell::new(LinePasses::default()),
     };
     loop {
         caches.classified_faces.borrow_mut().clear();

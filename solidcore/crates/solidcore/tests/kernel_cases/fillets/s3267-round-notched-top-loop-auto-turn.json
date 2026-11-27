@@ -1,0 +1,251 @@
+{
+  "area": "fillets",
+  "bodies": {
+    "b6": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [
+        "b6"
+      ],
+      "op": "copy",
+      "outputs": [
+        "b7"
+      ],
+      "params": {}
+    },
+    {
+      "inputs": [
+        "b7"
+      ],
+      "op": "tagged",
+      "outputs": [
+        "b8"
+      ],
+      "params": {
+        "operand": 0
+      }
+    },
+    {
+      "inputs": [
+        "b8"
+      ],
+      "op": "blend_dropping",
+      "outputs": [
+        "b9"
+      ],
+      "params": {
+        "edges": {
+          "kind": "edge",
+          "picked": [
+            {
+              "at": [
+                [
+                  -30.0,
+                  -20.0,
+                  25.0
+                ],
+                [
+                  30.0,
+                  -20.0,
+                  25.0
+                ]
+              ],
+              "index": 6
+            },
+            {
+              "at": [
+                [
+                  30.0,
+                  -20.0,
+                  25.0
+                ],
+                [
+                  30.0,
+                  20.0,
+                  25.0
+                ]
+              ],
+              "index": 9
+            },
+            {
+              "at": [
+                [
+                  -30.0,
+                  20.0,
+                  25.0
+                ],
+                [
+                  -30.0,
+                  -20.0,
+                  25.0
+                ]
+              ],
+              "index": 3
+            },
+            {
+              "at": [
+                [
+                  -2.4000000000000057,
+                  20.0,
+                  25.0
+                ],
+                [
+                  -30.0,
+                  20.0,
+                  25.0
+                ]
+              ],
+              "index": 14
+            },
+            {
+              "at": [
+                [
+                  30.0,
+                  20.0,
+                  25.0
+                ],
+                [
+                  2.3999999999999986,
+                  20.0,
+                  25.0
+                ]
+              ],
+              "index": 15
+            },
+            {
+              "at": [
+                [
+                  -2.4,
+                  17.6,
+                  25.0
+                ],
+                [
+                  2.4,
+                  17.6,
+                  25.0
+                ]
+              ],
+              "index": 12
+            },
+            {
+              "at": [
+                [
+                  -2.4000000000000057,
+                  20.0,
+                  25.0
+                ],
+                [
+                  -2.4,
+                  17.6,
+                  25.0
+                ]
+              ],
+              "index": 13
+            },
+            {
+              "at": [
+                [
+                  2.4,
+                  17.6,
+                  25.0
+                ],
+                [
+                  2.3999999999999986,
+                  20.0,
+                  25.0
+                ]
+              ],
+              "index": 11
+            }
+          ],
+          "points": [
+            [
+              0.0,
+              -20.0,
+              25.0
+            ],
+            [
+              30.0,
+              0.0,
+              25.0
+            ],
+            [
+              -30.0,
+              0.0,
+              25.0
+            ],
+            [
+              -16.200000000000003,
+              20.0,
+              25.0
+            ],
+            [
+              16.2,
+              20.0,
+              25.0
+            ],
+            [
+              0.0,
+              17.6,
+              25.0
+            ],
+            [
+              -2.400000000000003,
+              18.8,
+              25.0
+            ],
+            [
+              2.3999999999999995,
+              18.8,
+              25.0
+            ]
+          ],
+          "tolerance": 3.8170843806184367
+        },
+        "kind": "round",
+        "sizes": [
+          2.8,
+          2.8,
+          2.8,
+          2.8,
+          2.8,
+          2.8,
+          2.8,
+          2.8
+        ],
+        "turn": "auto"
+      }
+    }
+  ],
+  "case": "s3267-round-notched-top-loop-auto-turn",
+  "expected": {
+    "body_count": 1,
+    "faces": 18,
+    "method": "V0 = 60*40*25 - 4.8*2.4*12.5 = 59856. All walls are upright and every round is r = 2.8 between the top and an upright wall, mitred at every corner, so over a top point at plan distance t from the mitred inward offset of the top's outline the top drops by g(t) = r - sqrt(r^2 - (r-t)^2). The offset outlines are polygons with mitred corners: 6 convex right-angled corners (the block's four, the notch's two at the rim) each shorten the perimeter by 2t, the notch's 2 inner (reflex) corners each lengthen it by 2t, so L(t) = L0 - 8t, L0 = 200 + 4.8 = 204.8 (the notch's side edges' offsets keep length 2.4). Removed = integral of g(t) L(t) over [0, r] = L0 r^2 (1 - pi/4) - 8 r^3 (5/6 - pi/4) = 336.15339330437; V = 59519.84660669563. Faces: bottom, top, five sides (+Y split by the notch), the notch's three walls and floor, eight rounds = 18.",
+    "outcome": "solid",
+    "source": "analytic",
+    "tolerance": {
+      "rel": 1e-09
+    },
+    "volume_mm3": 59519.84660669563
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "records": "s3267-round-notched-top-loop-auto-turn.bodies.json.gz",
+  "result": [
+    {
+      "body": "Part",
+      "made": "b9"
+    }
+  ],
+  "sources": [
+    "tangency-labs/stress-corpus S3267"
+  ],
+  "ungraded": [],
+  "what": "a 60 x 40 x 25 block with a 4.8 x 4.8 notch 12.5 deep centred on its top face's +Y edge, the top face's outer loop rounded r 2.8 with the default turn (auto): the rounds of the notch's two 2.4-long side edges are shorter than the radius, so a swept turn at the notch's inner upright edges leaves them no room beside the mitre at the rim (the rail trimmed past the swept section, 'Unable to Trim Rail Curve' in 0.50.0); auto builds the mitred blend there, as 0.49.0's default did",
+  "why_not": []
+}

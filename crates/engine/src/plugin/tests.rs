@@ -265,7 +265,7 @@ fn manifest_is_inert_bounded_and_refuses_unknown_capabilities() {
         |m: &mut Value| m["runtime"]["entries"] = json!(["make", "make"]),
         |m: &mut Value| m["runtime"]["limits"]["memory_mib"] = json!(4097),
         |m: &mut Value| m["runtime"]["limits"]["fuel"] = json!(0),
-        |m: &mut Value| m["runtime"]["limits"]["deadline_ms"] = json!(30_001),
+        |m: &mut Value| m["runtime"]["limits"]["deadline_ms"] = json!(0),
         |m: &mut Value| m["runtime"]["api"] = json!("solidcraft:plugin@1.0.0"),
         |m: &mut Value| m["capabilities"] = json!(["commands@0.3"]),
         |m: &mut Value| m["capabilities"] = json!([]),
@@ -634,6 +634,10 @@ fn file_scopes_require_separate_read_and_write_approvals() {
 
     for command in [
         "component.insert_design",
+        "component.links",
+        "component.relink",
+        "component.replace_with_link",
+        "component.update_links",
         "file.insert_step",
         "file.insert_mesh",
         "file.insert_gerber",
@@ -743,6 +747,70 @@ fn file_commands_name_files_in_granted_folders_by_the_grants_name() {
         }
     }
     assert!(!input.join("copy.step").exists() && !root.join("copy.step").exists());
+    host.rollback_transaction().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A plugin keeps the designs it links current, as it inserts them: List Links, Update Links,
+/// Relink Source and Replace with Link read designs in its folders, named by `grant:`, under a
+/// read-only grant. A design outside them is refused, and so is a plugin without `file`.
+#[test]
+fn link_commands_read_designs_in_granted_folders_by_the_grants_name() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-link-grants-{}", std::process::id()));
+    let lib = root.join("lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    let save_box = |path: &Path, height: u32| {
+        let mut design = Session::default();
+        design.execute("solid.box", &json!({"length":10,"width":10,"height":height})).unwrap();
+        design.execute("file.save_as", &json!({"path":path})).unwrap();
+    };
+    save_box(&lib.join("part.sc"), 10);
+    save_box(&lib.join("other.sc"), 15);
+    save_box(&lib.join("plate.sc"), 5);
+    save_box(&root.join("outside.sc"), 30);
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::from(["file".into()]),
+        file_folders: Vec::new(),
+        file_read_folders: vec![lib.clone()],
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+        input_folders: Vec::new(),
+        messages: Vec::new(),
+        user_data: None,
+    };
+    host.session.plugin_state.file_grants = vec![FileGrant { name: "lib".into(), folder: lib.clone(), read: true, write: false }];
+    host.begin_transaction().unwrap();
+    host.run_command("component.insert_design", &json!({"path":"grant:lib/part.sc","name":"Part"})).unwrap();
+    save_box(&lib.join("part.sc"), 20);
+
+    let links = host.run_command("component.links", &json!({})).unwrap();
+    assert_eq!((&links["links"][0]["found"], &links["links"][0]["changed"]), (&json!(true), &json!(true)), "{links}");
+    let updated = host.run_command("component.update_links", &json!({})).unwrap();
+    assert_eq!(updated["updated"], json!(["Part"]), "{updated}");
+    let relinked = host.run_command("component.relink", &json!({"component":"Part","path":"grant:lib/other.sc"})).unwrap();
+    assert_eq!(relinked["path"], json!(lib.join("other.sc").to_string_lossy()), "{relinked}");
+
+    let outside = host.run_command("component.relink", &json!({"component":"Part","path":root.join("outside.sc")}));
+    assert!(matches!(&outside, Err(HostError::CommandFailed { .. })), "a design outside the folders is refused: {outside:?}");
+    let links = host.run_command("component.links", &json!({})).unwrap();
+    assert_eq!(links["links"][0]["file"], json!(lib.join("other.sc").to_string_lossy()), "the refused relink changed nothing: {links}");
+
+    host.run_command("component.activate", &json!({"component":0})).unwrap();
+    host.run_command("component.create", &json!({"name":"Plate"})).unwrap();
+    host.run_command("solid.box", &json!({"length":10,"width":10,"height":5})).unwrap();
+    let replaced = host.run_command("component.replace_with_link", &json!({"component":"Plate","path":"grant:lib/plate.sc"}));
+    assert!(replaced.is_ok(), "a copy is replaced by a link to a granted design: {replaced:?}");
+
+    host.groups.clear();
+    for id in ["component.links", "component.update_links", "component.relink", "component.replace_with_link"] {
+        let refused = host.run_command(id, &json!({"component":"Part","path":"grant:lib/part.sc"}));
+        assert!(matches!(&refused, Err(HostError::PermissionDenied { permission }) if permission.contains("`file` permission")), "{id}: {refused:?}");
+    }
     host.rollback_transaction().unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -891,6 +959,21 @@ fn disabled_ids_survive_scratch_and_new_design() {
 }
 
 #[test]
+fn guest_deadline_messages_preserve_the_exact_millisecond_budget() {
+    for (allowed, seconds) in [(1, "0.001"), (50, "0.05"), (5000, "5"), (u64::MAX, "18446744073709551.615")] {
+        let failure = PluginFailure {
+            plugin: "Sample".into(),
+            file: None,
+            exporting: false,
+            error: HostError::Exhausted { limit: "deadline_ms".into(), allowed },
+        };
+        let text = failure.text();
+        assert!(text.contains(&format!("all {seconds} s of guest time")), "{text}");
+        assert!(text.contains("runtime.limits.deadline_ms") && text.contains("max_deadline_ms"), "{text}");
+    }
+}
+
+#[test]
 fn a_failure_message_shows_braces_in_a_file_name_or_reason_as_they_are() {
     let failure = |file: &str, reason: &str| PluginFailure {
         plugin: "Sample".into(),
@@ -936,6 +1019,44 @@ mod native {
             s.execute("plugin.install", &json!({"path":zip,"replace":true,"approve":approve})).unwrap()["folder"].as_str().unwrap().into()
         }
     }
+    /// An entry asks `plugin.preview` whether it runs as a dialog's live preview (#22297): true in
+    /// a run of a preview session or with `preview: true`, false otherwise, and with no command
+    /// group. The flag stays with that run.
+    #[test]
+    fn an_entry_can_tell_that_it_runs_as_a_preview() {
+        let fixture = Fixture::new("call $box");
+        let mut manifest = manifest();
+        manifest["runtime"]["commands"] = json!(["plugin.preview"]);
+        std::fs::write(fixture.0.join("sample/plugin.json"), manifest.to_string()).unwrap();
+        // The entry runs `plugin.preview` and returns its reply (its result is the command's).
+        let source = component_template()
+            .replace("      call $box\n      call $box\n", "      call $box\n")
+            .replace("i32.const 9\n      i32.const 1024\n      i32.const 33", "i32.const 14\n      i32.const 1024\n      i32.const 2")
+            .replace("\"solid.box\"", "\"plugin.preview\"")
+            .replace(r#""{\22length\22:2,\22width\22:3,\22height\22:4}""#, r#""{}""#);
+        std::fs::write(fixture.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+        let mut s = Session::default();
+        let approval = s.execute("plugin.inspect", &json!({"path":fixture.path()})).unwrap()["approval"].clone();
+        let run = |s: &mut Session, preview: Option<bool>| {
+            let mut params = json!({"path":fixture.path(),"approval":approval,"entry":"make","params":{}});
+            if let Some(preview) = preview {
+                params["preview"] = json!(preview);
+            }
+            s.execute("plugin.run", &params).unwrap()["result"]["preview"].clone()
+        };
+        assert_eq!(run(&mut s, None), json!(false), "an ordinary run");
+        assert_eq!(run(&mut s, Some(true)), json!(true), "a script asks for the preview path");
+        assert!(!s.plugin_state.preview, "the flag stays with that run");
+        assert_eq!(run(&mut s, Some(false)), json!(false));
+        // A dialog's preview session (the host's dry run sets it) answers true without the param.
+        let mut preview = s.scratch();
+        preview.plugin_state.preview = true;
+        assert_eq!(run(&mut preview, None), json!(true));
+        // Outside any plugin run the command answers too.
+        assert_eq!(s.execute("plugin.preview", &json!({})).unwrap()["preview"], json!(false));
+        assert!(s.execute("plugin.preview", &json!({"x": 1})).is_err(), "it takes no parameters");
+    }
+
     /// A 0.41 plugin runs as before, alone and with a background shader added.
     #[test]
     fn a_commands_plugin_from_041_installs_and_runs_unchanged_beside_shaders() {
@@ -1032,7 +1153,10 @@ mod native {
         include_str!("fixture.wat").replace("\r\n", "\n").replace("__PACKAGE__", package).replace("__VERSION__", version)
     }
     fn component(code: &str) -> Vec<u8> {
-        let template = component_template();
+        component_with_memory_pages(code, 1)
+    }
+    fn component_with_memory_pages(code: &str, pages: u32) -> Vec<u8> {
+        let template = component_template().replacen("(memory (;0;) 1)", &format!("(memory (;0;) {pages})"), 1);
         let original = "      call $box\n      call $box\n";
         assert!(template.contains(original));
         wat::parse_str(template.replacen(original, &format!("      {code}\n"), 1)).unwrap()
@@ -1189,6 +1313,68 @@ mod native {
         wat::parse_str(source).unwrap()
     }
     #[test]
+    fn three_hundred_host_commands_need_raised_ceilings_and_current_approval() {
+        let code = "call $box ".repeat(300);
+        let f = Fixture::new(&code);
+        let memory_mib = 64;
+        // The fixture's bump allocator retains every host reply: give it the declared budget.
+        // A MiB contains 16 Wasm pages of 65536 bytes.
+        std::fs::write(f.0.join("sample/plugin.wasm"), component_with_memory_pages(&code, memory_mib * 16)).unwrap();
+        let path = f.0.join("sample/plugin.json");
+        let mut m = manifest();
+        m["runtime"]["limits"] = json!({"fuel":10_000_000,"memory_mib":memory_mib,"host_calls":300,"deadline_ms":5000});
+        std::fs::write(&path, m.to_string()).unwrap();
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length":1,"width":1,"height":1})).unwrap();
+        let before = s.doc.to_json();
+        let undo = s.undo.len();
+        let inspection = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
+        assert_eq!(inspection["within_host_limits"], false);
+        assert_eq!(inspection["host_limits"]["max_host_calls"], 256);
+        let refusal = f.run(&mut s).unwrap_err();
+        assert_eq!(refusal.host_error(), Some(&HostError::OverCeiling { limit: "host_calls".into(), requested: 300, allowed: 256 }));
+        assert!(refusal.to_string().contains("max_host_calls in the --plugin-limits file"));
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo);
+
+        s.plugin_limits = serde_json::from_value(json!({"max_host_calls":300})).unwrap();
+        m["runtime"]["limits"]["deadline_ms"] = json!(80000);
+        std::fs::write(&path, m.to_string()).unwrap();
+        let requested = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
+        let refusal = f.run(&mut s).unwrap_err();
+        assert_eq!(refusal.host_error(), Some(&HostError::OverCeiling { limit: "deadline_ms".into(), requested: 80000, allowed: 30000 }));
+        assert!(refusal.to_string().contains("max_deadline_ms in the --plugin-limits file"));
+        s.plugin_limits = serde_json::from_value(json!({"max_host_calls":300,"max_deadline_ms":80000})).unwrap();
+        let approved = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
+        assert_eq!(approved["within_host_limits"], true);
+        assert_eq!(approved["approval"], requested["approval"], "the user's ceilings never change the approved package");
+        s.execute("plugin.run", &json!({"path":f.path(),"approval":approved["approval"],"entry":"make"})).unwrap();
+        assert_eq!(s.doc.features.len(), 301, "all 300 commands ran");
+        assert_eq!(s.undo.len(), undo + 1);
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(s.doc.to_json(), before, "one undo removes the entire plugin edit");
+
+        for (field, requested) in [("host_calls", 301), ("deadline_ms", 80001)] {
+            let mut changed = m.clone();
+            changed["runtime"]["limits"][field] = json!(requested);
+            std::fs::write(&path, changed.to_string()).unwrap();
+            let inspection = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
+            assert_ne!(inspection["approval"], approved["approval"], "{field} is covered by approval");
+            assert!(s.execute("plugin.run", &json!({"path":f.path(),"approval":approved["approval"],"entry":"make"})).is_err());
+            assert_eq!(s.doc.to_json(), before);
+        }
+
+        // A plugin that keeps its default call request is stopped on call 257 and discards
+        // its earlier successful native commands, even when it ignores the host's refusal.
+        m["runtime"]["limits"].as_object_mut().unwrap().remove("host_calls");
+        std::fs::write(&path, m.to_string()).unwrap();
+        let refusal = f.run(&mut s).unwrap_err();
+        assert_eq!(refusal.host_error(), Some(&HostError::Exhausted { limit: "host_calls".into(), allowed: 256 }));
+        assert!(refusal.to_string().contains("runtime.limits.host_calls"));
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo);
+    }
+    #[test]
     fn larger_declared_budgets_need_user_ceilings_and_exact_content_approval() {
         let f = Fixture::new("call $box i32.const 2048 memory.grow i32.const -1 i32.eq if unreachable end");
         let path = f.0.join("sample/plugin.json");
@@ -1207,7 +1393,7 @@ mod native {
         assert_eq!(error.host_error(), Some(&HostError::OverCeiling { limit: "fuel".into(), requested: 200_000_000_000, allowed: 100_000_000_000 }));
         assert_eq!(s.doc.to_json(), before);
         assert!(s.undo.is_empty());
-        s.plugin_limits = HostLimits { max_fuel: 200_000_000_000, max_memory_mib: 256 };
+        s.plugin_limits = HostLimits { max_fuel: 200_000_000_000, max_memory_mib: 256, ..Default::default() };
         let approved = s.execute("plugin.inspect", &json!({"path":f.path()})).unwrap();
         assert_eq!(approved["within_host_limits"], true);
         assert_eq!(approved["approval"], inspection["approval"], "approval pins the exact request; a ceiling change never changes its budget");
@@ -2662,6 +2848,7 @@ mod native {
             (|m: &mut Value| m["runtime"]["commands"] = json!(["file.export"]), "runtime.commands"),
             (|m: &mut Value| m["runtime"]["limits"]["deadline_ms"] = json!(60_000), "runtime.limits.deadline_ms"),
             (|m: &mut Value| m["runtime"]["limits"]["fuel"] = json!(10_000_000_000_001_u64), "runtime.limits.fuel"),
+            (|m: &mut Value| m["runtime"]["limits"]["host_calls"] = json!(300), "runtime.limits.host_calls"),
             (|m: &mut Value| m["runtime"]["module"] = json!("missing.wasm"), "runtime.module"),
             (|m: &mut Value| m["surprise"] = json!(true), "manifest"),
         ] {
@@ -3422,8 +3609,11 @@ fn evaluated_mesh_transfer_past_the_vertex_budget_after_sharing_is_refused() {
 fn host_resource_policy_is_exact_user_state_and_never_design_data() {
     let defaults = HostLimits::default();
     assert_eq!((defaults.max_fuel, defaults.max_memory_mib), (100_000_000_000, 128));
+    assert_eq!(serde_json::to_value(defaults).unwrap()["max_host_calls"], 256);
+    assert_eq!(serde_json::to_value(defaults).unwrap()["max_deadline_ms"], 30000);
     let request = Limits::default();
     assert_eq!((request.fuel, request.memory_mib, request.deadline_ms), (10_000_000, 64, 5000));
+    assert_eq!(serde_json::to_value(&request).unwrap()["host_calls"], 256);
     assert!(defaults.check(&request).is_ok());
     for limits in
         [HostLimits { max_fuel: 0, ..defaults }, HostLimits { max_memory_mib: 0, ..defaults }, HostLimits { max_memory_mib: 4097, ..defaults }]
@@ -3433,7 +3623,7 @@ fn host_resource_policy_is_exact_user_state_and_never_design_data() {
     let mut m = manifest();
     m["runtime"]["limits"] = json!({"fuel":u64::MAX,"memory_mib":4096,"deadline_ms":30000});
     assert!(parse_manifest(&serde_json::to_vec(&m).unwrap(), "sample").is_ok());
-    let policy = HostLimits { max_fuel: u64::MAX, max_memory_mib: 4096 };
+    let policy = HostLimits { max_fuel: u64::MAX, max_memory_mib: 4096, ..Default::default() };
     assert_eq!(serde_json::from_str::<HostLimits>(&serde_json::to_string(&policy).unwrap()).unwrap(), policy);
     let mut s = Session { plugin_limits: policy, ..Default::default() };
     assert_eq!(s.scratch().plugin_limits, policy);
@@ -4171,7 +4361,9 @@ mod importers {
         let file = put(&root, "bracket.smp", &design());
         let importer = importer_for(&s, &file, None).unwrap().unwrap();
         let params = json!({"library":library});
-        assert!(import_file(&mut s, &importer, &file, &params).is_err());
+        let refused = s.execute("file.import", &json!({"path": file, "options": params})).unwrap_err();
+        assert!(matches!(refused.host_error(), Some(HostError::PermissionDenied { .. })), "{refused}");
+        assert!(refused.to_string().contains("the option library needs read approval for its folder"), "{refused}");
         s.plugin_state.user.dialog_folders = Some(folders::DialogFolders {
             plugin: "smp".into(),
             approval: package.approval,
@@ -4378,6 +4570,27 @@ mod importers {
     }
 
     #[test]
+    fn importer_deadline_keeps_its_existing_ceiling_and_can_be_raised() {
+        let (mut s, root) = installed("deadline-ceiling", &[("smp", &["smp"], false)]);
+        let path = root.join("plugins/smp");
+        let mut m = importer_manifest("smp", &["smp"], false);
+        m["runtime"]["limits"]["deadline_ms"] = json!(600000);
+        std::fs::write(path.join("plugin.json"), m.to_string()).unwrap();
+        assert_eq!(s.execute("plugin.inspect", &json!({"path":path})).unwrap()["within_host_limits"], true);
+        assert_eq!(s.execute("plugin.check", &json!({"path":path})).unwrap()["ok"], true);
+        assert!(s.execute("file.import", &json!({"path":put(&root,"legacy.smp",&design())})).is_ok());
+
+        m["runtime"]["limits"]["deadline_ms"] = json!(800000);
+        std::fs::write(path.join("plugin.json"), m.to_string()).unwrap();
+        let error = s.execute("file.import", &json!({"path":put(&root,"larger.smp",&design())})).unwrap_err();
+        assert_eq!(error.host_error(), Some(&HostError::OverCeiling { limit: "deadline_ms".into(), requested: 800000, allowed: 600000 }));
+        s.plugin_limits = serde_json::from_value(json!({"max_deadline_ms":800000})).unwrap();
+        assert_eq!(s.execute("plugin.inspect", &json!({"path":path})).unwrap()["within_host_limits"], true);
+        assert!(s.execute("file.import", &json!({"path":put(&root,"approved.smp",&design())})).is_ok());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn an_import_failure_names_the_plugin_and_the_file_and_says_not_supported_plainly() {
         let (mut s, root) = installed("errors", &[("smp", &["smp"], false)]);
         // A valid file the importer does not convert: "does not support", not "invalid".
@@ -4403,7 +4616,7 @@ mod importers {
         let error = s.execute("doc.open", &json!({"path": put(&root, "slow.smp", b"L")})).unwrap_err();
         assert_eq!(
             error.to_string(),
-            "Sample Importer could not open slow.smp: it ran longer than its time limit of 0.05 s and was stopped. Ask its author to raise its time limit."
+            "Sample Importer could not open slow.smp: it used all 0.05 s of guest time it asks for and was stopped. Ask its author to raise runtime.limits.deadline_ms; if needed, raise Max plugin guest time (ms) in Preferences › Plugins (in solidcraft-cli, max_deadline_ms in the --plugin-limits file)."
         );
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -6083,4 +6296,36 @@ fn a_plugin_without_a_state_grid_is_unchanged() {
     let compiled = craft_plugin::shader::compile(shader, include_str!("../../../../docs/plugin-examples/dusk/dusk.wgsl")).unwrap();
     assert!(!compiled.wgsl.contains("sc_state"), "{}", compiled.wgsl);
     assert!(!compiled.wgsl.contains("@binding(7)") && !compiled.wgsl.contains("@binding(8)"), "{}", compiled.wgsl);
+}
+
+#[test]
+fn a_body_a_plugin_run_hides_stays_hidden_beside_one_hidden_meanwhile() {
+    // #22153: the run's hide was lost when the window accepted the run.
+    let mut live = Session::default();
+    for name in ["Master", "Cabinet", "Door"] {
+        live.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1, "body_name": name})).unwrap();
+    }
+    live.execute("browser.visibility", &json!({"items": ["Door"], "visible": false})).unwrap();
+    let command = crate::cmd::CommandSpec::new("plugin.run", "Run Plugin", |session, _| {
+        let mut host = SolidCraftHost { session: session.scratch(), ..panel_host() };
+        host.begin_transaction().unwrap();
+        host.run_command("browser.visibility", &json!({"items": ["Master"], "visible": false})).unwrap();
+        host.run_command("browser.visibility", &json!({"items": ["Door"], "visible": true})).unwrap();
+        host.commit_transaction().unwrap();
+        assert!(changed_by(session, &host.session), "a run that only hides is accepted");
+        session.accept_computed(host.session)?;
+        Ok(json!({}))
+    })
+    .icon("play");
+    // The window runs the plugin on a copy; the user hides Cabinet before it is accepted.
+    let mut computed = live.scratch();
+    computed.execute_spec(&command, &json!({})).unwrap();
+    live.execute("browser.visibility", &json!({"items": ["Cabinet"], "visible": false})).unwrap();
+    live.accept_computed(computed).unwrap();
+    let shown = |s: &Session| ["Master", "Cabinet", "Door"].map(|name| s.body_visible(name));
+    assert_eq!(shown(&live), [false, false, true], "the run's hide and show, and the hide made meanwhile");
+    live.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(shown(&live), [true, false, false], "undo takes back the run and keeps the hide made meanwhile");
+    live.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(shown(&live), [false, false, true]);
 }

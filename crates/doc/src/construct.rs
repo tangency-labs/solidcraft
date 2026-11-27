@@ -419,7 +419,7 @@ pub fn placed_edge_pick(doc: &Document, st: &ModelState, geo: &GeoRef) -> Option
     let GeoRef::PlacedEdge { body, path, at, name, .. } = geo else { return None };
     let (body, frame, hit) = placed_edge(doc, st, body.as_ref(), path, *at, name).ok()?;
     let world_name = doc.world_body_name(st, &body.name, doc.model_body_component(body), path);
-    let point = solidcraft_kernel::services::affine::apply_point(&frame, hit.point.into());
+    let point = solidcraft_kernel::affine::apply_point(&frame, hit.point.into());
     Some((world_name, hit.edge, point.into()))
 }
 
@@ -777,7 +777,7 @@ pub(crate) fn scale_point(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
         GeoRef::Face { at, name } => {
             let (b, fi, p) = face_of(ctx.st, *at, name)?;
             if let Some(c) = kernel::cylinder_face_at(&b.body, p) {
-                let s = solidcraft_kernel::services::affine::distance_along(c.axis_point.into(), c.axis.vec().into(), p.into());
+                let s = solidcraft_kernel::affine::distance_along(c.axis_point.into(), c.axis.vec().into(), p.into());
                 let end = if (s - c.start).abs() <= (c.end - s).abs() { c.start } else { c.end };
                 return Ok(c.axis_point + c.axis * end);
             }
@@ -817,6 +817,47 @@ fn model_line(st: &ModelState, g: &GeoRef) -> Result<(Vec3, Vec3)> {
     }
 }
 
+/// A flat face that meets the straight body edge `g` picks, as its body's name, its index and a
+/// point inside it: what a plane at an angle about the edge is measured from when no reference
+/// plane is given (#20233). A flat face along a straight edge holds the edge's direction, so the
+/// plane goes through the edge. The first such face in the body's face order; `None` when there
+/// is none, when the edge is not straight (a circular edge's flat cap is square to its axis) or
+/// when `g` is not a body edge.
+pub fn flat_face_at_edge(st: &ModelState, g: &GeoRef) -> Result<Option<(String, usize, Vec3)>> {
+    let GeoRef::Edge { at, name } = g else { return Ok(None) };
+    let (b, edge, points) = edge_pick(st, *at, name)?;
+    if b.body.is_mesh() || points.len() != 2 || kernel::edge_circle(&b.body, edge).is_some() {
+        return Ok(None);
+    }
+    let mid = (points[0] + points[1]) * 0.5;
+    let tol = (b.body.size() * 1e-3).max(1e-3);
+    let Ok(lines) = b.body.edges(tol) else { return Ok(None) };
+    let record = b.body.record();
+    let Some(e) = record.edges.get(edge) else { return Ok(None) };
+    let mut faces: Vec<usize> = e.uses.iter().map(|u| u.face as usize).collect();
+    faces.sort_unstable();
+    faces.dedup();
+    for face in faces {
+        if !matches!(kernel::face_surface(&b.body, face), Some(FaceSurface::Plane { .. })) {
+            continue;
+        }
+        // A point a little way from the edge's middle towards the middle of another edge of the
+        // face, kept only when it lies on the face, so the pick is inside the face and not on the
+        // edge it shares with its neighbour.
+        for other in kernel::face_edge_indices(&b.body, face) {
+            let Some(q) = lines.get(other).filter(|_| other != edge).and_then(|l| l.points.get(l.points.len() / 2)) else { continue };
+            let p = mid + (*q - mid) * 1e-3;
+            if let Ok(Some(nearest)) = kernel::point_closest(p, &b.body, kernel::Members::Faces(&[face]))
+                && nearest.to.dist(p) < tol * 1e-3
+                && nearest.to.dist(mid) > tol * 1e-6
+            {
+                return Ok(Some((b.name.clone(), face, nearest.to)));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// What [`model_axis`] says about a reference that is neither an edge nor a face.
 pub const MODEL_AXIS_REFS: &str = "pick a straight or circular edge, or a cylinder, cone or torus face";
 
@@ -837,7 +878,7 @@ pub fn coil_model_axis(st: &ModelState, geo: &GeoRef) -> Result<(Vec3, Vec3)> {
 }
 
 fn oriented_axis((origin, direction): (Vec3, Vec3)) -> Result<(Vec3, Vec3)> {
-    let direction = solidcraft_kernel::services::affine::unit_axis_direction(direction.into(), solidcraft_geom::EPS)
+    let direction = solidcraft_kernel::affine::unit_axis_direction(direction.into(), solidcraft_geom::EPS)
         .filter(|_| origin.is_finite())
         .ok_or_else(|| bad("the axis has no direction"))?;
     Ok((origin, direction.into()))
@@ -866,8 +907,8 @@ pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, compon
             } else {
                 doc.path_transform(component, author_path).ok_or_else(|| DocError::reselect(name.as_str()))?
             };
-            let inverse = solidcraft_kernel::services::affine::inverse(&author).map_err(|_| bad("the feature's component frame is invalid"))?;
-            let (origin, direction) = solidcraft_kernel::services::affine::placed_axis(&frame, &inverse, origin.into(), direction.into())
+            let inverse = solidcraft_kernel::affine::inverse(&author).map_err(|_| bad("the feature's component frame is invalid"))?;
+            let (origin, direction) = solidcraft_kernel::affine::placed_axis(&frame, &inverse, origin.into(), direction.into())
                 .map_err(|_| bad("the axis has no direction"))?;
             Ok((origin.into(), direction.into()))
         }
@@ -880,7 +921,7 @@ pub fn model_axis_in(doc: Option<&Document>, st: &ModelState, g: &GeoRef, compon
 /// `d` or `-d`, whichever has its largest component (the first of equal ones) positive: how
 /// [`model_axis`] orients an axis, for a preview of one to point the same way.
 pub fn canonical_dir(d: Vec3) -> Vec3 {
-    solidcraft_kernel::services::affine::canonical_axis_direction(d.into()).into()
+    solidcraft_kernel::affine::canonical_axis_direction(d.into()).into()
 }
 
 /// The direction of a straight line a feature is turned parallel to: a straight model edge, a
@@ -945,6 +986,48 @@ pub(crate) fn plane(ctx: &Ctx, g: &GeoRef) -> Result<Plane> {
         },
         _ => Err(bad("pick a plane or planar face")),
     }
+}
+
+/// Where an extrude's To / From Object reference ([`crate::ObjectRef`]) is now.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ObjectAt {
+    /// A construction point or the origin.
+    Point(Vec3),
+    /// An origin or construction plane.
+    Plane(Plane),
+}
+
+/// [`ObjectAt`] of `r` in the model `ctx.st`. A construction plane later in the timeline is
+/// refused: it would be read as it is defined, and moving it would not rebuild the extrude.
+pub(crate) fn object_at(ctx: &Ctx, r: &crate::ObjectRef) -> Result<ObjectAt> {
+    use crate::walk::Walk;
+    let mut later = None;
+    r.walk_refs(&mut |item| {
+        if let crate::feature_refs::Ref::Feature(id) = item
+            && later.is_none()
+            && !ctx.st.construct.iter().any(|c| c.feature == id.0)
+        {
+            later = Some(id.0);
+        }
+    });
+    if let Some(id) = later {
+        let name = ctx.doc.feature(id).map_or_else(|| id.to_string(), |f| f.name.clone());
+        return Err(bad(format!("the plane `{name}` must come before the extrude in the timeline")));
+    }
+    match &r.0 {
+        // A construction plane of another component, where that component puts it (#11734).
+        GeoRef::Plane { plane } => {
+            let plane = crate::eval::construction_planes_in_frame(ctx.doc, ctx.st, ctx.component, plane)?;
+            Ok(ObjectAt::Plane(ctx.doc.resolve_plane_in(ctx.vals, &plane, ctx.depth + 1, ctx.component, Some(ctx.st))?))
+        }
+        g @ (GeoRef::ConstructPoint { .. } | GeoRef::Origin) => Ok(ObjectAt::Point(point(ctx, g)?)),
+        _ => Err(bad("not supported yet: To / From Object on this reference; give a plane or a construction point")),
+    }
+}
+
+/// [`object_at`] of `r` in the model `st`, for a feature in `component`.
+pub fn object_at_in(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, component: u64, r: &crate::ObjectRef) -> Result<ObjectAt> {
+    object_at(&Ctx { doc, vals, st, depth: 0, component }, r)
 }
 
 /// The centre of a round edge, sketch circle, sphere or torus.
@@ -1123,7 +1206,8 @@ fn touched<'a>(ctx: &Ctx<'a>, g: &GeoRef) -> Result<Touched<'a>> {
             let (b, fi, _) = face_of(ctx.st, *at, name)?;
             Ok(kernel::face_surface(&b.body, fi).map_or(Touched::Face(b, fi), Touched::Surface))
         }
-        GeoRef::Plane { .. } => {
+        // A construction or origin plane, or a component's origin plane (#23006).
+        GeoRef::Plane { .. } | GeoRef::Datum { .. } => {
             let pl = plane(ctx, g)?;
             Ok(Touched::Surface(FaceSurface::Plane { normal: pl.normal().unit().ok_or_else(|| bad("degenerate plane"))?, point: pl.origin }))
         }
@@ -1283,6 +1367,18 @@ fn line_plane(o: Vec3, d: Vec3, p: &Plane) -> Option<Vec3> {
     Some(o + d * ((p.origin - o).dot(n) / den))
 }
 
+/// Drop `at` onto the plane midway between two parallel planes. `None` when they are not
+/// parallel; the bisector of planes that meet is the midplane constructor's, below.
+pub(crate) fn midway(a: (Vec3, Vec3), b: (Vec3, Vec3), at: Vec3) -> Option<Vec3> {
+    let (pa, na) = a;
+    let (pb, nb) = b;
+    // Measure both levels from `at`. `square_plane_offset` also checks that the normals are
+    // parallel.
+    let a = kernel::affine::square_plane_offset(&crate::IDENTITY, (pa - at).into(), na.into(), nb.into()).ok()??;
+    let b = kernel::affine::distance_along(at.into(), nb.into(), pb.into());
+    Some(at + nb * a.midpoint(b))
+}
+
 /// Planes built from model geometry (the `PlaneRef` kinds that need the model).
 pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
     let degenerate = || bad("degenerate plane");
@@ -1290,10 +1386,7 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
         PlaneRef::Midplane { a, b, old_frame } => {
             let (pa, pb) = (plane(ctx, a)?, plane(ctx, b)?);
             let (na, nb) = (pa.normal(), pb.normal());
-            if na.cross(nb).len() < 1e-9 {
-                // Parallel: half way between them.
-                let half = nb * ((pb.origin - pa.origin).dot(nb) * 0.5);
-                let center = pa.origin + half;
+            if let Some(center) = midway((pa.origin, na), (pb.origin, nb), pa.origin) {
                 // A design saved before the midplane took a world plane's frame keeps the
                 // frame it was saved with: the first plane's own origin and axes (#18260).
                 if *old_frame {
@@ -1484,8 +1577,9 @@ impl GeoRef {
                             .filter_map(|v| rec.vertices.get(v as usize).map(|pt| Vec3::new(pt.point[0], pt.point[1], pt.point[2])))
                             .any(|q| q.dist(*at) <= tol)
                     };
+                    let edge_names = crate::naming::edge_name_index(b);
                     let mut meet: Vec<String> =
-                        rec.edges.iter().zip(crate::naming::edge_names(b)).filter(|(e, n)| !n.is_empty() && ends_here(e)).map(|(_, n)| n).collect();
+                        rec.edges.iter().zip(&edge_names.names).filter(|(e, n)| !n.is_empty() && ends_here(e)).map(|(_, n)| n.clone()).collect();
                     if meet.is_empty() {
                         continue;
                     }
