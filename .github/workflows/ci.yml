@@ -806,7 +806,7 @@ jobs:
     if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.native == 'true' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
     # Fork builds start from main's cache, read-only; give them room to finish and upload.
-    timeout-minutes: ${{ vars.CI_RUNNER && 180 || ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 60 || 45) }}
+    timeout-minutes: ${{ vars.CI_RUNNER == 'ubuntu-24.04' && 360 || vars.CI_RUNNER && 180 || ((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 60 || 45) }}
     env:
       CARGO_INCREMENTAL: "0"
       RUSTC_WRAPPER: sccache
@@ -816,13 +816,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
-      # The standard hosted runner has 16 GiB RAM and 14 GiB disk. This archive and the
-      # native test job can exhaust it when four rustc processes and a 20 GiB cache run.
+      # The standard hosted runner has 16 GiB RAM and 14 GiB disk. A single rustc in
+      # this workspace can approach 10 GiB, so keep compilation serial and cap sccache.
       - name: Bound compilation and cache on the standard hosted runner
         if: vars.CI_RUNNER == 'ubuntu-24.04'
         run: |
-          echo 'CARGO_BUILD_JOBS=2' >> "$GITHUB_ENV"
-          echo 'SCCACHE_CACHE_SIZE=2G' >> "$GITHUB_ENV"
+          echo 'CARGO_BUILD_JOBS=1' >> "$GITHUB_ENV"
+          echo 'SCCACHE_CACHE_SIZE=1G' >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
@@ -882,7 +882,7 @@ jobs:
     # after them. nextest hands tests to its threads as they free up, the slowest first (priority
     # in .config/nextest.toml), so they start at once and no core idles at the end.
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-32vcpu-ubuntu-2404' }}
-    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
+    timeout-minutes: ${{ vars.CI_RUNNER == 'ubuntu-24.04' && 360 || vars.CI_RUNNER && 180 || 60 }}
     env:
       # Pictures (snapshots, screenshots, ui.render, the viewport's offscreen tests) are drawn on
       # the GPU. The runner has none: Mesa's lavapipe (software Vulkan) draws them, and a test that
@@ -918,8 +918,8 @@ jobs:
       - name: Bound compilation and cache on the standard hosted runner
         if: vars.CI_RUNNER == 'ubuntu-24.04'
         run: |
-          echo 'CARGO_BUILD_JOBS=2' >> "$GITHUB_ENV"
-          echo 'SCCACHE_CACHE_SIZE=2G' >> "$GITHUB_ENV"
+          echo 'CARGO_BUILD_JOBS=1' >> "$GITHUB_ENV"
+          echo 'SCCACHE_CACHE_SIZE=1G' >> "$GITHUB_ENV"
           echo 'RAYON_NUM_THREADS=2' >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
@@ -975,6 +975,7 @@ jobs:
           PACKAGES: ${{ needs.changes.outputs.packages }}
           GPU_SHARDS: ${{ needs.changes.outputs.gpu }}
           WARM_DISK: ${{ steps.target.outputs.warm }}
+          CI_RUNNER_LABEL: ${{ vars.CI_RUNNER }}
         run: |
           # Pull requests skip the heavy tests (default-filter in .config/nextest.toml); `default()`
           # below is that filter, so a pull request still runs only what it ran before.
@@ -1006,6 +1007,8 @@ jobs:
           elif [ "$FULL" != true ]; then
             scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done
           fi
+          test_threads=()
+          if [ "$CI_RUNNER_LABEL" = ubuntu-24.04 ]; then test_threads=(--test-threads=2); fi
           # The GPU path tracer's tests run in their own job (GPU path tests): one at a time, they
           # took about 36 of this job's 45 minutes.
           excluded='package(=solidcraft-gpu) & test(/^path::/)'
@@ -1019,7 +1022,7 @@ jobs:
           # that passes. nextest's exit code 100 is "tests failed"; any other is its own error
           # (a build error, a bad filter) and fails the step at once.
           status=0
-          cargo nextest run "${scope[@]}" --cargo-profile ci --locked --profile ci --no-tests=pass \
+          cargo nextest run "${scope[@]}" "${test_threads[@]}" --cargo-profile ci --locked --profile ci --no-tests=pass \
             --ignore-default-filter -E "($base) & not ($excluded)" || status=$?
           if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
           cargo xtask known-failing --junit "$junit"
@@ -2022,7 +2025,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.solidcore == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
-    timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
+    timeout-minutes: ${{ vars.CI_RUNNER == 'ubuntu-24.04' && 360 || vars.CI_RUNNER && 180 || 60 }}
     defaults:
       run:
         working-directory: solidcore
@@ -2035,7 +2038,7 @@ jobs:
         run: rustup show active-toolchain || rustup toolchain install
       - name: Bound compilation on the standard hosted runner
         if: vars.CI_RUNNER == 'ubuntu-24.04'
-        run: echo 'CARGO_BUILD_JOBS=2' >> "$GITHUB_ENV"
+        run: echo 'CARGO_BUILD_JOBS=1' >> "$GITHUB_ENV"
       # Main saves the cache; every other run restores it, read-only.
       # target/ from main's last build (see WARM_TARGET); only main commits it.
       - name: Mount the build directory
