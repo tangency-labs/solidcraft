@@ -2831,18 +2831,15 @@ fn run_shell_offset(
     } else {
         None
     };
-    let (mut source, open) = match regularized {
-        Some(source) => source,
-        None => {
-            let mut executive = configured_shell_executive(original, options, faces);
-            executive.use_creator_tangency_tol(kernel);
-            return executive.do_solid_offset(
-                kernel,
-                Some(original),
-                SolidOffsetOptions::default(),
-                notifications,
-            );
-        }
+    let Some((mut source, open)) = regularized else {
+        let mut executive = configured_shell_executive(original, options, faces);
+        executive.use_creator_tangency_tol(kernel);
+        return executive.do_solid_offset(
+            kernel,
+            Some(original),
+            SolidOffsetOptions::default(),
+            notifications,
+        );
     };
     super::isolated::shell_offset(kernel, &mut source, options, &open, notifications)
 }

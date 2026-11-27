@@ -60,7 +60,7 @@ struct PlanarFace {
 }
 
 /// The construction-side use of an independent offset sheet. The upward use is
-/// always `Same`; the native shell head retains the orientation given to MakeFace.
+/// always `Same`; the native shell head retains the orientation given to `MakeFace`.
 pub(super) fn signed_sheet_faceuse(b: &Brep, f: FaceId) -> Result<Option<FaceuseId>> {
     let Some(up) = face2::upward_faceuse(b, f)? else {
         return Ok(None);
@@ -325,7 +325,9 @@ pub(super) fn coincident_opposites(
     };
     NotifyState::from_kernel_stores(&mut stores).with_kernel_env(k, |k, env| {
         for sheet in &replacements {
-            if !bp1::faces(&sheet.brep, None)?.is_empty() {
+            if bp1::faces(&sheet.brep, None)?.is_empty() {
+                exec.replace_face_relations(sheet.source.id, &[])?;
+            } else {
                 let before: BTreeSet<FaceId> = bp1::faces(b, None)?.into_iter().collect();
                 bp3::merge_brep(
                     k,
@@ -342,8 +344,6 @@ pub(super) fn coincident_opposites(
                     .filter(|f| !before.contains(f))
                     .collect();
                 exec.replace_face_relations(sheet.source.id, &fragments)?;
-            } else {
-                exec.replace_face_relations(sheet.source.id, &[])?;
             }
         }
         let editing = b.editing_enabled();
