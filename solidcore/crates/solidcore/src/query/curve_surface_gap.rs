@@ -34,8 +34,8 @@ use std::collections::{btree_map::Entry, BTreeMap, VecDeque};
 use std::sync::Arc;
 
 use crate::blend::fillet_section::certificate::{
-    below_continuity, curve_derivs_over, knot_cuts, nurbs_partials_over_piece, partials_hull,
-    past_one_low_line, EndContinuation, NurbsCurve,
+    below_continuity, curve_derivs_over, curve_derivs_over_about, knot_cuts,
+    nurbs_partials_over_piece, partials_hull, past_one_low_line, EndContinuation, NurbsCurve,
 };
 use crate::blend::fillet_section::interval::Ivl;
 use crate::blend::fillet_section::offset_box::offset_and_base_partials_over_piece;
@@ -190,23 +190,34 @@ impl TrimBoundMemo {
 /// [`TrimBoundKey`].
 fn pure_nurbs_flags(surface: &Surface, curve: &Curve, uv: &Curve) -> Option<u64> {
     use crate::curve::curve::CurveKind;
+    use crate::nurbs::b_spline_surface::BSplineSurfaceForm;
     use crate::surface::surface::SurfaceKind;
 
-    let s_oob = match surface.kind() {
-        SurfaceKind::BSpline(s) => s.is_out_of_bounds_enabled(),
-        SurfaceKind::BallPatch(s) => s.net().is_out_of_bounds_enabled(),
+    let s_base = match surface.kind() {
+        SurfaceKind::BSpline(s) => s,
+        SurfaceKind::BallPatch(s) => s.net(),
+        SurfaceKind::Sphere(s) => s.base().base(),
+        SurfaceKind::Torus(s) => s.base().base(),
+        SurfaceKind::SurfOfRevolution(s) => s.base(),
+        SurfaceKind::SurfOfExtrusion(s) => s.base(),
         _ => return None,
     };
-    let CurveKind::BSpline(c) = curve.kind() else {
-        return None;
+    s_base.gw_nurb()?;
+    let curve_oob = |c: &Curve| match c.kind() {
+        CurveKind::BSpline(b) => Some(b.is_out_of_bounds_enabled()),
+        CurveKind::Ellipse(e) => Some(e.base().is_out_of_bounds_enabled()),
+        CurveKind::Hyperbola(h) => Some(h.base().is_out_of_bounds_enabled()),
+        CurveKind::Parabola(p) => Some(p.base().is_out_of_bounds_enabled()),
+        _ => None,
     };
-    let CurveKind::BSpline(w) = uv.kind() else {
-        return None;
-    };
+    let c_oob = curve_oob(curve)?;
+    let w_oob = curve_oob(uv)?;
+    let s_poly = s_base.form() == BSplineSurfaceForm::Polynomial;
     Some(
-        u64::from(s_oob)
-            | (u64::from(c.is_out_of_bounds_enabled()) << 1)
-            | (u64::from(w.is_out_of_bounds_enabled()) << 2),
+        u64::from(s_base.is_out_of_bounds_enabled())
+            | (u64::from(c_oob) << 1)
+            | (u64::from(w_oob) << 2)
+            | (u64::from(s_poly) << 3),
     )
 }
 
@@ -1019,7 +1030,7 @@ fn piece(
     }
     let span = Ivl::new(a, b);
     let cd = curve_derivs_over(cn, span, 2, None)?;
-    let wd = curve_derivs_over(wn, span, 2, None)?;
+    let wd = uv_derivs_over(wn, span, 2)?;
     let (Some(c1), Some(c2)) = (cd.get(1), cd.get(2)) else {
         return Ok(None);
     };
@@ -1047,6 +1058,68 @@ fn psi_over(psi: &NurbsCurve, t: Ivl, ld: usize, [lo, hi]: [f64; 2]) -> Result<O
         *r = Ivl::new(a, b);
     }
     Ok(Some(out))
+}
+
+/// Not upstream (#22037): a UV curve's value and derivatives up to `ld` over `s`, each
+/// enclosed both as [`curve_derivs_over`] gives it and about the curve's point at the middle
+/// of `s` ([`curve_derivs_over_about`], that point added back to the value), and the two
+/// intersected: each holds the curve's, so their intersection does.
+///
+/// The value is the box the surface's partials are enclosed over, and its overshoot past the
+/// net's end is the slack the bisection adds ([`NetSurface::partials`]). Enclosed from the
+/// origin, a rational curve's quotient by its weight widens the box by the weights' change
+/// times the curve's distance from the origin, to first order in the piece: a circle trim
+/// tangent to its patch's side runs past it by about `0.76 h` at `(0, -10)` (`cylinder.smb`'s
+/// cap, a piece `h = 1.9e-3` long past by `1.4e-3`), so the slack shrank only as fast as the
+/// pieces, and the bisection ran out of pieces about each tangency with the bound at `0.097`.
+/// About the middle the quotient carries the curve's distance from that point instead, of the
+/// order of the piece: the box is within a second-order term of the curve's range, and its
+/// overshoot past a side the curve is tangent to is of the order of `h^2` (#22037).
+fn uv_derivs_over(wn: &NurbsCurve, s: Ivl, ld: usize) -> Result<Vec<V3<Ivl>>> {
+    let plain = curve_derivs_over(wn, s, ld, None)?;
+    if s.lo >= s.hi {
+        return Ok(plain);
+    }
+    let middle = curve_derivs_over(wn, Ivl::from(s.mid()), 0, None)?;
+    let Some(c) = middle.first().map(|p| [p.x.mid(), p.y.mid(), p.z.mid()]) else {
+        return Ok(plain);
+    };
+    if !c.iter().all(|x| x.is_finite()) {
+        return Ok(plain);
+    }
+    let about = curve_derivs_over_about(wn, s, ld, None, c)?;
+    let meet = |a: Ivl, b: Ivl| {
+        let m = Ivl::new(a.lo.max(b.lo), a.hi.min(b.hi));
+        // (each holds the curve's: they meet, but where either is not finite, or not an
+        // interval, the one from the origin stands)
+        if a.is_finite() && b.is_finite() && m.lo <= m.hi {
+            m
+        } else {
+            a
+        }
+    };
+    let [cx, cy, cz] = c;
+    Ok(plain
+        .iter()
+        .zip(&about)
+        .enumerate()
+        .map(|(d, (p, q))| {
+            let q = if d == 0 {
+                V3 {
+                    x: q.x + Ivl::from(cx),
+                    y: q.y + Ivl::from(cy),
+                    z: q.z + Ivl::from(cz),
+                }
+            } else {
+                *q
+            };
+            V3 {
+                x: meet(p.x, q.x),
+                y: meet(p.y, q.y),
+                z: meet(p.z, q.z),
+            }
+        })
+        .collect())
 }
 
 /// The curve, the trim and the reparametrisation [`trim_image_gap_bound`] compares, with
@@ -1133,7 +1206,7 @@ fn piece_reparametrised(
         return Ok(None);
     };
     let cd = curve_derivs_over(cn, r0, 2, None)?;
-    let wd = curve_derivs_over(wn, span, 2, None)?;
+    let wd = uv_derivs_over(wn, span, 2)?;
     let (Some(c1), Some(c2), Some(w1)) = (cd.get(1), cd.get(2), wd.get(1)) else {
         return Ok(None);
     };
@@ -2902,13 +2975,17 @@ fn line_piece(cn: &NurbsCurve, [lo, hi]: [f64; 2]) -> Option<WeightedPiece> {
     Some((vec![(on(lo), w0), (on(hi), w0)], vec![lo, lo, hi, hi]))
 }
 
-/// Not upstream (#22034): the indices in `net.pw` of the net's first row of control points
-/// (`v` index 0, for every `u` index) where `v` is the start of its `v` knots, or of its last
-/// where `v` is their end; `None` for any other `v`, or `v` knots not clamped (the first
-/// `q + 1` equal, the last `q + 1` equal, the two apart). Over clamped knots the basis
-/// functions in `v` at an end are 1 for the end row and 0 for every other, so the net's
-/// points at that `v` are exactly the rational curve of that row's points and weights, of the
-/// net's `u` knots and degree.
+/// Not upstream (#22034, #22820): the indices in `net.pw` of the net's row of control points
+/// interpolated directly at `v` (for every `u` index):
+/// - row `0` where `v` is the start of clamped `v` knots;
+/// - row `net.nv - 1` where `v` is their end;
+/// - row `first - 1` where `v` is an interior `C^0` knot of exact multiplicity `q` (`q > 0`,
+///   appearing at indices `first..first + q`, as at a sphere's equator `v = 0.5`).
+///
+/// `None` for any other `v`, or `v` knots that are not clamped and non-decreasing. At each
+/// such `v`, the basis function in `v` for that row is identically `1` from both sides and
+/// every other basis function is `0`, so the net's points at that `v` are exactly the rational
+/// curve of that row's points and weights, of the net's `u` knots and degree.
 fn end_row(net: &Nurbs, v: f64) -> Option<Vec<usize>> {
     let q = net.q;
     if net.nv == 0 || net.v.len() != net.nv + q + 1 {
@@ -2925,6 +3002,16 @@ fn end_row(net: &Nurbs, v: f64) -> Option<Vec<usize>> {
         0
     } else if v == v1 {
         net.nv.checked_sub(1)?
+    } else if q > 0 && v0 < v && v < v1 {
+        if !net.v.windows(2).all(|w| matches!(w, [a, b] if a <= b)) {
+            return None;
+        }
+        let first = net.v.partition_point(|&x| x < v);
+        let after = net.v.partition_point(|&x| x <= v);
+        if after.checked_sub(first)? != q || first <= q || after > net.nv {
+            return None;
+        }
+        first.checked_sub(1)?
     } else {
         return None;
     };
@@ -4964,6 +5051,9 @@ enum Correspondence {
 
 /// [`trim_image_gap_bound_within`] for `cover_moved_edge`'s structure-changed fallback so its
 /// bisection pieces are counted in [`crate::kernel::WorkCounters::move_trim_bisection_pieces`].
+/// Both fallback call sites treat every proved bound at most `enough` identically (covered /
+/// no raise) and lift a piece `budget` to [`MAX_PIECES`] automatically whenever an evaluated
+/// endpoint exceeds `enough`.
 pub(crate) fn trim_image_gap_bound_for_move(
     k: &Kernel,
     surface: &Surface,
@@ -4990,8 +5080,8 @@ pub(crate) fn trim_image_gap_bound_for_move(
         [enough, over],
         budget,
         Correspondence::Fitted,
-        false,
-        false,
+        budget.is_some(),
+        true,
         true,
         &pair,
     )?;
@@ -5113,12 +5203,14 @@ fn bound_trim_pair(
                 }
             }
         }
-        // (#22273: at equal parameters, where those cases give no bound or one above the
-        // cutoffs, a trim along a piece of a row is bounded on that piece
-        // ([`row_piece_pair_bound`], the same slack and residual added): a full row's check
-        // of a trim along a piece of it compares the piece's ends with the row's. The smaller
-        // of the two certified bounds is the answer where it meets the cutoffs)
-        if !fitted {
+        // (#22273, #22820: at equal parameters — and for `fitted` callers that treat all bounds
+        // `<= enough` identically, since a same-parameter bound also bounds Hausdorff distance —
+        // where those cases give no bound or one above the cutoffs, a trim along a piece of a
+        // row is bounded on that piece ([`row_piece_pair_bound`], the same slack and residual
+        // added): a full row's check of a trim along a piece of it compares the piece's ends
+        // with the row's. The smaller of the two certified bounds is the answer where it meets
+        // the cutoffs)
+        if !fitted || any_within_enough {
             if let Some(piece) = row_piece_pair_bound(k, to_surface, cn, c_slack, wn, net, range)? {
                 let bound = structured.map_or(piece, |s| s.min(piece));
                 if meets(bound) {
@@ -5226,11 +5318,26 @@ fn bound_trim_pair(
             if count_move_pieces {
                 k.work_counters.add_move_trim_bisection_pieces(evaluated);
             }
-            if let BisectOutcome::Proved(gap) = id_outcome {
-                let bound = (Ivl::from(gap) + Ivl::from(c_slack)).hi;
-                if bound.is_finite() && bound <= enough && bound <= over {
-                    return finish(memo_key, TrimBoundOutcome::Proved(bound));
+            match id_outcome {
+                BisectOutcome::Proved(gap) => {
+                    let bound = (Ivl::from(gap) + Ivl::from(c_slack)).hi;
+                    if bound.is_finite() && bound <= enough && bound <= over {
+                        return finish(memo_key, TrimBoundOutcome::Proved(bound));
+                    }
                 }
+                // (#22820: when the caller collapses budget-stopped runs whose endpoints all
+                // stayed within `enough` (`enough <= over`, so `enough_gap` matches `run`'s),
+                // every evaluated endpoint of `|C(t) - S(W(t))|` — an upper bound on the
+                // Hausdorff distance at `t` — stayed within `enough`: skip fitting a dense
+                // Hermite `ψ` just to hit `BudgetStopped` again on a pole or C^0 knot row.)
+                BisectOutcome::BudgetStopped
+                    if collapse_unproved && budget.is_some() && enough <= over =>
+                {
+                    return finish(memo_key, TrimBoundOutcome::BudgetStopped);
+                }
+                BisectOutcome::ExceedsOver
+                | BisectOutcome::BudgetStopped
+                | BisectOutcome::Unproved => {}
             }
         }
     }
@@ -5326,6 +5433,13 @@ fn bound_trim_pair(
     let with_psi = |psi: &NurbsCurve| -> Result<Option<f64>> {
         let mut endpoints = BTreeMap::new();
         let mut first = run(psi, cn, net, enough, &[], &mut endpoints)?;
+        // (#22820: when `collapse_unproved` is enabled and `first` stopped on the piece budget
+        // with every evaluated endpoint within `enough`, do not spend thousands of knot cuts or
+        // a recentred retry — whose `enough - slack` can also lift the piece cap — on a trim the
+        // caller already treats as covered.)
+        if collapse_unproved && first.is_none() && budget_stopped.get() {
+            return Ok(None);
+        }
         let mut cuts: Vec<f64> = Vec::new();
         if !first.is_some_and(|g| g <= enough) {
             cuts = psi
@@ -5525,8 +5639,8 @@ pub fn crv_on_surf_trim_gap_bound(
         let (Some(&r0), Some(&p1), Some(&p2)) = (r.first(), r.get(1), r.get(2)) else {
             return Ok(None);
         };
-        let wcd = curve_derivs_over(&wc, r0, 2, None)?;
-        let wd = curve_derivs_over(&wn, span, 2, None)?;
+        let wcd = uv_derivs_over(&wc, r0, 2)?;
+        let wd = uv_derivs_over(&wn, span, 2)?;
         let (Some(c1w), Some(c2w), Some(w1)) = (wcd.get(1), wcd.get(2), wd.get(1)) else {
             return Ok(None);
         };
@@ -9101,6 +9215,190 @@ mod tests {
         }
     }
 
+    /// #22037: `cylinder.smb`'s cap 1 (a bilinear B-spline patch over the circle's bounding
+    /// square, `u` in `[-5, 5]`, `v` in `[-10, 0]`), its edge 0 (a radius-5 circle of four
+    /// rational quadratic quarters) and its UV trim, as the file stores them.
+    fn flat_bspline_cap() -> (Kernel, Surface, Curve, Curve, [f64; 2]) {
+        use crate::nurbs::b_spline_surface::BSplineSurface;
+        use crate::nurbs::srf_basic::Surface as NurbSurface;
+        let k = Kernel::default();
+        let net = vec![
+            vec![
+                CPoint::new(0.0, 4.999999999999999, -5.0, NOW),
+                CPoint::new(0.0, 4.999999999999999, 5.0, NOW),
+            ],
+            vec![
+                CPoint::new(0.0, -5.000000000000001, -5.0, NOW),
+                CPoint::new(0.0, -5.000000000000001, 5.0, NOW),
+            ],
+        ];
+        let surface = NurbSurface::new(
+            net,
+            1,
+            1,
+            vec![-4.999999999999999, -4.999999999999999, 5.0, 5.0],
+            vec![-10.0, -10.0, 0.0, 0.0],
+        )
+        .unwrap();
+        let surface = Surface::from(BSplineSurface::from_nurb(surface, false));
+        let knots = vec![
+            0.0,
+            0.0,
+            0.0,
+            7.653668647301794,
+            7.653668647301794,
+            15.30733729460359,
+            15.30733729460359,
+            22.96100594190538,
+            22.96100594190538,
+            30.61467458920718,
+            30.61467458920718,
+            30.61467458920718,
+        ];
+        let c = |x: f64, y: f64, z: f64, w: f64| CPoint::new(x, y, z, w);
+        let curve = vec![
+            c(0.0, 0.0, 5.0, 1.0),
+            c(
+                0.0,
+                -3.5355339059327373,
+                3.5355339059327378,
+                std::f64::consts::FRAC_1_SQRT_2,
+            ),
+            c(0.0, -5.0, 0.0000000000000014, 1.0),
+            c(
+                0.0,
+                -3.5355339059327373,
+                -3.535533905932736,
+                0.7071067811865475,
+            ),
+            c(0.0, -0.0000000000000008, -4.999999999999998, 1.0),
+            c(
+                0.0,
+                3.535533905932737,
+                -3.535533905932737,
+                0.7071067811865475,
+            ),
+            c(0.0, 4.999999999999999, 0.0000000000000006, 1.0),
+            c(
+                0.0,
+                3.535533905932737,
+                3.535533905932737,
+                0.7071067811865475,
+            ),
+            c(0.0, 0.0, 5.0, 1.0),
+        ];
+        let curve = NurbCurve::new(curve, 2, knots.clone()).unwrap();
+        let curve = Curve::from(BSplineCurve::from_nurb(curve, 3, false));
+        let trim = vec![
+            c(0.0, 0.0, 0.0, 1.0),
+            c(
+                3.5355339059327373,
+                0.0,
+                0.0,
+                std::f64::consts::FRAC_1_SQRT_2,
+            ),
+            c(5.0, -4.999999999999998, 0.0, 1.0),
+            c(
+                3.5355339059327373,
+                -7.071067811865474,
+                0.0,
+                0.7071067811865475,
+            ),
+            c(0.0000000000000008, -9.999999999999998, 0.0, 1.0),
+            c(
+                -3.535533905932737,
+                -7.071067811865475,
+                0.0,
+                0.7071067811865475,
+            ),
+            c(-4.999999999999999, -4.999999999999999, 0.0, 1.0),
+            c(
+                -3.535533905932737,
+                -0.0000000000000006,
+                0.0,
+                0.7071067811865475,
+            ),
+            c(0.0, 0.0, 0.0, 1.0),
+        ];
+        let trim = NurbCurve::new(trim, 2, knots).unwrap();
+        let trim = Curve::from(BSplineCurve::from_nurb(trim, 2, false));
+        (k, surface, curve, trim, [0.0, 30.61467458920718])
+    }
+
+    /// #22037: the circle trims of `cylinder.smb`'s flat B-spline cap are bounded below the
+    /// bisection's floor, at least their sampled distance. The trim is tangent to the patch's
+    /// four sides; its UV box over a piece, enclosed from the origin, ran past the side at
+    /// `(0, -10)` by about `0.76 h` (the rational quotient's widening, first order in the
+    /// piece), and that overshoot is the slack the bisection adds: it shrank only as fast as
+    /// the pieces, and the pieces about each tangency ran out with the bound at `0.097` for
+    /// the whole circle, `7.2e-4` for a quarter and no bound at all at equal parameters. Each
+    /// piece closes once its second term with the slack is at most the floor `1e-7`, so the
+    /// bound is at most the floor plus the largest end value (about `2e-13` here): `2e-7`.
+    #[test]
+    fn a_circle_trim_tangent_to_its_patchs_sides_is_bounded_below_the_floor() {
+        let (k, s, curve, trim, range) = flat_bspline_cap();
+        let knots = [
+            range[0],
+            7.653668647301794,
+            15.30733729460359,
+            22.96100594190538,
+            range[1],
+        ];
+        let mut ranges = vec![range];
+        ranges.extend(knots.windows(2).map(|w| [w[0], w[1]]));
+        for r in ranges {
+            let mut sampled = 0.0_f64;
+            for i in 0..=1000 {
+                let t = r[0] + (r[1] - r[0]) * f64::from(i) / 1000.0;
+                let uv = trim.evaluate_point(&k, t).unwrap();
+                let on = s.evaluate_point(&k, Point2::new(uv.x, uv.y)).unwrap();
+                sampled = sampled.max((on - curve.evaluate_point(&k, t).unwrap()).length());
+            }
+            let image = trim_image_gap_bound(&k, &s, &curve, &trim, r, 1e-7)
+                .unwrap()
+                .unwrap();
+            let same = trim_same_parameter_gap_bound_within(
+                &k,
+                &s,
+                &curve,
+                &trim,
+                r,
+                1e-7,
+                [f64::NEG_INFINITY, f64::INFINITY],
+                None,
+            )
+            .unwrap()
+            .unwrap();
+            for g in [image, same] {
+                assert!(
+                    sampled <= g && g <= 2e-7,
+                    "{r:?}: {g:e} against {sampled:e}"
+                );
+            }
+        }
+    }
+
+    /// #22037: the trim's UV box over a piece `h = 1.9e-3` long from its tangency with the
+    /// patch's side `v = -10` (the knot `15.307...`, where `v' = 0`): enclosed from the
+    /// origin it runs past the side by more than `0.5 h`; about the piece's middle
+    /// ([`uv_derivs_over`]) by at most the curve's second-order term, `|v''| h^2 / 4` with
+    /// `|v''|` about `0.2` (the UV circle of radius 5 at about unit speed), below `h^2`. The
+    /// true trim stays within the side there (its control points do, and it is their convex
+    /// combination), so either box holds it.
+    #[test]
+    fn a_trims_box_runs_past_the_side_it_touches_by_second_order() {
+        let (_, _, _, trim, range) = flat_bspline_cap();
+        let (wn, _) = exact_curve_data(&trim, true).unwrap().unwrap();
+        let a = 15.30733729460359;
+        let h = range[1] / 16384.0;
+        let span = Ivl::new(a, a + h);
+        let past = |w: &[V3<Ivl>]| (-10.0 - w[0].y.lo).max(0.0);
+        let plain = past(&curve_derivs_over(&wn, span, 2, None).unwrap());
+        let about = past(&uv_derivs_over(&wn, span, 2).unwrap());
+        assert!(plain > 0.5 * h, "{plain:e} at h {h:e}");
+        assert!(about <= h * h, "{about:e} at h {h:e}");
+    }
+
     /// #22467: `TrimBoundMemo` stores each key once behind an `Arc`, evicts oldest entries
     /// once the retained byte budget (`TRIM_MEMO_MAX_BYTES`) is reached, and updates existing
     /// keys in place without growing entry count or retained bytes.
@@ -9145,5 +9443,73 @@ mod tests {
             memo.get(&make_key(299, words)),
             Some(TrimBoundOutcome::BudgetStopped)
         );
+    }
+
+    /// #22820: `end_row` recognizes interior `C^0` knot rows of exact multiplicity `q`
+    /// (such as a canonical sphere's equator at `v = 0.5`) as well as clamped end rows, while
+    /// refusing simple interior knots where the surface does not interpolate a single row.
+    #[test]
+    fn end_row_finds_interior_c0_equator_of_sphere() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::surface::sphere::Sphere;
+
+        let k = Kernel::default();
+        let sphere = Sphere::create_canonical(&k, &Axis2Placement::IDENTITY, 120.0).unwrap();
+        let net = Nurbs::of(sphere.base().base()).unwrap();
+        assert_eq!(net.q, 2);
+        assert_eq!(net.nv, 5);
+        // Clamped south pole (v = 0), interior double-knot equator (v = 0.5), clamped north pole (v = 1).
+        let south = end_row(&net, 0.0).unwrap();
+        let equator = end_row(&net, 0.5).unwrap();
+        let north = end_row(&net, 1.0).unwrap();
+        assert_eq!(south, (0..net.nu).map(|j| j * net.nv).collect::<Vec<_>>());
+        assert_eq!(
+            equator,
+            (0..net.nu).map(|j| j * net.nv + 2).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            north,
+            (0..net.nu).map(|j| j * net.nv + 4).collect::<Vec<_>>()
+        );
+        assert!(end_row(&net, 0.25).is_none());
+        assert!(end_row(&net, 0.75).is_none());
+
+        // Simple interior knot (multiplicity 1 < q = 2): not an interpolated control-point row.
+        let simple_v = Nurbs {
+            p: 1,
+            q: 2,
+            nu: 2,
+            nv: 4,
+            u: vec![0.0, 0.0, 1.0, 1.0],
+            v: vec![0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0],
+            pw: vec![0.0; 2 * 4 * 4],
+        };
+        assert!(end_row(&simple_v, 0.5).is_none());
+    }
+
+    /// #22820: `pure_nurbs_flags` accepts NURBS-evaluated analytic surfaces (`Sphere`) and
+    /// curves (`Ellipse`), so `TrimBoundMemo` caches sphere/ellipse move bounds across moves.
+    #[test]
+    fn pure_nurbs_flags_accepts_sphere_and_ellipse() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::b_spline_surface::SurfParamType;
+        use crate::surface::sphere::Sphere;
+
+        let k = Kernel::default();
+        let sphere = Sphere::create_canonical(&k, &Axis2Placement::IDENTITY, 120.0).unwrap();
+        let iso = sphere
+            .create_iso_parametric_curve(&k, SurfParamType::V, 0.5, None, true)
+            .unwrap();
+        let surface = Surface::from(sphere);
+        let curve = iso.curve;
+        let uv = Curve::from(
+            BSplineCurve::create_line_segment(
+                2,
+                Point3::new(0.0, 0.5, 0.0),
+                Point3::new(1.0, 0.5, 0.0),
+            )
+            .unwrap(),
+        );
+        assert!(pure_nurbs_flags(&surface, &curve, &uv).is_some());
     }
 }

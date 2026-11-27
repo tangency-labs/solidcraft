@@ -4558,3 +4558,92 @@ fn multi_seed_joined_pattern_separate_copies_inherit_unanimous_seed_material() {
     assert_eq!(s.doc.body_material(&copies[0]), solidcraft_doc::DEFAULT_MATERIAL);
     assert_eq!(s.doc.body_material(&copies[1]), "Steel");
 }
+
+#[test]
+fn pattern_edit_without_body_names_preserves_copy_names_and_overrides_with_left_out_entries() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [20, 0, 0], "operation": "new", "body_name": "FastenerA"}));
+    let feat_b =
+        run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [20, 20, 0], "operation": "new", "body_name": "FastenerB"}))
+            ["feature"]
+            .as_u64()
+            .unwrap();
+    run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [20, 40, 0], "operation": "new", "body_name": "FastenerC"}));
+    run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [20, 60, 0], "operation": "new", "body_name": "FastenerD"}));
+    run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [20, 80, 0], "operation": "new", "body_name": "FastenerE"}));
+
+    run(&mut s, "material.assign", json!({"bodies": ["FastenerA", "FastenerB"], "material": "Steel"}));
+    run(&mut s, "material.assign", json!({"bodies": ["FastenerC"], "material": "Aluminum"}));
+    run(&mut s, "material.assign", json!({"bodies": ["FastenerD"], "material": "Copper"}));
+    run(&mut s, "material.assign", json!({"bodies": ["FastenerE"], "material": "Titanium"}));
+
+    let pat = run(
+        &mut s,
+        "solid.pattern.circular",
+        json!({"bodies": ["FastenerA", "FastenerB", "FastenerC", "FastenerD"], "axis": "Z", "count": 2, "angle": "180 deg"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"body_names": ["Copy1", "Copy2", "Copy3", "Copy4"]}}));
+    run(&mut s, "material.assign", json!({"bodies": ["Copy4"], "material": "Brass"}));
+
+    // Suppress FastenerB so the pattern leaves index 1 out while keeping 4 source-aligned slots.
+    run(&mut s, "timeline.suppress", json!({"feature": feat_b, "suppressed": true}));
+    let left_out_copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == pat).map(|b| b.name.clone()).collect();
+    assert_eq!(left_out_copies, vec!["Copy1", "Copy3", "Copy4"]);
+
+    // Adding FastenerE without body_names while FastenerB is left out must keep Copy1/Copy3/Copy4
+    // aligned to their sources (preserving Copy4's explicit Brass) and give FastenerE's copy Titanium.
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"bodies": ["FastenerA", "FastenerB", "FastenerC", "FastenerD", "FastenerE"]}}));
+    let after_add: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == pat).map(|b| b.name.clone()).collect();
+    assert_eq!(after_add.len(), 4, "{after_add:?}");
+    assert_eq!(after_add[..3], ["Copy1", "Copy3", "Copy4"]);
+    assert_eq!(s.doc.body_material("Copy1"), "Steel");
+    assert_eq!(s.doc.body_material("Copy3"), "Aluminum");
+    assert_eq!(s.doc.body_material("Copy4"), "Brass");
+    assert_eq!(s.doc.body_material(&after_add[3]), "Titanium");
+
+    // Purging FastenerB and FastenerC without body_names must keep Copy4 on FastenerD (not Copy3)
+    // and retain both inherited materials and Copy4's explicit Brass override.
+    let copy_e = after_add[3].clone();
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"bodies": ["FastenerA", "FastenerD", "FastenerE"]}}));
+    let after_purge: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == pat).map(|b| b.name.clone()).collect();
+    assert_eq!(after_purge, ["Copy1", "Copy4", copy_e.as_str()]);
+    assert_eq!(s.doc.body_material("Copy1"), "Steel");
+    assert_eq!(s.doc.body_material("Copy4"), "Brass");
+    assert_eq!(s.doc.body_material(&copy_e), "Titanium");
+}
+
+#[test]
+fn mirror_combine_unmerged_copies_inherit_seed_material() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new", "body_name": "Bracket"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 30, 0], "operation": "new", "body_name": "Spacer"}));
+
+    // Single-seed combined mirror of a body away from the mirror plane yields an unmerged copy lump.
+    let single = run(&mut s, "solid.mirror", json!({"bodies": ["Bracket"], "plane": "YZ", "combine": true}));
+    let single_id = single["feature"].as_u64().unwrap();
+    let single_copy =
+        s.model.state().bodies.iter().find(|b| b.feature == single_id).map(|b| b.name.clone()).expect("disconnected mirror combine copy");
+
+    run(&mut s, "material.assign", json!({"bodies": ["Bracket"], "material": "Steel"}));
+    assert_eq!(s.doc.body_material(&single_copy), "Steel");
+    run(&mut s, "material.assign", json!({"bodies": [single_copy.as_str()], "material": "Default"}));
+    assert_eq!(s.doc.body_material(&single_copy), solidcraft_doc::DEFAULT_MATERIAL);
+    assert_eq!(s.doc.body_material("Bracket"), "Steel");
+
+    // Multi-seed combined mirror inherits unanimously when seeds share the same material.
+    run(&mut s, "material.assign", json!({"bodies": ["Spacer"], "material": "Steel"}));
+    let multi =
+        run(&mut s, "solid.mirror", json!({"bodies": ["Bracket", "Spacer"], "plane": {"origin": [0, -20, 0], "normal": [0, 1, 0]}, "combine": true}));
+    let multi_id = multi["feature"].as_u64().unwrap();
+    let multi_copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == multi_id).map(|b| b.name.clone()).collect();
+    assert_eq!(multi_copies.len(), 2, "{multi_copies:?}");
+    for copy in &multi_copies {
+        assert_eq!(s.doc.body_material(copy), "Steel", "{copy}");
+    }
+    run(&mut s, "material.assign", json!({"bodies": ["Spacer"], "material": "Aluminum"}));
+    for copy in &multi_copies {
+        assert_eq!(s.doc.body_material(copy), solidcraft_doc::DEFAULT_MATERIAL, "{copy}");
+    }
+}

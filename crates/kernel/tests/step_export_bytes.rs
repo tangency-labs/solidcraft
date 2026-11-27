@@ -75,6 +75,8 @@ const NO_READ_BACK: &[&str] = &["tests/step-regressions/thread_crest_band.step"]
 /// line #8 uncertainty by 9e-15 (0.017508281886215407 -> 0.01750828188620642).
 /// `stepped_tapered_hole.step` is new (solidcore#3253): a block whose stepped, tapered hole has
 /// whole-turn cone faces that close on their seams beside a quarter line.
+/// `bent_strip_micrometre_cuts.step` is new (#22579): SolidCraft's export of a bent strip with two
+/// cuts, which the reader reads finer than the file states.
 /// Entries whose export's bytes differ only on macOS's math functions, beside the pinned values
 /// above: the reader's seam split now lands on the edge's own knot, and the pcurves made beside it
 /// carry macOS libm's rounding for these fixtures (on Linux the split solves within the export's
@@ -92,6 +94,7 @@ const DIGESTS_MACOS: &[(&str, &str)] = &[
     ("tests/step-conformance/cone_point.step", "0345ac19b0d17681"),
     ("tests/step-conformance/cone_point_vertex.step", "96c735326c578395"),
     ("tests/step-conformance/grooved_shaft.step", "e08ae1efaaae2696"),
+    ("tests/step-regressions/bent_strip_micrometre_cuts.step", "31fdfe6a34c0efbc"),
     ("tests/step-regressions/hole_round_revolved.step", "1749e03c3c2f194a"),
     ("tests/step-regressions/rod_doubled_edge.step", "ef5f1b70be16e528"),
     ("tests/step-regressions/thread_crest_band.step", "2ed5caa31e66e216"),
@@ -154,6 +157,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-conformance/tiny_pin.step", "e86130e9cc19deff"),
     ("tests/step-conformance/torus_ring_nurbs.step", "25b37c2f5bf478a5"),
     ("tests/step-conformance/washer.step", "490ba83889e1002f"),
+    ("tests/step-regressions/bent_strip_micrometre_cuts.step", "7455340237d821cc"),
     ("tests/step-regressions/block_edge_off_its_face.step", "8e25cc9a701de87d"),
     ("tests/step-regressions/cylinder_rim_off_its_wall.step", "e07c2fdbef7cc0c6"),
     ("tests/step-regressions/cylinder_spline_rims.step", "ed34ee7908eddf1d"),
@@ -162,7 +166,7 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-regressions/rod_cross_hole_rim_off_curve_start.step", "908bb8af3062c6c0"),
     ("tests/step-regressions/rod_doubled_edge.step", "7e5ec3041433853c"),
     ("tests/step-regressions/rounded_disc_cut_vertices_off.step", "5dda1e626a95d58c"),
-    ("tests/step-regressions/swept_tube_last_wall.step", "b10f2cc091917d5a"),
+    ("tests/step-regressions/swept_tube_last_wall.step", "711d9a8df3f56e3a"),
     ("tests/step-regressions/thread_crest_band.step", "2dfb86551d60a9f3"),
     ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "0909a2e6b030bd2c"),
     ("tests/step-regressions/torus_patch_and_rest.step", "a82c8cbad7038460"),

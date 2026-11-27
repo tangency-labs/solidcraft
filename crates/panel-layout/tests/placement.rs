@@ -27,6 +27,7 @@ fn registry() -> PanelResult<PanelRegistry> {
         features: PanelFeatures::default(),
         side_height_policy: SideHeightPolicy::Content,
         fixed_bottom_height: None,
+        bottom_always_open: false,
         header_actions: Vec::new(),
         text_heavy: false,
     })?;

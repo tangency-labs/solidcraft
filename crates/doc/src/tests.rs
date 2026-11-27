@@ -2036,6 +2036,7 @@ fn errors_are_reported_not_fatal() {
             angle2: None,
             symmetric: false,
             convention: Default::default(),
+            join_profile_arcs: false,
             to: None,
         },
         None,
@@ -2344,6 +2345,43 @@ fn copy_lineage_resolves_seed_material_and_respects_overrides() {
     doc.materials.insert("B".into(), "Steel".into());
     doc.materials.insert("A (2)".into(), DEFAULT_MATERIAL.into());
     assert_eq!(doc.body_material("A (2)"), DEFAULT_MATERIAL);
+
+    // Combined Mirror: single-seed unmerged lump inherits its seed; multi-seed unmerged lumps
+    // inherit unanimously when every seed shares the same material.
+    let single_mir_id = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "YZ".into() },
+                bodies: vec!["A".into()],
+                combine: true,
+                placements: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(single_mir_id).unwrap().body_names = vec!["A_mir".into()];
+    assert_eq!(doc.copy_seed_body("A_mir"), Some("A"));
+    assert_eq!(doc.body_material("A_mir"), "Steel");
+
+    let multi_mir_id = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Origin { name: "XZ".into() },
+                bodies: vec!["A".into(), "B".into()],
+                combine: true,
+                placements: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(multi_mir_id).unwrap().body_names = vec!["AB_mir".into()];
+    assert_eq!(doc.copy_seed_body("AB_mir"), None);
+    assert!(doc.has_copy_material_lineage("AB_mir"));
+    assert_eq!(doc.body_material("AB_mir"), "Steel");
+    doc.materials.insert("B".into(), "Brass".into());
+    assert_eq!(doc.body_material("AB_mir"), DEFAULT_MATERIAL);
 }
 
 #[test]
