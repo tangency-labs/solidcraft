@@ -74,7 +74,9 @@ other is a tracked bug.
 - **Features:** extrude, revolve, sweep, loft, fillet, chamfer, shell, draft, holes, threads, patterns, mirror, split and combine on an editable parametric timeline.
 - **Parameters and configurations** with unit-aware expressions.
 - **Assemblies** with joints, motion studies, contact sets, interference and mass properties.
-- **Sheet metal** with flanges, hems, fold/unfold and flat patterns, and plastic enclosure features.
+- **Sheet metal** with flanges, hems, fold/unfold and flat patterns. Choose how two edge flanges
+  meet at a corner: **Butt**, **Partial overlap** or **Full overlap**.
+- **Plastic enclosure features.**
 - **Files:** STEP, IGES, 3MF, STL, OBJ and glTF in and out where supported, URDF export, `.sc` designs (`.solidcraft` files from earlier releases still open).
 - **Desktop app, browser app, headless CLI and MCP server**, all running the same commands.
 
@@ -294,11 +296,12 @@ MIT OR Apache-2.0, at your option. Developed under the
 [clean-room contribution rules](AGENTS.md); third-party code and assets retain their
 documented licences and attribution.
 
-SolidCraft's brand and interface are licensed separately, under
-[LICENSE-BRAND](LICENSE-BRAND): the UI kit, the look (interface icons, glyphs, built-in themes),
-the theme's design tokens and palettes, and the SolidCraft name, logo and app icon. Use them freely
-as part of SolidCraft. Using them in another program or product needs the maintainers' written
-permission first.
+That includes the user interface code: the UI kit, the theme's design tokens, the look's glyphs,
+themes and icon code. SolidCraft's branding and artwork are licensed separately, under
+[LICENSE-BRAND](LICENSE-BRAND): the SolidCraft name, logo, app icon and brand kit, and the
+interface icon artwork (the SVG masters in `crates/look/icons/design/svg`). Use them freely as part
+of SolidCraft. Using them in another program or product needs the maintainers' written permission
+first. ATTRIBUTION.md lists the licence of every asset file.
 
 SolidCraft is independent. Behaviour is designed from public documentation, general CAD
 conventions and user feedback. Reference tests use analytic values and open-source tools.

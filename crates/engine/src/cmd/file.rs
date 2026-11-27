@@ -1435,6 +1435,7 @@ fn kicad_options_record(options: &solidcraft_io::KicadOptions) -> Value {
         "components": options.components,
         "copper": options.copper.as_str(),
         "silkscreen": options.silkscreen,
+        "holes": options.holes.as_str(),
     });
     if let Some(thickness) = options.thickness {
         record["thickness"] = json!(thickness);
