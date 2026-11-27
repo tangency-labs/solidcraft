@@ -548,8 +548,14 @@ A cutter's software often expects its own layer names and colours. A **DXF profi
 file a shop writes once for its machine: for each role (the outline, the cut-outs, cut text,
 etched text, bends up, bends down, bend notes, pockets, perforation, roll lines) it gives the
 layer's name, its colour and its linetype (continuous, dashed or hidden), or turns the role off
-so that it is not in the file at all. Pass it as `"profile"`, either the file's path or the
-profile itself:
+so that it is not in the file at all.
+
+In the app, open **Create Flat Pattern** and click **Choose profile…** to pick the file. The panel
+lists each role the profile writes otherwise than the standard layers, or says why the file cannot
+be used, and **Export DXF…** then writes the file with it. **Use standard layers** drops the
+profile again. The ribbon's **Export DXF** button always writes the standard layers.
+
+From a script, pass it as `"profile"`, either the file's path or the profile itself:
 
 ```json
 {"command":"sheet.export_dxf","params":{"path":"bracket-flat.dxf","profile":"example-laser.json"}}

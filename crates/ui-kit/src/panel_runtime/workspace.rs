@@ -322,6 +322,7 @@ pub struct WorkspacePanelHost {
     last_mount_revision: Option<u64>,
     preview_started: Option<f64>,
     live_drag: bool,
+    float_on_empty_drop: bool,
     /// The panel a drag popped out, and the screen rectangle its window was
     /// shown at; the desktop adapter opens the window there.
     window_landing: Option<(InstanceId, LogicalRect)>,
@@ -436,6 +437,11 @@ impl WorkspacePanelHost {
         if changed {
             self.invalidate_geometry();
         }
+    }
+
+    pub fn set_float_on_empty_drop(&mut self, enabled: bool) {
+        self.float_on_empty_drop = enabled;
+        self.interaction.set_float_on_empty_drop(enabled);
     }
 
     pub fn set_live_drag(&mut self, enabled: bool) {
@@ -568,6 +574,7 @@ impl WorkspacePanelHost {
             last_mount_revision: None,
             preview_started: None,
             live_drag: false,
+            float_on_empty_drop: false,
             window_landing: None,
             #[cfg(not(target_arch = "wasm32"))]
             window_card: None,
@@ -1839,8 +1846,20 @@ impl WorkspacePanelHost {
         if self.live_drag && !drag_cards.is_empty() && (source.is_some() || self.drag_paint.active()) {
             let visual = landing.or(self.interaction.detached_layout()).or(frame.next_layout.as_ref()).unwrap_or(&frame.layout);
             let landing_preview = frame.preview.as_ref().filter(|_| landing.is_some() && source.is_some());
+            let carried = (self.float_on_empty_drop && !leaving)
+                .then(|| {
+                    let card = drag_cards.iter().find(|card| Some(&card.instance) == source)?;
+                    // The pointer itself, so the panel follows it even where the host suspends the drag.
+                    let at = ui.input(|input| input.pointer.latest_pos())?;
+                    let start = self.interaction.move_start()?;
+                    Some(card.committed_bounds.translate(egui::vec2(at.x - start.x, at.y - start.y)))
+                })
+                .flatten();
             let preview_bounds =
-                self.drag_paint.show(ui, &drag_cards, visual, source, landing_preview, runtime.environment().motion == Motion::Reduced);
+                self.drag_paint.show(ui, &drag_cards, visual, source, landing_preview, carried, runtime.environment().motion == Motion::Reduced);
+            if let Some(shown) = self.drag_paint.shown {
+                solidcraft_ui_registry::publish_rect("panel_drag:card", shown);
+            }
             if source.is_some() {
                 for section in &visual.sections {
                     if !drag_cards.iter().any(|card| card.instance == section.instance)
@@ -4004,7 +4023,11 @@ pub(super) fn popout_destination(
     Ok(Destination::NewSection { section: id, index, location, size: section.size })
 }
 
-fn new_section_identity(service: &LayoutService, instance: &InstanceId, reservations: &HostIdentityReservations) -> PanelResult<(SectionId, usize)> {
+pub(super) fn new_section_identity(
+    service: &LayoutService,
+    instance: &InstanceId,
+    reservations: &HostIdentityReservations,
+) -> PanelResult<(SectionId, usize)> {
     let source = service.layout().containing(instance)?;
     let index = service.layout().sections.len().saturating_sub(usize::from(source.tabs.len() == 1));
     if source.tabs.len() == 1 {

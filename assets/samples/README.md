@@ -1,9 +1,10 @@
 # Sample previews
 
 The editable authority is the built-in command scripts in
-`crates/engine/src/sample.rs`. The six 240 × 150 PNGs in `exports/` are generated
-by SolidCraft's thumbnail renderer from those original designs, using the same
-isometric camera as Recent. They are embedded by `home.rs`, so displaying Home
+`crates/engine/src/sample.rs`. The six 512 × 384 PNGs in `exports/` are generated
+by SolidCraft's thumbnail renderer from those original designs: the same cut-out,
+isometric picture and footprint chunk that a save keeps
+(`crates/engine/src/thumbnail.rs`). They are embedded by `home.rs`, so displaying Home
 does not evaluate sample geometry or read pixels back from the GPU. Selecting a
 sample builds its editable design through the normal commands.
 
