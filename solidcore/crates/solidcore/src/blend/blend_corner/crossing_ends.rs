@@ -150,12 +150,20 @@ fn other_face(pick: &Pick, face: FaceId) -> Option<FaceId> {
     }
 }
 
-/// The candidate meeting of picks `i` and `j`, from topology alone: an end of each joined
-/// by an unpicked straight edge `e`, each end a vertex of three edges, `e` on a face both
-/// picks lie on, its other face a plane.
-fn candidate(b: &Brep, picks: &[Pick], i: usize, j: usize) -> Result<Option<Candidate>> {
+/// Every candidate meeting of picks `i` and `j`, from topology alone, added to `found`: an
+/// end of each joined by an unpicked straight edge `e`, each end a vertex of three edges,
+/// `e` on a face both picks lie on, its other face a plane. Every such connector is a
+/// candidate, since which of them the bands reach across does not follow from topology and
+/// must not depend on the edges' orientations.
+fn candidates_of(
+    b: &Brep,
+    picks: &[Pick],
+    i: usize,
+    j: usize,
+    found: &mut Vec<Candidate>,
+) -> Result<()> {
     let (Some(p), Some(q)) = (picks.get(i), picks.get(j)) else {
-        return Ok(None);
+        return Ok(());
     };
     for vi in p.ends {
         for vj in q.ends {
@@ -178,18 +186,18 @@ fn candidate(b: &Brep, picks: &[Pick], i: usize, j: usize) -> Result<Option<Cand
                         && other_face(q, face).is_some()
                         && is_plane(b, end_face)?
                     {
-                        return Ok(Some(Candidate {
+                        found.push(Candidate {
                             picks: [i, j],
                             at: [vi, vj],
                             e,
                             face,
-                        }));
+                        });
                     }
                 }
             }
         }
     }
-    Ok(None)
+    Ok(())
 }
 
 /// The meeting end of a pick at `v` towards the unpicked edge `e` on `face`: the pick's
@@ -301,9 +309,7 @@ pub fn plan(k: &Kernel, b: &mut Brep, picked: &[EdgeId], sizes: &[f64]) -> Resul
     for i in 0..count {
         for j in 0..i {
             k.check_cancelled(OP)?;
-            if let Some(c) = candidate(b, &picks, i, j)? {
-                candidates.push(c);
-            }
+            candidates_of(b, &picks, i, j, &mut candidates)?;
         }
     }
     if candidates.is_empty() {

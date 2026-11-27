@@ -17,7 +17,7 @@ use solidcore::boolean::api_brep::{boolean_difference, boolean_intersection};
 use solidcore::math::Point3;
 use solidcore::primitive::api_primitives::{create_box, create_cylinder};
 use solidcore_ops::session;
-use solidcore_ops::sweep::{loft_to_point, Curve};
+use solidcore_ops::sweep::{extrude, loft_to_point, Curve, DraftCorner};
 use solidcore_ops::{
     blend, blend_ordered, blend_with, chamfer_sides_facing, make_box, Blend, BlendOptions, Body,
     ChamferCorner, ChamferSecond, CheckLevel, Corners, Error, FitKind, Order,
@@ -619,4 +619,47 @@ fn top_chamfers_past_the_end_collision_meet_on_the_vertical_chamfers() {
         let v = b.volume(1e-10).unwrap();
         assert!((v - want).abs() <= 1e-9 * want, "s={s}: {v} vs {want}");
     }
+}
+
+/// A trapezoid prism (top face z = 10, corners (-1, 0), (1, 0), (3, 10), (-3, 10)), its two
+/// sloping top edges chamfered at 1.2. Their bands reach past each other across the short top
+/// edge but not the long one, so which connector is tried first, which follows the edges'
+/// orientations, must not matter: the profile drawn either way round (every edge reversed)
+/// chamfers to the same valid solid.
+#[test]
+fn sloping_top_chamfers_do_not_depend_on_the_edges_orientation() {
+    all_fixes();
+    let corners = [[-1.0, 0.0], [1.0, 0.0], [3.0, 10.0], [-3.0, 10.0]];
+    let mut results = Vec::new();
+    for reversed in [false, true] {
+        let sides: Vec<Curve> = (0..4)
+            .map(|i| {
+                let (a, b) = (corners[i], corners[(i + 1) % 4]);
+                let (a, b) = if reversed { (b, a) } else { (a, b) };
+                Curve::Line {
+                    start: [a[0], a[1], 10.0],
+                    end: [b[0], b[1], 10.0],
+                }
+            })
+            .collect();
+        let b = extrude(
+            &sides,
+            [0.0, 0.0, -1.0],
+            10.0,
+            0.0,
+            DraftCorner::Curvature,
+            true,
+        )
+        .unwrap();
+        let picked: Vec<_> = [[2.0, 5.0, 10.0], [-2.0, 5.0, 10.0]]
+            .iter()
+            .map(|&p| common::edge_at(&b, p))
+            .collect();
+        solidcore_ops::blend(&b, Blend::Chamfer, &picked, &[1.2], &[], Corners::Filled).unwrap();
+        assert!(b.check(solidcore_ops::CheckLevel::All).unwrap().is_valid());
+        results.push((b.counts().unwrap(), b.volume(1e-10).unwrap()));
+    }
+    assert_eq!(results[0].0, results[1].0);
+    let (v, w) = (results[0].1, results[1].1);
+    assert!((v - w).abs() <= 1e-9 * v, "{v} vs {w}");
 }
