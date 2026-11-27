@@ -980,3 +980,36 @@ fn closed_path_with_inside_offset_and_out_of_plane_profile_mitres_cleanly() {
     close(m.volume, want_vol, 1e-3, "inside-offset closed sweep");
     assert!(m.centroid.x.abs() < 1e-5, "centroid x should be 0 by symmetry, got {}", m.centroid.x);
 }
+
+#[test]
+fn non_coplanar_arc_corner_trims_cleanly_along_corner_axis() {
+    // An incoming +Y line ending at the origin meets an R10 quarter arc curving down into -Z
+    // (out of the XY corner plane, so the arc bends along the corner axis -Z). The entry mitre
+    // cutter must bound the arc's displacement along the corner axis so no discarded sliver
+    // protrudes past the mitre plane x + y = 0 below z = -0.1.
+    let path = [
+        crate::PathSeg::Line { a: Vec3::new(0.0, -20.0, 0.0), b: Vec3::ZERO },
+        crate::PathSeg::Arc { a: Vec3::ZERO, center: Vec3::new(0.0, 0.0, -10.0), axis: Vec3::Y, angle: FRAC_PI_2 },
+    ];
+    let profile_plane = Plane { origin: Vec3::new(0.0, -20.0, 0.0), x: Vec3::X, y: -Vec3::Z };
+    let profile = region(Loop2::polygon(&[Vec2::new(-4.0, -0.1), Vec2::new(4.0, -0.1), Vec2::new(4.0, 0.1), Vec2::new(-4.0, 0.1)]));
+    // Cross-section area 8 * 0.2 = 1.6 centered on the path; both the mitre cut y = -x on the
+    // straight leg and theta = arcsin(-y/R) on the arc are odd over [-4, 4], so the analytic
+    // volume equals 1.6 * (20 + 10 * PI / 2).
+    let want_vol = 1.6 * (20.0 + 5.0 * PI);
+
+    let body = smlib_sweeps::sweep(&profile_plane, &pieces_of(&profile), &path, false).unwrap();
+    assert_eq!(body.validity(), Vec::<String>::new());
+    let m = crate::measure(&body).unwrap();
+    close(m.volume, want_vol, 1e-3, "non-coplanar arc corner volume");
+
+    // Verify no tessellated vertex on the discarded side of the mitre (x + y < -0.05) dips
+    // below the incoming straight leg's bottom face (z = -0.1).
+    let plan = body.mesh_plan(&crate::display_tolerance(body.size())).unwrap();
+    let mesh = body.mesh_of(&plan).unwrap();
+    for p in &mesh.positions {
+        if p.x + p.y < -0.05 {
+            assert!(p.z >= -0.12, "discarded arc sliver escaped entry mitre cutter at {p:?}");
+        }
+    }
+}

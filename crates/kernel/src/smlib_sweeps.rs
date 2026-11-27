@@ -1167,7 +1167,7 @@ mod imp {
         cut_normal: Vec3,
         axis: Vec3,
         lead: f64,
-        arc_radius: Option<f64>,
+        adjacent_arc: Option<(Vec3, Vec3, f64)>,
     ) -> Result<Brep> {
         let n = cut_normal;
         let u = axis;
@@ -1185,10 +1185,43 @@ mod imp {
         let v_max = reach_along(origin, x, y, pieces, at, v) + s_v_max;
         let n_max = ahead + lead * cos_half;
 
-        let arc_pad = arc_radius.filter(|r| *r > 0.0).map_or(0.0, |r| (back * back / (2.0 * r)).min(back));
-        let pad_u = 0.05 * (u_max - u_min).max(0.0) + 1e-3;
-        let pad_v = 0.05 * (v_max - v_min).max(0.0) + 0.05 * (lead + back) + arc_pad + 1e-3;
-        let pad_n = 0.05 * n_max.max(0.0) + 1e-3;
+        // When the adjacent segment is a circular arc, bound how far rotating the corner section
+        // around the arc's axis over `back / radius` can move it in each cutter coordinate. For a
+        // coplanar arc (`arc_axis ∥ u`), `u_perp` and `u × arc_axis` are both zero, so `arc_pad_u`
+        // stays zero and straight/coplanar runs remain tightly bounded along `u`.
+        let (arc_pad_u, arc_pad_v, arc_pad_n) = match adjacent_arc {
+            Some((center, arc_axis, arc_angle)) if back > 0.0 => {
+                let radius = at.dist(center);
+                match arc_axis.normalized() {
+                    Some(k) if radius > 0.0 => {
+                        let theta = ((back / radius) * 1.1).min(arc_angle.abs());
+                        let one_minus_cos = if theta >= std::f64::consts::PI { 2.0 } else { 1.0 - theta.cos() };
+                        let sin_bound = if theta >= std::f64::consts::FRAC_PI_2 { 1.0 } else { theta.sin() };
+                        let arc_disp = |w: Vec3| -> f64 {
+                            let w_perp = w - k * w.dot(k);
+                            let w_cross = w.cross(k);
+                            let r_w = if w_perp.len() > 1e-12 {
+                                reach_along(origin, x, y, pieces, center, w_perp).abs().max(reach_along(origin, x, y, pieces, center, -w_perp).abs())
+                            } else {
+                                0.0
+                            };
+                            let c_w = if w_cross.len() > 1e-12 {
+                                reach_along(origin, x, y, pieces, at, w_cross).abs().max(reach_along(origin, x, y, pieces, at, -w_cross).abs())
+                            } else {
+                                0.0
+                            };
+                            one_minus_cos * r_w + sin_bound * c_w
+                        };
+                        (arc_disp(u), arc_disp(v), arc_disp(n))
+                    }
+                    _ => (0.0, 0.0, 0.0),
+                }
+            }
+            _ => (0.0, 0.0, 0.0),
+        };
+        let pad_u = 0.05 * (u_max - u_min).max(0.0) + arc_pad_u + 1e-3;
+        let pad_v = 0.05 * (v_max - v_min).max(0.0) + 0.05 * (lead + back) + arc_pad_v + 1e-3;
+        let pad_n = 0.05 * n_max.max(0.0) + arc_pad_n + 1e-3;
 
         let (u0, u1) = (u_min - pad_u, u_max + pad_u);
         let (v0, v1) = (v_min - pad_v, v_max + pad_v);
@@ -1198,10 +1231,10 @@ mod imp {
         Brep::extrude(&rect, p(n), depth, 0.0, DraftCorner::default(), true).map_err(|e| failed("mitre", e))
     }
 
-    /// Radius of `s` when it is a circular arc, else `None`.
-    fn arc_radius(s: &crate::PathSeg) -> Option<f64> {
+    /// Center, axis, and sweep angle of `s` when it is a circular arc, else `None`.
+    fn arc_spec(s: &crate::PathSeg) -> Option<(Vec3, Vec3, f64)> {
         match *s {
-            crate::PathSeg::Arc { a, center, .. } => Some(a.dist(center)),
+            crate::PathSeg::Arc { center, axis, angle, .. } => Some((center, axis, angle)),
             _ => None,
         }
     }
@@ -1540,11 +1573,11 @@ mod imp {
                 let lead = usize::from(pre > 0.0);
                 inside.extend(segment_seeds(&from, pieces, &route, lead..lead + segs.len(), false));
                 if let Some(m) = entry {
-                    let cut = mitre_cutter(pose.origin, pose.x, pose.y, pieces, m.at, -t0, -m.normal, m.axis, pre, arc_radius(first))?;
+                    let cut = mitre_cutter(pose.origin, pose.x, pose.y, pieces, m.at, -t0, -m.normal, m.axis, pre, arc_spec(first))?;
                     piece = combined(&piece, &cut, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
                 }
                 if let Some(m) = exit {
-                    let cut = mitre_cutter(exit_pose.origin, exit_pose.x, exit_pose.y, pieces, m.at, t1, m.normal, m.axis, post, arc_radius(last))?;
+                    let cut = mitre_cutter(exit_pose.origin, exit_pose.x, exit_pose.y, pieces, m.at, t1, m.normal, m.axis, post, arc_spec(last))?;
                     piece = combined(&piece, &cut, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
                 }
                 (piece, exit_pose)
@@ -2198,7 +2231,7 @@ mod imp {
                     let pre = corner_mitre_lead(fo, fx, fy, &pieces, m, false);
                     let lead = prism(affine_moved(&first_map, t0 * -pre), t0, pre)?;
                     piece = combined(&piece, &lead, solidcraft_smlib::BooleanOp::Union, "sweep corner")?;
-                    let cut = mitre_cutter(fo, fx, fy, &pieces, m.at, -t0, -m.normal, m.axis, pre, arc_radius(first))?;
+                    let cut = mitre_cutter(fo, fx, fy, &pieces, m.at, -t0, -m.normal, m.axis, pre, arc_spec(first))?;
                     piece = combined(&piece, &cut, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
                 }
                 if let Some(m) = exit {
@@ -2206,7 +2239,7 @@ mod imp {
                     let post = corner_mitre_lead(eo, ex, ey, &pieces, m, true);
                     let tail = prism(end_map, t1, post)?;
                     piece = combined(&piece, &tail, solidcraft_smlib::BooleanOp::Union, "sweep corner")?;
-                    let cut = mitre_cutter(eo, ex, ey, &pieces, m.at, t1, m.normal, m.axis, post, arc_radius(last))?;
+                    let cut = mitre_cutter(eo, ex, ey, &pieces, m.at, t1, m.normal, m.axis, post, arc_spec(last))?;
                     piece = combined(&piece, &cut, solidcraft_smlib::BooleanOp::Subtract, "sweep mitre")?;
                 }
             }
