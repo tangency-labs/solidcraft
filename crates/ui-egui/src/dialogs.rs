@@ -773,6 +773,9 @@ pub struct Dialog {
     /// shown while this dialog is open, as an edited feature's sketch does, so its profiles can
     /// be picked even when an earlier feature uses the sketch and hides it.
     pub(crate) started_from_sketch: Option<u64>,
+    /// Sketch used by the last Invert Profiles action, even when it left no profiles selected.
+    /// Dialog-only state: never passed as a feature/command parameter.
+    profile_invert_sketch: Option<u64>,
     /// New Sketch was pressed: the dialog waits while the sketch is drawn ([`crate::command_sketch`]).
     pub(crate) new_sketch: bool,
     /// Its handle drags, for Undo and Redo while it is open (#22838).
@@ -1069,6 +1072,7 @@ impl Dialog {
             op_auto: Default::default(),
             anchor_hint: None,
             started_from_sketch: None,
+            profile_invert_sketch: None,
             auto: None,
             new_sketch: false,
             drag_undo: Default::default(),
@@ -2219,10 +2223,15 @@ impl Dialog {
             .sketch(id)
             .map(|ss| drawn_profiles(ss).into_iter().map(|index| Sel::Profile { sketch: id, index }).collect())
             .unwrap_or_default();
-        let Some(input) = self.inputs.first_mut() else { return false };
         if profiles.is_empty() {
             return false;
         }
+        // Selecting a sketch from Browser or History also changes the context for Invert,
+        // even if the user then clears every profile from this input (#18704).
+        if matches!(self.kind, Kind::Extrude { .. }) {
+            self.profile_invert_sketch = Some(id);
+        }
+        let Some(input) = self.inputs.first_mut() else { return false };
         input.items = profiles;
         if !input.multi {
             self.advance();
@@ -2280,6 +2289,14 @@ impl Dialog {
         }
         if !crate::dialogs_assembly::alignment_accepts(s, self, &sel) || self.take_extrude_target(s, &sel) {
             return;
+        }
+        // A deliberate profile pick changes the sketch Invert operates on, even when this
+        // same pick toggles the last profile off. A cleared input cannot identify that sketch.
+        if self.active == 0
+            && matches!(self.kind, Kind::Extrude { .. })
+            && let Sel::Profile { sketch, .. } = &sel
+        {
+            self.profile_invert_sketch = Some(*sketch);
         }
         if let Some(key) = stored_input_reference_key(self, self.active) {
             self.extra.remove(key);
@@ -2836,6 +2853,61 @@ fn retain_profile_sketch(kind: &Kind, input: &mut SelInput, sel: &Sel) {
     {
         input.items.retain(|x| !matches!(x, Sel::Profile { sketch: other, .. } if other != sketch));
     }
+}
+
+/// The sketch whose drawn profiles Extrude's Invert Selection works on: prefer a newly
+/// picked profile, then the last inverted sketch (which survives clearing every profile),
+/// then an active sketch or the most recent sketch (#18704).
+fn invert_profile_sketch(d: &Dialog, s: &Session) -> Option<u64> {
+    if !matches!(d.kind, Kind::Extrude { .. }) || !d.inputs.first().is_some_and(|i| i.accept & PROFILES != 0) {
+        return None;
+    }
+    d.inputs
+        .first()?
+        .items
+        .iter()
+        .find_map(|item| match item {
+            Sel::Profile { sketch, .. } => Some(*sketch),
+            _ => None,
+        })
+        .or(d.profile_invert_sketch)
+        .or(s.active_sketch)
+        .or_else(|| s.doc.features.iter().rev().find(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| f.id))
+}
+
+/// Swap picked and unpicked drawn profiles of one sketch, including when no profile is picked.
+/// Other input items (for example picked faces) are preserved. The sketch's existing hole and
+/// projection rules are shared with the Browser's "pick sketch" action (#18704).
+fn invert_extrude_profiles(d: &mut Dialog, s: &Session) -> bool {
+    let Some(sketch) = invert_profile_sketch(d, s) else { return false };
+    let state = crate::open_meshing::session_world(s);
+    let Some(solved) = state.sketch(sketch) else { return false };
+    let candidates = drawn_profiles(solved);
+    if candidates.is_empty() {
+        return false;
+    }
+    let Some(input) = d.inputs.first_mut() else { return false };
+    let selected: Vec<usize> = input
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Sel::Profile { sketch: id, index } if *id == sketch => Some(*index),
+            _ => None,
+        })
+        .collect();
+    input.items.retain(|item| !matches!(item, Sel::Profile { sketch: id, .. } if *id == sketch));
+    input.items.extend(candidates.into_iter().filter(|index| !selected.contains(index)).map(|index| Sel::Profile { sketch, index }));
+    d.profile_invert_sketch = Some(sketch);
+    d.profile_selection_changed = true;
+    d.active = 0;
+    d.awaiting_pick = true;
+    d.pick_refused = None;
+    d.error = None;
+    if let Kind::Extrude { smart, .. } = &mut d.kind {
+        smart.profiles_chosen = true;
+    }
+    d.sync_thread(s);
+    true
 }
 
 /// The profiles of a sketch that aren't the island inside another profile's hole: a circle in a
@@ -4185,6 +4257,7 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
     }
     let t = Tokens::get();
     let mut clear: Option<usize> = None;
+    let mut invert = false;
     let mut activate: Option<usize> = None;
     let mut remove = None;
     // Only one field may look active at a time (#10066): while any control in this dialog
@@ -4252,6 +4325,14 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
                 let selected_text = text.text().strip_prefix("↖ ").unwrap_or_else(|| text.text());
                 let prompt = if !filled && inp.label == "Edges" { tr("Select edges") } else { selected_text };
                 let enabled = crate::dialogs_assembly::alignment_input_available(d, i);
+                if i == 0 && invert_profile_sketch(d, s).is_some() {
+                    let response = crate::ui_kit::button(ui, solidcraft_ui_text::tr("dialog.invert_profiles"), crate::ui_kit::Button::Small);
+                    crate::scenario::publish_target("dialog:invert_profiles", response.rect);
+                    if response.clicked() {
+                        invert = true;
+                        surrender_keyboard_focus(ui);
+                    }
+                }
                 let chip =
                     ui.add_enabled_ui(enabled, |ui| crate::ui_kit::selection_field(ui, prompt, crate::ui_kit::Selection { active, filled })).inner;
                 if matches!(d.kind, Kind::Shell { .. }) && i == 0 {
@@ -4367,6 +4448,9 @@ pub(crate) fn input_rows_range(d: &mut Dialog, ui: &mut egui::Ui, s: &Session, n
         }
         d.awaiting_pick = true;
         d.pick_refused = None;
+    }
+    if invert {
+        invert_extrude_profiles(d, s);
     }
     if let Some(i) = clear {
         clear_input(d, i);
