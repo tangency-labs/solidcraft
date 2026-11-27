@@ -1,0 +1,26 @@
+{
+  "en": {
+    "ui.palette_hide_design_unit": "Hide dimension units"
+  },
+  "ar": {
+    "ui.palette_hide_design_unit": "إخفاء وحدات التصميم من أبعاد الرسم"
+  },
+  "he": {
+    "ui.palette_hide_design_unit": "הסתרת יחידות התכנון במידות הסקיצה"
+  },
+  "ja": {
+    "ui.palette_hide_design_unit": "スケッチ寸法の設計単位を隠す"
+  },
+  "vi": {
+    "ui.palette_hide_design_unit": "Ẩn đơn vị thiết kế trên kích thước phác thảo"
+  },
+  "zh": {
+    "ui.palette_hide_design_unit": "隐藏草图尺寸中的设计单位"
+  },
+  "de": {
+    "ui.palette_hide_design_unit": "Konstruktionseinheiten bei Skizzenmaßen ausblenden"
+  },
+  "ko": {
+    "ui.palette_hide_design_unit": "스케치 치수에서 설계 단위 숨기기"
+  }
+}
