@@ -1739,8 +1739,9 @@ fn classify_track(t: &Track, ctx: &Ctx, shadows: &ShadowIndex) -> Result<Vec<Pie
     // A cut just short of a silhouette turn stays above the parameter and 3D merge, because
     // the screen gap is only the square of that parameter gap. Consecutive pieces that small
     // are one run. A run whose own screen box is still within the tolerance joins a neighbour
-    // of the same visibility, or is omitted when extending a neighbour would flip visibility.
-    // Omitting it moves a drawn end by at most that box, not by one tolerance per piece. A
+    // of the same visibility, or, when that would flip visibility, the piece before it (else the
+    // piece after it) runs on over it, so the pieces still meet end to end and no end moves by
+    // more than that box, not by one tolerance per piece. A
     // run that is larger than the tolerance is kept, and so is a track of only such pieces:
     // that is a short edge.
     let tol = 1e-7 + 1e-9 * scale;
@@ -1787,6 +1788,12 @@ fn classify_track(t: &Track, ctx: &Ctx, shadows: &ShadowIndex) -> Result<Vec<Pie
                     prev.t[1] = prev.t[1].max(span[1]);
                 }
             } else if one_vis && rest.peek().is_some_and(|next| next.visibility == vis) {
+                pending = Some(span[0]);
+            } else if let Some(prev) = merged.last_mut() {
+                // Left out: the neighbour before it runs on over it, so the pieces still meet end
+                // to end, with at most the run's own box (inside the tolerance) painted by it.
+                prev.t[1] = prev.t[1].max(span[1]);
+            } else {
                 pending = Some(span[0]);
             }
         }
