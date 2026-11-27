@@ -244,7 +244,8 @@ folders and memory. `extensions` contains inert plugin metadata.
 A zip holds one plugin, with `plugin.json` and its component at the top or inside one top-level folder.
 The existing `solidcraft_io::safe_zip` reader refuses absolute paths, `..`, symlinks and device entries.
 The installer limits the archive to 256 entries, each file to 16 MiB (an importer component may be up to 64 MiB), and input and unpacked content to
-64 MiB. The manifest has a separate 64 KiB cap. Before publication, the host checks
+64 MiB. The manifest has a separate 64 KiB cap. Panel layout files have their own limits:
+256 KiB per file and 1 MiB across distinct layout files in one plugin. Before publication, the host checks
 `min_host_version`, then parses and validates the manifest. It refuses unknown or incompatible
 required capabilities; unsupported optional capabilities are left ungranted. It unpacks into a
 hidden `.install-…` folder beside the installed plugins, then renames it to `plugins/<id>/`.
@@ -1371,6 +1372,17 @@ workspaces' placements and does not cancel a command already running.
 
 The phase 2 host draws groups, tabs, splits, forms, buttons, toolbars, lists, tables, text,
 progress and empty states. Trees, charts and newer widget versions show a placeholder.
+A panel can keep its layout in a separate JSON file in the package:
+`"layout": {"file": "layouts/operations.json"}`. The file contains the same
+`{"root": 0, "nodes": [...]}` object as an inline layout. Inline layouts keep working.
+Workspace panels use these same declarations, so they can use layout files too.
+Paths follow the icon package rules: relative paths with forward slashes, plain names,
+no `.` or `..` components, no links, at most 128 characters, ending in `.json`.
+The host reads and validates files when it loads the manifest, before install review,
+dialogs or the runtime `describe` comparison. Missing, unreadable, oversized or invalid
+files refuse the manifest with a message naming the file. Each file is at most 256 KiB;
+all distinct layout files together are at most 1 MiB, separate from plugin.json's 64 KiB cap.
+
 Panels are transient view state, cleared when a design closes or the plugin is disabled.
 The host remembers placement by plugin id, panel id and dock zones. Code and data updates keep
 that placement. Changing the allowed zones or initial zone opens a new section in a legal dock.

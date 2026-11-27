@@ -198,7 +198,7 @@ fn read_package_listed(dir: &Path, folder: &str) -> Result<(solidcraft_engine::p
     static LISTED: std::sync::Mutex<Option<std::collections::HashMap<std::path::PathBuf, (ListedKey, String)>>> = std::sync::Mutex::new(None);
     let key = || -> Option<(solidcraft_engine::plugin::Manifest, ListedKey)> {
         let bytes = std::fs::read(dir.join("plugin.json")).ok()?;
-        let manifest = solidcraft_engine::plugin::parse_manifest(&bytes, folder).ok()?;
+        let manifest = solidcraft_engine::plugin::parse_package_manifest(&bytes, folder, dir).ok()?;
         let component = match &manifest.runtime {
             Some(runtime) => {
                 let meta = std::fs::metadata(dir.join(&runtime.module)).ok()?;
@@ -206,7 +206,9 @@ fn read_package_listed(dir: &Path, folder: &str) -> Result<(solidcraft_engine::p
             }
             None => None,
         };
-        Some((manifest, (bytes, component)))
+        let mut key_bytes = bytes;
+        key_bytes.extend(serde_json::to_vec(&manifest).ok()?);
+        Some((manifest, (key_bytes, component)))
     };
     let known = key();
     if let Some((manifest, key)) = &known

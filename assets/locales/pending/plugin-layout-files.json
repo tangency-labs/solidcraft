@@ -1,0 +1,26 @@
+{
+  "en": {
+    "plugin_error.layout_file": "Could not read layout file {file}: {reason}"
+  },
+  "ar": {
+    "plugin_error.layout_file": "تعذّرت قراءة ملف التخطيط {file}: {reason}"
+  },
+  "de": {
+    "plugin_error.layout_file": "Die Layoutdatei {file} konnte nicht gelesen werden: {reason}"
+  },
+  "he": {
+    "plugin_error.layout_file": "לא ניתן לקרוא את קובץ הפריסה {file}: {reason}"
+  },
+  "ja": {
+    "plugin_error.layout_file": "レイアウトファイル {file} を読み込めませんでした: {reason}"
+  },
+  "ko": {
+    "plugin_error.layout_file": "레이아웃 파일 {file}을(를) 읽을 수 없습니다: {reason}"
+  },
+  "vi": {
+    "plugin_error.layout_file": "Không đọc được tệp bố cục {file}: {reason}"
+  },
+  "zh": {
+    "plugin_error.layout_file": "无法读取布局文件 {file}：{reason}"
+  }
+}

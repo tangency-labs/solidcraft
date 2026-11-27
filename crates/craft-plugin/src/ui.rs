@@ -11,6 +11,10 @@ pub const UI_VERSION: u32 = 1;
 pub const MAX_PANELS: usize = 8;
 pub const MAX_WIDGETS: usize = 512;
 pub const MAX_PANEL_BYTES: usize = 1024 * 1024;
+/// Layout files have budgets independent of plugin.json.
+pub const MAX_LAYOUT_FILE_BYTES: usize = 256 * 1024;
+pub const MAX_LAYOUT_FILES_BYTES: usize = 1024 * 1024;
+
 pub const MAX_ROWS: usize = 100_000;
 pub const MAX_CHART_SERIES: usize = 8;
 pub const MAX_CHART_POINTS: usize = 20_000;
@@ -778,4 +782,46 @@ impl PanelData {
     pub fn json(&self) -> Result<Value> {
         serde_json::to_value(&self.values).map_err(|error| HostError::InvalidInput { field: "ui.data".into(), reason: error.to_string() })
     }
+}
+
+/// Resolve only panel declarations: workspace placements refer to these same panels.
+pub(crate) fn resolve_layout_files(manifest: &mut Value, read: &mut impl FnMut(&str) -> Result<Vec<u8>>) -> Result<Vec<(usize, String)>> {
+    let mut resolved = Vec::new();
+    let mut files = BTreeMap::<String, Value>::new();
+    let mut total = 0usize;
+    let Some(panels) = manifest.pointer_mut("/runtime/ui/panels").and_then(Value::as_array_mut) else { return Ok(resolved) };
+    for (index, panel) in panels.iter_mut().enumerate() {
+        let Some(layout) = panel.get_mut("layout") else { continue };
+        let Some(file) = layout.get("file") else { continue };
+        let file = file.as_str().ok_or_else(|| invalid("runtime.ui.layout.file", "must name a package file"))?.to_string();
+        let refuse = |reason: String| invalid(format!("layout {file}"), reason);
+        if layout.as_object().is_none_or(|o| o.len() != 1) {
+            return Err(refuse("file cannot be combined with inline layout fields".into()));
+        }
+        // Use the icon path alphabet and component rules, with a JSON extension.
+        let safe = file.strip_suffix(".json").is_some_and(|stem| crate::images::valid_path(&format!("{stem}.svg")));
+        if file.len() > 128 || !safe {
+            return Err(refuse("must be a relative .json path inside the package, with no . or .. components".into()));
+        }
+        let value = if let Some(value) = files.get(&file) {
+            value.clone()
+        } else {
+            let bytes = read(&file).map_err(|e| refuse(e.to_string()))?;
+            if bytes.len() > MAX_LAYOUT_FILE_BYTES {
+                return Err(refuse("layout file exceeds 256 KiB".into()));
+            }
+            total += bytes.len();
+            if total > MAX_LAYOUT_FILES_BYTES {
+                return Err(refuse("plugin layout files exceed 1 MiB in total".into()));
+            }
+            let value: Value = serde_json::from_slice(&bytes).map_err(|e| refuse(e.to_string()))?;
+            // Report a malformed layout against its file, before manifest deserialization.
+            serde_json::from_value::<Layout>(value.clone()).map_err(|e| refuse(e.to_string()))?;
+            files.insert(file.clone(), value.clone());
+            value
+        };
+        *layout = value;
+        resolved.push((index, file));
+    }
+    Ok(resolved)
 }

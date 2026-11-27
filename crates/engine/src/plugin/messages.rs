@@ -23,6 +23,7 @@ pub const MESSAGES: &[(&str, &str)] = &[
         "plugin_error.host_calls_ceiling",
         "it asks for {requested} host calls, and plugins may use {allowed}. Raise Max plugin host calls in Preferences › Plugins (in solidcraft-cli, max_host_calls in the --plugin-limits file).",
     ),
+    ("plugin_error.layout_file", "Could not read layout file {file}: {reason}"),
     (
         "plugin_error.memory_ceiling",
         "it asks for {requested} MiB of memory, and plugins may use {allowed} MiB. Install the plugin again and allow its memory request, or raise Max plugin memory (MiB) in Preferences › Plugins (in solidcraft-cli, max_memory_mib in the --plugin-limits file).",

@@ -28,12 +28,12 @@ pub struct FormatSlot {
 /// An import slot.
 pub type Importer = FormatSlot;
 
-/// Reads only `plugin.json` from a package folder, through the caller's file scope.
+/// Reads `plugin.json` and its layout files from a package folder, through the caller's file scope.
 pub(super) fn read_manifest(folder: &str) -> Result<Manifest> {
     let dir = Path::new(folder);
     let id = dir.file_name().and_then(|s| s.to_str()).ok_or_else(|| error("package needs an id folder"))?;
     let bytes = solidcraft_io::vfs::read(&dir.join("plugin.json").to_string_lossy(), MAX_MANIFEST_BYTES).map_err(|e| error(e.to_string()))?;
-    parse_manifest(&bytes, id)
+    parse_package_manifest(&bytes, id, dir)
 }
 
 /// The installed plugins' folders, by id: the plugins folder, plus packages inspected this session.

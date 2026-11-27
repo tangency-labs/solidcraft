@@ -388,6 +388,154 @@ fn panel_manifest() -> Value {
     m
 }
 
+#[test]
+fn layout_file_matches_inline_for_install_and_package_reads() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-layout-file-equivalence-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("sample");
+    std::fs::create_dir_all(dir.join("layouts")).unwrap();
+    let inline = panel_manifest();
+    let layout = serde_json::to_vec(&inline["runtime"]["ui"]["panels"][0]["layout"]).unwrap();
+    let mut external = inline.clone();
+    external["runtime"]["ui"]["panels"][0]["layout"] = json!({"file":"layouts/operations.json"});
+    let text = serde_json::to_vec(&external).unwrap();
+    std::fs::write(dir.join("plugin.json"), &text).unwrap();
+    std::fs::write(dir.join("plugin.wasm"), b"\0asm").unwrap();
+    std::fs::write(dir.join("layouts/operations.json"), &layout).unwrap();
+    let expected = parse_manifest(&serde_json::to_vec(&inline).unwrap(), "sample").unwrap();
+    let package = read_package(&dir.to_string_lossy()).unwrap();
+    let zip = solidcraft_io::safe_zip::write(&[
+        ("plugin.json", text.as_slice()),
+        ("plugin.wasm", b"\0asm"),
+        ("layouts/operations.json", layout.as_slice()),
+    ])
+    .unwrap();
+    let installed = install::unpack(&zip).unwrap();
+    assert_eq!(serde_json::to_value(&package.manifest).unwrap(), serde_json::to_value(&expected).unwrap());
+    assert_eq!(package.manifest.runtime.as_ref().unwrap().ui, installed.manifest.runtime.as_ref().unwrap().ui);
+    assert_eq!(package.approval, installed.approval);
+    assert_eq!(import::read_manifest(&dir.to_string_lossy()).unwrap().runtime.unwrap().ui, expected.runtime.as_ref().unwrap().ui);
+    let inline_text = serde_json::to_vec(&inline).unwrap();
+    assert_eq!(resolved_package_hash(&inline_text, b"\0asm", &expected), package_hash(&inline_text, b"\0asm"));
+    let before = package.approval;
+    let changed = json!({"root":0,"nodes":[{"widget":{"text":"Changed"}}]});
+    std::fs::write(dir.join("layouts/operations.json"), changed.to_string()).unwrap();
+    assert_ne!(before, read_package(&dir.to_string_lossy()).unwrap().approval);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn layout_file_refuses_missing_unreadable_invalid_oversized_and_escaping_paths() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-layout-file-refusals-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("sample");
+    std::fs::create_dir_all(dir.join("layouts")).unwrap();
+    let mut m = panel_manifest();
+    m["runtime"]["ui"]["panels"][0]["layout"] = json!({"file":"layouts/operations.json"});
+    let text = serde_json::to_vec(&m).unwrap();
+    let read = || parse_package_manifest(&text, "sample", &dir);
+    assert!(read().unwrap_err().to_string().contains("layouts/operations.json"));
+    let missing = solidcraft_io::safe_zip::write(&[("plugin.json", text.as_slice()), ("plugin.wasm", b"\0asm")]).unwrap();
+    assert!(install::unpack(&missing).unwrap_err().to_string().contains("layouts/operations.json"));
+    // A directory is unreadable as a layout, including when tests run as root.
+    std::fs::create_dir(dir.join("layouts/operations.json")).unwrap();
+    assert!(read().unwrap_err().to_string().contains("layouts/operations.json"));
+    std::fs::remove_dir(dir.join("layouts/operations.json")).unwrap();
+    for bytes in [
+        b"{".to_vec(),
+        vec![255],
+        b"{}".to_vec(),
+        br#"{"root":2,"nodes":[{"widget":{"text":"hi"}}]}"#.to_vec(),
+        vec![b' '; craft_plugin::ui::MAX_LAYOUT_FILE_BYTES + 1],
+    ] {
+        std::fs::write(dir.join("layouts/operations.json"), bytes).unwrap();
+        assert!(read().unwrap_err().to_string().contains("layouts/operations.json"));
+        let zip = solidcraft_io::safe_zip::write(&[
+            ("plugin.json", text.as_slice()),
+            ("plugin.wasm", b"\0asm"),
+            ("layouts/operations.json", std::fs::read(dir.join("layouts/operations.json")).unwrap().as_slice()),
+        ])
+        .unwrap();
+        assert!(install::unpack(&zip).unwrap_err().to_string().contains("layouts/operations.json"));
+    }
+    for path in ["../outside.json", "/outside.json", "layouts/../outside.json", "./outside.json", "layouts//a.json", "C:/a.json", r"layouts\a.json"] {
+        m["runtime"]["ui"]["panels"][0]["layout"] = json!({"file":path});
+        let text = serde_json::to_vec(&m).unwrap();
+        let error = parse_package_manifest(&text, "sample", &dir).unwrap_err().to_string();
+        assert!(error.contains(path), "{error}");
+        let zip = solidcraft_io::safe_zip::write(&[("plugin.json", text.as_slice()), ("plugin.wasm", b"\0asm")]).unwrap();
+        assert!(install::unpack(&zip).unwrap_err().to_string().contains(path));
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn layout_file_refuses_file_and_directory_links() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-layout-file-links-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let dir = root.join("sample");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::create_dir(root.join("outside")).unwrap();
+    std::fs::write(root.join("outside/a.json"), r#"{"root":0,"nodes":[{"widget":{"text":"hi"}}]}"#).unwrap();
+    std::os::unix::fs::symlink(root.join("outside"), dir.join("layouts")).unwrap();
+    std::os::unix::fs::symlink(root.join("outside/a.json"), dir.join("a.json")).unwrap();
+    for file in ["layouts/a.json", "a.json"] {
+        let mut m = panel_manifest();
+        m["runtime"]["ui"]["panels"][0]["layout"] = json!({"file":file});
+        let error = parse_package_manifest(&serde_json::to_vec(&m).unwrap(), "sample", &dir).unwrap_err().to_string();
+        assert!(error.contains(file), "{error}");
+    }
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn layout_file_budgets_are_separate_from_manifest_and_count_distinct_files() {
+    let mut m = panel_manifest();
+    let panel = m["runtime"]["ui"]["panels"][0].clone();
+    let mut panels = Vec::new();
+    for i in 0..5 {
+        let mut panel = panel.clone();
+        panel["id"] = json!(format!("panel-{i}"));
+        panel["layout"] = json!({"file":format!("layouts/{i}.json")});
+        panels.push(panel);
+    }
+    m["runtime"]["ui"]["panels"] = json!(panels);
+    let mut bytes = serde_json::to_vec(&panel["layout"]).unwrap();
+    bytes.resize(craft_plugin::ui::MAX_LAYOUT_FILE_BYTES, b' ');
+    let parse = |m: &Value| {
+        craft_plugin::parse_manifest_with_layouts(&serde_json::to_vec(m).unwrap(), "sample", "SolidCraft", env!("CARGO_PKG_VERSION"), |_| {
+            Ok(bytes.clone())
+        })
+    };
+    let error = parse(&m).unwrap_err().to_string();
+    assert!(error.contains("layouts/4.json") && error.contains("1 MiB"), "{error}");
+    m["runtime"]["ui"]["panels"].as_array_mut().unwrap().pop();
+    assert!(parse(&m).is_ok(), "four 256 KiB files fit the separate 1 MiB budget");
+    let package_files = |m: &Value, count: usize| {
+        let mut files = vec![
+            solidcraft_io::safe_zip::File { path: "plugin.json".into(), bytes: serde_json::to_vec(m).unwrap() },
+            solidcraft_io::safe_zip::File { path: "plugin.wasm".into(), bytes: b"\0asm".to_vec() },
+        ];
+        files.extend((0..count).map(|i| solidcraft_io::safe_zip::File { path: format!("layouts/{i}.json"), bytes: bytes.clone() }));
+        files
+    };
+    assert!(install::from_files(package_files(&m, 4), String::new()).is_ok());
+    let mut fifth = m["runtime"]["ui"]["panels"][0].clone();
+    fifth["id"] = json!("panel-4");
+    fifth["layout"] = json!({"file":"layouts/4.json"});
+    m["runtime"]["ui"]["panels"].as_array_mut().unwrap().push(fifth);
+    let error = install::from_files(package_files(&m, 5), String::new()).unwrap_err().to_string();
+    assert!(error.contains("layouts/4.json") && error.contains("1 MiB"), "{error}");
+    for panel in m["runtime"]["ui"]["panels"].as_array_mut().unwrap() {
+        panel["layout"] = json!({"file":"layouts/shared.json"});
+    }
+    assert!(parse(&m).is_ok());
+    let mut oversized = serde_json::to_vec(&m).unwrap();
+    oversized.resize(MAX_MANIFEST_BYTES + 1, b' ');
+    assert!(craft_plugin::parse_manifest_with_layouts(&oversized, "sample", "SolidCraft", env!("CARGO_PKG_VERSION"), |_| unreachable!()).is_err());
+}
+
 fn panel_host() -> SolidCraftHost {
     let package = Package {
         manifest: parse_manifest(panel_manifest().to_string().as_bytes(), "sample").unwrap(),
