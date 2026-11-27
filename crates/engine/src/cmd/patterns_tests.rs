@@ -3637,6 +3637,39 @@ fn circular_pattern_of_a_groove_and_its_fillet_rounds_every_copy_alike() {
     assert!(rel(v(&all), want) < 1e-6, "ten rounded grooves: {} mm³, expected {want} mm³", v(&all));
 }
 
+/// #20931: a ring revolved about X from a section with a 0.2 mm corner arc, a rib revolved 7°
+/// across that corner and joined, a 0.75 mm round on the two edges where the rib's end meets the
+/// ring, and a circular pattern of the rib and the round. Every copy is the original turned a
+/// quarter, apart from the others, so from the second rib on each one splits the ring's faces as
+/// the second did: four ribs have the faces of two plus twice what the second added. At count 4
+/// SMLib's check refused the round of the last copy (Bad SpeedPt, Bad CurveCusp on a 2D curve):
+/// the pattern joins its three rib copies in one union, and the round at the last of them fails
+/// there, while the same copies joined one at a time round.
+#[test]
+fn circular_pattern_of_a_rib_and_its_round_on_a_ring_builds_at_four_copies() {
+    let script: Value = serde_json::from_str(include_str!("../../../../examples/regressions/ring_rib_round_circular_pattern.json")).unwrap();
+    let build = |count: u32| {
+        let mut script = script.clone();
+        for c in script["commands"].as_array_mut().unwrap() {
+            if c["params"]["feature"]["type"] == "pattern" {
+                c["params"]["feature"]["pattern"]["count"] = json!(count.to_string());
+            }
+        }
+        let mut s = Session::default();
+        s.run_script(&script).unwrap();
+        let errors: Vec<_> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+        assert!(errors.is_empty(), "count {count}: {errors:?}");
+        let st = s.model.state();
+        let ring = st.body("Ring").unwrap();
+        (ring.body.face_count(), ring.body.lumps().expect("the ring body reports its lumps").len())
+    };
+    let (one, _) = build(1);
+    let (two, _) = build(2);
+    let (four, pieces) = build(4);
+    assert_eq!(pieces, 1, "the four ribs are joined to the ring");
+    assert_eq!(four, two + 2 * (two - one), "faces: {one} with one rib, {two} with two, {four} with four");
+}
+
 /// Copies of a body made by a pattern are drawn from the body's own triangles and display plan,
 /// moved, and keep doing so when they are moved into a component: a 30 by 30 pattern of a
 /// filleted cylinder meshed and planned every copy, twice, and took over a minute to show.

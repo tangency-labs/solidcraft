@@ -623,10 +623,12 @@ impl BackendGuard {
     }
 
     /// `backends` are about to be started: say so on disk first, flushed. It takes the place of
-    /// an attempt named only while the instance started ([`Self::attempt_while_the_instance_starts`]),
-    /// which the adapter's choice then leaves alone.
+    /// this file's attempt named only while the instance started
+    /// ([`Self::attempt_while_the_instance_starts`]), which the adapter's choice then leaves alone.
     pub fn attempt(&self, backends: eframe::wgpu::Backends) {
-        if let Ok(mut instance) = INSTANCE_ATTEMPT.lock() {
+        if let Ok(mut instance) = INSTANCE_ATTEMPT.lock()
+            && instance.as_ref().is_some_and(|named| named.marker == self.marker)
+        {
             instance.take();
         }
         let text = attempt_text(backends, &self.version);

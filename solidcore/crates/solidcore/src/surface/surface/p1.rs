@@ -2651,14 +2651,15 @@ impl Surface {
                 BlendRef::Procedural(p) => {
                     procedural_offset(k, self, p, signed_offset_distance, approx_tol_3d)?
                 }
-                // a round whose kind has no exact offset of its own kind: the chord (#2486),
-                // whose offset is the chamfer of other sizes on the offset faces, which no
-                // definition is built for yet, and the rational classes (a conic, a conic
-                // pair, a nodal quartic spine), whose net is a B-spline with no offset of its
-                // own kind, so no net of the moved radius to re-certify. The net is S (its
-                // bound is 0), so offsetting it as its net does is the exact offset of S; the
-                // offset keeps no definition
-                BlendRef::Exact { round, .. } if !round.class().offsets_as_its_kind() => None,
+                // a chamfer between planes (#2486), the chord: its offset is the chamfer of
+                // other sizes on the offset faces, which no definition is built for yet, so
+                // the plane offsets as its net does, exactly, and keeps no definition
+                BlendRef::Exact { round, .. }
+                    if round.class()
+                        == crate::surface::procedural_blend::exact::ExactClass::Chord =>
+                {
+                    None
+                }
                 BlendRef::Exact { round, .. } => {
                     let mut kind_only = self.clone();
                     kind_only.set_exact_round(None);
