@@ -2166,10 +2166,10 @@ impl<'a> Work<'a> {
             side(o1).hull(side(o2))
         };
         let axis = self.weight.axis;
-        let pick_bs = |s: &[Bs; 3]| match axis {
-            0 => &s[0],
-            1 => &s[1],
-            _ => &s[2],
+        let pick_at0 = |s: &[Bs; 3]| match axis {
+            0 => s[0].at(0, 0),
+            1 => s[1].at(0, 0),
+            _ => s[2].at(0, 0),
         };
         let c_axis = Ivl::from(match axis {
             0 => self.weight.centre[0],
@@ -2177,9 +2177,9 @@ impl<'a> Work<'a> {
             _ => self.z0,
         });
         let zmax = if self.weight.quantity == (Quantity::Moment { x: 0, y: 0, z: 0 }) {
-            (pick_bs(o1).at(0, 0) - c_axis)
+            (pick_at0(o1) - c_axis)
                 .mag()
-                .max((pick_bs(o2).at(0, 0) - c_axis).mag())
+                .max((pick_at0(o2) - c_axis).mag())
         } else {
             self.weight.phi([hull(0), hull(1), hull(2)]).mag()
         };
@@ -2276,9 +2276,9 @@ impl<'a> Work<'a> {
         // larger side's least `|x_axis - c_axis|`, which `zmax` takes the larger of), and the
         // cuts' `int |D|` bounds sum to at least `kept`
         let phi_least = if self.weight.quantity == (Quantity::Moment { x: 0, y: 0, z: 0 }) {
-            (pick_bs(o1).at(0, 0) - c_axis)
+            (pick_at0(o1) - c_axis)
                 .mig()
-                .max((pick_bs(o2).at(0, 0) - c_axis).mig())
+                .max((pick_at0(o2) - c_axis).mig())
         } else {
             self.weight.phi([hull(0), hull(1), hull(2)]).mig()
         };
