@@ -7710,6 +7710,39 @@ fn an_exact_pick_of_a_region_cut_by_the_face_outline_takes_only_that_region() {
     }
 }
 
+/// An outline that folds back on itself for a few micrometres (an imported SVG's coast) extrudes
+/// as one picked region as it does as the whole sketch (#22630): the fold's lobe, 6e-6 mm wide,
+/// is no spur of the region's outline (two coincident edges the kernel's check refused) and no
+/// region of its own.
+#[test]
+fn a_picked_region_whose_outline_folds_back_for_micrometres_extrudes() {
+    let mut s = Session::default();
+    let id = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+    // The curves s193, s194 and s195 of the reporter's sketch, closed by two lines clear of them.
+    for points in [
+        json!([[-4.40374, -7.86433], [-4.52194, -7.73448], [-3.75452, -7.79009], [-3.6926, -7.70315]]),
+        json!([[-3.6926, -7.70315], [-3.72686, -7.75118], [-3.68916, -7.45021], [-3.67333, -7.49464]]),
+        json!([[-3.67333, -7.49464], [-3.78961, -7.16718], [-4.31691, -7.50127], [-4.44598, -7.18056]]),
+    ] {
+        run(&mut s, "sketch.spline.control_point", json!({"points": points}));
+    }
+    run(&mut s, "sketch.line", json!({"points": [[-4.44598, -7.18056], [-5.5, -7.5], [-4.40374, -7.86433]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let state = s.model.state();
+    let ss = state.sketch(id).unwrap();
+    assert_eq!(ss.profiles.len(), 1, "{:?}", ss.profiles.iter().map(|p| p.area).collect::<Vec<_>>());
+    let area = ss.profiles[0].area;
+    for profiles in [json!([{"point": [-4.46, -7.53]}]), json!("all")] {
+        let mut s2 = Session::new((*s.doc).clone());
+        let p = json!({"sketch": id, "distance": 10, "operation": "new", "body_name": "Coast", "profiles": profiles.clone(), "exact_regions": true});
+        run(&mut s2, "solid.extrude", p);
+        let state = s2.model.state();
+        let body = state.bodies.iter().find(|b| b.name == "Coast").expect("the extruded body");
+        let v = body.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-4)).unwrap().measure().volume;
+        assert!(rel(v, area * 10.0) < 1e-3, "{profiles}: {v} vs {}", area * 10.0);
+    }
+}
+
 /// An explicit pick of a drawn hole still fills only that hole (#5176).
 #[test]
 fn an_explicit_pick_of_a_drawn_hole_fills_only_that_hole() {
