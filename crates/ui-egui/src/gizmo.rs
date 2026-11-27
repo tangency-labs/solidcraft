@@ -170,6 +170,34 @@ pub fn handle_point(name: &str, by: Vec3, turn: f64) -> Option<Vec3> {
 /// Ring radius as a share of the arrow length.
 const RING: f64 = 0.62;
 
+/// Resting and highlighted stroke widths (px) and plane fill opacities for triad handles (#23225).
+const AXIS_STROKE: f32 = 2.0;
+const AXIS_HOT_STROKE: f32 = 3.5;
+const RING_STROKE: f32 = 1.8;
+const RING_HOT_STROKE: f32 = 3.2;
+const PLANE_STROKE: f32 = 1.0;
+const PLANE_HOT_STROKE: f32 = 1.8;
+const PLANE_ALPHA: f32 = 0.35;
+const PLANE_HOT_ALPHA: f32 = 0.72;
+
+fn axis_color(tk: &Tokens, axis: usize, hot: bool) -> Color32 {
+    if hot { tk.axis_highlight(axis) } else { tk.axes()[axis.min(2)] }
+}
+
+fn axis_stroke(tk: &Tokens, axis: usize, hot: bool) -> Stroke {
+    Stroke::new(if hot { AXIS_HOT_STROKE } else { AXIS_STROKE }, axis_color(tk, axis, hot))
+}
+
+fn ring_stroke(tk: &Tokens, axis: usize, hot: bool) -> Stroke {
+    Stroke::new(if hot { RING_HOT_STROKE } else { RING_STROKE }, axis_color(tk, axis, hot))
+}
+
+fn plane_paint(tk: &Tokens, axis: usize, hot: bool) -> (Color32, Stroke) {
+    let col = axis_color(tk, axis, hot);
+    let alpha = if hot { PLANE_HOT_ALPHA } else { PLANE_ALPHA };
+    (col.gamma_multiply(alpha), Stroke::new(if hot { PLANE_HOT_STROKE } else { PLANE_STROKE }, col))
+}
+
 /// Where round a ring (degrees) a press takes that ring, clear of the handles over it.
 #[cfg(test)]
 pub(crate) fn ring_grip(proj: &Proj, t: &Triad, ring: usize) -> Option<f64> {
@@ -404,16 +432,22 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
     let hovered = if state.is_none() && !yielding { pointer.filter(|_| ui.rect_contains_pointer(proj.rect)).and_then(|p| hit(&sh, p)) } else { None };
     let active = state.map(|s| s.handle).or(hovered);
     let hot = |h: Handle| active == Some(h);
-    let col = |h: Handle, i: usize| if hot(h) { tk.accent } else { tk.axes()[i.min(2)] };
-    for (i, pts) in &sh.rings {
-        painter.add(Shape::line(pts.clone(), Stroke::new(if hot(Handle::Ring(*i)) { 3.0 } else { 1.8 }, col(Handle::Ring(*i), *i))));
+    // Draw resting handles first so a hovered or active handle always sits crisply on top.
+    for pass in [false, true] {
+        for (i, pts) in sh.rings.iter().filter(|(i, _)| hot(Handle::Ring(*i)) == pass) {
+            painter.add(Shape::line(pts.clone(), ring_stroke(&tk, *i, pass)));
+        }
     }
-    for (i, q) in &sh.planes {
-        let c = col(Handle::Plane(*i), *i);
-        painter.extend(projected_polygon(q, c.gamma_multiply(if hot(Handle::Plane(*i)) { 0.7 } else { 0.35 }), Stroke::new(1.0, c)));
+    for pass in [false, true] {
+        for (i, q) in sh.planes.iter().filter(|(i, _)| hot(Handle::Plane(*i)) == pass) {
+            let (fill, stroke) = plane_paint(&tk, *i, pass);
+            painter.extend(projected_polygon(q, fill, stroke));
+        }
     }
-    for (i, a, b, _) in &sh.arrows {
-        arrow(painter, *a, *b, col(Handle::Axis(*i), *i), hot(Handle::Axis(*i)));
+    for pass in [false, true] {
+        for (i, a, b, _) in sh.arrows.iter().filter(|(i, ..)| hot(Handle::Axis(*i)) == pass) {
+            arrow(painter, *a, *b, axis_stroke(&tk, *i, pass), pass);
+        }
     }
     let bc = if hot(Handle::Ball) { tk.accent } else { Color32::from_gray(235) };
     painter.circle(sh.ball, 6.0, bc, Stroke::new(1.5, Color32::from_gray(60)));
@@ -535,7 +569,7 @@ pub fn show(ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, id: egui::I
     Some(Drag { handle: st.handle, change, started, done })
 }
 
-fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32, hot: bool) {
+fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, stroke: Stroke, hot: bool) {
     let v = b - a;
     let len = v.length();
     if len < 1.0 {
@@ -543,9 +577,9 @@ fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32, hot: bool) {
     }
     let u = v / len;
     let n = vec2(-u.y, u.x);
-    painter.line_segment([a, b], Stroke::new(if hot { 3.0 } else { 2.0 }, col));
-    let head = 12.0f32.min(len * 0.5);
-    painter.add(Shape::convex_polygon(vec![b + u * 2.0, b - u * head + n * head * 0.4, b - u * head - n * head * 0.4], col, Stroke::NONE));
+    painter.line_segment([a, b], stroke);
+    let head = (if hot { 13.5f32 } else { 12.0f32 }).min(len * 0.5);
+    painter.add(Shape::convex_polygon(vec![b + u * 2.0, b - u * head + n * head * 0.4, b - u * head - n * head * 0.4], stroke.color, Stroke::NONE));
 }
 
 /// A 3×3 rotation (rows) about a unit axis.
@@ -718,5 +752,249 @@ mod tests {
         let (a, ang) = axis_angle(&h);
         assert!((ang - std::f64::consts::PI).abs() < 1e-9 && (a.y.abs() - 1.0).abs() < 1e-9);
         assert!((apply(&rotation(Vec3::Z, std::f64::consts::FRAC_PI_2), Vec3::X) - Vec3::Y).len() < 1e-12);
+    }
+
+    struct RestoreTheme {
+        dark: bool,
+        vision: solidcraft_theme::ColorVision,
+    }
+
+    impl RestoreTheme {
+        fn set(dark: bool) -> Self {
+            let saved = Self { dark: solidcraft_theme::is_dark(), vision: solidcraft_theme::vision() };
+            solidcraft_theme::set_dark(dark);
+            solidcraft_theme::set_vision(solidcraft_theme::ColorVision::Off);
+            saved
+        }
+    }
+
+    impl Drop for RestoreTheme {
+        fn drop(&mut self) {
+            solidcraft_theme::set_dark(self.dark);
+            solidcraft_theme::set_vision(self.vision);
+        }
+    }
+
+    fn luminance(c: Color32) -> f64 {
+        let [r, g, b, _] = c.to_srgba_unmultiplied();
+        let d = solidcraft_color::srgb::decode8;
+        0.2126 * d(r) + 0.7152 * d(g) + 0.0722 * d(b)
+    }
+
+    fn assert_axis_family(axis: usize, c: Color32, accent: Color32, context: &str) {
+        let [r, g, b, _] = c.to_srgba_unmultiplied();
+        let opaque = Color32::from_rgb(r, g, b);
+        assert_ne!(opaque, accent, "{context}: must not use generic accent highlight");
+        match axis {
+            0 => assert!(r > g && r > b, "{context}: X keeps red family, got {opaque:?}"),
+            1 => assert!(g > r && g > b, "{context}: Y keeps green family, got {opaque:?}"),
+            _ => assert!(b > r && b > g, "{context}: Z keeps blue family, got {opaque:?}"),
+        }
+    }
+
+    fn collect_shapes<'a>(clipped: &'a [egui::epaint::ClippedShape]) -> Vec<&'a Shape> {
+        fn walk<'a>(s: &'a Shape, out: &mut Vec<&'a Shape>) {
+            match s {
+                Shape::Vec(v) => v.iter().for_each(|c| walk(c, out)),
+                other => out.push(other),
+            }
+        }
+        let mut out = Vec::new();
+        for c in clipped {
+            walk(&c.shape, &mut out);
+        }
+        out
+    }
+
+    fn run_triad_frame(
+        ctx: &egui::Context,
+        rect: Rect,
+        proj: &Proj,
+        id: egui::Id,
+        triad: &Triad,
+        events: Vec<egui::Event>,
+    ) -> Vec<egui::epaint::ClippedShape> {
+        let mut out = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), events, ..Default::default() }, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
+                let painter = ui.painter().clone();
+                show(ui, &painter, proj, id, triad, 1.0);
+            });
+        });
+        out.textures_delta.clear();
+        out.shapes
+    }
+
+    /// #23225: Hovering or dragging an axis arrow or rotation ring keeps its own RGB axis color
+    /// (brighter tint + thicker stroke) instead of replacing it with the generic accent highlight.
+    #[test]
+    fn hovered_and_active_axes_and_rings_keep_their_own_color_and_thicken() {
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        let cam = solidcraft_viewport::Camera::default();
+        let proj = Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect, bounds: None };
+        let triad = Triad::world(Vec3::ZERO, true, true);
+        let l = mm_per_px(&proj, triad.center).unwrap() * LEN_PX;
+        let sh = shapes(&proj, &triad, l).unwrap();
+
+        for dark in [false, true] {
+            let _restore = RestoreTheme::set(dark);
+            let tk = Tokens::get();
+            for axis in 0..3 {
+                let rest_axis = axis_stroke(&tk, axis, false);
+                let hot_axis = axis_stroke(&tk, axis, true);
+                assert!(hot_axis.width > rest_axis.width, "dark={dark} axis {axis}: stroke thickens");
+                assert!(luminance(hot_axis.color) > luminance(rest_axis.color), "dark={dark} axis {axis}: color brightens");
+                assert_axis_family(axis, hot_axis.color, tk.accent, &format!("dark={dark} axis {axis}"));
+
+                let rest_ring = ring_stroke(&tk, axis, false);
+                let hot_ring = ring_stroke(&tk, axis, true);
+                assert!(hot_ring.width > rest_ring.width, "dark={dark} ring {axis}: stroke thickens");
+                assert!(luminance(hot_ring.color) > luminance(rest_ring.color), "dark={dark} ring {axis}: color brightens");
+                assert_axis_family(axis, hot_ring.color, tk.accent, &format!("dark={dark} ring {axis}"));
+
+                // Rendered axis hover and active drag.
+                let ctx = crate::fonts::test_context();
+                let id = egui::Id::unique(("axis_highlight", dark, axis));
+                let (_, a, b, _) = *sh.arrows.iter().find(|(i, ..)| *i == axis).unwrap();
+                let grip = a.lerp(b, 0.75);
+                assert_eq!(hit(&sh, grip), Some(Handle::Axis(axis)));
+                let _ = run_triad_frame(&ctx, rect, &proj, id, &triad, vec![]);
+                let hovered_clipped = run_triad_frame(&ctx, rect, &proj, id, &triad, vec![egui::Event::PointerMoved(grip)]);
+                let hovered_stroke = collect_shapes(&hovered_clipped)
+                    .into_iter()
+                    .find_map(|s| match s {
+                        Shape::LineSegment { points, stroke } if *points == [a, b] => Some(*stroke),
+                        _ => None,
+                    })
+                    .expect("axis shaft drawn on hover");
+                assert_eq!(hovered_stroke, hot_axis, "dark={dark} hovered axis {axis}");
+
+                // Press and drag away from the handle: active state keeps the brighter own color and width.
+                let _ = run_triad_frame(
+                    &ctx,
+                    rect,
+                    &proj,
+                    id,
+                    &triad,
+                    vec![egui::Event::PointerButton {
+                        pos: grip,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                );
+                let dragged_clipped = run_triad_frame(&ctx, rect, &proj, id, &triad, vec![egui::Event::PointerMoved(grip + vec2(30.0, 20.0))]);
+                let dragged_stroke = collect_shapes(&dragged_clipped)
+                    .into_iter()
+                    .find_map(|s| match s {
+                        Shape::LineSegment { points, stroke } if *points == [a, b] => Some(*stroke),
+                        _ => None,
+                    })
+                    .expect("axis shaft drawn while dragging");
+                assert_eq!(dragged_stroke, hot_axis, "dark={dark} dragged axis {axis}");
+
+                // Rendered rotation ring hover.
+                let ring_ctx = crate::fonts::test_context();
+                let ring_id = egui::Id::unique(("ring_highlight", dark, axis));
+                let (_, pts) = sh.rings.iter().find(|(i, _)| *i == axis).unwrap();
+                let deg = ring_grip(&proj, &triad, axis).expect("visible ring grip");
+                let (e1, e2) = triad.basis(axis);
+                let th = deg.to_radians();
+                let ring_pt = proj.to_screen(triad.center + (e1 * th.cos() + e2 * th.sin()) * (RING * l)).unwrap();
+                assert_eq!(hit(&sh, ring_pt), Some(Handle::Ring(axis)));
+                let _ = run_triad_frame(&ring_ctx, rect, &proj, ring_id, &triad, vec![]);
+                let ring_clipped = run_triad_frame(&ring_ctx, rect, &proj, ring_id, &triad, vec![egui::Event::PointerMoved(ring_pt)]);
+                let drawn_ring = collect_shapes(&ring_clipped)
+                    .into_iter()
+                    .find_map(|s| match s {
+                        Shape::Path(p) if p.points == *pts => match p.stroke.color {
+                            egui::epaint::ColorMode::Solid(c) => Some(Stroke::new(p.stroke.width, c)),
+                            _ => None,
+                        },
+                        _ => None,
+                    })
+                    .expect("ring drawn on hover");
+                assert_eq!(drawn_ring, hot_ring, "dark={dark} hovered ring {axis}");
+            }
+        }
+    }
+
+    /// #23225: Hovering or dragging a plane square (YZ=0/red, XZ=1/green, XY=2/blue) keeps its
+    /// own axis color in a brighter tint with higher fill opacity (lower transparency).
+    #[test]
+    fn hovered_and_active_planes_keep_their_own_color_and_raise_opacity() {
+        let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+        let cam = solidcraft_viewport::Camera::default();
+        let proj = Proj { cam, vp: cam.view_proj(4.0 / 3.0, 100.0), rect, bounds: None };
+        let triad = Triad::world(Vec3::ZERO, true, true);
+        let l = mm_per_px(&proj, triad.center).unwrap() * LEN_PX;
+        let sh = shapes(&proj, &triad, l).unwrap();
+
+        for dark in [false, true] {
+            let _restore = RestoreTheme::set(dark);
+            let tk = Tokens::get();
+            for (plane, name) in [(0, "YZ"), (1, "XZ"), (2, "XY")] {
+                let (rest_fill, rest_stroke) = plane_paint(&tk, plane, false);
+                let (hot_fill, hot_stroke) = plane_paint(&tk, plane, true);
+                assert!(hot_fill.a() > rest_fill.a(), "dark={dark} {name}: fill opacity increases ({} -> {})", rest_fill.a(), hot_fill.a());
+                assert!(hot_stroke.width > rest_stroke.width, "dark={dark} {name}: border thickens");
+                assert!(luminance(hot_fill) > luminance(rest_fill), "dark={dark} {name}: fill brightens");
+                assert_axis_family(plane, hot_fill, tk.accent, &format!("dark={dark} {name} fill"));
+                assert_axis_family(plane, hot_stroke.color, tk.accent, &format!("dark={dark} {name} border"));
+
+                let ctx = crate::fonts::test_context();
+                let id = egui::Id::unique(("plane_highlight", dark, plane));
+                let (_, q) = sh.planes.iter().find(|(i, _)| *i == plane).unwrap();
+                let center = Pos2::new(q.iter().map(|p| p.x).sum::<f32>() / q.len() as f32, q.iter().map(|p| p.y).sum::<f32>() / q.len() as f32);
+                assert_eq!(hit(&sh, center), Some(Handle::Plane(plane)));
+                let _ = run_triad_frame(&ctx, rect, &proj, id, &triad, vec![]);
+                let clipped = run_triad_frame(&ctx, rect, &proj, id, &triad, vec![egui::Event::PointerMoved(center)]);
+                let painted = collect_shapes(&clipped);
+                let mesh_color = painted
+                    .iter()
+                    .find_map(|s| match s {
+                        Shape::Mesh(m) if m.vertices.len() == q.len() && m.vertices.iter().zip(q.iter()).all(|(v, p)| v.pos == *p) => {
+                            Some(m.vertices[0].color)
+                        }
+                        _ => None,
+                    })
+                    .expect("plane fill mesh drawn on hover");
+                let edge_stroke = painted
+                    .iter()
+                    .find_map(|s| match s {
+                        Shape::LineSegment { points, stroke } if *points == [q[0], q[1]] => Some(*stroke),
+                        _ => None,
+                    })
+                    .expect("plane outline drawn on hover");
+                assert_eq!(mesh_color, hot_fill, "dark={dark} hovered {name} fill");
+                assert_eq!(edge_stroke, hot_stroke, "dark={dark} hovered {name} outline");
+
+                // Press and drag away from the square: active plane keeps higher opacity and own brighter color.
+                let _ = run_triad_frame(
+                    &ctx,
+                    rect,
+                    &proj,
+                    id,
+                    &triad,
+                    vec![egui::Event::PointerButton {
+                        pos: center,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                );
+                let dragged_clipped = run_triad_frame(&ctx, rect, &proj, id, &triad, vec![egui::Event::PointerMoved(center + vec2(40.0, 25.0))]);
+                let dragged = collect_shapes(&dragged_clipped);
+                let dragged_fill = dragged
+                    .iter()
+                    .find_map(|s| match s {
+                        Shape::Mesh(m) if m.vertices.len() == q.len() && m.vertices.iter().zip(q.iter()).all(|(v, p)| v.pos == *p) => {
+                            Some(m.vertices[0].color)
+                        }
+                        _ => None,
+                    })
+                    .expect("plane fill mesh drawn while dragging");
+                assert_eq!(dragged_fill, hot_fill, "dark={dark} dragged {name} fill");
+            }
+        }
     }
 }
