@@ -22,6 +22,7 @@ fn schemas_and_the_key_check_agree() {
             "depth",
             "direction",
             "dot_grid",
+            "face",
             "flip",
             "keepout_clip",
             "margin",
@@ -54,6 +55,9 @@ fn the_contract_refuses_what_the_handler_refuses() {
     let sketched = json!({"shape": "sketch", "cell_sketch": "Cell", "pitch_x": 20, "pitch_y": "2 * 10", "stagger": 0.5, "cell_angle": "30 deg", "flip": true, "cell_origin": [1, "2 mm"], "web": 1, "depth": 3});
     assert!(conforms(root, root, &sketched));
     assert!(conforms(root, root, &json!({"shape": "sketch", "cell_sketch": 3, "cell_origin": {"x": 1, "y": 2}, "web": 1})));
+    // A wall grid gives `face` (a point or a face name) instead of a sketch.
+    assert!(conforms(root, root, &json!({"face": [30, 0, 20], "shape": "square", "size": 8, "web": 2})));
+    assert!(conforms(root, root, &json!({"face": "Tube.F1", "shape": "square", "size": 8, "web": 2, "depth": 1.5, "targets": ["Tube"]})));
     for bad in [json!({"size": 5}), json!({"size": 5, "web": 1, "extra": 1})] {
         assert!(!conforms(root, root, &bad), "{bad}");
     }
@@ -70,6 +74,9 @@ fn the_contract_refuses_what_the_handler_refuses() {
         json!({"web": 1, "shape": "sketch", "cell_sketch": true}),
         json!({"web": 1, "shape": "sketch", "pitch_x": [1]}),
         json!({"web": 1, "shape": "sketch", "stagger": {}}),
+        json!({"size": 5, "web": 1, "face": [1, 2]}),
+        json!({"size": 5, "web": 1, "face": true}),
+        json!({"size": 5, "web": 1, "face": null}),
     ] {
         assert!(serde_json::from_value::<CellGridParams>(bad.clone()).is_err(), "{bad}");
     }

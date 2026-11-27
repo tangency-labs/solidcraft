@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::types::{
-    AngleExpr, DirectionParam, FeatureCommon, IdOrName, LengthExpr, NumberExpr, PointExpr2, PointExpr3, ProfilesParam, StringList, feature_common,
+    AngleExpr, DirectionParam, FaceRef, FeatureCommon, IdOrName, LengthExpr, NumberExpr, PointExpr2, PointExpr3, ProfilesParam, StringList, feature_common,
     present,
 };
 
@@ -66,11 +66,14 @@ pub enum CellClipParam {
 /// sketch plane as material (knurling, grip pads, standoffs). A profile's outer loop is the field to fill;
 /// a loop inside it is a keep-out that no cell crosses. The cells are cut in one operation, up to
 /// 1000 (the command help names the limit); a sheet metal body is refused (use
-/// `sheet.perforate`). The faces cut have no stable names yet.
+/// `sheet.perforate`). The faces cut have no stable names yet. With `face` instead of a sketch,
+/// square cells are cut round a whole-turn cylinder wall (outside or bore), through the wall
+/// or `depth` deep.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CellGridParams {
-    /// The sketch holding the field, by id or name. Default: the active sketch, else the last one.
+    /// The sketch holding the field, by id or name. Required unless `face`, and refused with it.
+    /// Default: the active sketch, else the last one.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "IdOrName")]
     pub sketch: Option<IdOrName>,
@@ -79,6 +82,13 @@ pub struct CellGridParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "ProfilesParam")]
     pub profiles: Option<ProfilesParam>,
+    /// A point [x, y, z] on a cylinder wall, or its face name, to cut square cells round instead
+    /// of filling a sketch: the outside or the bore of a whole-turn tube or rod, at an `angle` of
+    /// 0 or 90 deg, the cells' size and web going round evenly. Not with `sketch`, `profiles`,
+    /// `direction` or `mode: raised`; `targets` is at most the wall's body.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "FaceRef")]
+    pub face: Option<FaceRef>,
     /// What to do with the cells: cut them out, or raise them as material. Default: cut.
     #[serde(default)]
     pub mode: Option<CellGridModeParam>,
@@ -153,8 +163,9 @@ pub struct CellGridParams {
     /// `clip: whole`. Default 0: a cell may touch an edge.
     #[serde(default)]
     pub margin: Option<LengthExpr>,
-    /// How deep the cells are cut, or how high they stand when raised, along the sketch normal.
-    /// Required unless `through_all`.
+    /// How deep the cells are cut, or how high they stand when raised, along the sketch normal
+    /// (into the wall with `face`). Required unless `through_all`, or with `face`, where the
+    /// cells go through the wall when neither is set.
     #[serde(default)]
     pub depth: Option<LengthExpr>,
     /// Cut through every body in the way, instead of `depth`. Refused with `mode: raised`.
