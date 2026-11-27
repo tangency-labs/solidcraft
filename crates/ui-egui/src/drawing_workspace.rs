@@ -20,6 +20,7 @@ pub(crate) mod note;
 mod panels;
 pub(crate) mod placement;
 pub(crate) mod print;
+mod view_bodies;
 
 use panels::Tool;
 
@@ -476,6 +477,22 @@ pub(crate) fn start_projected(app: &mut SolveApp, parent: u64) -> bool {
     app.drawing_workspace.placement = Some(tool);
     app.drawing_workspace.options = Some(Tool::Projected);
     true
+}
+
+/// Hide in This View (#22107): view `view` of the open drawing leaves `body` out, added to the
+/// bodies it leaves out now (its own list, or the one it takes from its parent, which becomes its
+/// own). One `drawing.view.edit`, one undo step. A body already left out changes nothing.
+pub(crate) fn hide_body_in_view(app: &mut SolveApp, view: u64, body: solidcraft_engine::doc::drawing_view::HiddenBody) -> Result<(), String> {
+    let drawing = app.session.drawing("drawing.inspect").map_err(|error| error.to_string())?;
+    let resolved = drawing.resolve_view(view).map_err(|error| error.to_string())?;
+    let mut hidden: Vec<_> = resolved.hide_bodies.value.as_deref().unwrap_or_default().to_vec();
+    if hidden.contains(&body) {
+        return Ok(());
+    }
+    hidden.push(body);
+    app.run("drawing.view.edit", serde_json::json!({"view": solidcraft_engine::doc::ids::encode(view), "set": {"hide_bodies": hidden}}))
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 /// Edit object `object` of the open drawing, as a double-click on it at `at` does (the menu's Edit,
