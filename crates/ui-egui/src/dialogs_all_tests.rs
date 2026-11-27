@@ -521,8 +521,10 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         if command == "solid.cylinder" {
             continue; // its face and reference edges place it (cylinder reference tests); this form checks its fields
         }
-        if matches!(input.label, "Rail" | "Second Rail" | "Pass through" | "Direction" | "Roller (optional)" | "Tip (optional)" | "ui.cell_grid.wall")
-        {
+        if matches!(input.label, "Rail" | "Second Rail" | "Pass through" | "Direction" | "Roller (optional)" | "Tip (optional)") {
+            continue;
+        }
+        if input.label == "ui.cell_grid.wall" {
             continue; // Cell Grid's wall is an alternative to its profiles: the form checks it apart
         }
         let name = if index == 1 && command != "surface.ruled" { "Body2" } else { "Body1" };
@@ -1136,10 +1138,10 @@ fn cell_grid_form_shows_the_rows_of_the_chosen_shape_and_clip() {
 fn cell_grid_wall_hides_mode_and_direction() {
     let wall = |d: &mut Dialog| {
         d.inputs[0].items.clear();
-        d.inputs[3].items = vec![Sel::Face { body: "Body1".into(), index: 0, point: Vec3::new(10.0, 0.0, 2.5) }];
+        d.inputs[4].items = vec![Sel::Face { body: "Body1".into(), index: 0, point: Vec3::new(10.0, 0.0, 2.5) }];
     };
-    let rest = ["Shape", "Cell size", "Web", "Through all", "Depth", "Clip", "Keep-out clip", "Angle"];
-    check_form_with("solid.cell_grid", &rest, &["Mode", "Direction", "Inset rows"], wall);
+    let rest = ["Shape", "Cell size", "Web", "Through all", "Depth", "Clip", "Keep-out clip", "Inset rows", "Angle"];
+    check_form_with("solid.cell_grid", &rest, &["Mode", "Direction"], wall);
 }
 
 /// A cell grid on a wall sends the face (a point on it) and the wall's body as the only target,
@@ -1151,7 +1153,7 @@ fn cell_grid_wall_sends_the_face_and_the_body_and_no_sketch() {
     let point = Vec3::new(10.0, 0.0, 2.5);
     let mut d = Dialog::for_command(&h.app, "solid.cell_grid").unwrap();
     d.inputs[1].items = vec![Sel::Body { name: "Other".into() }];
-    d.inputs[3].items = vec![Sel::Face { body: "Tube".into(), index: 2, point }];
+    d.inputs[4].items = vec![Sel::Face { body: "Tube".into(), index: 2, point }];
     if let Kind::CellGrid(c) = &mut d.kind {
         // Raised and a direction are the form's to drop for a wall.
         (c.mode, c.direction, c.through_all) = (1, 2, true);
@@ -1166,9 +1168,9 @@ fn cell_grid_wall_sends_the_face_and_the_body_and_no_sketch() {
     d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
     assert_eq!(apply_commands(&h.app, &d).unwrap_err(), String::from(h.app.tr("error.cell_grid_wall_sketch")));
     d.inputs[0].items.clear();
-    d.inputs[3].items = vec![Sel::Face { body: "Tube".into(), index: usize::MAX, point }];
+    d.inputs[4].items = vec![Sel::Face { body: "Tube".into(), index: usize::MAX, point }];
     assert_eq!(apply_commands(&h.app, &d).unwrap_err(), String::from(h.app.tr("error.cell_grid_wall")));
-    d.inputs[3].items.clear();
+    d.inputs[4].items.clear();
     assert_eq!(apply_commands(&h.app, &d).unwrap_err(), String::from(h.app.tr("error.cell_grid_profiles")));
 }
 
@@ -1192,7 +1194,7 @@ fn cell_grid_sketch_shape_sends_the_cell_sketch_and_layout_and_edits_back() {
         c.shape = 5;
     }
     assert_eq!(apply_commands(&h.app, &d).unwrap_err(), String::from(h.app.tr("error.cell_grid_cell_sketch")));
-    d.inputs[4].items = vec![Sel::Profile { sketch: cell, index: 0 }];
+    d.inputs[3].items = vec![Sel::Profile { sketch: cell, index: 0 }];
     if let Kind::CellGrid(c) = &mut d.kind {
         // The default clip is snap: a sketched cell sends whole.
         (c.pitch_x, c.pitch_y, c.web, c.depth, c.through_all) = ("8 mm".into(), "6 mm".into(), "1 mm".into(), "1 mm".into(), false);
@@ -1219,7 +1221,7 @@ fn cell_grid_sketch_shape_sends_the_cell_sketch_and_layout_and_edits_back() {
     let (Kind::CellGrid(c), inputs, extra) = crate::dialogs_cell_grid::for_feature(&h.app, &kind).unwrap() else { panic!() };
     assert_eq!(c.shape, 5, "{c:?}");
     assert_eq!((c.pitch_x.as_str(), c.pitch_y.as_str(), c.flip, c.clip), ("8 mm", "6 mm", true, 0), "{c:?}");
-    assert_eq!(inputs[4].items, [Sel::Profile { sketch: cell, index: 0 }], "{inputs:?}");
+    assert_eq!(inputs[3].items, [Sel::Profile { sketch: cell, index: 0 }], "{inputs:?}");
     let commands = crate::dialogs_cell_grid::commands(&h.app, &c, &inputs, &extra).unwrap();
     let [(id, p)] = commands.as_slice() else { panic!("{commands:?}") };
     h.app.run(id, p.clone()).unwrap();

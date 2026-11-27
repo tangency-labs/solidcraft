@@ -31,14 +31,14 @@ const KEEPOUT_CLIPS: [Option<&str>; 4] = [None, Some("whole"), Some("snap"), Som
 const MODES: [&str; 2] = ["cut", "raised"];
 const DIRECTIONS: [&str; 3] = ["positive", "negative", "symmetric"];
 /// The inputs, in order: the profiles (their sketch and keep-outs), the bodies, the anchor, the
-/// cylinder wall to wrap the grid round (instead of profiles), the cell's profile (a sketched cell
-/// only: its sketch is the cell sketch). The wall comes before the cell so that [`shown_picks`]
-/// stays one range.
+/// cell's profile (a sketched cell only: its sketch is the cell sketch), the cylinder wall to wrap
+/// the grid round (instead of profiles). The wall comes last so the earlier inputs keep their
+/// places.
 const PROFILES_INPUT: usize = 0;
 const BODIES_INPUT: usize = 1;
 const ANCHOR_INPUT: usize = 2;
-const WALL_INPUT: usize = 3;
-const CELL_INPUT: usize = 4;
+const CELL_INPUT: usize = 3;
+const WALL_INPUT: usize = 4;
 /// The dialog's own note (not a command key) of the point the anchor field was filled with when
 /// the dialog opened on a stored grid: a field still holding it is not a new pick.
 const ANCHOR_SHOWN: &str = "anchor_shown";
@@ -169,10 +169,10 @@ fn inputs() -> Vec<SelInput> {
         SelInput::new("ui.bodies", BODIES, true),
         // A short label keeps the form's label column narrow; the tip says what none means.
         SelInput::new("Anchor", ANCHOR_PICKS, false).tip("ui.cell_grid.anchor_tip"),
-        // A round wall of a body: the grid is wrapped round it. Direction and Mode do not apply.
-        SelInput::new("ui.cell_grid.wall", FACES, false).tip("ui.cell_grid.wall_tip"),
         // One profile: its sketch is the cell sketch. Shown with the Sketch shape only.
         SelInput::new("ui.cell_grid.cell_sketch", PROFILES, false).tip("ui.cell_grid.cell_sketch_tip"),
+        // A round wall of a body: the grid is wrapped round it. Direction and Mode do not apply.
+        SelInput::new("ui.cell_grid.wall", FACES, false).tip("ui.cell_grid.wall_tip"),
     ]
 }
 
@@ -180,9 +180,9 @@ pub fn start(app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
     (id == "solid.cell_grid").then(|| (crate::length_input::defaults(&app.session.doc, Kind::CellGrid(CellGrid::default())), inputs()))
 }
 
-/// The pick rows to show, as runs of the dialog's inputs: the cell's profile only for a sketched cell.
-pub fn shown_picks(c: &CellGrid) -> std::ops::Range<usize> {
-    0..if c.sketched() { CELL_INPUT + 1 } else { CELL_INPUT }
+/// The pick rows to show, in order: the cell's profile only for a sketched cell, the wall always.
+pub fn shown_picks(c: &CellGrid) -> Vec<usize> {
+    (0..=WALL_INPUT).filter(|&i| i != CELL_INPUT || c.sketched()).collect()
 }
 
 pub fn rows(app: &SolveApp, ui: &mut egui::Ui, c: &mut CellGrid, inputs: &[SelInput]) -> bool {
