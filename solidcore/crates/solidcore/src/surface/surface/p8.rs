@@ -3483,6 +3483,8 @@ fn join_across_coincidence<O: SolutionObject>(
     last_sol.unique = None;
     // (no point merged or absorbed is shown the seam point it was identified as)
     last_sol.shared_contact = None;
+    // (a limit root joined in, by a range or a point, leaves its mark on what holds it)
+    last_sol.limit_root |= curr_sol.limit_root;
 
     // if CurrSol is a range
     if curr_sol.solution_type == SolutionType::RangeOfValues {
@@ -3517,7 +3519,6 @@ fn join_across_coincidence<O: SolutionObject>(
             } else {
                 last_original_contact.merged(curr_sol.contact)
             };
-            last_sol.limit_root |= curr_sol.limit_root;
         } else {
             // set LastSolution end value
             last_sol.end = curr_sol.start;
@@ -5152,6 +5153,31 @@ mod tests {
                 assert_eq!((kept.contact, kept.unique), (want, None), "{a:?} {b:?}");
             }
         }
+        // a limit root mark on either input is kept by the range two points make (the second
+        // past the shortest range), by a range extended by a range, and by a point that
+        // absorbs another; none on either leaves none
+        let range_from = |mut s: Solution<NoObject>, end: f64| {
+            s.solution_type = SolutionType::RangeOfValues;
+            s.end.parameters[0] = end;
+            s
+        };
+        for (on_last, on_curr) in [(false, true), (true, false), (true, true), (false, false)] {
+            let mut last = line_point(0.0, [0.2, 0.1, 0.1], Contact::Crossing);
+            last.limit_root = on_last;
+            let mut far = line_point(0.0, [0.6, 0.5, 0.1], Contact::Crossing);
+            far.limit_root = on_curr;
+            let mut near = line_point(0.0, [0.2 + EFF_ZERO, 0.1, 0.1], Contact::Crossing);
+            near.limit_root = on_curr;
+            let want = on_last || on_curr;
+            for curr in [far, range_from(far, 0.9), near] {
+                let joined = join_across_coincidence(last, &curr, Some(&unit)).unwrap();
+                assert_eq!(joined.limit_root, want, "{on_last} {on_curr} {curr:?}");
+            }
+            let joined = join_across_coincidence(range_from(last, 0.3), &far, Some(&unit)).unwrap();
+            assert_eq!(joined.solution_type, SolutionType::RangeOfValues);
+            assert_eq!(joined.limit_root, want);
+        }
+
         // a shared contact id is lost by a range and by a point that absorbs another
         let id = core::num::NonZeroU32::new(1).map(crate::geom::solution_array::ContactId);
         let mut last = line_point(0.0, [0.2, 0.1, 0.1], Contact::Crossing);

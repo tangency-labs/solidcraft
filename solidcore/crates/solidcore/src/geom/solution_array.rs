@@ -730,8 +730,8 @@ impl<O: Copy> Solution<O> {
 }
 
 impl<O: SolutionObject> Solution<O> {
-    /// Clears the type, the counts, the objects, the nodes and the contact
-    /// (`ReSet`). The solution ends keep their values, as upstream.
+    /// Clears the type, the counts, the objects, the nodes, the contact and the limit root
+    /// mark (`ReSet`). The solution ends keep their values, as upstream.
     pub fn reset(&mut self) {
         self.solution_type = SolutionType::Unknown;
         self.num_variables = 0;
@@ -741,6 +741,7 @@ impl<O: SolutionObject> Solution<O> {
         self.contact = Contact::Unclassified;
         self.unique = None;
         self.shared_contact = None;
+        self.limit_root = false;
     }
 
     /// Checks the counts upstream would use to index its fixed arrays.
@@ -2199,6 +2200,19 @@ mod tests {
         let mut cleared = linked;
         cleared.reset();
         assert_eq!(cleared.shared_contact, None);
+        // the limit root mark: none on a new solution, kept by a copy, cleared by a reset, so
+        // a solution reset and filled again for another root carries none
+        assert!(!Solution::<Obj>::new().limit_root);
+        let mut limit = crossing;
+        limit.limit_root = true;
+        let copy = limit;
+        assert!(copy.limit_root);
+        let mut reused = limit;
+        reused.reset();
+        assert!(!reused.limit_root);
+        reused.solution_type = SolutionType::SingleValue;
+        reused.contact = Contact::Crossing;
+        assert!(!reused.limit_root);
         let mut a: SolutionArray<Obj> = SolutionArray::new();
         for v in [3.0, 1.0] {
             let mut s = single(v, &[v]);

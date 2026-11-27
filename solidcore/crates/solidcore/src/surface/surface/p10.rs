@@ -1853,6 +1853,12 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                     last_sol.end = curr.end;
                     solutions.set_at(last_slot, &last_sol)?;
                 }
+                // (not upstream) a limit root the range held leaves its mark on the one
+                // that takes it in
+                if curr.limit_root && !last_sol.limit_root {
+                    last_sol.limit_root = true;
+                    solutions.set_at(last_slot, &last_sol)?;
+                }
             } else {
                 // just use the better solution
                 let mut kept = if curr.start.solution_value < last_end.solution_value {
@@ -1916,6 +1922,8 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
     // intersections.
     let num = solutions.len();
     let mut cull = vec![false; num];
+    // (not upstream) the solutions that take in the limit root mark of one culled
+    let mut marked = vec![false; num];
     let mut compress = false;
     for ii in 0..num {
         let inv_sol = solutions.get_at(ii)?;
@@ -1980,6 +1988,11 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                 if let Some(c) = cull.get_mut(ii) {
                     *c = true;
                 }
+                if inv_sol.limit_root || marked.get(ii).copied().unwrap_or(false) {
+                    if let Some(m) = marked.get_mut(jj) {
+                        *m = true;
+                    }
+                }
                 compress = true;
             } else {
                 // Range is long enough.  See about deleting the point solution.
@@ -1999,6 +2012,11 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                     if let Some(c) = cull.get_mut(jj) {
                         *c = true;
                     }
+                    if pt_sol.limit_root || marked.get(jj).copied().unwrap_or(false) {
+                        if let Some(m) = marked.get_mut(ii) {
+                            *m = true;
+                        }
+                    }
                     compress = true;
                 }
             }
@@ -2013,6 +2031,14 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
             {
                 break;
             }
+        }
+    }
+
+    for (ii, &m) in marked.iter().enumerate() {
+        if m {
+            let mut s = solutions.get_at(ii)?;
+            s.limit_root = true;
+            solutions.set_at(ii, &s)?;
         }
     }
 
