@@ -358,6 +358,7 @@ pub use fill::PatchSpec;
 pub use fill::patch_edges_crowned;
 pub use fill::patch_edges_report;
 pub use fill::patch_edges_with;
+pub use helix::MAX_HELIX_TURNS;
 pub use helix::loft_to_point;
 pub use helix::loft_to_point_with_rails;
 pub use helix::sweep_helix;
@@ -385,6 +386,7 @@ pub use matchsurf::seam_continuity;
 pub use measure::BodyMeasure;
 pub use measure::MassMeasure;
 pub use measure::levels_along;
+pub use measure::line_meets_box;
 pub use measure::measure;
 pub use measure::measure_many;
 pub use measure::measure_mass;
@@ -487,6 +489,7 @@ pub use route::query;
 pub use route::read_cadir;
 pub use route::revolve;
 pub use route::revolve_whole;
+pub use route::runtime;
 pub use route::sections;
 pub use route::shaft_spline;
 pub use route::shell;
@@ -527,9 +530,7 @@ pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
 
-/// The cancel token over this thread's work ([`Stop::within`]), for work outside the kernel that
-/// stops with it (a sketch solve).
-pub use solidcraft_smlib::stop::token as stop_token;
+pub use route::runtime::stop_token;
 pub use solidcraft_smlib::trace as smlib_trace;
 /// Solidcore's own profiler, written as JSON Lines (feature `solidcore-profile`): the kernel's
 /// scopes and counted work of the calls this process made.
