@@ -41,8 +41,16 @@ fn evaluation() -> String {
 /// The geometry kernel that computed a cache. A cache another kernel wrote (the C++ SMLib, which
 /// earlier builds could run on) is not this build's result: the kernels differ in tolerances and in
 /// what they refuse, so a design opened from it evaluates again.
+///
+/// Known limitation: this is a constant, so it doesn't record the active kernel backend. That is
+/// fine for the builds we ship (solidcore only), but the opt-in `backend-occt` build stamps its
+/// caches "solidcore" too, and can share cached bodies with a normal build; see #23125
+/// (https://github.com/tangency-labs/solidcraft/issues/23125).
 pub(super) const KERNEL: &str = "solidcore";
 
+/// Known limitation: this identity doesn't record the active kernel backend. That is fine for the
+/// builds we ship, but the opt-in `backend-occt` build can share import cache entries with a
+/// normal build; see #23125 (https://github.com/tangency-labs/solidcraft/issues/23125).
 pub(super) fn identity() -> Value {
     json!([FORMAT, PRODUCER, env!("CARGO_PKG_VERSION"), build()])
 }
