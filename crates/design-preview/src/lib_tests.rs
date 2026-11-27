@@ -324,3 +324,22 @@ fn a_directory_larger_than_its_record_says_is_refused() {
     assert!(u64::from(u32::from_le_bytes(largest[at + 12..at + 16].try_into().unwrap())) > MAX_DIRECTORY - (64 << 10));
     assert_eq!(open_archive(std::io::Cursor::new(largest)).map(|a| a.len()), Some(131));
 }
+
+#[test]
+fn the_directory_bounds_hold_exactly_at_their_values() {
+    let bytes = good();
+    let entries = |n: u16| with_field(&with_field(&bytes, 8, &n.to_le_bytes()), 10, &n.to_le_bytes());
+    assert!(fits(&entries(10_000)), "10,000 entries is the most a record may claim");
+    assert!(!fits(&entries(10_001)));
+    // A file over 8 MiB, so that a directory of 8 MiB from its start lies before the record.
+    let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let stored = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    writer.start_file("container.json", stored).unwrap();
+    writer.write_all(CONTAINER).unwrap();
+    writer.start_file("filler", stored).unwrap();
+    writer.write_all(&vec![0_u8; 9 << 20]).unwrap();
+    let big = writer.finish().unwrap().into_inner();
+    let directory = |size: u32| with_field(&with_field(&big, 16, &0_u32.to_le_bytes()), 12, &size.to_le_bytes());
+    assert!(fits(&directory(8 << 20)), "a directory of exactly 8 MiB");
+    assert!(!fits(&directory((8 << 20) + 1)), "one byte more, still inside the file");
+}
