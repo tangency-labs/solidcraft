@@ -317,6 +317,8 @@ mod sketch_rational;
 pub mod sketch_selection;
 mod sketch_store;
 mod socket_reach;
+mod stretch;
+mod stretch_sketch;
 mod surface;
 mod surface_analysis;
 mod surface_boundary;
@@ -664,6 +666,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(features_more::COMMANDS.iter());
     v.extend(cell_grid::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
+    v.extend(stretch::COMMANDS.iter());
     v.extend(construct_auto::COMMANDS.iter());
     v.extend(plugin::COMMANDS.iter());
     v.extend(plugin_storage::COMMANDS.iter());

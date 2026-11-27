@@ -642,6 +642,7 @@ fn check_form_with(command: &str, labels: &[&str], absent: &[&str], set: impl Fn
     }
     let checks: &[&str] = match command {
         "solid.shell" => &["Tangent Chain"],
+        "solid.stretch" => &["Edit sketch"],
         "solid.rib" | "solid.web" | "solid.align" | "sheet.flange" | "sheet.hem" | "sheet.fold" | "joint.create" => &["Flip"],
         "inspect.section" => &["Flip", "Hatch"],
         "solid.move" => &["Create Copy"],
@@ -717,6 +718,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Inset By" | "Extent Type" => Role::ComboBox,
         "Thickness Placement" if command == "frame.gusset" => return None, // icon buttons, checked by the gusset interaction test
         "Outline" => Role::ComboBox,
+        "X direction" | "Y direction" | "Z direction" if command == "solid.stretch" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
@@ -917,6 +919,11 @@ form_case!(angle_plane, "construct.plane.at_angle", ["Angle"]);
 form_case!(path_plane, "construct.plane.along_path", ["Position (0 to 1)"]);
 form_case!(split, "solid.split_body", []);
 form_case!(scale, "solid.scale", ["Type", "Scale factor"]);
+form_case!(
+    stretch,
+    "solid.stretch",
+    ["X direction", "X distance", "X cut at", "Y direction", "Y distance", "Y cut at", "Z direction", "Z distance", "Z cut at"]
+);
 
 /// Scale per axis (#10782): the dialog's X, Y and Z rows build `factors`; a Scale made with
 /// `factors` opens per axis with its three values and keeps them on OK, and switching it back to

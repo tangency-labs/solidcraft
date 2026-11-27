@@ -3139,6 +3139,83 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         joints: Vec<CapturedJoint>,
     },
+    /// Stretch (#20512): `body` stretched along up to three of its component's axes, one
+    /// [`AxisStretch`] each, in order (`kernel::stretch`).
+    Stretch {
+        body: BodyName,
+        stretches: Vec<AxisStretch>,
+    },
+}
+
+/// One axis of a Stretch: the body cut across square to `direction`, `at` along it from the face
+/// picked at `from` (or, with none, from the body's side that stays put), and the part beyond
+/// moved along `direction` by `distance` (a shrink when negative), the gap filled by the body's
+/// own section.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct AxisStretch {
+    pub direction: StretchDirection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<FacePick>,
+    #[walk(length = "Cut at")]
+    pub at: Expr,
+    #[walk(length = "Distance")]
+    pub distance: Expr,
+}
+
+/// The way the moving side of a Stretch goes: along one of its component's axes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StretchDirection {
+    PlusX,
+    MinusX,
+    PlusY,
+    MinusY,
+    PlusZ,
+    MinusZ,
+}
+
+impl StretchDirection {
+    pub const ALL: [StretchDirection; 6] = [Self::PlusX, Self::MinusX, Self::PlusY, Self::MinusY, Self::PlusZ, Self::MinusZ];
+
+    /// The unit vector the moving side goes along.
+    pub fn vector(self) -> solidcore_record::Vec3 {
+        use solidcore_record::Vec3;
+        match self {
+            Self::PlusX => Vec3::X,
+            Self::MinusX => Vec3::X * -1.0,
+            Self::PlusY => Vec3::Y,
+            Self::MinusY => Vec3::Y * -1.0,
+            Self::PlusZ => Vec3::Z,
+            Self::MinusZ => Vec3::Z * -1.0,
+        }
+    }
+
+    /// As commands and the design write it: `+x`, `-x`, … `-z`.
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::PlusX => "+x",
+            Self::MinusX => "-x",
+            Self::PlusY => "+y",
+            Self::MinusY => "-y",
+            Self::PlusZ => "+z",
+            Self::MinusZ => "-z",
+        }
+    }
+
+    /// The axis it runs along: 0 for X, 1 for Y, 2 for Z.
+    pub fn axis(self) -> usize {
+        match self {
+            Self::PlusX | Self::MinusX => 0,
+            Self::PlusY | Self::MinusY => 1,
+            Self::PlusZ | Self::MinusZ => 2,
+        }
+    }
+
+    /// From [`Self::key`] (case and spaces ignored).
+    pub fn parse(s: &str) -> Option<Self> {
+        let s = s.trim().to_ascii_lowercase();
+        Self::ALL.into_iter().find(|d| d.key() == s)
+    }
 }
 
 fn zero_translate() -> [Expr; 3] {
@@ -4309,6 +4386,7 @@ impl FeatureKind {
             FeatureKind::MeshReduce { .. } => "MeshReduceFeature",
             FeatureKind::Repair { .. } => "RepairFeature",
             FeatureKind::CapturePosition { .. } => "CapturePositionFeature",
+            FeatureKind::Stretch { .. } => "StretchFeature",
         }
     }
 
@@ -4408,6 +4486,7 @@ impl FeatureKind {
             FeatureKind::MeshImport { .. } => "mesh_import",
             FeatureKind::Repair { .. } => "repair",
             FeatureKind::CapturePosition { .. } => "capture_position",
+            FeatureKind::Stretch { .. } => "stretch",
         }
     }
 
@@ -4506,6 +4585,7 @@ impl FeatureKind {
             "MeshReduceFeature" => "mesh_reduce",
             "RepairFeature" => "repair",
             "CapturePositionFeature" => "capture_position",
+            "StretchFeature" => "stretch",
             _ => return None,
         })
     }
@@ -4608,6 +4688,7 @@ impl FeatureKind {
             FeatureKind::MeshReduce { .. } => "ReduceMesh",
             FeatureKind::Repair { .. } => "Repair",
             FeatureKind::CapturePosition { .. } => "CapturePosition",
+            FeatureKind::Stretch { .. } => "Stretch",
         }
     }
 }

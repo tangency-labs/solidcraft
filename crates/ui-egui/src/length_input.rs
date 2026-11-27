@@ -197,6 +197,7 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
         D::PatternRect { spacing, spacing2, extent, extent2, .. } => vec![spacing, spacing2, extent, extent2],
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
         D::OffsetFaces { distance } => vec![distance],
+        D::Stretch { distance_x, at_x, distance_y, at_y, distance_z, at_z, .. } => vec![distance_x, at_x, distance_y, at_y, distance_z, at_z],
         D::MeshConvert { tolerance } => vec![tolerance],
         D::Thread { length, .. } => vec![length],
         D::Emboss { depth, offset_x, offset_y, .. } => vec![depth, offset_x, offset_y],

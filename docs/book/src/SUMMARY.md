@@ -11,6 +11,7 @@
 - [Sketching and constraints](guide/sketching.md)
   - [Equation curves](guide/equation-curves.md)
 - [Solid features](guide/features.md)
+  - [Stretch](guide/stretch.md)
 - [Parameters and expressions](guide/parameters.md)
 - [Components and joints](guide/assemblies.md)
 - [Sheet metal](guide/sheet-metal.md)

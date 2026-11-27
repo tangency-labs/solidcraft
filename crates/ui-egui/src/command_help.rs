@@ -322,6 +322,7 @@ pub const DOCUMENTED: &[&str] = &[
     "solid.sphere",
     "solid.split_body",
     "solid.split_face",
+    "solid.stretch",
     "solid.sweep",
     "solid.thread",
     "solid.torus",

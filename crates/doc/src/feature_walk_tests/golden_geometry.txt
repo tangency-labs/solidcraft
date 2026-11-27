@@ -260,3 +260,6 @@ mesh_convert
 mesh_reduce
 mesh_import
 repair
+stretch
+  moves: stretches[0].from[0], stretches[0].from[1], stretches[0].from[2]
+  face points: [1, 2, 3]

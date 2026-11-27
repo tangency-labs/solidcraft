@@ -178,6 +178,7 @@ pub mod sketch_shapes;
 pub mod slicers;
 pub mod socket_reach;
 pub mod split;
+pub mod stretch;
 pub mod surface;
 pub mod surface_analysis;
 pub mod surface_blend;

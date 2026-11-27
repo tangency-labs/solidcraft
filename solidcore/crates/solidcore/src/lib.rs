@@ -65,6 +65,7 @@ pub mod primitive;
 pub mod prism;
 pub mod profile;
 pub mod query;
+pub mod stretch;
 pub mod surface;
 pub mod sweep;
 pub mod teeth;

@@ -3636,6 +3636,7 @@ impl SolveApp {
                         FeatureKind::MeshConvert { .. } => language.text("ui.feature_kind.mesh_convert"),
                         FeatureKind::MeshReduce { .. } => language.text("ui.feature_kind.mesh_reduce"),
                         FeatureKind::Repair { .. } => language.text("ui.feature_kind.repair"),
+                        FeatureKind::Stretch { .. } => language.text("ui.feature_kind.stretch"),
                         FeatureKind::Align { .. } => language.text("ui.feature_kind.align"),
                         FeatureKind::BodyTransfer { .. } => language.text("ui.feature_kind.body_transfer"),
                         FeatureKind::ConstructionAxis { .. } => language.text("ui.feature_kind.construction_axis"),

@@ -19015,6 +19015,37 @@ fn eval_feature_kind(
             *target = result;
             Ok(())
         }
+        FeatureKind::Stretch { body, stretches } => {
+            let index = st.bodies.iter().position(|b| &b.name == body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            let source = st.bodies.get(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            if source.body.is_mesh() {
+                return Err(DocError::Invalid("Stretch takes a solid, not a mesh body: convert the mesh first".into()));
+            }
+            let mut stretched = source.body.clone();
+            let mut cuts = Vec::with_capacity(stretches.len());
+            for one in stretches {
+                let at = val(vals, &one.at, Kind::Length)?;
+                let distance = val(vals, &one.distance, Kind::Length)?;
+                // The cut is `at` along the direction from the picked face, or, with no face,
+                // from the side that stays put.
+                let n = one.direction.vector();
+                let cut = kernel::stretch_cut(&stretched, n, one.from.as_ref().map(|face| face.0), at)?;
+                stretched = kernel::stretch(&stretched, cut, n, distance)?;
+                cuts.push((cut, n, distance));
+            }
+            // The body's cosmetic threads go with it: those beyond a cut move with the part, and
+            // one running along the direction across a cut grows with the body.
+            for t in st.threads.iter_mut().filter(|t| t.body == body.0) {
+                for &(cut, n, distance) in &cuts {
+                    (t.axis_point, t.start, t.end) = kernel::stretch_axis(t.axis_point, *t.axis, t.start, t.end, cut, n, distance);
+                }
+            }
+            let stretched = stretched.with_color(source.body.color());
+            let result = ModelBody::new(source.name.clone(), stretched, source.feature);
+            let target = st.bodies.get_mut(index).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
+            *target = result;
+            Ok(())
+        }
         FeatureKind::MeshReduce { body, triangle_count, percentage } => {
             let source = st.body(body).ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             if doc.model_body_component(source) != f.component {

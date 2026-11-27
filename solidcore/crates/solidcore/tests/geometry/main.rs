@@ -181,6 +181,8 @@ mod recognise_analytic;
 mod section_frames;
 #[path = "../sphere_drop_spans_certified.rs"]
 mod sphere_drop_spans_certified;
+#[path = "../stretch.rs"]
+mod stretch;
 #[path = "../subdivide_face_v_knots.rs"]
 mod subdivide_face_v_knots;
 #[path = "../tangent_edge.rs"]
