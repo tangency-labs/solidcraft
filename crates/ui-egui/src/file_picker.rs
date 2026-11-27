@@ -28,6 +28,32 @@ impl Wake for Repaint {
     }
 }
 
+// AppKit can return nil when constructing a native panel. The Objective-C
+// binding panics in that case; treat just this known failure as cancellation.
+fn guard_picker<T>(f: impl FnOnce() -> T) -> Result<T, ()> {
+    #[cfg(any(target_os = "macos", test))]
+    {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
+            Ok(value) => Ok(value),
+            Err(payload) => {
+                let message = payload.downcast_ref::<String>().map(String::as_str).or_else(|| payload.downcast_ref::<&str>().copied());
+                if message.is_some_and(|m| {
+                    m.contains("unexpected NULL returned from +[NSSavePanel savePanel]")
+                        || m.contains("unexpected NULL returned from +[NSOpenPanel openPanel]")
+                }) {
+                    Err(())
+                } else {
+                    std::panic::resume_unwind(payload)
+                }
+            }
+        }
+    }
+    #[cfg(not(any(target_os = "macos", test)))]
+    {
+        Ok(f())
+    }
+}
+
 impl SolveApp {
     /// Keep the target design and editors unchanged until the picker answers.
     /// (A save being written keeps it unchanged too, see [`crate::save_job`].)
@@ -49,8 +75,7 @@ impl SolveApp {
         }
         // The dialog offers the files installed importer plugins read too.
         solidcraft_engine::io::formats::set_plugin_open_filters(solidcraft_engine::plugin::open_filters(&self.session));
-        let future = self.services.pick_open.as_ref().map(|pick| pick(extensions));
-        self.begin_picker(future, Box::new(complete));
+        self.begin_picker(|services| services.pick_open.as_ref().map(|pick| pick(extensions)), Box::new(complete));
     }
 
     /// Ask for one file of a kind (`label`, `extensions`), with the host's dialog for it, or the
@@ -61,19 +86,20 @@ impl SolveApp {
         if self.file_picker_busy() {
             return;
         }
-        let future = match self.services.pick_file.as_ref() {
-            Some(pick) => Some(pick(label, extensions)),
-            None => self.services.pick_open.as_ref().map(|pick| pick(extensions)),
-        };
-        self.begin_picker(future, Box::new(complete));
+        self.begin_picker(
+            |services| match services.pick_file.as_ref() {
+                Some(pick) => Some(pick(label, extensions)),
+                None => services.pick_open.as_ref().map(|pick| pick(extensions)),
+            },
+            Box::new(complete),
+        );
     }
 
     pub(crate) fn pick_save(&mut self, name: &str, extensions: &[&str], complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
         if self.file_picker_busy() {
             return;
         }
-        let future = self.services.pick_save.as_ref().map(|pick| pick(name, extensions));
-        self.begin_picker(future, Box::new(complete));
+        self.begin_picker(|services| services.pick_save.as_ref().map(|pick| pick(name, extensions)), Box::new(complete));
     }
 
     /// Ask for a program (a slicer). Without a host dialog, the answer is a cancel.
@@ -81,8 +107,7 @@ impl SolveApp {
         if self.file_picker_busy() {
             return;
         }
-        let future = self.services.pick_program.as_ref().map(|pick| pick());
-        self.begin_picker(future, Box::new(complete));
+        self.begin_picker(|services| services.pick_program.as_ref().map(|pick| pick()), Box::new(complete));
     }
 
     /// Ask for a folder, starting in `current` (empty: the folder last used): a plugin field's
@@ -93,16 +118,34 @@ impl SolveApp {
         if self.file_picker_busy() {
             return;
         }
-        let future = self.services.pick_folder.as_ref().map(|pick| pick(current));
-        self.begin_picker(future, Box::new(complete));
+        self.begin_picker(|services| services.pick_folder.as_ref().map(|pick| pick(current)), Box::new(complete));
     }
 
-    fn begin_picker(&mut self, future: Option<FilePickerFuture>, complete: Completion) {
-        let Some(future) = future else {
-            complete(self, None);
-            return;
+    fn begin_picker(&mut self, open: impl FnOnce(&crate::Services) -> Option<FilePickerFuture>, complete: Completion) {
+        let mut future = match guard_picker(|| open(&self.services)) {
+            Ok(Some(future)) => future,
+            Ok(None) => {
+                complete(self, None);
+                return;
+            }
+            Err(()) => {
+                complete(self, None);
+                self.set_status(self.tr("file.picker_unavailable").to_string(), true);
+                return;
+            }
         };
-        self.begin_file_task(future, move |app, path| complete(app, path));
+        let future = std::future::poll_fn(move |cx| match guard_picker(|| future.as_mut().poll(cx)) {
+            Ok(Poll::Pending) => Poll::Pending,
+            Ok(Poll::Ready(path)) => Poll::Ready(Ok(path)),
+            Err(()) => Poll::Ready(Err(())),
+        });
+        self.begin_file_task(future, move |app, result| match result {
+            Ok(path) => complete(app, path),
+            Err(()) => {
+                complete(app, None);
+                app.set_status(app.tr("file.picker_unavailable").to_string(), true);
+            }
+        });
     }
 
     /// Keep the existing picker/input lock while asynchronous file work runs.
@@ -260,6 +303,29 @@ mod tests {
             tick(&mut h.app, &h.ctx);
             assert_eq!(completed.get(), 1);
             assert_eq!(h.app.session.doc.to_json(), before);
+        }
+    }
+
+    #[test]
+    fn unavailable_native_save_panel_keeps_unsaved_design() {
+        for during_poll in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("solid.box", json!({"length":10,"width":10,"height":10})).unwrap();
+            let before = h.app.session.doc.to_json();
+            h.app.services.pick_save = Some(Box::new(move |_, _| {
+                if during_poll {
+                    Box::pin(async { panic!("unexpected NULL returned from +[NSSavePanel savePanel]") })
+                } else {
+                    panic!("unexpected NULL returned from +[NSSavePanel savePanel]")
+                }
+            }));
+            crate::documents::request_quit(&mut h.app);
+            crate::documents::answer_prompt(&mut h.app, crate::documents::Answer::Save);
+            tick(&mut h.app, &h.ctx);
+            assert!(!h.app.file_picker_busy());
+            assert!(!h.app.quit_requested && h.app.session.is_dirty());
+            assert_eq!(h.app.session.doc.to_json(), before);
+            assert!(h.app.status.as_ref().is_some_and(|(_, _, error)| *error));
         }
     }
 
