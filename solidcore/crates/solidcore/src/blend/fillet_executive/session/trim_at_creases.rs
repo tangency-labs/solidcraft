@@ -2925,6 +2925,7 @@ impl FilletSession<'_> {
         // the sheet sewn in, and the body oriented. The sheet is merged in as the fillet's
         // normal path merges it (SmBrep::MergeBrep, surfaces kept as they are): its edges
         // keep their own tolerances and the body its own.
+        let roll_over_pass = self.executive.roll_over_pass;
         self.with_target_env(k, |k, b, env, identity| {
             let before: BTreeSet<FaceId> =
                 crate::topology::brep::p1::faces(b, None)?.into_iter().collect();
@@ -2945,15 +2946,32 @@ impl FilletSession<'_> {
                         &crate::topology::brep::p9::issue_curve_identity,
                     ),
                 };
-                crate::topology::brep::p4::stitch_faces_splitting_candidates_with_context(
-                    k,
-                    b,
-                    sew_tol,
-                    Some(&listed),
-                    false,
-                    Some(identity),
-                    Some(&mut edits),
-                )?
+                // A Roll-over second pass whose End cap spans two cliff faces across their
+                // tangent seam without a seam-cap split (`rollover::seam_end`) must not have
+                // its single cap edge split across the seam vertex during stitching; keep
+                // upstream candidate-list semantics there while enabling per-entity candidate
+                // splitting for ordinary crease trims.
+                if roll_over_pass {
+                    crate::topology::brep::p4::stitch_faces_with_context(
+                        k,
+                        b,
+                        sew_tol,
+                        Some(&listed),
+                        false,
+                        Some(identity),
+                        Some(&mut edits),
+                    )?
+                } else {
+                    crate::topology::brep::p4::stitch_faces_splitting_candidates_with_context(
+                        k,
+                        b,
+                        sew_tol,
+                        Some(&listed),
+                        false,
+                        Some(identity),
+                        Some(&mut edits),
+                    )?
+                }
             };
             // the edges the sheet is sewn along hold it to its own accuracy
             let sewn_tol = smos_max(
