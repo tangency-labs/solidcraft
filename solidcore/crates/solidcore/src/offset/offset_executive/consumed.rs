@@ -285,7 +285,18 @@ fn candidates(k: &Kernel, b: &mut Brep, open: &[FaceId], t: f64) -> Result<Vec<C
                 eprintln!("consumed trace: seed={seed:?} persistent={persistent:?} gap={gap} group={group:?} root={} analytic={analytic_boundary} touches={touches_persistent}", concave_root.is_some());
             }
             if let Some(shoulder) = concave_root {
+                // A pillar, closed by side walls of its own, is not a rib that runs into
+                // persistent walls: its collapse is a wall meeting across it, which
+                // the offset reports by name instead.
+                let mut pillar = false;
+                for &f in group.iter().filter(|&&f| f != seed) {
+                    if let Some(q) = plane(b, f)? {
+                        pillar |= q.normal.dot(a.normal).abs() <= gamma(64)
+                            && q.normal.dot(shoulder.normal).abs() <= gamma(64);
+                    }
+                }
                 if analytic_boundary
+                    && !pillar
                     && touches_persistent
                     && face::loops(b, persistent, false, None)?.len() == 1
                 {
