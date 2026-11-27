@@ -2221,8 +2221,7 @@ fn exact_bits(c: &Exact) -> Option<Vec<u64>> {
             bits.push(radius.to_bits());
         }
         Exact::Net(n) => {
-            bits.push(3);
-            n.push_bits(&mut bits);
+            bits.extend(n.bits());
         }
         Exact::Quadric(Implicit::Plane { .. } | Implicit::Torus { .. }) | Exact::Torus(_) => {
             return None;
@@ -3193,19 +3192,12 @@ pub fn local_extension_reach(
                     };
                     let pair =
                         EdgeQuantity::Meeting(own_face.min(other_face), own_face.max(other_face));
-                    // the plane's, then the net's: the same from either face
-                    let (plane_exact, net_exact) = if matches!(own, Exact::Plane(_)) {
-                        (&own, &other)
-                    } else {
-                        (&other, &own)
-                    };
-                    let surfaces =
-                        exact_bits(plane_exact)
-                            .zip(exact_bits(net_exact))
-                            .map(|(mut a, c)| {
-                                a.extend(c);
-                                a
-                            });
+                    // recorded under the plane's bits and the net's ([`net::Net::bits`]),
+                    // the same from either face: the second face takes the first's bound
+                    let surfaces = exact_bits(&Exact::Plane(plane)).map(|mut b| {
+                        b.extend(n.bits());
+                        b
+                    });
                     pieces(&piece, bounds, pair, surfaces.as_deref())?
                 }
                 (Exact::Quadric(q), Exact::Net(n)) | (Exact::Net(n), Exact::Quadric(q)) => {

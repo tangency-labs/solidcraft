@@ -2044,11 +2044,24 @@ mod tests {
             row[1].z += 0.125;
         }
         assert!(defers(&rows));
+    }
 
-        // Multi-span degree-1 translated spline extrusion (such as a wall extended during
-        // `local_operation` face offset): the exact isocurve is extracted in both UV orders,
-        // both strictly inside a span and at an interior knot, while non-monotone heights
-        // still defer to general SSI.
+    /// #22808: multi-span degree-1 translated spline extrusion (such as a wall extended during
+    /// `local_operation` face offset): the exact isocurve is extracted in both UV orders,
+    /// both strictly inside a span and at an interior knot, while non-monotone heights
+    /// still defer to general SSI.
+    #[test]
+    fn multi_span_translated_spline_rows_give_one_section_in_either_parameter_direction() {
+        use crate::nurbs::math::CPoint;
+        use crate::surface::plane::spline_section;
+
+        let k = Kernel::default();
+        let plane = rect();
+        let row = |z, shift| {
+            [(-1.0, shift), (0.0, 1.0 + shift), (1.0, shift)]
+                .map(|(x, y)| CPoint::from_point(Vec3::new(x, y, z)))
+                .to_vec()
+        };
         let multi_rows = vec![row(-2.0, 0.0), row(0.0, 0.5), row(4.0, 1.5)];
         let mut multi = BSplineSurface::from_data(
             2,

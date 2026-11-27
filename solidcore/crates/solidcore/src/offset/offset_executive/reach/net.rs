@@ -1005,47 +1005,6 @@ impl Net {
         du <= self.tolerance && dv <= self.tolerance
     }
 
-    /// Appends exact identifying bits for this net (`EdgeBounds` cache key).
-    /// `lines` is a pure deterministic function of `cn` and `range`, so encoding `cn`,
-    /// `range`, `closed`, `extends`, `continues` and `tolerance` determines every query on
-    /// this net bit for bit.
-    pub(super) fn push_bits(&self, bits: &mut Vec<u64>) {
-        let count = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
-        let mut flags = 0_u64;
-        for (i, &flag) in self
-            .closed
-            .iter()
-            .chain(&self.extends)
-            .chain(&self.continues)
-            .enumerate()
-        {
-            if flag {
-                flags |= 1_u64 << i;
-            }
-        }
-        let [(u0, u1), (v0, v1)] = self.range;
-        bits.extend([
-            count(self.cn.p),
-            count(self.cn.q),
-            count(self.cn.nu),
-            count(self.cn.nv),
-            count(self.cn.u.len()),
-        ]);
-        bits.extend(self.cn.u.iter().map(|x| x.to_bits()));
-        bits.push(count(self.cn.v.len()));
-        bits.extend(self.cn.v.iter().map(|x| x.to_bits()));
-        bits.push(count(self.cn.pw.len()));
-        bits.extend(self.cn.pw.iter().map(|x| x.to_bits()));
-        bits.extend([
-            u0.to_bits(),
-            u1.to_bits(),
-            v0.to_bits(),
-            v1.to_bits(),
-            flags,
-            self.tolerance.to_bits(),
-        ]);
-    }
-
     /// Fast floating-point evaluation of point and first partials on the knots or past an
     /// extended v side (Newton / grid search heuristic only; every certified result goes
     /// through [`Net::jet_near`]). Returns `None` for an offset net ([`Net::offset`]) or
@@ -1140,19 +1099,23 @@ impl Net {
 
     /// The net's data as bits, for an edge's bound to be taken again from its other face
     /// ([`super::EdgeBounds`]): the offset, the degrees and counts, the knots, the
-    /// homogeneous control points, which sides are extended or continued, and the tolerance.
-    /// Two nets with the same bits are the same surface, extended alike.
+    /// homogeneous control points, the parameter range, which directions are closed and which
+    /// sides are extended or continued, and the tolerance. Two nets with the same bits are the
+    /// same surface, extended alike.
     pub(super) fn bits(&self) -> Vec<u64> {
         let count = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
+        let [(u0, u1), (v0, v1)] = self.range;
         let mut out = vec![3, self.offset.map_or(u64::MAX, f64::to_bits)];
         out.extend([self.cn.p, self.cn.q, self.cn.nu, self.cn.nv].map(count));
         for list in [&self.cn.u, &self.cn.v, &self.cn.pw] {
             out.push(count(list.len()));
             out.extend(list.iter().map(|x| x.to_bits()));
         }
+        out.extend([u0.to_bits(), u1.to_bits(), v0.to_bits(), v1.to_bits()]);
         out.extend(
-            self.extends
+            self.closed
                 .iter()
+                .chain(&self.extends)
                 .chain(&self.continues)
                 .map(|&b| u64::from(b)),
         );
@@ -2886,10 +2849,10 @@ mod tests {
         }
     }
 
-    /// `Net::push_bits` produces identical bits for equal nets and differs when geometry or
+    /// `Net::bits` produces identical bits for equal nets and differs when geometry or
     /// tolerance changes.
     #[test]
-    fn net_push_bits_tracks_geometry_and_tolerance() {
+    fn net_bits_tracks_geometry_and_tolerance() {
         let k = Kernel::default();
         let surf = quarter_cylinder();
         let a = Net::of(&k, &surf, 1e-6).unwrap().unwrap();
@@ -2898,13 +2861,8 @@ mod tests {
         let d = Net::of(&k, &plane_net_at_height(1.0, 0.0), 1e-6)
             .unwrap()
             .unwrap();
-        let bits = |n: &Net| {
-            let mut out = Vec::new();
-            n.push_bits(&mut out);
-            out
-        };
-        assert_eq!(bits(&a), bits(&b));
-        assert_ne!(bits(&a), bits(&c));
-        assert_ne!(bits(&a), bits(&d));
+        assert_eq!(a.bits(), b.bits());
+        assert_ne!(a.bits(), c.bits());
+        assert_ne!(a.bits(), d.bits());
     }
 }
