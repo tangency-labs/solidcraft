@@ -190,7 +190,10 @@ mod tests {
             PathSeg::Arc { a: Vec3::new(0.0, 0.0, 10.0), center: Vec3::new(5.0, 0.0, 10.0), axis: Vec3::new(0.0, 1.0, 0.0), angle: 1.0 },
         ];
         let pl = Plane::XY;
-        assert_eq!(sweep(&pl, &region, &path).unwrap().record(), crate::build::sweep(&pl, &region, &path).unwrap().record());
+        assert_eq!(
+            sweep(&pl, &region, &path).unwrap().record(),
+            crate::build::sweep_with(&pl, &region, &path, &SweepControl::default()).unwrap().record()
+        );
         let ctl = SweepControl { twist: 0.5, scale: 1.5, orientation: SweepOrientation::Perpendicular, ..SweepControl::default() };
         assert_eq!(sweep_with(&pl, &region, &path, &ctl).unwrap().record(), crate::build::sweep_with(&pl, &region, &path, &ctl).unwrap().record());
         let points = PointPath::polyline(vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 5.0), Vec3::new(3.0, 0.0, 9.0)]);
