@@ -1953,15 +1953,15 @@ mod recognition {
                 path.segs.rotate_left(1);
             }
         }
-        // A control or a corner moved by 64 EPSILON of the largest coordinate, a few
-        // ULPs but more than any of the cells, is not one ellipse; neither is a gap.
+        // A control or a corner moved by 16 EPSILON of the largest coordinate (8 to 16
+        // ULPs, several times its cell) is not one ellipse; neither is a gap.
         let size = ellipse.segs.iter().fold(0.0_f64, |size, seg| match *seg {
             Seg2::Conic { a, apex, .. } => {
                 size.max(a.x.abs().max(a.y.abs()).max(apex.x.abs()).max(apex.y.abs()))
             }
             _ => size,
         });
-        let step = 64.0 * f64::EPSILON * size;
+        let step = 16.0 * f64::EPSILON * size;
         for (index, delta) in [(1, Vec2::new(step, 0.0)), (2, Vec2::new(0.0, -step))] {
             let mut moved_apex = ellipse.clone();
             if let Seg2::Conic { apex, .. } = &mut moved_apex.segs[index] {

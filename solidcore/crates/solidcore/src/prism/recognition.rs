@@ -788,9 +788,10 @@ fn corner_combination(terms: &[(f64, Vec2)]) -> Option<EllipsePoint> {
 
 /// Four rational quarters of weight 1/sqrt(2) on one parallelogram: corners c +/- u and
 /// c +/- v, and each control at its quarter's fourth corner c + from + to. The
-/// construction is the f64 triple that is returned (c the rounded mean of the stored
-/// corners, u and v the rounded half diagonals), and every stored corner and control
-/// must lie in its cell around that construction's point. A cell is half an ULP of the
+/// construction is c (the rounded mean of the stored corners, returned as the centre) and
+/// u, v (the rounded half diagonals, from which `ellipse_axes` takes the returned axes as
+/// before), and every stored corner and control must lie in its cell around that
+/// construction's point. A cell is half an ULP of the
 /// corners' local semiextent plus the rounding of u and v (once for a corner, twice for a
 /// control). It is widened by the rounding of a producer that stores each corner as one
 /// f64 sum and each control as the f64 a + b - c of its quarter's corners, as a turned
@@ -828,8 +829,8 @@ fn loop_as_quarter_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
     ];
     let corners = [p0, p1, p2, p3];
     let rounded = |p: EllipsePoint| Vec2::new(p.x.hi + p.x.lo, p.y.hi + p.y.lo);
-    // The construction is the f64 centre and half diagonals that are returned, so each
-    // cell below bounds a stored point's distance from the returned ellipse's own point.
+    // The construction is the returned f64 centre and the f64 half diagonals the returned
+    // axes come from, so each cell below bounds a stored point's distance from its point.
     let center = rounded(corner_combination(&corners.map(|p| (0.25, p)))?);
     let u = rounded(corner_combination(&[(0.5, p0), (-0.5, p2)])?);
     let v = rounded(corner_combination(&[(0.5, p1), (-0.5, p3)])?);
