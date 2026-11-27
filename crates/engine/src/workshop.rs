@@ -191,7 +191,7 @@ mod tests {
             item("shelf", Kind::Model, Tier::Unverified, "Wall shelf", "A bracket for a shelf."),
             item("fasteners", Kind::Part, Tier::Official, "Fasteners", "Bolts, nuts and washers."),
         ];
-        let ids = |f: &Filter| f.apply(&items).map(|i| i.id.as_str()).collect::<Vec<_>>();
+        let ids = |f: &Filter| f.apply(&items).map(|i| i.id.clone()).collect::<Vec<String>>();
         assert_eq!(ids(&Filter::default()), ["gears", "shelf", "fasteners"]);
         assert_eq!(ids(&Filter { kind: Some(Kind::Model), ..Filter::default() }), ["shelf"]);
         assert_eq!(ids(&Filter { tier: Some(Tier::Official), ..Filter::default() }), ["fasteners"]);

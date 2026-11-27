@@ -130,7 +130,8 @@ pub(crate) fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde
     }
     let browser = &app.workshop.browser;
     let s = lock(&browser.shared);
-    let shown: Vec<&str> = filter_of(browser).apply(&s.catalog.items).take(MAX_ROWS).map(|i| i.id.as_str()).collect();
+    let filter = filter_of(browser);
+    let shown: Vec<&str> = filter.apply(&s.catalog.items).take(MAX_ROWS).map(|i| i.id.as_str()).collect();
     Ok(serde_json::json!({
         "open": browser.open,
         "query": browser.query,
