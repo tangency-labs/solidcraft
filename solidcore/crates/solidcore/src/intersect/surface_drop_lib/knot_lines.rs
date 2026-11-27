@@ -18,10 +18,15 @@
 //! tangent from each side of the line and has to turn the corner inside itself: a notch a
 //! fraction of the tolerance deep, with a radius of curvature far below the curve's.
 //!
-//! **The lines.** For a B-spline surface, every interior knot of multiplicity at least
-//! the degree in its direction that lies inside the drop domain by more than the
-//! parameter zero. No other kind is given lines: an analytic surface is evaluated from
-//! its definition, which has no such line.
+//! **The lines.** For a B-spline surface, and for a surface of extrusion (evaluated from
+//! its B-spline base, whose knots in the profile's direction are the profile's), every
+//! interior knot of multiplicity at least the degree in its direction that lies inside
+//! the drop domain by more than the parameter zero. No other kind is given lines: an
+//! analytic surface is evaluated from its definition, which has no such line.
+//!
+//! **In the marcher.** The surface/surface trace takes the same lines as the places
+//! where its marching direction may turn a corner
+//! (`intersect::surface_intersector`, `compute_next_point`).
 //!
 //! **On a line.** A parameter within the kernel's parameter zero ([`EFF_ZERO_PARAM`]) of
 //! a knot, relative to the surface's knot range in that direction, is the knot
@@ -119,8 +124,11 @@ impl KnotLines {
     ///
     /// Those of the surface's knots (a B-spline surface without its NURB).
     pub fn of(surface: &Surface, uv_domain: &Extent2d) -> Result<Self> {
-        let SurfaceKind::BSpline(b) = surface.kind() else {
-            return Ok(Self::none());
+        let b = match surface.kind() {
+            SurfaceKind::BSpline(b) => b,
+            // evaluated from its B-spline base, whose knots are its profile's (#18488)
+            SurfaceKind::SurfOfExtrusion(e) => e.base(),
+            _ => return Ok(Self::none()),
         };
         let mut lines = Self::none();
         for (direction, inside) in [
@@ -250,6 +258,22 @@ impl KnotLines {
             }
         }
         first.map(|(_, line)| line)
+    }
+
+    /// In each direction, the side of the knots a step from `from` reaches `at` from when
+    /// `at` is exactly on a line of that direction and `from` is not: [`Side::Right`] (the
+    /// span ending at the knot) from below, [`Side::Left`] (the span starting at it) from
+    /// above; `None` elsewhere (#18488).
+    #[must_use]
+    pub fn reached_from(&self, from: Point2, at: Point2) -> [Option<Side>; 2] {
+        let side = |knots: &[f64], from: f64, at: f64| {
+            (knots.contains(&at) && from != at).then_some(if from < at {
+                Side::Right
+            } else {
+                Side::Left
+            })
+        };
+        [side(&self.u, from.x, at.x), side(&self.v, from.y, at.y)]
     }
 }
 

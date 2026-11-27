@@ -410,6 +410,22 @@ pub trait IntersectorVirtuals<'s> {
     fn landed_on_through_point(&mut self, _next: TsectId, _through: TsectId) -> Result<bool> {
         Ok(false)
     }
+
+    /// Not upstream (#18488): the point the trace goes on from after the traced point `at`,
+    /// which the step from `from` put on a `C0` knot line of a surface
+    /// ([`SurfaceIntersector::corner_point`]). The default has no such steps.
+    ///
+    /// # Errors
+    ///
+    /// The override's.
+    fn corner_point(
+        &mut self,
+        _k: &Kernel,
+        _from: TsectId,
+        _at: TsectId,
+    ) -> Result<Option<TsectPnt>> {
+        Ok(None)
+    }
 }
 
 /// The basic `SmSurfaceIntersector` bodies.
@@ -445,6 +461,10 @@ impl<'s> IntersectorVirtuals<'s> for SurfaceIntersector<'s> {
 
     fn flush_curve(&mut self, k: &Kernel, out: &mut TsectCurves) -> Result<()> {
         SurfaceIntersector::flush_curve(self, k, out)
+    }
+
+    fn corner_point(&mut self, k: &Kernel, from: TsectId, at: TsectId) -> Result<Option<TsectPnt>> {
+        SurfaceIntersector::corner_point(self, k, from, at)
     }
 }
 
@@ -1668,6 +1688,15 @@ pub fn trace_curve_with<'s, V: IntersectorVirtuals<'s> + ?Sized>(
                 approach_certified(v, k, tsp, next, uv_tol)?;
             }
             v.intersector_mut().add_point_to_curve(next)?;
+            // Not upstream (#18488): a point the step put on a C0 knot line is a corner of
+            // the curve; the trace goes on from it seen from the line's other side, a second
+            // point at the same curve parameter (no span between the two)
+            if !done {
+                if let Some(corner) = v.corner_point(k, tsp, next)? {
+                    let id = v.intersector_mut().alloc_point(corner);
+                    v.intersector_mut().add_point_to_curve(id)?;
+                }
+            }
         }
 
         // 4i. count the points

@@ -112,12 +112,14 @@ use crate::geom::solution_array::{
 use crate::geom::tol::{is_zero, ZONE_TOL_3D};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::intersect::surface_drop_lib::knot_lines::KnotLine;
 use crate::kernel::Kernel;
 use crate::math::{max2, EFF_ZERO, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::nurbs::knots::Side;
 use crate::nurbs::math::gamma;
 use crate::surface::surface::p1::SurfaceSolveContext;
 use crate::surface::surface::p2::surface_cache;
@@ -1221,6 +1223,20 @@ impl SurfaceIntersector<'_> {
         step_size =
             self.uv_domains[1].clip_line(prev_tsp.uv_pos(s1), prev_tsp.uv_deriv(s1), step_size);
 
+        // Not upstream (#18488): a C0 knot line of a surface that the step crosses bounds
+        // it as the domain does. The step is clipped to the line and its point solved on
+        // the line, over the piece of the domain on this side of it (the boundary testing
+        // of `RefinePoint`), so that the trace can turn the corner its marching direction
+        // may turn there (`trace_curve_with`, `corner_point`)
+        let mut pieces = self.uv_domains;
+        for ((piece, lines), s) in pieces.iter_mut().zip(&self.knot_lines).zip([s0, s1]) {
+            let (from, along) = (prev_tsp.uv_pos(s), prev_tsp.uv_deriv(s));
+            if let Some(line) = lines.crossed(from, from + along * step_size) {
+                *piece = piece_before(piece, line, from);
+                step_size = step_size.min(piece.clip_line(from, along, step_size));
+            }
+        }
+
         // remember clipping when it happens
         res.clipped = step_size < unclipped_step_size - EFF_ZERO * (1.0 + unclipped_step_size);
 
@@ -1234,8 +1250,8 @@ impl SurfaceIntersector<'_> {
         // fire since StepSize has already been clipped)
         let guesses = |step: f64| {
             [
-                self.uv_domains[0].clamp_point(prev_tsp.uv_pos(s0) + prev_tsp.uv_deriv(s0) * step),
-                self.uv_domains[1].clamp_point(prev_tsp.uv_pos(s1) + prev_tsp.uv_deriv(s1) * step),
+                pieces[0].clamp_point(prev_tsp.uv_pos(s0) + prev_tsp.uv_deriv(s0) * step),
+                pieces[1].clamp_point(prev_tsp.uv_pos(s1) + prev_tsp.uv_deriv(s1) * step),
             ]
         };
         let [mut guess_uv0, mut guess_uv1] = guesses(step_size);
@@ -1251,10 +1267,10 @@ impl SurfaceIntersector<'_> {
         // Find surf/surf xSectPoint near the guess points (a failure is no answer)
         let refine =
             |guess: [Point2; 2], do_boundary_testing: bool| -> Result<Option<[Point2; 2]>> {
-                match self.refine_point(
+                match self.refine_point_in(
                     k,
-                    guess[0],
-                    guess[1],
+                    &pieces,
+                    guess,
                     prev_tsp.point_type,
                     Some(prev_tsp.crv_deriv()),
                     Some(&previous_uv),
@@ -1328,8 +1344,19 @@ impl SurfaceIntersector<'_> {
         // set NextTSP values given its surface UV values (a next point: with the
         // previous point)
         let mut next_tsp = self.point(next)?.clone();
-        let r =
-            self.compute_point_values(k, next_uvs, &mut next_tsp, Some(&prev_tsp), Some(step_size));
+        // (not upstream, #18488: on a C0 knot line, from the side the step comes from)
+        let from = [prev_tsp.uv_pos(s0), prev_tsp.uv_pos(s1)];
+        let sides = self
+            .sides_reached(from, next_uvs)
+            .map(|[u, v]| (u.unwrap_or(Side::Left), v.unwrap_or(Side::Left)));
+        let r = self.compute_point_values_on(
+            k,
+            next_uvs,
+            &mut next_tsp,
+            Some(&prev_tsp),
+            Some(step_size),
+            sides,
+        );
         *self.point_mut(next)? = next_tsp.clone();
         if ignored(r)?.is_none() {
             res.boundary_hit = true; // causes termination of current tracing
@@ -1369,6 +1396,65 @@ impl SurfaceIntersector<'_> {
         res.deviation_found = acc.deviation_found;
         res.angle_found_rad = Some(acc.angle_found_rad);
         Ok(res)
+    }
+
+    /// Not upstream (#18488): for each surface, the sides of its `C0` knot lines a step
+    /// from the UV points `from` reaches the UV points `at` from, in u and in v
+    /// (`KnotLines::reached_from`): `None` where `at` is on no line it reaches.
+    #[must_use]
+    pub(crate) fn sides_reached(
+        &self,
+        from: [Point2; 2],
+        at: [Point2; 2],
+    ) -> [[Option<Side>; 2]; 2] {
+        let [l0, l1] = &self.knot_lines;
+        let [f0, f1] = from;
+        let [a0, a1] = at;
+        [l0.reached_from(f0, a0), l1.reached_from(f1, a1)]
+    }
+
+    /// Not upstream (#18488): the point the trace goes on from after the point `at`, which
+    /// its step from `from` put on a `C0` knot line of a surface ([`Self::compute_next_point`]):
+    /// `at` evaluated from the other side of each line it reached, at the same curve
+    /// parameter. Across such a line the surface's derivatives, and with them the marching
+    /// direction, may jump: the curve turns a corner at `at`, and the span after it starts
+    /// with the other side's tangents. `None` when `at` reached no line, or when the other
+    /// side gives no crossing point there (the trace then stops at `at`, as upstream's).
+    ///
+    /// # Errors
+    ///
+    /// Unported callees and cancellation in the evaluation; an unknown point id is
+    /// [`SolidError::InvalidInput`].
+    pub(crate) fn corner_point(
+        &self,
+        k: &Kernel,
+        from: TsectId,
+        at: TsectId,
+    ) -> Result<Option<TsectPnt>> {
+        let (from, at) = (self.point(from)?, self.point(at)?);
+        let uvs = [at.uv_pos(SrfIndex::First), at.uv_pos(SrfIndex::Second)];
+        let from_uvs = [from.uv_pos(SrfIndex::First), from.uv_pos(SrfIndex::Second)];
+        let reached = self.sides_reached(from_uvs, uvs);
+        if reached.iter().flatten().all(Option::is_none) {
+            return Ok(None);
+        }
+        let other = |side: Option<Side>| match side {
+            Some(Side::Left) => Side::Right,
+            _ => Side::Left,
+        };
+        let sides = reached.map(|[u, v]| (other(u), other(v)));
+        let mut corner = at.clone();
+        match self.compute_point_values_on(k, uvs, &mut corner, Some(at), None, sides) {
+            Ok(()) => {}
+            Err(e) if e.is_unported_or_cancelled() => return Err(e),
+            Err(_) => return Ok(None),
+        }
+        if corner.point_type != IntersectionPointType::Crossing {
+            return Ok(None);
+        }
+        corner.curve_parameter = at.curve_parameter;
+        corner.deviation = at.deviation;
+        Ok(Some(corner))
     }
 
     /// Whether the refined UV points `uvs` reach `pole`'s pole: on its degenerate boundary
@@ -1580,6 +1666,24 @@ impl SurfaceIntersector<'_> {
         law_curve: &mut FilletLaw,
     ) -> Result<TsectId> {
         split_span_with(self, k, curr, next, delta_step, law, law_curve)
+    }
+}
+
+/// Not upstream (#18488): the part of `domain` on the side of the knot line `line` that
+/// `from` lies on, bounded by the line (a step crossing the line is clipped to it).
+fn piece_before(domain: &Extent2d, line: KnotLine, from: Point2) -> Extent2d {
+    let (lo, hi) = (domain.min(), domain.max());
+    let knot = line.knot;
+    if line.direction == SurfParamType::U {
+        if from.x < knot {
+            Extent2d::from_bounds(lo.x, lo.y, knot, hi.y)
+        } else {
+            Extent2d::from_bounds(knot, lo.y, hi.x, hi.y)
+        }
+    } else if from.y < knot {
+        Extent2d::from_bounds(lo.x, lo.y, hi.x, knot)
+    } else {
+        Extent2d::from_bounds(lo.x, knot, hi.x, hi.y)
     }
 }
 

@@ -493,7 +493,6 @@ impl SurfaceIntersector<'_> {
     /// Those of the surface evaluations and the vector drops; `SM_ERR` for a surface
     /// without a normal and from the (unimplemented) singularity point; the errors of
     /// `AngleBetween`; [`SolidError::Unported`] from unported callees.
-    #[allow(clippy::too_many_lines)]
     pub fn compute_point_values(
         &self,
         k: &Kernel,
@@ -502,22 +501,51 @@ impl SurfaceIntersector<'_> {
         previous: Option<&TsectPnt>,
         step_size: Option<f64>,
     ) -> Result<()> {
+        let left = (Side::Left, Side::Left);
+        self.compute_point_values_on(k, uv_values, point, previous, step_size, [left; 2])
+    }
+
+    /// [`SurfaceIntersector::compute_point_values`] with each surface evaluated from the
+    /// sides `sides` (its u side, its v side) of the knots at its UV point (not upstream,
+    /// #18488: the two sides of a `C0` knot line the trace turns a corner on;
+    /// upstream evaluates from the left, the span starting at the knot).
+    #[allow(clippy::too_many_lines)]
+    pub(crate) fn compute_point_values_on(
+        &self,
+        k: &Kernel,
+        uv_values: [Point2; 2],
+        point: &mut TsectPnt,
+        previous: Option<&TsectPnt>,
+        step_size: Option<f64>,
+        sides: [(Side, Side); 2],
+    ) -> Result<()> {
         // 1. For each surface, store UVPoint values and compute and save surface
         //    values (pos, 1st & 2nd derivs, and unitized normal).
-        for (s, uv) in [SrfIndex::First, SrfIndex::Second]
+        for ((s, uv), (u_side, v_side)) in [SrfIndex::First, SrfIndex::Second]
             .into_iter()
             .zip(uv_values)
+            .zip(sides)
         {
             *point.uv_pos_mut(s) = uv;
+            let flags = EvaluateFlags {
+                u_side,
+                v_side,
+                ..LEFT_UPPER
+            };
+            let exact = EvaluateFlags {
+                u_side,
+                v_side,
+                ..LEFT_UPPER_EXACT
+            };
 
             // load Surface eval matrix into the point
-            let m = match self.surface(s).evaluate(k, uv, 2, 2, LEFT_UPPER) {
+            let m = match self.surface(s).evaluate(k, uv, 2, 2, flags) {
                 Ok(m) => m,
                 Err(e) if e.is_unported_or_cancelled() => return Err(e),
                 Err(e) => {
                     // upstream evaluates into the point's matrix before the zero
                     // tangent replacement fails: those exact derivatives stay
-                    if let Ok(raw) = self.surface(s).evaluate(k, uv, 2, 2, LEFT_UPPER_EXACT) {
+                    if let Ok(raw) = self.surface(s).evaluate(k, uv, 2, 2, exact) {
                         copy_upper_half(point.srf_eval_matrix_mut(s), &raw, 2);
                     }
                     return Err(e);
@@ -529,7 +557,8 @@ impl SurfaceIntersector<'_> {
             let mut norm = point.srf_du(s).cross(point.srf_dv(s));
             if norm.length_squared() < EFF_ZERO_SQ {
                 // try to evaluate a normal for pole and singularity points
-                norm = surface_evaluate_normal(k, self.surface(s), uv)?;
+                // (`crSurface.EvaluateNormal(uv, TRUE, TRUE, ..)`, from the sides asked for)
+                norm = self.surface(s).evaluate_normal(k, uv, u_side, v_side)?;
 
                 // error case - surface point has no normal
                 if norm.length_squared() < EFF_ZERO_SQ {
@@ -1011,11 +1040,23 @@ impl SurfaceIntersector<'_> {
                 // span keeps the trace's accuracy. The trace tested the two spans it made,
                 // not the one the merge makes, which can leave the 3D curve and a UV curve
                 // further apart than the tolerance
-                if t_delta_final / t_delta < 0.1 && self.span_keeps_accuracy(k, prev, fin)? {
+                // (not the second point of a corner, #18488, which ends no span)
+                if t_delta_final > 0.0
+                    && t_delta_final / t_delta < 0.1
+                    && self.span_keeps_accuracy(k, prev, fin)?
+                {
                     // skip next to last xsect point
                     curr = fin;
                     rest.next();
                 }
+            }
+
+            // Not upstream (#18488): the two points of a corner on a C0 knot line share
+            // their curve parameter; the span after it starts at the second, with the
+            // tangents of the line's other side
+            if curr.curve_parameter == prev.curve_parameter {
+                prev = curr;
+                continue;
             }
 
             // Collect maximum tangent plane angle and deviation
@@ -1674,12 +1715,6 @@ impl SolutionObject for BoundaryCurve {
 }
 
 // ---- unported callees --------------------------------------------------------------------------
-
-/// `crSurface.EvaluateNormal(uv, TRUE, TRUE, ..)` (virtual: the plane override, the
-/// curve-bounded surface's basis surface, `SmSurface::EvaluateNormal` otherwise).
-fn surface_evaluate_normal(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Vec3> {
-    surface.evaluate_normal(k, uv, Side::Left, Side::Left)
-}
 
 /// `crSurface.IsSingularity(uv, eSingDir)`: the plane override (none); other kinds
 /// run `SmSurface::IsSingularity`.

@@ -133,6 +133,7 @@ use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::tol::is_zero;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{sqrt, Point3, Vec3};
+use crate::intersect::surface_drop_lib::knot_lines::KnotLines;
 use crate::kernel::Kernel;
 use crate::math::{
     max2, max3, min2, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, INFINITE_PARAMETER, PI,
@@ -630,6 +631,10 @@ pub struct SurfaceIntersector<'s> {
     surfaces: [&'s Surface; 2],
     /// `m_vUVDomain`: the domain of each surface.
     pub uv_domains: [Extent2d; 2],
+    /// Not upstream (#18488): each surface's `C0` knot lines over its natural domain,
+    /// where the trace's marching direction may turn a corner
+    /// ([`SurfaceIntersector::compute_next_point`]).
+    pub(crate) knot_lines: [KnotLines; 2],
     /// `m_bClosedU`.
     pub closed_u: [bool; 2],
     /// `m_bClosedV`.
@@ -898,9 +903,15 @@ impl<'s> SurfaceIntersector<'s> {
             }
         };
 
+        let knot_lines = [
+            KnotLines::of(surface1, &surface1.natural_uv_domain_with_nurb(k)?)?,
+            KnotLines::of(surface2, &surface2.natural_uv_domain_with_nurb(k)?)?,
+        ];
+
         Ok(Self {
             surfaces: [surface1, surface2],
             uv_domains: [surf1_uv_domain, surf2_uv_domain],
+            knot_lines,
             closed_u: [closed_u0, closed_u1],
             closed_v: [closed_v0, closed_v1],
             use_surface_edges: [true, true],
@@ -1333,6 +1344,32 @@ impl<'s> SurfaceIntersector<'s> {
         previous_uv: Option<&[Point2]>,
         do_boundary_testing: bool,
     ) -> Result<Option<[Point2; 2]>> {
+        let domains = self.uv_domains;
+        self.refine_point_in(
+            k,
+            &domains,
+            [uv0, uv1],
+            ip_type,
+            plane_normal,
+            previous_uv,
+            do_boundary_testing,
+        )
+    }
+
+    /// [`SurfaceIntersector::refine_point`] over `domains` in place of the surfaces'
+    /// domains: their boundaries are the boundaries the boundary testing solves on, and
+    /// the refined points are clamped to them (not upstream, #18488: the piece of a domain
+    /// on one side of a `C0` knot line, [`SurfaceIntersector::compute_next_point`]).
+    pub(crate) fn refine_point_in(
+        &self,
+        k: &Kernel,
+        domains: &[Extent2d; 2],
+        [uv0, uv1]: [Point2; 2],
+        ip_type: IntersectionPointType,
+        plane_normal: Option<Vec3>,
+        previous_uv: Option<&[Point2]>,
+        do_boundary_testing: bool,
+    ) -> Result<Option<[Point2; 2]>> {
         let (xsect, tol) = match ip_type {
             IntersectionPointType::TangentCurve | IntersectionPointType::Singularity => {
                 (true, self.this_approx_tol_3d * 10.00)
@@ -1348,9 +1385,9 @@ impl<'s> SurfaceIntersector<'s> {
             let (found_answer, s) = surface_local_surface_intersect(
                 k,
                 self.surfaces[0],
-                &self.uv_domains[0],
+                &domains[0],
                 self.surfaces[1],
-                &self.uv_domains[1],
+                &domains[1],
                 tol,
                 uv0,
                 uv1,
@@ -1367,8 +1404,8 @@ impl<'s> SurfaceIntersector<'s> {
         // clamp the refined point to the surface boundaries
         let [s0, s1, s2, s3] = sol;
         Ok(Some([
-            self.uv_domains[0].clamp_point(Point2::new(s0, s1)),
-            self.uv_domains[1].clamp_point(Point2::new(s2, s3)),
+            domains[0].clamp_point(Point2::new(s0, s1)),
+            domains[1].clamp_point(Point2::new(s2, s3)),
         ]))
     }
 
