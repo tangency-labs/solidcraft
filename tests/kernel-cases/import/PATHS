@@ -3,6 +3,7 @@
 # repository root; `#` starts a comment.
 # STEP and IGES import and export, mesh import and export (3MF, STL, OBJ, glTF, URDF), mesh-to-solid conversion
 # and the print face a body is laid on.
+# Mesh-to-solid conversion is covered by solidcore/** in ../PATHS-ALL.
 crates/doc/src/print_face.rs
 crates/engine/src/cmd/file.rs
 crates/engine/src/cmd/file_import.rs
@@ -16,7 +17,6 @@ crates/io/src/urdf.rs
 crates/kernel/src/iges_in.rs
 crates/kernel/src/iges_in/**
 crates/kernel/src/iges_out.rs
-crates/kernel/src/mesh_convert.rs
 crates/kernel/src/meshbody.rs
 crates/kernel/src/sew.rs
 crates/kernel/src/splitface.rs

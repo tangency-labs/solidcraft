@@ -9,7 +9,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
 use solidcore_record::{Vec2, Vec3};
-use solidcraft_doc::{Expr, Operation, ThinSide, Touching};
+use solidcraft_doc::{Expr, OffsetEdges, Operation, ThinSide, Touching};
 
 use super::check::{keyed, whole};
 use crate::params;
@@ -222,6 +222,12 @@ target_point!(
     "must be a finite point [x,y,z]"
 );
 
+target_point!(
+    /// Thread's `from`: a [`Point3`], with the handler's message.
+    ThreadFromPoint,
+    "must be a point [x, y, z] near the end the thread starts at"
+);
+
 /// Extrude's `faces`: 1 to 1024 points on coplanar faces of one body, read as the handler reads
 /// them, with its messages.
 #[derive(Clone, Debug, PartialEq)]
@@ -256,7 +262,7 @@ impl JsonSchema for FacesParam {
     }
 }
 
-/// A direction given as an axis, as `features::axis_dir_param` reads it: X, Y or Z (trimmed, any
+/// A direction given as an axis, as `features::axis_dir_form` reads it: X, Y or Z (trimmed, any
 /// case) or a non-zero `[x, y, z]` (or `{x, y, z}`), with its messages.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AxisDir(pub Vec3);
@@ -280,7 +286,8 @@ impl JsonSchema for AxisDir {
     }
 }
 
-/// Coil's numeric direction or a picked axis, in the same forms as Revolve's axis.
+/// Coil's direction, read as [`AxisDirExpr`] (#21932), or a picked axis, in the same forms as
+/// Revolve's axis.
 /// References are resolved against the design by the command handler.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CoilAxis(pub Value);
@@ -294,7 +301,7 @@ impl<'de> Deserialize<'de> for CoilAxis {
                 None => Ok(Self(value)),
             };
         }
-        match crate::cmd::axis_dir_form(&value) {
+        match crate::cmd::axis_expr_form(&value) {
             Ok(_) => Ok(Self(value)),
             Err(_)
                 if value.as_str().is_some_and(|name| !name.trim().is_empty())
@@ -314,11 +321,11 @@ impl JsonSchema for CoilAxis {
         "CoilAxis".into()
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
-        let direction = generator.subschema_for::<AxisDir>();
+        let direction = generator.subschema_for::<AxisDirExpr>();
         let reference = generator.subschema_for::<RevolveAxis>();
         let point = generator.subschema_for::<Point3>();
         json_schema!({
-            "description": "X, Y or Z (any case), a non-zero direction [x, y, z], a named or picked axis in the same forms as Revolve, or an edge on a specific occurrence. Use the tagged sketch_axis form for the profile sketch's x or y axis. A placed edge names the definition body and persistent edge and records the pick point in the body's frame.",
+            "description": "X, Y or Z (any case), a non-zero direction [x, y, z] of numbers or unitless expressions, a named or picked axis in the same forms as Revolve, or an edge on a specific occurrence. Use the tagged sketch_axis form for the profile sketch's x or y axis. A placed edge names the definition body and persistent edge and records the pick point in the body's frame.",
             "anyOf": [{
                 "type": "object",
                 "properties": {
@@ -403,7 +410,7 @@ impl JsonSchema for Point2 {
     }
 }
 
-/// A cylinder's axis (#18822), as `features::axis_expr_form` reads it: X, Y or Z (any case), a
+/// A cylinder's, a cone's or a coil's axis (#18822, #21932), as `features::axis_expr_form` reads it: X, Y or Z (any case), a
 /// non-zero `[x, y, z]` of numbers, or `[x, y, z]` (or `{x, y, z}`) whose components are
 /// numbers or unitless expressions. Whether the expressions evaluate, and to a direction that
 /// isn't zero, is checked by the handler, which has the design.
@@ -681,12 +688,28 @@ keyword_param!(
     "Where the wire ends: axial (the default), in a plane through the coil's axis, or square, across the wire. Any case."
 );
 keyword_param!(
+    /// `solid.coil`'s `height_measure`.
+    CoilHeightMeasureParam,
+    "height measure",
+    &["center_line", "centre_line", "overall"],
+    "center_line or overall",
+    "What `height` measures: center_line (the default; centre_line is an alias), the helix's own height from the section's centre at one end to the other, or overall, end to end, from where the wire starts along the axis to where it stops. Any case."
+);
+keyword_param!(
     /// `solid.emboss`'s `mode`.
     EmbossModeParam,
     "mode",
     &["emboss", "deboss"],
     "emboss or deboss",
     "Whether the profiles are raised from the face (emboss, the default) or sunk into it (deboss). Any case."
+);
+keyword_param!(
+    /// `solid.dome`'s `shape`.
+    DomeShapeParam,
+    "shape",
+    &["elliptical", "spherical"],
+    "elliptical or spherical",
+    "The dome's meridian: elliptical (a quarter ellipse, the default; on a circle, a half ellipsoid of revolution) or spherical (the sphere through the rim and the apex, on a circle). Any case."
 );
 keyword_param!(
     /// `surface.ruled`'s `mode`.
@@ -800,6 +823,63 @@ impl JsonSchema for TouchingParam {
         enum_schema(
             &["separate", "one_body"],
             "What a join makes of pieces that share no face: separate (the default) makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body.",
+        )
+    }
+}
+
+/// Combine's `offset_faces`: 1 to 1000 faces of the tools, each as [`FaceRef`] reads it (a point
+/// on the face or its name), as the handler's `face::face_ref` reads them.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ToolFacesParam(pub Vec<FaceRef>);
+
+/// Combine's message for an `offset_faces` that isn't a list of 1 to 1000 faces.
+const TOOL_FACES_MESSAGE: &str = "`offset_faces` must list 1…1000 points on tool faces";
+
+impl<'de> Deserialize<'de> for ToolFacesParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = Value::deserialize(d)?;
+        let faces = v.as_array().filter(|a| !a.is_empty() && a.len() <= 1000).ok_or_else(|| D::Error::custom(whole(TOOL_FACES_MESSAGE)))?;
+        faces.iter().map(|f| FaceRef::deserialize(f).map_err(D::Error::custom)).collect::<Result<Vec<_>, _>>().map(ToolFacesParam)
+    }
+}
+
+impl JsonSchema for ToolFacesParam {
+    fn schema_name() -> Cow<'static, str> {
+        "ToolFaces".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let face = generator.subschema_for::<FaceRef>();
+        json_schema!({
+            "description": "The tool faces that move, one entry on each: a point on the face or its name.",
+            "type": "array", "items": face, "minItems": 1, "maxItems": 1000
+        })
+    }
+}
+
+/// What a grown tool's convex edges become, as `OffsetEdges::parse` reads it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OffsetEdgesParam(pub OffsetEdges);
+
+/// Combine's message for an `offset_edges` it doesn't know.
+const OFFSET_EDGES_MESSAGE: &str = "`offset_edges` must be sharp or round";
+
+impl<'de> Deserialize<'de> for OffsetEdgesParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) => OffsetEdges::parse(&s).map(OffsetEdgesParam).ok_or_else(|| D::Error::custom(whole(OFFSET_EDGES_MESSAGE))),
+            _ => Err(D::Error::custom(whole(OFFSET_EDGES_MESSAGE))),
+        }
+    }
+}
+
+impl JsonSchema for OffsetEdgesParam {
+    fn schema_name() -> Cow<'static, str> {
+        "OffsetEdges".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        enum_schema(
+            &["sharp", "round"],
+            "What a grown tool's convex edges become: sharp (the default) extends the grown faces until they meet; round rounds each convex edge with the offset as its radius.",
         )
     }
 }
@@ -936,6 +1016,30 @@ impl JsonSchema for ConventionParam {
     }
 }
 
+/// How a taper closes a sharp corner, as `extent_param` reads it (serde, case-sensitive).
+#[derive(Clone, Debug, PartialEq)]
+pub struct DraftCornerParam(pub solidcraft_kernel::DraftCorner);
+
+impl<'de> Deserialize<'de> for DraftCornerParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        serde_json::from_value(Value::deserialize(d)?)
+            .map(DraftCornerParam)
+            .map_err(|_| D::Error::custom("must be preserve_curvature, tangent or round"))
+    }
+}
+
+impl JsonSchema for DraftCornerParam {
+    fn schema_name() -> Cow<'static, str> {
+        "DraftCorner".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        enum_schema(
+            &["preserve_curvature", "tangent", "round"],
+            "How a taper closes the gap its offset opens at a sharp corner of the profile. preserve_curvature: each wall continues as itself (a line's plane, an arc's cone) until it meets its neighbour. tangent: each continues straight along its end tangent. round: an arc about the corner. Without it, a profile of lines and arcs preserves curvature and one with another curve at a corner takes tangent, and the feature's warning says so.",
+        )
+    }
+}
+
 /// A thin wall's side, as `ThinSide::parse` reads it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ThinSideParam(pub ThinSide);
@@ -1030,6 +1134,20 @@ impl JsonSchema for ProfilesParam {
                     "description": "Internal selections written by the app.",
                     "anyOf": [
                         {"type": "object", "properties": {"type": {"enum": ["whole_boundaries"]}}, "required": ["type"]},
+                        {
+                            "type": "object",
+                            "properties": {
+                                "type": {"enum": ["sided_curves"]},
+                                "loops": {"type": "array", "minItems": 1, "maxItems": 128, "items": {
+                                    "type": "array", "minItems": 1, "maxItems": 512, "items": {
+                                        "type": "object",
+                                        "properties": {"curve": {"type": "string"}, "side": {"enum": ["inside", "outside", "left", "right"]}},
+                                        "required": ["curve", "side"], "additionalProperties": false
+                                    }
+                                }}
+                            },
+                            "required": ["type", "loops"]
+                        },
                         {
                             "type": "object", "properties": {"offset_boundaries": associations}, "required": ["offset_boundaries"],
                             "not": {"properties": {"type": {"enum": ["whole_boundaries"]}}, "required": ["type"]}
@@ -1308,7 +1426,7 @@ impl JsonSchema for RailFitParam {
 /// rails to count; `None` leaves the count to the handler. `default_sketch`: a rail may
 /// leave its `sketch` out. A key a rail doesn't take, which the handler ignores, is refused too.
 pub(super) fn guide_rails_problem(v: &Value, count_for: Option<&str>, default_sketch: bool) -> Option<String> {
-    let Value::Array(given) = v else { return Some(whole("`rails` must list one or two rails: [{sketch, curves: [ids]}]")) };
+    let Value::Array(given) = v else { return Some(whole("`rails` must list guide rails: [{sketch, curves: [ids]}]")) };
     if let Some(what) = count_for
         && !(1..=2).contains(&given.len())
     {
@@ -1377,10 +1495,10 @@ impl JsonSchema for SweepRails {
     }
 }
 
-/// What `features::plane_param` says about `v` as a plane before it looks anything up, as a
+/// What `features::plane_param_named` says about `v` as a plane before it looks anything up, as a
 /// complete message, or `None`. Names and ids are the handler's to look up.
-fn plane_problem(v: &Value) -> Option<String> {
-    let forms = || whole(format!("`plane` must be {}", crate::cmd::PLANE_FORMS));
+pub(crate) fn plane_problem_named(v: &Value, key: &str) -> Option<String> {
+    let forms = || whole(format!("`{key}` must be {}", crate::cmd::PLANE_FORMS));
     match v {
         Value::String(_) => None,
         Value::Number(n) => n.as_u64().map_or_else(|| Some(forms()), |_| None),
@@ -1390,10 +1508,14 @@ fn plane_problem(v: &Value) -> Option<String> {
             if o.get("origin").is_some_and(|origin| PointExpr3::deserialize(origin).is_err()) {
                 return Some(whole("`origin` must be a point [x, y, z] of numbers or length expressions"));
             }
-            crate::cmd::explicit_plane(v, Vec3::ZERO).map_or_else(|| Some(whole("plane needs x_dir and y_dir, or normal")), |_| None)
+            crate::cmd::explicit_plane(v, Vec3::ZERO).map_or_else(|| Some(whole(format!("`{key}` needs x_dir and y_dir, or normal"))), |_| None)
         }
         _ => Some(forms()),
     }
+}
+
+fn plane_problem(v: &Value) -> Option<String> {
+    plane_problem_named(v, "plane")
 }
 
 /// A plane, as `features::plane_param` reads it: an origin plane's name or alias, a construction

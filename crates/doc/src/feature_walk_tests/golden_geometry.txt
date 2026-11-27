@@ -73,9 +73,15 @@ hole_countersink
 hole_references
   moves: direction[0], direction[2], position[0], position[1], position[2], references[0].edge[0], references[0].edge[1], references[0].edge[2], references[1].edge[0], references[1].edge[1], references[1].edge[2]
   face points: [0, 0, 0]
+hole_hardware
+  moves: direction[0], direction[2], position[0], position[1], position[2]
+  face points: [0, 0, 0]
 thread
   moves: face[0], face[1], face[2]
   face points: [0, 0, 0]
+shaft_spline
+  moves: bore[0], bore[1], bore[2], bore_start[0], bore_start[1], bore_start[2], shaft[0], shaft[1], shaft[2], shaft_start[0], shaft_start[1], shaft_start[2]
+  face points: [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]
 loft
   profiles: 4 all, 5 all
 sweep
@@ -85,6 +91,9 @@ sweep_options
   profiles: 1 all
 shell
   moves: faces[0][0], faces[0][1], faces[0][2]
+  face points: [0, 0, 0]
+dome
+  moves: face[0], face[1], face[2]
   face points: [0, 0, 0]
 draft
   moves: faces[0][0], faces[0][1], faces[0][2], neutral.axis_dir[0], neutral.axis_dir[1], neutral.axis_origin[0], neutral.axis_origin[1], neutral.axis_origin[2], pull[0], pull[2]
@@ -121,6 +130,7 @@ frame_member
   moves: pairs[0].b.at[0], pairs[0].b.at[1], pairs[0].b.at[2]
 frame_member_sketch
   profiles: 2 all
+frame_cope
 frame_trim
   moves: to[1].plane.axis_dir[0], to[1].plane.axis_dir[1], to[1].plane.axis_origin[0], to[1].plane.axis_origin[1], to[1].plane.axis_origin[2]
 frame_plate
@@ -204,6 +214,9 @@ surface_blend
 surface_offset
   moves: faces[0][0], faces[0][1], faces[0][2]
   face points: [0, 0, 0]
+surface_midsurface
+  moves: faces[0][0], faces[0][1], faces[0][2], faces[1][0], faces[1][1], faces[1][2]
+  face points: [0, 0, 0], [0, 0, 0]
 surface_blend
   moves: align[0][0], align[0][1], align[0][2], align[1][0], align[1][1], align[1][2], from.edges[0][0], from.edges[0][1], from.edges[0][2], seam[0][0], seam[0][1], seam[0][2], seam[1][0], seam[1][1], seam[1][2], to.edges[0][0], to.edges[0][1], to.edges[0][2]
 surface_boundary
@@ -239,6 +252,8 @@ surface_trim_mutual
   moves: keep[0], keep[1], keep[2], keep_with[0][0], keep_with[0][1], keep_with[0][2], keep_with[1][0], keep_with[1][1], keep_with[1][2], plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2]
 move
   moves: rotate_axis[1], rotate_axis[2]
+capture_position
+  placement: capture.ox, capture.oy, capture.oz
 import
 mesh_convert
 mesh_reduce

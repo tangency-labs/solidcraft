@@ -7,6 +7,18 @@
 use crate::{HostError, Result};
 use serde_json::{Map, Value};
 
+/// Dialog hint for choosing an installed font family; programmatic values remain strings.
+pub const FONT_KEY: &str = "x-solidcraft-font";
+
+/// Validate the optional font hint without looking at installed fonts or limiting values.
+pub fn font_field(schema: &Value) -> Result<bool> {
+    match schema.get(FONT_KEY) {
+        None => Ok(false),
+        Some(Value::Bool(true)) if schema.get("type").and_then(Value::as_str) == Some("string") => Ok(true),
+        Some(_) => Err(bad(FONT_KEY, "must be true on a string property")),
+    }
+}
+
 /// How deep a schema and value are followed.
 const MAX_DEPTH: usize = 32;
 /// The most schema nodes one check visits (`oneOf` inside `oneOf` multiplies).

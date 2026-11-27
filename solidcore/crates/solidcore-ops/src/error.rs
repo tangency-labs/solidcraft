@@ -3,7 +3,9 @@
 
 use solidcore::error::blend::BlendFailure;
 use solidcore::SolidError;
+use std::borrow::Cow;
 
+pub use solidcore::error::ErrorClass;
 pub use solidcore::topology::brep::SolidTest;
 
 /// SMLib's `SM_ERR_INVALID_INPUT`, the status of input the kernel refuses.
@@ -26,6 +28,8 @@ pub enum Error {
     /// An argument refused before the kernel saw it: not finite, out of range, or an index
     /// past its list.
     Argument,
+    /// A mesh reconstruction refused this input or could not certify the fitted solid.
+    Mesh(Cow<'static, str>),
     /// The kernel reported success but the result has no faces (for a boolean: it is empty).
     Empty,
     /// An empty boolean of solids refuted by the vertex `at` of an operand, which lies where the
@@ -91,10 +95,16 @@ pub enum Error {
         /// The vertex's point.
         at: Option<[f64; 3]>,
     },
+    /// A dome the kernel refuses, and why (a non-planar face, holes, a non-star outline, a
+    /// height not positive and finite, a spherical dome on a face that is not a circle, a
+    /// reversed dome not supported yet).
+    Dome(solidcore::topology::brep::dome::DomeRefusal),
     /// A swept turn ([`crate::Turn::Swept`]) the kernel does not build at the corner `at`:
     /// `room` where no radius of the rounds builds it (a sharp concave side edge between them),
     /// else where the blend corner does not build one yet (unequal or variable rounds, a corner
     /// of four edges, a curved, drafted or tangent side edge); `why` is the kernel's reason.
+    /// Where no radius builds it, the kernel names the side edge and the radius it is
+    /// rounded at first for the turn to pass (`side_edge`, `least_radius`).
     TurnRefused {
         /// Whether no radius builds it; otherwise the corner is of a kind not built yet.
         room: bool,
@@ -102,6 +112,12 @@ pub enum Error {
         why: String,
         /// The corner's point, where the kernel's session notes it.
         at: Option<[f64; 3]>,
+        /// The sharp side edge between the rounds that no radius of theirs passes (its index
+        /// in the body's native list), where the kernel names it.
+        side_edge: Option<usize>,
+        /// The least radius `side_edge` is rounded at first for the turn to pass (the rounds'
+        /// one radius), where the kernel names it.
+        least_radius: Option<f64>,
     },
     /// The kernel does not set back corner `corner` (an index into the call's corners): it sets
     /// back a corner only where every edge meeting it is blended, all convex or all concave, or
@@ -476,6 +492,11 @@ pub struct FailureCode {
     /// as `"blend::fillet_executive::…"`); for a failure ops decided ([`FailureCode::OPS`]),
     /// the name of its [`Error`] variant ([`Error::name`]).
     pub operation: &'static str,
+    /// The kernel's class of the error the call failed with ([`SolidError::class`]: a refusal,
+    /// a defect or a port failure), as solidcore gives it, so a caller never keeps its own
+    /// table of the kinds. [`ErrorClass::Unclassed`] for a kind solidcore does not class and
+    /// for a failure ops decided itself ([`FailureCode::OPS`]).
+    pub class: ErrorClass,
 }
 
 impl FailureCode {
@@ -489,6 +510,7 @@ impl FailureCode {
             call,
             kind: e.kind().code(),
             operation: e.operation(),
+            class: e.class(),
         }
     }
 
@@ -499,6 +521,7 @@ impl FailureCode {
             call,
             kind: Self::OPS,
             operation: e.name(),
+            class: ErrorClass::Unclassed,
         }
     }
 }
@@ -532,6 +555,7 @@ impl Error {
             Error::Status(..) => "Status",
             Error::Refused { .. } => "Refused",
             Error::Argument => "Argument",
+            Error::Mesh(..) => "Mesh",
             Error::Empty => "Empty",
             Error::EmptyRefuted { .. } => "EmptyRefuted",
             Error::NotSolid => "NotSolid",
@@ -590,6 +614,7 @@ impl Error {
             Error::ChamferAngleTooLarge { .. } => "ChamferAngleTooLarge",
             Error::OffsetRefused { .. } => "OffsetRefused",
             Error::BlendFailed { .. } => "BlendFailed",
+            Error::Dome(..) => "Dome",
         }
     }
 }
@@ -1010,6 +1035,7 @@ impl std::fmt::Display for Error {
                 write!(f, "solidcore rejected the input (SM_ERR_INVALID_INPUT)")
             }
             Error::Status(s) => write!(f, "solidcore failed (status {s})"),
+            Error::Dome(refusal) => write!(f, "{refusal}"),
             Error::Refused { operation, reason } => write!(f, "{operation}: {reason}"),
             Error::Argument => write!(f, "invalid argument"),
             Error::Empty => write!(f, "the result is empty"),
@@ -1177,6 +1203,7 @@ impl std::fmt::Display for Error {
                 f,
                 "solidcore-ops was called from inside a call or the failure callback"
             ),
+            Error::Mesh(why) => write!(f, "mesh conversion: {why}"),
             Error::NotOneFoot { found } => write!(
                 f,
                 "a classification found {found} nearest points on the face's surface, where one is needed"
@@ -1257,8 +1284,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// keeps the kernel's [`FailureCode`].
 #[must_use]
 pub(crate) fn status(e: SolidError) -> Error {
-    let (kind, operation) = (e.kind(), e.operation());
-    crate::session::noted_as(kind.code(), operation, typed(e))
+    let (kind, operation, class) = (e.kind(), e.operation(), e.class());
+    crate::session::noted_as(kind.code(), operation, class, typed(e))
 }
 
 /// [`status`]'s typing of the kernel error `e`.

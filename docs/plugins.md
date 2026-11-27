@@ -230,18 +230,25 @@ Send both as `approval` and `archive` when installing the reviewed package. A ch
 a typed `invalid_input` error for `approval` or `archive` before any files or grants are written. The dialog always
 sends both hashes; programmatic callers may omit it to install directly without a prior review.
 Replacing an installed plugin with the same id requires `"replace": true`.
-The response includes name, version, description, capabilities, permissions, requested `limits`, the app's
+The response includes name, version, description, required `capabilities`, `min_host_version`,
+`optional_capabilities`, `granted_capabilities`, `extensions`, permissions, requested `limits`, the app's
 `host_limits`, app commands,
 namespaced `entries`, declared `entry_points` with input schemas and slots, replacement information,
 the target `folder` and whether it was `installed`. A dry run reports `installed: false`.
 Dry-run description is the package review path; there is no separate review command or folder installer.
+Review `min_host_version` for the oldest supported SolidCraft and compare `optional_capabilities`
+with `granted_capabilities` to see which optional features this host supports. Capability grants
+describe host API availability; the separate `approve` object still controls command groups,
+folders and memory. `extensions` contains inert plugin metadata.
 
 A zip holds one plugin, with `plugin.json` and its component at the top or inside one top-level folder.
 The existing `solidcraft_io::safe_zip` reader refuses absolute paths, `..`, symlinks and device entries.
 The installer limits the archive to 256 entries, each file to 16 MiB (an importer component may be up to 64 MiB), and input and unpacked content to
-64 MiB. The manifest has a separate 16 KiB cap. Before publication, the host parses the manifest and
-refuses unknown or newer capabilities. It unpacks into a hidden `.install-…` folder beside the installed
-plugins, then renames it to `plugins/<id>/`. The entries resolve immediately, with no restart.
+64 MiB. The manifest has a separate 64 KiB cap. Before publication, the host checks
+`min_host_version`, then parses and validates the manifest. It refuses unknown or incompatible
+required capabilities; unsupported optional capabilities are left ungranted. It unpacks into a
+hidden `.install-…` folder beside the installed plugins, then renames it to `plugins/<id>/`.
+The entries resolve immediately, with no restart.
 
 ## Updates
 
@@ -270,7 +277,7 @@ new versions on its card. Older versions refuse a manifest with this field.
 ## Removing
 
 Each installed plugin card in **Preferences > Plugins** has an enable switch and **Remove** action.
-Remove asks for confirmation, then deletes the package folder and its stored grants. Cancelling
+Remove asks for confirmation, then deletes the package folder, its stored grants and remembered importer options. Cancelling
 Preferences does not restore a removed package. Removing a plugin preserves its data in saved designs.
 Approved grants and removal survive closing or resetting Preferences. Grants are host preferences,
 never design data; preferences retain at most 256 plugin ids, four command groups and 32 folders per id.
@@ -284,7 +291,7 @@ The command surface exposes management without opening dialogs:
 | `plugin.check` | `{path}`: a package folder or `.zip` | `{ok, id, name, version, kind, approval, entries, problems: [{severity, field, problem, fix}]}`; installs nothing |
 | `plugin.install` | `{path, approval?, archive?, replace?, dry_run?, approve?: {command_groups, folders: [{name, path, read, write}], fuel?, memory_mib?, input_folder?}}` | Package description and installation status, including declared `entry_points` |
 | `plugin.list` | `{}` | `{plugins: [{manifest, commands, disabled}]}` |
-| `plugin.remove` | `{id}` | `{id, removed: true}` |
+| `plugin.remove` | `{id, remove_user_data?: bool}` (default: false) | `{id, removed: true}` |
 | `plugin.grants` | `{}` | `{grants: [{id, status, package_hash, command_groups, folders, fuel?, memory_mib?, input_folder?}]}` |
 | `plugin.revoke` | `{id}` | `{id, revoked}` |
 | `plugin.tools` | `{name?}` | `{tools: [{name, kind, plugin, entry, plugin_name, plugin_version, description, effect, extensions, input_schema, approval?}]}`: every installed, enabled plugin's entries as tools for agents (below); `approval` only for the one tool `name` asks for |
@@ -360,12 +367,148 @@ Sheet Metal and Weldments. Existing tab visibility and workspace rules still app
 For example, `{"kind":"menu","name":"File"}` places an entry in File;
 `{"kind":"ribbon","name":"Model"}` places it in Model.
 
+### Grouping ribbon buttons
+
+By default, every entry has its own button in the Model tab's **Plugins** group, including a
+plugin with several entries. A plugin can explicitly put selected entries behind one button
+by adding `ribbon_groups` to its `runtime`:
+
+```json
+"runtime": {
+  "module": "gears.wasm",
+  "commands": [],
+  "entries": ["spur", "bevel", "worm", "inspect"],
+  "ribbon_groups": [
+    {
+      "label": "Gears",
+      "icon": "icons/gears.svg",
+      "entries": ["spur", "bevel", "worm"]
+    }
+  ]
+}
+```
+
+This gives one **Gears** ribbon button with a drop-down listing `spur`, `bevel` and `worm` in
+that order, and an individual button for `inspect`. Clicking either the button or its arrow opens
+the menu; choosing an entry opens its usual input dialog. Opening the menu runs no plugin code.
+Menu rows use each entry's usual title and icon. Entries that a user pinned individually to the
+ribbon keep their own button as well as their place in the group menu.
+
+`ribbon_groups` is optional; omitting it or declaring `[]` preserves the existing ribbon
+behaviour. It affects only the Model tab's Plugins buttons: the full Plugins menu, declared
+File/Help items, other ribbon-tab slots and programmatic command ids remain available as before.
+Several groups are allowed and appear in declaration order, followed by individual entries.
+Each group has:
+
+- `label`: 1 to 80 printable characters on one line, with a non-blank label. Surrounding spaces
+  are ignored when displaying the label and checking for duplicate labels.
+- `icon` (optional): a package-relative `.svg` path, following the same path rules, size limit,
+  SVG subset and theme palette as [entry icons](#icons-and-pictures). A missing or
+  invalid SVG falls back to the generic plugin icon; an unsafe or malformed path is refused.
+- `entries`: 1 to 32 names from this plugin's `runtime.entries`, in menu order. Use the local
+  entry name (`spur`), without the plugin id.
+
+At most 32 groups are accepted. Unknown entry names, empty groups, duplicate labels, repeated
+entry names within a group and entries included in more than one group are refused with an
+`invalid_manifest` error naming the field and the problem. Unknown fields in a group are also
+refused. Group icons are optional and do not need a new capability.
+
 Clicking a File, Help or ribbon item opens the same input-schema dialog as the Plugins menu.
 The host finds the entry by its namespaced `<plugin-id>.<entry>` command. The dialog uses the same
 enabled state and grant checks from every placement. Missing command-group grants leave Run off
-with an explanation. Opening the dialog executes no plugin code; for a command entry, Run submits the
-existing `plugin.run` transaction. An importer entry is not a command: its dialog shows the options,
-then its button chooses the file and opens it as a new design with `file.import`, as File > Open does.
+with an explanation. Opening a command dialog executes no plugin code; Run submits the
+existing `plugin.run` transaction. By default, importer menu entries show options before choosing
+a file, and File › Open and drag-and-drop import their paths directly.
+An importer entry may set `"file_first": true` in its manifest to choose the file before its
+options appear, so they can match the file. Its menu entry asks for the file first, and File › Open
+and drag-and-drop already have a path and go straight to the same form. Open file opens it as a
+new design with `file.import`; Cancel at either step opens nothing. Absent or `false` keeps the
+options-first dialog, and only an importer entry may set it. Releases before this field existed
+refuse a manifest that sets it, like any unknown entry field; set `min_host_version` to match.
+An importer may opt into the bounded dialog hook below; choosing a file then runs that hook,
+never the importer. The field changes no saved designs, and scripts and MCP calls ignore it.
+
+### File-aware importer forms
+
+File conditions use the same bounded condition grammar as sibling conditions, replacing `field`
+with `file`. Facts are host-owned, read-only and separate from input properties; a property named
+`extension` cannot override the selected file's extension. Facts are available without a new
+capability:
+
+```json
+"parts": {
+  "type": "string", "title": "Part",
+  "x-solidcraft-visible-when": {"file": "extension", "in": ["asm", "assembly"]}
+}
+```
+
+The fact names are `name` (filename, no folders, at most 255 UTF-8 bytes), `extension`
+(lowercase, no dot, at most 32 bytes), `size` (bytes, at most the import limit of 1 GiB), and
+`format` (the host-matched namespaced importer entry, such as `reader.convert`, at most 161
+bytes). File conditions accept `eq`, `in`, `all`, `any` and `not`, with the existing depth and
+node budgets. They work on visibility, enabled state, choices and conditional defaults,
+including nested schemas. Unknown facts and literals of the wrong type are rejected on load.
+Before a file is selected, file comparisons are false. Direct imports bind the same conditions
+to their supplied path before validating and omitting hidden options; they never open a form.
+
+An importer can additionally request `"dialog@0.1"` alongside `"formats@0.2"` and build against
+the additive `importer-dialog-plugin` world in `crates/craft-plugin/wit/plugin.wit`. This includes
+the existing importer world and adds the export `dialog-provider.update-fields(entry, context)`.
+The existing 0.1 and 0.2 importer worlds and their interfaces are unchanged; existing components
+need no rebuild and do not acquire a hook. The host checks the optional export when checking or
+installing the component; an explicit `dialog_hook` declaration requires it. This file-aware reply
+format is for importer entries without `dialog_hook`; entries with `"dialog_hook": true` use the
+general field patches described below.
+
+`context` is JSON:
+
+```json
+{"values":{"mode":"parts"},"file":{"name":"parts.asm","extension":"asm","size":2048,"format":"reader.convert","generation":3}}
+```
+
+`values` contains the current visible scalar inputs, including incomplete forms. The host does
+not accept file facts from option values. The hook returns JSON updates to already declared
+fields, for example after reading the part names listed by a header:
+
+```json
+{"fields":{"parts":{"oneOf":[{"const":"plate","title":"Plate"},{"const":"cover","title":"Cover"}],"default":"plate"}}}
+```
+
+A reply contains only `fields`, at most 256 updates and 64 KiB of JSON in total. Each update may
+change `title`, `description`, `default`, and either `enum` or `oneOf`. Text is at most 2,048
+bytes. Choice lists contain 1–256 strings; `oneOf` options contain `const` and optional `title`
+and `description`. Values must satisfy the original field constraints, and defaults must fit
+the updated choices. A hook cannot add fields, change types, constraints or directory semantics,
+or replace declarative conditions. Conditional choice lists cannot be replaced. Folder values
+need the existing install grants unless the field explicitly requests read consent as described
+below. A hook default grants no access; selecting or editing an annotated folder can grant read
+access for the eventual import, never for the file-aware hook.
+Untouched fields take new defaults; compatible text and numeric edits, including cleared or
+incomplete input, survive updates. Edited choices survive when the new choices still offer them.
+String choices retain their length constraints, and every offered value must satisfy them.
+If applying an update changes the visible values, the host calls the hook again with those
+values before enabling Open. Unchanged visible values do not trigger another call.
+
+Each update runs in a fresh sandbox on a worker, with at most 5,000,000 fuel, 500 ms shared by
+prefix acquisition and guest execution, and 256 host calls (or the manifest's smaller budgets).
+A prefix read that finishes after the deadline is discarded. The manifest's approved memory
+and stack ceilings still apply. Compilation and bounded prefix acquisition also run off the UI
+thread. Through the existing `source` interface, only path `""` is available: `size("")` reports
+the full file size, `resolve("")` returns `""`, and `read("", offset, len)` reads a snapshot of the
+first 64 KiB. Each requested range must lie in that prefix; the sum of requested lengths per
+update is at most 64 KiB, including repeat reads. Reads ending past EOF return fewer bytes.
+Sibling files remain inaccessible even with `input_folder` approved. `design.write` and design
+evaluation are refused during a hook; there are no app commands, folder grants or writes.
+The host bounds context JSON to 128 KiB. A failed or invalid update leaves Open off with the
+error; selecting a file again retries. No partial update is applied.
+
+**Change file…** keeps the form open, updates its host path and advances `file.generation`,
+even when the same path is picked again. Old header choices are cleared immediately. At most
+one worker runs per dialog; a result for an earlier generation is discarded before the next
+update starts. Closing the form disconnects its results. Editing inputs reruns an opted-in hook,
+with fields and Open disabled while it is pending. File conditions themselves never run Wasm.
+Scripts, CLI and MCP continue to pass `path` and `options` directly and never call this file-aware
+schema hook. An explicit `dialog_hook` entry still runs its general field hook before importing.
 
 ## Integration APIs
 
@@ -415,6 +558,58 @@ themselves; to show words instead, list the options as `oneOf`, each `{"const": 
   {"const": "stand_up", "title": "Stand up (Y-up to Z-up)"}
 ]}
 ```
+
+### Headings, folding sections, units and help links
+
+A long dialog can be grouped and explained with four annotations. They change only how the dialog
+is drawn: input checks, tool schemas and the values the plugin receives stay the same.
+
+```json
+"input_schema": {"type": "object", "x-solidcraft-field-order": "declared", "x-solidcraft-sections": "collapsible",
+  "properties": {
+    "units": {"type": "string", "enum": ["mm", "in"], "default": "mm", "x-solidcraft-section": "Carcass"},
+    "width": {"type": "number", "title": "Width", "default": 600, "x-solidcraft-unit-from": "units",
+              "x-solidcraft-help": "https://example.com/woodwork/width"},
+    "drawers": {"type": "integer", "title": "Drawers", "default": 2, "x-solidcraft-section": "Drawers"}
+  }}
+```
+
+- `x-solidcraft-section` on a field draws a heading above it, or a divider line when it is `""`.
+  The heading belongs to its field, so it hides when a condition hides that field. Headings follow
+  the dialog's field order, so use them with `"x-solidcraft-field-order": "declared"`.
+- `"x-solidcraft-sections": "collapsible"` on the root lets each heading fold away the fields under
+  it, down to the next heading or divider. Sections start open each time the dialog
+  opens. Folded fields keep their values and are still sent. A folded field with an error is
+  still drawn.
+- `x-solidcraft-unit-from` on a number field names a string choice in the same schema. The
+  choice's current value (for example `mm` or `in`) is drawn after the number instead of `unit`.
+- `x-solidcraft-help` on a field adds a "More about this field" link under it, opening the page
+  in the browser. It must be an https URL with a domain name (not an IP address), and nothing opens
+  until the link is clicked.
+
+The manifest is refused when a heading is not text or is longer than 80 characters, when
+`x-solidcraft-sections` is anything but `"collapsible"`, when `x-solidcraft-unit-from` is not on a
+number field naming another field that is a string choice, or when a help link is not an https URL with a domain name.
+
+### Font fields
+
+Mark a string property with `"x-solidcraft-font": true` to offer installed font families in the
+entry dialog:
+
+```json
+"font": {"type": "string", "title": "Font", "x-solidcraft-font": true,
+         "default": "Liberation Sans"}
+```
+
+Open the dropdown and type part of a name to filter it, ignoring case. Up/Down and Enter, or a
+click, choose a match. The plugin receives the full family name. The list includes the built-in
+Liberation Sans and usable installed families discovered by sketch text, cached after a background
+scan. Plugins need no folder grant to offer or use installed family names.
+
+The annotation must be `true` on a string property. It is a dialog hint: over MCP and scripts the
+value is still an ordinary string, and input checking accepts unknown names. The operation that
+uses the font reports an unknown font as usual. Other declared string constraints still apply.
+Use an ordinary `enum` or `oneOf` dropdown for a fixed list of names.
 
 ### Edit a stored operation through its normal form
 
@@ -480,6 +675,68 @@ revision changed, the entry does not run: the form revalidates against the curre
 reports missing picks beside their fields, and asks the person to review and Apply again.
 If the design changes while a worker computes, atomic command acceptance rejects its result.
 No stale result can overwrite the current design.
+
+### Folder fields and read access for one run
+
+A string property with `"format": "directory"` has a text box and, on a desktop host with a
+folder picker, a **Browse…** button. Without an annotation it passes a path and keeps its existing
+install-grant check. It grants no new access.
+
+Add `"x-solidcraft-grant": "read"` to ask for read access to a selected directory and its
+subdirectories for this entry invocation:
+
+```json
+"library": {
+  "type": "string", "title": "Parts library", "format": "directory",
+  "x-solidcraft-grant": "read"
+}
+```
+
+The dialog explains this permission beside the field. Browsing or editing/pasting its path gives
+consent when Run, Open file or Choose file… submits the entry. A default, including a conditional
+default, or a stored form value is not consent: the user must select or edit it, or it must already have read approval. The path
+must name an existing absolute local directory. Empty optional fields grant nothing. A hidden field
+is omitted and grants nothing; a disabled field cannot create new consent. Replacing the value
+replaces that field's root. Cancelling the entry or file picker grants nothing. Preview receives no
+folder grants. Closing or reopening a dialog starts fresh.
+
+Consent is bound to the reviewed package's content hash, entry and field, carried separately from
+parameters to that request's worker and consumed for that invocation. It is never saved to the design,
+Preferences or the shared grant store. To remember access, use the existing approvals in
+**Preferences › Plugins**: the plugin declares a named read folder in `runtime.permissions.files`
+and the user approves its path when installing or reviewing it. A later annotated field may name that
+folder or a permitted subdirectory; its property key need not match the install-time permission name.
+
+Scripts, CLI, MCP and direct `plugin.run` or `file.import` requests open no dialog and gain no
+permission from field values. A non-empty annotated value must already be covered by a current,
+package-bound **read** approval that the manifest requests, and by the caller's file scope.
+Write-only approvals do not imply read access. Hidden conditional values are removed before this check.
+
+To read these folders, add `"folders@0.1"` to `capabilities` alongside `commands@0.2` or `formats@0.2`.
+Build against the additive `command-with-folders` or `importer-with-folders` world in
+`craft:plugin@0.2.0`. These worlds retain their command/importer interfaces and import the new
+read-only `folders` interface. `command-with-folders` keeps its original imports; a plugin that
+also uses forms, design tokens or a dialog hook can compose an additional world with those
+interfaces. Existing worlds and the 0.1 API are unchanged; existing components still load.
+
+- `folders.read(grant, path, offset, len)` reads 1 byte to 1 MiB per call, returning fewer bytes at EOF.
+- `folders.size(grant, path)` returns a regular file's size, or none if absent or not a regular file.
+- `folders.resolve(grant, path)` returns the relative spelling of an existing file, or the unique
+  case-insensitive match of its final name, or none. An empty path resolves to the selected root (`""`).
+
+`grant` is the annotated **property key**, such as `"library"`; `path` is relative to that field's
+root, such as `"parts/bracket.bin"`, never the absolute path from the options. No operation writes.
+These grants do not widen `source`, `files`, host commands, other entries or another invocation.
+Absolute paths, parent traversal, hidden descendants, symbolic links and Windows device paths are
+refused. The approved root itself may have hidden ancestors. There are at most 32 annotated fields;
+reads share the import's 1 GiB total byte and 4,096-file budgets with `source`, as well as its
+cancellation, call and runtime limits. Command entries use the same folder byte/file limits and
+retain their command call limits.
+
+The annotation is supported only on top-level string properties with `"format": "directory"`.
+Other placements (including nested schemas and composition branches), modes other than `"read"`,
+malformed values, more than 32 grants, and non-printable or over-128-character property names are
+rejected at manifest load and by `plugin check`. Conditions on these properties use the rules below.
 
 ### Shared field definitions
 
@@ -623,6 +880,9 @@ Both strings containing values are JSON objects. Existing command worlds keep th
 plugins without this capability need no new export and continue to link and run. The interface
 is available alongside both supported `craft:plugin` WIT versions (0.1 and 0.2); use the
 `command-dialog-plugin` world when building a command plugin with the hook.
+Importer entries can use the same general patches. When the file-first form has a selected file,
+the host binds its file conditions before validating patches. Changing the file invalidates older
+patch replies, and the file reader and field hook share one worker slot per dialog.
 
 A reply maps existing property names to patches, for example:
 
@@ -643,8 +903,9 @@ at most 1024 bytes of printable text; input and reply are at most 1 MiB each.
 
 Declarative conditions run first, then the validated patch, then the same input check used by
 programmatic calls. The hook never edits: it runs as a read entry, with no edit command or file
-write grants, in a fresh sandbox. Its independent budgets are at most 10,000,000 fuel, 16 MiB
-memory and 250 ms, further capped by the entry's approved runtime limits and host ceilings.
+write grants, in a fresh sandbox. It reads the design with the read commands (`component.list`
+maps bodies to components) and the plugin's own data with `storage.get {}`. Its independent
+budgets are at most 10,000,000 fuel, 16 MiB memory and 250 ms, further capped by the entry's approved runtime limits and host ceilings.
 Compilation and execution happen on the command worker, outside the window thread.
 
 The dialog debounces changes for 120 ms. It remains interactive while waiting and drops replies
@@ -728,8 +989,9 @@ relative path to an `.svg` file inside the package:
   ]}}}
 ```
 
-- At the top of the schema it is the command's icon: its ribbon button, its rows in the Plugins,
-  File and Help menus, and its dialog's header. Without one the command has the generic plugin icon.
+- At the top of a command or importer entry's `input_schema` it is the entry's icon: its ribbon
+  button, its rows in the Plugins, File and Help menus, and its dialog's header. Without one the
+  entry has the generic plugin icon. Importers use the same image checks and fallback as commands.
 - On a `oneOf` option it is that option's picture in the dropdown. Pictures show when every option
   of the choice names one that passed the check below; otherwise the dropdown shows the titles alone.
 - The image is drawn like the app's own icons, and must be one: SolidCraft's icon SVG subset
@@ -743,7 +1005,8 @@ relative path to an `.svg` file inside the package:
   and stays inside the package: no `..`, no absolute path, no link. A file is at most 64 KiB and a
   package names at most 64 images. Images are read from the installed package when the plugins are
   listed; nothing is fetched from the network. A refused or missing image is logged and left out,
-  and the command works as before.
+  and the entry works as before. `plugin.check` reports missing or invalid images for both commands
+  and importers.
 - Images are not part of the `approval` hash: changing one changes only what is drawn.
 
 An option may also name a material swatch with `x-solidcraft-swatch`. This is a separate
@@ -761,6 +1024,24 @@ recommended.** A package may name at most 256 distinct swatches. The host draws 
 tiles and loads and decodes each distinct image once
 when it loads the package, then caches its texture. A missing, corrupt, wrongly typed or oversized
 swatch is omitted with a warning in `plugin check` and the install review; the plugin still works.
+
+An option may instead name a picture of the thing it stands for, such as a manufacturer's part,
+with `x-solidcraft-image`:
+
+```json
+{"const": "elbow90", "title": "Elbow 90° PVC d63", "x-solidcraft-image": "parts/elbow90.png"}
+```
+
+It follows the swatch rules (a plain relative path inside the package, no `.`, `..`, absolute path
+or link, nothing fetched from the network, `.png`, `.jpg` or `.jpeg`, colours kept as they are)
+with bigger limits: at most **512 KiB** and **1024 × 1024** decoded pixels. The host keeps each
+picture at most 512 pixels on a side, decodes each distinct file once when it loads the package,
+and caches its texture. The choice list shows the picture as a thumbnail beside the option, and a
+larger one of the highlighted option (the chosen one when none is highlighted). If an option names
+both, the picture is used, and if that picture is missing or refused, the swatch. A package may name at most 256 distinct swatches and pictures together.
+Decoded swatches and pictures share a budget of 128 MiB per package. When the total would exceed it, the host omits that entry, every later swatch and picture, and records a warning.
+A missing, corrupt, wrongly typed or oversized picture is omitted with a warning in `plugin check`
+and the install review; the plugin still works, and the value sent is still the option's `const`.
 
 A partially illustrated choice shows tiles beside the option titles in its dropdown. When every
 available option has a usable swatch, the dialog offers a grid with a search box; search matches a
@@ -783,14 +1064,23 @@ An ordinary plugin form has a **Preview** box, on when it opens; with it off, no
 A populated form for editing a stored operation starts with Preview off and retains stale picks
 for field validation. Nothing runs until Apply or an explicit Preview request.
 
-- The preview is a dry run of the same `plugin.run`: the plugin's code is unchanged and declares
-  nothing new. It runs on a scratch session that is thrown away, so the design, the undo history
-  and the selection never change. The run has none of the plugin's folder or command-group grants,
-  so it reads and writes no file and reaches nothing past the design; a plugin that needs them
-  shows "Preview:" with the refusal under its fields, and Run still runs it with its grants.
-- It runs again only when the parameters or the design change, under the plugin's own fuel,
-  memory and deadline limits, off the window's thread. A run left behind by newer inputs is
-  dropped.
+- The preview is a dry run of the same `plugin.run`: the plugin's code is unchanged. It runs on
+  a scratch session that is thrown away, so the design, the undo history and the selection never
+  change. The run has none of the plugin's folder or command-group grants, so it reads and writes
+  no file and reaches nothing past the design. Run still runs it with its grants.
+- A preview that fails shows "Preview:" and the run's error at the top of the dialog, above the
+  fields, in the error colour: the plugin's own refusal ("doors must be 0, 1 or 2") or a missing
+  grant. The error belongs to the current inputs, and it goes when they change.
+- The entry can tell that it runs as a preview: the command `plugin.preview` answers
+  `{"preview": true}` there and `{"preview": false}` in a run whose result is kept. List it in
+  `runtime.commands` like any other command; it needs no command group. An entry that builds a
+  lot of geometry can then leave out detail the preview does not need, such as small holes or
+  hardware models, and preview in a fraction of the time. A script tries that path with
+  `plugin.run`'s `preview: true`.
+- It runs again only when the parameters or the design change, once they have stood unchanged
+  for about 300 ms, under the plugin's own fuel, memory and deadline limits, off the window's
+  thread. A run left behind by newer inputs is cancelled at the plugin's next host call (as a
+  long job's Cancel stops it): the current inputs do not wait for it.
 - When the first successful preview is drawn, the app applies that run's last view command once
   if it is `view.fit` or `view.home`. Fit includes previewed sketch geometry when there are no
   bodies; even an empty result consumes this first-preview action. Later field changes leave the
@@ -808,10 +1098,12 @@ A command entry that takes a while, such as computing a toolpath, declares `"job
 "entries": [{"name": "pocket", "job": true, "input_schema": {"type": "object", "properties": {}}}]
 ```
 
-- **Time.** A job runs for up to ten minutes, a fixed limit. The runtime's
-  `deadline_ms` (at most 30 seconds) still applies to the plugin's other entries. Fuel and memory
-  limits are the same as for any entry. Each job has a limit of 1,048,576 host calls, including
-  progress reports.
+- **Time.** A job runs for up to ten minutes, a fixed limit. Like every entry's deadline, the ten
+  minutes count only the time the plugin's own code runs, not the time the app spends answering
+  its host calls. The runtime's `deadline_ms` (at most 30 seconds unless a user raises it in
+  Preferences > Plugins) still applies to the plugin's other entries. Fuel and memory limits are
+  the same as for any entry. Each job has at least 1,048,576 host calls, including progress
+  reports; a `host_calls` the plugin asks for above that, within the user's ceiling, is honoured.
 - **Where it shows.** Every plugin run started from its dialog or by an agent runs on a worker and
   is a row in the operations panel at the bottom right of the view, named for the plugin and the
   entry ("Gears: Pocket"). The step the plugin reports with `control.progress(fraction, message)`
@@ -831,12 +1123,92 @@ A command entry that takes a while, such as computing a toolpath, declares `"job
 
 The WIT package is `craft:plugin@0.2.0`. Its capability `commands@0.2` runs app commands, logs,
 reports progress and cancellation, reads named files and a clock, and exports the entry. A plugin's
-`plugin.json` lists what it needs, for example `"capabilities": ["commands@0.2"]`; the host refuses
-an unknown or newer capability when it reads the manifest, with a plain message such as "needs
-commands 0.3; update SolidCraft or the plugin". `formats@0.2` adds file-format slots: importers and
-exporters; `evaluate@0.2` lets an importer check its result, `storage@0.1` keeps data in a design
-(below), and `ui@0.1` adds host-drawn docked panels. `viewport` arrives later as its own versioned
-interface. While a version is 0.x, a minor version may break the one before it.
+`plugin.json` lists what it needs in `capabilities`, for example `"capabilities": ["commands@0.2"]`;
+the host refuses an unknown or incompatible required capability when it reads the manifest, with
+a plain message such as "needs commands 0.3; update SolidCraft or the plugin". `formats@0.2`
+adds file-format slots: importers and exporters; `evaluate@0.2` lets an importer check its result,
+`dialog@0.1` supplies bounded field patches and file-aware form updates, `storage@0.1` keeps data
+in a design, `user-storage@0.1` keeps per-user settings for command plugins and importers
+(below), and `ui@0.1` adds host-drawn docked panels. `viewport` arrives later as its own
+versioned interface. While a version is 0.x, a minor version may break the one before it.
+
+Starting with SolidCraft 0.45.0, manifests may also declare:
+
+- `min_host_version`: the oldest SolidCraft release the plugin supports, as a strict semantic
+  version such as `"0.45.0"` (including a patch number, with optional prerelease or build metadata).
+  This is the host version, independent of the plugin's own `version` and its capability versions.
+  An older host refuses the package before unknown-field or capability errors, naming both the
+  required and running host versions. Omit it to keep the existing behaviour with no minimum.
+- `optional_capabilities`: capabilities the plugin can do without. The host grants each requested
+  capability whose version it supports and ignores unknown or incompatible optional capabilities.
+  Malformed requests still fail validation. Both capability lists accept `name@major.minor` or
+  `name@major.minor.patch`; patch numbers do not change capability compatibility. Each list has
+  at most 16 entries, and a capability name may appear only once across both lists. Major versions
+  must match; for major zero, the minor must match a version the host serves. For later majors,
+  the host may serve a requested older minor. An entry's essential `commands` or `formats`
+  capability must stay in the required list.
+- `extensions`: a JSON object for future optional metadata. Unknown keys and their JSON values
+  inside this object are accepted and ignored by the host. It grants no capability or permission
+  and changes no plugin behaviour. Unknown top-level fields remain errors. This is distinct from
+  an importer entry's `extensions` list of file suffixes.
+
+Existing manifests need no changes. Releases before 0.45.0 cannot understand these new top-level
+fields, including `min_host_version`: their existing unknown-field refusal still applies. Set
+the minimum to a host that supports the fields and APIs the plugin actually needs; placing a
+required feature inside `extensions` does not make an older host implement it.
+
+For example, this importer can run without a future optional feature:
+
+```json
+{
+  "id": "sample", "name": "Sample", "version": "1.1.0",
+  "min_host_version": "0.45.0",
+  "capabilities": ["formats@0.2", "host@0.1"],
+  "optional_capabilities": ["future-import-feature@0.1"],
+  "extensions": {"sample": {"documentation": "Optional importer metadata"}},
+  "runtime": {
+    "module": "sample.wasm", "commands": [],
+    "entries": [{"name": "convert", "kind": "importer", "extensions": ["smp"]}]
+  }
+}
+```
+
+On this host, its granted capabilities are `formats@0.2` and `host@0.1`.
+`future-import-feature@0.1` is an illustrative name, not an implemented interface. The plugin
+chooses its fallback when that string is absent from the query below. The host returns the
+original requested strings, including any patch numbers, for required and supported optional
+capabilities only. It does not report capabilities the plugin did not request.
+
+The small read-only query is a separate additive WIT package, `craft:host@0.1.0`
+(`crates/craft-plugin/wit-host/plugin.wit`):
+
+```wit
+package craft:host@0.1.0;
+
+interface capabilities {
+    granted: func() -> list<string>;
+}
+
+world host-query {
+    import capabilities;
+}
+```
+
+A command or importer component may import `craft:host/capabilities@0.1.0` alongside its existing
+world, with either the 0.1 or 0.2 plugin WIT. Declare required `host@0.1` when the component
+imports this query. The host links the query only when `host@0.1` is granted. A manifest may ask
+for `host@0.1` optionally when its component does not import the query. The bounded result has
+at most 32 strings and reports API availability only; it does not approve file access, command
+groups, input folders or increased memory, run commands, or open dialogs.
+
+An optional manifest capability cannot make a static WIT import optional. A component that
+unconditionally imports an interface absent from a host cannot load there, even if that
+capability is listed as optional. Keep unavailable interfaces out of such a component's imports,
+or require a host that provides them with `min_host_version` and a required capability.
+`forms@0.1` is available for the populated command forms described above; interactive hosts
+defer opening until the entry succeeds, and programmatic hosts return `interactive_required`.
+`dialog@0.1` is available for the field hooks described above; a hook entry declares it in
+the required capabilities and opts in with `dialog_hook`.
 
 `themes@0.1` lets a plugin add colour themes to Preferences > Appearance > Theme from
 `solidcraft-theme/1` files it ships; it needs no runtime. A plugin that does not list it is not
@@ -997,15 +1369,18 @@ plugin and importer.
 - `plugin.check` (`solidcraft-cli plugin check <folder|plugin.zip>`) checks a package without
   running it, through the code Install and a call use: the installer's reader and limits, the
   manifest, the permissions (`net` is refused), the limits against the app's ceilings, and the
-  component against its world (`command-plugin`, `importer-plugin` or `exporter-plugin`) and this app's WIT version,
+  component against its world (`command-plugin`, `importer-plugin`,
+  `importer-plugin-with-storage` or `exporter-plugin`) and this app's WIT version,
   with no WASI or network import. Each problem has a severity, the field, what is wrong and how to
   fix it. In a folder, `tests/` and hidden files are left out. It runs no plugin code, installs
   nothing and never opens a dialog.
 - `solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases]` checks
   the package, installs it into a scratch plugins folder with the app's installer, and runs its
   test cases, `tests/*.json`, through `plugin.run`, `file.import` and `file.export` with the
-  app's limits. An exporter writes into the scratch folder. A folder's cases are in its `tests/`
-  folder; a `.zip`'s are the `tests/` folder it holds, so a
+  app's limits. An exporter writes into the scratch folder. A
+  case uses its own temporary user-settings folder, removed after the run. Cases never read or
+  write the native settings folder or the folder named by `SOLIDCRAFT_SETTINGS_DIR`. A
+  folder's cases are in its `tests/` folder; a `.zip`'s are the `tests/` folder it holds, so a
   `.zip` made without one has none. A case names the entry, its parameters or file, the grants
   (default: everything the manifest asks for, stored in the scratch folder's grant store as an
   install stores them, see [Headless use](#headless-use)), and what to expect: an error kind,
@@ -1034,17 +1409,45 @@ Only an importer may say `open`.
    "permissions": {"input_folder": true}}}
 ```
 
+An importer's options dialog has a **Remember these options** checkbox next to **Restore defaults**.
+It is off by default and belongs to that one entry (a plugin id and entry name). When you start an
+import with it on, the entry keeps the values you used, in the app's user preferences
+(`plugin_importer_options`), outside every design. With it off the entry keeps nothing.
+The next dialog keeps remembered fields that still satisfy the current input schema; missing or
+invalid fields start from the schema defaults. Changing a field or cancelling the dialog or file
+picker does not change the stored values. **Restore defaults** resets the values and leaves the
+checkbox as it is; the stored values change only when the next import starts.
+
+With the checkbox off, the entry's dialog starts from schema defaults, and **File > Open** and
+drag-and-drop start the import directly, as before; an entry with `file_first` still shows its
+dialog for the chosen file, from schema defaults. With it on, File > Open and drag-and-drop show
+that entry's dialog, filled in with the remembered values, for the file just chosen. The dialog's
+**Open file** button opens that file without asking for it again. If the form cannot render the
+importer's schema, the file still opens directly with schema defaults. Native readers retain
+priority for formats SolidCraft already supports.
+Removing a plugin forgets all of its entries' remembered values, including when Preferences is cancelled.
+
+Scripts, CLI and MCP opens never read or update this memory and never open an options dialog.
+They receive only their explicit `options`, with schema defaults filling omitted fields; explicit
+values always take precedence. Automated imports therefore do not depend on earlier interactive runs.
+
 - **Opening.** `doc.open` opens a file SolidCraft does not read itself with the installed, enabled
   importer that claims its extension. `file.import` always uses an importer, and `format`
   (`plugin_id.entry`, listed in `plugin.list`'s `importers`) picks one for either command, for
   example for a `.fcstd` file SolidCraft also reads. `options` passes the entry's declared options.
   Two importers claiming one extension need `format`. An entry's optional `label` names its group
-  in the Open dialog (default: the plugin's name), as for an export slot. File › Open offers the claimed extensions,
-  and the Plugins menu has each importer's entry: its dialog shows the options, then chooses the file.
+  in the Open dialog (default: the plugin's name), as for an export slot. File › Open offers the
+  claimed extensions, and the Plugins menu has each importer's entry. With the file-first
+  preference enabled, it chooses the file, then shows its options (see
+  [File-aware importer forms](#file-aware-importer-forms)).
 - **The world.** The component implements `importer-plugin`: it exports
   `importer.import-file(entry, file, options)` and imports `source` (the file, read in chunks of at
   most 1 MiB), `design` (where it writes a SolidCraft design file), `log`, `control` and `clock`.
   It has no `commands` import: an importer makes a design, it does not edit the open one.
+  To keep per-user preferences, add `"user-storage@0.1"` beside `"formats@0.2"` in the manifest
+  and build against the additive `importer-plugin-with-storage` world in `craft:plugin@0.2.0`.
+  It adds the same `user-storage` interface command plugins use; the existing `importer-plugin`
+  world is unchanged, so existing importers keep loading and running.
 - **The result.** The design opens as a new design that is not saved anywhere yet, named after
   the file unless the design names itself. The call returns a loss report,
   `{"summary": "...", "items": [{"severity": "info|degraded|dropped", "title": "...", "subject": "...", "message": "...", "code": "..."}], "details": {...}}`.
@@ -1061,6 +1464,12 @@ Only an importer may say `open`.
   **Save report…** saves it as a `.txt` file, or as a `.json` file in the shape of the reply.
   After OK, Plugins › Last import report… shows the last import's report again.
   Nothing changes unless the whole import succeeds.
+- **Per-user preferences.** An importer with `user-storage@0.1` can read its settings during an
+  import and stage `set` or `remove` calls, for example to remember the options used for a format.
+  Settings are saved only after the imported design is valid and the host accepts the successful
+  import. A failed or cancelled import, including an invalid output design, saves no settings.
+  The [per-user settings rules](#per-user-settings-user-storage01) below apply unchanged, including
+  key and byte limits and the scope checks for deleting settings when the plugin is uninstalled.
 - **Assemblies.** `source.read`, `source.size` and `source.resolve` with path `""` reach the file
   being imported. Any other path is relative to that file's folder (an assembly's parts) and needs
   the `input_folder` permission. The install review shows it and Install approves it, stored with
@@ -1075,13 +1484,21 @@ Only an importer may say `open`.
   it, returning the command's JSON reply (or `{"error": "..."}` when the command fails). Staging
   again starts a new design; `evaluate.reset` discards it, and nothing outlives the import. The
   session reads no files, not even fonts or linked designs, and runs no command that writes; its
-  time counts against the import's deadline, and Cancel stops the import between commands. A
+  native evaluation time does not count against the guest compute deadline. Cancel stops the
+  import between commands. A
   design the app can't open, a command outside the list or a reply over 1 MiB is an error for that
   call only, so the importer can report its history as unchecked instead of failing.
 - **Failures.** A failure fails that one import, named with the plugin and the file ("Sample
   could not open bracket.smp: ...", or "Sample does not support bracket.smp: ..." for
   `unsupported`), and the next one gets a fresh instance. The compiled component stays in memory, so the next file opens
-  without compiling again.
+  without compiling again. Return `unsupported(reason)` for a
+  deliberate refusal meant for the user: File › Open and drag-and-drop open show the plugin's name
+  and its reason as plain text in a dialog with OK. Traps and other failures use the status line.
+  Rust engine callers receive a typed `Unsupported` error with the plugin's reason. Answered
+  background opens also include `plugin_error: {"kind":"unsupported","plugin":"Sample","reason":"..."}`
+  alongside `ok: false` and the readable `error` text. Scripts and MCP do not open a dialog;
+  their error responses carry the readable text, not a stable importer refusal kind. Control
+  responses use `ok` and `error`; MCP tool responses use `isError` and text content.
 - **Compiled plugins are kept.** A plugin compiles once per version: SolidCraft keeps the compiled
   code with Wasmtime's compilation cache in the `plugin-compile` folder of its per-user cache folder
   (`%LOCALAPPDATA%\SolidCraft\plugin-compile`, `~/Library/Caches/SolidCraft/plugin-compile`, or
@@ -1095,7 +1512,8 @@ Only an importer may say `open`.
   compiles it again on one background thread; later files use its faster code, and it is what goes
   into the cache, so the next session loads it at once. Nothing waits for it. Fuel, memory, the
   deadline and Cancel hold the same under both compilers.
-- **Limits.** An importer's component may be up to 64 MiB, its deadline up to 10 minutes, and its
+- **Limits.** An importer's component may be up to 64 MiB, its guest compute deadline up to
+  10 minutes under default host policy (or more with a raised `max_deadline_ms`), and its
   `stack_kib` up to 64 MiB (a command may ask for at most 1 MiB). Its fuel and memory must fit the user's default limits in Preferences › Plugins
   unless the user approved more for this exact package at install. Build it for `wasm32-unknown-unknown` and wrap it with
   `wasm-tools component new`: the host links no WASI, so a component that imports any is refused.
@@ -1145,9 +1563,9 @@ are listed in `runtime.commands`:
 ## Errors
 
 Every plugin failure starts with the plugin's name, and an importer's or exporter's with the file's name too.
-Programs get the structured error (`kind` and its fields) from the engine as well as the text. The
-text comes from the message catalog (`plugin_error.*`) in the window's language; the command line
-and MCP give the English.
+Rust engine callers get the structured error (`kind` and its fields) as well as the text; script
+and MCP responses flatten importer errors to text as described above. The text comes from the
+message catalog (`plugin_error.*`) in the window's language; the command line and MCP give the English.
 
 | What happened | What the user reads |
 |---|---|
@@ -1155,16 +1573,89 @@ and MCP give the English.
 | `invalid-input` from the plugin | Sample could not open broken.smp: (its reason) |
 | More memory than plugins may use | Sample could not open big.smp: it asks for 2048 MiB of memory, and plugins may use 128 MiB. Install the plugin again and allow its memory request, or raise Max plugin memory (MiB) in Preferences › Plugins (in solidcraft-cli, max_memory_mib in the --plugin-limits file). |
 | More fuel than plugins may use | ... it asks for N fuel, and plugins may use M. Install the plugin again and allow its fuel request, or raise Max plugin fuel in Preferences › Plugins (in solidcraft-cli, max_fuel in the --plugin-limits file). |
-| It ran out of fuel, memory, stack or time | ... it used all N fuel it asks for and was stopped. Ask its author to raise its fuel limit. (memory in MiB, stack in KiB, time in seconds) |
+| More command host calls than plugins may use | ... it asks for N host calls, and plugins may use M. Raise Max plugin host calls in Preferences › Plugins (in solidcraft-cli, max_host_calls in the --plugin-limits file). |
+| More guest compute time than plugins may use | ... it asks for N ms of guest time, and plugins may use M ms. Raise Max plugin guest time (ms) in Preferences › Plugins (in solidcraft-cli, max_deadline_ms in the --plugin-limits file). |
+| It ran out of fuel, memory, host calls, stack or guest compute time | ... it used all N fuel it asks for and was stopped. Ask its author to raise its fuel limit. (memory in MiB, host calls as a count, stack in KiB, time in seconds) |
 | Its design is over 256 MiB | ... the design it made is larger than 256 MiB, the most a plugin can hand over. |
 | A trap | ... it stopped on an error inside the plugin (details). Report this to its author. |
 
 `plugin.inspect` words `limits_error` the same way. The structured kinds are `unsupported`
-(`reason`), `over_ceiling` (`limit` is `fuel` or `memory_mib`, with `requested` and `allowed`) and
-`exhausted` (`limit` is `fuel`, `memory_mib`, `stack_kib`, `deadline_ms` or `design_mib`, with
+(`reason`), `over_ceiling` (`limit` is `fuel`, `memory_mib`, `host_calls` or `deadline_ms`, with `requested` and `allowed`) and
+`exhausted` (`limit` is `fuel`, `memory_mib`, `host_calls`, `stack_kib`, `deadline_ms` or `design_mib`, with
 `allowed`). The engine's own numbers for a stopped run (fuel used and left) go to the debug log.
 
 ## Plugin data in a design
+
+A plugin chooses the lifetime of each setting. Keep values that determine a particular part
+with the design using `storage@0.1`. Keep personal defaults, such as a shop's preferred hinge
+or sheet price, with the user using `user-storage@0.1`. A plugin can request both capabilities.
+
+### Per-user settings (`user-storage@0.1`)
+
+Add `"user-storage@0.1"` beside `"commands@0.2"` or `"formats@0.2"` in the manifest's
+capabilities. No `runtime.data_format` is needed unless the plugin also uses design storage.
+The `craft:plugin/user-storage@0.2.0` host interface is available in `command-plugin` and the
+additive `importer-plugin-with-storage` world. Both offer:
+
+| Call | Result |
+| --- | --- |
+| `get(key)` | The JSON string, or `none` for an absent key |
+| `set(key, value)` | Saves a JSON value supplied as a string |
+| `remove(key)` | Whether the key existed |
+| `list()` | The stored keys, sorted by name |
+
+All four return `result<…, plugin-error>`. JSON `null` is a value, distinct from an absent key.
+Only the calling plugin's entries can access its settings: no call accepts another plugin id
+or a file path. The manifest capability is required for every call; importing the interface
+alone grants no access. Deleting settings when uninstalling obeys the caller's file scope as
+described below. Existing command plugins and importers continue linking without the new import.
+
+Each plugin can keep at most **128 keys** and **65,536 bytes (64 KiB)** for the entire compact
+JSON object, including keys, values, quotes, braces and separators. Keys contain 1–128 UTF-8
+bytes without control characters. Invalid keys or JSON return `invalid-input`. Exceeding a
+budget returns typed `limit-exceeded` naming `user-storage keys (128)` or
+`user-storage total bytes (65536)`. Each `set` argument accepts at most 1 MiB of JSON text
+before parsing (`limit-exceeded: user-storage JSON input bytes (1048576)`); whitespace does not
+consume the compact map's budget. A refused write leaves the previous data intact.
+
+`set` and `remove` are refused from `read` entries and dialog hooks, like design-storage writes.
+A file-aware hook may read its own settings with `get` and `list`; its read transaction is discarded
+when the hook finishes, and it still has only the bounded file prefix and no folder grants. Changes are
+staged while the entry runs and published when the host commits it. Guest failures discard
+staged settings. Importers may read throughout the import; their writes are published only after
+the host validates and accepts the successful import. Failed or cancelled imports publish no
+settings. The host remembers the loaded file's SHA-256 hash (including whether it was
+absent) and checks it again under a per-plugin file lock before replacing the map. If the file
+changed, or another run holds the lock, commit refuses with the structured host error
+`{"kind":"user_storage_conflict", "plugin":"gears"}`. No settings or design changes from that
+transaction are published. Retry the whole plugin call to load the latest settings and apply its
+changes again; even changes to different keys require a retry. A read without staged changes
+can still succeed after another run commits. The lock is released on close or process exit;
+the separate `<plugin-id>.lock` file stays beside the JSON file so simultaneous processes use
+the same lock. As with existing granted file writes, a later file-publication error may report
+failure after settings have committed. A user-settings write **does not edit the design or add
+an undo step**. Undoing a modelling operation does not undo the user's settings. A settings-only entry declares `edit`, since it
+writes, but its successful run leaves the design unchanged.
+
+SolidCraft saves one `plugin-user-data/<plugin-id>.json` file in the user's settings folder,
+using an atomic replacement. It never embeds these settings in a design or shares them with
+another plugin. Desktop, scripts, MCP and CLI plugin calls use the same folder:
+`$XDG_DATA_HOME/solidcraft` (default `~/.local/share/solidcraft`) on Linux,
+`~/Library/Application Support/SolidCraft` on macOS, and `%APPDATA%/SolidCraft/data` on Windows.
+`SOLIDCRAFT_SETTINGS_DIR` selects an isolated settings folder for desktop and headless runs;
+`--plugins-dir` changes installed packages, not the settings folder.
+`plugin test` gives each case a temporary settings folder and removes it after the run.
+
+Removing a plugin in Preferences offers to remove its saved user settings too; the box starts
+unchecked (keep). Scripts and MCP may omit `remove_user_data`:
+`plugin.remove {"id":"gears"}` and `plugin.remove {"id":"gears", "remove_user_data":false}`
+keep settings for reinstallation; `remove_user_data:true` deletes that plugin's settings.
+Deleting settings also requires the caller's file scope to allow the settings record; otherwise
+removal refuses with typed `permission_denied` before changing the package, grants or settings.
+These programmatic calls never prompt.
+Revoking approvals or disabling the plugin keeps its settings.
+
+### Design storage (`storage@0.1`)
 
 A design container reserves `plugins/<plugin-id>/` for a plugin's own files. They are kept and
 saved back untouched when the plugin is missing, and opening a design never fails because a plugin

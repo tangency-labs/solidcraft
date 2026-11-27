@@ -1052,6 +1052,71 @@ pub fn extrude_sheet(plane: &Plane, chains: &[Vec<Seg2>], start: f64, end: f64) 
     sheet_of(pieces, false, &[])
 }
 
+/// [`extrude_sheet`] with leaning walls: the side walls of [`crate::extrude_tapered_between`]'s
+/// solids, without their caps. Each region stands as drawn on `plane` moved `start` along its
+/// normal and is swept from there to `end` (offsets in mm), its walls leaning by `taper` as they
+/// go (radians; positive grows the region, so its outer wall leans out and the walls of its holes
+/// lean in), its sharp corners closed by its rule in `corners` (one a region, as each solid
+/// takes its own). Every loop closes: a wall leans away from the inside of its loop, which an
+/// open chain does not have. Each region's solid is built and its caps left out, so what the
+/// solid refuses (a taper that closes the region before the far end, a hole that meets the outer
+/// wall) is refused here for the same reason. The walls form one surface body facing out of the
+/// regions; each face comes from the profile segments the solid's wall does, numbered through
+/// the regions in order (each its outer loop, then its holes).
+pub fn extrude_sheet_tapered(plane: &Plane, regions: &[Region2], corners: &[crate::DraftCorner], start: f64, end: f64, taper: f64) -> Result<Body> {
+    if !crate::build::frame_ok(plane) {
+        return Err(invalid("extrude frame is not finite and orthonormal"));
+    }
+    if !(start.is_finite() && end.is_finite() && start.abs() < 1e7 && end.abs() < 1e7) {
+        return Err(invalid("extrude distance is not finite"));
+    }
+    if regions.is_empty() || regions.len() > MAX_CHAINS {
+        return Err(invalid("pick the profiles to extrude"));
+    }
+    if corners.len() != regions.len() {
+        return Err(invalid("a tapered extrude takes one corner rule for each profile"));
+    }
+    let loops: Vec<Vec<Seg2>> = crate::numbered::profile_loops(regions).map(|l| l.segs.clone()).collect();
+    check_chains(&loops, "extrude")?;
+    let closes = |c: &Vec<Seg2>| c.first().zip(c.last()).is_some_and(|(first, last)| last.end().dist(first.start()) <= 1e-6);
+    if !loops.iter().all(closes) {
+        return Err(invalid("a taper needs closed profiles: a chain of curves is open"));
+    }
+    let base = plane.offset(start);
+    let sign = if end >= start { 1.0 } else { -1.0 };
+    let mut pieces = Vec::with_capacity(regions.len());
+    // The number of the region's first segment among all the regions' segments.
+    let mut first = 0;
+    for (region, corner) in regions.iter().zip(corners) {
+        let solid = crate::extrude_tapered_between(&base, region, 0.0, (end - start).abs(), 0.0, sign, taper, *corner)?;
+        let made = solid.history().ok_or_else(|| failed("surface extrude: the tapered solid has no history"))?;
+        let is_cap = |f: &FaceProv| f.origins.iter().any(|o| matches!(o, FaceOrigin::Cap { .. }));
+        let walls: Vec<(usize, bool)> = made.faces.iter().enumerate().filter(|(_, f)| !is_cap(f)).map(|(i, _)| (i, false)).collect();
+        // A solid stands on its start cap: with none found the caps are not known, and the
+        // faces would not be the walls alone.
+        if walls.is_empty() || walls.len() == made.faces.len() {
+            return Err(failed("surface extrude: the walls of the tapered solid could not be told from its caps"));
+        }
+        let c = Parts::of(solid.record(), &walls)?.canonical()?;
+        // Each wall as the solid's history has it, its segments numbered through the regions.
+        let through = |o: &FaceOrigin| match *o {
+            FaceOrigin::Profile { segment } => FaceOrigin::Profile { segment: segment + first },
+            other => other,
+        };
+        let from: Option<Vec<FaceProv>> = c
+            .faces
+            .iter()
+            .map(|part| {
+                let wall = made.faces.get(walls.get(*part)?.0)?;
+                Some(FaceProv { origins: wall.origins.iter().map(through).collect(), change: wall.change })
+            })
+            .collect();
+        pieces.push((c.brep, from.ok_or_else(|| failed("surface extrude: a wall of the tapered solid has no history"))?));
+        first += region.loops().map(|l| l.segs.len()).sum::<usize>();
+    }
+    sheet_of(pieces, false, &[])
+}
+
 /// The sheet SMLib revolves from the sketch segments `segs` on `plane` about the axis through
 /// `origin` along the unit `axis` (in the plane) by `angle` radians (right-handed, up to a turn),
 /// with no caps, as its record: a surface builder's sector.
@@ -1215,7 +1280,7 @@ pub fn loft_sheet(sections: &[(Plane, Vec<Seg2>)]) -> Result<Body> {
     loft_sheet_with_rails(sections, &[], crate::RailFit::Scale)
 }
 
-/// [`loft_sheet`] following one or two guide rails (polylines from the first section to the last,
+/// [`loft_sheet`] following 1…16 guide rails (polylines from the first section to the last,
 /// through every section's curve; see [`crate::loft_rails`]), `fit` saying how they reshape the
 /// sections between. Without rails, the plain sheet loft.
 ///
@@ -1231,6 +1296,25 @@ pub fn loft_sheet_with_rails_legacy_sides(sections: &[(Plane, Vec<Seg2>)], rails
     lofted_sheet(sections, rails, fit, false)
 }
 
+/// Whether the ends of an ordered planar section meet, at the sketch chain's join tolerance.
+/// This distinguishes a loop from an open chain; it does not validate the section.
+#[must_use]
+pub fn loft_section_closed(chain: &[Seg2]) -> bool {
+    solidcore_ops::sweep::loft_section_closed(chain, 1e-6)
+}
+
+/// An uncapped loft through two closed planar sketch sections with a single G1 end. The
+/// original segments are the position constraints and name the walls; `tangent_at` selects
+/// section 0 or 1, `crown` shapes that end, and `faced` sets the side of the sheet as in
+/// [`loft_sheet_with_rails`].
+pub fn loft_sheet_planar_g1(sections: &[(Plane, Vec<Seg2>); 2], tangent_at: usize, crown: f64, faced: bool) -> Result<Body> {
+    let sections = sections.each_ref().map(|(plane, chain)| solidcore_ops::sweep::LoftSection { plane: *plane, segs: chain.clone() });
+    let ops = |e| failed(format!("surface loft: {e}"));
+    let (r, sources) = solidcore_ops::sweep::loft_sheet_planar_g1(&sections, tangent_at, crown, faced).map_err(ops)?;
+    let h = sources.iter().map(record::profile).collect();
+    sheet_of(vec![(r, h)], false, &[])
+}
+
 fn lofted_sheet(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>], fit: crate::RailFit, faced: bool) -> Result<Body> {
     if sections.len() < 2 || sections.len() > 50 {
         return Err(invalid("a loft needs 2…50 sections"));
@@ -1238,7 +1322,7 @@ fn lofted_sheet(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>], fit: crate
     let closed: Vec<bool> = sections
         .iter()
         .map(|(_, c)| match (c.first(), c.last()) {
-            (Some(f), Some(l)) if c.len() <= 4096 => Ok(l.end().dist(f.start()) <= 1e-6),
+            (Some(_), Some(_)) if c.len() <= 4096 => Ok(loft_section_closed(c)),
             _ => Err(invalid("a loft section has no curves, or too many")),
         })
         .collect::<Result<_>>()?;
@@ -1253,6 +1337,14 @@ fn lofted_sheet(sections: &[(Plane, Vec<Seg2>)], rails: &[Vec<Vec3>], fit: crate
         check_chains(std::slice::from_ref(chain), "loft")?;
     }
     let matched = if all_closed { closed_sections(sections)? } else { open_sections(sections)? };
+    if rails.len() > 2 {
+        // solidcore's skin is open, so a closed loop's sheet is not built along three or more rails.
+        if all_closed {
+            return Err(KernelError::Failed("not supported yet: a sheet loft of closed sections along three or more guide rails".into()));
+        }
+        let skin = crate::smlib_sweeps::skin_sections(&matched)?;
+        return all_new(Body::from_record(crate::smlib_sweeps::railed_skin(&skin, rails, fit, false)?)?, &[]);
+    }
     let lofted = crate::loft_rails::railed(&matched, all_closed, rails, fit)?;
     let curves: usize = lofted.iter().map(Vec::len).sum();
     if curves > solidcore_ops::sweep::MAX_CURVES {
@@ -1806,6 +1898,122 @@ mod tests {
         let closed = stitch(&[&walls, &bottom, &top], 1e-6).unwrap();
         assert!(!closed.is_surface());
         assert!(rel(measure(&closed).unwrap().volume, 400.0) < 1e-9);
+    }
+
+    /// Tapered sheets against their closed forms. A square of side a leaning out by α over a
+    /// height h: four trapezoids between sides a and a + 2 h tan α, each h / cos α tall along the
+    /// slope, so 4 (a + h tan α) h / cos α. A circle: a cone's frustum, π (r + r′) h / cos α with
+    /// r′ = r + h tan α. A profile with a hole: its hole's wall leans the other way, as on
+    /// [`crate::extrude_tapered`]'s solid, whose area less its two caps the walls have. The loop
+    /// at the start is the profile as drawn, whichever way the sheet goes from there.
+    #[test]
+    fn extrude_sheet_tapered_walls_have_their_closed_form_areas() {
+        use std::f64::consts::PI;
+        let corner = [crate::DraftCorner::default()];
+        let sq = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(20.0, 20.0), Vec2::new(0.0, 20.0)]),
+            holes: vec![],
+        };
+        let (h, alpha) = (10.0, 10f64.to_radians());
+        let grow = h * alpha.tan();
+        let walls = extrude_sheet_tapered(&Plane::XY, std::slice::from_ref(&sq), &corner, 0.0, h, alpha).unwrap();
+        assert!(walls.is_surface() && walls.face_count() == 4);
+        assert_eq!(walls.open_edge_count().unwrap(), 8, "open at both ends");
+        let m = measure(&walls).unwrap();
+        let want = 4.0 * (20.0 + grow) * h / alpha.cos();
+        assert!(rel(m.area, want) < 1e-9, "{} vs {want}", m.area);
+        // The top loop is the square grown by h tan α on every side; the bottom the square drawn.
+        assert!((m.bbox.min.x + grow).abs() < 1e-9 && (m.bbox.max.x - 20.0 - grow).abs() < 1e-9, "{:?}", m.bbox);
+        assert!(m.bbox.min.z.abs() < 1e-9 && (m.bbox.max.z - h).abs() < 1e-9, "{:?}", m.bbox);
+        // A patch on each end closes it into the frustum, h/3 (A + A′ + √(A A′)): the walls
+        // face out of the profile.
+        let top = Region2 {
+            outer: Loop2::polygon(&[
+                Vec2::new(-grow, -grow),
+                Vec2::new(20.0 + grow, -grow),
+                Vec2::new(20.0 + grow, 20.0 + grow),
+                Vec2::new(-grow, 20.0 + grow),
+            ]),
+            holes: vec![],
+        };
+        let closed = stitch(&[&walls, &patch_region(&Plane::XY, &sq).unwrap(), &patch_region(&Plane::XY.offset(h), &top).unwrap()], 1e-6).unwrap();
+        assert!(!closed.is_surface());
+        let side = 20.0 + 2.0 * grow;
+        let volume = h / 3.0 * (400.0 + side * side + 20.0 * side);
+        assert!(rel(measure(&closed).unwrap().volume, volume) < 1e-9);
+        // Downward from 3 above the plane, leaning in: the square as drawn at 3, smaller at -7.
+        let down = measure(&extrude_sheet_tapered(&Plane::XY, std::slice::from_ref(&sq), &corner, 3.0, 3.0 - h, -alpha).unwrap()).unwrap();
+        let want = 4.0 * (20.0 - grow) * h / alpha.cos();
+        assert!(rel(down.area, want) < 1e-9, "{} vs {want}", down.area);
+        assert!((down.bbox.max.z - 3.0).abs() < 1e-9 && (down.bbox.min.z - 3.0 + h).abs() < 1e-9, "{:?}", down.bbox);
+        assert!(down.bbox.min.x.abs() < 1e-9 && (down.bbox.max.x - 20.0).abs() < 1e-9, "widest at the start: {:?}", down.bbox);
+        // A circle of radius 5 leaning in by 10° over 10: a cone's frustum.
+        let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, 5.0), holes: vec![] };
+        let cone = extrude_sheet_tapered(&Plane::XY, std::slice::from_ref(&disc), &corner, 0.0, h, -alpha).unwrap();
+        assert!(cone.is_surface());
+        let m = measure(&cone).unwrap();
+        let want = PI * (5.0 + 5.0 - grow) * h / alpha.cos();
+        assert!(rel(m.area, want) < 1e-3, "{} vs {want}", m.area); // (measured on meshes)
+        assert!((m.bbox.max.x - 5.0).abs() < 1e-6, "{:?}", m.bbox);
+        // The square with a round hole, 5° outward: the walls of the solid, which is the solid's
+        // area less its caps (the ring at the bottom, the grown square less the shrunk hole on top).
+        let ring = Region2 { outer: sq.outer.clone(), holes: vec![Loop2::circle(Vec2::new(10.0, 10.0), 4.0)] };
+        let beta = 5f64.to_radians();
+        let g = h * beta.tan();
+        let sheet = extrude_sheet_tapered(&Plane::XY, std::slice::from_ref(&ring), &corner, 0.0, h, beta).unwrap();
+        assert!(sheet.is_surface());
+        let want = 4.0 * (20.0 + g) * h / beta.cos() + PI * (4.0 + 4.0 - g) * h / beta.cos();
+        let area = measure(&sheet).unwrap().area;
+        assert!(rel(area, want) < 1e-3, "{area} vs {want}");
+        let solid = measure(&crate::extrude_tapered(&Plane::XY, &ring, h, 1.0, beta, corner[0]).unwrap()).unwrap().area;
+        let caps = (400.0 - PI * 16.0) + ((20.0 + 2.0 * g).powi(2) - PI * (4.0 - g).powi(2));
+        assert!(rel(area, solid - caps) < 1e-3, "{area} vs {}", solid - caps);
+        // A circle of radius r leaning in by 60° closes at its centre r / tan 60° up, before the
+        // far end: the sheet is the cone to that apex, as the solid's is, π r · r / sin 60°.
+        let steep = 60f64.to_radians();
+        let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, 5.0), holes: vec![] };
+        let m = measure(&extrude_sheet_tapered(&Plane::XY, std::slice::from_ref(&disc), &corner, 0.0, h, -steep).unwrap()).unwrap();
+        let want = PI * 5.0 * 5.0 / steep.sin();
+        assert!(rel(m.area, want) < 1e-3, "{} vs {want}", m.area);
+        assert!((m.bbox.max.z - 5.0 / steep.tan()).abs() < 1e-6 && m.bbox.min.z.abs() < 1e-6, "{:?}", m.bbox);
+    }
+
+    /// What a tapered sheet refuses: a loop that does not close, a taper of a right angle or
+    /// more, a taper that runs a hole into the outer wall (as the solid refuses it), no distance,
+    /// and numbers that are not finite.
+    #[test]
+    fn extrude_sheet_tapered_refuses_bad_input() {
+        let corner = [crate::DraftCorner::default()];
+        let disc = Region2 { outer: Loop2::circle(Vec2::ZERO, 5.0), holes: vec![] };
+        let one = std::slice::from_ref(&disc);
+        assert!(extrude_sheet_tapered(&Plane::XY, one, &corner, 0.0, 10.0, 0.1).is_ok());
+        // A square of side 20 with a hole of radius 4 at its middle, leaning in by 30° over 10:
+        // the sides come in 5.77 and the hole grows by as much, so they meet (10 − 5.77 < 4 + 5.77).
+        let ring = Region2 {
+            outer: Loop2::polygon(&[Vec2::new(0.0, 0.0), Vec2::new(20.0, 0.0), Vec2::new(20.0, 20.0), Vec2::new(0.0, 20.0)]),
+            holes: vec![Loop2::circle(Vec2::new(10.0, 10.0), 4.0)],
+        };
+        assert!(
+            extrude_sheet_tapered(&Plane::XY, std::slice::from_ref(&ring), &corner, 0.0, 10.0, -30f64.to_radians()).is_err(),
+            "the hole meets the outer wall"
+        );
+        assert!(extrude_sheet_tapered(&Plane::XY, one, &corner, 0.0, 10.0, std::f64::consts::FRAC_PI_2).is_err());
+        assert!(extrude_sheet_tapered(&Plane::XY, one, &corner, 0.0, 10.0, f64::NAN).is_err());
+        assert!(extrude_sheet_tapered(&Plane::XY, one, &corner, 2.0, 2.0, 0.1).is_err());
+        assert!(extrude_sheet_tapered(&Plane::XY, one, &corner, 0.0, f64::INFINITY, 0.1).is_err());
+        assert!(extrude_sheet_tapered(&Plane::XY, &[], &[], 0.0, 10.0, 0.1).is_err());
+        assert!(extrude_sheet_tapered(&Plane::XY, one, &[], 0.0, 10.0, 0.1).is_err(), "no corner rule for the profile");
+        let open = Region2 {
+            outer: Loop2 {
+                segs: vec![
+                    Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(10.0, 0.0) },
+                    Seg2::Line { a: Vec2::new(10.0, 0.0), b: Vec2::new(10.0, 10.0) },
+                ],
+            },
+            holes: vec![],
+        };
+        let e = extrude_sheet_tapered(&Plane::XY, &[open], &corner, 0.0, 10.0, 0.1).unwrap_err();
+        assert!(e.to_string().contains("closed"), "{e}");
     }
 
     /// Sheets revolved about the sketch's y axis, against their analytic areas: a cylinder (and a
