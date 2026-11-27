@@ -574,7 +574,12 @@ pub const SECTIONS: &[Section] = &[
         ],
     },
     // Cell Grid cuts a sketch's area into a part, as Hole and Emboss do: it follows Hole in the menu.
-    Section { tab: "MODEL", panel: "CREATE", promoted: 3, ids: &["solid.extrude", "solid.revolve", "solid.hole", "solid.cell_grid", "solid.living_hinge"] },
+    Section {
+        tab: "MODEL",
+        panel: "CREATE",
+        promoted: 3,
+        ids: &["solid.extrude", "solid.revolve", "solid.hole", "solid.cell_grid", "solid.living_hinge"],
+    },
     Section {
         tab: "MODEL",
         panel: "MODIFY",
