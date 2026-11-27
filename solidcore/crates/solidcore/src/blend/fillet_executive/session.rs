@@ -2533,6 +2533,7 @@ impl<'target> FilletSession<'target> {
                                 .to_owned(),
                             fit_edge: None,
                             fit: None,
+                            refusal: None,
                         });
                     }
                 }
