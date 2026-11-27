@@ -46,13 +46,14 @@
 //!   `SmFace::SetSurface` (ported in `topology.face_p1`, which moves an owned
 //!   `Surface`): the swap takes the surface out of the deleted face and hands the
 //!   replaced one back.
-//! - **Same-face loop merge.** Upstream `SmBrep::DeleteEdge` assumes `pLU != pLURad`
-//!   implies `pFace != pFaceRad`; deleting a second internal seam of a single-face
-//!   doubly-periodic body (whose first seam split the loop into two loops of that same
-//!   face) sets `pDelF = pSurvF` and destroys the surviving face (#21218). When
+//! - **Same-face loop merge (WR-21218).** Upstream `SmBrep::DeleteEdge` assumes
+//!   `pLU != pLURad` implies `pFace != pFaceRad`; deleting a second internal seam of a
+//!   single-face doubly-periodic body (whose first seam split the loop into two loops of
+//!   that same face) sets `pDelF = pSurvF` and destroys the surviving face (#21218). When
 //!   `face == face_rad`, `delete_manifold_edge` merges the two loops on that face
-//!   (promoting the surviving loop to `OrientType::Same` if the removed loop was outer)
-//!   without notifying a face merge, swapping surfaces, or destroying the face.
+//!   (promoting the surviving loop to `OrientType::Same` and moving it to the head of both
+//!   face uses' loop lists if the removed loop was outer) without notifying a face merge,
+//!   swapping surfaces, or destroying the face.
 //! - **`SmLockBrepBox`** is RAII upstream; `StitchFaces` holds `topology.brep_p1`'s
 //!   [`LockBrepBox`] guard (unlocked on drop, on every path). Its lock
 //!   (`SmBrep::LockBoundingBox`, unit `query.brep`) is not ported yet.
@@ -677,6 +678,25 @@ fn faceuse_remove(b: &mut Brep, fu: FaceuseId, lu: LoopuseId, op: &'static str) 
 fn faceuse_post_insert(b: &mut Brep, fu: FaceuseId, lu: LoopuseId) -> Result<()> {
     b.faceuse_mut(fu)?.loopuses.push(lu);
     b.loopuse_mut(lu)?.faceuse = Some(fu);
+    Ok(())
+}
+
+/// Moves `lu` to index 0 of its face use's `loopuses` list so the promoted outer loop
+/// stays head of the face's loop list (validity-and-tolerances.md: outer loop first).
+fn move_loopuse_to_front(b: &mut Brep, lu: LoopuseId, op: &'static str) -> Result<()> {
+    let fu = deref(loopuse::faceuse(b, lu)?, op)?;
+    let list = &mut b.faceuse_mut(fu)?.loopuses;
+    if !list.contains(&lu) {
+        return Err(defect(
+            op,
+            "the loop use is not on its face use's list, though the kernel lists every loop use \
+             on the face use it links it to",
+        ));
+    }
+    let mut reordered = Vec::new();
+    reordered.push(lu);
+    reordered.extend(list.iter().copied().filter(|&x| x != lu));
+    *list = reordered;
     Ok(())
 }
 
@@ -1326,11 +1346,13 @@ fn delete_manifold_edge(
 
     if same_face {
         // Merging two loops of one face keeps that face alive; preserve the outer
-        // orientation when the removed loop carried it.
+        // orientation and head position when the removed loop carried it.
         if del_lu_was_outer {
             let surv_lu_other = deref(loopuse::other_loopuse(b, surv_lu)?, OP)?;
             b.loopuse_mut(surv_lu)?.orientation = OrientType::Same;
             b.loopuse_mut(surv_lu_other)?.orientation = OrientType::Same;
+            move_loopuse_to_front(b, surv_lu, OP)?;
+            move_loopuse_to_front(b, surv_lu_other, OP)?;
         }
         return Ok(());
     }
@@ -2713,5 +2735,51 @@ mod tests {
         let lu = b.loop_(loops[0]).unwrap().loopuse.unwrap();
         assert_eq!(loopuse::orientation(&b, lu).unwrap(), OrientType::Same);
         assert!(loopuse::is_vertex_loopuse(&b, lu).unwrap());
+
+        // When the face also carries an existing inner loop, promoting the split loop to
+        // outer must place it back at index 0 of both face uses' loop lists (outer first).
+        let mut b2 =
+            crate::primitive::api_primitives::create_torus(&mut k, crate::Point3::ZERO, 10.0, 3.0)
+                .unwrap();
+        let face2_id = b2.face_list()[0];
+        let edges2 = b2.edge_list().to_vec();
+        let hole_l = b2
+            .add_loop_record(Loop {
+                face: face2_id,
+                edges: Vec::new(),
+                loopuse: None,
+            })
+            .unwrap();
+        let hole_lu = b2.add_loopuse_record(Loopuse::default()).unwrap();
+        let hole_lu_mate = b2.add_loopuse_record(Loopuse::default()).unwrap();
+        b2.loopuse_mut(hole_lu).unwrap().loop_ = Some(hole_l);
+        b2.loopuse_mut(hole_lu).unwrap().mate = Some(hole_lu_mate);
+        b2.loopuse_mut(hole_lu).unwrap().orientation = OrientType::Opposite;
+        b2.loopuse_mut(hole_lu_mate).unwrap().loop_ = Some(hole_l);
+        b2.loopuse_mut(hole_lu_mate).unwrap().mate = Some(hole_lu);
+        b2.loopuse_mut(hole_lu_mate).unwrap().orientation = OrientType::Opposite;
+        b2.loop_mut(hole_l).unwrap().loopuse = Some(hole_lu);
+        let (fu, fu_mate) = face2::faceuses(&b2, face2_id).unwrap();
+        let (fu, fu_mate) = (fu.unwrap(), fu_mate.unwrap());
+        faceuse_post_insert(&mut b2, fu, hole_lu).unwrap();
+        faceuse_post_insert(&mut b2, fu_mate, hole_lu_mate).unwrap();
+
+        b2.set_editing_enabled(true);
+        with_local_env(|env| {
+            delete_edge(&mut k, &mut b2, env, edges2[0], Some(face2_id))?;
+            delete_edge(&mut k, &mut b2, env, edges2[1], Some(face2_id))
+        })
+        .unwrap();
+
+        let loops2 = face2::loops(&b2, face2_id, false, None).unwrap();
+        assert_eq!(loops2.len(), 2);
+        assert_ne!(loops2[0], hole_l, "promoted outer loop must head the face");
+        assert_eq!(loops2[1], hole_l);
+        for f_use in [fu, fu_mate] {
+            let head = b2.faceuse(f_use).unwrap().loopuses[0];
+            assert_eq!(loopuse::orientation(&b2, head).unwrap(), OrientType::Same);
+            assert_ne!(head, hole_lu);
+            assert_ne!(head, hole_lu_mate);
+        }
     }
 }

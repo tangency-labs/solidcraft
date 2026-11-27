@@ -1253,14 +1253,15 @@ impl Assembly<'_> {
 
     /// The slit made the meridian seam of `surface` when it is a surface of revolution closed
     /// at both poles ([`Assembly::meridian_slit`]); `None` for any other surface, or for a closed
-    /// meridian slit on a horn torus (coincident poles) left for [`Assembly::split_at_poles`] and
-    /// [`Assembly::reduce_pole_closed_seams`].
+    /// meridian slit on an analytic/revolved horn torus (coincident poles) left for
+    /// [`Assembly::split_at_poles`] and [`Assembly::reduce_pole_closed_seams`].
     fn closed_at_poles(&mut self, path: &[(u32, bool)], surface: &BSurface) -> R<Option<Option<Vec<(u32, bool)>>>> {
         let eval = SurfaceEval::new(surface).map_err(|e| e.to_string())?;
         match axis(surface).or_else(|| spline_axis(surface, &eval)) {
             // Meridians run in v: a spline closed in v has none.
             Some(ax) if ax.kind.winds_in() == 0 && ax.poles.iter().all(Option::is_some) => {
-                if let [Some(south), Some(north)] = ax.poles
+                if !matches!(ax.kind, Kind::Iso { .. })
+                    && let [Some(south), Some(north)] = ax.poles
                     && south.dist(north) <= self.tol
                     && let (Some(&first), Some(&last)) = (path.first(), path.last())
                     && self.start(first)? == self.end(last)?
@@ -1367,7 +1368,7 @@ impl Assembly<'_> {
                     continue;
                 }
                 let turned_surface = if needs_turn {
-                    match &surface {
+                    let turned = match &surface {
                         BSurface::PlacedRevolution { profile, origin, axis, matrix, forward } => {
                             let rotated = meridian(profile, ax.origin, ax.z, u_meridian)?;
                             Some(BSurface::PlacedRevolution {
@@ -1380,7 +1381,9 @@ impl Assembly<'_> {
                         }
                         BSurface::Sphere { .. } => crate::kernel::form::turned(&surface, u_meridian),
                         _ => None,
-                    }
+                    };
+                    let Some(s) = turned else { continue };
+                    Some(s)
                 } else {
                     None
                 };
@@ -1414,7 +1417,7 @@ impl Assembly<'_> {
         let edge = self.edges.get(e as usize).ok_or("edge reference")?;
         let c = CurveEval::new(&edge.curve).map_err(|m| m.to_string())?;
         let ([lo, hi], reach) = (edge.interval, self.tol.max(edge.tolerance));
-        let mut samples = Vec::with_capacity(SAMPLES + 1);
+        let mut samples = Vec::new();
         for k in 0..=SAMPLES {
             let t = lo + (hi - lo) * k as f64 / SAMPLES as f64;
             let p = c.point(t).ok_or("edge point")?;
@@ -1423,24 +1426,37 @@ impl Assembly<'_> {
         }
 
         // First check whether all non-pole samples lie on a single meridian `u_cand` and move
-        // strictly monotonically in `v`.
-        let mut u_cand = *u_ref;
-        let mut vs = Vec::with_capacity(SAMPLES + 1);
-        let mut on_meridian = true;
-        for &(p, at_pole) in &samples {
-            if at_pole {
-                continue;
+        // strictly monotonically in `v`. When no reference longitude is fixed yet, read it from
+        // the sample farthest from the axis so near-pole rounding is not magnified.
+        let radial_dist2 = |p: Vec3| {
+            let d = p - ax.origin;
+            (d - ax.z * d.dot(ax.z)).len2()
+        };
+        let u_cand = match *u_ref {
+            Some(u) => Some(u),
+            None => samples
+                .iter()
+                .filter(|&&(_, at_pole)| !at_pole)
+                .max_by(|(a, _), (b, _)| radial_dist2(*a).total_cmp(&radial_dist2(*b)))
+                .and_then(|&(p, _)| eval.project(p, None, f64::INFINITY).map(|q| q[0])),
+        };
+        let mut vs = Vec::new();
+        let mut on_meridian = u_cand.is_some();
+        if let Some(u) = u_cand {
+            for &(p, at_pole) in &samples {
+                if at_pole {
+                    continue;
+                }
+                let Some(q) = eval.project(p, None, f64::INFINITY) else {
+                    on_meridian = false;
+                    break;
+                };
+                if !eval.point([u, q[1]]).is_some_and(|m| m.dist(p) <= reach) {
+                    on_meridian = false;
+                    break;
+                }
+                vs.push(q[1]);
             }
-            let Some(q) = eval.project(p, None, f64::INFINITY) else {
-                on_meridian = false;
-                break;
-            };
-            let u = *u_cand.get_or_insert(q[0]);
-            if !eval.point([u, q[1]]).is_some_and(|m| m.dist(p) <= reach) {
-                on_meridian = false;
-                break;
-            }
-            vs.push(q[1]);
         }
         if on_meridian && vs.len() >= 2 {
             let inc = vs.windows(2).all(|w| matches!(w, [a, b] if a < b));

@@ -4813,8 +4813,18 @@ mod seam_completion_fault_tests {
         });
         let r = complete_imported_face_seams(&mut k, &mut b, face);
         FAULTS.set(SeamFaults::default());
-        assert!(r.is_ok(), "unexpected error: {r:?}");
+        assert_eq!(r.unwrap(), Some(vec![face]));
         assert_eq!(b.face_list(), &[face]);
         assert!(b.face(face).is_ok());
+        assert_eq!(b.edge_list().len(), 2);
+        assert_eq!(
+            super::p4::upward_edgeuses(&b, face, false, None)
+                .unwrap()
+                .len(),
+            4
+        );
+        for e in b.edge_list().to_vec() {
+            assert!(crate::topology::edge::is_manifold(&b, e).unwrap());
+        }
     }
 }
