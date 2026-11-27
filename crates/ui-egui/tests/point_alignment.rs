@@ -853,3 +853,69 @@ fn midpoint_selection_review_images() {
     }
     solidcraft_theme::set_dark(previous);
 }
+
+/// Horizontal and Vertical are tools of their own: each goes its own way, even for a line drawn
+/// nearer the other way (which the combined tool would pick), and shows a thin dashed guide along
+/// that way while it is on. The combined tool shows none.
+#[test]
+fn horizontal_and_vertical_tools_go_their_own_way_and_show_a_guide() {
+    use solidcraft_ui_egui::scenario;
+    for (tool, horizontal) in [("sketch.constraint.horizontal", true), ("sketch.constraint.vertical", false)] {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let (end, middle, beside) = if horizontal { ([13, 40], [11.5, 25.0], [16.0, 25.0]) } else { ([40, 13], [25.0, 11.5], [25.0, 16.0]) };
+        h.app.run("sketch.line", json!({"points":[[10,10],end],"infer":false,"connect":false})).unwrap();
+        h.app.run("sketch.point", json!({"point":[20,24],"id":"q","connect":false})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.fit_view();
+        h.frames(3);
+        // Every point clear of the cards that float over the view's edges.
+        h.app.cam.distance *= 2.0;
+        h.app.cam_anim = None;
+        h.frames(1);
+        h.step(&json!({"start": tool})).unwrap();
+        h.step(&json!({"move":{"sketch":beside}})).unwrap();
+        assert!(h.app.tool.as_ref().is_some_and(|t| t.hover.is_some()), "{tool}: no hover");
+        h.frames(1);
+        let guide = scenario::rect_of("viewport:axis_guide").unwrap_or_else(|| panic!("{tool}: no guide"));
+        let (along, across) = if horizontal { (guide.width(), guide.height()) } else { (guide.height(), guide.width()) };
+        assert!(along > 100.0 && across < 1.0, "{tool}: {guide:?}");
+        h.step(&json!({"click":{"sketch":middle}})).unwrap();
+        assert!(!h.app.status.as_ref().is_some_and(|(_, _, error)| *error), "{tool}: {:?}", h.app.status);
+        let sk = &h.app.session.model.state().sketches[0].sketch;
+        let a = sk.point(sk.resolve_point("l1.start").unwrap()).unwrap();
+        let b = sk.point(sk.resolve_point("l1.end").unwrap()).unwrap();
+        let wanted = if horizontal { ConstraintKind::Horizontal { l: 0 } } else { ConstraintKind::Vertical { l: 0 } };
+        assert!(sk.constraints.iter().any(|c| std::mem::discriminant(&c.kind) == std::mem::discriminant(&wanted)), "{tool}");
+        assert!(if horizontal { (a.y - b.y).abs() < 1e-6 } else { (a.x - b.x).abs() < 1e-6 }, "{tool}: {a:?} {b:?}");
+        // The tool stays on for the next pick.
+        assert_eq!(h.app.tool.as_ref().map(|t| t.cmd), Some(tool));
+        // After the first of two points the one guide still follows the cursor; none stays
+        // behind through the picked point.
+        let across = |name: &str| scenario::rect_of(name).map(|r| if horizontal { r.center().y } else { r.center().x });
+        let (start, q) = ([a.x, a.y], [20, 24]);
+        h.step(&json!({"click":{"sketch":start}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().unwrap().point_picks.len(), 1, "{tool}");
+        let mut last = None;
+        for at in [[17, 18], [24, 20]] {
+            h.step(&json!({"move":{"sketch":at}})).unwrap();
+            h.frames(1);
+            assert_eq!(scenario::rects("viewport:axis_guide").len(), 1, "{tool}");
+            let cursor = across("viewport:axis_guide");
+            assert!(cursor.is_some() && cursor != last, "{tool}: {cursor:?}");
+            last = cursor;
+        }
+        h.step(&json!({"click":{"sketch":q}})).unwrap();
+        h.step(&json!({"move":{"sketch":[20,20]}})).unwrap();
+        h.frames(1);
+        assert!(h.app.tool.as_ref().is_some_and(|t| t.point_picks.is_empty()), "{tool}: {:?}", h.app.status);
+        assert_eq!(scenario::rects("viewport:axis_guide").len(), 1, "{tool}");
+    }
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.step(&json!({"start":"sketch.constraint.horizontal_vertical"})).unwrap();
+    h.step(&json!({"move":{"sketch":[30,30]}})).unwrap();
+    h.frames(1);
+    assert!(solidcraft_ui_egui::scenario::rect_of("viewport:axis_guide").is_none());
+}

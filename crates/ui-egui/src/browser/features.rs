@@ -38,6 +38,8 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
     app.ui.show_browser = true;
     reveal_shared_panel(app, "browser");
     app.tree.reveal = None;
+    app.tree.reveal_occurrence = None;
+    app.tree.reveal_construction = None;
     super::open_path(app, &path);
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
     app.tree.open_row(&scope);
@@ -69,6 +71,8 @@ pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
     set_open(app, &scope, path.is_empty() || start_open, true);
     set_open(app, &format!("{scope}/history"), true, true);
+    app.tree.reveal_occurrence = None;
+    app.tree.reveal_construction = None;
     for folder in folder_chain(&app.session.doc.timeline_groups, id) {
         crate::timeline_folders::set_open(app, folder, true);
     }
@@ -626,7 +630,9 @@ fn feature_row(
     let mut order_key = String::new();
     write_order_key(here, id, &mut order_key);
     app.tree.remember(&order_key);
-    let action = sketch.map(|_| ("sketch", "Edit Profile Sketch"));
+    // The sketch button names the sketch it opens (#20405).
+    let sketch_tip = sketch.map(|s| crate::timeline::profile_sketch_tip(app, s.0).unwrap_or_else(|| "Edit Profile Sketch".to_string()));
+    let action = sketch_tip.as_deref().map(|tip| ("sketch", tip));
     // A sketch row has the eye its Sketches folder row has. A construction plane, axis or point has
     // its own visibility in the design Origin. A feature's eye shows and hides the bodies it made
     // (#5099); a component listed on its own stands for all of its placements.
@@ -746,7 +752,7 @@ fn marker_row(app: &SolveApp, ui: &mut egui::Ui, depth: usize) -> egui::Response
     crate::ui_kit::history_marker(ui.painter(), line, true, crate::workspace::tab_accent(&t, &app.ui.tab));
     crate::scenario::publish_handle("browser:rollback", rect.center());
     if response.hovered() || response.dragged() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
     }
     response.backing_on_hover_text(solidcraft_ui_text::tr("ui.history_marker_tip"))
 }
@@ -1805,6 +1811,41 @@ mod tests {
         }
     }
 
+    /// #20405: a feature's sketch button and its Edit Profile Sketch entries say which sketch they
+    /// open, so finding it takes no opening; the entries keep their label for scripts and keys.
+    #[test]
+    fn edit_profile_sketch_names_the_sketch_it_opens() {
+        let mut h = Harness::new();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Lid outline"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,15]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let pad = h.app.run("solid.extrude", json!({"distance":10,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+        let pad_name = h.app.session.doc.feature(pad).unwrap().name.clone();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.frames(2);
+        let named = "Edit Profile Sketch: Lid outline";
+        assert_eq!(crate::timeline::profile_sketch_tip(&h.app, sketch).as_deref(), Some(named));
+
+        // The Browser button's tooltip.
+        let button = crate::scenario::handle_at(&format!("action:{pad_name}")).unwrap();
+        for _ in 0..40 {
+            h.frame_with(vec![egui::Event::PointerMoved(button)]);
+            if h.widget(named).is_some() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        assert!(h.widget(named).is_some(), "the sketch button's tooltip names the sketch");
+
+        // The feature's right-click menu and the History menu: same label, the name on hover.
+        let feature_menu = crate::context_menu::items(&h.app, &Target::Feature { id: pad });
+        let history_menu = crate::timeline::feature_items(&h.app, pad);
+        for (menu, items) in [("feature", feature_menu), ("history", history_menu)] {
+            let edit = items.into_iter().find(|item| item.id == "ui.editSketch").unwrap_or_else(|| panic!("{menu}: no Edit Profile Sketch"));
+            assert_eq!((edit.label.as_str(), edit.tip.as_deref(), edit.enabled), ("Edit Profile Sketch", Some(named), true), "{menu}");
+        }
+    }
+
     /// A feature's browser row has the timeline's actions: its sketch button and menu edit the
     /// profile sketch, and the menu suppresses and rolls back; rolled-back rows stay listed.
     #[test]
@@ -2244,6 +2285,20 @@ mod tests {
         settle_heavy(&mut h);
         assert_eq!(h.app.session.doc.marker, Some(2), "the marker drag still rolls back");
         assert_eq!(order(&h), [ids[2], ids[0], ids[1]], "rolling back moves no feature");
+    }
+
+    /// The History marker in the browser moves only up and down, so the pointer over it shows
+    /// up-and-down arrows, not the grab cursor Windows draws as a four-way move cross.
+    #[test]
+    fn browser_history_marker_shows_up_and_down_arrows() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"name":"Block","body_name":"Cube"})).unwrap();
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        h.frames(3);
+        let marker = crate::scenario::handle_at("browser:rollback").unwrap();
+        h.call("ui.move", json!({"x": marker.x, "y": marker.y}));
+        h.frames(2);
+        assert_eq!(h.output.cursor_icon, egui::CursorIcon::ResizeVertical, "up and down arrows over the marker");
     }
 
     /// #7221: the history in the browser shows the timeline folders as the vertical History

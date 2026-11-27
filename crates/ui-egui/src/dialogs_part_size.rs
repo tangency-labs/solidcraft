@@ -343,7 +343,7 @@ mod tests {
         let before = app.session.doc.clone();
         let undo = app.session.undo.len();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.home.open = false;
         for id in [first, second] {
             h.app.tree.collapsed.insert(format!("o:{id}"));
@@ -618,7 +618,7 @@ mod tests {
         let (mut app, id) = part("socket_head_cap_screw", "M5", Some(20.5));
         app.run("document.units", json!({"units":"in"})).unwrap();
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.home.open = false;
         menu(&mut h.app, Target::Component { id });
         h.frames(3);
@@ -637,7 +637,7 @@ mod tests {
         let (app, id) = part("hex_cap_screw_inch", "1/2-13 UNC", Some(1.5 * 25.4));
         assert_eq!(configuration(&app, id).as_deref(), Some("1/2-13 UNC×1-1/2 in"));
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.home.open = false;
         menu(&mut h.app, Target::Component { id });
         h.frames(3);
@@ -651,7 +651,7 @@ mod tests {
     fn part_size_real_widgets_change_size_length_and_confirm_once() {
         let (app, id) = part("socket_head_cap_screw", "M5", Some(20.5));
         let mut h = crate::scenario::Harness::new();
-        h.app = app;
+        *h.app = app;
         h.app.home.open = false;
         h.frames(3);
         let undo = h.app.session.undo.len();

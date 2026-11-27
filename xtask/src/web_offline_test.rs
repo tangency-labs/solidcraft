@@ -571,6 +571,37 @@ const API_TEST: &str = r#"(async () => {
         release();
         handle.createWritable = createWritable;
     }
+    // Fail after opening a real writable stream. The failed save must abort it and
+    // keep the original error, rather than leave the browser's temporary copy open.
+    for (const phase of ['write throw', 'write rejection', 'close rejection', 'abort rejection']) {
+        let aborted = 0;
+        handle.createWritable = async function (...args) {
+            const stream = await createWritable.apply(this, args);
+            if (this.name !== 'linked-assembly.sc') return stream;
+            const abort = stream.abort.bind(stream);
+            stream.abort = async (...args) => {
+                aborted++;
+                await abort(...args);
+                if (phase === 'abort rejection') throw new Error('test abort failed');
+            };
+            if (phase === 'write throw') {
+                stream.write = () => { throw new Error('test write failed'); };
+            } else if (phase === 'write rejection' || phase === 'abort rejection') {
+                stream.write = () => Promise.reject(new Error('test write failed'));
+            } else {
+                stream.close = () => Promise.reject(new Error('test close failed'));
+            }
+            return stream;
+        };
+        try {
+            await rejects(() => app.execute('file.save', {path: '/opfs/linked-assembly.sc'}),
+                phase === 'close rejection' ? 'test close failed' : 'test write failed');
+            check(aborted === 1, phase + ' aborts the opened stream once');
+            check((await app.request('document.export')).dirty, phase + ' leaves the design unsaved');
+        } finally {
+            handle.createWritable = createWritable;
+        }
+    }
     await app.execute('file.save', {path: '/opfs/linked-assembly.sc'});
     const dir = await navigator.storage.getDirectory();
     const savedHandle = await dir.getFileHandle('linked-assembly.sc');

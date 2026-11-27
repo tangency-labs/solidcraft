@@ -73,9 +73,15 @@ hole_countersink
 hole_references
   moves: direction[0], direction[2], position[0], position[1], position[2], references[0].edge[0], references[0].edge[1], references[0].edge[2], references[1].edge[0], references[1].edge[1], references[1].edge[2]
   face points: [0, 0, 0]
+hole_hardware
+  moves: direction[0], direction[2], position[0], position[1], position[2]
+  face points: [0, 0, 0]
 thread
   moves: face[0], face[1], face[2]
   face points: [0, 0, 0]
+shaft_spline
+  moves: bore[0], bore[1], bore[2], bore_start[0], bore_start[1], bore_start[2], shaft[0], shaft[1], shaft[2], shaft_start[0], shaft_start[1], shaft_start[2]
+  face points: [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]
 loft
   profiles: 4 all, 5 all
 sweep
@@ -124,6 +130,7 @@ frame_member
   moves: pairs[0].b.at[0], pairs[0].b.at[1], pairs[0].b.at[2]
 frame_member_sketch
   profiles: 2 all
+frame_cope
 frame_trim
   moves: to[1].plane.axis_dir[0], to[1].plane.axis_dir[1], to[1].plane.axis_origin[0], to[1].plane.axis_origin[1], to[1].plane.axis_origin[2]
 frame_plate
@@ -245,6 +252,8 @@ surface_trim_mutual
   moves: keep[0], keep[1], keep[2], keep_with[0][0], keep_with[0][1], keep_with[0][2], keep_with[1][0], keep_with[1][1], keep_with[1][2], plane.axis_dir[0], plane.axis_dir[1], plane.axis_origin[0], plane.axis_origin[1], plane.axis_origin[2]
 move
   moves: rotate_axis[1], rotate_axis[2]
+capture_position
+  placement: capture.ox, capture.oy, capture.oz
 import
 mesh_convert
 mesh_reduce
