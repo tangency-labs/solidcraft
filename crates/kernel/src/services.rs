@@ -22,14 +22,6 @@ pub use solidcore_ops::finger_joint;
 pub use solidcore_ops::mid_joint;
 pub use solidcore_ops::mid_sheet;
 
-/// The prism services a weld reads with: a face's edges in a plane, a channel filled between two
-/// walls, and planar regions swept into a body (`solidcore_ops::prism`).
-pub mod prism {
-    pub use solidcore_ops::prism::{
-        ChannelFill, Contour, FillFailure, FillNote, FillOptions, FillSide, PlanarPiece, extrude_planar_regions, fill_channel, planar_edges,
-    };
-}
-
 /// The display plan and meshes (`solidcore-tess`).
 pub mod tess {
     pub use solidcore_tess::EvalCurve;

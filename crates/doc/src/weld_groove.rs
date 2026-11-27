@@ -4,7 +4,8 @@
 //! stretch of it that keeps one section ([`groove_weld_over`]).
 //!
 //! SolidCraft's own: solidcore and solidcore-ops hold no weld (bherbruck on #18409). Every read
-//! here is an ops call; this module adds the weld's rules and refusals. Nothing writes to a part.
+//! here is a kernel call through the kernel interface (`solidcraft_kernel`, after #22903); this
+//! module adds the weld's rules and refusals. Nothing writes to a part.
 //!
 //! | Rust              | What it is                                                         |
 //! |-------------------|--------------------------------------------------------------------|
@@ -45,11 +46,11 @@
 
 use solidcore_record::{Plane, Seg2, Vec2, Vec3};
 use solidcraft_kernel::affine;
-use solidcraft_kernel::services::measure::{Adjacency, FaceRun, Normal, Straight, straight_direction};
-use solidcraft_kernel::services::prism::{
-    ChannelFill, FillFailure, FillNote, FillOptions, FillSide, PlanarPiece, extrude_planar_regions, fill_channel, planar_edges,
+use solidcraft_kernel::api::UnitNormal;
+use solidcraft_kernel::{
+    Body, ChannelFill, FillFailure, FillNote, FillOptions, FillSide, KernelError, PlanarPiece, Straight, extrude_planar_regions, fill_channel,
+    profiles, straight_direction,
 };
-use solidcraft_kernel::services::{ExactBody as Body, Order, sweep};
 
 /// Which of the two parts of a joint something is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -105,7 +106,7 @@ pub enum GrooveRefusal {
     #[error("face {face} of the {part:?} part has its whole section nowhere along the joint: its ends lean past each other")]
     GrooveFaceNeverWhole { part: JointPart, face: usize },
     /// Face `face` of a part (a groove face or its outer face) is a surface whose straightness
-    /// along the joint ops cannot prove (no bound from [`Body::face_straying`]): it may be
+    /// along the joint the kernel cannot prove (no bound from [`Body::face_straying`]): it may be
     /// straight, but it is not taken unproved.
     #[error("face {face} of the {part:?} part cannot be proved straight along the joint")]
     GrooveFaceNotProved { part: JointPart, face: usize },
@@ -124,14 +125,14 @@ pub enum GrooveRefusal {
     /// builds, where there is one.
     #[error("{}", fill_text(why, *fit))]
     Fill { why: FillFailure, fit: Option<f64> },
-    /// The search for a direction the faces all run straight along was not decided (ops
+    /// The search for a direction the faces all run straight along was not decided (the kernel's
     /// [`Straight::Undecided`]: too many faces for its budget, or bands it cannot reach): the
     /// joint may run straight, but no direction is proved. Not a fault of the picks.
     #[error("the joint's direction could not be decided for these faces")]
     DirectionUndecided,
-    /// An ops call failed.
+    /// A kernel call failed.
     #[error(transparent)]
-    Ops(#[from] solidcraft_kernel::services::Error),
+    Kernel(#[from] KernelError),
     /// A placement call refused its numbers, in the kernel's words.
     #[error(transparent)]
     Placement(#[from] affine::AffineRefused),
@@ -142,10 +143,8 @@ type Result<T> = std::result::Result<T, GrooveRefusal>;
 /// One part's side of a groove joint.
 #[derive(Debug, Clone, Copy)]
 pub struct GroovePick<'a> {
-    /// The part (only read).
+    /// The part (only read); the faces below are its record face indices.
     pub part: &'a Body,
-    /// Its record order: the faces below are record indices in it.
-    pub order: &'a Order,
     /// Its groove faces (bevel, root face, J or U radius, square wall), in any order.
     pub faces: &'a [usize],
     /// Its plate face on the arrow side: the side the weld is made from.
@@ -186,12 +185,11 @@ impl Chain {
 /// [`GrooveRefusal::TJoint`] when the outer face is among the groove faces;
 /// [`GrooveRefusal::PicksNotOneChain`] when a face has three picked neighbours or is not joined
 /// to the chain; [`GrooveRefusal::ArrowFaceNotAtToe`] when the outer face meets no picked face,
-/// more than one, or one that is not an end of the chain. The errors of the ops calls otherwise.
+/// more than one, or one that is not an end of the chain. The errors of the kernel calls otherwise.
 pub fn chain(pick: &GroovePick<'_>, part: JointPart) -> Result<Chain> {
     let faces = picked(pick, part)?;
     // each face's edges, the outer face's last
-    let edges =
-        faces.iter().chain([&pick.outer]).map(|&f| pick.part.rim_edges(pick.order, &[f])).collect::<solidcraft_kernel::services::Result<Vec<_>>>()?;
+    let edges = faces.iter().chain([&pick.outer]).map(|&f| pick.part.rim_edges(&[f])).collect::<solidcraft_kernel::Result<Vec<_>>>()?;
     let outer_edges = edges.last().map_or(&[][..], Vec::as_slice);
     let shared = |a: &[usize], b: &[usize]| a.iter().copied().filter(|e| b.contains(e)).collect::<Vec<usize>>();
     // each picked face's picked neighbours, by position in `faces`
@@ -234,7 +232,7 @@ fn picked(pick: &GroovePick<'_>, part: JointPart) -> Result<Vec<usize>> {
     if faces.is_empty() {
         return Err(GrooveRefusal::Invalid("no groove face picked"));
     }
-    if faces.iter().chain([&pick.outer]).any(|&f| f >= pick.order.faces.len()) {
+    if faces.iter().chain([&pick.outer]).any(|&f| f >= pick.part.record().faces.len()) {
         return Err(GrooveRefusal::Invalid("a groove or outer face the part does not have"));
     }
     if faces.contains(&pick.outer) {
@@ -247,7 +245,7 @@ fn picked(pick: &GroovePick<'_>, part: JointPart) -> Result<Vec<usize>> {
 /// which every groove and outer face of both parts runs straight. Each pick's groove faces are
 /// read as one chain from the toe first ([`chain`]).
 ///
-/// `d` is the direction those faces are proved straight along ([`straight_direction`], ops), the
+/// `d` is the direction those faces are proved straight along ([`straight_direction`], the kernel's), the
 /// first of these that proves every face straight within the zone tolerance: the cross product of
 /// the two plane normals furthest from parallel when two are proved apart; else a direction inside
 /// every plane's and cylinder's band (how far `d` may lean for the face to stay within the zone);
@@ -269,7 +267,7 @@ fn picked(pick: &GroovePick<'_>, part: JointPart) -> Result<Vec<usize>> {
 /// The errors of [`chain`] for either pick; [`GrooveRefusal::OuterFaceNotPlane`];
 /// [`GrooveRefusal::DirectionUndetermined`]; [`GrooveRefusal::DirectionUndecided`];
 /// [`GrooveRefusal::GrooveFaceNotStraight`]; [`GrooveRefusal::GrooveFaceNotProved`];
-/// [`GrooveRefusal::OuterFaceWrongSide`]. The errors of the ops calls otherwise.
+/// [`GrooveRefusal::OuterFaceWrongSide`]. The errors of the kernel calls otherwise.
 pub fn joint_frame(picks: [&GroovePick<'_>; 2]) -> Result<Plane> {
     let parts = [JointPart::Left, JointPart::Right];
     let chains = [chain(picks[0], parts[0])?, chain(picks[1], parts[1])?];
@@ -286,7 +284,7 @@ pub fn joint_frame(picks: [&GroovePick<'_>; 2]) -> Result<Plane> {
         return Err(GrooveRefusal::Invalid("a chain with no toe edge"));
     };
     let (frame, _) = signed_frame(left, toe, d, outer[0].value)?;
-    let margin = side_margin(picks, &outer, sweep::zone_tolerance()?)?;
+    let margin = side_margin(picks, &outer, zone_tolerance()?)?;
     same_side(right, right_toe, &frame, outer[1].value, margin)?;
     Ok(frame)
 }
@@ -295,8 +293,8 @@ pub fn joint_frame(picks: [&GroovePick<'_>; 2]) -> Result<Plane> {
 ///
 /// # Errors
 /// [`GrooveRefusal::OuterFaceNotPlane`] for an outer face that is not a plane.
-fn outer_normal(pick: &GroovePick<'_>, part: JointPart) -> Result<Normal> {
-    match pick.part.face_plane_normal(pick.order, pick.outer)? {
+fn outer_normal(pick: &GroovePick<'_>, part: JointPart) -> Result<UnitNormal> {
+    match pick.part.face_plane_normal(pick.outer)? {
         Some(n) => Ok(n),
         None => Err(GrooveRefusal::OuterFaceNotPlane { part, face: pick.outer }),
     }
@@ -305,20 +303,20 @@ fn outer_normal(pick: &GroovePick<'_>, part: JointPart) -> Result<Normal> {
 /// How far either side of 45° [`same_side`] refuses rather than decides (brett19's point A on
 /// #22033 review 6): the two outer normals' proved bounds ([`Body::face_plane_normal`]), the
 /// product of the two outer faces' band half widths for the zone tolerance `zone`
-/// ([`Body::face_run`]: the joint's direction may lean inside them, which moves `y · outer` by up
+/// ([`Body::face_plane_band`]: the joint's direction may lean inside them, which moves `y · outer` by up
 /// to that product), and a few ulps for the comparisons' own rounding. shortcut: the direction into
 /// the right outer face from its toe is rounded, not certified ([`Body::edge_inward`]); a proved
 /// bound for it if a face this near 45° comes up.
 ///
 /// # Errors
-/// [`GrooveRefusal::OuterFaceNotPlane`] for an outer face ops gives no plane's band; the errors of
-/// the ops calls.
-fn side_margin(picks: [&GroovePick<'_>; 2], outer: &[Normal; 2], zone: f64) -> Result<f64> {
+/// [`GrooveRefusal::OuterFaceNotPlane`] for an outer face the kernel gives no plane band; the
+/// errors of the kernel calls.
+fn side_margin(picks: [&GroovePick<'_>; 2], outer: &[UnitNormal; 2], zone: f64) -> Result<f64> {
     let mut slopes = [0.0; 2];
     for ((pick, part), slope) in picks.into_iter().zip([JointPart::Left, JointPart::Right]).zip(&mut slopes) {
-        match pick.part.face_run(pick.order, pick.outer, zone)? {
-            FaceRun::Plane { slope: s, .. } => *slope = s,
-            _ => return Err(GrooveRefusal::OuterFaceNotPlane { part, face: pick.outer }),
+        match pick.part.face_plane_band(pick.outer, zone)? {
+            Some(s) => *slope = s,
+            None => return Err(GrooveRefusal::OuterFaceNotPlane { part, face: pick.outer }),
         }
     }
     Ok(outer[0].bound + outer[1].bound + slopes[0] * slopes[1] + 8.0 * f64::EPSILON)
@@ -326,19 +324,19 @@ fn side_margin(picks: [&GroovePick<'_>; 2], outer: &[Normal; 2], zone: f64) -> R
 
 /// Whether face `f` runs straight along `d` within the zone tolerance ([`Body::face_straying`]).
 fn straight(pick: &GroovePick<'_>, f: usize, d: [f64; 3], zone: f64) -> Result<bool> {
-    Ok(pick.part.face_straying(pick.order, f, d)?.is_some_and(|e| e <= zone))
+    Ok(pick.part.face_straying(f, d)?.is_some_and(|e| e <= zone))
 }
 
-/// The direction every one of `faces` is proved straight along, of either sign: one ops call over
+/// The direction every one of `faces` is proved straight along, of either sign: one kernel call over
 /// both parts' faces ([`straight_direction`]), its refusals named by part and face.
 ///
 /// # Errors
 /// [`GrooveRefusal::DirectionUndetermined`], [`GrooveRefusal::DirectionUndecided`],
 /// [`GrooveRefusal::GrooveFaceNotStraight`], [`GrooveRefusal::GrooveFaceNotProved`]; the errors of
-/// the ops call.
+/// the kernel call.
 fn direction(faces: &[(JointPart, &GroovePick<'_>, usize)]) -> Result<[f64; 3]> {
-    let reads: Vec<(&Body, &Order, usize)> = faces.iter().map(|&(_, pick, f)| (pick.part, pick.order, f)).collect();
-    let at = |i: usize| faces.get(i).map(|&(part, _, f)| (part, f)).ok_or(GrooveRefusal::Invalid("a face index ops does not have"));
+    let reads: Vec<(&Body, usize)> = faces.iter().map(|&(_, pick, f)| (pick.part, f)).collect();
+    let at = |i: usize| faces.get(i).map(|&(part, _, f)| (part, f)).ok_or(GrooveRefusal::Invalid("a face index the kernel does not have"));
     match straight_direction(&reads)? {
         Straight::Along { direction, .. } => Ok(direction),
         Straight::Undetermined => Err(GrooveRefusal::DirectionUndetermined),
@@ -361,12 +359,12 @@ fn direction(faces: &[(JointPart, &GroovePick<'_>, usize)]) -> Result<[f64; 3]> 
 fn signed_frame(left: &GroovePick<'_>, toe: usize, d: [f64; 3], outer: [f64; 3]) -> Result<(Plane, [f64; 3])> {
     let [mut x, y] = affine::frame_axes(d, outer)?;
     let mut d = d;
-    let inward = left.part.edge_inward(left.order, toe, left.outer)?;
+    let inward = left.part.edge_inward(toe, left.outer)?;
     if affine::distance_along([0.0; 3], x, inward) > 0.0 {
         x = x.map(|v| -v);
         d = d.map(|v| -v);
     }
-    let toe = left.part.edge_middle(left.order, toe)?;
+    let toe = edge_middle(left.part, toe)?;
     let v = |[a, b, c]: [f64; 3]| Vec3::new(a, b, c);
     Ok((Plane { origin: v(toe), x: v(x), y: v(y) }, d))
 }
@@ -379,9 +377,9 @@ fn signed_frame(left: &GroovePick<'_>, toe: usize, d: [f64; 3], outer: [f64; 3])
 /// 45° two equal components, and both are refused whatever the rounding.
 ///
 /// # Errors
-/// [`GrooveRefusal::OuterFaceWrongSide`]; the errors of the ops calls.
+/// [`GrooveRefusal::OuterFaceWrongSide`]; the errors of the kernel calls.
 fn same_side(right: &GroovePick<'_>, toe: usize, frame: &Plane, outer: [f64; 3], margin: f64) -> Result<()> {
-    let inward = right.part.edge_inward(right.order, toe, right.outer)?;
+    let inward = right.part.edge_inward(toe, right.outer)?;
     let along = |axis: Vec3, v: [f64; 3]| affine::distance_along([0.0; 3], point(axis), v);
     let faces_up = along(frame.y, outer) > along(frame.x, outer).abs() + margin;
     let runs_away = along(frame.x, inward) > along(frame.y, inward).abs() + margin;
@@ -440,10 +438,10 @@ pub struct Stretch {
 /// [`GrooveRefusal::DirectionUndetermined`]; [`GrooveRefusal::DirectionUndecided`];
 /// [`GrooveRefusal::GrooveFaceNotStraight`] for a picked face not straight along the joint or a groove face with no length along it;
 /// [`GrooveRefusal::GrooveFaceNeverWhole`]; [`GrooveRefusal::GrooveFaceNotProved`];
-/// [`GrooveRefusal::Fill`] with the size that builds. The errors of the ops calls otherwise, a
+/// [`GrooveRefusal::Fill`] with the size that builds. The errors of the kernel calls otherwise, a
 /// fill's input the kernel refuses among them.
 pub fn groove_weld(picks: [&GroovePick<'_>; 2], options: &FillOptions) -> Result<GrooveWeld> {
-    let zone = sweep::zone_tolerance()?;
+    let zone = zone_tolerance()?;
     let joint = cut(picks, zone)?;
     match joint.stretches.as_slice() {
         [(s, walls)] if s.from <= zone && s.to >= joint.end - joint.start - zone => build(picks, &joint, *s, walls, options, zone),
@@ -459,7 +457,7 @@ pub fn groove_weld(picks: [&GroovePick<'_>; 2], options: &FillOptions) -> Result
 /// [`GrooveRefusal::SectionChanges`] for an `over` that is not within one such stretch, or no
 /// longer than the zone tolerance; otherwise as [`groove_weld`].
 pub fn groove_weld_over(picks: [&GroovePick<'_>; 2], options: &FillOptions, over: Stretch) -> Result<GrooveWeld> {
-    let zone = sweep::zone_tolerance()?;
+    let zone = zone_tolerance()?;
     let joint = cut(picks, zone)?;
     let within = |s: &Stretch| s.from <= over.from + zone && over.to <= s.to + zone && over.to - over.from > zone;
     match joint.stretches.iter().find(|(s, _)| within(s)) {
@@ -513,9 +511,8 @@ fn cut(picks: [&GroovePick<'_>; 2], zone: f64) -> Result<Joint> {
     // each groove face's span along the joint and its section, read from its own edges
     let mut reads: [Vec<FaceRead>; 2] = [Vec::new(), Vec::new()];
     for (((pick, part), f), read) in picks.into_iter().zip(parts).zip(&faces).zip(&mut reads) {
-        let topology = pick.part.adjacency(pick.order)?;
         for &face in f {
-            match face_read(pick, &topology, face, &frame, d, zone)? {
+            match face_read(pick, face, &frame, d, zone)? {
                 Some(r) if r.span[1] - r.span[0] > zone => read.push(r),
                 Some(_) => return Err(GrooveRefusal::GrooveFaceNeverWhole { part, face }),
                 None => return Err(GrooveRefusal::GrooveFaceNotStraight { part, face }),
@@ -579,7 +576,7 @@ fn piece_walls(
         }
         let links = match chain(&GroovePick { faces: &faces, ..*pick }, part) {
             Ok(links) => links,
-            Err(e @ GrooveRefusal::Ops(_)) => return Err(e),
+            Err(e @ GrooveRefusal::Kernel(_)) => return Err(e),
             Err(e) => {
                 why.get_or_insert(e);
                 return Ok(None);
@@ -594,7 +591,7 @@ fn piece_walls(
             }
         }
         // the toe in the frame: its edge's middle, along x and y
-        let at = pick.part.edge_middle(pick.order, toe)?;
+        let at = edge_middle(pick.part, toe)?;
         let toe = Vec2::new(affine::distance_along(o, point(frame.x), at), affine::distance_along(o, point(frame.y), at));
         let Some(read) = wall_of(read, &links, toe, zone) else {
             return Ok(None);
@@ -610,7 +607,7 @@ fn build(picks: [&GroovePick<'_>; 2], joint: &Joint, over: Stretch, walls: &[Vec
     // a butt joint measures the depth from the plates' outer faces, square to the frame's y (only
     // whether the right one is square is read: its level, and so the origin, does not matter)
     let right = picks[1];
-    let butt = right.part.face_square_level(right.order, right.outer, point(frame.y), point(frame.origin))?.is_some();
+    let butt = right.part.face_square_level(right.outer, frame.y, frame.origin)?.is_some();
     let depth_normal = butt.then_some(Vec2::new(0.0, 1.0));
     let [left_wall, right_wall] = walls;
     let fill = match fill_channel(left_wall, right_wall, depth_normal, options)? {
@@ -623,9 +620,9 @@ fn build(picks: [&GroovePick<'_>; 2], joint: &Joint, over: Stretch, walls: &[Vec
 
 /// The first edge a groove face of `pick` (in the order of `faces`) shares with its outer face.
 fn toe_edge(pick: &GroovePick<'_>, faces: &[usize]) -> Result<Option<usize>> {
-    let outer = pick.part.rim_edges(pick.order, &[pick.outer])?;
+    let outer = pick.part.rim_edges(&[pick.outer])?;
     for &f in faces {
-        if let Some(&e) = pick.part.rim_edges(pick.order, &[f])?.iter().find(|e| outer.contains(e)) {
+        if let Some(&e) = pick.part.rim_edges(&[f])?.iter().find(|e| outer.contains(e)) {
             return Ok(Some(e));
         }
     }
@@ -634,6 +631,19 @@ fn toe_edge(pick: &GroovePick<'_>, faces: &[usize]) -> Result<Option<usize>> {
 
 fn point(v: Vec3) -> [f64; 3] {
     [v.x, v.y, v.z]
+}
+
+/// The middle of edge `edge` of `part` ([`solidcraft_kernel::edge_middle`]).
+fn edge_middle(part: &Body, edge: usize) -> Result<[f64; 3]> {
+    match solidcraft_kernel::edge_middle(part, edge)? {
+        Some(p) => Ok(point(p)),
+        None => Err(GrooveRefusal::Invalid("an edge whose middle the kernel cannot find")),
+    }
+}
+
+/// The kernel's zone tolerance ([`profiles::zone_tolerance`]).
+fn zone_tolerance() -> Result<f64> {
+    profiles::zone_tolerance().map_err(|e| GrooveRefusal::Kernel(KernelError::Failed(format!("zone tolerance: {e}"))))
 }
 
 /// Whether two stretches' walls are the same lines and arcs.
@@ -763,8 +773,8 @@ struct FaceRead {
     section: Option<Seg2>,
 }
 
-/// Groove face `face` of `pick` read across the joint from its own edges (`topology`, its part's
-/// [`Body::adjacency`]; brett19's point 1 on #22033 review 5). Its long edges, those whose two
+/// Groove face `face` of `pick` read across the joint from its own edges (their vertices in the
+/// part's record; brett19's point 1 on #22033 review 5). Its long edges, those whose two
 /// ends lie at one point of `frame` (within [`ALLOWANCE`]) and apart along `d`, run along the
 /// joint; edges on one such line are one run. Its span is from the last of the runs' starts to the
 /// first of their ends: where its whole section is present, so an end not square to the joint is
@@ -772,21 +782,27 @@ struct FaceRead {
 /// is exact; a J or U face's end cut at an angle may reach past its runs' ends inside the arc
 /// (shortcut: read the end edge's own extent along `d` when such ends come up).
 ///
-/// Its section: the one line or arc its edges read across the joint ([`planar_edges`]: its ends
-/// square to the joint), all reads the same within their tolerance; else, for a plane, the line
-/// between its two runs. `None` for a face with no long edge.
-fn face_read(pick: &GroovePick<'_>, topology: &Adjacency, face: usize, frame: &Plane, d: [f64; 3], zone: f64) -> Result<Option<FaceRead>> {
+/// Its section: the one line or arc its other edges (its ends) read across the joint
+/// ([`Body::planar_edges`]: its ends square to the joint), all reads the same within their
+/// tolerance; else, for a plane, the line between its two runs. `None` for a face with no long
+/// edge.
+fn face_read(pick: &GroovePick<'_>, face: usize, frame: &Plane, d: [f64; 3], zone: f64) -> Result<Option<FaceRead>> {
     let tol = zone * ALLOWANCE;
     let o = point(frame.origin);
-    let edges = pick.part.rim_edges(pick.order, &[face])?;
+    let edges = pick.part.rim_edges(&[face])?;
+    let record = pick.part.record();
     // each run along the joint: its point in the frame and how far it reaches along d
     let mut runs: Vec<(Vec2, [f64; 2])> = Vec::new();
+    // the edges across the joint (its ends), read for its section below
+    let mut ends: Vec<usize> = Vec::new();
     for &e in &edges {
-        let Some(Some([a, b])) = topology.edge_vertices.get(e) else { continue };
-        let (Some(&p), Some(&q)) = (topology.vertex_points.get(*a), topology.vertex_points.get(*b)) else { continue };
+        let Some(&[a, b]) = record.edges.get(e).map(|edge| &edge.vertices) else { continue };
+        let (Some(p), Some(q)) = (record.vertices.get(a as usize), record.vertices.get(b as usize)) else { continue };
+        let (p, q) = (p.point, q.point);
         let at = |p: [f64; 3]| Vec2::new(affine::distance_along(o, point(frame.x), p), affine::distance_along(o, point(frame.y), p));
         let (s, t) = (affine::distance_along(o, d, p), affine::distance_along(o, d, q));
         if !near(at(p), at(q), tol) || (t - s).abs() <= tol {
+            ends.push(e);
             continue;
         }
         let reach = [s.min(t), s.max(t)];
@@ -799,12 +815,11 @@ fn face_read(pick: &GroovePick<'_>, topology: &Adjacency, face: usize, frame: &P
         return Ok(None);
     }
     let span = runs.iter().fold([f64::NEG_INFINITY, f64::INFINITY], |[lo, hi], &(_, [a, b])| [lo.max(a), hi.min(b)]);
-    let read = planar_edges(pick.part, pick.order, frame, &edges)?;
-    let agree = read.tolerance.unwrap_or(0.0).max(zone);
-    let segs: Vec<Seg2> = read.pieces.into_iter().flatten().filter_map(|p| one_seg(&p)).collect();
+    let agree = pick.part.planar_edges_tolerance().max(zone);
+    let segs: Vec<Seg2> = pick.part.planar_edges(frame, &ends).into_iter().flatten().filter_map(|p| one_seg(&p)).collect();
     let section = match (segs.split_first(), runs.as_slice()) {
         (Some((a, rest)), _) => rest.iter().all(|b| same(a, b, agree)).then_some(*a),
-        (None, [(a, _), (b, _)]) if pick.part.face_plane_normal(pick.order, face)?.is_some() => Some(Seg2::Line { a: *a, b: *b }),
+        (None, [(a, _), (b, _)]) if pick.part.face_plane_normal(face)?.is_some() => Some(Seg2::Line { a: *a, b: *b }),
         _ => None,
     };
     Ok(Some(FaceRead { face, span, section }))
@@ -842,7 +857,7 @@ fn one_seg(pieces: &[PlanarPiece]) -> Option<Seg2> {
 }
 
 /// A line's or an arc's two ends. shortcut: an arc's ends by its angles in plain trigonometry,
-/// as the app's sheet-metal code reads them; an ops call for it if reviewers ask.
+/// as the app's sheet-metal code reads them; a kernel call for it if reviewers ask.
 fn ends(s: &Seg2) -> (Vec2, Vec2) {
     match *s {
         Seg2::Arc { center, radius, start, sweep } => {

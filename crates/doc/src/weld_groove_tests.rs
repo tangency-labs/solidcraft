@@ -11,51 +11,49 @@
 //! of different length, a gap that steps along the joint and a plate whose ends lean (both, or one
 //! with the other square) refused with the stretches that keep one section, each of which builds on
 //! its own; a wall whose runs never overlap refused as never whole; a pick off the chain refused
-//! naming it; the fill's notes and
-//! refusals in weld words (ISO 6520-1 no. 511 as a warning, full penetration). Ported from the
-//! second groove PR's first slice (solidcore `weld::groove::joint`, never pushed) onto ops reads
-//! (#18500).
+//! naming it; the fill's notes and refusals in weld words (ISO 6520-1 no. 511 as a warning, full
+//! penetration). Ported from the second groove PR's first slice (solidcore `weld::groove::joint`,
+//! never pushed) onto ops reads, now through the kernel interface (#18500).
 
 use std::f64::consts::{FRAC_PI_2, TAU};
 
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
-use solidcraft_kernel::services::prism::{Contour, extrude_planar_regions};
-use solidcraft_kernel::services::{ExactBody as Body, Order, session, sweep};
+use solidcraft_kernel::{Body, Contour, extrude_planar_regions};
 
 use super::*;
 
-/// A plate: the polygon `corners` (x, y, counter-clockwise) swept 120 along z, and its order.
-fn plate(corners: &[(f64, f64)]) -> (Body, Order) {
+/// A plate: the polygon `corners` (x, y, counter-clockwise) swept 120 along z.
+fn plate(corners: &[(f64, f64)]) -> Body {
     swept(&Plane::XY, corners)
 }
 
-/// The polygon `corners` in `plane`, swept 120 along its normal, and its order.
-fn swept(plane: &Plane, corners: &[(f64, f64)]) -> (Body, Order) {
+/// The polygon `corners` in `plane`, swept 120 along its normal.
+fn swept(plane: &Plane, corners: &[(f64, f64)]) -> Body {
     swept_by(plane, corners, 120.0)
 }
 
-/// The polygon `corners` in `plane`, swept `length` along its normal, and its order.
-fn swept_by(plane: &Plane, corners: &[(f64, f64)], length: f64) -> (Body, Order) {
+/// The polygon `corners` in `plane`, swept `length` along its normal.
+fn swept_by(plane: &Plane, corners: &[(f64, f64)], length: f64) -> Body {
     let pts: Vec<Vec2> = corners.iter().map(|&(x, y)| Vec2::new(x, y)).collect();
     swept_loop(plane, Loop2::polygon(&pts), length)
 }
 
-/// The region inside `outline` in `plane`, swept `length` along its normal, and its order. The
-/// kernel runs with the app's fixes, as it does once the app has made a body: with them an arc
-/// swept square to its plane is a cylinder (`linear_sweep_arc_is_cylinder`), without them an
-/// extrusion, which gives no direction.
-fn swept_loop(plane: &Plane, outline: Loop2, length: f64) -> (Body, Order) {
-    session::set_fixes(solidcraft_kernel::smlib_trace::fixes()).unwrap();
+/// The region inside `outline` in `plane`, swept `length` along its normal by the kernel, as the
+/// app makes a body: an arc swept square to its plane is a cylinder, which gives a direction.
+fn swept_loop(plane: &Plane, outline: Loop2, length: f64) -> Body {
     let region = Region2 { outer: outline, holes: Vec::new() };
-    let body = extrude_planar_regions(plane, &[region], 0.0, length).unwrap();
-    let (_, order) = body.to_record().unwrap();
-    (body, order)
+    extrude_planar_regions(plane, &[region], 0.0, length).unwrap()
+}
+
+/// The kernel's zone tolerance.
+fn zone() -> f64 {
+    solidcraft_kernel::profiles::zone_tolerance().unwrap()
 }
 
 /// The record faces of `plate` whose outward normal is `n` (a unit vector).
-fn facing((b, o): &(Body, Order), n: [f64; 3]) -> Vec<usize> {
-    (0..o.faces.len())
-        .filter(|&f| b.face_plane_normal(o, f).unwrap().is_some_and(|m| m.value.iter().zip(n).all(|(a, b)| (a - b).abs() < 1e-9)))
+fn facing(b: &Body, n: [f64; 3]) -> Vec<usize> {
+    (0..b.record().faces.len())
+        .filter(|&f| b.face_plane_normal(f).unwrap().is_some_and(|m| m.value.iter().zip(n).all(|(a, b)| (a - b).abs() < 1e-9)))
         .collect()
 }
 
@@ -68,12 +66,12 @@ const UP: [f64; 3] = [0.0, 1.0, 0.0];
 
 /// A 60° V with a root face 1 and a gap 1 on 8 mm plates: the left and right plates, and each
 /// one's groove faces (bevel, then root face).
-fn y_groove() -> ([(Body, Order); 2], [Vec<usize>; 2]) {
+fn y_groove() -> ([Body; 2], [Vec<usize>; 2]) {
     y_groove_of(120.0)
 }
 
 /// [`y_groove`] with the right plate `length` long (the left one 120).
-fn y_groove_of(length: f64) -> ([(Body, Order); 2], [Vec<usize>; 2]) {
+fn y_groove_of(length: f64) -> ([Body; 2], [Vec<usize>; 2]) {
     let t = 30.0_f64.to_radians().tan();
     let top = 0.5 + 7.0 * t;
     let left = plate(&[(-40.0, 0.0), (-40.0, -8.0), (-0.5, -8.0), (-0.5, -7.0), (-top, 0.0)]);
@@ -85,14 +83,14 @@ fn y_groove_of(length: f64) -> ([(Body, Order); 2], [Vec<usize>; 2]) {
 }
 
 /// The pick of `faces` on `plate`, its outer face the one facing +y.
-fn pick<'a>(plate: &'a (Body, Order), faces: &'a [usize]) -> GroovePick<'a> {
-    GroovePick { part: &plate.0, order: &plate.1, faces, outer: facing(plate, UP)[0] }
+fn pick<'a>(plate: &'a Body, faces: &'a [usize]) -> GroovePick<'a> {
+    GroovePick { part: plate, faces, outer: facing(plate, UP)[0] }
 }
 
 #[test]
 fn a_y_groove_gives_each_parts_chain_from_the_toe() {
     let (parts, faces) = y_groove();
-    let before: Vec<_> = parts.iter().map(|(b, _)| b.to_record().unwrap().0).collect();
+    let before: Vec<_> = parts.iter().map(|b| b.record().clone()).collect();
     for ((plate, f), part) in parts.iter().zip(&faces).zip([JointPart::Left, JointPart::Right]) {
         let got = chain(&pick(plate, f), part).unwrap();
         // the bevel first (it meets the outer face), then the root face
@@ -101,11 +99,11 @@ fn a_y_groove_gives_each_parts_chain_from_the_toe() {
         let outer = facing(plate, UP)[0];
         assert_eq!(got.toe.len(), 1, "{got:?}");
         for face in [f[0], outer] {
-            assert!(plate.0.rim_edges(&plate.1, &[face]).unwrap().contains(&got.toe[0]));
+            assert!(plate.rim_edges(&[face]).unwrap().contains(&got.toe[0]));
         }
     }
     // the parts are only read
-    let after: Vec<_> = parts.iter().map(|(b, _)| b.to_record().unwrap().0).collect();
+    let after: Vec<_> = parts.iter().map(|b| b.record().clone()).collect();
     assert_eq!(after, before);
 }
 
@@ -134,7 +132,7 @@ fn an_i_groove_is_a_chain_of_its_square_wall() {
 fn picks_that_are_not_one_chain_from_the_toe_are_refused() {
     let (parts, faces) = y_groove();
     let [left, right] = &parts;
-    let refused = |plate: &(Body, Order), f: &[usize], part: JointPart| chain(&pick(plate, f), part).unwrap_err();
+    let refused = |plate: &Body, f: &[usize], part: JointPart| chain(&pick(plate, f), part).unwrap_err();
     // the root face alone: it does not meet the outer face
     let outer = facing(left, UP)[0];
     assert_eq!(refused(left, &[faces[0][1]], JointPart::Left), GrooveRefusal::ArrowFaceNotAtToe { part: JointPart::Left, face: outer });
@@ -156,7 +154,7 @@ fn picks_that_are_not_one_chain_from_the_toe_are_refused() {
 // ---- the joint's frame ----
 
 /// The joint's frame, the outer faces the ones facing +y.
-fn joint(parts: &[(Body, Order); 2], faces: [&[usize]; 2]) -> Result<Plane> {
+fn joint(parts: &[Body; 2], faces: [&[usize]; 2]) -> Result<Plane> {
     joint_frame([&pick(&parts[0], faces[0]), &pick(&parts[1], faces[1])])
 }
 
@@ -169,16 +167,16 @@ const REACH: f64 = 300.0;
 /// the zone tolerance over `√3 REACH`. A point `o + a x + b y + c n` with `|(a, b, c)| <= L` moves
 /// with the axes by at most `L sqrt(|Δx|² + |Δy|² + |Δn|²) <= √3 L axes()`, `zone / 2` for
 /// `L <= REACH`, and with the origin by at most [`points`], the other half: so every point within
-/// [`REACH`] of the origin is within the zone tolerance ([`sweep::zone_tolerance`], the kernel's
+/// [`REACH`] of the origin is within the zone tolerance ([`zone`], the kernel's
 /// own bound for two points being the same), whatever the axes' errors (brett19 on #22033).
 fn axes() -> f64 {
-    sweep::zone_tolerance().unwrap() / (2.0 * 3.0_f64.sqrt() * REACH)
+    zone() / (2.0 * 3.0_f64.sqrt() * REACH)
 }
 
 /// How far the frame's origin may be off, as a vector length: half the zone tolerance (the other
 /// half is the axes', [`axes`]).
 fn points() -> f64 {
-    sweep::zone_tolerance().unwrap() / 2.0
+    zone() / 2.0
 }
 
 /// Whether `a` is within `tol` of `b`, as a vector length.
@@ -209,9 +207,9 @@ fn a_y_groove_runs_along_z_its_frame_towards_the_toe() {
     let top = 0.5 + 7.0 * 30.0_f64.to_radians().tan();
     assert!(within(frame.origin, [-top, 0.0, 60.0], points()), "{:?}", frame.origin);
     // the same frame again, and the parts only read
-    let before: Vec<_> = parts.iter().map(|(b, _)| b.to_record().unwrap().0).collect();
+    let before: Vec<_> = parts.iter().map(|b| b.record().clone()).collect();
     assert_eq!(joint(&parts, [&faces[0], &faces[1]]).unwrap(), frame);
-    let after: Vec<_> = parts.iter().map(|(b, _)| b.to_record().unwrap().0).collect();
+    let after: Vec<_> = parts.iter().map(|b| b.record().clone()).collect();
     assert_eq!(after, before);
 }
 
@@ -328,8 +326,8 @@ fn a_right_outer_face_turned_45_degrees_or_more_is_refused_as_a_corner_on_and_of
 }
 
 /// The pick of `faces` on `plate`, its outer face the one facing `up`.
-fn pick_up<'a>(plate: &'a (Body, Order), faces: &'a [usize], up: [f64; 3]) -> GroovePick<'a> {
-    GroovePick { part: &plate.0, order: &plate.1, faces, outer: facing(plate, up)[0] }
+fn pick_up<'a>(plate: &'a Body, faces: &'a [usize], up: [f64; 3]) -> GroovePick<'a> {
+    GroovePick { part: plate, faces, outer: facing(plate, up)[0] }
 }
 
 /// The joint's frame of two picks.
@@ -347,12 +345,12 @@ fn an_outer_face_that_is_not_convex_still_signs_the_frame_from_its_toe() {
     let right = swept_by(&above, &[(1.0, 0.0), (40.0, 0.0), (40.0, 110.0), (1.0, 110.0)], 8.0);
     let lf: Vec<usize> = facing(&left, [1.0, 0.0, 0.0])
         .into_iter()
-        .filter(|&f| (left.0.face_centroid(&left.1, f, 1e-8).unwrap().centroid[0] + 1.0).abs() < 1e-6)
+        .filter(|&f| {
+            left.face_square_level(f, Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.0)).unwrap().is_some_and(|l| (l.level + 1.0).abs() < 1e-6)
+        })
         .collect();
     let rf = facing(&right, [-1.0, 0.0, 0.0]);
     assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
-    let top = facing(&left, UP)[0];
-    assert!(left.0.face_centroid(&left.1, top, 1e-8).unwrap().centroid[0] > 60.0);
     let frame = joint(&[left, right], [&lf, &rf]).unwrap();
     assert!(near(frame.x, [1.0, 0.0, 0.0]) && near(frame.y, [0.0, 1.0, 0.0]), "{frame:?}");
     let n = normal(&frame);
@@ -370,13 +368,13 @@ fn arc(center: (f64, f64), radius: f64, start: f64, sweep: f64) -> Seg2 {
 /// A round groove on 8 mm plates: each plate's wall a quarter circle of radius 8 from its toe on
 /// the surface (x = -9 and 9) down to the root (x = -1 and 1). The only planes among the picked
 /// faces are the two outer faces, which are parallel, so the walls' axis gives the direction.
-fn round_groove() -> ([(Body, Order); 2], [Vec<usize>; 2]) {
+fn round_groove() -> ([Body; 2], [Vec<usize>; 2]) {
     round_groove_of(arc((-1.0, 0.0), 8.0, -FRAC_PI_2, -FRAC_PI_2), arc((1.0, 0.0), 8.0, 0.0, -FRAC_PI_2))
 }
 
 /// [`round_groove`] with its walls `left_wall` (from (-1, -8) to (-9, 0)) and `right_wall` (from
 /// (9, 0) to (1, -8)).
-fn round_groove_of(left_wall: Seg2, right_wall: Seg2) -> ([(Body, Order); 2], [Vec<usize>; 2]) {
+fn round_groove_of(left_wall: Seg2, right_wall: Seg2) -> ([Body; 2], [Vec<usize>; 2]) {
     let left = swept_loop(
         &Plane::XY,
         Loop2 { segs: vec![line((-40.0, 0.0), (-40.0, -8.0)), line((-40.0, -8.0), (-1.0, -8.0)), left_wall, line((-9.0, 0.0), (-40.0, 0.0))] },
@@ -387,7 +385,7 @@ fn round_groove_of(left_wall: Seg2, right_wall: Seg2) -> ([(Body, Order); 2], [V
         Loop2 { segs: vec![line((1.0, -8.0), (40.0, -8.0)), line((40.0, -8.0), (40.0, 0.0)), line((40.0, 0.0), (9.0, 0.0)), right_wall] },
         120.0,
     );
-    let wall = |(b, o): &(Body, Order)| -> Vec<usize> { (0..o.faces.len()).filter(|&f| b.face_plane_normal(o, f).unwrap().is_none()).collect() };
+    let wall = |b: &Body| -> Vec<usize> { (0..b.record().faces.len()).filter(|&f| b.face_plane_normal(f).unwrap().is_none()).collect() };
     let (lf, rf) = (wall(&left), wall(&right));
     assert_eq!((lf.len(), rf.len()), (1, 1), "{lf:?} {rf:?}");
     ([left, right], [lf, rf])
@@ -428,9 +426,9 @@ fn a_round_groove_whose_walls_are_no_cylinders_has_no_direction() {
 /// direction, and the joint is refused as undecided, not as a face that is not straight.
 #[test]
 fn faces_past_the_direction_search_s_budget_are_undecided() {
-    let zone = sweep::zone_tolerance().unwrap();
+    let zone = zone();
     let alpha = 0.9 * zone / (2.0 * 10.0 * 2.0_f64.sqrt());
-    let plates: Vec<((Body, Order), usize)> = (0..60)
+    let plates: Vec<(Body, usize)> = (0..60)
         .map(|k| {
             let (sin, cos) = (TAU * f64::from(k) / 60.0).sin_cos();
             let l = (1.0 + alpha * alpha).sqrt();
@@ -444,7 +442,7 @@ fn faces_past_the_direction_search_s_budget_are_undecided() {
             (plate, top[0])
         })
         .collect();
-    let picks: Vec<GroovePick<'_>> = plates.iter().map(|(p, f)| GroovePick { part: &p.0, order: &p.1, faces: &[], outer: *f }).collect();
+    let picks: Vec<GroovePick<'_>> = plates.iter().map(|(p, f)| GroovePick { part: p, faces: &[], outer: *f }).collect();
     let faces: Vec<(JointPart, &GroovePick<'_>, usize)> = picks.iter().map(|p| (JointPart::Left, p, p.outer)).collect();
     assert_eq!(direction(&faces).unwrap_err(), GrooveRefusal::DirectionUndecided);
 }
@@ -455,7 +453,7 @@ fn an_outer_face_that_is_no_plane_is_refused() {
     let [left, right] = &parts;
     // the left plate's round wall as its outer face, its top as the groove face
     let top = facing(left, UP);
-    let picks = [GroovePick { part: &left.0, order: &left.1, faces: &top, outer: faces[0][0] }, pick(right, &faces[1])];
+    let picks = [GroovePick { part: left, faces: &top, outer: faces[0][0] }, pick(right, &faces[1])];
     assert_eq!(frame_of(picks).unwrap_err(), GrooveRefusal::OuterFaceNotPlane { part: JointPart::Left, face: faces[0][0] });
 }
 
@@ -491,30 +489,37 @@ fn a_joint_off_the_world_axes_takes_its_plane_and_mirrors_within_the_allowance()
 
 // ---- the weld ----
 
+/// A body's box (the kernel's, SMLib's tight box, so a test allows it 1e-6 mm), its low and high
+/// corners.
+fn bounds(b: &Body) -> ([f64; 3], [f64; 3]) {
+    let bb = b.exact_bounds().unwrap();
+    ([bb.min.x, bb.min.y, bb.min.z], [bb.max.x, bb.max.y, bb.max.z])
+}
+
 fn flat() -> FillOptions {
     FillOptions { face: Contour::Flat, second_face: None, depth: None }
 }
 
-fn weld(parts: &[(Body, Order); 2], faces: &[Vec<usize>; 2], options: &FillOptions) -> Result<GrooveWeld> {
+fn weld(parts: &[Body; 2], faces: &[Vec<usize>; 2], options: &FillOptions) -> Result<GrooveWeld> {
     groove_weld([&pick(&parts[0], &faces[0]), &pick(&parts[1], &faces[1])], options)
 }
 
 #[test]
 fn a_y_groove_is_filled_flat_along_the_whole_joint() {
     let (parts, faces) = y_groove();
-    let before: Vec<_> = parts.iter().map(|(b, _)| b.to_record().unwrap().0).collect();
+    let before: Vec<_> = parts.iter().map(|b| b.record().clone()).collect();
     let got = weld(&parts, &faces, &flat()).unwrap();
     // the groove's section: the V from the surface down to the root face, 1 wide, then the gap
     // between the root faces, 1 deep: (1 + (1 + 14 tan 30°)) / 2 · 7 + 1
     let area = 8.0 + 49.0 * 30.0_f64.to_radians().tan();
-    let volume = got.body.volume(1e-9).unwrap();
+    let volume = got.body.volume_at(1e-9).unwrap();
     assert!((volume - 120.0 * area).abs() <= 1e-6 * volume, "{volume} != {}", 120.0 * area);
     assert!((got.fill.channel_depth - 8.0).abs() < 1e-9, "{:?}", got.fill);
-    let (lo, hi) = got.body.bounds().unwrap();
-    assert!(lo[2].abs() < 1e-9 && (hi[2] - 120.0).abs() < 1e-9, "{lo:?} {hi:?}");
-    assert!(lo[1] > -8.0 - 1e-9 && hi[1] < 1e-9, "{lo:?} {hi:?}");
+    let (lo, hi) = bounds(&got.body);
+    assert!(lo[2].abs() < 1e-6 && (hi[2] - 120.0).abs() < 1e-6, "{lo:?} {hi:?}");
+    assert!(lo[1] > -8.0 - 1e-6 && hi[1] < 1e-6, "{lo:?} {hi:?}");
     // the parts are only read
-    let after: Vec<_> = parts.iter().map(|(b, _)| b.to_record().unwrap().0).collect();
+    let after: Vec<_> = parts.iter().map(|b| b.record().clone()).collect();
     assert_eq!(after, before);
 }
 
@@ -541,7 +546,7 @@ fn stretches_of(got: &GrooveRefusal, want: &[(f64, f64)]) {
     }
 }
 
-fn weld_over(parts: &[(Body, Order); 2], faces: &[Vec<usize>; 2], from: f64, to: f64) -> Result<GrooveWeld> {
+fn weld_over(parts: &[Body; 2], faces: &[Vec<usize>; 2], from: f64, to: f64) -> Result<GrooveWeld> {
     groove_weld_over([&pick(&parts[0], &faces[0]), &pick(&parts[1], &faces[1])], &flat(), Stretch { from, to })
 }
 
@@ -552,13 +557,13 @@ fn parts_of_different_length_are_refused_with_the_stretch_they_share_which_build
     stretches_of(&got, &[(0.0, 100.0)]);
     assert!(got.to_string().contains("weld 0.00 to 100.00 mm"), "{got}");
     let area = 8.0 + 49.0 * 30.0_f64.to_radians().tan();
-    let volume = weld_over(&parts, &faces, 0.0, 100.0).unwrap().body.volume(1e-9).unwrap();
+    let volume = weld_over(&parts, &faces, 0.0, 100.0).unwrap().body.volume_at(1e-9).unwrap();
     assert!((volume - 100.0 * area).abs() <= 1e-6 * volume, "{volume} != {}", 100.0 * area);
 }
 
 /// An I groove whose left plate's wall steps back 1 at z = 60 (a gap of 1, then 2) on 8 mm
 /// plates, swept down from y = 0: the plates, and each one's wall faces (the left one's two).
-fn stepped_gap() -> ([(Body, Order); 2], [Vec<usize>; 2]) {
+fn stepped_gap() -> ([Body; 2], [Vec<usize>; 2]) {
     let above = Plane { origin: Vec3::new(0.0, 0.0, 0.0), x: Vec3::new(1.0, 0.0, 0.0), y: Vec3::new(0.0, 0.0, 1.0) };
     let left = swept_by(&above, &[(-40.0, 0.0), (-0.5, 0.0), (-0.5, 60.0), (-1.5, 60.0), (-1.5, 120.0), (-40.0, 120.0)], 8.0);
     let right = swept_by(&above, &[(0.5, 0.0), (40.0, 0.0), (40.0, 120.0), (0.5, 120.0)], 8.0);
@@ -576,10 +581,10 @@ fn a_gap_that_steps_along_the_joint_is_refused_with_its_two_stretches_each_of_wh
     // each stretch filled flat: the gap times the plates' 8 times its 60
     for (from, to, gap) in [(0.0, 60.0, 1.0), (60.0, 120.0, 2.0)] {
         let built = weld_over(&parts, &faces, from, to).unwrap();
-        let volume = built.body.volume(1e-9).unwrap();
+        let volume = built.body.volume_at(1e-9).unwrap();
         assert!((volume - gap * 8.0 * 60.0).abs() <= 1e-6 * volume, "{from}: {volume}");
-        let (lo, hi) = built.body.bounds().unwrap();
-        assert!((lo[2] - from).abs() < 1e-9 && (hi[2] - to).abs() < 1e-9, "{lo:?} {hi:?}");
+        let (lo, hi) = bounds(&built.body);
+        assert!((lo[2] - from).abs() < 1e-6 && (hi[2] - to).abs() < 1e-6, "{lo:?} {hi:?}");
     }
     // a part of one stretch builds; a span across the step does not
     assert!(weld_over(&parts, &faces, 10.0, 50.0).is_ok());
@@ -603,7 +608,7 @@ fn plate_ends_not_square_to_the_joint_give_the_stretch_where_the_groove_is_whole
     let got = weld(&parts, &faces, &flat()).unwrap_err();
     stretches_of(&got, &[(lean, 120.0 - lean)]);
     let built = weld_over(&parts, &faces, lean, 120.0 - lean).unwrap();
-    let volume = built.body.volume(1e-9).unwrap();
+    let volume = built.body.volume_at(1e-9).unwrap();
     let want = 8.0 * (120.0 - 2.0 * lean);
     assert!((volume - want).abs() <= 1e-6 * volume, "{volume} != {want}");
 }
@@ -626,7 +631,7 @@ fn a_plate_with_one_end_square_reads_its_section_from_that_end() {
     let got = weld(&parts, &faces, &flat()).unwrap_err();
     stretches_of(&got, &[(lean, 120.0)]);
     let built = weld_over(&parts, &faces, lean, 120.0).unwrap();
-    let volume = built.body.volume(1e-9).unwrap();
+    let volume = built.body.volume_at(1e-9).unwrap();
     let want = 8.0 * (120.0 - lean);
     assert!((volume - want).abs() <= 1e-6 * volume, "{volume} != {want}");
 }
@@ -654,7 +659,7 @@ fn a_round_groove_is_filled_flat_along_its_arc_walls() {
     let (parts, faces) = round_groove();
     let got = weld(&parts, &faces, &flat()).unwrap();
     let want = 120.0 * (16.0 + 32.0 * std::f64::consts::PI);
-    let volume = got.body.volume(1e-9).unwrap();
+    let volume = got.body.volume_at(1e-9).unwrap();
     assert!((volume - want).abs() <= 1e-6 * volume, "{volume} != {want}");
     assert!((got.fill.channel_depth - 8.0).abs() < 1e-9, "{:?}", got.fill);
 }
@@ -703,12 +708,12 @@ fn a_fill_refusal_says_what_is_wrong_in_weld_words_and_the_size_that_builds() {
 /// asked directly: the two plane normals furthest from parallel give it.
 #[test]
 fn a_y_groove_takes_its_direction_from_a_plane_pair() {
-    use solidcraft_kernel::services::measure::{StraightBy, straight_direction};
+    use solidcraft_kernel::{StraightBy, straight_direction};
     let (parts, faces) = y_groove();
-    let mut reads: Vec<(&Body, &Order, usize)> = Vec::new();
+    let mut reads: Vec<(&Body, usize)> = Vec::new();
     for (part, f) in parts.iter().zip(&faces) {
         let outer = facing(part, UP)[0];
-        reads.extend(f.iter().chain([&outer]).map(|&face| (&part.0, &part.1, face)));
+        reads.extend(f.iter().chain([&outer]).map(|&face| (part, face)));
     }
     let got = straight_direction(&reads).unwrap();
     assert!(matches!(got, Straight::Along { by: StraightBy::Planes(..), .. }), "{got:?}");
