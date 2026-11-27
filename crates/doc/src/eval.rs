@@ -10165,6 +10165,7 @@ fn edge_through(b: &ModelBody, p: Vec3) -> Option<f64> {
 }
 
 /// Where one edge pick of a blend resolves at the body level.
+#[derive(Clone)]
 enum BlendPickTarget {
     /// Resolve this pick on `st.bodies[ti]`.
     Body(usize),
