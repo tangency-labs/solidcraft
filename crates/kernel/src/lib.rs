@@ -243,8 +243,10 @@ pub use body::PlanStats;
 pub use body::PointClass;
 pub use body::RayPick;
 pub use body::Refusal;
+pub use body::ShapeLimit;
 pub use body::SketchPlane;
 pub use body::SurfaceKind;
+pub use body::Unshaped;
 pub use body::colour_name;
 pub use body::display_tolerance;
 pub use body::placed_mesh;
@@ -383,6 +385,7 @@ pub use matchsurf::seam_continuity;
 pub use measure::BodyMeasure;
 pub use measure::MassMeasure;
 pub use measure::levels_along;
+pub use measure::line_meets_box;
 pub use measure::measure;
 pub use measure::measure_many;
 pub use measure::measure_mass;
@@ -461,6 +464,7 @@ pub use route::curves;
 pub use route::cylinder;
 pub use route::default_cell_grid;
 pub use route::develop;
+pub use route::dxf;
 pub use route::extrude;
 pub use route::fillet;
 pub use route::gusset_prepare;
@@ -484,6 +488,8 @@ pub use route::query;
 pub use route::read_cadir;
 pub use route::revolve;
 pub use route::revolve_whole;
+pub use route::runtime;
+pub use route::sections;
 pub use route::shaft_spline;
 pub use route::shell;
 pub use route::sphere;
@@ -495,6 +501,7 @@ pub use route::stock_retained_line;
 pub use route::stock_section_plane;
 pub use route::stock_spatial_arc;
 pub use route::stock_terminal_planes;
+pub use route::tessellate;
 pub use route::thicken;
 pub use route::torus;
 pub use route::trim_member;
@@ -522,9 +529,7 @@ pub use solidcraft_smlib::hold_a_kernel;
 pub use solidcraft_smlib::start;
 pub use solidcraft_smlib::stop::Stop;
 
-/// The cancel token over this thread's work ([`Stop::within`]), for work outside the kernel that
-/// stops with it (a sketch solve).
-pub use solidcraft_smlib::stop::token as stop_token;
+pub use route::runtime::stop_token;
 pub use solidcraft_smlib::trace as smlib_trace;
 /// Solidcore's own profiler, written as JSON Lines (feature `solidcore-profile`): the kernel's
 /// scopes and counted work of the calls this process made.

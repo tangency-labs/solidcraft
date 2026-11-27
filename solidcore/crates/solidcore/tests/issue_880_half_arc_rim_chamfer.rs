@@ -619,10 +619,10 @@ fn crease_degrees(
         d[1][0].cross(d[0][1])
     };
     let (a, b) = (normal(before, true), normal(after, false));
-    (a.dot(b) / (a.length() * b.length()))
-        .clamp(-1.0, 1.0)
-        .acos()
-        .to_degrees()
+    // atan2 of the sine and the cosine, not the cosine's acos: near 0 the acos of a dot
+    // rounded one ulp short of 1 is already 8.5e-7 degrees (two ulps 1.2e-6), so a crease
+    // of none read as one at the 1e-6 bound
+    a.cross(b).length().atan2(a.dot(b)).to_degrees()
 }
 
 /// #16651: the half rim's chamfer with the rounds as their definitions. Where the chamfer

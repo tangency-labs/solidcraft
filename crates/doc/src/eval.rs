@@ -40,6 +40,21 @@ const FACES_KEPT: usize = 4;
 /// were worked out on: by face, count each way and display quality.
 type IsoLines = (Option<Body>, std::collections::HashMap<(usize, usize, usize), Arc<[kernel::IsoLine]>>);
 
+/// O(1) weak identity of a body's lazy rigid mesh placement (if any), preventing ABA reuse
+/// without retaining the placement or triggering tessellation.
+#[derive(Clone)]
+pub(crate) struct PlacementCell(Option<std::sync::Weak<placed_mesh::PlacedMesh>>);
+
+impl PlacementCell {
+    pub(crate) fn matches(&self, body: &ModelBody) -> bool {
+        match (&self.0, &body.mesh_placement) {
+            (Some(stored), Some(live)) => std::sync::Weak::ptr_eq(stored, &Arc::downgrade(live)),
+            (None, None) => true,
+            _ => false,
+        }
+    }
+}
+
 /// A body in the evaluated model.
 #[derive(Clone, Debug)]
 pub struct ModelBody {
@@ -543,6 +558,29 @@ impl ModelBody {
     /// unchanged) and, while it is held, by no other body.
     pub fn display_identity(&self) -> Arc<dyn std::any::Any + Send + Sync> {
         self.mesh.clone()
+    }
+
+    /// Weak reference to this body's display mesh cell, for O(1) cache identity checks without
+    /// triggering tessellation or retaining computed meshes.
+    pub(crate) fn mesh_cell(&self) -> std::sync::Weak<OnceLock<Arc<Mesh>>> {
+        Arc::downgrade(&self.mesh)
+    }
+
+    /// Address key of this body's display mesh cell, for O(1) hashing without triggering
+    /// tessellation.
+    pub(crate) fn mesh_cell_id(&self) -> usize {
+        Arc::as_ptr(&self.mesh) as usize
+    }
+
+    /// Weak reference to this body's rigid mesh placement (when present), for O(1) cache identity
+    /// checks without triggering tessellation.
+    pub(crate) fn placement_cell(&self) -> PlacementCell {
+        PlacementCell(self.mesh_placement.as_ref().map(Arc::downgrade))
+    }
+
+    /// Address key of this body's rigid mesh placement (0 when none), for O(1) hashing.
+    pub(crate) fn placement_cell_id(&self) -> usize {
+        self.mesh_placement.as_ref().map_or(0, |placed| Arc::as_ptr(placed) as usize)
     }
 
     /// For a rigidly placed copy of another body (a placement of a component's body, a pattern
@@ -2509,6 +2547,12 @@ impl Document {
     /// beside them in the design's length unit (#9015).
     pub fn eval_point(&self, p: &crate::PointExpr) -> Result<Vec3> {
         point(&self.evaluation_values(), p)
+    }
+
+    /// An expression read with `vals` from [`Document::evaluation_values`], as the features read
+    /// it: a bare number beside a parameter is in the design's length unit (#9015).
+    pub fn eval_as_features(vals: &BTreeMap<String, Value>, e: &str, kind: Kind) -> Result<f64> {
+        val(vals, e, kind)
     }
 }
 
@@ -4968,6 +5012,14 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.placed_body(st, &anchor.target.body);
             }
         }
+        // A carried construction is moved in its own component's frame, from the frame of the
+        // first moved body, so both placements are read.
+        FeatureKind::Move { bodies, carry, .. } if !carry.is_empty() => {
+            reads.components.extend(carry.iter().filter_map(|id| doc.feature(id.0)).map(|g| g.component));
+            if let Some(first) = bodies.first() {
+                reads.placed_body(st, first);
+            }
+        }
         FeatureKind::Sketch { plane, sketch } => {
             match crate::face_anchor::plane_face_anchor(plane) {
                 // Read in the frame of the placement it was drawn in, its face through the
@@ -7103,7 +7155,7 @@ pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region
         }
         // A curve loop that no longer bounds a profile exactly falls back to the best match; the
         // feature's warning says so (`profile_fallback_notes`).
-        ProfileSel::Curves { .. } | ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
+        ProfileSel::Curves { .. } | ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } | ProfileSel::SidedCurves { .. } => {
             crate::profile_selection_indices_lenient(ss, sel)?
                 .0
                 .into_iter()
@@ -13414,15 +13466,30 @@ fn pattern_count(vals: &BTreeMap<String, Value>, e: &str) -> Result<usize> {
 }
 
 /// One direction of a rectangular pattern, worked out from its distance type (#8523).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PatternRow {
     /// How many, the original included.
     pub count: usize,
-    /// The step between neighbours.
+    /// The step between neighbours (with a spacing list, its first gap).
     pub step: f64,
     /// Copy at the end: the length the row spans, its last copy at the extent's end and the gap
     /// before it shorter than `step` (centred: half of it each way, a copy at either end).
     pub end: Option<f64>,
+    /// A spacing list: the gaps from each copy to the next going out from the original, used in
+    /// turn and from the start again. Empty when every gap is `step`.
+    pub gaps: Vec<f64>,
+}
+
+/// The values a rectangular pattern direction is given; one its distance type doesn't use may be
+/// anything, or left out.
+#[derive(Clone, Copy, Debug)]
+pub struct PatternRowValues<'a> {
+    pub distance: crate::PatternDistance,
+    pub count: Option<&'a str>,
+    pub spacing: Option<&'a str>,
+    pub extent: Option<&'a str>,
+    pub spacing_list: &'a [crate::Expr],
+    pub copy_at_end: bool,
 }
 
 impl PatternRow {
@@ -13431,6 +13498,19 @@ impl PatternRow {
     /// moves to where the whole row spans exactly the extent; centred, the outermost slot on
     /// each side moves to half the extent that way.
     pub fn offsets(&self, alignment: solidcraft_sketch::PatternAlignment, reversed: bool) -> Vec<f64> {
+        if !self.gaps.is_empty() {
+            // Out from the original on each side the copies go to, the list's gaps in turn.
+            let mut reach = vec![0.0];
+            for gap in self.gaps.iter().cycle().take(self.count.saturating_sub(1)) {
+                reach.push(reach.last().copied().unwrap_or(0.0) + gap);
+            }
+            return (0..self.count)
+                .map(|i| {
+                    let m = alignment.multiplier(i, reversed);
+                    reach.get(m.abs() as usize).copied().unwrap_or(0.0) * m.signum()
+                })
+                .collect();
+        }
         let mut out: Vec<f64> = (0..self.count).map(|i| self.step * alignment.multiplier(i, reversed)).collect();
         let last = self.count.saturating_sub(1);
         if let Some(end) = self.end
@@ -13459,19 +13539,16 @@ impl PatternRow {
 }
 
 /// One rectangular pattern direction from its distance type and the expressions it uses: the
-/// count, the spacing and the extent (one it doesn't use may be anything, or left out). A
-/// centred direction set by spacing and extent reaches half the extent each way from the
-/// original, with as many copies on each side.
+/// count, the spacing, the extent or the spacing list. A centred direction set by spacing and
+/// extent reaches half the extent each way from the original, with as many copies on each side;
+/// a centred spacing list runs out from the original the same way on both sides.
 pub fn pattern_row(
     vals: &BTreeMap<String, Value>,
-    distance: crate::PatternDistance,
-    count: Option<&str>,
-    spacing: Option<&str>,
-    extent: Option<&str>,
-    copy_at_end: bool,
+    given: PatternRowValues<'_>,
     alignment: solidcraft_sketch::PatternAlignment,
 ) -> Result<PatternRow> {
     use crate::PatternDistance as D;
+    let PatternRowValues { distance, count, spacing, extent, spacing_list, copy_at_end } = given;
     let missing = |what: &str| DocError::Invalid(format!("the pattern's {what} is missing"));
     let positive = |e: Option<&str>, what: &str| -> Result<f64> {
         let v = val(vals, e.ok_or_else(|| missing(what))?, Kind::Length)?;
@@ -13484,13 +13561,13 @@ pub fn pattern_row(
         D::CountSpacing => {
             let n = pattern_count(vals, count.ok_or_else(|| missing("count"))?)?;
             let step = val(vals, spacing.ok_or_else(|| missing("spacing"))?, Kind::Length)?;
-            Ok(PatternRow { count: n, step, end: None })
+            Ok(PatternRow { count: n, step, end: None, gaps: Vec::new() })
         }
         D::CountExtent => {
             let n = pattern_count(vals, count.ok_or_else(|| missing("count"))?)?;
             let extent = positive(extent, "extent")?;
             let step = if n > 1 { extent / (n - 1) as f64 } else { 0.0 };
-            Ok(PatternRow { count: n, step, end: None })
+            Ok(PatternRow { count: n, step, end: None, gaps: Vec::new() })
         }
         D::SpacingExtent => {
             let step = positive(spacing, "spacing")?;
@@ -13512,9 +13589,30 @@ pub fn pattern_row(
             let gaps = fit as usize * sides;
             let short = reach - fit * step > tol;
             if copy_at_end && short {
-                return Ok(PatternRow { count: gaps + 1 + sides, step, end: Some(extent) });
+                return Ok(PatternRow { count: gaps + 1 + sides, step, end: Some(extent), gaps: Vec::new() });
             }
-            Ok(PatternRow { count: gaps + 1, step, end: None })
+            Ok(PatternRow { count: gaps + 1, step, end: None, gaps: Vec::new() })
+        }
+        D::CountList => {
+            let n = pattern_count(vals, count.ok_or_else(|| missing("count"))?)?;
+            if spacing_list.is_empty() {
+                return Err(missing("spacing list"));
+            }
+            if spacing_list.len() > MAX_INSTANCES {
+                return Err(DocError::Invalid(format!("the pattern's spacing list may have at most {MAX_INSTANCES} spacings")));
+            }
+            let gaps = spacing_list
+                .iter()
+                .enumerate()
+                .map(|(i, e)| {
+                    let v = val(vals, e, Kind::Length)?;
+                    if !v.is_finite() || v <= 0.0 || v >= 1e9 {
+                        return Err(DocError::Invalid(format!("the pattern's spacing list: spacing {} must be greater than zero", i + 1)));
+                    }
+                    Ok(v)
+                })
+                .collect::<Result<Vec<f64>>>()?;
+            Ok(PatternRow { count: n, step: gaps.first().copied().unwrap_or(0.0), end: None, gaps })
         }
     }
 }
@@ -13619,20 +13717,38 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
             extent2,
             copy_at_end1,
             copy_at_end2,
+            spacing_list1,
+            spacing_list2,
         } => {
-            let row1 = pattern_row(vals, *distance1, Some(count1), Some(spacing1), extent1.as_deref(), *copy_at_end1, *alignment)?;
+            let values1 = PatternRowValues {
+                distance: *distance1,
+                count: Some(count1),
+                spacing: Some(spacing1),
+                extent: extent1.as_deref(),
+                spacing_list: spacing_list1,
+                copy_at_end: *copy_at_end1,
+            };
+            let row1 = pattern_row(vals, values1, *alignment)?;
             let d1 = dir1.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?;
             // A second direction without the values its distance type uses is left out, as one
             // without a count or a spacing always was.
             let complete = (!distance2.uses_count() || count2.is_some())
                 && (!distance2.uses_spacing() || spacing2.is_some())
-                && (!distance2.uses_extent() || extent2.is_some());
+                && (!distance2.uses_extent() || extent2.is_some())
+                && (!distance2.uses_list() || !spacing_list2.is_empty());
+            let values2 = PatternRowValues {
+                distance: *distance2,
+                count: count2.as_deref(),
+                spacing: spacing2.as_deref(),
+                extent: extent2.as_deref(),
+                spacing_list: spacing_list2,
+                copy_at_end: *copy_at_end2,
+            };
             let (row2, d2) = match dir2 {
-                Some(d) if complete => (
-                    pattern_row(vals, *distance2, count2.as_deref(), spacing2.as_deref(), extent2.as_deref(), *copy_at_end2, *alignment2)?,
-                    d.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?,
-                ),
-                _ => (PatternRow { count: 1, step: 0.0, end: None }, Vec3::Y),
+                Some(d) if complete => {
+                    (pattern_row(vals, values2, *alignment2)?, d.normalized().ok_or_else(|| DocError::Invalid("pattern direction".into()))?)
+                }
+                _ => (PatternRow { count: 1, step: 0.0, end: None, gaps: Vec::new() }, Vec3::Y),
             };
             if row1.count.saturating_mul(row2.count) > MAX_INSTANCES {
                 return Err(DocError::Invalid("too many pattern instances".into()));
@@ -18221,7 +18337,7 @@ fn eval_feature_kind(
             st.bodies.push(envelope);
             Ok(())
         }
-        FeatureKind::Move { bodies, copy, copy_frames, .. } => {
+        FeatureKind::Move { bodies, copy, copy_frames, carry, leave, .. } => {
             if !copy_frames.is_empty()
                 && (!*copy || copy_frames.len() != bodies.len() || copy_frames.iter().any(|m| !crate::valid_transfer_matrix(m)))
             {
@@ -18300,7 +18416,7 @@ fn eval_feature_kind(
                 return Err(e);
             }
             if !*copy {
-                move_constructions_with(doc, st, bodies, &base_motion);
+                move_constructions_with(doc, st, bodies, &base_motion, carry, leave);
             }
             Ok(())
         }
@@ -18758,9 +18874,10 @@ fn lost_turn_line(origin: Vec3, axis: Vec3, why: String, warning: &mut Option<St
 /// Construction axes and points built on bodies a Move moves go with them (#10127): an axis
 /// through a cylinder turns with the cylinder, as its faces do. Only those built from the moved
 /// bodies alone (`Construct::bodies`) follow; one also held by a fixed point, a plane or another
-/// body stays. `m` is the move in the bodies' own frame; each construction is kept in its
+/// body stays. The Move's `carry` list takes others along too, and its `leave` list keeps
+/// some of those built on the bodies where they are. `m` is the move in the bodies' own frame; each construction is kept in its
 /// component's frame (`construction_state`), so the move is carried over into that frame.
-fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::BodyName], m: &Mat) {
+fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::BodyName], m: &Mat, carry: &[FeatureId], leave: &[FeatureId]) {
     let frame_of = |feature: u64| {
         let comp = doc.feature(feature).map(|f| f.component).unwrap_or(0);
         if comp == 0 && !doc.occurrences.is_empty() { crate::IDENTITY } else { doc.component_transform(comp) }
@@ -18769,10 +18886,18 @@ fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::
         st.bodies.iter().filter(|b| moved.iter().any(|n| *n == b.name)).map(|b| (b.name.as_str(), body_world(doc, b))).collect();
     let mut placed = Vec::new();
     for (k, c) in st.construct.iter().enumerate() {
-        let Some(body) = c.bodies.first().and_then(|b| world.get(b.as_str())) else { continue };
-        if !c.bodies.iter().all(|b| world.contains_key(b.as_str())) {
+        if leave.iter().any(|f| *f == c.feature) {
             continue;
         }
+        // A carried construction moves in the frame of the first moved body.
+        let body = if carry.iter().any(|f| *f == c.feature) {
+            moved.first().and_then(|n| world.get(AsRef::<str>::as_ref(n)))
+        } else if c.bodies.iter().all(|b| world.contains_key(b.as_str())) {
+            c.bodies.first().and_then(|b| world.get(b.as_str()))
+        } else {
+            None
+        };
+        let Some(body) = body else { continue };
         let frame = frame_of(c.feature);
         let (Some(body_inv), Some(frame_inv)) = (crate::mat_inverse(body), crate::mat_inverse(&frame)) else { continue };
         let in_frame = crate::mat_mul(&crate::mat_mul(&frame_inv, body), &crate::mat_mul(m, &crate::mat_mul(&body_inv, &frame)));
