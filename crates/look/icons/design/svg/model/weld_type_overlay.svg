@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Weld type: overlay or surfacing</title>
+  <path d="M6 38L58 38L58 52L6 52Z" fill="#b8c3cf"/>
+  <path d="M6 38L58 38L58 52L6 52Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6 38L6 28Q15 22 24 28Q33 34 42 28Q50 23 58 28L58 38Z" fill="#328bd3"/>
+  <path d="M6 38L6 28Q15 22 24 28Q33 34 42 28Q50 23 58 28L58 38Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

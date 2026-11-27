@@ -17,9 +17,9 @@ use super::config::NameList;
 use super::motion::require;
 use super::types::{
     AngleExpr, AxisDirExpr, AxisLine, CombineOperation, ConventionParam, DirectionParam, EdgeRefs, ExtentKeyword, ExtrudeOperation, FaceRefs,
-    FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromPoint, GeoRefParam, IdOrName, LengthExpr,
+    FacesParam, FeatureCommon, FilletCornerParam, FilletFitParam, FilletTurnParam, FilletTypeParam, FromObject, GeoRefParam, IdOrName, LengthExpr,
     NumberExpr, OffsetEdgesParam, OperationParam, PathList, PatternAxis, PlaneCommon, PlaneOrFace, PlaneParam, Point3, PointExpr3, ProfilesParam,
-    ScaleFactors, SketchRef, StringList, ThinSideParam, ThreadFromPoint, ToPoint, ToolFacesParam, TouchingParam, feature_common, present,
+    ScaleFactors, SketchRef, StringList, ThinSideParam, ThreadFromPoint, ToObject, ToPoint, ToolFacesParam, TouchingParam, feature_common, present,
 };
 use super::types::{RevolveAxis, RevolveConventionParam, RevolveDirection, RevolveToPoint};
 use crate::params::MAX_STRING_LIST;
@@ -180,10 +180,11 @@ pub struct ExtrudeParams {
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "ConventionParam")]
     pub convention: Option<ConventionParam>,
-    /// Extrude up to this face, vertex or point (To Object).
+    /// Extrude up to this face, vertex or point (To Object), or up to a plane or a construction
+    /// point, followed when it moves.
     #[serde(default, deserialize_with = "present")]
-    #[schemars(with = "ToPoint")]
-    pub to: Option<ToPoint>,
+    #[schemars(with = "ToObject")]
+    pub to: Option<ToObject>,
     /// How far past `to` to go.
     #[serde(default)]
     pub to_offset: Option<LengthExpr>,
@@ -194,11 +195,12 @@ pub struct ExtrudeParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "bool")]
     pub to_body_apart: Option<bool>,
-    /// Start at this face or point (From Object). On a flat face at a slant the start follows the
-    /// face, and a distance moves it along the extrusion.
+    /// Start at this face or point (From Object), or at a plane or a construction point,
+    /// followed when it moves. On a flat face or a plane at a slant the start follows its slope,
+    /// and a distance moves it along the extrusion.
     #[serde(default, deserialize_with = "present")]
-    #[schemars(with = "FromPoint")]
-    pub from: Option<FromPoint>,
+    #[schemars(with = "FromObject")]
+    pub from: Option<FromObject>,
     /// How the extrusion combines with existing bodies. Default: new.
     #[serde(default)]
     pub operation: Option<ExtrudeOperation>,

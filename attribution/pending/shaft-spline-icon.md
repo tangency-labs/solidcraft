@@ -1,1 +1,0 @@
-| crates/look/icons/design/svg/model/shaft_spline.svg | SolidCraft contributors | two-tone modelling icon master (64 grid), original SolidCraft artwork | SolidCraft Brand Licence (LICENSE-BRAND) |

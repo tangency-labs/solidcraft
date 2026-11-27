@@ -118,6 +118,14 @@ pub struct SketchPreview {
     pub wires: Vec<usize>,
 }
 
+/// The two flange panels of a corner in the actual computed preview mesh.
+pub struct FlangeCornerFaces {
+    pub sources: [solidcraft_engine::doc::SheetEdgeName; 2],
+    pub body: String,
+    pub mesh: Arc<Mesh>,
+    pub faces: [Vec<usize>; 2],
+}
+
 /// A computed preview: the scene to draw and the bodies it stands in for.
 pub struct Built {
     pub interaction: Option<JointInteraction>,
@@ -152,6 +160,10 @@ pub struct Built {
     /// The reply of a previewed assembly constraint (`dof`, `conflicts`): the Constrain dialog says
     /// how free the part is with the constraint it shows.
     pub placed: Option<serde_json::Value>,
+    /// Source-rim pairs offered by the evaluated flange command.
+    pub flange_corners: Vec<[solidcraft_engine::doc::SheetEdgeName; 2]>,
+    /// Current mesh faces for those source-rim pairs.
+    pub flange_faces: Vec<FlangeCornerFaces>,
     /// Bodies the preview only moves, drawn moved on the GPU instead of built where they land
     /// (a Move). `scene` is not read then.
     pub layer: Option<Layer>,
@@ -291,6 +303,10 @@ pub struct PreviewState {
     pub mirror_decided: Option<u64>,
     /// The members of the previewed Frame Member, for Remove Tube in its dialog.
     pub centrelines: Vec<crate::dialogs_frame::Centreline>,
+    /// Flange corners from the successful preview of the current inputs only.
+    pub flange_corners: Vec<[solidcraft_engine::doc::SheetEdgeName; 2]>,
+    pub flange_faces: Vec<FlangeCornerFaces>,
+    pub hovered_corner: Option<usize>,
     straight: crate::extrude_preview::StraightPreview,
     moving: crate::move_preview::MovePreview,
     /// PreviewReselect: Primary held - hide the preview and restore replaced bodies for picks.
@@ -339,6 +355,13 @@ impl PreviewState {
     /// Bodies the model scene should hide for the preview (empty while rolled back).
     pub fn effective_replaced(&self) -> &[String] {
         if self.rolled_back { &[] } else { &self.replaced }
+    }
+
+    pub(crate) fn corner_hover(&self) -> Option<&FlangeCornerFaces> {
+        if !self.active || self.rolled_back || self.error.is_some() {
+            return None;
+        }
+        self.flange_faces.get(self.hovered_corner?)
     }
 
     /// The key of the [`Layer`] scenes shown: a result for the same key leaves them out.
@@ -405,6 +428,9 @@ impl PreviewState {
     fn hide_scene(&mut self) {
         self.drop_layer();
         self.interaction = None;
+        self.flange_corners.clear();
+        self.flange_faces.clear();
+        self.hovered_corner = None;
         if self.active || !self.replaced.is_empty() {
             self.active = false;
             self.bounds = Aabb3::EMPTY;
@@ -434,6 +460,7 @@ impl PreviewState {
         self.mirror_decided = None;
         self.points.clear();
         self.centrelines.clear();
+        self.flange_corners.clear();
         self.sketches.clear();
         self.busy = false;
         self.rolled_back = false;
@@ -526,6 +553,9 @@ impl PreviewState {
                 self.points = b.points;
                 self.set_pose(b.joints);
                 self.centrelines = b.centrelines;
+                self.flange_corners = if self.error.is_none() { b.flange_corners } else { Vec::new() };
+                self.flange_faces = if self.error.is_none() { b.flange_faces } else { Vec::new() };
+                self.hovered_corner = None;
                 match b.layer {
                     // The scenes of this key are up: only the motion changes, nothing is uploaded.
                     Some(Layer { key, scenes: None, motion }) if self.layer_shown() == Some(key) => self.layer = Some((key, motion)),
@@ -587,6 +617,12 @@ impl PreviewState {
             // A constraint's reply says how free its part is with the inputs it was for: with other
             // picks it would describe the wrong rule, so the dialog falls back to the saved design.
             self.placed = None;
+            if !self.flange_corners.is_empty() || !self.flange_faces.is_empty() {
+                self.shown_key = None;
+            }
+            self.flange_corners.clear();
+            self.flange_faces.clear();
+            self.hovered_corner = None;
         }
         if let Some((k, rx)) = &self.running {
             let k = *k;
@@ -609,6 +645,14 @@ impl PreviewState {
                 // key.
                 if k == key || intermediate {
                     self.apply(k, job);
+                    if k != key {
+                        if !self.flange_corners.is_empty() || !self.flange_faces.is_empty() {
+                            self.shown_key = None;
+                        }
+                        self.flange_corners.clear();
+                        self.flange_faces.clear();
+                        self.hovered_corner = None;
+                    }
                 }
             }
         }
@@ -975,6 +1019,24 @@ fn compute_candidate(scratch: &Session, cmds: &[(String, Value)], colors: Colors
     result
 }
 
+fn flange_faces(after: &ModelState, sources: &[[solidcraft_engine::doc::SheetEdgeName; 2]]) -> Vec<FlangeCornerFaces> {
+    sources
+        .iter()
+        .filter_map(|sources| {
+            let mut candidates = after.surface_sheets.iter().filter_map(|sheet| {
+                let body = after.body(&sheet.body)?;
+                let faces = sources.each_ref().map(|source| sheet.bend_face_indices(body, source));
+                if faces.iter().any(Vec::is_empty) {
+                    return None;
+                }
+                Some(FlangeCornerFaces { sources: sources.clone(), body: body.name.clone(), mesh: body.mesh(), faces })
+            });
+            let corner = candidates.next()?;
+            candidates.next().is_none().then_some(corner)
+        })
+        .collect()
+}
+
 /// Evaluate the commands on the scratch session and build the preview scene.
 /// Features that add or remove a tool body (extrude, revolve, primitives with join, cut or
 /// intersect) show the tool itself: tinted for join, see-through red for cut. Other features
@@ -1040,6 +1102,15 @@ pub fn compute(s: &Session, cmds: &[(String, Value)], colors: Colors) -> Job {
             b.warning = (!warnings.is_empty()).then(|| warnings.join(" "));
             b.tapered = features().find_map(|id| p.after.tapered(id)).map(<[_]>::to_vec).unwrap_or_default();
             b.centrelines = crate::dialogs_frame::centrelines(&p);
+            if let Some((command, params)) = cmds.first() {
+                let editing = if command == "timeline.redefine" { params.get("feature").and_then(Value::as_u64) } else { None };
+                if command == "sheet.flange"
+                    || command == "timeline.redefine" && params.get("command").and_then(Value::as_str) == Some("sheet.flange")
+                {
+                    b.flange_corners = crate::dialogs_sheet::flange_corner_sources(&p.before, &p.after, editing);
+                    b.flange_faces = flange_faces(&p.after, &b.flange_corners);
+                }
+            }
             Ok(b)
         }
     }
@@ -1231,6 +1302,8 @@ fn build_copies(before: &ModelState, after: &ModelState, sources: &[String], c: 
         mirror_meets: None,
         points: Vec::new(),
         placed: None,
+        flange_corners: Vec::new(),
+        flange_faces: Vec::new(),
         layer: None,
         joints: Vec::new(),
         plugin_view: None,
@@ -1288,6 +1361,8 @@ fn build_tool(before: &ModelState, after: &ModelState, c: Colors, op: &str) -> B
         mirror_meets: None,
         points: Vec::new(),
         placed: None,
+        flange_corners: Vec::new(),
+        flange_faces: Vec::new(),
         layer: None,
         joints: Vec::new(),
         plugin_view: None,
@@ -1610,6 +1685,8 @@ fn build_scene(
         mirror_meets: None,
         points,
         placed: None,
+        flange_corners: Vec::new(),
+        flange_faces: Vec::new(),
         layer: None,
         joints: Vec::new(),
         plugin_view: None,
@@ -2089,6 +2166,8 @@ mod tests {
             mirror_meets: None,
             points: Vec::new(),
             placed: None,
+            flange_corners: Vec::new(),
+            flange_faces: Vec::new(),
             layer: None,
             joints: Vec::new(),
             plugin_view: None,
@@ -2214,6 +2293,71 @@ mod tests {
             pv.apply(1, Ok(layered(7, true, 10.0)));
             assert!(seen.insert(pv.moving_layer().expect("a layer").key));
         }
+    }
+
+    #[test]
+    fn flange_corner_preview_metadata_is_current_only() {
+        let sources = vec![[
+            solidcraft_engine::doc::SheetEdgeName::parse("F7:top(F1:side:l1)|F7:bend.inner(F1:side:l1)").unwrap(),
+            solidcraft_engine::doc::SheetEdgeName::parse("F7:top(F1:side:l2)|F7:bend.inner(F1:side:l2)").unwrap(),
+        ]];
+        let built = || Built { flange_corners: sources.clone(), ..pose() };
+        let mut preview = PreviewState::default();
+        preview.apply(1, Ok(built()));
+        assert_eq!(preview.flange_corners, sources);
+        let (pending, receiver) = std::sync::mpsc::channel();
+        preview.running = Some((2, receiver));
+        preview.poll(2, None);
+        assert!(preview.flange_corners.is_empty(), "changed inputs must not offer old corners");
+        assert!(preview.active, "the last good geometry can stay visible");
+        preview.poll(1, None);
+        assert!(preview.running.is_some(), "the stale worker is still allowed to finish");
+        assert_ne!(preview.shown_key, Some(1), "returning to A must rebuild its discarded metadata");
+        pending.send(Ok(built())).unwrap();
+        preview.poll(1, None);
+        assert!(preview.running.is_none() && preview.flange_corners.is_empty());
+        let (sender, receiver) = std::sync::mpsc::channel();
+        preview.running = Some((1, receiver));
+        sender.send(Ok(built())).unwrap();
+        preview.poll(1, None);
+        assert_eq!(preview.flange_corners, sources, "the rebuilt A offers its metadata again");
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        preview.running = Some((1, receiver));
+        sender.send(Ok(built())).unwrap();
+        preview.poll(2, None);
+        assert!(preview.flange_corners.is_empty(), "an obsolete result must be discarded");
+        assert_eq!(preview.shown_key, None);
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        preview.running = Some((2, receiver));
+        sender.send(Ok(built())).unwrap();
+        preview.poll(2, None);
+        assert_eq!(preview.flange_corners, sources, "the current successful result offers its corners");
+
+        for (tool, stream) in [(true, None), (false, Some(42))] {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            preview.running = Some((1, receiver));
+            preview.running_tool = tool;
+            preview.running_stream_key = stream;
+            sender.send(Ok(built())).unwrap();
+            preview.poll(2, stream);
+            assert!(preview.active, "successful intermediate geometry may still be shown");
+            assert!(preview.flange_corners.is_empty(), "intermediate geometry cannot offer obsolete corners");
+            assert_eq!(preview.shown_key, None, "returning to the intermediate key also needs a rebuild");
+        }
+
+        for failure in [Err("invalid expression".into()), Ok(Built { error: Some("invalid tool".into()), ..built() })] {
+            preview.apply(2, Ok(built()));
+            preview.apply(2, failure);
+            assert!(preview.flange_corners.is_empty(), "a failed preview offers no corners");
+        }
+        preview.apply(2, Ok(built()));
+        preview.clear();
+        assert!(preview.flange_corners.is_empty(), "closing the preview clears its corners");
+        preview.apply(2, Ok(built()));
+        preview.reset();
+        assert!(preview.flange_corners.is_empty(), "another design cannot inherit these corners");
     }
 
     /// The worker completes while the slider is still held or Play keeps advancing.
