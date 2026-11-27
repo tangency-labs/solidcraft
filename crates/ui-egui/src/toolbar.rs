@@ -2280,27 +2280,22 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                 ribbon::section_footer(ui, solidcraft_ui_text::tr("ui.ribbon_pin_footer"));
                                 return;
                             }
-                            let grouped = if *panel == "CONSTRUCT" && !app.preferences.construct_menu_groups {
-                                cmds.iter().map(|c| (None, *c)).collect()
-                            } else {
-                                crate::workspace::grouped_commands(&tab, panel, &cmds)
-                            };
+                            let grouped = crate::toolbar_custom::grouped_menu(app, &tab, panel, &cmds);
                             let grouped = crate::toolbar_custom::order_grouped(app, &tab, panel, grouped);
                             // Where each command was drawn, for a drag to another place (#5080).
                             let mut placed: Vec<(&'static str, Rect)> = Vec::new();
                             if app.preferences.ribbon_icon_grid && !grouped.is_empty() {
                                 let mut paints = Vec::new();
-                                let action = dropdown_grid(
-                                    app,
-                                    ui,
-                                    &tab,
-                                    &grouped,
-                                    &crate::workspace::ungrouped(&tab, panel, &cmds),
-                                    &mut paints,
-                                    &mut placed,
-                                );
+                                let loose = if tab == "MODEL" && *panel == "CREATE" && !app.preferences.create_menu_groups {
+                                    cmds.iter().map(|c| c.id).collect()
+                                } else {
+                                    crate::workspace::ungrouped(&tab, panel, &cmds)
+                                };
+                                let action = dropdown_grid(app, ui, &tab, &grouped, &loose, &mut paints, &mut placed);
                                 placed.retain(|(id, _)| crate::toolbar_custom::movable_in_menu(&tab, panel, id));
-                                if let Some((id, before)) = menu_drop(ui, &placed, true, &|id| crate::toolbar_custom::group_index(&tab, panel, id)) {
+                                if let Some((id, before)) =
+                                    menu_drop(ui, &placed, true, &|id| crate::toolbar_custom::group_index(app, &tab, panel, id))
+                                {
                                     menu_move = Some((*panel, id, before));
                                 }
                                 grid_action(app, ui, action, &mut menu, &mut toggle);
@@ -2358,7 +2353,8 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                                 }
                             });
                             placed.retain(|(id, _)| crate::toolbar_custom::movable_in_menu(&tab, panel, id));
-                            if let Some((id, before)) = menu_drop(ui, &placed, false, &|id| crate::toolbar_custom::group_index(&tab, panel, id)) {
+                            if let Some((id, before)) = menu_drop(ui, &placed, false, &|id| crate::toolbar_custom::group_index(app, &tab, panel, id))
+                            {
                                 menu_move = Some((*panel, id, before));
                             }
                             ribbon::section_footer(ui, solidcraft_ui_text::tr("ui.ribbon_pin_footer"));

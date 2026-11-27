@@ -1,0 +1,8 @@
+{
+  "en": {
+    "prefs.create_menu_groups": "Group Create menu by workflow",
+    "prefs.create_menu_groups_help": "Separate sketch-driven commands from direct objects and features in the Model Create menu.",
+    "ui.create_from_sketch": "Create from Sketch",
+    "ui.create_object_feature": "Create Object / Feature"
+  }
+}
