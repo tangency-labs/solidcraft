@@ -502,6 +502,10 @@ pub struct UiState {
     pub view_angles_lock_pitch: bool,
     pub view_angles_lock_roll: bool,
     pub palette_open: bool,
+    /// Which camera to reuse when reopening an existing sketch; chosen in the Sketch Palette.
+    /// The saved design and Preferences remain unchanged.
+    #[serde(skip)]
+    pub sketch_open_view: sketch_palette::SketchOpenView,
     /// Dark theme (the default); a preference kept between runs.
     pub dark: bool,
     /// Selection filter: kinds a click doesn't pick (`vertices`, `edges`, `faces`, `sketch`).
@@ -551,6 +555,7 @@ impl Default for UiState {
             view_angles_lock_pitch: false,
             view_angles_lock_roll: false,
             palette_open: false,
+            sketch_open_view: Default::default(),
             dark: true,
             pick_off: Vec::new(),
             render_pick: "face".into(),
@@ -656,6 +661,43 @@ pub struct PreSketchView {
     pub facing: Camera,
 }
 
+/// Cameras left by each sketch in the active design tab. Kept in that design's slot on tab
+/// switches, never shared with a different design's same-numbered feature (#18998).
+#[derive(Default)]
+pub(crate) struct SketchLastViews {
+    /// Most recent exit, including Cancel.
+    last: std::collections::BTreeMap<u64, Camera>,
+    /// Most recent Finish: cancelling a later edit must not replace this camera.
+    finished: std::collections::BTreeMap<u64, Camera>,
+}
+
+impl SketchLastViews {
+    fn to_open(&self, sketch: u64, mode: sketch_palette::SketchOpenView) -> Option<Camera> {
+        match mode {
+            sketch_palette::SketchOpenView::Face => None,
+            sketch_palette::SketchOpenView::Last => self.last.get(&sketch).copied(),
+            sketch_palette::SketchOpenView::LastFinished => self.finished.get(&sketch).copied(),
+        }
+    }
+
+    fn closed(&mut self, sketch: u64, cam: Camera, finished: bool) {
+        self.last.insert(sketch, cam);
+        if finished {
+            self.finished.insert(sketch, cam);
+        }
+    }
+
+    fn forget(&mut self, sketch: u64) {
+        self.last.remove(&sketch);
+        self.finished.remove(&sketch);
+    }
+
+    fn retain_existing(&mut self, exists: impl Fn(u64) -> bool) {
+        self.last.retain(|id, _| exists(*id));
+        self.finished.retain(|id, _| exists(*id));
+    }
+}
+
 /// The active component (and placement) before a sketch opened inside another one (#8127), and
 /// the component the sketch opened in.
 #[derive(Clone, Debug, PartialEq)]
@@ -743,6 +785,8 @@ pub struct SolveApp {
     /// The views around opening the open sketch. Leaving it goes back to the earlier one as the
     /// "When a sketch ends" preference says (#7038).
     pub pre_sketch_cam: Option<PreSketchView>,
+    /// Per-sketch last and last-finished views of this design tab (not saved into the model).
+    pub(crate) sketch_last_views: SketchLastViews,
     /// The command now running named the view to open its sketch in, so that view turns to face it.
     sketch_view_named: bool,
     /// The view from before Extrude turned it to isometric (#9176); the view goes back to it when
@@ -1191,6 +1235,7 @@ impl SolveApp {
             view_gizmo: view_gizmo::State::default(),
             now: 0.0,
             pre_sketch_cam: None,
+            sketch_last_views: Default::default(),
             sketch_view_named: false,
             pre_extrude_cam: None,
             pre_command_cam: None,
@@ -1997,6 +2042,17 @@ impl SolveApp {
         };
         if let Ok(v) = &r {
             sheet_views::command_opened(self, id, v);
+            // A sketch id can be reused after undo or deletion. Its predecessor's view
+            // must never become the starting camera of the newly created sketch.
+            if id == "sketch.create"
+                && let Some(sketch) = v.get("sketch").and_then(Value::as_u64)
+            {
+                self.sketch_last_views.forget(sketch);
+            }
+            if matches!(id, "edit.undo" | "edit.redo" | "timeline.delete") {
+                let doc = &self.session.doc;
+                self.sketch_last_views.retain_existing(|sketch| doc.feature(sketch).is_some());
+            }
             if id.eq_ignore_ascii_case("plugin.inspect")
                 && let Some(id) = v.pointer("/manifest/id").and_then(Value::as_str)
             {
@@ -2009,7 +2065,7 @@ impl SolveApp {
                     let named = std::mem::take(&mut self.sketch_view_named);
                     self.open_sketch_camera(before, named);
                 }
-                "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64)),
+                "sketch.finish" | "sketch.cancel" => self.sketch_closed(v.get("sketch").and_then(Value::as_u64), id == "sketch.finish"),
                 // The sketch being edited has all new contents: a tool's picks named the old ones.
                 "sketch.replace" if v.get("sketch_id").and_then(Value::as_u64).is_some_and(|id| self.session.active_sketch == Some(id)) => {
                     if let Some(tool) = self.tool.as_mut() {
@@ -2348,6 +2404,9 @@ impl SolveApp {
                     prefs::apply_new_design(self);
                 }
                 if matches!(id, "file.new" | "doc.open" | "doc.recover" | "file.revert_saved") {
+                    // Commands can replace the document inside this tab without switching
+                    // tabs. Its feature ids must not inherit views from the old design.
+                    self.sketch_last_views = Default::default();
                     documents::reset_chat(self);
                     self.edit_in_place.active = None;
                     render_workspace::reset_document(self);
@@ -3678,10 +3737,16 @@ impl SolveApp {
             return false;
         }
         let painted = self.viewport.compass_view.unwrap_or_else(|| self.docs.views.active().id);
-        let turn = turn && self.preferences.sketch_open_look_at;
+        // The Palette choice only changes how a person opens an existing sketch.
+        // Scripted edits and new sketches retain the previous view behaviour.
+        let remembered =
+            if turn { self.sketch_last_views.to_open(sketch, self.ui.sketch_open_view).filter(|camera| camera.up == self.ui.up_axis) } else { None };
+        let turn = turn && (remembered.is_some() || self.preferences.sketch_open_look_at);
         let _ = documents::with_sketch_camera(self, view, |app| {
             let before = if painted == view { before } else { app.settled_cam() };
-            if turn {
+            if let Some(to) = remembered {
+                app.animate_to(to);
+            } else if turn {
                 dialogs::look_at_sketch(app);
             }
             let facing = app.settled_cam();
@@ -3765,7 +3830,17 @@ impl SolveApp {
     }
 
     /// Successful UI and programmatic exits share the same window cleanup.
-    fn sketch_closed(&mut self, open: Option<u64>) {
+    fn sketch_closed(&mut self, open: Option<u64>, finished: bool) {
+        // Capture the actual editing tile before the existing exit preference restores
+        // its earlier camera. A cancelled new sketch has no surviving feature to remember.
+        if let Some(sketch) = open.filter(|sketch| self.session.doc.feature(*sketch).is_some())
+            && let Some(view) = self.pre_sketch_cam.as_ref().filter(|pre| pre.sketch == sketch).map(|pre| pre.view)
+        {
+            let _ = documents::with_sketch_camera(self, view, |app| {
+                let camera = app.settled_cam();
+                app.sketch_last_views.closed(sketch, camera, finished);
+            });
+        }
         self.sketch_closed_in(open, None);
     }
 
