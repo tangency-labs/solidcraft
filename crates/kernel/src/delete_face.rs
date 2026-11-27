@@ -15,7 +15,7 @@
 //! faces can also be taken off together where the kernel can restore their sharp edges.
 
 use solidcraft_geom::prelude::*;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use solidcore_ops::cap::{is_face_on_plane, is_point_on_plane};
 use solidcore_record::Vec3;
@@ -811,23 +811,24 @@ fn operand_of(o: &FaceOrigin) -> Option<usize> {
 /// the wedge against every other face of the body, so the walls stop at the part's side where
 /// the corner lies past it.
 ///
-/// The wedge is the convex polyhedron of those planes and the plane through the face's two
-/// straight edges, on the corner's side: for a chamfer exactly the gap; for a round it also holds
-/// the segment between the round and that plane, which lies on the round's other side and so is
-/// already as the boolean leaves it (checked at its middle). `None` where the selection is not
-/// that shape, or the boolean or its check fails.
+/// The wedge, its planes and which side of each, is the kernel's
+/// ([`solidcore_ops::gap_wedge::wedge`]); here it is confirmed against the body (its middle on
+/// the body's boundary, and for a round the segment it also holds already as the boolean leaves
+/// it) and applied. `None` where the selection is not that shape, or the boolean or its check
+/// fails.
 fn heal_by_wedge(
     body: &Body,
     rec: &solidcore_record::brep::Brep,
     del: &BTreeSet<usize>,
     planes: &HashMap<usize, (Vec3, f64)>,
 ) -> Result<Option<Body>> {
+    use solidcore_ops::gap_wedge::{GapFace, wedge};
     let mut picked = del.iter().copied();
     let (Some(face), None) = (picked.next(), picked.next()) else { return Ok(None) };
-    let size = body.size().max(1e-9);
-    let tol = size * 1e-6;
-    let point = |v: u32| rec.vertices.get(v as usize).map(|v| Vec3::from(v.point));
-    let mut lines: Vec<(Vec3, Vec3)> = Vec::new();
+    let tol = body.size().max(1e-9) * 1e-6;
+    let arr = |p: Vec3| [p.x, p.y, p.z];
+    let point = |v: u32| rec.vertices.get(v as usize).map(|v| v.point);
+    let mut lines: Vec<([f64; 3], [f64; 3])> = Vec::new();
     for e in crate::offset::face_edges(rec, face) {
         let Some(edge) = rec.edges.get(e as usize) else { return Ok(None) };
         if matches!(edge.curve, Curve::Line { .. }) {
@@ -835,89 +836,36 @@ fn heal_by_wedge(
             lines.push((a, b));
         }
     }
-    let [(a0, a1), (b0, b1)] = lines[..] else { return Ok(None) };
-    let Some(u) = (a1 - a0).normalized() else { return Ok(None) };
-    if (b1 - b0).cross(u).len() > tol || (b0 - a0).cross(u).len() <= tol {
-        return Ok(None);
-    }
-    let on = |(n, d): (Vec3, f64), p: Vec3| (n.dot(p) - d).abs() <= tol;
-    let wall = |a: Vec3, b: Vec3| {
-        let mut found = planes.iter().filter(|(_, pl)| on(**pl, a) && on(**pl, b)).map(|(f, pl)| (*f, *pl));
-        match (found.next(), found.next()) {
-            (Some(w), None) => Some(w),
-            _ => None,
-        }
-    };
-    let (Some((wa, pa)), Some((wb, pb))) = (wall(a0, a1), wall(b0, b1)) else { return Ok(None) };
-    if wa == wb {
-        return Ok(None);
-    }
-    // The face's middle and its outward normal there; for a round, the middle of the segment
-    // between it and the plane through its straight edges.
-    let c = (a0 + a1 + b0 + b1) * 0.25;
-    let (m, normal, segment) = match surf_of(rec, face) {
-        Some(Surf::Plane { n, .. }) => (c, n, None),
-        Some(Surf::Cylinder { o, a, r, convex }) => {
-            if a.cross(u).len() > 1e-9 {
-                return Ok(None);
-            }
-            let q = o + a * (c - o).dot(a);
-            let Some(out) = (c - q).normalized() else { return Ok(None) };
-            let m = q + out * r;
-            (m, if convex { out } else { -out }, Some((m + c) * 0.5))
-        }
+    let [a, b] = lines[..] else { return Ok(None) };
+    let gap = match surf_of(rec, face) {
+        Some(Surf::Plane { n, .. }) => GapFace::Plane { n: arr(n) },
+        Some(Surf::Cylinder { o, a, r, convex }) => GapFace::Cylinder { o: arr(o), a: arr(a), r, convex },
         _ => return Ok(None),
     };
-    if body.classify_point(m)? != crate::PointClass::OnBoundary {
-        return Ok(None);
-    }
-    // The sharp corner where the walls meet, level with the middle.
-    let den = pa.0.dot(pb.0.cross(u));
-    if den.abs() < 1e-9 {
-        return Ok(None);
-    }
-    let x = (pb.0.cross(u) * pa.1 + u.cross(pa.0) * pb.1 + pa.0.cross(pb.0) * u.dot(m)) / den;
-    let toward = normal.dot(x - m);
-    if !x.is_finite() || toward.abs() <= tol {
+    // the planes in face order, so the wedge is the same on every run
+    let ordered: BTreeMap<usize, (Vec3, f64)> = planes.iter().map(|(f, pl)| (*f, *pl)).collect();
+    let listed: Vec<(usize, [f64; 3], f64)> = ordered.iter().map(|(f, (n, d))| (*f, arr(*n), *d)).collect();
+    let Some(w) = wedge([a, b], gap, &listed, tol) else { return Ok(None) };
+    if body.classify_point(Vec3::from(w.middle))? != crate::PointClass::OnBoundary {
         return Ok(None);
     }
     // The corner on the outward side: the wedge is air, and is added.
-    let op = if toward > 0.0 { crate::BoolOp::Union } else { crate::BoolOp::Cut };
-    let mut sides = Vec::new();
-    for &(n, d) in planes.values() {
-        let s = n.dot(m) - d;
-        if s.abs() <= tol {
-            return Ok(None);
-        }
-        sides.push(if s < 0.0 { crate::HalfSpace { n, d } } else { crate::HalfSpace { n: -n, d: -d } });
-    }
-    let Some(k) = u.cross(b0 - a0).normalized() else { return Ok(None) };
-    let kd = k.dot(a0);
-    let s = k.dot(x) - kd;
-    if s.abs() <= tol {
-        return Ok(None);
-    }
-    sides.push(if s < 0.0 { crate::HalfSpace { n: k, d: kd } } else { crate::HalfSpace { n: -k, d: -kd } });
-    let Ok(wedge) = crate::convex_polyhedron(&sides) else { return Ok(None) };
-    if let Some(p) = segment {
-        let air_or_material = if op == crate::BoolOp::Union { crate::PointClass::Inside } else { crate::PointClass::Outside };
-        if body.classify_point(p)? != air_or_material {
+    let op = if w.add { crate::BoolOp::Union } else { crate::BoolOp::Cut };
+    let sides: Vec<crate::HalfSpace> = w.sides.iter().map(|(n, d)| crate::HalfSpace { n: Vec3::from(*n), d: *d }).collect();
+    let Ok((wedge_body, side_of)) = crate::polyhedron::convex_polyhedron_sides(&sides) else { return Ok(None) };
+    if let Some(p) = w.segment {
+        let air_or_material = if w.add { crate::PointClass::Inside } else { crate::PointClass::Outside };
+        if body.classify_point(Vec3::from(p))? != air_or_material {
             return Ok(None);
         }
     }
-    let Ok(Some(result)) = crate::boolean(body, &wedge, op) else { return Ok(None) };
+    let Ok(Some(result)) = crate::boolean(body, &wedge_body, op) else { return Ok(None) };
     if !matches!(checked_locally(body, &result), Ok(None)) {
         return Ok(None);
     }
     let Some(history) = result.history().cloned() else { return Ok(None) };
     // The wedge's faces lie on the neighbours' planes: their pieces are those neighbours.
-    let wrec = crate::native::brep_record(&wedge)?;
-    let neighbour = |g: usize| match surf_of(&wrec, g) {
-        Some(Surf::Plane { n, d }) => {
-            planes.iter().find(|(_, (pn, pd))| n.cross(*pn).len() <= 1e-9 && (d - pd * n.dot(*pn).signum()).abs() <= tol).map(|(f, _)| *f)
-        }
-        _ => None,
-    };
+    let neighbour = |g: usize| side_of.get(g).and_then(|&s| w.faces.get(s).copied().flatten());
     let map = |o: FaceOrigin| match o {
         FaceOrigin::Face { operand: 1, face } => neighbour(face).map(|face| FaceOrigin::Face { operand: 0, face }),
         o if operand_of(&o).is_some_and(|op| op != 0) => None,

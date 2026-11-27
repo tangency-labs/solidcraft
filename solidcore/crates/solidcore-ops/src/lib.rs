@@ -76,6 +76,7 @@ pub mod frame_gusset;
 pub mod frame_member;
 pub mod frame_trim;
 pub mod fuel;
+pub mod gap_wedge;
 pub mod heal;
 pub mod history;
 pub mod hlr;
