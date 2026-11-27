@@ -667,16 +667,20 @@ fn blend_failure(
 }
 
 /// Not upstream (#16404): a failure that gives no other reason (an unsupported corner or step,
-/// a bare status) where the corners step found a face beside a blended edge closing to a point
+/// a step of the executive failing, a bare status) where the corners step found a face beside a blended edge closing to a point
 /// is that face: no blend of any size fits there. A refusal that names its own reason (a blend
 /// too large, no room, a setback too short) keeps it.
 fn narrowed(s: &FilletSession<'_>, error: Error) -> Error {
     match (s.narrowing_vertex(), &error) {
-        (Some(p), Error::Status(..) | Error::Unsupported(..) | Error::CornerUnsupported { .. }) => {
-            Error::FaceClosesToPoint {
-                at: Some([p.x, p.y, p.z]),
-            }
-        }
+        (
+            Some(p),
+            Error::Status(..)
+            | Error::BlendFailed { .. }
+            | Error::Unsupported(..)
+            | Error::CornerUnsupported { .. },
+        ) => Error::FaceClosesToPoint {
+            at: Some([p.x, p.y, p.z]),
+        },
         _ => error,
     }
 }
