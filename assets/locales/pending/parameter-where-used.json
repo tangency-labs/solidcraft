@@ -4,69 +4,79 @@
     "Sketches": "Sketches",
     "Features": "Features",
     "Parameters": "Parameters",
-    "Not used": "Not used"
+    "Not used": "Not used",
+    "Other uses": "Other uses"
   },
   "de": {
     "Where used": "Verwendet in",
     "Sketches": "Skizzen",
     "Features": "Features",
     "Parameters": "Parameter",
-    "Not used": "Nicht verwendet"
+    "Not used": "Nicht verwendet",
+    "Other uses": "Weitere Verwendungen"
   },
   "es": {
     "Where used": "Dónde se usa",
     "Sketches": "Bocetos",
     "Features": "Operaciones",
     "Parameters": "Parámetros",
-    "Not used": "Sin usar"
+    "Not used": "Sin usar",
+    "Other uses": "Otros usos"
   },
   "fr": {
     "Where used": "Où est-il utilisé",
     "Sketches": "Esquisses",
     "Features": "Fonctions",
     "Parameters": "Paramètres",
-    "Not used": "Non utilisé"
+    "Not used": "Non utilisé",
+    "Other uses": "Autres utilisations"
   },
   "it": {
     "Where used": "Dove è usato",
     "Sketches": "Schizzi",
     "Features": "Funzioni",
     "Parameters": "Parametri",
-    "Not used": "Non usato"
+    "Not used": "Non usato",
+    "Other uses": "Altri usi"
   },
   "ja": {
     "Where used": "使用箇所",
     "Sketches": "スケッチ",
     "Features": "フィーチャー",
     "Parameters": "パラメーター",
-    "Not used": "未使用"
+    "Not used": "未使用",
+    "Other uses": "その他の使用箇所"
   },
   "zh": {
     "Where used": "使用位置",
     "Sketches": "草图",
     "Features": "特征",
     "Parameters": "参数",
-    "Not used": "未使用"
+    "Not used": "未使用",
+    "Other uses": "其他用途"
   },
   "ar": {
     "Where used": "أماكن الاستخدام",
     "Sketches": "الرسومات",
     "Features": "الميزات",
     "Parameters": "المعاملات",
-    "Not used": "غير مستخدم"
+    "Not used": "غير مستخدم",
+    "Other uses": "استخدامات أخرى"
   },
   "he": {
     "Where used": "היכן בשימוש",
     "Sketches": "סקיצות",
     "Features": "פיצ'רים",
     "Parameters": "פרמטרים",
-    "Not used": "לא בשימוש"
+    "Not used": "לא בשימוש",
+    "Other uses": "שימושים אחרים"
   },
   "vi": {
     "Where used": "Nơi sử dụng",
     "Sketches": "Phác thảo",
     "Features": "Tính năng",
     "Parameters": "Tham số",
-    "Not used": "Không dùng"
+    "Not used": "Không dùng",
+    "Other uses": "Nơi dùng khác"
   }
 }

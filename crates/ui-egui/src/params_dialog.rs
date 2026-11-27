@@ -90,13 +90,15 @@ pub struct ParamsDialog {
 }
 
 /// What uses a parameter, as its Where used list shows it (#20879): the sketches and the other
-/// features that rebuild when it changes (`parameters.users`' `drives`), and the parameters whose
-/// expressions read it.
+/// features that rebuild when it changes (`parameters.users`' `drives`), the parameters whose
+/// expressions read it, and the other users the list cannot select (a component's quantity, a
+/// joint, a configuration column, a rule, a canvas, a moved occurrence), by their names.
 #[derive(Debug, Default, PartialEq)]
 struct WhereUsed {
     sketches: Vec<(u64, String)>,
     features: Vec<(u64, String)>,
     parameters: Vec<String>,
+    others: Vec<String>,
 }
 
 impl WhereUsed {
@@ -109,18 +111,25 @@ impl WhereUsed {
             if sketch { &mut out.sketches } else { &mut out.features }.push((id, feature.to_string()));
         }
         for user in reply["users"].as_array().into_iter().flatten() {
-            if user["type"] == "parameter"
-                && let Some(parameter) = user["name"].as_str()
-                && !out.parameters.iter().any(|p| p == parameter)
+            // Features and dimensions are listed through `drives`; every other user is named.
+            let (list, name) = match user["type"].as_str() {
+                Some("feature" | "dimension") => continue,
+                Some("parameter") => (&mut out.parameters, user["name"].as_str()),
+                Some("configuration") => (&mut out.others, user["column"].as_str()),
+                _ => (&mut out.others, user["name"].as_str()),
+            };
+            if let Some(name) = name
+                && !list.iter().any(|known| known == name)
             {
-                out.parameters.push(parameter.to_string());
+                list.push(name.to_string());
             }
         }
         out
     }
 
+    /// Nothing uses the parameter: only then does the list say Not used.
     fn is_empty(&self) -> bool {
-        self.sketches.is_empty() && self.features.is_empty() && self.parameters.is_empty()
+        self.sketches.is_empty() && self.features.is_empty() && self.parameters.is_empty() && self.others.is_empty()
     }
 }
 
@@ -166,7 +175,11 @@ fn where_used_menu(app: &mut SolveApp, d: &mut ParamsDialog, ui: &mut egui::Ui, 
                 }
                 ui_kit::Menu::heading(ui, heading);
                 for (id, feature) in list {
-                    let row = ui_kit::menu::button(ui, feature, "");
+                    // A name from the design is shown as it is, never looked up in the catalog.
+                    let row = {
+                        let _names = solidcraft_ui_text::resolved_labels();
+                        ui_kit::menu::button(ui, feature, "")
+                    };
                     crate::scenario::publish_handle(&format!("param:used:{name}:{feature}"), row.rect.center());
                     if row.clicked() {
                         select(app, vec![*id]);
@@ -187,13 +200,23 @@ fn where_used_menu(app: &mut SolveApp, d: &mut ParamsDialog, ui: &mut egui::Ui, 
             if !used.parameters.is_empty() {
                 ui_kit::Menu::heading(ui, "Parameters");
                 for parameter in &used.parameters {
-                    let row = ui_kit::menu::button(ui, parameter, "");
+                    let row = {
+                        let _names = solidcraft_ui_text::resolved_labels();
+                        ui_kit::menu::button(ui, parameter, "")
+                    };
                     crate::scenario::publish_handle(&format!("param:used:{name}:{parameter}"), row.rect.center());
                     if row.clicked() {
                         d.filter = parameter.clone();
                         d.reset_scroll = true;
                         ui.close();
                     }
+                }
+            }
+            if !used.others.is_empty() {
+                ui_kit::Menu::heading(ui, "Other uses");
+                for other in &used.others {
+                    let _names = solidcraft_ui_text::resolved_labels();
+                    ui_kit::menu::button_enabled(ui, other, "", false);
                 }
             }
         },
@@ -530,7 +553,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     )
     .wide()
     .body_rows(16.0)
-    .reset_scroll(d.reset_scroll);
+    // A reset asked for while drawing (choosing a parameter in a Where used list) is kept for the
+    // next frame's panel; this frame's is used up here.
+    .reset_scroll(std::mem::take(&mut d.reset_scroll));
     // A width or body height the user dragged the card to replaces that default; each axis stays
     // automatic until the user drags it (review of #13422).
     let (chosen_width, chosen_height) = (SIZE.width(ctx), SIZE.height(ctx));
@@ -602,7 +627,6 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             },
         );
         resize = SIZE.edges(ui, side, panel.last_body_scrollbar(ui.ctx()));
-        d.reset_scroll = false;
     });
     SIZE.apply(ctx, resize, shown.as_ref().map(|r| r.response.rect), panel.last_body_height(ctx), viewport);
     // Held edits (#9279) are set by Apply and OK; Cancel, the close button and Escape drop them.
@@ -2103,6 +2127,13 @@ mod tests {
         // `depth` reads it, as do the sketch's dimension parameters.
         assert!(used.parameters.iter().any(|p| p == "depth"), "{used:?}");
         assert!(WhereUsed::read(&mut h.app, "spare").is_empty());
+        // A user the list cannot select is still a use: a parameter only a component's quantity
+        // reads is not Not used (review of #22621).
+        h.app.run("parameters.add", json!({"name":"span","expression":"1","unit":"m"})).unwrap();
+        h.app.run("component.create", json!({"name":"Cable","virtual":true,"bom_quantity":"2 * span"})).unwrap();
+        let span = WhereUsed::read(&mut h.app, "span");
+        assert_eq!(span.others, vec!["Cable".to_string()], "{span:?}");
+        assert!(!span.is_empty());
 
         h.step(&json!({"start":"parameters.change"})).unwrap();
         h.frames(3);
