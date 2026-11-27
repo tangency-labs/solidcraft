@@ -275,11 +275,11 @@ both returned hashes and the selected approvals:
 ```
 
 URL installation requires both hashes. The reply's `source` names the host and repository. It fetches the package again and refuses to install if either
-hash has changed since review. The same zip checks, limits and permission review apply. The host
+hash has changed since review. The same zip checks, limits and permission review apply. For GitHub URL installs, the host
 stores the selected `owner/repo` for later updates even if the manifest has no `updates.github`.
 Later updates retain that repository; a package naming a different repository is refused.
 For a downloaded update installed from a local `path`, `repository` can name the reviewed
-`owner/repo` to retain; the returned approval covers that metadata too. URL installs infer it from `url`.
+`owner/repo` to retain; the returned approval covers that metadata too. GitHub URL installs infer it from `url`.
 These calls never open a dialog, and neither review nor installation runs plugin code.
 
 A zip holds one plugin, with `plugin.json` and its component at the top or inside one top-level folder.
