@@ -16,10 +16,17 @@
 //! anything else is the executives' to refuse or settle. Two edges whose lines come within
 //! their sections' reaches of each other get no plan: their prisms would cut into each other's
 //! band, which the blend executives settle and the prisms do not.
+//!
+//! A concave edge's fill ends where the faces at the edge's ends, carried on, close it. Where
+//! those faces are extrusions along one of the edge's faces' normals (a section extruded, its
+//! coves split between a block and an upright on it among them), the part within a slab just
+//! behind that face, proved a uniform prism along the normal ([`slab_is_prism`]), moved past
+//! the face by its depth is the part with them carried on exactly ([`RunOut::backing_slabs`],
+//! tangency-labs/solidcraft#22821).
 
 use crate::blend::carried_face::plane_normal;
 use crate::blend::straight_wedge::{straight_wedge, StraightWedge};
-use crate::math::EFF_ZERO;
+use crate::math::{EFF_ZERO, EFF_ZERO_SQRT};
 use crate::query::brep::{calculate_bounding_box, BoundingBoxOptions};
 use crate::query::face::p1::point_on_face;
 use crate::topology::{edge, vertex, EdgeId, VertexId};
@@ -100,6 +107,125 @@ pub struct RunOut {
     pub reach: f64,
     /// The tolerance the points are found within: a billionth of the part's size.
     pub tolerance: f64,
+}
+
+/// A slab of the part behind one of a concave edge's faces, square to that face's outward
+/// normal (tangency-labs/solidcraft#22821): the region over the rectangle `rect` in the plane
+/// through `origin` spanned by `x` (the edge) and `y`, between the `levels` along `x × y` (the
+/// face's outward normal) from `origin`, just behind the face. Where the part
+/// within it is a uniform prism along the normal ([`slab_is_prism`]), the faces at the edge's
+/// ends are extrusions along it, and that piece of the part moved by `shift` (the normal times
+/// the depth) is the part with those faces carried on past the face, as far as the blend
+/// reaches: the fill of the edge's air ends where they close it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BackingSlab {
+    /// The slab's plane's origin: the edge's start, a thousandth of the reach behind the face.
+    pub origin: Point3,
+    /// Along the edge.
+    pub x: Vec3,
+    /// Square to the edge and the normal: `x × y` is the face's outward normal.
+    pub y: Vec3,
+    /// The slab's rectangle in `(x, y)`, counterclockwise: along `x` the prism's extent, along
+    /// `y` the prism's length each way.
+    pub rect: [[f64; 2]; 4],
+    /// The slab's levels along the normal, lower first: its depth behind the plane, twice the
+    /// blend's reach so that moved by it the slab covers the blend's section (which lies within
+    /// one reach of the edge), and 0.
+    pub levels: [f64; 2],
+    /// The move that carries the slab past the face: the normal times the depth.
+    pub shift: Vec3,
+    /// How far a face of the slab may stray from running along the normal, or a cap's vertex
+    /// from its level, for [`slab_is_prism`]: a thousand times the plan's tolerance.
+    pub limit: f64,
+}
+
+impl RunOut {
+    /// The slabs behind a concave edge's two faces ([`BackingSlab`]), the first face's first;
+    /// none for a convex edge, and none for a face whose normal is not found.
+    #[must_use]
+    pub fn backing_slabs(&self) -> Vec<BackingSlab> {
+        if !self.concave {
+            return Vec::new();
+        }
+        let Some((_, along)) = self.x.cross(self.y).length_and_unit() else {
+            return Vec::new();
+        };
+        // the second face's direction in from the edge, in the section's frame
+        let second = match self.section {
+            RunOutSection::Triangle(corners) => corners[2],
+            RunOutSection::Round { t1, .. } => t1,
+        };
+        let Some((_, t2)) = (self.x * second[0] + self.y * second[1]).length_and_unit() else {
+            return Vec::new();
+        };
+        // the faces' outward normals, out of the material into the air between them: the
+        // first's towards the second face's side, the second's towards the first's
+        let mut normals = vec![self.y];
+        if let Some((_, n2)) = (self.x - t2 * self.x.dot(t2)).length_and_unit() {
+            normals.push(n2);
+        }
+        let depth = 2.0 * self.reach;
+        let gap = self.reach * 1e-3;
+        normals
+            .into_iter()
+            .map(|d| BackingSlab {
+                origin: self.origin - d * gap,
+                x: along,
+                y: d.cross(along),
+                rect: {
+                    let across = (self.to - self.from).abs();
+                    [
+                        [self.from, -across],
+                        [self.to, -across],
+                        [self.to, across],
+                        [self.from, across],
+                    ]
+                },
+                levels: [-depth, 0.0],
+                shift: d * depth,
+                limit: self.tolerance * 1e3,
+            })
+            .collect()
+    }
+}
+
+/// Whether `b`, the part within slab `s`, is a uniform prism along the slab's normal: each of
+/// its faces runs straight along the normal, within `s.limit` (the kernel's bound on how far it
+/// strays across it, [`crate::prism::measure::face_straying`]), or has all its vertices within
+/// `s.limit` of the same one of the slab's two levels and lies in a plane square to the normal
+/// (a cap). `false` for a body with no faces.
+///
+/// # Errors
+/// Those of the topology walks.
+pub fn slab_is_prism(k: &Kernel, b: &Brep, s: &BackingSlab) -> Result<bool> {
+    let normal = s.x.cross(s.y);
+    let caps = s.levels.map(|level| s.origin + normal * level);
+    let faces = b.face_list();
+    if faces.is_empty() {
+        return Ok(false);
+    }
+    for &f in faces {
+        if crate::prism::measure::face_straying(k, b, f, normal).is_some_and(|x| x <= s.limit) {
+            continue;
+        }
+        // a cap: a plane square to the normal, every vertex at the one level
+        let square = plane_normal(k, b, f, s.limit)?
+            .is_some_and(|n| n.cross(normal).length() <= EFF_ZERO_SQRT);
+        if !square {
+            return Ok(false);
+        }
+        let mut off = [0.0_f64; 2];
+        for v in crate::topology::face::p4::vertices(b, f, None, false, None)? {
+            let at = vertex::point(b, v)?;
+            for (o, &c) in off.iter_mut().zip(&caps) {
+                *o = o.max((at - c).dot(normal).abs());
+            }
+        }
+        if off.iter().all(|&o| o > s.limit) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 /// The run-outs of `edges` of `b`, `each` the chamfer's distance or the round's radius of each
@@ -342,5 +468,53 @@ fn line_distance(p: Point3, u: Vec3, q: Point3, v: Vec3) -> f64 {
     } else {
         // parallel: the part of `between` square to the lines
         (between - u * between.dot(u)).length()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::primitive::api_primitives::create_box;
+
+    /// A slab through `origin` along the normal `x × y`, between levels -10 and 0.
+    fn slab(origin: Point3, x: Vec3, y: Vec3) -> BackingSlab {
+        BackingSlab {
+            origin,
+            x,
+            y,
+            rect: [[-50.0, -50.0], [50.0, -50.0], [50.0, 50.0], [-50.0, 50.0]],
+            levels: [-10.0, 0.0],
+            shift: x.cross(y) * 10.0,
+            limit: 1e-6,
+        }
+    }
+
+    #[test]
+    fn a_box_is_a_prism_along_its_edges_and_not_askew() -> Result<()> {
+        let mut k = Kernel::default();
+        let b = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 10.0, 10.0, 10.0)?;
+        // along z: four walls straight, the top and bottom at the slab's two levels
+        let along_z = slab(
+            Point3::new(0.0, 0.0, 10.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        assert!(slab_is_prism(&k, &b, &along_z)?);
+        // tilted between x and z: the walls stray across it, the caps are not square to it
+        let h = 0.5_f64.sqrt();
+        let askew = slab(
+            Point3::new(10.0, 0.0, 10.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(-h, 0.0, h),
+        );
+        assert!(!slab_is_prism(&k, &b, &askew)?);
+        // along z, but levels that miss the box's top and bottom: not this slab's prism
+        let shifted = slab(
+            Point3::new(0.0, 0.0, 12.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        assert!(!slab_is_prism(&k, &b, &shifted)?);
+        Ok(())
     }
 }

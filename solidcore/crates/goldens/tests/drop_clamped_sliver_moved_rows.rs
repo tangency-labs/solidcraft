@@ -6,19 +6,17 @@
 //! clamped polygon is within the drop's UV tolerance and the curve piece it covers is
 //! within the drop's 3D tolerance), and stretches the neighbouring span over the sliver's
 //! range. Main's trim kept such a span as an out-and-back fold. For each moved row the
-//! test takes main's `rec` values ([`MAIN_GEN0119`] and the rest, from a run of main's
+//! test takes main's `rec` values ([`MAIN_GEN0812`] and the rest, from a run of main's
 //! drop tracer) and this branch's (run here), and checks:
 //!
 //! 1. main's values encode to main's committed golden line ([`MAIN_LINES`], copied from
 //!    main's `intersect.surface_drop_lib_p3.jsonl`), and this branch's to the committed
 //!    line;
-//! 2. the two differ only in the curve that moved (the dropped curve and the record's copy
-//!    of it, or the record's control polygon of a failed trace) and in the deviations the
-//!    drop reports, each within the drop's tolerance;
-//! 3. the moved curve is main's with exactly one end span removed: every other control
-//!    point and knot is main's bit for bit, the inner control point next to the new end
-//!    included (the stretched span keeps its polygon), and the new end point is main's
-//!    junction point;
+//! 2. the two differ only in the record's control polygon and knots of a failed trace;
+//! 3. that polygon is main's with exactly one end span removed: every other control point
+//!    and knot is main's bit for bit, the inner control point next to the new end included
+//!    (the stretched span keeps its polygon), and the new end point is main's junction
+//!    point;
 //! 4. the removed span of main's curve folds back on itself (it is not monotone in a
 //!    coordinate), and every control point of the new curve lies in the domain.
 //!
@@ -27,6 +25,13 @@
 //! `blend.fillet_executive_p3` rows the fix moves (mass properties) are classified in
 //! `drop_clamped_sliver_moved_mass_rows.rs`. The rows in [`KEPT`] must keep main's
 //! values, and are checked bit for bit.
+//!
+//! `gen0119` left the moved rows with tangency-labs/solidcraft#22201: the drop's end span now
+//! starts with the curve's speed ahead of the knot, so the rule leaves out no span on gen0119,
+//! and its row is back within the goldens' comparator of the line from before the rule. It
+//! was the ledger's only row whose dropped curve (not a failed trace's polygon) lost its tail
+//! span, so the ledger no longer has an end-to-end witness of a tail span being removed on a
+//! successful drop; that witness proved the rule only against main from before it.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -46,8 +51,7 @@ const UNIT: &str = "intersect.surface_drop_lib_p3";
 const SEEDS: usize = 16;
 
 /// Main's committed golden lines of the moved rows.
-const MAIN_LINES: [&str; 2] = [
-    r#"{"case":"gen0119","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[["-inf","inf","-inf"]],"n":138}}}"#,
+const MAIN_LINES: [&str; 1] = [
     r#"{"case":"gen0812","deferred":null,"error":null,"ints":{},"topology":null,"values":{"rec":{"blocks":[[4180.699273288129,4190.577912346329,209689.88911730016]],"n":94}}}"#,
 ];
 
@@ -68,23 +72,18 @@ const KEPT_LINES: [&str; 2] = [
 #[derive(Clone, Copy, Debug)]
 enum End {
     Lead,
-    Tail,
 }
 
 /// Where the moved curve is.
 #[derive(Clone, Copy, Debug)]
 enum Place {
-    /// The dropped curve (and the record's copy of it).
-    Curve,
     /// The record's control polygon and knots of a failed trace.
     Polygon,
 }
 
 /// The moved rows: case, main's values, the curve that moved, the span removed.
-const MOVED: [(&str, &[f64], Place, End); 2] = [
-    ("gen0119", &MAIN_GEN0119, Place::Curve, End::Tail),
-    ("gen0812", &MAIN_GEN0812, Place::Polygon, End::Lead),
-];
+const MOVED: [(&str, &[f64], Place, End); 1] =
+    [("gen0812", &MAIN_GEN0812, Place::Polygon, End::Lead)];
 
 struct Reader<'a> {
     a: &'a [f64],
@@ -158,9 +157,6 @@ struct Record {
 impl Record {
     fn domain(&self) -> [f64; 4] {
         [self.head[4], self.head[5], self.head[6], self.head[7]]
-    }
-    fn tol(&self) -> f64 {
-        self.head[10]
     }
 }
 
@@ -258,24 +254,6 @@ fn one_span_removed(
             }
             &old[..4]
         }
-        End::Tail => {
-            assert!(spans > 1);
-            let last = old_knots.len() - 1;
-            assert_eq!(new_knots[..last - 1], old_knots[..last - 1]);
-            assert_eq!(new_knots[last - 1], old_knots[last]);
-            assert_eq!(new.len(), old.len() - 3);
-            let junction = 3 * (spans - 1);
-            assert_eq!(
-                new[..junction],
-                old[..junction],
-                "the stretched span keeps its polygon"
-            );
-            assert_eq!(
-                new[junction], old[junction],
-                "the new end is main's junction point"
-            );
-            &old[junction..]
-        }
     };
     assert!(
         !monotone(removed, 0) || !monotone(removed, 1),
@@ -284,22 +262,6 @@ fn one_span_removed(
     for p in new {
         assert!(in_domain(p, domain), "{p:?} outside {domain:?}");
     }
-}
-
-/// The distinct knots of a curve; its multiplicities must be a Bezier spline's.
-fn bezier_knots(c: &Curve) -> &[f64] {
-    let n = c.mults.len();
-    assert!(n >= 2 && c.mults[0] == 4.0 && c.mults[n - 1] == 4.0);
-    assert!(c.mults[1..n - 1].iter().all(|&m| m == 3.0), "{:?}", c.mults);
-    assert_eq!(c.degree, 3.0);
-    &c.knots
-}
-
-fn check_curve(old: &Curve, new: &Curve, end: End, domain: [f64; 4]) {
-    assert_eq!(new.degree, old.degree);
-    assert_eq!(new.interval, old.interval);
-    let (ok, nk) = (bezier_knots(old), bezier_knots(new));
-    one_span_removed(&old.points, ok, &new.points, nk, end, domain);
 }
 
 fn this_branch(case: &str) -> Output {
@@ -355,25 +317,8 @@ fn each_moved_row_is_mains_without_a_folded_end_span() {
         let out = this_branch(case);
         let new = decode(&out.values["rec"]);
         let domain = old.record.domain();
-        let tol = old.record.tol();
         let mut expect = old.clone();
         match place {
-            Place::Curve => {
-                assert_eq!(old.curves.len(), 1, "{case}");
-                assert_eq!(new.curves.len(), 1, "{case}");
-                check_curve(&old.curves[0], &new.curves[0], end, domain);
-                assert_eq!(new.record.curves, new.curves, "{case}: the record's copy");
-                expect.curves = new.curves.clone();
-                expect.record.curves = new.record.curves.clone();
-                // the drop reports what the stretched span's test measured
-                for d in new.distances.iter().chain(&new.record.deviations) {
-                    assert!(*d <= tol, "{case}: {d} past {tol}");
-                }
-                assert!(new.record.flags[5] <= tol, "{case}");
-                expect.distances = new.distances;
-                expect.record.deviations = new.record.deviations;
-                expect.record.flags[5] = new.record.flags[5];
-            }
             Place::Polygon => {
                 assert_ne!(old.record.head[0], 0.0, "{case}: a failed trace's record");
                 one_span_removed(
@@ -429,7 +374,7 @@ fn kept_rows_are_mains_bit_for_bit() {
 #[ignore = "prints the values main_values.rs holds; run on main to regenerate them"]
 #[allow(clippy::print_stdout)] // its output is the file
 fn print_rec_values() {
-    for case in ["gen0119", "gen0649", "gen0812", "gen1306"] {
+    for case in ["gen0649", "gen0812", "gen1306"] {
         let rec = &this_branch(case).values["rec"];
         let body: Vec<String> = rec.iter().map(|x| format!("{x:?}")).collect();
         println!(

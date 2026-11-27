@@ -745,3 +745,43 @@ fn mirror_warns_for_bare_pick_even_when_another_placement_is_qualified() {
     assert_box(world_box(&s, &copies[0]), mirrored_yz(&s, "Bolt (2)"));
     assert_box(world_box(&s, &copies[1]), mirrored_yz(&s, "Bolt (2) (Part:2)"));
 }
+
+/// An explicit placement on a mirror must not fall back to a same-named body in the root component
+/// (neither a plain root body nor an unrelated root pattern copy).
+#[test]
+fn mirror_explicit_placement_is_not_shadowed_by_same_named_root_body() {
+    let mut s = Session::default();
+    let sub = run(&mut s, "component.create", json!({"name": "SubAsm", "grounded": false}));
+    let occ = sub["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner": [40, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, 20, 0]}));
+
+    run(&mut s, "solid.box", json!({"corner": [10, -30, 0], "length": 10, "width": 10, "height": 10, "body_name": "Clamp"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Clamp"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 25}));
+
+    let mirror = run(&mut s, "solid.mirror", json!({"bodies": ["Pin"], "plane": "YZ"}))["feature"].as_u64().unwrap();
+    assert!(s.model.result(mirror).unwrap().error.is_none());
+
+    // 1) Plain root body paired with `[occ]` must be reported lost instead of mirroring root Clamp.
+    if let Some(f) = std::sync::Arc::make_mut(&mut s.doc).feature_mut(mirror)
+        && let solidcraft_doc::FeatureKind::Mirror { bodies, placements, .. } = &mut f.kind
+    {
+        *bodies = vec!["Clamp".into()];
+        *placements = vec![vec![occ]];
+    }
+    s.refresh();
+    let err_root = s.model.result(mirror).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_root.contains("no longer shows it"), "plain root body must not shadow explicit placement: {err_root:?}");
+
+    // 2) Unrelated root pattern copy paired with `[occ]` must also be reported lost.
+    if let Some(f) = std::sync::Arc::make_mut(&mut s.doc).feature_mut(mirror)
+        && let solidcraft_doc::FeatureKind::Mirror { bodies, placements, .. } = &mut f.kind
+    {
+        *bodies = vec!["Clamp (2)".into()];
+        *placements = vec![vec![occ]];
+    }
+    s.refresh();
+    let err_copy = s.model.result(mirror).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_copy.contains("no longer shows it"), "root pattern copy must not shadow explicit placement: {err_copy:?}");
+}

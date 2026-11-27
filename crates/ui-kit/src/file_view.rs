@@ -4,7 +4,7 @@ use super::{
     text::{paint_text, paint_text_aligned},
 };
 use crate::BackingTooltipExt as _;
-use egui::{Align2, FontId, InnerResponse, Rect, Response, Sense, Stroke, TextureId, Ui, Vec2, pos2, vec2};
+use egui::{FontId, InnerResponse, Rect, Response, Sense, Stroke, TextureId, Ui, Vec2, pos2, vec2};
 use solidcraft_theme::Tokens;
 
 pub struct RecoveryMessage<'a> {
@@ -19,7 +19,7 @@ pub struct RecentRow<'a> {
     pub path: &'a str,
     pub when: &'a str,
     pub workspace: &'a str,
-    pub thumbnail: Option<(TextureId, Vec2)>,
+    pub thumbnail: Option<crate::PreviewArt>,
     /// The design's picture could not be made (empty or unreadable). Draws a dimmed placeholder,
     /// so it reads as "no preview" rather than as one still loading.
     pub thumbnail_failed: bool,
@@ -83,7 +83,7 @@ pub struct SampleCard<'a> {
     pub title: &'a str,
     pub description: &'a str,
     pub icon: Icon<'a>,
-    pub thumbnail: Option<(TextureId, Vec2)>,
+    pub thumbnail: Option<crate::PreviewArt>,
 }
 
 /// Shared start-page surfaces. Every allocation is bounded by the caller's width.
@@ -340,7 +340,8 @@ impl FileView {
         }
         let inner = rect.shrink2(vec2(t.space_14, t.space_8));
         let preview = Rect::from_min_size(inner.min, vec2(t.space_24 * 2.0, inner.height()).min(inner.size()));
-        thumbnail(ui, preview, row.thumbnail);
+        let lit = response.hovered() || response.has_focus();
+        crate::file_preview(ui, response.id.with("preview"), preview, row.thumbnail, lit, 1.0);
         if row.thumbnail.is_none() {
             // A design whose picture could not be made shows a fainter box, so it reads as "no
             // preview" rather than as one still being drawn.
@@ -520,16 +521,6 @@ fn card(ui: &Ui, rect: Rect, response: &Response, primary: bool) {
     );
 }
 
-fn thumbnail(ui: &Ui, rect: Rect, texture: Option<(TextureId, Vec2)>) {
-    let t = Tokens::get();
-    ui.painter().rect(rect, t.radius_md, t.file_surface, t.tertiary_border(t.file_border), egui::StrokeKind::Inside);
-    if let Some((texture, size)) = texture.filter(|(_, size)| size.is_finite() && size.x > 0.0 && size.y > 0.0) {
-        let scale = (rect.width() / size.x).min(rect.height() / size.y);
-        let target = Align2::CENTER_CENTER.align_size_within_rect(size * scale, rect);
-        ui.painter().image(texture, target, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), t.file_image_tint);
-    }
-}
-
 fn recovery_panel(
     ui: &mut Ui,
     id: &str,
@@ -651,7 +642,8 @@ fn sample_card_with_height(ui: &mut Ui, id: &str, width: f32, sample: &SampleCar
     card(ui, rect, &response, false);
     let inner = rect.shrink(t.space_10);
     let image = Rect::from_min_size(inner.min, vec2(inner.width(), t.file_sample_image_height));
-    thumbnail(ui, image, sample.thumbnail);
+    let lit = response.hovered() || response.has_focus();
+    crate::file_preview(ui, response.id.with("preview"), image, sample.thumbnail, lit, 1.0);
     if sample.thumbnail.is_none() {
         sample.icon.paint(ui.painter(), Rect::from_center_size(image.center(), Vec2::splat(t.file_tile_icon.min(image.width()))), 1.0);
     }

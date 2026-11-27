@@ -816,6 +816,36 @@ pub(crate) struct Region {
     row_h: f64,
 }
 
+/// For each loop, the larger loops that contain it (`areas` are the loops' absolute areas).
+fn container_lists(loops: &[Loop], areas: &[f64]) -> Vec<Vec<usize>> {
+    let probes: Vec<Vec2> = loops.iter().map(Loop::interior_probe).collect();
+    let mut containers: Vec<Vec<usize>> = Vec::new();
+    for (i, &q) in probes.iter().enumerate() {
+        let ai = areas.get(i).copied().unwrap_or(0.0);
+        containers.push(
+            loops
+                .iter()
+                .enumerate()
+                .filter(|&(j, other)| {
+                    j != i && areas.get(j).copied().unwrap_or(0.0) > ai && other.contains(q)
+                })
+                .map(|(j, _)| j)
+                .collect(),
+        );
+    }
+    containers
+}
+
+/// For each loop, whether it is a keep-out (an odd nesting depth) rather than a field: the roles
+/// [`Region::from_loops`] gives them.
+pub(crate) fn keepout_loops(loops: &[Loop]) -> Vec<bool> {
+    let areas: Vec<f64> = loops.iter().map(|l| l.signed_area().abs()).collect();
+    container_lists(loops, &areas)
+        .iter()
+        .map(|c| c.len() % 2 == 1)
+        .collect()
+}
+
 impl Region {
     pub fn from_loops(loops: Vec<Loop>, bucket: f64) -> Region {
         let loops: Vec<Loop> = loops
@@ -823,21 +853,7 @@ impl Region {
             .filter(|l| l.signed_area().abs() > EPS * EPS)
             .collect();
         let areas: Vec<f64> = loops.iter().map(|l| l.signed_area().abs()).collect();
-        let probes: Vec<Vec2> = loops.iter().map(Loop::interior_probe).collect();
-        let mut containers: Vec<Vec<usize>> = Vec::new();
-        for (i, &q) in probes.iter().enumerate() {
-            let ai = areas.get(i).copied().unwrap_or(0.0);
-            containers.push(
-                loops
-                    .iter()
-                    .enumerate()
-                    .filter(|&(j, other)| {
-                        j != i && areas.get(j).copied().unwrap_or(0.0) > ai && other.contains(q)
-                    })
-                    .map(|(j, _)| j)
-                    .collect(),
-            );
-        }
+        let containers = container_lists(&loops, &areas);
         let mut parts: BTreeMap<usize, (Loop, Vec<Loop>)> = BTreeMap::new();
         for (i, lp) in loops.iter().enumerate() {
             if containers.get(i).is_some_and(|c| c.len() % 2 == 0) {
