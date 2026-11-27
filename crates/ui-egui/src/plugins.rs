@@ -67,6 +67,9 @@ pub(crate) fn runs_plugin_code(session: &solidcraft_engine::Session, method: &st
 
 /// How many turned-off ids a preferences file may name.
 pub const MAX_DISABLED: usize = 256;
+/// The most chosen background pictures kept in the preferences, and the longest path of one.
+pub const MAX_PICTURES: usize = 64;
+pub const MAX_PICTURE_PATH: usize = 1024;
 /// `plugin.json` larger than this is refused.
 const MAX_MANIFEST_BYTES: u64 = solidcraft_engine::plugin::MAX_MANIFEST_BYTES as u64;
 
@@ -83,12 +86,25 @@ pub struct Plugin {
     pub disabled: bool,
     pub groups: std::collections::BTreeSet<String>,
     pub entries: Vec<solidcraft_engine::plugin::Entry>,
-    /// The images its entries name, read from the package (`plugin_images`): each relative path
+    pub ribbon_groups: Vec<solidcraft_engine::plugin::RibbonGroup>,
+    /// The images its entries and ribbon groups name, read from the package (`plugin_images`): each relative path
     /// with the icon name it is drawn by.
     pub images: std::collections::BTreeMap<String, String>,
     pub(crate) swatches: crate::plugin_images::Swatches,
     /// Its view backgrounds (`shaders@0.1`): the preference's key, `id/shader`, and the name.
     pub shaders: Vec<(String, String)>,
+    /// Its tints for the ribbon and panels (`shaders@0.2`), as `shaders`.
+    pub tints: Vec<(String, String)>,
+    /// Its panel shaders (`shaders@0.2`), as `shaders`.
+    pub panels: Vec<(String, String)>,
+    /// The sliders of its shaders that have any, by the same key.
+    pub shader_settings: std::collections::BTreeMap<String, Vec<solidcraft_engine::plugin::shader::ShaderSetting>>,
+    /// Its textures a person chooses (`choose` in the manifest): `plugin/shader/<texture name>` and the label.
+    pub pictures: Vec<(String, String)>,
+    /// The GitHub `owner/repo` its updates come from (`plugin_updates`).
+    pub updates: Option<String>,
+    /// Its colour themes (`themes@0.1`): key `plugin:id/theme`, name and theme file.
+    pub themes: Vec<(String, String, String)>,
 }
 
 /// A folder under the plugins directory that is not a plugin.
@@ -154,9 +170,16 @@ fn check(m: Manifest, folder: &str) -> Result<Plugin, String> {
         disabled: false,
         groups: Default::default(),
         entries: Vec::new(),
+        ribbon_groups: Vec::new(),
         images: Default::default(),
         swatches: Default::default(),
         shaders: Vec::new(),
+        tints: Vec::new(),
+        panels: Vec::new(),
+        shader_settings: Default::default(),
+        pictures: Vec::new(),
+        updates: None,
+        themes: Vec::new(),
     })
 }
 
@@ -206,17 +229,48 @@ fn read_plugin(dir: &Path, folder: &str) -> Result<(Plugin, bool), String> {
         return Err("plugin.json is missing or larger than 64 KiB".into());
     }
     let (parsed, approval) = read_package_listed(dir, folder)?;
-    let shaders = parsed.shaders.iter().map(|shader| (format!("{}/{}", parsed.id, shader.id), shader.name.clone())).collect();
+    let of = |kind: solidcraft_engine::plugin::shader::ShaderKind| -> Vec<(String, String)> {
+        parsed.shaders.iter().filter(|s| s.kind == kind).map(|shader| (format!("{}/{}", parsed.id, shader.id), shader.name.clone())).collect()
+    };
+    let (shaders, tints) = (of(solidcraft_engine::plugin::shader::ShaderKind::Background), of(solidcraft_engine::plugin::shader::ShaderKind::Tint));
+    let panels = of(solidcraft_engine::plugin::shader::ShaderKind::Panel);
+    let shader_settings =
+        parsed.shaders.iter().filter(|s| !s.settings.is_empty()).map(|s| (format!("{}/{}", parsed.id, s.id), s.settings.clone())).collect();
+    let pictures = parsed
+        .shaders
+        .iter()
+        .flat_map(|shader| {
+            shader
+                .textures
+                .iter()
+                .filter_map(|texture| texture.choose.as_ref().map(|label| (format!("{}/{}/{}", parsed.id, shader.id, texture.name), label.clone())))
+        })
+        .collect();
+    let themes = parsed
+        .themes
+        .iter()
+        .map(|theme| {
+            let name = crate::plugin_themes::name(&dir.to_string_lossy(), &theme.source, &theme.id);
+            (format!("plugin:{}/{}", parsed.id, theme.id), name, theme.source.clone())
+        })
+        .collect();
     let mut plugin = check(Manifest { id: parsed.id, name: parsed.name, version: parsed.version, description: parsed.description }, folder)?;
     plugin.path = dir.to_string_lossy().into_owned();
     plugin.approval = approval;
     plugin.shaders = shaders;
+    plugin.tints = tints;
+    plugin.panels = panels;
+    plugin.shader_settings = shader_settings;
+    plugin.pictures = pictures;
+    plugin.updates = parsed.updates.map(|updates| updates.github);
+    plugin.themes = themes;
     let executable = parsed.runtime.is_some();
     if let Some(runtime) = parsed.runtime {
         plugin.entries = runtime.entries;
+        plugin.ribbon_groups = runtime.ribbon_groups;
         plugin.groups = runtime.permissions.command_groups;
     }
-    plugin.images = crate::plugin_images::load(dir, &plugin.id, &plugin.entries);
+    plugin.images = crate::plugin_images::load_with_groups(dir, &plugin.id, &plugin.entries, &plugin.ribbon_groups);
     plugin.swatches = crate::plugin_images::load_swatches(dir, &plugin.entries);
     Ok((plugin, executable))
 }
@@ -297,19 +351,32 @@ pub(crate) fn inventory<'a>(dir: Option<&Path>, inspected: impl Iterator<Item = 
     (plugins, skipped)
 }
 
-/// Exact integer controls retain all u64 fuel values, without a float slider conversion.
+/// Exact integer controls retain all u64 ceilings, without a float slider conversion.
 pub(crate) struct LimitInputs {
     applied: solidcraft_engine::plugin::HostLimits,
     fuel: String,
     memory: String,
+    host_calls: String,
+    deadline_ms: String,
 }
 impl From<solidcraft_engine::plugin::HostLimits> for LimitInputs {
     fn from(applied: solidcraft_engine::plugin::HostLimits) -> Self {
-        Self { fuel: applied.max_fuel.to_string(), memory: applied.max_memory_mib.to_string(), applied }
+        Self {
+            fuel: applied.max_fuel.to_string(),
+            memory: applied.max_memory_mib.to_string(),
+            host_calls: applied.max_host_calls.to_string(),
+            deadline_ms: applied.max_deadline_ms.to_string(),
+            applied,
+        }
     }
 }
 pub(crate) fn host_limits(p: &crate::prefs::Prefs) -> solidcraft_engine::plugin::HostLimits {
-    solidcraft_engine::plugin::HostLimits { max_fuel: p.plugin_max_fuel, max_memory_mib: p.plugin_max_memory_mib }
+    solidcraft_engine::plugin::HostLimits {
+        max_fuel: p.plugin_max_fuel,
+        max_memory_mib: p.plugin_max_memory_mib,
+        max_host_calls: p.plugin_max_host_calls,
+        max_deadline_ms: p.plugin_max_deadline_ms,
+    }
 }
 pub(crate) fn sync_policy(app: &mut SolveApp) {
     // A failed write is retried by the next sync; the command that changed the grants reports it.
@@ -538,6 +605,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context, wait: bool) {
 /// like any other, and its reply, should it ever come, has nowhere to go (the job worked on a copy of
 /// the session, so nothing of it reaches this one).
 fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: web_time::Instant) {
+    crate::plugin_themes::sync(app);
     let Some(job) = app.prefs_window.plugin_job.take() else { return };
     let result = if wait {
         job.done.recv().unwrap_or_else(|e| Err(e.to_string()))
@@ -567,6 +635,7 @@ fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: web_time::I
             // Take in grants another program changed or revoked in the shared store since the job
             // started: a revoked record must not come back with this job's grant.
             sync_policy(app);
+            app.plugin_themes.signature = None;
             // Preferences can change while package I/O runs. Keep a newer decision for this id.
             // A write to the stored grants during the job counts as a newer decision, unless the record this
             // job started from is still exactly as it was (an unrelated write).
@@ -587,12 +656,19 @@ fn tick_at(app: &mut SolveApp, ctx: &egui::Context, wait: bool, now: web_time::I
                 }
             }
             if job.command == "plugin.remove" {
+                crate::plugin_menu::forget_options(app, id);
+                #[cfg(not(target_arch = "wasm32"))]
+                crate::plugin_shaders::drop_pictures(app, id);
                 app.preferences.disabled_plugins.remove(id);
                 app.session.disabled_plugins.remove(id);
             }
             // A removed or replaced plugin's background is read again from its folder, or not at all.
             #[cfg(not(target_arch = "wasm32"))]
             crate::plugin_shaders::forget(app, id);
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::plugin_tint::forget(app, id);
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::plugin_panels::forget(app, id);
             persist_grants(app)?;
         }
         if let PackageAction::Describe { path } = &job.action {
@@ -663,19 +739,24 @@ pub(crate) fn offload_control(
 fn remove_confirmation(app: &mut SolveApp, ctx: &egui::Context) {
     let Some((id, name)) = app.prefs_window.plugin_remove.clone() else { return };
     let title = solidcraft_ui_text::format("prefs.plugin_remove_title", &[("name", &name)]);
+    let data_label = app.tr("prefs.plugin_remove_user_data").to_owned();
     let (closed, action) = crate::ui_kit::Confirm::new(egui::Id::unique("plugin_remove"), "delete", &title)
         .tone(crate::ui_kit::Tone::Danger)
         .actions(app.tr("prefs.plugin_remove"), app.tr("prefs.plugin_cancel"), None)
         .selected(crate::ui_kit::Action::Cancel)
         .show(ctx, true, |ui| {
             ui.add(egui::Label::new(app.tr("prefs.plugin_remove_note")).wrap());
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
+            let response = crate::ui_kit::checkbox(ui, &data_label, &mut app.prefs_window.plugin_remove_user_data);
+            crate::scenario::publish_target("prefs:plugin:remove_user_data", response.rect);
         });
     if closed || action == crate::ui_kit::Action::Cancel {
         app.prefs_window.plugin_remove = None;
     }
     if action == crate::ui_kit::Action::Ok {
         app.prefs_window.plugin_remove = None;
-        if let Err(error) = start_package(app, "plugin.remove", serde_json::json!({"id":id}), PackageAction::Remove) {
+        let params = serde_json::json!({"id":id,"remove_user_data":app.prefs_window.plugin_remove_user_data});
+        if let Err(error) = start_package(app, "plugin.remove", params, PackageAction::Remove) {
             app.set_status(error, true);
         }
         ctx.request_repaint();
@@ -683,18 +764,26 @@ fn remove_confirmation(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 fn parsed_limits(input: &LimitInputs) -> Option<solidcraft_engine::plugin::HostLimits> {
-    let limits =
-        solidcraft_engine::plugin::HostLimits { max_fuel: input.fuel.trim().parse().ok()?, max_memory_mib: input.memory.trim().parse().ok()? };
+    let limits = solidcraft_engine::plugin::HostLimits {
+        max_fuel: input.fuel.trim().parse().ok()?,
+        max_memory_mib: input.memory.trim().parse().ok()?,
+        max_host_calls: input.host_calls.trim().parse().ok()?,
+        max_deadline_ms: input.deadline_ms.trim().parse().ok()?,
+    };
     limits.validate().ok()?;
     Some(limits)
 }
 pub(crate) fn resource_pending(app: &SolveApp) -> bool {
     let current = host_limits(&app.preferences);
     app.prefs_window.plugin_limit_inputs.as_ref().is_some_and(|input| {
-        input.applied == current && (input.fuel != current.max_fuel.to_string() || input.memory != current.max_memory_mib.to_string())
+        input.applied == current
+            && (input.fuel != current.max_fuel.to_string()
+                || input.memory != current.max_memory_mib.to_string()
+                || input.host_calls != current.max_host_calls.to_string()
+                || input.deadline_ms != current.max_deadline_ms.to_string())
     })
 }
-/// Enter, Apply and OK commit both exact integers together. An incomplete edit cannot save a prefix.
+/// Enter, Apply and OK commit all exact integers together. An incomplete edit cannot save a prefix.
 pub(crate) fn commit_resource_inputs(app: &mut SolveApp) -> Result<(), String> {
     let Some(input) = app.prefs_window.plugin_limit_inputs.take() else { return Ok(()) };
     // A control client has already changed the preferences: never overwrite that newer policy.
@@ -703,10 +792,12 @@ pub(crate) fn commit_resource_inputs(app: &mut SolveApp) -> Result<(), String> {
     }
     let Some(limits) = parsed_limits(&input) else {
         app.prefs_window.plugin_limit_inputs = Some(input);
-        return Err(app.tr("prefs.plugin_limits_invalid").to_string());
+        return Err(app.tr("prefs.plugin_resource_limits_invalid").to_string());
     };
     app.preferences.plugin_max_fuel = limits.max_fuel;
     app.preferences.plugin_max_memory_mib = limits.max_memory_mib;
+    app.preferences.plugin_max_host_calls = limits.max_host_calls;
+    app.preferences.plugin_max_deadline_ms = limits.max_deadline_ms;
     app.prefs_window.plugin_limit_inputs = Some(limits.into());
     sync_policy(app);
     Ok(())
@@ -716,12 +807,14 @@ fn resource_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
     let mut input = app.prefs_window.plugin_limit_inputs.take().filter(|v| v.applied == current).unwrap_or_else(|| current.into());
     let (fuel_enter, _) = crate::ui_kit::text_row(ui, app.tr("prefs.plugin_max_fuel"), &mut input.fuel, "");
     let (memory_enter, _) = crate::ui_kit::text_row(ui, app.tr("prefs.plugin_max_memory"), &mut input.memory, "");
+    let (calls_enter, _) = crate::ui_kit::text_row(ui, app.tr("prefs.plugin_max_host_calls"), &mut input.host_calls, "");
+    let (deadline_enter, _) = crate::ui_kit::text_row(ui, app.tr("prefs.plugin_max_deadline_ms"), &mut input.deadline_ms, "");
     if parsed_limits(&input).is_none() {
-        crate::ui_kit::text(ui, app.tr("prefs.plugin_limits_invalid"), crate::ui_kit::Text::Error("plugin_limits"));
+        crate::ui_kit::text(ui, app.tr("prefs.plugin_resource_limits_invalid"), crate::ui_kit::Text::Error("plugin_limits"));
     }
-    crate::ui_kit::text(ui, app.tr("prefs.plugin_limits_note"), crate::ui_kit::Text::Hint("plugin_limits"));
+    crate::ui_kit::text(ui, app.tr("prefs.plugin_resource_limits_note"), crate::ui_kit::Text::Hint("plugin_limits"));
     app.prefs_window.plugin_limit_inputs = Some(input);
-    if (fuel_enter || memory_enter)
+    if (fuel_enter || memory_enter || calls_enter || deadline_enter)
         && let Err(error) = commit_resource_inputs(app)
     {
         app.set_status(error, true);
@@ -751,7 +844,7 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
     page_in_dir(app, ui, dir.as_deref());
 }
 
-fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
+pub(crate) fn page_in_dir(app: &mut SolveApp, ui: &mut egui::Ui, dir: Option<&Path>) {
     crate::ui_kit::settings_page(ui, |ui| {
         crate::ui_kit::settings_heading(ui, solidcraft_ui_text::tr("ui.plugins"), solidcraft_ui_text::tr("prefs.plugins_intro"));
         let Some(dir) = dir else {
@@ -916,9 +1009,12 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
     use crate::ui_kit;
     let mut on = enabled(app, &plugin.id);
     let was_on = on;
+    let offer = crate::plugin_updates::offered(app, plugin).map(|offer| offer.version.clone());
+    let update_label = offer.as_ref().map(|version| solidcraft_ui_text::format("plugin_update.button", &[("version", version)]));
     let labels = ui_kit::PluginCardLabels {
         show_in_folder: solidcraft_ui_text::tr_label("Show in folder"),
         enabled: solidcraft_ui_text::tr("prefs.plugins_enabled"),
+        update: update_label.as_deref(),
     };
     let remove_label = app.tr("prefs.plugin_remove").to_owned();
     let can_remove = !busy(app) && Path::new(&plugin.path) == dir.join(&plugin.id);
@@ -930,6 +1026,8 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
                 &mut on,
                 &labels,
                 |ui| {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    plugin_settings(app, ui, plugin, was_on);
                     ui.add_space(solidcraft_theme::Tokens::get().space_8);
                     ui_kit::icon_label_button(ui, &remove_label, "delete", can_remove, false)
                 },
@@ -937,7 +1035,7 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
         })
         .inner;
     let response = card.response;
-    let ((folder, check), remove) = card.inner;
+    let ((folder, check, update), remove) = card.inner;
     // What the user approved for this exact package, under its card.
     ui.add_space(solidcraft_theme::Tokens::get().space_2);
     let approved = approved_text(app, plugin);
@@ -951,6 +1049,13 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
         ui.horizontal_wrapped(|ui| {
             ui.add_space(t.space_12);
             ui.label(RichText::new(text).size(t.font_small).color(t.text_dim));
+        });
+    }
+    if !plugin.themes.is_empty() {
+        let names: Vec<&str> = plugin.themes.iter().map(|(_, name, _)| name.as_str()).collect();
+        ui.horizontal_wrapped(|ui| {
+            ui.add_space(t.space_12);
+            ui.label(RichText::new(crate::plugin_themes::hint(&names)).size(t.font_small).color(t.text_dim));
         });
     }
     crate::scenario::publish_target(&format!("prefs:plugin:{}:folder", plugin.id), folder.rect);
@@ -967,10 +1072,15 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
             app.preferences.disabled_plugins.insert(plugin.id.clone());
         }
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    plugin_settings(app, ui, plugin, on);
+    if let Some(update) = update {
+        crate::scenario::publish_target(&format!("prefs:plugin:{}:update", plugin.id), update.rect);
+        if update.clicked() {
+            crate::plugin_updates::start(app, ui.ctx(), plugin);
+        }
+    }
     crate::scenario::publish_target(&format!("prefs:plugin:{}:remove", plugin.id), remove.rect);
     if remove.clicked() {
+        app.prefs_window.plugin_remove_user_data = false;
         app.prefs_window.plugin_remove = Some((plugin.id.clone(), plugin.name.clone()));
     }
     crate::scenario::publish_rect(&format!("prefs:plugin:{}:card", plugin.id), response.rect);
@@ -983,14 +1093,17 @@ fn plugin_card(app: &mut SolveApp, ui: &mut egui::Ui, dir: &Path, plugin: &Plugi
     }
 }
 
-/// The plugin's own settings, under its card. A background (`shaders@0.1`) has a switch; one
-/// background is on at a time, and only while its plugin is on.
+/// The plugin's own settings, inside its card above Remove. A background and a tint (`shaders@0.2`)
+/// each have a switch, and the one switched on its sliders; one of each is on at a time, and only
+/// while its plugin is on.
 #[cfg(not(target_arch = "wasm32"))]
 fn plugin_settings(app: &mut SolveApp, ui: &mut egui::Ui, plugin: &Plugin, on: bool) {
-    if plugin.shaders.is_empty() {
+    if plugin.shaders.is_empty() && plugin.tints.is_empty() && plugin.panels.is_empty() {
         return;
     }
     let label = app.tr("prefs.background_shader").to_owned();
+    let tint_label = app.tr("prefs.tint_shader").to_owned();
+    let panel_label = app.tr("prefs.panel_shader").to_owned();
     ui.indent(("plugin_settings", &plugin.id), |ui| {
         ui.add_enabled_ui(on, |ui| {
             for (key, name) in &plugin.shaders {
@@ -1001,8 +1114,97 @@ fn plugin_settings(app: &mut SolveApp, ui: &mut egui::Ui, plugin: &Plugin, on: b
                 if value != active {
                     app.preferences.background_shader = if value { key.clone() } else { String::new() };
                 }
+                if active {
+                    shader_sliders(app, ui, plugin, key);
+                }
+                for (picture, choose) in
+                    plugin.pictures.iter().filter(|(p, _)| p.strip_prefix(key.as_str()).is_some_and(|rest| rest.starts_with('/')))
+                {
+                    picture_row(app, ui, picture, choose);
+                }
+            }
+            for (key, name) in &plugin.tints {
+                let active = on && app.preferences.tint_shader == *key;
+                let mut value = active;
+                let response = crate::ui_kit::checkbox(ui, &format!("{tint_label}: {name}"), &mut value);
+                crate::scenario::publish_target(&format!("prefs:tint:{key}"), response.rect);
+                if value != active {
+                    app.preferences.tint_shader = if value { key.clone() } else { String::new() };
+                }
+                if active {
+                    shader_sliders(app, ui, plugin, key);
+                }
+            }
+            for (key, name) in &plugin.panels {
+                let active = on && app.preferences.panel_shader == *key;
+                let mut value = active;
+                let response = crate::ui_kit::checkbox(ui, &format!("{panel_label}: {name}"), &mut value);
+                crate::scenario::publish_target(&format!("prefs:panel_shader:{key}"), response.rect);
+                if value != active {
+                    app.preferences.panel_shader = if value { key.clone() } else { String::new() };
+                }
+                if active {
+                    shader_sliders(app, ui, plugin, key);
+                }
             }
         });
+    });
+}
+
+/// A shader's settings as sliders, stored in `shader_settings` as `key/setting`.
+#[cfg(not(target_arch = "wasm32"))]
+fn shader_sliders(app: &mut SolveApp, ui: &mut egui::Ui, plugin: &Plugin, key: &str) {
+    let Some(settings) = plugin.shader_settings.get(key) else { return };
+    ui.indent(("shader_settings", key), |ui| {
+        for s in settings {
+            let stored = format!("{key}/{}", s.id);
+            let mut value =
+                app.preferences.shader_settings.get(&stored).copied().filter(|v| v.is_finite()).map_or(s.default, |v| v.clamp(s.min, s.max));
+            let response = ui
+                .horizontal(|ui| {
+                    ui.label(&s.name);
+                    crate::ui_kit::slider(ui, &mut value, s.min..=s.max, crate::ui_kit::Slider::default())
+                })
+                .inner;
+            crate::scenario::publish_target(&format!("prefs:shader_setting:{stored}"), response.rect);
+            if response.changed() {
+                app.preferences.shader_settings.insert(stored, value);
+            }
+        }
+    });
+}
+
+/// One chosen texture under its background's switch: its label, the picked file's name (or
+/// "Default"), Choose… and, once a picture is picked, Clear.
+#[cfg(not(target_arch = "wasm32"))]
+fn picture_row(app: &mut SolveApp, ui: &mut egui::Ui, picture: &str, choose: &str) {
+    let chosen = app.preferences.background_shader_pictures.get(picture).cloned();
+    let shown = chosen
+        .as_deref()
+        .and_then(|path| Path::new(path).file_name())
+        .map_or_else(|| app.tr("prefs.background_picture_default").to_owned(), |name| name.to_string_lossy().into_owned());
+    let row = format!("{choose}: {shown}");
+    let picture = picture.to_owned();
+    crate::ui_kit::row(ui, &row, |ui| {
+        let pick = crate::ui_kit::button(ui, app.tr("prefs.background_picture_choose"), crate::ui_kit::Button::Normal);
+        crate::scenario::publish_target(&format!("prefs:background_picture:{picture}:choose"), pick.rect);
+        if pick.clicked() {
+            let for_picture = picture.clone();
+            app.pick_file(choose, &["png", "jpg", "jpeg", "webp"], move |app, path| {
+                if let Some(path) = path
+                    && let Err(error) = crate::plugin_shaders::choose_picture(app, &for_picture, path)
+                {
+                    app.set_status(error, true);
+                }
+            });
+        }
+        if chosen.is_some() {
+            let clear = crate::ui_kit::button(ui, app.tr("prefs.background_picture_clear"), crate::ui_kit::Button::Ghost);
+            crate::scenario::publish_target(&format!("prefs:background_picture:{picture}:clear"), clear.rect);
+            if clear.clicked() {
+                app.preferences.background_shader_pictures.remove(&picture);
+            }
+        }
     });
 }
 
@@ -1149,6 +1351,15 @@ mod tests {
         for _ in 0..3 {
             page_frame(&mut h.app, &ctx, &root, vec![]);
         }
+        assert!(!h.app.prefs_window.plugin_remove_user_data, "keep user data by default");
+        assert!(crate::scenario::handle_at("prefs:plugin:remove_user_data").is_some(), "the confirmation offers data removal");
+        capture_page(&mut h.app, &root, "plugin-remove-confirm-keep.png");
+        // Return to the interaction context after rendering the review image.
+        for _ in 0..3 {
+            page_frame(&mut h.app, &ctx, &root, vec![]);
+        }
+        click_page(&mut h.app, &ctx, &root, "prefs:plugin:remove_user_data");
+        assert!(h.app.prefs_window.plugin_remove_user_data);
         capture_page(&mut h.app, &root, "plugin-remove-confirm.png");
         for _ in 0..3 {
             page_frame(&mut h.app, &ctx, &root, vec![]);
@@ -1163,11 +1374,46 @@ mod tests {
         for _ in 0..3 {
             page_frame(&mut h.app, &ctx, &root, vec![]);
         }
+        assert!(!h.app.prefs_window.plugin_remove_user_data, "a fresh confirmation defaults to keep");
         click_page(&mut h.app, &ctx, &root, "dialog:ok");
         // Closing Preferences cannot cancel an already confirmed filesystem mutation.
         crate::prefs::control(&mut h.app, &json!({"button":"cancel"})).unwrap();
         tick(&mut h.app, &ctx, true);
         assert!(!root.join("workshop-helper").exists() && h.app.preferences.plugin_grants.is_empty());
+    }
+
+    #[test]
+    fn plugins_remove_confirmation_deletes_user_settings_only_when_checked() {
+        use serde_json::json;
+        for remove_data in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            let root = h.dir.join("installed");
+            let settings = h.dir.join("settings");
+            h.app.session.plugin_state.plugins_dir = Some(root.clone());
+            h.app.session.plugin_state.user.user_settings_dir = Some(settings.clone());
+            let path = package(&h, "workshop-helper");
+            hand_install(&path, &root, "workshop-helper");
+            let store = solidcraft_engine::plugin::user_storage::Data::from([("hinge".into(), json!(42))]);
+            solidcraft_engine::plugin::user_storage::save(&settings, "workshop-helper", &store).unwrap();
+            let ctx = crate::fonts::test_context();
+            crate::prefs::control(&mut h.app, &json!({"open":"Plugins"})).unwrap();
+            for _ in 0..3 {
+                page_frame(&mut h.app, &ctx, &root, vec![]);
+            }
+            click_page(&mut h.app, &ctx, &root, "prefs:plugin:workshop-helper:remove");
+            for _ in 0..3 {
+                page_frame(&mut h.app, &ctx, &root, vec![]);
+            }
+            assert!(!h.app.prefs_window.plugin_remove_user_data);
+            if remove_data {
+                click_page(&mut h.app, &ctx, &root, "prefs:plugin:remove_user_data");
+            }
+            click_page(&mut h.app, &ctx, &root, "dialog:ok");
+            tick(&mut h.app, &ctx, true);
+            assert!(!root.join("workshop-helper").exists());
+            let data = solidcraft_engine::plugin::user_storage::load(&settings, "workshop-helper").unwrap();
+            assert_eq!(data.is_empty(), remove_data);
+        }
     }
 
     #[test]
@@ -1208,7 +1454,7 @@ mod tests {
         let (request, denied) = crate::control::ControlRequest::new(
             "engine.execute",
             json!({
-                "command":"plugin.remove","params":{"id":"controlled-plugin"},"allow_paths":[]
+                "command":"plugin.remove","params":{"id":"controlled-plugin","remove_user_data":false},"allow_paths":[]
             }),
         );
         assert!(offload_control(&mut h.app, &h.ctx, request).is_none());
@@ -1218,15 +1464,17 @@ mod tests {
         let (request, removed) = crate::control::ControlRequest::new(
             "command",
             json!({
-                "command":"plugin.remove","params":{"id":"controlled-plugin"},"allow_paths":[h.dir]
+                "command":"plugin.remove","params":{"id":"controlled-plugin","remove_user_data":false},"allow_paths":[h.dir]
             }),
         );
         assert!(request.ticket.take());
         let ticket = request.ticket.clone();
         assert!(offload_control(&mut h.app, &h.ctx, request).is_none());
         assert!(matches!(ticket.cancel(), solidcraft_control::Cancel::Running));
-        let (concurrent, refused) =
-            crate::control::ControlRequest::new("engine.execute", json!({"command":"plugin.remove","params":{"id":"controlled-plugin"}}));
+        let (concurrent, refused) = crate::control::ControlRequest::new(
+            "engine.execute",
+            json!({"command":"plugin.remove","params":{"id":"controlled-plugin","remove_user_data":false}}),
+        );
         assert!(offload_control(&mut h.app, &h.ctx, concurrent).is_none());
         assert_eq!(refused.recv().unwrap()["ok"], false);
         let revision = h.app.session.revision + 1;
@@ -1236,6 +1484,39 @@ mod tests {
         assert_eq!(h.app.session.revision, revision);
         assert!(!root.join("controlled-plugin").exists() && h.app.preferences.plugin_grants.is_empty());
         assert!(h.app.plugin_install.ask.is_none());
+    }
+
+    /// Removing a plugin drops the pictures chosen for its backgrounds; turning it off keeps them.
+    #[test]
+    fn removing_a_plugin_drops_its_chosen_pictures_and_turning_it_off_keeps_them() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        h.app.session.plugin_state.plugins_dir = Some(h.dir.join("controlled-packages"));
+        let path = package(&h, "controlled-plugin");
+        let (request, installed) = crate::control::ControlRequest::new(
+            "engine.execute",
+            json!({"command":"plugin.install","params":{"path":zip_package(&path),"approve":{"command_groups":["file"]}},"allow_paths":[h.dir]}),
+        );
+        assert!(request.ticket.take());
+        assert!(offload_control(&mut h.app, &h.ctx, request).is_none());
+        tick(&mut h.app, &h.ctx, true);
+        assert_eq!(installed.recv().unwrap()["ok"], true);
+        let picked = h.dir.join("a.png").to_string_lossy().into_owned();
+        for key in ["controlled-plugin/own/picture", "other/own/picture"] {
+            h.app.preferences.background_shader_pictures.insert(key.into(), picked.clone());
+        }
+        h.app.preferences.disabled_plugins.insert("controlled-plugin".into());
+        assert_eq!(h.app.preferences.background_shader_pictures.len(), 2, "turning it off keeps the pictures");
+        let (request, removed) = crate::control::ControlRequest::new(
+            "engine.execute",
+            json!({"command":"plugin.remove","params":{"id":"controlled-plugin"},"allow_paths":[h.dir]}),
+        );
+        assert!(request.ticket.take());
+        assert!(offload_control(&mut h.app, &h.ctx, request).is_none());
+        tick(&mut h.app, &h.ctx, true);
+        assert_eq!(removed.recv().unwrap()["ok"], true);
+        let kept: Vec<&String> = h.app.preferences.background_shader_pictures.keys().collect();
+        assert_eq!(kept, ["other/own/picture"], "removal drops only that plugin's pictures");
     }
 
     #[test]
@@ -1390,7 +1671,7 @@ mod tests {
         let path = package(&h, "workshop-helper");
         hand_install(&path, &root, "workshop-helper");
         crate::prefs::set(&mut h.app, &json!({"plugin_grants":{"workshop-helper":{"command_groups":["file"]}}})).unwrap();
-        start_package(&mut h.app, "plugin.remove", json!({"id":"workshop-helper"}), PackageAction::Remove).unwrap();
+        start_package(&mut h.app, "plugin.remove", json!({"id":"workshop-helper","remove_user_data":false}), PackageAction::Remove).unwrap();
         crate::prefs::set(&mut h.app, &json!({"plugin_grants":{"workshop-helper":{"command_groups":[]}}})).unwrap();
         let before = h.app.session.plugin_state.grants.clone();
         tick(&mut h.app, &h.ctx, true);
@@ -1627,7 +1908,7 @@ mod tests {
                         assert!(folder.right() <= checkbox.left(), "actions do not overlap");
                         assert!(card.height() > 62.0 && remove.top() > folder.bottom(), "host removal action stays in its own row inside the card");
                         assert_eq!(folder.height(), 24.0);
-                        assert_eq!(checkbox.size(), egui::vec2(16.0, 16.0));
+                        assert_eq!(checkbox.size(), egui::vec2(32.0, 18.0), "on and off is a slide switch, not a check box");
                         let t = solidcraft_theme::Tokens::get();
                         let icon = crate::scenario::rect_of("prefs:plugin:public-one:icon").unwrap();
                         assert_eq!(icon.size(), egui::vec2(36.0, 36.0));
@@ -1690,6 +1971,104 @@ mod tests {
         assert_eq!(h.app.preferences.background_shader, "skies/dawn", "a turned-off plugin's switches do nothing");
         crate::prefs::control(&mut h.app, &serde_json::json!({"button":"defaults"})).unwrap();
         assert_eq!(h.app.preferences.background_shader, "", "Restore Defaults on Plugins turns it off");
+    }
+
+    /// A chosen texture has a row under its background's switch: Choose… stores the picked file
+    /// for it, and Clear takes it back to the shipped picture.
+    #[test]
+    fn a_chosen_texture_has_a_row_to_pick_and_clear_its_picture() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.join("public-plugins");
+        write(
+            &dir,
+            "own",
+            r#"{"id":"own","name":"Own","version":"1","description":"","capabilities":["shaders@0.2"],"shaders":[{"id":"own","name":"Own","kind":"background","source":"own.wgsl","textures":[{"name":"picture","choose":"Picture","file":"default.png"}]}]}"#,
+        );
+        crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Plugins"})).unwrap();
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            page_frame(&mut h.app, &ctx, &dir, vec![]);
+        }
+        let picked = h.dir.join("picked.png").to_string_lossy().into_owned();
+        h.app.services.pick_file = Some(Box::new(move |_label: &str, _exts: &[&str]| {
+            let picked = picked.clone();
+            Box::pin(async move { Some(picked) })
+        }));
+        click_page(&mut h.app, &ctx, &dir, "prefs:background_picture:own/own/picture:choose");
+        // The picked file arrives through the app's own tick, which the page frame does not run.
+        for _ in 0..3 {
+            crate::file_picker::tick(&mut h.app, &ctx);
+            page_frame(&mut h.app, &ctx, &dir, vec![]);
+        }
+        assert_eq!(
+            h.app.preferences.background_shader_pictures.get("own/own/picture"),
+            Some(&h.dir.join("picked.png").to_string_lossy().into_owned())
+        );
+        assert!(crate::scenario::handle_at("prefs:background_picture:own/own/picture:clear").is_some(), "a chosen picture can be cleared");
+        click_page(&mut h.app, &ctx, &dir, "prefs:background_picture:own/own/picture:clear");
+        assert!(h.app.preferences.background_shader_pictures.is_empty(), "Clear takes the shipped picture back");
+    }
+
+    /// A shaders plugin with no chosen texture installs and shows its card as before: its
+    /// background switch, no picture rows, and no stored pictures.
+    #[test]
+    fn legacy_shader_plugins_show_no_picture_rows() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.join("public-plugins");
+        write(&dir, "dusk", include_str!("../../../docs/plugin-examples/dusk/plugin.json"));
+        write(&dir, "panorama", include_str!("../../../docs/plugin-examples/panorama/plugin.json"));
+        crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Plugins"})).unwrap();
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            page_frame(&mut h.app, &ctx, &dir, vec![]);
+        }
+        click_page(&mut h.app, &ctx, &dir, "prefs:background:dusk/dusk");
+        assert_eq!(h.app.preferences.background_shader, "dusk/dusk");
+        click_page(&mut h.app, &ctx, &dir, "prefs:background:panorama/panorama");
+        assert_eq!(h.app.preferences.background_shader, "panorama/panorama");
+        assert!(crate::scenario::handle_at("prefs:background_picture:dusk/dusk/0:choose").is_none());
+        assert!(crate::scenario::handle_at("prefs:background_picture:panorama/panorama/0:choose").is_none());
+        assert!(h.app.preferences.background_shader_pictures.is_empty());
+    }
+
+    #[test]
+    fn a_plugin_card_turns_its_panel_shader_on_and_off() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.join("public-plugins");
+        let manifest = r#"{"id":"frost","name":"frost","version":"1","description":"","capabilities":["shaders@0.2"],"shaders":[
+            {"id":"sky","name":"Sky","kind":"background","source":"sky.wgsl"},
+            {"id":"frost","name":"Frost","kind":"panel","source":"frost.wgsl"}]}"#;
+        write(&dir, "frost", manifest);
+        crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Plugins"})).unwrap();
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            page_frame(&mut h.app, &ctx, &dir, vec![]);
+        }
+        click_page(&mut h.app, &ctx, &dir, "prefs:panel_shader:frost/frost");
+        assert_eq!((h.app.preferences.panel_shader.as_str(), h.app.preferences.background_shader.as_str()), ("frost/frost", ""));
+        click_page(&mut h.app, &ctx, &dir, "prefs:panel_shader:frost/frost");
+        assert_eq!(h.app.preferences.panel_shader, "", "and off again");
+    }
+
+    #[test]
+    fn a_plugins_settings_sit_inside_its_card_above_remove() {
+        let mut h = crate::scenario::Harness::new();
+        let dir = h.dir.join("public-plugins");
+        write(
+            &dir,
+            "skies",
+            r#"{"id":"skies","name":"skies","version":"1","description":"","capabilities":["shaders@0.1"],"shaders":[{"id":"dusk","name":"dusk","kind":"background","source":"dusk.wgsl"}]}"#,
+        );
+        crate::prefs::control(&mut h.app, &serde_json::json!({"open":"Plugins"})).unwrap();
+        let ctx = crate::fonts::test_context();
+        for _ in 0..3 {
+            page_frame(&mut h.app, &ctx, &dir, vec![]);
+        }
+        let card = crate::scenario::rect_of("prefs:plugin:skies:card").unwrap();
+        let row = crate::scenario::rect_of("prefs:background:skies/dusk").unwrap();
+        let remove = crate::scenario::rect_of("prefs:plugin:skies:remove").unwrap();
+        assert!(card.contains_rect(row), "the background switch {row:?} is inside the card {card:?}");
+        assert!(row.bottom() <= remove.top(), "and above Remove: {row:?} vs {remove:?}");
     }
 
     #[test]
@@ -1953,24 +2332,76 @@ mod tests {
         assert_eq!(read.language, "en");
     }
     #[test]
+    fn resource_call_and_deadline_ceilings_require_confirmation_and_persist() {
+        use serde_json::json;
+        let mut h = crate::scenario::Harness::new();
+        let initial = host_limits(&h.app.preferences);
+        let changed = json!({"plugin_max_host_calls":2048,"plugin_max_deadline_ms":120000});
+        let reply = h.call("ui.prefs", changed);
+        assert_eq!(reply["ok"], true, "{reply}");
+        let saved: serde_json::Value = serde_json::from_str(&h.app.prefs()).unwrap();
+        assert_eq!(saved["preferences"]["plugin_max_host_calls"], 2048);
+        assert_eq!(saved["preferences"]["plugin_max_deadline_ms"], 120000);
+        let mut restored = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        restored.load_prefs(&saved.to_string());
+        assert_eq!(host_limits(&restored.preferences), host_limits(&h.app.preferences));
+        for bad in [
+            json!({"plugin_max_host_calls":0}),
+            json!({"plugin_max_host_calls":-1}),
+            json!({"plugin_max_host_calls":1.5}),
+            json!({"plugin_max_deadline_ms":0}),
+            json!({"plugin_max_deadline_ms":-1}),
+            json!({"plugin_max_deadline_ms":1.5}),
+        ] {
+            assert_eq!(h.call("ui.prefs", bad)["ok"], false);
+            assert_eq!(serde_json::from_str::<serde_json::Value>(&h.app.prefs()).unwrap(), saved);
+        }
+        let reset = h.call("ui.prefs", json!({"open":"Plugins","button":"defaults"}));
+        assert_eq!(reset["ok"], true, "{reset}");
+        assert_eq!(host_limits(&h.app.preferences), initial);
+        assert_eq!(h.app.session.plugin_limits, initial);
+        // Defaults is a draft: periodic preference saves retain the last confirmed values.
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&h.app.prefs()).unwrap()["preferences"], saved["preferences"]);
+        h.call("ui.prefs", json!({"button":"cancel"}));
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&h.app.prefs()).unwrap()["preferences"]["plugin_max_host_calls"], 2048);
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&h.app.prefs()).unwrap()["preferences"]["plugin_max_deadline_ms"], 120000);
+        let read = crate::prefs::lenient(&json!({"plugin_max_host_calls":0,"plugin_max_deadline_ms":0,"language":"en"}));
+        assert_eq!(host_limits(&read), solidcraft_engine::plugin::HostLimits::default());
+        assert!(h.app.session.undo.is_empty());
+    }
+    #[test]
     fn resource_text_edits_require_complete_valid_confirmation() {
         use serde_json::json;
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open":"Plugins"}));
         let initial = host_limits(&h.app.preferences);
-        h.app.prefs_window.plugin_limit_inputs = Some(LimitInputs { applied: initial, fuel: u64::MAX.to_string(), memory: "512".into() });
+        h.app.prefs_window.plugin_limit_inputs = Some(LimitInputs {
+            applied: initial,
+            fuel: u64::MAX.to_string(),
+            memory: "512".into(),
+            host_calls: u64::MAX.to_string(),
+            deadline_ms: u64::MAX.to_string(),
+        });
         assert!(resource_pending(&h.app));
         assert_eq!(h.app.session.plugin_limits, initial, "typing alone does not authorize a higher ceiling");
         assert_eq!(h.call("ui.prefs", json!({}))["result"]["apply_enabled"], true);
         assert_eq!(h.call("ui.prefs", json!({"button":"apply"}))["ok"], true);
         assert_eq!(h.app.session.plugin_limits.max_fuel, u64::MAX);
         assert_eq!(h.app.session.plugin_limits.max_memory_mib, 512);
+        assert_eq!(h.app.session.plugin_limits.max_host_calls, u64::MAX);
+        assert_eq!(h.app.session.plugin_limits.max_deadline_ms, u64::MAX);
         let applied = h.app.session.plugin_limits;
         for text in ["", "0", "18446744073709551616", "1.5"] {
-            h.app.prefs_window.plugin_limit_inputs = Some(LimitInputs { applied, fuel: text.into(), memory: "1024".into() });
-            assert_eq!(h.call("ui.prefs", json!({"button":"ok"}))["ok"], false);
-            assert!(h.app.prefs_window.shell.open);
-            assert_eq!(h.app.session.plugin_limits, applied);
+            for input in [
+                LimitInputs { fuel: text.into(), memory: "1024".into(), ..applied.into() },
+                LimitInputs { host_calls: text.into(), memory: "1024".into(), ..applied.into() },
+                LimitInputs { deadline_ms: text.into(), memory: "1024".into(), ..applied.into() },
+            ] {
+                h.app.prefs_window.plugin_limit_inputs = Some(input);
+                assert_eq!(h.call("ui.prefs", json!({"button":"ok"}))["ok"], false);
+                assert!(h.app.prefs_window.shell.open);
+                assert_eq!(h.app.session.plugin_limits, applied);
+            }
         }
         h.call("ui.prefs", json!({"button":"cancel"}));
         assert_eq!(h.app.session.plugin_limits, applied, "Cancel retains the last Apply");
@@ -1986,7 +2417,8 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open":"Plugins"}));
         let initial = host_limits(&h.app.preferences);
-        h.app.prefs_window.plugin_limit_inputs = Some(LimitInputs { applied: initial, fuel: "90000000".into(), memory: "512".into() });
+        h.app.prefs_window.plugin_limit_inputs =
+            Some(LimitInputs { applied: initial, fuel: "90000000".into(), memory: "512".into(), ..initial.into() });
         assert_eq!(h.call("ui.prefs", json!({"open":"General"}))["ok"], true);
         let draft = h.app.prefs_window.plugin_limit_inputs.as_ref().unwrap();
         assert_eq!((&draft.fuel, &draft.memory), (&"90000000".to_string(), &"512".to_string()));
@@ -2003,9 +2435,16 @@ mod tests {
             disabled: false,
             groups: Default::default(),
             entries: Vec::new(),
+            ribbon_groups: Vec::new(),
             images: Default::default(),
             swatches: Default::default(),
             shaders: Vec::new(),
+            tints: Vec::new(),
+            panels: Vec::new(),
+            shader_settings: Default::default(),
+            pictures: Vec::new(),
+            updates: None,
+            themes: Vec::new(),
             id: "ftc-frc-parts".into(),
             name: "FTC and FRC parts".into(),
             version: "0.1.0".into(),

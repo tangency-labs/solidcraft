@@ -22,5 +22,8 @@
   },
   "ko": {
     "home.recovery_hide": "다음 실행까지 숨기기"
+  },
+  "fr": {
+    "home.recovery_hide": "Masquer jusqu’au prochain lancement"
   }
 }

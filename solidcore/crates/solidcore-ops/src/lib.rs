@@ -11,6 +11,8 @@
 //! - [`session`]: the one process kernel, the fixes the application names, the panic guard, the
 //!   call running now and the failure callback;
 //! - [`cancel`]: stopping the calls of work nobody waits for any more ([`Error::Cancelled`]);
+//! - [`fuel`]: a deterministic work budget per call, so a call going nowhere stops early
+//!   ([`Error::OutOfFuel`]);
 //! - [`Error`]: why an operation failed, as data (the application words it);
 //! - [`Body`]: a kernel body, with primitives, copy and transform, counts and volume, `.smb`
 //!   bytes ([`file`]) and the validity check ([`check`]), and the record both ways
@@ -24,7 +26,8 @@
 //! distances and normals), [`contact`] (whether bodies meet, their boundary distance),
 //! [`pick`] (the edge or vertex nearest a point), [`boolean`], [`stitch`], [`prism`] (planar
 //! region booleans and extrusion, prism sections),
-//! [`cell_grid`] (the cells of a grid over a profile).
+//! [`cell_grid`] (the cells of a grid over a profile), [`profile`] (line families clipped to a
+//! region), [`shaft_spline`] (the outlines of a splined shaft and its hub from plain numbers).
 //!
 //! Operations change the body they are given, as the kernel does. An application that keeps
 //! its input copies it first ([`Body::copy`]).
@@ -38,13 +41,16 @@ pub mod bead;
 pub mod blend;
 pub mod blend_definition;
 pub mod blend_surface;
+pub mod board_drill;
 pub mod body;
 pub mod boolean;
+pub mod bspline;
 pub mod cancel;
 pub mod cap;
 pub mod cell_grid;
 pub mod check;
 pub mod conic_projection;
+pub mod constraint;
 pub mod contact;
 pub mod continuity;
 pub mod curve;
@@ -54,8 +60,9 @@ pub mod curve_knots;
 pub mod curve_plane;
 pub mod cylinder_wall;
 pub mod develop;
+pub mod dome;
+pub mod dxf;
 pub mod error;
-pub mod export_geometry;
 pub mod extend;
 pub mod face_pair;
 pub mod face_surface;
@@ -66,40 +73,48 @@ pub mod fit_projection;
 pub mod frame_gusset;
 pub mod frame_member;
 pub mod frame_trim;
-pub mod hatch;
+pub mod fuel;
 pub mod heal;
 pub mod history;
 pub mod hlr;
 pub mod hole_stacks;
-pub mod import_geometry;
 pub mod joint_turn;
 pub mod label;
 pub mod measure;
-pub mod member_turn;
+pub mod mesh;
 pub mod mid_joint;
 pub mod mid_sheet;
 pub mod network;
 pub mod offset;
 pub mod order;
 pub mod outline;
-pub mod path_export;
+pub mod paper_gaps;
+pub mod path_plane;
 pub mod pcurve;
 pub mod pick;
 pub mod point_identity;
 pub mod prism;
+pub mod profile;
 pub mod provenance;
 pub mod query;
 pub mod record_check;
+pub mod round_face;
+pub mod section_corners;
 pub mod session;
+pub mod shaft_spline;
+pub mod sketch_arc;
 pub mod spline_projection;
 pub mod split;
 pub mod step_assembly;
 pub mod stitch;
+pub mod stop;
+pub mod stroke_runs;
 pub mod surface;
 pub mod surface_cvs;
 pub mod sweep;
 pub mod tangent;
 pub mod trim;
+pub mod tube_cope;
 pub mod untrim;
 pub mod vertex_meet;
 
@@ -154,6 +169,7 @@ pub use check::CheckReport;
 pub use contact::flush_contact_points;
 pub use contact::Gap;
 pub use error::Error;
+pub use error::ErrorClass;
 pub use error::FailureCode;
 pub use error::FitKind;
 pub use error::OffsetRefusal;
@@ -181,9 +197,11 @@ pub use measure::FaceCentroid;
 pub use measure::FaceRayHit;
 pub use measure::GapSample;
 pub use measure::MassPropertiesEstimate;
+pub use measure::MaterialSides;
 pub use measure::MembersClosest;
 pub use measure::Normal;
 pub use measure::PointClass;
+pub use measure::PointLocation;
 pub use measure::PointNormalFace;
 pub use measure::PointSetSummary;
 pub use measure::RayEntity;
@@ -220,6 +238,8 @@ pub fn reduce_mesh(
 
 #[cfg(test)]
 mod ball_corner_tests;
+#[cfg(test)]
+mod dome_tests;
 #[cfg(test)]
 mod noisy_round_tests;
 #[cfg(test)]
