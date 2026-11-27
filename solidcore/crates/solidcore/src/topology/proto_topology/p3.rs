@@ -155,6 +155,7 @@ use crate::error::boolean::BooleanFailure;
 use crate::error::topology::TopologyFailure;
 use crate::error::{EntityRef, Failure, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::{circle_coplanar_circle_intersect_in_contact, CircleCircle};
 use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{ObjectKind, SolutionObject, SolutionType};
@@ -273,6 +274,20 @@ fn as_topology<O: ClassObject>(o: Option<O>) -> Option<O> {
 fn curve_of<O: Copy>(geometry: &impl ClassGeometry<O>, o: Option<O>) -> Result<&Curve> {
     o.and_then(|o| geometry.curve(o))
         .ok_or(dangling("curve handle is null or unknown"))
+}
+
+/// A provably enclosing axis-aligned bounding box of `curve` over `dom`, or `None` when
+/// the curve kind has no certified box or the box is undefined/non-finite (not upstream).
+fn curve_conservative_box(k: &Kernel, curve: &Curve, dom: &Extent1d) -> Result<Option<Extent3d>> {
+    let Some(Some(b)) = ignore_soft(curve.certified_bounding_box(k, dom))? else {
+        return Ok(None);
+    };
+    let finite = |p: Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if b.is_defined() && !b.has_negative_volume() && finite(b.min()) && finite(b.max()) {
+        Ok(Some(b))
+    } else {
+        Ok(None)
+    }
 }
 
 /// `FindOrCreateProtoEdge`'s quits once both end proto vertices are made: the interval's
@@ -1262,12 +1277,62 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// than a split; [`SolidError::InvalidInput`] for a
     /// deleted object or missing curve; [`SolidError::Unported`] for the callees
     /// listed in the module header.
+    /// Conservative axis-aligned bounding box of `pe`'s primary curve over its current
+    /// intersection interval, for AABB pre-culling of proto-edge intersections (not upstream).
+    /// Returns `None` when `pe` has no definitions, uses a compound curve kind, or yields an
+    /// undefined/non-finite box.
+    pub(crate) fn proto_edge_bounding_box(
+        &self,
+        k: &Kernel,
+        geometry: &impl ProtoBrep<O>,
+        pe: ProtoEdgeId,
+    ) -> Result<Option<Extent3d>> {
+        let Some(e) = self.proto_edge(pe) else {
+            return Ok(None);
+        };
+        let Some(&first) = e.edge_definitions().first() else {
+            return Ok(None);
+        };
+        let Some(ed) = self.edge_def(first) else {
+            return Ok(None);
+        };
+        let crv = curve_of(geometry, ed.xsect_curve_3d())?;
+        let dom = e.xsect_interval();
+        curve_conservative_box(k, crv, &dom)
+    }
+
+    /// `SmProtoTopologyManager::SplitIntersectingProtoEdges`: intersects the curves of
+    /// `pe1` and `pe2` (skipping edges that already share a proto vertex or are known to
+    /// overlap), splits each edge at every interior point intersection, combines the
+    /// split proto vertices, and removes the pair from their overlap lists when they had
+    /// a non-end intersection. Returns the curve handles deleted.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when a proto edge has no definition; [`SolidError::InvalidInput`] for a
+    /// deleted object or missing curve; [`SolidError::Unported`] for the callees
+    /// listed in the module header.
     pub fn split_intersecting_proto_edges(
         &mut self,
         k: &Kernel,
         geometry: &mut impl ProtoBrep<O>,
         pe1: ProtoEdgeId,
         pe2: ProtoEdgeId,
+    ) -> Result<Vec<O>> {
+        self.split_intersecting_proto_edges_with_boxes(k, geometry, pe1, pe2, None, None)
+    }
+
+    /// [`Self::split_intersecting_proto_edges`] with optional pre-computed conservative
+    /// bounding boxes for `pe1` and `pe2` so callers scanning all pairs compute each
+    /// proto edge's box once (not upstream).
+    pub(crate) fn split_intersecting_proto_edges_with_boxes(
+        &mut self,
+        k: &Kernel,
+        geometry: &mut impl ProtoBrep<O>,
+        pe1: ProtoEdgeId,
+        pe2: ProtoEdgeId,
+        box1: Option<Extent3d>,
+        box2: Option<Extent3d>,
     ) -> Result<Vec<O>> {
         let mut deleted: Vec<O> = Vec::new();
         // fork bcc6f01 (`SplitIntersectingProtoEdges`): the splits, combines and
@@ -1322,10 +1387,37 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         // (not upstream, #14329) Two lines go to `IntersectWithLine`, whose first test
         // returns no solution when the segments' boxes are apart: answer that here, before
         // the intersection's setup. A boolean asks it for every pair of proto edges, so
-        // with long outlines nearly every pair ends here.
+        // with long outlines nearly every pair ends here. For curved proto edges, reject
+        // pairs whose certified bounding boxes are disjoint by `2 * tol + EFF_ZERO`.
+        let box_tol = (tol.is_finite() && tol >= 0.0).then_some(2.0 * tol + EFF_ZERO);
+        if !core::ptr::eq(c1, c2) {
+            if let Some(bt) = box_tol {
+                if let (Some(b1), Some(b2)) = (box1, box2) {
+                    if b1.are_disjoint(&b2, bt) {
+                        return Ok(deleted);
+                    }
+                }
+            }
+        }
         if let (CurveKind::Line(l1), CurveKind::Line(l2)) = (c1.kind(), c2.kind()) {
             if l1.segments_apart(&dom1, l2, &dom2, tol) {
                 return Ok(deleted);
+            }
+        } else if !core::ptr::eq(c1, c2) && (box1.is_none() || box2.is_none()) {
+            if let Some(bt) = box_tol {
+                let b1 = match box1 {
+                    Some(b) => Some(b),
+                    None => curve_conservative_box(k, c1, &dom1)?,
+                };
+                let b2 = match box2 {
+                    Some(b) => Some(b),
+                    None => curve_conservative_box(k, c2, &dom2)?,
+                };
+                if let (Some(b1), Some(b2)) = (b1, b2) {
+                    if b1.are_disjoint(&b2, bt) {
+                        return Ok(deleted);
+                    }
+                }
             }
         }
         k.work_counters.add_proto_edge_intersection();

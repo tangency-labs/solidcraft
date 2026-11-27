@@ -56,6 +56,10 @@ mod grid_tsv;
 mod history;
 mod history_group;
 pub mod icons;
+/// 3D mouse input independent of how the device is opened: HID report descriptors and reports,
+/// buttons and calibration (`solidcraft-space-mouse`), here so every host that draws with the kit
+/// reads devices the same way (#23205).
+pub use solidcraft_space_mouse as space_mouse;
 mod keyboard_focus;
 mod layout;
 mod look_chain;
