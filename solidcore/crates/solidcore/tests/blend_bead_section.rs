@@ -1653,6 +1653,50 @@ fn a_foot_blend_keeps_its_legs_round_a_tube_joint() {
     assert!(smb(&k, &part) == before, "the tubes changed");
 }
 
+/// Round the tee at legs of 20 some stations are found only from their neighbour's foot: the
+/// root's direction into the face (a foot's first start) misses there, and the foot of the
+/// station before (its second start) finds it. The joint is walked up as a build walks it,
+/// each station from the one before. What is found is a station: each foot at its leg from
+/// the root, square to the joint, on its own tube. Without the second start it is a miss.
+#[test]
+fn a_station_the_root_s_direction_misses_is_found_from_its_neighbour_s_foot() {
+    use solidcore::blend::foot_blend::FootBlend;
+    let joint = branch_on_main(10.0, Vec3::new(1.0, 0.0, 0.0));
+    let mut k = kernel();
+    let (mut part, joints) = tubes(&mut k, &joint);
+    let blend = FootBlend::of_edge(&k, &mut part, joints[0], None).unwrap();
+    let (lo, hi) = (blend.interval().min(), blend.interval().max());
+    let legs = [20.0, 20.0];
+    let at = |i: u32| lo + (hi - lo) * f64::from(i) / 400.0;
+    let mut near = None;
+    for i in 0..23 {
+        near = Some(blend.station(&k, at(i), legs, near.as_ref()).unwrap());
+    }
+    let t = at(23);
+    assert!(
+        blend.station(&k, t, legs, None).is_err(),
+        "t {t}: found from the root's direction, so this station does not test the second start"
+    );
+    let s = blend.station(&k, t, legs, near.as_ref()).unwrap();
+    let mut on = Vec::new();
+    for foot in s.feet {
+        let w = foot - s.root;
+        assert!(
+            (w.length() - 20.0).abs() <= 1e-6,
+            "t {t}: a leg of {}",
+            w.length()
+        );
+        assert!(
+            w.dot(s.tangent).abs() <= 1e-6,
+            "t {t}: not square to the joint"
+        );
+        let tube = joint.iter().position(|tb| tb.off(foot) <= 1e-6);
+        assert!(tube.is_some(), "t {t}: a foot off both tubes");
+        on.push(tube);
+    }
+    assert_ne!(on[0], on[1], "t {t}: both feet on one tube");
+}
+
 /// The foot blend's section face between planes (equal and unequal legs, chord, convex and
 /// concave): along the edge its sides are the feet and its middle stands the sagitta off the
 /// chord's middle, to the weld's fit tolerance (0.01 mm); between planes at 90 degrees with 5 mm legs a
