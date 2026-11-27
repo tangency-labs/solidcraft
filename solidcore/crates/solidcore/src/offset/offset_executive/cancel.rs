@@ -126,6 +126,18 @@ fn opposite(a: PlanarFace, b: PlanarFace, tolerance: f64) -> bool {
         && gap < 2.0 * tolerance
 }
 
+/// Whether offset faces `a` and `b` stand for a common original face. Such faces are
+/// pieces of one source face (a face rebuilt where its loops crossed, with an island
+/// of its own), not opposing walls: their opposite construction sides are bookkeeping,
+/// and cancelling them would delete the island.
+fn share_an_original(exec: &OffsetExecutive, a: FaceId, b: FaceId) -> bool {
+    let of_a = exec.faceuse_to_faces.firsts(a);
+    exec.faceuse_to_faces
+        .firsts(b)
+        .iter()
+        .any(|original| of_a.contains(original))
+}
+
 struct Sheet {
     source: PlanarFace,
     brep: Brep,
@@ -294,7 +306,11 @@ pub(super) fn coincident_opposites(
         k.check_cancelled(OP)?;
         if planes
             .iter()
-            .any(|&q| p.id != q.id && opposite(p, q, tolerance))
+            .any(|&q| {
+                p.id != q.id
+                    && opposite(p, q, tolerance)
+                    && !share_an_original(exec, p.id, q.id)
+            })
         {
             selected.push(p);
         }
@@ -316,7 +332,9 @@ pub(super) fn coincident_opposites(
         for j in i.saturating_add(1)..count {
             k.check_cancelled(OP)?;
             let mut other = take_sheet(&mut sheets, j)?;
-            cancel_pair(k, &mut a, &mut other)?;
+            if !share_an_original(exec, a.source.id, other.source.id) {
+                cancel_pair(k, &mut a, &mut other)?;
+            }
             put_sheet(&mut sheets, j, other)?;
         }
         put_sheet(&mut sheets, i, a)?;
