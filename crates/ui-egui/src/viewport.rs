@@ -1347,7 +1347,7 @@ fn edited_sketch_host(app: &SolveApp) -> Option<&str> {
     let sid = crate::sketch_view::active_sketch(app)?;
     match &app.session.doc.feature(sid)?.kind {
         solidcraft_engine::doc::FeatureKind::Sketch { plane, .. } => {
-            solidcraft_engine::doc::plane_face_anchor(plane).map(|anchor| anchor.target.body.as_str())
+            solidcraft_engine::doc::face_anchor::plane_face_anchor(plane).map(|anchor| anchor.target.body.as_str())
         }
         _ => None,
     }

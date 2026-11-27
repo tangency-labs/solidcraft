@@ -100,7 +100,7 @@ fn sketches_of_other_components_fade_while_a_component_is_active() {
 
     let faded = |app: &SolveApp, sketch: u64| super::outside_work(app, super::WorkItem::Sketch(sketch));
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
-    let finished = super::c4(crate::theme::Tokens::get().sketch_fixed);
+    let finished = super::c4(solidcraft_theme::Tokens::get().sketch_fixed);
     let greyed = super::faded_colour(finished);
     assert_eq!(greyed[..3], finished[..3], "faded keeps the theme's hue");
     assert!(greyed[3] < finished[3], "and is faint");
@@ -130,6 +130,37 @@ fn sketches_of_other_components_fade_while_a_component_is_active() {
     app.run("component.activate", json!({"component": 0})).unwrap();
     assert!(!faded(&app, sketch_a) && !faded(&app, sketch_b));
     assert_eq!(counts(&app), (full + faint, 0), "with the design itself active nothing fades");
+}
+
+/// Drawing on another component's body keeps that body lit: while a sketch of the active
+/// component is edited on a face of B's box, the box is not faded, though it lies outside the
+/// active component; once the sketch is finished, it fades again (#12896).
+#[test]
+fn the_body_a_sketch_is_drawn_on_stays_lit_while_the_sketch_is_edited() {
+    let mut app = SolveApp::new(Session::default(), Services::default());
+    app.run("component.create", json!({"name": "B"})).unwrap();
+    app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Base"})).unwrap();
+    app.run("component.activate", json!({"component": 0})).unwrap();
+    let a = app.run("component.create", json!({"name": "A"})).unwrap()["component"].as_u64().unwrap();
+    assert_eq!(app.session.active_component, a);
+    let base = |app: &SolveApp| {
+        let world = app.session.world_state().unwrap();
+        let body = world.bodies.iter().find(|b| b.name == "Base").cloned().expect("B's box");
+        super::body_faded(app, &body, &super::active_body_names(app))
+    };
+    assert!(base(&app), "B's box lies outside the active component A");
+
+    let sketch = app.run("sketch.create", json!({"plane": {"face": [10, 10, 10]}, "name": "On B", "project_edges": false})).unwrap()["sketch"]
+        .as_u64()
+        .unwrap();
+    assert_eq!(crate::sketch_view::active_sketch(&app), Some(sketch));
+    assert!(!base(&app), "the body being drawn on stays lit");
+    assert!(!super::outside_work(&app, super::WorkItem::Sketch(sketch)), "and so does the sketch being edited");
+
+    app.run("sketch.line", json!({"points": [[2, 2], [8, 2]]})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    assert!(base(&app), "finished, the box fades with the rest of B");
+    assert!(!super::outside_work(&app, super::WorkItem::Sketch(sketch)), "A's own sketch never fades while A is active");
 }
 
 #[test]
