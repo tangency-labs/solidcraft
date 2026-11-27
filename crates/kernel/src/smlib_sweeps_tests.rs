@@ -361,6 +361,11 @@ fn a_profile_off_the_path_in_a_plane_holding_its_direction_still_sweeps() {
     ];
     let want = 88.0 * PI;
     close(volume(&smlib_sweeps::sweep(&yz, &pieces_of(&rect), &round, false).unwrap()), want, 1e-3, "ring");
+    // A rectangle a thousandth off the path (its corner at local 0.001, 0.001) is off it too: its
+    // points turn at radius sqrt(30^2 + y^2), so V = 2 pi h (b^2 - a^2) / 2 with h = 2, a = 0.001
+    // and b = 2.001, which is 8.008 pi.
+    let near = region(Loop2::polygon(&[Vec2::new(0.001, 0.001), Vec2::new(2.001, 0.001), Vec2::new(2.001, 2.001), Vec2::new(0.001, 2.001)]));
+    close(volume(&smlib_sweeps::sweep(&yz, &pieces_of(&near), &round, false).unwrap()), 8.008 * PI, 1e-3, "near ring");
 }
 
 #[test]

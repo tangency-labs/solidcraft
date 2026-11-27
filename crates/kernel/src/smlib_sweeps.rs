@@ -1051,7 +1051,7 @@ mod imp {
 
     /// Whether `start`, a point of `plane` (to the sweep's tolerance), lies inside the profile
     /// `pieces` by the even-odd rule on their outlines sampled at 64 points a piece, or within a
-    /// thousandth of the profile's size of one of those points.
+    /// millionth of the profile's size of one of those points.
     fn path_starts_in(plane: &Plane, pieces: &[Piece], start: Vec3) -> bool {
         const SAMPLES: usize = 64;
         let p = plane.to_local(start);
@@ -1060,7 +1060,7 @@ mod imp {
         for q in outline.iter().flatten() {
             (lo, hi) = (Vec2::new(lo.x.min(q.x), lo.y.min(q.y)), Vec2::new(hi.x.max(q.x), hi.y.max(q.y)));
         }
-        let near = 1e-3 * (hi - lo).len();
+        let near = 1e-6 * (hi - lo).len();
         if outline.iter().flatten().any(|q| (*q - p).len() <= near) {
             return true;
         }
