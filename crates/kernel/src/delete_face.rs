@@ -820,7 +820,7 @@ mod tests {
             .unwrap()
             .into_iter()
             .map(|hit| match hit {
-                solidcore_ops::ClassifiedPoint::On { face, .. } => face,
+                crate::points::ClassifiedPoint::On { face, .. } => face,
                 other => panic!("expected a point on the face, got {other:?}"),
             })
             .collect()

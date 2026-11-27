@@ -7462,8 +7462,10 @@ fn centre_line_gaps_follow_dimension_edits_and_survive_svg_export() {
     let xml = svg.split_once(&marker).unwrap().1.split_once("</g>").unwrap().0;
     let Item::Stroke { path, .. } = &cut.items[0] else { panic!("expected stroke") };
     let x = path[0].start().x;
-    // The A3 sheet is 297 mm high, and SVG reverses the paper y axis.
-    for (d, phase) in [(format!("M{x} 182L{x} 133"), "0.82"), (format!("M{x} 131L{x} 112"), "3.22")] {
+    // The A3 sheet is 297 mm high, and SVG reverses the paper y axis. The pieces start 0.82 mm and
+    // 3.22 mm into the pattern. Under the round caps each dash is stroked a line width (0.18 mm)
+    // shorter about its middle, so the offsets written are 0.09 mm less: 0.73 and 3.13.
+    for (d, phase) in [(format!("M{x} 182L{x} 133"), "0.73"), (format!("M{x} 131L{x} 112"), "3.13")] {
         assert!(
             xml.split("<path ")
                 .filter_map(|path| path.split_once('>'))
@@ -7588,7 +7590,9 @@ fn automatic_centre_mark_gaps_follow_dimension_and_export_the_same_pattern() {
     let marker = format!("<g data-object=\"{front}\" data-kind=\"centre_mark\">");
     let xml = svg.split_once(&marker).unwrap().1.split_once("</g>").unwrap().0;
     assert!(xml.contains("M150 152L150 146") && xml.contains("M150 144L150 142"), "{xml}");
-    assert!(xml.contains("stroke-dashoffset=\"1.66\"") && xml.contains("stroke-dashoffset=\"4.8\""), "{xml}");
+    // Under the round caps each dash is stroked a line width (0.18 mm) shorter about its middle, so
+    // the offsets written are 0.09 mm less than the pattern's 1.66 and 4.8.
+    assert!(xml.contains("stroke-dashoffset=\"1.57\"") && xml.contains("stroke-dashoffset=\"4.71\""), "{xml}");
     run(&mut s, "drawing.dimension.edit", json!({"dimension":ids::encode(dimension),"set":{"offset_mm":-4.0}}));
     let moved = settled(&mut s, sheet);
     assert_ne!(automatic_scene_groups(&moved.scene, front), groups);
