@@ -373,17 +373,23 @@ fn a_variant_with_its_own_key_leaves_the_family_key_alone() {
 }
 
 /// #22247: after a Two-Tangent Circle from the menu, C started that tool again, though the menu
-/// lists C next to Center-Diameter Circle. With Preferences › Sketch asking for it, C starts the
-/// listed tool; off (the default), the variant used last still comes back on C.
+/// lists C next to Center-Diameter Circle. With the option in the Sketch Palette's Feature Options
+/// on, C starts the listed tool; off (the default), the variant used last still comes back on C.
 #[test]
 fn a_shape_shortcut_can_start_the_tool_listed_next_to_it() {
     for listed in [false, true] {
         let mut h = Harness::new();
-        h.app.preferences.shortcut_starts_listed_tool = listed;
         h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
         h.settle();
         h.app.start("sketch.circle.two_tangent");
         h.settle();
+        if listed {
+            // A mode of the shape tools: it shows in the palette while one runs, not in Preferences.
+            let at = crate::scenario::handle_at("sketch_palette:toggle:shortcut_starts_listed_tool").expect("the circle tools show the option");
+            h.call("ui.click", json!({"x": at.x, "y": at.y}));
+            h.settle();
+            assert!(h.app.preferences.shortcut_starts_listed_tool, "the click turns it on");
+        }
         press(&mut h, "Escape");
         press(&mut h, "C");
         let expected = if listed { "sketch.circle.center" } else { "sketch.circle.two_tangent" };
