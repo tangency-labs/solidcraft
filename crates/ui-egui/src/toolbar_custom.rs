@@ -444,6 +444,22 @@ pub fn reset(app: &mut SolveApp, tab: &str) {
 /// (#5080). Within each group, the commands the saved order names take its order among the
 /// places they hold; any other (a command added since) keeps its place. The group's heading
 /// stays on its first command.
+/// The Model Create groups are opt-in. With grouping off, existing custom order is
+/// interpreted as a single flat group and is never restricted by the optional headings.
+fn menu_groups(app: &SolveApp, tab: &str, panel: &str) -> &'static [crate::workspace::CommandGroup] {
+    if tab == "MODEL" && panel == "CREATE" && !app.preferences.create_menu_groups { &[] } else { crate::workspace::groups(tab, panel) }
+}
+
+pub fn grouped_menu<'a>(app: &SolveApp, tab: &str, panel: &str, commands: &[&'a CommandSpec]) -> Vec<(Option<&'static str>, &'a CommandSpec)> {
+    if (panel == "CONSTRUCT" && !app.preferences.construct_menu_groups)
+        || (tab == "MODEL" && panel == "CREATE" && !app.preferences.create_menu_groups)
+    {
+        commands.iter().map(|c| (None, *c)).collect()
+    } else {
+        crate::workspace::grouped_commands(tab, panel, commands)
+    }
+}
+
 pub fn order_grouped<'a>(
     app: &SolveApp,
     tab: &str,
@@ -451,7 +467,7 @@ pub fn order_grouped<'a>(
     grouped: Vec<(Option<&'static str>, &'a CommandSpec)>,
 ) -> Vec<(Option<&'static str>, &'a CommandSpec)> {
     let Some(saved) = app.toolbar_custom.menus.get(&key(tab, panel)) else { return grouped };
-    let groups = crate::workspace::groups(tab, panel);
+    let groups = menu_groups(app, tab, panel);
     let group_of = |id: &str| groups.iter().position(|g| g.ids.contains(&id));
     let rank = |id: &str| saved.iter().position(|s| s == id);
     let mut out = grouped;
@@ -478,8 +494,8 @@ pub fn order_grouped<'a>(
 }
 
 /// Which group of `panel`'s drop-down command `id` is in (past the last for one in none).
-pub fn group_index(tab: &str, panel: &str, id: &str) -> usize {
-    let groups = crate::workspace::groups(tab, panel);
+pub fn group_index(app: &SolveApp, tab: &str, panel: &str, id: &str) -> usize {
+    let groups = menu_groups(app, tab, panel);
     groups.iter().position(|g| g.ids.contains(&id)).unwrap_or(groups.len())
 }
 
@@ -494,11 +510,11 @@ pub fn movable_in_menu(tab: &str, panel: &str, id: &str) -> bool {
 pub fn move_in_menu(app: &mut SolveApp, tab: &str, panel: &str, id: &str, before: Option<&str>) {
     let lists = panel_lists(tab);
     let Some((_, cmds, _)) = lists.iter().find(|(p, ..)| *p == panel) else { return };
-    let order: Vec<&str> = order_grouped(app, tab, panel, crate::workspace::grouped_commands(tab, panel, cmds)).iter().map(|(_, c)| c.id).collect();
+    let order: Vec<&str> = order_grouped(app, tab, panel, grouped_menu(app, tab, panel, cmds)).iter().map(|(_, c)| c.id).collect();
     if !order.contains(&id) || before == Some(id) {
         return;
     }
-    let groups = crate::workspace::groups(tab, panel);
+    let groups = menu_groups(app, tab, panel);
     let group_of = |x: &str| groups.iter().position(|g| g.ids.contains(&x)).unwrap_or(groups.len());
     let own = group_of(id);
     let mut ids: Vec<&str> = order.into_iter().filter(|x| *x != id).collect();
@@ -942,7 +958,7 @@ mod menu_order_tests {
     fn menu(app: &SolveApp, tab: &str, panel: &str) -> Vec<&'static str> {
         let lists = panel_lists(tab);
         let cmds = &lists.iter().find(|(p, ..)| *p == panel).unwrap().1;
-        order_grouped(app, tab, panel, crate::workspace::grouped_commands(tab, panel, cmds)).iter().map(|(_, c)| c.id).collect()
+        order_grouped(app, tab, panel, grouped_menu(app, tab, panel, cmds)).iter().map(|(_, c)| c.id).collect()
     }
 
     /// #5080: a command moves before another one of its menu; the order is saved with the
@@ -987,6 +1003,21 @@ mod menu_order_tests {
         let headings: Vec<_> = grouped.iter().filter_map(|(h, c)| h.map(|h| (h, c.id))).collect();
         assert_eq!(headings.first(), Some(&("Edges", "solid.chamfer")));
         assert!(headings.contains(&("Bodies", "solid.scale")), "{headings:?}");
+    }
+
+    #[test]
+    fn optional_create_groups_keep_flat_order_when_disabled() {
+        let mut h = crate::scenario::Harness::new();
+        assert!(!h.app.preferences.create_menu_groups);
+        move_in_menu(&mut h.app, "MODEL", "CREATE", "solid.sphere", Some("solid.extrude"));
+        let flat = menu(&h.app, "MODEL", "CREATE");
+        assert_eq!(flat.first(), Some(&"solid.sphere"));
+        h.app.preferences.create_menu_groups = true;
+        let grouped = menu(&h.app, "MODEL", "CREATE");
+        assert_eq!(grouped.len(), flat.len());
+        assert!(grouped.iter().position(|id| *id == "solid.extrude") < grouped.iter().position(|id| *id == "solid.sphere"));
+        h.app.preferences.create_menu_groups = false;
+        assert_eq!(menu(&h.app, "MODEL", "CREATE"), flat);
     }
 
     /// A command the saved order doesn't name (added in a later version) keeps its built-in

@@ -444,6 +444,34 @@ pub fn groups(tab: &str, panel: &str) -> &'static [CommandGroup] {
                 ],
             },
         ],
+        ("MODEL", "CREATE") => &[
+            CommandGroup {
+                label: "ui.create_from_sketch",
+                ids: &["solid.extrude", "solid.revolve", "solid.sweep", "solid.loft", "solid.rib", "solid.web", "solid.emboss", "solid.cell_grid"],
+            },
+            CommandGroup {
+                label: "ui.create_object_feature",
+                ids: &[
+                    "solid.box",
+                    "solid.cylinder",
+                    "solid.sphere",
+                    "solid.torus",
+                    "solid.cone",
+                    "solid.coil",
+                    "solid.pipe",
+                    "solid.hole",
+                    "solid.thread",
+                    "solid.dome",
+                    "solid.boundary_fill",
+                    "solid.bounding_solid",
+                    "shaft_spline.insert",
+                    "plastic.boss",
+                    "plastic.lip",
+                    "plastic.snap_fit",
+                    "plastic.rest",
+                ],
+            },
+        ],
         ("MODEL", "MODIFY") => &[
             CommandGroup { label: "Edges", ids: &["solid.fillet", "solid.chamfer"] },
             CommandGroup {
@@ -2039,6 +2067,22 @@ mod tests {
         assert_eq!(sheets(&mut h), added - 1, "the drawing has no older step");
         assert_eq!(h.app.session.undo.len(), steps + 1, "the model's steps stay, New Drawing's too");
         assert!(h.app.session.open_drawing.is_some());
+    }
+
+    #[test]
+    fn create_menu_groups_sketch_and_object_operations_without_losing_commands() {
+        let specs = solidcraft_engine::command_specs();
+        let (commands, promoted) = layout("MODEL", "CREATE", &specs).unwrap();
+        let grouped = grouped_commands("MODEL", "CREATE", &commands);
+        assert_eq!(grouped.iter().filter_map(|(h, _)| *h).collect::<Vec<_>>(), ["ui.create_from_sketch", "ui.create_object_feature"]);
+        let ids: std::collections::BTreeSet<_> = grouped.iter().map(|(_, c)| c.id).collect();
+        assert_eq!(grouped.len(), ids.len());
+        assert_eq!(ids, commands.iter().map(|c| c.id).collect());
+        assert_eq!(commands.iter().take(promoted).map(|c| c.id).collect::<Vec<_>>(), ["solid.extrude", "solid.revolve", "solid.hole"]);
+        assert_eq!(groups("MODEL", "CREATE")[0].ids[0], "solid.extrude");
+        assert!(groups("MODEL", "CREATE")[0].ids.contains(&"solid.sweep"));
+        assert!(groups("MODEL", "CREATE")[1].ids.contains(&"solid.hole"));
+        assert!(groups("MODEL", "CREATE")[1].ids.contains(&"solid.box"));
     }
 
     #[test]

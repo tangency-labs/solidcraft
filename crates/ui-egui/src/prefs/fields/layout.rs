@@ -34,6 +34,8 @@ macro_rules! layout_preferences {
             command_search_centred: bool = false, PAGE_LAYOUT;
             /// Group Construct menus under Planes, Axes and Points headings; off keeps the original command order.
             construct_menu_groups: bool = true, PAGE_LAYOUT => check_id_help("prefs.construct_menu_groups", "prefs.construct_menu_groups_help");
+            /// Group Model Create by input workflow. Off keeps the existing flat menu and order.
+            create_menu_groups: bool = false, PAGE_LAYOUT => check_id_help("prefs.create_menu_groups", "prefs.create_menu_groups_help");
             /// A design opens with the views it had when it was last closed.
             design_reopen_views: bool = false, PAGE_LAYOUT;
             /// Opening a sheet or workspace that a view already shows activates that view.
