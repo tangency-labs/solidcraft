@@ -18,6 +18,7 @@
 //! | [`is_infinite_param`]        | `SM_IS_INFINITE`                               |
 //! | [`max2`], [`min2`], [`max3`], [`min3`], [`max4`], [`min4`] | `smos_Max`, `smos_Min`, `smos_3Max`, `smos_3Min`, `smos_4Max`, `smos_4Min` |
 //! | [`rad_to_deg`]               | `SM_RAD2DEG`                                   |
+//! | [`det`]                      | the C library's `sin`, `cos`, `atan2`, `pow`, ... |
 //!
 //! ## Why not `glam`/`nalgebra`
 //!
@@ -27,6 +28,8 @@
 //! (e.g. `Unitize` of a zero vector). These hand-written types spell every expression
 //! in upstream order, so results are bit-identical to the C++ (built with
 //! `-ffp-contract=off`).
+
+pub mod det;
 
 pub use crate::geom::vector2d::{Point2, Vec2};
 pub use crate::geom::vector3d::{Point3, Vec3};
