@@ -48,6 +48,7 @@ mod fair;
 mod fill;
 #[cfg(test)]
 mod fillet_setback_tests;
+pub mod finger_joint;
 mod form_cell;
 mod freeform;
 pub mod fuzz;
@@ -898,3 +899,7 @@ mod tests;
 
 #[cfg(test)]
 mod trimmed_face_mesh_tests;
+
+// A second kernel compiled in beside solidcore, for measurement (`backend-occt`): choosing it.
+#[cfg(feature = "backend-occt")]
+pub use route::foreign;

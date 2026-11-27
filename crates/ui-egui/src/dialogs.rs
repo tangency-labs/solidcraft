@@ -504,6 +504,12 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// With round edges: the rounds' radius (an expression); empty: the offset's.
                 radius: String,
             },
+            FingerJoint {
+                count: String,
+                clearance: String,
+                inverted: bool,
+                edge_offset: String,
+            },
             EditParam {
                 name: String,
                 expr: String,
@@ -1155,6 +1161,10 @@ impl Dialog {
             ),
             "solid.fillet" => Dialog::new(fillet_kind(&fillet_radius_default(app), false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.chamfer" => Dialog::new(fillet_kind(&length_default(s, "1"), true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            "solid.finger_joint" => Dialog::new(
+                Kind::FingerJoint { count: "3".into(), clearance: length_default(s, "0"), inverted: false, edge_offset: length_default(s, "0") },
+                vec![SelInput::new("ui.finger_joint_bodies", BODIES, true)],
+            ),
             // The path is a sketch's curves or a body's edges, with Tangent Chain (#16084).
             "solid.pipe" => {
                 let (kind, inputs) = Kind::simple_start(id)?;
@@ -1772,6 +1782,7 @@ impl Dialog {
                 | Kind::Hole { .. }
                 | Kind::Primitive { .. }
                 | Kind::Combine { .. }
+                | Kind::FingerJoint { .. }
                 | Kind::BoundaryFill { .. }
         )
     }
@@ -3530,6 +3541,7 @@ fn title(k: &Kind) -> &'static str {
             _ => "TORUS",
         },
         Kind::Combine { .. } => "COMBINE",
+        Kind::FingerJoint { .. } => "cmd.solid.finger_joint",
         Kind::EditParam { .. } => "EDIT DIMENSION",
         Kind::Rename { .. } => "RENAME",
         Kind::RenameGroup { .. } => "RENAME GROUP",
@@ -8511,6 +8523,26 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             ("solid.combine", p)
         }
+        Kind::FingerJoint { count, clearance, inverted, edge_offset } => {
+            let bodies = sels(d, 0).body_names();
+            if bodies.len() < 2 || bodies.len() > solidcraft_engine::doc::MAX_FINGER_JOINT_BODIES {
+                return Err(tr("ui.finger_joint_select_bodies").into());
+            }
+            let mut seen = std::collections::BTreeSet::new();
+            if bodies.iter().any(|name| !seen.insert(name)) {
+                return Err(tr("ui.finger_joint_select_different").into());
+            }
+            let count =
+                count.trim().parse::<usize>().ok().filter(|n| (1..=64).contains(n)).ok_or_else(|| tr("ui.finger_joint_invalid_count").to_string())?;
+            if clearance.trim().is_empty() {
+                return Err(tr("ui.finger_joint_enter_clearance").into());
+            }
+            let edge_offset = if edge_offset.trim().is_empty() { Value::Null } else { json!(edge_offset) };
+            (
+                "solid.finger_joint",
+                json!({"bodies": bodies, "count": count, "clearance": clearance, "inverted": inverted, "edge_offset": edge_offset}),
+            )
+        }
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
         Kind::RenameGroup { group, name } => ("timeline.rename_group", json!({"group": group, "name": name})),
@@ -9022,7 +9054,7 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
     let mut indices: Vec<usize> = match sel {
         ProfileSel::All => (0..ps.len()).collect(),
         ProfileSel::Indices { indices } => indices.iter().copied().filter(|i| *i < ps.len()).collect(),
-        ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
+        ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } | ProfileSel::TextRegions { .. } => {
             solidcraft_engine::doc::profile_selection_indices(ss, sel).unwrap_or_default()
         }
         // The regions the feature builds, also those a change of the regions left to the closest
@@ -10294,6 +10326,21 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             if let Some(inp) = d.inputs.get_mut(1) {
                 inp.items = tools.iter().map(|n| Sel::Body { name: n.to_string() }).collect();
+            }
+            d
+        }
+        FeatureKind::FingerJoint { bodies, count, clearance, inverted, edge_offset } => {
+            let mut d = Dialog::new(
+                Kind::FingerJoint {
+                    count: count.to_string(),
+                    clearance: clearance.to_string(),
+                    inverted: *inverted,
+                    edge_offset: edge_offset.as_ref().map_or_else(|| length_default(s, "0"), |value| crate::length_input::stored(&s.doc, value)),
+                },
+                vec![SelInput::new("ui.finger_joint_bodies", BODIES, true)],
+            );
+            if let Some(input) = d.inputs.first_mut() {
+                input.items = bodies.iter().map(|body| Sel::Body { name: body.to_string() }).collect();
             }
             d
         }
