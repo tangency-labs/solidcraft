@@ -1169,6 +1169,9 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let points = if p.get("points").is_some() { Some(vec2_list(cmd, p, "points", MAX_BREAK_POINTS)?) } else { None };
     let model_edit = !s.sheet_sketching();
     let (out, info) = edit(s, p, cmd, false, |sk, doc| {
+        if let Some(id) = str_(p, "curve").filter(|id| sk.wire_index(id).is_some()) {
+            return Err(bad(cmd, format!("Break supports curves in the sketch plane; `{id}` is a 3D curve")));
+        }
         let ci = curve_arg(sk, p, cmd)?;
         if points.is_none()
             && let Some(end) = break_shared_end(sk, ci, req_vec2(cmd, p, "at")?)
