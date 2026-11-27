@@ -509,7 +509,7 @@ fn eval_component_chain(
                 let (r, deferred) = kernel::validating(validation, || {
                     IMPORT_HEALS.with(|h| *h.borrow_mut() = import_digests.heals(f.id).cloned());
                     let r =
-                        eval_feature(doc, vals, f, &mut next, &mut warning, &mut import_report, &mut repair, heal, None, prepared_imports.get(f.id));
+                        eval_feature(doc, vals, f, &mut next, &mut warning, &mut import_report, &mut repair, heal, None, prepared_imports.get(f.id), None);
                     IMPORT_HEALS.with(|h| *h.borrow_mut() = None);
                     r
                 });
