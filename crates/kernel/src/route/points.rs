@@ -5,7 +5,7 @@
 use solidcore_record::brep::Brep;
 use solidcraft_kernel_api::{OpKind, Points};
 
-pub use solidcraft_kernel_api::points::{Distance, PointSetSummary, PointsRefused};
+pub use solidcraft_kernel_api::points::{ClassifiedPoint, Distance, PointNormalFace, PointSetSummary, PointsRefused, UnitNormal};
 
 use super::{Which, which};
 use crate::backend::Solidcore;
