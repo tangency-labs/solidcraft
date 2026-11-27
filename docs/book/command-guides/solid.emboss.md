@@ -1,10 +1,10 @@
-Raise sketch text or a logo out of a face, or sink it in: an engraved part number, a serial or rev letter, a logo, or raised lettering on a casting pattern. It works on flat faces, and straight-line outlines can wrap around a cylinder.
+Raise sketch text or a logo out of a face, or sink it in: an engraved part number, a serial or rev letter, a logo, or raised lettering on a casting pattern. It works on flat faces, and text and outlines wrap around a cylinder.
 
 #### Before you start
 
 - You need a body and a sketch with closed profiles to emboss, usually text made with the sketch's Text tool. Sketch it on or parallel to the face it goes on.
 - Deboss sinks the profiles into the face: that's engraving. Emboss raises them out of it.
-- Only profiles made of straight lines running along and around the cylinder (orthogonal lines, such as a rectangular label or flat) wrap around it, sketched on a plane tangent to it. Text with curves or diagonals doesn't wrap; engrave it on a flat face instead. Pick the cylinder's wall as the Target Face to say which one when there is more than one.
+- To wrap text or an outline around a cylinder or a tube, sketch it on a plane tangent to the wall. It wraps when the body is a whole cylinder or tube with flat ends; a cylinder face of another shape, such as a groove in a block, is refused. Pick the cylinder's wall as the Target Face to say which one when there is more than one.
 
 #### Options
 
@@ -14,6 +14,9 @@ Raise sketch text or a logo out of a face, or sink it in: an engraved part numbe
 | Target Face (optional) | The face the profiles go on. Leave it empty to use the face under the sketch. | The outside of a shaft, to wrap a rectangular label area around it. |
 | Depth | How deep the profiles sink in, or how high they stand out. It starts at 1 in the design's unit. | 0.005 in to 0.010 in for engraving. |
 | Type | Emboss raises the profiles out of the face. Deboss sinks them into it. It starts at Emboss. | Deboss for an engraved part number. |
+| Offset X | Moves the profiles along the sketch's X before they go on the face. The sketch itself stays as it is. Empty means no move. On a cylinder it slides them around the wall when the sketch's X runs around it. | 0.5 in to nudge a part number away from a hole. |
+| Offset Y | The same along the sketch's Y. On a cylinder it slides them along the axis when the sketch's Y runs along it. | -0.25 in to drop a label lower on the face. |
+| Angle | Turns the profiles counter-clockwise, as you look at the sketch, about the middle of the box around them. The offsets keep to the sketch's X and Y. Empty means no turn. | 90 deg to run a label up the face instead of across it. |
 
 #### Try it: engrave a part number
 
@@ -29,6 +32,8 @@ Raise sketch text or a logo out of a face, or sink it in: an engraved part numbe
 - **Do** pick a text height and font your engraving tool can cut. Strokes thinner than the tool's tip get lost.
 - **Do** change the Depth from its default. It starts at 1 in the design's unit, far too deep for a marking.
 - **Do** type the unit with the number when the print uses another unit. In a millimetre design, typing 0.010 in enters 0.254 mm.
+- **Do** use Offset X, Offset Y and Angle to put the profiles where you want them on the face, instead of redrawing the sketch. They take a parameter name too, so one sketch can mark several places or follow a dimension.
+- **Don't** move the profiles off the face. With a Target Face picked, the whole of each profile must still lie on it, or the Emboss is refused. On a flat face with no Target Face picked, this isn't checked: a profile moved past the edge is still built, and a raised one hangs past the part.
 
 #### See also
 

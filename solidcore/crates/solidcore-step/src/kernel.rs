@@ -7,10 +7,57 @@ use solidcore_convert as c;
 use solidcore_record::Vec3;
 use solidcore_record::brep::{Curve, Curve2, Frame, Surface};
 
-pub(crate) use solidcore::eval::uv::Starts;
+pub(crate) use solidcore::eval::uv::{Starts, unwrap};
 
 /// Why a record cannot be evaluated: it does not convert (too deep), or the kernel refuses it.
 pub(crate) type Error = String;
+
+/// The kernel's geometric radial order of the faces leaving an edge. Record uses
+/// are returned as a permutation, with their side flags unchanged.
+pub(crate) fn radial_order(curve: &Curve, interval: [f64; 2], faces: &[(&Surface, &Curve2, bool)]) -> Result<Vec<usize>, Error> {
+    let curve = c::curve(curve).map_err(|e| e.to_string())?;
+    let converted = faces
+        .iter()
+        .map(|&(surface, pcurve, forward)| Ok((c::surface(surface).map_err(|e| e.to_string())?, c::curve2(pcurve), forward)))
+        .collect::<Result<Vec<_>, Error>>()?;
+    let faces: Vec<_> = converted.iter().map(|(surface, pcurve, forward)| k::pcurve::RadialFace { surface, pcurve, forward: *forward }).collect();
+    k::pcurve::radial_order(&curve, interval, &faces).map_err(|e| e.to_string())
+}
+
+/// Whether `curve`'s length over `interval`, its ends and knots as given, is proved at most
+/// `limit` ([`solidcore::curve::curve::Curve::proved_length_at_most`], settled rather than
+/// narrowed, within `most` pieces): `Some(true)` where it is, `Some(false)` where it is proved
+/// more, `None` where the kernel does not enclose that curve's kind, cannot make the curve, or
+/// settles neither within `most`.
+pub(crate) fn curve_length_at_most(curve: &Curve, interval: [f64; 2], limit: f64, most: usize) -> Result<Option<bool>, Error> {
+    // A line record with one point is that point: its length is 0, while the kernel's line
+    // constructor takes only a direction, which this one has none of.
+    if matches!(curve, Curve::Line { start, end } if start == end) {
+        return Ok(Some(0.0 <= limit));
+    }
+    let kernel = solidcore::kernel::Kernel::default();
+    let Ok(record) = c::curve(curve) else { return Ok(None) };
+    let Ok(made) = solidcore::curve::from_parameters::from_parameters(&kernel, &record, interval) else { return Ok(None) };
+    match made.curve.proved_length_at_most(&kernel, &made.interval, limit, most) {
+        Ok(settled) => Ok(settled),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Whether every point of `a` over `a_on` lies within `tol` of `b` over `b_on`, and every point
+/// of `b` within `tol` of `a` ([`solidcore::curve::curve::Curve::proved_together`], a whole-span
+/// enclosure, never samples): `None` where the kernel cannot prove it, or make a curve.
+pub(crate) fn curves_within(a: &Curve, a_on: [f64; 2], b: &Curve, b_on: [f64; 2], tol: f64) -> Result<Option<bool>, Error> {
+    let kernel = solidcore::kernel::Kernel::default();
+    let (Ok(a), Ok(b)) = (c::curve(a), c::curve(b)) else { return Ok(None) };
+    let (Ok(a), Ok(b)) = (
+        solidcore::curve::from_parameters::from_parameters(&kernel, &a, a_on),
+        solidcore::curve::from_parameters::from_parameters(&kernel, &b, b_on),
+    ) else {
+        return Ok(None);
+    };
+    a.curve.proved_together(&kernel, &a.interval, &b.curve, &b.interval, tol, &[]).map(Some).map_err(|e| e.to_string())
+}
 
 /// A curve record ready to evaluate.
 pub(crate) struct CurveEval(k::CurveEval);
@@ -81,6 +128,12 @@ impl SurfaceEval {
     pub(crate) fn pole_within(&self, uv: [f64; 2], reach: f64) -> Result<[bool; 2], String> {
         self.0.pole_within(uv, reach).map_err(|e| e.to_string())
     }
+    /// Whether the piece of the iso-line along `d` through `uv` over the `d` parameters `range`
+    /// lies within `reach` mm of `centre`, certified ([`k::SurfaceEval::iso_within`]); refused
+    /// where that cannot be decided.
+    pub(crate) fn iso_within(&self, uv: [f64; 2], d: usize, range: (f64, f64), centre: Vec3, reach: f64) -> Result<bool, String> {
+        self.0.iso_within(uv, d, range, c::vec3(centre), reach).map_err(|e| e.to_string())
+    }
     /// `pc` with its control points put on the knot range and a certified bound on how far that
     /// moves the surface under it; `None` when it is on the range, refused where the move is past
     /// `tolerance` or not bounded ([`k::SurfaceEval::pcurve_onto_knots`]).
@@ -95,6 +148,25 @@ pub(crate) fn face_flux(s: &SurfaceEval, v0: f64, loops: &[Vec<(&Curve2, bool)>]
     let converted: Vec<Vec<(k::Curve2, bool)>> = loops.iter().map(|l| l.iter().map(|(pc, fwd)| (c::curve2(pc), *fwd)).collect()).collect();
     let borrowed: Vec<Vec<(&k::Curve2, bool)>> = converted.iter().map(|l| l.iter().map(|(pc, fwd)| (pc, *fwd)).collect()).collect();
     k::face_flux(&s.0, v0, &borrowed, &|p| c::vec3(field(c::record_vec3(p))))
+}
+
+/// The sign of one closed shell, certified by the kernel's volume enclosure.
+/// No numerical estimate decides a repaired shell's absolute direction.
+pub(crate) fn shell_volume_positive(record: &solidcore_record::brep::Brep, shell: usize) -> Result<bool, Error> {
+    use solidcore::mass::enclosure::{VolumeSign, volume_sign};
+    use solidcore_record::brep::Region;
+
+    let shell = u32::try_from(shell).map_err(|_| "too many shells".to_string())?;
+    let mut single = record.clone();
+    single.regions = vec![Region { shells: vec![shell], void: false }, Region { shells: vec![shell], void: false }];
+    let single = single.canonical().map_err(|e| e.to_string())?.brep;
+    let mut kernel = solidcore::kernel::Kernel::default();
+    let mut body = c::brep::to_kernel_body(&mut kernel, &single, true).map_err(|e| e.to_string())?;
+    match volume_sign(&kernel, &mut body).map_err(|e| e.to_string())? {
+        VolumeSign::Positive(_) => Ok(true),
+        VolumeSign::Negative(_) => Ok(false),
+        VolumeSign::Undecided(_) => Err("the repaired shell's volume sign is not certified".into()),
+    }
 }
 
 /// The exact NURBS forms of the analytic kinds ([`k::form`]), over records.
@@ -121,7 +193,7 @@ pub(crate) mod form {
         let (form, d) = k::form::wound_surface(&surface_in(s)?, domain, tolerance)?;
         Some((surface_out(form)?, d))
     }
-    pub(crate) use solidcore::eval::form::param;
+    pub(crate) use solidcore::eval::form::{angle, param};
 
     pub(crate) fn frame_of(s: &Surface) -> Option<Frame> {
         k::form::frame_of(&surface_in(s)?).map(|f| c::record_frame(&f))

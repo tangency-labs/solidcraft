@@ -36,6 +36,7 @@
 //! | `straight_bspline` (private)  | none (#16639)                         |
 //! | `lines_and_arcs`              | `sm_DraftLinesAndArcs`                |
 //! | `curvature_keeping_walls`     | `sm_CreateCurvatureKeepingWalls`      |
+//! | `circle_closing_at_apex`      | none (#22149)                         |
 //!
 //! The method (from the fork): each profile curve's wall is the surface its draft
 //! sweeps, a line's plane or an arc's cone, ruled from the curve to its offset at the
@@ -64,9 +65,10 @@
 //! every loop is bounded by the profile's curve count or a fixed sample count (the arc span
 //! count is at most the arc's angle over a quarter turn). Walls whose sections all shrink to
 //! one point close the whole section there, a pyramid's apex or a ridge's far end, where the
-//! fork refused the draft (#17265). A B-spline input that is a straight line is a line (the
-//! fork takes only its lines, and drafts a square of B-spline segments by the offset method,
-//! #16639).
+//! fork refused the draft (#17265). A profile that is one circle drafted inward past its
+//! centre is its cone to the apex, where the fork's offset ran past the centre (#22149). A
+//! B-spline input that is a straight line is a line (the fork takes only its lines, and
+//! drafts a square of B-spline segments by the offset method, #16639).
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // the fork's NaN-safe tests
 
@@ -74,6 +76,7 @@ use super::PrimitiveCreationAccess;
 use crate::curve::composite_curve::{CompositeCurve, OffsetDirection};
 use crate::curve::curve::p2::{CIRCLE_TYPE, LINE_TYPE};
 use crate::curve::curve::{Curve, CurveKind};
+use crate::error::primitive::PrimitiveFailure;
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::certified::gamma;
@@ -175,17 +178,43 @@ struct Seam {
     f1: f64,
 }
 
-/// Element `i`, or `SM_ERR` (upstream indexes unchecked).
-fn at<T: Copy>(v: &[T], i: usize) -> Result<T> {
-    v.get(i)
-        .copied()
-        .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))
+/// A defect ([`PrimitiveFailure::Defect`]) with the status `SM_ERR` of the phrase it
+/// replaces.
+#[track_caller]
+fn defect(why: &'static str) -> SolidError {
+    SolidError::primitive(OP, PrimitiveFailure::Defect { why })
 }
 
-/// Element `i` by reference, or `SM_ERR`.
+// Why each step that fails here is the kernel's fault (`PrimitiveFailure::Defect`).
+
+/// Why an index into the walls' own lists is past them.
+const WALL_INDEX: &str = "an index into the walls' own lists is past them, though each list \
+     holds one entry per wall (or per span end, seam or piece) the walls were built with, and \
+     each index is counted over that same list";
+/// Why a piece's index is past the pieces.
+const PIECE_INDEX: &str = "a wall piece's index is past the pieces, though every index a \
+     wall's open ends hold is that of a piece pushed before it";
+/// Why a seam piece's wall is past the walls.
+const PIECE_WALL: &str = "a seam piece names a wall past the walls, though each piece is made \
+     between two walls of the profile, by their indices";
+/// Why an arc wall has fewer than two span ends.
+const FEW_BREAKS: &str = "an arc wall has fewer than two span ends, though the walls' extents \
+     give every arc wall the ends of its spans, at least its low and its high end";
+/// Why a wall's cone has fewer than two V knots.
+const FEW_V_KNOTS: &str = "the wall's cone has fewer than two V knots, though a cone's \
+     B-spline form has at least one span along V";
+
+/// Element `i` of one of the walls' own lists (a defect past it: upstream indexes
+/// unchecked).
+#[track_caller]
+fn at<T: Copy>(v: &[T], i: usize) -> Result<T> {
+    v.get(i).copied().ok_or_else(|| defect(WALL_INDEX))
+}
+
+/// Element `i` of one of the walls' own lists by reference (a defect past it).
+#[track_caller]
 fn at_ref<T>(v: &[T], i: usize) -> Result<&T> {
-    v.get(i)
-        .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))
+    v.get(i).ok_or_else(|| defect(WALL_INDEX))
 }
 
 /// The section of `w` at fraction `f` of the height, in the profile's plane: a line
@@ -589,10 +618,7 @@ fn seam_pcurve(
     // span's end (a quadratic's root) (the fork's tangency-labs/smlib@3ae7bfa)
     let nb = w.breaks.len();
     if nb < 2 {
-        return Err(SolidError::primitive_failed(
-            OP,
-            "a seam span has fewer than two breaks",
-        ));
+        return Err(defect(FEW_BREAKS));
     }
     // the seam's homogeneous control points and their height fractions
     let swh = sw;
@@ -662,10 +688,7 @@ fn seam_pcurve(
         )
     };
     let mut prev_w = 0.0;
-    for (piece, pair) in cuts.windows(2).enumerate() {
-        let (Some(&c0), Some(&c1)) = (pair.first(), pair.get(1)) else {
-            return Err(SolidError::primitive_failed(OP, "a seam cut is missing"));
-        };
+    for (piece, (&c0, &c1)) in cuts.iter().zip(cuts.iter().skip(1)).enumerate() {
         // the piece as a rational quadratic: its ends and the crossing of their tangents,
         // by blossoming the homogeneous curve: B(t0, t0), B(t0, t1), B(t1, t1)
         let q = [blossom(c0, c0), blossom(c0, c1), blossom(c1, c1)];
@@ -719,17 +742,17 @@ fn seam_pcurve(
         };
         for (k, ((dk, uk), tk)) in d4.iter().zip(u4).zip(t4).enumerate() {
             if !(*dk > 0.0) {
-                return Err(SolidError::primitive_failed(
+                return Err(SolidError::primitive(
                     OP,
-                    "a seam span weight is not positive",
+                    PrimitiveFailure::SeamWeightNotPositive { weight: *dk },
                 ));
             }
             let tau = tk / dk;
             if tau < -EFF_ZERO_SQRT || tau > 1.0 + EFF_ZERO_SQRT {
                 // the piece leaves its span
-                return Err(SolidError::primitive_failed(
+                return Err(SolidError::primitive(
                     OP,
-                    "a seam piece leaves its span",
+                    PrimitiveFailure::SeamLeavesSpan { tau },
                 ));
             }
             let t = s0 + (s1 - s0) * tau;
@@ -1015,14 +1038,16 @@ pub(super) struct WallsInput<'a> {
     pub tol: f64,
 }
 
-/// The walls of the profile, read from its segments (the first loop of
-/// `sm_CreateCurvatureKeepingWalls`).
-fn read_walls(
+/// One profile segment `pc`, run along `sense`, as its wall reads it: an arc of a circle
+/// among the inputs (counterclockwise about its axis, its angles from `x`), or a line;
+/// `Err` with its start point when it is neither (`sm_DraftInput` found none).
+fn read_wall(
     k: &Kernel,
     input: &WallsInput<'_>,
-) -> Result<core::result::Result<Vec<Wall>, CornerRefusal>> {
+    pc: &Curve,
+    sense: bool,
+) -> Result<core::result::Result<Wall, Point3>> {
     let WallsInput {
-        composite,
         inputs,
         normal: n,
         offset,
@@ -1035,59 +1060,70 @@ fn read_walls(
     } else {
         -1.0
     };
-    let canon = composite.canonical();
+    let mut w = Wall::default();
+    let ivl = pc.natural_interval();
+    w.start = pc.evaluate_point(k, if sense { ivl.min() } else { ivl.max() })?;
+    w.end = pc.evaluate_point(k, if sense { ivl.max() } else { ivl.min() })?;
+    let v = pc.evaluate(k, if sense { ivl.min() } else { ivl.max() }, 1, true, true)?;
+    let v1 = at(&v, 1)?;
+    let t = if sense { v1 } else { -v1 };
+    let found = draft_input(k, pc, inputs, tol)?;
+    match found.map(Curve::kind) {
+        Some(CurveKind::Ellipse(circle)) if found.is_some_and(|c| c.is_kind_of(CIRCLE_TYPE)) => {
+            let frame = circle.position();
+            w.arc = true;
+            w.center = frame.origin();
+            w.radius = circle.radius();
+            w.x = frame.x_axis().unitize()?;
+            let kk = w.x.cross(frame.y_axis()).unitize()?;
+            // counterclockwise about the axis it is run along
+            w.axis = if kk.cross(w.start - w.center).dot(t) >= 0.0 {
+                kk
+            } else {
+                -kk
+            };
+            w.y = w.axis.cross(w.x);
+            w.shrink = side * n.dot(w.axis) * offset;
+            w.start_ang = angle(&w, w.start, 0.0);
+            w.end_ang = angle(&w, w.end, w.start_ang);
+            if w.end_ang <= w.start_ang + EFF_ZERO_SQRT {
+                w.end_ang += 2.0 * PI;
+            }
+        }
+        Some(_) => {
+            w.arc = false;
+            w.dir = (w.end - w.start).unitize()?;
+            w.offset = side * offset * n.cross(w.dir);
+        }
+        None => return Ok(Err(w.start)),
+    }
+    Ok(Ok(w))
+}
+
+/// The walls of the profile, read from its segments (the first loop of
+/// `sm_CreateCurvatureKeepingWalls`).
+fn read_walls(
+    k: &Kernel,
+    input: &WallsInput<'_>,
+) -> Result<core::result::Result<Vec<Wall>, CornerRefusal>> {
+    let canon = input.composite.canonical();
     let mut walls = Vec::new();
     for (pc, &sense) in canon.curves.iter().zip(&canon.senses) {
-        let mut w = Wall::default();
-        let ivl = pc.natural_interval();
-        w.start = pc.evaluate_point(k, if sense { ivl.min() } else { ivl.max() })?;
-        w.end = pc.evaluate_point(k, if sense { ivl.max() } else { ivl.min() })?;
-        let v = pc.evaluate(k, if sense { ivl.min() } else { ivl.max() }, 1, true, true)?;
-        let v1 = at(&v, 1)?;
-        let t = if sense { v1 } else { -v1 };
-        let found = draft_input(k, pc, inputs, tol)?;
-        match found.map(Curve::kind) {
-            Some(CurveKind::Ellipse(circle))
-                if found.is_some_and(|c| c.is_kind_of(CIRCLE_TYPE)) =>
-            {
-                let frame = circle.position();
-                w.arc = true;
-                w.center = frame.origin();
-                w.radius = circle.radius();
-                w.x = frame.x_axis().unitize()?;
-                let kk = w.x.cross(frame.y_axis()).unitize()?;
-                // counterclockwise about the axis it is run along
-                w.axis = if kk.cross(w.start - w.center).dot(t) >= 0.0 {
-                    kk
-                } else {
-                    -kk
-                };
-                w.y = w.axis.cross(w.x);
-                w.shrink = side * n.dot(w.axis) * offset;
-                w.start_ang = angle(&w, w.start, 0.0);
-                w.end_ang = angle(&w, w.end, w.start_ang);
-                if w.end_ang <= w.start_ang + EFF_ZERO_SQRT {
-                    w.end_ang += 2.0 * PI;
-                }
-                if w.radius - w.shrink <= tol {
-                    let corner = pc.evaluate_point(k, ivl.mid())?;
-                    return Ok(Err(CornerRefusal {
-                        reason: TaperCornerRefusal::WallCloses,
-                        corner,
-                    }));
-                }
-            }
-            Some(_) => {
-                w.arc = false;
-                w.dir = (w.end - w.start).unitize()?;
-                w.offset = side * offset * n.cross(w.dir);
-            }
-            None => {
+        let w = match read_wall(k, input, pc, sense)? {
+            Ok(w) => w,
+            Err(start) => {
                 return Ok(Err(CornerRefusal {
                     reason: TaperCornerRefusal::NotExact,
-                    corner: w.start,
+                    corner: start,
                 }));
             }
+        };
+        if w.arc && w.radius - w.shrink <= input.tol {
+            let corner = pc.evaluate_point(k, pc.natural_interval().mid())?;
+            return Ok(Err(CornerRefusal {
+                reason: TaperCornerRefusal::WallCloses,
+                corner,
+            }));
         }
         walls.push(w);
     }
@@ -1371,9 +1407,7 @@ impl Sections<'_> {
     /// Piece `p` ends at `f`, at the point `q` of the profile's plane.
     fn end(&mut self, p: usize, f: f64, q: Point3) -> Result<()> {
         let h = self.h;
-        let piece = self.pieces.get_mut(p).ok_or_else(|| {
-            SolidError::primitive_failed(OP, "a wall piece index is out of range")
-        })?;
+        let piece = self.pieces.get_mut(p).ok_or_else(|| defect(PIECE_INDEX))?;
         piece.seam.x = q + f * h;
         piece.seam.f1 = f;
         Ok(())
@@ -1667,26 +1701,16 @@ fn walls_closing_at_apexes(
             },
             none: false,
         });
-        *sections
-            .ins
-            .get_mut(i)
-            .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))? = i;
+        *sections.ins.get_mut(i).ok_or_else(|| defect(WALL_INDEX))? = i;
         *sections
             .outs
             .get_mut(before)
-            .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))? = i;
-        *prev
-            .get_mut(i)
-            .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))? =
-            before;
-        *next
-            .get_mut(i)
-            .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))? =
-            (i + 1) % count;
+            .ok_or_else(|| defect(WALL_INDEX))? = i;
+        *prev.get_mut(i).ok_or_else(|| defect(WALL_INDEX))? = before;
+        *next.get_mut(i).ok_or_else(|| defect(WALL_INDEX))? = (i + 1) % count;
     }
     let set = |v: &mut Vec<usize>, i: usize, x: usize| -> Result<()> {
-        *v.get_mut(i)
-            .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))? = x;
+        *v.get_mut(i).ok_or_else(|| defect(WALL_INDEX))? = x;
         Ok(())
     };
     let mut f_cur = 0.0;
@@ -1800,10 +1824,7 @@ fn walls_closing_at_apexes(
         sections.end(at(&sections.outs, w)?, f, apex)?;
         let mut wa = at(&prev, w)?;
         let mut wb = at(&next, w)?;
-        *live
-            .get_mut(w)
-            .ok_or_else(|| SolidError::primitive_failed(OP, "a wall index is out of range"))? =
-            false;
+        *live.get_mut(w).ok_or_else(|| defect(WALL_INDEX))? = false;
         live_count -= 1;
         set(&mut next, wa, wb)?;
         set(&mut prev, wb, wa)?;
@@ -1847,12 +1868,8 @@ fn walls_closing_at_apexes(
                 sections.end(at(&sections.outs, wb)?, f, end)?;
                 let c = at(&prev, wa)?;
                 let d = at(&next, wb)?;
-                *live.get_mut(wa).ok_or_else(|| {
-                    SolidError::primitive_failed(OP, "a wall index is out of range")
-                })? = false;
-                *live.get_mut(wb).ok_or_else(|| {
-                    SolidError::primitive_failed(OP, "a wall index is out of range")
-                })? = false;
+                *live.get_mut(wa).ok_or_else(|| defect(WALL_INDEX))? = false;
+                *live.get_mut(wb).ok_or_else(|| defect(WALL_INDEX))? = false;
                 live_count -= 2;
                 // the walls left close at its far end with them: the section shrinks
                 // along the ridge to that end (#17265)
@@ -1950,20 +1967,25 @@ fn walls_closing_at_apexes(
             continue;
         }
         ends.get_mut(piece.a)
-            .ok_or_else(|| SolidError::primitive_failed(OP, "a seam piece's wall is out of range"))?
+            .ok_or_else(|| defect(PIECE_WALL))?
             .push(piece.seam);
         starts
             .get_mut(piece.b)
-            .ok_or_else(|| SolidError::primitive_failed(OP, "a seam piece's wall is out of range"))?
+            .ok_or_else(|| defect(PIECE_WALL))?
             .push(piece.seam);
     }
+    // each wall's first and last start and end seams
+    let mut chain_ends = Vec::new();
     for (i, (s, e)) in starts.iter().zip(&ends).enumerate() {
-        if s.is_empty() || e.is_empty() {
+        let (Some(&s0), Some(&e0), Some(&s1), Some(&e1)) =
+            (s.first(), e.first(), s.last(), e.last())
+        else {
             return Ok(refuse(
                 TaperCornerRefusal::WallCloses,
                 at_ref(&walls, i)?.start,
             ));
-        }
+        };
+        chain_ends.push([s0, e0, s1, e1]);
     }
 
     // each wall's extent: from its start seams' reach to its end seams', in spans that
@@ -2022,10 +2044,7 @@ fn walls_closing_at_apexes(
                 None,
             )?;
             if v_knots.len() < 2 {
-                return Err(SolidError::primitive_failed(
-                    OP,
-                    "the wall surface has fewer than two V knots",
-                ));
+                return Err(defect(FEW_V_KNOTS));
             }
             let spans = v_knots.len() - 1;
             for k in 0..=spans {
@@ -2064,7 +2083,7 @@ fn walls_closing_at_apexes(
 
     // the faces
     let mut far_curves = Vec::new();
-    for i in 0..count {
+    for (i, &[s0, e0, last_start, last_end]) in chain_ends.iter().enumerate() {
         let w = at_ref(&walls, i)?;
         let w_starts = at_ref(&starts, i)?;
         let w_ends = at_ref(&ends, i)?;
@@ -2107,12 +2126,6 @@ fn walls_closing_at_apexes(
             };
             let mut edges = EdgeLoop::default();
             if !w.point {
-                let s0 = *w_starts
-                    .first()
-                    .ok_or_else(|| SolidError::primitive_failed(OP, "a wall has no seam ends"))?;
-                let e0 = *w_ends
-                    .first()
-                    .ok_or_else(|| SolidError::primitive_failed(OP, "a wall has no seam ends"))?;
                 let tp0 = param(w, s0.p, 0.0, near0)?;
                 let tp1 = param(w, e0.p, 0.0, near1)?;
                 let mut bottom = low.copy();
@@ -2135,12 +2148,6 @@ fn walls_closing_at_apexes(
             }
             let mut top_curve = None;
             if at(&live, i)? {
-                let last_start = *w_starts
-                    .last()
-                    .ok_or_else(|| SolidError::primitive_failed(OP, "a wall has no seam ends"))?;
-                let last_end = *w_ends
-                    .last()
-                    .ok_or_else(|| SolidError::primitive_failed(OP, "a wall has no seam ends"))?;
                 let tx0 = param(w, last_start.x - h, 1.0, near0)?;
                 let tx1 = param(w, last_end.x - h, 1.0, near1)?;
                 let mut top = high.copy();
@@ -2239,6 +2246,63 @@ pub(super) fn curvature_keeping_walls(
     }
     lean_offsets(&mut walls, n, d);
     walls_closing_at_apexes(a, kernel_brep, target, input, walls, n, h)
+}
+
+/// The wall of a profile that is one circle, drafted inward so far that it closes before the
+/// far end (#22149, a drill point; not in the fork, which ran the circle's offset past its
+/// centre and built no closed solid). Its section at a fraction `f` of the height is the
+/// circle of radius `r - f shrink` ([`read_wall`]), gone at `f = r / shrink`, the apex on the
+/// axis; nothing of the profile is left above it, so the wall is the cone from the circle to
+/// the apex ([`draft_cone`] to that height, its far radius 0), built into `target`, and there
+/// is no far end to cap. A far radius within `tol` of 0 closes at the far end: the same cone,
+/// to the full height (the closing [`read_walls`] refuses for an arc between corners).
+/// `false`, nothing built, for any other profile or draft: not one segment that is a whole
+/// circle among the inputs (its ends within `tol` and its angle over a half turn, so not an
+/// open arc), a circle still open at the far end, a shrink or apex height that is not finite
+/// or an apex within `tol` of the profile (every test is written to accept, so NaN is not
+/// accepted), or a height not along the circle's axis (a draft leaning off the profile's
+/// plane).
+pub(super) fn circle_closing_at_apex(
+    a: &mut impl PrimitiveCreationAccess,
+    kernel_brep: BrepId,
+    target: BrepId,
+    input: &WallsInput<'_>,
+) -> Result<bool> {
+    let k = a.kernel(kernel_brep)?;
+    let tol = input.tol;
+    let canon = input.composite.canonical();
+    let (Some(pc), Some(&sense), 1) = (
+        canon.curves.first(),
+        canon.senses.first(),
+        canon.curves.len(),
+    ) else {
+        return Ok(false);
+    };
+    let Ok(mut w) = read_wall(k, input, pc, sense)? else {
+        return Ok(false);
+    };
+    let whole = w.arc && w.start.distance(w.end) <= tol && w.end_ang - w.start_ang > PI;
+    if !(whole && w.radius > tol && w.shrink.is_finite() && w.radius - w.shrink <= tol) {
+        return Ok(false);
+    }
+    // the apex: where the radius reaches 0, at the far end at most
+    let f = (w.radius / w.shrink).min(1.0);
+    let apex = f * input.height;
+    if !(apex.is_finite() && apex.abs() > tol) {
+        return Ok(false);
+    }
+    let h = apex * input.normal;
+    w.shrink = w.radius;
+    // the whole turn from the profile's start, the cone's seam through it
+    (w.lo, w.hi) = (w.start_ang, w.start_ang + 2.0 * PI);
+    let Some(cone) = draft_cone(k, &w, h)? else {
+        return Ok(false);
+    };
+    let surface = Surface::from(cone);
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let mut face = None;
+    a.surface_face(target, surface, domain, &mut face)?;
+    Ok(true)
 }
 
 #[cfg(test)]

@@ -63,6 +63,7 @@ use super::station::{
     Partials,
 };
 use super::taylor_model::TmN;
+use crate::error::blend::{BlendFailure, SectionDegeneracy, SectionProof};
 use crate::error::{Result, SolidError};
 use crate::geom::krawczyk::{contraction, plus_c_times, start_minus_y};
 use crate::kernel::Kernel;
@@ -87,7 +88,7 @@ macro_rules! tm_try {
     ($e:expr) => {
         match $e {
             Ok(v) => v,
-            Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+            Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => return Err(e),
             Err(_) => return Ok(None),
         }
     };
@@ -143,9 +144,9 @@ pub fn nurbs_partials_tm(
     let um = u.c.first().map_or(f64::NAN, |c| c.mid());
     let vm = v.c.first().map_or(f64::NAN, |c| c.mid());
     if !(um.is_finite() && vm.is_finite()) {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the feet's models have no finite midpoint",
+            BlendFailure::SectionNotProved(SectionProof::BoundFinite),
         ));
     }
     let nu = ders_basis(&cn.u, ku, cn.p, Ivl::from(um), cn.p);
@@ -237,9 +238,9 @@ pub fn nurbs_partials_tm(
     let w00 = hat(0, 0, 3);
     if !w00.range().is_positive() {
         // "SmGnSectionFSG: a face's weights are not positive over a box"
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "a face's weights are not positive over a box",
+            BlendFailure::SectionNotProved(SectionProof::FaceWeightPositive),
         ));
     }
     let inv_w = w00.recip();
@@ -295,9 +296,9 @@ pub fn curve_derivs_tm(
     let p = cn.p;
     let has_span = knot(&cn.u, piece as isize) < knot(&cn.u, piece as isize + 1);
     if !has_span || piece < p {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the piece is not a span of the curve",
+            BlendFailure::SectionDegenerate(SectionDegeneracy::NoSpanCoversInterval),
         ));
     }
     let nb = ders_basis(&cn.u, piece, p, Ivl::from(m), p);
@@ -345,9 +346,9 @@ pub fn curve_derivs_tm(
     }
     let w0 = hd.first().map_or_else(Ft::whole, |&[_, _, _, w]| w);
     if !w0.range().is_positive() {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the curve's weight is not proved positive",
+            BlendFailure::SectionNotProved(SectionProof::CurveWeightPositive),
         ));
     }
     let inv_w = w0.recip();
@@ -424,23 +425,27 @@ pub fn leader_series_tm(
 ///
 /// Those of [`curve_derivs_tm`]; `SM_ERR` where r is not proved positive.
 pub fn law_series_tm(law: &GnLaw<'_>, m: f64, delta: f64, order: usize) -> Result<Ser<Ft>> {
+    let GnLaw::Curve { n: law, .. } = law else {
+        return Err(SolidError::invalid_input(
+            OP,
+            "equal setbacks use the local support normals",
+        ));
+    };
     let mut r = Ser::constant(Ft::constant(IZ));
-    let piece = span(&law.n.u, law.n.p, law.n.n, m);
-    let d = curve_derivs_tm(&law.n, m, delta, order, piece)?;
+    let piece = span(&law.u, law.p, law.n, m);
+    let d = curve_derivs_tm(law, m, delta, order, piece)?;
     let mut fact = 1.0_f64;
-    for i in 0..=order {
+    // (`curve_derivs_tm` returns the orders 0 to `order`, each one)
+    for (i, di) in d.iter().take(order + 1).enumerate() {
         if i > 0 {
             fact *= i as f64;
         }
-        let di = d.get(i).ok_or_else(|| {
-            SolidError::blend_failed(OP, "the radius law has no derivative of this order")
-        })?;
         r.set(i, 0, di.x.scale(Ivl::from(1.0) / Ivl::from(fact)));
     }
     if !r.at(0, 0).range().is_positive() {
-        return Err(SolidError::blend_failed(
+        return Err(SolidError::blend(
             OP,
-            "the radius is not proved positive",
+            BlendFailure::SectionNotProved(SectionProof::RadiusPositive),
         ));
     }
     Ok(r)
@@ -454,6 +459,7 @@ fn system_tm<'a>(
     r: [f64; 2],
     side: [f64; 2],
     law: Option<&'a Ser<Ft>>,
+    equal_setback: Option<f64>,
 ) -> GnSystem<'a, Ft> {
     let [p0, p1] = p;
     GnSystem {
@@ -464,6 +470,7 @@ fn system_tm<'a>(
         side,
         hold: false,
         law,
+        equal_setback,
     }
 }
 
@@ -512,9 +519,10 @@ pub fn gn_enclose_tm(
     if !(delta.is_finite() && delta >= 0.0 && mid.is_finite()) {
         return Ok(None);
     }
+    let equal_setback = law.and_then(GnLaw::equal_setback);
     let law_r = match law {
-        Some(l) => Some(tm_try!(law_series_tm(l, mid, delta, order_s))),
-        None => None,
+        Some(law @ GnLaw::Curve { .. }) => Some(tm_try!(law_series_tm(law, mid, delta, order_s))),
+        _ => None,
     };
     let law_r = law_r.as_ref();
     let (leader, tangent) = tm_try!(leader_series_tm(leader_n, mid, delta, tr, at.leader));
@@ -550,7 +558,7 @@ pub fn gn_enclose_tm(
     // Jacobian there at t = 0
     let pz = tm_try!(partials(&p0, 2));
     let sx0 = p0.map(Ser::constant);
-    let sys0 = system_tm(&pz, &leader, &tangent, r, side, law_r);
+    let sys0 = system_tm(&pz, &leader, &tangent, r, side, law_r, equal_setback);
     let jac0 = tm_try!(gn_jacobian(&sys0, &sx0));
     let jm = jac0.map(|row| row.map(|j| j.c.first().map_or(f64::NAN, |c| c.mid())));
     let y = tm_try!(inverse4(&jm));
@@ -595,7 +603,7 @@ pub fn gn_enclose_tm(
             *tc = tc.with_rem(Ivl::new(-ri, ri));
         }
         let pt = tm_try!(partials(&tube, 2));
-        let sys_t = system_tm(&pt, &leader, &tangent, r, side, law_r);
+        let sys_t = system_tm(&pt, &leader, &tangent, r, side, law_r, equal_setback);
         let jac = tm_try!(gn_jacobian(&sys_t, &tube.map(Ser::constant)));
         let (_, cr, q) = contraction_ranges(&y, &jac);
         let contracts = q < 1.0;
@@ -640,7 +648,7 @@ pub fn gn_enclose_tm(
     // the coefficients, order by order: x = b + C x, b = -Y R, C over the root's tube
     let lk = tr.s() + tr.e() + 1;
     let pk = tm_try!(partials(&x0, lk.max(2)));
-    let sysk = system_tm(&pk, &leader, &tangent, r, side, law_r);
+    let sysk = system_tm(&pk, &leader, &tangent, r, side, law_r, equal_setback);
     let jk = tm_try!(gn_jacobian(&sysk, &x0.map(Ser::constant)));
     let (cm, cr, q) = contraction_ranges(&y, &jk);
     // 1 - q rounded down: the quotient rounded up is then at least the exact one

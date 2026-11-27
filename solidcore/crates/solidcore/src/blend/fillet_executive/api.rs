@@ -1,4 +1,4 @@
-//! Public fillet entry points: fillet B-rep edges through one live fillet session.
+//! Public fillet entry points: fillet B-rep edges through live fillet sessions.
 //!
 //! Upstream: `source/SM_API/src/SmApiBrep.cpp` (`SmApiFilletEdges` 2049-2087,
 //! `SmApiFilletEdgesPerEdge` 2094-2135, `SmApiVariableRadiusFillet` 2142-2178,
@@ -70,7 +70,8 @@ use crate::blend::fillet_solver::p1::{
     FilletSurfaceGenerator, FilletSurfaceGeneratorType, MakeSurfaceBlendSih,
 };
 use crate::blend::fillet_standard_solver::p1::{BoundaryTrimmingType, FilletLaw};
-use crate::error::{Result, SolidError};
+use crate::error::blend::BlendFailure;
+use crate::error::{EntityRef, Result, SolidError};
 use crate::kernel::Kernel;
 use crate::math::PI;
 use crate::surface::surface::Surface;
@@ -98,15 +99,16 @@ fn failing_as_a_whole(
     brep: &mut Brep,
     fillet: impl FnOnce(&mut Kernel, &mut Brep) -> Result<()>,
 ) -> Result<()> {
-    let result = brep.with_rollback(
-        |brep| {
-            fillet(k, brep)?;
-            // (not upstream, #2136 / #2371: a cancel that a status-ignoring helper
-            // inside the operation absorbed still ends it as `Cancelled`, never `Ok`)
-            k.check_cancelled(OP)
-        },
-        Result::is_ok,
-    );
+    let result = crate::blend::definition_check::keeping_blend_face_log(k, |k| {
+        brep.with_rollback(
+            |brep| {
+                fillet(k, brep)?;
+                // A cancel observed before the commit discards the edit and its log.
+                k.check_cancelled(OP)
+            },
+            Result::is_ok,
+        )
+    });
     // (not upstream: the port's cached topology fields, true again for the caller,
     // whichever body it gets back)
     brep.refresh_cached_topology();
@@ -133,22 +135,53 @@ fn keeping_a_solid_closed(
         fillet(k, brep)?;
         k.check_cancelled(OP)?;
         if closed && !is_closed_manifold(brep)? {
-            return Err(SolidError::blend_failed(
+            return Err(SolidError::blend(
                 OP,
-                "the result is not a closed manifold solid",
+                BlendFailure::Defect {
+                    why: "the stitched fillet left a closed manifold body open or non-manifold: \
+                          the executive built and stitched faces that do not close the body (for \
+                          example rails that cross on a face) instead of refusing them",
+                },
             ));
         }
         Ok(())
     })
 }
 
-/// `SM_ERR_INVALID_INPUT`: the API refuses its arguments (an empty or mismatched list, a
-/// size or tolerance out of range), as a status.
-fn invalid_input() -> SolidError {
-    SolidError::blend_invalid_value(
+/// `SM_ERR_INVALID_INPUT`: the API refuses an empty edge list, as a status.
+fn no_edges() -> SolidError {
+    SolidError::blend(OP, BlendFailure::NoEdgesGiven)
+}
+
+/// `SM_ERR_INVALID_INPUT` unless `size` is a size the fillet builds on `brep`
+/// ([`is_radius_supported`]: at least eight times its tolerance).
+fn supported_size(size: f64, brep: &Brep) -> Result<()> {
+    let tolerance = brep.tolerance();
+    if is_radius_supported(size, tolerance) {
+        return Ok(());
+    }
+    Err(SolidError::blend(
         OP,
-        "an argument of the fillet call is empty, mismatched or out of range",
-    )
+        BlendFailure::SizeBelowResolution { size, tolerance },
+    ))
+}
+
+/// `SM_ERR_INVALID_INPUT` unless a list of one entry per edge holds `given` entries for
+/// `edges` edges.
+fn one_per_edge(edges: usize, given: usize) -> Result<()> {
+    if given == edges {
+        return Ok(());
+    }
+    Err(SolidError::blend(
+        OP,
+        BlendFailure::PerEdgeListLength { edges, given },
+    ))
+}
+
+/// `SM_ERR_INVALID_INPUT`: a face of the first surface's body is given where the first
+/// surface has none.
+fn no_first_body() -> SolidError {
+    SolidError::blend(OP, BlendFailure::NoFirstBody)
 }
 
 /// `SmApiFilletEdges`: fillet `edges` of `brep` with one constant `radius` and
@@ -177,13 +210,11 @@ pub fn fillet_edges(
     thumbweight: f64,
 ) -> Result<()> {
     if edges.is_empty() {
-        return Err(invalid_input());
+        return Err(no_edges());
     }
-    if !is_radius_supported(radius, brep.tolerance()) {
-        return Err(invalid_input());
-    }
+    supported_size(radius, brep)?;
     keeping_a_solid_closed(k, brep, |k, brep| {
-        {
+        let status = {
             let mut session = FilletSession::new(k, brep)?;
             session
                 .prepare_constant_radius_edges(
@@ -195,7 +226,8 @@ pub fn fillet_edges(
                     thumbweight,
                 )
                 .and_then(|()| session.do_fillet(k))
-        }?;
+        };
+        check_separate_end_limit(status, brep)?;
         stitch_and_orient(k, brep, &StitchAndOrientOptions::default())
     })
 }
@@ -219,18 +251,15 @@ pub fn fillet_edges_per_edge(
     thumbweight: f64,
 ) -> Result<()> {
     if edges.is_empty() {
-        return Err(invalid_input());
+        return Err(no_edges());
     }
-    if radii.len() != edges.len() || xsect_types.len() != edges.len() {
-        return Err(invalid_input());
-    }
+    one_per_edge(edges.len(), radii.len())?;
+    one_per_edge(edges.len(), xsect_types.len())?;
     for &radius in radii {
-        if !is_radius_supported(radius, brep.tolerance()) {
-            return Err(invalid_input());
-        }
+        supported_size(radius, brep)?;
     }
     keeping_a_solid_closed(k, brep, |k, brep| {
-        {
+        let status = {
             let mut session = FilletSession::new(k, brep)?;
             session
                 .prepare_per_edge_constant_radius(
@@ -242,9 +271,21 @@ pub fn fillet_edges_per_edge(
                     thumbweight,
                 )
                 .and_then(|()| session.do_fillet(k))
-        }?;
+        };
+        check_separate_end_limit(status, brep)?;
         stitch_and_orient(k, brep, &StitchAndOrientOptions::default())
     })
+}
+
+/// The edge-list APIs require eight body tolerances at entry, even for a round.
+/// Do not suggest a geometric limit these callers could not retry.
+fn check_separate_end_limit(status: Result<()>, body: &Brep) -> Result<()> {
+    if let Err(SolidError::FilletRefused { operation, fit, .. }) = &status {
+        if *operation == super::session::finish::SEPARATE_ENDS_OP {
+            supported_size(fit.size, body)?;
+        }
+    }
+    status
 }
 
 /// `SmApiVariableRadiusFillet`: fillet `edges` of `brep` with a radius running
@@ -270,13 +311,10 @@ pub fn variable_radius_fillet(
     continuity: u32,
 ) -> Result<()> {
     if edges.is_empty() {
-        return Err(invalid_input());
+        return Err(no_edges());
     }
-    if !is_radius_supported(start_radius, brep.tolerance())
-        || !is_radius_supported(end_radius, brep.tolerance())
-    {
-        return Err(invalid_input());
-    }
+    supported_size(start_radius, brep)?;
+    supported_size(end_radius, brep)?;
     let law = FilletLaw::linear(start_radius, end_radius, None);
     keeping_a_solid_closed(k, brep, |k, brep| {
         {
@@ -369,9 +407,7 @@ fn fillet_all_edges(
 /// ([`is_radius_supported`]); the fillet executive's errors, with the body as it was
 /// before the call (not upstream).
 pub fn circular_fillet(k: &mut Kernel, brep: &mut Brep, radius: f64) -> Result<()> {
-    if !is_radius_supported(radius, brep.tolerance()) {
-        return Err(invalid_input());
-    }
+    supported_size(radius, brep)?;
     failing_as_a_whole(k, brep, |k, brep| {
         {
             let mut session = FilletSession::new(k, brep)?;
@@ -399,9 +435,7 @@ pub fn circular_fillet(k: &mut Kernel, brep: &mut Brep, radius: f64) -> Result<(
 /// ([`is_radius_supported`]); the fillet executive's errors, with the body as it was
 /// before the call (not upstream).
 pub fn chamfer_fillet(k: &mut Kernel, brep: &mut Brep, distance: f64) -> Result<()> {
-    if !is_radius_supported(distance, brep.tolerance()) {
-        return Err(invalid_input());
-    }
+    supported_size(distance, brep)?;
     failing_as_a_whole(k, brep, |k, brep| {
         let mut session = FilletSession::new(k, brep)?;
         fillet_all_edges(
@@ -433,11 +467,9 @@ pub fn set_bevel_corners(
     bevel_vertices: &[VertexId],
 ) -> Result<()> {
     if edges.is_empty() {
-        return Err(invalid_input());
+        return Err(no_edges());
     }
-    if !is_radius_supported(radius, brep.tolerance()) {
-        return Err(invalid_input());
-    }
+    supported_size(radius, brep)?;
     failing_as_a_whole(k, brep, |k, brep| {
         {
             let mut session = FilletSession::new(k, brep)?;
@@ -474,7 +506,7 @@ pub fn fillet_preview(
     radius: f64,
 ) -> Result<Vec<Option<Surface>>> {
     if edges.is_empty() {
-        return Err(invalid_input());
+        return Err(no_edges());
     }
     let preview = {
         let mut session = FilletSession::new(k, brep)?;
@@ -562,7 +594,11 @@ fn temporary_face(k: &mut Kernel, surface: &Surface) -> Result<(Brep, FaceId)> {
 /// A face argument's face, which must carry a surface (upstream a surface pointer).
 fn owned_face(body: &Brep, face: FaceId) -> Result<FaceId> {
     if body.face(face)?.surface.is_none() {
-        return Err(invalid_input());
+        return Err(SolidError::blend_at(
+            OP,
+            BlendFailure::FaceHasNoSurface,
+            EntityRef::Face(face),
+        ));
     }
     Ok(face)
 }
@@ -610,7 +646,7 @@ pub fn surface_surface_fillet(
             let face = owned_face(body, face)?;
             (BaseBrep::Caller(body), face)
         }
-        FilletSurfaceArg::FirstBodyFace(_) => return Err(invalid_input()),
+        FilletSurfaceArg::FirstBodyFace(_) => return Err(no_first_body()),
     };
     // if( !pSurface2->GetFace() ): the same surface as the first now has a face
     let (mut base2, face2) = match surface2 {
@@ -627,7 +663,7 @@ pub fn surface_surface_fillet(
         }
         FilletSurfaceArg::FirstBodyFace(face) => {
             if free1.is_some() {
-                return Err(invalid_input());
+                return Err(no_first_body());
             }
             (None, owned_face(base1.brep(), face)?)
         }
@@ -722,15 +758,13 @@ mod tests {
 
         let failed = failing_as_a_whole(&mut k, &mut body, |_, b| {
             edit(b)?;
-            Err(invalid_input())
+            Err(no_edges())
         });
         // #13790: the API's refusal of its arguments is a typed blend failure with the
         // status of the bare `Upstream` it replaced
         let failed = failed.unwrap_err();
-        assert!(matches!(
-            failed.blend_failure(),
-            Some(crate::error::blend::BlendFailure::InvalidValue(_))
-        ));
+        assert_eq!(failed.blend_failure(), Some(&BlendFailure::NoEdgesGiven));
+        assert_eq!(failed.kind(), crate::error::ErrorKind::InvalidInput);
         assert_eq!(failed.sm_status(), Some(SM_ERR_INVALID_INPUT));
         assert_eq!(failed.upstream_status(), Some(SM_ERR_INVALID_INPUT));
         assert_eq!(failed.operation(), OP);
@@ -778,12 +812,11 @@ mod tests {
             open(b)
         })
         .unwrap_err();
-        assert_eq!(
-            refused.blend_failure(),
-            Some(&crate::error::blend::BlendFailure::Failed(
-                "the result is not a closed manifold solid"
-            ))
+        assert!(
+            matches!(refused.blend_failure(), Some(BlendFailure::Defect { .. })),
+            "{refused:?}"
         );
+        assert!(refused.is_defect(), "{refused:?}");
         assert_eq!(refused.upstream_status(), Some(crate::error::SM_ERR));
         assert_eq!(refused.operation(), OP);
         assert_eq!(refused.entity(), None);
@@ -958,6 +991,57 @@ mod tests {
         assert_eq!(p1::faces(&body, None).unwrap().len(), 6);
     }
 
+    /// #19823: each of the API's checks of its arguments is its own named cause, of class
+    /// `InvalidInput`, keeping the status `SM_ERR_INVALID_INPUT` it replaced and its numbers.
+    #[test]
+    fn each_argument_check_names_its_cause() {
+        use crate::error::ErrorKind;
+        let mut k = Kernel::default();
+        let mut body = boxed(&mut k);
+        let edges = p1::edges(&body, None).unwrap();
+        let tolerance = body.tolerance();
+        let check = |r: Result<()>, cause: BlendFailure| {
+            let e = r.unwrap_err();
+            assert_eq!(e.blend_failure(), Some(&cause), "{e:?}");
+            assert_eq!(e.kind(), ErrorKind::InvalidInput, "{e:?}");
+            assert_eq!(e.upstream_status(), Some(SM_ERR_INVALID_INPUT), "{e:?}");
+            assert_eq!(e.operation(), OP, "{e:?}");
+            assert!(!e.is_defect() && !e.is_refusal(), "{e:?}");
+        };
+        check(
+            fillet_edges(&mut k, &mut body, &[], 1.0, 1, 1, 1.0),
+            BlendFailure::NoEdgesGiven,
+        );
+        let tiny = tolerance;
+        check(
+            fillet_edges(&mut k, &mut body, &edges[..1], tiny, 1, 1, 1.0),
+            BlendFailure::SizeBelowResolution {
+                size: tiny,
+                tolerance,
+            },
+        );
+        check(
+            fillet_edges_per_edge(
+                &mut k,
+                &mut body,
+                &edges[..2],
+                &[1.0],
+                &[FilletSurfaceGeneratorType::Circular; 2],
+                1,
+                1.0,
+            ),
+            BlendFailure::PerEdgeListLength { edges: 2, given: 1 },
+        );
+        check(
+            chamfer_fillet(&mut k, &mut body, tiny),
+            BlendFailure::SizeBelowResolution {
+                size: tiny,
+                tolerance,
+            },
+        );
+        assert_eq!(p1::faces(&body, None).unwrap().len(), 6);
+    }
+
     #[test]
     fn single_box_edge_fillet_is_a_closed_manifold_solid() {
         let mut k = Kernel::default();
@@ -1030,7 +1114,7 @@ mod tests {
         use crate::geom::attribute::{AttributeStore, ObjectKey};
         use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
         let store = AttributeStore::default();
-        let key_of = |_: crate::EntityRef| ObjectKey(0);
+        let key_of = |_: EntityRef| ObjectKey(0);
         brep_volume(
             k,
             body,
@@ -1041,6 +1125,380 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    fn post_foot(k: &mut Kernel) -> (Brep, [EdgeId; 2]) {
+        use crate::boolean::api_brep::{boolean_difference, boolean_union};
+        use crate::primitive::api_primitives::create_box;
+        use crate::topology::{edge, vertex};
+
+        let plate = create_box(k, Vec3::ZERO, 50.0, 50.0, 4.0).unwrap();
+        let post = create_box(k, Vec3::new(0.0, 0.0, 4.0), 10.0, 10.0, 30.0).unwrap();
+        let cut = create_box(k, Vec3::new(10.0, 10.0, -1.0), 5.0, 5.0, 6.0).unwrap();
+        let joined = boolean_union(k, plate, post).unwrap();
+        let body = boolean_difference(k, joined, cut).unwrap();
+        let edges = [Vec3::new(10.0, 5.0, 4.0), Vec3::new(5.0, 10.0, 4.0)].map(|at| {
+            body.edge_list()
+                .iter()
+                .copied()
+                .find(|&e| {
+                    let (Some(a), Some(z)) = edge::start_end_vertices(&body, e).unwrap() else {
+                        return false;
+                    };
+                    let a = vertex::point(&body, a).unwrap();
+                    let z = vertex::point(&body, z).unwrap();
+                    let midpoint = a + (z - a) * 0.5;
+                    (midpoint - at).length() < 1e-9
+                })
+                .unwrap()
+        });
+        (body, edges)
+    }
+
+    #[test]
+    fn joint_post_foot_blends_at_the_limit_in_the_kernel_api() {
+        for (section, code, area) in [
+            (FilletSurfaceGeneratorType::Linear, 0, 0.5),
+            (FilletSurfaceGeneratorType::Circular, 1, 1.0 - PI / 4.0),
+        ] {
+            for per_edge in [false, true] {
+                let mut k = Kernel {
+                    fixes: crate::kernel::UpstreamFixes::all(),
+                    ..Kernel::default()
+                };
+                let (mut body, edges) = post_foot(&mut k);
+                let blend = |k: &mut Kernel, b: &mut Brep, picks: &[EdgeId], size| {
+                    if per_edge {
+                        fillet_edges_per_edge(k, b, picks, &[size; 2], &[section; 2], 1, 1.0)
+                    } else {
+                        fillet_edges(k, b, picks, size, code, 1, 1.0)
+                    }
+                };
+                let limit = 5.0_f64;
+                let before = shape(&body);
+                let got = blend(&mut k, &mut body, &edges, limit.next_up());
+                assert!(
+                    matches!(got, Err(SolidError::FilletRefused { fit, .. }) if fit.size == limit),
+                    "{section:?}, per_edge={per_edge}: {got:?}",
+                );
+                assert_eq!(shape(&body), before);
+
+                for size in [limit.next_down(), limit] {
+                    let (mut attempt, picks) = post_foot(&mut k);
+                    blend(&mut k, &mut attempt, &picks, size).unwrap();
+                    assert!(is_manifold_solid(&attempt).unwrap());
+                    crate::topology::integrity::check(&attempt).unwrap();
+                    let want = 12_900.0 + 20.0 * size * size * area;
+                    let got = volume(&k, &mut attempt);
+                    assert!((got - want).abs() <= 1e-9 * want, "{got} vs {want}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn joint_post_foot_blends_through_a_direct_session() {
+        use crate::blend::blend_corner::TurnChoice;
+        use crate::geom::attribute::{ids, Attribute, Behavior};
+
+        let mut failed = Vec::new();
+        for (code, area, turn) in [
+            (0, 0.5, TurnChoice::Mitre),
+            (1, 1.0 - PI / 4.0, TurnChoice::Mitre),
+            (0, 0.5, TurnChoice::Auto),
+            (1, 1.0 - PI / 4.0, TurnChoice::Auto),
+        ] {
+            let mut k = Kernel {
+                fixes: crate::kernel::UpstreamFixes::all(),
+                ..Kernel::default()
+            };
+            let (mut body, edges) = post_foot(&mut k);
+            let mark = ids::USER_1;
+            let bottom = body
+                .face_list()
+                .iter()
+                .copied()
+                .find(|&face| {
+                    let surface = crate::topology::face::p2::surface(&body, face)
+                        .unwrap()
+                        .unwrap();
+                    let crate::surface::surface::SurfaceKind::Plane(plane) = surface.kind() else {
+                        return false;
+                    };
+                    let (origin, normal, _) = plane.is_planar();
+                    origin.z == 0.0 && normal.z.abs() == 1.0
+                })
+                .unwrap();
+            body.add_attribute(
+                EntityRef::Face(bottom),
+                Attribute::new(mark, Behavior::Copy),
+            )
+            .unwrap();
+            let result = {
+                let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+                session.set_turns(turn);
+                session
+                    .prepare_constant_radius_edges(&mut k, &edges, 5.0, code, 1, 1.0)
+                    .unwrap();
+                session.do_fillet(&mut k)
+            };
+            if let Err(error) = result {
+                failed.push((code, turn, error));
+                continue;
+            }
+            stitch_and_orient(&mut k, &mut body, &StitchAndOrientOptions::default()).unwrap();
+            body.refresh_cached_topology();
+            assert!(is_manifold_solid(&body).unwrap());
+            crate::topology::integrity::check(&body).unwrap();
+            let retained: usize = body
+                .face_list()
+                .iter()
+                .map(|&face| {
+                    body.entity_attributes(EntityRef::Face(face))
+                        .into_iter()
+                        .filter(|(_, a)| a.attribute_id() == mark)
+                        .count()
+                })
+                .sum();
+            assert_eq!(
+                retained, 1,
+                "the application attribute survives the session hand-back"
+            );
+            let want = 12_900.0 + 500.0 * area;
+            let got = volume(&k, &mut body);
+            assert!((got - want).abs() <= 1e-9 * want, "{got} vs {want}");
+        }
+        assert!(failed.is_empty(), "{failed:?}");
+    }
+
+    #[test]
+    fn post_foot_log_rolls_back_when_cancelled_after_both_groups_finish() {
+        use crate::blend::definition_check::BlendFaceLog;
+        use crate::kernel::CancelToken;
+
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let (mut body, edges) = post_foot(&mut k);
+        let shape_before = shape(&body);
+        let log_before = BlendFaceLog {
+            sessions: vec![Vec::new()],
+        };
+        k.blend_face_log = Some(log_before.clone());
+        let stop = CancelToken::new();
+        k.set_cancel_token(stop.clone());
+
+        let result = keeping_a_solid_closed(&mut k, &mut body, |k, body| {
+            {
+                let mut session = FilletSession::new(k, body)?;
+                session.prepare_constant_radius_edges(k, &edges, 5.0, 1, 1, 1.0)?;
+                session.do_fillet(k)?;
+            }
+            assert_eq!(k.blend_face_log.as_ref().unwrap().sessions.len(), 3);
+            assert_ne!(shape(body), shape_before);
+            stop.cancel();
+            Ok(())
+        });
+        assert!(
+            matches!(result, Err(SolidError::Cancelled { .. })),
+            "{result:?}"
+        );
+        assert_eq!(shape(&body), shape_before);
+        assert_eq!(k.blend_face_log, Some(log_before));
+    }
+
+    #[test]
+    fn a_shorter_lifted_rail_trim_does_not_certify_the_nominal_size() {
+        use crate::blend::blend_corner::separate_ends::{plan, SectionKind, SeparateEndPlan};
+        use crate::curve::curve::Curve;
+        use crate::curve::line::Line;
+        use crate::math::Point3;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+        use crate::surface::surface::{Surface, SurfaceKind};
+        use crate::topology::edgeuse::p1 as eu1;
+        use crate::topology::face::p2 as face2;
+        use crate::topology::{edge, vertex};
+
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let (mut b, edges) = post_foot(&mut k);
+        let corner = Vec3::new(10.0, 10.0, 4.0);
+        let end = Vec3::new(15.0, 10.0, 4.0);
+        let rail = b
+            .edge_list()
+            .iter()
+            .copied()
+            .find(|&edge_id| {
+                let (Some(a), Some(z)) = edge::start_end_vertices(&b, edge_id).unwrap() else {
+                    return false;
+                };
+                let [a, z] = [a, z].map(|v| vertex::point(&b, v).unwrap());
+                (a == corner && z == end) || (z == corner && a == end)
+            })
+            .unwrap();
+        let (Some(a), Some(z)) = edge::start_end_vertices(&b, rail).unwrap() else {
+            panic!("two rail vertices");
+        };
+        let points = [a, z].map(|v| vertex::point(&b, v).unwrap());
+        let delta = edge::tolerance(&b, rail)
+            .unwrap()
+            .min(vertex::tolerance(&b, a).unwrap())
+            .min(vertex::tolerance(&b, z).unwrap())
+            / 4.0;
+        assert!(delta > 0.0 && end.x - delta < end.x);
+        let eu = edge::edgeuses(&b, rail, None, None)
+            .unwrap()
+            .into_iter()
+            .find(|&eu| {
+                eu1::face(&b, eu).unwrap().is_some_and(|face| {
+                    matches!(face2::surface(&b, face).unwrap().map(Surface::kind),
+                    Some(SurfaceKind::Plane(plane)) if plane.position().z_axis().z.abs() == 1.0)
+                })
+            })
+            .unwrap();
+        let face = eu1::face(&b, eu).unwrap().unwrap();
+        let Some(SurfaceKind::Plane(plane)) = face2::surface(&b, face).unwrap().map(Surface::kind)
+        else {
+            panic!("planar floor");
+        };
+        let interval = edge::interval(&b, rail).unwrap();
+        let trims = [end.x - delta, end.x.next_down()].map(|end_x| {
+            let [a, z] = points.map(|point| {
+                let moved = if point == end {
+                    Vec3::new(end_x, point.y, point.z)
+                } else {
+                    point
+                };
+                let uv = plane.project_point_to_uv_domain(moved);
+                Point3::new(uv.x, uv.y, 0.0)
+            });
+            let span = z - a;
+            let direction = span / span.length();
+            let scale = span.length() / interval.length();
+            Curve::from(Line::from_parts(
+                BSplineCurve::new(2),
+                a - interval.min() * scale * direction,
+                direction,
+                interval,
+                scale,
+                false,
+            ))
+        });
+        let owner = eu1::uv_trim_curve(&b, eu).unwrap().1.unwrap();
+        for kind in [SectionKind::Chamfer, SectionKind::Round] {
+            assert!(matches!(
+                plan(&k, &mut b, &edges, &[5.0], kind).unwrap(),
+                SeparateEndPlan::Ends(_)
+            ));
+        }
+        for trim in trims {
+            b.edgeuse_mut(owner).unwrap().uv_trim_curve = Some(trim);
+            for kind in [SectionKind::Chamfer, SectionKind::Round] {
+                assert!(!matches!(
+                    plan(&k, &mut b, &edges, &[5.0], kind).unwrap(),
+                    SeparateEndPlan::Ends(_)
+                ));
+                assert!(!matches!(
+                    plan(&k, &mut b, &edges, &[6.0], kind).unwrap(),
+                    SeparateEndPlan::Limited { size: 5.0, .. }
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn missing_uv_can_be_proved_without_committing_it_and_displaced_uv_cannot() {
+        use crate::blend::blend_corner::separate_ends::{plan, SectionKind, SeparateEndPlan};
+        use crate::curve::curve::Curve;
+        use crate::curve::line::Line;
+        use crate::math::Point3;
+        use crate::surface::surface::{Surface, SurfaceKind};
+        use crate::topology::edgeuse::p1 as edgeuse;
+        use crate::topology::face::{p2 as face, p4 as face_uses};
+        use crate::topology::{edge, vertex};
+
+        let mut k = Kernel {
+            fixes: crate::kernel::UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let (mut body, edges) = post_foot(&mut k);
+        assert!(matches!(
+            plan(&k, &mut body, &edges, &[6.0], SectionKind::Chamfer).unwrap(),
+            SeparateEndPlan::Limited { size: 5.0, .. },
+        ));
+        let b = &mut body;
+        let [edge_id, _] = edges;
+        let displacement = Vec3::new(1e-6, 0.0, 0.0);
+        let (Some(start), Some(end)) = edge::start_end_vertices(b, edge_id).unwrap() else {
+            panic!("the selected line has two vertices");
+        };
+        let vertices = [start, end];
+        let points = vertices.map(|v| vertex::point(b, v).unwrap());
+        assert!(vertices
+            .into_iter()
+            .all(|v| vertex::tolerance(b, v).unwrap() > displacement.x));
+
+        let floor = edge::faces(b, edge_id, None)
+            .unwrap()
+            .into_iter()
+            .find(|&f| {
+                matches!(
+                    face::surface(b, f).unwrap().map(Surface::kind),
+                    Some(SurfaceKind::Plane(p))
+                        if p.position().origin().z == 4.0 && p.position().z_axis().z.abs() == 1.0
+                )
+            })
+            .expect("the floor beside the selected foot edge");
+        let occurrence = face_uses::upward_edgeuses(b, floor, false, None)
+            .unwrap()
+            .into_iter()
+            .find(|&eu| edgeuse::edge(b, eu).unwrap() == Some(edge_id))
+            .expect("the selected edge on the floor");
+        let (Some(_), Some(owner)) = edgeuse::uv_trim_curve(b, occurrence).unwrap() else {
+            panic!("the selected occurrence has a pcurve");
+        };
+        // Uncached trims are generated by the usual planar drop on the proof
+        // copy. The 6 mm refusal must not populate the caller's missing curve.
+        b.edgeuse_mut(owner).unwrap().uv_trim_curve = None;
+        assert!(edgeuse::uv_trim_curve(b, occurrence).unwrap().0.is_none());
+        let before = shape(b);
+        let zones = [
+            edge::tolerance(b, edge_id).unwrap(),
+            vertex::tolerance(b, start).unwrap(),
+            vertex::tolerance(b, end).unwrap(),
+        ];
+        assert!(matches!(
+            plan(&k, b, &edges, &[6.0], SectionKind::Chamfer).unwrap(),
+            SeparateEndPlan::Limited { size: 5.0, .. },
+        ));
+        assert!(edgeuse::uv_trim_curve(b, occurrence).unwrap().0.is_none());
+        assert_eq!(shape(b), before);
+        assert_eq!(
+            zones,
+            [
+                edge::tolerance(b, edge_id).unwrap(),
+                vertex::tolerance(b, start).unwrap(),
+                vertex::tolerance(b, end).unwrap()
+            ]
+        );
+
+        let Some(SurfaceKind::Plane(plane)) = face::surface(b, floor).unwrap().map(Surface::kind)
+        else {
+            panic!("the floor's plane");
+        };
+        let [a, z] = points.map(|p| plane.project_point_to_uv_domain(p + displacement));
+        let shifted = Line::from_points(Point3::new(a.x, a.y, 0.0), Point3::new(z.x, z.y, 0.0), 2);
+        // Keep the existing topology, vertices, 3D edge and tolerances.
+        b.edgeuse_mut(owner).unwrap().uv_trim_curve = Some(Curve::from(shifted));
+        for size in [4.2, 5.0, 6.0] {
+            assert!(matches!(
+                plan(&k, b, &edges, &[size], SectionKind::Chamfer).unwrap(),
+                SeparateEndPlan::NotApplicable,
+            ));
+        }
     }
 
     #[test]

@@ -30,10 +30,15 @@ pub struct OpenSteps {
     stop: usize,
     /// The model came from the file and needs no evaluation.
     adopted: bool,
-    /// Whether a signature check was asked for, and (when it was) its result, made on the worker
-    /// so landing the design does not hash its payloads on the window thread.
-    verify: bool,
+    /// The signature check's result when one was asked for, made on the worker so landing the
+    /// design does not hash its payloads on the window thread.
     checked: Option<Option<solidcraft_io::ProvenanceReport>>,
+    /// The file's provenance records, read with the design.
+    chain: Option<solidcraft_io::ProvenanceChain>,
+    /// What reading the bodies of linked designs said, of a design saved without them.
+    linked: Vec<String>,
+    /// Whether the design's saves keep the bodies of linked designs ([`Session::linked_bodies`]).
+    linked_bodies: bool,
 }
 
 impl OpenSteps {
@@ -54,12 +59,18 @@ impl OpenSteps {
         let verify = bool_(p, "verify").unwrap_or(false);
         // Stamped before it is read, as `doc.open` does.
         let disk = solidcraft_io::design_lock::stamp(path);
-        let (mut doc, saved) = read_design(&mut Session::default(), path)?;
+        // One reading of the file gives the document, the model, whether it is signed, its
+        // provenance records and the signature check, so all describe the same bytes.
+        let file = read_design(&mut Session::default(), path, verify)?;
+        let (mut doc, saved, chain) = (file.doc, file.model, file.chain);
         // A file with provenance must not adopt its excluded cache: the shield would then vouch
         // for geometry the signature does not cover.
-        let signed = solidcraft_io::has_design_provenance(path);
-        let checked = verify.then(|| solidcraft_io::read_design_provenance_file(path));
+        let signed = file.signed;
+        let checked = verify.then_some(file.report);
         super::super::component_link::resolve_design_links(&mut doc, Some(path));
+        let which = super::super::component_link::LinkedRead::read(p, "doc.open")?;
+        let linked = super::super::component_link::read_left_out_bodies(&mut doc, Some(path), validation, which);
+        let linked_bodies = !std::mem::take(&mut doc.linked_bodies_left_out);
         // What `Session::opened` does before it evaluates.
         solidcraft_io::vfs::install_checks();
         let visibility = std::mem::take(&mut doc.visibility);
@@ -79,8 +90,10 @@ impl OpenSteps {
             stop,
             adopted: adopted.is_some(),
             model: adopted.unwrap_or_else(|| under(validation)),
-            verify,
             checked,
+            chain,
+            linked,
+            linked_bodies,
         };
         Ok(Some(steps))
     }
@@ -137,8 +150,9 @@ impl OpenSteps {
             // `Session::opened` keeps.
             self.model.evaluate_shared(&self.doc);
         }
-        let opened = Session::with_model(self.doc, self.visibility, self.model).located(Some(&self.path));
-        opened_design(s, opened, &self.path, self.read_only, self.disk, self.verify, self.checked)
+        let opened = Session { linked_bodies: self.linked_bodies, ..Session::with_model(self.doc, self.visibility, self.model) }
+            .located_with(Some(&self.path), self.chain.clone());
+        opened_design(s, opened, &self.path, self.read_only, self.disk, self.checked, self.chain, self.linked)
     }
 }
 

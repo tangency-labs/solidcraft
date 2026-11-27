@@ -37,11 +37,14 @@ fn panel_arrow_bindings_and_cleared_defaults_survive_profile_export_import_and_a
 #[test]
 fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
     let keys: Vec<&str> = keys().collect();
-    // Test change: show_design_view_switcher, the setting the owner asked for, is a portable key.
+    // Test change: show_design_view_switcher is a portable key; 110 -> 109 because the
+    // wide_panel_grab key left Preferences, so one fewer portable key; 109 -> 107 because the
+    // documents browser's show_document_browser and library_thumbnail_size left with it (#8206);
+    // 108 -> 109 because Turn Around adds one portable Navigation preference.
     assert_eq!(
         keys.len(),
-        108,
-        "include document browser visibility and sizing and the repeated-shortcut preference among the current portable settings"
+        110,
+        "include the repeated-shortcut preference, the browser scroll wheel preferences and the centred command search among the current portable settings"
     );
     for key in [
         "nav",
@@ -55,12 +58,12 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "ui_scale",
         "ui_font",
         "navigator_style",
+        "navigator_turn_around",
         "nav_bridge_enabled",
         "nav_bridge_port",
         "language",
-        "library_thumbnail_size",
-        "show_document_browser",
         "suppress_sketch_snap",
+        "browser_scroll_wheel",
     ] {
         assert!(keys.contains(&key), "{key} belongs in a profile");
     }
@@ -72,6 +75,7 @@ fn a_profile_holds_input_and_interface_settings_but_not_the_machine() {
         "space_mouse_axis_speed",
         "space_mouse_reverse",
         "space_mouse_buttons",
+        "space_mouse_long_buttons",
         "space_mouse_enabled",
         "dark_parts_shading",
         "msaa",
@@ -810,18 +814,20 @@ fn profile_keys_cover_the_current_portable_preferences() {
     let expected = [
         "browser_bodies_folders",
         "browser_eye_left",
+        "browser_scroll_wheel",
         "center_arc_follows_cursor",
         "color_vision",
+        "command_search_centred",
         "design_reopen_views",
         "design_reuse_views",
         "design_sub_tab_render",
         "design_sub_tab_sheets",
-        "design_sub_tab_sketches",
         "design_views_as_tabs",
         "dialog_buttons",
         "direct_interaction",
         "escape_twice_finishes_sketch",
         "free_orbit",
+        "free_orbit_key",
         "free_orbit_upright",
         "hidden_toolbar_tabs",
         "hide_constraint_glyphs_zoomed_out",
@@ -834,7 +840,6 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "keep_work_on_tab_switch",
         "language",
         "layout",
-        "library_thumbnail_size",
         "line_drag_draws_one",
         "line_hover_tangent_arc",
         "live_panel_drag_preview",
@@ -848,9 +853,11 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "nav",
         "nav_bridge_enabled",
         "nav_bridge_port",
+        "nav_button_map",
         "navigation_bar",
         "navigator_fit",
         "navigator_style",
+        "navigator_turn_around",
         "orbit_around",
         "orbit_reverse",
         "origin_plane_names",
@@ -874,7 +881,6 @@ fn profile_keys_cover_the_current_portable_preferences() {
         "shortcut_again_ends_tool",
         "shortcut_cycles_modes",
         "show_design_view_switcher",
-        "show_document_browser",
         "show_selected_hidden_edges",
         "sketch_align_points",
         "sketch_auto_dimensions",
@@ -920,7 +926,11 @@ fn profile_keys_cover_the_current_portable_preferences() {
     let mut actual: Vec<_> = keys().collect();
     actual.sort_unstable();
     // Test change: one more portable key, show_design_view_switcher, the setting the owner asked for.
-    assert_eq!(expected.len(), 108);
+    // Test change: one more portable key, nav_button_map (what each mouse button drags).
+    // Test change: one more portable key, free_orbit_key (the key that makes one orbit drag free).
+    // Test change: two fewer portable keys, show_document_browser and library_thumbnail_size, gone with the document browser;
+    // Turn Around adds one portable Navigation preference to the 108 keys on main.
+    assert_eq!(expected.len(), 110);
     assert_eq!(actual, expected);
 }
 
@@ -942,6 +952,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.keep_work_on_tab_switch = true;
     h.app.preferences.line_hover_tangent_arc = true;
     h.app.preferences.navigator_fit = true;
+    h.app.preferences.navigator_turn_around = false;
     h.app.preferences.invert_navigator_arrows = true;
     h.app.preferences.home_fit_size = 0.5;
     h.app.preferences.ribbon_click_ends_tool = false;
@@ -956,6 +967,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
         ("home_fit_size", json!(0.5)),
         ("invert_navigator_arrows", json!(true)),
         ("navigator_fit", json!(true)),
+        ("navigator_turn_around", json!(false)),
         ("ribbon_click_ends_tool", json!(false)),
         ("ribbon_menus_follow_hover", json!(true)),
         ("sketch_face_activates_part", json!(true)),
@@ -983,6 +995,7 @@ fn moved_profile_settings_survive_saved_roundtrip_and_apply() {
     h.app.preferences.keep_work_on_tab_switch = false;
     h.app.preferences.line_hover_tangent_arc = false;
     h.app.preferences.navigator_fit = defaults.navigator_fit;
+    h.app.preferences.navigator_turn_around = defaults.navigator_turn_around;
     h.app.preferences.invert_navigator_arrows = defaults.invert_navigator_arrows;
     h.app.preferences.home_fit_size = defaults.home_fit_size;
     h.app.preferences.ribbon_click_ends_tool = defaults.ribbon_click_ends_tool;
@@ -1135,7 +1148,7 @@ fn a_profile_carries_the_view_navigators_body_and_one_without_leaves_it_alone() 
     run(&mut h, "view.navigator", json!({"style": "custom", "body": body, "texture": "modeled", "arrows": false, "home": false}));
     run(&mut h, "settings.profile.save", json!({"name": "Gizmo"}));
     let exported = capture(&h.app, "Gizmo");
-    assert!(exported["view_gizmo"]["v"].is_string(), "the body is packed into the profile: {}", exported["view_gizmo"]);
+    assert!(exported["view_gizmo"]["v"].is_array(), "the body is carried in the profile as plain numbers: {}", exported["view_gizmo"]);
     assert!(exported.to_string().len() < 64 * 1024, "a box costs little");
 
     // Elsewhere: a design without that body, the signed axes, and no custom body yet.

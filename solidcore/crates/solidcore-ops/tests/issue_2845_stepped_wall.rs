@@ -52,19 +52,10 @@ fn both_rounds_that_fit_build_their_closed_form() {
     }
 }
 
-/// Past the wall's 4 mm the ball rolls on the face x = 20 and on the wall's far edge (x = 16,
-/// y = 20): the arc runs from that edge to its rail, and the section it takes off the wall is
-/// the strip less the disc's part under the rail. With every fix on: SolidCraft's set fails here
-/// with a bare 1001 (the case `12342-round-wall-edge-r5-past-the-wall-refused`).
-fn past_the_wall(r: f64) -> f64 {
-    let near = r - 4.0;
-    let height = (r * r - near * near).sqrt();
-    let under = |u: f64| u / 2.0 * (r * r - u * u).max(0.0).sqrt() + r * r / 2.0 * (u / r).asin();
-    9520.0 - 42.0 * (4.0 * height - (under(r) - under(near)))
-}
-
+/// Past the wall's 4 mm the round overflows the wall and is trimmed at its crease with the
+/// wall's inner face ([`trimmed_at_its_crease`]), as on the record body below.
 #[test]
-fn the_wall_alone_rides_its_far_edge_past_its_width() {
+fn the_wall_alone_past_its_width_is_trimmed_at_its_crease() {
     all_fixes();
     for r in [4.5, 5.0, 6.0] {
         let b = stepped_wall();
@@ -72,7 +63,10 @@ fn the_wall_alone_rides_its_far_edge_past_its_width() {
         blend(&b, Blend::Round, &[e], &[r], &[], Corners::Filled).unwrap();
         assert!(b.check(CheckLevel::All).unwrap().is_valid(), "r {r}");
         let v = volume(&b);
-        assert!((v - past_the_wall(r)).abs() <= 1e-9 * v, "r {r}: {v}");
+        assert!(
+            (v - trimmed_at_its_crease(r)).abs() <= 1e-9 * v,
+            "r {r}: {v}"
+        );
     }
 }
 
@@ -106,8 +100,8 @@ fn recorded_stepped_wall() -> Body {
     Body::from_record(&record, true).unwrap().0
 }
 
-/// The overflow trimmed at its crease (docs/generic-blend.md section 3.4), without the
-/// outline's opt-in fix: the round on the continued faces, centred on x = y = 20 - r, is
+/// The overflow trimmed at its crease (docs/generic-blend.md section 3.4): the round on the
+/// continued faces, centred on x = y = 20 - r, is
 /// trimmed at its crease with the wall's inner face x = 16. Each section z in (-40, 2) loses
 /// the square [16, 20] x [20 - r, 20] less the disc's part in it,
 /// A(r) = 4 r - int_{r - 4}^{r} sqrt(r^2 - t^2) dt, over the wall's 42.
@@ -135,5 +129,30 @@ fn the_recorded_wall_s_round_past_the_wall_overflows() {
             (v - trimmed_at_its_crease(r)).abs() <= 1e-9 * v,
             "r {r}: {v}"
         );
+    }
+}
+
+/// Both rounds past the ledge's 3 mm on the record body (solidcraft#12342, case 2): the wall's
+/// round is trimmed at its crease ([`trimmed_at_its_crease`]) and the ledge's takes its whole
+/// corner over its 10 mm, the part of it under the wall taken off by the wall's round above.
+/// The two take material in z apart, so their volumes add. It failed with status 1001: the
+/// wall's foot edge on the ledge's top (x = 20, z = -40) was imprinted, then split by the
+/// ledge round's end arc, and only one piece kept the imprinted edge. On the record body it
+/// was the piece past the arc, so the piece from the wall's rail to the arc, which fences the
+/// ledge's top from what the wall's round takes off, was not imprinted: the trim took every
+/// face. The same L made from boxes kept the other piece and built.
+#[test]
+fn the_recorded_wall_and_ledge_past_the_ledge_build() {
+    for r in [4.5, 5.0, 6.0] {
+        let b = recorded_stepped_wall();
+        let edges = [edge_at(&b, WALL), edge_at(&b, LEDGE)];
+        blend(&b, Blend::Round, &edges, &[r], &[], Corners::Filled)
+            .unwrap_or_else(|e| panic!("r {r}: {e}"));
+        let report = b.check(CheckLevel::All).unwrap();
+        assert!(report.is_valid(), "r {r}: {report}");
+        let v = volume(&b);
+        let ledge = (1.0 - std::f64::consts::FRAC_PI_4) * r * r * 10.0;
+        let want = trimmed_at_its_crease(r) - ledge;
+        assert!((v - want).abs() <= 1e-9 * v, "r {r}: {v} against {want}");
     }
 }

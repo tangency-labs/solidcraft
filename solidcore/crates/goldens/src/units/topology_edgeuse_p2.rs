@@ -176,7 +176,7 @@ fn setup(i: &Inputs) -> Result<Result<Setup, Output>, HarnessError> {
 /// The scene a case's op runs on: the B-rep exactly as the Rust side builds it, and the
 /// selected edge use, before the op; `None` when the build fails or selects no edge use.
 /// For certificate tests that must check a premise on the replayed model rather than on a
-/// dump of it (`tests/issue_18325_moved_rows.rs`).
+/// dump of it (`trim_bounds`).
 ///
 /// # Errors
 ///
@@ -185,6 +185,18 @@ pub fn scene(case: &Case) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
     Ok(setup(&case.parse::<Inputs>()?)?
         .ok()
         .map(|s| (s.brep, s.eu)))
+}
+
+/// The case's B-rep after its op ran, and the selected edge use: what the case's row
+/// reports (`None` where the setup stops). For the rebuilt-trim certificate (`trim_bounds`).
+#[cfg(test)]
+pub(crate) fn after_op(case: &Case) -> Result<Option<(Brep, EdgeuseId)>, HarnessError> {
+    let i = case.parse::<Inputs>()?;
+    let Ok(mut s) = setup(&i)? else {
+        return Ok(None);
+    };
+    run_rust_op(&i.op, &mut s.brep, s.eu)?.map_err(|e| harness(format!("rust: {e}")))?;
+    Ok(Some((s.brep, s.eu)))
 }
 
 /// A 2D curve as a [`CrvIn`] (`None` for a non-B-spline or one without NURB data).
@@ -714,6 +726,10 @@ impl UnitDiff for Runner {
         serde_json::to_value(i).ok()
     }
 }
+
+#[cfg(test)]
+#[path = "topology_edgeuse_p2/trim_bounds.rs"]
+mod trim_bounds;
 
 #[cfg(test)]
 mod tests {

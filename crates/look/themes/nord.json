@@ -2,6 +2,7 @@
   "order": 160,
   "provenance": "Original SolidCraft mapping of Nord (MIT palette)",
   "base": "dark",
+  "accepts_accent": true,
   "colors": {
     "accent": "#88c0d0",
     "accent_soft": "#35495b",
