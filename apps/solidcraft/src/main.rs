@@ -186,7 +186,13 @@ fn without_background(stored: &str) -> Option<String> {
         return None;
     }
     *effect = serde_json::Value::String(String::new());
-    serde_json::to_string(&prefs).ok()
+    serde_json::to_string_pretty(&prefs).ok()
+}
+
+/// Keep native preferences as readable JSON inside the existing RON string.
+fn pretty_preferences(stored: &str) -> Result<String, String> {
+    let value: serde_json::Value = serde_json::from_str(stored).map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&value).map_err(|e| e.to_string())
 }
 
 /// Settings written to the settings file soon after they change (#8275). eframe saves them
@@ -731,11 +737,12 @@ struct LostWatch {
 
 impl App {
     fn prefs_for_storage(&self, storage: &dyn eframe::Storage) -> Result<String, String> {
-        self.solve.try_prefs().or_else(|reason| {
+        let prefs = self.solve.try_prefs().or_else(|reason| {
             log::warn!("Panel layout changes were not saved: {reason}");
             let previous = solidcraft_ui_egui::prefs::stored(|key| storage.get_string(key));
             self.solve.prefs_with_stored_panel_layout(previous.as_deref())
-        })
+        })?;
+        pretty_preferences(&prefs)
     }
 
     /// The graphics device was lost (#4172): the window can't draw again, so close, keeping
@@ -2371,9 +2378,11 @@ fn main() -> eframe::Result {
                     mark("app created");
                     solidcraft_engine::crash::phase("first frame");
                 });
+            let stored = app.prefs();
+            let stored = pretty_preferences(&stored).unwrap_or(stored);
             Ok(Box::new(App {
                 // Before `app` moves: the settings as read, already on disk.
-                prefs_writer: PrefsWriter::read(app.prefs()),
+                prefs_writer: PrefsWriter::read(stored),
                 clear_stored_background: cleared_background,
                 solve: app,
                 setup,

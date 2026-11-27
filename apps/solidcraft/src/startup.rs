@@ -2263,6 +2263,33 @@ mod tests {
     }
 
     #[test]
+    fn settings_are_stable_and_preference_fields_have_their_own_lines() {
+        use std::collections::HashMap;
+
+        let d = scratch("readable-settings");
+        let path = d.join("app.ron");
+        let before = serde_json::json!({"grid": true, "preferences": {"text": "quoted \"# and \\ paths", "notes": "line\nnext"}});
+        let mut after = before.clone();
+        after["grid"] = serde_json::json!(false);
+        let save = |v: &serde_json::Value| {
+            let prefs = crate::pretty_preferences(&v.to_string()).unwrap();
+            let kv = HashMap::from([("solidcraft.prefs".to_owned(), prefs), ("window".to_owned(), "opaque state".to_owned())]);
+            eframe::save_to_disk(&path, &kv);
+            let written = std::fs::read_to_string(&path).unwrap();
+            assert_eq!(ron::from_str::<HashMap<String, String>>(&written).unwrap(), kv);
+            written
+        };
+        let first = save(&before);
+        assert_eq!(first, save(&before));
+        let second = save(&after);
+        assert!(first.lines().any(|line| line.trim() == "\"grid\": true,"));
+        assert_eq!(first.lines().count(), second.lines().count());
+        assert_eq!(first.lines().zip(second.lines()).filter(|(a, b)| a != b).count(), 1);
+        assert!(check_settings(&d, &["solidcraft.prefs"]).is_empty());
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    #[test]
     fn a_settings_save_the_system_refuses_leaves_no_temporary_file() {
         let d = scratch("refused-save");
         let path = d.join("app.ron");

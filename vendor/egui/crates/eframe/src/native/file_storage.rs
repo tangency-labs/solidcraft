@@ -216,11 +216,14 @@ pub fn save_to_disk(file_path: &PathBuf, kv: &HashMap<String, String>) {
     match std::fs::File::create(&tmp_path) {
         Ok(file) => {
             let mut writer = std::io::BufWriter::new(file);
-            let config = Default::default();
+            // SolidCraft: keep keys ordered and write multiline strings as RON raw strings,
+            // so changes inside the preferences JSON can be reviewed line by line.
+            let ordered: std::collections::BTreeMap<_, _> = kv.iter().collect();
+            let config = ron::ser::PrettyConfig::default().escape_strings(false);
 
             profiling::scope!("ron::serialize");
             let written = ron::Options::default()
-                .to_io_writer_pretty(&mut writer, &kv, config)
+                .to_io_writer_pretty(&mut writer, &ordered, config)
                 .and_then(|()| writer.flush().map_err(|err| err.into()))
                 .and_then(|()| writer.get_ref().sync_all().map_err(|err| err.into()));
             drop(writer);
