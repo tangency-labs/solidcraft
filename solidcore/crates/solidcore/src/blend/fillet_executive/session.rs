@@ -2530,6 +2530,7 @@ impl<'target> FilletSession<'target> {
                             .to_owned(),
                         fit_edge: None,
                         fit: None,
+                        refusal: None,
                     });
                 }
                 // Not the fork's (WR-716, #2345): chamfers meeting at a vertex where every
