@@ -2127,7 +2127,7 @@ fn is_valid_base64(data: &str) -> bool {
 /// Decodes up to `max_bytes` leading bytes of a validated standard base64 string.
 fn decode_base64_prefix(data: &str, max_bytes: usize) -> Vec<u8> {
     let mut out = Vec::with_capacity(max_bytes);
-    for chunk in data.as_bytes().chunks_exact(4) {
+    for chunk in data.as_bytes().as_chunks::<4>().0 {
         if out.len() >= max_bytes {
             break;
         }
