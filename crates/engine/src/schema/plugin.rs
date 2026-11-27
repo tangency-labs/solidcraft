@@ -317,14 +317,14 @@ pub struct ImportedDesign {
     pub param_warnings: Vec<String>,
 }
 
-/// Install a plugin from a local `.zip` or a release package of a GitHub repository.
+/// Install a plugin from a local `.zip` or a release package of a GitHub, GitLab or Codeberg repository.
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InstallParams {
     /// The `.zip` to install; subject to the caller's file scope.
     #[serde(default)]
     pub path: Option<String>,
-    /// `owner/repo[@ref]`, or an HTTPS repository or release URL on github.com. Exactly one of path and url is required.
+    /// `owner/repo[@ref]` (GitHub), or an HTTPS repository or release URL on github.com, gitlab.com or codeberg.org. Exactly one of path and url is required.
     #[serde(default)]
     pub url: Option<String>,
     /// Preserve the reviewed GitHub owner/repo when installing an update from a local archive.
@@ -354,7 +354,7 @@ pub struct InstallResult {
     /// Repository recorded for updates when installed from a URL.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository: Option<String>,
-    /// Where a URL install came from, as `github.com/owner/repo`.
+    /// Where a URL install came from, as `host/owner/repo`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     /// SHA-256 of the exact manifest and component. Send it as `approval` after reviewing this reply.

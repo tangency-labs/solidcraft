@@ -502,7 +502,9 @@ mod tests {
                 if frame == 5 {
                     let text = crate::test_support::text_shapes(&output).map(|s| s.galley.text().to_owned()).collect::<Vec<_>>().join("\n");
                     assert!(
-                        text.contains("Repository on GitHub") && text.contains("Review package") && text.contains("https://github.com/maker/gears"),
+                        text.contains("Repository on GitHub, GitLab or Codeberg")
+                            && text.contains("Review package")
+                            && text.contains("https://github.com/maker/gears"),
                         "{text}"
                     );
                     let field = crate::scenario::rect_of("prefs:plugins:url").unwrap();
