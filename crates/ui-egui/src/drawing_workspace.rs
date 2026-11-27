@@ -2808,13 +2808,14 @@ mod tests {
         assert!(!h.app.drawing_workspace.settings_open, "the drawing's panels close with it");
         assert!(crate::scenario::handle_at("drawing:first:standard").is_some(), "the page that starts a drawing shows");
 
-        // With no drawing open, Drawing's own undo does nothing; the model's is Design's.
-        enter(&mut h.app, false).unwrap();
+        // With no drawing open, Drawing's own undo does nothing; the model's is Design's, entered
+        // as the workspace menu does.
+        crate::workspace::enter(&mut h.app, "design").unwrap();
         h.frames(2);
         h.step(&json!({"key":"Z","cmd":true})).unwrap();
         h.frames(3);
         assert_eq!(h.app.session.doc.drawings.len(), 1, "Design's Ctrl+Z undoes the delete");
-        enter(&mut h.app, true).unwrap();
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
         h.frames(3);
         assert!(std::sync::Arc::ptr_eq(&the_drawing(&h), &drawing), "the same drawing is back, and open");
         assert_eq!(h.app.session.undo.len(), steps, "the undo took its one step and opening the drawing added none");
@@ -2946,7 +2947,9 @@ mod tests {
         assert_eq!((left, h.app.session.open_drawing), (vec![ids[0], ids[2]], Some(ids[2])), "Drawing's undo leaves the delete");
 
         // Design's undo takes back the model's step: B is back where it was, and C stays open.
-        enter(&mut h.app, false).unwrap();
+        // Design and Drawing are entered as the workspace menu does: a Sheet view left focused
+        // would keep the drawing's undo.
+        crate::workspace::enter(&mut h.app, "design").unwrap();
         h.frames(2);
         h.step(&json!({"key":"Z","cmd":true})).unwrap();
         h.frames(3);
@@ -2955,7 +2958,7 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&h.app.session.doc.drawings[1], &b), "the same drawing, as it was");
         assert_eq!(h.app.session.undo.len(), steps, "the undo took the delete's one step");
         assert_eq!(h.app.session.open_drawing, Some(ids[2]), "undo opens no drawing: C stays open");
-        enter(&mut h.app, true).unwrap();
+        crate::workspace::enter(&mut h.app, "drawing").unwrap();
         h.frames(3);
         assert_eq!(h.app.session.open_drawing, Some(ids[2]), "entering Drawing again keeps C open, not B");
         assert_eq!(active_sheet(&h.app), Some(the_drawing(&h).sheets[0].id));
