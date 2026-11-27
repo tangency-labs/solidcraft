@@ -7097,12 +7097,15 @@ fn a_coil_spring_wire_with_a_surface_off_its_edges_measures_the_wire_below_its_e
 /// 68 mm³, not as surfaces with the wire's wall left out for an edge "4.78 mm off the face's
 /// surface". The kernel's drop of the cut's second piece onto the surface settled on another
 /// part of the surface for stretches of the edge; the trim is followed along the surface instead.
-/// The surface on the tube and 0.2 % off it (the file's) both read.
+/// The surface on the tube, 0.2 % inside it and 0.2 % outside it all read. Outside it, the file's
+/// seam on the exact tube is projected a sliver across the surface's boundary line; the seam
+/// completion took it for a seam to put back, and putting it back projected the cut afresh onto
+/// the turn it almost touches, leaving the body with its imported trims and some 7 % short.
 #[test]
 fn a_coil_spring_wire_cut_by_a_plane_tangent_to_its_tube_imports_closed() {
     let (pitch, cut) = (1.125_f64, 8.995_466_109_045_587_f64);
     let expected = coil_wire_volume_below(pitch, pitch / (2.0 * std::f64::consts::PI) * cut);
-    for scale in [1.0, 0.998] {
+    for scale in [1.0, 0.998, 1.002] {
         let imported = step_import(&coil_wire_file(pitch, 22, scale, cut)).unwrap();
         assert_eq!(imported.bodies.len(), 1, "{scale}: {:?}", imported.warnings);
         let body = &imported.bodies[0];
@@ -7242,7 +7245,7 @@ fn a_coil_spring_wire_bounded_by_two_closed_edges_and_no_seam_imports_closed() {
                 let closed = imported.bodies.len() == 1 && body.is_some_and(|b| b.closed && b.refused.is_none());
                 let volume = body.and_then(|b| measure(&b.body).ok()).map(|m| m.volume);
                 eprintln!("{case}: closed {closed}, volume {volume:?} against {expected}: {:?}", imported.warnings);
-                if !closed || !volume.is_some_and(|v| rel(v, expected) < 0.02) {
+                if !closed || !volume.is_some_and(|v| rel(v, expected) < 0.01) {
                     failed.push(format!("{case}: closed {closed}, volume {volume:?} against {expected}: {:?}", imported.warnings));
                 }
             }

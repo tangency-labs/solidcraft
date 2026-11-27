@@ -1269,6 +1269,7 @@ impl<'t> Assembly<'t> {
         // the whole body mutable, can its crossed cuts become edges and its trim pieces be
         // moved into the base period. An internal seam used on both sides is replaced rather
         // than retained as a boundary that would divide the same material into sliver faces.
+        seat_seam_trims(&mut brep);
         let (completion, skipped) = pcurve::complete_periodic_seams_noted(&brep).map_err(|e| e.to_string())?;
         if let Some(why) = skipped {
             // The body keeps its imported trims, which passed every check; say so rather than
@@ -2431,6 +2432,146 @@ pub(crate) fn reverse(uses: &mut [(u32, bool)]) {
     for u in uses {
         u.1 = !u.1;
     }
+}
+
+/// How far, as a share of the period, a seam's trim may lie off its surface's boundary line and
+/// still be put on it ([`seat_seam_trims`]); within that the edge's tolerance decides.
+const SEAM_SLIVER: f64 = 1e-3;
+
+/// The control points of `pcurve` in (u, v), a rational one's divided out (none of weight 0).
+fn pcurve_points(pcurve: &Curve2) -> Vec<[f64; 2]> {
+    match pcurve {
+        Curve2::Spline { points, .. } => points.clone(),
+        Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().filter(|h| h[2] != 0.0).map(|h| [h[0] / h[2], h[1] / h[2]]).collect(),
+    }
+}
+
+/// Coordinate `d` of the control points of `pcurve` at `which` (all, or only its first or last)
+/// set to `x`, a rational one's weights kept.
+fn set_pcurve_coordinate(pcurve: &mut Curve2, d: usize, x: f64, which: Option<bool>) {
+    fn set(points: &mut [[f64; 3]], d: usize, x: f64) {
+        for h in points {
+            let w = h[2];
+            if let Some(c) = h.get_mut(d) {
+                *c = x * w;
+            }
+        }
+    }
+    let pick = |n: usize| -> std::ops::Range<usize> {
+        match which {
+            None => 0..n,
+            Some(true) => 0..n.min(1),
+            Some(false) => n.saturating_sub(1)..n,
+        }
+    };
+    match pcurve {
+        Curve2::Spline { points, .. } => {
+            let r = pick(points.len());
+            for p in points.get_mut(r).into_iter().flatten() {
+                if let Some(c) = p.get_mut(d) {
+                    *c = x;
+                }
+            }
+        }
+        Curve2::RationalSpline { homogeneous, .. } => {
+            let r = pick(homogeneous.len());
+            if let Some(points) = homogeneous.get_mut(r) {
+                set(points, d, x);
+            }
+        }
+    }
+}
+
+/// Seam trims put on their surface's boundary line: on a face closed in u or v, an edge its loop
+/// uses twice (a seam the file writes) whose two trims lie along the two boundary lines of the
+/// surface's base period, each within a sliver of its line and within the edge's tolerance of it
+/// on the surface, has each trim made the line itself (its coordinate across the line set to the
+/// line's, along it kept), and the ends of the uses on either side that meet it there put on the
+/// line too, by the same test. An edge fitted to a little off the surface's own boundary (a wire's
+/// seam written on its exact tube, the surface fitted 0.2 % off it) is projected a sliver across
+/// the line, its trims then crossing the base period; the seam completion takes such a seam for
+/// one to delete and insert again, and that insertion, which projects the face's other edges
+/// afresh, can put a trim of an edge that passes close to another part of the surface there
+/// (a cut almost touching the next turn of a coil) and leave the loop a period short. On the line,
+/// the seam stands as the file wrote it. Returns how many trims were moved.
+fn seat_seam_trims(brep: &mut Brep) -> usize {
+    let tolerances: Vec<f64> = brep.edges.iter().map(|e| e.tolerance).collect();
+    let mut seated = 0;
+    for face in &mut brep.faces {
+        let Ok(eval) = SurfaceEval::new(face.parameters()) else { continue };
+        let dom = eval.domain();
+        for d in 0..2 {
+            let (Some(Some(period)), Some(Some((lo, hi)))) = (dom.period.get(d).copied(), dom.range.get(d).copied()) else { continue };
+            if !(period > 0.0) {
+                continue;
+            }
+            let uv = |x: f64, y: f64| if d == 0 { [x, y] } else { [y, x] };
+            // Whether moving `p` across to `line` keeps it within `tol` on the surface.
+            let near = |p: [f64; 2], line: f64, tol: f64| -> bool {
+                let (Some(&x), Some(&y)) = (p.get(d), p.get(1 - d)) else { return false };
+                (x - line).abs() <= SEAM_SLIVER * period && eval.point(uv(x, y)).zip(eval.point(uv(line, y))).is_some_and(|(a, b)| a.dist(b) <= tol)
+            };
+            for l in &mut face.loops {
+                let Loop::Edges { edges } = l else { continue };
+                // Each seam use and the boundary line its trim lies along.
+                let mut lines: Vec<(usize, u32, f64)> = Vec::new();
+                for (i, u) in edges.iter().enumerate() {
+                    if edges.iter().filter(|o| o.edge == u.edge).count() != 2 {
+                        continue;
+                    }
+                    let tol = tolerances.get(u.edge as usize).copied().unwrap_or(0.0);
+                    let points = pcurve_points(&u.pcurve);
+                    let Some(x) = points.first().and_then(|p| p.get(d)).copied() else { continue };
+                    let line = if (x - lo).abs() <= (x - hi).abs() { lo } else { hi };
+                    if points.iter().all(|p| near(*p, line, tol)) {
+                        lines.push((i, u.edge, line));
+                    }
+                }
+                // Only a seam whose two uses lie on the two lines, one each.
+                let seams: Vec<(usize, f64)> = lines
+                    .iter()
+                    .filter(|(i, e, line)| lines.iter().any(|(j, f, other)| j != i && f == e && other != line))
+                    .map(|(i, _, line)| (*i, *line))
+                    .collect();
+                let n = edges.len();
+                for (i, line) in seams {
+                    let on_line = |u: &OrientedEdge| pcurve_points(&u.pcurve).iter().all(|p| p.get(d) == Some(&line));
+                    if let Some(u) = edges.get_mut(i)
+                        && !on_line(u)
+                    {
+                        set_pcurve_coordinate(&mut u.pcurve, d, line, None);
+                        seated += 1;
+                    }
+                    // The use before ends where the seam's starts; the use after starts where it ends.
+                    for (k, at_loop_end) in [(i + n - 1, true), (i + 1, false)] {
+                        let Some(k) = k.checked_rem(n) else { continue };
+                        if seams_at(&lines, k) {
+                            continue;
+                        }
+                        let Some(u) = edges.get_mut(k) else { continue };
+                        let tol = tolerances.get(u.edge as usize).copied().unwrap_or(0.0);
+                        // The pcurve runs along its edge; the loop runs it backwards on a reversed use.
+                        let first = at_loop_end != u.forward;
+                        let points = pcurve_points(&u.pcurve);
+                        let end = if first { points.first() } else { points.last() };
+                        if let Some(p) = end
+                            && p.get(d) != Some(&line)
+                            && near(*p, line, tol)
+                        {
+                            set_pcurve_coordinate(&mut u.pcurve, d, line, Some(first));
+                            seated += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    seated
+}
+
+/// Whether use `k` of a loop is one of the seam uses in `lines`.
+fn seams_at(lines: &[(usize, u32, f64)], k: usize) -> bool {
+    lines.iter().any(|(i, _, _)| *i == k)
 }
 
 fn natural_periods(s: &BSurface) -> [bool; 2] {
