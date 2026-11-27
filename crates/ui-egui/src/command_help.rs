@@ -298,6 +298,7 @@ pub const DOCUMENTED: &[&str] = &[
     "solid.combine",
     "solid.cone",
     "solid.cylinder",
+    "solid.dogbone",
     "solid.dome",
     "solid.draft",
     "solid.emboss",
