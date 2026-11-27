@@ -1611,7 +1611,10 @@ impl OffsetFacesExecutive {
         if faces.is_empty() || faces.len() != surfaces.len() {
             return Err(Failure::new(
                 OP,
-                OffsetFailure::InvalidValue("faces moved onto surfaces need one surface each"),
+                OffsetFailure::FaceMoveSurfacesUnmatched {
+                    faces: faces.len(),
+                    surfaces: surfaces.len(),
+                },
             )
             .with_status(SM_ERR_INVALID_INPUT)
             .into_error());
