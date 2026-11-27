@@ -157,6 +157,47 @@ fn plane_at_angle_on_a_face_about_an_edge_follows_both() {
     assert!((pl.normal().z.abs() - half).abs() < 1e-9, "{pl:?}");
 }
 
+/// #20233: a body edge and an angle are enough. Without `base` the angle is measured from a flat
+/// face along the edge, so the plane goes through the edge, and it follows the edge. An axis that
+/// is not a body edge, or an edge no flat face runs along, still asks for `base`.
+#[test]
+fn plane_at_angle_about_an_edge_needs_no_base() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "h", "expression": "20 mm"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": "h", "name": "Base"}));
+    run(&mut s, "construct.plane.at_angle", json!({"axis": {"edge": [20, 0, 20]}, "angle": "45 deg", "name": "Slanted"}));
+    run(&mut s, "construct.plane.at_angle", json!({"axis": {"edge": [20, 0, 20]}, "angle": "0 deg", "base": null, "name": "Flat"}));
+    let feature = s.doc.find_feature("Slanted").unwrap();
+    let solidcraft_doc::FeatureKind::ConstructionPlane { plane: solidcraft_doc::PlaneRef::AtAngle { base, .. } } = &feature.kind else {
+        panic!("at_angle plane: {:?}", feature.kind)
+    };
+    assert!(matches!(base.as_ref(), solidcraft_doc::PlaneRef::Face { anchor: Some(_), .. }), "a face of the box: {base:?}");
+    let plane = |s: &Session, name: &str| construction_planes(s).into_iter().find(|p| p.1 == name).map(|p| p.2).unwrap();
+    let half = 0.5_f64.sqrt();
+    let pl = plane(&s, "Slanted");
+    assert!(pl.height(Vec3::new(20.0, 0.0, 20.0)).abs() < 1e-6 && pl.height(Vec3::new(-20.0, 0.0, 20.0)).abs() < 1e-6, "through the edge: {pl:?}");
+    let n = pl.normal();
+    assert!(n.x.abs() < 1e-9 && (n.y.abs() - half).abs() < 1e-9 && (n.z.abs() - half).abs() < 1e-9, "45° to both faces at the edge: {pl:?}");
+    // At 0° the plane is a face along the edge: the top or the front.
+    let n = plane(&s, "Flat").normal();
+    assert!((n.z.abs() - 1.0).abs() < 1e-9 || (n.y.abs() - 1.0).abs() < 1e-9, "{n:?}");
+    // A taller box: the plane follows the edge up.
+    run(&mut s, "parameters.change", json!({"name": "h", "expression": "30 mm"}));
+    let pl = plane(&s, "Slanted");
+    assert!(pl.height(Vec3::new(20.0, 0.0, 30.0)).abs() < 1e-6, "follows the edge: {pl:?}");
+    // No body edge: `base` is still needed, and the design is unchanged.
+    let before = s.doc.features.len();
+    for axis in [json!({"origin": [0, 0, 0], "dir": [1, 0, 0]}), json!("X")] {
+        let err = s.execute("construct.plane.at_angle", &json!({"axis": axis, "angle": "30 deg"})).unwrap_err().to_string();
+        assert!(err.contains("`base` is required"), "{axis}: {err}");
+    }
+    // A circular edge: its flat cap is square to its axis, so nothing runs along it.
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 10, "base": [0, 60, 0]}));
+    let err = s.execute("construct.plane.at_angle", &json!({"axis": {"edge": [5, 60, 10]}, "angle": "30 deg"})).unwrap_err().to_string();
+    assert!(err.contains("no flat face runs along this edge"), "{err}");
+    assert_eq!(s.doc.features.len(), before + 1, "only the cylinder was added");
+}
+
 /// A box `h` high with a construction axis "Rim" on its top front edge (y = 0, along X), and a
 /// plane "Slanted" turned 45 degrees about that axis, given by the axis's name, from the top
 /// face (which contains the axis, so the plane contains it too).

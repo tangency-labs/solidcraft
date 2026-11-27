@@ -61,14 +61,14 @@ use crate::Result;
 const MAX_CELLS: usize = 4;
 
 /// A polynomial in `δ`, its coefficients enclosed (`c[j]` of `δ^j`).
-type Poly = Vec<Ivl>;
+pub(super) type Poly = Vec<Ivl>;
 
-fn zero() -> Ivl {
+pub(super) fn zero() -> Ivl {
     Ivl::from(0.0)
 }
 
 /// `a b`.
-fn mul(a: &[Ivl], b: &[Ivl]) -> Poly {
+pub(super) fn mul(a: &[Ivl], b: &[Ivl]) -> Poly {
     let mut out = vec![zero(); (a.len() + b.len()).saturating_sub(1)];
     for (i, &x) in a.iter().enumerate() {
         for (j, &y) in b.iter().enumerate() {
@@ -81,7 +81,7 @@ fn mul(a: &[Ivl], b: &[Ivl]) -> Poly {
 }
 
 /// `acc += s a`.
-fn add_scaled(acc: &mut Poly, a: &[Ivl], s: Ivl) {
+pub(super) fn add_scaled(acc: &mut Poly, a: &[Ivl], s: Ivl) {
     if acc.len() < a.len() {
         acc.resize(a.len(), zero());
     }
@@ -98,7 +98,7 @@ fn sub(a: &[Ivl], b: &[Ivl]) -> Poly {
 }
 
 /// `Σ_{j ≥ from} |c_j| ρ^j`, rounded up (not finite for an unbounded coefficient).
-fn magnitude(c: &[Ivl], rho: f64, from: usize) -> f64 {
+pub(super) fn magnitude(c: &[Ivl], rho: f64, from: usize) -> f64 {
     let r = Ivl::from(rho);
     let mut power = Ivl::from(1.0);
     let mut sum = zero();
@@ -121,7 +121,7 @@ fn head(c: &[Ivl]) -> Ivl {
 }
 
 /// The values of `c` over `|δ| ≤ ρ`, enclosed.
-fn range(c: &[Ivl], rho: f64) -> Ivl {
+pub(super) fn range(c: &[Ivl], rho: f64) -> Ivl {
     let rest = magnitude(c, rho, 1);
     head(c) + Ivl::new(-rest, rest)
 }
@@ -217,7 +217,7 @@ fn linear_preimage(
 }
 
 /// `1 / j!` enclosed.
-fn inverse_factorial(j: usize) -> Ivl {
+pub(super) fn inverse_factorial(j: usize) -> Ivl {
     let mut f = Ivl::from(1.0);
     for i in 2..=j {
         f = f * Ivl::from(i as f64);
@@ -227,7 +227,7 @@ fn inverse_factorial(j: usize) -> Ivl {
 
 /// The homogeneous Taylor coefficients `(x w, y w, z w, w)` about `m` of the polynomial of
 /// knot span `k` of `cn` (exact: the span's polynomial has degree `cn.p`).
-fn curve_taylor(cn: &NurbsCurve, k: usize, m: f64) -> [Poly; 4] {
+pub(super) fn curve_taylor(cn: &NurbsCurve, k: usize, m: f64) -> [Poly; 4] {
     let p = cn.p;
     let ders = ders_basis(&cn.u, k, p, Ivl::from(m), p);
     let mut out: [Poly; 4] = std::array::from_fn(|_| vec![zero(); p + 1]);
@@ -798,6 +798,16 @@ pub(crate) fn trim_distance_bound(
     let Some(net) = NetSurface::of(k, &surface, &probe)? else {
         return Ok(None);
     };
+    // (#20643 review: the pieces bound the net's image; a cone's distance off its net is
+    // taken off `accept` and added to the result, rounded up)
+    let Some(off) = super::cone_net_offset(k, &surface, &net, uv)? else {
+        return Ok(None);
+    };
+    let accept = if off > 0.0 {
+        (Ivl::from(accept) - Ivl::from(off)).lo.max(0.0)
+    } else {
+        accept
+    };
     let (Some(cn), Some(wn)) = (stored_nurbs(curve), stored_nurbs(uv)) else {
         return Ok(None);
     };
@@ -952,7 +962,10 @@ pub(crate) fn trim_distance_bound(
         stack.push((mid, b, tm, tb, depth + 1));
         stack.push((a, mid, ta, tm, depth + 1));
     }
-    Ok(worst.is_finite().then_some(worst))
+    if !worst.is_finite() {
+        return Ok(None);
+    }
+    Ok(super::plus_net_offset(worst, off))
 }
 
 /// The ulps (of its middle) [`trim_distance_bound`] pulls each end of a piece's line in by,

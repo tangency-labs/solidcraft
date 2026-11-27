@@ -1941,22 +1941,24 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // A one-sided extrude made symmetric remembers the way it went, so what was picked on its
     // start cap is still found on the cap facing the same way.
     solidcraft_doc::keep_one_sided_direction(&s.model, &f, &mut nf);
-    let copy_sources = match &nf.kind {
-        FeatureKind::Pattern { bodies, components, occurrences, .. } if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() => {
+    let copy_sources_of = |kind: &FeatureKind| match kind {
+        FeatureKind::Pattern { bodies, components, occurrences, join, .. }
+            if !bodies.is_empty() && components.is_empty() && occurrences.is_empty() && (!*join || bodies.len() == 1) =>
+        {
             Some(solidcraft_doc::plain(bodies))
         }
+        FeatureKind::Mirror { bodies, combine: false, .. } if !bodies.is_empty() => Some(solidcraft_doc::plain(bodies)),
         FeatureKind::Move { bodies, copy: true, .. } if !bodies.is_empty() => Some(solidcraft_doc::plain(bodies)),
         _ => None,
     };
-    let sources_changed = match (&f.kind, &nf.kind) {
-        (FeatureKind::Pattern { bodies: old, .. }, FeatureKind::Pattern { bodies: new, .. })
-        | (FeatureKind::Move { bodies: old, .. }, FeatureKind::Move { bodies: new, .. }) => old != new,
-        _ => false,
-    };
-    let existing_copies: std::collections::HashSet<String> = if copy_sources.is_some() && !sources_changed {
-        s.model.state().bodies.iter().filter(|b| b.feature == id).map(|b| b.name.clone()).collect()
+    let copy_sources = copy_sources_of(&nf.kind);
+    let previous_copy_sources: std::collections::HashMap<String, String> = if copy_sources.is_some() {
+        copy_sources_of(&f.kind)
+            .and_then(|old_sources| super::features::copy_pairs_for(s, id, &old_sources))
+            .map(|pairs| pairs.into_iter().collect())
+            .unwrap_or_default()
     } else {
-        std::collections::HashSet::new()
+        std::collections::HashMap::new()
     };
     let mut capture_removed_joints = std::collections::BTreeSet::new();
     let mut capture_edited = false;
@@ -2053,8 +2055,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(EngineError::Other(e));
     }
     if let Some(sources) = copy_sources {
-        let preserve = (!sources_changed).then_some(&existing_copies);
-        let _ = super::features::copy_keeps_appearance_for(s, id, &sources, preserve, cmd);
+        let _ = super::features::copy_keeps_appearance_for(s, id, &sources, Some(&previous_copy_sources), cmd);
     }
     reply(cmd, TimelineEditResult { feature: id, recomputed: s.model.last_recomputed, restored: s.model.last_restored, param_warnings: Vec::new() })
 }

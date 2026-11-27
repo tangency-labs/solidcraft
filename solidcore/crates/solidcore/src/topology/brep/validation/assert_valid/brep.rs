@@ -421,7 +421,22 @@ fn validate_and_update_body(
             // every use of the vertex on the same face / edge, e.g. both ends of a
             // closed edge) shows in an earlier gap
             let start_edge_gap = tvu::vertex_edge_gap(k, b, start_vu, false)?.is_some();
-            let start_face_gap = tvu::vertex_face_gap(k, b, start_vu, false)?.is_some();
+            // On a closed edge (`start_v == end_v`), `end_vu`'s calculation below clears
+            // `start_vu`'s cached vertex/face gap on the same face. When `end_vu` is already
+            // cached and `start_vu` is already reset, computing `start_vu` only to wipe
+            // `end_vu` and immediately recompute `end_vu` produces the exact same state.
+            let closed_end_face_cached = start_v == end_v
+                && start_vu != end_vu
+                && tvu::has_vertex_face_gap(b, start_vu)?
+                && tvu::has_vertex_face_gap(b, end_vu)?
+                && !b.vertexuse(start_vu)?.vertex_face_gap.is_init()
+                && b.vertexuse(start_vu)?.vertex_face_gap.gap_3d == -UNDEF_DOUBLE
+                && b.vertexuse(end_vu)?.vertex_face_gap.is_init();
+            let start_face_gap = if closed_end_face_cached {
+                true
+            } else {
+                tvu::vertex_face_gap(k, b, start_vu, false)?.is_some()
+            };
             let end_edge_gap = tvu::vertex_edge_gap(k, b, end_vu, false)?.is_some();
             let end_face_gap = tvu::vertex_face_gap(k, b, end_vu, false)?.is_some();
             let (start, end) = (b.vertexuse(start_vu)?, b.vertexuse(end_vu)?);

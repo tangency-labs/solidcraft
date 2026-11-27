@@ -219,8 +219,10 @@ pub enum Turn {
     /// Each turn is [`Turn::Swept`] where the kernel builds it (the rolling ball can pass the
     /// side edge: it and the rounds differ in convexity, and the rounds are constant, of one
     /// radius, at a straight side edge square to them) and [`Turn::Mitre`] where it does not.
-    /// Decided per corner before anything is built, so it is never refused where the mitre
-    /// would have been made. Chamfers, which have no swept turn, are mitred.
+    /// Decided per corner before anything is built; where the blend with those turns does not
+    /// build (a swept turn that leaves a round no room beside another of its corners), the
+    /// blend is mitred, so it is never refused where the mitre would have been made. Chamfers,
+    /// which have no swept turn, are mitred.
     Auto,
 }
 
@@ -651,20 +653,36 @@ fn blend_failure(
             return (crate::session::noted(&e, error), None);
         }
     }
-    let (kind, operation) = (e.kind().code(), e.operation());
+    let (kind, operation, class) = (e.kind().code(), e.operation(), e.class());
     let (error, edge) = match session_refusal(s, e, call) {
         Ok(r) => (r.refusal.into(), r.edge),
         // a failure the kernel states in words says what the session noted of the step too
         Err(e) => (session_failure(s, &e).unwrap_or_else(|| status(e)), None),
     };
-    (crate::session::noted_as(kind, operation, error), edge)
+    (
+        crate::session::noted_as(kind, operation, class, error),
+        edge,
+    )
 }
 
 /// The refusal of a swept turn the corners step noted at its vertex (the blend corner's
 /// classification with swept turns on): [`Error::TurnRefused`] with the kernel's reason, without
-/// the "Fillet Error:" that says only whose it is, and where it is; `None` for a note of another
-/// kind, or one that gives no reason.
-fn turn_refusal(s: &FilletSession<'_>) -> Option<Error> {
+/// the "Fillet Error:" that says only whose it is, and where it is, and, where the corners
+/// step's failure `e` is the kernel's typed refusal of a sharp side edge, that edge's index and
+/// the radius it is rounded at first; `None` for a note of another kind, one that gives no
+/// reason, or a failure `e` that is not the corners step's refusal (a later vertex's own
+/// failure, which an earlier vertex's note does not explain).
+fn turn_refusal(s: &FilletSession<'_>, e: &SolidError) -> Option<Error> {
+    if !matches!(
+        e,
+        SolidError::BlendRefused {
+            refusal: BlendRefusal::SweptTurnPastSharpEdge { .. },
+            ..
+        }
+    ) && !matches!(e.blend_failure(), Some(BlendFailure::CornerRefused))
+    {
+        return None;
+    }
     let info = s.error_info();
     let room = match info.code {
         c if c == FilletErrorType::NoRoom as i32 => true,
@@ -679,10 +697,27 @@ fn turn_refusal(s: &FilletSession<'_>) -> Option<Error> {
         .strip_prefix("Fillet Error:")
         .map_or(why, str::trim_start)
         .to_owned();
+    let (side_edge, least_radius) = match *e {
+        SolidError::BlendRefused {
+            refusal:
+                BlendRefusal::SweptTurnPastSharpEdge {
+                    side_edge,
+                    least_radius,
+                    ..
+                },
+            ..
+        } => (
+            s.target().edge_list().iter().position(|&x| x == side_edge),
+            Some(least_radius),
+        ),
+        _ => (None, None),
+    };
     Some(Error::TurnRefused {
         room,
         why,
         at: info.location.map(|p| [p.x, p.y, p.z]),
+        side_edge,
+        least_radius,
     })
 }
 
@@ -1047,10 +1082,9 @@ fn pass(
             .and_then(|()| s.create_corners(k, None))
             .map(|()| Ok(Vec::new()));
         // a swept turn the corners step refused, with the kernel's reason
-        let refused_turn = if p.turn == Turn::Swept && prepared_ok && step.is_err() {
-            turn_refusal(&s)
-        } else {
-            None
+        let refused_turn = match &step {
+            Err(e) if p.turn == Turn::Swept && prepared_ok => turn_refusal(&s, e),
+            _ => None,
         };
         stopped.roll_overs = s.roll_overs().to_vec();
         // a vertex the corners step made no corner for, noted before a later step notes its
@@ -1298,7 +1332,7 @@ fn separated_end_passes(
         pass_or_refuse(k, b, together(edges, section, Turn::Mitre, &[], contract))
             .map(|result| result.map(|_| ()))
     };
-    groups.build(k, b, picked, sizes, pass_group).map(Some)
+    groups.build(k, b, pass_group).map(Some)
 }
 
 /// The rounds of [`blend`] when blends of several edges overflow their faces (the first call
@@ -1734,7 +1768,8 @@ pub fn blend(
 /// other than [`Blend::Round`], and for [`ChamferCorner::Facet`] with one other than
 /// [`Blend::Chamfer`]. A swept turn the kernel does not build is
 /// [`Error::TurnRefused`] with the kernel's reason and the corner's point: `room` at a sharp
-/// concave side edge (no radius of the rounds passes it), else where the blend corner does not
+/// concave side edge (no radius of the rounds passes it, with that edge and the radius it is
+/// rounded at first for the turn to pass), else where the blend corner does not
 /// build one yet. A refusal the kernel gives no reason for is as it classifies it
 /// ([`Error::NoRoom`], [`Error::CornerUnsupported`]).
 pub fn blend_ordered(
@@ -1815,7 +1850,25 @@ fn blend_impl(
                 .unwrap_or(0.0)
         })
         .collect();
-    let blended = blend_session(body, order, kind, edges, &each, setbacks, corners, options);
+    let blended = match blend_session(body, order, kind, edges, &each, setbacks, corners, options) {
+        // Auto never refuses a blend the mitre builds: its swept turns are chosen per corner
+        // ([`TurnChoice::Auto`]), each one the blend corner builds on its own, but a swept turn
+        // can still leave a round no room beside another corner of it (a round shorter than its
+        // radius between a swept turn and a mitre: its rail trimmed past the swept turn's
+        // section). Where the blend with Auto's turns does not build, it is the mitred blend,
+        // run on the untouched `body`; the mitre's refusal is the answer where that does not
+        // build either.
+        Err(e)
+            if turn == Turn::Auto && !matches!(e, Error::Cancelled | Error::OutOfFuel { .. }) =>
+        {
+            let mitred = BlendOptions {
+                turn: Turn::Mitre,
+                ..options
+            };
+            blend_session(body, order, kind, edges, &each, setbacks, corners, mitred)
+        }
+        other => other,
+    };
     match blended {
         // (not upstream) An equal chamfer or a constant round the kernel refuses as too large
         // for a face beside an edge or fails to build: where every picked edge is straight
@@ -1865,10 +1918,10 @@ fn blend_session(
             .flat_map(|log| log.sessions.iter().flatten())
             .map(|m| m.face)
             .collect();
-        if let (Some(log), Some(ours)) = (k.blend_face_log.as_mut(), ours) {
-            log.sessions.extend(ours.sessions);
-        }
         Ok(ran?.map(|mut blended| {
+            if let (Some(log), Some(ours)) = (k.blend_face_log.as_mut(), ours) {
+                log.sessions.extend(ours.sessions);
+            }
             blended.made = b
                 .face_list()
                 .iter()
@@ -1923,7 +1976,7 @@ fn blend_on_body(
     if picked.len() > 1
         && back.is_empty()
         && corners == Corners::Filled
-        && turn == Turn::Mitre
+        && turn != Turn::Swept
         && options.chamfer_corner == ChamferCorner::Mitre
         && matches!(kind, Blend::Chamfer | Blend::Round)
     {
