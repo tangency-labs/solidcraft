@@ -15724,8 +15724,17 @@ fn with_named_face_points(doc: &Document, vals: &BTreeMap<String, Value>, state:
         // Only a thread may find a numbered piece of a round side again as its whole face (#16602).
         let hit = if matches!(f.kind, FeatureKind::Thread { .. }) {
             crate::name_lookup::locate_thread_face_on_body(input, body, n, from)
-        } else if matches!(f.kind, FeatureKind::Extrude { .. }) {
-            // An extrude's faces are its From and To faces: only where they lie counts (#22281).
+        } else if matches!(
+            f.kind,
+            FeatureKind::Extrude { .. }
+                | FeatureKind::Hole { .. }
+                | FeatureKind::Boss { .. }
+                | FeatureKind::SnapFit { .. }
+                | FeatureKind::Rest { .. }
+        ) {
+            // Faces that only locate where a surface lies (an extrude's From/To face, a hole's
+            // start or To face, …) stay valid when an unrelated split elsewhere on the same face
+            // appears (#22281) or disappears.
             crate::name_lookup::locate_level_face_on_body(input, body, n, from)
         } else {
             crate::name_lookup::locate_face_on_body(input, body, n, from)

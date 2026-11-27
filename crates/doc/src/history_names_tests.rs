@@ -654,4 +654,11 @@ fn qualifier_status_tracks_surviving_and_missing_context_for_whole_and_split_fac
     assert_eq!(status.matched, 1);
     assert!(status.lists_other);
     assert_eq!(qualifier_status(&copied, 0, "F48:side:l2#[F48:side:l1,F52:side:l1]@F60.2", "F48:side:l1@F60.2"), None);
+
+    // On a still-split face where one sibling piece has bare stem (`own` empty), `unique_resuffixed_on_body`
+    // must not abort on the unqualified sibling and must still recover the qualified piece.
+    let split_with_bare_sibling = qualify(named(&["side", "side", "common_a", "hole1", "hole2", "hole3"]), &[(0, 2), (0, 3), (0, 4), (0, 5), (1, 2)]);
+    assert_eq!(split_with_bare_sibling.faces[0], "side#[hole1,hole2,hole3]");
+    assert_eq!(split_with_bare_sibling.faces[1], "side");
+    assert_eq!(crate::name_lookup::unique_resuffixed_on_body(&split_with_bare_sibling, "side#[bevel,hole1,hole2,hole3]"), Some(0));
 }

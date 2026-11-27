@@ -1733,13 +1733,92 @@ pub(crate) fn face_resolved_on_body(st: &ModelState, body_index: usize, name: &s
 }
 
 /// [`locate_face_on_body`] for a face that stands only for where it lies: an extrude's From or To
-/// face. When the named face is now split into pieces (a letter with a closed hole cut into it
-/// leaves an island of it, #22281), every piece lies on the face's own surface, so the piece the
-/// saved point lies on stands for the face as well as the face did: see [`split_face_piece`].
-/// A feature that works on the face's material (a shell, a draft) still finds nothing in a split
-/// face: the piece under its point is not all it took.
+/// face, or a hole's start or To face. When the named face is now split into pieces (a letter with
+/// a closed hole cut into it leaves an island of it, #22281), every piece lies on the face's own
+/// surface, so the piece the saved point lies on stands for the face as well as the face did: see
+/// [`split_face_piece`]. Likewise, when a neighbour-qualified piece name (`F3:link:<hash>#[…]`)
+/// loses an unrelated neighbour (e.g. a distant cut deleted in a linked component makes the face
+/// whole again, or a re-split leaves sibling pieces sharing inherited neighbours), the face of
+/// that stem with surviving context that the saved point lies on stands for the same surface: see
+/// [`resuffixed_level_face`]. A feature that works on the face's material (a shell, an offset
+/// face, a draft) still uses [`locate_face_on_body`] and refuses split or un-split faces.
 pub fn locate_level_face_on_body(st: &ModelState, body: Option<&str>, name: &str, p: Vec3) -> Option<FaceHit> {
-    locate_face_on_body(st, body, name, p).or_else(|| split_face_piece(st, name, p))
+    locate_face_on_body(st, body, name, p).or_else(|| split_face_piece(st, name, p)).or_else(|| resuffixed_level_face(st, body, name, p))
+}
+
+/// For a surface-level reference (`Hole`, `Extrude` From/To, …) saved under a non-numbered
+/// neighbour-qualified face name (`stem#[ctx1, ctx2, …]`): recover the face of `stem` after an
+/// unrelated neighbour inside `#[…]` disappeared or changed (for example, deleting a distant cut
+/// inside a linked component and running `component.relink`).
+///
+/// Refuses legacy names, sheet names, numbered pieces (`#k` / `#[…]#k`), index-only qualifiers,
+/// and missing Split Face roles (`F<n>:split:…`). Prefers the target `body` (when named) before
+/// scanning all solid bodies, matching [`locate_face_on_body`]. First takes the unique candidate
+/// whose exact surface contains `p` (preferring candidates with surviving context `matched > 0`);
+/// otherwise, if the surface shifted, takes the single unique candidate retaining at least half of
+/// its recorded qualifier neighbours (`matched * 2 >= total`).
+fn resuffixed_level_face(st: &ModelState, body: Option<&str>, name: &str, p: Vec3) -> Option<FaceHit> {
+    if name.is_empty()
+        || legacy_name(name).is_some()
+        || crate::sheet::split_sheet_face_name(name).is_some()
+        || !qualified(name)
+        || told_apart_by_index_only(name)
+    {
+        return None;
+    }
+    let search = |bodies: &[(usize, &ModelBody)]| -> Option<FaceHit> {
+        let mut cands: Vec<(usize, &ModelBody, usize, usize, usize)> = Vec::new();
+        for &(bi, b) in bodies {
+            let names = naming::names(b);
+            for face in 0..names.faces.len() {
+                if !matches!(crate::history_names::matches(&names, face, name), Some(Match::Stem)) {
+                    continue;
+                }
+                let Some(status) = crate::history_names::qualifier_status(&names, face, name, "") else { continue };
+                if status.missing.iter().any(|m| crate::history_names::is_split_role(m)) {
+                    continue;
+                }
+                let total = status.matched + status.missing.len();
+                cands.push((bi, b, face, status.matched, total));
+            }
+        }
+        if cands.is_empty() {
+            return None;
+        }
+        if p.is_finite() {
+            let mut on_overlap = cands.iter().filter(|&&(_, _, _, m, _)| m > 0).filter_map(|&(bi, b, face, ..)| {
+                let (_, point) = on_face(b, face, p)?;
+                Some(FaceHit { body: bi, face, point, verified: naming::names(b).verified(face), on_point: true })
+            });
+            if let Some(hit) = on_overlap.next() {
+                return on_overlap.next().is_none().then_some(hit);
+            }
+            let mut on_any = cands.iter().filter_map(|&(bi, b, face, ..)| {
+                let (_, point) = on_face(b, face, p)?;
+                Some(FaceHit { body: bi, face, point, verified: false, on_point: true })
+            });
+            if let Some(hit) = on_any.next() {
+                return on_any.next().is_none().then_some(hit);
+            }
+        }
+        if let &[(bi, b, face, matched, total)] = cands.as_slice()
+            && matched > 0
+            && matched.saturating_mul(2) >= total
+        {
+            let (_, point) = nearest_on_face(&b.mesh(), face, if p.is_finite() { p } else { Vec3::ZERO })?;
+            return Some(FaceHit { body: bi, face, point, verified: naming::names(b).verified(face), on_point: false });
+        }
+        None
+    };
+
+    if let Some(i) = body.and_then(|n| st.bodies.iter().position(|b| b.name == n))
+        && let Some(b) = st.bodies.get(i).filter(|b| !b.body.is_mesh())
+        && let Some(hit) = search(&[(i, b)])
+    {
+        return Some(hit);
+    }
+    let solids: Vec<(usize, &ModelBody)> = st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh()).collect();
+    search(&solids)
 }
 
 /// The one piece of a split face that point `p` lies on (exactly, as [`on_face`] decides), when
@@ -1790,20 +1869,30 @@ pub(crate) fn unique_resuffixed_on_body(names: &Names, name: &str) -> Option<usi
     if legacy_name(name).is_some() || !name.contains("#[") {
         return None;
     }
-    let mut found: Option<(usize, usize, usize)> = None;
+    let mut stems: Vec<usize> = Vec::new();
     for face in 0..names.faces.len() {
         match crate::history_names::matches(names, face, name) {
             Some(level) if exactly(level) => return None,
-            Some(Match::Stem) => {
-                let (matched, total) = crate::history_names::piece_overlap(names, face, name)?;
-                if matched > 0 {
-                    if found.is_some() {
-                        return None;
-                    }
-                    found = Some((face, matched, total));
-                }
-            }
+            Some(Match::Stem) => stems.push(face),
             _ => {}
+        }
+    }
+    let is_split = stems.len() > 1;
+    let mut found: Option<(usize, usize, usize)> = None;
+    for face in stems {
+        let overlap = if is_split {
+            crate::history_names::qualifier_status(names, face, name, "")
+                .filter(|s| !s.missing.iter().any(|m| crate::history_names::is_split_role(m)))
+                .map(|s| (s.matched, s.matched + s.missing.len()))
+        } else {
+            crate::history_names::piece_overlap(names, face, name)
+        };
+        let Some((matched, total)) = overlap else { continue };
+        if matched > 0 {
+            if found.is_some() {
+                return None;
+            }
+            found = Some((face, matched, total));
         }
     }
     let (face, matched, total) = found?;
@@ -1819,7 +1908,8 @@ pub(crate) fn unique_resuffixed_on_body(names: &Names, name: &str) -> Option<usi
 /// - otherwise, with a saved pick `pick`, the unique candidate whose exact surface contains `pick`
 ///   is taken — among those that still share a neighbour from the stored qualifier, or (when none
 ///   do, e.g. its sole qualifying neighbour was replaced) among faces that are still qualified
-///   pieces, never a face that became whole again with zero surviving neighbours (#11731).
+///   pieces or pieces of a still-split face, never a face that became whole again with zero
+///   surviving neighbours (#11731).
 fn resuffixed_face<'a>(
     candidates: &[(usize, &'a ModelBody, usize)],
     name: &str,
@@ -1829,11 +1919,26 @@ fn resuffixed_face<'a>(
     if candidates.is_empty() || !name.contains("#[") {
         return None;
     }
+    let mut body_counts: std::collections::BTreeMap<usize, usize> = std::collections::BTreeMap::new();
+    for &(bi, ..) in candidates {
+        *body_counts.entry(bi).or_default() += 1;
+    }
     let mut scored: Vec<(usize, &ModelBody, usize, usize, usize)> = Vec::with_capacity(candidates.len());
     for &(bi, b, face) in candidates {
         let names = naming::names(b);
-        let (matched, total) = crate::history_names::piece_overlap(&names, face, name)?;
+        let is_split = body_counts.get(&bi).copied().unwrap_or(0) > 1;
+        let overlap = if is_split {
+            crate::history_names::qualifier_status(&names, face, name, "")
+                .filter(|s| !s.missing.iter().any(|m| crate::history_names::is_split_role(m)))
+                .map(|s| (s.matched, s.matched + s.missing.len()))
+        } else {
+            crate::history_names::piece_overlap(&names, face, name)
+        };
+        let Some((matched, total)) = overlap else { continue };
         scored.push((bi, b, face, matched, total));
+    }
+    if scored.is_empty() {
+        return None;
     }
     let overlap: Vec<(usize, &ModelBody, usize, usize, usize)> = scored.iter().copied().filter(|&(_, _, _, m, _)| m > 0).collect();
     // If multiple faces on the same body still claim neighbours from the stored qualifier, the
@@ -1858,7 +1963,12 @@ fn resuffixed_face<'a>(
     let eligible: Vec<_> = if !overlap.is_empty() {
         overlap
     } else {
-        scored.into_iter().filter(|&(_, b, face, ..)| naming::names(b).faces.get(face).is_some_and(|n| qualified(n))).collect()
+        scored
+            .into_iter()
+            .filter(|&(bi, b, face, ..)| {
+                body_counts.get(&bi).copied().unwrap_or(0) > 1 || naming::names(b).faces.get(face).is_some_and(|n| qualified(n))
+            })
+            .collect()
     };
     let mut on = eligible.into_iter().filter(|(_, b, ..)| !b.body.is_mesh()).filter_map(|(bi, b, face, matched, _)| {
         let (_, point) = on_face(b, face, p)?;
