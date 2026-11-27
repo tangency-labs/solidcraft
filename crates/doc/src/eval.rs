@@ -6171,7 +6171,7 @@ impl Model {
         self.note_states();
         self.placement_inputs = None;
         self.fingerprinted = None;
-        self.placement_local = true;
+        self.placement_local = false;
         let (vals, perr) = evaluation_values(doc);
         self.param_errors = perr;
         self.frame_bodies.lock().unwrap_or_else(|e| e.into_inner()).next_generation();
@@ -6258,7 +6258,6 @@ impl Model {
         // back to the refused feature, which then fails with the check's error, as it would have.
         let mut checks = overlap::Checks::new(validation);
         let has_capture = doc.has_capture_position_timeline();
-        self.placement_local &= !has_capture;
         let mut stepper = CaptureStepper::new(doc, &vals);
         let mut resolved_joints: BTreeMap<u64, crate::CapturedJoint> = BTreeMap::new();
         let mut start = 0;
@@ -6300,7 +6299,6 @@ impl Model {
                 {
                     failed.insert(r.id, (r.name.clone(), e.clone()));
                 }
-                self.placement_local = self.placement_local && placement_reuse::local_geometry(f, feature_component);
                 let rolled_back = i >= marker;
                 // Retain at most one active result per rolled-back feature, even across several
                 // marker moves. Build the map anew so deleted features release their states too.
@@ -6868,7 +6866,14 @@ impl Model {
             break;
         }
         self.feature_checks = checks.running().then(|| overlap::Pending::new(checks));
-        self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());
+        self.placement_local = !has_capture && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none()) && {
+            let mut prev = &*self.empty;
+            doc.features.iter().zip(&out).all(|(f, r)| {
+                let ok = placement_reuse::placement_local_feature(doc, f, prev, &r.state, feature_component);
+                prev = &r.state;
+                ok
+            })
+        };
         self.poses = poses;
         self.component_keys = component_keys;
         self.results = out;
