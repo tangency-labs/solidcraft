@@ -121,24 +121,29 @@ pub fn to(app: &mut SolveApp, proj: &Proj, p: Pos2) {
         return;
     }
     let params = json!({"path": d.path, "at": [at.x, at.y, at.z], "point": [target.x, target.y, target.z], "continuous": true});
-    // One undo step for the whole drag: the first frame's, kept on top while the others run.
-    let own = if d.step.is_some() { app.session.undo.pop() } else { None };
+    let step = run_frame(app, params, d.step);
+    if let Some(d) = app.viewport.occurrence_drag.as_mut() {
+        d.step = step;
+    }
+}
+
+/// One frame of a drag: `occurrence.drag` with `params`, keeping the whole drag to one undo
+/// step, the first frame's, kept on top while the others run. `step` is the drag's step so far
+/// (none before the first frame that moved anything); the step after this frame is returned.
+pub(crate) fn run_frame(app: &mut SolveApp, params: serde_json::Value, step: Option<Arc<Document>>) -> Option<Arc<Document>> {
+    let own = if step.is_some() { app.session.undo.pop() } else { None };
     let before = app.session.doc.clone();
     let pushed = app.run("occurrence.drag", params).is_ok() && !Arc::ptr_eq(&before, &app.session.doc);
     match own {
-        Some(step) => {
+        Some(own) => {
             if pushed {
                 app.session.undo.pop();
             }
-            app.session.undo.push(step);
+            app.session.undo.push(own);
+            step
         }
-        None if pushed => {
-            let step = app.session.undo.last().map(|step| step.doc.clone());
-            if let Some(d) = app.viewport.occurrence_drag.as_mut() {
-                d.step = step;
-            }
-        }
-        None => {}
+        None if pushed => app.session.undo.last().map(|step| step.doc.clone()),
+        None => None,
     }
 }
 

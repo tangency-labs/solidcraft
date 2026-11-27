@@ -1,0 +1,6 @@
+{
+  "en": {
+    "prefs.right_drag_turns_parts": "Right drag turns parts",
+    "prefs.right_drag_turns_parts_tip": "A right drag that starts on a free part in an assembly turns the part about its centre instead of moving the view. Off: the right drag moves the view everywhere"
+  }
+}
