@@ -132,6 +132,7 @@ jobs:
       SOLIDCRAFT_VERSION: ${{ needs.version.outputs.version }}
       SOLIDCRAFT_BUILD_DATE: ${{ needs.version.outputs.date }}
       NFPM_VERSION: 2.47.0
+      SOLIDCRAFT_AUDITABLE: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install packaging tools
@@ -145,6 +146,8 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: release-linux-${{ matrix.arch }}
+      - name: Install dependency audit tools
+        run: cargo install cargo-auditable --version 0.7.7 --locked
       - name: Build and package (AppImage, deb, rpm, tar.gz)
         run: packaging/linux/package.sh
       - name: Check the packages
@@ -154,6 +157,13 @@ jobs:
           rpm -qip dist/release/*.rpm
           rpm -qlp dist/release/*.rpm | grep -E '/usr/bin/solidcraft$|THIRD-PARTY-LICENSES.txt'
           tar -tzf dist/release/*.tar.gz | grep -E '/bin/solidcraft$|THIRD-PARTY-LICENSES.txt'
+          # Check the actual shipped ELF files, not just the unstripped build output.
+          audit_dir=$(mktemp -d)
+          trap 'rm -rf "$audit_dir"' EXIT
+          tar -xzf dist/release/*.tar.gz -C "$audit_dir"
+          for exe in solidcraft solidcraft-cli; do
+            readelf --wide --section-headers "$audit_dir"/solidcraft-*/bin/"$exe" | grep -F '.dep-v0'
+          done
           ldd target/release/solidcraft
           for appimage in dist/release/*.AppImage; do
             chmod +x "$appimage"
