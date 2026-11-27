@@ -1488,6 +1488,7 @@ pub fn tool_for(id: &str) -> Option<Tool> {
         pts: Vec::new(),
         hover: None,
         picks: Vec::new(),
+        picks_dropped: false,
         point_picks: Vec::new(),
         dims: Vec::new(),
         dim_history: Vec::new(),
@@ -2034,7 +2035,6 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 return;
             }
             let Some((id, _)) = sketch_entity(app, &hits) else { return };
-            drop_gone_picks(app, tool);
             if cmd == "sketch.centerline" {
                 let _ = app.run(cmd, json!({"curves": [id]}));
                 return;
@@ -2047,6 +2047,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             }
             if !tool.picks.contains(&id) {
                 tool.picks.push(id);
+                tool.picks_dropped = false;
                 if let Some((p, _)) = at {
                     tool.pts.push((p, None));
                 }
@@ -2122,7 +2123,6 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
         crate::sketch_construction::place_point(app, tool, p);
         return;
     }
-    drop_gone_picks(app, tool);
     if tool.cmd == "sketch.circle.two_tangent" && tool.picks.len() == 2 {
         if let Err(error) = crate::sketch_dims::validate(app, tool) {
             app.set_status(tr_engine_error(&error), true);
@@ -2210,26 +2210,35 @@ fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
 /// Drops the picks of a curve-picking tool that no longer name a curve or point of the active
 /// sketch, with their click places, so the user picks again instead of the command refusing the
 /// stale id on every try: the Undo button can take away a picked curve and leaves the tool on
-/// (#23086). An origin axis pick (`x`, `y` or a JSON reference) is kept.
-fn drop_gone_picks(app: &SolveApp, t: &mut Tool) {
+/// (#23086). An origin axis pick (`x`, `y` or a JSON reference) is kept. Run on every frame
+/// before the value boxes are decided, so 2-Tangent Circle's Radius box goes with the pair.
+/// After a drop the boxes start over and true is returned, for the caller to show the hint.
+pub(crate) fn drop_gone_picks(app: &SolveApp, t: &mut Tool) -> bool {
     if !matches!(mode(t.cmd), Some(Mode::Entities(_))) || t.picks.is_empty() {
-        return;
+        return false;
     }
     let st = crate::open_meshing::session_world(&app.session);
-    let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return };
+    let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return false };
     let stands =
         |id: &str| ss.sketch.curve_index(id).is_some() || ss.sketch.resolve_point(id).is_some() || matches!(id, "x" | "y") || id.starts_with('{');
     let keep: Vec<bool> = t.picks.iter().map(|id| stands(id)).collect();
     if keep.iter().all(|k| *k) {
-        return;
+        return false;
     }
-    // Each click adds its pick and its place together; a preselection adds picks only.
-    if t.pts.len() == t.picks.len() {
-        let mut flags = keep.iter();
-        t.pts.retain(|_| flags.next().copied().unwrap_or(true));
-    }
+    // Each click adds its pick and its place together, after any preselected picks, which have
+    // no place: the places belong to the last picks.
+    let offset = t.picks.len().saturating_sub(t.pts.len());
+    let mut i = offset;
+    t.pts.retain(|_| {
+        let kept = keep.get(i).copied().unwrap_or(true);
+        i = i.saturating_add(1);
+        kept
+    });
     let mut flags = keep.iter();
     t.picks.retain(|_| flags.next().copied().unwrap_or(true));
+    crate::sketch_dims::reset(t);
+    t.picks_dropped = true;
+    true
 }
 
 fn run_entities(app: &mut SolveApp, t: &Tool) -> bool {
@@ -2265,8 +2274,13 @@ pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
         return false;
     }
     let Some(m) = mode(tool.cmd) else { return false };
-    drop_gone_picks(app, tool);
     match m {
+        // The Undo button took every pick away: the right-click that was meant to apply keeps the
+        // tool on, for the user to pick again, as a pick still standing would (#23086).
+        Mode::Entities(_) if tool.picks.is_empty() && tool.picks_dropped => {
+            tool.picks_dropped = false;
+            true
+        }
         Mode::Points(0) if tool.pts.len() >= 2 => {
             run_points(app, tool);
             tool.pts.clear();

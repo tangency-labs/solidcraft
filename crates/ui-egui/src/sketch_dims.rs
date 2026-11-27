@@ -816,6 +816,10 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
         return;
     }
     let Some(mut t) = app.tool.take() else { return };
+    // A pick whose curve the Undo button took away goes before the boxes are decided (#23086).
+    if crate::sketch_tools::drop_gone_picks(app, &mut t) {
+        app.set_tool_hint(crate::tools::hint(t.cmd));
+    }
     t.classic = app.preferences.construction_line_classic;
     t.arc_modes = app.preferences.sketch_arc_tangent_snap;
     sync(&mut t);
