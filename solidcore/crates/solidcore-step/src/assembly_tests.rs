@@ -796,8 +796,8 @@ fn whole_cylinder_of(r: f64) -> BSurface {
 
 /// Seating a trim that lies a sliver across a closed patch's seam is edited only under an enclosed
 /// bound: the unit cylinder's trim 2e-3 across its seam (a period of 4) moves its surface by about
-/// 3.1e-3 mm, which the bound holds and is accepted against 5e-2; the cylinder 50 times wider moves
-/// 50 times as far over the same sliver (0.157 mm), its partials make the bound past 5e-2, and the
+/// 2.83e-3 mm, which the bound holds and is accepted against 5e-2; the cylinder 50 times wider moves
+/// 50 times as far over the same sliver (0.14 mm), its partials make the bound past 5e-2, and the
 /// trim is declined; so is a trim past the sliver, one not finite, a weight that is not positive
 /// and a surface that is not a spline.
 #[test]
@@ -810,8 +810,9 @@ fn a_trim_is_seated_only_under_an_enclosed_bound_within_the_tolerance() {
         assert_eq!((period, lo, hi), (4.0, 0.0, 4.0));
         seating_shift(&eval, 0, [lo, hi], period, pcurve, which, 0.0)
     };
-    // The move of the surface for 2e-3 of u: a quarter turn is one unit of u, so pi/2 per unit.
-    let moved = 2e-3 * std::f64::consts::FRAC_PI_2;
+    // The move of the surface for 2e-3 of u at the seam: a quarter turn is one unit of u, and the
+    // rational arc runs sqrt(2) per unit of u at its ends (a bit over 1.4), so 2.83e-3 mm.
+    let moved = 2e-3 * 1.4;
     let narrow = shift(&whole_cylinder(), &trim(-2e-3), None).expect("a bound");
     assert!(narrow >= moved && narrow < 5e-2, "{narrow}");
     // The same from the other side of the line, and with only the end that moves counted.
