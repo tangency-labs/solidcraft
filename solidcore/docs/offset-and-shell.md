@@ -485,7 +485,9 @@ point of the body. If a turn before the shell fails, the shell builds, or is ref
 as it would without that turn. If a turn back fails, the result is the same valid body, with
 that face's seam left on the turned ruling. An inward closed shell refused for a thin feature
 (`offset/thin_features.rs`) takes off together every feature with a face whose inset collapses,
-then each other feature on its own.
+then each other feature on its own. Each cap's rim is taken out where the cap and the face beside
+it lie on one plane (`remove_cap_rims`), so that face runs on across the footprint; left in, a
+footprint touching the face's outer edge pinched the face, and the offset refused it (solidcraft#22785).
 
 Ops (`solidcore-ops/src/offset.rs`) calls this as `SmApiShellBrepFull` with convex edges extended,
 results merged, the offset solid made and the sheet's side walls merged. `thicken` with
