@@ -214,7 +214,7 @@ its inner rail collapses to a point. After the continuity partition, the face bu
 at any interior knot iso curve whose positive-weight control points coincide within the
 B-rep tolerance. This leaves the pole on the resulting faces' boundaries, whatever the
 closed profile's seam. A patch whose isos collapse at every knot in a direction, its ends
-included, is thinner than the tolerance there rather than pinched, and stays whole. The exact natural UV trims are retained with `keep_exact_pcurves`,
+included, is thinner than the tolerance there rather than pinched, and stays whole. The exact natural UV trims are retained,
 so reprojection cannot choose another parameter at that pole. The rounded-rectangle
 regression checks both profile seams, with and without caps, against analytic area and volume.
 
