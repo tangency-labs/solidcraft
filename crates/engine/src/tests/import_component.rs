@@ -958,6 +958,166 @@ fn renaming_an_imported_body_after_a_repeated_part_keeps_every_body_in_its_compo
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn step_source_link_is_recorded_saved_relative_updated_and_broken() {
+    let dir = temp_dir("source-link");
+    let path = part_file(&dir, "bracket");
+    let mut s = Session { param_check: crate::schema::ParamCheck::Strict, ..Default::default() };
+    let inserted = run(&mut s, "file.insert_step", json!({"path": path, "up": "y"}));
+    let comp = inserted["component"].as_u64().unwrap();
+    let feature = inserted["feature"].as_u64().unwrap();
+    let occurrence = inserted["occurrence"].as_u64().unwrap();
+    let placement = s.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().transform;
+    assert_eq!(s.doc.links[&comp].step_names.as_deref(), Some("auto"));
+    assert!(std::path::Path::new(&s.doc.links[&comp].path).is_absolute());
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], false);
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["importer"], json!({"format": "step"}));
+    let saved = dir.join("assembly.sc");
+    run(&mut s, "file.save", json!({"path": saved}));
+    let (doc, _) = solidcraft_io::read_design_file(&saved.to_string_lossy(), None::<fn(solidcraft_io::DesignPreview)>).unwrap();
+    assert_eq!(doc.links[&comp].path, "bracket.step");
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": saved}));
+    assert_eq!(opened.doc.links[&comp].step_names.as_deref(), Some("auto"));
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 40, "width": 20, "height": 10}));
+    run(&mut source, "file.export", json!({"path": path}));
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], true);
+    let old = shown_boxes(&s);
+    let undo = s.undo.len();
+    let reply = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(reply["updated"], json!(["bracket"]));
+    assert_eq!(s.undo.len(), undo + 1);
+    assert_eq!(s.doc.links[&comp].feature, feature);
+    assert_eq!(s.doc.occurrences.iter().find(|o| o.id == occurrence).unwrap().transform, placement);
+    let volume: f64 = s.world_state().unwrap().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum();
+    assert!((volume - 8000.0).abs() < 1e-6, "{volume}");
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][0]["changed"], false);
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(shown_boxes(&s), old);
+    run(&mut s, "component.update_links", json!({}));
+    let before = shown_boxes(&s);
+    run(&mut s, "component.break_link", json!({"component": comp}));
+    assert!(s.doc.links.is_empty());
+    assert_eq!(shown_boxes(&s), before);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.links.contains_key(&comp));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn step_source_link_failures_keep_bodies_and_do_not_hold_up_other_links() {
+    let dir = temp_dir("link-failures");
+    let missing = part_file(&dir, "missing");
+    let corrupt = part_file(&dir, "corrupt");
+    let good = part_file(&dir, "good");
+    let mut s = Session::default();
+    let a = run(&mut s, "file.insert_step", json!({"path": missing}))["component"].as_u64().unwrap();
+    let b = run(&mut s, "file.insert_step", json!({"path": corrupt}))["component"].as_u64().unwrap();
+    let c = run(&mut s, "file.insert_step", json!({"path": good}))["component"].as_u64().unwrap();
+    let original = s.doc.links.clone();
+    std::fs::remove_file(&missing).unwrap();
+    std::fs::write(&corrupt, b"ISO-10303-21; hostile incomplete file").unwrap();
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut source, "file.export", json!({"path": good}));
+    let before = s.undo.len();
+    let r = run(&mut s, "component.update_links", json!({}));
+    assert_eq!(r["updated"], json!(["good"]));
+    assert_eq!(r["failed"].as_array().unwrap().len(), 2);
+    assert_eq!(s.doc.links[&a], original[&a]);
+    assert_eq!(s.doc.links[&b], original[&b]);
+    assert_eq!(s.undo.len(), before + 1);
+    let volume: f64 = s.world_state().unwrap().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum();
+    assert!((volume - 13000.0).abs() < 1e-6, "{volume}");
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][1]["changed"], true);
+    // A repaired source is retried, even after the other source already updated.
+    part_file(&dir, "corrupt");
+    run(&mut s, "component.update_links", json!({"components": [b, c]}));
+    assert_eq!(run(&mut s, "component.links", json!({}))["links"][1]["changed"], false);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn step_source_link_opt_out_and_old_designs_stay_independent() {
+    let dir = temp_dir("link-old");
+    let path = part_file(&dir, "part");
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path, "link": false}));
+    assert!(s.doc.links.is_empty());
+    let mut old: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    old.as_object_mut().unwrap().remove("links");
+    let doc = solidcraft_doc::Document::from_json(&old.to_string()).unwrap();
+    let mut opened = Session::opened(doc, None);
+    assert!(opened.doc.links.is_empty());
+    let before = shown_boxes(&opened);
+    std::fs::remove_file(&path).unwrap();
+    let r = run(&mut opened, "component.update_links", json!({}));
+    assert_eq!(r["updated"], json!([]));
+    assert_eq!(shown_boxes(&opened), before);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn step_source_link_assembly_update_keeps_repeated_bodies_and_components() {
+    let dir = temp_dir("link-assembly");
+    let path = rig_file(&dir);
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let before = shown_boxes(&s);
+    let comps = s.doc.components.clone();
+    // A harmless header change still exercises reading and replacing an assembly source.
+    let text = std::fs::read_to_string(&path).unwrap().replace("ISO-10303-21;", "ISO-10303-21;\n/* changed source */");
+    std::fs::write(&path, text).unwrap();
+    run(&mut s, "component.update_links", json!({}));
+    assert_eq!(shown_boxes(&s), before);
+    assert_eq!(s.doc.components, comps);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn step_source_link_update_rebuilds_downstream_features() {
+    let dir = temp_dir("link-downstream");
+    let path = part_file(&dir, "bracket");
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let sketch = run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 10]}}))["sketch"].clone();
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [3, 3], "p1": [7, 7]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let cut = run(&mut s, "solid.extrude", json!({"sketch": sketch, "distance": -20, "operation": "cut"}))["feature"].as_u64().unwrap();
+    let volume = |s: &Session| s.world_state().unwrap().bodies.iter().map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).sum::<f64>();
+    assert!((volume(&s) - (6000.0 - 160.0)).abs() < 1e-5);
+    let mut source = Session::default();
+    run(&mut source, "solid.box", json!({"length": 40, "width": 20, "height": 10}));
+    run(&mut source, "file.export", json!({"path": path}));
+    let updated = run(&mut s, "component.update_links", json!({}));
+    assert!(s.model.result(cut).unwrap().error.is_none(), "{updated}: {:?}", s.model.result(cut).unwrap().error);
+    assert!((volume(&s) - (8000.0 - 160.0)).abs() < 1e-5, "volume after the update: {} {updated} {}", volume(&s), s.doc.to_json());
+    run(&mut s, "edit.undo", json!({}));
+    assert!((volume(&s) - (6000.0 - 160.0)).abs() < 1e-5);
+    run(&mut s, "edit.redo", json!({}));
+    assert!((volume(&s) - (8000.0 - 160.0)).abs() < 1e-5);
+    let mut sphere = Session::default();
+    run(&mut sphere, "solid.sphere", json!({"radius": 5}));
+    run(&mut sphere, "file.export", json!({"path": path}));
+    let lost = run(&mut s, "component.update_links", json!({}));
+    assert!(lost["warnings"].to_string().contains("no longer exists"), "{lost}");
+    assert!(s.model.result(cut).unwrap().error.is_some());
+    run(&mut s, "edit.undo", json!({}));
+    assert!((volume(&s) - (8000.0 - 160.0)).abs() < 1e-5);
+    let component = *s.doc.links.keys().next().unwrap();
+    run(&mut s, "component.break_link", json!({"component": component}));
+    assert!(s.model.result(cut).unwrap().error.is_none());
+    let saved = dir.join("attached.sc");
+    run(&mut s, "file.save", json!({"path": saved}));
+    let mut opened = Session::default();
+    run(&mut opened, "doc.open", json!({"path": saved}));
+    assert!(opened.doc.links.is_empty());
+    assert!(opened.model.result(cut).unwrap().error.is_none());
+    assert!((volume(&opened) - (8000.0 - 160.0)).abs() < 1e-5);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// Deleting a component of an imported assembly deletes its bodies too (#17578). The Import
 /// feature that builds them sits in the assembly's own component, so deleting the part's
 /// component only dropped the bodies' component assignment, and they stayed in the design.
@@ -1027,4 +1187,80 @@ fn deleting_a_component_of_an_imported_assembly_deletes_its_bodies() {
     assert_eq!(holding(&mut again), expected, "reopened");
     assert_eq!(shown_boxes(&again), [pin_box]);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Inspection must inventory the STEP's six placements, not its three definitions (#21797).
+/// The expected boxes/volumes come from rig_file's dimensions and the second arm's Z quarter-turn.
+#[test]
+fn document_inspection_lists_every_nested_step_placement_after_reopening() {
+    fn check(s: &mut Session) {
+        let doc = s.doc.clone();
+        let before = (s.revision, s.undo.len(), s.redo.len(), s.is_dirty(), s.doc.marker);
+        let r = run(s, "document.inspect", json!({"measure":true}));
+        let bodies = r["bodies"].as_array().unwrap();
+        assert_eq!(bodies.len(), 6, "three part definitions have six placements: {r}");
+        let names: std::collections::BTreeSet<_> = bodies.iter().map(|b| b["name"].as_str().unwrap()).collect();
+        assert_eq!(names.len(), 6, "each placement has a distinct usable world name");
+        for (min, max, volume) in [
+            ([0.0, 0.0, 0.0], [100.0, 60.0, 5.0], 30000.0),
+            ([10.0, 10.0, 5.0], [30.0, 14.0, 9.0], 320.0),
+            ([28.0, 11.0, 9.0], [30.0, 13.0, 19.0], 40.0),
+            ([56.0, 10.0, 5.0], [60.0, 30.0, 9.0], 320.0),
+            ([57.0, 28.0, 9.0], [59.0, 30.0, 19.0], 40.0),
+            ([90.0, 50.0, 5.0], [92.0, 52.0, 15.0], 40.0),
+        ] {
+            let body = bodies.iter().find(|b| (0..3).all(|k| (b["bbox"]["min"][k].as_f64().unwrap() - min[k]).abs() < 1e-6)).unwrap();
+            assert_eq!(body["closed"], true, "{body}");
+            assert!((body["volume_mm3"].as_f64().unwrap() - volume).abs() < 1e-6, "{body}");
+            for (k, expected) in max.into_iter().enumerate() {
+                assert!((body["bbox"]["max"][k].as_f64().unwrap() - expected).abs() < 1e-6, "{body}");
+            }
+        }
+        assert!((bodies.iter().map(|b| b["volume_mm3"].as_f64().unwrap()).sum::<f64>() - 30760.0).abs() < 1e-6);
+        let listed = run(s, "document.inspect", json!({"bodies":"names", "measure":true}));
+        assert_eq!(listed["bodies"].as_array().unwrap().iter().map(|n| n.as_str().unwrap()).collect::<std::collections::BTreeSet<_>>(), names);
+        assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+        assert_eq!((s.revision, s.undo.len(), s.redo.len(), s.is_dirty(), s.doc.marker), before);
+    }
+    let dir = temp_dir("inspect-placements");
+    let path = rig_file(&dir);
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path":path}));
+    assert_eq!(s.model.state().bodies.len(), 3, "the importer still shares the part definitions");
+    check(&mut s);
+    let design = dir.join("inspection.solidcraft");
+    run(&mut s, "file.save_as", json!({"path":design.to_string_lossy()}));
+    std::fs::remove_file(path).unwrap();
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path":design.to_string_lossy()}));
+    check(&mut reopened);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_link_names_its_importer_and_older_designs_load_without_one() {
+    use solidcraft_doc::{DesignLink, LinkImporter};
+    let importer =
+        LinkImporter { format: "kic.convert".into(), plugin: Some("kic".into()), version: Some("1.2".into()), options: json!({"layers": ["top"]}) };
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    s.doc_mut().links.insert(1, DesignLink { path: "board.kic".into(), feature: 1, importer: Some(importer.clone()), ..Default::default() });
+    s.doc_mut().links.insert(2, DesignLink { path: "part.sc".into(), feature: 2, ..Default::default() });
+    let text = solidcraft_io::write_design(&s.doc).unwrap();
+    let read = solidcraft_io::read_design(&text).unwrap();
+    assert_eq!(read.links[&1].importer, Some(importer));
+    assert!(read.links[&1].path == "board.kic" && !read.links[&1].is_design());
+    assert!(read.links[&2].importer.is_none() && read.links[&2].is_design());
+    // A link saved before the field has no importer, is a design link, and saves without one.
+    let old: DesignLink = serde_json::from_value(json!({"path": "part.sc", "feature": 3})).unwrap();
+    assert!(old.importer.is_none() && old.is_design());
+    assert!(serde_json::to_value(&old).unwrap().get("importer").is_none());
+    // A build that does not know the field ignores it: the design opens with its linked bodies.
+    let mut written: serde_json::Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    for link in written["links"].as_object_mut().unwrap().values_mut() {
+        link.as_object_mut().unwrap().remove("importer");
+    }
+    let unaware = solidcraft_io::read_design(written.to_string().as_bytes()).unwrap();
+    assert!(unaware.links.values().all(|l| l.importer.is_none()) && unaware.links.len() == 2);
+    assert_eq!(unaware.features.len(), s.doc.features.len(), "the bodies' features are kept");
 }

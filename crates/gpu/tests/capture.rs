@@ -3,6 +3,9 @@
 //! GPU output differs a little between drivers, so the checks count pixels of a kind rather than
 //! compare bytes. Skipped, with the reason printed, on a machine without a GPU adapter
 //! (`SOLIDCRAFT_REQUIRE_GPU=1` makes that a failure).
+// Test helpers outside #[test] functions print what they skip or measure; clippy.toml
+// `allow-print-in-tests` covers only #[test] functions and #[cfg(test)] code.
+#![allow(clippy::print_stderr)]
 
 use serde_json::json;
 use solidcore_record::Vec3;
@@ -50,7 +53,7 @@ fn opengl_viewport_pipelines_render_a_model() {
     // emit compute GLSL below 4.30, and request_device fails as Device(Lost). The test draws
     // nothing indirect, so the validation is not needed here.
     desc.flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
-    let instance = wgpu::Instance::new(desc);
+    let instance = solidcraft_viewport_gpu::select::start_instance(desc);
     let adapter = match pollster::block_on(instance.request_adapter(&Default::default())) {
         Ok(adapter) => adapter,
         Err(e) => {

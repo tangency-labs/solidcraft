@@ -30,7 +30,9 @@ The neutral profile, every role in full:
     "bend_notes":  {"on": true, "layer": "BEND_NOTES",  "color": 8, "linetype": "continuous"},
     "pockets":     {"on": true, "layer": "POCKET",      "color": 3, "linetype": "continuous"},
     "perforation": {"on": true, "layer": "PERFORATION", "color": 3, "linetype": "continuous"},
-    "roll":        {"on": true, "layer": "ROLL",        "color": 3, "linetype": "continuous"}
+    "roll":        {"on": true, "layer": "ROLL",        "color": 3, "linetype": "continuous"},
+    "form_up":     {"on": true, "layer": "FORM_UP",     "color": 1, "linetype": "dashed"},
+    "form_down":   {"on": true, "layer": "FORM_DOWN",   "color": 5, "linetype": "dashed"}
   }
 }
 ```
@@ -44,7 +46,7 @@ cutter would take for a contour:
   "format": "solidcraft-dxf-profile",
   "version": 1,
   "name": "Example laser",
-  "note": "Both bend directions on FOLD; no text, notes or roll lines.",
+  "note": "Both bend directions on FOLD; no text, notes, roll or bead lines.",
   "roles": {
     "outline":    {"layer": "CUT", "color": 7},
     "cut":        {"layer": "CUT", "color": 7},
@@ -53,7 +55,9 @@ cutter would take for a contour:
     "bend_up":    {"layer": "FOLD", "color": 3, "linetype": "hidden"},
     "bend_down":  {"layer": "FOLD", "color": 3, "linetype": "hidden"},
     "bend_notes": {"on": false},
-    "roll":       {"on": false}
+    "roll":       {"on": false},
+    "form_up":    {"on": false},
+    "form_down":  {"on": false}
   }
 }
 ```
@@ -76,6 +80,7 @@ cutter would take for a contour:
 | `pockets` | the boundaries of pockets, one layer per side and depth |
 | `perforation` | the holes of a perforation |
 | `roll` | where a roll starts and ends, and its middle |
+| `form_up`, `form_down` | a formed bead's centreline and footprint, by the side it stands out of (its note goes with the bend notes) |
 
 Each role has:
 

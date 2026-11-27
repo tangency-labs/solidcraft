@@ -65,6 +65,9 @@ fn refused(op: &str, wall: Option<f64>, e: SmError) -> KernelError {
         SmError::NoMatch { point } => KernelError::Invalid(format!("{op}: no face at selection point {}", point + 1)),
         SmError::Ambiguous { point } => KernelError::Invalid(format!("{op}: selection point {} is as near to two faces", point + 1)),
         SmError::Unsupported => KernelError::Failed(format!("not supported yet: SMLib {op} for this geometry")),
+        // A face the operation cannot handle, named for what it is (a draft's face that is neither
+        // a plane nor a cone or cylinder, #18541).
+        SmError::Refused(solidcore_ops::Error::Unsupported(why)) => KernelError::Failed(format!("not supported yet: {op}: {why}")),
         // A tangent blend that cannot follow the moved faces, in solidcore's words (#18575).
         SmError::BlendsNotFollowed { exact: false, why } => KernelError::Failed(format!("not supported yet: SMLib {op}: {why}")),
         SmError::BlendsNotFollowed { exact: true, why } => {
@@ -95,21 +98,31 @@ pub(crate) fn run(
     wall: Option<f64>,
     op: impl FnOnce(&Brep) -> std::result::Result<Brep, SmError>,
 ) -> Result<(Body, Option<History>)> {
-    use crate::validation::{Checked, Step};
+    run_ordered(name, b, wall, |tagged, _| op(tagged))
+}
+
+/// Like [`run`], also passing the operand's SMLib-to-record [`solidcraft_smlib::history::Order`]
+/// so the operation can name edges directly by SMLib index.
+pub(crate) fn run_ordered(
+    name: &str,
+    b: &Body,
+    wall: Option<f64>,
+    op: impl FnOnce(&Brep, Option<&solidcraft_smlib::history::Order>) -> std::result::Result<Brep, SmError>,
+) -> Result<(Body, Option<History>)> {
+    use crate::validation::Step;
     b.require_brep(name)?;
     let (sb, ob) = smlib_body_ordered(b)?;
     let tagged = sb.tagged(0).map_err(|e| failed(name, "tag", e))?;
-    let r = op(&tagged).map_err(|e| refused(name, wall, e))?;
+    let r = op(&tagged, ob.as_ref()).map_err(|e| refused(name, wall, e))?;
     let step = crate::validation::step();
-    if step == Step::Check {
-        let check = r.check(CheckLevel::All).map_err(|e| failed(name, "check", e))?;
-        if !check.is_valid() {
-            let input = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
-            let what = if input { "SMLib's check refuses the result (the body already fails it)" } else { "SMLib's check refuses the result" };
-            return Err(failed(name, what, check));
-        }
-    }
     let (body, or) = body_from_smlib_ordered(&r)?;
+    if step == Step::Check
+        && let crate::validation::DecodedCheck::Refused(detail) = crate::validation::check_decoded(&format!("SMLib {name}"), body.record())?
+    {
+        let input = sb.check(CheckLevel::All).is_ok_and(|c| !c.is_valid());
+        let what = if input { "SMLib's check refuses the result (the body already fails it)" } else { "SMLib's check refuses the result" };
+        return Err(failed(name, what, detail));
+    }
     let history = match (ob, or) {
         (Some(ob), Some(or)) => r.history().map_err(|e| failed(name, "history", e))?.history(&[ob], &or).map(Some).unwrap_or_else(|e| {
             log::debug!(target: "smlib", "{name} history: {e}");
@@ -117,7 +130,7 @@ pub(crate) fn run(
         }),
         _ => None,
     };
-    let body = if step == Step::Defer { body.left_unchecked(&format!("SMLib {name}"), Checked::AsIs, r, &[b]) } else { body };
+    let body = if step == Step::Defer { body.left_unchecked(&format!("SMLib {name}"), &[b]) } else { body };
     Ok((body, history))
 }
 
@@ -234,10 +247,31 @@ pub(crate) fn thicken(b: &Body, thickness: f64, symmetric: bool) -> Result<Body>
     Ok(r.with_checked_history(h, &record::counts(&[b])))
 }
 
+/// [`crate::offset_solid`] through SMLib: the closed solid `b` grown by `distance` along its
+/// faces' outward normals (negative: shrunk), the convex edges extended or (`round`) rounded with
+/// `distance` as the radius. Each moved face is the face itself, moved (Modified); a round SMLib
+/// makes along an edge or at a corner is new.
+pub(crate) fn offset_solid(b: &Body, distance: f64, round: bool) -> Result<Body> {
+    if !(distance.is_finite() && distance.abs() > 1e-9 && distance.abs() <= 1e6) {
+        return Err(KernelError::Invalid("the offset distance must be non-zero and at most 1e6 mm".into()));
+    }
+    let (r, h) = run("offset", b, None, |s| s.offset_solid(distance, round))?;
+    let h = h.map(|mut h| {
+        for f in &mut h.faces {
+            if f.change == Change::Kept && f.origins.iter().any(|o| matches!(o, FaceOrigin::Face { operand: 0, .. })) {
+                f.change = Change::Modified;
+            }
+        }
+        h
+    });
+    Ok(r.with_checked_history(h, &record::counts(&[b])))
+}
+
 /// [`crate::draft`] through SMLib: the faces under the points `at` (flat, parallel to `pull`)
 /// tilted by `angle` about their lines on `neutral`, leaning in going along `pull`; the faces
 /// around them extended or trimmed to meet them. A tilted face is the face itself (Modified).
-/// A face SMLib can't draft (not flat, or not parallel to the pull) is "not supported yet".
+/// A face SMLib can't draft (neither flat nor a cone or cylinder about the pull, or a plane not
+/// parallel to it) is "not supported yet", naming which.
 pub(crate) fn draft(b: &Body, at: &[Vec3], neutral: &solidcore_record::Plane, pull: Vec3, angle: f64) -> Result<Body> {
     if !angle.is_finite() || angle.abs() >= std::f64::consts::FRAC_PI_2 - 1e-3 {
         return Err(KernelError::Invalid("draft angle must be between −90° and 90°".into()));

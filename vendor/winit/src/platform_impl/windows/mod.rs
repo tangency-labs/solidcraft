@@ -2,10 +2,10 @@ use smol_str::SmolStr;
 use windows_sys::Win32::Foundation::{HANDLE, HWND};
 use windows_sys::Win32::UI::WindowsAndMessaging::{HMENU, WINDOW_LONG_PTR_INDEX};
 
-// SolidCraft: `set_quiet_window_move` (`platform::windows`).
+// SolidCraft: `set_quiet_window_move` and `set_touchpad_wheels` (`platform::windows`).
 pub(crate) use self::event_loop::{
-    set_quiet_window_move, ActiveEventLoop, EventLoop, EventLoopProxy, OwnedDisplayHandle,
-    PlatformSpecificEventLoopAttributes,
+    set_quiet_window_move, set_touchpad_wheels, ActiveEventLoop, EventLoop, EventLoopProxy,
+    OwnedDisplayHandle, PlatformSpecificEventLoopAttributes,
 };
 pub(crate) use self::icon::{SelectedCursor, WinIcon};
 pub(crate) use self::keyboard::{physicalkey_to_scancode, scancode_to_physicalkey};

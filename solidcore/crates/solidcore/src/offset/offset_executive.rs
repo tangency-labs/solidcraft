@@ -13,6 +13,7 @@ mod attributes;
 mod cavity;
 mod crossing_loops;
 mod edgeuse;
+mod empty_lens;
 mod extinct_branches;
 mod face;
 mod merge;

@@ -11,13 +11,14 @@ use egui::text::{LayoutJob, TextFormat};
 use egui::{Color32, FontId, Stroke};
 
 /// Opens a pill's marker.
-pub const OPEN: char = '«';
+pub const OPEN: char = solidcraft_engine::selection_context::PILL_OPEN;
 /// Closes it.
-pub const CLOSE: char = '»';
+pub const CLOSE: char = solidcraft_engine::selection_context::PILL_CLOSE;
 /// The longest marker (characters) that counts as one; anything longer is plain text.
 const MAX_MARKER: usize = 120;
 /// The longest label a marker carries.
-const MAX_LABEL: usize = 40;
+#[cfg(test)]
+const MAX_LABEL: usize = solidcraft_engine::selection_context::PILL_MAX_LABEL;
 /// The most digits of a pill's number.
 const MAX_DIGITS: usize = 6;
 
@@ -76,10 +77,7 @@ fn marker_at(chars: &[char], start: usize) -> Option<Span> {
 
 /// The marker for pill `id` with `label` (made safe: no brackets, one line, a bounded length).
 pub fn marker(id: u32, label: &str) -> String {
-    let clean: String = label.chars().map(|c| if c == OPEN || c == CLOSE || c.is_control() { ' ' } else { c }).collect();
-    let clean = clean.split_whitespace().collect::<Vec<_>>().join(" ");
-    let clean = if clean.chars().count() > MAX_LABEL { format!("{}…", clean.chars().take(MAX_LABEL - 1).collect::<String>()) } else { clean };
-    format!("{OPEN}{id}: {clean}{CLOSE}")
+    solidcraft_engine::selection_context::pill_marker(id, label)
 }
 
 /// The byte index of character `n` in `text` (the end of the text past its last character).

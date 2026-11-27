@@ -1,5 +1,5 @@
+use crate::drawing::measure::{LinearDirection, Reading};
 use serde_json::json;
-use solidcraft_geom::drawing_measure::{LinearDirection, Reading};
 use solidcraft_geom::drawing_sheet::{Margins, Orientation, PaperSize, SheetSize};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
 use solidcraft_geom::paper::line::LineGroup;
@@ -56,7 +56,7 @@ pub(crate) fn plate() -> Drawing {
     let (assembly, bolt_sheet) = (d.sheets[0].id, d.sheets[1].id);
     let mut add = |d: &mut Drawing, sheet, kind, place, settings, reference_shown_percent| {
         let id = d.allocate_id(&mut id_source).unwrap();
-        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent, label: None })]);
+        d.add_views([Arc::new(View { id, sheet, kind, place, settings, reference_shown_percent, centre_marks: None, label: None })]);
         id
     };
     let half = ViewOverrides { scale: Some("1:2".parse().unwrap()), ..ViewOverrides::default() };
@@ -462,7 +462,7 @@ fn a_sheets_title_block_outline() {
     assert_eq!(d.sheets[0].title_block_outline().unwrap(), None);
     Arc::make_mut(&mut d.sheets[0]).title_block = Some(solidcraft_geom::title_block::default_block());
     let outline = d.sheets[0].title_block_outline().unwrap().unwrap();
-    assert_eq!((outline.min, outline.max), (Vec2::new(230.0, 10.0), Vec2::new(410.0, 59.0)));
+    assert_eq!((outline.min, outline.max), (Vec2::new(230.0, 10.0), Vec2::new(410.0, 71.0)));
 }
 
 /// The most a drawing's blocks can ask of every edit's check: 1000 sheets, each with a 64-cell block.
@@ -652,6 +652,33 @@ fn a_sheet_goes_with_everything_on_it() {
     moved.validate().unwrap();
     moved.remove_sheet(assembly);
     assert!(moved.validate().unwrap_err().to_string().contains("parent"), "{:?}", moved.validate());
+}
+
+/// A list edited by number keeps its other items in order, and refuses a number past its end, one
+/// given twice and a count its rule refuses, each before the count is asked when it comes first.
+#[test]
+fn a_list_is_edited_by_number_before_anything_is_added() {
+    let list = ["a", "b", "c", "d"];
+    let counted = std::cell::Cell::new(None);
+    let count = |n: usize| {
+        counted.set(Some(n));
+        Ok(())
+    };
+    assert_eq!(kept_by_number(&list, &[3, 0], 2, count).unwrap(), ["b", "c"]);
+    assert_eq!(counted.get(), Some(4), "the count is of the kept and the added together");
+    assert_eq!(kept_by_number(&list, &[], 0, |_| Ok(())).unwrap(), list);
+    let empty: [&str; 0] = [];
+    assert!(matches!(kept_by_number(&list, &[4], 0, |_| Ok(())), Err(ByNumber::Past { last: Some(3) })));
+    assert!(matches!(kept_by_number(&empty, &[0], 0, |_| Ok(())), Err(ByNumber::Past { last: None })));
+    assert!(matches!(kept_by_number(&list, &[1, 2, 1], 0, |_| Ok(())), Err(ByNumber::Twice)));
+    assert!(matches!(kept_by_number(&list, &[0, 1, 2, 3, 0], 0, |_| Ok(())), Err(ByNumber::Twice)), "more numbers than items");
+    let refused = kept_by_number(&list, &[0], 9, |n| require(n <= 4, || format!("at most 4, not {n}")));
+    assert!(matches!(&refused, Err(ByNumber::Count(DocError::Invalid(why))) if why == "at most 4, not 12"), "{refused:?}");
+    // A hostile list of numbers, refused in one pass and never sorted.
+    counted.set(None);
+    let many = vec![1; 100_000];
+    assert!(matches!(kept_by_number(&list, &many, 0, count), Err(ByNumber::Twice)));
+    assert_eq!(counted.get(), None, "a refused edit never reaches the count");
 }
 
 #[test]
@@ -1389,13 +1416,19 @@ fn a_view_sketch_goes_with_its_view_and_with_its_views_sheet() {
     assert!(why.contains("owner"), "{why}");
 }
 
-/// A drawing saved before view sketches (its `format_pending` lacks `view-sketches`) opens with each
-/// sheet sketch's `sheet` as its owner, keeps its id and geometry, and saves the same bytes again.
+/// A drawing saved before view sketches (format 5, which they came with, its `format_pending`
+/// lacking `view-sketches`) opens with each sheet sketch's `sheet` as its owner, keeps its id and
+/// geometry, and saves the same bytes again.
 #[test]
 fn an_older_drawings_sheet_sketches_open_with_their_sheet_as_owner() {
     let current = file(&read(&view_sketch_file()).unwrap());
     let mut older = current.clone();
-    older["format_pending"] = json!(DRAWING.pending_names().into_iter().filter(|name| name != "view-sketches").collect::<Vec<_>>());
+    // The drawing as an older build saved it: format 5, the one that holds the sheet-owner change
+    // (`drawing/format/v5/view-sketches.rs`), with an empty list of the changes it has, so that
+    // change runs as it opens. Not `DRAWING.current()` with `pending_names()` less this change:
+    // another pending change moves the current number past 5, and the change never ran.
+    older["format"] = json!(DRAWING.format_string(5));
+    older["format_pending"] = json!([]);
     let mut record = current["sketches"][1].clone();
     let object = record.as_object_mut().unwrap();
     object.remove("owner");
@@ -1978,7 +2011,7 @@ fn w38d_record_fixture(hole: bool) -> (crate::Document, u64, crate::WholeProfile
         .unwrap()
         .boundary;
     let region = drawing.sheet_fill_region(&doc, 41, &boundary).unwrap();
-    drawing.patterns.push(Arc::new(PatternSnapshot { id: 71, pattern: solidcore_record::hatch::Pattern::lines_45() }));
+    drawing.patterns.push(Arc::new(PatternSnapshot { id: 71, pattern: crate::drawing::hatch::Pattern::lines_45() }));
     drawing.fills.push(Arc::new(SketchFill { id: 70, sketch: 41, boundary: boundary.clone(), paint: FillPaint::Solid, last_region: region }));
     drawing.validate().unwrap();
     doc.put_drawing(Arc::new(drawing));
@@ -2272,6 +2305,7 @@ fn sheet_sketch_unsupported_equations_and_centerlines_are_refused_before_solving
                 end: "1".into(),
                 tolerance: 0.01,
                 variable_unit: solidcraft_sketch::VariableUnit::Number,
+                radians_trig: false,
             });
             "equations"
         };

@@ -25,11 +25,6 @@ impl Iv {
         Self { lo: x, hi: x }
     }
 
-    /// `[x - e, x + e]`, rounded outward.
-    pub fn around(x: f64, e: f64) -> Self {
-        Self::out(x - e, x + e)
-    }
-
     fn out(lo: f64, hi: f64) -> Self {
         Self {
             lo: lo.next_down(),
@@ -93,11 +88,6 @@ impl Iv {
             self.lo.abs().min(self.hi.abs())
         }
     }
-
-    /// Whether `x` lies in the interval.
-    pub fn contains(self, x: f64) -> bool {
-        self.lo <= x && x <= self.hi
-    }
 }
 
 /// `a + b` exactly, as the rounded sum and its error (Knuth's `TwoSum`, round to nearest).
@@ -105,6 +95,34 @@ fn two_sum(a: f64, b: f64) -> (f64, f64) {
     let s = a + b;
     let bb = s - a;
     (s, (a - (s - bb)) + (b - bb))
+}
+
+/// `sin` and `cos` of `deg` degrees, enclosed: `x = deg pi / 180` with `pi` enclosed by
+/// its neighbours, then the Taylor series summed in intervals until the next term is
+/// below `1e-30`, plus that next term's magnitude, which bounds the Lagrange remainder
+/// `|x|^m / m!` of the series cut before power `m`.
+pub(crate) fn sin_cos_deg(deg: f64) -> (Iv, Iv) {
+    let pi = Iv {
+        lo: std::f64::consts::PI.next_down(),
+        hi: std::f64::consts::PI.next_up(),
+    };
+    let x = Iv::exact(deg).mul(pi).div(Iv::exact(180.0));
+    let x2 = x.mul(x);
+    let series = |first: Iv, power: usize| {
+        let (mut sum, mut term, mut m) = (Iv::ZERO, first, power);
+        loop {
+            sum = sum.add(term);
+            term = Iv::ZERO
+                .sub(term.mul(x2))
+                .div(Iv::exact(((m + 1) * (m + 2)) as f64));
+            m += 2;
+            if m > 2 + x.mag() as usize && term.mag() < 1e-30 {
+                let r = term.mag();
+                return sum.add(Iv { lo: -r, hi: r });
+            }
+        }
+    };
+    (series(x, 1), series(Iv::exact(1.0), 0))
 }
 
 /// `a b` exactly, as the rounded product and its error (the fused multiply-add rounds
@@ -295,25 +313,4 @@ pub(crate) fn homogeneous(net: &[Vec<CPoint>]) -> [Bern; 4] {
         }
     }
     out
-}
-
-impl Bern {
-    /// The value at `(u, v)` by de Casteljau in interval arithmetic: it holds the
-    /// polynomial's exact value there.
-    pub(crate) fn at(&self, u: f64, v: f64) -> Iv {
-        let at = |row: &[Iv], t: f64| {
-            let mut work = row.to_vec();
-            let (t, s) = (Iv::exact(t), Iv::exact(1.0).sub(Iv::exact(t)));
-            for r in 1..work.len() {
-                for i in 0..work.len() - r {
-                    work[i] = work[i].mul(s).add(work[i + 1].mul(t));
-                }
-            }
-            work[0]
-        };
-        let cols: Vec<Iv> = (0..=self.p)
-            .map(|i| at(&self.c[i * (self.q + 1)..(i + 1) * (self.q + 1)], v))
-            .collect();
-        at(&cols, u)
-    }
 }

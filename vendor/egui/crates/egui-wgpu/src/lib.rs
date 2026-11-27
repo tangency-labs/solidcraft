@@ -70,6 +70,68 @@ pub(crate) fn startup_step(step: &'static str, detail: &str) {
     }
 }
 
+/// SolidCraft: a frame whose texture took at least this long to acquire stalled. wgpu waits at
+/// most a second for the swap chain's next image, and D3D12 then goes on as if it had come: a
+/// hung GPU shows as frames that each wait that second and never reach the screen, a white
+/// window with nothing reported (#3321).
+pub const STALLED_ACQUIRE: std::time::Duration = std::time::Duration::from_millis(950);
+
+static STALLED_FRAMES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// SolidCraft: how many of the main window's frames in a row stalled acquiring their texture
+/// ([`STALLED_ACQUIRE`]). Other viewports (the agent chat's window) don't count: a frame on time
+/// there would start a stalled main window's count over.
+pub fn stalled_frames() -> u32 {
+    STALLED_FRAMES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The frames in a row that stalled, after one whose texture took `elapsed`. Only the `winit`
+/// painter acquires textures.
+#[cfg_attr(not(feature = "winit"), allow(dead_code))]
+fn count_stall(stalled: u32, elapsed: std::time::Duration) -> u32 {
+    if elapsed >= STALLED_ACQUIRE {
+        stalled.saturating_add(1)
+    } else {
+        0
+    }
+}
+
+/// The main window's acquire took `elapsed`; `frame`: it gave a texture to draw to, so its surface
+/// works again, if it didn't. An acquire that gives none (`Outdated`, `Validation`) still counts
+/// as a stall if it waited, but doesn't end the time without a texture ([`refused_for`]): a
+/// surface that configures, gives no frame and is refused again would otherwise start that time
+/// over each round (#3321 review).
+#[cfg_attr(not(feature = "winit"), allow(dead_code))]
+pub(crate) fn note_acquire(elapsed: std::time::Duration, frame: bool) {
+    let stalled = count_stall(stalled_frames(), elapsed);
+    STALLED_FRAMES.store(stalled, std::sync::atomic::Ordering::Relaxed);
+    if frame && let Ok(mut since) = REFUSED_SINCE.lock() {
+        *since = None;
+    }
+}
+
+static REFUSED_SINCE: std::sync::Mutex<Option<web_time::Instant>> = std::sync::Mutex::new(None);
+
+/// SolidCraft: how long the main window has gone without acquiring a texture because its surface
+/// refuses its configuration (or waits for a refused one's retry, #1935); `None` while it gets
+/// textures. Those frames are skipped before the acquire, so they never count as stalled: a
+/// surface refused for good after a GPU reset leaves a blank window with nothing else to show
+/// for it (#3321).
+pub fn refused_for() -> Option<std::time::Duration> {
+    REFUSED_SINCE.lock().ok().and_then(|since| *since).map(|since| since.elapsed())
+}
+
+/// The main window skipped a frame at `now` on a refused configure. That frame ends the stalled
+/// streak: stalls before and after a refusal aren't frames in a row ([`refused_for`] counts
+/// the refusal itself).
+#[cfg_attr(not(feature = "winit"), allow(dead_code))]
+pub(crate) fn note_refused(now: web_time::Instant) {
+    STALLED_FRAMES.store(0, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut since) = REFUSED_SINCE.lock() {
+        since.get_or_insert(now);
+    }
+}
+
 /// An error produced by egui-wgpu.
 #[derive(thiserror::Error, Debug)]
 pub enum WgpuError {
@@ -138,8 +200,8 @@ impl SurfaceConfig {
 /// A lost device can't be used again. wgpu only learns of the loss when a call into the driver
 /// fails: from then on every call on the device fails quietly, and the device's lost callback
 /// marks this. But a queue write that is the first call to meet the loss panics inside wgpu
-/// (`PendingWrites::activate`), so the painter first probes the device ([`DeviceLost::probe`]):
-/// the probe meets the loss instead, and the frame's uploads are skipped.
+/// (`PendingWrites::activate`), so the painter survives that panic ([`DeviceLost::survive`]),
+/// which probes the device to tell a loss from any other panic.
 #[derive(Clone, Debug, Default)]
 pub struct DeviceLost {
     lost: Arc<std::sync::atomic::AtomicBool>,
@@ -202,10 +264,10 @@ impl DeviceLost {
     }
 
     /// Run `draw`, GPU work on this device, and survive a panic it meets once the device is lost:
-    /// `None` then. The driver resets a device at any moment, so a reset can land after the
-    /// probe and a queue write (or the present) still be the first call to meet it, which panics
-    /// inside wgpu (`PendingWrites::activate` unwraps `Lost`, #10240). After such a panic the
-    /// probe meets the loss and marks it. Any other panic carries on unwinding.
+    /// `None` then. The driver resets a device at any moment, and a queue write (or the present)
+    /// can be the first call to meet it, which panics inside wgpu (`PendingWrites::activate`
+    /// unwraps `Lost`, #10240). After such a panic the probe meets the loss and marks it. Any
+    /// other panic carries on unwinding.
     pub fn survive<R>(
         &self,
         device: &wgpu::Device,
@@ -229,9 +291,9 @@ impl DeviceLost {
 /// Dropping or reconfiguring that surface later (the window closing as the app restarts after the
 /// loss) then panics in wgpu-hal: "Trying to destroy a SwapchainAcquireSemaphore that is still in
 /// use by a SurfaceTexture". So the frame keeps a second handle to its texture, and once the frame
-/// is gone that handle is destroyed ([`FreeSurfaceTexture`]), which takes the image (and its
-/// semaphores) back from the surface, lost device or not. After a present or discard that worked,
-/// the image is already back and the destroy does nothing.
+/// is gone on a lost device that handle is destroyed ([`FreeSurfaceTexture`]), which takes the
+/// image (and its semaphores) back from the surface. On a working device the present or discard
+/// gives the image back, so nothing more is done.
 ///
 /// The order is the struct's: Rust drops fields in declaration order, so [`Self::frame`] always
 /// goes before the texture handle is destroyed, and [`Self::present`] presents before it.
@@ -242,11 +304,12 @@ pub struct AcquiredFrame<F, T: FreeSurfaceTexture> {
 }
 
 impl<F, T: FreeSurfaceTexture> AcquiredFrame<F, T> {
-    /// `texture` is a second handle to `frame`'s texture.
-    pub fn new(frame: F, texture: T) -> Self {
+    /// `texture` is a second handle to `frame`'s texture; `lost` is the device's
+    /// [`DeviceLost::flag`], read once the frame is gone.
+    pub fn new(frame: F, texture: T, lost: Arc<std::sync::atomic::AtomicBool>) -> Self {
         Self {
             frame,
-            texture: FreeOnDrop(texture),
+            texture: FreeOnDrop { texture, lost },
         }
     }
 
@@ -272,12 +335,17 @@ impl FreeSurfaceTexture for wgpu::Texture {
     }
 }
 
-/// Frees its texture when dropped, also while a panic unwinds.
-struct FreeOnDrop<T: FreeSurfaceTexture>(T);
+/// Frees its texture when dropped on a lost device, also while a panic unwinds.
+struct FreeOnDrop<T: FreeSurfaceTexture> {
+    texture: T,
+    lost: Arc<std::sync::atomic::AtomicBool>,
+}
 
 impl<T: FreeSurfaceTexture> Drop for FreeOnDrop<T> {
     fn drop(&mut self) {
-        self.0.free();
+        if self.lost.load(std::sync::atomic::Ordering::Acquire) {
+            self.texture.free();
+        }
     }
 }
 
@@ -898,6 +966,42 @@ mod msaa_tests {
         assert_eq!(super::msaa_counts(F::MULTISAMPLE_X4, None), [1]);
         assert_eq!(super::clamp_msaa_samples(&[], 8), 1);
     }
+
+    /// Frames that each waited out wgpu's one-second acquire count up; one on time starts over
+    /// (#3321).
+    #[test]
+    fn frames_that_wait_out_the_acquire_count_as_stalled() {
+        use std::time::Duration;
+        let second = Duration::from_millis(1000);
+        let stalled = (0..3).fold(0, |n, _| super::count_stall(n, second));
+        assert_eq!(stalled, 3);
+        assert_eq!(super::count_stall(stalled, Duration::from_millis(16)), 0);
+        // A slow frame isn't a stall: the image came before the timeout.
+        assert_eq!(super::count_stall(0, Duration::from_millis(400)), 0);
+        assert_eq!(super::count_stall(u32::MAX, second), u32::MAX);
+    }
+
+    /// Four stalls, then frames skipped on a refused configure, then one stall: one in a row,
+    /// not five (CodeRabbit on #4016). Only this test drives the main window's counters.
+    #[test]
+    fn a_refused_configure_ends_the_stalled_streak() {
+        use std::time::Duration;
+        let second = Duration::from_millis(1000);
+        (0..4).for_each(|_| super::note_acquire(second, true));
+        assert_eq!(super::stalled_frames(), 4);
+        super::note_refused(web_time::Instant::now());
+        assert_eq!(super::stalled_frames(), 0);
+        assert!(super::refused_for().is_some());
+        // An acquire that gives no texture (`Outdated`, `Validation`) doesn't end the time
+        // without one (#3321 review); one that does, does.
+        super::note_acquire(Duration::from_millis(16), false);
+        assert!(super::refused_for().is_some(), "no texture yet");
+        super::note_acquire(second, true);
+        assert_eq!(super::stalled_frames(), 1);
+        assert!(super::refused_for().is_none(), "a texture ends the refusal");
+        super::note_acquire(Duration::from_millis(16), true);
+        assert_eq!(super::stalled_frames(), 0);
+    }
 }
 
 /// SolidCraft: run `f` with `device`'s errors captured, and the first error it caused. Uncaptured,
@@ -1151,14 +1255,19 @@ mod device_lost_tests {
 
     /// A window's surface as wgpu-core treats the image of an acquired frame: a present or a
     /// discard gives it back only on a valid device, a destroy of the texture always (#7148).
+    /// `lost` is the device's lost flag.
     #[derive(Default)]
     struct Surface {
-        lost: std::cell::Cell<bool>,
+        lost: std::sync::Arc<std::sync::atomic::AtomicBool>,
         image_held: std::cell::Cell<bool>,
         calls: std::cell::RefCell<Vec<&'static str>>,
     }
 
     impl Surface {
+        fn is_lost(&self) -> bool {
+            self.lost.load(std::sync::atomic::Ordering::Acquire)
+        }
+
         fn call(&self, name: &'static str, gives_back: bool) {
             self.calls.borrow_mut().push(name);
             if gives_back {
@@ -1176,7 +1285,7 @@ mod device_lost_tests {
     impl Drop for Frame<'_> {
         fn drop(&mut self) {
             if !self.presented {
-                self.surface.call("discard", !self.surface.lost.get());
+                self.surface.call("discard", !self.surface.is_lost());
             }
         }
     }
@@ -1205,11 +1314,12 @@ mod device_lost_tests {
                 presented: false,
             },
             Texture(surface),
+            surface.lost.clone(),
         );
         match end {
             End::Present => frame.present(|mut frame| {
                 frame.presented = true;
-                surface.call("present", !surface.lost.get());
+                surface.call("present", !surface.is_lost());
             }),
             End::Drop => drop(frame),
             End::Panic => {
@@ -1224,25 +1334,24 @@ mod device_lost_tests {
 
     /// However a frame ends, on a valid or a lost device, the surface has its image back by the
     /// time the frame is gone, so dropping or reconfiguring the surface can't meet a semaphore
-    /// still in use (#7148). The texture is freed only after the present or discard: freed first,
-    /// a valid device's present or discard would find it destroyed.
+    /// still in use (#7148). On a valid device the present or discard gives it back and the
+    /// texture is left alone; on a lost one the texture is freed, after the present or discard.
     #[test]
     fn a_frame_gives_its_image_back_however_it_ends_even_on_a_lost_device() {
         for lost in [false, true] {
             for end in [End::Present, End::Drop, End::Panic] {
                 let surface = Surface::default();
-                surface.lost.set(lost);
+                surface
+                    .lost
+                    .store(lost, std::sync::atomic::Ordering::Release);
                 run_frame(&surface, end);
                 let first = if matches!(end, End::Present) {
                     "present"
                 } else {
                     "discard"
                 };
-                assert_eq!(
-                    *surface.calls.borrow(),
-                    [first, "free"],
-                    "lost {lost}, {end:?}"
-                );
+                let expected: &[&str] = if lost { &[first, "free"] } else { &[first] };
+                assert_eq!(*surface.calls.borrow(), expected, "lost {lost}, {end:?}");
                 assert!(!surface.image_held.get(), "lost {lost}, {end:?}");
             }
         }

@@ -194,11 +194,13 @@ pub struct OccurrenceDof {
     pub dof: usize,
 }
 
-/// What `joint.edit` returns: the joints that disagree with the solved placement, and those the
-/// solve could not apply. Unless `quiet`, also each occurrence's degrees of freedom and the
-/// occurrences fixed in place.
+/// What `joint.edit` returns: the edited joint, the joints that disagree with the solved
+/// placement, and those the solve could not apply. Unless `quiet`, also each occurrence's degrees
+/// of freedom and the occurrences fixed in place.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct EditJointResult {
+    /// The edited joint, by id.
+    pub joint: u64,
     pub conflicts: Vec<JointProblem>,
     pub errors: Vec<JointProblem>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -428,12 +430,50 @@ impl JsonSchema for JointLimits {
 #[derive(Clone, Debug, PartialEq)]
 pub struct JointOriginArg(pub Value);
 
+/// Validate the keys of a sketch-point joint origin (`{sketch: id|name, point | curve, ...}`),
+/// shared by `MakeJointOriginParams::check` and `JointOriginArg::read`.
+fn check_sketch_origin(m: &Map<String, Value>) -> Result<(), String> {
+    match m.get("sketch") {
+        Some(Value::Number(n)) if n.as_u64().is_some() => {}
+        Some(Value::String(s)) if !s.is_empty() => {}
+        _ => return Err("`sketch` must be a sketch id or name".into()),
+    }
+    if let Some(occ) = m.get("occurrence").filter(|o| !o.is_null()) {
+        OccurrenceKey::read(occ)?;
+    }
+    let has_point = m.get("point").is_some_and(|p| !p.is_null());
+    let has_curve = m.get("curve").is_some_and(|c| !c.is_null());
+    if has_point && has_curve {
+        return Err("a sketch origin takes `point` or `curve`, not both".into());
+    }
+    if has_point {
+        match m.get("point").and_then(Value::as_str) {
+            Some(p) if !p.is_empty() && p.len() <= 512 => {}
+            _ => return Err("`point` must be a sketch point id (1 to 512 characters)".into()),
+        }
+    } else if has_curve {
+        match m.get("curve").and_then(Value::as_str) {
+            Some(c) if !c.is_empty() && c.len() <= 512 => {}
+            _ => return Err("`curve` must be a sketch curve id (1 to 512 characters)".into()),
+        }
+    } else {
+        return Err("a sketch origin needs `point` (e.g. \"c1.center\", \"p1\") or `curve` (a circle, arc or ellipse id)".into());
+    }
+    origin_x(m)?;
+    origin_end(m, false)
+}
+
 impl JointOriginArg {
     fn read(v: &Value) -> Result<Self, String> {
         if v.is_string() {
             return Ok(JointOriginArg(v.clone()));
         }
         check_secondary_axis_request(v)?;
+        if v.get("sketch").is_some() {
+            let m = v.as_object().ok_or("a joint origin must be an object")?;
+            check_sketch_origin(m)?;
+            return Ok(JointOriginArg(v.clone()));
+        }
         let named = ["face", "circle"].iter().any(|k| v.get(*k).and_then(Value::as_str).is_some());
         let picked = ["face", "circle", "edge", "point"].iter().any(|k| v.get(*k).and_then(params::vec3).is_some());
         // A plane or axis side, as the handler's plane_origin and axis_origin read them: a name
@@ -464,19 +504,21 @@ impl JsonSchema for JointOriginArg {
         let point = json!({"anyOf": forms});
         let at = |description: &str| json!({"description": description, "anyOf": forms});
         json_schema!({
-            "description": "A joint origin: the name of a joint origin made with joint.origin, or an object that says where it is, in world coordinates. Give one of face, circle, edge, point, plane or axis (a point [x, y, z]; for face and circle also a face's name; a plane or axis by name or definition object), or a frame {origin, z, x?}.",
+            "description": "A joint origin: the name of a joint origin made with joint.origin, or an object that says where it is, in world coordinates. Give one of face, circle, edge, point, sketch (with point or curve), plane or axis (a point [x, y, z]; for face and circle also a face's name; a plane or axis by name or definition object), or a frame {origin, z, x?}.",
             "anyOf": [
                 {"type": "string", "description": "The name of a joint origin."},
                 {
                     "type": "object",
                     "allOf": [secondary_axis_origin_schema()],
                     "properties": {
-                        "occurrence": {"description": "The occurrence the origin is on, by id or name. Default: found from the point, or the named face's component.", "type": ["number", "string"]},
+                        "occurrence": {"description": "The occurrence the origin is on, by id or name. Default: found from the point, or the named face's or sketch's component.", "type": ["number", "string"]},
                         "path": {"description": "The placement picked, as occurrence ids from the top of the assembly down to occurrence: says which copy of a sub-assembly placed more than once.", "anyOf": [path, {"type": "null"}]},
-                        "face": {"description": "The centre of a planar face: a point on it [x, y, z], or its name.", "anyOf": [point, {"type": "string"}]},
+                        "face": {"description": "The centre of a planar face, or a round end of a round face: a point on it [x, y, z], or its name.", "anyOf": [point, {"type": "string"}]},
                         "circle": {"description": "The centre of a round end: a point [x, y, z] on its wall, rim or centre, or the round face's name.", "anyOf": [point, {"type": "string"}]},
                         "edge": at("A point [x, y, z] on an edge of a planar face."),
-                        "point": at("A point [x, y, z]."),
+                        "point": {"description": "A point [x, y, z], or with sketch a sketch point id (e.g. \"c1.center\", \"p1\", \"origin\").", "anyOf": [point, {"type": "string", "minLength": 1}]},
+                        "sketch": {"description": "A sketch on the component, by id or name, paired with point or curve.", "type": ["number", "string"]},
+                        "curve": {"description": "With sketch: a circle, arc or ellipse curve id whose centre the origin snaps to.", "type": "string", "minLength": 1},
                         "plane": {"description": "The plane to sit on: \"XY\", \"XZ\" or \"YZ\" (the design's own), \"o:<ids>/origin/<item>\" (a placement's origin plane), a construction plane's name, or a plane definition object.", "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]},
                         "axis": {"description": "The axis to sit on: \"X\", \"Y\" or \"Z\", \"o:<ids>/origin/<item>\" (a placement's origin axis), a construction axis's name, or an axis definition object.", "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]},
                         "frame": {"description": "An explicit frame {origin: [x, y, z], z: [x, y, z], x?: [x, y, z]}.", "type": "object"},
@@ -707,8 +749,8 @@ pub struct CreateConstraintParams {
     #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ConstraintTypeParam")]
     pub kind: Option<ConstraintTypeParam>,
-    /// Side a's reference: a joint origin, as joint.create takes it (a face for a plane, a circle
-    /// for an axis, a point).
+    /// Side a's reference: a joint origin, as joint.create takes it (a planar face or datum plane
+    /// for a plane, a round face, circle or axis for an axis, a point).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointOriginArg")]
     pub a: Option<JointOriginArg>,
@@ -1072,7 +1114,8 @@ pub struct JointAddedResult {
     /// Its name.
     pub name: String,
     /// A value that starts inside its limits, not where it was given: the part moved there as it
-    /// was joined. Left out when there is none.
+    /// was joined; or a joint between two grounded parts that don't meet where it puts them, which
+    /// moves neither (#12867). Left out when there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub warnings: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
@@ -1101,6 +1144,21 @@ pub struct NamedValue {
     pub unit: ValueUnit,
     /// Its limits [min, max] in `unit`, or `null` for none.
     pub limits: Option<[f64; 2]>,
+    /// What a simulator reads for it (`joint.dynamics`), or `null` for none saved.
+    pub dynamics: Option<ValueDynamics>,
+}
+
+/// A joint value's saved dynamics, in SI (`joint.dynamics`); each `null` when not set.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, JsonSchema)]
+pub struct ValueDynamics {
+    /// The most force or torque, in N or N m.
+    pub effort: Option<f64>,
+    /// The highest speed, in m/s or rad/s.
+    pub velocity: Option<f64>,
+    /// Damping, in N s/m or N m s/rad.
+    pub damping: Option<f64>,
+    /// Friction, in N or N m.
+    pub friction: Option<f64>,
 }
 
 /// A joint's type as the replies name it.
@@ -1156,11 +1214,13 @@ impl JsonSchema for SnapShape {
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         let point = json!({"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3});
         json_schema!({
-            "description": "Where a joint origin sits on its component's geometry, as saved: `type` is frame, face_center, circle_center, edge or point, with the keys that type holds: origin, pick, point, z or x as [x, y, z] (x may also be a face reference), face, end, edge and corner as persistent names, and for an edge origin its axis.",
+            "description": "Where a joint origin sits on its component's geometry, as saved: `type` is frame, face_center, circle_center, edge, point or sketch_point, with the keys that type holds: origin, pick, point or z as [x, y, z] (for sketch_point, sketch is the sketch feature id and point is the point reference string), x as [x, y, z] or a reference, face, end, edge and corner as persistent names, and for an edge origin its axis.",
             "type": "object",
             "properties": {
-                "type": {"enum": ["frame", "face_center", "circle_center", "edge", "point"]},
-                "origin": point, "pick": point, "point": point, "z": point,
+                "type": {"enum": ["frame", "face_center", "circle_center", "edge", "point", "sketch_point"]},
+                "origin": point, "pick": point, "z": point,
+                "point": {"anyOf": [point, {"type": "string"}]},
+                "sketch": {"type": "integer", "minimum": 0},
                 "x": {"description": "A direction [x, y, z], or {face, pick?}: a face the turn is taken from."},
                 "face": {"type": "string"}, "end": {"type": "string"}, "edge": {"type": "string"}, "corner": {"type": "string"},
                 "axis": {"type": "object"}
@@ -1571,6 +1631,20 @@ pub struct EdgeReference {
     pub unverified: Option<bool>,
 }
 
+/// A persistent sketch-point reference held by a joint origin (`Snap::SketchPoint`).
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct SketchPointReference {
+    /// The sketch feature id.
+    pub sketch: u64,
+    /// The sketch feature name (empty if the sketch is gone).
+    pub sketch_name: String,
+    /// The point reference within the sketch (e.g. `c1.center`, `p1`, `origin`).
+    pub point: String,
+    /// Why the sketch is missing, when it is gone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// What a reference names.
 #[derive(Debug, Serialize, JsonSchema)]
 #[serde(untagged)]
@@ -1579,11 +1653,13 @@ pub enum Referent {
     Face(FaceReference),
     /// An edge.
     Edge(EdgeReference),
+    /// A sketch point.
+    SketchPoint(SketchPointReference),
 }
 
 /// What part of the snap a reference is.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum ReferenceRole {
     /// The face the origin is on.
     Face,
@@ -1595,6 +1671,8 @@ pub enum ReferenceRole {
     Edge,
     /// The edge that gives an edge origin's corner.
     Corner,
+    /// The sketch point the origin is on.
+    SketchPoint,
 }
 
 /// A persistent name a joint origin holds, with what it refers to.
@@ -2188,6 +2266,7 @@ fn secondary_axis_origin_schema() -> Value {
         {"allOf": [
             {"properties": {"x": secondary_axis_x_schema()}},
             {"anyOf": [
+                {"required": ["sketch"]},
                 {"required": ["plane"]},
                 {"required": ["axis"], "not": {"anyOf": [{"required": ["edge"]}, {"required": ["point"]}]}},
                 {"required": ["face"], "properties": {"face": point}},
@@ -2305,6 +2384,10 @@ pub struct MakeJointOriginParams {
     /// Blank text gives the default. A name already taken is refused.
     #[serde(default)]
     pub name: Option<String>,
+    /// Robot exports write the origin as a frame of its own: an empty link on a fixed joint.
+    /// Default false.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub export_frame: Option<bool>,
     /// The occurrence the origin is on, by id or name. Default: found from the point, or the
     /// named face's component.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2316,8 +2399,9 @@ pub struct MakeJointOriginParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<OccurrencePath>")]
     pub path: Option<Value>,
-    /// The centre of a planar face: a point on it, or its name. The first of `face` and `circle`
-    /// given by name wins; then the first given as a point of `face`, `circle`, `edge` and `point`.
+    /// The centre of a planar face, or a round end of a round face: a point on it, or its name.
+    /// The first of `face` and `circle` given by name wins; then the first given as a point of
+    /// `face`, `circle`, `edge` and `point`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "OriginFace")]
     pub face: Option<Value>,
@@ -2330,10 +2414,20 @@ pub struct MakeJointOriginParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "WorldPoint")]
     pub edge: Option<Value>,
-    /// A point: the frame's origin there, z along `z` (default: the world's z), x along `x`.
+    /// A point: the frame's origin there, z along `z` (default: the world's z), x along `x`; or
+    /// with `sketch`, a sketch point id (e.g. `c1.center`, `p1`, `origin`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "WorldPoint")]
+    #[schemars(with = "OriginFace")]
     pub point: Option<Value>,
+    /// A sketch on the component, by id or name, paired with `point` (a point id or
+    /// `<curve>.center`) or `curve` (a circle, arc or ellipse id).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "IdOrName")]
+    pub sketch: Option<Value>,
+    /// With `sketch`: a circle, arc or ellipse curve id whose centre the origin snaps to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<String>")]
+    pub curve: Option<Value>,
     /// The plane to sit on: `XY`, `XZ` or `YZ` (the design's own), `o:<ids>/origin/<item>` (a
     /// placement's origin plane), a construction plane's name, or a plane definition object. Read
     /// before the other keys: an origin with `plane` sits on the plane.
@@ -2387,7 +2481,7 @@ fn origin_required(schema: &mut Schema) {
     // The handler refuses a call with none of them.
     schema.insert(
         "anyOf".into(),
-        json!([{"required": ["face"]}, {"required": ["circle"]}, {"required": ["edge"]}, {"required": ["point"]}, {"required": ["plane"]}, {"required": ["axis"]}, {"required": ["frame"]}]),
+        json!([{"required": ["face"]}, {"required": ["circle"]}, {"required": ["edge"]}, {"required": ["point"]}, {"required": ["sketch"]}, {"required": ["plane"]}, {"required": ["axis"]}, {"required": ["frame"]}]),
     );
 }
 
@@ -2460,9 +2554,16 @@ fn origin_point(v: Option<&Value>, message: &str) -> Result<(), String> {
 impl MakeJointOriginParams {
     /// The keys `origin_param` reads, in the cases it reads them, in the order it reads them.
     fn check(m: &Map<String, Value>) -> Result<(), String> {
-        // The path is read first, by the same rule `occurrence.move` uses; `null` is left out.
+        if !matches!(m.get("export_frame"), None | Some(Value::Null | Value::Bool(_))) {
+            return Err("`export_frame` must be true or false".into());
+        }
+        // Then the path, by the same rule `occurrence.move` uses; `null` is left out.
         if let Some(path) = m.get("path").filter(|p| !p.is_null()) {
             OccurrencePath::deserialize(path).map_err(|_| "`path` must list 1..64 occurrence ids")?;
+        }
+        // A sketch-point origin: {sketch: id|name, point: "<id>" | curve: "<id>", occurrence?, path?, x?}.
+        if m.get("sketch").is_some() {
+            return check_sketch_origin(m);
         }
         // A plane or axis origin, as plane_origin and axis_origin read them: a name or key, or
         // a definition object. `plane` wins; `axis` is read when no `edge` or `point` is given.
@@ -2555,6 +2656,7 @@ impl<'de> Deserialize<'de> for MakeJointOriginParams {
         // The name is read last, once the origin is made.
         Ok(MakeJointOriginParams {
             name: text(&m, "name")?,
+            export_frame: m.get("export_frame").and_then(Value::as_bool),
             occurrence: m.get("occurrence").and_then(|v| OccurrenceKey::read(v).ok()),
             // Read by the handler's path parser, which `occurrence.move` shares.
             path: raw("path"),
@@ -2562,6 +2664,8 @@ impl<'de> Deserialize<'de> for MakeJointOriginParams {
             circle: raw("circle"),
             edge: raw("edge"),
             point: raw("point"),
+            sketch: raw("sketch"),
+            curve: raw("curve"),
             plane: raw("plane"),
             axis: raw("axis"),
             frame: raw("frame"),
@@ -3137,3 +3241,70 @@ pub struct CamResult {
 #[cfg(test)]
 #[path = "joints_tests.rs"]
 mod tests;
+
+/// Set or clear what a simulator reads for one value of a joint. URDF export writes these; the
+/// joint solver does not use them. Give none of the four to clear the value's dynamics.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct JointDynamicsParams {
+    /// The joint, by id or name.
+    pub joint: IdOrName,
+    /// Which of the joint's values. Default: 0.
+    #[serde(default)]
+    pub index: Option<usize>,
+    /// The most force or torque, in N or N m. Above 0.
+    #[serde(default)]
+    pub effort: Option<f64>,
+    /// The highest speed, in m/s or rad/s. Above 0.
+    #[serde(default)]
+    pub velocity: Option<f64>,
+    /// Damping, in N s/m or N m s/rad. 0 or more.
+    #[serde(default)]
+    pub damping: Option<f64>,
+    /// Friction, in N or N m. 0 or more.
+    #[serde(default)]
+    pub friction: Option<f64>,
+}
+
+/// What `joint.dynamics` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct JointDynamicsResult {
+    /// The joint, by id.
+    pub joint: u64,
+    /// The value set.
+    pub index: usize,
+    /// The effort now saved.
+    pub effort: Option<f64>,
+    /// The velocity now saved.
+    pub velocity: Option<f64>,
+    /// The damping now saved.
+    pub damping: Option<f64>,
+    /// The friction now saved.
+    pub friction: Option<f64>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Mark a named joint origin as a frame of its own in robot exports (a tool tip, a sensor mount),
+/// or stop marking it.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct OriginFrameParams {
+    /// The named joint origin.
+    pub origin: String,
+    /// Whether robot exports write it.
+    pub frame: bool,
+}
+
+/// What `joint.origin_frame` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OriginFrameResult {
+    /// The joint origin.
+    pub origin: String,
+    /// Whether robot exports now write it.
+    pub frame: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}

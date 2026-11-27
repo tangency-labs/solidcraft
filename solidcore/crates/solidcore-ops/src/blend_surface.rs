@@ -222,7 +222,7 @@ fn seams(
     let [from, to] = sides;
     let all = crate::stitch::gather(&[blend, from.body, to.body])?;
     let (sewn, _) = crate::stitch::stitch(all, how.stitch_tolerance)?;
-    let order = native_order(&sewn);
+    let order = sewn.own_order();
     let mut out = Vec::with_capacity(2);
     for middle in middles {
         let Some((edge, _)) = nearest_edge(&sewn, &order, middle)? else {
@@ -248,18 +248,6 @@ fn seams(
         out.push(seam);
     }
     <[SeamReport; 2]>::try_from(out).map_err(|_| Error::Exception)
-}
-
-/// The record order of `body` that is its own lists (faces, edges and vertices as the kernel
-/// holds them).
-fn native_order(body: &Body) -> Order {
-    let g = body.lock();
-    Order {
-        split_edges: 0,
-        faces: g.face_list().to_vec(),
-        edges: g.edge_list().to_vec(),
-        vertices: g.vertex_list().to_vec(),
-    }
 }
 
 /// The edge of `body` (by its index in `order`) nearest `p`, with how far it is (the kernel's
@@ -372,9 +360,9 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
     if !valid {
         return Err(Error::Argument);
     }
-    let (a_order, b_order) = (native_order(a), native_order(b));
+    let (a_order, b_order) = (a.own_order(), b.own_order());
     let (sewn, _) = crate::stitch::stitch(crate::stitch::gather(&[a, b])?, how.tolerance)?;
-    let order = native_order(&sewn);
+    let order = sewn.own_order();
     // the edges the sheets share once sewn: each runs along an edge of both
     let mut shared = Vec::new();
     for i in 0..order.edges.len() {
@@ -393,7 +381,7 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
     }
     let sizes = vec![size; shared.len()];
     let blended = crate::blend::blend(&sewn, kind, &shared, &sizes, &[], crate::Corners::Filled)?;
-    let rounded = native_order(&sewn);
+    let rounded = sewn.own_order();
     // The fillet's faces are the ones the kernel's blend made. Every other face is a sheet's,
     // cut back: the first's where a point inside it lies on the first sheet, else the
     // second's (the blend makes the faces it trims anew, so a face's id does not say which).
@@ -435,7 +423,7 @@ pub fn fillet_sheets(a: &Body, b: &Body, how: &FilletSheets) -> Result<Fillet> {
         None
     };
     // the seams: the fillet's edges that are edges between two faces of the rounded body
-    let fillet_order = native_order(&fillet);
+    let fillet_order = fillet.own_order();
     let mut seams = Vec::new();
     for i in 0..fillet_order.edges.len() {
         let middle = fillet.edge_middle(&fillet_order, i)?;
@@ -525,7 +513,7 @@ pub fn fillet_crossing(a: &Body, b: &Body, how: &FilletCrossing) -> Result<Fille
         return Err(Error::Argument);
     }
     for sheet in [a, b] {
-        if native_order(sheet).faces.len() != 1 {
+        if sheet.own_order().faces.len() != 1 {
             return Err(Error::Unsupported(
                 "a fillet between crossing sheets takes sheets of one face each",
             ));
@@ -545,7 +533,7 @@ pub fn fillet_crossing(a: &Body, b: &Body, how: &FilletCrossing) -> Result<Fille
 /// [`Error::Unsupported`] for a sheet `other` does not cut in two, or a piece its side does not
 /// decide; those of the face removal.
 fn half(cut: &Body, other: &Body, side: SheetSide, tol: f64) -> Result<Body> {
-    let order = native_order(cut);
+    let order = cut.own_order();
     if order.faces.len() < 2 {
         return Err(Error::Unsupported(
             "the sheets do not cross: a fillet between sheets that stand apart is not built",
