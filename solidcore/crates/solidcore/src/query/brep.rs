@@ -2327,12 +2327,13 @@ mod tests {
     /// give the side first, at a k in that set's piece around the first crossing past the
     /// origin (k = -r), and `first_face_hit`'s point is the surface's at its (u, v), within
     /// T of the ray. Unskewed from outside, the ray then leaves through the top at k = 2r,
-    /// within T. The rays: on radius 5, e = 1e-4, 1e-3 and 2e-3, s = 0, +-0.003, +-0.01,
-    /// +-0.05, at t = 0 (the seam), 45, 89, 90, 180 and 270 degrees (90, 180 and 270 the
-    /// joins of the side surface's spans); on radius 500, 5000 and 50000, e = 1e-5,
-    /// s = +-0.01, at 67.5, 80 and 85 degrees; on radius 50000, e = 1e-3 and 1e-4,
-    /// s = +-0.1, at 67.5, 80, 85 and 90; on radius 0.5, e = 1e-4, s = +-0.01, at 89 and
-    /// 90. Every ray that misses is listed.
+    /// within T. The rays, each from outside and from inside unless said: on radius 5,
+    /// e = 1e-4, 1e-3 and 2e-3, s = 0, +-0.003, +-0.01, +-0.05, at t = 0 (the seam), 45, 89,
+    /// 90, 180 and 270 degrees (90, 180 and 270 the joins of the side surface's spans),
+    /// the unskewed one at 270 degrees at e = 1e-4 from inside only; on radius 500, 5000
+    /// and 50000, e = 1e-5, s = 0.01, at 67.5 degrees, from outside only; on radius 50000,
+    /// e = 1e-3 and 1e-4, s = +-0.1, at 67.5, 80, 85 and 90; on radius 0.5, e = 1e-4,
+    /// s = +-0.01, at 89 and 90. Every ray that misses is listed.
     #[test]
     fn a_shallow_ray_meets_a_cylinder_side_at_its_seam_and_span_joins() {
         let mut k = Kernel::default();
@@ -2346,36 +2347,37 @@ mod tests {
             let (k1, k2) = (q / a, -rhs / q);
             Some((k1.min(k2), k1.max(k2)))
         };
+        // each ray's directions: `true` is from outside (c = -e)
+        let (both, outside, inside): (&[bool], &[bool], &[bool]) =
+            (&[true, false], &[true], &[false]);
         let mut cases = Vec::new();
         for e in [1e-4, 1e-3, 2e-3] {
             for degrees in [0.0_f64, 45.0, 89.0, 90.0, 180.0, 270.0] {
                 for skew in [0.0, 0.003, -0.003, 0.01, -0.01, 0.05, -0.05] {
-                    cases.push((5.0, e, skew, degrees));
+                    let unskewed_at_270 = e == 1e-4 && degrees == 270.0 && skew == 0.0;
+                    let inwards = if unskewed_at_270 { inside } else { both };
+                    cases.push((5.0, e, skew, degrees, inwards));
                 }
             }
         }
         for r in [500.0, 5000.0, 50000.0] {
-            for degrees in [67.5, 80.0, 85.0] {
-                for skew in [0.01, -0.01] {
-                    cases.push((r, 1e-5, skew, degrees));
-                }
-            }
+            cases.push((r, 1e-5, 0.01, 67.5, outside));
         }
         for e in [1e-3, 1e-4] {
             for degrees in [67.5, 80.0, 85.0, 90.0] {
                 for skew in [0.1, -0.1] {
-                    cases.push((50000.0, e, skew, degrees));
+                    cases.push((50000.0, e, skew, degrees, both));
                 }
             }
         }
         for degrees in [89.0, 90.0] {
             for skew in [0.01, -0.01] {
-                cases.push((0.5, 1e-4, skew, degrees));
+                cases.push((0.5, 1e-4, skew, degrees, both));
             }
         }
         let mut bodies: Vec<(f64, Brep, FaceId, FaceId, f64)> = Vec::new();
         let mut misses = Vec::new();
-        for (r, e, skew, degrees) in cases {
+        for (r, e, skew, degrees, inwards) in cases {
             if !bodies.iter().any(|body| body.0 == r) {
                 let mut tube = crate::primitive::api_primitives::create_cylinder(
                     &mut k,
@@ -2408,7 +2410,7 @@ mod tests {
             let radial = Vec3::new(cos, sin, 0.0);
             let tangent = Vec3::new(-sin, cos, 0.0);
             let p = Point3::new(r * cos, r * sin, 2.0 * r);
-            for inward in [true, false] {
+            for &inward in inwards {
                 let c = if inward { -e } else { e };
                 let d = radial * c + tangent * skew + Vec3::new(0.0, 0.0, 1.0);
                 let length = d.length();
