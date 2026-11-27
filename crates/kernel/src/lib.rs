@@ -255,6 +255,7 @@ pub use body::Unshaped;
 pub use body::colour_name;
 pub use body::display_tolerance;
 pub use body::placed_mesh;
+pub use body::straight_direction;
 pub use body::{KernelFormMask, KernelForms};
 pub use boundary::Boundary;
 pub use boundary::boundary_patch;
@@ -442,7 +443,9 @@ pub use polyhedron::offset_solid;
 pub use polyhedron::offset_tool;
 pub use prism::PLANAR_FIT_TOL;
 pub use prism::extrude_planar_regions;
+pub use prism::fill_channel;
 pub use prism::planar_regions_boolean;
+pub use prism::{ChannelFill, Contour, FillFailure, FillNote, FillOptions, FillRefusal, FillSide};
 pub use prism_curve::PlanarPiece;
 pub use prism_curve::PlanarSpline;
 pub use prism_measure::PrismSection;
@@ -535,6 +538,7 @@ pub use solidcore_ops::dome::DomeRefusal;
 pub use solidcore_ops::dome::DomeShape;
 pub use solidcore_ops::measure::ParallelTurnError;
 pub use solidcore_ops::measure::turn_to_parallel;
+pub use solidcore_ops::measure::{Straight, StraightBy};
 /// SolidCraft's kernel interface: the trait each kernel's adapter implements, its operations,
 /// inputs and errors.
 pub use solidcraft_kernel_api as api;
