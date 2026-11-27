@@ -36,6 +36,7 @@ const SOLIDCRAFT_FIXES: &[&str] = &[
     "fillet_trace_reaches_rails",
     "fillet_exact_round_classes",
     "edgeuse_convexity_propagates_step_off_failure",
+    "keep_exact_pcurves",
     "closed_smooth_pole_tangent_limit",
 ];
 

@@ -25,7 +25,7 @@
 //! - **Notifications.** The Euler operators notify through the caller's [`NotifyEnv`];
 //!   the new face's surface owner is named by the caller's `this_face`, as in
 //!   [`p7::make_face_with_curves`].
-//! - **Exact natural trims (WR-722).** Faces made on a
+//! - **Exact natural trims (WR-722, opt-in `keep_exact_pcurves`).** Faces made on a
 //!   surface's parameter rectangle keep its given iso-line pcurves. Reprojecting a
 //!   closed section at a collapsed horn rail can choose a different singular parameter.
 //! - **Pole partitions.** After continuity splitting, a B-spline patch is also split
@@ -269,7 +269,7 @@ pub fn create_face_in_region_from_surface(
             orientations: natural.orients,
             loop_points: Vec::new(),
         };
-        let keep = Some(true);
+        let keep = k.fixes.keep_exact_pcurves.then_some(true);
         let made = p7::make_face_with_curves(
             k,
             b,
@@ -1509,6 +1509,7 @@ mod tests {
         use crate::surface::procedural_sweep::ProceduralSweep;
 
         with_brep(|k, b, fenv| {
+            k.fixes.keep_exact_pcurves = true;
             let circle = |frame: Axis2Placement, start, end| {
                 BSplineCurve::create_circle_segment(
                     3,

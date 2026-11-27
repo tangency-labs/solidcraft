@@ -41,10 +41,10 @@
 //!   pointer). `CopyFaces` copies from one B-rep into another one: upstream also allows
 //!   the destination to be the source B-rep, which a shared and a mutable borrow cannot
 //!   express (copy within one B-rep through a clone).
-//! - **Exact pcurves (WR-722).** `MakeFaceWithCurves`'s keep
-//!   step flips the orientations it matches the given UV curves by on a face made with its
-//!   surface's orientation opposite, and `CopyFaces` without the merge passes the face's
-//!   own trims on to its copy (`pbOptCrvOnSurf`).
+//! - **Exact pcurves (WR-722).** `MakeFaceWithCurves`'s keep step flips the orientations
+//!   it matches the given UV curves by on a face made with its surface's orientation
+//!   opposite, and `CopyFaces` without the merge passes the face's own trims on to its
+//!   copy (`pbOptCrvOnSurf`).
 //! - **Index checks.** Loop counts that add up to more curves, orientations or edge uses
 //!   than given, and self-intersection UV curve arrays shorter than the 3D curves, are
 //!   [`SolidError::InvalidInput`] (upstream reads past its arrays).
