@@ -11682,6 +11682,20 @@ fn feature_tools_with_constructor(
             // To Object gives a signed distance from the start: one side only.
             let direction = if extent.to.is_some() { crate::Direction::Positive } else { extent.direction };
             let (a, b) = extent_sides(vals, extent, d, direction, second_end)?;
+            // To a curved face with a second distance: the face ends side one only, the way the
+            // To object lies (`d`'s sign). Side two keeps its own extent, built apart from the
+            // prism that runs through the target and is cut back to the face. A second
+            // distance on side one's side of the sketch has no meaning with that face.
+            let mut side_two: Option<(f64, f64)> = None;
+            let (a, b) = if curved.is_some() && extent.distance2.is_some() {
+                if a * b >= 0.0 {
+                    return Err(DocError::Invalid("the second distance must run the other way from the To object".into()));
+                }
+                side_two = Some(if a < 0.0 { (a, 0.0) } else { (0.0, a) });
+                (0.0, b)
+            } else {
+                (a, b)
+            };
             // A negative distance flips the side.
             let (mut lo, mut hi) = if a <= b { (a, b) } else { (b, a) };
             // To a curved (or slanted) face: run right through the target body, then keep what
@@ -11812,6 +11826,41 @@ fn feature_tools_with_constructor(
                 let start = if hi > 0.0 { lo + off } else { hi + off };
                 let far = if hi > 0.0 { hi + off } else { lo + off };
                 tools = trim_to_curved_face(tools, tb, fi, p.0, to_offset, &ss.plane, start, far)?;
+            }
+            if let Some((s_lo, s_hi)) = side_two {
+                let mut second = Vec::new();
+                for r in &regions {
+                    second.extend(
+                        centered_extrude(&ss.plane, r, s_lo + off, s_hi + off, Some(&ss), thin_roles.as_ref(), CapRoles::TwoSided, None).map_err(|e| match e {
+                            // An internal error keeps its class, so the evaluator retries it.
+                            e @ DocError::Kernel(solidcraft_kernel::KernelError::Internal(_)) => e,
+                            e => DocError::Invalid(format!(
+                                "the second side of the extrude, {} mm thick, cannot be built (a distance this thin is too thin for the kernel): {e}",
+                                s_hi - s_lo
+                            )),
+                        })?,
+                    );
+                }
+                // A new body is one body: side two is fused with the side-one pieces it shares the
+                // sketch plane's face; a join or a cut fuses them in its target.
+                if *operation == Operation::NewBody {
+                    for t2 in second {
+                        let mut group = vec![t2];
+                        let mut rest = Vec::new();
+                        for t in std::mem::take(&mut tools) {
+                            let first = group.first().map(|g| g.body.clone());
+                            match first {
+                                Some(g) if !kernel::apart(&t.body, &g)? => group.push(t),
+                                _ => rest.push(t),
+                            }
+                        }
+                        let fused = if group.len() > 1 { union_all(&group.iter().collect::<Vec<_>>())? } else { group.remove(0) };
+                        rest.push(fused);
+                        tools = rest;
+                    }
+                } else {
+                    tools.extend(second);
+                }
             }
             // A join's profile grows into the material it joins; its sketch plane and depth as drawn
             // still serve a join into sheet metal (`surface_sheet_join`), which takes the sketch's
