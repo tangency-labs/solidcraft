@@ -2803,11 +2803,12 @@ mod tests {
 
     /// tangency-labs/solidcraft#17720: the rows whose curve count the default from both
     /// surfaces moved, replayed through the tube certificate: each curve is one
-    /// component, except in these known rows (tangency-labs/solidcraft#18488):
-    /// - `gen0197`, `gen0401`, `gen0467`, `gen0510`: the intersector splits one component
-    ///   at a knot line of a degree-1 profile, and the pieces meet end to end on it;
-    /// - `gen0188`, `gen1119`: curves 1 and 2 end inside both domains, with an arc of their
-    ///   component in no curve between them (main leaves the same arc uncovered).
+    /// component. `gen0197`, `gen0401`, `gen0467`, `gen0510` and `gen0188` cross a
+    /// degree-1 knot line, of the profile or of the other surface, where the intersection
+    /// turns a corner: it stays one curve across it (tangency-labs/solidcraft#18488).
+    /// Known row: `gen1119`, whose curves 1 and 2 end inside both domains at no knot
+    /// line, with an arc of their component in no curve between them (main leaves the
+    /// same arc uncovered).
     #[test]
     fn moved_count_rows_are_certified_components() {
         let each = |n: usize| -> Vec<Vec<usize>> { (0..n).map(|i| vec![i]).collect() };
@@ -2824,11 +2825,11 @@ mod tests {
             ("gen1107", each(2), vec![]),
             ("gen1140", each(2), vec![]),
             ("global_cylinder_class", each(2), vec![]),
-            ("gen0197", vec![vec![0, 1]], vec![]),
-            ("gen0401", vec![vec![0, 2, 1]], vec![]),
-            ("gen0467", vec![vec![0, 1]], vec![]),
-            ("gen0510", vec![vec![0, 1]], vec![]),
-            ("gen0188", each(1), vec![1, 2]),
+            ("gen0197", each(1), vec![]),
+            ("gen0401", each(1), vec![]),
+            ("gen0467", each(1), vec![]),
+            ("gen0510", each(1), vec![]),
+            ("gen0188", each(2), vec![]),
             ("gen1119", each(1), vec![1, 2]),
         ];
         for (name, chains, open) in rows {

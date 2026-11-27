@@ -4137,6 +4137,76 @@ mod tests {
         assert!(r.curves_3d.is_empty());
     }
 
+    /// tangency-labs/solidcraft#18488: a V-shaped degree-1 profile `(-1, 0) -> (0, 1) ->
+    /// (1, 0)` swept 2 along z, cut by the plane `z = 1 + 0.3 x + 0.2 y` (a bilinear
+    /// B-spline, so the general intersection runs). Over the profile point `(x, y)` the
+    /// plane is at that height, so the intersection is the polyline `(-1, 0, 0.7) ->
+    /// (0, 1, 1.2) -> (1, 0, 1.3)`: one component, with a corner where it crosses the
+    /// profile's knot line `u = 1`. It is one crossing curve from one end to the other,
+    /// with a point at the corner, on that line.
+    #[test]
+    fn a_corner_on_a_degree_1_knot_line_stays_one_curve() {
+        let k = k();
+        let s = swept(
+            &k,
+            &[(-1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1.0, 0.0, 0.0)],
+            None,
+            Vec3::new(0.0, 0.0, 2.0),
+        );
+        let z = |x: f64, y: f64| 1.0 + 0.3 * x + 0.2 * y;
+        let plane = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(-2.0, -1.0, z(-2.0, -1.0)),
+                Vec3::new(2.0, -1.0, z(2.0, -1.0)),
+                Vec3::new(-2.0, 2.0, z(-2.0, 2.0)),
+                Vec3::new(2.0, 2.0, z(2.0, 2.0)),
+            )
+            .unwrap(),
+        );
+        let d = s.base().natural_uv_domain();
+        let od = plane.natural_uv_domain_with_nurb(&k).unwrap();
+        let tol = 1e-6;
+        let r = s
+            .global_surface_intersect(
+                &k,
+                &d,
+                IntersectTarget::Surface(&plane),
+                &od,
+                [true, true],
+                Some(tol),
+                None,
+            )
+            .unwrap();
+        assert_eq!(r.curves_3d.len(), 1, "{:?}", r.curve_types);
+        assert_eq!(r.curve_types, [TsectCurveType::Crossing]);
+        // the trace's points are Newton roots within its approximation tolerance
+        let c = &r.curves_3d[0];
+        let ivl = c.natural_interval();
+        let ends = [ivl.min(), ivl.max()].map(|t| c.evaluate_point(&k, t).unwrap());
+        let (a, b) = (Vec3::new(-1.0, 0.0, 0.7), Vec3::new(1.0, 0.0, 1.3));
+        let ends_ok = |p: Vec3, q: Vec3| ends[0].distance(p) < tol && ends[1].distance(q) < tol;
+        assert!(ends_ok(a, b) || ends_ok(b, a), "{ends:?}");
+        // a knot of the curve at the corner, where its UV curve on the extrusion is on the
+        // profile's knot line
+        let corner = Vec3::new(0.0, 1.0, 1.2);
+        let CurveKind::BSpline(bc) = c.kind() else {
+            panic!("a traced curve is a B-spline");
+        };
+        let at = bc
+            .knots(None)
+            .unwrap()
+            .0
+            .into_iter()
+            .find(|&t| c.evaluate_point(&k, t).unwrap().distance(corner) < tol)
+            .unwrap_or_else(|| panic!("no curve knot at the corner"));
+        let uv = r.surface1_uv_curves[0]
+            .as_ref()
+            .unwrap()
+            .evaluate_point(&k, at)
+            .unwrap();
+        assert_eq!(uv.x, 1.0, "{uv:?}");
+    }
+
     #[test]
     fn trim_rejects_a_larger_domain() {
         let k = k();
