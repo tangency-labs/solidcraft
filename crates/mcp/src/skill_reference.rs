@@ -47,6 +47,26 @@ const SKILLS: &[Skill] = &[
     },
 ];
 
+pub(crate) fn get(skill: &str, file: &str) -> Option<&'static str> {
+    let entry = SKILLS.iter().find(|s| s.name == skill)?;
+    entry.files.iter().find(|(name, _)| *name == file).map(|(_, text)| *text)
+}
+
+pub(crate) fn skill_names() -> Vec<String> {
+    SKILLS.iter().map(|s| s.name.to_owned()).collect()
+}
+
+pub(crate) fn skill_files(skill: &str) -> Vec<String> {
+    SKILLS.iter().find(|s| s.name == skill).map(|s| s.files.iter().map(|(name, _)| (*name).to_owned()).collect()).unwrap_or_default()
+}
+
+pub(crate) fn all_skill_files() -> Vec<String> {
+    let mut files: Vec<String> = SKILLS.iter().flat_map(|s| s.files.iter().map(|(name, _)| (*name).to_owned())).collect();
+    files.sort();
+    files.dedup();
+    files
+}
+
 pub(crate) fn read(args: &Map<String, Value>) -> Result<Value, String> {
     let name = args.get("skill").and_then(Value::as_str).ok_or("`skill` is required and must be a string")?;
     let skill = SKILLS

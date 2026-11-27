@@ -567,6 +567,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             Frame(crate::dialogs_frame::Member),
             /// End caps on frame members (`dialogs_end_cap`).
             EndCap(crate::dialogs_end_cap::EndCap),
+            /// Weld tool (`dialogs_weld`).
+            Weld(Box<crate::dialogs_weld::WeldDialog>),
             /// Dogbone reliefs in inside corners (`dialogs_dogbone`).
             Dogbone(crate::dialogs_dogbone::Dogbone),
             /// Cell Grid (`dialogs_cell_grid`).
@@ -1417,6 +1419,7 @@ impl Dialog {
                     .or_else(|| crate::dialogs_frame::start(app, id))
                     .or_else(|| crate::dialogs_shaft_spline::start(app, id))
                     .or_else(|| crate::dialogs_end_cap::start(app, id))
+                    .or_else(|| crate::dialogs_weld::start(app, id))
                     .or_else(|| crate::dialogs_dogbone::start(app, id))
                     .or_else(|| crate::dialogs_cell_grid::start(app, id))
                     .or_else(|| crate::dialogs_rotate_member::start(app, id))
@@ -1543,7 +1546,7 @@ impl Dialog {
                             inp.items.push(body);
                         }
                     }
-                    crate::dialogs_assembly::picked_whole_component(&mut d, &whole);
+                    crate::dialogs_assembly::picked_whole_component(&mut d, path, &whole);
                 }
                 continue;
             }
@@ -3564,6 +3567,7 @@ fn title(k: &Kind) -> &'static str {
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
         Kind::EndCap(_) => "ui.end_cap_title",
+        Kind::Weld(_) => "cmd.weld.create",
         Kind::Dogbone(_) => "ui.dogbone_title",
         Kind::CellGrid(_) => "ui.cell_grid_title",
         Kind::RotateMember(_) => "ui.rotate_member_title",
@@ -4491,7 +4495,7 @@ fn command_disabled(app: &SolveApp, d: &Dialog, error: &str) -> bool {
     spec.disabled_refusal(&app.session).is_some_and(|refusal| refusal == error)
 }
 
-fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) {
+pub(crate) fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) {
     if matches!(d.kind, Kind::SketchModify(_))
         && d.previews()
         && let Err(error) = apply_commands(app, d)
@@ -4581,40 +4585,71 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
         } else {
             // A fillet's refusal reads in plain words, or not at all where its Setback field already
             // says what is wrong; the kernel's own text stays in the hover text, Copy Details and the
-            // issue report.
+            // issue report. When SMLib reports the largest fitting size, the dialog names it and asks
+            // the user whether to apply it (#10849).
             let setback_in_field = d.extra.get("setbacks").is_none();
+            let single_radius = !matches!(d.extra.get("type").and_then(Value::as_str), Some("variable" | "spline"));
             let plain = if matches!(d.kind, Kind::Fillet { chamfer: false, .. }) { fillet_plain_error(&error, setback_in_field) } else { None };
-            ui.vertical(|ui| {
-                match &plain {
-                    Some(FilletRefusal::Plain(plain)) => {
-                        crate::ui_kit::text(ui, plain, crate::ui_kit::Text::Report("error", true)).backing_on_hover_text(shown_error(&error));
-                    }
-                    Some(FilletRefusal::InField) => {}
-                    None => {
-                        crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Report("error", true));
-                    }
-                }
-                ui.horizontal(|ui| {
-                    if plain.is_some() {
-                        let copy = crate::ui_kit::button(ui, tr("ui.copy_details"), crate::ui_kit::Button::Normal);
-                        crate::scenario::publish_handle("dialog:copy_details", copy.rect.center());
-                        if copy.backing_on_hover_text(tr("ui.copy_details_tip")).clicked() {
-                            ui.ctx().copy_text(error.clone());
+            let mut apply_fit: Option<String> = None;
+            let rect = ui
+                .vertical(|ui| {
+                    match &plain {
+                        Some(FilletRefusal::Plain(plain)) => {
+                            crate::ui_kit::text(ui, plain, crate::ui_kit::Text::Report("error", true)).backing_on_hover_text(shown_error(&error));
+                        }
+                        Some(FilletRefusal::FitSize { size_mm }) => {
+                            let shown = crate::length_input::shown(&app.session.doc, *size_mm);
+                            let msg = solidcraft_ui_text::format("ui.fillet_error_too_large_fit", &[("size", &shown)]);
+                            crate::ui_kit::text(ui, &msg, crate::ui_kit::Text::Report("error", true)).backing_on_hover_text(shown_error(&error));
+                        }
+                        Some(FilletRefusal::InField) => {}
+                        None => {
+                            crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Report("error", true));
                         }
                     }
-                    // A value the field flags is the user's to change, not a failure to report.
-                    if matches!(plain, Some(FilletRefusal::InField)) {
-                        return;
-                    }
-                    let response = crate::ui_kit::button(ui, "Create Issue…", crate::ui_kit::Button::Normal);
-                    crate::scenario::publish_handle("dialog:create_issue", response.rect.center());
-                    if response.clicked() {
-                        crate::issue_report::begin(app, ctx, Some(d), Some(&error));
-                    }
-                });
-            })
-            .response
-            .rect
+                    ui.horizontal_wrapped(|ui| {
+                        if let Some(FilletRefusal::FitSize { size_mm }) = &plain
+                            && single_radius
+                        {
+                            let shown = crate::length_input::shown(&app.session.doc, *size_mm);
+                            let label = solidcraft_ui_text::format("ui.fillet_use_fit_size", &[("size", &shown)]);
+                            let use_fit = crate::ui_kit::button(ui, &label, crate::ui_kit::Button::Primary);
+                            crate::scenario::publish_handle("dialog:use_fit_size", use_fit.rect.center());
+                            if use_fit.backing_on_hover_text(tr("ui.fillet_use_fit_size_tip")).clicked() {
+                                apply_fit = Some(shown);
+                            }
+                        }
+                        if plain.is_some() {
+                            let copy = crate::ui_kit::button(ui, tr("ui.copy_details"), crate::ui_kit::Button::Normal);
+                            crate::scenario::publish_handle("dialog:copy_details", copy.rect.center());
+                            if copy.backing_on_hover_text(tr("ui.copy_details_tip")).clicked() {
+                                ui.ctx().copy_text(error.clone());
+                            }
+                        }
+                        // A value the field flags is the user's to change, not a failure to report.
+                        if matches!(plain, Some(FilletRefusal::InField)) {
+                            return;
+                        }
+                        let response = crate::ui_kit::button(ui, "Create Issue…", crate::ui_kit::Button::Normal);
+                        crate::scenario::publish_handle("dialog:create_issue", response.rect.center());
+                        if response.clicked() {
+                            crate::issue_report::begin(app, ctx, Some(d), Some(&error));
+                        }
+                    });
+                })
+                .response
+                .rect;
+            if let Some(fit_text) = apply_fit {
+                if let Kind::Fillet { radius, .. } = &mut d.kind {
+                    *radius = fit_text;
+                }
+                d.error = None;
+                d.refused = None;
+                app.preview.error = None;
+                ctx.request_repaint();
+                return;
+            }
+            rect
         };
         // The refusal comes last in the dialog, under the fold when the fields fill it: only its
         // first line showed, or none, and no Create Issue (#8454). The dialog scrolls a new one
@@ -4633,6 +4668,9 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
 pub(crate) enum FilletRefusal {
     /// In these plain words.
     Plain(String),
+    /// Too large for the faces beside the edges, with SMLib's largest fitting size (mm), so the
+    /// dialog names it and asks the user whether to apply it (#10849).
+    FitSize { size_mm: f64 },
     /// Not again: the Setback field already flags the value and names the least it takes.
     InField,
 }
@@ -4653,10 +4691,11 @@ pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<
     {
         return Some(FilletRefusal::Plain(solidcraft_ui_text::format("ui.fillet_error_setback_short", &[("least", &format!("{least} mm"))])));
     }
-    let too_large = error.contains("larger than the faces beside its edges allow");
+    let too_large = error.contains("larger than the faces beside its edges allow") || error.contains("into the hollow");
     // The kernel tried smaller radii down to its least and none built: no radius is the cause, so
     // a smaller one, or Largest radius, is no advice (the full refusal stays under Copy details).
-    let none_fits = too_large && error.contains("no smaller radius builds either");
+    let none_fits = too_large && (error.contains("no smaller radius builds either") || error.contains("sizes tried builds"));
+    let fit_mm = solidcraft_engine::kernel::named_blend_fit(error).and_then(solidcraft_engine::kernel::BlendFit::length_mm);
     let corner = error.contains("setback") || error.contains("G2 corner") || error.contains("corner patch");
     let kernel = error.contains("SMLib")
         || error.contains("the operation failed")
@@ -4666,7 +4705,10 @@ pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<
     if none_fits {
         Some(FilletRefusal::Plain(tr("ui.fillet_error_no_radius").to_string()))
     } else if too_large {
-        Some(FilletRefusal::Plain(tr("ui.fillet_error_too_large").to_string()))
+        match fit_mm {
+            Some(size_mm) => Some(FilletRefusal::FitSize { size_mm }),
+            None => Some(FilletRefusal::Plain(tr("ui.fillet_error_too_large").to_string())),
+        }
     } else if corner && kernel {
         Some(FilletRefusal::Plain(tr("ui.fillet_error_corner").to_string()))
     } else if kernel {
@@ -5309,6 +5351,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     // Physical materials: the library's, then the design's own (material.create).
+    if matches!(d.kind, Kind::Weld(_)) {
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !app.esc_handled && escape_routed_here {
+            app.esc_handled = true;
+        } else {
+            crate::dialogs_weld::show(app, ctx, d);
+        }
+        return;
+    }
     let t = Tokens::get();
     let vp = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
     let placement = crate::shell::editor_space(app, vp);
@@ -8587,6 +8637,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
         Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),
+        Kind::Weld(k) => return crate::dialogs_weld::params(k).map(|p| vec![("weld.create".into(), p)]),
         Kind::Dogbone(k) => return crate::dialogs_dogbone::commands(app, k, &d.inputs, &d.extra),
         Kind::CellGrid(k) => return crate::dialogs_cell_grid::commands(app, k, &d.inputs, &d.extra),
         Kind::RotateMember(k) => return crate::dialogs_rotate_member::commands(app, k, &d.inputs, &d.extra, d.editing.is_some()),
@@ -11910,27 +11961,15 @@ mod refused_ok_tests {
     fn create_sketch_on_a_face_that_cannot_keep_an_attachment_waits_for_use_fixed_plane() {
         let mut h = Harness::new();
         let run = |h: &mut Harness, command: &str, params: Value| h.app.run(command, params).unwrap();
-        run(&mut h, "solid.box", json!({"length":40,"width":20,"height":5,"corner":[0,0,0],"body_name":"L"}));
-        run(&mut h, "solid.box", json!({"length":5,"width":20,"height":40,"corner":[0,0,0],"operation":"join"}));
-        run(&mut h, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"RibSketch"}));
-        run(&mut h, "sketch.line", json!({"points":[[5,25],[25,5]],"ids":["l1"]}));
-        run(&mut h, "sketch.finish", json!({}));
-        run(&mut h, "solid.rib", json!({"sketch":"RibSketch","curves":["l1"],"thickness":4}));
+        // A coil's flat end has no history name: a coil reports no roles for the faces it sweeps.
+        run(&mut h, "solid.coil", json!({"diameter":40,"revolutions":1.5,"pitch":8,"section":"square","section_size":4,"body_name":"Coil"}));
         let (index, point) = {
             let world = h.app.session.world_state().unwrap();
-            let face = world
-                .body("L")
-                .unwrap()
-                .body
-                .faces(0.01)
-                .unwrap()
-                .into_iter()
-                .find(|face| face.plane_normal.is_some_and(|n| n.dot(solidcore_record::Vec3::Y) > 0.999) && (face.centroid.y - 12.0).abs() < 1e-6)
-                .unwrap();
+            let face = world.body("Coil").unwrap().body.faces(0.01).unwrap().into_iter().find(|face| face.plane_normal.is_some()).unwrap();
             (face.index, face.centroid)
         };
         let before = h.app.session.doc.to_json();
-        let sel = Sel::Face { body: "L".into(), index, point };
+        let sel = Sel::Face { body: "Coil".into(), index, point };
         let error = start_sketch(&mut h.app, &sel).unwrap_err();
         assert!(error.contains("fixed"), "{error}");
         assert_eq!(h.app.session.doc.to_json(), before, "no sketch is made until the user chooses a fixed plane");

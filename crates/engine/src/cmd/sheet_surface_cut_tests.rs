@@ -72,6 +72,61 @@ fn a_hole_drilled_through_a_folded_sheet_is_a_cut_out_of_its_flat() {
     assert!((exact_volume(&s) - want).abs() < 1e-6 * want, "{} vs {want}", exact_volume(&s));
 }
 
+/// A vertical base carries a web with two parallel flanges bent down from it. A triangle below
+/// the bends clips the free corner of each flange in one Through All cut.
+#[test]
+fn a_through_all_notch_cuts_both_parallel_flanges() {
+    let mut s = session();
+    rule(&mut s, "Test", T, 0.44, 2.0, 0.5);
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [60, 12]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"type": "base", "sketch": "Base", "body_name": "Plate"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[2, 30, 12]], "height": 80, "position": "inside"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[40, 0, 10], [40, 60, 10]], "height": 20, "position": "inside"}));
+
+    let before_volume = exact_volume(&s);
+    let (before_area, before_cutouts) = flat_outline(&mut s);
+    let bends = flat(&mut s)["bends"].clone();
+    assert_eq!(bends.as_array().unwrap().len(), 3);
+    let probes = json!({"body": "Plate", "points": [[70, 1, -5], [70, 59, -5]]});
+    let classes = |s: &mut Session| run(s, "inspect.classify_points", probes.clone());
+    let before = classes(&mut s);
+    assert_eq!(before["results"][0]["class"], "inside");
+    assert_eq!(before["results"][1]["class"], "inside");
+
+    run(&mut s, "sketch.create", json!({"name": "Cut", "plane": {"x_dir": [1, 0, 0], "y_dir": [0, 0, 1]}}));
+    run(&mut s, "sketch.line", json!({"points": [[14, -8], [80, -8], [80, 4]], "closed": true, "infer": false}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Cut", "through_all": true, "direction": "negative", "operation": "cut"}));
+
+    let removed_area = 2.0 * (80.0 - 14.0) * (4.0 - (-8.0)) / 2.0;
+    let expected_volume = before_volume - T * removed_area;
+    let (after_area, after_cutouts) = flat_outline(&mut s);
+    assert!((before_area - after_area - removed_area).abs() < 1e-7, "flat area lost {}", before_area - after_area);
+    assert_eq!(after_cutouts, before_cutouts);
+    assert_eq!(flat(&mut s)["bends"], bends);
+
+    let check_folded = |s: &mut Session| {
+        let volume = exact_volume(s);
+        assert!((volume - expected_volume).abs() < 1e-7, "{volume} vs {expected_volume}");
+        let after = classes(s);
+        assert_eq!(after["results"][0]["class"], "outside");
+        assert_eq!(after["results"][1]["class"], "outside");
+        let measure = run(s, "inspect.measure", json!({"bodies": ["Plate"]}));
+        let body = &measure["bodies"][0];
+        // Each clipped corner adds one face, three edges and two net vertices.
+        assert_eq!(body["faces"], 28);
+        assert_eq!(body["edges"], 70);
+        assert_eq!(body["vertices"], 42);
+        assert_eq!(body["kernel"]["shells"], 1);
+    };
+    check_folded(&mut s);
+    run(&mut s, "sheet.unfold", json!({}));
+    run(&mut s, "sheet.refold", json!({}));
+    check_folded(&mut s);
+}
+
 /// An engraving cut 0.5 into the sheet's surface is a pocket down from the flat's face on the
 /// surface, its top (z 1.5…2), on its DXF layer; a hole drilled through it is a cut-out of the
 /// flat and a hole in the pocket. Cut into the other face, an engraving is a pocket from z 0 to 0.5.
