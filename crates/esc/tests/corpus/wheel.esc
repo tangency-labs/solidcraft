@@ -1,0 +1,15 @@
+esc 1
+part
+
+wheel_r = param(30 mm)
+
+width = param(12 mm)
+
+density = param(1.1 g/cm3)
+
+rim = cylinder(r: wheel_r, h: width, at: origin, axis: +Z)
+
+bore = hole(rim, d: 5 mm, at: origin, along: +Z, depth: width)
+  todo: "a flat for the D-shaft"
+
+hub = connector(origin: origin, z: -Z)

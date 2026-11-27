@@ -1,0 +1,25 @@
+esc 1
+assembly
+
+chassis_part = import("plate", width: 64 mm)
+
+wheel = import("wheel")
+
+motor = import("nema17")
+
+chassis = instance(chassis_part)
+
+motor_l = instance(motor)
+
+wheel_l = instance(wheel)
+
+j_motor = rigid(motor_l.shaft_face, chassis.motor_mount, angle: 90 deg)
+
+j_wheel = revolute(wheel_l.hub, motor_l.shaft_face, angle: 0 deg)
+
+s1 = step(place(chassis))
+
+s2 = step(insert(motor_l, joint: j_motor, from: axis(chassis.motor_mount, -Z), distance: 30 mm), after: s1)
+  why: "the motor goes in before the wheel covers its mount"
+
+s3 = step(press(wheel_l, joint: j_wheel, from: axis(motor_l.shaft_face, +Z), distance: 20 mm), after: s2)

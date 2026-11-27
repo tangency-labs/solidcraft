@@ -1,0 +1,4 @@
+esc 1
+part
+
+edge = line(origin, origin)

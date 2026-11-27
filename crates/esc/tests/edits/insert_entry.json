@@ -1,0 +1,1 @@
+{"file": "plate.esc", "intent": {"intent": "insert_entry", "after": "thick", "text": "lip = param(2 mm)\n  why: \"keeps the cable in\""}}

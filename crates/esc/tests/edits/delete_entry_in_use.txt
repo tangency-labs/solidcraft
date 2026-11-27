@@ -1,0 +1,1 @@
+error: `motor_mount` is used in robot.esc; remove those uses first

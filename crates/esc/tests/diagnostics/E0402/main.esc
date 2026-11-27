@@ -1,0 +1,6 @@
+esc 1
+part
+
+width = param(60 mm)
+
+width = param(64 mm)

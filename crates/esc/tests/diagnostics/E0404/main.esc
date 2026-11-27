@@ -1,0 +1,4 @@
+esc 1
+part
+
+plate = extrude(outline, 4 mm)

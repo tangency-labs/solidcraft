@@ -1,0 +1,3 @@
+main.esc:4:9: error[E0503]: `param` takes 1 positional argument, not 2
+  | width = param(60 mm, 64 mm)
+  |         ^^^^^^^^^^^^^^^^^^^

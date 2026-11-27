@@ -1,0 +1,10 @@
+esc 1
+assembly
+
+base_part = import("part")
+
+base = instance(base_part)
+
+s1 = step(place(base), after: s2)
+
+s2 = step(place(base))

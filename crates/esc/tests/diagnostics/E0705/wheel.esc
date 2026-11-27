@@ -1,0 +1,4 @@
+esc 1
+part
+
+rim = cylinder(r: 30 mm, h: 12)

@@ -1,0 +1,4 @@
+esc 1
+assembly
+
+other = import("other")

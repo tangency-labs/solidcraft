@@ -1,0 +1,4 @@
+esc 1
+part
+
+body = box(w: 10 mm, h: 10 mm, d: 10 mm, at: origin)

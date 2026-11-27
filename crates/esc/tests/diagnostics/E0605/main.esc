@@ -1,0 +1,4 @@
+esc 1
+part
+
+rim = cylinder(r: 90 deg, h: 12 mm)

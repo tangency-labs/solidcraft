@@ -1,0 +1,6 @@
+esc 1
+part
+
+mass = param(280 g)
+
+density = param(1.24 g/cm3)

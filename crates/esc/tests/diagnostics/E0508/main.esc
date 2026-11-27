@@ -1,0 +1,8 @@
+esc 1
+part
+
+a = box(w: 10 mm, h: 10 mm, d: 10 mm)
+
+b = box(w: 5 mm, h: 5 mm, d: 20 mm)
+
+both = combine(a, b, mode: merge)

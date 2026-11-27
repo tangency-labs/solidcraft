@@ -1,0 +1,3 @@
+main.esc:2:1: error[E0203]: the second line is the file kind, `part` or `assembly`
+  | 
+  | ^
