@@ -1366,10 +1366,10 @@ fn unchanged_read(
         .map(|r| (r.warnings.clone(), r.properties.clone(), r.metadata.clone()))
 }
 
-fn import_source_digest(step: &str, records: Option<&std::sync::Arc<solidcraft_kernel::ImportRecords>>) -> u64 {
+fn import_source_digest(step: &str, records: Option<&solidcraft_kernel::ImportRecords>) -> u64 {
     match records {
         Some(r) => {
-            let key = solidcraft_kernel::records_key_arc(r).unwrap_or_default();
+            let key = r.digest().map_or((0, 0), |d| (d.hash, d.bytes));
             digest(&(1u8, step.as_bytes(), key))
         }
         None => digest(&(0u8, step.as_bytes())),
@@ -1398,7 +1398,7 @@ fn remember_read_parts(
         file,
         configuration,
         bytes,
-        step: import_source_digest(step, records.as_ref()),
+        step: import_source_digest(step, records.as_deref()),
         faces: digest(faces),
         warnings: warnings.to_vec(),
         properties: properties.to_vec(),
@@ -3127,7 +3127,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             .map(|f| digest(f.link_faces.as_slice()));
         if let Some(known) = kept_faces.and_then(|faces| {
             let meshes = link_meshes(s, *comp, link.feature);
-            unchanged_read(file, selected_configuration(link), *bytes_hash, import_source_digest(&old.0, old.1.as_ref()), faces, meshes)
+            unchanged_read(file, selected_configuration(link), *bytes_hash, import_source_digest(&old.0, old.1.as_deref()), faces, meshes)
         }) {
             native_cached[slot] = Some(known);
             continue;
@@ -3318,7 +3318,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
                     .map(|f| digest(f.link_faces.as_slice()));
                 if let Some((known, properties, metadata)) = kept_faces.and_then(|faces| {
                     let meshes = link_meshes(s, comp, link.feature);
-                    unchanged_read(&file, selected_configuration(&link), digest(bytes.as_slice()), import_source_digest(&old.0, old.1.as_ref()), faces, meshes)
+                    unchanged_read(&file, selected_configuration(&link), digest(bytes.as_slice()), import_source_digest(&old.0, old.1.as_deref()), faces, meshes)
                 }) {
                     if let Some(kept) = s.doc_mut().links.get_mut(&comp) {
                         kept.file_sha256 = Some(read);
@@ -3535,7 +3535,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 /// What an Import feature's bodies are made from: its STEP text and its records.
-type ImportSource = (std::sync::Arc<str>, Option<std::sync::Arc<solidcraft_doc::kernel::ImportRecords>>);
+type ImportSource = (std::sync::Arc<str>, Option<solidcraft_doc::SharedRecords>);
 
 /// Whether two Import features make their bodies from the same source.
 fn same_import_source(a: &FeatureKind, b: &FeatureKind) -> bool {

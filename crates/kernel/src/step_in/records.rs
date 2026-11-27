@@ -7,17 +7,30 @@
 //! The records are saved in the design: it reopens without the original file, as a STEP import
 //! does. They come back from a file, so they are checked as hostile input before any is used.
 
-use std::sync::{Arc, Mutex, Weak};
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::brep::Brep;
 
-use super::parallel::{Part, placed, record_part};
+use super::parallel::{Part, placed, record_part, workers};
 use super::{ImportIssue, ImportReport, ImportedBody, IssueKind, LeftOut, M4, StepImport, StepNode};
-use crate::{KernelError, Result};
+use crate::{Body, KernelError, Result};
+
+/// Cached hash, serialised byte length and SHA-256 digest of [`ImportRecords`], computed once by
+/// streaming JSON through a zero-allocation `std::io::Write` hasher.
+#[derive(Clone, Debug)]
+pub struct RecordsDigest {
+    /// `DefaultHasher` hash of the serialised JSON string (matching `text_key` and `step_text_digest`).
+    pub hash: u64,
+    /// Exact UTF-8 byte length of the serialised JSON string.
+    pub bytes: usize,
+    /// Lowercase hex SHA-256 of the serialised JSON bytes (matching `payload_digest`).
+    pub sha256: String,
+}
 
 /// An import kept as records.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ImportRecords {
     /// The bodies, in the file's order. Reading records refuses more than an import makes
     /// (`bounded_bodies`).
@@ -37,12 +50,107 @@ pub struct ImportRecords {
     /// [`crate::Body::from_record`] without an SMLib round-trip, keeping exact face numbering.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub native: bool,
+    /// Lazily computed hash, byte length and SHA-256 of the serialised JSON form.
+    #[serde(skip)]
+    digest: OnceLock<RecordsDigest>,
 }
 
 /// One evaluated B-rep body packaged directly as an import record (no STEP round-trip).
 pub struct NativeRecordBody<'a> {
     pub name: String,
     pub body: &'a crate::Body,
+}
+
+impl Clone for ImportRecords {
+    fn clone(&self) -> Self {
+        Self {
+            bodies: self.bodies.clone(),
+            tree: self.tree.clone(),
+            warnings: self.warnings.clone(),
+            system: self.system.clone(),
+            native: self.native,
+            digest: OnceLock::new(),
+        }
+    }
+}
+
+impl PartialEq for ImportRecords {
+    fn eq(&self, other: &Self) -> bool {
+        self.bodies == other.bodies
+            && self.tree == other.tree
+            && self.warnings == other.warnings
+            && self.system == other.system
+            && self.native == other.native
+    }
+}
+
+impl ImportRecords {
+    pub fn new(bodies: Vec<RecordBody>, tree: Vec<StepNode>, warnings: Vec<String>, system: String) -> Self {
+        Self { bodies, tree, warnings, system, native: false, digest: OnceLock::new() }
+    }
+
+    /// Clear any cached serialised digest after mutating fields of `self`.
+    pub fn invalidate_digest(&mut self) {
+        self.digest.take();
+    }
+
+    /// Cached hash, byte length and SHA-256 of the serialised JSON form, computed once via a
+    /// zero-allocation streaming writer (`serde_json::to_writer`).
+    pub fn digest(&self) -> Result<&RecordsDigest> {
+        if let Some(d) = self.digest.get() {
+            return Ok(d);
+        }
+        let computed = stream_records_digest(self)?;
+        Ok(self.digest.get_or_init(|| computed))
+    }
+}
+
+/// Shared [`ImportRecords`] whose equality short-circuits on [`Arc::ptr_eq`]: `ImportRecords`
+/// holds floating-point geometry (`!Eq`), so `Arc::eq` cannot specialize on pointer identity and
+/// would otherwise walk every NURBS control point and triangle on every document comparison.
+/// Serialises identically to [`ImportRecords`].
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SharedRecords(pub Arc<ImportRecords>);
+
+impl SharedRecords {
+    pub fn new(records: ImportRecords) -> Self {
+        Self(Arc::new(records))
+    }
+
+    pub fn as_arc(&self) -> &Arc<ImportRecords> {
+        &self.0
+    }
+
+    pub fn ptr_eq(a: &Self, b: &Self) -> bool {
+        Arc::ptr_eq(&a.0, &b.0)
+    }
+}
+
+impl PartialEq for SharedRecords {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0) || *self.0 == *other.0
+    }
+}
+
+impl std::ops::Deref for SharedRecords {
+    type Target = ImportRecords;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<Arc<ImportRecords>> for SharedRecords {
+    fn from(records: Arc<ImportRecords>) -> Self {
+        Self(records)
+    }
+}
+
+impl From<ImportRecords> for SharedRecords {
+    fn from(records: ImportRecords) -> Self {
+        Self(Arc::new(records))
+    }
 }
 
 /// One body of an import kept as records.
@@ -144,11 +252,11 @@ pub fn import_trims() -> &'static (dyn solidcore_ops::pcurve::Trims + Sync) {
 /// The bodies an import kept as records makes, with its tree and warnings: what a STEP import
 /// gives, so a design uses either the same way.
 pub fn records_import(records: &ImportRecords) -> Result<StepImport> {
-    records_import_with_workers(records, super::parallel::workers())
+    records_import_with_workers(records, workers())
 }
 
-/// [`records_import`] with at most `workers` threads preparing independent original bodies in
-/// parallel while assembling the import in exact file order.
+/// [`records_import`] with at most `workers` threads preparing independent original bodies and
+/// placements in parallel while assembling the import in exact file order.
 pub(crate) fn records_import_with_workers(records: &ImportRecords, workers: usize) -> Result<StepImport> {
     let _span = solidcraft_profile::span("import", "records.import");
     if records.bodies.len() > super::MAX_BODIES {
@@ -178,52 +286,107 @@ pub(crate) fn records_import_with_workers(records: &ImportRecords, workers: usiz
             detail: w.clone(),
         });
     }
-    // Prepare independent original bodies in parallel (on desktop), collecting in exact file order.
+    // Pass 1: build every distinct original body (`copy_of.is_none()`) in parallel.
     let native = records.native;
-    let original_indices: Vec<usize> = records.bodies.iter().enumerate().filter_map(|(k, r)| r.copy_of.is_none().then_some(k)).collect();
-    let mut prepared: Vec<Option<std::result::Result<Part, String>>> = vec![None; records.bodies.len()];
-    if original_indices.len() > 1 && workers > 1 {
-        let made = crate::par::map_on_threads(&original_indices, workers.min(original_indices.len()), |&k| {
+    let build_part = |r: &RecordBody| if native { native_part_of(r) } else { part_of(r) };
+    let original_jobs: Vec<(usize, &RecordBody)> = records.bodies.iter().enumerate().filter(|(_, r)| r.copy_of.is_none()).collect();
+    let built_originals: Vec<std::result::Result<Part, String>> = if original_jobs.len() > 1 && workers > 1 {
+        let made = crate::par::map_on_threads(&original_jobs, workers.min(original_jobs.len()), |(_, r)| {
             if crate::watch::cancelled() {
                 return Err(String::new());
             }
-            if native { native_part_of(&records.bodies[k]) } else { part_of(&records.bodies[k]) }
+            build_part(r)
         });
         if crate::watch::cancelled() {
             return Err(crate::watch::cancelled_error("import"));
         }
-        for (&k, res) in original_indices.iter().zip(made) {
-            prepared[k] = Some(res.unwrap_or_else(|| Err("record body worker panicked".into())));
+        made.into_iter().map(|r| r.unwrap_or_else(|| Err("record body worker panicked".into()))).collect()
+    } else {
+        let mut made = Vec::with_capacity(original_jobs.len());
+        for (_, r) in &original_jobs {
+            if crate::watch::cancelled() {
+                return Err(crate::watch::cancelled_error("import"));
+            }
+            made.push(build_part(r));
         }
+        made
+    };
+    // An original's part is kept for its copies whatever its own placement: a copy placed where
+    // it can be still comes in when the original's placement is refused.
+    let originals: HashMap<usize, std::result::Result<Part, String>> =
+        original_jobs.into_iter().zip(built_originals).map(|((k, _), res)| (k, res)).collect();
+
+    // Resolve each body's part and validate its placement; collect non-identity placements for
+    // Pass 2 while identity placements clone the built body directly.
+    let mut resolved_parts: Vec<std::result::Result<&Part, String>> = Vec::with_capacity(records.bodies.len());
+    let mut placed_bodies: Vec<Option<std::result::Result<Body, String>>> = vec![None; records.bodies.len()];
+    let mut place_jobs: Vec<(usize, &Body, M4)> = Vec::new();
+    for (k, r) in records.bodies.iter().enumerate() {
+        let part = match r.copy_of {
+            None => match originals.get(&k) {
+                Some(Ok(part)) => Ok(part),
+                Some(Err(why)) => Err(why.clone()),
+                None => Err("no record".into()),
+            },
+            Some(j) => copy_part(records, &originals, k, j),
+        };
+        if let Ok(part) = part {
+            if let Err(why) = finite_placement(r) {
+                placed_bodies[k] = Some(Err(why));
+            } else {
+                let m = r.placement.unwrap_or(super::IDENTITY);
+                if m == super::IDENTITY {
+                    placed_bodies[k] = Some(Ok(part.body.clone()));
+                } else {
+                    place_jobs.push((k, &part.body, m));
+                }
+            }
+        }
+        resolved_parts.push(part);
     }
+
+    // Pass 2: run non-identity placements in parallel.
+    let transformed: Vec<std::result::Result<Body, String>> = if place_jobs.len() > 1 && workers > 1 {
+        let made = crate::par::map_on_threads(&place_jobs, workers.min(place_jobs.len()), |&(_, body, m)| {
+            if crate::watch::cancelled() {
+                return Err(String::new());
+            }
+            placed(body, &m).map_err(|e| e.to_string())
+        });
+        if crate::watch::cancelled() {
+            return Err(crate::watch::cancelled_error("import"));
+        }
+        made.into_iter().map(|r| r.unwrap_or_else(|| Err("record placement worker panicked".into()))).collect()
+    } else {
+        let mut made = Vec::with_capacity(place_jobs.len());
+        for &(_, body, m) in &place_jobs {
+            if crate::watch::cancelled() {
+                return Err(crate::watch::cancelled_error("import"));
+            }
+            made.push(placed(body, &m).map_err(|e| e.to_string()));
+        }
+        made
+    };
+    for ((k, _, _), res) in place_jobs.into_iter().zip(transformed) {
+        placed_bodies[k] = Some(res);
+    }
+
     // A body SMLib refuses is left out, as a STEP import leaves out a solid it cannot make, and
     // the others still come in: `kept[k]` is where record body `k` is among the bodies made.
     let mut kept = vec![None; records.bodies.len()];
-    // Each original's part, made once and placed again for each of its copies.
-    let mut originals: std::collections::HashMap<usize, Part> = std::collections::HashMap::new();
     // The parts counted among the import's solids.
     let mut counted = std::collections::HashSet::new();
-    for (k, r) in records.bodies.iter().enumerate() {
+    for ((k, r), (part, body)) in records.bodies.iter().enumerate().zip(resolved_parts.into_iter().zip(placed_bodies)) {
         if crate::watch::cancelled() {
             return Err(crate::watch::cancelled_error("import"));
         }
         let label = if r.name.is_empty() { format!("body {}", k + 1) } else { r.name.clone() };
         // The record body whose part this is: itself, or the one it is a copy of.
         let source = r.copy_of.unwrap_or(k);
-        let part = match r.copy_of {
-            None => prepared[k].take().unwrap_or_else(|| if native { native_part_of(r) } else { part_of(r) }),
-            Some(j) => copy_part(records, &originals, k, j),
-        };
-        // An original's part is kept for its copies whatever its own placement: a copy placed
-        // where it can be still comes in when the original's placement is refused.
-        if r.copy_of.is_none()
-            && let Ok(part) = &part
-        {
-            originals.insert(k, part.clone());
-        }
-        let made = part.and_then(|part| {
-            finite_placement(r)?;
-            placed(&part.body, &r.placement.unwrap_or(super::IDENTITY)).map(|b| (part, b)).map_err(|e| e.to_string())
+        let made = part.and_then(|part| match body {
+            Some(Ok(body)) => Ok((part, body)),
+            Some(Err(why)) => Err(why),
+            None => Err("no record".into()),
         });
         let (part, body) = match made {
             Ok(made) => made,
@@ -279,7 +442,7 @@ pub(crate) fn records_import_with_workers(records: &ImportRecords, workers: usiz
         kept[k] = Some(bodies.len());
         bodies.push(ImportedBody {
             source_item: source as u64,
-            face_origin: part.face_origin,
+            face_origin: part.face_origin.clone(),
             name: r.name.clone(),
             common_face_name: None,
             body,
@@ -341,77 +504,34 @@ fn renumbered(nodes: &[StepNode], kept: &[Option<usize>], made: &[ImportedBody])
         .collect()
 }
 
-/// Cached `(text_key_hash, text_len)` of live `Arc<ImportRecords>`, keyed by allocation identity
-/// (`Weak` keeps no data alive and prevents pointer-reuse aliasing).
-static RECORD_KEYS: Mutex<Vec<(Weak<ImportRecords>, (u64, usize))>> = Mutex::new(Vec::new());
-
-/// Remember `text`'s cache key for `records`, avoiding repeat JSON serialisation while `records` lives.
-pub fn cache_records_text(records: &Arc<ImportRecords>, text: &str) -> (u64, usize) {
-    let key = super::text_key(text);
-    if let Ok(mut keys) = RECORD_KEYS.lock() {
-        keys.retain(|(w, _)| w.strong_count() > 0 && !std::ptr::eq(w.as_ptr(), Arc::as_ptr(records)));
-        keys.push((Arc::downgrade(records), key));
-    }
-    key
-}
-
-/// Cache key `(hash, len)` of `records`'s serialised form, computed once per live `Arc<ImportRecords>`.
-pub fn records_key_arc(records: &Arc<ImportRecords>) -> Result<(u64, usize)> {
-    if let Ok(keys) = RECORD_KEYS.lock()
-        && let Some((_, key)) = keys.iter().find(|(w, _)| w.strong_count() > 0 && std::ptr::eq(w.as_ptr(), Arc::as_ptr(records)))
-    {
-        return Ok(*key);
-    }
-    let text = records_text(records)?;
-    Ok(cache_records_text(records, &text))
-}
-
 /// [`records_import`] through the recent imports' cache ([`super::step_import_shared`]'s), keyed
 /// by the records' serialised form.
 pub fn records_import_shared(records: &ImportRecords) -> Result<Arc<StepImport>> {
-    records_import_shared_with_workers(records, super::parallel::workers())
+    records_import_shared_with_workers(records, workers())
 }
 
 /// [`records_import_shared`] with at most `workers` inner worker threads, bounding nested
 /// parallelism when multiple independent imports decode concurrently.
 pub fn records_import_shared_with_workers(records: &ImportRecords, workers: usize) -> Result<Arc<StepImport>> {
-    let text = records_text(records)?;
-    let key = super::text_key(&text);
+    let digest = records.digest()?;
+    let key = (digest.hash, digest.bytes);
     // Records are made into bodies as they are, whatever the heal preference
     // ([`crate::heals_tolerance_defects`]): never healed, so cached as a read that does not heal.
     if let Some(imp) = super::recent(key, false) {
         return Ok(imp);
     }
     let imp = Arc::new(records_import_with_workers(records, workers)?);
-    super::remember(key, false, &imp, text.len() <= super::KEEP_SMALL_BYTES);
+    super::remember(key, false, &imp, digest.bytes <= super::KEEP_SMALL_BYTES);
     Ok(imp)
 }
 
-/// [`records_import_shared`] using the cached key of a live `Arc<ImportRecords>`, avoiding
-/// re-serialising large records to JSON on cache hits.
-pub fn records_import_shared_arc(records: &Arc<ImportRecords>) -> Result<Arc<StepImport>> {
-    records_import_shared_arc_with_workers(records, super::parallel::workers())
-}
-
-/// [`records_import_shared_arc`] with at most `workers` inner worker threads, bounding nested
-/// parallelism when multiple independent imports decode concurrently.
-pub fn records_import_shared_arc_with_workers(records: &Arc<ImportRecords>, workers: usize) -> Result<Arc<StepImport>> {
-    let key = records_key_arc(records)?;
-    if let Some(imp) = super::recent(key, false) {
-        return Ok(imp);
-    }
-    let imp = Arc::new(records_import_with_workers(records, workers)?);
-    super::remember(key, false, &imp, key.1 <= super::KEEP_SMALL_BYTES);
-    Ok(imp)
-}
-
-/// Build [`ImportRecords`] and its ready [`StepImport`] directly from SolidCraft's own evaluated
+/// Build [`SharedRecords`] and its ready [`StepImport`] directly from SolidCraft's own evaluated
 /// B-rep bodies (e.g. a linked design), registering the import in the recent-reads cache so the
 /// timeline evaluates it without re-parsing or re-importing through SMLib.
 ///
-/// Returns `(records, import, serialized_text)` so callers can check size limits and cache the
-/// payload digest without serialising the records a second time.
-pub fn records_from_bodies(root_name: &str, bodies: &[NativeRecordBody<'_>]) -> Result<(Arc<ImportRecords>, Arc<StepImport>, String)> {
+/// The records' streaming digest (hash, byte length, SHA-256) is populated eagerly without
+/// allocating a full serialised JSON string.
+pub fn records_from_bodies(root_name: &str, bodies: &[NativeRecordBody<'_>]) -> Result<(SharedRecords, Arc<StepImport>)> {
     let _span = solidcraft_profile::span("import", "records.from_bodies");
     if bodies.len() > super::MAX_BODIES {
         return Err(KernelError::Invalid(format!("an import of {} bodies (at most {})", bodies.len(), super::MAX_BODIES)));
@@ -478,9 +598,16 @@ pub fn records_from_bodies(root_name: &str, bodies: &[NativeRecordBody<'_>]) -> 
         children: Vec::new(),
     }];
     let report = ImportReport { parts: imported_bodies.len(), solids, single_root: true, ..ImportReport::default() };
-    let records = Arc::new(ImportRecords { bodies: record_bodies, tree: tree.clone(), warnings: Vec::new(), system: String::new(), native: true });
-    let text = records_text(&records)?;
-    let key = cache_records_text(&records, &text);
+    let records = SharedRecords::new(ImportRecords {
+        bodies: record_bodies,
+        tree: tree.clone(),
+        warnings: Vec::new(),
+        system: String::new(),
+        native: true,
+        digest: OnceLock::new(),
+    });
+    let digest = records.digest()?;
+    let key = (digest.hash, digest.bytes);
     let imp = Arc::new(StepImport {
         tree,
         bodies: imported_bodies,
@@ -491,8 +618,8 @@ pub fn records_from_bodies(root_name: &str, bodies: &[NativeRecordBody<'_>]) -> 
         preprocessor: String::new(),
         description: String::new(),
     });
-    super::remember(key, false, &imp, key.1 <= super::KEEP_SMALL_BYTES);
-    Ok((records, imp, text))
+    super::remember(key, false, &imp, digest.bytes <= super::KEEP_SMALL_BYTES);
+    Ok((records, imp))
 }
 
 /// `records` with `notes` about the file added to its warnings (what a check of the bodies its
@@ -522,10 +649,44 @@ pub fn records_noted(mut records: ImportRecords, imp: &StepImport, notes: Vec<St
     let warning_at = at.min(noted.warnings.len());
     noted.warnings.splice(warning_at..warning_at, notes.iter().cloned());
     records.warnings.extend(notes);
-    let text = records_text(&records)?;
+    records.invalidate_digest();
+    let digest = records.digest()?;
     let noted = Arc::new(noted);
-    super::remember(super::text_key(&text), false, &noted, text.len() <= super::KEEP_SMALL_BYTES);
+    super::remember((digest.hash, digest.bytes), false, &noted, digest.bytes <= super::KEEP_SMALL_BYTES);
     Ok((records, noted))
+}
+
+/// Zero-allocation streaming sink that computes the `DefaultHasher` key, exact byte length and
+/// SHA-256 digest of serialised [`ImportRecords`] JSON in a single pass.
+struct DigestWriter {
+    hasher: std::collections::hash_map::DefaultHasher,
+    sha: sha2::Sha256,
+    bytes: usize,
+}
+
+impl std::io::Write for DigestWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        use sha2::Digest;
+        use std::hash::Hasher;
+        self.hasher.write(buf);
+        self.sha.update(buf);
+        self.bytes = self.bytes.saturating_add(buf.len());
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn stream_records_digest(records: &ImportRecords) -> Result<RecordsDigest> {
+    use sha2::Digest;
+    use std::hash::{Hash, Hasher};
+    let mut w = DigestWriter { hasher: std::collections::hash_map::DefaultHasher::new(), sha: sha2::Sha256::new(), bytes: 0 };
+    serde_json::to_writer(&mut w, records).map_err(|e| KernelError::Invalid(format!("import records: {e}")))?;
+    // Match `str::hash`, which terminates the UTF-8 byte stream with `0xff`.
+    "".hash(&mut w.hasher);
+    Ok(RecordsDigest { hash: w.hasher.finish(), bytes: w.bytes, sha256: format!("{:x}", w.sha.finalize()) })
 }
 
 /// The records' serialised form: what an import kept as records is, as STEP text is what a STEP
@@ -619,14 +780,19 @@ fn mesh_part(mesh: &RecordMesh) -> std::result::Result<Part, String> {
 
 /// The part of body `k`, a copy of body `j`: `j`'s, which must be an earlier original that
 /// imported.
-fn copy_part(records: &ImportRecords, originals: &std::collections::HashMap<usize, Part>, k: usize, j: usize) -> std::result::Result<Part, String> {
+fn copy_part<'a>(
+    records: &ImportRecords,
+    originals: &'a HashMap<usize, std::result::Result<Part, String>>,
+    k: usize,
+    j: usize,
+) -> std::result::Result<&'a Part, String> {
     if j >= k {
         return Err(format!("a copy of body {}, which does not come before it", j.saturating_add(1)));
     }
     if records.bodies.get(j).is_none_or(|o| o.copy_of.is_some()) {
         return Err(format!("a copy of body {}, which is itself a copy", j + 1));
     }
-    originals.get(&j).cloned().ok_or_else(|| format!("a copy of body {}, which was not imported", j + 1))
+    originals.get(&j).and_then(|res| res.as_ref().ok()).ok_or_else(|| format!("a copy of body {}, which was not imported", j + 1))
 }
 
 /// The body's placement, when it has one, is finite.

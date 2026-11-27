@@ -2060,7 +2060,7 @@ mod tests {
             solidcraft_kernel::NativeRecordBody { name: "Plate".into(), body: &a },
             solidcraft_kernel::NativeRecordBody { name: "Pin".into(), body: &b },
         ];
-        let (_, imp, _) = solidcraft_kernel::records_from_bodies("Part", &inputs).unwrap();
+        let (_, imp) = solidcraft_kernel::records_from_bodies("Part", &inputs).unwrap();
         let carried = carried_face_names(&st, &imp.bodies);
         assert_eq!(carried.len(), 2);
         assert_eq!(carried[0], *face_names(&st.bodies[0]));

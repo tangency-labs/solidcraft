@@ -722,12 +722,8 @@ pub fn usd_import_feature(bytes: &[u8], file: &str, names: StepNames) -> Result<
 /// the one cadmpeg detects in the contents, not the file's name.
 fn records_import_feature(read: RecordsRead, file: &str, names: StepNames) -> Result<StepFeature> {
     let RecordsRead { records, warnings: decode_warnings, freecad, preprocessor, description } = read;
-    let records = std::sync::Arc::new(records);
-    let text = solidcraft_kernel::records_text(&records)?;
-    design::check_step_importable(&text)?;
-    solidcraft_kernel::cache_records_text(&records, &text);
-    solidcraft_doc::config::cache_records_payload_digest(&records, &text);
-    let mut imp = solidcraft_kernel::records_import_shared_arc(&records)?;
+    design::check_step_importable_bytes(records.digest()?.bytes)?;
+    let mut imp = solidcraft_kernel::records_import_shared(&records)?;
     // The rest of a STEP header, which the records do not keep, as a STEP import has it: with the
     // program (the records' `system`) it says whether the file has Y up. A copy, so the shared
     // import other reads of the same records find is not changed.
@@ -761,7 +757,13 @@ fn records_import_feature(read: RecordsRead, file: &str, names: StepNames) -> Re
         name,
         body_names,
         invisible,
-        kind: solidcraft_doc::FeatureKind::Import { file: file_name, step: "".into(), components: imp.tree.clone(), skip, records: Some(records) },
+        kind: solidcraft_doc::FeatureKind::Import {
+            file: file_name,
+            step: "".into(),
+            components: imp.tree.clone(),
+            skip,
+            records: Some(solidcraft_kernel::SharedRecords::new(records)),
+        },
         warnings: decode_warnings.into_iter().chain(imp.warnings.iter().cloned()).collect(),
         import: imp,
     })
@@ -772,9 +774,8 @@ fn records_import_feature(read: RecordsRead, file: &str, names: StepNames) -> Re
 /// size limits and shared-import caching.
 pub fn native_records_import_feature(design_name: &str, bodies: &[solidcraft_kernel::NativeRecordBody<'_>], file: &str) -> Result<StepFeature> {
     let _span = solidcraft_profile::span("import", "native_records_import_feature");
-    let (records, imp, text) = solidcraft_kernel::records_from_bodies(design_name, bodies)?;
-    design::check_step_importable(&text)?;
-    solidcraft_doc::config::cache_records_payload_digest(&records, &text);
+    let (records, imp) = solidcraft_kernel::records_from_bodies(design_name, bodies)?;
+    design::check_step_importable_bytes(records.digest()?.bytes)?;
     if imp.bodies.is_empty() {
         return Err(IoError::Invalid(format!("{file}: no bodies could be made of this file")));
     }
@@ -2007,8 +2008,8 @@ pub fn step_assembly(doc: &Document, local: &ModelState, name: &str) -> Result<V
             _ => Ok(None),
         })
         .collect::<std::result::Result<_, _>>()?;
-    for (b, framed) in local.bodies.iter().zip(&framed) {
-        let comp = doc.model_body_component(b);
+    let owners = doc.model_body_components(local);
+    for ((b, framed), comp) in local.bodies.iter().zip(&framed).zip(owners) {
         let Some(p) = index.get(&comp).and_then(|i| products.get_mut(*i)) else { continue };
         p.bodies.push(ExportBody { name: b.name.clone(), body: framed.as_ref().unwrap_or(&b.body), color: b.body.color() });
     }

@@ -488,7 +488,7 @@ pub(crate) fn realign_imports(doc: &mut solidcraft_doc::Document) -> Vec<std::sy
     if targets.len() > 1 && cores > 1 && !solidcraft_doc::progress::cancelled() {
         enum RealignPayload {
             Step(std::sync::Arc<str>),
-            Records(std::sync::Arc<solidcraft_doc::kernel::ImportRecords>),
+            Records(solidcraft_doc::SharedRecords),
         }
         // Deduplicate identical STEP or records payloads so shared imports decode once across worker threads.
         let mut unique: Vec<RealignPayload> = Vec::new();
@@ -498,7 +498,7 @@ pub(crate) fn realign_imports(doc: &mut solidcraft_doc::Document) -> Vec<std::sy
             let FeatureKind::Import { step, records, .. } = &doc.features[idx].kind else { continue };
             let (key, payload) = match records {
                 Some(r) => {
-                    let (hash, len) = solidcraft_doc::kernel::records_key_arc(r).unwrap_or_default();
+                    let (hash, len) = r.digest().map_or((0, 0), |d| (d.hash, d.bytes));
                     ((1u8, hash, len), RealignPayload::Records(r.clone()))
                 }
                 None => {
@@ -510,7 +510,7 @@ pub(crate) fn realign_imports(doc: &mut solidcraft_doc::Document) -> Vec<std::sy
             let found = by_key.get(&key).and_then(|jobs| {
                 jobs.iter().copied().find(|&j| match (&unique[j], &payload) {
                     (RealignPayload::Step(a), RealignPayload::Step(b)) => std::sync::Arc::ptr_eq(a, b) || a.as_ref() == b.as_ref(),
-                    (RealignPayload::Records(a), RealignPayload::Records(b)) => std::sync::Arc::ptr_eq(a, b) || a == b,
+                    (RealignPayload::Records(a), RealignPayload::Records(b)) => a == b,
                     _ => false,
                 })
             });
@@ -534,7 +534,7 @@ pub(crate) fn realign_imports(doc: &mut solidcraft_doc::Document) -> Vec<std::sy
                 }
                 match payload {
                     RealignPayload::Step(step) => solidcraft_doc::kernel::step_import_shared_with_workers(step, inner).ok(),
-                    RealignPayload::Records(r) => solidcraft_doc::kernel::records_import_shared_arc_with_workers(r, inner).ok(),
+                    RealignPayload::Records(r) => solidcraft_doc::kernel::records_import_shared_with_workers(r, inner).ok(),
                 }
             })
             .into_iter()
@@ -545,7 +545,7 @@ pub(crate) fn realign_imports(doc: &mut solidcraft_doc::Document) -> Vec<std::sy
                 .iter()
                 .map(|payload| match payload {
                     RealignPayload::Step(step) => solidcraft_doc::kernel::step_import_shared(step).ok(),
-                    RealignPayload::Records(r) => solidcraft_doc::kernel::records_import_shared_arc(r).ok(),
+                    RealignPayload::Records(r) => solidcraft_doc::kernel::records_import_shared(r).ok(),
                 })
                 .collect()
         };
@@ -567,7 +567,7 @@ pub(crate) fn realign_imports(doc: &mut solidcraft_doc::Document) -> Vec<std::sy
         let FeatureKind::Import { step, records, .. } = &f.kind else { continue };
         // A file that doesn't read fails the feature when it is evaluated, which reports it.
         let Ok(imp) = (match records {
-            Some(r) => solidcraft_doc::kernel::records_import_shared_arc(r),
+            Some(r) => solidcraft_doc::kernel::records_import_shared(r),
             None => solidcraft_doc::kernel::step_import_shared(step),
         }) else {
             continue;

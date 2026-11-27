@@ -875,7 +875,7 @@ fn same_feature(a: &Feature, b: &Feature) -> bool {
                 FeatureKind::Import { file: b, step: other, components: other_components, skip: other_skip, records: other_records },
             ) => {
                 let same_records = match (records, other_records) {
-                    (Some(r), Some(o)) => Arc::ptr_eq(r, o),
+                    (Some(r), Some(o)) => crate::SharedRecords::ptr_eq(r, o),
                     (None, None) => true,
                     _ => false,
                 };

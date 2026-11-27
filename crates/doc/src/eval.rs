@@ -2335,7 +2335,7 @@ impl ImportHeal {
 struct ImportDigests {
     steps: std::collections::HashMap<u64, (Arc<str>, u64)>,
     /// An import kept as records: its records and their digest, computed once per records.
-    records: std::collections::HashMap<u64, (Arc<kernel::ImportRecords>, u64)>,
+    records: std::collections::HashMap<u64, (kernel::SharedRecords, u64)>,
     meshes: std::collections::HashMap<u64, Vec<MeshDigest>>,
     /// The parts SMLib's checks of an import healed once they ended (after the import was
     /// first shown: [`Model::settle_import_checks`]), by import feature, with the digest of the
@@ -2422,8 +2422,8 @@ impl ImportDigests {
         self.steps.get(&id).filter(|(text, _)| Arc::ptr_eq(text, step)).map(|(_, digest)| *digest)
     }
 
-    fn records_digest(&self, id: u64, records: &Arc<kernel::ImportRecords>) -> Option<u64> {
-        self.records.get(&id).filter(|(r, _)| Arc::ptr_eq(r, records)).map(|(_, digest)| *digest)
+    fn records_digest(&self, id: u64, records: &kernel::SharedRecords) -> Option<u64> {
+        self.records.get(&id).filter(|(r, _)| kernel::SharedRecords::ptr_eq(r, records)).map(|(_, digest)| *digest)
     }
 
     fn mesh(&self, id: u64, index: usize, mesh: &crate::MeshData) -> Option<u64> {
@@ -2448,8 +2448,15 @@ fn mesh_content_digest(mesh: &crate::MeshData) -> u64 {
 
 /// An import's records digested as their serialised form; records that will not serialise
 /// digest as nothing (their evaluation fails and says why).
-fn records_digest(records: &Arc<kernel::ImportRecords>) -> u64 {
-    kernel::records_key_arc(records).map_or_else(|_| step_text_digest(""), |(hash, _)| hash)
+fn records_digest(records: &kernel::ImportRecords) -> u64 {
+    match records.digest() {
+        Ok(d) => {
+            #[cfg(test)]
+            cost_tests::count(|c| c.digested += 1);
+            d.hash
+        }
+        Err(_) => step_text_digest(""),
+    }
 }
 
 fn step_text_digest(text: &str) -> u64 {
@@ -19628,7 +19635,7 @@ fn eval_feature_kind(
             let (imp, digest) = match prepared_import {
                 Some((imp, digest)) => (imp.clone(), digest.clone()),
                 None => match records {
-                    Some(r) => (kernel::records_import_shared_arc(r)?, crate::config::records_payload_digest(r)?),
+                    Some(r) => (kernel::records_import_shared(r)?, r.digest()?.sha256.clone()),
                     None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
                 },
             };
