@@ -325,7 +325,7 @@ mod tests {
     }
 
     #[test]
-    fn it_takes_primitives_extrusions_revolutions_booleans_and_fillets_only() {
+    fn it_takes_the_operations_it_builds_only() {
         for &op in OpKind::ALL {
             let routed = matches!(
                 op,
@@ -337,6 +337,10 @@ mod tests {
                     | OpKind::Revolve
                     | OpKind::Boolean
                     | OpKind::Fillet
+                    | OpKind::Chamfer
+                    | OpKind::Shell
+                    | OpKind::Thicken
+                    | OpKind::OffsetFaces
             );
             assert_eq!(Occt.supports(op) != Support::No, routed, "{}", op.name());
         }
