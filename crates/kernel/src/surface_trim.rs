@@ -162,7 +162,7 @@ pub fn stop_at_bodies(walls: &Body, bodies: &[&Body], starts: &[Vec3], along: Ve
     const NAME: &str = "the imprint of the bodies in the walls' way";
     let _span = solidcraft_profile::span("kernel", "stop_at_bodies");
     walls.require_brep("trim")?;
-    TrimKeep::Regions(starts).check()?;
+    check_keep(&TrimKeep::Regions(starts))?;
     let no_form = || KernelError::Failed(format!("{NAME}: a body has no solidcore form"));
     let form = walls.ops_body().ok_or_else(no_form)?;
     let (ops, order) = (&form.0, &form.1);
@@ -329,8 +329,8 @@ pub fn mutual_trim(a: &Body, b: &Body, keep_a: TrimKeep, keep_b: TrimKeep, exten
             )));
         }
     }
-    keep_a.check()?;
-    keep_b.check()?;
+    check_keep(&keep_a)?;
+    check_keep(&keep_b)?;
     let ta = cut_by(a, &SplitTool::Face { body: b, face: 0 }, keep_a, extend, "first")?;
     let tb = cut_by(b, &SplitTool::Face { body: a, face: 0 }, keep_b, extend, "second")?;
     Ok((ta, tb))
