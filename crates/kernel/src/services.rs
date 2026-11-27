@@ -8,31 +8,14 @@
 //! Grouped as `solidcore-ops` groups them, under the same module names, so a call keeps its
 //! path below `services`.
 
-use solidcore_record::Vec3;
-
-use crate::body::Body;
-
-pub use solidcore_ops::ClassifiedPoint;
 pub use solidcore_ops::Error;
-pub use solidcore_ops::ErrorClass;
-pub use solidcore_ops::FailureCode;
-pub use solidcore_ops::PointNormalFace;
-pub use solidcore_ops::board_drill;
-pub use solidcore_ops::cancel;
 pub use solidcore_ops::constraint;
 pub use solidcore_ops::face_pair;
 pub use solidcore_ops::mid_joint;
 pub use solidcore_ops::mid_sheet;
-pub use solidcore_ops::session;
+pub use solidcore_ops::stroke_runs;
 pub use solidcore_ops::sweep;
 pub use solidcore_ops::{Body as ExactBody, CheckLevel, Order, Result, boolean, make_box, make_sphere, measure};
-
-/// How far record edge `edge` of `body`, on its exact trimmed curve, passes from `point`. `None`
-/// where the record doesn't convert, the index is past the edges, or the kernel finds no point.
-pub fn exact_edge_distance(body: &Body, edge: usize, point: Vec3) -> Option<f64> {
-    let (exact, order) = solidcore_ops::Body::from_record(body.record(), true).ok()?;
-    exact.edge_closest_point(&order, edge, [point.x, point.y, point.z]).ok()?.map(|p| p.distance)
-}
 
 /// The display plan and meshes (`solidcore-tess`).
 pub mod tess {

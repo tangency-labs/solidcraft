@@ -6921,3 +6921,119 @@ fn the_header_shows_stop_and_login_only_when_they_apply() {
     }
     assert!(State::NeedsAuth.shows_auth_status());
 }
+
+/// The shared document diff produces accurate per-turn Undo card summaries (added/edited/removed
+/// features with names and types, parameter `old -> new` edits, History marker moves, and empty
+/// output when nothing changed) while preserving `changed_note` verbatim.
+#[test]
+fn turn_diff_summary_reports_features_parameters_and_marker() {
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    let empty = app.session.doc.as_ref().clone();
+    assert!(turn_diff_summary(&empty, &empty).is_empty());
+    assert!(changed_note(&empty, &empty).is_none());
+
+    app.run("parameters.add", json!({"name": "w", "expression": "10", "unit": "mm"})).unwrap();
+    app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+    let box_name = app.session.doc.features[0].name.clone();
+    let w_expr = app.session.doc.params.iter().find(|p| p.name == "w").unwrap().expr.clone();
+    assert_eq!(turn_diff_summary(&empty, &app.session.doc), [format!("+ {box_name}"), format!("+ w = {w_expr}")]);
+
+    let base = app.session.doc.as_ref().clone();
+    let mut edited = base.clone();
+    edited.features[0].name = "MainPlate".into();
+    edited.params.iter_mut().find(|p| p.name == "w").unwrap().expr = "25".into();
+    edited.marker = Some(0);
+    assert_eq!(
+        turn_diff_summary(&base, &edited),
+        ["~ MainPlate (Box)".to_string(), format!("~ w: {w_expr} -> 25"), "~ History marker before MainPlate".to_string()]
+    );
+    let edited_note = changed_note(&base, &edited).unwrap();
+    assert!(edited_note.contains(&format!("parameters: w {w_expr} -> 25")), "{edited_note}");
+    assert!(edited_note.contains("features: MainPlate (edited)"), "{edited_note}");
+    assert!(edited_note.contains("the History marker is now before MainPlate, so it"), "{edited_note}");
+
+    let mut removed = edited.clone();
+    removed.features.clear();
+    removed.params.retain(|p| p.name != "w");
+    removed.marker = None;
+    assert_eq!(turn_diff_summary(&edited, &removed), ["- MainPlate (Box)", "- w", "~ History marker at end"]);
+    let removed_note = changed_note(&edited, &removed).unwrap();
+    assert!(removed_note.contains("w (removed)"), "{removed_note}");
+    assert!(removed_note.contains("MainPlate (removed)"), "{removed_note}");
+    assert!(removed_note.contains("the History marker is now at the end"), "{removed_note}");
+}
+
+/// Large turns cap their Undo card diff summary cleanly with a "+N more" overflow line without
+/// altering `changed_note`'s own item cap.
+#[test]
+fn turn_diff_summary_caps_large_turns_with_overflow_indicator() {
+    use solidcraft_engine::doc::Param;
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.run("parameters.add", json!({"name": "seed", "expression": "10", "unit": "mm"})).unwrap();
+    let before = app.session.doc.as_ref().clone();
+    let seed = before.params.iter().find(|p| p.name == "seed").cloned().unwrap();
+
+    let mut exact = before.clone();
+    exact.params.extend((0..MAX_CHANGES_SUMMARY).map(|i| Param { name: format!("q{i}"), ..seed.clone() }));
+    let exact_lines = turn_diff_summary(&before, &exact);
+    assert_eq!(exact_lines.len(), MAX_CHANGES_SUMMARY);
+    assert_eq!(exact_lines[MAX_CHANGES_SUMMARY - 1], format!("+ q{} = {}", MAX_CHANGES_SUMMARY - 1, seed.expr));
+
+    let mut many = before.clone();
+    many.params.extend((0..20).map(|i| Param { name: format!("p{i}"), ..seed.clone() }));
+    let capped = turn_diff_summary(&before, &many);
+    let expected_more = 20 - (MAX_CHANGES_SUMMARY - 1);
+    assert_eq!(capped.len(), MAX_CHANGES_SUMMARY);
+    assert_eq!(capped[0], format!("+ p0 = {}", seed.expr));
+    assert_eq!(capped[MAX_CHANGES_SUMMARY - 1], format!("+{expected_more} more"));
+    assert!(changed_note(&before, &many).unwrap().contains(&format!(", p11 = {} (new) and 8 more)", seed.expr)));
+}
+
+/// Completing a turn populates `Item::Changes::summary` and exposes it in `ui.agent_chat` status;
+/// undoing marks the card undone while preserving its diff summary, and a no-change turn adds none.
+#[test]
+fn undo_card_records_turn_diff_summary_and_exposes_it_in_status() {
+    let (mut app, tx) = app_in_a_turn();
+    let replies = [
+        ask(&tx, "engine.execute", json!({"command": "parameters.add", "params": {"name": "w", "expression": "10", "unit": "mm"}})),
+        ask(&tx, "engine.execute", boxed(0.0)),
+    ];
+    frame(&mut app);
+    for r in replies {
+        assert_eq!(r.recv_timeout(std::time::Duration::from_secs(30)).unwrap()["ok"], true);
+    }
+    app.agent_chat.on_event(Event::TurnEnded { reason: String::new() });
+    end_turn(&mut app);
+
+    let (n, summary) = app
+        .agent_chat
+        .items
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(i, item)| match item {
+            Item::Changes { steps: 2, summary, .. } => Some((i, summary.clone())),
+            _ => None,
+        })
+        .expect("the turn's changes item is present");
+    let box_name = app.session.doc.features[0].name.clone();
+    let w_expr = app.session.doc.params.iter().find(|p| p.name == "w").unwrap().expr.clone();
+    assert_eq!(summary, [format!("+ {box_name}"), format!("+ w = {w_expr}")]);
+
+    let state = status(&app);
+    assert_eq!(state["items"][n]["changes"], json!(2));
+    assert_eq!(state["items"][n]["undone"], json!(false));
+    assert_eq!(state["items"][n]["summary"], json!(summary));
+
+    undo_changes(&mut app, n);
+    let after_undo = status(&app);
+    assert_eq!(after_undo["items"][n]["undone"], json!(true));
+    assert_eq!(after_undo["items"][n]["summary"], json!(summary));
+
+    // A no-change turn records no `Item::Changes`.
+    let before_count = app.agent_chat.items.len();
+    app.agent_chat.state = Some(State::Busy);
+    start_turn(&mut app, "inspect".into(), false, None, Vec::new());
+    end_turn(&mut app);
+    assert!(!app.agent_chat.items[before_count..].iter().any(|i| matches!(i, Item::Changes { .. })));
+}
