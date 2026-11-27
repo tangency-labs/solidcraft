@@ -7,9 +7,8 @@
 
 use std::f64::consts::PI;
 
-use solidcraft_kernel::affine;
-use solidcraft_kernel::services::boolean::union_copies;
-use solidcraft_kernel::services::{CheckLevel, ExactBody as Body, Order, make_box, make_sphere};
+use solidcore_record::Vec3;
+use solidcraft_kernel::{SmlibCheck, affine, box_solid, join_apart, transform_matrix, validity};
 
 use super::*;
 
@@ -44,19 +43,19 @@ const SIZES: [(f64, f64, f64); 7] = [
 const NONE: SpotStyle = SpotStyle { marks: None, ball: None, pin: None };
 
 fn volume(b: &Body) -> f64 {
-    b.volume(1e-9).unwrap()
+    b.volume_at(1e-9).unwrap()
 }
 
-/// The kernel's check, every test.
+/// The kernel's check, every test: the record's, and the kernel's own at its strictest level.
 fn check(b: &Body, what: &str) {
-    let report = b.check(CheckLevel::All).unwrap();
-    assert!(report.is_valid(), "{what}: {}", report.text);
+    let v = validity(b);
+    assert!(v.record.is_ok() && matches!(v.smlib, Some(SmlibCheck::Valid)), "{what}: {v:?}");
 }
 
 /// The lowest and highest height (along +Z) of a body: its tight box.
 fn extent(b: &Body) -> (f64, f64) {
-    let (lo, hi) = b.bounds().unwrap();
-    (lo[2], hi[2])
+    let bb = b.exact_bounds().unwrap();
+    (bb.min.z, bb.max.z)
 }
 
 fn spot(style: SpotStyle) -> SpotWeld {
@@ -239,7 +238,7 @@ fn a_spot_is_placed_at_its_point_along_its_normal() {
     let unit = [1.0 / 3.0, 2.0 / 3.0, -2.0 / 3.0];
     for style in STYLES {
         for piece in pieces(&SpotWeld { at, normal: [1.0, 2.0, -2.0], ..spot(style) }) {
-            for v in piece.body.to_record().unwrap().0.vertices {
+            for v in &piece.body.record().vertices {
                 let p = [v.point[0] - at[0], v.point[1] - at[1], v.point[2] - at[2]];
                 let along = dot(p, unit);
                 let off = (dot(p, p) - along * along).max(0.0).sqrt();
@@ -329,7 +328,7 @@ fn finite_sizes_the_model_cannot_hold_are_refused() {
         }
     }
     // far from the origin: the spot passes the limit though each piece is small
-    refused(&SpotWeld { at: [2.0 * sweep::MAX_COORD, 0.0, 0.0], ..spot(STYLES[0]) });
+    refused(&SpotWeld { at: [2.0 * solidcraft_kernel::profiles::MAX_COORD, 0.0, 0.0], ..spot(STYLES[0]) });
 }
 
 /// The proposed diameter is `5 √t` of the thinnest sheet; fewer than two sheets, or a thickness
@@ -421,27 +420,24 @@ fn the_default_look_is_the_marks_alone() {
 // ---- where a spot sits ----
 
 /// A body and its record order.
-fn ordered(b: Body) -> (Body, Order) {
-    let (_, order) = b.to_record().unwrap();
-    (b, order)
+/// A 40 × 40 sheet from `z` up `t`, centred on the z axis.
+fn sheet(z: f64, t: f64) -> Body {
+    block([-20.0, -20.0, z], [40.0, 40.0, t])
 }
 
-/// A 40 × 40 sheet from `z` up `t`, centred on the z axis.
-fn sheet(z: f64, t: f64) -> (Body, Order) {
-    ordered(make_box([-20.0, -20.0, z], [40.0, 40.0, t]).unwrap())
+/// The box from `corner` of `size`.
+fn block(corner: [f64; 3], size: [f64; 3]) -> Body {
+    let lo = Vec3::from(corner);
+    box_solid(lo, lo + Vec3::from(size)).unwrap()
 }
 
 /// The record face of a box whose plane holds `p` (a point inside its top or bottom).
-fn face_at((b, o): &(Body, Order), p: [f64; 3]) -> usize {
-    (0..o.faces.len()).find(|&f| b.face_square_level(o, f, [0.0, 0.0, 1.0], p).unwrap().is_some_and(|l| l.level.abs() < 1e-9)).unwrap()
+fn face_at(b: &Body, p: [f64; 3]) -> usize {
+    (0..b.face_count()).find(|&f| b.face_square_level(f, Vec3::new(0.0, 0.0, 1.0), p.into()).unwrap().is_some_and(|l| l.level.abs() < 1e-9)).unwrap()
 }
 
-fn listed<'a>(sheets: &[&'a (Body, Order)]) -> Vec<(&'a Body, &'a Order)> {
-    sheets.iter().map(|&s| (&s.0, &s.1)).collect()
-}
-
-fn site(sheets: &[&(Body, Order)], picked: usize, p: [f64; 3]) -> Result<SpotSite> {
-    spot_site(&listed(sheets), picked, face_at(sheets[picked], p), p, D)
+fn site(sheets: &[&Body], picked: usize, p: [f64; 3]) -> Result<SpotSite> {
+    spot_site(sheets, picked, face_at(sheets[picked], p), p, D)
 }
 
 fn near(a: [f64; 3], b: [f64; 3]) -> bool {
@@ -496,7 +492,7 @@ fn a_point_off_the_picked_face_is_refused() {
     let lower = sheet(0.0, 1.5);
     let upper = sheet(1.5, 1.0);
     let face = face_at(&upper, [0.0, 0.0, 2.5]);
-    assert_eq!(spot_site(&listed(&[&lower, &upper]), 1, face, [30.0, 0.0, 2.5], D), Err(SpotRefusal::PointOffFace));
+    assert_eq!(spot_site(&[&lower, &upper], 1, face, [30.0, 0.0, 2.5], D), Err(SpotRefusal::PointOffFace));
 }
 
 /// Sheets 0.5 apart are refused with the gap; sheets that overlap by 0.5 are refused.
@@ -518,7 +514,7 @@ fn sheets_apart_or_overlapping_are_refused() {
 fn a_sheet_missed_or_beyond_the_picked_face_is_refused() {
     let lower = sheet(0.0, 1.5);
     let upper = sheet(1.5, 1.0);
-    let aside = ordered(make_box([50.0, 0.0, 0.0], [5.0, 5.0, 1.0]).unwrap());
+    let aside = block([50.0, 0.0, 0.0], [5.0, 5.0, 1.0]);
     assert_eq!(site(&[&lower, &upper, &aside], 0, [0.0; 3]), Err(SpotRefusal::SheetMissed { sheet: 2 }));
     let below = sheet(-5.0, 1.0);
     assert_eq!(site(&[&lower, &upper, &below], 0, [0.0; 3]), Err(SpotRefusal::FaceNotOuter { sheet: 2 }));
@@ -528,22 +524,19 @@ fn a_sheet_missed_or_beyond_the_picked_face_is_refused() {
 #[test]
 fn a_sheet_crossed_twice_is_refused() {
     let lower = sheet(0.0, 1.5);
-    let (a, _) = sheet(1.5, 1.0);
-    let (b, _) = sheet(4.0, 1.0);
-    let twice = ordered(union_copies(&a, &b).unwrap().unwrap());
+    let twice = join_apart(&[sheet(1.5, 1.0), sheet(4.0, 1.0)]).unwrap().unwrap();
     assert_eq!(site(&[&lower, &twice], 0, [0.0; 3]), Err(SpotRefusal::SheetCrossedAgain { sheet: 1 }));
 }
 
 /// A curved picked face is not flat; a sheet tilted 5° under the line is not square to it.
 #[test]
 fn a_face_not_flat_or_not_square_is_refused() {
-    let ball = ordered(make_sphere([0.0, 0.0, 10.0], 5.0).unwrap());
+    let ball = solidcraft_kernel::profiles::ball([0.0, 0.0, 10.0], 5.0, None).unwrap();
     let lower = sheet(0.0, 1.5);
-    assert_eq!(spot_site(&listed(&[&ball, &lower]), 0, 0, [0.0, 0.0, 15.0], D), Err(SpotRefusal::FaceNotFlat { sheet: 0, face: 0 }));
+    assert_eq!(spot_site(&[&ball, &lower], 0, 0, [0.0, 0.0, 15.0], D), Err(SpotRefusal::FaceNotFlat { sheet: 0, face: 0 }));
     // a sheet whose lower face passes through (0, 0, 1.5), tilted 5° about the y axis
-    let tilted = make_box([-20.0, -20.0, 1.5], [40.0, 40.0, 1.0]).unwrap();
-    tilted.transform(&affine::rotation([0.0, 0.0, 1.5], [0.0, 1.0, 0.0], 5f64.to_radians()).unwrap()).unwrap();
-    let tilted = ordered(tilted);
+    let tilted = block([-20.0, -20.0, 1.5], [40.0, 40.0, 1.0]);
+    let tilted = transform_matrix(&tilted, affine::rotation([0.0, 0.0, 1.5], [0.0, 1.0, 0.0], 5f64.to_radians()).unwrap()).unwrap();
     let got = site(&[&lower, &tilted], 0, [0.0; 3]);
     assert!(matches!(got, Err(SpotRefusal::FaceNotSquare { sheet: 1, .. })), "{got:?}");
 }
@@ -553,7 +546,7 @@ fn a_face_not_flat_or_not_square_is_refused() {
 #[test]
 fn a_footprint_past_a_face_edge_is_refused_with_the_diameter_that_fits() {
     let lower = sheet(0.0, 1.5);
-    let small = ordered(make_box([-1.5, -1.5, 1.5], [3.0, 3.0, 1.0]).unwrap());
+    let small = block([-1.5, -1.5, 1.5], [3.0, 3.0, 1.0]);
     let got = site(&[&lower, &small], 0, [0.0; 3]);
     let Err(SpotRefusal::PastFaceEdge { sheet: 1, diameter, fits, .. }) = got else {
         panic!("{got:?}");
@@ -561,7 +554,7 @@ fn a_footprint_past_a_face_edge_is_refused_with_the_diameter_that_fits() {
     assert_eq!(diameter, D);
     assert!((fits - 3.0).abs() < 1e-9, "fits {fits}");
     let face = face_at(&lower, [0.0; 3]);
-    assert!(spot_site(&listed(&[&lower, &small]), 0, face, [0.0; 3], 2.99).is_ok());
+    assert!(spot_site(&[&lower, &small], 0, face, [0.0; 3], 2.99).is_ok());
 }
 
 /// Fewer than two sheets, a picked sheet or face not listed, a point that is not finite or a
@@ -571,13 +564,13 @@ fn bad_site_input_is_refused_as_invalid_input() {
     let lower = sheet(0.0, 1.5);
     let upper = sheet(1.5, 1.0);
     let face = face_at(&lower, [0.0; 3]);
-    let both = listed(&[&lower, &upper]);
+    let both: &[&Body] = &[&lower, &upper];
     let bad = |r: Result<SpotSite>| matches!(r, Err(SpotRefusal::Invalid(_)));
-    assert!(bad(spot_site(&listed(&[&lower]), 0, face, [0.0; 3], D)));
-    assert!(bad(spot_site(&both, 2, face, [0.0; 3], D)));
-    assert!(bad(spot_site(&both, 0, 99, [0.0; 3], D)));
-    assert!(bad(spot_site(&both, 0, face, [f64::NAN, 0.0, 0.0], D)));
+    assert!(bad(spot_site(&[&lower], 0, face, [0.0; 3], D)));
+    assert!(bad(spot_site(both, 2, face, [0.0; 3], D)));
+    assert!(bad(spot_site(both, 0, 99, [0.0; 3], D)));
+    assert!(bad(spot_site(both, 0, face, [f64::NAN, 0.0, 0.0], D)));
     for d in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-        assert!(bad(spot_site(&both, 0, face, [0.0; 3], d)));
+        assert!(bad(spot_site(both, 0, face, [0.0; 3], d)));
     }
 }

@@ -64,6 +64,10 @@ pub trait Affine: Backend {
     /// The orthonormal axes along `x` and in the plane of `x` and `y`, on `y`'s side (a direction
     /// the kernel chooses when `y` runs along `x` or has no length).
     fn orthonormal_axes(&self, x: [f64; 3], y: [f64; 3]) -> Result<[[f64; 3]; 2], AffineRefused>;
+    /// The axes `x` and `y` of a frame whose normal runs along `d`: `y` along `v`'s part square
+    /// to `d` and `x = y × unit(d)`, both unit. Refused for numbers not finite, no length, or a `v`
+    /// whose part square to `d` is within its own rounding.
+    fn frame_axes(&self, d: [f64; 3], v: [f64; 3]) -> Result<[[f64; 3]; 2], AffineRefused>;
     /// A plane's axes with the coordinates smaller than `noise` dropped, each unit again. `None`
     /// when nothing sound is left; the caller keeps its own axes.
     fn axis_squared_axes(&self, x: [f64; 3], y: [f64; 3], noise: f64) -> Option<[[f64; 3]; 2]>;

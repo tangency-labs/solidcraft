@@ -1,0 +1,26 @@
+{
+  "ar": {
+    "dialog.no_shown_body_show_one": "لا يوجد جسم ظاهر لتغييره: أظهر جسمًا"
+  },
+  "de": {
+    "dialog.no_shown_body_show_one": "Kein sichtbarer Körper zum Ändern vorhanden. Blenden Sie einen Körper ein."
+  },
+  "en": {
+    "dialog.no_shown_body_show_one": "No shown body to change: show one"
+  },
+  "he": {
+    "dialog.no_shown_body_show_one": "אין גוף מוצג לשינוי: הציגו גוף"
+  },
+  "ja": {
+    "dialog.no_shown_body_show_one": "変更できる表示中のボディがありません。ボディを表示してください"
+  },
+  "ko": {
+    "dialog.no_shown_body_show_one": "변경할 수 있는 표시된 바디가 없습니다. 바디를 표시하세요"
+  },
+  "vi": {
+    "dialog.no_shown_body_show_one": "Không có thân khối đang hiển thị để thay đổi: hãy hiển thị một thân khối"
+  },
+  "zh": {
+    "dialog.no_shown_body_show_one": "没有可更改的显示实体：请显示一个实体"
+  }
+}

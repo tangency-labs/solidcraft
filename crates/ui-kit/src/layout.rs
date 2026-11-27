@@ -294,6 +294,17 @@ pub fn expr_row_positive(ui: &mut Ui, label: &str, value: &mut String) -> bool {
     })
 }
 
+/// Expression row with a checked field; preserves completion, Enter and label scrubbing.
+/// Its scrubbed value stops at zero, as `expr_row_positive`'s does.
+pub fn checked_expr_row(ui: &mut Ui, label: &str, value: &mut String, hint: &str, flagged: bool) -> bool {
+    scrub_row(ui, label, |ui, scrub| {
+        if let Some(scrub) = scrub {
+            super::fields::scrub(ui, scrub, value, true);
+        }
+        super::checked_field(ui, value, hint, flagged).0
+    })
+}
+
 /// Whole-number count row with step arrows; retains completion and accepted Enter. Tokens: `row, count_field`.
 pub fn count_row(ui: &mut Ui, label: &str, value: &mut String, limits: &super::Count<'_>) -> bool {
     row(ui, label, |ui| super::count_field(ui, value, limits))
@@ -586,6 +597,80 @@ pub fn section_heading(ui: &mut Ui, title: &str) {
 
 pub fn section<R>(ui: &mut Ui, id: impl egui::AsIdSalt, title: &str, default_open: bool, add: impl FnOnce(&mut Ui) -> R) -> Option<R> {
     section_count(ui, id, title, default_open, None::<usize>, add)
+}
+
+/// Bordered disclosure with a palette-colored summary icon when collapsed.
+pub fn card_section<R>(
+    ui: &mut Ui,
+    id: impl egui::AsIdSalt,
+    title: &str,
+    default_open: bool,
+    summary_icon: Option<&str>,
+    add: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
+    card_section_with_hover(ui, id, title, default_open, summary_icon, |_| {}, add)
+}
+
+/// A card disclosure whose header hover can drive a preview outside the card.
+pub fn card_section_with_hover<R>(
+    ui: &mut Ui,
+    id: impl egui::AsIdSalt,
+    title: &str,
+    default_open: bool,
+    summary_icon: Option<&str>,
+    hover: impl FnOnce(bool),
+    add: impl FnOnce(&mut Ui) -> R,
+) -> Option<R> {
+    let tokens = Tokens::get();
+    let id = ui.make_persistent_id(id);
+    let mut open = ui.ctx().data_mut(|data| data.get_persisted::<bool>(id)).unwrap_or(default_open);
+    let card = egui::Frame::new()
+        .inner_margin(egui::Margin::same(tokens.space_8 as i8))
+        .corner_radius(tokens.control_radius)
+        .stroke(tokens.control_border_stroke(tokens.dialog_rule))
+        .show(ui, |ui| {
+            let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), tokens.control_height), egui::Sense::hover());
+            let header = ui.interact(rect, id.with("header"), egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+            if header.clicked() {
+                open = !open;
+                header.request_focus();
+                ui.ctx().data_mut(|data| data.insert_persisted(id, open));
+            }
+            let icon = summary_icon.filter(|_| !open);
+            let leading = tokens.form_section_icon_size.min(rect.width());
+            let trailing = if icon.is_some() { tokens.control_height.min((rect.width() - leading).max(0.0)) } else { 0.0 };
+            let center = rect.center().y;
+            let rtl = solidcraft_ui_text::bidi::has_rtl(title) || ui.layout().main_dir() == egui::Direction::RightToLeft;
+            let leading_x = if rtl { rect.right() - leading / 2.0 } else { rect.left() + leading / 2.0 };
+            let chevron_rect = egui::Rect::from_center_size(egui::pos2(leading_x, center), vec2(leading, leading));
+            let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
+            if rtl && !open {
+                crate::icons::paint_ink_mirrored(&painter, chevron_rect, "chevron_right", tokens.form_dim);
+            } else {
+                super::disclosure(&painter, chevron_rect.center(), open, tokens.form_dim);
+            }
+            let (text_left, text_right) = if rtl {
+                let left = rect.left() + trailing;
+                (left, (chevron_rect.left() - tokens.space_6).max(left))
+            } else {
+                let right = rect.right() - trailing;
+                ((chevron_rect.right() + tokens.space_6).min(right), right)
+            };
+            let text = egui::Rect::from_min_max(egui::pos2(text_left, rect.top()), egui::pos2(text_right, rect.bottom()));
+            paint_text(ui, text, title, crate::type_face::semibold(tokens.font_label), tokens.form_ink, false);
+            if let Some(icon) = icon.filter(|_| trailing > 0.0) {
+                let icon_x = if rtl { rect.left() + trailing / 2.0 } else { rect.right() - trailing / 2.0 };
+                let area = egui::Rect::from_center_size(egui::pos2(icon_x, center), vec2(trailing, trailing));
+                crate::icons::paint_icon(ui.painter(), area, icon, f32::from(tokens.icon.a()) / 255.0);
+            }
+            header.widget_info(|| egui::WidgetInfo::selected(egui::Role::DisclosureTriangle, ui.is_enabled(), open, title));
+            ui.ctx().accesskit_node_builder(header.id, |node| node.set_expanded(open));
+            solidcraft_ui_registry::publish_target(&format!("dialog:card_header:{title}"), rect);
+            hover(header.contains_pointer());
+            open.then(|| add(ui))
+        });
+    solidcraft_ui_registry::publish_rect(&format!("dialog:card:{title}"), card.response.rect);
+    card.inner
 }
 
 /// Section with a renderer/method tag. Shares disclosure, typography and badge tokens with section_count.
@@ -1054,38 +1139,4 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
         solidcraft_ui_registry::publish_handle(&id, response.rect.center());
     }
     response
-}
-
-/// A two-line named item beside an enable checkbox and compact actions.
-/// Tokens: control_height, space_4/8/16, dialog_rule/footer, form_ink/dim, font_label/small.
-pub fn summary_row(ui: &mut Ui, name: &str, summary: &str, enabled: &mut bool, actions_width: f32, actions: impl FnOnce(&mut Ui)) -> bool {
-    let t = Tokens::get();
-    let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height() + t.space_16), egui::Sense::hover());
-    t.container_rect(ui.painter(), rect, t.radius_lg, t.dialog_body, t.dialog_rule);
-    let check = egui::Rect::from_min_size(rect.min + vec2(t.space_6, 0.0), vec2(t.space_24, rect.height()));
-    let changed = ui
-        .scope_builder(egui::UiBuilder::new().max_rect(check).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-            super::checkbox(ui, "", enabled).backing_on_hover_text(solidcraft_ui_text::tr_label("Enable rule")).changed()
-        })
-        .inner;
-    let right = (rect.right() - dimension(actions_width) - t.space_6).max(check.right());
-    let text = egui::Rect::from_min_max(
-        egui::pos2(check.right() + t.space_4, rect.top()),
-        egui::pos2((right - t.space_8).max(check.right() + t.space_4), rect.bottom()),
-    );
-    let title = egui::Rect::from_min_max(text.min, egui::pos2(text.right(), text.center().y));
-    let detail = egui::Rect::from_min_max(egui::pos2(text.left(), text.center().y), text.max);
-    paint_text(ui, title, name, crate::type_face::semibold(t.font_label), t.form_ink, false);
-    paint_text(ui, detail, summary, egui::FontId::proportional(t.font_small), t.form_dim, false);
-    let response = ui.interact(text, ui.scope_id().with("summary"), egui::Sense::hover()).backing_on_hover_text(summary);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), format!("{name}: {summary}")));
-    solidcraft_ui_registry::publish_rect(&format!("dialog:inline:{name}"), title);
-    solidcraft_ui_registry::publish_rect("dialog:report:rule_report", detail);
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(egui::Rect::from_min_max(egui::pos2(right, rect.top()), rect.max))
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        actions,
-    );
-    changed
 }

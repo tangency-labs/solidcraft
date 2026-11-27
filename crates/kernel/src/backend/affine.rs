@@ -51,6 +51,10 @@ impl Affine for Solidcore {
         ops::orthonormal_axes(x, y).map_err(refused)
     }
 
+    fn frame_axes(&self, d: [f64; 3], v: [f64; 3]) -> Result<[[f64; 3]; 2], AffineRefused> {
+        ops::frame_axes(d, v).map_err(refused)
+    }
+
     fn axis_squared_axes(&self, x: [f64; 3], y: [f64; 3], noise: f64) -> Option<[[f64; 3]; 2]> {
         ops::axis_squared_axes(x, y, noise)
     }
