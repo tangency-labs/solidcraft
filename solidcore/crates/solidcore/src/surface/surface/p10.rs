@@ -1611,16 +1611,46 @@ fn replaced_limit_spans<O>(solutions: &[Solution<O>], carried: &[bool]) -> Vec<[
         .collect()
 }
 
-/// (Not upstream) Whether a range of the drop over the curve parameters `[t0, t1]` meets one
-/// of the replaced marked `spans` widened by `widen` (the tolerance as a stretch of the
-/// curve's parameter): such a range takes the mark. A span or a range that is not finite
-/// meets everything.
-fn meets_a_limit_span(spans: &[[f64; 2]], t0: f64, t1: f64, widen: f64) -> bool {
+/// (Not upstream) Whether a range of the drop over the curve parameters `[t0, t1]` takes the
+/// limit root mark of the replaced marked `spans`: with `widen` (the tolerance as a stretch
+/// of the curve's parameter, exact where the curve's speed is constant), where it meets one
+/// of them widened by it; without (a curve whose speed varies, where no single stretch of
+/// parameter holds the tolerance everywhere), wherever any span is marked. A span or a range
+/// that is not finite meets everything.
+fn drop_range_marked(spans: &[[f64; 2]], t0: f64, t1: f64, widen: Option<f64>) -> bool {
+    let Some(widen) = widen else {
+        return !spans.is_empty();
+    };
     let (lo, hi) = (t0.min(t1), t0.max(t1));
     spans.iter().any(|&[a, b]| {
         let finite = [a, b, lo, hi, widen].iter().all(|x| x.is_finite());
         !finite || (lo <= b + widen && a - widen <= hi)
     })
+}
+
+/// (Not upstream) The curve's speed `|C'(t)|` where it is the same at every parameter: a line,
+/// or a polynomial B-spline of degree 1 with two control points (one straight piece, its
+/// derivative the difference of its points over its knot span); `None` for any other curve
+/// (its speed may vary, and nothing cheap shows it does not).
+fn constant_speed(k: &Kernel, curve: &Curve) -> Result<Option<f64>> {
+    use crate::curve::curve::CurveKind;
+    let straight = match curve.kind() {
+        CurveKind::Line(_) => true,
+        CurveKind::BSpline(b) => {
+            b.degree()? == 1 && b.control_points()?.len() == 2 && !b.is_rational()?
+        }
+        _ => false,
+    };
+    if !straight {
+        return Ok(None);
+    }
+    let ivl = curve.natural_interval();
+    let (p0, p1) = (
+        curve.evaluate_point(k, ivl.min())?,
+        curve.evaluate_point(k, ivl.max())?,
+    );
+    let span = ivl.length();
+    Ok((span > 0.0).then(|| p0.distance(p1) / span))
 }
 
 /// (Not upstream) The limit root marks ([`Solution::limit_root`]) of the solutions of the
@@ -2254,18 +2284,13 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
         }
         // a range of the drop takes the mark of a replaced solution it meets along the curve
         // (the drop is parameterized as the curve is: its ends are the ranges' curve
-        // parameters), within the tolerance as a stretch of the curve's parameter
+        // parameters), within the tolerance as a stretch of the curve's parameter: exact
+        // where the curve's speed is constant; elsewhere every range takes it
         let spans = replaced_limit_spans(solutions.as_slice(), &carried);
-        let widen = if spans.is_empty() {
-            0.0
-        } else {
-            let length = curve.approximate_length(k, interval, 5, false)?.0;
-            let speed = length / interval.length();
-            if speed > 0.0 && speed.is_finite() {
-                tol / speed
-            } else {
-                f64::INFINITY
-            }
+        let widen = match constant_speed(k, curve)? {
+            _ if spans.is_empty() => Some(0.0),
+            Some(speed) if speed > 0.0 && speed.is_finite() => Some(tol / speed),
+            _ => None,
         };
         for uv_curve in &dropped.uv_curves {
             let ivl = uv_curve.natural_interval();
@@ -2285,7 +2310,7 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
             set_p(&mut sol.end, 0, ivl.max())?;
             set_p(&mut sol.end, 1, end.x)?;
             set_p(&mut sol.end, 2, end.y)?;
-            sol.limit_root = meets_a_limit_span(&spans, ivl.min(), ivl.max(), widen);
+            sol.limit_root = drop_range_marked(&spans, ivl.min(), ivl.max(), widen);
             tmp.add(&sol);
         }
         if !dropped.uv_curves.is_empty() {
@@ -2336,6 +2361,22 @@ mod tests {
             ],
             1,
             vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        Curve::from(BSplineCurve::from_nurb(n, 3, false))
+    }
+
+    /// The line `y = 0.5`, `z = 0` from `x = 0` to 1 as a B-spline of degree 2 whose middle
+    /// point is at `x = 0.1`: in the plane, but its speed is not constant.
+    fn uneven_line() -> Curve {
+        let n = NurbCurve::new(
+            vec![
+                CPoint::new(0.0, 0.5, 0.0, NOW),
+                CPoint::new(0.1, 0.5, 0.0, NOW),
+                CPoint::new(1.0, 0.5, 0.0, NOW),
+            ],
+            2,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
         )
         .unwrap();
         Curve::from(BSplineCurve::from_nurb(n, 3, false))
@@ -2457,14 +2498,79 @@ mod tests {
             vec![[0.3, 0.6]]
         );
         assert_eq!(replaced_limit_spans(&[a, b], &[true]), vec![[0.3, 0.6]]);
-        // a drop's range takes the mark where it meets a span widened by the tolerance
+        // on a curve of constant speed a drop's range takes the mark where it meets a span
+        // widened by the tolerance as a stretch of parameter; on any other, wherever a span
+        // is marked, met or not
         let spans = [[0.3, 0.6]];
-        assert!(meets_a_limit_span(&spans, 0.5, 0.9, 1e-6));
-        assert!(meets_a_limit_span(&spans, 0.6 + 5e-7, 0.9, 1e-6));
-        assert!(!meets_a_limit_span(&spans, 0.6 + 2e-6, 0.9, 1e-6));
-        assert!(!meets_a_limit_span(&spans, 0.0, 0.3 - 2e-6, 1e-6));
-        assert!(!meets_a_limit_span(&[], 0.0, 1.0, 1e-6));
-        assert!(meets_a_limit_span(&spans, 0.0, 0.1, f64::INFINITY));
+        let w = Some(1e-6);
+        assert!(drop_range_marked(&spans, 0.5, 0.9, w));
+        assert!(drop_range_marked(&spans, 0.6 + 5e-7, 0.9, w));
+        assert!(!drop_range_marked(&spans, 0.6 + 2e-6, 0.9, w));
+        assert!(!drop_range_marked(&spans, 0.0, 0.3 - 2e-6, w));
+        assert!(!drop_range_marked(&[], 0.0, 1.0, w));
+        assert!(drop_range_marked(&spans, 0.0, 0.1, Some(f64::INFINITY)));
+        assert!(drop_range_marked(&spans, 0.0, 0.1, None));
+        assert!(drop_range_marked(&spans, 0.9, 1.0, None));
+        assert!(!drop_range_marked(&[], 0.0, 1.0, None));
+        // the speed: constant on the line of degree 1 with two points (1 over [0, 1]); none
+        // claimed on a curve of degree 2 whose points are spaced unevenly
+        let k = Kernel::default();
+        assert_eq!(constant_speed(&k, &line()).unwrap(), Some(1.0));
+        assert_eq!(constant_speed(&k, &uneven_line()).unwrap(), None);
+    }
+
+    /// A curve of varying speed (a parabolic arch in the plane, leaving its square between
+    /// t ≈ 0.146 and 0.854) whose stretch over [0, 0.1] coincides with the plane, marked as
+    /// a limit root: the drop replaces it by two ranges with a gap between them, and both
+    /// take the mark, though only the first meets the replaced stretch (no stretch of
+    /// parameter holds the tolerance everywhere along such a curve).
+    #[test]
+    fn the_drop_along_a_curve_of_varying_speed_marks_every_range() {
+        let n = NurbCurve::new(
+            vec![
+                CPoint::new(0.1, 0.5, 0.0, NOW),
+                CPoint::new(0.5, 2.5, 0.0, NOW),
+                CPoint::new(0.9, 0.5, 0.0, NOW),
+            ],
+            2,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let arch = Curve::from(BSplineCurve::from_nurb(n, 3, false));
+        let k = Kernel::default();
+        let at = |t: f64| arch.evaluate_point(&k, t).unwrap();
+        let mut long = Solution::<H>::new();
+        long.solution_type = SolutionType::RangeOfValues;
+        long.num_variables = 3;
+        let (a, b) = (at(0.0), at(0.1));
+        long.start.parameters[..3].copy_from_slice(&[0.0, a.x, a.y]);
+        long.end.parameters[..3].copy_from_slice(&[0.1, b.x, b.y]);
+        long.limit_root = true;
+        let mut array = SolutionArray::new();
+        array.add(&long);
+        let r = global_curve_intersect_combine_solutions(
+            &k,
+            &plane(),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+            &arch,
+            &Extent1d::from_min_max(0.0, 1.0),
+            1e-6,
+            &CombineContext::default(),
+            &mut array,
+        );
+        r.unwrap();
+        let got: Vec<_> = array
+            .as_slice()
+            .iter()
+            .map(|s| (s.solution_type, s.start.parameters[0], s.limit_root))
+            .collect();
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!(got[1].1 > 0.5, "{got:?}");
+        assert!(
+            got.iter()
+                .all(|&(kind, _, marked)| kind == SolutionType::RangeOfValues && marked),
+            "{got:?}"
+        );
     }
 
     #[test]

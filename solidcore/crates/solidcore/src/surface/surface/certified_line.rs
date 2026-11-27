@@ -100,7 +100,8 @@
 //! left lies in a box decided, as every crossing of a finished pass does; the solve adds those
 //! crossings and keeps the guesses' answer past them ([`publishable_roots`]: below the least
 //! line parameter of the boxes left by every leaf of the solve at its limit, so that no
-//! crossing published comes after one another leaf left undecided). A
+//! crossing a leaf at its limit adds comes after one another leaf left undecided; a finished
+//! leaf adds all its crossings, as before). A
 //! shallow chord of a wide cylinder's side, whose leaf takes several thousand boxes along the
 //! silhouette between its crossings (where the line's direction lies in the tangent plane and
 //! no box about it is regular), gets its first crossing so.
@@ -2160,10 +2161,13 @@ impl SearchedLeaf {
 /// leaf at its limit where one such leaf's records were not kept (nothing is then known of
 /// the boxes it left). A crossing's line parameter is the foot of its point, so a crossing in
 /// a box left to visit by any leaf has it at `b` or past it: every crossing of the solve's
-/// searched leaves below `b` lies in a box a pass decided, and a ray's first published hit
-/// below `b` is its first crossing in them. The culled strips and the leaves whose pass did
-/// not run are no part of the bound: what they hold is the guesses' answer, as before the
-/// pass; a finished leaf's roots are all added, as before.
+/// searched leaves below `b` lies in a box a pass decided: no root added from a leaf at its
+/// limit comes after a crossing a box left to visit may hold. The culled strips and the
+/// leaves whose pass did not run are no part of the bound: what they hold is the guesses'
+/// answer, as before the pass. A finished leaf's roots are all added, as before this bound
+/// existed, whatever boxes a leaf at its limit left: such a root can come after a crossing
+/// left in a box a leaf at its limit did not visit, as it could before (where a leaf at its
+/// limit added nothing).
 pub(crate) fn publishable_roots(leaves: &[SearchedLeaf]) -> Vec<Vec<CertifiedRoot>> {
     let at_limit = || {
         leaves
