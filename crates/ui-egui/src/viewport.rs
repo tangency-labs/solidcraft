@@ -514,6 +514,9 @@ pub struct ViewportState {
     /// turns in the other orbit style than `free_orbit` says until it ends (#20917). None between
     /// drags.
     pub(crate) orbit_flip: Option<bool>,
+    /// Set when a mouse orbit drag starts: whether the `roll_key` was held, so the drag rolls the
+    /// view about the line of sight until it ends (#22691). None between drags.
+    pub(crate) orbit_roll: Option<bool>,
     pub build_ms: f64,
     /// Adaptive supersampling (#1288) and ambient occlusion while moving (#7165): the view drawn
     /// last (its view-projection and pixels) and since when it has held still (app time, s).
@@ -8651,6 +8654,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::tool_modifiers::set_manipulator_free(crate::prefs::manipulator_free_held(app, mods));
     let manipulator_dragging = crate::tool_modifiers::manipulator_dragging();
     crate::tool_modifiers::set_manipulator_dragging(false);
+    crate::dialog_drag_undo::track(app, ui.ctx(), primary_pressed, primary_down, manipulator_dragging);
     {
         let platform = crate::tool_modifiers::Platform::of(ui.ctx());
         let held = crate::tool_modifiers::Held::new(mods, platform);
@@ -19397,6 +19401,37 @@ mod tests {
     /// A two-finger twist turns the view about the up axis (#6286): counter-clockwise turns the
     /// model counter-clockwise as seen from above, pitch and roll stay, the Orbit around point
     /// keeps its place, and noise or the preference off (the default) leave the camera still.
+    /// With "Roll about the line of sight" on (#22691), the same twist rolls the picture the way the
+    /// fingers turn in any view, keeps heading and pitch, and keeps the Orbit around point on screen;
+    /// it does nothing while the twist itself is off.
+    #[test]
+    fn trackpad_twist_rolls_the_view_about_the_line_of_sight_when_asked() {
+        let mut h = crate::scenario::Harness::new();
+        assert!(!h.app.preferences.trackpad_twist_rolls, "rolling is opt-in");
+        h.call("ui.move", json!({"x":800,"y":500}));
+        h.frame();
+        h.app.preferences.trackpad_twist_rolls = true;
+        let untouched = h.app.cam;
+        h.app.synthetic.push(egui::Event::Rotate(-0.3));
+        h.frame();
+        assert_eq!(h.app.cam, untouched, "with the twist off, its roll option does nothing");
+        h.app.preferences.trackpad_twist_turns = true;
+        h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
+        // A view looking along neither axis: the roll must not depend on which way Z points.
+        h.app.cam = solidcraft_viewport::Camera { target: Vec3::new(30.0, -20.0, 5.0), yaw: 0.7, pitch: 0.4, ..h.app.cam };
+        let before = h.app.cam;
+        let origin = before.frame_coords(Vec3::ZERO);
+        // egui counts clockwise: -0.3 is a counter-clockwise twist, which turns the picture
+        // counter-clockwise (a negative roll).
+        h.app.synthetic.push(egui::Event::Rotate(-0.3));
+        h.frame();
+        let rolled = h.app.cam;
+        let turned = (rolled.roll - before.roll + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        assert!((turned + 0.3).abs() < 1e-6, "counter-clockwise rolls the picture counter-clockwise: {turned}");
+        assert_eq!((rolled.yaw, rolled.pitch, rolled.distance), (before.yaw, before.pitch, before.distance), "nothing turns towards or away");
+        assert!((rolled.frame_coords(Vec3::ZERO) - origin).len() < 1e-6, "the origin keeps its place on screen");
+    }
+
     #[test]
     fn trackpad_twist_turns_the_view_about_the_up_axis() {
         let mut h = crate::scenario::Harness::new();

@@ -98,6 +98,7 @@ mod loft_rails_tests;
 mod loft_region_tests;
 mod matchsurf;
 mod measure;
+mod memory;
 mod meshbody;
 #[cfg(test)]
 mod modify_history_tests;
@@ -112,6 +113,7 @@ mod outline_tests;
 mod par;
 #[cfg(test)]
 mod split_cone_tests;
+pub use memory::{available_memory_bytes, with_available_memory_for_test};
 pub use par::KERNEL_STACK;
 pub use par::for_each_on_threads;
 pub use par::kernel_thread;
@@ -185,6 +187,7 @@ mod validity;
 pub mod watch;
 
 pub use backend::Solidcore;
+pub use blend::BlendFit;
 pub use blend::ChamferSide;
 pub use blend::FilletTurn;
 pub use blend::FitSearch;
@@ -207,6 +210,7 @@ pub use blend::fillet_max_why;
 pub use blend::fillet_removing;
 pub use blend::fillet_setback;
 pub use blend::largest_fit_note;
+pub use blend::named_blend_fit;
 pub use blend::named_fit;
 pub use blend::names_largest_fit;
 pub use blend::scale_fit_note;
@@ -235,7 +239,6 @@ pub use body::EdgeLines;
 pub use body::FaceInfo;
 pub use body::FacePaint;
 pub use body::FaceSource;
-pub use body::KernelForms;
 pub use body::MESH_MIN_ANGLE;
 pub use body::MeshSpec;
 pub use body::MeshTolerance;
@@ -252,6 +255,7 @@ pub use body::Unshaped;
 pub use body::colour_name;
 pub use body::display_tolerance;
 pub use body::placed_mesh;
+pub use body::{KernelFormMask, KernelForms};
 pub use boundary::Boundary;
 pub use boundary::boundary_patch;
 pub use boundary_network::BoundaryCurve;
@@ -269,6 +273,7 @@ pub use bridge::curve_chain_of_edges;
 pub use bridge::frames;
 pub use bridge::frames_across;
 pub use bridge::sample_grid;
+pub use bridge::tangent_face_chain_of_faces;
 pub use build::PathSeg;
 pub use build::canonical_revolve_axis;
 pub use build::extrude_tapered;
@@ -393,6 +398,7 @@ pub use measure::measure;
 pub use measure::measure_many;
 pub use measure::measure_mass;
 pub use measure::measure_mass_many;
+pub use measure::reach_past;
 pub use meshbody::MAX_TRIANGLES;
 pub use meshbody::mesh_body;
 pub use meshbody::mesh_body_with_normals;
@@ -422,6 +428,8 @@ pub use point_path::along_path;
 pub use point_path::curve_path;
 pub use point_path::edge_path;
 pub use point_path::face_section_along;
+pub use point_path::polyline_fraction_at;
+pub use point_path::polyline_point_at;
 pub use point_path::project_onto_face;
 pub use point_path::sketch_record_curve;
 pub use point_path::sweep_point_path_with;
@@ -778,6 +786,22 @@ impl KernelError {
         match e.panic() {
             Some(m) => KernelError::Internal(format!("{context}: {m}")),
             None => KernelError::Failed(format!("{context}: {e}")),
+        }
+    }
+
+    /// The largest fitting size in mm named by a [`KernelError::TooLarge`] refusal, if any.
+    pub fn largest_fit(&self) -> Option<f64> {
+        match self {
+            KernelError::TooLarge(why) => blend::named_fit(why),
+            _ => None,
+        }
+    }
+
+    /// The typed largest fitting size named by a [`KernelError::TooLarge`] refusal, if any.
+    pub fn blend_fit(&self) -> Option<BlendFit> {
+        match self {
+            KernelError::TooLarge(why) => blend::named_blend_fit(why),
+            _ => None,
         }
     }
 }

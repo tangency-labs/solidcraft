@@ -810,6 +810,46 @@ fn the_pill_shortens_in_a_narrow_title_bar() {
     assert!(shortened, "the long label gives way in a narrow bar");
 }
 
+/// Update, Donate and Discord are one kind of chip: the same height in both panel layouts, never
+/// crossing each other or Report a bug, at a wide and at narrow window widths.
+#[test]
+fn the_update_chip_matches_the_link_chips_in_both_layouts() {
+    let dir = scratch();
+    let (feed, _) = next_release_feed(&dir.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.updater.feed = Some(feed);
+    h.frame();
+    wait_for_check(&mut h);
+    let mut seen = Vec::new();
+    for layout in ["floating", "docked"] {
+        h.call("ui.set", json!({"layout": layout}));
+        for width in [1920.0, 1280.0, 1024.0, 900.0] {
+            h.call("ui.resize", json!({"width": width, "height": 720}));
+            h.frames(3);
+            let chips: Vec<_> = ["titlebar:update", "titlebar:kofi", "titlebar:discord", "titlebar:report"]
+                .into_iter()
+                .filter_map(|name| crate::scenario::rect_of(name).map(|r| (name, r)))
+                .collect();
+            assert!(chips.iter().any(|(n, _)| *n == "titlebar:update"), "{layout} {width}: Update is on the bar");
+            if width == 1920.0 {
+                for name in ["titlebar:kofi", "titlebar:discord"] {
+                    assert!(chips.iter().any(|(n, _)| *n == name), "{layout} {width}: {name} is on the bar");
+                }
+            }
+            for (name, r) in &chips {
+                assert_eq!(r.height(), solidcraft_ui_kit::app_bar::PILL_HEIGHT, "{layout} {width}: {name} {r:?}");
+                for (other, o) in &chips {
+                    assert!(name == other || !r.intersects(*o), "{layout} {width}: {name} {r:?} crosses {other} {o:?}");
+                }
+            }
+            seen.push((width as u32, chips));
+        }
+    }
+    // The bar draws the chips the same way in either panel layout.
+    let (floating, docked) = seen.split_at(4);
+    assert_eq!(floating, docked);
+}
+
 #[test]
 fn the_memo_survives_with_the_preferences() {
     let mut p = crate::prefs::Prefs::default();

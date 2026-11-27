@@ -107,6 +107,7 @@ const PORTED: &[&str] = &[
     "thicken",
     "untrim_face",
     "boolean",
+    "boolean_tagged",
     "union_all",
     "extrude",
     "revolve",
@@ -783,7 +784,10 @@ fn call_with_copy(
                 in_place,
             ))
         }
-        "boolean" => {
+        // `boolean_tagged` is SolidCraft's boolean of its operands tagged 0 and 1: the same
+        // result as `tagged` on each and then `boolean` (smlib's `Brep::boolean_tagged`), and
+        // tagging changes no geometry.
+        "boolean" | "boolean_tagged" => {
             let operation = match p["op"].as_str() {
                 Some("union") => BooleanOp::Union,
                 Some("subtract") => BooleanOp::Subtract,

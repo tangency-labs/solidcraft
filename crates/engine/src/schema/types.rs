@@ -200,14 +200,68 @@ macro_rules! target_point {
 }
 
 target_point!(
-    /// Extrude's `to`: a [`Point3`], with the handler's message.
+    /// Extrude's `to2` and Surface Extrude's `to`: a [`Point3`], with the handler's message.
     ToPoint,
     "must be a point [x, y, z] on the face, vertex or point to extrude to"
 );
-target_point!(
-    /// Extrude's `from`: a [`Point3`], with the handler's message.
-    FromPoint,
-    "must be a point [x, y, z] on the face or point to start from"
+
+/// Extrude's `to` and `from`: a [`Point3`], or a construction plane or point the extent follows
+/// (#8527), as `extent_param` reads them. Kept as given, for the handler.
+macro_rules! object_target {
+    ($(#[$doc:meta])* $name:ident, $message:literal) => {
+        $(#[$doc])*
+        #[derive(Clone, Debug, PartialEq)]
+        pub struct $name(pub Value);
+
+        impl<'de> Deserialize<'de> for $name {
+            fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+                use crate::cmd::GeoForm;
+                use solidcraft_doc::construct::GeoRef;
+                let v = Value::deserialize(d)?;
+                let fits = params::vec3(&v).is_some()
+                    || (v.is_object() || v.is_string())
+                        && match crate::cmd::geo_form(&v) {
+                            Ok(GeoForm::Plane(plane)) => plane_problem(plane).is_none(),
+                            Ok(GeoForm::ConstructPoint(_)) => true,
+                            Ok(GeoForm::Saved(g)) => matches!(g, GeoRef::Plane { .. } | GeoRef::ConstructPoint { .. } | GeoRef::Origin),
+                            _ => false,
+                        };
+                if fits { Ok($name(v)) } else { Err(D::Error::custom($message)) }
+            }
+        }
+
+        impl JsonSchema for $name {
+            fn schema_name() -> Cow<'static, str> {
+                stringify!($name).into()
+            }
+            fn inline_schema() -> bool {
+                true
+            }
+            fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+                let point = generator.subschema_for::<Point3>();
+                let plane = generator.subschema_for::<PlaneParam>();
+                json_schema!({
+                    "anyOf": [
+                        point,
+                        {"type": "object", "properties": {"plane": plane}, "required": ["plane"], "description": "A plane the extent follows when it moves: XY, XZ, YZ or a construction plane's name. A plane parallel to the sketch ends the extrude on it; a plane at a slant cuts the end along it; a plane the extrusion runs along is refused."},
+                        {"type": "object", "properties": {"construct_point": {"type": "string"}}, "required": ["construct_point"], "description": "A construction point by name: the extrude ends on the plane through it, parallel to the sketch, and follows it when it moves."},
+                        {"type": "string", "description": "A plane's name, as {plane: name}."}
+                    ]
+                })
+            }
+        }
+    };
+}
+
+object_target!(
+    /// Extrude's `to`: a point, a plane or a construction point, with the handler's message.
+    ToObject,
+    "must be a point [x, y, z] on the face, vertex or point to extrude to, a plane ({plane: XY|name}) or a construction point ({construct_point: name})"
+);
+object_target!(
+    /// Extrude's `from`: a point, a plane or a construction point, with the handler's message.
+    FromObject,
+    "must be a point [x, y, z] on the face or point to start from, a plane ({plane: XY|name}) or a construction point ({construct_point: name})"
 );
 
 target_point!(

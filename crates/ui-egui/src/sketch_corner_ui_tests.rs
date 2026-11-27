@@ -1584,6 +1584,98 @@ fn a_circle_centre_snapped_to_a_line_undone_and_redone_stays_on_it() {
     assert!(held.iter().any(|p| p.dist(Vec2::new(20.0, 0.0)) < 0.5), "the centre is held on the line: {held:?}");
 }
 
+/// The tools that take their points one by one send a stored snap again too (#22766): after the
+/// Undo button took its curve away, a Midpoint Line, a Conic and the splines are drawn through
+/// the places clicked, and the tool goes on. A spline is sent on the right click that ends it.
+#[test]
+fn a_point_tool_whose_stored_click_lost_its_curve_to_undo_is_still_drawn() {
+    let spline: &[[i32; 3]] = &[[30, 15, 0], [45, 10, 0], [50, 20, 0], [40, 25, 0], [25, 22, 0]];
+    let cases: [(&str, &[[i32; 3]], &[[i32; 3]]); 6] = [
+        ("sketch.line.midpoint", &[[20, 0, 0]], &[[40, 20, 0]]),
+        ("sketch.conic", &[[20, 0, 0]], &[[45, 20, 0], [30, 15, 0]]),
+        ("sketch.conic", &[[20, 15, 0], [20, 0, 0]], &[[35, 20, 0]]),
+        ("sketch.spline.fit_point", &[[20, 0, 0]], spline),
+        ("sketch.spline.control_point", &[[20, 0, 0]], spline),
+        ("sketch.spline.control_point_5", &[[20, 0, 0]], spline),
+    ];
+    let mut failed = Vec::new();
+    for (tool, before, after) in cases {
+        let mut h = clicked_then_undone(tool, before);
+        for at in after {
+            h.step(&json!({"move":{"world":at}})).unwrap();
+            h.step(&json!({"click":{"world":at}})).unwrap();
+        }
+        if tool.starts_with("sketch.spline.") {
+            h.step(&json!({"click":{"world":after[after.len() - 1]},"button":"right"})).unwrap();
+        }
+        let sid = h.app.session.active_sketch.unwrap();
+        let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+        // A control point spline brings its control polygon, so the new curve is counted by kind.
+        let drawn = sk.curves.iter().filter(|c| matches!(c.kind, CurveKind::Line { .. })).count() > 1
+            || sk.curves.iter().any(|c| !matches!(c.kind, CurveKind::Line { .. }));
+        let error = h.app.status.as_ref().filter(|s| s.2).map(|s| s.0.clone());
+        let ready = h.app.tool.as_ref().is_some_and(|t| t.pts.is_empty());
+        if error.is_some() || !drawn || !ready {
+            failed.push(format!("{tool} after {} click(s): drawn {drawn}, ready {ready}, {error:?}", before.len()));
+        }
+    }
+    // A fit point spline closed by a click on its start, which snapped to the removed line: the
+    // start is found by its place, and the closed spline is drawn.
+    let mut h = clicked_then_undone("sketch.spline.fit_point", &[[20, 0, 0]]);
+    for at in [[40, 15, 0], [30, 25, 0], [20, 0, 0]] {
+        h.step(&json!({"move":{"world":at}})).unwrap();
+        h.step(&json!({"click":{"world":at}})).unwrap();
+    }
+    let sid = h.app.session.active_sketch.unwrap();
+    let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+    let closed = sk.curves.iter().any(|c| matches!(c.kind, CurveKind::Spline { periodic: true, .. }));
+    let error = h.app.status.as_ref().filter(|s| s.2).map(|s| s.0.clone());
+    let ready = h.app.tool.as_ref().is_some_and(|t| t.pts.is_empty());
+    if error.is_some() || !closed || !ready {
+        failed.push(format!("closed fit point spline: closed {closed}, ready {ready}, {error:?}"));
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
+/// Tangent Arc and Blend Curve need the sketch point they were clicked on, so the place clicked
+/// cannot stand in for it. When the Undo button took that point away, the next click drops the
+/// stored one and shows where to click, and the clicks after it draw the curve (#22766).
+#[test]
+fn a_tangent_arc_or_blend_curve_whose_stored_end_was_undone_starts_over() {
+    let cases: [(&str, [i32; 3], &[[i32; 3]]); 2] =
+        [("sketch.arc.tangent", [75, 15, 0], &[[60, 30, 0], [75, 40, 0]]), ("sketch.blend_curve", [60, 30, 0], &[[60, 30, 0], [60, 50, 0]])];
+    for (tool, refused, again) in cases {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,50],[60,50]],"ids":["other"]})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,30],[60,30]],"ids":["keep"]})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,0],[60,0]],"ids":["base"]})).unwrap();
+        h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+        h.settle();
+        h.step(&json!({"start":tool})).unwrap();
+        h.step(&json!({"move":{"world":[60, 0, 0]}})).unwrap();
+        h.step(&json!({"click":{"world":[60, 0, 0]}})).unwrap();
+        let first = h.app.tool.as_ref().unwrap().pts.clone();
+        assert!(first.len() == 1 && first[0].1.as_deref() == Some("base.end"), "{tool}: {first:?}");
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        let sid = h.app.session.active_sketch.unwrap();
+        assert!(h.app.session.model.state().sketch(sid).unwrap().sketch.curve_index("base").is_none(), "{tool}: Undo took the line");
+        h.step(&json!({"move":{"world":refused}})).unwrap();
+        h.step(&json!({"click":{"world":refused}})).unwrap();
+        assert_eq!(h.app.status.as_ref().map(|s| (s.0.clone(), s.2)), crate::sketch_tools::hint(tool).map(|hint| (hint, true)), "{tool}");
+        assert!(h.app.tool.as_ref().is_some_and(|t| t.cmd == tool && t.pts.is_empty()), "{tool}: the stored click is gone, the tool is on");
+        assert_eq!(h.app.session.model.state().sketch(sid).unwrap().sketch.curves.len(), 2, "{tool}: nothing drawn yet");
+        for at in again {
+            h.step(&json!({"move":{"world":at}})).unwrap();
+            h.step(&json!({"click":{"world":at}})).unwrap();
+        }
+        let curves = h.app.session.model.state().sketch(sid).unwrap().sketch.curves.len();
+        assert_eq!(curves, 3, "{tool}: drawn from the clicks after the hint: {:?}", h.app.status);
+        assert!(h.app.tool.as_ref().is_some_and(|t| t.pts.is_empty()), "{tool}: ready for the next one");
+    }
+}
+
 /// The Edge-Center Rectangle's second click snapped onto a line, a little off a sketch axis, and
 /// the Undo button then took that line away: the rectangle is drawn with its edge the way it was
 /// clicked and previewed, not nudged onto the axis.

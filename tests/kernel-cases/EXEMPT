@@ -651,6 +651,8 @@ view.toolbar_reset_all            toolbar preferences: crates/ui-egui/src/toolba
 view.top                          the view: camera, layout, display
 view.visual_style                 the view: camera, layout, display
 view.zoom_mode                    the view: camera only: crates/ui-egui/src/nav_mode_tests.rs
+weld.create                       a weld graphic record, no geometry: crates/engine/src/tests.rs and crates/ui-egui/src/dialogs_weld_tests.rs
+weld.delete                       removes a weld graphic record: crates/engine/src/tests.rs
 window.options.use_as_default     copies pop-out presentation settings to preferences; no geometry
 
 # Commands that make or change geometry and have no case yet. This section only shrinks: the

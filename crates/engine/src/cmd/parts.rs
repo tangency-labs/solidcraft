@@ -1546,16 +1546,30 @@ fn hole_wall(s: &Session, a: Vec3) -> Option<HoleWall> {
     // Picks are in world coordinates, including rims on already placed standard parts.
     let st = s.world_state().ok()?;
     let dirs = [Vec3::Z * -1.0, Vec3::Z, Vec3::X, Vec3::X * -1.0, Vec3::Y, Vec3::Y * -1.0];
-    for step in [0.2, 0.5, 1.0, 2.0] {
-        for b in &st.bodies {
+    let steps = [0.2, 0.5, 1.0, 2.0];
+    // Each probe meshes the body it looks at (`cylinder_face_at`): only the bodies a probe can
+    // reach are looked at, each through a copy that keeps its mesh for the next probe, so a pick
+    // meshes a body once rather than once per probe and leaves the bodies far away alone (#6552).
+    // A probe is on a wall only when it lies on the body's surface, inside its exact box.
+    let reach = steps.iter().copied().fold(0.0, f64::max);
+    let bodies: Vec<_> = st
+        .bodies
+        .iter()
+        .filter(|b| {
+            b.body.is_mesh() || b.body.exact_bounds().map_or(true, |bb| bb.inflated(reach + 1e-3 + 2.0 * b.body.record().tolerance).contains(a))
+        })
+        .map(|b| b.body.keeping_meshes())
+        .collect();
+    for step in steps {
+        for b in &bodies {
             for d in dirs {
                 let q = a + d * step;
-                if let Some(c) = solidcraft_doc::kernel::cylinder_face_at(&b.body, q) {
+                if let Some(c) = solidcraft_doc::kernel::cylinder_face_at(b, q) {
                     let v = q - c.axis_point;
                     let along = v.dot(c.axis);
                     let on_wall = ((v - c.axis * along).len() - c.radius).abs() < 1e-3 && along > c.start && along < c.end;
                     if on_wall {
-                        return Some(wall_from_cylinder(&b.body, c, q));
+                        return Some(wall_from_cylinder(b, c, q));
                     }
                 }
             }
@@ -2680,6 +2694,26 @@ mod tests {
         assert_eq!(s.undo.len(), undo + 1);
         run(&mut s, "edit.undo", json!({}));
         assert_eq!((s.doc.components.len(), s.doc.occurrences.len()), (comps, occs));
+    }
+
+    /// #6552: finding the hole under a pick looks only at the bodies the pick can reach. Each
+    /// probe meshed every body in the design, 24 probes per pick, so a fastener inserted beside
+    /// a large imported part spent seconds meshing it again and again. A pick away from every
+    /// body meshes none of them; a pick on a hole's rim still finds the hole.
+    #[test]
+    fn finding_a_hole_meshes_no_body_out_of_the_picks_reach() {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "body_name": "Plate"}));
+        run(&mut s, "solid.hole", json!({"position": [20, 15, 10], "diameter": 3.4}));
+        run(&mut s, "solid.box", json!({"corner": [500, 0, 0], "length": 40, "width": 30, "height": 10, "body_name": "Far"}));
+        run(&mut s, "solid.hole", json!({"position": [520, 15, 10], "diameter": 3.4}));
+        let (wall, work) = solidcraft_kernel::profile::capture(|| super::hole_wall(&s, Vec3::new(250.0, 15.0, 5.0)));
+        assert!(wall.is_none());
+        assert_eq!(work.tessellate_ms, 0.0, "a pick away from every body meshes none of them");
+        let wall = super::hole_wall(&s, Vec3::new(21.7, 15.0, 10.0)).unwrap_or_else(|| panic!("the rim pick finds the hole"));
+        assert!((wall.radius - 1.7).abs() < 1e-3 && (wall.seat - Vec3::new(20.0, 15.0, wall.seat.z)).len() < 1e-3, "{wall:?}");
+        let r = run(&mut s, "parts.fastener", json!({"family": "socket_head_cap_screw", "size": "M3", "length": 8, "at": [21.7, 15, 10]}));
+        assert!(r["joint"].is_number(), "{r}");
     }
 
     /// #12191: a hole picked at both ends (a blind hole's rim and its floor edge, a through
