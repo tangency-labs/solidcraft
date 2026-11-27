@@ -61,7 +61,7 @@ fn the_example_package_loads_and_its_declarations_hold() {
 fn a_code_becomes_fields_rows_and_commands() {
     let g = example();
     let plan = g.plan("TN20-M4").unwrap();
-    assert_eq!(plan.component, "TN20-M4");
+    assert_eq!(plan.component.as_deref(), Some("TN20-M4"));
     assert_eq!(plan.parsed.rows.len(), 1);
     assert_eq!(plan.parsed.rows[0].status.as_deref(), Some("approximate"));
     assert_eq!(plan.parsed.rows[0].source.as_deref(), Some("S1"));
@@ -424,4 +424,275 @@ fn error_messages_read_as_sentences() {
     assert_eq!(e.to_string(), "generator limit: more than 5000 table rows");
     let e = GeneratorError::NeedsNewer { needs: "0.60.0".into(), have: "0.51.0".into() };
     assert!(e.to_string().contains("needs SolidCraft 0.60.0"));
+}
+
+// ---- the additions for the first adopter (docs/formats/generator-package.md, section 11) ----
+
+/// A package with a table `t` (key `k`), a lookup `t` on the field `k`, and the given extras.
+fn with(extra: Json) -> Generator {
+    let mut v: Json = json!({
+        "format": "solidcraft-generator/1", "id": "extras-test", "name": "Extras",
+        "grammar": {"alternatives": [[{"field": "k", "enum": ["a1", "b2", "c3"], "nocase": true}]]},
+        "tables": {"t": {"columns": {"k": "text", "n": "number"}, "key": ["k"], "csv": "k,n\na1,5\nb2,7\n"}},
+        "lookups": [{"table": "t", "as": "t", "key": {"k": "k"}}],
+        "steps": [{"command": "solid.box", "params": {"length": "${t.n}", "width": 1, "height": 1}}]
+    });
+    for (k, x) in extra.as_object().unwrap() {
+        v[k] = x.clone();
+    }
+    Generator::load(&v.to_string(), NOW).unwrap()
+}
+
+fn refusal(g: &Generator, code: &str) -> (RefusalKind, String) {
+    match g.parse(code) {
+        Err(GeneratorError::Refused { kind, message }) => (kind, message),
+        other => panic!("{code}: {other:?}"),
+    }
+}
+
+#[test]
+fn an_early_rule_and_a_missing_kind_refuse_a_valid_but_undrawn_type_as_not_modelled() {
+    // c3 is a real code with no table row: the lookup refuses it, with the kind the package gives.
+    let g = with(json!({}));
+    assert_eq!(refusal(&g, "c3").0, RefusalKind::Invalid);
+    let mut v = json!([{"table": "t", "as": "t", "key": {"k": "k"}, "missing": "{k} is not drawn", "missing_kind": "not_modelled"}]);
+    let g = with(json!({"lookups": v.clone()}));
+    assert_eq!(refusal(&g, "c3"), (RefusalKind::NotModelled, "c3 is not drawn".into()));
+    // An early rule runs before the lookups, so it can answer for a type that has no row at all.
+    v = json!([{"when": "k == \"c3\"", "refuse": "{k} is a valid code, not drawn here", "kind": "not_modelled", "phase": "early"}]);
+    let g = with(json!({"rules": v}));
+    assert_eq!(refusal(&g, "c3"), (RefusalKind::NotModelled, "c3 is a valid code, not drawn here".into()));
+    // ...and cannot read a lookup, which does not exist yet.
+    let g = with(json!({"rules": [{"when": "t.n > 1", "refuse": "x", "phase": "early"}]}));
+    assert!(matches!(g.parse("a1"), Err(GeneratorError::Expr { .. })));
+    // Bad words are refused at load.
+    for bad in [
+        json!({"lookups": [{"table": "t", "as": "t", "key": {"k": "k"}, "missing_kind": "gone"}]}),
+        json!({"rules": [{"when": "true", "refuse": "x", "phase": "soon"}]}),
+    ] {
+        let mut v: Json = serde_json::from_str(EXAMPLE).unwrap();
+        for (k, x) in bad.as_object().unwrap() {
+            v[k] = x.clone();
+        }
+        assert!(load(&v.to_string()).is_err());
+    }
+}
+
+#[test]
+fn case_folding_is_per_enum_or_for_the_whole_code() {
+    let g = with(json!({}));
+    assert_eq!(g.parse("B2").unwrap().code, "B2");
+    let g = with(
+        json!({"grammar": {"alternatives": [[{"lit": "x"}, {"field": "k", "chars": "alnum", "min_len": 1, "max_len": 4}]], "normalize": "lower", "refuse": "{code} is wrong"}}),
+    );
+    let parsed = g.parse("XA1").unwrap();
+    assert_eq!(parsed.code, "xa1");
+    assert_eq!(parsed.fields[0].1, Value::Text("a1".into()));
+    // The message shows the code as it was typed.
+    assert_eq!(refusal(&g, "ZZ9").1, "ZZ9 is wrong");
+    // Upper: the folded code is what is looked up.
+    let g = with(
+        json!({"grammar": {"alternatives": [[{"lit": "X"}, {"field": "k", "chars": "alnum", "min_len": 1, "max_len": 4}]], "normalize": "upper"}}),
+    );
+    assert!(refusal(&g, "xa1").1.contains("A1"));
+    let mut v: Json = serde_json::from_str(EXAMPLE).unwrap();
+    v["grammar"]["normalize"] = json!("title");
+    assert!(load(&v.to_string()).is_err());
+}
+
+#[test]
+fn numbers_become_text_in_one_defined_way() {
+    assert_eq!(ev("fmt(2.5)").unwrap(), Value::Text("2.5".into()));
+    assert_eq!(ev("fmt(1000)").unwrap(), Value::Text("1000".into()));
+    assert_eq!(ev("fmt(497.0)").unwrap(), Value::Text("497".into()));
+    assert_eq!(ev("fmt(4.2)").unwrap(), Value::Text("4.2".into()));
+    assert_eq!(ev("fmt(0.1 + 0.2)").unwrap(), Value::Text("0.30000000000000004".into()));
+    assert_eq!(ev("fmt(1.5, 3)").unwrap(), Value::Text("1.500".into()));
+    assert_eq!(ev("concat(\"M\", 3.5, \"-\", 4)").unwrap(), Value::Text("M3.5-4".into()));
+    assert_eq!(ev("\"x\" + -0").unwrap(), Value::Text("x0".into()));
+}
+
+#[test]
+fn empty_cells_mean_no_items_or_no_value() {
+    let csv = "k,pts,lst,opt,nums,groups\na1,,,,,\nb2,0 0; 1 1,x y,3.5,1 2 3,1 2; 3 4 5\n";
+    let make = |ty: &str| {
+        let mut v: Json = json!({
+            "format": "solidcraft-generator/1", "id": "cells-test", "name": "Cells",
+            "grammar": {"alternatives": [[{"field": "k", "enum": ["a1", "b2"]}]]},
+            "tables": {"t": {"columns": {"k": "text", "pts": "points", "lst": "list", "opt": ty, "nums": "numbers", "groups": "tuples"}, "key": ["k"], "csv": csv}},
+            "lookups": [{"table": "t", "as": "t", "key": {"k": "k"}}],
+            "vars": [{"name": "has_opt", "expr": "has(t.opt)"}, {"name": "n_pts", "expr": "len(t.pts)"}, {"name": "n_groups", "expr": "len(t.groups)"}, {"name": "third", "expr": "len(t.nums) > 2 ? at(t.nums, 2) : 0"}],
+            "steps": [{"command": "solid.box", "params": {"pts": "${t.pts}", "lst": "${t.lst}", "nums": "${t.nums}", "groups": "${t.groups}", "opt": "${t.opt}"}}]
+        });
+        v["x-note"] = json!(1);
+        load(&v.to_string())
+    };
+    // An empty cell is legal for a list, points, numbers or tuples column, and for `number?`.
+    let g = make("number?").unwrap();
+    let a = g.plan("a1").unwrap();
+    assert_eq!(a.commands[0].params, json!({"pts": [], "lst": [], "nums": [], "groups": [], "opt": null}));
+    assert_eq!(Generator::named_value(&a.parsed, "n_pts"), Some(0.0));
+    assert_eq!(a.parsed.vars[0].1, Value::Bool(false));
+    let b = g.plan("b2").unwrap();
+    assert_eq!(
+        b.commands[0].params,
+        json!({"pts": [[0, 0], [1, 1]], "lst": ["x", "y"], "nums": [1, 2, 3], "groups": [[1, 2], [3, 4, 5]], "opt": 3.5})
+    );
+    assert_eq!(b.parsed.vars[0].1, Value::Bool(true));
+    assert_eq!(Generator::named_value(&b.parsed, "third"), Some(3.0));
+    assert_eq!(Generator::named_value(&b.parsed, "n_groups"), Some(2.0));
+    // A plain `number` column still wants a number.
+    assert!(make("number").is_err());
+    // Arithmetic on an empty value is an error, not a zero.
+    let mut scope = Scope::new();
+    scope.insert("x".into(), Value::None);
+    let e = expr::parse("x + 1").unwrap();
+    assert!(expr::eval(&e, &scope, &mut Budget { remaining: 100 }).is_err());
+}
+
+#[test]
+fn a_table_list_drives_one_repeat_and_a_block_keeps_its_commands_in_order() {
+    let mut v: Json = json!({
+        "format": "solidcraft-generator/1", "id": "block-test", "name": "Block",
+        "grammar": {"alternatives": [[{"field": "k", "enum": ["a1"]}]]},
+        "tables": {"t": {"columns": {"k": "text", "bores": "tuples"}, "key": ["k"], "csv": "k,bores\na1,1 2 3; 4 5 6; 7 8 9\n"}},
+        "lookups": [{"table": "t", "as": "t", "key": {"k": "k"}}],
+        "steps": [{
+            "repeat": {"var": "i", "count": "len(t.bores)", "max": 5},
+            "steps": [
+                {"command": "sketch.line", "params": {"x": "${at(at(t.bores, i), 0)}", "n": "${i}"}},
+                {"command": "sketch.arc.three_point", "when": "i < 2", "params": {"d": "${at(at(t.bores, i), 2)}", "n": "${i}"}}
+            ]
+        }]
+    });
+    let g = load(&v.to_string()).unwrap();
+    let plan = g.plan("a1").unwrap();
+    let order: Vec<(String, i64)> = plan.commands.iter().map(|c| (c.command.clone(), c.params["n"].as_i64().unwrap())).collect();
+    assert_eq!(
+        order,
+        [("sketch.line", 0), ("sketch.arc.three_point", 0), ("sketch.line", 1), ("sketch.arc.three_point", 1), ("sketch.line", 2)]
+            .map(|(c, n)| (c.to_string(), n))
+    );
+    assert_eq!(plan.commands[0].params["x"], json!(1));
+    assert_eq!(plan.commands[3].params["d"], json!(6));
+    // A block cannot hold a repeat or a block of its own, and needs commands.
+    for bad in [
+        json!([{"steps": [{"command": "solid.box", "repeat": {"var": "j", "count": "2", "max": 2}}]}]),
+        json!([{"steps": [{"steps": [{"command": "solid.box"}]}]}]),
+        json!([{"steps": []}]),
+        json!([{"command": "solid.box", "steps": [{"command": "solid.box"}]}]),
+        json!([{"steps": [{"command": "solid.box"}], "params": {}}]),
+        json!([{"params": {}}]),
+    ] {
+        v["steps"] = bad;
+        assert!(load(&v.to_string()).is_err());
+    }
+    // Blocks multiply, so the total is counted before anything is expanded: 20 commands x 30.
+    let twenty: Vec<Json> = (0..20).map(|_| json!({"command": "solid.box"})).collect();
+    v["steps"] = json!([{"repeat": {"var": "i", "count": "30", "max": 30}, "steps": twenty}]);
+    let g = load(&v.to_string()).unwrap();
+    assert!(matches!(g.plan("a1"), Err(GeneratorError::Limit { what: "commands in one build", limit: 512 })));
+    // The template as a whole is capped too.
+    let many: Vec<Json> = (0..60).map(|_| json!({"command": "solid.box"})).collect();
+    v["steps"] = Json::Array((0..5).map(|_| json!({"steps": many.clone()})).collect());
+    assert!(matches!(load(&v.to_string()), Err(GeneratorError::Limit { what: "commands in the template", .. })));
+}
+
+#[test]
+fn constants_are_names_for_every_expression_and_may_key_a_lookup() {
+    let mut v: Json = json!({
+        "format": "solidcraft-generator/1", "id": "const-test", "name": "Const",
+        "const": {"plan": "p", "ratio": 0.5, "on": true},
+        "grammar": {"alternatives": [[{"field": "k", "enum": ["a1"]}]]},
+        "tables": {"params": {"columns": {"name": "text", "value": "number"}, "key": ["name"], "csv": "name,value\np,10\n"}},
+        "lookups": [{"table": "params", "as": "pr", "key": {"name": "plan"}}],
+        "vars": [{"name": "half", "expr": "pr.value * ratio"}],
+        "steps": [{"command": "solid.box", "when": "on", "params": {"length": "${half}"}}]
+    });
+    let plan = load(&v.to_string()).unwrap().plan("a1").unwrap();
+    assert_eq!(plan.commands[0].params["length"], json!(5));
+    // A constant is not a field: it is not in the fields shown.
+    assert!(plan.parsed.fields.iter().all(|(n, _)| n != "plan" && n != "ratio"));
+    for bad in [json!({"k": 1}), json!({"code": 1}), json!({"half": 1}), json!({"x y": 1}), json!({"list": [1]}), json!({"big": 1e999})] {
+        v["const"] = bad;
+        assert!(load(&v.to_string()).is_err());
+    }
+}
+
+#[test]
+fn the_allow_list_has_metadata_and_visibility_and_a_package_may_skip_the_component() {
+    let ok = ["browser.visibility", "component.metadata.set", "document.metadata.set", "solid.thread", "sketch.line", "construct.plane.offset"];
+    let steps: Vec<Json> = ok.iter().map(|c| json!({"command": c})).collect();
+    let mut v: Json = serde_json::from_str(&package(json!([{"command": "solid.box"}]))).unwrap();
+    v["steps"] = Json::Array(steps);
+    v["insert"] = json!({"component": false});
+    let plan = load(&v.to_string()).unwrap().plan("X1").unwrap();
+    assert_eq!(plan.component, None);
+    assert_eq!(plan.commands.len(), ok.len());
+    for no in ["browser.set_visibility_file", "document.open", "document.save", "settings.set", "file.save", "ui.start"] {
+        v["steps"] = json!([{"command": no}]);
+        assert!(load(&v.to_string()).is_err(), "{no}");
+    }
+    v["steps"] = json!([{"command": "solid.box"}]);
+    v["insert"] = json!({"component": 5});
+    assert!(load(&v.to_string()).is_err());
+}
+
+#[test]
+fn a_row_can_give_a_status_per_column() {
+    let csv = "k,a,b,c,status\na1,1,2,3,\"measured:a,b;approximate:c;published\"\nb2,1,2,3,labelled\n";
+    let mut v: Json = json!({
+        "format": "solidcraft-generator/1", "id": "status-test", "name": "Status",
+        "grammar": {"alternatives": [[{"field": "k", "enum": ["a1", "b2"]}]]},
+        "tables": {"t": {"columns": {"k": "text", "a": "number", "b": "number", "c": "number", "status": "text"}, "key": ["k"], "csv": csv}},
+        "lookups": [{"table": "t", "as": "t", "key": {"k": "k"}}],
+        "steps": [{"command": "solid.box"}]
+    });
+    let g = load(&v.to_string()).unwrap();
+    let row = &g.parse("a1").unwrap().rows[0];
+    assert_eq!(row.status.as_deref(), Some("published"));
+    assert_eq!(row.column_status.get("a").map(String::as_str), Some("measured"));
+    assert_eq!(row.column_status.get("b").map(String::as_str), Some("measured"));
+    assert_eq!(row.column_status.get("c").map(String::as_str), Some("approximate"));
+    let row = &g.parse("b2").unwrap().rows[0];
+    assert_eq!((row.status.as_deref(), row.column_status.len()), (Some("labelled"), 0));
+    for bad in ["measured:zz", "guessed", "measured:a;whatever"] {
+        v["tables"]["t"]["csv"] = json!(format!("k,a,b,c,status\na1,1,2,3,\"{bad}\"\n"));
+        assert!(load(&v.to_string()).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn the_review_object_is_checked_and_x_keys_are_allowed_inside_every_object() {
+    let mut v: Json = serde_json::from_str(EXAMPLE).unwrap();
+    v["review"] = json!({"reviewer": "A. Reader", "reviewer_kind": "person", "date": "2026-11-27", "sources_hash": "sha256:00", "level": "reviewed", "notes": "ok", "x-extra": 1});
+    let g = load(&v.to_string()).unwrap();
+    let review = g.meta.review.as_ref().unwrap();
+    assert_eq!((review.reviewer_kind.as_deref(), review.date.as_str(), review.level.as_deref()), (Some("person"), "2026-11-27", Some("reviewed")));
+    for bad in [
+        json!({"reviewer_kind": "robot"}),
+        json!({"date": "27 Nov"}),
+        json!({"level": "great"}),
+        json!({"surprise": 1}),
+        json!({"reviewer": "x".repeat(300)}),
+    ] {
+        v["review"] = bad;
+        assert!(load(&v.to_string()).is_err());
+    }
+    v.as_object_mut().unwrap().remove("review");
+    // x- keys on a step, a block, a repeat, a table, a lookup, a rule, a variable, a source, a grammar and a token.
+    v["steps"][0]["x-why"] = json!("note");
+    v["steps"][1]["repeat"]["x-why"] = json!("note");
+    v["tables"]["size"]["x-why"] = json!("note");
+    v["lookups"][0]["x-why"] = json!("note");
+    v["rules"][0]["x-why"] = json!("note");
+    v["vars"][0]["x-why"] = json!("note");
+    v["sources"][0]["x-why"] = json!("note");
+    v["grammar"]["x-why"] = json!("note");
+    v["grammar"]["alternatives"][0][0]["x-why"] = json!("note");
+    v["checks"][0]["x-why"] = json!("note");
+    assert!(load(&v.to_string()).is_ok());
+    // A misspelt key without the x- is still an error.
+    v["steps"][0]["whhy"] = json!(1);
+    assert!(load(&v.to_string()).is_err());
 }

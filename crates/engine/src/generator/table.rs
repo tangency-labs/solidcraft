@@ -18,11 +18,22 @@ pub struct TableDef {
 }
 
 /// The provenance columns every table may have.
-pub const STATUSES: [&str; 4] = ["published", "measured", "derived", "approximate"];
+pub const STATUSES: [&str; 5] = ["published", "labelled", "measured", "derived", "approximate"];
+
+/// One row: its values by column, and what it says about where they come from.
+#[derive(Clone, Debug)]
+pub struct Row {
+    pub values: BTreeMap<String, Value>,
+    /// The status that holds for the columns the row does not list (`published`, `labelled`,
+    /// `measured`, `derived` or `approximate`), if it names one.
+    pub status: Option<String>,
+    /// The columns with a status of their own.
+    pub column_status: BTreeMap<String, String>,
+}
 
 #[derive(Clone, Debug)]
 pub struct Table {
-    pub rows: Vec<BTreeMap<String, Value>>,
+    pub rows: Vec<Row>,
     key: Vec<String>,
     index: BTreeMap<Vec<String>, usize>,
 }
@@ -101,6 +112,41 @@ fn typed(table: &str, row: usize, column: &str, ty: &str, raw: &str) -> Result<V
             Ok(n) if n.is_finite() => Ok(Value::Num(n)),
             _ => at(format!("`{raw}` is not a finite number")),
         },
+        "number?" if raw.is_empty() => Ok(Value::None),
+        "number?" => match raw.parse::<f64>() {
+            Ok(n) if n.is_finite() => Ok(Value::Num(n)),
+            _ => at(format!("`{raw}` is not a finite number (or leave the cell empty)")),
+        },
+        "numbers" => {
+            let mut items = Vec::new();
+            for n in raw.split_whitespace() {
+                if items.len() >= MAX_LIST_ITEMS {
+                    return Err(GeneratorError::Limit { what: "items in a table list", limit: MAX_LIST_ITEMS });
+                }
+                match n.parse::<f64>() {
+                    Ok(x) if x.is_finite() => items.push(Value::Num(x)),
+                    _ => return at(format!("`{n}` is not a finite number")),
+                }
+            }
+            Ok(Value::List(items))
+        }
+        "tuples" => {
+            let mut groups = Vec::new();
+            for group in raw.split(';').filter(|g| !g.trim().is_empty()) {
+                if groups.len() >= MAX_LIST_ITEMS {
+                    return Err(GeneratorError::Limit { what: "items in a table list", limit: MAX_LIST_ITEMS });
+                }
+                let mut nums = Vec::new();
+                for n in group.split_whitespace() {
+                    match n.parse::<f64>() {
+                        Ok(x) if x.is_finite() && nums.len() < 16 => nums.push(Value::Num(x)),
+                        _ => return at(format!("`{}` is not a group of 1 to 16 finite numbers", group.trim())),
+                    }
+                }
+                groups.push(Value::List(nums));
+            }
+            Ok(Value::List(groups))
+        }
         "list" => {
             let items: Vec<Value> = raw.split_whitespace().map(|s| Value::Text(s.to_string())).collect();
             if items.len() > MAX_LIST_ITEMS {
@@ -125,6 +171,39 @@ fn typed(table: &str, row: usize, column: &str, ty: &str, raw: &str) -> Result<V
         }
         other => bad(table, format!("column `{column}` has the unknown type `{other}`")),
     }
+}
+
+/// A row's `status` cell: one status for the whole row (`measured`), or a status for some columns
+/// and one for the rest: `measured:d0,floor_half;approximate:tip_round;published`.
+fn parse_status(
+    table: &str,
+    row: usize,
+    raw: &str,
+    columns: &BTreeMap<String, String>,
+) -> Result<(Option<String>, BTreeMap<String, String>), GeneratorError> {
+    let mut default = None;
+    let mut listed = BTreeMap::new();
+    for part in raw.split(';').map(str::trim).filter(|p| !p.is_empty()) {
+        let (status, cols) = match part.split_once(':') {
+            Some((s, c)) => (s.trim(), Some(c)),
+            None => (part, None),
+        };
+        if !STATUSES.contains(&status) {
+            return bad(table, format!("row {row}: status `{status}` is not one of published, labelled, measured, derived, approximate"));
+        }
+        match cols {
+            None => default = Some(status.to_string()),
+            Some(list) => {
+                for col in list.split(',').map(str::trim).filter(|c| !c.is_empty()) {
+                    if !columns.contains_key(col) {
+                        return bad(table, format!("row {row}: status names the column `{col}`, which the table does not have"));
+                    }
+                    listed.insert(col.to_string(), status.to_string());
+                }
+            }
+        }
+    }
+    Ok((default, listed))
 }
 
 impl Table {
@@ -170,12 +249,10 @@ impl Table {
                 let ty = def.columns.get(h).map_or("text", String::as_str);
                 row.insert(h.clone(), typed(name, line, h, ty, cell)?);
             }
-            if let Some(Value::Text(status)) = row.get("status")
-                && !status.is_empty()
-                && !STATUSES.contains(&status.as_str())
-            {
-                return bad(name, format!("row {line}: status `{status}` is not one of published, measured, derived, approximate"));
-            }
+            let (status, column_status) = match row.get("status") {
+                Some(Value::Text(raw)) => parse_status(name, line, raw, &def.columns)?,
+                _ => (None, BTreeMap::new()),
+            };
             let key: Vec<String> = def.key.iter().filter_map(|k| row.get(k).and_then(Value::key_string)).collect();
             if key.len() != def.key.len() {
                 return bad(name, format!("row {line}: a key column has no usable value"));
@@ -183,13 +260,13 @@ impl Table {
             if index.insert(key.clone(), rows.len()).is_some() {
                 return bad(name, format!("row {line}: the key `{}` is repeated", key.join(" ")));
             }
-            rows.push(row);
+            rows.push(Row { values: row, status, column_status });
         }
         Ok(Table { rows, key: def.key.clone(), index })
     }
 
     /// The row for a key, in the order of the table's `key` columns.
-    pub fn find(&self, key: &[String]) -> Option<&BTreeMap<String, Value>> {
+    pub fn find(&self, key: &[String]) -> Option<&Row> {
         self.index.get(key).and_then(|i| self.rows.get(*i))
     }
 

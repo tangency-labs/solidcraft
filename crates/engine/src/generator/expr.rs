@@ -17,6 +17,8 @@ pub enum Value {
     Points(Vec<[f64; 2]>),
     /// A looked-up table row, read as `name.column`.
     Record(BTreeMap<String, Value>),
+    /// An empty cell of a `number?` column: no value (`has(x)` is false).
+    None,
 }
 
 /// Names visible to an expression.
@@ -56,6 +58,7 @@ impl Value {
             Value::List(items) => items.iter().map(Value::display).collect::<Vec<_>>().join(", "),
             Value::Points(points) => points.iter().map(|[x, y]| format!("{} {}", fmt_num(*x), fmt_num(*y))).collect::<Vec<_>>().join("; "),
             Value::Record(_) => "(row)".into(),
+            Value::None => String::new(),
         }
     }
 
@@ -80,6 +83,7 @@ impl Value {
                 Some(serde_json::Value::Array(rows))
             }
             Value::Record(_) => None,
+            Value::None => Some(serde_json::Value::Null),
         }
     }
 }
@@ -439,6 +443,8 @@ fn equal(a: &Value, b: &Value) -> bool {
         (Value::Num(x), Value::Num(y)) => x == y,
         (Value::Text(x), Value::Text(y)) => x == y,
         (Value::Bool(x), Value::Bool(y)) => x == y,
+        (Value::None, Value::None) => true,
+        (Value::None, _) | (_, Value::None) => false,
         _ => match (a.key_string(), b.key_string()) {
             (Some(x), Some(y)) => x == y,
             _ => false,
@@ -624,7 +630,11 @@ fn call(name: &str, args: &[Expr], scope: &Scope, budget: &mut Budget) -> Result
         "at" => {
             arity(name, args, 2, 2)?;
             let i = n(1)?;
-            let Value::List(items) = vals.first().cloned().unwrap_or(Value::Bool(false)) else { return fail("`at` needs a list") };
+            let items = match vals.first() {
+                Some(Value::List(items)) => items.clone(),
+                Some(Value::Points(points)) => points.iter().map(|[x, y]| Value::List(vec![Value::Num(*x), Value::Num(*y)])).collect(),
+                _ => return fail("`at` needs a list"),
+            };
             if i.fract() != 0.0 || i < 0.0 {
                 return fail("`at` needs a whole index of 0 or more");
             }
@@ -638,9 +648,20 @@ fn call(name: &str, args: &[Expr], scope: &Scope, budget: &mut Budget) -> Result
             text(items.iter().map(Value::display).collect::<Vec<_>>().join(sep.as_str()))
         }
         "fmt" => {
-            arity(name, args, 2, 2)?;
-            let d = digits(vals.get(1).cloned().unwrap_or(Value::Bool(false)))?;
-            text(format!("{:.*}", d as usize, n(0)?))
+            arity(name, args, 1, 2)?;
+            // `fmt(x)`: whole numbers without a decimal point, others the shortest text that reads back
+            // as the same number. `fmt(x, d)`: exactly `d` decimals.
+            match vals.get(1) {
+                None => text(fmt_num(n(0)?)),
+                Some(v) => {
+                    let d = digits(v.clone())?;
+                    text(format!("{:.*}", d as usize, n(0)?))
+                }
+            }
+        }
+        "has" => {
+            arity(name, args, 1, 1)?;
+            Ok(Value::Bool(!matches!(vals.first(), Some(Value::None))))
         }
         "concat" => {
             arity(name, args, 1, 32)?;

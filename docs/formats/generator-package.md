@@ -17,7 +17,9 @@ Format tag: `solidcraft-generator/1`. This page is the format; the machine form 
   zip holding it). There is no folder form in version 1.
 - `format` is `solidcraft-generator/1`. A build that does not know the major number refuses the
   package with "needs a newer SolidCraft"; unknown keys at the top level are refused too (a typo
-  must not pass silently), except under `x-` keys, which are kept and ignored.
+  must not pass silently), except `x-` keys, which are allowed on the top level and inside every structural object (grammar and its
+  tokens, tables, lookups, rules, variables, steps and blocks, repeats, sources, `review`, checks and `insert`) and are
+  ignored. Command parameters (`params`) and `declares` are the package's own data and are not touched.
 - `min_solidcraft` is the oldest SolidCraft that can run the package (`"0.52.0"`). An older
   build refuses it and says which version it needs.
 - `id` is lower-case letters, digits and dashes, 3 to 64 characters. `name`, `description`,
@@ -34,10 +36,15 @@ completely (the first that matches wins; a code that fits none is refused with t
 | `{"lit": "HNTT"}` | fixed text (case-insensitive when `"nocase": true`) |
 | `{"field": "type", "enum": ["5","6"]}` | one of a list; the longest listed value that fits is taken. `"labels"` may map a value to a display text |
 | `{"field": "length", "int": {"min": 20, "max": 4000, "step": 5}}` | an integer in a range, on a step (`step` default 1) |
-| `{"field": "w", "decimal": {"min": 0.5, "max": 9, "step": 0.5, "digits": 1}}` | a decimal with at most `digits` places |
-| `{"field": "id", "chars": "digits"\|"alpha"\|"alnum", "min_len": 1, "max_len": 8}` | a run of characters, for codes that are free-form |
+| `{"field": "w", "decimal": {"min": 0.5, "max": 9, "step": 0.5, "digits": 1}}` | a decimal with at most `digits` places; a `step` is counted from `min` (`min`, `min + step`, ...; 0 or no step: any value) |
+| `{"field": "id", "chars": "digits"\|"alpha"\|"alnum", "min_len": 1, "max_len": 8}` | a run of at least `min_len` and at most `max_len` characters of the class (the longest that lets the rest match), kept as typed |
 | `{"optional": [tokens], "default": {"m": "5"}}` | tokens that may be left out; `default` gives the field values when they are |
-| `{"flags": {"field": "options", "options": [{"code": "-C", "value": "coated"}], "max": 3}}` | optional suffixes, each at most once, in any order; the field is the list of values given |
+| `{"flags": {"field": "options", "options": [{"code": "-C", "value": "coated"}], "max": 3}}` | optional suffixes, each at most once, in any order; options are tried longest code first and `max` counts the options given; the field is the list of values given, in the order typed (empty when none) |
+
+**Case.** `nocase` on a `lit` or `enum` matches either case and gives the listed spelling. For a code typed in
+any case, `"grammar": {"normalize": "upper"}` (or `"lower"`) folds the whole code (ASCII letters) before it is
+matched; the folded code is `code` in expressions, the component's part number and the name, while `{code}` in a
+`grammar.refuse` or `missing` text is the code as it was typed (trimmed, the first 40 characters).
 
 Every field has a value after parsing, either typed from the code or from a `default`. A field is
 text, a number, or (for `flags`) a list of text. The parse result is the **fields** object, shown in
@@ -51,12 +58,15 @@ lookups of section 3, in order. A rule is
 ```
 
 `when` is a boolean expression (section 4). When it is true the code is refused with `refuse`
-(`{name}` in the text is replaced by a field, lookup value or variable). `kind` is `invalid` (the
+(`{name}` in the text is replaced by a field, lookup value or variable). `phase` is `late` (the
+default: after the lookups and variables) or `early` (before the lookups, so a rule can refuse a valid-but-undrawn
+type that has no table row at all; it reads fields, defaults and constants only). A lookup that finds no row
+refuses with its `missing` text and its `missing_kind` (`invalid` by default, or `not_modelled`). `kind` is `invalid` (the
 default: the code is not an ordering code of this series) or `not_modelled` (a real code this
 generator does not model; the dialog says so in different words and the command reply says
 `"reason": "not_modelled"`). Defaults are in the grammar (`default` above) and in `defaults`, a
 `{field: expression}` object for values that depend on others (used only when the field is
-absent). The order of evaluation is: grammar, `defaults`, `lookups`, `vars`, then `rules`.
+absent). See "Order of evaluation" below.
 
 **RFC 0019 regex declarations.** A Workshop manifest's `[[declares.matches]]` regex is a
 *search hint*: it lets global search offer the generator for a typed string. It does not parse.
@@ -86,15 +96,32 @@ form can therefore emit the grammar mechanically; a hand-written grammar does no
 }
 ```
 
-- `csv` is comma-separated with a header row; a cell may be quoted with `"`; at most 5000 rows and
-  64 columns. Column types: `text`, `number` (finite), `list` (space-separated texts),
-  `points` (pairs `x y` separated by `;`, at most 512 points, finite). A cell that does not fit its
-  type refuses the package at load, naming the row and column.
+- `csv` is comma-separated with a header row; a cell may be quoted with `"` (`""` is a quote); at most
+  5000 rows and 64 columns. Column types and what an empty cell means:
+
+  | Type | Cell | Empty cell |
+  |---|---|---|
+  | `text` | any text | empty text |
+  | `number` | a finite number | an error: the table is refused (use `number?`) |
+  | `number?` | a finite number, or nothing | no value: `has(x)` is false, `${x}` is `null`, arithmetic on it is an error |
+  | `list` | space-separated texts | an empty list |
+  | `numbers` | space-separated finite numbers (`1 2 3`) | an empty list |
+  | `points` | pairs `x y` separated by `;` (`0 0; 10 0`), finite | an empty list |
+  | `tuples` | groups of 1 to 16 numbers separated by `;` (`1 2 3; 4 5 6`), a list of lists | an empty list |
+
+  At most 512 items per cell. A cell that does not fit its type refuses the package at load,
+  naming the row and column. A list, numbers, points or tuples cell is read with `len(x)` and
+  `at(x, i)` (`at` of a `points` or `tuples` cell is the pair or group, a list), so a profile with a
+  different number of bores per row is one `repeat` over `len(...)` (section 5).
 - `key` names the columns that identify a row; a repeated key refuses the package.
-- Reserved provenance columns, all optional: `source` (an id from `sources`), `page`, `status` (one
-  of `published`, `measured`, `derived`, `approximate`) and `note`. They are not dimensions, but the
-  UI shows them as the part's provenance (section 6), and a `status` that is `approximate` is
-  flagged there.
+- Reserved provenance columns, all optional: `source` (an id from `sources`), `page`, `status` and
+  `note`. They are not dimensions, but the UI shows them as the part's provenance (section 6).
+  A `status` is `published` (a number the source prints), `labelled` (a number on the drawing's
+  label), `measured` (taken from the source's drawing), `derived` (worked out from other numbers) or
+  `approximate` (a guess; the UI flags it). A row whose columns differ lists them:
+  `measured:d0,floor_half;approximate:tip_round;published` means `d0` and `floor_half` are measured,
+  `tip_round` is approximate and every other column is published; a bare status is the default for
+  the columns not listed, and a named column that the table does not have refuses the table.
 - `lookups` join rows to the parsed fields, by key, as named records:
 
 ```json
@@ -111,6 +138,11 @@ form can therefore emit the grammar mechanically; a hand-written grammar does no
   `{"when": "!in(m, s.allowed_m)", "refuse": "HNTT{type} is offered in {s.allowed_m}, not {m}"}`
   (a list shows as its items joined by `, `).
 
+- `const` (top level) names values that every expression can read, and a lookup can use as a key:
+  `"const": {"plan": "plan", "ratio": 0.5}` and `"key": {"name": "plan"}`. A constant is a finite number,
+  text or true/false; its name may not be reused by a field, default, lookup or variable, and `code`
+  is reserved for the code itself.
+
 ## 4. Expressions
 
 A tiny pure language, evaluated by SolidCraft's own evaluator (no I/O, no loops, no calls out, no
@@ -122,7 +154,11 @@ recursion). Values are numbers (finite, `f64`), text, booleans and lists.
   (short circuit), `c ? a : b`, parentheses.
 - Functions: `min max abs round floor ceil sqrt pow`, `sin cos tan asin acos atan atan2` (degrees),
   `pi()`, `if(c, a, b)`, `in(x, list)`, `len(list)`, `at(list, i)`, `join(list, sep)`,
-  `fmt(x, digits)` (number to text), `concat(a, b, ...)`, `upper lower`.
+  `fmt(x)` and `fmt(x, digits)` (number to text, below), `has(x)` (an empty `number?` cell is false), `concat(a, b, ...)`, `upper lower`.
+- **Number to text** is defined once: wherever a number becomes text (`${...}` inside longer text, `{name}` in a
+  message, `+` with text, `concat`, `fmt(x)`) a whole number is written without a decimal point (`497`, `1000`,
+  `-0` is `0`) and any other number as the shortest text that reads back as the same number (`4.2`, `497.5`, never an
+  exponent). `fmt(x, d)` writes exactly `d` decimals (0 to 12).
 - Division by zero, a non-finite result, `sqrt` of a negative, an unknown name, a wrong type or an
   out-of-range index is an error that **refuses the code** with the expression and the cause (never
   a panic, never `NaN` in a command).
@@ -154,15 +190,28 @@ error).
 - **Repeats** are `"repeat": {"var": "i", "count": "n_holes", "max": 64}` on a step: the step runs
   for `i = 0 .. count - 1`, with `i` usable in its expressions (`"x": "${edge + i * pitch}"`). The count
   is an expression, evaluated once; it must be a whole number from 0 to `max` (`max` is at most
-  1024), else the code is refused. A build expands at most 512 steps in all.
-- Only commands in the **allowed list** may be used: model-building commands (sketch, solid,
-  component, parameter and feature commands). File, plugin, network, settings, shell and
-  generator commands are refused when the package loads, as are commands that open dialogs.
+  1024), else the code is refused. A build expands at most 512 commands in all.
+- **A block** repeats or guards several commands together, in order. `{"repeat": {...}, "steps": [A, B]}` runs
+  A then B for `i = 0`, then A then B for `i = 1`, and so on (a polyline run followed by its arc, again and again),
+  not all the A and then all the B. A block holds 1 to 64 commands, each `{command, params?, when?}` (its own `when`
+  is tested for every pass); it has no `params` of its own, and it holds no repeat and no block, so repeats still
+  cannot nest. A step is a `command` or a block of `steps`, never both. The count `times x commands` is added to
+  the running total and checked against the 512-command cap before anything is built, and the template as a
+  whole holds at most 256 commands (each counted once).
+- Only commands in the **allowed list** may be used: the commands whose ids start with `sketch.`, `solid.`,
+  `component.`, `construct.`, `surface.`, `parameters.` and `sheet.`, and exactly `browser.visibility`
+  (hide the construction sketch), `document.metadata.set` and `component.metadata.set` (part number,
+  description, material). Anything else (file, plugin, network, settings, shell, generator, and any command
+  with `import`, `link`, `open`, `export`, `save`, `load`, `insert_`, `paste` or `from_file` in its id) is refused
+  when the package loads, as is any parameter named `file`, `filename`, `url`, `uri`, `directory` or `folder`.
 - Each step runs through `Session::execute`, so the command's own schema check, undo and errors
   apply. The whole build is one undo step: if any step fails, the design is left as it was, and the
   error names the failing step and command.
-- `insert` says where the part goes: `{"component": "${code}"}` (the default) makes a new component
-  named after the code and builds the steps inside it. The component's part number is the code
+- `insert` says where the part goes, and it is not a step: the runner, not the package, issues the commands for it.
+  `{"component": "${code}"}` (the default) runs `component.create` with that name (activated), then
+  `component.metadata.set`, then the package's commands, then `component.activate.parent`, so the part is a
+  component of its own and the person is where they were. `{"component": false}` builds the commands in the
+  active component (or the document) as they are, for a package that places everything itself. The component's part number is the code
   and its description is the package's `name`, so a bill of materials names the part as ordered.
 
 ## 6. Provenance, sources and the guarantee level
@@ -181,6 +230,9 @@ error).
   claim is only a label.** The Workshop index build verifies it and sets the badge a user sees
   (RFC 0017, RFC 0019); a package installed from a file shows "declared" until then. SolidCraft
   itself checks `checked` by running the package's `checks`.
+- `review` is the evidence behind the guarantee, shown with it and never trusted: `{"reviewer": "A. Reader",
+  "reviewer_kind": "person" | "ai" | "automatic", "date": "2026-11-27", "sources_hash": "sha256:...",
+  "level": "reviewed", "notes": "..."}`. The Workshop index build checks it and sets the badge.
 - The part's provenance in the UI is: the provenance text, the sources it used, and the rows used
   with their `status`.
 
@@ -199,6 +251,13 @@ named `dimensions` (the values of variables, exactly). An `invalid` check requir
 refused and the refusal text to contain `message_contains`. `generator.check` runs them all and
 reports each; the same list is what the Workshop runs at publish time.
 
+How a check measures, so a maker's build and SolidCraft's agree: `volume_mm3` is the total volume of the bodies
+the build made, `bbox_mm` the size (max minus min, x y z) of their joint bounding box, `faces` the sum of their
+merged face counts as `inspect.measure` reports them (`faces` in its reply: split pieces of one analytic surface
+count once; it is not the kernel's own face count nor the length of `model.faces`), and `dimensions` the value of
+a variable or field by name. When a check gives no tolerance: volume `rel_tol` 1e-6 (relative), bounding box
+`abs_tol` 1e-6 mm per side, `dimensions` exact to 1e-9, and `faces` exact.
+
 ## 8. Commands
 
 | Command | Does |
@@ -216,6 +275,17 @@ solidcraft-cli run -- generator.build '{"package": "slot-nut-20.generator.json",
 
 `generator.build` returns `volume_mm3`, `bbox_mm` and `faces`, and with `"save": "path.sc"` also
 saves the design, so a maker's own build can be compared number for number.
+
+### Order of evaluation
+
+For one code, in this order, each step able to refuse the code:
+
+1. `const` values are in scope. 2. The grammar (after `normalize`) gives the fields. 3. `defaults` give the
+fields that are still missing, each worked out from the fields and constants alone (a default does not see another
+default). 4. `rules` with `"phase": "early"`. 5. `lookups`, in order (a later one may use an earlier one's
+columns). 6. `vars`, in order (a variable sees only earlier ones). 7. `rules` that are `late` (the default).
+8. `steps`: each step's `when`, then its `repeat` count (checked before anything is built), then each command's
+`when` and `params` for every pass. The package never runs anything in another order.
 
 ## 9. Installing and using a package
 
@@ -243,11 +313,11 @@ machine and in the browser.
 | Ordering code | 128 characters | before parsing |
 | Grammar matching | 20,000 steps per code; optional groups nest at most 4 deep | during matching, at load |
 | Text value (any one string, input or result) | 4096 characters | on creation |
-| Table | 5000 rows, 64 columns | at load |
+| Table | 5000 rows, 64 columns, 512 items in a list cell, 16 numbers in a tuple | at load |
 | Points in one cell | 512 | at load |
 | Expression | 512 characters, 256 parts, nesting 32 | at load |
 | Whole build | 1,000,000 evaluation steps | at evaluation |
-| Steps in the package | 256 | at load |
+| Commands in the template (blocks counted by their commands) | 256; a block holds at most 64 | at load |
 | Repeat count | a whole number, 0 to its `max`; `max` at most 1024 | after evaluating the count and **before expanding** |
 | Expanded commands (all repeats together) | 512 | before running any command |
 | Points or list items a `${...}` hands to a command | 512 | on substitution |
@@ -255,25 +325,39 @@ machine and in the browser.
 
 - A repeat count that is negative, fractional, `NaN`, infinite or over `max` refuses the code; the
   count is checked once, before a single command is built.
-- **Repeats do not nest.** A `repeat` belongs to one step and that step holds no steps, so counts
-  cannot multiply; the 512 expanded-command cap covers the sum anyway.
-- Conditionals are expressions with no side effects; `when` only skips a step.
+- **Repeats do not nest.** A `repeat` belongs to one step (or one block of plain commands), and a block holds no
+  repeat and no block, so counts cannot multiply; a block's commands times its count is added to the 512-command
+  cap before anything is expanded.
+- Conditionals are expressions with no side effects; `when` only skips a step or a command.
 - Polygons come from table cells, which are bounded at load; an expression cannot grow a list (the
   only list makers are table cells and `flags`).
 - No part of the path panics, reads a file other than the package, or reaches the network.
 
-## 11. Answers to the first adopter's questions
+## 11. Version, and answers to the first adopter's questions
 
-1. **Grammar:** structured tokens plus `rules` with per-reason refusal texts, `not_modelled` refusals
-   and defaults (section 2). The RFC 0019 regex is accepted as a declaration, checked by examples,
-   and maps to tokens mechanically.
-2. **Tables:** CSV with `source`, `page`, `status`, `note` columns and typed columns; lookups by
-   one or more keys, chained (section 3). The UI shows them.
-3. **Expressions:** arithmetic, `min`/`max`, trig, `fmt`/`concat`, conditionals, `when`, `repeat`,
-   named variables (sections 4 and 5).
-4. **Polygons:** a `points` column feeds `"${s.polygon}"` (section 5).
-5. **Checks:** volume, bbox, faces, dimensions per code, plus valid/invalid examples (section 7).
-6. **Provenance and guarantee:** sources, per-row status, text, and a guarantee level the index
-   verifies (section 6).
-7. **Version:** `format` plus `min_solidcraft`; one `.generator.json` file (section 1).
-8. **CLI:** `generator.build` and `generator.check` through `solidcraft-cli run` (section 8).
+**Version.** The format tag is `solidcraft-generator/1`. The additions in this section are all optional
+keys and column types (`const`, `review`, `phase`, `missing_kind`, `normalize`, block `steps`, `insert.component:
+false`, `number?`, `numbers`, `tuples`, a status per column, `fmt(x)`, `has(x)`, `x-` keys in inner objects), so a
+package written before them loads unchanged and the tag stays `/1`; a package that uses one sets `min_solidcraft` to
+the first release that has it. A change that would make an older package mean something else gets `/2`.
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | A refusal for a valid-but-undrawn type before the lookup | `rules[].phase: "early"`, and `lookups[].missing_kind: "not_modelled"` (section 2) |
+| 2 | Case folding | `nocase` on `lit`/`enum`, and `grammar.normalize: "upper" \| "lower"` (section 2) |
+| 3 | Number to text | one rule, `fmt(x)` and `fmt(x, d)` (section 4) |
+| 4 | Empty cells | legal for list, numbers, points and tuples (an empty list); `number?` for "none", `has(x)` (section 3) |
+| 5 | Numeric lists | `numbers` and `tuples` columns, read with `len` and `at`, one `repeat` over `len(...)` (sections 3 and 5) |
+| 6 | Repeat a group of steps | a block: `{"repeat": ..., "steps": [...]}`, interleaved in order (section 5) |
+| 7 | Order of evaluation, constants | stated (after section 8); `const` (section 3) |
+| 8 | Allow-list, `insert` | `browser.visibility`, `component.metadata.set` and `document.metadata.set` are allowed; `insert` runs `component.create` (activated), `component.metadata.set`, the commands, `component.activate.parent`; `insert.component: false` builds in place (section 5) |
+| 9 | Status per column | a `status` cell may list columns: `measured:d0,floor_half;approximate:tip_round;published` (section 3), plus the `labelled` status |
+| 10 | Guarantee evidence | the `review` object (section 6) |
+| 11 | How `faces` is counted, tolerances | merged face count of `inspect.measure`, volume 1e-6 relative, box 1e-6 mm (section 7) |
+| 12 | Small things | decimal `step` from `min`, `chars`, `flags`, `{code}` as typed, `x-` keys inside every structural object (section 2, 1) |
+
+Earlier questions: grammar with per-reason refusals, defaults and `not_modelled` (section 2); tables with
+provenance columns and chained lookups (section 3); arithmetic, trig, `fmt`, conditionals, `repeat`, named variables
+(sections 4 and 5); polygons from a `points` column (section 5); checks per code (section 7); sources, per-row status,
+guarantee (section 6); one `.generator.json` file with a format tag and `min_solidcraft` (section 1); the CLI path
+`generator.build` and `generator.check` through `solidcraft-cli run` (section 8).

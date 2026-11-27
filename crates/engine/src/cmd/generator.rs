@@ -12,8 +12,8 @@ use crate::generator::{Check, Generator, GeneratorError, Parsed, Plan, RowUsed, 
 use crate::params::bad;
 use crate::schema::generator::{
     GeneratorBuildParams, GeneratorBuildResult, GeneratorCheckParams, GeneratorCheckResult, GeneratorCheckRow, GeneratorListParams,
-    GeneratorListResult, GeneratorParseParams, GeneratorParseResult, GeneratorRow, GeneratorSource, GeneratorSummary, GeneratorValue,
-    InstalledGenerator,
+    GeneratorListResult, GeneratorParseParams, GeneratorParseResult, GeneratorReview, GeneratorRow, GeneratorSource, GeneratorSummary,
+    GeneratorValue, InstalledGenerator,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -109,6 +109,14 @@ fn summary(g: &Generator) -> GeneratorSummary {
         author: m.author.clone(),
         guarantee: m.guarantee.clone(),
         provenance: m.provenance.clone(),
+        review: m.review.as_ref().map(|r| GeneratorReview {
+            reviewer: r.reviewer.clone(),
+            reviewer_kind: r.reviewer_kind.clone(),
+            date: r.date.clone(),
+            sources_hash: r.sources_hash.clone(),
+            level: r.level.clone(),
+            notes: r.notes.clone(),
+        }),
         sources: m
             .sources
             .iter()
@@ -130,6 +138,7 @@ fn rows(list: &[RowUsed]) -> Vec<GeneratorRow> {
             source: r.source.clone(),
             page: r.page.clone(),
             status: r.status.clone(),
+            column_status: r.column_status.clone(),
             note: r.note.clone(),
         })
         .collect()
@@ -160,7 +169,7 @@ fn parse(_s: &mut Session, p: &Value) -> Result<Value> {
             out.variables = values(&parsed.vars);
             out.rows = rows(&parsed.rows);
             out.commands = Some(commands.len());
-            out.component = Some(component);
+            out.component = component;
         }
         Err(GeneratorError::Refused { kind, message }) => {
             out.reason = Some(kind.as_str().into());
@@ -176,7 +185,7 @@ fn parse(_s: &mut Session, p: &Value) -> Result<Value> {
 
 /// What a build made.
 struct Built {
-    component: String,
+    component: Option<String>,
     commands: usize,
     bodies: Vec<String>,
     volume_mm3: Option<f64>,
@@ -227,14 +236,18 @@ fn measure(s: &mut Session, names: &[String]) -> Result<(Option<f64>, Option<[f6
 fn run_build(s: &mut Session, cmd: &str, g: &Generator, code: &str) -> Result<Built> {
     let plan = g.plan(code).map_err(|e| bad(cmd, e.to_string()))?;
     let before = body_names(s)?;
-    s.execute("component.create", &json!({"name": plan.component, "activate": true}))?;
-    // The ordering code is the part number, so the bill of materials names the part as ordered.
-    let _ = s.execute("component.metadata.set", &json!({"component": plan.component, "part_number": plan.parsed.code, "description": g.meta.name}));
+    if let Some(name) = &plan.component {
+        s.execute("component.create", &json!({"name": name, "activate": true}))?;
+        // The ordering code is the part number, so the bill of materials names the part as ordered.
+        let _ = s.execute("component.metadata.set", &json!({"component": name, "part_number": plan.parsed.code, "description": g.meta.name}));
+    }
     for c in &plan.commands {
         s.execute(&c.command, &c.params).map_err(|e| bad(cmd, format!("step {} (`{}`) failed: {e}", c.step + 1, c.command)))?;
     }
     // Leave the person where they were: the part is a component of its own.
-    let _ = s.execute("component.activate.parent", &json!({}));
+    if plan.component.is_some() {
+        let _ = s.execute("component.activate.parent", &json!({}));
+    }
     let bodies: Vec<String> = body_names(s)?.into_iter().filter(|n| !before.contains(n)).collect();
     let (volume_mm3, bbox_mm, faces) = if bodies.is_empty() { (None, None, None) } else { measure(s, &bodies)? };
     Ok(Built { component: plan.component, commands: plan.commands.len(), bodies, volume_mm3, bbox_mm, faces, parsed: plan.parsed })

@@ -41,7 +41,7 @@ fn field_name(obj: &serde_json::Map<String, Json>) -> Result<String, GeneratorEr
 }
 
 fn known(obj: &serde_json::Map<String, Json>, allowed: &[&str]) -> Result<(), GeneratorError> {
-    match obj.keys().find(|k| !allowed.contains(&k.as_str())) {
+    match obj.keys().find(|k| !allowed.contains(&k.as_str()) && !k.starts_with("x-")) {
         Some(k) => bad(format!("unknown key `{k}` in a token")),
         None => Ok(()),
     }
@@ -332,4 +332,20 @@ pub fn parse_code(alternatives: &[Vec<Tok>], code: &str) -> Result<Option<Fields
         }
     }
     Ok(None)
+}
+
+/// The names of the fields a token list can set.
+pub fn field_names(toks: &[Tok], out: &mut Vec<String>) {
+    for t in toks {
+        match t {
+            Tok::Lit { .. } => {}
+            Tok::Enum { field, .. } | Tok::Int { field, .. } | Tok::Decimal { field, .. } | Tok::Chars { field, .. } | Tok::Flags { field, .. } => {
+                out.push(field.clone())
+            }
+            Tok::Optional { toks, default } => {
+                field_names(toks, out);
+                out.extend(default.keys().cloned());
+            }
+        }
+    }
 }

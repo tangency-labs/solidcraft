@@ -38,8 +38,14 @@ fn row_line(g: &Generator, r: &RowUsed) -> String {
             None => parts.push(title.to_string()),
         }
     }
+    let shown = |status: &str| solidcraft_ui_text::tr(&format!("ui.generator.status.{status}")).to_string();
     if let Some(status) = &r.status {
-        parts.push(solidcraft_ui_text::tr(&format!("ui.generator.status.{status}")).to_string());
+        parts.push(shown(status));
+    }
+    // A column with a weaker status than the row's says so: the person should know about it.
+    let weak: Vec<&str> = r.column_status.iter().filter(|(_, s)| s.as_str() == "approximate").map(|(c, _)| c.as_str()).collect();
+    if !weak.is_empty() {
+        parts.push(format!("{}: {}", shown("approximate"), weak.join(", ")));
     }
     if let Some(note) = &r.note {
         parts.push(note.clone());
@@ -78,7 +84,9 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Gen) -> bool {
                 for (name, value) in &plan.parsed.fields {
                     value_row(ui, name, &value.display());
                 }
-                value_row(ui, app.tr("ui.generator.makes"), &plan.component);
+                if let Some(component) = &plan.component {
+                    value_row(ui, app.tr("ui.generator.makes"), component);
+                }
                 for r in &plan.parsed.rows {
                     let line = row_line(g, r);
                     if !line.is_empty() {

@@ -153,8 +153,30 @@ struct Package {
     insert: InsertDef,
     #[serde(default)]
     checks: Vec<Check>,
+    #[serde(default, rename = "const")]
+    consts: BTreeMap<String, Json>,
+    #[serde(default)]
+    review: Option<ReviewDef>,
     #[serde(flatten)]
     extra: BTreeMap<String, Json>,
+}
+
+/// Who checked the package and against what (the `review` object).
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReviewDef {
+    #[serde(default)]
+    reviewer: String,
+    #[serde(default)]
+    reviewer_kind: Option<String>,
+    #[serde(default)]
+    date: String,
+    #[serde(default)]
+    sources_hash: String,
+    #[serde(default)]
+    level: Option<String>,
+    #[serde(default)]
+    notes: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -163,6 +185,9 @@ struct GrammarDef {
     alternatives: Vec<Vec<Json>>,
     #[serde(default)]
     refuse: Option<String>,
+    /// `upper` or `lower`: the code is folded before it is matched.
+    #[serde(default)]
+    normalize: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -173,6 +198,9 @@ struct LookupDef {
     key: BTreeMap<String, String>,
     #[serde(default)]
     missing: Option<String>,
+    /// `invalid` (the default) or `not_modelled`.
+    #[serde(default)]
+    missing_kind: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -182,6 +210,9 @@ struct RuleDef {
     refuse: String,
     #[serde(default)]
     kind: Option<String>,
+    /// `early` (before the lookups) or `late` (after the variables, the default).
+    #[serde(default)]
+    phase: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -202,20 +233,37 @@ struct RepeatDef {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StepDef {
-    command: String,
+    #[serde(default)]
+    command: Option<String>,
     #[serde(default)]
     params: Option<Json>,
     #[serde(default)]
     when: Option<String>,
     #[serde(default)]
     repeat: Option<RepeatDef>,
+    /// A block: the commands one `repeat` or `when` covers, in order.
+    #[serde(default)]
+    steps: Option<Vec<LeafDef>>,
+}
+
+/// One command inside a block.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LeafDef {
+    command: String,
+    #[serde(default)]
+    params: Option<Json>,
+    #[serde(default)]
+    when: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InsertDef {
+    /// A name template for the new component (default `${code}`), or `false` to build in the
+    /// active component without making one.
     #[serde(default)]
-    component: Option<String>,
+    component: Option<Json>,
 }
 
 /// An expected result the package carries for one code (section 7 of the format).
@@ -256,6 +304,20 @@ pub struct Meta {
     pub guarantee: Option<String>,
     pub provenance: String,
     pub sources: Vec<(String, String, String, String)>,
+    /// Who checked the package and against what, when it says.
+    pub review: Option<Review>,
+}
+
+/// The package's `review` object: evidence for its `guarantee`, shown with it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Review {
+    pub reviewer: String,
+    /// `person`, `ai` or `automatic`.
+    pub reviewer_kind: Option<String>,
+    pub date: String,
+    pub sources_hash: String,
+    pub level: Option<String>,
+    pub notes: String,
 }
 
 #[derive(Debug)]
@@ -264,6 +326,7 @@ struct Lookup {
     name: String,
     key: Vec<(String, Expr)>,
     missing: Option<String>,
+    missing_kind: RefusalKind,
 }
 
 #[derive(Debug)]
@@ -271,6 +334,7 @@ struct Rule {
     when: Expr,
     refuse: String,
     kind: RefusalKind,
+    early: bool,
 }
 
 #[derive(Debug)]
@@ -280,12 +344,20 @@ struct Repeat {
     max: usize,
 }
 
+/// One command of a step, with its own condition.
 #[derive(Debug)]
-struct Step {
+struct Leaf {
     command: String,
     params: Tmpl,
     when: Option<Expr>,
+}
+
+/// A step: one command or a block of them, run when its condition holds, once or repeated.
+#[derive(Debug)]
+struct Step {
+    when: Option<Expr>,
     repeat: Option<Repeat>,
+    body: Vec<Leaf>,
 }
 
 /// A package, loaded and checked, ready to turn codes into command lists.
@@ -303,7 +375,10 @@ pub struct Generator {
     rules: Vec<Rule>,
     vars: Vec<(String, Expr)>,
     steps: Vec<Step>,
-    component: Tmpl,
+    /// The component's name template; none: build in the active component.
+    component: Option<Tmpl>,
+    consts: Scope,
+    normalize: Option<bool>,
 }
 
 /// The row a lookup found, with its provenance.
@@ -314,7 +389,10 @@ pub struct RowUsed {
     pub key: Vec<String>,
     pub source: Option<String>,
     pub page: Option<String>,
+    /// The status of the row's columns that do not have one of their own.
     pub status: Option<String>,
+    /// The columns that have a status of their own.
+    pub column_status: BTreeMap<String, String>,
     pub note: Option<String>,
 }
 
@@ -342,7 +420,8 @@ pub struct PlannedCommand {
 #[derive(Clone, Debug)]
 pub struct Plan {
     pub parsed: Parsed,
-    pub component: String,
+    /// The component a build makes; none when the package builds in the active component.
+    pub component: Option<String>,
     pub commands: Vec<PlannedCommand>,
 }
 
@@ -365,7 +444,56 @@ fn compile_expr(src: &str) -> Result<Expr, GeneratorError> {
 fn command_allowed(id: &str) -> bool {
     const PREFIXES: [&str; 7] = ["sketch.", "solid.", "component.", "construct.", "surface.", "parameters.", "sheet."];
     const WORDS: [&str; 9] = ["import", "link", "open", "export", "save", "load", "insert_", "paste", "from_file"];
-    PREFIXES.iter().any(|p| id.starts_with(p)) && !WORDS.iter().any(|w| id.contains(w))
+    const EXACT: [&str; 2] = ["browser.visibility", "document.metadata.set"];
+    EXACT.contains(&id) || (PREFIXES.iter().any(|p| id.starts_with(p)) && !WORDS.iter().any(|w| id.contains(w)))
+}
+
+fn refusal_kind(kind: Option<&str>, what: &str) -> Result<RefusalKind, GeneratorError> {
+    match kind {
+        None | Some("invalid") => Ok(RefusalKind::Invalid),
+        Some("not_modelled") => Ok(RefusalKind::NotModelled),
+        Some(other) => pkg(format!("{what} is invalid or not_modelled, not `{other}`")),
+    }
+}
+
+/// `x-` keys are the package's own: allowed on every structural object (not inside command
+/// parameters or `declares`, whose keys are the package's data), kept by nobody and ignored.
+fn strip_extension_keys(raw: &mut Json) {
+    fn strip(o: &mut serde_json::Map<String, Json>) {
+        o.retain(|k, _| !k.starts_with("x-"));
+    }
+    fn each(v: Option<&mut Json>, f: &mut dyn FnMut(&mut serde_json::Map<String, Json>)) {
+        match v {
+            Some(Json::Array(items)) => items.iter_mut().for_each(|i| {
+                if let Json::Object(o) = i {
+                    f(o);
+                }
+            }),
+            Some(Json::Object(o)) => f(o),
+            _ => {}
+        }
+    }
+    let Some(top) = raw.as_object_mut() else { return };
+    for key in ["grammar", "insert", "review"] {
+        each(top.get_mut(key), &mut |o| strip(o));
+    }
+    for key in ["sources", "lookups", "rules", "vars", "checks"] {
+        each(top.get_mut(key), &mut |o| strip(o));
+    }
+    if let Some(Json::Object(tables)) = top.get_mut("tables") {
+        for t in tables.values_mut() {
+            each(Some(t), &mut |o| strip(o));
+        }
+    }
+    if let Some(Json::Array(steps)) = top.get_mut("steps") {
+        for st in steps {
+            if let Json::Object(o) = st {
+                strip(o);
+                each(o.get_mut("steps"), &mut |l| strip(l));
+                each(o.get_mut("repeat"), &mut |r| strip(r));
+            }
+        }
+    }
 }
 
 fn version_tuple(v: &str) -> Option<(u64, u64, u64)> {
@@ -382,7 +510,9 @@ impl Generator {
         if text.len() > MAX_PACKAGE_BYTES {
             return Err(GeneratorError::Limit { what: "bytes in a package", limit: MAX_PACKAGE_BYTES });
         }
-        let p: Package = serde_json::from_str(text).map_err(|e| GeneratorError::Package(format!("not a generator package: {e}")))?;
+        let mut raw: Json = serde_json::from_str(text).map_err(|e| GeneratorError::Package(format!("not a generator package: {e}")))?;
+        strip_extension_keys(&mut raw);
+        let p: Package = serde_json::from_value(raw).map_err(|e| GeneratorError::Package(format!("not a generator package: {e}")))?;
         if let Some(k) = p.extra.keys().find(|k| !k.starts_with("x-")) {
             return pkg(format!("unknown key `{k}`"));
         }
@@ -469,7 +599,8 @@ impl Generator {
             if l.key.len() != key.len() {
                 return pkg(format!("lookup `{}` names a column that is not in the table's key", l.r#as));
             }
-            lookups.push(Lookup { table: l.table.clone(), name: l.r#as.clone(), key, missing: l.missing.clone() });
+            let missing_kind = refusal_kind(l.missing_kind.as_deref(), "a lookup's `missing_kind`")?;
+            lookups.push(Lookup { table: l.table.clone(), name: l.r#as.clone(), key, missing: l.missing.clone(), missing_kind });
         }
         if lookups.len() > 32 {
             return Err(GeneratorError::Limit { what: "lookups", limit: 32 });
@@ -495,33 +626,132 @@ impl Generator {
         }
         let mut rules = Vec::new();
         for r in &p.rules {
-            let kind = match r.kind.as_deref() {
-                None | Some("invalid") => RefusalKind::Invalid,
-                Some("not_modelled") => RefusalKind::NotModelled,
-                Some(other) => return pkg(format!("a rule's `kind` is invalid or not_modelled, not `{other}`")),
+            let kind = refusal_kind(r.kind.as_deref(), "a rule's `kind`")?;
+            let early = match r.phase.as_deref() {
+                None | Some("late") => false,
+                Some("early") => true,
+                Some(other) => return pkg(format!("a rule's `phase` is early or late, not `{other}`")),
             };
-            rules.push(Rule { when: compile_expr(&r.when)?, refuse: r.refuse.clone(), kind });
+            rules.push(Rule { when: compile_expr(&r.when)?, refuse: r.refuse.clone(), kind, early });
         }
 
         // The command template.
         let mut steps = Vec::new();
-        for (i, s) in p.steps.iter().enumerate() {
-            if !command_allowed(&s.command) {
-                return pkg(format!("step {} runs `{}`, which a generator may not run", i + 1, s.command));
-            }
-            let repeat = match &s.repeat {
+        let mut leaves = 0usize;
+        for (i, st) in p.steps.iter().enumerate() {
+            let n = i + 1;
+            let repeat = match &st.repeat {
                 None => None,
                 Some(r) => {
                     if !is_name(&r.var) || r.max > MAX_REPEAT {
-                        return pkg(format!("step {}: a repeat needs a plain `var` and a `max` of at most {MAX_REPEAT}", i + 1));
+                        return pkg(format!("step {n}: a repeat needs a plain `var` and a `max` of at most {MAX_REPEAT}"));
                     }
                     Some(Repeat { var: r.var.clone(), count: compile_expr(&r.count)?, max: r.max })
                 }
             };
-            let params = template::compile(s.params.as_ref().unwrap_or(&Json::Object(Default::default())))?;
-            steps.push(Step { command: s.command.clone(), params, when: s.when.as_deref().map(compile_expr).transpose()?, repeat });
+            let when = st.when.as_deref().map(compile_expr).transpose()?;
+            let leaf = |command: &str, params: Option<&Json>, when: Option<&str>| -> Result<Leaf, GeneratorError> {
+                if !command_allowed(command) {
+                    return pkg(format!("step {n} runs `{command}`, which a generator may not run"));
+                }
+                let params = template::compile(params.unwrap_or(&Json::Object(Default::default())))?;
+                Ok(Leaf { command: command.to_string(), params, when: when.map(compile_expr).transpose()? })
+            };
+            let body = match (&st.command, &st.steps) {
+                (Some(command), None) => vec![leaf(command, st.params.as_ref(), None)?],
+                (None, Some(block)) => {
+                    if st.params.is_some() {
+                        return pkg(format!("step {n}: a block has no `params`; each command in it has its own"));
+                    }
+                    if block.is_empty() || block.len() > 64 {
+                        return pkg(format!("step {n}: a block holds 1 to 64 commands"));
+                    }
+                    block.iter().map(|l| leaf(&l.command, l.params.as_ref(), l.when.as_deref())).collect::<Result<Vec<_>, _>>()?
+                }
+                _ => return pkg(format!("step {n} needs either a `command` or a block of `steps`, not both or neither")),
+            };
+            leaves += body.len();
+            steps.push(Step { when, repeat, body });
         }
-        let component = template::compile(&Json::String(p.insert.component.clone().unwrap_or_else(|| "${code}".into())))?;
+        if leaves > MAX_STEPS {
+            return Err(GeneratorError::Limit { what: "commands in the template", limit: MAX_STEPS });
+        }
+        let component = match &p.insert.component {
+            None => Some(template::compile(&Json::String("${code}".into()))?),
+            Some(Json::Bool(false)) => None,
+            Some(Json::String(t)) => Some(template::compile(&Json::String(t.clone()))?),
+            Some(_) => return pkg("`insert.component` must be a name template or false"),
+        };
+
+        // Constants, the code's case and the review.
+        if p.consts.len() > 64 {
+            return Err(GeneratorError::Limit { what: "constants", limit: 64 });
+        }
+        let mut consts = Scope::new();
+        for (k, v) in &p.consts {
+            let value = match v {
+                Json::Number(n) => n.as_f64().filter(|x| x.is_finite()).map(Value::Num),
+                Json::String(t) if t.chars().count() <= MAX_TEXT_CHARS => Some(Value::Text(t.clone())),
+                Json::Bool(b) => Some(Value::Bool(*b)),
+                _ => None,
+            };
+            match value {
+                Some(value) if is_name(k) && k != "code" => {
+                    consts.insert(k.clone(), value);
+                }
+                _ => return pkg(format!("`const` `{k}` must be a plain name (not `code`) with a finite number, text or true/false")),
+            }
+        }
+        let mut taken: Vec<String> = Vec::new();
+        for alt in &alternatives {
+            grammar::field_names(alt, &mut taken);
+        }
+        taken.extend(lookups.iter().map(|l: &Lookup| l.name.clone()));
+        taken.extend(defaults.iter().map(|(n, _): &(String, Expr)| n.clone()));
+        taken.extend(vars.iter().map(|(n, _): &(String, Expr)| n.clone()));
+        if let Some(clash) = taken.iter().find(|n| consts.contains_key(*n) || n.as_str() == "code") {
+            return pkg(format!(
+                "`{clash}` is used twice: as a constant, a field, a default, a lookup or a variable (and `code` is the code itself)"
+            ));
+        }
+        let normalize = match p.grammar.normalize.as_deref() {
+            None => None,
+            Some("upper") => Some(true),
+            Some("lower") => Some(false),
+            Some(other) => return pkg(format!("`grammar.normalize` is upper or lower, not `{other}`")),
+        };
+        let review = match &p.review {
+            None => None,
+            Some(r) => {
+                if let Some(kind) = &r.reviewer_kind
+                    && !["person", "ai", "automatic"].contains(&kind.as_str())
+                {
+                    return pkg("`review.reviewer_kind` must be person, ai or automatic");
+                }
+                if let Some(level) = &r.level
+                    && !["checked", "reviewed", "drawing-matched"].contains(&level.as_str())
+                {
+                    return pkg("`review.level` must be checked, reviewed or drawing-matched");
+                }
+                let day = r.date.as_bytes();
+                let date_ok = r.date.is_empty()
+                    || (day.len() == 10 && day.iter().enumerate().all(|(i, c)| if i == 4 || i == 7 { *c == b'-' } else { c.is_ascii_digit() }));
+                if !date_ok {
+                    return pkg("`review.date` must look like 2026-11-27");
+                }
+                if r.reviewer.chars().count() > 200 || r.sources_hash.chars().count() > 128 || r.notes.chars().count() > 2000 {
+                    return pkg("`review` has a text that is too long");
+                }
+                Some(Review {
+                    reviewer: r.reviewer.clone(),
+                    reviewer_kind: r.reviewer_kind.clone(),
+                    date: r.date.clone(),
+                    sources_hash: r.sources_hash.clone(),
+                    level: r.level.clone(),
+                    notes: r.notes.clone(),
+                })
+            }
+        };
 
         // What the package declares for search.
         let mut declared = Vec::new();
@@ -549,6 +779,7 @@ impl Generator {
             guarantee: p.guarantee,
             provenance: p.provenance,
             sources: p.sources.into_iter().map(|s| (s.id, s.title, s.url, s.pages)).collect(),
+            review,
         };
         Ok(Generator {
             meta,
@@ -563,6 +794,8 @@ impl Generator {
             vars,
             steps,
             component,
+            consts,
+            normalize,
         })
     }
 
@@ -572,25 +805,45 @@ impl Generator {
     }
 
     fn parse_with(&self, code: &str, budget: &mut Budget) -> Result<Parsed, GeneratorError> {
-        let code = code.trim();
+        let typed = code.trim();
+        let shown = || typed.chars().take(40).collect::<String>();
+        let folded;
+        let code = match self.normalize {
+            Some(true) => {
+                folded = typed.to_ascii_uppercase();
+                folded.as_str()
+            }
+            Some(false) => {
+                folded = typed.to_ascii_lowercase();
+                folded.as_str()
+            }
+            None => typed,
+        };
         let Some(fields) = grammar::parse_code(&self.alternatives, code)? else {
             let message = match &self.refuse {
-                Some(m) => m.replace("{code}", &code.chars().take(40).collect::<String>()),
-                None => format!("`{}` is not an ordering code this generator understands", code.chars().take(40).collect::<String>()),
+                Some(m) => m.replace("{code}", &shown()),
+                None => format!("`{}` is not an ordering code this generator understands", shown()),
             };
             return Err(GeneratorError::Refused { kind: RefusalKind::Invalid, message });
         };
-        let mut scope: Scope = fields.into_iter().collect();
+        let mut scope: Scope = self.consts.clone();
+        scope.extend(fields);
         scope.insert("code".into(), Value::Text(code.to_string()));
-        let mut order: Vec<String> = scope.keys().filter(|k| *k != "code").cloned().collect();
+        let mut order: Vec<String> = scope.keys().filter(|k| *k != "code" && !self.consts.contains_key(*k)).cloned().collect();
 
+        // Defaults, each worked out from the fields and constants alone.
+        let mut computed = Vec::new();
         for (name, e) in &self.defaults {
             if !scope.contains_key(name) {
-                let v = expr::eval(e, &scope, budget).map_err(|err| expr_err(name, err))?;
-                scope.insert(name.clone(), v);
-                order.push(name.clone());
+                computed.push((name.clone(), expr::eval(e, &scope, budget).map_err(|err| expr_err(name, err))?));
             }
         }
+        for (name, v) in computed {
+            scope.insert(name.clone(), v);
+            order.push(name);
+        }
+
+        self.run_rules(true, &scope, budget)?;
 
         let mut rows = Vec::new();
         for l in &self.lookups {
@@ -608,9 +861,9 @@ impl Generator {
                     Some(m) => format_message(m, &scope),
                     None => format!("`{}` has no entry for {}", l.table, key.join(", ")),
                 };
-                return Err(GeneratorError::Refused { kind: RefusalKind::Invalid, message });
+                return Err(GeneratorError::Refused { kind: l.missing_kind, message });
             };
-            let text = |c: &str| match row.get(c) {
+            let text = |c: &str| match row.values.get(c) {
                 Some(Value::Text(t)) if !t.is_empty() => Some(t.clone()),
                 _ => None,
             };
@@ -620,10 +873,11 @@ impl Generator {
                 key,
                 source: text("source"),
                 page: text("page"),
-                status: text("status"),
+                status: row.status.clone(),
+                column_status: row.column_status.clone(),
                 note: text("note"),
             });
-            scope.insert(l.name.clone(), Value::Record(row.clone()));
+            scope.insert(l.name.clone(), Value::Record(row.values.clone()));
         }
 
         let mut vars = Vec::new();
@@ -633,50 +887,57 @@ impl Generator {
             vars.push((name.clone(), v));
         }
 
-        for r in &self.rules {
-            let hit = expr::eval(&r.when, &scope, budget).map_err(|err| expr_err("a rule", err))?;
+        self.run_rules(false, &scope, budget)?;
+
+        let fields = order.iter().filter_map(|k| scope.get(k).map(|v| (k.clone(), v.clone()))).collect();
+        Ok(Parsed { code: code.to_string(), fields, vars, rows, scope })
+    }
+
+    /// The rules of one phase, in order; the first whose `when` holds refuses the code.
+    fn run_rules(&self, early: bool, scope: &Scope, budget: &mut Budget) -> Result<(), GeneratorError> {
+        for r in self.rules.iter().filter(|r| r.early == early) {
+            let hit = expr::eval(&r.when, scope, budget).map_err(|err| expr_err("a rule", err))?;
             match hit {
-                Value::Bool(true) => return Err(GeneratorError::Refused { kind: r.kind, message: format_message(&r.refuse, &scope) }),
+                Value::Bool(true) => return Err(GeneratorError::Refused { kind: r.kind, message: format_message(&r.refuse, scope) }),
                 Value::Bool(false) => {}
                 _ => return Err(GeneratorError::Expr { expr: "a rule".into(), message: "`when` must give true or false".into() }),
             }
         }
-
-        let fields = order.iter().filter_map(|k| scope.get(k).map(|v| (k.clone(), v.clone()))).collect();
-        Ok(Parsed { code: code.to_string(), fields, vars, rows, scope })
+        Ok(())
     }
 
     /// Parse a code and expand the template into the commands to run.
     pub fn plan(&self, code: &str) -> Result<Plan, GeneratorError> {
         let mut budget = Budget { remaining: MAX_BUILD_STEPS };
         let parsed = self.parse_with(code, &mut budget)?;
-        let component = match self.component.render(&parsed.scope, &mut budget)? {
-            Json::String(s) if !s.trim().is_empty() => s,
-            _ => parsed.code.clone(),
+        let component = match &self.component {
+            None => None,
+            Some(t) => match t.render(&parsed.scope, &mut budget)? {
+                Json::String(s) if !s.trim().is_empty() => Some(s),
+                _ => Some(parsed.code.clone()),
+            },
+        };
+        let holds = |e: &Expr, scope: &Scope, budget: &mut Budget, what: &str| -> Result<bool, GeneratorError> {
+            match expr::eval(e, scope, budget).map_err(|err| expr_err(what, err))? {
+                Value::Bool(b) => Ok(b),
+                _ => Err(GeneratorError::Expr { expr: what.into(), message: "must give true or false".into() }),
+            }
         };
         let mut commands: Vec<PlannedCommand> = Vec::new();
         for (index, step) in self.steps.iter().enumerate() {
-            if let Some(w) = &step.when {
-                match expr::eval(w, &parsed.scope, &mut budget).map_err(|e| expr_err("a step's `when`", e))? {
-                    Value::Bool(true) => {}
-                    Value::Bool(false) => continue,
-                    _ => return Err(GeneratorError::Expr { expr: "a step's `when`".into(), message: "must give true or false".into() }),
-                }
+            if let Some(w) = &step.when
+                && !holds(w, &parsed.scope, &mut budget, "a step's `when`")?
+            {
+                continue;
             }
-            match &step.repeat {
-                None => {
-                    if commands.len() >= MAX_EXPANDED {
-                        return Err(GeneratorError::Limit { what: "commands in one build", limit: MAX_EXPANDED });
-                    }
-                    let params = step.params.render(&parsed.scope, &mut budget)?;
-                    commands.push(PlannedCommand { step: index, command: step.command.clone(), params });
-                }
+            // How many times the step runs, checked before anything is expanded.
+            let (times, var) = match &step.repeat {
+                None => (1usize, None),
                 Some(r) => {
                     let count = match expr::eval(&r.count, &parsed.scope, &mut budget).map_err(|e| expr_err("a repeat's `count`", e))? {
                         Value::Num(n) => n,
                         _ => return Err(GeneratorError::Expr { expr: "a repeat's `count`".into(), message: "must be a number".into() }),
                     };
-                    // Checked before anything is expanded.
                     if !count.is_finite() || count.fract() != 0.0 || count < 0.0 {
                         return Err(GeneratorError::Expr {
                             expr: "a repeat's `count`".into(),
@@ -686,16 +947,25 @@ impl Generator {
                     if count > r.max as f64 {
                         return Err(GeneratorError::Limit { what: "repeats in one step (its `max`)", limit: r.max });
                     }
-                    let n = count as usize;
-                    if commands.len().saturating_add(n) > MAX_EXPANDED {
-                        return Err(GeneratorError::Limit { what: "commands in one build", limit: MAX_EXPANDED });
+                    (count as usize, Some(&r.var))
+                }
+            };
+            if commands.len().saturating_add(times.saturating_mul(step.body.len())) > MAX_EXPANDED {
+                return Err(GeneratorError::Limit { what: "commands in one build", limit: MAX_EXPANDED });
+            }
+            let mut scope = parsed.scope.clone();
+            for i in 0..times {
+                if let Some(v) = var {
+                    scope.insert(v.clone(), Value::Num(i as f64));
+                }
+                for leaf in &step.body {
+                    if let Some(w) = &leaf.when
+                        && !holds(w, &scope, &mut budget, "a command's `when`")?
+                    {
+                        continue;
                     }
-                    let mut scope = parsed.scope.clone();
-                    for i in 0..n {
-                        scope.insert(r.var.clone(), Value::Num(i as f64));
-                        let params = step.params.render(&scope, &mut budget)?;
-                        commands.push(PlannedCommand { step: index, command: step.command.clone(), params });
-                    }
+                    let params = leaf.params.render(&scope, &mut budget)?;
+                    commands.push(PlannedCommand { step: index, command: leaf.command.clone(), params });
                 }
             }
         }

@@ -86,6 +86,26 @@ pub struct GeneratorSummary {
     /// The provenance text the package shows beside its parts.
     pub provenance: String,
     pub sources: Vec<GeneratorSource>,
+    /// Who checked the package and against what, when it says. Evidence for the guarantee, not
+    /// proof: the Workshop index verifies the level.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub review: Option<GeneratorReview>,
+}
+
+/// The package's `review` object.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct GeneratorReview {
+    pub reviewer: String,
+    /// `person`, `ai` or `automatic`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reviewer_kind: Option<String>,
+    /// `YYYY-MM-DD`, or empty.
+    pub date: String,
+    /// A hash of the sources the review read, as the package gives it.
+    pub sources_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<String>,
+    pub notes: String,
 }
 
 /// A named value: a field of the code or a variable.
@@ -109,9 +129,13 @@ pub struct GeneratorRow {
     pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub page: Option<String>,
-    /// `published`, `measured`, `derived` or `approximate`.
+    /// The status of the row's columns that have none of their own: `published`, `labelled`,
+    /// `measured`, `derived` or `approximate`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    /// The columns that have a status of their own, by column name.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub column_status: std::collections::BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
@@ -156,8 +180,9 @@ pub struct GeneratorParseResult {
 pub struct GeneratorBuildResult {
     pub generator: GeneratorSummary,
     pub code: String,
-    /// The component the part is in.
-    pub component: String,
+    /// The component the part is in; absent when the package builds in the active component.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub component: Option<String>,
     /// How many commands ran.
     pub commands: usize,
     /// The bodies the build made.
