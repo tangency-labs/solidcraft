@@ -2341,3 +2341,59 @@ fn a_drawing_saved_with_the_old_smallest_symbol_cell_opens() {
     let layout = read.sheets[0].title_block_layout().unwrap().unwrap();
     assert_eq!(layout.cells.iter().filter_map(|c| c.symbol_mm).collect::<Vec<_>>(), [2.5]);
 }
+
+/// Issue #21257: current-version drawings take the direct streaming path without building a
+/// whole-document `serde_json::Value` tree, while keeping legacy v1 upgrades and error contracts.
+#[test]
+fn current_version_drawing_direct_path_matches_round_trip_and_errors() {
+    assert!(!DRAWING.needs_upgrade(DRAWING.current(), None));
+    assert!(DRAWING.needs_upgrade(1, None));
+
+    let d = plate();
+    let text = d.to_json().unwrap();
+    assert_eq!(Drawing::from_json(&text).unwrap(), d);
+
+    // Format 1 drawing still upgrades cleanly via the bounded Value path.
+    let f1 = DRAWING.format_string(1);
+    let legacy = format!(
+        r#"{{"format":"{f1}","id":"0000000000002","name":"Legacy","sources":[],"language":"en","sheets":[{{"id":"0000000000003","name":"S","sheet":{{"size":{{"standard":"a4"}}}}}}]}}"#,
+    );
+    let upgraded = Drawing::from_json(&legacy).unwrap();
+    assert_eq!(upgraded.format, DRAWING.format_string(DRAWING.current()));
+    assert_eq!(upgraded.name, "Legacy");
+
+    // Current-version unknown fields, deep nesting, and out-of-range floats keep exact errors.
+    let current = DRAWING.format_string(DRAWING.current());
+    let deep = format!(r#"{{"format":"{current}","annotations":{}1{}}}"#, "[".repeat(70), "]".repeat(70));
+    assert_eq!(Drawing::from_json(&deep).unwrap_err().to_string(), "damaged drawing: nested too deeply");
+    let huge = format!(r#"{{"format":"{current}","annotations":1e10}}"#);
+    let why = Drawing::from_json(&huge).unwrap_err().to_string();
+    assert!(why.starts_with("damaged drawing: the number ") && why.ends_with(" is out of range"), "{why}");
+
+    // `"images": null` without `image_files` is rejected (matching `from_value`), while
+    // set-aside `image_files` + `placed_images` still restore cleanly when `"images": null` is present.
+    let mut null_images: Value = serde_json::from_str(&text).unwrap();
+    null_images["images"] = Value::Null;
+    assert!(Drawing::from_json(&null_images.to_string()).is_err());
+
+    let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+    png.extend(16u32.to_be_bytes());
+    png.extend(16u32.to_be_bytes());
+    png.extend([8, 6, 0, 0, 0]);
+    let mut with_image = plate();
+    let mut id_source = IdSource::seeded(SEED + 99);
+    let img_id = with_image.allocate_id(&mut id_source).unwrap();
+    let placed_id = with_image.allocate_id(&mut id_source).unwrap();
+    with_image.images.add([Arc::new(image::ImageFile::from_file(img_id, &png).unwrap())]);
+    with_image.sheet_images.add([Arc::new(image::SheetImage {
+        id: placed_id,
+        sheet: with_image.sheets[0].id,
+        rect_mm: [10.0, 20.0, 40.0, 50.0],
+        image: img_id,
+    })]);
+    let (saved, parts) = crate::blob::collecting_parts(|| with_image.to_json());
+    let mut with_null_legacy: Value = serde_json::from_str(&saved.unwrap()).unwrap();
+    with_null_legacy["images"] = Value::Null;
+    let restored = crate::blob::with_parts(parts.into_iter().collect(), || Drawing::from_json(&with_null_legacy.to_string())).unwrap();
+    assert_eq!(restored, with_image);
+}

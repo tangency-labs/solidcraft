@@ -440,10 +440,22 @@ impl<R: Read + Seek> Reader<R> {
         self.limited_blob(value, field, extension, limit)
     }
 
+    /// The blob named `name`, of this extension, within its part limit.
+    pub fn blob_named(&mut self, name: &str, extension: &str) -> Result<&[u8], FormatError> {
+        let limit = (self.limits.part_limit)(&format!("blob.{extension}"));
+        self.limited_blob_named(name, extension, limit)
+    }
+
     /// [`Reader::blob`] within `limit` bytes. Its hash is checked when it is first read, and every
     /// reference counts against the resolved budget.
     pub fn limited_blob(&mut self, value: &Value, field: &str, extension: &str, limit: usize) -> Result<&[u8], FormatError> {
         let name = value.get(field).and_then(Value::as_str).ok_or_else(|| invalid(format!("missing `{field}` reference")))?;
+        self.limited_blob_named(name, extension, limit)
+    }
+
+    /// [`Reader::blob_named`] within `limit` bytes. Its hash is checked when it is first read, and
+    /// every reference counts against the resolved budget.
+    pub fn limited_blob_named(&mut self, name: &str, extension: &str, limit: usize) -> Result<&[u8], FormatError> {
         let hash = name
             .strip_prefix("blobs/")
             .and_then(|n| n.strip_suffix(&format!(".{extension}")))

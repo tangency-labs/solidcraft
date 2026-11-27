@@ -37,7 +37,7 @@ impl ValidatedCard {
 
 impl<'de> Deserialize<'de> for ValidatedCard {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
-        let value = Value::deserialize(deserializer)?;
+        let value = crate::json_budget::deserialize_bounded_value(deserializer, crate::json_budget::MAX_SMALL_VALUE_BYTES)?;
         Self::from_value(&value).map_err(serde::de::Error::custom)
     }
 }

@@ -185,6 +185,37 @@ impl<E> Family<'_, E> {
 }
 
 impl<E: From<FormatError>> Family<'_, E> {
+    /// Whether bringing a file of format `version` with `applied` pending changes up to this
+    /// build's format will actually run at least one JSON-level upgrade step.
+    ///
+    /// When `false`, the file's JSON already has this build's schema shape and can be deserialized
+    /// directly without constructing an intermediate `serde_json::Value` tree.
+    pub fn needs_upgrade(&self, version: u32, applied: Option<&[String]>) -> bool {
+        let formats = &self.formats;
+        if version == 0 || version > self.current() {
+            return false;
+        }
+        let applied = applied.filter(|_| formats.parts(version).is_some());
+        let already_applied =
+            |part: &Part<E>| applied.is_some_and(|names| names.iter().any(|name| self.canonical_applied_name(version, name) == part.name));
+        if applied.is_some()
+            && formats.parts(version).unwrap_or_default().iter().filter(|part| !already_applied(part)).any(|part| part.step.is_some())
+        {
+            return true;
+        }
+        for from in version..self.current() {
+            match formats.hand.get(from as usize - 1) {
+                Some(_) => return true,
+                None => {
+                    if formats.parts(from + 1).unwrap_or_default().iter().filter(|part| !already_applied(part)).any(|part| part.step.is_some()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// Read a file's format and take its `format_pending` out of its JSON, before anything else
     /// in it is read: a file that isn't this family's is refused here. One a newer build saved is
     /// not: [`Family::newer`] says so.

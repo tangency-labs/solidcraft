@@ -67,6 +67,7 @@ pub use format_offsets::text_regions_selection_from_value;
 pub use format_offsets::whole_profile_selection_from_value;
 pub use inline_params::Defined;
 pub mod joints;
+pub mod json_budget;
 pub mod json_layout;
 mod lineage;
 pub mod metadata;
