@@ -958,6 +958,7 @@ fn unlock(s: &mut Session, p: &Value) -> Result<Value> {
         group.joints.retain(|id| !gone.contains(id));
     }
     doc.assembly.links.retain(|l| !gone.contains(&l.a) && !gone.contains(&l.b));
+    doc.remove_configuration_joints(&gone);
     s.visibility.hidden_joints.retain(|h| !gone.contains(h));
     reply(UnlockResult { component: id, joints: gone, rigid_group: group, param_warnings: Vec::new() })
 }

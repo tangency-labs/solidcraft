@@ -31,7 +31,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .contract(&CONFIGURE_CONTRACT)
         .output(output_schema_for::<ConfigTableReply>)
         .params(
-        "params?: [parameter names]; features?: [feature names]; materials?: [body names]; appearances?: [body names] (columns to add; with no rows yet, a \"Default\" row takes the current values)",
+        "params?: [parameter names]; features?: [feature names]; joints?: [joint ids or names]; materials?: [body names]; appearances?: [body names] (columns to add; with no rows yet, a \"Default\" row takes the current values)",
     ),
     CommandSpec::new("config.table", "Display Configuration Table", crate::checked!("config.table", show))
         .at("SOLID", "CONFIGURE")
@@ -39,12 +39,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&TABLE_CONTRACT)
         .output(output_schema_for::<ConfigTableReply>)
-        .params("→ columns (param:<name> or suppress:<feature>), rows (each with its fixed id), the active row's name and whether the design still matches it"),
+        .params("→ columns (param:<name>, suppress:<feature>, suppress_joint:<joint>, …), rows (each with its fixed id), the active row's name and whether the design still matches it"),
     CommandSpec::new("config.column", "Configuration Column", crate::checked!("config.column", column))
         .icon("configuration_table")
         .contract(&COLUMN_CONTRACT)
         .output(output_schema_for::<ConfigTableReply>)
-        .params("param? | feature? | material? | appearance? (target name); delete?: bool"),
+        .params("param? | feature? | joint? | material? | appearance? (target); delete?: bool"),
     CommandSpec::new("config.row", "Configuration Row", crate::checked!("config.row", row))
         .icon("configuration_table")
         .contract(&ROW_EDIT_CONTRACT)
@@ -86,7 +86,7 @@ pub static COMMANDS: &[CommandSpec] = &[
 ];
 
 fn column_of(s: &Session, p: &Value, cmd: &str) -> Result<Column> {
-    const TARGETS: &[&str] = &["param", "feature", "material", "appearance", "component_appearance", "face_appearance"];
+    const TARGETS: &[&str] = &["param", "feature", "joint", "material", "appearance", "component_appearance", "face_appearance"];
     if TARGETS.iter().filter(|k| p.get(**k).is_some()).count() != 1 {
         let named = TARGETS.iter().map(|k| format!("`{k}`")).collect::<Vec<_>>();
         let mut message = format!("give exactly one configuration target: {} or {}", named[..named.len() - 1].join(", "), named[named.len() - 1]);
@@ -169,6 +169,22 @@ fn column_of(s: &Session, p: &Value, cmd: &str) -> Result<Column> {
             return Ok(if appearance { Column::Appearance(body) } else { Column::Material(body) });
         }
     }
+    if let Some(value) = p.get("joint") {
+        let key = value
+            .as_str()
+            .map(str::to_string)
+            .or_else(|| value.as_u64().map(|id| id.to_string()))
+            .ok_or_else(|| bad(cmd, "`joint` must be an id or a name"))?;
+        if bool_(p, "delete") == Some(true)
+            && let Some(column) = s.doc.configs.columns.iter().find(|column| {
+                matches!(column, Column::SuppressJoint(id) if id.to_string() == key || s.doc.config_key(column) == key || s.doc.joint(*id).is_some_and(|j| j.name == key))
+            })
+        {
+            return Ok(column.clone());
+        }
+        let id = super::joints::joint_id(s, Some(value), cmd)?;
+        return Ok(Column::SuppressJoint(id));
+    }
     if let Some(n) = str_(p, "param") {
         if !s.doc.all_param_exprs().iter().any(|(m, _, _)| m == n) && s.doc.text_param(n).is_none() {
             return Err(bad(cmd, format!("no parameter `{n}`")));
@@ -216,7 +232,7 @@ fn configure(s: &mut Session, p: &Value) -> Result<Value> {
             add_column(s, c, cmd)?;
         }
     }
-    for (plural, singular) in [("component_appearances", "component_appearance"), ("face_appearances", "face_appearance")] {
+    for (plural, singular) in [("joints", "joint"), ("component_appearances", "component_appearance"), ("face_appearances", "face_appearance")] {
         if let Some(values) = p.get(plural) {
             let values = values
                 .as_array()
@@ -260,6 +276,9 @@ fn table(s: &Session, cmd: &str) -> Result<ConfigTable> {
         .iter()
         .map(|column| {
             let label = match column {
+                Column::SuppressJoint(id) => {
+                    format!("Suppress Joint: {}", s.doc.joint(*id).map(|j| j.name.clone()).unwrap_or_else(|| id.to_string()))
+                }
                 Column::ComponentAppearance(id) => {
                     format!("Component: {}", s.doc.components.iter().find(|c| c.id == *id).map(|c| c.name.clone()).unwrap_or_else(|| id.to_string()))
                 }
@@ -386,6 +405,7 @@ fn row(s: &mut Session, p: &Value) -> Result<Value> {
                         || match c {
                             Column::Param(n) => n == k,
                             Column::Suppress(id) => s.doc.feature(*id).is_some_and(|f| f.name == *k),
+                            Column::SuppressJoint(id) => *k == format!("suppress_joint:{id}") || s.doc.joint(*id).is_some_and(|j| j.name == *k),
                             Column::Material(_) | Column::Appearance(_) | Column::ComponentAppearance(_) | Column::FaceAppearance(_) => false,
                         }
                 })
@@ -415,7 +435,7 @@ fn row(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "configuration name already exists"));
     }
     for (column, value) in s.doc.configs.columns.iter().zip(&cells) {
-        if matches!(column, Column::Suppress(_)) {
+        if matches!(column, Column::Suppress(_) | Column::SuppressJoint(_)) {
             solidcraft_doc::config::suppression_cell(value).map_err(|e| bad(cmd, e.to_string()))?;
         }
     }
@@ -605,15 +625,39 @@ pub(crate) struct PutRow {
 /// view draws what it builds, so the failures are returned, not refused.
 pub(crate) fn put_row(s: &mut Session, key: RowKey<'_>, cmd: &str) -> Result<PutRow> {
     let failing: BTreeMap<u64, String> = s.model.results.iter().filter_map(|r| Some((r.id, r.error.clone()?))).collect();
+    let before_doc = s.doc.clone();
+    let before_state = s.model.state();
     let solved_before = s.solved_sketches();
     let trace = s.doc_mut().apply_configuration_with_trace(key).map_err(|e| bad(cmd, e.to_string()))?;
-    s.settle_value_edit(&solved_before)?;
-    let new_errors = s
+    let solved = s.settle_value_edit_with_joints(&solved_before)?;
+    let mut new_errors: Vec<String> = s
         .model
         .results
         .iter()
         .filter_map(|r| r.error.as_ref().filter(|error| failing.get(&r.id) != Some(*error)).map(|error| format!("{}: {error}", r.name)))
         .collect();
+    if let Some(sol) = solved
+        && (!sol.errors.is_empty() || !sol.conflicts.is_empty())
+    {
+        let before_sol = solidcraft_doc::joints::solve(&before_doc, &before_state);
+        let mut before_problems: BTreeMap<(bool, u64), String> = BTreeMap::new();
+        for (id, _, why) in before_sol.errors {
+            before_problems.insert((false, id), why);
+        }
+        for (id, _, why) in before_sol.conflicts {
+            before_problems.insert((true, id), why);
+        }
+        for (id, name, why) in sol.errors {
+            if before_problems.get(&(false, id)) != Some(&why) {
+                new_errors.push(format!("joint `{name}`: {why}"));
+            }
+        }
+        for (id, name, why) in sol.conflicts {
+            if before_problems.get(&(true, id)) != Some(&why) {
+                new_errors.push(format!("joint `{name}` conflict: {why}"));
+            }
+        }
+    }
     Ok(PutRow { trace, new_errors })
 }
 
@@ -700,6 +744,12 @@ fn not_captured(s: &Session) -> Vec<String> {
             && baseline.feature(feature.id).is_some_and(|before| before.suppressed != feature.suppressed)
         {
             out.push(format!("suppress:{}", feature.name));
+        }
+    }
+    for joint in &s.doc.assembly.joints {
+        if !columns.contains(&Column::SuppressJoint(joint.id)) && baseline.joint(joint.id).is_some_and(|before| before.suppressed != joint.suppressed)
+        {
+            out.push(s.doc.config_key(&Column::SuppressJoint(joint.id)));
         }
     }
     // Parameters, numeric and text: a changed one, and a user parameter added since. A new
@@ -1657,5 +1707,213 @@ mod tests {
         let mut empty = Session::default();
         let err = empty.execute("config.update_from_design", &json!({})).unwrap_err().to_string();
         assert!(err.contains("no configuration is active"), "{err}");
+    }
+
+    fn hinged_arm_session() -> (Session, u64) {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "theta", "expression": "30 deg"}));
+        run(&mut s, "component.create", json!({"name": "Base", "grounded": true}));
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": "Arm", "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [0, 0, 10]}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        let arm_occ = s.doc.occurrence_of(s.doc.find_component("Arm").unwrap()).unwrap().id;
+        run(
+            &mut s,
+            "joint.as_built",
+            json!({
+                "type": "revolute",
+                "name": "Hinge",
+                "a": "Base",
+                "b": "Arm",
+                "at": {"occurrence": "Base", "point": [0, 0, 10], "z": [0, 0, 1]},
+                "limits": [[0, 180]]
+            }),
+        );
+        run(
+            &mut s,
+            "assembly.constraint.create",
+            json!({
+                "type": "angle",
+                "name": "FixedAngle",
+                "a": {"occurrence": "Base", "face": [10, 0, 5]},
+                "b": {"occurrence": "Arm", "face": [20, 0, 15]},
+                "angle": "theta"
+            }),
+        );
+        (s, arm_occ)
+    }
+
+    fn arm_angle_deg(s: &Session, arm_occ: u64) -> f64 {
+        let m = solidcraft_doc::joints::occurrence_world(&s.doc, arm_occ);
+        m[0][1].atan2(m[0][0]).to_degrees().rem_euclid(360.0)
+    }
+
+    #[test]
+    fn suppress_joint_switches_between_fixed_angles_and_free_revolute() {
+        let (mut s, arm_occ) = hinged_arm_session();
+        run(&mut s, "config.configure", json!({"params": ["theta"], "joints": ["FixedAngle"]}));
+        run(&mut s, "config.row", json!({"name": "Fixed 90", "values": {"param:theta": "90 deg", "suppress_joint:FixedAngle": false}}));
+        run(&mut s, "config.row", json!({"name": "Free", "values": {"suppress_joint:FixedAngle": true}}));
+
+        let r = run(&mut s, "config.activate", json!({"row": "Free"}));
+        assert_eq!(r["active"], "Free");
+        assert!(s.doc.joint(s.doc.assembly.joints[1].id).unwrap().suppressed);
+        let list = run(&mut s, "joint.list", json!({}));
+        let arm_dof = list["dof"].as_array().unwrap().iter().find(|d| d["occurrence"] == json!(arm_occ)).unwrap()["dof"].as_u64();
+        assert_eq!(arm_dof, Some(1), "{list}");
+        let driven = run(&mut s, "joint.drive", json!({"joint": "Hinge", "value": 120}));
+        assert_eq!(driven["moved"], json!(true), "{driven}");
+        assert!((arm_angle_deg(&s, arm_occ) - 120.0).abs() < 1e-4);
+
+        run(&mut s, "config.activate", json!({"row": "Fixed 90"}));
+        assert!(!s.doc.joint(s.doc.assembly.joints[1].id).unwrap().suppressed);
+        let list = run(&mut s, "joint.list", json!({}));
+        let arm_dof = list["dof"].as_array().unwrap().iter().find(|d| d["occurrence"] == json!(arm_occ)).unwrap()["dof"].as_u64();
+        assert_eq!(arm_dof, Some(0), "{list}");
+        let angle90 = arm_angle_deg(&s, arm_occ);
+        assert!((angle90 - 90.0).abs() < 1e-4 || (angle90 - 270.0).abs() < 1e-4, "angle90={angle90}");
+
+        run(&mut s, "config.activate", json!({"row": "Default"}));
+        let angle30 = arm_angle_deg(&s, arm_occ);
+        assert!((angle30 - 150.0).abs() < 1e-4 || (angle30 - 210.0).abs() < 1e-4, "angle30={angle30}");
+        assert!(s.doc.configuration_matches());
+    }
+
+    #[test]
+    fn suppress_joint_refuses_new_conflicts_and_errors_but_allows_existing_conflicts() {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "theta", "expression": "30 deg"}));
+        run(&mut s, "component.create", json!({"name": "Base", "grounded": true}));
+        run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 10}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(&mut s, "component.create", json!({"name": "Arm", "grounded": false}));
+        run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [0, 0, 10]}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(
+            &mut s,
+            "joint.as_built",
+            json!({
+                "type": "revolute",
+                "name": "Hinge",
+                "a": "Base",
+                "b": "Arm",
+                "at": {"occurrence": "Base", "point": [0, 0, 10], "z": [0, 0, 1]},
+                "limits": [[0, 180]]
+            }),
+        );
+        // Create ConflictRigid at 0 deg before FixedAngle rotates Arm to 150 deg.
+        run(
+            &mut s,
+            "joint.create",
+            json!({
+                "type": "rigid",
+                "name": "ConflictRigid",
+                "a": {"occurrence": "Base", "point": [0, 0, 10], "x": [1, 0, 0]},
+                "b": {"occurrence": "Arm", "point": [0, 0, 10], "x": [1, 0, 0]}
+            }),
+        );
+        run(&mut s, "joint.edit", json!({"joint": "ConflictRigid", "suppressed": true}));
+        run(
+            &mut s,
+            "assembly.constraint.create",
+            json!({
+                "type": "angle",
+                "name": "FixedAngle",
+                "a": {"occurrence": "Base", "face": [10, 0, 5]},
+                "b": {"occurrence": "Arm", "face": [20, 0, 15]},
+                "angle": "theta"
+            }),
+        );
+        run(&mut s, "config.configure", json!({"params": ["theta"], "joints": ["ConflictRigid"]}));
+        run(&mut s, "config.row", json!({"name": "Conflicting", "values": {"suppress_joint:ConflictRigid": false}}));
+
+        let before = s.doc.clone();
+        let preview_err = s.execute("config.preview", &json!({"row": "Conflicting"})).unwrap_err().to_string();
+        assert!(preview_err.contains("ConflictRigid") && preview_err.contains("conflict"), "{preview_err}");
+        assert_eq!(s.doc, before);
+
+        let activate_err = s.execute("config.activate", &json!({"row": "Conflicting"})).unwrap_err().to_string();
+        assert!(activate_err.contains("ConflictRigid") && activate_err.contains("conflict"), "{activate_err}");
+        assert_eq!(s.doc, before);
+
+        // Lost origin error when a feature referenced by an unsuppressed joint is suppressed.
+        run(&mut s, "component.activate", json!({"component": "Base"}));
+        let extra = run(
+            &mut s,
+            "solid.box",
+            json!({"length": 5, "width": 5, "height": 5, "corner": [30, 0, 20], "operation": "new", "name": "Extra"}),
+        )["feature"]
+            .as_u64()
+            .unwrap();
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        run(
+            &mut s,
+            "joint.as_built",
+            json!({
+                "type": "rigid",
+                "name": "ExtraRigid",
+                "a": "Base",
+                "b": "Arm",
+                "at": {"occurrence": "Base", "face": [32, 0, 22]}
+            }),
+        );
+        run(&mut s, "config.column", json!({"feature": "Extra"}));
+        run(&mut s, "config.column", json!({"joint": "ExtraRigid"}));
+        run(&mut s, "config.row", json!({"name": "MissingOrigin", "values": {"suppress:Extra": true, "suppress_joint:ExtraRigid": false}}));
+        run(&mut s, "config.row", json!({"name": "CleanHidden", "values": {"suppress:Extra": true, "suppress_joint:ExtraRigid": true}}));
+
+        let before_missing = s.doc.clone();
+        let missing_err = s.execute("config.preview", &json!({"row": "MissingOrigin"})).unwrap_err().to_string();
+        assert!(missing_err.contains("ExtraRigid"), "{missing_err}");
+        assert!(s.execute("config.activate", &json!({"row": "MissingOrigin"})).is_err());
+        assert_eq!(s.doc, before_missing);
+        run(&mut s, "config.activate", json!({"row": "CleanHidden"}));
+        assert!(s.doc.feature(extra).unwrap().suppressed);
+
+        // An unchanged pre-existing conflict does not block switching another row.
+        run(&mut s, "joint.delete", json!({"joint": "ExtraRigid"}));
+        run(&mut s, "config.activate", json!({"row": "Default"}));
+        run(&mut s, "parameters.add", json!({"name": "W", "expression": "20 mm"}));
+        run(&mut s, "config.column", json!({"param": "W"}));
+        run(&mut s, "joint.edit", json!({"joint": "ConflictRigid", "suppressed": false}));
+        run(&mut s, "config.column", json!({"joint": "ConflictRigid", "delete": true}));
+        run(&mut s, "config.row", json!({"name": "Wide", "values": {"param:W": "30 mm"}}));
+        run(&mut s, "config.activate", json!({"row": "Wide"}));
+        assert_eq!(s.doc.configs.active.as_deref(), Some("Wide"));
+    }
+
+    #[test]
+    fn suppress_joint_update_cleanup_and_script_export() {
+        let (mut s, _) = hinged_arm_session();
+        let hinge_id = s.doc.assembly.joints[0].id;
+        let angle_id = s.doc.assembly.joints[1].id;
+        run(&mut s, "config.configure", json!({"joints": [angle_id]}));
+        run(&mut s, "config.row", json!({"name": "Free", "values": {"suppress_joint:FixedAngle": true}}));
+
+        // Capture changed joint suppression and flag unconfigured joint suppression in not_captured.
+        run(&mut s, "joint.edit", json!({"joint": angle_id, "suppressed": true}));
+        run(&mut s, "joint.edit", json!({"joint": hinge_id, "suppressed": true}));
+        let updated = run(&mut s, "config.update_from_design", json!({}));
+        assert_eq!(updated["updated"], json!(["suppress_joint:FixedAngle"]));
+        assert_eq!(updated["not_captured"], json!(["suppress_joint:Hinge"]));
+        assert_eq!(s.doc.configs.rows[0].cells, ["true"]);
+
+        // Deleting a joint removes its configuration column and preserves row cell alignment.
+        run(&mut s, "joint.delete", json!({"joint": angle_id}));
+        assert!(s.doc.configs.columns.is_empty());
+        assert!(s.doc.configs.rows.iter().all(|r| r.cells.is_empty()));
+
+        // Script export with a plain joint column (`Hinge`) emits config.column {"joint": "Hinge"}.
+        run(&mut s, "config.column", json!({"joint": "Hinge"}));
+        let script = run(&mut s, "timeline.export_script", json!({}));
+        let commands = script["script"]["commands"].as_array().unwrap();
+        assert!(commands.iter().any(|step| step["command"] == "config.column" && step["params"] == json!({"joint": "Hinge"})), "{script}");
+
+        // Deleting a component removes columns for joints referencing its occurrences.
+        run(&mut s, "component.delete", json!({"component": "Arm"}));
+        assert!(s.doc.configs.columns.is_empty());
+        assert!(s.doc.configs.rows.iter().all(|r| r.cells.is_empty()));
     }
 }

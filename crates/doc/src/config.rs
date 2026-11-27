@@ -1,6 +1,6 @@
 //! Configurations: a table whose rows are variants of the design. Each column is a parameter
-//! expression, feature suppression, body material or body appearance. Activating a row sets
-//! those values in the design atomically, which then rebuilds as usual.
+//! expression, feature or joint suppression, body material, or body/component/face appearance.
+//! Activating a row sets those values in the design atomically, which then rebuilds as usual.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -27,6 +27,8 @@ pub enum Column {
     Param(String),
     /// A feature's suppression (by feature id).
     Suppress(u64),
+    /// A joint's suppression (by joint id).
+    SuppressJoint(u64),
     /// A body's physical material (library name, or Default to clear).
     Material(String),
     /// A body's appearance (library name, serialized Look, or empty to clear).
@@ -154,6 +156,33 @@ pub fn appearance_cell(value: &str) -> Result<Option<crate::appearance::Look>> {
 }
 
 impl Document {
+    /// A joint by id.
+    pub fn joint(&self, id: u64) -> Option<&crate::joints::Joint> {
+        self.assembly.joints.iter().find(|joint| joint.id == id)
+    }
+
+    /// A mutable joint by id.
+    pub fn joint_mut(&mut self, id: u64) -> Option<&mut crate::joints::Joint> {
+        self.assembly.joints.iter_mut().find(|joint| joint.id == id)
+    }
+
+    /// Maintain columns and row cell alignment when joints are deleted.
+    pub fn remove_configuration_joints(&mut self, ids: &[u64]) {
+        if ids.is_empty() {
+            return;
+        }
+        let keep: Vec<bool> = self.configs.columns.iter().map(|c| !matches!(c, Column::SuppressJoint(id) if ids.contains(id))).collect();
+        if !keep.contains(&false) {
+            return;
+        }
+        let mut mask = keep.iter();
+        self.configs.columns.retain(|_| mask.next().copied().unwrap_or(true));
+        for row in &mut self.configs.rows {
+            let mut mask = keep.iter();
+            row.cells.retain(|_| mask.next().copied().unwrap_or(true));
+        }
+    }
+
     /// Parse a physical material cell (a built-in material or one defined in this design),
     /// returning None for the default material.
     pub fn material_cell(&self, value: &str) -> Result<Option<String>> {
@@ -203,6 +232,7 @@ impl Document {
                 }
             }),
             Column::Suppress(id) => self.feature(*id).map(|f| f.suppressed.to_string()),
+            Column::SuppressJoint(id) => self.joint(*id).map(|j| j.suppressed.to_string()),
             Column::Material(body) => Some(self.materials.get(body).cloned().unwrap_or_else(|| DEFAULT_MATERIAL.into())),
             Column::Appearance(body) => Some(self.appearances.bodies.get(body).and_then(|look| serde_json::to_string(look).ok()).unwrap_or_default()),
             Column::ComponentAppearance(id) => {
@@ -219,6 +249,13 @@ impl Document {
         match c {
             Column::Param(n) => format!("param:{n}"),
             Column::Suppress(id) => format!("suppress:{}", self.feature(*id).map(|f| f.name.clone()).unwrap_or_else(|| id.to_string())),
+            Column::SuppressJoint(id) => {
+                let key = self
+                    .joint(*id)
+                    .filter(|j| self.assembly.joints.iter().filter(|other| other.name == j.name).count() == 1)
+                    .map_or_else(|| id.to_string(), |j| j.name.clone());
+                format!("suppress_joint:{key}")
+            }
             Column::Material(body) => format!("material:{body}"),
             Column::Appearance(body) => format!("appearance:{body}"),
             Column::ComponentAppearance(id) => format!("component_appearance:{id}"),
@@ -273,6 +310,11 @@ impl Document {
                     let on = suppression_cell(v)?;
                     let f = next.feature_mut(*id).ok_or_else(|| DocError::Unknown(format!("configuration `{row}`: feature {id} is gone")))?;
                     f.suppressed = on;
+                }
+                Column::SuppressJoint(id) => {
+                    let on = suppression_cell(v)?;
+                    let j = next.joint_mut(*id).ok_or_else(|| DocError::Unknown(format!("configuration `{row}`: joint {id} is gone")))?;
+                    j.suppressed = on;
                 }
                 Column::Material(body) => match self.material_cell(v)? {
                     Some(material) => {
@@ -340,6 +382,7 @@ impl Document {
         }
         self.configs.columns.iter().zip(&r.cells).all(|(c, v)| match c {
             Column::Suppress(id) => suppression_cell(v).is_ok_and(|on| self.feature(*id).is_some_and(|f| f.suppressed == on)),
+            Column::SuppressJoint(id) => suppression_cell(v).is_ok_and(|on| self.joint(*id).is_some_and(|j| j.suppressed == on)),
             Column::Param(name) if self.text_param(name).is_some() => self.text_param(name).is_some_and(|p| p.text == crate::text_params::unquote(v)),
             Column::Param(name) => {
                 let kind = self
@@ -487,5 +530,64 @@ mod tests {
         assert!(appearance_cell(r#"{"name":"Invalid","color":[1,2,3],"opacity":1e999}"#).is_err());
         assert!(appearance_cell(&"a".repeat(4097)).is_err());
         assert!(appearance_cell("default").unwrap().is_none());
+    }
+
+    fn test_joint(id: u64, name: &str, suppressed: bool) -> crate::joints::Joint {
+        let origin = crate::joints::Snap::Frame { origin: solidcore_record::Vec3::ZERO, z: solidcore_record::Vec3::Z, x: None };
+        crate::joints::Joint {
+            id,
+            name: name.into(),
+            kind: crate::joints::JointKind::Rigid,
+            a: crate::joints::JointOrigin::new(0, origin.clone()),
+            b: crate::joints::JointOrigin::new(1, origin),
+            values: Vec::new(),
+            limits: Vec::new(),
+            flip: false,
+            offset: 0.0,
+            offset_xy: [0.0; 2],
+            angle: 0.0,
+            suppressed,
+            exprs: crate::joints::JointExprs::default(),
+            captured: None,
+            base_values: None,
+            base_exprs: Vec::new(),
+            constraint: None,
+            dynamics: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn suppress_joint_column_applies_matches_keys_and_cleans_up() {
+        let mut d = Document::new("JointConfigs");
+        d.assembly.joints.push(test_joint(10, "Angle1", false));
+        d.assembly.joints.push(test_joint(11, "Dup", false));
+        d.assembly.joints.push(test_joint(12, "Dup", true));
+        assert_eq!(d.config_key(&Column::SuppressJoint(10)), "suppress_joint:Angle1");
+        assert_eq!(d.config_key(&Column::SuppressJoint(11)), "suppress_joint:11");
+        assert_eq!(d.config_key(&Column::SuppressJoint(12)), "suppress_joint:12");
+        assert_eq!(d.config_current(&Column::SuppressJoint(10)).as_deref(), Some("false"));
+        assert_eq!(d.config_current(&Column::SuppressJoint(12)).as_deref(), Some("true"));
+
+        d.configs.columns = vec![Column::SuppressJoint(10), Column::SuppressJoint(11)];
+        d.configs.rows = vec![
+            ConfigRow { id: 1, name: "Fixed".into(), cells: vec!["false".into(), "false".into()] },
+            ConfigRow { id: 2, name: "Free".into(), cells: vec!["true".into(), "false".into()] },
+        ];
+        d.apply_configuration("Free").unwrap();
+        assert!(d.joint(10).unwrap().suppressed);
+        assert!(!d.joint(11).unwrap().suppressed);
+        assert!(d.configuration_matches());
+        d.joint_mut(10).unwrap().suppressed = false;
+        assert!(!d.configuration_matches());
+
+        d.remove_configuration_joints(&[10]);
+        assert_eq!(d.configs.columns, vec![Column::SuppressJoint(11)]);
+        assert_eq!(d.configs.rows[0].cells, vec!["false"]);
+        assert_eq!(d.configs.rows[1].cells, vec!["false"]);
+
+        d.assembly.joints.retain(|j| j.id != 11);
+        let before = d.clone();
+        assert!(d.apply_configuration("Fixed").is_err());
+        assert_eq!(d, before);
     }
 }

@@ -1300,3 +1300,80 @@ fn configurations_as_columns_swap_the_table_and_its_keys() {
     h.frames(3);
     assert!(scenario::rect_of("dialog:table:configuration_table:viewport").is_some(), "and switched back");
 }
+
+#[test]
+fn configuration_joint_suppression_columns_add_toggle_activate_and_remove() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+    h.app.run("component.create", json!({"name": "Base", "grounded": true})).unwrap();
+    h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app.run("component.create", json!({"name": "Arm", "grounded": false})).unwrap();
+    h.app.run("solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [0, 0, 10]})).unwrap();
+    h.app.run("component.activate", json!({"component": "root"})).unwrap();
+    h.app
+        .run(
+            "joint.as_built",
+            json!({
+                "type": "revolute",
+                "name": "Hinge",
+                "a": "Base",
+                "b": "Arm",
+                "at": {"occurrence": "Base", "point": [0, 0, 10], "z": [0, 0, 1]},
+                "limits": [[0, 180]]
+            }),
+        )
+        .unwrap();
+    h.app
+        .run(
+            "assembly.constraint.create",
+            json!({
+                "type": "angle",
+                "name": "FixedAngle",
+                "a": {"occurrence": "Base", "face": [10, 0, 5]},
+                "b": {"occurrence": "Arm", "face": [20, 0, 15]},
+                "angle": "30 deg"
+            }),
+        )
+        .unwrap();
+
+    h.app.start("config.table");
+    h.frames(4);
+    h.step(&json!({"click": {"handle": "dialog:menu:Add Column"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click": {"handle": "dialog:menu:Add Column:filter"}})).unwrap();
+    h.step(&json!({"text": "FixedAngle"})).unwrap();
+    h.step(&json!({"key": "Enter"})).unwrap();
+    h.frames(3);
+    assert!(
+        h.app.session.doc.configs.columns.iter().any(|c| matches!(c, solidcraft_engine::doc::config::Column::SuppressJoint(_))),
+        "FixedAngle joint suppression column was added"
+    );
+
+    // Add a "Free" row and toggle the joint suppression checkbox in it.
+    h.app.run("config.row", json!({"name": "Free"})).unwrap();
+    h.frames(3);
+    let angle_id = h.app.session.doc.assembly.joints[1].id;
+    assert!(!h.app.session.doc.joint(angle_id).unwrap().suppressed);
+    h.step(&json!({"click": {"handle": "config:cell:Free:suppress_joint:FixedAngle"}})).unwrap();
+    h.frames(3);
+    assert_eq!(config_cell(&h, "Free", 0), "true");
+
+    h.step(&json!({"click": {"handle": "config:activate:Free"}})).unwrap();
+    h.frames(3);
+    assert!(h.app.session.doc.joint(angle_id).unwrap().suppressed);
+
+    h.step(&json!({"click": {"handle": "config:activate:Default"}})).unwrap();
+    h.frames(3);
+    assert!(!h.app.session.doc.joint(angle_id).unwrap().suppressed);
+
+    // Remove the joint column from the table via the header remove button.
+    let header_rect = scenario::rect_of("dialog:column:configuration_table:Suppress Joint: FixedAngle").unwrap();
+    h.step(&json!({"move": [header_rect.center().x, header_rect.center().y]})).unwrap();
+    h.frames(2);
+    let remove = scenario::rect_of("dialog:button:Suppress Joint: FixedAngle:×").unwrap();
+    h.step(&json!({"click": [remove.center().x, remove.center().y]})).unwrap();
+    h.frames(3);
+    assert!(h.app.session.doc.configs.columns.is_empty(), "joint column removed from table");
+}

@@ -62,6 +62,7 @@ impl ConfigTable {
             let mapped = match column {
                 Column::Param(name) => maps.parameters.get(name).cloned().map(Column::Param),
                 Column::Suppress(id) => maps.features.get(id).copied().map(Column::Suppress),
+                Column::SuppressJoint(_) => None,
                 Column::Material(name) => maps.bodies.get(name).cloned().map(Column::Material),
                 Column::Appearance(name) => maps.bodies.get(name).cloned().map(Column::Appearance),
                 Column::ComponentAppearance(id) => maps.components.get(id).copied().map(Column::ComponentAppearance),

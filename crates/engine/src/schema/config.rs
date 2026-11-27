@@ -83,7 +83,7 @@ fn row<'de, D: Deserializer<'de>>(d: D) -> Result<RowRef, D::Error> {
     RowRef::read(&Value::deserialize(d)?).ok_or_else(|| D::Error::custom(whole("`row` is required")))
 }
 
-/// Add columns to the configuration table: parameters, feature suppressions, and bodies' and
+/// Add columns to the configuration table: parameters, feature and joint suppressions, and bodies' and
 /// components' materials and looks, each filled in every row with the design's current value. A
 /// column the table has is left as it is. With no rows yet, a "Default" row takes the current
 /// values and becomes the active row. One undo step.
@@ -96,6 +96,10 @@ pub struct ConfigConfigureParams {
     /// Features whose suppression to configure, by name.
     #[serde(default)]
     pub features: Option<NameList>,
+    /// Joints whose suppression to configure, each by id or name. At most 500.
+    #[serde(default, deserialize_with = "joint_keys", skip_serializing_if = "Option::is_none")]
+    #[schemars(schema_with = "joint_keys_schema")]
+    pub joints: Option<Vec<JointKey>>,
     /// Bodies whose material to configure, by name.
     #[serde(default)]
     pub materials: Option<NameList>,
@@ -115,7 +119,7 @@ pub struct ConfigConfigureParams {
 }
 
 /// Add a column to the configuration table, or delete one: give exactly one of `param`,
-/// `feature`, `material`, `appearance`, `component_appearance` and `face_appearance`. An added
+/// `feature`, `joint`, `material`, `appearance`, `component_appearance` and `face_appearance`. An added
 /// column is filled in every row with the design's current value; the rows are checked against
 /// the table's rules afterwards. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -129,6 +133,10 @@ pub struct ConfigColumnParams {
     #[serde(default, deserialize_with = "target_name", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
     pub feature: Option<String>,
+    /// A joint, by id or name: whether each row suppresses it.
+    #[serde(default, deserialize_with = "some_joint_key", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "JointKey")]
+    pub joint: Option<JointKey>,
     /// A body, by name: its material in each row.
     #[serde(default, deserialize_with = "target_name", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "String")]
@@ -307,6 +315,56 @@ fn component_keys_schema(generator: &mut SchemaGenerator) -> Schema {
     json_schema!({"type": "array", "items": key, "maxItems": MAX_COLUMNS})
 }
 
+/// A joint's name or id, as `config.column` reads `joint`: text or a whole number of 0 or more,
+/// with its message.
+#[derive(Clone, Debug, PartialEq)]
+pub struct JointKey(pub String);
+
+impl JointKey {
+    fn read(v: &Value) -> Option<Self> {
+        v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|id| id.to_string())).map(JointKey)
+    }
+}
+
+impl<'de> Deserialize<'de> for JointKey {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        JointKey::read(&Value::deserialize(d)?).ok_or_else(|| D::Error::custom(whole("`joint` must be an id or a name")))
+    }
+}
+
+impl JsonSchema for JointKey {
+    fn schema_name() -> Cow<'static, str> {
+        "JointKey".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "A joint's name or id.",
+            "anyOf": [{"type": "string"}, {"type": "integer", "minimum": 0}]
+        })
+    }
+}
+
+/// `joint`: given, `null` included, it must be a [`JointKey`], as the handler reads it whenever the
+/// key is there.
+fn some_joint_key<'de, D: Deserializer<'de>>(d: D) -> Result<Option<JointKey>, D::Error> {
+    JointKey::deserialize(d).map(Some)
+}
+
+/// `joints`: a list of at most 500 [`JointKey`]s; given, `null` included, it must be a list, as
+/// the handler reads it.
+fn joint_keys<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<JointKey>>, D::Error> {
+    let list = bounded_targets(Value::deserialize(d)?).map_err(D::Error::custom)?;
+    list.iter()
+        .map(|v| JointKey::read(v).ok_or_else(|| D::Error::custom(whole("`joint` must be an id or a name"))))
+        .collect::<Result<_, _>>()
+        .map(Some)
+}
+
+fn joint_keys_schema(generator: &mut SchemaGenerator) -> Schema {
+    let key = generator.subschema_for::<JointKey>();
+    json_schema!({"type": "array", "items": key, "maxItems": MAX_COLUMNS})
+}
+
 /// The list `config.configure` reads `component_appearances` and `face_appearances` as: at most
 /// 500 targets, with its message for anything else.
 fn bounded_targets(v: Value) -> Result<Vec<Value>, String> {
@@ -387,7 +445,7 @@ fn target_name<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::Err
 /// `config.column` takes exactly one target, as the handler counts them. (A target given as
 /// `null` counts, and its reader refuses it.)
 fn exactly_one_target(schema: &mut Schema) {
-    let one: Vec<Value> = ["param", "feature", "material", "appearance", "component_appearance", "face_appearance"]
+    let one: Vec<Value> = ["param", "feature", "joint", "material", "appearance", "component_appearance", "face_appearance"]
         .iter()
         .map(|key| serde_json::json!({"required": [key]}))
         .collect();
@@ -471,7 +529,7 @@ fn row_values<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Map<String, Valu
 
 fn row_values_schema(_: &mut SchemaGenerator) -> Schema {
     json_schema!({
-        "description": "Cells to set, by column key as `config.table` lists it (`param:W`, `suppress:Block`, `material:Body1`…), or by a parameter's or a suppressed feature's name. A cell is an expression for a parameter, true or false (suppressed) for a feature, a material's name for a material column, and a look's name or a look object for a look column; at most 4096 bytes. Each key must be a column the table has.",
+        "description": "Cells to set, by column key as `config.table` lists it (`param:W`, `suppress:Block`, `suppress_joint:Angle1`, `material:Body1`…), or by a parameter's, suppressed feature's, or suppressed joint's name. A cell is an expression for a parameter, true or false (suppressed) for a feature or joint, a material's name for a material column, and a look's name or a look object for a look column; at most 4096 bytes. Each key must be a column the table has.",
         "type": "object",
         "additionalProperties": {"type": ["string", "boolean", "number", "object"]}
     })
@@ -571,8 +629,8 @@ fn rule_index<'de, D: Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> 
 /// returns it after the switch.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ConfigTable {
-    /// Each column's key: `param:<name>`, `suppress:<feature>`, or a material or appearance
-    /// column's.
+    /// Each column's key: `param:<name>`, `suppress:<feature>`, `suppress_joint:<joint>`, or a
+    /// material or appearance column's.
     pub columns: Vec<String>,
     /// Each column: its key, a label to show, and what it drives.
     pub targets: Vec<ConfigTarget>,
@@ -634,7 +692,7 @@ pub struct ConfigUpdate {
     pub driven_by_rule: Vec<String>,
     /// Changes the table has no column for, since a row was last activated or updated in this
     /// session (or else since the design was opened or saved), as the column key that would hold each (`suppress:<feature>`,
-    /// `param:<name>`). Every configuration shares them.
+    /// `suppress_joint:<joint>`, `param:<name>`). Every configuration shares them.
     pub not_captured: Vec<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
