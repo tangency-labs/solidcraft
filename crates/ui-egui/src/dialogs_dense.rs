@@ -328,8 +328,8 @@ fn quantity_row(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label
     count_row_to(ui, doc, label, value, MAX_PATTERN_INSTANCES)
 }
 
-/// The most revolutions a coil makes (the helix's own limit).
-const MAX_COIL_REVOLUTIONS: i64 = 200;
+/// The most revolutions a coil makes (the helix's own limit, a whole number of turns).
+const MAX_COIL_REVOLUTIONS: i64 = solidcraft_engine::kernel::MAX_HELIX_TURNS as i64;
 
 /// A count row with step arrows by whole numbers from 1 to `max`, evaluated as the document
 /// evaluates it. A fraction still types in (a coil's revolutions); an arrow steps it to the next
@@ -353,15 +353,16 @@ fn finger_joint_count_row(ui: &mut egui::Ui, app: &SolveApp, value: &mut String)
 
 /// The distance types a rectangular pattern direction offers, in the order of
 /// [`PatternDistance`]'s words.
-const PATTERN_DISTANCES: [(PatternDistance, &str); 3] = [
+const PATTERN_DISTANCES: [(PatternDistance, &str); 4] = [
     (PatternDistance::CountSpacing, "ui.pattern_count_spacing"),
     (PatternDistance::CountExtent, "ui.pattern_count_extent"),
     (PatternDistance::SpacingExtent, "ui.pattern_spacing_extent"),
+    (PatternDistance::CountList, "ui.pattern_count_list"),
 ];
 
 /// One rectangular pattern direction (`index` 0 or 1) as its own titled group: the direction's
-/// pick, its Distance Type, the values that type takes (Quantity, Spacing, Extent, Copy at the
-/// end) and (for features) Alignment, in the same order for both directions, so a direction's
+/// pick, its Distance Type, the values that type takes (Quantity, Spacing, Extent, Spacing List,
+/// Copy at the end) and (for features) Alignment, in the same order for both directions, so a direction's
 /// settings sit together (#9634, #8523).
 fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, index: usize) -> bool {
     let (key, title, quantity_label, spacing_label) = if index == 0 {
@@ -374,6 +375,7 @@ fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, in
     } else {
         ("ui.pattern_distance_type_2", "ui.pattern_extent_2", "ui.pattern_copy_at_end_2", "distance2", "copy_at_end2")
     };
+    let list_label = if index == 0 { "ui.pattern_spacing_list" } else { "ui.pattern_spacing_list_2" };
     let features = d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES);
     ui_kit::section(ui, key, title, true, |ui| {
         let mut enter = false;
@@ -388,8 +390,8 @@ fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, in
         } else {
             d.extra.insert(type_key.into(), json!(distance.as_str()));
         }
-        if let Kind::PatternRect { count, spacing, count2, spacing2, extent, extent2 } = &mut d.kind {
-            let (count, spacing, extent) = if index == 0 { (count, spacing, extent) } else { (count2, spacing2, extent2) };
+        if let Kind::PatternRect { count, spacing, count2, spacing2, extent, extent2, list, list2 } = &mut d.kind {
+            let (count, spacing, extent, list) = if index == 0 { (count, spacing, extent, list) } else { (count2, spacing2, extent2, list2) };
             if distance.uses_count() {
                 enter |= quantity_row(ui, &app.session.doc, quantity_label, count);
             }
@@ -398,6 +400,11 @@ fn pattern_direction_group(app: &SolveApp, d: &mut Dialog, ui: &mut egui::Ui, in
             }
             if distance.uses_extent() {
                 enter |= expr_row_positive(ui, extent_label, extent);
+            }
+            if distance.uses_list() {
+                let row = ui.scope(|ui| ui_kit::row(ui, list_label, |ui| ui_kit::hint_field(ui, list, "10 mm; 20 mm; 30 mm")));
+                row.response.backing_on_hover_text(tr("ui.pattern_spacing_list_tip"));
+                enter |= row.inner;
             }
         }
         if distance == PatternDistance::SpacingExtent {
@@ -516,6 +523,10 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         for rows in crate::dialogs_shaft_spline::shown_picks(&d.inputs) {
             input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, rows);
         }
+    } else if let Kind::CellGrid(c) = &d.kind {
+        // The cell's profile shows with the Sketch shape only.
+        let shown = crate::dialogs_cell_grid::shown_picks(c);
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, shown);
     } else if matches!(d.kind, Kind::Frame(_)) {
         // Corner Overrides shows among Frame Member's own rows, under the corner settings.
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..2);
@@ -1141,12 +1152,28 @@ fn coil_size_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, 
     false
 }
 
-/// The coil's Height row, its text kept with the dialog's other options.
-fn coil_height_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>) -> bool {
+/// The coil's Height row, its text kept with the dialog's other options, and with a section of
+/// its own, what it measures: the helix's centre line (the default, kept out of the parameters)
+/// or the coil end to end (#20736).
+fn coil_height_row(ui: &mut egui::Ui, extra: &mut serde_json::Map<String, Value>, from_sketch: bool) -> bool {
+    let overall = !from_sketch && extra.get("height_measure").and_then(Value::as_str) == Some("overall");
+    if !from_sketch {
+        let mut selected = usize::from(overall);
+        choice_row(ui, "ui.coil_height_measure", "coil_height_measure", &mut selected, &["ui.coil_center_line", "ui.coil_overall"]);
+        if selected != usize::from(overall) {
+            if selected == 1 {
+                extra.insert("height_measure".into(), json!("overall"));
+            } else {
+                extra.remove("height_measure");
+            }
+        }
+    }
     let mut height = extra.get("coil_height").and_then(Value::as_str).unwrap_or_default().to_string();
     let before = height.clone();
-    // The helix's own height, centre line to centre line; the coil's section reaches past it.
-    let enter = expr_row(ui, "ui.coil_path_height", &mut height);
+    // The helix's own height, centre line to centre line, which the coil's section reaches past;
+    // or the coil's, end to end.
+    let label = if overall { "ui.coil_overall_height" } else { "ui.coil_path_height" };
+    let enter = expr_row(ui, label, &mut height);
     if height != before {
         extra.insert("coil_height".into(), json!(height));
     }
@@ -1576,7 +1603,17 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                     let _ = app.run("component.revert_position", json!({ "occurrences": revertible }));
                 }
             } else {
-                extra_options(ui, "move_options", &mut d.extra, &[("Create Copy", "copy")]);
+                // Keep Axes With Body takes along axes that run through the moved bodies (a
+                // Center Pole); it shows on every move (not a copy) so it can be found before a
+                // pole is added.
+                let copying = d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false);
+                let mut choices = vec![("Create Copy", "copy")];
+                if !copying {
+                    let keep = crate::dialogs_move::keeps_axes(app, d);
+                    d.extra.insert("keep_axes".into(), json!(keep));
+                    choices.push((app.tr("move.keep_axes"), "keep_axes"));
+                }
+                extra_options(ui, "move_options", &mut d.extra, &choices);
             }
         }
         Kind::Primitive { cmd, fields, operation, at, .. } => {
@@ -1594,7 +1631,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 }
                 // Sized by height: the Height row takes the slot of the field it replaces.
                 if (coil_by == 1 && *k == "revolutions") || (coil_by == 2 && *k == "pitch") {
-                    enter |= coil_height_row(ui, &mut d.extra);
+                    enter |= coil_height_row(ui, &mut d.extra, from_sketch);
                     continue;
                 }
                 // Revolutions steps by whole turns like the other counts (#7481).

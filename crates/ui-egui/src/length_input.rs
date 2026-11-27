@@ -104,6 +104,17 @@ pub(crate) fn shown(doc: &Document, mm: f64) -> String {
     format!("{} {unit}", if text == "-0" || text.is_empty() { "0" } else { text })
 }
 
+/// A computed length written into an editable field that is saved as it stands, in the design's
+/// unit: twelve decimals with trailing zeros dropped, so the saved value is the computed one to
+/// well under a nanometre and float noise such as 2.8000000000000003 never shows (#6794).
+pub(crate) fn precise(doc: &Document, mm: f64) -> String {
+    let unit = unit(doc);
+    let scale = unit_info(unit).map(|(_, scale)| scale).unwrap_or(1.0);
+    let text = format!("{:.12}", mm / scale);
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    format!("{} {unit}", if text == "-0" || text.is_empty() { "0" } else { text })
+}
+
 /// The diameter in a radius worked out from one, `(D) / 2`: what a diameter typed into Cylinder
 /// or Sphere is kept as (#6609). `None` for any other radius, such as `(a) / (b) / 2`.
 pub(crate) fn diameter_of(radius: &str) -> Option<&str> {

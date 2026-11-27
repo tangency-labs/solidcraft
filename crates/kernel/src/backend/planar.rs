@@ -40,6 +40,18 @@ impl Planar for Solidcore {
         sketch_arc::arc_third_point(s, e, h, radius, sweep)
     }
 
+    fn distance(&self, a: [f64; 2], b: [f64; 2]) -> f64 {
+        sketch_arc::distance(a, b)
+    }
+
+    fn left_side_along_line(&self, a: [f64; 2], b: [f64; 2], p: [f64; 2], q: [f64; 2], tol: f64) -> Option<bool> {
+        sketch_arc::left_side_along_line(a, b, p, q, tol)
+    }
+
+    fn left_side_inside_circle(&self, centre: [f64; 2], radius: f64, sweep: f64, c: [f64; 2], r: f64, tol: f64) -> Option<bool> {
+        sketch_arc::left_side_inside_circle(centre, radius, sweep, c, r, tol)
+    }
+
     fn joint_turn(&self, before: [f64; 2], after: [f64; 2]) -> Result<f64, PlanarRefused> {
         joint_turn::joint_turn(before, after).map_err(|e| PlanarRefused(e.to_string()))
     }
@@ -56,6 +68,10 @@ impl Planar for Solidcore {
         section_corners::exit_through_box(end, toward, rect)
     }
 
+    fn exit_through_round(&self, start: Vec3, toward: Vec3, axis: (Vec3, Vec3), radius: f64) -> Option<f64> {
+        section_corners::exit_through_round(start, toward, axis, radius)
+    }
+
     fn straight_length(&self, a: [f64; 2], b: [f64; 2]) -> f64 {
         paper_gaps::straight_length(a, b)
     }
@@ -70,6 +86,10 @@ impl Planar for Solidcore {
 
     fn hole_reaches_loops(&self, center: [f64; 2], size: [f64; 2], angle: f64, loops: &[Vec<[f64; 2]>]) -> bool {
         board_drill::hole_reaches_loops(center, size, angle, loops)
+    }
+
+    fn side_on_hole_wall(&self, center: [f64; 2], size: [f64; 2], angle: f64, points: &[[f64; 2]], chord: f64) -> bool {
+        board_drill::side_on_hole_wall(center, size, angle, points, chord)
     }
 
     fn circle_points(&self, c: Vec3, x: Vec3, y: Vec3, radius: f64, from: f64) -> [Vec3; 3] {
