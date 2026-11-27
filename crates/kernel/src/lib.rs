@@ -521,6 +521,7 @@ pub use sew::sew;
 pub use sew::sew_touching;
 pub use sew::sew_touching_traced;
 pub use solidcore_ops::MaterialSides;
+pub use solidcore_ops::affine::direction_cosine;
 pub use solidcore_ops::dome::DomeRefusal;
 pub use solidcore_ops::dome::DomeShape;
 pub use solidcore_ops::measure::ParallelTurnError;
