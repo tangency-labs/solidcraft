@@ -220,6 +220,7 @@ const ANSWERING: &[&str] = &[
     "planar_faces",
     "extrude",
     "revolve",
+    "revolve_joining_arcs",
     "sweep",
     "sweep_placed",
     "project_curves",
@@ -369,6 +370,7 @@ fn every_entry_point_answers() {
     says("to_native_prepared", a.to_native_prepared().map_err(|_| Error::Argument));
     says("extrude", Brep::extrude(&lines, p(0.0, 0.0, 1.0), 1.0, 0.0, DraftCorner::Curvature, true));
     says("revolve", Brep::revolve(&lines, p(20.0, 0.0, 0.0), p(0.0, 1.0, 0.0), 1.0, true));
+    says("revolve_joining_arcs", Brep::revolve_joining_arcs(&lines, p(20.0, 0.0, 0.0), p(0.0, 1.0, 0.0), 1.0, true));
     let run = [Curve::Line { start: p(5.0, 5.0, 5.0), end: p(5.0, 5.0, 15.0) }];
     says("sweep", Brep::sweep(&lines, &run, SweepFrame::Follow, true));
     says("sweep_placed", Brep::sweep_placed(&lines, &run, SweepFrame::Follow, true));

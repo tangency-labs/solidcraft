@@ -402,19 +402,21 @@ pub fn check_brep_full(
 }
 
 /// (not upstream) The tests [`check_brep`] runs of some of a B-rep's entities, and of no other:
-/// each of `faces`' own tests (`SmFace`, its loops' disjointness in UV space among them, test 38)
-/// and its loops' (`SmLoop`); each of `edges`' (`SmEdge`) and those of the vertices at their ends
-/// (`SmVertex`). Each entity is tested once, at `level` with the walk, and reported as
-/// [`check_brep`] reports it. None of the body-wide passes runs (the pointer check, the tolerance
-/// pass, the B-rep, region and shell tests), so its time is that of the entities named and not of
-/// the body.
+/// the tolerance pass on each of `edges`' uses (its vertex/edge and vertex/face gaps at both ends
+/// and its edge/face gap, list 2 tests 0-4, validating only), then each of `faces`' own tests
+/// (`SmFace`, its loops' disjointness in UV space among them, test 38) and its loops' (`SmLoop`);
+/// each of `edges`' (`SmEdge`) and those of the vertices at their ends (`SmVertex`). Each entity
+/// is tested once, at `level` with the walk, and reported as [`check_brep`] reports it. None of
+/// the other body-wide passes runs (the pointer check, the tolerance pass on the other edges, the
+/// B-rep, region and shell tests), so its time is that of the entities named and not of the body.
 ///
 /// For an edit of a body that passed [`check_brep`], with `faces` the faces it changed (and those
-/// beside an edge it changed) and `edges` the edges it changed, it is the whole check's verdict on
-/// what the edit made: an unchanged edge or vertex between faces whose surfaces stand would pass
-/// again. It proves nothing of the rest, and a caller that needs the body's verdict runs
-/// [`check_brep`]. [`BrepCheck::pointers`] reads passed and [`BrepCheck::pointer_reports`] is
-/// empty: the pointer check is not run. As [`check_brep`], where one of `faces` lacks its UV trim
+/// beside an edge it changed) and `edges` the edges it changed, it runs every test of the whole
+/// check that reads what the edit made, apart from the body-wide ones above: the pointer check
+/// (whether a vertex's or an edge's tolerance zone reaches topology it does not bound) and the
+/// region and shell tests. It proves nothing of the rest, and a caller that needs the body's
+/// verdict runs [`check_brep`]. [`BrepCheck::pointers`] reads passed and
+/// [`BrepCheck::pointer_reports`] is empty: the pointer check is not run. As [`check_brep`], where one of `faces` lacks its UV trim
 /// curves the tests run on a copy standing for `b`, so the trims they build stay off it.
 ///
 /// # Errors
@@ -506,7 +508,8 @@ pub fn check_brep_local(
         index,
         edge_sets: edge::EdgeSets::default(),
     };
-    let mut ok = true;
+    // the tolerance pass on the edges' uses, where the whole check runs it: before the walk
+    let mut ok = brep::edge_tolerances(k, b, &mut cx, &edge_list)?;
     for f in face_list {
         k.check_cancelled(OP)?;
         ok &= face::face(k, b, &mut cx, f)?;

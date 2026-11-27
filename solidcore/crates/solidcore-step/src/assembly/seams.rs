@@ -1047,33 +1047,42 @@ impl Assembly<'_> {
             else {
                 continue;
             };
-            let radial = x * u.cos() + y * u.sin();
-            let ring_radius = major_radius + minor_radius * w.cos();
-            let p = o + radial * ring_radius + z * (minor_radius * w.sin());
-            let v = index(self.vertices.len())?;
-            self.vertices.push(Vertex { point: arr(p), tolerance: self.tol });
-            // Round the axis the way u runs, round the tube the way v runs: the torus's whole
-            // (u, v) box, counter-clockwise.
-            let ring = BCurve::Circle {
-                frame: Frame { origin: arr(o + z * (minor_radius * w.sin())), x_axis: arr(radial), y_axis: arr(z.cross(radial)) },
-                radius: ring_radius,
-            };
-            let tube_x = radial * w.cos() + z * w.sin();
-            let tube_y = z * w.cos() - radial * w.sin();
-            let tube = BCurve::Circle {
-                frame: Frame { origin: arr(o + radial * major_radius), x_axis: arr(tube_x), y_axis: arr(tube_y) },
-                radius: minor_radius,
-            };
-            let ring = self.new_edge(ring, [0.0, TAU], [v, v])?;
-            let tube = self.new_edge(tube, [0.0, TAU], [v, v])?;
+            let bound = self.torus_seams(&frame, major_radius, minor_radius, u, w)?;
             let Some(face) = self.faces.get_mut(fi) else { continue };
             face.surface = turned;
-            face.loops.insert(0, Bound::Edges(vec![(ring, true), (tube, true), (ring, false), (tube, false)]));
+            face.loops.insert(0, bound);
             face.outer = Some(0);
             face.extent = None;
             completed += 1;
         }
         Ok(completed)
+    }
+
+    /// The two full-circle seams bound one period in each direction, about the natural normal.
+    pub(crate) fn torus_seams(&mut self, frame: &Frame, major_radius: f64, minor_radius: f64, u: f64, w: f64) -> R<Bound> {
+        let o = Vec3::from(frame.origin);
+        let (x, y) = (Vec3::from(frame.x_axis), Vec3::from(frame.y_axis));
+        let z = x.cross(y);
+        let radial = x * u.cos() + y * u.sin();
+        let ring_radius = major_radius + minor_radius * w.cos();
+        let p = o + radial * ring_radius + z * (minor_radius * w.sin());
+        let v = index(self.vertices.len())?;
+        self.vertices.push(Vertex { point: arr(p), tolerance: self.tol });
+        // Round the axis the way u runs, round the tube the way v runs: the torus's whole
+        // (u, v) box, counter-clockwise.
+        let ring = BCurve::Circle {
+            frame: Frame { origin: arr(o + z * (minor_radius * w.sin())), x_axis: arr(radial), y_axis: arr(z.cross(radial)) },
+            radius: ring_radius,
+        };
+        let tube_x = radial * w.cos() + z * w.sin();
+        let tube_y = z * w.cos() - radial * w.sin();
+        let tube = BCurve::Circle {
+            frame: Frame { origin: arr(o + radial * major_radius), x_axis: arr(tube_x), y_axis: arr(tube_y) },
+            radius: minor_radius,
+        };
+        let ring = self.new_edge(ring, [0.0, TAU], [v, v])?;
+        let tube = self.new_edge(tube, [0.0, TAU], [v, v])?;
+        Ok(Bound::Edges(vec![(ring, true), (tube, true), (ring, false), (tube, false)]))
     }
 
     /// Turn each torus face whose bounds hold a seam round the axis (a full circle about it,
@@ -2404,17 +2413,32 @@ impl Assembly<'_> {
 
     /// The use of loop `li` of face `fi` that starts on the closed spline's boundary line at
     /// `start` (the column at u = `start`, or the row at v = `start` for one closed in v), or on a
-    /// revolution's meridian at angle `start`: a vertex there within the tolerance, else one made
-    /// by splitting the loop's edge that crosses it.
+    /// revolution's meridian at angle `start`: a vertex there within the tolerance (or one whose
+    /// foot on the surface is there, within the vertex's own distance from the surface), else one
+    /// made by splitting the loop's edge that crosses it.
     fn seam_start(&mut self, fi: usize, li: usize, start: f64, ax: &Axis, eval: &SurfaceEval) -> R<usize> {
         let Some(Bound::Edges(es)) = self.faces.get(fi).and_then(|f| f.loops.get(li)) else { return Err("loop reference".into()) };
         let es = es.clone();
         let d = ax.kind.winds_in();
+        // A vertex is on the line within the tolerance, or its foot on the surface is within
+        // the vertex's own distance from the surface of it (at most the largest tolerance the
+        // record takes): a fitted surface a little off its edges puts each loop's vertex that
+        // far off every line of it, the seam's too, and the loop then crosses the line within
+        // that distance of the vertex, too near it for a split. The seam starts on the line at
+        // the vertex's place along it, the vertex's tolerance raised to cover the gap, as a new
+        // edge's covers its ends.
         let on_seam = |s: &Self, v: u32| -> R<bool> {
             let p = s.vpoint(v)?;
             let Some(q) = eval.project(p, None, f64::INFINITY) else { return Ok(false) };
             let on = if d == 0 { [start, q[1]] } else { [q[0], start] };
-            Ok(eval.point(on).is_some_and(|c| c.dist(p) <= s.tol))
+            let Some(c) = eval.point(on) else { return Ok(false) };
+            if c.dist(p) <= s.tol {
+                return Ok(true);
+            }
+            // Measured on the surface: from the vertex's foot on it to the line.
+            let Some(foot) = eval.point(q) else { return Ok(false) };
+            let reach = s.tol.max(foot.dist(p)).min(super::MAX_TOLERANCE);
+            Ok(c.dist(foot) <= reach)
         };
         for (k, u) in es.iter().enumerate() {
             if on_seam(self, self.start(*u)?)? {

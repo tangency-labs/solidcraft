@@ -15,6 +15,33 @@ fn rot(v: Vec3, k: Vec3, ang: f64) -> Vec3 {
     v * ang.cos() + k.cross(v) * ang.sin() + k * (k.dot(v) * (1.0 - ang.cos()))
 }
 
+/// Whether a coil's profile plane contains its axis, as a sketched coil profile must: the same
+/// incidence test as a revolve axis in its sketch plane (1e-9 on the axis's component along the
+/// plane's normal, 1e-6 mm on the axis point's height above the plane), measured by solidcore's
+/// `line_plane_deviation`. A plane across the axis
+/// would sweep a stacked slab and report success. A NaN is refused as across.
+///
+/// # Errors
+/// [`KernelError::Invalid`] naming the cause and what fits.
+pub fn require_plane_through_axis(plane: &Plane, axis_origin: Vec3, axis: Vec3) -> Result<()> {
+    let arr = |v: Vec3| [v.x, v.y, v.z];
+    let (tilt, offset) =
+        solidcore_ops::axial_section::line_plane_deviation(arr(plane.origin), arr(plane.x), arr(plane.y), arr(axis_origin), arr(axis))
+            .ok_or_else(|| KernelError::Invalid("the coil's profile plane or axis".into()))?;
+    if !(tilt <= 1e-9) {
+        return Err(KernelError::Invalid(
+            "the coil's profile must be on a plane through its axis; this plane is across it: sketch the profile on a plane that contains the axis"
+                .into(),
+        ));
+    }
+    if !(offset <= 1e-6) {
+        return Err(KernelError::Invalid(format!(
+            "the coil's profile must be on a plane through its axis; this plane is parallel to the axis but {offset:.6} mm from it: move the plane or the axis so the plane contains it"
+        )));
+    }
+    Ok(())
+}
+
 /// Sweep a planar region's outer loop along a helix about `axis` through `axis_origin`:
 /// `turns` revolutions (right-handed about `axis`), rising `pitch` per turn. The profile keeps
 /// its attitude relative to the axis, as a screw motion does: SMLib's screw sweep, one wall per
@@ -184,6 +211,22 @@ pub fn loft_to_point_with_rails(plane: &Plane, lp: &Loop2, apex: Vec3, rails: &[
 mod tests {
     use super::*;
     use solidcore_record::Seg2;
+
+    /// A circle on XY (normal Z) with axis Z through the origin does not lie in a plane through
+    /// the axis; nor does the axial plane moved 5 mm off the axis. The axial plane itself passes.
+    #[test]
+    fn a_profile_plane_must_contain_the_coil_axis() {
+        let err = require_plane_through_axis(&Plane::XY, Vec3::ZERO, Vec3::Z).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "invalid input: the coil's profile must be on a plane through its axis; this plane is across it: sketch the profile on a plane that contains the axis"
+        );
+        let off = Plane { origin: Vec3::new(0.0, 5.0, 0.0), x: Vec3::X, y: Vec3::Z };
+        let err = require_plane_through_axis(&off, Vec3::ZERO, Vec3::Z).unwrap_err().to_string();
+        assert!(err.contains("parallel to the axis but 5.000000 mm from it"), "{err}");
+        let axial = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+        assert!(require_plane_through_axis(&axial, Vec3::ZERO, Vec3::Z).is_ok());
+    }
 
     #[test]
     fn coil_volume_is_section_times_helix_length() {
