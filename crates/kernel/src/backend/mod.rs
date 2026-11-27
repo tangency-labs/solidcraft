@@ -23,6 +23,7 @@ mod mesh;
 mod modelling;
 mod planar;
 mod points;
+mod profiles;
 mod projection;
 mod query;
 mod runtime;

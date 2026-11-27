@@ -469,7 +469,7 @@ impl NavPreset {
     pub(crate) fn translated_label(&self) -> &str {
         match self.id {
             "creo" => solidcraft_ui_text::tr("nav.creo.label"),
-            "right-drag-orbit" => solidcraft_ui_text::tr("nav.right_drag_orbit.label"),
+            "right-drag-orbit" => solidcraft_ui_text::tr("nav.right-drag-orbit.label"),
             TOUCHPAD_NAV => solidcraft_ui_text::tr("nav.touchpad.label"),
             _ => solidcraft_ui_text::tr_label(self.label),
         }
@@ -478,7 +478,7 @@ impl NavPreset {
     pub(crate) fn translated_help(&self) -> &str {
         match self.id {
             "creo" => solidcraft_ui_text::tr("nav.creo.help"),
-            "right-drag-orbit" => solidcraft_ui_text::tr("nav.right_drag_orbit.help"),
+            "right-drag-orbit" => solidcraft_ui_text::tr("nav.right-drag-orbit.help"),
             _ => solidcraft_ui_text::tr_label(self.help),
         }
     }
