@@ -51,8 +51,28 @@ impl Modelling for Solidcore {
         crate::blend::fillet_turning(body, edges, radius, turn)
     }
 
+    fn fillet_removing(&self, body: &Body, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Body, Vec<Vec3>)> {
+        crate::blend::fillet_removing(body, edges, radius, turn)
+    }
+
+    fn fillet_each(&self, body: &Body, edges: &[Vec3], radii: &[f64], turn: FilletTurn) -> Result<Body> {
+        crate::blend::fillet_each(body, edges, radii, turn)
+    }
+
+    fn fillet_setback(&self, body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)]) -> Result<Body> {
+        crate::blend::fillet_setback(body, edges, radius, setbacks)
+    }
+
     fn chamfer(&self, body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
         crate::blend::chamfer(body, edges, distance)
+    }
+
+    fn chamfer_carrying_face(&self, body: &Body, edges: &[Vec3], distance: f64) -> Result<Body> {
+        crate::blend::chamfer_carrying_face(body, edges, distance)
+    }
+
+    fn chamfer_sides_carrying_face(&self, body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Body> {
+        crate::blend::chamfer_sides_carrying_face(body, edges, d1, side, flip)
     }
 
     fn chamfer_sides(&self, body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Body> {
