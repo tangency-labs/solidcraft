@@ -461,7 +461,7 @@ fn measure_pair(
     let touching = mesh.is_some_and(|m| m.distance <= slack);
     let may_overlap = touching || holds(ba, bb) || holds(bb, ba) || (incomplete_pair && !solidcraft_kernel::apart(ka, kb).unwrap_or(false));
     if may_overlap {
-        intersect_pair(ka, kb, a, b, tolerance, incomplete_pair, &mut out);
+        intersect_pair((ka, a), (kb, b), min_volume, tolerance, incomplete_pair, &mut out);
         if out.unchecked.is_some() {
             return out;
         }
@@ -503,21 +503,26 @@ fn measure_pair(
 }
 
 /// Runs the exact intersection boolean for one pair under `Validation::EachStep`, retrying in
-/// reversed operand order, checking certified disjointness (`interiors_disjoint`), and retrying
-/// shifted near the shared region on kernel failure; verifies an empty boolean result against exact
-/// interior point witnesses so a real overlap is never silently reported as clear; and attaches a
-/// non-boolean fallback distance when a pair still lands in `unchecked`.
+/// reversed operand order, checking certified disjointness (`interiors_disjoint`), retrying
+/// shifted near the shared region on kernel failure, and falling back to a sanity-checked
+/// `Validation::Off` measurement when SMLib's check alone refused the temporary overlap solid
+/// while both operands passed; verifies an empty boolean result against exact interior point
+/// witnesses so a real overlap is never silently reported as clear; and attaches a non-boolean
+/// fallback distance when a pair still lands in `unchecked`.
 fn intersect_pair(
-    ka: &solidcraft_kernel::Body,
-    kb: &solidcraft_kernel::Body,
-    a: &DistanceShape,
-    b: &DistanceShape,
+    (ka, a): (&solidcraft_kernel::Body, &DistanceShape),
+    (kb, b): (&solidcraft_kernel::Body, &DistanceShape),
+    min_volume: f64,
     tolerance: f64,
     incomplete_pair: bool,
     out: &mut PairResult,
 ) {
     let at = shared_center(a, b, ka, kb);
     let is_cancelled = || solidcraft_kernel::watch::current().is_some_and(|w| w.cancelled());
+    if is_cancelled() {
+        out.unchecked = Some("cancelled".into());
+        return;
+    }
     let fallback_distance = |out: &mut PairResult| {
         if is_cancelled() {
             return;
@@ -531,7 +536,7 @@ fn intersect_pair(
             }
         }
     };
-    let record_overlap = |m: solidcraft_kernel::BodyMeasure, out: &mut PairResult| {
+    let record_overlap = |m: solidcraft_kernel::MassMeasure, out: &mut PairResult| {
         if m.volume > 0.0
             && let Some(why) = super::interference::impossible_overlap(m.volume, &m.bbox, ka, kb)
         {
@@ -578,7 +583,8 @@ fn intersect_pair(
     };
 
     // A pair whose shared part can't be worked out is reported, not passed as clear. SMLib's
-    // check of the shared part runs here: a part it refuses is reported, not measured.
+    // check of the shared part runs here: a part it refuses is reported unless a sanity-checked
+    // measurement-only fallback recovers a valid overlap when both operands passed SMLib's check.
     match run_intersect(ka, kb) {
         Ok(Some(o)) => match measure_near_origin(&o, at) {
             Ok(m) => record_overlap(m, out),
@@ -601,8 +607,12 @@ fn intersect_pair(
                     }
                 },
                 Ok(None) => verify_empty(out),
-                Err(_) => {
-                    if !is_cancelled() && solidcraft_kernel::interiors_disjoint(ka, kb) == Some(true) {
+                Err(second_err) => {
+                    if is_cancelled() {
+                        out.unchecked = Some(first_err.to_string());
+                        return;
+                    }
+                    if solidcraft_kernel::interiors_disjoint(ka, kb) == Some(true) {
                         return;
                     }
                     if !is_cancelled()
@@ -611,8 +621,25 @@ fn intersect_pair(
                         record_overlap(m, out);
                         return;
                     }
-                    out.unchecked = Some(first_err.to_string());
-                    fallback_distance(out);
+                    match super::interference::fallback_unchecked_overlap(
+                        ka,
+                        kb,
+                        (&first_err, &second_err),
+                        |o| measure_near_origin(o, at),
+                        |v| v > 0.0 && v >= min_volume,
+                        is_cancelled,
+                    ) {
+                        super::interference::UncheckedFallback::Measured(m) => {
+                            out.overlap = Some((m.volume, m.area, m.bbox, m.centroid));
+                        }
+                        super::interference::UncheckedFallback::Cancelled => {
+                            out.unchecked = Some(first_err.to_string());
+                        }
+                        super::interference::UncheckedFallback::NotRecovered => {
+                            out.unchecked = Some(first_err.to_string());
+                            fallback_distance(out);
+                        }
+                    }
                 }
             }
         }
@@ -632,7 +659,7 @@ fn retry_shifted_intersect(
     kb: &solidcraft_kernel::Body,
     at: solidcore_record::Vec3,
     is_cancelled: &impl Fn() -> bool,
-) -> Option<solidcraft_kernel::BodyMeasure> {
+) -> Option<solidcraft_kernel::MassMeasure> {
     let far = at.x.abs().max(at.y.abs()).max(at.z.abs()) > 1.0;
     if !far || is_cancelled() {
         return None;
@@ -653,7 +680,7 @@ fn intersect_shifted(
     kb: &solidcraft_kernel::Body,
     at: solidcore_record::Vec3,
     swap: bool,
-) -> Option<solidcraft_kernel::BodyMeasure> {
+) -> Option<solidcraft_kernel::MassMeasure> {
     if !at.is_finite() {
         return None;
     }
@@ -661,7 +688,7 @@ fn intersect_shifted(
     let tb = solidcraft_kernel::transform(kb, -at, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0).ok()?;
     let (first, second) = if swap { (&tb, &ta) } else { (&ta, &tb) };
     let overlap = run_intersect(first, second).ok()??;
-    let mut m = solidcraft_kernel::measure(&overlap).ok()?;
+    let mut m = solidcraft_kernel::measure_mass(&overlap).ok()?;
     if !m.volume.is_finite() || m.volume <= 0.0 {
         return None;
     }
@@ -699,11 +726,11 @@ fn shared_region(a: &DistanceShape, b: &DistanceShape) -> Aabb3 {
     Aabb3 { min: min - g, max: max + g }
 }
 
-/// [`solidcraft_kernel::measure`] of `body` moved by `-at` and back: far from the origin, the
+/// [`solidcraft_kernel::measure_mass`] of `body` moved by `-at` and back: far from the origin, the
 /// centre of a thin part loses its precision (its moments are large numbers that nearly cancel).
-fn measure_near_origin(body: &solidcraft_kernel::Body, at: solidcore_record::Vec3) -> solidcraft_kernel::Result<solidcraft_kernel::BodyMeasure> {
+fn measure_near_origin(body: &solidcraft_kernel::Body, at: solidcore_record::Vec3) -> solidcraft_kernel::Result<solidcraft_kernel::MassMeasure> {
     let moved = solidcraft_kernel::transform(body, -at, solidcore_record::Vec3::ZERO, solidcore_record::Vec3::Z, 0.0)?;
-    let mut m = solidcraft_kernel::measure(&moved)?;
+    let mut m = solidcraft_kernel::measure_mass(&moved)?;
     m.centroid += at;
     m.bbox = Aabb3 { min: m.bbox.min + at, max: m.bbox.max + at };
     Ok(m)
