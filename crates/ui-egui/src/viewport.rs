@@ -9143,10 +9143,15 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !joint_handle_pointer
             && !app.viewport.draw_drag_handled
             && crate::dim_view::accept_outside_click(app);
+        // A click the image took (a Calibrate Canvas point, a Trace Region pick): the second click of
+        // a double-click lands in the same frame as the double-click, which is then the image's, not
+        // one in empty space.
+        let mut canvas_point = false;
         if resp.clicked() && !held && !reference_pick && !dim_accept && !joint_handle_pointer && !app.viewport.draw_drag_handled {
             if crate::browser_canvas::click(app, &proj, p, add) {
                 // Calibrate Canvas: the click sets Point A or B on the image (#9108); Trace Region: it picks a
                 // region, Ctrl+click one more (#20798).
+                canvas_point = true;
             } else if app.tool.is_some() {
                 crate::tools::on_click(app, &proj, p, mods.shift);
             } else if app.dialog.as_ref().is_some_and(|d| d.wants_picks()) {
@@ -9333,6 +9338,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         if resp.double_clicked()
             && picked.is_some()
             && hits.is_empty()
+            && !canvas_point
             && !pen_select
             && !held
             && !dim_edit
