@@ -151,8 +151,7 @@ pub fn plane_meets_cylinder(
     radius: f64,
 ) -> Result<Option<PlaneCylinder>> {
     run("mid_joint::plane_meets_cylinder", |k| {
-        let met =
-            kernel_plane_meets_cylinder(k, &plane(on), vec(axis_point), vec(axis), radius)?;
+        let met = kernel_plane_meets_cylinder(k, &plane(on), vec(axis_point), vec(axis), radius)?;
         Ok(met.map(|m| match m {
             KernelPlaneCylinder::Lines(lines) => {
                 PlaneCylinder::Lines(lines.iter().map(line).collect())

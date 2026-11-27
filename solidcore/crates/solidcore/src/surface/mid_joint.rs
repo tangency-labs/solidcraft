@@ -331,7 +331,9 @@ pub fn plane_meets_cylinder(
         (m * radius, n.cross(m) * (radius / cosine.abs()))
     };
     if !(finite(centre) && finite(major)) {
-        return Err(bad("the plane crosses the cylinder too shallowly to place the ellipse"));
+        return Err(bad(
+            "the plane crosses the cylinder too shallowly to place the ellipse",
+        ));
     }
     Ok(Some(PlaneCylinder::Ellipse {
         ellipse: Ellipse3 {
@@ -449,12 +451,7 @@ pub fn along_axis_to_plane(
 /// # Errors
 /// [`SolidError::InvalidInput`] for a point, axis or radius that is not finite, a radius that is
 /// not positive, an axis of zero length, or a point on the axis (no way out from it).
-pub fn onto_cylinder(
-    axis_point: Point3,
-    axis: Vec3,
-    radius: f64,
-    point: Point3,
-) -> Result<Point3> {
+pub fn onto_cylinder(axis_point: Point3, axis: Vec3, radius: f64, point: Point3) -> Result<Point3> {
     let bad = |reason| SolidError::InvalidInput {
         operation: ONTO,
         reason,
@@ -700,7 +697,10 @@ mod tests {
             panic!("no circle");
         };
         assert!(square);
-        assert!((ellipse.centre - v(0.0, 0.0, 2.0)).length() < 1e-12, "{ellipse:?}");
+        assert!(
+            (ellipse.centre - v(0.0, 0.0, 2.0)).length() < 1e-12,
+            "{ellipse:?}"
+        );
         assert!((ellipse.major.length() - 9.0).abs() < 1e-12);
         assert!((ellipse.minor.length() - 9.0).abs() < 1e-12);
         assert!(ellipse.major.dot(ellipse.minor).abs() < 1e-12);
@@ -728,7 +728,10 @@ mod tests {
             let t = f64::from(i) * std::f64::consts::TAU / 16.0;
             let p = ellipse.centre + (ellipse.major * t.cos()) + (ellipse.minor * t.sin());
             assert!((off_z(p) - 3.0).abs() < 1e-12, "{p:?}");
-            assert!(p.distance_along(tilted.point, tilted.outward).abs() < 1e-12, "{p:?}");
+            assert!(
+                p.distance_along(tilted.point, tilted.outward).abs() < 1e-12,
+                "{p:?}"
+            );
         }
     }
 
@@ -746,7 +749,10 @@ mod tests {
         assert_eq!(lines.len(), 2);
         let mut ys: Vec<f64> = lines.iter().map(|l| l.point.y).collect();
         ys.sort_by(f64::total_cmp);
-        assert!((ys[0] + 9.0).abs() < 1e-12 && (ys[1] - 9.0).abs() < 1e-12, "{lines:?}");
+        assert!(
+            (ys[0] + 9.0).abs() < 1e-12 && (ys[1] - 9.0).abs() < 1e-12,
+            "{lines:?}"
+        );
         assert!(lines
             .iter()
             .all(|l| l.point.x.abs() < 1e-12 && l.direction.z.abs() > 1.0 - 1e-12));
@@ -821,7 +827,10 @@ mod tests {
         let (a, b) = (3.0 / c, 3.0);
         for q in &quarters {
             let [x, y] = conic_at(q, 0.25);
-            assert!((x * x / (a * a) + y * y / (b * b) - 1.0).abs() < 1e-12, "{x} {y}");
+            assert!(
+                (x * x / (a * a) + y * y / (b * b) - 1.0).abs() < 1e-12,
+                "{x} {y}"
+            );
         }
         // Edge-on to the frame's plane: refused.
         let side = Frame {

@@ -282,7 +282,11 @@ fn midsurface_area(s: &mut Session, body: &str, extra: Value) -> (f64, String) {
 
 /// The analysis reply's joints of one kind.
 fn joints_of(reply: &Value, kind: &str) -> Vec<Value> {
-    reply.get("joints").and_then(Value::as_array).map(|j| j.iter().filter(|x| x.get("kind").and_then(Value::as_str) == Some(kind)).cloned().collect()).unwrap_or_default()
+    reply
+        .get("joints")
+        .and_then(Value::as_array)
+        .map(|j| j.iter().filter(|x| x.get("kind").and_then(Value::as_str) == Some(kind)).cloned().collect())
+        .unwrap_or_default()
 }
 
 /// A tube of radii 8 and 10 standing on a plate 60 x 60 x 4, its bore on through the plate: the
@@ -332,14 +336,18 @@ fn a_ring_round_a_tube_is_a_t_joined_on_a_circle() {
 #[test]
 fn a_plates_round_and_slanted_holes_are_carried_exactly() {
     let plate = || ("solid.box", json!({"length": 40, "width": 30, "height": 2, "corner": [0, 0, 0], "body_name": "Plate"}));
-    let mut s = design(&[plate(), ("solid.cylinder", json!({"radius": 5, "height": 4, "base": [20, 15, -1], "operation": "cut", "targets": ["Plate"]}))]);
+    let mut s =
+        design(&[plate(), ("solid.cylinder", json!({"radius": 5, "height": 4, "base": [20, 15, -1], "operation": "cut", "targets": ["Plate"]}))]);
     let (area, _) = midsurface_area(&mut s, "Plate", json!({}));
     let expected = 1200.0 - 25.0 * std::f64::consts::PI;
     assert!((area - expected).abs() < 0.05, "{area} against {expected}");
     let (sin, cos) = (30f64.to_radians().sin(), 30f64.to_radians().cos());
     let mut s = design(&[
         plate(),
-        ("solid.cylinder", json!({"radius": 3, "height": 20, "base": [20.0 - 10.0 * sin, 15, 1.0 - 10.0 * cos], "axis": [sin, 0, cos], "operation": "cut", "targets": ["Plate"]})),
+        (
+            "solid.cylinder",
+            json!({"radius": 3, "height": 20, "base": [20.0 - 10.0 * sin, 15, 1.0 - 10.0 * cos], "axis": [sin, 0, cos], "operation": "cut", "targets": ["Plate"]}),
+        ),
     ]);
     let analysis = s.execute("surface.midsurface_analyze", &json!({"body": "Plate", "max_thickness": "5 mm"})).unwrap_or_else(|e| panic!("{e}"));
     let expected = 1200.0 - 9.0 * std::f64::consts::PI / cos;

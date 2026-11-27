@@ -32,8 +32,8 @@ use solidcraft_kernel::services::mid_joint::{
 };
 use solidcraft_kernel::services::mid_sheet::{self as ms, Frame, Wall};
 use solidcraft_kernel::{
-    Body, BoolOp, ExtendLimit, ExtendMode, ExtendOptions, FaceSurface, extend_surface, face_surface, offset_surface, patch_region, planar_regions_boolean,
-    smooth_picks, stitch,
+    Body, BoolOp, ExtendLimit, ExtendMode, ExtendOptions, FaceSurface, extend_surface, face_surface, offset_surface, patch_region,
+    planar_regions_boolean, smooth_picks, stitch,
 };
 
 use crate::sheet_surface_convert::{cylinder_chart, cylinder_chart_in, face_region, planar_face};
@@ -702,7 +702,13 @@ fn round_pair(
             // all of the shorter one faced by the other: the wall is the shorter face's, and the
             // longer runs on past its ends only (a bore on through the plate a tube stands on).
             let within = |x: [f64; 2], y: [f64; 2]| x[0] >= y[0] - len_tol && x[1] <= y[1] + len_tol;
-            let shorter = if within(xa, xb) { Some(faces[0]) } else if within(xb, xa) { Some(faces[1]) } else { None };
+            let shorter = if within(xa, xb) {
+                Some(faces[0])
+            } else if within(xb, xa) {
+                Some(faces[1])
+            } else {
+                None
+            };
             let contained = !aligned && same_sweep && smaller > 0.0 && common >= smaller * (1.0 - 1e-3);
             let shorter = shorter.filter(|_| contained);
             // An opening in one face only has no partner across the wall: the sheet face's offset
@@ -922,7 +928,8 @@ pub fn analyze(body: &Body, opts: &Options) -> Result<Analysis> {
     // blockage to review. Notes they made are dropped, and the edge test is made again without
     // them, so that anything else between the faces is still seen.
     for flat in 0..pairs.len() {
-        let joined: Vec<usize> = joints.iter().filter(|j| j.pairs[0] == flat && matches!(j.kind, JointKind::Circle { .. })).map(|j| j.pairs[1]).collect();
+        let joined: Vec<usize> =
+            joints.iter().filter(|j| j.pairs[0] == flat && matches!(j.kind, JointKind::Circle { .. })).map(|j| j.pairs[1]).collect();
         if joined.is_empty() {
             continue;
         }
@@ -1333,7 +1340,15 @@ fn pair_of(look: &Look, faces: [usize; 2], a: &Flat, b: &Flat, gap: f64, mid: Ou
 
 /// The first of `samples` between the faces of flat pair `faces` (first face `a`, `gap` apart,
 /// halfway plane `mid`) well inside `shared`, and the `blocked` note it makes.
-fn edge_block(samples: &[[f64; 3]], a: &Flat, mid: &OutwardPlane, gap: f64, shared: &[Region2], faces: [usize; 2], tol: f64) -> Option<([f64; 3], String)> {
+fn edge_block(
+    samples: &[[f64; 3]],
+    a: &Flat,
+    mid: &OutwardPlane,
+    gap: f64,
+    shared: &[Region2],
+    faces: [usize; 2],
+    tol: f64,
+) -> Option<([f64; 3], String)> {
     let at = edge_between(samples, a, mid, gap, shared, tol * 100.0)?;
     let note = format!(
         "blocked: an edge of the body runs between faces {} and {} at ({:.3}, {:.3}, {:.3}), inside the wall the sheet would span",
@@ -1377,7 +1392,12 @@ fn slanted_bore(look: &Look, faces: [usize; 2], a: &Flat, mid: &OutwardPlane, r:
                 let quarters = ellipse_in_frame(&frame, &ellipse).ok()?;
                 let segs = quarters
                     .iter()
-                    .map(|k| Seg2::Conic { a: Vec2::new(k.a[0], k.a[1]), apex: Vec2::new(k.apex[0], k.apex[1]), b: Vec2::new(k.b[0], k.b[1]), w: k.w })
+                    .map(|k| Seg2::Conic {
+                        a: Vec2::new(k.a[0], k.a[1]),
+                        apex: Vec2::new(k.apex[0], k.apex[1]),
+                        b: Vec2::new(k.b[0], k.b[1]),
+                        w: k.w,
+                    })
                     .collect();
                 found = Some((Region2 { outer: Loop2 { segs }, holes: Vec::new() }, centre, vec![g]));
             }
@@ -1478,7 +1498,8 @@ struct Joined {
 /// opening) is the joint's, not an opening filled over. Exact region booleans (the kernel's).
 fn joined(p: &Pair, circles: &[JointCircle], tol: f64) -> Result<Joined> {
     let regions = |x: &[Region2], y: &[Region2], op: BoolOp| {
-        planar_regions_boolean(x, y, op, 1e-7).map_err(|e| DocError::Invalid(format!("midsurface: the joints of the sheet of faces {:?}: {e}", p.faces)))
+        planar_regions_boolean(x, y, op, 1e-7)
+            .map_err(|e| DocError::Invalid(format!("midsurface: the joints of the sheet of faces {:?}: {e}", p.faces)))
     };
     let area = |x: &[Region2]| x.iter().map(|r| r.area()).sum::<f64>();
     let mut shared = p.shared.clone();
@@ -1490,7 +1511,8 @@ fn joined(p: &Pair, circles: &[JointCircle], tol: f64) -> Result<Joined> {
         }
         let disc = |r: f64| Region2 { outer: Loop2::circle(c.centre, r), holes: Vec::new() };
         // Just outside the wall, as wide as it is thick.
-        let ring = Region2 { outer: Loop2::circle(c.centre, c.outer + (c.outer - c.inner)), holes: vec![Loop2::circle(c.centre, c.outer).reversed()] };
+        let ring =
+            Region2 { outer: Loop2::circle(c.centre, c.outer + (c.outer - c.inner)), holes: vec![Loop2::circle(c.centre, c.outer).reversed()] };
         if area(&regions(&shared, std::slice::from_ref(&ring), BoolOp::Intersect)?) > tol * tol {
             let closed = regions(&shared, &[disc(c.outer)], BoolOp::Union)?;
             shared = regions(&closed, &[disc(c.radius)], BoolOp::Cut)?;
@@ -3396,7 +3418,8 @@ mod tests {
         let m = solidcraft_kernel::measure(&surface_body(&s).unwrap()).unwrap();
         assert!((m.area - expected).abs() < expected * 1e-5, "{} against {expected}", m.area);
         // Square to the plate, the bore's own section is the openings': 1200 - 9 pi, as before.
-        let square = cut(&block(40.0, 30.0, 2.0), &solidcraft_kernel::cylinder(Vec3::new(20.0, 15.0, -1.0), Vec3::new(0.0, 0.0, 1.0), 3.0, 4.0).unwrap());
+        let square =
+            cut(&block(40.0, 30.0, 2.0), &solidcraft_kernel::cylinder(Vec3::new(20.0, 15.0, -1.0), Vec3::new(0.0, 0.0, 1.0), 3.0, 4.0).unwrap());
         let a = analyze(&square, &opts(5.0)).unwrap();
         let m = solidcraft_kernel::measure(&surface_body(&sheets(&square, &confident(&a)).unwrap()).unwrap()).unwrap();
         assert!((m.area - (1200.0 - 9.0 * PI)).abs() < 0.05, "{m:?}");
@@ -3409,7 +3432,10 @@ mod tests {
         // on the tube's sheet. Not joined yet: said, in the analysis and the build.
         let rib = extrude(
             &Plane::XY,
-            &[Region2 { outer: Loop2::polygon(&[Vec2::new(-1.0, 9.0), Vec2::new(1.0, 9.0), Vec2::new(1.0, 30.0), Vec2::new(-1.0, 30.0)]), holes: vec![] }],
+            &[Region2 {
+                outer: Loop2::polygon(&[Vec2::new(-1.0, 9.0), Vec2::new(1.0, 9.0), Vec2::new(1.0, 30.0), Vec2::new(-1.0, 30.0)]),
+                holes: vec![],
+            }],
             0.0,
             40.0,
         )
