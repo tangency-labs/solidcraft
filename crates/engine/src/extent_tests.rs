@@ -1015,3 +1015,184 @@ fn extrude_from_a_face_a_letters_island_splits_starts_on_the_piece_under_its_poi
         assert!((top - 13.0).abs() < 1e-6, "{words}: the post ends at {top}");
     }
 }
+
+/// A 20 × 10 mm rectangle on XY, from the origin, in a sketch named `Base`, and the parameter
+/// `H` = 25 mm.
+fn base_rectangle() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "H", "expression": "25 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]}));
+    run(&mut s, "sketch.finish", json!({}));
+    s
+}
+
+fn volume_and_z(s: &mut Session, b: &str) -> (f64, f64, f64) {
+    let b = body(s, b);
+    let num = |v: &Value| v.as_f64().unwrap_or(f64::NAN);
+    (num(&b["volume_mm3"]), num(&b["bbox"]["min"][2]), num(&b["bbox"]["max"][2]))
+}
+
+fn assert_block(s: &mut Session, b: &str, (volume, lo, hi): (f64, f64, f64)) {
+    let got = volume_and_z(s, b);
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    assert!((got.0 - volume).abs() < 1e-6 * volume, "volume {}, want {volume}", got.0);
+    assert!((got.1 - lo).abs() < 1e-6 && (got.2 - hi).abs() < 1e-6, "z {}..{}, want {lo}..{hi}", got.1, got.2);
+}
+
+/// To Object on a construction plane keeps the plane, so the extrusion follows it when a
+/// parameter moves it, also after a save and reload (#8527).
+#[test]
+fn extrude_to_a_construction_plane_follows_it() {
+    for to in [json!({"plane": "Target"}), json!("Target")] {
+        let mut s = base_rectangle();
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+        run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": to, "body_name": "Post"}));
+        assert_block(&mut s, "Post", (20.0 * 10.0 * 25.0, 0.0, 25.0));
+        let doc = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+        let mut cold = Session::new(doc);
+        for current in [&mut s, &mut cold] {
+            run(current, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+            assert_block(current, "Post", (20.0 * 10.0 * 40.0, 0.0, 40.0));
+        }
+    }
+}
+
+/// To Object on a construction point ends at the plane through the point, parallel to the
+/// sketch, wherever the point lies beside the profile, and follows the point (#8527).
+#[test]
+fn extrude_to_a_construction_point_follows_it() {
+    let mut s = base_rectangle();
+    run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 50, "name": "PX"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XZ", "offset": 50, "name": "PY"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "PZ"}));
+    run(&mut s, "construct.point.three_planes", json!({"a": "PX", "b": "PY", "c": "PZ", "name": "End"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"construct_point": "End"}, "body_name": "Post"}));
+    assert_block(&mut s, "Post", (20.0 * 10.0 * 25.0, 0.0, 25.0));
+    run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+    assert_block(&mut s, "Post", (20.0 * 10.0 * 40.0, 0.0, 40.0));
+}
+
+/// From Object on one construction plane and To Object on another: the extrusion runs between
+/// them and follows both (#8527).
+#[test]
+fn extrude_from_a_construction_plane_to_another_runs_between_them() {
+    let mut s = base_rectangle();
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 5, "name": "Floor"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "from": {"plane": "Floor"}, "to": {"plane": "Target"}, "body_name": "Post"}));
+    assert_block(&mut s, "Post", (20.0 * 10.0 * 20.0, 5.0, 25.0));
+    run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+    assert_block(&mut s, "Post", (20.0 * 10.0 * 35.0, 5.0, 40.0));
+}
+
+/// To Object on a construction plane at a slant cuts the end along the plane, as on a slanted
+/// body face. The plane z = 20 + x / 2 over the 20 × 10 rectangle leaves
+/// 10 × ∫₀²⁰ (20 + x / 2) dx = 5000 mm³, from z 0 to 30 (#8527).
+#[test]
+fn extrude_to_a_slanted_construction_plane_cuts_the_end_along_it() {
+    let mut s = base_rectangle();
+    run(
+        &mut s,
+        "construct.plane.three_points",
+        json!({"a": {"point": [0, 0, 20]}, "b": {"point": [20, 0, 30]}, "c": {"point": [0, 10, 20]}, "name": "Slope"}),
+    );
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"plane": "Slope"}, "body_name": "Post"}));
+    assert_block(&mut s, "Post", (5000.0, 0.0, 30.0));
+}
+
+/// A plane the extrusion runs along gives no end, so To Object on it is refused with that
+/// reason (#8527).
+#[test]
+fn extrude_to_a_plane_along_the_extrusion_is_refused() {
+    let mut s = base_rectangle();
+    let e = s.execute("solid.extrude", &json!({"sketch": "Base", "to": {"plane": "YZ"}})).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("gives no end"), "{e}");
+}
+
+/// From Object on a construction plane at a slant starts on the plane, as on a slanted body face.
+/// From z = x / 2 to z = 25 over the 20 × 10 rectangle: 10 × ∫₀²⁰ (25 − x / 2) dx = 4000 mm³
+/// (#8527).
+#[test]
+fn extrude_from_a_slanted_construction_plane_starts_on_it() {
+    let mut s = base_rectangle();
+    run(
+        &mut s,
+        "construct.plane.three_points",
+        json!({"a": {"point": [0, 0, 0]}, "b": {"point": [20, 0, 10]}, "c": {"point": [0, 10, 0]}, "name": "Slope"}),
+    );
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "from": {"plane": "Slope"}, "to": {"plane": "Target"}, "body_name": "Post"}));
+    assert_block(&mut s, "Post", (4000.0, 0.0, 25.0));
+}
+
+/// Renaming the construction plane an extrude runs to keeps the extrude on it (#8527).
+#[test]
+fn extrude_to_a_renamed_construction_plane_still_follows_it() {
+    let mut s = base_rectangle();
+    let plane = run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}))["feature"].clone();
+    run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"plane": "Target"}, "body_name": "Post"}));
+    run(&mut s, "timeline.rename", json!({"feature": plane, "name": "Shelf"}));
+    run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+    assert_block(&mut s, "Post", (20.0 * 10.0 * 40.0, 0.0, 40.0));
+}
+
+/// `operation: auto` reads where a To plane ends the extrude: from the top of a block down to a
+/// plane inside it, the extrude cuts (#8527).
+#[test]
+fn an_automatic_extrude_down_to_a_construction_plane_inside_a_block_cuts() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [0, 0, 0], "length": 20, "width": 10, "height": 30, "body_name": "Block"}));
+    run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": 20, "name": "Floor"}));
+    run(&mut s, "sketch.create", json!({"plane": {"origin": [0, 0, 30], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Top"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 2], "p1": [15, 8]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Top", "to": {"plane": "Floor"}, "operation": "auto"}));
+    assert_block(&mut s, "Block", (20.0 * 10.0 * 30.0 - 10.0 * 6.0 * 10.0, 0.0, 30.0));
+}
+
+/// The Extrude dialog reopens a To plane as the point stored with it and sends that point back.
+/// An edit that sends the same point keeps the plane, so the extrude still follows it; an edit
+/// that sends another point ends there instead (#8527).
+#[test]
+fn an_edit_that_sends_the_stored_to_point_keeps_the_plane() {
+    for (to, top) in [([0.0, 0.0, 25.0], 40.0), ([0.0, 0.0, 30.0], 30.0)] {
+        let mut s = base_rectangle();
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+        let id = run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"plane": "Target"}, "body_name": "Post"}))["feature"].clone();
+        let params = json!({"sketch": "Base", "to": to, "body_name": "Post"});
+        run(&mut s, "timeline.redefine", json!({"feature": id, "command": "solid.extrude", "params": params}));
+        run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+        assert_block(&mut s, "Post", (20.0 * 10.0 * top, 0.0, top));
+    }
+}
+
+/// `timeline.edit` merges what it sets into the stored extrude: a new To point ends the extrude
+/// there, and an edit that clears the reference keeps the stored point, not the plane (#8527).
+#[test]
+fn an_edit_that_sets_another_to_point_or_clears_the_plane_ends_at_the_point() {
+    for (set, top) in [(json!({"extent.to_offset": "0 mm"}), 40.0), (json!({"extent.to": [0, 0, 30]}), 30.0), (json!({"extent.to_ref": null}), 25.0)]
+    {
+        let mut s = base_rectangle();
+        run(&mut s, "construct.plane.offset", json!({"base": "XY", "offset": "H", "name": "Target"}));
+        let id = run(&mut s, "solid.extrude", json!({"sketch": "Base", "to": {"plane": "Target"}, "body_name": "Post"}))["feature"].clone();
+        run(&mut s, "timeline.edit", json!({"feature": id, "set": set}));
+        run(&mut s, "parameters.change", json!({"name": "H", "expression": "40 mm"}));
+        assert_block(&mut s, "Post", (20.0 * 10.0 * top, 0.0, top));
+    }
+}
+
+/// The run between a slanted To plane and the start has no second side: two sides are refused,
+/// not dropped (#8527).
+#[test]
+fn two_sides_to_a_slanted_construction_plane_are_refused() {
+    let mut s = base_rectangle();
+    run(
+        &mut s,
+        "construct.plane.three_points",
+        json!({"a": {"point": [0, 0, 20]}, "b": {"point": [20, 0, 30]}, "c": {"point": [0, 10, 20]}, "name": "Slope"}),
+    );
+    let p = json!({"sketch": "Base", "to": {"plane": "Slope"}, "distance2": 5});
+    let e = s.execute("solid.extrude", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("two sides with a plane at a slant"), "{e}");
+}

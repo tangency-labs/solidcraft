@@ -10,6 +10,10 @@
 //! brings the window forward, and wakes the UI, which opens them with [`take`] like files named
 //! on the command line.
 //!
+//! The same method receives `solidcraft://` Workshop links (the scheme is registered under
+//! `CFBundleURLTypes` in Info.plist): they are queued for the window with the links other
+//! launches hand over (`single_instance::hold_links`), which looks each one up and asks first.
+//!
 //! Adding a method to another crate's Objective-C class has no safe API, hence the `unsafe_code`
 //! allowance on [`install`] and [`add_open_urls_method`] (winit overrides `sendEvent:` on
 //! `NSApplication` similarly).
@@ -97,14 +101,22 @@ extern "C-unwind" fn open_urls(_delegate: &AnyObject, _cmd: Sel, _app: &AnyObjec
     }
 }
 
-/// Queue the files among `urls` and bring the window forward.
+/// Queue the files and Workshop links among `urls` and bring the window forward.
 fn queue(urls: &NSArray<NSURL>) {
     // Only file URLs: macOS 27 turns an https URL's path into a file path too.
     let paths: Vec<_> = urls.iter().filter(|u| u.isFileURL()).filter_map(|u| u.to_file_path()).map(|p| p.to_string_lossy().into_owned()).collect();
-    if paths.is_empty() {
+    let links: Vec<String> = urls
+        .iter()
+        .filter(|u| !u.isFileURL())
+        .filter_map(|u| u.absoluteString())
+        .map(|s| s.to_string())
+        .filter(|s| solidcraft_ui_egui::workshop::link::looks_like_link(s))
+        .collect();
+    if paths.is_empty() && links.is_empty() {
         return;
     }
     PENDING.lock().unwrap_or_else(PoisonError::into_inner).extend(paths);
+    crate::single_instance::hold_links(links);
     if let Some(ctx) = UI.get() {
         bring_forward(ctx);
     }
