@@ -168,6 +168,8 @@ fn same_geometry_inputs(a: &Document, b: &Document) -> bool {
         print_faces,
         // Read only by robot exports: no feature's geometry depends on it.
         collision_shapes: _,
+        // Display only: no feature's geometry depends on it.
+        edgeless_bodies: _,
         user_materials,
         appearances,
         body_components,

@@ -1,6 +1,7 @@
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 
+use super::CornerJoinParams;
 use super::{
     BendTableFormatParam, BendTableParams, BendTableResult, ConvertParams, DxfCurvesParam, DxfLayersParam, DxfNoteHeight, DxfTextParam,
     DxfUnitsParam, ExportDxfParams, ExportDxfResult, FixedPoint, FlangeEdges, FlangeParams, FlangePosition, FlangeTypeParam, FlatPatternParams,
@@ -44,6 +45,7 @@ fn sheet() -> Session {
 
 #[test]
 fn schemas_and_the_key_check_agree() {
+    assert_keys(input_schema_for::<CornerJoinParams>(), &keys(&["body", "covered", "covering", "gap", "kind", "overlap"]));
     assert_keys(
         input_schema_for::<FlangeParams>(),
         &keys(&[
@@ -52,6 +54,7 @@ fn schemas_and_the_key_check_agree() {
             "body",
             "corner_relief",
             "corner_relief_shape",
+            "corners",
             "curves",
             "distance",
             "edges",
@@ -106,6 +109,281 @@ fn schemas_and_the_key_check_agree() {
             "units",
         ],
     );
+}
+
+fn corner_join_params(s: &mut Session) -> Value {
+    s.execute("sheet.flange", &json!({"edges": [[50, 0, 0], [100, 30, 0]], "height": 20})).unwrap();
+    let state = s.model.state();
+    let surface = &state.surface_sheets[0];
+    let body = state.body(&surface.body).unwrap();
+    let sources: Vec<_> = (0..surface.sheet.joints.len()).filter_map(|joint| surface.bend_source_edge(joint, body).ok()).collect();
+    assert_eq!(sources.len(), 2);
+    json!({"covering": sources[0], "covered": sources[1], "name": "Joined"})
+}
+
+#[test]
+fn flange_corner_join_matches_a_separate_join_using_central_build_names() {
+    for (kind, overlap) in [("butt", None), ("partial_overlap", Some(1.0)), ("full_overlap", None)] {
+        for swap in [false, true] {
+            let mut expected = sheet();
+            let mut corner = corner_join_params(&mut expected);
+            corner.as_object_mut().unwrap().remove("name");
+            if swap {
+                let covering = corner["covering"].take();
+                corner["covering"] = corner["covered"].take();
+                corner["covered"] = covering;
+            }
+            corner["kind"] = json!(kind);
+            corner["overlap"] = json!(overlap);
+            corner["gap"] = json!(0.6);
+            let mut actual = sheet();
+            for key in ["covering", "covered"] {
+                assert!(corner[key].as_str().unwrap().contains('|'));
+            }
+            let params = json!({"edges": [[50, 0, 0], [100, 30, 0]], "height": 20, "corners": [corner], "name": "Joined"});
+            assert!(takes::<FlangeParams>(&params));
+            actual.execute("sheet.flange", &params).unwrap();
+            expected.execute("sheet.corner_join", &corner).unwrap();
+            assert_eq!(
+                serde_json::to_value(&actual.model.state().surface_sheets[0]).unwrap(),
+                serde_json::to_value(&expected.model.state().surface_sheets[0]).unwrap(),
+                "{params}"
+            );
+            let saved = serde_json::to_value(&actual.doc.find_feature("Joined").unwrap().kind).unwrap();
+            assert_eq!(saved["corners"][0]["covering"], corner["covering"]);
+            assert_eq!(saved["corners"][0]["covered"], corner["covered"]);
+            assert_eq!(saved["corners"][0]["kind"], corner["kind"]);
+            let reopened = Session::new(serde_json::from_value(serde_json::to_value(&actual.doc).unwrap()).unwrap());
+            assert_eq!(
+                serde_json::to_value(&reopened.model.state().surface_sheets).unwrap(),
+                serde_json::to_value(&actual.model.state().surface_sheets).unwrap(),
+                "cold rebuild: {params}"
+            );
+            let mut edited = sheet();
+            let feature =
+                edited.execute("sheet.flange", &json!({"edges": [[50, 0, 0], [100, 30, 0]], "height": 20, "name": "Joined"})).unwrap()["feature"]
+                    .as_u64()
+                    .unwrap();
+            let next_id = edited.doc.next_id;
+            edited.execute("timeline.redefine", &json!({"feature": feature, "command": "sheet.flange", "params": params})).unwrap();
+            assert_eq!(edited.doc.next_id, next_id);
+            assert_eq!(serde_json::to_value(&edited.doc.find_feature("Joined").unwrap().kind).unwrap(), saved, "redefined choices: {params}");
+            assert_eq!(
+                serde_json::to_value(&edited.model.state().surface_sheets).unwrap(),
+                serde_json::to_value(&actual.model.state().surface_sheets).unwrap(),
+                "redefined geometry: {params}"
+            );
+            for invalid in [json!({"kind": "partial_overlap", "overlap": 3.0}), json!({"covering": "F999:cap.surface|F999:bend.inner"})] {
+                let mut invalid_params = params.clone();
+                for (key, value) in invalid.as_object().unwrap() {
+                    invalid_params["corners"][0][key] = value.clone();
+                }
+                let before = edited.doc.clone();
+                assert!(
+                    edited.execute("timeline.redefine", &json!({"feature": feature, "command": "sheet.flange", "params": invalid_params})).is_err(),
+                    "{invalid_params}"
+                );
+                assert_eq!(*edited.doc, *before, "{invalid_params}");
+                assert_eq!(
+                    serde_json::to_value(&edited.model.state().surface_sheets).unwrap(),
+                    serde_json::to_value(&actual.model.state().surface_sheets).unwrap(),
+                    "refused redefine: {invalid_params}"
+                );
+            }
+            actual.execute("sheet.unfold", &json!({})).unwrap();
+            actual.execute("sheet.refold", &json!({})).unwrap();
+        }
+    }
+}
+
+#[test]
+fn flange_corner_redefine_normalizes_bare_lengths_in_design_units() {
+    let mut source = sheet();
+    let mut corner = corner_join_params(&mut source);
+    corner.as_object_mut().unwrap().remove("name");
+    corner["kind"] = json!("partial_overlap");
+    corner["overlap"] = json!(0.04);
+    corner["gap"] = json!("0.5 mm");
+    let base = json!({"edges": [[50, 0, 0], [100, 30, 0]], "height": "20 mm", "name": "Flanges"});
+    let mut params = base.clone();
+    params["corners"] = json!([corner]);
+    let mut direct = sheet();
+    direct.execute("document.units", &json!({"units": "in"})).unwrap();
+    direct.execute("sheet.flange", &params).unwrap();
+    let expected = serde_json::to_value(&direct.doc.find_feature("Flanges").unwrap().kind).unwrap();
+    assert_eq!(expected["corners"][0]["overlap"], "0.04 in");
+    assert_eq!(expected["corners"][0]["gap"], "0.5 mm");
+
+    let mut edited = sheet();
+    let feature = edited.execute("sheet.flange", &base).unwrap()["feature"].clone();
+    edited.execute("document.units", &json!({"units": "in"})).unwrap();
+    edited.execute("timeline.redefine", &json!({"feature": feature, "command": "sheet.flange", "params": params})).unwrap();
+    let actual = serde_json::to_value(&edited.doc.find_feature("Flanges").unwrap().kind).unwrap();
+    assert_eq!(actual["corners"], expected["corners"]);
+}
+
+#[test]
+fn flange_corner_join_absent_null_and_empty_choices_keep_the_rule_corners() {
+    let base = json!({"edges": [[50, 0, 0], [100, 30, 0]], "height": 20});
+    let mut expected = sheet();
+    expected.execute("sheet.flange", &base).unwrap();
+    let surface = serde_json::to_value(&expected.model.state().surface_sheets[0]).unwrap();
+    for corners in [None, Some(serde_json::Value::Null), Some(json!([]))] {
+        let mut params = base.clone();
+        if let Some(corners) = corners {
+            params["corners"] = corners;
+        }
+        assert!(takes::<FlangeParams>(&params));
+        let mut actual = sheet();
+        actual.execute("sheet.flange", &params).unwrap();
+        assert_eq!(serde_json::to_value(&actual.model.state().surface_sheets[0]).unwrap(), surface, "{params}");
+        let saved = serde_json::to_value(&actual.doc.features.last().unwrap().kind).unwrap();
+        assert!(saved.get("corners").is_none(), "{params}");
+    }
+}
+
+#[test]
+fn flange_corner_join_refuses_invalid_choices_without_adding_a_feature() {
+    let mut reference = sheet();
+    let mut corner = corner_join_params(&mut reference);
+    corner.as_object_mut().unwrap().remove("name");
+    let mut actual = sheet();
+    let doc = actual.doc.clone();
+    let surface = serde_json::to_value(&actual.model.state().surface_sheets[0]).unwrap();
+    for patch in [
+        json!({"kind": "partial"}),
+        json!({"kind": true}),
+        json!({"kind": "partial_overlap"}),
+        json!({"kind": "partial_overlap", "overlap": "not_a_parameter"}),
+        json!({"kind": "partial_overlap", "overlap": "90 deg"}),
+        json!({"gap": -1}),
+        json!({"gap": "90 deg"}),
+        json!({"covering": "base:rim.missing:top"}),
+        json!({"covered": corner["covering"]}),
+        json!({"body": "Plate"}),
+        json!({"unknown": true}),
+    ] {
+        let mut invalid = corner.clone();
+        for (key, value) in patch.as_object().unwrap() {
+            invalid[key] = value.clone();
+        }
+        let params = json!({"edges": [[50, 0, 0], [100, 30, 0]], "height": 20, "corners": [invalid]});
+        assert!(actual.execute("sheet.flange", &params).is_err(), "{params}");
+        assert_eq!(*actual.doc, *doc, "{params}");
+        assert_eq!(serde_json::to_value(&actual.model.state().surface_sheets[0]).unwrap(), surface, "{params}");
+    }
+    for (case, corners) in [json!({}), json!(true), json!([null]), json!(vec![corner.clone(); 2001])].into_iter().enumerate() {
+        let params = json!({"edges": [[50, 0, 0], [100, 30, 0]], "height": 20, "corners": corners});
+        assert!(actual.execute("sheet.flange", &params).is_err(), "corner list case {case}");
+        assert_eq!(*actual.doc, *doc, "corner list case {case}");
+        assert_eq!(serde_json::to_value(&actual.model.state().surface_sheets[0]).unwrap(), surface, "corner list case {case}");
+    }
+}
+
+#[test]
+fn corner_join_command_uses_real_flange_source_names_and_rolls_back_missing_sources() {
+    let mut s = sheet();
+    let mut params = corner_join_params(&mut s);
+    params["kind"] = json!("full_overlap");
+    let reply = s.execute("sheet.corner_join", &params).unwrap();
+    let schema = output_schema_for::<FeatureResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply));
+    let saved = serde_json::to_value(&s.doc).unwrap();
+    assert!(saved.to_string().contains("full_overlap"));
+    assert!(saved.to_string().contains(params["covering"].as_str().unwrap()));
+    let before = serde_json::to_value(&s.model.state().surface_sheets[0]).unwrap();
+    assert!(s.execute("sheet.corner_join", &json!({"covering": "base:rim.missing:top", "covered": params["covered"]})).is_err());
+    assert_eq!(serde_json::to_value(&s.doc).unwrap(), saved);
+    assert_eq!(serde_json::to_value(&s.model.state().surface_sheets[0]).unwrap(), before);
+    s.execute("sheet.unfold", &json!({})).unwrap();
+    s.execute("sheet.refold", &json!({})).unwrap();
+}
+
+#[test]
+fn corner_join_command_defaults_and_inactive_overlap_match_saved_parameters() {
+    for (kind, expected) in
+        [(None, "butt"), (Some(Value::Null), "butt"), (Some(json!("butt")), "butt"), (Some(json!("full_overlap")), "full_overlap")]
+    {
+        let mut s = sheet();
+        let mut params = corner_join_params(&mut s);
+        if let Some(kind) = kind {
+            params["kind"] = kind;
+        }
+        params["overlap"] = json!("not_a_parameter");
+        params["gap"] = Value::Null;
+        s.execute("sheet.corner_join", &params).unwrap();
+        let saved = serde_json::to_value(&s.doc.find_feature("Joined").unwrap().kind).unwrap();
+        assert_eq!(saved["kind"], expected);
+        assert!(saved["overlap"].is_null(), "{saved}");
+        assert!(saved["gap"].is_null(), "{saved}");
+    }
+}
+
+#[test]
+fn corner_join_command_refuses_invalid_active_parameters_atomically() {
+    let mut s = sheet();
+    let params = corner_join_params(&mut s);
+    let doc = s.doc.clone();
+    let surface = serde_json::to_value(&s.model.state().surface_sheets[0]).unwrap();
+    for patch in [
+        json!({"kind": "not_a_kind"}),
+        json!({"kind": "partial_overlap"}),
+        json!({"kind": "partial_overlap", "overlap": null}),
+        json!({"kind": "partial_overlap", "overlap": "not_a_parameter"}),
+        json!({"kind": "partial_overlap", "overlap": -1}),
+        json!({"kind": "full_overlap", "gap": -1}),
+        json!({"kind": "full_overlap", "gap": 0}),
+        json!({"kind": "full_overlap", "gap": "not_a_parameter"}),
+        json!({"covering": "base:rim.missing:top"}),
+        json!({"covered": params["covering"]}),
+    ] {
+        let mut invalid = params.clone();
+        for (key, value) in patch.as_object().unwrap() {
+            invalid[key] = value.clone();
+        }
+        assert!(s.execute("sheet.corner_join", &invalid).is_err(), "{invalid}");
+        assert_eq!(*s.doc, *doc, "{invalid}");
+        assert_eq!(serde_json::to_value(&s.model.state().surface_sheets[0]).unwrap(), surface, "{invalid}");
+    }
+}
+
+#[test]
+fn corner_join_schema_matches_defaults_and_refuses_hostile_source_names() {
+    let params = json!({"covering": "F7:top(F1:side:l2)|F7:bend.inner(F1:side:l2)", "covered": "F8:bottom(F1:side:l1)|F8:bend.inner(F1:side:l1)"});
+    for (patch, accepted) in [
+        (json!({}), true),
+        (json!({"kind": null, "overlap": null, "gap": null}), true),
+        (json!({"kind": "butt"}), true),
+        (json!({"kind": "partial_overlap", "overlap": "corner_overlap", "gap": 0.5}), true),
+        (json!({"kind": "full_overlap", "overlap": "unused"}), true),
+        (json!({"kind": "partial"}), false),
+        (json!({"kind": 1}), false),
+        (json!({"covering": null}), false),
+        (json!({"covered": 3}), false),
+        (json!({"overlap": true}), false),
+        (json!({"gap": []}), false),
+    ] {
+        let mut value = params.clone();
+        for (key, field) in patch.as_object().unwrap() {
+            value[key] = field.clone();
+        }
+        assert_eq!(takes::<CornerJoinParams>(&value), accepted, "{value}");
+    }
+    for name in [
+        "base:rim.far:side",
+        "base:far:top",
+        "base:rim.:top",
+        "F7..base:rim.far:top",
+        "|F7:top",
+        "F7:top|",
+        "F18446744073709551616:top|F7:bend.inner",
+    ] {
+        for key in ["covering", "covered"] {
+            let mut invalid = params.clone();
+            invalid[key] = json!(name);
+            assert!(parse::<CornerJoinParams>(invalid.clone()).is_none(), "{invalid}");
+        }
+    }
 }
 
 fn parse<T: DeserializeOwned>(v: Value) -> Option<T> {

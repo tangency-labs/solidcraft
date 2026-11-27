@@ -39,6 +39,7 @@ mod construct;
 mod construct_auto;
 pub(crate) mod delete;
 pub(crate) mod diagnostics;
+mod dogbone;
 mod drawing;
 mod drawing_auto_mark;
 mod drawing_balloon;
@@ -662,6 +663,7 @@ fn gather_command_specs() -> Vec<&'static CommandSpec> {
     v.extend(sketch_project::COMMANDS.iter());
     v.extend(sketch_links::COMMANDS.iter());
     v.extend(features::COMMANDS.iter());
+    v.extend(dogbone::COMMANDS.iter());
     v.extend(features_more::COMMANDS.iter());
     v.extend(cell_grid::COMMANDS.iter());
     v.extend(mesh::COMMANDS.iter());
