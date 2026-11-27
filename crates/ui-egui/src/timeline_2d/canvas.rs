@@ -903,7 +903,7 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
         let line_width = if marker_hovered || marker_dragged { 3.0 } else { 2.5 };
 
         // Vertical marker line through Tier 2 and component tracks (clipped to modeling section)
-        p_m.line_segment([pos2(line_x, line_top), pos2(line_x, line_bottom)], Stroke::new(line_width, accent.color));
+        p_m.line_segment([pos2(line_x, line_top), pos2(line_x, line_bottom - MARKER_FOOT_OVERLAP)], Stroke::new(line_width, accent.color));
 
         // Bottom of the vertical line: a down arrowhead while component rows are out of sight below
         p_m.add(marker_foot(line_x, line_bottom, accent.color, state.scroll_y + 0.5 < max_scroll_y));
@@ -1966,6 +1966,9 @@ fn paint_movable_corridor(
 }
 
 /// Renders the opening bracket `[` of a movable corridor with smart inset when coincident with the rollback marker.
+/// How far above its foot's bottom a marker's line ends: inside the cap and the arrowhead, so neither shows the line through its tip.
+pub(crate) const MARKER_FOOT_OVERLAP: f32 = 3.0;
+
 /// The foot of a rollback marker's line: a flat cap, or a down arrowhead when component rows
 /// are out of sight below, so the hidden rows show at the marker and not only in a counter.
 pub(crate) fn marker_foot(line_x: f32, line_bottom: f32, color: egui::Color32, more_below: bool) -> egui::Shape {

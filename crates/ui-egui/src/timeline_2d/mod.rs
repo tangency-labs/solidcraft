@@ -917,6 +917,9 @@ mod tests {
         assert!(arrow.points.contains(&egui::pos2(100.0, 80.0)), "its tip ends the line: {:?}", arrow.points);
         assert!(arrow.points.iter().all(|p| p.y <= 80.0));
         assert!(matches!(canvas::marker_foot(100.0, 80.0, color, false), egui::Shape::Rect(_)), "the flat cap when all rows show");
+        // The line ends inside both feet: below the arrowhead's base and the 4-point cap's top, above their bottom.
+        let base = arrow.points.iter().map(|p| p.y).fold(f32::MAX, f32::min);
+        assert!(80.0 - canvas::MARKER_FOOT_OVERLAP > base && canvas::MARKER_FOOT_OVERLAP > 0.0 && canvas::MARKER_FOOT_OVERLAP < 4.0);
     }
 
     #[test]
