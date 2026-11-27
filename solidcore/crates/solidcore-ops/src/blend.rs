@@ -40,6 +40,7 @@
 use std::collections::{HashMap, HashSet};
 
 use solidcore::blend::band_room::law_fits_band;
+use solidcore::blend::blend_corner::crossing_ends::{plan as crossing_end_plan, CrossingEndPlan};
 use solidcore::blend::blend_corner::rollover::{
     chain_off_seams, concave_chain, concave_chain_ends, has_end_arc, is_concave_chain, seams_back,
     RollOver,
@@ -1335,17 +1336,62 @@ fn separated_end_passes(
     groups.build(k, b, pass_group).map(Some)
 }
 
+/// Chamfers whose Ends meet across an unblended edge, built in the kernel's two passes
+/// ([`solidcore::blend::blend_corner::crossing_ends`]), each the ordinary chamfer pass;
+/// `None` where the kernel plans no passes.
+fn crossing_end_passes(
+    k: &mut Kernel,
+    b: &mut Brep,
+    picked: &[EdgeId],
+    sizes: &[f64],
+    turn: Turn,
+    chamfer_corner: ChamferCorner,
+    contract: Contract,
+) -> solidcore::Result<Option<Result<()>>> {
+    let CrossingEndPlan::Passes(passes) = crossing_end_plan(k, b, picked, sizes)? else {
+        return Ok(None);
+    };
+    let pass_group = |k: &mut Kernel, b: &mut Brep, edges: &[EdgeId], sizes: &[f64]| {
+        let chamfers: Vec<_> = sizes
+            .iter()
+            .map(|&d| ChamferSize::Distances([d, d]))
+            .collect();
+        let p = Pass {
+            edges,
+            section: Section::Chamfer {
+                sizes: &chamfers,
+                along: &[],
+            },
+            law: None,
+            setbacks: &[],
+            earlier: &[],
+            patches: false,
+            overflow: None,
+            turn,
+            chamfer_corner,
+            roll_over: RollOverStep::No,
+            contract,
+        };
+        pass_or_refuse(k, b, p).map(|result| result.map(|_| ()))
+    };
+    passes.build(k, b, pass_group).map(Some)
+}
+
 /// The rounds of [`blend`] when blends of several edges overflow their faces (the first call
-/// stopped in `b`, `edges` its edges, `sizes` theirs, `mitred` the mitred pairs it found): the
-/// blends that overflow on their own (each edge's alone, classified in `b`, where nothing was
-/// built) go first on `fresh` (the untouched input, copied before the first call; a copy keeps
-/// the order, so the edge at index i of `b` is at index i of `fresh`), the asked edges tagged
-/// ([`Picked`]). Each other asked edge is then what is left of it, the edges carrying its tag,
-/// rounded at its size in a second pass that is handed the faces the first made, so it meets
-/// the first rounds as one blend. An asked edge with nothing left is `dropped`. Two rounds
-/// mitred at a face's concave corner go first together. Where none overflows on its own, or
-/// all do, the edges are rounded together as before. Every pass turns as `turn`. The result is
-/// `fresh`, untagged.
+/// stopped in `b`, `edges` its edges, `sizes` theirs, `overflowing` the edges whose blends it
+/// found to overflow, `mitred` the mitred pairs it found): the blends that overflow on their own
+/// (each edge's alone, classified in `b`, where nothing was built) and in the first call go
+/// first on `fresh` (the untouched input, copied before the first call; a copy keeps the order,
+/// so the edge at index i of `b` is at index i of `fresh`), the asked edges tagged ([`Picked`]).
+/// A blend that overflows alone but not with the other asked blends (#22796: a round that
+/// alone runs on past its end into a notch, where with the round of the notch's side edge it
+/// turns the corner) stays with the others: going first, it would be built past its corner
+/// before the round it meets there. Each other asked edge is then what is left of it, the
+/// edges carrying its tag, rounded at its size in a second pass that is handed the faces the
+/// first made, so it meets the first rounds as one blend. An asked edge with nothing left is
+/// `dropped`. Two rounds mitred at a face's concave corner go first together. Where none goes
+/// first, or all do, the edges are rounded together as before. Every pass turns as `turn`. The
+/// result is `fresh`, untagged.
 #[allow(clippy::too_many_arguments)] // the C API's overflow_first
 fn overflow_first(
     k: &mut Kernel,
@@ -1355,6 +1401,7 @@ fn overflow_first(
     sizes: &[f64],
     section: fn(&[f64]) -> Section<'_>,
     turn: Turn,
+    overflowing: &[EdgeId],
     mitred: &[EdgeId],
     dropped: &mut [bool],
     contract: Contract,
@@ -1403,7 +1450,8 @@ fn overflow_first(
             Attribute::application(PICKED_ID, Behavior::Copy, Picked(i)),
         )?;
         if let Some(flag) = goes_first.get_mut(i) {
-            *flag = stopped.overflow.is_some_and(|over| !over.is_empty());
+            *flag =
+                stopped.overflow.is_some_and(|over| !over.is_empty()) && overflowing.contains(&e);
         }
     }
     // a round mitred to one that goes first goes with it, through every mitre
@@ -2021,6 +2069,19 @@ fn blend_on_body(
         Blend::Curvature => |s| Section::Curvature(s),
         Blend::Chord => |s| Section::Chord(s),
         Blend::Chamfer => {
+            // chamfers whose Ends meet across an unblended edge: two passes (#17026)
+            if let Some(made) =
+                crossing_end_passes(k, b, &picked, each, turn, options.chamfer_corner, contract)?
+            {
+                if let Err(e) = made {
+                    return Ok(Err(e));
+                }
+                return Ok(done(k, b, expect, contract)?.map(|()| Blended {
+                    dropped,
+                    holes: Vec::new(),
+                    made: Vec::new(),
+                }));
+            }
             let sizes: Vec<ChamferSize> = each
                 .iter()
                 .map(|&d| ChamferSize::Distances([d, d]))
@@ -2225,6 +2286,7 @@ fn blend_on_body(
             return Ok(Err(Error::Exception));
         };
         let mitred = std::mem::take(&mut stopped.mitred);
+        let overflowing = stopped.overflow.take().unwrap_or_default();
         return match overflow_first(
             k,
             b,
@@ -2233,6 +2295,7 @@ fn blend_on_body(
             each,
             section,
             turn,
+            &overflowing,
             &mitred,
             &mut dropped,
             contract,

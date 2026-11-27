@@ -32,7 +32,11 @@ fn info(focused: bool) -> egui::ViewportInfo {
 /// What eframe does for an immediate viewport: a pass of the shared context with that window's
 /// own input, inside the main window's frame.
 fn install_renderer() {
-    egui::Context::set_immediate_viewport_renderer(|ctx, viewport| {
+    install_renderer_with_output(|_, _| {});
+}
+
+fn install_renderer_with_output(observe: impl Fn(egui::ViewportId, &egui::PlatformOutput) + 'static) {
+    egui::Context::set_immediate_viewport_renderer(move |ctx, viewport| {
         let id = viewport.ids.this;
         assert_eq!(viewport.builder.native_owner, Some(egui::ViewportId::ROOT), "immediate view has the main window as its owner");
         SEEN.with(|seen| {
@@ -62,6 +66,7 @@ fn install_renderer() {
                 }
             });
         });
+        observe(id, &out.platform_output);
         out.textures_delta.clear();
     });
 }
@@ -277,6 +282,84 @@ fn a_right_click_in_the_popped_out_browser_opens_its_menu_in_that_window() {
     frame(&mut h, click(egui::pos2(800.0, 500.0), egui::PointerButton::Primary));
     frame(&mut h, Vec::new());
     assert!(h.app.viewport.context_menu.is_none(), "a click elsewhere closes the menu");
+}
+
+#[test]
+fn a_collapsed_native_assistant_header_opens_an_interactive_export_dialog() {
+    use egui::accesskit::{Action, Role, Toggled};
+    use solidcraft_engine::panels::InstanceId;
+    use std::rc::Rc;
+
+    SEEN.with(|seen| seen.borrow_mut().clear());
+    PENDING.with(|pending| pending.borrow_mut().clear());
+    FOCUSED.with(|focused| *focused.borrow_mut() = None);
+    let mut h = Harness::new();
+    h.ctx.set_embed_viewports(false);
+    h.app.home.open = false;
+    h.app.preferences.language = "en".into();
+    h.app.preferences.ai_features = true;
+    h.app.preferences.agent_chat_popped = false;
+    h.app.agent_chat.open = true;
+    h.app.agent_chat.items.push(crate::agent_chat::Item::Agent { thought: false, text: "A retained conversation".into() });
+    let controls = Rc::new(RefCell::new(HashMap::new()));
+    let capture = controls.clone();
+    let header = "Export conversation as Markdown…";
+    let checkbox = "Include tool details";
+    install_renderer_with_output(move |id, output| {
+        let mut controls = capture.borrow_mut();
+        controls.retain(|(window, _), _| *window != id);
+        for (_, node) in output.accesskit_update.iter().flat_map(|update| &update.nodes) {
+            let label = match (node.role(), node.label()) {
+                (Role::Button, Some(label)) if label == header => header,
+                (Role::CheckBox, Some(label)) if label == checkbox => checkbox,
+                _ => continue,
+            };
+            if let Some(bounds) = node.bounds().filter(|bounds| bounds.x0 < bounds.x1 && bounds.y0 < bounds.y1)
+                && node.supports_action(Action::Click)
+            {
+                let at = egui::pos2(((bounds.x0 + bounds.x1) / 2.0) as f32, ((bounds.y0 + bounds.y1) / 2.0) as f32);
+                controls.insert((id, label), (at, node.toggled()));
+            }
+        }
+    });
+
+    for _ in 0..3 {
+        frame(&mut h, Vec::new());
+    }
+    pop_out(&mut h, "assistant");
+    h.app.run("panel.collapse", json!({"target": {"type": "instance", "id": "assistant"}, "collapsed": true})).unwrap();
+    let layout = h.app.panel_runtime().unwrap().layout().layout();
+    let assistant = InstanceId::new("assistant").unwrap();
+    assert!(layout.containing(&assistant).unwrap().collapsed, "the native header is the only Assistant surface");
+    let windows = SEEN.with(|seen| seen.borrow().clone());
+    let [window] = windows[..] else { panic!("the Assistant has exactly one native viewport: {windows:?}") };
+    FOCUSED.with(|focused| *focused.borrow_mut() = Some(window));
+    frame(&mut h, Vec::new());
+
+    let click_control = |h: &mut Harness, label| {
+        let (at, _) = controls.borrow().get(&(window, label)).copied().expect(label);
+        send(window, click(at, egui::PointerButton::Primary));
+        frame(h, Vec::new());
+        send(window, release(at, egui::PointerButton::Primary));
+        frame(h, Vec::new());
+    };
+    click_control(&mut h, header);
+    for _ in 0..3 {
+        frame(&mut h, Vec::new());
+        assert!(!crate::ui_kit::Container::modal_input_blocked(&h.ctx), "the root viewport did not draw the native Assistant's modal");
+    }
+    let tools_checked = || controls.borrow().get(&(window, checkbox)).and_then(|(_, state)| *state);
+    assert_eq!(tools_checked(), Some(Toggled::False));
+    click_control(&mut h, checkbox);
+    frame(&mut h, Vec::new());
+    assert_eq!(tools_checked(), Some(Toggled::True));
+    assert!(!h.app.file_picker_busy());
+
+    send(window, type_key(egui::Key::Escape, ""));
+    frame(&mut h, Vec::new());
+    frame(&mut h, Vec::new());
+    assert!(!controls.borrow().contains_key(&(window, checkbox)), "Escape closes the modal in its own viewport");
+    assert_eq!(h.app.agent_chat.items.len(), 1);
 }
 
 /// The popped-out Browser's menu closes on a click in another popped-out panel's window, as it
