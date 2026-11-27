@@ -43,6 +43,10 @@ stays editable for retrying. Copying or opening a report does not modify the des
 | Windows | `%LOCALAPPDATA%\SolidCraft\crashes` |
 | macOS | `~/Library/Application Support/SolidCraft/crashes` |
 
+An organization can turn crash reports off with the `AllowCrashReports` policy
+([managed deployment](book/src/guide/managed-deployment.md)): SolidCraft then writes none, and
+reports written before stay in the folder until deleted.
+
 `SOLIDCRAFT_CRASH_DIR` overrides the folder. `solidcraft --crash-log` and
 `solidcraft-cli crashes dir` print it.
 

@@ -84,9 +84,12 @@ pub const LOCKS: &[Lock] = &[
 /// change to the file shows within a second. Locks `theme_follow` and the theme picker.
 pub const THEME_FILE: &str = "ThemeFile";
 
-/// Features that send data outside the organization and that its policy can turn off: the
-/// policy's value name (`REG_DWORD`, 0 turns the feature off, 1 leaves it on) and the feature.
-pub const ALLOWS: &[(&str, &str)] = &[("AllowEasyPrint", "easyprint"), ("AllowProblemReports", "problem_reports")];
+/// Features that send data outside the organization, or keep a copy of a design on the
+/// computer, and that its policy can turn off: the policy's value name (`REG_DWORD`, 0 turns the
+/// feature off, 1 leaves it on) and the feature. The host reads `crash_reports` before it installs
+/// crash capture (`solidcraft_engine::crash`).
+pub const ALLOWS: &[(&str, &str)] =
+    &[("AllowCrashReports", "crash_reports"), ("AllowEasyPrint", "easyprint"), ("AllowProblemReports", "problem_reports")];
 
 /// A preference's value, as a policy sets it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]

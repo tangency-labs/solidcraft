@@ -5,7 +5,7 @@
   Intune's import takes no combo boxes and wants every namespace it references uploaded first, so
   this file uses none of either. The target namespace never changes; a new policy raises revision.
 -->
-<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.6" schemaVersion="1.0">
+<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.7" schemaVersion="1.0">
   <policyNamespaces>
     <target prefix="solidcraft" namespace="TangencyLabs.Policies.SolidCraft" />
   </policyNamespaces>
@@ -194,6 +194,16 @@
       <elements>
         <text id="ThemeFile" valueName="ThemeFile" maxLength="4096" required="true" />
       </elements>
+    </policy>
+    <policy name="AllowCrashReports" class="Both" displayName="$(string.AllowCrashReports)" explainText="$(string.AllowCrashReports_Explain)" presentation="$(presentation.AllowCrashReports)" key="Software\Policies\SolidCraft" valueName="AllowCrashReports">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
     </policy>
     <policy name="AllowEasyPrint" class="Both" displayName="$(string.AllowEasyPrint)" explainText="$(string.AllowEasyPrint_Explain)" presentation="$(presentation.AllowEasyPrint)" key="Software\Policies\SolidCraft" valueName="AllowEasyPrint">
       <parentCategory ref="SolidCraft" />
