@@ -11,8 +11,8 @@ use solidcraft_geom::prelude::*;
 
 use super::{move_vector, occurrence, occurrence_path, translation, valid_position};
 use crate::params::bad;
-use crate::schema::component::{DragResult, DragRotate, DragTurned};
 use crate::schema::Point3;
+use crate::schema::component::{DragResult, DragRotate, DragTurned};
 use crate::{EngineError, Result, Session};
 
 #[cfg(test)]
@@ -178,7 +178,11 @@ pub(super) fn drag(s: &mut Session, p: &Value) -> Result<Value> {
         path,
         moved,
         translate: [t.x, t.y, t.z],
-        rotate: turn.map(|r| DragTurned { origin: [r.origin.0.x, r.origin.0.y, r.origin.0.z], axis: [r.axis.0.x, r.axis.0.y, r.axis.0.z], angle: r.angle }),
+        rotate: turn.map(|r| DragTurned {
+            origin: [r.origin.0.x, r.origin.0.y, r.origin.0.z],
+            axis: [r.axis.0.x, r.axis.0.y, r.axis.0.z],
+            angle: r.angle,
+        }),
         continuous,
         param_warnings: Vec::new(),
     })
@@ -201,6 +205,10 @@ fn rotation(r: &Value, cmd: &str) -> Result<DragRotate> {
     if axis.normalized().is_none() {
         return Err(bad(cmd, "rotate: axis must have a finite nonzero length"));
     }
-    let angle = r.get("angle").and_then(Value::as_f64).filter(|a| a.is_finite()).ok_or_else(|| bad(cmd, "rotate: angle must be a finite number of radians"))?;
+    let angle = r
+        .get("angle")
+        .and_then(Value::as_f64)
+        .filter(|a| a.is_finite())
+        .ok_or_else(|| bad(cmd, "rotate: angle must be a finite number of radians"))?;
     Ok(DragRotate { origin: Point3(origin), axis: Point3(axis), angle })
 }

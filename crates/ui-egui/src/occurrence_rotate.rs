@@ -104,9 +104,7 @@ pub fn track(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
     }
     // Something else took the pointer (a context menu held open, a tool or dialog), or undo was
     // pressed mid-turn and took its step: the turn stops where it is.
-    if !free(app)
-        || t.step.as_ref().is_some_and(|doc| !app.session.undo.last().is_some_and(|step| Arc::ptr_eq(&step.doc, doc)))
-    {
+    if !free(app) || t.step.as_ref().is_some_and(|doc| !app.session.undo.last().is_some_and(|step| Arc::ptr_eq(&step.doc, doc))) {
         end(app);
         return;
     }
