@@ -85,11 +85,7 @@ fn a_picture_keyed_to_another_document_or_picture_is_a_miss() {
 #[test]
 fn digests_are_compared_exactly() {
     let picture = png(512, 384, 1000);
-    let upper = format!(
-        r#"{{"format":"{V2}","app":"0.51.1","document":"{}","payload":"{}"}}"#,
-        hex(DOCUMENT).to_uppercase(),
-        hex(&picture)
-    );
+    let upper = format!(r#"{{"format":"{V2}","app":"0.51.1","document":"{}","payload":"{}"}}"#, hex(DOCUMENT).to_uppercase(), hex(&picture));
     let bytes = zip(&[
         ("container.json", CONTAINER),
         ("document.json", DOCUMENT),
@@ -128,23 +124,15 @@ fn a_missing_or_malformed_key_is_a_miss() {
     assert_eq!(read(&with_key(no_payload.as_bytes())), None);
     let numeric_document = format!(r#"{{"format":"{V2}","document":5,"payload":"{}"}}"#, hex(&picture));
     assert_eq!(read(&with_key(numeric_document.as_bytes())), None);
-    let long_app = format!(
-        r#"{{"format":"{V2}","app":"{}","document":"{}","payload":"{}"}}"#,
-        "x".repeat(5_000),
-        hex(DOCUMENT),
-        hex(&picture)
-    );
+    let long_app = format!(r#"{{"format":"{V2}","app":"{}","document":"{}","payload":"{}"}}"#, "x".repeat(5_000), hex(DOCUMENT), hex(&picture));
     assert_eq!(read(&with_key(long_app.as_bytes())), None);
 }
 
 #[test]
 fn a_missing_or_oversized_document_is_a_miss() {
     let picture = png(512, 384, 1000);
-    let without_document = zip(&[
-        ("container.json", CONTAINER),
-        ("cache/thumbnail.json", &key(V2, DOCUMENT, &picture)),
-        ("cache/thumbnail.png", &picture),
-    ]);
+    let without_document =
+        zip(&[("container.json", CONTAINER), ("cache/thumbnail.json", &key(V2, DOCUMENT, &picture)), ("cache/thumbnail.png", &picture)]);
     assert_eq!(read(&without_document), None);
     let largest = vec![b' '; 16 << 20];
     let at_bound = zip(&[
