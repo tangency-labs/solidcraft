@@ -1149,7 +1149,7 @@ impl Net {
         if self.stations.get().is_none() {
             let [ru, rv] = self.range;
             let (us, vs) = (stations(&self.cn.u, ru), stations(&self.cn.v, rv));
-            let mut points = Vec::with_capacity(us.len().saturating_mul(vs.len()));
+            let mut points = Vec::new();
             for &u in &us {
                 for &v in &vs {
                     if let Some((p, _, _)) = self.at(u, v)? {
