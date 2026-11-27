@@ -193,6 +193,8 @@ fn blend_kinds(body: &Body) -> Vec<&'static str> {
             Surface::Blend { definition } => Some(match definition.as_ref() {
                 BlendDefinition::Procedural(_) => "procedural",
                 BlendDefinition::ExactRound(_) => "exact",
+                BlendDefinition::Offset(_) => "offset",
+                BlendDefinition::BlendOffset(_) => "blend offset",
             }),
             _ => None,
         })

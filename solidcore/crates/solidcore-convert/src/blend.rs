@@ -17,6 +17,21 @@ pub fn blend(d: &r::BlendDefinition) -> kb::FaceDefinition {
         r::BlendDefinition::Procedural(d) => {
             kb::FaceDefinition::Procedural(Box::new(definition(d)))
         }
+        r::BlendDefinition::Offset(o) => {
+            kb::FaceDefinition::Offset(Box::new(kb::OffsetDefinitionRecord {
+                base: surface(&o.base),
+                distance: o.distance,
+                bound: o.bound,
+                map: map(&o.map),
+            }))
+        }
+        r::BlendDefinition::BlendOffset(o) => {
+            kb::FaceDefinition::BlendOffset(Box::new(kb::BlendOffsetRecord {
+                blend: procedural_blend(&o.blend),
+                distance: o.distance,
+                net_bound: o.net_bound,
+            }))
+        }
         r::BlendDefinition::ExactRound(d) => {
             kb::FaceDefinition::ExactRound(Box::new(kb::ExactRoundDefinition {
                 class: class(d.class),
@@ -50,6 +65,23 @@ pub fn record_blend(d: kb::FaceDefinition) -> r::BlendDefinition {
     match d {
         kb::FaceDefinition::Procedural(d) => {
             r::BlendDefinition::Procedural(Box::new(record_definition(*d)))
+        }
+        kb::FaceDefinition::Offset(o) => {
+            let o = *o;
+            r::BlendDefinition::Offset(Box::new(r::OffsetDefinitionRecord {
+                base: record_surface(o.base),
+                distance: o.distance,
+                bound: o.bound,
+                map: record_map(o.map),
+            }))
+        }
+        kb::FaceDefinition::BlendOffset(o) => {
+            let o = *o;
+            r::BlendDefinition::BlendOffset(Box::new(r::BlendOffsetRecord {
+                blend: record_procedural_blend(o.blend),
+                distance: o.distance,
+                net_bound: o.net_bound,
+            }))
         }
         kb::FaceDefinition::ExactRound(d) => {
             let d = *d;
@@ -132,6 +164,36 @@ fn record_definition(d: kb::BlendDefinitionRecord) -> r::BlendDefinitionRecord {
     }
 }
 
+fn procedural_blend(b: &r::ProceduralBlendRecord) -> kb::ProceduralBlendRecord {
+    kb::ProceduralBlendRecord {
+        definition: definition(&b.definition),
+        net: surface(&b.net),
+    }
+}
+
+fn record_procedural_blend(b: kb::ProceduralBlendRecord) -> r::ProceduralBlendRecord {
+    r::ProceduralBlendRecord {
+        definition: record_definition(b.definition),
+        net: record_surface(b.net),
+    }
+}
+
+fn map(m: &r::ParameterMapRecord) -> kb::ParameterMapRecord {
+    kb::ParameterMapRecord {
+        a: m.a,
+        b: m.b,
+        swapped: m.swapped,
+    }
+}
+
+fn record_map(m: kb::ParameterMapRecord) -> r::ParameterMapRecord {
+    r::ParameterMapRecord {
+        a: m.a,
+        b: m.b,
+        swapped: m.swapped,
+    }
+}
+
 fn support(s: &r::SupportRecord) -> kb::SupportRecord {
     match s {
         r::SupportRecord::Nurbs {
@@ -143,12 +205,7 @@ fn support(s: &r::SupportRecord) -> kb::SupportRecord {
             form: surface(form),
             revolution: revolution.as_ref().map(revolution_to_kernel),
         },
-        r::SupportRecord::Blend(b) => {
-            kb::SupportRecord::Blend(Box::new(kb::ProceduralBlendRecord {
-                definition: definition(&b.definition),
-                net: surface(&b.net),
-            }))
-        }
+        r::SupportRecord::Blend(b) => kb::SupportRecord::Blend(Box::new(procedural_blend(b))),
     }
 }
 
@@ -164,11 +221,7 @@ fn record_support(s: kb::SupportRecord) -> r::SupportRecord {
             revolution: revolution.map(record_revolution),
         },
         kb::SupportRecord::Blend(b) => {
-            let b = *b;
-            r::SupportRecord::Blend(Box::new(r::ProceduralBlendRecord {
-                definition: record_definition(b.definition),
-                net: record_surface(b.net),
-            }))
+            r::SupportRecord::Blend(Box::new(record_procedural_blend(*b)))
         }
     }
 }
@@ -520,7 +573,38 @@ mod tests {
             },
             net_kind: r::ExactNetKindRecord::Revolution,
         }));
-        for d in [procedural, exact] {
+        let base = r::NurbsSurfaceRecord {
+            u_degree: 1,
+            v_degree: 1,
+            u_count: 2,
+            v_count: 2,
+            u_knots: vec![0., 0., 1., 1.],
+            v_knots: vec![0., 0., 1., 1.],
+            points: vec![[0., 0., 0.], [0., 1., 0.], [1., 0., 0.], [1., 1., 0.]],
+            weights: None,
+        };
+        let offset = r::BlendDefinition::Offset(Box::new(r::OffsetDefinitionRecord {
+            base: base.clone(),
+            distance: -0.25,
+            bound: 1e-9,
+            map: r::ParameterMapRecord {
+                a: [0.5, 0.],
+                b: [1., -1.],
+                swapped: true,
+            },
+        }));
+        let blend_offset = r::BlendDefinition::BlendOffset(Box::new(r::BlendOffsetRecord {
+            blend: r::ProceduralBlendRecord {
+                definition: match &procedural {
+                    r::BlendDefinition::Procedural(d) => (**d).clone(),
+                    _ => unreachable!("the procedural fixture above is a procedural blend"),
+                },
+                net: base,
+            },
+            distance: 0.5,
+            net_bound: 1e-8,
+        }));
+        for d in [procedural, exact, offset, blend_offset] {
             assert_eq!(record_blend(blend(&d)), d);
         }
     }

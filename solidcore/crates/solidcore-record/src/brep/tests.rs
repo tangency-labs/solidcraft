@@ -1026,3 +1026,283 @@ fn an_older_reader_refuses_a_blend_face_by_name() {
         .to_string();
     assert!(error.contains("unknown variant `blend`"), "{error}");
 }
+
+/// A certified offset sheet's base: a bilinear patch of four points, valid as a record.
+fn an_offset_base() -> blend::NurbsSurfaceRecord {
+    blend::NurbsSurfaceRecord {
+        u_degree: 1,
+        v_degree: 1,
+        u_count: 2,
+        v_count: 2,
+        u_knots: vec![0., 0., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: vec![[0., 0., 0.], [0., 1., 0.], [1., 0., 0.], [1., 1., 0.]],
+        weights: None,
+    }
+}
+
+fn an_offset(distance: f64) -> blend::OffsetDefinitionRecord {
+    blend::OffsetDefinitionRecord {
+        base: an_offset_base(),
+        distance,
+        bound: 1e-7,
+        map: blend::ParameterMapRecord {
+            a: [0., 0.],
+            b: [1., 1.],
+            swapped: false,
+        },
+    }
+}
+
+/// `sheet()` with its face the certified offset of a base, on its net.
+fn offset_sheet(offset: blend::OffsetDefinitionRecord) -> Brep {
+    let mut b = sheet();
+    b.faces[0].surface = Surface::Blend {
+        definition: Box::new(blend::BlendDefinition::Offset(Box::new(offset))),
+    };
+    b.faces[0].nurbs = Some(Surface::Spline {
+        u_knots: vec![-10., -10., 10., 10.],
+        v_knots: vec![-10., -10., 10., 10.],
+        points: vec![
+            vec![[-10., -10., 0.], [-10., 10., 0.]],
+            vec![[10., -10., 0.], [10., 10., 0.]],
+        ],
+    });
+    b
+}
+
+fn a_blend_offset(depth: u32) -> blend::BlendOffsetRecord {
+    blend::BlendOffsetRecord {
+        blend: blend::ProceduralBlendRecord {
+            definition: a_blend(depth),
+            net: blend::NurbsSurfaceRecord {
+                u_degree: 1,
+                v_degree: 1,
+                u_count: 2,
+                v_count: 2,
+                u_knots: vec![0., 0., 1., 1.],
+                v_knots: vec![0., 0., 1., 1.],
+                points: vec![[0., 0., 1.], [0., 1., 1.], [1., 0., 1.], [1., 1., 1.]],
+                weights: None,
+            },
+        },
+        distance: 0.5,
+        net_bound: 1e-7,
+    }
+}
+
+/// `sheet()` with its face the offset of a blend by its definition, on its net.
+fn blend_offset_sheet(offset: blend::BlendOffsetRecord) -> Brep {
+    let mut b = sheet();
+    b.faces[0].surface = Surface::Blend {
+        definition: Box::new(blend::BlendDefinition::BlendOffset(Box::new(offset))),
+    };
+    b.faces[0].nurbs = Some(Surface::Spline {
+        u_knots: vec![-10., -10., 10., 10.],
+        v_knots: vec![-10., -10., 10., 10.],
+        points: vec![
+            vec![[-10., -10., 0.], [-10., 10., 0.]],
+            vec![[10., -10., 0.], [10., 10., 0.]],
+        ],
+    });
+    b
+}
+
+/// The items a face's surface holds, as the record's budget counts them.
+fn items_of(s: &Surface) -> usize {
+    let mut budget = Budget::input();
+    check_surface(s, &mut budget).unwrap_or_else(|e| panic!("{e}"));
+    budget.used
+}
+
+/// A certified offset sheet is a version-5 face: it validates and round-trips number for
+/// number, its base counted against the item budget; without its net it is refused.
+#[test]
+fn an_offset_face_validates_and_round_trips() {
+    let b = offset_sheet(an_offset(0.5));
+    assert_eq!(b.version, VERSION);
+    b.validate().unwrap_or_else(|e| panic!("{e}"));
+    let text = serde_json::to_string(&b).unwrap();
+    assert!(text.contains(r#""offset""#), "{text}");
+    assert!(text.contains(r#""bound""#), "{text}");
+    let back: Brep = serde_json::from_str(&text).unwrap();
+    assert_eq!(back, b);
+    assert!(items_of(&b.faces[0].surface) >= an_offset_base().items());
+    let mut bare = b;
+    bare.faces[0].nurbs = None;
+    assert!(bare.validate().is_err(), "an offset without its net");
+}
+
+/// An offset of a blend by its definition is a version-5 face: it validates and round-trips
+/// number for number, its blend's definition and net counted against the item budget.
+#[test]
+fn a_blend_offset_face_validates_and_round_trips() {
+    let b = blend_offset_sheet(a_blend_offset(3));
+    assert_eq!(b.version, VERSION);
+    b.validate().unwrap_or_else(|e| panic!("{e}"));
+    let text = serde_json::to_string(&b).unwrap();
+    assert!(text.contains(r#""blend_offset""#), "{text}");
+    assert!(text.contains(r#""net_bound""#), "{text}");
+    let back: Brep = serde_json::from_str(&text).unwrap();
+    assert_eq!(back, b);
+    assert!(items_of(&b.faces[0].surface) >= a_blend_offset(3).blend.net.items());
+    let mut bare = b;
+    bare.faces[0].nurbs = None;
+    assert!(bare.validate().is_err(), "an offset without its net");
+}
+
+/// A version-4 record carrying an offset face, or an offset of a blend, is refused by name:
+/// neither is a version-4 record, and it is never read as one.
+#[test]
+fn a_version_4_record_with_an_offset_is_refused() {
+    let mut b = offset_sheet(an_offset(0.5));
+    b.version = 4;
+    let error = b.validate().unwrap_err().to_string();
+    assert!(
+        error.contains("an offset needs record version 5"),
+        "{error}"
+    );
+    let mut blend = blend_offset_sheet(a_blend_offset(1));
+    blend.version = 4;
+    let error = blend.validate().unwrap_err().to_string();
+    assert!(
+        error.contains("an offset of a blend by its definition needs record version 5"),
+        "{error}"
+    );
+}
+
+/// Each malformed piece of an offset is refused, by name: the distance, the bound, the map,
+/// the base's counts, and the blend offset's distance, bound, nesting and net.
+#[test]
+fn a_malformed_offset_is_refused_typed() {
+    let cases: Vec<(&str, &str, blend::OffsetDefinitionRecord)> = vec![
+        (
+            "NaN distance",
+            "a definition's numbers are finite",
+            an_offset(f64::NAN),
+        ),
+        ("NaN bound", "a definition's numbers are finite", {
+            let mut o = an_offset(0.5);
+            o.bound = f64::NAN;
+            o
+        }),
+        ("infinite bound", "a definition's numbers are finite", {
+            let mut o = an_offset(0.5);
+            o.bound = f64::INFINITY;
+            o
+        }),
+        ("NaN map entry", "a definition's numbers are finite", {
+            let mut o = an_offset(0.5);
+            o.map.a[1] = f64::NAN;
+            o
+        }),
+        ("base counts", "a surface has u_count * v_count points", {
+            let mut o = an_offset(0.5);
+            o.base.u_count = 3;
+            o
+        }),
+    ];
+    for (name, reason, offset) in cases {
+        let error = offset_sheet(offset).validate().expect_err(name).to_string();
+        assert!(error.contains(reason), "{name}: {error}");
+    }
+    let blend_cases: Vec<(&str, &str, blend::BlendOffsetRecord)> = vec![
+        (
+            "NaN distance",
+            "an offset's distance is finite and not zero",
+            {
+                let mut o = a_blend_offset(1);
+                o.distance = f64::NAN;
+                o
+            },
+        ),
+        (
+            "zero distance",
+            "an offset's distance is finite and not zero",
+            {
+                let mut o = a_blend_offset(1);
+                o.distance = 0.0;
+                o
+            },
+        ),
+        ("negative bound", "a bound is finite and not negative", {
+            let mut o = a_blend_offset(1);
+            o.net_bound = -1e-9;
+            o
+        }),
+        (
+            "too deep",
+            "blends nest at most 3 definitions deep",
+            a_blend_offset(4),
+        ),
+        ("net counts", "a surface has u_count * v_count points", {
+            let mut o = a_blend_offset(1);
+            o.blend.net.u_count = 3;
+            o
+        }),
+    ];
+    for (name, reason, offset) in blend_cases {
+        let error = blend_offset_sheet(offset)
+            .validate()
+            .expect_err(name)
+            .to_string();
+        assert!(error.contains(reason), "{name}: {error}");
+    }
+}
+
+/// Version 5 is the record's; version 4 reads as it always did (5 adds the two offset
+/// definitions and nothing else): a committed version-4 record reads, validates and writes
+/// back exactly as it was, and as a version-5 record it reads the same. Versions before 4 and
+/// after 5 are refused.
+#[test]
+fn a_version_4_record_reads_exactly_as_before() {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../solidcore-ops/tests/data/gear_tooth.record.json"
+    );
+    let text = std::fs::read_to_string(path).unwrap();
+    let file: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let b: Brep = serde_json::from_str(&text).unwrap();
+    assert_eq!(b.version, 4);
+    b.validate().unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(serde_json::to_value(&b).unwrap(), file);
+    let mut current = b.clone();
+    current.version = VERSION;
+    current
+        .validate()
+        .unwrap_or_else(|e| panic!("version {VERSION}: {e}"));
+    assert_eq!(VERSION, 5);
+    assert_eq!(OLDEST_VERSION, 4);
+    for version in [3, 6] {
+        let mut other = b.clone();
+        other.version = version;
+        assert_eq!(
+            other.validate().unwrap_err().0,
+            "unsupported version",
+            "version {version}"
+        );
+    }
+}
+
+/// A reader from before version 5 refuses an offset by name rather than misreading it: its
+/// definitions are a closed set, and an unknown one is an error.
+#[test]
+fn an_older_reader_refuses_an_offset_by_name() {
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    #[allow(dead_code)]
+    enum OlderDefinition {
+        Procedural(serde_json::Value),
+        ExactRound(serde_json::Value),
+    }
+    let offset = blend::BlendDefinition::Offset(Box::new(an_offset(0.5)));
+    let error = serde_json::from_value::<OlderDefinition>(serde_json::to_value(offset).unwrap())
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("unknown variant `offset`"), "{error}");
+    let offset = blend::BlendDefinition::BlendOffset(Box::new(a_blend_offset(1)));
+    let error = serde_json::from_value::<OlderDefinition>(serde_json::to_value(offset).unwrap())
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("unknown variant `blend_offset`"), "{error}");
+}

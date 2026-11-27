@@ -12,7 +12,8 @@ mod binary;
 
 // 01/02 were development-only prototypes; independent metadata records start at 03; 04 stores
 // procedural intersections and placed revolutions exactly, and the measured runtime values; 05
-// nests geometry schema 4 (regions, unbounded geometry, pcurves, canonical order).
+// nests geometry schema 4 or 5 (regions, unbounded geometry, pcurves, canonical order; the
+// record carries its own version, and 5 adds the offset definitions).
 /// The file's first eight bytes.
 pub const MAGIC: &[u8; 8] = b"SCBREP05";
 // A body's own limits. A design's cache holds many bodies within the container's budgets, and

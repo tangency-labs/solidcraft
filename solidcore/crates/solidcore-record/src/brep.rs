@@ -19,7 +19,15 @@ pub mod part;
 mod topology;
 pub use curve2::Curve2;
 
-pub const VERSION: u32 = 4;
+/// The record's version, written by this crate. Version 5 adds the offset definitions
+/// ([`blend::BlendDefinition::Offset`] and [`blend::BlendDefinition::BlendOffset`]); a version-4
+/// reader refuses a version-5 record by its version, and a version-5 reader reads version 4 as
+/// it always did.
+pub const VERSION: u32 = 5;
+/// The oldest version this crate reads.
+pub const OLDEST_VERSION: u32 = 4;
+/// The first version that carries an offset definition.
+const OFFSET_VERSION: u32 = 5;
 /// The most items (records, points, knots, uses) [`Brep::validate`] takes in a record that comes
 /// from outside the kernel: a file, the control channel, pasted data. A record the kernel built
 /// ([`Brep::validate_built`]) has no such cap.
@@ -306,7 +314,8 @@ pub enum Surface {
     /// class's ([`blend::BlendDefinition`]). It has no (u, v) of its own: the face's `nurbs` is
     /// its net B, certified within the definition's bound of S (an exact round's net is S), and
     /// the face's (u, v) are the net's. The kernel rebuilds the definition and certifies the net
-    /// again before the face is an operand.
+    /// again before the face is an operand. An offset sheet (a definition of `S + d n`) and an
+    /// offset of a blend by its definition are blends too.
     Blend {
         definition: Box<blend::BlendDefinition>,
     },
@@ -782,7 +791,10 @@ impl Brep {
     }
 
     fn validate_within(&self, mut budget: Budget) -> Result<()> {
-        require(self.version == VERSION, "unsupported version")?;
+        require(
+            (OLDEST_VERSION..=VERSION).contains(&self.version),
+            "unsupported version",
+        )?;
         tolerance(self.tolerance)?;
         require(
             !self.shells.is_empty() && self.shells.len() <= MAX_SHELLS,
@@ -830,6 +842,18 @@ impl Brep {
             budget.add(e.uses.len())?;
         }
         for f in &self.faces {
+            require(
+                self.version >= OFFSET_VERSION
+                    || !matches!(&f.surface, Surface::Blend { definition }
+                        if matches!(definition.as_ref(), blend::BlendDefinition::Offset(_))),
+                "an offset needs record version 5",
+            )?;
+            require(
+                self.version >= OFFSET_VERSION
+                    || !matches!(&f.surface, Surface::Blend { definition }
+                        if matches!(definition.as_ref(), blend::BlendDefinition::BlendOffset(_))),
+                "an offset of a blend by its definition needs record version 5",
+            )?;
             if f.nurbs.is_some() {
                 face_label(&f.surface, &mut budget)?;
             } else {

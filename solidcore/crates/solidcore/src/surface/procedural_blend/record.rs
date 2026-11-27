@@ -718,6 +718,87 @@ pub enum FaceDefinition {
     Procedural(Box<BlendDefinitionRecord>),
     /// A round of an exact class's definition.
     ExactRound(Box<ExactRoundDefinition>),
+    /// A certified offset sheet's definition `S + d n` (record version 5).
+    Offset(Box<OffsetDefinitionRecord>),
+    /// An offset of a procedural blend by its definition (record version 5).
+    BlendOffset(Box<BlendOffsetRecord>),
+}
+
+/// The definition a certified offset sheet keeps: its base `S`, the signed distance `d` along
+/// the base's normal, the bound its net is certified within of `S + d n`, and the map from the
+/// net's parameters to the base's. Its record is `solidcore-record`'s
+/// `brep::blend::OffsetDefinitionRecord`, field for field.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OffsetDefinitionRecord {
+    /// The base S, as stored.
+    pub base: NurbsSurfaceRecord,
+    /// The signed distance d along the base's normal.
+    pub distance: f64,
+    /// The certified bound of the net from `S + d n` at the same parameters.
+    pub bound: f64,
+    /// The map from the net's (u, v) to the base's.
+    pub map: ParameterMapRecord,
+}
+
+impl OffsetDefinitionRecord {
+    /// The structural check: the base as its own check, and the distance, bound and map finite.
+    ///
+    /// # Errors
+    ///
+    /// The first [`RecordError`] met.
+    pub fn validate(&self) -> Result<(), RecordError> {
+        self.base.validate("offset.base")?;
+        let numbers = [
+            self.distance,
+            self.bound,
+            self.map.a[0],
+            self.map.a[1],
+            self.map.b[0],
+            self.map.b[1],
+        ];
+        if !all_finite(&numbers) {
+            return Err(refuse("offset", "a definition's numbers are finite"));
+        }
+        Ok(())
+    }
+}
+
+/// An offset of a procedural blend by its definition: the blend kept whole, the signed distance
+/// along its definition's normal, and the bound its net is certified within. Its record is
+/// `solidcore-record`'s `brep::blend::BlendOffsetRecord`, field for field.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BlendOffsetRecord {
+    /// The blend whose definition is offset: its definition S and its net B.
+    pub blend: ProceduralBlendRecord,
+    /// The signed distance d along S's normal.
+    pub distance: f64,
+    /// The bound G is certified within of `B + d n_B`, proved again on read.
+    pub net_bound: f64,
+}
+
+impl BlendOffsetRecord {
+    /// The structural check: the blend, the distance finite and not zero, the bound finite and
+    /// not negative.
+    ///
+    /// # Errors
+    ///
+    /// The first [`RecordError`] met.
+    pub fn validate(&self) -> Result<(), RecordError> {
+        self.blend.validate()?;
+        if !(self.distance.is_finite() && self.distance != 0.0) {
+            return Err(refuse(
+                "blend_offset.distance",
+                "an offset's distance is finite and not zero",
+            ));
+        }
+        if !(self.net_bound.is_finite() && self.net_bound >= 0.0) {
+            return Err(refuse(
+                "blend_offset.net_bound",
+                "a bound is finite and not negative",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// An [`ExactRoundRecord`] without its net's form, which is the face's surface: the definition

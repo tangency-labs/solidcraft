@@ -916,6 +916,18 @@ pub fn definition_surface(
             };
             proved.map(|()| made)
         }
+        FaceDefinition::Offset(_) => {
+            return Err(SolidError::Unsupported {
+                operation: OP_ADOPT,
+                reason: "an offset sheet's definition is not rebuilt yet",
+            });
+        }
+        FaceDefinition::BlendOffset(_) => {
+            return Err(SolidError::Unsupported {
+                operation: OP_ADOPT,
+                reason: "an offset of a blend by its definition needs the first-order certificate, which this kernel does not have",
+            });
+        }
     })
 }
 
