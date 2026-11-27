@@ -1115,7 +1115,7 @@ fn enclose_edge_trim_gap(
             return None;
         }
         let overhang = round_up((lo - iv.lo).max(0.0).max((iv.hi - hi).max(0.0)));
-        let c = Ivl::new(iv.lo.clamp(lo, hi), iv.hi.clamp(lo, hi));
+        let c = Ivl::new(iv.lo.max(lo).min(hi), iv.hi.min(hi).max(lo));
         Some((c, overhang))
     };
 
