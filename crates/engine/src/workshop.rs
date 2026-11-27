@@ -58,7 +58,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    pub const ALL: [Kind; 3] = [Kind::Plugin, Kind::Model, Kind::Part];
+    pub const ALL: &[Kind] = &[Kind::Plugin, Kind::Model, Kind::Part];
 
     pub fn id(self) -> &'static str {
         match self {
@@ -79,10 +79,6 @@ pub enum Tier {
     Community,
     /// Listed after machine checks only (also any tier this SolidCraft doesn't know).
     Unverified,
-}
-
-impl Tier {
-    pub const ALL: [Tier; 3] = [Tier::Official, Tier::Community, Tier::Unverified];
 }
 
 /// One listed item.
