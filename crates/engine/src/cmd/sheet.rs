@@ -209,6 +209,8 @@ pub static COMMANDS: &[CommandSpec] = &[
          tear removes nothing and cuts the flat pattern along the bend's end); \
          angle_display?: bend|included (how the DXF bend notes read the bend angles: the bend angle, default, or the included angle \
          left between the bend's sides, 180° less it; the bend table gives both, and a flange's `angle` is always the bend angle); \
+         unfold_method?: k_factor|deduction|allowance (where the bends' K-factor comes from: k_factor, default, or worked out from \
+         unfold_value, a press brake chart's 90° bend deduction or allowance for this thickness and radius); unfold_value? (length expression); \
          active?: bool; delete?: bool; material?: text (the material the rule is for, a label saved with it); \
          gauge?: with material, a gauge (16 ga) or metric thickness (1.5 mm) of the standard library (sheet.rule_library): the rule takes its thickness and keeps its own bend radius; \
          its K-factor is the bend model's estimate at the rule's R/T for bend_method?: air|bottoming|coining (default air), said in notes, \
@@ -477,8 +479,19 @@ fn rule_param(s: &Session, p: &Value, cmd: &str) -> Result<Option<String>> {
 
 /// Sheet values a flange takes from its rule. Passing one to `sheet.flange` is refused rather
 /// than ignored, so a script never gets a part of another thickness than it asked for.
-const RULE_ONLY: [&str; 9] =
-    ["thickness", "k_factor", "bend_radius", "relief_width", "relief_depth", "corner_relief", "corner_relief_shape", "bend_relief_shape", "hem_gap"];
+const RULE_ONLY: &[&str] = &[
+    "thickness",
+    "k_factor",
+    "bend_radius",
+    "relief_width",
+    "relief_depth",
+    "corner_relief",
+    "corner_relief_shape",
+    "bend_relief_shape",
+    "hem_gap",
+    "unfold_method",
+    "unfold_value",
+];
 
 /// The rule values an edge flange may set for itself: the corner relief and the bend relief's shape.
 const EDGE_RELIEF: [&str; 3] = ["corner_relief", "corner_relief_shape", "bend_relief_shape"];
@@ -1290,10 +1303,29 @@ fn rules(s: &mut Session, p: &Value) -> Result<Value> {
             *slot = e.into();
         }
     }
+    let unfold_given = p.get("unfold_method").filter(|v| !v.is_null());
+    if let Some(method) = unfold_given {
+        let method = method.as_str().and_then(sheet::UnfoldMethod::parse);
+        rule.unfold_method = method.ok_or_else(|| bad(cmd, "`unfold_method` must be k_factor, deduction or allowance"))?.name().into();
+    }
     let mut notes = Vec::new();
     if let Some(entry) = picked {
+        // A library pick gives the rule a new thickness, and a 90° bend deduction or allowance is a
+        // chart's value for one thickness: the rule goes back to its K-factor (the pick's), unless
+        // the call says how it unfolds (#6794).
+        let by_chart = sheet::UnfoldMethod::parse(&rule.unfold_method).is_some_and(|m| m != sheet::UnfoldMethod::KFactor);
+        if by_chart && unfold_given.is_none() && expr(p, "unfold_value").is_none() {
+            rule.unfold_method = sheet::UnfoldMethod::KFactor.name().into();
+            rule.unfold_value.clear();
+            notes.push("the rule now unfolds from its K-factor: its 90° bend deduction or allowance was for the thickness it had".to_string());
+        }
         let (vals, _) = s.doc.param_values();
         library_k_and_radius(s, cmd, p, entry, &vals, &mut rule, &mut notes)?;
+    }
+    // A rule that unfolds from its K-factor keeps no 90° value: it saves as a rule did before the
+    // setting existed, and a later switch to a chart method starts from the K-factor it has then.
+    if sheet::UnfoldMethod::parse(&rule.unfold_method) == Some(sheet::UnfoldMethod::KFactor) {
+        rule.unfold_value.clear();
     }
     if let Some(shape) = p.get("corner_relief_shape").filter(|v| !v.is_null()) {
         let shape = shape.as_str().and_then(solidcraft_doc::sheet::ReliefShape::parse);
@@ -1353,8 +1385,11 @@ fn library_k_and_radius(
         Some(m) => library::BendMethod::parse(m).ok_or_else(|| bad(cmd, "`bend_method` must be air, bottoming or coining"))?,
     };
     let v = s.doc.rule_values(vals, rule).map_err(|e| bad(cmd, e.to_string()))?;
+    // No estimate for a rule that unfolds from a 90° bend deduction or allowance: its K-factor is
+    // that value's, not the rule's `k_factor`.
     if expr(p, "k_factor").is_none()
         && !entry.given.k_factor
+        && sheet::UnfoldMethod::parse(&rule.unfold_method) == Some(sheet::UnfoldMethod::KFactor)
         && let Some(hardness) = entry.hardness
     {
         let r_over_t = v.bend_radius / v.thickness;

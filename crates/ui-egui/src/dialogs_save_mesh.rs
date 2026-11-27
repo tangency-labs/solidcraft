@@ -770,7 +770,7 @@ fn save(app: &mut SolveApp, mut params: Value, path: &str) {
 
 /// The status line after a save or a send.
 fn report(app: &mut SolveApp, result: &Value) {
-    let path = result.get("path").and_then(Value::as_str).unwrap_or_default();
+    let path = crate::display_user_path(result.get("path").and_then(Value::as_str).unwrap_or_default());
     let skipped = result.get("skipped").and_then(Value::as_array).map_or(Vec::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>());
     // Bodies left out of the file: said plainly, naming each one, in a warning that stays until it is dismissed.
     let skipped_suffix = if skipped.is_empty() {

@@ -238,7 +238,7 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
             drag = Some(Drag::Marker);
         }
         if resp.hovered() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
         }
         crate::history_marker(&p, mr, false, bar.accent);
         resp.backing_on_hover_text(bar.marker_tip);
@@ -246,9 +246,10 @@ fn lay_out(ui: &mut egui::Ui, bar: Bar, rect: Rect, contents: &mut dyn Contents)
     let content_end = contents.trailing(ui, &p, end, rect).max(end);
     // The scroll range follows the drawn content (the chips don't take layout space themselves).
     ui.allocate_exact_size(vec2((content_end - origin).max(0.0), rect.height()), Sense::hover());
-    // Drag feedback, and the drop.
-    if drag.is_some() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+    // Drag feedback, and the drop. The marker moves left and right, so it keeps its arrows;
+    // dragged steps show the closed hand.
+    if let Some(active) = &drag {
+        ui.ctx().set_cursor_icon(if matches!(active, Drag::Marker) { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::Grabbing });
     }
     // At the marker's slot, which side of the marker the pointer is on: before it, a dropped
     // step stays in the model; after it, the step is rolled back.
