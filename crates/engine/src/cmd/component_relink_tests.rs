@@ -3122,7 +3122,7 @@ fn hole_on_linked_qualified_face_survives_relink_when_distant_cut_deleted() {
         let asm_cut_id = run(
             &mut s,
             "solid.box",
-            json!({"corner": [90, -2, 12], "length": 10, "width": 44, "height": 10, "operation": "cut", "name": "AssemblyCut"}),
+            json!({"corner": [90, -2, 12], "length": 10, "width": 44, "height": 10, "operation": "cut", "targets": ["Beam"], "name": "AssemblyCut"}),
         )["feature"]
             .as_u64()
             .unwrap();
