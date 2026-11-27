@@ -2,7 +2,7 @@
   "en": {
     "ui.palette_sketch_open_view": "When opening an existing sketch",
     "ui.palette_sketch_open_view_note": "Remember a sketch's last camera view within its open design. New sketches use the normal view. The remembered view is not stored in the design file.",
-    "ui.palette_sketch_open_view.face": "Current behaviour",
+    "ui.palette_sketch_open_view.face": "Current behavior",
     "ui.palette_sketch_open_view.last": "Last view, including Cancel",
     "ui.palette_sketch_open_view.last_finished": "Last view from Finish only"
   },
