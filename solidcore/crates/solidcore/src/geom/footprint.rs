@@ -192,6 +192,29 @@ mod tests {
     }
 
     #[test]
+    fn a_crossing_split_by_a_sample_inside_a_thin_profile_still_runs_inside() {
+        assert!(path_runs_inside(
+            &[[-1.0, 0.0], [0.0, 0.0], [1.0, 0.0]],
+            &[thin()],
+            MARGIN
+        ));
+    }
+
+    #[test]
+    fn a_crossing_split_by_the_seam_of_a_closed_path_still_runs_inside() {
+        // The only crossing of the thin profile is the bottom side, at the seam (0, 0).
+        let closed = [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 5.0],
+            [-1.0, 5.0],
+            [-1.0, 0.0],
+            [0.0, 0.0],
+        ];
+        assert!(path_runs_inside(&closed, &[thin()], MARGIN));
+    }
+
+    #[test]
     fn a_path_that_starts_or_ends_inside_a_thin_profile_does_not_cross_it() {
         assert!(!path_runs_inside(
             &[[0.0, 0.0], [1.0, 0.0]],
