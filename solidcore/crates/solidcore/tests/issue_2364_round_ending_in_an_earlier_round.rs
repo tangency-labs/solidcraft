@@ -44,12 +44,10 @@ const BACK_TOP: Point3 = Point3::new(30.0, 0.0, 10.0);
 /// A point on the upright at the knife-edge tip.
 const TIP: Point3 = Point3::new(W + 21.0, 0.0, 5.0);
 
-/// SolidCraft's rig set: every fix but those it leaves off.
+/// SolidCraft's rig set: every fix.
 fn kernel() -> Kernel {
-    let mut f = UpstreamFixes::all();
-    f.fillet_refuse_rounds_breaking_through = false;
     Kernel {
-        fixes: f,
+        fixes: UpstreamFixes::all(),
         ..Kernel::default()
     }
 }

@@ -1,0 +1,23 @@
+{
+  "en": {
+    "prefs.export_name.source": "Name of the file it was imported from (else the design's)"
+  },
+  "ar": {
+    "prefs.export_name.source": "اسم الملف الذي استُورد منه (وإلا فاسم التصميم)"
+  },
+  "de": {
+    "prefs.export_name.source": "Name der Datei, aus der importiert wurde (sonst der des Designs)"
+  },
+  "he": {
+    "prefs.export_name.source": "שם הקובץ שממנו יובא (אחרת שם התכן)"
+  },
+  "ja": {
+    "prefs.export_name.source": "インポート元のファイル名（なければデザイン名）"
+  },
+  "vi": {
+    "prefs.export_name.source": "Tên tệp đã nhập vào (nếu không có thì tên thiết kế)"
+  },
+  "zh": {
+    "prefs.export_name.source": "导入来源的文件名（否则为设计名称）"
+  }
+}

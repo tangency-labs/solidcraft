@@ -1578,6 +1578,7 @@ fn rust_record(k: &mut Kernel, i: &Inputs, built: Option<Brep>) -> Record {
                 o.push(s);
                 made += r.as_ref().map_or(0, |(f, _)| f.len());
             }
+            crate::trim_hook::observe(&mut dest);
             o.push(made as f64);
             o.extend(brep_counts(&dest));
             // The whole destination graph after every copy (CopyFaces resets the new-face

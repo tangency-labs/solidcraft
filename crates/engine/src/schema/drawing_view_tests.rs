@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::drawing::view::ViewPlace;
 use solidcraft_doc::drawing_view::ViewSettings;
 
-use super::{BaseParams, CopyParams, EditParams, InspectParams, MoveParams, PlaceParam, ProjectedParams, SnapshotParams, ViewSet};
+use super::{BaseParams, CopyParams, EditParams, InspectParams, MoveParams, PlaceParam, ProjectedParams, ScaleParam, SnapshotParams, ViewSet};
 use crate::schema::input_schema_for;
 use crate::schema::tests::{assert_keys, assert_strict_keeps_todays_errors, conforms};
 
@@ -12,6 +12,7 @@ fn schemas_and_the_key_check_agree() {
         "chord_mm",
         "decimals",
         "hide",
+        "hide_bodies",
         "max_error_mm",
         "measure",
         "position_mm",
@@ -32,6 +33,7 @@ fn schemas_and_the_key_check_agree() {
         "configuration",
         "exploded",
         "hide",
+        "hide_bodies",
         "pose",
         "position_mm",
         "reference_hides_model",
@@ -65,6 +67,7 @@ fn the_edit_contract_lists_a_saved_views_settings() {
         tangent_edges: Some(Default::default()),
         occurrences: Some(Vec::new().into()),
         hide: Some(Vec::new().into()),
+        hide_bodies: Some(Vec::new().into()),
         line_group: Some(Default::default()),
         exploded: Some(Default::default()),
         pose: Some(Default::default()),
@@ -91,7 +94,10 @@ fn the_contract_lists_the_view_settings() {
     let mut theirs: Vec<String> = settings.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
     // Beside a view's settings, the request's own: where it goes, its page, its lines' chord and
     // accuracy check, whether it wants the paper scene, what it draws, and what it reads.
-    theirs.extend(["position_mm", "sheet", "chord_mm", "max_error_mm", "scene", "source", "hide", "measure", "units", "decimals"].map(String::from));
+    theirs.extend(
+        ["position_mm", "sheet", "chord_mm", "max_error_mm", "scene", "source", "hide", "hide_bodies", "measure", "units", "decimals"]
+            .map(String::from),
+    );
     theirs.sort();
     let schema = input_schema_for::<SnapshotParams>();
     let mut ours: Vec<String> = schema.as_value()["properties"].as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
@@ -137,6 +143,18 @@ fn a_place_reads_and_writes_as_the_record_and_its_schema_says_so() {
         assert!(serde_json::from_value::<PlaceParam>(bad.clone()).is_err(), "{bad}");
         assert_eq!(fitting(&bad), Vec::<Value>::new(), "{bad}");
     }
+}
+
+/// A scale's text pattern allows what `Scale` reads: the whitespace `trim` removes, round each
+/// number. `conforms` doesn't read patterns, so the pattern's text is pinned here, next to the
+/// reader's answer.
+#[test]
+fn the_scale_pattern_allows_what_the_parser_trims() {
+    let read = |text: &str| serde_json::from_value::<ScaleParam>(json!(text)).ok();
+    assert_eq!(read(" 1 :\t2\u{a0}"), read("1:2"));
+    let ws = crate::schema::types::whitespace_class();
+    let pattern = format!("^[{ws}]*[0-9]+(\\.[0-9]+)?[{ws}]*:[{ws}]*[0-9]+(\\.[0-9]+)?[{ws}]*$");
+    assert_eq!(schemars::schema_for!(ScaleParam).as_value()["pattern"], json!(pattern));
 }
 
 #[test]

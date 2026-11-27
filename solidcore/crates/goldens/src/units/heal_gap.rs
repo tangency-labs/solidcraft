@@ -947,10 +947,7 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
             let r = if *mode == 0 {
                 f.max_gap_sample(&k, *stop).map(|_| ())
             } else {
-                match f.build_sample_set(&k, *stop) {
-                    Err(e) if e.is_unported() => Err(e),
-                    _ => Ok(()),
-                }
+                f.build_sample_set(&k, *stop)
             };
             match r {
                 Ok(()) => o.push(0.0),
@@ -1587,6 +1584,36 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn both_gap_sample_modes_report_a_zero_sample_count() {
+        for mode in [0, 1] {
+            let input = Inputs::Gf {
+                gf: GfIn {
+                    tol: 1.0,
+                    this: ThisIn::Curve {
+                        curve: CurveIn::Line {
+                            p: [0.0, 0.0, 0.0],
+                            v: [1.0, 0.0, 0.0],
+                            domain: [0.0, 1.0],
+                            scale: 1.0,
+                            inside_out: false,
+                        },
+                        ivl: [0.0, 1.0],
+                    },
+                    other: OtherIn::Point([0.0, 0.0, 0.0]),
+                    cnt_u: 0,
+                    cnt_v: 1,
+                },
+                set_cnt: None,
+                set_tol: None,
+                stop: false,
+                mode,
+            };
+            let error = run_rust(&input).unwrap_err().to_string();
+            assert!(error.contains("zero sample count"), "mode {mode}: {error}");
+        }
+    }
 
     /// HANG-29: fuzz14876, a topology op on a face whose B-spline surface has a control
     /// point of `-1e300` (no native result in 60 s). The block contract refuses it through

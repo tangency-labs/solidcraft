@@ -94,6 +94,7 @@
 //!   [`Brep::refresh_cached_topology`]; nothing else changes.
 
 use crate::boolean::merge::MergeOptions;
+use crate::error::boolean::BooleanStage;
 use crate::error::{Result, SolidError};
 use crate::geom::a_object::BooleanOperation;
 use crate::kernel::Kernel;
@@ -317,6 +318,13 @@ fn copy_pairs(
 ///   of the NURBs over the two intervals, which need not be equal (two edges computed apart
 ///   end at parameters that differ in the last bits, #11652). Rational and 2D NURBs, and
 ///   intervals that share no more than a point, have no bound.
+/// - An ellipse and a B-spline or another ellipse (#21801): their NURBs (the ellipse's rational
+///   quadratic one) over the two intervals, bounded through the circle of the (first)
+///   ellipse's center, axes and X radius
+///   ([`hausdorff_about_circle`](crate::nurbs::circle_deviation::hausdorff_about_circle)),
+///   whatever their parameterisations: a circular arc and a curve computed along it (an
+///   intersection's section curve) are parameterised apart. A pair not running along that
+///   circle, or turning half of it or more, has no bound.
 /// - Every other pair: no bound.
 pub(crate) fn coincidence_bound(
     a: &crate::curve::curve::p2::Curve,
@@ -344,8 +352,36 @@ pub(crate) fn coincidence_bound(
             let (na, nb) = (ca.nurb_ref().ok()?, cb.nurb_ref().ok()?);
             certified_hausdorff(na, [ia.min(), ia.max()], nb, [ib.min(), ib.max()]).ok()
         }
+        (CurveKind::Ellipse(e), CurveKind::BSpline(cb)) => about_circle(e, e.base(), ia, cb, ib),
+        (CurveKind::BSpline(ca), CurveKind::Ellipse(e)) => about_circle(e, ca, ia, e.base(), ib),
+        (CurveKind::Ellipse(e), CurveKind::Ellipse(f)) => {
+            about_circle(e, e.base(), ia, f.base(), ib)
+        }
         _ => None,
     }
+}
+
+/// [`coincidence_bound`] of the NURBs `a` over `ia` and `b` over `ib` through the circle of
+/// `e`'s center, axes and X radius; `None` without one.
+fn about_circle(
+    e: &crate::curve::ellipse::Ellipse,
+    a: &crate::nurbs::b_spline_curve::BSplineCurve,
+    ia: &crate::geom::extent1d::Extent1d,
+    b: &crate::nurbs::b_spline_curve::BSplineCurve,
+    ib: &crate::geom::extent1d::Extent1d,
+) -> Option<f64> {
+    use crate::nurbs::circle_deviation::{hausdorff_about_circle, RefCircle};
+    let position = e.position();
+    let circle = RefCircle {
+        center: position.origin(),
+        x_axis: position.x_axis(),
+        y_axis: position.y_axis(),
+        radius: e.radius_x,
+    };
+    let (na, nb) = (a.nurb_ref().ok()?, b.nurb_ref().ok()?);
+    hausdorff_about_circle(na, [ia.min(), ia.max()], nb, [ib.min(), ib.max()], &circle)
+        .ok()
+        .flatten()
 }
 
 /// Not upstream (WR-754): the coincident edges along which a solid touches itself, glued back
@@ -376,7 +412,7 @@ pub(crate) fn coincidence_bound(
 /// id, an unported call, cancellation).
 ///
 /// **A gluing that fails leaves the operand as given.** The glue is all or nothing
-/// ([`glue_all_or_none`]): the operand, `k.rng` and `k.upstream_ub_passed` are saved before
+/// ([`glue_all_or_none`]): the operand and `k.upstream_ub_passed` are saved before
 /// the first pair, and any other failure of `GlueEdgesGeneral` restores them exactly, so the
 /// merge then runs as main does (0 is returned). `GlueEdgesGeneral` can fail on a valid operand, both before its
 /// first change to the topology (`b.remove_from_edge_list(del)`) and after it:
@@ -388,14 +424,13 @@ pub(crate) fn coincidence_bound(
 ///   `edge_remove` of the pair, the sector's mate and loop tests, `set_orientation`,
 ///   `add_oriented_eu_pair`, a surviving wire's `edge_remove` and vertex-use unlinking, the
 ///   surviving edge's `set_tolerance` and `destroy` of the deleted edge; then `merge_shells`,
-///   `test_closure_split_region_attempt` (whose status is ignored, as upstream, and which
-///   may draw from `k.rng`), `is_spine` and
-///   `test_closure_split_region_edge`.
+///   `test_closure_split_region_attempt` (whose status is ignored, as upstream), `is_spine`
+///   and `test_closure_split_region_edge`.
 ///
 /// A failure at an "after" site would leave the operand half glued, so a check up front
 /// cannot replace the snapshot. A snapshot the B-rep cannot take (a cleared surface owner,
 /// or nesting past the copy bound) means no gluing at all.
-fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
+pub(crate) fn glue_self_touching_edges(k: &mut Kernel, b: &mut Brep) -> Result<usize> {
     use std::collections::BTreeMap;
 
     use crate::topology::brep::p7::glue_edges_general;
@@ -499,8 +534,8 @@ type GluePair = (
 );
 
 /// Runs `glue` on every pair, all or nothing ([`glue_self_touching_edges`]'s errors): the
-/// operand, `k.rng` and `k.upstream_ub_passed` are saved first, and when a pair fails they
-/// are all put back exactly, so the merge then runs as on main. An ordinary failure
+/// operand and `k.upstream_ub_passed` are saved first, and when a pair fails they
+/// are put back exactly, so the merge then runs as on main. An ordinary failure
 /// ([`crate::error::native_failure`]) returns 0; a port defect or a cancellation is returned.
 /// No snapshot ([`Brep::snapshot`]) means nothing is glued. Returns the number of pairs
 /// glued.
@@ -528,7 +563,7 @@ fn glue_all_or_none(
     let Ok(saved) = b.snapshot() else {
         return Ok(0);
     };
-    let (rng, ub) = (k.rng.clone(), k.upstream_ub_passed.clone());
+    let ub = k.upstream_ub_passed.clone();
     let mut state = ArenaNotifyState::with_attributes_of(b);
     let mut failure = None;
     for pair in pairs {
@@ -541,7 +576,6 @@ fn glue_all_or_none(
         // the snapshot holds the attributes too: the store moved out is dropped
         drop(state);
         b.restore(saved);
-        k.rng = rng;
         k.upstream_ub_passed = ub;
         // a port defect or a cancellation goes on; an ordinary failure merges as given
         crate::error::native_failure::<()>(Err(e))?;
@@ -580,6 +614,8 @@ fn merge_boolean_by(
     // SmMerge sMerge(*pContext, pBrep1, pBrep2) (or 0, 0, &sOptions): tolerance and
     // angle 0, both computed by the constructor.
     use crate::boolean::merge::p3::BooleanDriver;
+    // (not upstream) counted, for tests of how many booleans an operation runs
+    k.work_counters.add_boolean();
     // (not upstream: WR-754) the operands' self-touch edge copies glued first
     glue_self_touching_edges(k, &mut brep1)?;
     glue_self_touching_edges(k, &mut brep2)?;
@@ -619,7 +655,12 @@ fn merge_boolean_by(
         )?
     };
     let mut result = result.ok_or_else(|| {
-        SolidError::entity_missing(OP_BOOLEAN, "the Boolean made no result B-rep")
+        SolidError::boolean_null_defect(
+            OP_BOOLEAN,
+            BooleanStage::Merge,
+            "the Boolean returned no result B-rep, though it leaves the result unset only \
+             for an extraction, which the operand checks refused before it ran",
+        )
     })?;
     // (not upstream: the port's cached topology fields, true again for the caller)
     result.refresh_cached_topology();
@@ -829,9 +870,11 @@ pub fn piecewise_merge(
     let result_id = merged?;
     if result_id != PrimitiveModel::MAIN {
         // PiecewiseMerge's result is its first operand
-        return Err(SolidError::stage_failed(
+        return Err(SolidError::boolean_defect(
             OP_PIECEWISE,
-            "the piecewise merge did not return its first operand",
+            BooleanStage::Tree,
+            "the piecewise merge returned another B-rep than its first operand, though it \
+             always merges into its first operand and returns it",
         ));
     }
     let mut other = model.take_brep(other_id)?;
@@ -1015,12 +1058,12 @@ mod tests {
             .unwrap()
     }
 
-    /// A gluing whose second pair fails after the first changed the operand and drew from
-    /// the kernel's rng: the operand, the rng and the upstream-UB list are put back exactly.
+    /// A gluing whose second pair fails after the first changed the operand and noted an
+    /// upstream UB: the operand and the upstream-UB list are put back exactly.
     /// An ordinary failure (`InvalidInput`) then lets the merge go on (0 glued); a failure
     /// that stands for no upstream status (`NotFound`, a stale id) is returned.
     #[test]
-    fn a_failed_gluing_restores_the_operand_and_the_rng() {
+    fn a_failed_gluing_restores_the_operand_and_the_ub_list() {
         use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
         let stale = SolidError::NotFound {
             operation: "test",
@@ -1032,7 +1075,7 @@ mod tests {
         ] {
             let mut k = Kernel::default();
             let mut b = unit_box(&mut k);
-            let (before, rng, ub) = (fingerprint(&b), k.rng.clone(), k.upstream_ub_passed.clone());
+            let (before, ub) = (fingerprint(&b), k.upstream_ub_passed.clone());
             let e = b.edge_list()[0];
             let pairs = [(e, e, OrientType::Same), (e, e, OrientType::Same)];
             let mut failure = Some(failure);
@@ -1041,7 +1084,6 @@ mod tests {
                 if first {
                     first = false;
                     b.edge_mut(e)?.tolerance = 7.0;
-                    let _ = k.rng.next_u64();
                     k.note_upstream_ub("test");
                     return Ok(());
                 }
@@ -1052,7 +1094,6 @@ mod tests {
                 assert_eq!(r.unwrap(), 0);
             }
             assert_eq!(fingerprint(&b), before);
-            assert_eq!(k.rng, rng);
             assert_eq!(k.upstream_ub_passed, ub);
         }
     }
@@ -1179,6 +1220,79 @@ mod tests {
         // a NaN end has no bound
         let nan = segment([1.0, 2.0, 3.0], [f64::NAN, 2.0, 3.0]);
         assert!(coincidence_bound(&a, &ivl, &nan, &ivl).is_none());
+    }
+
+    /// #21801: a circular arc (an ellipse, its rational quadratic NURB) and a polynomial
+    /// cubic along it, raised by 1e-6, parameterised apart (as a section curve along a fillet
+    /// is): the pair has a certified bound, at least the cubic's sampled distance from the
+    /// circle (a lower bound of the Hausdorff distance) and within three times it; before
+    /// the fix an ellipse against a B-spline had none. A cubic half a turn away has none.
+    #[test]
+    fn an_arc_and_a_cubic_along_it_have_a_bound() {
+        use crate::curve::curve::p2::{Curve, CurveKind};
+        use crate::curve::ellipse::{Ellipse, EllipseOptions};
+        use crate::geom::extent1d::Extent1d;
+        use crate::math::{Point3, Vec3};
+        let k = Kernel::default();
+        let (r, rise) = (1.15, 1e-6);
+        let half_pi = std::f64::consts::FRAC_PI_2;
+        let arc = Ellipse::new_circle(
+            &k,
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            // the ellipse's domain is in degrees
+            Extent1d::from_min_max(0.0, 90.0),
+            r,
+            &EllipseOptions::default(),
+        )
+        .unwrap();
+        let knots = arc.base().nurb_ref().unwrap().knots().to_vec();
+        let ia = Extent1d::from_min_max(knots[0], knots[knots.len() - 1]);
+        let arc = Curve::new(CurveKind::Ellipse(arc));
+        // two Hermite spans of the quarter (ends and tangents on the circle)
+        let along = |a0: f64, dz: f64| {
+            let h = half_pi / 2.0;
+            let t = 4.0 / 3.0 * (h / 4.0).tan();
+            let mut pts = vec![];
+            for i in 0..2 {
+                let (a, b) = (a0 + h * f64::from(i), a0 + h * f64::from(i + 1));
+                let p = |u: f64| [r * u.cos(), r * u.sin()];
+                let d = |u: f64| [-r * u.sin(), r * u.cos()];
+                let (pa, pb, da, db) = (p(a), p(b), d(a), d(b));
+                if i == 0 {
+                    pts.push([pa[0], pa[1], dz]);
+                }
+                pts.push([pa[0] + t * da[0], pa[1] + t * da[1], dz]);
+                pts.push([pb[0] - t * db[0], pb[1] - t * db[1], dz]);
+                pts.push([pb[0], pb[1], dz]);
+            }
+            cubic(
+                &pts,
+                vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0],
+            )
+        };
+        let ib = Extent1d::from_min_max(0.0, 2.0);
+        let b = along(0.0, rise);
+        // each point's distance from the circle: a lower bound of the Hausdorff distance
+        let off_circle = (0..=2000)
+            .map(|i| {
+                let p = b.evaluate_point(&k, f64::from(i) / 1000.0).unwrap();
+                ((p.x.hypot(p.y) - r).powi(2) + p.z * p.z).sqrt()
+            })
+            .fold(0.0, f64::max);
+        assert!(off_circle >= rise);
+        for d in [
+            coincidence_bound(&arc, &ia, &b, &ib).unwrap(),
+            coincidence_bound(&b, &ib, &arc, &ia).unwrap(),
+        ] {
+            assert!(
+                d >= off_circle && d <= 3.0 * off_circle,
+                "{d} vs {off_circle}"
+            );
+        }
+        let off = along(std::f64::consts::PI, 0.0);
+        assert!(coincidence_bound(&arc, &ia, &off, &ib).is_none());
     }
 
     /// The real defect three samples miss: two cubics between the same ends, one straight and

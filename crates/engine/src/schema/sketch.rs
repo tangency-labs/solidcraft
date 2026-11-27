@@ -25,6 +25,10 @@ use super::types::{IdOrName, Point3, present};
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct EditParams {
+    /// Open Model view to edit in; defaults to the focused or most recent Model view.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 9007199254740992_u64))]
+    pub view: Option<u64>,
     pub sketch: IdOrName,
     /// A position (or null, the end of the timeline): temporarily roll to this sketch and
     /// restore that position when the edit ends. Left out, a sketch with features after it is
@@ -87,6 +91,7 @@ pub struct ExitParams {
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct EditResult {
+    pub sketching_view: u64,
     pub sketch: u64,
     pub name: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -201,6 +206,10 @@ fn model_pick_schema(generator: &mut SchemaGenerator) -> Value {
 pub enum Operand {
     Id(String),
     Model(Value),
+    /// A planar model face `{face: [x, y, z], body?}`, which only `sketch.constraint.parallel`
+    /// takes: in a 3D sketch, the plane a drawn 3D line is held parallel to (#10616). Whether the
+    /// point is on a planar face is the handler's to check.
+    Face(Value),
 }
 
 impl JsonSchema for Operand {
@@ -224,6 +233,37 @@ fn operand_of(m: &Fields, key: &str, message: &str) -> Read<Option<Operand>> {
         Some(Value::String(id)) => Ok(Some(Operand::Id(id.clone()))),
         Some(v) if model_pick(v) => Ok(Some(Operand::Model(v.clone()))),
         Some(_) => refuse(message),
+    }
+}
+
+/// An operand of `sketch.constraint.parallel`: an [`Operand`], or a planar model face, the plane
+/// a drawn 3D line is held parallel to in a 3D sketch (#10616).
+pub struct ParallelOperand;
+
+impl JsonSchema for ParallelOperand {
+    fn schema_name() -> Cow<'static, str> {
+        "ParallelOperand".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let model = model_pick_schema(generator);
+        let point = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "A sketch line by its id, or a model edge {\"edge\": [x, y, z], \"body\"?} or vertex {\"vertex\": [x, y, z], \"body\"?}, projected into the sketch first. In a 3D sketch also a plane: xy, yz or xz, a construction plane's name, or a planar model face {\"face\": [x, y, z], \"body\"?}.",
+            "anyOf": [
+                {"type": "string"},
+                model,
+                {"type": "object", "properties": {"face": point, "body": {"type": "string"}}, "required": ["face"]}
+            ]
+        })
+    }
+}
+
+/// `key` as an operand of `sketch.constraint.parallel`: [`operand_of`]'s forms, or an object with
+/// `face`, which the 3D handler reads (and refuses itself when `face` is no point).
+fn parallel_operand_of(m: &Fields, key: &str, message: &str) -> Read<Option<Operand>> {
+    match m.get(key) {
+        Some(v) if !model_pick(v) && v.get("face").is_some() => Ok(Some(Operand::Face(v.clone()))),
+        _ => operand_of(m, key, message),
     }
 }
 
@@ -385,7 +425,7 @@ pub struct Constrained {
     pub determined_by: Option<Vec<String>>,
 }
 
-/// What `sketch.constraint.horizontal_vertical`, `parallel`, `perpendicular`, `collinear`,
+/// What `sketch.constraint.horizontal_vertical`, `horizontal`, `vertical`, `parallel`, `perpendicular`, `collinear`,
 /// `concentric` and `midpoint` return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ConstraintResult {
@@ -449,6 +489,16 @@ pub struct CoincidentResult {
 pub enum CoincidentMade {
     /// A coincident (or point-on-curve) constraint was added.
     Added(Constrained),
+    /// Two plain points were merged into one shared sketch point (or already shared it).
+    Merged {
+        /// The surviving shared point id.
+        point: String,
+        /// `true` when the two points already shared the same point.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        existing: bool,
+        /// The sketch's solve: `{solved, dof}`.
+        sketch: Value,
+    },
     /// The two points were already coincident, or the two lines already collinear: nothing was added.
     Existing {
         /// The constraint that already joins them.
@@ -519,6 +569,9 @@ pub struct FixOutcome {
     /// geometry are not counted. A point placed by parameter expressions is released as plain
     /// numbers at its current place.
     pub changed: usize,
+    /// Why nothing changed, when every entity picked is projected (it follows its source).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 /// What `sketch.constraint.fix` returns.
@@ -534,11 +587,18 @@ pub struct FixResult {
 }
 
 /// A command that takes two operands, `a` and `b`, in one form: the same keys, read with the
-/// handler's message for each.
+/// handler's message for each. `operand` and `read` name the schema and the reader of one operand
+/// when the command takes more than an [`Operand`] (`sketch.constraint.parallel` a model face too).
 macro_rules! two_operands {
     (
         $(#[$meta:meta])* $name:ident,
         a: $a_doc:literal, b: $b_doc:literal, what: $what:literal
+    ) => {
+        two_operands! { $(#[$meta])* $name, a: $a_doc, b: $b_doc, what: $what, operand: "Operand", read: operand_of }
+    };
+    (
+        $(#[$meta:meta])* $name:ident,
+        a: $a_doc:literal, b: $b_doc:literal, what: $what:literal, operand: $operand:literal, read: $read:ident
     ) => {
         $(#[$meta])*
         #[derive(Debug, JsonSchema)]
@@ -546,11 +606,11 @@ macro_rules! two_operands {
         pub struct $name {
             #[doc = $a_doc]
             #[serde(default, skip_serializing_if = "Option::is_none")]
-            #[schemars(with = "Operand")]
+            #[schemars(with = $operand)]
             pub a: Option<Operand>,
             #[doc = $b_doc]
             #[serde(default, skip_serializing_if = "Option::is_none")]
-            #[schemars(with = "Operand")]
+            #[schemars(with = $operand)]
             pub b: Option<Operand>,
             /// `refuse` (in any case) refuses the call when the sketch already determines the new
             /// constraint, instead of keeping it as a redundant one (any other text keeps it).
@@ -567,8 +627,8 @@ macro_rules! two_operands {
                 let m = fields(d)?;
                 let read = || -> Read<Self> {
                     let sketch = sketch_of(&m)?;
-                    let a = operand_of(&m, "a", &format!("`a` must be {}", $what))?;
-                    let b = operand_of(&m, "b", &format!("`b` must be {}", $what))?;
+                    let a = $read(&m, "a", &format!("`a` must be {}", $what))?;
+                    let b = $read(&m, "b", &format!("`b` must be {}", $what))?;
                     Ok(Self { a, b, if_redundant: if_redundant_of(&m)?, sketch })
                 };
                 read().map_err(D::Error::custom)
@@ -587,11 +647,14 @@ two_operands! {
 }
 
 two_operands! {
-    /// Make two lines, or a line and a sketch axis, parallel. Two different lines are needed.
+    /// Make two lines, or a line and a sketch axis, parallel. Two different lines are needed. In
+    /// a 3D sketch, also a drawn 3D line and a plane.
     ParallelParams,
-    a: "A line's id, or `x` / `y` for the sketch's own axis (a curve with that id wins; an axis becomes a linked construction line, reported in `created`), or a model edge.",
-    b: "The other line, as `a`.",
-    what: "a curve id, or x / y for a sketch axis"
+    a: "A line's id, or `x` / `y` for the sketch's own axis (a curve with that id wins; an axis becomes a linked construction line, reported in `created`), or a model edge. In a 3D sketch also a plane: `xy`, `yz` or `xz`, a construction plane's name, or a planar model face `{face: [x, y, z], body?}`.",
+    b: "The other line or plane, as `a`.",
+    what: "a curve id, or x / y for a sketch axis",
+    operand: "ParallelOperand",
+    read: parallel_operand_of
 }
 
 two_operands! {
@@ -753,32 +816,73 @@ fn horizontal_vertical_required(schema: &mut Schema) {
 impl<'de> Deserialize<'de> for HorizontalVerticalParams {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let m = fields(d)?;
+        horizontal_vertical_of(&m).map_err(D::Error::custom)
+    }
+}
+
+/// The keys `sketch.constraint.horizontal_vertical`, `horizontal` and `vertical` share, read as
+/// their handler reads them (`mode` only matters to the first).
+fn horizontal_vertical_of(m: &Fields) -> Read<HorizontalVerticalParams> {
+    let mode = text_of(m, "mode")?;
+    let sketch = sketch_of(m)?;
+    let if_redundant = if_redundant_of(m)?;
+    if let Some(list) = m.get("points").and_then(Value::as_array) {
+        let [a, b] = list.as_slice() else { return refuse("`points` needs exactly two point references") };
+        let points = Some([align_point(a)?, align_point(b)?]);
+        return Ok(HorizontalVerticalParams { line: None, points, mode, if_redundant, sketch });
+    }
+    let line = match m.get("line") {
+        None => None,
+        Some(Value::String(id)) => Some(id.clone()),
+        Some(_) => return refuse("`line` must be a curve id"),
+    };
+    Ok(HorizontalVerticalParams { line, points: None, mode, if_redundant, sketch })
+}
+
+/// Make a line horizontal (`sketch.constraint.horizontal`) or vertical
+/// (`sketch.constraint.vertical`), or two points level (same height) or plumb (one above the
+/// other), by `line` or by `points`: as `sketch.constraint.horizontal_vertical`, with the
+/// direction set by the command instead of by `mode`.
+#[derive(Debug, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = horizontal_vertical_required)]
+pub struct AxisAlignParams {
+    /// A line's id. Read when `points` is not a list; ignored when it is.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub line: Option<String>,
+    /// Exactly two points: ids, or a line's middle as `{midpoint: line_id}`. When it is a list,
+    /// `line` is ignored; anything else is ignored, as if the key were left out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "[AlignPoint; 2]")]
+    pub points: Option<[AlignPoint; 2]>,
+    /// `refuse` (in any case) refuses the call when the sketch already determines the new
+    /// constraint, instead of keeping it as a redundant one (any other text keeps it). Read
+    /// only when the constraint turns out redundant.
+    #[serde(default)]
+    pub if_redundant: Option<String>,
+    /// The sketch (default: the one being edited).
+    #[serde(default)]
+    pub sketch: Option<SketchKey>,
+}
+
+impl<'de> Deserialize<'de> for AxisAlignParams {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let m = fields(d)?;
         let read = || -> Read<Self> {
-            let mode = text_of(&m, "mode")?;
-            let sketch = sketch_of(&m)?;
-            let if_redundant = if_redundant_of(&m)?;
-            if let Some(list) = m.get("points").and_then(Value::as_array) {
-                let [a, b] = list.as_slice() else { return refuse("`points` needs exactly two point references") };
-                let points = Some([align_point(a)?, align_point(b)?]);
-                return Ok(Self { line: None, points, mode, if_redundant, sketch });
-            }
-            let line = match m.get("line") {
-                None => None,
-                Some(Value::String(id)) => Some(id.clone()),
-                Some(_) => return refuse("`line` must be a curve id"),
-            };
-            Ok(Self { line, points: None, mode, if_redundant, sketch })
+            let HorizontalVerticalParams { line, points, if_redundant, sketch, .. } = horizontal_vertical_of(&m)?;
+            Ok(Self { line, points, if_redundant, sketch })
         };
         read().map_err(D::Error::custom)
     }
 }
 
-/// Tie a point to the middle of a line, or make two lines' middles meet (the first stays, the
-/// second moves), by `point` and `line` or by `a` and `b`.
+/// Tie a point to the middle of a line or of an arc (halfway along the arc, not the middle of its
+/// chord), or make two lines' middles meet (the first stays, the second moves), by `point` and
+/// `line` or by `a` and `b`.
 #[derive(Debug, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = midpoint_required)]
 pub struct MidpointParams {
-    /// A point or a line, in pick order (a point and a line either way round, or two lines). When
+    /// A point or a line or arc, in pick order (a point and a line or arc either way round, or two lines). When
     /// `a` or `b` is given (`null` too), `point` and `line` are ignored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Operand")]
@@ -791,7 +895,7 @@ pub struct MidpointParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Operand")]
     pub point: Option<Operand>,
-    /// The line it goes to the middle of. Read when neither `a` nor `b` is given.
+    /// The line or arc it goes to the middle of. Read when neither `a` nor `b` is given.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Operand")]
     pub line: Option<Operand>,

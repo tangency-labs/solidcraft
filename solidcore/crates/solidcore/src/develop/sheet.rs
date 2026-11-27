@@ -1,0 +1,367 @@
+//! A sheet metal part's surfaces as the development takes them: its panels, each drawn in its own
+//! chart, the joints where they meet, and the reliefs cut where bends meet. Plain data, beside the
+//! record's own (`solidcore-record`'s `develop`, which `solidcore-convert` copies field by field),
+//! and the closed forms of a rip's lap and a bend's allowance and setback.
+//!
+//! Not upstream (SolidCraft's sheet development, moved into the kernel, docs/layers.md §1).
+//!
+//! Deviations: none (no upstream counterpart). No recursion.
+
+use crate::math::{Vec2, Vec3};
+use crate::prism::profile::{Region2, Seg2};
+
+use crate::eval::vec::VecExt;
+
+/// A sheet metal part's surfaces: the panels and the joints between them. The material lies on
+/// the side of the sheet that a chart's `u × v` points to, `thickness` deep.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Sheet {
+    /// How thick the sheet is.
+    pub thickness: f64,
+    /// Where the neutral surface lies through the thickness, as a fraction of it from the
+    /// inside of each bend.
+    pub k_factor: f64,
+    /// Its faces.
+    pub panels: Vec<Panel>,
+    /// Where its faces meet.
+    pub joints: Vec<Joint>,
+    /// The reliefs cut where bends meet.
+    pub corners: Vec<Corner>,
+    /// The cuts that cross a joint (see [`Cut`]).
+    pub cuts: Vec<Cut>,
+}
+
+/// A cut through the sheet that crosses a joint, so that no one panel's region can hold it: a
+/// hole across a bend's tangent line, or across a seam. Its region is drawn in the flat chart of
+/// a panel it reaches (the chart the development places: a roll's neutral one), and it is cut
+/// from every piece of the flat it reaches, bends' zones included. What it leaves of a zone bends
+/// where it still joins both panels, and is a tab of the one panel it joins otherwise.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Cut {
+    /// The panel whose flat chart the region is drawn in.
+    pub panel: usize,
+    /// What is cut.
+    pub region: Region2,
+}
+
+/// What is cut where two bends meet at a corner. A round or a square relief is cut from the flat
+/// pattern wherever it reaches: both bends' zones and every panel round the corner alike, none of
+/// them first. It is centered where the two zones' center lines cross, `size` across: a round,
+/// or the four-sided relief whose sides run along the two bends, `size` apart. A notch or a tear
+/// is the bends' own ends (see [`Relief`]), and cuts nothing more.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Corner {
+    /// The two bend joints.
+    pub joints: [usize; 2],
+    /// Its shape.
+    pub relief: CornerRelief,
+    /// How far across it is.
+    pub size: f64,
+}
+
+/// The shape of a corner's relief (see [`Corner`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CornerRelief {
+    /// The bends' ends notched.
+    Notch,
+    /// The bends' ends torn.
+    Tear,
+    /// A round hole.
+    Round,
+    /// A four-sided hole whose sides run along the bends.
+    Square,
+}
+
+/// A face of the sheet. Its region is drawn in its surface's own parameters, so whatever is drawn
+/// on the panel keeps its place on the surface, and the surface's flow (its parameter lines)
+/// carries to the flat exactly. An empty region is a panel with no material of its own, which
+/// still carries the joints on it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Panel {
+    /// Its name, which orders panels of equal material.
+    pub name: String,
+    /// The surface it lies on.
+    pub surface: Surface,
+    /// Its material, in its surface's parameters.
+    pub region: Region2,
+}
+
+/// The surface a panel lies on, and so what its parameters are. A curved panel is a roll: its
+/// radius is the panel's own geometry, where a bend's is a value of the joint. It flattens
+/// through its neutral surface, as a bend does, so a roll and a bend of one radius give the same
+/// flat. The parameters run so that the material lies on the side their `u x v` points to. Each
+/// kind's flat has a closed form; a free-form surface's has none, and is no panel's.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum Surface {
+    /// A planar panel: its parameters are its plane's coordinates.
+    #[default]
+    Plane,
+    /// A panel rolled on a cylinder of `radius` (the sheet's). Its parameters are length along
+    /// the axis and angle round it (radians).
+    Cylinder {
+        /// The cylinder's radius.
+        radius: f64,
+        /// Whether the material lies toward the axis.
+        material_inward: bool,
+    },
+    /// A panel rolled on a cone whose rulings make `half_angle` (radians) with its axis. Its
+    /// parameters are distance from the apex along a ruling and angle round the axis (radians).
+    Cone {
+        /// The angle its rulings make with its axis.
+        half_angle: f64,
+        /// Whether the material lies toward the axis.
+        material_inward: bool,
+    },
+}
+
+/// Where a joint lies on one of its panels: a straight line in the panel's parameters, through
+/// `origin` along the unit `dir`. The two anchors of a joint are the same line on the sheet,
+/// with the same origin and direction, and the `a` panel's material lies on the left of it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Anchor {
+    /// The panel.
+    pub panel: usize,
+    /// The line's origin, in the panel's parameters.
+    pub origin: Vec2,
+    /// The line's unit direction.
+    pub dir: Vec2,
+}
+
+/// Two panels meeting along a line.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Joint {
+    /// Where it lies on its first panel, whose material is on the left.
+    pub a: Anchor,
+    /// Where it lies on its second panel.
+    pub b: Anchor,
+    /// What it is.
+    pub kind: JointKind,
+}
+
+/// What a joint is.
+#[derive(Clone, Debug, PartialEq)]
+pub enum JointKind {
+    /// The sheet runs on from one panel to the other round a bend.
+    Bend(Bend),
+    /// The sheet runs on from one panel into the next with no bend between: where a roll
+    /// meets a flat panel or another roll tangent to it.
+    Seam,
+    /// The panels are cut apart along their shared edge (see [`Rip`]), and the flat pattern lays
+    /// them out apart unless other joints hold them together.
+    Rip(Rip),
+}
+
+/// How a rip parts two panels along the edge they share, whatever the edge's course and the
+/// panels' surfaces. At every point of the edge each panel is cut back from it, square to it on
+/// its own surface, by as much as its lap asks there: so a rip between two planes, round a
+/// roll's rim or along a curve across a cone is the one operation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Rip {
+    /// The edge on each panel `(a, b)`, in its parameters: the same points of it, in order from
+    /// the joint's start (its anchors' origin) to its end. Two make a straight edge.
+    pub edges: (Vec<Vec2>, Vec<Vec2>),
+    /// The edge on each panel `(a, b)` exactly, where its source knows it: lines, circular arcs
+    /// and free-form spans in the panel's parameters, end to end from the joint's start to its
+    /// end. Empty where only the points are known.
+    pub curves: (Vec<Seg2>, Vec<Seg2>),
+    /// How far the sheet turns across the edge at each of those points (radians, from the `a`
+    /// panel to the `b` one, positive toward the material, as a bend turns): 0 where it would run
+    /// straight on, so that a cut through a flat panel is a rip too.
+    pub turns: Vec<f64>,
+    /// What each panel is cut back.
+    pub lap: Lap,
+}
+
+/// How a rip parts its panels: what each is cut back from the edge, given how far the sheet
+/// turns there and how thick it is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Lap {
+    /// Each panel's metal kept `gap / 2` off the surface halfway between the two, through its
+    /// whole thickness: a mitered corner, or a slit `gap` wide through a flat panel.
+    Miter {
+        /// The gap between the two panels' metal.
+        gap: f64,
+    },
+    /// Each panel cut back the given distance from the edge, `(a, b)`, whatever the turn.
+    Cut(f64, f64),
+}
+
+/// A bend between two panels.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Bend {
+    /// How far the sheet turns, in radians, more than 0 and at most a half turn.
+    pub angle: f64,
+    /// The inside radius.
+    pub radius: f64,
+    /// The bend turns toward the material side of the sheet, so the sheet runs round the
+    /// outside of the bend; otherwise round the inside.
+    pub toward_material: bool,
+    /// What the anchors mark on the panels.
+    pub datum: Datum,
+    /// How long the edge is where the two panels meet, along the anchors from their origin: the
+    /// zone's ends lie within it, where the corners and rips at its ends leave them.
+    pub length: f64,
+    /// The bend zone's ends along the joint.
+    pub ends: ZoneEnds,
+    /// What each panel keeps beyond the zone's ends, between its anchor and where the bend
+    /// would start: `(a, b)`.
+    pub tails: (Tail, Tail),
+    /// What is cut at each of the zone's ends, `(start, end)` along the joint.
+    pub relief: (Relief, Relief),
+}
+
+/// What is cut at one end of a bend's zone, from both its panels alike. Reliefs are the bend's,
+/// never drawn on its panels: they move with its radius, its thickness and its ends.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Relief {
+    /// Nothing: past the end each panel keeps or trims its material as its tail says, so a kept
+    /// tail is torn from the bend along the end.
+    #[default]
+    None,
+    /// Past the end both panels stop at their tangent lines: where the bend meets another at a
+    /// corner, or where a rip cuts the panels beside it. The zone's end runs straight from its
+    /// given end on the `a` panel's tangent line to its given end on the `b` panel's.
+    Notch,
+    /// A free end, neither panel running on past it: past the end both panels stop at their
+    /// tangent lines, as at a notch, and the zone's end is what the panels' outlines make of it
+    /// under the bend. Each panel's outline, from where it crosses its tangent line (the given
+    /// end) on to the sharp, is carried into the zone square through the sheet, along the ray
+    /// from the bend's axis (see `layout::BendMap`): the part's surfaces are the definition, and
+    /// the zone's end follows from them whatever the bend's radius, thickness or K-factor.
+    /// Where the given ends do not lie on the panels' outlines (a sheet some change has left
+    /// before its ends are settled again), the end runs straight across between them, as at a
+    /// notch.
+    Outline,
+    /// A bend relief in each panel that runs on past the end: a slot `width` along past the
+    /// end, cut from `depth` inside the panel's tangent line out through its edge. None is cut
+    /// in a panel that runs on less far than that.
+    Slot {
+        /// How wide the slot is, along the joint.
+        width: f64,
+        /// How far inside the tangent line it starts.
+        depth: f64,
+    },
+    /// The bend relief of [`Relief::Slot`] with a round inner end: a half round `width` across
+    /// in place of the slot's square end, reaching `depth` inside the panel's tangent line at
+    /// its deepest, so the relief leaves no sharp inside corner for a crack to start from.
+    Obround {
+        /// How wide the slot is, along the joint.
+        width: f64,
+        /// How far inside the tangent line its round end reaches.
+        depth: f64,
+    },
+    /// Torn tight against a surface across the bend, as where a rip parts the panels beyond a
+    /// corner: past the end both panels stop at their tangent lines, as at a notch, and the
+    /// zone's end runs from its given end on the `a` panel's tangent line to its given end on
+    /// the `b` panel's, its metal kept off the surface by as much as at those two ends and, in
+    /// between, in proportion to how far the bend has turned, so that it follows the surface
+    /// all the way round. The surface is the plane of the points `p` with `p · normal = offset`
+    /// in the bend's frame at its `a` anchor (`x` along the joint, `y` toward the material, `z`
+    /// toward the `b` panel), `normal` toward the bend's side; a lap or a free-form rip will
+    /// part the panels along other surfaces.
+    Tear {
+        /// The plane's unit normal.
+        normal: Vec3,
+        /// The plane's offset along its normal.
+        offset: f64,
+    },
+}
+
+/// The line the anchors mark.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Datum {
+    /// The virtual sharp, where the two panels' surfaces would meet if the bend had no radius.
+    /// Changing the radius moves neither panel. A half turn has no sharp.
+    Sharp,
+    /// The tangent line, where each panel's flat material ends and the bend starts. A hem,
+    /// whose panels never meet, is anchored here.
+    Tangent,
+}
+
+/// The bend zone along its joint, in lengths along the anchors from their origin: where its
+/// edge on the `a` side starts and ends (`near`), and where its edge on the `b` side does
+/// (`far`). A square end has the same length in both; a torn end does not.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ZoneEnds {
+    /// The zone's edge on the `a` side: where it starts and ends.
+    pub near: (f64, f64),
+    /// The zone's edge on the `b` side: where it starts and ends.
+    pub far: (f64, f64),
+}
+
+/// What a panel keeps beyond the bend zone's ends, between its anchor and its tangent line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tail {
+    /// The panel's own outline: a base that runs on beside a shorter flange keeps its edge.
+    Keep,
+    /// Nothing: past the zone's ends the panel starts where the bend would.
+    Trim,
+}
+
+/// How far the way into a panel must lean off the halfway plane before a mitre's cut is found by
+/// dividing by that lean: a way that runs along the plane (a half turn) cuts nothing.
+const LAP_ALONG_TOL: f64 = 1e-9;
+
+impl Lap {
+    /// What each panel `(a, b)` is cut back from the edge, square to it on its own surface,
+    /// where the sheet turns `turn` across it and is `thickness` thick.
+    #[must_use]
+    pub fn cuts(&self, turn: f64, thickness: f64) -> (f64, f64) {
+        match *self {
+            Lap::Cut(a, b) => (a.max(0.0), b.max(0.0)),
+            Lap::Miter { gap } => {
+                // In the `a` panel's frame at the edge: y toward its material, z on toward the
+                // `b` panel. Into `a` is -z; into `b`, turned by `turn` toward the material, and
+                // `b`'s material normal turns with it.
+                let (sin, cos) = turn.sin_cos();
+                let (into_a, into_b, up_b) = (
+                    Vec3::new(0.0, 0.0, -1.0),
+                    Vec3::new(0.0, sin, cos),
+                    Vec3::new(0.0, cos, -sin),
+                );
+                // The plane halfway between them holds the edge; its normal toward `a`.
+                let half = into_a + into_b;
+                let m = match Vec3::new(0.0, -half.z, half.y).normalized() {
+                    Some(m) if m.dot(into_a) >= 0.0 => m,
+                    Some(m) => -m,
+                    None => into_a,
+                };
+                let cut = |into: Vec3, up: Vec3, m: Vec3| {
+                    let along = into.dot(m);
+                    if along > LAP_ALONG_TOL {
+                        ((gap / 2.0 - (thickness * up.dot(m)).min(0.0)) / along).max(0.0)
+                    } else {
+                        0.0
+                    }
+                };
+                (cut(into_a, Vec3::Y, m), cut(into_b, up_b, -m))
+            }
+        }
+    }
+}
+
+impl Bend {
+    /// The flat width of the bend zone: the length of its neutral arc, `θ (R + K T)`.
+    #[must_use]
+    pub fn allowance(&self, thickness: f64, k_factor: f64) -> f64 {
+        self.angle * (self.radius + k_factor * thickness)
+    }
+
+    /// How far each anchor lies from its panel's tangent line, toward the other panel: 0 at a
+    /// tangent line, `(R + T) tan(θ / 2)` at the virtual sharp of a bend toward the material and
+    /// `R tan(θ / 2)` of one away from it.
+    #[must_use]
+    pub fn setback(&self, thickness: f64) -> f64 {
+        match self.datum {
+            Datum::Tangent => 0.0,
+            Datum::Sharp => {
+                let surface_radius = if self.toward_material {
+                    self.radius + thickness
+                } else {
+                    self.radius
+                };
+                surface_radius * (self.angle / 2.0).tan()
+            }
+        }
+    }
+}

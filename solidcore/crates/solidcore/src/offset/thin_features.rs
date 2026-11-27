@@ -18,7 +18,8 @@
 //! at a time, until the shell of what is left builds. One is taken off only where the room
 //! test finds no cavity in it ([`shell_wall_room`] shows no witness: the room test proves a
 //! cavity, it does not prove there is none), and the whole result stands only if every step
-//! builds; otherwise the caller's refusal stands.
+//! builds; otherwise the caller's refusal stands. The features with a face whose inset
+//! collapses come off together, first, before one shell of what is left (solidcore#3353).
 
 use std::collections::BTreeSet;
 
@@ -27,8 +28,7 @@ use crate::boolean::api_brep::boolean_union;
 use crate::error::offset::OffsetFailure;
 use crate::error::{Reason, Result, SolidError};
 use crate::kernel::Kernel;
-use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use crate::offset::offset_executive::p2::{shell_brep_simple, ShellOptions};
+use crate::offset::offset_executive::p2::{inset_face_collapses, shell_brep_simple, ShellOptions};
 use crate::offset::wall_room::{shell_wall_room, WallRoom};
 use crate::topology::edgeuse::{p1 as eu1, p2 as eu2};
 use crate::topology::topology_traverser::face_edges;
@@ -64,6 +64,7 @@ fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Vec<Fac
     let mut found: BTreeSet<FaceId> = BTreeSet::from([seed]);
     let mut todo = vec![seed];
     while let Some(f) = todo.pop() {
+        let outer = crate::topology::face::p2::outer_faceuse(b, f)?;
         for e in face_edges(b, f)? {
             let faces = edge::faces(b, e, None)?;
             // the use of the edge on `f`'s face use that faces out of the material
@@ -72,9 +73,7 @@ fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Vec<Fac
                 let Some(fu) = eu1::faceuse(b, u)? else {
                     continue;
                 };
-                if eu1::face(b, u)? == Some(f)
-                    && eu1::faceuse_orientation(b, fu)? == OrientType::Same
-                {
+                if eu1::face(b, u)? == Some(f) && Some(fu) == outer {
                     on_f = Some(u);
                 }
             }
@@ -105,6 +104,8 @@ fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Vec<Fac
 /// The features of `b`: each set of two or more faces, at most half of them, reached from a
 /// face across convex edges ([`feature_from`]), smallest first, each once.
 fn features(k: &Kernel, b: &Brep) -> Result<Vec<Vec<FaceId>>> {
+    // a measurement copy: it reads the topology and tangency of the body and its faces are
+    // only grouped, never built from, so its surfaces' definitions are not needed
     let mut probe = b.clone_standing_for_self()?;
     let mut seen: BTreeSet<FaceId> = BTreeSet::new();
     let mut found = Vec::new();
@@ -126,11 +127,48 @@ fn features(k: &Kernel, b: &Brep) -> Result<Vec<Vec<FaceId>>> {
     Ok(found)
 }
 
+/// The features of `b` ([`features`]) in the steps they are taken off in, each step followed
+/// by a shell of what is left: first, together, every feature one of whose faces' inset by
+/// `wall` collapses ([`inset_face_collapses`]: a pin or boss whose side the wall shrinks onto
+/// its axis), since each such feature left on is refused again, and its collapse is refused
+/// only once every face's offset and mitre is built (solidcore#3353: seven Ø4 bosses on a drum
+/// of 120 holes took eight shells, seven of them refused, before the one that builds; now
+/// two); then each other feature on its own, smallest first.
+fn steps(k: &Kernel, b: &Brep, wall: f64) -> Result<Vec<Vec<Vec<FaceId>>>> {
+    let mut collapsing: Vec<Vec<FaceId>> = Vec::new();
+    let mut others: Vec<Vec<FaceId>> = Vec::new();
+    for faces in features(k, b)? {
+        let mut collapses = false;
+        for &f in &faces {
+            match inset_face_collapses(k, b, f, wall) {
+                Ok(true) => {
+                    collapses = true;
+                    break;
+                }
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Ok(false) | Err(_) => {}
+            }
+        }
+        if collapses {
+            collapsing.push(faces);
+        } else {
+            others.push(faces);
+        }
+    }
+    let mut steps = Vec::new();
+    if !collapsing.is_empty() {
+        steps.push(collapsing);
+    }
+    steps.extend(others.into_iter().map(|f| vec![f]));
+    Ok(steps)
+}
+
 /// `b` with `faces` taken off as a feature: the base and the feature, each closed by a planar
 /// cap on the footprint. `None` when it does not come off, or has room for a cavity of `wall`.
 fn take_off(k: &mut Kernel, b: &Brep, faces: &[FaceId], wall: f64) -> Result<Option<(Brep, Brep)>> {
-    // the footprint capped with its plane (the module's claim holds over a planar one only)
-    let mut base = b.clone_standing_for_self()?;
+    // the footprint capped with its plane (the module's claim holds over a planar one only);
+    // the base is shelled and the feature joined back, so both keep the faces' definitions
+    let mut base = b.clone_standing_for_self_keeping_definitions()?;
     let mut feature = match defeature_and_rebuild(
         k,
         &mut base,
@@ -187,17 +225,25 @@ fn taking_off(k: &mut Kernel, b: &Brep, options: ShellOptions) -> Result<Option<
             ok => ok,
         }
     };
-    let mut current = b.clone_standing_for_self()?;
+    // the body each feature is taken off and shelled, so its definitions are kept
+    let mut current = b.clone_standing_for_self_keeping_definitions()?;
     let mut taken: Vec<Brep> = Vec::new();
-    for faces in features(k, b)? {
-        if taken.len() >= MAX_FEATURES {
-            return Ok(None);
+    for step in steps(k, b, wall)? {
+        let mut took = false;
+        for faces in step {
+            if taken.len() >= MAX_FEATURES {
+                return Ok(None);
+            }
+            let Some((base, feature)) = take_off(k, &current, &faces, wall)? else {
+                continue;
+            };
+            taken.push(feature);
+            current = base;
+            took = true;
         }
-        let Some((base, feature)) = take_off(k, &current, &faces, wall)? else {
+        if !took {
             continue;
-        };
-        taken.push(feature);
-        current = base;
+        }
         match shell_brep_simple(k, &current, options, &[]) {
             Ok(shelled) => {
                 let mut result = shelled;

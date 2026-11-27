@@ -4,9 +4,9 @@
 `xtask licences --check`, `xtask layers`, clippy with `-D warnings`, the tests with the `ci`
 profile and the wasm build check.
 
-`cargo xtask fast` checks only what your change touches, for the edit-commit-push loop. It
-compares your branch with `origin/main` (`--base REF` for another), counting committed,
-uncommitted and untracked files, and:
+`cargo xtask fast` is the check before a commit and a push: it checks only what your change
+touches. It compares your branch with `origin/main` (`--base REF` for another), counting
+committed, uncommitted and untracked files, and:
 
 - formats the code;
 - runs the quick checks of `cargo xtask ci` (assets, lists, skills, layers, ui-containers,

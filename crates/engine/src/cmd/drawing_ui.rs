@@ -2,8 +2,7 @@
 //!
 //! These entries reserve discoverable homes while the owning Drawing contracts land.
 //! JSON execution always refuses; the UI may show reviewed option layouts separately.
-//! `drawing.export.planned` keeps the disabled UI action separate from `drawing.export`
-//! (the sheet export provider). View previews likewise use `.planned` ids so the
+//! View previews use `.planned` ids so the
 //! real base-view and projected-view providers keep their executable contracts.
 
 use super::CommandSpec;
@@ -31,7 +30,6 @@ pub const PENDING_ICONS: &[(&str, &str)] = &[
     ("drawing.note.chamfer", "drawing_chamfer_note"),
     ("drawing.parts_list", "drawing_parts_list"),
     ("drawing.parts_list.renumber", "drawing_parts_renumber"),
-    ("drawing.print", "drawing_print"),
     ("drawing.replace_model", "drawing_replace_model"),
     ("drawing.resources", "drawing_resources"),
     ("drawing.revise.planned", "drawing_issue_revision"),
@@ -46,7 +44,7 @@ pub const PENDING_ICONS: &[(&str, &str)] = &[
     ("drawing.view.base.planned", "drawing_base_view"),
     ("drawing.view.break", "drawing_view_break"),
     ("drawing.view.copy_to_sheet.planned", "drawing_view_copy_to_sheet"),
-    ("drawing.view.detail", "drawing_detail_view"),
+    ("drawing.view.detail.planned", "drawing_detail_view"),
     ("drawing.view.draft", "drawing_view_draft"),
     ("drawing.view.flat_pattern", "drawing_view_flat_pattern"),
     ("drawing.view.move_to_sheet.planned", "drawing_view_move_to_sheet"),
@@ -65,7 +63,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     planned!("drawing.view.base.planned", "Base View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("drawing_base_view"),
     planned!("drawing.view.projected.planned", "Projected View", "4816").icon("drawing_projected_view"),
     planned!("drawing.view.section.planned", "Section View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("drawing_section_view"),
-    planned!("drawing.view.detail", "Detail View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("drawing_detail_view"),
+    planned!("drawing.view.detail.planned", "Detail View", "4816").at("DRAWING LAYOUT", "VIEWS").icon("drawing_detail_view"),
     planned!("drawing.views.align", "Align Views", "4894").at("DRAWING LAYOUT", "ARRANGE").icon("drawing_align_views"),
     planned!("drawing.image", "Insert Image", "4894").at("DRAWING LAYOUT", "INSERT").icon("drawing_image"),
     planned!("drawing.line", "Drawing Line", "4890").icon("line"),
@@ -75,7 +73,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     planned!("drawing.note", "Drawing Note", "4896").at("DRAWING ANNOTATE", "NOTES").icon("drawing_note"),
     planned!("drawing.leader", "Leader Note", "4896").at("DRAWING ANNOTATE", "NOTES").icon("drawing_leader"),
     planned!("drawing.datum", "Datum", "4896").icon("drawing_datum"),
-    planned!("drawing.centre_mark", "Centre Mark", "4896").at("DRAWING ANNOTATE", "SYMBOLS").icon("drawing_centre_mark"),
+    planned!("drawing.centre_mark", "Center Mark", "4896").at("DRAWING ANNOTATE", "SYMBOLS").icon("drawing_centre_mark"),
     planned!("drawing.annotations.align", "Align Annotations", "4896").at("DRAWING ANNOTATE", "ARRANGE").icon("drawing_align_annotations"),
     planned!("drawing.annotations.space", "Space Annotations", "4896").at("DRAWING ANNOTATE", "ARRANGE").icon("drawing_space_annotations"),
     planned!("drawing.parts_list", "Parts List", "3874").at("DRAWING PARTS", "ASSEMBLY").icon("drawing_parts_list"),
@@ -84,8 +82,6 @@ pub static COMMANDS: &[CommandSpec] = &[
     planned!("drawing.update.planned", "Update Drawing", "4892").at("DRAWING REVIEW", "CHANGES").icon("drawing_update"),
     planned!("drawing.check.planned", "Check Drawing", "4894").at("DRAWING REVIEW", "CHANGES").icon("drawing_check"),
     planned!("drawing.revision", "Add Drawing Revision", "4894").at("DRAWING REVIEW", "REVISION").icon("drawing_revision"),
-    planned!("drawing.export.planned", "Export Drawing", "4890").at("DRAWING REVIEW", "OUTPUT").icon("export"),
-    planned!("drawing.print", "Print Drawing", "4890").at("DRAWING REVIEW", "OUTPUT").icon("drawing_print"),
     planned!("drawing.view.break", "Break View", "7578").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_break"),
     planned!("drawing.view.auxiliary.planned", "Auxiliary View", "13044").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_auxiliary"),
     planned!("drawing.view.pictorial", "Pictorial View", "13044").at("DRAWING LAYOUT", "VIEWS").icon("drawing_view_pictorial"),
@@ -120,7 +116,6 @@ mod tests {
         for id in ["drawing.export", "drawing.view.base", "drawing.view.projected", "drawing.view.section", "drawing.view.auxiliary"] {
             assert!(crate::find_command(id).unwrap().planned.is_none(), "the executable provider {id} stays registered");
         }
-        assert!(crate::find_command("drawing.export.planned").unwrap().planned.is_some(), "the scaffold export stays disabled");
         for command in super::COMMANDS {
             assert!(command.planned.is_some(), "{}", command.id);
             assert!(!command.info(&session).enabled, "{}", command.id);
