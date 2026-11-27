@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicIsize, AtomicUsize, Ordering};
 use windows::Win32::Foundation::{
     CLASS_E_CLASSNOTAVAILABLE, CLASS_E_NOAGGREGATION, E_FAIL, E_INVALIDARG, E_POINTER, E_UNEXPECTED, ERROR_ALREADY_INITIALIZED, S_FALSE, S_OK,
 };
-use windows::Win32::Graphics::Gdi::{BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DIB_RGB_COLORS, HBITMAP};
+use windows::Win32::Graphics::Gdi::{BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateDIBSection, DIB_RGB_COLORS, DeleteObject, HBITMAP, HGDIOBJ};
 use windows::Win32::System::Com::{IClassFactory, IClassFactory_Impl, ISequentialStream, IStream, STREAM_SEEK_CUR, STREAM_SEEK_END, STREAM_SEEK_SET};
 use windows::Win32::UI::Shell::PropertiesSystem::{IInitializeWithStream, IInitializeWithStream_Impl};
 use windows::Win32::UI::Shell::{IThumbnailProvider, IThumbnailProvider_Impl, WTS_ALPHATYPE, WTSAT_ARGB};
@@ -137,6 +137,8 @@ fn dib(bitmap: &Bitmap) -> Result<HBITMAP> {
     // SAFETY: `info` describes a 32-bit DIB of `width` x `height`; `bits` receives its pixel memory.
     let hbmp = unsafe { CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0) }?;
     if bits.is_null() {
+        // SAFETY: `hbmp` is the section just made, which nothing else holds.
+        let _ = unsafe { DeleteObject(HGDIOBJ(hbmp.0)) };
         return Err(E_FAIL.into());
     }
     // SAFETY: the section has `width * height * 4` bytes at `bits`, which is `bgra.len()`, and
@@ -203,12 +205,14 @@ impl IClassFactory_Impl for Factory_Impl {
     }
 
     fn LockServer(&self, flock: BOOL) -> Result<()> {
-        if flock.as_bool() {
-            LOCKS.fetch_add(1, Ordering::SeqCst);
-        } else {
-            LOCKS.fetch_sub(1, Ordering::SeqCst);
-        }
-        Ok(())
+        guarded(|| {
+            if flock.as_bool() {
+                LOCKS.fetch_add(1, Ordering::SeqCst);
+            } else {
+                LOCKS.fetch_sub(1, Ordering::SeqCst);
+            }
+            Ok(())
+        })
     }
 }
 
@@ -242,5 +246,6 @@ pub unsafe extern "system" fn DllGetClassObject(rclsid: *const GUID, riid: *cons
 /// COM asks whether it may unload the DLL: yes when no provider or factory is alive and no lock is held.
 #[unsafe(no_mangle)]
 pub extern "system" fn DllCanUnloadNow() -> HRESULT {
-    if OBJECTS.load(Ordering::SeqCst) == 0 && LOCKS.load(Ordering::SeqCst) <= 0 { S_OK } else { S_FALSE }
+    // A panic keeps the DLL loaded: S_FALSE is the answer that is never wrong.
+    catch_unwind(|| if OBJECTS.load(Ordering::SeqCst) == 0 && LOCKS.load(Ordering::SeqCst) <= 0 { S_OK } else { S_FALSE }).unwrap_or(S_FALSE)
 }
