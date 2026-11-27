@@ -1444,6 +1444,152 @@ fn a_spindle_torus_a_hair_from_a_horn_ends_its_form_where_its_tube_crosses_the_a
     }
 }
 
+/// One full horn torus (`R = r`) face written into `w`: a `TOROIDAL_SURFACE` (or
+/// `DEGENERATE_TOROIDAL_SURFACE` when `degenerate` is true) bounded by a meridian circle at
+/// longitude `meridian_angle` and, when `parallel_angle` is `Some(w)`, the parallel circle at
+/// tube angle `w` (`(-meridian, +parallel, +meridian, -parallel)`, the standard STEP 2-seam
+/// torus loop of #21218); when `parallel_angle` is `None`, bounded by the meridian slit alone
+/// starting at tube angle `start_tube` (`PI` starts at the pinch pole).
+fn full_horn_torus_face(
+    w: &mut W,
+    origin: V,
+    axis: V,
+    ref_dir: V,
+    r: f64,
+    meridian_angle: f64,
+    parallel_angle: Option<f64>,
+    start_tube: f64,
+    degenerate: bool,
+    same_sense: bool,
+) -> u64 {
+    let z = v3(axis).normalized().unwrap();
+    let x0 = v3(ref_dir);
+    let x = (x0 - z * x0.dot(z)).normalized().unwrap();
+    let y = z.cross(x);
+    let arr = |u: Vec3| [u.x, u.y, u.z];
+    let o = v3(origin);
+
+    let (su, cu) = meridian_angle.sin_cos();
+    let radial = x * cu + y * su;
+    let tangent = z.cross(radial);
+
+    let tube_angle = parallel_angle.unwrap_or(start_tube);
+    let (sw, cw) = tube_angle.sin_cos();
+    let p_start = o + radial * (r * (1.0 + cw)) + z * (r * sw);
+    let v_start = w.vertex(arr(p_start));
+
+    let m_ref = radial * cw + z * sw;
+    let c_meridian = w.circle(arr(o + radial * r), arr(-tangent), arr(m_ref), r);
+    let e_meridian = w.add(format!("EDGE_CURVE('',#{v_start},#{v_start},#{c_meridian},.T.)"));
+
+    let oes = if parallel_angle.is_some() {
+        let p_radius = r * (1.0 + cw);
+        let c_parallel = w.circle(arr(o + z * (r * sw)), arr(z), arr(radial), p_radius);
+        let e_parallel = w.add(format!("EDGE_CURVE('',#{v_start},#{v_start},#{c_parallel},.T.)"));
+        vec![w.oe(e_meridian, false), w.oe(e_parallel, true), w.oe(e_meridian, true), w.oe(e_parallel, false)]
+    } else {
+        vec![w.oe(e_meridian, false), w.oe(e_meridian, true)]
+    };
+
+    let bound = w.bound(&oes, true, true);
+    let placement = w.axis(origin, arr(z), arr(x));
+    let surface = if degenerate {
+        w.add(format!("DEGENERATE_TOROIDAL_SURFACE('',#{placement},{},{},.T.)", real(r), real(r)))
+    } else {
+        w.add(format!("TOROIDAL_SURFACE('',#{placement},{},{})", real(r), real(r)))
+    };
+    w.face(&[bound], surface, same_sense)
+}
+
+fn check_horn_torus_solid(s: &Solid, r: f64, expected_counts: [usize; 5], label: &str) {
+    assert!(!s.sheet, "{label}: expected solid, got sheet");
+    assert_eq!(counts(&s.brep), expected_counts, "{label}");
+    solidcore_ops::record_check::validate(&s.brep).unwrap_or_else(|e| panic!("{label}: validate: {e}"));
+    solidcore_ops::record_check::agreement(&s.brep).unwrap_or_else(|e| panic!("{label}: agreement: {e}"));
+    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap_or_else(|e| panic!("{label}: from_record: {e}"));
+    assert!(body.is_manifold_solid().unwrap(), "{label}: not manifold solid");
+    assert_eq!(body.check_solid(), Ok(()), "{label}: check_solid failed");
+    let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{label}: {report}");
+    let exact_vol = 2.0 * PI * PI * r * r * r;
+    let exact_area = 4.0 * PI * PI * r * r;
+    let mass = body.mass_properties(1e-6).unwrap_or_else(|e| panic!("{label}: mass: {e}"));
+    assert!((mass.volume - exact_vol).abs() < 1e-6 * exact_vol, "{label}: volume {} vs {exact_vol}", mass.volume);
+    assert!((mass.area - exact_area).abs() < 1e-6 * exact_area, "{label}: area {} vs {exact_area}", mass.area);
+}
+
+/// #21218: a full horn torus (`TOROIDAL_SURFACE` or `DEGENERATE_TOROIDAL_SURFACE` with `R = r`,
+/// one face bounded by its meridian and a parallel seam such as the outer equator) imports as a
+/// valid manifold solid matching the closed-form volume `2 π² r³` and surface area `4 π² r²`,
+/// rather than failing with `topology::Brep::face: face 0 not found` or importing with wrong volume.
+#[test]
+fn a_full_horn_torus_with_meridian_and_equator_imports_as_a_valid_solid() {
+    let cases = [
+        ("origin R=r=5 tol=2e-5", [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.0, 0.0, false, 2e-5),
+        ("tilted off-origin", [17.3, -9.4, 5.2], [1.0, 2.0, 3.0], [2.0, -1.0, 0.0], 5.0, 0.0, 0.0, false, 1e-7),
+        ("meridian off ref_direction", [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.7, 0.0, false, 1e-7),
+        ("parallel at top circle", [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.0, std::f64::consts::FRAC_PI_2, false, 1e-7),
+        ("parallel near pinch pole", [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.7, 3.0, false, 1e-7),
+        ("degenerate toroidal surface", [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.0, 0.0, true, 2e-5),
+    ];
+    for (label, origin, axis, ref_dir, r, lon, par, degen, tol) in cases {
+        let mut w = W::default();
+        let f = full_horn_torus_face(&mut w, origin, axis, ref_dir, r, lon, Some(par), 0.0, degen, true);
+        let shell = closed_shell(&mut w, &[f]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('Ring',#{shell})"));
+        let ex = w.file_with_uncertainty(&[solid], tol);
+        let res = read_solids(&ex);
+        assert!(res.failures.is_empty(), "{label}: {:?}", res.failures);
+        let s = res.solids.into_iter().next().unwrap_or_else(|| panic!("{label}: no solid"));
+        check_horn_torus_solid(&s, r, [2, 1, 1, 2, 2], label);
+    }
+}
+
+/// #21218: a full horn torus bounded by its meridian slit alone (starting at the outer equator
+/// or starting at the pinch pole) also imports as a valid manifold solid with closed-form volume.
+#[test]
+fn a_full_horn_torus_with_meridian_slit_only_imports_as_a_valid_solid() {
+    for (label, start_tube, expected_counts) in
+        [("equator start", 0.0, [2, 1, 1, 2, 2]), ("off-grid start", 0.3, [2, 1, 1, 2, 2]), ("pole start", PI, [2, 1, 1, 1, 1])]
+    {
+        let mut w = W::default();
+        let f = full_horn_torus_face(&mut w, [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.4, None, start_tube, false, true);
+        let shell = closed_shell(&mut w, &[f]);
+        let solid = w.add(format!("MANIFOLD_SOLID_BREP('Ring',#{shell})"));
+        let res = read_solids(&w.file(&[solid]));
+        assert!(res.failures.is_empty(), "{label}: {:?}", res.failures);
+        let s = res.solids.into_iter().next().unwrap_or_else(|| panic!("{label}: no solid"));
+        check_horn_torus_solid(&s, 5.0, expected_counts, label);
+    }
+}
+
+/// #21218: a full horn torus as an inward-facing cavity inside a cube subtracts `2 π² r³` from
+/// the cube's volume.
+#[test]
+fn a_full_horn_torus_void_inside_a_cube_subtracts_its_closed_form_volume() {
+    let mut w = W::default();
+    let outer_faces = box_faces(&mut w, [-20.0; 3], [20.0; 3], BoxStyle::default(), &mut |_, _| Vec::new());
+    let outer = closed_shell(&mut w, &outer_faces);
+    let void_face = full_horn_torus_face(&mut w, [0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0, 0.0, Some(0.0), 0.0, false, false);
+    let inner = closed_shell(&mut w, &[void_face]);
+    let void = w.add(format!("ORIENTED_CLOSED_SHELL('',*,#{inner},.T.)"));
+    let solid = w.add(format!("BREP_WITH_VOIDS('BlockWithHornVoid',#{outer},(#{void}))"));
+    let res = read_solids(&w.file(&[solid]));
+    assert!(res.failures.is_empty(), "{:?}", res.failures);
+    let s = res.solids.into_iter().next().unwrap();
+    assert!(!s.sheet);
+    solidcore_ops::record_check::validate(&s.brep).unwrap();
+    solidcore_ops::record_check::agreement(&s.brep).unwrap();
+    let (body, _) = solidcore_ops::body::Body::from_record(&s.brep, false).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    assert_eq!(body.check_solid(), Ok(()));
+    let report = body.check(solidcore_ops::check::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "{report}");
+    let exact_vol = 40.0_f64.powi(3) - 2.0 * PI * PI * 5.0_f64.powi(3);
+    let mass = body.mass_properties(1e-6).unwrap();
+    assert!((mass.volume - exact_vol).abs() < 1e-6 * exact_vol, "{} vs {exact_vol}", mass.volume);
+}
+
 /// A quarter elbow: a torus face winding round its tube between two tube circles (at u = 0 and
 /// u = π/2), closed by the two disks they bound. The tube face gets a seam round the axis at a
 /// vertex's angle round the tube, as a band round the axis gets one round the tube.

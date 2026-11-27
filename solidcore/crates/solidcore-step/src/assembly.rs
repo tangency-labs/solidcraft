@@ -836,6 +836,7 @@ impl<'t> Assembly<'t> {
         if at_poles > 0 {
             notes.push(format!("{at_poles} edges split where they pass through a face's pole"));
         }
+        self.reduce_pole_closed_seams()?;
         self.start_splines_clear_of_faces()?;
         let seams = self.add_seams()?;
         if seams > 0 {
