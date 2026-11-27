@@ -551,7 +551,8 @@ impl OffsetExecutive {
 
     /// Not upstream: whether offset face `face` came wholly from original faces that keep
     /// their surfaces and every edge and vertex unchanged ([`Self::keep_unmoved_edges`]),
-    /// so its surface and UV trims are already the original's and need no extension.
+    /// so its surface and loops are already the original's and need no extension or
+    /// crossing-loop resolution.
     pub(super) fn is_kept_offset_face(&self, face: FaceId) -> bool {
         if self.operation != OffsetOperation::LocalOperation || self.inverted_faces.contains(&face)
         {
