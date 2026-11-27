@@ -191,7 +191,7 @@ pub const VIEWPORT_STATUS: Page = Page {
     what: "The chips along the 3D view's edge that say a mode or analysis is on (Draft, Section, Zebra), open its settings and clear it.",
     usage: r#"
 let item = ui_kit::StatusItem { id: "draft".into(), kind: ui_kit::StatusKind::Mode, name: "Draft".into(),
-    setting: "Z · 1°".into(), has_key: true, editable: false };
+    setting: "Z · 1°".into(), has_key: true, editable: false, clear_key: None };
 let (rect, action) = ui_kit::viewport_status_item(ui, &item, &mut presentation);
 "#,
     dos: &["Show every mode that changes what the view draws, so it is never on unnoticed."],
@@ -202,7 +202,15 @@ let (rect, action) = ui_kit::viewport_status_item(ui, &item, &mut presentation);
             ("interference", ui_kit::StatusKind::Result, "Interference", "2 found"),
             ("thin", ui_kit::StatusKind::Attention, "Thin walls", "3 faces"),
         ] {
-            let item = ui_kit::StatusItem { id: id.into(), kind, name: name.into(), setting: setting.into(), has_key: true, editable: false };
+            let item = ui_kit::StatusItem {
+                id: id.into(),
+                kind,
+                name: name.into(),
+                setting: setting.into(),
+                has_key: true,
+                editable: false,
+                clear_key: None,
+            };
             let (_, action) = ui_kit::viewport_status_item(ui, &item, &mut d.status);
             if let Some(action) = action {
                 d.said(format!("{action:?}"));

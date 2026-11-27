@@ -303,6 +303,13 @@ pub fn mode_in_force(app: &crate::SolveApp, id: &str) -> Mode {
     if app.policy.locks("ai_permissions") { app.preferences.ai_permissions } else { mode_for(&app.preferences, id) }
 }
 
+/// The mode an agent's Permissions row shows: its own choice (None for "Same as above"), or, while
+/// the organization's policy sets `ai_permissions`, the mode in force. The agent's own choice is kept,
+/// unchanged, for when the policy goes.
+pub fn mode_shown(app: &crate::SolveApp, id: &str) -> Option<Mode> {
+    if app.policy.locks("ai_permissions") { Some(app.preferences.ai_permissions) } else { app.preferences.agent_permissions.get(id).copied() }
+}
+
 /// Whether an "always allow" answer lets `agent` use `tool` without asking. None does while the
 /// organization's policy sets `ai_permissions`: the answers are kept for when the policy goes.
 pub fn always_allowed_in_force(app: &crate::SolveApp, agent: &str, tool: &str) -> bool {
@@ -348,6 +355,8 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "Cheaper Inference", base_url: "https://api.cheaperinference.com/v1" },
     // UnoRouter serves OpenAI-compatible chat completions and GET /v1/models (#17068).
     ApiPreset { name: "UnoRouter", base_url: "https://api.unorouter.com/v1" },
+    // AI/ML API lists image, video and speech models too; the picker keeps the chat ones (#20006).
+    ApiPreset { name: "AI/ML API", base_url: "https://api.aimlapi.com/v1" },
     ApiPreset { name: "OpenRouter", base_url: "https://openrouter.ai/api/v1" },
 ];
 
@@ -547,6 +556,13 @@ mod tests {
                 .any(|p| p.name == "UnoRouter" && p.base_url == "https://api.unorouter.com/v1" && key_safe_for(p.base_url))
         );
         assert!(!presets(Protocol::Anthropic).iter().any(|p| p.name == "UnoRouter"), "this preset uses OpenAI-compatible chat completions");
+        // #20006: AI/ML API, OpenAI-compatible over HTTPS, just before OpenRouter.
+        let at = |name: &str| OPENAI_PRESETS.iter().position(|p| p.name == name);
+        let aimlapi = at("AI/ML API").expect("AI/ML API preset");
+        assert_eq!(OPENAI_PRESETS[aimlapi].base_url, "https://api.aimlapi.com/v1");
+        assert!(key_safe_for(OPENAI_PRESETS[aimlapi].base_url));
+        assert_eq!(Some(aimlapi + 1), at("OpenRouter"));
+        assert!(!presets(Protocol::Anthropic).iter().any(|p| p.name == "AI/ML API"));
         assert!(presets(Protocol::Anthropic).iter().any(|p| p.base_url == "https://api.anthropic.com/v1"));
         for name in ["DeepSeek", "Qwen"] {
             assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == name), "OpenAI-compatible preset for {name}");

@@ -148,7 +148,7 @@ pub(super) fn read_text_entity(
     }
     let Placement { source, horizontal, vertical, angle_deg } = if mtext { mtext_placement(entity)? } else { text_placement(entity)? };
     let at = super::scale_point(source, k);
-    if !at.is_finite() || solidcore_ops::import_geometry::collapsed_coordinate(source, at) {
+    if !at.is_finite() || solidcraft_kernel::dxf::import::collapsed_coordinate(source, at) {
         return Err(invalid("nonfinite or collapsed scaled insertion point"));
     }
     let raw_height = required(entity, 40)?;
@@ -156,7 +156,7 @@ pub(super) fn read_text_entity(
     if raw_height <= 0.0 || !height.is_finite() || height <= 0.0 {
         return Err(invalid("height must remain finite and positive after scaling"));
     }
-    if !solidcore_ops::export_geometry::finite_degrees(angle_deg) {
+    if !solidcraft_kernel::dxf::import::finite_degrees(angle_deg) {
         return Err(invalid("invalid rotation angle"));
     }
     // TEXT holds its value in group 1; MTEXT in group 3 chunks, then a group 1 tail.

@@ -6,13 +6,21 @@
 //! - [`AnalysisMemo`]: the analyses' results kept in the kernel by the curve's exact
 //!   content, so an unchanged curve checked again is not solved again.
 //!
-//! It is off when `Kernel::memoize_curve_caches` is off (the `curve-memo-off` feature),
-//! which runs every analysis in full, to check that it changes nothing.
+//! It is off when `Kernel::memoize_curve_caches` is off (set on the kernel), which runs
+//! every analysis in full, to check that it changes nothing.
 //!
 //! The control-point bounds that used to skip an analysis whose tolerance they cleared
 //! are gone: the analyses' own statuses are passed on (WR-663, tangency-labs/smlib
 //! 8843967), so a search that fails must run to report its failure, which no bound on
 //! the curve's speed or radius predicts.
+//!
+//! Not upstream (tangency-labs/solidcraft#11574): one closed-form exception,
+//! `span_bounds` in `p3.rs`. On a curve of degree 1 or 2 made of Bezier spans (straight
+//! segments and conic arcs), it bounds the speed and the radius of curvature from below,
+//! exactly up to rounding. A search whose bound clears its tolerance is not run: no
+//! solution could fail its test, but a numeric failure of that search is then not
+//! reported either, which is the WR-663 trade-off this exception makes for such curves.
+//! It is off with `Kernel::memoize_curve_caches`, as the memo is.
 //!
 //! Deviations: not upstream. No recursion.
 
@@ -51,18 +59,21 @@ pub struct AnalysisMemo {
 
 impl AnalysisMemo {
     /// Whether this memo holds no local entries.
+    #[cfg(any(not(target_arch = "wasm32"), test))]
     #[must_use]
     pub(crate) fn is_empty(&self) -> bool {
         self.results.is_empty()
     }
 
     /// Cheap ref-counted snapshot of local entries for read-only worker lookup.
+    #[cfg(any(not(target_arch = "wasm32"), test))]
     #[must_use]
     pub(crate) fn snapshot(&self) -> AnalysisSnapshot {
         Arc::new(self.results.clone())
     }
 
     /// Attaches a read-only parent snapshot (used by scoped parallel workers).
+    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn set_parent(&mut self, parent: Option<AnalysisSnapshot>) {
         self.parent = parent;
     }
@@ -98,6 +109,7 @@ impl AnalysisMemo {
     }
 
     /// Merges entries recorded by a worker memo into `self` in deterministic FIFO order.
+    #[cfg(any(not(target_arch = "wasm32"), test))]
     pub(crate) fn merge_from(&mut self, other: &Self) {
         for key in &other.order {
             if let Some(result) = other.results.get(key) {
@@ -128,7 +140,8 @@ pub(crate) fn analysis_key(
     let degree = u64::try_from(cur.degree()).ok()?;
     let n_cpts = u64::try_from(cpts.len()).ok()?;
     let n_knots = u64::try_from(knots.len()).ok()?;
-    let mut key = Vec::with_capacity(10 + cpts.len() * 4 + knots.len() + settings.len());
+    let mut key = Vec::new();
+    let _ = key.try_reserve(10 + cpts.len() * 4 + knots.len() + settings.len());
     key.extend_from_slice(&[
         property,
         lo.to_bits(),

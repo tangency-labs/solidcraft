@@ -32,7 +32,9 @@
 //! point back to its edge as the fork's check reads it.
 //! Only `SmBSplineCurve`, parabola and hyperbola checks take it; a line has too few
 //! control points for a zero-speed end and an ellipse's conic segments have no
-//! coincident end control points.
+//! coincident end control points. Not upstream: one edge's check evaluates each edge
+//! use's binormal at a parameter once while the B-rep is unwritten (`Binormals`): the
+//! edge-use check, the radial walk and the radial order read the same ones.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -257,6 +259,7 @@ fn replay_curve_output(cx: &mut Cx<'_>, out: CurveCheckOutput) -> bool {
     out.ok
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn precheck_one_edge(
     k: &Kernel,
     b: &Brep,
@@ -299,6 +302,9 @@ fn precheck_one_edge(
 
     let mut trim_curves = BTreeMap::new();
     for &eu in edgeuses {
+        if b.edgeuse(eu)?.edge != Some(e) && b.edgeuse(eu)?.edge.is_some() {
+            continue;
+        }
         let Some(c) = b.edgeuse(eu)?.uv_trim_curve.as_ref() else {
             continue;
         };
@@ -306,15 +312,10 @@ fn precheck_one_edge(
             Some(f) => b.face(f)?.surface.as_ref(),
             None => None,
         };
-        let eu_edge = eu1::edge(b, eu)?;
-        let other_ends = match eu_edge {
-            Some(other_e) if other_e != e => Some(edge_ends(k, b, other_e)?),
-            _ => None,
-        };
-        let ends = match eu_edge {
-            Some(other_e) if other_e == e => shared_ends.as_ref(),
-            Some(_) => other_ends.as_ref(),
-            None => None,
+        let ends = if b.edgeuse(eu)?.edge == Some(e) {
+            shared_ends.as_ref()
+        } else {
+            None
         };
         let mut local = want_reports.then(AssertArray::new);
         let ok = curve_readonly(
@@ -337,10 +338,10 @@ fn precheck_one_edge(
 }
 
 /// Pre-evaluates the expensive read-only edge curve and UV trim curve checks across
-/// `edges` in parallel when the body is large enough and multiple threads are available
-/// (not upstream). Returns `None` on wasm32, single-core hosts, or small edge counts.
-/// Errors are stored per-edge so the serial replay loop reports the first error in exact
-/// native edge order.
+/// dirty `edges` in parallel when the body is large enough and multiple threads are
+/// available (not upstream). Returns `None` on wasm32, single-core hosts, poll-counting
+/// cancellation/fuel tokens, or small dirty-edge counts. Errors are stored per-edge so
+/// the serial replay loop reports the first error in exact native edge order.
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn precheck_edges(
     k: &mut Kernel,
@@ -348,25 +349,36 @@ pub(super) fn precheck_edges(
     edges: &[EdgeId],
     level: u8,
     want_reports: bool,
-) -> Result<Option<Vec<Result<EdgeCurvePrecheck>>>> {
+) -> Result<Option<Vec<Option<Result<EdgeCurvePrecheck>>>>> {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
     const PARALLEL_EDGE_THRESHOLD: usize = 16;
     const OP_PRECHECK: &str = "topology::brep::validation::assert_valid::edge::precheck_edges";
 
-    if edges.len() < PARALLEL_EDGE_THRESHOLD {
+    if edges.len() < PARALLEL_EDGE_THRESHOLD
+        || k.cancel.as_ref().is_some_and(|c| c.polls().is_some())
+    {
+        return Ok(None);
+    }
+    let dirty: Vec<(usize, EdgeId)> = edges
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|&(_, e)| !crate::geom::check_memo::edge_clean(k, e))
+        .collect();
+    if dirty.len() < PARALLEL_EDGE_THRESHOLD {
         return Ok(None);
     }
     let threads = std::thread::available_parallelism()
         .map_or(1, usize::from)
-        .min(edges.len() / 4);
+        .min(dirty.len() >> 2);
     if threads < 2 {
         return Ok(None);
     }
 
-    // Materialize any missing NURB on analytic curves once before read-only parallel work.
-    for &e in edges {
+    // Materialize any missing NURB on dirty analytic curves once before read-only parallel work.
+    for &(_, e) in &dirty {
         k.check_cancelled(OP_PRECHECK)?;
         if let Some(c) = b.edge_mut(e)?.curve.as_mut() {
             ensure_curve_nurb(k, c, level)?;
@@ -394,40 +406,45 @@ pub(super) fn precheck_edges(
     let blend_net_tol = k.blend_net_tolerance.get();
     let prove_lazy_trim = k.caches.prove_lazy_trim_raise;
     let b_ref: &Brep = &*b;
+    let dirty_ref: &[(usize, EdgeId)] = &dirty;
     let next_idx = AtomicUsize::new(0);
 
     let worker_outputs: Vec<_> = std::thread::scope(|scope| {
-        let mut handles = Vec::with_capacity(threads);
+        let mut handles = Vec::new();
+        let _ = handles.try_reserve(threads);
         for _ in 0..threads {
             let parent_memo = parent_memo.as_ref().map(Arc::clone);
             let cancel = cancel.clone();
             let next_idx = &next_idx;
             handles.push(scope.spawn(move || {
-                let mut worker_k =
-                    Kernel::new(&crate::kernel::KernelOptions { tolerances, seed });
+                let mut worker_k = Kernel::new(&crate::kernel::KernelOptions { tolerances, seed });
                 worker_k.fixes = fixes;
                 worker_k.memoize_curve_caches = memoize;
                 worker_k.cancel = cancel;
                 worker_k.blend_net_tolerance.set(blend_net_tol);
                 worker_k.caches.prove_lazy_trim_raise = prove_lazy_trim;
                 if let Some(parent) = parent_memo {
-                    worker_k.caches.curve_analysis.borrow_mut().set_parent(Some(parent));
+                    worker_k
+                        .caches
+                        .curve_analysis
+                        .borrow_mut()
+                        .set_parent(Some(parent));
                 }
                 let mut results = Vec::new();
                 loop {
                     if let Err(err) = worker_k.check_cancelled(OP_PRECHECK) {
-                        let idx = next_idx.fetch_add(1, Ordering::Relaxed);
-                        if idx < edges.len() {
-                            results.push((idx, Err(err)));
+                        let d_idx = next_idx.fetch_add(1, Ordering::Relaxed);
+                        if let Some(&(orig_idx, _)) = dirty_ref.get(d_idx) {
+                            results.push((orig_idx, Err(err)));
                         }
                         break;
                     }
-                    let idx = next_idx.fetch_add(1, Ordering::Relaxed);
-                    let Some(&e) = edges.get(idx) else {
+                    let d_idx = next_idx.fetch_add(1, Ordering::Relaxed);
+                    let Some(&(orig_idx, e)) = dirty_ref.get(d_idx) else {
                         break;
                     };
                     let res = precheck_one_edge(&worker_k, b_ref, e, level, want_reports);
-                    results.push((idx, res));
+                    results.push((orig_idx, res));
                 }
                 (
                     results,
@@ -436,7 +453,8 @@ pub(super) fn precheck_edges(
                 )
             }));
         }
-        let mut collected = Vec::with_capacity(handles.len());
+        let mut collected = Vec::new();
+        let _ = collected.try_reserve(handles.len());
         for handle in handles {
             if let Ok(out) = handle.join() {
                 collected.push(out);
@@ -459,37 +477,34 @@ pub(super) fn precheck_edges(
         for id in ub {
             k.note_upstream_ub(id);
         }
-        for (idx, res) in results {
-            if let Some(slot) = slots.get_mut(idx) {
+        for (orig_idx, res) in results {
+            if let Some(slot) = slots.get_mut(orig_idx) {
                 *slot = Some(res);
             }
         }
     }
 
-    let mut out = Vec::with_capacity(edges.len());
-    for (idx, slot) in slots.into_iter().enumerate() {
-        if let Some(res) = slot {
-            out.push(res);
-        } else {
-            // Only unvisited if cancellation stopped workers early.
-            k.check_cancelled(OP_PRECHECK)?;
-            let Some(&e) = edges.get(idx) else {
-                break;
-            };
-            out.push(precheck_one_edge(k, b, e, level, want_reports));
+    for &(orig_idx, e) in &dirty {
+        if let Some(slot) = slots.get_mut(orig_idx) {
+            if slot.is_none() {
+                // Only unvisited if cancellation stopped workers early.
+                k.check_cancelled(OP_PRECHECK)?;
+                *slot = Some(precheck_one_edge(k, b, e, level, want_reports));
+            }
         }
     }
-    Ok(Some(out))
+    Ok(Some(slots))
 }
 
 #[cfg(target_arch = "wasm32")]
+#[allow(clippy::unnecessary_wraps)]
 pub(super) fn precheck_edges(
     _k: &mut Kernel,
     _b: &mut Brep,
     _edges: &[EdgeId],
     _level: u8,
     _want_reports: bool,
-) -> Result<Option<Vec<Result<EdgeCurvePrecheck>>>> {
+) -> Result<Option<Vec<Option<Result<EdgeCurvePrecheck>>>>> {
     Ok(None)
 }
 
@@ -629,10 +644,15 @@ pub(super) fn edge_with_precheck(
         rtn &= cx.rep.this_bool(b, C, this, 2, ok)?;
     }
 
+    // not upstream: the geometric tests of an edge whose neighbourhood passed them on a
+    // body before are skipped ([`crate::geom::check_memo`]); the structural ones run
+    let geo = !crate::geom::check_memo::edge_clean(k, e);
+
     // Check all connected Edgeuses (precompute `edge_ends` once for the edge and all its
     // edgeuses on the serial path instead of recomputing it per edgeuse).
     let edgeuses = b.edge(e)?.edgeuses.clone();
-    let shared_ends = if precheck.is_none()
+    let shared_ends = if geo
+        && precheck.is_none()
         && (has_curve
             || edgeuses
                 .iter()
@@ -644,7 +664,7 @@ pub(super) fn edge_with_precheck(
     };
 
     // Check Edge->Curve
-    if has_curve {
+    if has_curve && geo {
         if let Some(out) = precheck.as_mut().and_then(|p| p.edge_curve.take()) {
             rtn &= replay_curve_output(cx, out);
         } else {
@@ -656,35 +676,49 @@ pub(super) fn edge_with_precheck(
     rtn &= cx
         .rep
         .this_bool(b, C, this, 3, !need || !edgeuses.is_empty())?;
+    // not upstream: the binormals this edge's check evaluates, each kept while the
+    // B-rep is unwritten (see [`Binormals`])
+    let mut binormals = Binormals::default();
     for &eu in &edgeuses {
         let trim_precheck = precheck.as_mut().and_then(|p| p.trim_curves.remove(&eu));
-        rtn &= edgeuse_with_precheck(k, b, cx, eu, Some(e), shared_ends.as_ref(), trim_precheck)?;
+        rtn &= edgeuse_with_precheck(
+            k,
+            b,
+            cx,
+            eu,
+            &mut binormals,
+            Some(e),
+            shared_ends.as_ref(),
+            trim_precheck,
+        )?;
     }
 
     let edge_tol = tedge::tolerance(b, e)?;
-    let curve_length = {
-        let c = super::super::required(b.edge(e)?.curve.as_ref())?;
-        c.approximate_length(k, &interval, 5, false)?.0
-    };
+    if geo {
+        let curve_length = {
+            let c = super::super::required(b.edge(e)?.curve.as_ref())?;
+            c.approximate_length(k, &interval, 5, false)?.0
+        };
 
-    // 7: Edge Length must be larger than its tolerance
-    let ok = !need || curve_length >= edge_tol - EFF_ZERO;
-    rtn &= cx
-        .rep
-        .this_value(b, C, this, 7, ok, edge_tol, || curve_length - edge_tol)?;
+        // 7: Edge Length must be larger than its tolerance
+        let ok = !need || curve_length >= edge_tol - EFF_ZERO;
+        rtn &= cx
+            .rep
+            .this_value(b, C, this, 7, ok, edge_tol, || curve_length - edge_tol)?;
 
-    // 13: Edge->Curve must be within SmTol::GetXSectTol3d(Edge, GenSurface) of all
-    // Face->Surfaces (level 2)
-    let xsect_tol = edge_tol + edge_tol;
-    let mut max_gap = 0.0;
-    let ok = !cx.rep.need(2) || {
-        let (passed, gap) = seams::assert_test_edge13(k, b, e)?;
-        max_gap = gap;
-        passed
-    };
-    rtn &= cx
-        .rep
-        .this_value(b, C, this, 13, ok, xsect_tol, || max_gap)?;
+        // 13: Edge->Curve must be within SmTol::GetXSectTol3d(Edge, GenSurface) of all
+        // Face->Surfaces (level 2)
+        let xsect_tol = edge_tol + edge_tol;
+        let mut max_gap = 0.0;
+        let ok = !cx.rep.need(2) || {
+            let (passed, gap) = seams::assert_test_edge13(k, b, e)?;
+            max_gap = gap;
+            passed
+        };
+        rtn &= cx
+            .rep
+            .this_value(b, C, this, 13, ok, xsect_tol, || max_gap)?;
+    }
 
     // 14: Edge->Edgeuse orientations must alternate, SAME-OPPO-SAME-OPPO
     let ok = !need || assert_test_edge14(b, e)?;
@@ -721,11 +755,55 @@ pub(super) fn edge_with_precheck(
 
     // radial ordering of the faceuses round a manifold or spine edge
     if tedge::is_manifold(b, e)? || tedge::is_spine(b, e)? {
-        rtn &= radial_order(k, b, cx, e, &vertices)?;
+        rtn &= radial_order(k, b, cx, e, &vertices, &mut binormals)?;
     }
 
     // all done
     Ok(rtn)
+}
+
+/// Not upstream: the binormals of one edge's check, `evaluate_binormal(eu, t, use_3d_only:
+/// true, default options)` keyed by edge use and parameter. The edge-use check, the radial
+/// walk's tie test and the radial order's sector directions each read the binormal of the
+/// same edge use at the same parameter; a kept value is given back only while the B-rep's
+/// [`Brep::write_stamps`] equal those it was evaluated under, and only a call that wrote
+/// nothing is kept. `evaluate_binormal` reads only the kernel and the B-rep, so a kept
+/// value is the one the call would return. Errors are not kept: the call runs again and
+/// returns its error again.
+#[derive(Default)]
+pub(super) struct Binormals {
+    /// The stamps the kept values were evaluated under.
+    stamps: Option<crate::topology::WriteStamps>,
+    /// The kept values: edge use, the parameter's bits, the binormal.
+    kept: Vec<(EdgeuseId, u64, crate::topology::edgeuse::p2::BinormalEval)>,
+}
+
+impl Binormals {
+    /// `evaluate_binormal(k, b, eu, t, true, &BinormalOptions::default())`, reusing the
+    /// value kept for `eu` at `t` while the B-rep is unwritten.
+    fn eval(
+        &mut self,
+        k: &Kernel,
+        b: &mut Brep,
+        eu: EdgeuseId,
+        t: f64,
+    ) -> Result<crate::topology::edgeuse::p2::BinormalEval> {
+        let stamps = b.write_stamps();
+        if self.stamps.as_ref() != Some(&stamps) {
+            self.kept.clear();
+            self.stamps = None;
+        }
+        let bits = t.to_bits();
+        if let Some(&(_, _, eval)) = self.kept.iter().find(|x| x.0 == eu && x.1 == bits) {
+            return Ok(eval);
+        }
+        let eval = evaluate_binormal(k, b, eu, t, true, &BinormalOptions::default())?;
+        if b.write_stamps() == stamps {
+            self.stamps = Some(stamps);
+            self.kept.push((eu, bits, eval));
+        }
+        Ok(eval)
+    }
 }
 
 /// The edge curve's point at `t` (`m_pCurve->EvaluatePoint`).
@@ -744,13 +822,13 @@ fn sector_direction(
     b: &mut Brep,
     eu: EdgeuseId,
     t: f64,
-    options: BinormalOptions,
+    binormals: &mut Binormals,
     step_off: bool,
     step_off_dist: f64,
     certified: Option<&[(EdgeuseId, crate::math::Vec3)]>,
 ) -> Result<crate::topology::edgeuse::p2::BinormalEval> {
     use crate::topology::edgeuse::p2::{evaluate_binormal_step_off, StepOffOptions};
-    let mut eval = evaluate_binormal(k, b, eu, t, true, &options)?;
+    let mut eval = binormals.eval(k, b, eu, t)?;
     if let Some(&(_, dir)) = certified.and_then(|c| c.iter().find(|(u, _)| *u == eu)) {
         eval.binormal = dir;
         return Ok(eval);
@@ -787,6 +865,7 @@ fn radial_order(
     cx: &mut Cx<'_>,
     e: EdgeId,
     vertices: &[Option<crate::topology::VertexId>],
+    binormals: &mut Binormals,
 ) -> Result<bool> {
     const C: i64 = class::EDGE;
     let this = EntityRef::Edge(e);
@@ -803,7 +882,6 @@ fn radial_order(
     let mut primary_tangent = Point3::UNDEF;
     let circle = Extent1d::from_min_max(0.0, 360.0);
     let bound = b.edge(e)?.edgeuses.len() + 1;
-    let options = BinormalOptions::default();
 
     // Must watch out for zero sectors: coincident faces.
     let mut have_nonzero_angle = false;
@@ -829,8 +907,8 @@ fn radial_order(
         if !eu1::is_loop_edgeuse(b, eu)? || !eu1::is_loop_edgeuse(b, rad)? {
             break;
         }
-        let b0 = crate::error::ignored(evaluate_binormal(k, b, eu, seq_param, true, &options))?;
-        let b1 = crate::error::ignored(evaluate_binormal(k, b, rad, seq_param, true, &options))?;
+        let b0 = crate::error::ignored(binormals.eval(k, b, eu, seq_param))?;
+        let b1 = crate::error::ignored(binormals.eval(k, b, rad, seq_param))?;
         let mut tie = false;
         if let (Some(b0), Some(b1)) = (b0, b1) {
             if let (Ok(u0), Ok(u1)) = (b0.binormal.unitize(), b1.binormal.unitize()) {
@@ -870,10 +948,26 @@ fn radial_order(
         }
         let t = extent.evaluate(0.456);
         let certified = certified.as_deref();
-        let target_eval =
-            sector_direction(k, b, target, t, options, step_off, step_off_dist, certified)?;
-        let radial_eval =
-            sector_direction(k, b, radial, t, options, step_off, step_off_dist, certified)?;
+        let target_eval = sector_direction(
+            k,
+            b,
+            target,
+            t,
+            binormals,
+            step_off,
+            step_off_dist,
+            certified,
+        )?;
+        let radial_eval = sector_direction(
+            k,
+            b,
+            radial,
+            t,
+            binormals,
+            step_off,
+            step_off_dist,
+            certified,
+        )?;
 
         // 1st iteration save variables
         if primary.is_none() {
@@ -1006,7 +1100,13 @@ fn in_wire_shell(
 
 /// The UV trim checks of `SmEdgeuse::AssertValid` (tests 11, 6, 7, 25, 26) for an edge
 /// use holding a UV trim curve.
-fn uv_trim_checks(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, eu: EdgeuseId) -> Result<bool> {
+fn uv_trim_checks(
+    k: &mut Kernel,
+    b: &mut Brep,
+    cx: &mut Cx<'_>,
+    eu: EdgeuseId,
+    geo: bool,
+) -> Result<bool> {
     const C: i64 = class::EDGEUSE;
     let this = EntityRef::Edgeuse(eu);
     let mut rtn = true;
@@ -1047,7 +1147,7 @@ fn uv_trim_checks(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, eu: EdgeuseId) 
 
     // UVTrimCurve->Owner pointer must equal this Edgeuse pointer
     let check = trim.owner() == Some((cx.keys)(this));
-    if check {
+    if check && geo {
         let s = super::super::required(surface)?;
         let on_surface = crate::curve::crv_on_surf::CrvOnSurf::new(
             k,
@@ -1067,7 +1167,7 @@ fn uv_trim_checks(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, eu: EdgeuseId) 
     rtn &= cx.rep.this_bool(b, C, this, 6, !need || check)?;
 
     // 7: see if the UVTrimCurve jumps across a periodic boundary inappropriately
-    let ok = !need || {
+    let ok = !need || !geo || {
         let trim = super::super::required(b.edgeuse(eu)?.uv_trim_curve.as_ref())?;
         seams::assert_no_periodic_jump(k, trim, closed_u, closed_v, &domain)?
     };
@@ -1086,13 +1186,23 @@ fn uv_trim_checks(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, eu: EdgeuseId) 
     Ok(rtn)
 }
 
+/// Whether edge use `eu`'s geometric tests run: its edge's neighbourhood has not passed
+/// them on a body before ([`crate::geom::check_memo`]).
+fn edgeuse_geometry_due(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<bool> {
+    Ok(match b.edgeuse(eu)?.edge {
+        Some(e) => !crate::geom::check_memo::edge_clean(k, e),
+        None => true,
+    })
+}
+
 /// `SmEdgeuse::AssertValid(SM_NO_WALK)`.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 fn edgeuse_with_precheck(
     k: &mut Kernel,
     b: &mut Brep,
     cx: &mut Cx<'_>,
     eu: EdgeuseId,
+    binormals: &mut Binormals,
     parent_edge: Option<EdgeId>,
     parent_ends: Option<&EdgeEnds>,
     trim_precheck: Option<CurveCheckOutput>,
@@ -1106,6 +1216,9 @@ fn edgeuse_with_precheck(
         rtn &= base::topology(b, cx, this)?;
     }
     let need = cx.rep.need(0);
+    // not upstream: the geometric tests of a use of an edge whose neighbourhood passed
+    // them on a body before are skipped ([`crate::geom::check_memo`])
+    let geo = edgeuse_geometry_due(k, b, eu)?;
 
     // Edgeuse and the objects it attaches to need to share common contexts
     let record = b.edgeuse(eu)?;
@@ -1139,7 +1252,7 @@ fn edgeuse_with_precheck(
 
     // for edgeuses with UVTrimCurves on closed surfaces
     if has_trim {
-        rtn &= uv_trim_checks(k, b, cx, eu)?;
+        rtn &= uv_trim_checks(k, b, cx, eu, geo)?;
     }
 
     // 17: Edgeuse type is SmLoopuse_TYPE only when m_pSorLU points to a Loopuse
@@ -1248,11 +1361,10 @@ fn edgeuse_with_precheck(
                     };
                 rtn &= cx.rep.this_bool(b, C, this, 24, ok)?;
 
-                if let (Some(r), Some(_)) = (radial, mate) {
-                    let options = BinormalOptions::default();
+                if let (Some(r), Some(_), true) = (radial, mate, geo) {
                     let t = extent.evaluate(0.456);
-                    let target = evaluate_binormal(k, b, eu, t, true, &options)?;
-                    let radial_eval = evaluate_binormal(k, b, r, t, true, &options)?;
+                    let target = binormals.eval(k, b, eu, t)?;
+                    let radial_eval = binormals.eval(k, b, r, t)?;
 
                     // tangent sector orientation consistency (no new UV trim curves)
                     let tangent_sector = crate::topology::edgeuse::p2::is_tangent_sector(
@@ -1282,7 +1394,7 @@ fn edgeuse_with_precheck(
     }
 
     // when Edgeuse has a UVTrimCurve - Check that it's valid
-    if has_trim {
+    if has_trim && geo {
         if let Some(out) = trim_precheck {
             rtn &= replay_curve_output(cx, out);
         } else {
@@ -1327,7 +1439,7 @@ fn edgeuse_with_precheck(
     }
 
     // 20: The Control Polygon turns to follow a singular surface boundary
-    let dog_leg = seams::has_dog_leg_near_pole(k, b, eu)?;
+    let dog_leg = geo && seams::has_dog_leg_near_pole(k, b, eu)?;
     rtn &= cx.rep.this_bool(b, C, this, 20, !need || !dog_leg)?;
 
     // all done
@@ -1403,5 +1515,102 @@ mod tests {
         let cut = boolean_difference(&mut k, block, pin).unwrap();
         let (tangent, _) = tangent_edges(&k, &cut);
         assert!(tangent >= 1, "{tangent}");
+    }
+
+    /// The bodies of [`kept_binormals_are_the_evaluated_ones`]: a box, a cylinder, a box
+    /// less a cylinder resting on its face (WR-540's tangent edges) and a vendored filleted
+    /// boss, the same each call.
+    fn binormal_bodies(k: &mut Kernel) -> Vec<Brep> {
+        let corner = Point3::new(20.0, 5.0, 5.0);
+        let mut out = vec![create_box(k, corner, 15.0, 15.0, 27.5).unwrap()];
+        out.push(create_cylinder(k, Point3::new(0.0, 0.0, 0.0), 1.5, 4.0).unwrap());
+        let cut = create_box(k, corner, 15.0, 15.0, 27.5).unwrap();
+        let pin = create_cylinder(k, Point3::new(25.0, 12.5, 22.5), 5.0, 25.0).unwrap();
+        out.push(boolean_difference(k, cut, pin).unwrap());
+        out.push(filleted_boss(k));
+        out
+    }
+
+    /// The vendored `tests/data/issue_2621_solidcraft_m10_filleted_boss.smb`: a boss with
+    /// a filleted rim.
+    fn filleted_boss(k: &mut Kernel) -> Brep {
+        use crate::geom::attribute::AttributeStore;
+        use crate::topology::api_files::read_brep_from_file;
+        use crate::topology::brep::p10::TopologyEnv;
+        use crate::topology::topology::NotifyRecords;
+        let bytes = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/data/issue_2621_solidcraft_m10_filleted_boss.smb"
+        ));
+        let fresh = Brep::new();
+        let mut store = AttributeStore::new();
+        let mut records = NotifyRecords::new();
+        let key_of = |e| fresh.owner_identity(e);
+        let mut env = TopologyEnv {
+            all_attributes: &[],
+            attributes: &mut store,
+            key_of: &key_of,
+            records: &mut records,
+            next_key: 1 << 50,
+        };
+        let mut b = read_brep_from_file(k, Some(bytes.to_vec()), false, false, &mut env).unwrap();
+        b.refresh_cached_topology();
+        b
+    }
+
+    /// The full check of [`binormal_bodies`] reports what it reported before the edge
+    /// check kept its binormals: no failure line on any of them.
+    #[test]
+    fn binormal_bodies_check_as_before() {
+        use crate::topology::brep::validation::{check_brep_full, CheckLevel, ValidityScope};
+        let mut k = Kernel::default();
+        for (i, mut b) in binormal_bodies(&mut k).into_iter().enumerate() {
+            let check =
+                check_brep_full(&mut k, &mut b, CheckLevel::Level2, ValidityScope::Body).unwrap();
+            assert_eq!(check.lines(), Vec::<String>::new(), "body {i}");
+        }
+    }
+
+    /// [`Binormals`] gives back, bit for bit, what `evaluate_binormal` returns on the same
+    /// body never asked before; the second asking of every loop edge use is a kept value,
+    /// and a write to the B-rep drops every kept value.
+    #[test]
+    fn kept_binormals_are_the_evaluated_ones() {
+        let mut k = Kernel::default();
+        let mut bodies = binormal_bodies(&mut k);
+        let fresh = binormal_bodies(&mut k);
+        let options = BinormalOptions::default();
+        for (b, mut fresh) in bodies.iter_mut().zip(fresh) {
+            let mut memo = Binormals::default();
+            let mut uses = Vec::new();
+            for eu in b.edgeuses().ids().collect::<Vec<_>>() {
+                if !eu1::is_loop_edgeuse(b, eu).unwrap() {
+                    continue;
+                }
+                let e = b.edgeuse(eu).unwrap().edge.unwrap();
+                uses.push((eu, b.edge(e).unwrap().interval.evaluate(0.456)));
+            }
+            assert!(!uses.is_empty());
+            for round in 0..2 {
+                for &(eu, t) in &uses {
+                    let got = memo.eval(&k, b, eu, t);
+                    let want = evaluate_binormal(&k, &mut fresh, eu, t, true, &options);
+                    assert_eq!(format!("{got:?}"), format!("{want:?}"), "round {round}");
+                    let bits = |v: crate::math::Vec3| [v.x, v.y, v.z].map(f64::to_bits);
+                    let (got, want) = (got.unwrap(), want.unwrap());
+                    assert_eq!(bits(got.binormal), bits(want.binormal));
+                    assert_eq!(bits(got.tangent), bits(want.tangent));
+                    assert_eq!(bits(got.face_normal), bits(want.face_normal));
+                    assert_eq!(bits(got.point), bits(want.point));
+                }
+            }
+            // the first evaluation on a face can build its surface's cache (a write), so
+            // only the second round is all kept values
+            assert_eq!(memo.kept.len(), uses.len());
+            let (eu, t) = uses[0];
+            b.edgeuse_mut(eu).unwrap();
+            memo.eval(&k, b, eu, t).unwrap();
+            assert_eq!(memo.kept.len(), 1, "a write kept the old values");
+        }
     }
 }

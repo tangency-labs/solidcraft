@@ -971,15 +971,7 @@ fn a_bead_apart_past_its_sagitta_bound_is_refused_with_the_bound() {
     let want = 50.0_f64.sqrt() / 2.0 * (3.0 * PI / 8.0).tan();
     assert!((fit.size - want).abs() < 1e-9, "{} {want}", fit.size);
     assert!(
-        beads_apart(
-            &mut k,
-            &mut b,
-            &[edge],
-            &[size],
-            fit.size * (1.0 - 1e-6),
-            &[]
-        )
-        .is_ok(),
+        beads_apart(&mut k, &mut b, &[edge], &[size], fit.size, &[]).is_ok(),
         "the sagitta that fits builds"
     );
     assert!(smb(&k, &b) == before, "the corner changed");
@@ -1096,7 +1088,7 @@ fn unequal_legs_run_their_first_leg_along_the_face_picked() {
             &[edge],
             &[ChamferSize::Distances(legs)],
             h,
-            &[face],
+            &[Some(face)],
         )
         .unwrap()
         .remove(0);
