@@ -749,7 +749,14 @@ impl JsonSchema for ActivateParams {
     }
 }
 
-/// What `component.activate` returns.
+/// Make the parent of the active component the active one, at the placement the active one sits
+/// in: one level up a call, the design at the top. Refused while the design itself is active. A
+/// change of what is active, not an undo step. Replies as `component.activate` does.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct ActivateParentParams {}
+
+/// What `component.activate` and `component.activate.parent` return.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct ActivateResult {
     /// The active component now, by id.
@@ -2187,6 +2194,29 @@ pub struct OccurrencePropertiesParams {
     pub about: Option<Point3>,
 }
 
+/// Where an occurrence sits in one frame, in the forms `occurrence.move` takes.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PlacementPose {
+    /// Its origin, in mm.
+    pub position: [f64; 3],
+    /// The unit axis of its turn from the frame's axes. No turn: +Z.
+    pub axis: [f64; 3],
+    /// The turn about `axis`, in degrees, from 0 to 180.
+    pub angle_deg: f64,
+    /// The same placement as three rows of four: the rotation, with the translation in the last
+    /// column of each row.
+    pub matrix: [[f64; 4]; 3],
+}
+
+/// Where an occurrence sits: in its parent component and in the world.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct OccurrencePlacement {
+    /// Its own placement, in the component it is placed in.
+    pub in_parent: PlacementPose,
+    /// Its placement in the world: every placement above it applied.
+    pub world: PlacementPose,
+}
+
 /// What `occurrence.properties` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct OccurrencePropertiesResult {
@@ -2196,6 +2226,9 @@ pub struct OccurrencePropertiesResult {
     pub name: Option<String>,
     #[serde(flatten)]
     pub properties: PhysicalProperties,
+    /// Where it sits, in its parent and in the world, pending moves included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<OccurrencePlacement>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
@@ -2320,6 +2353,34 @@ pub struct BodyCollisionParams {
     pub component: Option<IdOrName>,
     /// `auto` (the export decides), `mesh`, `box`, `cylinder`, `sphere` or `none`.
     pub shape: String,
+}
+
+/// Draw bodies with or without their edge lines, whatever the visual style.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct BodyEdgeLinesParams {
+    /// The body, by name. Give this or `bodies`.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Several bodies, by name. Give this or `body`.
+    #[serde(default)]
+    pub bodies: Option<Vec<String>>,
+    /// `false` draws the bodies without their edge lines; `true` (the default) draws them as the
+    /// visual style says.
+    #[serde(default)]
+    pub show: Option<bool>,
+}
+
+/// What `body.edge_lines` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BodyEdgeLinesResult {
+    /// The bodies set.
+    pub bodies: Vec<String>,
+    /// Whether they now draw their edge lines.
+    pub show: bool,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
 }
 
 /// What `body.collision` returns.

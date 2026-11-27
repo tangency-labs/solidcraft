@@ -15,11 +15,20 @@
 //! record writes a sagitta yet
 //! ([`crate::surface::procedural_blend::convert::exact_to_record`] refuses one).
 //!
+//! A straight edge is a line, or a B-spline whose control points all lie within the edge's
+//! tolerance, at least the body's, of the line through its ends (some exporters write every
+//! edge as a B-spline: a curve lies in its control points' hull, so the whole edge is that
+//! close to the line). Two edges that run on, end to end, between the same two faces (one
+//! straight joint split by a vertex, as some exporters write it) get one bead each, square at
+//! their shared vertex: two planes meet in one line, so there is no corner between them. The
+//! two beads meet flush when their sections match: the same size, its first distance along
+//! the same face.
+//!
 //! Refused before anything is built, the part left as it was, as
 //! [`BlendFailure::WeldNotBuilt`] (class `Unsupported`) naming the edge or vertex: a joint
 //! that is not a straight edge between two planes ([`WeldGap::CurvedJoint`]: the bead on any
-//! joint, the foot blend, comes with its certificate), beads that meet at a vertex
-//! ([`WeldGap::BeadsMeetAtVertex`]: their corner) and a bead with an obtuse toe
+//! joint, the foot blend, comes with its certificate), beads that meet at a vertex between
+//! other faces ([`WeldGap::BeadsMeetAtVertex`]: their corner) and a bead with an obtuse toe
 //! ([`WeldGap::ObtuseToe`]). As too large (class `FilletTooLarge`), naming the size that
 //! builds: a toe past its face's trims ([`NoRoomReason::LegPastFace`], the leg) and a sagitta
 //! past its bound ([`NoRoomReason::BeadCutsFace`], the sagitta). As invalid input: an edge
@@ -403,8 +412,9 @@ struct Frame {
 ///
 /// # Errors
 ///
-/// [`WeldGap::CurvedJoint`] naming the edge for an edge that is not straight or a face on it
-/// that is not a plane; [`WeldGap::ObtuseToe`] naming the edge for legs whose toe is obtuse;
+/// [`WeldGap::CurvedJoint`] naming the edge for an edge not proved straight ([`straight`]) or
+/// a face on it that is not a plane; [`WeldGap::ObtuseToe`] naming the edge for legs whose toe
+/// is obtuse;
 /// native invalid input for an edge with no curve, not between two faces, or not an inside
 /// corner, and for an `along` that is not one of the edge's faces; [`BlendFailure::SizeBelowResolution`] naming the edge for a leg below the smallest
 /// size a fillet builds on `target`; those of the evaluations and of [`BeadDefinition::new`].
@@ -422,7 +432,7 @@ fn frame(
         .clone()
         .ok_or_else(|| SolidError::invalid_input(OP, "an edge with no curve"))?;
     let at_edge = Site::edge(TargetEdge::of_target(edge_id));
-    if !matches!(curve.kind(), CurveKind::Line(_)) {
+    if !matches!(curve.kind(), CurveKind::Line(_) | CurveKind::BSpline(_)) {
         return Err(not_built(WeldGap::CurvedJoint, at_edge));
     }
     let interval = edge::interval(target, edge_id)?;
@@ -434,7 +444,13 @@ fn frame(
             .ok_or_else(|| SolidError::invalid_input(OP, "the edge's curve gave no point"))
     };
     let start = at(0.0)?;
-    let run = at(1.0)? - start;
+    let end = at(1.0)?;
+    // a new or split edge's own tolerance may be 0: at least the body's, as elsewhere
+    let tol = edge::tolerance(target, edge_id)?.max(target.tolerance());
+    if !straight(&curve, start, end, tol)? {
+        return Err(not_built(WeldGap::CurvedJoint, at_edge));
+    }
+    let run = end - start;
     let length = run.length();
     let dir = run.unitize()?;
     // the edge's two faces: each one's direction into it from the edge and its normal
@@ -471,9 +487,16 @@ fn frame(
             .surface
             .clone()
             .ok_or_else(|| SolidError::invalid_input(OP, "a face with no surface"))?;
+        // a B-spline edge only lies within tolerance of the line the bead runs along: its
+        // tangent may lean off it, so its binormal is taken square to the line (the section's
+        // plane, as `BeadArc::new` reads it)
+        let binormal = match curve.kind() {
+            CurveKind::Line(_) => eval.binormal,
+            _ => eval.binormal - dir * eval.binormal.dot(dir),
+        };
         sides.push((
             face,
-            eval.binormal.unitize()?,
+            binormal.unitize()?,
             eval.face_normal.unitize()?,
             surface,
             eval.uv,
@@ -569,6 +592,31 @@ fn frame(
     })
 }
 
+/// Whether `curve` is proved to lie within `tol` of the line through `start` and `end` (its
+/// edge's ends): a line, or a B-spline with positive weights whose control points all lie
+/// that close to the line. A B-spline lies in its control points' convex hull, so the whole
+/// curve does; the bead is then built along the line, within `tol` of it.
+/// Ends closer than `tol` prove nothing.
+///
+/// # Errors
+///
+/// Those of reading the control points.
+fn straight(curve: &Curve, start: Point3, end: Point3, tol: f64) -> Result<bool> {
+    let (points, weights) = match curve.kind() {
+        CurveKind::Line(_) => return Ok(true),
+        CurveKind::BSpline(c) => c.control_polygon()?,
+        _ => return Ok(false),
+    };
+    if (end - start).length() <= tol || !weights.iter().all(|&w| w > 0.0) {
+        return Ok(false);
+    }
+    let dir = (end - start).unitize()?;
+    Ok(points.iter().all(|&p| {
+        let v = p - start;
+        (v - dir * v.dot(dir)).length() <= tol
+    }))
+}
+
 impl Frame {
     /// The bead swept from `t0` to `t1` along the edge (distances from its start; either may
     /// lie past the edge's ends).
@@ -662,7 +710,12 @@ impl Frame {
 
 /// The weld beads along `edges` of `target`, each as a body of its own built from its own
 /// faces, in the order of `edges`; `target` is left as it was, whether the beads are built or
-/// refused. Each edge is straight between two planes in an inside corner; `sizes` are one per
+/// refused. Each edge is straight between two planes in an inside corner (a line, or a
+/// B-spline whose control points lie within the edge's tolerance, at least the body's, of the
+/// line through its ends); two edges that meet end to end between the same two faces get a
+/// bead each, square at their shared vertex and flush there when their sections match (the
+/// same size, its first distance along the same face: name it in `along`, as each edge's
+/// first face, the default, may differ); `sizes` are one per
 /// edge (the chamfer's setbacks, the bead's toes), `sagitta` is the arc's height over the
 /// chord (`> 0` convex, `< 0` concave, `0` flat, [`BeadDefinition`]), and the first distance of
 /// edge i's size runs along face `along[i]` when given (one of that edge's two faces; `along`
@@ -684,7 +737,8 @@ impl Frame {
 /// builds on every edge; and
 /// [`NoRoomReason::LegPastFace`] with the leg that fits, naming the face, for a toe past its
 /// face's trims; [`BlendFailure::WeldNotBuilt`] for two of `edges` that meet at a
-/// vertex ([`WeldGap::BeadsMeetAtVertex`], naming it), an edge that is not straight between
+/// vertex and do not lie between the same two faces ([`WeldGap::BeadsMeetAtVertex`], naming
+/// it), an edge that is not straight between
 /// two planes ([`WeldGap::CurvedJoint`]) or legs with an obtuse toe ([`WeldGap::ObtuseToe`]),
 /// naming the edge; those of the evaluations and the sweeps. Every refusal comes before any
 /// bead is built.
@@ -708,12 +762,24 @@ pub fn beads_apart(
             return Err(SolidError::invalid_input(OP, "each edge is listed once"));
         }
     }
-    // beads meeting at a vertex need a corner piece
+    // beads meeting at a vertex need a corner piece, unless both edges lie between the same
+    // two faces: two planes meet in one line, so the edges run on along it (the frames refuse
+    // faces that are not planes) and their beads end square there, flush when their sections
+    // match
     let mut seen: std::collections::BTreeMap<VertexId, EdgeId> = std::collections::BTreeMap::new();
     for &e in edges {
         let (start, end) = edge::start_end_vertices(target, e)?;
         for v in [start, end].into_iter().flatten() {
-            if seen.insert(v, e).is_some_and(|other| other != e) {
+            let Some(other) = seen.insert(v, e).filter(|&other| other != e) else {
+                continue;
+            };
+            let (mine, theirs) = (
+                edge::faces(target, e, None)?,
+                edge::faces(target, other, None)?,
+            );
+            let run_on =
+                mine.len() == 2 && theirs.len() == 2 && mine.iter().all(|f| theirs.contains(f));
+            if !run_on {
                 return Err(not_built(
                     WeldGap::BeadsMeetAtVertex,
                     Site::vertex(TargetVertex::of_target(v)),

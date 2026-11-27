@@ -6,6 +6,11 @@ component has its own origin, bodies, sketches and timeline entries. The **activ
 (the radio button in the browser) receives new sketches and features; the others are drawn
 faded.
 
+**Activate Parent** (`component.activate.parent`), at the right end of the **MODEL** tab while a
+component is active, activates the component one level up: a part inside a subassembly goes back
+to the subassembly, and the top component goes back to the design. A double-click on empty space
+in the view does the same, unless Preferences, Design, `double_click_components` is off.
+
 Sketches drawn on a part's face while the design was active belong to the design, so they
 collect in its Sketches folder. **Move Sketches to Their Parts**
 (`component.move_sketches.to_parts`), on a Sketches folder's menu and on a sketch's menu, moves
@@ -167,6 +172,19 @@ pointing out of the face with its y into it, or with `"corner": [x, y, z]` at th
 point, its x and y running along the two edges into the face. The edge, the face and the corner
 are found again by name, so a bracket set 40 mm in from a panel's corner (a planar joint with
 values `[40, 40, 0]`) stays 40 mm in from that corner when the panel changes size.
+
+To center a slider in a slot, open **Constrain** and turn on **Center between two faces**.
+Pick the two parallel walls of the slot, then pick the reference on the slider. Pick a plane
+that marks the slider's middle, or turn on **Center the part by two faces** and pick its two
+parallel faces. For a round part, pick its cylindrical face or axis instead. The rule follows
+the named faces when the design changes. A slider can still slide along the walls and turn
+about their normal; a round part's axis stays in the halfway plane.
+
+Scripts pass `"faces": [[x, y, z], [x, y, z]]` as a joint origin, with one point on each of two
+parallel faces of the same occurrence. Use `assembly.constraint.create` with `"type": "center"`
+for the plane or two-face case, or `joint.create` with `"type": "line_on_plane"` for an axis.
+For a part with a datum at its middle, **Construct → Midplane** followed by a mate to that
+datum is also an option.
 
 A joint's Z offset, angle, values and the minimum and maximum of its limits can be typed as
 expressions over the design's parameters (`"offset": "gap + 2"`, `"values": ["travel"]`,
@@ -647,7 +665,9 @@ uses its first placement; `occurrence.properties` selects a specific instance. R
 measures the complete assembly. A placement that counts as a reference (a bill of materials
 type, below) adds nothing, nor does anything inside it; the component or occurrence measured
 counts whatever its type. Volumes are summed, including overlapping bodies, rather than
-measuring their union. The same workflow is available through `component.properties` and
+measuring their union. A placement's Properties also shows where it sits: **Position** and
+**Rotation** (angle, then axis), with **Frame** choosing between **In parent** and **World**, and
+**Copy matrix** for the matrix `occurrence.move` takes. The same workflow is available through `component.properties` and
 `occurrence.properties`; see
 [placement and measurement details](https://github.com/tangency-labs/solidcraft/blob/main/docs/assembly-properties.md).
 

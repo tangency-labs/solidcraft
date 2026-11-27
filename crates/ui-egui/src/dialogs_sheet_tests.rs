@@ -259,9 +259,9 @@ fn flat_exports_use_the_save_picker() {
             captured.lock().unwrap().push((name.to_string(), extensions.iter().map(|x| x.to_string()).collect::<Vec<_>>()));
             Box::pin(std::future::ready(None))
         }));
-        assert_eq!(export_flat(&mut app, "Base", "csv"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, "Base", None), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
-        assert_eq!(export_flat(&mut app, "Base", "dxf"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, "Base", Some(DxfExportOptions::default())), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
         let picks = picks.lock().unwrap();
         assert!(picks[0].0.ends_with("-Base.csv"));
@@ -337,6 +337,147 @@ fn flat_pattern_shows_each_side_of_the_flat_size_whole() {
         }
         assert!(!texts.iter().any(|t| t.galley.text().contains('×')), "{layout}: the sides are no longer run together");
     }
+}
+
+/// A plate with one flange up, its Flat Pattern panel open, and `profile` written beside the
+/// exports as the file the next Open picker returns.
+fn flat_panel_with_profile_file(profile: &str) -> crate::scenario::Harness {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+    for (id, params) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})),
+        ("sketch.finish", json!({})),
+        ("sheet.flange", json!({"sketch": "Base"})),
+        ("sheet.flange", json!({"edges": [[50, 0, 2.5]], "height": "20 mm", "position": "outside"})),
+    ] {
+        h.app.run(id, params).unwrap();
+    }
+    std::fs::write(h.dir.join("example-laser.json"), profile).unwrap();
+    h.app.start("sheet.flat_pattern");
+    h.frames(4);
+    h.step(&json!({"choose_file": "example-laser.json"})).unwrap();
+    h
+}
+
+/// Everything the Flat Pattern panel paints in one more frame.
+fn painted_texts(h: &mut crate::scenario::Harness) -> Vec<String> {
+    let output = h.ctx.run_ui(egui::RawInput { screen_rect: Some(h.ctx.content_rect()), focused: true, ..Default::default() }, |ui| {
+        h.app.logic(ui.ctx());
+        h.app.ui(ui);
+    });
+    crate::test_support::text_shapes(&output).map(|t| t.galley.text().to_string()).collect()
+}
+
+/// The one DXF the panel's Export DXF… wrote into the scenario's folder.
+fn exported_dxf(h: &crate::scenario::Harness) -> Option<String> {
+    let mut files = std::fs::read_dir(&h.dir).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "dxf"));
+    let file = files.next()?;
+    assert!(files.next().is_none(), "one DXF");
+    Some(std::fs::read_to_string(file).unwrap())
+}
+
+/// The Flat Pattern panel takes a DXF profile (#6803): Choose profile… reads a shop's file, the
+/// panel lists the roles it writes otherwise than the standard layers, and Export DXF… writes
+/// the file with it. Without a profile the export is the command's plain one.
+#[test]
+fn flat_pattern_exports_the_dxf_with_the_chosen_profile() {
+    let profile = json!({
+        "format": "solidcraft-dxf-profile",
+        "name": "Example laser",
+        "roles": {
+            "outline": {"layer": "LASER_CUT", "color": 7},
+            "bend_up": {"layer": "FOLD", "color": 30, "linetype": "hidden"},
+            "bend_down": {"layer": "FOLD", "color": 30, "linetype": "hidden"},
+            "bend_notes": {"on": false},
+        }
+    });
+    let mut h = flat_panel_with_profile_file(&profile.to_string());
+    let texts = painted_texts(&mut h);
+    assert!(texts.iter().any(|t| t == "DXF profile") && texts.iter().any(|t| t == "Standard layers"), "{texts:?}");
+    // The first click opens the export's options, the second exports.
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(3);
+    let plain = exported_dxf(&h).unwrap();
+    assert_eq!(plain, h.app.session.execute("sheet.export_dxf", &json!({})).unwrap()["dxf"].as_str().unwrap());
+    assert!(plain.contains("BEND_UP") && !plain.contains("FOLD") && !plain.contains("LASER_CUT"));
+
+    h.step(&json!({"widget": "Choose profile…"})).unwrap();
+    h.frames(3);
+    let texts = painted_texts(&mut h);
+    for shown in ["Example laser", "LASER_CUT, color 7, continuous", "FOLD, color 30, hidden", "Not exported", "Bends up", "Bend notes"] {
+        assert!(texts.iter().any(|t| t.trim() == shown), "{shown} is not shown: {texts:?}");
+    }
+    // Roles the profile leaves as they are have no row.
+    assert!(!texts.iter().any(|t| t.trim() == "Roll lines" || t.trim() == "Etched text"), "{texts:?}");
+    assert_eq!(texts.iter().filter(|t| t.as_str() == "FOLD, color 30, hidden").count(), 2, "both bend directions");
+    // The first click opens the export's options, the second exports.
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(3);
+    let written = exported_dxf(&h).unwrap();
+    let path = h.dir.join("example-laser.json").to_string_lossy().into_owned();
+    assert_eq!(written, h.app.session.execute("sheet.export_dxf", &json!({"profile": path})).unwrap()["dxf"].as_str().unwrap());
+    assert!(written.contains("LASER_CUT") && written.contains("FOLD"));
+    assert!(!written.contains("BEND_UP"));
+
+    // Back to the standard layers: the plain file again.
+    h.step(&json!({"widget": "Use standard layers"})).unwrap();
+    h.frames(2);
+    // The first click opens the export's options, the second exports.
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(3);
+    assert_eq!(exported_dxf(&h).unwrap(), plain);
+}
+
+/// A profile file that cannot be used says why in the panel, and Export DXF… writes nothing
+/// with it: a cutter that expects its own layers must not get the standard ones by mistake.
+#[test]
+fn flat_pattern_refuses_to_export_with_a_dxf_profile_it_cannot_use() {
+    let mut h = flat_panel_with_profile_file(r#"{"format": "solidcraft-dxf-profile", "roles": {"engrave": {"layer": "MARK"}}}"#);
+    h.step(&json!({"widget": "Choose profile…"})).unwrap();
+    h.frames(3);
+    let texts = painted_texts(&mut h);
+    let error = texts.iter().find(|t| t.starts_with("This DXF profile cannot be used.")).unwrap_or_else(|| panic!("no error shown: {texts:?}"));
+    assert!(error.contains("role `engrave` is not known"), "{error}");
+    // The file's name stands for the profile that has none.
+    assert!(texts.iter().any(|t| t == "example-laser.json"), "{texts:?}");
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(3);
+    assert!(exported_dxf(&h).is_none() && !h.app.file_picker_busy(), "nothing is exported and no picker opens");
+    let Some(Kind::Sheet(Sm::FlatPattern { status, profile, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("flat dialog") };
+    assert!(status.as_deref().is_some_and(|s| s.starts_with("Nothing was exported")), "{status:?}");
+    assert!(profile.as_ref().is_some_and(|p| p.read.is_err()));
+
+    // The file is read again at each export: once it is mended, the same choice exports.
+    std::fs::write(
+        h.dir.join("example-laser.json"),
+        r#"{"format": "solidcraft-dxf-profile", "roles": {"etch": {"layer": "MARK"}, "outline": {"layer": "LASER_CUT"}}}"#,
+    )
+    .unwrap();
+    // The first click opens the export's options, the second exports.
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "Export DXF…"})).unwrap();
+    h.frames(3);
+    assert!(exported_dxf(&h).is_some_and(|dxf| dxf.contains("LASER_CUT")));
+    // Dropping the profile takes the last export's message with it.
+    h.step(&json!({"widget": "Use standard layers"})).unwrap();
+    h.frames(2);
+    let Some(Kind::Sheet(Sm::FlatPattern { status, profile, .. })) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("flat dialog") };
+    assert!(status.is_none() && profile.is_none(), "{status:?}");
+    // A file that is not there is refused the same way.
+    std::fs::remove_file(h.dir.join("example-laser.json")).unwrap();
+    let choice = DxfProfileChoice::open(h.dir.join("example-laser.json").to_string_lossy().into_owned());
+    assert!(choice.read.is_err());
+    // A profile that changes nothing lists no role.
+    assert!(dxf_profile_changes(&solidcraft_engine::io::DxfExportProfile::neutral()).is_empty());
 }
 
 #[test]
@@ -470,7 +611,9 @@ fn pocket_export_button_uses_the_picker_and_preserves_depth_layers() {
         h.app.start("sheet.flat_pattern");
         h.settle();
         let undo = h.app.session.undo.len();
-        h.step(&json!({"widget":"Export DXF…"})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:sheet_dxf:options"}})).unwrap();
+        assert!(!path.exists(), "opening the options does not export");
+        h.step(&json!({"click":{"handle":"dialog:sheet_dxf:save"}})).unwrap();
         let exported = std::fs::read_to_string(&path).expect("actual Export DXF button writes the picker destination");
         assert!(exported.contains("POCKET_BOTTOM_Z0.000000_TO_1.000000_MM"));
         assert!(exported.contains("OUTLINE"));
@@ -495,7 +638,7 @@ fn bend_table_picker_writes_the_current_body() {
             Box::pin(std::future::ready(Some(chosen.clone())))
         }));
         let undo = app.session.undo.len();
-        assert_eq!(export_flat(&mut app, &body, "csv"), "Choose an export file…");
+        assert_eq!(export_flat(&mut app, &body, None), "Choose an export file…");
         crate::file_picker::tick(&mut app, &crate::fonts::test_context());
         assert_eq!(app.status.as_ref().map(|s| &s.0), Some(&format!("Exported {output}")));
         let contents = std::fs::read_to_string(&path).unwrap();
@@ -611,6 +754,184 @@ fn rules_dialog_sets_how_bend_angles_read() {
         let rule = h.app.session.doc.sheet_rule(None);
         assert_eq!((rule.angle_display.as_str(), rule.thickness.as_str()), ("bend", "2 mm"));
         assert_eq!(note(&mut h.app).as_deref(), Some("B1 UP 58%%d R1"));
+    }
+}
+
+/// The rule manager's unfold choice: Bend Deduction with a chart's 90° value reaches the rule and
+/// the flat pattern, the dialog shows both the next time, and K Factor takes the rule back.
+#[test]
+fn rules_dialog_unfolds_from_a_press_brake_charts_90_degree_value() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.set", json!({"layout":mode}));
+        h.app.run("sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "active": true})).unwrap();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+        h.app.run("sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": "90 deg"})).unwrap();
+        let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
+            Some(Kind::Sheet(Sm::Rules { unfold, values, .. })) => Some((*unfold, values.last().cloned().unwrap_or_default())),
+            _ => None,
+        };
+        let allowance = |app: &mut SolveApp| app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"][0]["allowance"].as_f64();
+        // K 0.5, R 1, T 2 at 90°: π/2 · (1 + 1) = π.
+        assert!((allowance(&mut h.app).unwrap_or(f64::NAN) - std::f64::consts::PI).abs() < 1e-9);
+        h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
+        h.frames(3);
+        assert_eq!(shown(&h.app), Some((0, String::new())), "a rule starts unfolding from its K-factor");
+        h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Unfold:Bend Deduction"}})).unwrap();
+        // The 90° field starts at the deduction K 0.5 gives, BD90 = 2·(1 + 2) − π, so switching alone
+        // changes nothing and shows no error: OK stays on.
+        // In full: the field is saved as it stands when the user types nothing over it.
+        let prefilled = shown(&h.app).map(|(unfold, value)| (unfold, crate::length_input::eval(&h.app.session.doc, &value, ValueKind::Length)));
+        assert!(
+            matches!(&prefilled, Some((1, Ok(value))) if (value - (6.0 - std::f64::consts::PI)).abs() < 1e-11),
+            "prefilled from the rule's K-factor: {prefilled:?}"
+        );
+        h.frames(2);
+        assert_eq!(crate::scenario::count_of("dialog:ok:enabled"), Some(1.0), "no error before the user types");
+        // The chart's BD90 3.2 mm: BA90 = 2·(1 + 2) − 3.2 = 2.8 mm.
+        if let Some(Kind::Sheet(Sm::Rules { values, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind)
+            && let Some(last) = values.last_mut()
+        {
+            *last = "3.2 mm".into();
+        }
+        h.frames(2);
+        h.step(&json!({"widget": "OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+        let rule = h.app.session.doc.sheet_rule(None);
+        assert_eq!((rule.unfold_method.as_str(), rule.unfold_value.as_str(), rule.k_factor.as_str()), ("deduction", "3.2 mm", "0.5"));
+        assert!((allowance(&mut h.app).unwrap_or(f64::NAN) - 2.8).abs() < 1e-9);
+        h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
+        h.frames(3);
+        assert_eq!(shown(&h.app), Some((1, "3.2 mm".into())), "the dialog shows the rule's unfold choice and value");
+        // Deduction to allowance converts the value: BA90 = 6 − 3.2 = 2.8 mm, the same part.
+        h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Unfold:Bend Allowance"}})).unwrap();
+        assert_eq!(shown(&h.app), Some((2, "2.8 mm".into())), "converted to the equivalent allowance");
+        // Back to the K-factor: the K Factor field takes the K the chart's value works out to,
+        // (2.8/(π/2) − 1)/2, not the 0.5 the rule had stored, so the part stays as it is.
+        h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Unfold:K Factor"}})).unwrap();
+        h.step(&json!({"widget": "OK"})).unwrap();
+        let back = h.app.session.doc.sheet_rule(None);
+        assert_eq!((back.unfold_method.as_str(), back.unfold_value.as_str()), ("k_factor", ""), "a K Factor rule keeps no 90° value");
+        let k = back.k_factor.parse::<f64>().unwrap_or(f64::NAN);
+        assert!((k - (2.8 / std::f64::consts::FRAC_PI_2 - 1.0) / 2.0).abs() < 1e-11, "{}", back.k_factor);
+        assert!((allowance(&mut h.app).unwrap_or(f64::NAN) - 2.8).abs() < 1e-9);
+    }
+}
+
+/// OK on the prefilled 90° value, with nothing typed over it, saves the part as it was: the field
+/// holds the value in full, not rounded for show (K 0.5, R 1, T 2: the allowance stays π).
+#[test]
+fn rules_dialog_saves_an_unedited_prefilled_90_degree_value_in_full() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "active": true})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app.run("sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": "90 deg"})).unwrap();
+    h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Unfold:Bend Deduction"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    assert_eq!(h.app.session.doc.sheet_rule(None).unfold_method, "deduction");
+    let allowance = h.app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"][0]["allowance"].as_f64();
+    assert!((allowance.unwrap_or(f64::NAN) - std::f64::consts::PI).abs() < 1e-9, "{allowance:?}");
+}
+
+/// Switching the Unfold choice keeps the part whichever way it goes (#6794): a value left by an
+/// earlier choice is not read as the new one's, a chart's value becomes the K Factor field, and
+/// `Thickness` in the bend radius is the rule's thickness.
+#[test]
+fn switching_the_unfold_choice_keeps_the_part_whichever_way_it_goes() {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let doc = solidcraft_engine::doc::Document::default();
+    let (k_factor, deduction, allowance) = (unfold_index("k_factor"), unfold_index("deduction"), unfold_index("allowance"));
+    let mm = |text: &str| crate::length_input::eval(&doc, text, ValueKind::Length).unwrap_or(f64::NAN);
+    let rule = |k: &str, radius: &str| vec!["2 mm".to_string(), k.to_string(), radius.to_string()];
+
+    // K 0.5, R 1, T 2: BD90 = 6 − π, BA90 = π. Deduction, back to K Factor, then Allowance: the
+    // deduction left in the hidden field is not handed on as an allowance.
+    let (mut main, mut extra) = (rule("0.5", "1 mm"), vec![String::new()]);
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert!((mm(&extra[0]) - (6.0 - PI)).abs() < 1e-11, "{}", extra[0]);
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    assert_eq!(main[1], "0.5", "the K Factor field already says this K: left as typed");
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, allowance);
+    assert!((mm(&extra[0]) - PI).abs() < 1e-11, "{}", extra[0]);
+
+    // A chart's BD90 3.2 mm is K (2.8/(π/2) − 1)/2, about 0.3913, not the 0.5 in the K Factor
+    // field: K Factor takes it, and Bend Deduction again shows the 3.2 mm as it was typed.
+    let (mut main, mut extra) = (rule("0.5", "1 mm"), vec!["3.2 mm".to_string()]);
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    let k = main[1].parse::<f64>().unwrap_or(f64::NAN);
+    assert!((k - (2.8 / FRAC_PI_2 - 1.0) / 2.0).abs() < 1e-11, "{}", main[1]);
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert_eq!(extra[0], "3.2 mm");
+    // A K typed over it since then counts: the 3.2 mm no longer says the rule's K-factor.
+    main[1] = "0.5".into();
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    main[1] = "0.4".into();
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert!((mm(&extra[0]) - (6.0 - FRAC_PI_2 * (1.0 + 0.4 * 2.0))).abs() < 1e-11, "{}", extra[0]);
+
+    // The default rule's bend radius, `Thickness`, is the rule's 2 mm: BD90 = 2·(2 + 2) − π/2·(2 + 1).
+    let (mut main, mut extra) = (rule("0.5", "Thickness"), vec![String::new()]);
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert!((mm(&extra[0]) - (8.0 - 1.5 * PI)).abs() < 1e-11, "{}", extra[0]);
+
+    // A value no K-factor from 0 to 1 gives is the rule's error to report: nothing is rewritten.
+    let (mut main, mut extra) = (rule("0.5", "1 mm"), vec!["9 mm".to_string()]);
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    assert_eq!((main[1].as_str(), extra[0].as_str()), ("0.5", "9 mm"));
+}
+
+/// The rule manager's card widens to fit its longest label, as feature cards do (#10620): at
+/// 1280×720 "Bend Deduction at 90°" and "Bend Allowance at 90°" drew as "Bend Deduction a…", and
+/// the card widens no further than its labels need. It widens only while a 90° row shows: a rule
+/// that unfolds from its K-factor, as every rule did before, keeps the card's fixed width.
+#[test]
+fn the_rule_managers_card_fits_its_90_degree_labels() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.resize", json!({"width": 1280, "height": 720}));
+    h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
+    h.frames(3);
+    let card = |h: &crate::scenario::Harness| h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dialog", "SHEET METAL RULES")))).map(|r| r.width());
+    let plain = card(&h).expect("the rules card");
+    for (choice, label) in [(1, "Bend Deduction at 90°"), (2, "Bend Allowance at 90°")] {
+        if let Some(Kind::Sheet(Sm::Rules { unfold, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *unfold = choice;
+        }
+        h.frames(4);
+        let drawn: Vec<String> = h
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text.starts_with(&label[..12]) => {
+                    Some(text.galley.rows.iter().map(|row| row.text()).collect::<String>())
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(drawn.iter().any(|t| t == label), "{label} drawn whole: {drawn:?}");
+        let wide = card(&h).unwrap_or(plain);
+        assert!(wide > plain && wide <= plain * 1.5, "{label}: card {wide} from {plain}");
+        // Wider, it is still a manager card: its header keeps the collapse arrow.
+        assert!(crate::scenario::handle_at("dialog:collapse").is_some(), "{label}: the header's collapse arrow");
+        // Back on K Factor the card is the width it was.
+        if let Some(Kind::Sheet(Sm::Rules { unfold, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *unfold = 0;
+        }
+        h.frames(4);
+        assert_eq!(card(&h), Some(plain), "the K Factor card keeps its fixed width after {label}");
     }
 }
 
@@ -1697,7 +2018,7 @@ fn perforate_toolbar_opens_without_running_empty_parameters() {
         let ctx = crate::fonts::test_context();
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
             if let Kind::Sheet(k) = &mut dialog.kind {
-                rows(&mut app, ui, k, &mut dialog.inputs);
+                rows(&mut app, ui, k, &mut dialog.inputs, &dialog.extra);
             }
         });
         let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text()).collect();
@@ -2412,4 +2733,238 @@ fn a_dragged_segment_round_trip_keeps_every_other_edge_byte_identical() {
         again[0].1["params"]
     );
     assert_eq!(segment_rows(&h)[1], before[1], "edge 2 still comes back as it was");
+}
+
+/// A 100 x 60 sheet with a base flange, and the Press-in Hardware dialog open with a place on its top face.
+fn hardware_dialog_on(place: Option<[f64; 3]>) -> (SolveApp, Dialog) {
+    let mut app = plate(crate::ui_kit::LayoutMode::Docked);
+    app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    app.session.selection = place.into_iter().filter_map(|p| face_sel(&app.session, Vec3::new(p[0], p[1], p[2]))).collect();
+    app.start("sheet.hardware");
+    let dialog = app.dialog.clone().expect("Press-in Hardware opens a dialog");
+    (app, dialog)
+}
+
+fn the_hardware_of(app: &SolveApp, id: u64) -> solidcraft_engine::doc::Hardware {
+    match app.session.doc.feature(id).map(|f| f.kind.clone()) {
+        Some(FeatureKind::Hole { hardware: Some(h), .. }) => h,
+        other => panic!("not a hardware hole: {other:?}"),
+    }
+}
+
+/// #17752: the toolbar opens the dialog and runs nothing until OK; the place picked and the kind,
+/// thread and length chosen make the commands; a nut takes no length.
+#[test]
+fn press_in_hardware_dialog_places_the_hardware_where_the_picks_are() {
+    let (mut app, empty) = hardware_dialog_on(None);
+    let features = app.session.doc.features.len();
+    assert!(empty.previews());
+    assert_eq!(app.session.doc.features.len(), features, "nothing is run by opening it");
+    let refusal = apply_commands(&app, &empty).expect_err("no place picked");
+    assert!(refusal.contains("select where the hardware goes"), "{refusal}");
+
+    let (placed_app, mut d) = hardware_dialog_on(Some([50.0, 30.0, 2.5]));
+    app = placed_app;
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!((c.len(), c[0].0.as_str()), (1, "sheet.hardware"));
+    assert_eq!((&c[0].1["kind"], &c[0].1["thread"]), (&json!("nut"), &json!("M3")));
+    assert!(c[0].1.get("length").is_none(), "a nut has no length: {}", c[0].1);
+    let at = |v: &Value| [0, 1, 2].map(|i| v["position"][i].as_f64().unwrap_or(f64::NAN));
+    assert!((at(&c[0].1)[0] - 50.0).abs() < 1e-6 && (at(&c[0].1)[1] - 30.0).abs() < 1e-6, "{}", c[0].1);
+
+    if let Kind::Sheet(Sm::Hardware { kind, thread, length }) = &mut d.kind {
+        (*kind, *thread, *length) = (2, "M4".into(), "8 mm".into());
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!((&c[0].1["kind"], &c[0].1["thread"], &c[0].1["length"]), (&json!("stud"), &json!("M4"), &json!("8 mm")));
+    run_all(&mut app, c);
+    let hole = app.session.doc.features.last().unwrap().id;
+    let h = the_hardware_of(&app, hole);
+    assert_eq!((h.thread.as_str(), h.part.as_str(), h.length.as_ref().map(|e| e.to_string())), ("M4", "stud.m4", Some("8 mm".to_string())));
+    let flat = app.session.execute("sheet.flat_pattern", &json!({})).unwrap();
+    assert_eq!(flat["hardware"][0]["length"], 8.0, "{flat}");
+
+    // A stud without its length is not run.
+    if let Kind::Sheet(Sm::Hardware { length, .. }) = &mut d.kind {
+        length.clear();
+    }
+    assert!(apply_commands(&app, &d).unwrap_err().contains("needs its length"));
+}
+
+/// Sketch points are placed with one command for their sketch, every point picked; Edit Feature
+/// brings the hardware, its length and the points back, and rebuilds it in place with the same command.
+#[test]
+fn press_in_hardware_dialog_takes_sketch_points_and_edits_them() {
+    let (mut app, _) = hardware_dialog_on(None);
+    app.dialog = None;
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 2.5], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pins"})).unwrap();
+    app.run("sketch.point", json!({"point": [20, 30], "id": "a"})).unwrap();
+    app.run("sketch.point", json!({"point": [80, 30], "id": "b"})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let sketch = app.session.doc.find_feature("Pins").unwrap().id;
+    app.session.selection = ["a", "b"].iter().map(|id| Sel::SketchPoint { id: format!("{sketch}:{id}") }).collect();
+    app.start("sheet.hardware");
+    let mut d = app.dialog.clone().unwrap();
+    if let Kind::Sheet(Sm::Hardware { kind, thread, length }) = &mut d.kind {
+        (*kind, *thread, *length) = (3, "M3".into(), "6 mm".into());
+    }
+    let c = apply_commands(&app, &d).unwrap();
+    assert_eq!(c.len(), 1, "one command for the sketch: {c:?}");
+    assert_eq!((&c[0].1["sketch"], &c[0].1["points"], &c[0].1["kind"]), (&json!(sketch), &json!(["a", "b"]), &json!("standoff")));
+    run_all(&mut app, c);
+    assert_eq!(app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["hardware"].as_array().map(Vec::len), Some(2));
+
+    let hole = app.session.doc.features.last().unwrap().id;
+    let e = edit_dialog(&app, hole, None).expect("a hardware hole is edited in the Hardware window");
+    assert!(matches!(&e.kind, Kind::Sheet(Sm::Hardware { kind: 3, thread, length }) if thread == "M3" && length == "6 mm"), "{:?}", e.kind);
+    assert_eq!(e.inputs[0].items.len(), 2);
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!((c[0].0.as_str(), c[0].1["command"].as_str()), ("timeline.redefine", Some("sheet.hardware")));
+    assert_eq!((&c[0].1["params"]["points"], &c[0].1["params"]["length"]), (&json!(["a", "b"]), &json!("6 mm")));
+    run_all(&mut app, c);
+    let h = the_hardware_of(&app, hole);
+    assert_eq!((h.kind.name(), h.thread.as_str()), ("standoff", "M3"), "the hardware is kept by the edit");
+}
+
+/// The form: a nut has no length row and a stud has one; its thread is one the table has for the
+/// kind (a thread the new kind lacks falls back to its first); the table's numbers show.
+#[test]
+fn press_in_hardware_form_offers_the_sizes_the_table_has_for_the_kind() {
+    let texts_of = |kind: usize, thread: &str| {
+        let (mut app, mut dialog) = hardware_dialog_on(Some([50.0, 30.0, 2.5]));
+        let ctx = crate::fonts::test_context();
+        if let Kind::Sheet(Sm::Hardware { kind: k, thread: t, .. }) = &mut dialog.kind {
+            (*k, *t) = (kind, thread.into());
+        }
+        let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
+            if let Kind::Sheet(k) = &mut dialog.kind {
+                rows(&mut app, ui, k, &mut dialog.inputs, &dialog.extra);
+            }
+        });
+        let texts: Vec<String> = crate::test_support::text_shapes(&output).map(|text| text.galley.text().to_string()).collect();
+        let Kind::Sheet(Sm::Hardware { thread, .. }) = dialog.kind else { panic!("not the hardware form") };
+        (texts, thread)
+    };
+    let (nut, thread) = texts_of(0, "M3");
+    assert_eq!(thread, "M3");
+    for label in ["Type", "Nut", "Thread", "M3", "Mounting hole 4.25 mm. Sheet at least 0.8 mm thick. Center at least 4.8 mm from an edge or bend."] {
+        assert!(nut.iter().any(|t| t == label), "missing {label}: {nut:?}");
+    }
+    assert!(!nut.iter().any(|t| t == "Length"), "a nut has no length: {nut:?}");
+    let (stud, thread) = texts_of(2, "M8");
+    assert_eq!(thread, "M8", "a stud comes in M8");
+    assert!(stud.iter().any(|t| t == "Length"), "{stud:?}");
+    // The standoffs stop at M5: an M8 left over from a stud is M3.
+    let (standoff, thread) = texts_of(3, "M8");
+    assert_eq!(thread, "M3");
+    assert!(standoff.iter().any(|t| t == "Length"), "{standoff:?}");
+}
+
+/// A sheet too thin is the preview's error, a centre too near an edge its warning, and a good place
+/// has neither: the dialog says why before OK (the form shows both, see the form test).
+#[test]
+fn press_in_hardware_preview_says_what_the_sheet_cannot_hold() {
+    let colors = || crate::preview::Colors {
+        body: [1; 4],
+        added: [2; 4],
+        new_body: [3; 4],
+        removed: [4; 4],
+        lost: [6; 4],
+        selected: [7; 4],
+        mirrored: [6; 4],
+        edge: [5; 4],
+        ghost: false,
+        glass_new: false,
+        tint_new: true,
+        cut_tint: true,
+        replaced_ghost: true,
+    };
+    let preview = |place: [f64; 3], kind: usize, thread: &str| {
+        let (app, mut d) = hardware_dialog_on(Some(place));
+        if let Kind::Sheet(Sm::Hardware { kind: k, thread: t, length }) = &mut d.kind {
+            (*k, *t, *length) = (kind, thread.into(), "8 mm".into());
+        }
+        let commands = crate::dialogs::preview_commands(&app, &d).expect("the inputs make a command");
+        crate::preview::compute(&app.session, &commands, colors())
+    };
+    let good = preview([50.0, 30.0, 2.5], 0, "M3").unwrap_or_else(|e| panic!("{e}"));
+    assert!(good.warning.is_none() && good.error.is_none(), "{:?} {:?}", good.warning, good.error);
+    let near = preview([3.0, 30.0, 2.5], 0, "M3").unwrap_or_else(|e| panic!("{e}"));
+    assert!(near.warning.as_deref().is_some_and(|w| w.contains("3 mm from the nearest edge, cut-out or other hole")), "{:?}", near.warning);
+    // The 2.5 mm sheet is thinner than a flush M6 nut's 3.2 mm.
+    let Err(thin) = preview([50.0, 30.0, 2.5], 1, "M6") else { panic!("a sheet too thin is refused") };
+    assert!(thin.contains("is 2.5 mm thick") && thin.contains("an M6 flush nut") && thin.contains("at least 3.2 mm"), "{thin}");
+    // That refusal says what to change: no Create Issue under it. A kernel failure is no such refusal.
+    assert!(crate::dialogs_sheet::hardware_refusal(&thin));
+    assert!(!crate::dialogs_sheet::hardware_refusal("`Body1`: what Hole1 cut leaves walls that are not square to the sheet: not supported yet"));
+}
+
+/// The window shows a refusal that says what to change (no Create Issue) by reading the engine's
+/// words, so each refusal `sheet.hardware` makes for a choice in the window is built here and must
+/// be one it recognises: rewording one in the engine fails this test and not silently the display.
+#[test]
+fn every_choice_refusal_of_sheet_hardware_is_shown_as_guidance() {
+    let (mut app, _) = hardware_dialog_on(None);
+    app.dialog = None;
+    app.run("solid.box", json!({"corner": [200, 0, 0], "length": 50, "width": 50, "height": 2.5, "body_name": "Block"})).unwrap();
+    let place = |extra: Value| {
+        let mut q = json!({"position": [50, 30, 2.5]});
+        q.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        q
+    };
+    for (what, params) in [
+        ("a size the table lacks", place(json!({"kind": "nut", "thread": "M7"}))),
+        ("a hole off the table's size", place(json!({"kind": "nut", "thread": "M3", "diameter": "4.5 mm"}))),
+        ("a stud without its length", place(json!({"kind": "stud", "thread": "M4"}))),
+        ("a nut with a length", place(json!({"kind": "nut", "thread": "M4", "length": "5 mm"}))),
+        ("a length of nothing", place(json!({"kind": "stud", "thread": "M4", "length": "0 mm"}))),
+        ("a sheet too thin", place(json!({"kind": "flush_nut", "thread": "M6"}))),
+        ("a place that is no sheet", json!({"kind": "nut", "thread": "M3", "position": [225, 25, 2.5]})),
+    ] {
+        let error = app.session.execute("sheet.hardware", &params).expect_err(what).to_string();
+        assert!(hardware_refusal(&error), "{what} is not shown as guidance: {error}");
+    }
+    // A failure of the design is no guidance: it keeps its Create Issue.
+    assert!(!hardware_refusal("`Body1`: what Hole1 cut leaves walls that are not square to the sheet: not supported yet"));
+}
+
+/// Edit Feature carries a custom hole diameter (4.3 mm for an M3 nut) while the size is the one it
+/// was made for; changed to another kind or thread it is the table's again, since the window has no
+/// diameter field and the old one would be refused for the new size.
+#[test]
+fn editing_hardware_keeps_a_custom_hole_only_for_the_size_it_was_made_for() {
+    let (mut app, _) = hardware_dialog_on(None);
+    app.dialog = None;
+    let hole = app.run("sheet.hardware", json!({"kind": "nut", "thread": "M3", "diameter": "4.3 mm", "position": [50, 30, 2.5]})).unwrap()["feature"]
+        .as_u64()
+        .unwrap();
+    let mut e = edit_dialog(&app, hole, None).expect("edit window");
+    let c = apply_commands(&app, &e).unwrap();
+    assert_eq!(c[0].1["params"]["diameter"], "4.3 mm", "kept for its own size: {}", c[0].1);
+    if let Kind::Sheet(Sm::Hardware { thread, .. }) = &mut e.kind {
+        *thread = "M4".into();
+    }
+    let c = apply_commands(&app, &e).unwrap();
+    assert!(c[0].1["params"].get("diameter").is_none(), "an M4's hole is the table's, not the M3's 4.3 mm: {}", c[0].1);
+    run_all(&mut app, c);
+    assert_eq!(the_hardware_of(&app, hole).thread, "M4", "and the edit is accepted");
+}
+
+/// An edit rebuilds one feature: a place added on a face to a hole made at sketch points makes two
+/// commands, which an edit refuses rather than quietly applying the first.
+#[test]
+fn editing_hardware_refuses_a_selection_that_makes_more_than_one_command() {
+    let (mut app, _) = hardware_dialog_on(None);
+    app.dialog = None;
+    app.run("sketch.create", json!({"plane": {"origin": [0, 0, 2.5], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Pins"})).unwrap();
+    app.run("sketch.point", json!({"point": [20, 30], "id": "a"})).unwrap();
+    app.run("sketch.finish", json!({})).unwrap();
+    let sketch = app.session.doc.find_feature("Pins").unwrap().id;
+    app.run("sheet.hardware", json!({"kind": "nut", "thread": "M3", "sketch": sketch, "points": ["a"]})).unwrap();
+    let hole = app.session.doc.features.last().unwrap().id;
+    let mut e = edit_dialog(&app, hole, None).expect("edit window");
+    assert!(apply_commands(&app, &e).is_ok(), "as it was");
+    e.inputs[0].items.push(face_sel(&app.session, Vec3::new(70.0, 30.0, 2.5)).expect("a face place"));
+    let error = apply_commands(&app, &e).expect_err("two commands in an edit");
+    assert!(error.contains("edit changes one feature"), "{error}");
 }
