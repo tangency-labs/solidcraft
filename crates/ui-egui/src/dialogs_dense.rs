@@ -84,6 +84,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         }),
         Kind::Sheet(k) => match k {
             crate::dialogs_sheet::Sm::Flange { .. } => Some("sheet.flange"),
+            crate::dialogs_sheet::Sm::CornerJoin { .. } => Some("sheet.corner_join"),
             crate::dialogs_sheet::Sm::Unfold { refold } => Some(if *refold { "sheet.refold" } else { "sheet.unfold" }),
             crate::dialogs_sheet::Sm::Convert { .. } => Some("sheet.convert"),
             crate::dialogs_sheet::Sm::Recognize { .. } => Some("sheet.recognize"),
@@ -95,7 +96,9 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         },
         Kind::Frame(_) => Some("frame.member"),
         Kind::EndCap(_) => Some("frame.end_cap"),
+        Kind::Dogbone(_) => Some("solid.dogbone"),
         Kind::CellGrid(_) => Some("solid.cell_grid"),
+        Kind::Weld(_) => Some("weld.create"),
         Kind::RotateMember(_) => Some("frame.rotate_member"),
         Kind::FrameTrim(_) => Some("frame.trim"),
         Kind::Gusset(_) => Some("frame.gusset"),
@@ -1289,6 +1292,10 @@ fn degrees(text: &str) -> Option<f64> {
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
     let through_point = offset_through_point(d).is_some();
+    if crate::dialogs_move::several_destinations(d) {
+        // Several To points copy to each (#22900): Create Copy ticks itself.
+        d.extra.insert("copy".into(), json!(true));
+    }
     // Move/Copy of a component without Create Copy moves its placement (`dialogs_move::placements`).
     let placing = !crate::dialogs_move::placements(d).is_empty();
     let shared = placing && crate::dialogs_move::moves_shared(app, d);
@@ -1752,10 +1759,16 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 d.extra.insert("up_to".into(), Value::Null);
             }
         }
-        Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
+        Kind::Sheet(_) => {
+            crate::dialogs_sheet::discover_flange_corners(app, d);
+            if let Kind::Sheet(k) = &mut d.kind {
+                enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs, &d.extra);
+            }
+        }
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
         Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
+        Kind::Dogbone(k) => enter |= crate::dialogs_dogbone::rows(app, ui, k, &mut d.extra),
         Kind::Pulley(k) => enter |= crate::dialogs_pulley::rows(app, ui, k),
         Kind::CellGrid(k) => enter |= crate::dialogs_cell_grid::rows(app, ui, k, &d.inputs),
         Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),
@@ -2935,6 +2948,70 @@ mod tests {
             crate::dialogs::fillet_plain_error(none, false),
             Some(crate::dialogs::FilletRefusal::Plain(solidcraft_ui_text::tr("ui.fillet_error_no_radius").to_string()))
         );
+    }
+
+    /// #10849: an oversized fillet refusal carrying SMLib's largest fitting size names that size
+    /// in the Fillet dialog and offers a button to use it; clicking the button updates the radius
+    /// field, clears the refusal, and applying the resulting command builds cleanly.
+    #[test]
+    fn a_too_large_fillet_names_smlibs_fit_size_and_asks_whether_to_use_it() {
+        crate::i18n::install();
+        assert_eq!(
+            crate::dialogs::fillet_plain_error(
+                "not supported yet: the fillet is larger than the faces beside its edges allow; the largest radius that fits is 3 mm",
+                false
+            ),
+            Some(crate::dialogs::FilletRefusal::FitSize { size_mm: 3.0 })
+        );
+        assert_eq!(
+            crate::dialogs::fillet_plain_error(
+                "not supported yet: the chord fillet is larger than the faces beside its edges allow; the largest chord width that fits is 1.5 mm",
+                false
+            ),
+            Some(crate::dialogs::FilletRefusal::FitSize { size_mm: 1.5 })
+        );
+        assert_eq!(
+            crate::dialogs::fillet_plain_error(
+                "the round of radius 7 mm on the edge at (0.000, 32.000, 42.000) would cut through the material behind it into the hollow at (0.000, 30.000, 40.000) and open the part; the largest radius that fits is 6.828427 mm",
+                false
+            ),
+            Some(crate::dialogs::FilletRefusal::FitSize { size_mm: 6.828427 })
+        );
+
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length": 14, "width": 6, "height": 10, "corner": [14, 0, 0], "body_name": "Bar"})).unwrap();
+        let picks = [
+            edge_sel(&h.app.session, Vec3::new(14.0, 0.0, 5.0)).unwrap(),
+            edge_sel(&h.app.session, Vec3::new(28.0, 0.0, 5.0)).unwrap(),
+            edge_sel(&h.app.session, Vec3::new(14.0, 6.0, 5.0)).unwrap(),
+            edge_sel(&h.app.session, Vec3::new(28.0, 6.0, 5.0)).unwrap(),
+        ];
+        h.app.session.selection = picks.to_vec();
+        h.step(&json!({"start": "solid.fillet"})).unwrap();
+        h.frames(3);
+        if let Some(Dialog { kind: Kind::Fillet { radius, .. }, .. }) = h.app.dialog.as_mut() {
+            *radius = "3.5 mm".into();
+        }
+        let mut copy = solidcraft_engine::Session::new((*h.app.session.doc).clone());
+        let refused = copy.execute("solid.fillet", &parameters(&h)).unwrap_err().to_string();
+        assert!(refused.contains("the largest radius that fits is 3 mm"), "{refused}");
+        let mut dialog = h.app.dialog.take().unwrap();
+        dialog.refuse(&h.app, refused);
+        h.app.dialog = Some(dialog);
+        h.frames(3);
+
+        assert!(scenario::handle_at("dialog:use_fit_size").is_some(), "Fillet dialog should offer a button to use SMLib's fit size");
+        h.step(&json!({"click": {"handle": "dialog:use_fit_size"}})).unwrap();
+        h.frames(3);
+
+        let d = h.app.dialog.as_ref().unwrap();
+        assert!(matches!(&d.kind, Kind::Fillet { radius, .. } if radius == "3 mm"), "{:?}", d.kind);
+        assert!(d.error.is_none(), "clicking Use 3 mm should clear the refusal: {:?}", d.error);
+        for (command, params) in apply_commands(&h.app, d).unwrap() {
+            h.app.run(&command, params).unwrap();
+        }
+        let st = crate::open_meshing::session_world(&h.app.session);
+        assert!(st.bodies.iter().all(|b| b.body.validity().is_empty()), "applying the offered fit size builds a valid body");
     }
 
     #[test]

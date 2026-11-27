@@ -113,6 +113,7 @@ impl FeatureKind {
             FeatureKind::Shell { body, .. }
             | FeatureKind::Dome { body, .. }
             | FeatureKind::Draft { body, .. }
+            | FeatureKind::Dogbone { body, .. }
             | FeatureKind::SplitFace { body, .. }
             | FeatureKind::OffsetFace { body, .. }
             | FeatureKind::DeleteFace { body, .. }

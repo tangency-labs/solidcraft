@@ -560,9 +560,15 @@ fn size_rows(ui: &mut egui::Ui, f: ThreadForm, designation: &mut String, suggest
     // ISO 7-1 writes the internal taper thread Rc: a size picked for a hole the dialog sized Rc
     // stays Rc.
     let internal = f == ThreadForm::Bspt && ThreadForm::pipe_internal(designation);
+    // An authored ISO metric tolerance class (`M8-6g`) stays when the size or pitch changes.
+    let class = f.tolerance_class(designation).map(str::to_owned);
     let designation_of = |f: ThreadForm, d: f64, p: f64| {
         let name = designation_of(f, d, p);
-        if internal { name.replacen("R ", "Rc ", 1) } else { name }
+        let name = if internal { name.replacen("R ", "Rc ", 1) } else { name };
+        match &class {
+            Some(class) => format!("{name}-{class}"),
+            None => name,
+        }
     };
     let mut diameters: Vec<f64> = table.iter().map(|(d, _)| *d).collect();
     if let Some((d, _)) = current
