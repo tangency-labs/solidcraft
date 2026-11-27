@@ -6258,7 +6258,10 @@ mod tests {
                 .unwrap()
                 .unwrap();
         let first_calls = calls.get();
-        assert!(bounds(&b, reach, 2.0) && !apart, "{reach}");
+        assert!(
+            reach >= 2.0 - b.tolerance() && reach <= 2.0 + 1e-3 && !apart,
+            "{reach}"
+        );
         assert!(
             first_calls < 256,
             "linear-predictor plane_net_piece should converge in < 256 pieces at 1e-3 tol, took {first_calls}"
