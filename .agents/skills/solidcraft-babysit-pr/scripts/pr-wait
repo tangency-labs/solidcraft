@@ -1,0 +1,537 @@
+#!/usr/bin/env python3
+"""pr-wait: watch one tangency-labs PR and print one line per real event.
+
+Adapted from tstack's pr-wait (https://github.com/t3dotgg/tstack, MIT, Copyright (c) 2026
+Theo Browne; see .agents/skills/LICENSE-tstack). Rewritten for SolidCraft's CI and the shared API budget.
+
+  python3 -I pr-wait <pr> [--repo owner/name] [--until green|full|ready|any-change]
+                          [--interval 90] [--max-hours 6] [--sha <commit>|any] [--head-wait 300]
+
+<pr> is a PR number or URL. The repo defaults to tangency-labs/solidcraft. Stdout carries only
+events, one line each, so Claude Code's Monitor tool wakes the agent once per event. Every line
+starts with `#<pr> @<head7>`: before acting on a line, check that <head7> is still the PR head
+(a line can reach you after you pushed again).
+
+--sha
+  The commit the PR head must be before anything is judged: right after a push, GitHub can still
+  report the old head (and its old failures) for a while. Default: the local HEAD, when the
+  checkout's current branch is the PR's head branch; otherwise no wait. `--sha any` turns it off.
+  It polls every 15 s for at most --head-wait seconds (default 300), then exits 1 saying which
+  head GitHub has.
+
+--until
+  green       the newest `ci` on the head passed, and no other check failed or is pending
+  full        green, and "Native Linux tests" ran and passed (heavy CI needs approved-for-ci)
+  ready       full, CodeRabbit finished on the head (or 30 min passed since we first saw the head),
+              and no unresolved, non-outdated review thread (default)
+  any-change  stop after the first poll that prints an event
+
+Exit codes
+  0  the --until condition is met, or the PR merged
+  1  needs you: a check failed, the PR conflicts, unresolved threads block `ready`, the PR closed,
+     the time limit passed, or GitHub stayed unreachable
+  2  bad arguments, unknown PR, or another pr-wait already watches this PR
+
+Quirks it knows:
+  - One check name can have several runs on a head (a label run, a cancelled run). Only the newest
+    run of each name counts, and a label run's SKIPPED rows never hide the real run's result. When an older `ci` on the head is red and the newest passed, it says
+    so once (`stale ci`): GitHub may still block the PR until a new head; do not re-run jobs.
+  - "Claim bot" and "Triage bot" never gate: a failure there (such as a 403 on a claim PR) is the
+    bot's own problem, not the PR's.
+  - "Native Linux tests" is skipped until approved-for-ci is on the PR; `full` waits for it.
+  - A fork head with no `ci` after 10 minutes is reported once: its runs may wait for approval.
+  - One GraphQL query per poll (two or three on a head with over 100 check runs), no REST. The interval floor is 60 s. When the GraphQL budget left
+    is under 300 points it sleeps until the reset instead of polling.
+
+State lives in ~/.local/state/sc-pr-wait/. A lock makes a second watcher for the same PR exit at
+once. The first run for a PR records what exists and reports only what comes after; a restart
+within 6 hours reports what arrived while no watcher ran.
+"""
+
+from __future__ import annotations
+
+import argparse
+import calendar
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Any, NoReturn
+
+# Windows has no fcntl, so the watcher lock uses msvcrt there.
+if sys.platform == "win32":
+    import msvcrt
+else:
+    import fcntl
+
+STATE_DIR = Path.home() / ".local" / "state" / "sc-pr-wait"
+# On Windows a locked byte range cannot be read by anyone else. The lock sits on one byte far past
+# the PID, so a second watcher can still read which process holds it.
+WINDOWS_LOCK_OFFSET = 1 << 30
+STALE_STATE_SECONDS = 6 * 3600
+MAX_FAILED_POLLS = 8
+MIN_INTERVAL = 60
+CODERABBIT_WAIT = 30 * 60
+FORK_APPROVAL_WAIT = 10 * 60
+NEVER_GATE = {"Claim bot", "Triage bot", "Label changes-default"}
+HEAVY = "Native Linux tests"
+WATCHED_LABELS = {"ready to merge", "approved-for-ci", "status:decision", "owner-approved", "needs changes", "priority"}
+STATUS_BOTS = ("github-actions", "coderabbitai", "blacksmith")
+TRANSIENT = re.compile(
+    r"HTTP (5\d\d|429)|rate limit|timed? ?out|connection (reset|refused)|EOF|temporar|"
+    r"could not resolve host|TLS handshake|Something went wrong|was submitted too quickly",
+    re.IGNORECASE,
+)
+
+QUERY = """
+query($owner: String!, $name: String!, $number: Int!) {
+  rateLimit { remaining resetAt }
+  viewer { login }
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      url state isDraft isCrossRepository headRefOid headRefName mergeable
+      author { login }
+      labels(first: 40) { nodes { name } }
+      mergeQueueEntry { state position }
+      timelineItems(last: 5, itemTypes: [REMOVED_FROM_MERGE_QUEUE_EVENT]) {
+        nodes { ... on RemovedFromMergeQueueEvent { id reason createdAt } }
+      }
+      comments(last: 50) { nodes { id url body author { login __typename } } }
+      reviews(last: 50) { nodes { id url state body author { login __typename } } }
+      reviewThreads(last: 60) {
+        nodes { isResolved isOutdated path line
+          comments(first: 30) { nodes { id url body author { login __typename } } } }
+      }
+      commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100) { CONTEXTS } } } } }
+    }
+  }
+}
+"""
+# A head with many runs (label runs, re-runs) has more than 100 contexts: the rest come page by page.
+CONTEXTS = """pageInfo { hasNextPage endCursor } nodes {
+        __typename
+        ... on CheckRun { name status conclusion startedAt completedAt detailsUrl }
+        ... on StatusContext { context state targetUrl createdAt }
+      }"""
+QUERY = QUERY.replace("CONTEXTS", CONTEXTS)
+PAGE = """
+query($owner: String!, $name: String!, $number: Int!, $after: String!) {
+  repository(owner: $owner, name: $name) { pullRequest(number: $number) {
+    commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: 100, after: $after) { CONTEXTS } } } } }
+  } }
+}
+""".replace("CONTEXTS", CONTEXTS)
+
+Json = dict[str, Any]
+
+
+class GhError(Exception):
+    def __init__(self, message: str, transient: bool) -> None:
+        super().__init__(message)
+        self.transient = transient
+
+
+def log(message: str) -> None:
+    print(f"pr-wait: {message}", file=sys.stderr, flush=True)
+
+
+def fail(message: str, code: int = 2) -> NoReturn:
+    print(f"pr-wait: {message}", flush=True)
+    sys.exit(code)
+
+
+def gh(args: list[str]) -> str:
+    """Run gh once. A failure is transient when it looks like the network or GitHub."""
+    # gh writes UTF-8. Without the encoding, Windows decodes it with the ANSI code page, which fails on an emoji.
+    proc = subprocess.run(["gh", *args], capture_output=True, text=True, encoding="utf-8")
+    if proc.returncode == 0:
+        return proc.stdout
+    lines = proc.stderr.strip().splitlines()
+    message = lines[-1] if lines else f"gh exited {proc.returncode}"
+    raise GhError(message, bool(TRANSIENT.search(proc.stderr)))
+
+
+def snippet(body: str, limit: int = 110) -> str:
+    text = re.sub(r"<!--.*?-->", " ", body or "", flags=re.DOTALL)
+    text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def who(node: Json) -> tuple[str, bool]:
+    author = node.get("author") or {}
+    return author.get("login") or "ghost", author.get("__typename") == "Bot"
+
+
+def parse_target(raw: str | None, repo: str | None) -> tuple[str, int]:
+    if raw is None or not raw.strip():
+        fail("missing PR number (did a variable expand to nothing?). Usage: pr-wait <pr> [--repo owner/name]")
+    url = re.fullmatch(r"https?://github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)(?:[/?#]\S*)?", raw.strip())
+    number = re.fullmatch(r"#?(\d+)", raw.strip())
+    if url:
+        repo, pr = repo or url.group(1), int(url.group(2))
+    elif number:
+        pr = int(number.group(1))
+    else:
+        fail(f"'{raw}' is not a PR number or PR URL")
+    repo = repo or "tangency-labs/solidcraft"
+    if pr <= 0 or not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
+        fail(f"bad target {repo}#{pr}")
+    return repo, pr
+
+
+def try_lock(handle: Any) -> bool:
+    """Take the watcher lock without waiting. False when another process holds it.
+
+    The operating system drops the lock when the process ends, however it ends."""
+    if sys.platform != "win32":
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return False
+        return True
+    fd = handle.fileno()
+    os.lseek(fd, WINDOWS_LOCK_OFFSET, os.SEEK_SET)
+    try:
+        msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+    except PermissionError:
+        return False
+    return True
+
+
+def lock(repo: str, pr: int) -> Any:
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    handle = open(STATE_DIR / f"{repo.replace('/', '__')}__{pr}.lock", "a+")
+    if not try_lock(handle):
+        handle.seek(0)
+        pid = handle.read().strip() or "unknown"
+        if sys.platform == "win32":
+            check = f"Get-CimInstance Win32_Process -Filter \"ProcessId={pid}\" | Select-Object ProcessId,CommandLine"
+        else:
+            check = f"ps -o pid,args -p {pid}"
+        fail(
+            f"pid {pid} already watches {repo}#{pr}; this one exits. If its events never reach you, check it "
+            f"with `{check}` and stop it by that number only if it is your own watcher."
+        )
+    handle.seek(0)
+    handle.truncate()
+    handle.write(str(os.getpid()))
+    handle.flush()
+    return handle
+
+
+def newest(contexts: list[Json]) -> tuple[dict[str, Json], set[str]]:
+    """The newest run of each check name, and the names with an older red run on this head."""
+    rows: dict[str, list[Json]] = {}
+    for c in contexts:
+        if c.get("__typename") == "CheckRun":
+            row = {"name": c["name"], "when": c.get("startedAt") or "", "link": c.get("detailsUrl") or "",
+                   "state": c.get("conclusion") or c.get("status") or "PENDING", "done": c.get("status") == "COMPLETED"}
+        elif c.get("__typename") == "StatusContext":
+            state = c.get("state") or "PENDING"
+            row = {"name": c["context"], "when": c.get("createdAt") or "", "link": c.get("targetUrl") or "",
+                   "state": state, "done": state not in ("PENDING", "EXPECTED")}
+        else:
+            continue
+        rows.setdefault(row["name"], []).append(row)
+    latest: dict[str, Json] = {}
+    stale_red: set[str] = set()
+    for name, runs in rows.items():
+        runs.sort(key=lambda r: r["when"])
+        # A label run skips every job but ci: its SKIPPED rows say nothing about the real run.
+        real = [r for r in runs if r["state"] != "SKIPPED"] or runs
+        latest[name] = real[-1]
+        if any(r["state"] in ("FAILURE", "CANCELLED", "TIMED_OUT", "ERROR") for r in real[:-1]):
+            stale_red.add(name)
+    return latest, stale_red
+
+
+class Watcher:
+    def __init__(self, repo: str, pr: int, until: str, interval: int, max_hours: float,
+                 expect: str | None = None, head_wait: int = 300) -> None:
+        self.repo, self.pr, self.until, self.interval = repo, pr, until, interval
+        self.owner, self.name = repo.split("/")
+        self.deadline = time.time() + max_hours * 3600
+        # The head to wait for, if any ("auto": the local HEAD when on the PR's branch).
+        self.expect = expect
+        self.head_deadline = time.time() + head_wait
+        self.head_ok = expect is None
+        self.path = STATE_DIR / f"{repo.replace('/', '__')}__{pr}.json"
+        state = self.load()
+        self.baseline = state is None
+        self.state: Json = state or {"reported": [], "labels": None, "heads": {}, "queued": None}
+        self.reported: set[str] = set(self.state["reported"])
+        self.events = 0
+        self.head7 = "-------"
+
+    def load(self) -> Json | None:
+        try:
+            if time.time() - self.path.stat().st_mtime > STALE_STATE_SECONDS:
+                return None
+            return json.loads(self.path.read_text())
+        except (OSError, ValueError):
+            return None
+
+    def save(self) -> None:
+        self.state["reported"] = sorted(self.reported)
+        tmp = self.path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.state))
+        tmp.replace(self.path)
+
+    def say(self, line: str) -> None:
+        print(f"#{self.pr} @{self.head7} {line}", flush=True)
+
+    def emit(self, key: str, line: str) -> None:
+        """Print an event once per PR, across restarts. The first run only records."""
+        if key in self.reported:
+            return
+        self.reported.add(key)
+        if not self.baseline:
+            self.events += 1
+            self.say(line)
+
+    def finish(self, code: int, line: str = "") -> NoReturn:
+        if line:
+            self.say(line)
+        self.save()
+        sys.exit(code)
+
+    def fetch(self) -> tuple[Json, Json]:
+        out = gh(["api", "graphql", "-f", f"query={QUERY}", "-f", f"owner={self.owner}",
+                  "-f", f"name={self.name}", "-F", f"number={self.pr}"])
+        data = json.loads(out).get("data") or {}
+        pr = (data.get("repository") or {}).get("pullRequest")
+        if pr is None:
+            raise GhError(f"cannot read {self.repo}#{self.pr}", False)
+        pr["viewer"] = data["viewer"]["login"]
+        pr["contexts"] = self.contexts(pr)
+        return pr, data.get("rateLimit") or {}
+
+    @staticmethod
+    def rollup(pr: Json) -> Json:
+        nodes = (pr.get("commits") or {}).get("nodes") or [{}]
+        return ((nodes[0].get("commit") or {}).get("statusCheckRollup") or {}).get("contexts") or {}
+
+    def contexts(self, pr: Json) -> list[Json]:
+        page = self.rollup(pr)
+        out = list(page.get("nodes") or [])
+        for _ in range(5):
+            info = page.get("pageInfo") or {}
+            if not info.get("hasNextPage"):
+                break
+            data = json.loads(gh(["api", "graphql", "-f", f"query={PAGE}", "-f", f"owner={self.owner}", "-f", f"name={self.name}",
+                                  "-F", f"number={self.pr}", "-f", f"after={info['endCursor']}"])).get("data") or {}
+            page = self.rollup((data.get("repository") or {}).get("pullRequest") or {})
+            out.extend(page.get("nodes") or [])
+        return out
+
+    def head_matches(self, pr: Json) -> bool:
+        """Whether GitHub's PR head is the commit we expect. Exits 1 once the wait runs out."""
+        if self.head_ok:
+            return True
+        if self.expect == "auto":
+            self.expect = local_head(pr.get("headRefName") or "")
+            if self.expect is None:
+                self.head_ok = True
+                return True
+        head = pr["headRefOid"]
+        if pr["state"] != "OPEN" or head.startswith(self.expect or "") or (self.expect or "").startswith(head):
+            self.head_ok = True
+            return True
+        if time.time() > self.head_deadline:
+            self.finish(1, f"stopped: GitHub still reports head {head[:7]}, not {self.expect[:7]}, after the "
+                        "head wait: check that the push landed (git ls-remote origin <branch>), then start again")
+        log(f"GitHub reports head {head[:7]}; waiting for {self.expect[:7]}")
+        return False
+
+    def poll(self) -> Json:
+        pr, rate = self.fetch()
+        head = pr["headRefOid"]
+        self.head7 = head[:7]
+        if not self.head_matches(pr):
+            rate["_head_wait"] = True
+            return rate
+        if pr["state"] == "MERGED":
+            self.finish(0, f"merged: {pr['url']}")
+        if pr["state"] == "CLOSED":
+            self.finish(1, f"closed without merging: {pr['url']}")
+        self.events = 0
+        first_seen = self.state["heads"].setdefault(head, time.time())
+        author = who(pr)[0]
+
+        # Checks: the newest run of each name.
+        latest, stale_red = newest(pr["contexts"])
+        gating = {n: c for n, c in latest.items() if n not in NEVER_GATE and n != "CodeRabbit"}
+        failed = sorted(n for n, c in gating.items() if c["done"] and c["state"] in ("FAILURE", "CANCELLED", "TIMED_OUT", "ERROR", "ACTION_REQUIRED", "STARTUP_FAILURE"))
+        pending = sorted(n for n, c in gating.items() if not c["done"])
+        ci = latest.get("ci")
+        ci_ok = bool(ci and ci["done"] and ci["state"] == "SUCCESS")
+        heavy = latest.get(HEAVY)
+        heavy_state = heavy["state"] if heavy else "absent"
+        labels = sorted(l["name"] for l in pr["labels"]["nodes"])
+
+        for n in failed:
+            self.emit(f"fail:{head}:{n}:{gating[n]['link']}", f"check failed: {n} {gating[n]['link']}")
+        if ci_ok and "ci" in stale_red:
+            self.emit(f"stale:{head}", "stale ci: an older ci run on this head is red, the newest passed; GitHub may "
+                      "still block until a new head. Do not re-run jobs; push only with a real change.")
+        if not ci and pr["isCrossRepository"] and time.time() - first_seen > FORK_APPROVAL_WAIT:
+            self.emit(f"fork:{head}", "no ci on this fork head after 10 min: its runs may wait for maintainer approval")
+
+        # Labels and the merge queue.
+        old = self.state["labels"]
+        if old is not None:
+            for l in sorted(set(labels) - set(old)):
+                if l in WATCHED_LABELS:
+                    self.emit(f"label+:{l}:{head}:{len(self.reported)}", f"label added: {l}")
+            for l in sorted(set(old) - set(labels)):
+                if l in WATCHED_LABELS:
+                    self.emit(f"label-:{l}:{head}:{len(self.reported)}", f"label removed: {l}")
+        self.state["labels"] = labels
+        entry = pr.get("mergeQueueEntry")
+        if entry and not self.state["queued"]:
+            self.emit(f"queued:{head}", f"in the merge queue, position {entry.get('position')}")
+        self.state["queued"] = bool(entry)
+        for ev in pr["timelineItems"]["nodes"]:
+            if ev.get("id"):
+                self.emit(f"dq:{ev['id']}", f"removed from the merge queue: {ev.get('reason') or 'no reason given'}")
+
+        # People and bots talking. Edits are never events.
+        for c in pr["comments"]["nodes"]:
+            login, is_bot = who(c)
+            if login == author or (is_bot and any(b in login for b in STATUS_BOTS)):
+                continue
+            self.emit(f"c:{c['id']}", f"comment from {login}: {snippet(c['body'])} {c['url']}")
+        for r in pr["reviews"]["nodes"]:
+            login, is_bot = who(r)
+            if login == author or not (r["state"] in ("APPROVED", "CHANGES_REQUESTED") or (r["body"] or "").strip()):
+                continue
+            self.emit(f"c:{r['id']}", f"review from {login} ({r['state'].lower()}): {snippet(r['body'])} {r['url']}")
+        unresolved = []
+        for t in pr["reviewThreads"]["nodes"]:
+            cs = t["comments"]["nodes"]
+            if not t["isResolved"] and not t["isOutdated"] and cs:
+                unresolved.append(cs[0]["url"])
+            where = f"{t['path']}:{t['line']}" if t.get("line") else t["path"]
+            for i, c in enumerate(cs):
+                login, _ = who(c)
+                if login == author:
+                    continue
+                kind = "new thread" if i == 0 else "thread reply"
+                self.emit(f"c:{c['id']}", f"{kind} from {login} on {where}: {snippet(c['body'])} {c['url']}")
+
+        # CodeRabbit is a status context. It gates `ready`, for at most 30 min per head.
+        cr = latest.get("CodeRabbit")
+        cr_done = bool(cr and cr["done"])
+        if cr_done:
+            self.emit(f"cr:{head}", f"CodeRabbit finished: {cr['state'].lower()}")
+        cr_ok = cr_done or time.time() - first_seen > CODERABBIT_WAIT
+
+        conflict = pr["mergeable"] == "CONFLICTING"
+        if conflict:
+            self.emit(f"dirty:{head}", "conflicts with its base: rebase onto origin/main")
+        green = ci_ok and not failed and not pending
+        full = green and heavy_state == "SUCCESS"
+        summary = (f"ci {ci['state'].lower() if ci else 'absent'}; {len(failed)} failed, {len(pending)} pending"
+                   f"{' (' + ', '.join(pending[:4]) + ')' if pending else ''}; heavy tests {heavy_state.lower()}"
+                   f"{'' if 'approved-for-ci' in labels else ' (no approved-for-ci)'}; CodeRabbit "
+                   f"{cr['state'].lower() if cr else 'not yet'}; {len(unresolved)} unresolved threads; "
+                   f"labels: {', '.join(labels) or 'none'}{'; DRAFT' if pr['isDraft'] else ''}")
+        if all(c["done"] for c in gating.values()) and gating:
+            self.emit(f"done:{head}", f"checks finished: {summary}")
+
+        if self.until != "any-change":
+            if conflict:
+                self.finish(1, "stopped: the PR conflicts with its base")
+            if failed:
+                self.finish(1, f"stopped: failed {', '.join(failed)}")
+            if green and self.until == "green":
+                self.finish(0, f"green: {summary}")
+            if green and self.until in ("full", "ready") and heavy_state != "SUCCESS" and "approved-for-ci" in labels \
+                    and heavy_state == "SKIPPED" and time.time() - first_seen > 20 * 60:
+                self.emit(f"heavyskip:{head}", "green, but heavy tests were skipped on this head although approved-for-ci "
+                          "is on (docs-only change, or a label run): read the run before calling it full")
+            if full and self.until == "full":
+                self.finish(0, f"full: {summary}")
+            if full and self.until == "ready" and cr_ok:
+                if unresolved:
+                    self.finish(1, f"blocked by {len(unresolved)} unresolved threads: {' '.join(unresolved[:5])}")
+                self.finish(0, f"ready: {summary}")
+        if self.until == "any-change" and self.events:
+            self.finish(0)
+        return rate
+
+    def run(self) -> NoReturn:
+        failures = 0
+        while True:
+            pause = self.interval
+            try:
+                rate = self.poll()
+                failures = 0
+                if rate.get("_head_wait"):
+                    time.sleep(15)
+                    continue
+                self.save()
+                if self.baseline:
+                    log(f"baseline recorded for {self.repo}#{self.pr}; reporting only new events")
+                self.baseline = False
+                if int(rate.get("remaining", 5000)) < 300:
+                    reset = rate.get("resetAt", "")
+                    log(f"GraphQL budget low ({rate.get('remaining')} left, reset {reset}); waiting for the reset")
+                    try:
+                        until = calendar.timegm(time.strptime(reset, "%Y-%m-%dT%H:%M:%SZ"))
+                        pause = max(self.interval, min(3600, until - time.time() + 30))
+                    except ValueError:
+                        pause = 900
+            except GhError as error:
+                if not error.transient:
+                    self.finish(1, f"pr-wait stopped: {error}")
+                failures += 1
+                log(f"poll failed ({failures}/{MAX_FAILED_POLLS}): {error}")
+                if failures >= MAX_FAILED_POLLS:
+                    self.finish(1, f"pr-wait stopped: GitHub unreachable for {failures} polls: {error}")
+                pause = min(self.interval * 2 ** failures, 900)
+            if time.time() + pause > self.deadline:
+                self.finish(1, "stopped: the time limit passed; read the PR and start again if it still needs watching")
+            time.sleep(pause)
+
+
+def local_head(branch: str) -> str | None:
+    """The local HEAD commit, when the current checkout is on the PR's head branch."""
+    def git(*args: str) -> str:
+        proc = subprocess.run(["git", *args], capture_output=True, text=True, encoding="utf-8")
+        return proc.stdout.strip() if proc.returncode == 0 else ""
+    if not branch or git("branch", "--show-current") != branch:
+        return None
+    return git("rev-parse", "HEAD") or None
+
+
+def main() -> None:
+    if sys.platform == "win32":
+        # A pipe on Windows prints with the ANSI code page, which cannot print an emoji from a comment.
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    p = argparse.ArgumentParser(prog="pr-wait", description="Watch a tangency-labs PR; one line per real event.")
+    p.add_argument("pr", nargs="?", help="PR number or URL")
+    p.add_argument("--repo", help="owner/name (default tangency-labs/solidcraft)")
+    p.add_argument("--until", choices=("green", "full", "ready", "any-change"), default="ready")
+    p.add_argument("--interval", type=int, default=90, help=f"seconds between polls (default 90, min {MIN_INTERVAL})")
+    p.add_argument("--max-hours", type=float, default=6.0, help="give up after this long (default 6)")
+    p.add_argument("--sha", default="auto", help="wait until the PR head is this commit (default: local HEAD on the PR's branch; 'any' to skip)")
+    p.add_argument("--head-wait", type=int, default=300, help="seconds to wait for that head (default 300)")
+    args = p.parse_args()
+    repo, pr = parse_target(args.pr, args.repo)
+    expect = None if args.sha == "any" else args.sha
+    if expect not in (None, "auto") and not re.fullmatch(r"[0-9a-f]{7,40}", expect):
+        fail(f"--sha '{args.sha}' is not a commit hash, 'auto' or 'any'")
+    _lock = lock(repo, pr)
+    Watcher(repo, pr, args.until, max(args.interval, MIN_INTERVAL), args.max_hours, expect, max(args.head_wait, 0)).run()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(130)

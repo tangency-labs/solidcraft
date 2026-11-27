@@ -121,6 +121,10 @@ impl Target {
         ready: None,
     };
 
+    /// The formats of a slicer that also reads STEP: PrusaSlicer since 2.4 and the slicers built on
+    /// it (SuperSlicer, Bambu Studio and its forks), which mesh the exact bodies themselves.
+    pub const WITH_STEP: &'static [&'static str] = &["3mf", "stl", "3mf-tagged", "step"];
+
     pub fn accepts(&self, format: &str) -> bool {
         self.formats.contains(&format)
     }
@@ -138,6 +142,7 @@ const TARGETS: &[Target] = &[
         name: "PrusaSlicer",
         keys: &["prusaslicer"],
         exes: &["prusa-slicer", "PrusaSlicer", "prusa-slicer.exe"],
+        formats: Target::WITH_STEP,
         single_instance: Some("--single-instance"),
         on_url_swap_below: Some(3),
         ready: Some(PRUSA_READY),
@@ -148,9 +153,17 @@ const TARGETS: &[Target] = &[
         name: "Bambu Studio",
         keys: &["bambustudio"],
         exes: &["bambu-studio", "BambuStudio", "bambu-studio.exe"],
+        formats: Target::WITH_STEP,
         ..Target::SLICER
     },
-    Target { id: "orca", name: "OrcaSlicer", keys: &["orcaslicer"], exes: &["orca-slicer", "OrcaSlicer", "orca-slicer.exe"], ..Target::SLICER },
+    Target {
+        id: "orca",
+        name: "OrcaSlicer",
+        keys: &["orcaslicer"],
+        exes: &["orca-slicer", "OrcaSlicer", "orca-slicer.exe"],
+        formats: Target::WITH_STEP,
+        ..Target::SLICER
+    },
     Target {
         id: "cura",
         name: "UltiMaker Cura",
@@ -164,6 +177,7 @@ const TARGETS: &[Target] = &[
         name: "SuperSlicer",
         keys: &["superslicer"],
         exes: &["superslicer", "SuperSlicer", "superslicer.exe"],
+        formats: Target::WITH_STEP,
         single_instance: Some("--single-instance"),
         ..Target::SLICER
     },
@@ -197,7 +211,14 @@ const TARGETS: &[Target] = &[
         ..Target::SLICER
     },
     // QIDI Studio is a Bambu Studio fork and takes what it takes.
-    Target { id: "qidi", name: "QIDI Studio", keys: &["qidistudio"], exes: &["qidi-studio", "QIDIStudio", "qidi-studio.exe"], ..Target::SLICER },
+    Target {
+        id: "qidi",
+        name: "QIDI Studio",
+        keys: &["qidistudio"],
+        exes: &["qidi-studio", "QIDIStudio", "qidi-studio.exe"],
+        formats: Target::WITH_STEP,
+        ..Target::SLICER
+    },
     // The resin slicers read STL.
     Target {
         id: "chitubox",
@@ -311,6 +332,21 @@ pub fn detect() -> Vec<Slicer> {
 pub(crate) static TEST_DETECTED: std::sync::Mutex<Option<Vec<Slicer>>> = std::sync::Mutex::new(None);
 #[cfg(test)]
 pub(crate) static TEST_BUSCTL: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Tests of the commands set how long a started slicer is waited for. [`READY_LIMIT`] is there for a
+/// slicer that hangs; a made-up one on a loaded machine can take longer than that to come up while
+/// nothing is wrong, and what such a test checks is that the file waits for the slicer's own sign.
+#[cfg(test)]
+pub(crate) static TEST_READY_LIMIT: std::sync::Mutex<Option<std::time::Duration>> = std::sync::Mutex::new(None);
+
+/// How long a started slicer is waited for: [`READY_LIMIT`].
+pub(crate) fn ready_limit() -> std::time::Duration {
+    #[cfg(test)]
+    if let Some(made_up) = *TEST_READY_LIMIT.lock().unwrap_or_else(std::sync::PoisonError::into_inner) {
+        return made_up;
+    }
+    READY_LIMIT
+}
 
 /// The program that is asked what is on the session bus: `busctl`.
 pub(crate) fn busctl_program() -> String {
@@ -1134,6 +1170,12 @@ pub(crate) fn wait_for_ready_via(slicer: &Slicer, busctl: &str, limit: std::time
 pub(crate) mod test_support {
     use std::path::Path;
 
+    /// `path` as one shell word, whatever it holds (a space, a quote): for paths written into the
+    /// scripts of [`fake_program`].
+    pub(crate) fn sh_quote(path: &Path) -> String {
+        format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+    }
+
     /// A small shell script that can be run. One that was only just written can fail to start (text
     /// file busy) while another test forks, which would read as a `busctl` that is missing; so it is
     /// started once here, patiently, with a flag the script answers at once, before a test relies
@@ -1346,6 +1388,7 @@ mod tests {
         let chitubox = found.iter().find(|f| f.base_id() == "chitubox").unwrap();
         assert_eq!(chitubox.target().default_format, "stl");
         assert!(!chitubox.target().accepts("3mf"));
+        assert!(!chitubox.target().accepts("step"));
         std::fs::remove_dir_all(root).unwrap();
     }
 

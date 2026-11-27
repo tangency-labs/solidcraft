@@ -234,7 +234,9 @@ impl Net {
         };
         let cn = match Nurbs::of(&form) {
             Ok(cn) => cn,
-            Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+            Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => {
+                return Err(e)
+            }
             Err(_) => return Ok(None),
         };
         // the box's sides are the end knots and its boundary rows the end control rows only
@@ -343,7 +345,9 @@ impl Net {
         };
         let ders = match curve_derivs_over(&lines.curve, v, 1, None) {
             Ok(d) => d,
-            Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+            Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => {
+                return Err(e)
+            }
             Err(_) => return Ok(None),
         };
         let (Some(d0), Some(d1)) = (ders.first(), ders.get(1)) else {
@@ -367,8 +371,9 @@ impl Net {
     }
 
     /// The parts of `[a, b]` in direction `d` (0 for u): on the knots, past each side the
-    /// executive extends, or, in a closed direction, round the seam (at most one period);
-    /// `None` past a side that is not extended.
+    /// executive extends, or, in a closed direction, round the seam (at most one period, from
+    /// wherever it starts: moved by whole turns onto the knots, each part past an end by one
+    /// more); `None` past a side that is not extended.
     fn parts(&self, d: usize, a: f64, b: f64) -> Option<Vec<Part>> {
         let (r0, r1) = *self.range.get(d)?;
         let closed = *self.closed.get(d)?;
@@ -379,18 +384,47 @@ impl Net {
         let mut out = Vec::new();
         if closed {
             let period = r1 - r0;
-            if b - a > period {
+            if period.is_nan() || period <= 0.0 || b - a > period {
                 return None;
             }
+            // a box starting off the knots moved by whole turns to start on them (a
+            // parameter and the one a period on are one point), the move rounded outward:
+            // Newton's steps from a root carried past the seam can land a period or more away
+            let (a, b) = if r0 <= a && a < r1 {
+                (a, b)
+            } else {
+                let turns = Ivl::from(((a - r0) / period).floor());
+                let moved = Ivl::new(a, b) - turns * (Ivl::from(r1) - Ivl::from(r0));
+                (moved.lo, moved.hi)
+            };
+            if !(a <= b && a.is_finite() && b.is_finite()) {
+                return None;
+            }
+            // each part of the box past an end is taken round the seam by one period, that
+            // part alone: a box wholly past an end (a point among them, as Newton's steps
+            // and Krawczyk's middle may be) is its own copy, not the whole way from the
+            // seam to it
+            // the period as an interval, so each wrapped end is rounded outward
+            let wrap = Ivl::from(r1) - Ivl::from(r0);
             if a < r0 {
-                out.push(Part::On(a + period, r1));
+                let hi = if b < r0 {
+                    (Ivl::from(b) + wrap).hi.min(r1)
+                } else {
+                    r1
+                };
+                out.push(Part::On((Ivl::from(a) + wrap).lo.min(hi), hi));
             }
             let (c0, c1) = (a.max(r0), b.min(r1));
             if c0 <= c1 {
                 out.push(Part::On(c0, c1));
             }
             if b > r1 {
-                out.push(Part::On(r0, b - period));
+                let lo = if a > r1 {
+                    (Ivl::from(a) - wrap).lo.max(r0)
+                } else {
+                    r0
+                };
+                out.push(Part::On(lo, (Ivl::from(b) - wrap).hi.max(lo)));
             }
             let in_range = out
                 .iter()
@@ -477,7 +511,9 @@ impl Net {
                     };
                     let p = match found {
                         Ok(p) => p,
-                        Err(e @ SolidError::Cancelled { .. }) => return Err(e),
+                        Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => {
+                            return Err(e)
+                        }
                         Err(_) => return Ok(None),
                     };
                     out = Some(match out {
@@ -490,7 +526,7 @@ impl Net {
         };
         match found {
             Ok(p) => Ok(Some(p)),
-            Err(e @ SolidError::Cancelled { .. }) => Err(e),
+            Err(e @ (SolidError::Cancelled { .. } | SolidError::OutOfFuel { .. })) => Err(e),
             Err(_) => Ok(None),
         }
     }

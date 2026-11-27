@@ -67,16 +67,16 @@ struct Item {
     shape: Shape,
     /// A slot this item is one end of (or the outline of).
     slot: Option<Slot>,
-    /// What the item is on its body's exact B-rep, for the closest points of two items.
+    /// The exact geometry used to find the closest points of two items.
     exact: Option<Exact>,
 }
 
-/// A picked item on its body's exact B-rep: the record edges of an edge (a whole circle's arcs
-/// together), the record faces of a face (a split cylinder's halves together), or a vertex's point.
+/// A picked item's record edges or faces, point, or bounded sketch line.
 enum Exact {
     Edges { body: String, edges: Vec<usize> },
     Faces { body: String, faces: Vec<usize> },
     Point(Vec3),
+    Segment { start: Vec3, end: Vec3 },
 }
 
 /// The circle through a polyline's points (all on one within `tol`): a fallback for edges the
@@ -202,19 +202,19 @@ fn sketch_curve(ss: &solidcraft_doc::SolvedSketch, id: &str) -> Option<Item> {
         _ => return None,
     };
     let mut json = json!({"type": "sketch_curve", "id": id});
-    let dir = match shape {
+    let (dir, exact) = match shape {
         Shape::Line { a, b } => {
             json["length_mm"] = json!(a.dist(b));
-            (b - a).normalized()
+            ((b - a).normalized(), Some(Exact::Segment { start: a, end: b }))
         }
         _ => {
             // A sketch's circle or arc is exact.
             json["length_mm"] = json!(curve_len(&shape, true, polyline_len(&pts)));
             add_round(&mut json, &shape);
-            None
+            (None, None)
         }
     };
-    Some(Item { geo: Geo::Points(pts), dir, json, shape, slot: None, exact: None })
+    Some(Item { geo: Geo::Points(pts), dir, json, shape, slot: None, exact })
 }
 
 /// A curve drawn in a 3D sketch, or a linked 3D curve (a wire, #14051), whose points are in world
@@ -240,13 +240,19 @@ fn sketch_wire(sk: &solidcraft_sketch::Sketch, id: &str) -> Option<Item> {
         [] | [_] => None,
         [a, b] => {
             json["length_mm"] = json!(a.dist(*b));
+            // A linked curve can have only two display samples. Only a drawn line's
+            // defining points identify the segment to measure on the exact face.
+            let exact = match w.fit.as_slice() {
+                [start, end] if w.link.is_none() && w.exact.is_empty() && w.control.is_none() => Some(Exact::Segment { start: *start, end: *end }),
+                _ => None,
+            };
             Some(Item {
                 geo: Geo::Points(densify(&[*a, *b])),
                 dir: (*b - *a).normalized(),
                 json,
                 shape: Shape::Line { a: *a, b: *b },
                 slot: None,
-                exact: None,
+                exact,
             })
         }
         pts => {
@@ -353,7 +359,11 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             })
         }
         Sel::ConstructionPoint { name } => {
-            let p = crate::view::construction_points(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p)?;
+            let p = if let Some(p) = s.origin_point(name) {
+                Some(p)
+            } else {
+                crate::view::construction_points(s).into_iter().find(|(_, n, _)| n == name).map(|(_, _, p)| p)
+            }?;
             Some(Item {
                 geo: Geo::Points(vec![p]),
                 dir: None,
@@ -367,6 +377,14 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
             geo: Geo::Points(vec![*point]),
             dir: None,
             json: json!({"type": "vertex", "position": point}),
+            shape: Shape::Point(*point),
+            slot: None,
+            exact: Some(Exact::Point(*point)),
+        }),
+        Sel::PointCloudPoint { cloud, index, point } => Some(Item {
+            geo: Geo::Points(vec![*point]),
+            dir: None,
+            json: json!({"type": "point", "cloud": cloud, "point_index": index, "position": point}),
             shape: Shape::Point(*point),
             slot: None,
             exact: Some(Exact::Point(*point)),
@@ -448,15 +466,12 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
         }
         Sel::Body { name } => {
             let body = st.body(name)?;
-            let closed = crate::cmd::inspect::encloses_volume(&body.body);
+            let closed = body.is_closed();
             let m = body.mesh();
             let tris: Vec<[Vec3; 3]> = m.triangles.iter().filter_map(|t| m.tri(t)).collect();
             let definitions = s.model.state();
-            let v = if definitions.sheets.iter().any(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty()) {
-                super::inspect::measure_body(body, Some(&definitions)).ok()?.volume
-            } else {
-                m.measure().volume
-            };
+            let perforated = definitions.surface_sheets.iter().any(|sheet| sheet.body == body.definition_name() && !sheet.perforations.is_empty());
+            let v = if perforated { super::inspect::measure_body(body, Some(&definitions)).ok()?.volume } else { m.measure().volume };
             plain(Geo::Tris(tris), None, json!({"type": "body", "name": name, "closed": closed, "volume_mm3": closed.then_some(v)}))
         }
         Sel::SketchCurve { id, sketch } => {
@@ -600,12 +615,11 @@ fn closest(a: &Item, b: &Item) -> Option<(Vec3, Vec3)> {
     triangle_set(a).closest(&triangle_set(b), f64::INFINITY).map(|m| (m.a, m.b))
 }
 
-/// The closest points of two items on their bodies' exact B-reps: an edge (its curve over its own
-/// interval) against an edge, a face (as it is trimmed) or a vertex, solved by the kernel. `None`
-/// for other pairs and for a mesh body, whose triangles are its geometry; an error where the
-/// kernel can't answer for B-rep items (the caller then marks the mesh's answer approximate).
+/// Finds the closest points on exact geometry. The kernel measures body faces, edges and
+/// vertices against one another, and bounded sketch lines against trimmed body faces.
+/// Returns `None` for unsupported pairs and mesh bodies, whose triangles are their geometry.
 fn exact_closest(st: &solidcraft_doc::ModelState, a: &Item, b: &Item) -> std::result::Result<Option<solidcraft_kernel::BodyDistance>, String> {
-    use solidcraft_kernel::{BodyDistance, Members, edges_closest, point_closest};
+    use solidcraft_kernel::{BodyDistance, Members, edges_closest, faces_closest, point_closest, segment_closest};
     let body = |name: &str| st.body(name).map(|b| &b.body).ok_or_else(|| format!("no body named '{name}'"));
     let swap = |d: Option<BodyDistance>| d.map(|d| BodyDistance { from: d.to, to: d.from, ..d });
     #[cfg(test)]
@@ -616,6 +630,7 @@ fn exact_closest(st: &solidcraft_doc::ModelState, a: &Item, b: &Item) -> std::re
         return Err("the kernel's solve was made to fail for a test".into());
     }
     let found = match (&a.exact, &b.exact) {
+        (Some(Exact::Faces { body: x, faces }), Some(Exact::Faces { body: y, faces: to })) => faces_closest(body(x)?, faces, body(y)?, to),
         (Some(Exact::Edges { body: x, edges }), Some(Exact::Edges { body: y, edges: to })) => {
             edges_closest(body(x)?, edges, body(y)?, Members::Edges(to))
         }
@@ -627,6 +642,15 @@ fn exact_closest(st: &solidcraft_doc::ModelState, a: &Item, b: &Item) -> std::re
         }
         (Some(Exact::Edges { body: x, edges }), Some(Exact::Point(p))) => point_closest(*p, body(x)?, Members::Edges(edges)).map(swap),
         (Some(Exact::Point(p)), Some(Exact::Edges { body: y, edges })) => point_closest(*p, body(y)?, Members::Edges(edges)),
+        // A vertex or point and a curved face: the face's exact surface as it is trimmed (#16262).
+        (Some(Exact::Faces { body: x, faces }), Some(Exact::Point(p))) => point_closest(*p, body(x)?, Members::Faces(faces)).map(swap),
+        (Some(Exact::Point(p)), Some(Exact::Faces { body: y, faces })) => point_closest(*p, body(y)?, Members::Faces(faces)),
+        (Some(Exact::Segment { start, end }), Some(Exact::Faces { body: y, faces })) => {
+            segment_closest(*start, *end, body(y)?, Members::Faces(faces))
+        }
+        (Some(Exact::Faces { body: x, faces }), Some(Exact::Segment { start, end })) => {
+            segment_closest(*start, *end, body(x)?, Members::Faces(faces)).map(swap)
+        }
         _ => Ok(None),
     };
     found.map_err(|e| e.to_string())
@@ -790,11 +814,15 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
         }
         // Edges, faces and vertices of B-rep bodies come nearest where their exact curves and
         // surfaces do, not where the display mesh's chords and triangles do (#17823). Where the
-        // kernel's solve can't answer, the mesh's closest points stand, marked approximate.
+        // kernel's solve can't answer for face pairs, measurement fails; existing edge paths
+        // retain their marked approximate result.
         match exact_closest(&world, a, b) {
             Ok(Some(e)) => out.set_closest(e.distance, e.from, e.to),
             Ok(None) => {}
             Err(e) => {
+                if matches!((&a.exact, &b.exact), (Some(Exact::Faces { .. }), Some(Exact::Faces { .. }))) {
+                    return Err(crate::EngineError::Other(e));
+                }
                 out.closest_exact = Some(false);
                 out.closest_note = Some(format!("approximate, from the display mesh: {e}"));
             }

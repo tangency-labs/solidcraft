@@ -7,7 +7,9 @@
 //!   and `is_outward_solid` calls it a solid.
 //! - A box with one edge rounded (radius 3) is enclosed to a millionth of its volume,
 //!   around the closed form `24000 - 40 * 9 * (1 - pi / 4)`, on the default kernel and with
-//!   the rounds' definitions on.
+//!   the rounds' definitions on. The same box moved to (200, 300, 400): its round alone, a
+//!   rational face about 500 from the origin, has its area enclosed around `60 pi` in about
+//!   a thousand cells, each cell's partials taken about the cell, not the origin.
 //! - A box, and the same box with its material outside (every face's material side
 //!   swapped), decide positive and negative with enclosures holding +120 and -120; a
 //!   sphere (seam and poles) holds `4/3 pi r^3`. Their area, centroid, inertia and
@@ -37,8 +39,8 @@ use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::kernel::{KernelOptions, UpstreamFixes};
 use solidcore::mass::enclosure::EnclosureStop;
 use solidcore::mass::enclosure::{
-    enclose_face_area, enclose_mass_properties, enclose_volume, volume_sign, Bounds,
-    VolumeEnclosure, VolumeSign, CELL_BUDGET,
+    enclose_face_area, enclose_face_area_relative, enclose_mass_properties, enclose_volume,
+    volume_sign, Bounds, VolumeEnclosure, VolumeSign, CELL_BUDGET,
 };
 use solidcore::math::{Point3, Vec3, PI};
 use solidcore::primitive::api_primitives::{create_box, create_cylindrical_box, create_sphere};
@@ -85,9 +87,7 @@ fn definitions_kernel() -> Kernel {
     let mut k = Kernel::new(&KernelOptions::default());
     let mut f = UpstreamFixes::default();
     for &name in UpstreamFixes::NAMES {
-        if name != "geometric_g2_continuity" {
-            *f.flag_mut(name).unwrap() = true;
-        }
+        *f.flag_mut(name).unwrap() = true;
     }
     k.fixes = f;
     k
@@ -293,6 +293,122 @@ fn face_areas_are_enclosed_one_face_at_a_time() {
         "{twice:?} {once:?}"
     );
     assert!(enclose_face_area(&k, &mut b, &[], 1.0).is_err());
+}
+
+/// `enclose_face_area_relative`, refined once toward a width relative to the area itself:
+/// - a cylinder's side of radius 2 and height 5 (no pole: it converges) at `rel` 1e-6 and a
+///   sphere of radius 2 at 1e-2 (the round-definition tests' `rel`) and 1e-4 end `Reached`,
+///   at most `rel` of their upper end wide, holding their closed forms `20 pi` and `16 pi`
+///   (the sphere's cells take their partials about the cell, so 1e-4 converges in budget);
+/// - the sphere at 1e-12 spends the cell budget first (its poles converge slowly): it ends
+///   at `Budget` within one check of [`CELL_BUDGET`] cells, wider than asked, and its band
+///   still holds `16 pi`;
+/// - a `rel` that is not positive (or NaN), and no faces, are refused.
+#[test]
+fn a_face_area_is_enclosed_relative_to_itself_in_one_refinement() {
+    use solidcore::primitive::api_primitives::create_cylinder;
+    // `n PI` for a power-of-two-times-5 `n` is off `n pi` only by PI's own rounding (under
+    // half an ulp of pi) and the one product's (half an ulp): under two ulps
+    let holds = |e: &VolumeEnclosure, exact: f64| {
+        let slack = 2.0 * f64::EPSILON * exact;
+        e.lo - slack <= exact && exact <= e.hi + slack
+    };
+    let mut k = Kernel::default();
+    let mut c = create_cylinder(&mut k, Point3::new(1.0, -2.0, 0.5), 2.0, 5.0).unwrap();
+    let side: Vec<_> = faces(&c, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&f| {
+            let face = c.face(f).unwrap();
+            let s = face.surface.as_ref().unwrap();
+            s.evaluate_point(&k, face.uv_domain.mid()).is_ok_and(|p| {
+                let (x, y) = (p.x - 1.0, p.y + 2.0);
+                (x * x + y * y - 4.0).abs() < 1e-9
+            })
+        })
+        .collect();
+    assert_eq!(side.len(), 1, "one side face");
+    let e = enclose_face_area_relative(&k, &mut c, &side, 1e-6).unwrap();
+    assert_eq!(e.stop, EnclosureStop::Reached, "side: {e:?}");
+    assert!(e.width() <= 1e-6 * e.hi, "side: {e:?}");
+    assert!(holds(&e, 20.0 * PI), "side: {e:?}");
+
+    let mut s = create_sphere(&mut k, Point3::new(1.0, -2.0, 0.5), 2.0).unwrap();
+    let all = faces(&s, None).unwrap();
+    let e = enclose_face_area_relative(&k, &mut s, &all, 1e-2).unwrap();
+    assert_eq!(e.stop, EnclosureStop::Reached, "sphere 1e-2: {e:?}");
+    assert!(e.width() <= 1e-2 * e.hi, "sphere 1e-2: {e:?}");
+    assert!(holds(&e, 16.0 * PI), "sphere 1e-2: {e:?}");
+    let e = enclose_face_area_relative(&k, &mut s, &all, 1e-4).unwrap();
+    assert_eq!(e.stop, EnclosureStop::Reached, "sphere 1e-4: {e:?}");
+    assert!(e.counts.cells <= CELL_BUDGET + 16, "sphere 1e-4: {e:?}");
+    assert!(e.width() <= 1e-4 * e.hi, "sphere 1e-4: {e:?}");
+    assert!(e.hi.is_finite(), "sphere 1e-4: {e:?}");
+    assert!(holds(&e, 16.0 * PI), "sphere 1e-4: {e:?}");
+    let e = enclose_face_area_relative(&k, &mut s, &all, 1e-12).unwrap();
+    assert_eq!(e.stop, EnclosureStop::Budget, "sphere 1e-12: {e:?}");
+    // Work stays bounded at starting cells + CELL_BUDGET + 1
+    assert!(e.counts.cells <= CELL_BUDGET + 16, "sphere 1e-12: {e:?}");
+    assert!(e.width() > 1e-12 * e.hi, "sphere 1e-12: {e:?}");
+    assert!(e.hi.is_finite(), "sphere 1e-12: {e:?}");
+    assert!(holds(&e, 16.0 * PI), "sphere 1e-12: {e:?}");
+
+    for rel in [0.0, -1.0, f64::NAN] {
+        assert!(
+            enclose_face_area_relative(&k, &mut s, &all, rel).is_err(),
+            "{rel}"
+        );
+    }
+    assert!(enclose_face_area_relative(&k, &mut s, &[], 1e-2).is_err());
+}
+
+/// The box 40 x 30 x 20 from (200, 300, 400) with its edge through (220, 330, 420) rounded
+/// at radius 3. Its round, a rational face about 500 from the origin (the quarter cylinder of
+/// radius 3 about the line y = 327, z = 417, length 40: area `60 pi`), is enclosed relative
+/// to its area at 1e-2 and at 1e-6 and ends `Reached` in about a thousand cells, holding
+/// `60 pi`. Its cells' partials are taken about each cell, not the origin: taken about the
+/// origin the quotient's `w_ij S` terms are of the size of the face's distance from the
+/// origin, most cells' `|S_u x S_v|^2` were not proved positive and were enclosed by their
+/// range times their area, and at 1e-2 the run spent its whole budget with a band from 52 to
+/// 356 (757 and 877 cells now, as for the same box at the origin).
+#[test]
+fn a_far_rational_rounds_area_is_enclosed_in_few_cells() {
+    let mut k = Kernel::default();
+    let mut b = create_box(&mut k, Point3::new(200.0, 300.0, 400.0), 40.0, 30.0, 20.0).unwrap();
+    let q = Point3::new(220.0, 330.0, 420.0);
+    let e = b
+        .edge_list()
+        .iter()
+        .copied()
+        .find(|&e| edge_closest_point(&k, &b, e, q).is_ok_and(|c| c.closest.distance < 1e-9))
+        .unwrap();
+    fillet_edges(&mut k, &mut b, &[e], 3.0, 1, 1, 1.0).unwrap();
+    let round: Vec<_> = faces(&b, None)
+        .unwrap()
+        .into_iter()
+        .filter(|&f| {
+            let face = b.face(f).unwrap();
+            let s = face.surface.as_ref().unwrap();
+            s.evaluate_point(&k, face.uv_domain.mid()).is_ok_and(|p| {
+                let (y, z) = (p.y - 327.0, p.z - 417.0);
+                (y * y + z * z - 9.0).abs() < 1e-9
+            })
+        })
+        .collect();
+    assert_eq!(round.len(), 1, "one round face");
+    // `60 PI` is off `60 pi` by PI's own rounding and the product's: under two ulps
+    let exact = 60.0 * PI;
+    let slack = 2.0 * f64::EPSILON * exact;
+    for rel in [1e-2, 1e-6] {
+        let e = enclose_face_area_relative(&k, &mut b, &round, rel).unwrap();
+        assert_eq!(e.stop, EnclosureStop::Reached, "{rel}: {e:?}");
+        assert!(e.width() <= rel * e.hi, "{rel}: {e:?}");
+        assert!(e.counts.cells <= 2000, "{rel}: {e:?}");
+        assert!(
+            e.lo - slack <= exact && exact <= e.hi + slack,
+            "{rel}: {e:?}"
+        );
+    }
 }
 
 #[test]

@@ -1,7 +1,7 @@
 # The documentation site on GitHub Pages: the book (docs/book) at https://docs.solidcraft.io/
-# and the web app at /app/ (the latest release), /app-rc/ (the newest release candidate) and
-# /app-edge/ (this commit). Needs Settings → Pages → Source = GitHub Actions; skipped while the
-# repository is private.
+# the web app at /app/ (the latest release), /app-rc/ (the newest release candidate) and
+# /app-edge/ (this commit), and the UI kit's component gallery at /kit/ (this commit). Needs
+# Settings → Pages → Source = GitHub Actions; skipped while the repository is private.
 name: Pages
 
 on:
@@ -61,12 +61,18 @@ jobs:
       - name: Build the web app
         working-directory: apps/solidcraft-web
         run: trunk build --release --public-url ./
+      - name: Build the UI kit's component gallery
+        working-directory: apps/ui-kit-gallery
+        run: trunk build --release --public-url ./
+      - name: Test the browser command API (headless Chrome)
+        run: cargo xtask web-api-test --site dist/web
       - name: Test the web app offline and across an update (headless Chrome)
         run: cargo xtask web-offline-test --site dist/web
       - name: Assemble the site
         run: |
           mkdir -p site
           cp -r target/book/. site/
+          mkdir -p site/kit && cp -r dist/kit/. site/kit/
           bash docs/book/seo.sh site  # canonical links, robots.txt, sitemap.xml
       - name: Add the web app channels (stable and release candidate from their releases, edge from this build)
         env:
@@ -97,3 +103,40 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # https://app.solidcraft.io/ is tangency-labs/solidcraft-app's Pages site, which publishes the
+  # same web zip as /app/ above. Tell it when the stable release changes, so both addresses move
+  # together: its own hourly check runs hours late. It deploys on every push to its main.
+  app-site:
+    needs: deploy
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    env:
+      GH_TOKEN: ${{ github.token }}
+      APP_DEPLOY_KEY: ${{ secrets.SOLIDCRAFT_APP_DEPLOY_KEY }}
+    steps:
+      - name: Record the stable release in solidcraft-app
+        run: |
+          set -euo pipefail
+          if [ -z "$APP_DEPLOY_KEY" ]; then
+            echo "::warning::SOLIDCRAFT_APP_DEPLOY_KEY is not set, so app.solidcraft.io waits for its own hourly check."
+            exit 0
+          fi
+          # The same choice as packaging/web-channels.sh: the latest release that is not a pre-release.
+          stable="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '[.[] | select(.draft == false and .prerelease == false)][0].tag_name // empty')"
+          test -n "$stable"
+          install -d -m 700 "$RUNNER_TEMP/ssh"
+          (umask 077 && printf '%s\n' "$APP_DEPLOY_KEY" > "$RUNNER_TEMP/ssh/app")
+          export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/ssh/app -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+          git clone -q --depth 1 git@github.com:tangency-labs/solidcraft-app.git "$RUNNER_TEMP/app"
+          cd "$RUNNER_TEMP/app"
+          if [ "$(cat release.txt 2>/dev/null || true)" = "$stable" ]; then
+            echo "solidcraft-app already has $stable"
+            exit 0
+          fi
+          printf '%s\n' "$stable" > release.txt
+          git add release.txt
+          git -c user.name="github-actions[bot]" -c user.email="41898183+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Release $stable"
+          git push -q origin HEAD:main
+          echo "solidcraft-app now deploys $stable"

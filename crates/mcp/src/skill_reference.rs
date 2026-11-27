@@ -32,6 +32,13 @@ const SKILLS: &[Skill] = &[
         ],
     },
     Skill {
+        name: "solidcraft-reporting",
+        files: &[
+            ("SKILL.md", include_str!("../../../skills/solidcraft-reporting/SKILL.md")),
+            ("reference/report-template.md", include_str!("../../../skills/solidcraft-reporting/reference/report-template.md")),
+        ],
+    },
+    Skill {
         name: "solidcraft-sheetmetal",
         files: &[
             ("SKILL.md", include_str!("../../../skills/solidcraft-sheetmetal/SKILL.md")),
@@ -47,8 +54,14 @@ pub(crate) fn read(args: &Map<String, Value>) -> Result<Value, String> {
         .find(|s| s.name == name)
         .ok_or_else(|| format!("Unknown skill. Available skills: {}", SKILLS.iter().map(|s| s.name).collect::<Vec<_>>().join(", ")))?;
     let file = match args.get("file") {
-        None | Some(Value::Null) => "reference.md",
-        Some(Value::String(file)) => file,
+        None | Some(Value::Null) => {
+            if skill.files.iter().any(|(name, _)| *name == "reference.md") {
+                "reference.md"
+            } else {
+                "SKILL.md"
+            }
+        }
+        Some(Value::String(file)) => file.as_str(),
         Some(_) => return Err("`file` must be a string".into()),
     };
     skill.files.iter().find(|(name, _)| *name == file).map(|(_, text)| Value::String((*text).into())).ok_or_else(|| {

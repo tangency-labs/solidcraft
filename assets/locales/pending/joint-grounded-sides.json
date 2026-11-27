@@ -1,0 +1,50 @@
+{
+  "en": {
+    "joint.does_not_hold": "{joint} doesn't hold: {reason}",
+    "joint.moves_neither": "{joint} moves neither part: both are grounded ({a}, {b}). Unground one to let the joint place it.",
+    "joint.moves_neither_root": "{joint} moves neither part: {occurrence} is grounded and the other side is in the main assembly, which doesn't move. Unground {occurrence} to let the joint place it.",
+    "joint.unground_part": "Unground {occurrence}"
+  },
+  "ar": {
+    "joint.does_not_hold": "{joint} لا يتحقق: {reason}",
+    "joint.moves_neither": "{joint} لا يحرّك أيًّا من القطعتين: كلتاهما مثبتتان بالأرض ({a}، {b}). فك تثبيت إحداهما ليضعها المفصل في موضعها.",
+    "joint.moves_neither_root": "{joint} لا يحرّك أيًّا من القطعتين: {occurrence} مثبتة بالأرض والجانب الآخر في التجميع الرئيسي الذي لا يتحرك. فك تثبيت {occurrence} ليضعها المفصل في موضعها.",
+    "joint.unground_part": "فك تثبيت {occurrence} بالأرض"
+  },
+  "de": {
+    "joint.does_not_hold": "{joint} hält nicht: {reason}",
+    "joint.moves_neither": "{joint} bewegt keines der Teile: Beide sind festgesetzt ({a}, {b}). Lösen Sie die Fixierung eines Teils, damit das Gelenk es platzieren kann.",
+    "joint.moves_neither_root": "{joint} bewegt keines der Teile: {occurrence} ist festgesetzt und die andere Seite liegt in der Hauptbaugruppe, die sich nicht bewegt. Lösen Sie die Fixierung von {occurrence}, damit das Gelenk es platzieren kann.",
+    "joint.unground_part": "Fixierung von {occurrence} lösen"
+  },
+  "he": {
+    "joint.does_not_hold": "{joint} אינו מתקיים: {reason}",
+    "joint.moves_neither": "{joint} אינו מזיז אף אחד מהחלקים: שניהם מעוגנים ({a}, {b}). בטלו את העיגון של אחד מהם כדי שהמפרק יציב אותו.",
+    "joint.moves_neither_root": "{joint} אינו מזיז אף אחד מהחלקים: {occurrence} מעוגן והצד השני נמצא במכלול הראשי, שאינו זז. בטלו את העיגון של {occurrence} כדי שהמפרק יציב אותו.",
+    "joint.unground_part": "ביטול עיגון של {occurrence}"
+  },
+  "ja": {
+    "joint.does_not_hold": "{joint} が成立しません: {reason}",
+    "joint.moves_neither": "{joint} はどちらの部品も動かしません。両方とも固定されています ({a}、{b})。どちらかの固定を解除すると、ジョイントがその部品を配置します。",
+    "joint.moves_neither_root": "{joint} はどちらの部品も動かしません。{occurrence} は固定されており、もう一方はメインアセンブリにあるため動きません。{occurrence} の固定を解除すると、ジョイントがその部品を配置します。",
+    "joint.unground_part": "{occurrence} の固定を解除"
+  },
+  "ko": {
+    "joint.does_not_hold": "{joint}이(가) 유지되지 않습니다: {reason}",
+    "joint.moves_neither": "{joint}은(는) 어느 부품도 움직이지 않습니다. 두 부품 모두 고정되어 있습니다({a}, {b}). 하나의 고정을 해제하면 관절이 그 부품을 배치합니다.",
+    "joint.moves_neither_root": "{joint}은(는) 어느 부품도 움직이지 않습니다. {occurrence}은(는) 고정되어 있고 다른 쪽은 움직이지 않는 메인 어셈블리에 있습니다. {occurrence}의 고정을 해제하면 관절이 그 부품을 배치합니다.",
+    "joint.unground_part": "{occurrence} 고정 해제"
+  },
+  "vi": {
+    "joint.does_not_hold": "{joint} không giữ được: {reason}",
+    "joint.moves_neither": "{joint} không di chuyển chi tiết nào: cả hai đều được cố định ({a}, {b}). Hủy cố định một chi tiết để khớp nối đặt nó vào vị trí.",
+    "joint.moves_neither_root": "{joint} không di chuyển chi tiết nào: {occurrence} được cố định và phía còn lại nằm trong cụm lắp ráp chính, vốn không di chuyển. Hủy cố định {occurrence} để khớp nối đặt nó vào vị trí.",
+    "joint.unground_part": "Hủy cố định {occurrence}"
+  },
+  "zh": {
+    "joint.does_not_hold": "{joint} 无法满足：{reason}",
+    "joint.moves_neither": "{joint} 不会移动任何零件：两者都已固定（{a}、{b}）。取消固定其中一个，接头即可放置它。",
+    "joint.moves_neither_root": "{joint} 不会移动任何零件：{occurrence} 已固定，另一侧位于不会移动的主装配体中。取消固定 {occurrence}，接头即可放置它。",
+    "joint.unground_part": "取消固定 {occurrence}"
+  }
+}

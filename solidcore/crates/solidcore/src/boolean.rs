@@ -4,6 +4,8 @@
 //! Upstream: `SmTopologySolver`, `SmMerge`, `SmRegion`, `SmBrepCutting` and related
 //! files in `source/SMLib`, and the boolean entry points of `SM_API/SmApiBrep`.
 
+pub mod apart;
 pub mod api_brep;
 pub mod merge;
+pub mod operand_tolerances;
 pub mod topology_intersector;

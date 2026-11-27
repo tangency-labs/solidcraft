@@ -48,7 +48,7 @@ impl BodyHistory for History {
     fn identity(body: &Body) -> History {
         let faces =
             (0..body.face_count()).map(|face| FaceProv { origins: vec![FaceOrigin::Face { operand: 0, face }], change: Change::Kept }).collect();
-        let edges = edge_faces(body.record())
+        let edges = edge_faces(body.record.topology())
             .into_iter()
             .enumerate()
             .map(|(edge, faces)| EdgeProv { faces, origins: vec![EdgeOrigin::Edge { operand: 0, edge }] })

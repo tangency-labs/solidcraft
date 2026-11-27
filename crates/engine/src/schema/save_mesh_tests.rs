@@ -292,6 +292,7 @@ fn replies_with_a_slicer_match_the_output_schema() {
 fn the_reply_type_serializes_as_before() {
     use super::{SaveMeshResult, SlicerDelivery};
     let reply = |delivery| SaveMeshResult {
+        skipped: Vec::new(),
         path: "a.stl".into(),
         bytes: 5,
         format: "StlBinary".into(),

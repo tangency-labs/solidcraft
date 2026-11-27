@@ -1,7 +1,9 @@
 //! A blend refused on its edges or corners, as data ([`BlendRefusal`], carried by
 //! [`crate::SolidError::BlendRefused`]), and the queries the refusals rest on: the tangent
 //! chain of edges ([`tangent_chain`], [`chains_among`]), the edge a blended edge runs on into
-//! ([`continuation`]) and a round too small to change the part ([`round_too_small`]).
+//! ([`continuation`]), a round too small to change the part or to build ([`round_too_small`])
+//! and a chamfer's or weld bead's setback below the body's resolution
+//! ([`setback_below_resolution`]).
 //!
 //! Not upstream (solidcore's). The chain follows the blend corner's own test of an edge
 //! running on tangentially at a vertex ([`continuing_edges`], the fork's
@@ -9,7 +11,9 @@
 //! ([`edge::blend_edgeuse_or_why`]). No recursion.
 
 use crate::blend::blend_corner::end::continuing_edges;
-use crate::math::{rad_to_deg, PI};
+use crate::blend::fillet_executive::p1::{is_radius_supported, SUPPORTED_TOLERANCES};
+use crate::error::blend::BlendFailure;
+use crate::math::{rad_to_deg, EFF_ZERO_SQRT, PI};
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
 use crate::topology::{edge, vertex, Brep, EdgeId, EdgeuseId, VertexId};
@@ -49,10 +53,15 @@ pub enum BlendRefusal {
         /// The edge it runs on into.
         continues_into: EdgeId,
     },
-    /// A round too small to change the part ([`round_too_small`]): its faces turn by `turn`
-    /// across the edge (radians, the least at the kernel's stations), so a round of the
-    /// radius asked lies within `tolerance` of the edge. `smallest_radius` is the least
-    /// radius that rounds it, `tolerance / (sec(turn / 2) - 1)`.
+    /// A round too small to change the part or for the kernel to build ([`round_too_small`]):
+    /// its faces turn by `turn` across the edge (radians, the least at the kernel's
+    /// stations), so a round of the radius asked lies within `tolerance` of the edge, or is
+    /// narrower across its faces than the blend takes (eight times the body's tolerance,
+    /// [`is_radius_supported`]). `smallest_radius` is the least radius the refusal lets
+    /// through, the larger of `tolerance / (sec(turn / 2) - 1)` and
+    /// `8 tol / (2 sin(turn / 2))` (raised by one part in a million, as the kernel fails
+    /// at that width exactly at some turns). It rounded the edge at the turns measured (90,
+    /// 120 and 135 degrees); across a sharper edge (60, 45) the kernel can still fail above it.
     RoundTooSmall {
         /// The edge.
         edge: EdgeId,
@@ -60,7 +69,7 @@ pub enum BlendRefusal {
         turn: f64,
         /// The edge's tolerance (at least the body's).
         tolerance: f64,
-        /// The least radius that rounds it.
+        /// The least radius the refusal lets through.
         smallest_radius: f64,
     },
     /// A setback asked at `vertex` too short for the corner: `least` is the least setback the
@@ -85,6 +94,21 @@ pub enum BlendRefusal {
         largest: f64,
         /// Which test refused it.
         why: SetbackTooLongWhy,
+    },
+    /// A Swept turn at `vertex` that no radius of its rounds builds: its side edge is sharp
+    /// and of the rounds' convexity, so their ball cannot circle it
+    /// ([`crate::blend::blend_corner::swept::classify_swept`]). The ball passes a side edge
+    /// rounded first at a radius of at least `least_radius`, the rounds' radius (the larger
+    /// where they differ within the tolerance; `docs/generic-blend.md`, Turn: R >= r). The
+    /// side edge's other tests for a Swept turn (not tangent, straight and square to both
+    /// rounded edges on a plane) are not made before this refusal.
+    SweptTurnPastSharpEdge {
+        /// The corner's vertex.
+        vertex: VertexId,
+        /// The sharp side edge between the rounds.
+        side_edge: EdgeId,
+        /// The least radius `side_edge` is rounded at for the ball to pass it.
+        least_radius: f64,
     },
     /// A chamfer's angle to its first face that runs out past the other face instead of
     /// meeting it: the chamfer's line and the other face meet only at an angle less than
@@ -172,9 +196,9 @@ impl BlendRefusal {
             | Self::ContinuesInto { edge, .. }
             | Self::RoundTooSmall { edge, .. }
             | Self::ChamferAngleTooLarge { edge, .. } => EntityRef::Edge(edge),
-            Self::SetbackTooShort { vertex, .. } | Self::SetbackTooLong { vertex, .. } => {
-                EntityRef::Vertex(vertex)
-            }
+            Self::SetbackTooShort { vertex, .. }
+            | Self::SetbackTooLong { vertex, .. }
+            | Self::SweptTurnPastSharpEdge { vertex, .. } => EntityRef::Vertex(vertex),
         }
     }
 }
@@ -358,11 +382,15 @@ pub fn continuation_at(
 }
 
 /// [`BlendRefusal::RoundTooSmall`] for a circular round of `radius` on `e`, or `None` where
-/// it changes the part. Across an edge whose faces' normals turn by `turn`, a round of
-/// radius r lies `r (sec(turn / 2) - 1)` inside the sharp edge at its middle, the farthest
-/// it moves the part; below the edge's tolerance (at least the body's) the round is the edge
-/// itself to the model's accuracy. `turn` is the least turn at the kernel's stations along
-/// the edge (those of its tangency test): at least the least turn along it, so a round
+/// it changes the part and the kernel builds it. Across an edge whose faces' normals turn
+/// by `turn`, a round of radius r lies `r (sec(turn / 2) - 1)` inside the sharp edge at its
+/// middle, the farthest it moves the part; below the edge's tolerance (at least the body's)
+/// the round is the edge itself to the model's accuracy. Its width across the faces, the
+/// chord `2 r sin(turn / 2)` between its edges, must be one the blend takes
+/// ([`is_radius_supported`]: eight times the body's tolerance, raised by one part in a
+/// million, as a chord of exactly that fails at some turns); a narrower round fails in the
+/// kernel, untyped or with no faces made. `turn` is the least turn at the kernel's
+/// stations along the edge (those of its tangency test): at least the least turn along it, so a round
 /// refused is within the tolerance where the faces turn least. An edge whose faces turn by
 /// no more than the blend's tangency angle there ([`edge::blend_edgeuse`]'s) is left to the
 /// blend, as is an edge without a blend edge use.
@@ -406,13 +434,48 @@ pub fn round_too_small(
         return Ok(None);
     }
     let tolerance = b.edge(e)?.tolerance.max(b.tolerance());
-    if radius * reach >= tolerance {
+    // the round's width across its faces, the chord between its two edges
+    let chord = 2.0 * (0.5 * turn).sin();
+    let narrowest = SUPPORTED_TOLERANCES * b.tolerance() / chord * (1.0 + EFF_ZERO_SQRT);
+    if radius * reach >= tolerance && radius >= narrowest {
         return Ok(None);
     }
     Ok(Some(BlendRefusal::RoundTooSmall {
         edge: e,
         turn,
         tolerance,
-        smallest_radius: tolerance / reach,
+        smallest_radius: (tolerance / reach).max(narrowest),
     }))
+}
+
+/// [`BlendFailure::SizeBelowResolution`] of `op` at edge `id` for the first of `setbacks`
+/// below the smallest size a fillet builds on a body of `tolerance`
+/// ([`is_radius_supported`]: eight times the tolerance; NaN fails too): a setback is how far
+/// a rail or a toe lies from the edge along its face, whether it was given as a distance or
+/// computed from an angle or a chord, and one that small puts it on the edge within
+/// tolerance, a sliver. Shared by the chamfer's preparation and the weld bead (#21004,
+/// #21138), so a size refused by one is refused alike by the other.
+///
+/// # Errors
+///
+/// That refusal (class `InvalidInput`, status `SM_ERR_INVALID_INPUT`), naming the setback
+/// and the tolerance.
+#[track_caller]
+pub(crate) fn setback_below_resolution(
+    op: &'static str,
+    id: EdgeId,
+    setbacks: [f64; 2],
+    tolerance: f64,
+) -> Result<()> {
+    match setbacks
+        .into_iter()
+        .find(|&s| !is_radius_supported(s, tolerance))
+    {
+        None => Ok(()),
+        Some(size) => Err(SolidError::blend_at(
+            op,
+            BlendFailure::SizeBelowResolution { size, tolerance },
+            EntityRef::Edge(id),
+        )),
+    }
 }

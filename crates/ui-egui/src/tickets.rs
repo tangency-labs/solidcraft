@@ -32,13 +32,13 @@ pub const SECRET_ID: &str = "tickets.solidcraft.io";
 pub struct Call(Receiver<Reply>);
 
 impl Call {
-    fn start(http: &Http, request: HttpRequest) -> Self {
+    pub(crate) fn start(http: &Http, request: HttpRequest) -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
         http(request, tx);
         Self(rx)
     }
     /// The answer once it came.
-    fn poll(&self) -> Option<Reply> {
+    pub(crate) fn poll(&self) -> Option<Reply> {
         match self.0.try_recv() {
             Ok(r) => Some(r),
             Err(TryRecvError::Empty) => None,
@@ -56,6 +56,21 @@ enum Step {
     Resume(usize),
     Chunk(usize),
     Finish(usize),
+}
+
+/// A failed request's phase and attachment. Include the file as well as the HTTP path:
+/// /api/uploads has no file name, and a timed-out request otherwise gives no clue which
+/// attachment the app was sending (#17932).
+fn step_context(step: Step, files: &[payload::File], missing: &std::collections::VecDeque<usize>) -> String {
+    let file =
+        |i: usize| files.get(i).map_or("attachment", |file| file.name.as_str()).chars().filter(|c| !c.is_control()).take(100).collect::<String>();
+    match step {
+        Step::Draft => "create report draft".into(),
+        Step::Open(i) => format!("start upload of {}", file(i)),
+        Step::Resume(i) => format!("resume upload of {}", file(i)),
+        Step::Chunk(i) => format!("upload part {} of {}", missing.front().copied().unwrap_or(1), file(i)),
+        Step::Finish(i) => format!("complete upload of {}", file(i)),
+    }
 }
 
 pub struct Sending {
@@ -91,6 +106,31 @@ pub enum Outcome {
     /// The server refused it, or something else went wrong (why).
     Failed(String),
     Cancelled,
+    /// The same report went to the server within [`REPEAT_WINDOW_MS`]: nothing was sent, and its
+    /// draft's page is offered instead (#21201).
+    AlreadySent(String),
+}
+
+/// How long a report that reached the server is offered again instead of being sent twice.
+pub const REPEAT_WINDOW_MS: f64 = 30.0 * 60.0 * 1000.0;
+
+/// A report that reached the server: what makes it the same report, its draft's page, and when.
+#[derive(Clone, Debug)]
+pub struct Sent {
+    pub same: String,
+    pub url: String,
+    /// When, in [`crate::now_ms`]'s milliseconds.
+    pub at_ms: f64,
+}
+
+/// What makes two reports the same one (#17556, #21201): the title and description typed, the
+/// failed operation and the design's hash. Attachments ticked or not, and when it was made, don't
+/// count.
+pub fn same_report(report: &payload::Outgoing) -> String {
+    let t = &report.ticket;
+    let repro = &t["repro"];
+    let key = serde_json::json!([t["title"], t["body"], repro["failing"], repro["design_sha256"]]);
+    api::sha256_hex(key.to_string().as_bytes())
 }
 
 #[derive(Default)]
@@ -103,6 +143,8 @@ pub struct Tickets {
     next_owner: u64,
     /// The last report sent, for Retry after a failure.
     pub last: Option<payload::Outgoing>,
+    /// The reports that reached the server in this run, newest last.
+    pub sent: Vec<Sent>,
     /// The queue folder; None: no queue (reports made offline wait in memory for this run).
     pub queue_dir: Option<PathBuf>,
     memory_queue: Vec<payload::Outgoing>,
@@ -158,6 +200,15 @@ pub fn send_for(app: &mut SolveApp, report: payload::Outgoing, owner: u64) {
     }
     app.tickets.owner = owner;
     app.tickets.outcome = None;
+    let same = same_report(&report);
+    let now = crate::now_ms();
+    app.tickets.sent.retain(|s| (now - s.at_ms).abs() < REPEAT_WINDOW_MS);
+    if let Some(earlier) = app.tickets.sent.iter().rev().find(|s| s.same == same) {
+        let url = earlier.url.clone();
+        log(app, "the same report was sent a few minutes ago: offered again, nothing sent");
+        app.tickets.outcome = Some(Outcome::AlreadySent(url));
+        return;
+    }
     start(app, report, None);
 }
 
@@ -270,6 +321,7 @@ fn finish(app: &mut SolveApp, s: Sending) {
     match s.draft {
         Some(draft) => {
             log(app, "opened in the browser");
+            app.tickets.sent.push(Sent { same: same_report(&s.report), url: draft.url.clone(), at_ms: crate::now_ms() });
             app.tickets.open_url = Some(draft.url.clone());
             app.tickets.outcome = Some(Outcome::Opened(draft.url));
         }
@@ -301,7 +353,12 @@ fn tick_send(app: &mut SolveApp) {
     let token = s.draft.as_ref().map(|d| d.upload_token.clone()).unwrap_or_default();
     let Some(call) = s.call.take() else {
         let r = request(&s, &token);
-        s.asked = format!("{} {}", r.method, r.url.strip_prefix(&api::server()).unwrap_or_default());
+        s.asked = format!(
+            "{} ({} {})",
+            step_context(s.step, &s.report.files, &s.missing),
+            r.method,
+            r.url.strip_prefix(&api::server()).unwrap_or_default(),
+        );
         s.call = Some(Call::start(&http, r));
         app.tickets.sending = Some(s);
         return;
@@ -440,5 +497,41 @@ fn request(s: &Sending, token: &str) -> HttpRequest {
             api::upload_part(token, &upload(i), n, part(s, i, n))
         }
         Step::Finish(i) => api::finish_upload(token, &upload(i)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Each offline request reports the phase and the file it was working on. File names
+    /// may contain control characters: these must not introduce extra log lines.
+    #[test]
+    fn timeout_step_context_names_the_phase_and_attachment() {
+        let files = [
+            payload::File {
+                name: "log.txt".into(),
+                content_type: "text/plain".into(),
+                kind: "log".into(),
+                bytes: vec![1],
+                upload: None,
+                done: false,
+            },
+            payload::File {
+                name: "screenshot\n.png".into(),
+                content_type: "image/png".into(),
+                kind: "screenshot".into(),
+                bytes: vec![2],
+                upload: None,
+                done: false,
+            },
+        ];
+        let parts = std::collections::VecDeque::from([3]);
+        assert_eq!(step_context(Step::Draft, &files, &parts), "create report draft");
+        assert_eq!(step_context(Step::Open(0), &files, &parts), "start upload of log.txt");
+        assert_eq!(step_context(Step::Resume(1), &files, &parts), "resume upload of screenshot.png");
+        assert_eq!(step_context(Step::Chunk(1), &files, &parts), "upload part 3 of screenshot.png");
+        assert_eq!(step_context(Step::Finish(1), &files, &parts), "complete upload of screenshot.png");
+        assert_eq!(step_context(Step::Open(5), &files, &parts), "start upload of attachment");
     }
 }

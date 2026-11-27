@@ -7,8 +7,8 @@ use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
 
 use crate::construct::switch;
-use crate::model::{ConstraintKind, Sketch};
-use crate::solver::{DrivingValues, solve, solve_after_value_edit};
+use crate::model::{ConstraintKind, CurveKind, Sketch};
+use crate::solver::{DrivingValues, edit_work_override, lm_work, solve, solve_after_value_edit};
 
 struct Lcg(u64);
 impl Lcg {
@@ -366,6 +366,21 @@ fn an_edit_continuation_cannot_reach_is_solved_in_steps() {
     }
 }
 
+/// The edit above, solved with each repeated LM run taken from the first (the step tries
+/// start from the same layout, so their first sub-steps repeat runs made before): the same
+/// geometry bit for bit and the same report as solved with every run made again.
+#[test]
+fn an_edit_solved_in_steps_is_the_same_with_repeated_runs_taken_again() {
+    let new = [54.0, 59.0, 72.0, 31.0, 78.0, 76.0, 33.0, 61.0, 82.0];
+    let mut rng = Lcg(1);
+    let (mut sk, old) = linkage(&mut rng, 1.0, 1.0, false);
+    set_distances(&mut sk, &new);
+    let ((plain, plain_report), (remembered, report), hits) = switch::without_differential(|| crate::solver::solve_after_value_edit_both(&sk, &old));
+    assert!(hits > 0, "the step tries repeat runs");
+    assert_eq!(remembered.points, plain.points);
+    assert_eq!(format!("{report:?}"), format!("{plain_report:?}"));
+}
+
 /// #15766: a horizontal and a vertical distance from a fixed point to a free one drawn on their
 /// negative sides, each edited to zero and back. At zero the two points are level; the next
 /// value puts the free point back on the side it was drawn on, not on the mirrored one.
@@ -409,6 +424,157 @@ fn an_aligned_point_distance_edited_through_zero_keeps_its_side() {
             let rep = solve_after_value_edit(&mut sk, &old);
             let at = sk.points[p].pos;
             assert!(rep.ok() && (at.x - want.0).abs() < 1e-6 && (at.y - want.1).abs() < 1e-6, "{vertical} {value}: {at:?} {rep:?}");
+        }
+    }
+}
+
+/// Two hexagons, each on a construction circle centred on an end of a horizontal construction
+/// line whose midpoint is the origin: the line made four times as long in one edit (100 to 400)
+/// moves each hexagon out with its end. The seed put each circle's centre on its new end and
+/// left the corners where they were, 150 mm away from a circle of radius 8; the iteration then
+/// met every constraint by pulling a hexagon's six corners into one, its sides squeezed to
+/// points (#19301). Carried with the centre, the corners start on the circle.
+#[test]
+fn a_large_edit_moves_hexagons_on_a_lines_ends_instead_of_squeezing_their_sides() {
+    let mut sk = Sketch::new();
+    let axis = sk.add_line(Vec2::new(50.0, 0.0), Vec2::new(-50.0, 0.0), None, None, None).unwrap();
+    sk.add_constraint(ConstraintKind::Midpoint { p: 0, l: axis }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Length { l: axis, value: 100.0 }, None).unwrap();
+    sk.add_constraint(ConstraintKind::Horizontal { l: axis }, None).unwrap();
+    let (start, end) = sk.curves[axis].kind.ends().unwrap();
+    let mut sides = Vec::new();
+    for (x, on) in [(-50.0, end), (50.0, start)] {
+        let center = Vec2::new(x, 0.0);
+        let circle = sk.add_circle(center, 8.0, None, None).unwrap();
+        let CurveKind::Circle { c, .. } = sk.curves[circle].kind else { panic!("a circle") };
+        sk.add_constraint(ConstraintKind::Coincident { p: on, q: c }, None).unwrap();
+        sk.add_constraint(ConstraintKind::Radius { c: circle, value: 8.0 }, None).unwrap();
+        let corners: Vec<usize> = (0..6)
+            .map(|k| {
+                let a = std::f64::consts::FRAC_PI_3 * (k + 4) as f64;
+                sk.add_point(center + Vec2::new(a.cos(), a.sin()) * 8.0, None).unwrap()
+            })
+            .collect();
+        let lines: Vec<usize> = (0..6).map(|k| sk.add_line_pts(corners[k], corners[(k + 1) % 6], None).unwrap()).collect();
+        for k in 0..5 {
+            sk.add_constraint(ConstraintKind::Equal { a: lines[k], b: lines[k + 1] }, None).unwrap();
+        }
+        for &p in &corners {
+            sk.add_constraint(ConstraintKind::PointOnCurve { p, c: circle }, None).unwrap();
+        }
+        sk.add_constraint(ConstraintKind::Horizontal { l: lines[3] }, None).unwrap();
+        sides.extend(lines);
+    }
+    assert!(solve(&mut sk).ok());
+    let old = sk.driving_values();
+    for c in &mut sk.constraints {
+        if let ConstraintKind::Length { value, .. } = &mut c.kind {
+            *value = 400.0;
+        }
+    }
+    let rep = solve_after_value_edit(&mut sk, &old);
+    assert!(rep.ok(), "{rep:?}");
+    for &l in &sides {
+        let (a, b) = sk.curves[l].kind.ends().unwrap();
+        let side = sk.points[a].pos.dist(sk.points[b].pos);
+        assert!((side - 8.0).abs() < 1e-6, "{}: {side}", sk.curves[l].id);
+    }
+}
+
+/// `k` copies of the linkage 60 mm apart, copy 0 fixed, each joined to the one before by two distances.
+fn chained(k: usize) -> (Sketch, DrivingValues) {
+    let mut sk = Sketch::new();
+    let mut ids: Vec<Vec<usize>> = Vec::new();
+    for i in 0..k {
+        let dx = 60.0 * i as f64;
+        let row: Vec<usize> = LAYOUT.iter().map(|p| sk.add_point(Vec2::new(p.0 + dx, p.1), None).unwrap()).collect();
+        if i == 0 {
+            sk.add_constraint(ConstraintKind::Fix { p: row[0] }, None).unwrap();
+        }
+        let l = sk.add_line_pts(row[0], row[1], None).unwrap();
+        sk.add_constraint(ConstraintKind::Horizontal { l }, None).unwrap();
+        if i > 0 {
+            let prev = &ids[i - 1];
+            for (a, b) in [(prev[1], row[0]), (prev[4], row[3])] {
+                let d = sk.points[a].pos.dist(sk.points[b].pos);
+                sk.add_constraint(ConstraintKind::Distance { p: a, q: b, value: d }, None).unwrap();
+            }
+        }
+        for (a, b) in PAIRS {
+            let d = sk.points[row[a]].pos.dist(sk.points[row[b]].pos);
+            sk.add_constraint(ConstraintKind::Distance { p: row[a], q: row[b], value: d }, None).unwrap();
+        }
+        ids.push(row);
+    }
+    let old = sk.driving_values();
+    (sk, old)
+}
+
+/// The last copy's nine distances of a `chained` sketch, set to `new` (`PAIRS` order).
+fn set_last_copy(sk: &mut Sketch, new: &[f64; 9]) {
+    let n = sk.constraints.len();
+    for (j, d) in new.iter().enumerate() {
+        sk.constraints[n - 9 + j].kind.set_value(*d);
+    }
+}
+
+/// The LM work one value edit may spend on `chained(20)`: about 2x the fix's, well below main's.
+const EDIT_LM_BOUND: usize = 250_000;
+
+/// #17905: one value edit on a large chained linkage spends a bounded amount of LM work (the
+/// variables LM works on, summed over its iterations), and either solves keeping its orientation or is
+/// refused with the sketch's geometry unchanged.
+#[test]
+fn a_value_edit_on_a_large_sketch_spends_a_bounded_amount_of_solver_work() {
+    let new = [54.0, 59.0, 72.0, 31.0, 78.0, 76.0, 33.0, 61.0, 82.0];
+    let (mut sk, old) = chained(20);
+    assert!(solve(&mut sk.clone()).ok());
+    set_last_copy(&mut sk, &new);
+    let before: Vec<Vec2> = sk.points.iter().map(|p| p.pos).collect();
+    lm_work::take();
+    edit_work_override::set(Some(4_000_000_000));
+    let report = switch::without_differential(|| solve_after_value_edit(&mut sk, &old));
+    edit_work_override::set(None);
+    let work = lm_work::take();
+    assert!(work <= EDIT_LM_BOUND, "LM work {work} over the bound {EDIT_LM_BOUND}");
+    assert!(sk.points.iter().all(|p| p.pos.x.is_finite() && p.pos.y.is_finite()));
+    let unchanged = sk.points.iter().map(|p| p.pos).eq(before.iter().copied());
+    assert!(report.keeps_orientation() || (!report.ok() && unchanged), "{report:?}");
+}
+
+/// #17905: a small value edit, stepped as before, still solves keeping its orientation.
+#[test]
+fn small_value_edits_solve_as_before() {
+    let new = [54.0, 59.0, 72.0, 31.0, 78.0, 76.0, 33.0, 61.0, 82.0];
+    let (mut sk, old) = chained(1);
+    assert!(solve(&mut sk.clone()).ok());
+    set_last_copy(&mut sk, &new);
+    let report = solve_after_value_edit(&mut sk, &old);
+    assert!(report.keeps_orientation(), "{report:?}");
+    for (&(a, b), d) in PAIRS.iter().zip(new) {
+        let measured = sk.points[a + 1].pos.dist(sk.points[b + 1].pos);
+        assert!((measured - d).abs() < 1e-6, "{a}-{b}: {measured} for {d}");
+    }
+}
+
+/// #17905: a small value edit on a large chained linkage still solves, keeping its orientation.
+#[test]
+fn a_small_edit_on_a_large_sketch_still_solves() {
+    for k in [40, 80] {
+        let (mut sk, old) = chained(k);
+        assert!(solve(&mut sk.clone()).ok());
+        let n = sk.constraints.len();
+        let mut new = [0.0; 9];
+        for (j, d) in new.iter_mut().enumerate() {
+            *d = sk.constraints[n - 9 + j].kind.value().expect("a distance") * 1.02;
+        }
+        set_last_copy(&mut sk, &new);
+        let report = switch::without_differential(|| solve_after_value_edit(&mut sk, &old));
+        assert!(report.ok() && report.keeps_orientation(), "k={k}: {report:?}");
+        let base = 1 + 6 * (k - 1);
+        for (&(a, b), d) in PAIRS.iter().zip(new) {
+            let measured = sk.points[base + a].pos.dist(sk.points[base + b].pos);
+            assert!((measured - d).abs() < 1e-6, "k={k} {a}-{b}: {measured} for {d}");
         }
     }
 }

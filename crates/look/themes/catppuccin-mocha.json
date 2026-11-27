@@ -2,6 +2,7 @@
   "order": 200,
   "provenance": "Original SolidCraft mapping of Catppuccin (MIT palette)",
   "base": "dark",
+  "accepts_accent": true,
   "colors": {
     "accent": "#cba6f7",
     "accent_soft": "#302b46",
