@@ -385,8 +385,8 @@ fn cell_grid(s: &mut Session, p: &Value) -> Result<Value> {
         depth,
         through_all,
         direction,
-            targets,
-        };
+        targets,
+    };
     match &wall {
         Some((_, picked)) => add_face_feature(picked, s, p, kind),
         None => add_feature(s, p, kind),
