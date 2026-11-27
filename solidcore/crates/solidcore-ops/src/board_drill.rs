@@ -20,3 +20,18 @@ pub fn hole_reaches_loops(
 ) -> bool {
     solidcore::geom::board_drill::hole_reaches_loops(center, size, angle, loops)
 }
+
+/// Whether a side of a board's outline lies on the wall of the drilled hole of
+/// [`hole_reaches_loops`]: every one of `points` is, within `chord` (the sag of a wall drawn as
+/// chords) or 0.6 % of the hole's radius, whichever is larger. No points, or a non-finite or
+/// negative input, is on no wall.
+#[must_use]
+pub fn side_on_hole_wall(
+    center: [f64; 2],
+    size: [f64; 2],
+    angle: f64,
+    points: &[[f64; 2]],
+    chord: f64,
+) -> bool {
+    solidcore::geom::board_drill::side_on_hole_wall(center, size, angle, points, chord)
+}

@@ -484,6 +484,7 @@ struct ProductionSnapshot {
     visibility: [Option<VisibilityIntent>; Product::ALL.len()],
     panels: [PanelSnapshot; Product::ALL.len()],
     actions: VecDeque<QueuedAction>,
+    dispatching_widget_actions: bool,
 }
 struct VisibilityIntent {
     document: DocumentId,
@@ -518,7 +519,18 @@ impl ProductionState {
                 extent: None,
             }),
             actions: VecDeque::new(),
+            dispatching_widget_actions: false,
         }))))
+    }
+
+    pub(super) fn with_widget_actions(&self, dispatch: impl FnOnce() -> PanelResult<()>) -> PanelResult<()> {
+        let previous = {
+            let mut snapshot = self.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel actions are borrowed"))?;
+            std::mem::replace(&mut snapshot.dispatching_widget_actions, true)
+        };
+        let result = dispatch();
+        self.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel actions are borrowed"))?.dispatching_widget_actions = previous;
+        result
     }
 }
 
@@ -690,11 +702,12 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
                     crate::timeline::run_transport(app, control);
                 }
             }
-            Product::Assistant => {
-                if action.action.0 == "new-chat" {
-                    crate::agent_chat::request_new_chat(app);
-                }
-            }
+            Product::Assistant => match action.action.0.as_str() {
+                "new-chat" => crate::agent_chat::request_new_chat(app),
+                #[cfg(not(target_arch = "wasm32"))]
+                "export-chat" => crate::agent_chat::request_export(&mut app.agent_chat),
+                _ => {}
+            },
             Product::RenderBrowser => {
                 let params = match action.action.0.as_str() {
                     "by-object" => json!({"by_look":false}),
@@ -1419,6 +1432,11 @@ impl PanelController for ProductionController {
         self.availability(owner, services.models).require()?;
         self.prepare_action(owner, action, services.models)?;
         let mut snapshot = self.state.0.try_borrow_mut().map_err(|_| error(Rule::Lifecycle, "application panel actions are borrowed"))?;
+        // The in-app host commits header and overflow clicks through the same action.
+        // Programmatic calls must not open the export dialog.
+        if self.product == Product::Assistant && action.0 == "export-chat" && !snapshot.dispatching_widget_actions {
+            return Ok(());
+        }
         if snapshot.actions.len() >= MAX_ACTIONS {
             return Err(error(Rule::CollectionLimit, "application panel action queue is full"));
         }
@@ -1648,10 +1666,6 @@ impl FramePanelContent for ProductionFrame<'_> {
     fn header_action_clicked(&mut self, instance: &InstanceId, action: &ControlId, button: egui::Rect) {
         if instance.0 == Product::Timeline2d.id() && action.0 == TIMELINE_SETTINGS {
             crate::context_menu::open_for(self.app, button.left_bottom(), crate::context_menu::Target::Timeline2dOptions);
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        if instance.0 == Product::Assistant.id() && action.0 == "export-chat" {
-            crate::agent_chat::request_export(&mut self.app.agent_chat);
         }
     }
 

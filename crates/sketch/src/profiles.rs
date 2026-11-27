@@ -910,24 +910,30 @@ pub fn find_drawn_profiles(sk: &Sketch) -> Vec<Profile> {
 /// which the letter's own profile already has as a hole. What "all profiles" means for text:
 /// the letters, not the letters with their counters filled in.
 pub fn without_text_counters(sk: &Sketch, profiles: Vec<Profile>) -> Vec<Profile> {
+    let counters = text_counters(sk, &profiles);
+    profiles.into_iter().zip(counters).filter(|(_, counter)| !*counter).map(|(p, _)| p).collect()
+}
+
+/// For each of `profiles`, whether it is the counter of a letter (see [`without_text_counters`]).
+pub fn text_counters(sk: &Sketch, profiles: &[Profile]) -> Vec<bool> {
     let index: std::collections::HashMap<&str, usize> = sk.curves.iter().enumerate().map(|(i, c)| (c.id.as_str(), i)).collect();
     let text_only: Vec<bool> = profiles
         .iter()
         .map(|p| !p.outer_curves.is_empty() && p.outer_curves.iter().all(|id| index.get(id.as_str()).is_some_and(|ci| sk.is_text_curve(*ci))))
         .collect();
     if !text_only.iter().any(|t| *t) {
-        return profiles;
+        return vec![false; profiles.len()];
     }
     // Outer polylines and their boxes, once.
     let polys: Vec<Ring<Vec2>> = profiles.iter().map(|p| p.region.outer.polyline(1e-3)).collect();
     let boxes: Vec<solidcraft_geom::Aabb2> = polys.iter().map(|pl| pl.bounds()).collect();
     let areas: Vec<f64> = profiles.iter().map(|p| p.region.outer.signed_area().abs()).collect();
-    let keep: Vec<bool> = (0..profiles.len())
+    (0..profiles.len())
         .map(|i| {
             if !text_only.get(i).copied().unwrap_or(false) {
-                return true;
+                return false;
             }
-            let Some(probe) = profiles.get(i).and_then(|p| p.region.outer.segs.first()).map(Seg2::mid) else { return true };
+            let Some(probe) = profiles.get(i).and_then(|p| p.region.outer.segs.first()).map(Seg2::mid) else { return false };
             let ai = areas.get(i).copied().unwrap_or(0.0);
             let depth = (0..profiles.len())
                 .filter(|&j| {
@@ -938,10 +944,9 @@ pub fn without_text_counters(sk: &Sketch, profiles: Vec<Profile>) -> Vec<Profile
                         && polys.get(j).is_some_and(|pl| pl.contains(probe))
                 })
                 .count();
-            depth % 2 == 0
+            depth % 2 == 1
         })
-        .collect();
-    profiles.into_iter().zip(keep).filter(|(_, k)| *k).map(|(p, _)| p).collect()
+        .collect()
 }
 
 /// Curves above which [`enclosed_gaps`] does not look for drawn loops (it then finds no gap).
