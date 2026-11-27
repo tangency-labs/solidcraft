@@ -222,7 +222,19 @@ fn wall_face(st: &ModelState, f: &Feature, at: Vec3, body: &Option<crate::BodyNa
             let mb = st.bodies.get(i).ok_or_else(lost)?;
             Ok((i, crate::appearance::face_index_at(mb, at).ok_or_else(lost)?))
         }
-        None => st.bodies.iter().enumerate().find_map(|(i, mb)| Some((i, crate::appearance::face_index_at(mb, at)?))).ok_or_else(lost),
+        // Without a body, the nearest face of any body within its pick tolerance (not the first
+        // body whose loose tolerance reaches the point).
+        None => st
+            .bodies
+            .iter()
+            .enumerate()
+            .filter_map(|(i, mb)| {
+                let (d, face) = crate::appearance::nearest_face(mb, at)?;
+                (d <= crate::appearance::pick_tolerance(mb)).then_some((d, i, face))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, i, face)| (i, face))
+            .ok_or_else(lost),
     }
 }
 
