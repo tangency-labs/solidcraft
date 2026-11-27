@@ -308,48 +308,58 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
         }
         out
     };
-    let mut incomplete = vec![false; n];
-    let boxes: Vec<Aabb3> = (0..n)
-        .map(|i| match (solid.get(i), placed_meshes.get(i).and_then(Option::as_ref)) {
-            (Some(b), Some((m, transform))) if flag(&used, i) => {
-                // Over the triangles with finite corners, as a shape's set of them is. Also track
-                // whether any face was left unmeshed so an incomplete or empty display mesh never
-                // silently prunes a body from overlap/clearance checks.
-                let mut bx = Aabb3::EMPTY;
-                let mut seen_faces = vec![false; b.body.face_count()];
-                for (k, t) in m.triangles.iter().enumerate() {
-                    let Some(p) = m.tri(t) else { continue };
-                    let p = match transform {
-                        Some(mat) => p.map(|v| solidcraft_doc::apply_point(mat, v)),
-                        None => p,
-                    };
-                    if !p.iter().all(|v| v.is_finite()) {
-                        continue;
-                    }
-                    p.into_iter().for_each(|v| bx.add(v));
-                    if let Some(seen) = m.tri_face.get(k).and_then(|&fi| seen_faces.get_mut(fi as usize)) {
-                        *seen = true;
-                    }
-                }
-                let chord = b.display_tol();
-                let g = solidcore_record::Vec3::new(1.0, 1.0, 1.0) * if chord.is_finite() && chord > 0.0 { chord } else { 0.0 };
-                let mesh_box = if bx.is_empty() { bx } else { Aabb3 { min: bx.min - g, max: bx.max + g } };
-                if bx.is_empty() || seen_faces.iter().any(|&seen| !seen) {
-                    if let Some(slot) = incomplete.get_mut(i) {
-                        *slot = true;
-                    }
-                    let exact = b.body.exact_bounds().ok().unwrap_or_else(|| b.outline_bounds()).inflated(2.0 * b.body.record().tolerance);
-                    if let Some(&mask) = initial_forms.get(i) {
-                        b.body.release_kernel_forms_since(mask);
-                    }
-                    mesh_box.union(&exact)
-                } else {
-                    mesh_box
-                }
+    let compute_box = |&i: &usize| -> (Aabb3, bool) {
+        let (Some(b), Some((m, transform))) = (solid.get(i), placed_meshes.get(i).and_then(Option::as_ref)) else {
+            return (Aabb3::EMPTY, false);
+        };
+        // Over the triangles with finite corners, as a shape's set of them is. Also track
+        // whether any face was left unmeshed so an incomplete or empty display mesh never
+        // silently prunes a body from overlap/clearance checks.
+        let mut bx = Aabb3::EMPTY;
+        let mut seen_faces = vec![false; b.body.face_count()];
+        for (k, t) in m.triangles.iter().enumerate() {
+            let Some(p) = m.tri(t) else { continue };
+            let p = match transform {
+                Some(mat) => p.map(|v| solidcraft_doc::apply_point(mat, v)),
+                None => p,
+            };
+            if !p.iter().all(|v| v.is_finite()) {
+                continue;
             }
-            _ => Aabb3::EMPTY,
-        })
-        .collect();
+            p.into_iter().for_each(|v| bx.add(v));
+            if let Some(seen) = m.tri_face.get(k).and_then(|&fi| seen_faces.get_mut(fi as usize)) {
+                *seen = true;
+            }
+        }
+        let chord = b.display_tol();
+        let g = solidcore_record::Vec3::new(1.0, 1.0, 1.0) * if chord.is_finite() && chord > 0.0 { chord } else { 0.0 };
+        let mesh_box = if bx.is_empty() { bx } else { Aabb3 { min: bx.min - g, max: bx.max + g } };
+        if bx.is_empty() || seen_faces.iter().any(|&seen| !seen) {
+            let exact = b.body.exact_bounds().ok().unwrap_or_else(|| b.outline_bounds()).inflated(2.0 * b.body.record().tolerance);
+            if let Some(&mask) = initial_forms.get(i) {
+                b.body.release_kernel_forms_since(mask);
+            }
+            (mesh_box.union(&exact), true)
+        } else {
+            (mesh_box, false)
+        }
+    };
+    let mut incomplete = vec![false; n];
+    let mut boxes = vec![Aabb3::EMPTY; n];
+    let computed: Vec<(Aabb3, bool)> = if idx.len() > 1 {
+        let threads = clearance_worker_limit(idx.len(), avail_start);
+        solidcraft_kernel::map_on_threads(&idx, threads, compute_box).into_iter().map(|r| r.unwrap_or((Aabb3::EMPTY, false))).collect()
+    } else {
+        idx.iter().map(compute_box).collect()
+    };
+    for (&i, (bx, is_incomplete)) in idx.iter().zip(computed) {
+        if let Some(slot) = boxes.get_mut(i) {
+            *slot = bx;
+        }
+        if let Some(slot) = incomplete.get_mut(i) {
+            *slot = is_incomplete;
+        }
+    }
 
     // Pairs whose boxes, grown by half the clearance each, meet.
     let half = solidcore_record::Vec3::new(1.0, 1.0, 1.0) * (gap / 2.0);
@@ -357,14 +367,8 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
     let (close, truncated) = super::joints::overlapping_pairs(&grown, MAX_PAIRS);
     let has_mesh = |i: usize| placed_meshes.get(i).is_some_and(Option::is_some);
     let close: Vec<(usize, usize)> = close.into_iter().filter(|&(i, j)| allowed(i, j) && has_mesh(i) && has_mesh(j)).collect();
-    let mut total = 0usize;
-    for i in 0..n {
-        for j in i + 1..n {
-            if allowed(i, j) {
-                total += 1;
-            }
-        }
-    }
+    let is_envelope: Vec<bool> = if envelopes.is_empty() { Vec::new() } else { solid.iter().map(|b| envelopes.is_envelope(&b.name)).collect() };
+    let total = count_allowed_pairs(n, &in_subjects, &in_against, against.is_some(), &path_by_body, &is_envelope, skip);
 
     // Pairs measured before come from the cache; the rest are measured in memory-bounded chunks.
     let settings = [gap.to_bits(), min_volume.to_bits(), tolerance.to_bits()];
@@ -382,11 +386,11 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let todo: Vec<usize> = (0..close.len()).filter(|&k| results.get(k).is_some_and(Option::is_none)).collect();
     let reused = close.len() - todo.len();
-
     // Distance shapes are built fallibly on demand per chunk, and evicted together with transient
     // kernel forms once a body's remaining pairs finish or the live working-set budget is reached.
     let mut shapes: Vec<Option<DistanceShape<'_>>> = (0..n).map(|_| None).collect();
     let mut active_shape_bytes: usize = 0;
+    let masses: Vec<super::interference::MassSlot> = (0..n).map(|_| std::sync::OnceLock::new()).collect();
     let evict_body = |i: usize, shapes: &mut [Option<DistanceShape<'_>>], active_bytes: &mut usize| {
         if let Some(slot) = shapes.get_mut(i)
             && let Some(old) = slot.take()
@@ -482,7 +486,7 @@ fn clearance(s: &mut Session, p: &Value) -> Result<Value> {
             let pa = PlacedMeshRef { mesh: ma, transform: *ta, mesh_bounds: a.mesh_bounds() };
             let pb = PlacedMeshRef { mesh: mb, transform: *tb, mesh_bounds: b.mesh_bounds() };
             let incomplete_pair = flag(&incomplete, i) || flag(&incomplete, j);
-            Ok(measure_pair((&ba.body, &pa), a, (&bb.body, &pb), b, gap, min_volume, tolerance, incomplete_pair))
+            Ok(measure_pair((i, &ba.body, &pa), a, (j, &bb.body, &pb), b, gap, min_volume, tolerance, incomplete_pair, &masses))
         });
         if let Ok(mut cache) = s.clearance_cache.lock() {
             for (&k, r) in chunk.iter().zip(&measured) {
@@ -761,14 +765,15 @@ fn collect_pair_results(
 /// when it may be closer than `gap`.
 #[allow(clippy::too_many_arguments)]
 fn measure_pair(
-    (ka, pa): (&solidcraft_kernel::Body, &PlacedMeshRef<'_>),
+    (ia, ka, pa): (usize, &solidcraft_kernel::Body, &PlacedMeshRef<'_>),
     a: &DistanceShape,
-    (kb, pb): (&solidcraft_kernel::Body, &PlacedMeshRef<'_>),
+    (ib, kb, pb): (usize, &solidcraft_kernel::Body, &PlacedMeshRef<'_>),
     b: &DistanceShape,
     gap: f64,
     min_volume: f64,
     tolerance: f64,
     incomplete_pair: bool,
+    masses: &[super::interference::MassSlot],
 ) -> PairResult {
     let mut out = PairResult::default();
     let slack = 2.0 * (a.chord() + b.chord());
@@ -801,7 +806,7 @@ fn measure_pair(
     let touching = mesh.is_some_and(|m| m.distance <= slack);
     let may_overlap = touching || holds(pa, pb) || holds(pb, pa) || (incomplete_pair && !solidcraft_kernel::apart(ka, kb).unwrap_or(false));
     if may_overlap {
-        intersect_pair((ka, a), (kb, b), min_volume, tolerance, incomplete_pair, &mut out);
+        intersect_pair((ia, ka, a), (ib, kb, b), min_volume, tolerance, incomplete_pair, masses, &mut out);
         if out.unchecked.is_some() {
             return out;
         }
@@ -850,11 +855,12 @@ fn measure_pair(
 /// witnesses so a real overlap is never silently reported as clear; and attaches a non-boolean
 /// fallback distance when a pair still lands in `unchecked`.
 fn intersect_pair(
-    (ka, a): (&solidcraft_kernel::Body, &DistanceShape),
-    (kb, b): (&solidcraft_kernel::Body, &DistanceShape),
+    (ia, ka, a): (usize, &solidcraft_kernel::Body, &DistanceShape),
+    (ib, kb, b): (usize, &solidcraft_kernel::Body, &DistanceShape),
     min_volume: f64,
     tolerance: f64,
     incomplete_pair: bool,
+    masses: &[super::interference::MassSlot],
     out: &mut PairResult,
 ) {
     let at = shared_center(a, b, ka, kb);
@@ -878,7 +884,7 @@ fn intersect_pair(
     };
     let record_overlap = |m: solidcraft_kernel::MassMeasure, out: &mut PairResult| {
         if m.volume > 0.0
-            && let Some(why) = super::interference::impossible_overlap(m.volume, &m.bbox, ka, kb)
+            && let Some(why) = super::interference::impossible_overlap_cached(m.volume, &m.bbox, (ia, ka), (ib, kb), masses)
         {
             out.unchecked = Some(why);
             return;
@@ -1109,6 +1115,7 @@ fn nearest_lists(
     // Each round measures, for every subject not settled yet, the next `count` candidates.
     for _ in 0..n.max(1) {
         let mut todo: Vec<(usize, usize)> = Vec::new();
+        let mut todo_set: HashSet<(usize, usize)> = HashSet::new();
         for (&i, (c, next)) in order.iter_mut() {
             let have = measured(known, i, c);
             let mut added = 0;
@@ -1119,7 +1126,7 @@ fn nearest_lists(
                 }
                 *next += 1;
                 let k = key(i, j);
-                if !known.contains_key(&k) && !failed.contains(&k) && !todo.contains(&k) {
+                if !known.contains_key(&k) && !failed.contains(&k) && todo_set.insert(k) {
                     todo.push(k);
                     added += 1;
                 }
@@ -1140,6 +1147,166 @@ fn nearest_lists(
         }
     }
     order.iter().map(|(&i, (c, _))| (i, measured(known, i, c).into_iter().take(count).collect())).collect()
+}
+
+/// Counts of participating bodies partitioned by subject/against membership, for exact algebraic
+/// pair counting without `O(N^2)` enumeration.
+#[derive(Clone, Copy, Default)]
+struct RoleCounts {
+    s_only: usize,
+    a_only: usize,
+    both: usize,
+}
+
+impl RoleCounts {
+    fn add(&mut self, in_subject: bool, in_against: bool) {
+        match (in_subject, in_against) {
+            (true, false) => self.s_only += 1,
+            (false, true) => self.a_only += 1,
+            (true, true) => self.both += 1,
+            (false, false) => {}
+        }
+    }
+
+    fn merge(self, other: Self) -> Self {
+        Self { s_only: self.s_only + other.s_only, a_only: self.a_only + other.a_only, both: self.both + other.both }
+    }
+
+    fn paired(self, has_against: bool) -> usize {
+        if !has_against {
+            let s = self.s_only + self.both;
+            s * s.saturating_sub(1) / 2
+        } else {
+            let s = self.s_only + self.both;
+            let a = self.a_only + self.both;
+            s * a - self.both * (self.both + 1) / 2
+        }
+    }
+
+    fn cross(self, other: Self, has_against: bool) -> usize {
+        if !has_against {
+            (self.s_only + self.both) * (other.s_only + other.both)
+        } else {
+            self.s_only * (other.a_only + other.both)
+                + self.a_only * (other.s_only + other.both)
+                + self.both * (other.s_only + other.a_only + other.both)
+        }
+    }
+}
+
+/// Exact count of unordered pairs `(i, j)` (`0 <= i < j < n`) satisfying `allowed(i, j)`,
+/// computed algebraically in `O(N * depth)` instead of `O(N^2)` enumeration.
+fn count_allowed_pairs(
+    n: usize,
+    in_subjects: &[bool],
+    in_against: &[bool],
+    has_against: bool,
+    path_by_body: &[&[u64]],
+    is_envelope: &[bool],
+    skip: SkipWithin,
+) -> usize {
+    let has_env = is_envelope.iter().any(|&e| e);
+    let mut all = RoleCounts::default();
+    let mut by_occ: HashMap<&[u64], RoleCounts> = HashMap::new();
+    let mut by_comp: HashMap<u64, RoleCounts> = HashMap::new();
+    let mut env_at: HashMap<&[u64], RoleCounts> = HashMap::new();
+    let mut non_env_at: HashMap<&[u64], RoleCounts> = HashMap::new();
+
+    for i in 0..n {
+        let s = in_subjects.get(i).copied().unwrap_or(false);
+        let a = in_against.get(i).copied().unwrap_or(false);
+        let active = if has_against { s || a } else { s };
+        if !active {
+            continue;
+        }
+        all.add(s, a);
+        let path = path_by_body.get(i).copied().unwrap_or(&[]);
+        match skip {
+            SkipWithin::Nothing => {}
+            SkipWithin::Occurrence => {
+                if !path.is_empty() {
+                    by_occ.entry(path).or_default().add(s, a);
+                }
+            }
+            SkipWithin::Component => {
+                if let Some(&first) = path.first() {
+                    by_comp.entry(first).or_default().add(s, a);
+                }
+            }
+        }
+        if has_env {
+            if is_envelope.get(i).copied().unwrap_or(false) {
+                env_at.entry(path).or_default().add(s, a);
+            } else {
+                non_env_at.entry(path).or_default().add(s, a);
+            }
+        }
+    }
+
+    let mut total = all.paired(has_against);
+    match skip {
+        SkipWithin::Nothing => {}
+        SkipWithin::Occurrence => {
+            for counts in by_occ.values() {
+                total -= counts.paired(has_against);
+            }
+        }
+        SkipWithin::Component => {
+            for counts in by_comp.values() {
+                total -= counts.paired(has_against);
+            }
+        }
+    }
+
+    if env_at.is_empty() {
+        return total;
+    }
+
+    // Subtract pairs `{e, b}` that passed `paired` and `skip` yet are excluded because an
+    // envelope `e` encloses `b` (`path(b).starts_with(path(e))`).
+    // 1. Same-path pairs (`path(e) == path(b)`): still active only for root (`&[]`) or when
+    //    `skip == SkipWithin::Nothing`; otherwise already subtracted by `skip`.
+    for (&path, &envs) in &env_at {
+        if path.is_empty() || skip == SkipWithin::Nothing {
+            total -= envs.paired(has_against);
+            if let Some(&non_envs) = non_env_at.get(path) {
+                total -= envs.cross(non_envs, has_against);
+            }
+        }
+    }
+    // 2. Strict-prefix pairs (`path(e)` is a proper prefix of `path(b)`):
+    //    - Under `SkipWithin::Component`, non-empty prefixes share `path[0]` and were already
+    //      subtracted by `skip`; only root envelopes (`&[]`) remain active.
+    //    - Under `SkipWithin::Nothing` or `SkipWithin::Occurrence`, every proper prefix
+    //      `&path[..len]` (`0 <= len < path.len()`) is still active (`path(e) != path(b)`).
+    let subtract_prefixes = |path: &[u64], counts: RoleCounts, total: &mut usize| {
+        if path.is_empty() {
+            return;
+        }
+        let max_prefix_len = match skip {
+            SkipWithin::Component => 1,
+            SkipWithin::Nothing | SkipWithin::Occurrence => path.len(),
+        };
+        for len in 0..max_prefix_len {
+            if let Some(&envs) = env_at.get(&path[..len]) {
+                *total -= envs.cross(counts, has_against);
+            }
+        }
+    };
+    for (&path, &envs) in &env_at {
+        let combined = match non_env_at.get(path) {
+            Some(&non_envs) => envs.merge(non_envs),
+            None => envs,
+        };
+        subtract_prefixes(path, combined, &mut total);
+    }
+    for (&path, &non_envs) in &non_env_at {
+        if !env_at.contains_key(path) {
+            subtract_prefixes(path, non_envs, &mut total);
+        }
+    }
+
+    total
 }
 
 #[cfg(test)]

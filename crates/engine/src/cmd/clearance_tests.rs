@@ -1255,3 +1255,164 @@ fn low_host_memory_returns_error_and_preserves_session() {
     assert_eq!(near.len(), 1, "{ok}");
     assert!((f(&near[0]["distance_mm"]) - 1.0).abs() < 1e-6, "{ok}");
 }
+
+/// Algebraic `count_allowed_pairs` matches the brute-force `O(N^2)` loop identically across
+/// `SkipWithin`, `against` (disjoint and overlapping with `subjects`), nested/root/same-path
+/// component envelopes, and overlapping exclusions where both `skip` and `envelopes` exclude a pair.
+#[test]
+fn algebraic_allowed_pair_count_matches_brute_force() {
+    use super::{SkipWithin, count_allowed_pairs};
+
+    let brute_force = |n: usize,
+                       in_subjects: &[bool],
+                       in_against: &[bool],
+                       has_against: bool,
+                       path_by_body: &[&[u64]],
+                       is_envelope: &[bool],
+                       skip: SkipWithin|
+     -> usize {
+        let flag = |v: &[bool], i: usize| v.get(i).copied().unwrap_or(false);
+        let path_of = |i: usize| path_by_body.get(i).copied().unwrap_or(&[]);
+        let env_of = |i: usize| is_envelope.get(i).copied().unwrap_or(false);
+        let allowed = |i: usize, j: usize| -> bool {
+            if i == j {
+                return false;
+            }
+            let paired = if !has_against {
+                flag(in_subjects, i) && flag(in_subjects, j)
+            } else {
+                (flag(in_subjects, i) && flag(in_against, j)) || (flag(in_subjects, j) && flag(in_against, i))
+            };
+            if !paired {
+                return false;
+            }
+            let (a, b) = (path_of(i), path_of(j));
+            let encloses = (env_of(i) && b.starts_with(a)) || (env_of(j) && a.starts_with(b));
+            if encloses {
+                return false;
+            }
+            match skip {
+                SkipWithin::Nothing => true,
+                SkipWithin::Occurrence => a.is_empty() || a != b,
+                SkipWithin::Component => a.is_empty() || a.first() != b.first(),
+            }
+        };
+        let mut total = 0usize;
+        for i in 0..n {
+            for j in i + 1..n {
+                if allowed(i, j) {
+                    total += 1;
+                }
+            }
+        }
+        total
+    };
+
+    // Rich fixture exercising root, shallow, deep, same-path, nested, and inactive envelopes plus
+    // overlapping subject/against roles.
+    let paths: Vec<&[u64]> = vec![
+        &[],        // 0: root envelope (both)
+        &[],        // 1: root body (subject)
+        &[],        // 2: root body (against)
+        &[1],       // 3: comp 1 envelope A (against)
+        &[1],       // 4: comp 1 envelope B (both) — same path as 3 & 5
+        &[1],       // 5: comp 1 body (subject)
+        &[1, 2],    // 6: nested envelope under comp 1 (subject)
+        &[1, 2],    // 7: nested body under comp 1 (against)
+        &[1, 2, 3], // 8: deep body enclosed by 0, 3, 4, 6 (both)
+        &[2],       // 9: comp 2 body (subject)
+        &[2, 5],    // 10: comp 2 child body (against)
+        &[1],       // 11: inactive envelope (neither subject nor against)
+    ];
+    let in_subjects = [true, true, false, false, true, true, true, false, true, true, false, false];
+    let in_against = [true, false, true, true, true, false, false, true, true, false, true, false];
+    let is_env_all = [true, false, false, true, true, false, true, false, false, false, false, true];
+    let no_env: &[bool] = &[];
+
+    for skip in [SkipWithin::Nothing, SkipWithin::Occurrence, SkipWithin::Component] {
+        for has_against in [false, true] {
+            for is_env in [&is_env_all[..], no_env] {
+                let got = count_allowed_pairs(paths.len(), &in_subjects, &in_against, has_against, &paths, is_env, skip);
+                let want = brute_force(paths.len(), &in_subjects, &in_against, has_against, &paths, is_env, skip);
+                assert_eq!(got, want, "has_against={has_against}, envs={}", !is_env.is_empty());
+            }
+        }
+    }
+
+    // Degenerate sizes (0 and 1 bodies) and deterministic pseudo-random stress sweep.
+    for n in [0usize, 1] {
+        let s = vec![true; n];
+        let a = vec![true; n];
+        let p: Vec<&[u64]> = vec![&[]; n];
+        let e = vec![false; n];
+        for skip in [SkipWithin::Nothing, SkipWithin::Occurrence, SkipWithin::Component] {
+            for has_against in [false, true] {
+                assert_eq!(count_allowed_pairs(n, &s, &a, has_against, &p, &e, skip), 0);
+            }
+        }
+    }
+
+    let palette: [&[u64]; 8] = [&[], &[1], &[2], &[1, 10], &[1, 11], &[1, 10, 20], &[2, 30], &[3]];
+    let mut seed: u64 = 0x5EED_CAFE_1234_5678;
+    let mut next_u64 = || {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        seed
+    };
+    for case in 0..100 {
+        let n = (next_u64() % 16) as usize + 1;
+        let has_against = (next_u64() & 1) == 1;
+        let skip = match next_u64() % 3 {
+            0 => SkipWithin::Nothing,
+            1 => SkipWithin::Occurrence,
+            _ => SkipWithin::Component,
+        };
+        let mut s = Vec::with_capacity(n);
+        let mut a = Vec::with_capacity(n);
+        let mut p = Vec::with_capacity(n);
+        let mut e = Vec::with_capacity(n);
+        let allow_env = (next_u64() & 3) != 0;
+        for _ in 0..n {
+            let r = next_u64();
+            s.push((r & 1) != 0);
+            a.push((r & 2) != 0);
+            p.push(palette[((r >> 2) % palette.len() as u64) as usize]);
+            e.push(allow_env && ((r >> 6) & 3) == 0);
+        }
+        let got = count_allowed_pairs(n, &s, &a, has_against, &p, &e, skip);
+        let want = brute_force(n, &s, &a, has_against, &p, &e, skip);
+        assert_eq!(got, want, "case {case} failed (n={n}, has_against={has_against})");
+    }
+}
+
+/// `nearest_lists` deduplicates shared candidate pairs across subjects in `O(1)` via `todo_set`
+/// so each pair is sent to `measure` at most once per round.
+#[test]
+fn nearest_lists_deduplicates_shared_candidates_in_each_round() {
+    use std::cell::RefCell;
+    use std::collections::{HashMap, HashSet};
+
+    use solidcore_record::Vec3;
+    use solidcraft_geom::Aabb3;
+
+    use super::nearest_lists;
+
+    let bx = |x: f64| Aabb3 { min: Vec3::new(x, 0.0, 0.0), max: Vec3::new(x + 1.0, 1.0, 1.0) };
+    let boxes = [bx(0.0), bx(2.0), bx(5.0), bx(9.0)];
+    let subjects = [0, 1, 2, 3];
+    let allowed = |i: usize, j: usize| i != j;
+    let mut known = HashMap::new();
+    let batches = RefCell::new(Vec::<Vec<(usize, usize)>>::new());
+
+    let lists = nearest_lists(&subjects, boxes.len(), 2, &boxes, &allowed, &mut known, |pairs| {
+        batches.borrow_mut().push(pairs.to_vec());
+        let unique: HashSet<(usize, usize)> = pairs.iter().copied().collect();
+        assert_eq!(unique.len(), pairs.len(), "duplicate pairs in round: {pairs:?}");
+        pairs.iter().map(|&(i, j)| Ok(Some(solidcraft_geom::mesh_distance::box_gap(&boxes[i], &boxes[j])))).collect()
+    });
+
+    assert!(!batches.borrow().is_empty());
+    assert_eq!(lists[&0], vec![(1, 1.0), (2, 4.0)]);
+    assert_eq!(lists[&1], vec![(0, 1.0), (2, 2.0)]);
+    assert_eq!(lists[&2], vec![(1, 2.0), (3, 3.0)]);
+    assert_eq!(lists[&3], vec![(2, 3.0), (1, 6.0)]);
+}

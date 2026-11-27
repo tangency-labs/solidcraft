@@ -344,6 +344,53 @@ fn a_shared_part_bigger_than_the_smaller_body_is_not_an_overlap() {
     assert_eq!(super::overlap_out_of_bounds(1005.3, &pin_box, plate, pin), None);
 }
 
+/// Per-body `OnceLock` mass caching in `impossible_overlap_cached` matches `impossible_overlap`
+/// identically across valid and bogus overlaps and reuses the cached mass when a body overlaps
+/// multiple neighbours.
+#[test]
+fn cached_impossible_overlap_matches_uncached_and_reuses_body_mass() {
+    use std::sync::OnceLock;
+
+    use solidcore_record::Vec3;
+    use solidcraft_geom::Aabb3;
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 100, "width": 50, "height": 10, "corner": [0, 0, 0], "body_name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 6, "width": 6, "height": 10, "corner": [10, 10, 5], "operation": "new", "body_name": "PinA"}));
+    run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 10, "corner": [40, 10, 5], "operation": "new", "body_name": "PinB"}));
+    let st = s.world_state().unwrap();
+    let plate = &st.body("Plate").unwrap().body;
+    let pin_a = &st.body("PinA").unwrap().body;
+    let pin_b = &st.body("PinB").unwrap().body;
+
+    let masses: Vec<super::MassSlot> = (0..3).map(|_| OnceLock::new()).collect();
+    let bounds = |min: [f64; 3], max: [f64; 3]| Aabb3 { min: Vec3::new(min[0], min[1], min[2]), max: Vec3::new(max[0], max[1], max[2]) };
+
+    // Valid overlap of Plate (0) and PinA (1): 6 x 6 x 5 = 180 mm³ inside [10..16, 10..16, 5..10].
+    let valid_a = bounds([10.0, 10.0, 5.0], [16.0, 16.0, 10.0]);
+    assert_eq!(
+        super::impossible_overlap_cached(180.0, &valid_a, (0, plate), (1, pin_a), &masses),
+        super::impossible_overlap(180.0, &valid_a, plate, pin_a),
+    );
+    assert_eq!(super::impossible_overlap_cached(180.0, &valid_a, (0, plate), (1, pin_a), &masses), None);
+    assert!(masses[0].get().is_some() && masses[1].get().is_some() && masses[2].get().is_none());
+
+    // Bogus volume larger than PinB (160 mm³) reusing Plate's cached mass slot (0).
+    let valid_b = bounds([40.0, 10.0, 5.0], [44.0, 14.0, 10.0]);
+    let cached_too_big = super::impossible_overlap_cached(50_000.0, &valid_b, (0, plate), (2, pin_b), &masses);
+    let uncached_too_big = super::impossible_overlap(50_000.0, &valid_b, plate, pin_b);
+    assert_eq!(cached_too_big, uncached_too_big);
+    assert!(cached_too_big.as_deref().is_some_and(|w| w.contains("more than the smaller body")));
+    assert!(masses[2].get().is_some());
+
+    // Bogus bbox reaching outside Plate ∩ PinB.
+    let outside_b = bounds([35.0, 10.0, 5.0], [44.0, 14.0, 10.0]);
+    let cached_out = super::impossible_overlap_cached(80.0, &outside_b, (0, plate), (2, pin_b), &masses);
+    let uncached_out = super::impossible_overlap(80.0, &outside_b, plate, pin_b);
+    assert_eq!(cached_out, uncached_out);
+    assert!(cached_out.as_deref().is_some_and(|w| w.contains("reaches outside")));
+}
+
 /// Unchecked measurement-only overlaps must satisfy strict geometric bounds (positive finite
 /// volume and area, bounded by both operands' boxes and volumes, no larger than their own
 /// bounding box, and centroid inside their own bounding box).
@@ -645,8 +692,8 @@ fn measure_overlap_stops_when_deadline_expires() {
     assert!(matches!(got, super::OverlapOutcome::Unchecked { measure_distance: false, .. }), "{got:?}");
 
     let names = ("A".to_string(), "B".to_string());
-    let stopped = super::check_pair(&a, &b, &names, a.size(), false, || web_time::Instant::now() >= expired);
+    let stopped = super::check_pair((0, &a), (1, &b), &names, a.size(), false, &[], || web_time::Instant::now() >= expired);
     assert!(matches!(stopped, super::Outcome::Unchecked(_)), "expired deadline must leave pair unchecked");
-    let active = super::check_pair(&a, &b, &names, a.size(), false, || false);
+    let active = super::check_pair((0, &a), (1, &b), &names, a.size(), false, &[], || false);
     assert!(matches!(active, super::Outcome::Hit(h) if (h.volume_mm3 - 500.0).abs() < 1e-6), "active deadline must find the 500 mm³ overlap");
 }

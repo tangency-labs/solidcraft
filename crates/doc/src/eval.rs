@@ -3474,6 +3474,26 @@ fn whole_extrude_sketch_key(f: &Feature, st: &ModelState) -> Option<(u64, u64)> 
     Some((sketch.0, h.finish()))
 }
 
+fn hash_thread_info(t: &crate::ThreadInfo, h: &mut impl Hasher) {
+    let crate::ThreadInfo { feature, body, designation, major_diameter, radius, pitch, internal, axis_point, axis, start, end, form, hand, starts } =
+        t;
+    feature.hash(h);
+    body.hash(h);
+    designation.hash(h);
+    major_diameter.to_bits().hash(h);
+    radius.to_bits().hash(h);
+    pitch.to_bits().hash(h);
+    internal.hash(h);
+    (axis_point.x.to_bits(), axis_point.y.to_bits(), axis_point.z.to_bits()).hash(h);
+    let axis = axis.vec();
+    (axis.x.to_bits(), axis.y.to_bits(), axis.z.to_bits()).hash(h);
+    start.to_bits().hash(h);
+    end.to_bits().hash(h);
+    form.hash(h);
+    hand.hash(h);
+    starts.hash(h);
+}
+
 impl EvalKey {
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -3499,6 +3519,13 @@ impl EvalKey {
         let read = f.reads(doc, st);
         let profile_key = read.as_ref().and_then(|_| whole_extrude_sketch_key(f, st));
         let sketch_key = |id: &u64| profile_key.filter(|(s, _)| s == id).map(|(_, key)| key).or_else(|| st.sketch_keys.get(id).copied());
+        let body_names_set: Option<std::collections::HashSet<&str>> =
+            (read.as_ref().is_some_and(|r| !r.import) && f.body_names.len() > 4 && !st.bodies.is_empty())
+                .then(|| st.bodies.iter().map(|b| b.name.as_str()).collect());
+        let has_body = |n: &str| match &body_names_set {
+            Some(set) => set.contains(n),
+            None => st.body(n).is_some(),
+        };
         let reads = read.map(|read| {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             if read.import {
@@ -3530,13 +3557,16 @@ impl EvalKey {
             }
             st.body_counter.hash(&mut h);
             // A body numbered from the counter skips the numbers reserved past it.
-            if f.body_names.is_empty() || f.body_names.iter().any(|n| n.is_empty() || st.body(n).is_some()) {
+            if f.body_names.is_empty() || f.body_names.iter().any(|n| n.is_empty() || has_body(n)) {
                 for n in st.reserved_body_names.iter().filter(|n| crate::is_counted_body_name(n)) {
                     n.hash(&mut h);
                 }
             }
             // A cut drops the threads of bodies it removes.
-            serde_json::to_string(&st.threads).unwrap_or_default().hash(&mut h);
+            st.threads.len().hash(&mut h);
+            for t in &st.threads {
+                hash_thread_info(t, &mut h);
+            }
             (h.finish(), read)
         });
         // An import's key of what it reads holds whatever bodies come before it already
@@ -3568,12 +3598,20 @@ impl EvalKey {
             }
             // A body takes the name the feature stores for it only while no other body has it.
             for n in &f.body_names {
-                (n, st.body(n).is_some()).hash(&mut h);
+                (n, has_body(n)).hash(&mut h);
             }
             // A cut drops the threads of bodies it removes.
-            for t in st.threads.iter().filter(|t| names.contains(&t.body.as_str())) {
-                serde_json::to_string(t).unwrap_or_default().hash(&mut h);
+            let read_names_set: Option<std::collections::HashSet<&str>> =
+                (names.len() > 4 && !st.threads.is_empty()).then(|| names.iter().copied().collect());
+            let mut thread_count = 0usize;
+            for t in st.threads.iter().filter(|t| match &read_names_set {
+                Some(set) => set.contains(t.body.as_str()),
+                None => names.contains(&t.body.as_str()),
+            }) {
+                hash_thread_info(t, &mut h);
+                thread_count += 1;
             }
+            thread_count.hash(&mut h);
             h.finish()
         });
         EvalKey { whole, reached, reads, relative }
