@@ -275,11 +275,77 @@ fn open_to_flush(path: &Path) -> std::io::Result<fs::File> {
     OpenOptions::new().read(true).write(cfg!(windows)).open(path)
 }
 
+/// Whether `path` is within an XDG document portal (`/run/user/<uid>/doc/*` or `$XDG_RUNTIME_DIR/doc/*`).
+/// The document portal FUSE filesystem exposes only the exact authorized document in its folder
+/// and refuses creating temporary files or backups beside it (#23097).
+fn is_document_portal(path: &Path) -> bool {
+    #[cfg(test)]
+    if tests::SIMULATE_PORTAL.with(std::cell::Cell::get) {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR") {
+            let doc_portal = Path::new(&runtime_dir).join("doc");
+            if path.starts_with(&doc_portal) {
+                return true;
+            }
+        }
+        if let Ok(rest) = path.strip_prefix("/run/user") {
+            let mut c = rest.components();
+            if c.next().and_then(|u| u.as_os_str().to_str()).is_some_and(|u| !u.is_empty() && u.bytes().all(|b| b.is_ascii_digit()))
+                && c.next().is_some_and(|d| d.as_os_str() == "doc")
+            {
+                return true;
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    false
+}
+
+/// Write `bytes` directly to `path`, for virtual filesystems like the XDG document portal
+/// that refuse creating temporary files beside the target (#23097).
+fn write_in_place(path: &Path, bytes: &[u8], report: bool) -> std::io::Result<()> {
+    let watch = solidcraft_kernel::watch::current();
+    let mut f = OpenOptions::new().write(true).create(true).truncate(true).open(path)?;
+    let mut done = 0usize;
+    bytes.chunks(CHUNK).try_for_each(|chunk| {
+        if watch.as_ref().is_some_and(|w| w.cancelled()) {
+            return Err(cancelled_error());
+        }
+        f.write_all(chunk)?;
+        done = done.saturating_add(chunk.len());
+        if report && let Some(w) = &watch {
+            w.progress("writing", done, bytes.len());
+        }
+        Ok(())
+    })?;
+    f.set_len(bytes.len() as u64)?;
+    flush(&f)
+}
+
 fn write_steps(path: &Path, bytes: &[u8], backup: bool, stop: Option<Step>) -> std::io::Result<()> {
+    if is_document_portal(path) {
+        return write_in_place(path, bytes, true);
+    }
     let permissions = fs::metadata(path).ok().filter(|m| m.is_file()).map(|m| m.permissions());
     let tmp = temp_beside(path, "new");
-    if let Err(e) = write_synced(&tmp, bytes, true, permissions.as_ref()).and_then(|_| keep_permissions(&permissions, &tmp)) {
+    #[cfg(test)]
+    let simulate_temp_missing = tests::TEMP_NOT_FOUND.with(std::cell::Cell::get);
+    #[cfg(not(test))]
+    let simulate_temp_missing = false;
+    let temp_res = if simulate_temp_missing {
+        Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+    } else {
+        write_synced(&tmp, bytes, true, permissions.as_ref()).and_then(|_| keep_permissions(&permissions, &tmp))
+    };
+    if let Err(e) = temp_res {
         let _ = fs::remove_file(&tmp);
+        if path.is_file() && e.kind() == std::io::ErrorKind::NotFound {
+            return write_in_place(path, bytes, true);
+        }
         return Err(e);
     }
     if stop == Some(Step::TempWritten) {
@@ -431,6 +497,12 @@ pub fn create_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         }
         return crate::vfs::write(&name, bytes);
     }
+    if is_document_portal(path) {
+        if fs::symlink_metadata(path).is_ok() {
+            return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists, "destination already exists"));
+        }
+        return write_in_place(path, bytes, false);
+    }
     let tmp = temp_beside(path, "create");
     write_synced(&tmp, bytes, false, None)?;
     // From here the temporary file is the rename's: moved to the name, or removed when refused.
@@ -528,6 +600,10 @@ mod tests {
         pub(super) static LINKS_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         /// This thread's permission sets fail with EPERM, as on an SMB or gvfs mount without unix extensions (#20552).
         pub(super) static CHMOD_REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// This thread's saves simulate an XDG document portal path (#23097).
+        pub(super) static SIMULATE_PORTAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        /// This thread's temp file creation fails with NotFound, as in an XDG document portal folder (#23097).
+        pub(super) static TEMP_NOT_FOUND: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
         /// This thread's no-replace renames ([`create_atomic`]) fail this many times in a row, with
         /// this error, before the drive is asked: as on a drive that takes neither the rename nor a
         /// hard link, or while another program holds the new file. Set with [`fail_no_replace`].
@@ -1309,6 +1385,87 @@ mod tests {
             assert_eq!(fs::read(&p).unwrap(), b"new");
             let _ = fs::remove_dir_all(&d);
         }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn document_portal_path_pattern_detected() {
+        assert!(is_document_portal(Path::new("/run/user/1000/doc/mcJmI00tnfPW0n4s09JqYw/xyz.sc")));
+        assert!(!is_document_portal(Path::new("/run/user/1000/gvfs/smb-share:server=nas,share=cad/doc/part.sc")));
+        assert!(!is_document_portal(Path::new("/home/user/designs/xyz.sc")));
+    }
+
+    #[test]
+    fn document_portal_save_writes_in_place_and_preserves_content() {
+        let directory = fresh_dir("portal");
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("test.sc");
+        fs::write(&path, b"initial file contents that are long").unwrap();
+
+        SIMULATE_PORTAL.with(|p| p.set(true));
+        let res = write_atomic(&path, b"short new content", true);
+        SIMULATE_PORTAL.with(|p| p.set(false));
+
+        assert!(res.is_ok(), "{res:?}");
+        assert_eq!(fs::read(&path).unwrap(), b"short new content");
+        assert!(stale_temps(&path).is_empty());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn temp_file_not_found_on_existing_file_falls_back_to_in_place() {
+        let directory = fresh_dir("temp-not-found");
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("existing.sc");
+        fs::write(&path, b"previous saved model").unwrap();
+
+        TEMP_NOT_FOUND.with(|p| p.set(true));
+        let res = write_atomic(&path, b"updated model bytes", true);
+        TEMP_NOT_FOUND.with(|p| p.set(false));
+
+        assert!(res.is_ok(), "{res:?}");
+        assert_eq!(fs::read(&path).unwrap(), b"updated model bytes");
+
+        // When the file does not exist, NotFound is returned rather than falling back.
+        let nonexistent = directory.join("missing.sc");
+        TEMP_NOT_FOUND.with(|p| p.set(true));
+        let err = write_atomic(&nonexistent, b"bytes", true).unwrap_err();
+        TEMP_NOT_FOUND.with(|p| p.set(false));
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn create_atomic_in_document_portal() {
+        let directory = fresh_dir("create-portal");
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("new_file.sc");
+
+        SIMULATE_PORTAL.with(|p| p.set(true));
+        let res = create_atomic(&path, b"brand new file content");
+        SIMULATE_PORTAL.with(|p| p.set(false));
+
+        assert!(res.is_ok(), "{res:?}");
+        assert_eq!(fs::read(&path).unwrap(), b"brand new file content");
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn create_atomic_in_document_portal_refuses_existing() {
+        let directory = fresh_dir("create-portal-exists");
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("existing_file.sc");
+        fs::write(&path, b"original content").unwrap();
+
+        SIMULATE_PORTAL.with(|p| p.set(true));
+        let res = create_atomic(&path, b"should not overwrite");
+        SIMULATE_PORTAL.with(|p| p.set(false));
+
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(&path).unwrap(), b"original content");
+        fs::remove_dir_all(directory).unwrap();
     }
 }
 
