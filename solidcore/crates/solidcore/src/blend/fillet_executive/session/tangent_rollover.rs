@@ -70,17 +70,50 @@ fn defect(why: &'static str, status: i32) -> SolidError {
 const SOLVER_OFFSETS: &str = "a round's solver has no offset surface on a side: the solver is set \
      up with one on each side, and a roll-over replaces one, never removes it";
 
-/// Whether `edge` has a curve that is not a straight line (so the closed-form straight-edge
-/// rollover [`tangent_rollover_supports`] does not cover it).
+/// Whether `edge` is geometrically curved along its interval (rather than a straight line
+/// segment, regardless of curve kind or parameterization speed), so the closed-form straight-edge
+/// rollover [`tangent_rollover_supports`] does not cover it.
 ///
 /// # Errors
-/// Those of the curve lookup and line recogniser.
+/// Those of the curve lookup, interval lookup, and evaluations.
 fn edge_is_curved(k: &Kernel, target: &Brep, edge: EdgeId) -> Result<bool> {
     const LINE_TOL: f64 = 1.0e-8;
-    let Some(curve) = edge::curve(target, edge)? else {
+    let Some(curve) = edge::evaluation_curve(target, edge)? else {
         return Ok(false);
     };
-    Ok(curve.is_line(k, 3, LINE_TOL)?.is_none())
+    if probe(curve.is_line(k, 3, LINE_TOL))?.flatten().is_some() {
+        return Ok(false);
+    }
+    let ivl = edge::interval(target, edge)?;
+    let (t0, t1) = (ivl.min(), ivl.max());
+    if !t0.is_finite() || !t1.is_finite() || t0 >= t1 {
+        return Ok(false);
+    }
+    let p0 = curve.evaluate_point(k, t0)?;
+    let p1 = curve.evaluate_point(k, t1)?;
+    let chord = p1 - p0;
+    let len = chord.length();
+    let tol = target.tolerance().max(1.0e-6);
+    if !len.is_finite() || len <= tol {
+        for frac in [0.25, 0.5, 0.75] {
+            let pt = curve.evaluate_point(k, ivl.evaluate(frac))?;
+            if pt.distance(p0) > tol {
+                return Ok(true);
+            }
+        }
+        return Ok(false);
+    }
+    let dir = chord * (1.0 / len);
+    for i in 1..10_u32 {
+        let t = ivl.evaluate(f64::from(i) / 10.0);
+        let pt = curve.evaluate_point(k, t)?;
+        let v = pt - p0;
+        let off_line = (v - dir * v.dot(dir)).length();
+        if off_line > tol {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// The vertices of the edges of `face`.
@@ -240,7 +273,10 @@ impl FilletSession<'_> {
                 // the other round's band on the face this one rolls onto is compared
                 // with its rolled rail by the bands' check (#19242)
                 rollovers
-            } else if lone && !edge_is_curved(k, &*self.objects.target, inputs.edge)? {
+            } else if lone
+                && (self.executive.classify_only
+                    || !edge_is_curved(k, &*self.objects.target, inputs.edge)?)
+            {
                 [None, None]
             } else {
                 let Some(solver) = self
