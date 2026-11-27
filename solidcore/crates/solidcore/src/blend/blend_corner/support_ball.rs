@@ -554,7 +554,7 @@ impl FilletCorner {
         let g_g = s_g.first_fillet_geom()?;
         let g_y = s_y.first_fillet_geom()?;
 
-        let mut made = Vec::with_capacity(5);
+        let mut made = Vec::new();
         for _ in 0..5 {
             let fv = new_corner_vertex(k, pseudo, corner)?;
             self.vertices.push(fv);
