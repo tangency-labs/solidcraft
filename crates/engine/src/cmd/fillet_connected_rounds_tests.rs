@@ -287,3 +287,21 @@ fn inside_round_at_a_pocket_opening_passes_the_face_geometry_check() {
     let gained = measure(&mut s) - before;
     assert!((gained - 65.0 * (4.0 - std::f64::consts::PI)).abs() < 1e-5, "{gained}");
 }
+
+/// #2663: three equal rounds meeting at one box corner remove three quarter-square
+/// strips and the part of the corner cube outside the remaining spherical octant.
+#[test]
+fn three_rounds_at_one_box_corner_have_the_analytic_volume() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":30,"width":20,"height":15,"corner":[0,0,0],"body_name":"Block"}));
+    run(&mut s, "solid.fillet", json!({"body":"Block","edges":[[15,0,0],[0,10,0],[0,0,7.5]],"radius":2}));
+    let pi = std::f64::consts::PI;
+    let r = 2.0_f64;
+    let expected = 9000.0 - (65.0 - 3.0 * r) * r * r * (1.0 - pi / 4.0) - r * r * r * (1.0 - pi / 6.0);
+    let measured = valid_volume(&mut s, "Block");
+    assert!((measured - expected).abs() < 1e-6, "{measured} vs {expected}");
+    let result = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(result["bodies"][0]["closed"], true);
+    assert_eq!(result["bodies"][0]["face_types"]["cylinder"], 3);
+    assert_eq!(result["bodies"][0]["face_types"]["sphere"], 1);
+}
