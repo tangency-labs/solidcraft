@@ -5296,6 +5296,34 @@ mod tests {
         }
     }
 
+    /// #22804: moving [`half_torus`]'s flat face outward (up to nearly the tube's full
+    /// radius) or inward builds a 2-face manifold solid at the exact Pappus volume.
+    #[test]
+    fn a_half_toruss_flat_face_moves_outward_and_inward_to_the_cut_volume() {
+        let (major, minor) = (30.0_f64, 8.0_f64);
+        let pi = core::f64::consts::PI;
+        for d in [0.2, 3.2, 7.5, -2.0] {
+            let mut k = Kernel::default();
+            let mut b =
+                half_torus_flat_face_offset(&mut k, d).unwrap_or_else(|e| panic!("d {d}: {e:?}"));
+            assert!(
+                crate::topology::brep::p2::is_manifold_solid(&b).unwrap(),
+                "d {d}"
+            );
+            assert_eq!(bp1::faces(&b, None).unwrap().len(), 2, "d {d}");
+            let volume = brep_volume_default(&k, &mut b, 1e-7).unwrap();
+            let expected = pi * pi * major * minor * minor
+                + 2.0
+                    * pi
+                    * major
+                    * (d * (minor * minor - d * d).sqrt() + minor * minor * (d / minor).asin());
+            assert!(
+                (volume - expected).abs() < 1e-4,
+                "d {d}: {volume} against {expected}"
+            );
+        }
+    }
+
     #[test]
     fn cancelling_a_quadric_solve_does_not_cache_an_uncertified_edge() {
         use crate::kernel::CancelToken;
