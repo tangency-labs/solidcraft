@@ -114,3 +114,16 @@ cover the four-edge selection here.
 A correct implementation needs the generic blend to discover and trim the
 interaction between distinct End events. No production change or golden blessing
 is justified by the evidence above alone.
+
+
+## Resolution (2026-11-27)
+
+The half-space argument above also gives a construction from existing events. Chamfered
+one at a time, the same picks build: two passes, the edges at `y = 0` and `y = 20` first,
+then the other two, give the closed 14-face solid of 7704 mm3 at `s = 2`, and match
+`7840 - 32 s^2 - 4 s^3 / 3 + 8 (s - 1)^3 / 3` at `s = 1.2` and `1.5`. In each second-pass
+End the chamfer plane meets the first pass's chamfer along their common line, which is the
+missing shared edge. `blend_corner/crossing_ends.rs` plans such passes for straight convex
+picks between planes whose bands reach past each other across an unchamfered edge joining
+their End vertices (each running away from the other's band, so the overlap is the
+corner's), and `solidcore-ops` runs the passes with the ordinary chamfer pass.

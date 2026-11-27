@@ -133,7 +133,6 @@ fn a_box_corner_s_three_chamfers_mitre_or_take_the_facet() {
 /// At each top corner, inclusion-exclusion adds back 3 * 2^3 / 3 - 2^3 / 4 = 6.
 /// The remaining volume is 8000 - 8 * 40 + 4 * 6 = 7704, with eight added faces.
 #[test]
-#[ignore = "#17026: intersecting chamfer ends with different input vertices need a shared edge"]
 fn top_and_vertical_chamfers_build_in_either_order() {
     all_fixes();
     let top = [
@@ -572,5 +571,52 @@ fn an_l_block_s_inner_corner_of_three_chamfers_is_refused_naming_the_vertex() {
         let v = b.volume(1e-10).unwrap();
         assert!((v - 18000.0).abs() <= 1e-9 * 18000.0, "{corner:?}: {v}");
         assert_eq!(b.counts().unwrap()[0], 8, "{corner:?}");
+    }
+}
+
+/// Past s = 1 the bands of two top chamfers reach past each other across the short top edge
+/// of the vertical chamfer between them, and their planes meet that chamfer's plane at
+/// (1, 1, 21 - s), joined to their rails' crossing (s, s, 20) by a new edge. The four
+/// vertical prisms remove 160; the four top prisms 40 s^2, less their four pairwise corner
+/// overlaps s^3 / 3; each top prism shares s^2 - s^3 / 6 with each of the two vertical
+/// prisms at its ends, and each corner's three-way overlap is s^3 / 3 - 2 (s - 1)^3 / 3
+/// (each slice of side a = s - w of the two strips, less the corner x + y < 2 cuts off
+/// past a = 1). So the solid is 7840 - 32 s^2 - 4 s^3 / 3 + 8 (s - 1)^3 / 3 for 1 <= s <= 2,
+/// 7704 at s = 2 as in the eight-edge chamfer, with 14 faces, 36 edges and 24 vertices.
+#[test]
+fn top_chamfers_past_the_end_collision_meet_on_the_vertical_chamfers() {
+    all_fixes();
+    let vertical = [
+        [0.0, 0.0, 9.0],
+        [20.0, 0.0, 9.0],
+        [0.0, 20.0, 9.0],
+        [20.0, 20.0, 9.0],
+    ];
+    let top = [
+        [10.0, 0.0, 20.0],
+        [10.0, 20.0, 20.0],
+        [0.0, 10.0, 20.0],
+        [20.0, 10.0, 20.0],
+    ];
+    for s in [1.2, 1.5, 2.0] {
+        let want = 7840.0 - 32.0 * s * s - 4.0 * s * s * s / 3.0
+            + 8.0 * (s - 1.0) * (s - 1.0) * (s - 1.0) / 3.0;
+        let b = make_box([0.0; 3], [20.0; 3]).unwrap();
+        for (points, distance) in [(vertical, 2.0), (top, s)] {
+            let picked: Vec<_> = points.iter().map(|&p| common::edge_at(&b, p)).collect();
+            solidcore_ops::blend(
+                &b,
+                Blend::Chamfer,
+                &picked,
+                &[distance],
+                &[],
+                Corners::Filled,
+            )
+            .unwrap();
+        }
+        assert!(b.check(solidcore_ops::CheckLevel::All).unwrap().is_valid());
+        assert_eq!(b.counts().unwrap(), [14, 36, 24], "s={s}");
+        let v = b.volume(1e-10).unwrap();
+        assert!((v - want).abs() <= 1e-9 * want, "s={s}: {v} vs {want}");
     }
 }
