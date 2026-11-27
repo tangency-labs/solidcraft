@@ -15,7 +15,10 @@
 //! is left, and joins the feature back on, solid. A feature is a set of faces, at most half
 //! the body's, reached from a face across convex edges (a feature's own faces meet at convex
 //! edges; the face it stands on meets it at concave ones); the smallest are tried first, one
-//! at a time, until the shell of what is left builds. One is taken off only where the room
+//! at a time, until the shell of what is left builds. A single face is a feature only where
+//! its inset collapses and it meets the faces it stands on at creases (a dome, a sphere's cap
+//! on a face, inset by its radius or more): its offset has no surface at all, so the offset
+//! of the body is the offset of the body without it. One is taken off only where the room
 //! test finds no cavity in it ([`shell_wall_room`] shows no witness: the room test proves a
 //! cavity, it does not prove there is none), and the whole result stands only if every step
 //! builds; otherwise the caller's refusal stands. The features with a face whose inset
@@ -57,11 +60,21 @@ pub fn refused_for_a_thin_feature(e: &SolidError) -> bool {
     )
 }
 
+/// A set of faces reached across convex edges ([`feature_from`]).
+struct Reached {
+    /// The faces, in id order.
+    faces: Vec<FaceId>,
+    /// Whether an edge the walk did not cross is tangent: the set runs on smoothly into a
+    /// face beside it (a round), instead of standing on it at a crease.
+    tangent_rim: bool,
+}
+
 /// The faces reached from `seed` across convex edges, `None` when that is every face of `b`
 /// (no feature: the seed's convex neighbours are the whole body).
-fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Vec<FaceId>>> {
+fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Reached>> {
     let all = b.faces().ids().count();
     let mut found: BTreeSet<FaceId> = BTreeSet::from([seed]);
+    let mut tangent_rim = false;
     let mut todo = vec![seed];
     while let Some(f) = todo.pop() {
         let outer = crate::topology::face::p2::outer_faceuse(b, f)?;
@@ -81,11 +94,14 @@ fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Vec<Fac
                 continue;
             };
             // a seam, a tangent edge or a concave one is not crossed
-            if faces.len() != 2
-                || faces.first() == faces.get(1)
-                || eu2::is_tangent_sector(k, b, eu, TANGENT_DEG, false, true)?
-                || !eu2::is_convex_radial_sector(k, b, eu, 5, false, TANGENT_DEG)?
-            {
+            if faces.len() != 2 || faces.first() == faces.get(1) {
+                continue;
+            }
+            if eu2::is_tangent_sector(k, b, eu, TANGENT_DEG, false, true)? {
+                tangent_rim = true;
+                continue;
+            }
+            if !eu2::is_convex_radial_sector(k, b, eu, 5, false, TANGENT_DEG)? {
                 continue;
             }
             for g in edge::faces(b, e, None)? {
@@ -98,11 +114,15 @@ fn feature_from(k: &Kernel, b: &mut Brep, seed: FaceId) -> Result<Option<Vec<Fac
             return Ok(None);
         }
     }
-    Ok(Some(found.into_iter().collect()))
+    Ok(Some(Reached {
+        faces: found.into_iter().collect(),
+        tangent_rim,
+    }))
 }
 
-/// The features of `b`: each set of two or more faces, at most half of them, reached from a
-/// face across convex edges ([`feature_from`]), smallest first, each once.
+/// The features of `b`: each set of faces, at most half of them, reached from a face across
+/// convex edges ([`feature_from`]), smallest first, each once. A single face is one only
+/// where it stands on its neighbours at creases (a dome, not a round).
 fn features(k: &Kernel, b: &Brep) -> Result<Vec<Vec<FaceId>>> {
     // a measurement copy: it reads the topology and tangency of the body and its faces are
     // only grouped, never built from, so its surfaces' definitions are not needed
@@ -113,13 +133,15 @@ fn features(k: &Kernel, b: &Brep) -> Result<Vec<Vec<FaceId>>> {
         if seen.contains(&f) {
             continue;
         }
-        let Some(faces) = feature_from(k, &mut probe, f)? else {
+        let Some(reached) = feature_from(k, &mut probe, f)? else {
             seen.insert(f);
             continue;
         };
+        let faces = reached.faces;
         seen.extend(faces.iter().copied());
         // a feature is the smaller part: at most half the faces
-        if faces.len() >= 2 && 2 * faces.len() <= b.faces().ids().count() {
+        if 2 * faces.len() <= b.faces().ids().count() && (faces.len() >= 2 || !reached.tangent_rim)
+        {
             found.push(faces);
         }
     }
@@ -133,7 +155,10 @@ fn features(k: &Kernel, b: &Brep) -> Result<Vec<Vec<FaceId>>> {
 /// its axis), since each such feature left on is refused again, and its collapse is refused
 /// only once every face's offset and mitre is built (solidcore#3353: seven Ø4 bosses on a drum
 /// of 120 holes took eight shells, seven of them refused, before the one that builds; now
-/// two); then each other feature on its own, smallest first.
+/// two); then each other feature on its own, smallest first. A feature of a single face
+/// ([`features`]) is taken only where its inset collapses: a dome inset by less than its
+/// radius keeps an offset (the smaller sphere), and what the shell is then is not the hollow
+/// of the body without it.
 fn steps(k: &Kernel, b: &Brep, wall: f64) -> Result<Vec<Vec<Vec<FaceId>>>> {
     let mut collapsing: Vec<Vec<FaceId>> = Vec::new();
     let mut others: Vec<Vec<FaceId>> = Vec::new();
@@ -151,7 +176,7 @@ fn steps(k: &Kernel, b: &Brep, wall: f64) -> Result<Vec<Vec<Vec<FaceId>>>> {
         }
         if collapses {
             collapsing.push(faces);
-        } else {
+        } else if faces.len() >= 2 {
             others.push(faces);
         }
     }

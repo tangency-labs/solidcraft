@@ -1272,6 +1272,10 @@ fn degrees(text: &str) -> Option<f64> {
 fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> bool {
     let mut enter = false;
     let through_point = offset_through_point(d).is_some();
+    if crate::dialogs_move::several_destinations(d) {
+        // Several To points copy to each (#22900): Create Copy ticks itself.
+        d.extra.insert("copy".into(), json!(true));
+    }
     // Move/Copy of a component without Create Copy moves its placement (`dialogs_move::placements`).
     let placing = !crate::dialogs_move::placements(d).is_empty();
     let shared = placing && crate::dialogs_move::moves_shared(app, d);

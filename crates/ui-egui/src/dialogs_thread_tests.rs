@@ -253,6 +253,27 @@ fn unified_form_offers_catalogue_sizes_and_keeps_an_authored_class() {
     );
 }
 
+/// An ISO metric class typed after the size stays through a pitch or size change (the Size and
+/// Pitch rows still read the size), and reaches the command and the reopened dialog.
+#[test]
+fn metric_form_keeps_an_authored_class() {
+    let mut h = shaft();
+    type_in(&mut h, "Designation", "M8-6g");
+    assert_eq!(params(&h)["designation"], "M8-6g");
+    choose(&mut h, "Size", "3 mm");
+    assert_eq!(params(&h)["designation"], "M3-6g", "a new size starts with its coarse pitch");
+    type_in(&mut h, "Designation", "M8-6g");
+    choose(&mut h, "Pitch", "1 mm");
+    assert_eq!(params(&h)["designation"], "M8x1-6g");
+    let (command, args) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    h.app.run(&command, args).unwrap();
+    assert_eq!(h.app.session.model.state().threads[0].designation, "M8x1-6g");
+    let saved = h.app.session.doc.features.last().unwrap().clone();
+    let mut dialog = crate::dialogs::Dialog::for_command(&h.app, "solid.thread").unwrap();
+    crate::dialogs_thread::reopen(&mut dialog, &h.app.session, &saved);
+    assert!(matches!(dialog.kind, Kind::Thread { designation, .. } if designation == "M8x1-6g"));
+}
+
 /// The dialog shows the command's own error text for options it cannot build.
 #[test]
 fn the_command_error_is_what_the_dialog_shows() {

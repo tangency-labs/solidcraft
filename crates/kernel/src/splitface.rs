@@ -159,10 +159,16 @@ fn face_patch(body: &Body, face: usize) -> Result<Patch> {
     let f = record.faces.get(face).ok_or_else(|| invalid(format!("the tool body has no face {face}")))?;
     let forward = body.face_forward(face);
     // The surface's own parameter box, unbounded where it is: of `surface` itself, not of its
-    // NURBS form (SMLib's cylinder is held on one, parameterised otherwise).
-    let dom = SurfaceEval::new(&f.surface).map_err(|e| invalid(format!("the split tool's surface: {e}")))?.domain();
+    // NURBS form (SMLib's cylinder is held on one, parameterised otherwise). A label (a round's
+    // definition, a ball patch) has no (u, v) of its own: its face's NURBS form is the surface,
+    // over its knot box, as a round's face was before it kept its definition.
+    let surface = match &f.surface {
+        Surface::Blend { .. } | Surface::BallPatch { .. } => f.parameters(),
+        s => s,
+    };
+    let dom = SurfaceEval::new(surface).map_err(|e| invalid(format!("the split tool's surface: {e}")))?.domain();
     let range = |k: usize| dom.range[k].map_or(ALL, |(a, b)| [a, b]);
-    Ok(Patch { surface: f.surface.clone(), domain: [range(0), range(1)], flip: !forward })
+    Ok(Patch { surface: surface.clone(), domain: [range(0), range(1)], flip: !forward })
 }
 
 /// The unit sweep direction of a sketch tool, on the sketch normal's side (`None`: along the
@@ -1351,6 +1357,45 @@ mod tests {
         let v = volumes(&split_body(&across, &SplitTool::Face { body: &ball, face }).unwrap());
         assert!(v.len() == 3, "{v:?}");
         assert!(rel(v[0], end) < 1e-4 && rel(v[1], end) < 1e-4 && rel(v[2], core) < 1e-4, "{v:?}, core {core}, ends {end}");
+    }
+
+    /// A round along a curved edge keeps its definition (`Surface::Blend`), which has no (u, v)
+    /// of its own, and is a split tool by its face's NURBS form. A cylinder r 20, 20 tall, its
+    /// bottom rim rounded r 5: the round is the torus of major radius 15 and tube radius 5 about
+    /// (0, 0, 5). Shelled 2 in from the top, the cavity's round is that torus with tube radius 3.
+    /// A tube r 16 to 17, 20 tall, split by either round: below the torus of tube radius r it
+    /// holds 2 pi times the integral of (5 - sqrt(r^2 - u^2)) (15 + u) over u = rho - 15 in
+    /// [1, 2]. Both splits were refused (#23158): "the split tool's surface: not supported yet:
+    /// a blend's label".
+    #[test]
+    fn a_tube_splits_by_a_round_on_a_cylinder_rim_and_by_the_round_of_its_shell() {
+        let pi = std::f64::consts::PI;
+        let disc = cylinder(Vec3::ZERO, Vec3::Z, 20.0, 20.0).unwrap();
+        let rounded = crate::fillet(&disc, &[Vec3::new(20.0, 0.0, 0.0)], 5.0).unwrap();
+        let shelled = crate::shell(&rounded, &[Vec3::new(0.0, 0.0, 20.0)], 2.0).unwrap();
+        let outer = cylinder(Vec3::ZERO, Vec3::Z, 17.0, 20.0).unwrap();
+        let bore = cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 16.0, 22.0).unwrap();
+        let tube = crate::boolean(&outer, &bore, crate::BoolOp::Cut).unwrap().unwrap();
+        let whole = pi * (289.0 - 256.0) * 20.0;
+        // The integral of sqrt(r^2 - u^2) and of u sqrt(r^2 - u^2).
+        let f = |r: f64, u: f64| u / 2.0 * (r * r - u * u).sqrt() + r * r / 2.0 * (u / r).asin();
+        let g = |r: f64, u: f64| -(r * r - u * u).powf(1.5) / 3.0;
+        let below = |r: f64| 2.0 * pi * (5.0 * 16.5 - (g(r, 2.0) - g(r, 1.0)) - 15.0 * (f(r, 2.0) - f(r, 1.0)));
+        // The round's face of each body: the face at the point (17.5, 0, z) of its torus.
+        let round_of = |b: &Body, r: f64| {
+            let z = 5.0 - (r * r - 2.5f64 * 2.5).sqrt();
+            let i = b.face_at(Vec3::new(17.5, 0.0, z), 1e-6).unwrap();
+            assert!(matches!(b.record().faces[i].surface, Surface::Blend { .. }), "face {i} of the r {r} round keeps its definition");
+            i
+        };
+        for (b, r) in [(&rounded, 5.0), (&shelled, 3.0)] {
+            let v = volumes(&split_body(&tube, &SplitTool::Face { body: b, face: round_of(b, r) }).unwrap());
+            let low = below(r);
+            assert!(
+                v.len() == 2 && rel(v[0], low.min(whole - low)) < 1e-6 && rel(v[1], low.max(whole - low)) < 1e-6,
+                "r {r}: {v:?}, below {low}, whole {whole}"
+            );
+        }
     }
 
     #[test]
