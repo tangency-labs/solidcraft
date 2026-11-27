@@ -257,6 +257,116 @@ fn a_numbered_sheets_own_placement_builds_it_again() {
     }
 }
 
+/// A session that ran `commands`, each a command and its parameters.
+fn design(commands: &[(&str, Value)]) -> Session {
+    let mut s = Session::default();
+    for (cmd, p) in commands {
+        s.execute(cmd, p).unwrap_or_else(|e| panic!("{cmd} {p}: {e}"));
+    }
+    s
+}
+
+/// `body`'s midsurface built with walls up to 5 mm (and `extra` parameters): its area, from the
+/// kernel's measure of the body made, and the reply's warning.
+fn midsurface_area(s: &mut Session, body: &str, extra: Value) -> (f64, String) {
+    let mut p = json!({"body": body, "max_thickness": "5 mm", "body_name": "Mid"});
+    if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
+        p.extend(extra.clone());
+    }
+    let reply = s.execute("surface.midsurface", &p).unwrap_or_else(|e| panic!("{e}"));
+    let warning = reply.get("warning").and_then(Value::as_str).unwrap_or_default().to_string();
+    let state = s.model.state();
+    let mid = state.body("Mid").unwrap_or_else(|| panic!("no midsurface: {reply}"));
+    (solidcraft_kernel::measure(&mid.body).unwrap_or_else(|e| panic!("{e}")).area, warning)
+}
+
+/// The analysis reply's joints of one kind.
+fn joints_of(reply: &Value, kind: &str) -> Vec<Value> {
+    reply.get("joints").and_then(Value::as_array).map(|j| j.iter().filter(|x| x.get("kind").and_then(Value::as_str) == Some(kind)).cloned().collect()).unwrap_or_default()
+}
+
+/// A tube of radii 8 and 10 standing on a plate 60 x 60 x 4, its bore on through the plate: the
+/// tube's sheet (radius 9) runs down to the plate's halfway plane z = 2, and the plate's sheet
+/// reaches in to radius 9. 3600 - 81 pi + 2 pi 9 (40 - 2) = 3600 + 603 pi.
+#[test]
+fn a_tube_on_a_plate_is_joined_on_a_circle() {
+    let mut s = design(&[
+        ("solid.box", json!({"length": 60, "width": 60, "height": 4, "center": [0, 0, 2], "body_name": "Part"})),
+        ("solid.cylinder", json!({"radius": 10, "height": 38, "base": [0, 0, 2], "operation": "join", "targets": ["Part"]})),
+        ("solid.cylinder", json!({"radius": 8, "height": 42, "base": [0, 0, -1], "operation": "cut", "targets": ["Part"]})),
+    ]);
+    let analysis = s.execute("surface.midsurface_analyze", &json!({"body": "Part", "max_thickness": "5 mm"})).unwrap_or_else(|e| panic!("{e}"));
+    let circles = joints_of(&analysis, "circle");
+    assert_eq!(circles.len(), 1, "{analysis}");
+    let radius = circles[0].get("radius").and_then(Value::as_f64);
+    assert!(radius.is_some_and(|r| (r - 9.0).abs() < 1e-9), "{analysis}");
+    let centre_z = circles[0].get("centre").and_then(|c| c.get(2)).and_then(Value::as_f64);
+    assert!(centre_z.is_some_and(|z| (z - 2.0).abs() < 1e-9), "{analysis}");
+    let (area, warning) = midsurface_area(&mut s, "Part", json!({}));
+    let expected = 3600.0 + 603.0 * std::f64::consts::PI;
+    assert!((area - expected).abs() < expected * 1e-4, "{area} against {expected}");
+    assert!(!warning.contains("a joint") && !warning.contains("filled over"), "{warning}");
+}
+
+/// A ring of radii 10 to 30, z 18..22, round a tube of radii 8 and 10, z 0..40: a T. The ring's
+/// sheet at z = 20 reaches in to radius 9, pi (900 - 81); the tube's two halves run to z = 20,
+/// 2 pi 9 40 together. 1539 pi.
+#[test]
+fn a_ring_round_a_tube_is_a_t_joined_on_a_circle() {
+    let mut s = design(&[
+        ("solid.cylinder", json!({"radius": 10, "height": 40, "base": [0, 0, 0], "body_name": "Part"})),
+        ("solid.cylinder", json!({"radius": 30, "height": 4, "base": [0, 0, 18], "operation": "join", "targets": ["Part"]})),
+        ("solid.cylinder", json!({"radius": 8, "height": 42, "base": [0, 0, -1], "operation": "cut", "targets": ["Part"]})),
+    ]);
+    let analysis = s.execute("surface.midsurface_analyze", &json!({"body": "Part", "max_thickness": "5 mm"})).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(joints_of(&analysis, "circle").len(), 2, "{analysis}");
+    let (area, warning) = midsurface_area(&mut s, "Part", json!({}));
+    let expected = 1539.0 * std::f64::consts::PI;
+    assert!((area - expected).abs() < expected * 1e-4, "{area} against {expected}");
+    assert!(!warning.contains("a joint"), "{warning}");
+}
+
+/// A plate 40 x 30 x 2 with a round hole of radius 5 through it: the sheet carries the hole,
+/// 1200 - 25 pi. With a bore of radius 3 through (20, 15, 1) tilted 30 degrees, the hole is the
+/// ellipse the bore cuts the halfway plane in: 1200 - 9 pi / cos 30.
+#[test]
+fn a_plates_round_and_slanted_holes_are_carried_exactly() {
+    let plate = || ("solid.box", json!({"length": 40, "width": 30, "height": 2, "corner": [0, 0, 0], "body_name": "Plate"}));
+    let mut s = design(&[plate(), ("solid.cylinder", json!({"radius": 5, "height": 4, "base": [20, 15, -1], "operation": "cut", "targets": ["Plate"]}))]);
+    let (area, _) = midsurface_area(&mut s, "Plate", json!({}));
+    let expected = 1200.0 - 25.0 * std::f64::consts::PI;
+    assert!((area - expected).abs() < 0.05, "{area} against {expected}");
+    let (sin, cos) = (30f64.to_radians().sin(), 30f64.to_radians().cos());
+    let mut s = design(&[
+        plate(),
+        ("solid.cylinder", json!({"radius": 3, "height": 20, "base": [20.0 - 10.0 * sin, 15, 1.0 - 10.0 * cos], "axis": [sin, 0, cos], "operation": "cut", "targets": ["Plate"]})),
+    ]);
+    let analysis = s.execute("surface.midsurface_analyze", &json!({"body": "Plate", "max_thickness": "5 mm"})).unwrap_or_else(|e| panic!("{e}"));
+    let expected = 1200.0 - 9.0 * std::f64::consts::PI / cos;
+    let pair_area = analysis.get("pairs").and_then(|p| p.get(0)).and_then(|p| p.get("area")).and_then(Value::as_f64);
+    assert!(pair_area.is_some_and(|a| (a - expected).abs() < 1e-6), "{analysis}");
+    let (area, warning) = midsurface_area(&mut s, "Plate", json!({}));
+    assert!((area - expected).abs() < expected * 1e-5, "{area} against {expected}");
+    assert!(!warning.contains("filled over"), "{warning}");
+}
+
+/// A rib 2 thick standing along a tube's length: its halfway plane runs along the tube's axis,
+/// a joint not made yet. The analysis says so, and so does the build's warning.
+#[test]
+fn a_rib_along_a_tube_is_reported_not_joined() {
+    let mut s = design(&[
+        ("solid.cylinder", json!({"radius": 10, "height": 40, "base": [0, 0, 0], "body_name": "Part"})),
+        ("solid.box", json!({"length": 2, "width": 21, "height": 40, "corner": [-1, 9, 0], "operation": "join", "targets": ["Part"]})),
+        ("solid.cylinder", json!({"radius": 8, "height": 42, "base": [0, 0, -1], "operation": "cut", "targets": ["Part"]})),
+    ]);
+    let analysis = s.execute("surface.midsurface_analyze", &json!({"body": "Part", "max_thickness": "5 mm"})).unwrap_or_else(|e| panic!("{e}"));
+    let open = joints_of(&analysis, "not_joined");
+    assert!(!open.is_empty() && open.iter().all(|j| j.get("why").and_then(Value::as_str).is_some()), "{analysis}");
+    assert!(joints_of(&analysis, "circle").is_empty(), "{analysis}");
+    let (_, warning) = midsurface_area(&mut s, "Part", json!({"include_review_pairs": true}));
+    assert!(warning.contains("a joint with the round wall"), "{warning}");
+}
+
 #[test]
 fn replies_match_the_output_schemas() {
     let check = |schema: schemars::Schema, reply: &Value| {

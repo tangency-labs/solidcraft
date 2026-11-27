@@ -4,10 +4,20 @@
 //! says why every other face is in no pair; a caller (a person, an agent, or [`confident`]) then
 //! chooses the pairs, and [`sheets`] and [`surface_body`] build them.
 //!
-//! Flat walls (two planes) and round walls (two coaxial cylinders) pair. Every decision is made on
+//! Flat walls (two planes) and round walls (two coaxial cylinders) pair. A round wall whose two
+//! faces differ only in how far they run along the axis (a tube's outside standing on a plate,
+//! its bore running on through the plate) is built from the shorter face. Where a flat wall
+//! square to a round wall's axis meets it (a tube on a plate, a ring round a tube, a cup's
+//! bottom), the sheets are joined on the circle the halfway plane and the halfway cylinder meet
+//! in: the round sheet's end is carried along its axis to the plane and the flat sheet ends on the
+//! circle ([`JointKind::Circle`]). A straight bore through a flat wall at a slant is carried as
+//! the exact ellipse it cuts the halfway plane in. Not joined yet, and said so
+//! ([`JointKind::Open`]): a flat wall along a round wall's axis (a rib on a tube) or across it at
+//! a slant, and round walls meeting round walls. Every decision is made on
 //! the exact faces: the overlap is an exact region boolean, "is anything in between?" an exact
 //! ray, a rim's width the exact points of its edges against the wall (solidcore's
-//! `mid_sheet::wall_holds`). The geometry itself (facing faces, joints, areas, projections) is
+//! `mid_sheet::wall_holds`). The geometry itself (facing faces, joints and the curves they lie on,
+//! areas, projections) is
 //! solidcore's (`solidcraft_kernel::services::{face_pair, mid_joint, mid_sheet}`); this module chooses and
 //! sequences.
 
@@ -17,9 +27,14 @@ use solidcraft_geom::prelude::*;
 use solidcraft_kernel::services::face_pair::{
     CylinderFace, OutwardPlane, axial_range_in, facing_cylinders, facing_planes, material_toward_axis, round_directions, wall_steps,
 };
-use solidcraft_kernel::services::mid_joint::{move_edge_onto_line, planes_meeting};
+use solidcraft_kernel::services::mid_joint::{
+    PlaneCylinder, along_axis_to_plane, ellipse_in_frame, move_edge_onto_line, onto_cylinder, plane_meets_cylinder, planes_meeting,
+};
 use solidcraft_kernel::services::mid_sheet::{self as ms, Frame, Wall};
-use solidcraft_kernel::{Body, BoolOp, FaceSurface, face_surface, offset_surface, patch_region, planar_regions_boolean, smooth_picks, stitch};
+use solidcraft_kernel::{
+    Body, BoolOp, ExtendLimit, ExtendMode, ExtendOptions, FaceSurface, extend_surface, face_surface, offset_surface, patch_region, planar_regions_boolean,
+    smooth_picks, stitch,
+};
 
 use crate::sheet_surface_convert::{cylinder_chart, cylinder_chart_in, face_region, planar_face};
 use crate::{DocError, Result};
@@ -82,6 +97,16 @@ pub struct Pair {
     /// Area of openings in only one of the two faces (a boss's foot, a blind pocket's mouth)
     /// that the sheet is filled over (mm²): the material there is not this wall's to model.
     pub filled_over: f64,
+    /// Where the sheet is filled over, in `frame`'s coordinates: a round wall joined to this one
+    /// takes back its foot.
+    filled: Vec<Region2>,
+    /// The `stepped` and `blocked` notes, each with what made it: a round wall joined to this one
+    /// that holds the edge point, or is the face the ray met, is the joint (a tube through a
+    /// ring), no step and no blockage.
+    marks: Vec<(Mark, String)>,
+    /// The exact points of the edges of the slanted bores the sheet carries: the wall's own
+    /// boundary, never something between its faces.
+    bore_points: Vec<[f64; 3]>,
     /// The plane halfway between the faces, its normal toward the first face.
     mid: OutwardPlane,
     /// The first face's plane frame, and its outward normal: what `shared` is read in.
@@ -102,14 +127,30 @@ impl Pair {
     }
 }
 
-/// A round wall: the outer cylinder face is offset by half the wall inward to make the sheet.
+/// What made a flat pair's `stepped` or `blocked` note.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Mark {
+    /// An edge of the body at this point inside an opening through both faces.
+    Step([f64; 3]),
+    /// An edge of the body at this point between the faces, inside the sheet.
+    EdgeBlock([f64; 3]),
+    /// This face, met by the ray between the faces.
+    FaceBlock(usize),
+}
+
+/// A round wall: one of its cylinder faces is offset by half the wall into the material to make
+/// the sheet.
 #[derive(Clone, Debug, PartialEq)]
 struct Round {
-    outer_face: usize,
-    /// Whether the two faces cover the same part of the wall (the same length along the axis and
-    /// the same angles round it): only then is the whole outer face's offset the wall's sheet.
+    /// The face whose offset is the sheet: the outer face of a wall whose two faces cover the
+    /// same part of it; of a wall whose faces differ only in how far they run along the axis (a
+    /// tube standing on a plate, its bore running on through the plate), the shorter, all of
+    /// which the other faces across the wall.
+    sheet_face: usize,
+    /// Whether the sheet face's offset is the wall's sheet: the two faces cover the same part of
+    /// the wall, or one covers all of the other's and runs on only past its ends along the axis.
     whole: bool,
-    /// How many holes the outer face has (openings in its chart): the offset carries them all.
+    /// How many holes the sheet face has (openings in its chart): the offset carries them all.
     holes: usize,
 }
 
@@ -163,6 +204,116 @@ pub struct Analysis {
     /// could still take as its own (within 1% and twice the slack of the limit plus the slack) are
     /// all kept, and the first past them: no cluster can tell a thicker one apart before it.
     pub beyond: Vec<f64>,
+    /// Where a flat wall meets a round one (an edge of the body between their faces), each pair
+    /// of walls once: whether their sheets are joined, and how, or why not.
+    pub joints: Vec<Joint>,
+}
+
+/// Where a flat wall meets a round wall, as [`Analysis::joints`] and the build read it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Joint {
+    /// The flat wall's pair and the round wall's, as indices into the pairs read.
+    pub pairs: [usize; 2],
+    /// How their sheets meet.
+    pub kind: JointKind,
+}
+
+/// How the sheets of a flat wall and a round wall meet.
+#[derive(Clone, Debug, PartialEq)]
+pub enum JointKind {
+    /// The flat wall is square to the round wall's axis (a tube standing on a plate, a ring
+    /// round a tube): the sheets are joined on the circle where the flat wall's halfway plane
+    /// meets the round wall's halfway cylinder, `centre` on the axis, of the halfway `radius`.
+    /// The round sheet's end is carried along the axis to the plane, and the flat sheet's loop
+    /// round the wall (a hole or its outline) moved onto the circle.
+    Circle { centre: [f64; 3], radius: f64 },
+    /// The faces meet tangentially (a bend and its leg): the sheets meet on the tangent line, no
+    /// joint to make.
+    Tangent,
+    /// Not joined: why, in words.
+    Open(String),
+}
+
+/// A round sheet's end at a [`JointKind::Circle`] joint: the round pair (an index into the pairs
+/// read), a point on the end's edge of the sheet (its face's edge carried onto the halfway
+/// radius) and how far along the axis the joint's plane lies from it.
+#[derive(Clone, Copy, Debug)]
+struct RoundEnd {
+    round: usize,
+    at: [f64; 3],
+    distance: f64,
+}
+
+/// The joints between the flat and the round walls of `pairs`, read on the body's edges between
+/// their faces, and the ends of the round sheets that the circle joints carry to their planes.
+/// The kernel decides every geometric question: whether the faces meet tangentially, where the
+/// halfway plane meets the halfway cylinder, how far an end lies from it.
+fn round_joints(body: &Body, q: &Query, pairs: &[Pair]) -> (Vec<Joint>, Vec<RoundEnd>) {
+    let mut joints: Vec<Joint> = Vec::new();
+    let mut ends: Vec<RoundEnd> = Vec::new();
+    let tol = (body.size() * 1e-6).max(1e-6);
+    for e in 0..body.record().edges.len() {
+        let on = q.edge_faces(e);
+        let [fa, fb] = on.as_slice() else { continue };
+        let middle = q.edge_interval(e).and_then(|[t0, t1]| q.edge_at(e, 0.5 * (t0 + t1))).map(|(m, _)| m);
+        for (flat_face, round_face) in [(*fa, *fb), (*fb, *fa)] {
+            for (fi, pf) in pairs.iter().enumerate().filter(|(_, p)| p.round.is_none() && p.faces.contains(&flat_face)) {
+                for (ri, pr) in pairs.iter().enumerate().filter(|(_, p)| p.faces.contains(&round_face)) {
+                    let (Some(round), Wall::Round { axis_point, axis, inner, outer }) = (&pr.round, pr.wall) else { continue };
+                    let known = joints.iter().position(|j| j.pairs == [fi, ri]);
+                    // The kernel decides whether the two faces meet tangentially along the edge.
+                    let tangent = middle.is_some_and(|m| smooth_picks(body, &[m]).is_ok_and(|s| s.first() == Some(&true)));
+                    let radius = 0.5 * (inner + outer);
+                    let met = plane_meets_cylinder(&pf.mid, axis_point, axis, radius);
+                    let kind = match (&met, tangent) {
+                        (_, true) => JointKind::Tangent,
+                        (Ok(Some(PlaneCylinder::Ellipse { ellipse, square: true })), false) if round.whole => {
+                            JointKind::Circle { centre: ellipse.centre, radius }
+                        }
+                        (Ok(Some(PlaneCylinder::Ellipse { square: true, .. })), false) => {
+                            JointKind::Open("the round wall is not built (see its pair's notes)".to_string())
+                        }
+                        (Ok(Some(PlaneCylinder::Ellipse { .. })), false) => JointKind::Open(
+                            "they meet at an angle, the flat wall across the round wall's axis at a slant (the joint is an ellipse): not joined yet".to_string(),
+                        ),
+                        (Ok(Some(PlaneCylinder::Lines(_))), false) => JointKind::Open(
+                            "they meet at an angle, the flat wall along the round wall's axis (the joint is a straight line on the round sheet): not joined yet".to_string(),
+                        ),
+                        (Ok(None), false) => JointKind::Open("they meet at an angle, and their halfway surfaces do not meet".to_string()),
+                        (Err(err), false) => JointKind::Open(format!("they meet at an angle, and where their halfway surfaces meet could not be read: {err}")),
+                    };
+                    // The sheet face's edge on the flat wall is an end of the round sheet: carried
+                    // along the axis to the flat wall's halfway plane.
+                    if let (JointKind::Circle { .. }, Some(m)) = (&kind, middle)
+                        && round_face == round.sheet_face
+                    {
+                        let distance = along_axis_to_plane(&pf.mid, array(m), axis).ok().flatten();
+                        let at = onto_cylinder(axis_point, axis, radius, array(m)).ok();
+                        if let (Some(distance), Some(at)) = (distance, at)
+                            && distance.abs() > tol
+                            && !ends.iter().any(|x| x.round == ri && near(x.at, at, tol * 100.0))
+                        {
+                            ends.push(RoundEnd { round: ri, at, distance: distance.abs() });
+                        }
+                    }
+                    match known {
+                        // A joint read on several edges keeps the first reading, unless a later
+                        // edge finds the faces at an angle where the first found them tangent.
+                        Some(k) => {
+                            if let Some(j) = joints.get_mut(k)
+                                && j.kind == JointKind::Tangent
+                                && kind != JointKind::Tangent
+                            {
+                                j.kind = kind;
+                            }
+                        }
+                        None => joints.push(Joint { pairs: [fi, ri], kind }),
+                    }
+                }
+            }
+        }
+    }
+    (joints, ends)
 }
 
 /// What every pairing step looks at: the body, a query on its record, the options and the
@@ -329,18 +480,31 @@ fn common_round(x: &[Region2], y: &[Region2], slack: f64, what: &str) -> Result<
 /// pocket's mouth (or a boss's foot) leads only to its own side and floor, so it is an opening in
 /// one face only, which the outer face's offset would carry as a hole the wall has not. (A chart
 /// cannot be used here: a hole a drill cuts in a cylinder is a curve no chart loop holds.)
-fn openings_match(q: &Query, faces: [usize; 2]) -> bool {
+///
+/// A loop whose every edge borders a plane square to the wall's axis is the wall's end where it
+/// stands on a flat face (a tube on a plate, a bore's floor, a ring round it): no opening either.
+fn openings_match(look: &Look, faces: [usize; 2], axis_point: [f64; 3], axis: [f64; 3]) -> bool {
+    let q = look.q;
     let borders = |g: usize, other: usize| face_edges(q, g).into_iter().any(|e| q.edge_faces(e).contains(&other));
     let reaches = |f: usize, other: usize| {
         let Some(face) = q.record().faces.get(f) else { return false };
         face.loops.iter().all(|l| match l {
             Bounds::Edges { edges } => {
                 edges.iter().any(|u| q.edge_faces(u.edge as usize).into_iter().any(|g| g == other || (g != f && borders(g, other))))
+                    || edges.iter().all(|u| q.edge_faces(u.edge as usize).into_iter().any(|g| g != f && square_plane(look, g, axis_point, axis)))
             }
             Bounds::Vertex { .. } => true,
         })
     };
     reaches(faces[0], faces[1]) && reaches(faces[1], faces[0])
+}
+
+/// Whether face `g` is a plane square to the axis through `axis_point` along `axis` (the
+/// kernel decides, within its angular tolerance).
+fn square_plane(look: &Look, g: usize, axis_point: [f64; 3], axis: [f64; 3]) -> bool {
+    let Some((plane, out)) = planar_face(look.body, look.q, g, look.tol) else { return false };
+    let on = OutwardPlane { point: array(plane.origin), outward: array(out) };
+    matches!(plane_meets_cylinder(&on, axis_point, axis, 1.0), Ok(Some(PlaneCylinder::Ellipse { square: true, .. })))
 }
 
 /// The body's round faces: each face's cylinder (`None` for the others), and the round ones as
@@ -500,8 +664,8 @@ fn round_pair(
     let mut area = 0.0;
     let mut coverage = 0.0;
     let mut whole = false;
-    let outer_chart = if outer_face == faces[0] { ca.as_ref() } else { cb.as_ref() };
-    let holes = outer_chart.map_or(0, |r| r.holes.len());
+    let mut sheet_face = outer_face;
+    let mut holes = 0;
     let outline_a = ca.as_ref().and_then(|r| extent(r, tol).map(|e| (r, e)));
     // `b`'s axial range read in `a`'s coordinates (its origin may differ, and its axis run the
     // other way), by the kernel.
@@ -534,14 +698,26 @@ fn round_pair(
             let same_sweep = (sweep_a - sweep_b).abs() <= 1e-4;
             let same_angles = larger > 0.0 && common >= larger * (1.0 - 1e-3);
             let aligned = same_axial && same_sweep && same_angles;
-            // An opening in one face only has no partner across the wall: the outer face's offset
+            // One face's length along the axis within the other's, the same angles round it, and
+            // all of the shorter one faced by the other: the wall is the shorter face's, and the
+            // longer runs on past its ends only (a bore on through the plate a tube stands on).
+            let within = |x: [f64; 2], y: [f64; 2]| x[0] >= y[0] - len_tol && x[1] <= y[1] + len_tol;
+            let shorter = if within(xa, xb) { Some(faces[0]) } else if within(xb, xa) { Some(faces[1]) } else { None };
+            let contained = !aligned && same_sweep && smaller > 0.0 && common >= smaller * (1.0 - 1e-3);
+            let shorter = shorter.filter(|_| contained);
+            // An opening in one face only has no partner across the wall: the sheet face's offset
             // would carry it as a hole the wall does not have (or miss one it has).
-            let matched = openings_match(q, faces);
-            whole = aligned && matched;
-            // A whole wall's sheet is the outer face's offset, holes and all; of any other pair,
+            let matched = openings_match(look, faces, a.cylinder.axis_point, a.cylinder.axis);
+            whole = (aligned || shorter.is_some()) && matched;
+            if let Some(f) = shorter {
+                sheet_face = f;
+            }
+            let sheet_chart = if sheet_face == faces[0] { ca.as_ref() } else { cb.as_ref() };
+            holes = sheet_chart.map_or(0, |r| r.holes.len());
+            // A whole wall's sheet is the sheet face's offset, holes and all; of any other pair,
             // what the two outlines share (it is not built, and no more of the wall is in it).
-            area = if whole { outer_chart.map_or(0.0, |r| r.area()) } else { common };
-            if aligned && !matched {
+            area = if whole { sheet_chart.map_or(0.0, |r| r.area()) } else { common };
+            if (aligned || shorter.is_some()) && !matched {
                 notes.push(format!(
                     "opening: faces {faces:?} have openings that do not match across the wall (a blind pocket or a boss in one face); a round wall with one is not built yet"
                 ));
@@ -553,7 +729,7 @@ fn round_pair(
             } else if let Some(note) = edge_in_round_wall(look, faces, outer_face, &a.cylinder, inner, outer) {
                 notes.push(note);
             }
-            if !aligned {
+            if !aligned && shorter.is_none() {
                 notes.push(format!(
                     "partial: the two faces differ in length along the axis ({:.3} to {:.3} against {:.3} to {:.3}), in the angles they sweep ({:.4} against {:.4} rad) or in how much of the wall they cover ({:.2}% in common); a sheet for part of a round wall is not built yet",
                     xa[0],
@@ -590,12 +766,15 @@ fn round_pair(
         confidence,
         notes,
         filled_over: 0.0,
+        filled: Vec::new(),
+        marks: Vec::new(),
+        bore_points: Vec::new(),
         mid: OutwardPlane { point: a.cylinder.axis_point, outward: a.cylinder.axis },
         frame: Plane::XY,
         out: Vec3::new(0.0, 0.0, 0.0),
         shared: Vec::new(),
         wall: Wall::Round { axis_point: a.cylinder.axis_point, axis: a.cylinder.axis, inner, outer },
-        round: Some(Round { outer_face, whole, holes }),
+        round: Some(Round { sheet_face, whole, holes }),
     }))
 }
 
@@ -737,7 +916,65 @@ pub fn analyze(body: &Body, opts: &Options) -> Result<Analysis> {
         };
         leftovers.push(Leftover { face, reason, held_by });
     }
-    Ok(Analysis { pairs, leftovers, faces: n, tolerance: tol, beyond })
+    let (joints, _) = round_joints(body, &q, &pairs);
+    // A round wall joined to a flat one on a circle runs into it (a tube through a ring, on a
+    // plate): its edges and faces between the flat wall's faces are the joint's, no step or
+    // blockage to review. Notes they made are dropped, and the edge test is made again without
+    // them, so that anything else between the faces is still seen.
+    for flat in 0..pairs.len() {
+        let joined: Vec<usize> = joints.iter().filter(|j| j.pairs[0] == flat && matches!(j.kind, JointKind::Circle { .. })).map(|j| j.pairs[1]).collect();
+        if joined.is_empty() {
+            continue;
+        }
+        let walls: Vec<(Wall, [usize; 2])> = joined.iter().filter_map(|r| pairs.get(*r)).map(|r| (r.wall, r.faces)).collect();
+        let held = |at: [f64; 3]| -> Result<bool> {
+            for (wall, _) in &walls {
+                if ms::wall_holds(wall, &[at], tol * 100.0).map_err(ops_err(&format!("the joints of pair {flat}")))? {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        };
+        let Some(p) = pairs.get(flat) else { continue };
+        let mut kept = Vec::new();
+        let mut dropped: Vec<String> = Vec::new();
+        let mut recheck = false;
+        for (mark, note) in &p.marks {
+            let explained = match mark {
+                Mark::Step(at) => held(*at)?,
+                Mark::EdgeBlock(at) => held(*at)?,
+                Mark::FaceBlock(f) => walls.iter().any(|(_, faces)| faces.contains(f)),
+            };
+            if explained {
+                recheck |= !matches!(mark, Mark::Step(_));
+                dropped.push(note.clone());
+            } else {
+                kept.push((*mark, note.clone()));
+            }
+        }
+        if dropped.is_empty() {
+            continue;
+        }
+        let mut found = None;
+        if recheck && let Some(a) = p.faces.first().and_then(|f| flats.get(*f)).and_then(Option::as_ref) {
+            let mut pool = Vec::new();
+            for s in &samples {
+                if !p.bore_points.contains(s) && !held(*s)? {
+                    pool.push(*s);
+                }
+            }
+            found = edge_block(&pool, a, &p.mid, p.thickness, &p.shared, p.faces, tol);
+        }
+        let Some(p) = pairs.get_mut(flat) else { continue };
+        p.notes.retain(|n| !dropped.contains(n));
+        if let Some((at, note)) = found {
+            kept.push((Mark::EdgeBlock(at), note.clone()));
+            p.notes.push(note);
+        }
+        p.marks = kept;
+        p.confidence = if p.notes.is_empty() { Confidence::High } else { Confidence::Review };
+    }
+    Ok(Analysis { pairs, leftovers, faces: n, tolerance: tol, beyond, joints })
 }
 
 /// Pairs that share a face are fine when they cover different parts of it (a flange split by its
@@ -955,15 +1192,49 @@ fn pair_of(look: &Look, faces: [usize; 2], a: &Flat, b: &Flat, gap: f64, mid: Ou
     // point: an opening that narrows between the faces (counterbores either side of a smaller
     // bore) has edges of the body strictly between the faces well inside the mouth; it is filled
     // over and listed for review rather than cut out whole.
+    //
+    // A straight bore through the wall at a slant opens the two faces in two ellipses side by
+    // side: what they share is not the hole the halfway plane has. The bore's own section there
+    // (the exact ellipse the kernel finds) is cut out instead, and the openings it explains are
+    // no openings filled over.
     let mut through = Vec::new();
+    let mut marks: Vec<(Mark, String)> = Vec::new();
+    let mut bored: Vec<Vec2> = Vec::new();
+    // The exact points of the edges of the slanted bores cut out: the wall's own boundary.
+    let mut bore_points: Vec<[f64; 3]> = Vec::new();
+    let mut sections: Vec<Region2> = Vec::new();
     for r in mouths {
+        let bore = slanted_bore(look, faces, a, &mid, &r);
+        let cut = bore.as_ref().map_or(&r, |(section, _)| section);
+        // A bore's own edges (its seam) run between the faces: no step in it.
+        let own: Vec<[f64; 3]> = bore.as_ref().map(|(_, gs)| gs.iter().filter_map(|g| edge_points(q, *g)).flatten().collect()).unwrap_or_default();
+        let others: Vec<[f64; 3]>;
+        let pool = if own.is_empty() {
+            samples
+        } else {
+            others = samples.iter().filter(|s| !own.contains(s)).copied().collect();
+            others.as_slice()
+        };
         match between(r.interior_point()) {
-            Ok(None) => match edge_between(samples, a, &mid, gap, std::slice::from_ref(&r), tol * 100.0) {
-                None => through.push(r),
-                Some(at) => notes.push(format!(
-                    "stepped: an opening through faces {} and {} narrows between them (an edge of the body at ({:.3}, {:.3}, {:.3})); it is filled over, not cut out",
-                    faces[0], faces[1], at[0], at[1], at[2]
-                )),
+            Ok(None) => match edge_between(pool, a, &mid, gap, std::slice::from_ref(cut), tol * 100.0) {
+                None => {
+                    if let Some((section, _)) = bore {
+                        bored.push(r.interior_point());
+                        sections.push(section.clone());
+                        through.push(section);
+                        bore_points.extend(own);
+                    } else {
+                        through.push(r);
+                    }
+                }
+                Some(at) => {
+                    let note = format!(
+                        "stepped: an opening through faces {} and {} narrows between them (an edge of the body at ({:.3}, {:.3}, {:.3})); it is filled over, not cut out",
+                        faces[0], faces[1], at[0], at[1], at[2]
+                    );
+                    marks.push((Mark::Step(at), note.clone()));
+                    notes.push(note);
+                }
             },
             Ok(Some(_)) => {}
             Err(f) => notes.push(format!("unchecked: face {f} could not be tested exactly for whether an opening goes through; it is filled over")),
@@ -974,8 +1245,22 @@ fn pair_of(look: &Look, faces: [usize; 2], a: &Flat, b: &Flat, gap: f64, mid: Ou
     if overlap_area <= tol * tol {
         return Ok(None);
     }
-    let exact: f64 = boolean(std::slice::from_ref(&a.region), std::slice::from_ref(&b_in_a), BoolOp::Intersect)?.iter().map(|r| r.area()).sum();
+    // What both faces cover: the faces' own regions in common, or with a slanted bore's openings
+    // closed and its section cut out instead.
+    let both = if bored.is_empty() {
+        boolean(std::slice::from_ref(&a.region), std::slice::from_ref(&b_in_a), BoolOp::Intersect)?
+    } else {
+        let unbored = |reg: &Region2| Region2 {
+            outer: reg.outer.clone(),
+            holes: reg.holes.iter().filter(|h| !bored.iter().any(|p| Region2 { outer: h.ccw(), holes: Vec::new() }.contains(*p))).cloned().collect(),
+        };
+        let closed = boolean(&[unbored(&a.region)], &[unbored(&b_in_a)], BoolOp::Intersect)?;
+        if closed.is_empty() { closed } else { boolean(&closed, &sections, BoolOp::Cut)? }
+    };
+    let exact: f64 = both.iter().map(|r| r.area()).sum();
     let filled_over = if overlap_area - exact > tol * tol { overlap_area - exact } else { 0.0 };
+    // Where the sheet is filled over, for a joint to take its share back (a tube's foot).
+    let filled_regions = if filled_over > 0.0 && !both.is_empty() { boolean(&shared, &both, BoolOp::Cut)? } else { Vec::new() };
     let smaller = a.region.area().min(b_in_a.area()).max(f64::MIN_POSITIVE);
     let coverage = (exact / smaller).clamp(0.0, 1.0);
     let aspect = overlap_area.sqrt() / gap;
@@ -995,7 +1280,9 @@ fn pair_of(look: &Look, faces: [usize; 2], a: &Flat, b: &Flat, gap: f64, mid: Ou
         match between(r.interior_point()) {
             Ok(Some((s, f))) => {
                 blocked = true;
-                notes.push(format!("blocked: face {f} lies {s:.3} mm below face {} before the partner is reached", faces[0]));
+                let note = format!("blocked: face {f} lies {s:.3} mm below face {} before the partner is reached", faces[0]);
+                marks.push((Mark::FaceBlock(f), note.clone()));
+                notes.push(note);
             }
             Ok(None) => {}
             Err(f) => notes.push(format!("unchecked: face {f} could not be tested for blocking exactly")),
@@ -1003,12 +1290,18 @@ fn pair_of(look: &Look, faces: [usize; 2], a: &Flat, b: &Flat, gap: f64, mid: Ou
     }
     // One ray sees one point. Any other face between the two (a web under one point, a skin
     // inside) has edges there: an exact point of the body's edges strictly between the two
-    // planes and well inside the shared region is material, or a void, the sheet would span.
-    if !blocked && let Some(at) = edge_between(samples, a, &mid, gap, &shared, tol * 100.0) {
-        notes.push(format!(
-            "blocked: an edge of the body runs between faces {} and {} at ({:.3}, {:.3}, {:.3}), inside the wall the sheet would span",
-            faces[0], faces[1], at[0], at[1], at[2]
-        ));
+    // planes and well inside the shared region is material, or a void, the sheet would span. A
+    // slanted bore's own edges are the wall's boundary.
+    let others: Vec<[f64; 3]>;
+    let pool = if bore_points.is_empty() {
+        samples
+    } else {
+        others = samples.iter().filter(|s| !bore_points.contains(s)).copied().collect();
+        others.as_slice()
+    };
+    if !blocked && let Some((at, note)) = edge_block(pool, a, &mid, gap, &shared, faces, tol) {
+        marks.push((Mark::EdgeBlock(at), note.clone()));
+        notes.push(note);
     }
     let confidence = if notes.is_empty() { Confidence::High } else { Confidence::Review };
     let point_b = face_region(body, q, &b.plane, b.out, faces[1], tol)
@@ -1026,6 +1319,9 @@ fn pair_of(look: &Look, faces: [usize; 2], a: &Flat, b: &Flat, gap: f64, mid: Ou
         confidence,
         notes,
         filled_over,
+        filled: filled_regions,
+        marks,
+        bore_points,
         mid,
         frame: a.plane,
         out: a.out,
@@ -1033,6 +1329,61 @@ fn pair_of(look: &Look, faces: [usize; 2], a: &Flat, b: &Flat, gap: f64, mid: Ou
         wall,
         round: None,
     }))
+}
+
+/// The first of `samples` between the faces of flat pair `faces` (first face `a`, `gap` apart,
+/// halfway plane `mid`) well inside `shared`, and the `blocked` note it makes.
+fn edge_block(samples: &[[f64; 3]], a: &Flat, mid: &OutwardPlane, gap: f64, shared: &[Region2], faces: [usize; 2], tol: f64) -> Option<([f64; 3], String)> {
+    let at = edge_between(samples, a, mid, gap, shared, tol * 100.0)?;
+    let note = format!(
+        "blocked: an edge of the body runs between faces {} and {} at ({:.3}, {:.3}, {:.3}), inside the wall the sheet would span",
+        faces[0], faces[1], at[0], at[1], at[2]
+    );
+    Some((at, note))
+}
+
+/// The faces of the body that share an edge with face `f`.
+fn neighbours(q: &Query, f: usize) -> Vec<usize> {
+    let mut out: Vec<usize> = face_edges(q, f).into_iter().flat_map(|e| q.edge_faces(e)).filter(|g| *g != f).collect();
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// The bore of a straight hole through the flat pair `faces` at a slant, behind the mouth `r`
+/// (what the two faces' openings share, in `a`'s frame): a cylinder face bordering both faces
+/// that crosses the halfway plane `mid` in an ellipse (the kernel's exact section, not a circle:
+/// a bore square to the wall opens both faces in its own section) whose centre lies in the mouth.
+/// That section as a region in `a`'s frame (four exact conic quarters), and the bore's faces (one
+/// cylinder may be split in several). `None` when no such bore, or more than one, lies behind it.
+fn slanted_bore(look: &Look, faces: [usize; 2], a: &Flat, mid: &OutwardPlane, r: &Region2) -> Option<(Region2, Vec<usize>)> {
+    let Look { body, q, tol, .. } = *look;
+    let frame = frame_of(&a.plane);
+    let second = neighbours(q, faces[1]);
+    let mut found: Option<(Region2, [f64; 2], Vec<usize>)> = None;
+    for g in neighbours(q, faces[0]).into_iter().filter(|g| second.contains(g) && !faces.contains(g)) {
+        let Some(bore) = round_face(body, q, g, tol) else { continue };
+        let c = bore.cylinder;
+        let Ok(Some(PlaneCylinder::Ellipse { ellipse, square: false })) = plane_meets_cylinder(mid, c.axis_point, c.axis, c.radius) else { continue };
+        let Ok(centre) = ms::in_frame(&frame, ellipse.centre) else { continue };
+        if !r.contains(Vec2::new(centre[0], centre[1])) {
+            continue;
+        }
+        match &mut found {
+            // The same cylinder split in faces: the same section.
+            Some((_, at, list)) if near([at[0], at[1], 0.0], [centre[0], centre[1], 0.0], tol * 100.0) => list.push(g),
+            Some(_) => return None,
+            None => {
+                let quarters = ellipse_in_frame(&frame, &ellipse).ok()?;
+                let segs = quarters
+                    .iter()
+                    .map(|k| Seg2::Conic { a: Vec2::new(k.a[0], k.a[1]), apex: Vec2::new(k.apex[0], k.apex[1]), b: Vec2::new(k.b[0], k.b[1]), w: k.w })
+                    .collect();
+                found = Some((Region2 { outer: Loop2 { segs }, holes: Vec::new() }, centre, vec![g]));
+            }
+        }
+    }
+    found.map(|(section, _, list)| (section, list))
 }
 
 /// A mid-sheet: the part of the plane halfway between a pair of faces that the pair shares, as a
@@ -1083,6 +1434,104 @@ fn edge_along(corners: &[[f64; 3]], e0: [f64; 3], e1: [f64; 3], tol: f64) -> Opt
     })
 }
 
+/// A circle a flat sheet is joined to a round wall on, in the flat pair's frame: its centre, the
+/// halfway radius, the round wall's inner and outer radii, and the round pair (an index into the
+/// pairs read).
+#[derive(Clone, Copy, Debug)]
+struct JointCircle {
+    centre: Vec2,
+    radius: f64,
+    inner: f64,
+    outer: f64,
+    round: usize,
+}
+
+/// The circle joints of flat pair `i` among `pairs`, read in its frame.
+fn joint_circles(pairs: &[Pair], joints: &[Joint], i: usize) -> Result<Vec<JointCircle>> {
+    let Some(p) = pairs.get(i) else { return Ok(Vec::new()) };
+    let frame = frame_of(&p.frame);
+    let mut out = Vec::new();
+    for j in joints.iter().filter(|j| j.pairs[0] == i) {
+        let (JointKind::Circle { centre, radius }, Some(Wall::Round { inner, outer, .. })) = (&j.kind, pairs.get(j.pairs[1]).map(|r| r.wall)) else {
+            continue;
+        };
+        // The halfway plane has the frame's axes: a point on it reads the same in both.
+        let [u, v] = ms::in_frame(&frame, *centre).map_err(ops_err("a joint's centre"))?;
+        out.push(JointCircle { centre: Vec2::new(u, v), radius: *radius, inner, outer, round: j.pairs[1] });
+    }
+    Ok(out)
+}
+
+/// A flat pair's sheet with its circle joints made: what it covers, what of it is still filled
+/// over openings, and the round pairs it was joined to.
+struct Joined {
+    shared: Vec<Region2>,
+    filled_over: f64,
+    rounds: Vec<usize>,
+}
+
+/// Flat pair `p`'s shared regions ended on each of `circles`, on the side the flat wall lies:
+/// a plate a tube stands on (or a ring round a tube) reaches in to the circle from outside
+/// (`(shared ∪ disc(outer)) − disc(radius)`), the floor of a bore (a cup's bottom) out to it
+/// from inside (`(shared ∩ disc(inner)) ∪ disc(radius)`). What the faces left open of the round
+/// wall's foot (its opening, the ring the tube stands on, the tube's own wall through a ring's
+/// opening) is the joint's, not an opening filled over. Exact region booleans (the kernel's).
+fn joined(p: &Pair, circles: &[JointCircle], tol: f64) -> Result<Joined> {
+    let regions = |x: &[Region2], y: &[Region2], op: BoolOp| {
+        planar_regions_boolean(x, y, op, 1e-7).map_err(|e| DocError::Invalid(format!("midsurface: the joints of the sheet of faces {:?}: {e}", p.faces)))
+    };
+    let area = |x: &[Region2]| x.iter().map(|r| r.area()).sum::<f64>();
+    let mut shared = p.shared.clone();
+    let mut filled = p.filled.clone();
+    let mut rounds = Vec::new();
+    for c in circles {
+        if shared.is_empty() {
+            break;
+        }
+        let disc = |r: f64| Region2 { outer: Loop2::circle(c.centre, r), holes: Vec::new() };
+        // Just outside the wall, as wide as it is thick.
+        let ring = Region2 { outer: Loop2::circle(c.centre, c.outer + (c.outer - c.inner)), holes: vec![Loop2::circle(c.centre, c.outer).reversed()] };
+        if area(&regions(&shared, std::slice::from_ref(&ring), BoolOp::Intersect)?) > tol * tol {
+            let closed = regions(&shared, &[disc(c.outer)], BoolOp::Union)?;
+            shared = regions(&closed, &[disc(c.radius)], BoolOp::Cut)?;
+            if !filled.is_empty() {
+                filled = regions(&filled, &[disc(c.outer)], BoolOp::Cut)?;
+            }
+        } else if area(&regions(&shared, &[disc(c.inner)], BoolOp::Intersect)?) > tol * tol {
+            let within = regions(&shared, &[disc(c.inner)], BoolOp::Intersect)?;
+            shared = regions(&within, &[disc(c.radius)], BoolOp::Union)?;
+            if !filled.is_empty() {
+                filled = regions(&filled, &[disc(c.inner)], BoolOp::Intersect)?;
+            }
+        } else {
+            continue;
+        }
+        rounds.push(c.round);
+    }
+    let filled_over = if rounds.is_empty() || p.filled.is_empty() {
+        p.filled_over
+    } else {
+        let left = area(&filled);
+        if left > tol * tol { left } else { 0.0 }
+    };
+    Ok(Joined { shared, filled_over, rounds })
+}
+
+/// Whether loop `lp` runs whole round `c`: arcs about it alone (within `slack`), of radii from
+/// `inner` to `outer`, turning once in all (a comparison of the loop's own numbers, no geometry).
+fn round_about(lp: &Loop2, c: Vec2, inner: f64, outer: f64, slack: f64) -> bool {
+    let mut turn = 0.0;
+    for s in &lp.segs {
+        match s {
+            Seg2::Arc { center, radius, sweep, .. } if center.dist(c) <= slack && *radius >= inner - slack && *radius <= outer + slack => {
+                turn += sweep.abs();
+            }
+            _ => return false,
+        }
+    }
+    !lp.segs.is_empty() && (turn - std::f64::consts::TAU).abs() <= 1e-6
+}
+
 /// What a caller may ask of the sheets beyond the pairs.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Build {
@@ -1113,7 +1562,7 @@ fn hole_size(h: &Loop2, tol: f64) -> f64 {
     pts.iter().enumerate().flat_map(|(i, p)| pts.iter().skip(i + 1).map(move |q| p.dist(*q))).fold(0.0, f64::max)
 }
 
-/// Whether `build` would fill a hole of a round wall's outer face `outer_face`: one no wider than
+/// Whether `build` would fill a hole of a round wall's sheet face `outer_face`: one no wider than
 /// its size to fill below, as [`hole_size`] fills a flat hole. A drilled hole's outline is a curve
 /// no chart loop holds, so each loop of the face is measured on its exact edges (the largest
 /// distance between two of their points, never more than the outline's length on the face): when
@@ -1142,7 +1591,8 @@ fn round_hole_filled(body: &Body, outer_face: usize, build: &Build) -> bool {
 /// The mid-sheets of `pairs` (a choice among an [`Analysis`]'s pairs), joined: where a solid edge
 /// joins faces of two different pairs and lies along one of the sheets' edges, that edge is moved
 /// onto the line the two halfway planes meet in (the sheet grows at an inside corner, and is
-/// trimmed where it ran past).
+/// trimmed where it ran past). Where a flat wall square to a round wall's axis meets it, the two
+/// are joined on the circle their halfway surfaces meet in ([`JointKind::Circle`]).
 pub fn sheets_with(body: &Body, pairs: &[Pair], build: &Build) -> Result<Vec<Sheet>> {
     let bad = |m: String| DocError::Invalid(format!("midsurface: {m}"));
     if body.is_mesh() {
@@ -1157,6 +1607,12 @@ pub fn sheets_with(body: &Body, pairs: &[Pair], build: &Build) -> Result<Vec<She
     }
     let tol = (body.size() * 1e-6).max(1e-6);
     let matching = tol * 100.0;
+    let q = Query::new(body.record());
+    // Where flat walls meet round ones: the circles their sheets are joined on, and the round
+    // sheets' ends carried there.
+    let (joints, ends) = round_joints(body, &q, pairs);
+    // The circle joints each flat sheet's loops were moved onto: (flat pair, round pair).
+    let mut circled: Vec<(usize, usize)> = Vec::new();
     // One polygon per piece a pair shares.
     let mut built: Vec<(usize, Sheet)> = Vec::new();
     for (i, p) in pairs.iter().enumerate() {
@@ -1166,17 +1622,36 @@ pub fn sheets_with(body: &Body, pairs: &[Pair], build: &Build) -> Result<Vec<She
             if !round.whole {
                 continue;
             }
-            // The offset carries every hole of the outer face: holes cannot be filled over yet. A
+            // The offset carries every hole of the sheet face: holes cannot be filled over yet. A
             // size to fill below that every hole is wider than fills none of them.
-            if round.holes > 0 && (!build.carry_holes || (build.suppress_holes_below > 0.0 && round_hole_filled(body, round.outer_face, build))) {
+            if round.holes > 0 && (!build.carry_holes || (build.suppress_holes_below > 0.0 && round_hole_filled(body, round.sheet_face, build))) {
                 return Err(bad(format!(
                     "the round wall of faces {:?} has {} holes, and holes in a round wall cannot be filled over yet: build it with holes carried and none suppressed, or leave the pair out",
                     p.faces, round.holes
                 )));
             }
-            // The outer face of the round wall, taken halfway in: a cylinder stays a cylinder.
-            let made = offset_surface(body, &[round.outer_face], -(p.thickness * 0.5), 1e-3)
+            // The sheet face of the round wall, taken halfway into the material: a cylinder stays
+            // a cylinder.
+            let mut made = offset_surface(body, &[round.sheet_face], -(p.thickness * 0.5), 1e-3)
                 .map_err(|e| bad(format!("the round wall of faces {:?}: {e}", p.faces)))?;
+            let mut notes = Vec::new();
+            // Its ends at flat walls square to its axis, carried along the axis (the cylinder
+            // continued, exactly) to their halfway planes: one extension per distance, the edges
+            // of one end (and of both ends, when as far) together.
+            let mut mine: Vec<RoundEnd> = ends.iter().filter(|x| x.round == i).copied().collect();
+            while let Some(first) = mine.first().copied() {
+                let (now, rest): (Vec<RoundEnd>, Vec<RoundEnd>) = mine.into_iter().partition(|x| (x.distance - first.distance).abs() <= matching);
+                mine = rest;
+                let at: Vec<Vec3> = now.iter().map(|x| vec3(x.at)).collect();
+                let opts = ExtendOptions { mode: ExtendMode::Natural, limit: ExtendLimit::Distance(first.distance), neighbours: true };
+                match extend_surface(&made, &at, &opts) {
+                    Ok(longer) => made = longer,
+                    Err(e) => notes.push(format!(
+                        "a joint with a flat wall was not made: the end could not be carried {:.3} mm along the axis to the flat wall's halfway plane ({e})",
+                        first.distance
+                    )),
+                }
+            }
             built.push((
                 i,
                 Sheet {
@@ -1190,7 +1665,7 @@ pub fn sheets_with(body: &Body, pairs: &[Pair], build: &Build) -> Result<Vec<She
                     normal: [0.0, 0.0, 0.0],
                     frame: Plane::XY,
                     holes: Vec::new(),
-                    notes: vec!["a round wall: flat sheets meet it tangentially, with no extension".to_string()],
+                    notes,
                 },
             ));
             continue;
@@ -1200,7 +1675,10 @@ pub fn sheets_with(body: &Body, pairs: &[Pair], build: &Build) -> Result<Vec<She
         let origin = ms::onto_plane(&p.mid, array(p.frame.origin)).map_err(ops_err("the halfway plane"))?;
         let frame = Plane { origin: vec3(origin), x: p.frame.x, y: p.frame.y };
         let sheet_frame = frame_of(&frame);
-        for region in &p.shared {
+        let circles = joint_circles(pairs, &joints, i)?;
+        let Joined { shared, filled_over, rounds } = joined(p, &circles, tol)?;
+        circled.extend(rounds.into_iter().map(|r| (i, r)));
+        for region in &shared {
             let mut corners = Vec::new();
             let mut curved = false;
             for seg in &region.outer.segs {
@@ -1209,12 +1687,19 @@ pub fn sheets_with(body: &Body, pairs: &[Pair], build: &Build) -> Result<Vec<She
                 corners.push(ms::from_frame(&sheet_frame, [a.x, a.y]).map_err(ops_err("a sheet's corner"))?);
             }
             let mut notes = Vec::new();
-            if curved {
+            // A round outline about a joined wall (a bore's floor, a cup's bottom) is the joint.
+            let joined_outline = circles.iter().any(|c| round_about(&region.outer, c.centre, c.radius, c.radius, matching));
+            if curved && !joined_outline {
                 notes.push("its outline has curved edges: its joints with other sheets are not extended or trimmed".to_string());
             }
             let mut holes = Vec::new();
             let mut dropped = 0;
             for h in &region.holes {
+                // A hole round a joined wall is the joint, never filled.
+                if circles.iter().any(|c| round_about(h, c.centre, c.radius, c.radius, matching)) {
+                    holes.push(h.clone());
+                    continue;
+                }
                 // With no size asked for, every hole is kept without measuring it.
                 if build.carry_holes && (build.suppress_holes_below <= 0.0 || hole_size(h, tol) > build.suppress_holes_below) {
                     holes.push(h.clone());
@@ -1225,10 +1710,10 @@ pub fn sheets_with(body: &Body, pairs: &[Pair], build: &Build) -> Result<Vec<She
             if dropped > 0 {
                 notes.push(format!("{dropped} holes were filled over, as asked"));
             }
-            if p.filled_over > 0.0 {
+            if filled_over > 0.0 {
                 notes.push(format!(
                     "filled over {:.1} mm² of openings that do not go straight through (in one face only, or closed or narrowing between the faces: a boss, rib, pocket or counterbore stands there): model that part separately",
-                    p.filled_over
+                    filled_over
                 ));
             }
             built.push((
@@ -1256,9 +1741,6 @@ pub fn sheets_with(body: &Body, pairs: &[Pair], build: &Build) -> Result<Vec<She
     let original: Vec<Vec<[f64; 3]>> = built.iter().map(|(_, s)| s.corners.clone()).collect();
     // For each pair of pairs that meet, whether each one's sheet was joined along some edge.
     let mut meets: Vec<(usize, usize, bool)> = Vec::new();
-    // Flat pairs (indices) meeting a round wall (its faces) at an angle, not tangentially.
-    let mut angled: Vec<(usize, [usize; 2])> = Vec::new();
-    let q = Query::new(body.record());
     for e in 0..body.record().edges.len() {
         let on = q.edge_faces(e);
         let [fa, fb] = on.as_slice() else { continue };
@@ -1288,20 +1770,8 @@ pub fn sheets_with(body: &Body, pairs: &[Pair], build: &Build) -> Result<Vec<She
                 continue;
             }
             let (Some(pa), Some(pb)) = (pairs.get(ia), pairs.get(ib)) else { continue };
-            // A flat wall meeting a round one tangentially (a bend and its leg) needs no joint:
-            // their sheets meet on the tangent line. One meeting it at an angle is not joined
-            // yet: said.
+            // A flat wall meeting a round one is joined (or said not to be) by its joint above.
             if pa.round.is_some() || pb.round.is_some() {
-                if let (None, Some(_)) | (Some(_), None) = (&pa.round, &pb.round) {
-                    let flat = if pa.round.is_none() { ia } else { ib };
-                    // The kernel decides whether the two faces meet tangentially all along the edge.
-                    let mid_point = q.edge_interval(e).and_then(|[t0, t1]| q.edge_at(e, 0.5 * (t0 + t1))).map(|(m, _)| m);
-                    let tangent = mid_point.is_some_and(|m| smooth_picks(body, &[m]).is_ok_and(|s| s.first() == Some(&true)));
-                    let round_faces = if flat == ia { pb.faces } else { pa.faces };
-                    if !tangent && !angled.contains(&(flat, round_faces)) {
-                        angled.push((flat, round_faces));
-                    }
-                }
                 continue;
             }
             let joint = planes_meeting(&pa.mid, &pb.mid).map_err(|e| bad(format!("joint of pairs {ia} and {ib}: {e}")))?;
@@ -1347,12 +1817,21 @@ pub fn sheets_with(body: &Body, pairs: &[Pair], build: &Build) -> Result<Vec<She
             sheet.notes.push("its edges met on the joint lines: it lies within the walls it joins and is absorbed into them".to_string());
         }
     }
-    // Never silent: a flat wall meeting a round one at an angle keeps its own edge there.
-    for (flat, round_faces) in angled {
+    // Never silent: a flat wall meeting a round one at an angle that is not joined keeps its own
+    // edge there, and says why.
+    for j in &joints {
+        let [flat, round] = j.pairs;
+        let why = match &j.kind {
+            JointKind::Tangent => continue,
+            JointKind::Circle { .. } if circled.contains(&(flat, round)) => continue,
+            JointKind::Circle { .. } => {
+                "no loop of this sheet runs whole round the round wall (only a hole or an outline all the way round it is moved onto the joint's circle yet)".to_string()
+            }
+            JointKind::Open(why) => why.clone(),
+        };
+        let Some(round_faces) = pairs.get(round).map(|p| p.faces) else { continue };
         for (_, sheet) in built.iter_mut().filter(|(i, s)| *i == flat && !s.collapsed) {
-            sheet.notes.push(format!(
-                "a joint with the round wall of faces {round_faces:?} was not made: they meet at an angle, not tangentially, and a flat sheet is not joined to a round one yet"
-            ));
+            sheet.notes.push(format!("a joint with the round wall of faces {round_faces:?} was not made: {why}"));
         }
     }
     // Never silent: a wall that meets another but whose sheet was joined to it along no edge (a
@@ -1628,7 +2107,7 @@ pub fn report_chosen(analysis: &Analysis, chosen: &[Pair], sheets: &[Sheet]) -> 
     if absorbed > 0 {
         out.push(format!("{absorbed} short walls lie within the plate they join and were absorbed into it (no sheet of their own)"));
     }
-    let loose = sheets.iter().filter(|s| s.curved && s.body.is_none()).count();
+    let loose = sheets.iter().filter(|s| s.notes.iter().any(|n| n.starts_with("its outline has curved edges"))).count();
     if loose > 0 {
         out.push(format!("{loose} sheets have curved outlines: where they meet other sheets they are not extended or trimmed"));
     }
@@ -2798,6 +3277,153 @@ mod tests {
         assert!(!a.pairs.iter().any(Pair::is_round), "{:?}", a.pairs);
         let apart = a.leftovers.iter().filter(|l| matches!(l.reason, Reason::NoOverlap { gap } if (gap - 6.0).abs() < 1e-9)).count();
         assert_eq!(apart, 2, "{:?}", a.leftovers);
+    }
+
+    /// A disc of radius `r` about the z axis from `z0` to `z1`.
+    fn disc(r: f64, z0: f64, z1: f64) -> Body {
+        extrude(&Plane::XY, &[Region2 { outer: Loop2::circle(Vec2::new(0.0, 0.0), r), holes: vec![] }], z0, z1).unwrap().pop().unwrap()
+    }
+
+    fn cut(a: &Body, b: &Body) -> Body {
+        solidcraft_kernel::boolean(a, b, BoolOp::Cut).unwrap().unwrap()
+    }
+
+    /// The total area of the sheets, each a body of its own.
+    fn sheet_area(s: &[Sheet]) -> f64 {
+        surface_bodies(s, false).unwrap().iter().map(|b| solidcraft_kernel::measure(b).unwrap().area).sum()
+    }
+
+    /// A plate 60 x 60 x 4 (z 0..4) and a tube of radii 8 and 10 standing on it at the origin up
+    /// to z = 40, its bore of radius 8 running on through the plate.
+    fn tube_on_plate() -> Body {
+        let part = union(&cuboid([-30.0, -30.0, 0.0], [30.0, 30.0, 4.0]), &tube(8.0, 10.0, 2.0, 40.0));
+        cut(&part, &disc(8.0, -1.0, 41.0))
+    }
+
+    #[test]
+    fn a_tube_on_a_plate_is_joined_on_the_circle_its_halfway_cylinder_meets_the_plates_halfway_plane() {
+        // The plate's sheet at z = 2 reaches in to the tube's halfway radius 9: 3600 - 81 pi. The
+        // tube's sheet, radius 9, runs from its top (z = 40) down to the plate's halfway plane
+        // (z = 2): 2 pi 9 38 = 684 pi. Before the joint the tube's sheet stood on the plate's top
+        // (z = 4, 648 pi) and the plate's sheet had the bore's hole (3600 - 64 pi).
+        let part = tube_on_plate();
+        let a = analyze(&part, &opts(5.0)).unwrap();
+        let round: Vec<&Pair> = a.pairs.iter().filter(|p| p.is_round()).collect();
+        let flat: Vec<&Pair> = a.pairs.iter().filter(|p| !p.is_round()).collect();
+        assert_eq!((round.len(), flat.len()), (1, 1), "{:?}", a.pairs);
+        // The tube's wall: its outside (z 4..40) is all faced by the bore (z 0..40), which runs on
+        // only past its end: one wall, built from the outside's offset.
+        assert_eq!(round[0].confidence, Confidence::High, "{:?}", round[0]);
+        assert!((round[0].overlap_area - 648.0 * PI).abs() < 648.0 * PI * 1e-3, "{:?}", round[0]);
+        assert_eq!(flat[0].confidence, Confidence::High, "{:?}", flat[0]);
+        assert!((flat[0].overlap_area - (3600.0 - 64.0 * PI)).abs() < 1e-3, "{:?}", flat[0]);
+        // One joint, a circle of radius 9 about (0, 0, 2).
+        assert_eq!(a.joints.len(), 1, "{:?}", a.joints);
+        let JointKind::Circle { centre, radius } = a.joints[0].kind.clone() else { panic!("{:?}", a.joints) };
+        assert!((radius - 9.0).abs() < 1e-9 && near(centre, [0.0, 0.0, 2.0], 1e-9), "{:?}", a.joints);
+        let s = sheets(&part, &confident(&a)).unwrap();
+        let expected = 3600.0 + 603.0 * PI;
+        let total = sheet_area(&s);
+        assert!((total - expected).abs() < expected * 1e-4, "{total} against {expected}");
+        let plate = s.iter().find(|x| x.body.is_none()).unwrap_or_else(|| panic!("{s:?}"));
+        assert_eq!(plate.holes.len(), 1, "{plate:?}");
+        assert!(round_about(&plate.holes[0], Vec2::new(0.0, 0.0), 9.0, 9.0, 1e-6), "{plate:?}");
+        // Nothing is left unjoined or filled over: the tube's foot is the joint's.
+        let notes = report(&a, &s);
+        assert!(!notes.iter().any(|n| n.contains("a joint") || n.contains("filled over")), "{notes:?}");
+        // Sewn into one body, the same area.
+        let m = solidcraft_kernel::measure(&surface_body(&s).unwrap()).unwrap();
+        assert!((m.area - expected).abs() < expected * 1e-4, "{m:?}");
+    }
+
+    #[test]
+    fn a_ring_round_a_tube_is_a_t_joined_on_the_circle_of_the_tubes_halfway_radius() {
+        // A tube of radii 8 and 10, z 0..40, with a ring of radii 10 to 30, z 18..22, round it.
+        // The ring's sheet at z = 20 reaches in to radius 9: pi (900 - 81) = 819 pi. The tube's
+        // outside is cut in two by the ring; each half's sheet runs to z = 20, together the whole
+        // 2 pi 9 40 = 720 pi. In all 1539 pi.
+        let part = union(&tube(8.0, 10.0, 0.0, 40.0), &tube(9.0, 30.0, 18.0, 22.0));
+        let a = analyze(&part, &opts(5.0)).unwrap();
+        let round: Vec<&Pair> = a.pairs.iter().filter(|p| p.is_round()).collect();
+        let flat: Vec<&Pair> = a.pairs.iter().filter(|p| !p.is_round()).collect();
+        assert_eq!((round.len(), flat.len()), (2, 1), "{:?}", a.pairs);
+        assert!(a.pairs.iter().all(|p| p.confidence == Confidence::High), "{:?}", a.pairs);
+        let circles = a.joints.iter().filter(|j| matches!(j.kind, JointKind::Circle { radius, .. } if (radius - 9.0).abs() < 1e-9)).count();
+        assert_eq!((a.joints.len(), circles), (2, 2), "{:?}", a.joints);
+        let s = sheets(&part, &confident(&a)).unwrap();
+        let expected = 1539.0 * PI;
+        let total = sheet_area(&s);
+        assert!((total - expected).abs() < expected * 1e-4, "{total} against {expected}");
+        let notes = report(&a, &s);
+        assert!(!notes.iter().any(|n| n.contains("a joint") || n.contains("filled over")), "{notes:?}");
+    }
+
+    #[test]
+    fn a_cups_bottom_reaches_out_to_the_circle_of_its_walls_halfway_radius() {
+        // A cup: a bottom of radius 20, z 0..2, and a wall of radii 18 and 20 up to z = 40. The
+        // bottom's sheet at z = 1 reaches out from its floor's radius 18 to 19: 361 pi. The
+        // wall's, radius 19, runs from z = 40 down to z = 1: 2 pi 19 39 = 1482 pi. In all 1843 pi.
+        let part = union(&disc(20.0, 0.0, 2.0), &tube(18.0, 20.0, 1.0, 40.0));
+        let a = analyze(&part, &opts(5.0)).unwrap();
+        assert!(a.pairs.iter().all(|p| p.confidence == Confidence::High), "{:?}", a.pairs);
+        let s = sheets(&part, &confident(&a)).unwrap();
+        let expected = 1843.0 * PI;
+        let total = sheet_area(&s);
+        assert!((total - expected).abs() < expected * 1e-4, "{total} against {expected} {:?} {:?}", a.pairs, a.joints);
+        assert!(!report(&a, &s).iter().any(|n| n.contains("a joint")), "{:?}", report(&a, &s));
+    }
+
+    #[test]
+    fn a_slanted_bore_through_a_plate_is_carried_as_the_ellipse_it_cuts_the_halfway_plane_in() {
+        // A plate 40 x 30 x 2 with a bore of radius 3 through (20, 15, 1), its axis tilted 30
+        // degrees from z: the halfway plane z = 1 cuts it in an ellipse of semi-axes 3 and
+        // 3 / cos 30, centred at (20, 15). The sheet is 1200 - 9 pi / cos 30. The two faces'
+        // openings are that ellipse moved 1 tan 30 either way; what they share is smaller.
+        let (s30, c30) = (30f64.to_radians().sin(), 30f64.to_radians().cos());
+        let axis = Vec3::new(s30, 0.0, c30);
+        let drill = solidcraft_kernel::cylinder(Vec3::new(20.0, 15.0, 1.0) - axis * 10.0, axis, 3.0, 20.0).unwrap();
+        let part = cut(&block(40.0, 30.0, 2.0), &drill);
+        let a = analyze(&part, &opts(5.0)).unwrap();
+        let flat: Vec<&Pair> = a.pairs.iter().filter(|p| !p.is_round()).collect();
+        assert_eq!(flat.len(), 1, "{:?}", a.pairs);
+        let expected = 1200.0 - 9.0 * PI / c30;
+        assert!((flat[0].overlap_area - expected).abs() < 1e-6, "{} against {expected}: {:?}", flat[0].overlap_area, flat[0]);
+        assert_eq!(flat[0].confidence, Confidence::High, "{:?}", flat[0]);
+        // The bore's slant is no opening filled over.
+        assert_eq!(flat[0].filled_over, 0.0, "{:?}", flat[0]);
+        let s = sheets(&part, &confident(&a)).unwrap();
+        assert_eq!(s.iter().map(|x| x.holes.len()).sum::<usize>(), 1, "{s:?}");
+        let m = solidcraft_kernel::measure(&surface_body(&s).unwrap()).unwrap();
+        assert!((m.area - expected).abs() < expected * 1e-5, "{} against {expected}", m.area);
+        // Square to the plate, the bore's own section is the openings': 1200 - 9 pi, as before.
+        let square = cut(&block(40.0, 30.0, 2.0), &solidcraft_kernel::cylinder(Vec3::new(20.0, 15.0, -1.0), Vec3::new(0.0, 0.0, 1.0), 3.0, 4.0).unwrap());
+        let a = analyze(&square, &opts(5.0)).unwrap();
+        let m = solidcraft_kernel::measure(&surface_body(&sheets(&square, &confident(&a)).unwrap()).unwrap()).unwrap();
+        assert!((m.area - (1200.0 - 9.0 * PI)).abs() < 0.05, "{m:?}");
+    }
+
+    #[test]
+    fn a_rib_along_a_tube_is_reported_not_joined() {
+        // A rib 2 thick (x -1..1) standing along a tube of radii 8 and 10 (y 9..30, z 0..40):
+        // its halfway plane x = 0 runs along the tube's axis, the joint would be a straight line
+        // on the tube's sheet. Not joined yet: said, in the analysis and the build.
+        let rib = extrude(
+            &Plane::XY,
+            &[Region2 { outer: Loop2::polygon(&[Vec2::new(-1.0, 9.0), Vec2::new(1.0, 9.0), Vec2::new(1.0, 30.0), Vec2::new(-1.0, 30.0)]), holes: vec![] }],
+            0.0,
+            40.0,
+        )
+        .unwrap()
+        .pop()
+        .unwrap();
+        let part = union(&tube(8.0, 10.0, 0.0, 40.0), &rib);
+        let a = analyze(&part, &opts(5.0)).unwrap();
+        let along = a.joints.iter().filter(|j| matches!(&j.kind, JointKind::Open(why) if why.contains("along the round wall's axis"))).count();
+        let not_built = a.joints.iter().filter(|j| matches!(&j.kind, JointKind::Open(why) if why.contains("not built"))).count();
+        assert!(along + not_built >= 1, "{:?}", a.joints);
+        let s = sheets(&part, &a.pairs).unwrap();
+        let notes = report_chosen(&a, &a.pairs, &s);
+        assert!(notes.iter().any(|n| n.contains("a joint with the round wall")), "{notes:?}");
     }
 
     #[test]

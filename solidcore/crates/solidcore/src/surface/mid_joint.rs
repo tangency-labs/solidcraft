@@ -5,6 +5,14 @@
 //! the edge onto that line, and meeting the edges beside it again, extends the sheet at an inside
 //! corner (an L bracket) and trims it where it runs past the other wall (a T junction).
 //!
+//! Where a flat wall meets a round one the joint is curved: the halfway plane meets the halfway
+//! cylinder in a circle (the plane square to the axis: a tube standing on a plate, a ring round a
+//! tube), an ellipse (across it at a slant), or lines (along it: a rib on a tube)
+//! ([`plane_meets_cylinder`]). A bore through a flat wall crosses its halfway plane in the same
+//! curve, the exact edge of the hole the sheet carries. An ellipse is read in a sheet's frame as
+//! four exact rational quadratic quarters ([`ellipse_in_frame`]); a round sheet's end is carried
+//! along the axis to the joint ([`along_axis_to_plane`], [`onto_cylinder`]).
+//!
 //! A sheet is a polygon of straight edges in one plane, as a list of 3D corners in order.
 //! Planes and lines meet within the kernel's angular tolerance ([`Tolerances::ang_tol_rad`]) and
 //! lines that are meant to cross in a plane must come within its zone tolerance of one another
@@ -19,6 +27,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::surface::face_pair::OutwardPlane;
+use crate::surface::mid_sheet::{in_frame, Frame};
 
 const MEET: &str = "surface::mid_joint::planes_meeting";
 const MOVE: &str = "surface::mid_joint::move_edge_onto_line";
@@ -199,6 +208,269 @@ pub fn move_edge_onto_line(
         })
         .collect();
     Ok(Some(moved))
+}
+
+const CYLINDER: &str = "surface::mid_joint::plane_meets_cylinder";
+const CONICS: &str = "surface::mid_joint::ellipse_in_frame";
+const ALONG: &str = "surface::mid_joint::along_axis_to_plane";
+const ONTO: &str = "surface::mid_joint::onto_cylinder";
+
+/// An ellipse in space: its centre and two semi-axes at right angles (a circle when they are
+/// equally long).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Ellipse3 {
+    /// The centre.
+    pub centre: Point3,
+    /// The first semi-axis: from the centre to the ellipse, the longer one.
+    pub major: Vec3,
+    /// The second semi-axis, at right angles to the first.
+    pub minor: Vec3,
+}
+
+/// Where a plane meets a cylinder: what the halfway plane of a flat wall and the halfway
+/// cylinder of a round wall have in common (the curve their joint lies on), or where a bore
+/// crosses a flat wall's halfway plane (the edge of the hole the sheet carries).
+#[derive(Debug, Clone, PartialEq)]
+pub enum PlaneCylinder {
+    /// The plane runs along the axis (within the angular tolerance): the lines it cuts the
+    /// cylinder in, two, or one where it touches the cylinder (within the zone tolerance).
+    Lines(Vec<Line3>),
+    /// The plane crosses the axis: an ellipse whose minor semi-axis is the radius and whose
+    /// major one is the radius over the cosine of the angle between the plane's normal and the
+    /// axis. `square`: the plane is square to the axis within the angular tolerance, and the
+    /// ellipse a circle of the radius.
+    Ellipse {
+        /// The curve.
+        ellipse: Ellipse3,
+        /// Whether the plane is square to the axis (the curve is a circle).
+        square: bool,
+    },
+}
+
+/// Where `plane` meets the cylinder of `radius` about the axis through `axis_point` along
+/// `axis`. `None` when the plane runs along the axis farther from it than the radius (and the
+/// zone tolerance).
+///
+/// Along the axis (the normal `n` and the unit axis `a` at right angles, within the angular
+/// tolerance), the plane lies `d` from the axis and cuts the cylinder in the lines along `a`
+/// through its foot on the plane moved `±√(r² − d²)` along `a × n`. Across it, the axis meets
+/// the plane at the centre; the minor semi-axis `r` runs along `a × n` (any direction in the
+/// plane when it is square) and the major one `r / |a · n|` along `n × (a × n)`: a point
+/// `x·m + y·M` from the centre lies `√(x² + (a · n)² y²)` from the axis, `r` on the ellipse.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a plane, axis or radius that is not finite, a radius that is
+/// not positive, a normal or axis of zero length, or a crossing so shallow that the ellipse
+/// overflows.
+pub fn plane_meets_cylinder(
+    kernel: &Kernel,
+    plane: &OutwardPlane,
+    axis_point: Point3,
+    axis: Vec3,
+    radius: f64,
+) -> Result<Option<PlaneCylinder>> {
+    let bad = |reason| SolidError::InvalidInput {
+        operation: CYLINDER,
+        reason,
+    };
+    if !(finite(plane.point)
+        && finite(plane.outward)
+        && finite(axis_point)
+        && finite(axis)
+        && radius.is_finite())
+    {
+        return Err(bad("the plane, the axis and the radius must be finite"));
+    }
+    if radius <= 0.0 {
+        return Err(bad("the radius must be positive"));
+    }
+    let (n, a) = (plane.outward.unitize()?, axis.unitize()?);
+    let cosine = a.dot(n);
+    let sine = kernel.tolerances.ang_tol_rad().sin();
+    let zone = kernel.tolerances.zone_tol_3d;
+    if cosine.abs() <= sine {
+        // Along the axis: the axis's direction in the plane, and the way across it there.
+        let along = (a - (n * cosine)).unitize()?;
+        let across = along.cross(n).unitize()?;
+        let d = axis_point.distance_along(plane.point, n);
+        if d.abs() > radius + zone {
+            return Ok(None);
+        }
+        let foot = axis_point - (n * d);
+        if d.abs() >= radius - zone {
+            return Ok(Some(PlaneCylinder::Lines(vec![Line3 {
+                point: foot,
+                direction: along,
+            }])));
+        }
+        let half = (radius * radius - d * d).sqrt();
+        let lines = [half, -half]
+            .into_iter()
+            .map(|s| Line3 {
+                point: foot + (across * s),
+                direction: along,
+            })
+            .collect();
+        return Ok(Some(PlaneCylinder::Lines(lines)));
+    }
+    // The axis meets the plane at the centre.
+    let t = plane.point.distance_along(axis_point, n) / cosine;
+    let centre = axis_point + (a * t);
+    let square = a.cross(n).length() <= sine;
+    let (minor, major) = if square {
+        // Any direction in the plane: one at right angles to the normal, and the next.
+        let other = if n.x.abs() < 0.9 {
+            Vec3::new(1.0, 0.0, 0.0)
+        } else {
+            Vec3::new(0.0, 1.0, 0.0)
+        };
+        let m = n.cross(other).unitize()?;
+        (m * radius, n.cross(m) * radius)
+    } else {
+        let m = a.cross(n).unitize()?;
+        (m * radius, n.cross(m) * (radius / cosine.abs()))
+    };
+    if !(finite(centre) && finite(major)) {
+        return Err(bad("the plane crosses the cylinder too shallowly to place the ellipse"));
+    }
+    Ok(Some(PlaneCylinder::Ellipse {
+        ellipse: Ellipse3 {
+            centre,
+            major,
+            minor,
+        },
+        square,
+    }))
+}
+
+/// A rational quadratic arc in a plane frame's coordinates: from `a` to `b` with the control
+/// point `apex` weighted `w` (the ends weighted 1). A quarter of an ellipse is one exactly.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Conic2 {
+    /// Its start.
+    pub a: [f64; 2],
+    /// Its control point.
+    pub apex: [f64; 2],
+    /// Its end.
+    pub b: [f64; 2],
+    /// The control point's weight.
+    pub w: f64,
+}
+
+/// `ellipse` read in `frame` (dropped onto the frame's plane along its normal, when it lies in
+/// another, which keeps an ellipse an ellipse) as its four quarters, exact rational quadratic
+/// arcs, running counter-clockwise in the frame's coordinates: from the end of one semi-axis to
+/// the next, the control point at the corner of the box the two span, weighted `cos 45°`. Two
+/// semi-axes `U` and `V` that are conjugate (a circle's two radii at right angles, mapped by any
+/// affine map) give the ellipse `c + U cos t + V sin t`, which those quarters are.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for an ellipse or frame that is not finite, or an ellipse that
+/// is a segment or a point in the frame (its plane at right angles to the frame's).
+pub fn ellipse_in_frame(frame: &Frame, ellipse: &Ellipse3) -> Result<[Conic2; 4]> {
+    if !(finite(ellipse.centre) && finite(ellipse.major) && finite(ellipse.minor)) {
+        return Err(SolidError::InvalidInput {
+            operation: CONICS,
+            reason: "the ellipse must be finite",
+        });
+    }
+    let c = in_frame(frame, ellipse.centre)?;
+    // A vector's coordinates: those of its tip set at the frame's origin.
+    let read = |v: Vec3| in_frame(frame, frame.origin + v);
+    let (u, mut v) = (read(ellipse.major)?, read(ellipse.minor)?);
+    let turn = u[0] * v[1] - u[1] * v[0];
+    let size = (u[0].abs() + u[1].abs()).max(v[0].abs() + v[1].abs());
+    if !(turn.abs() > size * size * 1e-12) {
+        return Err(SolidError::InvalidInput {
+            operation: CONICS,
+            reason: "the ellipse is edge-on to the frame's plane",
+        });
+    }
+    // Counter-clockwise: the second semi-axis a quarter turn on from the first.
+    if turn < 0.0 {
+        v = [-v[0], -v[1]];
+    }
+    let at = |s: f64, t: f64, d: [f64; 2], e: [f64; 2]| {
+        [c[0] + s * d[0] + t * e[0], c[1] + s * d[1] + t * e[1]]
+    };
+    let ends = [
+        at(1.0, 0.0, u, v),
+        at(0.0, 1.0, u, v),
+        at(-1.0, 0.0, u, v),
+        at(0.0, -1.0, u, v),
+    ];
+    let apexes = [
+        at(1.0, 1.0, u, v),
+        at(-1.0, 1.0, u, v),
+        at(-1.0, -1.0, u, v),
+        at(1.0, -1.0, u, v),
+    ];
+    let w = std::f64::consts::FRAC_1_SQRT_2;
+    let quarter = |k: usize| Conic2 {
+        a: ends[k % 4],
+        apex: apexes[k % 4],
+        b: ends[(k + 1) % 4],
+        w,
+    };
+    Ok([quarter(0), quarter(1), quarter(2), quarter(3)])
+}
+
+/// How far `point` lies from `plane` measured along `axis` (in the axis's units of length, signed:
+/// positive where the plane lies ahead along the axis). `None` when the axis runs along the plane
+/// within the angular tolerance.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a point, plane or axis that is not finite, or a normal or
+/// axis of zero length.
+pub fn along_axis_to_plane(
+    kernel: &Kernel,
+    plane: &OutwardPlane,
+    point: Point3,
+    axis: Vec3,
+) -> Result<Option<f64>> {
+    if !(finite(plane.point) && finite(plane.outward) && finite(point) && finite(axis)) {
+        return Err(SolidError::InvalidInput {
+            operation: ALONG,
+            reason: "the plane, the point and the axis must be finite",
+        });
+    }
+    let (n, a) = (plane.outward.unitize()?, axis.unitize()?);
+    let cosine = a.dot(n);
+    if cosine.abs() <= kernel.tolerances.ang_tol_rad().sin() {
+        return Ok(None);
+    }
+    Ok(Some(plane.point.distance_along(point, n) / cosine))
+}
+
+/// `point` moved straight out from (or in toward) the axis through `axis_point` along `axis`
+/// onto the cylinder of `radius` about it: the same place along the axis and the same angle
+/// round it.
+///
+/// # Errors
+/// [`SolidError::InvalidInput`] for a point, axis or radius that is not finite, a radius that is
+/// not positive, an axis of zero length, or a point on the axis (no way out from it).
+pub fn onto_cylinder(
+    axis_point: Point3,
+    axis: Vec3,
+    radius: f64,
+    point: Point3,
+) -> Result<Point3> {
+    let bad = |reason| SolidError::InvalidInput {
+        operation: ONTO,
+        reason,
+    };
+    if !(finite(axis_point) && finite(axis) && finite(point) && radius.is_finite()) {
+        return Err(bad("the point, the axis and the radius must be finite"));
+    }
+    if radius <= 0.0 {
+        return Err(bad("the radius must be positive"));
+    }
+    let a = axis.unitize()?;
+    let foot = axis_point + (a * point.distance_along(axis_point, a));
+    let out = (point - foot)
+        .unitize()
+        .map_err(|_| bad("the point lies on the axis"))?;
+    Ok(foot + (out * radius))
 }
 
 #[cfg(test)]
@@ -410,5 +682,175 @@ mod tests {
             direction: v(0.0, 1.0, 0.0),
         };
         assert!(move_edge_onto_line(&k, &sheet, 3, &nan_line).is_err());
+    }
+
+    /// The distance of `p` from the z axis.
+    fn off_z(p: Point3) -> f64 {
+        (p.x * p.x + p.y * p.y).sqrt()
+    }
+
+    #[test]
+    fn a_plane_square_to_a_cylinder_meets_it_in_a_circle_of_its_radius() {
+        // A tube's halfway cylinder (radius 9 about z) and a plate's halfway plane z = 2.
+        let k = kernel();
+        let plane = plane(v(5.0, 7.0, 2.0), v(0.0, 0.0, -1.0));
+        let Some(PlaneCylinder::Ellipse { ellipse, square }) =
+            plane_meets_cylinder(&k, &plane, v(0.0, 0.0, -30.0), v(0.0, 0.0, 3.0), 9.0).unwrap()
+        else {
+            panic!("no circle");
+        };
+        assert!(square);
+        assert!((ellipse.centre - v(0.0, 0.0, 2.0)).length() < 1e-12, "{ellipse:?}");
+        assert!((ellipse.major.length() - 9.0).abs() < 1e-12);
+        assert!((ellipse.minor.length() - 9.0).abs() < 1e-12);
+        assert!(ellipse.major.dot(ellipse.minor).abs() < 1e-12);
+        assert!(ellipse.major.z.abs() < 1e-12 && ellipse.minor.z.abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_tilted_plane_meets_a_cylinder_in_an_ellipse_of_radius_over_cosine() {
+        // A bore of radius 3 along z through the plane tilted 30 degrees about y through
+        // (0, 0, 1): semi-axes 3 and 3 / cos 30, area 9 pi / cos 30.
+        let k = kernel();
+        let (s, c) = (30f64.to_radians().sin(), 30f64.to_radians().cos());
+        let tilted = plane(v(0.0, 0.0, 1.0), v(s, 0.0, c));
+        let Some(PlaneCylinder::Ellipse { ellipse, square }) =
+            plane_meets_cylinder(&k, &tilted, v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0), 3.0).unwrap()
+        else {
+            panic!("no ellipse");
+        };
+        assert!(!square);
+        assert!((ellipse.centre - v(0.0, 0.0, 1.0)).length() < 1e-12);
+        assert!((ellipse.minor.length() - 3.0).abs() < 1e-12);
+        assert!((ellipse.major.length() - 3.0 / c).abs() < 1e-12);
+        // Every point of it lies on the cylinder and in the plane.
+        for i in 0..16 {
+            let t = f64::from(i) * std::f64::consts::TAU / 16.0;
+            let p = ellipse.centre + (ellipse.major * t.cos()) + (ellipse.minor * t.sin());
+            assert!((off_z(p) - 3.0).abs() < 1e-12, "{p:?}");
+            assert!(p.distance_along(tilted.point, tilted.outward).abs() < 1e-12, "{p:?}");
+        }
+    }
+
+    #[test]
+    fn a_plane_along_the_axis_meets_a_cylinder_in_two_lines_one_or_none() {
+        // A rib's halfway plane x = 0 and a tube's halfway cylinder of radius 9 about z: the
+        // lines along z through (0, 9) and (0, -9). x = 9 touches it; x = 10 misses it.
+        let k = kernel();
+        let rib = plane(v(0.0, 4.0, 0.0), v(1.0, 0.0, 0.0));
+        let Some(PlaneCylinder::Lines(lines)) =
+            plane_meets_cylinder(&k, &rib, v(0.0, 0.0, 5.0), v(0.0, 0.0, -1.0), 9.0).unwrap()
+        else {
+            panic!("no lines");
+        };
+        assert_eq!(lines.len(), 2);
+        let mut ys: Vec<f64> = lines.iter().map(|l| l.point.y).collect();
+        ys.sort_by(f64::total_cmp);
+        assert!((ys[0] + 9.0).abs() < 1e-12 && (ys[1] - 9.0).abs() < 1e-12, "{lines:?}");
+        assert!(lines
+            .iter()
+            .all(|l| l.point.x.abs() < 1e-12 && l.direction.z.abs() > 1.0 - 1e-12));
+        let touching = plane(v(9.0, 0.0, 0.0), v(1.0, 0.0, 0.0));
+        let one = plane_meets_cylinder(&k, &touching, v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0), 9.0);
+        assert!(matches!(one.unwrap(), Some(PlaneCylinder::Lines(l)) if l.len() == 1));
+        let apart = plane(v(10.0, 0.0, 0.0), v(1.0, 0.0, 0.0));
+        let none = plane_meets_cylinder(&k, &apart, v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0), 9.0);
+        assert_eq!(none.unwrap(), None);
+        // Nonsense is refused.
+        let zero = plane_meets_cylinder(&k, &rib, v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0), 0.0);
+        assert!(zero.is_err());
+        let nan = plane_meets_cylinder(&k, &rib, v(f64::NAN, 0.0, 0.0), v(0.0, 0.0, 1.0), 1.0);
+        assert!(nan.is_err());
+    }
+
+    /// The rational quadratic arc's point at `t`.
+    fn conic_at(q: &Conic2, t: f64) -> [f64; 2] {
+        let (b0, b1, b2) = ((1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t) * q.w, t * t);
+        let d = b0 + b1 + b2;
+        [
+            (b0 * q.a[0] + b1 * q.apex[0] + b2 * q.b[0]) / d,
+            (b0 * q.a[1] + b1 * q.apex[1] + b2 * q.b[1]) / d,
+        ]
+    }
+
+    #[test]
+    fn an_ellipse_reads_in_a_frame_as_four_exact_quarters_counter_clockwise() {
+        // The tilted bore's ellipse above (semi-axes 3 / cos 30 along x', 3 along y) read in the
+        // frame of the plane z = 1 (axes x and -y, so that the minor axis turns clockwise there):
+        // dropped onto it, the ellipse x² / (3 / cos 30 · cos 30)² + y² / 9 = 1, a circle of 3.
+        let k = kernel();
+        let (s, c) = (30f64.to_radians().sin(), 30f64.to_radians().cos());
+        let tilted = plane(v(0.0, 0.0, 1.0), v(s, 0.0, c));
+        let Some(PlaneCylinder::Ellipse { ellipse, .. }) =
+            plane_meets_cylinder(&k, &tilted, v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0), 3.0).unwrap()
+        else {
+            panic!("no ellipse");
+        };
+        let frame = Frame {
+            origin: v(1.0, 2.0, 1.0),
+            x: v(1.0, 0.0, 0.0),
+            y: v(0.0, -1.0, 0.0),
+        };
+        let quarters = ellipse_in_frame(&frame, &ellipse).unwrap();
+        // Closed, each quarter ending where the next starts.
+        for k in 0..4 {
+            assert_eq!(quarters[k].b, quarters[(k + 1) % 4].a);
+        }
+        // Every point lies 3 from the centre, (-1, 2) in the frame.
+        for q in &quarters {
+            for i in 0..=8 {
+                let [x, y] = conic_at(q, f64::from(i) / 8.0);
+                let r = ((x + 1.0) * (x + 1.0) + (y - 2.0) * (y - 2.0)).sqrt();
+                assert!((r - 3.0).abs() < 1e-12, "{q:?} {x} {y}");
+            }
+        }
+        // Counter-clockwise: the shoelace sum of the quarters' ends and apexes is positive.
+        let turn: f64 = quarters
+            .iter()
+            .map(|q| q.a[0] * q.b[1] - q.b[0] * q.a[1])
+            .sum();
+        assert!(turn > 0.0);
+        // In the tilted plane's own frame, it is the ellipse itself: a point a quarter of the
+        // way along the first quarter lies on x² / a² + y² / b² = 1.
+        let own = Frame {
+            origin: v(0.0, 0.0, 1.0),
+            x: v(c, 0.0, -s),
+            y: v(0.0, 1.0, 0.0),
+        };
+        let quarters = ellipse_in_frame(&own, &ellipse).unwrap();
+        let (a, b) = (3.0 / c, 3.0);
+        for q in &quarters {
+            let [x, y] = conic_at(q, 0.25);
+            assert!((x * x / (a * a) + y * y / (b * b) - 1.0).abs() < 1e-12, "{x} {y}");
+        }
+        // Edge-on to the frame's plane: refused.
+        let side = Frame {
+            origin: v(0.0, 0.0, 0.0),
+            x: v(1.0, 0.0, 0.0),
+            y: v(0.0, 0.0, 1.0),
+        };
+        let flat = Ellipse3 {
+            centre: v(0.0, 0.0, 0.0),
+            major: v(0.0, 2.0, 0.0),
+            minor: v(0.0, 0.0, 0.0),
+        };
+        assert!(ellipse_in_frame(&side, &flat).is_err());
+    }
+
+    #[test]
+    fn a_point_is_read_along_the_axis_to_a_plane_and_moved_onto_a_cylinder() {
+        let k = kernel();
+        // The tube's end at z = 4 and the plate's halfway plane z = 2: 2 back along +z.
+        let half = plane(v(30.0, -30.0, 2.0), v(0.0, 0.0, 1.0));
+        let d = along_axis_to_plane(&k, &half, v(10.0, 0.0, 4.0), v(0.0, 0.0, 5.0)).unwrap();
+        assert!(d.is_some_and(|d| (d + 2.0).abs() < 1e-12), "{d:?}");
+        // An axis along the plane never reaches it.
+        let none = along_axis_to_plane(&k, &half, v(10.0, 0.0, 4.0), v(1.0, 0.0, 0.0)).unwrap();
+        assert_eq!(none, None);
+        // (6, 8, 4) is 10 from the z axis: on radius 9 it is (5.4, 7.2, 4).
+        let p = onto_cylinder(v(0.0, 0.0, -7.0), v(0.0, 0.0, 2.0), 9.0, v(6.0, 8.0, 4.0)).unwrap();
+        assert!((p - v(5.4, 7.2, 4.0)).length() < 1e-12, "{p:?}");
+        assert!(onto_cylinder(v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0), 9.0, v(0.0, 0.0, 4.0)).is_err());
+        assert!(onto_cylinder(v(0.0, 0.0, 0.0), v(0.0, 0.0, 1.0), -1.0, v(1.0, 0.0, 4.0)).is_err());
     }
 }

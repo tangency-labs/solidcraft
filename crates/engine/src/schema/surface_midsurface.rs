@@ -121,7 +121,8 @@ pub struct MidsurfacePair {
     pub points: [[f64; 3]; 2],
     /// The wall's thickness, mm.
     pub thickness: f64,
-    /// The sheet's area before its joints are made, mm².
+    /// The sheet's area before its joints are made, mm² (a slanted bore's hole is its exact
+    /// section on the halfway plane, an ellipse).
     pub area: f64,
     /// The share of the smaller face the other covers, 0 to 1.
     pub coverage: f64,
@@ -132,7 +133,8 @@ pub struct MidsurfacePair {
     /// Whether the wall is round (two coaxial cylinders).
     pub round: bool,
     /// Openings that do not go straight through (in one face only, a boss's foot or a pocket; or
-    /// closed or narrowing between the faces, a counterbored bore) the sheet is filled over, mm².
+    /// closed or narrowing between the faces, a counterbored bore) the sheet is filled over, mm²,
+    /// before its joints are made: a round wall joined to it (see `joints`) takes back its foot.
     pub filled_over: f64,
     /// Why the pair needs a decision, in words.
     pub notes: Vec<String>,
@@ -169,6 +171,28 @@ pub struct MidsurfaceCluster {
     pub pairs: usize,
     /// A `max_thickness` that takes this wall thickness and thinner ones, and no thicker one.
     pub suggested_limit: f64,
+}
+
+/// Where a flat wall meets a round wall, and whether their sheets are joined.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct MidsurfaceJoint {
+    /// The flat wall's pair and the round wall's, as indices into `pairs`.
+    pub pairs: [usize; 2],
+    /// `circle` (joined: the flat wall is square to the round wall's axis, and the sheets meet
+    /// on the circle where the flat wall's halfway plane meets the round wall's halfway
+    /// cylinder), `tangent` (the faces meet smoothly, as a bend and its leg: the sheets meet on
+    /// the tangent line, no joint to make) or `not_joined` (see `why`).
+    pub kind: String,
+    /// For `circle`: the circle's centre on the round wall's axis.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub centre: Option<[f64; 3]>,
+    /// For `circle`: its radius, the round wall's halfway radius, mm.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f64>,
+    /// For `not_joined`: why, in words (a flat wall along the round wall's axis or across it at a
+    /// slant is not joined yet; a round wall that is not built).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub why: Option<String>,
 }
 
 /// A face that building the confident pairs leaves uncovered.
@@ -210,6 +234,9 @@ pub struct MidsurfaceAnalysis {
     pub leftovers: Vec<MidsurfaceLeftover>,
     /// The wall thicknesses found, thinnest first.
     pub clusters: Vec<MidsurfaceCluster>,
+    /// Where a flat wall meets a round one, each two walls once: joined on a circle, meeting
+    /// tangentially, or not joined and why.
+    pub joints: Vec<MidsurfaceJoint>,
     /// What building the confident pairs would cover.
     pub completeness: MidsurfaceCompleteness,
     /// In the warn parameter-check mode: what the call's parameters got wrong.

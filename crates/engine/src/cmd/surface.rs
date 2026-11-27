@@ -21,8 +21,8 @@ use crate::schema::surface::{
 };
 use crate::schema::surface_blend::BlendParams;
 use crate::schema::surface_midsurface::{
-    MidsurfaceAnalysis, MidsurfaceAnalyzeParams, MidsurfaceCluster, MidsurfaceCompleteness, MidsurfaceLeftover, MidsurfacePair, MidsurfaceParams,
-    MidsurfaceUncovered,
+    MidsurfaceAnalysis, MidsurfaceAnalyzeParams, MidsurfaceCluster, MidsurfaceCompleteness, MidsurfaceJoint, MidsurfaceLeftover, MidsurfacePair,
+    MidsurfaceParams, MidsurfaceUncovered,
 };
 use crate::schema::surface_profile::{SurfaceExtrudeParams, SurfaceRevolveParams};
 use crate::schema::surface_ruled::SurfaceRuledParams;
@@ -816,6 +816,18 @@ fn midsurface_analyze(s: &mut Session, p: &Value) -> Result<Value> {
         clusters: mid::thickness_clusters(&a)
             .iter()
             .map(|k| MidsurfaceCluster { thickness: k.thickness, up_to: k.up_to, area: k.area, pairs: k.pairs, suggested_limit: k.suggested_limit })
+            .collect(),
+        joints: a
+            .joints
+            .iter()
+            .map(|j| {
+                let (kind, centre, radius, why) = match &j.kind {
+                    mid::JointKind::Circle { centre, radius } => ("circle", Some(*centre), Some(*radius), None),
+                    mid::JointKind::Tangent => ("tangent", None, None, None),
+                    mid::JointKind::Open(why) => ("not_joined", None, None, Some(why.clone())),
+                };
+                MidsurfaceJoint { pairs: j.pairs, kind: kind.into(), centre, radius, why }
+            })
             .collect(),
         completeness: MidsurfaceCompleteness {
             faces: c.faces,
