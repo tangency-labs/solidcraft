@@ -112,31 +112,47 @@ pub fn toggle(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// Say why dictation failed. The message replaces the one of the try before, so an error that
+/// was put right does not stay in the chat.
+fn failed(app: &mut SolveApp, text: String) {
+    forget_failure(app);
+    app.agent_chat.dictation_error = Some(text.clone());
+    app.agent_chat.notice(text, true);
+}
+
+/// Take the last dictation error out of the chat: the next try is under way.
+fn forget_failure(app: &mut SolveApp) {
+    if let Some(old) = app.agent_chat.dictation_error.take() {
+        app.agent_chat.items.retain(|item| !matches!(item, super::Item::Notice { text, error: true } if *text == old));
+    }
+}
+
 fn start(app: &mut SolveApp) {
+    forget_failure(app);
     let Some(recorder) = app.services.recorder.clone() else {
-        app.agent_chat.notice(tr("ui.dictation_no_microphone"), true);
+        failed(app, tr("ui.dictation_no_microphone").to_string());
         return;
     };
     if endpoint(app).is_none() {
-        app.agent_chat.notice(tr("ui.dictation_not_set_up"), true);
+        failed(app, tr("ui.dictation_not_set_up").to_string());
         return;
     }
     // The server loads its model while you speak.
     #[cfg(not(target_arch = "wasm32"))]
     if let Err(e) = ensure_server(app) {
-        app.agent_chat.notice(trf("ui.dictation_server_failed", &[("error", &e)]), true);
+        failed(app, trf("ui.dictation_server_failed", &[("error", &e)]));
         return;
     }
     match recorder.start() {
         Ok(recording) => app.agent_chat.dictation = State::Recording(recording),
-        Err(e) => app.agent_chat.notice(trf("ui.dictation_record_failed", &[("error", &e)]), true),
+        Err(e) => failed(app, trf("ui.dictation_record_failed", &[("error", &e)])),
     }
 }
 
 fn transcribe(app: &mut SolveApp, ctx: &egui::Context, recording: Box<dyn Recording>) {
     let (Some(endpoint), Some(http)) = (endpoint(app), app.services.agent_http.clone()) else {
         drop(recording.finish());
-        app.agent_chat.notice(tr("ui.dictation_not_set_up"), true);
+        failed(app, tr("ui.dictation_not_set_up").to_string());
         return;
     };
     let secrets = app.services.secrets.clone();
@@ -159,7 +175,7 @@ fn transcribe(app: &mut SolveApp, ctx: &egui::Context, recording: Box<dyn Record
     });
     match spawned {
         Ok(_) => app.agent_chat.dictation = State::Transcribing(rx),
-        Err(e) => app.agent_chat.notice(trf("ui.dictation_failed", &[("error", &e.to_string())]), true),
+        Err(e) => failed(app, trf("ui.dictation_failed", &[("error", &e.to_string())])),
     }
 }
 
@@ -275,7 +291,8 @@ pub const SMALL_MODEL: &str = "ggml-small.bin";
 const SERVER_START: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// The model file for `server`: `model` if set, else [`SMALL_MODEL`] where the setup steps put it
-/// (`models/` of the whisper.cpp folder for a build, the server's own folder for a release zip).
+/// (`models/` of the whisper.cpp folder for a build; for a release zip the server's own folder, or
+/// the one above it, since the zip keeps the programs in `Release`).
 pub fn model_for(server: &std::path::Path, model: &str, exists: impl Fn(&std::path::Path) -> bool) -> Result<std::path::PathBuf, String> {
     let model = model.trim();
     if !model.is_empty() {
@@ -283,7 +300,13 @@ pub fn model_for(server: &std::path::Path, model: &str, exists: impl Fn(&std::pa
         return if exists(&path) { Ok(path) } else { Err(trf("ui.dictation_model_missing", &[("path", model)])) };
     }
     let dir = server.parent().unwrap_or(std::path::Path::new("."));
-    let candidates = [dir.join("../../models").join(SMALL_MODEL), dir.join("models").join(SMALL_MODEL), dir.join(SMALL_MODEL)];
+    let above = dir.parent();
+    let candidates: Vec<std::path::PathBuf> =
+        [above.and_then(|d| d.parent()).map(|d| d.join("models")), Some(dir.join("models")), Some(dir.to_path_buf()), above.map(|d| d.to_path_buf())]
+            .into_iter()
+            .flatten()
+            .map(|d| d.join(SMALL_MODEL))
+            .collect();
     candidates.iter().find(|p| exists(p)).cloned().ok_or_else(|| {
         let looked = candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ");
         trf("ui.dictation_model_not_found", &[("paths", &looked)])
@@ -385,11 +408,17 @@ const BUILD_UNIX: &str = "git clone --depth 1 https://github.com/ggml-org/whispe
 
 /// The steps that set up whisper.cpp's server on this system, for Preferences → AI → Dictation:
 /// build it (Linux, macOS) or download its release (Windows), download the multilingual `small`
-/// model, start it on [`LOCAL_URL`].
+/// model, start it on [`LOCAL_URL`]. On Windows the link is the list of releases: the one GitHub
+/// calls latest has had no files since v1.9.3, the zips are in the numbered builds.
+/// The message that says which file is the server program on this system.
+pub fn setup_server_text() -> &'static str {
+    if cfg!(target_os = "windows") { "ui.dictation_setup_server_windows" } else { "ui.dictation_setup_server" }
+}
+
 pub fn setup_steps() -> Vec<SetupStep> {
     if cfg!(target_os = "windows") {
         vec![
-            SetupStep { text: "ui.dictation_setup_download_windows", command: Some("https://github.com/ggml-org/whisper.cpp/releases/latest") },
+            SetupStep { text: "ui.dictation_setup_download_windows", command: Some("https://github.com/ggml-org/whisper.cpp/releases") },
             SetupStep {
                 text: "ui.dictation_setup_model",
                 command: Some("Invoke-WebRequest https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin -OutFile ggml-small.bin"),
@@ -472,7 +501,7 @@ pub fn poll(app: &mut SolveApp) {
     match answer {
         Ok(text) if text.is_empty() => app.agent_chat.notice(tr("ui.dictation_nothing_heard"), false),
         Ok(text) => insert(&mut app.agent_chat.input, &text, &mut app.agent_chat.caret_to),
-        Err(e) => app.agent_chat.notice(trf("ui.dictation_failed", &[("error", &e)]), true),
+        Err(e) => failed(app, trf("ui.dictation_failed", &[("error", &e)])),
     }
 }
 
@@ -515,16 +544,40 @@ mod tests {
     fn the_model_is_found_where_the_setup_steps_put_it() {
         crate::i18n::install();
         let built = std::path::Path::new("/w/whisper.cpp/build/bin/whisper-server");
-        let in_models = |p: &std::path::Path| p == std::path::Path::new("/w/whisper.cpp/build/bin/../../models/ggml-small.bin");
-        assert_eq!(model_for(built, "", in_models).unwrap(), std::path::Path::new("/w/whisper.cpp/build/bin/../../models/ggml-small.bin"));
+        let in_models = |p: &std::path::Path| p == std::path::Path::new("/w/whisper.cpp/models/ggml-small.bin");
+        assert_eq!(model_for(built, "", in_models).unwrap(), std::path::Path::new("/w/whisper.cpp/models/ggml-small.bin"));
         let zip = std::path::Path::new("C:/whisper/whisper-server.exe");
         let beside = |p: &std::path::Path| p == std::path::Path::new("C:/whisper/ggml-small.bin");
         assert_eq!(model_for(zip, "", beside).unwrap(), std::path::Path::new("C:/whisper/ggml-small.bin"));
+        // The release zip keeps the programs in `Release`: a model downloaded into the unzipped
+        // folder, one level up, is found too (seen on Windows with whisper-bin-x64.zip).
+        let in_release = std::path::Path::new("C:/whisper-bin-x64/Release/whisper-server.exe");
+        let above = |p: &std::path::Path| p == std::path::Path::new("C:/whisper-bin-x64/ggml-small.bin");
+        assert_eq!(model_for(in_release, "", above).unwrap(), std::path::Path::new("C:/whisper-bin-x64/ggml-small.bin"));
+        // The places looked in are plain paths, with no `..` in them.
+        assert!(!model_for(in_release, "", |_| false).unwrap_err().contains(".."));
         // A model set by hand wins, and must exist.
         assert_eq!(model_for(built, " /m/base.bin ", |_| true).unwrap(), std::path::Path::new("/m/base.bin"));
         assert!(model_for(built, "/m/base.bin", |_| false).unwrap_err().contains("/m/base.bin"));
         // Nothing found: the message says where it looked.
         assert!(model_for(built, "", |_| false).unwrap_err().contains("ggml-small.bin"));
+    }
+
+    #[test]
+    fn an_error_put_right_leaves_the_chat_at_the_next_try() {
+        crate::i18n::install();
+        // No recorder and no endpoint: each press fails, and only the last error stays.
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let errors = |app: &SolveApp| app.agent_chat.items.iter().filter(|i| matches!(i, super::super::Item::Notice { error: true, .. })).count();
+        start(&mut app);
+        assert_eq!(errors(&app), 1);
+        start(&mut app);
+        assert_eq!(errors(&app), 1, "the error of the try before is replaced");
+        // Another notice with other words is not dictation's to remove.
+        app.agent_chat.notice("something else", true);
+        forget_failure(&mut app);
+        assert_eq!(errors(&app), 1);
+        assert!(app.agent_chat.dictation_error.is_none());
     }
 
     #[test]

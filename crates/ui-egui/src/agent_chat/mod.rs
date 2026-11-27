@@ -569,6 +569,8 @@ pub struct AgentChat {
     pub actions: Vec<panel::PanelAction>,
     /// Dictation (#10883): recording, or waiting for the transcription.
     pub dictation: dictation::State,
+    /// The last dictation error shown in the chat, taken out when the next try starts.
+    pub dictation_error: Option<String>,
     /// The speech-to-text server the app started for dictation; stopped when this is dropped.
     #[cfg(not(target_arch = "wasm32"))]
     pub dictation_server: Option<dictation::Server>,

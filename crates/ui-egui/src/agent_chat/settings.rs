@@ -677,7 +677,7 @@ fn dictation_section(app: &mut SolveApp, ui: &mut egui::Ui) {
             #[cfg(not(target_arch = "wasm32"))]
             {
                 n += 1;
-                ui_kit::text(ui, &format!("{n}. {}", tr("ui.dictation_setup_server")), ui_kit::Text::Note("dictation_setup_server"));
+                ui_kit::text(ui, &format!("{n}. {}", tr(super::dictation::setup_server_text())), ui_kit::Text::Note("dictation_setup_server"));
                 server_fields(app, ui);
             }
             for (i, step) in steps.iter().enumerate().filter(|(_, s)| s.text == "ui.dictation_setup_run") {
