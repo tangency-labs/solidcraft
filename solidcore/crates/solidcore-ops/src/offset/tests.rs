@@ -765,6 +765,58 @@ fn a_thin_pin_on_a_cut_balls_cap_stays_solid() {
     assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
 }
 
+/// A dome: a ball r 4 centred on the top of a 60 x 40 x 25 block, half of it standing as one
+/// spherical face, shelled closed (#22788). Under half the radius the dome's inset, the ball
+/// r 4 - w, crosses the top's, the plane w below it, and the void takes the part of that ball
+/// above the plane: V = block + dome - (60 - 2w)(40 - 2w)(25 - 2w) - (4/3) pi (4 - w)^3 +
+/// pi h^2 (3 (4 - w) - h) / 3, h = (4 - w) - w the cap below the plane. From the radius on the
+/// inset has no surface at all: the dome holds no cavity and stays solid, and the void is the
+/// block's (that shell was refused as a collapse, the dome being a single face no feature
+/// walk took). The same on a cylinder r 10, 20 high, with a ball r 2 on its top, at 2.5.
+///
+/// Closed forms: 60000 + (2/3) pi 4^3 less the void; pi 10^2 20 + (2/3) pi 2^3 - pi 7.5^2 15.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_dome_inset_by_its_radius_or_more_stays_solid() {
+    all_fixes();
+    let dome = 2.0 / 3.0 * PI * 64.0;
+    let made = |w: f64| {
+        let blk = make_box([-30.0, -20.0, 0.0], [60.0, 40.0, 25.0]).unwrap();
+        let ball = make_sphere([0.0, 0.0, 25.0], 4.0).unwrap();
+        let b = crate::boolean::boolean(blk, ball, crate::BooleanOp::Union)
+            .unwrap()
+            .unwrap();
+        shell(&b, &order(&b), &[], -w).unwrap();
+        assert!(b.is_manifold_solid().unwrap(), "{w}");
+        assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0, "{w}");
+        volume(&b)
+    };
+    let void = |w: f64| (60.0 - 2.0 * w) * (40.0 - 2.0 * w) * (25.0 - 2.0 * w);
+    // under half the radius, as before: the inset ball less its cap below the void's ceiling
+    let (w, r) = (1.9, 2.1);
+    let h = r - w;
+    let want =
+        60000.0 + dome - void(w) - 4.0 / 3.0 * PI * r.powi(3) + PI * h * h * (3.0 * r - h) / 3.0;
+    let got = made(w);
+    assert!(rel(got, want) < 1e-9, "{w}: {got} {want}");
+    for w in [4.0, 5.0] {
+        let want = 60000.0 + dome - void(w);
+        let got = made(w);
+        assert!(rel(got, want) < 1e-9, "{w}: {got} {want}");
+    }
+
+    let base = make_cylinder([0.0; 3], 10.0, 20.0).unwrap();
+    let ball = make_sphere([0.0, 0.0, 20.0], 2.0).unwrap();
+    let b = crate::boolean::boolean(base, ball, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    shell(&b, &order(&b), &[], -2.5).unwrap();
+    let want = PI * 100.0 * 20.0 + 2.0 / 3.0 * PI * 8.0 - PI * 56.25 * 15.0;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
+}
+
 /// A 1200 x 2400 cylinder (r 600) with a 140 x 140 boss (r 70) on its top whose side touches
 /// the top's rim from inside (its axis 530 from the cylinder's: 530 + 70 = 600), shelled
 /// closed with a 72 wall (stress corpus S6050, S0837). The boss's side offset by 72 passes its
@@ -774,10 +826,12 @@ fn a_thin_pin_on_a_cut_balls_cap_stays_solid() {
 /// and at both vertices their offsets take the vertex's image as an end. Their extended UV
 /// curves, each wound round the circle many times, coincide: their thousands of crossings
 /// within the tolerance had some five thousand stretches certified for moving to a curve end
-/// (over 90 s). The base's shell is still refused, so the first refusal stands, unchanged.
+/// (over 90 s). Since #22785 the cap's rim on the top's plane is taken out, so the base is a
+/// plain cylinder that shells, and the boss (narrower than twice the wall) is joined back on
+/// solid: π·600²·2400 + π·70²·140 − π·528²·2256.
 #[test]
 #[allow(clippy::disallowed_methods)] // the seams' turn places the test body, not ops geometry
-fn a_thin_boss_touching_its_faces_rim_is_refused_without_winding_its_footprint() {
+fn a_thin_boss_touching_its_faces_rim_stays_solid_without_winding_its_footprint() {
     all_fixes();
     // each circle's seam turned 0.6131 rad about its axis, as SolidCraft's cylinders have it
     let (s, c) = 0.6131_f64.sin_cos();
@@ -797,22 +851,15 @@ fn a_thin_boss_touching_its_faces_rim_is_refused_without_winding_its_footprint()
         .unwrap()
         .unwrap();
     let o = order(&b);
-    let before = volume(&b);
     let (r, certified) = session::counted(
         solidcore::kernel::WorkCounters::contact_stretch_certifications,
         || shell(&b, &o, &[], -72.0),
     );
-    match r {
-        Err(Error::OffsetRefused {
-            why: crate::OffsetRefusal::Collapses { distance, radius },
-            ..
-        }) => {
-            assert!((distance.abs() - 72.0).abs() < 1e-9, "{distance}");
-            assert!((radius - 70.0).abs() < 1e-9, "{radius}");
-        }
-        other => panic!("{other:?}"),
-    }
-    assert!(rel(volume(&b), before) < 1e-12);
+    r.unwrap();
+    let want = PI * 360_000.0 * 2400.0 + PI * 4900.0 * 140.0 - PI * 528.0_f64.powi(2) * 2256.0;
+    assert!(rel(volume(&b), want) < 1e-9, "{} {want}", volume(&b));
+    assert!(b.is_manifold_solid().unwrap());
+    assert_eq!(b.check(crate::CheckLevel::All).unwrap().failures, 0);
     // the shells' own intersections certify under a hundred stretches; the footprint's wound
     // extensions certified thousands
     assert!(certified < 1_000, "{certified} stretches certified");

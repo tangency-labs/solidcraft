@@ -22,7 +22,8 @@ use occt_capi::{Boolean, Shape};
 use solidcore_record::brep::Brep;
 use solidcore_record::{Plane, Region2, Vec3};
 use solidcraft_kernel_api::{
-    Axis2, Backend, BackendError, BackendId, BoolOp, ChamferSide, Exported, FilletTurn, Modelling, OpKind, Primitive, Support,
+    Axis2, Backend, BackendError, BackendId, BoolOp, ChamferSide, Exported, ExtrudeSides, FilletTurn, Modelling, OpKind, Primitive, RevolveSides,
+    Support, Taper,
 };
 
 use crate::body::Body;
@@ -124,11 +125,27 @@ impl Modelling for Occt {
         }
     }
 
-    fn extrude(&self, _plane: &Plane, _regions: &[Region2], _start: f64, _end: f64) -> Result<Vec<Shape>, BackendError> {
+    fn extrude(&self, _plane: &Plane, _regions: &[Region2], _start: f64, _end: f64, _sides: ExtrudeSides<'_>) -> Result<Vec<Shape>, BackendError> {
         unsupported("extrude")
     }
 
-    fn revolve(&self, _plane: &Plane, _regions: &[Region2], _axis: Axis2, _angle: f64, _whole: bool) -> Result<Vec<Shape>, BackendError> {
+    fn extrude_material(&self, _plane: &Plane, _regions: &[Region2], _start: f64, _end: f64) -> Result<Shape, BackendError> {
+        unsupported("extrude")
+    }
+
+    fn extrude_tapered(&self, _plane: &Plane, _region: &Region2, _taper: &Taper) -> Result<Shape, BackendError> {
+        unsupported("a tapered extrude")
+    }
+
+    fn revolve(
+        &self,
+        _plane: &Plane,
+        _regions: &[Region2],
+        _axis: Axis2,
+        _angle: f64,
+        _whole: bool,
+        _sides: RevolveSides<'_>,
+    ) -> Result<Vec<Shape>, BackendError> {
         unsupported("revolve")
     }
 

@@ -1096,6 +1096,8 @@ struct Script {
     /// Every prompt in full (its text and pictures).
     prompts: Arc<Mutex<Vec<Vec<PromptPart>>>>,
     allow_paths: Arc<Mutex<Vec<Vec<std::path::PathBuf>>>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    service_tier: Arc<Mutex<agents::ServiceTier>>,
 }
 
 impl Script {
@@ -1133,6 +1135,10 @@ impl ChatBackend for Script {
     }
     fn set_model(&mut self, model: &str) {
         self.calls.lock().unwrap().push(format!("set_model: {model}"));
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    fn set_service_tier(&mut self, tier: agents::ServiceTier) {
+        *self.service_tier.lock().unwrap() = tier;
     }
     fn answer_permission(&mut self, key: u64, option: Option<&str>) {
         self.calls.lock().unwrap().push(format!("permission: {key} {option:?}"));
@@ -2495,6 +2501,32 @@ fn endpoint_with_script() -> (SolveApp, Script, egui::Context) {
     script.report(models_reply("fast"));
     poll(&mut app, &ctx);
     (app, script, ctx)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn new_chat_resets_the_running_service_tier_after_the_endpoint_url_changes() {
+    use agents::ServiceTier;
+
+    let (mut app, script, ctx) = endpoint_with_script();
+    app.preferences.agents[0].openai_responses = true;
+    app.agent_chat.agent_id = Some("api-1".into());
+    set_service_tier(&mut app, ServiceTier::Fast);
+    assert_eq!(*script.service_tier.lock().unwrap(), ServiceTier::Fast);
+
+    control(
+        &mut app,
+        &ctx,
+        &json!({"add_agent": {"id": "api-1", "kind": "api", "base_url": "http://localhost:11435/v1", "model": "fast", "openai_responses": true}}),
+    )
+    .unwrap();
+    set_service_tier(&mut app, ServiceTier::Ultrafast);
+    set_service_tier(&mut app, ServiceTier::Default);
+    assert!(app.agent_chat.api_service_tier.is_none());
+    assert_eq!(*script.service_tier.lock().unwrap(), ServiceTier::Fast);
+
+    new_chat(&mut app);
+    assert_eq!(*script.service_tier.lock().unwrap(), ServiceTier::Default);
 }
 
 /// A typed model goes straight to an endpoint, joins the list for the next connection and becomes
@@ -7095,6 +7127,337 @@ fn the_header_shows_stop_and_login_only_when_they_apply() {
         assert!(!state.shows_auth_status(), "{state:?} is not asking for a login");
     }
     assert!(State::NeedsAuth.shows_auth_status());
+}
+
+#[test]
+fn markdown_snapshot_preserves_retained_message_bodies_in_order() {
+    let prompt = "図面を確認  \r\n\r\n- First\r\n- Second  \r\n";
+    let reply = "### Result\n\nCheck the numbers.\n\n```rust\nlet radius = 4;  \n```\n\t ";
+    let items = [
+        Item::User { text: prompt.into(), image: false, pictures: Vec::new(), context: Context::default(), files: Vec::new() },
+        Item::Agent { thought: false, text: reply.into() },
+        Item::Agent { thought: false, text: " \t\n  ".into() },
+        Item::User { text: String::new(), image: false, pictures: Vec::new(), context: Context::default(), files: Vec::new() },
+    ];
+
+    let snapshot = export::markdown_snapshot(&items, false);
+    assert_eq!(
+        snapshot,
+        format!(
+            "# SolidCraft Assistant conversation\n\n> Snapshot of the retained conversation. Earlier messages may have been discarded.\n\n\
+             ## User\n\n{prompt}\n\n## Assistant\n\n{reply}\n\n## Assistant\n\n \t\n  \n\n## User\n\n\n\n"
+        )
+    );
+}
+
+#[test]
+fn markdown_snapshot_keeps_attachments_and_filters_chat_cards() {
+    let revision = Revision::of(&Arc::new(()));
+    let items = [
+        Item::User {
+            text: "Use these references".into(),
+            image: true,
+            pictures: vec![
+                Picture::new(b"secret-picture-bytes".to_vec(), "reference [front].png"),
+                Picture::shared(Arc::new(b"secret-view-bytes".to_vec()), "", true),
+            ],
+            files: vec!["- draft.step".into(), "1. part.step".into(), "2) alternate.step".into()],
+            context: Context { groups: vec![(1, "secret-context".into())], ..Context::default() },
+        },
+        Item::Agent { thought: true, text: "secret-thought".into() },
+        Item::Plan(vec![("secret-plan".into(), "pending".into())]),
+        Item::Permission { key: 1, title: "secret-permission".into(), options: Vec::new(), answer: Some("Allow".into()) },
+        Item::Approval { id: 2, title: "secret-approval".into(), tool: "file.save".into(), answer: None },
+        Item::Changes { steps: 4, summary: Vec::new(), features: Vec::new(), revision: revision.clone(), history: revision, undone: false },
+        Item::Tool {
+            id: "tool-id".into(),
+            title: "Read dimensions".into(),
+            kind: "read".into(),
+            status: Some(ToolStatus::Completed),
+            input: None,
+            output: Some("tool-result".into()),
+        },
+        Item::Notice { text: "The agent stopped.".into(), error: true },
+        Item::Agent { thought: false, text: "The plate fits.".into() },
+    ];
+
+    for include_tools in [false, true] {
+        let snapshot = export::markdown_snapshot(&items, include_tools);
+        assert!(snapshot.contains(
+            "Attachments:\n\n- File: - draft.step\n- File: 1. part.step\n- File: 2) alternate.step\n- Image: reference \\[front\\].png\n- Image: Model view\n"
+        ));
+        assert!(!snapshot.contains("secret-"), "picture bytes, selected model context and hidden cards stay out");
+        assert!(!snapshot.contains("file.save"), "held operations stay out");
+        assert_eq!(snapshot.contains("tool-result"), include_tools);
+        assert_eq!(snapshot.contains("The agent stopped."), include_tools);
+        if include_tools {
+            let call = snapshot.find("## Tool call: Read dimensions").expect("the labelled tool");
+            let notice = snapshot.find("## Notice (error)").expect("the labelled notice");
+            let reply = snapshot.find("## Assistant").expect("the reply");
+            assert!(call < notice && notice < reply);
+        }
+    }
+}
+
+#[test]
+fn markdown_snapshot_keeps_complete_tools_and_distinguishes_unavailable_fields() {
+    let input = json!({"description": "計測\n".repeat(4_000) + "input end"});
+    let result = format!("{}\n`````\n## A heading inside the result\nResult end  \n\n", "Measured: 20 mm³\n".repeat(4_000));
+    let items = [
+        Item::Tool {
+            id: "first".into(),
+            title: "Measure\n## Another heading".into(),
+            kind: "read`".into(),
+            status: Some(ToolStatus::Completed),
+            input: Some(input.clone()),
+            output: Some(result.clone()),
+        },
+        Item::Tool { id: "second".into(), title: String::new(), kind: String::new(), status: None, input: None, output: Some(String::new()) },
+        Item::Tool {
+            id: "third".into(),
+            title: String::new(),
+            kind: String::new(),
+            status: Some(ToolStatus::InProgress),
+            input: Some(Value::Null),
+            output: None,
+        },
+    ];
+
+    let snapshot = export::markdown_snapshot(&items, true);
+    assert!(snapshot.contains("Review it for paths and other sensitive data before sharing."));
+    assert!(snapshot.contains("## Tool call: Measure\\n\\#\\# Another heading\n\n- Call ID: first\n- Kind: read\\`\n- Status: Completed"));
+    assert!(snapshot.contains(&format!("Input:\n\n```json\n{input}\n```\n\n")));
+    assert!(snapshot.contains(&format!("Output:\n\n``````\n{result}``````\n\n")));
+    assert!(snapshot.contains("Input: not retained.\n\nOutput:\n\n```\n```\n"));
+    assert!(snapshot.contains("Input:\n\n```json\nnull\n```\n\nOutput: not retained."));
+}
+
+#[test]
+fn markdown_snapshot_keeps_later_sections_out_of_an_unfinished_code_block() {
+    for (lead, indent, fence) in [("The code is streaming:", "", "```"), ("- Streaming code:", "  ", "~~~~")] {
+        let partial_reply = format!("{lead}\n\n{indent}{fence}rust\n{indent}let height = 10;  ");
+        let items = [
+            Item::Agent { thought: false, text: partial_reply.clone() },
+            Item::User { text: "Continue".into(), image: false, pictures: Vec::new(), files: Vec::new(), context: Context::default() },
+        ];
+
+        let snapshot = export::markdown_snapshot(&items, true);
+        assert!(snapshot.contains(&format!("## Assistant\n\n{partial_reply}\n{indent}{fence}\n\n## User\n\nContinue")));
+    }
+}
+
+fn finish_markdown_snapshot_save(h: &mut crate::scenario::Harness) {
+    let began = std::time::Instant::now();
+    while h.app.file_picker_busy() {
+        crate::file_picker::tick(&mut h.app, &h.ctx);
+        if h.app.file_picker_busy() {
+            assert!(began.elapsed().as_secs() < 10, "the conversation export did not finish");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+}
+
+#[test]
+fn markdown_snapshot_save_keeps_the_reply_from_before_the_picker_answer() {
+    use crate::picker_test_support::{Slot, save};
+
+    let mut h = crate::scenario::Harness::new();
+    let path = h.dir.join("conversation.md");
+    std::fs::write(&path, b"Old file contents").unwrap();
+    h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2})).unwrap();
+    h.app.session.mark_saved();
+    let document = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "Retained reply  ".into() });
+    h.app.agent_chat.input = "Unsent draft".into();
+
+    let slot: Slot = Default::default();
+    save(&mut h.app, &slot);
+    panel::run(&mut h.app, &h.ctx, panel::PanelAction::ExportConversation { include_tools: false });
+    crate::file_picker::tick(&mut h.app, &h.ctx);
+    assert!(h.app.file_picker_busy());
+    assert_eq!(std::fs::read(&path).unwrap(), b"Old file contents", "the target stays intact until the picker answers");
+
+    let Some(Item::Agent { text, .. }) = h.app.agent_chat.items.last_mut() else { panic!("the retained reply") };
+    text.push_str("Later streamed text");
+    *slot.borrow_mut() = Some(Some(path.to_string_lossy().into_owned()));
+    finish_markdown_snapshot_save(&mut h);
+
+    let transcript = std::fs::read_to_string(&path).unwrap();
+    assert!(transcript.contains("## Assistant\n\nRetained reply  \n\n"));
+    assert!(!transcript.contains("Later streamed text") && !transcript.contains("Unsent draft"));
+    assert!(matches!(&h.app.agent_chat.items[..], [Item::Agent { text, .. }] if text == "Retained reply  Later streamed text"));
+    assert_eq!(h.app.agent_chat.input, "Unsent draft");
+    assert!(Arc::ptr_eq(&h.app.session.doc, &document));
+    assert_eq!(h.app.session.undo.len(), undo);
+    assert!(!h.app.session.is_dirty());
+    assert!(matches!(&h.app.status, Some((message, _, false)) if message == tr("ui.agent_chat_export_saved")));
+}
+
+#[test]
+fn markdown_snapshot_save_cancel_and_failure_preserve_the_conversation_and_design() {
+    use crate::picker_test_support::{Slot, save};
+
+    let mut h = crate::scenario::Harness::new();
+    let path = h.dir.join("occupied.md");
+    std::fs::create_dir(&path).unwrap();
+    let existing = path.join("keep.txt");
+    std::fs::write(&existing, b"Existing contents").unwrap();
+    h.app.session.mark_saved();
+    let document = h.app.session.doc.clone();
+    let undo = h.app.session.undo.len();
+    h.app.agent_chat.items.push(Item::Agent { thought: false, text: "Retained reply".into() });
+    h.app.set_status("Earlier status", false);
+    let earlier_status = h.app.status.clone();
+
+    for destination in [None, Some(path.to_string_lossy().into_owned())] {
+        let cancelled = destination.is_none();
+        let slot: Slot = Default::default();
+        save(&mut h.app, &slot);
+        panel::run(&mut h.app, &h.ctx, panel::PanelAction::ExportConversation { include_tools: false });
+        assert!(h.app.file_picker_busy());
+        *slot.borrow_mut() = Some(destination);
+        finish_markdown_snapshot_save(&mut h);
+
+        assert_eq!(std::fs::read(&existing).unwrap(), b"Existing contents");
+        assert!(Arc::ptr_eq(&h.app.session.doc, &document));
+        assert_eq!(h.app.session.undo.len(), undo);
+        assert!(!h.app.session.is_dirty());
+        assert!(matches!(&h.app.agent_chat.items[..], [Item::Agent { text, .. }] if text == "Retained reply"));
+        if cancelled {
+            assert_eq!(h.app.status, earlier_status);
+        } else {
+            let prefix = trf("ui.agent_chat_export_failed", &[("error", "")]);
+            assert!(matches!(&h.app.status, Some((message, _, true)) if message.starts_with(&prefix)));
+        }
+    }
+}
+
+#[test]
+fn markdown_snapshot_empty_assistant_stays_visible_with_export_disabled() {
+    let (mut h, script) = shared_assistant_harness();
+    h.app.agent_chat.items.clear();
+    h.frames(3);
+
+    let instance = solidcraft_engine::panels::InstanceId::new("assistant").unwrap();
+    let presentation = h.app.panel_runtime().unwrap().instance_presentation(&instance).unwrap();
+    let action = presentation.actions.iter().find(|action| action.id.0 == "export-chat").unwrap();
+    assert!(!action.enabled);
+    assert_eq!(action.disabled_reason.as_deref(), Some(tr("ui.agent_chat_export_empty")));
+    assert!(solidcraft_ui_registry::rect_of("agent_chat:composer_footer").is_some());
+    assert!(script.calls().is_empty());
+}
+
+#[test]
+fn markdown_snapshot_shared_headers_open_export_without_clearing_chat() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget};
+    use solidcraft_engine::panels::{ControlId, InstanceId};
+
+    let (mut h, script) = shared_assistant_harness();
+    let target = HostControlTarget::Pointer(HostPointerTarget::HeaderAction {
+        instance: InstanceId::new("assistant").unwrap(),
+        action: ControlId::new("export-chat").unwrap(),
+    });
+    for floating in [false, true] {
+        if floating {
+            shared_assistant_float(&mut h, 700.0, 380.0);
+        }
+        let control = h.app.universal_panel_frame().unwrap().controls.iter().find(|control| control.target == target).unwrap();
+        let at = egui::pos2(control.bounds.origin.x + control.bounds.size.width / 2.0, control.bounds.origin.y + control.bounds.size.height / 2.0);
+        click_at(&mut h, at, egui::PointerButton::Primary);
+        h.frames(3);
+        assert_eq!(h.app.agent_chat.export_tools, Some(false), "the actual header opens the export choices with tools off");
+        assert!(h.widget(tr("ui.agent_chat_export_tools")).is_some(), "the dialog shows the opt-in");
+        assert!(!h.app.file_picker_busy(), "the file picker waits for the user's Save choice");
+        assert!(matches!(&h.app.agent_chat.items[..], [Item::Agent { text, .. }] if text == "A retained conversation"));
+        assert_eq!(h.app.agent_chat.input, "Retained responsive composer draft");
+        assert!(script.calls().is_empty());
+        click_handle(&mut h, "agent_chat:export_cancel");
+        h.frames(3);
+        assert_eq!(h.app.agent_chat.export_tools, None);
+    }
+}
+
+#[test]
+fn markdown_snapshot_collapsed_assistant_can_export_from_its_overflow() {
+    use crate::panel_runtime::{HostControlTarget, HostPointerTarget};
+    use solidcraft_engine::panels::{ControlId, InstanceId};
+
+    let (mut h, script) = shared_assistant_harness();
+    let instance = InstanceId::new("assistant").unwrap();
+    let action = ControlId::new("export-chat").unwrap();
+    let params = json!({"target":{"type":"instance","id":"assistant"},"action":"export-chat"});
+    h.app.run_panel_command("panel.action", &params).unwrap();
+    h.app.panel_content_action(&instance, &action).unwrap();
+    h.frames(3);
+    assert_eq!(h.app.agent_chat.export_tools, None, "programmatic panel actions do not open the export dialog");
+    assert!(!h.app.file_picker_busy());
+
+    h.app.run_panel_command("panel.collapse", &json!({"target":{"type":"instance","id":"assistant"},"collapsed":true})).unwrap();
+    // Keep Export registered and available, but leave it out of the header so
+    // the host exposes it through its normal overflow menu.
+    h.app.panel_runtime_mut().unwrap().host_mut().unwrap().set_header_action_visible(instance.clone(), action.clone(), false);
+    h.frames(3);
+    let header = HostControlTarget::Pointer(HostPointerTarget::HeaderAction { instance: instance.clone(), action: action.clone() });
+    let position = |h: &crate::scenario::Harness, target: HostControlTarget| {
+        let control = h.app.universal_panel_frame()?.controls.iter().find(|control| control.target == target)?;
+        Some(egui::pos2(control.bounds.origin.x + control.bounds.size.width / 2.0, control.bounds.origin.y + control.bounds.size.height / 2.0))
+    };
+    assert!(position(&h, header).is_none());
+    let menu = HostControlTarget::Pointer(HostPointerTarget::Menu { instance: instance.clone() });
+    let at = position(&h, menu).expect("the collapsed panel's menu");
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    h.frames(3);
+    let at = position(&h, HostControlTarget::Content { instance, action }).expect("the menu offers the overflow export action");
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    h.frames(3);
+    assert!(h.widget(tr("ui.agent_chat_export_tools")).is_some(), "export still opens when the Assistant body is collapsed");
+    assert!(!h.app.file_picker_busy(), "the choice dialog shows before the file picker");
+    assert!(script.calls().is_empty());
+}
+
+#[test]
+fn markdown_snapshot_popped_out_header_saves_with_chosen_tool_details() {
+    use solidcraft_ui_registry::{handle_at, rect_of};
+
+    let (mut h, script) = shared_assistant_harness();
+    h.app.agent_chat.items.push(Item::Tool {
+        id: "detached-tool".into(),
+        title: "Measure".into(),
+        kind: "read".into(),
+        status: Some(ToolStatus::Completed),
+        input: None,
+        output: Some("Detached tool result".into()),
+    });
+    let path = h.dir.join("detached.md");
+    let destination = path.to_string_lossy().into_owned();
+    h.app.services.pick_save = Some(Box::new(move |name, extensions| {
+        assert_eq!(name, "assistant-conversation.md");
+        assert_eq!(extensions, &["md"]);
+        Box::pin(std::future::ready(Some(destination.clone())))
+    }));
+    h.call("ui.agent_chat", json!({"popped": true}));
+    h.frames(4);
+
+    // As in the existing pop-out tests, the harness embeds the Assistant's own viewport.
+    let window = rect_of("agent_chat:window").expect("the popped-out Assistant");
+    let at = handle_at("agent_chat:export-chat").expect("the popped-out header action");
+    assert!(window.contains(at));
+    click_at(&mut h, at, egui::PointerButton::Primary);
+    h.frames(3);
+    assert_eq!(h.app.agent_chat.export_tools, Some(false));
+    assert!(!h.app.file_picker_busy() && !path.exists());
+    click_handle(&mut h, "agent_chat:export_tools");
+    assert_eq!(h.app.agent_chat.export_tools, Some(true));
+    click_handle(&mut h, "agent_chat:export_save");
+    finish_markdown_snapshot_save(&mut h);
+
+    let transcript = std::fs::read_to_string(path).unwrap();
+    assert!(transcript.contains("A retained conversation"));
+    assert!(transcript.contains("Detached tool result"));
+    assert!(h.app.preferences.agent_chat_popped);
+    assert_eq!(h.app.agent_chat.export_tools, None);
+    assert!(script.calls().is_empty());
 }
 
 /// The shared document diff produces accurate per-turn Undo card summaries (added/edited/removed

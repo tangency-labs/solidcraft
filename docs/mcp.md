@@ -16,6 +16,23 @@ document remains the reference implementation today.
 
 ## Start it
 
+With [uv](https://docs.astral.sh/uv/) there is nothing to install first: `uvx solidcraft mcp` runs
+the MCP server over stdio from the `solidcraft` package on PyPI, whose wheel carries
+`solidcraft-cli` on Linux (x86_64, aarch64), macOS and Windows (elsewhere the package finds an
+installed `solidcraft-cli` on `PATH` or through `SOLIDCRAFT_CLI`) (`pip install solidcraft` installs the same `solidcraft`
+command). Any MCP client takes it as command `uvx`, args `["solidcraft", "mcp"]`:
+
+```json
+{
+  "mcpServers": {
+    "solidcraft": { "command": "uvx", "args": ["solidcraft", "mcp"] }
+  }
+}
+```
+
+`uvx solidcraft <args>` is `solidcraft-cli <args>`, so every flag below works the same way.
+Claude Code: `claude mcp add solidcraft -- uvx solidcraft mcp`.
+
 ```sh
 # Headless: an in-process design session, no window (screenshots are drawn on the GPU).
 solidcraft-cli mcp

@@ -1523,11 +1523,11 @@ fn bisect_core(
             match piece(a, b) {
                 Ok(Some(p)) => {
                     let bound = (Ivl::from(p.ends) + Ivl::from(p.with_slack)).hi;
+                    if p.ends > over {
+                        return Ok((BisectOutcome::ExceedsOver, evaluated));
+                    }
                     if budget.is_some() {
                         seen = seen.max(p.ends);
-                        if seen > over {
-                            return Ok((BisectOutcome::ExceedsOver, evaluated));
-                        }
                     }
                     let (capped, out_of_pieces) = out_of(seen);
                     let proved = budget.is_some() && bound <= seen;
@@ -2389,18 +2389,29 @@ fn structured_trim_gap_bound_as(
     if let Some(bound) = bilinear_trim_gap_bound(cn, wn, net, [lo, hi]) {
         return Some(bound);
     }
-    // (an iso line along the `u` side of a net of degree 1 in `v`, or along the `v` side of
-    // one of degree 1 in `u`: the same line on the net with `u` and `v` swapped; at equal
-    // parameters also one along the net's first or last row or column, whatever its degree
-    // across it, [`end_row`])
+    // (an iso line along the `u` side of a net of degree 1 in `v`, or along a linear
+    // ruling of one of degree 1 in `v`, or along the `v` side / ruling of one of degree 1
+    // in `u`: the same line on the net with `u` and `v` swapped; at equal parameters also
+    // one along the net's first or last row or column, whatever its degree across it,
+    // [`end_row`])
     if net.q == 1 || same_parameter {
         if let Some(bound) = iso_row_gap_bound(cn, wn, net, [lo, hi], same_parameter) {
             return Some(bound);
         }
+        if net.q == 1 {
+            if let Some(bound) = iso_ruling_gap_bound(cn, wn, net, [lo, hi]) {
+                return Some(bound);
+            }
+        }
     }
     if net.p == 1 || same_parameter {
         let (net, wn) = swapped_uv(net, wn)?;
-        return iso_row_gap_bound(cn, &wn, &net, [lo, hi], same_parameter);
+        if let Some(bound) = iso_row_gap_bound(cn, &wn, &net, [lo, hi], same_parameter) {
+            return Some(bound);
+        }
+        if net.q == 1 {
+            return iso_ruling_gap_bound(cn, &wn, &net, [lo, hi]);
+        }
     }
     None
 }
@@ -2704,6 +2715,159 @@ fn iso_row_gap_bound(
             worst = (Ivl::from(worst) + Ivl::from(lip) * Ivl::from(shift)).hi;
         }
     }
+    worst.is_finite().then_some(worst)
+}
+
+/// An analytic bound for a degree-1 trim along a constant-`u` ruling of a net of degree 1
+/// in `v` (`net.q == 1`, `net.nv == 2`, equal weights along `v`) paired with a degree-1 3D
+/// curve (e.g. cylinder, cone, or linear extrusion seam/tangency edges). Because the two `v`
+/// rows share weights `w(i, 0) == w(i, 1)`, the rational denominator `W(u)` is independent of
+/// `v`, so `S(u_a, v)` is affine in `v`; both `C(s)` and `S(W(s))` are affine in `s` on
+/// `[lo, hi]`, and by convexity of the Euclidean norm
+/// `|C(s) - S(W(s))| <= max(|C(lo) - S(u_a, v(lo))|, |C(hi) - S(u_a, v(hi))|)`.
+#[allow(clippy::float_cmp)] // exact bit equality of clamped knots, unit weights, constant u
+fn iso_ruling_gap_bound(
+    cn: &NurbsCurve,
+    wn: &NurbsCurve,
+    net: &Nurbs,
+    [lo, hi]: [f64; 2],
+) -> Option<f64> {
+    if !(cn.p == 1 && cn.n == 2 && wn.p == 1 && wn.n == 2 && net.q == 1 && net.nv == 2) {
+        return None;
+    }
+    if net.p == 0 || net.nu == 0 || net.u.len() != net.nu + net.p + 1 {
+        return None;
+    }
+    if cn.pw.len() != 8 || wn.pw.len() != 8 || net.pw.len() != 4 * net.nu * 2 {
+        return None;
+    }
+    let clamped_containing = |k: &[f64]| -> Option<[f64; 2]> {
+        match k {
+            [a, b, c, d] if *a == *b && *c == *d && *a <= lo && hi <= *d && *a < *d => {
+                Some([*a, *d])
+            }
+            _ => None,
+        }
+    };
+    let [c_lo, c_hi] = clamped_containing(&cn.u)?;
+    let [w_lo, w_hi] = clamped_containing(&wn.u)?;
+    let clamped_v = matches!(net.v.as_slice(), [a, b, c, d] if a == b && b < c && c == d);
+    if !clamped_v {
+        return None;
+    }
+    let (&nu0, &nu1, &nv0, &nv1) = (
+        net.u.get(net.p)?,
+        net.u.get(net.nu)?,
+        net.v.first()?,
+        net.v.last()?,
+    );
+    let raw = |pw: &[f64], i: usize| -> Option<[f64; 4]> {
+        let s = pw.get(4 * i..4 * i + 4)?;
+        Some([*s.first()?, *s.get(1)?, *s.get(2)?, *s.get(3)?])
+    };
+    let (c0_raw, c1_raw) = (raw(&cn.pw, 0)?, raw(&cn.pw, 1)?);
+    let ([_, _, _, w_c0], [_, _, _, w_c1]) = (c0_raw, c1_raw);
+    let ([u_a, v_a, _, w_a], [u_b, v_b, _, w_b]) = (raw(&wn.pw, 0)?, raw(&wn.pw, 1)?);
+    if !(w_c0 == 1.0 && w_c1 == 1.0 && w_a == 1.0 && w_b == 1.0) {
+        return None;
+    }
+    if !(u_a == u_b
+        && nu0 <= u_a
+        && u_a <= nu1
+        && nv0 <= v_a
+        && v_a <= nv1
+        && nv0 <= v_b
+        && v_b <= nv1)
+    {
+        return None;
+    }
+    // Equal weights along `v` guarantee `S(u_a, v)` is affine in `v`.
+    let mut row0_pw = Vec::new();
+    let _ = row0_pw.try_reserve(4 * net.nu);
+    let mut row1_pw = Vec::new();
+    let _ = row1_pw.try_reserve(4 * net.nu);
+    for i in 0..net.nu {
+        let p0 = net.pw.get(4 * (2 * i)..4 * (2 * i) + 4)?;
+        let p1 = net.pw.get(4 * (2 * i + 1)..4 * (2 * i + 1) + 4)?;
+        let (&w0, &w1) = (p0.get(3)?, p1.get(3)?);
+        if !(w0.is_finite() && w0 > 0.0 && w0.to_bits() == w1.to_bits()) {
+            return None;
+        }
+        row0_pw.extend_from_slice(p0);
+        row1_pw.extend_from_slice(p1);
+    }
+    let row0 = NurbsCurve {
+        p: net.p,
+        n: net.nu,
+        u: net.u.clone(),
+        pw: row0_pw,
+    };
+    let row1 = NurbsCurve {
+        p: net.p,
+        n: net.nu,
+        u: net.u.clone(),
+        pw: row1_pw,
+    };
+    let at_u = Ivl::from(u_a);
+    let s0 = *curve_derivs_over(&row0, at_u, 0, None).ok()?.first()?;
+    let s1 = *curve_derivs_over(&row1, at_u, 0, None).ok()?.first()?;
+    let dv = Ivl::from(nv1) - Ivl::from(nv0);
+    if !dv.is_positive() {
+        return None;
+    }
+    let frac = |s: f64, a: f64, b: f64| -> Option<Ivl> {
+        if s == a {
+            return Some(Ivl::from(0.0));
+        }
+        if s == b {
+            return Some(Ivl::from(1.0));
+        }
+        let span = Ivl::from(b) - Ivl::from(a);
+        if !span.is_positive() {
+            return None;
+        }
+        let t = (Ivl::from(s) - Ivl::from(a)) / span;
+        let t = Ivl::new(t.lo.max(0.0), t.hi.min(1.0));
+        (!t.lo.is_nan() && !t.hi.is_nan() && t.lo <= t.hi).then_some(t)
+    };
+    let lerp_v3 = |p0: V3<Ivl>, p1: V3<Ivl>, t: Ivl| {
+        let one_less = Ivl::from(1.0) - t;
+        plus(scaled(p0, one_less), scaled(p1, t))
+    };
+    let lerp_ivl = |a: f64, b: f64, t: Ivl| {
+        let one_less = Ivl::from(1.0) - t;
+        one_less * Ivl::from(a) + t * Ivl::from(b)
+    };
+    let blend = |v: Ivl| -> Option<V3<Ivl>> {
+        let b = (v - Ivl::from(nv0)) / dv;
+        let b = Ivl::new(b.lo.max(0.0), b.hi.min(1.0));
+        if b.lo.is_nan() || b.hi.is_nan() || b.lo > b.hi {
+            return None;
+        }
+        Some(lerp_v3(s0, s1, b))
+    };
+    let (v_lo, v_hi) = if [w_lo, w_hi] == [lo, hi] {
+        (Ivl::from(v_a), Ivl::from(v_b))
+    } else {
+        (
+            lerp_ivl(v_a, v_b, frac(lo, w_lo, w_hi)?),
+            lerp_ivl(v_a, v_b, frac(hi, w_lo, w_hi)?),
+        )
+    };
+    let sa = blend(v_lo)?;
+    let sb = blend(v_hi)?;
+    let (c0_pt, c1_pt) = (point_of(c0_raw)?, point_of(c1_raw)?);
+    let (ca, cb) = if [c_lo, c_hi] == [lo, hi] {
+        (c0_pt, c1_pt)
+    } else {
+        (
+            lerp_v3(c0_pt, c1_pt, frac(lo, c_lo, c_hi)?),
+            lerp_v3(c0_pt, c1_pt, frac(hi, c_lo, c_hi)?),
+        )
+    };
+    let d0 = norm_upper(minus(ca, sa))?;
+    let d1 = norm_upper(minus(cb, sb))?;
+    let worst = d0.max(d1);
     worst.is_finite().then_some(worst)
 }
 
@@ -8057,7 +8221,9 @@ mod tests {
             residual <= whole,
             "{residual:e} over the whole net's {whole:e}"
         );
-        if matches!(s.kind(), crate::surface::surface::SurfaceKind::Cone(_)) {
+        if matches!(s.kind(), crate::surface::surface::SurfaceKind::Cone(_))
+            && window.is_some_and(|[u, _]| u[1] - u[0] > 1e-6)
+        {
             assert!(residual > 1e-8, "the seam tear {residual:e}");
         }
         assert!(
@@ -9213,6 +9379,126 @@ mod tests {
             let (_, slack) = net.partials(&[w], lk, continuity).unwrap();
             assert!(slack >= 2.0 * jump, "{slack:e} against twice {jump:e}");
         }
+    }
+
+    /// Constant-`u` degree-1 ruling trims on a ruled NURBS net (`q == 1` and swapped `p == 1`)
+    /// are bounded analytically by [`iso_ruling_gap_bound`] without bisection, on both full
+    /// intervals and sub-intervals, and reject unequal `v`-row weights or slanted trims.
+    #[test]
+    fn iso_ruling_trim_on_cylinder_net_is_bounded_without_bisection() {
+        let (_, trims) = cylinder_trims();
+        let k = Kernel::default();
+        // Extract the exact cylinder net from the cylinder side face.
+        let cylinder_net = trims
+            .iter()
+            .find_map(|(s, curve, trim, range)| {
+                matches!(s.kind(), crate::surface::surface::SurfaceKind::Cone(_))
+                    .then(|| trim_data(&k, s, curve, trim, *range).2)
+            })
+            .expect("cylinder side net");
+        let (u0, u1) = (
+            *cylinder_net.u.get(cylinder_net.p).unwrap(),
+            *cylinder_net.u.get(cylinder_net.nu).unwrap(),
+        );
+        let (v0, v1) = (
+            *cylinder_net.v.first().unwrap(),
+            *cylinder_net.v.last().unwrap(),
+        );
+        let u_mid = 0.5 * (u0 + u1);
+        // Evaluate exact ruling endpoints via `NetSurface`.
+        let cyl_surf = trims
+            .iter()
+            .find_map(|(s, _, _, _)| {
+                matches!(s.kind(), crate::surface::surface::SurfaceKind::Cone(_)).then_some(s)
+            })
+            .unwrap();
+        let p_a = cyl_surf.evaluate_point(&k, Point2::new(u_mid, v0)).unwrap();
+        let p_b = cyl_surf.evaluate_point(&k, Point2::new(u_mid, v1)).unwrap();
+
+        let make_line = |a: [f64; 3], b: [f64; 3], t0: f64, t1: f64| NurbsCurve {
+            p: 1,
+            n: 2,
+            u: vec![t0, t0, t1, t1],
+            pw: vec![a[0], a[1], a[2], 1.0, b[0], b[1], b[2], 1.0],
+        };
+        let cn = make_line([p_a.x, p_a.y, p_a.z], [p_b.x, p_b.y, p_b.z], 0.0, 1.0);
+        let wn = make_line([u_mid, v0, 0.0], [u_mid, v1, 0.0], 0.0, 1.0);
+
+        // Full interval, exact ruling: near-zero certified bound.
+        let g = structured_trim_gap_bound(&cn, &wn, &cylinder_net, [0.0, 1.0]).unwrap();
+        assert!(g <= 1.0e-12, "exact cylinder ruling bound too loose: {g:e}");
+
+        // Sub-interval `[0.25, 0.75]` on the same line: still exact.
+        let g_sub = structured_trim_gap_bound(&cn, &wn, &cylinder_net, [0.25, 0.75]).unwrap();
+        assert!(
+            g_sub <= 1.0e-12,
+            "sub-interval ruling bound too loose: {g_sub:e}"
+        );
+
+        // Perturbed endpoint by `delta = 2e-4` along x: bound covers `delta` tightly.
+        let delta = 2.0e-4;
+        let cn_off = make_line(
+            [p_a.x + delta, p_a.y, p_a.z],
+            [p_b.x, p_b.y, p_b.z],
+            0.0,
+            1.0,
+        );
+        let g_off = structured_trim_gap_bound(&cn_off, &wn, &cylinder_net, [0.0, 1.0]).unwrap();
+        assert!(
+            g_off >= delta && g_off <= delta + 1.0e-11,
+            "perturbed ruling bound {g_off:e} vs {delta:e}"
+        );
+
+        // Swapped `(u, v)` net (`net.p == 1`) with matching swapped trim gives the same bound.
+        let (swap_net, swap_wn) = swapped_uv(&cylinder_net, &wn).unwrap();
+        let g_swap = structured_trim_gap_bound(&cn_off, &swap_wn, &swap_net, [0.0, 1.0]).unwrap();
+        assert!(
+            g_swap >= delta && g_swap <= delta + 1.0e-11,
+            "swapped ruling bound {g_swap:e} vs {delta:e}"
+        );
+
+        // Slanted trim (`u_a != u_b`) is not a ruling: returns `None`.
+        let wn_slant = make_line([u0, v0, 0.0], [u_mid, v1, 0.0], 0.0, 1.0);
+        assert_eq!(
+            structured_trim_gap_bound(&cn, &wn_slant, &cylinder_net, [0.0, 1.0]),
+            None
+        );
+
+        // Unequal weights along `v` breaks affinity in `v`: returns `None`.
+        let mut bad_net = cylinder_net.clone();
+        bad_net.pw[7] *= 1.5;
+        assert_eq!(
+            structured_trim_gap_bound(&cn, &wn, &bad_net, [0.0, 1.0]),
+            None
+        );
+    }
+
+    /// Even with `budget == None`, [`bisect`] stops immediately with `Some(INFINITY)` as soon
+    /// as any piece's endpoint gap exceeds `over`, without subdividing it further.
+    #[test]
+    fn bisect_without_budget_stops_at_once_when_ends_exceed_over() {
+        let mut evals = 0usize;
+        let res = bisect(
+            [0.0, 1.0],
+            4,
+            &[],
+            0.0,
+            1.0e-13,
+            [0.0, 1.0],
+            None,
+            |_a, _b| {
+                evals += 1;
+                // Huge unclosed slack so without the early `p.ends > over` cutoff it would
+                // bisect deeply before closing.
+                Ok(PieceBound::with(2.0, Ivl::from(100.0), 0.0))
+            },
+        )
+        .unwrap();
+        assert_eq!(res, Some(f64::INFINITY));
+        assert_eq!(
+            evals, 1,
+            "should return on the very first piece, got {evals}"
+        );
     }
 
     /// #22037: `cylinder.smb`'s cap 1 (a bilinear B-spline patch over the circle's bounding

@@ -131,8 +131,10 @@ fn mouse(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
         }
         let keeps = setting::nav_drag_keeps_mode(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.drag_keeps_mode.help"));
         crate::scenario::publish_target("prefs:nav_drag_keeps_mode", keeps.rect);
-        let wrap = setting::orbit_cursor_wrap(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.orbit_cursor_wrap.help"));
-        crate::scenario::publish_target("prefs:orbit_cursor_wrap", wrap.rect);
+        if super::platform::shown(app, super::platform::Needs::CursorWarp) {
+            let wrap = setting::orbit_cursor_wrap(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.orbit_cursor_wrap.help"));
+            crate::scenario::publish_target("prefs:orbit_cursor_wrap", wrap.rect);
+        }
         let unrolls = setting::upright_orbit_unrolls(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.upright_orbit_unrolls.help"));
         crate::scenario::publish_target("prefs:upright_orbit_unrolls", unrolls.rect);
         let mark = setting::mark_orbit_point(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("nav.mark_orbit_point.help"));
@@ -319,11 +321,14 @@ fn wheel(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     crate::scenario::publish_target("prefs:trackpad_pan", response.rect);
                 });
                 setting::orbit_reverse(app, ui);
-                setting::trackpad_twist_turns(app, ui);
-                ui.add_enabled_ui(app.preferences.trackpad_twist_turns, |ui| {
-                    let response = setting::trackpad_twist_rolls(app, ui);
-                    crate::scenario::publish_target("prefs:trackpad_twist_rolls", response.rect);
-                });
+                if super::platform::shown(app, super::platform::Needs::TrackpadTwist) {
+                    let twist = setting::trackpad_twist_turns(app, ui);
+                    crate::scenario::publish_target("prefs:trackpad_twist_turns", twist.rect);
+                    ui.add_enabled_ui(app.preferences.trackpad_twist_turns, |ui| {
+                        let response = setting::trackpad_twist_rolls(app, ui);
+                        crate::scenario::publish_target("prefs:trackpad_twist_rolls", response.rect);
+                    });
+                }
                 let response = setting::zoom_stop_at_model(app, ui).backing_on_hover_text(solidcraft_ui_text::tr("prefs.zoom_stop_at_model_tip"));
                 crate::scenario::publish_target("prefs:zoom_stop_at_model", response.rect);
             });

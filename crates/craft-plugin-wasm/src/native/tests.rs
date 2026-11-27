@@ -1313,6 +1313,32 @@ fn files_inside_grant_work_and_escape_is_refused() {
 }
 
 #[test]
+#[cfg(unix)]
+fn reading_a_granted_fifo_without_a_writer_is_refused_without_blocking() {
+    use files::Host;
+    let root = std::env::temp_dir().join(format!("craft-plugin-fifo-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));
+    std::fs::create_dir_all(&root).unwrap();
+    assert!(std::process::Command::new("mkfifo").arg(root.join("pipe")).status().unwrap().success());
+    let folder = Folder { dir: Dir::open_ambient_dir(&root, cap_std::ambient_authority()).unwrap(), path: root.clone(), read: true, write: false };
+    let (tx, rx) = mpsc::channel();
+    // Keep a regression from hanging the test process: no writer ever opens the pipe.
+    let worker = std::thread::spawn(move || {
+        let mut state = state(App::default());
+        state.effect = Effect::Read;
+        state.folders.insert("data".into(), folder);
+        let refused = matches!(
+            state.read_file("data".into(), "pipe".into()),
+            Err(PluginError::PermissionDenied(reason)) if reason.contains("only regular files are supported")
+        );
+        let _ = tx.send(refused);
+    });
+    let refused = rx.recv_timeout(Duration::from_secs(5));
+    std::fs::remove_dir_all(root).unwrap();
+    assert_eq!(refused, Ok(true), "a FIFO must be rejected before opening can block");
+    worker.join().unwrap();
+}
+
+#[test]
 fn staged_writes_publish_in_guest_order_across_grant_aliases_and_normalize_separators() {
     use files::Host;
     let root = std::env::temp_dir().join(format!("craft-plugin-write-order-{}-{}", std::process::id(), NEXT_FILE.fetch_add(1, Ordering::Relaxed)));

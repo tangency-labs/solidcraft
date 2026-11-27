@@ -1480,6 +1480,7 @@ fn a_revolve_to_its_own_part_keeps_its_result_when_another_part_moves() {
         angle2: None,
         symmetric: false,
         convention: Default::default(),
+        join_profile_arcs: false,
         to: Some(serde_json::from_value(serde_json::json!([5.0, 5.0, 4.0])).unwrap()),
     };
     let revolve = add_named(&mut doc, kind);
@@ -6255,6 +6256,7 @@ fn editing_external_sketch_line_axis_invalidates_revolve_and_pattern_cache() {
                 angle2: None,
                 symmetric: false,
                 convention: Default::default(),
+                join_profile_arcs: false,
                 to: None,
             },
             Some("RevB"),
@@ -6323,6 +6325,7 @@ fn editing_external_sketch_line_axis_invalidates_revolve_and_pattern_cache() {
                 angle2: None,
                 symmetric: false,
                 convention: Default::default(),
+                join_profile_arcs: false,
                 to: None,
             },
             Some("RevC"),
@@ -6587,6 +6590,178 @@ fn mirroring_cuts_that_consume_the_target_matches_sequential_refusal() {
     let err_seq = run(1);
     assert!(err_batch.as_deref().is_some_and(|e| e.contains("no body to cut")), "{err_batch:?}");
     assert_eq!(err_batch, err_seq);
+}
+
+/// Captured cross-component face anchors (`FaceAnchor::placement`), their `auto_face` border links,
+/// captured construction planes, and pinned sketch-to-sketch links (`Link::sketch_placements`) keep
+/// identical `placement_digest` values across rigid assembly motion, so driving a joint recomputes
+/// zero features on the stationary component while still invalidating broken occurrence paths and
+/// keeping legacy/root uncaptured anchors live.
+#[test]
+fn captured_face_anchor_and_sketch_link_digests_stay_invariant_across_rigid_motion() {
+    use solidcraft_sketch::{LinkKind, LinkSource, SketchPlacement};
+
+    let mut doc = Document::new("rigid assembly in-place references");
+    let housing = doc.add_component(Some("Housing"), 0).unwrap();
+    let cap = doc.add_component(Some("Cap"), 0).unwrap();
+    let mut extras = Vec::new();
+    for k in 0..4 {
+        let c = doc.add_component(Some(&format!("Hardware{k}")), 0).unwrap();
+        place(&mut doc, c, rigid(Vec3::new(100.0 + k as f64 * 20.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.3));
+        let b = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::ZERO),
+                    length: "5".into(),
+                    width: "5".into(),
+                    height: "5".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                Some(&format!("HardwareBox{k}")),
+            )
+            .unwrap();
+        doc.feature_mut(b).unwrap().component = c;
+        extras.push(c);
+    }
+    let housing_box = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(-20.0, -20.0, 0.0)),
+                length: "40".into(),
+                width: "40".into(),
+                height: "20".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("HousingBody"),
+        )
+        .unwrap();
+    doc.feature_mut(housing_box).unwrap().component = housing;
+    let cap_box = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(-20.0, -20.0, 40.0)),
+                length: "40".into(),
+                width: "40".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("CapBody"),
+        )
+        .unwrap();
+    doc.feature_mut(cap_box).unwrap().component = cap;
+    let cap_sketch_id = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(6.0, 4.0)), Some("CapSketch")).unwrap();
+    doc.feature_mut(cap_sketch_id).unwrap().component = cap;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    let cap_body = state.bodies.iter().find(|b| b.feature == cap_box).unwrap();
+    let top_index =
+        cap_body.body.face_sources().unwrap().iter().position(|s| matches!(s, Some(kernel::FaceSource::Box { axis: 2, high: true, .. }))).unwrap();
+    let picked = cap_body.body.face_plane(top_index).unwrap();
+    let cap_path = doc.first_path(cap);
+    let housing_path = doc.first_path(housing);
+    let anchor = doc.capture_face_anchor(cap_body, top_index, &picked, &cap_path, housing, &housing_path).unwrap();
+    assert!(anchor.placement.is_some(), "cross-component anchor captures its placement");
+
+    // 1. In-place sketch on Cap's face with an auto_face border link.
+    let face_plane = PlaneRef::Face { plane: picked, at: picked.origin, name: None, anchor: Some(Box::new(anchor.clone())) };
+    let resolved = crate::project::resolve_anchored_face(&doc, &state, &picked, LinkKind::Project, &anchor).unwrap();
+    let mut face_sk = Sketch::new();
+    let p0 = face_sk.add_point(Vec2::new(-4.0, -4.0), None).unwrap();
+    let p1 = face_sk.add_point(Vec2::new(4.0, 4.0), None).unwrap();
+    face_sk.add_line_pts(p0, p1, None).unwrap();
+    let link_id = face_sk.add_link(LinkKind::Project, resolved.source, &resolved.geom).unwrap();
+    if let Some(link) = face_sk.links.iter_mut().find(|l| l.id == link_id) {
+        link.face_name = Some(anchor.target.name.clone());
+        link.auto_face = true;
+    }
+    let anchored_sketch = doc.add_feature(FeatureKind::Sketch { plane: face_plane.clone(), sketch: face_sk }, Some("AnchoredSketch")).unwrap();
+    doc.feature_mut(anchored_sketch).unwrap().component = housing;
+
+    // 2. In-place offset construction plane on Cap's face.
+    let offset_plane = PlaneRef::Offset { base: Box::new(face_plane), distance: "5 mm".into() };
+    let anchored_plane = doc.add_feature(FeatureKind::ConstructionPlane { plane: offset_plane }, Some("AnchoredPlane")).unwrap();
+    doc.feature_mut(anchored_plane).unwrap().component = housing;
+
+    // 3. In-place sketch projecting Cap's sketch with captured `sketch_placements`.
+    let cap_curve = doc.sketch(cap_sketch_id).unwrap().curves[0].id.clone();
+    let link_src = LinkSource::SketchCurve { sketch: cap_sketch_id, curve: cap_curve };
+    let resolved_curve = crate::project::resolve(&doc, &BTreeMap::new(), &state, &Plane::XY, LinkKind::Project, &link_src).unwrap();
+    let mut linked_sk = Sketch::new();
+    let sk_link_id = linked_sk.add_link(LinkKind::Project, link_src, &resolved_curve.geom).unwrap();
+    if let Some(link) = linked_sk.links.iter_mut().find(|l| l.id == sk_link_id) {
+        link.sketch_placements.push(SketchPlacement { sketch: cap_sketch_id, placement: IDENTITY });
+    }
+    let pinned_link_sketch =
+        doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: linked_sk }, Some("PinnedLinkSketch")).unwrap();
+    doc.feature_mut(pinned_link_sketch).unwrap().component = housing;
+
+    // 4. Downstream housing cut after the cross-component references.
+    let housing_cut = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(-5.0, -5.0, 5.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::Cut,
+                centred: false,
+            },
+            Some("HousingCut"),
+        )
+        .unwrap();
+    doc.feature_mut(housing_cut).unwrap().component = housing;
+
+    let initial = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    // `state_for_face_anchor_only` avoids transforming the 4 unrelated rotated Hardware bodies
+    // when evaluating `AnchoredSketch` and `AnchoredPlane` (only `PinnedLinkSketch` frames live state).
+    assert!(initial.moved <= extras.len() + 2, "unexpected frame body transforms: {initial:?}");
+
+    let tracked = [anchored_sketch, anchored_plane, pinned_link_sketch, housing_cut];
+    let digests_before: Vec<u64> =
+        tracked.iter().map(|&id| placement_digest(&doc, doc.feature(id).unwrap(), Some(&model.state_before(id)))).collect();
+    let state_before = model.state();
+
+    // Rigidly translate Cap along Z (simulating a slider `joint.drive` stroke).
+    for stroke in [-20.0_f64, -100.0, -250.0, 0.0] {
+        place(&mut doc, cap, rigid(Vec3::new(0.0, 0.0, stroke), Vec3::ZERO, Vec3::Z, 0.0));
+        let digests_after: Vec<u64> =
+            tracked.iter().map(|&id| placement_digest(&doc, doc.feature(id).unwrap(), Some(&model.state_before(id)))).collect();
+        assert_eq!(digests_after, digests_before, "rigid stroke {stroke} must not change captured placement digests");
+        let work = counted(|| model.evaluate(&doc));
+        assert_eq!(model.last_recomputed, 0, "rigid stroke {stroke} must recompute zero features");
+        assert_eq!(work.moved, 0, "rigid stroke {stroke} must move zero frame bodies");
+        assert!(Arc::ptr_eq(&state_before, &model.state()), "rigid stroke {stroke} must retain the evaluated state");
+    }
+
+    // Breaking Cap's occurrence path must still invalidate the captured face anchor and fail cleanly.
+    let mut broken = doc.clone();
+    broken.occurrences.retain(|o| o.component != cap);
+    let broken_sketch_digest = placement_digest(&broken, broken.feature(anchored_sketch).unwrap(), Some(&model.state_before(anchored_sketch)));
+    let broken_plane_digest = placement_digest(&broken, broken.feature(anchored_plane).unwrap(), Some(&model.state_before(anchored_plane)));
+    assert_ne!(broken_sketch_digest, digests_before[0], "missing source occurrence must invalidate captured sketch anchor");
+    assert_ne!(broken_plane_digest, digests_before[1], "missing source occurrence must invalidate captured plane anchor");
+    let mut broken_model = model.clone();
+    broken_model.evaluate(&broken);
+    assert!(broken_model.result(anchored_sketch).and_then(|r| r.error.as_ref()).is_some());
+    assert!(broken_model.result(anchored_plane).and_then(|r| r.error.as_ref()).is_some());
+
+    // An uncaptured (legacy) FaceAnchor (`placement: None`) must remain live when Cap moves.
+    let mut legacy = doc.clone();
+    if let FeatureKind::Sketch { plane: PlaneRef::Face { anchor: Some(a), .. }, .. } = &mut legacy.feature_mut(anchored_sketch).unwrap().kind {
+        a.placement = None;
+    }
+    let mut legacy_model = Model::new();
+    legacy_model.evaluate(&legacy);
+    let legacy_before = placement_digest(&legacy, legacy.feature(anchored_sketch).unwrap(), Some(&legacy_model.state_before(anchored_sketch)));
+    place(&mut legacy, cap, rigid(Vec3::new(0.0, 0.0, -50.0), Vec3::ZERO, Vec3::Z, 0.0));
+    let legacy_after = placement_digest(&legacy, legacy.feature(anchored_sketch).unwrap(), Some(&legacy_model.state_before(anchored_sketch)));
+    assert_ne!(legacy_after, legacy_before, "uncaptured legacy FaceAnchor must stay live across motion");
 }
 
 /// Appending features to a growing multi-body timeline must not make `Model::release_left`
@@ -7698,6 +7873,71 @@ fn capture_position_preserves_last_valid_joint_pose_when_body_removed() {
 }
 
 #[test]
+fn capture_position_keeps_the_centered_pose_after_a_wall_is_removed() {
+    use crate::joints::{Constraint, Joint, JointKind, JointOrigin, Snap};
+    let mut doc = Document::new("last valid Center pose");
+    let slot = doc.add_component(Some("Slot"), 0).unwrap();
+    let slider = doc.add_component(Some("Slider"), 0).unwrap();
+    let wall_occ = doc.occurrences.iter_mut().find(|o| o.component == slot).unwrap();
+    wall_occ.grounded = true;
+    wall_occ.base_transform = Some(IDENTITY);
+    let wall_occ = wall_occ.id;
+    let slider_occ = doc.occurrences.iter().find(|o| o.component == slider).unwrap().id;
+    for (x, name) in [(0.0, "Left"), (30.0, "Right")] {
+        let id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::new(x, 0.0, 0.0)),
+                    length: "10 mm".into(),
+                    width: "10 mm".into(),
+                    height: "10 mm".into(),
+                    operation: Operation::NewBody,
+                    centred: false,
+                },
+                None,
+            )
+            .unwrap();
+        let f = doc.feature_mut(id).unwrap();
+        f.component = slot;
+        f.body_names = vec![name.into()];
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let [a, b] = [10.0, 30.0].map(|x| joints::between_face_pick(&doc, &model.state(), slot, Vec3::new(x, 5.0, 5.0)).unwrap());
+    doc.assembly.joints.push(Joint {
+        id: 1,
+        name: "Center1".into(),
+        kind: JointKind::Planar,
+        a: JointOrigin::new(wall_occ, Snap::BetweenFaces { a, b }),
+        b: JointOrigin::new(slider_occ, Snap::Frame { origin: Vec3::ZERO, z: Vec3::X, x: None }),
+        values: vec![0.0; 3],
+        limits: vec![None; 3],
+        dynamics: Vec::new(),
+        flip: false,
+        offset: 0.0,
+        offset_xy: [0.0; 2],
+        angle: 0.0,
+        suppressed: false,
+        exprs: Default::default(),
+        captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
+        constraint: Some(Constraint::Center),
+    });
+
+    // No intervening feature reads the pose. The solve must still see both walls once.
+    let rem = doc.add_feature(FeatureKind::Remove { bodies: vec!["Right".into()] }, Some("RemoveRight")).unwrap();
+    doc.feature_mut(rem).unwrap().component = slot;
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    let eager = eager_capture_occurrences(&doc, &model);
+    assert_occurrences_close(model.resolved_occurrences(), &eager, "Center after wall removal");
+    let landed = apply_point(&model.resolved_occurrences()[&slider_occ], Vec3::ZERO);
+    assert!((landed.x - 20.0).abs() < 1e-6, "last valid Center pose was at x = 20, got {landed:?}");
+}
+
+#[test]
 fn capture_position_revolute_joint_on_built_faces_matches_eager_solve() {
     use crate::joints::{Joint, JointKind, JointOrigin, Snap, XRef};
     let mut doc = Document::new("revolute built faces vs eager");
@@ -7975,6 +8215,7 @@ fn capture_position_flushes_joints_for_foreign_revolve_axis_in_adopt() {
                 angle2: None,
                 symmetric: false,
                 convention: Default::default(),
+                join_profile_arcs: false,
                 to: None,
             },
             Some("RevRoot"),

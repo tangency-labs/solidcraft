@@ -2050,6 +2050,11 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
         None => solidcraft_doc::RevolveConvention::SketchNormal,
         Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "`convention` must be sketch_normal or legacy_axis_start"))?,
     };
+    let join_profile_arcs = match p.get("join_profile_arcs") {
+        None => true,
+        Some(Value::Bool(join)) => *join,
+        Some(_) => return Err(bad(cmd, "`join_profile_arcs` must be a boolean")),
+    };
     let operation = operation(p, cmd)?;
     let mut targets = face_join_targets(s, p, operation, &[sketch], cmd)?;
     let unnamed = targets.is_empty() && string_list(cmd, p, "participants")?.is_empty();
@@ -2081,6 +2086,7 @@ fn revolve(s: &mut Session, p: &Value) -> Result<Value> {
         angle2,
         symmetric,
         convention,
+        join_profile_arcs,
         to: to.map(FacePick),
     };
     add_feature(s, &p, kind)
@@ -4374,11 +4380,16 @@ fn resolve_explicit_placements(s: &Session, names: Vec<String>, placements: Vec<
     let mut seen: std::collections::BTreeSet<(String, Vec<u64>)> = std::collections::BTreeSet::new();
     for (name, path) in names.into_iter().zip(placements) {
         let (at, _) = s.doc.path_placement(&path).ok_or_else(|| bad(cmd, format!("no placement {path:?}")))?;
-        let own = if let Some(mb) = st.body(&name) {
-            if s.doc.model_body_component(mb) != at {
-                return Err(bad(cmd, format!("placement {path:?} does not show body `{name}`")));
-            }
+        let own = if let Some(mb) = st.bodies.iter().find(|b| b.name == name && s.doc.model_body_component(b) == at) {
             mb.name.clone()
+        } else if let Some((_, own, ..)) = frames.iter().find(|(world, own, component, matched_path, _)| {
+            *component == at
+                && matched_path == &path
+                && (world == &name || qualified_body_name(&occ_names, own, matched_path).as_deref() == Some(name.as_str()))
+        }) {
+            own.clone()
+        } else if st.body(&name).is_some() {
+            return Err(bad(cmd, format!("placement {path:?} does not show body `{name}`")));
         } else if let Some(((_, own, component, matched_path, _), _)) = find_placed_frame(&occ_names, &frames, &name, cmd)? {
             if matched_path != &path {
                 return Err(bad(cmd, format!("body `{name}` is at placement {matched_path:?}, not {path:?}")));

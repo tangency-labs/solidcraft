@@ -231,12 +231,30 @@ mod tests {
     #[test]
     fn test_a_collapsed_track_title_fits_under_its_badge() {
         use super::assembly::collapsed_strip_title;
+        crate::i18n::install();
+        let _language = solidcraft_ui_text::scope("en");
         let width = |s: &str| s.len() as f32 * 6.0;
         assert_eq!(collapsed_strip_title(false, 200.0, width), Some("Assembly & Joints"));
         assert_eq!(collapsed_strip_title(false, 60.0, width), Some("Assembly"));
         assert_eq!(collapsed_strip_title(true, 60.0, width), Some("Modeling"));
         assert_eq!(collapsed_strip_title(false, 30.0, width), None);
         assert_eq!(collapsed_strip_title(true, -5.0, width), None);
+    }
+
+    #[test]
+    fn timeline_track_titles_and_counts_use_the_selected_language() {
+        use super::assembly::collapsed_strip_title;
+        crate::i18n::install();
+        let _language = solidcraft_ui_text::scope("cs");
+        let width = |s: &str| s.chars().count() as f32 * 6.0;
+        assert_eq!(collapsed_strip_title(false, 200.0, width), Some("Sestava a spoje"));
+        assert_eq!(collapsed_strip_title(false, 60.0, width), Some("Sestava"));
+        assert_eq!(collapsed_strip_title(true, 200.0, width), Some("Modelovací prvky"));
+        assert_eq!(collapsed_strip_title(true, 60.0, width), Some("Modelování"));
+        assert_eq!(collapsed_strip_title(true, 30.0, width), None);
+        assert_eq!(solidcraft_ui_text::format("ui.timeline_2d_steps_badge", &[("count", "3")]), "Kroky: 3");
+        assert_eq!(solidcraft_ui_text::format("ui.timeline_2d_joints_badge", &[("count", "2")]), "Spoje: 2");
+        assert_eq!(solidcraft_ui_text::format("ui.timeline_2d_active_summary", &[("active", "2"), ("total", "3")]), "Aktivní: 2 / 3");
     }
 
     /// A corridor is checked outward from the feature and stops at the first move that fails,
@@ -807,6 +825,21 @@ mod tests {
         h.app.run("solid.box", json!({"length": 20.0, "width": 20.0, "height": 10.0, "corner": [30, 0, 0]})).unwrap();
         let _ = h.app.run_heavy("timeline.roll_to", json!({"position": 1}));
         h.frames(3);
+    }
+
+    /// The marker's line ends in a down arrowhead while component rows are out of sight below,
+    /// and in the flat cap otherwise.
+    #[test]
+    fn test_marker_foot_points_down_at_hidden_rows() {
+        let color = egui::Color32::from_rgb(59, 130, 246);
+        let egui::Shape::Path(arrow) = canvas::marker_foot(100.0, 80.0, color, true) else { panic!("an arrowhead while rows are hidden") };
+        assert_eq!(arrow.points.len(), 3);
+        assert!(arrow.points.contains(&egui::pos2(100.0, 80.0)), "its tip ends the line: {:?}", arrow.points);
+        assert!(arrow.points.iter().all(|p| p.y <= 80.0));
+        assert!(matches!(canvas::marker_foot(100.0, 80.0, color, false), egui::Shape::Rect(_)), "the flat cap when all rows show");
+        // The line ends inside both feet: below the arrowhead's base and the 4-point cap's top, above their bottom.
+        let base = arrow.points.iter().map(|p| p.y).fold(f32::MAX, f32::min);
+        assert!(80.0 - canvas::MARKER_FOOT_OVERLAP > base && canvas::MARKER_FOOT_OVERLAP > 0.0 && canvas::MARKER_FOOT_OVERLAP < 4.0);
     }
 
     #[test]
