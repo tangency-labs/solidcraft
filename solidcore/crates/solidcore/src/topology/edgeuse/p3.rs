@@ -2365,8 +2365,12 @@ fn cover_moved_edge(
             }
             continue;
         }
-        // (the structure changed: the distance after the move is proved directly, for a
-        // trim covered before it)
+        // (the structure changed or the trim's control points lie outside the net's knot
+        // box: the distance after the move is proved directly, for a trim covered before it,
+        // using the same `MOVE_COVER_PIECES` budget as the `moved` branch so trims that never
+        // close on a pole or C^0 knot line do not spend `MAX_PIECES` while every endpoint
+        // stays within `tol`, while lifting the cap to `MAX_PIECES` if any endpoint of `b1`
+        // exceeds `tol`)
         let covered_before = trim_image_gap_bound_for_move(
             k,
             &t.surface,
@@ -2375,7 +2379,7 @@ fn cover_moved_edge(
             edge.range,
             floor,
             [tol, tol],
-            None,
+            Some(MOVE_COVER_PIECES),
         )?;
         if !matches!(covered_before, Some(b0) if b0.is_finite()) {
             continue;
@@ -2388,7 +2392,7 @@ fn cover_moved_edge(
             range,
             floor,
             [tol, limit],
-            None,
+            Some(MOVE_COVER_PIECES),
         )?;
         if let Some(b1) = b1.filter(|&b1| b1.is_finite() && b1 > tol) {
             need = need.max(b1);

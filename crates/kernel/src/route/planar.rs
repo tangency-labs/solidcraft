@@ -56,6 +56,15 @@ pub fn is_square_to_radius(centre: [f64; 2], p: [f64; 2], dir: [f64; 2]) -> bool
     }
 }
 
+/// Whether `p` lies on the line through `origin` along `dir`, within `tol` of it; `false` where
+/// `dir` is of no length.
+#[must_use]
+pub fn on_line(p: [f64; 2], origin: [f64; 2], dir: [f64; 2], tol: f64) -> bool {
+    match which(OpKind::Planar) {
+        Which::Solidcore => Solidcore.on_line(p, origin, dir, tol),
+    }
+}
+
 /// The centre of the circle through `a`, `b` and `c`; `None` for points on one line.
 #[must_use]
 pub fn circumcentre(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<[f64; 2]> {
@@ -152,13 +161,18 @@ pub fn exit_through_box(end: Vec3, toward: Vec3, rect: [Vec3; 4]) -> Option<f64>
     }
 }
 
-/// How far along `toward` from `start` its line leaves the round bar of `radius` (mm) about the
-/// line `axis`, without end. `None` for a zero `toward`, a radius not finite and positive, a
-/// degenerate axis, or a line that misses the bar or runs along it.
-#[must_use]
-pub fn exit_through_round(start: Vec3, toward: Vec3, axis: (Vec3, Vec3), radius: f64) -> Option<f64> {
+/// How far past `end` along `toward` a member's end is built to leave the round bars `rounds`
+/// (each its axis's ends and radius, mm) that `end` lies in: the farthest any point of its
+/// section runs on before leaving such a bar's far side, the section bounded by `sections` (each a
+/// rectangle's corners in order, placed at `end`), from 0 to `most`; `Ok(0.0)` where the end meets
+/// no bar.
+///
+/// # Errors
+/// The kernel's refusal, in its words: a non-finite point or length, a zero `toward`, or a bad
+/// radius for a bar the end lies in.
+pub fn reach_through_rounds(end: Vec3, toward: Vec3, sections: &[[Vec3; 4]], rounds: &[(Vec3, Vec3, f64)], most: f64) -> Result<f64, PlanarRefused> {
     match which(OpKind::Planar) {
-        Which::Solidcore => Solidcore.exit_through_round(start, toward, axis, radius),
+        Which::Solidcore => Solidcore.reach_through_rounds(end, toward, sections, rounds, most),
     }
 }
 
@@ -275,6 +289,8 @@ mod tests {
         assert_eq!(tangent_arc_centre(a, b, [0.0, 1.0]), sketch_arc::tangent_arc_centre(a, b, [0.0, 1.0]));
         assert_eq!(joint_turn([1.0, 0.0], [0.0, 1.0]).ok(), turn::joint_turn([1.0, 0.0], [0.0, 1.0]).ok());
         assert_eq!(straight_length(a, b), paper_gaps::straight_length(a, b));
+        assert_eq!(on_line(c, a, [1.0, 1.0], 1e-9), sketch_arc::on_line(c, a, [1.0, 1.0], 1e-9));
+        assert_eq!(on_line(c, a, b, 1e-9), sketch_arc::on_line(c, a, b, 1e-9));
         assert_eq!(distance(a, b), sketch_arc::distance(a, b));
         assert_eq!(left_side_along_line(a, [2.0, 0.0], a, b, 1e-9), sketch_arc::left_side_along_line(a, [2.0, 0.0], a, b, 1e-9));
         assert_eq!(left_side_along_line(a, [2.0, 0.0], a, b, 1e-9), Some(true));

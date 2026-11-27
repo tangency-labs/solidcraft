@@ -28,6 +28,10 @@ impl Planar for Solidcore {
         sketch_arc::is_square_to_radius(centre, p, dir)
     }
 
+    fn on_line(&self, p: [f64; 2], origin: [f64; 2], dir: [f64; 2], tol: f64) -> bool {
+        sketch_arc::on_line(p, origin, dir, tol)
+    }
+
     fn circumcentre(&self, a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<[f64; 2]> {
         sketch_arc::circumcentre(a, b, c)
     }
@@ -68,8 +72,15 @@ impl Planar for Solidcore {
         section_corners::exit_through_box(end, toward, rect)
     }
 
-    fn exit_through_round(&self, start: Vec3, toward: Vec3, axis: (Vec3, Vec3), radius: f64) -> Option<f64> {
-        section_corners::exit_through_round(start, toward, axis, radius)
+    fn reach_through_rounds(
+        &self,
+        end: Vec3,
+        toward: Vec3,
+        sections: &[[Vec3; 4]],
+        rounds: &[(Vec3, Vec3, f64)],
+        most: f64,
+    ) -> Result<f64, PlanarRefused> {
+        section_corners::reach_through_rounds(end, toward, sections, rounds, most).map_err(|e| PlanarRefused(e.to_string()))
     }
 
     fn straight_length(&self, a: [f64; 2], b: [f64; 2]) -> f64 {
