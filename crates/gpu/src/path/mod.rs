@@ -369,19 +369,23 @@ impl Executor {
         let healthy = Arc::new(AtomicBool::new(true));
         let scene_cache = Arc::new(std::sync::Mutex::new(scene::PreparedSceneCache::<PreparedScene>::default()));
         let uncaptured = healthy.clone();
-        let uncaptured_cache = scene_cache.clone();
+        let uncaptured_cache = Arc::downgrade(&scene_cache);
         device.on_uncaptured_error(Arc::new(move |e: wgpu::Error| {
             uncaptured.store(false, Ordering::Release);
-            let evicted = uncaptured_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
-            drop(evicted);
+            if let Some(cache) = uncaptured_cache.upgrade() {
+                let evicted = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+                drop(evicted);
+            }
             log::error!("gpu-path executor retired after uncaptured error: {e}");
         }));
         let lost = healthy.clone();
-        let lost_cache = scene_cache.clone();
+        let lost_cache = Arc::downgrade(&scene_cache);
         device.set_device_lost_callback(move |reason, message| {
             lost.store(false, Ordering::Release);
-            let evicted = lost_cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
-            drop(evicted);
+            if let Some(cache) = lost_cache.upgrade() {
+                let evicted = cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+                drop(evicted);
+            }
             log::warn!("gpu-path device lost ({reason:?}); executor unavailable: {message}");
         });
         let compiling = one_compile_at_a_time();

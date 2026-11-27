@@ -8218,13 +8218,13 @@ fn gpu_scene_preparation_cache_reuses_buffers_and_preserves_bit_identical_output
     // Moving camera.target changes the rebase origin -> miss and evict.
     let mut panned = image.clone();
     panned.camera.target += Vec3::new(0.25, 0.0, 0.0);
-    let panned_task = Task::new(executor.context.clone(), scene.clone(), panned, options, CancelToken::default()).unwrap();
+    let panned_task = Task::new(executor.context.clone(), scene.clone(), panned.clone(), options, CancelToken::default()).unwrap();
     assert!(!panned_task.scene_cache_hit);
 
     // Changing surface appearance invalidates the cache too.
     let mut repainted = scene;
     repainted.meshes[0].surface = Some(OpaqueSurface::new(Vec3::new(0.2, 0.5, 0.8), 0.1, 0.4, 1.5).unwrap());
-    let repainted_task = Task::new(executor.context.clone(), repainted, image, options, CancelToken::default()).unwrap();
+    let repainted_task = Task::new(executor.context.clone(), repainted, panned, options, CancelToken::default()).unwrap();
     assert!(!repainted_task.scene_cache_hit);
 
     // Explicit eviction clears the single-entry cache cleanly.
