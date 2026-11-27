@@ -559,18 +559,18 @@ fn split_body_splits_a_surface_body_along_sketch_curves() {
         run("sketch.circle.center", json!({"center": [0, 0], "radius": 50, "id": "rim"}));
         run("sketch.finish", json!({}));
         run("surface.extrude", json!({"sketch": "ShellSketch", "curves": ["rim"], "distance": 100, "body_name": "Shell"}));
-        run("sketch.create", json!({"plane": "XY", "name": "Cut"}));
+        let sk = run("sketch.create", json!({"plane": "XY", "name": "Cut"}))["sketch"].as_u64().unwrap();
         let p = if cut.starts_with("line") {
             run("sketch.line", json!({"points": [[30, -60], [30, 60]], "ids": ["c"]}));
             if cut == "line" {
-                json!({"body": "Shell", "sketch": "Cut", "curves": ["c"], "extend": false})
+                json!({"body": "Shell", "sketch": sk, "curves": ["c"], "extend": false})
             } else {
-                json!({"body": "Shell", "sketch": "Cut", "line": "c"})
+                json!({"body": "Shell", "sketch": sk, "line": "c"})
             }
         } else {
             let made = run("sketch.arc.center_point", json!({"center": [50, 0], "start": [50, 30], "end": [50, -30]}));
             let id = made["created"]["curves"][0].clone();
-            json!({"body": "Shell", "sketch": "Cut", "line": id})
+            json!({"body": "Shell", "sketch": sk, "line": id})
         };
         run("sketch.finish", json!({}));
         run("solid.split_body", p.clone());
