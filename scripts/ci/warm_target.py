@@ -22,6 +22,9 @@ half-done is rebuilt whatever its file looks like then.
 With no index on the disk (a new key, or a disk from before this script) nothing is touched: the
 files keep their checkout times and the workspace crates are rebuilt, as without the disk.
 A writer whose disk is more than USAGE_LIMIT full empties it first (one cold build).
+
+`prepare` writes `warm=true` to $GITHUB_OUTPUT when the disk held a tree to compare against, and
+`warm=false` otherwise, so a job can build less on a cold disk.
 """
 import argparse
 import os
@@ -79,6 +82,13 @@ def empty_dir(target):
             os.unlink(p)
 
 
+def output(warm):
+    path = os.environ.get("GITHUB_OUTPUT")
+    if path:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"warm={'true' if warm else 'false'}\n")
+
+
 def prepare(target, writer):
     os.makedirs(target, exist_ok=True)
     try:
@@ -107,6 +117,7 @@ def prepare(target, writer):
         changed = set(now)
         if writer:
             write_state(target, raw, changed)
+        output(False)
         return
     changed = {p for p, e in now.items() if old.get(p) != e} | (pending & set(now))
     removed = [p for p in old if p not in now] + [p for p in pending if p not in now]
@@ -140,6 +151,7 @@ def prepare(target, writer):
         print(f"  ... and {len(changed) - 40} more")
     if writer:
         write_state(target, raw, changed)
+    output(True)
 
 
 def write_state(target, raw, changed):

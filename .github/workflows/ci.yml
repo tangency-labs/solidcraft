@@ -691,6 +691,7 @@ jobs:
           path: ${{ github.workspace }}/target
           commit: ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && 'on-change' || 'false' }}
       - name: Mark what changed since the build directory's tree
+        id: target
         run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && '--writer' || '' }}
       # The registry and git checkouts only: target/ is on the disk above.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -699,13 +700,20 @@ jobs:
           cache-targets: "false"
           save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Clippy
+        # The whole workspace, pull requests too: on a warm target/ disk only what changed (the
+        # affected packages, scripts/ci/affected.py) is linted again, and `-p` for a few packages
+        # resolved other features than main's build, so it compiled their dependencies again. On a
+        # cold disk (no warm build to start from) a pull request lints only its packages, as before.
         env:
           FULL: ${{ needs.changes.outputs.full }}
           PACKAGES: ${{ needs.changes.outputs.packages }}
-        # The whole workspace, pull requests too: on the target/ disk only what changed (the affected
-        # packages, scripts/ci/affected.py) is linted again, and `-p` for a few packages resolved
-        # other features than main's build, so it compiled their dependencies again.
-        run: cargo clippy --workspace --all-targets --profile ci --locked -- -D warnings
+          WARM_DISK: ${{ steps.target.outputs.warm }}
+        run: |
+          scope=(--workspace)
+          if [ "$FULL" != true ] && [ "$WARM_DISK" != true ] && [ "$GITHUB_REF" != refs/heads/main ]; then
+            scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done
+          fi
+          cargo clippy "${scope[@]}" --all-targets --profile ci --locked -- -D warnings
       - name: Seal the build directory
         if: success() && (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target')
         run: python3 -I scripts/ci/warm_target.py seal --target target
@@ -879,6 +887,7 @@ jobs:
           path: ${{ github.workspace }}/target
           commit: ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && 'on-change' || 'false' }}
       - name: Mark what changed since the build directory's tree
+        id: target
         run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ (github.ref == 'refs/heads/main' || github.head_ref == 'ci-warm-target') && '--writer' || '' }}
       # The registry and git checkouts only: target/ is on the disk above.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -909,6 +918,7 @@ jobs:
           FULL: ${{ needs.changes.outputs.full }}
           PACKAGES: ${{ needs.changes.outputs.packages }}
           GPU_SHARDS: ${{ needs.changes.outputs.gpu }}
+          WARM_DISK: ${{ steps.target.outputs.warm }}
         run: |
           # Pull requests skip the heavy tests (default-filter in .config/nextest.toml); `default()`
           # below is that filter, so a pull request still runs only what it ran before.
@@ -930,10 +940,15 @@ jobs:
           # features for those alone, so most crates got other metadata than main's build and were
           # compiled again (about 190 dependencies and all 85 workspace crates). On the target/
           # disk the whole workspace costs only what changed, which is what those packages are.
+          # Without a warm disk (a new key, or one Blacksmith evicted) the whole workspace is a cold
+          # build, so a pull request then builds only its packages, as before.
+          scope=(--workspace)
           picked=
-          if [ "$FULL" != true ]; then
+          if [ "$FULL" != true ] && [ "$WARM_DISK" = true ]; then
             for p in $PACKAGES; do picked="${picked:+$picked | }package(=$p)"; done
             base="($base) & ($picked)"
+          elif [ "$FULL" != true ]; then
+            scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done
           fi
           # The GPU path tracer's tests run in their own job (GPU path tests): one at a time, they
           # took about 36 of this job's 45 minutes.
@@ -948,7 +963,7 @@ jobs:
           # that passes. nextest's exit code 100 is "tests failed"; any other is its own error
           # (a build error, a bad filter) and fails the step at once.
           status=0
-          cargo nextest run --workspace --cargo-profile ci --locked --profile ci --no-tests=pass \
+          cargo nextest run "${scope[@]}" --cargo-profile ci --locked --profile ci --no-tests=pass \
             --ignore-default-filter -E "($base) & not ($excluded)" || status=$?
           if [ "$status" -ne 0 ] && [ "$status" -ne 100 ]; then exit "$status"; fi
           cargo xtask known-failing --junit "$junit"
@@ -957,9 +972,28 @@ jobs:
       # whole workspace, and the CLI's integration tests (CARGO_BIN_EXE) build its binary.
       # Building it on its own (`cargo build -p solidcraft-cli`) resolved other features and
       # compiled most of the workspace a second time (about 6.5 minutes).
+      # On a cold disk a pull request tested only its packages (above): then, as before, the check
+      # is skipped when no package that feeds the command table changed, and the CLI is built when
+      # its tests did not build it.
       - name: Command labels in the translation catalogs
         if: needs.changes.outputs.warm != 'true'
-        run: cargo xtask i18n --check --cli "${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+        env:
+          FULL: ${{ needs.changes.outputs.full }}
+          PACKAGES: ${{ needs.changes.outputs.packages }}
+          WARM_DISK: ${{ steps.target.outputs.warm }}
+        run: |
+          cli="${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+          if [ "$FULL" != true ] && [ "$WARM_DISK" != true ]; then
+            case " $PACKAGES " in
+              *" solidcraft-cli "*|*" solidcraft-ui-egui "*|*" xtask "*) ;;
+              *) echo "No package that feeds the command table changed."; exit 0 ;;
+            esac
+            case " $PACKAGES " in
+              *" solidcraft-cli "*) ;;
+              *) cargo build -p solidcraft-cli --profile ci --locked ;;
+            esac
+          fi
+          cargo xtask i18n --check --cli "$cli"
       - name: Compiler cache statistics
         if: always()
         run: if command -v sccache >/dev/null; then sccache --show-stats; else echo "sccache was not set up; built without it"; fi
