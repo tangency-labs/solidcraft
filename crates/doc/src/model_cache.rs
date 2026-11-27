@@ -1535,6 +1535,7 @@ impl Model {
             }
         }
         let marker = doc.marker.unwrap_or(usize::MAX);
+        let constructions = super::construction_indices(doc);
         let ctx = context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let shared = shared_context_digest(doc, &vals) ^ validation_digest(validation) ^ heal_digest(heal);
         let origin_frames = states.first().map(|s| s.origin_frames.clone()).unwrap_or_default();
@@ -1564,7 +1565,8 @@ impl Model {
             // A fingerprint reads the state before its feature (where the bodies it takes lie).
             // After a state the file left out, the saved one is taken: `evaluate` works that state
             // out, checks the fingerprints after it, and evaluates again from one that differs.
-            prev = if exact { chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &import_digests, Some(&before)) } else { saved };
+            prev =
+                if exact { chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &import_digests, Some(&before), &constructions) } else { saved };
             if r.get("id").and_then(Json::as_u64) != Some(f.id) || saved != prev {
                 return Err(bad("saved model: the document changed"));
             }
@@ -1633,7 +1635,19 @@ impl Model {
                 if !pose_only(f)
                     && let Some(cache) = pass1_cache.as_mut()
                 {
-                    let reached = cache_adopted_result(cache, eval_doc, &vals, f, &result, ctx, shared, &before, &import_digests, &component_digests);
+                    let reached = cache_adopted_result(
+                        cache,
+                        eval_doc,
+                        &vals,
+                        f,
+                        &result,
+                        ctx,
+                        shared,
+                        &before,
+                        &import_digests,
+                        &constructions,
+                        &component_digests,
+                    );
                     pass1_component_keys.insert(f.id, reached);
                 }
                 exact = !result.unkept;
@@ -1699,8 +1713,19 @@ impl Model {
                     // A pose-only feature's fingerprint leaves its pose out, so its saved result may be
                     // from another pose than `doc`'s: it is no result for `doc`'s key (#12139).
                     if !pose_only(f) {
-                        let reached =
-                            cache_adopted_result(&mut cache, eval_doc, &vals, f, r, ctx, shared, &before, &model.import_digests, &component_digests);
+                        let reached = cache_adopted_result(
+                            &mut cache,
+                            eval_doc,
+                            &vals,
+                            f,
+                            r,
+                            ctx,
+                            shared,
+                            &before,
+                            &model.import_digests,
+                            &constructions,
+                            &component_digests,
+                        );
                         model.component_keys.insert(f.id, reached);
                     }
                     let prev_state = before;
@@ -1732,9 +1757,10 @@ fn cache_adopted_result(
     shared: u64,
     before: &ModelState,
     import_digests: &ImportDigests,
+    constructions: &[usize],
     component_digests: &super::ComponentDigests,
 ) -> u64 {
-    let key = EvalKey::new(eval_doc, vals, f, r.fingerprint, ctx, shared, before, import_digests, component_digests);
+    let key = EvalKey::new(eval_doc, vals, f, r.fingerprint, ctx, shared, before, import_digests, constructions, component_digests);
     let whole = CachedEval {
         error: None,
         error_code: None,

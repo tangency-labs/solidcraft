@@ -1123,6 +1123,7 @@ pub fn legacy_panel(tab: &str, panel: &str) -> Option<(&'static str, &'static st
 pub fn feature_icon(k: &FeatureKind) -> Option<&'static str> {
     Some(match k {
         FeatureKind::SheetBase { .. } | FeatureKind::SheetContour { .. } | FeatureKind::SheetFlange { .. } => "flange",
+        FeatureKind::SheetCornerJoin { .. } => "corner_join",
         FeatureKind::SheetHem { .. } => "hem",
         FeatureKind::SheetFold { .. } => "fold",
         FeatureKind::SheetPath { .. } => "path_flange",

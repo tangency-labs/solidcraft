@@ -3530,6 +3530,15 @@ pub(super) fn copy_keeps_appearance_for(
                 s.doc_mut().appearances.bodies.remove(&copy);
             }
         }
+        // A new copy, or one whose source changed, takes the source's edge lines; a copy rebuilt
+        // from the same body keeps what was set on it.
+        if !same_source {
+            if s.doc.edgeless_bodies.contains(&source) {
+                s.doc_mut().edgeless_bodies.insert(copy.clone());
+            } else {
+                s.doc_mut().edgeless_bodies.remove(&copy);
+            }
+        }
         if !same_source && s.doc.materials.contains_key(&copy) {
             s.doc_mut().materials.remove(&copy);
         }

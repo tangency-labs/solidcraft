@@ -101,10 +101,11 @@ impl Checks {
     /// the features after it ([`kernel::detach_kept`]); `None` when it runs in line.
     pub fn detach(&self, before: &ModelState, after: &ModelState) -> Option<Vec<(String, kernel::KeptCheck)>> {
         self.on.then(|| {
+            let prior = super::ShapeIndex::new(&before.bodies);
             after
                 .bodies
                 .iter()
-                .filter(|b| !before.bodies.iter().any(|old| old.body.same_shape(&b.body)))
+                .filter(|b| !prior.contains(&b.body))
                 .filter(|b| {
                     let reused = super::checked_thread_output(&b.body);
                     #[cfg(test)]

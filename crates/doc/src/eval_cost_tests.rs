@@ -68,6 +68,8 @@ pub(crate) struct Counts {
     pub join_unions: usize,
     /// Per-step placement joint solves made while stepping a `CapturePosition` timeline.
     pub step_joint_solves: usize,
+    /// Historical states whose bodies `Model::release_left` had to scan.
+    pub release_states_scanned: usize,
 }
 
 thread_local! {
@@ -107,6 +109,7 @@ thread_local! {
             contact_tests: 0,
             join_unions: 0,
             step_joint_solves: 0,
+            release_states_scanned: 0,
         })
     };
 }
@@ -210,6 +213,7 @@ pub(crate) fn add(delta: Counts) {
         contact_tests,
         join_unions,
         step_joint_solves,
+        release_states_scanned,
     } = delta;
     count(|c| {
         c.moved += moved;
@@ -246,6 +250,7 @@ pub(crate) fn add(delta: Counts) {
         c.contact_tests += contact_tests;
         c.join_unions += join_unions;
         c.step_joint_solves += step_joint_solves;
+        c.release_states_scanned += release_states_scanned;
     });
 }
 
@@ -763,10 +768,11 @@ fn a_frame_without_turns_keeps_its_fingerprint() {
         let vals = super::evaluation_values(doc).0;
         let f = doc.feature(frame).unwrap();
         let steps = super::ImportDigests::default();
-        let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None);
+        let constructions = super::construction_indices(doc);
+        let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None, &constructions);
         // And the key its result is cached under, which leaves the chain out.
         let comps = super::ComponentDigests::of(doc);
-        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, 0, &ModelState::default(), &steps, &comps).whole)
+        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, 0, &ModelState::default(), &steps, &constructions, &comps).whole)
     };
     let before = key(&doc);
     let turn = doc
@@ -3398,6 +3404,7 @@ fn a_flange_lays_its_sheet_out_once() {
         corner_relief: None,
         height_from: None,
         bend_relief_shape: None,
+        corners: Vec::new(),
     };
     for p in [Vec3::new(75.0, 0.0, 2.5), Vec3::new(75.0, 100.0, 2.5), Vec3::new(0.0, 50.0, 2.5), Vec3::new(150.0, 50.0, 2.5)] {
         // The pick is named as the engine names it, on the model as it is.
@@ -6572,6 +6579,228 @@ fn mirroring_cuts_that_consume_the_target_matches_sequential_refusal() {
     let err_seq = run(1);
     assert!(err_batch.as_deref().is_some_and(|e| e.contains("no body to cut")), "{err_batch:?}");
     assert_eq!(err_batch, err_seq);
+}
+
+/// Appending features to a growing multi-body timeline must not make `Model::release_left`
+/// rescan every historical state's bodies on each command; editing an earlier feature so a body
+/// actually leaves the model still scans and releases departed forms.
+#[test]
+fn release_left_skips_historical_state_scans_while_appending_and_releases_departed_solids() {
+    let mut doc = Document::new("release witness");
+    let first = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Base"),
+        )
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    model.release_left();
+    for k in 1..20 {
+        doc.add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(k as f64 * 25.0, 0.0, 0.0)),
+                length: "8".into(),
+                width: "8".into(),
+                height: "8".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+        model.evaluate(&doc);
+        let work = counted(|| model.release_left());
+        assert_eq!(work.release_states_scanned, 0, "step {k}: appending must prove every noted solid held via its witness");
+    }
+    assert_eq!(model.state().bodies.len(), 20);
+    // Editing the first feature replaces every historical state, so old solids actually depart.
+    let FeatureKind::Box { length, .. } = &mut doc.feature_mut(first).unwrap().kind else { panic!("box") };
+    *length = "14".into();
+    model.evaluate(&doc);
+    let passes_before = model.cache.lock().unwrap().release_passes;
+    let work = counted(|| model.release_left());
+    assert!(work.release_states_scanned > 0, "departed solids must be verified against held states");
+    assert_eq!(model.cache.lock().unwrap().release_passes, passes_before + 1);
+    assert!((kernel::measure(&model.state().bodies[0].body).unwrap().volume - 1400.0).abs() < 1e-6);
+}
+
+/// Incremental append evaluation in `expr::eval_params` must match full evaluation on growing
+/// literal feature-input lists as well as fallback cases (references, duplicates, and errors).
+#[test]
+fn incremental_eval_params_matches_full_evaluation_on_appended_literal_inputs() {
+    use crate::expr::{ParamDef, eval_params};
+    let mut defs: Vec<ParamDef> = vec![
+        ParamDef { name: "base".into(), expr: "10 mm".into(), unit: "mm".into() },
+        ParamDef { name: "double".into(), expr: "base * 2".into(), unit: "mm".into() },
+    ];
+    let (v0, e0) = eval_params(&defs, 1.0);
+    assert!(e0.is_empty());
+    assert!((v0["double"].v - 20.0).abs() < 1e-12);
+    for k in 1..=30 {
+        defs.push(ParamDef { name: format!("d{k}"), expr: format!("{}", k as f64 * 1.5), unit: "mm".into() });
+        let (vals, errs) = eval_params(&defs, 1.0);
+        assert!(errs.is_empty(), "step {k}: {errs:?}");
+        assert_eq!(vals.len(), defs.len());
+        assert!((vals[&format!("d{k}")].v - k as f64 * 1.5).abs() < 1e-12);
+    }
+    // Appending a parameter that references an existing one falls back cleanly and evaluates right.
+    defs.push(ParamDef { name: "sum".into(), expr: "d1 + d30".into(), unit: "mm".into() });
+    let (vals, errs) = eval_params(&defs, 1.0);
+    assert!(errs.is_empty(), "{errs:?}");
+    assert!((vals["sum"].v - 46.5).abs() < 1e-12);
+    // Appending a bad literal expression records the error cleanly without corrupting prior values.
+    defs.push(ParamDef { name: "broken".into(), expr: "10 mm + 5 deg".into(), unit: "mm".into() });
+    let (vals, errs) = eval_params(&defs, 1.0);
+    assert!(errs.contains_key("broken"), "{errs:?}");
+    assert!((vals["sum"].v - 46.5).abs() < 1e-12);
+}
+
+/// `Document::name_feature_inputs` and `Document::param_defs` preserve exact slot ordering,
+/// existing names, user-parameter avoidance, and design-unit rules in a single pass.
+#[test]
+fn name_feature_inputs_and_param_defs_preserve_order_and_units() {
+    let mut doc = Document::new("param defs");
+    doc.units = "in".into();
+    doc.set_param("d2", "2 in", Some("in"), None).unwrap();
+    let f1 = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "d2".into(),
+                height: "30".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(f1).unwrap().param_names = vec![String::new(), "custom_w".into()];
+    doc.name_feature_inputs(f1);
+    assert_eq!(doc.feature(f1).unwrap().param_names, vec!["d1", "custom_w", "d3"]);
+    let defs = doc.param_defs();
+    let by_name: BTreeMap<&str, (&str, &str)> = defs.iter().map(|p| (p.name.as_str(), (p.expr.as_str(), p.unit.as_str()))).collect();
+    assert_eq!(by_name.get("d1"), Some(&("10", "mm")));
+    assert_eq!(by_name.get("custom_w"), Some(&("d2", "in")));
+    assert_eq!(by_name.get("d3"), Some(&("30", "mm")));
+}
+
+/// `ShapeIndex` (used by `check_kept`, `Checks::detach`, `replaced`, and `added_bytes`) matches
+/// every body pair accepted by `Body::same_shape` — including two distinct lazily moved wrappers
+/// sharing a source and rigid motion (without materializing either), and a materialized lazy move
+/// paired with the ready record it produced — even though their `solid_id()` values differ.
+#[test]
+fn shape_index_matches_same_shape_for_lazy_moved_and_ready_bodies() {
+    let mut doc = Document::new("lazy shape index");
+    block(&mut doc, "A", Vec3::ZERO, [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let base = model.state().bodies[0].body.clone();
+
+    let shift_pos = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [25.0, 0.0, 0.0, 1.0]];
+    let shift_neg_zero = [[1.0, -0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [25.0, -0.0, 0.0, 1.0]];
+    let other_shift = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [40.0, 0.0, 0.0, 1.0]];
+
+    let moved_a = kernel::transform_matrix(&base, shift_pos).unwrap();
+    let moved_b = kernel::transform_matrix(&base, shift_neg_zero).unwrap();
+    let moved_other = kernel::transform_matrix(&base, other_shift).unwrap();
+
+    assert_ne!(moved_a.solid_id(), moved_b.solid_id(), "separate lazy moves have distinct wrapper addresses");
+    assert!(moved_a.same_shape(&moved_b));
+    assert!(!moved_a.same_shape(&moved_other));
+    assert!(!moved_a.lazy_move_made() && !moved_b.lazy_move_made());
+
+    let state_of = |body: kernel::Body| ModelState { bodies: vec![ModelBody::new("A".into(), body, 1)], ..ModelState::default() };
+    let before_lazy = state_of(moved_a.clone());
+    let after_lazy = state_of(moved_b.clone());
+    let after_other = state_of(moved_other.clone());
+
+    let checks = super::overlap::Checks::new(kernel::Validation::EachFeature);
+    assert!(super::ShapeIndex::new(&before_lazy.bodies).contains(&moved_b));
+    assert!(!super::ShapeIndex::new(&before_lazy.bodies).contains(&moved_other));
+    assert_eq!(counted(|| super::check_kept(&before_lazy, &after_lazy).unwrap()).kept_checks, 0);
+    assert!(checks.detach(&before_lazy, &after_lazy).is_none_or(|v| v.is_empty()));
+    assert!(super::replaced(&before_lazy, &after_lazy).is_empty());
+    assert_eq!(after_lazy.added_bytes(&before_lazy), 0);
+    assert!(!moved_a.lazy_move_made() && !moved_b.lazy_move_made(), "shape indexing must not materialize lazy moves");
+    assert_eq!(super::replaced(&before_lazy, &after_other).len(), 1);
+
+    // A materialized lazy move and a ready body sharing its Arc<Brep> also differ by solid_id(),
+    // yet satisfy same_shape() in both directions.
+    let ready = moved_a.into_ready_for_tests();
+    assert!(moved_a.lazy_move_made());
+    assert_ne!(moved_a.solid_id(), ready.solid_id());
+    assert!(moved_a.same_shape(&ready) && ready.same_shape(&moved_a));
+
+    let state_moved = state_of(moved_a);
+    let state_ready = state_of(ready);
+    for (before, after) in [(&state_moved, &state_ready), (&state_ready, &state_moved)] {
+        assert!(super::ShapeIndex::new(&before.bodies).contains(&after.bodies[0].body));
+        assert_eq!(counted(|| super::check_kept(before, after).unwrap()).kept_checks, 0);
+        assert!(checks.detach(before, after).is_none_or(|v| v.is_empty()));
+        assert!(super::replaced(before, after).is_empty());
+        assert_eq!(after.added_bytes(before), 0);
+    }
+}
+
+/// Fast-path model renames (`rename_body`, `rename_feature`, `rename_param`) update results
+/// in place without evaluating any feature, so they must clear `last_recomputed` and
+/// `last_restored` from the preceding evaluation just as `evaluate_shared` does on reuse.
+#[test]
+fn fast_path_model_renames_clear_last_recomputed() {
+    let mut doc = Document::new("rename clears last_recomputed");
+    doc.set_param("w", "10 mm", Some("mm"), None).unwrap();
+    let feature = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "w".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(feature).unwrap().body_names = vec!["Body1".into()];
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1);
+
+    let mut renamed_param = doc.clone();
+    renamed_param.rename_param("w", "plate_w").unwrap();
+    assert!(model.rename_param(&doc, &renamed_param, "w", "plate_w"));
+    assert_eq!((model.last_recomputed, model.last_restored), (0, 0));
+
+    let mut grown = renamed_param.clone();
+    grown.set_param("plate_w", "20 mm", Some("mm"), None).unwrap();
+    model.evaluate(&grown);
+    assert_eq!(model.last_recomputed, 1);
+
+    let mut renamed_feature = grown.clone();
+    renamed_feature.feature_mut(feature).unwrap().name = "BasePlate".into();
+    assert!(model.rename_feature(&renamed_feature, feature));
+    assert_eq!((model.last_recomputed, model.last_restored), (0, 0));
+
+    let mut taller = renamed_feature.clone();
+    taller.set_param("plate_w", "30 mm", Some("mm"), None).unwrap();
+    model.evaluate(&taller);
+    assert_eq!(model.last_recomputed, 1);
+
+    let mut renamed_body = taller.clone();
+    renamed_body.feature_mut(feature).unwrap().body_names = vec!["PlateBody".into()];
+    assert!(model.rename_body(&renamed_body, "Body1", "PlateBody"));
+    assert_eq!((model.last_recomputed, model.last_restored), (0, 0));
 }
 
 /// Multi-body `join` pre-filters targets by inflated exact bounds before calling `Body::meets`,

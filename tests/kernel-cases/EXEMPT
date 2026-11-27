@@ -25,6 +25,7 @@ assembly.bom.renumber             the bill of materials: its tests in crates/eng
 assembly.constraint.create        assembly placement: tested in joints_relations_tests.rs
 assembly.constraint.edit          assembly placement: tested in joints_relations_tests.rs
 body.collision                    URDF collision shape: no geometry built (crates/engine/src/cmd/urdf_tests.rs)
+body.edge_lines                   display only: which bodies draw their edge lines (crates/engine/src/cmd/component_properties_tests.rs)
 body.print_faces                  reports which bodies have a print face; crates/engine/src/cmd/print_face.rs tests
 body.remove_history               timeline bookkeeping: the body's B-rep kept as a base feature (crates/engine/src/cmd/edit_tests.rs)
 body.rename                       a body name
@@ -416,6 +417,7 @@ settings.profile.save             settings profiles: preferences saved, applied 
 shaft_spline.insert               crates/engine/src/cmd/shaft_spline_tests.rs (volumes and faces against hand-derived values) and the tooth outline tests in solidcore/crates/solidcore/src/teeth/tests.rs
 sheet.bead                        formed beads pressed into a panel: crates/engine/src/cmd/sheet_surface_bead_tests.rs and solidcore/crates/solidcore/src/develop/bead_tests.rs
 sheet.convert                     every face a panel: crates/engine/src/cmd/sheet_surface_convert_tests.rs and sheet_convert_tests.rs (thin solids are sheet.recognize, which the convert-named cases here run)
+sheet.corner_join                 named flange sources, overlap modes and atomic refusal: crates/doc/src/sheet_surface_features.rs
 sheet.hardware                    a hole in a sheet's flat, no kernel operation of its own: crates/engine/src/cmd/sheet_surface_cut_tests.rs and crates/ui-egui/src/dialogs_sheet_tests.rs
 sheet.measure_body                measures a body's thickness and modelled bend radii, makes nothing: crates/engine/src/cmd/sheet_recognize_tests.rs
 sheet.rule_library                the standard library's listing, makes nothing: crates/engine/src/cmd/sheet_tests.rs and crates/doc/src/sheet_library_tests.rs

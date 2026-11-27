@@ -81,6 +81,13 @@ pub enum JointRefusal {
     RipNotFinite,
     /// A rip that cuts less than 0, or a number that is not finite, from a side.
     RipLap,
+    /// An overlap whose gap is not positive, or whose coverage is not positive, finite
+    /// and at most the sheet's thickness.
+    OverlapRange,
+    /// An overlap where the sheet runs straight on or turns a half turn.
+    OverlapTurn,
+    /// A planar full overlap would collapse or invert a circular edge.
+    OverlapArcRadius,
     /// A rip's edge that leaves its panel's surface where it is cut back.
     RipOffSurface,
     /// A rip's edge that is not on its panel's outline.
@@ -98,6 +105,33 @@ pub enum JointRefusal {
     OutlineFit,
     /// An anchor with no frame on its panel's surface.
     NoFrame,
+}
+
+/// Why a flange corner setback could not be replaced.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CornerTailRefusal {
+    /// The shared side has no length.
+    NoLength,
+    /// The side runs along the bend instead of away from it.
+    AlongBend,
+    /// The contour contains multiple candidate trims or too few edges to restore one.
+    AmbiguousTrim,
+    /// The trim has no surrounding outline.
+    MissingContour,
+    /// The old trim no longer matches the outline beside it.
+    ModifiedTrim,
+    /// The edge beyond the old trim is not a line.
+    CurvedEdgePastTrim,
+    /// The edge beyond the old trim runs parallel to the side.
+    ParallelEdgePastTrim,
+    /// The restored side would not reach beyond the other flange.
+    ShortTrim,
+    /// The continuation beyond the shared corner has been changed.
+    ModifiedSide,
+    /// Multiple outline edges could be the taller side.
+    AmbiguousSide,
+    /// The new setback cannot meet the next straight edge without reversing it.
+    CannotSetBack,
 }
 
 /// Which of the sheet's rule values is refused.
@@ -251,6 +285,23 @@ pub trait Develop: Backend {
     /// right of the travel, or left when `flip`; corners turning less than `smooth` radians meet on
     /// the common normal.
     fn offset_contour(&self, segs: &[Seg2], depth: f64, thickness: f64, flip: bool, smooth: f64) -> Result<Vec<Seg2>, ContourRefusal>;
+    /// Replaces `old_cut` with `new_cut` beyond the shared flange `edge`, using the
+    /// bend anchor and length to orient the side in the panel chart.
+    fn retarget_corner_tail(
+        &self,
+        region: &Region2,
+        edge: [Vec2; 2],
+        anchor_origin: Vec2,
+        anchor_direction: Vec2,
+        bend_length: f64,
+        old_cut: f64,
+        new_cut: f64,
+    ) -> Result<Region2, CornerTailRefusal>;
+    /// Sets a straight side back by `by` along `into`, preserving holes. The side starts
+    /// at `from`, runs along `direction` for `rise`, and the setback starts at `height`.
+    /// Returns `None` if the side or its straight successor cannot be found, or the
+    /// setback would reverse the successor.
+    fn set_back_past(&self, region: &Region2, from: Vec2, direction: Vec2, rise: f64, height: f64, into: Vec2, by: f64) -> Option<Region2>;
     /// Where the flat is cut at one end of a bend's zone that a tear relief parts: along the zone's
     /// end from `from` toward `to`, from `depth` back inside the panel that runs on out to the
     /// farthest corner of the ending panel's `outline` on the line square to its anchor `ends` at

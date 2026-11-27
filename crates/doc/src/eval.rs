@@ -1929,19 +1929,12 @@ impl ModelState {
     /// to the budget keep only its last few states, so setting a parameter back recomputed what
     /// had dropped out.
     fn added_bytes(&self, before: &ModelState) -> usize {
-        // `before`'s bodies by solid, and its sketches by address: looked up per body and sketch,
-        // not searched (every feature's result is charged, so searching was bodies² per feature).
-        // Bodies sharing a solid are still told apart by `same_shape` (the mesh as well).
-        let mut solids: std::collections::HashMap<usize, Vec<&Body>> = std::collections::HashMap::with_capacity(before.bodies.len());
-        for o in &before.bodies {
-            solids.entry(o.body.solid_id()).or_default().push(&o.body);
-        }
-        let bodies: usize = self
-            .bodies
-            .iter()
-            .filter(|b| !solids.get(&b.body.solid_id()).is_some_and(|os| os.iter().any(|o| o.same_shape(&b.body))))
-            .map(|b| if b.bytes > 0 { b.bytes } else { b.body.retained_bytes() })
-            .sum();
+        // `before`'s bodies by shape keys, and its sketches by address: looked up per body and
+        // sketch, not searched (every feature's result is charged, so searching was bodies² per
+        // feature). Bodies sharing a key are still told apart by `same_shape` (the mesh as well).
+        let solids = ShapeIndex::new(&before.bodies);
+        let bodies: usize =
+            self.bodies.iter().filter(|b| !solids.contains(&b.body)).map(|b| if b.bytes > 0 { b.bytes } else { b.body.retained_bytes() }).sum();
         let kept: std::collections::HashSet<*const SolvedSketch> = before.sketches.iter().map(Arc::as_ptr).collect();
         let sketches: usize = self.sketches.iter().filter(|s| !kept.contains(&Arc::as_ptr(s))).map(|s| s.retained_bytes()).sum();
         // A state holds its sheets made from surfaces as it holds its threads, a copy of its own:
@@ -2181,7 +2174,7 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
     prev.hash(&mut h);
     rolled_back.hash(&mut h);
     vals.get(DESIGN_LEN).map(|v| v.v.to_bits()).hash(&mut h);
-    hash_feature_json(f, steps, &mut h);
+    let cached = hash_feature_json(f, steps, &mut h);
     // An import read, and a Repair evaluated, with the tolerance heal off are other results.
     if steps.heal_off && matches!(f.kind, FeatureKind::Import { .. } | FeatureKind::Repair { .. }) {
         ("tolerance heal", "off").hash(&mut h);
@@ -2194,9 +2187,17 @@ fn fingerprint(doc: &Document, prev: u64, f: &Feature, vals: &BTreeMap<String, V
         // Older cached member bodies do not have line provenance; rebuild them once.
         "frame-member-line".hash(&mut h);
     }
-    for n in param_names(f) {
+    let owned;
+    let names: &[String] = match &cached {
+        Some(entry) => &entry.2,
+        None => {
+            owned = param_names(f);
+            &owned
+        }
+    };
+    for n in names {
         n.hash(&mut h);
-        match (vals.get(&n), doc.text_param(&n)) {
+        match (vals.get(n), doc.text_param(n)) {
             (Some(v), _) => {
                 v.v.to_bits().hash(&mut h);
                 v.len.hash(&mut h);
@@ -2508,30 +2509,31 @@ fn fingerprint_sketch(sk: &mut solidcraft_sketch::Sketch) {
 /// feature again. The lock is held only to look up or store an entry, never while a feature is
 /// compared or written; an entry is the same whichever thread wrote it, since the text is a
 /// function of the feature alone.
-fn hash_feature_json(f: &Feature, steps: &ImportDigests, h: &mut impl Hasher) {
-    type Written = std::collections::HashMap<u64, Arc<(Feature, String)>>;
+fn hash_feature_json(f: &Feature, steps: &ImportDigests, h: &mut impl Hasher) -> Option<Arc<(Feature, String, Vec<String>)>> {
+    type Written = std::collections::HashMap<u64, Arc<(Feature, String, Vec<String>)>>;
     static WRITTEN: std::sync::LazyLock<std::sync::Mutex<Written>> = std::sync::LazyLock::new(Default::default);
     if matches!(f.kind, FeatureKind::Import { .. } | FeatureKind::MeshImport { .. }) {
         feature_json(f, steps).hash(h);
-        return;
+        return None;
     }
     let seen = WRITTEN.lock().unwrap_or_else(|e| e.into_inner()).get(&f.id).cloned();
     if let Some(seen) = seen
         && seen.0 == *f
     {
         seen.1.hash(h);
-        return;
+        return Some(seen);
     }
     #[cfg(test)]
     cost_tests::count_written();
     let json = feature_json(f, steps);
     json.hash(h);
-    let entry = Arc::new((f.clone(), json));
+    let entry = Arc::new((f.clone(), json, param_names(f)));
     let mut written = WRITTEN.lock().unwrap_or_else(|e| e.into_inner());
     if written.len() >= 1 << 15 {
         written.clear();
     }
-    written.insert(f.id, entry);
+    written.insert(f.id, entry.clone());
+    Some(entry)
 }
 
 fn feature_json(f: &Feature, steps: &ImportDigests) -> String {
@@ -2679,6 +2681,12 @@ fn evaluation_values(doc: &Document) -> (BTreeMap<String, Value>, BTreeMap<Strin
     (vals, perr)
 }
 
+/// Indices of construction features in `doc.features`, computed once per pass so
+/// [`construct_digest`] never rescans the full timeline for every feature.
+fn construction_indices(doc: &Document) -> Vec<usize> {
+    doc.features.iter().enumerate().filter_map(|(i, f)| f.kind.is_construction().then_some(i)).collect()
+}
+
 /// A feature's fingerprint in the chain after `prev`: its own inputs, where it is placed, and
 /// the sheet metal or plastic rules it takes defaults from.
 #[allow(clippy::too_many_arguments)]
@@ -2690,11 +2698,12 @@ fn chain_fingerprint(
     rolled_back: bool,
     steps: &ImportDigests,
     st: Option<&ModelState>,
+    constructions: &[usize],
 ) -> u64 {
     // A pose-only feature's placement is checked on its own ([`Model::poses`]), so moving the
     // parts it reads doesn't change the fingerprint of every feature after it (#12139).
     let placed = if pose_only(f) { 0 } else { placement_digest(doc, f, st) };
-    let mut fp = fingerprint(doc, prev, f, vals, rolled_back, steps) ^ placed ^ construct_digest(doc, vals, f, st);
+    let mut fp = fingerprint(doc, prev, f, vals, rolled_back, steps) ^ placed ^ construct_digest(doc, vals, f, st, constructions);
     // Sheet metal features also depend on the rules (and the parameters they use).
     if f.kind.is_sheet() {
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -2813,8 +2822,8 @@ fn json_strings<'a>(v: &'a serde_json::Value, out: &mut std::collections::BTreeS
 /// pattern or mirror also reads those its replayed features name. Taking any string in the
 /// definition that is a construction's name may take one too many, never one too few: the
 /// other construction geometry no longer goes into every feature's key.
-fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: Option<&ModelState>) -> u64 {
-    if matches!(f.kind, FeatureKind::Import { .. }) || !doc.features.iter().any(|f| f.kind.is_construction()) {
+fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: Option<&ModelState>, constructions: &[usize]) -> u64 {
+    if matches!(f.kind, FeatureKind::Import { .. }) || constructions.is_empty() {
         return 0;
     }
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -2834,7 +2843,7 @@ fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
         if steps > 4096 {
             named = true;
             "too deep".hash(&mut h);
-            for c in doc.features.iter().filter(|c| c.kind.is_construction()) {
+            for c in constructions.iter().filter_map(|&idx| doc.features.get(idx)) {
                 fingerprint(doc, 0, c, vals, false, &ImportDigests::default()).hash(&mut h);
             }
             break;
@@ -2853,7 +2862,10 @@ fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
                 ids.insert(id.0);
             }
         });
-        for c in doc.features.iter().filter(|c| c.kind.is_construction() && c.id != g.id && (ids.contains(&c.id) || names.contains(c.name.as_str())))
+        for c in constructions
+            .iter()
+            .filter_map(|&idx| doc.features.get(idx))
+            .filter(|c| c.id != g.id && (ids.contains(&c.id) || names.contains(c.name.as_str())))
         {
             if !seen.insert(c.id) {
                 continue;
@@ -3075,12 +3087,45 @@ pub(crate) fn heal_digest(heal: bool) -> u64 {
     h.finish()
 }
 
+/// Index bodies by the shape keys implied by [`Body::same_shape`] so shape-membership checks
+/// stay O(1) in the common case while remaining equivalent to `Body::same_shape` across ready
+/// records, lazily moved records sharing a source and motion, and a materialized lazy move
+/// paired with the ready record it produced.
+pub(super) struct ShapeIndex<'a> {
+    by_ready: std::collections::HashMap<usize, Vec<&'a Body>>,
+    by_moved: std::collections::HashMap<u64, Vec<&'a Body>>,
+}
+
+impl<'a> ShapeIndex<'a> {
+    pub(super) fn new(bodies: &'a [ModelBody]) -> Self {
+        let mut by_ready: std::collections::HashMap<usize, Vec<&'a Body>> = std::collections::HashMap::with_capacity(bodies.len());
+        let mut by_moved: std::collections::HashMap<u64, Vec<&'a Body>> = std::collections::HashMap::new();
+        for b in bodies {
+            let (ready, moved) = b.body.shape_keys();
+            if let Some(k) = ready {
+                by_ready.entry(k).or_default().push(&b.body);
+            }
+            if let Some(k) = moved {
+                by_moved.entry(k).or_default().push(&b.body);
+            }
+        }
+        Self { by_ready, by_moved }
+    }
+
+    pub(super) fn contains(&self, body: &Body) -> bool {
+        let (ready, moved) = body.shape_keys();
+        ready.is_some_and(|k| self.by_ready.get(&k).is_some_and(|os| os.iter().any(|old| old.same_shape(body))))
+            || moved.is_some_and(|k| self.by_moved.get(&k).is_some_and(|os| os.iter().any(|old| old.same_shape(body))))
+    }
+}
+
 /// SMLib's check of every body a feature made or changed (in `after`, not in `before`, the
 /// state it started from), once its steps left their checks to its end: the first that fails is
 /// the feature's error, naming the body.
 fn check_kept(before: &ModelState, after: &ModelState) -> kernel::Result<()> {
+    let prior = ShapeIndex::new(&before.bodies);
     for b in &after.bodies {
-        if before.bodies.iter().any(|old| old.body.same_shape(&b.body)) {
+        if prior.contains(&b.body) {
             continue;
         }
         // A thread output already checked (only successful checks are recorded) passed.
@@ -3110,11 +3155,13 @@ fn run_kept(checks: Vec<(String, kernel::KeptCheck)>, inputs: Vec<(String, Body,
 /// one result is blamed on its own former self or on bodies it consumed, never on another body
 /// the same feature changed beside it.
 fn replaced(before: &ModelState, after: &ModelState) -> Vec<(String, Body, bool)> {
+    let kept = ShapeIndex::new(&after.bodies);
+    let after_names: std::collections::HashSet<&str> = after.bodies.iter().map(|b| b.name.as_str()).collect();
     before
         .bodies
         .iter()
-        .filter(|old| !after.bodies.iter().any(|b| b.body.same_shape(&old.body)))
-        .map(|old| (old.name.clone(), old.body.clone(), !after.bodies.iter().any(|b| b.name == old.name)))
+        .filter(|old| !kept.contains(&old.body))
+        .map(|old| (old.name.clone(), old.body.clone(), !after_names.contains(old.name.as_str())))
         .collect()
 }
 
@@ -3442,12 +3489,13 @@ impl EvalKey {
         shared: u64,
         st: &ModelState,
         steps: &ImportDigests,
+        constructions: &[usize],
         components: &ComponentDigests,
     ) -> EvalKey {
         // A frame member is built turned by the Rotate steps after it.
         let local = fingerprint(doc, 0, f, vals, false, steps)
             ^ placement_digest(doc, f, Some(st))
-            ^ construct_digest(doc, vals, f, Some(st))
+            ^ construct_digest(doc, vals, f, Some(st), constructions)
             ^ turns_digest(doc, vals, f).unwrap_or(0)
             ^ depth_digest(st);
         let reached = components.reachable_digest(doc, f, st);
@@ -5613,6 +5661,25 @@ impl Model {
         self.results.iter().any(|r| r.import_report.as_ref().is_some_and(|i| i.checking()))
     }
 
+    /// Whether any import check is still running, finished with unsettled heals or issues, or
+    /// settled heals that still owe an evaluation ([`Self::settle_import_checks`]).
+    pub fn has_pending_import_checks(&self) -> bool {
+        self.import_heals_owed
+            || self.results.iter().any(|r| {
+                r.import_report.as_ref().is_some_and(|report| {
+                    if report.checks.is_empty() {
+                        return false;
+                    }
+                    if report.checking() {
+                        return true;
+                    }
+                    let heals = report.checks.heals();
+                    let known = heals.as_ref().is_some_and(|h| self.import_digests.heal_digest(r.id) == Some(h.digest()));
+                    (heals.is_some() && !known) || report.checks.issues().is_some_and(|issues| !issues.is_empty())
+                })
+            })
+    }
+
     /// Fold what the ended checks of each import found into its result: its report's issues and
     /// its warning, as an import that waited for them has them. An import whose checks found a
     /// part to repair, that no one was told of yet, joins [`Self::take_import_notices`] (in
@@ -5910,22 +5977,25 @@ impl Model {
         // The fingerprints from the first stored sketch on.
         let vals = evaluation_values(doc).0;
         let steps = ImportDigests::of(doc, &self.import_digests, self.heals());
+        let constructions = construction_indices(doc);
         let marker = doc.marker.unwrap_or(usize::MAX);
         let mut stepper = CaptureStepper::new(doc, &vals);
         let mut resolved_joints = BTreeMap::new();
         let mut prev_state = self.empty.clone();
-        for (i, f) in doc.features.iter().enumerate().take(first) {
-            if let Some(s) = stepper.as_mut() {
-                s.flush_for_feature(f, &prev_state);
-            }
-            if i < marker
-                && !f.suppressed
-                && let Some(r) = self.results.get(i).filter(|r| r.id == f.id && !r.skipped && r.error.is_none())
-            {
+        if stepper.is_some() {
+            for (i, f) in doc.features.iter().enumerate().take(first) {
                 if let Some(s) = stepper.as_mut() {
-                    s.advance(&mut resolved_joints, &vals, f, &prev_state, &r.state);
+                    s.flush_for_feature(f, &prev_state);
                 }
-                prev_state = r.state.clone();
+                if i < marker
+                    && !f.suppressed
+                    && let Some(r) = self.results.get(i).filter(|r| r.id == f.id && !r.skipped && r.error.is_none())
+                {
+                    if let Some(s) = stepper.as_mut() {
+                        s.advance(&mut resolved_joints, &vals, f, &prev_state, &r.state);
+                    }
+                    prev_state = r.state.clone();
+                }
             }
         }
         let mut prev_fp = first.checked_sub(1).and_then(|i| self.results.get(i)).map_or(0, |r| r.fingerprint);
@@ -5935,7 +6005,7 @@ impl Model {
                 s.flush_for_feature(f, &before);
             }
             let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
-            prev_fp = chain_fingerprint(eval_doc, &vals, f, prev_fp, i >= marker, &steps, Some(&before));
+            prev_fp = chain_fingerprint(eval_doc, &vals, f, prev_fp, i >= marker, &steps, Some(&before), &constructions);
             if let Some(r) = self.results.get_mut(i).filter(|r| r.id == f.id) {
                 r.fingerprint = prev_fp;
                 if i < marker && !f.suppressed && !r.skipped && r.error.is_none() {
@@ -5992,6 +6062,7 @@ impl Model {
         let vals = evaluation_values(doc).0;
         // as the next evaluation would fingerprint them: under the preference as it is now
         let steps = ImportDigests::of(doc, &self.import_digests, kernel::heals_tolerance_defects());
+        let constructions = construction_indices(doc);
         let marker = doc.marker.unwrap_or(usize::MAX);
         let mut prev = 0;
         // The model each feature starts from (which components the bodies it names are in).
@@ -6003,7 +6074,7 @@ impl Model {
                 s.flush_for_feature(f, &state);
             }
             let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
-            prev = chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &steps, Some(&state));
+            prev = chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &steps, Some(&state), &constructions);
             let posed = !pose_only(f) || self.poses.get(&f.id) == Some(&placement_digest(eval_doc, f, Some(&state)));
             if !r.skipped {
                 let prev_state = state.clone();
@@ -6136,6 +6207,7 @@ impl Model {
         // The component envelopes' features: the bodies they made are marked after every feature.
         let envelopes: std::collections::HashSet<u64> =
             doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::BoundingSolid { contents: true, .. })).map(|f| f.id).collect();
+        let constructions = construction_indices(doc);
         let watched = crate::progress::begin(doc.features.len());
         let prefetch_limit = doc.features.len().min(marker).min(watched.hold_limit());
         let prepared_imports = parallel::prefetch_imports(
@@ -6163,6 +6235,7 @@ impl Model {
             &self.frame_bodies,
             &self.cache,
             &self.import_digests,
+            &constructions,
             &component_digests,
             &envelopes,
             carried.as_ref(),
@@ -6249,7 +6322,7 @@ impl Model {
                 };
                 // Opening was cancelled: the rest is skipped and the result discarded.
                 let cancelled = watched.step(i);
-                let mut fp = chain_fingerprint(eval_doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state));
+                let mut fp = chain_fingerprint(eval_doc, &vals, f, prev_fp, rolled_back, &self.import_digests, Some(&state), &constructions);
                 prev_fp = fp;
                 let pose = pose_only(f).then(|| placement_digest(eval_doc, f, Some(&state)));
                 if let Some(pose) = pose {
@@ -6274,7 +6347,7 @@ impl Model {
                         .filter(|old| moved.is_empty() || old.skipped || reads_none_of(f, &state, &moved, feature_component))
                         .filter(|old| old.skipped || legacy_current(eval_doc, f, &state, &old.state))
                 {
-                    let before_reuse = state.clone();
+                    let before_reuse = stepper.is_some().then(|| state.clone());
                     if let Some(&k) = self.component_keys.get(&f.id) {
                         component_keys.insert(f.id, k);
                     }
@@ -6291,9 +6364,9 @@ impl Model {
                     }
                     if !old.skipped
                         && old.error.is_none()
-                        && let Some(s) = stepper.as_mut()
+                        && let (Some(s), Some(before_reuse)) = (stepper.as_mut(), before_reuse.as_ref())
                     {
-                        s.advance(&mut resolved_joints, &vals, f, &before_reuse, &state);
+                        s.advance(&mut resolved_joints, &vals, f, before_reuse, &state);
                     }
                     continue;
                 }
@@ -6357,7 +6430,7 @@ impl Model {
                     continue;
                 }
                 // The same feature on the same inputs: its earlier result.
-                let mut key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests, &component_digests);
+                let mut key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests, &constructions, &component_digests);
                 // A check that refused this feature's bodies on these inputs after its evaluation
                 // returned: it fails as it would have failed there.
                 if let Some(c) = carried.as_ref().filter(|c| c.id == f.id && c.key == key.whole) {
@@ -6377,7 +6450,7 @@ impl Model {
                         k.put(key.whole, &c);
                     }
                     restored += 1;
-                    let before_cache = state.clone();
+                    let before_cache = stepper.is_some().then(|| state.clone());
                     if c.error.is_none() {
                         state = c.state.clone();
                     }
@@ -6412,8 +6485,8 @@ impl Model {
                         unkept: false,
                         state: state.clone(),
                     });
-                    if ok && let Some(s) = stepper.as_mut() {
-                        s.advance(&mut resolved_joints, &vals, f, &before_cache, &state);
+                    if ok && let (Some(s), Some(before_cache)) = (stepper.as_mut(), before_cache.as_ref()) {
+                        s.advance(&mut resolved_joints, &vals, f, before_cache, &state);
                     }
                     continue;
                 }
@@ -6437,7 +6510,7 @@ impl Model {
                 {
                     restored += 1;
                     component_keys.insert(f.id, key.reached);
-                    let before_rolled = state.clone();
+                    let before_rolled = stepper.is_some().then(|| state.clone());
                     if r.error.is_none() {
                         state = r.state.clone();
                     }
@@ -6445,8 +6518,8 @@ impl Model {
                     let ok = r.error.is_none();
                     let warning = if ok { with_retained_notes(doc, r.warning.clone(), f, &state) } else { r.warning.clone() };
                     out.push(FeatureResult { state: state.clone(), unkept: false, warning, ..r.clone() });
-                    if ok && let Some(s) = stepper.as_mut() {
-                        s.advance(&mut resolved_joints, &vals, f, &before_rolled, &state);
+                    if ok && let (Some(s), Some(before_rolled)) = (stepper.as_mut(), before_rolled.as_ref()) {
+                        s.advance(&mut resolved_joints, &vals, f, before_rolled, &state);
                     }
                     continue;
                 }
@@ -6469,9 +6542,9 @@ impl Model {
                 // that digest so it evaluates unhealed and its check can heal and settle it anew.
                 if reused.is_none() && self.import_digests.has_digest_only_heal(f.id) {
                     self.import_digests.heals.remove(&f.id);
-                    fp = chain_fingerprint(eval_doc, &vals, f, prev_fp_in, rolled_back, &self.import_digests, Some(&state));
+                    fp = chain_fingerprint(eval_doc, &vals, f, prev_fp_in, rolled_back, &self.import_digests, Some(&state), &constructions);
                     prev_fp = fp;
-                    key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests, &component_digests);
+                    key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests, &constructions, &component_digests);
                 }
                 let reads = key.reads.as_ref().filter(|_| {
                     !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !self.param_errors.contains_key(n))
@@ -7309,6 +7382,8 @@ impl Model {
             r.state = state;
         }
         self.refingerprint(doc);
+        self.last_recomputed = 0;
+        self.last_restored = 0;
         true
     }
 
@@ -7359,6 +7434,8 @@ impl Model {
             }
         }
         self.refingerprint(doc);
+        self.last_recomputed = 0;
+        self.last_restored = 0;
         true
     }
 
@@ -7390,11 +7467,12 @@ impl Model {
         }
         // The results must be `previous`'s: each keeps the fingerprint evaluating `previous` gives
         // it ([`Model::refingerprint_from`]'s chain, over the states the results keep).
+        let constructions = construction_indices(previous);
         let marker = previous.marker.unwrap_or(usize::MAX);
         let (empty, mut prev) = (ModelState::default(), 0);
         let mut st = &empty;
         for (i, (r, f)) in self.results.iter().zip(&previous.features).enumerate() {
-            prev = chain_fingerprint(previous, &before, f, prev, i >= marker, &self.import_digests, Some(st));
+            prev = chain_fingerprint(previous, &before, f, prev, i >= marker, &self.import_digests, Some(st), &constructions);
             if r.fingerprint != prev {
                 return false;
             }
@@ -7450,6 +7528,8 @@ impl Model {
             r.state = state;
         }
         self.refingerprint(doc);
+        self.last_recomputed = 0;
+        self.last_restored = 0;
         true
     }
 
@@ -7457,6 +7537,11 @@ impl Model {
     /// (after a change that builds nothing differently).
     pub fn refingerprint(&mut self, doc: &Document) {
         self.refingerprint_from(doc, 0);
+    }
+
+    /// Whether `self.results` currently holds `doc`'s fingerprints (same `Arc` address and digest).
+    pub fn fingerprinted_for(&self, doc: &Arc<Document>) -> bool {
+        self.fingerprinted.is_some_and(|(of, digest)| of == Arc::as_ptr(doc) as usize && digest == fingerprints_digest(&self.results))
     }
 
     /// How many leading results keep their fingerprints when `doc` has the body names of the
@@ -7468,8 +7553,7 @@ impl Model {
     /// features among them replays a renamed one (it fingerprints its sources' definitions
     /// wherever they are). Without that proof: none.
     pub fn pinned_prefix(&self, doc: &Arc<Document>, renamed: &[u64]) -> usize {
-        let proven = self.fingerprinted.is_some_and(|(of, digest)| of == Arc::as_ptr(doc) as usize && digest == fingerprints_digest(&self.results));
-        if !proven {
+        if !self.fingerprinted_for(doc) {
             return 0;
         }
         let Some(first) = doc.features.iter().position(|f| renamed.contains(&f.id)) else { return doc.features.len() };
@@ -7498,19 +7582,22 @@ impl Model {
             return;
         }
         let (vals, _) = evaluation_values(doc);
+        let constructions = construction_indices(doc);
         let marker = doc.marker.unwrap_or(usize::MAX);
         let mut stepper = CaptureStepper::new(doc, &vals);
         let mut resolved_joints = BTreeMap::new();
-        let mut prev_state = self.empty.clone();
-        for (i, (r, f)) in self.results.iter().zip(&doc.features).enumerate().take(start) {
-            if let Some(s) = stepper.as_mut() {
-                s.flush_for_feature(f, &prev_state);
-            }
-            if i < marker && !f.suppressed && !r.skipped && r.error.is_none() {
+        if stepper.is_some() {
+            let mut prev_state = self.empty.clone();
+            for (i, (r, f)) in self.results.iter().zip(&doc.features).enumerate().take(start) {
                 if let Some(s) = stepper.as_mut() {
-                    s.advance(&mut resolved_joints, &vals, f, &prev_state, &r.state);
+                    s.flush_for_feature(f, &prev_state);
                 }
-                prev_state = r.state.clone();
+                if i < marker && !f.suppressed && !r.skipped && r.error.is_none() {
+                    if let Some(s) = stepper.as_mut() {
+                        s.advance(&mut resolved_joints, &vals, f, &prev_state, &r.state);
+                    }
+                    prev_state = r.state.clone();
+                }
             }
         }
         let last = start.checked_sub(1).and_then(|i| self.results.get(i));
@@ -7522,7 +7609,7 @@ impl Model {
                 s.flush_for_feature(f, &before);
             }
             let eval_doc: &Document = stepper.as_ref().map_or(doc, CaptureStepper::doc);
-            prev = chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &self.import_digests, Some(&before));
+            prev = chain_fingerprint(eval_doc, &vals, f, prev, i >= marker, &self.import_digests, Some(&before), &constructions);
             r.fingerprint = prev;
             let prev_state = before;
             before = r.state.clone();
@@ -17856,6 +17943,7 @@ fn eval_feature_kind(
         FeatureKind::SheetBase { .. }
         | FeatureKind::SheetContour { .. }
         | FeatureKind::SheetFlange { .. }
+        | FeatureKind::SheetCornerJoin { .. }
         | FeatureKind::SheetHem { .. }
         | FeatureKind::SheetPerforate { .. }
         | FeatureKind::SheetFold { .. }
