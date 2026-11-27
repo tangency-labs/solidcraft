@@ -144,6 +144,10 @@ fn component_and_path_required(schema: &mut Schema) {
 /// a file or one the caller holds in memory.
 fn path_or_document_required(schema: &mut Schema) {
     schema.insert("anyOf".into(), json!([{"required": ["path"]}, {"required": ["document"]}]));
+    explicit_configuration_for_identity(schema);
+}
+
+fn explicit_configuration_for_identity(schema: &mut Schema) {
     schema.insert(
         "allOf".into(),
         json!([{"anyOf": [
@@ -151,6 +155,11 @@ fn path_or_document_required(schema: &mut Schema) {
             {"required": ["configuration"], "properties": {"configuration": {"not": {"type": "null"}}}}
         ]}]),
     );
+}
+
+fn relink_schema(schema: &mut Schema) {
+    component_and_path_required(schema);
+    explicit_configuration_for_identity(schema);
 }
 
 /// Select a source configuration row, or follow the saved source state with `null`.
@@ -489,7 +498,7 @@ pub struct LinkFailure {
 /// keeping their identities and placements, or with `occurrence` for that one only. The design is
 /// read and checked before anything changes; one undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields, transform = component_and_path_required)]
+#[schemars(deny_unknown_fields, transform = relink_schema)]
 pub struct RelinkParams {
     // Optional in the type and required in the schema (`component_and_path_required`).
     /// The linked component, by id or name.
@@ -504,6 +513,10 @@ pub struct RelinkParams {
     /// the same source file; a different file follows its saved state. Null clears the selection.
     #[serde(default, deserialize_with = "configuration")]
     pub configuration: Option<RowRef>,
+    /// The selected row's expected creation identity, or null for a legacy row.
+    #[serde(default, deserialize_with = "configuration_identity")]
+    #[schemars(with = "Option<u64>")]
+    pub configuration_identity: Option<Option<u64>>,
     /// One of its placements, by id. When the component has other placements, only this one
     /// comes to show the design, as a placement of the component already linked to it or of a
     /// new one under the same parent, keeping its position, grounding and joints.

@@ -2471,17 +2471,22 @@ fn placement_transform(s: &Session, p: &Value, cmd: &str) -> Result<(solidcraft_
     Ok((transform, None))
 }
 
-fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
-    let cmd = "component.insert_design";
-    let selection = configuration_key(p, None, cmd)?;
+fn expected_configuration_identity(p: &Value, cmd: &str) -> Result<Option<Option<u64>>> {
     let expected_identity = match p.get("configuration_identity") {
         None => None,
         Some(Value::Null) => Some(None),
         Some(value) => Some(Some(value.as_u64().ok_or_else(|| bad(cmd, "`configuration_identity` must be an unsigned integer or null"))?)),
     };
-    if expected_identity.is_some() && selection.is_none() {
+    if expected_identity.is_some() && p.get("configuration").is_none_or(Value::is_null) {
         return Err(bad(cmd, "`configuration_identity` requires an explicit, non-null `configuration`"));
     }
+    Ok(expected_identity)
+}
+
+fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.insert_design";
+    let selection = configuration_key(p, None, cmd)?;
+    let expected_identity = expected_configuration_identity(p, cmd)?;
     // The design to link: a file, or the design the caller holds in memory (one open in this
     // session that has no file yet, #16829).
     let (given, held) = match (p.get("path"), p.get("document")) {
@@ -3914,8 +3919,9 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let same_source = same_link_source(s, &link, &file);
     let selection = configuration_key(p, if same_source { link.configuration } else { None }, cmd)?;
+    let expected_identity = expected_configuration_identity(p, cmd)?;
     let bytes = read_link(&file, s.path.as_deref(), false).map_err(|e| bad(cmd, e.to_string()))?;
-    let configuration = configuration_id(&bytes, selection, None).map_err(|e| bad(cmd, e.to_string()))?;
+    let configuration = configuration_id(&bytes, selection, expected_identity).map_err(|e| bad(cmd, e.to_string()))?;
     if same_source && p.get("configuration").is_none() && configuration != selected_configuration(&link) {
         return Err(bad(cmd, "the selected configuration was replaced; select a configuration again"));
     }

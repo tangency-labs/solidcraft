@@ -36,6 +36,23 @@ pub(crate) fn start(app: &mut SolveApp, component: u64, occurrence: Option<u64>)
     start_with(app, component, occurrence, false);
 }
 
+/// Read the saved configurations of the source this placement already shows.
+pub(crate) fn start_configuration(app: &mut SolveApp, component: u64, occurrence: u64) {
+    if app.file_picker_busy() || app.file_load_holds() {
+        return;
+    }
+    let Some(link) = app.session.doc.links.get(&component).filter(|link| link.is_design() && !link.path.is_empty()) else { return };
+    if !app.session.doc.occurrences.iter().any(|placement| placement.id == occurrence && placement.component == component) {
+        return;
+    }
+    let path = solidcraft_engine::cmd::resolve_design_link_path(app.session.path.as_deref(), &link.path).to_string_lossy().into_owned();
+    crate::network_prompt::change_configuration(app, path, component, occurrence);
+}
+
+pub(crate) fn report_configuration_changed(app: &mut SolveApp, result: &Value) {
+    report(app, result, "insert_design.change_configuration_done");
+}
+
 /// `start`; with `sync` the bodies take the new source's names (#16711).
 pub(crate) fn start_with(app: &mut SolveApp, component: u64, occurrence: Option<u64>, sync: bool) {
     if app.file_picker_busy() || app.file_load_holds() {
@@ -516,6 +533,75 @@ mod tests {
         assert!(app.session.doc.links[&shows(&app, second)].path.ends_with("moved.solidcraft"));
         assert!(app.status.as_ref().is_some_and(|(s, _, error)| s.contains("this instance") && !error), "{:?}", app.status);
         let _ = std::fs::remove_dir_all(folder);
+    }
+
+    #[test]
+    fn change_configuration_keeps_the_other_placement_and_survives_reopening() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.language = "en".into();
+        let file = h.dir.join("family.sc");
+        let mut source = Session::default();
+        for (command, params) in [
+            ("parameters.add", json!({"name": "L", "expression": "25 mm"})),
+            ("solid.box", json!({"length": "L", "width": 10, "height": 10})),
+            ("config.configure", json!({"params": ["L"]})),
+            ("config.row", json!({"name": "Default", "rename": "Short"})),
+            ("config.row", json!({"name": "Long", "values": {"L": "30 mm"}})),
+            ("config.activate", json!({"row": "Short"})),
+            ("file.save", json!({"path": file})),
+        ] {
+            source.execute(command, &params).unwrap();
+        }
+        let short = source.doc.configs.active_row().unwrap().id;
+        let long = source.doc.configs.rows.iter().find(|row| row.name == "Long").unwrap().id;
+        let inserted = h.app.run("component.insert_design", json!({"path": file, "configuration": short})).unwrap();
+        let component = inserted["component"].as_u64().unwrap();
+        let first = inserted["occurrence"].as_u64().unwrap();
+        let second = h.app.run("occurrence.copy", json!({"occurrence": first, "translate": [50,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+        let target = Target::Occurrence { path: vec![second] };
+        let item = context_menu::entries(&h.app, &target).into_iter().find(|i| i.id == "ui.changeConfiguration").unwrap();
+        assert_eq!(item.params, Some(json!({"component": component, "occurrence": second})));
+        assert!(!context_menu::entries(&h.app, &Target::Component { id: component }).iter().any(|i| i.id == "ui.changeConfiguration"));
+        let before = h.app.session.doc.clone();
+        let undo = h.app.session.undo.len();
+
+        context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        h.settle();
+        let ask = h.app.insert_design_options.as_ref().expect("the linked source has saved configurations");
+        assert_eq!(ask.rows.rows[ask.selected - 1].id, short);
+        let state = h.call("ui.inspect", json!({}));
+        assert!(state["result"]["windows"].as_array().unwrap().iter().any(|window| window == "component.relink"));
+        h.step(&json!({"click": {"handle": "insert_design:cancel"}})).unwrap();
+        assert!(h.app.insert_design_options.is_none());
+        assert!(Arc::ptr_eq(&h.app.session.doc, &before));
+        assert_eq!(h.app.session.undo.len(), undo);
+
+        h.app.run("select.set", json!({"items": [solidcraft_engine::Sel::Occurrence { path: vec![first] }]})).unwrap();
+        let selection = h.app.session.selection.clone();
+        context_menu::run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        h.settle();
+        h.step(&json!({"click": {"handle": "insert_design:configuration"}})).unwrap();
+        h.step(&json!({"widget": "Long"})).unwrap();
+        h.step(&json!({"click": {"handle": "insert_design:ok"}})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.selection, selection);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+
+        let assert_configurations = |s: &mut Session| {
+            for (occurrence, configuration, expected_volume) in [(first, short, 2500.0), (second, long, 3000.0)] {
+                let placed = s.doc.occurrences.iter().find(|placed| placed.id == occurrence).unwrap();
+                assert_eq!(s.doc.links[&placed.component].configuration, Some(configuration));
+                let measured = s.execute("occurrence.properties", &json!({"occurrence": occurrence})).unwrap();
+                assert!((measured["total"]["volume_mm3"].as_f64().unwrap() - expected_volume).abs() < 1e-6, "{measured}");
+            }
+        };
+        assert_configurations(&mut h.app.session);
+        let assembly = h.dir.join("assembly.sc");
+        h.app.run("file.save", json!({"path": assembly})).unwrap();
+        let mut reopened = Session::default();
+        reopened.execute("doc.open", &json!({"path": assembly})).unwrap();
+        assert_configurations(&mut reopened);
     }
 
     #[test]

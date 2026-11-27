@@ -184,13 +184,14 @@ fn dialog_state(app: &SolveApp) -> Value {
 /// The windows open beside the model (#9087), each named by what opens it: the command
 /// `ui.start` takes, or the `ui.help` item.
 fn open_windows(app: &SolveApp) -> Vec<&'static str> {
+    let configuration_options = app.insert_design_options.as_ref();
     [
         (app.params.is_some(), "parameters.change"),
         (app.design_properties.is_some(), "document.metadata"),
         (app.sketch_report.is_some(), "sketch.inspect"),
         (app.bom.is_some(), "assembly.bom"),
         (app.material_card_review.is_some(), "material.properties.validate"),
-        (app.insert_design_options.is_some(), "component.insert_design"),
+        (configuration_options.is_some(), configuration_options.map_or("", crate::insert_design_options::Ask::window_id)),
         (app.help.about, "about"),
         (app.updater.open, "updates"),
         (app.keymap.open, "shortcuts"),

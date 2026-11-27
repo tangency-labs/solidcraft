@@ -52,6 +52,8 @@ pub enum Kind {
     /// Insert a saved design into the active design as a linked component
     /// (`component.insert_design`): reading a large design takes a while (#11593).
     InsertDesign,
+    /// Choose another saved configuration of a linked placement's current source.
+    ChangeConfiguration,
     /// Open a design an earlier run autosaved before it closed.
     Recover { id: String, dir: Option<String> },
     /// Export a snapshot of the current design without adopting the worker's session.
@@ -130,6 +132,8 @@ pub struct Request {
     pub new_tab: bool,
     /// Interactive Insert Design reads the saved configuration rows before inserting anything.
     pub(crate) choose_configuration: bool,
+    /// A change of configuration is only for the assembly shown when the picker was requested.
+    pub(crate) configuration_document: Option<Arc<Document>>,
 }
 
 impl Request {
@@ -158,6 +162,7 @@ impl Request {
             print: false,
             new_tab: false,
             choose_configuration: false,
+            configuration_document: None,
         }
     }
     /// It adds what it reads to the active design.
@@ -166,7 +171,12 @@ impl Request {
     }
     /// It reads files the active design already names, and changes that design in place.
     fn reads_again(&self) -> bool {
-        matches!(self.kind, Kind::UpdateLinks | Kind::ReloadCloud)
+        matches!(self.kind, Kind::UpdateLinks | Kind::ReloadCloud | Kind::ChangeConfiguration)
+    }
+    pub(crate) fn configuration_is_current(&self, app: &SolveApp) -> bool {
+        self.configuration_document
+            .as_ref()
+            .is_none_or(|document| self.tab == Some(app.docs.current_tab()) && Arc::ptr_eq(document, &app.session.doc))
     }
     fn sheet_in_reply(&self) -> bool {
         self.kind == Kind::ExportSheet && self.path.is_empty()
@@ -202,6 +212,7 @@ impl Request {
             Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
             Kind::Insert => (insert_command(&self.path), self.params()),
             Kind::InsertDesign => ("component.insert_design", self.params()),
+            Kind::ChangeConfiguration => ("component.relink", self.params()),
             // As an open: a link in another folder that the copy has no bodies of waits for Load.
             Kind::Recover { id, dir } => ("doc.recover", json!({"id": id, "dir": dir, "linked_bodies": "folder"})),
             Kind::ExportDxf => ("file.export_view_dxf", Value::Object(self.options.clone())),
@@ -699,6 +710,11 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                     crate::insert_design_options::offer(app, request, rows);
                     return Ok(());
                 }
+                Ok(_) if request.kind == Kind::ChangeConfiguration => {
+                    let error = app.tr("insert_design.no_saved_configurations").to_string();
+                    app.set_status(error.clone(), true);
+                    return Err(error);
+                }
                 Ok(_) => {}
                 Err(error) => {
                     app.set_status(error.clone(), true);
@@ -756,9 +772,15 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 }
                 r
             }
-            Kind::UpdateLinks | Kind::ReloadCloud => {
+            Kind::UpdateLinks | Kind::ReloadCloud | Kind::ChangeConfiguration => {
                 let (command, params) = request.command();
-                solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || app.run(command, params))
+                let result = solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || app.run(command, params));
+                if request.kind == Kind::ChangeConfiguration
+                    && let Ok(result) = &result
+                {
+                    crate::linked_source::report_configuration_changed(app, result);
+                }
+                result
             }
         };
         request.answer(r);
@@ -766,6 +788,10 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
+        if request.kind == Kind::ChangeConfiguration {
+            // Like Insert Design, only read the source file, even if another app has it open.
+            return queue(app, request);
+        }
         // A design open in another SolidCraft asks first (#5467).
         let Some(request) = crate::open_elsewhere::check_open(app, request) else { return Ok(()) };
         queue(app, request)
@@ -927,6 +953,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         print: false,
         new_tab,
         choose_configuration: false,
+        configuration_document: None,
     };
     let _ = begin_request(app, request);
     None
@@ -1001,6 +1028,13 @@ fn start(app: &mut SolveApp) {
         return;
     }
     if reuse_open(app, &request) {
+        return;
+    }
+    if !request.configuration_is_current(app) {
+        let error = app.tr("insert_design.configuration_target_changed").to_string();
+        crate::operations::ended(app, &format!("file:{}", request.serial), Outcome::Failed(error.clone()));
+        app.set_status(error.clone(), true);
+        request.answer(Err(error));
         return;
     }
     if request.design.as_deref().is_some_and(|d| !app.session.path.as_deref().is_some_and(|p| crate::documents::same_path(p, d))) {
@@ -1567,6 +1601,9 @@ fn compute(
         if !rows.rows.is_empty() {
             return Ok(Made { session, result: Value::Null, thumbnail: false, configurations: Some(rows) });
         }
+        if command == "component.relink" {
+            return Err(solidcraft_ui_text::tr("insert_design.no_saved_configurations").to_string().into());
+        }
     }
     session.plugin_state.defer_user_settings();
     // The timeline's rebuild reports each feature and stops at the next one after Cancel. An
@@ -1793,6 +1830,7 @@ fn landing(app: &SolveApp, r: &Running) -> Land {
         Kind::Open | Kind::Recover { .. } if quiet(app, r) => Land::Now,
         Kind::Open | Kind::Recover { .. } => Land::Behind,
         _ if r.request.tab.is_some_and(|tab| tab != app.docs.current_tab()) || !quiet(app, r) => Land::Wait,
+        _ if !r.request.configuration_is_current(app) => Land::Now,
         _ if job.as_ref().is_ok_and(|made| made.configurations.is_some()) => Land::Now,
         _ if r.matches(&app.session) || r.request.tries >= MAX_TRIES => Land::Now,
         _ => Land::Again,
@@ -1890,6 +1928,9 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
     if app.file_load.warm.as_ref().is_some_and(|(serial, _)| *serial == running.request.serial) {
         app.file_load.warm = None;
     }
+    if !running.request.configuration_is_current(app) {
+        job = Err(app.tr("insert_design.configuration_target_changed").to_string().into());
+    }
     if !running.cancelled()
         && let Ok(made) = &mut job
         && let Some(rows) = made.configurations.take()
@@ -1941,8 +1982,14 @@ fn land_now(app: &mut SolveApp, mut running: Running) {
                 {
                     panel.depth = app.session.undo.len();
                 }
-                let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
-                app.set_status(language.format("ui.command_done", &[("command", language.command(id, crate::command_label(id)))]), false);
+                if request.kind == Kind::ChangeConfiguration {
+                    if let Ok(result) = &r {
+                        crate::linked_source::report_configuration_changed(app, result);
+                    }
+                } else {
+                    let language = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
+                    app.set_status(language.format("ui.command_done", &[("command", language.command(id, crate::command_label(id)))]), false);
+                }
                 // A design it could not read is said as when that was all it was asked.
                 if let Some(f) = r.as_ref().ok().and_then(|v| v["failed"].as_array()).and_then(|f| f.first()) {
                     let (name, why) = (f["name"].as_str().unwrap_or_default(), f["error"].as_str().unwrap_or_default());
@@ -2234,6 +2281,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             Kind::ExportDxf => "dxf.exporting",
             Kind::ExportSheet => "drawing_export.exporting",
             Kind::UpdateLinks => "file_load.updating_links",
+            Kind::ChangeConfiguration => "insert_design.changing_configuration",
             Kind::ReloadCloud => "file_load.reloading_cloud",
         })
     };
@@ -2242,7 +2290,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::Open => "open",
         Kind::Recover { .. } => "restore",
         Kind::ExportDxf | Kind::ExportSheet => "export",
-        Kind::UpdateLinks => "update",
+        Kind::UpdateLinks | Kind::ChangeConfiguration => "update",
         Kind::ReloadCloud => "import",
     };
     let (closed, action) = ui_kit::Window::new(card_id, icon, title)

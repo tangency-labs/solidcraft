@@ -113,7 +113,7 @@ pub(super) fn real_file(file: &Path) -> Option<PathBuf> {
 }
 
 /// The file a stored link path names, for a design saved at `design`.
-pub(super) fn resolve(design: Option<&str>, link: &str) -> PathBuf {
+pub fn resolve(design: Option<&str>, link: &str) -> PathBuf {
     let p = Path::new(link);
     match p.is_relative().then(|| base_dir(design)).flatten() {
         // Browser storage keys do not let the OS resolve `..` for us.

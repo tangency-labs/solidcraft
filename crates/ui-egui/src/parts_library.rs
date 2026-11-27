@@ -1166,8 +1166,9 @@ mod tests {
         }
         let long = source.doc.configs.rows.iter().find(|row| row.name == "Long").unwrap().id;
         let saved = std::fs::read(&path).unwrap();
+        h.app.preferences.ask_insert_design_configuration = false;
         insert(&mut h.app, &path, Vec3::ZERO).unwrap();
-        assert!(h.app.insert_design_options.is_none(), "the option starts off");
+        assert!(h.app.insert_design_options.is_none(), "the preference can restore direct insertion");
         assert_eq!(h.app.session.doc.links.values().next().unwrap().configuration, None);
         h.app.run("edit.undo", json!({})).unwrap();
 

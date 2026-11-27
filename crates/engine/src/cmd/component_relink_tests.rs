@@ -1867,6 +1867,21 @@ fn insert_configuration_identity_refuses_a_recycled_row_before_new_or_reused_ins
                 assert_variant_length(&mut s, original["occurrence"].as_u64().unwrap(), 35.0);
             }
         }
+        let error = s
+            .execute(
+                "component.relink",
+                &json!({
+                    "component": original["component"],
+                    "occurrence": original["occurrence"],
+                    "path": file,
+                    "configuration": row,
+                    "configuration_identity": identity
+                }),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("was replaced"), "{error}");
+        assert_eq!(s.doc, before);
+        assert_eq!(s.undo.len(), undo);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

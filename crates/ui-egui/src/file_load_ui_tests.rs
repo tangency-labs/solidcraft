@@ -2080,13 +2080,13 @@ fn insert_design_configuration_source(path: &std::path::Path) -> (Session, u64) 
 
 #[test]
 fn insert_design_configuration_picker_uses_the_chosen_row_or_the_saved_state() {
-    for choose_long in [false, true] {
+    for choice in [None, Some("Long"), Some("Saved state")] {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
-        h.app.preferences.ask_insert_design_configuration = true;
         h.app.preferences.language = "en".into();
         let path = h.dir.join("family.sc");
-        let (_, long) = insert_design_configuration_source(&path);
+        let (source, long) = insert_design_configuration_source(&path);
+        let short = source.doc.configs.active_row().unwrap().id;
         let saved = std::fs::read(&path).unwrap();
         let before = h.app.session.doc.clone();
         let undo = h.app.session.undo.len();
@@ -2096,7 +2096,7 @@ fn insert_design_configuration_picker_uses_the_chosen_row_or_the_saved_state() {
         h.app.start("component.insert_design");
         h.settle();
         let ask = h.app.insert_design_options.as_ref().expect("a saved family asks which row to insert");
-        assert_eq!(ask.selected, 0, "following the saved state differs from selecting its active row");
+        assert_eq!(ask.selected, 1, "the saved active row is selected by default");
         assert_eq!(ask.rows.rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(), ["Short", "Long"]);
         assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &before));
         assert_eq!(h.app.session.undo.len(), undo);
@@ -2104,17 +2104,22 @@ fn insert_design_configuration_picker_uses_the_chosen_row_or_the_saved_state() {
         let state = h.call("ui.inspect", json!({}));
         assert!(state["result"]["windows"].as_array().unwrap().iter().any(|window| window == "component.insert_design"));
 
-        if choose_long {
+        if let Some(choice) = choice {
             h.step(&json!({"click": {"handle": "insert_design:configuration"}})).unwrap();
-            h.step(&json!({"widget": "Long"})).unwrap();
+            h.step(&json!({"widget": choice})).unwrap();
         }
         h.step(&json!({"click": {"handle": "insert_design:ok"}})).unwrap();
         h.settle();
         assert!(h.app.insert_design_options.is_none());
         let link = h.app.session.doc.links.values().next().expect("the selected design was inserted");
-        assert_eq!(link.configuration, choose_long.then_some(long));
+        let (configuration, volume) = match choice {
+            Some("Saved state") => (None, 2500.0),
+            Some("Long") => (Some(long), 3000.0),
+            _ => (Some(short), 2500.0),
+        };
+        assert_eq!(link.configuration, configuration);
         let measured = h.app.session.execute("inspect.measure", &json!({})).unwrap();
-        assert!((measured["total"]["volume_mm3"].as_f64().unwrap() - if choose_long { 3000.0 } else { 2500.0 }).abs() < 1e-6);
+        assert!((measured["total"]["volume_mm3"].as_f64().unwrap() - volume).abs() < 1e-6);
         assert_eq!(h.app.session.undo.len(), undo + 1, "inserting is one undo step; choosing is none");
         assert_eq!(std::fs::read(&path).unwrap(), saved, "the source is never activated or saved by the picker");
         h.app.run("edit.undo", json!({})).unwrap();
@@ -2296,29 +2301,26 @@ fn insert_design_configuration_programmatic_insertion_never_opens_the_picker() {
 }
 
 #[test]
-fn insert_design_configuration_preference_is_opt_in_and_can_be_changed_through_control() {
+fn insert_design_configuration_preference_can_restore_direct_insertion() {
     let mut h = crate::scenario::Harness::new();
     h.app.home.open = false;
-    assert!(!h.app.preferences.ask_insert_design_configuration, "insertion keeps its existing default flow");
+    assert!(h.app.preferences.ask_insert_design_configuration);
     let path = h.dir.join("family.sc");
     insert_design_configuration_source(&path);
+    h.app.insert_design_async(&path.to_string_lossy(), None);
+    h.settle();
+    assert!(h.app.insert_design_options.is_some(), "the default offers the saved rows");
+    h.step(&json!({"click": {"handle": "insert_design:cancel"}})).unwrap();
+    assert!(h.app.session.doc.links.is_empty());
+
+    let disabled = h.call("ui.prefs", json!({"ask_insert_design_configuration": false}));
+    assert_eq!(disabled["ok"], true, "{disabled}");
+    assert!(!h.app.preferences.ask_insert_design_configuration);
     h.app.insert_design_async(&path.to_string_lossy(), None);
     h.settle();
     assert!(h.app.insert_design_options.is_none());
     assert_eq!(h.app.session.doc.links.len(), 1);
     assert_eq!(h.app.session.doc.links.values().next().unwrap().configuration, None);
-
-    let enabled = h.call("ui.prefs", json!({"ask_insert_design_configuration": true}));
-    assert_eq!(enabled["ok"], true, "{enabled}");
-    assert!(h.app.preferences.ask_insert_design_configuration);
-    h.app.insert_design_async(&path.to_string_lossy(), None);
-    h.settle();
-    assert!(h.app.insert_design_options.is_some(), "enabling it offers the saved rows");
-    h.step(&json!({"click": {"handle": "insert_design:cancel"}})).unwrap();
-    assert_eq!(h.app.session.doc.links.len(), 1);
-    let disabled = h.call("ui.prefs", json!({"ask_insert_design_configuration": false}));
-    assert_eq!(disabled["ok"], true, "{disabled}");
-    assert!(!h.app.preferences.ask_insert_design_configuration);
 }
 
 #[test]
