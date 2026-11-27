@@ -9,7 +9,7 @@
     clippy::float_cmp
 )]
 
-use std::f64::consts::{FRAC_PI_2, FRAC_PI_6, PI};
+use std::f64::consts::{FRAC_PI_2, FRAC_PI_6, PI, TAU};
 
 use crate::math::Vec2;
 use crate::prism::profile::{Loop2, Seg2};
@@ -2660,7 +2660,7 @@ fn square_and_hexagon_cells_keep_their_margin_from_a_cubic_within_the_chords_bou
     let ngon = |c: Vec2, r: f64, n: usize, turn: f64| -> Vec<Vec2> {
         (0..n)
             .map(|k| {
-                let a = turn + std::f64::consts::TAU * k as f64 / n as f64;
+                let a = turn + TAU * k as f64 / n as f64;
                 c + v(a.cos(), a.sin()) * r
             })
             .collect()
@@ -2725,7 +2725,7 @@ fn a_segment_far_from_the_origin_keeps_its_clearance_from_an_arc() {
         center: v(0.0, 0.0),
         radius: 1.0,
         start: 0.0,
-        sweep: std::f64::consts::TAU,
+        sweep: TAU,
     })
     .unwrap();
     let quarter = Edge::of(&Seg2::Arc {
@@ -3147,12 +3147,193 @@ fn a_rounded_voronoi_cell_with_a_short_side_keeps_its_corner_radius() {
     }
 }
 
+/// The least distance from a cell's outline (each piece's ends and middle) to the loop's pieces.
+fn rim_of(cell: &GridCell, outline: &[Loop2]) -> f64 {
+    let mut least = f64::INFINITY;
+    for seg in cell.loops.iter().flat_map(|l| &l.segs) {
+        let pts = match *seg {
+            Seg2::Line { a, b } => vec![a, (a + b) * 0.5],
+            Seg2::Arc {
+                center,
+                radius,
+                start,
+                sweep,
+            } => [0.0, 0.5]
+                .iter()
+                .map(|f| {
+                    let t = start + sweep * f;
+                    center + v(t.cos(), t.sin()) * radius
+                })
+                .collect(),
+            _ => panic!("{seg:?}"),
+        };
+        for o in outline.iter().flat_map(|l| &l.segs) {
+            let piece = match *o {
+                Seg2::Line { a, b } => Prim::line(a, b),
+                Seg2::Arc {
+                    center,
+                    radius,
+                    start,
+                    sweep,
+                } => Prim::arc(center, radius, start, sweep),
+                _ => panic!("{o:?}"),
+            };
+            for &p in &pts {
+                least = least.min(piece.distance(p));
+            }
+        }
+    }
+    least
+}
+
 #[test]
-fn a_voronoi_grid_snaps_as_whole_cells() {
+fn a_snapped_voronoi_grid_fills_the_field_up_to_a_rim_of_one_web() {
     let field = [rect(0.0, 0.0, 40.0, 30.0)];
-    let snap = run(&field, &voronoi(9, 0.5, Clip::Snap));
-    let whole = run(&field, &voronoi(9, 0.5, Clip::Whole));
-    assert_eq!(snap, whole);
+    for (seed, irregularity) in [(9, 0.5), (0, 0.7), (3, 1.0), (5, 0.0)] {
+        let snap = run(&field, &voronoi(seed, irregularity, Clip::Snap));
+        let whole = run(&field, &voronoi(seed, irregularity, Clip::Whole));
+        let free = run(&field, &voronoi(seed, irregularity, Clip::Free));
+        assert!(snap.warnings.is_empty(), "{:?}", snap.warnings);
+        // More than the whole cells, less than the cells trimmed at the outline itself.
+        assert!(snap.partial > 0);
+        assert!(snap.cells.len() > whole.cells.len());
+        assert!(snap.open_area > whole.open_area && snap.open_area < free.open_area);
+        let mut on_rim = 0;
+        for cell in &snap.cells {
+            let rim = rim_of(cell, &field);
+            assert!(rim >= W - 1e-6, "cell ({}, {}): {rim}", cell.i, cell.j);
+            on_rim += usize::from(rim <= W + 1e-6);
+            for p in vertices(cell) {
+                assert!(p.x >= W - 1e-6 && p.x <= 40.0 - W + 1e-6, "{p:?}");
+                assert!(p.y >= W - 1e-6 && p.y <= 30.0 - W + 1e-6, "{p:?}");
+            }
+        }
+        // The cells along the outline are cut exactly one web from it.
+        assert_eq!(on_rim, snap.partial, "{seed} {irregularity}");
+        // The cells away from the outline are the ones `Whole` keeps.
+        for cell in snap.cells.iter().filter(|c| c.kind == CellKind::Whole) {
+            let same = whole.cells.iter().find(|c| (c.i, c.j) == (cell.i, cell.j));
+            assert!(
+                same.is_none_or(|c| c == cell),
+                "cell ({}, {})",
+                cell.i,
+                cell.j
+            );
+        }
+    }
+}
+
+#[test]
+fn a_filled_voronoi_grid_keeps_a_rim_inside_a_corner_that_turns_away_and_round_a_keepout() {
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line {
+        a: v(a.0, a.1),
+        b: v(b.0, b.1),
+    };
+    // An L: the corner at (30, 20) turns away from the field.
+    let pts = [
+        (0.0, 0.0),
+        (60.0, 0.0),
+        (60.0, 20.0),
+        (30.0, 20.0),
+        (30.0, 50.0),
+        (0.0, 50.0),
+    ];
+    let l = Loop2 {
+        segs: (0..pts.len())
+            .map(|k| line(pts[k], pts[(k + 1) % pts.len()]))
+            .collect(),
+    };
+    let hole = Loop2 {
+        segs: vec![Seg2::Arc {
+            center: v(15.0, 30.0),
+            radius: 6.0,
+            start: 0.0,
+            sweep: TAU,
+        }],
+    };
+    let field = [l, hole];
+    for corner_radius in [0.0, 1.0] {
+        let plan = run(
+            &field,
+            &CellGridSpec {
+                corner_radius,
+                ..voronoi(2, 0.7, Clip::Snap)
+            },
+        );
+        assert!(plan.warnings.is_empty(), "{:?}", plan.warnings);
+        assert!(plan.partial > 0 && plan.whole > 0);
+        let mut least = f64::INFINITY;
+        for cell in &plan.cells {
+            let rim = rim_of(cell, &field);
+            assert!(rim >= W - 1e-6, "cell ({}, {}): {rim}", cell.i, cell.j);
+            least = least.min(rim);
+        }
+        assert!(least <= W + 1e-6, "{least}");
+    }
+}
+
+#[test]
+fn a_filled_voronoi_grid_rounds_the_corners_the_rim_cuts() {
+    let field = [rect(0.0, 0.0, 40.0, 30.0)];
+    let plan = run(
+        &field,
+        &CellGridSpec {
+            corner_radius: 1.0,
+            ..voronoi(9, 0.5, Clip::Snap)
+        },
+    );
+    assert!(plan.partial > 0);
+    for cell in plan.cells.iter().filter(|c| c.kind != CellKind::Whole) {
+        let segs = &cell.loops[0].segs;
+        let arcs = segs
+            .iter()
+            .filter(|s| matches!(s, Seg2::Arc { .. }))
+            .count();
+        // Lines and arcs in turn: every corner is rounded, the ones on the rim too.
+        assert_eq!(2 * arcs, segs.len(), "cell ({}, {})", cell.i, cell.j);
+        assert!(rim_of(cell, &field) >= W - 1e-6);
+    }
+}
+
+#[test]
+fn a_filled_voronoi_grid_cuts_a_sharp_corner_inside_a_rounded_corner_smaller_than_the_web() {
+    let line = |a: (f64, f64), b: (f64, f64)| Seg2::Line {
+        a: v(a.0, a.1),
+        b: v(b.0, b.1),
+    };
+    // A corner rounded by 1, less than the web.
+    let field = [Loop2 {
+        segs: vec![
+            line((0.0, 0.0), (40.0, 0.0)),
+            line((40.0, 0.0), (40.0, 29.0)),
+            Seg2::Arc {
+                center: v(39.0, 29.0),
+                radius: 1.0,
+                start: 0.0,
+                sweep: FRAC_PI_2,
+            },
+            line((39.0, 30.0), (0.0, 30.0)),
+            line((0.0, 30.0), (0.0, 0.0)),
+        ],
+    }];
+    let rounded = run(&field, &voronoi(9, 0.5, Clip::Snap));
+    let sharp = run(&[rect(0.0, 0.0, 40.0, 30.0)], &voronoi(9, 0.5, Clip::Snap));
+    assert!(rounded.warnings.is_empty(), "{:?}", rounded.warnings);
+    assert_eq!(rounded.cells, sharp.cells);
+    for cell in &rounded.cells {
+        assert!(rim_of(cell, &field) >= W - 1e-6);
+    }
+}
+
+#[test]
+fn a_voronoi_grid_keeps_whole_cells_when_the_outline_cannot_move_in_by_the_web() {
+    // The second field is narrower than two webs.
+    let field = [rect(0.0, 0.0, 40.0, 30.0), rect(50.0, 0.0, 52.0, 30.0)];
+    let snap = run(&field, &voronoi(4, 0.6, Clip::Snap));
+    let whole = run(&field, &voronoi(4, 0.6, Clip::Whole));
+    assert_eq!(snap.warnings.len(), 1, "{:?}", snap.warnings);
+    assert!(!whole.cells.is_empty());
+    assert_eq!(snap.cells, whole.cells);
     assert_eq!(snap.partial, 0);
 }
 

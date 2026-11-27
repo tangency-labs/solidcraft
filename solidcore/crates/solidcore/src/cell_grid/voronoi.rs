@@ -29,8 +29,19 @@
 //! far: the first [`RINGS`] rings are all of them, at every irregularity.
 //!
 //! # Clipping
-//! A voronoi cell has no lattice lines: `Free` trims the cell to the field as drawn, `Whole` and
-//! `Snap` keep only cells entirely inside it.
+//! A voronoi cell has no lattice lines to snap to. `Whole` keeps only the cells entirely inside
+//! the field and `Free` trims a cell to the field as drawn, as with the other shapes. `Snap` fills
+//! the field: a cell is trimmed to the field's outline moved in by one web, so the rim along the
+//! outline (and around a keep-out) is as wide as the web between two cells.
+//!
+//! The outline is moved piece by piece ([`inset_loops`]): a line sideways, an arc to a radius one
+//! web smaller or larger. At a corner that turns towards the field the moved pieces cross and
+//! are cut there; at one that turns away they are joined by an arc of one web about the corner
+//! (two lines that turn only a little are lengthened until they meet). A piece the move uses up
+//! (an edge or a radius shorter than the web allows) is not handled: the grid then keeps whole
+//! cells only and says so. Where the field is narrower than two webs the moved outline crosses
+//! itself, so every trimmed cell is measured against the outline as drawn and left solid when it
+//! comes nearer than a web.
 
 use std::f64::consts::{PI, TAU};
 
@@ -38,9 +49,11 @@ use crate::math::Vec2;
 use crate::prism::profile::{cross2, Loop2};
 
 use super::exact;
-use super::free::{self, Cell as FreeCell};
+use super::free::{self, intersections, Cell as FreeCell};
 use super::lattice::Lattice;
-use super::region::{clip_halfplane, poly_area, poly_centroid, Convex, Prim, Region};
+use super::region::{
+    clip_halfplane, keepout_loops, poly_area, poly_centroid, Convex, Loop, Prim, Region,
+};
 use super::vec::{ring_next, ring_prev, Vec2Ext};
 use super::{
     lattice_loops, points_to_prims, push, CellGridError, CellGridPlan, CellGridSpec, CellKind, Clip,
@@ -59,6 +72,11 @@ const ROUND_MOST: f64 = 0.9;
 /// Sides of a rounded cell's core shorter than this (mm), and corners turning less than this
 /// (radians), are left out: their arcs and lines would be too short to build.
 const ROUND_TOL: f64 = 1e-6;
+/// Two lines of an outline that turn away from the field by less than this (radians) are
+/// lengthened until they meet when the outline is moved in; a sharper corner gets an arc.
+const MITER_MOST: f64 = 0.05;
+/// A trimmed cell may come this much (mm) nearer the outline as drawn than one web.
+const RIM_TOL: f64 = 1e-6;
 /// The mantissa bits of an `f64`: a hash's top 53 bits as a fraction in `[0, 1)`.
 const MANTISSA_BITS: u32 = 53;
 
@@ -217,18 +235,206 @@ fn rounded(poly: &[Vec2], r: f64) -> Option<(Convex, f64, Vec<Prim>, f64)> {
     Some((core, r, prims, area))
 }
 
+/// The piece moved `w` to its left (`None` for an arc whose radius the move uses up).
+fn moved_left(p: &Prim, w: f64) -> Option<Prim> {
+    match *p {
+        Prim::Line { a, b, .. } => {
+            let d = (b - a).normalized()?;
+            let n = Vec2::new(-d.y, d.x) * w;
+            Some(Prim::line(a + n, b + n))
+        }
+        Prim::Arc {
+            c, r, a0, sweep, ..
+        } => {
+            // A counter-clockwise arc has its centre on the left.
+            let r = if sweep >= 0.0 { r - w } else { r + w };
+            (r > ROUND_TOL).then(|| Prim::arc(c, r, a0, sweep))
+        }
+    }
+}
+
+/// The moved piece `p` between the points `from` and `to` on it; `None` when nothing of it is
+/// left that runs the way it did.
+fn between(p: &Prim, from: Vec2, to: Vec2) -> Option<Prim> {
+    match *p {
+        Prim::Line { a, b, .. } => {
+            let d = (b - a).normalized()?;
+            ((to - from).dot(d) > ROUND_TOL).then(|| Prim::line(from, to))
+        }
+        Prim::Arc {
+            c, r, a0, sweep, ..
+        } => {
+            let turn = sweep.signum();
+            // How far round the arc a point is, from just before its start to just past its end.
+            let along = |x: Vec2| {
+                let t = (((x.y - c.y).atan2(x.x - c.x) - a0) * turn).rem_euclid(TAU);
+                if t > (sweep.abs() + TAU) / 2.0 {
+                    t - TAU
+                } else {
+                    t
+                }
+            };
+            // A whole circle starts and ends at one point.
+            let (t0, t1) = if from.distance(to) <= ROUND_TOL && sweep.abs() >= TAU - ROUND_TOL {
+                (0.0, sweep.abs())
+            } else {
+                (along(from), along(to))
+            };
+            ((t1 - t0) * r > ROUND_TOL)
+                .then(|| Prim::arc(c, r, a0 + t0 * turn, (t1 - t0) * turn).with_start(from))
+        }
+    }
+}
+
+/// The loop (the field on its left) moved in by `w`: see the module docs. `None` when a piece is
+/// used up or two moved pieces that should cross do not.
+fn inset_loop(lp: &Loop, w: f64) -> Option<Loop> {
+    // A rounded corner of the field no wider than the move leaves a sharp corner: its
+    // neighbours meet.
+    let kept: Vec<&Prim> = lp
+        .prims
+        .iter()
+        .filter(|p| !matches!(**p, Prim::Arc { r, sweep, .. } if sweep > 0.0 && r <= w + ROUND_TOL))
+        .collect();
+    let n = kept.len();
+    if n < 2 && n < lp.prims.len() {
+        return None;
+    }
+    let moved: Vec<Prim> = kept
+        .iter()
+        .map(|p| moved_left(p, w))
+        .collect::<Option<_>>()?;
+    // For the corner after each piece: where the piece now ends, a joining arc if there is one,
+    // and where the next piece now starts.
+    let mut joints: Vec<(Vec2, Option<Prim>, Vec2)> = Vec::with_capacity(n);
+    for k in 0..n {
+        let (p, q) = (*kept.get(k)?, *kept.get(ring_next(k, n))?);
+        let (mp, mq) = (moved.get(k)?, moved.get(ring_next(k, n))?);
+        let corner = p.end();
+        let joined = corner.distance(q.start()) <= ROUND_TOL;
+        let (u, v) = (p.direction_at(corner), q.direction_at(q.start()));
+        let turn = cross2(u, v).atan2(u.dot(v));
+        let (e, s) = (mp.end(), mq.start());
+        let lines = matches!((p, q), (Prim::Line { .. }, Prim::Line { .. }));
+        let joint = if e.distance(s) <= ROUND_TOL {
+            (e, None, e)
+        } else if lines && joined && turn > -MITER_MOST {
+            // Both lines moved by `w`: they meet on the corner's bisector.
+            let (nu, nv) = (Vec2::new(-u.y, u.x), Vec2::new(-v.y, v.x));
+            let x = corner + (nu + nv) * (w / (1.0 + nu.dot(nv)));
+            (x, None, x)
+        } else if turn > 0.0 || !joined {
+            let x = intersections(mp, mq)
+                .into_iter()
+                .min_by(|a, b| a.distance(corner).total_cmp(&b.distance(corner)))?;
+            (x, None, x)
+        } else {
+            let from = e - corner;
+            (
+                e,
+                Some(Prim::arc(corner, w, from.y.atan2(from.x), turn).with_start(e)),
+                s,
+            )
+        };
+        joints.push(joint);
+    }
+    let mut prims = Vec::with_capacity(2 * n);
+    for k in 0..n {
+        let (before, after) = (joints.get(ring_prev(k, n))?, joints.get(k)?);
+        prims.push(between(moved.get(k)?, before.2, after.0)?);
+        prims.extend(after.1);
+    }
+    Loop::new(prims, Some(lp.flattened))
+}
+
+/// The loops with the fields' outlines (`fields`) and the keep-outs' (`keepouts`) moved by `w`
+/// into the field, each as asked; the others as they are. `None` when one cannot be moved.
+fn inset_loops(loops: &[Loop], (fields, keepouts): (bool, bool), w: f64) -> Option<Vec<Loop>> {
+    loops
+        .iter()
+        .zip(keepout_loops(loops))
+        .map(|(lp, keepout)| {
+            if !(if keepout { keepouts } else { fields }) {
+                return Some(lp.clone());
+            }
+            // The field is on the left of a counter-clockwise outline and of a clockwise keep-out.
+            let moved = inset_loop(&lp.clone().oriented(!keepout), w)?;
+            // An outline that turns inside out has no field left.
+            ((moved.signed_area() > 0.0) != keepout).then_some(moved)
+        })
+        .collect()
+}
+
+/// A trimmed cell's piece as a convex polygon, when it is one of straight sides.
+fn convex_piece(prims: &[Prim]) -> Option<Vec<Vec2>> {
+    if !prims.iter().all(|p| matches!(p, Prim::Line { .. })) {
+        return None;
+    }
+    let pts = without_slivers(&prims.iter().map(Prim::start).collect::<Vec<_>>());
+    let n = pts.len();
+    let convex = n >= 3
+        && (0..n).all(|k| {
+            matches!(
+                (pts.get(ring_prev(k, n)), pts.get(k), pts.get(ring_next(k, n))),
+                (Some(&a), Some(&b), Some(&c)) if cross2(b - a, c - b) > 0.0
+            )
+        });
+    convex.then_some(pts)
+}
+
+/// Whether every piece keeps `w` clear of the outline as drawn (measured at each of its pieces'
+/// ends and middles), for the fields' outlines (`fields`) and the keep-outs' (`keepouts`) as asked.
+fn keeps_rim(
+    outline: &Region,
+    (fields, keepouts): (bool, bool),
+    pieces: &[(Vec<Prim>, f64)],
+    w: f64,
+) -> bool {
+    pieces.iter().flat_map(|p| p.0.iter()).all(|p| {
+        let near = outline.near(&p.bounds().grown(w));
+        [p.start(), p.mid()].iter().all(|&x| {
+            near.iter()
+                .filter(|&&i| match outline.keepout.get(i) {
+                    Some(true) => keepouts,
+                    _ => fields,
+                })
+                .filter_map(|&i| outline.prims.get(i))
+                .all(|o| o.distance(x) >= w - RIM_TOL)
+        })
+    })
+}
+
 /// The cells of a voronoi grid over a field given as closed loops (see the module docs).
 pub(crate) fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan, CellGridError> {
     let lat = spec.lattice()?;
     let mut warnings = Vec::new();
     let (loops, edges, flattened) = lattice_loops(field, spec, &mut warnings)?;
-    // Without lattice lines there is nothing to snap to.
-    let usable = |c: Clip| if c == Clip::Snap { Clip::Whole } else { c };
-    let field_clip = usable(spec.clip);
-    let keepout_clip = usable(spec.keepout_clip.unwrap_or(spec.clip));
+    let mut field_clip = spec.clip;
+    let mut keepout_clip = spec.keepout_clip.unwrap_or(spec.clip);
+    // `Snap` fills the field up to a rim of one web: the cells are trimmed to the outline moved
+    // in by the web (see the module docs).
+    let fills = (field_clip == Clip::Snap, keepout_clip == Clip::Snap);
+    let mut rim = None;
+    let mut loops = loops;
+    if (fills.0 || fills.1) && lat.w > 0.0 {
+        if let Some(moved) = inset_loops(&loops, fills, lat.w) {
+            rim = Some(Region::from_loops(loops, lat.p));
+            loops = moved;
+        } else {
+            warnings.push(
+                "the field's outline could not be moved in by the web, so only whole cells were \
+                 kept"
+                    .into(),
+            );
+            let whole = |c: Clip| if c == Clip::Snap { Clip::Whole } else { c };
+            (field_clip, keepout_clip) = (whole(field_clip), whole(keepout_clip));
+        }
+    }
     let region = Region::from_loops(loops, lat.p);
-    // Curves other than lines and arcs and a margin are decided on the exact edges.
-    let exact = (flattened || spec.margin > 0.0).then(|| exact::ExactField::new(edges, lat.p));
+    // Curves other than lines and arcs and a margin are decided on the exact edges. A filled
+    // field is decided on its moved outline, which has no exact edges.
+    let exact = ((flattened || spec.margin > 0.0) && rim.is_none())
+        .then(|| exact::ExactField::new(edges, lat.p));
     let mut out = CellGridPlan {
         warnings,
         ..CellGridPlan::default()
@@ -278,10 +484,17 @@ pub(crate) fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan,
         ) {
             (false, true) => keepout_clip,
             (_, false) => field_clip,
-            (true, true) if field_clip == Clip::Free && keepout_clip == Clip::Free => Clip::Free,
+            (true, true) if field_clip != Clip::Whole && keepout_clip != Clip::Whole => {
+                // Trimmed by both; the rim is checked when either has one.
+                if field_clip == Clip::Snap {
+                    field_clip
+                } else {
+                    keepout_clip
+                }
+            }
             (true, true) => Clip::Whole,
         };
-        if clip != Clip::Free {
+        if clip == Clip::Whole {
             continue;
         }
         let cell = match &round {
@@ -292,7 +505,30 @@ pub(crate) fn plan(field: &[Loop2], spec: &CellGridSpec) -> Result<CellGridPlan,
             },
             None => FreeCell::Polygon(&convex),
         };
-        match free::clip_cell(&region, &cell) {
+        let mut pieces = free::clip_cell(&region, &cell);
+        if let (Clip::Snap, Some(outline)) = (clip, &rim) {
+            // A corner the rim cut is rounded like the others when the piece allows it.
+            if round.is_some() {
+                let straight = free::clip_cell(&region, &FreeCell::Polygon(&convex));
+                if let Some([(prims, _)]) = straight.as_deref() {
+                    if let Some((_, _, prims, area)) =
+                        convex_piece(prims).and_then(|pts| rounded(&pts, spec.corner_radius))
+                    {
+                        pieces = Some(vec![(prims, area)]);
+                    }
+                }
+            }
+            if pieces
+                .as_ref()
+                .is_some_and(|p| !keeps_rim(outline, fills, p, lat.w))
+            {
+                out.warnings.push(format!(
+                    "cell ({i}, {j}) would leave a rim thinner than the web and was left solid"
+                ));
+                continue;
+            }
+        }
+        match pieces {
             Some(pieces) => {
                 let area: f64 = pieces.iter().map(|p| p.1).sum();
                 if area > MIN_AREA {
