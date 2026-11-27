@@ -9,7 +9,9 @@ use serde_json::{Map, Value, json};
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::{AxisRef, Direction, ExtendMode, ExtendTo, FaceAt, FeatureKind, Mat, PlaneRef, Position, ProfileSel, RuledCorners, RuledMode};
+use solidcraft_engine::doc::{
+    AxisRef, Direction, ExtendMode, ExtendTo, FaceAt, FeatureKind, Mat, PlaneRef, Position, ProfileSel, RuledCorners, RuledMode,
+};
 use solidcraft_engine::geom::prelude::*;
 use solidcraft_engine::kernel::{Construction, Continuity};
 
