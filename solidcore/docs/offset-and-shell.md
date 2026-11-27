@@ -295,12 +295,15 @@ Every reconstructed vertex must lie on the support's outward side and in every e
 material halfspace. Toleranced stored vertices and trims do not decide this certificate.
 Two exposed planes whose normals are opposite within the angular tolerance pair; their actual offset
 definitions (each sheet's stored origin and axes, its normal the exact cross product of the axes)
-certify that their material halfspaces have no common point in the cell: the sum of the two
-sheets' exact plane functions is positive at every reconstructed vertex (a Farkas certificate
-with unit multipliers), hence on their convex hull. For exactly opposite normals that sum is the
+certify that their material halfspaces have no common interior point in the cell: the sum of the
+two sheets' exact plane functions is non-negative at every reconstructed vertex (a Farkas
+certificate with unit multipliers), hence on their convex hull. Where it is zero the two sheets
+coincide (a branch inset by exactly half its width): their common part is a piece of one plane, of
+zero volume, which the regularized offset does not keep, so the tie at coincident opposite sheets
+is decided as no cavity, exactly as a crossing is. For exactly opposite normals that sum is the
 constant crossing of the two planes; a branch turned by a rotation, whose normals are opposite only
 up to rounding, is decided the same way (#22784). The branch contributes no cavity, so both its offset sheets and the support's
-attachment loop are removed. The attachment is an artificial cut, not an exposed face: it
+attachment loop are removed, and the walls meeting across it are not refused as meeting. The attachment is an artificial cut, not an exposed face: it
 supplies no additional offset halfspace. Thus a short, wide boss can still contain cavity.
 
 This is an empty-cell certificate within the mitred construction, using exact expansion

@@ -344,11 +344,15 @@ fn refuse_singular_or_folding_offset(
 /// the cap of the protrusion the two bound, both its edges with them convex (a floor between
 /// a recess and a cut below it has no such cap, and its shell builds). The
 /// cavity is [`crate::offset::wall_room::shell_wall_room`]'s certified witness. Each test
-/// is a witness: a pair or a cavity none shows leaves the inset to the offset.
+/// is a witness: a pair or a cavity none shows leaves the inset to the offset. A pair whose
+/// faces are both in `extinct`, the faces of branches whose offsets the exact empty-cell
+/// certificate removed (`extinct_branches`), is not refused: their offsets meeting on one
+/// plane bound no volume, and the branch stays solid.
 fn refuse_meeting_planar_insets(
     kernel: &mut Kernel,
     original: &mut Brep,
     open: &[FaceId],
+    extinct: &BTreeSet<FaceId>,
     wall: f64,
     operation: &'static str,
 ) -> Result<()> {
@@ -387,7 +391,7 @@ fn refuse_meeting_planar_insets(
             continue;
         }
         for (j, &(b, pb, mb, eb, _, offset_b)) in planar.iter().enumerate().skip(i + 1) {
-            if !offset_b {
+            if !offset_b || (extinct.contains(&a) && extinct.contains(&b)) {
                 continue;
             }
             // opposite to within the tolerance over both faces' extent
@@ -1672,17 +1676,6 @@ impl OffsetExecutive {
     ) -> Result<Brep> {
         let original = given(original, OP_EXTENDED, SM_ERR_NULL_POINTER)?;
         self.check_resolvable(OP_EXTENDED, original)?;
-        // Not upstream (#18239): an inset whose opposite planar walls meet (a square boss
-        // inset by half its width) is refused, as a round's collapse is below.
-        if self.inset()
-            && self.extend_convex_edges()
-            && self.local_faces.is_empty()
-            && self.operation() != OffsetOperation::LocalOperation
-        {
-            let wall = self.offset_distance();
-            let open = self.shell_faces().to_vec();
-            refuse_meeting_planar_insets(kernel, original, &open, wall, OP_EXTENDED)?;
-        }
         self.allocate_offset_brep(kernel, notifications)?;
         let faces = bp1::faces(original, None)?;
         for id in faces {
@@ -1695,7 +1688,20 @@ impl OffsetExecutive {
             }
         }
 
-        self.remove_extinct_branches(kernel, original, notifications)?;
+        let extinct = self.remove_extinct_branches(kernel, original, notifications)?;
+        // Not upstream (#18239): an inset whose opposite planar walls meet (a square boss
+        // inset by half its width) is refused, as a round's collapse is below, unless the
+        // walls are a branch just certified empty, whose offsets meet only on one plane and
+        // hold no cavity (#22783).
+        if self.inset()
+            && self.extend_convex_edges()
+            && self.local_faces.is_empty()
+            && self.operation() != OffsetOperation::LocalOperation
+        {
+            let wall = self.offset_distance();
+            let open = self.shell_faces().to_vec();
+            refuse_meeting_planar_insets(kernel, original, &open, &extinct, wall, OP_EXTENDED)?;
+        }
         let mapped = order_edgeuses_by_brep(original, &self.mapped_original_edgeuses())?;
         // (not upstream) a local operation's edges whose surfaces all stay are kept
         self.keep_unmoved_edges(original)?;
