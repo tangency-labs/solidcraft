@@ -10,7 +10,7 @@ fn schemas_and_the_key_check_agree() {
     assert_keys(input_schema_for::<TabGroupCreateParams>(), &["colour", "name", "tab"]);
     assert_keys(input_schema_for::<TabGroupAddParams>(), &["group", "tab"]);
     assert_keys(input_schema_for::<TabGroupTabParams>(), &["tab"]);
-    assert_keys(input_schema_for::<TabGroupUpdateParams>(), &["colour", "group", "name"]);
+    assert_keys(input_schema_for::<TabGroupUpdateParams>(), &["collapsed", "colour", "group", "name"]);
     assert_keys(input_schema_for::<TabGroupIdParams>(), &["group"]);
     assert_keys(input_schema_for::<TabGroupNoParams>(), &[]);
 }
