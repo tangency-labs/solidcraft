@@ -5675,8 +5675,6 @@ fn a_round_along_a_whole_circle_builds_alike_on_both_ends_of_a_mirrored_ring() {
     }
 }
 
-/// Acid-1 stage 4: both rims of the upper half torus, including the outer rim's
-/// detour around an r0.7 notch, are rounded r0.8 after joining the seam's boss.
 /// #19077, reduced: a quarter turn of a 20 wide, 6 high profile whose outer wall is a cone of
 /// slope 1/320, its two end faces through the axis, each end rounded 0.5 against the cone (the
 /// round's spine is a hyperbola, its plane square to the cone's axis) and shelled 0.4 inward.
@@ -5715,6 +5713,8 @@ fn a_revolved_body_with_rounds_on_its_shallow_cone_shells_04_inward() {
     assert!(0.0 < wall && wall < whole, "wall {wall} of {whole}");
 }
 
+/// Acid-1 stage 4: both rims of the upper half torus, including the outer rim's
+/// detour around an r0.7 notch, are rounded r0.8 after joining the seam's boss.
 #[test]
 fn both_flat_face_loops_of_a_notched_half_torus_round() {
     use solidcore_ops::boolean::boolean;
