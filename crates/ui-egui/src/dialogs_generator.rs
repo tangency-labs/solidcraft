@@ -101,6 +101,10 @@ pub fn rows(app: &SolveApp, ui: &mut egui::Ui, k: &mut Gen) -> bool {
             // A choice field can be changed here: the code is written again from the fields.
             let mut edited: Option<(String, String)> = None;
             for (name, value) in &r.fields {
+                // The letters of a letter map sit beside its value; the value is what is shown.
+                if name.strip_suffix("_code").is_some_and(|base| r.fields.contains_key(base)) {
+                    continue;
+                }
                 match g.declared.get(name).and_then(|d| options(&d.kind)) {
                     Some(list) => {
                         let current = shown(value);
