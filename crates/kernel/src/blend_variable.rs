@@ -223,7 +223,7 @@ pub fn fillet_variable_spline(body: &Body, edge_at: Vec3, start: Vec3, spline: &
 /// one radius `spline` along the whole chain: 0 at the chain's end nearest `start`, 1 at its
 /// other end, each edge taking the part its share of the chain's length gives, so the radius
 /// agrees where two edges meet. One end's radius may be zero. A closed chain, or edges that do
-/// not join end to end, are not supported.
+/// not join end to end, are not supported, and a round SMLib's check refuses is refused.
 pub fn fillet_variable_spline_chain(body: &Body, edges: &[Vec3], start: Vec3, spline: &RadiusSpline) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "fillet_variable_spline_chain");
     body.require_brep("fillet")?;
@@ -231,7 +231,13 @@ pub fn fillet_variable_spline_chain(body: &Body, edges: &[Vec3], start: Vec3, sp
     if edges.is_empty() || !(edges.iter().all(|p| p.is_finite()) && start.is_finite()) {
         return Err(KernelError::Invalid("the edge picks and the start point must be finite, and at least one edge picked".into()));
     }
-    crate::blend_smlib::fillet_variable_chain(body, edges, start, spline)
+    let made = crate::blend_smlib::fillet_variable_chain(body, edges, start, spline)?;
+    // SMLib can build a law that varies along a chain through a curved edge with its round's
+    // edges off its surfaces; refused here, so a caller can round the picked edge alone instead
+    if let Some(failure) = crate::validation::failing_check(&made)? {
+        return Err(KernelError::Failed(format!("SMLib's check refuses the round along the chain: {failure}")));
+    }
+    Ok(made)
 }
 
 /// A straight edge between two planar faces as the variable blend sees it: the body's record,
