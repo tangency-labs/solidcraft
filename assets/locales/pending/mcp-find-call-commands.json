@@ -1,0 +1,18 @@
+{
+  "en": {
+    "ui.agent_tool.call_command": "Call a command",
+    "ui.agent_tool.find_commands": "Find commands"
+  },
+  "de": {
+    "ui.agent_tool.call_command": "Befehl ausführen",
+    "ui.agent_tool.find_commands": "Befehle suchen"
+  },
+  "es": {
+    "ui.agent_tool.call_command": "Ejecutar un comando",
+    "ui.agent_tool.find_commands": "Buscar comandos"
+  },
+  "fr": {
+    "ui.agent_tool.call_command": "Exécuter une commande",
+    "ui.agent_tool.find_commands": "Rechercher des commandes"
+  }
+}

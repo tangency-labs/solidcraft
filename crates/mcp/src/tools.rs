@@ -57,6 +57,12 @@ fn expect_schema() -> Value {
     })
 }
 
+/// The tools `solidcraft-cli mcp` lists by default ([`Options::core_tools`]): the command search
+/// and call pair, which reach every command, and the session tools an agent uses on most calls.
+/// The others still answer when called by name, and `--all-tools` lists them.
+pub const CORE_TOOLS: &[&str] =
+    &["find_commands", "call_command", "batch", "inspect_design", "measure", "body_topology", "pending", "skill_reference"];
+
 /// Every tool, with its JSON schema, as the server has them by default. The same list serves the
 /// headless and the bridged backend.
 pub fn tool_definitions() -> Vec<Value> {
@@ -112,6 +118,41 @@ pub fn tool_definitions_with(opts: Options) -> Vec<Value> {
              JSON Schemas (2020-12) of its parameters (`input`) and of a successful result (`output`); null for the others.",
             object(json!({"id": string("Command id, e.g. \"solid.extrude\"")}), &["id"]),
             Effect::ReadOnly,
+        ),
+        tool(
+            "find_commands",
+            "Find commands",
+            "Search SolidCraft's commands (sketch, solid, surface, sheet metal, assembly joints, parameters, file, view…) by \
+             words. Returns the best matches, each {id, label, input, types, doc}: `input` is its parameters as a short \
+             signature (`name?` optional, `a|b` the choices, `T[]` a list), `types` spells out each named type once, and \
+             `doc` is the start of its parameter notes (`detail: true` for all of them). Run one with call_command or as a \
+             batch step.",
+            object(
+                json!({
+                    "query": string("Words to look for in command ids, labels and notes, e.g. \"fillet\", \"sketch circle\", \"revolute joint\""),
+                    "limit": {"type": "integer", "minimum": 1, "maximum": crate::find::MAX_LIMIT, "description": "At most this many matches (default 5)"},
+                    "detail": {"type": "boolean", "description": "Each match's full parameter notes (default false)"},
+                }),
+                &["query"],
+            ),
+            Effect::ReadOnly,
+        ),
+        tool(
+            "call_command",
+            "Call a command",
+            "Run any SolidCraft command by id (find_commands finds it) with JSON params, exactly as the toolbar does; never \
+             opens a dialog. The params are checked against the command's schema first: a mismatch is refused, naming the \
+             field, and nothing runs. Lengths are mm; numbers may be expressions (\"w / 2\", \"30 deg\"). Feature commands \
+             return the feature's id and the bodies it created, changed and removed; sketch commands return the ids they \
+             created, usable right away. A failure leaves the design unchanged.",
+            object(
+                json!({
+                    "id": string("Command id, e.g. \"solid.box\""),
+                    "params": {"type": "object", "description": "The command's parameters"},
+                }),
+                &["id"],
+            ),
+            Effect::Files,
         ),
         tool(
             "execute",
@@ -744,6 +785,8 @@ pub fn call_tool_with_context(b: &mut dyn Backend, name: &str, args: &Value, opt
         "batch" => return batch(b, a, opts, ctx),
         "check_parameters" => return check_parameters(b, a, opts),
         "execute" => return execute(b, a, opts),
+        "find_commands" => crate::find::find_commands(&solidcraft_engine::command_specs(), a),
+        "call_command" => return call_command(b, a, opts),
         "inspect_design" if opts.compact => inspect_design_compact(b, a),
         _ => dispatch(b, name, a),
     };
@@ -763,6 +806,23 @@ fn execute(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options) -> Value 
         Ok(v) => with_expectation(b, v, expect, opts),
         Err(e) => text_result(&Value::String(e), true, opts),
     }
+}
+
+/// `call_command {id, params}`: the params checked against the command's schema, then the
+/// command run as `execute` runs it, with a compact reply.
+fn call_command(b: &mut dyn Backend, a: &Map<String, Value>, opts: Options) -> Value {
+    let Some(id) = str_arg(a, "id") else {
+        return text_result(&Value::String("`id` is required: a command id from find_commands".into()), true, opts);
+    };
+    let params = a.get("params").cloned().filter(Value::is_object).unwrap_or(json!({}));
+    if let Some(why) = crate::find::refusal(id, &params) {
+        return text_result(&Value::String(why), true, opts);
+    }
+    let mut call = Map::new();
+    call.insert("command".into(), json!(id));
+    call.insert("params".into(), params);
+    call.insert("verbose".into(), json!(false));
+    execute(b, &call, opts)
 }
 
 /// What `execute` or `batch` was told the design would measure once the call went through
@@ -1471,6 +1531,14 @@ fn batch_step(step: &Value) -> Result<(String, Value, Option<Narrow>), String> {
             }
             mapped(inner, a.get("params").cloned().filter(Value::is_object).unwrap_or(json!({})))
         }
+        "call_command" => {
+            let inner = str_arg(a, "id").ok_or("a `call_command` step needs params {id, params}")?;
+            if !inner.contains('.') && TOOL_STEPS.contains(&inner) {
+                return Err(format!("a `call_command` step runs an engine command, not the `{inner}` tool"));
+            }
+            mapped(inner, a.get("params").cloned().filter(Value::is_object).unwrap_or(json!({})))
+        }
+        "find_commands" => Err("`find_commands` is a tool, not a command: call it on its own".into()),
         "measure" => match a.get("items") {
             Some(items) => {
                 let mut p = measure_region_params(a);
@@ -1548,6 +1616,7 @@ const TOOL_STEPS: &[&str] = &[
     "agent_cursor",
     "batch",
     "body_topology",
+    "call_command",
     "cancel",
     "check_parameters",
     "compare_picture",
@@ -1556,6 +1625,7 @@ const TOOL_STEPS: &[&str] = &[
     "documents",
     "execute",
     "export",
+    "find_commands",
     "inspect_design",
     "list_commands",
     "measure",
