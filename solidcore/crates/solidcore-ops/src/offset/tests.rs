@@ -3229,6 +3229,64 @@ mod drafts {
     /// tan 3 degrees.
     const TAN_THREE: f64 = 0.052_407_779_283_041_21;
 
+    /// A body of revolution about z, R 20 at z = 0, H 60 tall, its side drafted about its
+    /// circle on z = 0 to rho = R - t z and its top rim rounded r 2 after (#22803). With
+    /// `q = sqrt(1 + t^2)`: the round's centre circle is at `z = H - r`,
+    /// `rho_c = R - t (H - r) - r q`; it meets the side at `z_s = H - r + r t / q`, where the
+    /// side's radius is `rho_s = R - t z_s`; the frustum below `z_s` is
+    /// `pi z_s (R^2 + R rho_s + rho_s^2) / 3` and the cap above it pi times the integral of
+    /// `(rho_c + sqrt(r^2 - u^2))^2` for u from `r t / q` to r. Each the
+    /// double nearest its expression, for t = tan 3 degrees (leaning in), -tan 3 degrees
+    /// (leaning out) and tan(atan(1/6) + 3 degrees) (the cone R 20 to 10 drafted 3 degrees
+    /// more).
+    const ROUNDED_RIM_IN: f64 = 64_086.644_031_166_45;
+    const ROUNDED_RIM_OUT: f64 = 87_735.999_129_625_95;
+    const ROUNDED_CONE_RIM: f64 = 36_435.608_305_851_325;
+
+    /// The side of a cylinder R 20 x 60 (and of a cone R 20 to 10 x 60) whose top rim is
+    /// rounded 2 drafted 3 degrees about its circle on z = 0 (#22803): the round can't be
+    /// extended to meet the drafted side (leaning in, the cone at z = 58 is at rho 16.95,
+    /// inside the round's torus, rho 18 to 20), so it follows the side as a face offset's
+    /// blends do: taken off, the side drafted, the new rim rounded 2 again. The body is the
+    /// one drafted first and rounded after ([`ROUNDED_RIM_IN`]): its volume to rounding, valid
+    /// at every check level, four faces (bottom, side, round, top).
+    #[test]
+    fn a_side_whose_rim_is_rounded_drafts_and_the_round_follows() {
+        all_fixes();
+        for (cone, angle, want) in [
+            (false, THREE, ROUNDED_RIM_IN),
+            (false, -THREE, ROUNDED_RIM_OUT),
+            (true, THREE, ROUNDED_CONE_RIM),
+        ] {
+            let b = if cone {
+                make_cone([0.0; 3], 20.0, 10.0, 60.0).unwrap()
+            } else {
+                make_cylinder([0.0; 3], 20.0, 60.0).unwrap()
+            };
+            let top_radius = if cone { 10.0 } else { 20.0 };
+            let rim = super::edge_at(&b, [0.0, -top_radius, 60.0]);
+            crate::blend::blend(
+                &b,
+                crate::blend::Blend::Round,
+                &[rim],
+                &[2.0],
+                &[],
+                crate::blend::Corners::Filled,
+            )
+            .unwrap();
+            let o = order(&b);
+            let side = face(&b, &o, |bx| {
+                bx.min().z.abs() < 1e-9 && bx.max().z < 60.0 - 1e-6 && bx.max().z > 50.0
+            });
+            draft(&b, &o, &[side], [0.0; 3], Z, Z, angle).unwrap();
+            let got = volume(&b);
+            assert!(rel(got, want) < 1e-9, "cone {cone} {angle}: {got} {want}");
+            let report = b.check(crate::CheckLevel::All).unwrap();
+            assert_eq!(report.failures, 0, "cone {cone} {angle}: {}", report.text);
+            assert_eq!(b.counts().unwrap()[0], 4, "cone {cone} {angle}");
+        }
+    }
+
     /// A boss r 10 about (20, 20), z 10 to 20, drawn as two faces: a circle extruded as two
     /// half arcs, so its wall is split along the rulings through (10, 20) and (30, 20) and its
     /// top has a vertex on each, where the two wall faces and the top meet.

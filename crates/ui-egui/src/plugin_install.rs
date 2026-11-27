@@ -931,6 +931,7 @@ mod tests {
 
 #[test]
 fn permission_comparison_checks_exact_access_and_ignores_paths() {
+    crate::i18n::install();
     let _language = solidcraft_ui_text::scope("en");
     use solidcraft_engine::plugin::{FileGrant, Grants};
     let old = Grants {

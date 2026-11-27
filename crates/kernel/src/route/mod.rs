@@ -122,4 +122,35 @@ mod tests {
             records(&crate::build::revolve_whole_sides(&pl, &regions, o, d, a, one).unwrap())
         );
     }
+
+    /// Every fillet and chamfer entry point is the adapter's call: the same record (and, for
+    /// [`fillet_removing`], the same picks left out) as calling solidcore's blend directly.
+    #[test]
+    fn routed_fillets_and_chamfers_are_the_adapters() {
+        use crate::{ChamferSide, FilletTurn};
+        let b = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(60.0, 40.0, 20.0)).unwrap();
+        let edges = [Vec3::new(30.0, 40.0, 20.0), Vec3::new(60.0, 20.0, 20.0), Vec3::new(60.0, 40.0, 10.0)];
+        let (routed, gone) = fillet_removing(&b, &edges, 3.0, FilletTurn::Mitre).unwrap();
+        let (direct, gone_direct) = crate::blend::fillet_removing(&b, &edges, 3.0, FilletTurn::Mitre).unwrap();
+        assert_eq!((routed.record(), gone), (direct.record(), gone_direct));
+        let radii = [2.0, 3.0, 4.0];
+        assert_eq!(
+            fillet_each(&b, &edges, &radii, FilletTurn::Mitre).unwrap().record(),
+            crate::blend::fillet_each(&b, &edges, &radii, FilletTurn::Mitre).unwrap().record()
+        );
+        let corner = [(Vec3::new(60.0, 40.0, 20.0), 8.0)];
+        assert_eq!(
+            fillet_setback(&b, &edges, 5.0, &corner).unwrap().record(),
+            crate::blend::fillet_setback(&b, &edges, 5.0, &corner).unwrap().record()
+        );
+        assert_eq!(
+            chamfer_carrying_face(&b, &edges[..1], 2.0).unwrap().record(),
+            crate::blend::chamfer_carrying_face(&b, &edges[..1], 2.0).unwrap().record()
+        );
+        let side = ChamferSide::Distance(3.0);
+        assert_eq!(
+            chamfer_sides_carrying_face(&b, &edges[..1], 2.0, side, true).unwrap().record(),
+            crate::blend::chamfer_sides_carrying_face(&b, &edges[..1], 2.0, side, true).unwrap().record()
+        );
+    }
 }
