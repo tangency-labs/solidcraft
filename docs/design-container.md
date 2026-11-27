@@ -364,9 +364,10 @@ but takes the picture only when its key matches: the format is `solidcraft-thumb
 `document` and `payload` are the SHA-256 of `document.json` and of the PNG. File Explorer keeps a
 thumbnail until the file changes, so a stale picture would outlive the edit that made it stale.
 It also takes format 1: the app treats a format 1 picture as missing and draws a new one, but
-File Explorer cannot draw, so the handler shows the older picture. The handler decodes the PNG with an allocation limit and scales it down, never up, to
-the size File Explorer asks for, averaging in premultiplied alpha so no transparent colour
-bleeds into the model's edge. Any miss leaves the file's icon.
+File Explorer cannot draw, so the handler shows the older picture. The handler decodes the PNG
+with an allocation limit and scales it down, never up, to the size File Explorer asks for,
+averaging in premultiplied alpha so no transparent colour bleeds into the model's edge. Any miss
+leaves the file's icon.
 
 Desktop thumbnail reads seek within the file. The browser VFS supplies a bounded
 in-memory buffer instead; it avoids geometry reconstruction but does not provide
