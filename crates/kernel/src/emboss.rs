@@ -249,8 +249,9 @@ pub fn emboss_project_face(body: &Body, face: usize, at: Vec3, plane: &Plane, re
                     .fold((c, c), |(l, h), p| (Vec2::new(l.x.min(p.x), l.y.min(p.y)), Vec2::new(h.x.max(p.x), h.y.max(p.y))));
                 let corners = [lo2, Vec2::new(hi2.x, lo2.y), hi2, Vec2::new(lo2.x, hi2.y)];
                 // The prism runs square to the wall at the centroid, so a point `s` round it lands
-                // at the angle asin(s / r), not s / r; past the ring's inside it misses the ring.
-                let reach = r_in / r;
+                // at the angle asin(s / r), not s / r. Where the depth goes towards the axis, a
+                // point past the ring's inner circle misses the cap or floor.
+                let reach = if convex == (depth > 0.0) { 1.0 } else { r_in / r };
                 let lands = |(t, h): (f64, f64)| (t - theta).abs() <= reach && on_wall((theta + (t - theta).asin(), h));
                 if !on_wall((theta, height)) || !corners.into_iter().all(|p| lands(laid(p))) {
                     return Err(refuse(NOT_FITTING));
@@ -2343,6 +2344,14 @@ mod tests {
             let added = volume(&result) - volume(&cyl);
             assert!((added - want).abs() < 1e-4 * want.abs(), "w {w}, d {d}: added {added}, want {want}");
         }
+        // 58 wide and 10 deep, past the ring's inner circle (r 28) on the overlap side: it builds.
+        let (w, d) = (29., 10.);
+        let rect =
+            Region2 { outer: Loop2::polygon(&[Vec2::new(-w, -2.), Vec2::new(w, -2.), Vec2::new(w, 2.), Vec2::new(-w, 2.)]), holes: vec![] };
+        let want = 4. * 2. * (quarter(30. + d, w) - quarter(30., w));
+        let result = emboss_project_face(&cyl, wall, Vec3::new(30., 0., 10.), &sketch, &[rect], d).unwrap();
+        let added = volume(&result) - volume(&cyl);
+        assert!((added - want).abs() < 1e-4 * want, "w {w}, d {d}: added {added}, want {want}");
         // 70 wide, its ends would pass the wall: refused, not cut short.
         let wide =
             Region2 { outer: Loop2::polygon(&[Vec2::new(-35., -2.), Vec2::new(35., -2.), Vec2::new(35., 2.), Vec2::new(-35., 2.)]), holes: vec![] };
