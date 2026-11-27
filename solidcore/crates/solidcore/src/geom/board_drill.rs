@@ -62,6 +62,64 @@ pub fn hole_reaches_loops(
     })
 }
 
+/// Whether `point` lies on the wall of a drilled hole, the stadium of [`hole_reaches_loops`]: its
+/// distance from the hole's centre segment is the hole's radius, within 0.6 % of that radius
+/// (at least 1e-6). The slack takes in a slot's ends drawn as chords. A non-finite or negative
+/// input is on no wall.
+#[must_use]
+pub fn on_hole_wall(center: [f64; 2], size: [f64; 2], angle: f64, point: [f64; 2]) -> bool {
+    wall_gap(center, size, angle, point)
+        .is_some_and(|(gap, radius)| gap <= (radius * 0.006).max(1e-6))
+}
+
+/// Whether a side of a board's outline lies on the wall of a drilled hole: every one of `points`
+/// (its ends and its middle, say) is on the wall of [`on_hole_wall`], within `chord` or that
+/// test's slack, whichever is larger. `chord` takes in a wall drawn as chords, whose middles fall
+/// inside it by up to the chords' sag. No points, or a non-finite or negative input, is on no wall.
+#[must_use]
+pub fn side_on_hole_wall(
+    center: [f64; 2],
+    size: [f64; 2],
+    angle: f64,
+    points: &[[f64; 2]],
+    chord: f64,
+) -> bool {
+    if !chord.is_finite() || chord < 0.0 {
+        return false;
+    }
+    !points.is_empty()
+        && points.iter().all(|&point| {
+            wall_gap(center, size, angle, point)
+                .is_some_and(|(gap, radius)| gap <= (radius * 0.006).max(chord).max(1e-6))
+        })
+}
+
+/// How far `point` is from the wall of the hole of [`on_hole_wall`], with the hole's radius; `None`
+/// for a non-finite or negative input.
+fn wall_gap(center: [f64; 2], size: [f64; 2], angle: f64, point: [f64; 2]) -> Option<(f64, f64)> {
+    let [width, height] = size;
+    let finite = center
+        .iter()
+        .chain(&size)
+        .chain(&point)
+        .all(|v| v.is_finite())
+        && angle.is_finite();
+    if !finite || width < 0.0 || height < 0.0 {
+        return None;
+    }
+    let radius = width.min(height) * 0.5;
+    let half = (width.max(height) - width.min(height)) * 0.5;
+    let along = if width >= height {
+        angle
+    } else {
+        angle + std::f64::consts::FRAC_PI_2
+    };
+    let c = Vec2::from_array(center);
+    let axis = Vec2::new(along.cos(), along.sin()) * half;
+    let distance = point_segment_distance(Vec2::from_array(point), c - axis, c + axis);
+    Some(((distance - radius).abs(), radius))
+}
+
 fn cross(a: Vec2, b: Vec2) -> f64 {
     a.x * b.y - a.y * b.x
 }
@@ -167,6 +225,64 @@ mod tests {
         ));
         let broken = vec![vec![[f64::NAN, 0.0], [20.0, 0.0]], vec![], vec![[0.0, 0.0]]];
         assert!(!hole_reaches_loops([0.0, 20.0], [1.0, 1.0], 0.0, &broken));
+    }
+
+    #[test]
+    fn a_point_is_on_a_hole_wall_at_the_holes_radius() {
+        // A round 1 mm hole: its wall is 0.5 from the centre, in any direction.
+        assert!(on_hole_wall([2.0, 3.0], [1.0, 1.0], 0.0, [2.5, 3.0]));
+        assert!(on_hole_wall([2.0, 3.0], [1.0, 1.0], 0.0, [2.0, 2.5]));
+        assert!(!on_hole_wall([2.0, 3.0], [1.0, 1.0], 0.0, [2.0, 3.0]));
+        assert!(!on_hole_wall([2.0, 3.0], [1.0, 1.0], 0.0, [2.6, 3.0]));
+        // A 4 × 1 slot along +Y: its straight sides are 0.5 from the Y axis, its ends 2 from the centre.
+        assert!(on_hole_wall([0.0, 0.0], [4.0, 1.0], FRAC_PI_2, [0.5, 1.0]));
+        assert!(on_hole_wall([0.0, 0.0], [4.0, 1.0], FRAC_PI_2, [0.0, -2.0]));
+        assert!(!on_hole_wall([0.0, 0.0], [4.0, 1.0], FRAC_PI_2, [2.0, 0.0]));
+        // A chord's middle, just inside the round end, is within the slack.
+        assert!(on_hole_wall(
+            [0.0, 0.0],
+            [4.0, 1.0],
+            FRAC_PI_2,
+            [0.0, 1.998]
+        ));
+        assert!(!on_hole_wall([f64::NAN, 0.0], [1.0, 1.0], 0.0, [0.5, 0.0]));
+        assert!(!on_hole_wall(
+            [0.0, 0.0],
+            [1.0, 1.0],
+            0.0,
+            [f64::INFINITY, 0.0]
+        ));
+    }
+
+    #[test]
+    fn a_side_is_on_a_hole_wall_only_when_all_of_it_is() {
+        // A 2 mm hole 1.001 from the edge y = 0: the edge's middle (0, 0) is 0.001 off its wall,
+        // but the edge's ends are not on it.
+        let edge = [[-20.0, 0.0], [0.0, 0.0], [20.0, 0.0]];
+        assert!(!side_on_hole_wall(
+            [0.0, -1.001],
+            [2.0, 2.0],
+            0.0,
+            &edge,
+            0.02
+        ));
+        // A 1 mm half-hole cut as chords of 0.02 mm sag: a 30° chord's middle is 0.017 inside.
+        let (a, b) = (15_f64.to_radians(), 45_f64.to_radians());
+        let (p, q) = (
+            [0.5 * a.cos(), 0.5 * a.sin()],
+            [0.5 * b.cos(), 0.5 * b.sin()],
+        );
+        let chord = [p, [(p[0] + q[0]) * 0.5, (p[1] + q[1]) * 0.5], q];
+        assert!(side_on_hole_wall([0.0, 0.0], [1.0, 1.0], 0.0, &chord, 0.02));
+        assert!(!side_on_hole_wall([0.0, 0.0], [1.0, 1.0], 0.0, &chord, 0.0));
+        assert!(!side_on_hole_wall([0.0, 0.0], [1.0, 1.0], 0.0, &[], 0.02));
+        assert!(!side_on_hole_wall(
+            [0.0, 0.0],
+            [1.0, 1.0],
+            0.0,
+            &chord,
+            f64::NAN
+        ));
     }
 
     #[test]
