@@ -1223,18 +1223,33 @@ impl SurfaceIntersector<'_> {
         step_size =
             self.uv_domains[1].clip_line(prev_tsp.uv_pos(s1), prev_tsp.uv_deriv(s1), step_size);
 
-        // Not upstream (#18488): a C0 knot line of a surface that the step crosses bounds
-        // it as the domain does. The step is clipped to the line and its point solved on
-        // the line, over the piece of the domain on this side of it (the boundary testing
-        // of `RefinePoint`), so that the trace can turn the corner its marching direction
-        // may turn there (`trace_curve_with`, `corner_point`)
+        // Not upstream (#18488): a C0 knot line of a surface that the step crosses, where a
+        // first derivative of the surface jumps, bounds the step as the domain does. The
+        // step is clipped to the line and its point solved on the line, over the piece of
+        // the domain on this side of it (the boundary testing of `RefinePoint`), so that
+        // the trace can turn the corner its marching direction may turn there
+        // (`trace_curve_with`, `corner_point`). Across a line where the derivatives agree
+        // (a rational circle's double knots) nothing turns, and the step crosses it
         let mut pieces = self.uv_domains;
-        for ((piece, lines), s) in pieces.iter_mut().zip(&self.knot_lines).zip([s0, s1]) {
+        let mut clipped_at: [Option<KnotLine>; 2] = [None; 2];
+        for (((piece, lines), at), s) in pieces
+            .iter_mut()
+            .zip(&self.knot_lines)
+            .zip(&mut clipped_at)
+            .zip([s0, s1])
+        {
             let (from, along) = (prev_tsp.uv_pos(s), prev_tsp.uv_deriv(s));
-            if let Some(line) = lines.crossed(from, from + along * step_size) {
-                *piece = piece_before(piece, line, from);
-                step_size = step_size.min(piece.clip_line(from, along, step_size));
+            let to = from + along * step_size;
+            let Some(line) = lines.crossed(from, to) else {
+                continue;
+            };
+            let fraction = line.offset(from) / (line.offset(from) - line.offset(to));
+            if !line.jumps_at(k, self.surface(s), from + (to - from) * fraction)? {
+                continue;
             }
+            *piece = piece_before(piece, line, from);
+            step_size = step_size.min(piece.clip_line(from, along, step_size));
+            *at = Some(line);
         }
 
         // remember clipping when it happens
@@ -1284,6 +1299,18 @@ impl SurfaceIntersector<'_> {
         let Some(mut next_uvs) = refine([guess_uv0, guess_uv1], true)? else {
             return Ok(res);
         };
+        // (not upstream, #18488: a point within the parameter zero of the line its step
+        // was clipped to is on it; the solve can stop a rounding error short of it)
+        let onto_lines = |uvs: [Point2; 2]| {
+            let mut uvs = uvs;
+            for ((uv, at), lines) in uvs.iter_mut().zip(&clipped_at).zip(&self.knot_lines) {
+                if let Some(line) = at.filter(|&line| lines.is_within_zero(line, *uv)) {
+                    *uv = line.put_on(*uv);
+                }
+            }
+            uvs
+        };
+        next_uvs = onto_lines(next_uvs);
 
         // Not upstream: a step clipped at a boundary the curve does not reach, where the
         // line goes on to a degenerate boundary (a pole), steps to the pole instead
@@ -1323,7 +1350,7 @@ impl SurfaceIntersector<'_> {
             let Some(uvs) = refine([guess_uv0, guess_uv1], false)? else {
                 return Ok(res);
             };
-            next_uvs = uvs;
+            next_uvs = onto_lines(uvs);
 
             // update StepSize for this refined point
             let guess_step = guess_uv0 - prev_tsp.uv_pos(s0);

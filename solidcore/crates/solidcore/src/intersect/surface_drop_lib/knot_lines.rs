@@ -93,6 +93,39 @@ impl KnotLine {
             uv.y - self.knot
         }
     }
+
+    /// `uv` with its parameter in this line's direction put on the knot.
+    #[must_use]
+    pub fn put_on(&self, uv: Point2) -> Point2 {
+        if self.direction == SurfParamType::U {
+            Point2::new(self.knot, uv.y)
+        } else {
+            Point2::new(uv.x, self.knot)
+        }
+    }
+
+    /// Whether a first derivative of `surface` jumps across this line at `uv` (put on the
+    /// line): its two sides differ by more than [`JUMP`] of the longer one, as in
+    /// [`KnotLines::settle`] (#18488). Where a side cannot be evaluated, nothing is known to
+    /// jump.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::error::SolidError::Unported`] and cancellation from the evaluations.
+    pub fn jumps_at(&self, k: &Kernel, surface: &Surface, uv: Point2) -> Result<bool> {
+        let on = self.put_on(uv);
+        let across = if self.direction == SurfParamType::U {
+            (Side::Right, Side::Left)
+        } else {
+            (Side::Left, Side::Right)
+        };
+        let ahead = ignored(evaluate_1st_derivatives(k, surface, on, Side::Left, Side::Left))?;
+        let behind = ignored(evaluate_1st_derivatives(k, surface, on, across.0, across.1))?;
+        let jumps = |x: Vec3, y: Vec3| (x - y).length() > JUMP * x.length().max(y.length());
+        Ok(ahead
+            .zip(behind)
+            .is_some_and(|((_, au, av), (_, bu, bv))| jumps(au, bu) || jumps(av, bv)))
+    }
 }
 
 /// The `C0` knot lines of a drop surface inside its drop domain (module docs), with the
