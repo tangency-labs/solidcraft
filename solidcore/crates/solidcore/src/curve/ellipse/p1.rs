@@ -33,6 +33,7 @@
 //! | [`Ellipse::global_point_solve_step`]               | `SmEllipse::GlobalPointSolveSTEP`                 |
 //! | [`Ellipse::join_with`]                             | `SmEllipse::JoinWith`                             |
 //! | [`Ellipse::make_nurb`], [`Ellipse::make_nurb_owned`], [`Ellipse::make_nurb_owned_with_edge_tol`] | `SmEllipse::MakeNurb` |
+//! | [`Ellipse::make_open_arc_nurb`]                    | not upstream (solidcore#3442)                     |
 //! | [`Ellipse::notify`]                                | `SmEllipse::Notify`                               |
 //! | [`Ellipse::reverse_parameterization`]              | `SmEllipse::ReverseParameterization`              |
 //! | [`Ellipse::trim`]                                  | `SmEllipse::Trim`                                 |
@@ -1796,6 +1797,46 @@ impl Ellipse {
     /// deviations).
     pub fn make_nurb_owned(&mut self, k: &Kernel, owner: Option<ObjectRef>) -> Result<()> {
         self.make_nurb_owned_with_edge_tol(k, owner, None)
+    }
+
+    /// Sets the STEP domain to `domain` (degrees) and makes the NURB of a free, not
+    /// inside-out ellipse over it, closing it only when the domain is a full turn to
+    /// within `closure_tol_deg` degrees (`N_CreateEllipticalArcTol` with that angle
+    /// tolerance), and sets it (rebuilding the polar converter). Not upstream
+    /// (solidcore#3442): [`Self::make_nurb`]'s fixed `0.01` degree tolerance closes an
+    /// arc that falls short of a full turn by less than that, its last point moved
+    /// onto its first, and its domain check turns an end within `1e-4` degrees of 360
+    /// into 360; [`Ellipse::arc`] asks for its own angular tolerance instead.
+    ///
+    /// # Errors
+    ///
+    /// `InvalidInput` for an inside-out ellipse or one not of dimension 3; `SM_ERR`
+    /// when NLib fails (the old NURB is kept).
+    pub(crate) fn make_open_arc_nurb(
+        &mut self,
+        k: &Kernel,
+        domain: Extent1d,
+        closure_tol_deg: f64,
+    ) -> Result<()> {
+        if self.inside_out || self.base.dim != 3 {
+            return Err(SolidError::invalid_input(
+                OP_MAKE_NURB,
+                "an open arc's NURB is made for a 3D ellipse the right way out",
+            ));
+        }
+        self.anal_domain = domain;
+        let arc = EllipseArc {
+            center: self.position.origin(),
+            x: self.position.x_axis(),
+            y: self.position.y_axis(),
+            r1: self.radius_x,
+            r2: self.radius_y,
+            start: self.start_angle_deg(),
+            end: self.end_angle_deg(),
+        };
+        let cur = elliptical_arc_tol(&arc, closure_tol_deg, ConicType::Quadratic)
+            .map_err(SolidError::nurbs_routine(OP_MAKE_NURB))?;
+        ignore_status(self.set_from_gw_nurb(k, Some(&cur)))
     }
 
     /// [`Self::make_nurb_owned`] given the tolerance of the edge the ellipse's owner

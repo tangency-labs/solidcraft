@@ -53,6 +53,7 @@ pub mod design_properties;
 pub mod design_tab_prefs;
 pub mod design_view_ui;
 mod dialog_descriptor;
+mod dialog_drag_undo;
 pub mod dialogs;
 pub mod dialogs_appearance;
 pub mod dialogs_assembly;
@@ -587,6 +588,9 @@ pub struct Services {
     pub agent_http: Option<agent_chat::backend::HttpFn>,
     /// Show the designs the browser keeps for itself; None: the host has no such store.
     pub browser_files: Option<Box<dyn Fn()>>,
+    /// The page runs in Safari, the one browser that reports a two-finger twist (Preferences
+    /// offers the twist there only, #22848).
+    pub browser_safari: bool,
     /// Whether a recent design that is not in memory can be brought back by the host (the browser
     /// build remembers files it saved to the disk); None: it can't.
     pub can_restore: Option<Box<dyn Fn(&str) -> bool>>,
@@ -1757,7 +1761,17 @@ impl SolveApp {
         self.home.recent = v
             .get("recent")
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(Value::as_str).take(home::MAX_RECENT).map(str::to_string).collect())
+            .map(|a| {
+                // A path listed twice (saved by an older version, or written by two pages) is
+                // shown once (#23033).
+                let mut recent: Vec<String> = Vec::new();
+                for p in a.iter().filter_map(Value::as_str) {
+                    if recent.len() < home::MAX_RECENT && !recent.iter().any(|r| r == p) {
+                        recent.push(p.to_string());
+                    }
+                }
+                recent
+            })
             .unwrap_or_default();
         self.home.forgotten = keys("recent_forgotten");
         if let Some(s) = v.get("shortcut_box") {
@@ -2229,7 +2243,8 @@ impl SolveApp {
                 };
                 render_workspace::selection_editor(self, &selected);
             }
-            if id == "view.layout" {
+            // The organization's layout stays; the command changes nothing while a policy sets it.
+            if id == "view.layout" && !self.policy.locks("layout") {
                 let layout =
                     if v.get("mode").and_then(Value::as_str) == Some("compact") { ui_kit::LayoutMode::Docked } else { ui_kit::LayoutMode::Floating };
                 self.preferences.layout = layout;
@@ -4715,6 +4730,9 @@ impl SolveApp {
         self.control_click.enabled = ctx.os() == egui::os::OperatingSystem::Mac;
         params_dialog::install_expressions(ctx);
         ui_kit::set_viewport_half_height(ctx, self.cam.half_height());
+        // The orbit's wrap setting covers label drags too; a synthetic drag (control channel,
+        // scripts) has no real cursor to move.
+        ui_kit::set_scrub_cursor_wrap(ctx, self.preferences.orbit_cursor_wrap && !self.synthetic_press);
         // Tab or Shift+Tab into any text or number box selects its text, app-wide.
         ui_kit::install_keyboard_focus(ctx);
         // A setting the organization's policy sets keeps its value, whatever changed it.

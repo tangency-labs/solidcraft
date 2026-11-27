@@ -825,3 +825,25 @@ fn a_3d_control_point_drags_parallel_to_the_sketch_plane_in_one_undo_step() {
     h.app.run("edit.undo", json!({})).unwrap();
     assert!(wire(&h).fit[1].dist(Vec3::new(20.0, 10.0, 10.0)) < 1e-9);
 }
+
+/// #22910: a click repeated on the point just taken adds nothing, so the curve is still drawn.
+#[test]
+fn a_repeated_click_adds_no_point_to_a_3d_curve() {
+    let [a, b, c] = [OFF_PLANE[0], OFF_PLANE[1], OFF_PLANE[2]];
+    for cmd in ["sketch.line3d", "sketch.spline3d", "sketch.spline3d.control_point"] {
+        let (mut h, sketch) = box_and_3d_sketch("RepeatedClick3d");
+        h.app.start(cmd);
+        h.frames(2);
+        h.app.status = None;
+        click_world(&mut h, &[a, b, c, c], 1e-5);
+        h.step(&json!({"key": "Escape"})).unwrap();
+        let state = crate::open_meshing::session_world(&h.app.session);
+        let wires = &state.sketch(sketch).unwrap().sketch.wires;
+        let status = h.app.status.as_ref().map(|s| &s.0);
+        assert!(!wires.is_empty(), "{cmd}: {status:?}");
+        // A line chain is a wire for each segment, so neighbours are compared within a wire.
+        assert!(wires.iter().all(|w| w.fit.windows(2).all(|w| w[0] != w[1])), "{cmd}: {wires:?}");
+        let end = wires.last().and_then(|w| w.fit.last());
+        assert!(end.is_some_and(|p| p.dist(Vec3::new(c[0], c[1], c[2])) < 1e-5), "{cmd}: {end:?}");
+    }
+}

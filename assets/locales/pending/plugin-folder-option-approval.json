@@ -1,0 +1,26 @@
+{
+  "en": {
+    "plugin_error.folder_option_read_approval": "the option {option} needs read approval for its folder"
+  },
+  "ar": {
+    "plugin_error.folder_option_read_approval": "يحتاج الخيار {option} إلى إذن لقراءة مجلده"
+  },
+  "de": {
+    "plugin_error.folder_option_read_approval": "die Option {option} benötigt Lesezugriff auf ihren Ordner"
+  },
+  "he": {
+    "plugin_error.folder_option_read_approval": "לאפשרות {option} נדרש אישור לקריאת התיקייה שלה"
+  },
+  "ja": {
+    "plugin_error.folder_option_read_approval": "オプション {option} で指定したフォルダーの読み取りを許可してください"
+  },
+  "ko": {
+    "plugin_error.folder_option_read_approval": "{option} 옵션에 지정한 폴더를 읽으려면 승인이 필요합니다"
+  },
+  "vi": {
+    "plugin_error.folder_option_read_approval": "cần cấp quyền đọc thư mục cho tùy chọn {option}"
+  },
+  "zh": {
+    "plugin_error.folder_option_read_approval": "需要授权才能读取选项 {option} 指定的文件夹"
+  }
+}
