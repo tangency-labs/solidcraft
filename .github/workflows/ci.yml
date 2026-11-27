@@ -922,6 +922,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
+      - name: Enable headless software OpenGL on the standard hosted runner
+        if: vars.CI_RUNNER == 'ubuntu-24.04'
+        run: |
+          sudo apt-get install -y --no-install-recommends libegl1 libegl-mesa0 libgl1-mesa-dri
+          {
+            echo 'EGL_PLATFORM=surfaceless'
+            echo 'LIBGL_ALWAYS_SOFTWARE=1'
+          } >> "$GITHUB_ENV"
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - name: Bound compilation and cache on the standard hosted runner
