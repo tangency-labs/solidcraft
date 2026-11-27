@@ -123,7 +123,8 @@ pub(crate) fn add_mul_into(acc: &mut Vec<f64>, e: &[f64], f: &[f64]) -> Option<(
 
 /// `e + f` as an expansion.
 pub(crate) fn add(e: &[f64], f: &[f64]) -> Vec<f64> {
-    let mut acc = Vec::with_capacity(e.len().saturating_add(f.len()));
+    let mut acc = Vec::new();
+    let _ = acc.try_reserve(e.len().saturating_add(f.len()));
     for &c in e {
         if c != 0.0 {
             acc.push(c);
@@ -135,7 +136,8 @@ pub(crate) fn add(e: &[f64], f: &[f64]) -> Vec<f64> {
 
 /// `e - f` as an expansion.
 pub(crate) fn sub(e: &[f64], f: &[f64]) -> Vec<f64> {
-    let mut acc = Vec::with_capacity(e.len().saturating_add(f.len()));
+    let mut acc = Vec::new();
+    let _ = acc.try_reserve(e.len().saturating_add(f.len()));
     for &c in e {
         if c != 0.0 {
             acc.push(c);
@@ -162,7 +164,8 @@ pub(crate) fn scale(e: &[f64], b: f64) -> Option<Vec<f64>> {
     if b == 0.0 {
         return (b.is_finite() && e.iter().all(|c| c.is_finite())).then(Vec::new);
     }
-    let mut acc = Vec::with_capacity(e.len().saturating_mul(2));
+    let mut acc = Vec::new();
+    let _ = acc.try_reserve(e.len().saturating_mul(2));
     add_scaled_into(&mut acc, e, b)?;
     Some(acc)
 }
@@ -172,7 +175,8 @@ pub(crate) fn scale(e: &[f64], b: f64) -> Option<Vec<f64>> {
 fn diff_products(a1: f64, b1: f64, a2: f64, b2: f64) -> Option<Vec<f64>> {
     let (e1, p1) = product_pair(a1, b1)?;
     let (e2, p2) = product_pair(a2, b2)?;
-    let mut acc = Vec::with_capacity(4);
+    let mut acc = Vec::new();
+    let _ = acc.try_reserve(4);
     grow_into(&mut acc, e1);
     grow_into(&mut acc, p1);
     grow_into(&mut acc, -e2);
@@ -194,7 +198,8 @@ pub(crate) fn dot(u: Vec3, v: Vec3) -> Option<Vec<f64>> {
     let (ex, px) = product_pair(u.x, v.x)?;
     let (ey, py) = product_pair(u.y, v.y)?;
     let (ez, pz) = product_pair(u.z, v.z)?;
-    let mut acc = Vec::with_capacity(6);
+    let mut acc = Vec::new();
+    let _ = acc.try_reserve(6);
     grow_into(&mut acc, ex);
     grow_into(&mut acc, px);
     grow_into(&mut acc, ey);
@@ -207,7 +212,8 @@ pub(crate) fn dot(u: Vec3, v: Vec3) -> Option<Vec<f64>> {
 /// `det(a, b, c) = (a × b) · c` as an expansion.
 pub(crate) fn det3(a: Vec3, b: Vec3, c: Vec3) -> Option<Vec<f64>> {
     let [x, y, z] = cross(a, b)?;
-    let mut acc = Vec::with_capacity(12);
+    let mut acc = Vec::new();
+    let _ = acc.try_reserve(12);
     add_scaled_into(&mut acc, &x, c.x)?;
     add_scaled_into(&mut acc, &y, c.y)?;
     add_scaled_into(&mut acc, &z, c.z)?;
@@ -307,6 +313,10 @@ mod tests {
         let mut ref_p = scale(&f, 1e16).unwrap();
         add_into(&mut ref_p, &f);
         assert!(is_zero(&sub(&prod, &ref_p)));
-        assert!(prod.len() <= 8, "expected compact expansion, got {}", prod.len());
+        assert!(
+            prod.len() <= 8,
+            "expected compact expansion, got {}",
+            prod.len()
+        );
     }
 }

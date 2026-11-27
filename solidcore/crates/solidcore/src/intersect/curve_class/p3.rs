@@ -3284,7 +3284,8 @@ fn wrap_angle(d: f64) -> f64 {
 
 /// `e f` as an expansion.
 fn expansion_mul(e: &[f64], f: &[f64]) -> Option<Vec<f64>> {
-    let mut acc = Vec::with_capacity(e.len().saturating_mul(f.len()).saturating_mul(2));
+    let mut acc = Vec::new();
+    let _ = acc.try_reserve(e.len().saturating_mul(f.len()).saturating_mul(2));
     crate::geom::expansion::add_mul_into(&mut acc, e, f)?;
     Some(acc)
 }
@@ -3386,7 +3387,7 @@ impl CircleNurbSegments {
         let n = cpts.len();
         let at = |i: usize| knots.get(i).copied();
         let clamped = n >= 3
-            && n % 2 == 1
+            && (n & 1) == 1
             && knots.len() == n + 3
             && at(0) == at(2)
             && at(1) == at(2)
@@ -3396,8 +3397,10 @@ impl CircleNurbSegments {
             return None;
         }
         let plane_c = det3(px, py, c)?;
-        let mut hw = Vec::with_capacity(n);
-        let mut diff = Vec::with_capacity(16);
+        let mut hw = Vec::new();
+        let _ = hw.try_reserve(n);
+        let mut diff = Vec::new();
+        let _ = diff.try_reserve(16);
         for p in cpts {
             let w = if p.w == NOW { 1.0 } else { p.w };
             let z = if p.z == NOZ { 0.0 } else { p.z };
@@ -3415,8 +3418,9 @@ impl CircleNurbSegments {
             hw.push(([p.x, p.y, z], w));
         }
         let r2 = product(r, r)?;
-        let seg_count = (n - 1) / 2;
-        let mut segments = Vec::with_capacity(seg_count);
+        let seg_count = (n - 1) >> 1;
+        let mut segments = Vec::new();
+        let _ = segments.try_reserve(seg_count);
         for j in 0..seg_count {
             let (Some(ka), Some(kb)) = (at(2 * j + 2), at(2 * j + 3)) else {
                 return None;
@@ -3437,12 +3441,7 @@ impl CircleNurbSegments {
                 coeff_bounds: SegmentCoeffBounds::Pending,
             });
         }
-        Some(Self {
-            c,
-            r,
-            r2,
-            segments,
-        })
+        Some(Self { c, r, r2, segments })
     }
 
     fn compute_segment_bounds(
@@ -3470,13 +3469,16 @@ impl CircleNurbSegments {
         }
         let term = |i: usize, k: usize| -> Option<Vec<f64>> {
             let ((qi, wi), (qk, wk)) = (q.get(i)?, q.get(k)?);
-            let mut d = Vec::with_capacity(16);
+            let mut d = Vec::new();
+            let _ = d.try_reserve(16);
             for (a, b) in qi.iter().zip(qk.iter()) {
                 add_mul_into(&mut d, a, b)?;
             }
-            let mut rw = Vec::with_capacity(4);
+            let mut rw = Vec::new();
+            let _ = rw.try_reserve(4);
             add_scaled_into(&mut rw, r2, *wi)?;
-            let mut rww = Vec::with_capacity(8);
+            let mut rww = Vec::new();
+            let _ = rww.try_reserve(8);
             add_scaled_into(&mut rww, &rw, *wk)?;
             sub_into(&mut d, &rww);
             Some(d)
@@ -3491,11 +3493,13 @@ impl CircleNurbSegments {
         let t22 = term(2, 2)?;
 
         let scaled_bounds = |t: &[f64], factor: f64| -> Option<(f64, f64)> {
-            let mut e = Vec::with_capacity(t.len().saturating_mul(2));
+            let mut e = Vec::new();
+            let _ = e.try_reserve(t.len().saturating_mul(2));
             add_scaled_into(&mut e, t, factor)?;
             expansion_bounds(&e)
         };
-        let mut c2 = Vec::with_capacity(t02.len().saturating_add(t11.len()).saturating_mul(2));
+        let mut c2 = Vec::new();
+        let _ = c2.try_reserve(t02.len().saturating_add(t11.len()).saturating_mul(2));
         add_scaled_into(&mut c2, &t02, 2.0)?;
         add_scaled_into(&mut c2, &t11, 4.0)?;
 
@@ -3510,6 +3514,7 @@ impl CircleNurbSegments {
 
     /// Evaluates `(inward, outward)` radial deviation bounds over `[lo, hi]` using cached
     /// per-segment Bernstein coefficient bounds.
+    #[allow(clippy::manual_clamp)]
     fn radial_deviation(&mut self, [lo, hi]: [f64; 2]) -> Option<(f64, f64)> {
         if lo
             .partial_cmp(&hi)
@@ -3536,7 +3541,7 @@ impl CircleNurbSegments {
             };
             // the segment's local parameters of the range, widened by their rounding
             let len = seg.kb - seg.ka;
-            let local = |t: f64| (t.clamp(seg.ka, seg.kb) - seg.ka) / len;
+            let local = |t: f64| (t.max(seg.ka).min(seg.kb) - seg.ka) / len;
             let slack = 8.0 * ROUNDOFF * (seg.ka.abs().max(seg.kb.abs()) / len + 1.0);
             let span = [(local(lo) - slack).max(0.0), (local(hi) + slack).min(1.0)];
             let (mut n_lo, mut n_hi, mut mag) = (0.0_f64, 0.0_f64, 0.0_f64);
@@ -3562,10 +3567,7 @@ impl CircleNurbSegments {
                 wmin += w * b_lo;
                 wmax += w * b_hi;
             }
-            let (wmin, wmax) = (
-                wmin * (1.0 - 8.0 * ROUNDOFF),
-                wmax * (1.0 + 8.0 * ROUNDOFF),
-            );
+            let (wmin, wmax) = (wmin * (1.0 - 8.0 * ROUNDOFF), wmax * (1.0 + 8.0 * ROUNDOFF));
             if wmin.partial_cmp(&0.0) != Some(core::cmp::Ordering::Greater) {
                 return None;
             }
@@ -3708,11 +3710,11 @@ impl CoplanarCircles {
         let a_segs = CircleNurbSegments::prepare(curve, (a0, ra), (xe, ye))?;
         let e_segs = CircleNurbSegments::prepare(other, (e0, re), (xe, ye))?;
         let size = |v: Vec3| v.x.abs().max(v.y.abs()).max(v.z.abs());
-        let allowance =
-            coordinate_resolution(next_up(size(a0) + ra).max(next_up(size(e0) + re)))?;
+        let allowance = coordinate_resolution(next_up(size(a0) + ra).max(next_up(size(e0) + re)))?;
         let concentric = a0 == e0;
         let offset_len = (a0 - e0).length();
-        let mut offset2 = Vec::with_capacity(12);
+        let mut offset2 = Vec::new();
+        let _ = offset2.try_reserve(12);
         for (p, q) in [(a0.x, e0.x), (a0.y, e0.y), (a0.z, e0.z)] {
             let d = sub(&[p], &[q]);
             add_mul_into(&mut offset2, &d, &d)?;
