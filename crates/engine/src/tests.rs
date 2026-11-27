@@ -1337,6 +1337,7 @@ fn hostile_params_never_panic() {
         "shaft_face",
         "shape",
         "sheet",
+        "shows",
         "side",
         "sides",
         "size",
