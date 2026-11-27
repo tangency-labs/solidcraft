@@ -836,6 +836,7 @@ impl SavedModel {
             }
             let mut st = ModelState {
                 frame_bodies: Default::default(),
+                dogbones: Default::default(),
                 origin_frames: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
                 sketches: ids("sketches", sketches.len())?.into_iter().filter_map(|i| sketches.get(i).cloned()).collect(),

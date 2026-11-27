@@ -271,7 +271,8 @@ impl Tools for Agent {
         // So does the folder of each design file the call opened or saved: the call reached it,
         // so it was one of the agent's folders already. Only paths given in full: a running app
         // resolves a relative one against its own working folder.
-        if result["isError"] != true {
+        let dry_run_batch = name == "batch" && args.get("dry_run").and_then(Value::as_bool) == Some(true);
+        if result["isError"] != true && !dry_run_batch {
             for file in design_files(name, args).iter().filter(|f| std::path::Path::new(f).is_absolute()) {
                 self.scope = self.scope.take().map(|s| s.with_design_file(file));
             }

@@ -101,6 +101,7 @@ delete_face	false
 dimension	false
 discord	false
 display	false
+dogbone	false
 dome	false
 dots	false
 draft	false
@@ -168,6 +169,7 @@ feature_group	false
 fillet	false
 filter	false
 find_kinds	false
+finger_joint	false
 finish	false
 finish_edit	false
 fit	false
