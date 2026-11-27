@@ -7582,6 +7582,7 @@ mod tests {
             ("viewport_background_middle", json!([0, 0, 0]), PAGE_APPEARANCE),
             ("view_confirm_corner", json!(true), PAGE_LAYOUT),
             ("status_bar", json!(true), PAGE_LAYOUT),
+            ("design_properties_button", json!(false), PAGE_LAYOUT),
             ("show_donate_button", json!(false), PAGE_GENERAL),
             ("show_discord_button", json!(false), PAGE_GENERAL),
             ("browser_eye_left", json!(true), PAGE_LAYOUT),
