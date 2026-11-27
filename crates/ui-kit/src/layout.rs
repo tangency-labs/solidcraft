@@ -1140,37 +1140,3 @@ fn text_impl(ui: &mut Ui, text: &str, style: Text<'_>, hover_hint: Option<&str>)
     }
     response
 }
-
-/// A two-line named item beside an enable checkbox and compact actions.
-/// Tokens: control_height, space_4/8/16, dialog_rule/footer, form_ink/dim, font_label/small.
-pub fn summary_row(ui: &mut Ui, name: &str, summary: &str, enabled: &mut bool, actions_width: f32, actions: impl FnOnce(&mut Ui)) -> bool {
-    let t = Tokens::get();
-    let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height() + t.space_16), egui::Sense::hover());
-    t.container_rect(ui.painter(), rect, t.radius_lg, t.dialog_body, t.dialog_rule);
-    let check = egui::Rect::from_min_size(rect.min + vec2(t.space_6, 0.0), vec2(t.space_24, rect.height()));
-    let changed = ui
-        .scope_builder(egui::UiBuilder::new().max_rect(check).layout(egui::Layout::left_to_right(egui::Align::Center)), |ui| {
-            super::checkbox(ui, "", enabled).backing_on_hover_text(solidcraft_ui_text::tr_label("Enable rule")).changed()
-        })
-        .inner;
-    let right = (rect.right() - dimension(actions_width) - t.space_6).max(check.right());
-    let text = egui::Rect::from_min_max(
-        egui::pos2(check.right() + t.space_4, rect.top()),
-        egui::pos2((right - t.space_8).max(check.right() + t.space_4), rect.bottom()),
-    );
-    let title = egui::Rect::from_min_max(text.min, egui::pos2(text.right(), text.center().y));
-    let detail = egui::Rect::from_min_max(egui::pos2(text.left(), text.center().y), text.max);
-    paint_text(ui, title, name, crate::type_face::semibold(t.font_label), t.form_ink, false);
-    paint_text(ui, detail, summary, egui::FontId::proportional(t.font_small), t.form_dim, false);
-    let response = ui.interact(text, ui.scope_id().with("summary"), egui::Sense::hover()).backing_on_hover_text(summary);
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), format!("{name}: {summary}")));
-    solidcraft_ui_registry::publish_rect(&format!("dialog:inline:{name}"), title);
-    solidcraft_ui_registry::publish_rect("dialog:report:rule_report", detail);
-    ui.scope_builder(
-        egui::UiBuilder::new()
-            .max_rect(egui::Rect::from_min_max(egui::pos2(right, rect.top()), rect.max))
-            .layout(egui::Layout::left_to_right(egui::Align::Center)),
-        actions,
-    );
-    changed
-}

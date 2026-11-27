@@ -200,7 +200,9 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) -> 
             crate::sketch_dims::reset(tool);
             taken
         };
-        c.push(p);
+        if !repeats(&c, p) {
+            c.push(p);
+        }
         set_chain(Some(tool.cmd), c);
         return true;
     }
@@ -210,6 +212,11 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) -> 
     let Some((p, _)) = point_at(app, proj, pos) else { return true };
     if CHAIN.with(|c| c.borrow().0) != Some(tool.cmd) {
         set_chain(Some(tool.cmd), Vec::new());
+    }
+    // A second click on the point just taken (a double-click, say) adds nothing to a curve: the
+    // commands refuse two neighbouring points that are the same (#22910). The point tools take it.
+    if !matches!(tool.cmd, "sketch.point" | "sketch.point3d") && repeats(&chain(), p) {
+        return true;
     }
     match tool.cmd {
         "sketch.point" => {
@@ -260,6 +267,11 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) -> 
         }
     }
     true
+}
+
+/// Is `p` the point the chain already ends at? The same click gives the very same point.
+fn repeats(chain: &[Vec3], p: Vec3) -> bool {
+    chain.last() == Some(&p)
 }
 
 fn report(app: &mut SolveApp, r: Result<Value, String>) {

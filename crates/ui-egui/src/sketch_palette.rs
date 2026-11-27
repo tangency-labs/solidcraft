@@ -484,6 +484,10 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     // Preferences; kept for the next time the tool runs.
     let arc_snap = app.preferences.sketch_arc_tangent_snap;
     let mut arc_snap_clicked = false;
+    // Whether a shape's key starts the tool listed next to it rather than the one used last
+    // (#22247): a mode of the shape tools, so it is here and not in Preferences; kept.
+    let listed = app.preferences.shortcut_starts_listed_tool;
+    let mut listed_clicked = false;
     let has_curves = !selected_curves(app).is_empty();
     let selected_types = if has_curves { selected_linetypes(app) } else { std::array::from_fn(|i| mode(app) == i as u8) };
     // A construction line tool that takes a length has a line type of its own, which the Line
@@ -539,6 +543,15 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if current == "sketch.arc.three_point" {
                     arc_snap_clicked =
                         crate::ui_kit::checkbox_row(ui, "arc_tangent_snap", solidcraft_ui_text::tr("ui.palette_arc_tangent_snap"), arc_snap);
+                }
+                // Only for a family whose tools a key starts.
+                if family.commands.iter().any(|id| crate::keymap::display_for(app, id).is_some()) {
+                    listed_clicked = crate::ui_kit::checkbox_row(
+                        ui,
+                        "shortcut_starts_listed_tool",
+                        solidcraft_ui_text::tr("ui.palette_shortcut_starts_listed_tool"),
+                        listed,
+                    );
                 }
                 section.inner
             });
@@ -691,6 +704,9 @@ pub(crate) fn shared_body(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     if arc_snap_clicked {
         app.preferences.sketch_arc_tangent_snap = !arc_snap;
+    }
+    if listed_clicked {
+        app.preferences.shortcut_starts_listed_tool = !listed;
     }
     if let Some(id) = start {
         app.start(id);
