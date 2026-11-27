@@ -1336,6 +1336,67 @@ fn a_double_click_with_the_dimension_tool_in_hand_changes_no_mode() {
     }
 }
 
+/// The part's overall size (#20123): the plate's bottom edge picked, then the panel's option set, and
+/// the dimension placed reads the plate's 100 between its two end faces, a `faces` dimension, where
+/// the edge alone is a `length`. The option is set directly (the checkbox's state); the harness's
+/// double-click is not a user's, so a double-click's own frames are covered by the frame unit test.
+#[test]
+fn the_overall_size_option_makes_the_dimension_the_parts_width() {
+    let (mut h, _) = plate_sheet();
+    // Drawing ids are not in the order they were made in, so the new dimension is the one that wasn't here.
+    let before = h.app.session.drawing("drawing.inspect").unwrap().dimensions[0].id;
+    assert!(crate::drawing_workspace::start(&mut h.app, "drawing.dimension"));
+    h.frames(4);
+    let [x, y] = on_screen(140.0, 175.0);
+    h.step(&json!({"move": [x, y]})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click": [x, y]})).unwrap();
+    h.frames(2);
+    assert_eq!(crate::drawing_workspace::dimension::picked_shapes(&h.app).len(), 1, "one pick");
+    assert!(crate::drawing_workspace::dimension::set_overall(&mut h.app, true), "a lone straight edge offers it");
+    h.step(&json!({"click": on_screen(300.0, 60.0)})).unwrap();
+    h.frames(2);
+    let dimensions = &h.app.session.drawing("drawing.inspect").unwrap().dimensions;
+    assert_eq!(dimensions.len(), 2, "the dimension was placed");
+    let placed = dimensions.iter().find(|d| d.id != before).expect("a new dimension").id;
+    let id = solidcraft_engine::doc::ids::encode(placed);
+    let read = h.app.run("drawing.dimension.inspect", json!({"dimension": id})).unwrap();
+    assert!(read["record"]["kind"].get("faces").is_some(), "{read}");
+    assert!((read["value"].as_f64().unwrap() - 100.0).abs() < 1e-6, "{read}");
+}
+
+/// The overall size is offered only for an edge that runs across or up the sheet (#20123): along it, as
+/// the view shows it, a slanted edge has no overall width or height, so the option isn't offered rather
+/// than placing the edge's own length with the option ticked.
+#[test]
+fn the_overall_option_is_offered_only_for_an_edge_across_or_up_the_sheet() {
+    use crate::drawing_workspace::dimension::overall_direction;
+    let at = |x, y| solidcore_record::Vec2::new(x, y);
+    assert_eq!(overall_direction(at(0.0, 0.0), at(10.0, 0.0)), Some("horizontal"));
+    assert_eq!(overall_direction(at(10.0, 5.0), at(0.0, 5.0)), Some("horizontal"), "either way along");
+    assert_eq!(overall_direction(at(3.0, 0.0), at(3.0, -7.0)), Some("vertical"));
+    assert_eq!(overall_direction(at(0.0, 0.0), at(10.0, 3.0)), None, "slanted");
+    assert_eq!(overall_direction(at(0.0, 0.0), at(5.0, 5.0)), None, "diagonal");
+}
+
+/// The frames a user's double-click gives the Dimension tool (#20123): the first click only picks (no
+/// double-click, so no toggle); the second, where egui answers `clicked` and `double_clicked` both, is
+/// the double-click alone (no click to place with), and only offers the option (a hint; it sets
+/// nothing) on a draft that offers it and on the edge it picked.
+#[test]
+fn a_double_click_offers_the_overall_option_only_on_the_picked_edge() {
+    use crate::drawing_workspace::dimension::Clicks;
+    let first = Clicks::of_frame(true, false);
+    let second = Clicks::of_frame(true, true);
+    assert_eq!((first.clicked, first.double), (true, false));
+    assert_eq!((second.clicked, second.double), (false, true), "the second click is the double-click alone");
+    assert!(!first.offers_overall(true, || true), "a first click never offers it");
+    assert!(second.offers_overall(true, || true));
+    assert!(!second.offers_overall(false, || true), "a draft that doesn't offer it");
+    assert!(!second.offers_overall(true, || false), "off the picked edge");
+    assert!(!Clicks::of_frame(false, false).offers_overall(true, || true), "a quiet frame");
+}
+
 /// A placed dimension's text drags, as a sketch dimension's does: it follows the pointer by the
 /// same drag (`dim_view`), and the whole drag is one undo step.
 #[test]
@@ -2198,9 +2259,12 @@ fn marks_draw_each_item_of_the_scene() {
     assert!(marks.error.is_none(), "{:?}", marks.error);
     let lines: Vec<&Vec<Vec2>> = marks.marks.iter().filter_map(|m| if let Mark::Line { points, .. } = m { Some(points) } else { None }).collect();
     assert_eq!(lines.len(), 1 + 3 + 1, "the line, three dashes, the arc");
-    for dash in &lines[1..4] {
+    // Each 5 mm dash is drawn 0.35 mm shorter about its middle, so its round caps end it at 5 mm:
+    // from 0.175 + 10k to 4.825 + 10k.
+    for (k, dash) in lines[1..4].iter().enumerate() {
         let length: f64 = dash.windows(2).map(|w| w[0].dist(w[1])).sum();
-        assert!((length - 5.0).abs() < 1e-9, "{dash:?}");
+        let start = dash.first().map_or(f64::NAN, |p| p.x);
+        assert!((length - 4.65).abs() < 1e-9 && (start - (0.175 + 10.0 * k as f64)).abs() < 1e-9, "{dash:?}");
     }
     assert!(lines[4].iter().all(|p| (p.dist(Vec2::new(50.0, 50.0)) - 20.0).abs() <= 0.01 + 1e-9) && lines[4].len() > 20);
     let Some(Mark::Fill { triangles, .. }) = marks.marks.last() else { panic!("{:?}", marks.marks) };
@@ -2211,6 +2275,94 @@ fn marks_draw_each_item_of_the_scene() {
     bad.size_mm = Vec2::new(f64::NAN, 1.0);
     let marks = Marks::of(&bad, 8, 0.01);
     assert!(marks.marks.is_empty() && marks.error.is_some());
+}
+
+/// A closed line that turns back on itself is drawn within its miter limit, as the paper draws it
+/// (#21787). The bottom edge of an 80 mm disc seen 0.0001 rad off edge-on is a loop 80 mm long and
+/// 0.004 mm tall, drawn 0.5 mm wide and filled: egui's closed line joined its two ends by miter with
+/// no limit, spikes some 120 half widths long out past each end. Every vertex painted lies within
+/// a round join's reach of the loop.
+#[test]
+fn a_closed_line_that_turns_back_stays_within_its_miter_limit() {
+    let sliver: Vec<Vec2> =
+        (0..16).map(|i| f64::from(i) * std::f64::consts::TAU / 16.0).map(|t| Vec2::new(40.0 * t.cos(), 0.002 * t.sin())).collect();
+    let ring = Loop2::polygon(&sliver);
+    let stroke = Item::Stroke { path: ring.segs.clone(), closed: true, width_mm: 0.5, pattern: None };
+    let fill = Item::Fill { region: Region2 { outer: ring, holes: vec![] } };
+    let scene = Scene {
+        size_mm: Vec2::new(100.0, 100.0),
+        groups: vec![Group { object: 1, kind: ObjectKind::View, items: vec![stroke, fill] }],
+        fonts: Vec::new(),
+        clips: Vec::new(),
+    };
+    let marks = Marks::of(&scene, 7, 0.01);
+    assert!(marks.error.is_none(), "{:?}", marks.error);
+    let shapes = painted(&egui::Context::default(), &marks, &PictureTextures::default());
+    let mut tess = egui::epaint::Tessellator::new(1.0, egui::epaint::TessellationOptions::default(), [1, 1], vec![]);
+    let mut mesh = egui::Mesh::default();
+    shapes.into_iter().for_each(|clipped| tess.tessellate_shape(clipped.shape, &mut mesh));
+    assert!(!mesh.vertices.is_empty());
+    // 10 points a millimetre: the loop spans x ±400 and y ±0.02; the line is 5 wide, drawn in runs
+    // cut at every turn past 30° with round ends, so it reaches at most a half width past a point
+    // (1 / cos 15° of it at a join), a feather's pixel more.
+    let reach = 2.5 / 15f32.to_radians().cos() + 1.0;
+    for v in &mesh.vertices {
+        assert!(v.pos.x.abs() <= 400.0 + reach && v.pos.y.abs() <= 0.02 + reach, "{:?} lies off the loop", v.pos);
+    }
+}
+
+/// A chain line whose dot is one line width long keeps its dots: under round caps the dot is a
+/// dash 0 long, drawn as a disc. 0.5 mm wide, 12, 1.5, 0.5, 1.5 is stroked 11.5, 2, 0, 2 from
+/// 15.25: along 31 mm, dashes from 0.25 and 15.75 and dots at 13.75 and 29.25.
+#[test]
+fn a_chain_line_keeps_its_dots_under_round_caps() {
+    let chain = Item::Stroke {
+        path: vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(31.0, 0.0) }],
+        closed: false,
+        width_mm: 0.5,
+        pattern: Some(Dashes { lengths_mm: vec![12.0, 1.5, 0.5, 1.5], phase_mm: 0.0 }),
+    };
+    let scene = Scene {
+        size_mm: Vec2::new(100.0, 100.0),
+        groups: vec![Group { object: 1, kind: ObjectKind::View, items: vec![chain] }],
+        fonts: Vec::new(),
+        clips: Vec::new(),
+    };
+    let marks = Marks::of(&scene, 7, 0.01);
+    assert!(marks.error.is_none(), "{:?}", marks.error);
+    let ends: Vec<(f64, f64)> = marks
+        .marks
+        .iter()
+        .filter_map(|m| if let Mark::Line { points, .. } = m { Some((points.first()?.x, points.last()?.x)) } else { None })
+        .collect();
+    let expected = [(0.25, 11.75), (13.75, 13.75), (15.75, 27.25), (29.25, 29.25)];
+    assert!(ends.len() == expected.len() && ends.iter().zip(expected).all(|(a, b)| (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9), "{ends:?}");
+}
+
+/// A line that starts exactly on a dot draws it, and none exactly at its end, as the writers do:
+/// 0.5 mm wide, 0.5, 1.5 from 0.25 is stroked 0, 2 from 0, so along 4 mm the dots are at 0 and 2.
+#[test]
+fn a_dotted_line_starts_on_its_dot() {
+    let dotted = Item::Stroke {
+        path: vec![Seg2::Line { a: Vec2::new(0.0, 0.0), b: Vec2::new(4.0, 0.0) }],
+        closed: false,
+        width_mm: 0.5,
+        pattern: Some(Dashes { lengths_mm: vec![0.5, 1.5], phase_mm: 0.25 }),
+    };
+    let scene = Scene {
+        size_mm: Vec2::new(100.0, 100.0),
+        groups: vec![Group { object: 1, kind: ObjectKind::View, items: vec![dotted] }],
+        fonts: Vec::new(),
+        clips: Vec::new(),
+    };
+    let marks = Marks::of(&scene, 7, 0.01);
+    assert!(marks.error.is_none(), "{:?}", marks.error);
+    let ends: Vec<(f64, f64)> = marks
+        .marks
+        .iter()
+        .filter_map(|m| if let Mark::Line { points, .. } = m { Some((points.first()?.x, points.last()?.x)) } else { None })
+        .collect();
+    assert_eq!(ends, [(0.0, 0.0), (2.0, 2.0)]);
 }
 
 /// The plate's sheet draws its border, views, dimension and title block text: every text run's

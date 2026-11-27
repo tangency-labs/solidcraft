@@ -151,6 +151,12 @@ pub(super) fn on_disk(file: &Path) -> PathBuf {
     inside(file).map_or_else(|| file.to_path_buf(), |(holder, _)| holder)
 }
 
+/// The place `file` really is, every link in its path followed (`None`: it cannot be resolved, as
+/// for a missing file, or on the web, which has no such links).
+pub(super) fn real_file(file: &Path) -> Option<PathBuf> {
+    std::fs::canonicalize(file).ok()
+}
+
 /// The file a stored link path names, for a design saved at `design`.
 pub(super) fn resolve(design: Option<&str>, link: &str) -> PathBuf {
     // A part stored inside the design (experimental, #6892): the file it is unpacked to.
@@ -418,10 +424,11 @@ pub(super) fn link_presence(file: &Path, design: Option<&str>) -> Option<LinkPro
 /// or a device (judged from the path's text before anything is read), not a design or STEP file
 /// name, missing, larger than the design (or STEP) size limit, or outside an agent's folders. Each with the
 /// reason to show. Every kind of link reads its file here.
-pub(super) fn read_linked_file(file: &Path, design: Option<&str>) -> Result<Vec<u8>, LinkProblem> {
+/// `any`: the file is one an importer plugin reads, whatever its name, under the STEP size limit.
+pub(super) fn read_linked_file(file: &Path, design: Option<&str>, any: bool) -> Result<Vec<u8>, LinkProblem> {
     // An internal component of another design: that design is read, and the part taken from it.
     if let Some((holder, pick)) = inside(file) {
-        let bytes = read_linked_file(&holder, design)?;
+        let bytes = read_linked_file(&holder, design, false)?;
         return super::design_internal::member(&bytes, &pick).map_err(|why| problem(LinkState::Missing, format!("{}: {why}", holder.display())));
     }
     let shown = file.display().to_string();
@@ -429,7 +436,7 @@ pub(super) fn read_linked_file(file: &Path, design: Option<&str>) -> Result<Vec<
         return Err(why);
     }
     // A linked STEP file is read under the STEP size limit; every other link is a design.
-    let step = super::component_link::is_step_source(&shown);
+    let step = any || super::component_link::is_step_source(&shown);
     if !step && !solidcraft_io::is_design_path(&shown) {
         return Err(problem(LinkState::Unreadable, format!("{shown}: not a .{} design", solidcraft_io::DESIGN_EXT)));
     }
@@ -703,10 +710,10 @@ mod tests {
         let dir = folder("read");
         let good = dir.join("plate.sc");
         std::fs::write(&good, solidcraft_io::write_design(&Document::new("plate")).unwrap()).unwrap();
-        let read = read_linked_file(&good, None).map(|bytes| solidcraft_io::read_design(&bytes).map(|d| d.name).ok());
+        let read = read_linked_file(&good, None, false).map(|bytes| solidcraft_io::read_design(&bytes).map(|d| d.name).ok());
         assert_eq!(read, Ok(Some("plate".to_string())));
         assert_eq!(link_presence(&good, None), None);
-        let state = |file: &Path| read_linked_file(file, None).err().map(|e| (e.state, e.reason));
+        let state = |file: &Path| read_linked_file(file, None, false).err().map(|e| (e.state, e.reason));
         // Missing: no file there (and the same without reading it).
         let missing = dir.join("gone.sc");
         assert!(matches!(state(&missing), Some((LinkState::Missing, r)) if r.contains("gone.sc")));
@@ -716,7 +723,7 @@ mod tests {
         assert!(matches!(state(&dir.join("part.txt")), Some((LinkState::Unreadable, r)) if r.contains("not a .sc design")));
         // A STEP file is a link source too (Insert STEP keeps its link), read under the STEP limit.
         std::fs::write(dir.join("part.step"), b"ISO-10303-21;").unwrap();
-        assert_eq!(read_linked_file(&dir.join("part.step"), None), Ok(b"ISO-10303-21;".to_vec()));
+        assert_eq!(read_linked_file(&dir.join("part.step"), None, false), Ok(b"ISO-10303-21;".to_vec()));
         std::fs::create_dir_all(dir.join("folder.sc")).unwrap();
         assert!(matches!(state(&dir.join("folder.sc")), Some((LinkState::Unreadable, _))));
         // A design a newer SolidCraft saved is read like any other, and opens saying so (#12166).
@@ -724,7 +731,7 @@ mod tests {
         newer["format"] = serde_json::json!(solidcraft_doc::format::format_string(solidcraft_doc::format::FORMAT + 1));
         std::fs::write(dir.join("next.sc"), newer.to_string()).unwrap();
         let opened =
-            read_linked_file(&dir.join("next.sc"), None).map(|bytes| solidcraft_io::read_design(&bytes).map(|d| d.newer_file.is_some()).ok());
+            read_linked_file(&dir.join("next.sc"), None, false).map(|bytes| solidcraft_io::read_design(&bytes).map(|d| d.newer_file.is_some()).ok());
         assert_eq!(opened, Ok(Some(true)));
         // Not allowed: outside the folders an agent may use, without saying whether it exists.
         let inside = dir.join("inside");
@@ -748,11 +755,11 @@ mod tests {
     fn network_and_device_paths_are_refused_before_anything_is_read() {
         let calls = solidcraft_io::vfs::file_calls();
         let network = Path::new(r"\\fileserver\share\standard.sc");
-        let refused = read_linked_file(network, None).err();
+        let refused = read_linked_file(network, None, false).err();
         assert!(matches!(&refused, Some(p) if p.state == LinkState::NotAllowed && p.reason.contains("fileserver")), "{refused:?}");
         assert_eq!(link_presence(network, None).map(|p| p.state), Some(LinkState::NotAllowed));
         let device = Path::new(r"\\.\pipe\standard.sc");
-        assert_eq!(read_linked_file(device, None).err().map(|p| p.state), Some(LinkState::Unreadable));
+        assert_eq!(read_linked_file(device, None, false).err().map(|p| p.state), Some(LinkState::Unreadable));
         assert_eq!(solidcraft_io::vfs::file_calls(), calls, "a refused path asked the file system");
     }
 

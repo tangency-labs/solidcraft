@@ -515,7 +515,7 @@ comments only when they're about crashes, wrong results, data loss or security.
 
 Two quick checks run on every pull request (`.github/workflows/pr-checks.yml`, not required): it
 fails when a lower-numbered open PR by someone else already closes the same issue (the label
-`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt). A default here is a UX default only: a control, setting, preference or tool behaviour a user sees by default; a changed kernel or geometry result is `Changes a default: no`.
+`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt). A default here is a UX default only: a control, setting, preference or tool behaviour a user sees by default; a changed kernel or geometry result is `Changes a default: no`. Fixing janky or unintended behaviour is a bug fix, so `no` (a drag that cancelled now floats). Don't add a setting to keep old behaviour nobody would choose. `yes` is only for a deliberate change to established, intentional behaviour users rely on (sketch endpoints now merge instead of getting a coincident constraint).
 
 ## Labels and triage
 
@@ -584,6 +584,6 @@ about 250 KB and a clip under about 1 MB.
 ## Licence
 
 By contributing you agree that your contribution is licensed as MIT OR Apache-2.0, like the rest
-of SolidCraft. A contribution to the brand and interface (`crates/ui-kit`, `crates/look`,
-`crates/theme`, `assets/branding`, `assets/icons/app`) is licensed under
+of SolidCraft. A contribution to the branding or the interface icon artwork (`assets/branding`,
+`assets/icons/app`, the SVG masters in `crates/look/icons/design/svg`) is licensed under
 [LICENSE-BRAND](LICENSE-BRAND), which lets the maintainers also license it as MIT OR Apache-2.0. SolidCraft isn't affiliated with any CAD vendor; product names are trademarks of their owners (see NOTICE).

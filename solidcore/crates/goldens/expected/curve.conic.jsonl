@@ -454,7 +454,7 @@
 {"case":"gen0424","deferred":null,"error":null,"ints":{},"topology":null,"values":{"r":[1000.0,2.0,-1.0,3.0,2.0,3.0,3.0]}}
 {"case":"gen0425","deferred":null,"error":null,"ints":{},"topology":null,"values":{"r":[1000.0,1.0,-0.9098626227034111]}}
 {"case":"gen0426","deferred":null,"error":null,"ints":{},"topology":null,"values":{"r":[1000.0,1.0,0.9258459338314355]}}
-{"case":"gen0427","deferred":null,"error":null,"ints":{},"topology":null,"values":{"r":[1000.0,0.0]}}
+{"case":"gen0427","deferred":null,"error":null,"ints":{},"topology":null,"values":{"r":[1000.0,2.0,-0.9989123896658599,0.9989123896658599]}}
 {"case":"gen0428","deferred":null,"error":null,"ints":{},"topology":null,"values":{"r":[1000.0,769.4299495371152,-1774.3653151964133,0.0,769426859.3922594,-1774355263.3048053,0.0]}}
 {"case":"gen0429","deferred":null,"error":null,"ints":{},"topology":null,"values":{"r":{"blocks":[[15804.0,15806.0,34435.0]],"n":21}}}
 {"case":"gen0430","deferred":null,"error":null,"ints":{},"topology":null,"values":{"r":[1000.0,1.0641035906694061e-11,13.637406079717028,0.0]}}

@@ -465,6 +465,12 @@ pub struct Surface {
     /// definition is a set the net is on, or within its bound of); a motion moves it; an
     /// evaluation copy, which only evaluates, has none.
     definition: Option<Box<KeptDefinition>>,
+    /// Not upstream: whether the stored net is a fitted approximation of a definition (a
+    /// bound above 0: a swept wall, a Setback or Mixed corner's patch), kept by an
+    /// evaluation copy, which drops the definition itself, so that what proves a final
+    /// answer on the net alone ([`Surface::net_is_fitted`]) never takes such a net for its
+    /// surface. A copy carries it.
+    fitted_net: bool,
 }
 
 /// The trimmed surface cache a surface's cache slot holds: the `SM_OC_TRIMSRF` entry of
@@ -625,6 +631,7 @@ impl Clone for Surface {
             singularities_memo: SingularitiesMemo::new(),
             continuity_memo: ContinuityMemo::new(),
             definition: self.definition.clone(),
+            fitted_net: self.fitted_net,
         };
         s.update_owned_bases();
         s
@@ -991,6 +998,8 @@ impl Surface {
             singularities_memo: SingularitiesMemo::new(),
             continuity_memo: self.continuity_memo.share(),
             definition: None,
+            // (the definition goes, what it says of the net stays)
+            fitted_net: self.net_is_fitted(),
         })
     }
 
@@ -1098,6 +1107,7 @@ impl Surface {
             singularities_memo: SingularitiesMemo::new(),
             continuity_memo: self.continuity_memo.share(),
             definition: self.definition.clone(),
+            fitted_net: self.fitted_net,
         }
     }
 }
@@ -1265,6 +1275,7 @@ impl Surface {
             singularities_memo: SingularitiesMemo::new(),
             continuity_memo: ContinuityMemo::new(),
             definition: None,
+            fitted_net: false,
         }
     }
 
@@ -1305,6 +1316,21 @@ impl Surface {
             }
             _ => None,
         }
+    }
+
+    /// Whether the stored net is a fitted approximation of a definition rather than the
+    /// surface itself (not upstream): a definition kept with a bound other than 0 (a swept
+    /// wall, a Setback or Mixed corner's patch; a bound that is not a number counts), or an
+    /// evaluation copy of such a surface, which keeps this though it drops the definition.
+    /// A plain B-spline, an analytic surface and a net whose definition is exact (bound 0:
+    /// an exact round, a drafted face, a section blend, a Ball, Swept or End corner) are
+    /// their nets.
+    #[must_use]
+    pub fn net_is_fitted(&self) -> bool {
+        self.fitted_net
+            || self
+                .procedural_definition()
+                .is_some_and(|d| d.bound() != 0.0)
     }
 
     /// The definition this surface is the net of, whatever made it (#2572): a blend's
@@ -1364,11 +1390,17 @@ impl Surface {
 
     /// This surface's definition carried onto `piece`, a piece, extension or copy of it
     /// (#2485, #2488). A sweep's (#2572) is read point for point on its B-spline net: a
-    /// piece of another kind keeps none.
+    /// piece of another kind keeps none, but keeps that its net is fitted, as an evaluation
+    /// copy does: it is made from the fitted net, not from the sweep. What an evaluation copy
+    /// keeps of a definition it dropped, that its net is fitted ([`Surface::net_is_fitted`]),
+    /// is carried too: a copy or piece of such a copy is still a fitted net.
     fn carry_definition(&self, mut piece: Self) -> Self {
+        piece.fitted_net = self.fitted_net;
         let sweep = matches!(self.definition.as_deref(), Some(KeptDefinition::Sweep(_)));
         if sweep && !matches!(piece.kind(), SurfaceKind::BSpline(_)) {
             piece.definition = None;
+            // (the definition goes, what it says of the net stays)
+            piece.fitted_net = self.net_is_fitted();
             return piece;
         }
         piece.definition.clone_from(&self.definition);
@@ -4266,6 +4298,7 @@ impl Surface {
             // SmSphere::GlobalSurfaceIntersect: its special cases, else the base
             // SmSurface::GlobalSurfaceIntersect of this surface
             SurfaceKind::Sphere(s) => s.global_surface_intersect_with_into(
+                Some(self),
                 k,
                 uv_domain,
                 other,
@@ -4299,6 +4332,11 @@ impl Surface {
             SurfaceKind::Torus(t) => {
                 // (each special case resets the outputs on entry)
                 *out = SurfaceIntersection::default();
+                // (not upstream, #15049) the generators' contact where both are faces'
+                let contact = crate::surface::surf_of_revolution::p3::revolved_contact_tol(
+                    k,
+                    [Some(self), Some(other)],
+                );
                 // IntersectWithSphere / IntersectWithCone: a planar generator, else
                 // the general intersection
                 let revolved = |other: &dyn Revolved, out: &mut SurfaceIntersection| {
@@ -4312,6 +4350,7 @@ impl Surface {
                         other,
                         other_uv_domain,
                         approx_tol_3d,
+                        contact,
                         out,
                     )
                 };
@@ -4337,6 +4376,7 @@ impl Surface {
                         o.as_ref(),
                         other_uv_domain,
                         approx_tol_3d,
+                        contact,
                         out,
                     )?,
                     _ => true,
@@ -7955,6 +7995,7 @@ impl crate::geom::content::Content for Surface {
             singularities_memo: _,
             continuity_memo: _,
             definition,
+            fitted_net: _,
         } = self;
         if definition.is_some() {
             return None;

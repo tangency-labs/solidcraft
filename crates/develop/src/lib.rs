@@ -1,8 +1,8 @@
 //! Sheet development for SolidCraft: solidcore's, re-exported with SolidCraft's wording of its
 //! refusals. A sheet metal part's surfaces are the record's
 //! (`solidcore_record::develop`, as the saved model keeps them); laying them out flat, folding the
-//! flat back and the motions that place panels are solidcore's (`solidcraft_kernel::services::develop`, the
-//! kernel's `develop` module). Nothing here computes: this crate only names the calls for the
+//! flat back and the motions that place panels are solidcore's (`solidcraft_kernel::develop`, the
+//! kernel interface's `Develop` family). Nothing here computes: this crate only names the calls for the
 //! sheet features and words a refusal for the user.
 //!
 //! The record's motions and bends take their maths as methods of extension traits: `use
@@ -10,11 +10,11 @@
 //!
 //! [`Query`] answers exact questions of a B-rep record, as reading a sheet off a body asks them:
 //! where a point lies on the record's faces and which way they face there, how far it is from an
-//! edge, and which faces a ray meets (solidcore's, `solidcraft_kernel::services::query`).
+//! edge, and which faces a ray meets (solidcore's, `solidcraft_kernel::query`).
 //!
 //! [`hermite`] follows a curve carried into the flat by cubic pieces, each proved within a
 //! tolerance of it from bounds on the curve's derivatives and the map's (solidcore's,
-//! `solidcraft_kernel::services::develop::hermite`).
+//! `solidcraft_kernel::develop::hermite`).
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
@@ -52,31 +52,35 @@ pub use solidcore_record::develop::Tail;
 pub use solidcore_record::develop::Trim;
 pub use solidcore_record::develop::Zone;
 pub use solidcore_record::develop::ZoneEnds;
-pub use solidcraft_kernel::services::develop::BeadAgainst;
-pub use solidcraft_kernel::services::develop::BeadRefusal;
-pub use solidcraft_kernel::services::develop::Bent;
-pub use solidcraft_kernel::services::develop::ContourRefusal;
-pub use solidcraft_kernel::services::develop::Fold;
-pub use solidcraft_kernel::services::develop::MIN_BEAD_RADIUS;
-pub use solidcraft_kernel::services::develop::bead_against;
-pub use solidcraft_kernel::services::develop::bead_flank_angle;
-pub use solidcraft_kernel::services::develop::bead_footprint;
-pub use solidcraft_kernel::services::develop::crossings;
-pub use solidcraft_kernel::services::develop::curve_through;
-pub use solidcraft_kernel::services::develop::hermite;
-pub use solidcraft_kernel::services::develop::offset_contour;
-pub use solidcraft_kernel::services::develop::segment_in_region;
-pub use solidcraft_kernel::services::query::Query;
+pub use solidcraft_kernel::develop::BeadAgainst;
+pub use solidcraft_kernel::develop::BeadRefusal;
+pub use solidcraft_kernel::develop::Bent;
+pub use solidcraft_kernel::develop::ContourRefusal;
+pub use solidcraft_kernel::develop::CornerTailRefusal;
+pub use solidcraft_kernel::develop::Fold;
+pub use solidcraft_kernel::develop::MIN_BEAD_RADIUS;
+pub use solidcraft_kernel::develop::bead_against;
+pub use solidcraft_kernel::develop::bead_flank_angle;
+pub use solidcraft_kernel::develop::bead_footprint;
+pub use solidcraft_kernel::develop::crossings;
+pub use solidcraft_kernel::develop::curve_through;
+pub use solidcraft_kernel::develop::hermite;
+pub use solidcraft_kernel::develop::offset_contour;
+pub use solidcraft_kernel::develop::retarget_corner_tail;
+pub use solidcraft_kernel::develop::segment_in_region;
+pub use solidcraft_kernel::develop::set_back_past;
+pub use solidcraft_kernel::develop::tear_slit;
+pub use solidcraft_kernel::query::Query;
 
 /// The maths of the record's motions, bends and laps (solidcore's), as methods.
 pub mod prelude {
-    pub use solidcraft_kernel::services::develop::BendOps as _;
-    pub use solidcraft_kernel::services::develop::LapOps as _;
-    pub use solidcraft_kernel::services::develop::Rigid2Ops as _;
-    pub use solidcraft_kernel::services::develop::Rigid3Ops as _;
+    pub use solidcraft_kernel::develop::BendOps as _;
+    pub use solidcraft_kernel::develop::LapOps as _;
+    pub use solidcraft_kernel::develop::Rigid2Ops as _;
+    pub use solidcraft_kernel::develop::Rigid3Ops as _;
 }
 
-use solidcraft_kernel::services::develop::{JointRefusal, PanelRefusal, Refusal, RuleRefusal};
+use solidcraft_kernel::develop::{JointRefusal, PanelRefusal, Refusal, RuleRefusal};
 
 /// Why a sheet is not laid out or folded, in SolidCraft's words (solidcore's [`Refusal`]).
 #[derive(Clone, Debug, PartialEq, thiserror::Error)]
@@ -131,6 +135,9 @@ fn joint_words(why: JointRefusal) -> &'static str {
         JointRefusal::RipPoints => "a rip's edge has two or more points on each panel, and a turn at each",
         JointRefusal::RipNotFinite => "a rip's edge is not numbers",
         JointRefusal::RipLap => "a rip cuts 0 or more from each side",
+        JointRefusal::OverlapRange => "an overlap has a gap of more than 0 and covers more than 0 and at most the sheet's thickness",
+        JointRefusal::OverlapTurn => "an overlap needs a corner between 0 and 180 degrees",
+        JointRefusal::OverlapArcRadius => "a full overlap would collapse or invert a circular edge",
         JointRefusal::RipOffSurface => "a rip's edge leaves its panel's surface",
         JointRefusal::RipOffOutline => "a rip's edge is not on its panel's outline",
         JointRefusal::RipAgainstOutline => "a rip's edge runs against its panel's outline",
@@ -146,11 +153,11 @@ fn joint_words(why: JointRefusal) -> &'static str {
 /// Lays the sheet out flat (solidcore's `develop`): `anchors` says where some panels' neutral
 /// charts lie in the flat frame.
 pub fn develop(sheet: &Sheet, anchors: &[(usize, Rigid2)]) -> Result<Development, DevelopError> {
-    solidcraft_kernel::services::develop::develop(sheet, anchors).map_err(DevelopError::from)
+    solidcraft_kernel::develop::develop(sheet, anchors).map_err(DevelopError::from)
 }
 
 /// Folds a developed sheet (solidcore's `fold`): `roots` says where the first panel of each of
 /// the development's pieces lies in space.
 pub fn fold(sheet: &Sheet, dev: &Development, roots: &[Rigid3]) -> Result<Fold, DevelopError> {
-    solidcraft_kernel::services::develop::fold(sheet, dev, roots).map_err(DevelopError::from)
+    solidcraft_kernel::develop::fold(sheet, dev, roots).map_err(DevelopError::from)
 }

@@ -22,14 +22,66 @@ use solidcore_convert::{
     record_region2, record_seg2, record_vec2, record_vec3, region2, seg2, vec2, vec3,
 };
 use solidcore_record::develop::{
-    Bead, BeadForm, BeadOutline, Bend, Development, Lap, Mismatch, Rigid2, Rigid3, Sheet, Surface,
+    Anchor, Bead, BeadForm, BeadOutline, Bend, Development, Lap, Mismatch, Rigid2, Rigid3, Sheet,
+    Surface,
 };
 use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
 
 pub use solidcore::develop::{
-    BeadAgainst, BeadRefusal, ContourRefusal, JointRefusal, PanelRefusal, Refusal, RuleRefusal,
-    MAX_JOINTS, MAX_PANELS, MIN_BEAD_RADIUS,
+    BeadAgainst, BeadRefusal, ContourRefusal, CornerTailRefusal, JointRefusal, PanelRefusal,
+    Refusal, RuleRefusal, MAX_JOINTS, MAX_PANELS, MIN_BEAD_RADIUS,
 };
+
+/// Sets back a record region's flange side using the kernel's contour edit.
+///
+/// See [`k::set_back_past`] for parameter geometry and when it returns `None`.
+pub fn set_back_past(
+    region: &Region2,
+    from: Vec2,
+    direction: Vec2,
+    rise: f64,
+    height: f64,
+    into: Vec2,
+    by: f64,
+) -> Option<Region2> {
+    k::set_back_past(
+        &region2(region),
+        vec2(from),
+        vec2(direction),
+        rise,
+        height,
+        vec2(into),
+        by,
+    )
+    .map(|region| record_region2(&region))
+}
+
+/// Replaces a previous corner setback on a record region.
+///
+/// See [`k::retarget_corner_tail`] for the parameter geometry.
+///
+/// # Errors
+/// The kernel could not restore or trim the contour unambiguously.
+pub fn retarget_corner_tail(
+    region: &Region2,
+    edge: [Vec2; 2],
+    anchor_origin: Vec2,
+    anchor_direction: Vec2,
+    bend_length: f64,
+    old_cut: f64,
+    new_cut: f64,
+) -> Result<Region2, CornerTailRefusal> {
+    k::retarget_corner_tail(
+        &region2(region),
+        edge.map(vec2),
+        vec2(anchor_origin),
+        vec2(anchor_direction),
+        bend_length,
+        old_cut,
+        new_cut,
+    )
+    .map(|region| record_region2(&region))
+}
 
 /// Lays the sheet out flat ([`solidcore::develop::develop`]): `anchors` says where some panels'
 /// neutral charts lie in the flat frame.
@@ -90,12 +142,57 @@ pub fn offset_contour(
     k::offset_contour(&cv::segs(segs), depth, thickness, flip, smooth).map(|s| cv::record_segs(&s))
 }
 
+/// A closed profile `segs` moved `depth` across its plane ([`solidcore::develop::offset_closed_contour`]),
+/// as [`offset_contour`] moves an open one, the last piece meeting the first at a corner like any
+/// other: a lip's band edge.
+///
+/// # Errors
+/// The kernel's [`ContourRefusal`]: why the shifted profile does not hold together.
+pub fn offset_closed_contour(
+    segs: &[Seg2],
+    depth: f64,
+    thickness: f64,
+    flip: bool,
+    smooth: f64,
+) -> Result<Vec<Seg2>, ContourRefusal> {
+    k::offset_closed_contour(&cv::segs(segs), depth, thickness, flip, smooth)
+        .map(|s| cv::record_segs(&s))
+}
+
 /// A curve through `points` in order ([`solidcore::develop::curve_through`]): a line where they
 /// lie on one, else a clamped cubic spline through every one of them.
 #[must_use]
 pub fn curve_through(points: &[Vec2]) -> Vec<Seg2> {
     let points: Vec<solidcore::math::Vec2> = points.iter().copied().map(vec2).collect();
     cv::record_segs(&k::curve_through(&points))
+}
+
+/// Where the flat is cut at one end of a bend's zone that a tear bend relief parts
+/// ([`solidcore::develop::tear_slit`]): along the zone's end from `from` (on the tangent line of
+/// the panel that runs on past it) toward `to` (on the tangent line of the panel that ends there),
+/// from `depth` back inside the panel that runs on out to the farthest corner of the ending
+/// panel's `outline` on the line square to its anchor `ends` at `at`, that panel laid in the flat
+/// by `place`. `None` when the zone's end has no way or no corner reaches past `from`.
+#[must_use]
+pub fn tear_slit(
+    from: Vec2,
+    to: Vec2,
+    depth: f64,
+    ends: &Anchor,
+    at: f64,
+    outline: &Loop2,
+    place: &Rigid2,
+) -> Option<[Vec2; 2]> {
+    k::tear_slit(
+        vec2(from),
+        vec2(to),
+        depth,
+        &cv::anchor(ends),
+        at,
+        &solidcore_convert::loop2(outline),
+        &cv::rigid2(place),
+    )
+    .map(|s| s.map(record_vec2))
 }
 
 /// A developed sheet folded ([`fold`]).
@@ -541,6 +638,38 @@ pub fn bead_flank_angle(depth: f64, width: f64, crown_width: f64) -> Result<f64,
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_tear_slit_on_record_values_is_the_kernels() {
+        // A flange 30 along its anchor and 20 out, laid in the flat 5 up from the base's tangent
+        // line; the zone's end at the anchor's length, from the base's tangent line to the
+        // flange's, cut 2 deep into the base.
+        let ends = Anchor {
+            panel: 1,
+            origin: Vec2::new(0.0, 0.0),
+            dir: Vec2::new(1.0, 0.0),
+        };
+        let outline = Loop2::polygon(&[
+            Vec2::new(0.0, 0.0),
+            Vec2::new(30.0, 0.0),
+            Vec2::new(30.0, 20.0),
+            Vec2::new(0.0, 20.0),
+        ]);
+        let place = Rigid2 {
+            cos: 1.0,
+            sin: 0.0,
+            shift: Vec2::new(0.0, 5.0),
+        };
+        let (from, to) = (Vec2::new(30.0, 0.0), Vec2::new(30.0, 5.0));
+        assert_eq!(
+            tear_slit(from, to, 2.0, &ends, 30.0, &outline, &place),
+            Some([Vec2::new(30.0, -2.0), Vec2::new(30.0, 25.0)])
+        );
+        assert_eq!(
+            tear_slit(from, from, 2.0, &ends, 30.0, &outline, &place),
+            None
+        );
+    }
+
     /// A contour's surfaces come back as record segments: an L of two lines shifted 1 with the
     /// material on the right meets at (9, 1); lines that turn back are the kernel's refusal.
     #[test]
@@ -583,6 +712,25 @@ mod tests {
         assert_eq!(
             offset_contour(&back, 1.0, 2.0, false, 1e-6),
             Err(ContourRefusal::TurnsBack)
+        );
+    }
+
+    /// A closed profile comes back as record segments: the square from (0, 0) to (10, 10) run
+    /// counter-clockwise, moved 1 to the left of the travel, is the square from (1, 1) to (9, 9),
+    /// joined at (1, 1) where it closes too.
+    #[test]
+    fn a_closed_contour_offset_comes_back_as_record_segments() {
+        let at = |x: f64, y: f64| Vec2 { x, y };
+        let line = |a: Vec2, b: Vec2| Seg2::Line { a, b };
+        let corners = [at(0.0, 0.0), at(10.0, 0.0), at(10.0, 10.0), at(0.0, 10.0)];
+        let moved = [at(1.0, 1.0), at(9.0, 1.0), at(9.0, 9.0), at(1.0, 9.0)];
+        let square: Vec<Seg2> = (0..4)
+            .map(|i| line(corners[i], corners[(i + 1) % 4]))
+            .collect();
+        let inside: Vec<Seg2> = (0..4).map(|i| line(moved[i], moved[(i + 1) % 4])).collect();
+        assert_eq!(
+            offset_closed_contour(&square, 1.0, 0.0, false, 1e-6),
+            Ok(inside)
         );
     }
 }

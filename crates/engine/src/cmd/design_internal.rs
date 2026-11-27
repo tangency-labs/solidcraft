@@ -211,7 +211,7 @@ pub(crate) fn write(file: &Path, bytes: &[u8]) -> Result<(), String> {
 /// there is one, else the ones the design's file holds: `held`, what this session last put
 /// there, before what the file held when it was opened.
 pub(crate) fn bytes(doc: &Document, held: &BTreeMap<String, Blob>, own: Option<&str>, name: &str) -> Option<Blob> {
-    work_file(own, name).and_then(|file| read_linked_file(&file, own).ok()).map(Blob::from).or_else(|| stored(doc, held, name).cloned())
+    work_file(own, name).and_then(|file| read_linked_file(&file, own, false).ok()).map(Blob::from).or_else(|| stored(doc, held, name).cloned())
 }
 
 /// The stored part `name` as the design's file holds it: `held`, what this session last put

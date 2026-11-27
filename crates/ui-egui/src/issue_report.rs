@@ -669,7 +669,7 @@ pub fn crash_draft(report: &serde_json::Value) -> Draft {
 
 /// Open a reviewed draft for a crash report (no screenshot: the view shows nothing of it).
 pub fn begin_crash(app: &mut SolveApp, ctx: &egui::Context, report: &serde_json::Value) {
-    if keep_open_draft(app, true) {
+    if refused(app) || keep_open_draft(app, true) {
         return;
     }
     if app.issue_report.draft.is_none() {
@@ -724,7 +724,7 @@ pub fn draft_url(title: &str, body: &str) -> (String, bool) {
 }
 
 pub fn begin(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::Dialog>, error: Option<&str>) {
-    if keep_open_draft(app, dialog.is_some() || error.is_some()) {
+    if refused(app) || keep_open_draft(app, dialog.is_some() || error.is_some()) {
         return;
     }
     if app.issue_report.draft.is_none() {
@@ -733,6 +733,22 @@ pub fn begin(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::D
     cancel_capture(app);
     app.issue_report.draft = Some(window_draft(app, ctx, dialog, error));
     capture(app, ctx, dialog);
+}
+
+/// The organization's policy turns problem reports off (`AllowProblemReports` = 0): no report
+/// opens, to the ticket server or GitHub, and the status bar says where the details are instead.
+pub(crate) fn refused(app: &mut SolveApp) -> bool {
+    if app.policy.allows("problem_reports") {
+        return false;
+    }
+    app.set_status(solidcraft_ui_text::tr("policy.reports_off").to_string(), true);
+    true
+}
+
+/// An error toast offers Report… only where a report can open: tickets work here, and the
+/// organization's policy hasn't turned problem reports off.
+pub fn toast_offers_report(app: &SolveApp) -> bool {
+    app.policy.allows("problem_reports") && ticket::enabled(app)
 }
 
 /// Reopening must not replace the reviewed context or the typing waiting for its screenshot.
@@ -1082,9 +1098,50 @@ mod tests {
     fn combine(app: &mut SolveApp) {
         app.start("solid.combine");
         let dialog = app.dialog.as_mut().unwrap();
-        dialog.kind = dialogs::Kind::Combine { operation: 2, keep_tools: true };
+        dialog.kind = dialogs::Kind::Combine {
+            operation: 2,
+            keep_tools: true,
+            offset: "0 mm".into(),
+            round_edges: false,
+            picked_faces: false,
+            radius: String::new(),
+        };
         dialog.inputs.get_mut(0).unwrap().items = vec![Sel::Body { name: "Stock".into() }];
         dialog.inputs.get_mut(1).unwrap().items = vec![Sel::Body { name: "Cutter".into() }];
+    }
+
+    /// An organization's policy that turns problem reports off (#10260): no report opens, from the
+    /// app bar, a failed operation, a crash or an agent, and the status bar says where to look.
+    #[test]
+    fn a_policy_that_turns_problem_reports_off_opens_no_report() {
+        crate::i18n::install();
+        let _language = solidcraft_ui_text::scope("en");
+        let mut h = crate::scenario::Harness::new();
+        h.app.policy = crate::policy::Policy::from_json(r#"{"AllowProblemReports": 0}"#);
+        let ctx = h.ctx.clone();
+        begin(&mut h.app, &ctx, None, Some("Fillet failed"));
+        assert!(h.app.issue_report.draft.is_none(), "no report opens");
+        let (text, _, error) = h.app.status.clone().unwrap_or_default();
+        assert!(error && text.contains("Copy diagnostic information"), "{text}");
+        h.app.status = None;
+        begin_crash(&mut h.app, &ctx, &json!({"id": "crash-1", "message": "boom"}));
+        assert!(h.app.issue_report.draft.is_none(), "no crash report opens either");
+        assert!(h.app.status.is_some());
+        // AllowProblemReports = 1 leaves it as it was.
+        h.app.policy = crate::policy::Policy::from_json(r#"{"AllowProblemReports": 1}"#);
+        begin(&mut h.app, &ctx, None, Some("Fillet failed"));
+        assert!(h.app.issue_report.draft.is_some());
+    }
+
+    /// With problem reports turned off, a failed operation's toast offers no Report… (#10260).
+    #[test]
+    fn an_error_toast_offers_report_only_while_the_policy_allows_reports() {
+        let (mut app, _, _, _) = ticket_app(true, None);
+        assert!(toast_offers_report(&app));
+        app.policy = crate::policy::Policy::from_json(r#"{"AllowProblemReports": 0}"#);
+        assert!(!toast_offers_report(&app), "no Report… while the policy turns reports off");
+        app.policy = crate::policy::Policy::from_json(r#"{"AllowProblemReports": 1}"#);
+        assert!(toast_offers_report(&app));
     }
 
     fn click_commands(h: &mut crate::scenario::Harness, label: &str) -> Vec<egui::OutputCommand> {
@@ -2956,6 +3013,32 @@ mod tests {
         let bytes: Vec<u8> = requests.iter().filter(|r| r.method == "PUT").flat_map(|r| r.body.clone().unwrap_or_default()).collect();
         assert!(bytes.windows(19).any(|w| w == b"SECRET-DESIGN-BYTES"), "the ticked design goes with the draft");
         assert!(app.session.log.iter().any(|l| l.contains("Problem report: opened in the browser")), "each step is in the log");
+    }
+
+    /// The same report sent again within half an hour makes no second draft: the first one's page
+    /// is offered instead (#21201). Another title, or the same report after the half hour, is sent.
+    #[test]
+    fn ticket_report_sent_again_offers_the_earlier_draft() {
+        let (mut app, _, requests, _) = ticket_app(true, None);
+        let ctx = crate::fonts::test_context();
+        let drafts = |requests: &Requests| requests.lock().unwrap().iter().filter(|r| r.url.ends_with("/api/drafts")).count();
+        let report = || payload::build(&form(), payload::Ticks { design: true, ..Default::default() }, &evidence_with_design(), "t");
+        tickets::send(&mut app, report());
+        frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
+        assert_eq!((drafts(&requests), app.tickets.outcome.clone()), (1, Some(tickets::Outcome::Opened(draft_page()))));
+        tickets::send(&mut app, report());
+        assert!(app.tickets.sending.is_none(), "nothing is sent");
+        assert_eq!((drafts(&requests), app.tickets.outcome.clone()), (1, Some(tickets::Outcome::AlreadySent(draft_page()))));
+        let other = payload::Form { title: "Shell fails".into(), ..form() };
+        tickets::send(&mut app, payload::build(&other, payload::Ticks::default(), &evidence_with_design(), "t"));
+        frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
+        assert_eq!(drafts(&requests), 2, "another report is sent");
+        for sent in &mut app.tickets.sent {
+            sent.at_ms -= tickets::REPEAT_WINDOW_MS;
+        }
+        tickets::send(&mut app, report());
+        frames_until(&mut app, &ctx, |a| a.tickets.sending.is_none());
+        assert_eq!((drafts(&requests), app.tickets.outcome.clone()), (3, Some(tickets::Outcome::Opened(draft_page()))));
     }
 
     #[test]
