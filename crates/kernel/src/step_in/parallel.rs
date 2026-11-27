@@ -73,7 +73,13 @@ pub(super) fn workers() -> usize {
 }
 
 pub(super) fn prepare(ex: &Exchange, job: &Job) -> Prepared {
-    let _span = solidcraft_profile::span("import", "step.body");
+    // On a worker thread: the span says which item of the file it reads (#22473); a part read
+    // before is placed again, and the import's own span names the file's feature.
+    let span = solidcraft_profile::span("import", "step.body");
+    let _span = match &job.source {
+        Source::Item { item, .. } => span.arg("item", format_args!("#{item}")),
+        Source::Oriented(_) => span,
+    };
     let (part, read) = match &job.source {
         Source::Oriented(part) => (part.clone(), None),
         Source::Item { item, units } => {

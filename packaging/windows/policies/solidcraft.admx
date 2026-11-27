@@ -5,7 +5,7 @@
   Intune's import takes no combo boxes and wants every namespace it references uploaded first, so
   this file uses none of either. The target namespace never changes; a new policy raises revision.
 -->
-<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.5" schemaVersion="1.0">
+<policyDefinitions xmlns="http://www.microsoft.com/GroupPolicy/PolicyDefinitions" revision="1.7" schemaVersion="1.0">
   <policyNamespaces>
     <target prefix="solidcraft" namespace="TangencyLabs.Policies.SolidCraft" />
   </policyNamespaces>
@@ -14,7 +14,7 @@
     <definitions>
       <definition name="SUPPORTED_SolidCraft_0_44" displayName="$(string.SUPPORTED_SolidCraft_0_44)" />
       <definition name="SUPPORTED_SolidCraft_0_46" displayName="$(string.SUPPORTED_SolidCraft_0_46)" />
-      <definition name="SUPPORTED_SolidCraft_0_48" displayName="$(string.SUPPORTED_SolidCraft_0_48)" />
+      <definition name="SUPPORTED_SolidCraft_0_51" displayName="$(string.SUPPORTED_SolidCraft_0_51)" />
     </definitions>
   </supportedOn>
   <categories>
@@ -188,9 +188,36 @@
         <decimal value="0" />
       </disabledValue>
     </policy>
+    <policy name="ThemeFile" class="Both" displayName="$(string.ThemeFile)" explainText="$(string.ThemeFile_Explain)" presentation="$(presentation.ThemeFile)" key="Software\Policies\SolidCraft">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
+      <elements>
+        <text id="ThemeFile" valueName="ThemeFile" maxLength="4096" required="true" />
+      </elements>
+    </policy>
+    <policy name="AllowEasyPrint" class="Both" displayName="$(string.AllowEasyPrint)" explainText="$(string.AllowEasyPrint_Explain)" presentation="$(presentation.AllowEasyPrint)" key="Software\Policies\SolidCraft" valueName="AllowEasyPrint">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
+    <policy name="AllowProblemReports" class="Both" displayName="$(string.AllowProblemReports)" explainText="$(string.AllowProblemReports_Explain)" presentation="$(presentation.AllowProblemReports)" key="Software\Policies\SolidCraft" valueName="AllowProblemReports">
+      <parentCategory ref="SolidCraft" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_46" />
+      <enabledValue>
+        <decimal value="1" />
+      </enabledValue>
+      <disabledValue>
+        <decimal value="0" />
+      </disabledValue>
+    </policy>
     <policy name="DxfDashedHiddenLines" class="Both" displayName="$(string.DxfDashedHiddenLines)" explainText="$(string.DxfDashedHiddenLines_Explain)" presentation="$(presentation.DxfDashedHiddenLines)" key="Software\Policies\SolidCraft" valueName="DxfDashedHiddenLines">
       <parentCategory ref="SolidCraft" />
-      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
       <enabledValue>
         <decimal value="1" />
       </enabledValue>
@@ -200,7 +227,7 @@
     </policy>
     <policy name="RibbonLabels" class="Both" displayName="$(string.RibbonLabels)" explainText="$(string.RibbonLabels_Explain)" presentation="$(presentation.RibbonLabels)" key="Software\Policies\SolidCraft" valueName="RibbonLabels">
       <parentCategory ref="SolidCraft" />
-      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
       <enabledValue>
         <decimal value="1" />
       </enabledValue>
@@ -210,7 +237,7 @@
     </policy>
     <policy name="StatusBar" class="Both" displayName="$(string.StatusBar)" explainText="$(string.StatusBar_Explain)" presentation="$(presentation.StatusBar)" key="Software\Policies\SolidCraft" valueName="StatusBar">
       <parentCategory ref="SolidCraft" />
-      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
       <enabledValue>
         <decimal value="1" />
       </enabledValue>
@@ -220,7 +247,7 @@
     </policy>
     <policy name="MeshExportFormat" class="Both" displayName="$(string.MeshExportFormat)" explainText="$(string.MeshExportFormat_Explain)" presentation="$(presentation.MeshExportFormat)" key="Software\Policies\SolidCraft">
       <parentCategory ref="SolidCraft" />
-      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
       <elements>
         <enum id="MeshExportFormat" valueName="MeshExportFormat" required="true">
           <item displayName="$(string.MeshExportFormat_stl)">
@@ -243,7 +270,7 @@
     </policy>
     <policy name="MeshExportQuality" class="Both" displayName="$(string.MeshExportQuality)" explainText="$(string.MeshExportQuality_Explain)" presentation="$(presentation.MeshExportQuality)" key="Software\Policies\SolidCraft">
       <parentCategory ref="SolidCraft" />
-      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
       <elements>
         <enum id="MeshExportQuality" valueName="MeshExportQuality" required="true">
           <item displayName="$(string.MeshExportQuality_standard)">
@@ -266,7 +293,7 @@
     </policy>
     <policy name="DxfOrigin" class="Both" displayName="$(string.DxfOrigin)" explainText="$(string.DxfOrigin_Explain)" presentation="$(presentation.DxfOrigin)" key="Software\Policies\SolidCraft">
       <parentCategory ref="SolidCraft" />
-      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
       <elements>
         <enum id="DxfOrigin" valueName="DxfOrigin" required="true">
           <item displayName="$(string.DxfOrigin_target)">
@@ -284,7 +311,7 @@
     </policy>
     <policy name="Layout" class="Both" displayName="$(string.Layout)" explainText="$(string.Layout_Explain)" presentation="$(presentation.Layout)" key="Software\Policies\SolidCraft">
       <parentCategory ref="SolidCraft" />
-      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
       <elements>
         <enum id="Layout" valueName="Layout" required="true">
           <item displayName="$(string.Layout_floating)">
@@ -302,7 +329,7 @@
     </policy>
     <policy name="Slicer" class="Both" displayName="$(string.Slicer)" explainText="$(string.Slicer_Explain)" presentation="$(presentation.Slicer)" key="Software\Policies\SolidCraft">
       <parentCategory ref="SolidCraft" />
-      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
       <elements>
         <enum id="Slicer" valueName="Slicer" required="true">
           <item displayName="$(string.Slicer_prusa)">
@@ -385,7 +412,7 @@
     </policy>
     <policy name="Theme" class="Both" displayName="$(string.Theme)" explainText="$(string.Theme_Explain)" presentation="$(presentation.Theme)" key="Software\Policies\SolidCraft">
       <parentCategory ref="SolidCraft" />
-      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
       <elements>
         <enum id="Theme" valueName="Theme" required="true">
           <item displayName="$(string.Theme_dark)">
@@ -528,14 +555,14 @@
     </policy>
     <policy name="InterfaceFont" class="Both" displayName="$(string.InterfaceFont)" explainText="$(string.InterfaceFont_Explain)" presentation="$(presentation.InterfaceFont)" key="Software\Policies\SolidCraft">
       <parentCategory ref="SolidCraft" />
-      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
       <elements>
         <text id="InterfaceFont" valueName="InterfaceFont" maxLength="64" required="true" />
       </elements>
     </policy>
     <policy name="DxfTolerance" class="Both" displayName="$(string.DxfTolerance)" explainText="$(string.DxfTolerance_Explain)" presentation="$(presentation.DxfTolerance)" key="Software\Policies\SolidCraft">
       <parentCategory ref="SolidCraft" />
-      <supportedOn ref="SUPPORTED_SolidCraft_0_48" />
+      <supportedOn ref="SUPPORTED_SolidCraft_0_51" />
       <elements>
         <text id="DxfTolerance" valueName="DxfTolerance" maxLength="16" required="true" />
       </elements>

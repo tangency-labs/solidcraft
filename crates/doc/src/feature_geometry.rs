@@ -15,9 +15,9 @@ pub fn restored_thread_pick(saved: Vec3, resolved: Vec3) -> Vec3 {
     let saved_coords = [saved.x, saved.y, saved.z];
     let resolved_coords = [resolved.x, resolved.y, resolved.z];
     let (Ok(change), Ok(saved_scale), Ok(resolved_scale)) = (
-        solidcraft_kernel::services::point_distance(saved_coords, resolved_coords),
-        solidcraft_kernel::services::point_distance(saved_coords, [0.0; 3]),
-        solidcraft_kernel::services::point_distance(resolved_coords, [0.0; 3]),
+        solidcraft_kernel::points::point_distance(saved_coords, resolved_coords),
+        solidcraft_kernel::points::point_distance(saved_coords, [0.0; 3]),
+        solidcraft_kernel::points::point_distance(resolved_coords, [0.0; 3]),
     ) else {
         return resolved;
     };
@@ -83,6 +83,7 @@ impl FeatureKind {
             | FeatureKind::DeleteFace { .. }
             | FeatureKind::ReplaceFace { .. }
             | FeatureKind::SurfaceOffset { .. }
+            | FeatureKind::SurfaceMidsurface { .. }
             | FeatureKind::SurfaceMatch { .. }
             | FeatureKind::SurfaceFair { .. } => &["faces"],
             FeatureKind::SplitFace { .. } => &["faces", "tool"],
@@ -91,12 +92,13 @@ impl FeatureKind {
             FeatureKind::Hole { .. } => &["position", "to"],
             FeatureKind::Boss { .. } | FeatureKind::SnapFit { .. } | FeatureKind::Rest { .. } => &["position"],
             FeatureKind::Thread { .. } => &["face", "up_to"],
+            FeatureKind::ShaftSpline { .. } => &["shaft", "shaft_start", "bore", "bore_start"],
             FeatureKind::SheetConvert { .. } | FeatureKind::Lip { .. } | FeatureKind::SurfaceUntrim { .. } | FeatureKind::SurfaceRuled { .. } => {
                 &["face"]
             }
-            FeatureKind::Emboss { .. } => &["face"],
+            FeatureKind::Emboss { .. } | FeatureKind::Dome { .. } => &["face"],
             FeatureKind::Revolve { .. } => &["to"],
-            FeatureKind::Extrude { .. } | FeatureKind::SurfaceExtrude { .. } => &["extent.to", "extent.from"],
+            FeatureKind::Extrude { .. } | FeatureKind::SurfaceExtrude { .. } => &["extent.to", "extent.from", "extent.to2"],
             FeatureKind::SurfaceExtend { .. } => &["up_to"],
             _ => &[],
         }
@@ -109,12 +111,14 @@ impl FeatureKind {
     pub fn face_body(&self) -> Option<&str> {
         match self {
             FeatureKind::Shell { body, .. }
+            | FeatureKind::Dome { body, .. }
             | FeatureKind::Draft { body, .. }
             | FeatureKind::SplitFace { body, .. }
             | FeatureKind::OffsetFace { body, .. }
             | FeatureKind::DeleteFace { body, .. }
             | FeatureKind::ReplaceFace { body, .. }
             | FeatureKind::SurfaceOffset { body, .. }
+            | FeatureKind::SurfaceMidsurface { body, .. }
             | FeatureKind::Boss { body, .. }
             | FeatureKind::Lip { body, .. }
             | FeatureKind::SnapFit { body, .. }
@@ -126,6 +130,15 @@ impl FeatureKind {
             FeatureKind::SurfaceUntrim { face, .. } | FeatureKind::Split { tool: Some(face), .. } => Some(face.body.as_ref()),
             _ => None,
         }
+    }
+
+    /// Whether face point `slot` of a Shaft Spline, in the order the geometry walk gives its points, is a face
+    /// the teeth start from (`shaft_start`, `bore_start`). Such a face only says which end of the round face the
+    /// teeth start at, and the point saved for it says so as well.
+    pub fn spline_start_slot(&self, slot: usize) -> bool {
+        let FeatureKind::ShaftSpline { shaft, shaft_start, bore, bore_start, .. } = self else { return false };
+        let points = [(shaft.is_some(), false), (shaft_start.is_some(), true), (bore.is_some(), false), (bore_start.is_some(), true)];
+        points.into_iter().filter(|(given, _)| *given).nth(slot).is_some_and(|(_, start)| start)
     }
 
     /// The recorded body for a Thread target face slot; its optional Up To face has no target body.

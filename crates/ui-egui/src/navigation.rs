@@ -14,7 +14,7 @@ use egui::{Pos2, Rect, pos2, vec2};
 use serde_json::json;
 use solidcore_record::Vec3;
 use solidcraft_engine::geom::prelude::*;
-use solidcraft_kernel::services::{centroid_and_mean_radius, point_displacement, point_distance};
+use solidcraft_kernel::points::{centroid_and_mean_radius, point_displacement, point_distance};
 use solidcraft_viewport::Camera;
 
 use crate::SolveApp;
@@ -42,27 +42,6 @@ impl NavCaps {
     pub fn shows(self, slot: &crate::navigation_bar::Slot) -> bool {
         slot.available(self.orbit, self.pick)
     }
-}
-
-/// Give a panel the wheel delta left by its children, one movable axis at a time.
-/// Boundary deltas remain available to the panel host's input fallback.
-pub(crate) fn panel_scroll_offset(ctx: &egui::Context, previous: egui::Vec2, maximum: egui::Vec2) -> egui::Vec2 {
-    let mut offset = previous;
-    ctx.input_mut(|input| {
-        if maximum.x > 0.0 && input.smooth_scroll_delta.x != 0.0 {
-            offset.x = (previous.x - input.smooth_scroll_delta.x).clamp(0.0, maximum.x);
-            if offset.x != previous.x {
-                input.smooth_scroll_delta.x = 0.0;
-            }
-        }
-        if maximum.y > 0.0 && input.smooth_scroll_delta.y != 0.0 {
-            offset.y = (previous.y - input.smooth_scroll_delta.y).clamp(0.0, maximum.y);
-            if offset.y != previous.y {
-                input.smooth_scroll_delta.y = 0.0;
-            }
-        }
-    });
-    offset
 }
 
 /// Supplies the scroll phases browsers omit, before the shared navigation sees input.
@@ -1108,7 +1087,9 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         // Ctrl+left drag from empty space orbits in every preset (Cmd on macOS). A Ctrl+click
         // still selects, and Ctrl on geometry still drags it without snapping.
         let ctrl_orbit = (mods.ctrl || mods.command) && !mods.shift && !mods.alt && empty_space(app);
-        app.viewport.primary_nav = preset.or(ctrl_orbit.then_some(NavMode::Orbit));
+        // A left press during a middle drag is the preset's chord (NX: zoom), not a pick (#22063).
+        let chord = middle.then(|| crate::prefs::nav_chord(app, crate::prefs::NavButton::Left)).flatten();
+        app.viewport.primary_nav = chord.or(preset).or(ctrl_orbit.then_some(NavMode::Orbit));
     } else if zoom_drag || (!primary_down && !primary_released) {
         app.viewport.primary_nav = None;
     }
@@ -1148,7 +1129,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         .map(|pointer| (*pointer, crate::prefs::NavButton::of_pointer(*pointer)))
         .find(|(pointer, nav)| {
             ui.input(|i| i.pointer.button_down(*pointer) && !i.pointer.could_any_button_be_click())
-                && (crate::prefs::nav_mode(app, *nav, mods).is_some() || app.viewport.button_nav.is_some_and(|(held, _)| held == *nav))
+                && (crate::prefs::nav_mode(app, *nav, mods).is_some() || app.viewport.button_nav.is_some_and(|held| held.button == *nav))
         })
         .map(|(_, nav)| nav);
     let side_drag = right_drag || extra_drag.is_some();
@@ -1169,18 +1150,44 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
     let press_in_view = ui
         .input(|input| input.pointer.press_origin())
         .is_some_and(|at| input_rect.contains(at) && !on_control(at) && !crate::shell::covered(app, at));
-    let captured = button.is_some_and(|button| app.viewport.orbit_from.is_some() || app.viewport.button_nav.is_some_and(|(held, _)| held == button));
+    // A second button held during a middle drag switches it to the preset's chord while it is held
+    // (NX: middle + right pans, middle + left zooms, #22063); letting go goes back to the middle
+    // drag's own mode.
+    let chord = if !middle {
+        None
+    } else if ui.input(|i| i.pointer.secondary_down()) {
+        crate::prefs::nav_chord(app, crate::prefs::NavButton::Right)
+    } else if primary_down {
+        crate::prefs::nav_chord(app, crate::prefs::NavButton::Left)
+    } else {
+        None
+    };
+    let captured =
+        button.is_some_and(|button| app.viewport.orbit_from.is_some() || app.viewport.button_nav.is_some_and(|held| held.button == button));
     let dragging = captured || (press_in_view && (resp.dragged() || (inside && (button.is_some() || (space_pan && primary_down)))));
     // A middle or right drag keeps the mode it started with until its button is released, as a
     // left one does (`primary_nav`): letting go of Shift partway through a Shift+middle orbit
-    // doesn't turn the rest into a pan (#9557). Off in Preferences, the keys held decide on every
-    // frame, as before.
+    // doesn't turn the rest into a pan (#9557). If the press began while the window was unfocused,
+    // wait until focus arrives to lock the mode so modifiers held before clicking into the window
+    // still take effect (#20352). Off in Preferences, the keys held decide on every frame, as before.
+    let focused = ui.input(|i| i.focused);
     let button_mode = match button {
         Some(b) if dragging && app.viewport.axis_drag.is_none() => {
-            let kept = app.viewport.button_nav.filter(|(held, _)| *held == b && app.preferences.nav_drag_keeps_mode);
-            let mode = kept.map_or_else(|| crate::prefs::nav_mode(app, b, mods), |(_, mode)| mode);
-            app.viewport.button_nav = Some((b, mode));
-            mode
+            let previous = app.viewport.button_nav.filter(|held| held.button == b);
+            let kept = previous.filter(|held| held.focused && app.preferences.nav_drag_keeps_mode);
+            let mode = kept.map_or_else(|| crate::prefs::nav_mode(app, b, mods), |held| held.mode);
+            // Only a drag that began unfocused re-resolves its mode; a focused drag (with the
+            // preference off too) keeps its orbit state exactly as before.
+            if previous.is_some_and(|held| !held.focused && held.mode != mode) {
+                app.viewport.orbit_pivot = None;
+                app.viewport.orbit_pivot_at = None;
+                app.viewport.orbit_mark = None;
+                app.viewport.orbit_from = None;
+                app.viewport.orbit_free = None;
+            }
+            app.viewport.button_nav =
+                Some(crate::viewport::ButtonNav { button: b, mode, focused: previous.is_some_and(|held| held.focused) || focused });
+            chord.or(mode)
         }
         Some(_) => None,
         None => {
@@ -1268,9 +1275,12 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
                 Some(b) => crate::prefs::nav_mode(app, b, without_shift) == Some(NavMode::Orbit),
                 None => app.viewport.nav.is_some(),
             };
-        orbit_drag(app, rect, f64::from(delta.x), f64::from(delta.y), press, snap, true);
+        decide_orbit_flip(app, button, mods);
+        let free = mouse_free_orbit(app);
+        orbit_drag_styled(app, rect, f64::from(delta.x), f64::from(delta.y), press, snap, true, free);
         wrap_cursor(app, ui, rect);
     } else {
+        app.viewport.orbit_flip = None;
         if app.viewport.axis_drag.is_none() {
             app.viewport.orbit_free = None;
         }
@@ -1303,6 +1313,7 @@ fn handle_input(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &egui::
         app.viewport.orbit_pivot_at = None;
         app.viewport.orbit_mark = None;
         app.viewport.orbit_from = None;
+        app.viewport.orbit_flip = None;
         app.viewport.cursor_wrap = None;
     }
     if app.viewport.spin {
@@ -1482,15 +1493,17 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     });
     if let Some(queued) = app.viewport.device_motion.take() {
         let before = app.cam;
+        let lock = app.preferences.space_mouse_horizon_lock;
         let (free, fov) = (app.preferences.free_orbit, app.view_fov());
-        with_fov(&mut app.cam, fov, |cam| device_camera(cam, queued.motion, queued.seconds, height, turn, free, anchor, pivot));
+        with_fov(&mut app.cam, fov, |cam| device_camera(cam, queued.motion, queued.seconds, height, turn, free, lock, anchor, pivot));
         app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
     // A device app's motion (the navigation bridge), on the same terms.
     if let Some(queued) = app.viewport.bridge_motion.take() {
         let before = app.cam;
+        let lock = app.preferences.space_mouse_horizon_lock;
         let (reverse, free, fov) = (app.preferences.zoom_reverse, app.preferences.free_orbit, app.view_fov());
-        with_fov(&mut app.cam, fov, |cam| bridge_camera(cam, queued, height, turn, reverse, free, anchor, pivot));
+        with_fov(&mut app.cam, fov, |cam| bridge_camera(cam, queued, height, turn, reverse, free, lock, anchor, pivot));
         app.cam = crate::view_angles::keep_locked(app, before, app.cam);
     }
 }
@@ -1512,6 +1525,7 @@ pub(crate) fn bridge_camera(
     turn: bool,
     reverse_zoom: bool,
     free_orbit: bool,
+    horizon_lock: bool,
     anchor: Option<Vec3>,
     pivot: Option<Vec3>,
 ) {
@@ -1520,7 +1534,14 @@ pub(crate) fn bridge_camera(
     let [ox, oy] = motion.orbit;
     if turn {
         let keep = pivot.map(|p| (p, cam.frame_coords(p)));
-        if free_orbit {
+        if horizon_lock {
+            if free_orbit {
+                cam.orbit_unlimited(ox, oy);
+            } else {
+                cam.orbit(ox, oy);
+            }
+            level_horizon(cam, BRIDGE_FRAME_SECONDS, free_orbit);
+        } else if free_orbit {
             cam.rotate_in_view(Vec3::new(-oy * 0.008, -ox * 0.008, 0.0));
         } else {
             orbit_on_screen(cam, ox, oy);
@@ -1541,13 +1562,37 @@ pub(crate) fn bridge_camera(
     }
 }
 
+/// With the horizon lock, the share of a roll left after a second is `e^-HORIZON_LEVEL_RATE`.
+const HORIZON_LEVEL_RATE: f64 = 8.0;
+
+/// A device app's motion carries no time: its horizon lock eases the roll as one frame does.
+const BRIDGE_FRAME_SECONDS: f64 = 1.0 / 60.0;
+
+/// Ease `cam`'s roll toward level over `seconds` (the 3D mouse horizon lock): the short way
+/// round, never past level, and exactly level once within a hair, so a view that is level stays
+/// exactly level. Level is no roll, or, with `over_poles` (free orbit tilts on over the top, so
+/// the view may be upside down), the nearest half turn.
+fn level_horizon(cam: &mut Camera, seconds: f64, over_poles: bool) {
+    use std::f64::consts::{PI, TAU};
+    if !cam.roll.is_finite() {
+        cam.roll = 0.0;
+        return;
+    }
+    let level = if over_poles { (cam.roll / PI).round() * PI } else { 0.0 };
+    let off = (cam.roll - level + PI).rem_euclid(TAU) - PI;
+    let eased = off * (-HORIZON_LEVEL_RATE * seconds).exp();
+    cam.roll = level + if eased.abs() < 1e-4 { 0.0 } else { eased };
+}
+
 /// `seconds` of 3D mouse `motion` on `cam`, in a view `height` points tall. A full deflection
 /// pans about 0.6 of the view's height a second and turns about two radians a second, whatever
 /// the frame rate. With `turn` off the view keeps its orientation. `anchor` is the model point the
 /// view holds while it zooms, as the wheel's cursor point (none zooms through the model, #7435).
 /// `pivot` is the point the view turns around and keeps still on screen (none: the view's centre).
 /// Reverse zoom direction is a wheel setting and leaves the cap alone: the cap's own direction is
-/// its per-axis invert, already in `motion` (#8993).
+/// its per-axis invert, already in `motion` (#8993). With `horizon_lock` the view never rolls:
+/// `free_orbit` then only lets the tilt go on over the poles, as the mouse's upright free orbit
+/// does (see [`level_horizon`]).
 pub(crate) fn device_camera(
     cam: &mut Camera,
     motion: Motion,
@@ -1555,6 +1600,7 @@ pub(crate) fn device_camera(
     height: f64,
     turn: bool,
     free_orbit: bool,
+    horizon_lock: bool,
     anchor: Option<Vec3>,
     pivot: Option<Vec3>,
 ) {
@@ -1572,7 +1618,18 @@ pub(crate) fn device_camera(
         // Roll and Rz is Spin. The KMJ profile swaps physical Ry/Rz for the selected navigation
         // mode, so swapping them again here would make Roll behave like Spin.
         let keep = pivot.map(|p| (p, cam.frame_coords(p)));
-        if free_orbit {
+        if horizon_lock {
+            // The horizon stays level: Tilt tilts, Roll and Spin both turn about the world's up
+            // axis, and a roll the view already has is eased out. With free orbit the tilt goes
+            // on over the poles (the mouse's upright free orbit); without it, it stops at them.
+            let (turn, tilt) = ((ry + rz) * 250.0 * seconds, rx * 250.0 * seconds);
+            if free_orbit {
+                cam.orbit_unlimited(turn, tilt);
+            } else {
+                cam.orbit(turn, tilt);
+            }
+            level_horizon(cam, seconds, free_orbit);
+        } else if free_orbit {
             cam.rotate_in_view(Vec3::new(-rx, -ry, rz) * (2.0 * seconds));
         } else {
             orbit_on_screen(cam, ry * 250.0 * seconds, rx * 250.0 * seconds);
@@ -1634,20 +1691,27 @@ fn snapped_quarter_roll(mut target: Camera, reference: Camera) -> Camera {
 /// direction at once; the unsnapped orbit is kept in `orbit_free` so many small deltas still
 /// cross snap boundaries. A small angular margin avoids flicker at a boundary.
 pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press: Option<Pos2>, snap: bool, around_cursor: bool) {
+    let free = app.preferences.free_orbit;
+    orbit_drag_styled(app, rect, dx, dy, press, snap, around_cursor, free);
+}
+
+/// [`orbit_drag`] in the orbit style `free` names, which a mouse drag takes from
+/// [`mouse_free_orbit`].
+fn orbit_drag_styled(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press: Option<Pos2>, snap: bool, around_cursor: bool, free_style: bool) {
     let displayed = app.cam;
     let previous_free = app.viewport.orbit_free.take();
     if let Some(free) = previous_free {
         app.cam = free;
     }
     if around_cursor {
-        orbit(app, rect, dx, dy, press);
+        orbit_styled(app, rect, dx, dy, press, free_style);
     } else {
-        orbit_camera(app, dx, dy);
+        orbit_camera_styled(app, dx, dy, free_style);
     }
     let free = app.cam;
     app.viewport.orbit_free = Some(free);
     if !snap {
-        if app.preferences.free_orbit {
+        if free_style {
             app.viewport.orbit_free = None;
         }
         return;
@@ -1661,7 +1725,7 @@ pub(crate) fn orbit_drag(app: &mut SolveApp, rect: Rect, dx: f64, dy: f64, press
             target.pitch = displayed.pitch;
         }
     }
-    if app.preferences.free_orbit {
+    if free_style {
         target = snapped_quarter_roll(target, free);
     }
     // The cursor, origin and view-centre pivots stay still. The axis gizmo uses the origin when selected;
@@ -1715,14 +1779,21 @@ pub(crate) fn middle_double_click(app: &mut SolveApp, ui: &egui::Ui, inside: boo
 /// point. The cursor pivot is chosen once, when the drag begins; the view-centre pivot too, while
 /// it stays under the middle of the view (see [`kept_view_middle`]).
 pub fn orbit(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Option<Pos2>) {
+    let free = app.preferences.free_orbit;
+    orbit_styled(app, rect, dx, dy, press, free);
+}
+
+/// [`orbit`] in the orbit style `free_style` names (the trackpad and the other callers use the
+/// `free_orbit` preference; a mouse drag takes it from [`mouse_free_orbit`]).
+fn orbit_styled(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, press: Option<Pos2>, free_style: bool) {
     let (pivot, kept) = orbit_pivot(app, rect, (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at), press.unwrap_or(rect.center()));
     (app.viewport.orbit_pivot, app.viewport.orbit_pivot_at) = kept;
     app.viewport.orbit_mark = orbit_mark(app, pivot);
-    if app.preferences.free_orbit {
+    if free_style {
         app.viewport.orbit_from = None;
         match pivot {
-            Some(p) => orbit_about(app, rect, dx, dy, p),
-            None => orbit_camera(app, dx, dy),
+            Some(p) => orbit_about_styled(app, rect, dx, dy, p, free_style),
+            None => orbit_camera_styled(app, dx, dy, free_style),
         }
         return;
     }
@@ -1904,9 +1975,14 @@ pub struct OrbitFrom {
 }
 
 /// Rotate rigidly about the chosen pivot, keeping its camera-frame position unchanged.
-pub(crate) fn orbit_about(app: &mut SolveApp, _rect: egui::Rect, dx: f64, dy: f64, pivot: Vec3) {
+pub(crate) fn orbit_about(app: &mut SolveApp, rect: egui::Rect, dx: f64, dy: f64, pivot: Vec3) {
+    let free = app.preferences.free_orbit;
+    orbit_about_styled(app, rect, dx, dy, pivot, free);
+}
+
+fn orbit_about_styled(app: &mut SolveApp, _rect: egui::Rect, dx: f64, dy: f64, pivot: Vec3, free_style: bool) {
     let coords = app.cam.frame_coords(pivot);
-    orbit_camera(app, dx, dy);
+    orbit_camera_styled(app, dx, dy, free_style);
     app.cam.place(pivot, coords);
 }
 
@@ -2126,8 +2202,42 @@ impl TouchNavigation {
     }
 }
 
+/// Whether the mouse orbit drag under way turns freely: the `free_orbit` preference, turned over
+/// for a drag that began with the `free_orbit_key` held (#20917). Only the mouse drag asks; the
+/// trackpad, touch and 3D mouse orbits use the preference itself.
+fn mouse_free_orbit(app: &SolveApp) -> bool {
+    app.preferences.free_orbit != app.viewport.orbit_flip.unwrap_or(false)
+}
+
+/// Decides, as a mouse orbit drag starts, whether the `free_orbit_key` held then turns it into the
+/// other orbit style; the drag keeps that until it ends (every frame instead, with
+/// `nav_drag_keeps_mode` off). A key the binding itself needs for the orbit (Alt for an Alt+left
+/// orbit) does nothing: the drag must still orbit with the key let go. `button` is none for the
+/// left button.
+fn decide_orbit_flip(app: &mut SolveApp, button: Option<crate::prefs::NavButton>, mods: egui::Modifiers) {
+    if app.preferences.nav_drag_keeps_mode && app.viewport.orbit_flip.is_some() {
+        return;
+    }
+    let key = crate::prefs::FreeOrbitKey::of(app);
+    let spare = key.held(mods) && {
+        let rest = key.released(mods);
+        match button {
+            Some(b) => crate::prefs::nav_mode(app, b, mods) == Some(NavMode::Orbit) && crate::prefs::nav_mode(app, b, rest) == Some(NavMode::Orbit),
+            None => {
+                app.viewport.nav == Some(NavMode::Orbit) || crate::prefs::nav_mode(app, crate::prefs::NavButton::Left, rest) == Some(NavMode::Orbit)
+            }
+        }
+    };
+    app.viewport.orbit_flip = Some(spare);
+}
+
 fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
-    if !app.preferences.free_orbit {
+    let free = app.preferences.free_orbit;
+    orbit_camera_styled(app, dx, dy, free);
+}
+
+fn orbit_camera_styled(app: &mut SolveApp, dx: f64, dy: f64, free_style: bool) {
+    if !free_style {
         app.cam.orbit(dx, dy);
     } else if app.preferences.free_orbit_upright && app.preferences.upright_orbit_unrolls {
         // The same preference as the upright orbit's: the pointer is read through the view's
@@ -2143,6 +2253,7 @@ fn orbit_camera(app: &mut SolveApp, dx: f64, dy: f64) {
 #[cfg(test)]
 mod tests {
     use solidcraft_engine::geom::prelude::*;
+    use solidcraft_ui_kit::panel_scroll_offset;
 
     #[test]
     fn panel_wheel_consumes_only_axes_that_move_and_clamps_to_their_limits() {
@@ -2156,7 +2267,7 @@ mod tests {
         ] {
             crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
                 ui.input_mut(|input| input.smooth_scroll_delta = delta);
-                assert_eq!(super::panel_scroll_offset(ui.ctx(), previous, maximum), expected);
+                assert_eq!(panel_scroll_offset(ui.ctx(), previous, maximum), expected);
                 assert_eq!(ui.input(|input| input.smooth_scroll_delta), remaining);
             });
         }
@@ -2171,7 +2282,7 @@ mod tests {
             // A child has already consumed Y; only its unclaimed X reaches the host.
             ui.input_mut(|input| input.smooth_scroll_delta = vec2(-12.0, 0.0));
             let events = ui.input(|input| input.events.clone());
-            assert_eq!(super::panel_scroll_offset(ui.ctx(), vec2(5.0, 7.0), vec2(40.0, 40.0)), vec2(17.0, 7.0));
+            assert_eq!(panel_scroll_offset(ui.ctx(), vec2(5.0, 7.0), vec2(40.0, 40.0)), vec2(17.0, 7.0));
             assert_eq!(ui.input(|input| input.smooth_scroll_delta), egui::Vec2::ZERO);
             assert_eq!(ui.input(|input| input.events.clone()), events, "raw fallback ownership stays with the host");
         });
@@ -3059,6 +3170,135 @@ mod tests {
         assert!((h.app.cam.back().z - 0.6_f64.sin()).abs() > 1e-3);
     }
 
+    /// The 3D mouse horizon lock: whatever the six axes do, the view never rolls and the world's
+    /// up axis stays vertical on screen, with or without free orbit.
+    #[test]
+    fn horizon_lock_keeps_the_horizon_level_whatever_the_six_axes_do() {
+        use super::*;
+        use crate::space_mouse::Motion;
+        for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
+            for free_orbit in [false, true] {
+                let mut cam = Camera { yaw: 0.3, pitch: 0.4, up, ..Default::default() };
+                for i in 0..600 {
+                    let t = f64::from(i) * 0.37;
+                    let motion = Motion {
+                        translation: [t.sin(), (t * 1.3).cos(), (t * 0.7).sin()],
+                        rotation: [(t * 0.9).sin(), (t * 1.7).cos(), (t * 0.5).sin()],
+                    };
+                    device_camera(&mut cam, motion, 0.016, 600.0, true, free_orbit, true, None, None);
+                    assert!(cam.basis().0.dot(cam.up_dir()).abs() < 1e-9, "{up:?} free_orbit {free_orbit}: frame {i}: the horizon stays level");
+                    if !free_orbit {
+                        assert_eq!(cam.roll, 0.0, "{up:?}: frame {i}");
+                        assert!(cam.basis().1.dot(cam.up_dir()) >= 0.0, "{up:?}: never upside down");
+                    }
+                }
+            }
+        }
+    }
+
+    /// With free orbit too, the tilt goes on over the poles (the view ends up upside down) while the
+    /// horizon stays level, with no jump of the heading; a roll the view had is eased out.
+    #[test]
+    fn horizon_lock_with_free_orbit_tilts_over_the_pole_and_keeps_the_horizon_level() {
+        use super::*;
+        use crate::space_mouse::Motion;
+        for up in [solidcraft_viewport::UpAxis::Z, solidcraft_viewport::UpAxis::Y] {
+            for start_roll in [0.0, 0.7] {
+                let mut cam = Camera { yaw: 0.5, pitch: 0.3, roll: start_roll, up, ..Default::default() };
+                let seconds = 0.016;
+                let step = 2.0 * seconds;
+                let mut upside_down = false;
+                for i in 0..400 {
+                    let before = cam;
+                    let rotation = [1.0, if i % 2 == 0 { 0.4 } else { -0.4 }, 0.0];
+                    device_camera(&mut cam, Motion { translation: [0.0; 3], rotation }, seconds, 600.0, true, true, true, None, None);
+                    let moved = before.back().dot(cam.back()).clamp(-1.0, 1.0).acos();
+                    assert!(moved <= 2.0 * step + 1e-6, "{up:?} frame {i}: the view jumped by {moved}");
+                    if i > 200 {
+                        assert!(cam.basis().0.dot(cam.up_dir()).abs() < 1e-6, "{up:?} frame {i}: the horizon stays level: {cam:?}");
+                    }
+                    upside_down |= cam.basis().1.dot(cam.up_dir()) < 0.0;
+                }
+                assert!(upside_down, "{up:?} start roll {start_roll}: the tilt went on over the pole");
+            }
+        }
+    }
+
+    /// Off (the default), the cap turns the view as it did before: Tilt and Roll orbit, Spin rolls.
+    #[test]
+    fn without_the_horizon_lock_the_cap_still_rolls_the_view() {
+        use super::*;
+        use crate::space_mouse::Motion;
+        let motion = Motion { translation: [0.0; 3], rotation: [0.2, 0.3, 0.5] };
+        let start = Camera { yaw: 0.3, pitch: 0.4, ..Default::default() };
+        let mut cam = start;
+        device_camera(&mut cam, motion, 0.1, 600.0, true, false, false, None, None);
+        let mut by_hand = start;
+        by_hand.orbit(0.3 * 250.0 * 0.1, 0.2 * 250.0 * 0.1);
+        by_hand.roll_by(0.5 * 2.0 * 0.1);
+        assert_eq!(cam, by_hand);
+        assert!(cam.roll != 0.0, "Spin rolls the view");
+    }
+
+    /// Switching the lock on in a rolled view eases the roll out: it falls steadily to level, with
+    /// no jump (bar the last hair, 1e-4 rad, that snaps to level), either way round.
+    #[test]
+    fn horizon_lock_eases_an_existing_roll_out_without_a_jump() {
+        use super::*;
+        use crate::space_mouse::Motion;
+        for start_roll in [0.7, -0.7, 3.0, -3.0, 7.0] {
+            let mut cam = Camera { yaw: 0.3, pitch: 0.2, roll: start_roll, ..Default::default() };
+            let mut last = (cam.roll + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+            let mut frames = 0;
+            while cam.roll != 0.0 {
+                device_camera(&mut cam, Motion { translation: [0.0; 3], rotation: [0.0; 3] }, 0.016, 600.0, true, false, true, None, None);
+                let now = cam.roll;
+                assert!(now.abs() < last.abs(), "start {start_roll}: roll {now} after {last}");
+                assert!(last.abs() - now.abs() <= last.abs() * (1.0 - (-8.0_f64 * 0.016).exp()) + 1e-4, "start {start_roll}: no jump");
+                last = now;
+                frames += 1;
+                assert!(frames < 600, "start {start_roll}: levelled within ten seconds");
+            }
+        }
+    }
+
+    /// Tilting on into a pole stops at the pole, with the view's direction moving smoothly: no
+    /// flip and no jump of the heading.
+    #[test]
+    fn horizon_lock_tilts_into_the_pole_without_flipping() {
+        use super::*;
+        use crate::space_mouse::Motion;
+        for tilt in [1.0, -1.0] {
+            let mut cam = Camera { yaw: 0.5, pitch: 0.0, ..Default::default() };
+            let seconds = 0.016;
+            let step = 2.0 * seconds;
+            for i in 0..400 {
+                let before = cam;
+                let rotation = [tilt, if i % 2 == 0 { 0.5 } else { -0.5 }, 0.0];
+                device_camera(&mut cam, Motion { translation: [0.0; 3], rotation }, seconds, 600.0, true, false, true, None, None);
+                assert!(cam.pitch.abs() < std::f64::consts::FRAC_PI_2, "frame {i}: {cam:?}");
+                assert!(cam.basis().1.dot(cam.up_dir()) >= 0.0, "frame {i}: never upside down");
+                let moved = before.back().dot(cam.back()).clamp(-1.0, 1.0).acos();
+                assert!(moved <= 2.0 * step + 1e-9, "frame {i}: the view jumped by {moved}");
+            }
+            assert!(cam.pitch.abs() > std::f64::consts::FRAC_PI_2 - 1e-3, "tilt {tilt}: it reached the pole");
+        }
+    }
+
+    /// A device app's orbit keeps the horizon on the same terms.
+    #[test]
+    fn horizon_lock_applies_to_a_device_apps_orbit_too() {
+        use super::*;
+        let mut cam = Camera { yaw: 0.3, pitch: 0.2, roll: 0.7, ..Default::default() };
+        for _ in 0..600 {
+            let motion = BridgeMotion { orbit: [9.0, 4.0], ..Default::default() };
+            bridge_camera(&mut cam, motion, 600.0, true, false, false, true, None, None);
+            assert!(cam.basis().1.dot(cam.up_dir()) >= 0.0);
+        }
+        assert_eq!(cam.roll, 0.0);
+        assert!(cam.basis().0.dot(cam.up_dir()).abs() < 1e-9);
+    }
+
     #[test]
     fn solidworks_mouse_orbit_passes_the_pole_and_shift_snaps() {
         use serde_json::json;
@@ -3096,6 +3336,178 @@ mod tests {
         h.frame_with(vec![press(false)]);
         h.frame_with(vec![Event::ModifiersChanged(egui::Modifiers::NONE)]);
         h.frames(2);
+    }
+
+    /// One drag of 80 points straight down from a view looking almost over the pole, for the
+    /// "Free orbit while holding" tests: `mods` held at the press and let go after `release_after`
+    /// of its 16 steps. Returns the view before and after.
+    fn orbit_over_the_pole(
+        h: &mut crate::scenario::Harness,
+        button: egui::PointerButton,
+        mods: egui::Modifiers,
+        release_after: Option<usize>,
+    ) -> (solidcraft_viewport::Camera, solidcraft_viewport::Camera) {
+        use egui::{Event, vec2};
+        h.app.home.open = false;
+        h.frames(2);
+        h.app.cam = solidcraft_viewport::Camera { yaw: 0.0, pitch: 1.4, ..Default::default() };
+        let before = h.app.cam;
+        let at = h.app.viewport.rect.map_or(egui::pos2(600.0, 400.0), |r| r.center());
+        let press = |pressed, pos, modifiers| Event::PointerButton { pos, button, pressed, modifiers };
+        h.frame_with(vec![Event::ModifiersChanged(mods), Event::PointerMoved(at)]);
+        h.frame_with(vec![press(true, at, mods)]);
+        let mut held = mods;
+        for i in 1..=16 {
+            let mut events = Vec::new();
+            if release_after == Some(i - 1) {
+                held = egui::Modifiers::NONE;
+                events.push(Event::ModifiersChanged(held));
+            }
+            events.push(Event::PointerMoved(at + vec2(0.0, 5.0) * i as f32));
+            h.frame_with(events);
+        }
+        h.frame_with(vec![press(false, at + vec2(0.0, 80.0), held)]);
+        h.frame_with(vec![Event::ModifiersChanged(egui::Modifiers::NONE)]);
+        h.frames(2);
+        (before, h.app.cam)
+    }
+
+    /// Two views are the same turn when their back directions agree.
+    fn same_view(a: &solidcraft_viewport::Camera, b: &solidcraft_viewport::Camera) -> bool {
+        a.back().dist(b.back()) < 1e-9
+    }
+
+    #[test]
+    fn free_orbit_key_defaults_to_none_and_changes_no_orbit() {
+        use egui::{Modifiers, PointerButton};
+        assert_eq!(crate::prefs::Prefs::default().free_orbit_key, "none");
+        let mut reference = crate::scenario::Harness::new();
+        let (_, plain) = orbit_over_the_pole(&mut reference, PointerButton::Secondary, Modifiers::NONE, None);
+        let mut free = crate::scenario::Harness::new();
+        free.app.preferences.free_orbit = true;
+        let (_, free_turn) = orbit_over_the_pole(&mut free, PointerButton::Secondary, Modifiers::NONE, None);
+        assert!(!same_view(&plain, &free_turn), "the turntable stops at the pole and a free orbit goes over it");
+        for mods in [Modifiers::ALT, Modifiers::CTRL] {
+            let mut h = crate::scenario::Harness::new();
+            let (_, held) = orbit_over_the_pole(&mut h, PointerButton::Secondary, mods, None);
+            assert!(same_view(&held, &plain), "{mods:?} with no key chosen stays a turntable orbit");
+            assert_eq!(h.app.viewport.orbit_flip, None, "nothing is left set after the drag");
+        }
+        for mods in [Modifiers::NONE, Modifiers::SHIFT, Modifiers::ALT, Modifiers::CTRL, Modifiers::COMMAND] {
+            assert!(!crate::prefs::FreeOrbitKey::Off.held(mods));
+        }
+    }
+
+    #[test]
+    fn the_free_orbit_key_makes_one_drag_free_and_the_other_way_round() {
+        use egui::{
+            Modifiers,
+            PointerButton::{Middle, Secondary},
+        };
+        // Fusion orbits on the right button; Solidworks on the plain middle one (Ctrl and Shift
+        // there pan and zoom, so only Alt is a spare key for it).
+        for (key, mods, other, button, nav) in [
+            ("alt", Modifiers::ALT, Some(Modifiers::CTRL), Secondary, "fusion"),
+            ("ctrl", Modifiers::CTRL, Some(Modifiers::ALT), Secondary, "fusion"),
+            ("alt", Modifiers::ALT, None, Middle, "solidworks"),
+        ] {
+            let run = |free: bool, key: &str, mods: Modifiers, release_after: Option<usize>| {
+                let mut h = crate::scenario::Harness::new();
+                h.app.preferences.nav = nav.into();
+                h.app.preferences.free_orbit = free;
+                h.app.preferences.free_orbit_key = key.into();
+                orbit_over_the_pole(&mut h, button, mods, release_after).1
+            };
+            let label = format!("{key} {button:?}");
+            // The two styles, as the plain drag turns them with no key chosen.
+            let turntable = run(false, "none", Modifiers::NONE, None);
+            let free = run(true, "none", Modifiers::NONE, None);
+            assert!(!same_view(&turntable, &free), "{label}: the styles differ over the pole");
+            assert!(same_view(&run(false, key, Modifiers::NONE, None), &turntable), "{label}: no key stays upright");
+            if let Some(other) = other {
+                assert!(same_view(&run(false, key, other, None), &turntable), "{label}: another key changes nothing");
+            }
+            assert!(same_view(&run(false, key, mods, None), &free), "{label}: the key makes the drag free");
+            // With Free chosen, the key gives the turntable instead.
+            assert!(same_view(&run(true, key, Modifiers::NONE, None), &free), "{label}: Free chosen stays free");
+            assert!(same_view(&run(true, key, mods, None), &turntable), "{label}: the key turns a Free orbit into the turntable");
+            // Let go partway: the drag keeps the style it began with.
+            assert!(same_view(&run(false, key, mods, Some(4)), &free), "{label}: the drag keeps its mode");
+        }
+        // With "A drag keeps the navigation it started with" off, the keys held decide each frame.
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.free_orbit = true;
+        let (_, free) = orbit_over_the_pole(&mut h, Secondary, Modifiers::NONE, None);
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.free_orbit_key = "alt".into();
+        h.app.preferences.nav_drag_keeps_mode = false;
+        let (_, partly) = orbit_over_the_pole(&mut h, Secondary, Modifiers::ALT, Some(4));
+        assert!(!same_view(&partly, &free));
+    }
+
+    /// The trackpad and every other orbit that is not a mouse drag follow the `free_orbit`
+    /// preference, whatever a mouse drag left in `orbit_flip` (it is still set on the frame the
+    /// flipped drag ends).
+    #[test]
+    fn orbits_that_are_not_a_mouse_drag_ignore_the_free_orbit_key() {
+        use super::*;
+        let turn = |free: bool, flip: Option<bool>| {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.free_orbit = free;
+            h.app.viewport.orbit_flip = flip;
+            let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
+            h.app.cam = solidcraft_viewport::Camera { yaw: 0.0, pitch: 1.4, ..Default::default() };
+            orbit(&mut h.app, rect, 0.0, 80.0, None);
+            h.app.cam
+        };
+        for free in [false, true] {
+            assert!(same_view(&turn(free, Some(true)), &turn(free, None)), "free_orbit {free}: a stale flip changed the trackpad orbit");
+            assert!(same_view(&turn(free, Some(false)), &turn(free, None)));
+        }
+        assert!(!same_view(&turn(false, None), &turn(true, None)), "the two styles differ here");
+    }
+
+    #[test]
+    fn the_free_orbit_key_does_nothing_where_the_binding_needs_that_key() {
+        use crate::prefs::NavButton;
+        use egui::Modifiers;
+        let flip = |nav: &str, key: &str, button: Option<NavButton>, mods: Modifiers| {
+            let mut h = crate::scenario::Harness::new();
+            h.app.preferences.nav = nav.into();
+            h.app.preferences.free_orbit_key = key.into();
+            super::decide_orbit_flip(&mut h.app, button, mods);
+            h.app.viewport.orbit_flip
+        };
+        // Alt+left orbits in the Maya mapping: Alt is what orbits, so it can't also switch.
+        assert_eq!(flip("maya", "alt", None, Modifiers::ALT), Some(false));
+        // Fusion's right drag orbits with no key, so either key is spare.
+        assert_eq!(flip("fusion", "alt", Some(NavButton::Right), Modifiers::ALT), Some(true));
+        assert_eq!(flip("fusion", "ctrl", Some(NavButton::Right), Modifiers::CTRL), Some(true));
+        assert_eq!(flip("fusion", "ctrl", Some(NavButton::Right), Modifiers::NONE), Some(false));
+        assert_eq!(flip("fusion", "none", Some(NavButton::Right), Modifiers::ALT), Some(false));
+        // Ctrl+left orbit from empty space (every mapping) is the Ctrl key's own orbit.
+        assert_eq!(flip("fusion", "ctrl", None, Modifiers::CTRL), Some(false));
+        // Shift+middle is Fusion's orbit: Shift is needed, and Alt on top of it is spare.
+        assert_eq!(flip("fusion", "alt", Some(NavButton::Middle), Modifiers::SHIFT), Some(false));
+        assert_eq!(flip("fusion", "alt", Some(NavButton::Middle), Modifiers::SHIFT | Modifiers::ALT), Some(true));
+        // Ctrl+middle pans in Solidworks: no orbit, so nothing to switch.
+        assert_eq!(flip("solidworks", "ctrl", Some(NavButton::Middle), Modifiers::CTRL), Some(false));
+        assert_eq!(flip("solidworks", "alt", Some(NavButton::Middle), Modifiers::ALT), Some(true));
+    }
+
+    #[test]
+    fn a_bad_free_orbit_key_is_refused_and_a_good_one_is_kept() {
+        let mut h = crate::scenario::Harness::new();
+        for bad in ["shift", "meta", ""] {
+            let reply = h.call("ui.prefs", serde_json::json!({"free_orbit_key": bad}));
+            assert_eq!(reply["ok"], false, "{bad}: {reply}");
+        }
+        assert_eq!(h.app.preferences.free_orbit_key, "none");
+        for good in ["alt", "ctrl", "none"] {
+            let reply = h.call("ui.prefs", serde_json::json!({"free_orbit_key": good}));
+            assert_eq!(reply["ok"], true, "{good}: {reply}");
+            assert_eq!(h.app.preferences.free_orbit_key, good);
+        }
     }
 
     #[test]
@@ -3275,7 +3687,7 @@ mod tests {
         }
         // Other presets keep the existing upright camera behavior.
         let mut cam = Camera { yaw: 0.0, pitch: 1.5, ..Default::default() };
-        device_camera(&mut cam, Motion { translation: [0.0; 3], rotation: [1.0, 0.0, 0.0] }, 0.1, 600.0, true, false, None, None);
+        device_camera(&mut cam, Motion { translation: [0.0; 3], rotation: [1.0, 0.0, 0.0] }, 0.1, 600.0, true, false, false, None, None);
         assert!(cam.pitch < std::f64::consts::FRAC_PI_2 && cam.pitch > 1.5);
     }
 
@@ -3302,11 +3714,11 @@ mod tests {
             let rolled = Camera { roll, ..upright };
             for rotation in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.6, -0.8, 0.0]] {
                 let cap = |cam: &mut Camera| {
-                    device_camera(cam, Motion { translation: [0.0; 3], rotation }, 1e-4, 600.0, true, false, None, None);
+                    device_camera(cam, Motion { translation: [0.0; 3], rotation }, 1e-4, 600.0, true, false, false, None, None);
                 };
                 let bridge = |cam: &mut Camera| {
                     let orbit = [rotation[1] * 0.03, rotation[0] * 0.03];
-                    bridge_camera(cam, BridgeMotion { orbit, ..Default::default() }, 600.0, true, false, false, None, None);
+                    bridge_camera(cam, BridgeMotion { orbit, ..Default::default() }, 600.0, true, false, false, false, None, None);
                 };
                 for turn in [&cap as &dyn Fn(&mut Camera), &bridge] {
                     let (want, got) = (on_screen(upright, turn), on_screen(rolled, turn));
@@ -3913,6 +4325,90 @@ mod tests {
         assert_eq!(super::wrapped(view, pos2(5000.0, 300.0)), Some(pos2(896.0, 300.0)), "far outside lands inside");
         assert_eq!(super::wrapped(view, pos2(f32::NAN, 300.0)), None);
         assert_eq!(super::wrapped(Rect::from_min_size(pos2(0.0, 0.0), vec2(10.0, 10.0)), pos2(20.0, 5.0)), None, "too small a view");
+    }
+
+    /// #22063: with the NX preset, a middle drag orbits, and holding the right button too pans
+    /// while the left one zooms, as in NX. Letting the second button go goes back to orbiting, and
+    /// the left press of the zoom is navigation, not a pick. Another preset's middle drag keeps its
+    /// own mode whatever else is held.
+    #[test]
+    fn nx_middle_drag_pans_with_the_right_button_and_zooms_with_the_left() {
+        use egui::{Event, Modifiers, PointerButton, pos2, vec2};
+        let session = || {
+            let mut s = solidcraft_engine::Session::default();
+            s.execute("solid.box", &serde_json::json!({"length":40,"width":30,"height":20})).unwrap();
+            s
+        };
+        let ctx = egui::Context::default();
+        let mut time = 0.0;
+        let mut frame = |app: &mut crate::SolveApp, events: Vec<Event>| {
+            time += 1.0 / 60.0;
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(800.0, 600.0))),
+                time: Some(time),
+                focused: true,
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(raw, |ui| {
+                let rect = ui.max_rect();
+                app.viewport.rect = Some(rect);
+                let resp = ui.interact(rect, ui.scope_id().with("model"), egui::Sense::click_and_drag());
+                super::handle(app, ui, rect, &resp, super::NavCaps::MODEL);
+            });
+            out.textures_delta.clear();
+        };
+        let button = |button, pressed, at| Event::PointerButton { pos: at, button, pressed, modifiers: Modifiers::NONE };
+        // Drags six times by `by` and gives the camera before and after.
+        fn drag(
+            frame: &mut impl FnMut(&mut crate::SolveApp, Vec<Event>),
+            app: &mut crate::SolveApp,
+            at: &mut egui::Pos2,
+            by: egui::Vec2,
+        ) -> (solidcraft_viewport::Camera, solidcraft_viewport::Camera) {
+            let before = app.cam;
+            for _ in 0..6 {
+                *at += by;
+                frame(app, vec![Event::PointerMoved(*at)]);
+            }
+            (before, app.cam)
+        }
+        let mut app = crate::SolveApp::new(session(), crate::Services::default());
+        crate::prefs::choose_nav_preset(&mut app.preferences, crate::prefs::nav_preset("nx"));
+        let mut at = pos2(300.0, 300.0);
+        frame(&mut app, vec![Event::PointerMoved(at)]);
+        frame(&mut app, vec![button(PointerButton::Middle, true, at)]);
+        let (a, b) = drag(&mut frame, &mut app, &mut at, vec2(12.0, 0.0));
+        assert!((a.yaw - b.yaw).abs() > 1e-4, "a middle drag orbits");
+        // Middle + right: a pan, the view's direction kept.
+        frame(&mut app, vec![button(PointerButton::Secondary, true, at)]);
+        let (a, b) = drag(&mut frame, &mut app, &mut at, vec2(12.0, 8.0));
+        assert_eq!((a.yaw, a.pitch, a.distance), (b.yaw, b.pitch, b.distance), "middle + right does not orbit or zoom");
+        assert!((a.target - b.target).len2() > 1e-12, "middle + right pans");
+        frame(&mut app, vec![button(PointerButton::Secondary, false, at)]);
+        // Middle + left: a zoom, and no pick.
+        frame(&mut app, vec![button(PointerButton::Primary, true, at)]);
+        assert_eq!(app.viewport.primary_nav, Some(crate::viewport::NavMode::Zoom), "the left press navigates, it does not select");
+        let (a, b) = drag(&mut frame, &mut app, &mut at, vec2(0.0, 10.0));
+        assert_eq!((a.yaw, a.pitch), (b.yaw, b.pitch), "middle + left does not orbit");
+        assert!(a != b, "middle + left zooms");
+        frame(&mut app, vec![button(PointerButton::Primary, false, at)]);
+        // The second button let go: the middle drag orbits again.
+        let (a, b) = drag(&mut frame, &mut app, &mut at, vec2(12.0, 0.0));
+        assert!((a.yaw - b.yaw).abs() > 1e-4, "back to orbiting");
+        frame(&mut app, vec![button(PointerButton::Middle, false, at)]);
+        assert!(crate::prefs::nav_chord(&app, crate::prefs::NavButton::Right).is_some());
+
+        // Fusion has no chords: its middle drag pans whatever else is held.
+        let mut app = crate::SolveApp::new(session(), crate::Services::default());
+        crate::prefs::choose_nav_preset(&mut app.preferences, crate::prefs::nav_preset("fusion"));
+        assert_eq!(crate::prefs::nav_chord(&app, crate::prefs::NavButton::Left), None);
+        frame(&mut app, vec![Event::PointerMoved(at)]);
+        frame(&mut app, vec![button(PointerButton::Middle, true, at)]);
+        frame(&mut app, vec![button(PointerButton::Primary, true, at)]);
+        let (a, b) = drag(&mut frame, &mut app, &mut at, vec2(0.0, 10.0));
+        assert_eq!((a.yaw, a.pitch, a.distance), (b.yaw, b.pitch, b.distance), "Fusion's middle drag stays a pan");
+        assert!((a.target - b.target).len2() > 1e-12);
     }
 
     /// An orbit drag that reaches the edge of the view keeps turning round the model: the cursor
@@ -4672,7 +5168,7 @@ mod tests {
         let legacy_centre = points.iter().fold(egui::Vec2::ZERO, |sum, point| sum + point.to_vec2()) / points.len() as f32;
         let legacy_mean = points.iter().map(|point| point.distance(legacy_centre.to_pos2())).sum::<f32>() / points.len() as f32;
         let kernel_points: Vec<_> = points.iter().map(|point| super::screen_point(*point)).collect();
-        let kernel_mean = solidcraft_kernel::services::centroid_and_mean_radius(&kernel_points).unwrap().mean_distance;
+        let kernel_mean = solidcraft_kernel::points::centroid_and_mean_radius(&kernel_points).unwrap().mean_distance;
         assert!(
             (f64::from(legacy_mean) - kernel_mean).abs() <= f64::from(f32::EPSILON) * kernel_mean.max(1.0),
             "legacy f32 {legacy_mean} vs f64 query {kernel_mean}"
@@ -5358,6 +5854,165 @@ mod view_key_tests {
                     assert!(close(&moved, &seen_moved), "{what}: a 4 by 3 move after the press went to {moved:?}, not {seen_moved:?}");
                 }
             }
+        }
+    }
+
+    /// Holding Ctrl (or Shift) before middle-dragging into an unfocused SolidCraft window in
+    /// SolidWorks navigation must pan (or zoom) immediately rather than orbiting (#20352), both
+    /// when modifiers arrive while hovering unfocused and when focus + modifiers arrive one frame
+    /// after the press. Once focused, `nav_drag_keeps_mode` still locks the mode (#9557).
+    #[test]
+    fn solidworks_unfocused_window_modifier_middle_drag_pans_and_zooms() {
+        use egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect, vec2};
+        let run_frame = |h: &mut crate::scenario::Harness, time: &mut f64, events: Vec<Event>, focused: bool| {
+            *time = time.max(h.ctx.input(|i| i.time)) + 1.0 / 60.0;
+            let mut raw = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1000.0))),
+                time: Some(*time),
+                focused,
+                events,
+                ..Default::default()
+            };
+            crate::window_chrome::release_stale_input(&h.ctx, &mut raw);
+            h.app.raw_input_hook(&mut raw);
+            let app = &mut h.app;
+            let mut out = h.ctx.run_ui(raw, |ui| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            });
+            out.textures_delta.clear();
+        };
+        let setup = || {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            crate::prefs::choose_nav_preset(&mut h.app.preferences, crate::prefs::nav_preset("solidworks"));
+            h.app.preferences.nav_drag_keeps_mode = true;
+            h.call("ui.view", serde_json::json!({"view": "front"}));
+            h.frames(2);
+            let time = h.ctx.input(|i| i.time);
+            let at = h.app.viewport.rect.unwrap().center();
+            (h, time, at)
+        };
+        let ctrl = Modifiers { ctrl: true, command: !cfg!(target_os = "macos"), ..Default::default() };
+
+        // Case 1: Ctrl reported while hovering unfocused, then middle-press gains focus without a
+        // duplicate ModifiersChanged event.
+        {
+            let (mut h, mut time, at) = setup();
+            let start = h.app.cam;
+            run_frame(&mut h, &mut time, vec![Event::WindowFocused(false)], false);
+            run_frame(&mut h, &mut time, vec![Event::ModifiersChanged(ctrl), Event::PointerMoved(at)], false);
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![Event::WindowFocused(true), Event::PointerButton { pos: at, button: PointerButton::Middle, pressed: true, modifiers: ctrl }],
+                true,
+            );
+            for i in 1..=6 {
+                run_frame(&mut h, &mut time, vec![Event::PointerMoved(at + vec2(10.0 * i as f32, 6.0 * i as f32))], true);
+            }
+            let mid = h.app.cam;
+            assert!((mid.yaw - start.yaw).abs() < 1e-9 && (mid.pitch - start.pitch).abs() < 1e-9, "case 1 must pan, not orbit: {mid:?}");
+            assert!(mid.target.dist(start.target) > 1e-3, "case 1 must move the camera target");
+            // Releasing Ctrl partway through still keeps panning once focused (#9557).
+            run_frame(&mut h, &mut time, vec![Event::ModifiersChanged(Modifiers::NONE)], true);
+            for i in 7..=12 {
+                run_frame(&mut h, &mut time, vec![Event::PointerMoved(at + vec2(10.0 * i as f32, 6.0 * i as f32))], true);
+            }
+            let end = h.app.cam;
+            assert!((end.yaw - start.yaw).abs() < 1e-9 && (end.pitch - start.pitch).abs() < 1e-9, "case 1 keeps pan after Ctrl release: {end:?}");
+            assert!(end.target.dist(mid.target) > 1e-3, "case 1 continues panning");
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![Event::PointerButton { pos: at + vec2(120.0, 72.0), button: PointerButton::Middle, pressed: false, modifiers: Modifiers::NONE }],
+                true,
+            );
+        }
+
+        // Case 2: Middle-press arrives while unfocused (stale NONE modifiers), then focus + Ctrl
+        // arrive on the following frame as the drag moves.
+        {
+            let (mut h, mut time, at) = setup();
+            let start = h.app.cam;
+            run_frame(&mut h, &mut time, vec![Event::WindowFocused(false)], false);
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![
+                    Event::PointerMoved(at),
+                    Event::PointerButton { pos: at, button: PointerButton::Middle, pressed: true, modifiers: Modifiers::NONE },
+                ],
+                false,
+            );
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![Event::WindowFocused(true), Event::ModifiersChanged(ctrl), Event::PointerMoved(at + vec2(12.0, 8.0))],
+                true,
+            );
+            for i in 2..=6 {
+                run_frame(&mut h, &mut time, vec![Event::PointerMoved(at + vec2(12.0 * i as f32, 8.0 * i as f32))], true);
+            }
+            let end = h.app.cam;
+            assert!((end.yaw - start.yaw).abs() < 1e-9 && (end.pitch - start.pitch).abs() < 1e-9, "case 2 must pan, not orbit: {end:?}");
+            assert!(end.target.dist(start.target) > 1e-3, "case 2 must pan the camera");
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![Event::PointerButton { pos: at + vec2(72.0, 48.0), button: PointerButton::Middle, pressed: false, modifiers: ctrl }],
+                true,
+            );
+        }
+
+        // Case 3: Shift+middle zoom into an unfocused window (press-before-focus).
+        {
+            let (mut h, mut time, at) = setup();
+            let start = h.app.cam;
+            run_frame(&mut h, &mut time, vec![Event::WindowFocused(false)], false);
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![
+                    Event::PointerMoved(at),
+                    Event::PointerButton { pos: at, button: PointerButton::Middle, pressed: true, modifiers: Modifiers::NONE },
+                ],
+                false,
+            );
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![Event::WindowFocused(true), Event::ModifiersChanged(Modifiers::SHIFT), Event::PointerMoved(at + vec2(0.0, 40.0))],
+                true,
+            );
+            let end = h.app.cam;
+            assert!((end.yaw - start.yaw).abs() < 1e-9 && (end.pitch - start.pitch).abs() < 1e-9, "case 3 must zoom, not orbit: {end:?}");
+            assert!((end.distance - start.distance).abs() > 1e-3, "case 3 must change camera distance");
+        }
+
+        // Case 4: Regression guard — a plain middle orbit begun while focused stays orbit even if
+        // Ctrl is pressed partway through (#9557).
+        {
+            let (mut h, mut time, at) = setup();
+            let start = h.app.cam;
+            run_frame(&mut h, &mut time, vec![Event::ModifiersChanged(Modifiers::NONE), Event::PointerMoved(at)], true);
+            run_frame(
+                &mut h,
+                &mut time,
+                vec![Event::PointerButton { pos: at, button: PointerButton::Middle, pressed: true, modifiers: Modifiers::NONE }],
+                true,
+            );
+            for i in 1..=4 {
+                run_frame(&mut h, &mut time, vec![Event::PointerMoved(at + vec2(10.0 * i as f32, 0.0))], true);
+            }
+            let mid = h.app.cam;
+            assert!((mid.yaw - start.yaw).abs() > 1e-3, "focused plain middle drag orbits");
+            run_frame(&mut h, &mut time, vec![Event::ModifiersChanged(ctrl)], true);
+            for i in 5..=8 {
+                run_frame(&mut h, &mut time, vec![Event::PointerMoved(at + vec2(10.0 * i as f32, 0.0))], true);
+            }
+            let end = h.app.cam;
+            assert!((end.yaw - mid.yaw).abs() > 1e-3, "focused orbit keeps orbiting after Ctrl is pressed");
         }
     }
 }
