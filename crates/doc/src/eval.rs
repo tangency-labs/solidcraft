@@ -11393,7 +11393,11 @@ fn hole_spots_raw<'a>(vals: &BTreeMap<String, Value>, st: &ModelState, f: &'a Fe
         _ => {
             let dir = self::direction(vals, direction, "direction")?;
             let p = single_hole_position(vals, st, position, at, points)?;
-            let p = if hole_references(f).is_empty() { p } else { with_references(vals, st, f, hole_start(st, f, p, dir), dir, false)? };
+            // The source hole is already drilled at `p`, so projecting `p` along `dir` with
+            // `hole_start` shoots straight through the opening onto an opposite wall of a hollow
+            // body or the bottom of a blind bore (#23221). Resolve the reference frame from `p`
+            // and the reference edges directly.
+            let p = if hole_references(f).is_empty() { p } else { with_references(vals, st, f, p, dir, false)? };
             Ok((vec![HoleSpot { at: p, point: None }], hole_dir_into_face(st, hole_start(st, f, p, dir), dir, hole_drill_scope(f))))
         }
     }
