@@ -1795,7 +1795,8 @@ fn compact_text(text: &str, max_chars: usize) -> String {
     if chars.next().is_some() { format!("{short}…") } else { short }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
+#[cfg(not(target_arch = "wasm32"))]
 mod config_ui_tests {
     use super::*;
 
