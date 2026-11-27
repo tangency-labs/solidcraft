@@ -165,6 +165,7 @@ pub const DOCUMENTED: &[&str] = &[
     "pulley.insert",
     "shaft_spline.insert",
     "sheet.convert",
+    "sheet.corner_join",
     "sheet.export_bend_table",
     "sheet.export_dxf",
     "sheet.flange",
@@ -369,6 +370,7 @@ pub const DOCUMENTED: &[&str] = &[
     "view.spin",
     "view.tool",
     "view.visual_style",
+    "weld.create",
 ];
 
 /// The example pictures, by command id (sorted): original SVGs on the icon grid in

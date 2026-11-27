@@ -865,19 +865,19 @@ impl Reader {
     }
 
     /// The placement an item states: an AXIS2_PLACEMENT's frame, or a
-    /// CARTESIAN_TRANSFORMATION_OPERATOR_3D, uniform or not: its axes, scales and origin (an
-    /// omitted axis is the global one, an omitted scale 1, an omitted second or third scale the
-    /// first).
+    /// CARTESIAN_TRANSFORMATION_OPERATOR_3D, uniform or not: its axes (derived as the STEP reader
+    /// derives them, `solidcore_step::read::operator_axes`), scales and origin (an omitted scale 1,
+    /// an omitted second or third scale the first).
     fn placement_matrix(&mut self, item: u64, u: Units) -> R<M4> {
         let reader = solidcore_step::read::Reader::new(&self.ex, u.units);
         let e = self.ex.get(item).ok_or_else(|| format!("missing entity #{item}"))?;
         if matches!(e.name(), "CARTESIAN_TRANSFORMATION_OPERATOR_3D" | "CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM") {
             let p = solidcore_record::step::product::operator_attributes(e);
             let o = reader.point(p.get(2).and_then(Param::as_ref_id).ok_or("transformation without origin")?)?;
-            let direction = |i: usize, global: [f64; 3]| -> R<[f64; 3]> {
+            let direction = |i: usize| -> R<Option<[f64; 3]>> {
                 match p.get(i) {
-                    None | Some(Param::Null) => Ok(global),
-                    Some(Param::Ref(id)) => reader.direction(*id),
+                    None | Some(Param::Null) => Ok(None),
+                    Some(Param::Ref(id)) => reader.direction(*id).map(Some),
                     _ => Err("invalid transformation direction".into()),
                 }
             };
@@ -889,7 +889,7 @@ impl Reader {
             };
             let sx = scale(3, 1.0)?;
             let (sy, sz) = (scale(5, sx)?, scale(6, sx)?);
-            let (x, y, z) = (direction(0, [1.0, 0.0, 0.0])?, direction(1, [0.0, 1.0, 0.0])?, direction(4, [0.0, 0.0, 1.0])?);
+            let [x, y, z] = solidcore_step::read::operator_axes(direction(0)?, direction(1)?, direction(4)?, "transformation axes")?;
             let col = |d: [f64; 3], s: f64| [d[0] * s, d[1] * s, d[2] * s, 0.0];
             let m = [col(x, sx), col(y, sy), col(z, sz), [o[0], o[1], o[2], 1.0]];
             if !m.iter().flatten().all(|x| x.is_finite()) {

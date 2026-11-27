@@ -1,0 +1,30 @@
+{
+  "en": {
+    "sketch.rectangle.can_turn": "Can turn",
+    "sketch.rectangle.fixed": "Fixed"
+  },
+  "ar": {
+    "sketch.rectangle.can_turn": "قابل للتدوير",
+    "sketch.rectangle.fixed": "ثابت"
+  },
+  "de": {
+    "sketch.rectangle.can_turn": "Drehbar",
+    "sketch.rectangle.fixed": "Fest"
+  },
+  "he": {
+    "sketch.rectangle.can_turn": "ניתן לסיבוב",
+    "sketch.rectangle.fixed": "קבוע"
+  },
+  "ja": {
+    "sketch.rectangle.can_turn": "回転可能",
+    "sketch.rectangle.fixed": "固定"
+  },
+  "vi": {
+    "sketch.rectangle.can_turn": "Xoay được",
+    "sketch.rectangle.fixed": "Cố định"
+  },
+  "zh": {
+    "sketch.rectangle.can_turn": "可旋转",
+    "sketch.rectangle.fixed": "固定"
+  }
+}

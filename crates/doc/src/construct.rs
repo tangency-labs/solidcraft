@@ -988,6 +988,48 @@ pub(crate) fn plane(ctx: &Ctx, g: &GeoRef) -> Result<Plane> {
     }
 }
 
+/// Where an extrude's To / From Object reference ([`crate::ObjectRef`]) is now.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ObjectAt {
+    /// A construction point or the origin.
+    Point(Vec3),
+    /// An origin or construction plane.
+    Plane(Plane),
+}
+
+/// [`ObjectAt`] of `r` in the model `ctx.st`. A construction plane later in the timeline is
+/// refused: it would be read as it is defined, and moving it would not rebuild the extrude.
+pub(crate) fn object_at(ctx: &Ctx, r: &crate::ObjectRef) -> Result<ObjectAt> {
+    use crate::walk::Walk;
+    let mut later = None;
+    r.walk_refs(&mut |item| {
+        if let crate::feature_refs::Ref::Feature(id) = item
+            && later.is_none()
+            && !ctx.st.construct.iter().any(|c| c.feature == id.0)
+        {
+            later = Some(id.0);
+        }
+    });
+    if let Some(id) = later {
+        let name = ctx.doc.feature(id).map_or_else(|| id.to_string(), |f| f.name.clone());
+        return Err(bad(format!("the plane `{name}` must come before the extrude in the timeline")));
+    }
+    match &r.0 {
+        // A construction plane of another component, where that component puts it (#11734).
+        GeoRef::Plane { plane } => {
+            let plane = crate::eval::construction_planes_in_frame(ctx.doc, ctx.st, ctx.component, plane)?;
+            Ok(ObjectAt::Plane(ctx.doc.resolve_plane_in(ctx.vals, &plane, ctx.depth + 1, ctx.component, Some(ctx.st))?))
+        }
+        g @ (GeoRef::ConstructPoint { .. } | GeoRef::Origin) => Ok(ObjectAt::Point(point(ctx, g)?)),
+        _ => Err(bad("not supported yet: To / From Object on this reference; give a plane or a construction point")),
+    }
+}
+
+/// [`object_at`] of `r` in the model `st`, for a feature in `component`.
+pub fn object_at_in(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, component: u64, r: &crate::ObjectRef) -> Result<ObjectAt> {
+    object_at(&Ctx { doc, vals, st, depth: 0, component }, r)
+}
+
 /// The centre of a round edge, sketch circle, sphere or torus.
 fn centre(ctx: &Ctx, g: &GeoRef) -> Result<Vec3> {
     match g {
@@ -1164,7 +1206,8 @@ fn touched<'a>(ctx: &Ctx<'a>, g: &GeoRef) -> Result<Touched<'a>> {
             let (b, fi, _) = face_of(ctx.st, *at, name)?;
             Ok(kernel::face_surface(&b.body, fi).map_or(Touched::Face(b, fi), Touched::Surface))
         }
-        GeoRef::Plane { .. } => {
+        // A construction or origin plane, or a component's origin plane (#23006).
+        GeoRef::Plane { .. } | GeoRef::Datum { .. } => {
             let pl = plane(ctx, g)?;
             Ok(Touched::Surface(FaceSurface::Plane { normal: pl.normal().unit().ok_or_else(|| bad("degenerate plane"))?, point: pl.origin }))
         }
@@ -1324,6 +1367,18 @@ fn line_plane(o: Vec3, d: Vec3, p: &Plane) -> Option<Vec3> {
     Some(o + d * ((p.origin - o).dot(n) / den))
 }
 
+/// Drop `at` onto the plane midway between two parallel planes. `None` when they are not
+/// parallel; the bisector of planes that meet is the midplane constructor's, below.
+pub(crate) fn midway(a: (Vec3, Vec3), b: (Vec3, Vec3), at: Vec3) -> Option<Vec3> {
+    let (pa, na) = a;
+    let (pb, nb) = b;
+    // Measure both levels from `at`. `square_plane_offset` also checks that the normals are
+    // parallel.
+    let a = kernel::affine::square_plane_offset(&crate::IDENTITY, (pa - at).into(), na.into(), nb.into()).ok()??;
+    let b = kernel::affine::distance_along(at.into(), nb.into(), pb.into());
+    Some(at + nb * a.midpoint(b))
+}
+
 /// Planes built from model geometry (the `PlaneRef` kinds that need the model).
 pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
     let degenerate = || bad("degenerate plane");
@@ -1331,10 +1386,7 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
         PlaneRef::Midplane { a, b, old_frame } => {
             let (pa, pb) = (plane(ctx, a)?, plane(ctx, b)?);
             let (na, nb) = (pa.normal(), pb.normal());
-            if na.cross(nb).len() < 1e-9 {
-                // Parallel: half way between them.
-                let half = nb * ((pb.origin - pa.origin).dot(nb) * 0.5);
-                let center = pa.origin + half;
+            if let Some(center) = midway((pa.origin, na), (pb.origin, nb), pa.origin) {
                 // A design saved before the midplane took a world plane's frame keeps the
                 // frame it was saved with: the first plane's own origin and axes (#18260).
                 if *old_frame {

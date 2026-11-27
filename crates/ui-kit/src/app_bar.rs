@@ -773,24 +773,45 @@ pub fn preview_control(ui: &mut egui::Ui, cell: Rect, control: Control<'_>, opac
     }
 }
 
+/// The font of a chip's label (Donate, Discord, Update).
+pub fn chip_font() -> FontId {
+    crate::type_face::semibold(Tokens::get().font_label)
+}
+
+/// Width of a chip with `label` and no ×: padding, icon, gap, label, padding. With no label it is
+/// a round chip `PILL_HEIGHT` wide.
+pub fn chip_width(ctx: &egui::Context, label: Option<&str>) -> f32 {
+    use crate::app_bar_layout::application::{CONTENT_PADDING, GAP};
+    label.map_or(PILL_HEIGHT, |label| {
+        let text = ctx.fonts_mut(|f| f.layout_no_wrap(label.to_owned(), chip_font(), Tokens::get().app_bar_text)).size().x;
+        CONTENT_PADDING * 2.0 + PILL_ICON_SIZE + GAP + text
+    })
+}
+
+/// One application-bar chip (the link pills and Update draw through this one painter): a flat
+/// capsule `PILL_HEIGHT` tall in `fill`, lightened by `lift` (0 to 1, its hover), with `icon` in
+/// the bar's ink at the left and `label` in the semibold label font beside it, ending `trailing`
+/// points before the right edge (room for a pill's ×). With no label the icon is centred.
+pub fn paint_chip(ui: &egui::Ui, rect: Rect, fill: egui::Color32, icon: &str, label: Option<&str>, lift: f32, trailing: f32) {
+    use crate::app_bar_layout::application::{CONTENT_PADDING, GAP};
+    let t = Tokens::get();
+    let ink = t.app_bar_text;
+    ui.painter().rect_filled(rect, ITEM_PILL_RADIUS, fill.lerp_to_gamma(ink, 0.08 * lift));
+    let icon_x = if label.is_some() || trailing > 0.0 { rect.left() + CONTENT_PADDING + PILL_ICON_SIZE / 2.0 } else { rect.center().x };
+    let glyph = Rect::from_center_size(pos2(icon_x, rect.center().y), vec2(PILL_ICON_SIZE, PILL_ICON_SIZE));
+    crate::icons::paint_ink(ui.painter(), glyph, icon, ink);
+    if let Some(label) = label {
+        let text = Rect::from_min_max(pos2(glyph.right() + GAP, rect.top()), pos2(rect.right() - trailing.max(CONTENT_PADDING), rect.bottom()));
+        crate::paint_text(ui, text, label, chip_font(), ink, false);
+    }
+}
+
 fn paint_link_pill(ui: &egui::Ui, rect: Rect, p: &Pill<'_>, lift: f32, veil: f32) {
     let t = Tokens::get();
     let ink = t.app_bar_text;
     let x_rect = pill_close(rect);
-    let fill = p.fill.lerp_to_gamma(ink, 0.08 * lift);
-    ui.painter().rect_filled(rect, ITEM_PILL_RADIUS, fill);
-    let icon = Rect::from_center_size(
-        pos2(rect.left() + crate::app_bar_layout::application::CONTENT_PADDING + PILL_ICON_SIZE / 2.0, rect.center().y),
-        vec2(PILL_ICON_SIZE, PILL_ICON_SIZE),
-    );
-    crate::icons::paint_ink(ui.painter(), icon, p.icon, ink);
-    if p.labelled && !p.label.is_empty() {
-        let label = Rect::from_min_max(
-            pos2(icon.right() + crate::app_bar_layout::application::GAP, rect.top()),
-            pos2(x_rect.left() - crate::app_bar_layout::application::GAP, rect.bottom()),
-        );
-        crate::paint_text(ui, label, p.label, crate::type_face::semibold(t.font_label), ink, false);
-    }
+    let label = (p.labelled && !p.label.is_empty()).then_some(p.label);
+    paint_chip(ui, rect, p.fill, p.icon, label, lift, rect.right() - x_rect.left() + crate::app_bar_layout::application::GAP);
     if veil > 0.0 {
         ui.painter().circle_filled(x_rect.center(), PILL_X / 2.0, t.figure_shadow.to_opaque().gamma_multiply(0.38 * veil));
     }
@@ -918,10 +939,7 @@ fn handle(prefix: &str, key: &str) -> String {
 fn pill_width(ctx: &egui::Context, p: &Pill) -> f32 {
     let label = if p.labelled && !p.label.is_empty() {
         crate::app_bar_layout::application::GAP
-            + ctx
-                .fonts_mut(|f| f.layout_no_wrap(p.label.to_owned(), crate::type_face::semibold(Tokens::get().font_label), Tokens::get().app_bar_text))
-                .size()
-                .x
+            + ctx.fonts_mut(|f| f.layout_no_wrap(p.label.to_owned(), chip_font(), Tokens::get().app_bar_text)).size().x
     } else {
         0.0
     };

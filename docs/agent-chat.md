@@ -77,6 +77,13 @@ every prompt and answer, including those scrolled out of view, but not thoughts,
 notices. Ctrl+C then copies them in order as plain text, each under who wrote it. Esc or a
 click ends the selection; in the message box Ctrl+A selects only the draft.
 
+From the Assistant header, choose **Export conversation as Markdown…** to save the current
+chat as a `.md` file. The file preserves the original formatting of the prompts and replies
+still in the chat. If a reply is arriving, the export captures the text received when you
+open the save dialog. Select **Include tool details** to add the retained tool calls and results.
+With this option selected, the dialog reminds you to review the file before sharing it. The file
+lists attachments by name and skips the draft, thoughts, plans and approval cards.
+
 - **Docking:** on the left, Assistant is the first panel, before vertical history and the browser.
   The drag highlight shows the actual destination bounds. Drag the panel's header (the dotted grip and the title) to the other half of the
   window and let go. The side it would land on lights up while you drag. You can also pick
@@ -99,6 +106,12 @@ click ends the selection; in the message box Ctrl+A selects only the draft.
   reasoning effort. Changing the model can change or remove the effort choices. A selection is
   shown as applied only after the agent reports it; a rejected change leaves the confirmed
   selection in place and shows an error.
+- **Service tier** shows the speed choices reported by the ACP agent. For endpoints configured
+  with **Use OpenAI Responses API**, choose **Fast** or **Ultrafast**. OpenAI's hosted Chat
+  Completions endpoint also offers **Fast**. The endpoint choice applies from the next turn.
+  Choose **Provider default** to use the endpoint's configured tier. A new chat starts with that
+  default. Availability depends on the model and account, and faster tiers can cost more.
+  [OpenAI Fast mode](https://developers.openai.com/api/docs/guides/fast-mode) · [OpenAI Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode)
 - **Older agents and API endpoints** keep their model and mode drop-downs when they report those
   choices (an ACP agent's legacy model/mode lists, or an endpoint's `/models`). SolidCraft remembers
   the last model choice for each agent and puts it back on the next session when still available.
@@ -254,6 +267,8 @@ doesn't change the last known login state.
 | GitHub Copilot CLI, Qwen Code, goose | listed with their install command when missing |
 
 The panel lists agents that aren't installed with their install command and a **Copy** button.
+To copy an installation command during an active chat, open **Add agent…**, choose
+**Installed agent**, and expand **Not installed**.
 
 For Mistral Vibe, put `vibe-acp` on your PATH and refresh the agent list. Follow Vibe's sign-in
 prompt, run `vibe --setup` in a terminal, or set `MISTRAL_API_KEY` before launching SolidCraft.
@@ -472,6 +487,10 @@ load servers you configured for them:
 - **One undo per message:** everything the agent changes while answering one message becomes
   a single undo step, named after your message. The conversation shows *N changes, one undo
   step* with **Undo these changes** while nothing else has happened since.
+- **Show in model:** when a message adds or edits features, its changes card counts them.
+  In a Model view, choose **Show in model** to highlight the features whose edits still match
+  the Assistant's changes. **Hide highlight** clears the highlight. Closing Assistant,
+  changing the design, switching tabs or undoing also clears it.
 - **Tool cards:** each tool call shows as a card with its state; click it to see what it returned.
 - **Formatted text:** the agent's answers show as Markdown: headings, lists, quotes, tables, code
   blocks (with **Copy**), bold, italic, `code` and links (web links only; each link is a button

@@ -2228,6 +2228,23 @@ fn a_fillet_of_a_tangent_chain_ends_at_a_slight_bend() {
     assert!((removed - want).abs() < 1e-4, "removed {removed}, expected {want}");
 }
 
+/// #17356: the 2 mm fillet of the outer top edges, after the inner top edges were rounded, was
+/// refused as cutting the part in pieces. The ray classifying a point beside the new round crosses
+/// the inner round's face twice within one leaf of its search tree, and only the far crossing was found.
+#[test]
+fn outer_top_fillet_after_the_inner_round_builds_one_closed_body() {
+    let s = replay(include_str!("../../../examples/regressions/fillet_outer_top_after_inner_round.json"));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    let state = s.model.state();
+    assert_eq!(state.bodies.len(), 1);
+    let body = &state.body("Body1").unwrap().body;
+    assert_eq!(body.shell_count(), 1);
+    assert!(body.validity().is_empty(), "{:?}", body.validity());
+    // a recorded volume: the rim is seven tapered lobes, and its round has no closed form
+    let (got, want) = (volume(&s, "Body1"), 323_074.223_6);
+    assert!((got - want).abs() < 1e-6 * want, "volume {got}, want {want}");
+}
+
 /// A section of #15701: an arch (a seven-point fit spline) on the plane x = `x`, offset 1 mm to
 /// the side of `inside` with `chain: false`, which gives a fit spline of 97 points (the small arch)
 /// or 193 (the large ones), and closed with two short lines between the ends. `last` is the

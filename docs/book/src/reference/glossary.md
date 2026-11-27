@@ -38,7 +38,7 @@ later pull requests, one topic at a time, each pointing at its entry here.
 A view of the timeline that draws each feature in the row of the component it changes, with one
 column for each step.
 
-- **In SolidCraft:** the 2D Timeline button in the History's header (`timeline_2d`) and the options
+- **In SolidCraft:** the chevron in the bottom History's header (`timeline_2d`) and the options
   behind its settings button (`timeline_2d_*`); its two parts are the *modeling track* and the *assembly track*.
 - **Don't use:** 2D history, matrix timeline.
 - **Elsewhere:** multi-track timeline.
@@ -477,6 +477,14 @@ a new row takes the next number at its level. A row listed under another reads a
 - **Don't use:** position, balloon number, find number; index.
 - **Elsewhere:** item number, item, find number, balloon number.
 - **For translators:** a label, not a quantity or a count; not a part number.
+
+### key parameter
+
+A named value marked with a star for frequent changes.
+
+- **In SolidCraft:** `parameters.favorite`; the Key parameters band and its compact fields and sliders.
+- **Don't use:** favourites as the name of a separate, duplicated list.
+- **For translators:** a frequently changed input, not a keyboard key or a database key.
 
 ### keyboard profile
 
@@ -1043,6 +1051,7 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | a named set of preferences | *settings profile* | `settings.profile.*`, Preferences › General |
 | | another CAD tool's keys on SolidCraft's commands | *keyboard profile* | `keyboard_profile`, Preferences › Shortcuts |
 | Gap | the space a hem leaves | hem gap | the Hem dialog's Gap row |
+| | the clearance between two flanges at a sheet corner | *corner gap* | the Gap row in a Flange corner card or the Corner Join dialog |
 | | an open end in the sketch continuity legend | open end | the sketch continuity legend |
 | | the space left between welded frame members | *weld gap* | the Frame Member dialog's Gap rows, `gap` |
 | Clearance | the Clearance command | clearance check | `inspect.clearance` |
@@ -1070,6 +1079,12 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the
 Normal line type as "normal vector".
+
+## Weld graphic
+
+A saved record of a weld's manufacturing settings and optional manual symbol.
+It is separate from timeline features and bodies; creating it does not add a
+solid bead or change mass properties.
 
 ## Mounting plate
 

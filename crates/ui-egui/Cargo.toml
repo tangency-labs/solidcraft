@@ -102,6 +102,7 @@ lopdf = { version = "0.45", default-features = false }
 pollster = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "wayland", "x11"] }
 wat = "1"
 
 [build-dependencies]
