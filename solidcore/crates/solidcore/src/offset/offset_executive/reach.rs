@@ -5300,6 +5300,7 @@ mod tests {
     /// radius) or inward builds a 2-face manifold solid at the exact Pappus volume.
     #[test]
     fn a_half_toruss_flat_face_moves_outward_and_inward_to_the_cut_volume() {
+        use crate::mass::integrator::properties::brep_volume_default;
         let (major, minor) = (30.0_f64, 8.0_f64);
         let pi = core::f64::consts::PI;
         for d in [0.2, 3.2, 7.5, -2.0] {
