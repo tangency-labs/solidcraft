@@ -1172,6 +1172,7 @@ impl JsonSchema for ProfilesParam {
                     "description": "Internal selections written by the app.",
                     "anyOf": [
                         {"type": "object", "properties": {"type": {"enum": ["whole_boundaries"]}}, "required": ["type"]},
+                        {"type": "object", "properties": {"type": {"enum": ["text_regions"]}, "links": associations}, "required": ["type", "links"]},
                         {
                             "type": "object",
                             "properties": {
