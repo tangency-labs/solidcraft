@@ -545,9 +545,7 @@ mod tests {
         run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [10, 5]}));
         run(&mut s, "sketch.finish", json!({}));
         run(&mut s, "solid.extrude", json!({"sketch": "S2", "distance": 1, "direction": "negative", "operation": "join"}));
-        let st = s.model.state();
-        assert!(st.body("Body1").is_some_and(|b| b.body.validity().is_empty()));
-        drop(st);
+        assert!(s.model.state().body("Body1").is_some_and(|b| b.body.validity().is_empty()));
         let after = volume(&mut s);
         assert!(rel(after, before + 200.0) < 1e-6, "{after} vs {}", before + 200.0);
     }
