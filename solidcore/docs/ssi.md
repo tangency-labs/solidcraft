@@ -379,9 +379,23 @@ Port (`intersect/surface_intersector/p3.rs`, `compute_next_point`; `p4.rs`, `tra
   well inside both limits (an eighth of the tolerance, a quarter of the angle) grows it by 1.5.
 - **End.** The trace stops at a domain boundary, at a through, start or end point it snaps to
   (`test_point`), on reaching a curve already found, or after 5000 points (an error).
+- **Knot lines** (not upstream). Across a `C0` knot line of a surface where a first derivative
+  jumps (a degree-1 profile of an extrusion, a crease of a B-spline surface), n1 × n2 turns, so
+  every step across the line fails the span test and the trace would stop just short of it,
+  leaving one component as several curves. Such a line bounds the step as the domain does: the
+  step is clipped to it and its point solved on it by the boundary solve of `refine_point`, with
+  the surface evaluated from the side the trace comes from. The trace then goes on from the same
+  point evaluated from the other side, at the same curve parameter; `flush_curve` starts the next
+  span there, so the curve keeps its corner (`compute_next_point`, `corner_point`,
+  `intersect/surface_drop_lib/knot_lines.rs` for the lines).
 - **Output.** `flush_curve` (`p2.rs`) writes the points as a piecewise cubic C0 B-spline in 3D and
   in each UV domain, one knot vector for all three, with the curve type and the largest deviation
   seen.
+
+![Left: an intersection curve with a corner on a surface's C0 knot line, traced from both ends with steps that shrink toward the line, ending in two curves. Right: the last step clipped to the line at K, the trace going on from K with the tangent of the other side, one curve.](ssi/knot-corner.svg)
+
+*Figure 2. Look at K: the step ends on the knot line, and the curve leaves K with the tangent of
+the line's other side, so one component stays one curve.*
 
 `ssi` marches each arc of a loop-free pair from its seed to its exit with a predictor along
 nA × nB and a Newton corrector held to a plane across the curve; Newton stops at a residual of
@@ -406,7 +420,7 @@ identically, the contact is of higher order or the surfaces **coincide** there.
 
 ![Left: two surfaces touching along a tangent curve, normals equal along it. Right: a branch point where two intersection branches cross, with the four directions leaving it.](ssi/branch-point.svg)
 
-*Figure 2. Look at where the normals are parallel: along the whole tangent curve (left) there is no
+*Figure 3. Look at where the normals are parallel: along the whole tangent curve (left) there is no
 marching direction; at the branch point B (right) there are four, and both branches end there.*
 
 **Port.** `AdvSurfaceIntersector::compute_singularity_point` (`adv_surface_intersector.rs`) classifies
@@ -523,7 +537,7 @@ are computed from the two surfaces' frames, and the curve is stored as its ratio
 
 ![A plane cutting a cylinder obliquely in an ellipse; the plane's normal, the cylinder's axis and the angle between them; the ellipse's centre and semi-axes.](ssi/plane-cylinder.svg)
 
-*Figure 3. Look at the angle θ between the axis and the plane's normal: it alone decides whether the
+*Figure 4. Look at the angle θ between the axis and the plane's normal: it alone decides whether the
 exact section is a circle, an ellipse with semi-axes R and R / cos θ, or lines along the axis.*
 
 **Plane/cylinder in detail** (`Cone::intersect_with_plane`). With a the axis, n the plane's normal and

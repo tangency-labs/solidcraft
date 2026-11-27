@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1000" height="470" viewBox="0 0 1000 470">
+  <title>knot-corner</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect x="0" y="0" width="1000" height="470" fill="#ffffff"/>
+    <rect x="40" y="70" width="420" height="330" fill="#f0f0f0"/>
+    <rect x="520" y="70" width="420" height="330" fill="#f0f0f0"/>
+    <line x1="250" y1="70" x2="250" y2="400" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <line x1="730" y1="70" x2="730" y2="400" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="6 4"/>
+    <polyline points="60,380 250,150 440,370" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <polyline points="540,380 730,150 920,370" fill="none" stroke="#1f6fb2" stroke-width="3" stroke-miterlimit="10"/>
+    <circle cx="60" cy="380" r="3" fill="#000000"/>
+    <circle cx="145.5" cy="276.5" r="3" fill="#000000"/>
+    <circle cx="202.5" cy="207.5" r="3" fill="#000000"/>
+    <circle cx="231" cy="173" r="3" fill="#000000"/>
+    <circle cx="242.4" cy="159.2" r="3" fill="#000000"/>
+    <circle cx="440" cy="370" r="3" fill="#000000"/>
+    <circle cx="354.5" cy="271" r="3" fill="#000000"/>
+    <circle cx="297.5" cy="205" r="3" fill="#000000"/>
+    <circle cx="269" cy="172" r="3" fill="#000000"/>
+    <circle cx="257.6" cy="158.8" r="3" fill="#000000"/>
+    <circle cx="540" cy="380" r="3" fill="#000000"/>
+    <circle cx="616" cy="288" r="3" fill="#000000"/>
+    <circle cx="692" cy="196" r="3" fill="#000000"/>
+    <circle cx="787" cy="216" r="3" fill="#000000"/>
+    <circle cx="853.5" cy="293" r="3" fill="#000000"/>
+    <circle cx="920" cy="370" r="3" fill="#000000"/>
+    <line x1="730" y1="150" x2="762" y2="111" fill="none" stroke="#999999" stroke-width="1.5" stroke-miterlimit="10" stroke-dasharray="4 3"/>
+    <circle cx="730" cy="150" r="6" fill="#555555"/>
+    <text transform="matrix(1 0 0 1 40 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">main: two traces stop at the knot line</tspan></text>
+    <text transform="matrix(1 0 0 1 520 40)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="20" font-weight="bold" fill="#000000"><tspan x="0" y="0">this change: one curve turns the corner</tspan></text>
+    <text transform="matrix(1 0 0 1 258 92)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">C0 knot line</tspan></text>
+    <text transform="matrix(1 0 0 1 652 92)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">C0 knot line</tspan></text>
+    <text transform="matrix(1 0 0 1 118 352)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">trace 1</tspan></text>
+    <text transform="matrix(1 0 0 1 338 352)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">trace 2</tspan></text>
+    <text transform="matrix(1 0 0 1 702 152)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="14" fill="#000000"><tspan x="0" y="0">K</tspan></text>
+    <text transform="matrix(1 0 0 1 768 114)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">tangent before K</tspan></text>
+    <text transform="matrix(1 0 0 1 802 198)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#555555"><tspan x="0" y="0">tangent after K</tspan></text>
+    <text transform="matrix(1 0 0 1 40 428)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">Past the line the marching direction turns: each step across it fails the span test,</tspan></text>
+    <text transform="matrix(1 0 0 1 40 446)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">the step shrinks to about 1e-10 and the trace ends. Two curves.</tspan></text>
+    <text transform="matrix(1 0 0 1 520 428)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">The step is clipped to the line and solved on it (K); the trace goes on</tspan></text>
+    <text transform="matrix(1 0 0 1 520 446)" x="0" y="0" xml:space="preserve" font-family="Helvetica, sans-serif" font-size="12" fill="#000000"><tspan x="0" y="0">from K evaluated on the line&apos;s other side. One curve with a corner.</tspan></text>
+  </g>
+</svg>
