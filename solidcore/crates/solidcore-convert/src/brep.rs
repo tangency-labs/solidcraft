@@ -502,20 +502,34 @@ fn data(k: &Kernel, rec: &r::Brep, bare: &[(u32, u32, u32)]) -> R<BrepData> {
         if matches!(e.curve, r::Curve::SurfaceIntersection { .. }) && e.nurbs.is_none() {
             return Err(Unsupported::NotYet("traced intersection curves"));
         }
-        let (curve, interval): (KernelCurve, Extent1d) = match (&e.curve, &e.nurbs) {
+        // A circle or ellipse with its NURBS form is its label where the form proves it. A label
+        // its form does not prove (the circle's numbers off the form by more than the rounding
+        // of checking it) is dropped, and the edge is its exact NURBS, as a face's is (owner
+        // 22254: a valid body is never refused, and the form's numbers are never put under the
+        // label). A form that is no curve of its own keeps the label's refusal.
+        let labelled = match (&e.curve, &e.nurbs) {
             (r::Curve::Circle { .. } | r::Curve::Ellipse { .. }, Some(n)) => {
-                let [lo, hi] = e.interval;
-                (
-                    curves::conic_on_form(k, &crate::curve(&e.curve)?, &crate::curve(n)?)?,
-                    Extent1d::from_raw(lo, hi),
-                )
+                match curves::conic_on_form(k, &crate::curve(&e.curve)?, &crate::curve(n)?) {
+                    Ok(conic) => Ok(conic),
+                    Err(refusal)
+                        if refusal.is_cancelled()
+                            || refusal.is_unported()
+                            || refusal.is_not_certified() =>
+                    {
+                        return Err(refusal.into());
+                    }
+                    Err(refusal) => Err(Some(refusal)),
+                }
             }
-            (_, Some(n)) => {
-                let c = curves::from_parameters(k, &crate::curve(n)?, e.interval)?;
-                (c.curve, c.interval)
-            }
-            (c, None) => {
-                let c = curves::from_parameters(k, &crate::curve(c)?, e.interval)?;
+            _ => Err(None),
+        };
+        // Else the curve is its NURBS form where the record gives one, its label where not.
+        let (curve, interval): (KernelCurve, Extent1d) = match labelled {
+            Ok(conic) => (conic, Extent1d::from_raw(e.interval[0], e.interval[1])),
+            Err(refused) => {
+                let source = crate::curve(e.nurbs.as_ref().unwrap_or(&e.curve))?;
+                let c = curves::from_parameters(k, &source, e.interval)
+                    .map_err(|error| refused.unwrap_or(error))?;
                 (c.curve, c.interval)
             }
         };

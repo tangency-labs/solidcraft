@@ -951,6 +951,60 @@ fn analytic_records_carry_labels_on_their_forms() {
     }
 }
 
+/// A circle edge whose label is off its form reads as its exact NURBS, and the body is still
+/// read: the two rims of a cylinder labelled 1.75e-13 of their radius larger than their forms
+/// (what a revolved wall of large arcs left in a SolidCraft body: rims of radius 49 that lie
+/// 8.6e-12 off their forms, the rounding of the torus nets they were cut from). The solid is the
+/// same, 20 pi. On their forms the rims read as circles.
+#[test]
+fn a_circle_edge_off_its_form_reads_as_its_nurbs() {
+    let mut k = kernel();
+    let mut b = primitives::create_cylinder(&mut k, Vec3::new(0.0, 0.0, 0.0), 2.0, 5.0).unwrap();
+    let (r, _) = to_record(&mut k, &mut b).unwrap();
+    let rims: Vec<usize> = (0..r.edges.len())
+        .filter(|i| matches!(r.edges[*i].curve, Curve::Circle { .. }))
+        .collect();
+    assert_eq!(rims.len(), 2);
+    let read = |k: &mut Kernel, record: &Record| -> (Record, f64) {
+        let (mut back, order) = to_kernel(k, record, true).unwrap();
+        order_is_total(&order, record, &back);
+        valid(k, &mut back);
+        let v = volume(k, &mut back);
+        (to_record(k, &mut back).unwrap().0, v)
+    };
+    let solid = 20.0 * std::f64::consts::PI;
+
+    let (again, v) = read(&mut k, &r);
+    assert!((v - solid).abs() <= 1e-9 * solid, "{v}");
+    assert_eq!(again, r);
+
+    let mut off = r.clone();
+    for &i in &rims {
+        if let Curve::Circle { radius, .. } = &mut off.edges[i].curve {
+            *radius *= 1.0 + 1.75e-13;
+            assert_ne!(*radius, 2.0);
+        }
+    }
+    let (again, v) = read(&mut k, &off);
+    assert!((v - solid).abs() <= 1e-9 * solid, "{v}");
+    assert_eq!(again.edges.len(), r.edges.len());
+    for (i, e) in again.edges.iter().enumerate() {
+        if rims.contains(&i) {
+            // the form the record gave, under no label
+            assert!(
+                matches!(e.curve, Curve::RationalSpline { .. }),
+                "edge {i}: {:?}",
+                e.curve
+            );
+            assert!(e.nurbs.is_none(), "edge {i}");
+            assert_eq!(Some(&e.curve), r.edges[i].nurbs.as_ref(), "edge {i}");
+            assert_eq!(e.interval, r.edges[i].interval, "edge {i}");
+        } else {
+            assert_eq!(*e, r.edges[i], "edge {i}");
+        }
+    }
+}
+
 /// Uses that go to the kernel bare (without their record pcurves) come back with the kernel's
 /// own trims: on the square sheet, the very lines its record had.
 #[test]
