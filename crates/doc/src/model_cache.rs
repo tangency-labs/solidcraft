@@ -1552,6 +1552,8 @@ impl Model {
         // Populate the evaluation cache in pass 1 while every state is kept and unposed, avoiding
         // a second full timeline/capture-step walk when `unkept == 0 && !posed`.
         let mut pass1_cache = Some(EvalCache::default());
+        let component_digests = super::ComponentDigests::of(doc);
+        let mut pass1_component_keys = HashMap::new();
         for (i, (f, r)) in doc.features.iter().zip(features).enumerate() {
             if let Some(s) = stepper.as_mut() {
                 s.flush_for_feature(f, &before);
@@ -1630,7 +1632,8 @@ impl Model {
                 if !pose_only(f)
                     && let Some(cache) = pass1_cache.as_mut()
                 {
-                    cache_adopted_result(cache, eval_doc, &vals, f, &result, ctx, shared, &before, &import_digests);
+                    let reached = cache_adopted_result(cache, eval_doc, &vals, f, &result, ctx, shared, &before, &import_digests, &component_digests);
+                    pass1_component_keys.insert(f.id, reached);
                 }
                 exact = !result.unkept;
                 let prev_state = before;
@@ -1695,7 +1698,9 @@ impl Model {
                     // A pose-only feature's fingerprint leaves its pose out, so its saved result may be
                     // from another pose than `doc`'s: it is no result for `doc`'s key (#12139).
                     if !pose_only(f) {
-                        cache_adopted_result(&mut cache, eval_doc, &vals, f, r, ctx, shared, &before, &model.import_digests);
+                        let reached =
+                            cache_adopted_result(&mut cache, eval_doc, &vals, f, r, ctx, shared, &before, &model.import_digests, &component_digests);
+                        model.component_keys.insert(f.id, reached);
                     }
                     let prev_state = before;
                     before = r.state.clone();
@@ -1709,11 +1714,13 @@ impl Model {
             }
         } else if let Some(cache) = pass1_cache {
             model.cache = Arc::new(std::sync::Mutex::new(cache));
+            model.component_keys = pass1_component_keys;
         }
         Ok(model)
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
 fn cache_adopted_result(
     cache: &mut EvalCache,
@@ -1725,8 +1732,9 @@ fn cache_adopted_result(
     shared: u64,
     before: &ModelState,
     import_digests: &ImportDigests,
-) {
-    let key = EvalKey::new(eval_doc, vals, f, r.fingerprint, ctx, shared, before, import_digests);
+    component_digests: &super::ComponentDigests,
+) -> u64 {
+    let key = EvalKey::new(eval_doc, vals, f, r.fingerprint, ctx, shared, before, import_digests, component_digests);
     let whole = CachedEval {
         error: None,
         error_code: None,
@@ -1757,6 +1765,7 @@ fn cache_adopted_result(
         }
     }
     cache.states.put(key.whole, whole, r.state.retained_bytes(), r.ms);
+    key.reached
 }
 
 #[cfg(test)]

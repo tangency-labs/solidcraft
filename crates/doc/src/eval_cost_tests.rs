@@ -765,7 +765,8 @@ fn a_frame_without_turns_keeps_its_fingerprint() {
         let steps = super::ImportDigests::default();
         let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None);
         // And the key its result is cached under, which leaves the chain out.
-        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, 0, &ModelState::default(), &steps).whole)
+        let comps = super::ComponentDigests::of(doc);
+        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, 0, &ModelState::default(), &steps, &comps).whole)
     };
     let before = key(&doc);
     let turn = doc
@@ -2533,6 +2534,7 @@ fn marking(p: Vec3) -> FeatureKind {
         hand: crate::thread_forms::ThreadHand::Right,
         starts: 1,
         ease_out: None,
+        to_bottom: false,
         tip: Default::default(),
         chamfer_angle: None,
         chamfer_depth: None,
@@ -2619,6 +2621,8 @@ fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -2676,6 +2680,8 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -4363,6 +4369,78 @@ fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 20.0).abs() < 1e-9);
 }
 
+/// Multi-target joins and `Touching::Separate` keep exact results when AABB prefiltering and mesh
+/// caching skip meshing disjoint pairs.
+#[test]
+fn multi_target_join_and_separate_touching_preserve_exact_results() {
+    let mut doc = Document::new("multi-target join");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(50.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "C", Vec3::new(100.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    // Boss on B joins B only; A and C stay untouched.
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::new(52.0, 2.0, 10.0)),
+            length: "4".into(),
+            width: "4".into(),
+            height: "5".into(),
+            operation: Operation::Join,
+            centred: false,
+        },
+        None,
+    )
+    .unwrap();
+    // Boss bridging B and C merges B and C into one body while A stays separate.
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::new(58.0, 2.0, 2.0)),
+            length: "44".into(),
+            width: "4".into(),
+            height: "4".into(),
+            operation: Operation::Join,
+            centred: false,
+        },
+        None,
+    )
+    .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().bodies.len(), 2);
+    assert!((volume(&model, "A") - 1000.0).abs() < 1e-6);
+    // B (1000) + boss (80) + C (1000) + bridge (44*4*4 = 704) - 2 overlaps (2*4*4 = 32 each)
+    let expected_bc = 1000.0 + 80.0 + 1000.0 + 704.0 - 64.0;
+    assert!((volume(&model, "B") - expected_bc).abs() < 1e-6, "{} vs {expected_bc}", volume(&model, "B"));
+}
+
+/// A single multi-tool join that warms a target's contact-mesh cache, bridges two targets while a
+/// third stays live, and then joins a later tool touching only the new bridge geometry must
+/// invalidate the remade target's cache so the later tool joins the remade target rather than
+/// missing it and falling back to the first live target.
+#[test]
+fn multi_target_join_invalidates_target_mesh_cache_after_bridge() {
+    let mut doc = Document::new("multi-tool bridge cache invalidation");
+    // Put C first in `live` so a stale cache on A would cause tool 3 to miss A and fall back to C.
+    block(&mut doc, "C", Vec3::new(100.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(20.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    // One multi-tool extrude (3 profiles in order):
+    // 1. (1..5, 1..5): touches A only -> warms `target_meshes["A"]`
+    // 2. (8..22, 1..5): bridges A and B while C stays live -> remakes A, invalidating its cache
+    // 3. (13..17, 5..9): lies strictly in the gap x=13..17 between original A (x<=10) and B
+    //    (x>=20), touching only the bridge from tool 2 along y=5.
+    join_rects(&mut doc, &[(1.0, 1.0, 4.0, 4.0), (8.0, 1.0, 14.0, 4.0), (13.0, 5.0, 4.0, 4.0)], 10.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().bodies.len(), 2);
+    assert!((volume(&model, "C") - 1000.0).abs() < 1e-6, "tool 3 must not fall back to C: {}", volume(&model, "C"));
+    // A (1000) + B (1000) + gap span of bridge (10*4*10 = 400) + tool 3 (4*4*10 = 160);
+    // tool 1 lies inside A and the bridge ends overlap A and B.
+    let expected_a = 1000.0 + 1000.0 + 400.0 + 160.0;
+    assert!((volume(&model, "A") - expected_a).abs() < 1e-6, "{} vs {expected_a}", volume(&model, "A"));
+}
+
 /// When an import's background checks end having healed a part, the model takes the healed
 /// body in the import's place: settling marks the import and what follows it stale, the next
 /// evaluation reads the healed body under another fingerprint, and settling the same heal again
@@ -4442,9 +4520,57 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
     assert_eq!(fingerprints(&other), before);
 }
 
-/// #17708 review: the evaluation that brings an import's healed parts in reads the file again,
-/// and that read's checks heal it again. When they end with the heals the model already has,
-/// the import is not news: the window is told of the heal once, and nothing goes stale.
+/// The evaluation that brings a large import's healed parts in takes them from the read the
+/// import made, without reading the file again: the model holds the read until what its check
+/// found is settled. Read again, a 240 MB assembly was parsed, converted and checked a second
+/// time on the window thread while the first read's bodies were still shown, and the system
+/// killed the app for its memory. Once a check ends with nothing to bring in, the read is let go.
+#[test]
+fn an_imports_healed_parts_come_from_the_read_it_made() {
+    // the heal preference held on for the whole test, on its thread
+    let _on = kernel::heal_preference_for_tests(true);
+    let mut doc = placed_imports(1);
+    // Larger than the cache of recent reads keeps once nothing uses them (1 MB), as such a file is.
+    let FeatureKind::Import { step, .. } = &mut doc.features[0].kind else { panic!("import fixture") };
+    *step = step.replacen("DATA;", &format!("DATA;\n/* {} */", "x".repeat(2 << 20)), 1).into();
+    let import = doc.features[0].id;
+    let mut model = Model::new();
+    let read_run = {
+        // The check of the read still runs after the import shows, as a large file's does.
+        let _open = kernel::ImportChecks::hold_open_for_tests();
+        model.evaluate(&doc);
+        let run = model.result(import).and_then(|r| r.import_report.clone()).expect("the read's report").checks.clone();
+        assert!(run.is_running(), "the check runs on after the import");
+        assert!(model.holds_import_read(import), "the model holds the read while its check runs");
+        // The check ends having healed the first part.
+        let healed = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0)).unwrap();
+        let n = healed.face_count();
+        let checks = kernel::ImportChecks::ended_for_tests(
+            Vec::new(),
+            vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
+        );
+        let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+        r.import_report =
+            Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
+        assert!(model.settle_import_checks(), "the heal is owed");
+        assert!(model.holds_import_read(import), "held for the evaluation that brings the heal in");
+        model.evaluate(&doc);
+        let mut volumes: Vec<f64> = model.state().bodies.iter().map(|b| b.body.volume_at(1e-6).unwrap().round()).collect();
+        volumes.sort_by(f64::total_cmp);
+        assert_eq!(volumes, [27.0, 125.0], "the healed part replaces the file's");
+        let now = model.result(import).and_then(|r| r.import_report.clone()).expect("the report").checks.clone();
+        assert!(now == run, "the healed parts came from the read the import made: the file was not read again");
+        run
+    };
+    // The read's check ends (its boxes pass): nothing more to bring in, so the read is let go.
+    assert!(read_run.wait().is_some());
+    assert!(!model.settle_import_checks());
+    assert!(!model.holds_import_read(import), "let go once its check is settled");
+}
+
+/// #17708 review: when the checks of the import's read end with the heals the model already has
+/// (a file read again, whose checks heal it again), the import is not news: the window is told
+/// of the heal once, and nothing goes stale.
 #[test]
 fn a_heal_the_next_read_finds_again_is_told_once() {
     // the heal preference held on for the whole test, on its thread
@@ -4683,6 +4809,15 @@ fn a_healed_import_keeps_its_model_cache_across_save_and_open() {
     // Settle the heal and evaluate so the model carries the healed body.
     assert!(model.settle_import_checks_under(true));
     model.evaluate(&doc);
+    // That evaluation reads the import again with its heal, which starts a fresh SMLib check of
+    // its parts on a kernel thread; a save keeps no model while one runs (#20133). Wait for it
+    // to end, as a save once the check ends would.
+    for r in &model.results {
+        if let Some(report) = &r.import_report {
+            report.checks.wait();
+        }
+    }
+    assert!(!model.checking_imports());
     assert!(model.has_import_heals());
     assert!(model.cache_skip_reason(&doc).is_none(), "{:?}", model.cache_skip_reason(&doc));
     let healed_fp = model.result(import).unwrap().fingerprint;
@@ -5693,6 +5828,8 @@ fn unrelated_earlier_edits_keep_downstream_cosmetic_threads_and_pattern_cached()
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -5926,6 +6063,8 @@ fn unrelated_earlier_edits_keep_downstream_shell_scale_mirror_and_extrude_patter
                     extent2: None,
                     copy_at_end1: false,
                     copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
@@ -6047,6 +6186,8 @@ fn editing_external_sketch_line_axis_invalidates_revolve_and_pattern_cache() {
             extent2: None,
             copy_at_end1: false,
             copy_at_end2: false,
+            spacing_list1: Vec::new(),
+            spacing_list2: Vec::new(),
         },
         bodies: Vec::new(),
         placements: Vec::new(),
@@ -6679,6 +6820,8 @@ fn parallel_pattern_mirror_fillet_scale_move_and_cut_are_deterministic() {
             angle: None,
             copy: true,
             copy_frames: vec![frame, frame],
+            carry: Vec::new(),
+            leave: Vec::new(),
         },
         None,
     )
@@ -7667,4 +7810,225 @@ fn capture_position_flushes_joints_for_foreign_revolve_axis_in_adopt() {
     assert!(adopted.is_current(&doc));
     adopted.evaluate(&doc);
     assert_eq!(adopted.last_recomputed, 0);
+}
+
+/// Adding an unrelated component must not invalidate the evaluation cache (`EvalKey::whole`,
+/// `EvalKey::reads`, `EvalKey::relative`, or `primed`) for existing features — including features
+/// whose `Feature::reads` is `None` (#22662).
+#[test]
+fn adding_unrelated_component_keeps_eval_cache_warm() {
+    let mut doc = Document::new("unrelated component cache");
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let plate = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "20".into(),
+                width: "20".into(),
+                height: "6".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().component = comp_a;
+    let hole_f = doc.add_feature(hole(Vec3::new(10.0, 10.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 3.0), Some("Hole1")).unwrap();
+    doc.feature_mut(hole_f).unwrap().component = comp_a;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    // Confirm the Hole feature exercises the `EvalKey::whole` path (`reads == None`).
+    assert!(doc.feature(hole_f).unwrap().reads(&doc, &model.state_before(hole_f)).is_none());
+
+    // Add a new unrelated component (as `component.create` / `parts.insert` does).
+    let _fastener = doc.add_component(Some("M5x10 BHCS"), 0).unwrap();
+
+    // Force cache lookup (no `self.results` prefix reuse) using the shared EvalCache.
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    assert!(cached.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(cached.last_recomputed, 0, "adding an unrelated component must hit the eval cache");
+    assert_eq!(cached.last_restored, doc.features.len());
+    assert_eq!(full_eval_snapshot(&cached), full_eval_snapshot(&cold_model(&doc)));
+
+    // Primed results evaluated before the unrelated component was added also remain valid.
+    let mut primed = Model::new();
+    primed.prime(&model);
+    primed.evaluate(&doc);
+    assert_eq!(primed.last_recomputed, 0, "adding an unrelated component must not invalidate primed results");
+    assert_eq!(primed.last_restored, doc.features.len());
+}
+
+/// Toggling UI-only component metadata (`history_hidden`, `identification_color`, properties,
+/// etc.) must not invalidate the evaluation cache or `evaluate_shared`'s placement proof (#22662).
+#[test]
+fn component_display_metadata_changes_keep_eval_cache_warm() {
+    let mut doc = Document::new("component display metadata");
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let plate = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "20".into(),
+                width: "20".into(),
+                height: "6".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().component = comp_a;
+    let hole_f = doc.add_feature(hole(Vec3::new(10.0, 10.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 3.0), Some("Hole1")).unwrap();
+    doc.feature_mut(hole_f).unwrap().component = comp_a;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+
+    // Mutate every display/metadata-only field on PartA.
+    let c = doc.components.iter_mut().find(|c| c.id == comp_a).unwrap();
+    c.history_hidden = true;
+    c.identification_color = Some([10, 20, 30]);
+    c.identification_color_index = Some(42);
+    c.properties.insert("finish".into(), "anodized".into());
+    c.name_split = Some(crate::ComponentNameSplit { separator: "-".into(), left_property: "part".into(), right_property: "rev".into() });
+
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    assert!(cached.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(cached.last_recomputed, 0, "UI-only component changes must hit the eval cache");
+    assert_eq!(cached.last_restored, doc.features.len());
+    assert_eq!(full_eval_snapshot(&cached), full_eval_snapshot(&cold_model(&doc)));
+
+    // Local-geometry shared evaluation proof also stays valid across UI-only component changes.
+    let mut local_doc = Document::new("local display metadata");
+    let comp_l = local_doc.add_component(Some("LocalPart"), 0).unwrap();
+    let box_l = local_doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Cube"),
+        )
+        .unwrap();
+    local_doc.feature_mut(box_l).unwrap().component = comp_l;
+    let mut shared_doc = Arc::new(local_doc);
+    let mut shared_model = Model::new();
+    assert!(shared_model.evaluate_shared(&shared_doc));
+    {
+        let d = Arc::make_mut(&mut shared_doc);
+        let c = d.components.iter_mut().find(|c| c.id == comp_l).unwrap();
+        c.history_hidden = true;
+        c.identification_color = Some([1, 2, 3]);
+    }
+    assert!(!shared_model.evaluate_shared(&shared_doc), "UI-only component change must keep evaluate_shared proof");
+    assert_eq!(shared_model.last_recomputed, 0);
+}
+
+/// Renaming a component that a feature can reach must still invalidate that feature's cache key
+/// (e.g. so target error messages reflect the renamed component).
+#[test]
+fn renaming_reached_component_invalidates_its_cache_key() {
+    let mut doc = Document::new("rename reached component");
+    let comp_a = doc.add_component(Some("OldName"), 0).unwrap();
+    let comp_b = doc.add_component(Some("Cutter"), 0).unwrap();
+    let plate = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "20".into(),
+                width: "20".into(),
+                height: "6".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().component = comp_a;
+    // Cut in comp_b with default targets: comp_b has no bodies, so `empty_boolean_targets` names
+    // the overlapping body's component (`OldName`).
+    let cut = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(2.0, 2.0, 0.0)),
+                length: "4".into(),
+                width: "4".into(),
+                height: "6".into(),
+                operation: Operation::Cut,
+                centred: false,
+            },
+            Some("MissCut"),
+        )
+        .unwrap();
+    doc.feature_mut(cut).unwrap().component = comp_b;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let err_before = model.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_before.contains("OldName"), "expected error naming OldName, got: {err_before}");
+
+    doc.components.iter_mut().find(|c| c.id == comp_a).unwrap().name = "NewName".into();
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    let err_after = cached.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_after.contains("NewName"), "expected refreshed error naming NewName, got: {err_after}");
+    assert!(cached.last_recomputed >= 1);
+
+    // Primed results must also reject reuse when a reached component was renamed.
+    let mut primed = Model::new();
+    primed.prime(&model);
+    primed.evaluate(&doc);
+    let err_primed = primed.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_primed.contains("NewName"), "expected primed miss naming NewName, got: {err_primed}");
+    assert!(primed.last_recomputed >= 1);
+
+    // Rolled-back results must also reject reuse when a reached component was renamed while rolled back.
+    doc.components.iter_mut().find(|c| c.id == comp_a).unwrap().name = "OldName".into();
+    let mut rolled = Model::new();
+    rolled.evaluate(&doc);
+    assert!(rolled.result(cut).and_then(|r| r.error.as_deref()).is_some_and(|e| e.contains("OldName")));
+    doc.marker = Some(1);
+    rolled.evaluate(&doc);
+    doc.components.iter_mut().find(|c| c.id == comp_a).unwrap().name = "RenamedWhileRolled".into();
+    doc.marker = None;
+    rolled.evaluate(&doc);
+    let err_rolled = rolled.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_rolled.contains("RenamedWhileRolled"), "expected rolled miss naming RenamedWhileRolled, got: {err_rolled}");
+    assert!(rolled.last_recomputed >= 1);
+}
+
+/// Adding a missing destination component for a `BodyTransfer` must invalidate its cached refusal
+/// so the transfer succeeds on the next evaluation (#22662).
+#[test]
+fn body_transfer_cache_invalidates_when_destination_component_is_added() {
+    let mut doc = Document::new("body transfer cache");
+    block(&mut doc, "Plate", Vec3::ZERO, [10.0, 10.0, 4.0]);
+    let dest = doc.add_component(Some("Dest"), 0).unwrap();
+    let transfer = doc
+        .add_feature(
+            FeatureKind::BodyTransfer { bodies: vec![crate::BodyName("Plate".into())], from: 0, to: dest, transform: crate::IDENTITY },
+            Some("MovePlate"),
+        )
+        .unwrap();
+    let saved_dest = doc.components.pop().unwrap();
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.result(transfer).and_then(|r| r.error.as_deref()).is_some(), "transfer to missing component must fail");
+
+    doc.components.push(saved_dest);
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    assert_eq!(cached.result(transfer).and_then(|r| r.error.as_deref()), None, "transfer must succeed once destination component exists");
+    assert_eq!(cached.state().body("Plate").unwrap().component, dest);
+    assert!(cached.last_recomputed >= 1);
 }

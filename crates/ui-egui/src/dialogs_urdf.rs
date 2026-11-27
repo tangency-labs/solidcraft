@@ -74,14 +74,15 @@ pub fn run(app: &mut SolveApp, f: &UrdfExport) -> Result<(), String> {
 /// The export's status. What the URDF leaves out (a free coupled joint, a body without
 /// collision) is said, each warning in the output.
 fn report(app: &mut SolveApp, path: &str, r: &Value) {
+    let shown = crate::display_user_path(path);
     let warnings: Vec<&str> = r["warnings"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     match warnings.first() {
-        None => app.set_status(format!("Exported {path}"), false),
+        None => app.set_status(format!("Exported {shown}"), false),
         Some(first) => {
             for w in &warnings {
                 app.session.echo(format!("URDF: {w}"));
             }
-            app.set_status(format!("Exported {path} with {} warning(s): {first}", warnings.len()), true);
+            app.set_status(format!("Exported {shown} with {} warning(s): {first}", warnings.len()), true);
         }
     }
 }

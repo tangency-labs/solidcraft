@@ -430,11 +430,12 @@ fn export_animation(app: &mut SolveApp, params: Value, name: &str) {
         let made = sc.execute("motion.study", &params).and_then(|r| {
             sc.execute(
                 "motion.export_animation",
-                &json!({"study": r["study"], "path": path, "camera": camera, "grid": guides.grid, "axes": guides.axes}),
+                // At the rate the dialog plays it, so the GIF lasts as long as playing does.
+                &json!({"study": r["study"], "path": path, "camera": camera, "grid": guides.grid, "axes": guides.axes, "fps": STEPS_PER_S}),
             )
         });
         match made {
-            Ok(_) => app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", &path)]), false),
+            Ok(_) => app.set_status(solidcraft_ui_text::format("ui.saved_to", &[("path", crate::display_user_path(&path))]), false),
             Err(e) => app.set_status(e.to_string(), true),
         }
     });
@@ -1442,7 +1443,8 @@ mod tests {
     }
 
     /// Export Animation saves the study the dialog shows (its keys need not be saved) as a GIF,
-    /// also when the name is typed without `.gif`, and the design keeps no study.
+    /// also when the name is typed without `.gif`, and the design keeps no study. The GIF plays
+    /// at the dialog's rate: its 5 frames (steps 0 to 4) last 5/24 s, in hundredths.
     #[test]
     fn export_animation_saves_the_dialogs_study_as_a_gif() {
         // Drawn as the CLI draws (the headless device), as scenario shots are.
@@ -1480,6 +1482,19 @@ mod tests {
         let gif = std::fs::read(h.dir.join("swing.gif")).unwrap();
         assert!(gif.starts_with(b"GIF89a"), "{:?}", h.app.status);
         assert!(h.app.status.as_ref().is_some_and(|s| !s.2), "{:?}", h.app.status);
+        // Each frame's delay, from its graphic control block (after the 256-colour table).
+        let (mut at, mut delays) = (13 + 768, Vec::new());
+        while gif[at] != 0x3B {
+            if gif[at] == 0x21 && gif[at + 1] == 0xF9 {
+                delays.push(u16::from_le_bytes([gif[at + 4], gif[at + 5]]));
+            }
+            at += if gif[at] == 0x2C { 11 } else { 2 };
+            while gif[at] != 0 {
+                at += usize::from(gif[at]) + 1;
+            }
+            at += 1;
+        }
+        assert_eq!(delays, [4, 4, 5, 4, 4], "24 frames a second");
         assert!(h.app.session.doc.assembly.studies.is_empty(), "exporting saves no study");
     }
 
