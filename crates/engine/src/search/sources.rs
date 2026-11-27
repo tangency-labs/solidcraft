@@ -1,25 +1,29 @@
-//! Built-in Phase 1 [`SearchSource`] implementations (RFC 0019 §3.1):
-//! commands, open design entities (features, bodies, sketches, components, parameters, joints,
-//! named views), standard parts library, built-in samples and installed plugins.
+//! Built-in [`SearchSource`] implementations (RFC 0019 §3.1):
+//! commands, open design entities (features, bodies, sketches, construction geometry, components,
+//! occurrences, parameters, joints, named views), standard parts library, built-in samples and
+//! installed plugins.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde_json::json;
-use solidcraft_doc::FeatureKind;
 use solidcraft_doc::joints::JointKind;
+use solidcraft_doc::{Document, FeatureKind, WorldNames};
 
 use super::{ItemVisibility, SearchContext, SearchField, SearchGroup, SearchItem, SearchRegistry, SearchScope, SearchSource, SearchSurfaces};
 
 /// Maximum number of items emitted by one design source to bound work on huge designs.
 const MAX_SOURCE_ITEMS: usize = 10_000;
+/// Maximum ancestor depth walked when building component/occurrence paths.
+const MAX_PATH_DEPTH: usize = 64;
 
-/// Register every built-in Phase 1 search source in deterministic order.
+/// Register every built-in search source in deterministic order.
 pub fn register_builtins(registry: &mut SearchRegistry) {
     registry
         .register(Box::new(CommandsSource))
         .register(Box::new(FeaturesSource))
         .register(Box::new(BodiesSource))
         .register(Box::new(SketchesSource))
+        .register(Box::new(ConstructionSource))
         .register(Box::new(ComponentsSource))
         .register(Box::new(ParametersSource))
         .register(Box::new(JointsSource))
@@ -146,18 +150,19 @@ impl SearchSource for FeaturesSource {
         let mut items = Vec::new();
         for (idx, feature) in doc.features.iter().take(MAX_SOURCE_ITEMS).enumerate() {
             let type_name = feature.kind.type_name();
+            let kind_label = feature_kind_label(&feature.kind);
             let rolled_back = idx >= marker;
-            let param_summary = feature.param_names.iter().take(8).find_map(|name| params.get(name.as_str())).map(|p| {
-                p.display_value
-                    .or(p.value)
-                    .filter(|v| v.is_finite())
-                    .map_or_else(|| truncate_chars(&p.expression, 64), |v| format!("{v} {}", p.unit).trim().to_string())
-            });
-            let mut detail_parts = vec![type_name.to_string()];
+            let comp_path = component_path_label(doc, feature.component);
+            let occ_path = first_occurrence_path(doc, feature.component);
+            let param_summary = feature.param_names.iter().take(8).find_map(|name| params.get(name.as_str())).map(format_param_value);
+            let mut detail_parts = vec![kind_label.to_string()];
             if let Some(val) = &param_summary
                 && !val.is_empty()
             {
                 detail_parts.push(val.clone());
+            }
+            if let Some(path) = &comp_path {
+                detail_parts.push(path.clone());
             }
             if feature.suppressed {
                 detail_parts.push("suppressed".into());
@@ -165,13 +170,24 @@ impl SearchSource for FeaturesSource {
             if rolled_back {
                 detail_parts.push("rolled back".into());
             }
-            let fields = vec![SearchField::title(&feature.name), SearchField::identifier(feature.id.to_string()), SearchField::secondary(type_name)];
+            let subtitle = match &comp_path {
+                Some(path) => Some(format!("{kind_label} · {path}")),
+                None => Some(kind_label.to_string()),
+            };
+            let mut fields = vec![
+                SearchField::title(&feature.name),
+                SearchField::identifier(feature.id.to_string()),
+                SearchField::secondary(format!("{kind_label} {type_name}")),
+            ];
+            if let Some(path) = &comp_path {
+                fields.push(SearchField::secondary(path));
+            }
             items.push(SearchItem {
                 id: feature.id.to_string(),
                 kind: "feature".into(),
                 group: SearchGroup::Design,
                 title: feature.name.clone(),
-                subtitle: Some(type_name.to_string()),
+                subtitle,
                 detail: Some(detail_parts.join(" · ")),
                 icon: Some("timeline".into()),
                 installed: true,
@@ -187,7 +203,12 @@ impl SearchSource for FeaturesSource {
                 metadata: Some(json!({
                     "feature_id": feature.id,
                     "type": type_name,
+                    "kind_label": kind_label,
                     "component": feature.component,
+                    "component_path": comp_path,
+                    "occurrence_path": occ_path,
+                    "is_sketch": matches!(feature.kind, FeatureKind::Sketch { .. }),
+                    "is_construction": feature.kind.is_construction(),
                     "suppressed": feature.suppressed,
                     "rolled_back": rolled_back,
                 })),
@@ -216,35 +237,142 @@ impl SearchSource for BodiesSource {
     }
     fn search(&self, ctx: &SearchContext<'_>) -> Result<Vec<SearchItem>, String> {
         let s = ctx.session;
+        let doc = &s.doc;
         let state = s.model.state();
+        let world_names = WorldNames::new(doc, &state);
+        let mut comp_placements: HashMap<u64, Vec<Vec<u64>>> = HashMap::new();
+        for (owner, path, _) in doc.placements().into_iter().take(MAX_SOURCE_ITEMS) {
+            if owner != 0 {
+                comp_placements.entry(owner).or_default().push(path);
+            }
+        }
         let mut items = Vec::new();
         for body in state.bodies.iter().take(MAX_SOURCE_ITEMS) {
+            if items.len() >= MAX_SOURCE_ITEMS {
+                break;
+            }
             if s.body_removed_later(&body.name) {
                 continue;
             }
-            let visible = s.body_visible(&body.name);
-            let component = s.doc.model_body_component(body);
-            let fields = vec![SearchField::title(&body.name), SearchField::identifier(&body.name), SearchField::secondary("body")];
-            items.push(SearchItem {
-                id: body.name.clone(),
-                kind: "body".into(),
-                group: SearchGroup::Design,
-                title: body.name.clone(),
-                subtitle: Some("Body".into()),
-                detail: Some(if visible { "Visible".into() } else { "Hidden".into() }),
-                icon: Some("body".into()),
-                installed: true,
-                enabled: true,
-                disabled_reason: None,
-                action: Some("select.set".into()),
-                metadata: Some(json!({
-                    "name": body.name,
-                    "component": component,
-                    "visible": visible,
-                })),
-                visibility: ItemVisibility::Public,
-                fields,
-            });
+            let component = doc.model_body_component(body);
+            let comp_path = component_path_label(doc, component);
+            let material = doc.materials.get(&body.name).cloned();
+            let (body_kind, body_kind_label, icon) = if body.body.is_mesh() {
+                ("mesh", "Mesh", "mesh_body")
+            } else if body.is_surface() {
+                ("surface", "Surface", "surface")
+            } else {
+                ("solid", "Solid", "body")
+            };
+
+            let placements: &[Vec<u64>] = if component == 0 { &[] } else { comp_placements.get(&component).map(Vec::as_slice).unwrap_or(&[]) };
+
+            if placements.is_empty() {
+                let visible = s.body_visible(&body.name);
+                let mut fields =
+                    vec![SearchField::title(&body.name), SearchField::identifier(&body.name), SearchField::secondary(format!("body {body_kind}"))];
+                if let Some(path) = &comp_path {
+                    fields.push(SearchField::secondary(path));
+                }
+                if let Some(mat) = &material {
+                    fields.push(SearchField::secondary(mat));
+                }
+                let subtitle = match &comp_path {
+                    Some(path) => Some(format!("Body · {path}")),
+                    None => Some("Body".into()),
+                };
+                let mut detail_parts = vec![body_kind_label.to_string(), if visible { "Visible".into() } else { "Hidden".into() }];
+                if let Some(mat) = &material {
+                    detail_parts.push(mat.clone());
+                }
+                items.push(SearchItem {
+                    id: body.name.clone(),
+                    kind: "body".into(),
+                    group: SearchGroup::Design,
+                    title: body.name.clone(),
+                    subtitle,
+                    detail: Some(detail_parts.join(" · ")),
+                    icon: Some(icon.into()),
+                    installed: true,
+                    enabled: true,
+                    disabled_reason: None,
+                    action: Some("select.set".into()),
+                    metadata: Some(json!({
+                        "name": body.name,
+                        "source_name": body.name,
+                        "component": component,
+                        "component_path": comp_path,
+                        "occurrence_path": Vec::<u64>::new(),
+                        "occurrence_label": Option::<String>::None,
+                        "visible": visible,
+                        "body_kind": body_kind,
+                        "material": material,
+                    })),
+                    visibility: ItemVisibility::Public,
+                    fields,
+                });
+            } else {
+                for path in placements {
+                    if items.len() >= MAX_SOURCE_ITEMS {
+                        break;
+                    }
+                    let world_name = world_names.name(&body.name, component, path);
+                    let visible = s.body_visible(&world_name);
+                    let occ_label = occurrence_path_label(doc, path);
+                    let location = occ_label.as_deref().or(comp_path.as_deref());
+                    let mut fields = vec![
+                        SearchField::title(&world_name),
+                        SearchField::identifier(&world_name),
+                        SearchField::secondary(format!("body {body_kind}")),
+                    ];
+                    if world_name != body.name {
+                        fields.push(SearchField::identifier(&body.name));
+                    }
+                    if let Some(path_label) = &comp_path {
+                        fields.push(SearchField::secondary(path_label));
+                    }
+                    if let Some(occ) = &occ_label {
+                        fields.push(SearchField::secondary(occ));
+                    }
+                    if let Some(mat) = &material {
+                        fields.push(SearchField::secondary(mat));
+                    }
+                    let subtitle = match location {
+                        Some(loc) => Some(format!("Body · {loc}")),
+                        None => Some("Body".into()),
+                    };
+                    let mut detail_parts = vec![body_kind_label.to_string(), if visible { "Visible".into() } else { "Hidden".into() }];
+                    if let Some(mat) = &material {
+                        detail_parts.push(mat.clone());
+                    }
+                    items.push(SearchItem {
+                        id: world_name.clone(),
+                        kind: "body".into(),
+                        group: SearchGroup::Design,
+                        title: world_name.clone(),
+                        subtitle,
+                        detail: Some(detail_parts.join(" · ")),
+                        icon: Some(icon.into()),
+                        installed: true,
+                        enabled: true,
+                        disabled_reason: None,
+                        action: Some("select.set".into()),
+                        metadata: Some(json!({
+                            "name": world_name,
+                            "source_name": body.name,
+                            "component": component,
+                            "component_path": comp_path,
+                            "occurrence_path": path,
+                            "occurrence_label": occ_label,
+                            "visible": visible,
+                            "body_kind": body_kind,
+                            "material": material,
+                        })),
+                        visibility: ItemVisibility::Public,
+                        fields,
+                    });
+                }
+            }
         }
         Ok(items)
     }
@@ -273,14 +401,31 @@ impl SearchSource for SketchesSource {
             if !matches!(feature.kind, FeatureKind::Sketch { .. }) {
                 continue;
             }
-            let fields = vec![SearchField::title(&feature.name), SearchField::identifier(feature.id.to_string()), SearchField::secondary("sketch")];
+            let comp_path = component_path_label(doc, feature.component);
+            let occ_path = first_occurrence_path(doc, feature.component);
+            let mut fields =
+                vec![SearchField::title(&feature.name), SearchField::identifier(feature.id.to_string()), SearchField::secondary("sketch")];
+            if let Some(path) = &comp_path {
+                fields.push(SearchField::secondary(path));
+            }
+            let subtitle = match &comp_path {
+                Some(path) => Some(format!("Sketch · {path}")),
+                None => Some("Sketch".into()),
+            };
+            let mut detail_parts = vec![format!("Sketch #{}", feature.id)];
+            if let Some(path) = &comp_path {
+                detail_parts.push(path.clone());
+            }
+            if feature.suppressed {
+                detail_parts.push("suppressed".into());
+            }
             items.push(SearchItem {
                 id: feature.id.to_string(),
                 kind: "sketch".into(),
                 group: SearchGroup::Design,
                 title: feature.name.clone(),
-                subtitle: Some("Sketch".into()),
-                detail: Some(format!("Sketch #{}", feature.id)),
+                subtitle,
+                detail: Some(detail_parts.join(" · ")),
                 icon: Some("sketch".into()),
                 installed: true,
                 enabled: !feature.suppressed,
@@ -288,7 +433,86 @@ impl SearchSource for SketchesSource {
                 action: Some("sketch.edit".into()),
                 metadata: Some(json!({
                     "sketch_id": feature.id,
+                    "feature_id": feature.id,
                     "component": feature.component,
+                    "component_path": comp_path,
+                    "occurrence_path": occ_path,
+                    "suppressed": feature.suppressed,
+                })),
+                visibility: ItemVisibility::Public,
+                fields,
+            });
+        }
+        Ok(items)
+    }
+}
+
+struct ConstructionSource;
+
+impl SearchSource for ConstructionSource {
+    fn id(&self) -> &'static str {
+        "design.construction"
+    }
+    fn surfaces(&self) -> SearchSurfaces {
+        SearchSurfaces::GLOBAL.union(SearchSurfaces::DESIGN).union(SearchSurfaces::BROWSER)
+    }
+    fn scopes(&self) -> &'static [SearchScope] {
+        &[SearchScope::Design, SearchScope::Construction]
+    }
+    fn group(&self) -> SearchGroup {
+        SearchGroup::Design
+    }
+    fn search(&self, ctx: &SearchContext<'_>) -> Result<Vec<SearchItem>, String> {
+        let s = ctx.session;
+        let doc = &s.doc;
+        let before_marker = doc.marker.unwrap_or(doc.features.len());
+        let mut items = Vec::new();
+        for feature in doc.features.iter().take(before_marker).take(MAX_SOURCE_ITEMS) {
+            if !feature.kind.is_construction() {
+                continue;
+            }
+            let (kind_slug, kind_label, icon) = match feature.kind {
+                FeatureKind::ConstructionAxis { .. } => ("axis", "Construction Axis", "axis"),
+                FeatureKind::ConstructionPoint { .. } => ("point", "Construction Point", "point"),
+                _ => ("plane", "Construction Plane", "plane"),
+            };
+            let visible = !s.visibility.hidden_origin.contains(&feature.name);
+            let comp_path = component_path_label(doc, feature.component);
+            let mut fields = vec![
+                SearchField::title(&feature.name),
+                SearchField::identifier(feature.id.to_string()),
+                SearchField::secondary(format!("construction {kind_slug} {kind_label}")),
+            ];
+            if let Some(path) = &comp_path {
+                fields.push(SearchField::secondary(path));
+            }
+            let subtitle = match &comp_path {
+                Some(path) => Some(format!("{kind_label} · {path}")),
+                None => Some(kind_label.to_string()),
+            };
+            let mut detail_parts = vec![kind_label.to_string(), if visible { "Visible".into() } else { "Hidden".into() }];
+            if feature.suppressed {
+                detail_parts.push("suppressed".into());
+            }
+            items.push(SearchItem {
+                id: feature.id.to_string(),
+                kind: "construction".into(),
+                group: SearchGroup::Design,
+                title: feature.name.clone(),
+                subtitle,
+                detail: Some(detail_parts.join(" · ")),
+                icon: Some(icon.into()),
+                installed: true,
+                enabled: !feature.suppressed,
+                disabled_reason: feature.suppressed.then(|| "construction feature is suppressed".into()),
+                action: Some("select.set".into()),
+                metadata: Some(json!({
+                    "feature_id": feature.id,
+                    "name": feature.name,
+                    "construction_kind": kind_slug,
+                    "component": feature.component,
+                    "component_path": comp_path,
+                    "visible": visible,
                     "suppressed": feature.suppressed,
                 })),
                 visibility: ItemVisibility::Public,
@@ -316,16 +540,67 @@ impl SearchSource for ComponentsSource {
     }
     fn search(&self, ctx: &SearchContext<'_>) -> Result<Vec<SearchItem>, String> {
         let doc = &ctx.session.doc;
+        let comp_names: HashMap<u64, &str> = doc.components.iter().map(|c| (c.id, c.name.as_str())).collect();
         let mut items = Vec::new();
         for comp in doc.components.iter().take(MAX_SOURCE_ITEMS) {
-            let fields = vec![SearchField::title(&comp.name), SearchField::identifier(comp.id.to_string()), SearchField::secondary("component")];
+            let comp_path = component_path_label(doc, comp.id);
+            let parent_path = component_path_label(doc, comp.parent);
+            let occ_path = first_occurrence_path(doc, comp.id);
+            let linked_source = doc.links.get(&comp.id).map(|l| l.path.as_str());
+            let std_part = doc.parts.get(&comp.id);
+            let part_number = comp.metadata.0.get("part_number").and_then(serde_json::Value::as_str);
+            let description = comp.metadata.0.get("description").and_then(serde_json::Value::as_str);
+
+            let mut fields = vec![SearchField::title(&comp.name), SearchField::identifier(comp.id.to_string()), SearchField::secondary("component")];
+            if let Some(parent) = &parent_path {
+                fields.push(SearchField::secondary(parent));
+            }
+            if let Some(link) = linked_source {
+                fields.push(SearchField::keywords(format!("linked external {link}")));
+            }
+            if let Some(part) = std_part {
+                fields.push(SearchField::keywords(format!("standard part {} {}", part.family, part.size)));
+            }
+            if let Some(pn) = part_number
+                && !pn.is_empty()
+            {
+                fields.push(SearchField::identifier(pn));
+            }
+            if let Some(desc) = description
+                && !desc.is_empty()
+            {
+                fields.push(SearchField::keywords(desc));
+            }
+
+            let subtitle = match (linked_source, std_part, &parent_path) {
+                (Some(_), _, Some(parent)) => Some(format!("Linked component · {parent}")),
+                (Some(_), _, None) => Some("Linked component".into()),
+                (None, Some(_), Some(parent)) => Some(format!("Standard part · {parent}")),
+                (None, Some(_), None) => Some("Standard part".into()),
+                (None, None, Some(parent)) => Some(format!("Component · {parent}")),
+                (None, None, None) => Some("Component".into()),
+            };
+            let detail = if let Some(link) = linked_source {
+                Some(format!("Linked: {}", truncate_chars(link, 96)))
+            } else if let Some(part) = std_part {
+                match part.length {
+                    Some(len) => Some(format!("{} {}x{}", part.family, part.size, format_length(len))),
+                    None => Some(format!("{} {}", part.family, part.size)),
+                }
+            } else if let Some(pn) = part_number
+                && !pn.is_empty()
+            {
+                Some(format!("Part #{pn}"))
+            } else {
+                Some(format!("Component #{}", comp.id))
+            };
             items.push(SearchItem {
                 id: format!("component:{}", comp.id),
                 kind: "component".into(),
                 group: SearchGroup::Design,
                 title: comp.name.clone(),
-                subtitle: Some("Component".into()),
-                detail: Some(format!("Component #{}", comp.id)),
+                subtitle,
+                detail,
                 icon: Some("component".into()),
                 installed: true,
                 enabled: true,
@@ -334,24 +609,59 @@ impl SearchSource for ComponentsSource {
                 metadata: Some(json!({
                     "component_id": comp.id,
                     "parent": comp.parent,
+                    "component_path": comp_path,
+                    "occurrence_path": occ_path,
+                    "linked_source": linked_source,
+                    "standard_part": std_part.map(|p| json!({"family": p.family, "size": p.size, "length": p.length})),
+                    "part_number": part_number,
                 })),
                 visibility: ItemVisibility::Public,
                 fields,
             });
         }
         for occ in doc.occurrences.iter().take(MAX_SOURCE_ITEMS) {
-            let fields = vec![
+            let path = doc.occurrence_path(occ.id).unwrap_or_else(|| vec![occ.id]);
+            let occ_label = occurrence_path_label(doc, &path);
+            let comp_name = comp_names.get(&occ.component).copied();
+            let linked_source = doc.links.get(&occ.component).map(|l| l.path.as_str());
+            let mut fields = vec![
                 SearchField::title(&occ.name),
                 SearchField::identifier(occ.id.to_string()),
                 SearchField::secondary("occurrence placement component"),
             ];
+            if let Some(cname) = comp_name {
+                fields.push(SearchField::secondary(cname));
+            }
+            if let Some(label) = &occ_label {
+                fields.push(SearchField::secondary(label));
+            }
+            if let Some(link) = linked_source {
+                fields.push(SearchField::keywords(format!("linked external {link}")));
+            }
+            let subtitle = match (linked_source, &occ_label) {
+                (Some(_), Some(label)) if label != &occ.name => Some(format!("Linked placement · {label}")),
+                (Some(_), _) => Some("Linked placement".into()),
+                (None, Some(label)) if label != &occ.name => Some(format!("Placement · {label}")),
+                _ => Some("Component placement".into()),
+            };
+            let mut detail_parts = Vec::new();
+            if occ.grounded {
+                detail_parts.push("Grounded".into());
+            }
+            if let Some(link) = linked_source {
+                detail_parts.push(format!("Linked: {}", truncate_chars(link, 80)));
+            } else if let Some(cname) = comp_name {
+                detail_parts.push(cname.to_string());
+            } else {
+                detail_parts.push(format!("Occurrence #{}", occ.id));
+            }
             items.push(SearchItem {
                 id: format!("occurrence:{}", occ.id),
                 kind: "occurrence".into(),
                 group: SearchGroup::Design,
                 title: occ.name.clone(),
-                subtitle: Some("Component placement".into()),
-                detail: Some(if occ.grounded { "Grounded".into() } else { format!("Occurrence #{}", occ.id) }),
+                subtitle,
+                detail: Some(detail_parts.join(" · ")),
                 icon: Some("component".into()),
                 installed: true,
                 enabled: true,
@@ -360,8 +670,12 @@ impl SearchSource for ComponentsSource {
                 metadata: Some(json!({
                     "occurrence_id": occ.id,
                     "component_id": occ.component,
+                    "component_name": comp_name,
                     "parent": occ.parent,
+                    "path": path,
+                    "occurrence_label": occ_label,
                     "grounded": occ.grounded,
+                    "linked_source": linked_source,
                 })),
                 visibility: ItemVisibility::Public,
                 fields,
@@ -389,28 +703,40 @@ impl SearchSource for ParametersSource {
     fn search(&self, ctx: &SearchContext<'_>) -> Result<Vec<SearchItem>, String> {
         let mut items = Vec::new();
         for p in ctx.session.doc.param_rows().into_iter().take(MAX_SOURCE_ITEMS) {
-            let formatted = p
-                .display_value
-                .or(p.value)
-                .filter(|v| v.is_finite())
-                .map_or_else(|| truncate_chars(&p.expression, 64), |v| format!("{v} {}", p.unit).trim().to_string());
-            let mut fields =
-                vec![SearchField::title(&p.name), SearchField::identifier(&p.name), SearchField::secondary(format!("parameter {}", p.source))];
+            let value_expr = format_param_detail(&p);
+            let mut fields = vec![
+                SearchField::title(&p.name),
+                SearchField::identifier(&p.name),
+                SearchField::secondary(if p.source == "user" { "parameter user".to_string() } else { format!("parameter dimension {}", p.source) }),
+            ];
             if !p.comment.is_empty() {
                 fields.push(SearchField::keywords(&p.comment));
             }
-            if let Some(feature) = &p.feature {
-                fields.push(SearchField::secondary(feature));
+            if let Some(text) = &p.text {
+                if !text.is_empty() {
+                    fields.push(SearchField::secondary(text));
+                }
+            } else if expression_is_formula(&p.expression) {
+                fields.push(SearchField::secondary(&p.expression));
             }
-            let detail = if p.comment.is_empty() { formatted.clone() } else { format!("{formatted} · {}", truncate_chars(&p.comment, 96)) };
+            if let Some(input) = p.input {
+                fields.push(SearchField::secondary(input));
+            }
+            let subtitle = match (&p.feature, p.input) {
+                (Some(feat), Some(inp)) => Some(format!("Dimension ({feat}: {inp})")),
+                (Some(feat), None) => Some(format!("Dimension ({feat})")),
+                (None, _) if p.source == "sketch" => Some("Dimension (sketch)".into()),
+                (None, _) => Some("Parameter (user)".into()),
+            };
+            let detail = if p.comment.is_empty() { value_expr } else { format!("{value_expr} · {}", truncate_chars(&p.comment, 96)) };
             items.push(SearchItem {
                 id: p.name.clone(),
                 kind: "parameter".into(),
                 group: SearchGroup::Design,
                 title: p.name.clone(),
-                subtitle: Some(format!("Parameter ({})", p.source)),
+                subtitle,
                 detail: Some(detail),
-                icon: Some("parameters".into()),
+                icon: Some("params".into()),
                 installed: true,
                 enabled: p.error.is_none(),
                 disabled_reason: p.error.clone(),
@@ -422,8 +748,11 @@ impl SearchSource for ParametersSource {
                     "display_value": p.display_value,
                     "unit": p.unit,
                     "source": p.source,
+                    "feature": p.feature,
+                    "input": p.input,
                     "comment": p.comment,
                     "favorite": p.favorite,
+                    "text": p.text,
                 })),
                 visibility: ItemVisibility::Public,
                 fields,
@@ -449,21 +778,39 @@ impl SearchSource for JointsSource {
         SearchGroup::Design
     }
     fn search(&self, ctx: &SearchContext<'_>) -> Result<Vec<SearchItem>, String> {
+        let s = ctx.session;
+        let doc = &s.doc;
+        let occ_names: HashMap<u64, &str> = doc.occurrences.iter().map(|o| (o.id, o.name.as_str())).collect();
         let mut items = Vec::new();
-        for joint in ctx.session.doc.assembly.joints.iter().take(MAX_SOURCE_ITEMS) {
+        for joint in doc.assembly.joints.iter().take(MAX_SOURCE_ITEMS) {
             let kind_name = joint_kind_label(joint.kind);
-            let fields = vec![
+            let occ_a = occ_names.get(&joint.a.occurrence).copied();
+            let occ_b = occ_names.get(&joint.b.occurrence).copied();
+            let visible = !s.visibility.hidden_joints.contains(&joint.id);
+            let mut fields = vec![
                 SearchField::title(&joint.name),
                 SearchField::identifier(joint.id.to_string()),
                 SearchField::secondary(format!("joint {kind_name}")),
             ];
+            if let Some(a) = occ_a {
+                fields.push(SearchField::secondary(a));
+            }
+            if let Some(b) = occ_b {
+                fields.push(SearchField::secondary(b));
+            }
+            let detail = match (occ_a, occ_b) {
+                (Some(a), Some(b)) => format!("{kind_name} · {a} ↔ {b}"),
+                (Some(a), None) => format!("{kind_name} · {a}"),
+                (None, Some(b)) => format!("{kind_name} · {b}"),
+                (None, None) => format!("{kind_name} joint"),
+            };
             items.push(SearchItem {
                 id: joint.id.to_string(),
                 kind: "joint".into(),
                 group: SearchGroup::Design,
                 title: joint.name.clone(),
                 subtitle: Some(format!("Joint ({kind_name})")),
-                detail: Some(format!("{kind_name} joint")),
+                detail: Some(detail),
                 icon: Some("joint".into()),
                 installed: true,
                 enabled: true,
@@ -472,6 +819,9 @@ impl SearchSource for JointsSource {
                 metadata: Some(json!({
                     "joint_id": joint.id,
                     "kind": kind_name,
+                    "occurrence_a": occ_a,
+                    "occurrence_b": occ_b,
+                    "visible": visible,
                 })),
                 visibility: ItemVisibility::Public,
                 fields,
@@ -525,7 +875,7 @@ impl SearchSource for NamedViewsSource {
                 title: view.name.clone(),
                 subtitle: Some("Named view".into()),
                 detail: Some("Saved camera view".into()),
-                icon: Some("camera".into()),
+                icon: Some("perspective".into()),
                 installed: true,
                 enabled: true,
                 disabled_reason: None,
@@ -757,4 +1107,128 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     let mut iter = text.chars();
     let taken: String = iter.by_ref().take(max_chars).collect();
     if iter.next().is_some() { format!("{taken}…") } else { taken }
+}
+
+fn component_path_label(doc: &Document, comp_id: u64) -> Option<String> {
+    if comp_id == 0 {
+        return None;
+    }
+    let mut parts = Vec::new();
+    let mut cur = comp_id;
+    let mut seen = Vec::new();
+    while cur != 0 && parts.len() < MAX_PATH_DEPTH {
+        if seen.contains(&cur) {
+            break;
+        }
+        seen.push(cur);
+        let Some(comp) = doc.components.iter().find(|c| c.id == cur) else { break };
+        parts.push(comp.name.as_str());
+        cur = comp.parent;
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    parts.reverse();
+    Some(parts.join(" › "))
+}
+
+fn occurrence_path_label(doc: &Document, path: &[u64]) -> Option<String> {
+    if path.is_empty() {
+        return None;
+    }
+    let mut parts = Vec::with_capacity(path.len().min(MAX_PATH_DEPTH));
+    for &id in path.iter().take(MAX_PATH_DEPTH) {
+        if let Some(occ) = doc.occurrences.iter().find(|o| o.id == id) {
+            parts.push(occ.name.as_str());
+        }
+    }
+    (!parts.is_empty()).then(|| parts.join(" › "))
+}
+
+fn first_occurrence_path(doc: &Document, comp_id: u64) -> Vec<u64> {
+    if comp_id == 0 {
+        return Vec::new();
+    }
+    doc.occurrence_of(comp_id).and_then(|o| doc.occurrence_path(o.id)).unwrap_or_default()
+}
+
+fn feature_kind_label(kind: &FeatureKind) -> &'static str {
+    match kind {
+        FeatureKind::Sketch { .. } => "Sketch",
+        FeatureKind::Extrude { .. } => "Extrude",
+        FeatureKind::Revolve { .. } => "Revolve",
+        FeatureKind::Fillet { .. } => "Fillet",
+        FeatureKind::Chamfer { .. } => "Chamfer",
+        FeatureKind::Box { .. } => "Box",
+        FeatureKind::Cylinder { .. } => "Cylinder",
+        FeatureKind::Sphere { .. } => "Sphere",
+        FeatureKind::Torus { .. } => "Torus",
+        FeatureKind::Cone { .. } => "Cone",
+        FeatureKind::Combine { .. } => "Combine",
+        FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Rectangular { .. }, .. } => "Rectangular Pattern",
+        FeatureKind::Pattern { pattern: solidcraft_doc::PatternKind::Path { .. }, .. } => "Path Pattern",
+        FeatureKind::Pattern { .. } => "Circular Pattern",
+        FeatureKind::Mirror { .. } => "Mirror",
+        FeatureKind::ConstructionPlane { .. } => "Construction Plane",
+        FeatureKind::ConstructionAxis { .. } => "Construction Axis",
+        FeatureKind::ConstructionPoint { .. } => "Construction Point",
+        FeatureKind::Hole { .. } => "Hole",
+        FeatureKind::Thread { .. } => "Thread",
+        FeatureKind::Loft { .. } => "Loft",
+        FeatureKind::Sweep { .. } => "Sweep",
+        FeatureKind::Shell { .. } => "Shell",
+        FeatureKind::Draft { .. } => "Draft",
+        FeatureKind::Split { .. } => "Split Body",
+        FeatureKind::SplitFace { .. } => "Split Face",
+        _ => {
+            let raw = kind.type_name();
+            raw.strip_suffix("Feature").unwrap_or(raw)
+        }
+    }
+}
+
+fn format_param_value(p: &solidcraft_doc::ParamRow) -> String {
+    if let Some(text) = &p.text {
+        return format!("\"{}\"", truncate_chars(text, 64));
+    }
+    p.display_value
+        .or(p.value)
+        .filter(|v| v.is_finite())
+        .map_or_else(|| truncate_chars(&p.expression, 64), |v| format!("{v} {}", p.unit).trim().to_string())
+}
+
+fn format_param_detail(p: &solidcraft_doc::ParamRow) -> String {
+    if let Some(text) = &p.text {
+        return format!("\"{}\"", truncate_chars(text, 64));
+    }
+    let val = format_param_value(p);
+    let expr = p.expression.trim();
+    if !expr.is_empty() && expression_is_formula(expr) && !expr.eq_ignore_ascii_case(&val) {
+        format!("{val} = {}", truncate_chars(expr, 64))
+    } else {
+        val
+    }
+}
+
+fn expression_is_formula(expr: &str) -> bool {
+    let trimmed = expr.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    // Check if the expression is a plain numeric literal with an optional unit (`75`, `75 mm`, `75mm`).
+    let mut parts = trimmed.split_whitespace();
+    let first = parts.next().unwrap_or("");
+    let second = parts.next();
+    let third = parts.next();
+    let is_unit = |u: &str| !u.is_empty() && u.chars().all(|c| c.is_ascii_alphabetic() || c == '°' || c == '"');
+    if third.is_none() && first.parse::<f64>().is_ok() && second.is_none_or(is_unit) {
+        return false;
+    }
+    if second.is_none() {
+        let num_end = first.find(|c: char| c.is_ascii_alphabetic() || c == '°' || c == '"').unwrap_or(first.len());
+        if num_end > 0 && num_end < first.len() && first[..num_end].parse::<f64>().is_ok() && is_unit(&first[num_end..]) {
+            return false;
+        }
+    }
+    true
 }

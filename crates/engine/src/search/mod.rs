@@ -117,6 +117,7 @@ pub enum SearchScope {
     Features,
     Bodies,
     Sketches,
+    Construction,
     Components,
     Parameters,
     Joints,
@@ -133,6 +134,7 @@ impl SearchScope {
         SearchScope::Features,
         SearchScope::Bodies,
         SearchScope::Sketches,
+        SearchScope::Construction,
         SearchScope::Components,
         SearchScope::Parameters,
         SearchScope::Joints,
@@ -149,6 +151,7 @@ impl SearchScope {
             SearchScope::Features => "features",
             SearchScope::Bodies => "bodies",
             SearchScope::Sketches => "sketches",
+            SearchScope::Construction => "construction",
             SearchScope::Components => "components",
             SearchScope::Parameters => "parameters",
             SearchScope::Joints => "joints",
@@ -162,6 +165,28 @@ impl SearchScope {
     pub fn from_id(s: &str) -> Option<Self> {
         Self::ALL.iter().copied().find(|v| v.id().eq_ignore_ascii_case(s))
     }
+}
+
+/// Known item kind slugs emitted by built-in search sources (used for `kinds` filtering).
+pub const KNOWN_KINDS: &[&str] = &[
+    "command",
+    "feature",
+    "body",
+    "sketch",
+    "construction",
+    "component",
+    "occurrence",
+    "parameter",
+    "joint",
+    "named_view",
+    "standard_part",
+    "sample",
+    "plugin",
+];
+
+/// Normalize a caller-supplied kind filter slug if it matches a known kind.
+pub fn normalize_kind(s: &str) -> Option<&'static str> {
+    KNOWN_KINDS.iter().copied().find(|k| k.eq_ignore_ascii_case(s))
 }
 
 /// Result group in RFC 0019 §3.3 order (stated rank, never computed).
@@ -403,13 +428,24 @@ pub struct SearchQuery {
     pub text: String,
     pub surface: SearchSurface,
     pub scopes: Vec<SearchScope>,
+    /// Optional item-kind slugs (`body`, `component`, `occurrence`, `feature`, `sketch`,
+    /// `construction`, `parameter`, `joint`, `named_view`, `command`, `standard_part`, `sample`,
+    /// `plugin`). Empty matches every kind.
+    pub kinds: Vec<String>,
     pub limit: usize,
     pub include_disabled: bool,
 }
 
 impl SearchQuery {
     pub fn new(text: impl Into<String>) -> Self {
-        Self { text: text.into(), surface: SearchSurface::Global, scopes: Vec::new(), limit: DEFAULT_LIMIT, include_disabled: true }
+        Self {
+            text: text.into(),
+            surface: SearchSurface::Global,
+            scopes: Vec::new(),
+            kinds: Vec::new(),
+            limit: DEFAULT_LIMIT,
+            include_disabled: true,
+        }
     }
 
     pub fn with_surface(mut self, surface: SearchSurface) -> Self {
@@ -419,6 +455,11 @@ impl SearchQuery {
 
     pub fn with_scopes(mut self, scopes: Vec<SearchScope>) -> Self {
         self.scopes = scopes;
+        self
+    }
+
+    pub fn with_kinds(mut self, kinds: Vec<String>) -> Self {
+        self.kinds = kinds;
         self
     }
 
@@ -508,6 +549,7 @@ impl SearchRegistry {
             text: normalized_query.clone(),
             surface: query.surface,
             scopes: query.scopes.clone(),
+            kinds: query.kinds.clone(),
             limit: bounded_limit,
             include_disabled: query.include_disabled,
         };
@@ -543,6 +585,9 @@ impl SearchRegistry {
                             continue;
                         }
                         if !bounded_query.include_disabled && !item.enabled {
+                            continue;
+                        }
+                        if !bounded_query.kinds.is_empty() && !bounded_query.kinds.iter().any(|k| k.eq_ignore_ascii_case(&item.kind)) {
                             continue;
                         }
                         let Some(matched) = matcher::match_query_against_fields(&normalized_query, &item.fields, viewer) else {

@@ -31,7 +31,7 @@ pub struct ShortcutBox {
     /// Most recent first.
     pub recent: Vec<String>,
     pub pinned: Vec<String>,
-    design: Option<(u64, Vec<DesignRow>)>,
+    design: Option<(u64, String, Vec<DesignRow>)>,
     /// Retained paint content while closing; the public query still clears immediately.
     closing_text: String,
     /// The pointer moved while the box was open: only then does a hovered result reveal its
@@ -277,10 +277,17 @@ fn requires(schema: &Value, root: &Value, depth: usize) -> bool {
         || branches("allOf").is_some_and(|b| b.iter().any(|s| requires(s, root, depth + 1)))
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum DesignTarget {
-    Feature(u64),
+    Feature { id: u64, placement: Option<(u64, Vec<u64>)> },
+    Sketch { id: u64, placement: Option<(u64, Vec<u64>)> },
+    Construction(u64),
+    Body(String),
+    Component { id: u64, path: Vec<u64> },
+    Occurrence { component: u64, path: Vec<u64> },
     Parameter(String),
+    Joint(u64),
+    NamedView(String),
 }
 
 #[derive(Clone, Debug)]
@@ -295,53 +302,189 @@ fn bounded(text: &str) -> String {
     text.chars().take(MAX_QUERY).collect()
 }
 
-fn design_rows(app: &mut SolveApp, query: &str) -> Vec<DesignRow> {
-    if app.sbox.design.as_ref().is_none_or(|(revision, _)| *revision != app.session.revision) {
-        let doc = &app.session.doc;
-        let params = doc.param_rows();
-        let values: std::collections::BTreeMap<_, _> = params.iter().take(20_000).map(|p| (p.name.as_str(), p)).collect();
-        let mut rows = Vec::new();
-        for feature in doc.features.iter().take(10_000) {
-            let value = feature
-                .param_names
-                .iter()
-                .take(64)
-                .find_map(|name| values.get(name.as_str()))
-                .map(|p| p.display_value.or(p.value).filter(|v| v.is_finite()).map_or_else(|| bounded(&p.expression), |v| format!("{v} {}", p.unit)))
-                .unwrap_or_default();
-            rows.push(DesignRow {
-                label: bounded(&feature.name),
-                detail: format!("{} · {value}", solidcraft_ui_text::tr("search.feature")),
-                icon: crate::timeline::icon_of(&feature.kind),
-                target: DesignTarget::Feature(feature.id),
-            });
-        }
-        let icon = solidcraft_engine::find_command("parameters.change").map_or("", |c| c.icon);
-        for p in params.iter().filter(|p| p.source == "user").take(10_000) {
-            let value = p.display_value.or(p.value).filter(|v| v.is_finite()).map_or_else(|| bounded(&p.expression), |v| format!("{v} {}", p.unit));
-            rows.push(DesignRow {
-                label: bounded(&p.name),
-                detail: format!("{} · {value}", solidcraft_ui_text::tr("search.parameter")),
-                icon,
-                target: DesignTarget::Parameter(p.name.clone()),
-            });
-        }
-        app.sbox.design = Some((app.session.revision, rows));
+fn design_badge_key(target: &DesignTarget) -> &'static str {
+    match target {
+        DesignTarget::Feature { .. } => "search.feature",
+        DesignTarget::Sketch { .. } => "ui.sketch",
+        DesignTarget::Construction(_) => "ui.construction",
+        DesignTarget::Body(_) => "render.pick_body",
+        DesignTarget::Component { .. } => "render.pick_component",
+        DesignTarget::Occurrence { .. } => "ui.placement",
+        DesignTarget::Parameter(_) => "search.parameter",
+        DesignTarget::Joint(_) => "cmd.joint_create",
+        DesignTarget::NamedView(_) => "ui.drawing_panel.saved_view",
     }
-    let q = query.trim().to_lowercase();
-    let mut rows: Vec<_> = app
-        .sbox
-        .design
-        .as_ref()
-        .into_iter()
-        .flat_map(|(_, rows)| rows)
-        .filter_map(|row| {
-            let rank = score(&q, &row.label);
-            (rank > 0).then_some((rank, row.clone()))
-        })
+}
+
+fn meta_u64(meta: Option<&Value>, key: &str) -> Option<u64> {
+    meta.and_then(|m| m.get(key)).and_then(Value::as_u64)
+}
+
+fn meta_str<'a>(meta: Option<&'a Value>, key: &str) -> Option<&'a str> {
+    meta.and_then(|m| m.get(key)).and_then(Value::as_str)
+}
+
+fn meta_u64_vec(meta: Option<&Value>, key: &str) -> Vec<u64> {
+    meta.and_then(|m| m.get(key)).and_then(Value::as_array).map(|arr| arr.iter().filter_map(Value::as_u64).collect()).unwrap_or_default()
+}
+
+fn design_placement(meta: Option<&Value>) -> Option<(u64, Vec<u64>)> {
+    let comp = meta_u64(meta, "component").filter(|&c| c != 0)?;
+    let path = meta_u64_vec(meta, "occurrence_path");
+    (!path.is_empty()).then_some((comp, path))
+}
+
+fn design_rows(app: &mut SolveApp, query: &str) -> Vec<DesignRow> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Vec::new();
+    }
+    if let Some((revision, cached_q, cached_rows)) = &app.sbox.design
+        && *revision == app.session.revision
+        && cached_q == q
+    {
+        return cached_rows.clone();
+    }
+
+    use solidcraft_engine::search::{SearchQuery, SearchSurface, SearchViewer, global_search};
+
+    let result = global_search(&app.session, &SearchQuery::new(q).with_surface(SearchSurface::Design).with_limit(64), &SearchViewer::local_user());
+
+    // Prefer specialized `sketch` and `construction` rows over generic `feature` rows for the
+    // same feature id so the user never sees duplicate rows for one sketch or construction plane.
+    let specialized_features: BTreeSet<u64> = result
+        .hits
+        .iter()
+        .filter(|h| matches!(h.kind.as_str(), "sketch" | "construction"))
+        .filter_map(|h| meta_u64(h.metadata.as_ref(), "feature_id").or_else(|| h.id.parse::<u64>().ok()))
         .collect();
-    rows.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.label.cmp(&b.1.label)));
-    rows.into_iter().take(24).map(|(_, row)| row).collect()
+
+    let param_icon = solidcraft_engine::find_command("parameters.change").map_or("params", |c| c.icon);
+    let joint_icon = solidcraft_engine::find_command("joint.create").map_or("joint", |c| c.icon);
+
+    let mut rows = Vec::new();
+    for hit in result.hits {
+        let meta = hit.metadata.as_ref();
+        let (icon, target) = match hit.kind.as_str() {
+            "feature" => {
+                let Some(id) = meta_u64(meta, "feature_id").or_else(|| hit.id.parse::<u64>().ok()) else { continue };
+                if specialized_features.contains(&id) {
+                    continue;
+                }
+                let icon = app.session.doc.feature(id).map_or("timeline", |f| crate::timeline::icon_of(&f.kind));
+                (icon, DesignTarget::Feature { id, placement: design_placement(meta) })
+            }
+            "sketch" => {
+                let Some(id) = meta_u64(meta, "sketch_id").or_else(|| hit.id.parse::<u64>().ok()) else { continue };
+                ("sketch", DesignTarget::Sketch { id, placement: design_placement(meta) })
+            }
+            "construction" => {
+                let Some(id) = meta_u64(meta, "feature_id").or_else(|| hit.id.parse::<u64>().ok()) else { continue };
+                let icon = app.session.doc.feature(id).map_or("plane", |f| crate::timeline::icon_of(&f.kind));
+                (icon, DesignTarget::Construction(id))
+            }
+            "body" => {
+                let name = meta_str(meta, "name").unwrap_or(&hit.id).to_string();
+                let icon = match hit.icon.as_deref() {
+                    Some("mesh_body") => "mesh_body",
+                    Some("surface") => "surface",
+                    _ => "body",
+                };
+                (icon, DesignTarget::Body(name))
+            }
+            "component" => {
+                let Some(id) = meta_u64(meta, "component_id") else { continue };
+                let path = meta_u64_vec(meta, "occurrence_path");
+                ("component", DesignTarget::Component { id, path })
+            }
+            "occurrence" => {
+                let component = meta_u64(meta, "component_id").unwrap_or(0);
+                let path = meta_u64_vec(meta, "path");
+                if path.is_empty() {
+                    continue;
+                }
+                ("component", DesignTarget::Occurrence { component, path })
+            }
+            "parameter" => {
+                let name = meta_str(meta, "name").unwrap_or(&hit.id).to_string();
+                (param_icon, DesignTarget::Parameter(name))
+            }
+            "joint" => {
+                let Some(id) = meta_u64(meta, "joint_id").or_else(|| hit.id.parse::<u64>().ok()) else { continue };
+                (joint_icon, DesignTarget::Joint(id))
+            }
+            "named_view" => {
+                let name = meta_str(meta, "name").unwrap_or(&hit.id).to_string();
+                ("perspective", DesignTarget::NamedView(name))
+            }
+            _ => continue,
+        };
+
+        let badge = solidcraft_ui_text::tr(design_badge_key(&target));
+        let detail =
+            match (&hit.subtitle, &hit.detail) {
+                (Some(sub), Some(det)) if !det.is_empty() && !sub.eq_ignore_ascii_case(det) && !det.starts_with(sub.as_str()) => {
+                    if sub.contains('·') { format!("{sub} · {det}") } else { format!("{badge} · {det}") }
+                }
+                (_, Some(det)) if !det.is_empty() => format!("{badge} · {det}"),
+                (Some(sub), _) if !sub.is_empty() => sub.clone(),
+                _ => badge.to_string(),
+            };
+
+        rows.push(DesignRow { label: bounded(&hit.title), detail: bounded(&detail), icon, target });
+        if rows.len() >= 24 {
+            break;
+        }
+    }
+
+    app.sbox.design = Some((app.session.revision, q.to_string(), rows.clone()));
+    rows
+}
+
+fn activate_design_target(app: &mut SolveApp, target: DesignTarget) {
+    match target {
+        DesignTarget::Feature { id, placement } => {
+            app.edit_feature_in(id, placement.as_ref().map(|(c, p)| (*c, p.as_slice())));
+        }
+        DesignTarget::Sketch { id, placement } => {
+            app.edit_sketch_in(id, placement.as_ref().map(|(c, p)| (*c, p.as_slice())));
+        }
+        DesignTarget::Construction(id) => {
+            crate::browser::reveal_construction(app, id);
+        }
+        DesignTarget::Body(name) => {
+            let _ = app.run("select.set", json!({ "items": [solidcraft_engine::Sel::Body { name: name.clone() }] }));
+            crate::browser::reveal_body(app, &name);
+        }
+        DesignTarget::Component { id, path } => {
+            app.tree.picked_components = vec![id];
+            app.tree.picked_joints.clear();
+            if !path.is_empty() {
+                let _ = app.run("select.set", json!({ "items": [solidcraft_engine::Sel::Occurrence { path: path.clone() }] }));
+                crate::browser::reveal_occurrence(app, &path);
+            }
+        }
+        DesignTarget::Occurrence { component, path } => {
+            app.tree.picked_joints.clear();
+            if !path.is_empty() {
+                app.tree.picked_components = if component != 0 { vec![component] } else { Vec::new() };
+                let _ = app.run("select.set", json!({ "items": [solidcraft_engine::Sel::Occurrence { path: path.clone() }] }));
+                crate::browser::reveal_occurrence(app, &path);
+            }
+        }
+        DesignTarget::Parameter(name) => {
+            app.start("parameters.change");
+            if let Some(dialog) = &mut app.params {
+                dialog.filter = name;
+            }
+        }
+        DesignTarget::Joint(id) => {
+            crate::browser::reveal_joint(app, id);
+        }
+        DesignTarget::NamedView(name) => {
+            let _ = app.run("view.apply", json!({ "view": name }));
+        }
+    }
 }
 
 /// Same split, serde parser and error messages as the original command line.
@@ -637,10 +780,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                         let handle = format!("search:design:{index}");
                                         let mut item = ui_kit::MenuItem::new(&handle, &row.label, row.icon);
                                         item.highlighted = app.sbox.index == rows.len() + index;
-                                        let badge = solidcraft_ui_text::tr(match row.target {
-                                            DesignTarget::Feature(_) => "search.feature",
-                                            DesignTarget::Parameter(_) => "search.parameter",
-                                        });
+                                        let badge = solidcraft_ui_text::tr(design_badge_key(&row.target));
                                         item.shortcut = badge;
                                         let response = item.search_row(ui, &query, &row.detail, Some(ui_kit::SearchBadge::Kind));
                                         if item.highlighted && (up || down) {
@@ -736,15 +876,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             } else if let Some(row) = design.get(index.saturating_sub(rows.len())).filter(|_| index >= rows.len()) {
                 let target = row.target.clone();
                 close(app);
-                match target {
-                    DesignTarget::Feature(id) => app.edit_feature(id),
-                    DesignTarget::Parameter(name) => {
-                        app.start("parameters.change");
-                        if let Some(dialog) = &mut app.params {
-                            dialog.filter = name;
-                        }
-                    }
-                }
+                activate_design_target(app, target);
             }
         }
     }
@@ -1189,7 +1321,7 @@ mod tests {
         h.app.run("parameters.add", json!({"name":"box_width", "expression":"6 mm"})).unwrap();
         let rows = design_rows(&mut h.app, "box");
         assert_eq!(rows.len(), 2, "{rows:?}");
-        assert!(rows.iter().any(|r| matches!(r.target, DesignTarget::Feature(_)) && r.detail.contains("6 mm")));
+        assert!(rows.iter().any(|r| matches!(r.target, DesignTarget::Feature { .. }) && r.detail.contains("6 mm")));
         assert!(rows.iter().any(|r| matches!(r.target, DesignTarget::Parameter(_)) && r.detail.contains("6 mm")));
         h.call("ui.palette", json!({"text":"box_width"}));
         h.frames(3);
@@ -1202,6 +1334,81 @@ mod tests {
         h.step(&json!({"click":{"handle":"menu:search:design:0"}})).unwrap();
         assert!(!h.app.ui.palette_open);
         assert!(h.app.dialog.is_some(), "a feature opens its existing edit dialog");
+    }
+
+    #[test]
+    fn document_entity_search_finds_and_activates_bodies_components_sketches_construction_and_views() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+
+        // Build a rich live document: parameter formula, construction plane, component + sketch + extrude body, named view.
+        h.app.run("parameters.add", json!({"name": "mount_span", "expression": "40 mm"})).unwrap();
+        h.app.run("parameters.add", json!({"name": "mount_half", "expression": "mount_span / 2"})).unwrap();
+        let datum = h.app.run("construct.plane.offset", json!({"base": "XY", "offset": 12, "name": "MountDatum"})).unwrap();
+        let datum_id = datum["feature"].as_u64().unwrap();
+        let comp = h.app.run("component.create", json!({"name": "MountPlate"})).unwrap();
+        let comp_id = comp["component"].as_u64().unwrap();
+        h.app.run("component.activate", json!({"component": comp_id})).unwrap();
+        let sk = h.app.run("sketch.create", json!({"plane": "XY", "name": "MountOutline"})).unwrap();
+        let sketch_id = sk["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [30, 20]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"distance": 8, "name": "MountExtrude", "body_name": "MountBody"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("view.save", json!({"name": "MountIso", "camera": {"target": [0, 0, 0], "yaw": 0.6, "pitch": 0.35, "distance": 110}})).unwrap();
+
+        // 1. All document entity kinds appear and sketches/construction are deduplicated from generic features.
+        let rows = design_rows(&mut h.app, "Mount");
+        assert!(rows.iter().any(|r| matches!(&r.target, DesignTarget::Body(n) if n == "MountBody")), "{rows:?}");
+        assert!(rows.iter().any(|r| matches!(r.target, DesignTarget::Component { id, .. } if id == comp_id)), "{rows:?}");
+        assert!(rows.iter().any(|r| matches!(r.target, DesignTarget::Occurrence { component, .. } if component == comp_id)), "{rows:?}");
+        assert!(rows.iter().any(|r| matches!(r.target, DesignTarget::Sketch { id, .. } if id == sketch_id)), "{rows:?}");
+        assert!(rows.iter().any(|r| matches!(r.target, DesignTarget::Construction(id) if id == datum_id)), "{rows:?}");
+        assert!(rows.iter().any(|r| matches!(&r.target, DesignTarget::NamedView(n) if n == "MountIso")), "{rows:?}");
+        assert!(rows.iter().any(|r| matches!(&r.target, DesignTarget::Parameter(n) if n == "mount_half") && r.detail.contains("20 mm")), "{rows:?}");
+        // No duplicate generic Feature row for sketch_id or datum_id.
+        assert!(!rows.iter().any(|r| matches!(r.target, DesignTarget::Feature { id, .. } if id == sketch_id || id == datum_id)), "{rows:?}");
+
+        // 2. Picking a body from Ctrl+K selects it and reveals it in the Browser.
+        h.call("ui.palette", json!({"text": "MountBody"}));
+        h.frames(3);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        assert!(!h.app.ui.palette_open);
+        assert!(h.app.ui.show_browser);
+        assert!(
+            h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::Body { name } if name == "MountBody")),
+            "{:?}",
+            h.app.session.selection
+        );
+
+        // 3. Activating a component selects its placement and reveals it in the Browser.
+        let comp_target = rows.iter().find(|r| matches!(r.target, DesignTarget::Component { id, .. } if id == comp_id)).unwrap().target.clone();
+        activate_design_target(&mut h.app, comp_target);
+        assert_eq!(h.app.tree.picked_components, vec![comp_id]);
+        assert!(
+            h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::Occurrence { path } if !path.is_empty())),
+            "{:?}",
+            h.app.session.selection
+        );
+        assert!(h.app.tree.reveal_occurrence.is_some());
+
+        // 4. Activating a construction plane selects it and reveals it in the Browser.
+        activate_design_target(&mut h.app, DesignTarget::Construction(datum_id));
+        assert!(
+            h.app.session.selection.iter().any(|s| matches!(s, solidcraft_engine::Sel::Plane { name } if name == "MountDatum")),
+            "{:?}",
+            h.app.session.selection
+        );
+
+        // 5. Activating a named view applies its saved camera.
+        h.app.session.camera = None;
+        activate_design_target(&mut h.app, DesignTarget::NamedView("MountIso".into()));
+        assert!(h.app.session.camera.is_some(), "named view applies camera");
+
+        // 6. Activating a sketch enters sketch editing mode.
+        let sketch_target = rows.iter().find(|r| matches!(r.target, DesignTarget::Sketch { id, .. } if id == sketch_id)).unwrap().target.clone();
+        activate_design_target(&mut h.app, sketch_target);
+        assert_eq!(h.app.session.active_sketch, Some(sketch_id));
     }
 
     #[test]

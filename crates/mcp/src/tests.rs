@@ -4113,6 +4113,53 @@ fn search_tool_finds_commands_design_entities_and_standard_parts_with_typo_safet
     assert_eq!(batched["results"][0]["hits"][0]["title"], "FlangeBody", "{batched}");
 }
 
+#[test]
+fn search_tool_filters_document_entities_by_scope_and_kind() {
+    let mut s = server();
+    tool(&mut s, "set_parameter", json!({"name": "rotor_dia", "value": "50 mm"}));
+    tool(&mut s, "set_parameter", json!({"name": "rotor_rad", "value": "rotor_dia / 2"}));
+    tool(&mut s, "execute", json!({"command": "construct.plane.offset", "params": {"base": "XY", "offset": 10, "name": "RotorDatum"}}));
+    let comp = tool(&mut s, "execute", json!({"command": "component.create", "params": {"name": "RotorHub"}}));
+    let comp_id = comp["component"].as_u64().unwrap();
+    tool(&mut s, "execute", json!({"command": "component.activate", "params": {"component": comp_id}}));
+    tool(&mut s, "execute", json!({"command": "sketch.create", "params": {"plane": "XY", "name": "RotorSketch"}}));
+    tool(&mut s, "execute", json!({"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [20, 20]}}));
+    tool(&mut s, "execute", json!({"command": "sketch.finish", "params": {}}));
+    tool(&mut s, "execute", json!({"command": "solid.extrude", "params": {"distance": 8, "name": "RotorBoss", "body_name": "RotorBody"}}));
+    tool(&mut s, "execute", json!({"command": "component.activate", "params": {"component": 0}}));
+    tool(
+        &mut s,
+        "execute",
+        json!({"command": "view.save", "params": {"name": "RotorView", "camera": {"target": [0, 0, 0], "yaw": 0.4, "pitch": 0.3, "distance": 90}}}),
+    );
+
+    // Design surface returns all matching live document entities without commands.
+    let design = tool(&mut s, "search", json!({"query": "rotor", "surface": "design"}));
+    let hits = design["hits"].as_array().unwrap();
+    let kinds: Vec<&str> = hits.iter().filter_map(|h| h["kind"].as_str()).collect();
+    assert!(!kinds.contains(&"command"), "design surface excludes commands: {design}");
+    for expected in ["body", "component", "occurrence", "feature", "sketch", "construction", "parameter", "named_view"] {
+        assert!(kinds.contains(&expected), "missing `{expected}` in {kinds:?}");
+    }
+
+    // `kinds` filter narrows results to only bodies and parameters.
+    let filtered = tool(&mut s, "search", json!({"query": "rotor", "surface": "design", "kinds": ["body", "parameter"]}));
+    let fhits = filtered["hits"].as_array().unwrap();
+    assert!(!fhits.is_empty());
+    assert!(fhits.iter().all(|h| matches!(h["kind"].as_str(), Some("body" | "parameter"))), "{filtered}");
+    let rad = fhits.iter().find(|h| h["title"] == "rotor_rad").expect("formula param present");
+    assert!(rad["detail"].as_str().is_some_and(|d| d.contains("25 mm") && d.contains("rotor_dia / 2")), "{rad}");
+
+    // `construction` scope isolates construction planes/axes/points.
+    let construction = tool(&mut s, "search", json!({"query": "RotorDatum", "scopes": ["construction"]}));
+    assert_eq!(construction["sources_searched"], json!(["design.construction"]));
+    assert_eq!(construction["hits"][0]["kind"], "construction");
+
+    // Invalid kind returns a structured tool error.
+    let bad = raw_tool(&mut s, "search", json!({"query": "rotor", "kinds": ["bogus_kind"]}));
+    assert_eq!(bad["result"]["isError"], true, "{bad}");
+}
+
 /// `measure` with `items` (#1392): a sketch circle's diameter and radius, and two circles'
 /// centre-to-centre with the closest and farthest distances.
 #[test]

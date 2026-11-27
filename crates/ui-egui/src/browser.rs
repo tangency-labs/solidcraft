@@ -218,6 +218,28 @@ pub(crate) fn reveal_construction(app: &mut SolveApp, id: u64) {
     open_found_item_rows(app, component, &path, "construction", &id.to_string());
 }
 
+/// Find in Browser for a component placement: show the Browser and open ancestor placements down
+/// to `path`, scrolling its row into view.
+pub(crate) fn reveal_occurrence(app: &mut SolveApp, path: &[u64]) {
+    sync_reveals(app);
+    app.tree.search.clear();
+    app.ui.show_browser = true;
+    reveal_shared_panel(app, "browser");
+    find_occurrence_in_tree(app, path);
+}
+
+/// Find in Browser for an assembly joint: show the Browser and pick the joint so it highlights in
+/// the Browser, viewport and timeline.
+pub(crate) fn reveal_joint(app: &mut SolveApp, id: u64) {
+    sync_reveals(app);
+    app.tree.search.clear();
+    app.ui.show_browser = true;
+    reveal_shared_panel(app, "browser");
+    app.tree.picked_joints = vec![id];
+    app.tree.picked_components.clear();
+    let _ = app.run("select.clear", json!({}));
+}
+
 /// Open the rows above a component placement and no others: the document and each ancestor
 /// placement down to its parent, leaving the placement itself and its Bodies folder as they were.
 /// Rows that started closed and were opened by the previous reveal close again unless toggled by

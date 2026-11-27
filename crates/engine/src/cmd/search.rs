@@ -6,7 +6,9 @@ use super::CommandSpec;
 use crate::params::bad;
 use crate::schema::search::{SearchCommandResult, SearchParams};
 use crate::schema::{TypedContract, output_schema_for};
-use crate::search::{DEFAULT_LIMIT, MAX_LIMIT, MAX_QUERY_CHARS, SearchQuery, SearchScope, SearchSurface, SearchViewer, global_search};
+use crate::search::{
+    DEFAULT_LIMIT, KNOWN_KINDS, MAX_LIMIT, MAX_QUERY_CHARS, SearchQuery, SearchScope, SearchSurface, SearchViewer, global_search, normalize_kind,
+};
 use crate::{Result, Session};
 
 const SEARCH_CONTRACT: TypedContract<SearchParams> = TypedContract::new();
@@ -20,7 +22,8 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new("engine.search", "Searc
     .output(output_schema_for::<SearchCommandResult>)
     .params(
         "query: text to search for (up to 256 characters); \
-         scopes?: [commands|design|features|bodies|sketches|components|parameters|joints|named_views|parts|samples|plugins] (default: all sources for the surface); \
+         scopes?: [commands|design|features|bodies|sketches|construction|components|parameters|joints|named_views|parts|samples|plugins] (default: all sources for the surface); \
+         kinds?: [command|feature|body|sketch|construction|component|occurrence|parameter|joint|named_view|standard_part|sample|plugin] (default: all kinds); \
          surface?: global|commands|design|parts|preferences|browser (default global); \
          limit?: 1..500 (default 50); \
          include_disabled?: bool (default true) \
@@ -45,10 +48,24 @@ fn search(s: &mut Session, p: &Value) -> Result<Value> {
             .ok_or_else(|| {
                 bad(
                     cmd,
-                    "`scopes` takes commands, design, features, bodies, sketches, components, parameters, joints, named_views, parts, samples and plugins",
+                    "`scopes` takes commands, design, features, bodies, sketches, construction, components, parameters, joints, named_views, parts, samples and plugins",
                 )
             })?,
         Some(_) => return Err(bad(cmd, "`scopes` must be a list of valid search scope names")),
+    };
+    let kinds = match p.get("kinds") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) if items.len() <= KNOWN_KINDS.len() => items
+            .iter()
+            .map(|v| v.as_str().and_then(normalize_kind).map(str::to_string))
+            .collect::<Option<Vec<String>>>()
+            .ok_or_else(|| {
+                bad(
+                    cmd,
+                    "`kinds` takes command, feature, body, sketch, construction, component, occurrence, parameter, joint, named_view, standard_part, sample and plugin",
+                )
+            })?,
+        Some(_) => return Err(bad(cmd, "`kinds` must be a list of valid search kind names")),
     };
     let surface = match p.get("surface") {
         None | Some(Value::Null) => SearchSurface::Global,
@@ -72,7 +89,12 @@ fn search(s: &mut Session, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad(cmd, "`include_disabled` must be true or false")),
     };
 
-    let query = SearchQuery::new(query_text).with_surface(surface).with_scopes(scopes).with_limit(limit).with_include_disabled(include_disabled);
+    let query = SearchQuery::new(query_text)
+        .with_surface(surface)
+        .with_scopes(scopes)
+        .with_kinds(kinds)
+        .with_limit(limit)
+        .with_include_disabled(include_disabled);
     let result = global_search(s, &query, &SearchViewer::agent());
     serde_json::to_value(SearchCommandResult { result, param_warnings: Vec::new() }).map_err(|e| bad(cmd, e.to_string()))
 }

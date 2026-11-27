@@ -8,7 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 use super::check::whole;
-use crate::search::{MAX_LIMIT, MAX_QUERY_CHARS, SearchResult, SearchScope, SearchSurface};
+use crate::search::{KNOWN_KINDS, MAX_LIMIT, MAX_QUERY_CHARS, SearchResult, SearchScope, SearchSurface, normalize_kind};
 
 /// Query text for `engine.search`: a string of at most 256 characters.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -53,7 +53,7 @@ impl<'de> Deserialize<'de> for ScopeList {
                 .map(ScopeList)
                 .ok_or_else(|| {
                     D::Error::custom(whole(
-                        "`scopes` takes commands, design, features, bodies, sketches, components, parameters, joints, named_views, parts, samples and plugins",
+                        "`scopes` takes commands, design, features, bodies, sketches, construction, components, parameters, joints, named_views, parts, samples and plugins",
                     ))
                 }),
             _ => Err(D::Error::custom(whole("`scopes` must be a list of valid search scope names"))),
@@ -72,6 +72,42 @@ impl JsonSchema for ScopeList {
             "type": "array",
             "items": {"type": "string", "enum": ids},
             "maxItems": SearchScope::ALL.len()
+        })
+    }
+}
+
+/// Optional list of item kind slugs for `engine.search`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KindList(pub Vec<String>);
+
+impl<'de> Deserialize<'de> for KindList {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::Array(items) if items.len() <= KNOWN_KINDS.len() => items
+                .iter()
+                .map(|v| v.as_str().and_then(normalize_kind).map(str::to_string))
+                .collect::<Option<Vec<String>>>()
+                .map(KindList)
+                .ok_or_else(|| {
+                    D::Error::custom(whole(
+                        "`kinds` takes command, feature, body, sketch, construction, component, occurrence, parameter, joint, named_view, standard_part, sample and plugin",
+                    ))
+                }),
+            _ => Err(D::Error::custom(whole("`kinds` must be a list of valid search kind names"))),
+        }
+    }
+}
+
+impl JsonSchema for KindList {
+    fn schema_name() -> Cow<'static, str> {
+        "SearchKindList".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "Optional list of item kind slugs to keep (e.g. [\"body\", \"component\", \"parameter\"]). Empty or omitted keeps every kind.",
+            "type": "array",
+            "items": {"type": "string", "enum": KNOWN_KINDS},
+            "maxItems": KNOWN_KINDS.len()
         })
     }
 }
@@ -147,6 +183,9 @@ pub struct SearchParams {
     /// Optional scope filter restricting which sources run.
     #[serde(default)]
     pub scopes: Option<ScopeList>,
+    /// Optional item-kind filter restricting which result kinds are returned.
+    #[serde(default)]
+    pub kinds: Option<KindList>,
     /// Optional surface (`global`, `commands`, `design`, `parts`, `preferences`, `browser`).
     #[serde(default)]
     pub surface: Option<SurfaceParam>,
@@ -180,16 +219,17 @@ mod tests {
     fn search_schema_keys_and_strict_contract_agree() {
         let schema = input_schema_for::<SearchParams>();
         let keys: Vec<String> = schema_keys(schema.as_value()).into_iter().collect();
-        assert_eq!(keys, ["include_disabled", "limit", "query", "scopes", "surface"]);
+        assert_eq!(keys, ["include_disabled", "kinds", "limit", "query", "scopes", "surface"]);
 
         let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
-        let ok = s.execute("engine.search", &json!({"query": "extrude", "scopes": ["commands"], "limit": 5})).unwrap();
+        let ok = s.execute("engine.search", &json!({"query": "extrude", "scopes": ["commands"], "kinds": ["command"], "limit": 5})).unwrap();
         assert!(ok["hits"].as_array().is_some_and(|hits| !hits.is_empty()), "{ok}");
         assert!(s.execute("engine.search", &json!({"query": "extrude", "bogus": true})).is_err());
         assert!(s.execute("engine.search", &json!({})).is_err());
         assert!(s.execute("engine.search", &json!({"query": 42})).is_err());
         assert!(s.execute("engine.search", &json!({"query": "x", "limit": 0})).is_err());
         assert!(s.execute("engine.search", &json!({"query": "x", "scopes": ["unknown_scope"]})).is_err());
+        assert!(s.execute("engine.search", &json!({"query": "x", "kinds": ["unknown_kind"]})).is_err());
         assert!(s.execute("engine.search", &json!({"query": "x", "surface": "unknown_surface"})).is_err());
     }
 }
