@@ -3977,7 +3977,8 @@ pub fn prompt(app: &mut SolveApp, ctx: &egui::Context) {
                                     ui.spacing_mut().item_spacing.x = 0.0;
                                     ui.add_space(name_left - row_left);
                                     ui.vertical(|ui| {
-                                        let original = row.where_.as_deref().map_or_else(|| solidcraft_ui_text::tr("document.not_saved_yet"), crate::display_user_path);
+                                        let not_saved = solidcraft_ui_text::tr("document.not_saved_yet");
+                                        let original = row.where_.as_deref().map_or(not_saved, crate::display_user_path);
                                         let friendly = row.where_.as_deref().map_or_else(|| original.to_string(), crate::home::friendly_path);
                                         let shown = ui_kit::ellipsize_middle(
                                             ui,
