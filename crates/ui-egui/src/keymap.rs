@@ -1102,7 +1102,12 @@ fn shortcut_row(
         .collect();
     let width = ui.available_width().max(0.0);
     let actions_width = if editing { t.control_height * 2.0 + t.space_4 } else { 0.0 };
-    let name_width = ui_kit::ContentWidth::label(ui, label).min(width * 0.45);
+    // Where the keys come from, drawn under the name when that isn't SolidCraft's own keys. The
+    // name column fits it too, so a short name ("Fit") doesn't wrap the note letter by letter.
+    let source = key_source(app, command.id);
+    let source_width =
+        source.as_ref().map_or(0.0, |s| ui.painter().layout_no_wrap(s.clone(), egui::FontId::proportional(t.font_caption), t.text_dim).size().x);
+    let name_width = ui_kit::ContentWidth::label(ui, label).max(source_width).min(width * 0.45);
     let widest = widths.iter().copied().fold(0.0, f32::max);
     let beside = width - name_width - t.space_14 - actions_width - t.space_8 >= widest;
     let controls_width = (width - actions_width - t.space_8 - if beside { name_width + t.space_14 } else { 0.0 }).max(0.0);
@@ -1115,9 +1120,8 @@ fn shortcut_row(
         }
         line_width += if line_width > 0.0 { t.space_8 + next } else { *next };
     }
-    // The name, and under it where the keys come from when that isn't SolidCraft's own keys.
     let mut name_text = egui::text::LayoutJob::simple(label.to_owned(), egui::FontId::proportional(t.font_label), t.form_ink, 0.0);
-    if let Some(source) = key_source(app, command.id) {
+    if let Some(source) = source {
         name_text.append(&format!("\n{source}"), 0.0, egui::TextFormat::simple(egui::FontId::proportional(t.font_caption), t.text_dim));
     }
     name_text.wrap.max_width = if beside { name_width.max(1.0) } else { width.max(1.0) };
@@ -2593,22 +2597,22 @@ mod tests {
 
     #[test]
     fn a_shortcut_row_says_under_its_name_where_its_keys_come_from() {
-        let command = command_specs().into_iter().find(|c| c.id == "view.isometric").unwrap();
         let ctx = crate::fonts::test_context();
-        let source_of = |a: &SolveApp| {
+        let row_of = |a: &SolveApp, id: &str, label: &str| {
+            let command = command_specs().into_iter().find(|c| c.id == id).unwrap();
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                 ui.scope_builder(
                     egui::UiBuilder::new().max_rect(egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(500.0, 100.0))),
                     |ui| {
                         ui_kit::scope(ui, |ui| {
-                            shortcut_row(a, ui, command, &["End"], "Isometric View", false);
+                            shortcut_row(a, ui, command, &["End"], label, false);
                         });
                     },
                 );
             });
             output.textures_delta.clear();
             output.shapes.iter().find_map(|s| match &s.shape {
-                egui::Shape::Text(text) if text.galley.job.text.starts_with("Isometric View") => {
+                egui::Shape::Text(text) if text.galley.job.text.starts_with(label) => {
                     let rows = &text.galley.rows;
                     let last = rows.last().map(|r| text.pos.y + r.min_y()).unwrap_or_default();
                     Some((text.galley.job.text.clone(), text.pos.x, rows.len(), last))
@@ -2616,6 +2620,7 @@ mod tests {
                 _ => None,
             })
         };
+        let source_of = |a: &SolveApp| row_of(a, "view.isometric", "Isometric View");
         let mut a = app();
         let (plain, _, rows, _) = source_of(&a).unwrap();
         assert_eq!((plain.as_str(), rows), ("Isometric View", 1), "SolidCraft's own keys say nothing");
@@ -2625,6 +2630,9 @@ mod tests {
         assert_eq!(rows, 2, "on its own line");
         assert!((x - 20.0).abs() < 0.5, "at the row's left edge, under the name: {x}");
         assert!(last > 20.0 + solidcraft_theme::Tokens::get().font_label, "below the name: {last}");
+        // A name shorter than its note: the note still keeps to one line.
+        let (text, _, rows, _) = row_of(&a, "view.fit", "Fit").unwrap();
+        assert_eq!((text.as_str(), rows), ("Fit\nFrom NX", 2), "a short name doesn't wrap its note");
         bind(&mut a, "view.isometric", "F9", false).unwrap();
         assert_eq!(source_of(&a).unwrap().0, "Isometric View\nChanged by you");
     }
