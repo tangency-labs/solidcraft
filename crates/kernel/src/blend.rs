@@ -3935,6 +3935,56 @@ mod tests {
         let actual_all = before - crate::measure(&explicit).unwrap().volume;
         assert!((actual_all - removed_all).abs() < 2e-3, "kinked explicit: {actual_all} vs {removed_all}");
     }
+
+    /// Chamfering both rims of a through-hole cut in a 3 mm bent plate far from the origin must
+    /// not depend on the hole's `(x, y)` coordinates or fail `SmFace::Test #36` ("Face Near
+    /// missing Seam") when straight seam edges are canonical unbounded lines over finite edge
+    /// intervals.
+    #[test]
+    fn off_origin_through_hole_rim_chamfers_succeed_across_positions() {
+        use solidcore_record::{Loop2, Plane, Region2, Vec2};
+
+        // 3 mm bent L-bracket extruded along X from a (Y, Z) profile far from the origin:
+        // horizontal flange in z in [160, 163], vertical leg rising to z = 180.
+        let profile = [
+            Vec2::new(-220.0, 160.0),
+            Vec2::new(-180.0, 160.0),
+            Vec2::new(-180.0, 180.0),
+            Vec2::new(-183.0, 180.0),
+            Vec2::new(-183.0, 163.0),
+            Vec2::new(-220.0, 163.0),
+        ];
+        let plate = crate::extrude(&Plane::YZ, &[Region2 { outer: Loop2::polygon(&profile), holes: vec![] }], -90.0, -30.0).unwrap().remove(0);
+
+        // Sketch plane flush with the horizontal flange's bottom face (z = 160, normal -Z).
+        let bottom_plane = Plane { origin: Vec3::new(0.0, 0.0, 160.0), x: Vec3::X, y: Vec3::new(0.0, -1.0, 0.0) };
+        let r = 2.25;
+        let d = 0.5;
+        let both_chamfers_removed = 2.0 * std::f64::consts::PI * d * d * (r + d / 3.0);
+
+        for (cx, cy) in [(-74.0, -200.0), (-64.0, -202.0), (-61.5, -201.3), (-58.2, -199.7), (-52.7, -204.1)] {
+            let hole = crate::extrude(&bottom_plane, &[Region2 { outer: Loop2::circle(Vec2::new(cx, -cy), r), holes: vec![] }], -4.0, 0.0)
+                .unwrap()
+                .remove(0);
+            let with_hole = crate::boolean(&plate, &hole, crate::BoolOp::Cut).unwrap().unwrap();
+            let vol_before = crate::measure(&with_hole).unwrap().volume;
+
+            let bot_done =
+                chamfer(&with_hole, &[Vec3::new(cx + r, cy, 160.0)], d).unwrap_or_else(|e| panic!("bottom chamfer at ({cx}, {cy}) failed: {e}"));
+            assert!(bot_done.validity().is_empty(), "bottom at ({cx}, {cy}): {:?}", bot_done.validity());
+            let vb = crate::validity(&bot_done);
+            assert!(matches!(vb.smlib, Some(crate::SmlibCheck::Valid)), "bottom at ({cx}, {cy}): {:?}", vb.smlib);
+
+            let both_done =
+                chamfer(&bot_done, &[Vec3::new(cx + r, cy, 163.0)], d).unwrap_or_else(|e| panic!("top chamfer at ({cx}, {cy}) failed: {e}"));
+            assert!(both_done.validity().is_empty(), "both at ({cx}, {cy}): {:?}", both_done.validity());
+            let vt = crate::validity(&both_done);
+            assert!(matches!(vt.smlib, Some(crate::SmlibCheck::Valid)), "both at ({cx}, {cy}): {:?}", vt.smlib);
+
+            let removed = vol_before - crate::measure(&both_done).unwrap().volume;
+            assert!((removed - both_chamfers_removed).abs() < 1e-4, "at ({cx}, {cy}): {removed} vs {both_chamfers_removed}");
+        }
+    }
 }
 
 #[cfg(test)]
