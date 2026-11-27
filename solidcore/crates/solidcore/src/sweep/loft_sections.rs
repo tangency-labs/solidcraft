@@ -64,7 +64,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::error::{sweep::SweepFailure, Result, SolidError};
 use crate::math::{Point2, Vec2, Vec3, EFF_ZERO_SQRT};
-use crate::prism::profile::{casteljau, Seg2, H2};
+use crate::prism::profile::{casteljau, conic_segment, cross2, Seg2, H2};
 
 /// The weight of the tangent terms against the distance between the points.
 const TURN: f64 = 1.0;
@@ -514,10 +514,26 @@ pub(super) fn signed_area(segs: &[Seg2]) -> f64 {
 pub(super) fn centroid(segs: &[Seg2]) -> Point2 {
     let area = signed_area(segs);
     let (mut sx, mut sy) = (0.0, 0.0);
+    let chord = |a: Point2, b: Point2| {
+        (
+            (b.y - a.y) / 6.0 * (a.x * a.x + a.x * b.x + b.x * b.x),
+            -(b.x - a.x) / 6.0 * (a.y * a.y + a.y * b.y + b.y * b.y),
+        )
+    };
     for s in segs {
         if let Seg2::Line { a, b } = *s {
-            sx += (b.y - a.y) / 6.0 * (a.x * a.x + a.x * b.x + b.x * b.x);
-            sy -= (b.x - a.x) / 6.0 * (a.y * a.y + a.y * b.y + b.y * b.y);
+            let (x, y) = chord(a, b);
+            sx += x;
+            sy += y;
+        } else if let Seg2::Conic { a, apex, b, w } = *s {
+            // Exact: a high weight crowds the arc into a sliver of its parameter range.
+            let (x, y) = chord(a, b);
+            let (f, share) = conic_segment(w).unwrap_or((f64::NAN, f64::NAN));
+            let mid = (a + b) * 0.5;
+            let c = mid + (apex - mid) * share;
+            let region = cross2(apex - a, b - a) * 0.5 * f;
+            sx += x + region * c.x;
+            sy += y + region * c.y;
         } else {
             sx += integrate(|t| {
                 let (p, d) = (s.point_at(t), derivative(s, t));
@@ -2729,14 +2745,14 @@ mod tests {
         }
     }
 
-    /// A rectangle lofted to the same rectangle with its corners rounded (radius 4), both orders:
-    /// each corner runs to a point near the middle of its rounded corner, and the rounded
-    /// corners' ends split the rectangle's sides next to the corners (12 vertices each).
-    /// #22856: a conic of weight 999 over a 20 x 10 rectangle. Expected centres from the
-    /// conic's segment integrated on a dense polygon, and Archimedes' 2/5 for the parabola.
+    /// #22856: a conic over a 20 x 10 rectangle; centres from a dense polygon and Archimedes.
     #[test]
     fn a_high_weight_conic_keeps_its_area_centre() {
-        for (w, y) in [(999.0, 0.833_273_297_235), (1.0, -1.4)] {
+        for (w, y) in [
+            (999.0, 0.833_273_297_235),
+            (1.5, -0.785_126_169_625),
+            (1.0, -1.4),
+        ] {
             let segs = [
                 Seg2::Conic {
                     a: p(0.0, 0.0),
@@ -2756,6 +2772,9 @@ mod tests {
         }
     }
 
+    /// A rectangle lofted to the same rectangle with its corners rounded (radius 4), both orders:
+    /// each corner runs to a point near the middle of its rounded corner, and the rounded
+    /// corners' ends split the rectangle's sides next to the corners (12 vertices each).
     #[test]
     fn a_corner_runs_to_the_middle_of_a_rounded_corner() {
         let (w, h, r) = (40.0, 20.0, 4.0);

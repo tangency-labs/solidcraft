@@ -687,6 +687,31 @@ pub(super) fn conic_factor(w: f64) -> Option<(f64, f64)> {
     (f.is_finite()).then_some((f, gamma(64) * terms))
 }
 
+/// The arc-to-chord region of a rational quadratic arc of weight `w`: its area over the control
+/// triangle's, `f`, and its centroid's share of the median from the chord's midpoint to the apex,
+/// `w^2 (f - 2/3) / ((w^2 - 1) f)` (slices `2 sqrt(c y^2 - 2 y + 1)`, `c = 1 - 1/w^2`).
+pub(crate) fn conic_segment(w: f64) -> Option<(f64, f64)> {
+    let (f, _) = conic_factor(w)?;
+    let e = 1.0 - w;
+    let lifted = if e.abs() <= 0.5 {
+        // (f - 2/3) / e = -2/3 + 2 w sum_{k >= 1} 2 (k + 1) (2 e)^(k - 1) B(k + 3, k + 1)
+        let mut beta = 1.0 / 20.0; // k = 1: 3! 1! / 5!
+        let mut power = 1.0;
+        let mut sum = 0.0;
+        for k in 1..60u32 {
+            let kf = f64::from(k);
+            sum += 2.0 * (kf + 1.0) * power * beta;
+            power *= 2.0 * e;
+            beta *= (kf + 3.0) * (kf + 1.0) / ((2.0 * kf + 4.0) * (2.0 * kf + 5.0));
+        }
+        (-2.0 / 3.0 + 2.0 * w * sum) / -(1.0 + w)
+    } else {
+        (f - 2.0 / 3.0) / (w * w - 1.0)
+    };
+    let share = w * w * lifted / f;
+    share.is_finite().then_some((f, share))
+}
+
 /// The Bernstein coefficients of the product of two Bernstein polynomials (Farin §5.2), and a
 /// bound on their rounding.
 pub(crate) fn product(a: &[f64], b: &[f64]) -> Option<(Vec<f64>, f64)> {
