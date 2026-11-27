@@ -49,6 +49,14 @@ ui_kit::table_custom(ui, "params", &columns, "No parameters yet", |ui, table| {
         "Don't delete a row without a bin in the row itself.",
     ],
     demo: |ui, d| {
+        ui_kit::table_custom(ui, "gallery_card", &[ui_kit::Column::new("Name", 1.0).flex()], "Empty", |ui, card| {
+            card.headers(ui, |_, _| false);
+            for name in ["Width", "Height"] {
+                card.row(ui, name, name == "Height", |row| {
+                    row.cell(|ui| ui_kit::text(ui, name, ui_kit::Text::Cell));
+                });
+            }
+        });
         state(ui, "Editable, sortable (click Name)", |ui| {
             let columns =
                 [ui_kit::Column::new("Name", 1.0), ui_kit::Column::new("Expression", 1.5).flex(), ui_kit::Column::new("Delete", 0.3).icon_only()];

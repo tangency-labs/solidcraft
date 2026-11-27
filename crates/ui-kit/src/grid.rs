@@ -803,7 +803,7 @@ fn draw_cell<S: GridSource>(
     let in_range = range.is_some_and(|r| r.contains(row, col) && !r.single());
     let is_cursor = state.cursor.as_ref().is_some_and(|c| c.row == row && c.col == col);
     if in_range && shows_focus {
-        ui.painter().rect_filled(rect, 0.0, t.selected_bg);
+        ui.painter().rect_filled(rect, 0.0, t.selected_bg.blend(t.form_primary.gamma_multiply(0.15)));
     }
     let name = cell_name(cell);
     let handle = format!("grid:{}:{}:{}", cell.id, cell.key, cell.column.key);

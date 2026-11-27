@@ -1128,3 +1128,11 @@ in both themes. `SOLIDCRAFT_PREFERENCE_WIDGET_EVIDENCE=<dir>` keeps the CPU-rend
 `preference_widgets_and_figures_board_in_both_themes`.
 
 Assistant permission cards accept an optional `SettingsChoice.icon`; Do everything uses the existing warning artwork, including its exclamation mark.
+
+`CardSurface` supplies nested card frames, bands, rules and selection painting. The optional
+`colors.card_fill` theme-file key accepts `#rrggbb` or `#rrggbbaa`; its fallback lifts
+`dialog_body` towards `form_ink` and stays translucent. Built-in Light/Dark retain their
+original card overlays. Bands mix this fill with 6% `form_primary`; outlines use
+`container_border(dialog_border)`, rules use `dialog_rule`, hover uses `hover`, and selection
+uses `selected_bg` with a derived accent wash. Page switches use `field`, `selected_bg` and
+`form_primary` through control strokes. Gallery: Tables → Table.

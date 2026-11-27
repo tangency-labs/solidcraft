@@ -515,6 +515,7 @@ theme_keys! {
         app_bar_separator, surface_accent, mesh_accent, form_accent, render_accent, on_accent, agent_ok, agent_busy, app_bar_hover_subtle,
         app_bar_hover_button, app_bar_hover_strong, app_bar_tab_active,
         form_ink, form_dim, form_primary, form_primary_fill, form_error, form_error_fill, form_success, form_success_fill, dialog_body, dialog_footer, dialog_rule, control_fill, control_border, dialog_label, selected_ink, selected_bg,
+        card_fill,
     ],
     many: [continuity, logo, library_highlights, section_hatch, paper_lines, paper_dark_lines],
     icons: [highlight, agent, marker_halo],
@@ -1238,6 +1239,9 @@ pub fn resolve_base(theme: &ThemeFile) -> Tokens {
     }
     // A file that sets no colours is its base palette, exactly.
     if !theme.colors.is_empty() {
+        if !theme.colors.contains_key("card_fill") {
+            t.card_fill = t.derived_card_fill();
+        }
         solidcraft_theme::file_view_from_theme(&mut t, theme.base.is_dark(), |k| theme.colors.contains_key(k));
     }
     t
@@ -1613,6 +1617,20 @@ pub mod fixtures {
 mod tests {
     use super::fixtures::*;
     use super::*;
+
+    #[test]
+    fn card_fill_defaults_and_theme_file_colours() {
+        let blueprint: Value = serde_json::from_str(include_str!("../../look/themes/blueprint.json")).unwrap();
+        let blueprint = from_value(&json!({"format":FORMAT,"name":"Blueprint","base":"dark","colors":blueprint["colors"]})).unwrap();
+        for t in [Tokens::light(), Tokens::dark(), resolve(&blueprint)] {
+            assert_ne!(t.dialog_bg.blend(t.card_fill), t.dialog_bg);
+            assert!(t.card_fill.a() > 0 && t.card_fill.a() < 255);
+        }
+        let mut file = json!({"format":FORMAT,"name":"Cards","base":"dark","colors":{"card_fill":"#12345680"}});
+        assert_eq!(resolve(&from_value(&file).unwrap()).card_fill, parse_color("#12345680").unwrap());
+        file["colors"]["card_fill"] = json!("#nothex");
+        assert!(from_value(&file).is_err());
+    }
 
     #[test]
     fn option_definitions_reject_bad_keys_and_hostile_numbers() {

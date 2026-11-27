@@ -164,12 +164,12 @@ pub struct Table<'a> {
     view_width: f32,
     selection: Option<SelectionPaint>,
     previous_row: Option<(egui::Rect, bool)>,
-    groups: usize,
+    has_groups: bool,
     group_has_rows: bool,
     cell_selection: Option<CellSelectionState<'a>>,
     cells: Vec<CellRecord>,
     cell_paint: Option<CellPaint>,
-    cell_rules: Vec<(egui::Painter, egui::layers::ShapeIdx, egui::Rect, egui::Stroke)>,
+    cell_rules: Vec<(egui::Painter, egui::layers::ShapeIdx, egui::Rect)>,
     cell_background: CellBackground,
 }
 
@@ -189,11 +189,9 @@ pub fn table_custom<'a, R>(ui: &mut Ui, id: &str, columns: &'a [Column<'a>], emp
     let t = Tokens::get();
     let columns = columns.get(..columns.len().min(MAX_COLUMNS)).unwrap_or_default();
     let mut reveal = None;
-    let output = egui::Frame::NONE
+    let output = super::CardSurface(t)
+        .frame()
         .outer_margin(egui::Margin::same(t.space_12 as i8))
-        .corner_radius(t.radius_lg)
-        .fill(t.table_fill())
-        .stroke(t.container_border(t.border))
         .show(ui, |ui| {
             egui::ScrollArea::horizontal().id_salt(("table", id)).content_margin(egui::Margin::ZERO).auto_shrink([false, true]).show_viewport(
                 ui,
@@ -215,7 +213,7 @@ pub fn table_custom<'a, R>(ui: &mut Ui, id: &str, columns: &'a [Column<'a>], emp
                         view_width: viewport.width(),
                         selection: None,
                         previous_row: None,
-                        groups: 0,
+                        has_groups: false,
                         group_has_rows: false,
                         cell_selection: None,
                         cells: Vec::new(),
@@ -360,12 +358,6 @@ impl<'a> Table<'a> {
             if response.clicked() || response.drag_started() {
                 selection.select((cell.row, cell.column), state.mode == SelectionMode::Range && modifiers.shift);
                 response.request_focus();
-                ui.memory_mut(|memory| {
-                    memory.set_focus_lock_filter(
-                        response.id,
-                        egui::EventFilter { horizontal_arrows: true, vertical_arrows: true, escape: true, ..Default::default() },
-                    )
-                });
             }
         }
         if state.mode == SelectionMode::Range
@@ -383,34 +375,21 @@ impl<'a> Table<'a> {
                 if input.consume_key(modifiers, egui::Key::Escape) {
                     selection.clear();
                 } else if self.rows > 0 && !self.columns.is_empty() {
-                    let (mut row, mut column) = selection.focus.unwrap_or((0, 0));
+                    let (row, column) = selection.focus.unwrap_or((0, 0));
                     if state.mode == SelectionMode::Range && (modifiers.ctrl || modifiers.command) && input.consume_key(modifiers, egui::Key::A) {
                         selection.anchor = Some((0, 0));
                         selection.focus = Some((self.rows - 1, self.columns.len() - 1));
                     } else {
-                        let moved = if input.consume_key(modifiers, egui::Key::ArrowLeft) {
-                            column = column.saturating_sub(1);
-                            true
-                        } else if input.consume_key(modifiers, egui::Key::ArrowRight) {
-                            column = column.saturating_add(1).min(self.columns.len() - 1);
-                            true
-                        } else if input.consume_key(modifiers, egui::Key::ArrowUp) {
-                            row = row.saturating_sub(1);
-                            true
-                        } else if input.consume_key(modifiers, egui::Key::ArrowDown) {
-                            row = row.saturating_add(1).min(self.rows - 1);
-                            true
-                        } else if input.consume_key(modifiers, egui::Key::Home) {
-                            column = 0;
-                            true
-                        } else if input.consume_key(modifiers, egui::Key::End) {
-                            column = self.columns.len() - 1;
-                            true
-                        } else {
-                            false
-                        };
-                        if moved {
-                            selection.select((row, column), state.mode == SelectionMode::Range && modifiers.shift);
+                        let moves = [
+                            (egui::Key::ArrowLeft, (row, column.saturating_sub(1))),
+                            (egui::Key::ArrowRight, (row, column.saturating_add(1).min(self.columns.len() - 1))),
+                            (egui::Key::ArrowUp, (row.saturating_sub(1), column)),
+                            (egui::Key::ArrowDown, (row.saturating_add(1).min(self.rows - 1), column)),
+                            (egui::Key::Home, (row, 0)),
+                            (egui::Key::End, (row, self.columns.len() - 1)),
+                        ];
+                        if let Some((_, cell)) = moves.into_iter().find(|(key, _)| input.consume_key(modifiers, *key)) {
+                            selection.select(cell, state.mode == SelectionMode::Range && modifiers.shift);
                         }
                     }
                 }
@@ -441,32 +420,15 @@ impl<'a> Table<'a> {
             block.max = (block.max.to_vec2() * ppp).round().to_pos2() / ppp;
             solidcraft_ui_registry::publish_rect(&format!("dialog:table:{}:selection", self.id), block);
             if let Some(paint) = &self.cell_paint {
-                let fill = if selection.single().is_some() { t.input_fill() } else { t.form_primary.gamma_multiply(0.15) };
-                paint.painter.set(paint.fill, egui::Shape::rect_filled(block, t.control_radius, fill));
-                paint.painter.set(
-                    paint.outline,
-                    egui::Shape::rect_stroke(block, t.control_radius, egui::Stroke::new(1.5, t.form_primary), egui::StrokeKind::Inside),
-                );
+                let card = super::CardSurface(t);
+                paint.painter.set(paint.fill, card.cell_selection(block));
+                paint.painter.set(paint.outline, card.focus(block, t.control_radius));
             }
         }
         // Split the ordinary row rules outside the selected columns. The single fill covers
         // every internal boundary; neither a hairline nor cell clipping can cut it in two.
-        for (painter, slot, row, stroke) in &self.cell_rules {
-            let y = row.top();
-            let line = |left, right| egui::Shape::line_segment([egui::pos2(left, y), egui::pos2(right, y)], *stroke);
-            let shapes = if block.is_positive() && y > block.top() && y < block.bottom() {
-                let mut shapes = Vec::new();
-                if row.left() < block.left() {
-                    shapes.push(line(row.left(), block.left().min(row.right())));
-                }
-                if row.right() > block.right() {
-                    shapes.push(line(block.right().max(row.left()), row.right()));
-                }
-                shapes
-            } else {
-                vec![line(row.left(), row.right())]
-            };
-            painter.set(*slot, egui::Shape::Vec(shapes));
+        for (painter, slot, row) in &self.cell_rules {
+            painter.set(*slot, super::CardSurface(t).rule(*row, block));
         }
     }
 
@@ -517,8 +479,7 @@ impl<'a> Table<'a> {
         let t = Tokens::get();
         let width = self.width();
         let (rect, _) = ui.allocate_exact_size(vec2(width, row_height() + t.space_6), egui::Sense::hover());
-        let radius = egui::CornerRadius { nw: t.radius_lg, ne: t.radius_lg, sw: 0, se: 0 };
-        ui.painter().rect_filled(rect, radius, t.text.gamma_multiply(0.08));
+        ui.painter().add(super::CardSurface(t).band(rect, true));
         let mut left = rect.left() + t.space_12;
         let first_left = left;
         let mut dividers = Vec::new();
@@ -544,7 +505,7 @@ impl<'a> Table<'a> {
             }
             left = at.right() + t.space_8;
         }
-        ui.painter().hline(rect.x_range(), rect.bottom(), t.tertiary_border(t.dialog_rule));
+        ui.painter().hline(rect.x_range(), rect.bottom(), super::CardSurface(t).rule_stroke());
         if let Some(key) = resize {
             for (index, x) in dividers {
                 self.column_divider(ui, key, index, x, rect);
@@ -611,25 +572,12 @@ impl<'a> Table<'a> {
             *open = !*open;
             response.mark_changed();
         }
-        if self.cell_selection.is_some() {
-            self.cell_background.shapes.push(egui::Shape::rect_filled(rect, 0, t.text.gamma_multiply(0.05)));
-        } else {
-            ui.painter().rect_filled(rect, 0, t.text.gamma_multiply(0.05));
+        self.background(ui.painter(), super::CardSurface(t).band(rect, false));
+        if self.has_groups {
+            self.rule(ui, rect);
         }
-        let rule = t.tertiary_border(t.dialog_rule);
-        if self.groups > 0 {
-            if self.cell_selection.is_some() {
-                self.cell_rules.push((ui.painter().clone(), ui.painter().add(egui::Shape::Noop), rect, rule));
-            } else {
-                ui.painter().hline(rect.x_range(), rect.top(), rule);
-            }
-        }
-        if self.cell_selection.is_some() {
-            self.cell_rules.push((ui.painter().clone(), ui.painter().add(egui::Shape::Noop), rect.translate(vec2(0.0, rect.height())), rule));
-        } else {
-            ui.painter().hline(rect.x_range(), rect.bottom(), rule);
-        }
-        self.groups = self.groups.saturating_add(1);
+        self.rule(ui, rect.translate(vec2(0.0, rect.height())));
+        self.has_groups = true;
 
         let icon = egui::Rect::from_center_size(rect.left_center() + vec2(t.space_12, 0.0), vec2(t.space_12, t.space_12));
         super::disclosure(ui.painter(), icon.center(), *open, t.form_dim);
@@ -648,15 +596,10 @@ impl<'a> Table<'a> {
         let painter = ui.painter().with_clip_rect(ui.clip_rect().intersect(rect));
         painter.galley(egui::pos2(left, rect.center().y - galley.size().y * 0.5), galley, t.form_dim);
         let pill = egui::Rect::from_min_size(egui::pos2(left + label_width + t.space_8, rect.center().y - t.space_8), vec2(count_width, t.space_16));
-        painter.rect_filled(pill, (t.space_16 * 0.5).round() as u8, t.text.gamma_multiply(0.13));
+        painter.rect_filled(pill, (t.space_16 * 0.5).round() as u8, t.selected_bg);
         painter.galley(egui::pos2(pill.left() + t.space_6, pill.center().y - count_galley.size().y * 0.5), count_galley, t.form_dim);
         if response.has_focus() {
-            painter.rect_stroke(
-                rect.shrink2(vec2(t.space_4, t.space_2 * 0.5)),
-                t.radius_md,
-                egui::Stroke::new(1.5, t.form_primary),
-                egui::StrokeKind::Inside,
-            );
+            painter.add(super::CardSurface(t).focus(rect.shrink2(vec2(t.space_4, t.space_2 * 0.5)), t.radius_md));
         }
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::DisclosureTriangle, ui.is_enabled(), *open, label));
         ui.ctx().accesskit_node_builder(response.id, |node| node.set_expanded(*open));
@@ -666,12 +609,27 @@ impl<'a> Table<'a> {
         response.on_hover_cursor(egui::CursorIcon::PointingHand)
     }
 
+    fn background(&mut self, painter: &egui::Painter, shape: egui::Shape) {
+        if self.cell_selection.is_some() {
+            self.cell_background.shapes.push(shape);
+        } else {
+            painter.add(shape);
+        }
+    }
+
+    fn rule(&mut self, ui: &Ui, row: egui::Rect) {
+        if self.cell_selection.is_some() {
+            self.cell_rules.push((ui.painter().clone(), ui.painter().add(egui::Shape::Noop), row));
+        } else {
+            ui.painter().add(super::CardSurface(Tokens::get()).rule(row, egui::Rect::NOTHING));
+        }
+    }
+
     fn finish_selection(&mut self) {
         if let Some(selection) = self.selection.take() {
             let t = Tokens::get();
             let rect = selection.rect;
-            let fill = if selection.hovered { t.selected_bg.lerp_to_gamma(t.form_primary, 0.08) } else { t.selected_bg };
-            let shape = egui::Shape::rect_filled(rect, t.radius_md, fill);
+            let shape = super::CardSurface(t).selection(rect, selection.hovered);
             if self.cell_selection.is_some() {
                 self.cell_background.shapes.push(shape);
             } else {
@@ -743,20 +701,11 @@ impl<'a> Table<'a> {
         if !selected || !adjacent {
             self.finish_selection();
         }
-        if let Some((previous, was_selected)) = self.previous_row
+        if let Some((_, was_selected)) = self.previous_row
             && adjacent
             && !(selected && was_selected)
         {
-            if self.cell_selection.is_some() {
-                self.cell_rules.push((
-                    ui.painter().clone(),
-                    ui.painter().add(egui::Shape::Noop),
-                    rect,
-                    t.tertiary_border(t.dialog_rule.gamma_multiply(0.5)),
-                ));
-            } else {
-                ui.painter().hline(rect.x_range(), previous.bottom(), t.tertiary_border(t.dialog_rule.gamma_multiply(0.5)));
-            }
+            self.rule(ui, rect);
         }
         self.previous_row = Some((rect, selected));
         if selected {
@@ -818,12 +767,7 @@ impl<'a> Table<'a> {
             return response;
         }
         if !selected && hovered {
-            let shape = egui::Shape::rect_filled(rect, t.radius_md, t.text.gamma_multiply(0.06));
-            if self.cell_selection.is_some() {
-                self.cell_background.shapes.push(shape);
-            } else {
-                ui.painter().add(shape);
-            }
+            self.background(ui.painter(), egui::Shape::rect_filled(rect, t.radius_md, t.hover));
         }
         response.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, ui.is_enabled(), selected, key));
         solidcraft_ui_registry::publish_rect(&format!("dialog:table:{}:{key}", self.id), rect);
@@ -842,7 +786,7 @@ impl<'a> Table<'a> {
         });
         ui.advance_cursor_after_rect(allocation);
         if response.has_focus() {
-            ui.painter().rect_stroke(rect, t.radius_md, egui::Stroke::new(1.5, t.form_primary), egui::StrokeKind::Inside);
+            ui.painter().add(super::CardSurface(t).focus(rect, t.radius_md));
         }
         response
     }

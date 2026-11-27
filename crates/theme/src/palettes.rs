@@ -257,6 +257,7 @@ impl Tokens {
             dialog_label: Color32::from_rgb(58, 70, 86),
             selected_ink: Color32::from_rgb(26, 80, 127),
             selected_bg: Color32::from_rgb(232, 241, 250),
+            card_fill: Color32::from_rgba_unmultiplied_const(255, 255, 255, 153),
             figure_ground: Color32::from_rgb(247, 248, 250),
             figure_line: Color32::from_rgb(111, 124, 143),
             figure_highlight: Color32::WHITE,
@@ -513,6 +514,7 @@ impl Tokens {
         t.form_error_fill = t.timeline_item_error;
         t.form_success = Color32::from_rgb(143, 219, 154);
         t.form_success_fill = Color32::from_rgb(44, 74, 51);
+        t.card_fill = Color32::from_rgba_unmultiplied_const(255, 255, 255, 14);
         t
     }
 

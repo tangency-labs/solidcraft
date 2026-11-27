@@ -92,8 +92,13 @@ pub(super) fn highlight(ui: &Ui, track: egui::Rect, target: egui::Rect, reduced:
         .shrink2(vec2(0.0, t.space_2));
     solidcraft_ui_registry::publish_rect("page_switch:highlight", pill);
     egui::Shape::Vec(vec![
-        egui::Shape::rect_filled(pill, t.control_radius, if solidcraft_theme::is_dark() { t.nav_hover } else { t.control_fill }),
-        egui::Shape::rect_stroke(pill, t.control_radius, t.container_border(t.dialog_border), egui::StrokeKind::Inside),
+        egui::Shape::rect_filled(pill, t.control_radius, t.selected_bg),
+        egui::Shape::rect_stroke(
+            pill,
+            t.control_radius,
+            egui::Stroke::new(t.control_border_stroke(t.form_primary).width, t.form_primary),
+            egui::StrokeKind::Inside,
+        ),
     ])
 }
 

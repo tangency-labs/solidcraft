@@ -30,7 +30,7 @@ impl SelectionBar<'_> {
                 .inner_margin(egui::Margin { left: t.space_12 as i8, right: t.space_8 as i8, top: t.space_6 as i8, bottom: t.space_6 as i8 })
                 .corner_radius(t.radius_lg)
                 .fill(t.selected_bg)
-                .stroke(egui::Stroke::new(t.control_border_stroke(t.form_primary).width, t.form_primary.gamma_multiply(0.33)));
+                .stroke(egui::Stroke::new(t.control_border_stroke(t.form_primary).width, t.form_primary));
             let width = (ui.available_width() - frame.total_margin().sum().x).max(0.0);
             let shown = frame.show(ui, |ui| {
                 ui.set_min_width(width);

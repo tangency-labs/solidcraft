@@ -1365,6 +1365,8 @@ pub struct Tokens {
     pub dialog_label: Color32,
     pub selected_ink: Color32,
     pub selected_bg: Color32,
+    /// Translucent nested content card, lifted from the dialog body.
+    pub card_fill: Color32,
     /// Ground under every Preferences figure.
     pub figure_ground: Color32,
     /// Outlines and reference lines of Preferences figures.
@@ -1470,10 +1472,11 @@ pub struct Tokens {
 }
 
 impl Tokens {
-    /// Neutral light over glass, shared by table cards in built-in and custom themes.
-    /// Keep this translucent so the window beneath the card remains visible.
-    pub fn table_fill(&self) -> Color32 {
-        Color32::from_white_alpha(if is_dark() { 14 } else { 153 })
+    /// Default for theme files that omit card_fill; built-in palettes retain their glass overlays.
+    pub fn derived_card_fill(&self) -> Color32 {
+        let [r, g, b, _] = self.form_ink.to_srgba_unmultiplied();
+        let lift = (f32::from(r) + f32::from(g) + f32::from(b)) / 7650.0;
+        self.dialog_body.lerp_to_gamma(self.form_ink, lift).gamma_multiply(0.6)
     }
 
     /// An expanded outline follows its fill, including a theme's deliberately square corners.
