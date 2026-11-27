@@ -1117,7 +1117,7 @@ mod tests {
     #[test]
     fn refine_sag_evaluates_each_interior_edge_once() {
         let b = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
-        let loops = [0..4];
+        let loops = std::slice::from_ref(&(0..4));
         let mut seeds = Vec::new();
         for i in 1..=3u32 {
             for j in 1..=3u32 {
@@ -1130,7 +1130,7 @@ mod tests {
             Some((Vec3::new(u, v, 0.0), Some(Vec3::Z)))
         };
         let sag = Sag { eval: &flat, tol: 1e-3, h: 10.0, turn: None, scale: [1.0, 1.0] };
-        let Some((extra, tris)) = triangulate(&b, &loops, Fill { seeds: &seeds, refine: Some((sag, 200)), shape: false, lenient: false, flat: None }) else {
+        let Some((extra, tris)) = triangulate(&b, loops, Fill { seeds: &seeds, refine: Some((sag, 200)), shape: false, lenient: false, flat: None }) else {
             panic!("meshes")
         };
         let mut uv = b.to_vec();
