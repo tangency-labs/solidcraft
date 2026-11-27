@@ -928,8 +928,10 @@ What the port does today:
     cusp, and found that touch 1.5e-4 from it: a vertex there split the tool's line edge and
     not the block's arc edge, and the merge failed in `make_faceuse`. The meeting is taken
     where it lies more than the tolerance and at most a thousand times it from the point,
-    and the point and the middle of the stretch between them lie within the tolerance of
-    both edges.
+    and the point and the meeting lie within the tolerance of both edges and so does the
+    whole stretch between them, by enclosure and not by sampling: the line's distance is
+    convex, so its two ends bound it, and the circle's out-of-plane and radial deviations
+    along the stretch are bounded in outward-rounded intervals (`stretch_within_circle`).
 
   Bare surfaces and curves keep upstream's zero contact.
 
