@@ -2600,7 +2600,7 @@ fn a_notch_through_a_thin_round_on_a_large_half_torus_is_cut() {
     assert_eq!(class(0.0, 500.38, 0.05), Inside, "beside the notch");
     // The section's height at a distance `rho` from the axis: the tube over the flat face, less
     // the outer round (centre 0.05 above the face, 0.45 from the tube's centre) under it.
-    let (big, tube, round) = (500.0, 0.5, 0.05);
+    let (big, tube, round): (f64, f64, f64) = (500.0, 0.5, 0.05);
     let round_x = big + ((tube - round) * (tube - round) - round * round).sqrt();
     let height = |rho: f64| -> f64 {
         let d = rho - big;
