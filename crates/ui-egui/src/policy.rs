@@ -243,6 +243,8 @@ fn parse(kind: Kind, value: &Value) -> Option<Setting> {
         (Kind::Permission, Value::Text(text)) if text.len() <= MAX_CHOICE => {
             crate::agent_chat::agents::Mode::parse(&text.trim().to_ascii_lowercase()).map(|mode| Setting::Text(mode.id().into()))
         }
+        // Checked before `follow_path` trims, so a newline or tab at either end is refused too.
+        (Kind::ThemeFile, Value::Text(text)) if text.chars().any(char::is_control) => None,
         (Kind::ThemeFile, Value::Text(text)) => crate::theme_files::follow_path(text).ok().filter(|path| !path.is_empty()).map(Setting::Text),
         _ => None,
     }
@@ -826,6 +828,8 @@ mod tests {
             Value::Text("  ".into()),
             Value::Text("a\nb".into()),
             Value::Text("a\u{0}b".into()),
+            Value::Text("\n/etc/solidcraft/theme.json\t".into()),
+            Value::Text("/etc/solidcraft/theme.json\r\n".into()),
             Value::Text("x".repeat(5000)),
             Value::Number(1),
         ] {
