@@ -836,6 +836,79 @@ fn send_to_slicer_sends_step_to_the_slicers_that_read_it() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// #23257: `file.send_to_slicer` passes `quality` (`standard`, `fine`, `finest`) to the mesh
+/// builder; omitting `quality` keeps `standard` as the default, and unknown values are refused.
+#[cfg(unix)]
+#[test]
+fn send_to_slicer_uses_requested_mesh_quality() {
+    use std::os::unix::fs::PermissionsExt;
+    let _turn = CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = std::env::temp_dir().join(format!("solidcraft-send-quality-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("fake-slicer");
+    std::fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let keep = dir.join("kept");
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 200, "width": 100, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"base": [100, 50, -1], "radius": 1.5, "height": 7, "operation": "cut"}));
+    crate::slicers::set_chosen_programs(&[script.to_string_lossy().into_owned()]);
+    let stl_triangles = |b: &[u8]| u32::from_le_bytes([b[80], b[81], b[82], b[83]]);
+    let mut counts = Vec::new();
+    for quality in [None, Some("standard"), Some("fine"), Some("finest")] {
+        let mut p = json!({"slicer": script, "bodies": ["Plate"], "format": "stl", "wait": "no", "copy_to": keep});
+        if let Some(q) = quality {
+            p["quality"] = json!(q);
+        }
+        let r = s.execute("file.send_to_slicer", &p).unwrap();
+        let bytes = std::fs::read(r["path"].as_str().unwrap()).unwrap();
+        counts.push(stl_triangles(&bytes));
+    }
+    let standard_3mf =
+        s.execute("file.send_to_slicer", &json!({"slicer": script, "bodies": ["Plate"], "format": "3mf", "wait": "no", "copy_to": keep})).unwrap();
+    let finest_3mf = s
+        .execute(
+            "file.send_to_slicer",
+            &json!({"slicer": script, "bodies": ["Plate"], "format": "3mf", "quality": "finest", "wait": "no", "copy_to": keep}),
+        )
+        .unwrap();
+    let bad = s.execute(
+        "file.send_to_slicer",
+        &json!({"slicer": script, "bodies": ["Plate"], "format": "stl", "quality": "ultra", "wait": "no", "copy_to": keep}),
+    );
+    crate::slicers::set_chosen_programs(&[]);
+    assert_eq!(counts[0], counts[1], "standard is the default: {counts:?}");
+    assert!(counts[2] > counts[1] && counts[3] > counts[2], "finer quality meshes more triangles: {counts:?}");
+    assert!(finest_3mf["bytes"].as_u64().unwrap() > standard_3mf["bytes"].as_u64().unwrap(), "3MF grows with Finest");
+    assert!(bad.unwrap_err().to_string().contains("`quality` must be standard, fine or finest"));
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// #23257: `file.open_in_easyprint` passes `quality` to the mesh builder with `standard` as default.
+#[test]
+fn open_in_easyprint_uses_requested_mesh_quality() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 200, "width": 100, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"base": [100, 50, -1], "radius": 1.5, "height": 7, "operation": "cut"}));
+    let seen = easyprint_host(&mut s, Ok(()));
+    for quality in [None, Some("standard"), Some("fine"), Some("finest")] {
+        let mut p = json!({"consent": true, "bodies": ["Plate"], "format": "stl"});
+        if let Some(q) = quality {
+            p["quality"] = json!(q);
+        }
+        s.execute("file.open_in_easyprint", &p).unwrap();
+    }
+    let bad = s.execute("file.open_in_easyprint", &json!({"consent": true, "bodies": ["Plate"], "format": "stl", "quality": "ultra"}));
+    assert!(bad.unwrap_err().to_string().contains("`quality` must be standard, fine or finest"));
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 4, "invalid quality did not upload");
+    let stl_triangles = |b: &[u8]| u32::from_le_bytes([b[80], b[81], b[82], b[83]]);
+    let counts: Vec<u32> = seen.iter().map(|(_, b)| stl_triangles(b)).collect();
+    assert_eq!(counts[0], counts[1], "standard is the default: {counts:?}");
+    assert!(counts[2] > counts[1] && counts[3] > counts[2], "finer quality meshes more triangles: {counts:?}");
+}
+
 type Uploads = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
 /// A session whose "host" records what it is handed and answers `answer`.

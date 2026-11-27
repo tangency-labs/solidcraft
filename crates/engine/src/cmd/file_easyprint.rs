@@ -28,7 +28,7 @@ pub(super) struct Exported {
 /// Export the bodies (the selected ones when none are named), each laid on its print face (a STEP
 /// file too: the bodies are turned before they are written). A 3MF that can't be written is
 /// written as an STL, and `fell_back` says so.
-pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Format) -> Result<Exported> {
+pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Format, quality: solidcraft_io::MeshQuality) -> Result<Exported> {
     let mut bodies = named.to_vec();
     if bodies.is_empty() {
         bodies = s.selected_items()?.into_iter().filter_map(|x| if let crate::Sel::Body { name } = x { Some(name) } else { None }).collect();
@@ -39,9 +39,7 @@ pub(super) fn export_bodies(s: &Session, cmd: &str, named: &[String], format: Fo
     let mut doc = s.doc.painted(&*s.world_state()?);
     let mut laid = super::print_face::lay_on_print_faces(s, &mut doc, &bodies, &[]);
     // What meshing the bodies reported goes with the print-face warnings.
-    let write = |format| {
-        solidcraft_io::export_with_parts_noted(&doc, &bodies, &[], format, &s.doc.name, &s.doc.metadata, solidcraft_io::MeshQuality::Standard, None)
-    };
+    let write = |format| solidcraft_io::export_with_parts_noted(&doc, &bodies, &[], format, &s.doc.name, &s.doc.metadata, quality, None);
     let mut fell_back = false;
     let ((bytes, notes), ext) = match (format, write(format)) {
         (_, Ok(b)) => (b, extension(format)),
@@ -71,11 +69,12 @@ pub(super) fn open_in_easyprint(s: &mut Session, p: &Value) -> Result<Value> {
         Some("stl") => Format::StlBinary,
         Some(other) => return Err(bad(cmd, format!("unknown mesh format `{other}` (3mf, stl)"))),
     };
+    let quality = super::mesh_quality(p, cmd)?;
     let upload = s.easyprint_upload.clone().ok_or_else(|| bad(cmd, "not supported yet: this app has no way to reach EasyPrint"))?;
     if !bool_(p, "consent").unwrap_or(false) {
         return Err(bad(cmd, "this uploads the model to Printables' servers: ask the user, then pass `consent: true`"));
     }
-    let Exported { bytes, ext, fell_back, laid, .. } = export_bodies(s, cmd, &string_list(cmd, p, "bodies")?, format)?;
+    let Exported { bytes, ext, fell_back, laid, .. } = export_bodies(s, cmd, &string_list(cmd, p, "bodies")?, format, quality)?;
     if bytes.len() > MAX_BYTES {
         let mb = bytes.len().div_ceil(1_000_000);
         return Err(bad(cmd, format!("the model is {mb} MB and EasyPrint takes {} MB at most: send fewer bodies", MAX_BYTES / 1_000_000)));

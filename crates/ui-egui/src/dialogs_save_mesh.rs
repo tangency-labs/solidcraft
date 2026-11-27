@@ -38,7 +38,8 @@ const FORMATS: [(&str, &str, &str); 3] = [("STL", "stl", "stl"), ("3MF", "3mf", 
 const SEND_FORMATS: [(&str, &str); 4] = [("STL", "stl"), ("3MF", "3mf"), ("3MF with face tags", "3mf-tagged"), ("STEP", "step")];
 /// The list key of the EasyPrint row (no slicer has it: ids are words, programs are paths).
 const EASYPRINT: &str = "easyprint";
-/// How closely the mesh follows curved faces (#4747): the label and `file.save_mesh`'s `quality`.
+/// How closely the mesh follows curved faces (#4747): the label and `file.save_mesh` /
+/// `file.send_to_slicer`'s `quality`.
 const QUALITIES: [(&str, &str); 3] = [("Standard", "standard"), ("Fine", "fine"), ("Finest", "finest")];
 /// Edge of a slicer's icon in the list.
 const ICON: f32 = 16.0;
@@ -49,9 +50,9 @@ const MAX_CUSTOM: usize = 24;
 #[derive(Clone, Debug, PartialEq)]
 pub struct SaveMesh {
     pub(crate) format: usize,
-    /// Send to Slicer: bodies, slicer and format are asked (no quality row).
+    /// Send to Slicer: bodies, slicer, format and mesh quality are asked.
     open: bool,
-    /// Index into [`QUALITIES`] (Save As Mesh; Send to Slicer has no quality row).
+    /// Index into [`QUALITIES`] (Save As Mesh and Send to Slicer's mesh formats).
     pub(crate) quality: usize,
     /// The chosen slicer: an installed one's id, or the path of one the user added.
     pub(crate) slicer: String,
@@ -482,6 +483,17 @@ fn preselect(app: &SolveApp, k: &mut SaveMesh) {
     }
 }
 
+/// The Quality row, shared by Save As Mesh and Send to Slicer's mesh formats (#23257).
+/// An organization's MeshExportQuality policy locks it.
+fn quality_row(app: &SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh) {
+    let locked = app.policy.locks("save_mesh_quality");
+    let mut quality = k.quality;
+    crate::policy::row_below(ui, locked, |ui| choice_row(ui, "Quality", "sm_quality", &mut quality, &QUALITIES.map(|q| q.0)));
+    if !locked {
+        k.quality = quality;
+    }
+}
+
 /// The rows after the Bodies input; true when Enter was pressed in a field.
 pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mut [SelInput]) -> bool {
     if k.open {
@@ -500,16 +512,13 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
     if !k.open {
         // An organization's MeshExportFormat and MeshExportQuality policies set these.
         // Greyed out and noted; a pick in a locked row changes nothing.
-        let (format_locked, quality_locked) = (app.policy.locks("save_mesh_format"), app.policy.locks("save_mesh_quality"));
-        let (mut format, mut quality) = (k.format, k.quality);
+        let format_locked = app.policy.locks("save_mesh_format");
+        let mut format = k.format;
         crate::policy::row_below(ui, format_locked, |ui| choice_row(ui, "Format", "sm_format", &mut format, &FORMATS.map(|f| f.0)));
-        crate::policy::row_below(ui, quality_locked, |ui| choice_row(ui, "Quality", "sm_quality", &mut quality, &QUALITIES.map(|q| q.0)));
         if !format_locked {
             k.format = format;
         }
-        if !quality_locked {
-            k.quality = quality;
-        }
+        quality_row(app, ui, k);
         return false;
     }
     if k.stale {
@@ -560,6 +569,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut SaveMesh, inputs: &mu
     });
     if k.slicer != EASYPRINT {
         send_format_row(app, ui, k);
+    }
+    // STEP exports exact B-rep, so mesh tessellation quality applies to mesh formats only (#23257).
+    if k.slicer == EASYPRINT || k.send_format != "step" {
+        quality_row(app, ui, k);
     }
     // A browser has no folder dialog, and EasyPrint keeps no file.
     if k.slicer != EASYPRINT && app.services.pick_folder.is_some() {
@@ -723,10 +736,8 @@ fn add_custom(app: &mut SolveApp, path: &str) -> Result<(), String> {
 pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)>, String> {
     let format = FORMATS.get(k.format).map_or("stl", |f| f.1);
     let mut p = json!({ "format": format });
-    // Standard is the command's own default, so it is left out. Sending has no quality row.
-    if let Some((_, quality)) = QUALITIES.get(k.quality).filter(|_| k.quality > 0 && !k.open) {
-        p["quality"] = json!(quality);
-    }
+    // Standard is the command's own default, so it is left out.
+    let quality = QUALITIES.get(k.quality).filter(|_| k.quality > 0).map(|(_, q)| *q);
     let names = crate::selection::items(inputs, 0).body_names();
     if names.is_empty() {
         return Err(solidcraft_ui_text::tr("ui.save_mesh_pick_bodies").into());
@@ -738,9 +749,18 @@ pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)
         }
         if k.slicer == EASYPRINT {
             p["format"] = json!("3mf");
+            if let Some(q) = quality {
+                p["quality"] = json!(q);
+            }
             return Ok(vec![("file.open_in_easyprint".into(), p)]);
         }
-        p["format"] = json!(if k.send_format.is_empty() { "3mf" } else { k.send_format.as_str() });
+        let send_format = if k.send_format.is_empty() { "3mf" } else { k.send_format.as_str() };
+        p["format"] = json!(send_format);
+        if send_format != "step"
+            && let Some(q) = quality
+        {
+            p["quality"] = json!(q);
+        }
         p["slicer"] = json!(k.slicer);
         if k.copy {
             if k.copy_folder.trim().is_empty() {
@@ -752,6 +772,9 @@ pub fn commands(k: &SaveMesh, inputs: &[SelInput]) -> Result<Vec<(String, Value)
             }
         }
         return Ok(vec![("file.send_to_slicer".into(), p)]);
+    }
+    if let Some(q) = quality {
+        p["quality"] = json!(q);
     }
     Ok(vec![("file.save_mesh".into(), p)])
 }
@@ -785,6 +808,9 @@ pub fn run(app: &mut SolveApp, k: &SaveMesh, inputs: &[SelInput]) -> Result<(), 
             && policy_send_format(format_policy(app), &k.slicer, &app.slicer_menu.entries()).is_none()
         {
             app.preferences.send_formats.insert(k.slicer.clone(), k.send_format.clone());
+        }
+        if !app.policy.locks("save_mesh_quality") && (k.slicer == EASYPRINT || k.send_format != "step") {
+            app.preferences.save_mesh_quality = QUALITIES.get(k.quality).map_or("standard", |q| q.1).into();
         }
         if k.slicer == EASYPRINT {
             crate::easyprint_ui::request(app, params);
@@ -1358,8 +1384,10 @@ mod tests {
         assert_eq!(first_format(None, "3mf", &[]), "3mf");
     }
 
+    /// #23257: the chosen body quality goes to Save As Mesh, Send to Slicer (mesh formats) and
+    /// Open with EasyPrint; Standard (the default) and STEP omit `quality`.
     #[test]
-    fn a_remembered_quality_goes_to_save_but_not_to_send() {
+    fn chosen_quality_goes_to_save_send_and_easyprint_but_not_step() {
         let mut input = SelInput::new("Bodies", BODIES, true);
         input.items = vec![Sel::Body { name: "Part".into() }];
         let k = SaveMesh {
@@ -1367,17 +1395,151 @@ mod tests {
             quality: 2,
             open: true,
             slicer: "prusa".into(),
-            send_format: String::new(),
+            send_format: "3mf".into(),
             stale: false,
             shown: None,
             copy: false,
             copy_folder: String::new(),
             copy_overwrite: false,
         };
-        let (_, sent) = commands(&k, std::slice::from_ref(&input)).unwrap().remove(0);
-        assert_eq!(sent.get("quality"), None, "sending has no quality row: the default applies");
+        let (_, sent_finest) = commands(&k, std::slice::from_ref(&input)).unwrap().remove(0);
+        assert_eq!(sent_finest["quality"], "finest");
+        let (_, sent_fine) =
+            commands(&SaveMesh { quality: 1, send_format: "stl".into(), ..k.clone() }, std::slice::from_ref(&input)).unwrap().remove(0);
+        assert_eq!(sent_fine["quality"], "fine");
+        let (_, sent_standard) = commands(&SaveMesh { quality: 0, ..k.clone() }, std::slice::from_ref(&input)).unwrap().remove(0);
+        assert_eq!(sent_standard.get("quality"), None, "Standard is the command's own default");
+        let (_, sent_step) = commands(&SaveMesh { send_format: "step".into(), ..k.clone() }, std::slice::from_ref(&input)).unwrap().remove(0);
+        assert_eq!(sent_step.get("quality"), None, "STEP is exact B-rep and omits mesh quality");
+        let (ep_cmd, sent_ep) = commands(&SaveMesh { slicer: EASYPRINT.into(), ..k.clone() }, std::slice::from_ref(&input)).unwrap().remove(0);
+        assert_eq!((ep_cmd.as_str(), sent_ep["quality"].as_str()), ("file.open_in_easyprint", Some("finest")));
         let (_, saved) = commands(&SaveMesh { open: false, ..k }, &[input]).unwrap().remove(0);
         assert_eq!(saved["quality"], "finest");
+    }
+
+    /// #23257: Send to Slicer exposes the Quality selector (`Standard`, `Fine`, `Finest`) with
+    /// unchanged default (`Standard`), hides it for STEP, passes the chosen preset to
+    /// `file.send_to_slicer`, and respects the `MeshExportQuality` policy lock.
+    #[test]
+    fn send_to_slicer_exposes_quality_selector_with_unchanged_default() {
+        crate::i18n::install();
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.services.pick_program = Some(Box::new(|| Box::pin(async { None })));
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Part"})).unwrap();
+        let seed_orca = |h: &mut crate::scenario::Harness| {
+            h.app.slicer_menu.detected = vec![slicers::Slicer {
+                id: "orca".into(),
+                name: "OrcaSlicer".into(),
+                command: vec!["orca-slicer".into()],
+                icon: None,
+                prusa_major: None,
+            }];
+            let mut k = match h.app.dialog.as_ref().map(|d| d.kind.clone()) {
+                Some(Kind::SaveMesh(k)) => k,
+                _ => panic!("Send to Slicer dialog is open"),
+            };
+            k.stale = false;
+            k.slicer = "orca".into();
+            preselect(&h.app, &mut k);
+            h.app.dialog.as_mut().unwrap().kind = Kind::SaveMesh(k);
+        };
+        h.app.start("file.send_to_slicer");
+        {
+            let Some(Kind::SaveMesh(k)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("no Send to Slicer dialog") };
+            assert_eq!(k.quality, 0, "default quality is Standard");
+        }
+        seed_orca(&mut h);
+        h.frames(2);
+        assert!(crate::scenario::handle_at("dialog:Quality").is_some(), "Quality row is shown in Send to Slicer");
+        h.step(&json!({"click": {"handle": "dialog:Quality"}})).unwrap();
+        for preset in ["Standard", "Fine", "Finest"] {
+            assert!(crate::scenario::handle_at(&format!("dialog:Quality:{preset}")).is_some(), "{preset} preset is exposed");
+        }
+        h.step(&json!({"click": {"handle": "dialog:Quality:Fine"}})).unwrap();
+        h.frames(2);
+        {
+            let d = h.app.dialog.as_ref().unwrap();
+            let Kind::SaveMesh(k) = &d.kind else { panic!("no dialog") };
+            assert_eq!(k.quality, 1);
+            let (id, p) = commands(k, &d.inputs).unwrap().remove(0);
+            assert_eq!((id.as_str(), p["quality"].as_str()), ("file.send_to_slicer", Some("fine")));
+        }
+        h.step(&json!({"click": {"handle": "dialog:Quality"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Quality:Finest"}})).unwrap();
+        h.frames(2);
+        {
+            let d = h.app.dialog.as_ref().unwrap();
+            let Kind::SaveMesh(k) = &d.kind else { panic!("no dialog") };
+            assert_eq!(k.quality, 2);
+            let (id, p) = commands(k, &d.inputs).unwrap().remove(0);
+            assert_eq!((id.as_str(), p["quality"].as_str()), ("file.send_to_slicer", Some("finest")));
+        }
+        // Switching to STEP hides Quality and omits it from the command; switching back restores it.
+        h.step(&json!({"click": {"handle": "dialog:Format"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Format:STEP"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("dialog:Quality").is_none(), "STEP hides mesh quality");
+        {
+            let d = h.app.dialog.as_ref().unwrap();
+            let Kind::SaveMesh(k) = &d.kind else { panic!("no dialog") };
+            let (_, p) = commands(k, &d.inputs).unwrap().remove(0);
+            assert_eq!((p["format"].as_str(), p.get("quality")), (Some("step"), None));
+        }
+        h.step(&json!({"click": {"handle": "dialog:Format"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Format:3MF"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::handle_at("dialog:Quality").is_some(), "mesh format shows Quality again");
+        {
+            let Some(Kind::SaveMesh(k)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("no dialog") };
+            assert_eq!(k.quality, 2, "chosen quality survives switching away from STEP and back");
+        }
+        // MeshExportQuality policy locks the Quality row in Send to Slicer too.
+        h.app.dialog = None;
+        h.app.policy = crate::policy::Policy::from_json(r#"{"MeshExportQuality": "fine"}"#);
+        h.frame();
+        h.app.start("file.send_to_slicer");
+        seed_orca(&mut h);
+        h.frames(2);
+        let Some(Kind::SaveMesh(k)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("no dialog") };
+        assert_eq!(k.quality, 1, "policy sets Fine in Send to Slicer");
+        assert!(h.widget("Set by your organization").is_some(), "locked quality row is noted");
+    }
+
+    /// #23257: changing the quality in Send to Slicer remembers the choice and passes it to the
+    /// mesh builder, producing a finer mesh at Finest than at Standard.
+    #[cfg(unix)]
+    #[test]
+    fn send_to_slicer_remembers_quality_and_passes_it_to_mesh_builder() {
+        let (mut app, seen, _) = app_with_fake_slicer("quality");
+        app.run("solid.remove", json!({"bodies": ["Part"]})).unwrap();
+        app.run("solid.box", json!({"length": 200, "width": 100, "height": 5, "body_name": "Plate"})).unwrap();
+        app.run("solid.cylinder", json!({"base": [100, 50, -1], "radius": 1.5, "height": 7, "operation": "cut"})).unwrap();
+        let keep = seen.parent().unwrap().join("kept");
+        let key = app.preferences.custom_slicers[0].clone();
+        app.preferences.send_slicer = key.clone();
+        let (Kind::SaveMesh(mut k), mut inputs) = start(&app, "file.send_to_slicer").unwrap() else { panic!("not the mesh dialog") };
+        assert_eq!(k.quality, 0, "default quality is Standard");
+        inputs[0].items = body_picks(&app, false);
+        k.slicer = key;
+        k.send_format = "stl".into();
+        k.copy = true;
+        k.copy_folder = keep.to_string_lossy().into_owned();
+        // Send at Standard, then at Finest; each version lands in `keep`.
+        run(&mut app, &k, &inputs).unwrap();
+        k.quality = 2;
+        run(&mut app, &k, &inputs).unwrap();
+        assert_eq!(app.preferences.save_mesh_quality, "finest", "chosen quality is remembered");
+        let (Kind::SaveMesh(again), _) = start(&app, "file.send_to_slicer").unwrap() else { panic!("not the mesh dialog") };
+        assert_eq!(again.quality, 2, "next opening starts from the remembered quality");
+        let stl_triangles = |suffix: &str| {
+            let path = std::fs::read_dir(&keep).unwrap().map(|e| e.unwrap().path()).find(|p| p.to_string_lossy().ends_with(suffix)).expect(suffix);
+            let b = std::fs::read(path).unwrap();
+            u32::from_le_bytes([b[80], b[81], b[82], b[83]])
+        };
+        assert!(stl_triangles("-v2.stl") > stl_triangles("-v1.stl"), "Finest meshes more triangles than Standard");
+        let _ = std::fs::remove_dir_all(seen.parent().unwrap());
+        solidcraft_engine::slicers::set_chosen_programs(&[]);
     }
 
     /// The Export file name preference names the file every export offers: File › Export, Save As

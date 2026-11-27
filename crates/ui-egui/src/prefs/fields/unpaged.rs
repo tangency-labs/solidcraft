@@ -72,7 +72,7 @@ macro_rules! unpaged_preferences {
             /// choice here (`save_mesh_send`, `save_mesh_slicer`); a settings file that still has them loads,
             /// and they are ignored.
             save_mesh_format: String = "stl".into();
-            /// Save as mesh: the last quality (`standard`, `fine` or `finest`, #4747).
+            /// Save as mesh and Send to Slicer: the last quality (`standard`, `fine` or `finest`, #4747, #23257).
             save_mesh_quality: String = "standard".into();
             /// Send to Slicer: the format last sent to each slicer, by its key in the slicer list (`3mf`,
             /// `stl` or `step`). A slicer that is not in it starts from its own default, 3MF for most.
