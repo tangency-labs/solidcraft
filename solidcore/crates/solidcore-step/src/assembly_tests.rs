@@ -789,9 +789,13 @@ fn whole_cylinder() -> BSurface {
 
 /// [`whole_cylinder`] of radius `r`.
 fn whole_cylinder_of(r: f64) -> BSurface {
-    let BSurface::RationalSpline { u_knots, v_knots, homogeneous } = whole_cylinder() else { unreachable!() };
-    let homogeneous = homogeneous.into_iter().map(|row| row.into_iter().map(|[x, y, z, w]| [r * x, r * y, z, w]).collect()).collect();
-    BSurface::RationalSpline { u_knots, v_knots, homogeneous }
+    match whole_cylinder() {
+        BSurface::RationalSpline { u_knots, v_knots, homogeneous } => {
+            let homogeneous = homogeneous.into_iter().map(|row| row.into_iter().map(|[x, y, z, w]| [r * x, r * y, z, w]).collect()).collect();
+            BSurface::RationalSpline { u_knots, v_knots, homogeneous }
+        }
+        other => other,
+    }
 }
 
 /// Seating a trim that lies a sliver across a closed patch's seam is edited only under an enclosed
