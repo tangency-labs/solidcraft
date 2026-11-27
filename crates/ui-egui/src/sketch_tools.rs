@@ -2034,6 +2034,7 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
                 return;
             }
             let Some((id, _)) = sketch_entity(app, &hits) else { return };
+            drop_gone_picks(app, tool);
             if cmd == "sketch.centerline" {
                 let _ = app.run(cmd, json!({"curves": [id]}));
                 return;
@@ -2121,6 +2122,7 @@ pub(crate) fn place_point(app: &mut SolveApp, tool: &mut Tool, p: (Vec2, Option<
         crate::sketch_construction::place_point(app, tool, p);
         return;
     }
+    drop_gone_picks(app, tool);
     if tool.cmd == "sketch.circle.two_tangent" && tool.picks.len() == 2 {
         if let Err(error) = crate::sketch_dims::validate(app, tool) {
             app.set_status(tr_engine_error(&error), true);
@@ -2205,6 +2207,31 @@ fn run_points(app: &mut SolveApp, t: &Tool) -> bool {
     crate::tools::draw(app, t, params).is_ok()
 }
 
+/// Drops the picks of a curve-picking tool that no longer name a curve or point of the active
+/// sketch, with their click places, so the user picks again instead of the command refusing the
+/// stale id on every try: the Undo button can take away a picked curve and leaves the tool on
+/// (#23086). An origin axis pick (`x`, `y` or a JSON reference) is kept.
+fn drop_gone_picks(app: &SolveApp, t: &mut Tool) {
+    if !matches!(mode(t.cmd), Some(Mode::Entities(_))) || t.picks.is_empty() {
+        return;
+    }
+    let st = crate::open_meshing::session_world(&app.session);
+    let Some(ss) = active_sketch(app).and_then(|s| st.sketch(s)) else { return };
+    let stands =
+        |id: &str| ss.sketch.curve_index(id).is_some() || ss.sketch.resolve_point(id).is_some() || matches!(id, "x" | "y") || id.starts_with('{');
+    let keep: Vec<bool> = t.picks.iter().map(|id| stands(id)).collect();
+    if keep.iter().all(|k| *k) {
+        return;
+    }
+    // Each click adds its pick and its place together; a preselection adds picks only.
+    if t.pts.len() == t.picks.len() {
+        let mut flags = keep.iter();
+        t.pts.retain(|_| flags.next().copied().unwrap_or(true));
+    }
+    let mut flags = keep.iter();
+    t.picks.retain(|_| flags.next().copied().unwrap_or(true));
+}
+
 fn run_entities(app: &mut SolveApp, t: &Tool) -> bool {
     let k = &t.picks;
     let params = match t.cmd {
@@ -2238,6 +2265,7 @@ pub fn finish(app: &mut SolveApp, tool: &mut Tool) -> bool {
         return false;
     }
     let Some(m) = mode(tool.cmd) else { return false };
+    drop_gone_picks(app, tool);
     match m {
         Mode::Points(0) if tool.pts.len() >= 2 => {
             run_points(app, tool);

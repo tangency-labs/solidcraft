@@ -1567,6 +1567,50 @@ fn a_shape_whose_stored_click_lost_its_curve_to_undo_is_still_drawn() {
     assert!(failed.is_empty(), "{failed:#?}");
 }
 
+/// The Undo button while a tangent-circle tool runs can take away a curve it picked (#23086). The
+/// lost pick is dropped, so the curves picked next make the circle: 2-Tangent Circle no longer
+/// fails on every Enter, 3-Tangent Circle no longer loses a set of picks.
+#[test]
+fn a_tangent_circle_whose_pick_lost_its_curve_to_undo_takes_the_next_picks() {
+    let cases: [(&str, &[[i32; 3]], bool); 2] = [
+        ("sketch.circle.two_tangent", &[[30, 0, 0], [0, 30, 0]], true),
+        ("sketch.circle.three_tangent", &[[30, 0, 0], [0, 30, 0], [60, 30, 0]], false),
+    ];
+    let mut failed = Vec::new();
+    for (tool, after, enter) in cases {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[-10,0],[70,0]],"ids":["bottom"]})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,-10],[0,70]],"ids":["left"]})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[60,-10],[60,70]],"ids":["right"]})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[-10,60],[70,60]],"ids":["gone"]})).unwrap();
+        h.step(&json!({"call":"ui.view","params":{"view":"fit"}})).unwrap();
+        h.settle();
+        let sid = h.app.session.active_sketch.unwrap();
+        h.step(&json!({"start":tool})).unwrap();
+        h.step(&json!({"click":{"world":[30, 60, 0]}})).unwrap();
+        assert_eq!(h.app.tool.as_ref().map(|t| t.picks.clone()), Some(vec!["gone".to_string()]), "{tool}");
+        // The Undo button: it runs `edit.undo` and leaves the tool on with its pick.
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        assert!(h.app.session.model.state().sketch(sid).unwrap().sketch.curve_index("gone").is_none(), "{tool}: Undo took the line");
+        for at in after {
+            h.step(&json!({"click":{"world":at}})).unwrap();
+        }
+        if enter {
+            h.step(&json!({"key":"Enter"})).unwrap();
+        }
+        let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+        let circles = sk.curves.iter().filter(|c| matches!(c.kind, CurveKind::Circle { .. })).count();
+        let error = h.app.status.as_ref().filter(|s| s.2).map(|s| s.0.clone());
+        let ready = h.app.tool.as_ref().is_some_and(|t| t.picks.is_empty());
+        if error.is_some() || circles != 1 || !ready {
+            failed.push(format!("{tool}: {circles} circle(s), ready {ready}, {error:?}"));
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
+}
+
 /// Redo after that Undo brings the line back, and the circle's centre clicked on it is held on it
 /// again: the stored snap is only set aside while its curve is gone.
 #[test]
