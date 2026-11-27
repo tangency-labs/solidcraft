@@ -298,6 +298,7 @@ pub(crate) mod plugin_tint;
 pub(crate) mod plugin_updates;
 pub(crate) mod plugin_workspaces;
 pub(crate) mod plugins;
+pub(crate) mod point_cloud_deviation;
 pub mod point_clouds;
 pub mod policy;
 pub mod prefs;

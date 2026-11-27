@@ -375,6 +375,8 @@ pub struct TreeState {
     pub canvas_panel: Option<CanvasPanel>,
     /// The Edit Point Cloud panel.
     pub cloud_panel: Option<CloudPanel>,
+    /// The Point Cloud Deviation card.
+    pub deviation_card: Option<crate::point_cloud_deviation::DeviationCard>,
     /// What the Section Analysis dialog's OK made, per plane of the section, for Edit to start from.
     pub section_dialog: Vec<crate::dialogs::SectionDraft>,
     /// What waits for the Capture Position question: a command id, or [`SAVE`].
@@ -1894,6 +1896,7 @@ pub(crate) fn editors(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::browser_prompts::capture_prompt(app, ui.ctx());
     crate::browser_canvas::panel(app, ui.ctx());
     point_clouds::panel(app, ui.ctx());
+    crate::point_cloud_deviation::card(app, ui.ctx());
     crate::sketch_attachment_ui::panel(app, ui.ctx());
 }
 

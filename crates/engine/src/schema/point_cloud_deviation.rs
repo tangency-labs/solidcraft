@@ -167,6 +167,10 @@ pub struct PointCloudDeviationResult {
     /// `null` for a point that could not be measured. Otherwise absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub distances: Option<Vec<Option<f64>>>,
+    /// With `per_point`: for each entry of `distances`, the closest point on the body's faces
+    /// (mm), `null` for a point that could not be measured. Otherwise absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closest: Option<Vec<Option<[f64; 3]>>>,
     /// The body's own tolerance (mm): the kernel solves each distance on the exact geometry,
     /// and a point within this distance of a face counts as on it.
     pub body_tolerance_mm: f64,
