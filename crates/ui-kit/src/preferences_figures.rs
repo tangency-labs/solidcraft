@@ -196,7 +196,9 @@ pub fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutPreview,
     t.container_rect(&p, outer, t.radius_lg, t.control_fill, t.dialog_rule);
     let r = outer.shrink(t.space_8);
     let c = Canvas { rect: r };
-    p.rect(r, t.control_radius, t.viewport_top, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
+    // The view's own background, gradient and middle colour included (#9230), not just its top.
+    paint_view_background(&p, r, f32::from(t.control_radius), [t.viewport_top, t.viewport_bottom], t.viewport_middle);
+    p.rect_stroke(r, t.control_radius, t.control_border_stroke(t.control_border), egui::StrokeKind::Inside);
     let inset = if state.compact { 0.0 } else { 4.0 };
     let gap = if state.compact { 0.0 } else { 3.0 };
     let ribbon_height = if state.labels { 16.0 } else { 10.0 };
@@ -255,6 +257,51 @@ pub fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutPreview,
     ui.interact(outer, ui.make_persistent_id("layout_preview_help"), egui::Sense::hover()).backing_on_hover_text(note);
 }
 
+/// A rounded `rect` filled the way the 3D view fills its background: `top` at the top edge,
+/// `bottom` at the bottom edge, through `middle` halfway down when given. One strip per row of
+/// the rounded outline (and one at the middle), so the colour is exact at every row.
+fn paint_view_background(p: &Painter, rect: Rect, radius: f32, [top, bottom]: [Color32; 2], middle: Option<Color32>) {
+    if !(rect.is_finite() && rect.width() > 0.0 && rect.height() > 0.0) {
+        return;
+    }
+    let radius = radius.clamp(0.0, rect.width().min(rect.height()) / 2.0);
+    let colour = |y: f32| {
+        let f = ((y - rect.top()) / rect.height()).clamp(0.0, 1.0);
+        match middle {
+            Some(m) if f <= 0.5 => top.lerp_to_gamma(m, f * 2.0),
+            Some(m) => m.lerp_to_gamma(bottom, f * 2.0 - 1.0),
+            None => top.lerp_to_gamma(bottom, f),
+        }
+    };
+    // How far the outline sits in from the sides at height `y`.
+    let inset = |y: f32| {
+        let d = (rect.top() + radius - y).max(y - (rect.bottom() - radius)).max(0.0);
+        radius - (radius * radius - d * d).max(0.0).sqrt()
+    };
+    const ARC: usize = 6;
+    let mut rows: Vec<f32> = (0..=ARC)
+        .flat_map(|i| {
+            let d = radius * (1.0 - (i as f32 / ARC as f32 * std::f32::consts::FRAC_PI_2).sin());
+            [rect.top() + radius - d, rect.bottom() - radius + d]
+        })
+        .chain([rect.top(), rect.center().y, rect.bottom()])
+        .collect();
+    rows.sort_by(f32::total_cmp);
+    rows.dedup_by(|a, b| (*a - *b).abs() < 0.01);
+    let mut mesh = egui::Mesh::default();
+    for (i, &y) in rows.iter().enumerate() {
+        let (x, c) = (inset(y), colour(y));
+        mesh.colored_vertex(egui::pos2(rect.left() + x, y), c);
+        mesh.colored_vertex(egui::pos2(rect.right() - x, y), c);
+        if i > 0 {
+            let n = 2 * i as u32;
+            mesh.add_triangle(n - 2, n - 1, n + 1);
+            mesh.add_triangle(n - 2, n + 1, n);
+        }
+    }
+    p.add(Shape::mesh(mesh));
+}
+
 #[allow(unused_imports, reason = "painted by the Preferences pages of #9875 to #9883")]
 pub use super::preferences_figure_ops::ThemeSample;
 use super::preferences_figure_ops::paint;
@@ -306,6 +353,42 @@ mod tests {
             assert!(dialog.left() > browser.right(), "the floating editor opens at the right edge");
             assert!(dialog.bottom() < history.top(), "the editor leaves the History strip visible");
         }
+        solidcraft_theme::set_dark(previous);
+    }
+
+    /// The layout preview shows the view's background as the view paints it (#9230): with a
+    /// gradient of the user's, its top, middle and bottom colours, the middle one halfway down,
+    /// in both themes.
+    #[test]
+    fn layout_preview_shows_the_views_own_gradient() {
+        use crate::LayoutPreview;
+        use egui::Color32;
+        let previous = solidcraft_theme::is_dark();
+        let (top, middle, bottom) = ([250, 200, 120], [90, 160, 60], [20, 40, 90]);
+        solidcraft_theme::set_viewport_background(Some(solidcraft_theme::ViewBackground { top, middle: Some(middle), bottom }));
+        for dark in [false, true] {
+            solidcraft_theme::set_dark(dark);
+            let ctx = crate::test_support::context();
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                ui.set_width(262.0);
+                super::paint_layout(ui, LayoutPreview { compact: false, labels: true, history_in_browser: false }, "Where the panels go");
+            });
+            output.textures_delta.clear();
+            let background = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Mesh(mesh) if mesh.vertices.iter().any(|v| v.color == Color32::from_rgb(90, 160, 60)) => Some(mesh.clone()),
+                    _ => None,
+                })
+                .expect("the middle colour is painted");
+            let (high, low) = background.vertices.iter().fold((f32::MAX, f32::MIN), |(a, b), v| (a.min(v.pos.y), b.max(v.pos.y)));
+            let at = |y: f32| background.vertices.iter().filter(|v| (v.pos.y - y).abs() < 0.01).map(|v| v.color).collect::<Vec<_>>();
+            assert_eq!(at(high), vec![Color32::from_rgb(250, 200, 120); 2], "dark {dark}: the top colour at the top");
+            assert_eq!(at(low), vec![Color32::from_rgb(20, 40, 90); 2], "dark {dark}: the bottom colour at the bottom");
+            assert_eq!(at((high + low) / 2.0), vec![Color32::from_rgb(90, 160, 60); 2], "dark {dark}: the middle colour halfway down");
+        }
+        solidcraft_theme::set_viewport_background(None);
         solidcraft_theme::set_dark(previous);
     }
 

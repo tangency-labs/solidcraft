@@ -1,8 +1,8 @@
-//! `drawing.note.add`, `.edit` and `.inspect` (W19e, #4896): a note on a sheet, a view, or an edge or
+//! `drawing.note.add`, `.edit`, `.delete` and `.inspect` (W19e, #4896): a note on a sheet, a view, or an edge or
 //! corner of a view's model, and where it stands with the model now. What it points at is picked as
 //! a dimension's is and saved by name ([`solidcraft_doc::Document::edge_reference`]). Adding and
 //! editing are one undo step of the drawing each, and none of the commands evaluates the model. A
-//! note is deleted as a drawing's other objects are (`selection.delete`).
+//! note is deleted by `drawing.note.delete`, or as a drawing's other objects are (`selection.delete`).
 
 use std::sync::Arc;
 
@@ -10,7 +10,8 @@ use serde_json::Value;
 use solidcraft_doc::bom::Tree;
 use solidcraft_doc::drawing::fields::{FieldState, Values, no_field};
 use solidcraft_doc::drawing::note::{Anchor, Branch, End, Note, leaders_refused};
-use solidcraft_doc::ids;
+use solidcraft_doc::drawing::{ByNumber, OnSheet, kept_by_number};
+use solidcraft_doc::{DocError, ids};
 use solidcraft_geom::cell::{Content, HAlign, Part};
 
 use super::CommandSpec;
@@ -18,13 +19,16 @@ use super::drawing_dimension::status_words;
 use super::drawing_view::{check_drawn, drawn_warning};
 use crate::params::bad;
 use crate::schema::drawing_note::{
-    AddParams, AnchorParam, BranchParam, BranchResult, BranchesSet, EditParams, EditResult, FieldResult, InspectParams, NoteResult,
+    AddParams, AnchorParam, BranchParam, BranchResult, BranchesSet, DeleteParams, DeleteResult, EditParams, EditResult, FieldResult, InspectParams,
+    NoteResult,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
 const ADD: &str = "drawing.note.add";
 const ADD_CONTRACT: TypedContract<AddParams> = TypedContract::new();
+const DELETE: &str = "drawing.note.delete";
+const DELETE_CONTRACT: TypedContract<DeleteParams> = TypedContract::new();
 const EDIT: &str = "drawing.note.edit";
 const EDIT_CONTRACT: TypedContract<EditParams> = TypedContract::new();
 const INSPECT: &str = "drawing.note.inspect";
@@ -40,11 +44,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(
             "anchor: {sheet: id or name}, {view: id}, {edge: {view, edge}} or {corner: {view, corner}} (an edge or a corner as drawing.dimension.add \
              takes it; its leader ends there); at: [x, y] on paper in mm, from the sheet's lower-left corner or the view's centre; content: text, \
-             or [{text} or {field: {source: component|drawing|sheet|revision, key, format?}}]; cap_mm?: 0.5..100, its text height; align?: left (default: the text starts at `at`), centre (the text is centred on `at`) or right (the text ends at `at`), each line of several standing the same way; branches?: [{edge} or \
+             or [{text} or {field: {source: component|drawing|sheet|revision, key, format?}}]; cap_mm?: 0.5..100, its text height; align?: left (default: the text starts at `at`), centre (the text is centred on `at`) or right (the text ends at `at`), each line of several standing the same way; at_edge?: middle (default) or picked, where an edge anchor's leader ends: on the edge's middle, or at its `point`, kept as a part of the edge's length; branches?: [{edge} or\
              {corner}], more leaders of a note on a view, 16 leaders in all, its anchor's included → what drawing.note.inspect answers \
              for it. Saved by name, never the point picked; an edge or a corner on a part its view doesn't \
              draw is refused. One undo step; no model is evaluated.",
         ),
+    CommandSpec::new(DELETE, "Delete Note", crate::checked!("drawing.note.delete", delete)).begins_edit()
+        .icon("delete")
+        .in_drawing()
+        .doc_only()
+        .contract(&DELETE_CONTRACT)
+        .output(output_schema_for::<DeleteResult>)
+        .params("note: its id → {note}. One undo step; no model is evaluated."),
     CommandSpec::new(EDIT, "Edit Note", crate::checked!("drawing.note.edit", edit)).begins_edit_when(crate::edit_start::changes_editor_fields)
         .icon("edit")
         .in_drawing()
@@ -90,10 +101,11 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let anchor = match request.anchor {
         AnchorParam::Sheet(named) => Anchor::Sheet(crate::drawing_scene::sheet_id(&record, &named, ADD)?),
         AnchorParam::View(view) => Anchor::View(on_view(view.0)?),
-        AnchorParam::Edge { view, edge } => Anchor::Edge {
-            view: on_view(view.0)?,
-            edge: s.doc.edge_reference(&s.model, &edge.pick, &edge.path).map_err(|why| bad(ADD, why.to_string()))?,
-        },
+        AnchorParam::Edge { view, edge: picked } => {
+            let edge = s.doc.edge_reference(&s.model, &picked.pick, &picked.path).map_err(|why| bad(ADD, why.to_string()))?;
+            let along = super::drawing_balloon::leader_along(s, &edge, &picked.pick, request.at_edge, ADD)?;
+            Anchor::Edge { view: on_view(view.0)?, edge, along }
+        }
         AnchorParam::Corner { view, corner } => Anchor::Corner {
             view: on_view(view.0)?,
             point: s.doc.corner_reference(&s.model, &corner.pick, &corner.path).map_err(|why| bad(ADD, why.to_string()))?,
@@ -103,7 +115,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let align = Some(request.align.unwrap_or(HAlign::Left));
     let mut note = Note { id: 0, anchor, at: request.at, content: request.content.0, cap_mm: request.cap_mm, align, branches };
     if let Some(view) = note.anchor.view() {
-        check_drawn(&record, view, note.paths(), ADD)?;
+        check_drawn(s, &record, view, note.references(), ADD)?;
     }
     note.id = record.allocate_id(&mut s.ids).map_err(|e| bad(ADD, e.to_string()))?;
     let id = note.id;
@@ -112,6 +124,17 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(())
     })?;
     answer(s, ADD, id)
+}
+
+fn delete(s: &mut Session, p: &Value) -> Result<Value> {
+    let request: DeleteParams = crate::schema::read(DELETE, p)?;
+    let id = request.note.0;
+    s.edit_drawing(DELETE, |d| {
+        d.notes.by_id(id).ok_or_else(|| bad(DELETE, format!("the drawing has no note {}", ids::encode(id))))?;
+        d.remove_objects(&OnSheet { notes: vec![id], ..Default::default() });
+        Ok(())
+    })?;
+    serde_json::to_value(DeleteResult { note: ids::encode(id) }).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 fn edit(s: &mut Session, p: &Value) -> Result<Value> {
@@ -159,36 +182,25 @@ fn branch(s: &Session, pick: &BranchParam, cmd: &str) -> Result<Branch> {
 
 /// Note `id`'s branches after `set`: those it takes out by number as the list is now, each once,
 /// then those it adds, found as an add finds them. The numbers and the count are checked before
-/// anything is looked up, and each branch it adds is on a part its view draws (one kept from before
-/// may not be, and can be taken out).
+/// anything is looked up, as a dimension set's targets edit checks them ([`kept_by_number`]), and
+/// each branch it adds is on a part its view draws (one kept from before may not be, and can be
+/// taken out).
 fn new_branches(s: &Session, id: u64, set: BranchesSet) -> Result<Vec<Branch>> {
     let record = s.drawing(EDIT)?;
     let note = record.notes.by_id(id).ok_or_else(|| bad(EDIT, format!("the drawing has no note {}", ids::encode(id))))?;
-    let mut gone = set.remove;
-    gone.sort_unstable();
-    if gone.windows(2).any(|pair| pair.first() == pair.get(1)) {
-        return Err(bad(EDIT, "`branches.remove` names each branch once"));
-    }
-    if gone.last().is_some_and(|last| *last >= note.branches.len()) {
-        return Err(bad(
-            EDIT,
-            match note.branches.len().checked_sub(1) {
-                Some(last) => format!("`branches.remove` numbers this note's branches, 0 to {last}"),
-                None => "`branches.remove`: this note has no branches".into(),
-            },
-        ));
-    }
-    let count = note.branches.len().saturating_sub(gone.len()).saturating_add(set.add.len());
-    let own = usize::from(note.anchor.path().is_some());
-    if let Some(why) = leaders_refused(note.anchor.view().is_some(), count, own.saturating_add(count)) {
-        return Err(bad(EDIT, why));
-    }
+    let (on_view, own) = (note.anchor.view().is_some(), usize::from(note.anchor.path().is_some()));
+    let count = |n: usize| leaders_refused(on_view, n, own.saturating_add(n)).map_or(Ok(()), |why| Err(DocError::Invalid(why)));
+    let kept = kept_by_number(&note.branches, &set.remove, set.add.len(), count).map_err(|why| match why {
+        ByNumber::Past { last: Some(last) } => bad(EDIT, format!("`branches.remove` numbers this note's branches, 0 to {last}")),
+        ByNumber::Past { last: None } => bad(EDIT, "`branches.remove`: this note has no branches"),
+        ByNumber::Twice => bad(EDIT, "`branches.remove` names each branch once"),
+        ByNumber::Count(why) => bad(EDIT, why.to_string()),
+    })?;
     let added = set.add.iter().map(|pick| branch(s, pick, EDIT)).collect::<Result<Vec<_>>>()?;
     if let Some(view) = note.anchor.view() {
-        check_drawn(record, view, added.iter().map(Branch::path), EDIT)?;
+        check_drawn(s, record, view, added.iter().map(Branch::reference), EDIT)?;
     }
-    let kept = note.branches.iter().enumerate().filter(|(at, _)| gone.binary_search(at).is_err()).map(|(_, branch)| branch.clone());
-    Ok(kept.chain(added).collect())
+    Ok(kept.into_iter().chain(added).collect())
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
@@ -209,7 +221,7 @@ fn answer(s: &Session, cmd: &str, id: u64) -> Result<Value> {
     let read = |values: &Values| (values.text(&note.content), fields(values, &note.content));
     let at = d.sheet_of(&note.anchor).ok_or_else(|| bad(cmd, format!("note {} is on no sheet", ids::encode(id))))?;
     let (text, fields) = crate::title_block_text::with_values(s, &mut Tree::new(&s.doc, &state), d, at, std::iter::once(&note.content), read);
-    let mut warnings = note.anchor.view().map(|view| drawn_warning(d, view, note.paths())).unwrap_or_default();
+    let mut warnings = note.anchor.view().map(|view| drawn_warning(s, d, view, note.references())).unwrap_or_default();
     warnings.extend(off_paper(d, note, &text, at));
     let reply = NoteResult {
         note: ids::encode(id),

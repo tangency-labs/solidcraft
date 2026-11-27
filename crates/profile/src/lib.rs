@@ -183,7 +183,7 @@ impl Drop for Span {
     fn drop(&mut self) {
         #[cfg(any(feature = "enabled", test))]
         if let Some(open) = self.open.take() {
-            imp::close(&open);
+            imp::close(open);
         }
     }
 }
@@ -199,6 +199,27 @@ pub fn span(category: &'static str, name: &'static str) -> Span {
     {
         let _ = (category, name);
         Span {}
+    }
+}
+
+impl Span {
+    /// Name what this span is for (a feature, a body, a part in a file), as the trace's `args`
+    /// (#22473). Nothing is kept, or formatted, while the profiler is not recording.
+    #[inline]
+    pub fn arg(self, key: &'static str, value: impl std::fmt::Display) -> Span {
+        #[cfg(any(feature = "enabled", test))]
+        {
+            let mut span = self;
+            if let Some(open) = &mut span.open {
+                imp::arg(open, key, value.to_string());
+            }
+            span
+        }
+        #[cfg(not(any(feature = "enabled", test)))]
+        {
+            let _ = (key, value);
+            self
+        }
     }
 }
 
@@ -319,13 +340,20 @@ mod imp {
         max_ns: u64,
     }
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone)]
     struct Event {
         key: Key,
         tid: u32,
         start_ns: u64,
         dur_ns: u64,
+        /// What the span was for, as [`super::Span::arg`] named it: the trace's `args`.
+        args: Vec<(&'static str, String)>,
     }
+
+    /// Arguments one span keeps (more are dropped).
+    const MAX_ARGS: usize = 8;
+    /// The longest argument value kept, in bytes (a longer one is cut at a character boundary).
+    const MAX_ARG_LEN: usize = 256;
 
     #[derive(Default)]
     struct Global {
@@ -369,6 +397,21 @@ mod imp {
         key: Key,
         start_ns: u64,
         depth: usize,
+        args: Vec<(&'static str, String)>,
+    }
+
+    pub(super) fn arg(open: &mut Open, key: &'static str, mut value: String) {
+        if open.args.len() >= MAX_ARGS {
+            return;
+        }
+        if value.len() > MAX_ARG_LEN {
+            let mut end = MAX_ARG_LEN;
+            while !value.is_char_boundary(end) {
+                end -= 1;
+            }
+            value.truncate(end);
+        }
+        open.args.push((key, value));
     }
 
     pub(super) fn open(key: Key) -> Option<Open> {
@@ -383,10 +426,10 @@ mod imp {
             })
             .ok()
             .flatten()?;
-        Some(Open { key, start_ns: now_ns(), depth })
+        Some(Open { key, start_ns: now_ns(), depth, args: Vec::new() })
     }
 
-    pub(super) fn close(o: &Open) {
+    pub(super) fn close(o: Open) {
         let dur = now_ns().saturating_sub(o.start_ns);
         let (child, outermost) = STACK
             .try_with(|s| {
@@ -401,7 +444,7 @@ mod imp {
                 (child, outermost)
             })
             .unwrap_or((0, true));
-        add(o.key, o.start_ns, dur, dur.saturating_sub(child), outermost);
+        add(o.key, o.start_ns, dur, dur.saturating_sub(child), outermost, o.args);
     }
 
     pub(super) fn record(key: Key, dur: u64) {
@@ -416,7 +459,7 @@ mod imp {
                 outermost
             })
             .unwrap_or(true);
-        add(key, start, dur, dur, outermost);
+        add(key, start, dur, dur, outermost, Vec::new());
     }
 
     fn thread_id(g: &mut Global) -> u32 {
@@ -443,7 +486,7 @@ mod imp {
         "main".into()
     }
 
-    fn add(key: Key, start_ns: u64, dur_ns: u64, self_ns: u64, outermost: bool) {
+    fn add(key: Key, start_ns: u64, dur_ns: u64, self_ns: u64, outermost: bool, args: Vec<(&'static str, String)>) {
         let mut g = global();
         let tid = thread_id(&mut g);
         let a = g.agg.entry(key).or_default();
@@ -454,7 +497,7 @@ mod imp {
         a.self_ns = a.self_ns.saturating_add(self_ns);
         a.max_ns = a.max_ns.max(dur_ns);
         if g.events.len() < MAX_EVENTS {
-            g.events.push(Event { key, tid, start_ns, dur_ns });
+            g.events.push(Event { key, tid, start_ns, dur_ns, args });
         } else {
             g.dropped = g.dropped.saturating_add(1);
         }
@@ -537,10 +580,12 @@ mod imp {
         }
         for e in &events {
             sep(w)?;
-            serde_json::to_writer(
-                &mut *w,
-                &json!({"ph": "X", "cat": e.key.0, "name": e.key.1, "pid": 1, "tid": e.tid, "ts": us(e.start_ns), "dur": us(e.dur_ns)}),
-            )?;
+            let mut event = json!({"ph": "X", "cat": e.key.0, "name": e.key.1, "pid": 1, "tid": e.tid, "ts": us(e.start_ns), "dur": us(e.dur_ns)});
+            if !e.args.is_empty() {
+                event["args"] =
+                    e.args.iter().map(|(k, v)| ((*k).to_owned(), serde_json::Value::from(v.as_str()))).collect::<serde_json::Map<_, _>>().into();
+            }
+            serde_json::to_writer(&mut *w, &event)?;
         }
         w.write_all(b"]}\n")
     }

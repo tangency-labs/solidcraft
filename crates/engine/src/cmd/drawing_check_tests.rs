@@ -751,6 +751,33 @@ fn a_feature_drawn_by_a_split_and_aligned_plate_is_not_covered() {
     assert_eq!(coverage_of(&reply, block)["state"], json!("not_covered"), "{reply}");
 }
 
+/// A flat strip extended by Surface Extend is rebuilt without face history (the feature that made
+/// it stays its face's maker, but its name is found by geometry): the strip's coverage is unknown,
+/// with why, and no feature is not covered. A 10 x 20 mm sheet whose top edge is extended 5 mm.
+#[test]
+fn faces_named_from_geometry_give_unknown() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Line"}));
+    let line = run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]]}));
+    let line = line["created"]["curves"][0].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let strip = run(&mut s, "surface.extrude", json!({"sketch": "Line", "curves": [line], "distance": 20, "body_name": "Strip"}));
+    let block = strip["feature"].as_u64().unwrap();
+    run(&mut s, "surface.extend", json!({"body": "Strip", "edges": [[5, 0, 20]], "distance": "5 mm"}));
+    let state = s.model.state();
+    let from_geometry = state
+        .bodies
+        .iter()
+        .any(|b| naming::face_names(b).iter().enumerate().any(|(i, name)| coverage::made_by(name) == Some(block) && !naming::face_name_exact(b, i)));
+    assert!(from_geometry, "the extended strip's faces are named from geometry");
+    drawn(&mut s);
+    let reply = checked(&mut s, json!({}));
+    let entry = coverage_of(&reply, block);
+    assert_eq!(entry["state"], json!("unknown"), "{reply}");
+    assert!(!entry["why"].as_str().unwrap().is_empty(), "{reply}");
+    assert!(coverage(&reply).iter().all(|(_, state, _)| state != "not_covered"), "{reply}");
+}
+
 /// A saved dimension whose edge name is hostile covers nothing and never panics; the note on the
 /// hole still covers it.
 #[test]
@@ -930,6 +957,49 @@ fn a_note_on_an_exploded_view_is_checked_as_any_views_and_covers_its_feature() {
     let reply = checked(&mut s, json!({}));
     assert!(whys(&reply, "out_of_date").is_empty(), "{reply}");
     assert_eq!(coverage_of(&reply, plate)["by"], json!([{"kind": "note", "id": note}]), "{reply}");
+}
+
+/// Automatic groups belong to a view, but are absent from selectable objects; check their accepted
+/// paper geometry once per view and preserve the identities of manual annotations.
+#[test]
+fn automatic_mark_findings_name_the_view_and_check_accepted_geometry() {
+    use crate::drawing_scene::{AnnotationFailure, SheetObject};
+    use solidcore_record::Seg2;
+    use solidcraft_geom::paper::Group;
+
+    let (mut s, _) = plate();
+    let (sheet, view) = drawn(&mut s);
+    let d = s.drawing("test").unwrap().clone();
+    let mut shown = crate::drawing_scene::build(&s, &d, sheet).unwrap();
+    let manual = view + 100_000;
+    let line = |id| Group {
+        object: id,
+        kind: ObjectKind::CentreMark,
+        items: vec![Item::Stroke {
+            path: vec![Seg2::Line { a: Vec2::new(-2.0, 10.0), b: Vec2::new(2.0, 10.0) }],
+            closed: false,
+            width_mm: 0.18,
+            pattern: None,
+        }],
+    };
+    shown.scene.groups.extend([line(view), line(view), line(manual)]);
+    shown.objects.push(SheetObject {
+        object: manual,
+        kind: ObjectKind::CentreMark,
+        bounds_mm: Aabb2 { min: Vec2::new(-2.0, 10.0), max: Vec2::new(2.0, 10.0) },
+        boundary_mm: None,
+    });
+    shown.annotation_failures.extend([
+        AnnotationFailure { object: view, view, kind: ObjectKind::CentreMark, reason: "automatic failure".into() },
+        AnnotationFailure { object: manual, view, kind: ObjectKind::CentreMark, reason: "manual failure".into() },
+    ]);
+    let findings = on_sheet(&d, sheet, shown).unwrap();
+    let count = |kind, what, id| findings.iter().filter(|f| f.kind == kind && f.object.kind == what && f.object.id == ids::encode(id)).count();
+    assert_eq!(count(FindingKind::OutsideSheet, CheckedKind::View, view), 1);
+    assert_eq!(count(FindingKind::OutsideSheet, CheckedKind::CentreMark, manual), 1);
+    assert_eq!(count(FindingKind::Failed, CheckedKind::View, view), 1);
+    assert_eq!(count(FindingKind::Failed, CheckedKind::CentreMark, manual), 1);
+    assert_eq!(count(FindingKind::Failed, CheckedKind::CentreMark, view), 0);
 }
 
 /// A note is held to the paper by the extent its alignment gives it: one at 15 mm from the sheet's

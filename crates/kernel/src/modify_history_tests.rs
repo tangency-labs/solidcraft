@@ -2,6 +2,9 @@
 //! face and edge origin checked against the geometry of the operands (in tests only: the history
 //! itself is recorded, never sampled), and the exact origins asserted where the outcome is known.
 
+#[path = "../../../solidcore/crates/solidcore/tests/support/annular_samples.rs"]
+mod annular_samples;
+
 use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
 use solidcraft_geom::prelude::*;
 
@@ -326,6 +329,41 @@ fn offset_moves_a_face() {
     assert!(e.to_string().contains("no room"), "{e}");
 }
 
+/// A narrow annular end must be picked on its exact trims, independently of the body's length
+/// (and hence the chord tolerance of the old picking mesh).
+#[test]
+fn offset_an_annular_end_near_either_circular_rim() {
+    let boss = cylinder(Vec3::ZERO, Vec3::Z, 3.5, 200.0).unwrap();
+    let bore = cylinder(Vec3::new(0.0, 0.0, -1.0), Vec3::Z, 1.75, 202.0).unwrap();
+    let b = boolean(&boss, &bore, BoolOp::Cut).unwrap().unwrap();
+    let centre = Vec3::new(2.625, 0.0, 200.0);
+    let end = b.face_at_point(centre).unwrap().unwrap();
+    let expected = crate::offset_faces(&b, &[centre], 4.0).unwrap();
+    // The bore and outer wall keep their radii; only the length grows, from 200 to 204 mm.
+    let want = annular_samples::annular_volume(204.0);
+    assert!((volume(&expected) - want).abs() < want * 1e-7);
+    for p in annular_samples::rim_points(200.0).into_iter().map(Vec3::from) {
+        let holders: Vec<usize> = (0..b.face_count()).filter(|&f| b.point_lies_on_face(f, p, b.record().tolerance).unwrap().is_some()).collect();
+        assert_eq!(holders, [end], "only the annular face holds {p:?}");
+        assert_eq!(b.face_at_point(p).unwrap(), Some(end), "{p:?}");
+        let moved = crate::offset_faces(&b, &[p], 4.0).unwrap();
+        assert_eq!(moved.record(), expected.record(), "{p:?}");
+    }
+    let tolerance = b.record().tolerance;
+    let within = centre + Vec3::Z * (tolerance * 0.5);
+    assert_eq!(b.face_at_point(within).unwrap(), Some(end));
+    assert_eq!(crate::offset_faces(&b, &[within], 4.0).unwrap().record(), expected.record());
+    // Just off the end (beyond modelling tolerance, within the pick's reach) still picks it.
+    let off = centre + Vec3::Z * (tolerance * 4.0);
+    assert_eq!(b.face_at_point(off).unwrap(), None);
+    assert_eq!(crate::offset_faces(&b, &[off], 4.0).unwrap().record(), expected.record());
+    // Far from every face: refused.
+    for p in [Vec3::new(0.0, 0.0, 200.0), Vec3::new(0.5, 0.0, 200.0), centre + Vec3::Z * 5.0, Vec3::new(9.0, 0.0, 200.0)] {
+        let e = crate::offset_faces(&b, &[p], 4.0).unwrap_err();
+        assert!(e.to_string().contains("no face at"), "{p:?}: {e}");
+    }
+}
+
 #[test]
 fn split_a_face() {
     let b = cube();
@@ -571,6 +609,123 @@ mod smlib {
         let plate = extrude(&Plane::XY, &[Region2 { outer: square(0.0, 0.0, 40.0, 40.0), holes: vec![hole] }], 0.0, 10.0).unwrap().pop().unwrap();
         let e = offset_backend::shell(&plate, &[Vec3::new(35.0, 20.0, 10.0)], 1.5).unwrap_err().to_string();
         assert!(e.contains("the 1.5 mm walls would meet along a line"), "{e}");
+    }
+
+    /// A wall refused for folding names a thinner wall only after building it (#20781): the
+    /// walls tried run from just under the largest the kernel names, and the first that builds
+    /// is the one the message gives; where none builds, the message says the wall is not the
+    /// obstacle and shows no kernel internals.
+    #[test]
+    fn a_refused_shell_names_only_a_wall_that_builds() {
+        use crate::offset_backend::{thinner_shell_hint, thinner_walls};
+        use solidcraft_smlib::Error as SmError;
+        let walls = thinner_walls(2.0, Some(0.8));
+        assert_eq!(walls.len(), 3);
+        assert!(walls.iter().all(|w| *w < 0.8 && *w > 0.0), "{walls:?}");
+        assert!(thinner_walls(2.0, None).iter().all(|w| *w <= 1.0));
+        let folds = SmError::WallFolds { largest: Some(0.8) };
+        let first = || crate::KernelError::Invalid("fold".into());
+        // The 0.95 wall fails, the 0.75 wall builds: that is the one named.
+        let e = thinner_shell_hint(2.0, &folds, first(), |w| w < 0.8 * 0.8).to_string();
+        assert!(e.contains("a wall of 0.6 mm builds"), "{e}");
+        let e = thinner_shell_hint(2.0, &folds, first(), |_| false).to_string();
+        assert!(e.contains("no thinner wall builds either"), "{e}");
+        assert!(!e.contains("shell_brep") && !e.contains("status") && !e.contains("1001"), "{e}");
+    }
+
+    /// Where the kernel refused a wall for folding and no thinner wall builds, the refusal says
+    /// the wall is not the obstacle, in exactly these words.
+    #[test]
+    fn a_folding_shell_no_thinner_wall_fixes_says_so_in_its_words() {
+        use crate::offset_backend::thinner_shell_hint;
+        use solidcraft_smlib::Error as SmError;
+        let folds = SmError::WallFolds { largest: None };
+        let e = thinner_shell_hint(1.5875, &folds, crate::KernelError::Invalid("fold".into()), |_| false);
+        assert_eq!(
+            e,
+            crate::KernelError::Invalid(
+                "shell: a wall of 1.5875 mm does not fit, and no thinner wall builds either, so the wall is not the obstacle: \
+                 a face of the body curves too tightly to offset inwards, or the body has faces too small or too many to offset into a solid \
+                 (a curve cut as many tiny flat pieces, for example); round the tight bend or rebuild the body with smoother faces"
+                    .into()
+            )
+        );
+    }
+
+    /// A shell the kernel refuses for any other reason than a fold (a result that is not a solid,
+    /// a refusal of its own, a status) at every wall keeps the kernel's refusal (solidcore#3424):
+    /// a kernel defect is never told to the user as a face that curves too tightly. A thinner
+    /// wall that builds is still named.
+    #[test]
+    fn a_shell_refused_at_every_wall_for_another_reason_keeps_the_kernels_refusal() {
+        use crate::offset_backend::thinner_shell_hint;
+        use solidcraft_smlib::Error as SmError;
+        let not_solid = SmError::RefusedWithDiagnostic {
+            refusal: solidcore_ops::Error::NotSolid,
+            diagnostic: "offset::offset_executive::p2::shell_brep: the body built is not a manifold solid, as its input was".into(),
+        };
+        for failure in [not_solid, SmError::NotSolid, SmError::Status(1001), SmError::Solidcore("shell: refused".into())] {
+            let first = crate::KernelError::Failed(format!("SMLib shell: operation: {failure}"));
+            let e = thinner_shell_hint(1.5875, &failure, first.clone(), |_| false);
+            assert_eq!(e, first, "{failure:?}");
+            let e = thinner_shell_hint(1.5875, &failure, first.clone(), |w| w <= 0.8).to_string();
+            assert!(e.contains("the walls offset from this body do not close into a solid; a wall of 0.79375 mm builds"), "{e}");
+        }
+    }
+
+    /// A tube of outer radius 1 shelled open at the top by 2 mm cannot fit; whatever wall the
+    /// refusal offers builds when used (#20781).
+    #[test]
+    fn a_shell_hint_on_a_thin_rod_builds_when_used() {
+        let rod = cylinder(Vec3::ZERO, Vec3::Z, 1.0, 10.0).unwrap();
+        let top = Vec3::new(0.2, 0.2, 10.0);
+        match offset_backend::shell(&rod, &[top], 2.0) {
+            Ok(_) => {}
+            Err(e) => {
+                let e = e.to_string();
+                if let Some(at) = e.rfind("a wall of ").and_then(|i| e[i + 10..].find(" mm builds").map(|j| (i + 10, i + 10 + j))) {
+                    let w: f64 = e[at.0..at.1].parse().unwrap();
+                    assert!(offset_backend::shell(&rod, &[top], w).is_ok(), "{e}");
+                } else {
+                    assert!(!e.contains("shell_brep") && !e.contains("status 1001"), "{e}");
+                }
+            }
+        }
+    }
+
+    /// #20781's situation: the largest wall the kernel names is a face's own radius of
+    /// curvature, a wall that itself collapses. A post of radius 0.8276550758693992 stands on a
+    /// plate whose rim is many small flat faces (a curve cut as flat pieces). Shelled 2 mm
+    /// open at the post's top, the wall is refused, and whatever the refusal offers is strictly under
+    /// that radius and builds when used; where no wall builds it says so plainly.
+    #[test]
+    fn a_shell_wall_named_under_a_radius_limit_builds_when_used() {
+        const R: f64 = 0.8276550758693992;
+        let rim: Vec<Vec2> = (0..96)
+            .map(|i| {
+                let a = std::f64::consts::TAU * f64::from(i) / 96.0;
+                Vec2::new(8.0 * a.cos(), 8.0 * a.sin())
+            })
+            .collect();
+        let plate = extrude(&Plane::XY, &[Region2 { outer: Loop2::polygon(&rim), holes: vec![] }], 0.0, 10.0).unwrap().pop().unwrap();
+        let post = cylinder(Vec3::new(0.0, 0.0, 9.0), Vec3::Z, R, 7.0).unwrap();
+        let body = boolean(&plate, &post, BoolOp::Union).unwrap().unwrap();
+        let top = Vec3::new(0.1, 0.1, 16.0);
+        // The wall that is the radius itself collapses: it is never a wall to name.
+        assert!(offset_backend::shell(&body, &[top], R).is_err(), "a wall of the post's own radius builds");
+        let e = offset_backend::shell(&body, &[top], 2.0).unwrap_err().to_string();
+        let named = e.rfind("a wall of ").and_then(|i| e[i + 10..].find(" mm builds").map(|j| e[i + 10..i + 10 + j].to_string()));
+        match named {
+            Some(w) => {
+                let w: f64 = w.parse().unwrap();
+                assert!(w > 0.0 && w < R, "the wall named is not under the radius: {e}");
+                assert!(offset_backend::shell(&body, &[top], w).is_ok(), "the wall named does not build: {e}");
+            }
+            None => {
+                assert!(e.contains("no thinner wall builds either"), "{e}");
+                assert!(!e.contains("shell_brep") && !e.contains("status") && !e.contains("1001"), "{e}");
+            }
+        }
     }
 
     #[test]

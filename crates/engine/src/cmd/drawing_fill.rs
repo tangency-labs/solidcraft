@@ -4,7 +4,8 @@ use std::sync::Arc;
 
 use serde::Serialize;
 use serde_json::Value;
-use solidcore_record::{Region2, hatch};
+use solidcore_record::Region2;
+use solidcraft_doc::drawing::hatch::Pattern;
 use solidcraft_doc::drawing::{Drawing, FillPaint, FillRegionStatus, PatternSnapshot, ResolvedSketchFill, SketchFill};
 use solidcraft_doc::ids;
 
@@ -79,7 +80,8 @@ fn paint_reading(paint: &FillPaint) -> contract::Paint {
 
 fn admit_paint(drawing: &Drawing, id: u64, region: Region2, cmd: &str) -> Result<()> {
     let fill = drawing.sheet_fill(id).ok_or_else(|| bad(cmd, "the fill disappeared before paint admission"))?;
-    let sheet = drawing.sheet_sketch(fill.sketch).ok_or_else(|| bad(cmd, "the owning sheet sketch disappeared"))?.sheet;
+    let record = drawing.sheet_sketch(fill.sketch).ok_or_else(|| bad(cmd, "the owning sheet sketch disappeared"))?;
+    let sheet = drawing.sketch_sheet(record).ok_or_else(|| bad(cmd, "the owning sheet sketch's owner disappeared"))?;
     let resolved = ResolvedSketchFill {
         drawing: drawing.id,
         sheet,
@@ -194,7 +196,8 @@ fn readings(s: &Session, selected: Option<u64>, cmd: &str) -> Result<Value> {
             }
             Err(reason) => (contract::Status::Failed, Some(reason.clone())),
         };
-        let sheet = drawing.sheet_sketch(fill.sketch).ok_or_else(|| bad(cmd, "the owning sketch disappeared"))?.sheet;
+        let record = drawing.sheet_sketch(fill.sketch).ok_or_else(|| bad(cmd, "the owning sketch disappeared"))?;
+        let sheet = drawing.sketch_sheet(record).ok_or_else(|| bad(cmd, "the owning sketch's owner disappeared"))?;
         fills.push(contract::Reading {
             fill: ids::encode(fill.id),
             sheet: ids::encode(sheet),
@@ -244,8 +247,8 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
         )
         .map_err(|error| bad(cmd, error.to_string()))?,
         contract::PatternImport::Builtin { pattern } => vec![match pattern {
-            contract::Builtin::Lines45 => hatch::Pattern::lines_45(),
-            contract::Builtin::CrossHatch => hatch::Pattern::cross_hatch(),
+            contract::Builtin::Lines45 => Pattern::lines_45(),
+            contract::Builtin::CrossHatch => Pattern::cross_hatch(),
         }],
     };
     let drawing = s.drawing(cmd)?.clone();

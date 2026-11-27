@@ -295,6 +295,51 @@ fn extrude_to_a_named_face_keeps_it_when_another_part_touches_it() {
     assert!(rel(v, 36.0 * 20.0) < 1e-6, "the extrude ended at the plate: {v}");
 }
 
+/// A body built in a component from a sketch of the root keeps the place its component was moved
+/// to when the move is captured (#14513): the body belongs to its component, so it moves with it.
+#[test]
+fn extrude_from_root_sketch_keeps_the_captured_position_of_its_component() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [10, 20]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.create", json!({"name": "A", "activate": false}));
+    run(&mut s, "component.create", json!({"name": "B", "activate": false}));
+    run(&mut s, "component.activate", json!({"component": "A"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": 10, "body_name": "PartA"}));
+    run(&mut s, "component.activate", json!({"component": "B"}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Profile", "distance": 10, "body_name": "PartB"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "B:1", "translate": [40, 0, 0], "capture": false}));
+    run(&mut s, "component.capture_position", json!({}));
+    let near = |a: f64, e: f64| (a - e).abs() < 1e-5;
+    let b = s.world_state().unwrap().body("PartB").unwrap().mesh().bounds();
+    assert!(near(b.min.x, 40.0) && near(b.max.x, 50.0), "PartB must keep the captured position: {b:?}");
+    let a = s.world_state().unwrap().body("PartA").unwrap().mesh().bounds();
+    assert!(near(a.min.x, 0.0) && near(a.max.x, 10.0), "PartA stays where its component stands: {a:?}");
+}
+
+/// A sweep in a component, from a profile and a path of the root, is built where they are shown.
+/// When the component is moved and the move is captured, the swept body keeps the place the
+/// component was moved to, as an extrude from the same sketch does (#14513).
+#[test]
+fn sweep_from_root_sketches_keeps_the_captured_position_of_its_component() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Profile"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-2, -2], "p1": [2, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Path"}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, -40]], "ids": ["down"]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let made = run(&mut s, "component.create", json!({"name": "Rail", "grounded": false, "activate": true}));
+    let occurrence = made["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.sweep", json!({"sketch": "Profile", "path_sketch": "Path", "path": ["down"], "operation": "new", "body_name": "Tube"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occurrence, "translate": [40, 0, 0], "capture": false}));
+    run(&mut s, "component.capture_position", json!({}));
+    let near = |a: f64, e: f64| (a - e).abs() < 1e-5;
+    let b = s.world_state().unwrap().body("Tube").unwrap().mesh().bounds();
+    assert!(near(b.min.x, 38.0) && near(b.max.x, 42.0), "the swept body must keep the captured position: {b:?}");
+}
+
 /// An extrude in a child component from a shared root sketch captures the relative sketch frame
 /// at creation time, so joining or moving that component later moves the extruded body rigidly
 /// with the component instead of pulling it back to the root sketch's world placement.
@@ -503,4 +548,54 @@ fn pasted_extrude_from_root_sketch_moves_with_target_component() {
     let pasted = s.world_state().unwrap().bodies.iter().find(|b| b.name != "RailABody").unwrap().mesh().bounds();
     let near = |a: f64, e: f64| (a - e).abs() < 1e-5;
     assert!(near(pasted.min.x, 60.0) && near(pasted.max.x, 70.0), "pasted body must move with RailB: {pasted:?}");
+}
+
+/// A primitive's axis given by letter or as a vector builds the same solid in a turned component (#21098).
+#[test]
+fn primitive_axis_letter_and_vector_agree_in_turned_component() {
+    let cylinder_bounds = |axis: serde_json::Value| {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "A", "grounded": false, "activate": true}));
+        run(&mut s, "occurrence.move", json!({"occurrence": "A:1", "to_matrix": [0, -1, 0, 100, 1, 0, 0, 0, 0, 0, 1, 0]}));
+        run(&mut s, "solid.cylinder", json!({"diameter": "20 mm", "height": "50 mm", "base": [10, 0, 0], "axis": axis, "body_name": "Cyl"}));
+        s.world_state().unwrap().body("Cyl").unwrap().mesh().bounds()
+    };
+    let by_letter = cylinder_bounds(json!("Y"));
+    let by_vector = cylinder_bounds(json!([0, 1, 0]));
+    let near = |a: f64, b: f64| (a - b).abs() < 1e-5;
+    assert!(
+        near(by_letter.min.x, by_vector.min.x)
+            && near(by_letter.max.x, by_vector.max.x)
+            && near(by_letter.min.y, by_vector.min.y)
+            && near(by_letter.max.y, by_vector.max.y)
+            && near(by_letter.min.z, by_vector.min.z)
+            && near(by_letter.max.z, by_vector.max.z),
+        "cylinder letter axis {by_letter:?} must match vector axis {by_vector:?}"
+    );
+    let approx = |a: f64, b: f64| (a - b).abs() < 1e-2;
+    assert!(approx(by_letter.min.x, 0.0) && approx(by_letter.max.x, 20.0), "{by_letter:?}");
+    assert!(approx(by_letter.min.y, 0.0) && approx(by_letter.max.y, 50.0), "{by_letter:?}");
+
+    let cone_bounds = |axis: serde_json::Value| {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "A", "grounded": false, "activate": true}));
+        run(&mut s, "occurrence.move", json!({"occurrence": "A:1", "to_matrix": [0, -1, 0, 100, 1, 0, 0, 0, 0, 0, 1, 0]}));
+        run(
+            &mut s,
+            "solid.cone",
+            json!({"radius": "10 mm", "top_radius": "5 mm", "height": "50 mm", "base": [10, 0, 0], "axis": axis, "body_name": "Cone"}),
+        );
+        s.world_state().unwrap().body("Cone").unwrap().mesh().bounds()
+    };
+    let cone_letter = cone_bounds(json!("Y"));
+    let cone_vector = cone_bounds(json!([0, 1, 0]));
+    assert!(
+        near(cone_letter.min.x, cone_vector.min.x)
+            && near(cone_letter.max.x, cone_vector.max.x)
+            && near(cone_letter.min.y, cone_vector.min.y)
+            && near(cone_letter.max.y, cone_vector.max.y)
+            && near(cone_letter.min.z, cone_vector.min.z)
+            && near(cone_letter.max.z, cone_vector.max.z),
+        "cone letter axis {cone_letter:?} must match vector axis {cone_vector:?}"
+    );
 }

@@ -129,3 +129,31 @@ fn a_wide_line_of_nothing_is_refused() {
         assert!(paper_dxf(&scene.prepare().unwrap(), &|_| wide).is_err(), "{wide}");
     }
 }
+
+/// A view's hidden-line pass can leave a piece far shorter than the DXF grid of 1e-9 mm: a circle
+/// seen edge on, cut beside the point where it turns back. Written, such a piece is a point.
+/// Alone it adds no entity; between two lines it adds no vertex. The sheet still exports.
+#[test]
+fn a_piece_shorter_than_the_dxf_grid_is_not_written_and_does_not_refuse_the_sheet() {
+    let (a, b) = (p(150.0, 200.0), p(150.0 + 3e-14, 200.0));
+    let lone = Item::Stroke { path: vec![Seg2::Line { a, b }], closed: false, width_mm: 0.5, pattern: None };
+    let through = Item::Stroke {
+        path: vec![Seg2::Line { a: p(100.0, 200.0), b: a }, Seg2::Line { a, b }, Seg2::Line { a: b, b: p(150.0, 250.0) }],
+        closed: false,
+        width_mm: 0.5,
+        pattern: None,
+    };
+    let scene = Scene::new(p(297.0, 297.0), vec![Group { object: 1, kind: ObjectKind::View, items: vec![lone, through] }]);
+    let (text, _) = paper_dxf(&scene.prepare().unwrap(), &|_| 0.5).unwrap();
+    let (entities, _) = read(&text);
+    assert_eq!(entities.len(), 1, "one polyline, nothing for the lone piece: {entities:?}");
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let at = lines.iter().position(|l| *l == "AcDbPolyline").unwrap();
+    let vertices: Vec<(&str, &str)> = lines[at + 1..]
+        .chunks(2)
+        .map(|c| (c[0], c[1]))
+        .take_while(|(code, _)| *code != "0")
+        .filter(|(code, _)| ["10", "20"].contains(code))
+        .collect();
+    assert_eq!(vertices, [("10", "100.0"), ("20", "200.0"), ("10", "150.0"), ("20", "200.0"), ("10", "150.0"), ("20", "250.0")]);
+}

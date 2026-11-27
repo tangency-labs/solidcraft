@@ -12,23 +12,18 @@
 //! The blend executive splits variable-radius faces at corners in their law. An unported kernel
 //! operation maps to [`Error::Unsupported`].
 //!
-//! The picks by point, the statuses and the result contract below ([`pick_edges`], [`status`],
-//! [`finish`], [`on_copy`]) are what the operation families still on the kernel crate share
-//! (tangency-labs/solidcore#3304).
+//! The picks by point, the statuses and the copy below ([`pick`], [`status`], [`on_copy`]) are
+//! what the operation families still on the kernel crate share (tangency-labs/solidcore#3304).
 
 use solidcore::SolidError;
 use solidcore::blend::fillet_corner::p3::MIXED_CORNER_RAILS_CROSS;
 use solidcore::error::nurbs::NurbsFailure;
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
-use solidcore::query::api_queries::edge_closest_point;
-use solidcore::topology::brep::p1 as brep_p1;
-use solidcore::topology::brep::p2 as brep_p2;
+use solidcore::topology::Brep;
 use solidcore::topology::brep::p3::brep_copy;
-use solidcore::topology::brep::validation::{CheckLevel, validate_and_update_tolerances};
-use solidcore::topology::{Brep, EdgeId, VertexId};
 
-use super::{Body, answer};
+use super::Body;
 use crate::{Blend, ChamferSecond, Error, Hole, HoleEdge, MAX_POINTS, Result, Turn};
 
 /// Why solidcore refuses the 3x2 mixed-convexity corner whose rails cross
@@ -133,7 +128,7 @@ pub(super) enum Miss {
 /// first picked it. A point picks none when the nearest is farther than `tol`, and is ambiguous
 /// when the second nearest is within `tol` too and nearer than the first by at most `model_tol`.
 /// An entity whose distance query returns a status other than success is skipped, as the capi
-/// skips it ([`answer`]); any other solidcore error fails the pick.
+/// skips it ([`super::answer`]); any other solidcore error fails the pick.
 pub(super) fn pick<T: Copy + PartialEq>(
     all: &[T],
     points: &[[f64; 3]],
@@ -172,23 +167,6 @@ pub(super) fn pick<T: Copy + PartialEq>(
     Ok(Ok((picked, first)))
 }
 
-/// `pick_edges` (`edge_distance`: `SmApiEdgeClosestPoint`).
-pub(super) fn pick_edges(
-    k: &Kernel,
-    b: &Brep,
-    points: &[[f64; 3]],
-    tol: f64,
-) -> solidcore::Result<std::result::Result<(Vec<EdgeId>, Vec<usize>), Miss>> {
-    let all = brep_p1::edges(b, None)?;
-    pick(&all, points, tol, b.tolerance(), |e, p| Ok(answer(edge_closest_point(k, b, e, p))?.map(|c| c.closest.distance)))
-}
-
-/// `pick_vertices` (`vertex_distance`).
-pub(super) fn pick_vertices(b: &Brep, points: &[[f64; 3]], tol: f64) -> solidcore::Result<std::result::Result<(Vec<VertexId>, Vec<usize>), Miss>> {
-    let all = brep_p1::vertices(b, None)?;
-    pick(&all, points, tol, b.tolerance(), |v, p| Ok(Some((b.vertex(v)?.point - p).length())))
-}
-
 /// An edge pick's failure as `pick_error` (ops.rs) reads it.
 pub(super) fn edge_miss(m: Miss) -> Error {
     match m {
@@ -213,13 +191,23 @@ const ERR_PICK_AMBIGUOUS: i32 = -1102;
 /// Runs `f`, a step of the entry point `call` on solidcore-ops, for `body`, the entry point's
 /// input ([`super::call::ops_as`]: the session's fixes, the stop token, the profiler span, the
 /// call running now, and `body` left in the dump folder should it fail), its refusal as
-/// SolidCraft's error ([`refused`]).
+/// SolidCraft's error ([`blend_refused`]).
 fn ops<T>(call: &'static str, body: &Body, f: impl FnOnce() -> solidcore_ops::Result<T>) -> Result<T> {
-    super::call::ops_as(call, &[("brep", body)], refused, f)
+    super::call::ops_as(call, &[("brep", body)], blend_refused, f)
+}
+
+/// A refusal of a blend's own step as [`refused`] words it, except that what the kernel cannot
+/// build yet keeps the kernel's reason ([`Error::Unported`]) instead of the bare
+/// [`Error::Unsupported`], which the other callers of [`refused`] word in their own terms.
+fn blend_refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
+    match e {
+        solidcore_ops::Error::Unsupported(why) if why != MIXED_CORNER_RAILS_CROSS => Error::Unported(why),
+        e => refused(call, e, detail),
+    }
 }
 
 /// `e`, a refusal of the entry point `call` on `body` that is this crate's own (a pick that
-/// chose nothing, the curvature fillet's wedges): while a dump folder is set, `body` is left
+/// chose nothing): while a dump folder is set, `body` is left
 /// there, as for a refusal of solidcore-ops'.
 fn failed(call: &'static str, body: &Body, e: Error) -> Error {
     super::dump::failed_ops(call, &e.to_string(), &[("brep", body)]);
@@ -231,7 +219,7 @@ fn failed(call: &'static str, body: &Body, e: Error) -> Error {
 /// too short, a swept turn not built, a corner no blend handles), the kernel's statuses as the
 /// status, the blend refusals and failures ops types carried as they are ([`Error::Refused`]),
 /// and every other error as any solidcore-ops call's ([`super::call::error`]).
-fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
+pub(super) fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) -> Error {
     use solidcore_ops::Error as Ops;
     match e {
         Ops::Status(code) => Error::Status(code),
@@ -242,7 +230,7 @@ fn refused(call: &'static str, e: solidcore_ops::Error, detail: Option<String>) 
         Ops::SetbackTooShort { least, at, builds, .. } => Error::SetbackTooShort { least, at, builds },
         Ops::CornerUnsupported { why, at } => Error::CornerUnsupported { why, at },
         Ops::CornerRefused { corner } => Error::CornerRefused { corner },
-        Ops::TurnRefused { room, why, at } => Error::TurnRefused { room, why, at },
+        Ops::TurnRefused { room, why, at, .. } => Error::TurnRefused { room, why, at },
         Ops::NoEffect => Error::NoEffect,
         Ops::Unsupported(why) if why == MIXED_CORNER_RAILS_CROSS => Error::Unported(MIXED_CORNER_UNSUPPORTED),
         Ops::Unsupported(_) | Ops::Unported(_) => Error::Unsupported,
@@ -305,23 +293,6 @@ fn copy(call: &'static str, body: &Body) -> Result<Body> {
     ops(call, body, || body.copy())
 }
 
-/// `finish`: the result must have faces, and a solid input must give a closed manifold solid.
-/// Before refusing a non-manifold result, grows tolerances to cover marginal gaps (SolidCraft
-/// issue #10: fuzzer seeds 178 and others). Tolerances only grow.
-pub(super) fn finish(k: &mut Kernel, mut b: Brep, solid_in: bool) -> solidcore::Result<Out<Brep>> {
-    if b.face_list().is_empty() {
-        return Ok(Err(Error::Empty));
-    }
-    // Always try growing tolerances first: covers marginal edge/vertex gaps where the gap
-    // exceeds the recorded tolerance. Tolerances only grow: a body that already passes is
-    // unchanged; a marginal failure becomes sound.
-    let _ = validate_and_update_tolerances(k, &mut b, false, None, CheckLevel::Level2 as u8);
-    if solid_in && !brep_p2::is_manifold_solid(&b)? {
-        return Ok(Err(Error::NotSolid));
-    }
-    Ok(Ok(b))
-}
-
 /// Runs `f` on a copy of `body` (`brep_copy`).
 pub(super) fn on_copy(call: &'static str, body: &Body, f: impl FnOnce(&mut Kernel, Brep) -> solidcore::Result<Out<Brep>>) -> Result<Body> {
     if body.kernel_left_unfinished() {
@@ -342,14 +313,6 @@ pub(crate) enum Corners {
     /// Removed, the holes listed (`smlib_blend_setback_open`).
     Open,
 }
-
-/// Why a curvature fillet over edges of different wedge angles is refused: SolidCraft refuses it
-/// since every edge took the equal-area thumbweight of the first one's wedge (in the fork as in
-/// solidcore#2261), so that an edge of another wedge took off another area than its own, and
-/// which one depended on the edges' order.
-pub(crate) const CURVATURE_MIXED_WEDGES: &str = "a curvature-continuous fillet on solidcore over edges whose faces meet at different \
-angles: every edge takes the equal-area thumbweight of the first one's angle, so the others take off the wrong area \
-(https://github.com/tangency-labs/solidcore/issues/2250#issuecomment-6563419897)";
 
 /// [`blend_holes`] without its holes.
 #[allow(clippy::too_many_arguments)] // the capi's blend_call
@@ -445,11 +408,6 @@ fn blend_call(
         .zip(&at.first)
         .map(|(&vertex, &j)| solidcore_ops::SetBack { vertex, distance: setbacks.get(j).copied().unwrap_or(0.0) })
         .collect();
-    // Edges of other wedges than the first's are not built together curvature-continuously
-    // (solidcore#2250's comment 6563419897).
-    if kind == Blend::Curvature && !ops(CALL, &w, || solidcore_ops::blend::edges_share_wedge(&w, &picked.entities))? {
-        return Err(failed(CALL, &w, Error::Unported(CURVATURE_MIXED_WEDGES)));
-    }
     let kind = match kind {
         Blend::Round => solidcore_ops::Blend::Round,
         Blend::Curvature => solidcore_ops::Blend::Curvature,
@@ -460,6 +418,7 @@ fn blend_call(
         turn: match turn {
             Turn::Mitre => solidcore_ops::Turn::Mitre,
             Turn::Swept => solidcore_ops::Turn::Swept,
+            Turn::Auto => solidcore_ops::Turn::Auto,
         },
         ..solidcore_ops::BlendOptions::default()
     };
@@ -626,8 +585,8 @@ mod tests {
         use solidcore::error::Failure;
         use solidcore::error::sweep::SweepFailure;
         let sweep = |w| Failure::new("sweep::topology_sweep", w).into_error();
-        assert!(matches!(status(sweep(SweepFailure::Failed("the face was already swept"))), Error::Status(1001)));
-        assert!(matches!(status(sweep(SweepFailure::Missing("the edge's curve"))), Error::Status(1006)));
+        assert!(matches!(status(sweep(SweepFailure::FaceAlreadySwept)), Error::Status(1001)));
+        assert!(matches!(status(sweep(SweepFailure::NullTarget)), Error::Status(1006)));
         assert!(matches!(status(SolidError::sm_err("CopyFaces")), Error::Status(1001)));
         let cap = SweepFailure::RailPastStationCap { asked: 1e-6, reached: 1e-3, wires: 64 };
         assert!(matches!(status(sweep(cap)), Error::Solidcore(_)));
@@ -695,8 +654,9 @@ mod tests {
         assert!(matches!(status(topology(TopologyFailure::InvalidValue("a zero normal"))), Error::Status(1007)));
         assert!(matches!(status(topology(TopologyFailure::Inconsistent("two outer loops"))), Error::Status(1005)));
         assert!(matches!(status(topology(TopologyFailure::DropFailed { status: 1010 })), Error::Status(1010)));
-        let at =
-            Failure::new("topology::vertexuse", TopologyFailure::Failed("x")).at(solidcore::EntityRef::Vertex(VertexId::from_index(2))).into_error();
+        let at = Failure::new("topology::vertexuse", TopologyFailure::Failed("x"))
+            .at(solidcore::EntityRef::Vertex(solidcore::topology::VertexId::from_index(2)))
+            .into_error();
         assert!(matches!(status(at), Error::Status(1001)));
     }
 

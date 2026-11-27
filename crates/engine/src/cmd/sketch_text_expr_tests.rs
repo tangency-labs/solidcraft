@@ -1,4 +1,4 @@
-//! A sketch text's height, place and angle can be expressions of the design's parameters: the
+//! A sketch text's height, place, angle and spacing can be expressions of the design's parameters: the
 //! text keeps the expression, follows the parameters, and a number typed instead replaces it.
 
 use serde_json::{Value, json};
@@ -38,7 +38,7 @@ fn no_trouble(s: &Session) {
 fn stored(s: &Session, link: &str) -> (Vec2, f64, f64, solidcraft_sketch::TextExprs) {
     let id = s.doc.find_feature("S").unwrap().id;
     let LinkSource::Text { at, height, angle, exprs, .. } = &s.doc.sketch(id).unwrap().link(link).unwrap().source else { panic!("not a text") };
-    (*at, *height, *angle, exprs.clone())
+    (*at, *height, *angle, (**exprs).clone())
 }
 
 fn reopened(s: &Session) -> Session {
@@ -109,6 +109,89 @@ fn a_texts_angle_can_be_an_expression_too() {
     // Reopened, the text stands as the parameter says.
     let (lo, hi) = text_box(&reopened(&s));
     assert!(hi.y - lo.y > hi.x - lo.x, "{lo:?} {hi:?}");
+}
+
+/// The spacing stored for the text `link` of sketch `S`: letter spacing, line spacing and their
+/// expressions.
+fn spacing(s: &Session, link: &str) -> (f64, f64, Option<String>, Option<String>) {
+    let id = s.doc.find_feature("S").unwrap().id;
+    let LinkSource::Text { style, exprs, .. } = &s.doc.sketch(id).unwrap().link(link).unwrap().source else { panic!("not a text") };
+    (style.letter_spacing, style.line_spacing, exprs.letter_spacing.clone(), exprs.line_spacing.clone())
+}
+
+#[test]
+fn a_texts_letter_and_line_spacing_can_be_expressions_too() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "0 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "lines", "expression": "1", "unit": ""}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    // Two lines of two capitals without descenders: one gap between the letters of a line, and
+    // the second line one line distance below the first one's baseline.
+    let r = run(&mut s, "sketch.text", json!({"text": "II\nII", "at": [0, 0], "height": 10, "letter_spacing": "gap", "line_spacing": "lines"}));
+    let link = r["link"].as_str().unwrap().to_string();
+    assert_eq!(r["exprs"], json!({"letter_spacing": "gap", "line_spacing": "lines"}), "{r}");
+    run(&mut s, "sketch.finish", json!({}));
+    no_trouble(&s);
+    let (lo, hi) = text_box(&s);
+    let (width, below) = (hi.x - lo.x, hi.y - lo.y - 10.0);
+    assert!(below > 1.0, "{lo:?} {hi:?}");
+
+    // Wider and further apart: the outlines follow both parameters, and so do they after the
+    // design is saved and opened again.
+    run(&mut s, "parameters.change", json!({"name": "gap", "expression": "2 mm"}));
+    run(&mut s, "parameters.change", json!({"name": "lines", "expression": "2"}));
+    let check = |s: &Session| {
+        no_trouble(s);
+        let (lo, hi) = text_box(s);
+        assert!((hi.x - lo.x - width - 2.0).abs() < 1e-6, "{lo:?} {hi:?}");
+        assert!((hi.y - lo.y - 10.0 - 2.0 * below).abs() < 1e-6, "{lo:?} {hi:?}");
+    };
+    check(&s);
+    check(&reopened(&s));
+    assert_eq!(spacing(&s, &link), (2.0, 2.0, Some("gap".into()), Some("lines".into())));
+
+    // The parameters list the text as a user, and a rename reaches its expressions.
+    let users = run(&mut s, "parameters.users", json!({"name": "gap"}));
+    assert!(users.to_string().contains("Text letter spacing"), "{users}");
+    let users = run(&mut s, "parameters.users", json!({"name": "lines"}));
+    assert!(users.to_string().contains("Text line spacing"), "{users}");
+    run(&mut s, "parameters.rename", json!({"name": "lines", "new_name": "leading"}));
+    assert_eq!(spacing(&s, &link).3.as_deref(), Some("leading"));
+
+    // A number replaces an expression; what an edit leaves out stays one.
+    run(&mut s, "sketch.edit", json!({"sketch": "S"}));
+    let r = run(&mut s, "sketch.edit_text", json!({"link": link, "letter_spacing": 1}));
+    assert_eq!(r["exprs"], json!({"line_spacing": "leading"}), "{r}");
+    assert_eq!(spacing(&s, &link), (1.0, 2.0, None, Some("leading".into())));
+
+    // A value typed as a definition (`name = value`, #4071) adds that parameter, and the text
+    // follows it, as the height does.
+    run(&mut s, "sketch.edit_text", json!({"link": link, "height": "tall = 12 mm", "letter_spacing": "wide = 3 mm", "line_spacing": "airy = 1.5"}));
+    let params = run(&mut s, "parameters.list", json!({}));
+    for name in ["tall", "wide", "airy"] {
+        assert!(params.to_string().contains(&format!("\"{name}\"")), "{name}: {params}");
+    }
+    assert_eq!(stored(&s, &link).3.height.as_deref(), Some("tall"));
+    assert_eq!(spacing(&s, &link), (3.0, 1.5, Some("wide".into()), Some("airy".into())));
+    run(&mut s, "parameters.change", json!({"name": "wide", "expression": "4 mm"}));
+    assert_eq!(spacing(&s, &link).0, 4.0);
+
+    // What cannot be a spacing is refused, and nothing changes.
+    let before = s.doc.to_json();
+    for (extra, error) in [
+        (json!({"letter_spacing": "nope"}), "unknown parameter"),
+        (json!({"letter_spacing": "leading * 1 deg"}), "`letter_spacing`"),
+        (json!({"line_spacing": "gap"}), "`line_spacing`"),
+        (json!({"line_spacing": "leading - 2"}), "`line_spacing` must be a positive factor"),
+    ] {
+        let mut edit = json!({"link": link});
+        for (key, value) in extra.as_object().unwrap() {
+            edit[key] = value.clone();
+        }
+        let e = s.execute("sketch.edit_text", &edit).unwrap_err().to_string();
+        assert!(e.contains(error), "{edit}: {e}");
+        assert_eq!(s.doc.to_json(), before, "{extra}");
+    }
 }
 
 #[test]
@@ -327,6 +410,27 @@ fn word_expr(s: &Session, link: &str) -> Value {
     serde_json::to_value(stored(s, link).3).unwrap()["text"].clone()
 }
 
+/// #4811: an older design whose text parameter is named `g`, now a unit, opens with it renamed to
+/// `g_param` in the text's words too: the text shows the same words, the comment says why, and the
+/// design saves and reopens the same.
+#[test]
+fn an_older_text_parameter_named_after_a_unit_is_renamed_in_its_texts_words() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "qqg", "expression": "IT", "unit": "text", "comment": "tag"}));
+    let r = block_with_text(&mut s, json!({"text_expression": "qqg + '-L'"}));
+    let link = r["link"].as_str().unwrap().to_string();
+    // Saved by an older build, where `g` could name a parameter.
+    let mut file: Value = serde_json::from_str(&s.doc.to_json().replace("qqg", "g")).unwrap();
+    file["format"] = json!("solidcraft/30");
+    file.as_object_mut().unwrap().remove("format_pending");
+    let opened = Session::new(solidcraft_doc::format::read(&file.to_string()).unwrap());
+    no_trouble(&opened);
+    assert_eq!(word_expr(&opened, &link), json!("g_param + '-L'"));
+    assert_eq!(words(&opened, &link), "IT-L");
+    assert_eq!(opened.doc.text_param("g_param").map(|p| p.comment.as_str()), Some("tag (renamed from `g`, which is now a unit)"));
+    assert_eq!(solidcraft_doc::format::read(&opened.doc.to_json()).unwrap(), *opened.doc);
+}
+
 /// A text's words can be an expression of text parameters (`Label + '-L'`): a parameter edit,
 /// or a configuration row that sets the parameter, relabels the text, and a cut of the text
 /// follows in the same rebuild, as if its words had been typed.
@@ -396,6 +500,88 @@ fn a_texts_words_follow_its_text_parameters_and_so_does_its_cut() {
         let e = s.execute("sketch.edit_text", &json!({"link": link, "text_expression": bad})).unwrap_err().to_string();
         assert!(e.contains(says), "{bad}: {e}");
     }
+}
+
+/// #727: a cut that picked every region of a text by index (`profiles: [0, 1]`) follows
+/// the text's new words when its text parameter changes, as the whole-sketch cut does: the
+/// same number of glyphs (`22` to `25`), a glyph with a counter (`30`) and more glyphs (`177`).
+#[test]
+fn a_cut_of_a_texts_regions_picked_by_index_follows_its_new_words() {
+    let whole = |words: &str| {
+        let mut s = Session::default();
+        block_with_text(&mut s, json!({"text": words}));
+        no_trouble(&s);
+        volume(&mut s)
+    };
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Label", "expression": "22", "unit": "text"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": -10}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let link = run(&mut s, "sketch.text", json!({"text_expression": "Label", "at": [5, 10], "height": 8}))["link"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S", "profiles": [0, 1], "distance": -1, "operation": "cut"}));
+    no_trouble(&s);
+    let first = volume(&mut s);
+    assert!((first - whole("22")).abs() < 1e-6, "22: {first} against {} by the whole sketch", whole("22"));
+
+    for w in ["25", "30", "177"] {
+        run(&mut s, "parameters.change", json!({"name": "Label", "expression": w}));
+        assert_eq!(words(&s, &link), w);
+        no_trouble(&s);
+        let (got, want) = (volume(&mut s), whole(w));
+        assert!((got - want).abs() < 1e-6, "{w}: {got} against {want} by the whole sketch");
+    }
+
+    // Saved as the text, not its curves: it reopens and still follows the words.
+    let saved = |s: &Session| serde_json::to_value(&s.doc.find_feature("Extrude2").unwrap().kind).unwrap().to_string();
+    assert!(saved(&s).contains(r#""text_regions""#), "{}", saved(&s));
+    let mut again = reopened(&s);
+    run(&mut again, "parameters.change", json!({"name": "Label", "expression": "22"}));
+    no_trouble(&again);
+    assert!((volume(&mut again) - first).abs() < 1e-6, "22 after a save");
+
+    // One letter of two stays one letter: a part of a text never grows into the whole text.
+    let mut one = Session::default();
+    run(&mut one, "parameters.add", json!({"name": "Label", "expression": "22", "unit": "text"}));
+    run(&mut one, "sketch.create", json!({"plane": "XY"}));
+    run(&mut one, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 30]}));
+    run(&mut one, "sketch.finish", json!({}));
+    run(&mut one, "solid.extrude", json!({"distance": -10}));
+    run(&mut one, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    run(&mut one, "sketch.text", json!({"text_expression": "Label", "at": [5, 10], "height": 8}));
+    run(&mut one, "sketch.finish", json!({}));
+    run(&mut one, "solid.extrude", json!({"sketch": "S", "profiles": [0], "distance": -1, "operation": "cut"}));
+    no_trouble(&one);
+    assert!(!saved(&one).contains(r#""text_regions""#), "{}", saved(&one));
+    let half = 30000.0 - volume(&mut one);
+    assert!(half > 0.0 && (half - (30000.0 - first) / 2.0).abs() < 1e-6, "one 2 of 22 cuts half of what both do: {half}");
+}
+
+/// #727: a cut of two whole texts picked by index is saved as both texts. When new words run
+/// one text into the other, the letters they cut apart are an error, not a pick of their pieces.
+#[test]
+fn a_cut_of_two_texts_that_new_words_run_together_is_an_error() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "Label", "expression": "1", "unit": "text"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 30]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": -10}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let first = run(&mut s, "sketch.text", json!({"text_expression": "Label", "at": [5, 10], "height": 8}))["link"].as_str().unwrap().to_string();
+    let second = run(&mut s, "sketch.text", json!({"text": "7", "at": [40, 10], "height": 8}))["link"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "S", "profiles": [0, 1], "distance": -1, "operation": "cut"}));
+    no_trouble(&s);
+    let saved = serde_json::to_value(&s.doc.find_feature("Extrude2").unwrap().kind).unwrap().to_string();
+    assert!(saved.contains(r#""text_regions""#) && saved.contains(&first) && saved.contains(&second), "{saved}");
+
+    run(&mut s, "parameters.change", json!({"name": "Label", "expression": "1111111111111"}));
+    let cut = s.model.results.iter().find(|r| r.name == "Extrude2").unwrap();
+    assert!(cut.error.as_deref().is_some_and(|e| e.contains("cut into")), "{:?}", cut.error);
 }
 
 /// #9281: a number parameter in a text's words shows its value in the design's units

@@ -129,14 +129,19 @@ pub fn part_name(blob: &Blob, extension: &str) -> String {
 /// refused by name rather than read as an empty file.
 pub(crate) fn add_part(blob: &Blob, extension: &str) -> String {
     let name = part_name(blob, extension);
+    keep_part(&name, blob);
+    name
+}
+
+/// Save an existing container part under the verified name the file used for it.
+pub(crate) fn keep_part(name: &str, blob: &Blob) {
     WRITING.with(|held| {
         if let Some(parts) = held.borrow_mut().as_mut()
-            && !parts.iter().any(|(known, _)| *known == name)
+            && !parts.iter().any(|(known, _)| known == name)
         {
-            parts.push((name.clone(), blob.clone()));
+            parts.push((name.into(), blob.clone()));
         }
     });
-    name
 }
 
 /// An older design's base64 text, as [`Blob`]'s own reading, except that text which is not base64

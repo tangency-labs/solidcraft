@@ -90,6 +90,7 @@ use crate::curve::curve::p2::{
 use crate::curve::curve::p3::eval_n;
 use crate::curve::ellipse::Ellipse;
 use crate::curve::line::Line;
+use crate::error::curve::{CurveFailure, FunctionGap, PropertyOption};
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::a_object;
 use crate::geom::assert_array::{labels, AssertArray, AssertReport, ObjectKey, ReportSpec};
@@ -1349,9 +1350,11 @@ impl<'a, C: CurveEvaluate + ?Sized> CurvePropertyEfo<'a, C> {
     /// The option vectors after upstream's `NULL` check (`SER(SM_ERR)`).
     fn checked_vec(&self, i: usize) -> Result<Vec3> {
         if self.opt_vectors.is_none() {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_EFO,
-                "the property function has no option vectors",
+                CurveFailure::PropertyOptionMissing {
+                    option: PropertyOption::Vectors,
+                },
             ));
         }
         self.vec(i)
@@ -1368,7 +1371,12 @@ impl<'a, C: CurveEvaluate + ?Sized> CurvePropertyEfo<'a, C> {
     /// The property value after upstream's `NULL` check (`SER(SM_ERR)`).
     fn checked_value(&self) -> Result<f64> {
         self.property_value.ok_or_else(|| {
-            SolidError::curve_failed(OP_EFO, "the property function has no property value")
+            SolidError::curve(
+                OP_EFO,
+                CurveFailure::PropertyOptionMissing {
+                    option: PropertyOption::Value,
+                },
+            )
         })
     }
 
@@ -1381,8 +1389,9 @@ impl<'a, C: CurveEvaluate + ?Sized> CurvePropertyEfo<'a, C> {
 impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
     // `signal_errors` only chooses whether upstream prints the error.
     fn evaluate(&mut self, t: f64, out: &mut FunctionValue, _signal_errors: bool) -> Result<()> {
-        let err =
-            || SolidError::curve_failed(OP_EFO, "the property function cannot be evaluated there");
+        let undefined = |t: f64, why: FunctionGap| {
+            SolidError::curve(OP_EFO, CurveFailure::FunctionUndefined { t, why })
+        };
 
         // init output
         out.f = 0.0;
@@ -1396,7 +1405,7 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 let p = self.checked_vec(0)?;
                 let c = self.eval(self.kernel, t, 1, true)?;
                 if c[1].length_squared() < EFF_ZERO {
-                    return Err(err());
+                    return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
                 }
                 let cp = c[0] - p;
                 out.f = cp.dot(cp);
@@ -1407,7 +1416,7 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 let p = self.checked_vec(0)?;
                 let c = self.eval(self.kernel, t, 1, true)?;
                 if c[1].length_squared() < EFF_ZERO {
-                    return Err(err());
+                    return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
                 }
                 let cp = c[0] - p;
                 let d = self.value()?;
@@ -1419,7 +1428,7 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 let v = self.checked_vec(0)?;
                 let c = self.eval(self.kernel, t, 2, true)?;
                 if c[1].length_squared() < EFF_ZERO {
-                    return Err(err());
+                    return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
                 }
                 out.f = v.dot(c[1]);
                 out.f_prime = v.dot(c[2]);
@@ -1441,14 +1450,15 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 let c = self.eval(self.kernel, t, 3, false)?;
                 let b = c[1].length();
                 if is_zero(b) {
-                    return Err(err()); // Zero first derivative error
+                    return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
+                    // Zero first derivative error
                 }
                 let numer = b * b * b;
 
                 let a = c[1].cross(c[2]);
                 let denom = a.length();
                 if is_zero(denom) {
-                    return Err(err()); // No curvature: infinite radius
+                    return Err(undefined(t, FunctionGap::NoCurvature)); // No curvature: infinite radius
                 }
                 out.f = numer / denom - k;
 
@@ -1477,7 +1487,7 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                         out.f_prime = 0.0;
                         return Ok(());
                     }
-                    return Err(err());
+                    return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
                 }
                 out.f_prime = c[1].dot(c[2]) / len;
             }
@@ -1487,7 +1497,7 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 // F = (C'/|C'| x V)^2, F' = (same) . (same)'
                 let length = c[1].length();
                 if is_zero(length) {
-                    return Err(err());
+                    return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
                 }
                 let cu = c[1] / length;
                 let cup = c[1].unitized_derivative(c[2]);
@@ -1504,25 +1514,25 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 let c = self.eval(self.kernel, t, 3, true)?;
                 let mut cpu = c[1];
                 if c[1].length_squared() < EFF_ZERO {
-                    return Err(err());
+                    return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
                 }
 
                 // no silhouette when tangent is perp to the viewing vector.
                 if c[1].dot(v).abs() < EFF_ZERO_SQRT {
-                    return Err(err());
+                    return Err(undefined(t, FunctionGap::TangentAcrossView));
                 }
 
                 // (SER(Unitize), tangency-labs/smlib 8311f8e)
                 cpu = cpu.unitize()?;
                 let cpup = c[1].unitized_derivative(c[2]);
                 if c[2].length_squared() < EFF_ZERO {
-                    return Err(err());
+                    return Err(undefined(t, FunctionGap::ZeroSecondDerivative));
                 }
                 let cppu = c[2].unitize()?;
                 let cppup = c[2].unitized_derivative(c[3]);
                 let a = cpu.cross(cppu);
                 if a.length_squared() < EFF_ZERO {
-                    return Err(err());
+                    return Err(undefined(t, FunctionGap::NoCurvature));
                 }
                 let osc_plane_vec = a.cross(cpu);
                 out.f = v.dot(osc_plane_vec);
@@ -1537,25 +1547,25 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 // F = C' x C'' x C' . (C-P) (unitized)
                 let mut cpu = c[1];
                 if c[1].length_squared() < EFF_ZERO {
-                    return Err(err());
+                    return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
                 }
 
                 // tangent in the silhouette plane: not really a silhouette
                 if c[1].dot(c_minus_p).abs() < EFF_ZERO_SQRT {
-                    return Err(err());
+                    return Err(undefined(t, FunctionGap::TangentAcrossView));
                 }
 
                 // (SER(Unitize), tangency-labs/smlib 8311f8e)
                 cpu = cpu.unitize()?;
                 let cpup = c[1].unitized_derivative(c[2]);
                 if c[2].length_squared() < EFF_ZERO {
-                    return Err(err());
+                    return Err(undefined(t, FunctionGap::ZeroSecondDerivative));
                 }
                 let cppu = c[2].unitize()?;
                 let cppup = c[2].unitized_derivative(c[3]);
                 let a = cpu.cross(cppu);
                 if a.length_squared() < EFF_ZERO {
-                    return Err(err());
+                    return Err(undefined(t, FunctionGap::NoCurvature));
                 }
                 let osc_plane_vec = a.cross(cpu);
                 out.f = c_minus_p.dot(osc_plane_vec);
@@ -1569,7 +1579,7 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 out.f = c[1].x;
                 out.f_prime = c[2].x;
                 if is_zero(out.f) && is_zero(out.f_prime) {
-                    return Err(err());
+                    return Err(undefined(t, FunctionGap::StationaryComponent));
                 }
             }
             CurvePropertyType::YNormal => {
@@ -1577,7 +1587,7 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 out.f = c[1].y;
                 out.f_prime = c[2].y;
                 if is_zero(out.f) && is_zero(out.f_prime) {
-                    return Err(err());
+                    return Err(undefined(t, FunctionGap::StationaryComponent));
                 }
             }
             CurvePropertyType::ZNormal => {
@@ -1585,7 +1595,7 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 out.f = c[1].z;
                 out.f_prime = c[2].z;
                 if is_zero(out.f) && is_zero(out.f_prime) {
-                    return Err(err());
+                    return Err(undefined(t, FunctionGap::StationaryComponent));
                 }
             }
             CurvePropertyType::XyzNormal => {
@@ -1598,21 +1608,21 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                     out.f = c[1].y * c[1].z;
                     out.f_prime = c[2].y * c[1].z + c[1].y * c[2].z;
                     if is_zero(out.f) && is_zero(out.f_prime) {
-                        return Err(err());
+                        return Err(undefined(t, FunctionGap::StationaryComponent));
                     }
                 }
                 if is_zero(c[1].y) && is_zero(c[2].y) {
                     out.f = c[1].x * c[1].z;
                     out.f_prime = c[2].x * c[1].z + c[1].x * c[2].z;
                     if is_zero(out.f) && is_zero(out.f_prime) {
-                        return Err(err());
+                        return Err(undefined(t, FunctionGap::StationaryComponent));
                     }
                 }
                 if is_zero(c[1].z) && is_zero(c[2].z) {
                     out.f = c[1].x * c[1].y;
                     out.f_prime = c[2].x * c[1].y + c[1].x * c[2].y;
                     if is_zero(out.f) && is_zero(out.f_prime) {
-                        return Err(err());
+                        return Err(undefined(t, FunctionGap::StationaryComponent));
                     }
                 }
             }
@@ -1628,7 +1638,7 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 out.f = 1.0 / c[1].dot(c[1]);
                 let denom = c[1].dot(c[1]) * c[1].dot(c[1]);
                 if denom < EFF_ZERO_SQ {
-                    return Err(err());
+                    return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
                 }
                 out.f_prime = (-2.0 * c[1].dot(c[2])) / denom;
             }
@@ -1637,7 +1647,8 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 // F = b^3 / |A|, A = C' x C'', b = |C'|
                 let b = c[1].length();
                 if is_zero(b) {
-                    return Err(err()); // Zero 1stDeriv point in search for MinRadOfCurvature
+                    return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
+                    // Zero 1stDeriv point in search for MinRadOfCurvature
                 }
                 let numer = b * b * b;
 
@@ -1676,7 +1687,8 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
 
                 let b = c[1].length();
                 if is_zero(b) {
-                    return Err(err()); // Zero first derivative error
+                    return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
+                    // Zero first derivative error
                 }
                 let denom = b * b * b;
 
@@ -1710,7 +1722,12 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
             }
             CurvePropertyType::CylinderIntersection => {
                 if self.opt_vectors.is_none() {
-                    return Err(err());
+                    return Err(SolidError::curve(
+                        OP_EFO,
+                        CurveFailure::PropertyOptionMissing {
+                            option: PropertyOption::Vectors,
+                        },
+                    ));
                 }
                 let cyl_radius = self.value()?;
                 let center = self.vec(0)?;
@@ -1725,7 +1742,12 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
             | CurvePropertyType::MinimizeAngleToPlane
             | CurvePropertyType::MinimizeDirectedAngle => {
                 if self.opt_vectors.is_none() {
-                    return Err(err());
+                    return Err(SolidError::curve(
+                        OP_EFO,
+                        CurveFailure::PropertyOptionMissing {
+                            option: PropertyOption::Vectors,
+                        },
+                    ));
                 }
                 let c = self.eval(self.kernel, t, 2, true)?;
                 // F = (C' x N) . (C - Origin)
@@ -1781,7 +1803,12 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
             }
             CurvePropertyType::TangentToCircle => {
                 if self.opt_vectors.is_none() {
-                    return Err(err());
+                    return Err(SolidError::curve(
+                        OP_EFO,
+                        CurveFailure::PropertyOptionMissing {
+                            option: PropertyOption::Vectors,
+                        },
+                    ));
                 }
 
                 let c = self.eval(self.kernel, t, 2, true)?;
@@ -1790,7 +1817,7 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 let diff = c[0] - p;
                 let mag = c[1].length();
                 if mag < EFF_ZERO {
-                    return Err(err());
+                    return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
                 }
 
                 // Determine which case we have (ahead / behind on both tangents).
@@ -1816,13 +1843,18 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
             CurvePropertyType::MaximaToLine => {
                 // F = Dot(C',Cross(Cross(V,C-P),V))
                 if self.opt_vectors.is_none() {
-                    return Err(err());
+                    return Err(SolidError::curve(
+                        OP_EFO,
+                        CurveFailure::PropertyOptionMissing {
+                            option: PropertyOption::Vectors,
+                        },
+                    ));
                 }
                 let p = self.vec(0)?;
                 let v = self.vec(1)?;
                 let c = self.eval(self.kernel, t, 2, true)?;
                 if c[1].length_squared() < EFF_ZERO {
-                    return Err(err());
+                    return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
                 }
 
                 let norm_at_c = v.cross(v.cross(c[0] - p));
@@ -1834,12 +1866,17 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
             CurvePropertyType::MaximaToPlane => {
                 // F = C' . V, F' = C'' . V
                 if self.opt_vectors.is_none() {
-                    return Err(err());
+                    return Err(SolidError::curve(
+                        OP_EFO,
+                        CurveFailure::PropertyOptionMissing {
+                            option: PropertyOption::Vectors,
+                        },
+                    ));
                 }
                 let v = self.vec(1)?;
                 let c = self.eval(self.kernel, t, 2, true)?;
                 if c[1].length_squared() < EFF_ZERO {
-                    return Err(err());
+                    return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
                 }
 
                 out.f = v.dot(c[1]);
@@ -1848,11 +1885,16 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
             CurvePropertyType::ProjectedTangentThroughPoint => {
                 // F = ( (C-P) x C' ) . N, F' = ( (C-P) x C'' ) . N
                 if self.opt_vectors.is_none() {
-                    return Err(err());
+                    return Err(SolidError::curve(
+                        OP_EFO,
+                        CurveFailure::PropertyOptionMissing {
+                            option: PropertyOption::Vectors,
+                        },
+                    ));
                 }
                 let c = self.eval(self.kernel, t, 2, true)?;
                 if c[1].length_squared() < EFF_ZERO {
-                    return Err(err());
+                    return Err(SolidError::curve(OP_EFO, CurveFailure::ZeroTangent { t }));
                 }
 
                 let gap = c[0] - self.vec(0)?;
@@ -1863,7 +1905,9 @@ impl<C: CurveEvaluate + ?Sized> EvalFunction for CurvePropertyEfo<'_, C> {
                 let cross2 = gap.cross(c[2]);
                 out.f_prime = cross2.dot(n);
             }
-            CurvePropertyType::PlaneClassify => return Err(err()),
+            CurvePropertyType::PlaneClassify => {
+                return Err(SolidError::curve(OP_EFO, CurveFailure::NoPropertyFunction))
+            }
         }
         Ok(())
     }
@@ -1944,18 +1988,14 @@ impl<'a, C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> CcTangentIntEnf
 
         // if we have a zero length tangent then we must fail
         if tan_len_sq2 < EFF_ZERO || tan_len_sq1 < EFF_ZERO {
-            return Err(SolidError::curve_failed(
-                OP_TAN,
-                "a curve has a zero-length tangent",
-            ));
+            let t = if tan_len_sq2 < EFF_ZERO { x1 } else { x0 };
+            return Err(SolidError::curve(OP_TAN, CurveFailure::ZeroTangent { t }));
         }
 
-        let ufp = pvv1[1]
-            .unitize()
-            .map_err(|_| SolidError::curve_failed(OP_TAN, "a curve's tangent does not unitize"))?;
-        let ugp = pvv2[1]
-            .unitize()
-            .map_err(|_| SolidError::curve_failed(OP_TAN, "a curve's tangent does not unitize"))?;
+        // (both squared lengths are at least SM_EFF_ZERO, above the SM_EFF_ZERO_SQ under
+        // which Unitize fails, so the tangents unitize)
+        let ufp = pvv1[1].unitize_or_z();
+        let ugp = pvv2[1].unitize_or_z();
         let ufpp = pvv1[1].unitized_derivative(pvv1[2]);
         let ugpp = pvv2[1].unitized_derivative(pvv2[2]);
         let gap_vec = pvv1[0] - pvv2[0];
@@ -2220,9 +2260,9 @@ impl<C: CurveEvaluate + ?Sized> EvalNFunctions for CpDistAtEnfo<'_, C> {
 
         // if we have a zero length tangent then we must fail
         if tan_len_sq1 < EFF_ZERO {
-            return Err(SolidError::curve_failed(
+            return Err(SolidError::curve(
                 OP_DIST_AT,
-                "the curve has a zero-length tangent",
+                CurveFailure::ZeroTangent { t: x0 },
             ));
         }
 

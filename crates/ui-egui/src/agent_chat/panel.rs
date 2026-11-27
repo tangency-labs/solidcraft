@@ -58,6 +58,8 @@ pub enum PanelAction {
     RemovePending(usize),
     /// Undo the changes of the message at this index.
     UndoChanges(usize),
+    /// Toggle the model highlight for this message's changes.
+    ShowModelChanges(usize),
     SetMode(String),
     SetModel(String),
     SetCustomModel(String),
@@ -90,6 +92,9 @@ pub enum PanelAction {
     /// Attach a picture pasted into the text box (desktop only).
     #[cfg(not(target_arch = "wasm32"))]
     AttachPicture(super::paste::Picture),
+    /// Continue the task the agent could not finish (the provider's usage limit, or any other
+    /// error): it goes again with a note that it was cut short (#16318).
+    Continue,
     /// The assistant's page in Preferences.
     OpenSettings,
     /// Preferences, adding an agent.
@@ -117,9 +122,14 @@ pub fn run(app: &mut SolveApp, ctx: &egui::Context, action: PanelAction) {
             }
         }
         PanelAction::SendNow => send_now(app, ctx),
+        PanelAction::Continue => super::continue_task(app),
         PanelAction::Cancel => cancel(app),
         PanelAction::RemovePending(n) => remove_pending(app, n),
         PanelAction::UndoChanges(n) => undo_changes(app, n),
+        PanelAction::ShowModelChanges(n) => {
+            super::toggle_model_changes(app, n);
+            ctx.request_repaint();
+        }
         PanelAction::SetMode(m) => set_mode(app, &m),
         PanelAction::SetModel(m) => set_model(app, &m),
         PanelAction::SetCustomModel(m) => {
@@ -196,6 +206,9 @@ pub struct PanelView {
     /// The undo history as a message's changes left it, while it still is: their Undo is offered
     /// only then, so it never takes a step made after them.
     pub undo_history: Option<super::Revision>,
+    /// Whether the current view can show a feature highlight, and which card is showing one.
+    model_view_visible: bool,
+    model_changes: Option<usize>,
     /// Length units and decimals for the summaries of what the agent did.
     pub units: String,
     pub decimals: u8,
@@ -235,12 +248,14 @@ impl PanelView {
         let current = agents::current(app);
         let permission_agent =
             if app.agent_chat.state().running() { Some(app.agent_chat.running_id.clone()) } else { current.as_ref().map(|e| e.id.clone()) };
-        let permission = permission_agent.as_deref().map_or(app.preferences.ai_permissions, |id| agents::mode_for(&app.preferences, id));
+        let permission = permission_agent.as_deref().map_or(app.preferences.ai_permissions, |id| agents::mode_in_force(app, id));
         PanelView {
             shown: shown(app),
             document: app.session.doc.name.clone(),
             revision: super::Revision::of(&app.session.doc),
             undo_history: super::UndoMark::current(&app.agent_chat.items, &app.session.undo),
+            model_view_visible: super::model_changes_view_visible(app),
+            model_changes: super::model_changes_index(app),
             units: app.session.doc.units.clone(),
             decimals: app.preferences.length_decimals,
             agents: agents::entries(app),
@@ -404,6 +419,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.agent_chat.drop_rect = None;
     app.agent_chat.hovered = None;
     app.agent_chat.hover.clear();
+    if !shown(app) || !app.agent_chat.open || !super::model_changes_view_visible(app) {
+        app.agent_chat.clear_model_changes();
+    }
     if !visible {
         app.agent_chat.panel_rect = None;
         app.agent_chat.window_placed = false;
@@ -448,9 +466,13 @@ pub(crate) fn prepare_shared(app: &mut SolveApp, ctx: &egui::Context) {
 
 /// Independent viewers and drop feedback keep their existing window policy.
 pub(crate) fn finish_shared(app: &mut SolveApp, ctx: &egui::Context) {
+    if !super::model_changes_view_visible(app) {
+        app.agent_chat.clear_model_changes();
+    }
     if !shown(app) || !app.agent_chat.open {
         app.agent_chat.keyboard_owned = false;
         app.agent_chat.hover.clear();
+        app.agent_chat.model_changes_shown = None;
         return;
     }
     if app.agent_chat.panel_rect.is_none() {
@@ -822,9 +844,10 @@ pub fn window_place(saved: Option<[f32; 4]>) -> Option<([f32; 2], [f32; 2])> {
 /// The chat window's settings. The saved place and size go only to a window that is opening:
 /// egui turns a changed place into a move, and the system rounds what it is given, so giving it
 /// every frame made the window chase its own rounding (it shook a pixel up and down).
-pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs) -> egui::ViewportBuilder {
+pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs, owner: egui::ViewportId) -> egui::ViewportBuilder {
     let title = format!("{document} — {}", tr("ui.agent_chat"));
-    let builder = egui::ViewportBuilder::default().with_title(title).with_min_inner_size([MIN_WIDTH, 320.0]);
+    let builder =
+        crate::window_chrome::popout_viewport(egui::ViewportBuilder::default(), owner).with_title(title).with_min_inner_size([MIN_WIDTH, 320.0]);
     if placed {
         return builder;
     }
@@ -839,7 +862,7 @@ pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs) -> 
 /// The system's close button closes the chat (it opens there again); Dock puts it back.
 #[cfg(not(target_arch = "wasm32"))]
 fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &mut AgentPanelPrefs, blur: &mut crate::blur::State) {
-    let builder = window_builder(&view.document, chat.window_placed, prefs);
+    let builder = window_builder(&view.document, chat.window_placed, prefs, ctx.viewport_id());
     chat.window_placed = true;
     // The side panel isn't drawn: its place no longer counts as "in the chat".
     chat.panel_rect = None;
@@ -1304,22 +1327,38 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
 fn transcript_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) -> f32 {
     // Select All and Copy of the whole conversation, read before its labels see the keys.
     super::select_all::handle(chat, ui.ctx());
+    let top = ui.cursor().top();
+    if let Some(stage) = chat.current_stage() {
+        let t = Tokens::get();
+        let label = trf("ui.agent_chat_current_stage", &[("step", stage)]);
+        inset(ui, |ui| {
+            let line = ui
+                .add(egui::Label::new(RichText::new(&label).color(t.text_dim).size(t.font_small)).truncate().selectable(false))
+                .backing_on_hover_text(&label);
+            solidcraft_ui_registry::publish_rect("agent_chat:current_stage", line.rect);
+        });
+    }
+    let stage_height = ui.cursor().top() - top;
+    let margin = Tokens::get().space_12 as i8;
+    let height = ui.available_height();
+    // The height inside the margins, less a point so rounding never shows a scroll bar.
+    let room = (height - 2.0 * f32::from(margin) - 1.0).max(0.0);
     let conversation = egui::ScrollArea::vertical()
         .id_salt("sc_agent_chat_scroll")
         .min_scrolled_height(0.0)
-        .max_height(ui.available_height())
+        .max_height(height)
         .auto_shrink([false, false])
         .stick_to_bottom(true)
         .show(ui, |ui| {
-            egui::Frame::NONE.inner_margin(egui::Margin::same(Tokens::get().space_12 as i8)).show(ui, |ui| {
+            egui::Frame::NONE.inner_margin(egui::Margin::same(margin)).show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = Tokens::get().space_10;
-                conversation(chat, view, ui);
+                conversation(chat, view, ui, room);
             });
             // Last, so the scroll goes to this area and not to one nested in the conversation.
             scroll_while_selecting(ui);
         });
     solidcraft_ui_registry::publish_rect("agent_chat:conversation", conversation.inner_rect);
-    conversation.content_size.y
+    stage_height + conversation.content_size.y
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1464,19 +1503,23 @@ fn switcher(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     if let Some(options) = chat.config_options.clone() {
         config_selects(chat, ui, &options);
     }
-    ui.horizontal(|ui| {
-        let b = if chat.state().running() {
-            ui_kit::button(ui, tr("ui.agent_chat_stop"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.agent_chat_stop_tip"))
-        } else {
-            let label = if chat.state() == State::Failed { "ui.agent_chat_retry" } else { "ui.agent_chat_connect" };
-            ui_kit::button(ui, tr(label), ui_kit::Button::Normal)
-        };
-        solidcraft_ui_registry::publish_handle("agent_chat:connect", b.rect.center());
-        if b.clicked() {
-            chat.actions.push(if chat.state().running() { PanelAction::Disconnect } else { PanelAction::Connect });
-        }
-    });
-    if let Some(a) = &chat.auth_status {
+    if chat.state().shows_stop() || !chat.state().running() {
+        ui.horizontal(|ui| {
+            let b = if chat.state().shows_stop() {
+                ui_kit::button(ui, tr("ui.agent_chat_stop"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.agent_chat_stop_tip"))
+            } else {
+                let label = if chat.state() == State::Failed { "ui.agent_chat_retry" } else { "ui.agent_chat_connect" };
+                ui_kit::button(ui, tr(label), ui_kit::Button::Normal)
+            };
+            solidcraft_ui_registry::publish_handle("agent_chat:connect", b.rect.center());
+            if b.clicked() {
+                chat.actions.push(if chat.state().shows_stop() { PanelAction::Disconnect } else { PanelAction::Connect });
+            }
+        });
+    }
+    if chat.state().shows_auth_status()
+        && let Some(a) = &chat.auth_status
+    {
         ui.label(RichText::new(a).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_small));
     }
 }
@@ -2009,13 +2052,15 @@ fn scroll_while_selecting(ui: &egui::Ui) {
     ui.scroll_with_delta_animation(vec2(0.0, -step), egui::style::ScrollAnimation::none());
 }
 
+/// The conversation, in `room` points of height before it scrolls.
 #[cfg(not(target_arch = "wasm32"))]
-fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
+fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room: f32) {
     let t = Tokens::get();
     let mut answer: Option<(usize, Option<String>)> = None;
     // Allow (true), Deny (false), Always allow (None).
     let mut approval: Option<(u64, Option<bool>)> = None;
     let mut undo: Option<usize> = None;
+    let mut toggle_model_changes: Option<usize> = None;
     let mut open_gallery: Option<Gallery> = None;
     // The pill or chip under the pointer, for the host to light.
     let mut hovered: Option<Hovered> = None;
@@ -2236,20 +2281,52 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                     }
                 });
             }
-            Item::Changes { steps, revision, history, undone } => {
-                ui.horizontal(|ui| {
-                    let text = trf("ui.agent_chat_changes", &[("n", &steps.to_string())]);
-                    ui.label(RichText::new(text).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
-                    if *undone {
-                        ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
-                    } else if revision.same(current) && view.undo_history.as_ref().is_some_and(|h| history.same(h)) {
-                        let b =
-                            ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.ai_undo_tip"));
-                        solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
-                        if b.clicked() {
-                            undo = Some(n);
-                        }
+            Item::Changes { steps, summary, features, revision, history, undone } => {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = t.space_6;
+                    if !summary.is_empty() {
+                        ui_kit::assistant_tool_detail(ui, |ui| {
+                            ui.set_min_width(ui.available_width().max(0.0));
+                            ui.spacing_mut().item_spacing.y = t.space_2;
+                            for line in summary {
+                                let mut text = RichText::new(line.as_str()).color(t.text_dim).size(t.font_small);
+                                if *undone {
+                                    text = text.strikethrough();
+                                }
+                                ui.add(egui::Label::new(text).truncate()).backing_on_hover_text(line.as_str());
+                            }
+                        });
                     }
+                    ui.horizontal_wrapped(|ui| {
+                        let text = if features.is_empty() {
+                            trf("ui.agent_chat_changes", &[("n", &steps.to_string())])
+                        } else {
+                            trf("ui.agent_chat_model_changes", &[("n", &features.len().to_string())])
+                        };
+                        ui.label(RichText::new(text).color(t.text_dim).size(t.font_caption));
+                        if *undone {
+                            ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(t.font_caption));
+                        } else if revision.same(current) && view.undo_history.as_ref().is_some_and(|h| history.same(h)) {
+                            if !features.is_empty() && view.model_view_visible {
+                                let label = tr(if view.model_changes == Some(n) {
+                                    "ui.agent_chat_hide_model_changes"
+                                } else {
+                                    "ui.agent_chat_show_model_changes"
+                                });
+                                let b = ui_kit::button(ui, label, ui_kit::Button::Normal);
+                                solidcraft_ui_registry::publish_handle("agent_chat:model_changes", b.rect.center());
+                                if b.clicked() {
+                                    toggle_model_changes = Some(n);
+                                }
+                            }
+                            let b = ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal)
+                                .backing_on_hover_text(tr("ui.ai_undo_tip"));
+                            solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
+                            if b.clicked() {
+                                undo = Some(n);
+                            }
+                        }
+                    });
                 });
             }
             Item::Notice { text, error } => {
@@ -2259,6 +2336,18 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
             }
         }
         took_line(ui, &stamp);
+    }
+    // A task the agent could not finish (the provider's usage limit, or any other error) waits
+    // to be continued (#16318).
+    if chat.unfinished.is_some() && chat.state() == State::Ready {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(tr("ui.agent_chat_interrupted")).color(t.text_dim).size(t.font_small));
+            let b = ui_kit::button(ui, tr("ui.agent_chat_continue"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.agent_chat_continue_tip"));
+            solidcraft_ui_registry::publish_handle("agent_chat:continue", b.rect.center());
+            if b.clicked() {
+                chat.actions.push(PanelAction::Continue);
+            }
+        });
     }
     // While the agent works with no tool running, how long since it last said or did something
     // (a running tool's card counts for itself).
@@ -2369,10 +2458,7 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
                 }
             });
         } else {
-            ui_kit::assistant_prose(ui, |ui| {
-                ui.label(RichText::new(tr("ui.agent_chat_intro")).color(t.text_dim));
-                ui.label(RichText::new(tr("ui.agent_chat_privacy")).color(t.text_dim).size(t.font_small));
-            });
+            new_chat_intro(ui, room);
         }
     }
     if let Some((n, text)) = edit_done {
@@ -2407,6 +2493,36 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     }
     if let Some(n) = undo {
         chat.actions.push(PanelAction::UndoChanges(n));
+    }
+    if let Some(n) = toggle_model_changes {
+        chat.actions.push(PanelAction::ShowModelChanges(n));
+    }
+}
+
+/// A new chat's short introduction and the hint to type in the message box, at the bottom of the
+/// conversation's `room` so they sit just above the message box (#11256). The space above them
+/// comes from their height the frame before; a frame that measures a new height is laid out
+/// again, so they never show in the wrong place. Taller than the room, the conversation keeps its
+/// bottom in view, so the hint stays just above the message box and the start scrolls up.
+#[cfg(not(target_arch = "wasm32"))]
+fn new_chat_intro(ui: &mut egui::Ui, room: f32) {
+    let t = Tokens::get();
+    let id = ui.scope_id().with("sc_agent_chat_intro_height");
+    let known = ui.data(|data| data.get_temp::<f32>(id));
+    ui.add_space(known.map_or(0.0, |height| (room - height).max(0.0)));
+    let intro = ui_kit::assistant_prose(ui, |ui| {
+        ui.vertical(|ui| {
+            ui.label(RichText::new(tr("ui.agent_chat_intro_short")).color(t.text_dim));
+            ui.label(RichText::new(tr("ui.agent_chat_privacy")).color(t.text_dim).size(t.font_small));
+            ui.label(tr("ui.agent_chat_hint"));
+        })
+        .response
+        .rect
+    });
+    solidcraft_ui_registry::publish_rect("agent_chat:intro", intro);
+    if known.is_none_or(|height| (height - intro.height()).abs() > 0.5) {
+        ui.data_mut(|data| data.insert_temp(id, intro.height()));
+        ui.ctx().request_discard("Assistant intro measured");
     }
 }
 
@@ -2854,21 +2970,31 @@ fn tool_card(ui: &mut egui::Ui, n: usize, call: &ToolCall) {
             ui.indent(id.with("detail"), |ui| {
                 if let Some(input) = call.input {
                     let text = serde_json::to_string_pretty(input).unwrap_or_default();
-                    tool_detail(ui, tr("ui.ai_tool_arguments"), &text, id.with("in"));
+                    let copy = tool_detail(ui, tr("ui.ai_tool_arguments"), &text, id.with("in"));
+                    solidcraft_ui_registry::publish_handle(&format!("agent_chat:tool:{n}:copy:arguments"), copy.rect.center());
                 }
                 if let Some(o) = call.output {
-                    tool_detail(ui, tr("ui.ai_tool_result"), o, id.with("out"));
+                    let copy = tool_detail(ui, tr("ui.ai_tool_result"), o, id.with("out"));
+                    solidcraft_ui_registry::publish_handle(&format!("agent_chat:tool:{n}:copy:result"), copy.rect.center());
                 }
             });
         });
     });
 }
 
-/// One part of a card's Details: its heading and the raw text, cut short and scrolling.
+/// One part of a card's Details: a bounded, scrolling preview and a Copy action for the full text.
 #[cfg(not(target_arch = "wasm32"))]
-fn tool_detail(ui: &mut egui::Ui, heading: &str, text: &str, id: Id) {
+fn tool_detail(ui: &mut egui::Ui, heading: &str, text: &str, id: Id) -> egui::Response {
     let t = Tokens::get();
-    ui.label(RichText::new(heading).size(t.font_small).color(t.text_dim));
+    let copy = ui
+        .horizontal(|ui| {
+            ui.label(RichText::new(heading).size(t.font_small).color(t.text_dim));
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| ui_kit::button(ui, tr("ui.agent_chat_copy"), ui_kit::Button::Small)).inner
+        })
+        .inner;
+    if copy.clicked() {
+        ui.ctx().copy_text(text.to_owned());
+    }
     let shown: String =
         if text.chars().count() > MAX_DETAIL { text.chars().take(MAX_DETAIL).chain(std::iter::once('…')).collect() } else { text.to_string() };
     ui_kit::assistant_tool_detail(ui, |ui| {
@@ -2877,6 +3003,7 @@ fn tool_detail(ui: &mut egui::Ui, heading: &str, text: &str, id: Id) {
             ui.add(egui::Label::new(RichText::new(shown).monospace().size(t.font_small)).selectable(true).wrap());
         });
     });
+    copy
 }
 
 /// A small status mark drawn as a shape (no glyph a system font might lack): filled when the
@@ -3023,6 +3150,35 @@ mod tests {
         assert!(app.agent_chat.items.is_empty(), "the panel itself sends nothing");
     }
 
+    /// The button that continues a task the agent could not finish asks the host to continue it
+    /// (#16318); the panel itself continues nothing.
+    #[test]
+    fn the_continue_button_records_the_task_to_continue() {
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.agent_chat.state = Some(State::Ready);
+        app.agent_chat.unfinished = Some(("make a gearbox".into(), false, None, Vec::new()));
+        let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(440.0, 720.0));
+        let frame = |app: &mut SolveApp, events: Vec<egui::Event>| {
+            solidcraft_ui_registry::clear_handles();
+            let input = egui::RawInput { screen_rect: Some(screen), focused: true, events, ..Default::default() };
+            let view = PanelView::of(app, &ctx);
+            // The conversation is drawn in the room it has before it scrolls (#17355).
+            let mut output = ctx.run_ui(input, |ui| {
+                let room = ui.available_height();
+                ui_kit::scope(ui, |ui| conversation(&mut app.agent_chat, &view, ui, room))
+            });
+            output.textures_delta.clear();
+        };
+        frame(&mut app, Vec::new());
+        let at = solidcraft_ui_registry::handle_at("agent_chat:continue").expect("the continue button is drawn");
+        for pressed in [true, false] {
+            frame(&mut app, crate::test_support::pointer(at, pressed));
+        }
+        assert_eq!(app.agent_chat.actions, [PanelAction::Continue]);
+        assert!(app.agent_chat.unfinished.is_some(), "the panel itself continues nothing");
+    }
+
     /// The composer of `app` drawn once with `events`, as the host draws it, its actions left unrun.
     fn composer_frame(ctx: &egui::Context, app: &mut SolveApp, events: Vec<egui::Event>) {
         solidcraft_ui_registry::clear_handles();
@@ -3089,6 +3245,8 @@ mod tests {
             document: "Plate".into(),
             revision: Revision::of(&solidcraft_engine::Session::default().doc),
             undo_history: None,
+            model_view_visible: true,
+            model_changes: None,
             units: "mm".into(),
             decimals: 2,
             agents: Vec::new(),
@@ -3257,7 +3415,7 @@ mod tests {
             let view = PanelView::of(&mut app, &ctx);
             let mut output = ctx.run_ui(input, |ui| {
                 ui.set_width(width);
-                ui_kit::scope(ui, |ui| conversation(&mut app.agent_chat, &view, ui));
+                ui_kit::scope(ui, |ui| conversation(&mut app.agent_chat, &view, ui, 720.0));
             });
             output.textures_delta.clear();
             for id in ["reject", "remember", "once", "custom"] {
@@ -3316,5 +3474,61 @@ mod tests {
                 assert!(!a.shrink(0.5).intersects(b.shrink(0.5)), "picker overlap: {a:?} {b:?}");
             }
         }
+    }
+
+    /// Draws a new chat with one agent in a panel of `size`, a few frames as the app does, and
+    /// returns the texts drawn in the last one.
+    fn new_chat_texts(size: egui::Vec2) -> Vec<String> {
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        app.preferences.agents.push(agents::AgentConfig { id: "plate".into(), name: "Plate agent".into(), ..Default::default() });
+        app.agent_chat.detection = Some(discover::Detection::default());
+        app.agent_chat.picking = Some(false);
+        app.agent_chat.state = Some(State::Ready);
+        let input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)), ..Default::default() };
+        let mut texts = Vec::new();
+        for _ in 0..3 {
+            solidcraft_ui_registry::clear_handles();
+            let mut output = ctx.run_ui(input.clone(), |ui| {
+                let mut prefs = AgentPanelPrefs::read(&app.preferences);
+                let view = PanelView::of(&mut app, ui.ctx());
+                header(&mut app.agent_chat, ui, &mut prefs);
+                desktop_body(&mut app.agent_chat, &view, ui, Flow::Tall, &prefs);
+            });
+            texts = crate::test_support::text_shapes(&output).map(|text| text.galley.text().to_string()).collect();
+            output.textures_delta.clear();
+        }
+        texts
+    }
+
+    /// A new chat's short introduction and the hint to type sit just above the message box, not
+    /// at the top of an empty panel (#11256).
+    #[test]
+    fn a_new_chat_introduces_itself_just_above_the_message_box() {
+        let texts = new_chat_texts(vec2(440.0, 720.0));
+        for id in ["ui.agent_chat_intro_short", "ui.agent_chat_privacy", "ui.agent_chat_hint"] {
+            assert!(texts.iter().any(|text| text == tr(id)), "{id} is drawn: {texts:?}");
+        }
+        assert!(!texts.iter().any(|text| text == tr("ui.agent_chat_intro")), "the long introduction is not");
+        let intro = solidcraft_ui_registry::rect_of("agent_chat:intro").expect("the introduction is drawn");
+        let conversation = solidcraft_ui_registry::rect_of("agent_chat:conversation").expect("the conversation is drawn");
+        let composer = solidcraft_ui_registry::rect_of("agent_chat:composer_box").expect("the message box is drawn");
+        let t = Tokens::get();
+        assert!(intro.top() > conversation.top() + 100.0, "the introduction is not at the top: {intro:?} in {conversation:?}");
+        assert!(intro.bottom() <= conversation.bottom(), "the introduction is not cut off: {intro:?} in {conversation:?}");
+        let gap = composer.top() - intro.bottom();
+        assert!((0.0..=t.space_12 * 3.0).contains(&gap), "the hint sits just above the message box: {gap} between {intro:?} and {composer:?}");
+    }
+
+    /// In a panel too short for the short introduction, the hint to type stays in view just above
+    /// the message box and the start of the introduction scrolls up.
+    #[test]
+    fn a_new_chat_introduction_taller_than_the_panel_keeps_the_hint_in_view() {
+        new_chat_texts(vec2(300.0, 260.0));
+        let intro = solidcraft_ui_registry::rect_of("agent_chat:intro").expect("the introduction is drawn");
+        let conversation = solidcraft_ui_registry::rect_of("agent_chat:conversation").expect("the conversation is drawn");
+        assert!(intro.height() > conversation.height(), "the introduction is taller than the conversation: {intro:?} in {conversation:?}");
+        assert!(intro.bottom() <= conversation.bottom(), "the hint is not cut off: {intro:?} in {conversation:?}");
+        assert!(intro.bottom() > conversation.top(), "the hint is not scrolled out of view: {intro:?} in {conversation:?}");
     }
 }

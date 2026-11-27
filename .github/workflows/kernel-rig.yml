@@ -49,6 +49,12 @@ on:
   # CI (ci.yml) calls this on pull requests and merge groups, so the rig is part of the required
   # `ci` check; the release gate (release-gate.yml) calls it too.
   workflow_call:
+    inputs:
+      # CI on a batch branch (Tickets' merge batches, ci.yml) passes where the batch leaves main:
+      # the run then grades the areas that diff reaches, as for a merge group.
+      batch_base:
+        type: string
+        default: ""
   workflow_dispatch:
 
 permissions:
@@ -62,6 +68,10 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  # The build job keeps target/ on a Blacksmith sticky disk that main's pushes write, as ci.yml's
+  # build jobs do (WARM_TARGET there); change it to start the disk afresh.
+  WARM_TARGET: target-v1
+  SCCACHE_IDLE_TIMEOUT: "0"
 
 jobs:
   plan:
@@ -72,8 +82,10 @@ jobs:
     # The checkout fetches history without file contents (below), so this takes well under a minute.
     timeout-minutes: 10
     outputs:
-      # The shard matrix (JSON list of areas and the ladder; [] when nothing is selected).
+      # The areas selected and the ladder (JSON list; [] when nothing is selected).
       shards: ${{ steps.plan.outputs.shards }}
+      # The shard matrix: the ladder alone, the areas in at most three groups (JSON list).
+      groups: ${{ steps.groups.outputs.groups }}
       # Whether the build job, and with it the coverage check, runs.
       build: ${{ steps.plan.outputs.build }}
     steps:
@@ -82,8 +94,8 @@ jobs:
           # A pull request's diff needs its base's history: the commits and trees, not every file
           # version. A full clone of every blob took over the 5-minute timeout on a 2-vCPU runner and
           # cancelled the merge queue's rig selection (Select the rig areas) again and again.
-          fetch-depth: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && '0' || '1' }}
-          filter: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group') && 'blob:none' || '' }}
+          fetch-depth: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group' || inputs.batch_base != '') && '0' || '1' }}
+          filter: ${{ (github.event_name == 'pull_request' || github.event_name == 'merge_group' || inputs.batch_base != '') && 'blob:none' || '' }}
       - name: Selection self-test
         run: python3 -I scripts/ci/test_kernel_rig_plan.py
       - id: plan
@@ -93,6 +105,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           GROUP_BASE_REF: ${{ github.event.merge_group.base_ref }}
+          BATCH_BASE: ${{ inputs.batch_base }}
+          PUSH_SHA: ${{ github.sha }}
         run: |
           # Pull requests and merge groups run the areas their diff reaches (a change that touches no
           # kernel path runs none); pushes to main, the release gate and a run by hand run every area.
@@ -104,6 +118,13 @@ jobs:
             BASE_SHA=$(git merge-base refs/remotes/origin/rig-base "$HEAD_SHA")
             echo "Merge group: diffing $BASE_SHA ($GROUP_BASE_REF tip) ... $HEAD_SHA"
           fi
+          # A batch branch (ci.yml passes its base): the batch's diff from main, as for a merge group.
+          if [ -n "$BATCH_BASE" ]; then
+            EVENT_NAME=merge_group
+            BASE_SHA=$BATCH_BASE
+            HEAD_SHA=$PUSH_SHA
+            echo "Batch branch: diffing $BASE_SHA ... $HEAD_SHA"
+          fi
           if [ "$EVENT_NAME" = pull_request ] || [ "$EVENT_NAME" = merge_group ]; then
             git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/rig-paths"
             python3 -I scripts/ci/kernel_rig_plan.py --paths "$RUNNER_TEMP/rig-paths" \
@@ -111,6 +132,22 @@ jobs:
           else
             python3 -I scripts/ci/kernel_rig_plan.py --all --github-output "$GITHUB_OUTPUT"
           fi
+      # Most areas take well under a minute of cases (about 15 minutes for all 18), and the ladder
+      # about 6: a runner for each spent more time starting and checking out than running cases. The
+      # ladder gets one, and the areas share at most three (every third area in each), so the rig ends
+      # when the ladder does, as before.
+      - id: groups
+        name: Group the areas into shards
+        env:
+          SHARDS: ${{ steps.plan.outputs.shards }}
+        run: |
+          groups=$(jq -c '
+            ([.[] | select(. != "ladder")]) as $areas
+            | ([$areas | length, 3] | min) as $n
+            | (if index("ladder") then [{name: "ladder", areas: "ladder"}] else [] end)
+              + [range(0; $n) as $i | {name: "areas \($i + 1)/\($n)",
+                  areas: ([$areas | to_entries[] | select(.key % $n == $i) | .value] | join(" "))}]' <<<"$SHARDS")
+          echo "groups=$groups" | tee -a "$GITHUB_OUTPUT"
 
   build:
     name: Build the CLI
@@ -125,6 +162,7 @@ jobs:
       SCCACHE_CACHE_SIZE: 10G
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@1.99.1
@@ -137,9 +175,22 @@ jobs:
           key: ${{ github.repository }}-sccache-kernel-rig
           path: /home/runner/.cache/sccache
           commit: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && 'on-change' || 'false' }}
+      # target/ from main's last rig build; scripts/ci/warm_target.py marks what changed since its
+      # tree, so Cargo rebuilds only those crates and what depends on them.
+      - name: Mount the build directory
+        uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        continue-on-error: true
+        with:
+          key: ${{ github.repository }}-${{ env.WARM_TARGET }}-kernel-rig
+          path: ${{ github.workspace }}/target
+          commit: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'on-change' || 'false' }}
+      - name: Mark what changed since the build directory's tree
+        run: python3 -I scripts/ci/warm_target.py prepare --target target ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '--writer' || '' }}
+      # The registry and git checkouts only: target/ is on the disk above.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: kernel-rig
+          cache-targets: "false"
           save-if: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') }}
       - name: Set up compiler cache
         id: sccache
@@ -161,6 +212,9 @@ jobs:
       # Every registry command is used by a case or listed in tests/kernel-cases/EXEMPT.
       - name: Every command has a case
         run: target/debug/xtask kernel-cases --coverage --cli target/release/solidcraft-cli
+      - name: Seal the build directory
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: python3 -I scripts/ci/warm_target.py seal --target target
       # A coverage-only run (the registry or the cases changed, no area selected) runs no shard.
       - name: Pack the binaries
         if: needs.plan.outputs.shards != '[]'
@@ -176,7 +230,7 @@ jobs:
         run: if command -v sccache >/dev/null; then sccache --show-stats; else echo "sccache was not set up; built without it"; fi
 
   shard:
-    name: Kernel rig (${{ matrix.shard }})
+    name: Kernel rig (${{ matrix.group.name }})
     needs: [plan, build]
     if: needs.plan.outputs.shards != '[]'
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -184,34 +238,47 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # The areas of tests/kernel-cases/ the plan selected, and the ladder. On the build box
-        # (aarch64, 4 cases at a time) the slowest areas took about 1 minute (booleans, 212 s of
+        # The areas of tests/kernel-cases/ the plan selected, grouped, and the ladder. On the build
+        # box (aarch64, 4 cases at a time) the slowest areas took about 1 minute (booleans, 212 s of
         # cases with one of 84 s; threads, 161 s) and the ladder, one case at a time, 92 s: no area
         # needs splitting.
-        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+        group: ${{ fromJSON(needs.plan.outputs.groups) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/merge-main
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: kernel-rig-bin
           path: ${{ runner.temp }}
       - name: Unpack the binaries
         run: mkdir -p target && tar -xf "$RUNNER_TEMP/kernel-rig-bin.tar" -C target
+      # Every area of the group runs, even after one fails, so each reports its own outcome.
       - name: Run the cases against the known-failing list (the ladder against its golden)
         env:
-          SHARD: ${{ matrix.shard }}
+          AREAS: ${{ matrix.group.areas }}
         run: |
-          if [ "$SHARD" = ladder ]; then
-            set -- --ladder --gate
-          else
-            set -- --area "$SHARD" --known-failing "tests/kernel-cases/$SHARD/KNOWN_FAILING"
+          failed=
+          for area in $AREAS; do
+            echo "::group::$area"
+            if [ "$area" = ladder ]; then
+              set -- --ladder --gate
+            else
+              set -- --area "$area" --known-failing "tests/kernel-cases/$area/KNOWN_FAILING"
+            fi
+            target/debug/xtask kernel-cases "$@" --cli target/release/solidcraft-cli --out "$RUNNER_TEMP/kernel-rig/$area" \
+              || failed="$failed $area"
+            echo "::endgroup::"
+          done
+          if [ -n "$failed" ]; then
+            echo "::error::Kernel rig failed in:$failed"
+            exit 1
           fi
-          target/debug/xtask kernel-cases "$@" --cli target/release/solidcraft-cli --out "$RUNNER_TEMP/kernel-rig"
+      # One folder per area inside.
       - name: Keep the results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: kernel-rig-results-${{ matrix.shard }}
+          name: kernel-rig-results-${{ strategy.job-index }}
           path: ${{ runner.temp }}/kernel-rig/**/results.json
           if-no-files-found: ignore
 

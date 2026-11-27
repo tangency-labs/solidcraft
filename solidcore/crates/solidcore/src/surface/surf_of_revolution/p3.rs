@@ -65,6 +65,10 @@
 //!   `SmBSplineSurface::CalculateBoundingBox`); the NURB has no owner, so its zone
 //!   tolerance expansion finds no face (`GetFace()` is `NULL`), as for a surface of
 //!   revolution outside a face upstream.
+//! - **Coaxial faces in contact** (not upstream, #15049). Where both surfaces are faces'
+//!   (`revolved_contact_tol`), the generators of `intersect_revolved_into` are intersected
+//!   at the contact tolerance, so generators a hair less than tangent touch at one point
+//!   and the surfaces along one circle; bare surfaces keep upstream's crossings.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p2::CurvePropertyType;
@@ -74,7 +78,8 @@ use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::Curve;
 use crate::curve::ellipse::{Ellipse, EllipseOptions, PolarConversion};
 use crate::curve::iso_curve::IsoCurve;
-use crate::error::{ignore_status, ignored, Result, SolidError};
+use crate::error::surface::{AnalyticCheck, SurfaceFailure};
+use crate::error::{ignore_status, ignored, Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -85,7 +90,7 @@ use crate::geom::global_solver::{
 use crate::geom::solution_array::{
     ObjectKind, Solution, SolutionArray, SolutionObject, SolutionType, SortKey,
 };
-use crate::geom::tol::are_same;
+use crate::geom::tol::{are_same, contact_tol_3d};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
@@ -98,7 +103,7 @@ use crate::nurbs::b_spline_surface::{
 };
 use crate::nurbs::geom::Rectangle;
 use crate::nurbs::srf_basic::Direction;
-use crate::surface::surface::p2::{SurfaceIntersection, TsectCurveType};
+use crate::surface::surface::p2::{Surface, SurfaceIntersection, TsectCurveType};
 use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
 
 use super::p1::{
@@ -181,7 +186,7 @@ fn surface_local_point_solve<O: Copy>(
     guess: Point2,
 ) -> Result<(bool, Solution<O>)> {
     // the SmSurface body (surface.surface_p5), on a Surface holding a copy
-    let surface = crate::surface::surface::Surface::from(surface.clone_exact());
+    let surface = Surface::from(surface.clone_exact());
     let r = surface.local_point_solve::<O>(k, domain, operation, point, guess)?;
     Ok((r.found, r.solution))
 }
@@ -276,14 +281,27 @@ impl SurfOfRevolution {
         );
 
         // GetOrCreateGwNurbPointer
+        let mut made = Ok(());
         if self.base.nurb.is_none() {
-            ignore_status(self.make_nurb(k))?;
+            made = self.make_nurb(k);
+            ignore_status(made.clone())?;
         }
-        let sur = self
-            .base
-            .nurb
-            .as_mut()
-            .ok_or_else(|| SolidError::surface_missing(OP_REPARAM, "the surface's NURB"))?;
+        let Some(sur) = self.base.nurb.as_mut() else {
+            return Err(match made {
+                Err(e) => {
+                    SolidError::surface_nurb_not_made(OP_REPARAM, SM_ERR_NULL_POINTER, Err(e))
+                }
+                Ok(()) => Failure::new(
+                    OP_REPARAM,
+                    SurfaceFailure::Defect {
+                        why: "the NURB is missing after make_nurb returned success, which on \
+                              success sets the NURB",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error(),
+            });
+        };
 
         // set NURB Surface domain parameterization - no change in shape
         sur.reparam_to_interval(r, Direction::UV)?;
@@ -373,9 +391,9 @@ impl SurfOfRevolution {
         let mut d_scale = 1.0;
         if let Some(s) = scale {
             if !are_same(s.x, s.y) || !are_same(s.x, s.z) || s.x < EFF_ZERO {
-                return Err(SolidError::surface_failed(
+                return Err(SolidError::surface(
                     OP_XFORM,
-                    "the scale is not uniform and positive",
+                    SurfaceFailure::ScaleNotUniform,
                 ));
             }
             d_scale = s.x;
@@ -396,7 +414,7 @@ impl SurfOfRevolution {
         let gen = self
             .gen_curve
             .as_mut()
-            .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))?;
+            .ok_or_else(|| SolidError::surface(OP_GEN, SurfaceFailure::SurfaceWithoutGenerator))?;
         ignore_status(gen.transform_at_depth(k, rotate_n_move, scale, depth + 1))?;
 
         // apply transformation to underlying Nurb
@@ -454,7 +472,7 @@ impl SurfOfRevolution {
         let gen = self
             .gen_curve
             .as_mut()
-            .ok_or_else(|| SolidError::surface_missing(OP_GEN, "the generator curve"))?;
+            .ok_or_else(|| SolidError::surface(OP_GEN, SurfaceFailure::SurfaceWithoutGenerator))?;
         gen_adjust_step_interval(k, gen, &v_ivl)?;
 
         // make sure m_pGenCurve Nurb domain matches crNewNurbsDomain (status ignored)
@@ -506,9 +524,9 @@ impl SurfOfRevolution {
         }
 
         // arrive here when polar conversions are possible
-        let circle = self.polar_curve().ok_or_else(|| {
-            SolidError::surface_missing(OP_TO_NURBS, "the polar conversion circle")
-        })?;
+        let circle = self
+            .polar_curve()
+            .ok_or_else(|| SolidError::surface(OP_TO_NURBS, SurfaceFailure::NoPolarConverter))?;
         let (mut x, exact_conversion) = self
             .polar
             .convert_to_nurbs_parameter(k, circle, step_uv.x, 0.0)?;
@@ -640,15 +658,15 @@ impl SurfOfRevolution {
     ) -> Result<SolutionArray<O>> {
         // no work - can't convert to polar coordinates - does not have a planar generator
         if !self.have_polar_conversion() {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_DROP,
-                "the surface has no polar conversion",
+                SurfaceFailure::PolarConversionImpossible,
             ));
         }
         if !self.planar_generator {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_DROP,
-                "the generator is not planar",
+                SurfaceFailure::GeneratorNotPlanar,
             ));
         }
 
@@ -681,10 +699,9 @@ impl SurfOfRevolution {
 
         // when point is not in sweep interval
         if !inside {
-            return Err(SolidError::surface_failed(
-                OP_DROP,
-                "the point is outside the sweep interval",
-            ));
+            return Err(Failure::new(OP_DROP, SurfaceFailure::PointOutsideSweep)
+                .with_status(crate::error::SM_ERR)
+                .into_error());
         }
 
         // For testPoints on seams and given a pointing vector - only keep the specified
@@ -741,7 +758,7 @@ impl SurfOfRevolution {
 
         let circle = self
             .polar_curve()
-            .ok_or_else(|| SolidError::surface_missing(OP_DROP, "the polar conversion circle"))?;
+            .ok_or_else(|| SolidError::surface(OP_DROP, SurfaceFailure::NoPolarConverter))?;
         let num_gen = gen_solutions.len();
 
         // for every rotation angle (normally 1, 2 for points on seams)
@@ -778,11 +795,25 @@ impl SurfOfRevolution {
                         let (r, sol3) = iso_point_inversion(k, &iso, &nurb_ivl, u_parameter, pnt)?;
                         match r {
                             Ok(true) => u_parameter = sol3.start.param(0)?,
-                            _ => {
-                                return Err(SolidError::surface_failed(
+                            Ok(false) => {
+                                return Err(SolidError::surface(
                                     OP_DROP,
-                                    "the iso circle inversion did not converge",
+                                    SurfaceFailure::Defect {
+                                        why: "the inversion of the surface's own point at the \
+                                              drop's angle and generator parameter onto the \
+                                              NURB's iso circle at that parameter found no \
+                                              answer; point and circle both come from this \
+                                              surface, not from the caller",
+                                    },
                                 ))
+                            }
+                            Err(e) => {
+                                return Err(Failure::new(
+                                    OP_DROP,
+                                    SurfaceFailure::CurveInversionFailed,
+                                )
+                                .caused_by(e)
+                                .into_error())
                             }
                         }
                     }
@@ -949,13 +980,23 @@ impl SurfOfRevolution {
         cone: &R,
         cone_uv_domain: &Extent2d,
         approx_tol_3d: Option<f64>,
+        contact_tol: f64,
         out: &mut SurfaceIntersection,
     ) -> Result<bool> {
         if !self.planar_generator {
             *out = SurfaceIntersection::default();
             return Ok(true);
         }
-        intersect_revolved_into(self, k, uv_domain, cone, cone_uv_domain, approx_tol_3d, out)
+        intersect_revolved_into(
+            self,
+            k,
+            uv_domain,
+            cone,
+            cone_uv_domain,
+            approx_tol_3d,
+            contact_tol,
+            out,
+        )
     }
 
     /// [`Self::intersect_with_sphere`] into `out` (reset first). On an error `out` keeps
@@ -967,6 +1008,7 @@ impl SurfOfRevolution {
         sphere: &R,
         sphere_uv_domain: &Extent2d,
         approx_tol_3d: Option<f64>,
+        contact_tol: f64,
         out: &mut SurfaceIntersection,
     ) -> Result<bool> {
         // Can not intersect things with non planar generator curves here
@@ -981,6 +1023,7 @@ impl SurfOfRevolution {
             sphere,
             sphere_uv_domain,
             approx_tol_3d,
+            contact_tol,
             out,
         )
     }
@@ -1006,9 +1049,11 @@ impl SurfOfRevolution {
         let deg_u = self.base.degree(SurfParamType::U);
         let deg_v = self.base.degree(SurfParamType::V);
         if (deg_u != 2 && deg_v != 2) || !self.base.is_rational() {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_REBUILD,
-                "the NURB is not of degree 2 and rational in one direction",
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::DegreeAndRationality,
+                },
             ));
         }
 
@@ -1026,64 +1071,59 @@ impl SurfOfRevolution {
             * (1.0 + nurb_min_point.max_dimension() + nurb_max_point.max_dimension());
         let ang_tol_rad = EFF_ZERO_SQRT * tolerance_scale;
 
+        // The frame and angles of a direction whose iso curves are circles of a revolution:
+        // a test that finds circles returns them, set at its first circle (it refuses a
+        // family that is all degenerate), so they are carried with the answer.
+        let revolution = |c: super::IsoCircles| {
+            if c.found_circles && c.parallel_planes && c.coaxial_centers && c.planar_gen_curve {
+                c.reference_frame.zip(c.angles)
+            } else {
+                None
+            }
+        };
+
         // test sequence of U direction (V Constant) isoCurves for circularity and
         // parallelism
-        let mut circles_v = None;
-        let mut is_revolution_no_swap_uv = false;
+        let mut revolution_no_swap_uv = None;
         if deg_u == 2 {
-            let c = super::test_for_iso_circles(
+            revolution_no_swap_uv = revolution(super::test_for_iso_circles(
                 k,
                 &self.base,
                 SurfParamType::V,
                 scaled_zero,
                 ang_tol_rad,
-            )?;
-            is_revolution_no_swap_uv =
-                c.found_circles && c.parallel_planes && c.coaxial_centers && c.planar_gen_curve;
-            circles_v = Some(c);
+            )?);
         }
 
         // test sequence of V direction (U Constant) isoCurves
-        let mut circles_u = None;
-        let mut is_revolution_with_swap_uv = false;
-        if !is_revolution_no_swap_uv && deg_v == 2 {
-            let c = super::test_for_iso_circles(
+        let mut revolution_with_swap_uv = None;
+        if revolution_no_swap_uv.is_none() && deg_v == 2 {
+            revolution_with_swap_uv = revolution(super::test_for_iso_circles(
                 k,
                 &self.base,
                 SurfParamType::U,
                 scaled_zero,
                 ang_tol_rad,
-            )?;
-            is_revolution_with_swap_uv =
-                c.found_circles && c.parallel_planes && c.coaxial_centers && c.planar_gen_curve;
-            circles_u = Some(c);
-        }
-
-        // no work - no sweep direction
-        if !is_revolution_with_swap_uv && !is_revolution_no_swap_uv {
-            return Err(SolidError::surface_failed(
-                OP_REBUILD,
-                "the NURB has no sweep direction",
-            ));
+            )?);
         }
 
         // Let GenCurve = iso-curve from the 'other' parameter
-        let (gen_dir, swap_uv, param, circles) = if is_revolution_no_swap_uv {
-            // constant V isoParamCurves are circles
-            (SurfParamType::U, false, nurb_uv_domain.min().x, circles_v)
-        } else {
-            // constant U isoParamCurves are circles
-            (SurfParamType::V, true, nurb_uv_domain.min().y, circles_u)
-        };
-        let circles = circles.ok_or_else(|| {
-            SolidError::surface_failed(OP_REBUILD, "the iso circle test found no circles")
-        })?;
-        let ref_frame = circles.reference_frame.ok_or_else(|| {
-            SolidError::surface_failed(OP_REBUILD, "the iso circles have no reference frame")
-        })?;
-        let angles = circles.angles.ok_or_else(|| {
-            SolidError::surface_failed(OP_REBUILD, "the iso circles have no angle interval")
-        })?;
+        let (gen_dir, swap_uv, param, (ref_frame, angles)) =
+            match (revolution_no_swap_uv, revolution_with_swap_uv) {
+                // constant V isoParamCurves are circles
+                (Some(found), _) => (SurfParamType::U, false, nurb_uv_domain.min().x, found),
+                // constant U isoParamCurves are circles
+                (None, Some(found)) => (SurfParamType::V, true, nurb_uv_domain.min().y, found),
+                // no work - no sweep direction
+                (None, None) => {
+                    return Err(SolidError::surface(
+                        OP_REBUILD,
+                        SurfaceFailure::NurbNotAnalytic {
+                            check: AnalyticCheck::NoCircularDirection,
+                        },
+                    ));
+                }
+            };
         let (min_ang_deg, max_ang_deg) = (angles.min(), angles.max());
 
         // create GenCurve isoParamCurve
@@ -1095,9 +1135,11 @@ impl SurfOfRevolution {
 
         // no work - GenCurve is degenerate
         if iso_crv.is_degenerate(k, scaled_zero, None)? {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_REBUILD,
-                "the generator iso curve is degenerate",
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::GeneratorIsoDegenerate,
+                },
             ));
         }
 
@@ -1108,9 +1150,11 @@ impl SurfOfRevolution {
         let is_planar = planar.is_planar;
         let is_linear = linear.linear;
         if !is_planar {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_REBUILD,
-                "the generator iso curve is not planar",
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::GeneratorNotPlanar,
+                },
             ));
         }
 
@@ -1134,9 +1178,11 @@ impl SurfOfRevolution {
             origin_point_dist < scaled_zero && frame_plane_ortho < scaled_zero
         };
         if !is_co_planar {
-            return Err(SolidError::surface_failed(
+            return Err(SolidError::surface(
                 OP_REBUILD,
-                "the generator iso curve is not in the plane of the axis",
+                SurfaceFailure::NurbNotAnalytic {
+                    check: AnalyticCheck::GeneratorOffAxisPlane,
+                },
             ));
         }
 
@@ -1195,13 +1241,13 @@ impl SurfOfRevolution {
                     db.go_to_next_line();
                     Ok(v != 0)
                 };
+                let dbl = |db: &mut DatabaseReader| -> Result<f64> {
+                    ascii(db.in_stream_mut().and_then(InputStream::extract_double))
+                };
                 let vec = |db: &mut DatabaseReader| -> Result<Vec3> {
-                    let s = db
-                        .in_stream_mut()
-                        .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
-                    let a = ascii(s.extract_double())?;
-                    let b = ascii(s.extract_double())?;
-                    let c = ascii(s.extract_double())?;
+                    let a = dbl(db)?;
+                    let b = dbl(db)?;
+                    let c = dbl(db)?;
                     db.go_to_next_line();
                     Ok(Vec3::new(a, b, c))
                 };
@@ -1210,13 +1256,10 @@ impl SurfOfRevolution {
                 let orig = vec(db)?;
                 let x = vec(db)?;
                 let y = vec(db)?;
-                let s = db
-                    .in_stream_mut()
-                    .ok_or_else(|| SolidError::surface_missing(OP_READ, "the input stream"))?;
-                let a = ascii(s.extract_double())?;
-                let b = ascii(s.extract_double())?;
-                let c = ascii(s.extract_double())?;
-                let d = ascii(s.extract_double())?;
+                let a = dbl(db)?;
+                let b = dbl(db)?;
+                let c = dbl(db)?;
+                let d = dbl(db)?;
                 db.go_to_next_line();
                 let swap_uv = flag(db)?;
                 (
@@ -1318,6 +1361,21 @@ fn sweep_arc(
     }
 }
 
+/// Not upstream (#15049): the contact tolerance of a coaxial intersection
+/// ([`intersect_revolved_into`]): [`contact_tol_3d`] where both surfaces are faces' (each
+/// has its owner's zone tolerance), as the walls of parallel cylinders read it
+/// (`Cone::intersect_with_cone_on_into`, WR-787); bare surfaces keep upstream's zero.
+pub(crate) fn revolved_contact_tol(k: &Kernel, surfaces: [Option<&Surface>; 2]) -> f64 {
+    if surfaces
+        .iter()
+        .all(|s| s.is_some_and(|s| s.owner_zone_tol_3d().is_some()))
+    {
+        contact_tol_3d(k)
+    } else {
+        0.0
+    }
+}
+
 /// [`SurfOfRevolution::intersect_with_surf_of_revolution`] of the surface of revolution
 /// part of `this`, whose virtual `ConvertDomainFromNURBSToSTEP` converts this side's
 /// domain (an `SmTorus` calling the inherited `IntersectWithSurfOfRevolution`).
@@ -1341,6 +1399,7 @@ pub(crate) fn intersect_revolved<T: Revolved + ?Sized, R: Revolved + ?Sized>(
         other,
         other_uv_domain,
         approx_tol_3d,
+        0.0,
         &mut out,
     )?;
     Ok((more, out))
@@ -1348,6 +1407,19 @@ pub(crate) fn intersect_revolved<T: Revolved + ?Sized, R: Revolved + ?Sized>(
 
 /// [`intersect_revolved`] into `out` (reset first). On an error `out` keeps what was appended
 /// before it, as upstream leaves its output arrays.
+///
+/// Not upstream (#15049): `contact_tol` is the contact tolerance of the generator
+/// intersection ([`revolved_contact_tol`]). Two coaxial surfaces meet in one circle per
+/// meeting of their generators in a plane through the axis, so where those generators are
+/// a circle and a circle or a line in its plane a hair less than tangent, by less than
+/// `contact_tol`, they touch at one point and the surfaces along one circle (the contact
+/// rule of `docs/booleans.md` §6). Upstream's two crossings lie `2√(2rδ)` apart across the
+/// contact, wherever the rounding of the two surfaces puts them, while the surfaces stay
+/// within δ of each other between them: a cut whose arc runs tangentially into its line at
+/// a corner, swept round the axis of a cylinder that line sweeps onto, crossed that
+/// cylinder a few hundredths of a millimetre from the corner's edge, within the tolerance
+/// of both of the tool's faces there, and the imprint failed (#15049). Zero keeps
+/// upstream's crossings.
 pub(crate) fn intersect_revolved_into<T: Revolved + ?Sized, R: Revolved + ?Sized>(
     this: &T,
     k: &Kernel,
@@ -1355,6 +1427,7 @@ pub(crate) fn intersect_revolved_into<T: Revolved + ?Sized, R: Revolved + ?Sized
     other: &R,
     other_uv_domain: &Extent2d,
     approx_tol_3d: Option<f64>,
+    contact_tol: f64,
     out: &mut SurfaceIntersection,
 ) -> Result<bool> {
     // init output
@@ -1400,7 +1473,15 @@ pub(crate) fn intersect_revolved_into<T: Revolved + ?Sized, R: Revolved + ?Sized
             };
             let boxes = me.base.calculate_bounding_box(k, uv_domain, &req)?;
             let bbox = boxes.normal.ok_or_else(|| {
-                SolidError::surface_missing(OP_ISECT, "the surface's bounding box")
+                Failure::new(
+                    OP_ISECT,
+                    SurfaceFailure::Defect {
+                        why: "the B-spline bounding box routine, asked for the normal box, \
+                              returned without it, though it returns every box it is asked for",
+                    },
+                )
+                .with_status(SM_ERR_NULL_POINTER)
+                .into_error()
             })?;
             let size = bbox.size().length();
             EFF_ZERO_SQRT * (1.0 + size)
@@ -1467,8 +1548,15 @@ pub(crate) fn intersect_revolved_into<T: Revolved + ?Sized, R: Revolved + ?Sized
         handles: [Some(GenHandle(0, this_ivl)), Some(GenHandle(1, other_ivl))],
         analytic_handles: [Some(GenHandle(2, this_ivl)), Some(GenHandle(3, other_ivl))],
     };
-    let solutions =
-        this_gen.global_curve_intersect(k, &this_ivl, &other_gen, &other_ivl, tol, &opts)?;
+    let solutions = this_gen.global_curve_intersect_in_contact(
+        k,
+        &this_ivl,
+        &other_gen,
+        &other_ivl,
+        tol,
+        &opts,
+        contact_tol,
+    )?;
 
     // for every genCurve/genCurve solution
     for solution in solutions.as_slice() {
@@ -1605,6 +1693,49 @@ mod tests {
         Kernel::default()
     }
 
+    /// Read from the code, not from a run: an empty surface has no generator, so its
+    /// make fails in `gen()`, and its NURB has degree 0 and no weights; a domain past the
+    /// natural one is the caller's trim.
+    #[test]
+    fn empty_surface_and_oversized_trim_name_their_causes() {
+        let k = k();
+        let mut empty = SurfOfRevolution::empty();
+        let mut unit = Extent2d::new();
+        unit.add_point(Point2::new(0.0, 0.0));
+        unit.add_point(Point2::new(1.0, 1.0));
+        let e = empty.reparameterize(&k, &unit).unwrap_err();
+        assert_eq!(e.operation(), OP_REPARAM);
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::NurbNotMade));
+        assert_eq!(e.sm_status(), Some(SM_ERR_NULL_POINTER));
+        assert_eq!(
+            e.cause().and_then(SolidError::surface_failure),
+            Some(&SurfaceFailure::SurfaceWithoutGenerator)
+        );
+
+        let e = SurfOfRevolution::empty()
+            .rebuild_step_from_nurb_parameters(&k)
+            .unwrap_err();
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::NurbNotAnalytic {
+                check: AnalyticCheck::DegreeAndRationality
+            })
+        );
+
+        let mut s = cone();
+        let mut big = s.base().natural_uv_domain();
+        big.expand_absolute(1.0);
+        let e = s.trim_with_domain(&k, &big).unwrap_err();
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::TrimDomainOutside)
+        );
+        assert_eq!(
+            e.upstream_status(),
+            Some(crate::error::SM_ERR_OUTSIDE_OF_DOMAIN)
+        );
+    }
+
     fn cone() -> SurfOfRevolution {
         let mut l = Line::from_points(Vec3::new(2.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 3.0), 3);
         l.make_nurb().unwrap();
@@ -1684,7 +1815,7 @@ mod tests {
         // a non-planar test is not this one's job: a point outside the sweep fails
         let mut half = cone();
         half.anal_uv_domain = Extent2d::from_bounds(0.0, 0.0, 90.0, 1.0);
-        assert!(half
+        let e = half
             .drop_point_fast::<Me>(
                 &k,
                 &dom,
@@ -1696,7 +1827,88 @@ mod tests {
                 SolutionRequested::All,
                 None,
             )
-            .is_err());
+            .unwrap_err();
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::PointOutsideSweep)
+        );
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
+    }
+
+    /// The inversion answers a point off the surface (status `SM_ERR_NOT_WITHIN_TOLERANCE`,
+    /// with the generator's miss as its cause) and a point outside the sweep by name; the
+    /// construction refuses a tolerance that is no distance and a generator on the axis.
+    #[test]
+    fn inversion_answers_and_construction_refusals_are_named() {
+        let k = k();
+        let s = cone();
+        let e = s
+            .step_inversion(
+                &k,
+                &s.step_uv_domain(),
+                Vec3::new(5.0, 0.0, 1.0),
+                1e-9,
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::PointOffSurface));
+        assert_eq!(
+            e.upstream_status(),
+            Some(crate::error::SM_ERR_NOT_WITHIN_TOLERANCE)
+        );
+        assert_eq!(
+            e.cause().and_then(SolidError::surface_failure),
+            Some(&SurfaceFailure::PointNotOnGenerator)
+        );
+        let mut half = cone();
+        half.anal_uv_domain = Extent2d::from_bounds(0.0, 0.0, 90.0, 3.0);
+        let r = 2.0 - 1.0 / 3.0;
+        let e = half
+            .step_inversion(
+                &k,
+                &half.step_uv_domain(),
+                Vec3::new(-r, 0.0, 1.0),
+                1e-9,
+                None,
+            )
+            .unwrap_err();
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::PointOutsideSweep)
+        );
+        assert_eq!(
+            e.upstream_status(),
+            Some(crate::error::SM_ERR_OUTSIDE_OF_DOMAIN)
+        );
+        let line = |a: Vec3, b: Vec3| {
+            let mut l = Line::from_points(a, b, 3);
+            l.make_nurb().unwrap();
+            Curve::from(l)
+        };
+        let e = SurfOfRevolution::create_canonical_off_axis(
+            &k,
+            line(Vec3::new(2.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 3.0)),
+            Vec3::ZERO,
+            Vec3::Z,
+            false,
+            f64::NAN,
+        )
+        .unwrap_err();
+        assert_eq!(
+            e.surface_failure(),
+            Some(&SurfaceFailure::ToleranceNotADistance)
+        );
+        let e = SurfOfRevolution::create_canonical_off_axis(
+            &k,
+            line(Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 3.0)),
+            Vec3::ZERO,
+            Vec3::Z,
+            false,
+            1e-9,
+        )
+        .unwrap_err();
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::GeneratorOnAxis));
+        assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
     }
 
     #[test]
@@ -1776,9 +1988,11 @@ mod tests {
         t.transform(&k, &rf, Some(Vec3::new(2.0, 2.0, 2.0)))
             .unwrap();
         assert!(t.position().z_axis().y.abs() > 0.99);
-        assert!(t
+        let e = t
             .transform(&k, &rf, Some(Vec3::new(1.0, 2.0, 1.0)))
-            .is_err());
+            .unwrap_err();
+        assert_eq!(e.surface_failure(), Some(&SurfaceFailure::ScaleNotUniform));
+        assert_eq!(e.sm_status(), Some(crate::error::SM_ERR));
         let c = s.copy();
         assert!(c.approx_eq(&k, &s).unwrap());
     }
