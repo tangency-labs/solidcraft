@@ -701,19 +701,24 @@ jobs:
           merge-multiple: true
       - name: Build the wheels
         run: packaging/python/wheels.sh packages dist/python
-      - name: Check the Linux x86_64 wheel with its own binary
-        # Installed into a clean environment with no SOLIDCRAFT_CLI, so the client must find the
-        # solidcraft-cli inside the wheel; then the client's tests run against it.
-        run: |
-          python3 -m venv "$RUNNER_TEMP/wheel-check"
-          "$RUNNER_TEMP/wheel-check/bin/pip" install --quiet dist/python/solidcraft-*-manylinux_*_x86_64.whl pytest numpy
-          cd "$RUNNER_TEMP" && env -u SOLIDCRAFT_CLI "$RUNNER_TEMP/wheel-check/bin/python" -m pytest -q -p no:cacheprovider "$GITHUB_WORKSPACE/python/tests"
-          ls -l "$GITHUB_WORKSPACE"/dist/python
+      - run: ls -l dist/python
+      # Uploaded before the check below installs anything from PyPI, so nothing that check runs
+      # can change the wheels that ship (and that SHA256SUMS.txt lists).
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-python
           path: dist/python/*.whl
           if-no-files-found: error
+      - name: Check the Linux x86_64 wheel with its own binary
+        # Installed into a clean environment with no SOLIDCRAFT_CLI, so the client must find the
+        # solidcraft-cli inside the wheel; then the client's tests run against it. pytest comes from
+        # python/tests/requirements.txt, exact versions with their hashes; the NumPy test skips
+        # without NumPy, so it is not installed here.
+        run: |
+          python3 -m venv "$RUNNER_TEMP/wheel-check"
+          "$RUNNER_TEMP/wheel-check/bin/pip" install --quiet --require-hashes --only-binary :all: -r python/tests/requirements.txt
+          "$RUNNER_TEMP/wheel-check/bin/pip" install --quiet --no-deps dist/python/solidcraft-*-manylinux_*_x86_64.whl
+          cd "$RUNNER_TEMP" && env -u SOLIDCRAFT_CLI "$RUNNER_TEMP/wheel-check/bin/python" -m pytest -q -p no:cacheprovider "$GITHUB_WORKSPACE/python/tests"
 
   release:
     name: GitHub Release or dry-run artifacts
