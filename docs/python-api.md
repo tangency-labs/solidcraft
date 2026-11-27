@@ -440,16 +440,18 @@ On Sonnet 5.5 (3 runs per setup, $9.07 in all):
 
 ## Repository rules this touches
 
-- `.agents/skills/solidcraft-performance/SKILL.md` says Python is allowed "only for asset authoring,
-  lint and review tools ... never as an application dependency". The client fits the second half:
-  the app never imports or needs it. The first half needs a new line, such as "a client library in
-  `python/`, which the app never depends on".
+- `.agents/skills/solidcraft-performance/SKILL.md` allows Python only for asset authoring, lint and
+  review tools, and now names this client as the one other exception: standard library only, run in
+  the user's own Python, and never shipped or imported by the app.
 - `.agents/skills/solidcraft-packaging/SKILL.md`: PyPI and conda distribution belong with Homebrew and
   AUR (package distribution, not a platform integration), but publishing accounts are the
   maintainer's decision.
-- CI does not run the Python tests yet. A job would run `cargo xtask python` and `pytest` when
-  `python/`, `xtask/src/python.rs`, `crates/mcp` or `apps/solidcraft-cli` change. Adding it is a
-  workflow change, which the owner approves.
+- CI runs the Python tests on an approved pull request or a merge group whose diff touches
+  `python/`, `xtask/src/python.rs`, `packaging/python/`, `crates/mcp/` or
+  `crates/engine/src/schema/`, and on no other: `ci.yml`'s Reference tests job builds the
+  `ci`-profile `solidcraft-cli` it already builds, then runs `cargo xtask python` and `pytest`
+  against it. pytest is installed from `python/tests/requirements.txt` (exact versions, with
+  hashes). The release's `python` job runs them again against the Linux x86_64 wheel.
 
 ## Decisions needed
 
