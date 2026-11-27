@@ -285,13 +285,194 @@ fn analytic_shells_keep_their_closed_forms() {
     assert!((got - want).abs() <= 1e-8 * want, "torus {got} vs {want}");
 }
 
-/// #18239: a 2 x 2 x 2 square boss on a 20 x 20 x 10 block, shelled closed. At a wall of 1
-/// the boss's opposite sides' offsets meet (half its width), so its offset vanishes while
-/// the block keeps a cavity: refused as walls meeting across it, naming 1, the largest wall
-/// that fits (not as a radius of curvature, which a flat face has none of). At
-/// 0.9 it builds: the block's cavity (18.2 x 18.2 x 8.2) and the boss's (0.2 x 0.2 x 2).
+/// A planar version of the disappearing rib in SolidCraft #16307: the xz outline
+/// of a 20 mm block cut down to z14 beside a 1 mm rib, chamfered 1 mm at its top.
+/// Its area is 20*14 + 1*5 + 1/2 = 285.5 mm2, swept 20 mm along y.
+fn chamfered_rib(k: &mut Kernel) -> Brep {
+    use solidcore::curve::curve::Curve;
+    use solidcore::math::Vec3;
+    use solidcore::primitive::api_curves::create_line_segment;
+    use solidcore::sweep::api_brep::create_linear_sweep;
+
+    k.fixes = solidcore::kernel::UpstreamFixes::all();
+    let outline = [
+        (0.0, 0.0),
+        (20.0, 0.0),
+        (20.0, 14.0),
+        (1.0, 14.0),
+        (1.0, 20.0),
+        (0.0, 19.0),
+    ];
+    let curves: Vec<Curve> = outline
+        .iter()
+        .zip(outline.iter().cycle().skip(1))
+        .map(|(&(x0, z0), &(x1, z1))| {
+            Curve::from(
+                create_line_segment(Vec3::new(x0, 0.0, z0), Vec3::new(x1, 0.0, z1)).unwrap(),
+            )
+        })
+        .collect();
+    let refs: Vec<_> = curves.iter().map(Some).collect();
+    create_linear_sweep(k, &refs, Vec3::new(0.0, 1.0, 0.0), 20.0, true).unwrap()
+}
+
+/// Once t reaches half the rib's width, its cavity has no positive volume.
+/// The remaining mitred cavity is (20-2t) by (20-2t) by (14-t), open at z0.
 #[test]
-fn square_boss_inset_by_half_its_width_is_refused_naming_it() {
+fn shell_removes_a_chamfered_ribs_vanished_cavity() {
+    use offset_fixture::{planar_faces_at, shell};
+    use solidcore::error::EntityRef;
+    use solidcore::geom::attribute::{Attribute, Behavior};
+
+    for t in [0.5_f64, 1.0, 2.0] {
+        let mut k = Kernel::default();
+        let mut body = chamfered_rib(&mut k);
+        assert!((volume(&k, &mut body).unwrap() - 5710.0).abs() < 1e-7);
+        // Source reconstruction must not alias the untouched outer face's metadata.
+        let rights = planar_faces_at(&k, &body, 0, 20.0);
+        assert_eq!(rights.len(), 1, "t={t}: one outer face on x=20 before");
+        for &right in &rights {
+            body.add_attribute(
+                EntityRef::Face(right),
+                Attribute::new(30001, Behavior::Copy),
+            )
+            .unwrap();
+        }
+        let open = planar_faces_at(&k, &body, 2, 0.0);
+        assert_eq!(open.len(), 1);
+        let mut made = shell(&mut k, body, -t, &open).unwrap();
+        assert!(brep_is_manifold_solid(&made).unwrap());
+        let rights = planar_faces_at(&k, &made, 0, 20.0);
+        assert_eq!(rights.len(), 1, "t={t}: one outer face on x=20 after");
+        for right in rights {
+            assert!(
+                made.find_attribute(EntityRef::Face(right), 30001).is_some(),
+                "t={t}: the outer face keeps its attribute"
+            );
+        }
+        for (axis, at) in [(0, 0.0), (0, 1.0), (2, 14.0)] {
+            for other in planar_faces_at(&k, &made, axis, at) {
+                assert!(made.find_attribute(EntityRef::Face(other), 30001).is_none());
+            }
+        }
+        let checked = check_brep(&mut k, &mut made, CheckLevel::Level2).unwrap();
+        assert_eq!(checked.failures().count(), 0, "{:?}", checked.reports);
+        let want = 5710.0 - (20.0 - 2.0 * t).powi(2) * (14.0 - t);
+        let got = volume(&k, &mut made).unwrap();
+        assert!((got - want).abs() < 1e-7, "t={t}: {got} vs {want}");
+    }
+}
+
+/// Below the half-width event, the rib's mitred cavity still has positive area.
+#[test]
+fn shell_keeps_a_chamfered_ribs_cavity_below_half_its_width() {
+    use offset_fixture::{planar_faces_at, shell};
+
+    let mut k = Kernel::default();
+    let mut body = chamfered_rib(&mut k);
+    assert!((volume(&k, &mut body).unwrap() - 5710.0).abs() < 1e-7);
+    let open = planar_faces_at(&k, &body, 2, 0.0);
+    assert_eq!(open.len(), 1);
+    let t = 0.4;
+    let mut made = shell(&mut k, body, -t, &open).unwrap();
+    assert!(brep_is_manifold_solid(&made).unwrap());
+    let checked = check_brep(&mut k, &mut made, CheckLevel::Level2).unwrap();
+    assert_eq!(checked.failures().count(), 0, "{:?}", checked.reports);
+    let width = 20.0 - 2.0 * t;
+    let rib_area = (1.0 - 2.0 * t) * (5.5 + (1.0 - 2.0_f64.sqrt()) * t);
+    let want = 5710.0 - width * (width * (14.0 - t) + rib_area);
+    let got = volume(&k, &mut made).unwrap();
+    assert!((got - want).abs() < 1e-7, "{got} vs {want}");
+}
+
+/// The same rib with a radius-2 cylindrical round, reproducing the reporter's
+/// collapsed-round refusal as well as the planar rib's disappearing cavity.
+#[test]
+fn shell_removes_a_rounded_ribs_vanished_cavity() {
+    use offset_fixture::{planar_faces_at, shell};
+    use solidcore::blend::fillet_executive::api::fillet_edges;
+    use solidcore::boolean::api_brep::boolean;
+    use solidcore::geom::a_object::BooleanOperation;
+    use solidcore::math::Point3;
+    use solidcore::primitive::api_primitives::create_box;
+
+    for t in [1.0_f64, 2.0] {
+        let mut k = Kernel {
+            fixes: solidcore::kernel::UpstreamFixes::all(),
+            ..Default::default()
+        };
+        let mut body = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 20.0, 20.0).unwrap();
+        let edge = body
+            .edges()
+            .iter()
+            .find(|(_, e)| {
+                let c = e.curve.as_ref().unwrap();
+                [e.interval.min(), e.interval.max()].into_iter().all(|u| {
+                    let p = c.evaluate_point(&k, u).unwrap();
+                    p.x.abs() < 1e-9 && (p.z - 20.0).abs() < 1e-9
+                })
+            })
+            .map(|(id, _)| id)
+            .unwrap();
+        fillet_edges(&mut k, &mut body, &[edge], 2.0, 1, 1, 1.0).unwrap();
+        let tool = create_box(&mut k, Point3::new(2.0, -1.0, 14.0), 20.0, 22.0, 8.0).unwrap();
+        let mut body = boolean(&mut k, body, tool, BooleanOperation::Difference)
+            .unwrap()
+            .result;
+        // 20 * (20*14 + 2*4 + pi*2^2/4).
+        let input = 5760.0 + 20.0 * std::f64::consts::PI;
+        assert!((volume(&k, &mut body).unwrap() - input).abs() < 1e-7);
+        let open = planar_faces_at(&k, &body, 2, 0.0);
+        assert_eq!(open.len(), 1);
+        let mut made = shell(&mut k, body, -t, &open).unwrap();
+        assert!(brep_is_manifold_solid(&made).unwrap());
+        let checked = check_brep(&mut k, &mut made, CheckLevel::Level2).unwrap();
+        assert_eq!(checked.failures().count(), 0, "{:?}", checked.reports);
+        let want = input - (20.0 - 2.0 * t).powi(2) * (14.0 - t);
+        let got = volume(&k, &mut made).unwrap();
+        assert!((got - want).abs() < 1e-7, "t={t}: {got} vs {want}");
+    }
+}
+
+/// An opening does not move inward: a half-width wall does not consume the rib
+/// when either of its opposing faces is open. Both variants keep a finite cavity.
+#[test]
+fn shell_keeps_a_ribs_cavity_when_an_opposing_face_is_open() {
+    use offset_fixture::{planar_faces_at, shell};
+
+    for open_x in [0.0, 1.0] {
+        let mut k = Kernel::default();
+        let body = chamfered_rib(&mut k);
+        let open = planar_faces_at(&k, &body, 0, open_x);
+        assert_eq!(open.len(), 1);
+        let t = 0.5;
+        let mut made = shell(&mut k, body, -t, &open).unwrap();
+        assert!(brep_is_manifold_solid(&made).unwrap());
+        let checked = check_brep(&mut k, &mut made, CheckLevel::Level2).unwrap();
+        assert_eq!(checked.failures().count(), 0, "{:?}", checked.reports);
+        let left = if open_x == 0.0 { 0.0 } else { t };
+        let rib_right = if open_x == 1.0 { 1.0 } else { 1.0 - t };
+        let base_area = (20.0 - t - left) * (14.0 - 2.0 * t);
+        let rib_height = 19.0 + (left + rib_right) / 2.0 - 2.0_f64.sqrt() * t - (14.0 - t);
+        let cavity = (20.0 - 2.0 * t) * (base_area + (rib_right - left) * rib_height);
+        let want = 5710.0 - cavity;
+        let got = volume(&k, &mut made).unwrap();
+        assert!(
+            (got - want).abs() < 1e-7,
+            "open x={open_x}: {got} vs {want}"
+        );
+    }
+}
+
+/// #18239, #22783: a 2 x 2 x 2 square boss on a 20 x 20 x 10 block, shelled closed. At a wall
+/// of 1 the boss's opposite sides' offsets meet on one plane (half its width): what the boss
+/// would hold of the cavity has no volume, so the boss stays solid and the cavity is the
+/// block's alone, 18 x 18 x 8. A wall 5e-8 thinner leaves the boss a cavity 1e-7 wide, within
+/// the body's tolerance of nothing, which is refused as walls meeting across it, naming 1,
+/// the largest wall that fits (not as a radius of curvature, which a flat face has none of).
+/// At 0.9 it builds: the block's cavity (18.2 x 18.2 x 8.2) and the boss's (0.2 x 0.2 x 2).
+#[test]
+fn square_boss_inset_by_half_its_width_stays_solid() {
     use offset_fixture::shell;
     use solidcore::boolean::api_brep::boolean_union;
     use solidcore::math::Point3;
@@ -303,19 +484,27 @@ fn square_boss_inset_by_half_its_width_is_refused_naming_it() {
     };
     let mut k = Kernel::default();
     let boss = part(&mut k);
-    let err = shell(&mut k, boss, -1.0, &[]).unwrap_err();
+    let mut b = shell(&mut k, boss, -1.0, &[]).unwrap();
+    assert!(brep_is_manifold_solid(&b).unwrap());
+    let want = 4008.0 - 18.0 * 18.0 * 8.0;
+    let got = volume(&k, &mut b).unwrap();
+    assert!((got - want).abs() <= 1e-8 * want, "{got} vs {want}");
+    let wall = 1.0 - 5e-8;
+    let mut k = Kernel::default();
+    let boss = part(&mut k);
+    let err = shell(&mut k, boss, -wall, &[]).unwrap_err();
     let Some(&Reason::Offset(OffsetFailure::WallsMeetAcross { face, largest, .. })) =
         err.failure().map(|f| &f.reason)
     else {
-        panic!("wall 1: not walls meeting across the boss: {err}");
+        panic!("wall {wall}: not walls meeting across the boss: {err}");
     };
     assert!((largest - 1.0).abs() <= 1e-9, "{largest}");
     assert_eq!(err.kind(), ErrorKind::OffsetCollapses);
     assert_eq!(
         err.to_string(),
         format!(
-            "{}: the offset of face {} by 1 vanishes: the wall reaches half the width between \
-             two opposite faces (the largest wall that fits is {largest})",
+            "{}: the offset of face {} by {wall} vanishes: the wall reaches half the width \
+             between two opposite faces (the largest wall that fits is {largest})",
             err.operation(),
             face.index()
         )

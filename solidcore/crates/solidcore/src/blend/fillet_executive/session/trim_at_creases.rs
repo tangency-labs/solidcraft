@@ -1979,6 +1979,7 @@ impl FilletSession<'_> {
             );
         }
         let mut note = None;
+        let mut site = None;
 
         // the target is trimmed in place; a failed trim puts it back as it was, from a
         // snapshot that keeps its geometry's owners (#2715: a clone's surfaces have none)
@@ -1994,9 +1995,17 @@ impl FilletSession<'_> {
             face_tangency,
             &section_ends,
             &mut note,
+            &mut site,
         );
         if let Some(refused) = note.take() {
             self.note_refusal(refused);
+            if let Some((edge, at)) = site {
+                self.executive.error.edge = Some(FilletObject::Topology(
+                    FilletBody::Target,
+                    EntityRef::Edge(edge),
+                ));
+                self.executive.error.location = Some(at);
+            }
         }
         if trimmed.is_err() {
             self.objects.target.restore(kept);
@@ -2078,6 +2087,7 @@ impl FilletSession<'_> {
         face_tangency: f64,
         section_ends: &[SectionEnd],
         note: &mut Option<Refusal>,
+        site: &mut Option<(EdgeId, Point3)>,
     ) -> Result<()> {
         // a refusal for a blend too large, noted with its reason and failing with it
         let refuse_no_room =
@@ -2370,6 +2380,17 @@ impl FilletSession<'_> {
                 let inner = face::p2::calculate_an_internal_point(k, &mut sheet, p)?;
                 let (inside, on_boundary) = in_material(k, self.objects.target, inner)?;
                 if on_boundary {
+                    if let Some(&i) = round_of.get(&s) {
+                        if let (Some(&edge_id), Some(curve)) =
+                            (blended_edges.get(i), blended_curves.get(i))
+                        {
+                            if let Ok(mid) =
+                                curve.evaluate_point(k, curve.natural_interval().evaluate(0.5))
+                            {
+                                *site = Some((edge_id, mid));
+                            }
+                        }
+                    }
                     return refuse(
                         note,
                         FilletErrorType::BadMerge,
@@ -2904,6 +2925,7 @@ impl FilletSession<'_> {
         // the sheet sewn in, and the body oriented. The sheet is merged in as the fillet's
         // normal path merges it (SmBrep::MergeBrep, surfaces kept as they are): its edges
         // keep their own tolerances and the body its own.
+        let roll_over_pass = self.executive.roll_over_pass;
         self.with_target_env(k, |k, b, env, identity| {
             let before: BTreeSet<FaceId> =
                 crate::topology::brep::p1::faces(b, None)?.into_iter().collect();
@@ -2924,15 +2946,32 @@ impl FilletSession<'_> {
                         &crate::topology::brep::p9::issue_curve_identity,
                     ),
                 };
-                crate::topology::brep::p4::stitch_faces_with_context(
-                    k,
-                    b,
-                    sew_tol,
-                    Some(&listed),
-                    false,
-                    Some(identity),
-                    Some(&mut edits),
-                )?
+                // A Roll-over second pass whose End cap spans two cliff faces across their
+                // tangent seam without a seam-cap split (`rollover::seam_end`) must not have
+                // its single cap edge split across the seam vertex during stitching; keep
+                // upstream candidate-list semantics there while enabling per-entity candidate
+                // splitting for ordinary crease trims.
+                if roll_over_pass {
+                    crate::topology::brep::p4::stitch_faces_with_context(
+                        k,
+                        b,
+                        sew_tol,
+                        Some(&listed),
+                        false,
+                        Some(identity),
+                        Some(&mut edits),
+                    )?
+                } else {
+                    crate::topology::brep::p4::stitch_faces_splitting_candidates_with_context(
+                        k,
+                        b,
+                        sew_tol,
+                        Some(&listed),
+                        false,
+                        Some(identity),
+                        Some(&mut edits),
+                    )?
+                }
             };
             // the edges the sheet is sewn along hold it to its own accuracy
             let sewn_tol = smos_max(
@@ -2960,6 +2999,11 @@ impl FilletSession<'_> {
                 || (open_free == 0
                     && (maybe_open || !crate::topology::brep::p2::is_manifold_solid(b)?))
             {
+                if let Ok(found) =
+                    failing_blended_edge(k, b, &copies, blended_edges, &blended_curves)
+                {
+                    *site = found;
+                }
                 return refuse(
                     note,
                     FilletErrorType::BadMerge,
@@ -3003,6 +3047,58 @@ impl FilletSession<'_> {
             )
         })
     }
+}
+
+/// Nearest blended edge to an unstitched lamina edge after a failed crease-trim stitch,
+/// preferring lamina edges on `copies` (the merged sheet and extension faces). Returns the
+/// target edge id and its curve midpoint so the caller can report which edge failed to sew.
+fn failing_blended_edge(
+    k: &Kernel,
+    b: &Brep,
+    copies: &[FaceId],
+    blended_edges: &[EdgeId],
+    blended_curves: &[Curve],
+) -> Result<Option<(EdgeId, Point3)>> {
+    let mut probe: Option<Point3> = None;
+    'copies: for &f in copies {
+        if b.face(f).is_err() {
+            continue;
+        }
+        for e in face::p4::edges(b, f, None, false, None)? {
+            if !edge::is_lamina(b, e)? {
+                continue;
+            }
+            if let Some(curve) = edge::curve(b, e)? {
+                probe = Some(curve.evaluate_point(k, edge::interval(b, e)?.evaluate(0.5))?);
+                break 'copies;
+            }
+        }
+    }
+    if probe.is_none() {
+        for e in crate::topology::brep::p1::edges(b, None)? {
+            if !edge::is_lamina(b, e)? {
+                continue;
+            }
+            if let Some(curve) = edge::curve(b, e)? {
+                probe = Some(curve.evaluate_point(k, edge::interval(b, e)?.evaluate(0.5))?);
+                break;
+            }
+        }
+    }
+    let Some(p) = probe else {
+        return Ok(None);
+    };
+    let mut best: Option<(f64, EdgeId, Point3)> = None;
+    for (&edge_id, curve) in blended_edges.iter().zip(blended_curves) {
+        let ivl = curve.natural_interval();
+        if let Some((_, dist)) = drop_on(k, curve, &ivl, p)? {
+            if best.is_none_or(|(d, _, _)| dist < d) {
+                let mid = curve.evaluate_point(k, ivl.evaluate(0.5))?;
+                best = Some((dist, edge_id, mid));
+            }
+        }
+    }
+    Ok(best.map(|(_, edge_id, mid)| (edge_id, mid)))
 }
 
 /// [`FilletSession`]'s target edit through its notifications, on its objects alone (for

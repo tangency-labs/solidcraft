@@ -7116,22 +7116,190 @@ fn a_coil_spring_wire_with_a_surface_off_its_edges_measures_the_wire_below_its_e
 /// #20575 (`17-step-spring-wire-hang-b.step`): the closely wound wire cut where its flat end
 /// stands all but tangent to the tube of the turn above (the end plane touches the tube at the
 /// cut's last vertex) comes in as one closed body of the volume of the wire below that plane, about
-/// 68 mm³, not as surfaces with the wire's wall left out for an edge "4.78 mm off the face's
-/// surface". The kernel's drop of the cut's second piece onto the surface settled on another
+/// 64 mm³ (the plane is at z = 1.61 mm), not as surfaces with the wire's wall left out for an edge
+/// "4.78 mm off the face's surface". The kernel's drop of the cut's second piece onto the surface settled on another
 /// part of the surface for stretches of the edge; the trim is followed along the surface instead.
-/// The surface on the tube and 0.2 % off it (the file's) both read.
+/// The surface on the tube, 0.2 % inside it and 0.2 % outside it all read, their seams completed:
+/// off the tube, the file's seam on the exact tube is projected a sliver across the surface's
+/// boundary line, and the seam completion took it for a seam to put back; putting it back
+/// projected the cut afresh onto the turn it almost touches and left the loop a period short, so
+/// the body kept its imported trims with a warning that it had not been tidied.
 #[test]
 fn a_coil_spring_wire_cut_by_a_plane_tangent_to_its_tube_imports_closed() {
     let (pitch, cut) = (1.125_f64, 8.995_466_109_045_587_f64);
     let expected = coil_wire_volume_below(pitch, pitch / (2.0 * std::f64::consts::PI) * cut);
-    for scale in [1.0, 0.998] {
+    for scale in [1.0, 0.998, 1.002] {
         let imported = step_import(&coil_wire_file(pitch, 22, scale, cut)).unwrap();
         assert_eq!(imported.bodies.len(), 1, "{scale}: {:?}", imported.warnings);
         let body = &imported.bodies[0];
         assert!(body.closed && body.refused.is_none(), "{scale}: {:?}", imported.warnings);
+        assert!(!imported.warnings.iter().any(|w| w.contains("were not completed")), "{scale}: {:?}", imported.warnings);
         let volume = measure(&body.body).unwrap().volume;
         assert!(rel(volume, expected) < 0.01, "{scale}: {volume} against {expected}");
+        assert_face_domains_hold_their_trims(&body.body);
     }
+}
+
+/// Every face's stored domain is around the control points of all its loops' pcurves (the
+/// positive-weight hull holds the whole trim), as `Face::domain` says: seating a seam's trims on
+/// the boundary lines must not leave a box taken before it.
+fn assert_face_domains_hold_their_trims(body: &Body) {
+    use solidcore_record::brep::{Curve2, Loop};
+
+    for (fi, face) in body.record().faces.iter().enumerate() {
+        for l in &face.loops {
+            let Loop::Edges { edges } = l else { continue };
+            for u in edges {
+                let points: Vec<[f64; 2]> = match &u.pcurve {
+                    Curve2::Spline { points, .. } => points.clone(),
+                    Curve2::RationalSpline { homogeneous, .. } => homogeneous.iter().map(|h| [h[0] / h[2], h[1] / h[2]]).collect(),
+                };
+                for p in points {
+                    for (d, range) in face.domain.iter().enumerate() {
+                        assert!(p[d] >= range[0] - 1e-9 && p[d] <= range[1] + 1e-9, "face {fi}, edge {}: {p:?} outside {:?}", u.edge, face.domain);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The knots of a uniform periodic cubic of `n` spans: from -3 to `n + 3`, one apart.
+fn periodic_knots(n: usize) -> Vec<f64> {
+    (0..n + 7).map(|i| i as f64 - 3.0).collect()
+}
+
+/// The `n + 3` control points (the last three the first three again) of the uniform periodic
+/// cubic on [`periodic_knots`] that passes through `through(k)` at each whole parameter `k` of
+/// `0..n`.
+fn periodic_through(n: usize, through: impl Fn(usize) -> P3) -> Vec<P3> {
+    let knots = periodic_knots(n);
+    let mut basis = vec![vec![0.0; n]; n];
+    for (k, row) in basis.iter_mut().enumerate() {
+        for j in 0..n + 3 {
+            row[j % n] += spline_basis(&knots, j, 3, k as f64);
+        }
+    }
+    let mut points = solve_points(basis, (0..n).map(through).collect());
+    points.extend_from_within(0..3);
+    points
+}
+
+/// The file of a coil spring wire written as one face with two bounds and no seam (#20575, the
+/// layout of the extra files there): a tube of radius 0.55 mm round two turns of a helix of radius
+/// 7.5 mm about the z axis, one B-spline surface closed round the wire on uniform periodic knots
+/// (6 spans round, `spans` along it, through points on a tube `scale` times the wire's radius), a
+/// flat cap square to the wire at its start and a flat end at `z = z_cut`. The wire's face is
+/// bounded by the cap's circle and the cut, each one closed edge round the wire on its exact tube,
+/// and nothing joins the two.
+fn two_bound_coil_wire_file(pitch: f64, spans: usize, scale: f64, z_cut: f64) -> String {
+    use std::f64::consts::TAU;
+    const R: f64 = 7.5;
+    const TUBE: f64 = 0.55;
+    const ROUND: usize = 6;
+    const CUT_POINTS: usize = 96;
+    let c = pitch / TAU;
+    let l = R.hypot(c);
+    // The tangent, the normal towards the axis and the binormal of the helix at the angle `a`.
+    let frame = |a: f64| -> (P3, P3, P3) {
+        let t = [-R * a.sin() / l, R * a.cos() / l, c / l];
+        let n = [-a.cos(), -a.sin(), 0.0];
+        (t, n, cross3(t, n))
+    };
+    let tube = |a: f64, phi: f64, rho: f64| -> P3 {
+        let (_, n, b) = frame(a);
+        let h = [R * a.cos(), R * a.sin(), c * a];
+        [0, 1, 2].map(|i| h[i] + (n[i] * phi.cos() + b[i] * phi.sin()) * rho)
+    };
+
+    // The surface: round the wire through 6 points of each of its Greville rows along it, then
+    // along it through those.
+    let nv = spans + 3;
+    let kv = clamped_knots(nv, 0.0, 2.0 * TAU);
+    let gv: Vec<f64> = (0..nv).map(|i| (kv[i + 1] + kv[i + 2] + kv[i + 3]) / 3.0).collect();
+    let av: Vec<Vec<f64>> = gv.iter().map(|&t| (0..nv).map(|i| spline_basis(&kv, i, 3, t)).collect()).collect();
+    let rows: Vec<Vec<P3>> = gv.iter().map(|&a| periodic_through(ROUND, |k| tube(a, TAU * k as f64 / ROUND as f64, TUBE * scale))).collect();
+    let net: Vec<Vec<P3>> = (0..ROUND + 3).map(|k| solve_points(av.clone(), rows.iter().map(|r| r[k]).collect())).collect();
+
+    // The cut: where the tube meets the plane, round the wire, through as many points.
+    let cut_at = |phi: f64| tube((z_cut - TUBE * phi.sin() * R / l) / c, phi, TUBE);
+    let cut = periodic_through(CUT_POINTS, |k| cut_at(TAU * k as f64 / CUT_POINTS as f64));
+
+    let mut w = Entities::default();
+    let point = |w: &mut Entities, p: P3| format!("#{}", w.add(format!("CARTESIAN_POINT('',({:?},{:?},{:?}))", p[0], p[1], p[2])));
+    let list = |v: Vec<String>| v.join(",");
+    let ones = |n: usize| list(vec!["1".to_string(); n]);
+    let knots = |k: &[f64]| list(k.iter().map(|x| format!("{x:?}")).collect());
+    let surface_rows: Vec<String> = net.iter().map(|row| format!("({})", list(row.iter().map(|p| point(&mut w, *p)).collect()))).collect();
+    let (v_knots, v_mults) = distinct_knots(&kv);
+    let surface = w.add(format!(
+        "B_SPLINE_SURFACE_WITH_KNOTS('',3,3,({}),.UNSPECIFIED.,.T.,.F.,.F.,({}),({}),({}),({}),.UNSPECIFIED.)",
+        list(surface_rows),
+        ones(ROUND + 7),
+        list(v_mults.iter().map(|m| m.to_string()).collect()),
+        knots(&periodic_knots(ROUND)),
+        knots(&v_knots)
+    ));
+    let (t0, n0, _) = frame(0.0);
+    let v_ring = w.vertex(tube(0.0, 0.0, TUBE));
+    let ring_axis = w.axis(tube(0.0, 0.0, 0.0), t0, n0);
+    let ring = w.add(format!("CIRCLE('',#{ring_axis},{TUBE:?})"));
+    let e_ring = w.add(format!("EDGE_CURVE('',#{v_ring},#{v_ring},#{ring},.T.)"));
+    let cut_ids: Vec<String> = cut.iter().map(|p| point(&mut w, *p)).collect();
+    let cut_curve = w.add(format!(
+        "B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.T.,.F.,({}),({}),.UNSPECIFIED.)",
+        list(cut_ids),
+        ones(CUT_POINTS + 7),
+        knots(&periodic_knots(CUT_POINTS))
+    ));
+    let v_cut = w.vertex(cut_at(0.0));
+    let e_cut = w.add(format!("EDGE_CURVE('',#{v_cut},#{v_cut},#{cut_curve},.T.)"));
+    let bound = |w: &mut Entities, e: usize, forward: bool| {
+        let oe = w.add(format!("ORIENTED_EDGE('',*,*,#{e},.{}.)", if forward { "T" } else { "F" }));
+        let l = w.add(format!("EDGE_LOOP('',(#{oe}))"));
+        w.add(format!("FACE_BOUND('',#{l},.T.)"))
+    };
+    // The surface's normal points out of the wire: round it (u) then along it (v).
+    let (start, end) = (bound(&mut w, e_ring, true), bound(&mut w, e_cut, false));
+    let wire = w.add(format!("ADVANCED_FACE('',(#{start},#{end}),#{surface},.T.)"));
+    let cap_axis = w.axis(tube(0.0, 0.0, 0.0), [-t0[0], -t0[1], -t0[2]], n0);
+    let cap_plane = w.add(format!("PLANE('',#{cap_axis})"));
+    let cap = w.face(&[(e_ring, false)], cap_plane);
+    let end_axis = w.axis([0.0, 0.0, z_cut], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let end_plane = w.add(format!("PLANE('',#{end_axis})"));
+    let end_face = w.face(&[(e_cut, true)], end_plane);
+    w.solid(&[wire, cap, end_face]).replace("LENGTH_MEASURE(1.E-3)", "LENGTH_MEASURE(1.E-5)")
+}
+
+/// #20575 (the extra files there): a coil spring wire written as one face bounded by the cap's
+/// circle and the cut, each a closed edge once round the wire, with no seam edge between them,
+/// comes in as one closed body of the volume of the wire below its end plane, its surface on the
+/// wire's tube or a little off it. Two loops that each go once round a closed surface bound a band
+/// of it; the import joins them by a seam along the surface's own boundary line. It refused the
+/// face ("a loop around a closed surface that never reaches the line its seam runs on") where the
+/// surface lies off the loops' vertices by more than the tolerance, and with the surface on them
+/// the face's trims were left crossing the surface's period.
+#[test]
+fn a_coil_spring_wire_bounded_by_two_closed_edges_and_no_seam_imports_closed() {
+    let mut failed = Vec::new();
+    for (pitch, spans, scale, z_cut) in
+        [(3.0, 16, 1.0, 4.98), (3.0, 16, 0.998, 4.98), (3.0, 22, 0.998, 4.98), (1.125, 22, 0.996, 1.62), (1.125, 22, 1.002, 1.62)]
+    {
+        let expected = coil_wire_volume_below(pitch, z_cut) * scale * scale;
+        let case = format!("pitch {pitch}, {spans} spans, scale {scale}");
+        match step_import(&two_bound_coil_wire_file(pitch, spans, scale, z_cut)) {
+            Err(e) => failed.push(format!("{case}: {e}")),
+            Ok(imported) => {
+                let body = imported.bodies.first();
+                let closed = imported.bodies.len() == 1 && body.is_some_and(|b| b.closed && b.refused.is_none());
+                let volume = body.and_then(|b| measure(&b.body).ok()).map(|m| m.volume);
+                if !closed || !volume.is_some_and(|v| rel(v, expected) < 0.01) {
+                    failed.push(format!("{case}: closed {closed}, volume {volume:?} against {expected}: {:?}", imported.warnings));
+                }
+            }
+        }
+    }
+    assert!(failed.is_empty(), "{failed:#?}");
 }
 
 /// #20534: a bore that touches a flat face along a line, so four faces meet there. The bore's

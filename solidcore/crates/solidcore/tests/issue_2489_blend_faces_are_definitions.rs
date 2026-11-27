@@ -11,7 +11,7 @@
 //! The cases: a box edge rounded r 5 (an exact cylinder, ending in two Ends), its Gⁿ round
 //! (continuity 2), its chamfer; three equal rounds at a box corner (the Ball) and three
 //! unequal ones (the Setback), and beside a cylinder (the curved Setback, #2343); a boss's base rounded r 1 with its Turns Mitred and Swept; a
-//! cut ball's rim (two Joins); #2256's tangent peg (the Mixed corner); and the offset of
+//! cut ball's rim (two Joins); #2256's tangent peg chamfered (the Mixed corner); and the offset of
 //! #2388's chamfered box (the offsets of a chamfer and two rounds); a cylinder's rim
 //! chamfered by its radius (a cone to its apex, #17875); and the two
 //! captured mirrored shell rims, using the geometry matrix's shared builder and rig fix set.
@@ -282,9 +282,10 @@ fn cases() -> Vec<Case> {
     let mut k = kernel();
     let mut b = peg(&mut k);
     let es = picks(&k, &b, &[[20.0, 0.0, 10.0], [32.0, 8.0, 10.0]]);
-    fillet_edges(&mut k, &mut b, &es, 2.0, 1, 1, 1.0).unwrap();
+    // chamfers: the Mixed corner of rounds is refused at the cusp (#22151)
+    fillet_edges(&mut k, &mut b, &es, 2.0, 0, 1, 1.0).unwrap();
     b.refresh_cached_topology();
-    out.push(checked("tangent peg's mixed corner r 2", &b, &made(&k)));
+    out.push(checked("tangent peg's mixed corner d 2", &b, &made(&k)));
 
     // #2388's own fix set: the offset of this body with every fix on is refused
     // (`offset_brep`, status 1001)

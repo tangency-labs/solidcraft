@@ -81,7 +81,8 @@ negates it (`OffsetGeometryCreation::faceuse_offset_with_backend`, `offset/offse
 | surface of revolution | the generator offset in its plane and swept again: a line or circle stays a line or circle; a B-spline or conic generator is offset by `create_simple_offset` within the approximation tolerance | exact for lines and arcs; **fitted, not certified**, otherwise | `surface/surf_of_revolution/p2.rs` |
 | extrusion, B-spline, curve-bounded, STEP | an `OffsetSurface`: S + d n of a copy of the surface, evaluated on demand (`base_create_offset_surface`); the extrusion's own override is not ported (commented out upstream) | exact as a definition; its net is §3.2's | `surface/surface/p1.rs`, `surface/offset_surface.rs` |
 | round of the ball's circle, one radius | the round of radius r + τd on the supports offset by σᵢd, the same spine, leader and seeds; its net built on the stations and certified; r + τd ≤ 0: collapsed | certified | `surface/procedural_blend/offset.rs` |
-| round of an exact class | its kind's exact offset (a cylinder of r to a cylinder of r ± d) carrying the definition of the new radius, re-certified by identity | exact | same |
+| round of an exact class whose kind offsets as itself (line, circle, point: a cylinder, torus or sphere) | its kind's exact offset (a cylinder of r to a cylinder of r ± d) carrying the definition of the new radius, re-certified by identity | exact | same |
+| round of a rational exact class (a conic, a conic pair or a nodal quartic spine) | its kind's offset is the offset surface of its B-spline net, kept as it is; the net is S (bound 0), so it is S + d n; no definition kept, since that offset has no NURBS form to re-certify one on | exact as a definition; its net is §3.2's | `surface/procedural_blend/offset.rs` |
 | chamfer between planes | the plane offset as a plane; no definition kept | exact | `surface/surface/p1.rs` |
 | Gⁿ round (order ≥ 2), radius law, round on a B-spline support | the offset surface of the face, as an extrusion's | see §3.2 | `surface/procedural_blend/offset.rs` |
 | corner face, drafted face | the offset of the face's own surface kind; a drafted face's surface is its plane or cone, so the offset is exact; a corner keeps no definition | as its kind | `surface/surface/p1.rs` |
@@ -122,6 +123,14 @@ such a round is the offset of its net. That breaks the one rule, and the ledger
 `crates/solidcore/tests/data/blend_definition_ledger/offset.md` lists it. The net also
 drops its bound: the face gets `BSplineSurface::from_nurb(made.surface, false)`, a bare net with no
 stored ε (`p1.rs`). Both are open (§9).
+
+The face's edges were built on the implicit offset and stay within their tolerances of the net,
+but a seam edge must lie on the net's own seam line: the check's seam test flags a vertex more
+than 1e-9 beside it, and a later cut across the seam puts its vertex on the edge. So each seam
+edge of a face given its net (its UV trim curve an iso line) gets the net's iso curve along the
+seam, exactly, where that curve runs between the edge's own vertices within its tolerance
+(`seams_onto_iso_curves`, `p1.rs`). The seam lifted from the implicit offset lay up to 8.5e-7 off
+the net's seam line on a thickened closed loft.
 
 ## 4. Folds, collapses and the largest wall
 
@@ -285,13 +294,21 @@ supporting planes. The first scope requires
 simple vertices and strict convex facet cycles, distinct vertices and independent edge planes.
 Every reconstructed vertex must lie on the support's outward side and in every exposed face's
 material halfspace. Toleranced stored vertices and trims do not decide this certificate.
-Opposite exposed planes whose actual offset definitions have crossed certify that their halfspaces have empty
-intersection. The branch contributes no cavity, so both its offset sheets and the support's
-attachment loop are removed. The attachment is an artificial cut, not an exposed face: it
+Two exposed planes whose normals are opposite within the angular tolerance pair; their actual offset
+definitions (each sheet's stored origin and axes, its normal the exact cross product of the axes)
+certify that their material halfspaces have no common interior point in the cell: the sum of the
+two sheets' exact plane functions is non-negative at every reconstructed vertex (a Farkas
+certificate with unit multipliers), hence on their convex hull. Where it is zero the two sheets
+coincide (a branch inset by exactly half its width): their common part is a piece of one plane, of
+zero volume, which the regularized offset does not keep, so the tie at coincident opposite sheets
+is decided as no cavity, exactly as a crossing is. For exactly opposite normals that sum is the
+constant crossing of the two planes; a branch turned by a rotation, whose normals are opposite only
+up to rounding, is decided the same way (#22784). The branch contributes no cavity, so both its offset sheets and the support's
+attachment loop are removed, and the walls meeting across it are not refused as meeting. The attachment is an artificial cut, not an exposed face: it
 supplies no additional offset halfspace. Thus a short, wide boss can still contain cavity.
 
-This is an empty-cell certificate within the mitred construction, using outward-rounded
-interval inequalities and exact opposite normals, without a tolerance or an alternate
+This is an empty-cell certificate within the mitred construction, using exact expansion
+inequalities on the cell's vertices, without a distance tolerance or an alternate
 construction. The source body remains intact for the shell difference. Curved or nonconvex
 branches, multiple attachments, cavity-shell branches, and infeasibility without an opposite
 plane pair still require the general arrangement and cavity rule. This event does not complete
