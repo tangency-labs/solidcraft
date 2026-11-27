@@ -174,9 +174,8 @@ impl Document {
         let n = self.features.get(idx).map(|f| f.kind.inputs().len()).unwrap_or(0);
         let missing = self.features.get(idx).is_some_and(|f| (0..n).any(|k| f.param_names.get(k).is_none_or(|x| x.is_empty())));
         if missing {
-            let names =
-                self.params.iter().map(|p| p.name.as_str()).chain(self.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str)));
-            let taken = numbers_after("d", names);
+            // Text parameters too, as `next_d_name` counts them: an input never takes a text parameter's name.
+            let taken = numbers_after("d", self.taken_names());
             let mut next = 1u64;
             if let Some(f) = self.features.get_mut(idx) {
                 if f.param_names.len() < n {
