@@ -99,6 +99,12 @@ click ends the selection; in the message box Ctrl+A selects only the draft.
   reasoning effort. Changing the model can change or remove the effort choices. A selection is
   shown as applied only after the agent reports it; a rejected change leaves the confirmed
   selection in place and shows an error.
+- **Service tier** shows the speed choices reported by the ACP agent. For endpoints configured
+  with **Use OpenAI Responses API**, choose **Fast** or **Ultrafast**. OpenAI's hosted Chat
+  Completions endpoint also offers **Fast**. The endpoint choice applies from the next turn.
+  Choose **Provider default** to use the endpoint's configured tier. A new chat starts with that
+  default. Availability depends on the model and account, and faster tiers can cost more.
+  [OpenAI Fast mode](https://developers.openai.com/api/docs/guides/fast-mode) · [OpenAI Ultrafast mode](https://developers.openai.com/api/docs/guides/ultrafast-mode)
 - **Older agents and API endpoints** keep their model and mode drop-downs when they report those
   choices (an ACP agent's legacy model/mode lists, or an endpoint's `/models`). SolidCraft remembers
   the last model choice for each agent and puts it back on the next session when still available.
