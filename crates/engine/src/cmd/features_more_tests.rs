@@ -3910,6 +3910,115 @@ fn a_sketch_coil_refuses_contradictory_parameters() {
     assert!(e.contains("no sketch `Nope`"), "{e}");
 }
 
+/// A circle on XY does not lie in a plane through the default Z axis (XY's normal is Z).
+/// The command must refuse; a stacked slab of that disk would be π·2²·(pitch·revolutions) = 96π.
+#[test]
+fn coil_profile_plane_across_the_axis_is_refused() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Flat section"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 0], "diameter": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    let built = s.execute("solid.coil", &json!({"sketch": "Flat section", "pitch": 8, "revolutions": 3, "body_name": "FlatCoil"}));
+    let err = built.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
+    // Disk area π·2² = 4π, height 8·3 = 24: slab volume 96π.
+    let slab = PI * 4.0 * 24.0;
+    let vol = volume(&mut s);
+    let off = rel(vol, slab);
+    assert!(
+        err.contains("plane through its axis") && err.contains("across"),
+        "a profile on a plane across the axis must be refused, not built (volume {vol}, a slab is {slab}, rel {off}): {err}"
+    );
+    assert!(s.model.state().bodies.is_empty(), "a refused coil left a body of volume {vol}");
+    assert!(rel(vol, slab) > 1e-3, "left the slab volume {vol}");
+}
+
+/// The same circle on XZ, which contains the Z axis. Centroid 20 mm from the axis,
+/// area π·2² = 4π, n = 3: V = 2·π·n·A·r = 2·π·3·4π·20 = 480 π².
+#[test]
+fn coil_profile_plane_on_xz_keeps_the_closed_form_volume() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "name": "Section"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 0], "diameter": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 3, "pitch": 8}));
+    assert!(rel(volume(&mut s), 2.0 * PI * 3.0 * (PI * 4.0) * 20.0) < 1e-3, "{}", volume(&mut s));
+}
+
+/// XZ offset 5 mm is parallel to Z (normal +Y) but the axis through the origin is 5 mm off it.
+#[test]
+fn coil_profile_plane_parallel_but_not_through_the_axis_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XZ", "offset": 5, "name": "Section"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [20, 0], "diameter": 4}));
+    run(&mut s, "sketch.finish", json!({}));
+    let built = s.execute("solid.coil", &json!({"sketch": "Section", "revolutions": 3, "pitch": 8}));
+    let err = built.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
+    let vol = volume(&mut s);
+    assert!(err.contains("plane through its axis"), "a plane parallel to the axis but not through it must be refused (volume {vol}): {err}");
+    assert!(s.model.state().bodies.is_empty(), "a refused coil left a body of volume {vol}");
+}
+
+/// XY contains the X axis. A 1×1 mm square, sketch x −0.5..0.5 along the axis and sketch y 10..11
+/// radial: r_centroid = 10.5, A = 1, n = 3, V = 2·π·n·A·r = 2·π·3·1·10.5.
+#[test]
+fn coil_profile_plane_on_xy_about_axis_x_is_a_coil() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Section"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [-0.5, 10], "p1": [0.5, 11]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 3, "pitch": 8, "axis": "X"}));
+    assert!(rel(volume(&mut s), 2.0 * PI * 3.0 * 1.0 * 10.5) < 1e-3, "{}", volume(&mut s));
+}
+
+/// The thread-groove square, drawn on XY instead of a plane through the shaft axis.
+/// A refused cut must leave the cylinder's volume unchanged.
+#[test]
+fn coil_profile_plane_across_the_axis_does_not_cut() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40, "body_name": "Shaft"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Groove"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [18, 1], "p1": [19, 2]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let before = volume(&mut s);
+    let built = s.execute("solid.coil", &json!({"sketch": "Groove", "revolutions": 3, "pitch": 8, "operation": "cut", "targets": ["Shaft"]}));
+    let err = built.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
+    let after = volume(&mut s);
+    assert!(
+        err.contains("plane through its axis") && err.contains("across"),
+        "a cut on a plane across the axis must be refused (before {before}, after {after}): {err}"
+    );
+    assert!((after - before).abs() < 1e-6, "the shaft changed: before {before} after {after}");
+}
+
+/// A coil whose profile plane contained the axis, then redefined onto XY, which does not.
+/// The rebuild must refuse. Stacking the 1×1 mm square for pitch·revolutions = 24 mm is the slab.
+#[test]
+fn coil_profile_plane_redefined_onto_xy_is_refused() {
+    use std::f64::consts::PI;
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "name": "Section"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, -0.5], "p1": [11, 0.5]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.coil", json!({"sketch": "Section", "revolutions": 3, "pitch": 8}));
+    // Same square as the valid YZ coil: V = 2 π n A r_centroid, A = 1, r = 10.5, n = 3.
+    assert!(rel(volume(&mut s), 2.0 * PI * 3.0 * 1.0 * 10.5) < 1e-3, "the coil on YZ should build: {}", volume(&mut s));
+    let built = s.execute("sketch.redefine", &json!({"sketch": "Section", "plane": "XY"}));
+    let command_err = built.as_ref().err().map(|e| e.to_string()).unwrap_or_default();
+    let feature_errs: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+    let text = format!("{command_err} {}", feature_errs.join(" "));
+    // Area 1 mm² times height 8·3 = 24 mm.
+    let slab = 1.0 * 8.0 * 3.0;
+    let vol = volume(&mut s);
+    let coil_ok = built.is_ok() && feature_errs.is_empty();
+    assert!(
+        text.contains("plane through its axis") && !(coil_ok && rel(vol, slab) < 1e-3),
+        "redefining onto XY must refuse, not leave a slab of {slab} (got {vol}; command={command_err:?}; features={feature_errs:?})"
+    );
+}
+
 #[test]
 fn a_loaded_coil_cannot_be_both_primitive_and_from_a_sketch() {
     let mut s = Session::default();
