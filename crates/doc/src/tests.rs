@@ -2036,6 +2036,7 @@ fn errors_are_reported_not_fatal() {
             angle2: None,
             symmetric: false,
             convention: Default::default(),
+            join_profile_arcs: false,
             to: None,
         },
         None,
@@ -5749,4 +5750,104 @@ fn asymmetric_profile_and_old_designs_preserve_face_names() {
     for (i, name) in names.iter().enumerate() {
         assert!(!name.is_empty(), "face {i} has valid name");
     }
+}
+
+/// #18815: a design with a failing feature still keeps a partial model cache for all valid
+/// upstream and independent features; reopening adopts those cached states, re-evaluates only
+/// the failing feature (`last_recomputed == 1`), and reproduces the exact error and final state.
+#[test]
+fn partial_model_cache_keeps_valid_features_around_an_error_and_reproduces_it() {
+    // Case 1: valid upstream -> failing middle feature -> valid independent downstream feature.
+    let mut doc = Document::new("Partial cache");
+    let upstream = boxed(&mut doc, 0, "Upstream", 0.0, &["UpstreamBody"]);
+    add_in(
+        &mut doc,
+        0,
+        "Broken",
+        serde_json::json!({
+            "type": "box",
+            "corner": [50.0, 0.0, 0.0],
+            "length": "0",
+            "width": "10",
+            "height": "10",
+            "operation": "new_body",
+        }),
+    );
+    let broken = doc.find_feature("Broken").unwrap().id;
+    let downstream = boxed(&mut doc, 0, "Downstream", 100.0, &["DownstreamBody"]);
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.result(upstream).unwrap().error.is_none());
+    assert!(model.result(broken).unwrap().error.is_some(), "Broken must fail evaluation");
+    assert!(model.result(downstream).unwrap().error.is_none());
+    assert_eq!(model.state().bodies.len(), 2);
+
+    let saved = model.saved(&doc).expect("valid features keep a partial model cache");
+    let features = saved.records["features"].as_array().unwrap();
+    assert!(features[0].get("state").is_some() && features[0].get("errored").is_none());
+    assert!(features[1].get("state").is_none() && features[1].get("errored") == Some(&serde_json::json!(true)));
+    assert!(features[2].get("state").is_some() && features[2].get("errored").is_none());
+    assert_eq!(saved.final_state().unwrap().bodies.len(), 2);
+
+    // Thinning also works on a partial cache that carries an errored feature.
+    let pieces: Vec<Vec<(usize, usize)>> = (0..saved.bodies.len()).map(|i| vec![(i, 1024)]).collect();
+    let (thinned, _, _) = saved.thinned(&pieces, 0).expect("thinning a partial cache succeeds");
+    assert_eq!(thinned.final_state().unwrap().bodies.len(), 2);
+
+    let adopted = Model::adopt(&doc, &saved).expect("partial cache adopts cleanly");
+    assert_eq!(adopted.last_recomputed, 1, "only the failing feature is re-evaluated on open");
+    assert_eq!(adopted.result(upstream).unwrap().ms, model.result(upstream).unwrap().ms);
+    assert_eq!(adopted.result(downstream).unwrap().ms, model.result(downstream).unwrap().ms);
+    assert_eq!(adopted.result(broken).unwrap().error, model.result(broken).unwrap().error);
+    same_as_opened(&adopted, &doc, "partial cache around a failing middle feature");
+
+    // Case 2: failing feature is the last feature in the timeline.
+    let mut tail_doc = Document::new("Tail error");
+    let base = boxed(&mut tail_doc, 0, "Base", 0.0, &["BaseBody"]);
+    add_in(
+        &mut tail_doc,
+        0,
+        "TailBroken",
+        serde_json::json!({
+            "type": "box",
+            "corner": [50.0, 0.0, 0.0],
+            "length": "0",
+            "width": "10",
+            "height": "10",
+            "operation": "new_body",
+        }),
+    );
+    let tail_broken = tail_doc.find_feature("TailBroken").unwrap().id;
+    let mut tail_model = Model::new();
+    tail_model.evaluate(&tail_doc);
+    let tail_saved = tail_model.saved(&tail_doc).expect("valid upstream feature keeps a partial cache");
+    assert_eq!(tail_saved.final_state().unwrap().bodies.len(), 1);
+    let tail_pieces: Vec<Vec<(usize, usize)>> = (0..tail_saved.bodies.len()).map(|i| vec![(i, 1024)]).collect();
+    let (tail_thin, _, _) = tail_saved.thinned(&tail_pieces, 0).expect("thinning a tail-error partial cache succeeds");
+    assert_eq!(tail_thin.final_state().unwrap().bodies.len(), 1);
+    let tail_adopted = Model::adopt(&tail_doc, &tail_saved).expect("tail-error partial cache adopts cleanly");
+    assert_eq!(tail_adopted.last_recomputed, 1, "only the failing tail feature is re-evaluated");
+    assert_eq!(tail_adopted.result(base).unwrap().ms, tail_model.result(base).unwrap().ms);
+    assert_eq!(tail_adopted.result(tail_broken).unwrap().error, tail_model.result(tail_broken).unwrap().error);
+    same_as_opened(&tail_adopted, &tail_doc, "partial cache before a failing tail feature");
+
+    // Case 3: when every non-skipped feature fails, no cache is saved.
+    let mut all_bad = Document::new("All failed");
+    add_in(
+        &mut all_bad,
+        0,
+        "OnlyBroken",
+        serde_json::json!({
+            "type": "box",
+            "corner": [0.0, 0.0, 0.0],
+            "length": "0",
+            "width": "10",
+            "height": "10",
+            "operation": "new_body",
+        }),
+    );
+    let mut all_bad_model = Model::new();
+    all_bad_model.evaluate(&all_bad);
+    assert!(all_bad_model.saved(&all_bad).is_none());
 }

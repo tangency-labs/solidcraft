@@ -1,11 +1,14 @@
 //! Fusion spot and seam welds: a spot with a straight or tapered zone, partly into the second sheet
 //! or melted through with its root; a seam along a line, and along a line and an arc; a sharp
 //! corner; against their closed-form volumes, every body through the kernel's check; the shape a
-//! process starts with; the refusals.
+//! process starts with; the refusals, an arc bulging past the size limit among them; and the site
+//! of a fusion seam with an arc tighter than the weld, or between its widest part and the
+//! resistance seam's.
 
 use std::f64::consts::{FRAC_PI_2, PI};
 
-use solidcraft_kernel::{Body, SmlibCheck, validity};
+use solidcore_record::Vec3;
+use solidcraft_kernel::{Body, SmlibCheck, box_solid, validity};
 
 use super::*;
 use crate::weld_seam::Turn;
@@ -148,9 +151,57 @@ fn bad_fusion_welds_are_refused() {
     assert!(bad(FusionWeld { normal: [0.0; 3], ..ok.clone() }));
     assert!(matches!(fusion_weld(&FusionWeld { path: vec![to(0.0, 0.0)], ..ok.clone() }), Err(FusionRefusal::Path(SeamRefusal::Invalid(_)))));
     let tight = SeamPiece::Arc { center: [0.0, 1.0, 0.0], to: [1.0, 1.0, 0.0], turn: Turn::Left };
-    let got = fusion_weld(&FusionWeld { path: vec![tight], ..ok });
+    let got = fusion_weld(&FusionWeld { path: vec![tight], ..ok.clone() });
     let Err(FusionRefusal::ArcTighterThanSeam { piece: 0, fits }) = got else {
         panic!("{got:?}");
     };
     assert!((fits - 2.0).abs() < 1e-9, "{fits}");
+    // ends 1e8 out, but the long way round over the top reaches y = 1.01e9, past the size limit
+    let bulge = SeamPiece::Arc { center: [0.0, 5e8, 0.0], to: [1e8, 0.0, 0.0], turn: Turn::Right };
+    assert!(bad(FusionWeld { start: [-1e8, 0.0, 0.0], path: vec![bulge], ..ok }));
+}
+
+// ---- where a fusion seam sits ----
+
+/// A 40 × 40 sheet from `z` up `t`, centred on the z axis.
+fn sheet(z: f64, t: f64) -> Body {
+    box_solid(Vec3::new(-20.0, -20.0, z), Vec3::new(20.0, 20.0, z + t)).unwrap()
+}
+
+/// A fusion seam of width 3 drawn on the upper sheet's top along a half circle of `radius` about
+/// the z axis.
+fn arc_site(radius: f64) -> Result<SeamSite> {
+    let lower = sheet(0.0, T2);
+    let upper = sheet(T2, T1);
+    let top = T1 + T2;
+    let face = (0..upper.face_count())
+        .find(|&f| upper.face_square_level(f, Vec3::new(0.0, 0.0, 1.0), [0.0, 0.0, top].into()).unwrap().is_some_and(|l| l.level.abs() < 1e-9))
+        .unwrap();
+    let path = [SeamPiece::Arc { center: [0.0, 0.0, top], to: [radius, 0.0, top], turn: Turn::Left }];
+    fusion_seam_site(&[&lower, &upper], 1, face, [-radius, 0.0, top], &path, W)
+}
+
+/// An arc of radius 1.4 is tighter than the cap (1.5): refused at the site with the width that
+/// fits, 2.8, as the build would. One of 1.55 is wider than the cap though tighter than the
+/// resistance seam's edge zone (1.575): the fusion seam's site takes it, and the weld builds.
+#[test]
+fn a_fusion_seam_site_takes_the_arcs_the_weld_builds() {
+    let got = arc_site(1.4);
+    let Err(FusionRefusal::Path(SeamRefusal::ArcTighterThanSeam { piece: 0, fits })) = got else {
+        panic!("{got:?}");
+    };
+    assert!((fits - 2.8).abs() < 1e-9, "{fits}");
+    let s = arc_site(1.55).unwrap();
+    let w = FusionWeld {
+        start: s.start,
+        path: s.path,
+        normal: s.normal,
+        thicknesses: s.sheets.iter().map(|x| x.thickness).collect(),
+        width: W,
+        shape: FusionShape::Tapered,
+        depth: DEPTH,
+    };
+    for piece in fusion_weld(&w).unwrap().pieces {
+        check(&piece.body, "arc of 1.55");
+    }
 }

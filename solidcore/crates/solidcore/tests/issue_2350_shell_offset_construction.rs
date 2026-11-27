@@ -285,13 +285,15 @@ fn analytic_shells_keep_their_closed_forms() {
     assert!((got - want).abs() <= 1e-8 * want, "torus {got} vs {want}");
 }
 
-/// #18239: a 2 x 2 x 2 square boss on a 20 x 20 x 10 block, shelled closed. At a wall of 1
-/// the boss's opposite sides' offsets meet (half its width), so its offset vanishes while
-/// the block keeps a cavity: refused as walls meeting across it, naming 1, the largest wall
-/// that fits (not as a radius of curvature, which a flat face has none of). At
-/// 0.9 it builds: the block's cavity (18.2 x 18.2 x 8.2) and the boss's (0.2 x 0.2 x 2).
+/// #18239, #22783: a 2 x 2 x 2 square boss on a 20 x 20 x 10 block, shelled closed. At a wall
+/// of 1 the boss's opposite sides' offsets meet on one plane (half its width): what the boss
+/// would hold of the cavity has no volume, so the boss stays solid and the cavity is the
+/// block's alone, 18 x 18 x 8. A wall 5e-8 thinner leaves the boss a cavity 1e-7 wide, within
+/// the body's tolerance of nothing, which is refused as walls meeting across it, naming 1,
+/// the largest wall that fits (not as a radius of curvature, which a flat face has none of).
+/// At 0.9 it builds: the block's cavity (18.2 x 18.2 x 8.2) and the boss's (0.2 x 0.2 x 2).
 #[test]
-fn square_boss_inset_by_half_its_width_is_refused_naming_it() {
+fn square_boss_inset_by_half_its_width_stays_solid() {
     use offset_fixture::shell;
     use solidcore::boolean::api_brep::boolean_union;
     use solidcore::math::Point3;
@@ -303,19 +305,27 @@ fn square_boss_inset_by_half_its_width_is_refused_naming_it() {
     };
     let mut k = Kernel::default();
     let boss = part(&mut k);
-    let err = shell(&mut k, boss, -1.0, &[]).unwrap_err();
+    let mut b = shell(&mut k, boss, -1.0, &[]).unwrap();
+    assert!(brep_is_manifold_solid(&b).unwrap());
+    let want = 4008.0 - 18.0 * 18.0 * 8.0;
+    let got = volume(&k, &mut b).unwrap();
+    assert!((got - want).abs() <= 1e-8 * want, "{got} vs {want}");
+    let wall = 1.0 - 5e-8;
+    let mut k = Kernel::default();
+    let boss = part(&mut k);
+    let err = shell(&mut k, boss, -wall, &[]).unwrap_err();
     let Some(&Reason::Offset(OffsetFailure::WallsMeetAcross { face, largest, .. })) =
         err.failure().map(|f| &f.reason)
     else {
-        panic!("wall 1: not walls meeting across the boss: {err}");
+        panic!("wall {wall}: not walls meeting across the boss: {err}");
     };
     assert!((largest - 1.0).abs() <= 1e-9, "{largest}");
     assert_eq!(err.kind(), ErrorKind::OffsetCollapses);
     assert_eq!(
         err.to_string(),
         format!(
-            "{}: the offset of face {} by 1 vanishes: the wall reaches half the width between \
-             two opposite faces (the largest wall that fits is {largest})",
+            "{}: the offset of face {} by {wall} vanishes: the wall reaches half the width \
+             between two opposite faces (the largest wall that fits is {largest})",
             err.operation(),
             face.index()
         )

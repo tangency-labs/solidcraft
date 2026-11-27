@@ -1367,6 +1367,18 @@ fn line_plane(o: Vec3, d: Vec3, p: &Plane) -> Option<Vec3> {
     Some(o + d * ((p.origin - o).dot(n) / den))
 }
 
+/// Drop `at` onto the plane midway between two parallel planes. `None` when they are not
+/// parallel; the bisector of planes that meet is the midplane constructor's, below.
+pub(crate) fn midway(a: (Vec3, Vec3), b: (Vec3, Vec3), at: Vec3) -> Option<Vec3> {
+    let (pa, na) = a;
+    let (pb, nb) = b;
+    // Measure both levels from `at`. `square_plane_offset` also checks that the normals are
+    // parallel.
+    let a = kernel::affine::square_plane_offset(&crate::IDENTITY, (pa - at).into(), na.into(), nb.into()).ok()??;
+    let b = kernel::affine::distance_along(at.into(), nb.into(), pb.into());
+    Some(at + nb * a.midpoint(b))
+}
+
 /// Planes built from model geometry (the `PlaneRef` kinds that need the model).
 pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
     let degenerate = || bad("degenerate plane");
@@ -1374,10 +1386,7 @@ pub(crate) fn resolve_geo_plane(ctx: &Ctx, p: &PlaneRef) -> Result<Plane> {
         PlaneRef::Midplane { a, b, old_frame } => {
             let (pa, pb) = (plane(ctx, a)?, plane(ctx, b)?);
             let (na, nb) = (pa.normal(), pb.normal());
-            if na.cross(nb).len() < 1e-9 {
-                // Parallel: half way between them.
-                let half = nb * ((pb.origin - pa.origin).dot(nb) * 0.5);
-                let center = pa.origin + half;
+            if let Some(center) = midway((pa.origin, na), (pb.origin, nb), pa.origin) {
                 // A design saved before the midplane took a world plane's frame keeps the
                 // frame it was saved with: the first plane's own origin and axes (#18260).
                 if *old_frame {

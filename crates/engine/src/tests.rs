@@ -1183,6 +1183,106 @@ fn revolve_a_spherical_shell_off_the_origin() {
     }
 }
 
+fn split_revolve_profile(s: &mut Session) {
+    run(s, "sketch.create", json!({"plane": "XZ", "flip": true, "name": "Pot"}));
+    run(s, "sketch.line", json!({"points": [[0, 0], [66.14378277661477, 0]], "ids": ["base"]}));
+    run(s, "sketch.arc.center_point", json!({"center": [0, 75], "start": [66.14378277661477, 0], "end": [0, 175], "id": "round"}));
+    run(s, "sketch.line", json!({"points": [[0, 175], [0, 0]], "ids": ["axis"]}));
+    run(s, "sketch.line", json!({"points": [[0, 250], [40, 250]], "ids": ["top"]}));
+    run(
+        s,
+        "sketch.arc.center_point",
+        json!({
+            "center": [40, 190], "start": [40, 250], "end": [95.4327719506772, 167.0389940580946], "clockwise": true, "id": "bend"
+        }),
+    );
+    run(s, "sketch.line", json!({"points": [[95.4327719506772, 167.0389940580946], [57.308972344637716, 75]], "ids": ["leg"]}));
+    run(s, "sketch.finish", json!({}));
+    assert_eq!(s.model.state().sketches[0].profiles[0].outer_curves.iter().filter(|id| *id == "round").count(), 2);
+}
+
+#[test]
+fn a_revolved_arc_split_by_a_handle_path_keeps_one_face_and_takes_its_round() {
+    // #18537: the open leg cuts the pot profile into two arcs on the same circle.
+    // Revolving them as separate faces introduced a boundary through the handle junction.
+    let mut s = Session::default();
+    split_revolve_profile(&mut s);
+    run(&mut s, "solid.revolve", json!({"sketch": "Pot", "profiles": [{"curves": ["base", "round", "axis"]}], "axis": {"curve": "axis"}}));
+    let faces = run(&mut s, "model.faces", json!({"body": "Body1"}));
+    let names: Vec<&str> = faces["faces"].as_array().unwrap().iter().map(|f| f["name"].as_str().unwrap()).collect();
+    assert_eq!(names.len(), 2, "one spherical face and the bottom plane: {names:?}");
+    assert!(names.contains(&"F2:side:round") && names.contains(&"F2:side:base"), "{names:?}");
+    // Sphere R100 minus its bottom cap of height 25.
+    let want = 4.0 / 3.0 * PI * 100.0f64.powi(3) - PI * 25.0f64.powi(2) * (100.0 - 25.0 / 3.0);
+    assert!(rel(volume(&mut s), want) < 5e-4);
+    run(&mut s, "sketch.create", json!({"plane": "YZ", "flip": "y", "name": "Handle"}));
+    run(&mut s, "sketch.circle.center", json!({"center": [0, 250], "radius": 17.5}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.sweep", json!({"sketch": "Handle", "path_sketch": "Pot", "path": ["top", "bend", "leg"], "operation": "join"}));
+    let before = volume(&mut s);
+    run(&mut s, "solid.fillet", json!({"edges": [[81.4, 17.5, 133.1]], "radius": 15}));
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(measured["body_count"], 1);
+    assert_eq!(measured["bodies"][0]["closed"], true);
+    assert!(measured["total"]["volume_mm3"].as_f64().unwrap() > before, "the concave junction round adds material");
+}
+
+#[test]
+fn an_old_split_revolve_reopens_with_both_named_faces() {
+    let mut s = Session::default();
+    split_revolve_profile(&mut s);
+    let params = json!({"sketch": "Pot", "profiles": [{"curves": ["base", "round", "axis"]}], "axis": {"curve": "axis"}});
+    let mut legacy_params = params.clone();
+    legacy_params["join_profile_arcs"] = json!(false);
+    run(&mut s, "solid.revolve", legacy_params);
+    let picks = [[100.0, 0.0, 75.0], [60.0, 0.0, 155.0]];
+    for (pick, name) in picks.iter().zip(["Lower", "Upper"]) {
+        run(&mut s, "construct.plane.tangent", json!({"face": {"face": pick}, "name": name}));
+    }
+
+    // The old format had no joining option. The planes hold the exact names of the two
+    // faces, as they would in a design saved before Revolve could join the arcs.
+    let mut legacy: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    legacy["format"] = json!("solidcraft/58");
+    legacy.as_object_mut().unwrap().remove("format_pending");
+    assert!(legacy["features"][1].get("join_profile_arcs").is_none());
+    let names = [2, 3].map(|i| legacy["features"][i]["plane"]["face"]["name"].as_str().unwrap().to_owned());
+    assert_eq!(names, ["F2:side:round#[F2:side:base]", "F2:side:round"]);
+
+    let dir = std::env::temp_dir().join(format!("solidcraft-split-revolve-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("legacy.solidcraft");
+    std::fs::write(&path, legacy.to_string()).unwrap();
+    let mut reopened = Session::default();
+    run(&mut reopened, "doc.open", json!({"path": path}));
+    let check = |s: &Session| {
+        let state = s.model.state();
+        let body = state.body("Body1").unwrap();
+        assert_eq!(body.body.face_count(), 3, "both original sphere faces and the bottom plane");
+        let faces: Vec<_> = names
+            .iter()
+            .zip(picks)
+            .map(|(name, pick)| {
+                let pick = Vec3::from(pick);
+                let (face, _) = solidcraft_doc::naming::face_on_body(body, name, pick).unwrap();
+                let (distance, exact_face) = body.body.nearest_face(pick).unwrap();
+                assert!(distance < 1e-5, "{name}: {distance}");
+                assert_eq!(face, exact_face, "{name}");
+                face
+            })
+            .collect();
+        assert_ne!(faces[0], faces[1]);
+        let planes = crate::view::construction_planes(s);
+        assert!(planes.iter().any(|(_, name, _)| name == "Lower") && planes.iter().any(|(_, name, _)| name == "Upper"));
+    };
+    check(&reopened);
+    // An ordinary redefine of an old feature keeps its topology, including when its
+    // original command parameters did not specify an arc-joining mode.
+    run(&mut reopened, "timeline.redefine", json!({"feature": "Revolve1", "command": "solid.revolve", "params": params}));
+    check(&reopened);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
 #[test]
 fn extrude_of_adjacent_profiles_has_whole_edges() {
     // A holder from two regions of one sketch (a disc and the ring around it, both cut off by a
@@ -4645,6 +4745,37 @@ fn face_extrude_follows_edits() {
 }
 
 /// Appearances on faces, bodies and components: face > body > component > material.
+/// #22984: the appearance commands take a face by the name `model.faces` lists, as Shell does.
+#[test]
+fn appearance_commands_take_a_face_by_name() {
+    let mut s = Session::default();
+    s.execute("solid.box", &json!({"body_name": "Plate", "length": 40, "width": 30, "height": 6})).unwrap();
+    let faces = s.execute("model.faces", &json!({"body": "Plate"})).unwrap();
+    let top = faces["faces"].as_array().unwrap().iter().find(|f| f["point"][2] == 6.0).unwrap().clone();
+    let name = top["name"].as_str().unwrap();
+    // With and without `body`, and as `{point}` is still read.
+    for (params, color) in [(json!({"body": "Plate", "faces": [name]}), "#ff0000"), (json!({"faces": [name]}), "#00ff00")] {
+        let mut params = params;
+        params["color"] = json!(color);
+        let reply = s.execute("appearance.assign", &params).unwrap();
+        assert_eq!(reply["faces"][0]["body"], "Plate", "{reply}");
+        for face in [json!(name), top["index"].clone()] {
+            let chain = s.execute("appearance.chain", &json!({"target": {"body": "Plate", "face": face}})).unwrap();
+            assert_eq!(chain["active"], "face", "{chain}");
+            assert_eq!(chain["steps"][0]["look"]["color"], color, "{chain}");
+        }
+        let picked = s.execute("appearance.pick_up", &json!({"target": {"body": "Plate", "face": name}})).unwrap();
+        assert_eq!(picked["look"]["color"], color, "{picked}");
+    }
+    for (command, params) in [
+        ("appearance.assign", json!({"faces": ["F99:top"], "color": "#ff0000"})),
+        ("appearance.chain", json!({"target": {"body": "Plate", "face": "F99:top"}})),
+    ] {
+        let error = s.execute(command, &params).unwrap_err().to_string();
+        assert!(error.contains("no face is named `F99:top`"), "{error}");
+    }
+}
+
 #[test]
 fn appearances_by_face_body_and_component() {
     let mut s = Session::default();

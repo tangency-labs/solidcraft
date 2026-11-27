@@ -588,6 +588,9 @@ pub struct Services {
     pub agent_http: Option<agent_chat::backend::HttpFn>,
     /// Show the designs the browser keeps for itself; None: the host has no such store.
     pub browser_files: Option<Box<dyn Fn()>>,
+    /// The page runs in Safari, the one browser that reports a two-finger twist (Preferences
+    /// offers the twist there only, #22848).
+    pub browser_safari: bool,
     /// Whether a recent design that is not in memory can be brought back by the host (the browser
     /// build remembers files it saved to the disk); None: it can't.
     pub can_restore: Option<Box<dyn Fn(&str) -> bool>>,
@@ -1758,7 +1761,17 @@ impl SolveApp {
         self.home.recent = v
             .get("recent")
             .and_then(Value::as_array)
-            .map(|a| a.iter().filter_map(Value::as_str).take(home::MAX_RECENT).map(str::to_string).collect())
+            .map(|a| {
+                // A path listed twice (saved by an older version, or written by two pages) is
+                // shown once (#23033).
+                let mut recent: Vec<String> = Vec::new();
+                for p in a.iter().filter_map(Value::as_str) {
+                    if recent.len() < home::MAX_RECENT && !recent.iter().any(|r| r == p) {
+                        recent.push(p.to_string());
+                    }
+                }
+                recent
+            })
             .unwrap_or_default();
         self.home.forgotten = keys("recent_forgotten");
         if let Some(s) = v.get("shortcut_box") {
@@ -3425,6 +3438,10 @@ impl SolveApp {
             }
             if self.session.has_selection() && (matches!(t.kind, tools::Kind::Draw(_)) || crate::sketch_tools::is_drawing_tool(id)) {
                 let _ = self.session.execute("select.clear", &json!({}));
+            }
+            // An open sketch window would keep the keyboard from the tool's size boxes.
+            if self.dialog.as_ref().is_some_and(|d| matches!(d.kind, dialogs::Kind::SketchModify(_))) {
+                dialogs::cancel(self);
             }
             self.tool = Some(t);
             self.set_tool_hint(tools::hint(id));
