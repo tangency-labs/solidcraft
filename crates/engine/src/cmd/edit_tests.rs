@@ -995,6 +995,86 @@ fn failed_timeline_move_many_keeps_folder_membership_and_order() {
 }
 
 #[test]
+fn timeline_move_many_with_allow_errors_moves_block_into_folder_and_lists_broken() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[10, 5, 10]], "distance": 1, "name": "Bevel"}));
+    let group = run(&mut s, "timeline.group", json!({"name": "Body", "features": ["Base", "Bevel"]}))["group"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 2, "name": "Extension"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, -5], "p1": [15, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Extension", "distance": 12, "operation": "join", "name": "Extend"}));
+
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+    let error =
+        s.execute("timeline.move_many", &json!({"features": ["Extension", "Extend"], "group": group, "position": 1})).unwrap_err().to_string();
+    assert!(error.contains("breaks Bevel"), "{error}");
+    assert_eq!(s.doc, before);
+    assert_eq!(s.undo.len(), undo, "a refused move adds no undo step");
+
+    let error = s
+        .execute("timeline.move_many", &json!({"features": ["Extension", "Extend"], "group": group, "position": 1, "allow_errors": "yes"}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("`allow_errors` must be true or false"), "{error}");
+    assert_eq!(s.doc, before);
+
+    let r = run(&mut s, "timeline.move_many", json!({"features": ["Extension", "Extend"], "group": group, "position": 1, "allow_errors": true}));
+    assert_eq!(feature_names(&s), ["Base", "Extension", "Extend", "Bevel"]);
+    let folder = s.doc.timeline_groups.iter().find(|f| f.id == group).unwrap();
+    let expected_ids: Vec<u64> = s.doc.features.iter().map(|f| f.id).collect();
+    assert_eq!(folder.features, expected_ids, "both moved features join the folder with the box and chamfer");
+    let broken = r["broken"].as_array().unwrap();
+    assert_eq!(broken.len(), 1, "{r}");
+    assert_eq!(broken[0]["feature"], "Bevel", "{r}");
+    assert!(broken[0]["error"].as_str().is_some_and(|e| !e.is_empty()), "{r}");
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc, before, "one undo restores both order and folder membership");
+}
+
+#[test]
+fn timeline_move_many_with_active_true_reports_features_broken_after_marker_advances() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[10, 5, 10]], "distance": 1, "name": "Bevel"}));
+    let group = run(&mut s, "timeline.group", json!({"name": "Body", "features": ["Base", "Bevel"]}))["group"].as_u64().unwrap();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 2, "name": "Extension"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, -5], "p1": [15, 15]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Extension", "distance": 12, "operation": "join", "name": "Extend"}));
+
+    run(&mut s, "timeline.roll_to", json!({"position": 2}));
+    assert_eq!(s.doc.marker, Some(2));
+    let before = s.doc.clone();
+    let undo = s.undo.len();
+
+    let error = s
+        .execute("timeline.move_many", &json!({"features": ["Extension", "Extend"], "group": group, "position": 1, "active": true}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("breaks Bevel"), "{error}");
+    assert_eq!(s.doc, before);
+    assert_eq!(s.undo.len(), undo, "a refused move adds no undo step");
+
+    let r = run(
+        &mut s,
+        "timeline.move_many",
+        json!({"features": ["Extension", "Extend"], "group": group, "position": 1, "active": true, "allow_errors": true}),
+    );
+    assert_eq!(feature_names(&s), ["Base", "Extension", "Extend", "Bevel"]);
+    assert_eq!(s.doc.marker, None, "active: true brings all features before the marker");
+    let broken = r["broken"].as_array().unwrap();
+    assert_eq!(broken.len(), 1, "{r}");
+    assert_eq!(broken[0]["feature"], "Bevel", "{r}");
+    assert!(broken[0]["error"].as_str().is_some_and(|e| !e.is_empty()), "{r}");
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc, before, "one undo restores order, folder membership and marker");
+}
+
+#[test]
 fn timeline_folders_can_nest_and_reject_cycles() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"}));
@@ -3453,4 +3533,314 @@ fn timeline_folders_stop_at_what_a_design_file_holds() {
     assert!(error.contains("at most"), "{error}");
     assert_eq!(s.doc.timeline_groups.len(), cap);
     solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+}
+
+/// Reordering a later linked sub-assembly earlier than an existing same-named linked sub-assembly
+/// must preserve the existing body's name (`Bolt`) and keep the moved sub-assembly's disambiguated
+/// name (`Bolt (2)`), so root body patterns (and chained patterns) seeded on `Bolt` keep every copy
+/// in `inspect.measure` and `assembly.mass_properties` with zero timeline errors or warnings.
+#[test]
+fn reordering_a_later_linked_subassembly_earlier_keeps_body_names_and_pattern_copies() {
+    let dir = std::env::temp_dir().join(format!("solidcraft-reorder-link-pattern-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let save_part = |name: &str| {
+        let path = dir.join(format!("{name}.sc"));
+        let mut part = Session::default();
+        run(&mut part, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Bolt"}));
+        run(&mut part, "file.save", json!({"path": path.to_string_lossy()}));
+        path
+    };
+    let (p1, p2) = (save_part("S1"), save_part("S2"));
+
+    let mut s = Session::default();
+    let s1 = run(&mut s, "component.insert_design", json!({"path": p1.to_string_lossy(), "name": "S1"}));
+    let occ_s1 = s1["occurrence"].as_u64().unwrap();
+    let f_s1 = s.doc.find_feature("S1").unwrap().id;
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Bolt"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20, "body_names": ["PAT#1"], "name": "Pat1"}),
+    );
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["PAT#1"], "dir1": [0, 0, 1], "count1": 2, "spacing1": 20, "body_names": ["PAT#2"], "name": "Pat2"}),
+    );
+    run(&mut s, "component.insert_design", json!({"path": p2.to_string_lossy(), "name": "S2", "translate": [40, 0, 0]}));
+    let f_s2 = s.doc.find_feature("S2").unwrap().id;
+
+    let pat1 = s.doc.find_feature("Pat1").unwrap();
+    assert!(
+        matches!(&pat1.kind, solidcraft_doc::FeatureKind::Pattern { bodies, placements, .. } if bodies.len() == 1 && bodies[0] == "Bolt" && placements == &[vec![occ_s1]]),
+        "{:?}",
+        pat1.kind
+    );
+    assert_eq!(pat1.body_names, ["PAT#1"]);
+
+    // Legacy-style copy where both linked Import features still carry unpinned `["Bolt"]`.
+    let mut legacy_doc = (*s.doc).clone();
+    for f in &mut legacy_doc.features {
+        if matches!(f.kind, solidcraft_doc::FeatureKind::Import { .. }) {
+            f.body_names = vec!["Bolt".into()];
+        }
+    }
+    let legacy_json = legacy_doc.to_json();
+
+    let assert_intact = |s: &mut Session, label: &str| {
+        assert_eq!(s.doc.features.first().map(|f| f.id), Some(f_s2), "{label}: S2 moved to rank 0");
+        for r in &s.model.results {
+            assert!(r.error.is_none(), "{label}: feature `{}` failed: {:?}", r.name, r.error);
+            assert!(r.warning.is_none(), "{label}: feature `{}` warned: {:?}", r.name, r.warning);
+        }
+        let st = s.model.state();
+        let s1_bodies: Vec<&str> = st.bodies.iter().filter(|b| b.feature == f_s1).map(|b| b.name.as_str()).collect();
+        let s2_bodies: Vec<&str> = st.bodies.iter().filter(|b| b.feature == f_s2).map(|b| b.name.as_str()).collect();
+        assert_eq!(s1_bodies, ["Bolt"], "{label}: S1 must keep Bolt");
+        assert_eq!(s2_bodies, ["Bolt (2)"], "{label}: S2 must keep Bolt (2)");
+
+        let measured = run(s, "inspect.measure", json!({}));
+        assert_eq!(measured["body_count"], 4, "{label}: {measured}");
+        let mut measure_names: Vec<String> =
+            measured["bodies"].as_array().unwrap().iter().filter_map(|b| b["name"].as_str().map(str::to_string)).collect();
+        measure_names.sort();
+        assert_eq!(measure_names, ["Bolt", "Bolt (2)", "PAT#1", "PAT#2"], "{label} inspect.measure");
+        let vol = measured["total"]["volume_mm3"].as_f64().unwrap();
+        assert!((vol - 4000.0).abs() < 1e-3, "{label}: expected 4000 mm3, got {vol}");
+
+        let mass = run(s, "assembly.mass_properties", json!({}));
+        let mut mass_names: Vec<String> = mass["occurrences"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|o| o["bodies"].as_array().into_iter().flatten())
+            .filter_map(|b| b["name"].as_str().map(str::to_string))
+            .collect();
+        mass_names.sort();
+        assert_eq!(mass_names, ["Bolt", "Bolt (2)", "PAT#1", "PAT#2"], "{label} assembly.mass_properties");
+        let mass_vol: f64 = mass["occurrences"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|o| o["bodies"].as_array().into_iter().flatten())
+            .filter_map(|b| b["volume_mm3"].as_f64())
+            .sum();
+        assert!((mass_vol - 4000.0).abs() < 1e-3, "{label}: expected 4000 mm3 in mass_properties, got {mass_vol}");
+    };
+
+    // 1. Live session: timeline.reorder + compute_all + undo/redo.
+    run(&mut s, "timeline.reorder", json!({"feature": f_s2, "position": 0}));
+    assert_intact(&mut s, "live reorder");
+    run(&mut s, "timeline.compute_all", json!({}));
+    assert_intact(&mut s, "live reorder compute_all");
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.features.first().map(|f| f.id), Some(f_s1));
+    run(&mut s, "edit.redo", json!({}));
+    assert_intact(&mut s, "live redo");
+
+    // 2. Unpinned legacy doc in memory: timeline.reorder to rank 0.
+    let mut raw_reorder = Session::new(solidcraft_doc::Document::from_json(&legacy_json).unwrap());
+    run(&mut raw_reorder, "timeline.reorder", json!({"feature": f_s2, "position": 0}));
+    assert_intact(&mut raw_reorder, "legacy timeline.reorder");
+    run(&mut raw_reorder, "timeline.compute_all", json!({}));
+    assert_intact(&mut raw_reorder, "legacy timeline.reorder compute_all");
+
+    // 3. Unpinned legacy doc in memory: timeline.move_many to rank 0.
+    let mut raw_move = Session::new(solidcraft_doc::Document::from_json(&legacy_json).unwrap());
+    run(&mut raw_move, "timeline.move_many", json!({"features": [f_s2], "position": 0}));
+    assert_intact(&mut raw_move, "legacy timeline.move_many");
+
+    // 4. Unpinned legacy doc in memory: timeline.reorder_many to rank 0.
+    let mut raw_many = Session::new(solidcraft_doc::Document::from_json(&legacy_json).unwrap());
+    run(&mut raw_many, "timeline.reorder_many", json!({"features": [f_s2], "position": 0}));
+    assert_intact(&mut raw_many, "legacy timeline.reorder_many");
+
+    // 5. Rolled-back unpinned legacy doc: moving S2 past the marker to rank 0 keeps names intact.
+    let mut rolled_doc = solidcraft_doc::Document::from_json(&legacy_json).unwrap();
+    rolled_doc.marker = Some(3);
+    let mut rolled = Session::new(rolled_doc);
+    run(&mut rolled, "timeline.reorder", json!({"feature": f_s2, "position": 0, "active": true}));
+    assert_intact(&mut rolled, "rolled-back legacy timeline.reorder");
+
+    // 6. Rolled-back doc where active prefix is already pinned (`names_pinned` warm) while S2 past
+    //    the marker has empty or blank `body_names`: pinning must still evaluate and pin S2 before
+    //    reordering so S2 keeps `Bolt (2)` and S1 keeps `Bolt`.
+    let mut empty_rolled_doc = solidcraft_doc::Document::from_json(&legacy_json).unwrap();
+    empty_rolled_doc.feature_mut(f_s2).unwrap().body_names.clear();
+    empty_rolled_doc.marker = Some(3);
+    let mut empty_rolled = Session::new(empty_rolled_doc);
+    empty_rolled.pin_body_names();
+    assert!(empty_rolled.doc.feature(f_s2).unwrap().body_names.is_empty(), "S2 stays unpinned past marker before reorder");
+    run(&mut empty_rolled, "timeline.reorder", json!({"feature": f_s2, "position": 0, "active": true}));
+    assert_intact(&mut empty_rolled, "rolled-back unpinned-empty S2 timeline.reorder");
+
+    let mut blank_rolled_doc = solidcraft_doc::Document::from_json(&legacy_json).unwrap();
+    blank_rolled_doc.feature_mut(f_s2).unwrap().body_names = vec!["".into()];
+    blank_rolled_doc.marker = Some(3);
+    let mut blank_rolled = Session::new(blank_rolled_doc);
+    blank_rolled.pin_body_names();
+    run(&mut blank_rolled, "timeline.reorder_many", json!({"features": [f_s2], "position": 0, "active": true}));
+    assert_intact(&mut blank_rolled, "rolled-back blank S2 timeline.reorder_many");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Moving a feature so a multi-body pattern would newly leave out one of its source bodies must
+/// not silently succeed with zero errors: `timeline.reorder`, `timeline.reorder_many` and
+/// `timeline.move_many` all refuse it unless `allow_errors: true` is passed.
+#[test]
+fn reordering_refuses_when_a_multi_body_pattern_would_silently_drop_a_copy() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Bolt", "name": "BoltBox"}));
+    run(&mut s, "solid.box", json!({"corner": [40, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Plate", "name": "PlateBox"}));
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Bolt", "Plate"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20, "body_names": ["PAT#1", "PAT#2"], "name": "PatMulti"}),
+    );
+
+    for (cmd, params) in [
+        ("timeline.reorder", json!({"feature": "BoltBox", "position": 2})),
+        ("timeline.reorder_many", json!({"features": ["BoltBox"], "position": 3})),
+        ("timeline.move_many", json!({"features": ["BoltBox"], "position": 3})),
+    ] {
+        let err = s.execute(cmd, &params).unwrap_err().to_string();
+        assert!(err.contains("PatMulti"), "{cmd} must refuse dropping a pattern body: {err}");
+    }
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(measured["body_count"], 4, "all copies stay intact after refused reorders: {measured}");
+
+    let allowed = run(&mut s, "timeline.reorder", json!({"feature": "BoltBox", "position": 2, "allow_errors": true}));
+    let broken = allowed["broken"].as_array().unwrap();
+    assert!(broken.iter().any(|b| b["feature"] == "PatMulti"), "allow_errors must report PatMulti in broken: {allowed}");
+}
+
+/// Single-feature `timeline.reorder` must check the full history past the rollback marker just as
+/// `timeline.reorder_many` and `timeline.move_many` do, so moving a source body past a rolled-back
+/// multi-body pattern is refused unless `allow_errors: true` is passed.
+#[test]
+fn rolled_back_single_feature_reorder_refuses_dropping_a_pattern_copy_past_the_marker() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Bolt", "name": "BoltBox"}));
+    run(&mut s, "solid.box", json!({"corner": [40, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Plate", "name": "PlateBox"}));
+    run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Bolt", "Plate"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20, "body_names": ["PAT#1", "PAT#2"], "name": "PatMulti"}),
+    );
+
+    // Roll back past `PatMulti`, both with `PatMulti` right behind the marker and with it still
+    // behind the marker after the candidate move (`marker = Some(1)`).
+    for pos in [2, 1] {
+        run(&mut s, "timeline.roll_to", json!({"position": pos}));
+        assert_eq!(s.doc.marker, Some(pos));
+        let before = s.doc.clone();
+        let err = s.execute("timeline.reorder", &json!({"feature": "BoltBox", "position": 2})).unwrap_err().to_string();
+        assert!(err.contains("PatMulti"), "marker={pos}: timeline.reorder must refuse breaking rolled-back PatMulti: {err}");
+        assert_eq!(s.doc, before, "marker={pos}: refused reorder must leave document unchanged");
+    }
+
+    // With `allow_errors: true`, the move proceeds and reports the rolled-back pattern in `broken`.
+    let allowed = run(&mut s, "timeline.reorder", json!({"feature": "BoltBox", "position": 2, "allow_errors": true}));
+    let broken = allowed["broken"].as_array().unwrap();
+    assert!(broken.iter().any(|b| b["feature"] == "PatMulti"), "allow_errors must report rolled-back PatMulti: {allowed}");
+
+    // Undoing and rolling forward restores all four bodies intact.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "timeline.roll_to", json!({"position": "end"}));
+    let measured = run(&mut s, "inspect.measure", json!({}));
+    assert_eq!(measured["body_count"], 4, "all copies stay intact after undo + roll forward: {measured}");
+}
+
+#[test]
+fn timeline_edit_refuses_blend_edge_picks_past_history_marker_and_succeeds_just_before_feature() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "name": "Plate"}));
+    run(&mut s, "solid.box", json!({"corner": [10, 5, 10], "length": 20, "width": 20, "height": 10, "operation": "join", "name": "Boss"}));
+    run(&mut s, "solid.chamfer", json!({"edges": [[20, 5, 20]], "distance": 1, "name": "Bevel"}));
+
+    let bevel_id = s.doc.find_feature("Bevel").unwrap().id;
+    let initial_names = s.doc.feature(bevel_id).unwrap().edge_names.clone();
+    let initial_refs = s.doc.feature(bevel_id).unwrap().edge_refs.clone();
+    assert_eq!(initial_names.len(), 1);
+    assert!(!initial_names[0].is_empty(), "{initial_names:?}");
+
+    // Roll back before Boss so active geometry preceding Bevel is unbuilt.
+    run(&mut s, "timeline.rollback", json!({"feature": "Plate"}));
+    assert_eq!(s.doc.marker, Some(1));
+    let doc_at_plate = s.doc.clone();
+
+    // Editing edges (new or re-sent) must refuse rather than snapping to Plate's marker geometry.
+    for edges in [json!([[20, 25, 20]]), json!([[20, 5, 20]])] {
+        let err = s.execute("timeline.edit", &json!({"feature": "Bevel", "set": {"edges": edges}})).unwrap_err().to_string();
+        assert!(err.contains("Bevel") && err.contains("history marker"), "{err}");
+        assert_eq!(s.doc, doc_at_plate, "refused edit must leave the document untouched");
+    }
+
+    // Non-geometric edits on the rolled-back chamfer still work and preserve persistent names.
+    run(&mut s, "timeline.edit", json!({"feature": "Bevel", "set": {"distance": "2"}}));
+    assert_eq!(s.doc.marker, Some(1));
+    assert_eq!(s.doc.feature(bevel_id).unwrap().edge_names, initial_names);
+    assert_eq!(s.doc.feature(bevel_id).unwrap().edge_refs, initial_refs);
+
+    // Moving the marker to just before Bevel builds Boss so Bevel's edge picks resolve accurately.
+    run(&mut s, "timeline.rollback", json!({"feature": "Boss"}));
+    assert_eq!(s.doc.marker, Some(2));
+    run(&mut s, "timeline.edit", json!({"feature": "Bevel", "set": {"edges": [[20, 25, 20]]}}));
+    assert_eq!(s.doc.marker, Some(2));
+    let updated_names = s.doc.feature(bevel_id).unwrap().edge_names.clone();
+    assert_ne!(updated_names, initial_names, "the newly picked edge must replace the old name");
+
+    // Rolling to the end builds Bevel cleanly with the updated edge and distance.
+    run(&mut s, "timeline.rollback", json!({"position": "end"}));
+    let result = s.model.result(bevel_id).unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert!(result.warning.is_none(), "{:?}", result.warning);
+    let volume = run(&mut s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    let expected = 40.0 * 30.0 * 10.0 + 20.0 * 20.0 * 10.0 - 0.5 * 2.0 * 2.0 * 20.0;
+    assert!((volume - expected).abs() < 1e-4, "{volume} != {expected}");
+}
+
+#[test]
+fn timeline_edit_refuses_face_and_profile_picks_past_history_marker() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 30, "height": 10, "name": "Plate"}));
+    run(&mut s, "solid.box", json!({"corner": [10, 5, 10], "length": 20, "width": 20, "height": 10, "operation": "join", "name": "Boss"}));
+    run(&mut s, "solid.shell", json!({"faces": [[20, 15, 20]], "thickness": 2, "name": "Hollow"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "SlotSketch"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [8, 8]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "SlotSketch", "distance": 5, "operation": "new", "name": "Pad"}));
+
+    let hollow_id = s.doc.find_feature("Hollow").unwrap().id;
+    let initial_faces = s.doc.feature(hollow_id).unwrap().face_names.clone();
+    assert!(!initial_faces.is_empty());
+
+    // Roll back to Plate so Boss, Hollow, SlotSketch, and Pad are all past the marker.
+    run(&mut s, "timeline.rollback", json!({"feature": "Plate"}));
+    assert_eq!(s.doc.marker, Some(1));
+    let doc_at_plate = s.doc.clone();
+
+    // Face pick edits on Hollow are refused while Boss is rolled back.
+    let err = s.execute("timeline.edit", &json!({"feature": "Hollow", "set": {"faces": [[20, 15, 0]]}})).unwrap_err().to_string();
+    assert!(err.contains("Hollow") && err.contains("history marker"), "{err}");
+    assert_eq!(s.doc, doc_at_plate);
+
+    // Profile pick edits on Pad are refused while SlotSketch is rolled back.
+    let err = s.execute("timeline.edit", &json!({"feature": "Pad", "set": {"profiles": [0]}})).unwrap_err().to_string();
+    assert!(err.contains("Pad") && err.contains("history marker"), "{err}");
+    assert_eq!(s.doc, doc_at_plate);
+
+    // Non-geometric edits on both rolled-back features still succeed.
+    run(&mut s, "timeline.edit", json!({"feature": "Hollow", "set": {"thickness": "1.5"}}));
+    run(&mut s, "timeline.edit", json!({"feature": "Pad", "set": {"extent.distance": "8"}}));
+    assert_eq!(s.doc.feature(hollow_id).unwrap().face_names, initial_faces);
+
+    // If the only feature between the marker and Hollow is suppressed, state_before(Hollow) is exact.
+    run(&mut s, "timeline.suppress", json!({"feature": "Boss", "suppressed": true}));
+    run(&mut s, "timeline.edit", json!({"feature": "Hollow", "set": {"faces": [[20, 15, 10]]}}));
+    run(&mut s, "timeline.rollback", json!({"position": "end"}));
+    let result = s.model.result(hollow_id).unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert!(result.warning.is_none(), "{:?}", result.warning);
 }

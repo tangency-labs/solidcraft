@@ -13,6 +13,7 @@
 mod analysis;
 mod camera;
 pub mod clear_coat;
+mod footprint;
 pub mod grid;
 pub mod hatch;
 mod pick;
@@ -31,7 +32,10 @@ pub use camera::Quat;
 pub use camera::StandardView;
 pub use camera::UpAxis;
 pub use camera::ViewAngles;
+pub use camera::dial_turn;
 pub use camera::ease_in_out;
+pub use footprint::Footprint;
+pub use footprint::footprint;
 pub use pick::DrawnPoint;
 pub use pick::nearest_drawn_point;
 pub use raster::Canvas;

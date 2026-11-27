@@ -59,7 +59,9 @@ impl StraightPreview {
             }
         }
         if app.session.doc.units != "mm"
-            || ["distance2", "start_offset", "from", "to", "to_offset", "thin"].iter().any(|key| params.get(*key).is_some())
+            || ["distance2", "start_offset", "from", "to", "to_offset", "to2", "to_offset2", "through_all2", "thin"]
+                .iter()
+                .any(|key| params.get(*key).is_some())
             || params.get("through_all").and_then(Value::as_bool) == Some(true)
         {
             return None;
@@ -166,9 +168,12 @@ impl StraightPreview {
             placed: None,
             centrelines: Vec::new(),
             tapered: Vec::new(),
+            flange_corners: Vec::new(),
+            flange_faces: Vec::new(),
             replaced: Vec::new(),
             outlines: Vec::new(),
             error: crate::preview::extrusion_target_error(&app.session, commands, &app.session.model.state()),
+            warning: None,
             bounds,
             layer: None,
             joints: Vec::new(),

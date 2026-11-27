@@ -198,7 +198,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&LIST_CONTRACT)
         .output(crate::schema::output_schema_for::<AppearanceListResult>)
-        .params("body?: name (or a placed copy's, `KB (K:2)`: the body it shows) → assigned appearances; with body, its resolved look and its faces' (face index, look)"),
+        .params(
+            "body?: name (or a placed copy's, `KB (K:2)`: the body it shows); active_only?: bool (default false; true omits overrides whose body or component is not in the active model) → assigned appearances (inactive_bodies lists body overrides absent from the active model); with body, its resolved look and its faces' (face index, look)",
+        ),
     CommandSpec::new("material.list", "List Materials", crate::checked!("material.list", material_list))
         .icon("list")
         .noundo()
@@ -345,9 +347,17 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "unknown body name"));
     }
     if let Some((region, inside)) = region {
+        let bounds_list: Vec<solidcraft_kernel::Result<solidcraft_geom::Aabb3>> = if selected.len() > 1 {
+            solidcraft_kernel::map_on_threads(&selected, 16, |b| b.body.exact_bounds())
+                .into_iter()
+                .map(|r| r.unwrap_or_else(|| Err(solidcraft_kernel::KernelError::Internal("bounding this body failed".into()))))
+                .collect()
+        } else {
+            selected.iter().map(|b| b.body.exact_bounds()).collect()
+        };
         let mut matches = Vec::new();
-        for body in selected {
-            let bounds = body.body.exact_bounds().map_err(|e| bad(cmd, format!("could not bound `{}`: {e}", body.name)))?;
+        for (body, bounds) in selected.into_iter().zip(bounds_list) {
+            let bounds = bounds.map_err(|e| bad(cmd, format!("could not bound `{}`: {e}", body.name)))?;
             let matches_region = if inside { region.contains(bounds.min) && region.contains(bounds.max) } else { region.meets(&bounds) };
             if !bounds.is_empty() && matches_region {
                 matches.push(body);
@@ -881,7 +891,7 @@ fn reply(cmd: &str, reply: impl serde::Serialize) -> Result<Value> {
 /// Read the existing exact classifier; face choice and normal evaluation also stay in the kernel.
 fn classify_points(s: &mut Session, p: &Value) -> Result<Value> {
     use crate::schema::FaceRef;
-    use solidcraft_kernel::services::{ClassifiedPoint as KernelPoint, PointNormalFace};
+    use solidcraft_kernel::points::{ClassifiedPoint as KernelPoint, PointNormalFace};
 
     let cmd = "inspect.classify_points";
     let args: ClassifyPointsParams = serde_json::from_value(p.clone()).map_err(|e| bad(cmd, e.to_string()))?;
@@ -943,7 +953,7 @@ fn model_faces(s: &mut Session, p: &Value) -> Result<Value> {
                 index: f.index,
                 name: names.get(f.index).cloned(),
                 exact: solidcraft_doc::naming::face_name_exact(b, f.index),
-                area: f.area,
+                area: super::measure_exact::face_area(&b.body, f.index).unwrap_or(f.area),
                 centroid: f.centroid.into(),
                 plane_normal: f.plane_normal.map(Into::into),
                 point: spot.map(|x| x.point.into()),
@@ -1013,11 +1023,12 @@ fn physical_material(s: &mut Session, p: &Value) -> Result<Value> {
     if bodies.is_empty() || bodies.iter().any(|b| st.body(b).is_none()) {
         return Err(bad(cmd, "`bodies` must list existing bodies"));
     }
+    let doc = s.doc_mut();
     for b in &bodies {
-        if canonical == solidcraft_doc::DEFAULT_MATERIAL {
-            s.doc_mut().materials.remove(b);
+        if canonical == solidcraft_doc::DEFAULT_MATERIAL && !doc.has_copy_material_lineage(b) {
+            doc.materials.remove(b);
         } else {
-            s.doc_mut().materials.insert(b.clone(), canonical.clone());
+            doc.materials.insert(b.clone(), canonical.clone());
         }
     }
     typed_reply(cmd, MaterialAssignResult { bodies, material: canonical, param_warnings: Vec::new() })
@@ -1108,6 +1119,11 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
             Some(l) => a.bodies.insert(b.clone(), l.clone()),
             None => a.bodies.remove(b),
         };
+        // A mesh body has one face, the whole body: a look on that face would hide every body
+        // look from then on, so the body's look replaces it (#22573).
+        if st.body(b).is_some_and(|mb| mb.body.is_mesh()) {
+            a.faces.retain(|f| f.body != *b);
+        }
     }
     for (body, pt) in &faces {
         // One entry per face: a new one replaces any at the same spot.
@@ -1311,7 +1327,25 @@ fn appearance_library(_s: &mut Session, _p: &Value) -> Result<Value> {
 }
 
 fn appearance_list(s: &mut Session, p: &Value) -> Result<Value> {
+    if p.get("active_only").is_some_and(|v| !v.is_boolean() && !v.is_null()) {
+        return Err(bad("appearance.list", "`active_only` must be a boolean"));
+    }
+    let active_only = bool_(p, "active_only").unwrap_or(false);
+    let st = s.model.state();
+    let live_bodies: std::collections::BTreeSet<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
+    let live_components: std::collections::BTreeSet<u64> = s.doc.components.iter().map(|c| c.id).collect();
     let a = &s.doc.appearances;
+    let inactive_bodies: Vec<String> = a
+        .bodies
+        .keys()
+        .chain(a.faces.iter().map(|f| &f.body))
+        .filter(|name| !live_bodies.contains(name.as_str()))
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let include_body = |name: &str| !active_only || live_bodies.contains(name);
+    let include_component = |id: u64| !active_only || live_components.contains(&id);
     // "In this design": each look used, with where.
     type Used = Vec<(solidcraft_doc::appearance::Look, Vec<String>, Vec<FaceSpot>, Vec<u64>)>;
     let mut used: Used = Vec::new();
@@ -1324,19 +1358,19 @@ fn appearance_list(s: &mut Session, p: &Value) -> Result<Value> {
             }
         }
     }
-    for (b, l) in &a.bodies {
+    for (b, l) in a.bodies.iter().filter(|&(b, _)| include_body(b)) {
         let i = slot(&mut used, l);
         if let Some(u) = used.get_mut(i) {
             u.1.push(b.clone());
         }
     }
-    for f in &a.faces {
+    for f in a.faces.iter().filter(|f| include_body(&f.body)) {
         let i = slot(&mut used, &f.look);
         if let Some(u) = used.get_mut(i) {
             u.2.push(FaceSpot { body: f.body.clone(), point: [f.point.x, f.point.y, f.point.z] });
         }
     }
-    for (c, l) in &a.components {
+    for (c, l) in a.components.iter().filter(|&(c, _)| include_component(*c)) {
         let i = slot(&mut used, l);
         if let Some(u) = used.get_mut(i) {
             u.3.push(*c);
@@ -1346,18 +1380,24 @@ fn appearance_list(s: &mut Session, p: &Value) -> Result<Value> {
         used.into_iter().map(|(l, bodies, faces, components)| LookInDesign { look: LookReply::from(&l), bodies, faces, components }).collect();
     let mut out = AppearanceListResult {
         in_design,
-        bodies: a.bodies.iter().map(|(b, l)| (b.clone(), LookReply::from(l))).collect(),
+        bodies: a.bodies.iter().filter(|&(b, _)| include_body(b)).map(|(b, l)| (b.clone(), LookReply::from(l))).collect(),
         faces: a
             .faces
             .iter()
+            .filter(|f| include_body(&f.body))
             .map(|f| FaceLookReply { body: f.body.clone(), point: [f.point.x, f.point.y, f.point.z], appearance: LookReply::from(&f.look) })
             .collect(),
-        components: a.components.iter().map(|(c, l)| ComponentLookReply { component: *c, appearance: LookReply::from(l) }).collect(),
+        components: a
+            .components
+            .iter()
+            .filter(|&(c, _)| include_component(*c))
+            .map(|(c, l)| ComponentLookReply { component: *c, appearance: LookReply::from(l) })
+            .collect(),
+        inactive_bodies,
         body: None,
         param_warnings: Vec::new(),
     };
     if let Some(name) = str_(p, "body") {
-        let st = s.model.state();
         // A placed copy's name (`KB (K:2)`) means the body it shows, as appearance.assign takes
         // it (#9740): the reply names that body.
         let own = s.own_body_name(name);

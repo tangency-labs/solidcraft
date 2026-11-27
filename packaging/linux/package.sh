@@ -66,6 +66,8 @@ install -Dm755 "$BIN/solidcraft" "$STAGE/usr/bin/solidcraft"
 install -Dm755 "$BIN/solidcraft-cli" "$STAGE/usr/bin/solidcraft-cli"
 strip "$STAGE/usr/bin/solidcraft" "$STAGE/usr/bin/solidcraft-cli" 2>/dev/null || true
 install -Dm644 "$ROOT/assets/platforms/linux/$APP_ID.desktop" "$STAGE/usr/share/applications/$APP_ID.desktop"
+# solidcraft:// links: a hidden entry of their own, so the visible one opens files as it always has.
+install -Dm644 "$ROOT/assets/platforms/linux/$APP_ID.workshop-links.desktop" "$STAGE/usr/share/applications/$APP_ID.workshop-links.desktop"
 install -Dm644 "$ROOT/assets/platforms/linux/$APP_ID.mime.xml" "$STAGE/usr/share/mime/packages/$APP_ID.xml"
 mkdir -p "$STAGE/usr/share/metainfo"
 sed -e "s/@VERSION@/$VERSION/g" -e "s/@DATE@/$SOLIDCRAFT_BUILD_DATE/g" \
@@ -77,7 +79,7 @@ mkdir -p "$STAGE/usr/share/doc/solidcraft"
 copy_docs "$STAGE/usr/share/doc/solidcraft"
 
 if command -v desktop-file-validate >/dev/null; then
-  desktop-file-validate "$STAGE/usr/share/applications/$APP_ID.desktop"
+  desktop-file-validate "$STAGE/usr/share/applications/$APP_ID.desktop" "$STAGE/usr/share/applications/$APP_ID.workshop-links.desktop"
 fi
 if command -v appstreamcli >/dev/null; then
   appstreamcli validate --no-net --explain "$STAGE/usr/share/metainfo/$APP_ID.metainfo.xml"

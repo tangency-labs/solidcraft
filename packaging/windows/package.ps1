@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Produces, in $env:DIST (default: dist/release):
-    solidcraft-<version>-windows-<arch>.msi            per-machine installer (WiX v5)
+    solidcraft-<version>-windows-<arch>.msi            installer (WiX v5): all users, or just for me
     solidcraft-<version>-windows-<arch>-portable.zip   solidcraft.exe + solidcraft-cli.exe + licences
     SolidCraft-<version>-windows-<arch>.exe            the app alone (x64 only: a plain download)
     solidcraft-<version>-windows-policy-templates.zip  solidcraft.admx + en-US/solidcraft.adml for
@@ -62,6 +62,8 @@ if (-not $Version) {
 if (-not $Version) { throw 'could not read [workspace.package] version from Cargo.toml' }
 # MSI ProductVersion is numeric (major.minor.build); pre-release tags are dropped there.
 $MsiVersion = ($Version -split '-')[0]
+# The same, each part zero-padded, so the installer can compare versions as strings.
+$SortableVersion = (($MsiVersion -split '\.') | ForEach-Object { $_.PadLeft(5, '0') }) -join '.'
 
 $Target = switch ($Arch) { 'x64' { 'x86_64-pc-windows-msvc' } 'x86' { 'i686-pc-windows-msvc' } 'arm64' { 'aarch64-pc-windows-msvc' } }
 $Dist = if ($env:DIST) { $env:DIST } else { Join-Path $Root 'dist\release' }
@@ -144,7 +146,7 @@ Invoke-Native 'wix build' {
   wix build (Join-Path $Root 'assets/platforms/windows/solidcraft.wxs') -arch $Arch `
     -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
     -culture en-US -loc (Join-Path $Root 'assets/platforms/windows/solidcraft.en-us.wxl') `
-    -d "Version=$MsiVersion" -d "DisplayVersion=$Version" -d "BinDir=$Stage" -d "IconPath=$Icon" `
+    -d "Version=$MsiVersion" -d "DisplayVersion=$Version" -d "SortableVersion=$SortableVersion" -d "BinDir=$Stage" -d "IconPath=$Icon" `
     -o $Msi
 }
 Invoke-Native 'MSI shortcut icon validation (ICE50)' {
@@ -207,6 +209,18 @@ if ($Arch -eq 'x64' -and -not $PortableOnly) {
   if (($entries -join '|') -cne ($Names -join '|')) { throw "$Templates holds $($entries -join ', '), expected $($Names -join ', ')" }
   Write-Output "ok $(Split-Path -Leaf $Templates): $($entries -join ', ')"
   $Outputs += $Templates
+}
+
+# The CLI runs where the machine can run its build: an x64 machine runs x64 and x86, an Arm64 one
+# (Windows 11's emulation) all three. A machine whose architecture can't be read fails the job
+# rather than skip the check (#22444).
+$HostArch = "$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)".ToLowerInvariant()
+if (-not $HostArch) { $HostArch = "$env:PROCESSOR_ARCHITECTURE".ToLowerInvariant() -replace '^amd64$', 'x64' }
+$CanRun = switch ($HostArch) {
+  'arm64' { $true }
+  'x64' { $Arch -ne 'arm64' }
+  'x86' { $Arch -eq 'x86' }
+  default { throw "cannot tell this machine's architecture ('$HostArch'), so cannot decide whether to run solidcraft-cli --version" }
 }
 
 if ($CanRun) {

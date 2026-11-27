@@ -129,7 +129,7 @@ pub(super) fn groups(
                 Some(Ok(shown)) => shown,
                 Some(Err(why)) => return Err(bad(CMD, format!("cannot scan shown bodies: {}", why.name()))),
             };
-            let (edges, candidates) = scan(&shown.of_view(&view), &view)?;
+            let (edges, candidates) = scan(&shown.of_view(&drawing_view::DrawnView::new(s, view.clone())), &view)?;
             let resolved = resolve_exclusions(&s.doc, &s.model, &rule.exclude).map_err(|e| bad(CMD, e.to_string()))?;
             let by_index: BTreeMap<_, _> = edges
                 .iter()
@@ -228,7 +228,7 @@ pub(super) fn candidates(s: &Session, id: u64) -> Result<Vec<MarkCandidate>> {
         Err(Unmeasured::NoBodies) => return Ok(Vec::new()),
         Err(why) => return Err(bad(CMD, format!("cannot scan shown bodies: {}", why.name()))),
     };
-    scan(&shown.of_view(&view), &view).map(|(_, marks)| marks)
+    scan(&shown.of_view(&drawing_view::DrawnView::new(s, view.clone())), &view).map(|(_, marks)| marks)
 }
 
 fn scan(shown: &ShownSet, view: &ResolvedView) -> Result<(Vec<CircularEdge>, Vec<MarkCandidate>)> {
@@ -256,7 +256,7 @@ pub(super) fn group(id: u64, centre: Vec2, radius: f64, overshoot: f64) -> Resul
 
 fn stroke(line: solidcore_record::Seg2) -> Item {
     let (a, b) = (line.start(), line.end());
-    let length = solidcraft_kernel::services::paper_gaps::straight_length([a.x, a.y], [b.x, b.y]);
+    let length = solidcraft_kernel::planar::straight_length([a.x, a.y], [b.x, b.y]);
     let long = 3.6;
     let lengths_mm = vec![long, 0.54, 0.18, 0.54];
     let period = lengths_mm.iter().sum();
