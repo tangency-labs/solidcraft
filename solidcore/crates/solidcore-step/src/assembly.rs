@@ -2652,9 +2652,11 @@ pub(crate) fn pcurve_box(pcs: &[Vec<Curve2>]) -> [[f64; 2]; 2] {
 /// one use has no neighbour: those stay. The miss counts only the uses beside it that end on the
 /// seam, and a use with none stays: in a loop lifted past the seam, whose next use starts a turn
 /// back (as at a sphere's pole), that jump is no rounding, and put on the seam the use would lie
-/// a quarter turn from its edge. A B-spline is a convex combination of its control points, so
-/// the pcurve then lies on the range, and moves by no more than its points did; the gap to the
-/// edge is measured and covered (`raise_edges`). The number of uses moved.
+/// a quarter turn from its edge. The miss is taken around the period, the seam's two sides being
+/// one place: a use from one side beside a use ending on the other misses it by nothing. A
+/// B-spline is a convex combination of its control points, so the pcurve then lies on the range,
+/// and moves by no more than its points did; the gap to the edge is measured and covered
+/// (`raise_edges`). The number of uses moved.
 pub(crate) fn onto_seam(surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], pcs: &mut [Vec<Curve2>]) -> usize {
     let Ok(on) = SurfaceEval::new(surface) else { return 0 };
     let domain = on.domain();
@@ -2690,14 +2692,20 @@ pub(crate) fn onto_seam(surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], pcs
                 else {
                     continue;
                 };
-                // How far it misses the uses beside it that end on the seam, at its vertices; none
+                // How far it misses the uses beside it that end on the seam, at its vertices, as
+                // points on the surface (the seam's two sides, `lo` and `hi`, are one place, so a
+                // use from `hi` beside one ending at `lo` misses it by nothing, not a turn); none
                 // of them on the seam, it stays.
                 let at = |q: &[f64; 2]| q.get(d).copied().unwrap_or(f64::NAN);
                 let on_end = |x: f64| (x - lo).abs() <= round || (x - hi).abs() <= round;
+                let apart = |a: f64, b: f64| {
+                    let r = (a - b).rem_euclid(*period);
+                    r.min(*period - r)
+                };
                 let misses: Vec<f64> = [(at(start), at(prev_end)), (at(end), at(next_start))]
                     .into_iter()
                     .filter(|&(_, beside)| on_end(beside))
-                    .map(|(own, beside)| (own - beside).abs())
+                    .map(|(own, beside)| apart(own, beside))
                     .collect();
                 if misses.is_empty() {
                     continue;
