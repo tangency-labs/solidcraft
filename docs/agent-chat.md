@@ -254,6 +254,8 @@ doesn't change the last known login state.
 | GitHub Copilot CLI, Qwen Code, goose | listed with their install command when missing |
 
 The panel lists agents that aren't installed with their install command and a **Copy** button.
+To copy an installation command during an active chat, open **Add agent…**, choose
+**Installed agent**, and expand **Not installed**.
 
 For Mistral Vibe, put `vibe-acp` on your PATH and refresh the agent list. Follow Vibe's sign-in
 prompt, run `vibe --setup` in a terminal, or set `MISTRAL_API_KEY` before launching SolidCraft.

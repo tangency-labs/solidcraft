@@ -1872,21 +1872,29 @@ fn agent_list(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     if sandbox_hint {
         no_agents(ui);
     }
-    let missing: Vec<discover::Missing> = if snap() { Vec::new() } else { chat.detection.as_ref().map(|d| d.missing.clone()).unwrap_or_default() };
-    if !missing.is_empty() {
-        let heading = if all.is_empty() && !sandbox_hint { tr("ui.agent_chat_none_found") } else { tr("ui.agent_chat_not_installed") };
-        ui_kit::section(ui, "sc_agent_missing", heading, all.is_empty(), |ui| {
-            for m in missing {
-                ui.horizontal(|ui| {
-                    ui_kit::text(ui, m.name, ui_kit::Text::Inline);
-                    if ui_kit::button(ui, tr("ui.agent_chat_copy"), ui_kit::Button::Small).backing_on_hover_text(m.install).clicked() {
-                        ui.ctx().copy_text(m.install.to_string());
-                    }
-                });
-                ui_kit::text(ui, m.install, ui_kit::Text::Report(m.name, false));
-            }
-        });
+    let heading = if all.is_empty() && !sandbox_hint { tr("ui.agent_chat_none_found") } else { tr("ui.agent_chat_not_installed") };
+    missing_agents(ui, "sc_agent_missing", heading, all.is_empty(), chat.detection.as_ref());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn missing_agents(ui: &mut egui::Ui, id: &str, heading: &str, default_open: bool, detection: Option<&discover::Detection>) {
+    let Some(detection) = detection else { return };
+    if snap() || detection.missing.is_empty() {
+        return;
     }
+    ui_kit::section(ui, id, heading, default_open, |ui| {
+        for agent in &detection.missing {
+            ui.horizontal(|ui| {
+                ui_kit::text(ui, agent.name, ui_kit::Text::Inline);
+                let copy = ui_kit::button(ui, tr("ui.agent_chat_copy"), ui_kit::Button::Small).backing_on_hover_text(agent.install);
+                solidcraft_ui_registry::publish_handle(&format!("{id}:copy:{}", agent.id), copy.rect.center());
+                if copy.clicked() {
+                    ui.ctx().copy_text(agent.install.to_string());
+                }
+            });
+            ui_kit::text(ui, agent.install, ui_kit::Text::Report(agent.name, false));
+        }
+    });
 }
 
 #[cfg(not(target_arch = "wasm32"))]

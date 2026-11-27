@@ -6047,6 +6047,58 @@ fn shared_assistant_harness() -> (crate::scenario::Harness, Script) {
     (h, script)
 }
 
+#[test]
+fn add_agent_copies_an_install_command_without_interrupting_the_chat() {
+    use solidcraft_ui_registry::handle_at;
+
+    const INSTALL: &str = "npm install -g @agentclientprotocol/codex-acp";
+    let (mut h, script) = shared_assistant_harness();
+    h.app.agent_chat.running_id = "claude".into();
+    h.app.agent_chat.agent_id = Some("claude".into());
+    h.app.agent_chat.picking = Some(false);
+    h.app.agent_chat.detection = Some(discover::Detection {
+        found: vec![discover::Found {
+            id: "claude",
+            name: "Claude Code",
+            argv: vec!["claude-agent-acp".into()],
+            version: Some("1.0".into()),
+            login: discover::Login::Unknown,
+            problem: None,
+            install: "",
+        }],
+        missing: vec![discover::Missing { id: "codex", name: "Codex", install: INSTALL }],
+        ..Default::default()
+    });
+    h.frames(3);
+
+    let switcher = handle_at("agent_chat:switcher").expect("the connected agent switcher");
+    click_at(&mut h, switcher, egui::PointerButton::Primary);
+    h.frames(2);
+    let add = handle_at("dialog:list:add").expect("Add agent in the switcher");
+    click_at(&mut h, add, egui::PointerButton::Primary);
+    h.frames(3);
+    assert!(h.app.agent_chat.settings.add.is_some(), "the switcher opens Add agent");
+
+    let missing = handle_at("dialog:section:Not installed").expect("Add agent lists installation instructions");
+    click_at(&mut h, missing, egui::PointerButton::Primary);
+    h.frames(3);
+    assert!(h.widget(INSTALL).is_some(), "the complete Codex installation command is visible");
+    let copy = handle_at("sc_ai_add_missing:copy:codex").expect("the Codex Copy button");
+    click_at(&mut h, copy, egui::PointerButton::Primary);
+    assert_eq!(copied_text(&h).as_deref(), Some(INSTALL));
+
+    let cancel = handle_at("dialog:cancel").expect("the Add agent Cancel button");
+    click_at(&mut h, cancel, egui::PointerButton::Primary);
+    h.frames(2);
+    assert!(h.app.agent_chat.settings.add.is_none());
+    assert_eq!(h.app.agent_chat.state(), State::Ready);
+    assert_eq!(h.app.agent_chat.running_id, "claude");
+    assert!(h.app.agent_chat.backend.is_some());
+    assert!(matches!(h.app.agent_chat.items.as_slice(), [Item::Agent { text, .. }] if text == "A retained conversation"));
+    assert_eq!(h.app.agent_chat.input, "Retained responsive composer draft");
+    assert!(script.calls().is_empty(), "no action was sent to the current agent");
+}
+
 fn shared_assistant_float(h: &mut crate::scenario::Harness, width: f32, height: f32) {
     use solidcraft_engine::panels::{Destination, InstanceId, LayoutAction, Mutation, Point, SectionId, SectionLocation, Size};
     let instance = InstanceId::new("assistant").unwrap();
