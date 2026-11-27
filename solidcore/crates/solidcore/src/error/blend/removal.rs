@@ -16,6 +16,13 @@ use crate::error::{ErrorKind, SM_ERR, SM_ERR_NULL_POINTER};
 pub enum RemovalRefusal {
     /// Two adjacent edges of the fillet face are both tangent.
     AdjacentEdgesTangent,
+    /// A ring chamfer's neighbours are not a plane, cylinder or cone about one axis.
+    ChamferNeighboursNotCoaxial,
+    /// No tangent edge, and both opposite pairs run where the faces across them meet.
+    ChamferSidesAmbiguous,
+    /// No tangent edge, and an edge is not straight or a face across one is not a plane, so
+    /// which pair are the chamfer's sides is not decided.
+    ChamferSidesUndecided,
     /// A corner of more than three edges keeps its end edge, which would need a fitted
     /// intersection to run on to the new corner.
     CornerNeedsFittedIntersection,
@@ -35,7 +42,7 @@ pub enum RemovalRefusal {
     FaceGrowsPastDomain,
     /// The ring fillet has more than two rails.
     MoreThanTwoRails,
-    /// Neither of the fillet face's first two edges is tangent.
+    /// No tangent edge, and no opposite pair runs where the faces across it meet.
     NoTangentEdge,
     /// The face is not a ring fillet.
     NotARing,
@@ -88,6 +95,9 @@ pub const fn removal_class(reason: RemovalRefusal) -> ErrorKind {
     use RemovalRefusal as R;
     match reason {
         R::AdjacentEdgesTangent => ErrorKind::NotARemovableFillet,
+        R::ChamferNeighboursNotCoaxial => ErrorKind::NotARemovableFillet,
+        R::ChamferSidesAmbiguous => ErrorKind::NotARemovableFillet,
+        R::ChamferSidesUndecided => ErrorKind::NotARemovableFillet,
         R::CornerNeedsFittedIntersection => ErrorKind::RemovalNotExact,
         R::CornerOffSideLine => ErrorKind::RemovalNotExact,
         R::EdgeNotBetweenTwoFaces => ErrorKind::NotARemovableFillet,

@@ -7,6 +7,7 @@
 //! ([`faces_back`]), and where a polyline leaves a plane ([`plane_departures`]): a closed guide
 //! rail is opened where it leaves the first section.
 
+use crate::geom::geom_utility::p1::{determinant_3_vectors, intersect_three_planes};
 use crate::geom::vector3d::Vec3;
 
 /// How far from parallel two unit normals may be for their planes to be square to each other:
@@ -106,9 +107,46 @@ pub fn plane_departures(
         .collect()
 }
 
+/// The triple product of three unit normals under which their planes share a line (or two
+/// are parallel) instead of meeting in one point.
+const DEPENDENT: f64 = 1.0e-9;
+
+/// Where the planes `n · x = d` of `planes` (unit normals) meet: one point when the normals'
+/// triple product is at least [`DEPENDENT`] ([`intersect_three_planes`]), else `None`. Delete
+/// Face's corner across a gap, where three neighbours' planes meet.
+#[must_use]
+pub fn three_planes_meet(planes: [(Vec3, f64); 3]) -> Option<Vec3> {
+    let [(a, da), (b, db), (c, dc)] = planes;
+    if determinant_3_vectors(a, b, c).abs() < DEPENDENT {
+        return None;
+    }
+    intersect_three_planes(a * da, a, b * db, b, c * dc, c)
+        .ok()
+        .filter(|x| x.x.is_finite() && x.y.is_finite() && x.z.is_finite())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn three_planes_meet_at_a_box_corner_and_not_along_a_ridge() {
+        let (x, y, z) = (
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+        );
+        assert_eq!(
+            three_planes_meet([(x, 2.0), (y, 3.0), (z, 4.0)]),
+            Some(Vec3::new(2.0, 3.0, 4.0))
+        );
+        // Three planes through the z axis share it: no corner.
+        let s = 0.5_f64.sqrt();
+        assert_eq!(
+            three_planes_meet([(x, 0.0), (y, 0.0), (Vec3::new(s, s, 0.0), 0.0)]),
+            None
+        );
+    }
 
     #[test]
     fn a_section_faces_back_when_its_normal_and_the_one_before_part_along_the_step() {

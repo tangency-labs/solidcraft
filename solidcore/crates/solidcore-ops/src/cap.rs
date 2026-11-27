@@ -8,7 +8,9 @@
 //! the face's surface and inside its trim by the kernel's
 //! [`solidcore::topology::face::curve_on::curve_lies_on_face`] (#16713).
 
-use solidcore::geom::plane_height::{is_face_on_plane_at, is_point_at, is_square_plane_at};
+use solidcore::geom::plane_height::{
+    is_face_on_plane_at, is_point_at, is_square_plane_at, three_planes_meet,
+};
 use solidcore::geom::vector3d::Vec3;
 use solidcore::topology::face::curve_on::curve_lies_on_face;
 
@@ -48,6 +50,13 @@ pub fn is_square_plane_at_height(
 #[must_use]
 pub fn is_point_on_plane(point: [f64; 3], normal: [f64; 3], height: f64, tol: f64) -> bool {
     is_point_at(vec(point), vec(normal), height, tol)
+}
+
+/// Where the planes `normal · x = height` of `planes` (unit normals) meet, when in one point
+/// (the kernel's [`three_planes_meet`]).
+#[must_use]
+pub fn three_planes_point(planes: [([f64; 3], f64); 3]) -> Option<[f64; 3]> {
+    three_planes_meet(planes.map(|(n, d)| (vec(n), d))).map(|p| [p.x, p.y, p.z])
 }
 
 /// Whether a planar face with unit normal `face_normal` and boundary corners `corners` lies on
