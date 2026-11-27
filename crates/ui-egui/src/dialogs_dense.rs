@@ -512,6 +512,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
     if crate::hole_refs::takes(d) {
         // Each reference edge with its distance (#37, #6380).
         enter |= crate::hole_refs::input_rows(d, ui, &app.session, app.preferences.origin_plane_names, app.preferences.length_decimals);
+    } else if matches!(d.kind, Kind::Extrude { .. }) {
+        // Target Bodies is the final input, but belongs beside Operation in the form.
+        let end = d.inputs.iter().position(|i| i.label == EXTRUDE_TARGETS).unwrap_or(d.inputs.len());
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..end);
+        crate::command_sketch::offer_row(app, d, ui);
     } else if matches!(d.kind, Kind::PatternRect { .. }) {
         // Each direction's pick shows in its own group, with its quantity and spacing (#9634).
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..1);
@@ -651,27 +656,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         Kind::EditParam { name, expr } => {
             enter |= ui_kit::row(ui, name, |ui| ui_kit::focused_field(ui, expr));
         }
-        Kind::Extrude {
-            distance,
-            direction,
-            operation,
-            auto_op,
-            smart,
-            distance2,
-            taper,
-            taper_present,
-            to_offset,
-            start,
-            offset_start,
-            symmetric_offset,
-            all,
-            all2,
-            to_offset2,
-            thin,
-            wall,
-            wall_side,
-            wall2,
-        } => {
+        Kind::Extrude { distance, direction, operation, auto_op, smart, distance2, to_offset, all, all2, to_offset2, .. } => {
             // The feature's name (#18668): what it is called, or will be. Blank is the default name.
             let mut name = d.extra.get("name").and_then(Value::as_str).unwrap_or_default().to_string();
             let before = name.clone();
@@ -758,6 +743,28 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if d.inputs.iter().any(|i| i.label == EXTRUDE_TARGETS && !i.items.is_empty()) {
                 *auto_op = false;
             }
+            if let Some(index) = d.inputs.iter().position(|i| i.label == EXTRUDE_TARGETS) {
+                input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, index..index + 1);
+            }
+            // Reborrow the settings after the picker has had access to the full dialog.
+            let Kind::Extrude {
+                direction,
+                auto_op,
+                smart,
+                taper,
+                taper_present,
+                start,
+                offset_start,
+                symmetric_offset,
+                thin,
+                wall,
+                wall_side,
+                wall2,
+                ..
+            } = &mut d.kind
+            else {
+                return enter;
+            };
             ui_kit::section(ui, "extrude_options", "Options", true, |ui| {
                 let was_thin = *thin;
                 let was_direction = *direction;

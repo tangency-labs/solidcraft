@@ -582,6 +582,35 @@ fn representative(h: &Harness, command: &str) -> Dialog {
     d
 }
 
+#[test]
+fn extrude_target_bodies_follow_operation_in_the_form() {
+    for operation in [1, 2] {
+        let mut h = fixture();
+        let mut d = representative(&h, "solid.extrude");
+        if let Kind::Extrude { operation: op, auto_op, .. } = &mut d.kind {
+            *op = operation;
+            *auto_op = false;
+        }
+        super::set_extrude_targets(&mut d.inputs, &mut d.active, &mut d.extra, operation);
+        for _ in 0..2 {
+            scenario::clear_handles();
+            let mut out = h.ctx.run_ui(
+                egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(320.0, 1600.0))), ..Default::default() },
+                |ui| {
+                    ui_kit::scope(ui, |ui| {
+                        rows(&mut h.app, &h.ctx, &mut d, ui);
+                    });
+                },
+            );
+            out.textures_delta.clear();
+        }
+        let op = scenario::rect_of("dialog:row:Operation").unwrap();
+        let targets = scenario::rect_of("dialog:row:Target Bodies").unwrap();
+        assert!(targets.top() >= op.bottom(), "the target picker follows Operation");
+        assert!(targets.top() - op.bottom() < Tokens::get().control_height, "the rows are adjacent");
+    }
+}
+
 fn check_form(command: &str, labels: &[&str]) {
     check_form_with(command, labels, &[], |_| {});
 }
