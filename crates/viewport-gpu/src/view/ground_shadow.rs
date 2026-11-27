@@ -300,7 +300,7 @@ impl Resources {
                             src: level.src.clone(),
                             flat: level.flat,
                             error: 0.0,
-                            instances: Some(instances),
+                            instances,
                             count: u32::try_from(draw.placements.len() / super::INSTANCE_SIZE).unwrap_or(u32::MAX),
                         })
                     })

@@ -21,7 +21,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 
-use super::{INSTANCE_SIZE, InstanceLook, InstancedDraw, LOD_PX, edges, indirect};
+use super::{EDGE_PX, INSTANCE_SIZE, InstanceLook, InstancedDraw, LOD_PX, edges, indirect};
 
 const SHADER: &str = include_str!("cull.wgsl");
 /// Words of a placement ([`INSTANCE_SIZE`] bytes).
@@ -128,15 +128,6 @@ const COPIED: u8 = 1;
 const MAPPING: u8 = 2;
 const MAPPED: u8 = 3;
 
-/// Key for the view the placements were last culled for: view-projection matrix, viewport size,
-/// edge tolerance bits (`edge_px.to_bits()`), whether a depth pyramid was bound, and any hovered
-/// placement index.
-type CullKey = ([[f32; 4]; 4], [f32; 2], u32, bool, Option<u32>);
-
-fn cull_key(vp: &[[f32; 4]; 4], size: [f32; 2], edge_px: f32, has_hiz: bool, hover: Option<u32>) -> CullKey {
-    (*vp, size, edge_px.to_bits(), has_hiz, hover)
-}
-
 /// First indirect triangle entry index for each `(draw, level)`, in O(D * L) time.
 fn tri_entry_table(draw_levels: &[usize], tri_entries: &[(usize, usize, u32, u32, i32)]) -> Vec<Vec<Option<usize>>> {
     let mut table: Vec<Vec<Option<usize>>> = draw_levels.iter().map(|&len| vec![None; len]).collect();
@@ -187,7 +178,7 @@ pub(super) struct GpuCull {
     /// The shader's `View` after its matrix and size.
     words: [u32; 8],
     /// The view the placements were last culled for.
-    culled_for: Option<CullKey>,
+    culled_for: Option<([[f32; 4]; 4], [f32; 2], bool, Option<u32>)>,
     /// The device's workgroups per dispatch dimension.
     max_groups: u32,
     readback: wgpu::Buffer,
@@ -416,12 +407,11 @@ impl GpuCull {
         draw.look == InstanceLook::Opaque
     }
 
-    /// Cull for the view `vp` of `size` pixels (and edge tolerance `edge_px`), in `encoder`
-    /// (before the frame's passes): again only when the view, edge tolerance, hover, or
-    /// `cpu_changed` (the see-through placements the CPU culled, in `draws`' `shown`) changed.
-    /// With `hidden` (the last frame's depth pyramid, and whether the depth buffer is 1 at the
-    /// near plane), also leaves out the placements it hides. Takes the statistics of an earlier
-    /// cull that have come back into `indirect` and `edges`.
+    /// Cull for the view `vp` of `size` pixels, in `encoder` (before the frame's passes):
+    /// again only when the view changed or `cpu_changed` (the see-through placements the CPU
+    /// culled, in `draws`' `shown`). With `hidden` (the last frame's depth pyramid, and whether
+    /// the depth buffer is 1 at the near plane), also leaves out the placements it hides. Takes
+    /// the statistics of an earlier cull that have come back into `indirect` and `edges`.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn run(
         &mut self,
@@ -430,7 +420,6 @@ impl GpuCull {
         encoder: &mut wgpu::CommandEncoder,
         vp: &[[f32; 4]; 4],
         size: [f32; 2],
-        edge_px: f32,
         hidden: Option<(&super::hiz::Hiz, bool)>,
         cpu_changed: bool,
         draws: &[InstancedDraw],
@@ -440,9 +429,8 @@ impl GpuCull {
     ) {
         self.collect(indirect, edges);
         // Against a pyramid, each frame (it changes with every frame drawn); without one, again
-        // only for another view, edge tolerance, hover, or after a cull that left out hidden
-        // placements.
-        let key = cull_key(vp, size, edge_px, hidden.is_some(), hover);
+        // only for another view, or after a cull that left out hidden placements.
+        let key = (*vp, size, hidden.is_some(), hover);
         if !cpu_changed && hidden.is_none() && self.culled_for == Some(key) {
             // A cull whose statistics could not be copied while the readback was busy: copy them
             // now that it is free (a cull below would overwrite its arguments).
@@ -485,7 +473,7 @@ impl GpuCull {
         for column in vp {
             view.extend(column.iter().flat_map(|x| x.to_le_bytes()));
         }
-        for x in [size[0], size[1], LOD_PX, edge_px] {
+        for x in [size[0], size[1], LOD_PX, EDGE_PX] {
             view.extend(x.to_le_bytes());
         }
         view.extend(self.words.iter().flat_map(|w| w.to_le_bytes()));
@@ -617,23 +605,6 @@ mod tests {
         assert!(hidden_by_depth(0.80, 0.20, 0.01));
         // Within the depth buffer's own resolution: the same surface, not one behind another.
         assert!(!hidden_by_depth(0.500_000_5, 0.5, 0.0));
-    }
-
-    /// `GpuCull::culled_for` differentiates still (`EDGE_PX`) and moving (`EDGE_PX_MOVING`) edge
-    /// tolerances, so transitioning between orbiting and resting re-runs the compute cull instead
-    /// of reusing stale coarse/fine edge arguments.
-    #[test]
-    fn culled_for_key_differentiates_edge_px_tolerances() {
-        use super::cull_key;
-        use crate::view::{EDGE_PX, EDGE_PX_MOVING};
-        let vp = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, -1.0, -1.0], [0.0, 0.0, -1.0, 0.0]];
-        let size = [1280.0, 720.0];
-        let still = cull_key(&vp, size, EDGE_PX, false, None);
-        let moving = cull_key(&vp, size, EDGE_PX_MOVING, false, None);
-        assert_ne!(still, moving, "EDGE_PX and EDGE_PX_MOVING must produce distinct cull keys");
-        assert_eq!(still, cull_key(&vp, size, EDGE_PX, false, None), "identical inputs produce identical keys");
-        assert_ne!(still, cull_key(&vp, size, EDGE_PX, true, None), "depth pyramid flag differentiates keys");
-        assert_ne!(still, cull_key(&vp, size, EDGE_PX, false, Some(0)), "hover placement differentiates keys");
     }
 
     /// The O(D * L) triangle and edge lookup tables built in `GpuCull::new` match the previous
@@ -800,37 +771,6 @@ mod tests {
             levels_drawn[level] += usize::from(count > 0);
         }
         assert!(levels_drawn.iter().all(|n| *n > 0), "every level drawn: {levels_drawn:?}");
-        // Switching to the moving edge tolerance (`EDGE_PX_MOVING`) re-runs the GPU cull and picks
-        // the exact same coarser edge levels as the CPU cull.
-        {
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-            gpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX_MOVING, None, None);
-            cpu.cull(&device, &queue, &mut encoder, &vp, size, &motions, crate::view::EDGE_PX_MOVING, None, None);
-            queue.submit([encoder.finish()]);
-            let g = gpu.gpu_cull.as_ref().expect("the GPU culls the scene");
-            let args = read(&g.args);
-            let out = read(&gpu.indirect.as_ref().unwrap().instances().unwrap());
-            let edge_args_at = g.words[5] as usize;
-            let half = out.len() / 2;
-            for (n, (part, level, ..)) in gpu.edges.as_ref().unwrap().entry_list().into_iter().enumerate() {
-                let (count, first) = (word(&args, edge_args_at + n * 4 + 1), word(&args, edge_args_at + n * 4 + 3));
-                let mut got: Vec<Vec<u8>> = (first..first + count)
-                    .map(|k| out[half + k as usize * INSTANCE_SIZE..half + (k as usize + 1) * INSTANCE_SIZE].to_vec())
-                    .collect();
-                got.sort();
-                let d = &cpu.instanced[part];
-                let mut want: Vec<Vec<u8>> = d
-                    .edges_shown
-                    .as_ref()
-                    .expect("culled on the CPU")
-                    .iter()
-                    .filter(|(_, l)| usize::from(*l) == level)
-                    .map(|(i, _)| d.placements[*i as usize * INSTANCE_SIZE..(*i as usize + 1) * INSTANCE_SIZE].to_vec())
-                    .collect();
-                want.sort();
-                assert_eq!(got, want, "the moving edges of part {part}, level {level}");
-            }
-        }
         // A whole-body hover flags its one placement's palette word in what each cull writes,
         // on the GPU and on the CPU alike, and the flag goes when the hover does.
         let row = cpu.instanced[0].shown.as_ref().and_then(|s| s.first()).map(|(i, _)| *i).expect("a placement in view");

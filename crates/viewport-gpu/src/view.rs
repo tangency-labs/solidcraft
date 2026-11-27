@@ -2005,10 +2005,8 @@ struct LevelDraw {
     flat: bool,
     /// How far it strays from the full triangles (mm; 0 for them).
     error: f32,
-    /// The placements drawn from it, first `count` of them ([`Batches::cull`]). `None` while
-    /// batched through [`indirect::Indirect`], which draws from its own unified instance buffer;
-    /// allocated lazily if a non-batched fallback draws it directly.
-    instances: Option<wgpu::Buffer>,
+    /// The placements drawn from it, first `count` of them ([`Batches::cull`]).
+    instances: wgpu::Buffer,
     count: u32,
 }
 
@@ -2073,10 +2071,7 @@ impl LevelDraw {
         if self.count == 0 {
             return;
         }
-        let Some(instances) = &self.instances else {
-            return;
-        };
-        pass.set_vertex_buffer(1, instances.slice(..));
+        pass.set_vertex_buffer(1, self.instances.slice(..));
         match &*self.tris {
             SharedGpu::Indexed { vertices, indices, count } => {
                 pass.set_vertex_buffer(0, vertices.slice(..));
@@ -2725,26 +2720,10 @@ impl Batches {
                 None
             };
             let arena = self.arena.clone();
-            self.instanced = self.instanced(device, &sc.instanced, donor.as_deref(), arena.as_deref(), true);
+            self.instanced = self.instanced(device, &sc.instanced, donor.as_deref(), arena.as_deref());
             self.instance_rows = sc.instance_rows.clone();
             self.hover_cpu = None;
             self.indirect = arena.clone().and_then(|a| indirect::Indirect::new(device, &self.instanced, a));
-            // Any draw that indirect drawing did not batch (e.g. a mesh whose coarser level missed
-            // the arena, or a refused indirect allocation) draws from its own level buffers before
-            // the first cull: populate level 0 now; coarser levels allocate lazily in
-            // `cull_placements`.
-            for (n, d) in self.instanced.iter_mut().enumerate() {
-                if !self.indirect.as_ref().is_some_and(|x| x.batches(n))
-                    && let Some(level) = d.levels.first_mut()
-                    && level.instances.is_none()
-                    && !d.placements.is_empty()
-                {
-                    level.instances = buffer_init(device, "sc_instances", &d.placements, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST);
-                    if level.instances.is_some() {
-                        self.uploads.placements += d.placements.len() as u64;
-                    }
-                }
-            }
             // The instanced edges, and the lit ones drawn again over them, from one segment
             // buffer: a lit part's edges are the model's (this scene's, or the model scene's for
             // the highlight), uploaded once.
@@ -2780,17 +2759,17 @@ impl Batches {
             self.selected_blocks = sc.selected_blocks.clone();
             self.recoloured = sc.recoloured.clone();
             self.lit_edges = sc.lit_edges.clone();
-            self.hover_instanced = self.instanced(device, &sc.hover_instanced, donor.as_deref(), arena.as_deref(), false);
-            self.selected_instanced = self.instanced(device, &sc.selected_instanced, donor.as_deref(), arena.as_deref(), false);
+            self.hover_instanced = self.instanced(device, &sc.hover_instanced, donor.as_deref(), arena.as_deref());
+            self.selected_instanced = self.instanced(device, &sc.selected_instanced, donor.as_deref(), arena.as_deref());
             self.hover_face_instanced = if sc.hover_face_instanced.is_empty() {
                 Vec::new()
             } else {
-                self.instanced(device, &sc.hover_face_instanced, model, arena.as_deref(), false)
+                self.instanced(device, &sc.hover_face_instanced, model, arena.as_deref())
             };
             self.selected_face_instanced = if sc.selected_face_instanced.is_empty() {
                 Vec::new()
             } else {
-                self.instanced(device, &sc.selected_face_instanced, model, arena.as_deref(), false)
+                self.instanced(device, &sc.selected_face_instanced, model, arena.as_deref())
             };
             let mut kept = std::mem::take(&mut self.blocks);
             let mut order = Vec::with_capacity(sc.blocks.len());
@@ -2893,15 +2872,13 @@ impl Batches {
 
     /// The instanced meshes on the GPU: triangles drawn from `arena` where it holds them, else
     /// uploaded once per key (kept while the key comes back with the same bytes); placements
-    /// uploaded only when not deferred to [`indirect::Indirect`] (which owns its unified instance
-    /// buffer).
+    /// every time.
     fn instanced(
         &mut self,
         device: &wgpu::Device,
         meshes: &[InstancedMesh],
         donor: Option<&Batches>,
         arena: Option<&indirect::Arena>,
-        defer_instances: bool,
     ) -> Vec<InstancedDraw> {
         let mut kept = std::mem::take(&mut self.instanced_tris);
         let mut out = Vec::with_capacity(meshes.len());
@@ -2924,7 +2901,6 @@ impl Batches {
                     })
                 };
                 let in_arena = arena.and_then(|a| a.place(tris));
-                let deferred = defer_instances && in_arena.is_some();
                 let gpu = match in_arena {
                     Some(g) => (tris.clone(), Arc::new(g)),
                     None => {
@@ -2940,18 +2916,12 @@ impl Batches {
                         }
                     }
                 };
-                // Draws batched by `indirect::Indirect` (and culled by `gpu_cull`) read placements
-                // from their own unified buffer, so skip allocating a dead per-level buffer here.
-                let instances = if deferred {
-                    None
-                } else {
-                    let Some(buf) = buffer_init(device, "sc_instances", &placements, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST)
-                    else {
-                        continue;
-                    };
-                    self.uploads.placements += placements.len() as u64;
-                    Some(buf)
+                // Until the first cull, every placement is drawn in full.
+                let Some(instances) = buffer_init(device, "sc_instances", &placements, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST)
+                else {
+                    continue;
                 };
+                self.uploads.placements += placements.len() as u64;
                 let count = if i == 0 { count } else { 0 };
                 levels.push(LevelDraw { tris: gpu.1.clone(), src: tris.clone(), flat: tris.flat, error, instances, count });
                 // A mesh in the arena is drawn from there: it keeps no buffers of its own.
@@ -3078,7 +3048,7 @@ impl Batches {
             }
         }
         self.hover_cpu = on_cpu;
-        let (changed, edges_changed) = self.cull_placements(device, queue, vp, size, motions, edge_px);
+        let (changed, edges_changed) = self.cull_placements(queue, vp, size, motions, edge_px);
         // The GPU cull's scene holds every draw's placements in order: the hovered one is the
         // count before its draw plus its row.
         let hover = on_gpu.and_then(|(d, row)| {
@@ -3086,7 +3056,7 @@ impl Batches {
             u32::try_from(before + row).ok()
         });
         if let (Some(g), Some(indirect)) = (self.gpu_cull.as_mut(), self.indirect.as_mut()) {
-            g.run(device, queue, encoder, vp, size, edge_px, hidden, changed, &self.instanced, indirect, self.edges.as_mut(), hover);
+            g.run(device, queue, encoder, vp, size, hidden, changed, &self.instanced, indirect, self.edges.as_mut(), hover);
             return;
         }
         if let Some(indirect) = self.indirect.as_mut()
@@ -3115,15 +3085,7 @@ impl Batches {
     /// levels (`shown`, `edges_shown`), those not drawn indirectly written to their levels'
     /// buffers. With a GPU cull, only the draws it leaves (see-through), and no edges. Whether
     /// the placements and the edges' placements changed.
-    fn cull_placements(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        vp: &[[f32; 4]; 4],
-        size: [f32; 2],
-        motions: &Motions,
-        edge_px: f32,
-    ) -> (bool, bool) {
+    fn cull_placements(&mut self, queue: &wgpu::Queue, vp: &[[f32; 4]; 4], size: [f32; 2], motions: &Motions, edge_px: f32) -> (bool, bool) {
         let gpu = self.gpu_cull.as_ref();
         let mut changed = false;
         let f = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0.0, f32::from_le_bytes);
@@ -3205,14 +3167,7 @@ impl Batches {
                     .copied()
                     .collect();
                 if !bytes.is_empty() {
-                    if let Some(instances) = &level.instances {
-                        queue.write_buffer(instances, 0, &bytes);
-                    } else {
-                        let mut init = vec![0u8; d.placements.len()];
-                        init[..bytes.len()].copy_from_slice(&bytes);
-                        level.instances =
-                            crate::buffer_init(device, "sc_instances", &init, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST).ok();
-                    }
+                    queue.write_buffer(&level.instances, 0, &bytes);
                 }
                 level.count = u32::try_from(bytes.len() / INSTANCE_SIZE).unwrap_or(u32::MAX);
             }
@@ -3277,6 +3232,7 @@ impl Batches {
             std::hash::Hash::hash(&(Arc::as_ptr(&b.plan) as usize), &mut h);
             open = !std::hash::Hasher::finish(&h).is_multiple_of(CHUNK_SPLIT) && chunks.last().is_some_and(|c| c.len() < MAX_CHUNK_BODIES);
         }
+        // Looked up, not searched for: a large model has thousands of chunks.
         let chunk_keys: Vec<Vec<usize>> = chunks.iter().map(|c| c.iter().map(|b| Arc::as_ptr(&b.plan) as usize).collect()).collect();
         let live: std::collections::HashSet<&[usize]> = chunk_keys.iter().map(Vec::as_slice).collect();
         self.resident.retain(|k, _| live.contains(k.as_slice()));

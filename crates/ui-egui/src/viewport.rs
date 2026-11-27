@@ -12648,22 +12648,30 @@ mod tests {
         boxes.push(("Odd".into(), solidcraft_engine::geom::Aabb3 { min: Vec3::new(f64::NAN, 0.0, 0.0), max: Vec3::new(1.0, 1.0, 1.0) }));
         let tree = BodyTree::new(&boxes);
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(800., 600.));
-        for fov in [45.0, 0.0] {
+        for perspective in [true, false] {
             let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
-            app.cam.fov = fov;
+            app.ui.perspective = perspective;
+            if perspective {
+                app.preferences.perspective_fov = 45_f64.to_radians();
+            }
             app.cam.target = Vec3::ZERO;
             app.cam.distance = 60.0;
             app.cam.yaw = 0.7;
             app.cam.pitch = 0.4;
             let proj = projection(&app, rect);
+            if perspective {
+                assert!(proj.cam.fov > 0.0, "expected perspective projection");
+            } else {
+                assert_eq!(proj.cam.fov, 0.0, "expected orthographic projection");
+            }
             for gx in 0..5 {
                 for gy in 0..4 {
                     let pos = pos2(80.0 + gx as f32 * 160.0, 60.0 + gy as f32 * 150.0);
                     let near = tree.candidates(&boxes, |bb| screen_box(&proj, bb, 8.01).is_none_or(|r| r.contains(pos)));
-                    assert!(near.windows(2).all(|w| w[0] < w[1]), "ascending, each once (fov={fov})");
+                    assert!(near.windows(2).all(|w| w[0] < w[1]), "ascending, each once (perspective={perspective})");
                     for (i, (_, b)) in boxes.iter().enumerate() {
                         if screen_box(&proj, b, 8.0).is_none_or(|r| r.contains(pos)) {
-                            assert!(near.contains(&i), "body {i} must be a candidate at {pos:?} (fov={fov})");
+                            assert!(near.contains(&i), "body {i} must be a candidate at {pos:?} (perspective={perspective})");
                         }
                     }
                     assert!(near.ends_with(&[boxes.len() - 2, boxes.len() - 1]), "loose boxes are always candidates");
@@ -12710,9 +12718,12 @@ mod tests {
 
         // Test three camera setups: fitted perspective, close-up perspective (putting some boxes
         // behind the eye), and orthographic.
-        let views = [(45.0, None), (45.0, Some((Vec3::ZERO, 40.0, 0.65, 0.45))), (0.0, None)];
-        for (fov, custom) in views {
-            app.cam.fov = fov;
+        let views = [(true, None), (true, Some((Vec3::ZERO, 40.0, 0.65, 0.45))), (false, None)];
+        for (perspective, custom) in views {
+            app.ui.perspective = perspective;
+            if perspective {
+                app.preferences.perspective_fov = 45_f64.to_radians();
+            }
             if let Some((target, distance, yaw, pitch)) = custom {
                 app.cam.target = target;
                 app.cam.distance = distance;
@@ -12722,6 +12733,11 @@ mod tests {
                 app.fit_view();
             }
             let proj = projection(&app, rect);
+            if perspective {
+                assert!(proj.cam.fov > 0.0, "expected perspective projection");
+            } else {
+                assert_eq!(proj.cam.fov, 0.0, "expected orthographic projection");
+            }
             // Probe face centres, edge midpoints, vertices of several boxes, plus empty pixels.
             let mut probes = vec![pos2(10.0, 10.0), pos2(790.0, 590.0)];
             for [x, y, z] in [[0.0, 0.0, 0.0], [25.0, 0.0, 0.0], [-25.0, 25.0, -25.0], [4.0, 4.0, 0.0], [0.0, 0.0, 25.0]] {
@@ -12743,7 +12759,7 @@ mod tests {
                     let bvh = pick_hits(&app, &proj, pos, PickOptions { all, include_midpoints: true, ..PickOptions::default() });
                     let linear =
                         pick_hits(&app, &proj, pos, PickOptions { all, include_midpoints: true, linear_bodies: true, ..PickOptions::default() });
-                    assert_eq!(bvh, linear, "BVH pick must match linear scan (fov={fov}, all={all}, pos={pos:?})");
+                    assert_eq!(bvh, linear, "BVH pick must match linear scan (perspective={perspective}, all={all}, pos={pos:?})");
                     if let Some(hits) = &bvh {
                         saw_face |= hits.iter().any(|h| matches!(h, Hit::Face { .. }));
                         saw_edge |= hits.iter().any(|h| matches!(h, Hit::Edge { .. }));

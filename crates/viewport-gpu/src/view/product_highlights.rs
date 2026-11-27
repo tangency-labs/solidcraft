@@ -265,8 +265,8 @@ impl Renderer {
             tally.triangles(draw.mesh.index_count, 1);
         }
         // PBR placements are opaque too: they occlude feedback as the built ones do.
-        for look in [InstanceLook::Opaque, InstanceLook::Pbr] {
-            model.draw_instanced(pass, look, false, &depth.instanced, &depth.instanced, tally);
+        for draw in model.instanced.iter().filter(|draw| matches!(draw.look, InstanceLook::Opaque | InstanceLook::Pbr)) {
+            draw.draw(pass, &depth.instanced, &depth.instanced, tally);
         }
         // Render's build_highlight emits self-contained mesh triangles/edges, including
         // whole bodies; it intentionally does not reference the Design model's GPU plans.
