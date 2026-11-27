@@ -80,6 +80,13 @@ pub fn is_square_to_radius(centre: [f64; 2], p: [f64; 2], dir: [f64; 2]) -> bool
     math::is_square_to_radius_2d(centre, p, dir)
 }
 
+/// Whether `p` lies on the line through `origin` along `dir`, within `tol` of it; `false` where
+/// `dir` is of no length.
+#[must_use]
+pub fn on_line(p: [f64; 2], origin: [f64; 2], dir: [f64; 2], tol: f64) -> bool {
+    math::on_line_2d(p, origin, dir, tol)
+}
+
 /// The centre of the circle through `a`, `b` and `c`; `None` for points on one line.
 #[must_use]
 pub fn circumcentre(a: [f64; 2], b: [f64; 2], c: [f64; 2]) -> Option<[f64; 2]> {
@@ -189,5 +196,19 @@ mod tests {
         assert!(is_square_to_radius([0.0, 0.0], [1.0, 0.0], [0.0, 1.0]));
         assert!(!is_square_to_radius([0.0, 0.0], [1.0, 0.0], [1.0, 0.0]));
         assert!(!is_square_to_radius([1.0, 0.0], [1.0, 0.0], [0.0, 1.0]));
+    }
+
+    #[test]
+    fn a_point_is_on_a_line_within_the_tolerance_of_it() {
+        // The line through (1, 1) along (3, 4), a length 5 direction: (4, 5) is on it, and the
+        // points 0.01 to its side of it are 0.01 off whichever way the direction is given.
+        let (o, d) = ([1.0, 1.0], [3.0, 4.0]);
+        assert!(on_line([4.0, 5.0], o, d, 1e-9));
+        assert!(on_line([4.0, 5.0], o, [-0.6, -0.8], 1e-9));
+        assert!(!on_line([4.008, 4.994], o, d, 0.009));
+        assert!(on_line([4.008, 4.994], o, d, 0.011));
+        assert!(on_line([-1.992, -3.006], o, d, 0.011));
+        // A direction of no length gives no line.
+        assert!(!on_line(o, o, [0.0, 0.0], 1.0));
     }
 }

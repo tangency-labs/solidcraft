@@ -646,6 +646,25 @@ fn a_round_on_a_revolved_rational_circle_imports_as_a_torus() {
     assert!(rel(m.volume, volume) < 1e-6, "volume {} vs {volume}", m.volume);
 }
 
+/// SolidCraft's export of a valid bent strip whose cuts leave edges 6.955e-5 mm long (#22579). The
+/// file states the strip's largest tolerance, 9.17e-5 mm, so the part is read again at a quarter
+/// of its shortest edge, 1.739e-5 mm. One vertex lies 1.427e-5 mm off its line edge's end. The
+/// kernel keeps half of a record's tolerance as the vertex's zone, and SMLib's check passes a
+/// vertex only when its gap to an edge's end is at most half that zone, so the read must give it
+/// at least four times its gap. Then the strip comes in closed, with its 9 faces, and passes the
+/// full check, as it does where it was built.
+#[test]
+fn a_part_read_finer_than_its_file_states_keeps_its_vertices_within_their_tolerances() {
+    let imp = step_import(include_str!("../../../../tests/step-regressions/bent_strip_micrometre_cuts.step")).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    let body = &imp.bodies[0];
+    assert!(body.closed, "{:?}", imp.warnings);
+    assert_eq!(body.body.face_count(), 9);
+    assert!(imp.warnings.iter().any(|w| w.ends_with("read at 1.739e-5 mm")), "{:?}", imp.warnings);
+    assert_eq!(crate::validation::failing_check(&body.body).unwrap(), None, "{:?}", imp.warnings);
+    assert!(!imp.warnings.iter().any(|w| w.contains("needs repair")), "{:?}", imp.warnings);
+}
+
 /// The midpoint rule over n even steps of [a, b].
 fn midpoint(f: impl Fn(f64) -> f64, a: f64, b: f64, n: usize) -> f64 {
     let h = (b - a) / n as f64;
@@ -5901,18 +5920,21 @@ fn hair_step_step_file(step: f64, gap: f64, accuracy: f64) -> String {
 
 /// The heal at import is honest about what it cannot do: the hair step itself is read at a
 /// finer tolerance (the reader's own answer to edges shorter than the stated tolerance), so it
-/// imports clean and nothing is healed; with a corner off its edges past the edges'
-/// tolerance (SMLib's pointer stage fails it, which no tolerance-scale heal reaches) it still
-/// needs repair, and no heal is claimed.
+/// imports clean and nothing is healed, and so does a corner off its edges by a gap the stated
+/// tolerance covers as the kernel's check takes it (a quarter of it, #22579); with a corner off
+/// its edges past that (SMLib's pointer stage fails it, which no tolerance-scale heal reaches) it
+/// still needs repair, and no heal is claimed.
 #[test]
 fn a_hair_step_file_imports_clean_and_a_real_gap_still_needs_repair() {
     let healed = |imp: &StepImport| imp.warnings.iter().any(|w| w.contains("healed SMLib's check failures"));
     let needs = |imp: &StepImport| imp.report.issues.iter().any(|i| matches!(i.kind, IssueKind::NeedsRepair));
-    let clean = step_import(&hair_step_step_file(3e-4, 0.0, 1e-3)).unwrap();
-    assert_eq!(clean.bodies.len(), 1);
-    assert!(!needs(&clean) && !healed(&clean), "{:?}", clean.warnings);
-    assert_eq!(crate::validation::failing_check(&clean.bodies[0].body).unwrap(), None);
-    for (gap, accuracy) in [(4e-4, 1e-3), (4e-4, 5e-4), (6e-4, 1e-3)] {
+    for (gap, accuracy) in [(0.0, 1e-3), (1e-4, 1e-3), (2.4e-4, 1e-3), (1e-4, 5e-4)] {
+        let clean = step_import(&hair_step_step_file(3e-4, gap, accuracy)).unwrap();
+        assert_eq!(clean.bodies.len(), 1);
+        assert!(!needs(&clean) && !healed(&clean), "{gap} {accuracy}: {:?}", clean.warnings);
+        assert_eq!(crate::validation::failing_check(&clean.bodies[0].body).unwrap(), None, "{gap} {accuracy}");
+    }
+    for (gap, accuracy) in [(2.6e-4, 1e-3), (4e-4, 1e-3), (4e-4, 5e-4), (6e-4, 1e-3)] {
         let imp = step_import(&hair_step_step_file(3e-4, gap, accuracy)).unwrap();
         assert!(needs(&imp) && !healed(&imp), "{gap} {accuracy}: {:?}", imp.warnings);
         assert!(crate::validation::failing_check(&imp.bodies[0].body).unwrap().is_some());

@@ -2407,7 +2407,10 @@ fn classify_rail_end(
 ///
 /// # Errors
 /// `SM_ERR_NULL_POINTER` without cap, edge, face, vertex, solver or curve; `SM_ERR` for an
-/// unprocessed vertex; those of the classification and the intersection.
+/// unprocessed vertex; those of the classification, of the cap edge's heading
+/// ([`cap_edge_heading`]) and of the intersection, among them
+/// [`BlendFailure::SrfSrfHeadingNotFollowed`] where no curve leaves the vertex on the
+/// heading's side.
 fn calc_end_cap_edges(
     k: &Kernel,
     target: &mut Brep,
@@ -2482,28 +2485,125 @@ fn calc_end_cap_edges(
         }
         let start_pt = pseudo.vertex_point(start)?;
         let end_pt = pseudo.vertex_point(end)?;
-        let mut dir = end_pt - start_pt;
         let surface = crate::topology::face::p2::surface(target, face)?
             .ok_or_else(|| face_without_surface(OP, face))?
             .clone_for_evaluation()?;
-        let curves = srf_srf_intersection(
-            k,
-            Some(start_pt),
-            Some(end_pt),
-            Some(&mut dir),
-            None,
-            &surface,
-            cap,
-            corner.approx_tol_3d,
-            corner.tangency_tol_radians,
-            SrfSrfOptions::default(),
-        )?;
-        let curve = curves.curve_3d.ok_or_else(|| {
+        // Not the fork's (tangency-labs/solidcraft#21941): the cap's edge is the curve that
+        // leaves the vertex into the side face ([`cap_edge_heading`]), not the chord's span,
+        // which on a closed curve runs the long way round from a vertex at its closure.
+        let vertex_at_start = rail_end == end;
+        let heading = cap_edge_heading(k, target, pseudo, corner, solvers, face, cap)?;
+        let curve = if let Some(mut heading) = heading {
+            let (from, to) = if vertex_at_start {
+                (start_pt, end_pt)
+            } else {
+                (end_pt, start_pt)
+            };
+            let mut curve = srf_srf_intersection(
+                k,
+                Some(from),
+                Some(to),
+                Some(&mut heading),
+                None,
+                &surface,
+                cap,
+                corner.approx_tol_3d,
+                corner.tangency_tol_radians,
+                SrfSrfOptions {
+                    closed_by_start_direction: true,
+                    heading_side_only: true,
+                    ..SrfSrfOptions::default()
+                },
+            )?
+            .curve_3d;
+            if !vertex_at_start {
+                if let Some(c) = curve.as_mut() {
+                    let span = c.natural_interval();
+                    let _ = c.reverse_parameterization(k, &span)?;
+                }
+            }
+            curve
+        } else {
+            let mut dir = end_pt - start_pt;
+            srf_srf_intersection(
+                k,
+                Some(start_pt),
+                Some(end_pt),
+                Some(&mut dir),
+                None,
+                &surface,
+                cap,
+                corner.approx_tol_3d,
+                corner.tangency_tol_radians,
+                SrfSrfOptions::default(),
+            )?
+            .curve_3d
+        };
+        let curve = curve.ok_or_else(|| {
             unbuildable_with(OP, CornerStep::EndSideFaceMissesCap, SM_ERR_NULL_POINTER)
         })?;
         set_edge_curve(pseudo.brep_mut(), fe, Some(curve))?;
     }
     Ok(None)
+}
+
+/// Not the fork's (tangency-labs/solidcraft#21941): the direction an End's cap edge on the side
+/// face `face` (F) leaves the corner's vertex, where F meets the cap's plane: square to F's
+/// normal and to the plane's there, turned into F (along the blended edge use's binormal on
+/// F, which points into the face). The cap's edge on F is the curve from the vertex to the
+/// rail's end that leaves this way: where F meets the plane in a closed curve (a sphere's
+/// equator), the span between the parameters the two points drop to runs the long way round
+/// from a vertex at the curve's closure (on the sphere's seam), out of F, and left the strip
+/// the round takes off F open ("the trim leaks"). `None` where the direction is not defined: a
+/// cap that is not a plane, a blended edge with no use on F, or F tangent to the plane at the
+/// vertex; the chord is used there, as the fork does.
+///
+/// # Errors
+/// Those of the corner's vertex, rib, solver and blended edge use lookups (no vertex given, a
+/// solver missing its edge use); those of the topology queries and of the binormal at the
+/// vertex.
+fn cap_edge_heading(
+    k: &Kernel,
+    target: &mut Brep,
+    pseudo: &FilletBrep,
+    corner: &FilletCorner,
+    solvers: &dyn SweptSolvers,
+    face: FaceId,
+    cap: &crate::surface::surface::Surface,
+) -> Result<Option<Vec3>> {
+    use crate::topology::edgeuse::p3::{evaluate_binormal, BinormalOptions};
+    let crate::surface::surface::p2::SurfaceKind::Plane(plane) = cap.kind() else {
+        return Ok(None);
+    };
+    let vertex = corner_vertex(corner)?;
+    let rib = first_edge(corner)?;
+    let fs = solvers.solver(rib_solver(pseudo, rib)?)?;
+    let fil_eu = solver_edgeuse(fs, 0)?;
+    let eu = if face_of(target, fil_eu)? == face {
+        fil_eu
+    } else {
+        match eu1::radial(target, fil_eu)? {
+            Some(radial) if face_of(target, radial)? == face => radial,
+            _ => return Ok(None),
+        }
+    };
+    let blended = edge_of(target, eu)?;
+    let ivl = edge::interval(target, blended)?;
+    let at = if edge::start_vertex(target, blended)? == Some(vertex) {
+        ivl.min()
+    } else {
+        ivl.max()
+    };
+    let into = evaluate_binormal(k, target, eu, at, true, &BinormalOptions::default())?;
+    let along = into.face_normal.cross(plane.evaluate_normal());
+    let Ok(along) = along.unitize() else {
+        return Ok(None);
+    };
+    Ok(Some(if along.dot(into.binormal) < 0.0 {
+        -along
+    } else {
+        along
+    }))
 }
 
 /// Whether the blended edge's face `face` (F) ends at `vertex` in an edge T tangent to

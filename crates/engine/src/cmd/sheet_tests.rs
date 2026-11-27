@@ -7732,6 +7732,74 @@ fn a_return_alone_on_a_leaning_wall_keeps_out_of_the_walls_beside_it() {
     assert!(rel(vol, polygon_area(&outline) * 2.0) < 1e-3, "{vol} vs {}", polygon_area(&outline) * 2.0);
 }
 
+/// An equilateral triangle tray, 120 on a side, made as [`tray_with_returns`] makes its tray (2 mm
+/// aluminium, R 1, K 0.5, gap 0.5, walls 20 high at 90° on its three edges in one feature) and,
+/// when `with_return`, a level return 12 high on the wall on y = 0 alone, picked on that wall's
+/// inner face.
+fn triangle_tray(with_return: bool) -> Session {
+    let mut s = Session::default();
+    run(
+        &mut s,
+        "sheet.manage_rules",
+        json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "gap": "0.5 mm", "active": true}),
+    );
+    // The triangle's height, 60·√3.
+    let h = 103.923_048_454_132_63;
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.line", json!({"points": [[0.0, 0.0], [120.0, 0.0], [60.0, h]], "closed": true}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[60.0, 0.0, 2.0], [90.0, h / 2.0, 2.0], [30.0, h / 2.0, 2.0]], "height": 20, "angle": "90 deg"}));
+    if with_return {
+        run(&mut s, "sheet.flange", json!({"edges": [[60.0, 2.0, 20.0]], "height": 12, "angle": "90 deg"}));
+    }
+    s
+}
+
+/// A return alone on a wall whose corners are acute (#19832): on an equilateral triangle tray
+/// (60°) and on the trapezoid of [`tray_with_returns`] (77.5°), walls 20 high at 90° and a level
+/// return on the wall on y = 0. The walls beside it run in across the return, so its sides are
+/// cut back on a slant, parallel to them, and its bend stops square where the slant starts. The
+/// return's side used to run on along that slant down to the return's anchor, past the bend's
+/// end, and left a sliver of the return lying in the bend's corner against the bend's end face;
+/// the sew refused the two ("sew: ambiguous edge contact"). Within the bend's strip the side now
+/// follows the bend's end.
+#[test]
+fn a_return_alone_on_a_wall_between_acute_corners_keeps_clear_of_the_walls_beside_it() {
+    // By hand: at a corner of angle α the wall beside has its inner face T = 2 in from the base's
+    // edge, and the return keeps g·cos(α/2) clear of it (half the gap g = 0.5 off the mitre
+    // between the two). The return's start, R + T = 3 in from its wall's outer face, comes
+    // nearest that face, so its bend stops (T + g·cos(α/2) + (R + T)·cos α) / sin α along the edge
+    // from each corner, and the bend is 120 less twice that long: 110.917 096 at α = 60° (the
+    // triangle) and 113.770 021 at α = atan(90 / 20) (the trapezoid, 77.47°).
+    let cases = [
+        ("triangle", triangle_tray(true), triangle_tray(false), 110.917_096_231_345_24),
+        ("trapezoid", tray_with_returns(80.0, 90.0, "0.5 mm", &[0]), tray_with_returns(80.0, 90.0, "0.5 mm", &[]), 113.770_021_333_771_17),
+    ];
+    for (name, mut s, mut without, want) in cases {
+        assert!(no_errors_or_warnings(&s), "{name}: {:?}", s.model.results);
+        let lengths = bend_lengths(&mut s);
+        assert!(lengths.last().is_some_and(|got| (got - want).abs() < 1e-6), "{name}: {lengths:?} vs {want}");
+        // The return lies inside the walls: the part's box is the walls' own.
+        let (with, without) = (bbox(&mut s), bbox(&mut without));
+        for end in ["min", "max"] {
+            for k in 0..3 {
+                let (a, b) = (with[end][k].as_f64().unwrap_or(f64::NAN), without[end][k].as_f64().unwrap_or(f64::NAN));
+                assert!((a - b).abs() < 1e-6, "{name}: {with} vs {without}");
+            }
+        }
+        // One outline in the flat, and the folded part holds its material (K 0.5).
+        let f = flat(&mut s);
+        assert_eq!(f["outline"].as_array().map(Vec::len), Some(1), "{name}: {f}");
+        let (outline, vol) = (outline_points(&f), volume(&mut s));
+        assert!(rel(vol, polygon_area(&outline) * 2.0) < 1e-6, "{name}: {vol} vs {}", polygon_area(&outline) * 2.0);
+        run(&mut s, "sheet.unfold", json!({}));
+        assert!(same_points(&outline_points(&flat(&mut s)), &outline), "{name}");
+        run(&mut s, "sheet.refold", json!({}));
+        assert!(rel(volume(&mut s), vol) < 1e-9, "{name}");
+    }
+}
+
 #[test]
 fn returns_follow_the_rules_gap_and_a_gap_of_zero_is_refused() {
     use std::f64::consts::SQRT_2;
