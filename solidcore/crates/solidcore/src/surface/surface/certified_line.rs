@@ -511,6 +511,7 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests
 
+use crate::math::det;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -2916,7 +2917,7 @@ impl Revolved {
                     slope: if c.cylinder {
                         0.0
                     } else {
-                        c.semi_angle_deg.to_radians().tan()
+                        det::tan(c.semi_angle_deg.to_radians())
                     },
                 },
             ),
@@ -3356,7 +3357,7 @@ impl Chart {
 /// The unit vector along `v`, `None` where it is not finite or of no length.
 fn unit2(v: [f64; 2]) -> Option<[f64; 2]> {
     let [a, b] = v;
-    let len = a.hypot(b);
+    let len = det::hypot(a, b);
     (len > 0.0 && len.is_finite()).then(|| [a / len, b / len])
 }
 
@@ -6942,7 +6943,7 @@ mod tests {
         let found = pass(
             &k,
             &s,
-            Vec3::new(a.cos(), a.sin(), -1.0),
+            Vec3::new(det::cos(a), det::sin(a), -1.0),
             Vec3::new(0.0, 0.0, 3.0),
             [0.0, 1.0],
             1.0e-5,
@@ -7758,7 +7759,7 @@ mod tests {
         let found = pass(
             &k,
             &s,
-            Vec3::new(-2.0, a.sin(), 0.5),
+            Vec3::new(-2.0, det::sin(a), 0.5),
             Vec3::new(4.0, 0.0, 0.0),
             [0.0, 1.0],
             TOL,
@@ -9905,7 +9906,7 @@ mod tests {
         use crate::nurbs::b_spline_surface::BSplineSurface;
         use crate::nurbs::math::{CPoint, NOW};
         use crate::nurbs::srf_basic::Surface as NlSurface;
-        let (sin, cos) = bend.to_radians().sin_cos();
+        let (sin, cos) = det::sin_cos(bend.to_radians());
         let mut profile = vec![[-1.0, -0.2], [-0.5, 0.0], [0.0, 0.0]];
         let mut knots = vec![0.0, 0.0, 0.0, 0.5, 0.5];
         if broken {
@@ -9931,7 +9932,7 @@ mod tests {
     /// direction, and its direction doubled is its vector, so the stored line passes through
     /// the ridge point exactly), and along x half the tolerance above it.
     fn crease_lines(bend: f64, tol: f64) -> [(Vec3, Vec3); 3] {
-        let (sin, cos) = bend.to_radians().sin_cos();
+        let (sin, cos) = det::sin_cos(bend.to_radians());
         let (along, out) = (Vec3::new(cos, 0.0, -sin), Vec3::new(sin, 0.0, cos));
         let ridge = Vec3::new(0.0, 0.5, 0.0);
         let through = |d: Vec3| (ridge - d, d * 2.0);

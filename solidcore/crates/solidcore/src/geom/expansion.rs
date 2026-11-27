@@ -135,6 +135,7 @@ pub(crate) fn to_f64(e: &[f64]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     #[test]
     fn a_rounded_sum_is_not_zero_but_its_exact_one_is() {
@@ -161,7 +162,7 @@ mod tests {
     /// one just in range is exact.
     #[test]
     fn a_product_that_could_underflow_is_out_of_range() {
-        assert_eq!(LEAST_EXACT_PRODUCT, 2.0_f64.powi(-968));
+        assert_eq!(LEAST_EXACT_PRODUCT, det::powi(2.0_f64, -968));
         assert!(product(1e-200, 1e-200).is_none());
         assert!(product(1e-160, 1e-160).is_none());
         assert!(product(1e-310, 1.0).is_none());
@@ -169,7 +170,7 @@ mod tests {
         assert!(product(f64::MAX, 2.0).is_none());
         assert!(product(f64::NAN, 1.0).is_none());
         assert_eq!(product(0.0, 1e-310), Some(vec![0.0]));
-        let h = 2.0_f64.powi(-484);
+        let h = det::powi(2.0_f64, -484);
         assert_eq!(product(h, h), Some(vec![0.0, LEAST_EXACT_PRODUCT]));
         assert!(product(1e-140, 1e-140).is_some());
         let z = Vec3::new(0.0, 0.0, 1e-310);

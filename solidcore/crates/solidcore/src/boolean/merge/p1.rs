@@ -1433,6 +1433,7 @@ impl TemporaryBrepShift {
 mod tests {
 
     use super::*;
+    use crate::math::det;
 
     /// A 1 x 2 x 3 box's origin corner (three faces, none parallel), moved `d` along x,
     /// with vertex tolerance `tolerance`.
@@ -1513,7 +1514,7 @@ mod tests {
         let mut points: Vec<Point3> = (0..20)
             .map(|i| {
                 let a = f64::from(i) * std::f64::consts::TAU / 20.0;
-                centre + Vec3::new(2.0 * a.cos(), 2.0 * a.sin(), 0.0)
+                centre + Vec3::new(2.0 * det::cos(a), 2.0 * det::sin(a), 0.0)
             })
             .collect();
         points.push(centre + Vec3::new(0.3, -0.2, 0.0));
