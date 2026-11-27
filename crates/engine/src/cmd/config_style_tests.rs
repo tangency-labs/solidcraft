@@ -257,13 +257,13 @@ fn configuration_face_indices_verifies_exact_planar_faces() {
 fn a_row_can_pick_between_alternative_features_and_a_later_feature_still_finds_the_body_by_name() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Base"}));
-    let (cube, cube_name) = (s.doc.features[0].id, s.doc.features[0].name.clone());
+    let cube_name = s.doc.features[0].name.clone();
     run(&mut s, "timeline.suppress", json!({"feature": cube_name, "suppressed": true}));
     run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 30, "body_name": "Base"}));
-    let (rod, rod_name) = (s.doc.features[1].id, s.doc.features[1].name.clone());
+    let rod_name = s.doc.features[1].name.clone();
     run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Base"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30}));
     run(&mut s, "config.configure", json!({"features": [cube_name, rod_name]}));
-    let (cube_key, rod_key) = (format!("suppress:{cube}"), format!("suppress:{rod}"));
+    let (cube_key, rod_key) = (format!("suppress:{cube_name}"), format!("suppress:{rod_name}"));
     run(&mut s, "config.row", json!({"name": "Cube", "values": {cube_key.clone(): false, rod_key.clone(): true}}));
     run(&mut s, "config.row", json!({"name": "Rod", "values": {cube_key: true, rod_key: false}}));
     let volume = |s: &mut Session| run(s, "inspect.measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
@@ -309,6 +309,7 @@ fn a_rule_names_a_feature_and_a_limit_needs_no_column() {
     run(&mut s, "parameters.add", json!({"name": "w", "expression": "4 mm"}));
     run(&mut s, "solid.box", json!({"length": 10, "width": "w", "height": 5, "body_name": "Bar"}));
     let (id, name) = (s.doc.features[0].id, s.doc.features[0].name.clone());
+    run(&mut s, "config.configure", json!({"params": ["w"]}));
     run(
         &mut s,
         "config.rule",

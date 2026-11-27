@@ -230,7 +230,11 @@ fn installed_generators_are_listed_by_folder_and_a_broken_one_is_skipped() {
 fn options_outside_the_code_reach_the_script_and_a_tables_columns_are_the_provenance() {
     let dir = nut_package(None);
     std::fs::create_dir(dir.path().join("tables")).unwrap();
-    std::fs::write(dir.path().join("tables/sizes.csv"), "key,row,source,page,status\n6,M6,Fixture catalogue,7,needs_review\n").unwrap();
+    std::fs::write(
+        dir.path().join("tables/sizes.csv"),
+        "key,row,source,page,status\n6,M6,Fixture catalogue,7,needs_review\nM6,M6,Fixture catalogue,7,needs_review\n",
+    )
+    .unwrap();
     std::fs::write(
         dir.path().join("generator.rhai"),
         r#"

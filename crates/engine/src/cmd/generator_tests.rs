@@ -75,7 +75,7 @@ fn parameters_are_kept_by_the_link_and_saved_with_the_design() {
     assert!(close(volume(&mut s), want), "{}", volume(&mut s));
     run(&mut s, "file.save", json!({"path": file}));
     let mut again = Session::default();
-    run(&mut again, "file.open", json!({"path": file}));
+    run(&mut again, "doc.open", json!({"path": file}));
     assert!(close(volume(&mut again), want), "{}", volume(&mut again));
     let component = run(&mut again, "component.links", json!({}))["links"][0]["component"].as_u64().unwrap();
     // Update Links builds it again with the saved values.

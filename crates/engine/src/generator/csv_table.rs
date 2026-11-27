@@ -83,8 +83,11 @@ fn typed(raw: &str) -> Json {
         return Json::Null;
     }
     let plain_int = t.strip_prefix('-').unwrap_or(t);
-    if !plain_int.is_empty() && plain_int.chars().all(|c| c.is_ascii_digit()) && (plain_int == "0" || !plain_int.starts_with('0')) {
-        if let Ok(n) = t.parse::<i64>() {
+    if !plain_int.is_empty() && plain_int.chars().all(|c| c.is_ascii_digit()) {
+        // Leading zeros (a part number such as 007) stay text.
+        if (plain_int == "0" || !plain_int.starts_with('0'))
+            && let Ok(n) = t.parse::<i64>()
+        {
             return Json::from(n);
         }
     } else if t.chars().all(|c| c.is_ascii_digit() || matches!(c, '.' | '-' | 'e' | 'E' | '+'))
