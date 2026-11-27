@@ -1061,8 +1061,17 @@ fn tapered_note(tapers: &[Option<kernel::Taper>]) -> Option<String> {
 /// runs on into the edges that continue the picked one as a constant round does; a pick on a
 /// chain an earlier pick took is that chain, rounded once. A pick whose chain closes on itself,
 /// which has no end for the law to start from, and every pick of a round without
-/// `tangent_chain` take the picked edge alone.
-fn law_by_law(input: Traced, edges: &[Vec3], start: Vec3, law: &kernel::RadiusSpline, tangent_chain: bool) -> Result<(kernel::Body, Traced)> {
+/// `tangent_chain` take the picked edge alone. A chain the kernel cannot round with the law
+/// (SMLib refuses some laws that vary along a chain through a curved edge) also takes the
+/// picked edge alone, as before chains were followed, and `warning` says so with the reason.
+fn law_by_law(
+    input: Traced,
+    edges: &[Vec3],
+    start: Vec3,
+    law: &kernel::RadiusSpline,
+    tangent_chain: bool,
+    warning: &mut Option<String>,
+) -> Result<(kernel::Body, Traced)> {
     let mut picks = Vec::with_capacity(edges.len());
     let mut taken: Vec<usize> = Vec::new();
     for p in edges {
@@ -1083,10 +1092,22 @@ fn law_by_law(input: Traced, edges: &[Vec3], start: Vec3, law: &kernel::RadiusSp
     let mut b = input;
     let mut from = None;
     for (p, along) in picks {
-        let made = if along {
-            kernel::fillet_variable_spline_chain(&b.body, &kernel::tangent_chain(&b.body, &[p])?, start, law)?
-        } else {
-            kernel::fillet_variable_spline(&b.body, p, start, law)?
+        let chained =
+            if along { Some(kernel::fillet_variable_spline_chain(&b.body, &kernel::tangent_chain(&b.body, &[p])?, start, law)) } else { None };
+        let made = match chained {
+            Some(Ok(made)) => made,
+            Some(Err(e)) => {
+                let made = kernel::fillet_variable_spline(&b.body, p, start, law)?;
+                append_warning(
+                    warning,
+                    format!(
+                        "the radius could not run along the tangent chain of the edge at ({:.3}, {:.3}, {:.3}), so the round takes that edge alone ({e})",
+                        p.x, p.y, p.z
+                    ),
+                );
+                made
+            }
+            None => kernel::fillet_variable_spline(&b.body, p, start, law)?,
         };
         let next = Traced::step(made, &[&b]);
         from = Some(std::mem::replace(&mut b, next));
@@ -9981,7 +10002,7 @@ fn blend_raw(
                 pts.push((*t, val(vals, e, Kind::Length)?));
             }
             let law = kernel::RadiusSpline::of_points(&pts, *smooth)?;
-            law_by_law(input, edges, start.0, &law, *tangent_chain)?
+            law_by_law(input, edges, start.0, &law, *tangent_chain, warning)?
         }
         FeatureKind::Fillet { style: crate::FilletStyle::Spline { start, knots, radii }, tangent_chain, .. } => {
             let mut values = vec![r];
@@ -9989,7 +10010,7 @@ fn blend_raw(
                 values.push(val(vals, e, Kind::Length)?);
             }
             let law = crate::FilletStyle::spline(knots, values);
-            law_by_law(input, edges, start.0, &law, *tangent_chain)?
+            law_by_law(input, edges, start.0, &law, *tangent_chain, warning)?
         }
         FeatureKind::Fillet { fit: crate::FilletFit::Taper, .. } => {
             let (b, tapers) = kernel::fillet_tapered(&mb.body, edges, r)?;
