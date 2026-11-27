@@ -889,6 +889,9 @@ fn intersect_pair(
         if m.volume > 0.0
             && let Some(why) = super::interference::impossible_overlap_cached(&m, (ia, ka), (ib, kb), masses)
         {
+            if !is_cancelled() && solidcraft_kernel::interiors_disjoint(ka, kb) == Some(true) {
+                return;
+            }
             out.unchecked = Some(why);
             fallback_distance(out);
             return;

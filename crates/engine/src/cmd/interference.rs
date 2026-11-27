@@ -263,7 +263,7 @@ fn check_pair(
         solidcraft_kernel::measure_mass,
         |m| (m.volume > threshold).then(|| impossible_overlap_cached(m, (a_idx, a), (b_idx, b), masses)).flatten(),
         |v| v > threshold,
-        false,
+        true,
         should_stop,
     ) {
         OverlapOutcome::Empty => return Outcome::Clear,

@@ -1694,3 +1694,152 @@ fn nested_disk_in_pocket_far_from_origin_has_no_overlap_at_identity_or_180_deg()
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// An 18 mm tenon seated flush inside a matching 18 mm square window of a plate that also has
+/// circular bolt holes is verified cleanly as 0 mm contact (not `unchecked`), reports ~0.08 mm
+/// when given a 0.08 mm clearance gap, and still reports a genuine 0.05 mm penetration as an
+/// overlap (zero false negatives).
+#[test]
+fn tenon_in_window_with_bolt_holes_flush_gap_and_penetration() {
+    let make_plate = |s: &mut Session| {
+        run(s, "solid.box", json!({"length": 100, "width": 100, "height": 12, "corner": [-40, -40, 0], "body_name": "Plate"}));
+        run(s, "solid.box", json!({"length": 18, "width": 18, "height": 16, "corner": [0, 0, -2], "operation": "new", "body_name": "WindowCut"}));
+        run(s, "solid.combine", json!({"operation": "cut", "target": "Plate", "tools": ["WindowCut"]}));
+        run(s, "solid.cylinder", json!({"radius": 3, "height": 16, "base": [-20, 9, -2], "operation": "cut", "targets": ["Plate"]}));
+        run(s, "solid.cylinder", json!({"radius": 3, "height": 16, "base": [38, 9, -2], "operation": "cut", "targets": ["Plate"]}));
+    };
+
+    // 1. Flush contact (exact flush and 3e-5 mm axial shift): verified as 0 mm contact, not unchecked.
+    for (label, z_shift) in [("exact_flush", 0.0), ("shifted_3e5", 3e-5)] {
+        let mut s = Session::default();
+        make_plate(&mut s);
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 18, "width": 18, "height": 12, "corner": [0, 0, z_shift], "operation": "new", "body_name": "Tenon"}),
+        );
+        let r = run(&mut s, "inspect.clearance", json!({"clearance": 1, "nearest": 1}));
+        assert_eq!(r["unchecked"], json!([]), "{label}: {r}");
+        assert_eq!(r["overlaps"], json!([]), "{label}: {r}");
+        let near = r["near"].as_array().cloned().unwrap_or_default();
+        assert_eq!(near.len(), 1, "{label}: {r}");
+        assert_eq!(f(&near[0]["distance_mm"]), 0.0, "{label}: {r}");
+        assert_eq!(f(&r["nearest"]["Tenon"][0]["distance_mm"]), 0.0, "{label}: {r}");
+
+        let inter = run(&mut s, "inspect.interference", json!({}));
+        assert_eq!(inter["count"], 0, "{label}: {inter}");
+        assert_eq!(inter["unchecked"], json!([]), "{label}: {inter}");
+    }
+
+    // 2. Small 0.08 mm clearance gap all round: verified cleanly with distance_mm ≈ 0.08.
+    {
+        let mut s = Session::default();
+        make_plate(&mut s);
+        let gap = 0.08;
+        let size = 18.0 - 2.0 * gap;
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": size, "width": size, "height": 12, "corner": [gap, gap, 0], "operation": "new", "body_name": "Tenon"}),
+        );
+        let r = run(&mut s, "inspect.clearance", json!({"clearance": 1, "nearest": 1}));
+        assert_eq!(r["unchecked"], json!([]), "{r}");
+        assert_eq!(r["overlaps"], json!([]), "{r}");
+        let near = r["near"].as_array().cloned().unwrap_or_default();
+        assert_eq!(near.len(), 1, "{r}");
+        assert!((f(&near[0]["distance_mm"]) - gap).abs() < 1e-6, "{r}");
+        assert!((f(&r["nearest"]["Tenon"][0]["distance_mm"]) - gap).abs() < 1e-6, "{r}");
+    }
+
+    // 3. Genuine 0.05 mm penetration into one window wall: still detected as overlap.
+    {
+        let mut s = Session::default();
+        make_plate(&mut s);
+        let depth = 0.05;
+        run(
+            &mut s,
+            "solid.box",
+            json!({"length": 18, "width": 18, "height": 12, "corner": [-depth, 0, 3e-5], "operation": "new", "body_name": "Tenon"}),
+        );
+        let r = run(&mut s, "inspect.clearance", json!({"clearance": 1, "nearest": 1}));
+        assert_eq!(r["unchecked"], json!([]), "{r}");
+        let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+        assert_eq!(overlaps.len(), 1, "{r}");
+        let want = depth * 18.0 * (12.0 - 3e-5);
+        assert!((f(&overlaps[0]["volume_mm3"]) - want).abs() < 1e-2 * want, "{r}");
+    }
+}
+
+/// A shim/spacer rotated 180 degrees sitting flush against two side plates (with through bores)
+/// and a dowel pin seated flush inside the matching bore: every pair is verified as 0 mm contact
+/// (not `unchecked`), while a 0.05 mm penetration of either the spacer or the dowel pin is still
+/// reported as an overlap.
+#[test]
+fn rotated_spacer_flush_against_side_plates_and_dowel_pin() {
+    let build_assembly = |s: &mut Session, spacer_pen: f64, pin_pen: f64| {
+        // Side plate A: z in [0, 10], with a Ø6 dowel bore at (0, 0) and a Ø4 hole at (12, 0).
+        run(s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-20, -20, 0], "body_name": "SideA"}));
+        run(s, "solid.cylinder", json!({"radius": 3, "height": 14, "base": [0, 0, -2], "operation": "cut", "targets": ["SideA"]}));
+        run(s, "solid.cylinder", json!({"radius": 2, "height": 14, "base": [12, 0, -2], "operation": "cut", "targets": ["SideA"]}));
+
+        // Spacer: z in [10 - spacer_pen, 16 - spacer_pen], rotated 180° around Z, with matching Ø6 bore.
+        run(
+            s,
+            "solid.box",
+            json!({"length": 40, "width": 40, "height": 6, "corner": [-20, -20, 10.0 - spacer_pen], "operation": "new", "body_name": "Spacer"}),
+        );
+        run(s, "solid.cylinder", json!({"radius": 3, "height": 10, "base": [0, 0, 8.0 - spacer_pen], "operation": "cut", "targets": ["Spacer"]}));
+        run(s, "solid.move", json!({"bodies": ["Spacer"], "axis": [0, 0, 1], "angle": "180 deg"}));
+
+        // Side plate B: z in [16, 26], flush with the opposite side of the spacer, with matching Ø6 bore.
+        run(s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-20, -20, 16], "operation": "new", "body_name": "SideB"}));
+        run(s, "solid.cylinder", json!({"radius": 3, "height": 14, "base": [0, 0, 14], "operation": "cut", "targets": ["SideB"]}));
+
+        // Dowel pin: Ø6 (or Ø6 + 2*pin_pen) passing through all three bores.
+        run(s, "solid.cylinder", json!({"radius": 3.0 + pin_pen, "height": 30, "base": [0, 0, -2], "operation": "new", "body_name": "Dowel"}));
+    };
+
+    // 1. All flush contact: zero overlaps, zero unchecked, all touching pairs at 0.0 mm.
+    {
+        let mut s = Session::default();
+        build_assembly(&mut s, 0.0, 0.0);
+        let r = run(&mut s, "inspect.clearance", json!({"clearance": 1, "nearest": 1}));
+        assert_eq!(r["unchecked"], json!([]), "{r}");
+        assert_eq!(r["overlaps"], json!([]), "{r}");
+        let near = r["near"].as_array().cloned().unwrap_or_default();
+        let pairs: Vec<[String; 2]> = near.iter().map(pair).collect();
+        for expected in [
+            ["SideA".to_string(), "Spacer".to_string()],
+            ["SideB".to_string(), "Spacer".to_string()],
+            ["Dowel".to_string(), "SideA".to_string()],
+            ["Dowel".to_string(), "Spacer".to_string()],
+            ["Dowel".to_string(), "SideB".to_string()],
+        ] {
+            assert!(pairs.contains(&expected), "missing flush contact {expected:?}: {r}");
+        }
+        assert!(near.iter().all(|n| f(&n["distance_mm"]) == 0.0), "{r}");
+    }
+
+    // 2. Genuine 0.05 mm spacer penetration into SideA: detected as overlap.
+    {
+        let mut s = Session::default();
+        build_assembly(&mut s, 0.05, 0.0);
+        let r = run(&mut s, "inspect.clearance", json!({"bodies": ["Spacer"], "against": ["SideA"], "clearance": 1}));
+        assert_eq!(r["unchecked"], json!([]), "{r}");
+        let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+        assert_eq!(overlaps.len(), 1, "{r}");
+        assert!(f(&overlaps[0]["volume_mm3"]) > 50.0, "{r}");
+    }
+
+    // 3. Genuine 0.05 mm radial penetration of Dowel into Spacer bore: detected as overlap.
+    {
+        let mut s = Session::default();
+        build_assembly(&mut s, 0.0, 0.05);
+        let r = run(&mut s, "inspect.clearance", json!({"bodies": ["Dowel"], "against": ["Spacer"], "clearance": 1}));
+        assert_eq!(r["unchecked"], json!([]), "{r}");
+        let overlaps = r["overlaps"].as_array().cloned().unwrap_or_default();
+        assert_eq!(overlaps.len(), 1, "{r}");
+        let want = std::f64::consts::PI * (3.05_f64.powi(2) - 3.0_f64.powi(2)) * 6.0;
+        assert!((f(&overlaps[0]["volume_mm3"]) - want).abs() < 0.02 * want, "want {want}: {r}");
+    }
+}
