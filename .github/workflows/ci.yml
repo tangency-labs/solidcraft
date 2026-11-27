@@ -172,6 +172,11 @@ jobs:
       quick: ${{ steps.paths.outputs.quick }}
       packages: ${{ steps.paths.outputs.packages }}
       oracle: ${{ steps.paths.outputs.oracle }}
+      # The Python client's tests: approved pull requests and merge groups that touch the client, its
+      # generator, its packaging or the command schemas. They run in Native Linux tests, against the
+      # CLI that job builds on its warm disk; when the native checks don't run (a change to python/
+      # alone), in Reference tests.
+      python: ${{ steps.paths.outputs.python }}
       doctests: ${{ steps.paths.outputs.doctests }}
       # Cargo.lock or a Cargo.toml changed (pull requests and merge groups): Dependency advisories.
       deps: ${{ steps.paths.outputs.deps }}
@@ -190,6 +195,11 @@ jobs:
       # jobs with a target/ disk still build, without testing, so the disks main writes follow
       # main and a pull request recompiles only what it changed.
       warm: ${{ steps.paths.outputs.warm }}
+      # The build-variant checks (Shared crates build on their own, Build without usage statistics):
+      # every run with `native` but a pull request, which runs them only when it touches what they
+      # guard; the batch runs them before every merge.
+      shared: ${{ steps.paths.outputs.shared }}
+      no_usage_stats: ${{ steps.paths.outputs.no_usage_stats }}
       # The key a passing SolidCore result is kept under (its tree and the CI that tested it), and
       # the run whose result for that exact key this run reuses instead of testing again.
       solidcore_key: ${{ steps.paths.outputs.solidcore_key }}
@@ -224,6 +234,7 @@ jobs:
           deps=false
           wasm=false
           solidcore=false
+          python=false
           full=true
           packages=
           queue_tested=false
@@ -291,6 +302,13 @@ jobs:
           # checks run its own required checks. Pull requests, merge groups and pushes to main share it.
           solidcore_paths() {
             if grep -qz '^solidcore/' "$1"; then solidcore=true; fi
+          }
+          # Whether the NUL-separated paths in $1 reach the Python client (python): the package and
+          # its tests, its generator and wheel builder, its packaging, the MCP server it mirrors, and
+          # the command schemas its bindings are generated from. Pull requests and merge groups
+          # share it; no other pull request runs the client's tests (the release job runs them too).
+          python_paths() {
+            if grep -qzE '^(python/|xtask/src/python\.rs$|packaging/python/|crates/mcp/|crates/engine/src/schema/)' "$1"; then python=true; fi
           }
           # Whether the NUL-separated paths in $1 (the diff $2..$3) change what the build jobs' caches
           # are keyed on, and which (cache_key): rust-cache hashes the toolchain file and the lockfile,
@@ -403,6 +421,7 @@ jobs:
               gpu_paths "$RUNNER_TEMP/ci-paths"
               deps_wasm_paths "$RUNNER_TEMP/ci-paths"
               solidcore_paths "$RUNNER_TEMP/ci-paths"
+              python_paths "$RUNNER_TEMP/ci-paths"
               if [ "$gpu_paths" = false ] && group_has_render_label "$GROUP_BASE_SHA..$GROUP_HEAD_SHA"; then
                 gpu_paths=true
               fi
@@ -434,6 +453,7 @@ jobs:
             deps_wasm_paths "$RUNNER_TEMP/ci-paths"
             wasm=false
             solidcore_paths "$RUNNER_TEMP/ci-paths"
+            python_paths "$RUNNER_TEMP/ci-paths"
             # Pull requests build and test the touched packages and their dependents; nothing
             # selected means no code changed.
             select_packages "$RUNNER_TEMP/ci-paths"
@@ -459,20 +479,40 @@ jobs:
             native=false
             oracle=false
             solidcore=false
+            python=false
           fi
-          # A push that only merges main into the change (Merge branch 'main', Update branch) when
-          # the change itself already passed: nothing new to test here, and main tests the merged
-          # result after it lands. Over three days, 872 of 1,241 such merges brought in nothing that
+          # A change that already passed (scripts/ci/main_merge.py): the same commit again (a label
+          # added again, approved-for-ci after a pass, a reopen), a "Re-run all jobs" after a pass, a
+          # commit with the same tree, or a push that only merges main into the change (Merge branch
+          # 'main', Update branch). Nothing new to test here, and the batch tests the merged
+          # result before it lands. Over 11 hours on 2026-11-26, 827 pull request runs covered 524
+          # heads: one full run per head is the goal. Over three days, 872 of 1,241 such merges brought in nothing that
           # touched the pull request's files, and each restarted the whole run.
           carried=
           if [ "$EVENT_NAME" = pull_request ] && [ "$native" = true ]; then
             carried=$(python3 -I scripts/ci/main_merge.py --base "$BASE_SHA" --head "$HEAD_SHA" --repo "$REPO" \
-              --pr "$PR_NUMBER" --head-repo "$HEAD_REPO" --head-ref "$HEAD_REF" | sed -n 's/^carried=//p')
+              --pr "$PR_NUMBER" --head-repo "$HEAD_REPO" --head-ref "$HEAD_REF" \
+              --run-id "$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" | sed -n 's/^carried=//p')
             if [ -n "$carried" ]; then
-              echo "Only a merge of main into a change that passed in $carried: repository checks only."
+              echo "This change already passed in $carried: repository checks only."
               native=false
               solidcore=false
+              python=false
             fi
+          fi
+          # The build-variant checks guard the manifests and the feature-gated code. On a pull request
+          # they run only for a change that reaches them; merge groups, batches, main and the nightly
+          # always run them with the native checks, so nothing lands without them. Shared crates:
+          # a manifest or the lockfile (a shared crate's dependencies) or the check itself. Without
+          # usage statistics: a manifest, the lockfile, or a diff that mentions the feature.
+          shared=$native
+          no_usage_stats=$native
+          if [ "$EVENT_NAME" = pull_request ] && [ "$native" = true ]; then
+            shared=$deps
+            no_usage_stats=$deps
+            if grep -qxzE 'xtask/src/(shared|layers)\.rs' "$RUNNER_TEMP/ci-paths"; then shared=true; fi
+            if git diff "$BASE_SHA...$HEAD_SHA" | grep -qE '^[+-].*usage[-_]stats'; then no_usage_stats=true; fi
+            echo "shared=$shared no_usage_stats=$no_usage_stats (pull request: only when it touches what they guard)"
           fi
           # SolidCore's tests and checks read nothing outside solidcore/ (its own lockfile, toolchain
           # file and test data are inside it) but the steps that run them: this workflow and the
@@ -536,6 +576,7 @@ jobs:
             echo "gpu=$gpu"
             echo "windows=$windows"
             echo "oracle=$oracle"
+            echo "python=$python"
             echo "doctests=$doctests"
             echo "deps=$deps"
             echo "wasm=$wasm"
@@ -544,6 +585,8 @@ jobs:
             echo "batch_base=${batch_base:-}"
             echo "queue_tested=$queue_tested"
             echo "warm=$warm"
+            echo "shared=$shared"
+            echo "no_usage_stats=$no_usage_stats"
             echo "solidcore_key=$solidcore_key"
             echo "solidcore_reused=$solidcore_reused"
             echo "full=$full"
@@ -725,7 +768,7 @@ jobs:
     # what makes them movable to their own repository (#12935). The check builds them in a
     # scratch workspace, so it compiles the kernel and the UI stack again: it is a build, not
     # a static check, and it belongs in the heavy lane.
-    if: needs.changes.outputs.native == 'true' || needs.changes.outputs.warm == 'true'
+    if: needs.changes.outputs.shared == 'true' || needs.changes.outputs.warm == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
     timeout-minutes: ${{ vars.CI_RUNNER && 90 || 30 }}
     steps:
@@ -994,6 +1037,14 @@ jobs:
             esac
           fi
           cargo xtask i18n --check --cli "$cli"
+      # The Python client's bindings and tests (Select checks' `python`), against the CLI the test
+      # build made: about 15 seconds. Built here only when the build above did not make it.
+      - name: Python client tests
+        if: needs.changes.outputs.warm != 'true' && needs.changes.outputs.python == 'true'
+        run: |
+          cli="${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+          [ -x "$cli" ] || cargo build -p solidcraft-cli --profile ci --locked
+          scripts/ci/python-client.sh "$cli"
       - name: Compiler cache statistics
         if: always()
         run: if command -v sccache >/dev/null; then sccache --show-stats; else echo "sccache was not set up; built without it"; fi
@@ -1303,7 +1354,10 @@ jobs:
   oracle:
     name: Reference tests
     needs: changes
-    if: needs.changes.outputs.oracle == 'true'
+    # Also the Python client's tests (Select checks' `python`) when the native checks don't run
+    # (a change to python/ alone): they need the CLI this job builds, so they reuse its build and
+    # caches. With the native checks, Native Linux tests runs them against its own build instead.
+    if: needs.changes.outputs.oracle == 'true' || (needs.changes.outputs.python == 'true' && needs.changes.outputs.native != 'true')
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: ${{ vars.CI_RUNNER && 180 || 60 }}
     env:
@@ -1346,9 +1400,13 @@ jobs:
       - name: Build the command line
         run: cargo build -p solidcraft-cli --profile ci --locked
       - name: Replay tests/oracle and compare with expected.json
+        if: needs.changes.outputs.oracle == 'true'
         run: cargo xtask oracle --cli "${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
+      - name: Python client tests
+        if: needs.changes.outputs.python == 'true' && needs.changes.outputs.native != 'true'
+        run: scripts/ci/python-client.sh "${CARGO_TARGET_DIR:-target}/ci/solidcraft-cli"
       - name: Upload the report
-        if: always()
+        if: always() && needs.changes.outputs.oracle == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: oracle-report
@@ -1472,7 +1530,7 @@ jobs:
   no-usage-stats:
     name: Build without usage statistics
     needs: changes
-    if: needs.changes.outputs.native == 'true' || needs.changes.outputs.warm == 'true'
+    if: needs.changes.outputs.no_usage_stats == 'true' || needs.changes.outputs.warm == 'true'
     runs-on: ${{ vars.CI_RUNNER || 'blacksmith-16vcpu-ubuntu-2404' }}
     timeout-minutes: ${{ vars.CI_RUNNER && 90 || 40 }}
     steps:
@@ -1588,10 +1646,14 @@ jobs:
           QUICK_COMPILE: ${{ needs.quick-compile.result }}
           WINDOWS: ${{ needs.changes.outputs.windows }}
           ORACLE_RUN: ${{ needs.changes.outputs.oracle }}
+          PYTHON_RUN: ${{ needs.changes.outputs.python }}
           DOCTESTS: ${{ needs.changes.outputs.doctests }}
           CLIPPY: ${{ needs.clippy.result }}
-          # The shared crates build on their own: that job runs with the native flag, like Clippy.
+          # The build-variant checks: with the native flag, except on a pull request that does not
+          # touch what they guard (Select checks' `shared` and `no_usage_stats`).
+          SHARED_RUN: ${{ needs.changes.outputs.shared }}
           SHARED: ${{ needs.shared-crates.result }}
+          NO_USAGE_STATS_RUN: ${{ needs.changes.outputs.no_usage_stats }}
           BUILD: ${{ needs.build-tests.result }}
           EVENT_NAME: ${{ github.event_name }}
           TESTS: ${{ needs.tests.result }}
@@ -1630,12 +1692,16 @@ jobs:
           fi
           if [ "$NATIVE" = true ]; then
             test "$CLIPPY" = success
-            test "$SHARED" = success
             # The archive for the action matrix and property tests exists nightly and by hand only.
             if [ "$EVENT_NAME" = schedule ] || [ "$EVENT_NAME" = workflow_dispatch ]; then
               test "$BUILD" = success
             fi
             test "$TESTS" = success
+          fi
+          if [ "$SHARED_RUN" = true ]; then
+            test "$SHARED" = success
+          fi
+          if [ "$NO_USAGE_STATS_RUN" = true ]; then
             test "$NO_USAGE_STATS" = success
           fi
           # The same output decides whether the GPU path tests run (their job's `if`).
@@ -1645,7 +1711,8 @@ jobs:
           if [ "$DOCTESTS" = true ]; then
             test "$DOCS" = success
           fi
-          if [ "$ORACLE_RUN" = true ]; then
+          # The Python client's tests run in Reference tests only without the native checks.
+          if [ "$ORACLE_RUN" = true ] || { [ "$PYTHON_RUN" = true ] && [ "$NATIVE" != true ]; }; then
             test "$ORACLE" = success
           fi
           if [ "$WINDOWS" = true ]; then

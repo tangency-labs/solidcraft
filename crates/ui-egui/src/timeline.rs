@@ -335,12 +335,14 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Revolve { .. } => "revolve",
         FeatureKind::Fillet { .. } => "fillet",
         FeatureKind::Chamfer { .. } => "chamfer",
+        FeatureKind::Dogbone { .. } => "dogbone",
         FeatureKind::Box { .. } => "box",
         FeatureKind::Cylinder { .. } => "cylinder",
         FeatureKind::Sphere { .. } => "sphere",
         FeatureKind::Torus { .. } => "torus",
         FeatureKind::Cone { .. } => "cone",
         FeatureKind::Combine { .. } => "combine",
+        FeatureKind::FingerJoint { .. } => "finger_joint",
         FeatureKind::Pattern { pattern: solidcraft_engine::doc::PatternKind::Rectangular { .. }, .. } => "pattern_rect",
         FeatureKind::Pattern { pattern: solidcraft_engine::doc::PatternKind::Path { .. }, .. } => "pattern_path",
         FeatureKind::Pattern { .. } => "pattern_circ",
@@ -2084,6 +2086,7 @@ mod tests {
             ("surface.fair", json!({"type":"surface_fair", "body":"A", "tolerance":"0.001"})),
             ("solid.rib", json!({"type":"rib", "sketch":0, "curves":[], "thickness":"2"})),
             ("solid.web", json!({"type":"rib", "sketch":0, "curves":[], "thickness":"2", "web":true})),
+            ("solid.finger_joint", json!({"type":"finger_joint", "bodies":["A","B"], "count":3, "clearance":"0"})),
         ];
         for (id, definition) in cases {
             let feature: solidcraft_engine::doc::FeatureKind = serde_json::from_value(definition).unwrap();

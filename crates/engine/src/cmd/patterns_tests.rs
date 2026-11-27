@@ -3637,6 +3637,39 @@ fn circular_pattern_of_a_groove_and_its_fillet_rounds_every_copy_alike() {
     assert!(rel(v(&all), want) < 1e-6, "ten rounded grooves: {} mm³, expected {want} mm³", v(&all));
 }
 
+/// #20931: a ring revolved about X from a section with a 0.2 mm corner arc, a rib revolved 7°
+/// across that corner and joined, a 0.75 mm round on the two edges where the rib's end meets the
+/// ring, and a circular pattern of the rib and the round. Every copy is the original turned a
+/// quarter, apart from the others, so from the second rib on each one splits the ring's faces as
+/// the second did: four ribs have the faces of two plus twice what the second added. At count 4
+/// SMLib's check refused the round of the last copy (Bad SpeedPt, Bad CurveCusp on a 2D curve):
+/// the pattern joins its three rib copies in one union, and the round at the last of them fails
+/// there, while the same copies joined one at a time round.
+#[test]
+fn circular_pattern_of_a_rib_and_its_round_on_a_ring_builds_at_four_copies() {
+    let script: Value = serde_json::from_str(include_str!("../../../../examples/regressions/ring_rib_round_circular_pattern.json")).unwrap();
+    let build = |count: u32| {
+        let mut script = script.clone();
+        for c in script["commands"].as_array_mut().unwrap() {
+            if c["params"]["feature"]["type"] == "pattern" {
+                c["params"]["feature"]["pattern"]["count"] = json!(count.to_string());
+            }
+        }
+        let mut s = Session::default();
+        s.run_script(&script).unwrap();
+        let errors: Vec<_> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+        assert!(errors.is_empty(), "count {count}: {errors:?}");
+        let st = s.model.state();
+        let ring = st.body("Ring").unwrap();
+        (ring.body.face_count(), ring.body.lumps().expect("the ring body reports its lumps").len())
+    };
+    let (one, _) = build(1);
+    let (two, _) = build(2);
+    let (four, pieces) = build(4);
+    assert_eq!(pieces, 1, "the four ribs are joined to the ring");
+    assert_eq!(four, two + 2 * (two - one), "faces: {one} with one rib, {two} with two, {four} with four");
+}
+
 /// Copies of a body made by a pattern are drawn from the body's own triangles and display plan,
 /// moved, and keep doing so when they are moved into a component: a 30 by 30 pattern of a
 /// filleted cylinder meshed and planned every copy, twice, and took over a minute to show.
@@ -4524,4 +4557,231 @@ fn multi_seed_joined_pattern_separate_copies_inherit_unanimous_seed_material() {
     run(&mut s, "material.assign", json!({"bodies": [copies[0].as_str()], "material": "Default"}));
     assert_eq!(s.doc.body_material(&copies[0]), solidcraft_doc::DEFAULT_MATERIAL);
     assert_eq!(s.doc.body_material(&copies[1]), "Steel");
+}
+
+/// Renaming or deleting an input body of a multi-body pattern (with no placement) must fail the
+/// pattern with an unknown-body error instead of silently skipping the missing entries.
+#[test]
+fn pattern_reports_error_when_input_body_is_renamed_or_deleted() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [10, -5, 0], "length": 10, "width": 10, "height": 10, "body_name": "Bracket"}));
+    let p1 = run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Bracket"], "dir1": [0, 1, 0], "count1": 3, "spacing1": 20, "name": "GridPat"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    let p2 = run(
+        &mut s,
+        "solid.pattern.circular",
+        json!({"bodies": ["Bracket", "Bracket (2)", "Bracket (3)"], "axis": "Z", "count": 2, "name": "CircPat"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    let p3 = run(
+        &mut s,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Bracket", "Bracket (2)"], "dir1": [0, 0, 1], "count1": 2, "spacing1": 25, "name": "StackPat"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+
+    assert!(s.model.result(p2).unwrap().error.is_none());
+    assert!(s.model.result(p3).unwrap().error.is_none());
+
+    // Rename P1's copies so Bracket (2) and Bracket (3) no longer exist.
+    run(&mut s, "timeline.edit", json!({"feature": p1, "set": {"body_names": ["Renamed_1", "Renamed_2"]}}));
+    let computed = run(&mut s, "timeline.compute_all", json!({}));
+    assert_eq!(computed["errors"].as_u64(), Some(2), "{computed}");
+
+    let err_p2 = s.model.result(p2).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(
+        err_p2.contains("unknown body `Bracket (2)`") && err_p2.contains("2 missing") && err_p2.contains("`Bracket (3)`"),
+        "expected missing-bodies error on CircPat, got: {err_p2:?}"
+    );
+    let err_p3 = s.model.result(p3).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_p3.contains("unknown body `Bracket (2)`"), "expected unknown-body error on StackPat, got: {err_p3:?}");
+
+    let inspected = run(&mut s, "document.inspect", json!({"bodies": false, "sketches": false}));
+    let timeline = inspected["timeline"].as_array().unwrap();
+    for name in ["CircPat", "StackPat"] {
+        let row = timeline.iter().find(|r| r["name"] == name).unwrap();
+        assert!(row["error"].as_str().is_some_and(|e| e.contains("unknown body")), "{name}: {row}");
+    }
+
+    // Deleting one seed body of a two-body pattern also fails the pattern cleanly.
+    let mut del = Session::default();
+    run(&mut del, "solid.box", json!({"corner": [0, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(&mut del, "solid.box", json!({"corner": [30, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Spacer", "name": "SpacerBox"}));
+    let pat = run(
+        &mut del,
+        "solid.pattern.rectangular",
+        json!({"bodies": ["Pin", "Spacer"], "dir1": [0, 1, 0], "count1": 2, "spacing1": 20, "name": "PairPat"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut del, "timeline.delete", json!({"feature": "SpacerBox"}));
+    let err_del = del.model.result(pat).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_del.contains("unknown body `Spacer`"), "expected unknown-body error after delete, got: {err_del:?}");
+}
+
+/// An explicit placement on a body pattern must resolve strictly within that placement instead of
+/// falling back to a same-named body in the root component (whether a plain root body or an
+/// unrelated root pattern copy).
+#[test]
+fn pattern_explicit_placement_is_not_shadowed_by_same_named_root_body() {
+    let mut s = Session::default();
+    let sub = run(&mut s, "component.create", json!({"name": "SubAsm", "grounded": false}));
+    let occ = sub["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"corner": [50, 0, 0], "length": 10, "width": 10, "height": 10, "body_name": "Pin"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.move", json!({"occurrence": occ, "translate": [0, 100, 0]}));
+
+    run(&mut s, "solid.box", json!({"corner": [0, -80, 0], "length": 10, "width": 10, "height": 10, "body_name": "Housing"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": ["Housing"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 25, "name": "RootPat"}));
+
+    let circ = run(&mut s, "solid.pattern.circular", json!({"bodies": ["Pin", "Housing"], "axis": "Z", "count": 2, "name": "CircPat"}))["feature"]
+        .as_u64()
+        .unwrap();
+    assert!(s.model.result(circ).unwrap().error.is_none());
+
+    // 1) Plain root body ("Housing") paired with occurrence placement `[occ]` must fail instead
+    //    of silently falling back to the root body.
+    if let Some(f) = Arc::make_mut(&mut s.doc).feature_mut(circ)
+        && let solidcraft_doc::FeatureKind::Pattern { bodies, placements, .. } = &mut f.kind
+    {
+        *bodies = vec!["Housing".into(), "Pin".into()];
+        *placements = vec![vec![occ], vec![occ]];
+    }
+    s.refresh();
+    let err_root = s.model.result(circ).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_root.contains("no longer shows it"), "plain root body must not shadow explicit placement: {err_root:?}");
+
+    // 2) Unrelated root pattern copy ("Housing (2)") paired with `[occ]` must also fail instead
+    //    of matching `migrated_copy_placement`'s root prefix `&[]`.
+    if let Some(f) = Arc::make_mut(&mut s.doc).feature_mut(circ)
+        && let solidcraft_doc::FeatureKind::Pattern { bodies, placements, .. } = &mut f.kind
+    {
+        *bodies = vec!["Housing (2)".into(), "Pin".into()];
+        *placements = vec![vec![occ], vec![occ]];
+    }
+    s.refresh();
+    let err_copy = s.model.result(circ).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_copy.contains("no longer shows it"), "root pattern copy must not shadow explicit placement: {err_copy:?}");
+}
+
+#[test]
+fn pattern_edit_without_body_names_preserves_copy_names_and_overrides_with_left_out_entries() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [20, 0, 0], "operation": "new", "body_name": "FastenerA"}));
+    let feat_b =
+        run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [20, 20, 0], "operation": "new", "body_name": "FastenerB"}))
+            ["feature"]
+            .as_u64()
+            .unwrap();
+    run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [20, 40, 0], "operation": "new", "body_name": "FastenerC"}));
+    run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [20, 60, 0], "operation": "new", "body_name": "FastenerD"}));
+    run(&mut s, "solid.box", json!({"length": 8, "width": 8, "height": 8, "corner": [20, 80, 0], "operation": "new", "body_name": "FastenerE"}));
+
+    run(&mut s, "material.assign", json!({"bodies": ["FastenerA", "FastenerB"], "material": "Steel"}));
+    run(&mut s, "material.assign", json!({"bodies": ["FastenerC"], "material": "Aluminum"}));
+    run(&mut s, "material.assign", json!({"bodies": ["FastenerD"], "material": "Copper"}));
+    run(&mut s, "material.assign", json!({"bodies": ["FastenerE"], "material": "Titanium"}));
+
+    let pat = run(
+        &mut s,
+        "solid.pattern.circular",
+        json!({"bodies": ["FastenerA", "FastenerB", "FastenerC", "FastenerD"], "axis": "Z", "count": 2, "angle": "180 deg"}),
+    )["feature"]
+        .as_u64()
+        .unwrap();
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"body_names": ["Copy1", "Copy2", "Copy3", "Copy4"]}}));
+    run(&mut s, "material.assign", json!({"bodies": ["Copy4"], "material": "Brass"}));
+
+    // Suppress FastenerB so the pattern leaves index 1 out while keeping 4 source-aligned slots.
+    run(&mut s, "timeline.suppress", json!({"feature": feat_b, "suppressed": true}));
+    let left_out_copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == pat).map(|b| b.name.clone()).collect();
+    assert_eq!(left_out_copies, vec!["Copy1", "Copy3", "Copy4"]);
+
+    // Adding FastenerE without body_names while FastenerB is left out must keep Copy1/Copy3/Copy4
+    // aligned to their sources (preserving Copy4's explicit Brass) and give FastenerE's copy Titanium.
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"bodies": ["FastenerA", "FastenerB", "FastenerC", "FastenerD", "FastenerE"]}}));
+    let after_add: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == pat).map(|b| b.name.clone()).collect();
+    assert_eq!(after_add.len(), 4, "{after_add:?}");
+    assert_eq!(after_add[..3], ["Copy1", "Copy3", "Copy4"]);
+    assert_eq!(s.doc.body_material("Copy1"), "Steel");
+    assert_eq!(s.doc.body_material("Copy3"), "Aluminum");
+    assert_eq!(s.doc.body_material("Copy4"), "Brass");
+    assert_eq!(s.doc.body_material(&after_add[3]), "Titanium");
+
+    // Purging FastenerB and FastenerC without body_names must keep Copy4 on FastenerD (not Copy3)
+    // and retain both inherited materials and Copy4's explicit Brass override.
+    let copy_e = after_add[3].clone();
+    run(&mut s, "timeline.edit", json!({"feature": pat, "set": {"bodies": ["FastenerA", "FastenerD", "FastenerE"]}}));
+    let after_purge: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == pat).map(|b| b.name.clone()).collect();
+    assert_eq!(after_purge, ["Copy1", "Copy4", copy_e.as_str()]);
+    assert_eq!(s.doc.body_material("Copy1"), "Steel");
+    assert_eq!(s.doc.body_material("Copy4"), "Brass");
+    assert_eq!(s.doc.body_material(&copy_e), "Titanium");
+}
+
+#[test]
+fn mirror_combine_unmerged_copies_inherit_seed_material() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "operation": "new", "body_name": "Bracket"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 30, 0], "operation": "new", "body_name": "Spacer"}));
+
+    // Single-seed combined mirror of a body away from the mirror plane yields an unmerged copy lump.
+    let single = run(&mut s, "solid.mirror", json!({"bodies": ["Bracket"], "plane": "YZ", "combine": true}));
+    let single_id = single["feature"].as_u64().unwrap();
+    let single_copy =
+        s.model.state().bodies.iter().find(|b| b.feature == single_id).map(|b| b.name.clone()).expect("disconnected mirror combine copy");
+
+    run(&mut s, "material.assign", json!({"bodies": ["Bracket"], "material": "Steel"}));
+    assert_eq!(s.doc.body_material(&single_copy), "Steel");
+    run(&mut s, "material.assign", json!({"bodies": [single_copy.as_str()], "material": "Default"}));
+    assert_eq!(s.doc.body_material(&single_copy), solidcraft_doc::DEFAULT_MATERIAL);
+    assert_eq!(s.doc.body_material("Bracket"), "Steel");
+
+    // Multi-seed combined mirror inherits unanimously when seeds share the same material.
+    run(&mut s, "material.assign", json!({"bodies": ["Spacer"], "material": "Steel"}));
+    let multi =
+        run(&mut s, "solid.mirror", json!({"bodies": ["Bracket", "Spacer"], "plane": {"origin": [0, -20, 0], "normal": [0, 1, 0]}, "combine": true}));
+    let multi_id = multi["feature"].as_u64().unwrap();
+    let multi_copies: Vec<String> = s.model.state().bodies.iter().filter(|b| b.feature == multi_id).map(|b| b.name.clone()).collect();
+    assert_eq!(multi_copies.len(), 2, "{multi_copies:?}");
+    for copy in &multi_copies {
+        assert_eq!(s.doc.body_material(copy), "Steel", "{copy}");
+    }
+    run(&mut s, "material.assign", json!({"bodies": ["Spacer"], "material": "Aluminum"}));
+    for copy in &multi_copies {
+        assert_eq!(s.doc.body_material(copy), solidcraft_doc::DEFAULT_MATERIAL, "{copy}");
+    }
+}
+
+/// A pattern of picked placements adds them again once and keeps no timeline feature, so a body
+/// pattern redefined into one says so instead of "did not make a feature" (#22942).
+#[test]
+fn a_body_pattern_redefined_to_picked_placements_says_why_it_is_refused() {
+    let mut s = Session::default();
+    let part = run(&mut s, "component.create", json!({"name": "Part"}));
+    let occurrence = part["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[0,0,0],"body_name":"PartBox"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"corner":[30,0,0],"body_name":"Block"}));
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies":["Block"],"dir1":[0,0,1],"count1":3,"spacing1":20,"name":"Pattern"}));
+    let (doc, occurrences) = (s.doc.clone(), s.doc.occurrences.len());
+    let err = s
+        .execute(
+            "timeline.redefine",
+            &json!({"feature":"Pattern","command":"solid.pattern.rectangular","params":{
+                "occurrences":[[occurrence]],"dir1":[0,0,1],"count1":3,"spacing1":20}}),
+        )
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("not kept in the timeline"), "{err}");
+    assert!(!err.contains("did not make a feature"), "{err}");
+    assert_eq!(s.doc, doc, "the refused edit leaves the design as it was");
+    assert_eq!(s.doc.occurrences.len(), occurrences, "no placement is added");
 }

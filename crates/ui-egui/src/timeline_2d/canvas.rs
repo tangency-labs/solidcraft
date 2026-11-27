@@ -903,11 +903,10 @@ pub fn paint_timeline_2d(app: &mut SolveApp, ui: &mut Ui, floating: bool) {
         let line_width = if marker_hovered || marker_dragged { 3.0 } else { 2.5 };
 
         // Vertical marker line through Tier 2 and component tracks (clipped to modeling section)
-        p_m.line_segment([pos2(line_x, line_top), pos2(line_x, line_bottom)], Stroke::new(line_width, accent.color));
+        p_m.line_segment([pos2(line_x, line_top), pos2(line_x, line_bottom - MARKER_FOOT_OVERLAP)], Stroke::new(line_width, accent.color));
 
-        // Bottom handle cap on vertical line
-        let bottom_cap_rect = Rect::from_min_size(pos2(line_x - 5.0, line_bottom - 4.0), vec2(10.0, 4.0));
-        p_m.rect_filled(bottom_cap_rect, egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, accent.color);
+        // Bottom of the vertical line: a down arrowhead while component rows are out of sight below
+        p_m.add(marker_foot(line_x, line_bottom, accent.color, state.scroll_y + 0.5 < max_scroll_y));
 
         // Square pin handle in Tier 1 contacting vertical line
         let pin_size = if marker_hovered || marker_dragged { vec2(15.0, 15.0) } else { vec2(14.0, 14.0) };
@@ -1235,7 +1234,7 @@ fn paint_two_tier_header(
 
     // Diamond icon + Title + Count Badge
     p.text(pos2(banner_rect.left() + 10.0, banner_rect.center().y), egui::Align2::LEFT_CENTER, "◆", FontId::proportional(t.font_small), accent.color);
-    p.text(
+    let heading_rect = p.text(
         pos2(banner_rect.left() + 24.0, banner_rect.center().y),
         egui::Align2::LEFT_CENTER,
         solidcraft_ui_text::tr_label("MODELING FEATURES"),
@@ -1243,7 +1242,8 @@ fn paint_two_tier_header(
         t.text,
     );
     let count_text = solidcraft_ui_text::format("ui.timeline_2d_steps_badge", &[("count", &total_features.to_string())]);
-    let badge_rect = Rect::from_center_size(pos2(banner_rect.left() + 175.0, banner_rect.center().y), vec2(58.0, 16.0));
+    let badge_left = (banner_rect.left() + 146.0).max(heading_rect.right() + 6.0);
+    let badge_rect = Rect::from_min_size(pos2(badge_left, banner_rect.center().y - 8.0), vec2(58.0, 16.0));
     p.rect_filled(badge_rect, 3.0, accent.color.gamma_multiply(0.18));
     p.rect_stroke(badge_rect, 3.0, Stroke::new(1.0, accent.color.gamma_multiply(0.4)), StrokeKind::Inside);
     p.text(badge_rect.center(), egui::Align2::CENTER_CENTER, count_text, FontId::monospace(t.font_badge), accent.color);
@@ -1967,6 +1967,21 @@ fn paint_movable_corridor(
 }
 
 /// Renders the opening bracket `[` of a movable corridor with smart inset when coincident with the rollback marker.
+/// How far above its foot's bottom a marker's line ends: inside the cap and the arrowhead, so neither shows the line through its tip.
+pub(crate) const MARKER_FOOT_OVERLAP: f32 = 3.0;
+
+/// The foot of a rollback marker's line: a flat cap, or a down arrowhead when component rows
+/// are out of sight below, so the hidden rows show at the marker and not only in a counter.
+pub(crate) fn marker_foot(line_x: f32, line_bottom: f32, color: egui::Color32, more_below: bool) -> egui::Shape {
+    if more_below {
+        let points = vec![pos2(line_x - 6.0, line_bottom - 7.0), pos2(line_x + 6.0, line_bottom - 7.0), pos2(line_x, line_bottom)];
+        egui::Shape::convex_polygon(points, color, Stroke::NONE)
+    } else {
+        let cap = Rect::from_min_size(pos2(line_x - 5.0, line_bottom - 4.0), vec2(10.0, 4.0));
+        egui::Shape::rect_filled(cap, egui::CornerRadius { nw: 2, ne: 2, sw: 0, se: 0 }, color)
+    }
+}
+
 pub(crate) fn paint_bracket_open(p: &egui::Painter, x: f32, grid_origin_x: f32, top: f32, bottom: f32, color: egui::Color32, marker_x: Option<f32>) {
     let stroke = Stroke::new(2.0, color);
 

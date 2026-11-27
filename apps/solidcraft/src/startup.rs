@@ -604,8 +604,33 @@ impl BackendGuard {
         (guard, skipped)
     }
 
-    /// `backends` are about to be started: say so on disk first, flushed.
+    /// [`Self::begin`] for standard startup (`gpu_startup`), which names an API on disk only while
+    /// Intel's Vulkan driver creates the window's device on Windows
+    /// (`gpu_startup::guards_device_creation`): a launch that left no attempt file behind writes
+    /// nothing, and only reads the APIs that crashed this version before. APIs whose window failed
+    /// to start are not skipped: standard startup goes to the software renderer instead.
+    pub fn begin_standard(dir: &Path, graphics_path: &Path, version: &str) -> (Self, SkippedBackends) {
+        let marker = dir.join(GRAPHICS_ATTEMPT);
+        if marker.exists() {
+            let (guard, skipped) = Self::begin(dir, graphics_path, version);
+            return (guard, SkippedBackends { crashed: skipped.crashed, failed: eframe::wgpu::Backends::empty() });
+        }
+        let crashed = read_backend_settings(graphics_path).map(|graphics| crashed_backends(&graphics, version)).unwrap_or_else(|reason| {
+            log::warn!("graphics: {reason}");
+            eframe::wgpu::Backends::empty()
+        });
+        (Self { marker, version: version.into() }, SkippedBackends { crashed, failed: eframe::wgpu::Backends::empty() })
+    }
+
+    /// `backends` are about to be started: say so on disk first, flushed. It takes the place of
+    /// this file's attempt named only while the instance started
+    /// ([`Self::attempt_while_the_instance_starts`]), which the adapter's choice then leaves alone.
     pub fn attempt(&self, backends: eframe::wgpu::Backends) {
+        if let Ok(mut instance) = INSTANCE_ATTEMPT.lock()
+            && instance.as_ref().is_some_and(|named| named.marker == self.marker)
+        {
+            instance.take();
+        }
         let text = attempt_text(backends, &self.version);
         if let Err(reason) = solidcraft_engine::io::safe_write::write_atomic_no_follow(&self.marker, text.as_bytes()) {
             log::warn!("graphics: attempt not saved: {reason}");
@@ -619,7 +644,18 @@ impl BackendGuard {
     /// wgpu's default set also lists Metal and D3D12 on Linux, which are never loaded.
     pub fn attempt_when_the_instance_starts(&self, backends: eframe::wgpu::Backends) {
         if let Ok(mut waiting) = ATTEMPT_AT_INSTANCE.lock() {
-            *waiting = Some((self.clone(), backends & native_backends()));
+            *waiting = Some((self.clone(), backends & native_backends(), false));
+        }
+    }
+
+    /// [`Self::attempt_when_the_instance_starts`] for standard startup's OpenGL guard
+    /// (`gpu_startup::guards_instance_creation`, #22917): `backends` are named on disk when
+    /// egui-wgpu creates its instance and no longer once the window's adapter is chosen
+    /// ([`adapter_chosen`]), when the instance and its adapters are up. A crash in a device
+    /// created later is not theirs.
+    pub fn attempt_while_the_instance_starts(&self, backends: eframe::wgpu::Backends) {
+        if let Ok(mut waiting) = ATTEMPT_AT_INSTANCE.lock() {
+            *waiting = Some((self.clone(), backends & native_backends(), true));
         }
     }
 
@@ -638,8 +674,12 @@ impl BackendGuard {
     }
 }
 
-/// What [`BackendGuard::attempt_when_the_instance_starts`] keeps for [`instance_starting`].
-static ATTEMPT_AT_INSTANCE: Mutex<Option<(BackendGuard, eframe::wgpu::Backends)>> = Mutex::new(None);
+/// What [`BackendGuard::attempt_when_the_instance_starts`] keeps for [`instance_starting`]; `true`
+/// when the name goes again once the adapter is chosen
+/// ([`BackendGuard::attempt_while_the_instance_starts`]).
+static ATTEMPT_AT_INSTANCE: Mutex<Option<(BackendGuard, eframe::wgpu::Backends, bool)>> = Mutex::new(None);
+/// The attempt [`instance_starting`] named that [`adapter_chosen`] takes away again.
+static INSTANCE_ATTEMPT: Mutex<Option<BackendGuard>> = Mutex::new(None);
 
 /// egui-wgpu is about to create the window's graphics instance, which loads the API's driver: the
 /// first moment the window's own start can crash inside one. Names the APIs kept by
@@ -647,8 +687,21 @@ static ATTEMPT_AT_INSTANCE: Mutex<Option<(BackendGuard, eframe::wgpu::Backends)>
 /// agent chat, say) goes through the same step, after the first frame removed the file.
 pub fn instance_starting() {
     let waiting = ATTEMPT_AT_INSTANCE.lock().ok().and_then(|mut waiting| waiting.take());
-    if let Some((guard, backends)) = waiting {
+    if let Some((guard, backends, until_adapter)) = waiting {
         guard.attempt(backends);
+        if until_adapter && let Ok(mut instance) = INSTANCE_ATTEMPT.lock() {
+            *instance = Some(guard);
+        }
+    }
+}
+
+/// egui-wgpu chose the window's adapter: the instance and its adapters came up without a crash,
+/// so an attempt named only while the instance started
+/// ([`BackendGuard::attempt_while_the_instance_starts`]) goes. Any other attempt stays.
+pub fn adapter_chosen() {
+    let named = INSTANCE_ATTEMPT.lock().ok().and_then(|mut instance| instance.take());
+    if let Some(guard) = named {
+        guard.clear();
     }
 }
 
@@ -1181,8 +1234,101 @@ pub fn no_window_message(error: &str, settings: Option<&Path>) -> String {
     )
 }
 
+/// `solidcraft --open-url LINK`, as the system starts SolidCraft for a `solidcraft://` link
+/// (Windows' `--open-url "%1"`, the Linux handler entry's `--open-url %u`). `None`: no
+/// `--open-url`, an ordinary launch. `Some(link)`: the argument right after the first
+/// `--open-url` (`None` when there is none, or it isn't text). Every other argument is ignored,
+/// so a link holding quotes or spaces, which a shell or the Windows command line may split into
+/// more arguments, can never add an option (`--control`, `--theme-file`) or a file.
+pub fn open_url_argument(args: impl IntoIterator<Item = std::ffi::OsString>) -> Option<Option<String>> {
+    let mut args = args.into_iter();
+    args.by_ref().find(|a| a == "--open-url")?;
+    Some(args.next().and_then(|link| link.into_string().ok()))
+}
+
+/// The path a `file:` URL names. Only `file:///path` and `file://localhost/path`; `None` for
+/// anything else (another host, a bad escape, a NUL), which is dropped rather than taken as a
+/// path. On unix the escapes decode to bytes, so a name that isn't UTF-8 comes through as it is.
+pub fn file_url_path(url: &str) -> Option<PathBuf> {
+    let rest = url.strip_prefix("file://")?;
+    let path = rest.strip_prefix("localhost").unwrap_or(rest);
+    if !path.starts_with('/') || path.contains(['?', '#']) {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(path.len());
+    let mut it = path.bytes();
+    while let Some(b) = it.next() {
+        if b == b'%' {
+            let hex = [it.next()?, it.next()?];
+            bytes.push(u8::from_str_radix(std::str::from_utf8(&hex).ok()?, 16).ok()?);
+        } else {
+            bytes.push(b);
+        }
+    }
+    if bytes.contains(&0) {
+        return None;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        Some(PathBuf::from(std::ffi::OsStr::from_bytes(&bytes)))
+    }
+    #[cfg(not(unix))]
+    {
+        let path = String::from_utf8(bytes).ok()?;
+        // Windows: `file:///C:/designs/part.sc` names `C:/designs/part.sc`.
+        let drive = path.as_bytes().get(1..3).is_some_and(|d| d.first().is_some_and(u8::is_ascii_alphabetic) && d.get(1) == Some(&b':'));
+        Some(PathBuf::from(if cfg!(windows) && drive { path.get(1..).unwrap_or(&path) } else { path.as_str() }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn file_urls_name_local_paths() {
+        use super::file_url_path;
+        use std::path::Path;
+        assert_eq!(file_url_path("file:///home/me/My%20part.sc").as_deref(), Some(Path::new("/home/me/My part.sc")));
+        assert_eq!(file_url_path("file://localhost/tmp/a.step").as_deref(), Some(Path::new("/tmp/a.step")));
+        assert_eq!(file_url_path("file:///tmp/%C3%A9.sc").as_deref(), Some(Path::new("/tmp/é.sc")));
+        assert_eq!(file_url_path("file://server/share/a.sc"), None);
+        assert_eq!(file_url_path("file:///tmp/a%2"), None);
+        assert_eq!(file_url_path("file:///tmp/a%00.sc"), None);
+        assert_eq!(file_url_path("file:///tmp/a.sc?x"), None);
+        assert_eq!(file_url_path("https://example.com/a.sc"), None);
+        #[cfg(unix)]
+        {
+            // Latin-1 `é`: not UTF-8, still the file's name.
+            use std::os::unix::ffi::OsStrExt;
+            let path = file_url_path("file:///tmp/caf%E9.sc").unwrap();
+            assert_eq!(path.as_os_str().as_bytes(), b"/tmp/caf\xe9.sc");
+        }
+        #[cfg(windows)]
+        assert_eq!(file_url_path("file:///C:/designs/a.sc").as_deref(), Some(Path::new("C:/designs/a.sc")));
+    }
+
+    #[test]
+    fn an_open_url_launch_takes_the_link_and_nothing_else() {
+        use super::open_url_argument;
+        let args = |list: &[&str]| list.iter().map(std::ffi::OsString::from).collect::<Vec<_>>();
+        // A link holding a quote, spaces and an option arrives as one argument and stays one.
+        let crafted = r#"solidcraft://workshop/plugin/maker/gears" --control 1234 --theme-file /tmp/x.json "#;
+        assert_eq!(open_url_argument(args(&["--open-url", crafted])), Some(Some(crafted.to_string())));
+        // Split into more arguments (the Windows command line ends `"%1"` at the quote): only the
+        // first is the link, and the rest is never read as options or files.
+        let split =
+            args(&["--open-url", "solidcraft://workshop/plugin/maker/gears", "--control", "1234", "--theme-file", "/tmp/x.json", "/etc/passwd"]);
+        assert_eq!(open_url_argument(split), Some(Some("solidcraft://workshop/plugin/maker/gears".to_string())));
+        // Options before it are ignored too, and a second `--open-url` is only text.
+        let before = args(&["--control", "1234", "--open-url", "solidcraft://workshop/model/a/b", "--open-url", "solidcraft://workshop/model/c/d"]);
+        assert_eq!(open_url_argument(before), Some(Some("solidcraft://workshop/model/a/b".to_string())));
+        assert_eq!(open_url_argument(args(&["--open-url"])), Some(None));
+        // Not an open-url launch: the ordinary parser reads the arguments.
+        assert_eq!(open_url_argument(args(&["--control", "1234", "part.sc"])), None);
+        // The crafted text is refused by the link parser, so nothing is looked up.
+        assert!(solidcraft_ui_egui::workshop::link::parse(crafted).is_none());
+    }
+
     use super::*;
 
     fn cards() -> Vec<AdapterChoice> {
@@ -1451,6 +1597,32 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// #22110: standard startup writes nothing on a launch that left no attempt behind (every
+    /// machine but Windows on Intel's Vulkan driver), and still learns from one that died while
+    /// Intel's Vulkan driver created the device: Vulkan is skipped by this version from then on.
+    #[test]
+    fn standard_startup_writes_nothing_until_a_guarded_device_crashed() {
+        use eframe::wgpu::Backends;
+        let dir = scratch("backend-guard-standard");
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, r#"{"msaa":4,"failed_backends":{"dx12":"0.50.1"}}"#).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let (guard, skipped) = BackendGuard::begin_standard(&dir, &path, "0.50.1");
+        assert_eq!(skipped, SkippedBackends::default(), "nothing crashed; a failed window is not skipped");
+        assert_eq!(std::fs::read(&path).unwrap(), before, "graphics.json is not rewritten");
+        assert!(!dir.join(GRAPHICS_ATTEMPT).exists());
+        // The process dies while Intel's Vulkan driver creates the window's device.
+        guard.attempt(Backends::VULKAN);
+        let (_, skipped) = BackendGuard::begin_standard(&dir, &path, "0.50.1");
+        assert_eq!(skipped, SkippedBackends { crashed: Backends::VULKAN, failed: Backends::empty() });
+        assert!(!dir.join(GRAPHICS_ATTEMPT).exists(), "the leftover is read once");
+        let (_, skipped) = BackendGuard::begin_standard(&dir, &path, "0.50.1");
+        assert_eq!(skipped.crashed, Backends::VULKAN, "skipped from then on");
+        let (_, skipped) = BackendGuard::begin_standard(&dir, &path, "0.51.0");
+        assert_eq!(skipped, SkippedBackends::default(), "a new version tries Vulkan once more");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// #19643: a panic from a missing libxkbcommon-x11 (the window system's event loop, before any
     /// graphics driver is loaded) left the attempt file behind, and the next launches blamed
     /// Vulkan, Metal and D3D12 in turn. The attempt is named when egui-wgpu creates its instance
@@ -1485,6 +1657,56 @@ mod tests {
         // removed the file, and must not name the API again.
         crate::startup_step(eframe::egui_wgpu::STEP_INSTANCE, "");
         assert!(!attempt.exists(), "a later window names nothing");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #22917: standard startup's OpenGL guard names OpenGL only from the instance's creation until
+    /// the adapter is chosen. A crash in between makes the next launch of this version skip
+    /// OpenGL; a start that got to its adapter leaves nothing behind, and an attempt named after
+    /// the instance (Intel's Vulkan device, #22110) stays for its device.
+    #[test]
+    fn opengl_is_named_only_while_the_instance_starts() {
+        use eframe::wgpu::Backends;
+        let _one_at_a_time = INSTANCE_ATTEMPT_TESTS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let v = "0.50.1";
+        let dir = scratch("backend-guard-gl-instance");
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, r#"{"msaa":4}"#).unwrap();
+        let attempt = dir.join(GRAPHICS_ATTEMPT);
+        let (guard, skipped) = BackendGuard::begin_standard(&dir, &path, v);
+        assert_eq!(skipped, SkippedBackends::default());
+        // A clean start: named while the instance and its adapters come up, then gone.
+        guard.attempt_while_the_instance_starts(Backends::GL);
+        assert!(!attempt.exists(), "nothing before the instance");
+        crate::startup_step(eframe::egui_wgpu::STEP_INSTANCE, "");
+        assert!(attempt.is_file(), "named before the OpenGL driver loads");
+        crate::startup_step(eframe::egui_wgpu::STEP_SURFACE, "");
+        crate::startup_step(eframe::egui_wgpu::STEP_ADAPTER, "");
+        assert!(attempt.is_file(), "the adapters are listed with the driver loaded");
+        crate::startup_step(eframe::egui_wgpu::STEP_ADAPTER_CHOSEN, "Vulkan NVIDIA (DiscreteGpu)");
+        assert!(!attempt.exists(), "the instance came up: nothing is left");
+        let (_, skipped) = BackendGuard::begin_standard(&dir, &path, v);
+        assert_eq!(skipped, SkippedBackends::default(), "a clean start skips nothing");
+        assert_eq!(backend_settings(&path), serde_json::json!({"msaa": 4}), "graphics.json untouched");
+        // Intel's Vulkan device guard names Vulkan in the adapter choice: it outlives the step.
+        guard.attempt_while_the_instance_starts(Backends::GL);
+        crate::startup_step(eframe::egui_wgpu::STEP_INSTANCE, "");
+        guard.attempt(Backends::VULKAN);
+        crate::startup_step(eframe::egui_wgpu::STEP_ADAPTER_CHOSEN, "Vulkan Intel (IntegratedGpu)");
+        assert!(attempt.is_file(), "Vulkan stays named while its device is created");
+        guard.clear();
+        // The process dies while the instance starts: OpenGL is skipped by this version.
+        guard.attempt_while_the_instance_starts(Backends::GL);
+        crate::startup_step(eframe::egui_wgpu::STEP_INSTANCE, "");
+        let (_, skipped) = BackendGuard::begin_standard(&dir, &path, v);
+        assert_eq!(skipped, SkippedBackends { crashed: Backends::GL, failed: Backends::empty() });
+        assert!(!attempt.exists(), "the leftover is read once");
+        // A later choice of adapter in this process finds nothing to take away.
+        crate::startup_step(eframe::egui_wgpu::STEP_ADAPTER_CHOSEN, "");
+        let (_, skipped) = BackendGuard::begin_standard(&dir, &path, v);
+        assert_eq!(skipped.crashed, Backends::GL, "skipped from then on");
+        let (_, skipped) = BackendGuard::begin_standard(&dir, &path, "0.51.0");
+        assert_eq!(skipped, SkippedBackends::default(), "a new version tries OpenGL once more");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
