@@ -114,9 +114,9 @@ scripts.
 
 **Extrude to a picked target** (Preferences › Tools, on by default) lets a pick choose the
 extent. With it on and a profile selected in the solid Extrude dialog, picking a face away from
-its plane, a curved face, an off-plane vertex or a parallel plane automatically switches
-**Distance** to **To Object**. Coplanar faces still join the profile selection; non-parallel
-planes are not targets. Clicking into the **Profiles** box first makes the next picks profiles
+its plane, a curved face, an off-plane vertex or a plane parallel or at a slant to it
+automatically switches **Distance** to **To Object**. Coplanar faces still join the profile
+selection; a plane the extrusion runs along is not a target. Clicking into the **Profiles** box first makes the next picks profiles
 again, even off the plane. The extent can still be chosen manually. For a new extrusion without
 start or end offsets or a From Object input, the target also sets the stored distance and
 one-sided direction, so returning to **Distance** keeps that reach. Thin Extrude keeps its
@@ -126,14 +126,13 @@ existing picks. With the setting off, picks only add profiles.
 or an edge and click one of the points that light up, its ends or its middle (a hole's centre
 too), the way Move's points are picked. So an extrude can end where two sketch lines meet.
 
-Scripts and MCP can end an extrusion at a construction plane or point, or start it there:
-`to: {plane: "Target"}` (or just the plane's name) and `to: {construct_point: "P1"}`, and the
-same for `from`. The extrusion follows the plane or the point when a parameter moves it. A
-plane parallel to the sketch ends the extrusion on it. A plane at a slant cuts the end along
-it, as a slanted face does. A plane the extrusion runs along gives no end, so it is refused. A
-point ends the extrusion on the plane through it, parallel to the sketch. The Extrude dialog
-doesn't offer these picks yet; editing such an extrusion in the dialog keeps its plane or
-point unless you pick another target.
+**To Object** and **From Object** also take an origin or construction plane, or a construction
+point. The extrusion follows the plane or the point when a parameter moves it. A plane parallel
+to the sketch ends the extrusion on it. A plane at a slant cuts the end along it, as a slanted
+face does. A plane the extrusion runs along gives no end, so it can't be picked. A point ends
+the extrusion on the plane through it, parallel to the sketch. Editing the extrusion shows the
+plane or the point it follows. Scripts and MCP give them as `to: {plane: "Target"}` (or just the
+plane's name) and `to: {construct_point: "P1"}`, and the same for `from`.
 
 Dragging Extrude's distance arrow stops at flat faces parallel to the profile that lie over it,
 such as the far side of the block a cut goes into: once the arrow's tip comes within a few
