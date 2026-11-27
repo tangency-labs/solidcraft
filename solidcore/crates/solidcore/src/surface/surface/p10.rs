@@ -1588,6 +1588,52 @@ fn opening_drops(
     Ok(true)
 }
 
+/// (Not upstream) The limit root marks ([`Solution::limit_root`]) of the solutions of the
+/// combination's second phase once its culls are made: `marks` before them, and each cull as
+/// `(culled, the solution it was culled for)`. The solutions the culls join (culled ones and
+/// what they were culled for, through chains) share one mark, the OR of theirs, so that a
+/// survivor carries every mark that reached it whatever order the culls were made in.
+fn absorbed_marks(marks: &[bool], absorbed: &[(usize, usize)]) -> Vec<bool> {
+    let n = marks.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    let root = |parent: &mut Vec<usize>, mut i: usize| {
+        while let Some(&up) = parent.get(i) {
+            if up == i {
+                break;
+            }
+            // (path halving)
+            let grand = parent.get(up).copied().unwrap_or(up);
+            if let Some(slot) = parent.get_mut(i) {
+                *slot = grand;
+            }
+            i = grand;
+        }
+        i
+    };
+    for &(a, b) in absorbed {
+        if a >= n || b >= n {
+            continue;
+        }
+        let (ra, rb) = (root(&mut parent, a), root(&mut parent, b));
+        if let Some(slot) = parent.get_mut(ra) {
+            *slot = rb;
+        }
+    }
+    let mut set_mark = vec![false; n];
+    for (i, &m) in marks.iter().enumerate() {
+        let r = root(&mut parent, i);
+        if let Some(slot) = set_mark.get_mut(r) {
+            *slot |= m;
+        }
+    }
+    (0..n)
+        .map(|i| {
+            let r = root(&mut parent, i);
+            set_mark.get(r).copied().unwrap_or(false)
+        })
+        .collect()
+}
+
 /// `sm_GlobalCurveIntersectCombineSolutions`: combines the curve/surface solutions
 /// `[curve t, surface u, surface v]` (sorted by the curve parameter) into unique point
 /// solutions and coincident segments, in place: merges touching, overlapping and
@@ -1922,8 +1968,9 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
     // intersections.
     let num = solutions.len();
     let mut cull = vec![false; num];
-    // (not upstream) the solutions that take in the limit root mark of one culled
-    let mut marked = vec![false; num];
+    // (not upstream) each cull as (culled, the solution it is culled for): the limit root
+    // marks follow them once every cull is made (`absorbed_marks`)
+    let mut absorbed: Vec<(usize, usize)> = Vec::new();
     let mut compress = false;
     for ii in 0..num {
         let inv_sol = solutions.get_at(ii)?;
@@ -1988,11 +2035,7 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                 if let Some(c) = cull.get_mut(ii) {
                     *c = true;
                 }
-                if inv_sol.limit_root || marked.get(ii).copied().unwrap_or(false) {
-                    if let Some(m) = marked.get_mut(jj) {
-                        *m = true;
-                    }
-                }
+                absorbed.push((ii, jj));
                 compress = true;
             } else {
                 // Range is long enough.  See about deleting the point solution.
@@ -2012,11 +2055,7 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
                     if let Some(c) = cull.get_mut(jj) {
                         *c = true;
                     }
-                    if pt_sol.limit_root || marked.get(jj).copied().unwrap_or(false) {
-                        if let Some(m) = marked.get_mut(ii) {
-                            *m = true;
-                        }
-                    }
+                    absorbed.push((jj, ii));
                     compress = true;
                 }
             }
@@ -2034,8 +2073,9 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
         }
     }
 
-    for (ii, &m) in marked.iter().enumerate() {
-        if m {
+    let marks: Vec<bool> = solutions.as_slice().iter().map(|s| s.limit_root).collect();
+    for (ii, m) in absorbed_marks(&marks, &absorbed).into_iter().enumerate() {
+        if m && !marks.get(ii).copied().unwrap_or(true) {
             let mut s = solutions.get_at(ii)?;
             s.limit_root = true;
             solutions.set_at(ii, &s)?;
@@ -2534,6 +2574,31 @@ mod tests {
             // each a transversal crossing, typed by its certified root
             assert_eq!(sol.contact, Contact::Crossing, "{t}");
         }
+    }
+
+    /// The limit root marks after the combination's culls (`absorbed_marks`): a survivor
+    /// carries every mark that reached it, whatever order the culls were made in. A range A
+    /// before a short marked range B, with a point P inside both: A culls P, then B is culled
+    /// for P; A carries B's mark. The same with B before A, and through a chain (a marked
+    /// point culled by a long range L, a short range culled for a point L culls too). A
+    /// solution no cull reaches keeps its own mark.
+    #[test]
+    fn a_culled_limit_root_marks_its_survivor_in_any_order() {
+        let (a, b, p) = (0, 1, 2);
+        let got = absorbed_marks(&[false, true, false], &[(p, a), (b, p)]);
+        assert!(got[a], "{got:?}");
+        let (b, a, p) = (0, 1, 2);
+        let got = absorbed_marks(&[true, false, false], &[(b, p), (p, a)]);
+        assert!(got[a], "{got:?}");
+        // the chain: P0 (marked) culled by L1; S2 culled for P3; P3 culled by L1; 4 apart
+        let got = absorbed_marks(
+            &[true, false, false, false, false],
+            &[(2, 3), (0, 1), (3, 1)],
+        );
+        assert_eq!(got, vec![true, true, true, true, false]);
+        let got = absorbed_marks(&[false, false, false, false], &[(3, 2), (2, 1), (1, 0)]);
+        assert_eq!(got, vec![false; 4]);
+        assert_eq!(absorbed_marks(&[true, false], &[]), vec![true, false]);
     }
 
     /// A line dipping 2e-6 below the torus's crown where the crown meets the seam crosses it
