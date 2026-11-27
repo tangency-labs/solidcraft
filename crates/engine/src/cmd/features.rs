@@ -534,8 +534,11 @@ fn extrude_base(s: &Session, p: &Value) -> Option<(Vec3, Vec3)> {
 pub fn extrude_reach(s: &Session, p: &Value) -> Option<f64> {
     if let Some(to) = p.get("to") {
         let (base, n) = extrude_base(s, p)?;
-        let t = object_point(s, to, base, n)?;
-        return Some((t - base).dot(n)).filter(|h| h.is_finite());
+        let h = match object_target(s, to, base, n, s.active_component)? {
+            ObjectTarget::Point(t) => (t - base).dot(n),
+            ObjectTarget::Level(h) => h,
+        };
+        return Some(h).filter(|h| h.is_finite());
     }
     let d = s.doc.eval(&expr(p, "distance")?, Kind::Length).ok()?;
     let dir = str_(p, "direction").map(str::to_ascii_lowercase);
@@ -556,8 +559,8 @@ const START_PROBE_MM: f64 = 0.1;
 /// Faces picked in the world are probed in the placed model; one that cannot be placed is the
 /// error.
 pub fn auto_operation(s: &Session, p: &Value) -> Result<Option<&'static str>> {
-    let st = if grouped_face(p).is_some() { s.world_state()? } else { s.model.state() };
-    Ok(auto_operation_in(s, p, &st))
+    let (st, frame) = if grouped_face(p).is_some() { (s.world_state()?, 0) } else { (s.model.state(), s.active_component) };
+    Ok(auto_operation_in(s, p, &st, frame))
 }
 
 impl Session {
@@ -575,8 +578,9 @@ fn grouped_face(p: &Value) -> Option<Vec3> {
     p.get("faces").and_then(Value::as_array).and_then(|faces| faces.first()).and_then(vec3)
 }
 
-/// [`auto_operation`] probing the model `st`.
-fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) -> Option<&'static str> {
+/// [`auto_operation`] probing the model `st`, which is in the frame of the component `frame`
+/// (the root's for the placed model): a construction plane To / From Object is read there.
+fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState, frame: u64) -> Option<&'static str> {
     let symmetric = p.get("to").is_none() && str_(p, "direction").is_some_and(|d| d.eq_ignore_ascii_case("symmetric"));
     // Imported face groups can belong to a child of an empty active component.
     // Probe in the same coordinate frame as the face picks.
@@ -604,14 +608,18 @@ fn auto_operation_in(s: &Session, p: &Value, st: &solidcraft_doc::ModelState) ->
     };
     // The extrude starts at its From Object or start offset, not at the profile: probe from
     // there (#467). To an object it then reaches only from that start.
-    let start = match p.get("from").and_then(|from| object_point(s, from, base, n)) {
-        Some(from) if grouped.is_none() => (from - base).dot(n),
+    let start = match p.get("from").and_then(|from| object_target(s, from, base, n, frame)) {
+        Some(ObjectTarget::Point(from)) if grouped.is_none() => (from - base).dot(n),
+        Some(ObjectTarget::Level(h)) if grouped.is_none() => h,
         _ => expr(p, "start_offset").and_then(|e| s.doc.eval(&e, Kind::Length).ok()).unwrap_or(0.0),
     };
     let start = if start.is_finite() { start } else { 0.0 };
     let base = base + n * start;
     let d = if grouped.is_some() && p.get("to").is_some() {
-        (object_point(s, p.get("to")?, base, n)? - base).dot(n)
+        match object_target(s, p.get("to")?, base, n, frame)? {
+            ObjectTarget::Point(t) => (t - base).dot(n),
+            ObjectTarget::Level(h) => h,
+        }
     } else if let Some(d) = extrude_reach(s, p) {
         if p.get("to").is_some() { d - start } else { d }
     } else {
@@ -1455,7 +1463,7 @@ fn extrude_from(s: &mut Session, p: &Value, grouped: Option<FaceProfile>) -> Res
     // Auto leaves the hidden body the sketch is on alone, as its probe does.
     let auto_hidden = if auto && face_body.is_none() && !named { hidden_face_body(s, sketch) } else { None };
     let operation = if auto {
-        match Operation::parse(auto_operation_in(s, p, &s.model.state()).unwrap_or("new")).unwrap_or(Operation::NewBody) {
+        match Operation::parse(auto_operation_in(s, p, &s.model.state(), s.active_component).unwrap_or("new")).unwrap_or(Operation::NewBody) {
             Operation::Join if auto_hidden.is_some() => Operation::NewBody,
             o => o,
         }
@@ -1917,21 +1925,28 @@ pub(super) fn extent_param(s: &Session, p: &Value, cmd: &str) -> Result<Extent> 
     })
 }
 
-/// Where a To / From Object parameter lies for an extrude from `base` along `n`: the point, a
-/// construction point, or where the line from `base` along `n` meets a plane (#8527). `None`
-/// when it can't be found, or for a plane the line never meets.
-fn object_point(s: &Session, v: &Value, base: Vec3, n: Vec3) -> Option<Vec3> {
+/// What [`object_target`] finds.
+enum ObjectTarget {
+    Point(Vec3),
+    Level(f64),
+}
+
+/// Where a To / From Object parameter lies for an extrude from `base` along `n` (#8527): a
+/// point (given, or a construction point), or the level along `n` where a plane meets the line
+/// from `base`. `component` is the frame `base` is in: the active component's for a sketch, the
+/// root's for faces picked in the world. `None` when it can't be found, or for a plane the line
+/// never meets.
+fn object_target(s: &Session, v: &Value, base: Vec3, n: Vec3, component: u64) -> Option<ObjectTarget> {
     if let Some(p) = vec3(v) {
-        return Some(p);
+        return Some(ObjectTarget::Point(p));
     }
     let r = ObjectRef(super::construct::geo(s, Some(v), "solid.extrude", "to").ok()?);
     let (vals, _) = s.doc.param_values();
-    match solidcraft_doc::construct::object_at_in(&s.doc, &vals, &s.model.state(), s.active_component, &r).ok()? {
-        ObjectAt::Point(q) => Some(q),
+    match solidcraft_doc::construct::object_at_in(&s.doc, &vals, &s.model.state(), component, &r).ok()? {
+        ObjectAt::Point(q) => Some(ObjectTarget::Point(q)),
         ObjectAt::Plane(pl) => {
             let sketch = solidcore_record::Plane::from_normal(base, n)?;
-            let level = solidcraft_kernel::level_on_plane(&sketch, base, &pl).ok()?;
-            Some(sketch.offset(level).origin)
+            solidcraft_kernel::level_on_plane(&sketch, base, &pl).ok().map(ObjectTarget::Level)
         }
     }
 }
