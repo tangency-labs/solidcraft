@@ -478,11 +478,7 @@ pub(super) fn admit_bulged(vertices: &[DxfVertex], closed: bool) -> Result<()> {
     }
     let check = |from: DxfVertex, to: Vec2| -> Result<()> {
         if from.bulge != 0.0
-            && solidcraft_kernel::services::dxf::export::bulge_arc(
-                solidcraft_kernel::services::dxf::export::Vertex { at: from.at, bulge: from.bulge },
-                to,
-            )
-            .is_none()
+            && solidcraft_kernel::dxf::export::bulge_arc(solidcraft_kernel::dxf::export::Vertex { at: from.at, bulge: from.bulge }, to).is_none()
         {
             return Err(IoError::Invalid("bulged polyline arc has collapsed or non-finite geometry".into()));
         }
@@ -521,11 +517,8 @@ fn sample_bulged(vertices: &[DxfVertex], closed: bool, out: &mut Vec<Vec2>) -> R
 }
 
 fn sample_bulged_edge(from: DxfVertex, to: Vec2, out: &mut Vec<Vec2>) -> Result<()> {
-    let points = solidcraft_kernel::services::dxf::export::bulged_edge_points(
-        solidcraft_kernel::services::dxf::export::Vertex { at: from.at, bulge: from.bulge },
-        to,
-    )
-    .map_err(|error| IoError::Invalid(error.reason))?;
+    let points = solidcraft_kernel::dxf::export::bulged_edge_points(solidcraft_kernel::dxf::export::Vertex { at: from.at, bulge: from.bulge }, to)
+        .map_err(|error| IoError::Invalid(error.reason))?;
     out.try_reserve(points.len()).map_err(|_| IoError::Invalid("cannot allocate bulged polyline bounds".into()))?;
     out.extend(points);
     Ok(())
@@ -1002,18 +995,16 @@ fn shape_preflight(shape: &DxfShape) -> Result<()> {
         DxfShape::Line(a, b) => a.is_finite() && b.is_finite(),
         DxfShape::Polyline { points } => points.len() >= 2 && points.len() <= MAX_DXF_FILE_VALUES && points.iter().all(|p| p.is_finite()),
         DxfShape::Circle { c, r } => c.is_finite() && r.is_finite() && *r > 0.0,
-        DxfShape::Arc { c, r, a0, a1 } => {
-            c.is_finite() && r.is_finite() && *r > 0.0 && solidcraft_kernel::services::dxf::export::arc_fields_finite(*a0, *a1)
-        }
+        DxfShape::Arc { c, r, a0, a1 } => c.is_finite() && r.is_finite() && *r > 0.0 && solidcraft_kernel::dxf::export::arc_fields_finite(*a0, *a1),
         DxfShape::Ellipse { c, major, ratio, t0, t1 } => {
             c.is_finite()
-                && solidcraft_kernel::services::dxf::export::axis_nonzero(*major)
+                && solidcraft_kernel::dxf::export::axis_nonzero(*major)
                 && ratio.is_finite()
                 && *ratio > 0.0
                 && *ratio <= 1.0
                 && t0.is_finite()
                 && t1.is_finite()
-                && solidcraft_kernel::services::dxf::export::finite_span(*t0, *t1)
+                && solidcraft_kernel::dxf::export::finite_span(*t0, *t1)
         }
         DxfShape::Spline { degree, knots, ctrl, weights } => {
             let degree = usize::from(*degree);
@@ -1039,7 +1030,7 @@ fn shape_preflight(shape: &DxfShape) -> Result<()> {
         }
         DxfShape::Text { at, height, angle_deg, text } | DxfShape::AlignedText { at, height, angle_deg, text, .. } => {
             text_encode::writable(text)?;
-            at.is_finite() && height.is_finite() && *height > 0.0 && solidcraft_kernel::services::dxf::export::finite_degrees(*angle_deg)
+            at.is_finite() && height.is_finite() && *height > 0.0 && solidcraft_kernel::dxf::export::finite_degrees(*angle_deg)
         }
     };
     if !finite {
@@ -1185,7 +1176,7 @@ fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
         DxfShape::Circle { r, .. } => positive(emitted_length(*r)?)?,
         DxfShape::Arc { r, a0, a1, .. } => {
             positive(emitted_length(*r)?)?;
-            if !solidcraft_kernel::services::dxf::export::distinct_degrees(emitted_number(*a0)?, emitted_number(*a1)?) {
+            if !solidcraft_kernel::dxf::export::distinct_degrees(emitted_number(*a0)?, emitted_number(*a1)?) {
                 return Err(collapse());
             }
         }
@@ -1228,7 +1219,7 @@ fn shape_emission_preflight(shape: &DxfShape) -> Result<()> {
 
 fn extend_extents(extents: Option<(Vec2, Vec2)>, point: Vec2) -> (Vec2, Vec2) {
     extents.map_or((point, point), |(lo, hi)| {
-        let b = solidcraft_kernel::services::dxf::export::union_bounds(lo, hi, point, point);
+        let b = solidcraft_kernel::dxf::export::union_bounds(lo, hi, point, point);
         (b.min, b.max)
     })
 }
