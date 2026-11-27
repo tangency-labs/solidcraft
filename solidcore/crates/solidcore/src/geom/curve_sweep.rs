@@ -13,8 +13,12 @@ use crate::geom::vector3d::{Point3, Vec3};
 use crate::math::HALF_PI;
 
 /// The sine of the smallest angle the sweep direction may make with a face's tangent plane at
-/// the curve for the sweep to cut the face across (1°): at every sample nearer than this the
-/// swept sheet would lie along the face, touching it rather than crossing it.
+/// the curve for the sweep to cut the face across (1°). At any angle above zero the swept sheet
+/// does cross the face, but where the crossing lies is ill-conditioned: an error `e` in the
+/// curve or the face, square to the face, moves the crossing by `e / sin(angle)` along the face.
+/// The cutoff bounds that growth at `1 / sin 1° ≈ 57`; a shallower sweep at every sample of the
+/// curve, down to exactly along the face where the sheet only touches it, is treated as running
+/// along the face.
 pub const ALONG_FACE: f64 = 0.017_452_406_437_283_512;
 
 /// Why no sweep direction is found for a curve.
@@ -24,8 +28,9 @@ pub enum SweepRefusal {
     NoFace,
     /// The given direction is zero or not finite, or the face normals at the curve cancel out.
     NoDirection,
-    /// The direction lies in the face's tangent plane at every sample of the curve: the sheet
-    /// would run along the face (tangent to it) for the curve's whole length.
+    /// The direction lies in the face's tangent plane, or within [`ALONG_FACE`] of it, at every
+    /// sample of the curve: the sheet would touch the face, or cross it where the crossing moves
+    /// more than 57 times any error, for the curve's whole length.
     AlongFace,
 }
 
@@ -43,7 +48,8 @@ pub struct Sample {
 /// face normals at the curve's samples, each at the foot on the face nearest the sample. Refused
 /// when no sample has a foot and no direction is given, when there is no direction (`given` zero or not finite, the normals
 /// cancel out), or when the direction lies in the face's tangent plane, within [`ALONG_FACE`], at
-/// every sample: the swept sheet would run along the face instead of across it.
+/// every sample: the swept sheet would touch the face, or cross it so shallowly that where it
+/// crosses is not reliable (see [`ALONG_FACE`]).
 pub fn sweep_direction(samples: &[Sample], given: Option<Vec3>) -> Result<Vec3, SweepRefusal> {
     let normals: Vec<Vec3> = samples
         .iter()
@@ -299,6 +305,22 @@ pub fn run_on(at: Point3, along: Vec3, far: f64) -> Option<Point3> {
     (p.x.is_finite() && p.y.is_finite() && p.z.is_finite()).then_some(p)
 }
 
+/// The point on from `at` along the direction `along` (backward for a negative `far`) that has
+/// run `far` square to the sweep `dir`: where an open curve's end, continued along its tangent,
+/// has passed the box in the swept sheet (which holds only the run across the sweep). A tangent
+/// square to the sweep runs on `far` itself; a steeper one runs on `far / sin(angle to dir)`.
+/// `None` for a tangent along `dir` (the sine within 1e-9), a zero vector or numbers that are not
+/// finite.
+#[must_use]
+pub fn run_on_across(at: Point3, along: Vec3, dir: Vec3, far: f64) -> Option<Point3> {
+    let t = along.unitize().ok()?;
+    let across = t.cross(dir.unitize().ok()?).length();
+    if across.is_nan() || across <= 1e-9 {
+        return None;
+    }
+    run_on(at, t, far / across)
+}
+
 /// Whether a curve from `start` to `end` closes on itself: its ends within a billionth of its
 /// size from the origin, as a sketch chain's.
 #[must_use]
@@ -322,6 +344,70 @@ pub fn turn_about(points: &[Point3], dir: Vec3) -> f64 {
         })
         .sum::<f64>()
         * 0.5
+}
+
+/// Most points of a closed polyline [`loop_turn`] checks for crossings (pairs of its edges).
+const MAX_LOOP_POINTS: usize = 8192;
+
+/// Which way a closed polyline `points` (its last point on its first) turns about the unit `dir`,
+/// as seen along `dir`: `Some(true)` counter-clockwise (the left of the curve as the sweep sees
+/// it is inside), `Some(false)` clockwise. `None` where that cannot be told: the view crosses
+/// itself (its lobes turn opposite ways, so no one side is inside for all of them), it encloses
+/// no area (within a billionth of its size squared), it has more than [`MAX_LOOP_POINTS`]
+/// points, or its numbers are not finite.
+#[must_use]
+pub fn loop_turn(points: &[Point3], dir: Vec3) -> Option<bool> {
+    let k = dir.unitize().ok()?;
+    if points.len() < 4 || points.len() > MAX_LOOP_POINTS {
+        return None;
+    }
+    // Two axes square to the sweep: the view along it.
+    let pick = if k.x.abs() < 0.9 { Vec3::X } else { Vec3::Y };
+    let (_, u) = (pick - k * pick.dot(k)).length_and_unit()?;
+    let v = k.cross(u);
+    let first = *points.first()?;
+    let flat: Vec<[f64; 2]> = points
+        .iter()
+        .map(|p| [(*p - first).dot(u), (*p - first).dot(v)])
+        .collect();
+    if flat.iter().flatten().any(|x| !x.is_finite()) {
+        return None;
+    }
+    let size = flat
+        .iter()
+        .fold(0.0_f64, |m, [x, y]| m.max(x.abs()).max(y.abs()));
+    let area = turn_about(points, k);
+    if !(area.is_finite() && area.abs() > 1e-9 * size * size) {
+        return None;
+    }
+    // A crossing: two edges that are not neighbours, each with the other's ends strictly on its
+    // two sides (a touch within a billionth of the size counts as none).
+    let eps = 1e-9 * size * size;
+    let side = |a: [f64; 2], b: [f64; 2], p: [f64; 2]| {
+        (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+    };
+    let apart = |s: f64, t: f64| (s > eps && t < -eps) || (s < -eps && t > eps);
+    let edges: Vec<([f64; 2], [f64; 2])> = flat
+        .windows(2)
+        .filter_map(|w| match w {
+            [a, b] => Some((*a, *b)),
+            _ => None,
+        })
+        .collect();
+    let last = edges.len().saturating_sub(1);
+    for (i, (a, b)) in edges.iter().enumerate() {
+        for (j, (c, d)) in edges.iter().enumerate().skip(i + 2) {
+            if i == 0 && j == last {
+                continue;
+            }
+            if apart(side(*a, *b, *c), side(*a, *b, *d))
+                && apart(side(*c, *d, *a), side(*c, *d, *b))
+            {
+                return None;
+            }
+        }
+    }
+    Some(area > 0.0)
 }
 
 #[cfg(test)]
@@ -406,6 +492,20 @@ mod tests {
             sample(Vec3::X, &[(Vec3::X, -Vec3::Z)]),
         ];
         assert_eq!(sweep_direction(&both, None), Err(SweepRefusal::NoDirection));
+    }
+
+    #[test]
+    fn the_cutoff_is_where_a_crossing_moves_57_times_an_error() {
+        // 1 / sin 1° = 57.30: an error e square to the face moves the crossing by e / sin(angle).
+        assert!((1.0 / ALONG_FACE - 57.298_688_498_550_18).abs() < 1e-9);
+        assert!((ALONG_FACE - 1.0_f64.to_radians().sin()).abs() < 1e-17);
+        let flat = [sample(Vec3::ZERO, &[(Vec3::ZERO, Vec3::Z)])];
+        let tilt = |deg: f64| Vec3::new(0.0, deg.to_radians().cos(), deg.to_radians().sin());
+        assert_eq!(
+            sweep_direction(&flat, Some(tilt(0.99))),
+            Err(SweepRefusal::AlongFace)
+        );
+        assert!(sweep_direction(&flat, Some(tilt(1.01))).is_ok());
     }
 
     #[test]
@@ -582,6 +682,21 @@ mod tests {
             run_on(Vec3::X, Vec3::Y * 2.0, -3.0),
             Some(Vec3::new(1.0, -3.0, 0.0))
         );
+        // Square to the sweep: `far` itself. At 45° to it: far / sin 45° = 2√2 along (1, 0, 1)/√2,
+        // which is 2 across. Along the sweep: none.
+        assert_eq!(
+            run_on_across(Vec3::X, Vec3::Y * 2.0, Vec3::Z, -3.0),
+            Some(Vec3::new(1.0, -3.0, 0.0))
+        );
+        let slant = run_on_across(Vec3::ZERO, Vec3::new(1.0, 0.0, 1.0), Vec3::Z, 2.0).unwrap();
+        assert!(
+            slant.distance(Vec3::new(2.0, 0.0, 2.0)) < 1e-12,
+            "{slant:?}"
+        );
+        assert_eq!(
+            run_on_across(Vec3::ZERO, Vec3::Z, -Vec3::Z * 3.0, 2.0),
+            None
+        );
         assert!(closes(Vec3::X, Vec3::X) && !closes(Vec3::X, Vec3::Y));
         let square = [
             Vec3::ZERO,
@@ -592,5 +707,57 @@ mod tests {
         ];
         assert_eq!(turn_about(&square, Vec3::Z), 1.0);
         assert_eq!(turn_about(&square, -Vec3::Z), -1.0);
+    }
+
+    #[test]
+    fn a_loop_turns_one_way_unless_it_crosses_itself_or_has_no_area() {
+        let square = [
+            Vec3::ZERO,
+            Vec3::X,
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::Y,
+            Vec3::ZERO,
+        ];
+        assert_eq!(loop_turn(&square, Vec3::Z), Some(true));
+        assert_eq!(loop_turn(&square, -Vec3::Z), Some(false));
+        let reversed: Vec<Vec3> = square.iter().rev().copied().collect();
+        assert_eq!(loop_turn(&reversed, Vec3::Z), Some(false));
+        // A circle of radius 0.005 in 8 points either way round.
+        let circle = |sign: f64| -> Vec<Vec3> {
+            (0..=8)
+                .map(|i| {
+                    let t = sign * TWO_PI * f64::from(i) / 8.0;
+                    Vec3::new(0.005 * t.cos(), 0.005 * t.sin(), 0.0)
+                })
+                .collect()
+        };
+        assert_eq!(loop_turn(&circle(1.0), Vec3::Z), Some(true));
+        assert_eq!(loop_turn(&circle(-1.0), Vec3::Z), Some(false));
+        // A chord there and back encloses nothing: not told, not clockwise.
+        let chord = [Vec3::ZERO, Vec3::X * 0.01, Vec3::ZERO];
+        assert_eq!(loop_turn(&chord, Vec3::Z), None);
+        // (0,0,0), (4,4,0), (0,4,2), (4,0,2) seen along +z: a bow tie whose lobes enclose +8 and
+        // -8 (the total turn is 0); either way, its lobes turn opposite ways.
+        let bow = [
+            Vec3::ZERO,
+            Vec3::new(4.0, 4.0, 0.0),
+            Vec3::new(0.0, 4.0, 2.0),
+            Vec3::new(4.0, 0.0, 2.0),
+            Vec3::ZERO,
+        ];
+        assert_eq!(turn_about(&bow, Vec3::Z), 0.0);
+        assert_eq!(loop_turn(&bow, Vec3::Z), None);
+        // Lobes of unequal size, (0,0), (4,4), (0,4), (6,0): the total turn (16 − 24) / 2 = -4
+        // favours one lobe, and the view still crosses itself.
+        let uneven = [
+            Vec3::ZERO,
+            Vec3::new(4.0, 4.0, 0.0),
+            Vec3::new(0.0, 4.0, 0.0),
+            Vec3::new(6.0, 0.0, 0.0),
+            Vec3::ZERO,
+        ];
+        assert_eq!(turn_about(&uneven, Vec3::Z), -4.0);
+        assert_eq!(loop_turn(&uneven, Vec3::Z), None);
+        assert_eq!(loop_turn(&square, Vec3::ZERO), None);
     }
 }

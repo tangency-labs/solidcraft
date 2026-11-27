@@ -135,6 +135,92 @@ fn a_closed_circle_cuts_a_disc_out_of_a_top() {
     assert_eq!(sides.sides, vec![vec![Some(true)], vec![Some(false)]], "the disc is inside the loop");
 }
 
+/// A closed 3D circle of radius 0.005 (under the 0.01 a loop used to be sampled to, which made it
+/// one chord and no turn) on the top of a 0.04 × 0.03 × 0.02 box cuts a disc of 0.005² π out of
+/// it, named inside the loop whichever way round the circle is drawn.
+#[test]
+fn a_small_closed_circle_is_inside_either_way_round() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(0.04, 0.03, 0.02)).unwrap();
+    let top = b.face_within(Vec3::new(0.02, 0.015, 0.02), 1e-9).unwrap().unwrap();
+    for angle in [TAU, -TAU] {
+        let circle = vec![PathSeg::Arc { a: Vec3::new(0.025, 0.015, 0.02), center: Vec3::new(0.02, 0.015, 0.02), axis: Vec3::Z, angle }];
+        let tool = curves3d_tool(&b, &[top], vec![circle], None).unwrap();
+        let (split, from) = split_faces_with_map(&b, &[top], &tool).unwrap();
+        let pieces: Vec<usize> = (0..split.face_count()).filter(|f| from.get(*f) == Some(&top)).collect();
+        let form = split.ops_body().unwrap();
+        let mut a: Vec<(f64, usize)> = pieces.iter().map(|f| (form.0.face_area(&form.1, *f, 1e-12).unwrap(), *f)).collect();
+        a.sort_by(|x, y| x.0.total_cmp(&y.0));
+        assert_eq!(a.len(), 2, "{angle}: {a:?}");
+        assert!(rel(a[0].0, 0.005 * 0.005 * PI) < 1e-6, "{angle}: {a:?}");
+        let sides = split_piece_sides(&split, &[a[0].1, a[1].1], &tool).unwrap();
+        assert_eq!(sides.sides, vec![vec![Some(true)], vec![Some(false)]], "{angle}: the disc is inside the loop");
+    }
+}
+
+/// A closed 3D loop (10, 5, 20), (30, 25, 20), (10, 25, 22), (30, 5, 22) swept along +Z: seen
+/// along the sweep a bow tie crossing itself at (20, 15), its lobes the triangles of area
+/// ½ · 20 · 10 = 100 above and below that point, turning opposite ways (the total turn is 0). The
+/// 40 × 30 top splits into the two lobes and the rest, 1200 − 200 = 1000, and no piece is named
+/// inside or outside the loop, since no one side of it is inside for both lobes.
+#[test]
+fn a_loop_crossing_itself_along_the_sweep_names_no_inside() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    let top = b.face_within(Vec3::new(20.0, 15.0, 20.0), 1e-6).unwrap().unwrap();
+    let p = [Vec3::new(10.0, 5.0, 20.0), Vec3::new(30.0, 25.0, 20.0), Vec3::new(10.0, 25.0, 22.0), Vec3::new(30.0, 5.0, 22.0)];
+    let bow: Vec<PathSeg> = (0..4).map(|i| PathSeg::Line { a: p[i], b: p[(i + 1) % 4] }).collect();
+    let tool = curves3d_tool(&b, &[top], vec![bow], Some(Vec3::Z)).unwrap();
+    let (split, from) = split_faces_with_map(&b, &[top], &tool).unwrap();
+    let pieces: Vec<usize> = (0..split.face_count()).filter(|f| from.get(*f) == Some(&top)).collect();
+    let form = split.ops_body().unwrap();
+    let mut a: Vec<(f64, usize)> = pieces.iter().map(|f| (form.0.face_area(&form.1, *f, 1e-9).unwrap(), *f)).collect();
+    a.sort_by(|x, y| x.0.total_cmp(&y.0));
+    assert_eq!(a.len(), 3, "{a:?}");
+    assert!(rel(a[0].0, 100.0) < 1e-6 && rel(a[1].0, 100.0) < 1e-6 && rel(a[2].0, 1000.0) < 1e-6, "{a:?}");
+    let faces: Vec<usize> = a.iter().map(|x| x.1).collect();
+    let sides = split_piece_sides(&split, &faces, &tool).unwrap();
+    assert_eq!(sides.fields, vec![FieldKind::Loop]);
+    assert_eq!(sides.sides, vec![vec![None], vec![None], vec![None]], "neither lobe is called inside");
+}
+
+/// A 3D line rising steeply over a box's top, from (20, 15, 20) to (20.01, 15, 30), swept along +Z:
+/// its sheet is the plane y = 15, and its ends, run on until they have passed the top across the
+/// sweep (not only 0.001 of that), halve the 40 × 30 top: 600 and 600.
+#[test]
+fn a_steep_line_runs_on_across_the_sweep() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    let top = b.face_within(Vec3::new(20.0, 15.0, 20.0), 1e-6).unwrap().unwrap();
+    let steep = vec![PathSeg::Line { a: Vec3::new(20.0, 15.0, 20.0), b: Vec3::new(20.01, 15.0, 30.0) }];
+    let tool = curves3d_tool(&b, &[top], vec![steep], Some(Vec3::Z)).unwrap();
+    let (split, from) = split_faces_with_map(&b, &[top], &tool).unwrap();
+    assert_eq!(split.face_count(), 7);
+    let form = split.ops_body().unwrap();
+    let a: Vec<f64> = (0..split.face_count()).filter(|f| from.get(*f) == Some(&top)).map(|f| form.0.face_area(&form.1, f, 1e-9).unwrap()).collect();
+    assert_eq!(a.len(), 2, "{a:?}");
+    assert!(a.iter().all(|x| rel(*x, 600.0) < 1e-6), "{a:?}");
+}
+
+/// An open clockwise quarter arc on a box's top (radius 5 about (20, 15), from (25, 15) to
+/// (20, 10), turning -90° about +Z) is continued along its own travel: before its start toward +Y
+/// to the edge at y = 30, after its end toward -X to the edge at x = 0. The piece holding the
+/// corner (0, 30) is the rectangle 25 × 20 less the 5 × 5 corner the arc rounds, plus the
+/// quarter disc: 500 − 25 + 25π/4; the other is the rest of 1200.
+#[test]
+fn a_clockwise_open_arc_runs_on_along_its_travel() {
+    let b = box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+    let top = b.face_within(Vec3::new(20.0, 15.0, 20.0), 1e-6).unwrap().unwrap();
+    let arc = vec![PathSeg::Arc { a: Vec3::new(25.0, 15.0, 20.0), center: Vec3::new(20.0, 15.0, 20.0), axis: Vec3::Z, angle: -FRAC_PI_2 }];
+    let tool = curves3d_tool(&b, &[top], vec![arc], None).unwrap();
+    let (split, from) = split_faces_with_map(&b, &[top], &tool).unwrap();
+    assert_eq!(split.face_count(), 7);
+    let form = split.ops_body().unwrap();
+    let mut a: Vec<f64> =
+        (0..split.face_count()).filter(|f| from.get(*f) == Some(&top)).map(|f| form.0.face_area(&form.1, f, 1e-9).unwrap()).collect();
+    a.sort_by(f64::total_cmp);
+    let corner = 475.0 + 25.0 * PI / 4.0;
+    assert_eq!(a.len(), 2, "{a:?}");
+    assert!(rel(a[0], corner) < 1e-6 && rel(a[1], 1200.0 - corner) < 1e-6, "{a:?} against {corner}");
+}
+
 /// A sweep lying in the face's tangent plane all along the curve is refused, and so is a curve
 /// whose sheet misses the face; a zero direction is refused too.
 #[test]

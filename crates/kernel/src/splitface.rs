@@ -64,8 +64,9 @@ const MAX_DIRECTION_SAMPLES: usize = 64;
 /// (at each of its sample points the normal at the nearest point of the nearest face,
 /// [`solidcore_ops::curve_sweep::sweep_direction`]). Refused: no curves, a curve with no segments
 /// or a point that is not finite, a zero direction, normals that cancel out, and a sweep that
-/// lies in the face's tangent plane at every sample of a curve (the sheet would run along the
-/// face, touching it, for the curve's whole length instead of crossing it).
+/// lies in the face's tangent plane, or within 1° of it, at every sample of a curve (the sheet
+/// would touch the face, or cross it too shallowly for where it crosses to be reliable,
+/// [`solidcore_ops::curve_sweep::ALONG_FACE`], for the curve's whole length).
 pub fn curves3d_tool(body: &Body, faces: &[usize], wires: Vec<Vec<PathSeg>>, along: Option<Vec3>) -> Result<SplitTool<'static>> {
     use solidcore_ops::curve_sweep::{self as cs, SweepRefusal};
     body.require_brep("split face")?;
@@ -92,6 +93,9 @@ pub fn curves3d_tool(body: &Body, faces: &[usize], wires: Vec<Vec<PathSeg>>, alo
         }
         let step = pts.len().div_ceil(MAX_DIRECTION_SAMPLES).max(1);
         let picked: Vec<Vec3> = pts.iter().step_by(step).chain(pts.last()).copied().collect();
+        // Why a face the curve lies over has no normal there (a pole, an apex, material on both
+        // sides): kept to name the cause when no face gives a normal at all.
+        let mut no_normal: Option<String> = None;
         let samples: Vec<cs::Sample> = picked
             .iter()
             .map(|p| cs::Sample {
@@ -100,7 +104,13 @@ pub fn curves3d_tool(body: &Body, faces: &[usize], wires: Vec<Vec<PathSeg>>, alo
                     .iter()
                     .filter_map(|f| {
                         let foot = body.point_lies_on_face(*f, *p, reach).ok().flatten()?;
-                        let normal = body.face_normal_at(*f, foot).ok().flatten()?;
+                        let normal = match body.face_normal_at(*f, foot) {
+                            Ok(n) => n?,
+                            Err(e) => {
+                                no_normal.get_or_insert_with(|| e.to_string());
+                                return None;
+                            }
+                        };
                         Some((a3(foot), a3(normal)))
                     })
                     .collect(),
@@ -108,13 +118,20 @@ pub fn curves3d_tool(body: &Body, faces: &[usize], wires: Vec<Vec<PathSeg>>, alo
             .collect();
         let dir = cs::sweep_direction(&samples, along.map(a3)).map_err(|e| {
             invalid(match e {
-                SweepRefusal::NoFace => {
-                    format!("3D curve {n} lies over none of the faces to split, so they give no normal to sweep it along: give a direction")
-                }
+                SweepRefusal::NoFace => match &no_normal {
+                    Some(why) => format!(
+                        "the faces have no normal where 3D curve {n} lies over them ({why}), so there is none to sweep it along: give a direction"
+                    ),
+                    None => format!(
+                        "3D curve {n} lies over none of the faces to split, so they give no normal to sweep it along: give a direction"
+                    ),
+                },
                 SweepRefusal::NoDirection if along.is_some() => "the split direction must be a nonzero vector".to_string(),
                 SweepRefusal::NoDirection => format!("the faces' normals at 3D curve {n} cancel out: give a direction"),
                 SweepRefusal::AlongFace => {
-                    format!("3D curve {n} would be swept along the face (tangent to it) for its whole length, so it cannot cut across it")
+                    format!(
+                        "3D curve {n} would be swept along the face (tangent to it, or within 1° of that) for its whole length, so it cannot cut reliably across it"
+                    )
                 }
             })
         })?;
@@ -149,12 +166,16 @@ fn wire_patches(w: &SweptCurve, reach: &Aabb3) -> Result<Vec<Patch>> {
     let (mut lead, mut tail) = (None, None);
     if !cs::closes(a3(first.start()), a3(last.end())) {
         let no_tangent = || invalid("a 3D split curve with no tangent at an end");
-        let (t0, _) = first.tangents().ok_or_else(no_tangent)?;
-        let (_, t1) = last.tangents().ok_or_else(no_tangent)?;
+        // The directions of travel at the ends (an arc's turned by the sign of its angle).
+        let (_, t0) = first.along(0.0).ok_or_else(no_tangent)?;
+        let (_, t1) = last.along(1.0).ok_or_else(no_tangent)?;
         let (s0, s1) = (first.start(), last.end());
+        // Each end runs on until it has passed the box across the sweep (the sheet holds only that
+        // part of its run): further for a tangent steep to the sweep.
         let far = cs::reach_past(lo, hi, a3(s0)).max(cs::reach_past(lo, hi, a3(s1)));
-        let before = cs::run_on(a3(s0), a3(t0), -far).map(v3).ok_or_else(no_tangent)?;
-        let after = cs::run_on(a3(s1), a3(t1), far).map(v3).ok_or_else(no_tangent)?;
+        let steep = || invalid("an end of the 3D split curve runs along the split direction");
+        let before = cs::run_on_across(a3(s0), a3(t0), dir, -far).map(v3).ok_or_else(steep)?;
+        let after = cs::run_on_across(a3(s1), a3(t1), dir, far).map(v3).ok_or_else(steep)?;
         // An end line is lengthened; any other end gets a line added.
         match segs.first_mut() {
             Some(PathSeg::Line { a, .. }) => *a = before,
@@ -573,7 +594,8 @@ pub struct PieceSides {
 /// Which side of each field of `tool` each of the faces `faces` of `split` (a body `tool` split
 /// with [`split_faces`]) lies on: the tool's field at a point inside the face, on its surface and
 /// inside its trims (SMLib's `CalculateAnInternalPoint`). Each piece of a split face lies wholly
-/// on one side of every field, so one point says which; a face that lies on a field says nothing.
+/// on one side of every field, so one point says which; a face that lies on a field says nothing,
+/// and nor does any piece about a closed 3D curve that turns no one way about its sweep.
 pub fn split_piece_sides(split: &Body, faces: &[usize], tool: &SplitTool) -> Result<PieceSides> {
     let fields: Vec<ToolSide> = cutters(tool, &reach_of(split))?
         .iter()
@@ -581,23 +603,35 @@ pub fn split_piece_sides(split: &Body, faces: &[usize], tool: &SplitTool) -> Res
         .collect::<Result<_>>()?;
     // Each patch's positive side is a sketch curve's left: inside a counter-clockwise loop,
     // outside a clockwise one.
-    let kinds: Vec<(FieldKind, bool)> = match tool {
-        SplitTool::Plane(_) => vec![(FieldKind::Plane, true)],
-        SplitTool::Face { .. } => vec![(FieldKind::Face, true)],
+    // `None`: which side is which cannot be told for any piece.
+    let kinds: Vec<(FieldKind, Option<bool>)> = match tool {
+        SplitTool::Plane(_) => vec![(FieldKind::Plane, Some(true))],
+        SplitTool::Face { .. } => vec![(FieldKind::Face, Some(true))],
         SplitTool::Curves { curves, .. } => curves
             .iter()
-            .map(|c| if chain_closed(c) { (FieldKind::Loop, solidcore_record::Loop2 { segs: c.clone() }.is_ccw()) } else { (FieldKind::Curve, true) })
+            .map(|c| {
+                if chain_closed(c) {
+                    (FieldKind::Loop, Some(solidcore_record::Loop2 { segs: c.clone() }.is_ccw()))
+                } else {
+                    (FieldKind::Curve, Some(true))
+                }
+            })
             .collect(),
-        // A closed 3D curve's left is inside where it turns counter-clockwise about its sweep.
+        // A closed 3D curve's left is inside where it turns counter-clockwise about its sweep;
+        // where it turns no one way (its view along the sweep crosses itself, or encloses
+        // nothing) no piece is called inside. Sampled to a thousandth of its length, whatever
+        // its size, so a small loop is still seen to turn.
         SplitTool::Curves3d { wires } => wires
             .iter()
             .map(|w| {
-                let pts: Vec<[f64; 3]> = chain_points(&w.segs, 1e-2).into_iter().map(a3).collect();
+                let length: f64 = w.segs.iter().filter_map(PathSeg::length).sum();
+                let tol = (length * 1e-3).max(1e-9);
+                let pts: Vec<[f64; 3]> = chain_points(&w.segs, tol).into_iter().map(a3).collect();
                 match (pts.first(), pts.last()) {
                     (Some(a), Some(b)) if solidcore_ops::curve_sweep::closes(*a, *b) => {
-                        (FieldKind::Loop, solidcore_ops::curve_sweep::turn_about(&pts, a3(w.along)) > 0.0)
+                        (FieldKind::Loop, solidcore_ops::curve_sweep::loop_turn(&pts, a3(w.along)))
                     }
-                    _ => (FieldKind::Curve, true),
+                    _ => (FieldKind::Curve, Some(true)),
                 }
             })
             .collect(),
@@ -615,8 +649,9 @@ pub fn split_piece_sides(split: &Body, faces: &[usize], tool: &SplitTool) -> Res
                 .iter()
                 .zip(&kinds)
                 .map(|(field, (_, ahead))| {
+                    let ahead = (*ahead)?;
                     let side = field.at(p?);
-                    (side.is_finite() && side.abs() > tol).then_some((side > 0.0) == *ahead)
+                    (side.is_finite() && side.abs() > tol).then_some((side > 0.0) == ahead)
                 })
                 .collect()
         })

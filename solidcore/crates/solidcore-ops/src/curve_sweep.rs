@@ -143,6 +143,13 @@ pub fn run_on(at: [f64; 3], along: [f64; 3], far: f64) -> Option<[f64; 3]> {
     k::run_on(vec(at), vec(along), far).map(arr)
 }
 
+/// The point on from `at` along `along` that has run `far` square to the sweep `dir`
+/// ([`k::run_on_across`]); `None` for a tangent along `dir`.
+#[must_use]
+pub fn run_on_across(at: [f64; 3], along: [f64; 3], dir: [f64; 3], far: f64) -> Option<[f64; 3]> {
+    k::run_on_across(vec(at), vec(along), vec(dir), far).map(arr)
+}
+
 /// Whether a curve from `start` to `end` closes on itself ([`k::closes`]).
 #[must_use]
 pub fn closes(start: [f64; 3], end: [f64; 3]) -> bool {
@@ -154,4 +161,12 @@ pub fn closes(start: [f64; 3], end: [f64; 3]) -> bool {
 pub fn turn_about(points: &[[f64; 3]], dir: [f64; 3]) -> f64 {
     let points: Vec<Vec3> = points.iter().map(|p| vec(*p)).collect();
     k::turn_about(&points, vec(dir))
+}
+
+/// Which way a closed polyline turns about `dir`: `Some(true)` counter-clockwise, `None` where
+/// that cannot be told, as where its view crosses itself or encloses nothing ([`k::loop_turn`]).
+#[must_use]
+pub fn loop_turn(points: &[[f64; 3]], dir: [f64; 3]) -> Option<bool> {
+    let points: Vec<Vec3> = points.iter().map(|p| vec(*p)).collect();
+    k::loop_turn(&points, vec(dir))
 }

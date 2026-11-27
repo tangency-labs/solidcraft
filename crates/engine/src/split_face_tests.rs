@@ -380,3 +380,25 @@ fn split_face_by_3d_curves_refuses_a_tangent_sweep_and_a_miss() {
     assert!(miss.as_ref().is_err_and(|e| e.to_string().contains("does not cross")), "{miss:?}");
     assert_eq!(s.doc.features.len(), n);
 }
+
+/// A body placed 100 mm along +X (its own offset): a 3D line drawn where the body is shown, on its
+/// top at world x = 110 (x = 10 in the body's own frame), cuts the 40 × 30 top into 10 · 30 = 300
+/// and 30 · 30 = 900 mm². The curve is read in the body's stored frame, not at its world x = 110.
+#[test]
+fn split_face_by_a_3d_line_on_a_placed_body() {
+    use solidcore_record::Vec3;
+    let mut s = boxed();
+    s.doc_mut().body_offsets.insert("B".into(), solidcraft_doc::rigid(Vec3::new(100.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    s.refresh();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Marks"}));
+    run(&mut s, "sketch.options", json!({"sketch_3d": true}));
+    run(&mut s, "sketch.line3d", json!({"points": [[110, 5, 20], [110, 25, 20]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.split_face", json!({"faces": [[20, 15, 20]], "body": "B", "sketch": "Marks"}));
+    assert_eq!(faces_volume(&mut s, "B").0, 7);
+    let f = run(&mut s, "model.faces", json!({"body": "B"}));
+    let mut a: Vec<f64> = f["faces"].as_array().cloned().unwrap_or_default().iter().map(|x| x["area"].as_f64().unwrap_or(f64::NAN)).collect();
+    a.sort_by(f64::total_cmp);
+    // Sides 600, 600, 800, 800, bottom 1200, and the top's two pieces.
+    assert!(close(a[0], 300.0) && close(a[5], 900.0), "{a:?}");
+}

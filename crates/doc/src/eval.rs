@@ -16503,10 +16503,16 @@ fn eval_feature_kind(
                 }
                 (None, Some(sid)) if !wires.is_empty() || sketch_splits_with_wires(st, sid.0) => {
                     let ss = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
-                    // The 3D curves in this feature's frame, each as its exact segments.
-                    let ss = path_in_frame(doc, ss, f.component)?;
+                    // The 3D curves, and the direction (given in this feature's frame), in the
+                    // frame the target body is stored in (its component's placement and its own
+                    // offset), each curve as its exact segments.
+                    let inverse = crate::mat_inverse(&body_world(doc, &mb))
+                        .ok_or_else(|| DocError::Invalid(format!("the placement of `{}` cannot be inverted", mb.name)))?;
+                    let owner = doc.feature(ss.feature).map(|o| o.component).unwrap_or(0);
+                    let ss = path_with_frame(ss, &crate::mat_mul(&inverse, &doc.component_transform(owner)), &inverse)?;
+                    let along = crate::mat_mul(&inverse, &doc.component_transform(f.component));
                     let picked_wires = split_wires(&ss, wires)?;
-                    kernel::curves3d_tool(&mb.body, &picked, picked_wires, direction.map(|d| d.0))?
+                    kernel::curves3d_tool(&mb.body, &picked, picked_wires, direction.map(|d| crate::apply_vector(&along, d.0)))?
                 }
                 (None, Some(sid)) => {
                     let ss = st.sketch(sid.0).ok_or_else(|| DocError::Unknown(format!("sketch {sid}")))?;
