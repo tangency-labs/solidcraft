@@ -3,9 +3,9 @@
 //! stays open, by one background thread asking GitHub for that repository's latest release. A newer
 //! stable release with a `<id>.zip` or `<id>-<version>.zip` asset puts Update to <version> on the
 //! plugin's card, whether the plugin is on or off. Update downloads the `.zip`, checks it against
-//! the release's sha256 digest, and opens the same review as Install plugin…, with the folders the
-//! installed version was given filled in. The install's own checks and its atomic replace do the
-//! rest; a failure leaves the installed version.
+//! the release's sha256 digest, and opens the same review as Install plugin…, which keeps the
+//! installed version's folders as for any update. The install's own checks and its atomic replace
+//! do the rest; a failure leaves the installed version.
 //!
 //! The requests carry nothing but the repository names. The app's update check setting (and the
 //! organization's policy over it) turns the checks off, as for the app's own update.
@@ -80,7 +80,8 @@ pub(crate) fn offered<'a>(app: &'a SolveApp, plugin: &Plugin) -> Option<&'a Offe
     let state = &app.plugin_updates;
     let busy = state.download.as_ref().is_some_and(|d| d.id == plugin.id) || state.pending.as_ref().is_some_and(|p| p.id == plugin.id);
     let offer = state.offers.get(&plugin.id)?;
-    (plugin.updates.is_some() && !busy && is_newer(&offer.version, &plugin.version)).then_some(offer)
+    let same_repo = plugin.updates.as_ref().is_some_and(|repo| repo.eq_ignore_ascii_case(&offer.repo));
+    (same_repo && !busy && is_newer(&offer.version, &plugin.version)).then_some(offer)
 }
 
 fn checks_allowed(app: &SolveApp) -> bool {
@@ -136,7 +137,7 @@ fn poll_check(app: &mut SolveApp) {
 }
 
 /// Update: download the offered `.zip` beside the plugins, off the window thread.
-pub(crate) fn start(app: &mut SolveApp, plugin: &Plugin) {
+pub(crate) fn start(app: &mut SolveApp, ctx: &egui::Context, plugin: &Plugin) {
     let Some(offer) = offered(app, plugin).cloned() else { return };
     let Some(repository) = plugin.updates.clone() else { return };
     if app.plugin_updates.download.is_some() || app.plugin_updates.pending.is_some() || crate::plugins::busy(app) {
@@ -147,8 +148,10 @@ pub(crate) fn start(app: &mut SolveApp, plugin: &Plugin) {
     let path = dir.join(".updates").join(std::format!("{}-{}.zip", plugin.id, offer.version));
     let version = offer.version.clone();
     let (send, done) = std::sync::mpsc::channel();
+    let ctx = ctx.clone();
     let spawned = std::thread::Builder::new().name("plugin-update-download".into()).spawn(move || {
         let _ = send.send(fetch(&download, &offer, path));
+        ctx.request_repaint();
     });
     if spawned.is_ok() {
         app.set_status(format("plugin_update.downloading", &[("plugin", &plugin.name), ("version", &version)]), false);
@@ -179,21 +182,14 @@ pub(crate) fn repository<'a>(app: &'a SolveApp, path: &str) -> Option<&'a str> {
     app.plugin_updates.pending.as_ref().filter(|pending| pending.path.to_string_lossy() == path).map(|pending| pending.repository.as_str())
 }
 
-/// For the review of a downloaded update: the package must be the plugin and version offered, and
-/// the folders the installed version was given are filled in by name. `None`: not an update.
-pub(crate) fn prepare(app: &SolveApp, path: &str, plugin: &Value, grants: &mut solidcraft_engine::plugin::Grants) -> Option<Result<(), String>> {
+/// For the review of a downloaded update: the package must be the plugin and version offered.
+/// The review fills in the installed version's folders as for any replacement. `None`: not an update.
+pub(crate) fn prepare(app: &SolveApp, path: &str, plugin: &Value) -> Option<Result<(), String>> {
     let pending = app.plugin_updates.pending.as_ref().filter(|pending| pending.path.to_string_lossy() == path)?;
     let (id, version) = (plugin.get("id").and_then(Value::as_str), plugin.get("version").and_then(Value::as_str));
     if id != Some(pending.id.as_str()) || version.map(|v| v.strip_prefix('v').unwrap_or(v)) != Some(pending.version.as_str()) {
         let found = std::format!("{} {}", id.unwrap_or_default(), version.unwrap_or_default());
         return Some(Err(std::format!("the download is {found}, not {} {}", pending.id, pending.version)));
-    }
-    if let Some(installed) = app.session.plugin_state.grants.get(&pending.id) {
-        for grant in &mut grants.folders {
-            if let Some(old) = installed.folders.iter().find(|old| old.name == grant.name) {
-                grant.folder.clone_from(&old.folder);
-            }
-        }
     }
     Some(Ok(()))
 }

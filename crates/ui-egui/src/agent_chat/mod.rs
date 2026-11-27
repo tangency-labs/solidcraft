@@ -53,8 +53,16 @@ use crate::{ControlRequest, SolveApp};
 use backend::{ChatBackend, Event, PermissionOption, PromptPart, ToolStatus};
 use solidcraft_ui_text::{format as trf, tr};
 
-pub(crate) use panel::{finish_shared, owns_keyboard_input, prepare_shared, request_new_chat, shared_content, tool_space};
-pub use panel::{show, tip as panel_tip, toggle, toggle_shortcut};
+pub(crate) use panel::finish_shared;
+pub(crate) use panel::owns_keyboard_input;
+pub(crate) use panel::prepare_shared;
+pub(crate) use panel::request_new_chat;
+pub(crate) use panel::shared_content;
+pub use panel::show;
+pub use panel::tip as panel_tip;
+pub use panel::toggle;
+pub use panel::toggle_shortcut;
+pub(crate) use panel::tool_space;
 
 /// Most entries kept in the conversation; older ones are dropped.
 const MAX_ITEMS: usize = 2000;
@@ -71,6 +79,8 @@ const VIEW_IMAGE: (u32, u32) = (960, 600);
 const MAX_PICTURE_BYTES: usize = 4 << 20;
 /// A tool call's arguments kept for its card, at most this big (as JSON text).
 const MAX_TOOL_INPUT: usize = 64 << 10;
+/// Most characters from a plan step shown above the conversation.
+const MAX_STAGE_CHARS: usize = 240;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
@@ -107,6 +117,16 @@ impl State {
             State::Exited => "ui.agent_chat_state_exited",
             State::Failed => "ui.agent_chat_state_failed",
         })
+    }
+    /// Whether the header offers Stop: only while a turn (or the start of the agent) can be
+    /// stopped. An idle, connected agent has nothing to stop.
+    fn shows_stop(self) -> bool {
+        matches!(self, State::Starting | State::Busy)
+    }
+    /// Whether the agent's own sign-in label is shown: only when it needs a login. An agent that
+    /// is connected and signed in may still report a stale "not logged in" label.
+    fn shows_auth_status(self) -> bool {
+        self == State::NeedsAuth
     }
     fn running(self) -> bool {
         matches!(self, State::Starting | State::Ready | State::Busy | State::NeedsAuth)
@@ -297,10 +317,12 @@ pub enum Item {
         tool: String,
         answer: Option<bool>,
     },
-    /// A message's changes, merged into one undo step; `revision`: the design right after it,
-    /// `history`: the undo history right after it ([`UndoMark::revision`]).
+    /// A message's changes, merged into one undo step; `summary`: concise diff lines against the
+    /// design before the turn, `revision`: the design right after it, `history`: the undo history
+    /// right after it ([`UndoMark::revision`]).
     Changes {
         steps: usize,
+        summary: Vec<String>,
         revision: Revision,
         history: Revision,
         undone: bool,
@@ -381,6 +403,8 @@ struct Turn {
     /// When it was sent, and when the agent last said or did something (ms since the epoch).
     began: f64,
     heard: f64,
+    /// The first running step from this turn's latest plan update.
+    current_stage: Option<String>,
 }
 
 /// A message typed while the agent works: shown in the transcript as "Queued" until it is sent.
@@ -448,6 +472,29 @@ struct ModelRevert {
     saved: Option<String>,
 }
 
+/// A switch that starts on (`#[derive(Default)]` would start it off). Read and set it through `*`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct OnByDefault(pub bool);
+
+impl Default for OnByDefault {
+    fn default() -> Self {
+        Self(true)
+    }
+}
+
+impl std::ops::Deref for OnByDefault {
+    type Target = bool;
+    fn deref(&self) -> &bool {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for OnByDefault {
+    fn deref_mut(&mut self) -> &mut bool {
+        &mut self.0
+    }
+}
+
 #[derive(Default)]
 pub struct AgentChat {
     /// The panel is shown (View menu, the application bar's chat button, Ctrl+Shift+A).
@@ -469,8 +516,8 @@ pub struct AgentChat {
     documents: bool,
     /// Send a picture of the view with the next message.
     pub attach_view: bool,
-    /// Send what is selected in the model with the next message.
-    pub attach_selection: bool,
+    /// Send what is selected in the model with the next message. On unless turned off.
+    pub attach_selection: OnByDefault,
     /// How many things the current selection is by clicks, kept while the selection and the design
     /// stay as they are: (the selection, the design's address, the count).
     selected_count: Option<(Vec<solidcraft_engine::Sel>, usize, usize)>,
@@ -531,6 +578,9 @@ pub struct AgentChat {
     all_selected: bool,
     /// The last message sent, kept to send again after a sign-in (its files too).
     last: Option<(String, bool, Option<usize>, Vec<attach::Attachment>)>,
+    /// The task of a turn the agent could not finish (the provider's usage limit, or any other
+    /// error): it waits to be continued, with its files, when the agent can work again (#16318).
+    unfinished: Option<(String, bool, Option<usize>, Vec<attach::Attachment>)>,
     /// Files for the next message (pictures, text files, imported parts), shown as chips.
     pub(crate) attachments: Vec<attach::Attachment>,
     /// Pictures pasted so far, to name the next one.
@@ -580,6 +630,9 @@ pub struct AgentChat {
     /// The design as the agent last saw it: at the end of its last turn that it answered or worked
     /// in. The next message tells it when the design is no longer that one (#10854).
     seen: Option<Revision>,
+    /// Which design (`session.uid`, name, optional path) the agent last saw, so switching tabs
+    /// with a shared conversation informs the agent on its next turn (#16282).
+    seen_design: Option<Box<(u64, String, Option<String>)>>,
     tools_available: Option<bool>,
     /// The agent was started with SolidCraft's tools (solidcraft-cli and the control port were
     /// both there): if they are still unavailable, they failed to start, not to be found.
@@ -833,6 +886,9 @@ impl AgentChat {
     pub(crate) fn heard_at(&self) -> Option<f64> {
         self.turn.as_ref().filter(|_| self.state() == State::Busy).map(|t| t.heard)
     }
+    fn current_stage(&self) -> Option<&str> {
+        self.turn.as_ref().filter(|_| self.state() == State::Busy && !self.stopped && !self.steering).and_then(|turn| turn.current_stage.as_deref())
+    }
     /// Keep the picture just sent with the message at `at` in the conversation (the user can open
     /// it). A message sent again (after a sign-in) has its picture already: nothing is added, and
     /// never to another message.
@@ -859,8 +915,11 @@ impl AgentChat {
 
     fn stop_backend(&mut self, wait: bool) {
         self.steering = false;
+        // A discarded backend can no longer finish the retired turn.
+        self.discard_end = false;
         // The next agent starts without this one's memory of the design.
         self.seen = None;
+        self.seen_design = None;
         if let Some(mut b) = self.backend.take() {
             b.cancel();
             b.shutdown(wait);
@@ -981,6 +1040,15 @@ impl AgentChat {
                 }
             }
             Event::Plan(entries) => {
+                if let Some(turn) = self.turn.as_mut() {
+                    turn.current_stage = entries
+                        .iter()
+                        .filter(|(_, status)| status == "in_progress")
+                        .flat_map(|(content, _)| content.lines())
+                        .map(str::trim)
+                        .find(|line| !line.is_empty())
+                        .map(|line| line.chars().take(MAX_STAGE_CHARS).collect());
+                }
                 // A plan is replaced whole: update this turn's plan where it is.
                 let turn = self.items.iter().rposition(|i| matches!(i, Item::User { .. })).unwrap_or(0);
                 if let Some(Item::Plan(p)) = self.items.iter_mut().skip(turn).rev().find(|i| matches!(i, Item::Plan(_))) {
@@ -1072,6 +1140,11 @@ impl AgentChat {
                 self.ended = Some(reason.clone());
                 if std::mem::take(&mut self.discard_end) {
                     return Some(Outcome::TurnEnd);
+                }
+                // A turn the agent could not finish (the provider's usage limit, or any other
+                // error) keeps its task: the user can continue it when the agent can work again.
+                if reason == "error" {
+                    self.unfinished = self.last.clone();
                 }
                 match reason.as_str() {
                     "" | "auth" | "error" => {}
@@ -1271,7 +1344,8 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(hint) = entry.problem_hint() {
         chat.notice(hint, true);
     }
-    let bridge = cli.zip(chat.tools_port).map(|(cli, port)| acp::McpBridge { cli, port });
+    let allow_paths = configured_allow_paths(&app.preferences.agent_allowed_paths);
+    let bridge = cli.zip(chat.tools_port).map(|(cli, port)| acp::McpBridge { cli, port, allow_paths });
     chat.tools_available = Some(bridge.is_some());
     chat.tools_bridged = bridge.is_some();
     let wake = ctx.clone();
@@ -1293,6 +1367,7 @@ pub fn connect(app: &mut SolveApp, ctx: &egui::Context) {
                         http,
                         request_timeout_s: entry.request_timeout_s,
                         reasoning_effort: entry.reasoning_effort.clone(),
+                        openai_responses: entry.openai_responses,
                     },
                     start,
                 )
@@ -1438,26 +1513,42 @@ pub(crate) fn continue_in_document(app: &mut SolveApp) {
     }
     chat.pills.clear();
     chat.selected_count = None;
+    chat.hover.clear();
+    chat.lit_cache = None;
+    chat.gone = Gone::default();
+    chat.chips_version += 1;
 }
 
-/// A newly opened tab has no conversation to displace. Move the initiating chat into it,
-/// grouping the previous design's completed edits before its session is parked.
-pub(crate) fn follow_new_tab(app: &mut SolveApp, switch: impl FnOnce(&mut SolveApp)) {
-    if !app.agent_chat.following_document {
-        switch(app);
-        return;
-    }
+/// Group any undo steps made during the active turn into one step on the outgoing session before
+/// switching tabs (#16282).
+pub(crate) fn merge_active_turn_for_switch(app: &mut SolveApp) {
     if let Some(turn) = app.agent_chat.turn.as_ref() {
         let steps = merge_turn(&mut app.session.undo, turn);
         if steps > 0 {
+            let summary = turn_summary(turn, &app.session.doc);
             app.agent_chat.push(Item::Changes {
                 steps,
+                summary,
                 revision: Revision::of(&app.session.doc),
                 history: UndoMark::revision(&app.session.undo),
                 undone: false,
             });
         }
     }
+}
+
+/// A newly opened tab has no conversation to displace. Move the initiating chat into it,
+/// grouping the previous design's completed edits before its session is parked.
+pub(crate) fn follow_new_tab(app: &mut SolveApp, switch: impl FnOnce(&mut SolveApp)) {
+    if app.preferences.agent_shared_session {
+        switch(app);
+        return;
+    }
+    if !app.agent_chat.following_document {
+        switch(app);
+        return;
+    }
+    merge_active_turn_for_switch(app);
     let mut chat = AgentChat::default();
     app.agent_chat.swap_document(&mut chat);
     switch(app);
@@ -1475,6 +1566,7 @@ pub(crate) fn leave_document(app: &mut SolveApp) {
     let chat = &mut app.agent_chat;
     chat.steering = false;
     chat.last = None;
+    chat.unfinished = None;
     // A prompt waiting for startup or sign-in has not reached the backend yet. Keep it
     // with the explicit queue so a late Ready event cannot send it on returning to the tab.
     if let Some((text, image, at, files)) = chat.queued.take() {
@@ -1494,20 +1586,148 @@ const MAX_PENDING: usize = 20;
 /// Said to the agent before a message that interrupted it, so it knows its last step may be
 /// incomplete.
 const INTERRUPT_NOTE: &str = "[The user interrupted your previous step.]";
+/// Said to the agent before a task it could not finish, so it goes on with it instead of
+/// starting again.
+const CONTINUE_NOTE: &str = "[The previous attempt was cut short before it finished. Continue the task from where it stopped.]";
 /// Most names one list of [`changed_note`] carries; the rest are counted.
 const CHANGED_ITEMS: usize = 12;
+/// Most diff lines shown on one Undo card; extra changes fold into a trailing "+N more" line.
+const MAX_CHANGES_SUMMARY: usize = 8;
+
+/// Structured diff between two [`solidcraft_engine::doc::Document`] snapshots, shared by
+/// [`changed_note`] (for telling the agent about manual edits) and [`turn_diff_summary`] (for the
+/// per-turn Undo card).
+#[derive(Debug, Default)]
+struct DocumentDiff {
+    params: Vec<ParamChange>,
+    features: Vec<FeatureChange>,
+    marker: Option<MarkerChange>,
+}
+
+#[derive(Debug)]
+enum ParamChange {
+    Added { name: String, expr: String, model: bool },
+    Edited { name: String, old: String, new: String },
+    Removed { name: String, model: bool },
+}
+
+#[derive(Debug)]
+enum FeatureChange {
+    Added { name: String, kind: &'static str },
+    Edited { name: String, kind: &'static str },
+    Removed { name: String, kind: &'static str },
+}
+
+#[derive(Debug)]
+enum MarkerChange {
+    Before(String),
+    End,
+}
+
+fn diff_documents(seen: &solidcraft_engine::doc::Document, now: &solidcraft_engine::doc::Document) -> DocumentDiff {
+    use solidcraft_engine::doc::Feature;
+    use std::collections::HashMap;
+    if seen == now {
+        return DocumentDiff::default();
+    }
+    let clip = |s: &str| s.chars().take(60).collect::<String>();
+    let before_params: HashMap<&str, &str> = seen.params.iter().map(|p| (p.name.as_str(), p.expr.as_str())).collect();
+    let after_params: HashMap<&str, &str> = now.params.iter().map(|p| (p.name.as_str(), p.expr.as_str())).collect();
+    let params = now
+        .params
+        .iter()
+        .filter_map(|p| match before_params.get(p.name.as_str()) {
+            Some(old) if *old == p.expr => None,
+            Some(old) => Some(ParamChange::Edited { name: clip(&p.name), old: clip(old), new: clip(&p.expr) }),
+            None => Some(ParamChange::Added { name: clip(&p.name), expr: clip(&p.expr), model: p.model }),
+        })
+        .chain(
+            seen.params
+                .iter()
+                .filter(|p| !after_params.contains_key(p.name.as_str()))
+                .map(|p| ParamChange::Removed { name: clip(&p.name), model: p.model }),
+        )
+        .collect();
+    let feature_name = |f: &Feature| if f.name.is_empty() { format!("#{}", f.id) } else { clip(&f.name) };
+    let before_features: HashMap<u64, &Feature> = seen.features.iter().map(|f| (f.id, f)).collect();
+    let after_features: HashMap<u64, &Feature> = now.features.iter().map(|f| (f.id, f)).collect();
+    let features = now
+        .features
+        .iter()
+        .filter_map(|f| match before_features.get(&f.id) {
+            Some(old) if *old == f => None,
+            Some(_) => Some(FeatureChange::Edited { name: feature_name(f), kind: f.kind.base_name() }),
+            None => Some(FeatureChange::Added { name: feature_name(f), kind: f.kind.base_name() }),
+        })
+        .chain(
+            seen.features
+                .iter()
+                .filter(|f| !after_features.contains_key(&f.id))
+                .map(|f| FeatureChange::Removed { name: feature_name(f), kind: f.kind.base_name() }),
+        )
+        .collect();
+    let marker = (seen.marker != now.marker).then(|| match now.marker.and_then(|i| now.features.get(i)) {
+        Some(f) => MarkerChange::Before(feature_name(f)),
+        None => MarkerChange::End,
+    });
+    DocumentDiff { params, features, marker }
+}
+
+/// Feature name with its kind appended when the name does not already start with the kind
+/// (e.g. `MainPlate (Box)`, while `Box1` stays `Box1`).
+fn feature_label(name: &str, kind: &str) -> String {
+    let redundant = !kind.is_empty() && name.strip_prefix(kind).is_some_and(|rest| rest.chars().next().is_none_or(|c| !c.is_ascii_alphabetic()));
+    if kind.is_empty() || redundant { name.to_string() } else { format!("{name} ({kind})") }
+}
+
+/// Concise, bounded per-turn design diff lines for the Undo card: added/edited/removed features,
+/// parameter changes (skipping auto-generated model parameters added or removed alongside features),
+/// and History marker movement.
+fn turn_diff_summary(before: &solidcraft_engine::doc::Document, after: &solidcraft_engine::doc::Document) -> Vec<String> {
+    let diff = diff_documents(before, after);
+    let mut lines = Vec::new();
+    for feature in diff.features {
+        lines.push(match feature {
+            FeatureChange::Added { name, kind } => format!("+ {}", feature_label(&name, kind)),
+            FeatureChange::Edited { name, kind } => format!("~ {}", feature_label(&name, kind)),
+            FeatureChange::Removed { name, kind } => format!("- {}", feature_label(&name, kind)),
+        });
+    }
+    for param in diff.params {
+        match param {
+            ParamChange::Added { name, expr, model: false } => lines.push(format!("+ {name} = {expr}")),
+            ParamChange::Edited { name, old, new } => lines.push(format!("~ {name}: {old} -> {new}")),
+            ParamChange::Removed { name, model: false } => lines.push(format!("- {name}")),
+            ParamChange::Added { model: true, .. } | ParamChange::Removed { model: true, .. } => {}
+        }
+    }
+    if let Some(marker) = diff.marker {
+        lines.push(match marker {
+            MarkerChange::Before(name) => format!("~ History marker before {name}"),
+            MarkerChange::End => "~ History marker at end".into(),
+        });
+    }
+    if lines.len() > MAX_CHANGES_SUMMARY {
+        let kept = MAX_CHANGES_SUMMARY.saturating_sub(1);
+        let more = lines.len() - kept;
+        lines.truncate(kept);
+        lines.push(trf("ui.agent_chat_ctx_more", &[("n", &more.to_string())]));
+    }
+    lines
+}
+
+fn turn_summary(turn: &Turn, now: &solidcraft_engine::doc::Document) -> Vec<String> {
+    turn.start.get::<solidcraft_engine::doc::Document>().map_or_else(Vec::new, |before| turn_diff_summary(&before, now))
+}
 
 /// Said to the agent before a message when the design is not the one its last turn left: the user
 /// changed it by hand in between (#10854). Names the parameters and features that changed and
 /// where the History marker went, so the agent reads the design again instead of reusing
 /// positions and picks from before.
 fn changed_note(seen: &solidcraft_engine::doc::Document, now: &solidcraft_engine::doc::Document) -> Option<String> {
-    use solidcraft_engine::doc::Feature;
-    use std::collections::HashMap;
     if seen == now {
         return None;
     }
-    let clip = |s: &str| s.chars().take(60).collect::<String>();
     let list = |items: Vec<String>| {
         let more = items.len().saturating_sub(CHANGED_ITEMS);
         let mut text = items.into_iter().take(CHANGED_ITEMS).collect::<Vec<_>>().join(", ");
@@ -1516,48 +1736,51 @@ fn changed_note(seen: &solidcraft_engine::doc::Document, now: &solidcraft_engine
         }
         text
     };
+    let diff = diff_documents(seen, now);
     let mut parts = Vec::new();
-    let before: HashMap<&str, &str> = seen.params.iter().map(|p| (p.name.as_str(), p.expr.as_str())).collect();
-    let after: HashMap<&str, &str> = now.params.iter().map(|p| (p.name.as_str(), p.expr.as_str())).collect();
-    let params: Vec<String> = now
+    let params: Vec<String> = diff
         .params
-        .iter()
-        .filter_map(|p| match before.get(p.name.as_str()) {
-            Some(old) if *old == p.expr => None,
-            Some(old) => Some(format!("{} {} -> {}", clip(&p.name), clip(old), clip(&p.expr))),
-            None => Some(format!("{} = {} (new)", clip(&p.name), clip(&p.expr))),
+        .into_iter()
+        .map(|p| match p {
+            ParamChange::Edited { name, old, new } => format!("{name} {old} -> {new}"),
+            ParamChange::Added { name, expr, .. } => format!("{name} = {expr} (new)"),
+            ParamChange::Removed { name, .. } => format!("{name} (removed)"),
         })
-        .chain(seen.params.iter().filter(|p| !after.contains_key(p.name.as_str())).map(|p| format!("{} (removed)", clip(&p.name))))
         .collect();
     if !params.is_empty() {
         parts.push(format!("parameters: {}", list(params)));
     }
-    let name = |f: &Feature| if f.name.is_empty() { format!("#{}", f.id) } else { clip(&f.name) };
-    let before: HashMap<u64, &Feature> = seen.features.iter().map(|f| (f.id, f)).collect();
-    let after: HashMap<u64, &Feature> = now.features.iter().map(|f| (f.id, f)).collect();
-    let features: Vec<String> = now
+    let features: Vec<String> = diff
         .features
-        .iter()
-        .filter_map(|f| match before.get(&f.id) {
-            Some(old) if *old == f => None,
-            Some(_) => Some(format!("{} (edited)", name(f))),
-            None => Some(format!("{} (new)", name(f))),
+        .into_iter()
+        .map(|f| match f {
+            FeatureChange::Edited { name, .. } => format!("{name} (edited)"),
+            FeatureChange::Added { name, .. } => format!("{name} (new)"),
+            FeatureChange::Removed { name, .. } => format!("{name} (removed)"),
         })
-        .chain(seen.features.iter().filter(|f| !after.contains_key(&f.id)).map(|f| format!("{} (removed)", name(f))))
         .collect();
     if !features.is_empty() {
         parts.push(format!("features: {}", list(features)));
     }
-    if seen.marker != now.marker {
-        parts.push(match now.marker.and_then(|i| now.features.get(i)) {
-            Some(f) => format!("the History marker is now before {}, so it and the features after it are rolled back", name(f)),
-            None => "the History marker is now at the end".into(),
+    if let Some(marker) = diff.marker {
+        parts.push(match marker {
+            MarkerChange::Before(name) => format!("the History marker is now before {name}, so it and the features after it are rolled back"),
+            MarkerChange::End => "the History marker is now at the end".into(),
         });
     }
     let what = if parts.is_empty() { String::new() } else { format!(" ({})", parts.join("; ")) };
     Some(format!(
         "[The user changed the design by hand since your last reply{what}. Read it again before you reuse positions, edge or face picks or sizes from earlier in this chat.]"
     ))
+}
+
+/// Said to the agent when a shared conversation switched to a different design tab since its last
+/// completed turn (#16282), so it inspects the active tab instead of reusing picks from another design.
+fn switched_design_note(prev_name: &str, now_name: &str, now_path: Option<&str>) -> String {
+    let at = now_path.map(|p| format!(" ({p})")).unwrap_or_default();
+    format!(
+        "[The active design tab changed from \"{prev_name}\" to \"{now_name}\"{at}. Read it again before you reuse positions, body names, edge or face picks, or sizes from earlier in this chat.]"
+    )
 }
 
 /// Work out again which chips point at things that have left the design, when the design or the
@@ -1650,6 +1873,10 @@ pub(crate) fn lit<'a>(
 
 /// How many things the selection is, counting what was clicked (the two halves of a rim are one).
 pub fn selected_count(app: &mut SolveApp) -> usize {
+    // A whole-body selection counts the bodies it covers (they come and go with Hide and Show).
+    if app.session.all_bodies_selected() {
+        return app.session.selected_count().unwrap_or(0);
+    }
     let doc = Arc::as_ptr(&app.session.doc) as usize;
     if let Some((selection, at, count)) = &app.agent_chat.selected_count
         && *at == doc
@@ -1746,7 +1973,7 @@ pub fn send(app: &mut SolveApp, ctx: &egui::Context, text: String) {
     // The selection is read now, when the user sends, not when a queued message finally goes.
     // What was picked goes first, then what is selected (without what was picked twice).
     let (text, mut context) = place_pills(&mut app.agent_chat, text);
-    if app.agent_chat.attach_selection {
+    if *app.agent_chat.attach_selection {
         let mut selected = context::describe_selection(&mut app.session);
         // A pick that is also selected stays one item, under its pill, marked as attached too.
         for item in &mut context.items {
@@ -1858,8 +2085,23 @@ pub fn send_now(app: &mut SolveApp, ctx: &egui::Context) {
     }
 }
 
+/// Continue the task the agent could not finish (the provider's usage limit, or any other
+/// error): it goes again, with a note that says it was cut short. The conversation does not
+/// repeat it: the task is the one that is already there.
+pub fn continue_task(app: &mut SolveApp) {
+    if app.agent_chat.state() != State::Ready {
+        return;
+    }
+    let Some((text, image, at, files)) = app.agent_chat.unfinished.take() else {
+        return;
+    };
+    // The task's place in the conversation is where its picture is kept: it is only still there
+    // when the conversation has not changed since.
+    let at = at.filter(|&at| matches!(app.agent_chat.items.get(at), Some(Item::User { .. })));
+    start_turn_with(app, text, image, at, files, Some(CONTINUE_NOTE));
+}
 /// New chat: stop what runs (as Stop does), clear the conversation and the queue, and start a
-/// fresh session on the same agent (no restart); the agent and its mode stay, the design's undo
+/// fresh session with the selected agent; the agent and its mode stay, the design's undo
 /// history is untouched.
 pub fn new_chat(app: &mut SolveApp) {
     let running = app.agent_chat.state() == State::Busy;
@@ -1882,22 +2124,31 @@ pub fn new_chat(app: &mut SolveApp) {
     chat.pending_edit = None;
     chat.queued = None;
     chat.last = None;
+    chat.unfinished = None;
     chat.steering = false;
     chat.stopped = false;
     chat.ended = None;
     chat.seen = None;
-    chat.discard_end = running;
+    chat.seen_design = None;
+    chat.discard_end |= running;
     chat.model_revert = None;
     if matches!(chat.state(), State::Ready | State::Busy) {
         chat.restore_mode = Some(chat.mode.clone()).filter(|m| !m.is_empty());
         chat.state = Some(State::Starting);
+        let allow_paths = configured_allow_paths(&app.preferences.agent_allowed_paths);
         if let Some(b) = chat.backend.as_mut() {
-            // Instructions edited since the last session apply from this one on.
+            // Instructions and allowed folders edited since the last session apply from this one on.
             b.set_instructions(&app.preferences.agent_instructions);
+            b.set_allow_paths(&allow_paths);
             b.new_session();
         }
     }
     chat.clear_config();
+}
+
+/// Configured extra folders the assistant's MCP bridge may reach (#20326).
+fn configured_allow_paths(paths: &[String]) -> Vec<std::path::PathBuf> {
+    paths.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).map(std::path::PathBuf::from).collect()
 }
 
 /// Whether New chat would throw something away that the user may want (so it asks first).
@@ -1939,8 +2190,21 @@ fn start_turn(app: &mut SolveApp, text: String, image: bool, at: Option<usize>, 
 /// that takes them. `at` is the message's place in the conversation, where its picture is kept.
 fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usize>, files: Vec<attach::Attachment>, note: Option<&str>) {
     let (pictures, documents) = (app.agent_chat.images, app.agent_chat.documents);
-    let seen = app.agent_chat.seen.as_ref().and_then(Revision::get::<solidcraft_engine::doc::Document>);
-    let changed = seen.and_then(|seen| changed_note(&seen, &app.session.doc));
+    let switched = app
+        .agent_chat
+        .seen_design
+        .as_deref()
+        .filter(|(uid, _, _)| *uid != app.session.uid)
+        .map(|(_, prev_name, _)| switched_design_note(prev_name, &app.session.doc.name, app.session.path.as_deref()));
+    let changed = if switched.is_some() {
+        switched
+    } else {
+        app.agent_chat
+            .seen
+            .as_ref()
+            .and_then(Revision::get::<solidcraft_engine::doc::Document>)
+            .and_then(|seen| changed_note(&seen, &app.session.doc))
+    };
     let notes: Vec<&str> = note.into_iter().chain(changed.as_deref()).collect();
     let lead = if notes.is_empty() { text.clone() } else { format!("{}\n\n{text}", notes.join("\n")) };
     // The whole message stays within the cap: the files' text gets what the words leave.
@@ -1977,8 +2241,10 @@ fn start_turn_with(app: &mut SolveApp, text: String, image: bool, at: Option<usi
         edit_requested: requests_edit(&text),
         began: now,
         heard: now,
+        current_stage: None,
     });
     app.agent_chat.last = Some((text, image, at, files));
+    app.agent_chat.unfinished = None;
     app.agent_chat.state = Some(State::Busy);
     app.agent_chat.stopped = false;
     app.agent_chat.steering = false;
@@ -2115,7 +2381,7 @@ fn decline_all(app: &mut SolveApp, why: &str) {
 
 /// Allow or deny a held request.
 pub fn approve(app: &mut SolveApp, id: u64, allow: bool) {
-    approve_with(app, id, allow, "the user declined it");
+    approve_with(app, id, allow, "the user declined this call");
 }
 
 /// Allow a held request and remember to allow its tool for this agent from now on.
@@ -2152,8 +2418,8 @@ pub fn answer_permission(app: &mut SolveApp, index: usize, option: Option<&str>)
 /// user is asked.
 fn on_permission(app: &mut SolveApp, key: u64, title: String, kind: Option<&str>, options: Vec<PermissionOption>) {
     let agent = app.agent_chat.running_id.clone();
-    let mode = agents::mode_for(&app.preferences, &agent);
-    let remembered = agents::always_allowed(&app.preferences, &agent, &title);
+    let mode = agents::mode_in_force(app, &agent);
+    let remembered = agents::always_allowed_in_force(app, &agent, &title);
     let why = if acp::is_bridge_tool(&title, kind) {
         Some("ui.ai_auto_ours")
     } else if remembered {
@@ -2191,7 +2457,7 @@ fn approve_with(app: &mut SolveApp, id: u64, allow: bool, why: &str) {
     if allow {
         app.control_held.push_back(h.req);
     } else {
-        let _ = h.req.reply.send(json!({"ok": false, "error": format!("not run: {why}")}));
+        let _ = h.req.reply.send(json!({"ok": false, "error": format!("{} {why}", solidcraft_control::NOT_RUN)}));
     }
 }
 
@@ -2226,6 +2492,7 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
     // A turn the agent never answered (a sign-in, an error before its reply) showed it nothing.
     if turn.replied || turn.tool_called || turn.requests > 0 {
         chat.seen = Some(Revision::of(&session.doc));
+        chat.seen_design = Some(Box::new((session.uid, session.doc.name.clone(), session.path.clone())));
     }
     if chat.ended.as_deref() == Some("")
         && !chat.stopped
@@ -2242,7 +2509,8 @@ fn finish_turn(chat: &mut AgentChat, session: &mut solidcraft_engine::Session) {
         chat.notice(warning, false);
     }
     if steps > 0 {
-        chat.push(Item::Changes { steps, revision: Revision::of(&session.doc), history: UndoMark::revision(&session.undo), undone: false });
+        let summary = turn_summary(&turn, &session.doc);
+        chat.push(Item::Changes { steps, summary, revision: Revision::of(&session.doc), history: UndoMark::revision(&session.undo), undone: false });
     }
     // How long the answer took, under its last item ("Answered in 23 min").
     let answered = chat.ended.as_deref().is_some_and(|r| !matches!(r, "cancelled" | "error" | "auth")) && !chat.stopped;
@@ -2266,7 +2534,7 @@ fn merge_turn(undo: &mut Vec<solidcraft_engine::Snapshot>, turn: &Turn) -> usize
 /// Merge the undo steps made since `start_doc` (with the history at `start`) into one, labelled
 /// `label`; how many steps it took in (0: none were made, the history no longer reaches that far, or
 /// they changed several parts of the design, whose steps are each undone in their own part).
-fn merge_undo(
+pub(crate) fn merge_undo(
     undo: &mut Vec<solidcraft_engine::Snapshot>,
     start_doc: &Arc<solidcraft_engine::doc::Document>,
     start: &UndoMark,
@@ -2320,6 +2588,8 @@ fn pump_tools(app: &mut SolveApp) {
     let Some(rx) = app.agent_chat.tools_rx.take() else { return };
     let configured = app.preferences.agent_chat_turn_limit;
     let limit = if configured == 0 { u32::MAX } else { configured.clamp(1, 1000) };
+    // The organization's permissions, when its policy sets them (see `agents::mode_in_force`).
+    let policy_mode = app.policy.locks("ai_permissions").then_some(app.preferences.ai_permissions);
     for mut req in rx.try_iter().take(64) {
         let refuse = |req: ControlRequest, e: String| {
             let _ = req.reply.send(json!({"ok": false, "error": e}));
@@ -2337,17 +2607,28 @@ fn pump_tools(app: &mut SolveApp) {
         };
         req.chat_turn = Some(Arc::clone(&turn.active));
         turn.requests += 1;
-        // Requests without folders of their own stay inside the chat's working folder.
-        if let Some(o) = req.params.as_object_mut()
-            && !o.contains_key("allow_paths")
-        {
-            o.insert("allow_paths".into(), json!([working_dir().to_string_lossy()]));
+        // Requests without folders of their own stay inside the chat's working folder; folders
+        // configured in Assistant preferences (`agent_allowed_paths`, #20326) apply as well.
+        if let Some(o) = req.params.as_object_mut() {
+            let extra: Vec<Value> =
+                app.preferences.agent_allowed_paths.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).map(|s| json!(s)).collect();
+            if !o.contains_key("allow_paths") {
+                let mut paths = vec![json!(working_dir().to_string_lossy())];
+                paths.extend(extra);
+                o.insert("allow_paths".into(), Value::Array(paths));
+            } else if let Some(arr) = o.get_mut("allow_paths").and_then(Value::as_array_mut) {
+                for path in extra {
+                    if !arr.contains(&path) {
+                        arr.push(path);
+                    }
+                }
+            }
         }
         let undo_left = undo_len.saturating_sub(turn.start_undo.get::<UndoMark>().map_or(0, |m| m.depth));
         // The permission mode (the agent's own, else the global one) and "always allow" answers.
-        let mode = agents::mode_for(&app.preferences, &app.agent_chat.running_id);
+        let mode = policy_mode.unwrap_or_else(|| agents::mode_for(&app.preferences, &app.agent_chat.running_id));
         let tool = gate::tool_key(&req.method, &req.params);
-        let always = agents::always_allowed(&app.preferences, &app.agent_chat.running_id, &tool);
+        let always = policy_mode.is_none() && agents::always_allowed(&app.preferences, &app.agent_chat.running_id, &tool);
         // Plugin runs, named tools and importers ask in every mode, alone or as a batch step.
         let plugin_run = gate::runs_plugin(&req.method, &req.params) || crate::plugins::runs_plugin_code(&app.session, &req.method, &req.params);
         let judged = gate::request(&req.method, &req.params, undo_left);
@@ -2355,7 +2636,7 @@ fn pump_tools(app: &mut SolveApp) {
         // batch's file steps by their own ids), never by an answer for some other batch.
         let (tool, always) = if matches!(judged, gate::Verdict::Ask(_)) {
             let keys = gate::asking_keys(&req.method, &req.params, undo_left);
-            let always = keys.iter().all(|k| agents::always_allowed(&app.preferences, &app.agent_chat.running_id, k));
+            let always = policy_mode.is_none() && keys.iter().all(|k| agents::always_allowed(&app.preferences, &app.agent_chat.running_id, k));
             (keys.join("\n"), always)
         } else {
             (tool, always)
@@ -2866,7 +3147,13 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
         }
         c.key = false;
         c.allow_insecure_http &= c.kind == agents::Kind::Api;
-        if !c.allow_insecure_http && app.preferences.agents.iter().any(|old| old.id == c.id && old.allow_insecure_http) {
+        c.openai_responses &= c.kind == agents::Kind::Api;
+        if app
+            .preferences
+            .agents
+            .iter()
+            .any(|old| old.id == c.id && ((old.allow_insecure_http && !c.allow_insecure_http) || old.openai_responses != c.openai_responses))
+        {
             disconnect_endpoint(app, &c.id);
         }
         app.preferences.agents.retain(|x| x.id != c.id);
@@ -2969,7 +3256,7 @@ pub fn control(app: &mut SolveApp, ctx: &egui::Context, p: &Value) -> Result<Val
         app.agent_chat.attach_view = a;
     }
     if let Some(a) = p.get("attach_selection").and_then(Value::as_bool) {
-        app.agent_chat.attach_selection = a;
+        *app.agent_chat.attach_selection = a;
     }
     if p.get("pick").and_then(Value::as_bool) == Some(true) {
         start_pick(app, p.get("pick_at").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok()));
@@ -3046,7 +3333,7 @@ pub fn status(app: &SolveApp) -> Value {
                 json!({"permission": title, "options": options.iter().map(|o| json!({"id": o.id, "name": o.name, "kind": o.kind})).collect::<Vec<_>>(), "answer": answer})
             }
             Item::Approval { title, answer, .. } => json!({"approval": title, "answer": answer}),
-            Item::Changes { steps, undone, .. } => json!({"changes": steps, "undone": undone}),
+            Item::Changes { steps, summary, undone, .. } => json!({"changes": steps, "summary": summary, "undone": undone}),
             Item::Notice { text, error } => json!({"notice": text, "error": error}),
         })
         .collect();
@@ -3105,6 +3392,7 @@ pub fn status(app: &SolveApp) -> Value {
         state.insert("modelsNote".into(), json!(c.models_note));
         state.insert("customModels".into(), json!(custom_models_accepted(app)));
         state.insert("instructions".into(), json!(app.preferences.agent_instructions));
+        state.insert("sharedSession".into(), json!(app.preferences.agent_shared_session));
         // What the box holds, and what the pill marks in it stand for.
         state.insert("input".into(), json!(c.input));
         state.insert("pills".into(), Value::Array(c.pills.iter().map(|p| json!({"id": p.id, "label": p.label, "items": p.context.items.iter().map(|i| json!({"label": i.label, "detail": i.detail})).collect::<Vec<_>>()})).collect::<Vec<_>>()));

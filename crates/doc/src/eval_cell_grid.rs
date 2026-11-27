@@ -17,6 +17,15 @@ const _: () = assert!(MAX_CUT_CELLS < solidcore_record::brep::MAX_SHELLS, "one s
 /// Past this many cells the cut takes noticeable time, and the feature says so.
 pub const SLOW_CUT_CELLS: usize = 100;
 
+/// The kernel's refusal of a cell grid, in its own words (as the kernel's error carried them
+/// before the router).
+fn refused(e: solidcraft_kernel::KernelError) -> DocError {
+    match e {
+        solidcraft_kernel::KernelError::Invalid(why) => DocError::Invalid(why),
+        e => DocError::Invalid(e.to_string()),
+    }
+}
+
 /// The tool of a cell grid feature: every cell's prism, as one body (raised: one per set of bodies met).
 pub(crate) fn tools(
     doc: &Document,
@@ -32,6 +41,14 @@ pub(crate) fn tools(
         sides,
         dot_grid,
         size,
+        cell_sketch,
+        pitch_x,
+        pitch_y,
+        stagger,
+        cell_angle,
+        flip,
+        cell_origin_x,
+        cell_origin_y,
         web,
         angle,
         anchor,
@@ -69,7 +86,7 @@ pub(crate) fn tools(
         f,
     )?;
     let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
-    let defaults = solidcore_ops::cell_grid::default_spec();
+    let defaults = solidcraft_kernel::default_cell_grid();
     let sides = match sides {
         Some(e) => {
             let n = val(vals, e, Kind::Unitless)?;
@@ -89,7 +106,12 @@ pub(crate) fn tools(
         shape: *shape,
         sides,
         dot_grid: *dot_grid,
-        size: val(vals, size, Kind::Length)?,
+        size: match (size, cell_sketch) {
+            (Some(e), _) => val(vals, e, Kind::Length)?,
+            // A sketched cell has its outline and its pitch, not a size.
+            (None, Some(_)) => defaults.size,
+            (None, None) => return Err(DocError::Invalid("a cell grid needs a cell `size` (or a `cell_sketch`)".into())),
+        },
         web: val(vals, web, Kind::Length)?,
         angle: match angle {
             Some(e) => val(vals, e, Kind::Angle)?,
@@ -117,7 +139,39 @@ pub(crate) fn tools(
         },
     };
     let loops: Vec<solidcore_record::Loop2> = regions.iter().flat_map(|r| r.loops().cloned()).collect();
-    let plan = solidcore_ops::cell_grid::plan_cell_grid(&loops, &spec).map_err(|e| DocError::Invalid(e.to_string()))?;
+    let plan = match cell_sketch {
+        None => solidcraft_kernel::plan_cell_grid(&loops, &spec),
+        Some(id) => {
+            let origin = match (cell_origin_x, cell_origin_y) {
+                (Some(x), Some(y)) => Some(Vec2::new(val(vals, x, Kind::Length)?, val(vals, y, Kind::Length)?)),
+                (None, None) => None,
+                _ => return Err(DocError::Invalid("a cell origin needs both its x and its y".into())),
+            };
+            let need = |e: &Option<crate::Expr>, what: &str| match e {
+                Some(e) => val(vals, e, Kind::Length),
+                None => Err(DocError::Invalid(format!("a sketched cell needs `{what}`"))),
+            };
+            let cell = solidcore_record::cell_grid::SketchCell {
+                profile: cell_profile(
+                    st.sketch(id.0).ok_or_else(|| DocError::Unknown(format!("cell sketch {id} (it must come earlier in the timeline)")))?,
+                )?,
+                origin,
+                pitch_x: need(pitch_x, "pitch_x")?,
+                pitch_y: need(pitch_y, "pitch_y")?,
+                stagger: match stagger {
+                    Some(e) => val(vals, e, Kind::Unitless)?,
+                    None => 0.0,
+                },
+                cell_angle: match cell_angle {
+                    Some(e) => val(vals, e, Kind::Angle)?,
+                    None => 0.0,
+                },
+                flip: *flip,
+            };
+            solidcraft_kernel::plan_sketch_cell_grid(&loops, &cell, &spec)
+        }
+    }
+    .map_err(refused)?;
     if plan.cells.is_empty() {
         return Err(DocError::Invalid("no cell fits inside the profiles: use smaller cells, a thinner web or `clip: free`".into()));
     }
@@ -155,9 +209,9 @@ pub(crate) fn tools(
     extrude_within_reach([lo, hi])?;
     let mut tools: Vec<Traced> = Vec::new();
     for cell in &plan.cells {
-        let pieces = solidcore_ops::cell_grid::cell_regions(cell).map_err(|e| DocError::Invalid(e.to_string()))?;
+        let pieces = solidcraft_kernel::cell_regions(cell).map_err(refused)?;
         for region in &pieces {
-            tools.extend(centered_extrude(&ss.plane, region, lo, hi, None, None, false, None)?);
+            tools.extend(centered_extrude(&ss.plane, region, lo, hi, None, None, CapRoles::ByHeight, None)?);
         }
     }
     // Raised cells join each body they meet, as a join extrude's regions do: packed into one tool
@@ -232,4 +286,52 @@ fn exact_reach(st: &ModelState, plane: &Plane, scope: &[String]) -> Result<f64> 
         return Err(DocError::Invalid("through all needs a body to cut".into()));
     }
     Ok(far * 1.02 + 1.0)
+}
+
+/// The cell of a sketched grid: the one closed profile of the sketch, as a loop in the sketch's own
+/// coordinates. A sketch with no closed profile, several, or one with a hole is refused, naming
+/// the sketch. So is one bounded by an ellipse, a spline or a conic: the sketch draws those as
+/// polylines, and a cell is exact.
+pub fn cell_profile(ss: &SolvedSketch) -> Result<solidcore_record::Loop2> {
+    let chosen = select_profiles(ss, &ProfileSel::All)
+        .map_err(|e| DocError::Invalid(format!("the cell sketch `{}` holds no closed profile: {e}", ss.name)))?;
+    refuse_free_form_cell(ss)?;
+    let regions = solidcraft_sketch::merge_regions(&chosen);
+    match regions.as_slice() {
+        [one] if one.holes.is_empty() => Ok(one.outer.clone()),
+        [one] => Err(DocError::Invalid(format!(
+            "the cell sketch `{}` holds a profile with {} holes: a cell is one closed profile without holes",
+            ss.name,
+            one.holes.len()
+        ))),
+        many => Err(DocError::Invalid(format!(
+            "the cell sketch `{}` holds {} closed profiles: a cell is exactly one closed profile",
+            ss.name,
+            many.len()
+        ))),
+    }
+}
+
+/// Refuses a cell sketch whose drawn profiles are bounded by a free-form curve. The curve kinds
+/// decide, not the polyline the sketch turns them into. The profiles are the ones "all" selects,
+/// so reference and construction curves, which bound none of them, do not count.
+fn refuse_free_form_cell(ss: &SolvedSketch) -> Result<()> {
+    let drawn = solidcraft_sketch::find_drawn_profiles(&ss.sketch);
+    let chosen = if drawn.is_empty() { ss.profiles.clone() } else { drawn };
+    let chosen = solidcraft_sketch::without_text_counters(&ss.sketch, chosen);
+    let bounding = chosen.iter().flat_map(|p| p.outer_curves.iter().chain(p.hole_curves.iter().flatten()));
+    for id in bounding {
+        let Some(curve) = ss.sketch.curves.iter().find(|c| &c.id == id) else { continue };
+        let kind = match curve.kind {
+            solidcraft_sketch::CurveKind::Ellipse { .. } => "an ellipse",
+            solidcraft_sketch::CurveKind::Spline { .. } => "a spline",
+            solidcraft_sketch::CurveKind::Conic { .. } => "a conic",
+            _ => continue,
+        };
+        return Err(DocError::Invalid(format!(
+            "the cell sketch `{}` is bounded by {kind} (`{id}`): a cell is made of lines and arcs, not free-form curves",
+            ss.name
+        )));
+    }
+    Ok(())
 }

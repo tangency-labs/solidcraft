@@ -20,6 +20,7 @@ use super::{active_sheet, edit_object, open_sheet_menu, select_sheet};
 pub(crate) fn show(app: &mut SolveApp, rows: &mut Rows<'_>) {
     let t = Tokens::get();
     rows.ui().add_space(t.space_4);
+    picker(app, rows.ui());
     if let Ok(drawing) = app.session.drawing("drawing.inspect").cloned() {
         let key = format!("drawing:browser:{}", encode(drawing.id));
         if branch(app, rows, &key, Row { icon: "ws_drawing", label: &drawing.name, name: true, ..Row::default() }, true) {
@@ -46,6 +47,49 @@ pub(crate) fn show(app: &mut SolveApp, rows: &mut Rows<'_>) {
         }
     }
     rows.ui().add_space(t.space_4);
+}
+
+/// The design's drawings as a drop-down above the tree, once it has one: the open drawing's
+/// name (New drawing… while the setup page shows), listing every drawing to open in its place,
+/// and New drawing… to make another from the setup page.
+fn picker(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if app.session.doc.drawings.is_empty() {
+        return;
+    }
+    let t = Tokens::get();
+    let drawings: Vec<(u64, String)> = app.session.doc.drawings.iter().map(|d| (d.id, d.name.clone())).collect();
+    let open = app.session.open_drawing;
+    let new = app.tr_label("ui.drawing_picker.new").to_string();
+    let current = drawings.iter().find(|(id, _)| Some(*id) == open).map_or(new.as_str(), |(_, name)| name.as_str()).to_string();
+    let mut picked = None;
+    let mut make = false;
+    let combo = ui
+        .horizontal(|ui| {
+            ui.add_space(t.space_8);
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+            crate::ui_kit::dropdown_menu(ui, "drawing_picker", &current, |ui| {
+                for (id, name) in &drawings {
+                    let key = encode(*id);
+                    let choice = crate::ui_kit::list_picker(ui, &key, name, open == Some(*id));
+                    crate::scenario::publish_target(&format!("drawing:picker:{key}"), choice.rect);
+                    if choice.clicked() {
+                        picked = Some(*id);
+                    }
+                }
+                ui.separator();
+                let choice = crate::ui_kit::list_picker(ui, "new", &new, false);
+                crate::scenario::publish_target("drawing:picker:new", choice.rect);
+                make |= choice.clicked();
+            })
+        })
+        .inner;
+    crate::scenario::publish_target("drawing:picker", combo.rect);
+    ui.add_space(t.space_4);
+    if let Some(id) = picked {
+        super::open_drawing(app, id);
+    } else if make {
+        super::new_drawing(app);
+    }
 }
 
 /// Whether `object` of `drawing` is part of the selection: its row is drawn selected, as a
@@ -127,7 +171,13 @@ fn show_sheet(app: &mut SolveApp, rows: &mut Rows<'_>, drawing: &Drawing, sheet:
                 open = next;
                 rows.ui().data_mut(|data| data.insert_temp(id, open));
             }
-            Event::Click(_) | Event::Open(_) => select_sheet(app, sheet.id),
+            Event::Click(_) | Event::Open(_) => {
+                if !app.preferences.design_sub_tab_sheets {
+                    select_sheet(app, sheet.id);
+                } else if let Err(error) = crate::sheet_views::open_in(app, drawing.id, sheet.id, false) {
+                    app.set_status(error, true);
+                }
+            }
             Event::Menu { at, .. } => open_sheet_menu(app, drawing.id, sheet.id, Rect::from_min_max(at, at)),
             _ => {}
         }
@@ -246,7 +296,7 @@ pub(crate) fn name_of(app: &SolveApp, id: u64) -> Option<String> {
     Some(view_name(app, drawing, view, number))
 }
 
-fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> String {
+pub(crate) fn view_name(app: &SolveApp, drawing: &Drawing, view: &View, number: usize) -> String {
     // A view with a label is called what its label says: its name, else its words and letter
     // (`DETAIL A`), never nothing.
     if let Some(label) = &view.label {

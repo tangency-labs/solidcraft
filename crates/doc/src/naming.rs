@@ -16,6 +16,7 @@
 //! resolve through them say so. Names are worked out lazily, on first request.
 
 use solidcraft_geom::prelude::*;
+use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use solidcore_record::{Vec2, Vec3};
@@ -35,6 +36,96 @@ pub struct NamingOrigin {
     pub mats: Vec<crate::Mat>,
 }
 
+/// Cached persistent edge names of a body, with an O(1) exact-name index.
+#[derive(Debug)]
+pub(crate) struct EdgeNameIndex {
+    pub(crate) names: Vec<String>,
+    pub(crate) by_name: HashMap<String, usize>,
+    /// Whether any cached edge name uses the older colon-nested form (`:blend:` / `:inner:`).
+    has_old_form: bool,
+}
+
+impl EdgeNameIndex {
+    fn from_names(names: Vec<String>) -> Self {
+        let mut by_name = HashMap::with_capacity(names.len());
+        let mut has_old_form = false;
+        for (i, n) in names.iter().enumerate() {
+            has_old_form |= crate::persistent_name::in_old_form(n);
+            by_name.entry(n.clone()).or_insert(i);
+        }
+        Self { names, by_name, has_old_form }
+    }
+
+    /// The first edge whose name matches `name` (in either text form), matching
+    /// `names.iter().position(|n| same_edge(n, name))` in O(1) for current names.
+    pub(crate) fn find_exact(&self, name: &str) -> Option<usize> {
+        if !self.has_old_form {
+            if let Some(&i) = self.by_name.get(name) {
+                return Some(i);
+            }
+            if crate::persistent_name::in_old_form(name)
+                && let Ok(parsed) = crate::persistent_name::EdgeName::parse(name)
+            {
+                return self.by_name.get(&parsed.to_string()).copied();
+            }
+            return None;
+        }
+        self.names.iter().position(|n| crate::persistent_name::same_edge(n, name))
+    }
+}
+
+/// Cached persistent vertex names of a body, with incident face lists and an O(1) exact-name index.
+#[derive(Debug)]
+pub(crate) struct VertexNameIndex {
+    pub(crate) names: Vec<String>,
+    pub(crate) by_name: HashMap<String, usize>,
+    pub(crate) incident: Vec<Vec<u32>>,
+    /// Whether any cached vertex name uses the older colon-nested form (`:blend:` / `:inner:`).
+    has_old_form: bool,
+}
+
+impl VertexNameIndex {
+    fn empty() -> Self {
+        Self { names: Vec::new(), by_name: HashMap::new(), incident: Vec::new(), has_old_form: false }
+    }
+
+    fn from_parts(names: Vec<String>, incident: Vec<Vec<u32>>) -> Self {
+        let mut by_name = HashMap::with_capacity(names.len());
+        let mut has_old_form = false;
+        for (i, n) in names.iter().enumerate() {
+            if !n.is_empty() && incident.get(i).is_some_and(|fs| !fs.is_empty()) {
+                has_old_form |= crate::persistent_name::in_old_form(n);
+                by_name.entry(n.clone()).or_insert(i);
+            }
+        }
+        Self { names, by_name, incident, has_old_form }
+    }
+
+    /// The first non-orphan vertex whose name matches `name` (in either text form), matching
+    /// the linear `same_edge` scan in O(1) for current names.
+    pub(crate) fn find_exact(&self, name: &str) -> Option<usize> {
+        if name.is_empty() {
+            return None;
+        }
+        if !self.has_old_form {
+            if let Some(&v) = self.by_name.get(name) {
+                return Some(v);
+            }
+            if crate::persistent_name::in_old_form(name)
+                && let Ok(parsed) = crate::persistent_name::EdgeName::parse(name)
+            {
+                return self.by_name.get(&parsed.to_string()).copied();
+            }
+            return None;
+        }
+        self.names
+            .iter()
+            .enumerate()
+            .find(|(v, n)| !n.is_empty() && self.incident.get(*v).is_some_and(|fs| !fs.is_empty()) && crate::persistent_name::same_edge(n, name))
+            .map(|(v, _)| v)
+    }
+}
+
 /// The lazily computed names of a body, shared by its clones.
 #[derive(Clone, Debug, Default)]
 pub struct NameCell {
@@ -45,11 +136,17 @@ pub struct NameCell {
     /// What the body's faces came from, when the feature that made it reports it.
     lineage: Option<Arc<Lineage>>,
     names: Arc<OnceLock<Arc<Names>>>,
+    /// Cached edge names paired with the body shape they were computed from (guards in-place `ModelBody.body` replacement).
+    edge_names: Arc<OnceLock<(solidcraft_kernel::Body, Arc<EdgeNameIndex>)>>,
+    /// Cached vertex names paired with the body shape they were computed from (guards in-place `ModelBody.body` replacement).
+    vertex_names: Arc<OnceLock<(solidcraft_kernel::Body, Arc<VertexNameIndex>)>>,
     /// The body this one is a moved copy of (its names are that body's).
     copy_of: Option<Arc<ModelBody>>,
     /// How deep the chain of features that named it is, for names taken from a saved model
     /// (which has no origin): see [`NameCell::depth`].
     saved_depth: Option<usize>,
+    /// Whether the names came from a saved model, with nothing to work them out from again.
+    saved: bool,
 }
 
 impl NameCell {
@@ -58,7 +155,17 @@ impl NameCell {
     }
     /// Names of a body made by `origin`'s feature, following `lineage` where it is known.
     pub(crate) fn traced(origin: Option<Arc<NamingOrigin>>, lineage: Option<Arc<Lineage>>) -> Self {
-        NameCell { origin, cached_construction: None, lineage, names: Arc::new(OnceLock::new()), copy_of: None, saved_depth: None }
+        NameCell {
+            origin,
+            cached_construction: None,
+            lineage,
+            names: Arc::new(OnceLock::new()),
+            edge_names: Arc::new(OnceLock::new()),
+            vertex_names: Arc::new(OnceLock::new()),
+            copy_of: None,
+            saved_depth: None,
+            saved: false,
+        }
     }
     /// Names already known, taken as they are.
     pub fn known(names: Arc<Vec<String>>) -> Self {
@@ -78,19 +185,41 @@ impl NameCell {
     pub(crate) fn saved(names: Arc<Names>, depth: Option<usize>) -> Self {
         let mut cell = Self::shared(names);
         cell.saved_depth = depth;
+        cell.saved = true;
         cell
     }
     /// How deep the chain of features that named the body is (`None`: not made by a feature).
     pub(crate) fn depth(&self) -> Option<usize> {
         self.origin.as_ref().map(|o| o.depth).or(self.saved_depth)
     }
+    /// Saved names of a body made again with `depth` features before it now.
+    pub(crate) fn saved_at(&mut self, depth: usize) {
+        self.saved_depth = Some(depth);
+    }
     /// Identity of the names: clones of a cell share them.
     pub(crate) fn id(&self) -> usize {
         Arc::as_ptr(&self.names) as usize
     }
+    /// Weak reference to the lazy names cell, for O(1) cache identity checks without computing
+    /// or retaining names.
+    pub(crate) fn names_cell(&self) -> std::sync::Weak<OnceLock<Arc<Names>>> {
+        Arc::downgrade(&self.names)
+    }
     /// The same origin, lineage and depth with nothing worked out yet: for a body given a new
-    /// name, whose faces' names may be made from it.
-    pub(crate) fn renamed(&self) -> Self {
+    /// name, whose faces' names may be made from it. Names with nothing to work them out from
+    /// again (a saved model's) are kept, only those made from the old name following it (#21192).
+    pub(crate) fn renamed(&self, old: &str, new: &str) -> Self {
+        if self.origin.is_none()
+            && self.copy_of.is_none()
+            && self.saved
+            && let Some(names) = self.names.get()
+        {
+            let stem = format!("{old}:face:");
+            let faces = names.faces.iter().map(|n| n.strip_prefix(&stem).map_or_else(|| n.clone(), |k| format!("{new}:face:{k}"))).collect();
+            let mut cell = Self::saved(Arc::new(crate::history_names::Names { faces: Arc::new(faces), info: names.info.clone() }), self.saved_depth);
+            cell.lineage = self.lineage.clone();
+            return cell;
+        }
         let mut cell = Self::traced(self.origin.clone(), self.lineage.clone());
         cell.copy_of = self.copy_of.clone();
         cell.saved_depth = self.saved_depth;
@@ -99,7 +228,17 @@ impl NameCell {
     fn shared(names: Arc<Names>) -> Self {
         let cell = OnceLock::new();
         let _ = cell.set(names);
-        NameCell { origin: None, cached_construction: None, lineage: None, names: Arc::new(cell), copy_of: None, saved_depth: None }
+        NameCell {
+            origin: None,
+            cached_construction: None,
+            lineage: None,
+            names: Arc::new(cell),
+            edge_names: Arc::new(OnceLock::new()),
+            vertex_names: Arc::new(OnceLock::new()),
+            copy_of: None,
+            saved_depth: None,
+            saved: false,
+        }
     }
 }
 
@@ -113,6 +252,10 @@ enum NamingAncestor {
     Copy(Arc<ModelBody>),
 }
 impl NameCell {
+    /// Whether these are names a saved model kept ([`NameCell::saved`]), not worked out here.
+    pub(crate) fn is_saved(&self) -> bool {
+        self.saved
+    }
     fn detach_ancestors(&mut self, pending: &mut Vec<NamingAncestor>) {
         if let Some(origin) = self.origin.take().and_then(Arc::into_inner) {
             pending.push(NamingAncestor::State(origin.before));
@@ -158,7 +301,17 @@ pub use crate::name_lookup::{
 pub use crate::piece_names::parent_piece;
 
 /// Deeper chains than this are named by position only (bounded work and stack).
-const MAX_DEPTH: usize = 400;
+pub(crate) const MAX_DEPTH: usize = 400;
+
+/// How deep the bodies a feature makes on `before` are in the chain of features that named them.
+pub(crate) fn depth_after(before: &ModelState) -> usize {
+    before.bodies.iter().filter_map(|b| b.names.depth()).max().unwrap_or(0) + 1
+}
+
+/// Whether the bodies a feature makes on `before` are past [`MAX_DEPTH`], named by position.
+pub(crate) fn past_limit(before: &ModelState) -> bool {
+    depth_after(before) >= MAX_DEPTH
+}
 
 /// Up to this many sample points per face.
 const SAMPLES: usize = 9;
@@ -254,8 +407,8 @@ impl FaceIndex {
         FaceIndex { faces }
     }
 
-    /// The face a point lies on (within `tol`).
-    fn face_at(&self, p: Vec3, tol: f64) -> Option<usize> {
+    /// The face a point lies on (within `tol`) and its distance to the point.
+    fn face_and_dist_at(&self, p: Vec3, tol: f64) -> Option<(f64, usize)> {
         let mut best: Option<(f64, usize)> = None;
         for (i, (bounds, tris)) in self.faces.iter().enumerate() {
             if !bounds.inflated(tol).contains(p) {
@@ -266,7 +419,12 @@ impl FaceIndex {
                 best = Some((d, i));
             }
         }
-        best.map(|(_, i)| i)
+        best
+    }
+
+    /// The face a point lies on (within `tol`).
+    fn face_at(&self, p: Vec3, tol: f64) -> Option<usize> {
+        self.face_and_dist_at(p, tol).map(|(_, i)| i)
     }
 }
 
@@ -531,6 +689,96 @@ fn predecessor(b: &ModelBody) -> Option<&ModelBody> {
     o.before.body(&b.name)
 }
 
+/// The input of a non-copy rigid transform whose exact history keeps every face and edge
+/// one-to-one. Compatibility names may cross these steps, never a copy or a topology edit.
+pub(crate) fn rigid_predecessor(b: &ModelBody) -> Option<&ModelBody> {
+    use solidcraft_kernel::history::{EdgeOrigin, FaceOrigin};
+
+    let origin = b.names.origin.as_ref()?;
+    let bodies = match &origin.feature.kind {
+        FeatureKind::Move { bodies, copy: false, .. } | FeatureKind::Align { bodies, .. } => bodies,
+        _ => return None,
+    };
+    if !bodies.iter().any(|name| *name == b.name) {
+        return None;
+    }
+    let lineage = b.names.lineage.as_ref()?;
+    let [operand] = lineage.operands.as_slice() else { return None };
+    let crate::lineage::Operand::Body(name) = operand.as_ref() else { return None };
+    let source = origin.before.body(name)?;
+    let history = &lineage.history;
+    if history.operands != 1 || history.faces.len() != b.body.face_count() || history.edges.len() != b.body.edge_count() {
+        return None;
+    }
+    fn permutation(indices: impl Iterator<Item = Option<usize>>, count: usize) -> bool {
+        let mut seen = vec![false; count];
+        for index in indices {
+            let Some(slot) = index.and_then(|i| seen.get_mut(i)) else { return false };
+            if std::mem::replace(slot, true) {
+                return false;
+            }
+        }
+        seen.into_iter().all(|found| found)
+    }
+    let faces = history.faces.iter().map(|face| match face.origins.as_slice() {
+        [FaceOrigin::Face { operand: 0, face }] => Some(*face),
+        _ => None,
+    });
+    let edges = history.edges.iter().map(|edge| match edge.origins.as_slice() {
+        [EdgeOrigin::Edge { operand: 0, edge }] => Some(*edge),
+        _ => None,
+    });
+    (permutation(faces, source.body.face_count()) && permutation(edges, source.body.edge_count())).then_some(source)
+}
+
+/// An edge's direct source through a non-copy rigid transform or join. Like exact naming,
+/// follow only Body and intermediate Stage operands, never Copy, Inner or newly made geometry.
+pub(crate) fn inherited_edge_predecessor(b: &ModelBody, edge: usize) -> Option<(&ModelBody, usize)> {
+    use crate::Operation;
+    use crate::lineage::Operand;
+    use solidcraft_kernel::history::EdgeOrigin;
+
+    let origin = b.names.origin.as_ref()?;
+    match &origin.feature.kind {
+        FeatureKind::Move { copy: false, .. } | FeatureKind::Align { .. } => {
+            rigid_predecessor(b)?;
+        }
+        FeatureKind::Combine { operation: Operation::Join | Operation::NewBody, .. }
+        | FeatureKind::Box { operation: Operation::Join, .. }
+        | FeatureKind::Cylinder { operation: Operation::Join, .. }
+        | FeatureKind::Cone { operation: Operation::Join, .. }
+        | FeatureKind::Sphere { operation: Operation::Join, .. }
+        | FeatureKind::Torus { operation: Operation::Join, .. }
+        | FeatureKind::Extrude { operation: Operation::Join, .. }
+        | FeatureKind::Revolve { operation: Operation::Join, .. }
+        | FeatureKind::Sweep { operation: Operation::Join, .. }
+        | FeatureKind::Loft { operation: Operation::Join, .. }
+        | FeatureKind::Pipe { operation: Operation::Join, .. }
+        | FeatureKind::Coil { operation: Operation::Join, .. }
+        | FeatureKind::BoundaryFill { operation: Operation::Join, .. }
+        | FeatureKind::Thicken { operation: Operation::Join, .. }
+        | FeatureKind::SurfaceNetwork { operation: Operation::Join, .. } => {}
+        _ => return None,
+    }
+    let mut lineage = b.names.lineage.as_deref()?;
+    let mut edge = edge;
+    for _ in 0..MAX_DEPTH {
+        let [EdgeOrigin::Edge { operand, edge: source_edge }] = lineage.history.edges.get(edge)?.origins.as_slice() else { return None };
+        match lineage.operands.get(*operand)?.as_ref() {
+            Operand::Body(name) => {
+                let source = origin.before.body(name)?;
+                return (*source_edge < source.body.edge_count()).then_some((source, *source_edge));
+            }
+            Operand::Stage(stage) => {
+                edge = *source_edge;
+                lineage = &stage.lineage;
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
 /// Work out the names of the earlier versions of `b` that are not known yet, oldest first and
 /// every [`WARM_STEP`]th, so that naming `b` never recurses through more than that many of them.
 /// A body's names are found from the names of the body it was made from, which are found the
@@ -579,7 +827,7 @@ pub(crate) fn names(b: &ModelBody) -> Arc<Names> {
             // Exact history needs no mesh; geometry does (its face count is the mesh's).
             let names = match b.names.origin.as_ref() {
                 Some(o) if o.depth < MAX_DEPTH => b.names.lineage.as_ref().and_then(|l| crate::history_names::derive(b, o, l)).unwrap_or_else(|| {
-                    let centres = || face_centres(b);
+                    let centres = || face_centres(b).unwrap_or_default();
                     Names::unverified(geometric_names(b, o, face_count(b)), &mesh_adjacency(b), crate::history_names::by_place(&o.feature, &centres))
                 }),
                 _ => Names::unverified((0..face_count(b)).map(|k| format!("{}:face:{k}", b.name)).collect(), &[], None),
@@ -811,28 +1059,60 @@ pub fn strip_edge_piece(n: &str) -> String {
     crate::piece_names::strip_edge_piece(n)
 }
 
-/// Edges sharing a name: number them along the longest axis of their spread.
-fn number_pieces(names: &mut [String], pts: &[Vec<Vec3>], mark: char) {
+/// Items sharing a name: number them along the longest axis of their spread.
+fn number_pieces_by(names: &mut [String], centre: impl Fn(usize) -> Vec3, mark: char, skip_empty: bool) {
+    use std::collections::hash_map::Entry;
+    use std::fmt::Write as _;
+
     // The pieces of each name, gathered in one pass (a faceted body has thousands of names).
-    let mut groups: std::collections::BTreeMap<String, Vec<usize>> = std::collections::BTreeMap::new();
-    for (i, n) in names.iter().enumerate() {
-        groups.entry(n.clone()).or_default().push(i);
-    }
-    for (n, same) in groups {
-        if same.len() < 2 {
-            continue;
+    let duplicates: Vec<Vec<usize>> = {
+        let mut seen: HashMap<&str, Result<usize, usize>> = HashMap::with_capacity(names.len());
+        let mut dups: Vec<Vec<usize>> = Vec::new();
+        for (i, n) in names.iter().enumerate() {
+            if skip_empty && n.is_empty() {
+                continue;
+            }
+            match seen.entry(n.as_str()) {
+                Entry::Vacant(e) => {
+                    e.insert(Ok(i));
+                }
+                Entry::Occupied(mut e) => match *e.get() {
+                    Ok(first) => {
+                        let slot = dups.len();
+                        dups.push(vec![first, i]);
+                        let _ = e.insert(Err(slot));
+                    }
+                    Err(slot) => {
+                        if let Some(group) = dups.get_mut(slot) {
+                            group.push(i);
+                        }
+                    }
+                },
+            }
         }
-        let centre = |j: usize| {
-            let ps = pts.get(j).cloned().unwrap_or_default();
-            ps.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / ps.len().max(1) as f64)
-        };
-        let order = along_spread(same.iter().map(|j| (*j, centre(*j))).collect());
-        for (k, j) in order.iter().enumerate() {
-            if let Some(slot) = names.get_mut(*j) {
-                *slot = format!("{n}{mark}{}", k + 1);
+        dups
+    };
+    for same in duplicates {
+        let order = along_spread(same.iter().map(|&j| (j, centre(j))).collect());
+        for (k, j) in order.into_iter().enumerate() {
+            if let Some(slot) = names.get_mut(j) {
+                let _ = write!(slot, "{mark}{}", k + 1);
             }
         }
     }
+}
+
+/// Edges sharing a name: number them along the longest axis of their spread.
+fn number_pieces(names: &mut [String], pts: &[Vec<Vec3>], mark: char) {
+    number_pieces_by(
+        names,
+        |j| {
+            let ps = pts.get(j).map(Vec::as_slice).unwrap_or(&[]);
+            ps.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / ps.len().max(1) as f64)
+        },
+        mark,
+        false,
+    );
 }
 
 /// The items of `cs` (index, centre) ordered along the longest axis of their centres' spread,
@@ -869,9 +1149,10 @@ pub(crate) fn along_spread(cs: Vec<(usize, Vec3)>) -> Vec<usize> {
     order.into_iter().map(|(j, _)| j).collect()
 }
 
-/// Each face's centre: the mean of the sampled centres of its triangles.
-pub(crate) fn face_centres(b: &ModelBody) -> Vec<Vec3> {
-    samples(&b.mesh(), face_count(b)).into_iter().map(|ps| ps.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / ps.len().max(1) as f64)).collect()
+/// Each face's centre: the area-weighted centroid from the kernel.
+pub(crate) fn face_centres(b: &ModelBody) -> solidcraft_kernel::Result<Vec<Vec3>> {
+    let fs = b.body.faces(0.01)?;
+    Ok(fs.into_iter().map(|f| f.centroid).collect())
 }
 
 /// The name of a face new to `f` (a feature that went through `eval::naming_feature`).
@@ -979,10 +1260,12 @@ fn role_name(f: &Feature, before: &ModelState, ps: &[Vec3], ns: &[Vec3], fi: usi
             format!("F{fid}:{role}")
         }
         FeatureKind::Cylinder { axis, .. } => {
-            let flat = !ns.is_empty() && ns.iter().all(|m| m.cross(axis.0).len() < 1e-6);
+            // The axis is numbers here: `naming_feature` evaluated it.
+            let Some(axis) = crate::literal_dir(axis) else { return format!("F{fid}:face:{fi}") };
+            let flat = !ns.is_empty() && ns.iter().all(|m| m.cross(axis).len() < 1e-6);
             let role = if !flat {
                 "side"
-            } else if ns.first().is_some_and(|m| m.dot(axis.0) > 0.0) {
+            } else if ns.first().is_some_and(|m| m.dot(axis) > 0.0) {
                 "top"
             } else {
                 "bottom"
@@ -1055,9 +1338,19 @@ fn polyline_dist(pts: &[Vec2], q: Vec2) -> f64 {
         .fold(f64::MAX, f64::min)
 }
 
+/// Cached names and exact-lookup index of a body's edges (by mesh edge index).
+pub(crate) fn edge_name_index(b: &ModelBody) -> Arc<EdgeNameIndex> {
+    let build = || {
+        let faces = face_names(b);
+        Arc::new(EdgeNameIndex::from_names(edge_names_from(b, &faces)))
+    };
+    let (body, index) = b.names.edge_names.get_or_init(|| (b.body.clone(), build()));
+    if body.same_shape(&b.body) { index.clone() } else { build() }
+}
+
 /// Names of a body's edges (by mesh edge index): `<face A>|<face B>`, numbered when repeated.
 pub fn edge_names(b: &ModelBody) -> Vec<String> {
-    edge_names_from(b, &face_names(b))
+    edge_name_index(b).names.clone()
 }
 
 /// Names of a body's edges from its faces' names `faces`.
@@ -1072,8 +1365,7 @@ fn edge_names_from(b: &ModelBody, faces: &[String]) -> Vec<String> {
             n.join("|")
         })
         .collect();
-    let pts: Vec<Vec<Vec3>> = m.edges.clone();
-    number_pieces(&mut names, &pts, '~');
+    number_pieces(&mut names, &m.edges, '~');
     names
 }
 
@@ -1085,19 +1377,9 @@ pub fn find_edge(b: &ModelBody, name: &str, near: Vec3) -> Result<Vec3, String> 
 
 /// Names of the edges nearest each point on a body (for storing references).
 pub fn edge_names_at(b: &ModelBody, pts: &[Vec3]) -> Vec<String> {
-    let m = b.mesh();
-    let names = edge_names(b);
-    pts.iter()
-        .map(|p| {
-            m.edges
-                .iter()
-                .enumerate()
-                .map(|(i, e)| (e.windows(2).map(|w| p.dist_to_segment(w[0], w[1])).fold(f64::MAX, f64::min), i))
-                .min_by(|a, b| a.0.total_cmp(&b.0))
-                .and_then(|(_, i)| names.get(i).cloned())
-                .unwrap_or_default()
-        })
-        .collect()
+    let edges = edge_name_index(b);
+    let lines = b.edge_lines();
+    pts.iter().map(|p| lines.nearest(*p).and_then(|i| edges.names.get(i).cloned()).unwrap_or_default()).collect()
 }
 
 /// Incident face indices (sorted, deduplicated) for each B-rep vertex in `record`.
@@ -1117,15 +1399,26 @@ pub(crate) fn vertex_incident_faces(record: &solidcore_record::brep::Brep) -> Ve
     per_vertex
 }
 
+/// Cached names, incident faces, and exact-lookup index of a body's vertices. Empty for a mesh body.
+pub(crate) fn vertex_name_index(b: &ModelBody) -> Arc<VertexNameIndex> {
+    let build = || {
+        if b.body.is_mesh() {
+            return Arc::new(VertexNameIndex::empty());
+        }
+        let record = b.body.record();
+        let incident = vertex_incident_faces(record);
+        let faces = face_names(b);
+        let names = vertex_names_from_record(record, &incident, &faces);
+        Arc::new(VertexNameIndex::from_parts(names, incident))
+    };
+    let (body, index) = b.names.vertex_names.get_or_init(|| (b.body.clone(), build()));
+    if body.same_shape(&b.body) { index.clone() } else { build() }
+}
+
 /// Names of a body's vertices (by B-rep record vertex index): `<face A>|<face B>|…`, numbered
 /// with `~k` when repeated along the longest axis of their spread. Empty for a mesh body.
 pub fn vertex_names(b: &ModelBody) -> Vec<String> {
-    if b.body.is_mesh() {
-        return Vec::new();
-    }
-    let record = b.body.record();
-    let incident = vertex_incident_faces(record);
-    vertex_names_from_record(record, &incident, &face_names(b))
+    vertex_name_index(b).names.clone()
 }
 
 /// Names of `record`'s vertices from `incident` face indices and face names `faces`.
@@ -1138,21 +1431,9 @@ pub(crate) fn vertex_names_from_record(record: &solidcore_record::brep::Brep, in
             n.join("|")
         })
         .collect();
-    let mut non_empty = Vec::new();
-    let mut indices = Vec::new();
-    let mut non_empty_pts = Vec::new();
-    for (i, (n, v)) in names.iter().zip(&record.vertices).enumerate() {
-        if !n.is_empty() {
-            non_empty.push(n.clone());
-            indices.push(i);
-            non_empty_pts.push(vec![Vec3::new(v.point[0], v.point[1], v.point[2])]);
-        }
-    }
-    number_pieces(&mut non_empty, &non_empty_pts, '~');
-    for (i, n) in indices.into_iter().zip(non_empty) {
-        if let Some(slot) = names.get_mut(i) {
-            *slot = n;
-        }
+    let limit = names.len().min(record.vertices.len());
+    if let Some(prefix) = names.get_mut(..limit) {
+        number_pieces_by(prefix, |j| record.vertices.get(j).map(|v| Vec3::new(v.point[0], v.point[1], v.point[2])).unwrap_or(Vec3::ZERO), '~', true);
     }
     names
 }
@@ -1177,18 +1458,34 @@ pub(crate) fn vertex_index_at(b: &ModelBody, at: Vec3) -> Option<usize> {
         .map(|(_, i)| i)
 }
 
-/// Names of the faces holding each point (any body; empty when none does).
+/// Names of the faces holding each point within modelling tolerance (any body; empty when none
+/// does). Resolve against the exact trimmed faces: a display chord can put a point near a round
+/// rim nearer the adjacent wall and save that wall's name instead.
 pub fn face_names_at(st: &ModelState, pts: &[Vec3]) -> Vec<String> {
     pts.iter()
         .map(|p| {
+            // Exact distances of a point on two faces at once (walls touching along a line) differ
+            // only by rounding: within `ON` the first body's face is the one, as it is at 0.
+            const ON: f64 = 1e-9;
+            let mut best: Option<(f64, String)> = None;
             for b in st.bodies.iter().filter(|b| !b.body.is_mesh()) {
+                // A point on a body's face, found by exact geometry, names that face (#20260).
+                if let Some(f) = b.body.face_at_point(*p).ok().flatten() {
+                    best = Some((0.0, face_names(b).get(f).cloned().unwrap_or_default()));
+                    break;
+                }
                 let tol = (b.body.size() * 1e-3).max(1e-3);
-                let idx = FaceIndex::new(&b.mesh(), face_count(b));
-                if let Some(f) = idx.face_at(*p, tol) {
-                    return face_names(b).get(f).cloned().unwrap_or_default();
+                if let Some((d, f)) = b.body.face_and_dist_at(*p, tol)
+                    && best.as_ref().is_none_or(|(bd, _)| d < *bd - ON)
+                {
+                    let name = face_names(b).get(f).cloned().unwrap_or_default();
+                    best = Some((d, name));
+                    if d <= ON {
+                        break;
+                    }
                 }
             }
-            String::new()
+            best.map(|(_, name)| name).unwrap_or_default()
         })
         .collect()
 }
@@ -1198,14 +1495,31 @@ pub fn face_name_at_body(body: &ModelBody, point: Vec3) -> Option<String> {
     if body.body.is_mesh() || !point.is_finite() {
         return None;
     }
-    let mesh = body.mesh();
-    let count = face_count(body);
-    if mesh.triangles.len() > 2_000_000 || count > 50_000 {
+    if body.body.face_count() > 50_000 {
         return None;
     }
     let tolerance = (body.body.size() * 1e-3).max(1e-3);
-    let index = FaceIndex::new(&mesh, count).face_at(point, tolerance)?;
+    let index = body.body.face_at(point, tolerance)?;
     face_names(body).get(index).filter(|name| !name.is_empty()).cloned()
+}
+
+/// Whether `name` is a linked face of Import feature `feature` disambiguated by a positional tie
+/// number (`F<feature>:link:<digest>#<k>` or `F<feature>:link:<digest>#[…]#<k>`), which can shift
+/// onto a different sibling face when faces are added or removed.
+pub fn is_tie_numbered_link_face(name: &str, feature: u64) -> bool {
+    let clean = name.trim_start_matches(crate::name_lookup::LEGACY_MARK);
+    let prefix = format!("F{feature}:link:");
+    if !clean.starts_with(&prefix) {
+        return false;
+    }
+    clean.rsplit_once('#').is_some_and(|(_, digits)| !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Whether `name` (a face name, or an edge/vertex name joining face names with `|`) references a
+/// positional tie-numbered linked face of Import feature `feature`.
+pub fn has_tie_numbered_link_face(name: &str, feature: u64) -> bool {
+    let clean = crate::piece_names::strip_edge_number(name.trim_start_matches(crate::name_lookup::LEGACY_MARK));
+    clean.split('|').any(|part| is_tie_numbered_link_face(part, feature))
 }
 
 /// The names the faces of `imported` have in `part`, by body, then face (empty where not known):
@@ -1312,7 +1626,14 @@ pub fn face_spot(b: &ModelBody, index: usize) -> Option<FaceSpot> {
 pub fn named_face_point(st: &ModelState, body: Option<&str>, name: &str) -> Result<Vec3, String> {
     let hit = locate_one(st, body, name)?;
     let b = st.bodies.get(hit.body).ok_or_else(|| format!("no face is named `{name}`"))?;
-    face_spot(b, hit.face).map(|spot| spot.point).ok_or_else(|| format!("face `{name}` has no surface to pick"))
+    // The spot starts on a display triangle. Project it onto the known face before exact
+    // face-name capture; a non-analytic curved face has no analytic projection in `spot`.
+    // When the exact projection finds nothing, the spot itself is returned, as it always was.
+    let spot = face_spot(b, hit.face).ok_or_else(|| format!("face `{name}` has no surface to pick"))?;
+    match solidcraft_kernel::point_closest(spot.point, &b.body, solidcraft_kernel::Members::Faces(&[hit.face])) {
+        Ok(Some(nearest)) => Ok(nearest.to),
+        _ => Ok(spot.point),
+    }
 }
 
 /// The point on the face this name finds nearest `p`; `None` when the name finds no face (see
@@ -1358,6 +1679,41 @@ mod tests {
     }
 
     #[test]
+    fn rigid_predecessor_requires_a_non_copy_transform_and_bijective_history() {
+        use crate::lineage::Operand;
+        let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(4., 2., 1.)).unwrap();
+        let source = ModelBody::new("Box".into(), body.clone(), 1);
+        let before = Arc::new(ModelState::default().with_bodies(vec![source.clone()]));
+        let feature: Feature = serde_json::from_value(serde_json::json!({
+            "id": 2, "name": "Move", "type": "move", "bodies": ["Box"], "translate": ["0 mm", "0 mm", "0 mm"]
+        }))
+        .unwrap();
+        let mut lineage = Lineage::of(&body, Operand::Body("Box".into()));
+        // A rigid transform is allowed to reorder entities: the map must be bijective,
+        // rather than requiring that every index remain at its old position.
+        lineage.history.faces.swap(0, 1);
+        lineage.history.edges.swap(0, 1);
+        let made = |feature: Feature, lineage: Option<Lineage>| {
+            let mut moved = source.clone();
+            let origin = Arc::new(NamingOrigin { feature, before: before.clone(), depth: 1, mats: Vec::new() });
+            moved.names = NameCell::traced(Some(origin), lineage.map(Arc::new));
+            moved
+        };
+        assert!(rigid_predecessor(&made(feature.clone(), Some(lineage.clone()))).is_some());
+        assert!(rigid_predecessor(&made(feature.clone(), None)).is_none(), "no history is no proof");
+        let mut copied = feature.clone();
+        let FeatureKind::Move { copy, .. } = &mut copied.kind else { panic!("Move") };
+        *copy = true;
+        assert!(rigid_predecessor(&made(copied, Some(lineage.clone()))).is_none(), "a copy has its own names");
+        let mut duplicate = lineage.clone();
+        duplicate.history.faces[1].origins = duplicate.history.faces[0].origins.clone();
+        assert!(rigid_predecessor(&made(feature.clone(), Some(duplicate))).is_none(), "two faces from one source are not a rigid move");
+        let mut missing = lineage.clone();
+        missing.history.edges[0].origins.clear();
+        assert!(rigid_predecessor(&made(feature, Some(missing))).is_none(), "an edge with no source is not a rigid move");
+    }
+
+    #[test]
     fn cached_face_lookups_schedule_no_name_warmup() {
         let st = lookup_bodies();
         for b in &st.bodies {
@@ -1394,7 +1750,7 @@ mod tests {
             assert_eq!(take_warm_jobs(), 0, "snapshots share ready names");
 
             st.bodies[0].name = "Renamed".into();
-            st.bodies[0].names = st.bodies[0].names.renamed();
+            st.bodies[0].names = st.bodies[0].names.renamed("", "Renamed");
             let renamed = lookup(&st, "Renamed:face:0");
             same_hit(&renamed, &hit);
             assert_eq!(take_warm_jobs(), 1, "a rename invalidates only its own names");
@@ -1665,5 +2021,315 @@ mod tests {
         let body = ModelBody::new("Cube".into(), body, 1);
         let pairs = mesh_adjacency(&body);
         assert_eq!(pairs.len(), 12);
+    }
+
+    #[test]
+    fn face_names_at_chooses_nearest_face_across_all_bodies() -> Result<(), Box<dyn std::error::Error>> {
+        let body1 = solidcraft_kernel::box_solid(Vec3::new(-22.3, 0.0, 0.0), Vec3::new(-22.3 + 200.0, 100.0, 20.0))?;
+        let mb1 = ModelBody::new("Body1".into(), body1, 1);
+
+        let body2 = solidcraft_kernel::box_solid(Vec3::new(-37.5, 0.0, 0.0), Vec3::new(-37.5 + 15.0, 100.0, 20.0))?;
+        let mb2 = ModelBody::new("Body2".into(), body2, 2);
+
+        let st = ModelState::default().with_bodies(vec![mb1.clone(), mb2.clone()]);
+
+        let pt = Vec3::new(-22.5, 50.0, 10.0);
+        let names = face_names_at(&st, &[pt]);
+        assert_eq!(names.len(), 1);
+        let body2_faces = face_names(&mb2);
+        assert!(body2_faces.contains(&names[0]), "expected a face belonging to Body2, got '{}'", names[0]);
+        Ok(())
+    }
+
+    fn naive_edge_names(b: &ModelBody) -> Vec<String> {
+        let m = b.mesh();
+        let faces = face_names(b);
+        let mut out: Vec<String> = m
+            .edge_faces
+            .iter()
+            .map(|fs| {
+                let mut n: Vec<&str> = fs.iter().filter_map(|f| faces.get(*f as usize).map(String::as_str)).collect();
+                n.sort();
+                n.join("|")
+            })
+            .collect();
+        let mut groups: std::collections::BTreeMap<String, Vec<usize>> = std::collections::BTreeMap::new();
+        for (i, n) in out.iter().enumerate() {
+            groups.entry(n.clone()).or_default().push(i);
+        }
+        for (n, same) in groups {
+            if same.len() < 2 {
+                continue;
+            }
+            let order = along_spread(
+                same.iter()
+                    .map(|&j| {
+                        let ps = m.edges.get(j).cloned().unwrap_or_default();
+                        let c = ps.iter().fold(Vec3::ZERO, |a, p| a + *p) * (1.0 / ps.len().max(1) as f64);
+                        (j, c)
+                    })
+                    .collect(),
+            );
+            for (k, j) in order.iter().enumerate() {
+                if let Some(slot) = out.get_mut(*j) {
+                    *slot = format!("{n}~{}", k + 1);
+                }
+            }
+        }
+        out
+    }
+
+    fn naive_vertex_names(b: &ModelBody) -> Vec<String> {
+        if b.body.is_mesh() {
+            return Vec::new();
+        }
+        let record = b.body.record();
+        let incident = vertex_incident_faces(record);
+        let faces = face_names(b);
+        let mut out: Vec<String> = incident
+            .iter()
+            .map(|fs| {
+                let mut n: Vec<&str> = fs.iter().filter_map(|f| faces.get(*f as usize).map(String::as_str)).filter(|s| !s.is_empty()).collect();
+                n.sort();
+                n.join("|")
+            })
+            .collect();
+        let mut groups: std::collections::BTreeMap<String, Vec<usize>> = std::collections::BTreeMap::new();
+        for (i, (n, _)) in out.iter().zip(&record.vertices).enumerate() {
+            if !n.is_empty() {
+                groups.entry(n.clone()).or_default().push(i);
+            }
+        }
+        for (n, same) in groups {
+            if same.len() < 2 {
+                continue;
+            }
+            let order = along_spread(
+                same.iter()
+                    .map(|&j| {
+                        let p = record.vertices[j].point;
+                        (j, Vec3::new(p[0], p[1], p[2]))
+                    })
+                    .collect(),
+            );
+            for (k, j) in order.iter().enumerate() {
+                if let Some(slot) = out.get_mut(*j) {
+                    *slot = format!("{n}~{}", k + 1);
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn cached_edge_and_vertex_names_match_uncached_across_fillets_cuts_renames_and_resets() {
+        let doc = crate::Document {
+            features: serde_json::from_value(serde_json::json!([
+                {
+                    "id": 1, "name": "Box1", "type": "box", "body_names": ["Block"],
+                    "corner": [0.0, 0.0, 0.0], "length": "20 mm", "width": "10 mm", "height": "10 mm", "operation": "new_body"
+                },
+                {
+                    "id": 2, "name": "Cut1", "type": "box",
+                    "corner": [5.0, -1.0, 4.0], "length": "10 mm", "width": "12 mm", "height": "10 mm", "operation": "cut"
+                },
+                {
+                    "id": 3, "name": "Fillet1", "type": "fillet",
+                    "edges": [[0.0, 5.0, 10.0], [20.0, 5.0, 10.0]], "radius": "1 mm", "body": "Block"
+                }
+            ]))
+            .unwrap(),
+            ..crate::Document::default()
+        };
+        let mut model = crate::Model::new();
+        model.evaluate(&doc);
+        assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| (&r.name, &r.error)).collect::<Vec<_>>());
+
+        let verify_body = |label: &str, body: &ModelBody| {
+            let expected_edges = naive_edge_names(body);
+            let expected_vertices = naive_vertex_names(body);
+            assert_eq!(edge_names(body), expected_edges, "{label}: cached edge_names mismatch");
+            assert_eq!(edge_names_from(body, &face_names(body)), expected_edges, "{label}: edge_names_from mismatch");
+            assert_eq!(vertex_names(body), expected_vertices, "{label}: cached vertex_names mismatch");
+
+            let m = body.mesh();
+            for (i, name) in expected_edges.iter().enumerate() {
+                if name.is_empty() {
+                    continue;
+                }
+                let near = m.edges.get(i).and_then(|pts| pts.first()).copied().unwrap_or(Vec3::ZERO);
+                let hit = locate_edge(body, name, near).unwrap_or_else(|e| panic!("{label}: edge `{name}` failed: {e}"));
+                assert_eq!(hit.edge, i, "{label}: edge `{name}` resolved to wrong index");
+            }
+            if !body.body.is_mesh() {
+                let rec = body.body.record();
+                for (v, name) in expected_vertices.iter().enumerate() {
+                    if name.is_empty() {
+                        continue;
+                    }
+                    let p = rec.vertices[v].point;
+                    let hit =
+                        locate_vertex(body, name, Vec3::new(p[0], p[1], p[2])).unwrap_or_else(|e| panic!("{label}: vertex `{name}` failed: {e}"));
+                    assert_eq!(hit.vertex, v, "{label}: vertex `{name}` resolved to wrong index");
+                }
+            }
+        };
+
+        for (label, st) in [("box", model.state_before(2)), ("cut", model.state_before(3)), ("fillet", model.state())] {
+            let body = st.body("Block").unwrap();
+            verify_body(label, body);
+        }
+
+        // Duplicate face names trigger `~1`/`~2` numbering on both edges and vertices.
+        let mut dup = ModelBody::new("Dup".into(), solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(8., 4., 2.)).unwrap(), 1);
+        let nf = face_count(&dup);
+        dup.names = NameCell::known(Arc::new(vec!["shared".into(); nf]));
+        assert!(edge_names(&dup).iter().any(|n| n.contains('~')), "duplicate edge names should be disambiguated");
+        assert!(vertex_names(&dup).iter().any(|n| n.contains('~')), "duplicate vertex names should be disambiguated");
+        verify_body("duplicate_known", &dup);
+
+        // `NameCell::same` on a rotated copy shares face names, but computes its own geometry-dependent edge/vertex caches.
+        let rot_z: crate::Mat = [[0.0, -1.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let rotated = solidcraft_kernel::transform_matrix(&dup.body, rot_z).unwrap();
+        let mut moved = ModelBody::new("Moved".into(), rotated, 1);
+        moved.names = NameCell::same(&dup);
+        assert!(Arc::ptr_eq(&names(&moved), &names(&dup)));
+        assert!(!Arc::ptr_eq(&edge_name_index(&moved), &edge_name_index(&dup)));
+        assert!(!Arc::ptr_eq(&vertex_name_index(&moved), &vertex_name_index(&dup)));
+        verify_body("moved_same", &moved);
+
+        // Non-saved body rename invalidates cached edge and vertex names.
+        let mut plain = ModelBody::new("Plain".into(), solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(6., 3., 2.)).unwrap(), 1);
+        verify_body("plain_before_rename", &plain);
+        plain.name = "RenamedPlain".into();
+        plain.names = plain.names.renamed("Plain", "RenamedPlain");
+        assert!(edge_names(&plain).iter().all(|n| n.contains("RenamedPlain:face:")));
+        assert!(vertex_names(&plain).iter().all(|n| n.contains("RenamedPlain:face:")));
+        verify_body("plain_after_rename", &plain);
+
+        // Saved body rename rewrites face names and invalidates cached edge and vertex names.
+        let saved_faces = Arc::new(Names::given(face_names(&plain)));
+        plain.names = NameCell::saved(saved_faces, Some(1));
+        verify_body("saved_before_rename", &plain);
+        plain.name = "RenamedSaved".into();
+        plain.names = plain.names.renamed("RenamedPlain", "RenamedSaved");
+        assert!(edge_names(&plain).iter().all(|n| n.contains("RenamedSaved:face:")));
+        assert!(vertex_names(&plain).iter().all(|n| n.contains("RenamedSaved:face:")));
+        verify_body("saved_after_rename", &plain);
+
+        // NameCell resets (`traced`, `new`, `default`, `known`) each clear edge/vertex caches cleanly.
+        for (label, cell) in [
+            ("reset_traced", NameCell::traced(None, None)),
+            ("reset_new", NameCell::new(None)),
+            ("reset_default", NameCell::default()),
+            ("reset_known", NameCell::known(Arc::new((0..face_count(&plain)).map(|k| format!("F9:face:{k}")).collect()))),
+        ] {
+            plain.names = cell;
+            verify_body(label, &plain);
+        }
+    }
+
+    #[test]
+    fn edge_and_vertex_name_caches_reuse_arc_and_invalidate_on_mutation() {
+        let mut body = ModelBody::new("Part".into(), solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(5., 3., 2.)).unwrap(), 1);
+        let e1 = edge_name_index(&body);
+        let e2 = edge_name_index(&body);
+        assert!(Arc::ptr_eq(&e1, &e2), "repeated edge_name_index must hit OnceLock cache");
+
+        let v1 = vertex_name_index(&body);
+        let v2 = vertex_name_index(&body);
+        assert!(Arc::ptr_eq(&v1, &v2), "repeated vertex_name_index must hit OnceLock cache");
+
+        let first_edge = e1.names[0].clone();
+        let first_vertex = v1.names[0].clone();
+        assert_eq!(locate_edge(&body, &first_edge, Vec3::ZERO).unwrap().edge, 0);
+        assert_eq!(locate_vertex(&body, &first_vertex, Vec3::ZERO).unwrap().vertex, 0);
+        assert!(Arc::ptr_eq(&edge_name_index(&body), &e1), "locate_edge must reuse cached EdgeNameIndex");
+        assert!(Arc::ptr_eq(&vertex_name_index(&body), &v1), "locate_vertex must reuse cached VertexNameIndex");
+
+        // Cloned snapshots share the same populated caches.
+        let snapshot = body.clone();
+        assert!(Arc::ptr_eq(&edge_name_index(&snapshot), &e1));
+        assert!(Arc::ptr_eq(&vertex_name_index(&snapshot), &v1));
+
+        // Renaming invalidates this body's caches without disturbing the snapshot.
+        body.name = "Renamed".into();
+        body.names = body.names.renamed("Part", "Renamed");
+        let e3 = edge_name_index(&body);
+        let v3 = vertex_name_index(&body);
+        assert!(!Arc::ptr_eq(&e3, &e1), "rename must invalidate edge_names cache");
+        assert!(!Arc::ptr_eq(&v3, &v1), "rename must invalidate vertex_names cache");
+        assert!(locate_edge(&body, &first_edge, Vec3::ZERO).is_err());
+        assert_eq!(locate_edge(&body, &e3.names[0], Vec3::ZERO).unwrap().edge, 0);
+        assert!(Arc::ptr_eq(&edge_name_index(&snapshot), &e1), "snapshot edge cache must stay intact");
+        assert!(Arc::ptr_eq(&vertex_name_index(&snapshot), &v1), "snapshot vertex cache must stay intact");
+        assert_eq!(locate_edge(&snapshot, &first_edge, Vec3::ZERO).unwrap().edge, 0);
+
+        // Replacing face names via NameCell::known invalidates both caches.
+        body.names = NameCell::known(Arc::new((0..face_count(&body)).map(|k| format!("F7:face:{k}")).collect()));
+        let e4 = edge_name_index(&body);
+        let v4 = vertex_name_index(&body);
+        assert!(!Arc::ptr_eq(&e4, &e3));
+        assert!(!Arc::ptr_eq(&v4, &v3));
+        assert!(e4.names.iter().all(|n| n.contains("F7:face:")));
+        assert!(v4.names.iter().all(|n| n.contains("F7:face:")));
+
+        // Mesh bodies cache an empty VertexNameIndex and reuse the same Arc.
+        let mesh_body = ModelBody::new(
+            "Mesh".into(),
+            solidcraft_kernel::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z], &[[0, 1, 2], [0, 1, 3], [1, 2, 3], [0, 2, 3]]).unwrap(),
+            1,
+        );
+        let mv1 = vertex_name_index(&mesh_body);
+        let mv2 = vertex_name_index(&mesh_body);
+        assert!(mv1.names.is_empty());
+        assert!(Arc::ptr_eq(&mv1, &mv2));
+    }
+
+    #[test]
+    fn edge_and_vertex_name_caches_guard_in_place_body_replacement() {
+        let mut body = ModelBody::new("Part".into(), solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(8., 4., 2.)).unwrap(), 1);
+        let nf = face_count(&body);
+        body.names = NameCell::known(Arc::new(vec!["shared".into(); nf]));
+        let e1 = edge_name_index(&body);
+        let v1 = vertex_name_index(&body);
+        let snapshot = body.clone();
+
+        // Colour-only changes preserve the shape identity, so both caches stay warm.
+        body.body = body.body.clone().with_color(Some([0.2, 0.4, 0.6]));
+        assert!(Arc::ptr_eq(&edge_name_index(&body), &e1));
+        assert!(Arc::ptr_eq(&vertex_name_index(&body), &v1));
+
+        // Replacing `ModelBody.body` in place with a rotated shape bypasses the stale cache
+        // while keeping cloned snapshots intact.
+        let rot_z: crate::Mat = [[0.0, -1.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        body.body = solidcraft_kernel::transform_matrix(&body.body, rot_z).unwrap();
+        let e2 = edge_name_index(&body);
+        let v2 = vertex_name_index(&body);
+        assert!(!Arc::ptr_eq(&e2, &e1));
+        assert!(!Arc::ptr_eq(&v2, &v1));
+        assert_eq!(v2.names, naive_vertex_names(&body));
+        assert_eq!(v2.incident.len(), body.body.record().vertices.len());
+        assert!(Arc::ptr_eq(&edge_name_index(&snapshot), &e1));
+        assert!(Arc::ptr_eq(&vertex_name_index(&snapshot), &v1));
+
+        // Replacing a B-rep body in place with a mesh body rebuilds an empty vertex index.
+        let mesh = solidcraft_kernel::mesh_body(&[Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::Z], &[[0, 1, 2], [0, 1, 3], [1, 2, 3], [0, 2, 3]]).unwrap();
+        body.body = mesh.clone();
+        let v_mesh = vertex_name_index(&body);
+        assert!(v_mesh.names.is_empty());
+        assert!(v_mesh.incident.is_empty());
+        assert!(Arc::ptr_eq(&vertex_name_index(&snapshot), &v1));
+
+        // Replacing a mesh body in place with a B-rep body rebuilds full vertex names.
+        let mut from_mesh = ModelBody::new("FromMesh".into(), mesh, 1);
+        let mv1 = vertex_name_index(&from_mesh);
+        assert!(mv1.names.is_empty());
+        from_mesh.body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(5., 3., 2.)).unwrap();
+        let mv2 = vertex_name_index(&from_mesh);
+        assert!(!Arc::ptr_eq(&mv2, &mv1));
+        assert_eq!(mv2.names, naive_vertex_names(&from_mesh));
+        assert_eq!(mv2.incident.len(), from_mesh.body.record().vertices.len());
+        assert_eq!(locate_vertex(&from_mesh, &mv2.names[0], Vec3::ZERO).unwrap().vertex, 0);
     }
 }

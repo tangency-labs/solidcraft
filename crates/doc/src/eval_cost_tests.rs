@@ -27,7 +27,8 @@ use crate::*;
 /// import feature, the tight boxes the kernel was asked for, the flats of sheets made from
 /// surfaces laid out (their pieces cut), the blends the kernel was asked for, the searches for
 /// the radius that fits, the meshes a cam's profile was read from, and the kernel's point
-/// classifications a pattern's copies were probed with.
+/// classifications a pattern's copies were probed with, and the bodies a hole's points were
+/// classified in.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct Counts {
     pub moved: usize,
@@ -55,10 +56,16 @@ pub(crate) struct Counts {
     pub thread_cuts: usize,
     pub grouped_thread_fallbacks: usize,
     pub hole_tools: usize,
+    pub run_on_probes: usize,
     pub tight_boxes: usize,
     pub blends: usize,
     pub fit_searches: usize,
     pub classifications: usize,
+    pub hole_points: usize,
+    /// Contact tests a join made to find which bodies its tool meets.
+    pub contact_tests: usize,
+    /// Kernel union calls (`union` or `union_all`) made by `join`.
+    pub join_unions: usize,
 }
 
 thread_local! {
@@ -89,10 +96,14 @@ thread_local! {
             thread_cuts: 0,
             grouped_thread_fallbacks: 0,
             hole_tools: 0,
+            run_on_probes: 0,
             tight_boxes: 0,
             blends: 0,
             fit_searches: 0,
             classifications: 0,
+            hole_points: 0,
+            contact_tests: 0,
+            join_unions: 0,
         })
     };
 }
@@ -144,6 +155,95 @@ pub(crate) fn counted(f: impl FnOnce()) -> Counts {
     COUNTS.with(Cell::get)
 }
 
+/// Run `f` while measuring its [`Counts`] without modifying this thread's outer counters.
+pub(crate) fn measure<R>(f: impl FnOnce() -> R) -> (R, Counts) {
+    let saved = COUNTS.with(|c| c.replace(Counts::default()));
+    struct Restore(Counts);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            COUNTS.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(saved);
+    let r = f();
+    let delta = COUNTS.with(Cell::get);
+    (r, delta)
+}
+
+/// Add `delta` to this thread's [`Counts`].
+pub(crate) fn add(delta: Counts) {
+    let Counts {
+        moved,
+        digested,
+        imports_read,
+        cam_meshes,
+        mesh_digested,
+        joint_faces,
+        faces_at,
+        measures,
+        body_searches,
+        feature_searches,
+        cut,
+        cylinder_search,
+        tapped_wall,
+        miss_intersects,
+        cut_tools,
+        apart_unions,
+        surfaces,
+        flats,
+        joined_apart,
+        kept_checks,
+        detached_checks,
+        reused_checks,
+        thread_cuts,
+        grouped_thread_fallbacks,
+        hole_tools,
+        run_on_probes,
+        tight_boxes,
+        blends,
+        fit_searches,
+        classifications,
+        hole_points,
+        contact_tests,
+        join_unions,
+    } = delta;
+    count(|c| {
+        c.moved += moved;
+        c.digested += digested;
+        c.imports_read += imports_read;
+        c.cam_meshes += cam_meshes;
+        c.mesh_digested += mesh_digested;
+        c.joint_faces += joint_faces;
+        c.faces_at += faces_at;
+        c.measures += measures;
+        c.body_searches += body_searches;
+        c.feature_searches += feature_searches;
+        c.cut += cut;
+        c.cylinder_search += cylinder_search;
+        c.tapped_wall += tapped_wall;
+        c.miss_intersects += miss_intersects;
+        c.cut_tools += cut_tools;
+        c.apart_unions += apart_unions;
+        c.surfaces += surfaces;
+        c.flats += flats;
+        c.joined_apart += joined_apart;
+        c.kept_checks += kept_checks;
+        c.detached_checks += detached_checks;
+        c.reused_checks += reused_checks;
+        c.thread_cuts += thread_cuts;
+        c.grouped_thread_fallbacks += grouped_thread_fallbacks;
+        c.hole_tools += hole_tools;
+        c.run_on_probes += run_on_probes;
+        c.tight_boxes += tight_boxes;
+        c.blends += blends;
+        c.fit_searches += fit_searches;
+        c.classifications += classifications;
+        c.hole_points += hole_points;
+        c.contact_tests += contact_tests;
+        c.join_unions += join_unions;
+    });
+}
+
 #[test]
 fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
     use crate::joints::{Joint, JointKind, JointOrigin, Snap, XRef};
@@ -156,7 +256,7 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
         .add_feature(
             FeatureKind::Cylinder {
                 base: point_expr(Vec3::ZERO),
-                axis: Dir(Vec3::Z),
+                axis: crate::dir_expr(Vec3::Z),
                 radius: "2".into(),
                 height: "10".into(),
                 operation: Operation::NewBody,
@@ -186,7 +286,10 @@ fn joint_face_measurements_are_shared_across_motion_samples_and_snap_kinds() {
         exprs: Default::default(),
         offset_xy: [0.0; 2],
         captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
         constraint: None,
+        dynamics: Vec::new(),
     });
     // One body supplies both old nearest-face snaps and persistent named-face snaps.
     // A scratch model shares its measurements, even though each sample changes the pose.
@@ -416,6 +519,115 @@ fn moving_a_construction_plane_moves_the_sketch_on_it() {
     assert!((model.state().sketch(sketch).unwrap().plane.origin.z - 12.0).abs() < 1e-9, "the sketch follows its plane");
 }
 
+/// A boundary surface reads its own sketch and nothing else: an edit of a sketch it does not use
+/// leaves it as it was. A delete in a later sketch rebuilt a patch through four arcs of an earlier
+/// one, whose edge tolerances take most of a second to prove, twice per check (#17714).
+#[test]
+fn a_boundary_surface_keeps_its_result_when_another_sketch_changes() {
+    let mut doc = Document::new("Boundary");
+    let mut square = Sketch::new();
+    let corners = [(0.0, 0.0), (20.0, 0.0), (20.0, 20.0), (0.0, 20.0)].map(|(x, y)| square.add_point(Vec2::new(x, y), None).unwrap());
+    let mut curves = Vec::new();
+    for k in 0..4 {
+        let line = square.add_line_pts(corners[k], corners[(k + 1) % 4], None).unwrap();
+        curves.push(square.curves[line].id.clone());
+    }
+    let loop_sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: square }, None).unwrap();
+    let other = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XZ".into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let patch = doc
+        .add_feature(FeatureKind::SurfaceBoundary { sketch: loop_sketch.into(), curves, orders: Vec::new(), crown: 0.0, samples: 25 }, None)
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().bodies.len(), 1);
+
+    // The line sketch before the patch changes: it alone is evaluated again.
+    if let Ok(sk) = doc.sketch_mut(other)
+        && let Some(p) = sk.points.get_mut(1)
+    {
+        p.pos = Vec2::new(12.0, 2.0);
+    }
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1, "only the edited sketch");
+    assert!(model.result(patch).unwrap().error.is_none());
+    assert_eq!(model.state().bodies.len(), 1);
+
+    // Its own sketch changes: the patch follows it.
+    if let Ok(sk) = doc.sketch_mut(loop_sketch)
+        && let Some(p) = sk.points.get_mut(corners[2])
+    {
+        p.pos = Vec2::new(30.0, 20.0);
+    }
+    let size = model.state().bodies[0].body.size();
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 2, "the square and the patch");
+    assert!(model.result(patch).unwrap().error.is_none());
+    assert!(model.state().bodies[0].body.size() > size, "the patch reaches the moved corner");
+}
+
+/// Construction geometry can follow another part in a sketch while the whole boundary extruded
+/// from it stays put. A shared point still moves the drawn curve, and a missing boundary fails.
+#[test]
+fn a_whole_profile_extrusion_reads_its_boundary_and_naming_curves() {
+    let mut doc = Document::new("Construction geometry");
+    block(&mut doc, "Other", Vec3::new(30.0, 30.0, 30.0), [2.0; 3]);
+    let other = doc.features[0].id;
+    let mut sketch = Sketch::new();
+    let center = sketch.add_point(Vec2::new(3.0, 2.0), None).unwrap();
+    sketch.add_circle(Vec2::ZERO, 4.0, Some(center), Some("rim")).unwrap();
+    let end = sketch.add_point(Vec2::new(20.0, 2.0), None).unwrap();
+    let guide = sketch.add_line_pts(center, end, None).unwrap();
+    sketch.curves[guide].construction = true;
+    let id = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+    let extrude = doc
+        .add_feature(
+            FeatureKind::Extrude {
+                thin: None,
+                sketch: id.into(),
+                profiles: ProfileSel::WholeBoundaries { profiles: vec![WholeProfileBoundary { outer: vec!["rim".into()], holes: Vec::new() }] },
+                extent: serde_json::from_value(serde_json::json!({"distance": "2"})).unwrap(),
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(extrude).unwrap().body_names = vec!["Disk".into()];
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let first = model.state();
+    let disk = first.body("Disk").unwrap();
+    let names = crate::naming::face_names(disk);
+    let mut reopened = Model::adopt(&doc, &model.saved(&doc).unwrap()).unwrap();
+    // With another body gone, only the relative cache entry can give back the disk.
+    doc.feature_mut(other).unwrap().suppressed = true;
+    doc.sketch_mut(id).unwrap().points[end].pos.x = 25.0;
+    for session in [&mut model, &mut reopened] {
+        let before = session.state();
+        session.evaluate(&doc);
+        assert_eq!(session.last_recomputed, 1, "only the sketch");
+        assert_eq!(session.last_restored, 1);
+        let next = session.state();
+        assert!(next.body("Other").is_none());
+        assert_eq!(next.sketch(id).unwrap().sketch.point(end).unwrap().x, 25.0);
+        let disk = next.body("Disk").unwrap();
+        assert!(disk.body.same(&before.body("Disk").unwrap().body));
+        assert_eq!(crate::naming::face_names(disk), names);
+    }
+
+    doc.sketch_mut(id).unwrap().points[center].pos.x = 8.0;
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 2, "the guide and rim share the moved point");
+    assert!((centroid_of(&model, extrude).x - 8.0).abs() < 1e-7);
+    assert_eq!(crate::naming::face_names(model.state().body("Disk").unwrap()), names);
+
+    doc.sketch_mut(id).unwrap().curves[0].id = "other".into();
+    model.evaluate(&doc);
+    assert!(model.result(extrude).unwrap().error.is_some(), "the old pick no longer resolves");
+    assert!(model.state().body("Disk").is_none());
+}
+
 #[test]
 fn a_sketch_on_a_face_still_sees_the_placed_bodies() {
     let parts = 3;
@@ -548,7 +760,8 @@ fn a_frame_without_turns_keeps_its_fingerprint() {
         let steps = super::ImportDigests::default();
         let fp = super::chain_fingerprint(doc, &vals, f, 0, false, &steps, None);
         // And the key its result is cached under, which leaves the chain out.
-        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, &ModelState::default(), &steps, 0).whole)
+        let comps = super::ComponentDigests::of(doc);
+        (fp, super::EvalKey::new(doc, &vals, f, fp, 0, 0, &ModelState::default(), &steps, &comps).whole)
     };
     let before = key(&doc);
     let turn = doc
@@ -622,6 +835,199 @@ fn an_import_after_a_moved_sketch_is_not_read_again() {
     assert_eq!(work.imports_read, 0, "the import after the sketch must not be read again: {work:?}");
     assert_eq!(model.last_recomputed, 1, "only the sketch is evaluated again: {work:?}");
     assert_eq!(model.state().bodies.len(), 2, "the plate and the imported part: {work:?}");
+}
+
+/// Adds a single-box imported component to `doc`, returning `(component_id, feature_id)`.
+fn add_imported_part(doc: &mut Document, part_name: &str, body_name: &str, origin_x: f64, size: f64) -> (u64, u64) {
+    let solid = kernel::box_solid(Vec3::new(origin_x, 0.0, 0.0), Vec3::new(origin_x + size, size, size)).unwrap();
+    let step: Arc<str> = kernel::step_export(&[&solid], part_name).unwrap().into();
+    let comp = doc.add_component(Some(part_name), 0).unwrap();
+    let kind = FeatureKind::Import { file: format!("{part_name}.step"), step, components: Vec::new(), skip: Vec::new(), records: None };
+    let id = doc.add_feature(kind, Some(part_name)).unwrap();
+    let f = doc.feature_mut(id).unwrap();
+    f.component = comp;
+    f.body_names = vec![body_name.into()];
+    (comp, id)
+}
+
+/// Snapshot of a model's bodies (name, cache key, owning component, quantized volume, face names)
+/// and threads for verifying cached replay matches fresh evaluation identically.
+fn import_snapshot(model: &Model) -> (Vec<(String, u64, u64, i64, Vec<String>)>, Vec<ThreadInfo>) {
+    let st = model.state();
+    let bodies = st
+        .bodies
+        .iter()
+        .map(|b| {
+            let vol = (kernel::measure(&b.body).unwrap().volume * 1e6).round() as i64;
+            (b.name.clone(), b.key, b.component, vol, (*crate::naming::face_names(b)).clone())
+        })
+        .collect();
+    (bodies, st.threads.clone())
+}
+
+/// Deleting an early independent Import component must not re-evaluate later independent Import
+/// components — both in-session and on the first edit after opening a saved design — while
+/// preserving carried face names and linked cosmetic threads. A saved import whose bodies carry a
+/// legacy key safely falls back to evaluating once.
+#[test]
+fn deleting_an_early_import_keeps_later_independent_imports() {
+    let mut doc = Document::new("assembly delete");
+    doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Origin { name: "XY".into() } }, Some("Datum")).unwrap();
+    let (_comp_a, _feat_a) = add_imported_part(&mut doc, "PartA", "BlockA", 0.0, 10.0);
+    let (comp_b, _feat_b) = add_imported_part(&mut doc, "PartB", "BlockB", 20.0, 10.0);
+    let (_comp_c, feat_c) = add_imported_part(&mut doc, "PartC", "BlockC", 40.0, 10.0);
+    let (_comp_d, feat_d) = add_imported_part(&mut doc, "PartD", "BlockD", 60.0, 10.0);
+    let (_comp_e, _feat_e) = add_imported_part(&mut doc, "PartE", "BlockE", 80.0, 10.0);
+
+    doc.feature_mut(feat_c).unwrap().link_faces = vec![vec!["F1:top".into(), "F1:bottom".into()]];
+    doc.feature_mut(feat_d).unwrap().link_threads = vec![vec![ThreadInfo {
+        feature: 0,
+        body: String::new(),
+        designation: "M8".into(),
+        major_diameter: 8.0,
+        radius: 4.0,
+        pitch: 1.25,
+        internal: true,
+        axis_point: Vec3::new(65.0, 5.0, 0.0),
+        axis: solidcraft_geom::UnitVec3::new(Vec3::Z).unwrap(),
+        start: 0.0,
+        end: 10.0,
+        form: crate::thread_forms::ThreadForm::default(),
+        hand: crate::thread_forms::ThreadHand::default(),
+        starts: 1,
+    }]];
+
+    let mut model = Model::new();
+    let initial = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(initial.imports_read, 5, "{initial:?}");
+
+    let saved = model.saved(&doc).unwrap();
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+
+    // Mutate PartD's saved body key to simulate a design saved by an older version with a
+    // different key: PartD must fall back to evaluating once while PartC and PartE stay cached.
+    let mut legacy_saved = model.saved(&doc).unwrap();
+    let block_d = legacy_saved.records["model_bodies"].as_array_mut().unwrap().iter_mut().find(|b| b["name"] == "BlockD").unwrap();
+    block_d["key"] = serde_json::json!("deadbeef");
+    let rekeyed = Model::adopt(&doc, &legacy_saved).unwrap();
+
+    doc.remove_component_tree(comp_b).unwrap();
+
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    let expected = import_snapshot(&fresh);
+    assert_eq!(expected.0.len(), 4);
+    assert_eq!(expected.1.len(), 1);
+    assert_eq!(expected.1[0].body, "BlockD");
+    assert_eq!(expected.1[0].feature, feat_d);
+
+    for (what, mut candidate, reads) in [("in-session", model, 0), ("opened", reopened, 0), ("opened legacy key", rekeyed, 1)] {
+        let work = counted(|| candidate.evaluate(&doc));
+        assert!(candidate.results.iter().all(|r| r.error.is_none()), "{what}");
+        assert_eq!(work.imports_read, reads, "{what}: {work:?}");
+        assert_eq!(candidate.last_recomputed, reads, "{what}: {work:?}");
+        assert_eq!(import_snapshot(&candidate), expected, "{what}: cached replay must match fresh evaluation");
+    }
+}
+
+/// Updating an early independent Import feature (changing its STEP payload and body count) must
+/// re-evaluate only that import and reuse every later independent Import feature, both in-session
+/// and on the first edit after opening a saved design.
+#[test]
+fn updating_an_early_import_keeps_later_independent_imports() {
+    let mut doc = Document::new("assembly update");
+    let (_comp_a, _feat_a) = add_imported_part(&mut doc, "PartA", "BlockA", 0.0, 10.0);
+    let (_comp_b, feat_b) = add_imported_part(&mut doc, "PartB", "BlockB", 20.0, 10.0);
+    let (_comp_c, _feat_c) = add_imported_part(&mut doc, "PartC", "BlockC", 40.0, 10.0);
+    let (_comp_d, _feat_d) = add_imported_part(&mut doc, "PartD", "BlockD", 60.0, 10.0);
+
+    let mut model = Model::new();
+    let initial = counted(|| model.evaluate(&doc));
+    assert_eq!(initial.imports_read, 4, "{initial:?}");
+
+    let saved = model.saved(&doc).unwrap();
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+
+    // Update PartB to carry two bodies instead of one, shifting body indices before PartC and PartD.
+    let b1 = kernel::box_solid(Vec3::new(20.0, 0.0, 0.0), Vec3::new(32.0, 12.0, 12.0)).unwrap();
+    let b2 = kernel::box_solid(Vec3::new(20.0, 20.0, 0.0), Vec3::new(26.0, 26.0, 6.0)).unwrap();
+    let new_step: Arc<str> = kernel::step_export(&[&b1, &b2], "PartB").unwrap().into();
+    let f = doc.feature_mut(feat_b).unwrap();
+    if let FeatureKind::Import { step, .. } = &mut f.kind {
+        *step = new_step;
+    }
+    f.body_names = vec!["BlockB1".into(), "BlockB2".into()];
+
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    let expected = import_snapshot(&fresh);
+    assert_eq!(expected.0.len(), 5);
+
+    for (what, mut candidate) in [("in-session", model), ("opened", reopened)] {
+        let work = counted(|| candidate.evaluate(&doc));
+        assert!(candidate.results.iter().all(|r| r.error.is_none()), "{what}");
+        assert_eq!(work.imports_read, 1, "{what}: only the updated import should be read: {work:?}");
+        assert_eq!(candidate.last_recomputed, 1, "{what}: only the updated import should recompute: {work:?}");
+        assert_eq!(import_snapshot(&candidate), expected, "{what}: cached replay must match fresh evaluation");
+    }
+}
+
+/// Independent Import caching must stay exact when body-name collisions are unchanged, removed, or
+/// newly introduced by an earlier edit (both in-session and after opening a saved design).
+#[test]
+fn import_cache_recomputes_when_body_name_collisions_change() {
+    let mut doc = Document::new("assembly collisions");
+    let (comp_a, _feat_a) = add_imported_part(&mut doc, "PartA", "Block", 0.0, 10.0);
+    let (comp_b, _feat_b) = add_imported_part(&mut doc, "PartB", "Plate", 20.0, 10.0);
+    let (_comp_c, feat_c) = add_imported_part(&mut doc, "PartC", "Block", 40.0, 10.0);
+    let (_comp_d, _feat_d) = add_imported_part(&mut doc, "PartD", "Cap", 60.0, 10.0);
+
+    let mut model = Model::new();
+    let initial = counted(|| model.evaluate(&doc));
+    assert_eq!(initial.imports_read, 4, "{initial:?}");
+    let names = |m: &Model| m.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&model), ["Block", "Plate", "Block (2)", "Cap"]);
+
+    // 1. Deleting unrelated PartB leaves PartC's blocker ("Block") intact: zero imports re-read.
+    doc.remove_component_tree(comp_b).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(work.imports_read, 0, "unrelated delete must keep PartC and PartD cached: {work:?}");
+    assert_eq!(model.last_recomputed, 0, "{work:?}");
+    assert_eq!(names(&model), ["Block", "Block (2)", "Cap"]);
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    assert_eq!(import_snapshot(&model), import_snapshot(&fresh));
+
+    // Save this colliding state and reopen it before removing the blocker.
+    let saved = model.saved(&doc).unwrap();
+    let mut reopened = Model::adopt(&doc, &saved).unwrap();
+
+    // 2. Deleting PartA frees "Block": PartC must re-evaluate and claim "Block", while PartD stays cached.
+    doc.remove_component_tree(comp_a).unwrap();
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    let expected = import_snapshot(&fresh);
+    assert_eq!(names(&fresh), ["Block", "Cap"]);
+
+    for (what, candidate) in [("in-session", &mut model), ("opened", &mut reopened)] {
+        let work = counted(|| candidate.evaluate(&doc));
+        assert_eq!(work.imports_read, 1, "{what}: only PartC should re-evaluate when its blocker disappears: {work:?}");
+        assert_eq!(candidate.last_recomputed, 1, "{what}: {work:?}");
+        assert_eq!(import_snapshot(candidate), expected, "{what}");
+    }
+    assert_eq!(names(&model), ["Block", "Cap"]);
+
+    // 3. Introducing a new collision ("Cap" in PartC) before PartD must force PartD to re-evaluate
+    //    and disambiguate to "Cap (2)".
+    doc.feature_mut(feat_c).unwrap().body_names = vec!["Cap".into()];
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(work.imports_read, 2, "PartC and colliding PartD must both evaluate: {work:?}");
+    assert_eq!(model.last_recomputed, 2, "{work:?}");
+    assert_eq!(names(&model), ["Cap", "Cap (2)"]);
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    assert_eq!(import_snapshot(&model), import_snapshot(&fresh));
 }
 
 /// Pinning body names fingerprints the timeline again only from the first renamed feature on
@@ -799,7 +1205,7 @@ fn a_cams_profile_is_meshed_once() {
     // The cam's body: a cylinder in the cam's own component.
     let kind = FeatureKind::Cylinder {
         base: point_expr(Vec3::ZERO),
-        axis: Dir(Vec3::Z),
+        axis: crate::dir_expr(Vec3::Z),
         radius: "5".into(),
         height: "10".into(),
         operation: Operation::NewBody,
@@ -822,6 +1228,7 @@ fn a_cams_profile_is_meshed_once() {
         b: origin(occurrence),
         values: Vec::new(),
         limits: Vec::new(),
+        dynamics: Vec::new(),
         flip: false,
         offset: 0.0,
         angle: 0.0,
@@ -829,6 +1236,8 @@ fn a_cams_profile_is_meshed_once() {
         exprs: Default::default(),
         offset_xy: [0.0; 2],
         captured: None,
+        base_values: None,
+        base_exprs: Vec::new(),
         constraint: None,
     };
     let profile = CamProfile::Edges { occurrence, picks: vec![Vec3::new(5.0, 0.0, 10.0)], names: Vec::new() };
@@ -871,6 +1280,25 @@ fn turning_a_joint_between_parts_cuts_no_hole_again() {
 }
 
 #[test]
+fn a_coil_cut_recipe_requires_a_numeric_axis() {
+    let mut doc = Document::new("coil cut");
+    let kind = serde_json::from_value(serde_json::json!({
+        "type": "coil", "base": ["0", "0", "0"], "diameter": "20", "pitch": "8",
+        "turns": "2", "section_size": "1", "operation": "cut"
+    }))
+    .unwrap();
+    let coil = doc.add_feature(kind, None).unwrap();
+    let feature = doc.feature(coil).unwrap();
+    let vals = BTreeMap::new();
+    assert!(super::tool_recipe(&doc, feature, &vals).is_some());
+
+    let mut referenced = feature.clone();
+    let FeatureKind::Coil { axis_ref, .. } = &mut referenced.kind else { panic!("expected a Coil") };
+    *axis_ref = Some(AxisRef::Construction { name: "Spine".into() });
+    assert!(super::tool_recipe(&doc, &referenced, &vals).is_none());
+}
+
+#[test]
 fn a_tool_cutting_another_part_cuts_again_when_that_part_moves() {
     let mut doc = Document::new("cross part");
     let tools = doc.add_component(Some("Tools"), 0).unwrap();
@@ -899,6 +1327,59 @@ fn a_tool_cutting_another_part_cuts_again_when_that_part_moves() {
     model.evaluate(&doc);
     assert_eq!(model.last_recomputed, 0);
     assert!((volume(&model, &body) - (400.0 - 16.0)).abs() < 1e-6, "{}", volume(&model, &body));
+}
+
+/// A combine whose tool is a further placement's body (`Bit (Drill:2)`) reads that placement
+/// alone. A component or another placement added elsewhere keeps the combine's result; moving
+/// the tool's own placement cuts again. Reading every placement cut each such combine again
+/// for every occurrence added anywhere in the design.
+#[test]
+fn a_combine_with_a_placed_copys_tool_keeps_its_result_when_other_placements_are_added() {
+    let boxed = |corner: Vec3, length: &str, height: &str| FeatureKind::Box {
+        corner: point_expr(corner),
+        length: length.into(),
+        width: length.into(),
+        height: height.into(),
+        operation: Operation::NewBody,
+        centred: false,
+    };
+    let mut doc = Document::new("copy tool");
+    let board = doc.add_feature(boxed(Vec3::ZERO, "100", "10"), None).unwrap();
+    let drill = doc.add_component(Some("Drill"), 0).unwrap();
+    let bit = doc.add_feature(boxed(Vec3::new(-50.0, -50.0, 5.0), "10", "5"), None).unwrap();
+    doc.feature_mut(bit).unwrap().component = drill;
+    let copy = doc.add_occurrence(drill, 0, rigid(Vec3::new(70.0, 70.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let st = model.state();
+    let name_of = |id: u64| st.bodies.iter().find(|b| b.feature == id).unwrap().name.clone();
+    let (board, tool) = (name_of(board), crate::WorldNames::new(&doc, &st).name(&name_of(bit), drill, &[copy]));
+    let kind = FeatureKind::Combine {
+        target: board.clone().into(),
+        tools: vec![tool.into()],
+        operation: Operation::Cut,
+        keep_tools: true,
+        offset: None,
+        offset_edges: OffsetEdges::Sharp,
+        offset_faces: Vec::new(),
+        offset_radius: None,
+    };
+    let combine = doc.add_feature(kind, None).unwrap();
+    model.evaluate(&doc);
+    assert!(model.result(combine).is_some_and(|r| r.error.is_none()), "{:?}", model.result(combine));
+    assert!((volume(&model, &board) - (100_000.0 - 500.0)).abs() < 1e-6, "{}", volume(&model, &board));
+    // A new component and another placement of the drill, away from the board: nothing to cut again.
+    doc.add_component(Some("Other"), 0).unwrap();
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0, "component added");
+    doc.add_occurrence(drill, 0, rigid(Vec3::new(500.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 0, "placement added");
+    // The tool's own placement moved off the board: the hole goes with it.
+    doc.occurrences.iter_mut().find(|o| o.id == copy).unwrap().transform = rigid(Vec3::new(300.0, 300.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    model.evaluate(&doc);
+    assert_eq!(model.last_recomputed, 1, "tool moved");
+    assert!((volume(&model, &board) - 100_000.0).abs() < 1e-6, "{}", volume(&model, &board));
 }
 
 /// A root design with two 10 x 10 x 4 mm plates, "Plate" at the origin and "Other" 30 mm along Y,
@@ -1027,7 +1508,7 @@ fn a_body_is_measured_once_while_it_stays_the_same() {
     let cylinder = |doc: &mut Document, x: f64| {
         let kind = FeatureKind::Cylinder {
             base: point_expr(Vec3::new(x, 0.0, 0.0)),
-            axis: Dir(Vec3::Z),
+            axis: crate::dir_expr(Vec3::Z),
             radius: "2".into(),
             height: "10".into(),
             operation: Operation::NewBody,
@@ -1525,6 +2006,268 @@ fn looking_bodies_up_once_keeps_every_placement_digest() {
     }
 }
 
+/// #19451: a mirror of a cut that names a further placement's body (`Plate (Part:2)`, not in the
+/// model) reads every placement, as the cut does (#20040): moving that placement evaluates both
+/// again.
+#[test]
+fn a_mirror_of_a_cut_naming_a_further_placements_body_reads_every_placement() {
+    let mut doc = Document::new("mirror");
+    let part = doc.add_component(Some("Part"), 0).unwrap();
+    let plate = plate_with_holes(&mut doc, part, 0, 1);
+    let cut = doc.features.last().unwrap().id;
+    doc.feature_mut(cut).unwrap().participants = vec![format!("{plate} (Part:2)")];
+    let second = doc.add_occurrence(part, 0, rigid(Vec3::new(50.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+    let mirror = mirror_of(&mut doc, &[cut], PlaneRef::Origin { name: "YZ".into() });
+    let digests = |doc: &Document| {
+        let mut model = Model::new();
+        model.evaluate(doc);
+        [cut, mirror].map(|id| placement_digest(doc, doc.feature(id).unwrap(), Some(&model.state_before(id))))
+    };
+    let before = digests(&doc);
+    doc.occurrences.iter_mut().find(|o| o.id == second).unwrap().transform = rigid(Vec3::new(80.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    let after = digests(&doc);
+    assert_ne!(after[0], before[0], "the cut reads the moved placement");
+    assert_ne!(after[1], before[1], "so does its mirror");
+}
+
+/// #19451: a mirror of a root cut into a placed part cuts the part where it is placed, so it is
+/// evaluated again when that part moves, not when another does.
+#[test]
+fn a_mirror_of_a_cut_reads_where_the_cuts_target_is_placed() {
+    let mut doc = Document::new("mirror");
+    let part = doc.add_component(Some("Part"), 0).unwrap();
+    let other = doc.add_component(Some("Other"), 0).unwrap();
+    plate_with_holes(&mut doc, part, 0, 1);
+    let cut = doc.features.last().unwrap().id;
+    let mirror = mirror_of(&mut doc, &[cut], PlaneRef::Origin { name: "YZ".into() });
+    let digest = |doc: &Document| {
+        let mut model = Model::new();
+        model.evaluate(doc);
+        placement_digest(doc, doc.feature(mirror).unwrap(), Some(&model.state_before(mirror)))
+    };
+    let before = digest(&doc);
+    assert_ne!(before, 0);
+    place(&mut doc, other, rigid(Vec3::new(0.0, 0.0, 50.0), Vec3::ZERO, Vec3::Z, 0.0));
+    assert_eq!(digest(&doc), before, "another part moved");
+    place(&mut doc, part, rigid(Vec3::new(0.0, 0.0, 20.0), Vec3::ZERO, Vec3::Z, std::f64::consts::PI));
+    assert_ne!(digest(&doc), before, "the cut's target moved");
+}
+
+/// A mirror of `features` across `plane`, in the root.
+fn mirror_of(doc: &mut Document, features: &[u64], plane: PlaneRef) -> u64 {
+    let kind = FeatureKind::Mirror {
+        features: features.iter().map(|id| FeatureId(*id)).collect(),
+        plane,
+        bodies: Vec::new(),
+        combine: false,
+        placements: Vec::new(),
+    };
+    doc.add_feature(kind, None).unwrap()
+}
+
+/// #19451: a mirror of a mirror made in another part reads where that part is placed, though
+/// what it copies is the root's: the inner mirror's copies are composed in the outer one's frame
+/// through the part's placement. Another part moved changes nothing it reads.
+#[test]
+fn a_mirror_of_a_mirror_in_another_part_reads_where_that_part_is_placed() {
+    let mut doc = Document::new("mirror");
+    let part = doc.add_component(Some("Part"), 0).unwrap();
+    let other = doc.add_component(Some("Other"), 0).unwrap();
+    plate_with_holes(&mut doc, 0, 0, 1);
+    let cut = doc.features.last().unwrap().id;
+    let plane = PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "YZ".into() }), distance: "3 mm".into() };
+    let inner = mirror_of(&mut doc, &[cut], plane);
+    doc.feature_mut(inner).unwrap().component = part;
+    let outer = mirror_of(&mut doc, &[inner], PlaneRef::Origin { name: "XZ".into() });
+    let digest = |doc: &Document| {
+        let mut model = Model::new();
+        model.evaluate(doc);
+        placement_digest(doc, doc.feature(outer).unwrap(), Some(&model.state_before(outer)))
+    };
+    place(&mut doc, part, rigid(Vec3::new(0.0, 0.0, 20.0), Vec3::ZERO, Vec3::Z, std::f64::consts::PI));
+    let before = digest(&doc);
+    assert_ne!(before, 0);
+    place(&mut doc, other, rigid(Vec3::new(0.0, 0.0, 50.0), Vec3::ZERO, Vec3::Z, 0.0));
+    assert_eq!(digest(&doc), before, "another part moved");
+    place(&mut doc, part, rigid(Vec3::new(0.0, 0.0, 20.0), Vec3::ZERO, Vec3::Z, std::f64::consts::FRAC_PI_2));
+    assert_ne!(digest(&doc), before, "the inner mirror's part turned");
+}
+
+/// #19451: a mirror of a round in a design with nothing placed copies it as before, without the
+/// exact box of any body: those found the frame the round's edges are kept in, which is the
+/// mirror's own when nothing is placed.
+#[test]
+fn a_mirror_of_a_round_with_nothing_placed_measures_no_box() {
+    let mut doc = Document::new("blocks");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(-10.0, 20.0, 0.0), [20.0, 10.0, 10.0]);
+    let kind = FeatureKind::Fillet {
+        edges: vec![Position(Vec3::new(10.0, 5.0, 5.0))],
+        radius: "1".into(),
+        body: None,
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain: false,
+        edge_radii: Vec::new(),
+    };
+    let round = doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let rounded = volume(&model, "A");
+    let mirror = mirror_of(&mut doc, &[round], PlaneRef::Origin { name: "YZ".into() });
+    let work = counted(|| model.evaluate(&doc));
+    assert_eq!(model.result(mirror).and_then(|r| r.error.clone()), None);
+    assert!(volume(&model, "A") < rounded - 1e-3, "the copy rounds A's other edge");
+    assert_eq!(work.tight_boxes, 0, "{work:?}");
+}
+
+/// The first edit after a design opens from its saved model evaluates only what the edit
+/// changes, as every later edit does: a block changed leaves the other block and its round as
+/// they were. The saved model gave only each feature's whole result, so the first edit after
+/// opening evaluated every feature after it, the features of other bodies and parts included.
+#[test]
+fn the_first_edit_after_opening_keeps_the_features_of_other_bodies() {
+    let mut doc = Document::new("blocks");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(-10.0, 20.0, 0.0), [20.0, 10.0, 10.0]);
+    let kind = FeatureKind::Fillet {
+        edges: vec![Position(Vec3::new(10.0, 25.0, 10.0))],
+        radius: "2".into(),
+        body: Some("B".into()),
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain: false,
+        edge_radii: Vec::new(),
+    };
+    doc.add_feature(kind, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    let rounded = volume(&model, "B");
+    assert!(rounded < 2000.0 - 1.0, "{rounded}");
+    let saved = model.saved(&doc).unwrap();
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+    // The same file with the round's body keyed otherwise (saved by a version that keyed it
+    // another way): what the round changed is not taken back, the round is evaluated again.
+    let mut other_key = model.saved(&doc).unwrap();
+    // B as the round left it: the deepest of its records (a body keeps the feature that made it).
+    let rounded_b = other_key.records["model_bodies"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .filter(|b| b["name"] == "B")
+        .max_by_key(|b| b["depth"].as_u64())
+        .unwrap();
+    assert_eq!(rounded_b["depth"], 3, "{rounded_b}");
+    rounded_b["key"] = serde_json::json!("deadbeef");
+    let rekeyed = Model::adopt(&doc, &other_key).unwrap();
+    let a = doc.features.first().unwrap().id;
+    if let FeatureKind::Box { length, .. } = &mut doc.feature_mut(a).unwrap().kind {
+        *length = "25".into();
+    }
+    let bodies = |model: &Model| {
+        let st = model.state();
+        st.bodies.iter().map(|b| (b.name.clone(), b.key, crate::naming::face_names(b))).collect::<Vec<_>>()
+    };
+    let mut fresh = Model::new();
+    fresh.evaluate(&doc);
+    let rebuilt = bodies(&fresh);
+    for (what, mut model, evaluated) in [("in the session", model, 1), ("opened", reopened, 1), ("opened, keyed otherwise", rekeyed, 2)] {
+        let work = counted(|| model.evaluate(&doc));
+        assert_eq!(model.last_recomputed, evaluated, "{what}: {work:?}");
+        assert_eq!(work.blends, evaluated - 1, "{what}: {work:?}");
+        assert!((volume(&model, "A") - 2500.0).abs() < 1e-6, "{what}: {}", volume(&model, "A"));
+        assert!((volume(&model, "B") - rounded).abs() < 1e-9, "{what}: {} then {rounded}", volume(&model, "B"));
+        assert_eq!(bodies(&model), rebuilt, "{what}: the same bodies, keys and face names as the design evaluated afresh");
+    }
+}
+
+/// A join into the only body there is takes it without asking whether the tool meets it: the
+/// contact test meshes the body finely, and on a part of a few hundred faces it took longer than
+/// the join. With two bodies the tool picks the one it meets, as before.
+#[test]
+fn a_join_into_the_only_body_makes_no_contact_test() {
+    let boss = |corner: Vec3| FeatureKind::Box {
+        corner: point_expr(corner),
+        length: "4".into(),
+        width: "4".into(),
+        height: "4".into(),
+        operation: Operation::Join,
+        centred: false,
+    };
+    let mut doc = Document::new("one block");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    doc.add_feature(boss(Vec3::new(-2.0, -2.0, 10.0)), None).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(work.contact_tests, 0, "{work:?}");
+    assert!((volume(&model, "A") - (2000.0 + 64.0)).abs() < 1e-6, "{}", volume(&model, "A"));
+    // A second block: the boss joins the one it stands on.
+    let mut doc = Document::new("two blocks");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(-10.0, 20.0, 0.0), [20.0, 10.0, 10.0]);
+    doc.add_feature(boss(Vec3::new(-2.0, 23.0, 10.0)), None).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert!(work.contact_tests > 0, "{work:?}");
+    assert!((volume(&model, "A") - 2000.0).abs() < 1e-6, "{}", volume(&model, "A"));
+    assert!((volume(&model, "B") - (2000.0 + 64.0)).abs() < 1e-6, "{}", volume(&model, "B"));
+}
+
+/// A cut that takes nothing from the body says so without measuring its volume: the cut's
+/// history traces every face of the body to the body itself, so the tool took no material
+/// (#8990: two exact volumes, a second each, for one such cut). A cut that takes material is
+/// still told apart, and says nothing.
+#[test]
+fn a_cut_that_takes_nothing_is_known_without_measuring() {
+    // A square on XY from (x, y) to (x + 4, y + 4), cut 4 mm up into block A.
+    let cut_at = |doc: &mut Document, x: f64, y: f64| {
+        let mut sk = Sketch::new();
+        let p = [(x, y), (x + 4.0, y), (x + 4.0, y + 4.0), (x, y + 4.0)].map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap());
+        for k in 0..4 {
+            sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+        }
+        let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+        let kind = FeatureKind::Extrude {
+            thin: None,
+            sketch: SketchId(sketch),
+            profiles: ProfileSel::All,
+            extent: serde_json::from_value(serde_json::json!({"distance": "4"})).unwrap(),
+            operation: Operation::Cut,
+            targets: vec![],
+        };
+        doc.add_feature(kind, Some("Cut")).unwrap()
+    };
+    // Against the block's side at x 10, face to face: it takes nothing.
+    let mut doc = Document::new("beside");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    let cut = cut_at(&mut doc, 10.0, -2.0);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    let result = model.result(cut).unwrap();
+    assert!(result.error.is_none(), "{:?}", result.error);
+    assert!(result.warning.as_deref().is_some_and(|w| w.contains("the cut removes no material")), "{:?}", result.warning);
+    assert_eq!(work.measures, 0, "{work:?}");
+    assert!((volume(&model, "A") - 2000.0).abs() < 1e-6, "{}", volume(&model, "A"));
+    // Into the block's corner: it takes 2 x 2 x 4 mm, and says nothing.
+    let mut doc = Document::new("into");
+    block(&mut doc, "A", Vec3::new(-10.0, -5.0, 0.0), [20.0, 10.0, 10.0]);
+    let cut = cut_at(&mut doc, 8.0, 3.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let result = model.result(cut).unwrap();
+    assert!(result.error.is_none() && result.warning.is_none(), "{:?} {:?}", result.error, result.warning);
+    assert!((volume(&model, "A") - (2000.0 - 16.0)).abs() < 1e-6, "{}", volume(&model, "A"));
+}
+
 /// `comps` parts, each with `bodies` boxes, `sketches` sketches and `taps` taps, placed `copies`
 /// times: a design and its state, made without evaluating it.
 fn placed_parts(comps: usize, bodies: usize, sketches: usize, taps: usize, copies: usize) -> (Document, ModelState) {
@@ -1666,7 +2409,7 @@ fn block(doc: &mut Document, name: &str, corner: Vec3, size: [f64; 3]) {
 fn cutter(base: Vec3, radius: f64, height: f64) -> FeatureKind {
     FeatureKind::Cylinder {
         base: point_expr(base),
-        axis: Dir(Vec3::Z),
+        axis: crate::dir_expr(Vec3::Z),
         radius: radius.to_string().into(),
         height: height.to_string().into(),
         operation: Operation::Cut,
@@ -1751,7 +2494,7 @@ fn shaft(doc: &mut Document, name: &str, base: Vec3, radius: f64, height: f64) {
         .add_feature(
             FeatureKind::Cylinder {
                 base: point_expr(base),
-                axis: Dir(Vec3::Z),
+                axis: crate::dir_expr(Vec3::Z),
                 radius: radius.to_string().into(),
                 height: height.to_string().into(),
                 operation: Operation::NewBody,
@@ -1786,6 +2529,7 @@ fn marking(p: Vec3) -> FeatureKind {
         hand: crate::thread_forms::ThreadHand::Right,
         starts: 1,
         ease_out: None,
+        to_bottom: false,
         tip: Default::default(),
         chamfer_angle: None,
         chamfer_depth: None,
@@ -1807,7 +2551,7 @@ fn grouped_thread_document(modeled: bool) -> (Document, u64) {
         doc.add_feature(
             FeatureKind::Cylinder {
                 base: point_expr(Vec3::new(x, y, 2.0)),
-                axis: Dir(Vec3::Z),
+                axis: crate::dir_expr(Vec3::Z),
                 radius: "3".into(),
                 height: "4".into(),
                 operation: Operation::Join,
@@ -1866,9 +2610,20 @@ fn a_pattern_replays_every_grouped_thread_pick_on_its_named_body() {
                     alignment2: Default::default(),
                     reversed: false,
                     reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: false,
             },
             None,
         )
@@ -1914,9 +2669,20 @@ fn a_patterned_modelled_thread_reuses_its_final_check() {
                     alignment2: Default::default(),
                     reversed: false,
                     reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
                 },
                 bodies: Vec::new(),
                 placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: false,
             },
             None,
         )
@@ -2154,7 +2920,7 @@ fn a_grouped_modelled_thread_cuts_and_checks_each_of_two_bodies_once() {
             .add_feature(
                 FeatureKind::Cylinder {
                     base: point_expr(Vec3::new(x, 0.0, 2.0)),
-                    axis: Dir(Vec3::Z),
+                    axis: crate::dir_expr(Vec3::Z),
                     radius: "3".into(),
                     height: "4".into(),
                     operation: Operation::Join,
@@ -2189,7 +2955,7 @@ fn overlapping_grouped_thread_tool_boxes_keep_the_sequential_cutter() {
         doc.add_feature(
             FeatureKind::Cylinder {
                 base: point_expr(Vec3::new(x, y, 2.0)),
-                axis: Dir(Vec3::Z),
+                axis: crate::dir_expr(Vec3::Z),
                 radius: "3".into(),
                 height: "4".into(),
                 operation: Operation::Join,
@@ -2225,7 +2991,7 @@ fn shoulder_thread_checks(tip: crate::thread_forms::ThreadTip, continuous_flanks
     doc.add_feature(
         FeatureKind::Cylinder {
             base: point_expr(Vec3::new(0.0, 0.0, 2.0)),
-            axis: Dir(Vec3::Z),
+            axis: crate::dir_expr(Vec3::Z),
             radius: "3".into(),
             height: "4".into(),
             operation: Operation::Join,
@@ -2383,7 +3149,7 @@ fn a_tap_marking_searches_only_the_bodies_near_it() {
     let hole = FeatureKind::Hole {
         position: FacePick(Vec3::new(30.0, 30.0, 12.0)),
         at: None,
-        direction: Dir(-Vec3::Z),
+        direction: crate::dir_expr(-Vec3::Z),
         diameter: "5".into(),
         depth: Some("10".into()),
         hole: HoleKind::default(),
@@ -2397,6 +3163,7 @@ fn a_tap_marking_searches_only_the_bodies_near_it() {
         to: None,
         references: Vec::new(),
         old_surface_start: false,
+        hardware: None,
     };
     let (work, threads) = marking_work(&mut doc, hole);
     assert_eq!(work.cylinder_search, 1, "only the plate is searched");
@@ -2429,7 +3196,7 @@ fn a_tap_marking_still_searches_the_bodies_within_its_reach() {
         block(&mut doc, "Plate", Vec3::new(-20.0, -20.0, 0.0), [40.0, 40.0, 10.0]);
         let bore = FeatureKind::Cylinder {
             base: point_expr(Vec3::new(0.0, 0.0, -1.0)),
-            axis: Dir(Vec3::Z),
+            axis: crate::dir_expr(Vec3::Z),
             radius: "2.5".into(),
             height: "12".into(),
             operation: Operation::Cut,
@@ -2527,7 +3294,7 @@ fn a_tapped_hole_reads_the_bodies_along_its_drill_line() {
     let hole = FeatureKind::Hole {
         position: FacePick(Vec3::new(30.0, 30.0, 12.0)),
         at: None,
-        direction: Dir(-Vec3::Z),
+        direction: crate::dir_expr(-Vec3::Z),
         diameter: "5".into(),
         depth: Some("10".into()),
         hole: HoleKind::default(),
@@ -2541,6 +3308,7 @@ fn a_tapped_hole_reads_the_bodies_along_its_drill_line() {
         to: None,
         references: Vec::new(),
         old_surface_start: false,
+        hardware: None,
     };
     let (work, threads) = marking_work(&mut doc, hole);
     assert_eq!(work.tapped_wall, 3, "Plate, Below and Grazing are read");
@@ -2624,6 +3392,7 @@ fn a_flange_lays_its_sheet_out_once() {
         corner_relief_shape: None,
         corner_relief: None,
         height_from: None,
+        bend_relief_shape: None,
     };
     for p in [Vec3::new(75.0, 0.0, 2.5), Vec3::new(75.0, 100.0, 2.5), Vec3::new(0.0, 50.0, 2.5), Vec3::new(150.0, 50.0, 2.5)] {
         // The pick is named as the engine names it, on the model as it is.
@@ -2643,7 +3412,7 @@ fn a_flange_lays_its_sheet_out_once() {
 fn disc_with_hole_pattern(doc: &mut Document, radius: f64, count: usize) -> u64 {
     let disc = FeatureKind::Cylinder {
         base: point_expr(Vec3::ZERO),
-        axis: Dir(Vec3::Z),
+        axis: crate::dir_expr(Vec3::Z),
         radius: "50".into(),
         height: "1.5".into(),
         operation: Operation::NewBody,
@@ -2777,6 +3546,81 @@ fn many_copies_cut_in_groups_leave_what_one_cut_leaves() {
     assert_eq!(names, one_names);
 }
 
+/// A 60 x 60 x 3 plate cut through by one sketch of `n` x `n` separate 2 mm squares, 4 mm apart,
+/// with at most `shells` shells in one joined tool: the plate's volume, its face count and the
+/// extrude's error.
+fn plate_cut_by_squares(n: usize, shells: usize) -> (f64, usize, Option<String>) {
+    super::JOINED_SHELLS_LIMIT.with(|l| l.set(shells));
+    let mut doc = Document::new("squares");
+    let kind = FeatureKind::Box {
+        corner: point_expr(Vec3::ZERO),
+        length: "60".into(),
+        width: "60".into(),
+        height: "3".into(),
+        operation: Operation::NewBody,
+        centred: false,
+    };
+    doc.add_feature(kind, Some("Plate")).unwrap();
+    let mut sk = Sketch::new();
+    for (i, j) in (0..n).flat_map(|i| (0..n).map(move |j| (i, j))) {
+        let (x, y) = (2.0 + 4.0 * i as f64, 2.0 + 4.0 * j as f64);
+        let p = [(x, y), (x + 2.0, y), (x + 2.0, y + 2.0), (x, y + 2.0)].map(|(x, y)| sk.add_point(Vec2::new(x, y), None).unwrap());
+        for k in 0..4 {
+            sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+        }
+    }
+    let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    let kind = FeatureKind::Extrude {
+        thin: None,
+        sketch: SketchId(sketch),
+        profiles: ProfileSel::All,
+        extent: serde_json::from_value(serde_json::json!({"distance": "3"})).unwrap(),
+        operation: Operation::Cut,
+        targets: vec![],
+    };
+    doc.add_feature(kind, Some("Squares")).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    super::JOINED_SHELLS_LIMIT.with(|l| l.set(super::MAX_JOINED_SHELLS));
+    let error = model.results.iter().find_map(|r| r.error.clone());
+    let st = model.state();
+    let faces = st.bodies.first().map_or(0, |b| b.body.face_count());
+    (disc_volume(&model), faces, error)
+}
+
+#[test]
+fn profiles_apart_past_one_tools_shells_cut_in_groups() {
+    // 25 squares apart, joined into tools of at most 8 shells: four tools, each cut in turn, as
+    // more than 1024 squares are cut with the kernel's own limit (#20398: 1369 squares ended in
+    // "pieces: portable B-rep: shell count"). The plate comes out as one cut of all of them
+    // leaves it.
+    let (volume, faces, error) = plate_cut_by_squares(5, 8);
+    let (one_volume, one_faces, one_error) = plate_cut_by_squares(5, usize::MAX);
+    assert_eq!((error, one_error), (None, None));
+    let plate = 60.0 * 60.0 * 3.0 - 25.0 * 4.0 * 3.0;
+    assert!((volume - plate).abs() < 1e-6 * plate && (one_volume - plate).abs() < 1e-6 * plate, "{volume} {one_volume} vs {plate}");
+    assert_eq!((faces, one_faces), (6 + 25 * 4, 6 + 25 * 4));
+}
+
+#[test]
+fn more_profiles_apart_than_one_record_holds_join_into_several_tools() {
+    // 1100 boxes apart, each one shell: more than one body's record takes, so they come out as
+    // two tools, each of at most that many shells, together all the boxes' faces.
+    let tools: Vec<crate::lineage::Traced> = (0..1100)
+        .map(|i| {
+            let (x, y) = (3.0 * (i % 40) as f64, 3.0 * (i / 40) as f64);
+            crate::lineage::Traced::unnamed(kernel::box_solid(Vec3::new(x, y, 0.0), Vec3::new(x + 1.0, y + 1.0, 1.0)).unwrap())
+        })
+        .collect();
+    let bodies: Vec<kernel::Body> = tools.iter().map(|t| t.body.clone()).collect();
+    let one = kernel::join_apart(&bodies).map(|_| ()).map_err(|e| e.to_string());
+    assert!(one.as_ref().is_err_and(|e| e.contains("shell count")), "{one:?}");
+    let joined = super::join_apart_tools(tools).unwrap();
+    let shells: Vec<usize> = joined.iter().map(|t| t.body.record().shells.len()).collect();
+    assert_eq!(shells, vec![550, 550]);
+    assert_eq!(joined.iter().map(|t| t.body.face_count()).sum::<usize>(), 6 * 1100);
+}
+
 /// A ring (25 mm outside, 16 mm bore, 55 mm high) with a blind groove, 8 mm wide and 30 mm deep,
 /// cut into its bore from below, in a circular pattern of ten about Z: their boxes, grown as the
 /// kernel grows them, meet, their exact shapes are 1.9 mm apart. The ring's faces counted as its
@@ -2785,7 +3629,7 @@ fn grooved_ring_faces() -> (usize, Counts) {
     let mut doc = Document::new("grooves");
     let cylinder = |base: Vec3, radius: &str, height: &str, operation: Operation| FeatureKind::Cylinder {
         base: point_expr(base),
-        axis: Dir(Vec3::Z),
+        axis: crate::dir_expr(Vec3::Z),
         radius: radius.into(),
         height: height.into(),
         operation,
@@ -2825,7 +3669,7 @@ fn copies_that_notch_the_same_round_face_cut_at_once_leave_the_faces_of_one_by_o
 fn shaft_with_coil_pattern(doc: &mut Document, count: Option<usize>) -> (f64, Counts) {
     let shaft = FeatureKind::Cylinder {
         base: point_expr(Vec3::ZERO),
-        axis: Dir(Vec3::Z),
+        axis: crate::dir_expr(Vec3::Z),
         radius: "10".into(),
         height: "40".into(),
         operation: Operation::NewBody,
@@ -2902,6 +3746,112 @@ fn plate_with_hole_grid(hole: serde_json::Value) -> (f64, f64, Counts) {
     (disc_volume(&model), std::f64::consts::PI * 1.5 * 1.5 * 2.0, work)
 }
 
+/// A hole as deep as its plate, after `others` boxes 300 mm and more away and, with `under`, a
+/// slab touching the plate's bottom face: the plate's and slab's volumes and the work.
+fn plate_hole_among_bodies(others: usize, under: bool) -> (f64, Option<f64>, Counts) {
+    let mut doc = Document::new("bodies");
+    let solid = |corner: [f64; 3], length: f64, height: f64| -> FeatureKind {
+        serde_json::from_value(serde_json::json!({
+            "type": "box", "corner": corner, "length": length.to_string(), "width": length.to_string(), "height": height.to_string(),
+        }))
+        .unwrap()
+    };
+    for i in 0..others {
+        doc.add_feature(solid([300.0 + 30.0 * i as f64, 0.0, 0.0], 20.0, 20.0), Some(&format!("Far{i}"))).unwrap();
+    }
+    if under {
+        doc.add_feature(solid([0.0, 0.0, -5.0], 100.0, 5.0), Some("Under")).unwrap();
+    }
+    doc.add_feature(solid([0.0, 0.0, 0.0], 100.0, 2.0), Some("Plate")).unwrap();
+    let hole: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "hole", "position": [50, 50, 2], "direction": [0, 0, -1], "diameter": "3", "depth": "2",
+    }))
+    .unwrap();
+    doc.add_feature(hole, Some("Hole")).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    let st = model.state();
+    // The plate is the body from z = 0 to 2 at the origin, the slab the one below it.
+    let volume = |top: f64| {
+        st.bodies
+            .iter()
+            .find(|b| b.body.exact_bounds().is_ok_and(|bb| bb.min.x.abs() < 1e-6 && (bb.max.z - top).abs() < 1e-6))
+            .map(|b| kernel::measure(&b.body).unwrap().volume)
+    };
+    (volume(2.0).unwrap(), volume(0.0), work)
+}
+
+/// A hole with a depth looks for material and air either side of its bottom, to know whether it
+/// comes out there (#17873), in the bodies whose boxes hold those points only (#19946). It
+/// classified both points in every body of the design: 2 x 21 classifications with 20 boxes far
+/// away, which in a design of hundreds of imported parts cost minutes for each evaluation of its
+/// holes. A body touching the plate where the hole ends is still asked.
+#[test]
+fn a_hole_classifies_its_bottom_in_the_bodies_there_only() {
+    let through = 20_000.0 - std::f64::consts::PI * 1.5 * 1.5 * 2.0;
+    for others in [0, 20] {
+        let (plate, under, work) = plate_hole_among_bodies(others, false);
+        assert!((plate - through).abs() < 1e-6 * through, "{others} boxes: {plate}");
+        assert_eq!(under, None);
+        assert_eq!(work.hole_points, 2, "{others} boxes: {work:?}");
+    }
+    let (plate, under, work) = plate_hole_among_bodies(20, true);
+    assert!((plate - through).abs() < 1e-6 * through, "{plate}");
+    assert!((under.unwrap() - 50_000.0).abs() < 1e-6 * 50_000.0, "the slab is not drilled: {under:?}");
+    assert_eq!(work.hole_points, 4, "{work:?}");
+}
+
+#[test]
+fn targeted_holes_and_their_copies_classify_only_the_plate() {
+    let mut doc = Document::new("plate and reference");
+    let reference = MeshData {
+        name: "Reference".into(),
+        // A tetrahedron whose box contains both holes. At the plate's bottom (z = 0)
+        // the mesh ends at x + y = 45, and the plate starts at x + y = 48.
+        positions: [0., 0., -5., 60., 0., -5., 0., 60., -5., 0., 0., 15.].into(),
+        triangles: [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3].into(),
+        color: None,
+        corner_normals: Default::default(),
+    };
+    doc.add_feature(FeatureKind::MeshImport { file: "reference.stl".into(), meshes: vec![reference] }, Some("Reference")).unwrap();
+    let plate = doc
+        .add_feature(
+            serde_json::from_value(serde_json::json!({"type": "box", "corner": [24, 24, 0], "length": "10", "width": "10", "height": "10"})).unwrap(),
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().body_names = vec!["Plate".into()];
+    let hole = doc
+        .add_feature(
+            serde_json::from_value(serde_json::json!({
+                "type": "hole", "position": [27, 27, 10], "direction": [0, 0, -1], "diameter": "3", "depth": "5",
+            }))
+            .unwrap(),
+            Some("Hole"),
+        )
+        .unwrap();
+    doc.feature_mut(hole).unwrap().participants = vec!["Plate".into()];
+    doc.add_feature(
+        serde_json::from_value(serde_json::json!({
+            "type": "pattern", "features": [hole],
+            "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "2", "spacing1": "4"},
+        }))
+        .unwrap(),
+        Some("Copy"),
+    )
+    .unwrap();
+
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    // Two samples either side of the depth of each of the two holes.
+    assert_eq!(work.hole_points, 4, "{work:?}");
+    let volume = kernel::measure(&model.state().body("Plate").unwrap().body).unwrap().volume;
+    let expected = 1000.0 - 2.0 * std::f64::consts::PI * 1.5 * 1.5 * 5.0;
+    assert!((volume - expected).abs() < 1e-6 * expected, "{volume} against {expected}");
+}
+
 /// A pattern of a hole builds its tools once when every copy is drilled the same way, and for
 /// each copy when the tools look at the material there (#7942).
 #[test]
@@ -2922,6 +3872,51 @@ fn copies_of_a_plain_hole_move_its_tools_and_a_drill_point_drills_each() {
     let drilled = serde_json::json!({"depth": "1", "hole": {"type": "drilled", "tip_angle": "118 deg"}});
     let (_, _, work) = plate_with_hole_grid(drilled);
     assert_eq!(work.hole_tools, 90, "{work:?}");
+}
+
+/// A 200 x 100 x 1 plate with a 2 mm through hole at (4, 4) in a `count1` x `count2` grid on a
+/// 6 mm pitch: the plate's volume, the holes' and the work.
+fn plate_with_hole_pattern(count1: usize, count2: usize) -> (f64, f64, Counts) {
+    let mut doc = Document::new("vents");
+    let plate: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "box", "corner": [0, 0, 0], "length": "200", "width": "100", "height": "1",
+    }))
+    .unwrap();
+    doc.add_feature(plate, Some("Plate")).unwrap();
+    let hole: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "hole", "position": [4, 4, 1], "direction": [0, 0, -1], "diameter": "2",
+    }))
+    .unwrap();
+    let hole = doc.add_feature(hole, Some("Hole")).unwrap();
+    let pattern: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern", "features": [hole],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": count1.to_string(), "spacing1": "6",
+            "dir2": [0, 1, 0], "count2": count2.to_string(), "spacing2": "6"},
+    }))
+    .unwrap();
+    doc.add_feature(pattern, Some("Vents")).unwrap();
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+    (disc_volume(&model), std::f64::consts::PI, work)
+}
+
+/// 512 identical through holes from a feature pattern of one hole (#261): each copy was cut into
+/// an ever more complex plate, so 128 took 30 s and 512 did not finish in 150 s. The copies are
+/// apart, so they are joined into tools of at most [`super::MAX_JOINED_TOOLS`] pieces and the
+/// plate is cut once for each tool: the 127 copies of a 16 x 8 grid in 4 cuts and the 511 of a
+/// 32 x 16 grid in 16, four times the cuts for four times the copies (a cut for each copy would
+/// be 127 and 511). Counted, not timed (#14587): each of those cuts still works on the whole
+/// plate, so their time grows with the holes cut before them, and a load on the machine moves
+/// the ratio of two times past any limit that still tells a cut a copy from a cut a tool.
+#[test]
+fn a_pattern_of_512_holes_cuts_the_plate_once_for_each_joined_tool() {
+    for (count1, count2, cuts) in [(16, 8, 4), (32, 16, 16)] {
+        let (v, hole, work) = plate_with_hole_pattern(count1, count2);
+        let n = (count1 * count2) as f64;
+        assert!((v - (20_000.0 - n * hole)).abs() < 1e-6 * n * hole, "{n} holes: {v}");
+        assert_eq!((work.cut_tools, work.miss_intersects), (cuts, 0), "{n} holes: {work:?}");
+    }
 }
 
 /// A copy of a hole with material just above its spot, which is cut out of its tools there, has
@@ -2954,6 +3949,8 @@ fn a_hole_copy_under_material_builds_its_own_tools() {
     assert_eq!(volumes.len(), 2, "{volumes:?}");
     assert!((volumes[0] - 400.0).abs() < 1e-6, "{volumes:?}");
     assert!((volumes[1] - (20_000.0 - 90.0 * hole)).abs() < 1e-6 * hole, "{volumes:?}");
+    // Each block piece already lies in the full-width run-on of the first tool.
+    assert_eq!(work.run_on_probes, 0, "{work:?}");
     // The three copies under the block build theirs, and so does a copy in the clear after one.
     assert!(work.hole_tools > 4 && work.hole_tools < 90, "{work:?}");
 }
@@ -3189,7 +4186,7 @@ fn a_hole_classifies_the_faces_it_reads_not_every_face_of_the_design() {
     for k in 0..40 {
         let kind = FeatureKind::Cylinder {
             base: point_expr(Vec3::new(10.0 * f64::from(k), 0.0, 0.0)),
-            axis: Dir(Vec3::Z),
+            axis: crate::dir_expr(Vec3::Z),
             radius: "2".into(),
             height: "10".into(),
             operation: Operation::NewBody,
@@ -3281,6 +4278,29 @@ fn a_hole_whose_run_on_column_cannot_be_built_keeps_its_run_on() {
     assert!(near.is_empty());
 }
 
+/// A cover can shorten the run-on below a nearer piece. The hole still checks whether its
+/// shortened tool reaches the piece before subtracting it.
+#[test]
+fn a_shortened_run_on_checks_its_first_piece() {
+    let mut state = ModelState::default();
+    for (name, low, high) in [("Plate", -5.0, 0.0), ("Near", 0.15, 0.18), ("Cover", 0.25, 0.5)] {
+        let body = kernel::box_solid(Vec3::new(-50.0, -50.0, low), Vec3::new(50.0, 50.0, high)).unwrap();
+        state.bodies.push(ModelBody::new(name.into(), body, 0));
+    }
+    let vals = Default::default();
+    let depth = Some("2".into());
+    let reach = super::hole_reach(&vals, &state, &Vec3::ZERO, -Vec3::Z, "3", &depth, &HoleKind::Simple, false, &[]).unwrap();
+    assert!((reach.top - 0.125).abs() < 1e-6);
+    assert_eq!(reach.above.len(), 1);
+    let work = counted(|| {
+        let tools = super::hole_tools_reaching(&vals, &state, &Vec3::ZERO, -Vec3::Z, "3", &depth, &HoleKind::Simple, &reach).unwrap();
+        let volume = kernel::measure(&tools[0].0.body).unwrap().volume;
+        let expected = std::f64::consts::PI * 1.5_f64.powi(2) * (2.0 + reach.top);
+        assert!((volume - expected).abs() < 1e-6, "{volume}");
+    });
+    assert_eq!(work.run_on_probes, 1);
+}
+
 /// `n` boxes of 2 x 2 x 2 in a row, `pitch` from one to the next, joined into the first by one
 /// Combine: the model, and the Combine.
 fn boxes_joined(n: usize, pitch: f64) -> (Model, u64, Counts) {
@@ -3308,6 +4328,10 @@ fn boxes_joined(n: usize, pitch: f64) -> (Model, u64, Counts) {
                 tools: tools.iter().map(|t| t.clone().into()).collect(),
                 operation: Operation::Join,
                 keep_tools: false,
+                offset: None,
+                offset_edges: OffsetEdges::Sharp,
+                offset_faces: Vec::new(),
+                offset_radius: None,
             },
             None,
         )
@@ -3340,6 +4364,78 @@ fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
     assert!((kernel::measure(&st.bodies[0].body).unwrap().volume - 20.0).abs() < 1e-9);
 }
 
+/// Multi-target joins and `Touching::Separate` keep exact results when AABB prefiltering and mesh
+/// caching skip meshing disjoint pairs.
+#[test]
+fn multi_target_join_and_separate_touching_preserve_exact_results() {
+    let mut doc = Document::new("multi-target join");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(50.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "C", Vec3::new(100.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    // Boss on B joins B only; A and C stay untouched.
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::new(52.0, 2.0, 10.0)),
+            length: "4".into(),
+            width: "4".into(),
+            height: "5".into(),
+            operation: Operation::Join,
+            centred: false,
+        },
+        None,
+    )
+    .unwrap();
+    // Boss bridging B and C merges B and C into one body while A stays separate.
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::new(58.0, 2.0, 2.0)),
+            length: "44".into(),
+            width: "4".into(),
+            height: "4".into(),
+            operation: Operation::Join,
+            centred: false,
+        },
+        None,
+    )
+    .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().bodies.len(), 2);
+    assert!((volume(&model, "A") - 1000.0).abs() < 1e-6);
+    // B (1000) + boss (80) + C (1000) + bridge (44*4*4 = 704) - 2 overlaps (2*4*4 = 32 each)
+    let expected_bc = 1000.0 + 80.0 + 1000.0 + 704.0 - 64.0;
+    assert!((volume(&model, "B") - expected_bc).abs() < 1e-6, "{} vs {expected_bc}", volume(&model, "B"));
+}
+
+/// A single multi-tool join that warms a target's contact-mesh cache, bridges two targets while a
+/// third stays live, and then joins a later tool touching only the new bridge geometry must
+/// invalidate the remade target's cache so the later tool joins the remade target rather than
+/// missing it and falling back to the first live target.
+#[test]
+fn multi_target_join_invalidates_target_mesh_cache_after_bridge() {
+    let mut doc = Document::new("multi-tool bridge cache invalidation");
+    // Put C first in `live` so a stale cache on A would cause tool 3 to miss A and fall back to C.
+    block(&mut doc, "C", Vec3::new(100.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(20.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    // One multi-tool extrude (3 profiles in order):
+    // 1. (1..5, 1..5): touches A only -> warms `target_meshes["A"]`
+    // 2. (8..22, 1..5): bridges A and B while C stays live -> remakes A, invalidating its cache
+    // 3. (13..17, 5..9): lies strictly in the gap x=13..17 between original A (x<=10) and B
+    //    (x>=20), touching only the bridge from tool 2 along y=5.
+    join_rects(&mut doc, &[(1.0, 1.0, 4.0, 4.0), (8.0, 1.0, 14.0, 4.0), (13.0, 5.0, 4.0, 4.0)], 10.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().bodies.len(), 2);
+    assert!((volume(&model, "C") - 1000.0).abs() < 1e-6, "tool 3 must not fall back to C: {}", volume(&model, "C"));
+    // A (1000) + B (1000) + gap span of bridge (10*4*10 = 400) + tool 3 (4*4*10 = 160);
+    // tool 1 lies inside A and the bridge ends overlap A and B.
+    let expected_a = 1000.0 + 1000.0 + 400.0 + 160.0;
+    assert!((volume(&model, "A") - expected_a).abs() < 1e-6, "{} vs {expected_a}", volume(&model, "A"));
+}
+
 /// When an import's background checks end having healed a part, the model takes the healed
 /// body in the import's place: settling marks the import and what follows it stale, the next
 /// evaluation reads the healed body under another fingerprint, and settling the same heal again
@@ -3347,7 +4443,7 @@ fn a_join_of_bodies_that_are_all_apart_runs_no_union() {
 /// file's bodies.
 #[test]
 fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
-    // the heal preference is the process's: held on for the whole test (under `cargo test`)
+    // the heal preference held on for the whole test, on its thread
     let _on = kernel::heal_preference_for_tests(true);
     let mut doc = placed_imports(1);
     let later = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(10.0, 1.0)), None).unwrap();
@@ -3387,7 +4483,8 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
         vec![kernel::HealedBody { index: 0, body: healed, face_origin, face_source: face_source.clone() }],
     );
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks: checks.clone() }));
+    r.import_report =
+        Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks: checks.clone() }));
 
     assert!(model.settle_import_checks(), "a heal changes the import");
     assert!(model.settle_import_checks(), "until an evaluation brings it in, it is still owed");
@@ -3406,7 +4503,7 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
 
     // The same heal settled again: nothing to do.
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
     assert!(!model.settle_import_checks());
     model.evaluate(&doc);
     assert_eq!(model.last_recomputed, 0);
@@ -3418,12 +4515,60 @@ fn an_imports_healed_parts_replace_its_bodies_once_its_checks_end() {
     assert_eq!(fingerprints(&other), before);
 }
 
-/// #17708 review: the evaluation that brings an import's healed parts in reads the file again,
-/// and that read's checks heal it again. When they end with the heals the model already has,
-/// the import is not news: the window is told of the heal once, and nothing goes stale.
+/// The evaluation that brings a large import's healed parts in takes them from the read the
+/// import made, without reading the file again: the model holds the read until what its check
+/// found is settled. Read again, a 240 MB assembly was parsed, converted and checked a second
+/// time on the window thread while the first read's bodies were still shown, and the system
+/// killed the app for its memory. Once a check ends with nothing to bring in, the read is let go.
+#[test]
+fn an_imports_healed_parts_come_from_the_read_it_made() {
+    // the heal preference held on for the whole test, on its thread
+    let _on = kernel::heal_preference_for_tests(true);
+    let mut doc = placed_imports(1);
+    // Larger than the cache of recent reads keeps once nothing uses them (1 MB), as such a file is.
+    let FeatureKind::Import { step, .. } = &mut doc.features[0].kind else { panic!("import fixture") };
+    *step = step.replacen("DATA;", &format!("DATA;\n/* {} */", "x".repeat(2 << 20)), 1).into();
+    let import = doc.features[0].id;
+    let mut model = Model::new();
+    let read_run = {
+        // The check of the read still runs after the import shows, as a large file's does.
+        let _open = kernel::ImportChecks::hold_open_for_tests();
+        model.evaluate(&doc);
+        let run = model.result(import).and_then(|r| r.import_report.clone()).expect("the read's report").checks.clone();
+        assert!(run.is_running(), "the check runs on after the import");
+        assert!(model.holds_import_read(import), "the model holds the read while its check runs");
+        // The check ends having healed the first part.
+        let healed = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0)).unwrap();
+        let n = healed.face_count();
+        let checks = kernel::ImportChecks::ended_for_tests(
+            Vec::new(),
+            vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
+        );
+        let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+        r.import_report =
+            Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
+        assert!(model.settle_import_checks(), "the heal is owed");
+        assert!(model.holds_import_read(import), "held for the evaluation that brings the heal in");
+        model.evaluate(&doc);
+        let mut volumes: Vec<f64> = model.state().bodies.iter().map(|b| b.body.volume_at(1e-6).unwrap().round()).collect();
+        volumes.sort_by(f64::total_cmp);
+        assert_eq!(volumes, [27.0, 125.0], "the healed part replaces the file's");
+        let now = model.result(import).and_then(|r| r.import_report.clone()).expect("the report").checks.clone();
+        assert!(now == run, "the healed parts came from the read the import made: the file was not read again");
+        run
+    };
+    // The read's check ends (its boxes pass): nothing more to bring in, so the read is let go.
+    assert!(read_run.wait().is_some());
+    assert!(!model.settle_import_checks());
+    assert!(!model.holds_import_read(import), "let go once its check is settled");
+}
+
+/// #17708 review: when the checks of the import's read end with the heals the model already has
+/// (a file read again, whose checks heal it again), the import is not news: the window is told
+/// of the heal once, and nothing goes stale.
 #[test]
 fn a_heal_the_next_read_finds_again_is_told_once() {
-    // the heal preference is the process's: held on for the whole test (under `cargo test`)
+    // the heal preference held on for the whole test, on its thread
     let _on = kernel::heal_preference_for_tests(true);
     let doc = placed_imports(1);
     let mut model = Model::new();
@@ -3450,7 +4595,8 @@ fn a_heal_the_next_read_finds_again_is_told_once() {
     };
     let ended = |model: &mut Model, checks: kernel::ImportChecks| {
         let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-        r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+        r.import_report =
+            Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
     };
     ended(&mut model, run());
     assert!(model.settle_import_checks());
@@ -3478,7 +4624,7 @@ fn a_save_while_an_import_is_checked_keeps_no_model_and_does_not_wait() {
     let import = doc.features[0].id;
     let (checks, end) = kernel::ImportChecks::running_for_tests();
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
     assert!(model.checking_imports());
     // (were it to wait, this would never return: nothing else ends the check)
     assert!(model.saved_if_checked(&doc).is_none(), "no model while the check runs");
@@ -3498,6 +4644,34 @@ fn a_save_while_an_import_is_checked_keeps_no_model_and_does_not_wait() {
     assert_eq!(feature["warning"], serde_json::json!(crate::eval::import_warning(&["fails SMLib's check"])));
     assert_eq!(feature["import_report"]["issues"][0]["detail"], "fails SMLib's check", "kept with what the check found");
     assert_eq!(saved.records, model.saved(&doc).unwrap().records, "as a save that waited keeps it");
+}
+
+/// #20633: a window is woken once when an import's check of its parts ends, and not at all while
+/// it runs, so an untouched window draws nothing for the minutes a large import's check takes.
+#[test]
+fn a_window_is_woken_once_when_an_imports_check_ends() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let doc = placed_imports(1);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let end = model.running_import_check_for_tests(import);
+    assert!(model.checking_imports());
+    let woke = Arc::new(AtomicUsize::new(0));
+    let w = woke.clone();
+    model.on_import_checks_end(Arc::new(move || {
+        w.fetch_add(1, Ordering::SeqCst);
+    }));
+    assert_eq!(woke.load(Ordering::SeqCst), 0, "nothing while the check runs");
+    end(Vec::new());
+    assert_eq!(woke.load(Ordering::SeqCst), 1, "the end of the check wakes the window once");
+    assert!(!model.checking_imports());
+    // A model whose checks have all ended wakes nothing: the result is already in.
+    let w = woke.clone();
+    model.on_import_checks_end(Arc::new(move || {
+        w.fetch_add(1, Ordering::SeqCst);
+    }));
+    assert_eq!(woke.load(Ordering::SeqCst), 1, "no check is running, so nothing is woken");
 }
 
 /// The tolerance heal preference is part of an import's and a Repair's fingerprint, and of no
@@ -3576,7 +4750,7 @@ fn a_heal_that_ends_after_the_preference_turned_off_leaves_no_healed_note() {
         vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
     );
     let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
-    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, checks }));
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
 
     assert!(model.settle_import_checks_under(false), "an evaluation is owed: the import is read again");
     assert!(!model.has_import_heals(), "the heal is not taken");
@@ -3587,6 +4761,111 @@ fn a_heal_that_ends_after_the_preference_turned_off_leaves_no_healed_note() {
     assert!(model.settle_import_checks_under(false), "settled again: still owed");
     assert!(!model.has_import_heals() && model.take_import_notices().is_empty());
     assert!(model.results.iter().all(|r| r.stale), "the import and what follows it are stale");
+}
+
+/// An import whose background check healed a part keeps its model cache across save and open:
+/// the heal digest travels in the saved manifest, `Model::adopt` restores it so the cached healed
+/// bodies are accepted without re-importing, later edits after the import reuse it, saving again
+/// keeps the cache, and turning off the heal preference or re-evaluating the import itself drops
+/// the digest cleanly.
+#[test]
+fn a_healed_import_keeps_its_model_cache_across_save_and_open() {
+    let _on = kernel::heal_preference_for_tests(true);
+    let mut doc = placed_imports(1);
+    let sketch = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(10.0, 1.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let import = doc.features[0].id;
+    let unhealed_fp = model.result(import).unwrap().fingerprint;
+
+    let issue = kernel::ImportIssue {
+        kind: kernel::IssueKind::Repaired,
+        item: Some(1),
+        part: String::new(),
+        paths: Vec::new(),
+        faces: 0,
+        times: 1,
+        detail: "healed SMLib's check failures".into(),
+    };
+    let healed = kernel::box_solid(Vec3::ZERO, Vec3::new(3.0, 3.0, 3.0)).unwrap();
+    let healed_vol = healed.volume_at(1e-6).unwrap();
+    let n = healed.face_count();
+    let checks = kernel::ImportChecks::ended_for_tests(
+        vec![issue],
+        vec![kernel::HealedBody { index: 0, body: healed, face_origin: vec![0; n], face_source: (0..n).collect() }],
+    );
+    let r = model.results.iter_mut().find(|r| r.id == import).unwrap();
+    r.import_report = Some(Arc::new(kernel::ImportReport { parts: 2, solids: 2, issues: Vec::new(), single_root: false, split_edges: 0, checks }));
+
+    // Before settling the new heal, saving reports why it skips the cache.
+    assert!(model.cache_skip_reason(&doc).is_some_and(|r| r.contains("healed after evaluation")), "{:?}", model.cache_skip_reason(&doc));
+    assert!(model.saved_if_checked(&doc).is_none());
+
+    // Settle the heal and evaluate so the model carries the healed body.
+    assert!(model.settle_import_checks_under(true));
+    model.evaluate(&doc);
+    // That evaluation reads the import again with its heal, which starts a fresh SMLib check of
+    // its parts on a kernel thread; a save keeps no model while one runs (#20133). Wait for it
+    // to end, as a save once the check ends would.
+    for r in &model.results {
+        if let Some(report) = &r.import_report {
+            report.checks.wait();
+        }
+    }
+    assert!(!model.checking_imports());
+    assert!(model.has_import_heals());
+    assert!(model.cache_skip_reason(&doc).is_none(), "{:?}", model.cache_skip_reason(&doc));
+    let healed_fp = model.result(import).unwrap().fingerprint;
+    assert_ne!(healed_fp, unhealed_fp);
+    assert!((model.state().bodies[0].body.volume_at(1e-6).unwrap() - healed_vol).abs() < 1e-6);
+
+    // First save + adopt: the cache is written and adopted with the healed body.
+    let saved = model.saved_if_checked(&doc).expect("healed import keeps its model cache");
+    assert!(saved.records.get("import_heals").is_some());
+    // Thinning the cache preserves `import_heals` so adopting a thinned cache still succeeds.
+    let pieces: Vec<Vec<(usize, usize)>> = (0..saved.bodies.len()).map(|i| vec![(i, 1)]).collect();
+    let (thinned, _, _) = saved.thinned(&pieces, usize::MAX).expect("thinning succeeds");
+    assert_eq!(thinned.records.get("import_heals"), saved.records.get("import_heals"));
+    assert!(Model::adopt(&doc, &thinned).is_ok(), "adopt accepts thinned healed import cache");
+    let mut adopted = Model::adopt(&doc, &saved).expect("adopt accepts healed import cache");
+    assert!(adopted.is_current(&doc));
+    assert!(adopted.has_import_heals());
+    assert!((adopted.state().bodies[0].body.volume_at(1e-6).unwrap() - healed_vol).abs() < 1e-6);
+
+    // Editing a feature after the import reuses the adopted healed import without re-evaluating it.
+    let _ = sketch;
+    doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(20.0, 2.0)), None).unwrap();
+    adopted.evaluate(&doc);
+    assert_eq!(adopted.last_recomputed, 1, "only the new feature should evaluate");
+    assert_eq!(adopted.result(import).unwrap().fingerprint, healed_fp);
+    assert!((adopted.state().bodies[0].body.volume_at(1e-6).unwrap() - healed_vol).abs() < 1e-6);
+
+    // Saving a second time from the adopted model keeps the cache too.
+    let saved_again = adopted.saved_if_checked(&doc).expect("second save keeps the model cache");
+    let mut adopted_again = Model::adopt(&doc, &saved_again).expect("second adopt succeeds");
+    assert!(adopted_again.is_current(&doc));
+
+    // Inserting an unrelated feature before the import reuses the healed import from the change
+    // cache without re-importing it.
+    let mut before_doc = doc.clone();
+    let early = line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(5.0, 5.0));
+    before_doc.add_feature(early, None).unwrap();
+    let last = before_doc.features.pop().unwrap();
+    before_doc.features.insert(0, last);
+    adopted_again.evaluate(&before_doc);
+    assert!(adopted_again.has_import_heals(), "change-cache hit keeps the healed import");
+    assert!((adopted_again.state().bodies[0].body.volume_at(1e-6).unwrap() - healed_vol).abs() < 1e-6);
+
+    // If the import itself must actually be re-evaluated (cache miss), the digest-only heal
+    // entry is dropped so it evaluates cleanly with the unhealed fingerprint.
+    adopted_again.no_cache = true;
+    adopted_again.evaluate(&doc);
+    assert!(!adopted_again.has_import_heals(), "digest-only heal dropped on re-evaluation");
+    assert_eq!(adopted_again.result(import).unwrap().fingerprint, unhealed_fp);
+
+    // Turning off the tolerance heal preference invalidates the adopted healed model.
+    let _off = kernel::heal_preference_for_tests(false);
+    assert!(!adopted.is_current(&doc));
 }
 
 /// A cut measures the tight box of its tool, and the body's only when the box can show
@@ -3677,7 +4956,7 @@ fn holed_cube(doc: &mut Document, size: f64, hole: f64) {
     {
         let kind = FeatureKind::Cylinder {
             base: point_expr(base),
-            axis: Dir(axis),
+            axis: crate::dir_expr(axis),
             radius: (hole / 2.0).to_string().into(),
             height: size.to_string().into(),
             operation: Operation::Cut,
@@ -3715,20 +4994,42 @@ fn round_of_every_edge(doc: &mut Document, body: &kernel::Body, radius: &str) ->
 /// search for the largest radius that fits (#4282): the search cannot be guided then, and it
 /// blends every edge again for each of the sizes it tries. On the design of #4282 (a cube with
 /// a hole through each axis, a 2 mm round of every edge) those ten blends of the forty-one edges
-/// took 77 s, fifteen times the blend that failed, and they found nothing: the round fails at
-/// any radius there.
+/// took 77 s, fifteen times the blend that failed, and they found nothing. That round now builds
+/// ([`the_round_of_every_edge_of_a_cube_holed_along_each_axis_builds`]); the refusal here is
+/// one the kernel still cannot size.
 #[test]
 fn a_refused_round_that_names_no_radius_to_try_does_not_search_for_one() {
-    // The design of #4282 at a third of its size (the round and the holes keep their
-    // proportions): a cube with a hole through each axis, a round of every one of its edges.
-    // The kernel refuses the radius and cannot size the refusal.
-    let mut doc = Document::new("holed cube");
-    holed_cube(&mut doc, 10.0, 10.0 / 3.0);
+    // A 60 x 40 x 25 block cut down to a ball of radius 35.75 about (0, 0, 12.5), and a 2 mm
+    // round of its four top edges (solidcore-ops'
+    // `rounds_whose_rails_cross_past_their_edges_ends_on_a_sphere_are_refused`).
+    // The top face is the rectangle less its corners outside the circle of radius
+    // rho = sqrt(35.75^2 - 12.5^2) = 33.49, so the four edges end on the ball and share no
+    // corner. Past their ends the rails of two neighbouring rounds run on as the lines
+    // x = 30 - r and y = 20 - r and cross on the top face while (30 - r)^2 + (20 - r)^2 < rho^2,
+    // so no round larger than r = 25 - sqrt(625 - (1300 - rho^2) / 2) = 1.850 fits. The kernel
+    // finds the bands overlapping past the edges' ends and refuses the round as having no room
+    // there, without naming a radius that fits.
+    let mut doc = Document::new("ball-trimmed block");
+    block(&mut doc, "Part", Vec3::new(-30.0, -20.0, 0.0), [60.0, 40.0, 25.0]);
+    let ball = FeatureKind::Sphere { center: point_expr(Vec3::new(0.0, 0.0, 12.5)), radius: "35.75".into(), operation: Operation::Intersect };
+    doc.add_feature(ball, None).unwrap();
     let mut model = Model::new();
     model.evaluate(&doc);
     assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
-    let body = model.state().bodies[0].body.clone();
-    let fillet = round_of_every_edge(&mut doc, &body, &format!("{} mm", 2.0 / 3.0));
+    let top = [Vec3::new(30.0, -10.0, 25.0), Vec3::new(-30.0, 10.0, 25.0), Vec3::new(-15.0, -20.0, 25.0), Vec3::new(15.0, 20.0, 25.0)];
+    let kind = FeatureKind::Fillet {
+        edges: top.into_iter().map(Position).collect(),
+        radius: "2".into(),
+        body: None,
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: Vec::new(),
+        turn: Default::default(),
+        tangent_chain: true,
+        edge_radii: Vec::new(),
+    };
+    let fillet = doc.add_feature(kind, None).unwrap();
     let work = counted(|| model.evaluate(&doc));
     let r = model.result(fillet);
     let error = r.and_then(|r| r.error.clone()).unwrap_or_default();
@@ -3736,6 +5037,40 @@ fn a_refused_round_that_names_no_radius_to_try_does_not_search_for_one() {
     // The blend the kernel refused, and no search for a radius that fits.
     assert_eq!(work.blends, 1, "{work:?}");
     assert_eq!(work.fit_searches, 0, "{work:?}");
+}
+
+/// The design of #4282 at a third of its size: a 10 mm cube with a hole of radius 5/3 through
+/// its centre along each axis, and a round R = 2/3 of every one of its edges. The round builds
+/// one valid body (the kernel refused it without a radius to try until #21715: rail ends whose
+/// feet straddle a hole's seam at the three-hole corners), and it removes the volume derived here:
+/// - 11.04862 for the 12 cube edges with their 8 corners, exact: the cube less the rounded box
+///   of b = a - 2R, a^3 - (b^3 + 6 b^2 R + 3 pi b R^2 + 4/3 pi R^3).
+/// - 6.52825 for the 6 hole rims, exact: each a quarter-torus spandrel by Pappus, the area
+///   R^2 (1 - pi/4) about the hole's axis at r + R (10 - 3 pi) / (12 - 3 pi).
+/// - 2.15652 for the 12 edges where two holes meet, approximate: R^2 (tan(t/2) - t/2) along each
+///   2.840 mm edge, the angle t between the walls going from 90 to 60 degrees, the walls taken as
+///   flat and the three-hole corners left out.
+///
+/// Together 19.73339. The tolerance, 0.02 mm3, is about 1% of the approximate 2.157: the kernel's
+/// 19.72604 is 0.0073 below the sum.
+#[test]
+fn the_round_of_every_edge_of_a_cube_holed_along_each_axis_builds() {
+    let mut doc = Document::new("holed cube");
+    holed_cube(&mut doc, 10.0, 10.0 / 3.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
+    let body = model.state().bodies[0].body.clone();
+    let before = kernel::measure(&body).unwrap().volume;
+    let fillet = round_of_every_edge(&mut doc, &body, &format!("{} mm", 2.0 / 3.0));
+    model.evaluate(&doc);
+    assert_eq!(model.result(fillet).and_then(|r| r.error.clone()), None);
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    let rounded = &st.bodies[0].body;
+    kernel::check_kept(rounded).unwrap();
+    let removed = before - kernel::measure(rounded).unwrap().volume;
+    assert!((removed - 19.73339).abs() < 0.02, "{removed}");
 }
 
 /// A round the kernel refuses naming the radius that fits still searches for it: the search is
@@ -3803,18 +5138,2039 @@ fn a_round_refused_into_a_hollow_searches_for_the_largest_radius_that_fits() {
     assert_eq!(work.fit_searches, 1, "{work:?}");
 }
 
-/// A pattern's copies are probed with the kernel's point classifications, to know whether they
-/// take material without intersecting them with the body (#11257). The points of a line are
-/// classified in one call, not one call a point: the kernel makes the body's copy and its
-/// search structures once for all the points of a call, and again for every call a point makes
-/// on its own.
+/// Whether a pattern's copies take material is read from the cut's own history first (#18396):
+/// a copy whose tool leaves a wall in the body, on a surface the body did not have, took
+/// material, and is neither probed with the kernel's point classifications (#11257) nor
+/// intersected with the body.
 #[test]
-fn a_pattern_probes_its_copies_with_one_classification_a_line() {
-    // The ten grooves of the pattern notch the same round bore: the probe's points lie on the
-    // bore's surface, where they are not inside the ring, so the probe tries every line it
-    // has before it finds the ring's material. It asked the kernel for 370 classifications,
-    // one a point, and asks for 36.
+fn a_pattern_knows_its_copies_took_material_from_the_cut() {
+    // The ten grooves of the pattern notch the same round bore. Each leaves its own round wall
+    // (4 mm about its own axis, a surface the ring did not have) in the ring: none is probed.
+    // The probe asked the kernel for 36 classifications here, batched a line to a call.
     let (faces, work) = grooved_ring_faces();
     assert_eq!(faces, 24, "the ring comes out as it did");
-    assert_eq!(work.classifications, 36, "{work:?}");
+    assert_eq!((work.classifications, work.miss_intersects), (0, 0), "{work:?}");
+}
+
+/// A pattern's copies the cut's history cannot place are probed with the kernel's point
+/// classifications (#11257), the points of a line in one call, not one call a point: the kernel
+/// makes the body's copy and its search structures once for all the points of a call.
+#[test]
+fn a_pattern_probes_the_copies_the_cut_does_not_place_with_one_classification_a_line() {
+    let mut doc = Document::new("in the bore");
+    let cylinder = |base: Vec3, radius: &str, height: &str, operation: Operation| FeatureKind::Cylinder {
+        base: point_expr(base),
+        axis: crate::dir_expr(Vec3::Z),
+        radius: radius.into(),
+        height: height.into(),
+        operation,
+        references: Vec::new(),
+    };
+    doc.add_feature(cylinder(Vec3::ZERO, "25", "55", Operation::NewBody), Some("Ring")).unwrap();
+    doc.add_feature(cylinder(Vec3::new(0.0, 0.0, -1.0), "16", "57", Operation::Cut), Some("Bore")).unwrap();
+    // Sixteen pegs 2 mm round on a 10 mm circle, all in the empty bore (out to 12 mm of its 16):
+    // each 3.9 mm from the next, so their 4 mm boxes meet and the cut can't place them.
+    let peg = doc.add_feature(cylinder(Vec3::new(10.0, 0.0, 10.0), "2", "20", Operation::Cut), Some("Peg")).unwrap();
+    let pattern = hole_pattern(&mut doc, peg, 16);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    let result = model.result(pattern).unwrap();
+    assert!(result.error.is_none(), "{result:?}");
+    assert!(result.warning.as_deref().is_some_and(|w| w.starts_with("15 of 15 cut copies remove no material")), "{result:?}");
+    // Each of the 15 copies is probed along 4 lines (its round side's axis and the three lines
+    // through the middle of its box), each line with one call for the peg's points and one for
+    // the ring's points among them (none in the ring): 15 x 4 x 2.
+    assert_eq!(work.classifications, 120, "{work:?}");
+}
+
+/// A body of two pieces can lose a whole piece to a copy that leaves none of its faces: that copy
+/// took material, and the cut's history does not count it a miss.
+#[test]
+fn a_copy_that_takes_a_whole_piece_of_a_body_is_not_a_miss() {
+    let block = |corner: Vec3, size: f64, operation: Operation| FeatureKind::Box {
+        corner: point_expr(corner),
+        length: size.to_string().into(),
+        width: size.to_string().into(),
+        height: size.to_string().into(),
+        operation,
+        centred: false,
+    };
+    let mut doc = Document::new("two pieces");
+    doc.add_feature(block(Vec3::ZERO, 10.0, Operation::NewBody), Some("A")).unwrap();
+    // A second piece of A, 4 mm across at x 30: the join meets nothing and keeps it apart.
+    doc.add_feature(block(Vec3::new(30.0, 0.0, 0.0), 4.0, Operation::Join), Some("Piece")).unwrap();
+    // A 6 mm cutter at x 18 to 24, clear of both pieces; its copy 11 mm on, x 29 to 35, holds the
+    // whole second piece.
+    let cutter = doc.add_feature(block(Vec3::new(18.0, -1.0, -1.0), 6.0, Operation::Cut), Some("Cutter")).unwrap();
+    let pattern: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern", "features": [cutter],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "2", "spacing1": "11"},
+    }))
+    .unwrap();
+    let pattern = doc.add_feature(pattern, None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let result = model.result(pattern).unwrap();
+    assert!(result.error.is_none(), "{result:?}");
+    assert!(!result.warning.as_deref().is_some_and(|w| w.contains("cut copies remove no material")), "{:?}", result.warning);
+    let st = model.state();
+    let v: f64 = st.bodies.iter().map(|b| kernel::measure(&b.body).unwrap().volume).sum();
+    assert!((v - 1000.0).abs() < 1e-6, "{v}");
+}
+
+/// A pattern's copies that leave no face in the body, each clear of the others, took no
+/// material: the cut's history says so, and the count of the copies that remove no material is
+/// the one the kernel's tests gave, without asking it (#18396).
+#[test]
+fn a_pattern_knows_its_copies_beside_the_body_took_no_material() {
+    let mut doc = Document::new("beside the ring");
+    let cylinder = |base: Vec3, radius: &str, height: &str, operation: Operation| FeatureKind::Cylinder {
+        base: point_expr(base),
+        axis: crate::dir_expr(Vec3::Z),
+        radius: radius.into(),
+        height: height.into(),
+        operation,
+        references: Vec::new(),
+    };
+    doc.add_feature(cylinder(Vec3::ZERO, "25", "55", Operation::NewBody), Some("Ring")).unwrap();
+    // Every copy stands 60 mm from the axis: 4 mm round, 31 mm or more from the ring, and about
+    // 38 mm from the next copy.
+    let peg = doc.add_feature(cylinder(Vec3::new(60.0, 0.0, -1.0), "4", "57", Operation::Cut), Some("Peg")).unwrap();
+    let pattern = hole_pattern(&mut doc, peg, 10);
+    let mut model = Model::new();
+    let work = counted(|| model.evaluate(&doc));
+    let result = model.result(pattern).unwrap();
+    assert!(result.error.is_none(), "{result:?}");
+    assert!(result.warning.as_deref().is_some_and(|w| w.starts_with("9 of 9 cut copies remove no material")), "{result:?}");
+    assert_eq!((work.classifications, work.miss_intersects), (0, 0), "{work:?}");
+}
+
+/// #611: a parameter rename keeps the results only when they are the ones evaluating `previous`
+/// gives: a `previous` that builds something else (a literal that differs) is refused, and the
+/// model is left as it was.
+#[test]
+fn a_parameter_rename_keeps_no_results_evaluated_for_another_design() {
+    let mut doc = Document::default();
+    doc.set_param("w", "2", None, None).unwrap();
+    let feature = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "w".into(),
+                width: "3".into(),
+                height: "4".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let shown = model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>();
+    let mut other = doc.clone();
+    let FeatureKind::Box { height, .. } = &mut other.feature_mut(feature).unwrap().kind else { panic!("box") };
+    *height = "5".into();
+    let mut renamed = other.clone();
+    renamed.rename_param("w", "v").unwrap();
+    assert_eq!(renamed.param_rename_from(&other), Some(("w".into(), "v".into())));
+    assert!(!model.rename_param(&other, &renamed, "w", "v"), "the results are not the 2 x 3 x 5 box's");
+    assert_eq!(model.results.iter().map(|r| r.fingerprint).collect::<Vec<_>>(), shown, "the model is left as it was");
+    // The design the results were evaluated for is renamed without evaluating.
+    let mut same = doc.clone();
+    same.rename_param("w", "v").unwrap();
+    assert!(model.rename_param(&doc, &same, "w", "v"));
+    model.evaluate(&same);
+    assert_eq!(model.last_recomputed, 0);
+}
+
+/// Add a sketch on XY with disjoint rectangles `(x, y, w, h)` and extrude all of them to `height`
+/// with `Operation::Join`.
+fn join_rects(doc: &mut Document, rects: &[(f64, f64, f64, f64)], height: f64) -> u64 {
+    let mut sk = Sketch::new();
+    for &(x, y, w, h) in rects {
+        let pts = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)].map(|(px, py)| sk.add_point(Vec2::new(px, py), None).unwrap());
+        for k in 0..4 {
+            sk.add_line_pts(pts[k], pts[(k + 1) % 4], None).unwrap();
+        }
+    }
+    let sketch = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, None).unwrap();
+    let kind = FeatureKind::Extrude {
+        thin: None,
+        sketch: SketchId(sketch),
+        profiles: ProfileSel::All,
+        extent: serde_json::from_value(serde_json::json!({"distance": height.to_string()})).unwrap(),
+        operation: Operation::Join,
+        targets: Vec::new(),
+    };
+    doc.add_feature(kind, None).unwrap()
+}
+
+/// Multi-target join batches all tools hitting each target into one kernel union per target,
+/// preserving body names, exact volumes, and exact traced face lineage.
+#[test]
+fn multi_target_join_batches_tools_per_target() {
+    let mut doc = Document::new("multi-target batch");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [40.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(0.0, 30.0, 0.0), [40.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+
+    // Three bosses on A and three bosses on B in one feature: 6 tools across 2 targets.
+    let rects =
+        [(2.0, 3.0, 4.0, 4.0), (14.0, 3.0, 4.0, 4.0), (26.0, 3.0, 4.0, 4.0), (2.0, 33.0, 4.0, 4.0), (14.0, 33.0, 4.0, 4.0), (26.0, 33.0, 4.0, 4.0)];
+    let extrude = join_rects(&mut doc, &rects, 14.0);
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(extrude).is_some_and(|r| r.error.is_none()), "{:?}", model.result(extrude));
+    assert_eq!(work.join_unions, 2, "one batched union per target: {work:?}");
+    assert!(work.contact_tests > 0, "{work:?}");
+
+    let st = model.state();
+    let names: Vec<&str> = st.bodies.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(names, vec!["A", "B"]);
+    assert!((volume(&model, "A") - 4192.0).abs() < 1e-6, "{}", volume(&model, "A"));
+    assert!((volume(&model, "B") - 4192.0).abs() < 1e-6, "{}", volume(&model, "B"));
+    for b in &st.bodies {
+        assert!((0..b.body.face_count()).all(|i| crate::naming::face_name_exact(b, i)), "exact lineage lost on {}", b.name);
+    }
+}
+
+/// A bridging tool meeting two or more targets merges them in one batched union call, preserving
+/// exact volume, thread re-attribution, and face lineage; a chain of overlapping tools in one
+/// feature also bridges targets cleanly.
+#[test]
+fn multi_target_join_batches_bridging_tool_with_threads_and_lineage() {
+    let mut doc = Document::new("bridge three targets");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(30.0, 0.0, 0.0), [20.0, 10.0, 10.0]);
+    block(&mut doc, "C", Vec3::new(60.0, 0.0, 0.0), [20.0, 10.0, 10.0]);
+    doc.add_feature(
+        FeatureKind::Cylinder {
+            base: point_expr(Vec3::new(40.0, 5.0, 10.0)),
+            axis: crate::dir_expr(Vec3::Z),
+            radius: "3".into(),
+            height: "6".into(),
+            operation: Operation::Join,
+            references: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    doc.add_feature(marking(Vec3::new(43.0, 5.0, 13.0)), None).unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().threads.len(), 1);
+    assert_eq!(model.state().threads[0].body, "B");
+    let before_sum = volume(&model, "A") + volume(&model, "B") + volume(&model, "C");
+
+    // One bar spanning from A across B into C merges all three into A in one batched union.
+    let bridge = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(15.0, 2.0, 2.0)),
+                length: "50".into(),
+                width: "6".into(),
+                height: "6".into(),
+                operation: Operation::Join,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(bridge).is_some_and(|r| r.error.is_none()), "{:?}", model.result(bridge));
+    assert_eq!(work.join_unions, 1, "bridging A, B, and C must run one batched union: {work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    assert_eq!(st.bodies[0].name, "A");
+    assert!((volume(&model, "A") - (before_sum + 720.0)).abs() < 1e-4, "{}", volume(&model, "A"));
+    assert_eq!(st.threads.len(), 1);
+    assert_eq!(st.threads[0].body, "A", "thread on absorbed B must move to A");
+    assert!((0..st.bodies[0].body.face_count()).all(|i| crate::naming::face_name_exact(&st.bodies[0], i)));
+
+    // A chain of two overlapping tools in one pattern feature: copy 1 extends A, copy 2 meets
+    // copy 1 and B (without touching A's base body), so both merge A and B into one body.
+    let mut doc = Document::new("chained bridge");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(26.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    let seed = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(8.0, 2.0, 2.0)),
+                length: "8".into(),
+                width: "6".into(),
+                height: "6".into(),
+                operation: Operation::Join,
+                centred: false,
+            },
+            None,
+        )
+        .unwrap();
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let pattern: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern",
+        "features": [seed],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "3", "spacing1": "6"},
+    }))
+    .unwrap();
+    let pat = doc.add_feature(pattern, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(pat).is_some_and(|r| r.error.is_none()), "{:?}", model.result(pat));
+    assert_eq!(work.join_unions, 1, "chained bridge merges A, queued copy, bridging copy, and B in one union: {work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 1);
+    assert_eq!(st.bodies[0].name, "A");
+    assert!((volume(&model, "A") - 2576.0).abs() < 1e-4, "{}", volume(&model, "A"));
+}
+
+/// Multi-target join fast-paths apart tools that miss every target via `union_all_apart`, and
+/// batches multiple tools hitting one target while keeping a sheet metal body's identity intact.
+#[test]
+fn multi_target_join_batches_same_target_apart_tools_and_keeps_sheet_identity() {
+    // Four apart bosses that miss both A and B fall back to A and join without any kernel union.
+    let mut doc = Document::new("apart fallback");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(0.0, 30.0, 0.0), [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+
+    let apart_rects = [(40.0, 0.0, 4.0, 4.0), (50.0, 0.0, 4.0, 4.0), (60.0, 0.0, 4.0, 4.0), (70.0, 0.0, 4.0, 4.0)];
+    let extrude = join_rects(&mut doc, &apart_rects, 4.0);
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(extrude).is_some_and(|r| r.error.is_none()), "{:?}", model.result(extrude));
+    assert_eq!(work.joined_apart, 1, "apart fallback tools must join without intersection work: {work:?}");
+    assert_eq!(work.join_unions, 0, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.body("A").unwrap().body.lumps().unwrap().len(), 5);
+    assert!((volume(&model, "A") - 1256.0).abs() < 1e-6, "{}", volume(&model, "A"));
+    assert_eq!(st.body("B").unwrap().body.lumps().unwrap().len(), 1);
+    assert!((volume(&model, "B") - 1000.0).abs() < 1e-6, "{}", volume(&model, "B"));
+
+    // Sheet metal identity rule: multiple tools meeting A (including one reaching across a sheet
+    // metal body) batch into A without absorbing the sheet.
+    let mut doc = Document::new("sheet kept");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [20.0, 20.0, 10.0]);
+    flat_sheet(&mut doc, Vec2::new(25.0, 0.0), 20.0, 20.0);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let sheets = sheet_bodies(&model);
+    assert_eq!(sheets.len(), 1);
+    let sheet_name = sheets[0].clone();
+    let sheet_vol = volume(&model, &sheet_name);
+
+    let rects = [(2.0, 2.0, 4.0, 4.0), (10.0, 2.0, 4.0, 4.0), (18.0, 12.0, 10.0, 4.0)];
+    let extrude = join_rects(&mut doc, &rects, 14.0);
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(extrude).is_some_and(|r| r.error.is_none()), "{:?}", model.result(extrude));
+    assert_eq!(work.join_unions, 1, "all three tools joining A must batch into one union: {work:?}");
+    assert_eq!(sheet_bodies(&model), vec![sheet_name.clone()]);
+    assert_eq!(model.state().bodies.len(), 2);
+    assert!((volume(&model, "A") - 4608.0).abs() < 1e-4, "{}", volume(&model, "A"));
+    assert!((volume(&model, &sheet_name) - sheet_vol).abs() < 1e-6, "{}", volume(&model, &sheet_name));
+}
+
+/// Snapshot of a model's evaluated state for verifying cached incremental replay matches a cold
+/// `no_cache` evaluation identically (bodies, volume, exact bounds via `m.bbox`, face counts, face
+/// names, cosmetic threads, body counter, and resolved named face points).
+fn full_eval_snapshot(model: &Model) -> (Vec<(String, u64, i64, [i64; 6], usize, Vec<String>)>, Vec<ThreadInfo>, usize, Vec<(u64, Vec<[u64; 3]>)>) {
+    let st = model.state();
+    let bodies = st
+        .bodies
+        .iter()
+        .map(|b| {
+            let m = kernel::measure(&b.body).unwrap();
+            let vol = (m.volume * 1e6).round() as i64;
+            let bb = [
+                (m.bbox.min.x * 1e6).round() as i64,
+                (m.bbox.min.y * 1e6).round() as i64,
+                (m.bbox.min.z * 1e6).round() as i64,
+                (m.bbox.max.x * 1e6).round() as i64,
+                (m.bbox.max.y * 1e6).round() as i64,
+                (m.bbox.max.z * 1e6).round() as i64,
+            ];
+            (b.name.clone(), b.component, vol, bb, b.body.face_count(), (*crate::naming::face_names(b)).clone())
+        })
+        .collect();
+    let named_faces =
+        st.named_faces.iter().map(|(&id, pts)| (id, pts.iter().map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()]).collect())).collect();
+    (bodies, st.threads.clone(), st.body_counter, named_faces)
+}
+
+fn cold_model(doc: &Document) -> Model {
+    let mut fresh = Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(doc);
+    fresh
+}
+
+/// Editing, adding, or deleting an unrelated earlier component or body must skip recomputing
+/// downstream modeled threads — both grouped body-qualified threads with `face_names` and legacy
+/// threads without `target_bodies`, in-session and on the first edit after opening a saved design.
+/// Editing a threaded body or moving an unread body to overlap it must recompute cleanly and stay
+/// identical to a cold evaluation.
+#[test]
+fn unrelated_earlier_edits_and_deletes_skip_downstream_modeled_threads() {
+    let mut doc = Document::new("modeled thread cache");
+    doc.set_param("A_h", "10 mm", None, None).unwrap();
+    doc.set_param("B_len", "4 mm", None, None).unwrap();
+
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let box_a = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(0.0, 0.0, 0.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "A_h".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BlockA"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(box_a).unwrap();
+        f.component = comp_a;
+        f.body_names = vec!["BlockA".into()];
+    }
+
+    // Component B at x = 60..90: a plate with 4 M6 shafts and a grouped modeled Thread with
+    // explicit target_bodies and stored face_names.
+    let comp_b = doc.add_component(Some("PartB"), 0).unwrap();
+    let plate_b = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(60.0, -15.0, 0.0)),
+                length: "30".into(),
+                width: "30".into(),
+                height: "2".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("PlateB"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(plate_b).unwrap();
+        f.component = comp_b;
+        f.body_names = vec!["PlateB".into()];
+    }
+    let mut b_faces = Vec::new();
+    for (x, y) in [(67.0, -8.0), (83.0, -8.0), (67.0, 8.0), (83.0, 8.0)] {
+        let shaft = doc
+            .add_feature(
+                FeatureKind::Cylinder {
+                    base: point_expr(Vec3::new(x, y, 2.0)),
+                    axis: crate::dir_expr(Vec3::Z),
+                    radius: "3".into(),
+                    height: "B_len".into(),
+                    operation: Operation::Join,
+                    references: Vec::new(),
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(shaft).unwrap().component = comp_b;
+        b_faces.push(FacePick(Vec3::new(x + 3.0, y, 5.0)));
+    }
+    let mut b_thread_kind = marking(b_faces.remove(0).0);
+    if let FeatureKind::Thread { additional_faces, modeled, designation, target_bodies, continuous_flanks, .. } = &mut b_thread_kind {
+        *additional_faces = b_faces;
+        *modeled = true;
+        *designation = Some("M6x0.75".into());
+        *target_bodies = vec!["PlateB".into(); 4];
+        *continuous_flanks = true;
+    }
+    // Capture face_names on PlateB before adding the thread, as the command does.
+    let mut seed = Model::new();
+    seed.evaluate(&doc);
+    assert!(seed.results.iter().all(|r| r.error.is_none()), "{:?}", seed.results.iter().find(|r| r.error.is_some()));
+    let b_face_names = face_point_names(&doc, &seed.state(), &b_thread_kind, comp_b).unwrap();
+    assert!(b_face_names.iter().all(|n| !n.is_empty()), "{b_face_names:?}");
+    let thread_b = doc.add_feature(b_thread_kind, Some("ThreadB")).unwrap();
+    {
+        let f = doc.feature_mut(thread_b).unwrap();
+        f.component = comp_b;
+        f.face_names = b_face_names;
+    }
+
+    // Component C at x = 140..160: a single shaft with a legacy modeled Thread (empty target_bodies).
+    let comp_c = doc.add_component(Some("PartC"), 0).unwrap();
+    let shaft_c = doc
+        .add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::new(150.0, 0.0, 0.0)),
+                axis: crate::dir_expr(Vec3::Z),
+                radius: "3".into(),
+                height: "4".into(),
+                operation: Operation::NewBody,
+                references: Vec::new(),
+            },
+            Some("ShaftC"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(shaft_c).unwrap();
+        f.component = comp_c;
+        f.body_names = vec!["ShaftC".into()];
+    }
+    let mut c_thread_kind = marking(Vec3::new(153.0, 0.0, 2.0));
+    if let FeatureKind::Thread { modeled, designation, continuous_flanks, .. } = &mut c_thread_kind {
+        *modeled = true;
+        *designation = Some("M6x0.75".into());
+        *continuous_flanks = true;
+    }
+    let thread_c = doc.add_feature(c_thread_kind, Some("ThreadC")).unwrap();
+    doc.feature_mut(thread_c).unwrap().component = comp_c;
+
+    let mut model = Model::new();
+    let initial = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert!(initial.thread_cuts >= 2, "initial evaluation cuts both modeled threads: {initial:?}");
+
+    let saved = model.saved(&doc).unwrap();
+    let reopened = Model::adopt(&doc, &saved).unwrap();
+
+    // 1. Unrelated earlier edit (PartA height): only BlockA recomputes; zero thread cuts.
+    doc.set_param("A_h", "14 mm", None, None).unwrap();
+    let expected = full_eval_snapshot(&cold_model(&doc));
+    for (what, mut candidate) in [("in-session", model.clone()), ("opened", reopened)] {
+        let work = counted(|| candidate.evaluate(&doc));
+        assert!(candidate.results.iter().all(|r| r.error.is_none()), "{what}");
+        assert_eq!(work.thread_cuts, 0, "{what}: unrelated edit must not recut threads: {work:?}");
+        assert_eq!(candidate.last_recomputed, 1, "{what}: only BlockA should recompute");
+        assert_eq!(full_eval_snapshot(&candidate), expected, "{what}: cached replay must match cold eval");
+    }
+    model.evaluate(&doc);
+
+    // 2. Deleting unrelated earlier PartA: zero features recomputed, zero thread cuts.
+    let mut without_a = doc.clone();
+    without_a.remove_component_tree(comp_a).unwrap();
+    let work = counted(|| model.evaluate(&without_a));
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(work.thread_cuts, 0, "deleting PartA must not recut downstream threads: {work:?}");
+    assert_eq!(model.last_recomputed, 0, "deleting PartA must recompute zero features");
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&without_a)));
+
+    // 3. Adding an unrelated earlier component before PartB & PartC: only the new box recomputes.
+    let mut with_d = without_a.clone();
+    let comp_d = with_d.add_component(Some("PartD"), 0).unwrap();
+    let box_d = with_d
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(-80.0, 0.0, 0.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BlockD"),
+        )
+        .unwrap();
+    {
+        let f = with_d.feature_mut(box_d).unwrap();
+        f.component = comp_d;
+        f.body_names = vec!["BlockD".into()];
+    }
+    with_d.features.rotate_right(1);
+    let work = counted(|| model.evaluate(&with_d));
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(work.thread_cuts, 0, "adding far PartD must not recut downstream threads: {work:?}");
+    assert_eq!(model.last_recomputed, 1, "only BlockD should recompute");
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&with_d)));
+
+    // 4. Soundness: editing PartB's shaft height must recompute PartB's thread (while PartC stays cached).
+    let mut edited_b = doc.clone();
+    model.evaluate(&edited_b);
+    edited_b.set_param("B_len", "5 mm", None, None).unwrap();
+    let work = counted(|| model.evaluate(&edited_b));
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(work.thread_cuts, 1, "only PartB's grouped thread should recut: {work:?}");
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&edited_b)));
+
+    // 5. Soundness: adding an unread body overlapping PartB must invalidate PartB's geometric
+    //    face-naming clearance and match a cold evaluation identically.
+    let mut overlapping = doc.clone();
+    model.evaluate(&overlapping);
+    let comp_o = overlapping.add_component(Some("Overlap"), 0).unwrap();
+    let box_o = overlapping
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(62.0, -12.0, 0.0)),
+                length: "26".into(),
+                width: "24".into(),
+                height: "6".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("OverlapBlock"),
+        )
+        .unwrap();
+    {
+        let f = overlapping.feature_mut(box_o).unwrap();
+        f.component = comp_o;
+        f.body_names = vec!["OverlapBlock".into()];
+    }
+    overlapping.features.rotate_right(1);
+    let work = counted(|| model.evaluate(&overlapping));
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(work.thread_cuts, 1, "overlapping unread body must invalidate PartB's thread clearance: {work:?}");
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&overlapping)));
+}
+
+/// Cosmetic threads (both body-qualified with `face_names` and legacy) and patterns of cosmetic
+/// threads must stay cached across unrelated earlier edits and deletes — both in-session and after
+/// opening a saved design — while recomputing when an unrelated body moves into a legacy thread's
+/// cylinder reach.
+#[test]
+fn unrelated_earlier_edits_keep_downstream_cosmetic_threads_and_pattern_cached() {
+    let mut doc = Document::new("cosmetic thread cache");
+    doc.set_param("A_x", "0 mm", None, None).unwrap();
+
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let box_a = doc
+        .add_feature(
+            FeatureKind::Cylinder {
+                base: [Expr::from("A_x"), Expr::from("0"), Expr::from("0")],
+                axis: crate::dir_expr(Vec3::Z),
+                radius: "3".into(),
+                height: "8".into(),
+                operation: Operation::NewBody,
+                references: Vec::new(),
+            },
+            Some("PinA"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(box_a).unwrap();
+        f.component = comp_a;
+        f.body_names = vec!["PinA".into()];
+    }
+
+    // Component B at x = 60: plate with two bosses, a body-qualified cosmetic Thread on the first
+    // boss with stored face_names, and a rectangular Pattern copying that Thread onto the second.
+    let comp_b = doc.add_component(Some("PartB"), 0).unwrap();
+    let plate_b = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(50.0, -10.0, 0.0)),
+                length: "30".into(),
+                width: "20".into(),
+                height: "2".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("PlateB"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(plate_b).unwrap();
+        f.component = comp_b;
+        f.body_names = vec!["PlateB".into()];
+    }
+    for x in [58.0, 72.0] {
+        let boss = doc
+            .add_feature(
+                FeatureKind::Cylinder {
+                    base: point_expr(Vec3::new(x, 0.0, 2.0)),
+                    axis: crate::dir_expr(Vec3::Z),
+                    radius: "3".into(),
+                    height: "6".into(),
+                    operation: Operation::Join,
+                    references: Vec::new(),
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(boss).unwrap().component = comp_b;
+    }
+    let mut b_thread_kind = marking(Vec3::new(61.0, 0.0, 5.0));
+    if let FeatureKind::Thread { target_bodies, .. } = &mut b_thread_kind {
+        *target_bodies = vec!["PlateB".into()];
+    }
+    let mut seed = Model::new();
+    seed.evaluate(&doc);
+    let b_face_names = face_point_names(&doc, &seed.state(), &b_thread_kind, comp_b).unwrap();
+    assert_eq!(b_face_names.len(), 1);
+    assert!(!b_face_names[0].is_empty());
+    let thread_b = doc.add_feature(b_thread_kind, Some("CosmeticB")).unwrap();
+    {
+        let f = doc.feature_mut(thread_b).unwrap();
+        f.component = comp_b;
+        f.face_names = b_face_names;
+    }
+    let pattern_b = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: vec![FeatureId(thread_b)],
+                pattern: PatternKind::Rectangular {
+                    dir1: Dir(Vec3::X),
+                    count1: "2".into(),
+                    spacing1: "14".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: solidcraft_sketch::PatternAlignment::Right,
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
+                },
+                bodies: Vec::new(),
+                placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: false,
+            },
+            Some("PatternB"),
+        )
+        .unwrap();
+    doc.feature_mut(pattern_b).unwrap().component = comp_b;
+
+    // Component C at x = 140: legacy cosmetic thread without target_bodies.
+    let comp_c = doc.add_component(Some("PartC"), 0).unwrap();
+    let pin_c = doc
+        .add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::new(140.0, 0.0, 0.0)),
+                axis: crate::dir_expr(Vec3::Z),
+                radius: "3".into(),
+                height: "8".into(),
+                operation: Operation::NewBody,
+                references: Vec::new(),
+            },
+            Some("PinC"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(pin_c).unwrap();
+        f.component = comp_c;
+        f.body_names = vec!["PinC".into()];
+    }
+    let thread_c = doc.add_feature(marking(Vec3::new(143.0, 0.0, 4.0)), Some("CosmeticC")).unwrap();
+    doc.feature_mut(thread_c).unwrap().component = comp_c;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(model.state().threads.len(), 3);
+
+    let reopened = Model::adopt(&doc, &model.saved(&doc).unwrap()).unwrap();
+
+    // 1. Editing PinA away from B & C: only PinA recomputes; zero cylinder searches.
+    doc.set_param("A_x", "5 mm", None, None).unwrap();
+    let expected = full_eval_snapshot(&cold_model(&doc));
+    for (what, mut candidate) in [("in-session", model.clone()), ("opened", reopened)] {
+        let work = counted(|| candidate.evaluate(&doc));
+        assert!(candidate.results.iter().all(|r| r.error.is_none()), "{what}");
+        assert_eq!(work.cylinder_search, 0, "{what}: unrelated edit must skip cosmetic threads: {work:?}");
+        assert_eq!(candidate.last_recomputed, 1, "{what}: only PinA should recompute");
+        assert_eq!(full_eval_snapshot(&candidate), expected, "{what}");
+    }
+    model.evaluate(&doc);
+
+    // 2. Deleting PartA: zero features recomputed, all 3 cosmetic threads preserved identically.
+    let mut without_a = doc.clone();
+    without_a.remove_component_tree(comp_a).unwrap();
+    let work = counted(|| model.evaluate(&without_a));
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(work.cylinder_search, 0, "{work:?}");
+    assert_eq!(model.last_recomputed, 0);
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&without_a)));
+
+    // 3. Soundness: moving PinA right onto Component C's legacy pick must invalidate CosmeticC.
+    doc.set_param("A_x", "140 mm", None, None).unwrap();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert!(model.last_recomputed >= 2, "PinA and legacy CosmeticC must recompute when PinA enters reach");
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&doc)));
+}
+
+/// Independent downstream Shell (with `face_names`), Scale, Mirror of bodies, OffsetFace (with
+/// `face_names`), Fillet, and Pattern of Extrude must stay cached across unrelated earlier edits
+/// and component deletes (in-session and after `Model::adopt`), and recompute when their own
+/// inputs change.
+#[test]
+fn unrelated_earlier_edits_keep_downstream_shell_scale_mirror_and_extrude_pattern_cached() {
+    let mut doc = Document::new("multi-feature independent cache");
+    doc.set_param("A_h", "10 mm", None, None).unwrap();
+    doc.set_param("B_w", "20 mm", None, None).unwrap();
+
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let box_a = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(0.0, 0.0, 0.0)),
+                length: "10".into(),
+                width: "10".into(),
+                height: "A_h".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BlockA"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(box_a).unwrap();
+        f.component = comp_a;
+        f.body_names = vec!["BlockA".into()];
+    }
+
+    // Component B at x = 40: box -> Shell (with face_names) -> Scale -> Mirror of body.
+    let comp_b = doc.add_component(Some("PartB"), 0).unwrap();
+    let box_b = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(40.0, 0.0, 0.0)),
+                length: "B_w".into(),
+                width: "20".into(),
+                height: "12".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BlockB"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(box_b).unwrap();
+        f.component = comp_b;
+        f.body_names = vec!["BlockB".into()];
+    }
+    let shell_kind = FeatureKind::Shell {
+        faces: vec![FacePick(Vec3::new(50.0, 10.0, 12.0))],
+        thickness: "2".into(),
+        body: Some("BlockB".into()),
+        direction: String::new(),
+        tangent_chain: false,
+    };
+    let mut seed = Model::new();
+    seed.evaluate(&doc);
+    let shell_names = face_point_names(&doc, &seed.state(), &shell_kind, comp_b).unwrap();
+    assert_eq!(shell_names.len(), 1);
+    assert!(!shell_names[0].is_empty());
+    let shell_b = doc.add_feature(shell_kind, Some("ShellB")).unwrap();
+    {
+        let f = doc.feature_mut(shell_b).unwrap();
+        f.component = comp_b;
+        f.face_names = shell_names;
+    }
+    let scale_b = doc
+        .add_feature(
+            FeatureKind::Scale {
+                bodies: vec!["BlockB".into()],
+                origin: Position(Vec3::ZERO),
+                about: Some(ScaleAbout::Centre),
+                factor: "1.1".into(),
+                factors: None,
+            },
+            Some("ScaleB"),
+        )
+        .unwrap();
+    doc.feature_mut(scale_b).unwrap().component = comp_b;
+    let mirror_b = doc
+        .add_feature(
+            FeatureKind::Mirror {
+                features: Vec::new(),
+                plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XZ".into() }), distance: "10 mm".into() },
+                bodies: vec!["BlockB".into()],
+                combine: false,
+                placements: Vec::new(),
+            },
+            Some("MirrorB"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(mirror_b).unwrap();
+        f.component = comp_b;
+        f.body_names = vec!["BlockB_Mirror".into()];
+    }
+
+    // Component C at x = 100: plate -> Sketch -> Extrude cut -> Pattern of Extrude -> OffsetFace
+    // (with face_names) -> Fillet.
+    let comp_c = doc.add_component(Some("PartC"), 0).unwrap();
+    let plate_c = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(100.0, 0.0, 0.0)),
+                length: "40".into(),
+                width: "20".into(),
+                height: "8".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("PlateC"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(plate_c).unwrap();
+        f.component = comp_c;
+        f.body_names = vec!["PlateC".into()];
+    }
+    let mut sk = Sketch::new();
+    let p = [Vec2::new(106.0, 7.0), Vec2::new(112.0, 7.0), Vec2::new(112.0, 13.0), Vec2::new(106.0, 13.0)].map(|q| sk.add_point(q, None).unwrap());
+    for k in 0..4 {
+        sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+    }
+    let sketch_c = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk }, Some("SketchC")).unwrap();
+    doc.feature_mut(sketch_c).unwrap().component = comp_c;
+    let cut_c = doc
+        .add_feature(
+            FeatureKind::Extrude {
+                thin: None,
+                sketch: SketchId(sketch_c),
+                profiles: ProfileSel::All,
+                extent: serde_json::from_value(serde_json::json!({"distance": "10"})).unwrap(),
+                operation: Operation::Cut,
+                targets: vec!["PlateC".into()],
+            },
+            Some("CutC"),
+        )
+        .unwrap();
+    doc.feature_mut(cut_c).unwrap().component = comp_c;
+    let pat_c = doc
+        .add_feature(
+            FeatureKind::Pattern {
+                features: vec![FeatureId(cut_c)],
+                pattern: PatternKind::Rectangular {
+                    dir1: Dir(Vec3::X),
+                    count1: "2".into(),
+                    spacing1: "16".into(),
+                    dir2: None,
+                    count2: None,
+                    spacing2: None,
+                    alignment: solidcraft_sketch::PatternAlignment::Right,
+                    alignment2: Default::default(),
+                    reversed: false,
+                    reversed2: false,
+                    distance1: Default::default(),
+                    distance2: Default::default(),
+                    extent1: None,
+                    extent2: None,
+                    copy_at_end1: false,
+                    copy_at_end2: false,
+                    spacing_list1: Vec::new(),
+                    spacing_list2: Vec::new(),
+                },
+                bodies: Vec::new(),
+                placements: Vec::new(),
+                components: Vec::new(),
+                occurrences: Vec::new(),
+                join: false,
+            },
+            Some("PatternC"),
+        )
+        .unwrap();
+    doc.feature_mut(pat_c).unwrap().component = comp_c;
+    let offset_kind =
+        FeatureKind::OffsetFace { faces: vec![FacePick(Vec3::new(140.0, 10.0, 4.0))], distance: "2".into(), body: Some("PlateC".into()) };
+    seed.evaluate(&doc);
+    let offset_names = face_point_names(&doc, &seed.state(), &offset_kind, comp_c).unwrap();
+    assert_eq!(offset_names.len(), 1);
+    assert!(!offset_names[0].is_empty());
+    let offset_c = doc.add_feature(offset_kind, Some("OffsetC")).unwrap();
+    {
+        let f = doc.feature_mut(offset_c).unwrap();
+        f.component = comp_c;
+        f.face_names = offset_names;
+    }
+    let fillet_c = doc
+        .add_feature(
+            FeatureKind::Fillet {
+                edges: vec![Position(Vec3::new(100.0, 10.0, 8.0))],
+                radius: "1".into(),
+                body: Some("PlateC".into()),
+                style: Default::default(),
+                fit: Default::default(),
+                corner: Default::default(),
+                setbacks: Vec::new(),
+                turn: Default::default(),
+                tangent_chain: false,
+                edge_radii: Vec::new(),
+            },
+            Some("FilletC"),
+        )
+        .unwrap();
+    doc.feature_mut(fillet_c).unwrap().component = comp_c;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+
+    let reopened = Model::adopt(&doc, &model.saved(&doc).unwrap()).unwrap();
+
+    // 1. Unrelated edit to PartA: only BlockA recomputes; zero blends or downstream work.
+    doc.set_param("A_h", "16 mm", None, None).unwrap();
+    let expected = full_eval_snapshot(&cold_model(&doc));
+    for (what, mut candidate) in [("in-session", model.clone()), ("opened", reopened)] {
+        let work = counted(|| candidate.evaluate(&doc));
+        assert!(candidate.results.iter().all(|r| r.error.is_none()), "{what}");
+        assert_eq!(work.blends, 0, "{what}: unrelated edit must skip FilletC: {work:?}");
+        assert_eq!(candidate.last_recomputed, 1, "{what}: only BlockA should recompute");
+        assert_eq!(full_eval_snapshot(&candidate), expected, "{what}");
+    }
+    model.evaluate(&doc);
+
+    // 2. Deleting PartA: zero features recomputed across all of PartB and PartC.
+    let mut without_a = doc.clone();
+    without_a.remove_component_tree(comp_a).unwrap();
+    let work = counted(|| model.evaluate(&without_a));
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(work.blends, 0, "{work:?}");
+    assert_eq!(model.last_recomputed, 0, "deleting PartA must recompute zero features");
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&without_a)));
+
+    // 3. Soundness: editing PartB's width recomputes BlockB + ShellB + ScaleB + MirrorB (4
+    //    features) while leaving PartC's entire chain cached!
+    model.evaluate(&doc);
+    doc.set_param("B_w", "24 mm", None, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(work.blends, 0, "editing PartB must keep PartC's Fillet cached: {work:?}");
+    assert_eq!(model.last_recomputed, 4, "BlockB, ShellB, ScaleB, MirrorB should recompute");
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&doc)));
+}
+
+/// Editing a sketch line referenced via `AxisRef::SketchLine` from another sketch (either in the
+/// same component or in another component) — or moving that other component — must invalidate both
+/// the dependent `Revolve` and a `Pattern` of that `Revolve`, while unrelated earlier edits still
+/// keep same-component `Revolve` and `Pattern` features cached.
+#[test]
+fn editing_external_sketch_line_axis_invalidates_revolve_and_pattern_cache() {
+    let rect_sketch = |x0: f64, y0: f64, w: f64, h: f64| {
+        let mut sk = Sketch::new();
+        let p = [Vec2::new(x0, y0), Vec2::new(x0 + w, y0), Vec2::new(x0 + w, y0 + h), Vec2::new(x0, y0 + h)].map(|q| sk.add_point(q, None).unwrap());
+        for k in 0..4 {
+            sk.add_line_pts(p[k], p[(k + 1) % 4], None).unwrap();
+        }
+        sk
+    };
+    let axis_sketch = |x: f64| {
+        let mut sk = Sketch::new();
+        let a = sk.add_point(Vec2::new(x, 0.0), None).unwrap();
+        let b = sk.add_point(Vec2::new(x, 10.0), None).unwrap();
+        let line = sk.add_line_pts(a, b, None).unwrap();
+        let id = sk.curves[line].id.clone();
+        (sk, id)
+    };
+    let rect_pattern = |src: u64| FeatureKind::Pattern {
+        features: vec![FeatureId(src)],
+        pattern: PatternKind::Rectangular {
+            dir1: Dir(Vec3::Y),
+            count1: "2".into(),
+            spacing1: "12".into(),
+            dir2: None,
+            count2: None,
+            spacing2: None,
+            alignment: solidcraft_sketch::PatternAlignment::Right,
+            alignment2: Default::default(),
+            reversed: false,
+            reversed2: false,
+            distance1: Default::default(),
+            distance2: Default::default(),
+            extent1: None,
+            extent2: None,
+            copy_at_end1: false,
+            copy_at_end2: false,
+            spacing_list1: Vec::new(),
+            spacing_list2: Vec::new(),
+        },
+        bodies: Vec::new(),
+        placements: Vec::new(),
+        components: Vec::new(),
+        occurrences: Vec::new(),
+        join: false,
+    };
+
+    // 1. Same-component external axis sketch: unrelated edit stays cached; editing axis sketch
+    //    invalidates both Revolve and Pattern of Revolve.
+    let mut doc = Document::new("revolve same-component external axis");
+    doc.set_param("A_h", "10 mm", None, None).unwrap();
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let box_a = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "10".into(),
+                height: "A_h".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("BlockA"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(box_a).unwrap();
+        f.component = comp_a;
+        f.body_names = vec!["BlockA".into()];
+    }
+
+    let comp_b = doc.add_component(Some("PartB"), 0).unwrap();
+    let (sk_axis_b, axis_b_curve) = axis_sketch(50.0);
+    let axis_b = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk_axis_b }, Some("AxisB")).unwrap();
+    doc.feature_mut(axis_b).unwrap().component = comp_b;
+    let prof_b = doc
+        .add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: rect_sketch(60.0, 0.0, 4.0, 6.0) }, Some("ProfB"))
+        .unwrap();
+    doc.feature_mut(prof_b).unwrap().component = comp_b;
+    let rev_b = doc
+        .add_feature(
+            FeatureKind::Revolve {
+                sketch: SketchId(prof_b),
+                profiles: ProfileSel::All,
+                axis: AxisRef::SketchLine { curve: axis_b_curve, sketch: Some(axis_b) },
+                angle: "180 deg".into(),
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+                angle2: None,
+                symmetric: false,
+                convention: Default::default(),
+                to: None,
+            },
+            Some("RevB"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(rev_b).unwrap();
+        f.component = comp_b;
+        f.body_names = vec!["RevB".into()];
+    }
+    let pat_b = doc.add_feature(rect_pattern(rev_b), Some("PatB")).unwrap();
+    {
+        let f = doc.feature_mut(pat_b).unwrap();
+        f.component = comp_b;
+        f.body_names = vec!["RevB_Copy".into()];
+    }
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert_eq!(full_eval_snapshot(&model), full_eval_snapshot(&cold_model(&doc)));
+
+    // Unrelated edit to PartA keeps RevolveB and PatB cached.
+    doc.set_param("A_h", "14 mm", None, None).unwrap();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(model.last_recomputed, 1, "only BlockA should recompute on unrelated edit");
+    let before_axis_edit = full_eval_snapshot(&model);
+    assert_eq!(before_axis_edit, full_eval_snapshot(&cold_model(&doc)));
+
+    // Moving the axis line in AxisB must invalidate both RevB and PatB.
+    if let FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(axis_b).unwrap().kind {
+        for pt in &mut sketch.points {
+            pt.pos.x -= 3.0;
+        }
+    }
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert!(model.last_recomputed >= 3, "AxisB, RevB, and PatB must recompute: {}", model.last_recomputed);
+    let after_axis_edit = full_eval_snapshot(&model);
+    assert_ne!(after_axis_edit, before_axis_edit, "moving external axis line must change revolved geometry");
+    assert_eq!(after_axis_edit, full_eval_snapshot(&cold_model(&doc)));
+
+    // 2. Cross-component external axis sketch: both editing the axis sketch and moving its owning
+    //    component must invalidate Revolve and Pattern of Revolve.
+    let mut doc = Document::new("revolve cross-component external axis");
+    let comp_axis = doc.add_component(Some("PartAxis"), 0).unwrap();
+    let (sk_axis_c, axis_c_curve) = axis_sketch(110.0);
+    let axis_c = doc.add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: sk_axis_c }, Some("AxisC")).unwrap();
+    doc.feature_mut(axis_c).unwrap().component = comp_axis;
+
+    let comp_c = doc.add_component(Some("PartC"), 0).unwrap();
+    let prof_c = doc
+        .add_feature(FeatureKind::Sketch { plane: PlaneRef::Origin { name: "XY".into() }, sketch: rect_sketch(120.0, 0.0, 4.0, 6.0) }, Some("ProfC"))
+        .unwrap();
+    doc.feature_mut(prof_c).unwrap().component = comp_c;
+    let rev_c = doc
+        .add_feature(
+            FeatureKind::Revolve {
+                sketch: SketchId(prof_c),
+                profiles: ProfileSel::All,
+                axis: AxisRef::SketchLine { curve: axis_c_curve, sketch: Some(axis_c) },
+                angle: "180 deg".into(),
+                operation: Operation::NewBody,
+                targets: Vec::new(),
+                angle2: None,
+                symmetric: false,
+                convention: Default::default(),
+                to: None,
+            },
+            Some("RevC"),
+        )
+        .unwrap();
+    {
+        let f = doc.feature_mut(rev_c).unwrap();
+        f.component = comp_c;
+        f.body_names = vec!["RevC".into()];
+    }
+    let pat_c = doc.add_feature(rect_pattern(rev_c), Some("PatC")).unwrap();
+    {
+        let f = doc.feature_mut(pat_c).unwrap();
+        f.component = comp_c;
+        f.body_names = vec!["RevC_Copy".into()];
+    }
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    let initial_c = full_eval_snapshot(&model);
+    assert_eq!(initial_c, full_eval_snapshot(&cold_model(&doc)));
+
+    // Editing the axis line in another component invalidates both RevC and PatC.
+    if let FeatureKind::Sketch { sketch, .. } = &mut doc.feature_mut(axis_c).unwrap().kind {
+        for pt in &mut sketch.points {
+            pt.pos.x -= 2.0;
+        }
+    }
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert!(model.last_recomputed >= 3, "AxisC, RevC, and PatC must recompute: {}", model.last_recomputed);
+    let edited_c = full_eval_snapshot(&model);
+    assert_ne!(edited_c, initial_c);
+    assert_eq!(edited_c, full_eval_snapshot(&cold_model(&doc)));
+
+    // Moving the component that owns AxisC also invalidates both RevC and PatC.
+    place(&mut doc, comp_axis, rigid(Vec3::new(-3.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    assert!(model.last_recomputed >= 2, "RevC and PatC must recompute when PartAxis moves: {}", model.last_recomputed);
+    let moved_c = full_eval_snapshot(&model);
+    assert_ne!(moved_c, edited_c);
+    assert_eq!(moved_c, full_eval_snapshot(&cold_model(&doc)));
+}
+
+/// A hollow rectangular tube (outer `w` x `h`, wall thickness `wall`, length `len`, centred on X
+/// and Y, standing on Z = 0..`h`), open at both X ends.
+fn hollow_tube(doc: &mut Document, len: f64, w: f64, h: f64, wall: f64) {
+    let outer = FeatureKind::Box {
+        corner: point_expr(Vec3::new(-len / 2.0, -w / 2.0, 0.0)),
+        length: len.to_string().into(),
+        width: w.to_string().into(),
+        height: h.to_string().into(),
+        operation: Operation::NewBody,
+        centred: false,
+    };
+    doc.add_feature(outer, Some("Tube")).unwrap();
+    let cavity = FeatureKind::Box {
+        corner: point_expr(Vec3::new(-len / 2.0 - 1.0, -w / 2.0 + wall, wall)),
+        length: (len + 2.0).to_string().into(),
+        width: (w - 2.0 * wall).to_string().into(),
+        height: (h - 2.0 * wall).to_string().into(),
+        operation: Operation::Cut,
+        centred: false,
+    };
+    doc.add_feature(cavity, Some("Cavity")).unwrap();
+}
+
+/// A multi-point hole with 2..7 apart sketch points cuts all of them in one boolean without
+/// tessellating the body's display mesh, and leaves the same volume, faces and names as cutting
+/// them one by one.
+#[test]
+fn a_multi_point_hole_with_fewer_than_eight_points_cuts_at_once() {
+    let run = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("six holes");
+        block(&mut doc, "Plate", Vec3::new(0.0, 0.0, 0.0), [100.0, 40.0, 4.0]);
+        let mut sk = Sketch::new();
+        let ids: Vec<String> = (0..6)
+            .map(|i| {
+                let idx = sk.add_point(Vec2::new(10.0 + 15.0 * i as f64, 20.0), None).unwrap();
+                sk.points[idx].id.clone()
+            })
+            .collect();
+        let top = PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: "4 mm".into() };
+        let sketch = doc.add_feature(FeatureKind::Sketch { plane: top, sketch: sk }, Some("Points")).unwrap();
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        let hole_kind: FeatureKind = serde_json::from_value(serde_json::json!({
+            "type": "hole", "position": [0, 0, 0], "direction": [0, 0, -1], "diameter": "5",
+            "points": {"sketch": sketch, "ids": ids},
+        }))
+        .unwrap();
+        doc.add_feature(hole_kind, Some("Holes")).unwrap();
+        let work = counted(|| model.evaluate(&doc));
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        let st = model.state();
+        let body = &st.bodies[0];
+        let meshed = body.mesh.get().is_some();
+        let mut names = crate::naming::face_names(body).to_vec();
+        names.sort();
+        (disc_volume(&model), body.body.face_count(), names, work, meshed)
+    };
+    let (v_batch, f_batch, n_batch, w_batch, meshed) = run(super::MAX_JOINED_TOOLS);
+    let (v_seq, f_seq, n_seq, _, _) = run(1);
+    assert_eq!((w_batch.cut, w_batch.cut_tools), (1, 1), "{w_batch:?}");
+    assert!(!meshed, "multi-point hole on a planar face should not tessellate the display mesh");
+    let expected = 100.0 * 40.0 * 4.0 - 6.0 * std::f64::consts::PI * 2.5 * 2.5 * 4.0;
+    assert!((v_batch - expected).abs() < 1e-4 * expected, "{v_batch} vs {expected}");
+    assert!((v_batch - v_seq).abs() < 1e-6 * expected, "{v_batch} vs {v_seq}");
+    assert_eq!(f_batch, f_seq);
+    assert_eq!(n_batch, n_seq);
+}
+
+/// Mirroring many disjoint hole features onto the other half of a hollow tube batches all their
+/// mirrored cuts into one `apply_traced` call (one boolean for <= 32 tools) with zero display mesh
+/// tessellation and identical geometry and face names to cutting each hole one by one.
+#[test]
+fn mirroring_many_hole_features_batches_disjoint_cuts_and_keeps_names() {
+    let run = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("mirrored tube holes");
+        hollow_tube(&mut doc, 300.0, 80.0, 100.0, 3.0);
+        let mut holes = Vec::new();
+        for i in 0..12 {
+            let x = 15.0 + 10.0 * i as f64;
+            let y = if i % 2 == 0 { -20.0 } else { 20.0 };
+            holes.push(doc.add_feature(hole(Vec3::new(x, y, 100.0), Vec3::new(0.0, 0.0, -1.0), 5.0), Some(&format!("H{i}"))).unwrap());
+        }
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        assert!(model.state().bodies[0].mesh.get().is_none(), "single holes on planar faces should not tessellate the display mesh");
+        let mirror = mirror_of(&mut doc, &holes, PlaneRef::Origin { name: "YZ".into() });
+        let work = counted(|| model.evaluate(&doc));
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        let st = model.state();
+        let body = &st.bodies[0];
+        let meshed = body.mesh.get().is_some();
+        let mut names = crate::naming::face_names(body).to_vec();
+        names.sort();
+        (mirror, disc_volume(&model), body.body.face_count(), names, work, meshed)
+    };
+    let (_, v_batch, f_batch, n_batch, w_batch, meshed) = run(super::MAX_JOINED_TOOLS);
+    let (_, v_seq, f_seq, n_seq, _, _) = run(1);
+    assert_eq!((w_batch.cut, w_batch.cut_tools, w_batch.miss_intersects), (1, 1, 0), "{w_batch:?}");
+    assert!(!meshed, "mirroring planar holes should not tessellate the display mesh");
+    let tube_v = 300.0 * (80.0 * 100.0 - 74.0 * 94.0);
+    let holes_v = 24.0 * std::f64::consts::PI * 2.5 * 2.5 * 6.0;
+    let expected = tube_v - holes_v;
+    assert!((v_batch - expected).abs() < 1e-4 * expected, "{v_batch} vs {expected}");
+    assert!((v_batch - v_seq).abs() < 1e-6 * expected, "{v_batch} vs {v_seq}");
+    assert_eq!(f_batch, f_seq);
+    assert_eq!(n_batch, n_seq);
+}
+
+/// Mirroring overlapping hole features flushes the pending cut batch before any overlapping hole
+/// so the geometry and face names stay identical to sequential execution.
+#[test]
+fn mirroring_overlapping_holes_flushes_and_matches_sequential_cut() {
+    let run = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("overlapping mirror");
+        block(&mut doc, "Plate", Vec3::new(-60.0, -20.0, 0.0), [120.0, 40.0, 6.0]);
+        let h1 = doc.add_feature(hole(Vec3::new(20.0, 0.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 8.0), Some("H1")).unwrap();
+        // Overlaps H1 (centres 4 mm apart, radii 4 mm each).
+        let h2 = doc.add_feature(hole(Vec3::new(24.0, 0.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 8.0), Some("H2")).unwrap();
+        // Disjoint from both H1 and H2.
+        let h3 = doc.add_feature(hole(Vec3::new(45.0, 0.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 6.0), Some("H3")).unwrap();
+        mirror_of(&mut doc, &[h1, h2, h3], PlaneRef::Origin { name: "YZ".into() });
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none() && r.warning.is_none()), "{:?}", model.results);
+        let body = &model.state().bodies[0];
+        let mut names = crate::naming::face_names(body).to_vec();
+        names.sort();
+        (disc_volume(&model), body.body.face_count(), names)
+    };
+    let (v_batch, f_batch, n_batch) = run(super::MAX_JOINED_TOOLS);
+    let (v_seq, f_seq, n_seq) = run(1);
+    assert!((v_batch - v_seq).abs() < 1e-6 * v_seq.max(1.0), "{v_batch} vs {v_seq}");
+    assert_eq!(f_batch, f_seq);
+    assert_eq!(n_batch, n_seq);
+}
+
+/// Mirroring disjoint cuts where one splits the target body falls back to sequential replay so
+/// split body names, piece order, volumes and face names match sequential execution identically.
+#[test]
+fn mirroring_cuts_that_split_a_body_matches_sequential_pieces_and_names() {
+    let run = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("split mirror");
+        block(&mut doc, "Bar", Vec3::new(-60.0, 0.0, 0.0), [120.0, 10.0, 10.0]);
+        let slice = FeatureKind::Box {
+            corner: point_expr(Vec3::new(18.0, -1.0, -1.0)),
+            length: "4".into(),
+            width: "12".into(),
+            height: "12".into(),
+            operation: Operation::Cut,
+            centred: false,
+        };
+        let c1 = doc.add_feature(slice, Some("Slice")).unwrap();
+        let c2 = doc.add_feature(hole(Vec3::new(40.0, 5.0, 10.0), Vec3::new(0.0, 0.0, -1.0), 4.0), Some("Hole")).unwrap();
+        mirror_of(&mut doc, &[c1, c2], PlaneRef::Origin { name: "YZ".into() });
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+        let bodies: Vec<(String, f64, usize, Vec<String>)> = model
+            .state()
+            .bodies
+            .iter()
+            .map(|b| {
+                let mut names = crate::naming::face_names(b).to_vec();
+                names.sort();
+                (b.name.clone(), kernel::measure(&b.body).unwrap().volume, b.body.face_count(), names)
+            })
+            .collect();
+        bodies
+    };
+    let batch = run(super::MAX_JOINED_TOOLS);
+    let seq = run(1);
+    assert_eq!(batch.len(), 3, "{batch:?}");
+    assert_eq!(batch.len(), seq.len());
+    for (a, b) in batch.iter().zip(&seq) {
+        assert_eq!(a.0, b.0);
+        assert!((a.1 - b.1).abs() < 1e-6 * b.1.max(1.0), "{} vs {}", a.1, b.1);
+        assert_eq!(a.2, b.2);
+        assert_eq!(a.3, b.3);
+    }
+}
+
+/// Mirroring disjoint cuts where the first consumes the only target body falls back to sequential
+/// replay so the second cut reports the same "no body to cut or intersect" refusal as sequential.
+#[test]
+fn mirroring_cuts_that_consume_the_target_matches_sequential_refusal() {
+    let run = |limit: usize| {
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(limit));
+        let mut doc = Document::new("consume mirror");
+        block(&mut doc, "Stub", Vec3::new(-25.0, 0.0, 0.0), [20.0, 10.0, 10.0]);
+        let cover = FeatureKind::Box {
+            corner: point_expr(Vec3::new(4.0, -1.0, -1.0)),
+            length: "22".into(),
+            width: "12".into(),
+            height: "12".into(),
+            operation: Operation::Cut,
+            centred: false,
+        };
+        let c1 = doc.add_feature(cover, Some("Cover")).unwrap();
+        let c2 = doc.add_feature(hole(Vec3::new(40.0, 5.0, 10.0), Vec3::new(0.0, 0.0, -1.0), 4.0), Some("Hole")).unwrap();
+        let mirror = mirror_of(&mut doc, &[c1, c2], PlaneRef::Origin { name: "YZ".into() });
+        let mut model = Model::new();
+        model.evaluate(&doc);
+        super::JOINED_TOOLS_LIMIT.with(|l| l.set(super::MAX_JOINED_TOOLS));
+        model.result(mirror).and_then(|r| r.error.clone())
+    };
+    let err_batch = run(super::MAX_JOINED_TOOLS);
+    let err_seq = run(1);
+    assert!(err_batch.as_deref().is_some_and(|e| e.contains("no body to cut")), "{err_batch:?}");
+    assert_eq!(err_batch, err_seq);
+}
+
+/// Multi-body `join` pre-filters targets by inflated exact bounds before calling `Body::meets`,
+/// so distant untouched bodies never run fine contact tests or get meshed.
+#[test]
+fn join_with_distant_bodies_skips_contact_tests_and_meshing_for_distant_targets() {
+    let mut doc = Document::new("distant join");
+    for i in 0..5 {
+        block(&mut doc, &format!("B{i}"), Vec3::new(50.0 * i as f64, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    assert!(model.state().bodies.iter().all(|b| b.cached_mesh().is_none()));
+
+    // A single boss standing on B2 must only contact-test B2, leaving B0/B1/B3/B4 unmeshed.
+    let boss = FeatureKind::Box {
+        corner: point_expr(Vec3::new(102.0, 2.0, 10.0)),
+        length: "4".into(),
+        width: "4".into(),
+        height: "4".into(),
+        operation: Operation::Join,
+        centred: false,
+    };
+    let f1 = doc.add_feature(boss, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(f1).is_some_and(|r| r.error.is_none()), "{:?}", model.result(f1));
+    assert_eq!(work.contact_tests, 1, "only the touching target B2 should run Body::meets: {work:?}");
+    assert_eq!(work.join_unions, 1, "{work:?}");
+    for name in ["B0", "B1", "B3", "B4"] {
+        assert!(model.state().body(name).unwrap().cached_mesh().is_none(), "distant target {name} must not be meshed");
+    }
+    assert!((volume(&model, "B2") - 1064.0).abs() < 1e-6, "{}", volume(&model, "B2"));
+    for name in ["B0", "B1", "B3", "B4"] {
+        assert!((volume(&model, name) - 1000.0).abs() < 1e-6, "{name}: {}", volume(&model, name));
+    }
+
+    // Two bosses standing on B1 and B3: one contact test per tool, distant targets stay unmeshed.
+    let f2 = join_rects(&mut doc, &[(52.0, 2.0, 4.0, 4.0), (152.0, 2.0, 4.0, 4.0)], 14.0);
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(f2).is_some_and(|r| r.error.is_none()), "{:?}", model.result(f2));
+    assert_eq!(work.contact_tests, 2, "each tool should contact-test only its own target: {work:?}");
+    assert_eq!(work.join_unions, 2, "{work:?}");
+    for name in ["B0", "B2", "B4"] {
+        assert!(model.state().body(name).unwrap().cached_mesh().is_none(), "untouched target {name} must stay unmeshed");
+    }
+    assert!((volume(&model, "B1") - 1064.0).abs() < 1e-6, "{}", volume(&model, "B1"));
+    assert!((volume(&model, "B3") - 1064.0).abs() < 1e-6, "{}", volume(&model, "B3"));
+}
+
+/// `join_pattern_copies` uses batched union (`join_union_batch`) for overlapping copies and
+/// `union_all_apart` for disjoint copies, matching the exact union volume.
+#[test]
+fn join_pattern_copies_matches_exact_union_volume() {
+    // Five overlapping 10x10x10 cubes spaced 6 mm along X span 0..34 -> exact volume 3400 mm^3.
+    let mut doc = Document::new("pattern join overlap");
+    block(&mut doc, "Bar", Vec3::ZERO, [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let pat_kind: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern",
+        "features": [],
+        "bodies": ["Bar"],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "5", "spacing1": "6"},
+        "join": true,
+    }))
+    .unwrap();
+    let pat = doc.add_feature(pat_kind, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(pat).is_some_and(|r| r.error.is_none()), "{:?}", model.result(pat));
+    assert_eq!(work.join_unions, 1, "overlapping pattern copies must batch into one union: {work:?}");
+    assert_eq!(model.state().bodies.len(), 1);
+    assert_eq!(model.state().bodies[0].name, "Bar");
+    assert!((volume(&model, "Bar") - 3400.0).abs() < 1e-4, "{}", volume(&model, "Bar"));
+
+    // Four disjoint 10x10x10 cubes spaced 25 mm along X fast-path via `union_all_apart` and stay
+    // four separate bodies totaling 4000 mm^3.
+    let mut doc = Document::new("pattern join apart");
+    block(&mut doc, "Peg", Vec3::ZERO, [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let pat_kind: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern",
+        "features": [],
+        "bodies": ["Peg"],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "4", "spacing1": "25"},
+        "join": true,
+    }))
+    .unwrap();
+    let pat = doc.add_feature(pat_kind, None).unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.result(pat).is_some_and(|r| r.error.is_none()), "{:?}", model.result(pat));
+    assert_eq!(work.joined_apart, 1, "disjoint pattern copies should fast-path via union_all_apart: {work:?}");
+    assert_eq!(work.join_unions, 0, "{work:?}");
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 4);
+    assert_eq!(st.bodies[0].name, "Peg");
+    let total: f64 = st.bodies.iter().map(|b| kernel::measure(&b.body).unwrap().volume).sum();
+    assert!((total - 4000.0).abs() < 1e-4, "{total}");
+}
+
+/// Parallel multi-body `Pattern`, `Mirror`, `Fillet`, `Scale`, `Move` (with composed `copy_frames`),
+/// and `Cut` produce deterministic body names, ordering, and exact geometry across repeated runs.
+#[test]
+fn parallel_pattern_mirror_fillet_scale_move_and_cut_are_deterministic() {
+    let eval_snapshot = |doc: &Document| -> Vec<(String, usize, f64, solidcraft_geom::Aabb3)> {
+        let mut model = Model::new();
+        model.evaluate(doc);
+        assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+        model
+            .state()
+            .bodies
+            .iter()
+            .map(|b| (b.name.clone(), b.body.face_count(), kernel::measure(&b.body).unwrap().volume, b.body.exact_bounds().unwrap()))
+            .collect()
+    };
+
+    // 1. Multi-body Pattern (2 sources x 4 instances = 8 bodies).
+    let mut doc = Document::new("par pattern");
+    block(&mut doc, "A", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "B", Vec3::new(0.0, 20.0, 0.0), [10.0, 10.0, 10.0]);
+    let pat: FeatureKind = serde_json::from_value(serde_json::json!({
+        "type": "pattern",
+        "features": [],
+        "bodies": ["A", "B"],
+        "pattern": {"type": "rectangular", "dir1": [1, 0, 0], "count1": "4", "spacing1": "20"},
+    }))
+    .unwrap();
+    doc.add_feature(pat, None).unwrap();
+    let run1 = eval_snapshot(&doc);
+    let run2 = eval_snapshot(&doc);
+    assert_eq!(run1.len(), 8);
+    assert_eq!(run1, run2, "parallel body pattern must be deterministic");
+    assert!(run1.iter().all(|(_, f, v, _)| *f == 6 && (*v - 1000.0).abs() < 1e-6));
+
+    // 2. Multi-body Mirror across YZ (3 bodies -> 6 bodies).
+    let mut doc = Document::new("par mirror");
+    for i in 0..3 {
+        block(&mut doc, &format!("M{i}"), Vec3::new(10.0 + 20.0 * i as f64, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    }
+    doc.add_feature(
+        FeatureKind::Mirror {
+            features: Vec::new(),
+            plane: PlaneRef::Origin { name: "YZ".into() },
+            bodies: vec![BodyName("M0".into()), BodyName("M1".into()), BodyName("M2".into())],
+            combine: false,
+            placements: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    let run1 = eval_snapshot(&doc);
+    let run2 = eval_snapshot(&doc);
+    assert_eq!(run1.len(), 6);
+    assert_eq!(run1, run2, "parallel mirror must be deterministic");
+    assert!((run1[3].3.min.x - (-20.0)).abs() < 1e-6 && (run1[3].3.max.x - (-10.0)).abs() < 1e-6);
+    assert!((run1[4].3.min.x - (-40.0)).abs() < 1e-6 && (run1[4].3.max.x - (-30.0)).abs() < 1e-6);
+    assert!((run1[5].3.min.x - (-60.0)).abs() < 1e-6 && (run1[5].3.max.x - (-50.0)).abs() < 1e-6);
+
+    // 3. Multi-body Fillet across 3 bodies in one feature.
+    let mut doc = Document::new("par fillet");
+    for i in 0..3 {
+        block(&mut doc, &format!("F{i}"), Vec3::new(30.0 * i as f64, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    }
+    doc.add_feature(
+        FeatureKind::Fillet {
+            edges: vec![Position(Vec3::new(5.0, 0.0, 10.0)), Position(Vec3::new(35.0, 0.0, 10.0)), Position(Vec3::new(65.0, 0.0, 10.0))],
+            radius: "1".into(),
+            body: None,
+            style: Default::default(),
+            fit: Default::default(),
+            corner: Default::default(),
+            setbacks: Vec::new(),
+            turn: Default::default(),
+            tangent_chain: false,
+            edge_radii: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    let run1 = eval_snapshot(&doc);
+    let run2 = eval_snapshot(&doc);
+    assert_eq!(run1, run2, "parallel fillet must be deterministic");
+    let names: Vec<&str> = run1.iter().map(|(n, ..)| n.as_str()).collect();
+    assert_eq!(names, vec!["F0", "F1", "F2"]);
+    let expected_fillet_v = 1000.0 - 10.0 * (1.0 - std::f64::consts::FRAC_PI_4);
+    for (_, faces, vol, _) in &run1 {
+        assert_eq!(*faces, 7);
+        assert!((*vol - expected_fillet_v).abs() < 1e-3, "{vol} vs {expected_fillet_v}");
+    }
+
+    // 4. Multi-body Cut (3 surviving targets cut in parallel, 1 distant target pruned).
+    let mut doc = Document::new("par cut");
+    for i in 0..3 {
+        block(&mut doc, &format!("C{i}"), Vec3::new(20.0 * i as f64, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    }
+    block(&mut doc, "Far", Vec3::new(200.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    doc.add_feature(
+        FeatureKind::Box {
+            corner: point_expr(Vec3::new(-5.0, 3.0, 3.0)),
+            length: "60".into(),
+            width: "4".into(),
+            height: "4".into(),
+            operation: Operation::Cut,
+            centred: false,
+        },
+        None,
+    )
+    .unwrap();
+    let work = counted(|| model.evaluate(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    assert_eq!(work.cut, 3, "only the 3 intersecting bodies should be cut: {work:?}");
+    let run1 = eval_snapshot(&doc);
+    let run2 = eval_snapshot(&doc);
+    assert_eq!(run1, run2, "parallel cut must be deterministic");
+    for (i, item) in run1.iter().enumerate().take(3) {
+        assert!((item.2 - 840.0).abs() < 1e-4, "C{i}: {}", item.2);
+    }
+    assert!((run1[3].2 - 1000.0).abs() < 1e-6, "Far: {}", run1[3].2);
+
+    // 5. Multi-body Scale and Move (copy + non-identity copy_frames composed into one transform).
+    let mut doc = Document::new("par scale move");
+    block(&mut doc, "S0", Vec3::new(0.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    block(&mut doc, "S1", Vec3::new(30.0, 0.0, 0.0), [10.0, 10.0, 10.0]);
+    doc.add_feature(
+        FeatureKind::Scale {
+            bodies: vec![BodyName("S0".into()), BodyName("S1".into())],
+            origin: Position(Vec3::ZERO),
+            about: None,
+            factor: "2".into(),
+            factors: None,
+        },
+        None,
+    )
+    .unwrap();
+    let frame = rigid(Vec3::new(0.0, 0.0, 20.0), Vec3::ZERO, Vec3::Z, 0.0);
+    doc.add_feature(
+        FeatureKind::Move {
+            bodies: vec![BodyName("S0".into()), BodyName("S1".into())],
+            translate: ["0".into(), "50".into(), "0".into()],
+            rotate_axis: None,
+            rotate_about: None,
+            origin: None,
+            angle: None,
+            copy: true,
+            copy_frames: vec![frame, frame],
+            carry: Vec::new(),
+            leave: Vec::new(),
+        },
+        None,
+    )
+    .unwrap();
+    let run1 = eval_snapshot(&doc);
+    let run2 = eval_snapshot(&doc);
+    assert_eq!(run1.len(), 4);
+    assert_eq!(run1, run2, "parallel scale + move copy must be deterministic");
+    for (_, _, vol, _) in &run1 {
+        assert!((*vol - 8000.0).abs() < 1e-4, "{vol}");
+    }
+    assert!(run1[2].3.min.dist(Vec3::new(0.0, 50.0, 20.0)) < 1e-6, "{:?}", run1[2].3);
+    assert!(run1[2].3.max.dist(Vec3::new(20.0, 70.0, 40.0)) < 1e-6, "{:?}", run1[2].3);
+    assert!(run1[3].3.min.dist(Vec3::new(60.0, 50.0, 20.0)) < 1e-6, "{:?}", run1[3].3);
+    assert!(run1[3].3.max.dist(Vec3::new(80.0, 70.0, 40.0)) < 1e-6, "{:?}", run1[3].3);
+}
+
+/// `world_state_moved_reusing` and `body_frames_with_source` with nested multi-occurrence
+/// subassemblies, sketches, constructions, and cosmetic threads produce exact placements and
+/// identical outputs across cache reuse and occurrence moves.
+#[test]
+fn world_state_moved_reusing_and_body_frames_match_nested_assembly() {
+    let mut doc = Document::new("nested world");
+    let sub = doc.add_component(Some("Sub"), 0).unwrap();
+    let part = doc.add_component(Some("Part"), sub).unwrap();
+
+    // Place Sub at x = 10 and a second instance at x = 100.
+    let occ_sub1 = doc.occurrence_of(sub).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_sub1).unwrap().transform = rigid(Vec3::new(10.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    let occ_sub2 = doc.add_occurrence(sub, 0, rigid(Vec3::new(100.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+
+    // Place Part inside Sub at y = 10 and a second instance at y = 40.
+    let occ_part1 = doc.occurrence_of(part).unwrap().id;
+    doc.occurrences.iter_mut().find(|o| o.id == occ_part1).unwrap().transform = rigid(Vec3::new(0.0, 10.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0);
+    let _occ_part2 = doc.add_occurrence(part, sub, rigid(Vec3::new(0.0, 40.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0)).unwrap();
+
+    // Root body, sketch, and construction plane.
+    block(&mut doc, "RootBox", Vec3::ZERO, [5.0, 5.0, 5.0]);
+    let root_sk = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(5.0, 0.0)), Some("RootSk")).unwrap();
+    let offset_xy = |d: &str| FeatureKind::ConstructionPlane {
+        plane: PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "XY".into() }), distance: d.into() },
+    };
+    let root_cp = doc.add_feature(offset_xy("1"), Some("RootCP")).unwrap();
+
+    // Sub sketch and construction plane.
+    let sub_sk = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(6.0, 0.0)), Some("SubSk")).unwrap();
+    doc.feature_mut(sub_sk).unwrap().component = sub;
+    let sub_cp = doc.add_feature(offset_xy("3"), Some("SubCP")).unwrap();
+    doc.feature_mut(sub_cp).unwrap().component = sub;
+
+    // Part sketch, construction plane, cylinder, and cosmetic thread.
+    let part_sk = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(7.0, 0.0)), Some("PartSk")).unwrap();
+    doc.feature_mut(part_sk).unwrap().component = part;
+    let part_cp = doc.add_feature(offset_xy("5"), Some("PartCP")).unwrap();
+    doc.feature_mut(part_cp).unwrap().component = part;
+    let cyl = doc
+        .add_feature(
+            FeatureKind::Cylinder {
+                base: point_expr(Vec3::ZERO),
+                axis: crate::dir_expr(Vec3::Z),
+                radius: "3".into(),
+                height: "12".into(),
+                operation: Operation::NewBody,
+                references: Vec::new(),
+            },
+            Some("Pin"),
+        )
+        .unwrap();
+    doc.feature_mut(cyl).unwrap().component = part;
+    let tap = doc.add_feature(marking(Vec3::new(3.0, 0.0, 6.0)), Some("Tap")).unwrap();
+    doc.feature_mut(tap).unwrap().component = part;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results.iter().find(|r| r.error.is_some()));
+    let st = model.state();
+    assert_eq!(st.bodies.len(), 2);
+    assert_eq!(st.sketches.len(), 3);
+    assert_eq!(st.construct.len(), 3);
+    assert_eq!(st.threads.len(), 1);
+
+    let frames = doc.body_frames_with_source(&st);
+    let mut cache = PlacedBodies::default();
+    let empty_moves = BTreeMap::new();
+    let world = world_state_moved_reusing(&doc, &st, &empty_moves, &mut cache).unwrap();
+
+    // 1 root body + 2*2 nested Part placements = 5 world bodies.
+    assert_eq!(frames.len(), 5);
+    assert_eq!(world.bodies.len(), 5);
+    for ((wname, def, comp, _, mat), wb) in frames.iter().zip(&world.bodies) {
+        assert_eq!(wname, &wb.name);
+        assert_eq!(def, wb.definition_name());
+        assert_eq!(*comp, wb.component);
+        assert_eq!(*mat, wb.source_transform);
+    }
+
+    // Sketches and constructions belong only to each component's primary (first) placement.
+    assert_eq!(world.sketches.len(), 3);
+    assert_eq!(world.construct.len(), 3);
+    let find_sk = |feat: u64| world.sketches.iter().find(|s| s.feature == feat).unwrap();
+    assert!(find_sk(root_sk).plane.origin.dist(Vec3::ZERO) < 1e-9);
+    assert!(find_sk(sub_sk).plane.origin.dist(Vec3::new(10.0, 0.0, 0.0)) < 1e-9);
+    assert!(find_sk(part_sk).plane.origin.dist(Vec3::new(10.0, 10.0, 0.0)) < 1e-9);
+
+    let cp_origin = |feat: u64| match &world.construct.iter().find(|c| c.feature == feat).unwrap().geom {
+        crate::construct::ConstructGeom::Plane(p) => p.origin,
+        other => panic!("expected plane, got {other:?}"),
+    };
+    assert!(cp_origin(root_cp).dist(Vec3::new(0.0, 0.0, 1.0)) < 1e-9);
+    assert!(cp_origin(sub_cp).dist(Vec3::new(10.0, 0.0, 3.0)) < 1e-9);
+    assert!(cp_origin(part_cp).dist(Vec3::new(10.0, 10.0, 5.0)) < 1e-9);
+
+    // Cosmetic threads appear on all 4 placements of Part, with matching body names and world axes.
+    assert_eq!(world.threads.len(), 4);
+    let mut thread_xy: Vec<(f64, f64)> = world.threads.iter().map(|t| (t.axis_point.x, t.axis_point.y)).collect();
+    thread_xy.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    let expected_xy = [(10.0, 10.0), (10.0, 40.0), (100.0, 10.0), (100.0, 40.0)];
+    for ((ax, ay), (ex, ey)) in thread_xy.iter().zip(expected_xy) {
+        assert!((ax - ex).abs() < 1e-9 && (ay - ey).abs() < 1e-9, "({ax}, {ay}) vs ({ex}, {ey})");
+    }
+    for t in &world.threads {
+        assert!(world.body(&t.body).is_some(), "thread body `{}` missing from world state", t.body);
+    }
+
+    // Reusing `PlacedBodies` with a moved second Sub occurrence shifts only its placements.
+    let mut moves = BTreeMap::new();
+    moves.insert(occ_sub2, rigid(Vec3::new(200.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    let moved_world = world_state_moved_reusing(&doc, &st, &moves, &mut cache).unwrap();
+    assert_eq!(moved_world.bodies.len(), 5);
+    assert_eq!(moved_world.threads.len(), 4);
+    let mut moved_xy: Vec<(f64, f64)> = moved_world.threads.iter().map(|t| (t.axis_point.x, t.axis_point.y)).collect();
+    moved_xy.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    for ((ax, ay), (ex, ey)) in moved_xy.iter().zip([(10.0, 10.0), (10.0, 40.0), (200.0, 10.0), (200.0, 40.0)]) {
+        assert!((ax - ex).abs() < 1e-9 && (ay - ey).abs() < 1e-9, "({ax}, {ay}) vs ({ex}, {ey})");
+    }
+}
+
+/// Adding an unrelated component must not invalidate the evaluation cache (`EvalKey::whole`,
+/// `EvalKey::reads`, `EvalKey::relative`, or `primed`) for existing features — including features
+/// whose `Feature::reads` is `None` (#22662).
+#[test]
+fn adding_unrelated_component_keeps_eval_cache_warm() {
+    let mut doc = Document::new("unrelated component cache");
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let plate = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "20".into(),
+                width: "20".into(),
+                height: "6".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().component = comp_a;
+    let hole_f = doc.add_feature(hole(Vec3::new(10.0, 10.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 3.0), Some("Hole1")).unwrap();
+    doc.feature_mut(hole_f).unwrap().component = comp_a;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+    // Confirm the Hole feature exercises the `EvalKey::whole` path (`reads == None`).
+    assert!(doc.feature(hole_f).unwrap().reads(&doc, &model.state_before(hole_f)).is_none());
+
+    // Add a new unrelated component (as `component.create` / `parts.insert` does).
+    let _fastener = doc.add_component(Some("M5x10 BHCS"), 0).unwrap();
+
+    // Force cache lookup (no `self.results` prefix reuse) using the shared EvalCache.
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    assert!(cached.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(cached.last_recomputed, 0, "adding an unrelated component must hit the eval cache");
+    assert_eq!(cached.last_restored, doc.features.len());
+    assert_eq!(full_eval_snapshot(&cached), full_eval_snapshot(&cold_model(&doc)));
+
+    // Primed results evaluated before the unrelated component was added also remain valid.
+    let mut primed = Model::new();
+    primed.prime(&model);
+    primed.evaluate(&doc);
+    assert_eq!(primed.last_recomputed, 0, "adding an unrelated component must not invalidate primed results");
+    assert_eq!(primed.last_restored, doc.features.len());
+}
+
+/// Toggling UI-only component metadata (`history_hidden`, `identification_color`, properties,
+/// etc.) must not invalidate the evaluation cache or `evaluate_shared`'s placement proof (#22662).
+#[test]
+fn component_display_metadata_changes_keep_eval_cache_warm() {
+    let mut doc = Document::new("component display metadata");
+    let comp_a = doc.add_component(Some("PartA"), 0).unwrap();
+    let plate = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "20".into(),
+                width: "20".into(),
+                height: "6".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().component = comp_a;
+    let hole_f = doc.add_feature(hole(Vec3::new(10.0, 10.0, 6.0), Vec3::new(0.0, 0.0, -1.0), 3.0), Some("Hole1")).unwrap();
+    doc.feature_mut(hole_f).unwrap().component = comp_a;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+
+    // Mutate every display/metadata-only field on PartA.
+    let c = doc.components.iter_mut().find(|c| c.id == comp_a).unwrap();
+    c.history_hidden = true;
+    c.identification_color = Some([10, 20, 30]);
+    c.identification_color_index = Some(42);
+    c.properties.insert("finish".into(), "anodized".into());
+    c.name_split = Some(crate::ComponentNameSplit { separator: "-".into(), left_property: "part".into(), right_property: "rev".into() });
+
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    assert!(cached.results.iter().all(|r| r.error.is_none()));
+    assert_eq!(cached.last_recomputed, 0, "UI-only component changes must hit the eval cache");
+    assert_eq!(cached.last_restored, doc.features.len());
+    assert_eq!(full_eval_snapshot(&cached), full_eval_snapshot(&cold_model(&doc)));
+
+    // Local-geometry shared evaluation proof also stays valid across UI-only component changes.
+    let mut local_doc = Document::new("local display metadata");
+    let comp_l = local_doc.add_component(Some("LocalPart"), 0).unwrap();
+    let box_l = local_doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "10".into(),
+                width: "10".into(),
+                height: "10".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Cube"),
+        )
+        .unwrap();
+    local_doc.feature_mut(box_l).unwrap().component = comp_l;
+    let mut shared_doc = Arc::new(local_doc);
+    let mut shared_model = Model::new();
+    assert!(shared_model.evaluate_shared(&shared_doc));
+    {
+        let d = Arc::make_mut(&mut shared_doc);
+        let c = d.components.iter_mut().find(|c| c.id == comp_l).unwrap();
+        c.history_hidden = true;
+        c.identification_color = Some([1, 2, 3]);
+    }
+    assert!(!shared_model.evaluate_shared(&shared_doc), "UI-only component change must keep evaluate_shared proof");
+    assert_eq!(shared_model.last_recomputed, 0);
+}
+
+/// Renaming a component that a feature can reach must still invalidate that feature's cache key
+/// (e.g. so target error messages reflect the renamed component).
+#[test]
+fn renaming_reached_component_invalidates_its_cache_key() {
+    let mut doc = Document::new("rename reached component");
+    let comp_a = doc.add_component(Some("OldName"), 0).unwrap();
+    let comp_b = doc.add_component(Some("Cutter"), 0).unwrap();
+    let plate = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "20".into(),
+                width: "20".into(),
+                height: "6".into(),
+                operation: Operation::NewBody,
+                centred: false,
+            },
+            Some("Plate"),
+        )
+        .unwrap();
+    doc.feature_mut(plate).unwrap().component = comp_a;
+    // Cut in comp_b with default targets: comp_b has no bodies, so `empty_boolean_targets` names
+    // the overlapping body's component (`OldName`).
+    let cut = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::new(2.0, 2.0, 0.0)),
+                length: "4".into(),
+                width: "4".into(),
+                height: "6".into(),
+                operation: Operation::Cut,
+                centred: false,
+            },
+            Some("MissCut"),
+        )
+        .unwrap();
+    doc.feature_mut(cut).unwrap().component = comp_b;
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let err_before = model.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_before.contains("OldName"), "expected error naming OldName, got: {err_before}");
+
+    doc.components.iter_mut().find(|c| c.id == comp_a).unwrap().name = "NewName".into();
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    let err_after = cached.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_after.contains("NewName"), "expected refreshed error naming NewName, got: {err_after}");
+    assert!(cached.last_recomputed >= 1);
+
+    // Primed results must also reject reuse when a reached component was renamed.
+    let mut primed = Model::new();
+    primed.prime(&model);
+    primed.evaluate(&doc);
+    let err_primed = primed.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_primed.contains("NewName"), "expected primed miss naming NewName, got: {err_primed}");
+    assert!(primed.last_recomputed >= 1);
+
+    // Rolled-back results must also reject reuse when a reached component was renamed while rolled back.
+    doc.components.iter_mut().find(|c| c.id == comp_a).unwrap().name = "OldName".into();
+    let mut rolled = Model::new();
+    rolled.evaluate(&doc);
+    assert!(rolled.result(cut).and_then(|r| r.error.as_deref()).is_some_and(|e| e.contains("OldName")));
+    doc.marker = Some(1);
+    rolled.evaluate(&doc);
+    doc.components.iter_mut().find(|c| c.id == comp_a).unwrap().name = "RenamedWhileRolled".into();
+    doc.marker = None;
+    rolled.evaluate(&doc);
+    let err_rolled = rolled.result(cut).and_then(|r| r.error.as_deref()).unwrap_or("");
+    assert!(err_rolled.contains("RenamedWhileRolled"), "expected rolled miss naming RenamedWhileRolled, got: {err_rolled}");
+    assert!(rolled.last_recomputed >= 1);
+}
+
+/// Adding a missing destination component for a `BodyTransfer` must invalidate its cached refusal
+/// so the transfer succeeds on the next evaluation (#22662).
+#[test]
+fn body_transfer_cache_invalidates_when_destination_component_is_added() {
+    let mut doc = Document::new("body transfer cache");
+    block(&mut doc, "Plate", Vec3::ZERO, [10.0, 10.0, 4.0]);
+    let dest = doc.add_component(Some("Dest"), 0).unwrap();
+    let transfer = doc
+        .add_feature(
+            FeatureKind::BodyTransfer { bodies: vec![crate::BodyName("Plate".into())], from: 0, to: dest, transform: crate::IDENTITY },
+            Some("MovePlate"),
+        )
+        .unwrap();
+    let saved_dest = doc.components.pop().unwrap();
+
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    assert!(model.result(transfer).and_then(|r| r.error.as_deref()).is_some(), "transfer to missing component must fail");
+
+    doc.components.push(saved_dest);
+    let mut cached = Model { cache: model.cache.clone(), ..Model::new() };
+    cached.evaluate(&doc);
+    assert_eq!(cached.result(transfer).and_then(|r| r.error.as_deref()), None, "transfer must succeed once destination component exists");
+    assert_eq!(cached.state().body("Plate").unwrap().component, dest);
+    assert!(cached.last_recomputed >= 1);
 }

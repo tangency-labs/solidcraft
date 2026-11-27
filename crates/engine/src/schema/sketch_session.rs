@@ -129,6 +129,10 @@ fn curves<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EntityIds>, D::Error
     entity_ids(d, "curves", "`curves` must list curve ids")
 }
 
+fn construction_points<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EntityIds>, D::Error> {
+    entity_ids(d, "points", "`points` must list point ids")
+}
+
 fn entities<'de, D: Deserializer<'de>>(d: D) -> Result<Option<EntityIds>, D::Error> {
     entity_ids(d, "entities", "`entities` must list sketch entity ids")
 }
@@ -206,7 +210,20 @@ macro_rules! option_flags {
     )+};
 }
 
-option_flags!(value, show_profile, show_points, show_dimensions, show_constraints, show_projected, show_construction, grid, snap, slice, sketch_3d);
+option_flags!(
+    value,
+    show_profile,
+    show_points,
+    show_dimensions,
+    show_constraints,
+    show_projected,
+    show_construction,
+    show_control_polygons,
+    grid,
+    snap,
+    slice,
+    sketch_3d
+);
 
 // ---------------------------------------------------------------------------------------------
 // sketch.create
@@ -340,6 +357,10 @@ impl JsonSchema for InsidePlane {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CreateKeys {
+    /// Open Model view to edit in; defaults to the focused or most recent Model view.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 9007199254740992_u64))]
+    pub view: Option<u64>,
     /// The plane to sketch on: XY, XZ or YZ (also Top, Front, Right), a construction plane's
     /// name or id, a picked planar face `{face: [x, y, z], body?, index?, path?, fixed?}`, or an
     /// explicit plane `{origin?, x_dir, y_dir}` in mm. Default: XY. On XY, the sketch's x and y
@@ -473,6 +494,8 @@ pub struct Activated {
 /// What `sketch.create` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct CreateResult {
+    /// The Model view owning this sketch edit. Runtime identity, not a design feature.
+    pub sketching_view: u64,
     /// The new sketch's feature id.
     pub sketch: u64,
     /// Its name.
@@ -499,26 +522,32 @@ pub struct CreateResult {
 // ---------------------------------------------------------------------------------------------
 // sketch.construction, sketch.delete
 
-fn curves_required(schema: &mut Schema) {
-    require(schema, "curves");
+/// `sketch.construction` takes curves, points or both: the handler refuses a call with neither.
+fn curves_or_points(schema: &mut Schema) {
+    schema.insert("anyOf".into(), json!([{"required": ["curves"]}, {"required": ["points"]}]));
 }
 
 fn entities_required(schema: &mut Schema) {
     require(schema, "entities");
 }
 
-/// Switch curves between normal and construction. The selection switches together (a slot or
-/// polygon as a whole): to construction unless all of it already is. Projected curves may
-/// switch too. A centerline that becomes construction stops being a centerline, and a normal
-/// line is a finite one. One undo step.
+/// Switch curves and points between normal and construction. The selection switches together
+/// (a slot or polygon as a whole): to construction unless all of it already is. Projected
+/// curves may switch too. A centerline that becomes construction stops being a centerline, and
+/// a normal line is a finite one. A construction point is reference geometry that features
+/// reading a sketch's points (a Hole from the whole sketch) leave out. One undo step.
 #[derive(Debug, Deserialize, JsonSchema)]
-#[schemars(deny_unknown_fields, transform = curves_required)]
+#[schemars(deny_unknown_fields, transform = curves_or_points)]
 pub struct ConstructionParams {
-    // Optional in the type and required in the schema (`curves_required`).
+    // Optional in the type; the schema asks for curves, points or both (`curves_or_points`).
     /// The curves, by id.
     #[serde(default, deserialize_with = "curves", skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "EntityIds")]
+    #[schemars(with = "Option<EntityIds>")]
     pub curves: Option<EntityIds>,
+    /// The points, by id (`p3`, `l1.end`).
+    #[serde(default, deserialize_with = "construction_points", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<EntityIds>")]
+    pub points: Option<EntityIds>,
     /// True makes them construction, false makes them normal. Default: construction unless all of
     /// them already are.
     #[serde(default, deserialize_with = "value", skip_serializing_if = "Option::is_none")]
@@ -548,6 +577,9 @@ pub struct ConstructionResult {
 #[derive(Debug, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields, transform = entities_required)]
 pub struct DeleteParams {
+    /// Keep identifiable surviving projection edges linked. Default: false, break the remaining link.
+    #[serde(default)]
+    pub preserve_projection_link: bool,
     // Optional in the type and required in the schema (`entities_required`).
     /// What to delete: curve, point, constraint, wire or link ids.
     #[serde(default, deserialize_with = "entities", skip_serializing_if = "Option::is_none")]
@@ -563,6 +595,121 @@ pub struct DeleteParams {
 pub struct DeleteResult {
     /// How many ids were given (all of them were found).
     pub deleted: usize,
+    /// The sketch's solve; null when it was not solved again.
+    pub sketch: Option<SketchSolve>,
+    /// Projections part of which was deleted and whose deleted members could not be recorded:
+    /// what remained of each is normal geometry now.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub broken_links: Vec<BrokenLink>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// A projection `sketch.delete` broke off.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct BrokenLink {
+    /// The projection's id.
+    pub link: String,
+    /// Why its deleted members could not be recorded.
+    pub why: String,
+}
+
+fn detach_point_required(schema: &mut Schema) {
+    require(schema, "curve");
+    require(schema, "point");
+}
+
+fn opt_offset_point<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Point2>, D::Error> {
+    let v = Value::deserialize(d)?;
+    if v.is_null() {
+        return Ok(None);
+    }
+    params::vec2(&v).map(|p| Some(Point2(p))).ok_or_else(|| refuse("`offset` must be [dx, dy]"))
+}
+
+/// Detach a sketch curve from a shared or coincident point, placing its detached endpoint at an
+/// optional 2D offset so the curve can be dragged independently.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = detach_point_required)]
+pub struct DetachPointParams {
+    /// The curve to detach.
+    #[serde(default, deserialize_with = "curve_id", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub curve: Option<String>,
+    /// The shared or coincident point id (`p3`, `l1.end`, `origin`).
+    #[serde(default, deserialize_with = "point_id", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub point: Option<String>,
+    /// Optional 2D nudge [dx, dy] in sketch coordinates (mm) for the detached endpoint.
+    #[serde(default, deserialize_with = "opt_offset_point", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Point2")]
+    pub offset: Option<Point2>,
+    /// Optional scalar distance (mm) to nudge the detached endpoint inward along the real curve
+    /// (capped at half the curve's exact arc length). Used when `offset` is omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub distance: Option<f64>,
+    /// Optional specific `Coincident` constraint id to delete when detaching a fallback point.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint: Option<String>,
+    /// The sketch. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+/// What `sketch.detach_point` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct DetachPointResult {
+    /// The point id now on that end/centre of `curve`.
+    pub point: String,
+    /// Any fallback `Coincident` constraint ids removed while detaching.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub detached_coincident: Vec<String>,
+    /// The sketch's solve; null when it was not solved again.
+    pub sketch: Option<SketchSolve>,
+    /// In the warn parameter-check mode: what the call's parameters got wrong.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
+/// Which connected curve-relation group `sketch.unlink_curve_group` removes a curve from.
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CurveGroupKind {
+    Equal,
+    Parallel,
+}
+
+fn unlink_curve_group_required(schema: &mut Schema) {
+    require(schema, "curve");
+    require(schema, "kind");
+}
+
+/// Remove a curve from its connected `Equal` or `Parallel` constraint group while preserving
+/// constraints among any remaining curves in that group.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields, transform = unlink_curve_group_required)]
+pub struct UnlinkCurveGroupParams {
+    /// The curve to unlink from the group.
+    #[serde(default, deserialize_with = "curve_id", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "String")]
+    pub curve: Option<String>,
+    /// Which constraint group kind to unlink (`equal` or `parallel`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<CurveGroupKind>,
+    /// The sketch. Default: the one being edited.
+    #[serde(default)]
+    pub sketch: Option<SketchTarget>,
+}
+
+/// What `sketch.unlink_curve_group` returns.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct UnlinkCurveGroupResult {
+    /// Constraint ids removed from `curve`.
+    pub removed: Vec<String>,
+    /// Any bridging constraint ids added to keep the remaining curves connected.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub added: Vec<String>,
     /// The sketch's solve; null when it was not solved again.
     pub sketch: Option<SketchSolve>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
@@ -978,6 +1125,10 @@ pub struct OptionsParams {
     #[serde(default, deserialize_with = "show_construction", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
     pub show_construction: Option<bool>,
+    /// Show the sides of spline control polygons.
+    #[serde(default, deserialize_with = "show_control_polygons", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "Option<bool>")]
+    pub show_control_polygons: Option<bool>,
     /// Show the grid.
     #[serde(default, deserialize_with = "grid", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<bool>")]
@@ -1014,6 +1165,8 @@ pub struct SketchOptions {
     pub show_projected: bool,
     /// Construction geometry is shown.
     pub show_construction: bool,
+    /// Spline control polygons are shown.
+    pub show_control_polygons: bool,
     /// The grid is shown.
     pub grid: bool,
     /// Clicks snap to the grid.

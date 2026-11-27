@@ -185,6 +185,31 @@ pub const HEBREW: Candidates = &[
     ),
 ];
 
+/// Georgian: Mkhedruli, Asomtavruli and Mtavruli are not in egui's built-in faces. The interface
+/// uses a candidate only if it draws Georgian; drawings do not search this list yet.
+pub const GEORGIAN: Candidates = &[
+    // Windows
+    ("Sylfaen", &["C:\\Windows\\Fonts\\sylfaen.ttf"]),
+    ("Segoe UI", &["C:\\Windows\\Fonts\\segoeui.ttf"]),
+    // macOS
+    ("SF Georgian", &["/System/Library/Fonts/SFGeorgian.ttf"]),
+    // Linux
+    (
+        "Noto Sans Georgian",
+        &[
+            "/usr/share/fonts/noto/NotoSansGeorgian-Regular.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSansGeorgian-Regular.ttf",
+            "/usr/share/fonts/google-noto/NotoSansGeorgian-Regular.ttf",
+            "/usr/share/fonts/google-noto-vf/NotoSansGeorgian[wght].ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansGeorgian-Regular.ttf",
+        ],
+    ),
+    (
+        "DejaVu Sans",
+        &["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/dejavu/DejaVuSans.ttf"],
+    ),
+];
+
 /// Arabic, with the joining forms a shaper uses. egui's built-in faces have none.
 pub const ARABIC: Candidates = &[
     // Windows
@@ -213,6 +238,40 @@ pub const ARABIC: Candidates = &[
         "DejaVu Sans",
         &["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/TTF/DejaVuSans.ttf", "/usr/share/fonts/dejavu/DejaVuSans.ttf"],
     ),
+];
+
+/// Lao: Noto Sans Lao when installed, then system Lao faces (Leelawadee UI on Windows
+/// also covers Lao). The interface uses a candidate only if it draws Lao.
+pub const LAO: Candidates = &[
+    // Windows
+    (
+        "Noto Sans Lao",
+        &[
+            "C:\\Windows\\Fonts\\NotoSansLao-Regular.ttf",
+            "C:\\Windows\\Fonts\\NotoSansLao[wdth,wght].ttf",
+            "C:\\Windows\\Fonts\\NotoSansLao-VariableFont_wdth,wght.ttf",
+        ],
+    ),
+    ("Noto Sans Lao UI", &["C:\\Windows\\Fonts\\NotoSansLaoUI-Regular.ttf"]),
+    ("Lao UI", &["C:\\Windows\\Fonts\\LaoUI.ttf"]),
+    ("Leelawadee UI", &["C:\\Windows\\Fonts\\LeelawUI.ttf"]),
+    ("Leelawadee", &["C:\\Windows\\Fonts\\leelawad.ttf"]),
+    // macOS
+    ("Noto Sans Lao", &["/Library/Fonts/NotoSansLao-Regular.ttf"]),
+    ("Lao Sangam MN", &["/System/Library/Fonts/Supplemental/Lao Sangam MN.ttf", "/System/Library/Fonts/Lao Sangam MN.ttf"]),
+    ("Lao MN", &["/System/Library/Fonts/Supplemental/Lao MN.ttc", "/System/Library/Fonts/Lao MN.ttc"]),
+    // Linux
+    (
+        "Noto Sans Lao",
+        &[
+            "/usr/share/fonts/noto/NotoSansLao-Regular.ttf",
+            "/usr/share/fonts/truetype/noto/NotoSansLao-Regular.ttf",
+            "/usr/share/fonts/google-noto/NotoSansLao-Regular.ttf",
+            "/usr/share/fonts/google-noto-vf/NotoSansLao[wdth,wght].ttf",
+            "/usr/share/fonts/opentype/noto/NotoSansLao-Regular.ttf",
+        ],
+    ),
+    ("Phetsarath OT", &["/usr/share/fonts/truetype/phetsarath/Phetsarath_OT.ttf", "/usr/share/fonts/opentype/phetsarath/Phetsarath_OT.otf"]),
 ];
 
 /// Largest character map read: a full CJK font's is about a megabyte.
@@ -325,6 +384,18 @@ struct Search {
     answers: HashMap<Query, Answer>,
     asked: HashSet<Query>,
     running: bool,
+    #[cfg(any(test, feature = "test-font-gate"))]
+    held: HashSet<char>,
+}
+
+impl Search {
+    fn answer(&self, query: &Query, _wait: bool) -> Option<&Answer> {
+        #[cfg(any(test, feature = "test-font-gate"))]
+        if !_wait && self.held.contains(&query.ch) {
+            return None;
+        }
+        self.answers.get(query)
+    }
 }
 
 fn state() -> std::sync::MutexGuard<'static, Search> {
@@ -464,12 +535,16 @@ pub(crate) fn answered(query: &Query) -> Answer {
         }
         return web_answers(std::slice::from_ref(query)).into_iter().flatten().next().flatten();
     }
-    state().answers.get(query).cloned().flatten()
+    state().answer(query, false).cloned().flatten()
 }
 
 /// The answers to `queries`, in order. With `wait` the search runs here; else the ones not known
 /// yet go to a thread, and this is None until they are in (a system with no threads waits).
 pub(crate) fn answers(queries: &[Query], wait: bool) -> Option<Vec<Answer>> {
+    answers_with_worker(queries, wait, || std::thread::Builder::new().name("font-search".into()).spawn(run_asked).map(drop))
+}
+
+pub(crate) fn answers_with_worker(queries: &[Query], wait: bool, start_worker: impl FnOnce() -> std::io::Result<()>) -> Option<Vec<Answer>> {
     if queries.iter().all(|query| query.dirs.is_empty()) {
         return web_answers(queries);
     }
@@ -481,9 +556,9 @@ pub(crate) fn answers(queries: &[Query], wait: bool) -> Option<Vec<Answer>> {
             if !search.running {
                 search.running = true;
                 drop(search);
-                if std::thread::Builder::new().name("font-search".into()).spawn(run_asked).is_err() {
+                if start_worker().is_err() {
                     run_asked();
-                    return known(queries);
+                    return known(queries, false);
                 }
             }
             return None;
@@ -493,12 +568,12 @@ pub(crate) fn answers(queries: &[Query], wait: bool) -> Option<Vec<Answer>> {
     if !unknown.is_empty() {
         store(search(&unknown));
     }
-    known(queries)
+    known(queries, wait)
 }
 
-fn known(queries: &[Query]) -> Option<Vec<Answer>> {
+fn known(queries: &[Query], wait: bool) -> Option<Vec<Answer>> {
     let search = state();
-    queries.iter().map(|query| search.answers.get(query).cloned()).collect()
+    queries.iter().map(|query| search.answer(query, wait).cloned()).collect()
 }
 
 fn store(found: Vec<(Query, Answer)>) {
@@ -658,4 +733,25 @@ pub(super) fn placeholder(path: &Path) -> bool {
 fn sets(face: &FaceTable, ch: char) -> bool {
     let Some(cmap) = face.table.as_deref().filter(|_| face.outlines).and_then(ttf_parser::cmap::Table::parse) else { return false };
     cmap.subtables.into_iter().filter(|table| table.is_unicode()).any(|table| table.glyph_index(u32::from(ch)).is_some_and(|glyph| glyph.0 != 0))
+}
+
+/// A held character stays pending for nonblocking reads even if its answer is already cached.
+/// The search can finish on the caller's thread when the OS cannot start a worker.
+#[cfg(any(test, feature = "test-font-gate"))]
+pub mod gate {
+    use super::state;
+
+    /// Holds back the answer for `ch` until the returned hold is dropped.
+    pub fn hold(ch: char) -> Hold {
+        state().held.insert(ch);
+        Hold(ch)
+    }
+
+    pub struct Hold(char);
+
+    impl Drop for Hold {
+        fn drop(&mut self) {
+            state().held.remove(&self.0);
+        }
+    }
 }

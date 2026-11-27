@@ -109,7 +109,10 @@ use std::borrow::Cow;
 
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{
+    EntityRef, Failure, Result, SolidError, SM_ERR_INVALID_INPUT, SM_ERR_NULL_POINTER,
+};
 use crate::geom::assert_array::{AssertArray, AssertReport, ObjectKey, ReportSpec};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
@@ -170,11 +173,25 @@ fn null(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-/// A value the trimming tools compute with that has no defined result, as the phrase
-/// says (upstream `SM_ERR_INVALID_INPUT`).
-pub(crate) fn invalid_value(what: &'static str) -> SolidError {
-    SolidError::topology_invalid_value(OP, what)
+/// A topology failure of the trimming tools ([`SolidError::topology`]).
+pub(crate) fn failure(cause: TopologyFailure) -> SolidError {
+    SolidError::topology(OP, cause)
 }
+
+/// [`failure`] with the status of the site it replaces, where that is not the cause's own.
+pub(crate) fn failure_with_status(cause: TopologyFailure, status: i32) -> SolidError {
+    Failure::new(OP, cause).with_status(status).into_error()
+}
+
+/// A defect ([`TopologyFailure::Defect`]): a link of the B-rep or a surface the trim holds
+/// is gone, with the status `SM_ERR_NULL_POINTER` of the `NER` it replaces.
+fn broken_link(why: &'static str) -> SolidError {
+    failure_with_status(TopologyFailure::Defect { why }, SM_ERR_NULL_POINTER)
+}
+
+/// Why the retained transfer is gone after the early checks read its surface.
+const SURFACE_CHECKED: &str = "the retained transfer is gone, though the early checks just \
+                               read its surface and nothing between takes it";
 
 /// The identity a face or loop has in an assert report (upstream compares pointers):
 /// its `SmTopoTypes.h` code in the high bits and its arena index in the low ones.
@@ -490,21 +507,25 @@ impl TrimSurfaceTransfer {
 }
 
 enum TrimSurfaceBackend<'a> {
-    Legacy(&'a mut Option<Surface>),
+    Legacy(Box<Surface>),
     Retained(&'a mut TrimSurfaceTransfer),
 }
 
 impl TrimSurfaceBackend<'_> {
     fn surface(&self) -> Result<&Surface> {
         match self {
-            Self::Legacy(surface) => surface
-                .as_ref()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim")),
+            Self::Legacy(surface) => Ok(&**surface),
             Self::Retained(transfer) => transfer
                 .transfer
                 .as_ref()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim"))?
-                .owned_surface(),
+                .and_then(crate::topology::brep::p6::FaceSurfaceTransfer::owned_surface)
+                .ok_or_else(|| {
+                    broken_link(
+                        "the retained surface to trim is gone or installed before the trim, \
+                         though the trim's transfer is made with it and gives it up only to \
+                         the face it builds",
+                    )
+                }),
         }
     }
 
@@ -576,7 +597,6 @@ pub fn trim_surface_with_model_space_curves(
         uv_domain,
         surface_orientation,
     } = input;
-    let mut surface = Some(surface);
     trim_surface_impl(
         k,
         b,
@@ -590,7 +610,7 @@ pub fn trim_surface_with_model_space_curves(
             uv_domain,
             surface_orientation,
         },
-        TrimSurfaceBackend::Legacy(&mut surface),
+        TrimSurfaceBackend::Legacy(Box::new(surface)),
         first_is_outer,
         oriented_correctly,
         may_cross_seam,
@@ -613,19 +633,20 @@ fn trim_surface_impl(
 ) -> Result<Vec<FaceId>> {
     // Native SmObjDelete/SmObjsDelete remain active through these early checks.
     let early = (|| {
-        let region = region
-            .ok_or_else(|| SolidError::topology_missing(OP, "the region for the new faces"))?;
+        let region = region.ok_or_else(|| {
+            failure_with_status(TopologyFailure::NoRegionGiven, SM_ERR_NULL_POINTER)
+        })?;
         if !b.region(region)?.in_brep {
-            return Err(SolidError::topology_missing(OP, "the region in the B-rep"));
+            return Err(failure_with_status(
+                TopologyFailure::NotInBrep,
+                SM_ERR_NULL_POINTER,
+            ));
         }
         let _ = first_is_outer; // SM_ASSERT only
         brep_set_tolerance(k, b, tol_3d)?;
         let g1_surface = surface_continuity_check(k, surface.surface()?)?;
         if !g1_surface && !oriented_correctly {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the surface is not G1 and the loops are not oriented",
-            ));
+            return Err(failure(TopologyFailure::UnorientedLoopsOnNonG1Surface));
         }
         Ok((region, g1_surface))
     })();
@@ -640,15 +661,12 @@ fn trim_surface_impl(
     // Native clears the temporary cleanup immediately before MakeFace(s).
     let mut new_faces = match surface {
         TrimSurfaceBackend::Legacy(surface) => {
-            let surface = surface
-                .take()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim"))?;
             let input = TrimInput {
                 loop_counts: input.loop_counts,
                 curves: input.curves,
                 orientations: input.orientations,
                 loop_points: input.loop_points,
-                surface,
+                surface: *surface,
                 uv_domain: input.uv_domain,
                 surface_orientation: input.surface_orientation,
             };
@@ -682,7 +700,7 @@ fn trim_surface_impl(
                 transfer
                     .transfer
                     .as_mut()
-                    .ok_or_else(|| SolidError::topology_missing(OP, "the surface to trim"))?,
+                    .ok_or_else(|| broken_link(SURFACE_CHECKED))?,
                 &input.uv_domain,
                 input.surface_orientation,
                 None,
@@ -1306,12 +1324,19 @@ fn move_loopuse_first(
 ) -> Result<()> {
     let list = &mut b.faceuse_mut(fu)?.loopuses;
     let pos = list.iter().position(|&x| x == lu).ok_or_else(|| {
-        SolidError::topology_failed(OP, "the loop use is not in the face use's loop uses")
+        failure(TopologyFailure::Defect {
+            why: "the loop use is not in its face use's list, though the face use is read \
+                  from the loop use",
+        })
     })?;
     list.remove(pos);
     list.insert(0, lu);
     Ok(())
 }
+
+/// Why a loop use of a face's loop has no face use.
+const LU_NO_FU: &str = "a loop use of the face's loop has no face use, though a face's loop \
+                        uses sit in its face uses";
 
 /// `FixTrimLoopOrder`: takes the loop whose UV trim curves have the largest bounding box
 /// (by squared diagonal) as the outer loop, orients it as outer and the others as inner
@@ -1332,7 +1357,7 @@ pub fn fix_trim_loop_order(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> 
     // Get the loops
     let loops = fp2::loops(b, f, false, None)?;
     if loops.is_empty() {
-        return Err(SolidError::topology_failed(OP, "the face has no loops")); // no loops at all
+        return Err(failure(TopologyFailure::FaceWithoutLoops)); // no loops at all
     }
 
     // Find the outer loop
@@ -1414,12 +1439,14 @@ pub fn fix_trim_loop_order(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<bool> 
     // Move outer to the first position
     let (lu_a, lu_b) = lu1::loop_loopuses(b, outer_loop)?;
     let lu_b = lu_b.ok_or_else(|| null("loop without second loop use"))?;
-    let fu_a = b.loopuse(lu_a)?.faceuse.ok_or_else(|| {
-        SolidError::topology_missing(OP, "the face use of the loop's first loop use")
-    })?;
-    let fu_b = b.loopuse(lu_b)?.faceuse.ok_or_else(|| {
-        SolidError::topology_missing(OP, "the face use of the loop's second loop use")
-    })?;
+    let fu_a = b
+        .loopuse(lu_a)?
+        .faceuse
+        .ok_or_else(|| broken_link(LU_NO_FU))?;
+    let fu_b = b
+        .loopuse(lu_b)?
+        .faceuse
+        .ok_or_else(|| broken_link(LU_NO_FU))?;
     move_loopuse_first(b, fu_a, lu_a)?;
     move_loopuse_first(b, fu_b, lu_b)?;
 
@@ -1473,10 +1500,10 @@ impl OrderedLoops {
         if self.closed && self.on_plane {
             Ok(())
         } else {
-            Err(SolidError::topology_failed(
-                OP,
-                "the loops do not close, or a curve is off their plane",
-            ))
+            Err(failure(TopologyFailure::LoopsNotClosedOrPlanar {
+                closed: self.closed,
+                on_plane: self.on_plane,
+            }))
         }
     }
 }
@@ -1579,10 +1606,7 @@ fn next_round_the_vertex(
     };
     let (mut back, _) = leaving(arrive)?;
     if back.length() <= 0.0 {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the arriving edge's tangent has zero length",
-        ));
+        return Err(failure(TopologyFailure::CurveEndWithoutTangent));
     }
     back /= back.length();
 
@@ -1591,10 +1615,7 @@ fn next_round_the_vertex(
     for &end in &candidates {
         let (ray, acc) = leaving(end)?;
         if ray.length() <= 0.0 {
-            return Err(SolidError::topology_failed(
-                OP,
-                "a leaving edge's tangent has zero length",
-            ));
+            return Err(failure(TopologyFailure::CurveEndWithoutTangent));
         }
         rays.push(ray);
         accs.push(acc);
@@ -1907,9 +1928,9 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
             plane_base_count += 1;
             jj += 2;
         }
-        let loop_normal = loop_normal
-            .unitize()
-            .map_err(|_| invalid_value("the loop's normal has zero length"))?;
+        let loop_normal = loop_normal.unitize().map_err(|_| {
+            failure_with_status(TopologyFailure::LoopWithoutNormal, SM_ERR_INVALID_INPUT)
+        })?;
 
         // Update the plane data for all loops
         if out.loop_counts.len() == 1 {
@@ -1937,7 +1958,7 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
     out.plane_normal = out
         .plane_normal
         .unitize()
-        .map_err(|_| invalid_value("the loops' average normal has zero length"))?;
+        .map_err(|_| failure(TopologyFailure::NoCurveGiven))?;
 
     // test every curve to see if it's on the plane
     for c in curves {
@@ -2222,7 +2243,7 @@ pub fn check_face(
             UNDEF_DOUBLE,
             UNDEF_DOUBLE,
         )?;
-        return Err(SolidError::topology_failed(OP, "the face has no loops")); // Loops are missing
+        return Err(failure(TopologyFailure::FaceWithoutLoops)); // Loops are missing
     }
 
     // (not upstream, which passes such a face unchecked: "it's not a problem when an edge
@@ -2252,10 +2273,7 @@ pub fn check_face(
         )?;
         if !present {
             made?;
-            return Err(SolidError::topology_failed(
-                OP,
-                "the face's UV trim curves cannot be made, so its loops cannot be checked",
-            ));
+            return Err(failure(TopologyFailure::UvTrimCurvesNotMade));
         }
     }
 
@@ -2302,10 +2320,7 @@ pub fn check_face(
 
         // signal bad loop errors: we want 1st Loop Outer, rest Inner
         if (ii == 0 && lo == OrientType::Opposite) || (ii != 0 && lo == OrientType::Same) {
-            return Err(SolidError::topology_failed(
-                OP,
-                "the first loop is not outer, or a later loop is not inner",
-            ));
+            return Err(failure(TopologyFailure::LoopsMisoriented));
         }
 
         report(
@@ -2322,7 +2337,7 @@ pub fn check_face(
 
         // Also check for zero-area loop.
         if lo == OrientType::Unknown {
-            return Err(SolidError::topology_failed(OP, "a loop has zero area"));
+            return Err(failure(TopologyFailure::LoopOrientationUndecided));
         }
     }
     Ok(())
@@ -2348,10 +2363,11 @@ pub fn check_faces(
 
 /// `sm_IsLoopUVGapWithinTolerance`: whether the UV gap from `start_uv` to `end_uv` on a
 /// B-spline surface (any `SmBSplineSurface` kind) is certified closed: the gap's UV
-/// rectangle lies in the natural domain and every control point of its exact sub-patch
+/// rectangle lies in the natural domain and every control point of its covering patch
 /// (or, for a zero-width rectangle, of the iso-parametric curve over the gap) has a
-/// positive weight and lies within `xsect_tol_3d` of both `start_point` and
-/// `end_point`. Failures of the extraction give `false`.
+/// positive weight and lies within `xsect_tol_3d` of both endpoints, allowing for
+/// the certified distance from a procedural blend's net to its definition.
+/// Failures of the extraction give `false`.
 ///
 /// # Errors
 ///
@@ -2458,21 +2474,43 @@ pub fn is_loop_uv_gap_within_tolerance(
             Err(_) => return Ok(false),
         }
     } else {
-        let patch = match bss.copy_sub_patch(&gap) {
-            Ok(p) => p,
-            Err(e) if e.is_unported_or_cancelled() => return Err(e),
-            Err(_) => return Ok(false),
+        // A gap one rounding error away from an isoline can be narrower than a
+        // representable knot span. Extract a containing strip in that direction.
+        // Only the hull and coverage tests below can certify the gap.
+        let strip = |lo: f64, hi: f64, a: f64, z: f64| {
+            let pad = f64::EPSILON.sqrt() * (z - a);
+            if hi - lo < pad {
+                ((lo - pad).max(a), (hi + pad).min(z))
+            } else {
+                (lo, hi)
+            }
         };
-
-        // CopySubPatch can snap to knots. A shrunken domain cannot certify this gap.
-        let pd = patch.natural_uv_domain();
-        if pd.min().x > gap.min().x
-            || pd.min().y > gap.min().y
-            || pd.max().x < gap.max().x
-            || pd.max().y < gap.max().y
-        {
-            return Ok(false);
-        }
+        let (u0, u1) = strip(gap.min().x, gap.max().x, nat.min().x, nat.max().x);
+        let (v0, v1) = strip(gap.min().y, gap.max().y, nat.min().y, nat.max().y);
+        let enclosing = Extent2d::from_bounds(u0, v0, u1, v1);
+        // Try the original rectangle first. Extraction may snap its limits to
+        // knots; the extracted patch must still contain the full original gap.
+        let extract = |domain: &Extent2d| -> Result<Option<BSplineSurface>> {
+            let patch = match bss.copy_sub_patch(domain) {
+                Ok(patch) => patch,
+                Err(e) if e.is_unported_or_cancelled() => return Err(e),
+                Err(_) => return Ok(None),
+            };
+            let pd = patch.natural_uv_domain();
+            let covers = pd.min().x <= gap.min().x
+                && pd.min().y <= gap.min().y
+                && pd.max().x >= gap.max().x
+                && pd.max().y >= gap.max().y;
+            Ok(covers.then_some(patch))
+        };
+        let patch = match extract(&gap)? {
+            Some(patch) => patch,
+            None if enclosing != gap => match extract(&enclosing)? {
+                Some(patch) => patch,
+                None => return Ok(false),
+            },
+            None => return Ok(false),
+        };
         match patch.control_point_net() {
             Ok(net) => (net.points, net.weights),
             Err(_) => return Ok(false),
@@ -2482,14 +2520,24 @@ pub fn is_loop_uv_gap_within_tolerance(
         return Ok(false);
     }
 
+    // The hull encloses the net B. At the same UV, |S - endpoint| is at most
+    // |S - B| + |B - endpoint|. Round the remaining distance down if the
+    // subtraction rounded up (when bound <= tolerance, FastTwoSum's residual).
+    let bound = crate::surface::surface_cache::p3::definition_bound(surface);
+    let remaining = xsect_tol_3d - bound;
+    let net_tolerance = if xsect_tol_3d - remaining < bound {
+        crate::geom::certified::next_down(remaining)
+    } else {
+        remaining
+    };
     // Empty weights mean a nonrational curve or patch, with implicit unit weights.
     let rational = !weights.is_empty();
     for (i, p) in points.iter().enumerate() {
         let w = weights.get(i).copied().unwrap_or(0.0);
         #[allow(clippy::neg_cmp_op_on_partial_ord)] // upstream's NaN-safe tests
         if (rational && !(w > 0.0))
-            || !(p.distance(start_point) <= xsect_tol_3d)
-            || !(p.distance(end_point) <= xsect_tol_3d)
+            || !(p.distance(start_point) <= net_tolerance)
+            || !(p.distance(end_point) <= net_tolerance)
         {
             return Ok(false);
         }
@@ -2687,10 +2735,7 @@ pub fn check_loop(
                     closure = 1;
                 }
                 if closure >= 2 {
-                    return Err(SolidError::topology_failed(
-                        OP,
-                        "the loop crosses the surface's closure more than once",
-                    ));
+                    return Err(failure(TopologyFailure::LoopJumpsInUv));
                 }
             }
         }
@@ -2710,10 +2755,7 @@ pub fn surface_continuity_check(k: &Kernel, surface: &Surface) -> Result<bool> {
     let (cu, _) = surface.calculate_continuities(k, SurfParamType::U)?;
     let (cv, _) = surface.calculate_continuities(k, SurfParamType::V)?;
     if cu == ContinuityType::Discontinuous || cv == ContinuityType::Discontinuous {
-        return Err(SolidError::topology_failed(
-            OP,
-            "the surface is discontinuous",
-        ));
+        return Err(failure(TopologyFailure::SurfaceDiscontinuous));
     }
     Ok(!(cu == ContinuityType::C0 || cv == ContinuityType::C0))
 }
@@ -2862,6 +2904,51 @@ mod tests {
     use super::*;
     use crate::nurbs::crv_basic::Curve as NlCurve;
     use crate::nurbs::math::{CPoint, NOW, NOZ};
+
+    #[test]
+    fn nearly_isoparametric_gap_uses_a_containing_strip() {
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+
+        let k = Kernel::default();
+        let height = 0.00044;
+        let net = [0.0, 1.0].map(|u| [0.0, height].map(|v| CPoint::new(u, v, 0.0, NOW)).to_vec());
+        let patch = NlSurface::new(
+            net.to_vec(),
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, height, height],
+        )
+        .unwrap();
+        let surface = Surface::from(BSplineSurface::from_nurb(patch, false));
+        let u = 0.125_f64;
+        let start = Point2::new(u, 0.0);
+        let end = Point2::new(f64::from_bits(u.to_bits() + 1), height);
+        let a = surface.evaluate_point(&k, start).unwrap();
+        let z = surface.evaluate_point(&k, end).unwrap();
+        assert!(is_loop_uv_gap_within_tolerance(&k, &surface, start, end, a, z, 0.0005).unwrap());
+        assert!(!is_loop_uv_gap_within_tolerance(&k, &surface, start, end, a, z, 0.0004).unwrap());
+    }
+
+    #[test]
+    fn a_blend_gap_reserves_the_certified_distance_from_its_net() {
+        let (k, blend) = crate::surface::extend::tests::round_blend(1, true);
+        let bound = blend.bound();
+        let net = Surface::from(blend.net().clone());
+        let surface = Surface::from(blend);
+        // Finite length along the straight generator and a one-ulp gap across it.
+        let start = Point2::new(0.25, 0.5);
+        let end = Point2::new(0.5, crate::geom::certified::next_up(start.y));
+        let a = surface.evaluate_point(&k, start).unwrap();
+        let z = surface.evaluate_point(&k, end).unwrap();
+        let distance = a.distance(z);
+        let fits = |s: &Surface, tol| {
+            is_loop_uv_gap_within_tolerance(&k, s, start, end, a, z, tol).unwrap()
+        };
+        assert!(fits(&net, distance + bound / 2.0));
+        assert!(!fits(&surface, distance + bound / 2.0));
+        assert!(fits(&surface, distance + 2.0 * bound));
+    }
 
     #[test]
     fn original_g1_trim_retains_surface_identity_and_issued_face_owner() {
@@ -3072,7 +3159,7 @@ mod tests {
                 TrimSurfaceLocation::Destroyed => {
                     assert!(mode == 1 || mode == 2);
                     let code = if mode == 1 {
-                        crate::error::SM_ERR_NULL_POINTER
+                        SM_ERR_NULL_POINTER
                     } else {
                         crate::error::SM_ERR
                     };

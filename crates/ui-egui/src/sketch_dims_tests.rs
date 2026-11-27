@@ -666,7 +666,7 @@ fn rectangle_boxes_sit_beside_it_between_the_panels_too() {
 fn rectangle_boxes_stay_near_their_edges_at_window_borders() {
     for command in ["sketch.rectangle.two_point", "sketch.rectangle.center", "sketch.rectangle.rounded"] {
         for (a, b, dimension) in
-            [(egui::pos2(400.0, 170.0), egui::pos2(900.0, 450.0), 0usize), (egui::pos2(450.0, 650.0), egui::pos2(10.0, 850.0), 1usize)]
+            [(egui::pos2(400.0, 230.0), egui::pos2(900.0, 450.0), 0usize), (egui::pos2(450.0, 650.0), egui::pos2(10.0, 850.0), 1usize)]
         {
             let mut h = Harness::new();
             h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -696,21 +696,21 @@ fn small_rounded_rectangle_boxes_at_borders_fit_without_overlap() {
         h.call("ui.view", json!({"view":"top"}));
         h.step(&json!({"start":"sketch.rectangle.rounded"})).unwrap();
         // Keep the corners left of the axes navigator in the narrow window.
-        for point in [egui::pos2(300.0, 170.0), egui::pos2(380.0, 210.0)] {
+        for point in [egui::pos2(300.0, 230.0), egui::pos2(380.0, 270.0)] {
             assert!(in_open_view(&h, egui::Rect::from_center_size(point, egui::vec2(1.0, 1.0))), "{width}x{height}: {point:?} is drawable");
         }
-        h.step(&json!({"click":[300,170]})).unwrap();
-        h.step(&json!({"move":[380,210]})).unwrap();
+        h.step(&json!({"click":[300,230]})).unwrap();
+        h.step(&json!({"move":[380,270]})).unwrap();
         h.frames(3);
         let fields: Vec<_> =
             (0..3usize).map(|i| h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dim_area", i)))).expect("dimension is visible")).collect();
         for (i, field) in fields.iter().enumerate() {
             assert!(in_open_view(&h, *field), "{width}x{height}: {field:?} leaves the open view");
-            assert!(!field.expand(2.0).contains(egui::pos2(380.0, 210.0)), "{width}x{height}: {field:?} covers the next corner");
+            assert!(!field.expand(2.0).contains(egui::pos2(380.0, 270.0)), "{width}x{height}: {field:?} covers the next corner");
             assert!(fields[..i].iter().all(|previous| !previous.intersects(*field)), "{width}x{height}: fields overlap: {fields:?}");
         }
         // The preview's final click must still reach the sketch.
-        h.step(&json!({"click":[380,210]})).unwrap();
+        h.step(&json!({"click":[380,270]})).unwrap();
         let state = h.app.session.world_state().unwrap();
         let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         assert_eq!(sketch.profiles.len(), 1, "{width}x{height}: the click finishes the rectangle");
@@ -1302,4 +1302,32 @@ fn edge_center_rectangle_typed_length_and_width_become_dimensions() {
     let state = h.app.session.world_state().unwrap();
     let sketch = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     assert_eq!(sketch.sketch.constraints.iter().filter(|c| c.kind.is_dimension()).count(), 2);
+}
+
+/// #20719: the third point of a typed sweep keeps its height off the chord for a tiny sweep, where
+/// `1 - cos` would round to zero and leave the three points on one line.
+#[test]
+fn a_tiny_typed_sweep_keeps_the_third_point_off_the_chord() {
+    use solidcore_record::Vec2;
+    let (s, e, h) = (Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0), Vec2::new(0.5, 1.0));
+    let ordinary = super::arc_through(s, e, h, None, Some(std::f64::consts::FRAC_PI_2)).unwrap();
+    assert!((ordinary.x - 0.5).abs() < 1e-12 && (ordinary.y - (0.5f64.sqrt() * (1.0 - 0.5f64.sqrt()))).abs() < 1e-12, "{ordinary:?}");
+    // R = 1e8, height = R (1 - cos 5e-9) = 1.25e-9.
+    let tiny = super::arc_through(s, e, h, None, Some(1e-8)).unwrap();
+    assert!((tiny.y - 1.25e-9).abs() < 1e-14, "{tiny:?}");
+}
+
+/// #20719: the dotted guides of a 3-Point Arc go from its centre to each end it is level or plumb
+/// with, and only those.
+#[test]
+fn the_arc_centre_guides_join_the_ends_it_lines_up_with() {
+    use solidcore_record::Vec2;
+    let at = Vec2::new;
+    // The corner of an L: level with one end and plumb with the other.
+    let l = super::centre_guides(at(0.0, 0.0), [at(0.0, 50.0), at(50.0, 0.0)], 0.1);
+    assert_eq!(l, vec![(at(0.0, 0.0), at(0.0, 50.0)), (at(0.0, 0.0), at(50.0, 0.0))]);
+    // Level with the start only.
+    assert_eq!(super::centre_guides(at(10.0, 5.0), [at(-20.0, 5.05), at(30.0, 40.0)], 0.1), vec![(at(10.0, 5.0), at(-20.0, 5.05))]);
+    // Lined up with neither, or too far off the line.
+    assert!(super::centre_guides(at(10.0, 5.0), [at(0.0, 9.0), at(30.0, 40.0)], 0.1).is_empty());
 }

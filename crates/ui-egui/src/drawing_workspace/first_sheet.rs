@@ -67,6 +67,15 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, bounds: Rect) {
                     };
                     ui.label(RichText::new(subtitle).size(t.font_heading).color(t.form_dim));
                 });
+                if let Some(left) = super::left_for_new(app).map(|drawing| (drawing.id, drawing.name.clone())) {
+                    let back = solidcraft_ui_text::format("ui.drawing_picker.back", &[("name", &left.1)]);
+                    let button = ui.vertical_centered(|ui| ui_kit::text_button(ui, &back, true)).inner;
+                    crate::scenario::publish_target("drawing:first:back", button.rect);
+                    if button.clicked() {
+                        super::open_drawing(app, left.0);
+                        return;
+                    }
+                }
                 ui.add_space(t.space_16);
                 let enabled = can_create(app);
                 let picker = app.services.pick_open.is_some();
@@ -210,10 +219,40 @@ pub(super) fn show_picker(app: &mut SolveApp, ctx: &egui::Context) {
     app.drawing_workspace.first_sheet = Some(form);
 }
 
-fn create(app: &mut SolveApp, params: Value) -> bool {
+/// A name for another drawing of a design that has drawings: the design's name, as a first
+/// drawing is named, with the first number from 2 that no drawing of it has, so the drawing
+/// picker tells them apart. None for a design's first drawing.
+fn another_name(app: &SolveApp) -> Option<String> {
+    let drawings = &app.session.doc.drawings;
+    if drawings.is_empty() {
+        return None;
+    }
+    let base = &app.session.doc.name;
+    (2..=drawings.len() + 2).map(|n| format!("{base} {n}")).find(|name| drawings.iter().all(|d| d.name != *name))
+}
+
+fn create(app: &mut SolveApp, mut params: Value) -> bool {
+    if params.get("name").is_none()
+        && let Some(name) = another_name(app)
+    {
+        params["name"] = json!(name);
+    }
     match app.run("drawing.create", params) {
         Ok(_) => {
+            app.drawing_workspace.return_to = None;
             crate::drawing_sheet_page::fit(app);
+            if app.preferences.design_sub_tab_sheets {
+                let owner = app
+                    .session
+                    .open_drawing
+                    .and_then(|id| app.session.doc.drawing(id))
+                    .and_then(|drawing| drawing.sheets.first().map(|sheet| (drawing.id, sheet.id)));
+                if let Some((drawing, sheet)) = owner
+                    && let Err(error) = crate::sheet_views::open_in(app, drawing, sheet, false)
+                {
+                    app.set_status(error, true);
+                }
+            }
             true
         }
         Err(error) => {

@@ -2,7 +2,7 @@
 struct U {
     vp: mat4x4<f32>,
     back: vec4<f32>,   // xyz = toward the eye, w = 1 for linear output
-    screen: vec4<f32>, // viewport width, height (px), unused, silhouettes on (1)
+    screen: vec4<f32>, // viewport width, height (px), one past the last motion slot that moves (0: none), silhouettes on (1)
     clip: array<vec4<f32>, 6>, // section planes: normal, d each, the first ones (zero normal: unused)
     cap: vec4<f32>,    // colour of the inside of cut bodies
     ana: vec4<f32>,    // surface analysis: mode (1 zebra, 2 draft, 3 curvature, 6 values), parameter
@@ -15,7 +15,7 @@ struct U {
     // blocked; curvature flat, middle, tight
     ana_c: array<vec4<f32>, 8>,
     ana_f: vec4<f32>,  // x = 1: stripe the negative draft and blocked faces
-    depth: vec4<f32>,  // x = 1: reversed depth (1 near, 0 far); y, z: the faces' push (`FACE_BIAS`)
+    depth: vec4<f32>,  // x = 1: reversed depth (1 near, 0 far); y, z: the faces' push (`FACE_BIAS`); w: the first motion slot that moves
     // Where the drawn geometry is moved in the world: identity, or a dragged component's move
     // from where its scene was built (`MovingLayer`)
     model: mat4x4<f32>,
@@ -42,6 +42,19 @@ fn turned(n: vec3<f32>) -> vec3<f32> {
 
 fn reversed() -> bool {
     return u.depth.x > 0.5;
+}
+
+/// The depth steps a pipeline's surfaces are pushed away from the eye (negative: toward it) with
+/// reversed depth, each 2⁻²³ of the vertex's own depth (`face_push` in view.rs). The GPU's
+/// constant bias in a float buffer counts steps at the triangle's largest depth instead, so a
+/// long triangle (one cut by the near plane, which is then 1) went back by a share of the depth
+/// range where it was near the eye: millimetres, and a face behind it showed through (#21024).
+override FACE_PUSH: f32 = 0.0;
+
+/// Clip position `c` pushed by [`FACE_PUSH`]: its depth scaled, so every point of a triangle
+/// goes back by steps of its own depth (as `pushed` does for a depth a shader writes).
+fn face_pushed(c: vec4<f32>) -> vec4<f32> {
+    return vec4<f32>(c.xy, c.z * (1.0 - FACE_PUSH * 1.1920929e-7), c.w);
 }
 
 /// Clip-space depth measured the usual way (0 at the near plane, w at the far one), whichever
@@ -84,19 +97,86 @@ fn palette_entry(i: u32) -> vec2<u32> {
     return textureLoad(pal, vec2<i32>(i32(i & 2047u), i32(i >> 11u)), 0).xy;
 }
 
-// The palette's PBR materials (`Material` in view.rs): for palette row r, texel row 2r holds each
-// entry's linear base colour and a PBR flag, row 2r + 1 its metallic fraction, roughness and IOR.
+// The rigid motions bodies are drawn moved by (`motions.rs`): three texels a slot, the rows of
+// the motion less the identity (a zeroed slot moves nothing), 512 slots to a row. A palette
+// entry names its body's slot above the hatch byte of its second word. A texture like the
+// palette, so WebGL2 reads it in the vertex stage too.
+@group(0) @binding(7) var motions: texture_2d<f32>;
+
+/// The motion slot palette entry `e` names when it is one that moves this frame, else 0: only
+/// a slot from `U.depth.w` up to `U.screen.z` has a motion to read, so a frame that moves
+/// nothing, and every body outside that range, reads nothing more than it did.
+fn motion_of(e: vec2<u32>) -> u32 {
+    let m = f32(e.y >> 8u);
+    if (m >= u.screen.z || m < u.depth.w) { return 0u; }
+    return e.y >> 8u;
+}
+
+/// A placement's motion: the slot `s` its own word names, else the one its entry `e` names
+/// (`motion_of`). Copies of a part share their entries, not their motions.
+fn placement_motion(s: u32, e: vec2<u32>) -> u32 {
+    if (s == 0u) { return motion_of(e); }
+    let m = f32(s);
+    if (m >= u.screen.z || m < u.depth.w) { return 0u; }
+    return s;
+}
+
+/// `motion_of` for palette index `c`, for a stage that does not read the entry otherwise.
+fn motion_at(c: u32) -> u32 {
+    if (u.screen.z < 0.5) { return 0u; }
+    return motion_of(palette_entry(c));
+}
+
+/// Row `k` of motion `m`, less the identity.
+fn motion_row(m: u32, k: i32) -> vec4<f32> {
+    return textureLoad(motions, vec2<i32>(i32(m & 511u) * 3 + k, i32(m >> 9u)), 0);
+}
+
+/// A body's point moved by its motion `m`, then placed like the rest of its scene (`placed`).
+fn placed_by(m: u32, p: vec3<f32>) -> vec3<f32> {
+    if (m == 0u) { return placed(p); }
+    let q = vec4<f32>(p, 1.0);
+    return placed(p + vec3<f32>(dot(motion_row(m, 0), q), dot(motion_row(m, 1), q), dot(motion_row(m, 2), q)));
+}
+
+/// A body's direction turned by its motion `m`, then like the rest of its scene (`turned`).
+fn turned_by(m: u32, n: vec3<f32>) -> vec3<f32> {
+    if (m == 0u) { return turned(n); }
+    return turned(n + vec3<f32>(dot(motion_row(m, 0).xyz, n), dot(motion_row(m, 1).xyz, n), dot(motion_row(m, 2).xyz, n)));
+}
+
+// The palette's PBR materials (`Material` in view.rs): for palette row r, texel row 4r holds each
+// entry's linear base colour and a PBR flag, row 4r + 1 its metallic fraction, roughness and IOR,
+// row 4r + 2 a point on its turn axis (w 1 when it has one) and row 4r + 3 the axis's direction.
 @group(0) @binding(2) var pbr_materials: texture_2d<f32>;
+
+/// Where palette entry `i`'s first material texel is.
+fn material_at(i: u32) -> vec2<u32> {
+    return vec2<u32>(i & 2047u, (i >> 11u) * 4u);
+}
 
 /// Palette entry `i`'s hatch word (`hatch`, under 256) with the entry's PBR finish packed above
 /// it: metallic in bits 8-15, roughness in 16-23, bit 24 set when the entry has one. An entry
 /// past the material texture has none (a load out of range is not defined).
 fn finish_h(i: u32, hatch: u32) -> u32 {
-    let at = vec2<u32>(i & 2047u, (i >> 11u) * 2u);
-    if (at.y + 1u >= textureDimensions(pbr_materials).y || textureLoad(pbr_materials, at, 0).w < 0.5) { return hatch; }
+    let at = material_at(i);
+    if (at.y + 3u >= textureDimensions(pbr_materials).y || textureLoad(pbr_materials, at, 0).w < 0.5) { return hatch; }
     let p = clamp(textureLoad(pbr_materials, at + vec2<u32>(0u, 1u), 0).xy, vec2<f32>(0.0), vec2<f32>(1.0));
     let q = vec2<u32>(round(p * 255.0));
     return hatch | (q.x << 8u) | (q.y << 16u) | (1u << 24u);
+}
+
+/// Palette entry `i`'s turn axis in the scene's frame: a point on it (w 1 when the entry has one,
+/// 0 for none) and its direction.
+struct Turn {
+    at: vec4<f32>,
+    along: vec3<f32>,
+}
+
+fn turn_of(i: u32) -> Turn {
+    let at = material_at(i);
+    if (at.y + 3u >= textureDimensions(pbr_materials).y) { return Turn(vec4<f32>(0.0), vec3<f32>(0.0)); }
+    return Turn(textureLoad(pbr_materials, at + vec2<u32>(0u, 2u), 0), textureLoad(pbr_materials, at + vec2<u32>(0u, 3u), 0).xyz);
 }
 
 /// A palette entry's colour bytes as byte/255 (the old Unorm8x4 conversion, bit for bit).
@@ -109,13 +189,11 @@ fn palette(i: u32) -> vec4<f32> {
     return unpack_color(palette_entry(i).x);
 }
 
-fn to_linear(c: vec3<f32>) -> vec3<f32> {
-    return select(c, pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
-}
-
+/// A display colour as the target wants it: decoded to linear light for an sRGB target, whose
+/// encoding then gives the same bytes back.
 fn out_color(c: vec4<f32>) -> vec4<f32> {
     if (u.back.w > 0.5) {
-        return vec4<f32>(to_linear(c.rgb), c.a);
+        return vec4<f32>(srgb_decode(c.rgb), c.a);
     }
     return c;
 }
@@ -132,6 +210,10 @@ struct TOut {
     // every vertex shader that gives none: a struct's fields start at zero).
     @location(4) v: f32,
     @location(5) @interpolate(flat) hv: u32,
+    // The face's turn axis in the world (`turn_of`): a point on it, w 1 when it has one (0 for
+    // every vertex shader that gives none), and its direction.
+    @location(6) @interpolate(flat) turn_at: vec4<f32>,
+    @location(7) @interpolate(flat) turn_along: vec3<f32>,
 };
 
 /// A built triangle's vertex: its value word is an f32's bits, or all ones for none
@@ -154,14 +236,30 @@ fn vs_tri_planned(@location(0) local: vec3<f32>, @location(1) n: vec3<f32>, @loc
 /// A triangle vertex at `local` with normal `n` in palette entry `c`, without a value.
 fn tri_vertex(local: vec3<f32>, n: vec3<f32>, c: u32) -> TOut {
     var o: TOut;
-    let p = placed(local);
-    o.pos = u.vp * vec4<f32>(p, 1.0);
-    o.n = turned(n);
     let e = palette_entry(c);
+    let m = motion_of(e);
+    let p = placed_by(m, local);
+    o.pos = face_pushed(u.vp * vec4<f32>(p, 1.0));
+    o.n = turned_by(m, n);
     o.c = unpack_color(e.x);
-    o.h = finish_h(c, e.y);
+    o.h = finish_h(c, e.y & 255u);
     o.wp = p;
+    let t = turn_of(c);
+    o.turn_at = vec4<f32>(placed_by(m, t.at.xyz), t.at.w);
+    o.turn_along = turned_by(m, t.along);
     return o;
+}
+
+/// The bit of a placement's palette word that marks the whole hovered body (`HOVER_FLAG` in
+/// view.rs): never part of a palette index.
+const HOVER_FLAG: u32 = 0x80000000u;
+
+/// A placement's colour: its palette entry's, with the hover tint added (as `hover_color` adds
+/// it) when its word carries `HOVER_FLAG`.
+fn placement_color(word: u32, e: vec2<u32>) -> vec4<f32> {
+    let c = unpack_color(e.x);
+    if ((word & HOVER_FLAG) != 0u) { return vec4<f32>(c.rgb + u.tint.rgb, c.a); }
+    return c;
 }
 
 /// Shared triangles (in their part's own frame) drawn at one placement: the rows of its rigid
@@ -175,18 +273,24 @@ fn vs_tri_inst(
     @location(3) r0: vec4<f32>,
     @location(4) r1: vec4<f32>,
     @location(5) r2: vec4<f32>,
-    @location(6) c: u32,
+    @location(6) word: u32,
+    @location(9) s: u32,
 ) -> TOut {
     let q = vec4<f32>(p, 1.0);
-    let wp = placed(vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
+    let c = word & ~HOVER_FLAG;
+    let e = palette_entry(c);
+    let m = placement_motion(s, e);
+    let wp = placed_by(m, vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
     let pn = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
     var o: TOut;
-    o.pos = u.vp * vec4<f32>(wp, 1.0);
-    o.n = turned(pn);
-    let e = palette_entry(c);
-    o.c = unpack_color(e.x);
-    o.h = finish_h(c, e.y);
+    o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
+    o.n = turned_by(m, pn);
+    o.c = placement_color(word, e);
+    o.h = finish_h(c, e.y & 255u);
     o.wp = wp;
+    // shortcut: no turn axis (a copy's brushing picks a world axis), since the palette's axis is
+    // in the first copy's frame; move it from the definition's frame if copies of turned metal
+    // parts need rings.
     return o;
 }
 
@@ -209,16 +313,18 @@ fn vs_tri_inst_flat(
     @location(3) r0: vec4<f32>,
     @location(4) r1: vec4<f32>,
     @location(5) r2: vec4<f32>,
-    @location(6) c: u32,
+    @location(6) word: u32,
+    @location(9) s: u32,
 ) -> FOut {
     let q = vec4<f32>(p, 1.0);
-    let wp = placed(vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
-    var o: FOut;
-    o.pos = u.vp * vec4<f32>(wp, 1.0);
-    o.rp = wp - u.eye.xyz;
+    let c = word & ~HOVER_FLAG;
     let e = palette_entry(c);
-    o.c = unpack_color(e.x);
-    o.h = finish_h(c, e.y);
+    let wp = placed_by(placement_motion(s, e), vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q)));
+    var o: FOut;
+    o.pos = face_pushed(u.vp * vec4<f32>(wp, 1.0));
+    o.rp = wp - u.eye.xyz;
+    o.c = placement_color(word, e);
+    o.h = finish_h(c, e.y & 255u);
     return o;
 }
 
@@ -465,10 +571,21 @@ fn solid(i: TOut, front: bool) -> vec4<f32> {
     let fw = fwidth(ndv);
     if (clipped(i.wp)) { discard; }
     if (!front && sectioned()) { return cap_color(i); }
-    if (u.ana.x > 0.5 && length(i.n) > 0.5) {
+    // Under surface analysis a selected face shows the selection tint (the one-body highlight's
+    // own pass draws it over the analysis); with every shown body selected, every face does.
+    if (u.ana.x > 0.5 && length(i.n) > 0.5 && u.sel.w < 0.5) {
         return analysis(i, k);
     }
-    let c = lit(i, occlusion(i));
+    // Every shown body is selected: an exact copy of what the highlight pipeline's one-body tint
+    // computes (`fs_hl_selected`: `lit_color(i, 1.0, vec4(u.sel.rgb, i.c.a), false)`), so the two
+    // tints agree instead of merely looking similar. One uniform, no per-body highlight entry.
+    // A branch on a uniform, not `select()`, which would light every fragment twice.
+    var c: vec4<f32>;
+    if (u.sel.w > 0.5) {
+        c = lit_color(i, 1.0, vec4<f32>(u.sel.rgb, i.c.a), false);
+    } else {
+        c = lit(i, occlusion(i));
+    }
     // Silhouettes (styles with edges): where a curved surface turns away from the eye, a line
     // about 1.5 px wide, on the visible surface only (depth-correct).
     if (u.screen.w > 0.5 && length(i.n) > 0.5 && fw > 1e-6) {
@@ -825,7 +942,7 @@ fn lit(i: TOut, visibility: f32) -> vec4<f32> {
     return lit_color(i, visibility, i.c, true);
 }
 
-/// sRGB to linear light, exact (the straight segment too, which `to_linear` leaves out).
+/// sRGB to linear light, exact, with the straight segment near black.
 fn srgb_decode(c: vec3<f32>) -> vec3<f32> {
     return select(c / 12.92, pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
 }
@@ -857,10 +974,9 @@ fn finishes() -> bool {
     return (u32(u.sky.w) & 2u) != 0u && dot(u.sky.xyz, u.sky.xyz) > 0.25;
 }
 
-// The studio finished faces are lit by (`Environment` in environment.rs): model-viewer's neutral
-// room, as is, at model-viewer's exposure for it (`STUDIO_EXPOSURE`), prefiltered for image-based
-// lighting (split-sum). Mip k of the specular map
-// is the studio through a GGX lobe of perceptual roughness k / (mips - 1); the diffuse map is its
+// The studio finished faces are lit by (`Environment` in environment.rs), as is (exposure 1),
+// prefiltered for image-based lighting (split-sum). Mip k of the specular map is the studio
+// through a GGX lobe of perceptual roughness k / (mips - 1); the diffuse map is its
 // cosine-weighted irradiance / π; the DFG table is the GGX environment BRDF's scale and bias.
 @group(0) @binding(3) var studio_specular: texture_2d<f32>;
 @group(0) @binding(4) var studio_diffuse: texture_2d<f32>;
@@ -868,8 +984,6 @@ fn finishes() -> bool {
 @group(0) @binding(6) var studio_dfg: texture_2d<f32>;
 /// The specular map's mips (`SPECULAR_LEVELS`; WebGL2 cannot ask a texture for its count).
 const STUDIO_MIPS: f32 = 6.0;
-/// model-viewer's exposure for its neutral room under Khronos PBR Neutral (`COMMERCE_EXPOSURE`).
-const STUDIO_EXPOSURE: f32 = 1.3;
 
 /// Where the direction `d` (in the studio's frame, y up) lands on its equirectangular maps.
 fn studio_uv(d: vec3<f32>) -> vec2<f32> {
@@ -908,6 +1022,135 @@ fn ibl_ggx_fresnel(nv: f32, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
     return fss_ess + fms_ems;
 }
 
+/// A satin metal's brushing, worked out from the face and its turn axis (the viewport's meshes
+/// carry no UVs or tangents). A face with a turn axis is turned: the grooves run around the axis,
+/// rings on a round face and circles about the centre on a flat face across it. Elsewhere they run
+/// around the world axis the normal is most across, so an upright cylinder still gets rings and a
+/// flat face straight strokes. `across` points across the grooves, `grain` is -0.5..0.5 per
+/// groove, `strength` is 0 off satin metals.
+struct Brush {
+    across: vec3<f32>,
+    grain: f32,
+    strength: f32,
+}
+
+/// Line widths (mm) of the three octaves, and their weights: hairlines, as an abrasive belt
+/// leaves them, not bands.
+const BRUSH_PERIODS: vec3<f32> = vec3<f32>(0.3, 0.12, 0.05);
+const BRUSH_WEIGHTS: vec3<f32> = vec3<f32>(0.45, 0.35, 0.2);
+/// How long a scratch runs before it fades, in its octave's line widths (the noise along a line
+/// changes once per this much, so scratches come out about this long, some shorter).
+const BRUSH_LENGTHS: vec3<f32> = vec3<f32>(45.0, 70.0, 110.0);
+/// How much a line lightens or darkens the metal, roughens it, tilts its normal across the
+/// grooves (what makes a scratch catch the light), and stretches the reflection along them.
+const BRUSH_SHADE: f32 = 0.1;
+const BRUSH_ROUGHNESS: f32 = 0.1;
+const BRUSH_TILT: f32 = 0.12;
+const BRUSH_ANISOTROPY: f32 = 0.55;
+/// An octave fades out between these many pixels per line, so distant metal never shimmers.
+const BRUSH_MIN_PX: vec2<f32> = vec2<f32>(1.0, 3.0);
+
+fn brush_hash(x: f32) -> f32 {
+    return fract(sin(x * 12.9898) * 43758.5453);
+}
+
+/// Smooth value noise on the line: 0..1, one random level per unit. With `cells` above zero it
+/// repeats every `cells` units (a groove that closes on itself has no seam).
+fn brush_noise(x: f32, cells: f32) -> f32 {
+    let k = floor(x);
+    let f = x - k;
+    var k0 = k;
+    var k1 = k + 1.0;
+    if (cells > 0.0) {
+        k0 = k0 - cells * floor(k0 / cells);
+        k1 = k1 - cells * floor(k1 / cells);
+    }
+    return mix(brush_hash(k0), brush_hash(k1), f * f * (3.0 - 2.0 * f));
+}
+
+/// Where along the grooves a point is: a length (`closed` 0), or for grooves that close on
+/// themselves the turn about the axis, 0..1, with `closed` 1 (`radius` is then the groove's
+/// radius on a round face, or 0 when it is the groove's own radius, a flat face's circles).
+struct Along {
+    at: f32,
+    closed: f32,
+    radius: f32,
+}
+
+/// One groove's scratch, -0.5..0.5: a level of its own, shown along stretches where its noise
+/// along the groove is high, so scratches start and stop.
+fn scratch(groove: f32, seed: f32, period: f32, length: f32, along: Along) -> f32 {
+    let level = brush_hash((groove + seed) * 1.618 + 0.5) - 0.5;
+    let shift = brush_hash(groove + seed + 0.37);
+    var shown = 0.0;
+    if (along.closed > 0.5) {
+        let radius = select(along.radius, (groove + 0.5) * period, along.radius <= 0.0);
+        let cells = max(1.0, round(6.2831853 * radius / (period * length)));
+        shown = brush_noise(along.at * cells + floor(shift * cells), cells);
+    } else {
+        shown = brush_noise(along.at / (period * length) + shift * 97.0, 0.0);
+    }
+    return level * smoothstep(0.35, 0.75, shown);
+}
+
+/// Pixels on screen per millimetre along `d` at `p`.
+fn px_per_mm(p: vec3<f32>, d: vec3<f32>) -> f32 {
+    let a = u.vp * vec4<f32>(p, 1.0);
+    let b = u.vp * vec4<f32>(p + d, 1.0);
+    return length((b.xy / b.w - a.xy / a.w) * 0.5 * u.screen.xy);
+}
+
+fn brushing(p: vec3<f32>, n: vec3<f32>, metallic: f32, roughness: f32, turn_at: vec4<f32>, turn_along: vec3<f32>) -> Brush {
+    // shortcut: no appearance says "brushed", so every metal between polished and blasted is; a
+    // brushed flag in the look is the upgrade if polished-but-rough metals need to stay plain.
+    let strength = smoothstep(0.5, 1.0, metallic) * smoothstep(0.18, 0.28, roughness) * (1.0 - smoothstep(0.6, 0.75, roughness));
+    // Ties go to Z, then Y: an upright face's strokes run level, a flat face's along X.
+    let m = abs(n) + vec3<f32>(2e-3, 1e-3, 0.0);
+    var axis = vec3<f32>(0.0, 0.0, 1.0);
+    if (m.y < m.z && m.y <= m.x) { axis = vec3<f32>(0.0, 1.0, 0.0); }
+    if (m.x < m.z && m.x < m.y) { axis = vec3<f32>(1.0, 0.0, 0.0); }
+    var across = cross(n, normalize(cross(n, axis)));
+    var s = dot(p, across);
+    var along = Along(dot(p, cross(across, n)), 0.0, 0.0);
+    if (turn_at.w > 0.5 && dot(turn_along, turn_along) > 1e-12) {
+        let a = normalize(turn_along);
+        let r = p - turn_at.xyz;
+        let radial = r - a * dot(r, a);
+        let flat_across = radial - n * dot(radial, n);
+        let round_across = a - n * dot(a, n);
+        // The turn about the axis, 0..1, from a frame square to it.
+        let e1 = normalize(cross(a, select(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), abs(a.x) > 0.9)));
+        let turn = atan2(dot(radial, cross(a, e1)), dot(radial, e1)) / 6.2831853 + 0.5;
+        if (abs(dot(n, a)) > 0.7 && dot(flat_across, flat_across) > 1e-8) {
+            // A face across the axis, faced on the lathe: circles about the centre.
+            across = normalize(flat_across);
+            s = length(radial);
+            along = Along(turn, 1.0, 0.0);
+        } else if (dot(round_across, round_across) > 1e-8) {
+            // A face around the axis (a cylinder, cone or torus): rings along it.
+            across = normalize(round_across);
+            s = dot(r, a);
+            along = Along(turn, 1.0, length(radial));
+        }
+    }
+    let px = px_per_mm(p, across);
+    var grain = 0.0;
+    for (var k = 0; k < 3; k++) {
+        let period = BRUSH_PERIODS[k];
+        let fade = smoothstep(BRUSH_MIN_PX.x, BRUSH_MIN_PX.y, px * period);
+        if (fade <= 0.0) { continue; }
+        // Each line has its own scratch; a pixel between two blends them over a sharp step, so
+        // lines read as lines, not as soft bands.
+        let x = s / period;
+        let g = floor(x);
+        let w = smoothstep(0.3, 0.7, x - g);
+        let seed = 7919.0 * f32(k);
+        let line = mix(scratch(g, seed, period, BRUSH_LENGTHS[k], along), scratch(g + 1.0, seed, period, BRUSH_LENGTHS[k], along), w);
+        grain += fade * BRUSH_WEIGHTS[k] * line;
+    }
+    return Brush(across, grain * 2.0 * strength, strength);
+}
+
 /// An opaque face with a material finish, lit by the studio (image-based, split-sum, as the
 /// Khronos glTF Sample Renderer): the PBR appearance's metallic and roughness (`finish_h`), else
 /// a plain dielectric of roughness 0.5 (a product choice: satin). The studio turns with
@@ -918,7 +1161,9 @@ fn ibl_ggx_fresnel(nv: f32, roughness: f32, f0: vec3<f32>) -> vec3<f32> {
 fn finished(i: TOut, n: vec3<f32>, visibility: f32, base: vec4<f32>) -> vec4<f32> {
     let pbr = (i.h >> 24u) != 0u;
     let metallic = select(0.0, f32((i.h >> 8u) & 255u) / 255.0, pbr);
-    let roughness = select(0.5, f32((i.h >> 16u) & 255u) / 255.0, pbr);
+    let satin = select(0.5, f32((i.h >> 16u) & 255u) / 255.0, pbr);
+    let brush = brushing(i.wp, n, metallic, satin, i.turn_at, i.turn_along);
+    let roughness = clamp(satin + BRUSH_ROUGHNESS * brush.grain, 0.045, 1.0);
     let a = roughness * roughness;
     // The view per pixel in perspective: a flat face then reflects a gradient, not one colour.
     let back = normalize(u.back.xyz);
@@ -930,8 +1175,14 @@ fn finished(i: TOut, n: vec3<f32>, visibility: f32, base: vec4<f32>) -> vec4<f32
     if (dot(front, front) < 1e-6) { front = select(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), abs(up.x) > 0.9); }
     front = normalize(front);
     let side = cross(up, front);
+    // Brushed metal reflects a streak across its grooves: Filament's bent normal for anisotropy
+    // (getReflectedVector), along the grooves' cross direction.
+    let streak = cross(brush.across, v);
+    // A scratch tilts the surface a little across the grooves, so it catches the light on its own.
+    let scratched = normalize(n + brush.across * (BRUSH_TILT * brush.grain));
+    let bent = normalize(mix(scratched, cross(streak, brush.across), BRUSH_ANISOTROPY * brush.strength));
     // Filament getSpecularDominantDirection, whose roughness is a (perceptual squared).
-    let r = normalize(mix(reflect(-v, n), n, a * a));
+    let r = normalize(mix(reflect(-v, bent), n, a * a));
     let rl = vec3<f32>(dot(r, side), dot(r, up), dot(r, front));
     let nl = vec3<f32>(dot(n, side), dot(n, up), dot(n, front));
     // Khronos getIBLRadianceGGX: lod = perceptual roughness × (mips - 1).
@@ -939,12 +1190,12 @@ fn finished(i: TOut, n: vec3<f32>, visibility: f32, base: vec4<f32>) -> vec4<f32
     // Filament SpecularAO_Lagarde, whose roughness is a.
     let specular_ao = clamp(pow(nv + visibility, exp2(-16.0 * a - 1.0)) - 1.0 + visibility, 0.0, 1.0);
     let specular = textureSampleLevel(studio_specular, studio_s, studio_uv(rl), lod).rgb * specular_ao;
-    let albedo = srgb_decode(base.rgb);
+    let albedo = srgb_decode(base.rgb) * (1.0 + BRUSH_SHADE * brush.grain);
     let diffuse = textureSampleLevel(studio_diffuse, studio_s, studio_uv(nl), 0.0).rgb * albedo * visibility;
     // Khronos pbr.frag: a dielectric (F0 0.04, glTF's IOR 1.5) and a metal, mixed by metallic.
     let dielectric = mix(diffuse, specular, ibl_ggx_fresnel(nv, roughness, vec3<f32>(0.04)));
     let metal = specular * ibl_ggx_fresnel(nv, roughness, albedo);
-    let mapped = pbr_neutral(mix(dielectric, metal, metallic) * STUDIO_EXPOSURE);
+    let mapped = pbr_neutral(mix(dielectric, metal, metallic));
     if (u.back.w > 0.5) { return vec4<f32>(mapped, base.a); }
     return vec4<f32>(srgb_encode(mapped), base.a);
 }
@@ -1057,7 +1308,7 @@ fn lifted_z(p: vec3<f32>, c: vec4<f32>, px: f32, half: vec2<f32>) -> f32 {
 
 @vertex
 fn vs_line(@builtin(vertex_index) vi: u32, @location(0) local_a: vec3<f32>, @location(1) local_b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
-    return line_vertex(vi, local_a, local_b, c, wbits);
+    return line_vertex(vi, local_a, local_b, c, wbits, motion_at(c));
 }
 
 /// A scene's own lines drawn again in another colour and width (a whole hovered body's edges,
@@ -1070,12 +1321,14 @@ fn vs_line_lit(@builtin(vertex_index) vi: u32, @location(0) local_a: vec3<f32>, 
     let eighths = style & 127u;
     var w = bitcast<u32>(f32(eighths) / 8.0);
     if ((style & 128u) != 0u) { w = 0x80000000u | (eighths << 24u); }
-    return line_vertex(vi % 6u, local_a, local_b, style >> 8u, w);
+    // Moved with the body whose line it is: the entry it was built with names the motion.
+    return line_vertex(vi % 6u, local_a, local_b, style >> 8u, w, motion_at(c));
 }
 
-fn line_vertex(vi: u32, local_a: vec3<f32>, local_b: vec3<f32>, c: u32, wbits: u32) -> LOut {
-    let a = placed(local_a);
-    let b = placed(local_b);
+/// A line from `local_a` to `local_b` in palette entry `c`, moved by motion `m` (0: none).
+fn line_vertex(vi: u32, local_a: vec3<f32>, local_b: vec3<f32>, c: u32, wbits: u32, m: u32) -> LOut {
+    let a = placed_by(m, local_a);
+    let b = placed_by(m, local_b);
     var pa = a;
     var pb = b;
     var ca = u.vp * vec4<f32>(a, 1.0);
@@ -1122,11 +1375,11 @@ fn line_vertex(vi: u32, local_a: vec3<f32>, local_b: vec3<f32>, c: u32, wbits: u
     var z = base.z;
     if (lifted && base.w > 1e-6) {
         let p = select(pa, pb, t > 0.5);
-        let g = grazing(p, turned(octahedral(wbits & 4095u)), turned(octahedral((wbits >> 12u) & 4095u)));
+        let g = grazing(p, turned_by(m, octahedral(wbits & 4095u)), turned_by(m, octahedral((wbits >> 12u) & 4095u)));
         z = lifted_z(p, base, wd * 0.5 * g + 1.0, half);
     }
     var o: LOut;
-    o.pos = vec4<f32>(base.xy + off / half * base.w, z, base.w);
+    o.pos = face_pushed(vec4<f32>(base.xy + off / half * base.w, z, base.w));
     let col = palette(c);
     o.c = vec4<f32>(col.rgb, col.a * (wa / wd));
     o.wp = select(pa, pb, t > 0.5);

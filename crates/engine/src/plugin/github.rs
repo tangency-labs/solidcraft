@@ -41,6 +41,8 @@ pub struct Offer {
     pub version: String,
     pub url: String,
     pub sha256: String,
+    /// The `owner/repo` it came from.
+    pub repo: String,
 }
 
 /// An HTTPS GitHub repository, optionally naming a release tag.
@@ -159,7 +161,7 @@ fn release(json: &[u8], repo: &str, id: Option<&str>) -> Result<Offer, FetchErro
                 asset.get("name").and_then(Value::as_str).unwrap_or("the plugin package")
             ))
         })?;
-    Ok(Offer { version, url: url.to_string(), sha256 })
+    Ok(Offer { version, url: url.to_string(), sha256, repo: repo.to_string() })
 }
 
 /// The updater and installer use the same bounded download and digest check.

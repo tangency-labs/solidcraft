@@ -136,6 +136,11 @@ fn file(dir: &Path, id: &str, ext: &str) -> PathBuf {
     dir.join(format!("{id}.{ext}"))
 }
 
+/// Release a successful probe before returning, even if a starting child inherited the handle.
+fn lock_is_available(lock: File) -> bool {
+    lock.try_lock().is_ok() && lock.unlock().is_ok()
+}
+
 /// Entries left by apps that are no longer running, newest first.
 pub fn orphans(dir: &Path) -> Vec<Entry> {
     let mut out: Vec<Entry> = fs::read_dir(dir)
@@ -153,10 +158,7 @@ pub fn orphans(dir: &Path) -> Vec<Entry> {
                 return None;
             }
             // Held by a running app: not an orphan.
-            let lock = File::open(file(dir, &entry.id, "lock"));
-            if let Ok(l) = &lock
-                && l.try_lock().is_err()
-            {
+            if File::open(file(dir, &entry.id, "lock")).is_ok_and(|lock| !lock_is_available(lock)) {
                 return None;
             }
             Some(entry)
@@ -264,6 +266,7 @@ impl Drop for Autosaver {
         if let Some(w) = self.writing.take() {
             let _ = w.done.recv();
         }
+        self.release_lock();
     }
 }
 
@@ -282,6 +285,9 @@ struct Snapshot {
     visibility: crate::Visibility,
     dimension_values: crate::DimensionValues,
     path: Option<String>,
+    /// Whether the design's saves keep the bodies of linked designs ([`Session::linked_bodies`]).
+    /// The copy holds them either way; it carries the choice, so a recovered design keeps it.
+    linked_bodies: bool,
 }
 
 impl Snapshot {
@@ -291,7 +297,11 @@ impl Snapshot {
     fn write(&self) -> Result<Vec<String>> {
         let io = |e: std::io::Error| EngineError::Other(format!("autosave: {e}"));
         let (doc, left_out) = drawing::openable(&self.doc);
-        let bytes = solidcraft_io::write_design_container(&crate::as_saved(&doc, &self.visibility, &self.dimension_values))?;
+        let mut design = crate::as_saved(&doc, &self.visibility, &self.dimension_values);
+        if !self.linked_bodies {
+            design.to_mut().linked_bodies_left_out = true;
+        }
+        let bytes = solidcraft_io::write_design_container(&design)?;
         solidcraft_io::write_atomic(&file(&self.dir, &self.id, solidcraft_io::DESIGN_EXT), &bytes, false).map_err(io)?;
         let entry = Entry {
             id: self.id.clone(),
@@ -307,6 +317,13 @@ impl Snapshot {
 }
 
 impl Autosaver {
+    fn release_lock(&mut self) {
+        // Closing our handle alone leaves the lock held by any copy inherited by a child.
+        if let Some(lock) = self.lock.take() {
+            let _ = lock.unlock();
+        }
+    }
+
     /// Start autosaving into `dir` (created if needed), holding this design's lock.
     pub fn new(dir: &Path, interval: Duration) -> Result<Autosaver> {
         let io = |e: std::io::Error| EngineError::Other(format!("{}: {e}", dir.display()));
@@ -316,7 +333,7 @@ impl Autosaver {
             let p = e.path();
             if p.extension().and_then(|x| x.to_str()) == Some("lock")
                 && !p.with_extension("json").exists()
-                && File::open(&p).is_ok_and(|l| l.try_lock().is_ok())
+                && File::open(&p).is_ok_and(lock_is_available)
             {
                 let _ = fs::remove_file(&p);
             }
@@ -374,7 +391,15 @@ impl Autosaver {
                 }
                 // No thread to write on: write here, as before.
                 Err(_) => {
-                    let snapshot = Snapshot { dir: self.dir.clone(), id: self.id.clone(), doc, visibility, dimension_values, path: s.path.clone() };
+                    let snapshot = Snapshot {
+                        dir: self.dir.clone(),
+                        id: self.id.clone(),
+                        doc,
+                        visibility,
+                        dimension_values,
+                        path: s.path.clone(),
+                        linked_bodies: s.linked_bodies,
+                    };
                     let written = snapshot.write();
                     self.written(s, snapshot.doc, snapshot.visibility, written)?;
                     Ok(true)
@@ -415,6 +440,7 @@ impl Autosaver {
             visibility: s.visibility.clone(),
             dimension_values: s.dimension_values.clone(),
             path: s.path.clone(),
+            linked_bodies: s.linked_bodies,
         })
     }
 
@@ -462,7 +488,7 @@ impl Autosaver {
         for ext in ["json"].into_iter().chain(solidcraft_io::DESIGN_EXTS) {
             let _ = fs::remove_file(file(&self.dir, &self.id, ext));
         }
-        self.lock = None;
+        self.release_lock();
         let _ = fs::remove_file(file(&self.dir, &self.id, "lock"));
     }
 
@@ -470,10 +496,10 @@ impl Autosaver {
     /// launch to offer. The lock is released either way.
     pub fn close(mut self, s: &Session) {
         let _ = self.save(s);
+        self.release_lock();
         if !self.has_entry {
             let _ = fs::remove_file(file(&self.dir, &self.id, "lock"));
         }
-        self.lock = None;
     }
 }
 
@@ -540,6 +566,34 @@ mod tests {
             std::thread::sleep(Duration::from_millis(1));
             a.tick(s, false).unwrap();
         }
+    }
+
+    #[test]
+    fn a_closed_autosave_is_recoverable_while_a_copy_of_its_lock_is_open() {
+        let d = dir("copied-lock");
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        for close in [true, false] {
+            let mut a = Autosaver::new(&d, Duration::ZERO).unwrap();
+            assert!(a.save(&s).unwrap());
+            let id = a.id.clone();
+            let copy = a.lock.as_ref().unwrap().try_clone().unwrap();
+            assert!(orphans(&d).is_empty(), "a live autosave stays hidden");
+            if close {
+                a.close(&s);
+            } else {
+                drop(a);
+            }
+            let probe = File::open(file(&d, &id, "lock")).unwrap();
+            let probe_copy = probe.try_clone().unwrap();
+            assert!(lock_is_available(probe), "the autosaver released its lock");
+            let found = orphans(&d);
+            assert_eq!(found.iter().map(|entry| &entry.id).collect::<Vec<_>>(), [&id]);
+            drop(probe_copy);
+            drop(copy);
+            remove(&d, &id).unwrap();
+        }
+        fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]

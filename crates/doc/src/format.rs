@@ -330,6 +330,42 @@ pub fn pending_names() -> Vec<String> {
     DESIGN.pending_names()
 }
 
+/// Where format steps list the parameters, text parameters and feature inputs of an older design
+/// named after what a newer build made a unit (`g`, `kg`…). [`read`] takes the list out and
+/// renames them (`Document::rename_unit_word_params`), as the build that saved the design read
+/// them.
+const UNIT_WORD_PARAMS: &str = "unit_word_params";
+
+/// List under [`UNIT_WORD_PARAMS`] which of `words` name a parameter, a text parameter or a
+/// feature input of `v`, in the order of `words`, after the names an earlier step listed (a
+/// damaged list is refused, as `read` refuses it). The names are read once, each looked up in
+/// `words`, so a hostile file's size can't make it slow. A change that makes words units calls this from its step, with its
+/// own words as they were when it was made.
+fn list_unit_word_params(v: &mut Value, words: &[&str]) -> Result<()> {
+    let mut listed = solidcraft_format::take_names(v, UNIT_WORD_PARAMS, "design")?.unwrap_or_default();
+    let mut hit = vec![false; words.len()];
+    let params =
+        ["params", "text_params"].into_iter().filter_map(|key| v.get(key)).filter_map(Value::as_array).flatten().filter_map(|p| p.get("name"));
+    let inputs =
+        v.get("features").and_then(Value::as_array).into_iter().flatten().filter_map(|f| f.get("param_names")).filter_map(Value::as_array).flatten();
+    for name in params.chain(inputs).filter_map(Value::as_str) {
+        if let Some(h) = words.iter().position(|w| *w == name).and_then(|i| hit.get_mut(i)) {
+            *h = true;
+        }
+    }
+    for (word, _) in words.iter().zip(&hit).filter(|(_, h)| **h) {
+        if !listed.iter().any(|n| n.as_str() == *word) {
+            listed.push(word.to_string());
+        }
+    }
+    if !listed.is_empty()
+        && let Some(o) = v.as_object_mut()
+    {
+        o.insert(UNIT_WORD_PARAMS.into(), listed.into());
+    }
+    Ok(())
+}
+
 pub fn format_string(n: u32) -> String {
     DESIGN.format_string(n)
 }
@@ -550,10 +586,21 @@ fn v2_to_v3(v: &mut Value) -> Result<()> {
 /// Read a design file's JSON, upgrading older formats.
 pub fn read(s: &str) -> Result<Document> {
     let mut v: Value = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("not a SolidCraft design: {e}")))?;
+    let drawings = if v.get("drawings").is_some() {
+        #[derive(serde::Deserialize)]
+        struct Inline<'a> {
+            #[serde(borrow)]
+            drawings: &'a serde_json::value::RawValue,
+        }
+        let raw: Inline<'_> = serde_json::from_str(s).map_err(|e| DocError::Invalid(format!("not a SolidCraft design: {e}")))?;
+        serde_json::from_str::<Vec<&serde_json::value::RawValue>>(raw.drawings.get()).ok()
+    } else {
+        None
+    };
     let (version, applied) = DESIGN.take_version(&mut v)?;
     match DESIGN.newer(version, applied.as_deref()) {
-        Some(newer) => crate::newer_file::read(v, version, applied, newer),
-        None => decode(v, version, applied.as_deref()),
+        Some(newer) => crate::newer_file::read(v, version, applied, newer, drawings.as_deref()),
+        None => decode(v, version, applied.as_deref(), drawings.as_deref()),
     }
 }
 
@@ -572,6 +619,7 @@ pub fn says_newer(text: &str) -> bool {
 
 /// The checks of a design's JSON that need nothing outside the part of it they are given.
 pub(crate) fn check_raw(v: &Value, version: u32) -> Result<Vec<(usize, usize)>> {
+    validate_top_level_counts(v)?;
     check_design_numbers(v)?;
     crate::config::validate_rules_json(v)?;
     crate::config::validate_styles_json(v)?;
@@ -585,11 +633,26 @@ pub(crate) fn check_raw(v: &Value, version: u32) -> Result<Vec<(usize, usize)>> 
     validate_wires(v, version)
 }
 
+/// Bound top-level record lists before format upgrades run, so crafted older designs with
+/// oversized feature, parameter, component, occurrence or folder lists fail in O(1).
+fn validate_top_level_counts(value: &Value) -> Result<()> {
+    let too_many = |key: &str, max: usize| value.get(key).and_then(Value::as_array).is_some_and(|list| list.len() > max);
+    if too_many("features", crate::document::MAX_FEATURES)
+        || too_many("params", crate::document::MAX_PARAMS)
+        || too_many("components", crate::document::MAX_FEATURES)
+        || too_many("occurrences", crate::assembly::MAX_OCCURRENCES)
+        || too_many("timeline_groups", crate::document::MAX_FEATURES)
+    {
+        return Err(DocError::Invalid("document too large".into()));
+    }
+    Ok(())
+}
+
 /// [`check_raw`], the upgrade and the typed record alone: what a piece of a design must pass by
 /// itself ([`crate::newer_file`]), with nothing else in the file for it to refer to.
 pub(crate) fn check_piece(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<()> {
     // Each drawing is a record of its own family, read by its own rules, numbers and all.
-    take_drawings(&mut v)?;
+    take_drawings(&mut v, None)?;
     check_raw(&v, version)?;
     DESIGN.upgrade(&mut v, version, applied)?;
     let d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
@@ -597,12 +660,18 @@ pub(crate) fn check_piece(mut v: Value, version: u32, applied: Option<&[String]>
 }
 
 /// A design's JSON, its format taken out, as the document it holds.
-pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> Result<Document> {
+pub(crate) fn decode(
+    mut v: Value,
+    version: u32,
+    applied: Option<&[String]>,
+    drawing_text: Option<&[&serde_json::value::RawValue]>,
+) -> Result<Document> {
     // Each drawing is a record of its own family, read by its own rules, numbers and all.
-    let drawings = take_drawings(&mut v)?;
+    let drawings = take_drawings(&mut v, drawing_text)?;
     let legacy_wires = check_raw(&v, version)?;
     validate_body_transfers(&v)?;
     DESIGN.upgrade(&mut v, version, applied)?;
+    let unit_words = solidcraft_format::take_names(&mut v, UNIT_WORD_PARAMS, "design")?.unwrap_or_default();
     let mut d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
     check_typed_numbers(&d)?;
     let mut legacy_by_feature = std::collections::BTreeMap::<usize, Vec<usize>>::new();
@@ -684,6 +753,27 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
             unplaced.join(", ")
         )));
     }
+    let bad_base: Vec<String> = d
+        .occurrences
+        .iter()
+        .filter(|o| o.base_transform.as_ref().is_some_and(|m| !crate::is_placement(m)))
+        .map(|o| format!("`{}`", o.name))
+        .collect();
+    if !bad_base.is_empty() {
+        return Err(DocError::Invalid(format!(
+            "damaged design: {} an invalid base placement: {}",
+            if bad_base.len() == 1 { "an occurrence has" } else { "occurrences have" },
+            bad_base.join(", ")
+        )));
+    }
+    for j in &d.assembly.joints {
+        if j.base_values.as_ref().is_some_and(|v| v.len() > 64) || j.base_exprs.len() > 64 {
+            return Err(DocError::Invalid(format!("damaged design: joint `{}` has too many base values", j.name)));
+        }
+        if j.base_values.as_ref().is_some_and(|v| v.iter().any(|x| !x.is_finite() || x.abs() > MAX_REAL)) {
+            return Err(DocError::Invalid(format!("damaged design: joint `{}` has an out-of-range base value", j.name)));
+        }
+    }
     if !all_unique(d.features.iter().map(|f| f.id))
         || !all_unique(d.components.iter().map(|c| c.id))
         || !all_unique(d.occurrences.iter().map(|o| o.id))
@@ -727,12 +817,45 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
         {
             return Err(DocError::Invalid(format!("damaged design: feature `{}` has an invalid profile frame", feature.name)));
         }
+        if let crate::FeatureKind::CapturePosition { moves, joints } = &feature.kind {
+            if moves.len() > crate::MAX_PLACEMENTS || joints.len() > crate::MAX_PLACEMENTS {
+                return Err(DocError::Invalid(format!("damaged design: feature `{}` has too many captured entries", feature.name)));
+            }
+            for m in moves {
+                if let Some(rot) = &m.rotation
+                    && (!crate::is_placement(rot) || rot[3][..3].iter().any(|v| v.abs() >= 1e-9))
+                {
+                    return Err(DocError::Invalid(format!("damaged design: feature `{}` has an invalid captured rotation", feature.name)));
+                }
+                if let Some(axis) = m.rotate_axis
+                    && axis.iter().any(|v| !v.is_finite())
+                {
+                    return Err(DocError::Invalid(format!("damaged design: feature `{}` has an invalid rotation axis", feature.name)));
+                }
+                if let Some(path) = &m.path
+                    && path.len() > crate::MAX_PLACEMENT_DEPTH + 1
+                {
+                    return Err(DocError::Invalid(format!(
+                        "damaged design: feature `{}` has a placement path deeper than {}",
+                        feature.name,
+                        crate::MAX_PLACEMENT_DEPTH
+                    )));
+                }
+            }
+            for cj in joints {
+                if cj.values.len() > 64 || cj.exprs.len() > 64 {
+                    return Err(DocError::Invalid(format!("damaged design: feature `{}` has too many captured joint values", feature.name)));
+                }
+                if cj.values.iter().any(|v| !v.is_finite() || v.abs() > MAX_REAL) {
+                    return Err(DocError::Invalid(format!("damaged design: feature `{}` has an out-of-range captured joint value", feature.name)));
+                }
+            }
+        }
     }
-    // Fill in what older designs (and hand-edited files) may lack; a no-op otherwise.
     crate::format_offsets::validate_typed(&d)?;
-    normalise(&mut d)?;
     // `next_id` is trusted by nothing: a hand-edited or generated file may omit it or leave it stale,
     // and the next feature, component or occurrence would then reuse an id that is already taken.
+    // Raised before `normalise`, which adds the occurrences older designs lack under new ids.
     let largest =
         d.features.iter().map(|f| f.id).chain(d.components.iter().map(|c| c.id)).chain(d.occurrences.iter().map(|o| o.id)).max().unwrap_or(0);
     let floor = largest.checked_add(1).ok_or_else(|| DocError::Invalid("damaged design: the id space is exhausted".into()))?;
@@ -740,6 +863,8 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
     // These lists used to allocate independently. Keep their existing identities, but never
     // let a later deletion make them available again after loading an older design.
     d.next_id = d.next_item_id()?;
+    // Fill in what older designs (and hand-edited files) may lack; a no-op otherwise.
+    normalise(&mut d, &unit_words)?;
     d.drawings = crate::drawing::in_design(drawings).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
     d.format = format_string(FORMAT);
     d.format_pending = pending_names();
@@ -748,12 +873,17 @@ pub(crate) fn decode(mut v: Value, version: u32, applied: Option<&[String]>) -> 
 
 /// Take a plain JSON design's drawings out of its JSON and read each, before the design's own
 /// rules see anything: a drawing this build can't read refuses the design, never dropped.
-fn take_drawings(v: &mut Value) -> Result<Vec<crate::drawing::Drawing>> {
+fn take_drawings(v: &mut Value, text: Option<&[&serde_json::value::RawValue]>) -> Result<Vec<crate::drawing::Drawing>> {
     let Some(list) = v.as_object_mut().and_then(|o| o.remove("drawings")) else { return Ok(Vec::new()) };
     let Value::Array(list) = list else { return Err(DocError::Invalid("damaged design: `drawings` is not a list".into())) };
     crate::drawing::check_count(list.len()).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
-    let read = |(i, d): (usize, Value)| crate::drawing::Drawing::from_value(d).map_err(|e| DocError::Invalid(format!("drawing {}: {e}", i + 1)));
-    list.into_iter().enumerate().map(read).collect()
+    list.into_iter()
+        .enumerate()
+        .map(|(i, drawing)| {
+            let text = text.and_then(|records| records.get(i)).map(|raw| raw.get());
+            crate::drawing::Drawing::read_value(drawing, text).map_err(|e| DocError::Invalid(format!("drawing {}: {e}", i + 1)))
+        })
+        .collect()
 }
 
 fn all_unique(ids: impl Iterator<Item = u64>) -> bool {
@@ -799,8 +929,10 @@ fn validate_sketch_sizes(value: &Value) -> Result<()> {
                         }
                     }
                 }
-                if curve.get("spline_handle_of").and_then(Value::as_str).is_some_and(|id| id.len() > 512) {
-                    return Err(invalid());
+                for key in ["spline_handle_of", "spline_control_polygon_of"] {
+                    if curve.get(key).and_then(Value::as_str).is_some_and(|id| id.len() > 512) {
+                        return Err(invalid());
+                    }
                 }
             }
         }
@@ -1220,7 +1352,7 @@ fn validate_freeform_chain_offsets(value: &Value) -> Result<()> {
 
 /// Largest coordinate or size a design may hold (mm): a kilometre-scale part is already far
 /// outside what the kernel's tolerances serve.
-pub(crate) const MAX_REAL: f64 = 1e9;
+pub const MAX_REAL: f64 = 1e9;
 
 /// Every number the design itself holds is in range ([`check_numbers`]). `metadata` is left
 /// alone: it is other tools' data, kept as it is and never read as a number (#1015); parsing
@@ -1290,16 +1422,13 @@ fn check_numbers(v: &Value, noun: &str, depth: usize) -> Result<()> {
     Ok(())
 }
 
-/// Feature input names and component occurrences, which format 1 files may predate.
-fn normalise(d: &mut Document) -> Result<()> {
+/// Feature input names and component occurrences, which format 1 files may predate, and new
+/// names for the parameters an upgrade found named after what are now units (`unit_words`).
+fn normalise(d: &mut Document, unit_words: &[String]) -> Result<()> {
     d.normalise_component_color_indices()?;
     d.name_all_feature_inputs();
-    let missing: Vec<(u64, u64)> =
-        d.components.iter().filter(|c| !d.occurrences.iter().any(|o| o.component == c.id)).map(|c| (c.id, c.parent)).collect();
-    for (c, p) in missing {
-        d.add_occurrence(c, p, crate::IDENTITY)?;
-    }
-    Ok(())
+    d.place_unplaced_components()?;
+    d.rename_unit_word_params(unit_words)
 }
 
 #[cfg(test)]
@@ -1832,6 +1961,189 @@ mod tests {
         assert_eq!(opened.format_pending, pending_names());
     }
 
+    /// The parameters an upgrade lists under `unit_word_params` (#4811) are renamed as the design
+    /// opens when their names are reserved words now, as the build that saved it read them; the
+    /// list is never saved, and a damaged one is refused.
+    #[test]
+    fn listed_parameters_named_after_reserved_words_are_renamed_as_the_design_opens() {
+        let mut file: Value = serde_json::from_str(&Document::new("A").to_json()).unwrap();
+        file["params"] = serde_json::json!([
+            {"name": "mm", "expr": "3", "unit": ""},
+            {"name": "twice", "expr": "2 mm", "unit": ""},
+            {"name": "width", "expr": "10", "unit": "mm"}
+        ]);
+        file[UNIT_WORD_PARAMS] = serde_json::json!(["mm", "width", "absent"]);
+        let opened = read(&file.to_string()).unwrap();
+        let params: Vec<(&str, &str)> = opened.params.iter().map(|p| (p.name.as_str(), p.expr.as_str())).collect();
+        assert_eq!(params, [("mm_param", "3"), ("twice", "2 mm_param"), ("width", "10")], "a free name is left alone");
+        assert_eq!(opened.param_values().0["twice"].v, 6.0);
+        assert_eq!(opened.param("mm_param").map(|p| p.comment.as_str()), Some("renamed from `mm`, which is now a unit"));
+        let saved: Value = serde_json::from_str(&opened.to_json()).unwrap();
+        assert_eq!(saved.get(UNIT_WORD_PARAMS), None);
+        assert_eq!(read(&opened.to_json()).unwrap(), opened);
+        for damaged in [serde_json::json!("mm"), serde_json::json!([1]), serde_json::json!(["x".repeat(200)]), serde_json::json!(vec!["mm"; 1001])] {
+            file[UNIT_WORD_PARAMS] = damaged;
+            let error = read(&file.to_string()).unwrap_err().to_string();
+            assert!(error.contains("`unit_word_params` is not a short list"), "{error}");
+        }
+    }
+
+    /// An older design whose parameters, feature inputs and dimensions are named after what are
+    /// now units (#4811) opens with them renamed, and everything that uses them reads them as the
+    /// build that saved it did: the same values, nothing failing, comments that say why, and the
+    /// same design when it is saved and opened again. A design saved with the change already is
+    /// read as it is: `50 g` there is 50 grams.
+    #[test]
+    fn older_parameters_named_after_new_units_are_renamed_as_they_open() {
+        use crate::config::{Column, ConfigRow, ConfigRule, RuleCondition, RuleEffect, RuleOperator};
+        // Built under stand-in names, which the older file then has as `g`, `lb`, `kg` and `ml`.
+        let mut doc = Document::new("old");
+        doc.set_param("qqg", "4", Some(""), Some("gap count")).unwrap();
+        doc.set_param("qqlb", "10 mm", Some("mm"), None).unwrap();
+        doc.set_param("twice", "2 qqg * qqlb", Some("mm"), None).unwrap();
+        let kind = crate::FeatureKind::Box {
+            corner: ["qqlb".into(), "0".into(), "0".into()],
+            length: "qqlb + 1".into(),
+            width: "qqg mm".into(),
+            height: "twice".into(),
+            operation: crate::Operation::NewBody,
+            centred: false,
+        };
+        let id = doc.add_feature(kind, None).unwrap();
+        let length = doc.feature(id).unwrap().param_names[0].clone();
+        doc.rename_param(&length, "qqkg").unwrap();
+        doc.set_param("wide", "qqkg * 2", Some("mm"), None).unwrap();
+        let mut sketch = solidcraft_sketch::Sketch::new();
+        let a = sketch.add_point(solidcore_record::Vec2::ZERO, None).unwrap();
+        let b = sketch.add_point(solidcore_record::Vec2::new(30.0, 0.0), None).unwrap();
+        let line = sketch.add_line_pts(a, b, None).unwrap();
+        let dimension = doc.new_model_param("qqlb * 3", "mm");
+        sketch.add_constraint(solidcraft_sketch::ConstraintKind::Length { l: line, value: 30.0 }, Some(dimension.clone())).unwrap();
+        doc.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+        doc.rename_param(&dimension, "qqml").unwrap();
+        doc.set_favorite("qqg", true).unwrap();
+        doc.configs.columns = vec![Column::Param("qqlb".into())];
+        let row = doc.allocate_id().unwrap();
+        doc.configs.rows.push(ConfigRow { id: row, name: "Default".into(), cells: vec!["qqg * 3 mm".into()] });
+        doc.configs.rules.push(ConfigRule {
+            id: "r".into(),
+            name: "r".into(),
+            enabled: true,
+            length_unit: None,
+            condition: RuleCondition::Parameter { parameter: "qqg".into(), operator: RuleOperator::Gt, expression: "1".into() },
+            effect: RuleEffect::DriveParameter { parameter: "qqlb".into(), expression: "qqg * 2 mm".into() },
+        });
+        // Sheet metal and plastic rules and a canvas's plane hold expressions too (#4420).
+        let mut steel = crate::sheet::SheetRule::steel();
+        (steel.thickness, steel.gap) = ("qqlb / 5".into(), "qqg mm / 8".into());
+        doc.sheet.rules.push(steel);
+        let mut housing = crate::plastic::PlasticRule::library().remove(0);
+        (housing.clearance, housing.draft) = ("qqg mm / 40".into(), "qqg deg".into());
+        doc.plastic.rules.push(housing);
+        let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
+        png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
+        let canvas = doc.allocate_id().unwrap();
+        doc.canvases.push(crate::canvas::Canvas {
+            id: canvas,
+            name: "Canvas1".into(),
+            format: "png".into(),
+            data: png.into(),
+            pixels: [4, 2],
+            plane: crate::PlaneRef::Offset { base: Box::new(crate::PlaneRef::Origin { name: "XY".into() }), distance: "qqlb * 2".into() },
+            center: solidcore_record::Vec2::ZERO,
+            width: 40.0,
+            angle: 0.0,
+            opacity: 0.5,
+            flip: false,
+            visible: true,
+            locked: false,
+            component: 0,
+            anchor: None,
+        });
+        // (sheet thickness and gap, plastic clearance and draft, the canvas plane's height)
+        let rule_and_plane_values = |d: &Document| {
+            let vals = d.param_values().0;
+            let sheet = d.rule_values(&vals, &d.sheet.rules[0]).map(|v| (v.thickness, v.gap)).ok();
+            let plastic = d.plastic_values(&vals, &d.plastic.rules[0]).map(|v| (v.clearance, v.draft)).ok();
+            (sheet, plastic, d.canvas_plane(&vals, &d.canvases[0], &crate::ModelState::default()).ok().map(|p| p.origin.z))
+        };
+        let rules_before = rule_and_plane_values(&doc);
+        let draft_is_4_deg = |d: f64| (d - 4f64.to_radians()).abs() < 1e-12;
+        let (sheet, plastic, height) = rules_before;
+        assert_eq!((sheet, height), (Some((2.0, 0.5)), Some(20.0)));
+        assert!(plastic.is_some_and(|(clearance, draft)| clearance == 0.1 && draft_is_4_deg(draft)), "{plastic:?}");
+        let before = doc.param_values().0;
+        let text = doc.to_json().replace("qqkg", "kg").replace("qqml", "ml").replace("qqlb", "lb").replace("qqg", "g");
+        let mut file: Value = serde_json::from_str(&text).unwrap();
+        file["format"] = Value::from("solidcraft/30");
+        file.as_object_mut().unwrap().remove("format_pending");
+
+        let opened = read(&file.to_string()).unwrap();
+        let names: Vec<&str> = opened.params.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(names, ["g_param", "lb_param", "twice", "wide", "ml_param"]);
+        let expr_of = |n: &str| opened.param(n).map(|p| p.expr.as_str());
+        assert_eq!(
+            (expr_of("twice"), expr_of("wide"), expr_of("ml_param")),
+            (Some("2 g_param * lb_param"), Some("kg_param * 2"), Some("lb_param * 3"))
+        );
+        let f = opened.feature(id).unwrap();
+        assert_eq!(f.param_names.first().map(String::as_str), Some("kg_param"));
+        let crate::FeatureKind::Box { corner, length, width, .. } = &f.kind else { panic!("a box") };
+        assert_eq!((corner[0].as_str(), length.as_str(), width.as_str()), ("lb_param", "lb_param + 1", "g_param mm"));
+        let dimensions: Vec<&str> = opened
+            .features
+            .iter()
+            .flat_map(|f| match &f.kind {
+                crate::FeatureKind::Sketch { sketch, .. } => sketch.constraints.iter().filter_map(|c| c.param.as_deref()).collect::<Vec<_>>(),
+                _ => Vec::new(),
+            })
+            .collect();
+        assert_eq!(dimensions, ["ml_param"]);
+        assert_eq!(opened.configs.columns, [Column::Param("lb_param".into())]);
+        assert_eq!(opened.configs.rows[0].cells, ["g_param * 3 mm"]);
+        let rule_uses = opened.configs.rules[0].parameter_references();
+        assert!(rule_uses.iter().all(|n| n == "g_param" || n == "lb_param") && rule_uses.len() == 3, "{rule_uses:?}");
+        assert!(opened.favorites.contains("g_param"));
+        let steel = &opened.sheet.rules[0];
+        assert_eq!((steel.thickness.as_str(), steel.gap.as_str()), ("lb_param / 5", "g_param mm / 8"));
+        let housing = &opened.plastic.rules[0];
+        assert_eq!((housing.clearance.as_str(), housing.draft.as_str()), ("g_param mm / 40", "g_param deg"));
+        let crate::PlaneRef::Offset { distance, .. } = &opened.canvases[0].plane else { panic!("an offset plane") };
+        assert_eq!(distance.as_ref(), "lb_param * 2");
+        assert_eq!(rule_and_plane_values(&opened), rules_before);
+        // The same values under the new names, and nothing fails.
+        let (after, errors) = opened.param_values();
+        assert!(errors.is_empty(), "{errors:?}");
+        for (old, new) in [("qqg", "g_param"), ("qqlb", "lb_param"), ("twice", "twice"), ("qqkg", "kg_param"), ("wide", "wide"), ("qqml", "ml_param")]
+        {
+            assert_eq!(after.get(new), before.get(old), "{new}");
+        }
+        assert_eq!((after["twice"].v, after["wide"].v, after["ml_param"].v), (80.0, 22.0, 30.0));
+        // The comments say why, after what they said.
+        assert_eq!(opened.param("g_param").map(|p| p.comment.as_str()), Some("gap count (renamed from `g`, which is now a unit)"));
+        assert_eq!(opened.param("lb_param").map(|p| p.comment.as_str()), Some("renamed from `lb`, which is now a unit"));
+        assert_eq!(opened.param_comments.get("kg_param").map(String::as_str), Some("renamed from `kg`, which is now a unit"));
+        // The model builds as it did, and the configuration's rule still drives its parameter.
+        let mut model = crate::Model::new();
+        model.evaluate(&opened);
+        assert!(model.results.iter().all(|r| r.error.is_none()), "{:?}", model.results);
+        let volume = model.state().bodies.first().and_then(|b| solidcraft_kernel::measure(&b.body).ok()).map(|m| m.volume);
+        assert!(volume.is_some_and(|v| (v - 11.0 * 4.0 * 80.0).abs() < 1e-6), "{volume:?}");
+        let mut configured = opened.clone();
+        configured.apply_configuration("Default").unwrap();
+        assert_eq!(configured.param_values().0["lb_param"].v, 8.0, "g_param * 2 mm");
+        // Saved and opened again it is the same design: the step ran once, the list isn't saved.
+        assert_eq!(read(&opened.to_json()).unwrap(), opened);
+
+        // A design saved with this change reads its units as units.
+        let mut new = Document::new("new");
+        new.set_param("load", "50 g", None, None).unwrap();
+        assert_eq!(new.param("load").map(|p| p.unit.as_str()), Some("kg"));
+        let reopened = read(&new.to_json()).unwrap();
+        assert_eq!(reopened, new);
+        assert_eq!(reopened.param_values().0["load"], crate::expr::Value::mass(50.0));
+    }
+
     /// 24 added the corner relief of an edge flange: a no-op step carries a 23 design up, a flange
     /// without a relief of its own saves as before, and one with it is saved under 24 and kept.
     #[test]
@@ -1847,6 +2159,7 @@ mod tests {
             corner_relief_shape: shape.map(Into::into),
             corner_relief: size.map(Into::into),
             height_from: None,
+            bend_relief_shape: None,
         };
         let saved = |document: &Document| -> Value { serde_json::from_str(&document.to_json()).unwrap() };
         // A flange that follows the rule saves neither key, and a design of format 23 opens as it was.
@@ -1860,7 +2173,7 @@ mod tests {
         let opened = read(&file.to_string()).unwrap();
         assert_eq!(opened.format, format_string(FORMAT));
         let mut kept = plain.features.clone();
-        kept.iter_mut().for_each(|f| f.kernel_piece_order = true);
+        kept.iter_mut().for_each(|f| (f.kernel_piece_order, f.least_face_piece_order) = (true, true));
         assert_eq!(opened.features, kept);
         // One that chooses its relief says so in the file, which is stamped 24 and keeps it.
         let mut own = Document::new("A");
@@ -2054,6 +2367,7 @@ mod tests {
                         direction: Direction::Negative,
                         distance2: None,
                         start_offset: None,
+                        symmetric_offset: false,
                         through_all: false,
                         second_follows_first: false,
                         taper: Some("0 deg".into()),
@@ -2062,6 +2376,9 @@ mod tests {
                         to_offset: Some("offset + 1 mm".into()),
                         from: Some(crate::FacePick(solidcore_record::Vec3::new(0.0, 0.0, 5.0))),
                         to_body_apart: false,
+                        through_all2: false,
+                        to2: None,
+                        to_offset2: None,
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,
@@ -2369,7 +2686,7 @@ mod tests {
         legacy["format"] = Value::from("solidcraft/6");
         let original_table = legacy["configs"].clone();
         let upgraded = read(&legacy.to_string()).unwrap();
-        d.features.iter_mut().for_each(|f| (f.shell_piece_order, f.kernel_piece_order) = (true, true));
+        d.features.iter_mut().for_each(|f| (f.shell_piece_order, f.kernel_piece_order, f.least_face_piece_order) = (true, true, true));
         assert_eq!(upgraded, d, "the identity migration preserves the complete design");
         assert_eq!(serde_json::to_value(&upgraded.configs).unwrap(), original_table);
         assert_eq!(upgraded.format, format_string(FORMAT));
@@ -2428,10 +2745,11 @@ mod tests {
         pieces_in_shell_order(&mut features);
         for f in features.as_array_mut().into_iter().flatten() {
             f["kernel_piece_order"] = Value::Bool(true);
+            f["least_face_piece_order"] = Value::Bool(true);
         }
         let params = legacy["params"].clone();
         let upgraded = read(&legacy.to_string()).unwrap();
-        d.features.iter_mut().for_each(|f| (f.shell_piece_order, f.kernel_piece_order) = (true, true));
+        d.features.iter_mut().for_each(|f| (f.shell_piece_order, f.kernel_piece_order, f.least_face_piece_order) = (true, true, true));
         assert_eq!(upgraded, d);
         let upgraded_json: Value = serde_json::from_str(&upgraded.to_json()).unwrap();
         assert_eq!(upgraded_json["features"], features);
@@ -2531,6 +2849,200 @@ mod tests {
         assert_eq!(names.first().unwrap().as_str(), "d1");
         assert_eq!(names.last().unwrap().as_str(), "d15000");
         assert_eq!(names.iter().collect::<std::collections::BTreeSet<_>>().len(), names.len());
+    }
+
+    /// Deterministic draws for the input-name repair tests (xorshift64), so a failure names its case.
+    struct Draws(u64);
+
+    impl Draws {
+        /// A number in `0..n`, for `n` above 0.
+        fn below(&mut self, n: usize) -> usize {
+            self.0 ^= self.0 << 13;
+            self.0 ^= self.0 >> 7;
+            self.0 ^= self.0 << 17;
+            (self.0 % n as u64) as usize
+        }
+    }
+
+    fn input_repair_box() -> crate::FeatureKind {
+        crate::FeatureKind::Box {
+            corner: ["0".into(), "0".into(), "0".into()],
+            length: "10".into(),
+            width: "10".into(),
+            height: "10".into(),
+            operation: crate::Operation::NewBody,
+            centred: false,
+        }
+    }
+
+    /// `Document::name_all_feature_inputs` as it was while a freed `dN` lowered `next`, the
+    /// reference for its names. Only the lines marked as counters are new. They return how often
+    /// a freed name lowered `next`, and how often a name freed at or above `next` was given later.
+    fn input_repair_that_restarts(d: &mut Document) -> (usize, usize) {
+        let mut taken: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+        for name in d.params.iter().map(|p| &p.name).chain(d.features.iter().flat_map(|f| &f.param_names)) {
+            *taken.entry(name.clone()).or_default() += 1;
+        }
+        let mut next = 1usize;
+        let (mut lowered, mut given_later, mut freed_above) = (0, 0, std::collections::BTreeSet::new()); // counters
+        for f in &mut d.features {
+            let n = f.kind.inputs().len();
+            for k in 0..n {
+                if f.param_names.get(k).is_some_and(|name| !name.is_empty()) {
+                    continue;
+                }
+                let name = loop {
+                    let name = format!("d{next}");
+                    next += 1;
+                    if !taken.contains_key(&name) {
+                        break name;
+                    }
+                };
+                given_later += usize::from(freed_above.remove(&name)); // counter
+                if f.param_names.len() <= k {
+                    f.param_names.resize(k + 1, String::new());
+                }
+                if let Some(slot) = f.param_names.get_mut(k) {
+                    *slot = name.clone();
+                }
+                taken.insert(name, 1);
+            }
+            for name in f.param_names.drain(n..) {
+                if let Some(count) = taken.get_mut(&name) {
+                    *count -= 1;
+                    if *count == 0 {
+                        taken.remove(&name);
+                        if let Some(i) = name.strip_prefix('d').and_then(|s| s.parse::<usize>().ok())
+                            && name == format!("d{i}")
+                            && i > 0
+                        {
+                            if i < next {
+                                lowered += 1; // counter
+                            } else {
+                                freed_above.insert(name.clone()); // counter
+                            }
+                            next = next.min(i);
+                        }
+                    }
+                }
+            }
+        }
+        (lowered, given_later)
+    }
+
+    /// A name as a damaged or hand-edited file may hold one. Often empty or a `dN` the repair
+    /// also gives (up to d24), sometimes a `dN` the repair rarely reaches, sometimes a name that
+    /// is not `dN` as the repair writes it (`d05` and `d+3` parse as 5 and 3).
+    fn drawn_input_name(draws: &mut Draws) -> String {
+        match draws.below(20) {
+            0..=7 => String::new(),
+            8..=14 => format!("d{}", 1 + draws.below(24)),
+            15 | 16 => format!("d{}", 25 + draws.below(40)),
+            _ => ["d0", "d05", "d007", "d-1", "dx", "d+3", "D2", "x1", "d", "d1.0"][draws.below(10)].to_string(),
+        }
+    }
+
+    /// Up to four parameters and twelve features of zero to three inputs, each feature with up
+    /// to three more names than inputs (fewer is missing names, more is surplus names).
+    fn drawn_input_design(draws: &mut Draws, kinds: &[crate::Feature]) -> Document {
+        let mut d = Document::new("drawn input names");
+        for _ in 0..draws.below(5) {
+            let name = drawn_input_name(draws);
+            d.params.push(crate::Param { name, expr: "1".into(), unit: String::new(), comment: String::new(), model: false });
+        }
+        for id in 1..=draws.below(13) as u64 {
+            let mut f = kinds[draws.below(kinds.len())].clone();
+            f.id = id;
+            f.param_names.clear();
+            for _ in 0..draws.below(f.kind.inputs().len() + 4) {
+                f.param_names.push(drawn_input_name(draws));
+            }
+            d.features.push(f);
+            d.next_id = id + 1;
+        }
+        d
+    }
+
+    /// Thousands of drawn timelines get the names of the repair that lowered `next` to a freed
+    /// name, and of `name_feature_inputs` feature by feature. The draws mix empty and missing
+    /// names, repeats, names shared with parameters, surplus names written as `dN` or not, and
+    /// freed names below and at or above `next`.
+    #[test]
+    fn bulk_input_repair_gives_the_names_of_the_repair_that_restarted_its_search() {
+        let mut kinds_doc = Document::new("kinds");
+        let at = || ["0".into(), "0".into(), "0".into()];
+        let sketch = crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch: solidcraft_sketch::Sketch::new() };
+        let sphere = crate::FeatureKind::Sphere { center: at(), radius: "5".into(), operation: crate::Operation::NewBody };
+        let torus = crate::FeatureKind::Torus { center: at(), major: "10".into(), minor: "2".into(), operation: crate::Operation::NewBody };
+        for kind in [sketch, sphere, torus, input_repair_box()] {
+            kinds_doc.add_feature(kind, None).unwrap();
+        }
+        let kinds = kinds_doc.features;
+        assert_eq!(kinds.iter().map(|f| f.kind.inputs().len()).collect::<Vec<_>>(), [0, 1, 2, 3]);
+        let names = |d: &Document| d.features.iter().map(|f| f.param_names.clone()).collect::<Vec<_>>();
+        let mut draws = Draws(0x9e37_79b9_7f4a_7c15);
+        let (mut lowered, mut given_later) = (0, 0);
+        for case in 0..5000 {
+            let drawn = drawn_input_design(&mut draws, &kinds);
+            let mut old = drawn.clone();
+            let (l, g) = input_repair_that_restarts(&mut old);
+            (lowered, given_later) = (lowered + l, given_later + g);
+            let mut new = drawn.clone();
+            new.name_all_feature_inputs();
+            assert_eq!(names(&new), names(&old), "case {case}, drawn {:?}", names(&drawn));
+            assert_eq!(new.params, drawn.params);
+            let mut one_by_one = drawn.clone();
+            for id in drawn.features.iter().map(|f| f.id) {
+                one_by_one.name_feature_inputs(id);
+            }
+            assert_eq!(names(&new), names(&one_by_one), "case {case}, drawn {:?}", names(&drawn));
+        }
+        assert!(lowered > 0 && given_later > 0, "the draws reach both kinds of freed name ({lowered}, {given_later})");
+    }
+
+    /// The shape of a slow file found by reading how designs are opened. Boxes 1 to m each have
+    /// three unnamed inputs and one surplus name, dj for box j, and a last box names its inputs
+    /// x1 to x3 and has the b surplus names d(m+2) to d(m+b+1). Before the repair the taken `dN`
+    /// are d1 to dm and that block, so the lowest free name is d(m+1) and the lowest above the
+    /// block d(m+b+2). Box 1 takes d(m+1), d(m+b+2) and d(m+b+3), then frees d1. When box j
+    /// (from 2) is repaired, boxes 2 to j-1 hold d1 to d(j-2), box j-1 has just freed d(j-1),
+    /// dj to dm are still surplus names, and boxes 1 to j-1 hold d(m+1) and d(m+b+2) to
+    /// d(m+b+2j-1). So box j takes d(j-1), d(m+b+2j) and d(m+b+2j+1). The last box keeps its
+    /// own three names and drops the block. Each name the search tries is either held before the
+    /// repair (d1 to dm and the block), and tried once at most since the search never goes back
+    /// down, or the name it then gives to one of the 3m unnamed inputs. So it tries at most
+    /// 4m + b names (this repair tries 3m + b + 1). Lowering the search to each freed name made
+    /// it pass the whole block again for every box, about m times (m+b) tries.
+    #[test]
+    fn freed_surplus_names_are_reused_without_passing_a_large_block_again() {
+        let mut template = Document::new("freed input names");
+        let id = template.add_feature(input_repair_box(), None).unwrap();
+        let f = template.feature(id).unwrap().clone();
+        assert_eq!(f.kind.inputs().len(), 3);
+        let d = |i: usize| format!("d{i}");
+        for (m, b) in [(2_000, 0), (2_000, 50_000)] {
+            let mut design = Document::new("freed input names");
+            for j in 1..=m {
+                let mut f = f.clone();
+                f.id = j as u64;
+                f.param_names = vec![String::new(), String::new(), String::new(), d(j)];
+                design.features.push(f);
+            }
+            let mut last = f.clone();
+            last.id = m as u64 + 1;
+            last.param_names = ["x1", "x2", "x3"].map(String::from).into_iter().chain((m + 2..=m + b + 1).map(d)).collect();
+            design.features.push(last);
+            design.next_id = m as u64 + 2;
+            let json = design.to_json();
+            crate::params::INPUT_NAME_TRIES.set(0);
+            let back = read(&json).unwrap();
+            let tries = crate::params::INPUT_NAME_TRIES.get();
+            assert!(tries <= 4 * m + b, "{m} boxes, {b} block names, {tries} names tried");
+            let mut expected = vec![vec![d(m + 1), d(m + b + 2), d(m + b + 3)]];
+            expected.extend((2..=m).map(|j| vec![d(j - 1), d(m + b + 2 * j), d(m + b + 2 * j + 1)]));
+            expected.push(["x1", "x2", "x3"].map(String::from).to_vec());
+            assert_eq!(back.features.iter().map(|f| f.param_names.clone()).collect::<Vec<_>>(), expected, "{m} boxes, {b} block names");
+        }
     }
 
     #[test]
@@ -2692,6 +3204,25 @@ mod tests {
     }
 
     #[test]
+    fn occurrences_added_on_open_take_fresh_ids_and_the_design_reopens() {
+        let mut d = Document::new("Legacy");
+        d.add_component(None, 0).unwrap();
+        let b = d.add_component(None, 0).unwrap();
+        // No `next_id`, `b` without its occurrence, and the other occurrence on id 1.
+        let json = edited(&d, |v| {
+            v.as_object_mut().unwrap().remove("next_id");
+            let occurrences = v["occurrences"].as_array_mut().unwrap();
+            occurrences.retain(|o| o["component"] != b);
+            occurrences[0]["id"] = 1.into();
+        });
+        let back = read(&json).unwrap();
+        assert_eq!(back.occurrences.len(), 2);
+        assert!(back.occurrences.iter().any(|o| o.component == b));
+        assert!(all_unique(back.occurrences.iter().map(|o| o.id)), "{:?}", back.occurrences);
+        read(&back.to_json()).unwrap();
+    }
+
+    #[test]
     fn missing_or_stale_next_id_does_not_reuse_existing_ids() {
         let d = two_components_one_occurrence();
         let largest = d.components.iter().map(|c| c.id).chain(d.occurrences.iter().map(|o| o.id)).max().unwrap();
@@ -2708,6 +3239,334 @@ mod tests {
             let fresh = back.add_component(None, 0).unwrap();
             assert!(fresh > largest, "new component reused id {fresh}");
         }
+    }
+
+    /// #1017. An import's rigid group takes its id from the shared counter. A design whose saved
+    /// `next_id` is missing or stale must not hand that id out again, in memory or after it opens.
+    #[test]
+    fn a_stale_next_id_never_reuses_a_rigid_group_id() {
+        let mut d = two_components_one_occurrence();
+        let component = d.components[0].id;
+        let members = d.occurrences.iter().map(|o| o.id).collect();
+        let group = d.allocate_id().unwrap();
+        d.assembly.rigid_groups.push(crate::joints::RigidGroup { id: group, name: "Board".into(), component, members });
+        d.next_id = group;
+        assert!(d.next_item_id().unwrap() > group, "next_item_id {} with the group at {group}", d.next_item_id().unwrap());
+        for stale in [None, Some(0), Some(group)] {
+            let json = edited(&d, |v| {
+                let o = v.as_object_mut().unwrap();
+                match stale {
+                    Some(n) => o.insert("next_id".into(), n.into()),
+                    None => o.remove("next_id"),
+                };
+            });
+            let mut back = read(&json).unwrap();
+            assert_eq!(back.assembly.rigid_groups.len(), 1, "the group survives loading with {stale:?}");
+            assert!(back.next_id > group, "next_id {} after load with {stale:?}, group at {group}", back.next_id);
+            let fresh = back.allocate_id().unwrap();
+            assert!(fresh > group, "a new object reused the rigid group's id {fresh} with {stale:?}");
+        }
+    }
+
+    /// Loading gives an occurrence to each component that has none, as an older design may have.
+    /// With a missing or stale saved `next_id`, that occurrence must not take an id the design
+    /// already uses, a rigid group's included, so the counter is repaired before it is made.
+    #[test]
+    fn an_occurrence_made_while_loading_takes_no_id_in_use() {
+        let mut d = two_components_one_occurrence();
+        let (first, second) = (d.components[0].id, d.components[1].id);
+        let members = d.occurrences.iter().filter(|o| o.component == first).map(|o| o.id).collect();
+        let group = d.allocate_id().unwrap();
+        d.assembly.rigid_groups.push(crate::joints::RigidGroup { id: group, name: "Board".into(), component: first, members });
+        for stale in [None, Some(0), Some(1), Some(group)] {
+            let json = edited(&d, |v| {
+                let o = v.as_object_mut().unwrap();
+                match stale {
+                    Some(n) => o.insert("next_id".into(), n.into()),
+                    None => o.remove("next_id"),
+                };
+                // The file leaves out the second component's occurrences, so loading makes one.
+                if let Some(list) = o.get_mut("occurrences").and_then(Value::as_array_mut) {
+                    list.retain(|x| x.get("component").and_then(Value::as_u64) != Some(second));
+                }
+            });
+            let saved: Value = serde_json::from_str(&json).unwrap();
+            let kept = saved["occurrences"].as_array().map_or(0, |l| l.iter().filter(|x| x["component"].as_u64() == Some(second)).count());
+            assert_eq!(kept, 0, "the file holds no occurrence of the second component");
+            let back = read(&json).unwrap();
+            assert!(back.occurrences.iter().any(|x| x.component == second), "loading gave the second component an occurrence with {stale:?}");
+            let mut ids: Vec<u64> = back
+                .components
+                .iter()
+                .map(|c| c.id)
+                .chain(back.occurrences.iter().map(|o| o.id))
+                .chain(back.assembly.rigid_groups.iter().map(|g| g.id))
+                .collect();
+            let all = ids.len();
+            ids.sort_unstable();
+            ids.dedup();
+            assert_eq!(ids.len(), all, "an id is used twice after loading with {stale:?}: {ids:?}");
+        }
+    }
+
+    /// How loading placed each component that has no occurrence before it kept what it looks up
+    /// in sets and maps, copied as it was. It called `Document::add_occurrence` (copied below as
+    /// it was) once per component, and each call looked through the whole design.
+    fn old_place_unplaced(d: &mut Document) -> Result<()> {
+        let missing: Vec<(u64, u64)> =
+            d.components.iter().filter(|c| !d.occurrences.iter().any(|o| o.component == c.id)).map(|c| (c.id, c.parent)).collect();
+        for (c, p) in missing {
+            old_add_occurrence(d, c, p, crate::IDENTITY)?;
+        }
+        Ok(())
+    }
+
+    fn old_add_occurrence(d: &mut Document, component: u64, parent: u64, transform: crate::Mat) -> Result<u64> {
+        if component == 0 || !d.components.iter().any(|c| c.id == component) {
+            return Err(DocError::Unknown(format!("component {component}")));
+        }
+        if old_inside_component(d, parent, component) {
+            return Err(DocError::Invalid("a component can't contain itself".into()));
+        }
+        if d.occurrences.len() >= 100_000 {
+            return Err(DocError::Invalid("too many occurrences".into()));
+        }
+        if !crate::is_placement(&transform) {
+            return Err(DocError::Invalid("an occurrence's placement must be a rigid motion (no scaling or mirroring) within 1e9 mm".into()));
+        }
+        let id = d.next_id.max(1);
+        d.next_id = id.checked_add(1).ok_or_else(|| DocError::Invalid("too many items in the design".into()))?;
+        let cname = d.components.iter().find(|c| c.id == component).map(|c| c.name.clone()).unwrap_or_default();
+        let next = d.occurrences.iter().filter(|o| o.component == component).count() + 1;
+        let free = |k: &usize| {
+            let name = format!("{cname}:{k}");
+            !d.occurrences.iter().any(|o| o.name == name)
+        };
+        let k = std::iter::once(next).chain(1..).find(free).unwrap_or(next);
+        d.occurrences.push(crate::Occurrence {
+            id,
+            component,
+            parent,
+            name: format!("{cname}:{k}"),
+            transform,
+            base_transform: None,
+            grounded: false,
+            expressed_moves: Vec::new(),
+            bom_type: None,
+        });
+        Ok(id)
+    }
+
+    fn old_component_within(d: &Document, a: u64, b: u64) -> bool {
+        let mut c = a;
+        for _ in 0..1000 {
+            if c == b {
+                return true;
+            }
+            if c == 0 {
+                return false;
+            }
+            match d.components.iter().find(|x| x.id == c) {
+                Some(x) => c = x.parent,
+                None => return false,
+            }
+        }
+        false
+    }
+
+    fn old_inside_component(d: &Document, parent: u64, component: u64) -> bool {
+        if old_component_within(d, parent, component) {
+            return true;
+        }
+        let tree = crate::occurrence_tree::OccurrenceTree::new(d);
+        let mut stack = vec![component];
+        let mut seen = std::collections::BTreeSet::new();
+        while let Some(c) = stack.pop() {
+            if !seen.insert(c) || seen.len() > crate::MAX_PLACEMENTS {
+                continue;
+            }
+            for o in tree.children(c) {
+                if o.component == parent {
+                    return true;
+                }
+                stack.push(o.component);
+            }
+        }
+        false
+    }
+
+    /// Numbers for drawn designs, the same on every run (splitmix64).
+    struct Draw(u64);
+
+    impl Draw {
+        fn below(&mut self, n: u64) -> u64 {
+            self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            (z ^ (z >> 31)) % n.max(1)
+        }
+
+        fn pick<'a>(&mut self, of: &[&'a str]) -> &'a str {
+            of[self.below(of.len() as u64) as usize]
+        }
+    }
+
+    fn occurrence(id: u64, component: u64, parent: u64, name: String) -> crate::Occurrence {
+        crate::Occurrence {
+            id,
+            component,
+            parent,
+            name,
+            transform: crate::IDENTITY,
+            base_transform: None,
+            grounded: false,
+            expressed_moves: Vec::new(),
+            bom_type: None,
+        }
+    }
+
+    /// A small design with components to place while loading. Components share a name or have
+    /// their own, names hold colons and digits, occurrences take the names other components'
+    /// occurrences would, leave gaps between numbers or end in what only looks like a number
+    /// (`P:01`, `P:+2`), components sit in other components or in unknown ones, and some
+    /// placements fail (an unknown component 0, a component inside itself through its parents or
+    /// its placements, no id left).
+    fn drawn_design(draw: &mut Draw) -> Document {
+        const NAMES: [&str; 9] = ["P", "P", "A", "A:1", "P:2", "7", "", "x:y:3", "P:1:1"];
+        let mut d = Document::new("drawn");
+        let n = draw.below(8) + 1;
+        for i in 1..=n {
+            // Mostly its own id, sometimes 0 or another component's (a damaged file).
+            let id = match draw.below(25) {
+                0 => 0,
+                1 => draw.below(n) + 1,
+                _ => i,
+            };
+            // Mostly the root, else a component of the design (itself too) or an unknown one.
+            let parent = match draw.below(8) {
+                0..=3 => 0,
+                4..=6 => draw.below(n + 1),
+                _ => 900 + draw.below(2),
+            };
+            d.components.push(crate::Component { id, name: draw.pick(&NAMES).into(), parent, ..Default::default() });
+        }
+        for i in 0..draw.below(12) {
+            let component = match draw.below(10) {
+                0 => 0,
+                1 => 900,
+                _ => draw.below(n) + 1,
+            };
+            let parent = if draw.below(3) == 0 { draw.below(n) + 1 } else { 0 };
+            let name = match draw.below(6) {
+                0 => draw.pick(&NAMES).to_string(),
+                1 => format!("o{i}"),
+                2 => format!("{}:{}", draw.pick(&NAMES), draw.pick(&["01", "+2", "0", "2x", " 3", "18446744073709551617"])),
+                _ => format!("{}:{}", draw.pick(&NAMES), draw.below(5) + 1),
+            };
+            d.occurrences.push(occurrence(500 + i, component, parent, name));
+        }
+        d.next_id = match draw.below(10) {
+            0 => u64::MAX - draw.below(3),
+            1 => 0,
+            _ => 600 + draw.below(3),
+        };
+        d
+    }
+
+    /// Loading gives each component without an occurrence the occurrence one `add_occurrence`
+    /// call per component gave, with the same names, ids, parents and order, or fails at the same
+    /// component with the same error. A command adding occurrences afterwards gets what it got
+    /// before too.
+    #[test]
+    fn loading_places_unplaced_components_as_one_add_occurrence_each_did() {
+        let mut draw = Draw(0x5eed_1017);
+        let mut scaled = crate::IDENTITY;
+        scaled[0][0] = 2.0;
+        let mut outcomes = std::collections::BTreeMap::<String, usize>::new();
+        for case in 0..5000 {
+            let design = drawn_design(&mut draw);
+            let shown = || {
+                let components: Vec<_> = design.components.iter().map(|c| (c.id, &c.name, c.parent)).collect();
+                let occurrences: Vec<_> = design.occurrences.iter().map(|o| (o.id, o.component, o.parent, &o.name)).collect();
+                format!("case {case}, next id {}, components {components:?}, occurrences {occurrences:?}", design.next_id)
+            };
+            let (mut old, mut new) = (design.clone(), design.clone());
+            let was = old_place_unplaced(&mut old);
+            assert_eq!(new.place_unplaced_components(), was, "{}", shown());
+            assert_eq!(new.occurrences, old.occurrences, "{}", shown());
+            assert_eq!(new.next_id, old.next_id, "{}", shown());
+            *outcomes.entry(was.err().map_or("placed".into(), |e| e.to_string())).or_default() += 1;
+            for _ in 0..3 {
+                let (component, parent) = (draw.below(10), draw.below(10));
+                let transform = if draw.below(8) == 0 { scaled } else { crate::IDENTITY };
+                let was = old_add_occurrence(&mut old, component, parent, transform);
+                assert_eq!(new.add_occurrence(component, parent, transform), was, "{}, then {component} into {parent}", shown());
+                assert_eq!(new.occurrences, old.occurrences, "{}, then {component} into {parent}", shown());
+                assert_eq!(new.next_id, old.next_id, "{}, then {component} into {parent}", shown());
+            }
+        }
+        for outcome in ["placed", "unknown component 0", "a component can't contain itself", "too many items in the design"] {
+            assert!(outcomes.contains_key(outcome), "no drawn design ended with {outcome}, outcomes {outcomes:?}");
+        }
+    }
+
+    /// Near the cap of 100 000 occurrences, loading stops at the component where one
+    /// `add_occurrence` per component stopped. Two short of the cap, three components named P
+    /// are to be placed. The first takes `P:1` (no occurrence has a name starting with P) and
+    /// the first id, the second finds `P:1` taken and takes `P:2`, and the third is refused. At
+    /// the cap, a component inside itself is refused as that, since it is checked before the
+    /// count.
+    #[test]
+    fn loading_stops_at_the_occurrence_cap_where_add_occurrence_did() {
+        let component =
+            |id: u64, parent: u64| crate::Component { id, name: if id == 1 { "Big".into() } else { "P".into() }, parent, ..Default::default() };
+        let mut short = Document::new("two short of the cap");
+        short.components = vec![component(1, 0), component(2, 0), component(3, 0), component(4, 0)];
+        short.occurrences = (1..=99_998).map(|i| occurrence(10 + i, 1, 0, format!("Big:{i}"))).collect();
+        short.next_id = 200_000;
+        let mut full = short.clone();
+        full.name = "at the cap".into();
+        full.components[1].parent = 2;
+        full.occurrences.extend((99_999..=100_000).map(|i| occurrence(10 + i, 1, 0, format!("Big:{i}"))));
+        let expected = [Err(DocError::Invalid("too many occurrences".into())), Err(DocError::Invalid("a component can't contain itself".into()))];
+        let mut loaded = Vec::new();
+        for (design, expected) in [short, full].into_iter().zip(expected) {
+            let (mut old, mut new) = (design.clone(), design.clone());
+            assert_eq!(old_place_unplaced(&mut old), expected, "{}", design.name);
+            assert_eq!(new.place_unplaced_components(), expected, "{}", design.name);
+            assert_eq!(new.occurrences, old.occurrences, "{}", design.name);
+            assert_eq!(new.next_id, old.next_id, "{}", design.name);
+            loaded.push(new);
+        }
+        let placed: Vec<_> = loaded[0].occurrences[99_998..].iter().map(|o| (o.id, o.component, o.parent, o.name.as_str())).collect();
+        assert_eq!(placed, [(200_000, 2, 0, "P:1"), (200_001, 3, 0, "P:2")]);
+        assert_eq!(loaded[0].next_id, 200_002);
+        assert_eq!(loaded[1].occurrences.len(), 100_000, "nothing is placed at the cap");
+    }
+
+    /// The shape of a design built by a code audit of how designs are read, at a tenth of its
+    /// size. Component 1 (A) has 9 000 occurrences named `P:1` to `P:9000`, and the 999
+    /// components named P (ids 2 to 1000) have none. Loading places them in file order. Each has
+    /// no occurrence yet, so it tries `P:1` first, which is taken, and then takes the first free
+    /// number. `P:1` to `P:9000` are taken by the file and the components before it took one
+    /// each, so component `k` gets `P:{8999 + k}`, which is `P:9001` to `P:9999`. The largest id
+    /// in the file is 109 000, so new ids start at 109 001 and component `k` gets `108 999 + k`,
+    /// in the root, and the counter ends at 110 000.
+    #[test]
+    fn loading_names_many_unplaced_components_past_many_taken_numbers() {
+        let components: Vec<Value> =
+            std::iter::once(serde_json::json!({"id": 1, "name": "A"})).chain((2..=1000).map(|k| serde_json::json!({"id": k, "name": "P"}))).collect();
+        let occurrences: Vec<Value> = (1..=9000).map(|i| serde_json::json!({"id": 100_000 + i, "component": 1, "name": format!("P:{i}")})).collect();
+        let json = edited(&Document::new("audit shape"), |v| {
+            v["components"] = components.into();
+            v["occurrences"] = occurrences.into();
+        });
+        let d = read(&json).unwrap();
+        let placed: Vec<_> = d.occurrences[9000..].iter().map(|o| (o.id, o.component, o.parent, o.name.clone())).collect();
+        let expected: Vec<_> = (2..=1000u64).map(|k| (108_999 + k, k, 0, format!("P:{}", 8999 + k))).collect();
+        assert_eq!(placed, expected);
+        assert_eq!(d.next_id, 110_000);
     }
 
     #[test]
@@ -2834,5 +3693,28 @@ mod tests {
         assert_eq!(serde_json::to_value(&k).unwrap(), new);
         let parallel: SweepOrientation = serde_json::from_value(serde_json::json!("parallel")).unwrap();
         assert_eq!(parallel, SweepOrientation::Parallel);
+    }
+
+    #[test]
+    fn pre_upgrade_bounds_reject_oversized_legacy_designs_and_u64_max_occurrence_id() {
+        let too_many_components: Vec<Value> = (1..=crate::document::MAX_FEATURES + 1).map(|i| serde_json::json!({"id": i, "name": "C"})).collect();
+        let v = serde_json::json!({
+            "format": "solidcraft/56",
+            "name": "oversized",
+            "params": [],
+            "components": too_many_components,
+            "features": [],
+        });
+        assert!(check_raw(&v, 56).unwrap_err().to_string().contains("document too large"));
+
+        let u64_max_legacy = serde_json::json!({
+            "format": "solidcraft/56",
+            "name": "exhausted",
+            "params": [],
+            "components": [{"id": 1, "name": "A", "parent": 0}, {"id": 2, "name": "B", "parent": 0}],
+            "occurrences": [{"id": u64::MAX, "component": 1, "parent": 0, "name": "A:1"}],
+            "features": [],
+        });
+        assert!(read(&u64_max_legacy.to_string()).is_err());
     }
 }

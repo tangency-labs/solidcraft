@@ -66,6 +66,7 @@
 //!   tangent; pinned v1.0.1's skewed line made them fall through to
 //!   [`PointSetType::Planar`].
 
+use crate::error::geom::GeomFailure;
 use crate::error::{ignore_status, Result, SolidError};
 use crate::geom::geom_utility::p1::{
     self, add_point, determinant_3_vectors, determinate_4x4, intersect_three_planes,
@@ -343,7 +344,11 @@ pub fn triangle_point_distance(
 
     let uv = match vec_lin_comb_two_vectors(vec_x, vec_y, test_vec) {
         Ok(uv) => uv,
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => return Err(e),
         Err(_) => {
             // collinear points: nearest of the two edges from p0
             let (dist1, u) = segment_point_distance(p0, p1, test);
@@ -400,13 +405,12 @@ pub fn line_line_at_distance(
     const OP: &str = "geom::geom_utility::p2::line_line_at_distance";
     let (cl1, cl2) = match line_line_closest_point(line_pnt1, line_vec1, line_pnt2, line_vec2) {
         Ok(v) => v,
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
-        Err(_) => {
-            return Err(SolidError::geom_failed(
-                OP,
-                "the lines have no closest points",
-            ))
-        }
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => return Err(e),
+        Err(e) => return Err(SolidError::geom_call(OP)(e)),
     };
     let p1 = line_pnt1 + cl1 * line_vec1;
     let p2 = line_pnt2 + cl2 * line_vec2;
@@ -414,7 +418,13 @@ pub fn line_line_at_distance(
     let mut beta = line_vec1.angle_between(line_vec2)?;
     beta /= 2.0;
     if dist_between > at_distance {
-        return Err(SolidError::geom_failed(OP, "the lines are too far apart"));
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::TooFarApart {
+                distance: dist_between,
+                limit: at_distance,
+            },
+        ));
     }
     let half_proj = sqrt(at_distance * at_distance - dist_between * dist_between) / 2.0;
     let dist_along_a = half_proj / beta.sin();
@@ -613,7 +623,11 @@ pub fn segment_segment_intersect(
     let (mut param1, mut param2) =
         match line_line_closest_point(line_start, line_vec, other_start, other_vec) {
             Ok(v) => v,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             // parallel lines
             Err(_) => return Ok(points),
         };
@@ -717,7 +731,11 @@ pub fn segment_segment_closest_point(
     let (mut param1, mut param2) =
         match line_line_closest_point(line_start, line_vec, other_start, other_vec) {
             Ok(v) => v,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             // parallel lines
             Err(_) => return Ok(hits),
         };
@@ -763,7 +781,12 @@ pub fn circle_plane_intersect(
         match intersect_two_planes(circle_origin, circle_normal, plane_point, plane_normal)? {
             PlanesIntersection::Line { point, direction } => (point, direction),
             PlanesIntersection::Parallel { .. } => {
-                return Err(SolidError::geom_failed(OP, "the planes are parallel"))
+                return Err(SolidError::geom(
+                    OP,
+                    GeomFailure::Defect {
+                        why: "intersect_two_planes found the circle's plane parallel to the plane, though the cross product of their normals passed the non-parallel check above (|n1 x n2|^2 >= SM_EFF_ZERO, above its own threshold)",
+                    },
+                ))
             }
         };
 
@@ -835,7 +858,11 @@ pub fn sphere_circle_sphere_circle_intersect(
 
     let planes = match intersect_two_planes(cir1_center, cir1_normal, cir2_center, cir2_normal) {
         Ok(PlanesIntersection::Line { point, direction }) => Some((point, direction)),
-        Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }),
+        ) => return Err(e),
         Ok(PlanesIntersection::Parallel { .. }) | Err(_) => None,
     };
     let Some((line_pt, line_vec)) = planes else {
@@ -851,7 +878,11 @@ pub fn sphere_circle_sphere_circle_intersect(
     let (mut count, mut params) =
         match line_intersect_sphere(line_pt, line_vec, sphere_center, sphere_radius, tol3d) {
             Ok(v) => v,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             // only for a zero line vector, which cannot happen here
             Err(_) => return Ok(CurveIntersection::Points(Vec::new())),
         };
@@ -869,9 +900,11 @@ pub fn sphere_circle_sphere_circle_intersect(
         let mut dir2 = cir2_normal.normal_in_plane(cir1_normal);
         if dir1.length() <= EFF_ZERO || dir2.length() <= EFF_ZERO {
             // upstream: WARN("unexpected branch - needs review")
-            return Err(SolidError::geom_failed(
+            return Err(SolidError::geom(
                 OP,
-                "the circles' planes give no direction",
+                GeomFailure::ZeroDirection {
+                    length: dir1.length().min(dir2.length()),
+                },
             ));
         }
         dir1 = dir1.unitize_or_z();
@@ -1031,9 +1064,9 @@ pub fn mult_4x4(a: &[[f64; 4]; 4], b: &[[f64; 4]; 4]) -> [[f64; 4]; 4] {
 pub fn inverse_4x4(a: &[[f64; 4]; 4]) -> Result<[[f64; 4]; 4]> {
     let det = determinate_4x4(a);
     if is_zero(det) {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             "geom::geom_utility::p2::inverse_4x4",
-            "the matrix is singular",
+            GeomFailure::Singular { measure: det },
         ));
     }
 
@@ -1142,7 +1175,13 @@ pub fn frenet_from_derivatives(vals: &[Vec3], n: usize) -> Result<Vec<Vec3>> {
 
     let tan_len_sq = d1.length_squared();
     if tan_len_sq < EFF_ZERO_SQ {
-        return Err(SolidError::geom_failed(OP, "the tangent has zero length"));
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::ZeroDerivative {
+                order: 1,
+                length: tan_len_sq,
+            },
+        ));
     }
     // with P' scaled by 2^e1 and P'' by 2^e2 the formula gives 2^(e2 - 2 e1) times the
     // curvature, so 2^(2 e1 - e2) restores it
@@ -1162,12 +1201,23 @@ pub fn frenet_from_derivatives(vals: &[Vec3], n: usize) -> Result<Vec<Vec3>> {
     }
 
     if is_zero(d2.length()) {
-        return Err(SolidError::geom_failed(OP, "the second derivative is zero"));
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::ZeroDerivative {
+                order: 2,
+                length: d2.length(),
+            },
+        ));
     }
     let cross_len = d1.cross(d2).length();
     let denominator = cross_len * cross_len;
     if is_zero(denominator) {
-        return Err(SolidError::geom_failed(OP, "the derivatives are parallel"));
+        return Err(SolidError::geom(
+            OP,
+            GeomFailure::Parallel {
+                measure: denominator,
+            },
+        ));
     }
     let numerator = determinant_3_vectors(d1, d2, get(3));
     let torsion = numerator / denominator;
@@ -1175,9 +1225,12 @@ pub fn frenet_from_derivatives(vals: &[Vec3], n: usize) -> Result<Vec<Vec3>> {
     let mut torsion_vec = d1.cross(curvature);
     let vec_len = torsion_vec.length();
     if vec_len < EFF_ZERO {
-        return Err(SolidError::geom_failed(
+        return Err(SolidError::geom(
             OP,
-            "the torsion vector has zero length",
+            GeomFailure::ZeroDerivative {
+                order: 3,
+                length: vec_len,
+            },
         ));
     }
     torsion_vec *= torsion / vec_len;

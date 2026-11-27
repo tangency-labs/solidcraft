@@ -88,12 +88,15 @@ pub struct Budget {
     /// stopped by it: once it is spent, the drag takes no more steps this frame (`None`: not
     /// counted).
     numeric_left: Option<usize>,
+    /// Whether the numerical solves stop when their allowance is spent (a value edit's), rather
+    /// than only being counted (a drag frame's).
+    numeric_stops: bool,
 }
 
 impl Budget {
     /// A budget of `work` units: membership scans or estimated dense arithmetic operations.
     pub fn new(work: usize) -> Budget {
-        Budget { left: work, spent: 0, cut: false, numeric_left: None }
+        Budget { left: work, spent: 0, cut: false, numeric_left: None, numeric_stops: false }
     }
     /// The budget of one solve: about 0.3 s, so a hostile sketch can't stall it.
     pub fn full() -> Budget {
@@ -112,6 +115,18 @@ impl Budget {
     /// This budget with `work` units for its numerical solves (a frame that runs out sooner).
     pub fn with_numeric(self, work: usize) -> Budget {
         Budget { numeric_left: Some(work), ..self }
+    }
+    /// This budget with `work` units for its numerical solves, which stop when it is spent.
+    pub(crate) fn for_edit(self, work: usize) -> Budget {
+        Budget { numeric_left: Some(work), numeric_stops: true, ..self }
+    }
+    /// The numerical solves' work left, when it is counted.
+    pub(crate) fn numeric_left(&self) -> Option<usize> {
+        self.numeric_left
+    }
+    /// Whether the numerical solves stop when their allowance is spent ([`Budget::for_edit`]).
+    pub(crate) fn numeric_stops(&self) -> bool {
+        self.numeric_stops
     }
     /// Whether the numerical solves' work is counted ([`Budget::frame`]).
     pub(crate) fn counts_numeric(&self) -> bool {

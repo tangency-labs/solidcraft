@@ -11,10 +11,10 @@
 //! footprint, which also puts them below the board.
 
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use solidcore_record::{Loop2, Plane, Region2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_doc::Mat;
 use solidcraft_geom::prelude::*;
 
@@ -22,10 +22,26 @@ use crate::{IoError, Result};
 
 /// Largest KiCad board file read.
 pub const MAX_KICAD_BYTES: usize = 128 << 20;
-const MAX_TOKENS: usize = 2_000_000;
+/// Token cap for a small file; a larger file may hold as many tokens as `token_cap` allows.
+const MIN_TOKEN_CAP: usize = 2_000_000;
 const MAX_DEPTH: usize = 128;
 const MAX_FOOTPRINTS: usize = 100_000;
+/// Fields kept per footprint for its text variables.
+const MAX_FOOTPRINT_FIELDS: usize = 256;
+/// Characters a text may grow to as its variables are expanded; the rest stays as written.
+const MAX_EXPANDED_TEXT: usize = 4096;
+/// How deep variables inside a variable's name are expanded (`${${REFERENCE}}`).
+const MAX_VARIABLE_DEPTH: usize = 8;
 const MAX_MODELS: usize = 500_000;
+/// Files listed in a board's `embedded_files` blocks, over the board and its footprints.
+const MAX_EMBEDDED_ENTRIES: usize = 50_000;
+/// The largest embedded file, unpacked. A real STEP model is a few hundred kilobytes; the limit
+/// stops a small compressed file from growing into memory.
+const MAX_EMBEDDED_FILE_BYTES: usize = 64 << 20;
+/// All embedded files together, unpacked.
+const MAX_EMBEDDED_TOTAL_BYTES: usize = 256 << 20;
+/// The prefix of a footprint model path that names a file stored inside the board.
+const EMBED_SCHEME: &str = "kicad-embed://";
 const MAX_OUTLINE_SEGMENTS: usize = 500_000;
 const MAX_OUTLINE_POINTS: usize = 500_000;
 const MAX_MODEL_VERTICES: usize = 5_000_000;
@@ -110,6 +126,44 @@ impl KicadCopper {
     }
 }
 
+/// Which drilled holes come in. Each choice keeps the ones before it: mounting holes, then the
+/// holes of through-hole pads, then vias.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum KicadHoles {
+    /// No holes, except those that reach the board's edge or a cutout (a castellated pad).
+    None,
+    /// Mounting holes: every unplated hole, and every hole of a `MountingHole…` footprint.
+    #[default]
+    Mounting,
+    /// Mounting holes and the plated holes of through-hole pads.
+    Pads,
+    /// Every hole, vias as well.
+    All,
+}
+
+impl KicadHoles {
+    /// `none`, `mounting`, `pads` or `all` (any case).
+    pub fn parse(s: &str) -> Option<KicadHoles> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "none" => Some(KicadHoles::None),
+            "mounting" => Some(KicadHoles::Mounting),
+            "pads" => Some(KicadHoles::Pads),
+            "all" => Some(KicadHoles::All),
+            _ => None,
+        }
+    }
+
+    /// The option's parameter value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            KicadHoles::None => "none",
+            KicadHoles::Mounting => "mounting",
+            KicadHoles::Pads => "pads",
+            KicadHoles::All => "all",
+        }
+    }
+}
+
 /// What the importer brings in besides the board substrate.
 #[derive(Clone, Debug, PartialEq)]
 pub struct KicadOptions {
@@ -121,6 +175,8 @@ pub struct KicadOptions {
     pub copper: KicadCopper,
     /// Build the front and back silkscreen.
     pub silkscreen: bool,
+    /// Which drilled holes come in; a hole left out is left out of every layer.
+    pub holes: KicadHoles,
     /// Board substrate colour (`None`: [`DEFAULT_BOARD_COLOR`]).
     pub color: Option<[u8; 3]>,
     /// Mesh or B-rep (B-rep is refused).
@@ -134,6 +190,7 @@ impl Default for KicadOptions {
             components: true,
             copper: KicadCopper::Overlay,
             silkscreen: true,
+            holes: KicadHoles::default(),
             color: None,
             representation: KicadRepresentation::default(),
         }
@@ -161,7 +218,7 @@ pub struct KicadBoard {
     /// Closed Edge.Cuts contours in the board frame (X right, Y up; KiCad's Y is negated).
     pub outlines: Vec<Vec<[f64; 2]>>,
     pub footprints: Vec<KicadFootprint>,
-    /// Front/back copper tracks and arcs. Their points are in the board frame.
+    /// Copper tracks and arcs on any copper layer. Their points are in the board frame.
     pub tracks: Vec<KicadStroke>,
     pub vias: Vec<KicadVia>,
     /// Filled copper zone polygons per layer.
@@ -172,14 +229,42 @@ pub struct KicadBoard {
     pub texts: Vec<KicadText>,
     /// Drilled holes (pads and vias) in the board frame.
     pub drills: Vec<KicadDrill>,
+    /// The files stored inside the board (KiCad 8 and later), by name: what a footprint's
+    /// `kicad-embed://<name>` model path refers to.
+    pub embedded_files: Vec<KicadEmbeddedFile>,
+    /// The inner copper layers the board has (`In<n>.Cu`, by `n`, In1 nearest the front), each
+    /// with how deep its copper sits as a fraction of the board's thickness: 0 is the front face,
+    /// 1 the back face. From the board's stackup when it gives a simple one, else spaced evenly.
+    pub inner_layers: Vec<(u32, f64)>,
     pub color: [f32; 3],
     pub warnings: Vec<String>,
+}
+
+/// A file stored in the board's `embedded_files` block (board level or inside a footprint).
+/// A footprint lists the files it uses with their checksums; the board-level block also carries
+/// the data. One name can therefore appear several times.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KicadEmbeddedFile {
+    pub name: String,
+    /// KiCad's file type: `model`, `font`, `datasheet` or `worksheet`.
+    pub kind: String,
+    /// The compressed file as base64 text, when this entry carries it.
+    pub data: Option<String>,
+    /// The checksum KiCad recorded for the file, when this entry has one.
+    pub checksum: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct KicadFootprint {
     pub reference: String,
     pub value: String,
+    /// The footprint's library name, `Library:Footprint` (or just `Footprint`).
+    pub name: String,
+    /// Every field (property) by its name, hidden ones too: what `${NAME}` in its text reads.
+    pub fields: Vec<(String, String)>,
+    /// The footprint's id (`uuid`, `tstamp` before KiCad 8): KiCad saves a cross reference such
+    /// as `${R7:VALUE}` with it in place of the reference.
+    pub uuid: String,
     pub layer: String,
     /// Board X/Y in millimetres and footprint rotation in degrees.
     pub at: [f64; 3],
@@ -196,8 +281,12 @@ pub struct KicadFootprint {
 #[derive(Clone, Debug, PartialEq)]
 pub struct KicadText {
     pub text: String,
-    /// X/Y in millimetres and rotation in degrees, in the containing frame.
+    /// X/Y in millimetres in the containing frame, and the rotation in degrees. A footprint's
+    /// text stores its rotation on the board, not relative to the footprint (KiCad 5 files as well).
     pub at: [f64; 3],
+    /// A footprint text KiCad may draw upside down: `(unlocked yes)`, or `unlocked` in its `at`.
+    /// Other footprint text is turned to read upright (see [`footprint_text_angle`]).
+    pub unlocked: bool,
     pub layer: String,
     /// Cap height and glyph width in millimetres.
     pub height: f64,
@@ -231,11 +320,16 @@ pub struct KicadModel {
 pub struct KicadPad {
     pub at: [f64; 3],
     pub size: [f64; 2],
+    /// `thru_hole`, `np_thru_hole`, `smd` or `connect`.
+    pub kind: String,
     /// `circle`, `rect`, `oval`, `roundrect`, `trapezoid` or `custom`.
     pub shape: String,
     pub layers: Vec<String>,
     /// `(width, height)` of the drill, if any.
     pub drill: Option<[f64; 2]>,
+    /// How far the pad's copper sits from its position (and its hole), in the pad's own frame:
+    /// `(drill … (offset dx dy))`. The hole stays at `at`.
+    pub offset: [f64; 2],
     pub roundrect_ratio: f64,
 }
 
@@ -254,6 +348,7 @@ pub struct KicadVia {
     /// Board frame.
     pub at: [f64; 2],
     pub size: f64,
+    /// 0: no hole (the holes option left it out).
     pub drill: f64,
     pub layers: Vec<String>,
 }
@@ -271,6 +366,12 @@ pub struct KicadDrill {
     pub center: [f64; 2],
     /// Round holes have equal sides; a slot is a stadium of this width and height.
     pub size: [f64; 2],
+    /// The direction of a slot's width in the board frame, in radians anticlockwise from +X (its
+    /// pad's rotation on the board).
+    pub angle: f64,
+    /// A plated hole, with copper on its wall: a via's, or a `thru_hole` pad's. KiCad's drill files
+    /// put these in the plated (PTH) file and an `np_thru_hole` pad's in the unplated (NPTH) one.
+    pub plated: bool,
 }
 
 /// A KiCad board and the reusable component placements it references.
@@ -304,6 +405,17 @@ pub fn is_kicad_path(path: &str) -> bool {
     Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("kicad_pro") || e.eq_ignore_ascii_case("kicad_pcb"))
 }
 
+/// The smallest board thickness, in millimetres, the import believes.
+///
+/// The import options window's "Board thickness" row offers the same range (see
+/// [`crate::formats`]), so the thickness the window shows for a file and the thickness the import
+/// uses for that file are the same number.
+pub(crate) const BOARD_THICKNESS_MIN_MM: f64 = 0.01;
+
+/// The largest board thickness, in millimetres, the import believes (see
+/// [`BOARD_THICKNESS_MIN_MM`]).
+pub(crate) const BOARD_THICKNESS_MAX_MM: f64 = 1000.0;
+
 /// The board's own thickness (mm), from its `(general (thickness …))`: the import options window
 /// shows it before the board is built. `None` when the file cannot be read or names no valid
 /// thickness.
@@ -328,13 +440,21 @@ pub fn kicad_board_thickness(bytes: &[u8]) -> Option<f64> {
                         Token::Atom(value) => value.parse::<f64>().ok(),
                         _ => None,
                     })?;
-                    return (value.is_finite() && value > 0.0 && value <= 1000.0).then_some(value);
+                    return (value.is_finite() && (BOARD_THICKNESS_MIN_MM..=BOARD_THICKNESS_MAX_MM).contains(&value)).then_some(value);
                 }
                 _ => {}
             }
         }
     }
     None
+}
+
+/// The thickness of the board a KiCad project or PCB path names, read from its file without
+/// building it (the import options start at it; `doc.open` uses it when given no `thickness`).
+pub fn kicad_file_thickness(path: &str) -> Option<f64> {
+    let board = kicad_board_path(Path::new(path)).ok()?;
+    let bytes = crate::vfs::read(&board.to_string_lossy(), MAX_KICAD_BYTES).ok()?;
+    kicad_board_thickness(&bytes)
 }
 
 /// Resolve a selected KiCad project to its same-stem board, or keep a directly selected board.
@@ -373,7 +493,7 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
         .and_then(|g| field(g, "thickness"))
         .and_then(|e| numbers(e, 1).ok())
         .and_then(|n| n.first().copied())
-        .filter(|v| *v > 0.0 && *v <= 1000.0)
+        .filter(|v| (BOARD_THICKNESS_MIN_MM..=BOARD_THICKNESS_MAX_MM).contains(v))
         .unwrap_or(1.6);
 
     let color = options.color.map(|c| [c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0]).unwrap_or(DEFAULT_BOARD_COLOR);
@@ -388,6 +508,8 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
         graphics: Vec::new(),
         texts: Vec::new(),
         drills: Vec::new(),
+        embedded_files: Vec::new(),
+        inner_layers: Vec::new(),
         color,
         warnings: Vec::new(),
     };
@@ -424,7 +546,7 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
                 };
                 if layer == "Edge.Cuts" {
                     push_stroke_segments(&stroke, &board_to_world(), &mut segments);
-                } else if is_silk(&layer) || is_outer_copper(&layer) {
+                } else if is_silk(&layer) || is_copper_layer(&layer) {
                     if board.graphics.len() >= MAX_GRAPHICS {
                         board.warnings.push("additional board graphics were skipped".into());
                     } else {
@@ -486,21 +608,374 @@ pub fn parse_kicad_board_with(bytes: &[u8], file: &str, options: KicadOptions) -
     }
     board.outlines = join_outline_segments(segments, &mut board.warnings);
     // Drilled holes are cut from the substrate.
-    for footprint in &board.footprints {
-        let transform = footprint_world(footprint);
-        for pad in &footprint.pads {
-            let Some(drill) = pad.drill else { continue };
-            let center = apply2(&transform, pad.at[0], pad.at[1]);
-            board.drills.push(KicadDrill { center, size: [drill[0].abs(), drill[1].abs()] });
-        }
-    }
-    for via in &board.vias {
-        board.drills.push(KicadDrill { center: [via.at[0], -via.at[1]], size: [via.drill.abs(), via.drill.abs()] });
-    }
+    board.drills = board_drills(&board);
     if extra_text_seen {
         board.warnings.push("text boxes, dimensions and tables are not modeled yet".into());
     }
+    collect_embedded_files(&root, &mut board.embedded_files, &mut board.warnings);
+    board.inner_layers = inner_layer_depths(&root, &board);
+    expand_text_variables(&mut board, &root);
     Ok(board)
+}
+
+/// The inner copper layers of a board and how deep each sits (see [`KicadBoard::inner_layers`]).
+/// A layer counts when the board's layer table lists it or anything is drawn on it. Their depths
+/// follow the board's stackup when it is simple to read, else the layers are spaced evenly
+/// through the board: In1 at 1/(n+1) of the way from the front face, In2 at 2/(n+1), and so on.
+fn inner_layer_depths(root: &Expr<'_>, board: &KicadBoard) -> Vec<(u32, f64)> {
+    let mut found: std::collections::BTreeSet<u32> = std::collections::BTreeSet::new();
+    let mut note = |name: &str| {
+        if let Some(CopperLayer::Inner(n)) = copper_layer(name) {
+            found.insert(n);
+        }
+    };
+    for entry in field(root, "layers").map(children).unwrap_or_default() {
+        if let Some(name) = children(entry).get(1).and_then(atom) {
+            note(name);
+        }
+    }
+    board.tracks.iter().for_each(|track| note(&track.layer));
+    board.zones.iter().for_each(|zone| note(&zone.layer));
+    board.graphics.iter().for_each(|graphic| note(&graphic.layer));
+    board.texts.iter().for_each(|text| note(&text.layer));
+    for footprint in &board.footprints {
+        footprint.texts.iter().for_each(|text| note(&text.layer));
+        footprint.pads.iter().flat_map(|pad| pad.layers.iter()).for_each(|layer| note(layer));
+    }
+    let Some(last) = found.iter().next_back().copied() else { return Vec::new() };
+    if let Some(depths) = stackup_depths(root, &found) {
+        return depths;
+    }
+    found.iter().map(|n| (*n, f64::from(*n) / f64::from(last + 1))).collect()
+}
+
+/// Where the board's stackup puts each inner copper layer, as a fraction of the way from the
+/// front copper's inner face to the back copper's: the layers between the two, each with its own
+/// `(thickness …)`. `None` when the board has no stackup, a layer in it lacks a thickness, a layer
+/// is made of sublayers, or it does not name every inner layer the board uses.
+fn stackup_depths(root: &Expr<'_>, inner: &std::collections::BTreeSet<u32>) -> Option<Vec<(u32, f64)>> {
+    let stackup = field(field(root, "setup")?, "stackup")?;
+    let mut rows: Vec<(&str, f64)> = Vec::new();
+    for layer in children(stackup).iter().filter(|e| head(e) == Some("layer")) {
+        // KiCad 9 writes it as a bare word, older files as a field.
+        if field(layer, "addsublayer").is_some() || children(layer).iter().any(|c| atom(c) == Some("addsublayer")) {
+            return None;
+        }
+        let name = children(layer).get(1).and_then(atom)?;
+        let thickness = field(layer, "thickness").and_then(|e| numbers_but(e, 1, "locked").ok()).and_then(|n| n.first().copied());
+        rows.push((name, thickness.unwrap_or(f64::NAN)));
+    }
+    let front = rows.iter().position(|(name, _)| *name == "F.Cu")?;
+    let back = rows.iter().position(|(name, _)| *name == "B.Cu")?;
+    let between = rows.get(front + 1..back)?;
+    if between.iter().any(|(_, thickness)| !(thickness.is_finite() && *thickness > 0.0)) {
+        return None;
+    }
+    let span: f64 = between.iter().map(|(_, thickness)| thickness).sum();
+    if !(span.is_finite() && span > 0.0) {
+        return None;
+    }
+    let mut depths = Vec::new();
+    for n in inner {
+        let name = format!("In{n}.Cu");
+        let at = between.iter().position(|(row, _)| *row == name)?;
+        let before: f64 = between.iter().take(at).map(|(_, thickness)| thickness).sum();
+        let centre = before + between.get(at)?.1 / 2.0;
+        depths.push((*n, (centre / span).clamp(0.0, 1.0)));
+    }
+    Some(depths)
+}
+
+/// Put each text's variables in, as KiCad draws them: `${REVISION}` and the title block's other
+/// names, `${LAYER}`, and in a footprint's text its fields (`${REFERENCE}`, `${VALUE}`, any field by
+/// its exact name, hidden ones too), `${FOOTPRINT_NAME}` and `${FOOTPRINT_LIBRARY}`; `${R7:VALUE}`
+/// reads another footprint's. Names are case-sensitive; an unknown one stays as written. A text
+/// that comes out empty (a revision the board never set) is dropped.
+fn expand_text_variables(board: &mut KicadBoard, root: &Expr<'_>) {
+    let title = title_block_variables(root);
+    let layers = layer_names(root);
+    // Each reference and id to its footprint, the first one when two share it.
+    let mut by_reference: std::collections::HashMap<&str, &KicadFootprint> = std::collections::HashMap::new();
+    for footprint in &board.footprints {
+        by_reference.entry(footprint.reference.as_str()).or_insert(footprint);
+    }
+    for footprint in board.footprints.iter().filter(|f| !f.uuid.is_empty()) {
+        by_reference.entry(footprint.uuid.as_str()).or_insert(footprint);
+    }
+    let vars = TextVariables { title: &title, layers: &layers, footprints: &by_reference };
+    let stopped = std::cell::RefCell::new(Vec::<String>::new());
+    let expand_all = |texts: &[KicadText], footprint: Option<&KicadFootprint>| -> Vec<KicadText> {
+        texts
+            .iter()
+            .filter_map(|text| {
+                let budget = Budget::new();
+                let resolve = |name: &str, depth: usize| vars.resolve(name, &text.layer, footprint, depth, &budget);
+                let expanded = expand_variables(&text.text, 0, &budget, &resolve);
+                if budget.spent() {
+                    stopped.borrow_mut().push(footprint.map_or_else(|| "a board text".to_string(), |f| f.reference.clone()));
+                }
+                (!expanded.trim().is_empty()).then(|| KicadText { text: expanded, ..text.clone() })
+            })
+            .collect()
+    };
+    let board_texts = expand_all(&board.texts, None);
+    let footprint_texts: Vec<Vec<KicadText>> = board.footprints.iter().map(|footprint| expand_all(&footprint.texts, Some(footprint))).collect();
+    let mut stopped = stopped.into_inner();
+    board.texts = board_texts;
+    for (footprint, texts) in board.footprints.iter_mut().zip(footprint_texts) {
+        footprint.texts = texts;
+    }
+    if !stopped.is_empty() {
+        let count = stopped.len();
+        stopped.dedup();
+        stopped.truncate(5);
+        board.warnings.push(format!("text variables nested too deeply in {count} text(s) were left partly as written ({})", stopped.join(", ")));
+    }
+}
+
+/// The work one text's variables may take: each name looked up and each character a value
+/// holds, values that are then left out included. A text whose budget runs out keeps the rest of
+/// its variables as written.
+const MAX_VARIABLE_WORK: usize = 100_000;
+
+/// What is left of one text's [`MAX_VARIABLE_WORK`].
+struct Budget(std::cell::Cell<usize>);
+
+impl Budget {
+    fn new() -> Budget {
+        Budget(std::cell::Cell::new(MAX_VARIABLE_WORK))
+    }
+
+    /// Take `work` from the budget; `false`, and nothing left, when it does not hold that much.
+    fn spend(&self, work: usize) -> bool {
+        let left = self.0.get();
+        self.0.set(left.saturating_sub(work));
+        work <= left && left > 0
+    }
+
+    fn spent(&self) -> bool {
+        self.0.get() == 0
+    }
+}
+
+/// What a board's text variables read: its title block, its layers' names, its footprints by
+/// reference and by id.
+struct TextVariables<'a> {
+    title: &'a [(String, String)],
+    layers: &'a std::collections::HashMap<String, String>,
+    footprints: &'a std::collections::HashMap<&'a str, &'a KicadFootprint>,
+}
+
+impl TextVariables<'_> {
+    /// The value of the variable `name` in a text on `layer` (in `footprint`'s text, or the
+    /// board's for `None`), `depth` names deep; `None` when there is no such variable or `budget`
+    /// is spent. A cross reference (`R7:VALUE`, or the footprint's id in place of `R7`) reads that
+    /// footprint's; qualifiers are followed one after another, at most [`MAX_VARIABLE_DEPTH`] of
+    /// them.
+    fn resolve(&self, name: &str, layer: &str, footprint: Option<&KicadFootprint>, depth: usize, budget: &Budget) -> Option<String> {
+        if !budget.spend(1) {
+            return None;
+        }
+        let (mut name, mut layer, mut footprint) = (name, layer, footprint);
+        let mut hops = 0usize;
+        while let Some((reference, rest)) = name.split_once(':') {
+            hops += 1;
+            if hops > MAX_VARIABLE_DEPTH {
+                return None;
+            }
+            let Some(other) = self.footprints.get(reference).copied() else {
+                return Some(format!("<Unknown reference: {reference}>"));
+            };
+            (name, layer, footprint) = (rest, other.layer.as_str(), Some(other));
+        }
+        if let Some(footprint) = footprint {
+            let (library, part) = footprint.name.split_once(':').unwrap_or(("", footprint.name.as_str()));
+            match name {
+                "REFERENCE" => return Some(footprint.reference.clone()),
+                "VALUE" => return Some(footprint.value.clone()),
+                "FOOTPRINT_NAME" => return Some(part.to_string()),
+                "FOOTPRINT_LIBRARY" => return Some(library.to_string()),
+                _ => {}
+            }
+            if let Some((_, value)) = footprint.fields.iter().find(|(key, _)| key == name) {
+                // A field is read as KiCad shows it: its own variables put in, in its footprint.
+                if depth >= MAX_VARIABLE_DEPTH {
+                    return None;
+                }
+                let value =
+                    expand_variables(value, depth + 1, budget, &|inner: &str, d: usize| self.resolve(inner, layer, Some(footprint), d, budget));
+                // One field's value is no longer than a whole text may be.
+                return (value.len() <= MAX_EXPANDED_TEXT).then_some(value);
+            }
+        }
+        if name == "LAYER" {
+            return Some(self.layers.get(layer).cloned().unwrap_or_else(|| default_layer_name(layer).to_string()));
+        }
+        self.title.iter().find(|(key, _)| key == name).map(|(_, value)| value.clone())
+    }
+}
+
+/// `text` with each `${NAME}` that `resolve` knows replaced by its value; a name is expanded
+/// first (`${${REFERENCE}}` reads the variable named by the reference), and a `${` that is never
+/// closed runs to the end of the text, as KiCad reads it. Once `budget` is spent the rest of the
+/// text stays as written.
+fn expand_variables(text: &str, depth: usize, budget: &Budget, resolve: &dyn Fn(&str, usize) -> Option<String>) -> String {
+    let mut out = String::with_capacity(text.len().min(MAX_EXPANDED_TEXT));
+    let mut rest = text;
+    while let Some(at) = rest.find("${") {
+        if out.len() > MAX_EXPANDED_TEXT || budget.spent() {
+            break;
+        }
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 2..];
+        let mut open = 1usize;
+        let mut end = None;
+        for (index, ch) in after.char_indices() {
+            if after[index..].starts_with("${") {
+                open += 1;
+            } else if ch == '}' {
+                open -= 1;
+                if open == 0 {
+                    end = Some(index);
+                    break;
+                }
+            }
+        }
+        let (inner, next) = match end {
+            Some(index) => (&after[..index], &after[index + 1..]),
+            None => (after, ""),
+        };
+        let name = if depth < MAX_VARIABLE_DEPTH { expand_variables(inner, depth + 1, budget, resolve) } else { inner.to_string() };
+        // A value that would take the text past the limit is left out, its name kept; its
+        // characters count against the budget either way.
+        match resolve(&name, depth).filter(|value| budget.spend(value.len()) && out.len() + value.len() <= MAX_EXPANDED_TEXT) {
+            Some(value) => out.push_str(&value),
+            None => {
+                out.push_str("${");
+                out.push_str(&name);
+                if end.is_some() {
+                    out.push('}');
+                }
+            }
+        }
+        rest = next;
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The title block's text variables; each is defined (empty when the board does not set it).
+fn title_block_variables(root: &Expr<'_>) -> Vec<(String, String)> {
+    let block = field(root, "title_block");
+    let entry = |key: &str| block.and_then(|b| field(b, key)).and_then(|e| children(e).get(1)).and_then(atom).unwrap_or_default().to_string();
+    let mut vars = vec![
+        ("TITLE".to_string(), entry("title")),
+        ("ISSUE_DATE".to_string(), entry("date")),
+        ("REVISION".to_string(), entry("rev")),
+        ("COMPANY".to_string(), entry("company")),
+    ];
+    for n in 1..=9 {
+        let comment = block
+            .map(children)
+            .unwrap_or_default()
+            .iter()
+            .filter(|e| head(e) == Some("comment"))
+            .find(|e| children(e).get(1).and_then(atom) == Some(n.to_string().as_str()))
+            .and_then(|e| children(e).get(2))
+            .and_then(atom)
+            .unwrap_or_default()
+            .to_string();
+        vars.push((format!("COMMENT{n}"), comment));
+    }
+    vars
+}
+
+/// The names the board gives its layers (`(5 "F.SilkS" user "Top silk")`), by their canonical name.
+fn layer_names(root: &Expr<'_>) -> std::collections::HashMap<String, String> {
+    let mut names = std::collections::HashMap::new();
+    for entry in field(root, "layers").map(children).unwrap_or_default() {
+        let parts = children(entry);
+        if let (Some(canonical), Some(user)) = (parts.get(1).and_then(atom), parts.get(3).and_then(atom)) {
+            names.insert(canonical.to_string(), user.to_string());
+        }
+    }
+    names
+}
+
+/// The name KiCad shows for a layer the board's layer table does not name.
+fn default_layer_name(layer: &str) -> &str {
+    match layer {
+        "F.SilkS" => "F.Silkscreen",
+        "B.SilkS" => "B.Silkscreen",
+        other => other,
+    }
+}
+
+/// Every drilled hole of the board's pads and vias, in the board frame.
+fn board_drills(board: &KicadBoard) -> Vec<KicadDrill> {
+    let mut drills = Vec::new();
+    for footprint in &board.footprints {
+        let transform = footprint_world(footprint);
+        drills.extend(footprint.pads.iter().filter_map(|pad| pad_drill(&transform, pad)));
+    }
+    drills.extend(board.vias.iter().filter_map(via_drill));
+    drills
+}
+
+/// A pad's drilled hole on the board, if it has one; `transform` places its footprint.
+fn pad_drill(transform: &Mat, pad: &KicadPad) -> Option<KicadDrill> {
+    let drill = pad.drill?;
+    let center = apply2(transform, pad.at[0], pad.at[1]);
+    // The pad's own X axis, turned by its rotation in the footprint frame, on the board.
+    let [ux, uy] = pad_axis(pad);
+    let ahead = apply2(transform, pad.at[0] + ux, pad.at[1] + uy);
+    let angle = solidcraft_kernel::planar::direction_angle(center, ahead);
+    Some(KicadDrill { center, size: [drill[0].abs(), drill[1].abs()], angle, plated: pad.kind == "thru_hole" })
+}
+
+/// A via's drilled hole on the board, unless it has none.
+fn via_drill(via: &KicadVia) -> Option<KicadDrill> {
+    (via.drill > 0.0).then(|| KicadDrill { center: [via.at[0], -via.at[1]], size: [via.drill, via.drill], angle: 0.0, plated: true })
+}
+
+/// Leave out the drilled holes `holes` does not keep. The substrate stays whole there and the copper
+/// closes over the spot; an unplated pad, which is only its hole, goes with it. A hole that reaches
+/// the board's edge or a cutout (a castellated pad) is always kept: it shapes the board.
+fn keep_holes(board: &mut KicadBoard, holes: KicadHoles) {
+    if holes == KicadHoles::All {
+        return;
+    }
+    let outlines = &board.outlines;
+    for footprint in &mut board.footprints {
+        let transform = footprint_world(footprint);
+        let mounting = footprint.name.rsplit(':').next().is_some_and(|name| name.to_ascii_lowercase().starts_with("mountinghole"));
+        footprint.pads.retain_mut(|pad| {
+            let Some(drill) = pad_drill(&transform, pad) else { return true };
+            let unplated = pad.kind == "np_thru_hole";
+            let kept = match holes {
+                KicadHoles::None => false,
+                KicadHoles::Mounting => mounting || unplated,
+                KicadHoles::Pads | KicadHoles::All => true,
+            };
+            if kept || reaches_an_outline(outlines, &drill) {
+                return true;
+            }
+            pad.drill = None;
+            !unplated
+        });
+    }
+    for via in &mut board.vias {
+        if via_drill(via).is_some_and(|drill| !reaches_an_outline(outlines, &drill)) {
+            via.drill = 0.0;
+        }
+    }
+    board.drills = board_drills(board);
+}
+
+/// Does a drill reach an outline, the board's edge or a cutout's? Measured to the drill's own
+/// shape, so a slot counts when its end comes to an edge and not when it only lies beside one.
+fn reaches_an_outline(outlines: &[Vec<[f64; 2]>], drill: &KicadDrill) -> bool {
+    solidcraft_kernel::planar::hole_reaches_loops(drill.center, drill.size, drill.angle, outlines)
 }
 
 /// The matrix that maps a board point (KiCad's Y down) to SolidCraft's Y up.
@@ -531,8 +1006,35 @@ fn is_silk(layer: &str) -> bool {
     layer == "F.SilkS" || layer == "B.SilkS"
 }
 
-fn is_outer_copper(layer: &str) -> bool {
-    layer == "F.Cu" || layer == "B.Cu"
+fn is_copper_layer(layer: &str) -> bool {
+    copper_layer(layer).is_some()
+}
+
+/// The most inner copper layers (`In1.Cu` …) the import reads; KiCad itself stops at 30.
+const MAX_INNER_LAYERS: u32 = 30;
+
+/// A copper layer of the board, in stacking order: front, `In1.Cu` to `In<n>.Cu`, back.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum CopperLayer {
+    Front,
+    Inner(u32),
+    Back,
+}
+
+/// The copper layer a KiCad layer name means, `None` for any other layer.
+fn copper_layer(name: &str) -> Option<CopperLayer> {
+    match name {
+        "F.Cu" => Some(CopperLayer::Front),
+        "B.Cu" => Some(CopperLayer::Back),
+        _ => {
+            let digits = name.strip_prefix("In")?.strip_suffix(".Cu")?;
+            if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            let n: u32 = digits.parse().ok()?;
+            (1..=MAX_INNER_LAYERS).contains(&n).then_some(CopperLayer::Inner(n))
+        }
+    }
 }
 
 /// Turn a stroke into line segments in its containing frame, applying `transform`.
@@ -670,7 +1172,7 @@ fn bezier_points(p0: [f64; 2], p1: [f64; 2], p2: [f64; 2], p3: [f64; 2]) -> Vec<
 
 fn parse_track(expr: &Expr<'_>, warnings: &mut Vec<String>) -> Option<KicadStroke> {
     let layer = layer_of(expr)?;
-    if !is_outer_copper(&layer) {
+    if !is_copper_layer(&layer) {
         return None;
     }
     let a = point_of(expr, "start")?;
@@ -685,7 +1187,7 @@ fn parse_track(expr: &Expr<'_>, warnings: &mut Vec<String>) -> Option<KicadStrok
 
 fn parse_track_arc(expr: &Expr<'_>, warnings: &mut Vec<String>) -> Option<KicadStroke> {
     let layer = layer_of(expr)?;
-    if !is_outer_copper(&layer) {
+    if !is_copper_layer(&layer) {
         return None;
     }
     let a = point_of(expr, "start")?;
@@ -776,61 +1278,174 @@ fn clean_contour(points: &[[f64; 2]]) -> Option<Vec<[f64; 2]>> {
     (pts.len() >= 3).then_some(pts)
 }
 
+/// Take a fill outline apart at its bridges. KiCad saves a filled polygon with holes as one
+/// outline that runs in to each hole along a zero-width bridge, round the hole and back out along
+/// the same line (and from one hole on to the next the same way). Kept, a bridge is an edge with
+/// nothing beside it, drawn as a line across the pour. So the bridges go, and the pieces they held
+/// together are loops of their own: the pour's outline and its holes, which nesting sorts out (see
+/// [`regions_from_loops`]).
+///
+/// One walk round the outline, with the points it has not closed yet on a stack, the way brackets
+/// are matched: a step back along the edge just walked is a bridge going back out and takes that
+/// edge off; a step back onto a point still on the stack closes the loop since it. Each point goes
+/// on and off the stack once, so a hatched fill with thousands of holes costs one pass.
+fn split_bridges(points: &[[f64; 2]]) -> Vec<Vec<[f64; 2]>> {
+    let key = |p: [f64; 2]| (p[0].to_bits(), p[1].to_bits());
+    let mut loops = Vec::new();
+    let mut path: Vec<[f64; 2]> = Vec::with_capacity(points.len());
+    let mut on_path: HashMap<(u64, u64), usize> = HashMap::with_capacity(points.len());
+    // Round once and back to the first point, so the outline's last edge closes it.
+    for &point in points.iter().chain(points.first()) {
+        if path.last() == Some(&point) {
+            continue;
+        }
+        if path.len() >= 2 && path.get(path.len() - 2) == Some(&point) {
+            if let Some(top) = path.pop() {
+                on_path.remove(&key(top));
+            }
+            continue;
+        }
+        if let Some(&at) = on_path.get(&key(point)) {
+            let span = path.split_off((at + 1).min(path.len()));
+            for q in &span {
+                on_path.remove(&key(*q));
+            }
+            if span.len() >= 2 {
+                loops.push(std::iter::once(point).chain(span).collect());
+            }
+            continue;
+        }
+        on_path.insert(key(point), path.len());
+        path.push(point);
+    }
+    loops
+}
+
 /// A copper zone's filled polygons, one zone per layer they lie on. KiCad 9 writes a zone that
 /// spans layers as `(layers "F.Cu" "B.Cu")` with a `filled_polygon` per layer, so the fill's own
 /// layer decides (the zone's `(layer …)` is the fallback).
 fn parse_zone(expr: &Expr<'_>, warnings: &mut Vec<String>) -> Vec<KicadZone> {
-    let zone_layer = layer_of(expr).filter(|layer| is_outer_copper(layer));
+    let zone_layer = layer_of(expr).filter(|layer| is_copper_layer(layer));
     let mut contours: Vec<(String, Vec<Vec<[f64; 2]>>)> = Vec::new();
     let mut total = 0usize;
     for fill in children(expr).iter().filter(|e| head(e) == Some("filled_polygon")) {
         let layer = layer_of(fill).or_else(|| zone_layer.clone());
-        let Some(layer) = layer.filter(|layer| is_outer_copper(layer)) else { continue };
-        let Some(points) = poly_points(fill).and_then(|points| clean_contour(&points)) else { continue };
+        let Some(layer) = layer.filter(|layer| is_copper_layer(layer)) else { continue };
+        let Some(points) = poly_points(fill) else { continue };
         total = total.saturating_add(points.len());
         if total > MAX_ZONE_POINTS {
             warnings.push("a copper zone was too large and was skipped".into());
             return Vec::new();
         }
-        match contours.iter_mut().find(|(l, _)| *l == layer) {
-            Some((_, list)) => list.push(points),
-            None => contours.push((layer, vec![points])),
+        for points in split_bridges(&points).iter().filter_map(|piece| clean_contour(piece)) {
+            match contours.iter_mut().find(|(l, _)| *l == layer) {
+                Some((_, list)) => list.push(points),
+                None => contours.push((layer.clone(), vec![points])),
+            }
         }
     }
     contours.into_iter().map(|(layer, contours)| KicadZone { layer, contours }).collect()
 }
 
+/// How far apart two Edge.Cuts ends may be and still be one corner of the outline, in millimetres.
+/// A board drawn in KiCad can leave a few nanometres between the end of one line and the start of
+/// the next, and KiCad reads such an outline as closed: its own STEP export joins points up to
+/// 0.01 mm apart (the default of `kicad-cli pcb export step --min-distance`).
+const OUTLINE_JOIN_DISTANCE: f64 = 0.01;
+
+/// How many segment ends the outline join may look at in all. A real board has a few ends near each
+/// corner, so it stays far below this; a file that piles its ends into one place would otherwise
+/// cost the square of its segment count.
+const MAX_OUTLINE_JOIN_WORK: usize = 50_000_000;
+
+/// The cell of the outline-joining grid a point is in.
+fn outline_cell(point: [f64; 2]) -> (i64, i64) {
+    ((point[0] / OUTLINE_JOIN_DISTANCE).floor() as i64, (point[1] / OUTLINE_JOIN_DISTANCE).floor() as i64)
+}
+
+/// Take a joined segment's ends out of the grid: it holds only the segments not joined yet.
+/// Returns how many entries it looked through, which counts toward the join's work limit.
+fn forget_outline_segment(cells: &mut std::collections::HashMap<(i64, i64), Vec<usize>>, segment: ([f64; 2], [f64; 2]), index: usize) -> usize {
+    let mut looked = 0usize;
+    for end in [segment.0, segment.1] {
+        if let Some(cell) = cells.get_mut(&outline_cell(end)) {
+            looked = looked.saturating_add(cell.len());
+            cell.retain(|other| *other != index);
+        }
+    }
+    looked
+}
+
+/// What the outline join gives when it passes its work limit: no outline at all (not the
+/// contours closed before it), and the warning that says why.
+fn outline_join_given_up(warnings: &mut Vec<String>) -> Vec<Vec<[f64; 2]>> {
+    warnings.push("the Edge.Cuts outline has too many ends in one place to join".into());
+    Vec::new()
+}
+
 fn join_outline_segments(segments: Vec<([f64; 2], [f64; 2])>, warnings: &mut Vec<String>) -> Vec<Vec<[f64; 2]>> {
-    let mut adjacent = std::collections::HashMap::<(i64, i64), Vec<usize>>::new();
+    // Every segment end, in the cells of a grid as wide as the joining distance: the ends within
+    // that distance of a point are in its cell or one of the eight around it.
+    let mut cells = std::collections::HashMap::<(i64, i64), Vec<usize>>::new();
     for (index, (a, b)) in segments.iter().enumerate() {
-        adjacent.entry(point_key(*a)).or_default().push(index);
-        adjacent.entry(point_key(*b)).or_default().push(index);
+        cells.entry(outline_cell(*a)).or_default().push(index);
+        cells.entry(outline_cell(*b)).or_default().push(index);
     }
     let mut contours = Vec::new();
     let mut used = vec![false; segments.len()];
+    let mut work = 0usize;
     for index in 0..segments.len() {
         if used[index] {
             continue;
         }
+        if work > MAX_OUTLINE_JOIN_WORK {
+            return outline_join_given_up(warnings);
+        }
         used[index] = true;
+        work = work.saturating_add(forget_outline_segment(&mut cells, segments[index], index));
         let (start, end) = segments[index];
         let mut contour = vec![start, end];
         let mut closed = near2(start, end);
         while !closed {
             let last = contour.last().copied().unwrap_or(start);
-            let next_index = adjacent.get(&point_key(last)).and_then(|indices| {
-                indices.iter().copied().find(|index| !used[*index] && segments.get(*index).is_some_and(|(a, b)| near2(*a, last) || near2(*b, last)))
-            });
-            let Some(next_index) = next_index else { break };
-            used[next_index] = true;
-            let (a, b) = segments[next_index];
-            let next = if near2(a, last) { b } else { a };
-            contour.push(next);
+            // The unused segment whose end is nearest: an exact continuation before one across a
+            // gap, and the earliest in the file when two are equally near. `true` means its
+            // second point is the far end.
+            let mut best: Option<(f64, usize, bool)> = None;
+            let (cx, cy) = outline_cell(last);
+            for cell in (-1..=1).flat_map(|dx| (-1..=1).map(move |dy| (cx.saturating_add(dx), cy.saturating_add(dy)))) {
+                let candidates = cells.get(&cell).map(Vec::as_slice).unwrap_or_default();
+                work = work.saturating_add(candidates.len());
+                for &candidate in candidates {
+                    let Some((a, b)) = segments.get(candidate) else { continue };
+                    for (gap, forward) in [(distance2(*a, last), true), (distance2(*b, last), false)] {
+                        let nearer = best.is_none_or(|(least, index, _)| gap < least || (gap == least && candidate < index));
+                        if gap <= OUTLINE_JOIN_DISTANCE && nearer {
+                            best = Some((gap, candidate, forward));
+                        }
+                    }
+                }
+            }
+            // The contour is closed when it is back at its start and no segment goes on from
+            // nearer than that: a piece shorter than the joining distance beside the start is
+            // still walked, not cut off. A contour has at least three corners.
+            let home = distance2(last, start);
+            if contour.len() >= 4 && home <= OUTLINE_JOIN_DISTANCE && best.is_none_or(|(gap, _, _)| home <= gap) {
+                closed = true;
+                break;
+            }
+            let Some((_, next_index, forward)) = best else { break };
+            if work > MAX_OUTLINE_JOIN_WORK {
+                return outline_join_given_up(warnings);
+            }
+            let (Some(taken), Some(segment)) = (used.get_mut(next_index), segments.get(next_index).copied()) else { break };
+            *taken = true;
+            work = work.saturating_add(forget_outline_segment(&mut cells, segment, next_index));
+            contour.push(if forward { segment.1 } else { segment.0 });
             if contour.len() > MAX_OUTLINE_POINTS {
                 contour.clear();
                 break;
             }
-            closed = near2(next, start);
         }
         if closed && contour.len() >= 4 {
             contour.pop();
@@ -842,10 +1457,6 @@ fn join_outline_segments(segments: Vec<([f64; 2], [f64; 2])>, warnings: &mut Vec
     contours
 }
 
-fn point_key(point: [f64; 2]) -> (i64, i64) {
-    ((point[0] * 1e6).round() as i64, (point[1] * 1e6).round() as i64)
-}
-
 fn near2(a: [f64; 2], b: [f64; 2]) -> bool {
     (a[0] - b[0]).abs() <= 1e-6 && (a[1] - b[1]).abs() <= 1e-6
 }
@@ -853,16 +1464,31 @@ fn near2(a: [f64; 2], b: [f64; 2]) -> bool {
 /// Make a mesh body for the board: its largest (or several) closed outlines, with board cutouts
 /// and drilled holes removed. `thickness` is in millimetres.
 pub fn kicad_board_mesh(board: &KicadBoard, thickness: f64) -> Result<crate::MeshObject> {
+    kicad_board_mesh_noted(board, thickness, &mut Vec::new())
+}
+
+/// [`kicad_board_mesh`], also saying in `notes` which drills could not be cut as a notch (kept as
+/// holes) and whether the drilled holes were lost altogether.
+fn kicad_board_mesh_noted(board: &KicadBoard, thickness: f64, notes: &mut Vec<String>) -> Result<crate::MeshObject> {
     if !thickness.is_finite() || thickness <= 0.0 || thickness > 1000.0 {
         return Err(IoError::Invalid("KiCad board thickness must be finite and between 0 and 1000 mm".into()));
     }
     let loops = outline_loops(board)?;
-    let regions = regions_from_loops(loops.clone(), Some(&board.drills));
-    let parts = extrude_regions(&regions, 0.0, thickness).or_else(|_| {
-        // A drill that touches a cutout can defeat the profile: keep the board and lose the holes.
-        let regions = regions_from_loops(loops, None);
-        extrude_regions(&regions, 0.0, thickness)
-    })?;
+    let mut cut_notes = Vec::new();
+    let regions = regions_from_loops_noted(loops.clone(), Some(&board.drills), &mut cut_notes);
+    let parts = match extrude_regions(&regions, 0.0, thickness) {
+        Ok(parts) => {
+            notes.append(&mut cut_notes);
+            parts
+        }
+        Err(_) => {
+            // A drill that touches a cutout can defeat the profile: keep the board and lose the holes.
+            if !board.drills.is_empty() {
+                notes.push("the board's drilled holes could not be cut: the board is built without them".into());
+            }
+            extrude_regions(&regions_from_loops(loops, None), 0.0, thickness)?
+        }
+    };
     // One body: the board's areas, at the height it stands at.
     let mut mesh = solidcraft_geom::Mesh::default();
     for part in &parts {
@@ -877,16 +1503,64 @@ pub fn kicad_board_mesh(board: &KicadBoard, thickness: f64) -> Result<crate::Mes
     })
 }
 
-/// The board substrate as exact solids, exported as a STEP file: the engine adds it as an Import
-/// feature, so its faces and edges can be picked and used like any other body.
-fn board_solid(board: &KicadBoard, thickness: f64) -> Result<String> {
+/// The board substrate as exact solids, its outline with cutouts and drilled holes extruded to
+/// `thickness`, with whether the drilled holes were lost and the notes on the half-holes. With
+/// `plating`, the wall of every plated hole takes the colour of the pads' plating, as a face colour:
+/// the board's own faces, so it costs no geometry.
+fn board_bodies(board: &KicadBoard, thickness: f64, plating: bool) -> Result<(Vec<solidcraft_kernel::Body>, bool, Vec<String>)> {
     let loops = outline_loops(board)?;
-    let regions = regions_from_loops(loops.clone(), Some(&board.drills));
-    let bodies =
-        extrude_regions_bodies(&regions, 0.0, thickness).or_else(|_| extrude_regions_bodies(&regions_from_loops(loops, None), 0.0, thickness))?;
+    let mut notes = Vec::new();
+    let regions = regions_from_loops_noted(loops.clone(), Some(&board.drills), &mut notes);
+    // SMLib's check of each extrusion runs here: a board with drills it refuses is built without them.
+    let checked = |regions: &[Region2]| {
+        solidcraft_kernel::validating(solidcraft_kernel::Validation::EachStep, || extrude_regions_bodies(regions, 0.0, thickness)).0
+    };
+    let mut holes_lost = false;
+    let bodies = checked(&regions).or_else(|_| {
+        holes_lost = !board.drills.is_empty();
+        checked(&regions_from_loops(loops, None))
+    })?;
     if bodies.is_empty() {
         return Err(IoError::Invalid("the board has no closed outline to build".into()));
     }
+    let plated: Vec<&KicadDrill> = board.drills.iter().filter(|drill| drill.plated).collect();
+    if !plating || plated.is_empty() {
+        return Ok((bodies, holes_lost, notes));
+    }
+    let bodies = bodies
+        .into_iter()
+        .map(|body| {
+            let faces: Vec<solidcraft_kernel::FacePaint> = body
+                .face_sources()
+                .unwrap_or_default()
+                .iter()
+                .enumerate()
+                .filter(|(_, source)| match source {
+                    Some(solidcraft_kernel::FaceSource::ExtrudeSide { segment, .. }) => plated.iter().any(|drill| on_drill_wall(drill, segment)),
+                    _ => false,
+                })
+                .map(|(face, _)| solidcraft_kernel::FacePaint { face, color: PAD_COLOR, opacity: 1.0, name: None })
+                .collect();
+            if faces.is_empty() { body } else { body.with_paint(Some(solidcraft_kernel::Paint { opacity: 1.0, faces, name: None })) }
+        })
+        .collect();
+    Ok((bodies, holes_lost, notes))
+}
+
+/// Does the side `segment` lie on a drill's wall? A drill is a stadium, a round one with no straight
+/// part. Its ends and its middle must all be on the wall: a side that only passes near a drill is
+/// not. A half-hole is cut as chords of [`CURVE_TOLERANCE`] (see [`notch_loop`]) and a slot's ends
+/// are drawn as chords (see [`slot_loop`]), whose middles fall a little inside the wall; the
+/// kernel's test allows for that.
+fn on_drill_wall(drill: &KicadDrill, segment: &Seg2) -> bool {
+    let points = [segment.start(), segment.mid(), segment.end()].map(|p| [p.x, p.y]);
+    solidcraft_kernel::planar::side_on_hole_wall(drill.center, drill.size, drill.angle, &points, CURVE_TOLERANCE)
+}
+
+/// The board substrate as exact solids, exported as a STEP file: the engine adds it as an Import
+/// feature, so its faces and edges can be picked and used like any other body.
+fn board_solid(board: &KicadBoard, thickness: f64, plating: bool) -> Result<(String, bool, Vec<String>)> {
+    let (bodies, holes_lost, notes) = board_bodies(board, thickness, plating)?;
     let exports: Vec<solidcraft_kernel::ExportBody<'_>> = bodies
         .iter()
         .enumerate()
@@ -905,7 +1579,7 @@ fn board_solid(board: &KicadBoard, thickness: f64) -> Result<String> {
             crate::MAX_STEP_BYTES >> 20
         )));
     }
-    Ok(step)
+    Ok((step, holes_lost, notes))
 }
 
 /// The import's steps on one scale of a thousand units: starting, the board parsed, its
@@ -923,7 +1597,8 @@ fn report_import(step: usize) {
 /// Read a board and its referenced STEP/VRML models into one mesh feature and placement plan.
 pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadLoader<'_>) -> Result<KicadImport> {
     report_import(0);
-    let board = parse_kicad_board_with(bytes, file, options.clone())?;
+    let mut board = parse_kicad_board_with(bytes, file, options.clone())?;
+    keep_holes(&mut board, options.holes);
     report_import(1);
     let corner = board_corner(&board);
     let thickness = options.thickness.unwrap_or(board.thickness);
@@ -932,19 +1607,25 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
     let mut plan = crate::MeshPlan::default();
     let mut board_step = None;
     if options.representation == KicadRepresentation::Brep {
-        match board_solid(&board, thickness) {
-            Ok(step) => board_step = Some(step),
+        match board_solid(&board, thickness, options.copper != KicadCopper::None) {
+            Ok((step, holes_lost, notes)) => {
+                warnings.extend(notes);
+                if holes_lost {
+                    warnings.push("the board's drilled holes could not be cut: the board is built without them".into());
+                }
+                board_step = Some(step);
+            }
             Err(error) => {
                 // A profile the kernel cannot build (or a drill touching a cutout) must not lose
                 // the board: it comes in as the mesh it used to be.
                 warnings.push(format!("the board is a mesh: {error}"));
-                let board_mesh = kicad_board_mesh(&board, thickness)?;
+                let board_mesh = kicad_board_mesh_noted(&board, thickness, &mut warnings)?;
                 meshes.push(mesh_data(board_mesh.name, board_mesh.positions, board_mesh.triangles, board_mesh.color));
                 plan.bodies.push(None);
             }
         }
     } else {
-        let board_mesh = kicad_board_mesh(&board, thickness)?;
+        let board_mesh = kicad_board_mesh_noted(&board, thickness, &mut warnings)?;
         meshes.push(mesh_data(board_mesh.name, board_mesh.positions, board_mesh.triangles, board_mesh.color));
         plan.bodies.push(None);
     }
@@ -954,6 +1635,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
     // beside it: a footprint that names both forms of one model has one model, built once.
     let mut files = std::collections::HashMap::<(std::path::PathBuf, [u64; 10]), usize>::new();
     let mut totals = (0usize, 0usize);
+    let mut embedded_cache = EmbeddedCache::new(&board);
     if options.components {
         for footprint in &board.footprints {
             let back = footprint.layer.starts_with("B.");
@@ -978,10 +1660,14 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                     place_model(&mut plan, &mut placed_here, slot, footprint, back, thickness);
                     continue;
                 }
-                let file = match load(&model.path) {
+                let loaded = match model.path.strip_prefix(EMBED_SCHEME) {
+                    Some(name) => embedded_model(&board, name, &mut embedded_cache),
+                    None => load(&model.path),
+                };
+                let file = match loaded {
                     Ok(file) => file,
                     Err(reason) => {
-                        warnings.push(format!("{}: {}", model_label(&model.path), short_reason(&reason)));
+                        warnings.push(load_failure(&model.path, &reason, Path::new(file).parent()));
                         continue;
                     }
                 };
@@ -1011,7 +1697,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                                     .map(|p| Vec3::new(p.x * KICAD_VRML_UNIT_MM, p.y * KICAD_VRML_UNIT_MM, p.z * KICAD_VRML_UNIT_MM))
                                     .collect();
                                 match solidcraft_kernel::mesh_body(&positions, &m.triangles) {
-                                    Ok(_) => (vec![mesh_data(component_name(footprint, &model.path), positions, m.triangles, m.color)], None, notes),
+                                    Ok(_) => (vec![mesh_data(component_name(&model.path), positions, m.triangles, m.color)], None, notes),
                                     Err(e) => (Vec::new(), Some(short_reason(&e.to_string())), std::mem::take(&mut notes)),
                                 }
                             }
@@ -1046,7 +1732,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
                     continue;
                 }
                 let slot = plan.slots.len();
-                plan.slots.push(component_name(footprint, &model.path));
+                plan.slots.push(component_name(&model.path));
                 let transform = model_local_matrix(model, back);
                 let mut failed = None;
                 let mut placed = Vec::with_capacity(imported_meshes.len());
@@ -1102,6 +1788,7 @@ pub fn read_kicad(bytes: &[u8], file: &str, options: &KicadOptions, load: KicadL
         }
     }
     report_import(5);
+    let warnings = collapse_repeats(warnings);
     let body_names: Vec<String> = meshes.iter().map(|mesh| mesh.name.clone()).collect();
     let file_name = Path::new(file).file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
     let feature = crate::MeshFeature {
@@ -1129,9 +1816,11 @@ fn board_corner(board: &KicadBoard) -> Option<[f64; 2]> {
 /// Millimetres in one unit of a KiCad VRML model (0.1 inch).
 const KICAD_VRML_UNIT_MM: f64 = 2.54;
 
-fn component_name(footprint: &KicadFootprint, path: &str) -> String {
-    let label = footprint.reference.trim();
-    if label.is_empty() { path.to_string() } else { label.to_string() }
+/// The component a model becomes: named after the model's file (`R_0603_1608Metric`), since every
+/// footprint that places the model shares it. Each placement carries its footprint's reference.
+fn component_name(path: &str) -> String {
+    let stem = Path::new(path).file_stem().and_then(|stem| stem.to_str()).map(str::trim).unwrap_or("");
+    if stem.is_empty() { path.to_string() } else { stem.to_string() }
 }
 
 /// The STEP file inside a KiCad `….stpZ` (a zip archive holding one `….step`).
@@ -1148,6 +1837,201 @@ fn unzip_stpz(bytes: &[u8]) -> std::result::Result<Vec<u8>, String> {
         return Err("the model file is too large".into());
     }
     Ok(out)
+}
+
+/// Collect the `embedded_files` blocks of a board: the board's own and each footprint's.
+fn collect_embedded_files(root: &Expr<'_>, out: &mut Vec<KicadEmbeddedFile>, warnings: &mut Vec<String>) {
+    let mut blocks: Vec<&Expr<'_>> = Vec::new();
+    for item in children(root) {
+        match head(item) {
+            Some("embedded_files") => blocks.push(item),
+            Some("footprint" | "module") => blocks.extend(children(item).iter().filter(|e| head(e) == Some("embedded_files"))),
+            _ => {}
+        }
+    }
+    for block in blocks {
+        for file in children(block).iter().filter(|e| head(e) == Some("file")) {
+            if out.len() >= MAX_EMBEDDED_ENTRIES {
+                warnings.push("additional embedded files were skipped".into());
+                return;
+            }
+            let text = |name: &str| field(file, name).and_then(|e| children(e).get(1)).and_then(atom).map(str::to_string);
+            let Some(name) = text("name").filter(|n| !n.is_empty()) else { continue };
+            let data = text("data").map(|d| d.chars().filter(|c| !c.is_whitespace()).collect::<String>());
+            out.push(KicadEmbeddedFile { name, kind: text("type").unwrap_or_default(), data, checksum: text("checksum") });
+        }
+    }
+}
+
+/// Embedded files already unpacked (or already found unusable), by name, and the bytes unpacked
+/// so far: one file used by many footprints is unpacked once, and the total is bounded.
+struct EmbeddedCache {
+    files: HashMap<String, std::result::Result<Vec<u8>, String>>,
+    total: usize,
+    /// The board's embedded entries by name (positions in `KicadBoard::embedded_files`, every
+    /// entry of a name), so a lookup is one hash probe, not a scan of all entries.
+    by_name: HashMap<String, Vec<usize>>,
+}
+
+impl EmbeddedCache {
+    fn new(board: &KicadBoard) -> Self {
+        let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
+        for (index, file) in board.embedded_files.iter().enumerate() {
+            by_name.entry(file.name.clone()).or_default().push(index);
+        }
+        Self { files: HashMap::new(), total: 0, by_name }
+    }
+}
+
+/// The model file a `kicad-embed://<name>` path stands for. `Err` says in a few words why the
+/// board's own copy cannot be used: missing, not a model, not stored with data, disagreeing
+/// checksums, or damaged data.
+/// Each reason is under 60 characters: `load_failure` cuts a reason there, so it reads whole.
+fn embedded_model(board: &KicadBoard, name: &str, cache: &mut EmbeddedCache) -> std::result::Result<KicadModelFile, String> {
+    let path = format!("{EMBED_SCHEME}{name}");
+    if let Some(done) = cache.files.get(name) {
+        return done.clone().map(|bytes| KicadModelFile { path, bytes });
+    }
+    let result = unpack_embedded(board, name, cache);
+    cache.files.insert(name.to_string(), result.clone());
+    result.map(|bytes| KicadModelFile { path, bytes })
+}
+
+fn unpack_embedded(board: &KicadBoard, name: &str, cache: &mut EmbeddedCache) -> std::result::Result<Vec<u8>, String> {
+    let entries: Vec<&KicadEmbeddedFile> =
+        cache.by_name.get(name).into_iter().flatten().filter_map(|index| board.embedded_files.get(*index)).collect();
+    if entries.is_empty() {
+        return Err("the embedded file is not in the board file".into());
+    }
+    if entries.iter().any(|f| !f.kind.is_empty() && f.kind != "model") {
+        return Err("the embedded file is not a 3D model".into());
+    }
+    let Some(data) = entries.iter().find_map(|f| f.data.as_deref()) else {
+        return Err("the board holds no data for the embedded file".into());
+    };
+    // KiCad's checksum algorithm is not part of its published file format, so it cannot be
+    // recomputed here; the checksums the board records for one file (each footprint's and the
+    // data's own) must at least agree.
+    let mut sums = entries.iter().filter_map(|f| f.checksum.as_deref());
+    if let Some(first) = sums.next()
+        && sums.any(|other| !other.eq_ignore_ascii_case(first))
+    {
+        return Err("the embedded file's checksums disagree".into());
+    }
+    let packed = decode_base64(data).ok_or_else(|| "the embedded file is corrupt (its data is not base64)".to_string())?;
+    let room = MAX_EMBEDDED_FILE_BYTES.min(MAX_EMBEDDED_TOTAL_BYTES.saturating_sub(cache.total));
+    let bytes = unpack_zstd(&packed, room)?;
+    cache.total = cache.total.saturating_add(bytes.len());
+    Ok(bytes)
+}
+
+/// Unpack one zstd frame into at most `limit` bytes.
+fn unpack_zstd(packed: &[u8], limit: usize) -> std::result::Result<Vec<u8>, String> {
+    use std::io::Read;
+    let decoder = ruzstd::decoding::StreamingDecoder::new(packed).map_err(|_| "the embedded file is corrupt (not compressed data)".to_string())?;
+    let mut out = Vec::new();
+    decoder.take(limit as u64 + 1).read_to_end(&mut out).map_err(|_| "the embedded file is corrupt (damaged data)".to_string())?;
+    if out.len() > limit {
+        return Err(format!("the embedded file is too large (limit {} MB unpacked)", MAX_EMBEDDED_FILE_BYTES >> 20));
+    }
+    if out.is_empty() {
+        return Err("the embedded file is empty".into());
+    }
+    Ok(out)
+}
+
+/// Standard base64 (RFC 4648) with or without padding; `None` for any other character or a
+/// length no base64 text has.
+fn decode_base64(text: &str) -> Option<Vec<u8>> {
+    let body = text.trim_end_matches('=');
+    if text.len() - body.len() > 2 || body.len() % 4 == 1 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(body.len() / 4 * 3 + 2);
+    let (mut acc, mut bits) = (0u32, 0u32);
+    for byte in body.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        };
+        acc = (acc << 6) | u32::from(value);
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((acc >> bits) as u8);
+            acc &= (1 << bits) - 1;
+        }
+    }
+    Some(out)
+}
+
+/// The warning for a model that could not be read. The loader's reason starts with the path it
+/// tried (`<path>: no such file or directory (os error 2)`): a missing file says which folder was
+/// searched, in words rather than the operating system's, so the reader knows where to look.
+fn load_failure(reference: &str, reason: &str, board_folder: Option<&Path>) -> String {
+    let label = model_label(reference);
+    // One variable that is not set leaves out every model that names it: one line for all of them.
+    if reason.starts_with("unresolved environment variable") {
+        return format!("{reason}: the models that name it are left out (set it in the environment or in KiCad's Configure Paths)");
+    }
+    if let Some((head, tail)) = reason.split_once(": ")
+        && (head.contains('\\') || head.contains('/'))
+        && is_missing_file(tail)
+    {
+        let searched = Path::new(head).parent();
+        // A folder under the board's own is named from the board, so a long personal path is not repeated.
+        let folder = match (searched, board_folder.filter(|dir| !dir.as_os_str().is_empty())) {
+            (Some(dir), Some(board)) => match dir.strip_prefix(board) {
+                Ok(rest) if rest.as_os_str().is_empty() => "the board's folder".to_string(),
+                Ok(rest) => format!("the board's folder, {}", rest.to_string_lossy()),
+                Err(_) => dir.to_string_lossy().into_owned(),
+            },
+            (Some(dir), None) => dir.to_string_lossy().into_owned(),
+            (None, _) => String::new(),
+        };
+        if !folder.is_empty() {
+            return format!("{label}: not found in {folder}");
+        }
+    }
+    format!("{label}: {}", short_reason(reason))
+}
+
+/// Whether an operating system's or the browser's error says the file is not there, whatever the
+/// platform's words: Linux and macOS say "no such file or directory", Windows "cannot find the file
+/// specified" (or "cannot find the path"), the browser "no such file in this browser", and all of
+/// them carry the code `os error 2` or `3` where the system gives one.
+fn is_missing_file(tail: &str) -> bool {
+    let tail = tail.to_ascii_lowercase();
+    tail.starts_with("no such file")
+        || tail.contains("cannot find the file")
+        || tail.contains("cannot find the path")
+        || tail.contains("(os error 2)")
+        || tail.contains("(os error 3)")
+}
+
+/// Identical warnings said once, with how many there were: a board with fifty footprints of one
+/// missing model gives one line, not fifty. The first occurrence keeps its place.
+fn collapse_repeats(warnings: Vec<String>) -> Vec<String> {
+    let mut order: Vec<String> = Vec::new();
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for warning in warnings {
+        let count = counts.entry(warning.clone()).or_insert(0);
+        if *count == 0 {
+            order.push(warning);
+        }
+        *count += 1;
+    }
+    order
+        .into_iter()
+        .map(|warning| match counts.get(&warning).copied().unwrap_or(1) {
+            1 => warning,
+            n => format!("{warning} (x{n})"),
+        })
+        .collect()
 }
 
 /// A model's name as a warning shows it: its file name, not the whole resolved path.
@@ -1240,7 +2124,8 @@ fn file_id(path: &str) -> std::path::PathBuf {
 }
 
 /// Place a built model in a footprint, once per footprint: a footprint that names one model more
-/// than once (both formats of the same file, say) shows it once.
+/// than once (both formats of the same file, say) shows it once. The placement is named after the
+/// footprint's reference (none when it has none).
 fn place_model(
     plan: &mut crate::MeshPlan,
     placed_here: &mut std::collections::HashSet<usize>,
@@ -1250,7 +2135,9 @@ fn place_model(
     thickness: f64,
 ) {
     if placed_here.insert(slot) {
-        plan.places.push(crate::PlanPlace { slot, parent: None, transform: footprint_place(footprint, back, thickness) });
+        let reference = footprint.reference.trim();
+        let name = (!reference.is_empty()).then(|| reference.to_string());
+        plan.places.push(crate::PlanPlace { slot, parent: None, transform: footprint_place(footprint, back, thickness), name });
     }
 }
 
@@ -1262,14 +2149,16 @@ fn footprint_place(footprint: &KicadFootprint, back: bool, thickness: f64) -> Ma
     solidcraft_doc::rigid(Vec3::new(footprint.at[0], -footprint.at[1], z), Vec3::ZERO, Vec3::Z, footprint.at[2].to_radians())
 }
 
-/// A model's transform in the footprint's 3D frame: translation, a half turn about X on the
-/// back, the Euler rotation (X, then Y, then Z) and the scale. KiCad measures the rotation in
-/// the board's Y-down frame, so each angle turns the other way in SolidCraft's Y-up frame; the
-/// offset is applied in the footprint's frame (before the back's half turn, after the rotation).
+/// A model's transform in the footprint's 3D frame: a half turn about X on the back, the
+/// translation, the Euler rotation (X, then Y, then Z) and the scale. KiCad measures the rotation
+/// in the board's Y-down frame, so each angle turns the other way in SolidCraft's Y-up frame. The
+/// offset is the model's own, so the back's half turn carries it too: a back-side model's offset
+/// points the other way in Y and Z (a positive Z offset moves it away from the board, which is
+/// down).
 fn model_local_matrix(model: &KicadModel, back: bool) -> Mat {
     let mut m = solidcraft_doc::rigid(Vec3::new(model.at[0], model.at[1], model.at[2]), Vec3::ZERO, Vec3::Z, 0.0);
     if back {
-        m = solidcraft_doc::mat_mul(&m, &solidcraft_doc::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::X, std::f64::consts::PI));
+        m = solidcraft_doc::mat_mul(&solidcraft_doc::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::X, std::f64::consts::PI), &m);
     }
     let rx = solidcraft_doc::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::X, -model.rotate[0].to_radians());
     let ry = solidcraft_doc::rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Y, -model.rotate[1].to_radians());
@@ -1402,6 +2291,12 @@ fn clean_loop(points: &[[f64; 2]]) -> Option<Loop2> {
 /// Classify closed contours by containment (even depth is solid, odd is a cutout) and cut the
 /// given drills from the region that holds them.
 fn regions_from_loops(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>) -> Vec<Region2> {
+    regions_from_loops_noted(loops, drills, &mut Vec::new())
+}
+
+/// [`regions_from_loops`], also noting in `notes` each drill at the board's edge that could not be
+/// cut as a notch (it is then kept as a hole).
+fn regions_from_loops_noted(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>, notes: &mut Vec<String>) -> Vec<Region2> {
     let areas: Vec<f64> = loops.iter().map(|l| l.signed_area().abs()).collect();
     let samples: Vec<Vec2> = loops.iter().map(loop_sample).collect();
     let mut parents: Vec<Option<usize>> = vec![None; loops.len()];
@@ -1441,7 +2336,10 @@ fn regions_from_loops(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>) -> Vec<R
             let center = Vec2::new(drill.center[0], drill.center[1]);
             let mut best: Option<usize> = None;
             for (i, (_, region)) in regions.iter().enumerate() {
-                if region.outer.contains(center)
+                // A centre exactly on the outline counts as on the board: `contains` answers for
+                // one side of an edge only, which dropped the drills on the other two edges.
+                let on_board = region.outer.contains(center) || distance_to_loop(&region.outer, center).is_some_and(|d| d < 1e-6);
+                if on_board
                     && !region.holes.iter().any(|h| h.contains(center))
                     && best.is_none_or(|b| region.outer.signed_area().abs() < regions[b].1.outer.signed_area().abs())
                 {
@@ -1451,8 +2349,27 @@ fn regions_from_loops(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>) -> Vec<R
             let Some(i) = best else { continue };
             let size = [drill.size[0].abs(), drill.size[1].abs()];
             let r = (size[0].min(size[1]) * 0.5).max(1e-4);
-            let hole = if (size[0] - size[1]).abs() <= 1e-6 { Loop2::circle_from(center, r, 0.0) } else { slot_loop(center, size[0], size[1]) };
+            let hole =
+                if (size[0] - size[1]).abs() <= 1e-6 { Loop2::circle_from(center, r, 0.0) } else { slot_loop(center, size[0], size[1], drill.angle) };
             if let Some((_, region)) = regions.get_mut(i) {
+                // A drill that reaches the board's edge (a castellated hole) is a notch in the
+                // outline, not a hole inside it.
+                let reach = size[0].max(size[1]) * 0.5 + 1e-6;
+                if distance_to_loop(&region.outer, center).is_some_and(|d| d < reach) {
+                    if !drill_crosses(&region.outer, &hole) {
+                        // Wholly inside the outline, only near it: an ordinary hole.
+                        region.holes.push(hole.reversed());
+                        continue;
+                    }
+                    if let Some(notched) = notch_loop(&region.outer, &hole, center) {
+                        region.outer = notched;
+                        continue;
+                    }
+                    notes.push(format!(
+                        "the drill at ({:.3}, {:.3}) mm reaches the board's edge but could not be cut as a half-hole: it is kept as a hole",
+                        center.x, -center.y
+                    ));
+                }
                 region.holes.push(hole.reversed());
             }
         }
@@ -1460,7 +2377,88 @@ fn regions_from_loops(loops: Vec<Loop2>, drills: Option<&[KicadDrill]>) -> Vec<R
     regions.into_iter().map(|(_, r)| r).collect()
 }
 
-fn slot_loop(center: Vec2, width: f64, height: f64) -> Loop2 {
+/// How far `p` is from the loop's boundary (the loop drawn as a polyline).
+fn distance_to_loop(loop_: &Loop2, p: Vec2) -> Option<f64> {
+    let points = loop_.polyline(CURVE_TOLERANCE);
+    let n = points.len();
+    if n < 2 {
+        return None;
+    }
+    let mut best = f64::INFINITY;
+    for i in 0..n {
+        let (a, b) = (points[i], points[(i + 1) % n]);
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let len2 = dx * dx + dy * dy;
+        let t = if len2 > 0.0 { (((p.x - a.x) * dx + (p.y - a.y) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
+        let (ex, ey) = (p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+        best = best.min((ex * ex + ey * ey).sqrt());
+    }
+    best.is_finite().then_some(best)
+}
+
+/// A closed polyline through the loop's points (curves drawn as lines).
+fn loop_to_pline(loop_: &Loop2) -> Option<cavalier_contours::polyline::Polyline<f64>> {
+    use cavalier_contours::polyline::{PlineSource, PlineSourceMut, Polyline};
+    let mut pl = Polyline::<f64>::new_closed();
+    for point in loop_.polyline(CURVE_TOLERANCE) {
+        pl.add(point.x, point.y, 0.0);
+    }
+    (pl.vertex_count() >= 3).then_some(pl)
+}
+
+fn pline_to_loop(pl: &cavalier_contours::polyline::Polyline<f64>) -> Option<Loop2> {
+    use cavalier_contours::polyline::PlineSource;
+    let points: Vec<Vec2> = (0..pl.vertex_count()).map(|i| pl.at(i)).map(|v| Vec2::new(v.x, v.y)).collect();
+    (points.len() >= 3).then(|| Loop2::polygon(&points).ccw())
+}
+
+/// Whether the drill, in its own pose, reaches past the outline (or onto it): a half-hole rather
+/// than a hole that merely lies near the edge.
+fn drill_crosses(outer: &Loop2, drill: &Loop2) -> bool {
+    drill.polyline(CURVE_TOLERANCE).iter().any(|p| !outer.contains(*p))
+}
+
+/// The outline with `drill` cut out of its edge: one outline when the cut leaves one piece.
+///
+/// A drill centred on an edge can put polygon vertices exactly on that edge, which the boolean
+/// refuses as touching input. So when a cut fails, the drill polygon is turned a very small angle
+/// (at most 0.006 rad, about a hundredth of a millimetre at the end of a 4 mm slot) about its
+/// centre, which moves every vertex off the edge, and tried again. Only a drill that crosses the
+/// outline in its specified pose gets here (see [`drill_crosses`]).
+fn notch_loop(outer: &Loop2, drill: &Loop2, center: Vec2) -> Option<Loop2> {
+    use cavalier_contours::polyline::{BooleanOp, PlineSource, PlineSourceMut};
+    let mut a = loop_to_pline(outer)?;
+    if a.area() < 0.0 {
+        a.invert_direction_mut();
+    }
+    let points = drill.polyline(CURVE_TOLERANCE);
+    for turn in [0.0_f64, 0.001, -0.0023, 0.0057] {
+        let (sin, cos) = turn.sin_cos();
+        let mut b = cavalier_contours::polyline::Polyline::<f64>::new_closed();
+        for p in &points {
+            let (dx, dy) = (p.x - center.x, p.y - center.y);
+            b.add(center.x + dx * cos - dy * sin, center.y + dx * sin + dy * cos, 0.0);
+        }
+        if b.vertex_count() < 3 {
+            return None;
+        }
+        if b.area() < 0.0 {
+            b.invert_direction_mut();
+        }
+        let result = a.boolean(&b, BooleanOp::Not);
+        if result.pos_plines.len() == 1
+            && result.neg_plines.is_empty()
+            && let Some(notched) = result.pos_plines.first().and_then(|r| pline_to_loop(&r.pline))
+        {
+            return Some(notched);
+        }
+    }
+    None
+}
+
+/// A slot (stadium) of `width` × `height` about `center`, its width turned to point along `angle`
+/// (radians from +X towards +Y in the frame it is drawn in).
+fn slot_loop(center: Vec2, width: f64, height: f64, angle: f64) -> Loop2 {
     let (long, short, vertical) = if width >= height { (width, height, false) } else { (height, width, true) };
     let r = short * 0.5;
     let half = (long * 0.5 - r).max(0.0);
@@ -1475,6 +2473,11 @@ fn slot_loop(center: Vec2, width: f64, height: f64) -> Loop2 {
         let a = std::f64::consts::FRAC_PI_2 + std::f64::consts::PI * i as f64 / n as f64;
         let (dx, dy) = (r * a.cos(), r * a.sin());
         pts.push(if vertical { Vec2::new(center.x + dy, center.y - half + dx) } else { Vec2::new(center.x - half + dx, center.y + dy) });
+    }
+    let (s, c) = angle.sin_cos();
+    for p in &mut pts {
+        let (x, y) = (p.x - center.x, p.y - center.y);
+        *p = Vec2::new(center.x + c * x - s * y, center.y + s * x + c * y);
     }
     Loop2::polygon(&pts)
 }
@@ -1566,7 +2569,8 @@ fn extrude_regions(regions: &[Region2], z0: f64, z1: f64) -> Result<Vec<solidcra
     for region in regions {
         items.push(region_loops(region)?);
     }
-    let (mut points, triangles) = solidcore_tess::triangulate_union(&items).map_err(|error| IoError::Invalid(format!("KiCad copper: {error}")))?;
+    let (mut points, triangles) =
+        solidcraft_kernel::tessellate::triangulate_union(&items).map_err(|error| IoError::Invalid(format!("KiCad copper: {error}")))?;
     // One face of each triangle, without the ones that could not be on a surface: a corner twice
     // has an edge of its own, and the same triangle twice would put two faces on one edge.
     let mut seen: HashSet<[u32; 3]> = HashSet::with_capacity(triangles.len());
@@ -1870,17 +2874,18 @@ fn track_end(p: [f64; 2]) -> TrackEnd {
     TrackEnd((p[0] / TRACK_JOIN_TOLERANCE).round() as i64, (p[1] / TRACK_JOIN_TOLERANCE).round() as i64)
 }
 
-/// The side and width a trace is on: only tracks that share them join.
-type TraceKey = (bool, u64, TrackEnd);
+/// The layer and width a trace is on: only tracks that share them join.
+type TraceKey = (CopperLayer, u64, TrackEnd);
 
 /// The board's tracks and track arcs as continuous traces: KiCad stores a routed trace as one
 /// `segment` (or `arc`) per leg, so legs that meet end to end on the same layer and width are
 /// joined into one polyline. Points are in the board frame.
-fn track_polylines(tracks: &[KicadStroke]) -> Vec<(bool, f64, Vec<[f64; 2]>)> {
+fn track_polylines(tracks: &[KicadStroke]) -> Vec<(CopperLayer, f64, Vec<[f64; 2]>)> {
     let mut ends: HashMap<TraceKey, Vec<usize>> = HashMap::new();
     for (i, track) in tracks.iter().enumerate() {
         let (Some(first), Some(last)) = (track.points.first(), track.points.last()) else { continue };
-        let key = (track.layer == "F.Cu", track.width.to_bits());
+        let Some(layer) = copper_layer(&track.layer) else { continue };
+        let key = (layer, track.width.to_bits());
         ends.entry((key.0, key.1, track_end(*first))).or_default().push(i);
         if track_end(*first) != track_end(*last) {
             ends.entry((key.0, key.1, track_end(*last))).or_default().push(i);
@@ -1895,13 +2900,13 @@ fn track_polylines(tracks: &[KicadStroke]) -> Vec<(bool, f64, Vec<[f64; 2]>)> {
             continue;
         }
         used[start] = true;
-        let front = track.layer == "F.Cu";
+        let Some(layer) = copper_layer(&track.layer) else { continue };
         let width = track.width.to_bits();
         let mut chain = track.points.clone();
-        extend_trace(&mut chain, tracks, &ends, &mut used, front, width, true);
-        extend_trace(&mut chain, tracks, &ends, &mut used, front, width, false);
+        extend_trace(&mut chain, tracks, &ends, &mut used, layer, width, true);
+        extend_trace(&mut chain, tracks, &ends, &mut used, layer, width, false);
         if chain.len() >= 2 {
-            out.push((front, track.width, chain.iter().map(|p| [p[0], -p[1]]).collect()));
+            out.push((layer, track.width, chain.iter().map(|p| [p[0], -p[1]]).collect()));
         }
     }
     out
@@ -1914,13 +2919,13 @@ fn extend_trace(
     tracks: &[KicadStroke],
     ends: &HashMap<TraceKey, Vec<usize>>,
     used: &mut [bool],
-    front: bool,
+    layer: CopperLayer,
     width: u64,
     at_end: bool,
 ) {
     loop {
         let Some(anchor) = (if at_end { chain.last() } else { chain.first() }).copied() else { return };
-        let Some(candidates) = ends.get(&(front, width, track_end(anchor))) else { return };
+        let Some(candidates) = ends.get(&(layer, width, track_end(anchor))) else { return };
         let mut free = candidates.iter().copied().filter(|i| !used.get(*i).copied().unwrap_or(true));
         let (Some(next), None) = (free.next(), free.next()) else { return };
         let Some(points) = tracks.get(next).map(|t| t.points.as_slice()) else { return };
@@ -2263,7 +3268,7 @@ impl Plate {
     fn add_surface_region(&mut self, region: &Region2, z0: f64, z1: f64) -> bool {
         let Some(front) = self.surface else { return false };
         let Ok(loops) = region_loops(region) else { return false };
-        let Ok((points, mut triangles)) = solidcore_tess::triangulate_planar(&loops) else { return false };
+        let Ok((points, mut triangles)) = solidcraft_kernel::tessellate::triangulate_planar(&loops) else { return false };
         if triangles.is_empty() {
             return false;
         }
@@ -2367,7 +3372,7 @@ fn cut_lists(pads: &[Vec<[f64; 2]>], vias: &[Vec<[f64; 2]>], drills: &[Vec<[f64;
 /// one, whichever side it is on (a drill goes through the board).
 fn drill_outlines(board: &KicadBoard) -> Vec<Vec<[f64; 2]>> {
     let mut out = Vec::new();
-    for via in &board.vias {
+    for via in board.vias.iter().filter(|via| via.drill > 0.0) {
         let center = [via.at[0], -via.at[1]];
         let points = circle_points(center, (via.drill * 0.5).abs());
         if points.len() >= 3 {
@@ -2535,8 +3540,9 @@ fn trim_around_drills(points: &[[f64; 2]], width: f64, bare: &[Vec<[f64; 2]>], c
     runs
 }
 
-/// Front and back copper plates: tracks, vias, pads and zones, modelled with their thickness or
-/// as a thin film overlaid on the board's surfaces.
+/// Copper plates: the front and back (tracks, vias, pads and zones), modelled with their thickness
+/// or as a thin film overlaid on the board's surfaces, and, when modelled, one plate for each
+/// inner layer at its own depth inside the board.
 fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings: &mut Vec<String>) -> Vec<(Plate, String, [f32; 3])> {
     let surface = mode == KicadCopper::Overlay;
     let mut front = Plate { surface: surface.then_some(true), ..Default::default() };
@@ -2550,7 +3556,45 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
         (thickness, thickness + OVERLAY_THICKNESS, -OVERLAY_THICKNESS, 0.0)
     } else {
         (thickness, thickness + COPPER_THICKNESS, -COPPER_THICKNESS, 0.0)
+    }; // Inner layers sit inside the board, where an overlay (a look for the faces) would not show:
+    // they come in only as modelled copper, each at the depth the board's stackup gives it.
+    // A board thinner than the foil has no room inside it for an inner layer.
+    let thin = thickness < COPPER_THICKNESS;
+    let modelled = mode == KicadCopper::Mesh && !thin;
+    let mut inner: BTreeMap<u32, Plate> = BTreeMap::new();
+    let inner_skipped = std::cell::Cell::new(false);
+    let inner_depth: HashMap<u32, f64> = board.inner_layers.iter().copied().collect();
+    let heights = |layer: CopperLayer| -> (f64, f64) {
+        match layer {
+            CopperLayer::Front => (top, bottom),
+            CopperLayer::Back => (under, under_top),
+            CopperLayer::Inner(n) => {
+                let half = COPPER_THICKNESS / 2.0;
+                let centre = thickness * (1.0 - inner_depth.get(&n).copied().unwrap_or(0.5));
+                let centre = centre.min(thickness - half).max(half);
+                (centre - half, centre + half)
+            }
+        }
     };
+    // Is this layer built? An inner layer is not when the copper is an overlay.
+    let wanted = |layer: CopperLayer| -> bool {
+        let skip = matches!(layer, CopperLayer::Inner(_)) && !modelled;
+        if skip {
+            inner_skipped.set(true);
+        }
+        !skip
+    };
+    // Pads are never counted by `wanted`: a board whose only inner copper is its through-hole
+    // pads (on `*.Cu`) still has inner copper to report as left out.
+    if !modelled
+        && board
+            .footprints
+            .iter()
+            .flat_map(|footprint| footprint.pads.iter())
+            .any(|pad| board.inner_layers.iter().any(|(n, _)| pad_on_inner(pad, *n)))
+    {
+        inner_skipped.set(true);
+    }
     let mut items = 0usize;
     let mut too_many = false;
     let mut add = |plate: &mut Plate, f: &dyn Fn(&mut Plate)| {
@@ -2569,10 +3613,27 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
     let (via_front, via_back) = via_outlines(board);
     let (cut_front, bare_front) = cut_lists(&pad_front, &via_front, &drills);
     let (cut_back, bare_back) = cut_lists(&pad_back, &via_back, &drills);
-    for (front_side, width, points) in track_polylines(&board.tracks) {
-        let (z0, z1) = if front_side { (top, bottom) } else { (under, under_top) };
-        let plate = if front_side { &mut front } else { &mut back };
-        let (copper, bare) = if front_side { (&cut_front, &bare_front) } else { (&cut_back, &bare_back) };
+    // A trace on an inner layer stops at that layer's pads and keeps clear of every drilled hole.
+    let cut_inner: HashMap<u32, (Vec<Vec<[f64; 2]>>, Vec<Vec<[f64; 2]>>)> = if modelled {
+        board.inner_layers.iter().map(|(n, _)| (*n, cut_lists(&inner_pad_outlines(board, *n), &[], &drills))).collect()
+    } else {
+        HashMap::new()
+    };
+    let no_cut: (Vec<Vec<[f64; 2]>>, Vec<Vec<[f64; 2]>>) = (Vec::new(), Vec::new());
+    for (layer, width, points) in track_polylines(&board.tracks) {
+        if !wanted(layer) {
+            continue;
+        }
+        let (z0, z1) = heights(layer);
+        let plate = plate_of(layer, &mut front, &mut back, &mut inner);
+        let (copper, bare) = match layer {
+            CopperLayer::Front => (&cut_front, &bare_front),
+            CopperLayer::Back => (&cut_back, &bare_back),
+            CopperLayer::Inner(n) => {
+                let cut = cut_inner.get(&n).unwrap_or(&no_cut);
+                (&cut.0, &cut.1)
+            }
+        };
         for run in trim_around_drills(&points, width, bare, copper) {
             add(plate, &|p| p.add_track(&run, width, false, z0, z1));
         }
@@ -2601,10 +3662,10 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
         if contours.is_empty() {
             continue;
         }
+        let Some(layer) = copper_layer(&zone.layer).filter(|layer| wanted(*layer)) else { continue };
         let regions = regions_from_loops(contours, Some(&board.drills));
-        let front_side = zone.layer == "F.Cu";
-        let (z0, z1) = if front_side { (top, bottom) } else { (under, under_top) };
-        let plate = if front_side { &mut front } else { &mut back };
+        let (z0, z1) = heights(layer);
+        let plate = plate_of(layer, &mut front, &mut back, &mut inner);
         if surface {
             if !surface_regions(plate, &regions, z0, z1) {
                 warnings.push(format!("a copper zone on {} could not be built", zone.layer));
@@ -2622,7 +3683,9 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
         for pad in &footprint.pads {
             let on_front = pad.layers.iter().any(|l| l == "F.Cu" || l == "*.Cu" || l == "F&B.Cu");
             let on_back = pad.layers.iter().any(|l| l == "B.Cu" || l == "*.Cu" || l == "F&B.Cu");
-            if !on_front && !on_back {
+            let on_inner: Vec<u32> =
+                if modelled { board.inner_layers.iter().map(|(n, _)| *n).filter(|n| pad_on_inner(pad, *n)).collect() } else { Vec::new() };
+            if !on_front && !on_back && on_inner.is_empty() {
                 continue;
             }
             let loops = pad_loops(pad);
@@ -2641,18 +3704,25 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
                     let (z0, z1) = if exposed { (under - PAD_PROUD, under_top) } else { (under, under_top) };
                     add(plate, &|p| p.add_pad(&points, &holes, z0, z1));
                 }
+                for n in &on_inner {
+                    let (z0, z1) = heights(CopperLayer::Inner(*n));
+                    add(inner.entry(*n).or_default(), &|p| p.add_pad(&points, &holes, z0, z1));
+                }
             }
         }
     }
-    for graphic in &board.graphics {
-        let layer = graphic.layer.as_str();
-        if !is_outer_copper(layer) {
-            continue;
-        }
-        let front_side = layer == "F.Cu";
-        let points: Vec<[f64; 2]> = graphic.points.iter().map(|p| [p[0], -p[1]]).collect();
-        let (z0, z1) = if front_side { (top, bottom) } else { (under, under_top) };
-        let plate = if front_side { &mut front } else { &mut back };
+    // Board graphics and the graphics of footprints (in their footprint's frame) on copper layers.
+    let board_frame = board_to_world();
+    let graphics = board
+        .graphics
+        .iter()
+        .map(|graphic| (graphic, board_frame))
+        .chain(board.footprints.iter().flat_map(|footprint| footprint.graphics.iter().map(move |graphic| (graphic, footprint_world(footprint)))));
+    for (graphic, frame) in graphics {
+        let Some(layer) = copper_layer(&graphic.layer).filter(|layer| wanted(*layer)) else { continue };
+        let points: Vec<[f64; 2]> = graphic.points.iter().map(|p| apply2(&frame, p[0], p[1])).collect();
+        let (z0, z1) = heights(layer);
+        let plate = plate_of(layer, &mut front, &mut back, &mut inner);
         if graphic.filled && points.len() >= 3 {
             add(plate, &|p| p.add_loop(&points, z0, z1));
         } else {
@@ -2662,13 +3732,10 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
     let mut text_failed = false;
     {
         let mut one = |text: &KicadText, origin: Vec2, angle: f64| {
-            if !is_outer_copper(&text.layer) {
-                return;
-            }
-            let front_side = text.layer == "F.Cu";
-            let plate = if front_side { &mut front } else { &mut back };
+            let Some(layer) = copper_layer(&text.layer).filter(|layer| wanted(*layer)) else { return };
+            let plate = plate_of(layer, &mut front, &mut back, &mut inner);
             let failed = std::cell::Cell::new(false);
-            let (z0, z1) = if front_side { (top, bottom) } else { (under, under_top) };
+            let (z0, z1) = heights(layer);
             add(plate, &|p| failed.set(failed.get() || !add_text_plate(p, text, origin, angle, z0, z1)));
             if failed.get() {
                 text_failed = true;
@@ -2683,7 +3750,7 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
             let frame = footprint_world(footprint);
             for text in &footprint.texts {
                 let origin = apply2(&frame, text.at[0], text.at[1]);
-                one(text, Vec2::new(origin[0], origin[1]), (footprint.at[2] + text.at[2]).to_radians());
+                one(text, Vec2::new(origin[0], origin[1]), footprint_text_angle(text).to_radians());
             }
         }
     }
@@ -2707,7 +3774,52 @@ fn copper_meshes(board: &KicadBoard, thickness: f64, mode: KicadCopper, warnings
     if !back_pads.is_empty() {
         out.push((back_pads, "Copper B.Cu pads".to_string(), PAD_COLOR));
     }
+    // Inner copper has no solder mask over it: it keeps the foil's own colour.
+    for (n, plate) in inner {
+        if !plate.is_empty() {
+            out.push((plate, format!("Copper In{n}.Cu"), COPPER_COLOR));
+        }
+    }
+    if inner_skipped.get() {
+        warnings.push(if thin {
+            "the inner copper layers are left out: the board is thinner than the copper".into()
+        } else {
+            "the inner copper layers are left out: they come in only with copper modelled".into()
+        });
+    }
     out
+}
+
+/// The plate a copper layer is drawn on.
+fn plate_of<'a>(layer: CopperLayer, front: &'a mut Plate, back: &'a mut Plate, inner: &'a mut BTreeMap<u32, Plate>) -> &'a mut Plate {
+    match layer {
+        CopperLayer::Front => front,
+        CopperLayer::Back => back,
+        CopperLayer::Inner(n) => inner.entry(n).or_default(),
+    }
+}
+
+/// Is this pad's copper on inner layer `n`: named on it, or on every copper layer (`*.Cu`)?
+fn pad_on_inner(pad: &KicadPad, n: u32) -> bool {
+    let name = format!("In{n}.Cu");
+    pad.layers.iter().any(|l| *l == name || l == "*.Cu")
+}
+
+/// The copper of every pad on inner layer `n`, in the board frame.
+fn inner_pad_outlines(board: &KicadBoard, n: u32) -> Vec<Vec<[f64; 2]>> {
+    let mut outlines = Vec::new();
+    for footprint in &board.footprints {
+        let transform = footprint_world(footprint);
+        for pad in footprint.pads.iter().filter(|pad| pad_on_inner(pad, n)) {
+            for loop_ in pad_loops(pad) {
+                let moved: Vec<[f64; 2]> = loop_.iter().map(|p| apply2(&transform, p[0], p[1])).collect();
+                if moved.len() >= 3 {
+                    outlines.push(moved);
+                }
+            }
+        }
+    }
+    outlines
 }
 
 /// How far copper in a mask opening stands above the masked copper (mm). They are the same foil
@@ -2800,7 +3912,7 @@ fn silkscreen_meshes(board: &KicadBoard, thickness: f64, warnings: &mut Vec<Stri
             let frame = footprint_world(footprint);
             for text in &footprint.texts {
                 let origin = apply2(&frame, text.at[0], text.at[1]);
-                text_one(text, Vec2::new(origin[0], origin[1]), (footprint.at[2] + text.at[2]).to_radians());
+                text_one(text, Vec2::new(origin[0], origin[1]), footprint_text_angle(text).to_radians());
             }
         }
     }
@@ -2843,14 +3955,25 @@ fn pad_loops(pad: &KicadPad) -> Vec<Vec<[f64; 2]>> {
         "roundrect" => rounded_rect_points(sx, sy, (pad.roundrect_ratio.clamp(0.0, 0.5)) * sx.min(sy)),
         _ => vec![[-sx * 0.5, -sy * 0.5], [sx * 0.5, -sy * 0.5], [sx * 0.5, sy * 0.5], [-sx * 0.5, sy * 0.5]],
     };
-    let angle = pad.at[2].to_radians();
-    let (s, c) = angle.sin_cos();
     for p in &mut points {
-        let (x, y) = (p[0], p[1]);
-        p[0] = c * x + s * y + pad.at[0];
-        p[1] = -s * x + c * y + pad.at[1];
+        // The copper's offset from the hole is in the pad's frame, so it turns with the pad.
+        let [x, y] = turn_in_pad(pad, p[0] + pad.offset[0], p[1] + pad.offset[1]);
+        p[0] = x + pad.at[0];
+        p[1] = y + pad.at[1];
     }
     vec![points]
+}
+
+/// A vector in the pad's own frame turned by the pad's rotation, into the footprint frame (KiCad's
+/// Y down, where a positive rotation turns anticlockwise as the board is seen).
+fn turn_in_pad(pad: &KicadPad, x: f64, y: f64) -> [f64; 2] {
+    let (s, c) = pad.at[2].to_radians().sin_cos();
+    [c * x + s * y, -s * x + c * y]
+}
+
+/// The pad's own X axis in the footprint frame.
+fn pad_axis(pad: &KicadPad) -> [f64; 2] {
+    turn_in_pad(pad, 1.0, 0.0)
 }
 
 /// A via's copper in the board frame: a disc, or a ring when the via is drilled.
@@ -2872,7 +3995,13 @@ fn pad_drill_points(pad: &KicadPad) -> Option<Vec<[f64; 2]>> {
         return None;
     }
     let center = Vec2::new(pad.at[0], pad.at[1]);
-    let hole = if (size[0] - size[1]).abs() <= 1e-6 { Loop2::circle_from(center, size[0] * 0.5, 0.0) } else { slot_loop(center, size[0], size[1]) };
+    // A slot lies along the pad's own axis.
+    let [ux, uy] = pad_axis(pad);
+    let hole = if (size[0] - size[1]).abs() <= 1e-6 {
+        Loop2::circle_from(center, size[0] * 0.5, 0.0)
+    } else {
+        slot_loop(center, size[0], size[1], uy.atan2(ux))
+    };
     Some(hole.polyline(1e-3).to_vec().into_iter().map(|p| [p.x, p.y]).collect())
 }
 
@@ -2901,8 +4030,11 @@ fn pad_holes(outer: &Loop2, points: &[[f64; 2]], drills: &[KicadDrill]) -> Vec<L
         }
         let reach = size[0].max(size[1]) * 0.5;
         let key = ((center.x * 1000.0).round() as i64, (center.y * 1000.0).round() as i64);
-        let hole =
-            if (size[0] - size[1]).abs() <= 1e-6 { Loop2::circle_from(center, size[0] * 0.5, 0.0) } else { slot_loop(center, size[0], size[1]) };
+        let hole = if (size[0] - size[1]).abs() <= 1e-6 {
+            Loop2::circle_from(center, size[0] * 0.5, 0.0)
+        } else {
+            slot_loop(center, size[0], size[1], drill.angle)
+        };
         match widest.get(&key) {
             Some((wider, _)) if *wider >= reach => {}
             _ => {
@@ -2973,6 +4105,23 @@ fn parse_footprint(
     let layer = layer_of(expr).unwrap_or_default();
     let reference = property(expr, "Reference").or_else(|| fp_text(expr, "reference")).unwrap_or_default();
     let value = property(expr, "Value").or_else(|| fp_text(expr, "value")).unwrap_or_default();
+    let name = children(expr).get(1).and_then(atom).unwrap_or_default().to_string();
+    let uuid = field(expr, "uuid").or_else(|| field(expr, "tstamp")).and_then(|e| children(e).get(1)).and_then(atom).unwrap_or_default().to_string();
+    let mut fields: Vec<(String, String)> = Vec::new();
+    for child in children(expr).iter().filter(|e| head(e) == Some("property")) {
+        if let (Some(key), Some(text)) = (children(child).get(1).and_then(atom), children(child).get(2).and_then(atom))
+            && fields.len() < MAX_FOOTPRINT_FIELDS
+            && !fields.iter().any(|(k, _)| k == key)
+        {
+            fields.push((key.to_string(), text.to_string()));
+        }
+    }
+    // Older files keep the reference and value as `fp_text`, not properties.
+    for (key, text) in [("Reference", &reference), ("Value", &value)] {
+        if !fields.iter().any(|(k, _)| k == key) {
+            fields.push((key.to_string(), text.clone()));
+        }
+    }
     let mut models = Vec::new();
     let mut pads = Vec::new();
     let mut graphics = Vec::new();
@@ -3044,8 +4193,13 @@ fn parse_footprint(
             _ => {}
         }
     }
+    // A pad's rotation is stored on the board (KiCad adds the footprint's); kept here in the
+    // footprint frame, where the pad is placed, so that the footprint's rotation turns it once.
+    for pad in &mut pads {
+        pad.at[2] -= position[2];
+    }
     position[2] = position[2].rem_euclid(360.0);
-    Ok(KicadFootprint { reference, value, layer, at: position, models, pads, graphics, texts })
+    Ok(KicadFootprint { reference, value, name, fields, uuid, layer, at: position, models, pads, graphics, texts })
 }
 
 fn parse_pad(expr: &Expr<'_>) -> std::result::Result<KicadPad, String> {
@@ -3062,6 +4216,7 @@ fn parse_pad(expr: &Expr<'_>) -> std::result::Result<KicadPad, String> {
     if !(sx.is_finite() && sy.is_finite() && sx > 0.0 && sy > 0.0 && sx <= MAX_NUMBER && sy <= MAX_NUMBER) {
         return Err("invalid size".into());
     }
+    let kind = children(expr).get(2).and_then(atom).unwrap_or_default().to_string();
     let shape = children(expr).get(3).and_then(atom).unwrap_or("rect").to_string();
     let layers = field(expr, "layers").map(|e| children(e).iter().skip(1).filter_map(atom).map(str::to_string).collect()).unwrap_or_default();
     let drill = field(expr, "drill").and_then(numeric_atoms).and_then(|n| {
@@ -3072,12 +4227,18 @@ fn parse_pad(expr: &Expr<'_>) -> std::result::Result<KicadPad, String> {
         let second = n.get(1).copied().unwrap_or(first);
         Some([first, if second.is_finite() && second > 0.0 { second } else { first }])
     });
+    // An SMD pad writes `(drill (offset dx dy))` with no drill size: the offset still applies.
+    let offset = field(expr, "drill")
+        .and_then(|drill| field(drill, "offset"))
+        .and_then(numeric_atoms)
+        .and_then(|n| Some([*n.first()?, *n.get(1)?]))
+        .unwrap_or([0.0, 0.0]);
     let roundrect_ratio = field(expr, "roundrect_rratio")
         .and_then(|e| numbers(e, 1).ok())
         .and_then(|n| n.first().copied())
         .filter(|v| v.is_finite() && *v >= 0.0 && *v <= 0.5)
         .unwrap_or(0.0);
-    Ok(KicadPad { at: [x, y, angle], size: [sx, sy], shape, layers, drill, roundrect_ratio })
+    Ok(KicadPad { at: [x, y, angle], size: [sx, sy], kind, shape, layers, drill, offset, roundrect_ratio })
 }
 
 fn numeric_atoms(expr: &Expr<'_>) -> Option<Vec<f64>> {
@@ -3107,14 +4268,18 @@ fn parse_text(expr: &Expr<'_>, text_index: usize) -> Option<KicadText> {
         return None;
     }
     let layer = layer_of(expr)?;
-    if !is_silk(&layer) && !is_outer_copper(&layer) {
+    if !is_silk(&layer) && !is_copper_layer(&layer) {
         return None;
     }
     let effects = field(expr, "effects");
     if is_hidden(expr) || effects.is_some_and(is_hidden) {
         return None;
     }
-    let at = field(expr, "at").and_then(|e| numbers(e, 2).ok()).unwrap_or_default();
+    // Older files write `(at x y angle unlocked)`; the word is not a number.
+    let at_field = field(expr, "at");
+    let at = at_field.and_then(|e| numbers_but(e, 2, "unlocked").ok()).unwrap_or_default();
+    let unlocked = at_field.is_some_and(|e| children(e).iter().any(|c| atom(c) == Some("unlocked")))
+        || field(expr, "unlocked").is_some_and(|e| children(e).get(1).and_then(atom) != Some("no"));
     let x = at.first().copied().unwrap_or(0.0);
     let y = at.get(1).copied().unwrap_or(0.0);
     let angle = at.get(2).copied().unwrap_or(0.0);
@@ -3150,7 +4315,27 @@ fn parse_text(expr: &Expr<'_>, text_index: usize) -> Option<KicadText> {
             }
         }
     }
-    Some(KicadText { text, at: [x, y, angle], layer, height, width, thickness, bold, italic, mirror, left, right, top, bottom })
+    Some(KicadText { text, at: [x, y, angle], unlocked, layer, height, width, thickness, bold, italic, mirror, left, right, top, bottom })
+}
+
+/// The rotation a footprint's text is drawn at, in degrees on the board. The file stores it on the
+/// board already (the footprint's own rotation is not added). Unless the text is unlocked, KiCad
+/// keeps it readable: a rotation past a quarter turn either way is drawn half a turn round, in
+/// (-90, 90], about the same anchor and with the same justification. Board text is never turned.
+fn footprint_text_angle(text: &KicadText) -> f64 {
+    if text.unlocked {
+        return text.at[2];
+    }
+    let mut angle = text.at[2].rem_euclid(360.0);
+    if angle > 180.0 {
+        angle -= 360.0;
+    }
+    if angle > 90.0 {
+        angle -= 180.0;
+    } else if angle <= -90.0 {
+        angle += 180.0;
+    }
+    angle
 }
 
 /// A 3D model offset: KiCad writes `(offset (xyz ...))` in millimetres; the legacy
@@ -3242,9 +4427,14 @@ fn atom<'e, 'a>(expr: &'e Expr<'a>) -> Option<&'e str> {
 }
 
 fn numbers(expr: &Expr<'_>, minimum: usize) -> std::result::Result<Vec<f64>, String> {
+    numbers_but(expr, minimum, "")
+}
+
+/// [`numbers`], passing over the one word `skip` among them (a text's `(at x y angle unlocked)`).
+fn numbers_but(expr: &Expr<'_>, minimum: usize, skip: &str) -> std::result::Result<Vec<f64>, String> {
     let mut values = Vec::new();
     for item in children(expr).iter().skip(1) {
-        if let Some(value) = atom(item) {
+        if let Some(value) = atom(item).filter(|value| skip.is_empty() || *value != skip) {
             let number = value.parse::<f64>().map_err(|_| format!("invalid number `{value}`"))?;
             if !number.is_finite() || number.abs() > MAX_NUMBER {
                 return Err(format!("number `{value}` is outside the supported range"));
@@ -3258,24 +4448,57 @@ fn numbers(expr: &Expr<'_>, minimum: usize) -> std::result::Result<Vec<f64>, Str
     Ok(values)
 }
 
+/// The most tokens a board of `len` bytes may hold: one per two bytes, with `MIN_TOKEN_CAP` as the
+/// floor. KiCad indents every line, so a real board has well over two bytes per token (about 2.5 at
+/// the densest); a board under `MAX_KICAD_BYTES` is therefore not refused for its token count, and
+/// only denser input (a run of bare parentheses is one token per byte) is. The size cap bounds the
+/// memory: at most `MAX_KICAD_BYTES / 2` tokens.
+fn token_cap(len: usize) -> usize {
+    MIN_TOKEN_CAP.max(len / 2)
+}
+
+/// Push one token, refusing the board first when the vector already holds `cap` tokens, so it never
+/// grows (and reallocates) past the cap.
+fn push_token<'a>(tokens: &mut Vec<Token<'a>>, cap: usize, token: Token<'a>) -> Result<()> {
+    if tokens.len() >= cap {
+        return Err(IoError::Invalid(format!("KiCad PCB has more than {cap} s-expression tokens")));
+    }
+    tokens.push(token);
+    Ok(())
+}
+
 fn tokenize(source: &str) -> Result<Vec<Token<'_>>> {
+    let cap = token_cap(source.len());
     let mut tokens = Vec::new();
     let mut index = 0usize;
     while index < source.len() {
         let byte = source.as_bytes().get(index).copied().unwrap_or_default();
         match byte {
             b'(' => {
-                tokens.push(Token::Open);
+                push_token(&mut tokens, cap, Token::Open)?;
                 index += 1;
             }
             b')' => {
-                tokens.push(Token::Close);
+                push_token(&mut tokens, cap, Token::Close)?;
                 index += 1;
             }
             b'"' => {
                 let (value, next) = quoted(source, index + 1)?;
-                tokens.push(Token::String(value));
+                push_token(&mut tokens, cap, Token::String(value))?;
                 index = next;
+            }
+            b'|' => {
+                // `|…|`: the text between the bars is one atom, whitespace and all. KiCad stores an
+                // embedded file's base64 data this way, wrapped over many lines.
+                let start = index + 1;
+                let end = source
+                    .get(start..)
+                    .and_then(|rest| rest.find('|'))
+                    .map(|n| start + n)
+                    .ok_or_else(|| IoError::Invalid("unterminated |…| text in KiCad PCB".into()))?;
+                let text = source.get(start..end).ok_or_else(|| IoError::Invalid("invalid UTF-8 boundary in KiCad PCB".into()))?;
+                push_token(&mut tokens, cap, Token::Atom(text))?;
+                index = end + 1;
             }
             b';' => {
                 while index < source.len() && source.as_bytes().get(index) != Some(&b'\n') {
@@ -3291,11 +4514,8 @@ fn tokenize(source: &str) -> Result<Vec<Token<'_>>> {
                     index += 1;
                 }
                 let word = source.get(start..index).ok_or_else(|| IoError::Invalid("invalid UTF-8 boundary in KiCad PCB".into()))?;
-                tokens.push(Token::Atom(word));
+                push_token(&mut tokens, cap, Token::Atom(word))?;
             }
-        }
-        if tokens.len() > MAX_TOKENS {
-            return Err(IoError::Invalid(format!("KiCad PCB has more than {MAX_TOKENS} s-expression tokens")));
         }
     }
     Ok(tokens)
@@ -3351,7 +4571,7 @@ impl<'a> Parser<'a> {
             return Err(IoError::Invalid(format!("KiCad PCB nesting exceeds {MAX_DEPTH}")));
         }
         self.nodes = self.nodes.saturating_add(1);
-        if self.nodes > MAX_TOKENS {
+        if self.nodes > self.tokens.len() {
             return Err(IoError::Invalid("KiCad PCB has too many s-expression nodes".into()));
         }
         match self.tokens.get(self.next).cloned() {

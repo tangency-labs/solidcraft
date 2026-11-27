@@ -201,8 +201,8 @@ pub use web::*;
 
 #[cfg(target_arch = "wasm32")]
 mod web {
-    use std::cell::{Cell, RefCell};
-    use std::collections::{HashMap, VecDeque};
+    use std::cell::RefCell;
+    use std::collections::HashMap;
     use std::rc::Rc;
 
     use js_sys::{Array, Function, Object, Promise, Reflect};
@@ -220,9 +220,6 @@ mod web {
     thread_local! {
         /// Handles picked or looked up in this session, by id.
         static HANDLES: RefCell<HashMap<String, FileSystemFileHandle>> = RefCell::new(HashMap::new());
-        /// Writes waiting for their turn (a file takes one writer at a time), latest per id.
-        static QUEUE: RefCell<VecDeque<(String, Vec<u8>)>> = const { RefCell::new(VecDeque::new()) };
-        static BUSY: Cell<bool> = const { Cell::new(false) };
     }
 
     /// Why a dialog gave no file.
@@ -388,29 +385,7 @@ mod web {
 
     // ---- writing ------------------------------------------------------------------------
 
-    /// Queue what a command wrote to a disk path. Writes go one at a time; a newer write of the
-    /// same file replaces one still waiting.
-    pub fn enqueue(files: &Rc<Files>, path: &str, bytes: Vec<u8>) {
-        QUEUE.with(|q| {
-            let mut q = q.borrow_mut();
-            q.retain(|(p, _)| p != path);
-            q.push_back((path.to_string(), bytes));
-        });
-        if BUSY.with(|b| b.replace(true)) {
-            return;
-        }
-        let files = files.clone();
-        spawn_local(async move {
-            while let Some((path, bytes)) = QUEUE.with(|q| q.borrow_mut().pop_front()) {
-                if let Err(e) = write(&path, &bytes).await {
-                    files.failed_disk(&path, &e);
-                }
-            }
-            BUSY.with(|b| b.set(false));
-        });
-    }
-
-    async fn write(path: &str, bytes: &[u8]) -> Result<(), String> {
+    pub async fn write(path: &str, bytes: &[u8]) -> Result<(), String> {
         let (id, name) = parse(path).ok_or("not a file on the computer")?;
         let handle = handle_for(id).await.map_err(|e| format!("{name}: {e}"))?;
         write_handle(&handle, bytes).await.map_err(|e| format!("{name}: {e}"))
@@ -418,11 +393,7 @@ mod web {
 
     async fn write_handle(handle: &FileSystemFileHandle, bytes: &[u8]) -> Result<(), String> {
         ensure_readwrite(handle).await?;
-        let w: web_sys::FileSystemWritableFileStream =
-            JsFuture::from(handle.create_writable()).await.map_err(err)?.dyn_into().map_err(|_| "no writable stream".to_string())?;
-        JsFuture::from(w.write_with_u8_array(bytes).map_err(err)?).await.map_err(err)?;
-        JsFuture::from(w.close()).await.map_err(err)?;
-        Ok(())
+        crate::files::write_handle(handle, bytes).await
     }
 
     async fn handle_for(id: &str) -> Result<FileSystemFileHandle, String> {

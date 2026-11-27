@@ -463,7 +463,7 @@ pub fn settings_plugin_card_with_actions<R>(
         let folder_width = folder_galley.size().x + t.space_8 * 2.0 + t.space_14 + t.space_6;
         let update_galley = labels.update.map(|label| ui.painter().layout_no_wrap(label.into(), FontId::proportional(t.font_body), t.form_ink));
         let update_width = update_galley.as_ref().map_or(0.0, |galley| galley.size().x + t.space_12 * 2.0 + t.space_8);
-        let actions_width = folder_width + t.space_12 + t.space_16 + update_width;
+        let actions_width = folder_width + t.space_12 + super::switch_size().x + update_width;
         let beside = width >= tile_side + t.space_12 * 2.0 + actions_width + t.form_label_width;
         let text_width = (width - tile_side - t.space_12 - if beside { actions_width + t.space_12 } else { 0.0 }).max(1.0);
         let version_galley = ui.painter().layout_no_wrap(version.into(), FontId::proportional(t.font_small), t.form_dim);
@@ -494,7 +494,8 @@ pub fn settings_plugin_card_with_actions<R>(
             ui.painter().galley(at + vec2(0.0, header_height + t.space_2), body, t.form_dim);
         }
         let center_y = if beside { rect.center().y } else { rect.bottom() - t.space_12 };
-        let check_rect = Rect::from_center_size(pos2(rect.right() - t.space_8, center_y), vec2(t.space_16, t.space_16));
+        let switch = super::switch_size();
+        let check_rect = Rect::from_center_size(pos2(rect.right() - switch.x / 2.0, center_y), switch);
         let update_rect = Rect::from_min_size(
             pos2(check_rect.left() - t.space_12 - (update_width - t.space_8), center_y - t.control_height / 2.0),
             vec2((update_width - t.space_8).max(0.0), t.control_height),
@@ -515,7 +516,13 @@ pub fn settings_plugin_card_with_actions<R>(
         if folder.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
-        let check = super::checkbox_at(ui, check_rect, &format!("{name}: {}", labels.enabled), enabled);
+        // The switch reads on or off at full strength on a dimmed (turned-off) card.
+        let check = ui
+            .scope(|ui| {
+                ui.set_opacity(1.0);
+                super::switch_at(ui, check_rect, &format!("{name}: {}", labels.enabled), enabled)
+            })
+            .inner;
         // A turned-off card is dimmed; its Update button is not.
         let update = labels.update.map(|label| {
             ui.scope(|ui| {

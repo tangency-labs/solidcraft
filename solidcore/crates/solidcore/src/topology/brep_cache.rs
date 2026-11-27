@@ -26,7 +26,8 @@
 //! Face queries (`topology.face_p4`) remain explicit back-edges; the B-rep box calls
 //! `query::brep`, face boxes `query::face::p1`; the polygon path is ported.
 
-use crate::error::{Result, SolidError};
+use crate::error::topology::TopologyFailure;
+use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::a_object::{BREP_TYPE, POLY_BREP_TYPE};
 use crate::geom::extent3d::Extent3d;
 use crate::geom::object;
@@ -39,6 +40,19 @@ use crate::query::poly::{PolyBrep, PolyEdgeId, PolyFaceId, PolyVertexId};
 use crate::topology::{edge, Brep, EdgeId, FaceId, VertexId};
 
 const OP: &str = "topology::brep_cache";
+
+/// A defect at a link the kernel always sets, keeping the `SM_ERR_NULL_POINTER` of the
+/// `NER` it replaces.
+fn missing_defect(why: &'static str) -> SolidError {
+    Failure::new(OP, TopologyFailure::Defect { why })
+        .with_status(SM_ERR_NULL_POINTER)
+        .into_error()
+}
+
+/// The top node a spatial tree is made with ([`Tree::new_spatial`]); growing the tree
+/// moves the top, never removes it.
+const NO_TOP: &str =
+    "the spatial tree has no top node, though it is made with one and growing it never removes it";
 
 /// `SmBrepCache_TYPE`.
 pub const TYPE: i64 = 16400;
@@ -110,9 +124,9 @@ impl<O> BrepCache<O> {
     /// Other codes return upstream's `SM_ERR`.
     pub fn new(target_type: i64) -> Result<Self> {
         if target_type != BREP_TYPE && target_type != POLY_BREP_TYPE {
-            return Err(SolidError::topology_failed(
+            return Err(SolidError::topology(
                 OP,
-                "the cache is only for a B-rep or a poly B-rep",
+                TopologyFailure::CacheTargetNotBrep,
             ));
         }
         Ok(Self {
@@ -197,10 +211,8 @@ impl<O: Copy + PartialEq> BrepCache<O> {
             (&mut surfaces, Some(NodeGeomType::Polygon)),
         ] {
             tree.set_owner_object(Some(TreeOwner::BrepCache));
-            if let Some(geom) = geom {
-                let top = tree
-                    .top_node()
-                    .ok_or_else(|| SolidError::topology_missing(OP, "the tree's top node"))?;
+            // `new_spatial` made the tree with its top node just above
+            if let (Some(geom), Some(top)) = (geom, tree.top_node()) {
                 tree.node_mut(top)?.geom_type = geom;
             }
         }
@@ -246,10 +258,9 @@ impl<O: Copy + PartialEq> BrepCache<O> {
                 }
                 for e in brep_edges(b)? {
                     let data = b.edge(e)?;
-                    let curve = data
-                        .curve
-                        .as_ref()
-                        .ok_or_else(|| SolidError::topology_missing(OP, "the edge's curve"))?;
+                    let curve = data.curve.as_ref().ok_or_else(|| {
+                        SolidError::topology(OP, TopologyFailure::EdgeWithoutCurve)
+                    })?;
                     if curve.owner() == Some(keys(CacheObject::Edge(e))) {
                         bbox = curve
                             .calculate_bounding_box(
@@ -264,7 +275,10 @@ impl<O: Copy + PartialEq> BrepCache<O> {
                             )?
                             .normal
                             .ok_or_else(|| {
-                                SolidError::topology_missing(OP, "the edge curve's bounding box")
+                                missing_defect(
+                                    "the edge curve's box has no normal box, though the request \
+                                     asks for it and every curve kind fills the boxes it is asked for",
+                                )
                             })?;
                         bbox.expand_absolute(data.tolerance);
                         curves.add_to_spatial_tree(
@@ -276,10 +290,9 @@ impl<O: Copy + PartialEq> BrepCache<O> {
                 }
                 for f in brep_faces(b)? {
                     let data = b.face(f)?;
-                    let surface = data
-                        .surface
-                        .as_ref()
-                        .ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?;
+                    let surface = data.surface.as_ref().ok_or_else(|| {
+                        SolidError::topology(OP, TopologyFailure::FaceWithoutSurface)
+                    })?;
                     if surface.owner() == Some(keys(CacheObject::Face(f))) {
                         bbox = face_bounding_box(k, b, f)?;
                         bbox.expand_absolute(data.tolerance);
@@ -328,9 +341,11 @@ impl<O: Copy + PartialEq> BrepCache<O> {
             let owner = face
                 .surface
                 .as_ref()
-                .ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?
+                .ok_or_else(|| SolidError::topology(OP, TopologyFailure::FaceWithoutSurface))?
                 .face()?
-                .ok_or_else(|| SolidError::topology_missing(OP, "the surface's owning face"))?;
+                .ok_or_else(|| {
+                    SolidError::topology(OP, TopologyFailure::SurfaceWithoutOwningFace)
+                })?;
             let owner = face_id(b, owner, keys)?;
             match face_bounding_box(k, b, owner) {
                 Ok(bbox) => surface_box = bbox,
@@ -380,14 +395,10 @@ impl<O: Copy + PartialEq> BrepCache<O> {
             (&mut self.curves, curve_union, 0.0),
             (&mut self.vertices, vertex_union, EFF_ZERO),
         ] {
-            if !bbox.has_negative_volume() {
+            // the trees are built: checked on entry
+            if let (false, Some(tree)) = (bbox.has_negative_volume(), tree.as_mut()) {
                 bbox.expand_absolute(100.0 * tol);
-                let tree = tree
-                    .as_mut()
-                    .ok_or_else(|| SolidError::topology_missing(OP, "the cache's tree"))?;
-                let top = tree
-                    .top_node()
-                    .ok_or_else(|| SolidError::topology_missing(OP, "the tree's top node"))?;
+                let top = tree.top_node().ok_or_else(|| missing_defect(NO_TOP))?;
                 if !bbox.is_contained_by(&tree.node(top)?.bbox, containment_tol) {
                     crate::error::ignore_status(tree.add_to_spatial_tree(
                         &bbox,
@@ -419,9 +430,9 @@ fn resize_edge(
     let owner = data
         .curve
         .as_ref()
-        .ok_or_else(|| SolidError::topology_missing(OP, "the edge's curve"))?
+        .ok_or_else(|| SolidError::topology(OP, TopologyFailure::EdgeWithoutCurve))?
         .edge(owner_of)?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the curve's owning edge"))?;
+        .ok_or_else(|| SolidError::topology(OP, TopologyFailure::CurveOwnerUnresolved))?;
     let owner = edge_id(b, owner, keys)?;
     match crate::query::edge::calculate_bounding_box(
         k,
@@ -443,10 +454,14 @@ fn resize_edge(
         Err(_) => {}
     }
     *curve_union = curve_union.union(curve_box);
-    let first = edge::vertex(b, e)?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the edge's first vertex"))?;
-    let second = edge::other_vertex(b, e, Some(first))?
-        .ok_or_else(|| SolidError::topology_missing(OP, "the edge's second vertex"))?;
+    let no_vertex = || {
+        missing_defect(
+            "an edge has no vertex at an end, though every edge use the B-rep links has a \
+             vertex use at its vertex",
+        )
+    };
+    let first = edge::vertex(b, e)?.ok_or_else(no_vertex)?;
+    let second = edge::other_vertex(b, e, Some(first))?.ok_or_else(no_vertex)?;
     for v in [first, second] {
         let data = b.vertex(v)?;
         if data.tolerance > *tol {
@@ -545,7 +560,7 @@ impl crate::intersect::topology_solver::p1::TopologyObjects<CacheObject> for Bre
             return Err(SolidError::port_invariant(OP, "expected B-rep handle"));
         }
         self.cache
-            .ok_or_else(|| SolidError::topology_missing(OP, "the B-rep cache"))
+            .ok_or_else(|| SolidError::topology(OP, TopologyFailure::SolveViewWithoutCache))
     }
     fn curve(&self, object: CacheObject) -> Result<&crate::curve::curve::Curve> {
         let CacheObject::Curve(e) = object else {
@@ -555,7 +570,7 @@ impl crate::intersect::topology_solver::p1::TopologyObjects<CacheObject> for Bre
             .edge(e)?
             .curve
             .as_ref()
-            .ok_or_else(|| SolidError::topology_missing(OP, "the edge's curve"))
+            .ok_or_else(|| SolidError::topology(OP, TopologyFailure::EdgeWithoutCurve))
     }
     fn analytic_curve_handle(&self, object: CacheObject) -> Option<CacheObject> {
         Some(object)
@@ -621,7 +636,7 @@ impl crate::intersect::topology_solver::p1::TopologyObjects<CacheObject> for Bre
             .face(f)?
             .surface
             .as_ref()
-            .ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))?;
+            .ok_or_else(|| SolidError::topology(OP, TopologyFailure::FaceWithoutSurface))?;
         Ok(CacheObject::Surface(f))
     }
     fn surface(&self, object: CacheObject) -> Result<&crate::surface::surface::Surface> {
@@ -632,7 +647,7 @@ impl crate::intersect::topology_solver::p1::TopologyObjects<CacheObject> for Bre
             .face(f)?
             .surface
             .as_ref()
-            .ok_or_else(|| SolidError::topology_missing(OP, "the face's surface"))
+            .ok_or_else(|| SolidError::topology(OP, TopologyFailure::FaceWithoutSurface))
     }
     fn face_uv_domain(&self, object: CacheObject) -> Result<crate::geom::extent2d::Extent2d> {
         let CacheObject::Face(f) = object else {
@@ -868,7 +883,10 @@ mod tests {
     #[test]
     fn initialization_contract_and_atomic_build_failure() {
         let k = Kernel::default();
-        assert!(BrepCache::<CacheObject>::new(0).is_err_and(|e| e.upstream_status() == Some(1001)));
+        assert!(
+            BrepCache::<CacheObject>::new(0).is_err_and(|e| e.upstream_status() == Some(1001)
+                && e.topology_failure() == Some(&TopologyFailure::CacheTargetNotBrep))
+        );
         let mut cache = BrepCache::new(BREP_TYPE).unwrap();
         assert!(cache.vertex_tree().is_none());
         let b = Brep::new();
@@ -885,7 +903,8 @@ mod tests {
         open.add_edge(v0, v1).unwrap();
         assert!(cache
             .build_trees(&k, CacheSource::Brep(&open), |o| o, &arena_identity)
-            .is_err_and(|e| e.upstream_status() == Some(1006)));
+            .is_err_and(|e| e.upstream_status() == Some(1006)
+                && e.topology_failure() == Some(&TopologyFailure::EdgeWithoutCurve)));
         assert!(
             cache.vertex_tree().is_none()
                 && cache.curve_tree().is_none()

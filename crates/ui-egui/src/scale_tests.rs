@@ -332,6 +332,8 @@ pub(crate) fn view_frame(
     let t = solidcraft_theme::Tokens::get();
     let none = || std::sync::Arc::new(std::sync::Mutex::new(None));
     crate::gpu::Frame {
+        selection_all: false,
+        hover_body: None,
         product: false,
         product_lights: None,
         upload_error: None,
@@ -361,12 +363,16 @@ pub(crate) fn view_frame(
         eye: [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }],
         ao_radius: 0.0,
         ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+        occlusion: false,
+        edge_px: solidcraft_viewport_gpu::view::EDGE_PX,
         sky: [0.0; 4],
         ssaa: 1.0,
         hover_tint: [f32::from(t.hover_face_lift) / 255.0; 3],
         selection_tint: [0.4, 0.6, 0.9],
         hatch: Default::default(),
         moving: None,
+        motions: Default::default(),
+        ground: None,
     }
 }
 
@@ -1010,4 +1016,32 @@ fn product_preview_rebuild_cost() {
             instanced.blocks.iter().map(|b| b.bytes.vertices.len()).sum::<usize>(),
         );
     }
+}
+
+#[test]
+fn pop_out_interface_scales_only_its_own_viewport_and_pointer() {
+    let ctx = egui::Context::default();
+    let child = egui::ViewportId::from_hash_of("scaled pop-out");
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
+    let pointer = egui::pos2(400.0, 200.0);
+    let input = |viewport_id| {
+        let mut raw =
+            egui::RawInput { viewport_id, screen_rect: Some(screen), events: vec![egui::Event::PointerMoved(pointer)], ..Default::default() };
+        raw.viewports.entry(viewport_id).or_default().native_pixels_per_point = Some(1.0);
+        raw
+    };
+    crate::view_window_scale::in_window(&ctx, child, 2.0, || {
+        ctx.run_ui(input(child), |ui| {
+            assert_eq!(ui.ctx().pixels_per_point(), 2.0);
+            assert_eq!(ui.ctx().content_rect().size(), egui::vec2(400.0, 300.0));
+            assert_eq!(ui.input(|i| i.pointer.hover_pos()), Some(egui::pos2(200.0, 100.0)));
+        })
+        .drop_without_applying_deltas();
+    });
+    ctx.run_ui(input(egui::ViewportId::ROOT), |ui| {
+        assert_eq!(ui.ctx().pixels_per_point(), 1.0);
+        assert_eq!(ui.ctx().content_rect(), screen);
+        assert_eq!(ui.input(|i| i.pointer.hover_pos()), Some(pointer));
+    })
+    .drop_without_applying_deltas();
 }

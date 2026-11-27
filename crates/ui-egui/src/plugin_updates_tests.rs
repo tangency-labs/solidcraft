@@ -137,7 +137,7 @@ fn review_dialog(h: &mut crate::scenario::Harness, evidence: &str) -> String {
 #[test]
 fn a_release_is_offered_only_from_its_own_repository_as_a_stable_version() {
     let offer = parse_release(&release(Some(&"AB".repeat(32))), "maker/gears", "gears").unwrap();
-    assert_eq!(offer, Offer { version: "1.1.0".into(), url: ASSET.into(), sha256: "ab".repeat(32) });
+    assert_eq!(offer, Offer { version: "1.1.0".into(), url: ASSET.into(), sha256: "ab".repeat(32), repo: "maker/gears".into() });
     assert_eq!(parse_release(&release(Some(&"ab".repeat(32))), "Maker/Gears", "gears").unwrap().url, ASSET, "the owner's case may differ");
     let versioned = json!({"tag_name":"1.1.0","assets":[{"name":"gears-1.1.0.zip","digest":std::format!("sha256:{}", "cd".repeat(32)),
         "browser_download_url":"https://github.com/maker/gears/releases/download/1.1.0/gears-1.1.0.zip"}]});
@@ -235,7 +235,7 @@ fn a_url_package_uses_the_existing_review_before_installing_with_approved_folder
     settle(&mut h);
     assert_eq!(h.app.plugin_updates.offers["gears"].version, "1.2.0");
     let plugin = crate::plugin_slots::preferences_inventory(&mut h.app, &root).into_iter().find(|p| p.id == "gears").unwrap();
-    start(&mut h.app, &plugin);
+    start(&mut h.app, &h.ctx, &plugin);
     settle(&mut h);
     let ask = h.app.plugin_install.ask.take().expect("the update without repository metadata is reviewed");
     assert!(ask.update);
@@ -274,10 +274,10 @@ fn a_newer_release_puts_update_beside_the_toggle_and_updates_keeping_the_folders
     let update = crate::scenario::handle_at("prefs:plugin:gears:update").expect("Update shows");
     let toggle = crate::scenario::handle_at("prefs:plugin:gears").unwrap();
     assert!((update.y - toggle.y).abs() < 1.0 && update.x < toggle.x, "Update sits beside the toggle, before it: {update:?} {toggle:?}");
-    // Update: download, check, then the same review as Install, with the installed folders filled in.
+    // Update: download, check, then the same review as Install, keeping the folder at the same access.
     let dir = plugins_dir(&h);
     let plugin = crate::plugin_slots::preferences_inventory(&mut h.app, &dir).into_iter().find(|p| p.id == "gears").unwrap();
-    start(&mut h.app, &plugin);
+    start(&mut h.app, &h.ctx, &plugin);
     settle(&mut h);
     let ask = h.app.plugin_install.ask.as_ref().expect("the update is reviewed");
     assert!(ask.update);
@@ -300,6 +300,20 @@ fn a_newer_release_puts_update_beside_the_toggle_and_updates_keeping_the_folders
 }
 
 #[test]
+fn a_release_from_another_repository_is_not_offered() {
+    crate::i18n::install();
+    let (mut h, _) = installed(Err(FetchError::Failed("offline".into())), Vec::new());
+    let dir = plugins_dir(&h);
+    let mut plugin = crate::plugin_slots::preferences_inventory(&mut h.app, &dir).into_iter().find(|p| p.id == "gears").unwrap();
+    let offer = Offer { version: "1.1.0".into(), url: ASSET.into(), sha256: "ab".repeat(32), repo: "maker-a/gears".into() };
+    h.app.plugin_updates.offers.insert("gears".into(), offer);
+    plugin.updates = Some("maker-b/gears".into());
+    assert!(offered(&h.app, &plugin).is_none(), "maker-a's release is not an update for maker-b's gears");
+    plugin.updates = Some("Maker-A/Gears".into());
+    assert!(offered(&h.app, &plugin).is_some(), "the owner's case may differ");
+}
+
+#[test]
 fn a_download_that_is_not_the_offered_package_is_refused() {
     crate::i18n::install();
     let new = package("gears", "1.1.0");
@@ -308,7 +322,7 @@ fn a_download_that_is_not_the_offered_package_is_refused() {
     settle(&mut h);
     let dir = plugins_dir(&h);
     let plugin = crate::plugin_slots::preferences_inventory(&mut h.app, &dir).into_iter().find(|p| p.id == "gears").unwrap();
-    start(&mut h.app, &plugin);
+    start(&mut h.app, &h.ctx, &plugin);
     settle(&mut h);
     assert!(h.app.plugin_install.ask.is_none());
     assert!(h.app.status.as_ref().unwrap().0.contains("checksum"), "{:?}", h.app.status);
@@ -319,7 +333,7 @@ fn a_download_that_is_not_the_offered_package_is_refused() {
     settle(&mut h);
     let dir = plugins_dir(&h);
     let plugin = crate::plugin_slots::preferences_inventory(&mut h.app, &dir).into_iter().find(|p| p.id == "gears").unwrap();
-    start(&mut h.app, &plugin);
+    start(&mut h.app, &h.ctx, &plugin);
     settle(&mut h);
     assert!(h.app.plugin_install.ask.is_none());
     assert!(h.app.status.as_ref().unwrap().0.contains("not gears 1.1.0"), "{:?}", h.app.status);
@@ -338,7 +352,7 @@ fn an_update_cannot_change_the_recorded_repository() {
     let root = plugins_dir(&h);
     let plugin = crate::plugin_slots::preferences_inventory(&mut h.app, &root).into_iter().find(|p| p.id == "gears").unwrap();
     let grants = h.app.preferences.plugin_grants.clone();
-    start(&mut h.app, &plugin);
+    start(&mut h.app, &h.ctx, &plugin);
     settle(&mut h);
     assert!(h.app.plugin_install.ask.is_none());
     assert!(h.app.status.as_ref().unwrap().0.contains("different GitHub repository"), "{:?}", h.app.status);

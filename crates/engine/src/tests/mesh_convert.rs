@@ -25,6 +25,172 @@ pub(crate) fn imported_box() -> Session {
     Session::new(doc)
 }
 
+/// A closed box with planar grids dense enough to have interior collapsible edges.
+pub(crate) fn subdivided_box() -> Session {
+    let mut s = imported_box();
+    let FeatureKind::MeshImport { meshes, .. } = &mut s.doc_mut().features[0].kind else { panic!("mesh") };
+    let mesh = &mut meshes[0];
+    let mut positions = Vec::new();
+    let mut triangles = Vec::new();
+    let faces = [
+        ([0., 0., 0.], [0., 3., 0.], [3., 0., 0.]),
+        ([0., 0., 12.], [3., 0., 0.], [0., 3., 0.]),
+        ([0., 0., 0.], [3., 0., 0.], [0., 0., 3.]),
+        ([0., 12., 0.], [0., 0., 3.], [3., 0., 0.]),
+        ([0., 0., 0.], [0., 0., 3.], [0., 3., 0.]),
+        ([12., 0., 0.], [0., 3., 0.], [0., 0., 3.]),
+    ];
+    for (origin, u, v) in faces {
+        let base = (positions.len() / 3) as u32;
+        for y in 0..=4 {
+            for x in 0..=4 {
+                positions.extend((0..3).map(|i| origin[i] + u[i] * f64::from(x) + v[i] * f64::from(y)));
+            }
+        }
+        for y in 0..4 {
+            for x in 0..4 {
+                let a = base + y * 5 + x;
+                triangles.extend([a, a + 1, a + 6, a, a + 6, a + 5]);
+            }
+        }
+    }
+    mesh.positions = positions.into();
+    mesh.triangles = triangles.into();
+    s.refresh();
+    s
+}
+
+#[test]
+fn reduction_persists_a_separate_mesh_for_conversion_and_undo() {
+    let mut s = subdivided_box();
+    s.selection = vec![crate::Sel::Body { name: "Mesh".into() }];
+    let recomputed_before = s.model.recomputed;
+    let reply = run(&mut s, "mesh.reduce", json!({"percentage": 40, "name": "Reduce"}));
+    assert_eq!(s.model.recomputed - recomputed_before, 1, "only the new reduction should recompute geometry");
+    let name = reply["created_bodies"][0].as_str().unwrap().to_owned();
+    let original = reply["original_triangles"].as_u64().unwrap();
+    let target = reply["target_triangles"].as_u64().unwrap();
+    let achieved = reply["achieved_triangles"].as_u64().unwrap();
+    assert_eq!(target, (original as f64 * 0.4).floor() as u64);
+    assert!(achieved < original);
+    assert_eq!(reply["warning"].is_string(), achieved > target);
+    let check = |s: &Session| {
+        let state = s.model.state();
+        assert_eq!(state.body("Mesh").unwrap().body.triangle_mesh().unwrap().1.len() as u64, original);
+        let reduced = &state.body(&name).unwrap().body;
+        assert_eq!(reduced.triangle_mesh().unwrap().1.len() as u64, achieved);
+        assert!(reduced.is_closed_mesh());
+        assert_eq!(reduced.color(), Some([0.2, 0.5, 0.8]));
+    };
+    check(&s);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.state().body(&name).is_none());
+    run(&mut s, "edit.redo", json!({}));
+    check(&s);
+    let mut cold = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    check(&cold);
+    run(&mut cold, "mesh.convert", json!({"body": name}));
+    assert!(cold.model.state().body("Mesh").unwrap().body.is_mesh());
+    assert!(!cold.model.state().body(&name).unwrap().body.is_mesh());
+}
+
+#[test]
+fn reduction_rejects_invalid_and_unreachable_requests_atomically() {
+    let mut s = subdivided_box();
+    let before = s.doc.to_json();
+    for params in [
+        json!({"body":"Mesh"}),
+        json!({"body":"Mesh","triangle_count":0}),
+        json!({"body":"Mesh","triangle_count":1.5}),
+        json!({"body":"Mesh","percentage":0}),
+        json!({"body":"Mesh","percentage":100}),
+        json!({"body":"Mesh","percentage":-1}),
+        json!({"body":"Mesh","percentage":50,"triangle_count":10}),
+        json!({"body":"Mesh","triangle_count":100000}),
+        json!({"body":"Missing","triangle_count":1}),
+    ] {
+        assert!(s.execute("mesh.reduce", &params).is_err(), "{params}");
+        assert_eq!(s.doc.to_json(), before);
+    }
+}
+
+#[test]
+fn reduction_reports_actual_count_for_a_noisy_mesh() {
+    let mut s = subdivided_box();
+    let FeatureKind::MeshImport { meshes, .. } = &mut s.doc_mut().features[0].kind else { panic!("mesh") };
+    let mut positions = meshes[0].positions.to_vec();
+    // Perturb the interior of the top face, retaining the watertight boundary.
+    for y in 1..4 {
+        for x in 1..4 {
+            positions[(25 + y * 5 + x) * 3 + 2] += (x * y) as f64 * 0.013;
+        }
+    }
+    meshes[0].positions = positions.into();
+    s.refresh();
+    let before = s.model.state().body("Mesh").unwrap().body.triangle_mesh().unwrap().1.len();
+    let reply = run(&mut s, "mesh.reduce", json!({"body":"Mesh","percentage":50}));
+    let name = reply["created_bodies"][0].as_str().unwrap();
+    let state = s.model.state();
+    assert_eq!(state.body("Mesh").unwrap().body.triangle_mesh().unwrap().1.len(), before);
+    let achieved = state.body(name).unwrap().body.triangle_mesh().unwrap().1.len();
+    assert_eq!(reply["achieved_triangles"], achieved);
+    assert!(achieved < before);
+}
+
+#[test]
+fn reduction_uses_source_component_and_its_placements() {
+    let path = std::env::temp_dir().join(format!("solidcraft-reduce-placed-{}.stl", std::process::id()));
+    let mut source = subdivided_box();
+    run(&mut source, "file.save_mesh", json!({"path": path}));
+    let mut s = Session::default();
+    let inserted = run(&mut s, "file.insert_mesh", json!({"path": path, "name": "Scan"}));
+    let owner = inserted["component"].as_u64().unwrap();
+    run(&mut s, "occurrence.copy", json!({"component": "Scan", "translate": [0, 40, 0]}));
+    let definition = s.model.state().bodies[0].name.clone();
+    s.doc_mut().body_offsets.insert(definition.clone(), solidcraft_doc::rigid(Vec3::new(7.0, 3.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    s.refresh();
+    let second = s.world_state().unwrap().bodies.iter().find(|b| b.name != definition).unwrap().name.clone();
+    let context = (s.active_component, s.active_occurrence_path.clone());
+    let reply = run(&mut s, "mesh.reduce", json!({"body": second, "triangle_count": 1}));
+    assert_eq!((s.active_component, s.active_occurrence_path.clone()), context);
+    let name = reply["created_bodies"][0].as_str().unwrap();
+    assert_eq!(s.doc.model_body_component(s.model.state().body(name).unwrap()), owner);
+    let check = |s: &Session, source_x: f64, derived_x: f64| {
+        let world = s.world_state().unwrap();
+        let bounds = |definition: &str| {
+            let mut boxes: Vec<_> = world.bodies.iter().filter(|b| b.definition_name() == definition).map(|b| b.mesh().bounds()).collect();
+            boxes.sort_by(|a, b| a.min.y.total_cmp(&b.min.y));
+            boxes
+        };
+        let source = bounds(&definition);
+        let reduced = bounds(name);
+        assert_eq!(source.len(), 2);
+        assert_eq!(reduced.len(), 2);
+        for (original, result) in source.iter().zip(&reduced) {
+            assert!((original.min.x - source_x).abs() < 1e-8);
+            assert!((result.min.x - derived_x).abs() < 1e-8);
+            assert!((original.min.y - result.min.y).abs() < 1e-8);
+            assert!((original.max.y - result.max.y).abs() < 1e-8);
+            assert!((original.min.z - result.min.z).abs() < 1e-8);
+            assert!((original.max.z - result.max.z).abs() < 1e-8);
+        }
+    };
+    check(&s, 7.0, 7.0);
+    let cold = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    check(&cold, 7.0, 7.0);
+    // A warm evaluation must follow subsequent changes to the source offset.
+    s.doc_mut().body_offsets.insert(definition.clone(), solidcraft_doc::rigid(Vec3::new(9.0, 3.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    s.refresh();
+    check(&s, 9.0, 9.0);
+    // A separately stored derived-body placement wins, rather than being composed twice.
+    s.doc_mut().body_offsets.insert(name.to_string(), solidcraft_doc::rigid(Vec3::new(20.0, 3.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+    s.refresh();
+    check(&s, 9.0, 20.0);
+    let cold = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    check(&cold, 9.0, 20.0);
+    std::fs::remove_file(path).unwrap();
+}
+
 /// An edit keeps the design as it was for undo, and an imported mesh's triangles are shared
 /// with that copy, not copied (a scan's are hundreds of megabytes): after an edit and its undo
 /// the document holds the same arrays. They still save as plain arrays.
@@ -62,6 +228,11 @@ fn mesh_conversion_is_parametric_undoable_and_editable_after_cold_reopen() {
     run(&mut s, "solid.scale", json!({"bodies":["Mesh"],"factor":"size","name":"Mesh scale"}));
     run(&mut s, "mesh.convert", json!({"body":"Mesh","tolerance":"0.01 mm","name":"Reconstructed prism"}));
     let check = |s: &Session| {
+        let feature = s.doc.features.iter().find(|f| matches!(&f.kind, FeatureKind::MeshConvert { .. })).unwrap();
+        assert!(
+            serde_json::to_value(feature).unwrap().get("reconstruction").is_none(),
+            "the current converter does not persist a legacy reconstruction mode"
+        );
         let state = s.model.state();
         let body = &state.body("Mesh").unwrap().body;
         assert!(!body.is_mesh());
@@ -84,6 +255,37 @@ fn mesh_conversion_is_parametric_undoable_and_editable_after_cold_reopen() {
     run(&mut cold, "solid.fillet", json!({"body":"Mesh","edges":[[0,20,60]],"radius":2}));
     assert!(volume(&mut cold) < 48000.);
     assert!(cold.model.results.iter().all(|r| r.error.is_none()));
+}
+
+#[test]
+fn a_closed_nonprismatic_mesh_converts_to_a_faceted_solid() {
+    let mut doc = Document::default();
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "tetrahedron.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: vec![0., 0., 0., 8., 0., 0., 0., 8., 0., 0., 0., 8.].into(),
+                triangles: vec![0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3].into(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        None,
+    )
+    .unwrap();
+    let mut s = Session::new(doc);
+    run(&mut s, "mesh.convert", json!({"body":"Mesh"}));
+    let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    for session in [&s, &reopened] {
+        let state = session.model.state();
+        let solid = &state.body("Mesh").unwrap().body;
+        assert!(!solid.is_mesh());
+        assert!(solid.validity().is_empty());
+        let measurement = solidcraft_kernel::measure(solid).unwrap();
+        assert_eq!(measurement.merged.face_types.get("plane"), Some(&4));
+        assert!((measurement.volume - 512. / 6.).abs() < 1e-6);
+    }
 }
 
 #[test]
@@ -282,6 +484,7 @@ impl Drop for MadeUp {
     fn drop(&mut self) {
         *crate::slicers::TEST_DETECTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         *crate::slicers::TEST_BUSCTL.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        *crate::slicers::TEST_READY_LIMIT.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         crate::slicers::set_chosen_programs(&[]);
     }
 }
@@ -340,26 +543,73 @@ fn save_mesh_accepts_the_path_of_a_listed_appimage_and_refuses_the_others() {
 #[cfg(unix)]
 #[test]
 fn save_mesh_with_a_cold_prusaslicer_3_waits_for_it_before_sending() {
-    use crate::slicers::{Slicer, TEST_BUSCTL, TEST_DETECTED, test_support::fake_program};
+    save_mesh_to_a_cold_prusaslicer_3("cold", 0.0, 0.0);
+}
+
+/// The same on a slow machine: the slicer takes a second to start and to take the file, and each
+/// look at the bus takes a second. Whether the file waits must not depend on how fast that is.
+#[cfg(unix)]
+#[test]
+fn save_mesh_with_a_slow_cold_prusaslicer_3_still_waits_for_it_before_sending() {
+    save_mesh_to_a_cold_prusaslicer_3("slow", 1.0, 1.0);
+}
+
+/// The same where the temporary folder's name has a space and a quote in it: the made-up
+/// slicer and bus still write inside the test's own folder.
+#[cfg(unix)]
+#[test]
+fn save_mesh_with_a_cold_prusaslicer_3_in_a_folder_with_a_space_waits_for_it_before_sending() {
+    save_mesh_to_a_cold_prusaslicer_3("in a folder with a space and a ' quote", 0.0, 0.0);
+}
+
+/// `file.save_mesh` to a made-up PrusaSlicer 3 that is not running: its launcher takes `start`
+/// seconds before it logs what it was started with, and each look at the bus takes `look` seconds.
+///
+/// Nothing here depends on how fast the machine is. The slicer is on the bus only once it has
+/// started (it has logged its start) and has been looked for twice, so the file can only follow the
+/// start; the log is read once both lines are in; and the slicer is waited for longer than
+/// [`crate::slicers::READY_LIMIT`], which is there for a slicer that hangs, not one that is slow.
+/// The limits below are for a hang only.
+#[cfg(unix)]
+fn save_mesh_to_a_cold_prusaslicer_3(tag: &str, start: f64, look: f64) {
+    use crate::slicers::test_support::{fake_program, sh_quote};
+    use crate::slicers::{Slicer, TEST_BUSCTL, TEST_DETECTED, TEST_READY_LIMIT};
+    use std::time::{Duration, Instant};
     let _turn = CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let _reset = MadeUp;
-    let dir = std::env::temp_dir().join(format!("solidcraft-save-mesh-cold-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("solidcraft-save-mesh-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let launcher_dir = dir.join("slic3r-app-launcher");
     std::fs::create_dir_all(&launcher_dir).unwrap();
-    let log = dir.join("log");
-    let launcher = fake_program(&launcher_dir, "PrusaSlicer", &format!("echo \"$@\" >> {}", log.display()));
+    let (log, up, early) = (dir.join("log"), dir.join("up"), dir.join("sent-early"));
+    let pause = |seconds: f64| if seconds > 0. { format!("sleep {seconds}; ") } else { String::new() };
+    // Given a file before the bus said the slicer was up: noted when it is started, before its own delay.
+    let launcher = fake_program(
+        &launcher_dir,
+        "PrusaSlicer",
+        &format!(
+            "[ $# -gt 1 ] && [ ! -e {u} ] && : > {e}; {p}echo \"$@\" >> {l}",
+            u = sh_quote(&up),
+            e = sh_quote(&early),
+            p = pause(start),
+            l = sh_quote(&log)
+        ),
+    );
     let count = dir.join("count");
-    // Not on the bus the first two looks, there after that.
+    // Not on the bus the first two looks, nor before it has started; there after that.
     let busctl = fake_program(
         &dir,
         "busctl",
         &format!(
-            "n=$(cat {c} 2>/dev/null || echo 0); echo $((n+1)) > {c}; echo ':1.5 1 x'; [ $n -ge 2 ] && echo 'com.prusa3d.prusaslicer.BroadcastListener.ab 2 y'; exit 0",
-            c = count.display()
+            "n=$(cat {c} 2>/dev/null || echo 0); echo $((n+1)) > {c}; {p}echo ':1.5 1 x'; if [ $n -ge 2 ] && [ -s {l} ]; then : > {u}; echo 'com.prusa3d.prusaslicer.BroadcastListener.ab 2 y'; fi; exit 0",
+            c = sh_quote(&count),
+            p = pause(look),
+            l = sh_quote(&log),
+            u = sh_quote(&up)
         ),
     );
     *TEST_BUSCTL.lock().unwrap() = Some(busctl);
+    *TEST_READY_LIMIT.lock().unwrap() = Some(Duration::from_secs(120));
     *TEST_DETECTED.lock().unwrap() =
         Some(vec![Slicer { id: "prusa".into(), name: "PrusaSlicer".into(), command: vec![launcher], icon: None, prusa_major: Some(3) }]);
     let mut s = imported_box();
@@ -367,11 +617,17 @@ fn save_mesh_with_a_cold_prusaslicer_3_waits_for_it_before_sending() {
     let r = s.execute("file.save_mesh", &json!({"path": out, "slicer": "prusa", "single_instance": false})).unwrap();
     assert!(out.exists());
     assert!(r.get("slicer").is_some() && r.get("slicer_timeout").is_none(), "{r}");
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    let lines: Vec<String> = std::fs::read_to_string(&log).unwrap().lines().map(String::from).collect();
+    // The launcher it was sent to runs on its own: read the log once it has written its line.
+    let read = || std::fs::read_to_string(&log).unwrap_or_default().lines().map(String::from).collect::<Vec<_>>();
+    let hang = Instant::now() + Duration::from_secs(60);
+    while read().len() < 2 && Instant::now() < hang {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let lines = read();
     // Started with no file, then sent the file, both with the flag (the preference could not take it away).
     assert_eq!(lines, ["--single-instance".to_string(), format!("--single-instance {}", out.display())]);
     assert!(std::fs::read_to_string(&count).unwrap().trim().parse::<u32>().unwrap() >= 3, "it looked until it was up");
+    assert!(!early.exists(), "the file was sent before the slicer was on the bus");
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -485,6 +741,98 @@ fn send_to_slicer_writes_3mf_and_starts_the_program_with_it() {
     await_launch(stl["path"].as_str().unwrap());
     crate::slicers::set_chosen_programs(&[]);
     std::fs::remove_dir_all(std::path::Path::new(&file).parent().unwrap()).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn send_to_slicer_can_keep_the_file_in_a_folder_numbered_or_replaced() {
+    use std::os::unix::fs::PermissionsExt;
+    let _turn = CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut s = imported_box();
+    let dir = std::env::temp_dir().join(format!("solidcraft-slicer-copy-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = dir.join("fake-slicer");
+    std::fs::write(&script, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Two folders deep and not there yet; and a folder whose name ends in a space is that folder.
+    let keep = dir.join("kept/inner");
+    let spaced = dir.join("spaced ");
+    run(&mut s, "select.set", json!({"items":[{"type":"body","name":"Mesh"}]}));
+    crate::slicers::set_chosen_programs(&[script.to_string_lossy().into_owned()]);
+    let send = |s: &mut Session, extra: Value| {
+        let mut p = json!({"slicer": script, "wait": "no", "format": "stl", "copy_to": keep});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        s.execute("file.send_to_slicer", &p)
+    };
+    let (first, second) = (send(&mut s, json!({})), send(&mut s, json!({})));
+    let (replace_a, replace_b) = (send(&mut s, json!({"copy_overwrite": true})), send(&mut s, json!({"copy_overwrite": true})));
+    crate::slicers::set_chosen_programs(&[]);
+    let (first, second, replace_a, replace_b) = (first.unwrap(), second.unwrap(), replace_a.unwrap(), replace_b.unwrap());
+    let name = |r: &Value| std::path::Path::new(r["path"].as_str().unwrap()).file_name().unwrap().to_string_lossy().into_owned();
+    // Each send is a new version in the folder the user chose, and the file is really there.
+    let stem = name(&first).trim_end_matches("-v1.stl").to_string();
+    assert_eq!((name(&first), first["version"].as_u64(), first["copy"].as_bool()), (format!("{stem}-v1.stl"), Some(1), Some(true)));
+    assert_eq!((name(&second), second["version"].as_u64()), (format!("{stem}-v2.stl"), Some(2)));
+    assert!(first["path"].as_str().unwrap().starts_with(keep.to_str().unwrap()));
+    assert!(!std::fs::read(first["path"].as_str().unwrap()).unwrap().is_empty());
+    // Overwriting keeps one file named after the design, and no version number.
+    assert_eq!((name(&replace_a), replace_a["version"].is_null()), (format!("{stem}.stl"), true));
+    assert_eq!(replace_a["path"], replace_b["path"]);
+    let files = std::fs::read_dir(&keep).unwrap().count();
+    assert_eq!(files, 3, "v1, v2 and the replaced one");
+    crate::slicers::set_chosen_programs(&[script.to_string_lossy().into_owned()]);
+    let in_spaced = send(&mut s, json!({"copy_to": spaced}));
+    crate::slicers::set_chosen_programs(&[]);
+    assert!(in_spaced.unwrap()["path"].as_str().unwrap().starts_with(spaced.to_str().unwrap()), "the folder keeps its spelling");
+    // Without `copy_to` the file still goes to the slicer folder.
+    crate::slicers::set_chosen_programs(&[script.to_string_lossy().into_owned()]);
+    let plain = s.execute("file.send_to_slicer", &json!({"slicer": script, "wait": "no", "format": "stl"}));
+    crate::slicers::set_chosen_programs(&[]);
+    let plain = plain.unwrap();
+    assert!(plain["copy"].is_null() && !plain["path"].as_str().unwrap().starts_with(keep.to_str().unwrap()));
+    std::fs::remove_dir_all(std::path::Path::new(plain["path"].as_str().unwrap()).parent().unwrap()).unwrap();
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// A slicer that reads STEP is sent the exact bodies as a `.step` file; one that does not (Cura)
+/// is refused before anything is written. A program the user picked counts as the slicer its name
+/// says, so a build of OrcaSlicer added under Custom… takes STEP too.
+#[cfg(unix)]
+#[test]
+fn send_to_slicer_sends_step_to_the_slicers_that_read_it() {
+    use std::os::unix::fs::PermissionsExt;
+    let _turn = CHOSEN_PROGRAMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let dir = std::env::temp_dir().join(format!("solidcraft-send-step-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let program = |name: &str| {
+        let p = dir.join(name);
+        std::fs::write(&p, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        p.to_string_lossy().into_owned()
+    };
+    let (orca, cura) = (program("orca-slicer"), program("cura"));
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 10, "height": 5, "corner": [0, 0, 0], "body_name": "Block"}));
+    crate::slicers::set_chosen_programs(&[orca.clone(), cura.clone()]);
+    let step = s.execute("file.send_to_slicer", &json!({"slicer": orca, "bodies": ["Block"], "format": "step"}));
+    let stp = s.execute("file.send_to_slicer", &json!({"slicer": orca, "bodies": ["Block"], "format": "STP"}));
+    let refused = s.execute("file.send_to_slicer", &json!({"slicer": cura, "bodies": ["Block"], "format": "step"}));
+    let unknown = s.execute("file.send_to_slicer", &json!({"slicer": orca, "bodies": ["Block"], "format": "iges"}));
+    crate::slicers::set_chosen_programs(&[]);
+    let (step, stp) = (step.unwrap(), stp.unwrap());
+    let file = step["path"].as_str().unwrap().to_string();
+    assert!(file.ends_with(".step"), "{file}");
+    assert_eq!(step["format"], "step");
+    assert!(std::fs::read(&file).unwrap().starts_with(b"ISO-10303-21;"));
+    assert_eq!(stp["path"], step["path"], "stp names the same format");
+    let refused = refused.unwrap_err().to_string();
+    assert!(refused.contains("does not take step"), "{refused}");
+    assert!(unknown.is_err());
+    // Only this test's file: the slicer folder is shared with the other sends.
+    std::fs::remove_file(&file).unwrap();
     std::fs::remove_dir_all(dir).unwrap();
 }
 
@@ -676,6 +1024,204 @@ fn a_second_placements_mesh_body_converts_by_the_name_the_world_shows() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// Preserve perpendicular analytic bores and attached sketches through moves, undo and cache-free reopen.
+#[test]
+fn perpendicular_bores_survive_conversion_undo_and_cold_reopen() {
+    use solidcore_record::{Loop2, Plane, Region2, Vec2};
+    use solidcraft_kernel::{BoolOp, boolean, box_solid, extrude_planar_regions};
+    let base = box_solid(Vec3::ZERO, Vec3::new(20., 16., 2.)).unwrap();
+    let wall = box_solid(Vec3::new(4., 0., 2.), Vec3::new(8., 16., 12.)).unwrap();
+    let mut source = boolean(&base, &wall, BoolOp::Union).unwrap().unwrap();
+    let circle = |center| Region2 { outer: Loop2::circle(center, 2.), holes: vec![] };
+    for (plane, start, end, center) in [(Plane::XY, 0., 2., Vec2::new(14., 8.)), (Plane::YZ, 4., 8., Vec2::new(8., 8.))] {
+        let tool = extrude_planar_regions(&plane, &[circle(center)], start, end).unwrap();
+        source = boolean(&source, &tool, BoolOp::Cut).unwrap().unwrap();
+    }
+    let mesh = source.mesh(&solidcraft_kernel::MeshTolerance::chord(0.005)).unwrap();
+    let mut doc = Document::default();
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "analytic-bracket.stl".into(),
+            meshes: vec![MeshData {
+                name: "Bracket".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+                corner_normals: Default::default(),
+            }],
+        },
+        Some("Imported bracket"),
+    )
+    .unwrap();
+    // File import pins its body's name before the first model-changing command.
+    doc.features.last_mut().unwrap().body_names = vec!["Bracket".into()];
+    let mut s = Session::new(doc);
+    let before = s.doc.to_json();
+    run(&mut s, "mesh.convert", json!({"body":"Bracket","tolerance":"0.05 mm"}));
+    let check = |s: &Session| {
+        let state = s.model.state();
+        let body = &state.body("Bracket").unwrap().body;
+        assert!(!body.is_mesh());
+        assert!(body.validity().is_empty());
+        let volume = solidcraft_kernel::measure(body).unwrap().volume;
+        assert!((volume - (1280. - 24. * std::f64::consts::PI)).abs() < 0.02, "{volume}");
+        assert!(solidcraft_kernel::measure(body).unwrap().merged.face_types.get("cylinder").copied().unwrap_or(0) >= 2);
+        assert!(s.model.results.iter().all(|r| r.error.is_none()));
+    };
+    check(&s);
+    {
+        let state = s.model.state();
+        let body = &state.body("Bracket").unwrap().body;
+        let step = solidcraft_kernel::step_export(&[body], "Analytic bracket").unwrap();
+        let imported = solidcraft_kernel::step_import(&step).unwrap();
+        assert_eq!(imported.bodies.len(), 1);
+        let measure = solidcraft_kernel::measure(&imported.bodies[0].body).unwrap();
+        assert!((measure.volume - (1280. - 24. * std::f64::consts::PI)).abs() < 0.02);
+        assert_eq!(measure.merged.face_types.get("cylinder"), Some(&2));
+    }
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before);
+    run(&mut s, "edit.redo", json!({}));
+    check(&s);
+    check(&Session::new(Document::from_json(&s.doc.to_json()).unwrap()));
+    run(&mut s, "parameters.add", json!({"name":"shift","expression":"0 mm"}));
+    run(&mut s, "solid.move", json!({"bodies":["Bracket"],"translate":["shift","shift","shift"]}));
+    let mut points = Vec::new();
+    for (i, normal) in [-Vec3::X, Vec3::Z].into_iter().enumerate() {
+        let (index, point) = {
+            let state = s.model.state();
+            let body = state.body("Bracket").unwrap();
+            let index =
+                body.body.faces(0.01).unwrap().into_iter().find(|face| face.plane_normal.is_some_and(|n| n.dot(normal) > 0.99)).unwrap().index;
+            (index, solidcraft_doc::naming::face_spot(body, index).unwrap().point)
+        };
+        points.push(point);
+        let name = format!("Attached{i}");
+        run(&mut s, "sketch.create", json!({"plane":{"body":"Bracket","face":point,"index":index},"project_edges":true,"name":name}));
+        let id = s.doc.find_feature(&name).unwrap().id;
+        let FeatureKind::Sketch { plane, .. } = &s.doc.feature(id).unwrap().kind else { panic!("expected sketch") };
+        assert!(matches!(plane, solidcraft_doc::PlaneRef::Face { anchor: Some(_), .. }));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    let check_sketches = |s: &Session, shift: f64| {
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+        let state = s.model.state();
+        for (i, point) in points.iter().enumerate() {
+            let id = s.doc.find_feature(&format!("Attached{i}")).unwrap().id;
+            let plane = state.sketch(id).unwrap().plane;
+            assert!((*point + Vec3::new(shift, shift, shift) - plane.origin).dot(plane.normal()).abs() < 1e-7);
+        }
+    };
+    check_sketches(&s, 0.);
+    run(&mut s, "parameters.change", json!({"name":"shift","expression":"5 mm"}));
+    check_sketches(&s, 5.);
+    check_sketches(&Session::new(Document::from_json(&s.doc.to_json()).unwrap()), 5.);
+    run(&mut s, "edit.undo", json!({}));
+    check_sketches(&s, 0.);
+    run(&mut s, "edit.redo", json!({}));
+    check_sketches(&s, 5.);
+}
+
+/// Changed mesh inputs or fit tolerance must invalidate old face anchors instead of reusing an ordinal.
+#[test]
+fn reconstructed_face_attachments_do_not_retarget_when_reconstruction_inputs_change() {
+    let mut s = imported_box();
+    run(&mut s, "parameters.add", json!({"name":"size","expression":"1","unit":""}));
+    run(&mut s, "solid.scale", json!({"bodies":["Mesh"],"factor":"size"}));
+    run(&mut s, "parameters.add", json!({"name":"fit","expression":"0.01 mm"}));
+    run(&mut s, "mesh.convert", json!({"body":"Mesh","tolerance":"fit"}));
+    let index = s
+        .model
+        .state()
+        .body("Mesh")
+        .unwrap()
+        .body
+        .faces(0.01)
+        .unwrap()
+        .into_iter()
+        .find(|face| face.plane_normal.is_some_and(|normal| normal.x < -0.99))
+        .unwrap()
+        .index;
+    run(&mut s, "sketch.create", json!({"plane":{"body":"Mesh","face":[0,10,15],"index":index},"name":"Attached"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let id = s.doc.find_feature("Attached").unwrap().id;
+    run(&mut s, "parameters.change", json!({"name":"size","expression":"2"}));
+    assert!(s.model.results.iter().any(|r| r.id == id && r.error.is_some()), "a changed input must not reuse a recovered face ordinal");
+    let cold = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(cold.model.results.iter().any(|r| r.id == id && r.error.is_some()));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+    run(&mut s, "parameters.change", json!({"name":"fit","expression":"0.02 mm"}));
+    assert!(s.model.results.iter().any(|r| r.id == id && r.error.is_some()), "a changed tolerance must not reuse a recovered face ordinal");
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+}
+
+/// Unused source vertices are absent from display meshes but still distinguish reconstruction inputs.
+#[test]
+fn reconstructed_face_identity_tracks_vertices_omitted_from_the_display_mesh() {
+    let mut first = imported_box().doc.as_ref().clone();
+    let FeatureKind::MeshImport { meshes, .. } = &mut first.features[0].kind else { panic!("mesh import") };
+    let mut positions = meshes[0].positions.to_vec();
+    positions.extend([1., 1., 1.]);
+    meshes[0].positions = positions.into();
+    let mut second = first.clone();
+    let FeatureKind::MeshImport { meshes, .. } = &mut second.features[0].kind else { panic!("mesh import") };
+    *std::sync::Arc::make_mut(&mut meshes[0].positions).last_mut().unwrap() = 2.;
+    let display = |doc: &Document| {
+        let s = Session::new(doc.clone());
+        serde_json::to_value(s.model.state().body("Mesh").unwrap().body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap()).unwrap()
+    };
+    assert_eq!(display(&first), display(&second), "the changed vertex is not used for display");
+    let names = |doc: Document| {
+        let mut s = Session::new(doc);
+        run(&mut s, "mesh.convert", json!({"body":"Mesh","tolerance":"0.01 mm"}));
+        assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results);
+        solidcraft_doc::naming::face_names(s.model.state().body("Mesh").unwrap()).as_ref().clone()
+    };
+    assert_ne!(names(first), names(second), "source changes must not reuse recovered face identities");
+}
+
+/// Face Extrude keeps a source-bound internal profile and rejects its stale attachment after
+/// a tolerance edit, including after a cache-free reopen; undo restores the original reference.
+#[test]
+fn converted_face_extrusion_keeps_its_source_bound_profile_across_reopen_and_undo() {
+    let mut s = imported_box();
+    run(&mut s, "parameters.add", json!({"name":"fit","expression":"0.01 mm"}));
+    run(&mut s, "mesh.convert", json!({"body":"Mesh","tolerance":"fit"}));
+    run(&mut s, "solid.extrude", json!({"face":[5,10,30],"distance":5,"operation":"join"}));
+    let profile = s.doc.features.iter().find(|feature| matches!(&feature.kind, FeatureKind::Sketch { .. })).unwrap().id;
+    let check = |s: &Session, stale: bool| {
+        assert!(
+            matches!(
+                &s.doc.feature(profile).unwrap().kind,
+                FeatureKind::Sketch { plane: solidcraft_doc::PlaneRef::Face { name: Some(_), anchor: Some(_), .. }, .. }
+            ),
+            "face Extrude must keep its source-bound linked profile"
+        );
+        if stale {
+            assert!(
+                s.model.results.iter().any(|result| result.id == profile && result.error.is_some()),
+                "a changed tolerance must refuse the old source-bound profile: {:?}",
+                s.model.results
+            );
+        } else {
+            assert!(s.model.results.iter().all(|result| result.error.is_none()), "{:?}", s.model.results);
+            let state = s.model.state();
+            let volume = solidcraft_kernel::measure(&state.body("Mesh").unwrap().body).unwrap().volume;
+            assert!((volume - 7000.).abs() < 1e-6, "{volume}");
+        }
+    };
+    check(&s, false);
+    check(&Session::new(Document::from_json(&s.doc.to_json()).unwrap()), false);
+    run(&mut s, "parameters.change", json!({"name":"fit","expression":"0.02 mm"}));
+    check(&s, true);
+    check(&Session::new(Document::from_json(&s.doc.to_json()).unwrap()), true);
+    run(&mut s, "edit.undo", json!({}));
+    check(&s, false);
+    check(&Session::new(Document::from_json(&s.doc.to_json()).unwrap()), false);
+}
+
 /// #18465: a file of another CAD program (a zip as a `.f3d`, text as a `.x_t`) is not a design;
 /// Open says it does not open that kind of file, not what the design reader made of it. A design
 /// under its own extension keeps the reader's words, and a design under an odd name still opens.
@@ -705,4 +1251,67 @@ fn open_names_an_unsupported_file_instead_of_the_design_readers_complaint() {
     std::fs::copy(&design, &copy).unwrap();
     assert!(s.execute("doc.open", &json!({"path": copy.to_string_lossy()})).is_ok());
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+/// The imported 10 x 20 x 30 mm mesh box with the solid `Block` beside it, x 20..40, and a
+/// rectangle from `p0` to `p1` sketched at z = 20, to cut 15 mm down (to z = 5).
+fn mesh_beside_block(p0: [f64; 2], p1: [f64; 2]) -> Session {
+    let mut s = imported_box();
+    run(&mut s, "solid.box", json!({"corner": [20, 0, 0], "length": 20, "width": 20, "height": 10, "operation": "new_body", "body_name": "Block"}));
+    cut_sketch(&mut s, p0, p1);
+    s
+}
+
+fn cut_sketch(s: &mut Session, p0: [f64; 2], p1: [f64; 2]) {
+    run(s, "sketch.create", json!({"plane": {"origin": [0, 0, 20], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Cut"}));
+    run(s, "sketch.rectangle.two_point", json!({"p0": p0, "p1": p1}));
+    run(s, "sketch.finish", json!({}));
+}
+
+fn body_volume(s: &mut Session, name: &str) -> f64 {
+    run(s, "inspect.measure", json!({"bodies": [name]}))["total"]["volume_mm3"].as_f64().unwrap()
+}
+
+/// A cut that names no body skips a mesh body in its path and cuts the solids (#615).
+#[test]
+fn automatic_cut_over_a_solid_and_a_mesh_cuts_the_solid_and_keeps_the_mesh() {
+    let mut s = mesh_beside_block([5.0, 5.0], [30.0, 15.0]);
+    run(&mut s, "solid.extrude", json!({"sketch": "Cut", "distance": "-15 mm", "operation": "cut"}));
+    assert!(rel(body_volume(&mut s, "Block"), 4000.0 - 10.0 * 10.0 * 5.0) < 1e-6);
+    assert!(rel(body_volume(&mut s, "Mesh"), 6000.0) < 1e-6);
+    assert!(s.model.state().body("Mesh").unwrap().body.is_mesh());
+}
+
+/// A mesh body elsewhere in the design does not stop a cut that never meets it (#615).
+#[test]
+fn automatic_cut_clear_of_a_mesh_cuts_the_solid() {
+    let mut s = mesh_beside_block([25.0, 5.0], [35.0, 15.0]);
+    run(&mut s, "solid.extrude", json!({"sketch": "Cut", "distance": "-15 mm", "operation": "cut"}));
+    assert!(rel(body_volume(&mut s, "Block"), 4000.0 - 10.0 * 10.0 * 5.0) < 1e-6);
+    assert!(rel(body_volume(&mut s, "Mesh"), 6000.0) < 1e-6);
+}
+
+/// With only a mesh body to cut, the cut is refused with the way out: Convert Mesh (#615).
+#[test]
+fn automatic_cut_of_only_a_mesh_is_refused_naming_convert_mesh() {
+    let mut s = imported_box();
+    cut_sketch(&mut s, [2.0, 2.0], [8.0, 8.0]);
+    let before = s.doc.to_json();
+    let error = s.execute("solid.extrude", &json!({"sketch": "Cut", "distance": "-15 mm", "operation": "cut"})).unwrap_err().to_string();
+    assert!(error.contains("Convert Mesh"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
+    assert!(s.model.state().body("Mesh").unwrap().body.is_mesh());
+}
+
+/// A cut that names a mesh body is refused with the way out: Convert Mesh (#615).
+#[test]
+fn cut_naming_a_mesh_is_refused_naming_convert_mesh() {
+    let mut s = mesh_beside_block([5.0, 5.0], [30.0, 15.0]);
+    let before = s.doc.to_json();
+    let error = s
+        .execute("solid.extrude", &json!({"sketch": "Cut", "distance": "-15 mm", "operation": "cut", "targets": ["Block", "Mesh"]}))
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("Convert Mesh"), "{error}");
+    assert_eq!(s.doc.to_json(), before);
 }

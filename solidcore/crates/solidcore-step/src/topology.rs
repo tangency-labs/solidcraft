@@ -26,6 +26,9 @@
 //! vertex's and edge's to start with. A vertex measurably off its curve or surface, or an edge
 //! whose curve lies measurably off a face's surface, gets that distance (with margin) as its
 //! tolerance, and the solid's notes say how many and how far.
+//! Pcurves use a separate construction tolerance, never coarser than [`DEFAULT_TOLERANCE`]
+//! merely because the context states a coarse uncertainty. Measured gaps and explicit fit
+//! deviations still carry their own allowances; the source's tolerance remains the record's.
 //!
 //! Pcurves are the closed forms the 3D edges have on our surfaces ([`pcurve::exact_pcurves`]); a
 //! use with none gets its pcurve from the kernel ([`read_solids_with`], SMLib's own trims), except
@@ -372,6 +375,27 @@ const FEATURE_MARGIN: f64 = 0.25;
 /// as the solid's tolerance, such edges read as zero-length edges, coincident edges and loops
 /// that turn the wrong way, and the kernel refuses every operation on the solid.
 fn feature_tolerance(brep: &Brep, stated: f64) -> Option<f64> {
+    let shortest = shortest_edge(brep);
+    // An edge as long as the stated tolerance or longer is one that tolerance tells apart.
+    if shortest >= stated {
+        return None;
+    }
+    let fine = (FEATURE_MARGIN * shortest).max(MIN_TOLERANCE);
+    (fine < stated).then_some(fine)
+}
+
+/// Whether a solid read at a finer tolerance than its file states still tells its shortest
+/// edge apart: no edge's own tolerance may reach that edge's length. An edge that lies off its
+/// faces' surfaces carries its gap as its tolerance, whatever the solid was read at; a gap as
+/// long as the shortest edge makes the finer read no finer where it matters, and its tolerances
+/// mixed four orders of magnitude apart (1.6e-6 mm beside 2.6e-4 mm on one face of an Inventor
+/// plate) leave the next boolean on that face with coincident edges (issue #18848).
+fn fine_read_holds(fine: &Brep, shortest: f64) -> bool {
+    fine.edges.iter().all(|e| e.tolerance < shortest)
+}
+
+/// The shortest distance between the two vertices of an edge, infinite when there is none.
+fn shortest_edge(brep: &Brep) -> f64 {
     let mut shortest = f64::INFINITY;
     for e in &brep.edges {
         let [a, b] = e.vertices;
@@ -384,12 +408,7 @@ fn feature_tolerance(brep: &Brep, stated: f64) -> Option<f64> {
             shortest = d;
         }
     }
-    // An edge as long as the stated tolerance or longer is one that tolerance tells apart.
-    if shortest >= stated {
-        return None;
-    }
-    let fine = (FEATURE_MARGIN * shortest).max(MIN_TOLERANCE);
-    (fine < stated).then_some(fine)
+    shortest
 }
 
 fn read_with<'a>(
@@ -409,7 +428,18 @@ fn read_with<'a>(
     // Read again at the tolerance its own features set; the faces count against the budget once.
     let after = *budget;
     *budget = before;
+    let shortest = shortest_edge(&first.brep);
     match read_at(ex, reader, item, fine, budget, trims, left_out, sheets) {
+        // Its edges' own gaps undo the finer read: as the file states it, with a note why.
+        Ok(solid) if !fine_read_holds(&solid.brep, shortest) => {
+            *budget = after;
+            let widest = solid.brep.edges.iter().map(|e| e.tolerance).fold(0.0, f64::max);
+            let mut solid = first;
+            solid.notes.push(format!(
+                "the file states a tolerance of {stated} mm, but the part has edges as short as {shortest:.3e} mm; read at {fine:.3e} mm, edges off their faces keep gaps up to {widest:.3e} mm, at least its shortest edge, so it is read as stated"
+            ));
+            Ok(solid)
+        }
         Ok(mut solid) => {
             solid.notes.push(format!(
                 "the file states a tolerance of {stated} mm, but the part has edges as short as {:.3e} mm: read at {fine:.3e} mm",
@@ -705,7 +735,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             self.asm.raise_vertex(v, gap, id)?;
         }
         let i = index(self.asm.edges.len())?;
-        self.asm.edges.push(EdgeB { curve, interval, vertices, tolerance: self.asm.tol, form: None });
+        self.asm.edges.push(EdgeB { curve, interval, vertices, tolerance: self.asm.tol, pcurve_tolerance: self.asm.pcurve_tolerance(), form: None });
         self.edge_ids.insert(id, (i, mapped.with_step));
         Ok((i, mapped.with_step))
     }
@@ -741,13 +771,15 @@ impl<'b, 'a> Builder<'b, 'a> {
     }
 
     /// An ORIENTED_EDGE (or a bare EDGE_CURVE) as a loop uses it: its schema edge and whether
-    /// the loop runs along it.
+    /// the loop runs along it. A SEAM_EDGE (ISO 10303-42, an oriented edge with one more
+    /// attribute, the PCURVE of its use) reads the same: its pcurve, like every PCURVE of the
+    /// file, is not used.
     fn oriented_edge(&mut self, id: u64, depth: usize) -> R<(u32, bool)> {
         if depth > MAX_NESTING {
             return Err("oriented edges nested too deeply".into());
         }
         let e = entity(self.ex, id)?;
-        if e.name() == "ORIENTED_EDGE" {
+        if matches!(e.name(), "ORIENTED_EDGE" | "SEAM_EDGE") {
             let p = e.params();
             let (edge, along) = self.oriented_edge(rid(p.get(3), "oriented edge element")?, depth + 1)?;
             let orientation = flag(p.get(4), "oriented edge orientation")?;
@@ -1014,6 +1046,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                 interval: [0.0, 1.0],
                 vertices: [va, vb],
                 tolerance: self.asm.tol,
+                pcurve_tolerance: self.asm.pcurve_tolerance(),
                 form: None,
             });
             self.poly_edges.insert(key, e);
@@ -1200,9 +1233,137 @@ fn full_knots(knots: &[f64], mults: &[usize], count: usize, degree: usize) -> R<
     Ok(v)
 }
 
+/// A B-spline curve as the record holds it: clamped ([`spline_curve`]), its parameter rescaled
+/// where the file's cannot resolve its edges ([`resolvable`]).
 fn map_bspline_curve(b: &BSplineCurve) -> R<BCurve> {
     let knots = full_knots(&b.knots, &b.multiplicities, b.points.len(), b.degree)?;
-    spline_curve(b.degree, knots, &b.points, b.weights.as_deref())
+    resolvable(spline_curve(b.degree, knots, &b.points, b.weights.as_deref())?)
+}
+
+/// The kernel's knot resolution, `SM_EFF_ZERO` (absolute): two knots no farther apart than it
+/// are one knot (`nurbs::nurbs_crv::get_knots`, the B-spline check's knot count).
+const KNOT_RESOLUTION: f64 = 1e-12;
+
+/// The shortest edge the kernel keeps: it takes an edge shorter than half its tolerance for no
+/// edge, and no record's tolerance is below [`MIN_TOLERANCE`].
+const SHORTEST_EDGE: f64 = 0.5 * MIN_TOLERANCE;
+
+/// The resolution of [`project`]'s parameters at `t`: its search stops once its bracket is no
+/// wider than `1e-15 (1 + |t|)`, and gives the bracket's middle.
+fn projection_resolution(t: f64) -> f64 {
+    0.5e-15 * (1.0 + t.abs())
+}
+
+/// Spline `curve` on a parameter that resolves every edge the kernel keeps on it, the same curve
+/// point for point.
+///
+/// An edge on the curve at least [`SHORTEST_EDGE`] long spans at least that length over the
+/// curve's greatest speed, `S`, in parameter; the reader finds its ends to
+/// [`projection_resolution`] each. The file's parameter is kept when that interval, so found,
+/// is longer than the kernel's [`KNOT_RESOLUTION`] for every such edge:
+/// `SHORTEST_EDGE / S - 2 projection_resolution(max |knot|) > KNOT_RESOLUTION`. Otherwise (Siemens
+/// NX writes cubic Béziers on knots spanning 1.02e-7 for edges 20 mm long, `S` about 2e8, so an
+/// edge of 1.3e-6 mm spans 6.5e-15) the trims of a short edge on it have their end knots taken
+/// for one, the kernel's check fails the solid, and its mass properties have no trim to
+/// integrate. Its knots are then mapped `t ↦ (t − c) 2^k`, with `2^k` the least power of two at or
+/// above `S`, so that the curve runs no faster than one unit of length per unit of parameter
+/// (as a line's edge runs over `[0, length]`): `c` is the first knot when every `t − c` is exact
+/// (always when the first knot is 0, the usual case), else 0. Both steps are exact, so the knots
+/// keep their order and multiplicities and the curve is the file's point for point. The new
+/// domain is shorter than `2 S (b − a)`, `[a, b]` the file's domain: twice the length the curve
+/// would have at its bound speed throughout. That is about twice the curve's length where the
+/// bound is tight (a cubic whose control points are evenly spaced along a line, as NX's are,
+/// runs at exactly `S`) and within the bound's own factor otherwise. With `c = 0` the knots also
+/// reach no further from 0 than twice that (a `t − c` is inexact only where the first knot is
+/// smaller than the domain's length).
+///
+/// `S` is bounded from the derivative's control points (Piegl and Tiller, The NURBS Book,
+/// eqs. 3.4 and 4.8): a spline's derivative is `Σ N_{i,p-1} p (P_{i+1} − P_i) / Δ_i` with
+/// `Δ_i = t_{i+p+1} − t_{i+1}` (terms with `Δ_i = 0` vanish), so `|C'| ≤ max p |P_{i+1} − P_i| / Δ_i`;
+/// a rational one's is `Σ N_{i,p-1} p (w_{i+1} (P_{i+1} − C) − w_i (P_i − C)) / (Δ_i W)`. Term `i`
+/// is nonzero only on the knot spans `j = i + 1 ..= i + p`, where `C` lies in the hull of
+/// `P_{j-p} ..= P_j` and `W ≥ min w_{j-p ..= j}` (positive weights); both index ranges lie in
+/// `i + 1 − p ..= i + p`, so `|C'| ≤ max p (w_i + w_{i+1}) D_i / (Δ_i m_i)`, with `D_i` the
+/// diagonal of the box of `P_{i+1-p} ..= P_{i+p}` and `m_i` their least weight (local, so a long
+/// rational curve's bound is not its whole extent over each span). The bound is raised by 16 ε,
+/// past the rounding of the at most 16 operations behind each term (γ_16 is below 8.1 ε). A curve whose bound is not finite is refused (only a file whose spans are far
+/// below any rounding of its points gets one).
+fn resolvable(curve: BCurve) -> R<BCurve> {
+    let (knots, points, weights): (&[f64], Vec<Vec3>, Option<Vec<f64>>) = match &curve {
+        BCurve::Spline { knots, points } => (knots, points.iter().map(|p| v3(*p)).collect(), None),
+        BCurve::RationalSpline { knots, homogeneous } => (
+            knots,
+            homogeneous.iter().map(|h| Vec3::new(h[0] / h[3], h[1] / h[3], h[2] / h[3])).collect(),
+            Some(homogeneous.iter().map(|h| h[3]).collect()),
+        ),
+        _ => return Ok(curve),
+    };
+    let n = points.len();
+    let Some(degree) = knots.len().checked_sub(n + 1) else { return Ok(curve) };
+    let p = degree as f64;
+    // The rational bound's factor `D_i / min w` over the points `i + 1 − p ..= i + p` (weights
+    // are positive, `check_values`).
+    let spread = |w: &[f64], i: usize| -> Option<f64> {
+        let (from, to) = ((i + 1).saturating_sub(degree), (i + degree).min(n.saturating_sub(1)));
+        let (near, weights) = (points.get(from..=to)?, w.get(from..=to)?);
+        let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        for q in near {
+            for (k, x) in [q.x, q.y, q.z].into_iter().enumerate() {
+                if let (Some(l), Some(h)) = (lo.get_mut(k), hi.get_mut(k)) {
+                    (*l, *h) = (l.min(x), h.max(x));
+                }
+            }
+        }
+        let least = weights.iter().copied().fold(f64::INFINITY, f64::min);
+        Some(v3(hi).dist(v3(lo)) / least)
+    };
+    let mut speed: f64 = 0.0;
+    for (i, pair) in points.windows(2).enumerate() {
+        let (Some(t0), Some(t1)) = (knots.get(i + 1), knots.get(i + degree + 1)) else { continue };
+        let span = t1 - t0;
+        if !(span > 0.0) {
+            continue;
+        }
+        let (Some(a), Some(b)) = (pair.first(), pair.last()) else { continue };
+        let term = match &weights {
+            None => p * b.dist(*a) / span,
+            Some(w) => {
+                let (Some(wa), Some(wb), Some(d)) = (w.get(i), w.get(i + 1), spread(w, i)) else { continue };
+                p * (wa + wb) * d / span
+            }
+        };
+        speed = speed.max(term);
+    }
+    let speed = speed * (1.0 + 16.0 * f64::EPSILON);
+    if !speed.is_finite() {
+        return Err("a B-spline curve too fast in its own parameter to rescale".into());
+    }
+    let (Some(&first), Some(&last)) = (knots.first(), knots.last()) else { return Ok(curve) };
+    let largest = first.abs().max(last.abs());
+    if SHORTEST_EDGE / speed - 2.0 * projection_resolution(largest) > KNOT_RESOLUTION {
+        return Ok(curve);
+    }
+    // The least power of two at or above the speed (at least 2^16 here, as the test above failed).
+    let mut scale = 1.0_f64;
+    while scale < speed {
+        scale *= 2.0;
+    }
+    // `t − c` exact for every knot (Knuth's two-sum: its rounding error is exactly zero).
+    let exact = |t: f64| {
+        let d = t - first;
+        let back = d - t;
+        (t - (d - back)) + (-first - back) == 0.0
+    };
+    let c = if knots.iter().all(|t| exact(*t)) { first } else { 0.0 };
+    let knots: Vec<f64> = knots.iter().map(|t| (t - c) * scale).collect();
+    if knots.iter().any(|t| !t.is_finite()) {
+        return Err("a B-spline curve too fast in its own parameter to rescale".into());
+    }
+    Ok(match curve {
+        BCurve::Spline { points, .. } => BCurve::Spline { knots, points },
+        BCurve::RationalSpline { homogeneous, .. } => BCurve::RationalSpline { knots, homogeneous },
+        other => other,
+    })
 }
 
 fn map_bspline_surface(b: &BSplineSurface) -> R<BSurface> {
@@ -1660,6 +1821,56 @@ fn angle_of(a: f64, b: f64) -> f64 {
     if t < 0.0 { t + TAU } else { t }
 }
 
+/// The angle in [0, 2π) of the point of the ellipse `(r0 cos t, r1 sin t)` nearest the point
+/// `(x, y)` of its plane: a vertex's parameter on it. On a circle that is the point's own angle.
+/// On an ellipse the angle of the point scaled onto the circle (`atan2(y / r1, x / r0)`) is that
+/// only for a point exactly on it: a point a file's rounding off a flat ellipse (radii 1000.95 and
+/// 0.31 mm) is off it across its minor radius by a large part of that radius, and that angle put
+/// such a vertex 5 to 8 mm along the curve from where it is. So the angle starts from the best of
+/// the point's angle on the circle and the angles its two coordinates give alone (`acos(x / r0)`,
+/// `asin(y / r1)`, either way round), and Newton's method on the distance's derivative finds the
+/// nearest point, every step taken only where it brings the curve nearer.
+fn ellipse_angle(x: f64, y: f64, [r0, r1]: [f64; 2]) -> f64 {
+    let scaled = angle_of(x / r0, y / r1);
+    if r0 == r1 || !(r0 > 0.0 && r1 > 0.0) || !x.is_finite() || !y.is_finite() {
+        return scaled;
+    }
+    // Half the squared distance from the point at `t`, and its first and second derivatives.
+    let dist = |t: f64| 0.5 * ((r0 * t.cos() - x).powi(2) + (r1 * t.sin() - y).powi(2));
+    let slope = |t: f64| (r1 * r1 - r0 * r0) * t.sin() * t.cos() + r0 * x * t.sin() - r1 * y * t.cos();
+    let bend = |t: f64| (r1 * r1 - r0 * r0) * (2.0 * t).cos() + r0 * x * t.cos() + r1 * y * t.sin();
+    // A point on the ellipse to rounding: its angle on the circle is the nearest point's.
+    if (2.0 * dist(scaled)).sqrt() <= 1e-12 * r0.max(r1) {
+        return scaled;
+    }
+    let (c, s) = ((x / r0).clamp(-1.0, 1.0).acos(), (y / r1).clamp(-1.0, 1.0).asin());
+    let starts = [scaled, if y < 0.0 { -c } else { c }, s, std::f64::consts::PI - s];
+    let Some(mut t) = starts.into_iter().min_by(|a, b| dist(*a).total_cmp(&dist(*b))) else { return scaled };
+    let mut d = dist(t);
+    for _ in 0..64 {
+        let (g, h) = (slope(t), bend(t));
+        if !(h > 0.0) || g == 0.0 {
+            break;
+        }
+        let mut step = g / h;
+        // A step that does not bring the curve nearer is halved, a few times at most.
+        let mut moved = false;
+        for _ in 0..16 {
+            let next = t - step;
+            let e = dist(next);
+            if e < d {
+                (t, d, moved) = (next, e, true);
+                break;
+            }
+            step *= 0.5;
+        }
+        if !moved || step.abs() <= 1e-16 * (1.0 + t.abs()) {
+            break;
+        }
+    }
+    angle_of(t.cos(), t.sin())
+}
+
 /// `x` reduced to [0, 2π).
 fn turn(x: f64) -> f64 {
     let r = x.rem_euclid(TAU);
@@ -1810,7 +2021,7 @@ fn conic(curve: BCurve, position: &Placement, radii: [f64; 2], ps: P3, pe: P3, s
     let y = position.y();
     let param = |p: P3| {
         let q = sub(p, position.origin);
-        angle_of(dot(q, position.ref_direction) / radii[0], dot(q, y) / radii[1])
+        ellipse_angle(dot(q, position.ref_direction), dot(q, y), radii)
     };
     let (ts, te) = (param(ps), param(pe));
     // Along the curve from `from` to `to`, increasing.
@@ -1884,7 +2095,7 @@ fn open_or_closed(curve: BCurve, ps: P3, pe: P3, same_sense: bool, closed: bool,
         if t - a <= eps || b - t <= eps || v3(ps).dist(pa).min(v3(ps).dist(pb)) <= tol {
             return Ok(Mapped { curve, interval: [a, b], with_step: true, sense_mismatch: false });
         }
-        let curve = crate::kernel::restart_curve(&curve, t)?;
+        let curve = crate::kernel::restart_curve(&ends_joined(curve), t)?;
         return Ok(Mapped { curve, interval: [t, t + (b - a)], with_step: true, sense_mismatch: false });
     }
     let ts = project(&eval, a, b, &knots, v3(ps)).ok_or("no parameter for the edge's start")?;
@@ -1923,10 +2134,70 @@ fn open_or_closed(curve: BCurve, ps: P3, pe: P3, same_sense: bool, closed: bool,
         return Err("a degenerate edge on a closed spline".into());
     }
     if from > to {
-        let curve = crate::kernel::restart_curve(&curve, from)?;
+        let curve = crate::kernel::restart_curve(&ends_joined(curve), from)?;
         return Ok(Mapped { curve, interval: [from, to + (b - a)], with_step: same_sense, sense_mismatch: false });
     }
     Ok(Mapped { curve, interval: [from, to], with_step: same_sense, sense_mismatch: false })
+}
+
+/// A closed spline or polyline (its ends within the tolerance of each other, as
+/// [`open_or_closed`] takes it) whose two ends are not one point to the last digit, with both end
+/// control points made their mean, each keeping its weight: the curve's ends become one point, so
+/// a restart of it ([`crate::kernel::restart_curve`], which joins the seam exactly) finds the seam
+/// closed. Files close a curve on itself to their own uncertainty, not to the last digit (a
+/// closed B-spline written with its first control point at x = -24.9475248 and its last at
+/// -24.9475247999999). The curve moves by at most half the gap: its points are convex
+/// combinations of its control points, and only the two end ones move, each by half the gap.
+/// A curve not clamped at both ends (its end control points are not its ends) is as it was.
+fn ends_joined(curve: BCurve) -> BCurve {
+    let clamped = |knots: &[f64], count: usize| -> bool {
+        let Some(p) = knots.len().checked_sub(count + 1) else { return false };
+        let (Some(head), Some(tail)) = (knots.get(..=p), knots.len().checked_sub(p + 1).and_then(|at| knots.get(at..))) else {
+            return false;
+        };
+        head.windows(2).all(|w| w.first() == w.last()) && tail.windows(2).all(|w| w.first() == w.last())
+    };
+    let mean = |a: [f64; 3], b: [f64; 3]| [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1]), 0.5 * (a[2] + b[2])];
+    match curve {
+        BCurve::Spline { knots, mut points } if points.len() >= 2 && clamped(&knots, points.len()) => {
+            if let (Some(&a), Some(&b)) = (points.first(), points.last()) {
+                let m = mean(a, b);
+                if let Some(p) = points.first_mut() {
+                    *p = m;
+                }
+                if let Some(p) = points.last_mut() {
+                    *p = m;
+                }
+            }
+            BCurve::Spline { knots, points }
+        }
+        BCurve::RationalSpline { knots, mut homogeneous } if homogeneous.len() >= 2 && clamped(&knots, homogeneous.len()) => {
+            let point = |h: &[f64; 4]| (h[3] > 0.0).then(|| [h[0] / h[3], h[1] / h[3], h[2] / h[3]]);
+            if let (Some(a), Some(b)) = (homogeneous.first().and_then(point), homogeneous.last().and_then(point)) {
+                let m = mean(a, b);
+                let last = homogeneous.len() - 1;
+                for i in [0, last] {
+                    if let Some(h) = homogeneous.get_mut(i) {
+                        *h = [m[0] * h[3], m[1] * h[3], m[2] * h[3], h[3]];
+                    }
+                }
+            }
+            BCurve::RationalSpline { knots, homogeneous }
+        }
+        BCurve::Polyline { mut points } if points.len() >= 2 => {
+            if let (Some(&a), Some(&b)) = (points.first(), points.last()) {
+                let m = mean(a, b);
+                if let Some(p) = points.first_mut() {
+                    *p = m;
+                }
+                if let Some(p) = points.last_mut() {
+                    *p = m;
+                }
+            }
+            BCurve::Polyline { points }
+        }
+        other => other,
+    }
 }
 
 /// A closed edge on an open curve that runs on past it: a full turn written as a spline that

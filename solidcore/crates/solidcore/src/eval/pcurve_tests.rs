@@ -81,6 +81,92 @@ fn radial_order_uses_exact_face_directions_in_every_input_order() {
     }
 }
 
+/// #21183: a Ø0.12 hole 0.44 off a Ø1 bar's axis touches its wall along the bar's seam line, so
+/// their rays tie in pairs (up to rounding once turned off the axes). The hole curves away faster:
+/// about +z, bar back, hole back, hole forward, bar forward, so wall and space alternate.
+#[test]
+fn faces_tangent_along_an_edge_are_ordered_by_how_fast_they_curve_away() {
+    let seam = Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![[0., 0.], [0., 1.]],
+    };
+    for turn in [0.0f64, 0.3, 1.1, 2.5, 4.0] {
+        let (s, c) = turn.sin_cos();
+        let at = |r: f64, z: f64| [r * c, r * s, z];
+        let turned = |origin: [f64; 3]| frame(origin, [c, s, 0.], [-s, c, 0.]);
+        let bar = Surface::Cylinder {
+            frame: turned([0.; 3]),
+            radius: 0.5,
+        };
+        let hole = Surface::Cylinder {
+            frame: turned(at(0.44, 0.)),
+            radius: 0.06,
+        };
+        let curve = Curve::Line {
+            start: at(0.5, 0.),
+            end: at(0.5, 1.),
+        };
+        let uses = [(&bar, false), (&hole, false), (&hole, true), (&bar, true)];
+        for perm in 0..24usize {
+            let mut pool: Vec<usize> = (0..4).collect();
+            let mut k = perm;
+            let mut input = Vec::new();
+            for n in (1..=4).rev() {
+                input.push(pool.remove(k % n));
+                k /= n;
+            }
+            let faces: Vec<_> = input
+                .iter()
+                .map(|&i| RadialFace {
+                    surface: uses[i].0,
+                    pcurve: &seam,
+                    forward: uses[i].1,
+                })
+                .collect();
+            let order = radial_order(&curve, [0., 1.], &faces).unwrap();
+            let got: Vec<_> = order.into_iter().map(|i| input[i]).collect();
+            let expected: Vec<_> = (0..4).map(|n| (input[0] + n) % 4).collect();
+            assert_eq!(got, expected, "turn {turn}, {input:?}");
+        }
+    }
+    let bar = |turn: f64| {
+        let (s, c) = turn.sin_cos();
+        Surface::Cylinder {
+            frame: frame([0.; 3], [c, s, 0.], [-s, c, 0.]),
+            radius: 0.5,
+        }
+    };
+    let (s, c) = 0.3f64.sin_cos();
+    let curve = Curve::Line {
+        start: [0.5 * c, 0.5 * s, 0.],
+        end: [0.5 * c, 0.5 * s, 1.],
+    };
+    // These turns give bends a rounding apart (-2 ± 2 ulps).
+    for turn in [0.0519, 0.2249] {
+        let (low, high) = (bar(0.3), bar(0.3 + turn));
+        let below = Curve2::Spline {
+            knots: vec![0., 0., 1., 1.],
+            points: vec![[-turn, 0.], [-turn, 1.]],
+        };
+        let faces = [
+            RadialFace {
+                surface: &low,
+                pcurve: &seam,
+                forward: true,
+            },
+            RadialFace {
+                surface: &high,
+                pcurve: &below,
+                forward: true,
+            },
+        ];
+        assert!(
+            matches!(radial_order(&curve, [0., 1.], &faces), Err(Error::Failed(m)) if m.contains("tangent faces")),
+            "turn {turn}"
+        );
+    }
+}
+
 #[test]
 fn radial_order_refuses_undefined_and_indistinguishable_directions() {
     let curve = Curve::Line {
@@ -999,6 +1085,113 @@ fn closes_around_the_box(
             );
         }
     }
+}
+
+/// A loop that starts on a closed spline's seam, its lowest point a hair below the range's start
+/// (an edge a few µm off the seam line, a writer's rounding: 1e-6 of the period, about 2e-5 mm on
+/// this cylinder of radius 3), stays on the range at a tolerance that covers that: moved a whole
+/// period on, past the range's end, the face's pcurves lay off its NURBS form, which measured it
+/// short. At a tolerance below it the loop stays where its lowest point puts it.
+#[test]
+fn a_loop_a_hair_below_a_closed_splines_range_stays_on_it() {
+    let (cylinder, _) = form::surface(
+        &Surface::Cylinder {
+            frame: about_z([0.; 3], false),
+            radius: 3.,
+        },
+        [[0., TAU], [0., 4.]],
+    )
+    .unwrap();
+    let dom = SurfaceEval::new(&cylinder).unwrap().domain();
+    let (a, b) = dom.range[0].unwrap();
+    let period = dom.period[0].unwrap();
+    let (lo, hi) = (a - 1e-6 * period, a + 0.75 * period);
+    let line = |p: [f64; 2], q: [f64; 2]| Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![p, q],
+    };
+    // Three quarters of a turn, counter-clockwise in (u, v).
+    let given = [
+        line([lo, 0.], [hi, 0.]),
+        line([hi, 0.], [hi, 4.]),
+        line([hi, 4.], [lo, 4.]),
+        line([lo, 4.], [lo, 0.]),
+    ];
+    let edge = Curve::Line {
+        start: [0.; 3],
+        end: [1., 0., 0.],
+    };
+    let l: Vec<EdgeUse<'_>> = given
+        .iter()
+        .enumerate()
+        .map(|(e, g)| EdgeUse {
+            edge: e as u32,
+            curve: &edge,
+            interval: [0., 1.],
+            forward: true,
+            tolerance: 0.0,
+            given: Some(g),
+        })
+        .collect();
+    let pcs = pcurves(&cylinder, std::slice::from_ref(&l), 1e-4).unwrap();
+    for pc in &pcs[0] {
+        for q in points(pc) {
+            assert!(
+                (lo - 1e-12..=hi + 1e-12).contains(&q[0]) && q[0] < b,
+                "on the range [{a}, {b}]: {q:?}"
+            );
+        }
+    }
+    let pcs = pcurves(&cylinder, &[l], 1e-7).unwrap();
+    for (got, given) in pcs[0].iter().zip(&given) {
+        let moved: Vec<[f64; 2]> = points(given)
+            .iter()
+            .map(|q| [q[0] + period, q[1]])
+            .collect();
+        assert_eq!(points(got), moved, "below the tolerance: a period on");
+    }
+}
+
+#[test]
+fn stored_trim_hulls_leaving_a_base_period_request_a_topology_edit() {
+    let surface = Surface::Spline {
+        u_knots: vec![0., 0., 1., 2., 3., 4., 4.],
+        v_knots: vec![0., 0., 3., 3.],
+        points: [[-2., -2.], [2., -2.], [2., 2.], [-2., 2.], [-2., -2.]]
+            .map(|[x, y]| vec![[x, y, 0.], [x, y, 3.]])
+            .to_vec(),
+    };
+    let domain = SurfaceEval::new(&surface).unwrap().domain();
+    let line = |a, b| Curve2::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![a, b],
+    };
+    for u in [0.0, 4.0] {
+        assert!(!leaves_base_period(domain, &line([u, 0.], [u, 3.])));
+    }
+    assert!(leaves_base_period(domain, &line([3.9, 0.], [4.1, 3.])));
+    assert!(leaves_base_period(domain, &line([-0.1, 0.], [0.1, 3.])));
+    // The analogous cut in v is handled the same way; an open direction is not a seam.
+    let Surface::Spline {
+        u_knots,
+        v_knots,
+        points,
+    } = &surface
+    else {
+        unreachable!()
+    };
+    let transposed = Surface::Spline {
+        u_knots: v_knots.clone(),
+        v_knots: u_knots.clone(),
+        points: (0..2)
+            .map(|j| points.iter().map(|row| row[j]).collect())
+            .collect(),
+    };
+    assert!(leaves_base_period(
+        SurfaceEval::new(&transposed).unwrap().domain(),
+        &line([0., 3.9], [3., 4.1])
+    ));
+    assert!(!leaves_base_period(domain, &line([0., -1.], [4., 4.])));
 }
 
 /// A full-period loop with a small overrun at its cut belongs around the base
@@ -2320,4 +2513,1507 @@ fn a_pcurves_derivative_is_answered_on_its_interval_and_only_in_numbers() {
         points: vec![[0., 0.], [f64::INFINITY, 0.]],
     };
     assert_eq!(eval_d1(&far, 0.5), None);
+}
+
+/// A degree-1 patch over [0, 1]² on the corners (0, 0, 0), (0, 10, 0), (10, 0, 0) and (10, 10,
+/// `top`): not a parallelogram for a `top` other than 0, so not a plane ([`flat_patch`]).
+fn twisted(top: f64) -> Surface {
+    Surface::Spline {
+        u_knots: vec![0., 0., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: vec![
+            vec![[0., 0., 0.], [0., 10., 0.]],
+            vec![[10., 0., 0.], [10., 10., top]],
+        ],
+    }
+}
+
+/// The four boundary segments of [`twisted`], from the (u, v) corner `from` to `to`, each as the
+/// edge that runs along it (its two control points `off` mm above the boundary).
+fn boundary_edge(top: f64, from: [f64; 2], to: [f64; 2], off: f64) -> Curve {
+    let at = |[u, v]: [f64; 2]| {
+        let z = if u == 1. && v == 1. { top } else { 0. };
+        [10. * u, 10. * v, z + off]
+    };
+    Curve::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![at(from), at(to)],
+    }
+}
+
+const SIDES: [([f64; 2], [f64; 2]); 4] = [
+    ([0., 0.], [1., 0.]),
+    ([0., 1.], [1., 1.]),
+    ([0., 0.], [0., 1.]),
+    ([1., 0.], [1., 1.]),
+];
+
+/// A whole boundary curve of a patch gets the straight (u, v) line along it by a proved bound,
+/// whatever its offset within the cap, running either way; and the bound is the gap it has.
+#[test]
+fn an_edge_along_a_patch_boundary_gets_its_straight_line_with_the_proved_gap() {
+    let surface = twisted(2.);
+    for off in [0.0, 2e-5, 7.5e-5] {
+        for (from, to) in SIDES {
+            for reversed in [false, true] {
+                let (a, b) = if reversed { (to, from) } else { (from, to) };
+                let edge = boundary_edge(2., a, b, off);
+                let found = boundary_iso(&surface, &edge, [0., 1.], 1e-3)
+                    .unwrap()
+                    .unwrap_or_else(|| panic!("{off} {from:?} {to:?} {reversed}"));
+                assert!(
+                    found.gap >= off && found.gap <= off + 1e-9,
+                    "{off}: proved {}",
+                    found.gap
+                );
+                assert_eq!(segment_points(&found.pcurve), [a, b]);
+                assert_eq!(found.pcurve.interval(), Some([0., 1.]));
+                // The lift is the boundary: as far from the edge as the proof says.
+                let lifted = lift_error(&surface, &edge, [0., 1.], &found.pcurve);
+                assert!(lifted <= found.gap, "{off}: {lifted} against {}", found.gap);
+            }
+        }
+    }
+}
+
+/// A line record and an interval of its own parameters: the same proof.
+#[test]
+fn a_line_edge_along_a_patch_boundary_is_proved_too() {
+    let surface = twisted(2.);
+    let edge = Curve::Line {
+        start: [0., 10., 1e-5],
+        end: [10., 10., 2. + 1e-5],
+    };
+    let found = boundary_iso(&surface, &edge, [0., 1.], 1e-3)
+        .unwrap()
+        .unwrap();
+    assert_eq!(segment_points(&found.pcurve), [[0., 1.], [1., 1.]]);
+    assert!((found.gap - 1e-5).abs() < 1e-9, "{}", found.gap);
+    // Not the line's whole extent: not the whole boundary.
+    assert_eq!(
+        boundary_iso(&surface, &edge, [0., 0.5], 1e-3).unwrap(),
+        None
+    );
+}
+
+/// The importer raises the edge's tolerance to cover the proved gap and then asks for pcurves:
+/// the closed form is taken at the raised tolerance, and not at the file's, where the edge is
+/// farther from its boundary than half of it.
+#[test]
+fn a_patch_boundary_pcurve_is_exact_where_the_tolerance_covers_its_proved_gap() {
+    let surface = twisted(2.);
+    for off in [0.0, 2e-5, 7.5e-5] {
+        let edge = boundary_edge(2., [0., 1.], [1., 1.], off);
+        let gap = boundary_iso(&surface, &edge, [0., 1.], 1e-3)
+            .unwrap()
+            .unwrap()
+            .gap;
+        let raised = SURFACE_GAP_MARGIN * gap.max(1e-6);
+        let made = exact_pcurves(&surface, &one(&edge, [0., 1.]), raised, None).unwrap();
+        let pc = made[0][0].as_ref().expect("a closed form");
+        // The line along the boundary: its ends where the tolerance's closed form puts them (the
+        // edge's own ends projected, up to a few parts in 10⁶ off the corners) or on the corners.
+        let [from, to] = segment_points(pc);
+        assert!(
+            from[0].abs() < 1e-5 && (from[1] - 1.).abs() < 1e-5,
+            "{from:?}"
+        );
+        assert!(
+            (to[0] - 1.).abs() < 1e-5 && (to[1] - 1.).abs() < 1e-5,
+            "{to:?}"
+        );
+        assert!(lift_error(&surface, &edge, [0., 1.], pc) <= 0.5 * raised);
+        let all = pcurves(&surface, &one(&edge, [0., 1.]), raised).unwrap();
+        assert_eq!(all[0][0], *pc);
+    }
+    // At a tolerance the gap is past, the line is not taken (nothing is fitted).
+    let edge = boundary_edge(2., [0., 1.], [1., 1.], 7.5e-5);
+    let made = exact_pcurves(&surface, &one(&edge, [0., 1.]), 1e-6, None).unwrap();
+    assert_eq!(made[0][0], None);
+}
+
+/// An edge whose pace repeats on a dyadic grid of its parameter. The boundary is a straight cubic
+/// row of 12.7 mm at an even pace; the edge is the same line at the pace
+/// `g(t) = t + A sin²(16 π t)`, which equals the even pace at every multiple of 1/16 of the
+/// parameter and bows about 4 µm between them. The map's pieces start at 1/8 and halve, so every
+/// midpoint a halving tests is a multiple of 1/16, where the straight piece is exact. A refinement
+/// that tests the midpoint alone sees no error, stops at pieces that are 4 µm off, and the proof
+/// then fails the cap. A piece is split on its error at points that are no dyadic fraction of it,
+/// so this gets its map, either way round.
+#[test]
+fn an_edge_whose_pace_repeats_on_a_dyadic_grid_gets_a_reparametrised_line() {
+    let length = 12.7;
+    let surface = Surface::Spline {
+        u_knots: vec![0., 0., 0., 0., 1., 1., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: (0..4)
+            .map(|i| {
+                let x = length * i as f64 / 3.0;
+                vec![[x, 0., 0.], [x, 10., 0.]]
+            })
+            .collect(),
+    };
+    let bow = 3.0e-4;
+    let pace = |t: f64| t + bow * (16.0 * PI * t).sin().powi(2);
+    let count = 256;
+    let params: Vec<f64> = (0..=count).map(|j| j as f64 / count as f64).collect();
+    for reversed in [false, true] {
+        let points: Vec<[f64; 3]> = params
+            .iter()
+            .map(|&t| {
+                let u = if reversed { 1.0 - pace(t) } else { pace(t) };
+                [length * u, 0., 0.]
+            })
+            .collect();
+        let (knots, points) = interpolate(&params, &points, 3);
+        let edge = Curve::Spline { knots, points };
+        let found = boundary_iso(&surface, &edge, [0., 1.], 1e-3)
+            .unwrap()
+            .unwrap_or_else(|| panic!("reversed {reversed}: no proof"));
+        assert!(found.gap < 1e-3, "reversed {reversed}: gap {}", found.gap);
+        let Curve2::Spline { points, .. } = &found.pcurve else {
+            panic!("a spline pcurve")
+        };
+        assert!(points.len() > 16, "{} points", points.len());
+        let lifted = lift_error(&surface, &edge, [0., 1.], &found.pcurve);
+        assert!(lifted <= found.gap, "lifts {lifted}, proved {}", found.gap);
+    }
+}
+
+/// Where the tolerance in force already takes a boundary edge as a straight line, the pcurve is
+/// that line to the bit (not the proof's, whose ends sit exactly on the patch's corners), so a face
+/// read before this proof is read the same after it.
+#[test]
+fn a_boundary_edge_the_tolerance_already_takes_keeps_the_line_it_always_got() {
+    let surface = twisted(2.);
+    for off in [0.0, 3e-6, 2e-5] {
+        for (from, to) in SIDES {
+            let edge = boundary_edge(2., from, to, off);
+            let tol = 1e-3;
+            let made = exact_pcurves(&surface, &one(&edge, [0., 1.]), tol, None).unwrap();
+            let on = On::new(&surface).unwrap();
+            let eval = CurveEval::new(&edge).unwrap();
+            let old = on
+                .along(&eval, [0., 1.], tol)
+                .expect("the tolerance takes it");
+            assert_eq!(made[0][0], Some(old), "off {off}, {from:?} to {to:?}");
+        }
+    }
+}
+
+/// Anything the proof does not cover is `None`, so the caller carries on as it did.
+#[test]
+fn what_is_not_a_whole_boundary_curve_of_a_polynomial_patch_has_no_proof() {
+    let surface = twisted(2.);
+    let (cap, whole) = (1e-3, [0., 1.]);
+    let none = |s: &Surface, c: &Curve, why: &str| {
+        assert_eq!(boundary_iso(s, c, whole, cap).unwrap(), None, "{why}");
+    };
+    // On the interior: the iso-curve at u = 0.5 is not a boundary.
+    let middle = Curve::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![[5., 0., 0.], [5., 10., 1.]],
+    };
+    none(&surface, &middle, "the interior");
+    // Off the boundary by more than the cap.
+    none(
+        &surface,
+        &boundary_edge(2., [0., 0.], [1., 0.], 0.5),
+        "past the cap",
+    );
+    assert!(boundary_iso(
+        &surface,
+        &boundary_edge(2., [0., 0.], [1., 0.], 0.5),
+        whole,
+        1.
+    )
+    .unwrap()
+    .is_some());
+    // The right ends at the wrong pace: the quadratic whose middle control point is a quarter
+    // of the way is the boundary's line, a eighth of its length (1.25 mm) off at its middle.
+    let slow = Curve::Spline {
+        knots: vec![0., 0., 0., 1., 1., 1.],
+        points: vec![[0., 0., 0.], [2.5, 0., 0.], [10., 0., 0.]],
+    };
+    // The line itself, at a pace the boundary's straight line does not have: its own
+    // reparametrised line, not the straight one (the pcurve bends where the pace does).
+    let paced = boundary_iso(&surface, &slow, whole, cap)
+        .unwrap()
+        .expect("the boundary at another pace");
+    assert!(paced.gap < 1e-4, "{}", paced.gap);
+    let Curve2::Spline { points, .. } = &paced.pcurve else {
+        panic!("a spline pcurve")
+    };
+    assert!(points.len() > 2);
+    assert!(lift_error(&surface, &slow, whole, &paced.pcurve) <= paced.gap);
+    // The same line at a parameter that is: a line's own elevation is the boundary.
+    let elevated = Curve::Spline {
+        knots: vec![0., 0., 0., 1., 1., 1.],
+        points: vec![[0., 0., 0.], [5., 0., 0.], [10., 0., 0.]],
+    };
+    assert!(boundary_iso(&surface, &elevated, whole, cap)
+        .unwrap()
+        .is_some());
+    // A rational patch, with its weights not all one.
+    let rational = Surface::RationalSpline {
+        u_knots: vec![0., 0., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        homogeneous: vec![
+            vec![[0., 0., 0., 1.], [0., 10., 0., 1.]],
+            vec![[10., 0., 0., 1.], [20., 20., 4., 2.]],
+        ],
+    };
+    // Its side with weights (1, 2) is a rational curve, no polynomial edge's; its side with
+    // weights (1, 1) is a polynomial one, and is proved.
+    none(
+        &rational,
+        &boundary_edge(2., [1., 0.], [1., 1.], 0.),
+        "a rational boundary against a polynomial edge",
+    );
+    assert!(boundary_iso(
+        &rational,
+        &boundary_edge(2., [0., 0.], [1., 0.], 0.),
+        whole,
+        cap
+    )
+    .unwrap()
+    .is_some());
+    // A rational edge on a polynomial patch, a polyline: no boundary of it.
+    for edge in [
+        Curve::RationalSpline {
+            knots: vec![0., 0., 1., 1.],
+            homogeneous: vec![[0., 0., 0., 1.], [10., 0., 0., 1.]],
+        },
+        Curve::Polyline {
+            points: vec![[0., 0., 0.], [10., 0., 0.]],
+        },
+    ] {
+        none(&surface, &edge, "not a polynomial B-spline");
+    }
+    // Not a spline patch.
+    let plane = Surface::Plane {
+        origin: [0.; 3],
+        u_axis: [10., 0., 0.],
+        v_axis: [0., 10., 0.],
+    };
+    none(
+        &plane,
+        &boundary_edge(2., [0., 0.], [1., 0.], 0.),
+        "a plane",
+    );
+    // A patch closed in u: its ends are one curve, and the loop's pcurves run round it.
+    let square = [[0., 0.], [10., 0.], [10., 10.], [0., 10.], [0., 0.]];
+    let closed = Surface::Spline {
+        u_knots: vec![0., 0., 1., 2., 3., 4., 4.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: square
+            .iter()
+            .map(|[x, y]| vec![[*x, *y, 0.], [*x, *y, 5.]])
+            .collect(),
+    };
+    let rim = Curve::Spline {
+        knots: vec![0., 0., 1., 2., 3., 4., 4.],
+        points: square.iter().map(|[x, y]| [*x, *y, 0.]).collect(),
+    };
+    assert_eq!(
+        boundary_iso(&closed, &rim, [0., 4.], cap).unwrap(),
+        None,
+        "closed in u"
+    );
+    // The same polygon left open is a boundary.
+    let open = Surface::Spline {
+        u_knots: vec![0., 0., 1., 2., 3., 3.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: square[..4]
+            .iter()
+            .map(|[x, y]| vec![[*x, *y, 0.], [*x, *y, 5.]])
+            .collect(),
+    };
+    let rim = Curve::Spline {
+        knots: vec![0., 0., 1., 2., 3., 3.],
+        points: square[..4].iter().map(|[x, y]| [*x, *y, 0.]).collect(),
+    };
+    let found = boundary_iso(&open, &rim, [0., 3.], cap).unwrap().unwrap();
+    assert_eq!(found.pcurve.interval(), Some([0., 3.]));
+}
+
+/// Hostile numbers are errors or no proof, never a panic.
+#[test]
+fn boundary_proofs_of_hostile_records_give_errors_or_none() {
+    let surface = twisted(2.);
+    let edge = boundary_edge(2., [0., 0.], [1., 0.], 0.);
+    for bad in [
+        [f64::NAN, 1.],
+        [0., f64::NAN],
+        [0., f64::INFINITY],
+        [1., 0.],
+        [0.5, 0.5],
+    ] {
+        assert!(
+            matches!(
+                boundary_iso(&surface, &edge, bad, 1e-3),
+                Err(Error::Invalid(_))
+            ),
+            "{bad:?}"
+        );
+    }
+    for cap in [f64::NAN, f64::INFINITY, 0., -1.] {
+        assert!(
+            matches!(
+                boundary_iso(&surface, &edge, [0., 1.], cap),
+                Err(Error::Invalid(_))
+            ),
+            "{cap}"
+        );
+    }
+    // Numbers not finite in the records.
+    let nan_edge = Curve::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![[0., 0., 0.], [f64::NAN, 0., 0.]],
+    };
+    assert!(boundary_iso(&surface, &nan_edge, [0., 1.], 1e-3).is_err());
+    let nan_patch = Surface::Spline {
+        u_knots: vec![0., 0., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: vec![
+            vec![[0., 0., 0.], [0., 10., f64::INFINITY]],
+            vec![[10., 0., 0.], [10., 10., 0.]],
+        ],
+    };
+    assert!(boundary_iso(&nan_patch, &edge, [0., 1.], 1e-3).is_err());
+    // Nets of nothing, of one point, of knots that do not fit, and of every size of number.
+    for points in [vec![], vec![vec![]], vec![vec![[0.; 3]]]] {
+        let patch = Surface::Spline {
+            u_knots: vec![0., 0., 1., 1.],
+            v_knots: vec![0., 0., 1., 1.],
+            points,
+        };
+        let r = boundary_iso(&patch, &edge, [0., 1.], 1e-3);
+        assert!(matches!(r, Err(_) | Ok(None)), "{r:?}");
+    }
+    for scale in [1e-300, 1e-150, 1e150, 1e300] {
+        let big = |p: [f64; 3]| p.map(|x| x * scale);
+        let patch = Surface::Spline {
+            u_knots: vec![0., 0., 1., 1.],
+            v_knots: vec![0., 0., 1., 1.],
+            points: vec![
+                vec![big([0., 0., 0.]), big([0., 10., 0.])],
+                vec![big([10., 0., 0.]), big([10., 10., 2.])],
+            ],
+        };
+        let curve = Curve::Spline {
+            knots: vec![0., 0., 1., 1.],
+            points: vec![big([0., 0., 0.]), big([10., 0., 0.])],
+        };
+        let r = boundary_iso(&patch, &curve, [0., 1.], 1e-3);
+        assert!(matches!(r, Err(_) | Ok(None | Some(_))), "{scale}: {r:?}");
+        // Where a proof is returned, its bound is a number and positive, at every scale: a leg of
+        // coordinates whose squares underflow is not read as no length at all.
+        if let Ok(Some(found)) = &r {
+            assert!(
+                found.gap.is_finite() && found.gap > 0.0,
+                "{scale}: {}",
+                found.gap
+            );
+        }
+    }
+    // An edge with more control points than the proof refines.
+    let n = MAX_BOUNDARY_POINTS + 1;
+    let long = Curve::Spline {
+        knots: std::iter::once(0.)
+            .chain((0..n).map(|k| k as f64 / n as f64))
+            .chain([1., 1.])
+            .collect(),
+        points: (0..n)
+            .map(|k| [10. * k as f64 / n as f64, 0., 0.])
+            .collect(),
+    };
+    assert_eq!(boundary_iso(&surface, &long, [0., 1.], 1e-3).unwrap(), None);
+}
+
+/// A tiny deterministic generator (xorshift) for the tests' perturbations, in [0, 1).
+struct Lcg(u64);
+
+impl Lcg {
+    fn next(&mut self) -> f64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 >> 11) as f64 / (1u64 << 53) as f64
+    }
+}
+
+/// A point of the degree-`p` B-spline of `points` on `knots` by de Boor's algorithm, written here
+/// on its own (not the library's evaluator) so a bound is not checked with its own code.
+fn de_boor(points: &[[f64; 3]], knots: &[f64], p: usize, t: f64) -> [f64; 3] {
+    let n = points.len();
+    let mut l = p;
+    while l + 1 < n && knots[l + 1] <= t {
+        l += 1;
+    }
+    let mut d: Vec<[f64; 3]> = (0..=p).map(|j| points[l - p + j]).collect();
+    for r in 1..=p {
+        for j in (r..=p).rev() {
+            let i = l - p + j;
+            let den = knots[i + p + 1 - r] - knots[i];
+            let a = if den > 0.0 { (t - knots[i]) / den } else { 0.0 };
+            d[j] = std::array::from_fn(|k| (1.0 - a) * d[j - 1][k] + a * d[j][k]);
+        }
+    }
+    d[p]
+}
+
+/// The knots `k` with every interior one moved by up to `delta` (the ends kept, the order kept),
+/// each by `delta` exactly where `extreme` (a random sign), else by a random amount.
+fn shifted(k: &[f64], p: usize, delta: f64, extreme: bool, rng: &mut Lcg) -> Vec<f64> {
+    let (first, last) = (k[0], k[k.len() - 1]);
+    let mut out = k.to_vec();
+    for j in p + 1..k.len() - p - 1 {
+        let s = if extreme {
+            if rng.next() < 0.5 {
+                -1.0
+            } else {
+                1.0
+            }
+        } else {
+            2.0 * rng.next() - 1.0
+        };
+        // A shade under `delta`, so the sum's own rounding stays inside it.
+        out[j] = (k[j] + s * delta * (1.0 - 1e-3))
+            .max(out[j - 1])
+            .min(last)
+            .max(first);
+    }
+    // The running maximum cannot have moved a knot by more than `delta`.
+    assert!(out.iter().zip(k).all(|(a, b)| (a - b).abs() <= delta));
+    assert!(out.windows(2).all(|w| w[0] <= w[1]));
+    out
+}
+
+/// The largest distance between the curve of `points` on `a` and on `b` over `a`'s and `b`'s
+/// knots, their middles, and three random points of each span.
+fn curves_apart(points: &[[f64; 3]], a: &[f64], b: &[f64], p: usize, rng: &mut Lcg) -> f64 {
+    let (first, last) = (a[0], a[a.len() - 1]);
+    let mut ts = vec![first, last];
+    for k in [a, b] {
+        for w in k.windows(2) {
+            ts.push(w[0]);
+            ts.push(0.5 * (w[0] + w[1]));
+            ts.extend((0..3).map(|_| w[0] + rng.next() * (w[1] - w[0])));
+        }
+    }
+    ts.iter()
+        .filter(|t| **t >= first && **t <= last)
+        .map(|&t| {
+            let (x, y) = (de_boor(points, a, p, t), de_boor(points, b, p, t));
+            ((x[0] - y[0]).powi(2) + (x[1] - y[1]).powi(2) + (x[2] - y[2]).powi(2)).sqrt()
+        })
+        .fold(0.0, f64::max)
+}
+
+/// The estimate the first proof used, `2 p L δ`, `L` the steepest derivative control point.
+fn first_order_estimate(points: &[[f64; 3]], knots: &[f64], p: usize, delta: f64) -> f64 {
+    let mut l = 0.0_f64;
+    for (i, w) in points.windows(2).enumerate() {
+        let gap = knots[i + p + 1] - knots[i + 1];
+        let step = ((w[1][0] - w[0][0]).powi(2)
+            + (w[1][1] - w[0][1]).powi(2)
+            + (w[1][2] - w[0][2]).powi(2))
+        .sqrt();
+        if gap > 0.0 {
+            l = l.max(p as f64 * step / gap);
+        } else if step > 0.0 {
+            return f64::INFINITY;
+        }
+    }
+    2.0 * p as f64 * l * delta
+}
+
+/// Clamped knots of degree `p` over `[0, last]`, the interior ones as `interior` gives them.
+fn clamped(p: usize, interior: &[f64], last: f64) -> Vec<f64> {
+    let mut k = vec![0.0; p + 1];
+    k.extend(interior);
+    k.extend(vec![last; p + 1]);
+    k
+}
+
+/// Control points of a wandering polygon of `n` points about a few tens of millimetres.
+fn polygon(n: usize, rng: &mut Lcg) -> Vec<[f64; 3]> {
+    (0..n)
+        .map(|i| {
+            let x = i as f64;
+            [
+                0.6 * x + 3.0 * rng.next(),
+                20.0 * (x / 9.0).sin() + 3.0 * rng.next(),
+                5.0 * (x / 3.0).cos() + 6.0 * rng.next(),
+            ]
+        })
+        .collect()
+}
+
+/// What moving the knots does is bounded by `knot_shift_bound`, which is a proved bound where the
+/// estimate `2 p L δ` it replaces was not: for a cubic of 168 poles on uneven knots, and for one
+/// whose knots come in clusters (triple, pairs, and four within a few parts in 10⁷), every knot
+/// moved by up to δ, in random amounts and by δ in a random direction, δ from far below the knot
+/// gaps to past them; each time the curve's actual deviation is under the bound, with the knots
+/// as given as the computed ones and the other way round.
+#[test]
+fn the_knot_shift_bound_covers_the_curves_a_perturbation_moves() {
+    let p = 3;
+    let mut rng = Lcg(0x9e37_79b9_7f4a_7c15);
+    let poles = 168;
+    let points = polygon(poles, &mut rng);
+    let cp = |pts: &[[f64; 3]]| -> Vec<CPoint> {
+        pts.iter()
+            .map(|q| CPoint::new(q[0], q[1], q[2], NOW))
+            .collect()
+    };
+    let cps = cp(&points);
+    // Uneven: gaps between 0.2 and 1.8.
+    let uneven: Vec<f64> = (0..poles - p - 1)
+        .scan(0.0, |x, _| {
+            *x += 0.2 + 1.6 * rng.next();
+            Some(*x)
+        })
+        .collect();
+    let last = uneven[uneven.len() - 1] + 1.0;
+    let even = clamped(p, &uneven, last);
+    // Clusters: 41 centres, four knots each, the pattern changing with the centre.
+    let mut clustered = Vec::new();
+    for c in 0..(poles - p - 1) / 4 {
+        let at = 1.0 + c as f64;
+        let s = 1e-7 * (1 + c % 3) as f64;
+        match c % 4 {
+            // A knot of multiplicity 3, one more beside it.
+            0 => clustered.extend([at, at, at, at + s]),
+            // Four distinct knots within 3 s.
+            1 => clustered.extend([at, at + s, at + 2.0 * s, at + 3.0 * s]),
+            // Two pairs.
+            2 => clustered.extend([at, at, at + s, at + s]),
+            _ => clustered.extend([at, at + 0.5 * s, at + 0.5 * s, at + 2.0 * s]),
+        }
+    }
+    assert_eq!(clustered.len(), poles - p - 1);
+    let cluster_end = 1.0 + (clustered.len() / 4) as f64;
+    let clustered = clamped(p, &clustered, cluster_end);
+    assert_eq!(even.len(), poles + p + 1);
+    assert_eq!(clustered.len(), poles + p + 1);
+    let mut report = Vec::new();
+    for (name, knots, deltas) in [
+        ("uneven", &even, vec![1e-9, 1e-4, 0.05, 0.2, 0.5]),
+        (
+            "clustered",
+            &clustered,
+            vec![1e-9, 1e-8, 1e-7, 3e-7, 1e-6, 1e-4, 0.01],
+        ),
+    ] {
+        for delta in deltas {
+            let mut worst = 0.0_f64;
+            let mut best_ratio = f64::INFINITY;
+            for trial in 0..12 {
+                let moved = shifted(knots, p, delta, trial % 2 == 0, &mut rng);
+                let actual = curves_apart(&points, knots, &moved, p, &mut rng);
+                for (given, computed) in [(knots, &moved), (&moved, knots)] {
+                    let bound = knot_shift_bound(&cps, computed, p, delta).unwrap();
+                    assert!(
+                        actual <= bound + 1e-11,
+                        "{name} δ = {delta} trial {trial}: moved {actual}, bound {bound} (given {} knots)",
+                        given.len()
+                    );
+                    best_ratio = best_ratio.min(bound / actual.max(1e-300));
+                }
+                worst = worst.max(actual);
+            }
+            let old = first_order_estimate(&points, knots, p, delta);
+            let bound = knot_shift_bound(&cps, knots, p, delta).unwrap();
+            report.push(format!("{name} δ = {delta:e}: worst moved {worst:.3e}, bound {bound:.3e}, 2pLδ {old:.3e}, tightest bound/moved {best_ratio:.2}"));
+        }
+    }
+    eprintln!("{}", report.join("\n"));
+    // Hostile arguments: no bound, never a panic.
+    assert_eq!(knot_shift_bound(&cps, &even, 0, 1e-3), None);
+    assert_eq!(knot_shift_bound(&cps, &even[1..], p, 1e-3), None);
+    assert_eq!(knot_shift_bound(&cps, &even, p, f64::NAN), None);
+    assert_eq!(knot_shift_bound(&cps, &even, p, -1.0), None);
+    let mut unordered = even.clone();
+    unordered.swap(10, 11);
+    assert_eq!(knot_shift_bound(&cps, &unordered, p, 1e-3), None);
+    assert_eq!(knot_shift_bound(&[], &[0.0; 4], 3, 0.0), None);
+}
+
+/// Where knots cluster closer than δ (five of a cubic's interior knots within 4 mm in a span of
+/// five, δ from a quarter of their spacing to past it) the curve moves by up to what the proved
+/// bound allows and no more; the first-order estimate `2 p L δ` it replaced is only a comparison
+/// (it was never proved: no case here breaks it, and the proved bound is the smaller).
+#[test]
+fn the_knot_shift_bound_holds_where_the_knots_of_a_cubic_cluster() {
+    let p = 3;
+    let points: Vec<[f64; 3]> = (0..12)
+        .map(|i| [i as f64, if i % 2 == 0 { 0.0 } else { 3.0 }, 0.0])
+        .collect();
+    let cps: Vec<CPoint> = points
+        .iter()
+        .map(|q| CPoint::new(q[0], q[1], q[2], NOW))
+        .collect();
+    // Eight interior knots: three even, then five a thousandth apart.
+    let interior = [1.0, 2.0, 3.0, 4.0, 4.001, 4.002, 4.003, 4.004];
+    let knots = clamped(p, &interior, 5.0);
+    let mut rng = Lcg(7);
+    for delta in [2.5e-4, 1e-3, 2e-3, 4e-3, 1e-2] {
+        let old = first_order_estimate(&points, &knots, p, delta);
+        let bound = knot_shift_bound(&cps, &knots, p, delta).unwrap();
+        let mut worst = 0.0_f64;
+        for k in 0..40 {
+            let moved = shifted(&knots, p, delta, k % 2 == 0, &mut rng);
+            let actual = curves_apart(&points, &knots, &moved, p, &mut rng);
+            assert!(
+                actual <= bound + 1e-11,
+                "δ = {delta}: {actual} against {bound}"
+            );
+            worst = worst.max(actual);
+        }
+        assert!(
+            bound <= old,
+            "δ = {delta}: the proved bound {bound} is no larger than the estimate {old}"
+        );
+        eprintln!(
+            "cluster δ = {delta}: 2pLδ {old:.4e}, proved {bound:.4e}, worst moved {worst:.4e}"
+        );
+    }
+}
+
+/// A leg of tiny coordinates counts its length: the squares of `5e-170` underflow to 0, and a
+/// bound that read the leg as no length at all would sit below the displacement (a degree-1 curve
+/// whose middle knot moves by δ is displaced at that knot by `|ΔP₀| δ / (0.5 + δ)`, in closed form:
+/// the point is `P₁` on one knot vector and a convex combination on the other).
+#[test]
+fn the_knot_shift_bound_counts_a_leg_of_tiny_coordinates() {
+    let cp = |x: f64, y: f64| CPoint::new(x, y, 0.0, NOW);
+    for scale in [1.0, 1e-100, 1e-170] {
+        let points = [
+            cp(0.0, 0.0),
+            cp(3.0 * scale, 4.0 * scale),
+            cp(6.0 * scale, 8.0 * scale),
+        ];
+        let knots = [0.0, 0.0, 0.5, 1.0, 1.0];
+        let leg = (3.0 * scale).hypot(4.0 * scale);
+        for delta in [1e-12, 1e-6, 1e-3] {
+            let displacement = leg * delta / (0.5 + delta);
+            let bound = knot_shift_bound(&points, &knots, 1, delta).unwrap();
+            assert!(bound.is_finite() && bound > 0.0, "{scale} {delta}: {bound}");
+            assert!(
+                bound >= displacement,
+                "{scale} {delta}: the bound {bound} is under the displacement {displacement}"
+            );
+        }
+    }
+}
+
+/// `extract_iso_crv` at the end of a clamped range returns the net's end row and the knots
+/// themselves, bit for bit, on all four sides (the u-curves at the least and greatest v, the
+/// v-curves at the least and greatest u): the extraction term of a boundary proof is exactly 0.
+#[test]
+fn the_extracted_boundary_is_a_copy_of_the_net_s_row() {
+    let u_knots = vec![0.0, 0.0, 0.0, 0.0, 0.37, 0.81, 1.0, 1.0, 1.0, 1.0];
+    let v_knots = vec![0.25, 0.25, 0.25, 0.6, 1.5, 1.5, 1.5];
+    let mut rng = Lcg(11);
+    let points: Vec<Vec<[f64; 3]>> = (0..6)
+        .map(|i| {
+            (0..4)
+                .map(|j| {
+                    [
+                        i as f64 + rng.next(),
+                        j as f64 * 3.0 + rng.next(),
+                        10.0 * rng.next() - 5.0,
+                    ]
+                })
+                .collect()
+        })
+        .collect();
+    let surface = Surface::Spline {
+        u_knots: u_knots.clone(),
+        v_knots: v_knots.clone(),
+        points: points.clone(),
+    };
+    let SurfaceEval::Eval(EvalSurface::Nurbs(n), _) = SurfaceEval::new(&surface).unwrap() else {
+        panic!("a spline")
+    };
+    let nl = n.nl_surface().expect("an NLib surface");
+    let row = |c: &NlCurve| -> Vec<[f64; 3]> { c.cpts().iter().map(|q| [q.x, q.y, q.z]).collect() };
+    let u_end = extract_iso_crv(nl, 0.25, Direction::U).unwrap();
+    assert_eq!(row(&u_end), points.iter().map(|r| r[0]).collect::<Vec<_>>());
+    assert_eq!(u_end.knots(), &u_knots[..]);
+    let v_end = extract_iso_crv(nl, 1.5, Direction::U).unwrap();
+    assert_eq!(row(&v_end), points.iter().map(|r| r[3]).collect::<Vec<_>>());
+    assert_eq!(v_end.knots(), &u_knots[..]);
+    let first = extract_iso_crv(nl, 0.0, Direction::V).unwrap();
+    assert_eq!(row(&first), points[0]);
+    assert_eq!(first.knots(), &v_knots[..]);
+    let last = extract_iso_crv(nl, 1.0, Direction::V).unwrap();
+    assert_eq!(row(&last), points[5]);
+    assert_eq!(last.knots(), &v_knots[..]);
+}
+
+/// A cubic patch of 168 poles along u (uneven knots) over a bilinear v, whose four edges are its
+/// boundary rows 20 micrometres off, on parameter intervals that are no affine image of the
+/// patch's but one whose knots round (so the proof's knot-map term is exercised on a long
+/// polygon): each gets its line, with a proved gap that is the offset plus rounding, and the line
+/// lifts onto the edge within it.
+#[test]
+fn a_long_cubic_patch_boundary_is_proved_on_an_interval_of_its_own() {
+    let p = 3;
+    let mut rng = Lcg(0xdead_beef);
+    let poles = 168;
+    let row = polygon(poles, &mut rng);
+    let uneven: Vec<f64> = (0..poles - p - 1)
+        .scan(0.0, |x, _| {
+            *x += 0.2 + 1.6 * rng.next();
+            Some(*x)
+        })
+        .collect();
+    let end = uneven[uneven.len() - 1] + 1.0;
+    let u_knots = clamped(p, &uneven, end);
+    let lift = [0.0, 0.0, 10.0];
+    let points: Vec<Vec<[f64; 3]>> = row
+        .iter()
+        .map(|q| vec![*q, [q[0] + lift[0], q[1] + lift[1], q[2] + lift[2]]])
+        .collect();
+    let surface = Surface::Spline {
+        u_knots: u_knots.clone(),
+        v_knots: vec![0., 0., 1., 1.],
+        points,
+    };
+    let off = 2e-5;
+    for (t0, t1) in [(0.0, 1.0), (1000.0, 1007.5), (-3.0, 4.25)] {
+        for reversed in [false, true] {
+            // Boundary v = 0, on [t0, t1]: knots a linear map of the patch's, rounded.
+            let map = |x: f64| t0 + x / end * (t1 - t0);
+            let mut knots: Vec<f64> = u_knots.iter().map(|x| map(*x)).collect();
+            knots[0] = t0;
+            let n = knots.len();
+            knots[n - 1] = t1;
+            for k in knots.iter_mut().take(p + 1) {
+                *k = t0;
+            }
+            for k in knots.iter_mut().skip(n - p - 1) {
+                *k = t1;
+            }
+            let mut pts: Vec<[f64; 3]> = row.iter().map(|q| [q[0], q[1], q[2] + off]).collect();
+            if reversed {
+                pts.reverse();
+                knots = knots.iter().rev().map(|k| t0 + t1 - k).collect();
+                let n = knots.len();
+                for k in knots.iter_mut().take(p + 1) {
+                    *k = t0;
+                }
+                for k in knots.iter_mut().skip(n - p - 1) {
+                    *k = t1;
+                }
+            }
+            let edge = Curve::Spline { knots, points: pts };
+            let found = boundary_iso(&surface, &edge, [t0, t1], 1e-3)
+                .unwrap()
+                .unwrap_or_else(|| panic!("[{t0}, {t1}] {reversed}"));
+            assert!(
+                found.gap >= off * (1.0 - 1e-9) && found.gap <= off + 1e-6,
+                "[{t0}, {t1}] {reversed}: proved {}",
+                found.gap
+            );
+            let [from, to] = segment_points(&found.pcurve);
+            assert_eq!([from[1], to[1]], [0.0, 0.0], "on v = 0");
+            assert_eq!(from[0] == 0.0, !reversed);
+            let lifted = lift_error(&surface, &edge, [t0, t1], &found.pcurve);
+            assert!(
+                lifted <= found.gap,
+                "[{t0}, {t1}] {reversed}: {lifted} against {}",
+                found.gap
+            );
+        }
+    }
+}
+
+/// `boundary_covered` is the importer's one question: an edge is covered for the line only where
+/// `exact_pcurves` then takes it at the covered tolerance. For every side, either way, and the gaps
+/// of the other tests: the answer is the proved gap exactly where the line is taken at the larger of
+/// the tolerance and the margin times the gap; at a margin under 2 (which asks the proof within
+/// half of less than its own gap) the bound is proved and the line is not taken, and no gap is
+/// given.
+#[test]
+fn a_boundary_gap_is_covered_only_where_the_closed_form_takes_the_line() {
+    let surface = twisted(2.);
+    let (face, margin, most) = (1e-6, SURFACE_GAP_MARGIN, 1.0);
+    for off in [0.0, 2e-5, 7.5e-5, 1e-3, 0.016, 0.3] {
+        for (from, to) in SIDES {
+            for reversed in [false, true] {
+                let (a, b) = if reversed { (to, from) } else { (from, to) };
+                let edge = boundary_edge(2., a, b, off);
+                let proved = boundary_iso(&surface, &edge, [0., 1.], BOUNDARY_GAP_CAP).unwrap();
+                let covered =
+                    boundary_covered(&surface, &edge, [0., 1.], face, margin, most).unwrap();
+                assert_eq!(covered, proved.as_ref().map(|p| p.gap), "{off} {a:?} {b:?}");
+                if let Some(gap) = covered {
+                    let raised = face.max(margin * gap);
+                    let made =
+                        exact_pcurves(&surface, &one(&edge, [0., 1.]), raised, None).unwrap();
+                    assert!(made[0][0].is_some(), "{off}: covered but not taken");
+                    // The edge's own tolerance, where it is the larger, is the one asked at.
+                    let wide =
+                        boundary_covered(&surface, &edge, [0., 1.], 0.5, margin, most).unwrap();
+                    assert_eq!(wide, Some(gap));
+                }
+            }
+        }
+        let edge = boundary_edge(2., [0., 0.], [1., 0.], off);
+        let proved = boundary_iso(&surface, &edge, [0., 1.], most).unwrap();
+        // A margin of 1.5 asks the closed form within 0.75 of the gap, which the proof is not.
+        let low = boundary_covered(&surface, &edge, [0., 1.], face, 1.5, most).unwrap();
+        if let Some(p) = proved {
+            if p.gap > 0.5 * face / 0.75 {
+                assert_eq!(
+                    low, None,
+                    "{off}: proved {} but not taken at a margin of 1.5",
+                    p.gap
+                );
+            }
+        }
+    }
+    // Past what a tolerance holds, nothing; and nothing for a tolerance or margin that is not a number.
+    let far = boundary_edge(2., [0., 0.], [1., 0.], 0.5);
+    assert_eq!(
+        boundary_covered(&surface, &far, [0., 1.], face, margin, most).unwrap(),
+        None
+    );
+    for (tolerance, margin) in [
+        (f64::NAN, 3.0),
+        (1e-6, f64::NAN),
+        (0.0, 3.0),
+        (1e-6, f64::INFINITY),
+        (1e-6, -3.0),
+    ] {
+        assert!(boundary_covered(&surface, &far, [0., 1.], tolerance, margin, 1.0).is_err());
+    }
+}
+
+/// A patch closed in one direction has a seam: its edge along the seam (or round the closed
+/// direction) is no boundary, the proof gives none, no tolerance is covered for it, and
+/// `exact_pcurves` makes of it only what the straight-line candidate always made (taken at
+/// the tolerance, nothing proved). A polynomial net that comes back to its first row in u.
+#[test]
+fn a_patch_closed_in_one_direction_has_no_boundary_proof_on_its_seam() {
+    let square = [[0., 0.], [10., 0.], [10., 10.], [0., 10.], [0., 0.]];
+    let closed = Surface::Spline {
+        u_knots: vec![0., 0., 1., 2., 3., 4., 4.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: square
+            .iter()
+            .map(|[x, y]| vec![[*x, *y, 0.], [*x, *y, 5.]])
+            .collect(),
+    };
+    // The seam: the v-curve at u = 0 (and the same at u = 4), either way; the u-curves at v = 0 and v = 1.
+    let seams = [([0., 0., 0.], [0., 0., 5.]), ([0., 0., 5.], [0., 0., 0.])];
+    let rim = |z: f64| Curve::Spline {
+        knots: vec![0., 0., 1., 2., 3., 4., 4.],
+        points: square.iter().map(|[x, y]| [*x, *y, z]).collect(),
+    };
+    let mut edges: Vec<(Curve, [f64; 2])> = seams
+        .iter()
+        .map(|(a, b)| {
+            (
+                Curve::Spline {
+                    knots: vec![0., 0., 1., 1.],
+                    points: vec![*a, *b],
+                },
+                [0., 1.],
+            )
+        })
+        .collect();
+    edges.push((rim(0.), [0., 4.]));
+    edges.push((rim(5.), [0., 4.]));
+    for (edge, interval) in &edges {
+        assert_eq!(boundary_iso(&closed, edge, *interval, 1e-3).unwrap(), None);
+        assert_eq!(
+            boundary_covered(&closed, edge, *interval, 1e-6, SURFACE_GAP_MARGIN, 1.0).unwrap(),
+            None
+        );
+        // What `exact_pcurves` makes is what the straight-line candidate makes, and nothing else.
+        let on = On::new(&closed).unwrap();
+        let eval = CurveEval::new(edge).unwrap();
+        let tol = 1e-3;
+        let direct = on.pcurve(edge, &eval, *interval, tol).ok();
+        let made = exact_pcurves(&closed, &one(edge, *interval), tol, None)
+            .unwrap()
+            .remove(0)
+            .remove(0);
+        assert_eq!(made, direct);
+        assert_eq!(
+            made,
+            on.along(&eval, *interval, tol)
+                .filter(|pc| on.lifts(pc, &eval, *interval, 0.5 * tol))
+        );
+    }
+}
+
+/// A patch of 10 m (the twisted one, in millimetres), and its side v = 0 as an edge `off` mm above
+/// it.
+fn metres_edge(off: f64) -> (Surface, Curve) {
+    let k = 1000.0;
+    let at = |x: f64, y: f64, z: f64| [x * k, y * k, z * k];
+    let surface = Surface::Spline {
+        u_knots: vec![0., 0., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: vec![
+            vec![at(0., 0., 0.), at(0., 10., 0.)],
+            vec![at(10., 0., 0.), at(10., 10., 2.)],
+        ],
+    };
+    let edge = Curve::Spline {
+        knots: vec![0., 0., 1., 1.],
+        points: vec![[0., 0., off], [10. * k, 0., off]],
+    };
+    (surface, edge)
+}
+
+/// No edge tolerance past 10³ mm is honoured, the face's or an edge record's (the largest
+/// `pcurves` takes): a cover that would ask for one is none, whatever `max_tolerance` allows.
+#[test]
+fn a_boundary_is_not_covered_at_a_tolerance_past_what_an_edge_is_honoured_at() {
+    let (most, margin) = (2e3, 1.0);
+    // The metre-scale gaps here are far past the exporter-rounding cap, so the ceiling is asked
+    // with that cap lifted to what the tolerance alone allows.
+    let wide = |surface: &Surface, edge: &Curve, tolerance: f64, margin: f64, most: f64| {
+        covered_on(
+            &On::new(surface).unwrap(),
+            edge,
+            [0., 1.],
+            tolerance,
+            margin,
+            most,
+            f64::INFINITY,
+        )
+        .unwrap()
+        .map(|(gap, _)| gap)
+    };
+    // An edge 400 mm off a patch 10 m across, covered at 900 mm: within the ceiling, and taken.
+    let (surface, near) = metres_edge(400.0);
+    let found = wide(&surface, &near, 900.0, margin, most);
+    assert!(
+        found.is_some_and(|g| (400.0..401.0).contains(&g)),
+        "{found:?}"
+    );
+    // An edge 1200 mm off, covered at 3000 mm: the proof holds and 3000 is within `max_tolerance`,
+    // but is past the ceiling, so no cover.
+    let (surface, far) = metres_edge(1200.0);
+    assert!(boundary_iso(&surface, &far, [0., 1.], most)
+        .unwrap()
+        .is_some());
+    assert_eq!(wide(&surface, &far, 3000.0, margin, 4e3), None);
+    // The same edge at the ceiling itself is covered.
+    assert!(
+        wide(&surface, &far, 1000.0, margin, 4e3).is_none(),
+        "half of 1000 mm is under the 1200 mm gap"
+    );
+    let (surface, mid) = metres_edge(450.0);
+    assert!(wide(&surface, &mid, 1000.0, margin, 4e3).is_some());
+}
+
+/// A patch whose side along u at v = 0 is the straight line from (0, 0, 0) to (10, 0, 0) run at
+/// an uneven pace (a cubic whose x control points are 0, 1, 9, 10), a second row 10 mm up in y.
+fn uneven_patch() -> Surface {
+    let row = |y: f64| [0., 1., 9., 10.].map(|x| [x, y, 0.]).to_vec();
+    Surface::Spline {
+        u_knots: vec![0., 0., 0., 0., 1., 1., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: (0..4).map(|i| vec![row(0.)[i], row(10.)[i]]).collect(),
+    }
+}
+
+/// [`uneven_patch`] with an interior knot (0.3) and five poles: a boundary of two spans, which a
+/// map across it has to meet at the knot.
+fn knotted_patch() -> Surface {
+    let row = |y: f64| [0., 1., 3., 9., 10.].map(|x| [x, y, 0.]).to_vec();
+    Surface::Spline {
+        u_knots: vec![0., 0., 0., 0., 0.3, 1., 1., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: (0..5).map(|i| vec![row(0.)[i], row(10.)[i]]).collect(),
+    }
+}
+
+/// A map from an edge's parameter onto a boundary of two spans passes the knot between them: the
+/// pcurve has a breakpoint there, and its lift is within the proved gap everywhere (the check is
+/// denser than the importer's).
+#[test]
+fn a_reparametrised_line_across_a_knot_of_the_boundary_lifts_within_its_gap() {
+    let surface = knotted_patch();
+    for (a, b) in [([0., 0., 0.], [10., 0., 0.]), ([10., 0., 0.], [0., 0., 0.])] {
+        let edge = line(a, b);
+        let found = boundary_iso(&surface, &edge, [0., 1.], 1e-3)
+            .unwrap()
+            .unwrap_or_else(|| panic!("{a:?}: no proof"));
+        let Curve2::Spline { points, .. } = &found.pcurve else {
+            panic!("a spline pcurve")
+        };
+        assert!(
+            points.iter().any(|q| (q[0] - 0.3).abs() < 1e-15),
+            "no breakpoint at the knot: {:?}",
+            points.iter().map(|q| q[0]).collect::<Vec<_>>()
+        );
+        let worst = lift_error(&surface, &edge, [0., 1.], &found.pcurve);
+        assert!(worst <= found.gap, "lifts {worst}, proved {}", found.gap);
+    }
+}
+
+/// The reparametrised proof of records no honest file holds gives `None` or an error, never a
+/// panic: numbers that are not finite, nets of one scale or another, an edge with no points on
+/// the boundary, and one whose ends are the boundary's but whose middle is far off.
+#[test]
+fn reparametrised_proofs_of_hostile_records_give_errors_or_none() {
+    let surface = uneven_patch();
+    let ends = |mid: [f64; 3]| Curve::Spline {
+        knots: vec![0., 0., 0., 1., 1., 1.],
+        points: vec![[0., 0., 0.], mid, [10., 0., 0.]],
+    };
+    for mid in [
+        [f64::NAN, 0., 0.],
+        [f64::INFINITY, 0., 0.],
+        [5., 1e300, 0.],
+        [5., 3., 0.],
+    ] {
+        let found = boundary_iso(&surface, &ends(mid), [0., 1.], 1e-3);
+        assert!(!matches!(found, Ok(Some(_))), "{mid:?}: {found:?}");
+    }
+    // The same line at a pace that is all but a jump is the boundary, proved or not: no panic.
+    let _ = boundary_iso(&surface, &ends([1e-300, 0., 0.]), [0., 1.], 1e-3);
+    for scale in [1e-300, 1e-150, 1e150, 1e300] {
+        let big = Surface::Spline {
+            u_knots: vec![0., 0., 0., 0., 1., 1., 1., 1.],
+            v_knots: vec![0., 0., 1., 1.],
+            points: [0., 1., 9., 10.]
+                .map(|x| vec![[x * scale, 0., 0.], [x * scale, 10. * scale, 0.]])
+                .to_vec(),
+        };
+        let edge = line([0., 0., 0.], [10. * scale, 0., 0.]);
+        let _ = boundary_iso(&big, &edge, [0., 1.], 1e-3);
+    }
+}
+
+/// [`uneven_patch`] a hundred times as long (1000 mm): the straight pieces of the map leave an error
+/// that grows with the boundary's length, so the map needs more than a thousand of them to come
+/// within the cap, and the proof finds it.
+#[test]
+fn a_long_boundary_at_an_uneven_pace_gets_a_map_of_thousands_of_pieces() {
+    let scale = 100.0;
+    let row = |y: f64| {
+        [0., 1., 9., 10.]
+            .map(|x| [x * scale, y * scale, 0.])
+            .to_vec()
+    };
+    let surface = Surface::Spline {
+        u_knots: vec![0., 0., 0., 0., 1., 1., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: (0..4).map(|i| vec![row(0.)[i], row(10.)[i]]).collect(),
+    };
+    let edge = line([0., 0., 0.], [10. * scale, 0., 0.]);
+    let found = boundary_iso(&surface, &edge, [0., 1.], 1e-3)
+        .unwrap()
+        .expect("a map within the cap");
+    let Curve2::Spline { points, .. } = &found.pcurve else {
+        panic!("a spline pcurve")
+    };
+    assert!(
+        points.len() > 1024 && points.len() <= 4096,
+        "{} points",
+        points.len()
+    );
+    assert!(found.gap <= 1e-3, "{}", found.gap);
+    assert!(lift_error(&surface, &edge, [0., 1.], &found.pcurve) <= found.gap);
+}
+
+/// An edge that lies on a patch's boundary but runs at a pace of its own is that boundary's line
+/// with the pace the edge has: the edge is a straight line at an even pace, the boundary the same
+/// line at an uneven one, 0.9 mm from it at equal parameter, so no straight line in (u, v) is
+/// the pcurve, and the proof finds a map `g` whose pcurve `(g(t), 0)` lifts onto the edge within
+/// what it certifies. Either way round.
+#[test]
+fn an_edge_at_its_own_pace_along_a_boundary_gets_a_reparametrised_line() {
+    let surface = uneven_patch();
+    for (a, b) in [([0., 0., 0.], [10., 0., 0.]), ([10., 0., 0.], [0., 0., 0.])] {
+        let edge = line(a, b);
+        // At equal parameter the boundary is far from it: the straight line is not the proof.
+        let found = boundary_iso(&surface, &edge, [0., 1.], 1e-3)
+            .unwrap()
+            .unwrap_or_else(|| panic!("{a:?} to {b:?}: no proof"));
+        assert!(found.gap < 1e-4, "{a:?}: gap {}", found.gap);
+        let Curve2::Spline { knots, points } = &found.pcurve else {
+            panic!("a spline pcurve")
+        };
+        assert!(
+            points.len() > 2,
+            "the line is not straight: {} points",
+            points.len()
+        );
+        assert_eq!(knots.len(), points.len() + 2);
+        assert!(points.iter().all(|q| q[1] == 0.0), "on v = 0");
+        // Monotone, from one end of the boundary to the other.
+        let us: Vec<f64> = points.iter().map(|q| q[0]).collect();
+        let rising = us.windows(2).all(|w| w[0] <= w[1]);
+        let falling = us.windows(2).all(|w| w[0] >= w[1]);
+        assert!(if a[0] == 0. { rising } else { falling }, "{us:?}");
+        let lifted = lift_error(&surface, &edge, [0., 1.], &found.pcurve);
+        assert!(lifted <= found.gap, "lifts {lifted}, proved {}", found.gap);
+    }
+    // An edge the same line at a pace the boundary cannot follow within the cap (the straight
+    // line is not along the quadratic bump of this boundary) has none.
+    let bump = Surface::Spline {
+        u_knots: vec![0., 0., 0., 1., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        points: vec![
+            vec![[0., 0., 0.], [0., 10., 0.]],
+            vec![[5., 0., 0.4], [5., 10., 0.4]],
+            vec![[10., 0., 0.], [10., 10., 0.]],
+        ],
+    };
+    let flat = line([0., 0., 0.], [10., 0., 0.]);
+    assert_eq!(boundary_iso(&bump, &flat, [0., 1.], 1e-3).unwrap(), None);
+}
+
+/// An edge 16 µm off a patch's boundary is another curve, not exporter rounding: no proof, no
+/// cover, however large the tolerance the file allows.
+#[test]
+fn an_edge_far_off_the_boundary_for_rounding_is_no_boundary() {
+    let surface = twisted(2.);
+    let edge = boundary_edge(2., [0., 0.], [1., 0.], 0.016);
+    assert_eq!(
+        boundary_iso(&surface, &edge, [0., 1.], BOUNDARY_GAP_CAP).unwrap(),
+        None
+    );
+    assert_eq!(
+        boundary_covered(&surface, &edge, [0., 1.], 0.01, SURFACE_GAP_MARGIN, 1.0).unwrap(),
+        None
+    );
+}
+
+/// A rounded cube's edge strip and corner patch, as a STEP exporter writes them: rational
+/// quadratic conics of middle weight `W`, the edge curves their own records `off` mm off.
+const CONIC_W: f64 = 2.0 / 3.0;
+
+fn homogeneous(p: [f64; 3], w: f64) -> [f64; 4] {
+    [p[0] * w, p[1] * w, p[2] * w, w]
+}
+
+/// A conic of weights (1, `CONIC_W`, 1) through `a` and `b` with middle control point `m`.
+fn conic(a: [f64; 3], m: [f64; 3], b: [f64; 3]) -> Curve {
+    Curve::RationalSpline {
+        knots: vec![0., 0., 0., 1., 1., 1.],
+        homogeneous: vec![
+            homogeneous(a, 1.0),
+            homogeneous(m, CONIC_W),
+            homogeneous(b, 1.0),
+        ],
+    }
+}
+
+/// The strip along z of a rounded edge (radius 3, z from 3 to 17): u across the conic, v along z.
+fn conic_strip() -> Surface {
+    let rows = [([3., 0.], 1.0), ([0., 0.], CONIC_W), ([0., 3.], 1.0)];
+    Surface::RationalSpline {
+        u_knots: vec![0., 0., 0., 1., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        homogeneous: rows
+            .iter()
+            .map(|([x, y], w)| {
+                vec![
+                    homogeneous([*x, *y, 3.], *w),
+                    homogeneous([*x, *y, 17.], *w),
+                ]
+            })
+            .collect(),
+    }
+}
+
+fn line(a: [f64; 3], b: [f64; 3]) -> Curve {
+    Curve::Line { start: a, end: b }
+}
+
+/// The corner patch at the origin: a biquadratic net with its u = 0 side collapsed to a point.
+fn conic_corner() -> Surface {
+    let net = [
+        [[3., 0., 3.], [3., 0., 3.], [3., 0., 3.]],
+        [[0., 0., 3.], [0.75, 0.75, 0.75], [3., 0., 0.]],
+        [[0., 3., 3.], [0., 3., 0.], [3., 3., 0.]],
+    ];
+    let w = [1.0, CONIC_W, 1.0];
+    Surface::RationalSpline {
+        u_knots: vec![0., 0., 0., 1., 1., 1.],
+        v_knots: vec![0., 0., 0., 1., 1., 1.],
+        homogeneous: net
+            .iter()
+            .zip(w)
+            .map(|(row, wi)| {
+                row.iter()
+                    .zip(w)
+                    .map(|(p, wj)| homogeneous(*p, wi * wj))
+                    .collect()
+            })
+            .collect(),
+    }
+}
+
+fn uses_with(edges: &[(Curve, [f64; 2])]) -> Vec<EdgeUse<'_>> {
+    uses_of(edges, &[20, 21, 22, 23][..edges.len()])
+}
+
+/// A rational patch's boundary is proved where the edge has the patch's own knots and weights
+/// (a conic edge a few micrometres off, and the straight sides along its v direction, which is
+/// not rational), and a face with one side collapsed to a point is the whole patch on its other
+/// three. A different weight, a different knot, or an edge on the collapsed side is not proved.
+#[test]
+fn a_rational_patchs_boundary_is_proved_where_the_edge_has_its_knots_and_weights() {
+    let off = 3e-5;
+    let strip = conic_strip();
+    let edges = vec![
+        (conic([3., 0., 3.], [0., off, 3.], [0., 3., 3.]), [0., 1.]),
+        (
+            conic([3., 0., 17.], [0., off, 17.], [0., 3., 17.]),
+            [0., 1.],
+        ),
+        (line([3., 0., 3.], [3., 0., 17.]), [0., 1.]),
+        (line([0., 3., 3.], [0., 3., 17.]), [0., 1.]),
+    ];
+    let gaps = boundary_covers(&strip, &uses_with(&edges), None, SURFACE_GAP_MARGIN, 1.0)
+        .unwrap()
+        .expect("the strip's four sides");
+    assert_eq!(gaps.len(), 4);
+    assert!((off..off + 1e-9).contains(&gaps[0]), "{gaps:?}");
+    assert!(gaps[2] < 1e-9, "{gaps:?}");
+    // The same edge with another middle weight is a different curve: no proof.
+    let mut other = edges.clone();
+    other[0].0 = Curve::RationalSpline {
+        knots: vec![0., 0., 0., 1., 1., 1.],
+        homogeneous: vec![
+            homogeneous([3., 0., 3.], 1.0),
+            homogeneous([0., off, 3.], 0.7),
+            homogeneous([0., 3., 3.], 1.0),
+        ],
+    };
+    assert_eq!(
+        boundary_covers(&strip, &uses_with(&other), None, SURFACE_GAP_MARGIN, 1.0).unwrap(),
+        None
+    );
+    // The corner patch: three edges and a collapsed side.
+    let corner = conic_corner();
+    let edges = vec![
+        (conic([3., 0., 3.], [0., off, 3.], [0., 3., 3.]), [0., 1.]),
+        (conic([0., 3., 3.], [0., 3., 0.], [3., 3., 0.]), [0., 1.]),
+        (conic([3., 3., 0.], [3., 0., 0.], [3., 0., 3.]), [0., 1.]),
+    ];
+    let gaps = boundary_covers(&corner, &uses_with(&edges), None, SURFACE_GAP_MARGIN, 1.0)
+        .unwrap()
+        .expect("the corner's three sides");
+    assert_eq!(gaps.len(), 3);
+    assert!(gaps.iter().all(|g| *g < 1e-4), "{gaps:?}");
+    // Four uses of a patch with a collapsed side, or two, are not the whole patch.
+    assert_eq!(
+        boundary_covers(
+            &corner,
+            &uses_with(&edges[..2]),
+            None,
+            SURFACE_GAP_MARGIN,
+            1.0
+        )
+        .unwrap(),
+        None
+    );
+}
+
+/// A face's parameter box drops the sides it does not hold before they are ranked: the line is the
+/// face's boundary only where the box holds it.
+#[test]
+fn a_side_outside_the_faces_box_is_no_boundary_of_it() {
+    let surface = twisted(2.);
+    let tol = 1e-3;
+    for (side, (from, to)) in SIDES.iter().enumerate() {
+        let edge = boundary_edge(2., *from, *to, 2e-5);
+        let eval = CurveEval::new(&edge).unwrap();
+        let line = |face: Option<[[f64; 2]; 2]>| {
+            On::new(&surface)
+                .unwrap()
+                .within(face)
+                .boundary_line(&edge, &eval, [0., 1.], tol)
+        };
+        // The whole box, a padded one, and none: the side is found, and said to be the one it is.
+        for face in [
+            None,
+            Some([[0., 1.], [0., 1.]]),
+            Some([[-1e-12, 1.], [0., 1. + 1e-12]]),
+            Some([[-1., 2.], [-1., 2.]]),
+        ] {
+            assert_eq!(line(face).map(|b| b.side), Some(side), "{side} in {face:?}");
+        }
+        // A box that does not reach the side: not chosen. Each of the four halves of the patch
+        // holds two sides whole and the ends of the others.
+        for (name, half) in [
+            ("v from 0.5", [[0., 1.], [0.5, 1.]]),
+            ("v to 0.5", [[0., 1.], [0., 0.5]]),
+            ("u from 0.5", [[0.5, 1.], [0., 1.]]),
+            ("u to 0.5", [[0., 0.5], [0., 1.]]),
+        ] {
+            let holds = [from, to]
+                .iter()
+                .all(|q| q.iter().zip(half).all(|(x, r)| *x >= r[0] && *x <= r[1]));
+            assert_eq!(line(Some(half)).is_some(), holds, "side {side} in {name}");
+        }
+    }
+    // The ranking is among the sides the box holds: a box over the v = 1 half, where v = 0's
+    // edge is no candidate, gives the edge of the side v = 1 its own side, and v = 0's nothing.
+    let top = Some([[0., 1.], [0.5, 1.]]);
+    let low = boundary_edge(2., [0., 0.], [1., 0.], 0.);
+    let (on, eval) = (
+        On::new(&surface).unwrap().within(top),
+        CurveEval::new(&low).unwrap(),
+    );
+    assert_eq!(on.boundary_line(&low, &eval, [0., 1.], tol), None);
+    let found = |face| {
+        covered_on(
+            &On::new(&surface).unwrap().within(face),
+            &low,
+            [0., 1.],
+            1e-6,
+            SURFACE_GAP_MARGIN,
+            1.0,
+            BOUNDARY_GAP_CAP,
+        )
+        .unwrap()
+    };
+    assert!(found(None).is_some_and(|(_, side)| side == 0));
+    assert_eq!(found(top), None);
+}
+
+/// The four sides of [`twisted`] as the face's one loop: each `off` mm above its side, edge ids
+/// 0 to 3 in the order of `order` (indices into [`SIDES`]), each running `reversed` where it says.
+fn whole_patch(off: f64, order: [usize; 4], reversed: [bool; 4]) -> Vec<(Curve, [f64; 2])> {
+    order
+        .iter()
+        .zip(reversed)
+        .map(|(k, r)| {
+            let (from, to) = SIDES[*k];
+            let (a, b) = if r { (to, from) } else { (from, to) };
+            (boundary_edge(2., a, b, off), [0., 1.])
+        })
+        .collect()
+}
+
+fn uses_of<'a>(edges: &'a [(Curve, [f64; 2])], ids: &[u32]) -> Vec<EdgeUse<'a>> {
+    edges
+        .iter()
+        .zip(ids)
+        .map(|((curve, interval), edge)| EdgeUse {
+            edge: *edge,
+            curve,
+            interval: *interval,
+            forward: true,
+            tolerance: 1e-6,
+            given: None,
+        })
+        .collect()
+}
+
+/// A face is read as the whole patch only where its uses are exactly the four natural sides, one
+/// each, each covered: in any order or direction it gives the four gaps (each what the per-edge
+/// question gives); three uses, a side used twice, an edge used twice, a side with no edge, an
+/// edge on no side, a box that is a part of the patch, a rational patch or a plane give none.
+#[test]
+fn a_face_is_the_whole_patch_only_as_its_four_natural_sides() {
+    let surface = twisted(2.);
+    let margin = SURFACE_GAP_MARGIN;
+    let covers = |s: &Surface, uses: &[EdgeUse<'_>], domain| {
+        boundary_covers(s, uses, domain, margin, 1.0).unwrap()
+    };
+    let ids = [10, 11, 12, 13];
+    for (order, reversed) in [
+        ([0, 1, 2, 3], [false; 4]),
+        ([3, 2, 1, 0], [true; 4]),
+        ([2, 0, 3, 1], [true, false, false, true]),
+    ] {
+        let edges = whole_patch(2e-5, order, reversed);
+        let uses = uses_of(&edges, &ids);
+        let gaps =
+            covers(&surface, &uses, None).unwrap_or_else(|| panic!("{order:?} {reversed:?}"));
+        assert_eq!(gaps.len(), 4);
+        for (g, (edge, interval)) in gaps.iter().zip(&edges) {
+            let one = boundary_covered(&surface, edge, *interval, 1e-6, margin, 1.0).unwrap();
+            assert_eq!(Some(*g), one, "{order:?}");
+            assert!(*g >= 2e-5 && *g <= 2e-5 + 1e-9, "{g}");
+        }
+        // The natural box, as it is or padded, is the whole patch; a part of it is a trimmed face.
+        let natural = Some([[0., 1.], [0., 1.]]);
+        assert_eq!(covers(&surface, &uses, natural), Some(gaps.clone()));
+        assert_eq!(
+            covers(&surface, &uses, Some([[0., 1. + 1e-12], [0., 1.]])),
+            Some(gaps.clone())
+        );
+        for part in [
+            [[0., 1.], [0., 0.5]],
+            [[0.1, 1.], [0., 1.]],
+            [[0., 1.], [0., 1.1]],
+            [[0., 1.], [f64::NAN, 1.]],
+        ] {
+            assert_eq!(covers(&surface, &uses, Some(part)), None, "{part:?}");
+        }
+        // Three uses, none, or five.
+        assert_eq!(covers(&surface, &uses[..3], None), None);
+        assert_eq!(covers(&surface, &[], None), None);
+        let mut five = edges.clone();
+        five.push(five[0].clone());
+        assert_eq!(
+            covers(&surface, &uses_of(&five, &[10, 11, 12, 13, 14]), None),
+            None
+        );
+        // An edge used twice (the same id, so four uses of three edges), or a side twice (two
+        // edges on one side, and none on another).
+        assert_eq!(
+            covers(&surface, &uses_of(&edges, &[10, 11, 12, 12]), None),
+            None
+        );
+        let mut twice = edges.clone();
+        twice[3] = twice[0].clone();
+        assert_eq!(covers(&surface, &uses_of(&twice, &ids), None), None);
+        // An edge that is no boundary, or off by more than the cap.
+        let mut trimmed = edges.clone();
+        trimmed[2] = (
+            Curve::Spline {
+                knots: vec![0., 0., 1., 1.],
+                points: vec![[5., 0., 0.], [5., 10., 1.]],
+            },
+            [0., 1.],
+        );
+        assert_eq!(covers(&surface, &uses_of(&trimmed, &ids), None), None);
+        let mut far = edges.clone();
+        far[1] = whole_patch(0.5, order, reversed).swap_remove(1);
+        assert_eq!(covers(&surface, &uses_of(&far, &ids), None), None);
+    }
+    // Not a polynomial patch: a plane, a rational net.
+    let edges = whole_patch(0., [0, 1, 2, 3], [false; 4]);
+    let uses = uses_of(&edges, &ids);
+    let plane = Surface::Plane {
+        origin: [0.; 3],
+        u_axis: [10., 0., 0.],
+        v_axis: [0., 10., 0.],
+    };
+    let rational = Surface::RationalSpline {
+        u_knots: vec![0., 0., 1., 1.],
+        v_knots: vec![0., 0., 1., 1.],
+        homogeneous: vec![
+            vec![[0., 0., 0., 1.], [0., 10., 0., 1.]],
+            vec![[10., 0., 0., 1.], [20., 20., 4., 2.]],
+        ],
+    };
+    assert_eq!(covers(&plane, &uses, None), None);
+    assert_eq!(covers(&rational, &uses, None), None);
+    // Numbers that are not numbers are errors, never a panic.
+    for (margin, most) in [(f64::NAN, 1.0), (3.0, 0.0), (-3.0, 1.0)] {
+        assert!(boundary_covers(&surface, &uses, None, margin, most).is_err());
+    }
+    let mut bad = uses.clone();
+    bad[0].tolerance = f64::NAN;
+    assert!(boundary_covers(&surface, &bad, None, margin, 1.0).is_err());
 }

@@ -914,3 +914,100 @@ fn a_thin_half_torus_is_sized_by_its_edges_not_its_vertices() {
         }
     }
 }
+
+/// A dense periodic wavy B-spline face (361 x 12 control points, 24 circumferential ripples)
+/// trimmed by 12 interior holes plans cleanly at display tolerance with exact boundary coverage
+/// and zero refused faces, and `Curve2::evaluator` agrees with `Curve2::eval` on dense pcurves.
+#[test]
+fn dense_trimmed_periodic_bspline_face_plans_at_display_tolerance() {
+    let clamped = |p: usize, n: usize| {
+        let mut k = vec![0.0; p + 1];
+        let inner = n - p - 1;
+        k.extend((1..=inner).map(|i| i as f64 / (inner + 1) as f64));
+        k.extend(vec![1.0; p + 1]);
+        k
+    };
+    let (nu, nv) = (361, 12);
+    let ku = clamped(3, nu);
+    let kv = clamped(3, nv);
+    let mut ctrl = Vec::with_capacity(nu * nv);
+    for j in 0..nv {
+        let s = j as f64 / (nv - 1) as f64;
+        for i in 0..nu {
+            let t = std::f64::consts::TAU * (i as f64 / (nu - 1) as f64);
+            let r = 10.0 + 0.4 * (24.0 * t + 0.6 * s).sin() + 0.3 * (3.0 * t + 0.2 * s).sin();
+            ctrl.push([r * t.cos(), r * t.sin(), 30.0 * s, 1.0]);
+        }
+    }
+    let eval = EvalSurface::nurbs([3, 3], [ku.clone(), kv], [nu, nv], ctrl);
+    let face = poles::Face::new(eval, 1e-6);
+    let size = 40.0;
+    let tol = crate::MeshTolerance::display_of(size);
+    let (chord, turn) = tol.rules(size);
+    let rules = size::Rules::new(chord, size, turn);
+    let face_size = size::face_size(&face, &uv::domain(&face), &rules);
+    let sample_uv = |uvs: Vec<[f64; 2]>| {
+        let pts = uvs.iter().map(|&[u, v]| face.derivs(u, v).expect("evaluates").0).collect();
+        seam::Loop { uv: uvs, pts }
+    };
+    // Outer loop along the parameter box [0, 1] x [0, 1].
+    let (bu, bv) = (360usize, 24usize);
+    let mut outer = Vec::with_capacity(2 * (bu + bv));
+    for i in 0..bu {
+        outer.push([i as f64 / bu as f64, 0.0]);
+    }
+    for j in 0..bv {
+        outer.push([1.0, j as f64 / bv as f64]);
+    }
+    for i in (1..=bu).rev() {
+        outer.push([i as f64 / bu as f64, 1.0]);
+    }
+    for j in (1..=bv).rev() {
+        outer.push([0.0, j as f64 / bv as f64]);
+    }
+    let mut loops = vec![sample_uv(outer)];
+    // 12 radial holes evenly spaced around u, clockwise in (u, v).
+    for h in 0..12 {
+        let cu = (h as f64 + 0.5) / 12.0;
+        let cv = if h % 2 == 0 { 0.35 } else { 0.65 };
+        let (ru, rv) = (0.022, 0.05);
+        let hole: Vec<[f64; 2]> = (0..24)
+            .map(|k| {
+                let a = -std::f64::consts::TAU * (k as f64 / 24.0);
+                [cu + ru * a.cos(), cv + rv * a.sin()]
+            })
+            .collect();
+        loops.push(sample_uv(hole));
+    }
+    let (planned, stats) = plan_or_fill(0, "spline", &face, &loops, &rules, face_size, 0.0, None, Purpose::Display).expect("plans");
+    assert!(stats.lenient.is_empty(), "lenient: {:?}", stats.lenient);
+    let Planned::Face(fp) = planned else { panic!("display plan") };
+    assert!(!fp.triangles.is_empty());
+    let plan = TessPlan { surfaces: vec![face.into_eval()], faces: vec![FacePlan { surface: Some(0), ..fp }], edges: Vec::new(), edge_faces: Vec::new() };
+    let (mesh, refused) = plan.evaluate();
+    assert!(refused.is_empty(), "refused: {refused:?}");
+    assert!(!mesh.triangles.is_empty());
+
+    // Reusable Curve2Eval agrees with Curve2::eval and independent closed-form coordinates on a
+    // dense 361-point cubic pcurve (by Marsden's identity, u(t) = t and v(t) = 0.25 + 0.5 * t^2).
+    let pts: Vec<[f64; 2]> = (0..nu)
+        .map(|i| {
+            let (k1, k2, k3) = (ku[i + 1], ku[i + 2], ku[i + 3]);
+            let greville = (k1 + k2 + k3) / 3.0;
+            let quad = (k1 * k2 + k1 * k3 + k2 * k3) / 3.0;
+            [greville, 0.25 + 0.5 * quad]
+        })
+        .collect();
+    let pc = solidcore::eval::Curve2::Spline { knots: ku, points: pts };
+    let ev = pc.evaluator().expect("evaluator");
+    for k in 0..=20 {
+        let t = k as f64 / 20.0;
+        let p = ev.eval(t).expect("evaluates");
+        assert_eq!(Some(p), pc.eval(t), "t = {t}");
+        let expected = [t, 0.25 + 0.5 * t * t];
+        assert!(
+            (p[0] - expected[0]).abs() < 1e-12 && (p[1] - expected[1]).abs() < 1e-12,
+            "t = {t}: got {p:?}, expected {expected:?}"
+        );
+    }
+}

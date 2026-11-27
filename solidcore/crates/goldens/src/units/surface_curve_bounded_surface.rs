@@ -1425,7 +1425,7 @@ mod wr43_tests {
                     assert!(
                         m.contains("curve type not read")
                             || m.contains("curve dimension not read")
-                            || m.contains("the curve type read is not known"),
+                            || (m.contains("the curve type ") && m.contains(" is unknown")),
                         "{}: {m}",
                         c.name
                     );

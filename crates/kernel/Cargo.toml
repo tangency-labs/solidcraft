@@ -13,9 +13,14 @@ solidcore-record = { workspace = true }
 solidcore-ops = { workspace = true }
 solidcore-tess = { workspace = true }
 solidcraft-geom = { workspace = true }
+solidcraft-kernel-api = { workspace = true }
 solidcraft-smlib = { workspace = true }
 solidcraft-profile = { workspace = true }
 solidcore-step = { workspace = true }
+# CADIR read and write, for io (`services::cadir`).
+solidcore-cadir = { workspace = true }
+# CADIR's model types, which the exchange family's adapter reads and writes.
+cadmpeg-ir = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -25,7 +30,12 @@ web-time = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon = { workspace = true }
+sysinfo = { workspace = true }
 
 [dev-dependencies]
 solidcraft-profile = { workspace = true, features = ["enabled"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
+
+[features]
+# Solidcore's own profiler, written as JSON Lines through `write_kernel_profiles`.
+solidcore-profile = ["solidcraft-smlib/solidcore-profile"]
