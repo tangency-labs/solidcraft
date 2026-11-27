@@ -140,6 +140,59 @@ fn a_shell_keeps_its_rounds_as_blends_of_the_moved_radius() {
     );
 }
 
+/// A cylinder r `r` from `z = bottom` to 40, cut by the plane through `(0, 0, 25 - drop)`
+/// tilted 20° about the x axis (its normal `(0, -sin 20°, cos 20°)`, `drop` along it), its
+/// slanted rim rounded `round`. The round between the plane and the cylinder at a slant
+/// is of an exact class whose net is a rational B-spline (its spine an ellipse).
+#[allow(clippy::disallowed_methods)] // the fixture's placement, not ops geometry
+fn slanted_rim_cylinder(r: f64, bottom: f64, drop: f64, round: f64) -> Body {
+    let tilt = 20f64.to_radians();
+    let cylinder = make_cylinder([0.0, 0.0, bottom], r, 40.0 - bottom).unwrap();
+    let cap = make_box([-60.0, -60.0, 25.0 - drop], [120.0, 120.0, 60.0 + drop]).unwrap();
+    cap.transform(&crate::affine::rotation([0.0, 0.0, 25.0], [1.0, 0.0, 0.0], tilt).unwrap())
+        .unwrap();
+    let body = crate::boolean::boolean(cylinder, cap, crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    // the rim where it crosses y = 0 on the tilted plane, at x = -r: away from the
+    // cylinder's seam at x = r
+    let rim = edge_at(&body, [-r, 0.0, 25.0 - drop / tilt.cos()]);
+    blend(&body, Blend::Round, &[rim], &[round], &[], Corners::Filled).unwrap();
+    body
+}
+
+/// A shell offsets a round of an exact class whose net is a B-spline (solidcore#3424: a
+/// round on a slanted rim refused every wall since the shell kept the rounds' definitions).
+/// That round's own offset is an offset surface of its net, with no NURBS form to certify
+/// the moved definition on; it is the exact offset all the same and is kept without one.
+/// The body is convex, so a closed shell of wall 1 leaves the cavity of its points at least
+/// 1 inside: the same construction on the faces moved in by 1, the cylinder r 9 from z = 1,
+/// the plane moved 1 along its normal and the rim's round 2 - 1. The shell's volume is the
+/// body's less that cavity's, each volume within its relative accuracy 1e-8, and the walls
+/// placed within the body's tolerance over both boundaries, each of less area than the
+/// uncut cylinder's side and two of its slanted ends, 2 pi 10 40 + 2 pi 10² / cos 20°.
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_round_on_a_slanted_rim_shells_by_its_offset_surface() {
+    all_fixes();
+    let body = slanted_rim_cylinder(10.0, 0.0, 0.0, 2.0);
+    let cavity = slanted_rim_cylinder(9.0, 1.0, 1.0, 1.0);
+    let (outer, inner) = (volume(&body), volume(&cavity));
+    shell(&body, &order(&body), &[], -1.0).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    body.check_solid().unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert_eq!(report.failures, 0, "{}", report.text);
+    let measured = volume(&body);
+    let area = 2.0 * PI * 10.0 * 40.0 + 2.0 * PI * 100.0 / 20f64.to_radians().cos();
+    let bound = 1e-8 * (outer + inner + measured) + body.tolerance().unwrap() * 2.0 * area;
+    assert!(
+        (measured - (outer - inner)).abs() <= bound,
+        "{measured} vs {} within {bound}",
+        outer - inner
+    );
+}
+
 #[test]
 fn a_cylinder_shells_open_at_its_top() {
     all_fixes();
@@ -491,6 +544,87 @@ fn a_half_torus_keeps_a_periodic_seam_when_its_offsets_still_meet() {
         .collect();
     assert_eq!(seam_edges.len(), 1, "one retained outer-rim seam");
     assert_eq!(query.edge_faces(seam_edges[0]), [cavity, cavity]);
+}
+
+/// A cylinder r 12.7 to z = 7.9375 whose cap is split by the plane y = 0 and whose rim's two
+/// arcs are chamfered 1.5875, with a cylinder r 11.1125 standing 11.1125 on what is left of
+/// the cap and its top rim rounded r 11: a dome on a chamfered base (T-1504's power dome).
+/// The dome's seam runs from a vertex of the chamfer's arcs to the round's rim, which is
+/// tangent to the dome's side.
+#[allow(clippy::disallowed_methods)] // the fixture's placement, not ops geometry
+fn dome_on_a_chamfered_base() -> Body {
+    let (r, h, c, dome) = (12.7, 7.9375, 1.5875, 11.1125);
+    let base = make_cylinder([0.0; 3], r, h).unwrap();
+    let base = split_by_plane(
+        &base,
+        [1.0, 1.0, h],
+        ([0.0; 3], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+    );
+    let arcs = [edge_at(&base, [0.0, r, h]), edge_at(&base, [0.0, -r, h])];
+    blend(&base, Blend::Chamfer, &arcs, &[c, c], &[], Corners::Filled).unwrap();
+    let side = make_cylinder([0.0, 0.0, h], dome, dome).unwrap();
+    let body = crate::boolean::boolean(base, side, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let rim = edge_at(&body, [0.0, dome, h + dome]);
+    blend(&body, Blend::Round, &[rim], &[11.0], &[], Corners::Filled).unwrap();
+    body
+}
+
+/// T-1504 (solidcore#3424): the dome on a chamfered base shells open at its bottom. Since the
+/// periodic-seam construction (#18885) it was refused, "the body built is not a manifold
+/// solid": at the dome's seam, the support beyond it is the round's offset, whose extension
+/// past its tangent rim is the dome's own offset cylinder. It contains the whole intersection
+/// of the chamfer's offset with that cylinder, so it bounds none of it, and the seam's
+/// ordinary trim applies, as where there is no support at all.
+///
+/// Every face moves in t = 1.5875 and the moved faces meet where they cross, so the cavity is
+/// the solid of revolution of the moved profile: the cylinder r 11.1125 up to the chamfer's
+/// line r + z = 19.05 moved in, r + z = 19.05 - t sqrt 2, which it meets at z1 = 5.69244; the
+/// frustum along that line to r 9.525 at z2 = 7.27994; the cylinder r 9.525 to the round's
+/// centre z = 8.05; the round r 11 - t about the circle r 0.1125 there, to z = 17.4625. The
+/// body is the same construction unmoved: cylinder r 12.7 to 6.35, frustum to r 11.1125 at
+/// 7.9375, cylinder to 8.05, round r 11. A cylinder is pi R² L, a frustum pi L (R1² + R1 R2 +
+/// R2²) / 3, and a round r a about the circle r b over a quarter turn
+/// pi (a b² + pi a² b / 2 + 2 a³ / 3).
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_dome_on_a_chamfered_base_shells_open_at_its_bottom() {
+    all_fixes();
+    let cylinder = |r: f64, l: f64| PI * r * r * l;
+    let frustum = |r1: f64, r2: f64, l: f64| PI * l * (r1 * r1 + r1 * r2 + r2 * r2) / 3.0;
+    let round = |a: f64, b: f64| PI * (a * b * b + PI * a * a * b / 2.0 + 2.0 * a * a * a / 3.0);
+    let (r, h, c, dome, t) = (12.7, 7.9375, 1.5875, 11.1125, 1.5875);
+    let (centre, b) = (h + dome - 11.0, dome - 11.0);
+    let outer =
+        cylinder(r, h - c) + frustum(r, dome, c) + cylinder(dome, centre - h) + round(11.0, b);
+    let line = r + h - c - t * 2f64.sqrt();
+    let (z1, z2) = (line - (r - t), line - (dome - t));
+    let cavity = cylinder(r - t, z1)
+        + frustum(r - t, dome - t, z2 - z1)
+        + cylinder(dome - t, centre - z2)
+        + round(11.0 - t, b);
+    let body = dome_on_a_chamfered_base();
+    assert!(
+        rel(volume(&body), outer) < 1e-9,
+        "{} vs {outer}",
+        volume(&body)
+    );
+    let o = order(&body);
+    let bottom = face(&body, &o, |bx| {
+        bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+    });
+    shell(&body, &o, &[bottom], -t).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    body.check_solid().unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert_eq!(report.failures, 0, "{}", report.text);
+    let measured = volume(&body);
+    assert!(
+        rel(measured, outer - cavity) < 1e-9,
+        "{measured} vs {}",
+        outer - cavity
+    );
 }
 
 /// A 30 x 30 x 20 block with a conical recess from its bottom (radius 7.2 at z = 0, falling
@@ -2278,6 +2412,178 @@ fn a_box_with_a_lofted_tunnel_shelled_passes_the_full_check() {
     }
 }
 
+/// #23056's sections: the 16 control points of a closed uniform cubic spline round an ellipse
+/// 60 x 40 and one 50 x 32, as SolidCraft's sketch gave them (x across, z up).
+const WIDE_ELLIPSE: [[f64; 2]; 16] = [
+    [0.0, 40.0],
+    [22.961, 36.9552],
+    [42.4264, 28.2843],
+    [55.4328, 15.3073],
+    [60.0, 0.0],
+    [55.4328, -15.3073],
+    [42.4264, -28.2843],
+    [22.961, -36.9552],
+    [0.0, -40.0],
+    [-22.961, -36.9552],
+    [-42.4264, -28.2843],
+    [-55.4328, -15.3073],
+    [-60.0, 0.0],
+    [-55.4328, 15.3073],
+    [-42.4264, 28.2843],
+    [-22.961, 36.9552],
+];
+const NARROW_ELLIPSE: [[f64; 2]; 16] = [
+    [0.0, 32.0],
+    [19.1342, 29.5641],
+    [35.3553, 22.6274],
+    [46.194, 12.2459],
+    [50.0, 0.0],
+    [46.194, -12.2459],
+    [35.3553, -22.6274],
+    [19.1342, -29.5641],
+    [0.0, -32.0],
+    [-19.1342, -29.5641],
+    [-35.3553, -22.6274],
+    [-46.194, -12.2459],
+    [-50.0, 0.0],
+    [-46.194, 12.2459],
+    [-35.3553, 22.6274],
+    [-19.1342, 29.5641],
+];
+
+/// The closed uniform cubic spline of the control points `cvs` on the plane y = `y`, as one
+/// curve of its 16 Bézier pieces (`knots` 0..16, each inner one triple), the form SolidCraft
+/// lofts. It starts at the spline's point at control point 2, (P1 + 4 P2 + P3) / 6, and runs
+/// towards control point 1, as SolidCraft traced it: the loft's seam runs from there on the
+/// first section to the same point on the second.
+fn closed_spline_section(cvs: &[[f64; 2]; 16], y: f64) -> Vec<crate::sweep::Curve> {
+    // the control points from 2 backwards: q(j) = P(2 - j), periodically
+    let q = |j: usize| {
+        let [x, z] = cvs[(18 - j % 16) % 16];
+        [x, y, z]
+    };
+    let mix = |w: [f64; 3], p: [[f64; 3]; 3]| -> [f64; 4] {
+        let s = w[0] + w[1] + w[2];
+        let c = |i: usize| (w[0] * p[0][i] + w[1] * p[1][i] + w[2] * p[2][i]) / s;
+        [c(0), c(1), c(2), 1.0]
+    };
+    let mut points = Vec::new();
+    for j in 0..16 {
+        // piece j between the knots of q(j) and q(j + 1): its first three Bézier points
+        let (before, here, after) = (q(j + 15), q(j), q(j + 1));
+        points.push(mix([1.0, 4.0, 1.0], [before, here, after]));
+        points.push(mix([0.0, 2.0, 1.0], [before, here, after]));
+        points.push(mix([0.0, 1.0, 2.0], [before, here, after]));
+    }
+    points.push(points[0]);
+    let mut knots = vec![0.0; 4];
+    for i in 1..16 {
+        knots.extend([f64::from(i); 3]);
+    }
+    knots.extend([16.0; 4]);
+    vec![crate::sweep::Curve::Nurbs {
+        degree: 3,
+        points,
+        knots,
+    }]
+}
+
+/// #23056: the ruled loft of [`WIDE_ELLIPSE`] at y = 0 and [`NARROW_ELLIPSE`] at y = 60, one
+/// closed face whose seam runs from (41.35, 0, 27.57) to (34.46, 60, 22.05), thickened 3 to
+/// its outside. The wall is the loft face, its offset and a ruled wall at each end, each closed
+/// on itself with a seam of its own.
+fn thickened_closed_loft() -> Body {
+    let (wall, _) = crate::sweep::loft_sheet(
+        &[
+            closed_spline_section(&WIDE_ELLIPSE, 0.0),
+            closed_spline_section(&NARROW_ELLIPSE, 60.0),
+        ],
+        1,
+    )
+    .unwrap();
+    thicken(&wall, 3.0, false).unwrap();
+    wall
+}
+
+/// #23056: a box x 15..45, y 30..70, z 0..60 cut from the top of [`thickened_closed_loft`]
+/// crosses the seams of the loft face and of its offset at y = 30, and takes the seam of the
+/// wall at y = 60 away. The notch adds the box's planes x = 15, x = 45 and y = 30 to the
+/// wall's four faces (the box's other sides miss the wall: at z = 0 it lies beyond x = 50), and
+/// the loft face and its offset still go all the way round below y = 30, each one face with
+/// its seam: seven faces, one closed solid, which SMLib's full check takes. The part of the
+/// wall inside the box, cut across the same seams, passes it too, and the two together are
+/// the wall: their volumes add up to its volume, within twice the volumes' accuracy (1e-8
+/// each). The offset face's seam was its lift from the exact offset, up to 8.5e-7 off the
+/// certified net that replaced that offset, so the notch's corner on it lay that far beside
+/// the net's seam, and test #36 ("Face Near missing Seam") failed.
+#[test]
+fn a_box_cut_across_the_seam_of_a_thickened_closed_loft_passes_the_full_check() {
+    all_fixes();
+    let wall = thickened_closed_loft();
+    let report = wall.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "the wall: {}", report.text);
+    let whole = volume(&wall);
+    let notch = || make_box([15.0, 30.0, 0.0], [30.0, 40.0, 60.0]).unwrap();
+    let inside =
+        crate::boolean::boolean(wall.copy().unwrap(), notch(), crate::BooleanOp::Intersect)
+            .unwrap()
+            .unwrap();
+    let cut = crate::boolean::boolean(wall, notch(), crate::BooleanOp::Subtract)
+        .unwrap()
+        .unwrap();
+    assert!(cut.is_manifold_solid().unwrap());
+    assert_eq!(cut.counts().unwrap()[0], 7);
+    let report = cut.check(crate::CheckLevel::All).unwrap();
+    assert!(report.is_valid(), "the notched wall: {}", report.text);
+    let report = inside.check(crate::CheckLevel::All).unwrap();
+    assert!(
+        report.is_valid(),
+        "the wall inside the box: {}",
+        report.text
+    );
+    let parts = volume(&cut) + volume(&inside);
+    assert!(rel(parts, whole) < 2e-8, "{parts} vs {whole}");
+}
+
+/// #23056: [`thickened_closed_loft`] split by the plane x = 38 or z = 25, each crossing the
+/// seams of the loft face and of its offset (x 41.35 to 34.46, z 27.57 to 22.05 along the
+/// loft's), gives two closed solids that SMLib's full check takes, and that together are the
+/// wall: their volumes add up to its volume, within twice the volumes' accuracy (1e-8 each).
+#[test]
+fn splits_across_the_seam_of_a_thickened_closed_loft_pass_the_full_check() {
+    use crate::split::{split_body, Tool};
+    use solidcore_record::brep::Surface as RecordSurface;
+    all_fixes();
+    let x38 = Tool {
+        surface: RecordSurface::Plane {
+            origin: [38.0, 0.0, 0.0],
+            u_axis: [0.0, 1.0, 0.0],
+            v_axis: [0.0, 0.0, 1.0],
+        },
+        domain: [[-10.0, 70.0], [-60.0, 60.0]],
+    };
+    let z25 = Tool {
+        surface: RecordSurface::Plane {
+            origin: [0.0, 0.0, 25.0],
+            u_axis: [1.0, 0.0, 0.0],
+            v_axis: [0.0, 1.0, 0.0],
+        },
+        domain: [[-80.0, 80.0], [-10.0, 70.0]],
+    };
+    for (name, plane) in [("x = 38", x38), ("z = 25", z25)] {
+        let wall = thickened_closed_loft();
+        let whole = volume(&wall);
+        let (a, b) = split_body(&wall, &plane).unwrap().unwrap();
+        let halves = volume(&a) + volume(&b);
+        assert!(rel(halves, whole) < 2e-8, "{name}: {halves} vs {whole}");
+        for half in [a, b] {
+            assert!(half.is_manifold_solid().unwrap(), "{name}");
+            let report = half.check(crate::CheckLevel::All).unwrap();
+            assert!(report.is_valid(), "{name}: {}", report.text);
+        }
+    }
+}
+
 /// The rounded rectangle `x` in [x0, x1], `z` in [z0, z1] with corners of radius 8 on the plane
 /// y = `y`, counter-clockwise about -y from its bottom side's start, as SolidCraft places a
 /// sketch on x = (1, 0, 0), y = (0, 0, 1).
@@ -2722,6 +3028,34 @@ mod drafts {
         let small = big + h * TAN_CONE;
         let v = PI * h * (big * big + big * small + small * small) / 3.0;
         assert!(rel(volume(&c), v) < 1e-9, "{} {v}", volume(&c));
+    }
+
+    /// #22807: an R 10, height 100 cylinder drafted 6 degrees about XY closes at z ~ 95.14 < 100.
+    /// The refusal is a typed geometric refusal (`OffsetRefusal::DraftConeCloses`), not
+    /// `Error::Unsupported`, and leaves the body untouched.
+    #[test]
+    fn a_cylinder_drafted_until_it_closes_is_refused_with_the_reason() {
+        // 6 degrees in radians (6 * pi / 180)
+        const SIX: f64 = 0.104_719_755_119_659_78;
+        all_fixes();
+        let c = make_cylinder([0.0; 3], 10.0, 100.0).unwrap();
+        let o = order(&c);
+        let before = c.to_smb(false).unwrap();
+        let err = draft(&c, &o, &[curved(&c, &o)], [0.0; 3], Z, Z, SIX).unwrap_err();
+        assert_eq!(
+            err,
+            Error::OffsetRefused {
+                face: None,
+                why: crate::OffsetRefusal::DraftConeCloses,
+            }
+        );
+        let text = err.to_string();
+        assert!(
+            text.contains("a drafted cone would close within the face"),
+            "{text}"
+        );
+        assert!(!text.contains("not supported yet"), "{text}");
+        assert_eq!(c.to_smb(false).unwrap(), before);
     }
 
     /// Refused before the kernel or by its draft, the body as it came in: no neutral normal, no

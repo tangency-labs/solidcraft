@@ -20,7 +20,8 @@ use std::f64::consts::{FRAC_PI_2, TAU};
 use crate::math::Vec2;
 use crate::prism::profile::{cross2, Seg2};
 
-use super::region::{Convex, EPS};
+use super::gap;
+use super::region::{Bounds, Convex, Prim, EPS};
 use super::vec::ring_next;
 
 /// The room (mm) a cell is looked at with beyond its box: a curve is found in the buckets of its
@@ -477,18 +478,12 @@ impl ExactField {
         )
     }
 
-    /// Whether any edge reaches `outline`: it meets the outline shrunk by [`EPS`] (crosses it, or
-    /// lies inside it), or, with a `margin`, lies nearer than that to it. Measured exactly, to
-    /// lines and arcs in closed form and to other curves on the curves themselves.
-    pub fn meets(&self, outline: &CellOutline, margin: f64) -> bool {
-        let reach = margin.max(0.0) + 4.0 * CHORD;
-        let (b0, b1, b2, b3) = match *outline {
-            CellOutline::Circle { c, r } => (c.x - r, c.y - r, c.x + r, c.y + r),
-            CellOutline::Polygon(p) => (p.bounds.x0, p.bounds.y0, p.bounds.x1, p.bounds.y1),
-        };
+    /// The indices of the edges in the buckets that the box `(x0, y0, x1, y1)` grown by `reach`
+    /// touches, sorted and without repeats.
+    fn near_edges(&self, (x0, y0, x1, y1): (f64, f64, f64, f64), reach: f64) -> Vec<usize> {
         let ((i0, j0), (i1, j1)) = (
-            self.index(b0 - reach, b1 - reach),
-            self.index(b2 + reach, b3 + reach),
+            self.index(x0 - reach, y0 - reach),
+            self.index(x1 + reach, y1 + reach),
         );
         let mut near: Vec<usize> = Vec::new();
         for j in j0..=j1 {
@@ -500,6 +495,50 @@ impl ExactField {
         }
         near.sort_unstable();
         near.dedup();
+        near
+    }
+
+    /// Whether an edge comes within `limit` of any piece of `prims` (a sketched cell's outline,
+    /// whose box is `bounds`): lines and arcs in closed form, a curve on its chords (a decision on
+    /// the near side, short of the curve's own distance by at most `2 * CHORD`). With
+    /// `curves_only`, only the curves count (a line or an arc may touch the cell).
+    pub fn within_prims(
+        &self,
+        prims: &[Prim],
+        bounds: &Bounds,
+        limit: f64,
+        curves_only: bool,
+    ) -> bool {
+        let reach = limit.max(0.0) + 4.0 * CHORD;
+        let (b0, b1, b2, b3) = (bounds.x0, bounds.y0, bounds.x1, bounds.y1);
+        for k in self.near_edges((b0, b1, b2, b3), reach) {
+            let (Some(edge), Some(&bx)) = (self.edges.get(k), self.boxes.get(k)) else {
+                continue;
+            };
+            if bx[0] > b2 + reach || bx[2] < b0 - reach || bx[1] > b3 + reach || bx[3] < b1 - reach
+            {
+                continue;
+            }
+            if curves_only && !matches!(edge, Edge::Curve { .. }) {
+                continue;
+            }
+            if prims.iter().any(|p| edge_within_prim(edge, p, limit)) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Whether any edge reaches `outline`: it meets the outline shrunk by [`EPS`] (crosses it, or
+    /// lies inside it), or, with a `margin`, lies nearer than that to it. Measured exactly, to
+    /// lines and arcs in closed form and to other curves on the curves themselves.
+    pub fn meets(&self, outline: &CellOutline, margin: f64) -> bool {
+        let reach = margin.max(0.0) + 4.0 * CHORD;
+        let (b0, b1, b2, b3) = match *outline {
+            CellOutline::Circle { c, r } => (c.x - r, c.y - r, c.x + r, c.y + r),
+            CellOutline::Polygon(p) => (p.bounds.x0, p.bounds.y0, p.bounds.x1, p.bounds.y1),
+        };
+        let near = self.near_edges((b0, b1, b2, b3), reach);
         let inner = match outline {
             CellOutline::Polygon(p) => Some(p.shrunk(EPS)),
             CellOutline::Circle { .. } => None,
@@ -534,6 +573,37 @@ impl ExactField {
             }
         }
         false
+    }
+}
+
+/// Whether `edge` comes within `limit` of the piece `p` (a line or an arc): a line against the
+/// edge with [`Edge::within_segment`], an arc against a line or an arc edge in closed form
+/// ([`gap::prim_distance`] and `arc_to_segment`) and against a curve on its chords.
+fn edge_within_prim(edge: &Edge, p: &Prim, limit: f64) -> bool {
+    match *p {
+        Prim::Line { a, b, .. } => edge.within_segment(a, b, limit),
+        Prim::Arc {
+            c, r, a0, sweep, ..
+        } => {
+            let arc = Edge::Arc {
+                center: c,
+                radius: r,
+                start: a0,
+                sweep,
+            };
+            match edge {
+                Edge::Line(s, e) => arc.within_segment(*s, *e, limit),
+                Edge::Arc {
+                    center,
+                    radius,
+                    start,
+                    sweep: swept,
+                } => !(gap::prim_distance(p, &Prim::arc(*center, *radius, *start, *swept)) > limit),
+                Edge::Curve { chords, .. } => {
+                    chords_within(chords, limit, |s, e| arc.arc_to_segment(s, e))
+                }
+            }
+        }
     }
 }
 

@@ -6,6 +6,8 @@
 //!   no record of the cut is kept. Where it reaches an edge a rip cut the panel back to (the gap
 //!   that closes a corner), it runs on across the rip's lap to the rip's line: the panel's
 //!   outline runs to that line, past its material, and the rip cuts back what is left of it;
+//! - where it gives a panel material back within a cut-out, through the sheet with square walls
+//!   (a round in an inside corner of the cut-out), the panel's outline holds it;
 //! - where it stops inside the thickness on a floor parallel to the panel, the panel keeps a
 //!   recess, from its own face or the face one thickness into the material, to the floor's depth;
 //!   a later cut through a recess takes it with the material;
@@ -1241,13 +1243,65 @@ fn ray_crossings(s: &Seg2, end: Vec2, p: Vec2) -> usize {
     match *s {
         Seg2::Line { a, .. } => usize::from(counts(a.y, end.y) && a.x + (p.y - a.y) * (end.x - a.x) / (end.y - a.y) > p.x),
         Seg2::Arc { center, radius, start, sweep } => {
+            let start_y = s.start().y;
+            if radius >= 0.0 && radius.is_finite() {
+                let y_lo = (center.y - radius).min(start_y).min(end.y);
+                let y_hi = (center.y + radius).max(start_y).max(end.y);
+                let x_hi = center.x + radius * (1.0 + 1e-12) + 1e-12;
+                if p.y < y_lo || p.y >= y_hi || p.x > x_hi {
+                    return 0;
+                }
+            }
             // Pieces between the arc's ends and its circle's top and bottom.
             let (lo, hi) = (start.min(start + sweep), start.max(start + sweep));
-            let mut stops = vec![0.0];
-            let mut turn = FRAC_PI_2 + PI * ((lo - FRAC_PI_2) / PI).ceil();
+            let y_at = |t: f64| match t {
+                t if t <= 0.0 => start_y,
+                t if t >= 1.0 => end.y,
+                t => center.y + radius * (start + sweep * t).sin(),
+            };
+            let count_stops = |stops: &mut [f64]| {
+                stops.sort_by(f64::total_cmp);
+                stops
+                    .windows(2)
+                    .filter(|w| {
+                        let &[t0, t1] = *w else { return false };
+                        // Along a piece the way across from the center keeps its side: x is on it.
+                        let side = (start + sweep * 0.5 * (t0 + t1)).cos().signum();
+                        let x = center.x + side * (radius * radius - (p.y - center.y).powi(2)).max(0.0).sqrt();
+                        counts(y_at(t0), y_at(t1)) && x > p.x
+                    })
+                    .count()
+            };
             // A top or a bottom each half turn on. An arc whose angles are not finite has none
             // to stop at, nor one whose angles are so large that a half turn no longer moves
             // them: past either, the loop would never end.
+            if sweep.abs() <= TAU {
+                let mut buf = [0.0_f64; 6];
+                let mut n = 1usize;
+                let mut overflow = false;
+                let mut turn = FRAC_PI_2 + PI * ((lo - FRAC_PI_2) / PI).ceil();
+                while hi.is_finite() && turn < hi && turn + PI > turn {
+                    if turn > lo {
+                        if let Some(slot) = buf.get_mut(n) {
+                            *slot = (turn - start) / sweep;
+                            n += 1;
+                        } else {
+                            overflow = true;
+                            break;
+                        }
+                    }
+                    turn += PI;
+                }
+                if !overflow && let Some(slot) = buf.get_mut(n) {
+                    *slot = 1.0;
+                    n += 1;
+                    if let Some(slice) = buf.get_mut(..n) {
+                        return count_stops(slice);
+                    }
+                }
+            }
+            let mut stops = vec![0.0];
+            let mut turn = FRAC_PI_2 + PI * ((lo - FRAC_PI_2) / PI).ceil();
             while hi.is_finite() && turn < hi && turn + PI > turn {
                 if turn > lo {
                     stops.push((turn - start) / sweep);
@@ -1255,22 +1309,7 @@ fn ray_crossings(s: &Seg2, end: Vec2, p: Vec2) -> usize {
                 turn += PI;
             }
             stops.push(1.0);
-            stops.sort_by(f64::total_cmp);
-            let y_at = |t: f64| match t {
-                t if t <= 0.0 => s.start().y,
-                t if t >= 1.0 => end.y,
-                t => center.y + radius * (start + sweep * t).sin(),
-            };
-            stops
-                .windows(2)
-                .filter(|w| {
-                    let &[t0, t1] = *w else { return false };
-                    // Along a piece the way across from the center keeps its side: x is on it.
-                    let side = (start + sweep * 0.5 * (t0 + t1)).cos().signum();
-                    let x = center.x + side * (radius * radius - (p.y - center.y).powi(2)).max(0.0).sqrt();
-                    counts(y_at(t0), y_at(t1)) && x > p.x
-                })
-                .count()
+            count_stops(&mut stops)
         }
         _ => {
             let Some(curve) = rational(s) else { return 0 };
@@ -1744,6 +1783,21 @@ fn onto_panels(
             .transpose()
             .map_err(|e| e.to_string())?
             .unwrap_or_default();
+        // What the feature gave back to the panel within its holes (a round in an inside corner
+        // of a cut-out) is the panel's own: its region grows by it, and its walls are read there.
+        let (region, here) = match rest.as_deref() {
+            Some(w) if plane => {
+                let others: Vec<usize> = w.iter().copied().filter(|f| !here.contains(f)).collect();
+                match given_back(sk, p, now, &qb, &slab, frame, &others, tol, sag)? {
+                    Some(grown) => {
+                        let here = within(&qb, &slab, &grown, w, tol * 100.0, sag).map_err(|e| e.to_string())?;
+                        (grown, here)
+                    }
+                    None => (panel.region.clone(), here),
+                }
+            }
+            _ => (panel.region.clone(), here),
+        };
         taken.claimed.extend(here.iter().copied());
         if !plane {
             // A roll: what went through it is its walls' shadow.
@@ -1768,7 +1822,7 @@ fn onto_panels(
         // surfaces too: a wall that leans is not square to the panel, whatever its faces show,
         // except a conical countersink opening square from either face, which the panel keeps.
         let (bands, bored) = lying(now, &qb, frame, t, &here, &panel.name, tol)?;
-        let read = |b: &Body, q: &Query| on_panel(b, q, frame, t, std::slice::from_ref(&panel.region), tol, drawn).map_err(|e| e.to_string());
+        let read = |b: &Body, q: &Query| on_panel(b, q, frame, t, std::slice::from_ref(&region), tol, drawn).map_err(|e| e.to_string());
         let (before, after) = (read(was, &qa)?, read(now, &qb)?);
         let cs_faces: BTreeSet<usize> = after.countersinks.iter().flat_map(|(_, faces)| faces.iter().copied()).collect();
         let others: Vec<usize> = here.iter().copied().filter(|f| !bored.contains(f) && !cs_faces.contains(f)).collect();
@@ -1883,6 +1937,11 @@ fn onto_panels(
             taken.shadowed = true;
             union(through.into_iter().chain(bands.iter().cloned()).collect(), tol).map_err(|e| e.to_string())?
         };
+        if region != panel.region
+            && let Some(x) = out.sheet.panels.get_mut(p)
+        {
+            x.region = region.clone();
+        }
         // These regions are the material the cut removed. The slack for comparing whole faces
         // above can exceed a real corner round on a large panel.
         if !through.is_empty() {
@@ -1902,7 +1961,7 @@ fn onto_panels(
             for g in through {
                 own.push(across_laps(sk, p, g, &rips, tol)?);
             }
-            match left(&panel.region, &own, &holders(sk, p), tol)? {
+            match left(&region, &own, &holders(sk, p), tol)? {
                 Left::Kept(kept, parted) => {
                     if let Some(x) = out.sheet.panels.get_mut(p) {
                         x.region = kept;
@@ -1973,6 +2032,54 @@ fn onto_panels(
         }
     }
     Ok((out, taken))
+}
+
+/// Panel `p` of `sk` grown by what `now` has of it within its holes, when that is what the
+/// feature's walls `others` (the ones not read in the panel's region, in its `slab`) lie on:
+/// material through the panel with square walls, joined to the panel (a round in an inside corner
+/// of a cut-out). None where the walls lie elsewhere, or what the holes hold is anything else
+/// (a recess, a piece apart from the panel): that is read, or refused, as before. A loose piece
+/// of the panel in a hole (see [`Loose`]) is its own, not the panel's.
+#[allow(clippy::too_many_arguments)]
+fn given_back(
+    sk: &SurfaceSheet,
+    p: usize,
+    now: &Body,
+    qb: &Query,
+    slab: &Slab,
+    frame: &Rigid3,
+    others: &[usize],
+    tol: f64,
+    sag: f64,
+) -> std::result::Result<Option<Region2>, String> {
+    let Some(panel) = sk.sheet.panels.get(p) else { return Ok(None) };
+    if others.is_empty() || panel.region.holes.is_empty() {
+        return Ok(None);
+    }
+    let outline = Region2 { outer: panel.region.outer.clone(), holes: Vec::new() };
+    if within(qb, slab, &outline, others, tol * 100.0, sag).map_err(|e| e.to_string())?.is_empty() {
+        return Ok(None);
+    }
+    let holes: Vec<Region2> = panel.region.holes.iter().map(|h| Region2 { outer: h.ccw(), holes: Vec::new() }).collect();
+    let loose: Vec<Region2> = sk.loose.iter().filter(|l| l.panel == p).map(|l| l.region.clone()).collect();
+    let holes = if loose.is_empty() { holes } else { planar_regions_boolean(&holes, &loose, BoolOp::Cut, tol).map_err(|e| e.to_string())? };
+    let t = sk.sheet.thickness;
+    let o = on_panel(now, qb, frame, t, &holes, tol, None).map_err(|e| e.to_string())?;
+    if o.near.is_empty() || !o.near_floors.is_empty() || !o.far_floors.is_empty() || !o.countersinks.is_empty() {
+        return Ok(None);
+    }
+    // Square walls: each face sees the material wherever the other does.
+    let slack = tol * 10.0 * perimeter(&o.near).max(1.0);
+    let off = |a: &[Region2], b: &[Region2]| planar_regions_boolean(a, b, BoolOp::Cut, tol).map(|r| area(&r)).map_err(|e| e.to_string());
+    if off(&o.near, &o.far)? > slack || off(&o.far, &o.near)? > slack {
+        return Ok(None);
+    }
+    // Not [`union`]: what was given back lies in a hole's box, which that reads as apart.
+    let grown = planar_regions_boolean(std::slice::from_ref(&panel.region), &o.near, BoolOp::Union, tol).map_err(|e| e.to_string())?;
+    Ok(match <[Region2; 1]>::try_from(grown) {
+        Ok([one]) => Some(one),
+        Err(_) => None,
+    })
 }
 
 /// Whether the panel on side `k` of a bend's `zone` (0 its `a` panel, 1 its `b` one) still holds
@@ -2143,12 +2250,12 @@ fn bounded(q: &Query, frame: &Rigid3, group: &[usize], gone: &[Region2], near: f
 
 #[cfg(test)]
 mod tests {
-    use std::f64::consts::{PI, SQRT_2};
+    use std::f64::consts::{FRAC_PI_2, PI, SQRT_2, TAU};
 
     use solidcore_record::{Loop2, Region2, Seg2, Vec2, Vec3};
     use solidcraft_geom::prelude::*;
 
-    use super::{holds, loop_box_in, reaches, seg_box};
+    use super::{holds, loop_box_in, ray_crossings, reaches, seg_box};
 
     /// How near points are one, as a body reads them.
     const NEAR: f64 = 1e-6;
@@ -2304,5 +2411,61 @@ mod tests {
         let b = loop_box_in(&circle, |q| Vec3::new(5.0 + q.x * half, q.y, q.x * 0.5));
         let near = |a: Vec3, b: Vec3| a.dist(b) < 1e-12;
         assert!(near(b.min, Vec3::new(5.0 - half, -1.0, -0.5)) && near(b.max, Vec3::new(5.0 + half, 1.0, 0.5)), "{b:?}");
+    }
+
+    #[test]
+    fn ray_crossings_arc_matches_reference_across_bands_and_multiturn() {
+        fn ref_arc_crossings(s: &Seg2, end: Vec2, p: Vec2) -> usize {
+            let counts = |y0: f64, y1: f64| (y0 > p.y) != (y1 > p.y);
+            let Seg2::Arc { center, radius, start, sweep } = *s else { return 0 };
+            let (lo, hi) = (start.min(start + sweep), start.max(start + sweep));
+            let mut stops = vec![0.0];
+            let mut turn = FRAC_PI_2 + PI * ((lo - FRAC_PI_2) / PI).ceil();
+            while hi.is_finite() && turn < hi && turn + PI > turn {
+                if turn > lo {
+                    stops.push((turn - start) / sweep);
+                }
+                turn += PI;
+            }
+            stops.push(1.0);
+            stops.sort_by(f64::total_cmp);
+            let y_at = |t: f64| match t {
+                t if t <= 0.0 => s.start().y,
+                t if t >= 1.0 => end.y,
+                t => center.y + radius * (start + sweep * t).sin(),
+            };
+            stops
+                .windows(2)
+                .filter(|w| {
+                    let &[t0, t1] = *w else { return false };
+                    let side = (start + sweep * 0.5 * (t0 + t1)).cos().signum();
+                    let x = center.x + side * (radius * radius - (p.y - center.y).powi(2)).max(0.0).sqrt();
+                    counts(y_at(t0), y_at(t1)) && x > p.x
+                })
+                .count()
+        }
+
+        let c = Vec2::new(10.0, 20.0);
+        let r = 4.0;
+        let arcs = [
+            Seg2::Arc { center: c, radius: r, start: 0.0, sweep: TAU },
+            Seg2::Arc { center: c, radius: r, start: 0.3, sweep: -TAU },
+            Seg2::Arc { center: c, radius: r, start: -0.5 * PI, sweep: PI },
+            Seg2::Arc { center: c, radius: r, start: 0.25 * PI, sweep: 0.5 * PI },
+            Seg2::Arc { center: c, radius: r, start: 0.1, sweep: 3.0 * TAU },
+            Seg2::Arc { center: c, radius: r, start: 0.0, sweep: f64::INFINITY },
+            Seg2::Arc { center: c, radius: r, start: 1e17, sweep: 1e3 },
+        ];
+        let xs = [2.0, 6.0, 8.0, 10.0, 12.0, 14.0, 14.0 + 1e-13, 18.0];
+        let ys = [14.0, 16.0 - 1e-12, 16.0, 18.0, 20.0, 22.0, 24.0, 24.0 + 1e-12, 26.0];
+        for s in arcs {
+            let end = s.end();
+            for &x in &xs {
+                for &y in &ys {
+                    let p = Vec2::new(x, y);
+                    assert_eq!(ray_crossings(&s, end, p), ref_arc_crossings(&s, end, p), "arc={s:?} p={p:?}");
+                }
+            }
+        }
     }
 }

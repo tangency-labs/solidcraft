@@ -67,6 +67,8 @@ pub struct AppPanelRuntime {
     fit_window: Option<(InstanceId, std::time::Instant)>,
     host: Option<WorkspacePanelHost>,
     last_tick_frame: Option<u64>,
+    /// The `timeline_2d` preference as the last tick saw it: a change asks the bottom History to rise or lower.
+    pub(super) timeline_2d_seen: Option<bool>,
     detached_content: crate::semantic_content::Detached,
     last_error: Option<PanelError>,
     sync_error: Option<PanelError>,
@@ -94,6 +96,7 @@ impl AppPanelRuntime {
             fit_window: None,
             host: None,
             last_tick_frame: None,
+            timeline_2d_seen: None,
             detached_content: Default::default(),
             last_error: None,
             sync_error: None,
@@ -1433,6 +1436,7 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
     let plugin_error = super::plugin::sync(app).err();
     let production_error = super::production::drain_production_actions(app)
         .and_then(|()| super::production::sync_production_visibility(app))
+        .and_then(|()| super::production::sync_timeline_view(app))
         .and_then(|()| super::production::refresh_production(app))
         .err();
     if let Some(integration) = &mut app.panel_runtime {
@@ -1442,6 +1446,7 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
     let direction = crate::i18n::panel_direction(&app.preferences.language);
     // The Browser's search field takes its title's place while it is open (#1634).
     let browser_header = crate::browser_search::bar_shown(app).then(crate::browser_search::header_min_width);
+    let history_row = app.panel_runtime.as_ref().map_or((false, false), super::production::history_row);
     if let Some(integration) = &mut app.panel_runtime {
         let frame = ctx.cumulative_frame_nr();
         if integration.last_tick_frame == Some(frame) {
@@ -1453,16 +1458,24 @@ pub(crate) fn tick_app(app: &mut crate::SolveApp, ctx: &egui::Context) {
             && let Some(host) = &mut integration.host
         {
             host.set_header_action_visible(InstanceId("history".into()), ControlId("play".into()), app.preferences.history_play_button);
-            // The 2D Timeline shows only at the bottom: a History on the left has no switch.
-            let view = ControlId(super::production::TIMELINE_VIEW.into());
-            host.set_header_action_visible(InstanceId("history".into()), view.clone(), !app.preferences.timeline_left);
-            for instance in ["history", "timeline-2d"] {
-                host.set_header_action_trailing(InstanceId(instance.into()), view.clone());
+            // The chevron raises the bottom row to the 2D Timeline and lowers it again; a History in a side column has neither.
+            let history = InstanceId("history".into());
+            for (action, shown) in [
+                (super::production::TIMELINE_EXPAND, history_row.0 && !history_row.1),
+                (super::production::TIMELINE_COLLAPSE, history_row.0 && history_row.1),
+                (super::production::TIMELINE_SETTINGS, history_row.0 && history_row.1),
+            ] {
+                let action = ControlId(action.into());
+                host.set_header_action_visible(history.clone(), action.clone(), shown);
+                host.set_header_action_trailing(history.clone(), action);
             }
             host.set_header_content(InstanceId("browser".into()), browser_header);
             // The open search box holds the magnifier.
             host.set_header_action_visible(InstanceId("browser".into()), ControlId("magnifier".into()), browser_header.is_none());
             host.set_live_drag(app.preferences.live_panel_drag_preview);
+            host.set_float_on_empty_drop(true);
+            // #19054 and #19115 shipped with this on; 5921596eae dropped its preference and its default.
+            host.set_wide_grab(true);
         }
         let result = (|| {
             #[cfg(not(target_arch = "wasm32"))]
@@ -1635,6 +1648,8 @@ pub(crate) fn prepare_pop_out_panels(
             host.note_egui_context(ui.ctx(), force_opaque);
             host.set_gap(gap)?;
             host.set_live_drag(app.preferences.live_panel_drag_preview);
+            host.set_float_on_empty_drop(true);
+            host.set_wide_grab(true);
         }
         runtime.prepare_host_in_domain(&app.session, logical_rect(domain), logical_rect(capacity), &chrome)?;
         if let Some(workspace) = workspace
