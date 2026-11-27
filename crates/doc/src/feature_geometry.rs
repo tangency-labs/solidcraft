@@ -96,7 +96,7 @@ impl FeatureKind {
             FeatureKind::SheetConvert { .. } | FeatureKind::Lip { .. } | FeatureKind::SurfaceUntrim { .. } | FeatureKind::SurfaceRuled { .. } => {
                 &["face"]
             }
-            FeatureKind::Emboss { .. } | FeatureKind::Dome { .. } => &["face"],
+            FeatureKind::Emboss { .. } | FeatureKind::Dome { .. } | FeatureKind::CellGrid { .. } => &["face"],
             FeatureKind::Revolve { .. } => &["to"],
             FeatureKind::Extrude { .. } | FeatureKind::SurfaceExtrude { .. } => &["extent.to", "extent.from", "extent.to2"],
             FeatureKind::SurfaceExtend { .. } => &["up_to"],
@@ -106,7 +106,7 @@ impl FeatureKind {
 
     /// The body a feature that works on one body's faces names (shell, draft, split, offset,
     /// delete and replace face, surface offset, the placed plastic features, sheet metal
-    /// conversion, ruled surface, untrim, Split Body's tool face): its face points pick faces of
+    /// conversion, ruled surface, untrim, Split Body's tool face, a cell grid on a wall): its face points pick faces of
     /// that body.
     pub fn face_body(&self) -> Option<&str> {
         match self {
@@ -122,7 +122,8 @@ impl FeatureKind {
             | FeatureKind::Boss { body, .. }
             | FeatureKind::Lip { body, .. }
             | FeatureKind::SnapFit { body, .. }
-            | FeatureKind::Rest { body, .. } => body.as_deref(),
+            | FeatureKind::Rest { body, .. }
+            | FeatureKind::CellGrid { body, .. } => body.as_deref(),
             FeatureKind::SheetConvert { body, .. }
             | FeatureKind::SheetSurfaceConvert { body, .. }
             | FeatureKind::SheetRecognize { body, .. }

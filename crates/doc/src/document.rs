@@ -1908,13 +1908,26 @@ pub enum FeatureKind {
     /// outer loop is the field, a loop inside it a keep-out), cut from the targets `depth` deep
     /// (or through all) along the sketch normal, or with `mode: raised` standing `depth` high
     /// from the sketch plane and joined to the targets. The cells are planned by solidcore
-    /// (`solidcraft_kernel::plan_cell_grid`) and cut in one boolean.
+    /// (`solidcraft_kernel::plan_cell_grid`) and cut in one boolean. With a `face` instead of a
+    /// sketch (#23010), square cells are cut into a whole-turn cylinder wall of `body`, outside or
+    /// bore, through the wall or `depth` deep.
     CellGrid {
-        /// Feature id of the sketch.
-        sketch: SketchId,
-        /// Which of the sketch's profiles hold the field and its keep-outs.
+        /// Feature id of the sketch. Its absence means the cells go on the cylinder wall `face`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sketch: Option<SketchId>,
+        /// Which of the sketch's profiles hold the field and its keep-outs. Defaults to all of
+        /// them, so a wall cell grid may leave it out; always saved, so an older design saves
+        /// as it came.
+        #[serde(default = "all_profiles")]
         #[walk(profiles_of = sketch)]
         profiles: ProfileSel,
+        /// A point on the cylinder wall (outside or bore) the cells are cut into, instead of a
+        /// sketch's profiles. Saved by designs of a newer format.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        face: Option<FacePick>,
+        /// The body the wall `face` belongs to.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        body: Option<BodyName>,
         #[serde(default)]
         mode: CellGridMode,
         #[serde(default = "default_cell_shape")]
