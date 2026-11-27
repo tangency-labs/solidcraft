@@ -2029,9 +2029,25 @@ mod recognition {
             Vec2::new(-8.0, -8.0),
             Vec2::ZERO,
         ];
+        // A first quarter that goes out and back near the origin, thinner than even the
+        // local cell resolves.
+        let q = 3.0 * 2.0_f64.powi(-55);
+        let fold = [
+            Vec2::new(1.0, 1.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::ZERO,
+            Vec2::new(0.0, q),
+        ];
+        let fold_controls = [
+            Vec2::new(1.5, 1.5),
+            Vec2::new(0.5, 0.5),
+            Vec2::new(-0.5, -0.5 + 2.0_f64.powi(-54)),
+            Vec2::new(0.5, 0.5),
+        ];
         for ellipse in [
             quarters(c, corners, controls),
             quarters(c2, spike, spike_controls),
+            quarters(Vec2::ZERO, fold, fold_controls),
         ] {
             for mut path in [ellipse.clone(), ellipse.reversed()] {
                 for _ in 0..4 {

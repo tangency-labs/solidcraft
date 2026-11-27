@@ -788,17 +788,22 @@ fn corner_combination(terms: &[(f64, Vec2)]) -> Option<EllipsePoint> {
 
 /// Four rational quarters of weight 1/sqrt(2) on one parallelogram: corners c +/- u and
 /// c +/- v, and each control at its quarter's fourth corner c + from + to. The
-/// construction is fixed from the stored corners (c their mean, u and v the half
-/// diagonals, in double-double), and every stored corner and control must lie in its
-/// cell around that construction's point. A cell is half an ULP of the corners' local
-/// semiextent, widened by the rounding of a producer that stores each corner as one f64
-/// sum and each control as the f64 a + b - c of its quarter's corners, as a turned
-/// sketch ellipse does (#18399): the largest half ULP of the stored coordinates for a
-/// corner; twice that, plus the half ULP of |a| + |b|, for a control. The widening
-/// applies only while it is at most sqrt(EPSILON) of the minor semi-axis: half of the
-/// significand still resolves the ellipse's thinnest direction, so a rounding cannot fold
-/// a quarter or flip its turn. Beyond that the world spacing, not the curve, would decide
-/// the shape (a 4/3 split at x = 2^52), and only the local cell applies. Joins are exact.
+/// construction is the f64 triple that is returned (c the rounded mean of the stored
+/// corners, u and v the rounded half diagonals), and every stored corner and control
+/// must lie in its cell around that construction's point. A cell is half an ULP of the
+/// corners' local semiextent plus the rounding of u and v (once for a corner, twice for a
+/// control). It is widened by the rounding of a producer that stores each corner as one
+/// f64 sum and each control as the f64 a + b - c of its quarter's corners, as a turned
+/// sketch ellipse does (#18399), and by the rounding of the returned centre: the largest
+/// half ULP of the stored coordinates for a corner; twice that, plus the half ULP of
+/// |a| + |b|, for a control. With c = c* + mean(e) for stored corner errors e, a corner
+/// is off by (e0 - e1 + e2 - e3) / 4 and a control by mean(e) plus its two roundings.
+/// The widening applies only while the control cell stays within sqrt(EPSILON) of the
+/// minor semi-axis: half of the significand still resolves the ellipse's thinnest
+/// direction, so no point in a cell can fold a quarter or flip its turn. Beyond that the
+/// world spacing, not the curve, would decide the shape (a 4/3 split at x = 2^52), and
+/// only the local cell applies; a loop that does not resolve even that is refused.
+/// Joins are exact.
 fn loop_as_quarter_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
     let [q0, q1, q2, q3] = lp.segs.as_slice() else {
         return None;
@@ -822,14 +827,17 @@ fn loop_as_quarter_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
         quarter(q3, q0)?,
     ];
     let corners = [p0, p1, p2, p3];
-    let center = corner_combination(&corners.map(|p| (0.25, p)))?;
-    let u = corner_combination(&[(0.5, p0), (-0.5, p2)])?;
-    let v = corner_combination(&[(0.5, p1), (-0.5, p3)])?;
-    if !matches!(u.cross(v)?.sign()?, 1 | -1) {
+    let rounded = |p: EllipsePoint| Vec2::new(p.x.hi + p.x.lo, p.y.hi + p.y.lo);
+    // The construction is the f64 centre and half diagonals that are returned, so each
+    // cell below bounds a stored point's distance from the returned ellipse's own point.
+    let center = rounded(corner_combination(&corners.map(|p| (0.25, p)))?);
+    let u = rounded(corner_combination(&[(0.5, p0), (-0.5, p2)])?);
+    let v = rounded(corner_combination(&[(0.5, p1), (-0.5, p3)])?);
+    let exact = |p: Vec2| EllipsePoint::relative(p, Vec2::ZERO);
+    if !center.is_finite() || !matches!(exact(u)?.cross(exact(v)?)?.sign()?, 1 | -1) {
         return None;
     }
-    let rounded = |p: EllipsePoint| Vec2::new(p.x.hi + p.x.lo, p.y.hi + p.y.lo);
-    let (mut major, minor, ratio, _) = ellipse_axes(rounded(u), rounded(v))?;
+    let (mut major, minor, ratio, _) = ellipse_axes(u, v)?;
 
     let (min, max) = corners.iter().fold((p0, p0), |(min, max), p| {
         (
@@ -841,6 +849,7 @@ fn loop_as_quarter_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
         ellipse_local_resolution(min.x, max.x)?,
         ellipse_local_resolution(min.y, max.y)?,
     );
+    let add = |a: Vec2, b: Vec2| Vec2::new(ellipse_bound_add(a.x, b.x), ellipse_bound_add(a.y, b.y));
     let larger = |a: Vec2, b: Vec2| Vec2::new(a.x.max(b.x), a.y.max(b.y));
     let rounding = |p: Vec2| Vec2::new(rounding_radius(p.x), rounding_radius(p.y));
     let stored = [p0, p1, p2, p3, h0, h1, h2, h3]
@@ -853,40 +862,42 @@ fn loop_as_quarter_ellipse(lp: &Loop2) -> Option<(Vec2, Vec2, f64)> {
                 let sum = Vec2::new(a.x.abs() + b.x.abs(), a.y.abs() + b.y.abs());
                 larger(cell, rounding(sum))
             });
-    let control_rounding = Vec2::new(
-        ellipse_bound_add(ellipse_bound_add(stored.x, stored.x), sums.x),
-        ellipse_bound_add(ellipse_bound_add(stored.y, stored.y), sums.y),
-    );
-    let resolved =
-        control_rounding.x.max(control_rounding.y) <= minor.length_hypot() * f64::EPSILON.sqrt();
-    let cell = |widening: Vec2| {
-        let widening = if resolved { widening } else { Vec2::ZERO };
-        Vec2::new(
-            ellipse_bound_add(local.x, widening.x),
-            ellipse_bound_add(local.y, widening.y),
-        )
+    // The returned half diagonals' rounding is local; a corner uses one, a control two.
+    let offsets = larger(rounding(u), rounding(v));
+    let (corner_local, control_local) = (add(local, offsets), add(local, add(offsets, offsets)));
+    // The producer's rounding, and the returned centre's.
+    let corner_rounding = add(stored, rounding(center));
+    let control_rounding = add(add(add(stored, stored), sums), rounding(center));
+    let resolution = minor.length_hypot() * f64::EPSILON.sqrt();
+    let resolves = |cell: Vec2| cell.x.max(cell.y) <= resolution;
+    let widened = add(control_local, control_rounding);
+    let (corner_cell, control_cell) = if resolves(widened) {
+        (add(corner_local, corner_rounding), widened)
+    } else {
+        (corner_local, control_local)
     };
-
-    // Each corner is (p0 - p1 + p2 - p3) / 4 away from its construction point, by sign.
-    let corner = corner_combination(&[(0.25, p0), (-0.25, p1), (0.25, p2), (-0.25, p3)])?;
-    if !corner.fits(cell(stored)) {
+    if !resolves(control_cell) {
         return None;
     }
-    for (i, control) in [h0, h1, h2, h3].into_iter().enumerate() {
-        // control - (c + from + to): the quarter's own corners count -3/4, the others 1/4.
-        let [k0, k1, k2, k3] = [0, 1, 2, 3]
-            .map(|j| 0.25 - f64::from(u8::from(j == i)) - f64::from(u8::from(j == (i + 1) % 4)));
-        let residual =
-            corner_combination(&[(k0, p0), (k1, p1), (k2, p2), (k3, p3), (1.0, control)])?;
-        if !residual.fits(cell(control_rounding)) {
+
+    let offsets = [u, v, -u, -v];
+    for ((corner, control), (from, to)) in corners
+        .into_iter()
+        .zip([h0, h1, h2, h3])
+        .zip(offsets.into_iter().zip(offsets.into_iter().cycle().skip(1)))
+    {
+        let corner = EllipsePoint::relative(corner, center)?.minus(exact(from)?)?;
+        let control = EllipsePoint::relative(control, center)?
+            .minus(exact(from)?)?
+            .minus(exact(to)?)?;
+        if !corner.fits(corner_cell) || !control.fits(control_cell) {
             return None;
         }
     }
     if major.x < 0.0 || (major.x == 0.0 && major.y < 0.0) {
         major = -major;
     }
-    let center = rounded(center);
-    (center.is_finite() && ratio.is_finite()).then_some((center, major, ratio))
+    ratio.is_finite().then_some((center, major, ratio))
 }
 
 /// Recognize one directed turn of circular arcs on exactly the same center and radius.
