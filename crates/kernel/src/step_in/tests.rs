@@ -1383,6 +1383,51 @@ fn a_part_smlibs_check_fails_is_reported_at_import_by_name() {
     assert!(clean.report.issues.iter().all(|i| i.kind != IssueKind::NeedsRepair), "{:?}", clean.warnings);
 }
 
+/// Cylinders far from the origin (their rims tens of thousands of mm out) round trip through
+/// the kernel without SMLib's check failing them (issue #22886). Since #21017 a whole-turn
+/// circle whose seam is a rounding hair off a quarter line took a fifth quarter only a hair
+/// long, whose control points coincide (`SmBSplineCurve` test #15), and the seam's angles came
+/// out of order in its polar form (`SmPolarConversion` test #3). A whole turn is now
+/// parameterized exactly from the quarter line its start is a hair off.
+#[test]
+fn cylinders_far_from_the_origin_round_trip_without_failing_the_check() {
+    for (file, text) in [
+        (
+            "w-cb146199d09b7002.step",
+            include_str!("../../../../tests/step-regressions/w-cb146199d09b7002.step"),
+        ),
+        (
+            "w-a7addca74fa79cb4.step",
+            include_str!("../../../../tests/step-regressions/w-a7addca74fa79cb4.step"),
+        ),
+        (
+            "w-1c2e3ec0626d9446.step",
+            include_str!("../../../../tests/step-regressions/w-1c2e3ec0626d9446.step"),
+        ),
+        (
+            "w-f1bd61624ebebe31.step",
+            include_str!("../../../../tests/step-regressions/w-f1bd61624ebebe31.step"),
+        ),
+    ] {
+        let imp = step_import(text).unwrap_or_else(|e| panic!("{file}: {e}"));
+        assert_eq!(imp.bodies.len(), 1, "{file}: {:?}", imp.warnings);
+        assert!(
+            imp.report.issues.iter().all(|i| i.kind != IssueKind::NeedsRepair),
+            "{file}: {:?}",
+            imp.report.issues
+        );
+        let body = &imp.bodies[0].body;
+        let check = body
+            .smlib()
+            .unwrap()
+            .check(solidcraft_smlib::CheckLevel::All)
+            .unwrap_or_else(|e| panic!("{file}: {e}"));
+        assert!(check.is_valid(), "{file}: {}", check.text.lines().next().unwrap_or_default());
+        let m = measure(body).unwrap();
+        assert!(m.volume > 0.0 && m.volume.is_finite(), "{file}: volume {}", m.volume);
+    }
+}
+
 /// `block` (one solid `#101` in representation `#60`, as [`bezier_block`] writes it) as a part
 /// placed twice in an assembly: once where the file defines it, and once 100 mm along x by a
 /// CARTESIAN_TRANSFORMATION_OPERATOR_3D that scales it by `(sx, sy, sz)` (non-uniform when they

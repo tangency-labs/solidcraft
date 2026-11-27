@@ -75,6 +75,8 @@ const NO_READ_BACK: &[&str] = &["tests/step-regressions/thread_crest_band.step"]
 /// line #8 uncertainty by 9e-15 (0.017508281886215407 -> 0.01750828188620642).
 /// `stepped_tapered_hole.step` is new (solidcore#3253): a block whose stepped, tapered hole has
 /// whole-turn cone faces that close on their seams beside a quarter line.
+/// The four `w-…` files are new (#22886): unions of cylinders tens of thousands of mm from the
+/// origin, whose whole-turn rims are a rounding hair off a quarter line.
 /// Entries whose export's bytes differ only on macOS's math functions, beside the pinned values
 /// above: the reader's seam split now lands on the edge's own knot, and the pcurves made beside it
 /// carry macOS libm's rounding for these fixtures (on Linux the split solves within the export's
@@ -167,6 +169,13 @@ const DIGESTS: &[(&str, &str)] = &[
     ("tests/step-regressions/tiny_rounds_coarse_tolerance.step", "0909a2e6b030bd2c"),
     ("tests/step-regressions/torus_patch_and_rest.step", "a82c8cbad7038460"),
     ("tests/step-regressions/torus_patch_and_rest_revolved.step", "6b2f15c1dc602029"),
+    // Cylinders far from the origin round trip since #22886: on main their whole-turn circle
+    // forms held a hair-long fifth quarter whose control points coincide, and SMLib's check
+    // failed the read-back by 15, 11, 3 and 15 tests.
+    ("tests/step-regressions/w-1c2e3ec0626d9446.step", "697f93f5b7a7ab6d"),
+    ("tests/step-regressions/w-a7addca74fa79cb4.step", "dfb742d39af1869d"),
+    ("tests/step-regressions/w-cb146199d09b7002.step", "1db2179cb13a213d"),
+    ("tests/step-regressions/w-f1bd61624ebebe31.step", "a41654ef5c30eb23"),
     ("(assembly)", "45b6ef6cf64529e2"),
 ];
 

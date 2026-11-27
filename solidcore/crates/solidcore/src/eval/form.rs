@@ -293,6 +293,7 @@ pub fn curve(c: &Curve, [t0, t1]: [f64; 2]) -> Option<(Curve, [f64; 2])> {
 
 fn conic(frame: &Frame, [rx, ry]: [f64; 2], t: [f64; 2]) -> Option<(Curve, [f64; 2])> {
     let (o, x, y, _) = axes(frame)?;
+    let t = whole_turn_on_line(t, o.len() / rx.min(ry).abs());
     let grid = quarters(t, 0.0)?;
     let on = params(t, grid);
     let whole = arcs(grid.0, grid.1);
@@ -305,6 +306,25 @@ fn conic(frame: &Frame, [rx, ry]: [f64; 2], t: [f64; 2]) -> Option<(Curve, [f64;
         .map(|([c, s], w)| hom(o + x * (rx * c) + y * (ry * s), *w))
         .collect();
     Some((Curve::RationalSpline { knots, homogeneous }, on))
+}
+
+/// A whole turn whose start lies a rounding hair off a quarter line, parameterized exactly from
+/// that line; another interval as it is. A whole turn that starts off the line takes a fifth
+/// quarter only a hair long, whose control points coincide (`SmBSplineCurve` test #15), and a
+/// hair is what an angle measured from coordinates far from the origin carries: a few units of
+/// the position's last place over the radius (`scale`, position over radius). A seam really off
+/// the line by more than that — a whole turn whose seam circle's own form needs its fifth
+/// quarter — keeps it.
+fn whole_turn_on_line([a0, a1]: [f64; 2], scale: f64) -> [f64; 2] {
+    if a1 - a0 < TAU * (1.0 - TURN_ROUNDING) {
+        return [a0, a1];
+    }
+    let line = (a0 / FRAC_PI_2).round() * FRAC_PI_2;
+    if (a0 - line).abs() <= 64.0 * f64::EPSILON * scale {
+        [line, line + TAU]
+    } else {
+        [a0, a1]
+    }
 }
 
 /// Quarter arcs ([`arcs`]) with the first and the last cut to `[s0, s1]`, form parameters inside
@@ -1573,3 +1593,7 @@ fn ixm<T>(a: &mut [T; 2], d: usize) -> &mut T {
         y
     }
 }
+
+#[cfg(test)]
+#[path = "form_tests.rs"]
+mod tests;
