@@ -845,6 +845,12 @@ impl Document {
         if full != stem {
             candidates.push(full);
         }
+        // Where its name stands for other faces too (the two caps of an extrude from an offset
+        // start share their role), the face by another name of its own (`F7:cap:low`), made by the
+        // same feature. Only a name that finds this face, with its pieces, on one plane is taken.
+        if let Some(info) = names.info.get(index) {
+            candidates.extend(info.synonyms.iter().map(String::as_str).filter(|name| crate::persistent_name::made_by(name) == Some(origin)));
+        }
         candidates.into_iter().find_map(|name| {
             let target = crate::config::ConfigFaceTarget {
                 body: body.definition_name().into(),

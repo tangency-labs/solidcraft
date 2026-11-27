@@ -357,6 +357,10 @@ pub struct InstallResult {
     /// Where a URL install came from, as `host/owner/repo`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// Workspaces declared by the plugin, shown during permission review. They are inert data;
+    /// any enter or exit hook is a read-only entry listed in `entry_points`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspaces: Vec<crate::plugin::ui::WorkspaceSpec>,
     /// SHA-256 of the exact manifest and component. Send it as `approval` after reviewing this reply.
     pub approval: String,
     /// SHA-256 of the whole `.zip`. Send it as `archive` after reviewing this reply.
