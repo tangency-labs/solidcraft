@@ -210,7 +210,7 @@ fn fitted(member: &Traced, (end_point, toward, middle): (Vec3, Vec3, Vec3), tool
         }
         let size = b.max - b.min;
         let depth = w + size.x.min(size.y).min(size.z);
-        let gate = zone(end_point, toward, w, depth.min(half / 2.0))?;
+        let gate = zone(&member.body, end_point, toward, w, depth.min(half / 2.0))?;
         if kernel::boolean(&tool.body, &gate, BoolOp::Intersect)?.is_some() {
             reach.push((tool, depth));
         }
@@ -220,7 +220,7 @@ fn fitted(member: &Traced, (end_point, toward, middle): (Vec3, Vec3, Vec3), tool
     }
     // A tool that reaches the end is cut over its whole crossing, an oblique brace's included, and nowhere else.
     // Its faces are named for the zone, apart from the member's own `face:<k>`, where it leaves one on the member.
-    let clip = zone(end_point, toward, w, 2.0 * reach.iter().map(|r| r.1).fold(0.0, f64::max))?;
+    let clip = zone(&member.body, end_point, toward, w, 2.0 * reach.iter().map(|r| r.1).fold(0.0, f64::max))?;
     let roles = (0..clip.face_count()).map(|k| vec![format!("fit_zone:{k}")]).collect();
     let clip = Traced::made(clip, Some(roles));
     let mut fitted: Option<Traced> = None;
@@ -275,14 +275,20 @@ fn fitted(member: &Traced, (end_point, toward, middle): (Vec3, Vec3, Vec3), tool
     Ok(rest.map(|_| piece))
 }
 
-/// The end zone: a box `w` out from the member's line each way, from `w` past `end` back `depth` into the
-/// member, `toward` pointing out of it.
-fn zone(end: Vec3, toward: Vec3, w: f64, depth: f64) -> Result<kernel::Body> {
+/// The end zone of `member`: a box `w` out from its line each way, from `w` past its own end (`end`, its line's end,
+/// or as far as the member is built past it) back `depth` into it, `toward` pointing out of it. An end built past
+/// its line's end (an open section fitted at an angle) is so cut over the whole crossing it reaches, and what it
+/// runs past the tool's far side comes away.
+fn zone(member: &kernel::Body, end: Vec3, toward: Vec3, w: f64, depth: f64) -> Result<kernel::Body> {
     let u = toward.any_perp();
     // x × y = u × (-toward × u) = -toward: the box runs back into the member.
-    let plane = Plane::new(end + toward * w, u, (-toward).cross(u)).ok_or_else(|| DocError::Invalid("a tube end has no zone".into()))?;
+    let back = (-toward).cross(u);
+    // Its levels along -toward from the line's end: the lowest is how far it is built past (none when it can't be read).
+    let past = Plane::new(end, u, back).and_then(|p| kernel::levels_along(member, &p).ok()).map_or(0.0, |[low, _]| (-low).max(0.0));
+    let out = w + if past.is_finite() { past } else { 0.0 };
+    let plane = Plane::new(end + toward * out, u, back).ok_or_else(|| DocError::Invalid("a tube end has no zone".into()))?;
     let square = [Vec2::new(-w, -w), Vec2::new(w, -w), Vec2::new(w, w), Vec2::new(-w, w)];
-    let mut bodies = kernel::extrude(&plane, &[Region2 { outer: Loop2::polygon(&square), holes: Vec::new() }], 0.0, depth + w)?;
+    let mut bodies = kernel::extrude(&plane, &[Region2 { outer: Loop2::polygon(&square), holes: Vec::new() }], 0.0, depth + out)?;
     match (bodies.pop(), bodies.is_empty()) {
         (Some(body), true) => Ok(body),
         _ => Err(DocError::Invalid("a tube end's zone is not one solid".into())),

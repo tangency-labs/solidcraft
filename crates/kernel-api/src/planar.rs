@@ -62,10 +62,11 @@ pub trait Planar: Backend {
     /// rectangle's corners in order (mm). `None` for a zero `toward`, a degenerate `rect` or a line
     /// along the box.
     fn exit_through_box(&self, end: Vec3, toward: Vec3, rect: [Vec3; 4]) -> Option<f64>;
-    /// How far along `toward` from `start` its line leaves the round bar of `radius` (mm) about
-    /// the line `axis`, without end. `None` for a zero `toward`, a radius not finite and positive,
-    /// a degenerate axis, or a line that misses the bar or runs along it.
-    fn exit_through_round(&self, start: Vec3, toward: Vec3, axis: (Vec3, Vec3), radius: f64) -> Option<f64>;
+    /// How far past `end` along `toward` a member's end is built to leave the round bars `rounds`
+    /// (each its axis's ends and radius, mm) that `end` lies in: the farthest any of `starts` (its
+    /// section's corners placed at `end`) runs on before leaving such a bar's far side, from 0 to
+    /// `most`. 0 for input that isn't finite or a zero `toward`.
+    fn reach_through_rounds(&self, end: Vec3, toward: Vec3, starts: &[Vec3], rounds: &[(Vec3, Vec3, f64)], most: f64) -> f64;
     /// The length of a straight paper stroke from `a` to `b`.
     fn straight_length(&self, a: [f64; 2], b: [f64; 2]) -> f64;
     /// Whether a line's endpoints project to distinct points in the view plane `basis`.

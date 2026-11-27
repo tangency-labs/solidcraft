@@ -289,9 +289,7 @@ fn built(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut M
         if reach <= 0.0 {
             return Ok(member.clone());
         }
-        let (x, y) = axes.get(m).copied().ok_or_else(|| DocError::Invalid(format!("line `{id}` has no length")))?;
-        let at = ats.get(m).copied().unwrap_or(at);
-        let plane = Plane::new(*a - x * at.x - y * at.y, x, y).ok_or_else(|| DocError::Invalid(format!("line `{id}`: no plane square to it")))?;
+        let plane = placed(m, *a);
         let length = a.dist(*b);
         let span = if at_start { (-reach, 0.0) } else { (length, length + reach) };
         let more = member_body(plane, unreversed(m, *a), &regions, *b - *a, span, id)?;
@@ -1490,7 +1488,7 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
     // The end is square to the member, so at an angle one side of it trails the line's end: each corner of the
     // member's own section box runs on until it too leaves the far side, and the end reaches the farthest of them.
     let own = placed(f.member, end);
-    let starts: Vec<Vec3> = corners.iter().map(|q| end + (own.to_world(*q) - own.to_world(Vec2::ZERO))).chain([end]).collect();
+    let starts: Vec<Vec3> = corners.iter().map(|q| own.to_world(*q)).chain([end]).collect();
     let reach = f
         .against
         .iter()
@@ -1515,16 +1513,8 @@ fn fit_reach(segments: &[(String, Vec3, Vec3)], regions: &[Region2], placed: &dy
 /// the end lies in. At most the member's length; 0 where the end meets none.
 fn open_reach((a, b): (Vec3, Vec3), at_start: bool, own: &Plane, corners: &[Vec2], earlier: &[Reach]) -> f64 {
     let (end, toward) = if at_start { (a, a - b) } else { (b, b - a) };
-    let starts: Vec<Vec3> = corners.iter().map(|q| end + (own.to_world(*q) - own.to_world(Vec2::ZERO))).chain([end]).collect();
-    let reach = earlier
-        .iter()
-        .filter(|(c, d, r)| {
-            let (p, q) = solidcraft_geom::mesh_distance::closest_on_segments(end, end, *c, *d);
-            p.dist(q) <= *r
-        })
-        .flat_map(|&(c, d, r)| starts.iter().filter_map(move |s| solidcraft_kernel::planar::exit_through_round(*s, toward, (c, d), r)))
-        .fold(0.0, f64::max);
-    if reach.is_finite() { reach.clamp(0.0, a.dist(b)) } else { 0.0 }
+    let starts: Vec<Vec3> = corners.iter().map(|q| own.to_world(*q)).chain([end]).collect();
+    solidcraft_kernel::planar::reach_through_rounds(end, toward, &starts, earlier, a.dist(b))
 }
 
 /// Auto's ends (#4003 spec A4-A6), as [`corner_ends`] gives stage 1's, and the ends cut to fit, in laying order:

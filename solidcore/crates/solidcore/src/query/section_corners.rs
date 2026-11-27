@@ -10,6 +10,7 @@
 //! | [`measure_corner_turns`] | (none)   |
 //! | [`exit_through_box`]     | (none)   |
 //! | [`exit_through_round`]   | (none)   |
+//! | [`reach_through_rounds`] | (none)   |
 //!
 //! Deviations: no upstream counterpart.
 
@@ -103,8 +104,8 @@ pub fn exit_through_box(end: Point3, toward: Vec3, rect: &[Point3; 4]) -> Result
 ///
 /// # Errors
 ///
-/// [`SolidError::InvalidInput`] for a zero or non-finite `toward`, or a `radius` not finite and
-/// positive.
+/// [`SolidError::InvalidInput`] for a zero or non-finite `toward`, a `radius` not finite and
+/// positive, or a non-finite `start`, `a` or `b`.
 pub fn exit_through_round(
     start: Point3,
     toward: Vec3,
@@ -116,6 +117,13 @@ pub fn exit_through_round(
         return Err(SolidError::InvalidInput {
             operation: "exit_through_round",
             reason: "the radius must be finite and positive",
+        });
+    }
+    let finite = |p: Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if !(finite(start) && finite(a) && finite(b)) {
+        return Err(SolidError::InvalidInput {
+            operation: "exit_through_round",
+            reason: "the start and the axis must be finite points",
         });
     }
     let t = toward.unitize()?;
@@ -135,7 +143,61 @@ pub fn exit_through_round(
     if disc < 0.0 {
         return Ok(None);
     }
-    Ok(Some((-bb + disc.sqrt()) / (2.0 * aa)))
+    let s = (-bb + disc.sqrt()) / (2.0 * aa);
+    if !s.is_finite() {
+        return Err(SolidError::InvalidInput {
+            operation: "exit_through_round",
+            reason: "the exit distance is not finite",
+        });
+    }
+    Ok(Some(s))
+}
+
+/// How far past `end` along `toward` a member's end is built to leave the round bars `rounds`
+/// (each its axis's ends and radius) that `end` lies in: the farthest any of `starts` (the
+/// corners of its section, placed square to its line at `end`) runs on before it leaves such a
+/// bar's far side ([`exit_through_round`]). Bars `end` lies outside of are not met. At least 0,
+/// at most `most` (the member's own length: a far side that far off is no joint its end makes).
+///
+/// # Errors
+///
+/// [`SolidError::InvalidInput`] for a non-finite `end` or `most`, a negative `most`, or the
+/// refusals of [`exit_through_round`] for a bar `end` lies in.
+pub fn reach_through_rounds(
+    end: Point3,
+    toward: Vec3,
+    starts: &[Point3],
+    rounds: &[(Point3, Point3, f64)],
+    most: f64,
+) -> Result<f64> {
+    let finite = |p: Point3| p.x.is_finite() && p.y.is_finite() && p.z.is_finite();
+    if !(finite(end) && most.is_finite() && most >= 0.0) {
+        return Err(SolidError::InvalidInput {
+            operation: "reach_through_rounds",
+            reason: "the end must be a finite point and the length finite and not negative",
+        });
+    }
+    let mut reach = 0.0f64;
+    for &(a, b, radius) in rounds {
+        // The nearest point of the axis's segment to `end`.
+        let w = b - a;
+        let ww = w.dot(w);
+        let s = if ww > 0.0 {
+            ((end - a).dot(w) / ww).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
+        let off = end - (a + w * s);
+        if !(off.dot(off).sqrt() <= radius) {
+            continue;
+        }
+        for &start in starts {
+            if let Some(out) = exit_through_round(start, toward, (a, b), radius)? {
+                reach = reach.max(out);
+            }
+        }
+    }
+    Ok(reach.clamp(0.0, most))
 }
 
 #[cfg(test)]
@@ -201,5 +263,58 @@ mod tests {
             f64::NAN
         )
         .is_err());
+        // A non-finite start or axis is refused, not measured as NaN.
+        assert!(exit_through_round(
+            Point3::new(0.0, f64::NAN, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            axis,
+            10.0
+        )
+        .is_err());
+        assert!(exit_through_round(
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.0),
+            (
+                Point3::new(0.0, 0.0, 0.0),
+                Point3::new(f64::INFINITY, 0.0, 0.0)
+            ),
+            10.0
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn an_end_reaches_past_the_bars_it_lies_in_by_its_farthest_corner() {
+        // An end at the X axis heading up, its section's corners 5 either side across X and Y; the bar of
+        // radius 10 about the X axis is left at z = 10 by every corner; the bar about a line 100 off is not met.
+        let end = Point3::new(50.0, 0.0, 0.0);
+        let starts = [
+            Point3::new(45.0, -5.0, -3.0),
+            Point3::new(55.0, 5.0, 2.0),
+            end,
+        ];
+        let near = (
+            Point3::new(0.0, 0.0, 0.0),
+            Point3::new(100.0, 0.0, 0.0),
+            10.0,
+        );
+        let far = (
+            Point3::new(0.0, 100.0, 0.0),
+            Point3::new(100.0, 100.0, 0.0),
+            10.0,
+        );
+        let up = Vec3::new(0.0, 0.0, 1.0);
+        let reach = reach_through_rounds(end, up, &starts, &[near, far], 1000.0).unwrap();
+        // The lowest corner (z = -3, y = -5) leaves where y² + z² = 100: z = √75.
+        assert!((reach - (75f64.sqrt() + 3.0)).abs() < 1e-9, "{reach}");
+        assert_eq!(
+            reach_through_rounds(end, up, &starts, &[far], 1000.0).unwrap(),
+            0.0
+        );
+        assert_eq!(
+            reach_through_rounds(end, up, &starts, &[near], 4.0).unwrap(),
+            4.0
+        );
+        assert!(reach_through_rounds(end, up, &starts, &[near], f64::NAN).is_err());
     }
 }
