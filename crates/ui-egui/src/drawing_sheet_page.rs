@@ -1259,7 +1259,7 @@ impl Marks {
                     }
                     for outline in outlines {
                         let points: Vec<Pos2> = outline.iter().map(|p| at.screen(*p)).collect();
-                        painter.add(egui::Shape::closed_line(points, Stroke::new(hair * 0.5, ink)));
+                        round_line(painter, &points, true, Stroke::new(hair * 0.5, ink));
                     }
                 }
                 Mark::Picture { source, rect, opacity, clip, within } => {

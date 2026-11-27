@@ -546,6 +546,87 @@ fn a_half_torus_keeps_a_periodic_seam_when_its_offsets_still_meet() {
     assert_eq!(query.edge_faces(seam_edges[0]), [cavity, cavity]);
 }
 
+/// A cylinder r 12.7 to z = 7.9375 whose cap is split by the plane y = 0 and whose rim's two
+/// arcs are chamfered 1.5875, with a cylinder r 11.1125 standing 11.1125 on what is left of
+/// the cap and its top rim rounded r 11: a dome on a chamfered base (T-1504's power dome).
+/// The dome's seam runs from a vertex of the chamfer's arcs to the round's rim, which is
+/// tangent to the dome's side.
+#[allow(clippy::disallowed_methods)] // the fixture's placement, not ops geometry
+fn dome_on_a_chamfered_base() -> Body {
+    let (r, h, c, dome) = (12.7, 7.9375, 1.5875, 11.1125);
+    let base = make_cylinder([0.0; 3], r, h).unwrap();
+    let base = split_by_plane(
+        &base,
+        [1.0, 1.0, h],
+        ([0.0; 3], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]),
+    );
+    let arcs = [edge_at(&base, [0.0, r, h]), edge_at(&base, [0.0, -r, h])];
+    blend(&base, Blend::Chamfer, &arcs, &[c, c], &[], Corners::Filled).unwrap();
+    let side = make_cylinder([0.0, 0.0, h], dome, dome).unwrap();
+    let body = crate::boolean::boolean(base, side, crate::BooleanOp::Union)
+        .unwrap()
+        .unwrap();
+    let rim = edge_at(&body, [0.0, dome, h + dome]);
+    blend(&body, Blend::Round, &[rim], &[11.0], &[], Corners::Filled).unwrap();
+    body
+}
+
+/// T-1504 (solidcore#3424): the dome on a chamfered base shells open at its bottom. Since the
+/// periodic-seam construction (#18885) it was refused, "the body built is not a manifold
+/// solid": at the dome's seam, the support beyond it is the round's offset, whose extension
+/// past its tangent rim is the dome's own offset cylinder. It contains the whole intersection
+/// of the chamfer's offset with that cylinder, so it bounds none of it, and the seam's
+/// ordinary trim applies, as where there is no support at all.
+///
+/// Every face moves in t = 1.5875 and the moved faces meet where they cross, so the cavity is
+/// the solid of revolution of the moved profile: the cylinder r 11.1125 up to the chamfer's
+/// line r + z = 19.05 moved in, r + z = 19.05 - t sqrt 2, which it meets at z1 = 5.69244; the
+/// frustum along that line to r 9.525 at z2 = 7.27994; the cylinder r 9.525 to the round's
+/// centre z = 8.05; the round r 11 - t about the circle r 0.1125 there, to z = 17.4625. The
+/// body is the same construction unmoved: cylinder r 12.7 to 6.35, frustum to r 11.1125 at
+/// 7.9375, cylinder to 8.05, round r 11. A cylinder is pi R² L, a frustum pi L (R1² + R1 R2 +
+/// R2²) / 3, and a round r a about the circle r b over a quarter turn
+/// pi (a b² + pi a² b / 2 + 2 a³ / 3).
+#[test]
+#[allow(clippy::disallowed_methods)] // closed-form oracle, not ops geometry
+fn a_dome_on_a_chamfered_base_shells_open_at_its_bottom() {
+    all_fixes();
+    let cylinder = |r: f64, l: f64| PI * r * r * l;
+    let frustum = |r1: f64, r2: f64, l: f64| PI * l * (r1 * r1 + r1 * r2 + r2 * r2) / 3.0;
+    let round = |a: f64, b: f64| PI * (a * b * b + PI * a * a * b / 2.0 + 2.0 * a * a * a / 3.0);
+    let (r, h, c, dome, t) = (12.7, 7.9375, 1.5875, 11.1125, 1.5875);
+    let (centre, b) = (h + dome - 11.0, dome - 11.0);
+    let outer =
+        cylinder(r, h - c) + frustum(r, dome, c) + cylinder(dome, centre - h) + round(11.0, b);
+    let line = r + h - c - t * 2f64.sqrt();
+    let (z1, z2) = (line - (r - t), line - (dome - t));
+    let cavity = cylinder(r - t, z1)
+        + frustum(r - t, dome - t, z2 - z1)
+        + cylinder(dome - t, centre - z2)
+        + round(11.0 - t, b);
+    let body = dome_on_a_chamfered_base();
+    assert!(
+        rel(volume(&body), outer) < 1e-9,
+        "{} vs {outer}",
+        volume(&body)
+    );
+    let o = order(&body);
+    let bottom = face(&body, &o, |bx| {
+        bx.min().z.abs() < 1e-9 && bx.max().z.abs() < 1e-9
+    });
+    shell(&body, &o, &[bottom], -t).unwrap();
+    assert!(body.is_manifold_solid().unwrap());
+    body.check_solid().unwrap();
+    let report = body.check(crate::CheckLevel::All).unwrap();
+    assert_eq!(report.failures, 0, "{}", report.text);
+    let measured = volume(&body);
+    assert!(
+        rel(measured, outer - cavity) < 1e-9,
+        "{measured} vs {}",
+        outer - cavity
+    );
+}
+
 /// A 30 x 30 x 20 block with a conical recess from its bottom (radius 7.2 at z = 0, falling
 /// 0.4 per mm), in which a 12 x 12 post stands from z = 1 up: the post's sides poke into the
 /// recess between z = 1 and z = 3, each through a lens whose hyperbola has its apex on the

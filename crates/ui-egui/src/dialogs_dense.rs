@@ -83,6 +83,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         }),
         Kind::Sheet(k) => match k {
             crate::dialogs_sheet::Sm::Flange { .. } => Some("sheet.flange"),
+            crate::dialogs_sheet::Sm::CornerJoin { .. } => Some("sheet.corner_join"),
             crate::dialogs_sheet::Sm::Unfold { refold } => Some(if *refold { "sheet.refold" } else { "sheet.unfold" }),
             crate::dialogs_sheet::Sm::Convert { .. } => Some("sheet.convert"),
             crate::dialogs_sheet::Sm::Recognize { .. } => Some("sheet.recognize"),
@@ -94,6 +95,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         },
         Kind::Frame(_) => Some("frame.member"),
         Kind::EndCap(_) => Some("frame.end_cap"),
+        Kind::Dogbone(_) => Some("solid.dogbone"),
         Kind::CellGrid(_) => Some("solid.cell_grid"),
         Kind::RotateMember(_) => Some("frame.rotate_member"),
         Kind::FrameTrim(_) => Some("frame.trim"),
@@ -1713,10 +1715,16 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 d.extra.insert("up_to".into(), Value::Null);
             }
         }
-        Kind::Sheet(k) => enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs),
+        Kind::Sheet(_) => {
+            crate::dialogs_sheet::discover_flange_corners(app, d);
+            if let Kind::Sheet(k) = &mut d.kind {
+                enter |= crate::dialogs_sheet::rows(app, ui, k, &mut d.inputs, &d.extra);
+            }
+        }
         Kind::Plastic(k) => enter |= crate::dialogs_plastic::rows(app, ui, k, &d.inputs),
         Kind::Frame(_) => enter |= crate::dialogs_frame::rows(app, ui, d),
         Kind::EndCap(k) => enter |= crate::dialogs_end_cap::rows(app, ui, k, &d.inputs),
+        Kind::Dogbone(k) => enter |= crate::dialogs_dogbone::rows(app, ui, k, &mut d.extra),
         Kind::Pulley(k) => enter |= crate::dialogs_pulley::rows(app, ui, k),
         Kind::CellGrid(k) => enter |= crate::dialogs_cell_grid::rows(app, ui, k, &d.inputs),
         Kind::RotateMember(k) => enter |= crate::dialogs_rotate_member::rows(app, ui, k, &mut d.inputs),

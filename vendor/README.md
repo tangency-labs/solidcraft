@@ -335,3 +335,13 @@ SolidCraft changes:
   jumped back when the drag ended, and one opened on another screen did not come forward with
   its parent (#22313). A window with an explicit parent
   (`WindowAttributes::with_parent_window`) is a child window as in winit.
+
+## occt-capi (MIT OR Apache-2.0; Open CASCADE itself LGPL-2.1-only WITH OCCT-exception-1.0)
+
+`vendor/occt-capi` is the Open CASCADE (OCCT) C ABI module behind `solidcraft-kernel`'s opt-in
+`backend-occt` feature, an experiment that checks the kernel interface fits a second kernel
+(`docs/kernel-support.md`). Its build files and two shim files come from text-to-cad-rs
+(`crates/occt-capi-sys`); `vendor/occt-capi/README.md` says which and what changed. It is not a
+`[patch]`: `solidcraft-kernel` depends on it by path, only with the feature, and no build we ship
+turns that on. OCCT is downloaded and built into the module at build time and is never stored here;
+the licence terms are in `vendor/occt-capi/README.md`.
