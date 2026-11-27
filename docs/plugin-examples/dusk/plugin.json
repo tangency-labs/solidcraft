@@ -1,0 +1,16 @@
+{
+  "id": "dusk",
+  "name": "Dusk",
+  "version": "1.0.0",
+  "description": "A sky in the theme's colours behind the model, with a glow drifting along the horizon.",
+  "capabilities": ["shaders@0.1"],
+  "shaders": [
+    {
+      "id": "dusk",
+      "name": "Dusk",
+      "kind": "background",
+      "source": "dusk.wgsl",
+      "animated": true
+    }
+  ]
+}

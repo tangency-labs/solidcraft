@@ -315,12 +315,15 @@ fn cut_at_creases(
                     w.y = l;
                 }
             };
-            // a crossing that rounds onto an end moves that end's point onto the line
-            if lam.is_nan() || lam <= 0.0 {
+            // a crossing that rounds onto an end moves that end's point onto the line, in
+            // `lam` or in its parameter `t` (a cut whose `t` rounds to `b` would leave a piece
+            // of no length past it, which the bound cannot take; with the end's point on the
+            // line, the piece before it runs up to the line and covers `t` to `b` itself)
+            if lam.is_nan() || lam <= 0.0 || a + lam * (b - a) <= a {
                 on_line(&mut sa);
                 continue;
             }
-            if lam >= 1.0 {
+            if lam >= 1.0 || a + lam * (b - a) >= b {
                 on_line(&mut sb);
                 continue;
             }
@@ -757,6 +760,50 @@ mod tests {
             BSplineCurve::from_data(3, 3, 7, 3, &pts, &[0., 0., 0., 0., 1., 1., 1., 1.])
                 .expect("arc"),
         )
+    }
+
+    /// A crease crossing whose `t` rounds onto the segment's end (#21301: the tilted
+    /// cylinder's exact ellipse ends its quarter at `t = 1.25000000772715891`, where its
+    /// foot `u = 0.5` lies one ulp below the net's crease line `0.5000000000000001`): the
+    /// end's point moves onto the line and no piece of no length is left. Before, the cut
+    /// at `t = b` left one that no halving could prove.
+    #[test]
+    fn a_crease_crossing_that_rounds_onto_the_end_moves_the_end() {
+        let l = 0.500_000_000_000_000_1;
+        let lines = (vec![l], Vec::new());
+        // the last of the probe's halvings toward the knot, and its two feet
+        let (a, b) = (1.250_000_007_727_144_7, 1.250_000_007_727_158_9);
+        let (wa, wb) = (
+            Point2::new(0.500_000_000_000_014_2, 0.202_352_441_727_733_23),
+            Point2::new(0.5, 0.202_352_441_727_736_6),
+        );
+        let lam = (l - wa.x) / (wb.x - wa.x);
+        assert!(lam < 1.0 && a + lam * (b - a) == b, "the case: lam {lam}");
+        let nodes = cut_at_creases(&lines, a, b, wa, wb);
+        assert_eq!(nodes.len(), 2, "{nodes:?}");
+        assert_eq!(nodes[0], (a, wa));
+        assert_eq!(nodes[1], (b, Point2::new(l, wb.y)));
+        assert!(in_one_patch(&lines, nodes[0].1, nodes[1].1));
+        // the mirror case at the start
+        let (a, b) = (1.0, 1.0 + 2f64.powi(-40));
+        let (wa, wb) = (Point2::new(0.5, 0.2), Point2::new(0.508, 0.2));
+        let lam = (l - wa.x) / (wb.x - wa.x);
+        assert!(lam > 0.0 && a + lam * (b - a) == a, "the case: lam {lam}");
+        let nodes = cut_at_creases(&lines, a, b, wa, wb);
+        assert_eq!(nodes.len(), 2, "{nodes:?}");
+        assert_eq!(nodes[0], (a, Point2::new(l, wa.y)));
+        assert_eq!(nodes[1], (b, wb));
+        // a crossing inside the segment is still cut there
+        let nodes = cut_at_creases(
+            &lines,
+            0.0,
+            1.0,
+            Point2::new(0.4, 0.2),
+            Point2::new(0.6, 0.2),
+        );
+        assert_eq!(nodes.len(), 3, "{nodes:?}");
+        assert!(nodes[0].0 < nodes[1].0 && nodes[1].0 < nodes[2].0);
+        assert_eq!(nodes[1].1.x, l);
     }
 
     #[test]

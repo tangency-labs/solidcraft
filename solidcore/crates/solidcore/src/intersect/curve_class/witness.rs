@@ -20,8 +20,6 @@
 //!
 //! The range is kept unchanged (the classifier's own answer) whenever the witness does
 //! not apply or cannot decide:
-//! - `Kernel::fixes.simple_coincidence_crossing_is_point` is on (it decides these ranges
-//!   itself, so its results are unchanged);
 //! - the classification has no tangency partner (only
 //!   [`crate::topology::face::p3::face_intersect_breps_cached`] sets one);
 //! - the solution is not a range of the curve on an edge, or the edge is a seam;
@@ -553,10 +551,7 @@ pub(crate) fn tangency_point<O: ClassObject>(
     solution: &Solution<O>,
     tolerance: f64,
 ) -> Result<Option<Solution<O>>> {
-    if k.fixes.simple_coincidence_crossing_is_point
-        || solution.solution_type != SolutionType::RangeOfValues
-        || edge.seam.is_some()
-    {
+    if solution.solution_type != SolutionType::RangeOfValues || edge.seam.is_some() {
         return Ok(None);
     }
     let (Some(partner), Some(face)) = (cc.tangency_partner, cc.face) else {

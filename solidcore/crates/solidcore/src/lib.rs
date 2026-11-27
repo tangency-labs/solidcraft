@@ -43,6 +43,7 @@ pub mod error;
 pub mod kernel;
 pub mod limits;
 pub mod math;
+pub mod mesh_reconstruction;
 pub mod topology;
 
 pub mod blend;
@@ -52,8 +53,6 @@ pub mod curve;
 pub mod develop;
 pub mod eval;
 pub mod geom;
-#[allow(missing_docs)]
-pub mod hatch;
 pub mod heal;
 pub mod hlr;
 pub mod intersect;
@@ -67,6 +66,8 @@ pub mod profile;
 pub mod query;
 pub mod surface;
 pub mod sweep;
+pub mod teeth;
+pub mod weld_symbol;
 
 pub use error::EntityRef;
 pub use error::Result;

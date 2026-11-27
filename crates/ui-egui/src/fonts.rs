@@ -6,6 +6,9 @@
 
 use std::sync::Arc;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod system_fallback;
+
 use egui::{FontDefinitions, FontFamily};
 #[cfg(not(target_arch = "wasm32"))]
 use solidcraft_engine::sketch::fallback;
@@ -16,7 +19,7 @@ use solidcraft_look::fonts::{self as look, with_symbol_fallback};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ui_kit::type_face::SYMBOL_FALLBACK;
 #[cfg(any(test, not(target_arch = "wasm32")))]
-use crate::ui_kit::type_face::{ARABIC_FALLBACK, GEORGIAN_FALLBACK, HEBREW_FALLBACK, THAI_FALLBACK};
+use crate::ui_kit::type_face::{ARABIC_FALLBACK, GEORGIAN_FALLBACK, HEBREW_FALLBACK, LAO_FALLBACK, THAI_FALLBACK};
 
 fn all_families() -> impl Iterator<Item = FontFamily> {
     sans_families().into_iter().chain([FontFamily::Monospace])
@@ -508,6 +511,7 @@ struct SystemFonts {
     hebrew: Option<Vec<u8>>,
     arabic: Option<Vec<u8>>,
     georgian: Option<Vec<u8>>,
+    lao: Option<Vec<u8>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -519,13 +523,14 @@ fn system_fallbacks() -> &'static SystemFonts {
         let cjk = find_system_cjk_font();
         let chinese = find_system_chinese_font().filter(|bytes| cjk.as_ref() != Some(bytes));
         let hangul = first_candidate(fallback::HANGUL);
+        let lao = lao_font();
         let thai = first_candidate(fallback::THAI);
         let hebrew =
             fallback::candidate_files(fallback::HEBREW).find_map(|path| try_read_font(std::path::Path::new(path)).filter(|bytes| covers(bytes, 'א')));
         let arabic = arabic_font();
         let georgian = fallback::candidate_files(fallback::GEORGIAN)
             .find_map(|path| try_read_font(std::path::Path::new(path)).filter(|bytes| covers(bytes, 'ა')));
-        SystemFonts { cjk, chinese, hangul, thai, hebrew, arabic, georgian }
+        SystemFonts { cjk, chinese, hangul, thai, hebrew, arabic, georgian, lao }
     })
 }
 
@@ -534,6 +539,16 @@ fn system_fallbacks() -> &'static SystemFonts {
 pub fn system_fonts_ready() -> bool {
     SYSTEM_FONTS.get().is_some()
 }
+
+/// Draws a character none of the faces has with an installed font that has it (#20005), the
+/// installed fonts listed on a thread of their own. Once per context.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn add_system_font_fallback(ctx: &egui::Context) {
+    system_fallback::install(ctx);
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn add_system_font_fallback(_ctx: &egui::Context) {}
 
 /// Search for the system fallback faces on a thread and repaint when they are found.
 #[cfg(not(target_arch = "wasm32"))]
@@ -566,9 +581,18 @@ pub fn setup_fonts_without_waiting(ctx: &egui::Context, language: &str, ui_font:
 
 #[cfg(not(target_arch = "wasm32"))]
 fn install_fonts(ctx: &egui::Context, language: &str, ui_font: &str, system: Option<&SystemFonts>) {
-    let (cjk, chinese, hangul, thai, hebrew, arabic, georgian) = match system {
-        Some(f) => (f.cjk.clone(), f.chinese.clone(), f.hangul.clone(), f.thai.clone(), f.hebrew.clone(), f.arabic.clone(), f.georgian.clone()),
-        None => (None, None, None, None, None, None, None),
+    let (cjk, chinese, hangul, thai, hebrew, arabic, georgian, lao) = match system {
+        Some(f) => (
+            f.cjk.clone(),
+            f.chinese.clone(),
+            f.hangul.clone(),
+            f.thai.clone(),
+            f.hebrew.clone(),
+            f.arabic.clone(),
+            f.georgian.clone(),
+            f.lao.clone(),
+        ),
+        None => (None, None, None, None, None, None, None, None),
     };
     let mut fonts = look::definitions();
     if let Some(font) = self::ui_font(ui_font) {
@@ -583,7 +607,8 @@ fn install_fonts(ctx: &egui::Context, language: &str, ui_font: &str, system: Opt
             THAI_FALLBACK => thai.clone(),
             HEBREW_FALLBACK => hebrew.clone(),
             ARABIC_FALLBACK => arabic.clone(),
-            _ => georgian.clone(),
+            GEORGIAN_FALLBACK => georgian.clone(),
+            _ => lao.clone(),
         };
         if let Some(bytes) = bytes
             && let Some(with_fallback) = with_fallback(fonts.clone(), name, bytes)
@@ -595,10 +620,9 @@ fn install_fonts(ctx: &egui::Context, language: &str, ui_font: &str, system: Opt
     if needs_cjk_font(language) {
         // Select the first installed face in language order (a duplicate Chinese face may
         // already be installed as CJK_FALLBACK). Keep explicit interface choices ahead of it.
-        if let Some(primary) = order
-            .into_iter()
-            .find(|name| ![THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK].contains(name) && fonts.font_data.contains_key(*name))
-        {
+        if let Some(primary) = order.into_iter().find(|name| {
+            ![THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK, LAO_FALLBACK].contains(name) && fonts.font_data.contains_key(*name)
+        }) {
             promote_font_to_front(&mut fonts, primary);
         }
     }
@@ -689,6 +713,26 @@ fn arabic_font() -> Option<Vec<u8>> {
     pack.into_iter()
         .chain(fallback::candidate_files(fallback::ARABIC).map(std::path::PathBuf::from))
         .find_map(|path| try_read_font(&path).filter(|bytes| covers(bytes, 'ب')))
+}
+
+/// The first Lao font in `CRAFT_FONTS_DIR`, Windows per-user fonts, or the candidate
+/// paths that draws Lao (`Noto Sans Lao` ahead of system Lao faces).
+#[cfg(not(target_arch = "wasm32"))]
+fn lao_font() -> Option<Vec<u8>> {
+    let pack = std::env::var_os("CRAFT_FONTS_DIR").map(|dir| std::path::PathBuf::from(dir).join("NotoSansLao-Regular.ttf"));
+    let user_win = std::env::var_os("LOCALAPPDATA").into_iter().flat_map(|dir| {
+        let base = std::path::PathBuf::from(dir).join("Microsoft").join("Windows").join("Fonts");
+        [
+            base.join("NotoSansLao-Regular.ttf"),
+            base.join("NotoSansLaoUI-Regular.ttf"),
+            base.join("NotoSansLao[wdth,wght].ttf"),
+            base.join("NotoSansLao-VariableFont_wdth,wght.ttf"),
+        ]
+    });
+    pack.into_iter()
+        .chain(user_win)
+        .chain(fallback::candidate_files(fallback::LAO).map(std::path::PathBuf::from))
+        .find_map(|path| try_read_font(&path).filter(|bytes| covers(bytes, 'ກ')))
 }
 
 /// Web installs the bundled faces synchronously; Japanese and Chinese are fetched by the shell
@@ -1021,18 +1065,19 @@ mod tests {
     fn a_chinese_ui_puts_the_chinese_face_before_the_japanese_one() {
         assert_eq!(
             fallback_order("zh"),
-            [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK]
+            [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK, LAO_FALLBACK]
         );
         assert_eq!(fallback_order("zh-TW"), fallback_order("zh"));
         assert_eq!(
             fallback_order("ko"),
-            [HANGUL_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK]
+            [HANGUL_FALLBACK, CJK_FALLBACK, CHINESE_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK, LAO_FALLBACK]
         );
         assert_eq!(fallback_order("ar")[0], ARABIC_FALLBACK);
+        assert_eq!(fallback_order("lo")[0], LAO_FALLBACK);
         for lang in ["en", "ja", "de", "he"] {
             assert_eq!(
                 fallback_order(lang),
-                [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK],
+                [CJK_FALLBACK, CHINESE_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK, LAO_FALLBACK],
                 "{lang} keeps the Japanese font first"
             );
         }
@@ -1045,8 +1090,8 @@ mod tests {
             let list = &fonts.families[&family];
             assert_eq!(list.first(), defaults.families[&family].first(), "the Latin UI font stays first");
             assert_eq!(
-                &list[list.len() - 7..],
-                [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK]
+                &list[list.len() - 8..],
+                [CHINESE_FALLBACK, CJK_FALLBACK, HANGUL_FALLBACK, THAI_FALLBACK, HEBREW_FALLBACK, ARABIC_FALLBACK, GEORGIAN_FALLBACK, LAO_FALLBACK]
             );
         }
     }

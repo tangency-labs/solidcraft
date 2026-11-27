@@ -206,7 +206,7 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_line_closest_point;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
-use crate::geom::tol::{approx_tol3d, zone_tol3d};
+use crate::geom::tol::{approx_tol3d, zone_tol3d, ANG_TOL_RAD};
 use crate::geom::vector2d::Point2;
 use crate::intersect::surface_drop_lib::p3::DropSolveContext;
 use crate::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
@@ -218,7 +218,9 @@ use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::crv_fit::p1::ParamMethod;
 use crate::nurbs::knots::Side;
+use crate::nurbs::math::gamma;
 use crate::query::brep::BrepFaceServices;
+use crate::surface::normal_cone::{crossing_line_in_ball, CrossingLine};
 use crate::surface::plane::p2::stop_on_warning;
 use crate::surface::plane::Plane;
 use crate::surface::procedural_blend::NetScope;
@@ -1702,17 +1704,94 @@ fn crossed_seam(
     Ok((on1 != on2).then_some(crossed))
 }
 
+/// Not upstream (solidcore-native, #21416): whether `pieces`, the first ending where the second
+/// starts (within `100 * approx_tol`), are one branch of the intersection of `surfaces` run on
+/// through their meeting point, proved from the surfaces' definitions:
+/// - the meeting point is a regular point of the intersection: the surfaces' normal cones over
+///   a ball holding both pieces' ends there and the intersection's points they stand for (each
+///   within `approx_tol` of its piece, so the ball is no wider: its radius gives the turn below
+///   no more room than the pieces' own fit) prove the surfaces cross, never tangent, at every
+///   point of both in it ([`crossing_line_in_ball`]), so no branch point, touch point or
+///   tangent curve lies there (docs/ssi.md §4.4, §8 item 7) and the intersection is one smooth
+///   curve through it, along `n1 x n2`;
+/// - the pieces' tangents there agree in direction along it: the intersection's tangent line
+///   lies within the angle of sine `spread` of the crossing line `L` everywhere in the ball, so
+///   oriented along `L` it is one direction `T` there; a tangent `t` with `|t . L| > spread |t|`
+///   (rounding included) lies within a quarter turn less that angle of `L` or `-L`, so within
+///   a quarter turn of `T` or `-T`. Both pieces' tangents on the side of `T`, or both on the
+///   side of `-T`, run the branch one way through the point: neither turns back over the other
+///   nor runs off across it;
+/// - and neither kinks there: the branch's tangent line turns by less than twice the angle of
+///   sine `spread` over the ball, so the two tangents, rounding included, are no further apart
+///   than that and the kernel's angle tolerance ([`ANG_TOL_RAD`]) for the pieces' own fit.
+///
+/// `false` where either is not proved: a surface of a kind without a closed-form normal cone,
+/// normals parallel or nearly so at the point (a branch point, where both branches end, or a
+/// touch point), a piece turning back, a tangent too far across the branch, a kink, or a tangent
+/// not finite. The pieces are then not joined, and the search
+/// is left as it was.
+///
+/// # Errors
+/// Those of the evaluations.
+fn continues_across(
+    k: &Kernel,
+    pieces: [&Curve; 2],
+    surfaces: [(&Surface, &Extent2d); 2],
+    approx_tol: f64,
+) -> Result<bool> {
+    let [first, second] = pieces;
+    let [(surf1, _), (surf2, _)] = surfaces;
+    // each piece's point and tangent at the meeting point: the first's end, the second's start
+    let mut ends = [(Point3::ZERO, Vec3::ZERO); 2];
+    for (slot, (piece, at_end)) in ends.iter_mut().zip([(first, true), (second, false)]) {
+        let ivl = piece.natural_interval();
+        let t = if at_end { ivl.max() } else { ivl.min() };
+        let d = piece.evaluate(k, t, 1, at_end, true)?;
+        let (Some(&p), Some(&tangent)) = (d.first(), d.get(1)) else {
+            return Ok(false);
+        };
+        *slot = (p, tangent);
+    }
+    let [(p, t1), (q, t2)] = ends;
+    // the ball holds both ends and the intersection's points within `approx_tol` of them, and no
+    // more: its spread is the turn allowed below, so a wider ball would pass a kink (#21959 review)
+    let radius = (p.distance(q) + approx_tol) * (1.0 + gamma(2));
+    if !radius.is_finite() {
+        return Ok(false);
+    }
+    let Some(CrossingLine { line, spread }) = crossing_line_in_ball(surf1, surf2, p, radius) else {
+        return Ok(false);
+    };
+    // the side of the branch's direction a tangent lies on, where its component along the line
+    // is beyond the spread and the rounding of the dot product with a unit vector
+    let heading = |t: Vec3| {
+        let along = t.dot(line);
+        let len = t.length();
+        (along.is_finite() && len.is_finite() && along.abs() > (spread + gamma(8)) * len)
+            .then_some(along > 0.0)
+    };
+    if !matches!((heading(t1), heading(t2)), (Some(a), Some(b)) if a == b) {
+        return Ok(false);
+    }
+    // the angle between the tangents, read high by its rounding
+    let between = t1.cross(t2).length().atan2(t1.dot(t2)) * (1.0 + gamma(8)) + gamma(8);
+    let turn = 2.0 * spread.asin() + ANG_TOL_RAD;
+    Ok(between.is_finite() && between <= turn)
+}
+
 /// Not upstream (solidcore-native, #21416): the two pieces of an intersection curve on either
 /// side of the seam of one of its surfaces (`crossed`, [`crossed_seam`]), the first ending where
 /// the second starts, joined as one B-spline curve. On the surface whose seam it crosses its UV
 /// image is no one curve on the surface's domain, so it has none there, as a curve run through
 /// a closed candidate's closure has none (`on_closed_seam`): the merge cuts the curve at the
 /// seam where it meets the face. On the other surface its UV curve is the joined curve dropped
-/// onto it. `None` where a piece is not a B-spline curve (no curve of the intersectors') or
-/// the joined curve does not drop onto that other surface: the pieces then stay what they were.
+/// onto it. `None` where the pieces are not proved one curve through their meeting point
+/// ([`continues_across`]), where a piece is not a B-spline curve (no curve of the
+/// intersectors') or the joined curve does not drop onto that other surface: the pieces then
+/// stay what they were.
 ///
 /// # Errors
-/// Those of the join and the drop.
+/// Those of the evaluations, the join and the drop.
 fn joined_across_seam(
     k: &Kernel,
     pieces: [&Curve; 2],
@@ -1720,6 +1799,9 @@ fn joined_across_seam(
     surfaces: [(&Surface, &Extent2d); 2],
     approx_tol: f64,
 ) -> Result<Option<SrfSrfCurves>> {
+    if !continues_across(k, pieces, surfaces, approx_tol)? {
+        return Ok(None);
+    }
     let [first, second] = pieces;
     let (Some(first), Some(second)) = (b_spline_base(first), b_spline_base(second)) else {
         return Ok(None);
@@ -4129,41 +4211,15 @@ impl FilletBrep {
                     return Err(defect(OP, FOOT_NO_DROP));
                 }
                 // a closed surface names the foot once per period: take the name nearest the
-                // edge use's parameters, as the section solve continues from them across a seam.
-                // Not along a direction that collapses at the edge use's parameters (a sphere's
-                // pole): there the edge use's parameter is an arbitrary label, not a side of the
-                // seam, and the nearest name to it could lie a quarter period outside the
-                // domain. A miss of that test leaves the nearest name, as on a regular point.
-                // (a predicate that cannot evaluate reads as collapsed: the foot keeps its name)
-                let sing = match base.is_singularity(k, b.uv, EFF_ZERO, false) {
-                    Ok(sing) => sing,
-                    Err(e) if e.is_unported_or_cancelled() => return Err(e),
-                    Err(_) => crate::surface::surface::p5::Singularity {
-                        singular: true,
-                        direction: SurfParamType::Neither,
-                    },
-                };
-                let collapsed = |dir: SurfParamType| {
-                    sing.direction == dir
-                        || (sing.singular
-                            && matches!(
-                                sing.direction,
-                                SurfParamType::Neither | SurfParamType::Both
-                            ))
-                };
-                let mut foot = dropped.result_uv;
-                let periods = crate::blend::fillet_solver::p1::seam_periods(k, &base)?;
-                for (period, (value, near, dir)) in periods.iter().zip([
-                    (&mut foot.x, b.uv.x, SurfParamType::U),
-                    (&mut foot.y, b.uv.y, SurfParamType::V),
-                ]) {
-                    if let Some(interval) = period {
-                        if !collapsed(dir) {
-                            let length = interval.length();
-                            *value += length * ((near - *value) / length).round();
-                        }
-                    }
-                }
+                // edge use's parameters, as the section solve continues from them across a seam
+                // (`period_name_nearest`, which leaves a direction collapsing there, a sphere's
+                // pole, alone).
+                let foot = crate::blend::fillet_solver::p1::period_name_nearest(
+                    k,
+                    &base,
+                    dropped.result_uv,
+                    b.uv,
+                )?;
                 *slot = foot;
             }
 
@@ -5738,6 +5794,165 @@ mod tests {
             assert_eq!(e.kind(), crate::error::ErrorKind::InvalidInput);
             assert!(!e.is_defect());
             assert_eq!(e.upstream_status(), Some(1001));
+        }
+    }
+
+    /// The cylinder of radius 1 about the line through `origin` along `seam x across`, 10 long
+    /// from `origin`, its seam along `seam` from the axis.
+    fn unit_cylinder(k: &Kernel, origin: Point3, seam: Vec3, across: Vec3) -> (Surface, Extent2d) {
+        let frame = Axis2Placement::new(origin, seam, across);
+        let mut cylinder = Cone::create_canonical_cylinder(k, &frame, 1.0).unwrap();
+        let mut domain = Extent2d::default();
+        domain.set_min_max_coords(0.0, 0.0, 360.0, 10.0).unwrap();
+        cylinder.adjust_step_uv_domain(k, &domain).unwrap();
+        let surface = Surface::from(cylinder);
+        let domain = surface.natural_uv_domain_with_nurb(k).unwrap();
+        (surface, domain)
+    }
+
+    /// The ellipse `(cos s, ±cos s, sin s)` over `from..to` degrees: a branch of the
+    /// intersection of the unit cylinders about y and about x, in the plane x = ±y.
+    fn branch(k: &Kernel, sign: f64, from: f64, to: f64) -> Curve {
+        use crate::curve::ellipse::{Ellipse, EllipseOptions};
+        let x = Vec3::new(1.0, sign, 0.0) / 2.0_f64.sqrt();
+        let domain = Extent1d::from_min_max(from, to);
+        let opts = EllipseOptions::default();
+        let e = Ellipse::new(
+            k,
+            Point3::ZERO,
+            x,
+            Vec3::new(0.0, 0.0, 1.0),
+            domain,
+            2.0_f64.sqrt(),
+            1.0,
+            &opts,
+        );
+        Curve::from(e.unwrap())
+    }
+
+    fn candidate(curve_3d: Curve) -> Candidate {
+        Candidate {
+            curve_3d,
+            uv_curve1: None,
+            uv_curve2: None,
+            through: None,
+        }
+    }
+
+    /// The two surfaces of a pair, each with its domain, as the intersectors take them.
+    fn surfaces<'a>(
+        a: &'a (Surface, Extent2d),
+        b: &'a (Surface, Extent2d),
+    ) -> [(&'a Surface, &'a Extent2d); 2] {
+        [(&a.0, &a.1), (&b.0, &b.1)]
+    }
+
+    fn on_branch(sign: f64, deg: f64) -> Point3 {
+        let s = deg.to_radians();
+        Point3::new(s.cos(), sign * s.cos(), s.sin())
+    }
+
+    /// #21416 review: two candidates that meet on a closed surface's seam are joined only where
+    /// the meeting point is a regular point of the intersection and the two run on through it.
+    /// The unit cylinders about y (`a`) and about x (`b`) meet in the ellipses in the planes
+    /// x = y and x = -y, which cross at the branch points (0, 0, ±1), where both normals are z.
+    /// - With `a`'s seam through (0, 0, 1), the branch x = y from (1, 1, 0) up to it and the
+    ///   branch x = -y on from it to (-1, 1, 0) meet on the seam, two different branches turning
+    ///   a right angle there: not joined.
+    /// - With `a`'s seam at 45 degrees, through the regular point at 45 degrees of the branch
+    ///   x = y (the normals 60 degrees apart), that branch cut there is joined, and runs from
+    ///   the start to the end.
+    /// - The same seam, the piece from 20 to 45 degrees and the piece from 45 back to 0: one
+    ///   branch, but the second turns back over the first: not joined.
+    /// - The piece from 0 to 45 degrees and a segment from the seam point: it runs on along the
+    ///   branch's tangent, kinks 11 degrees off it (beyond the kernel's angle tolerance) or
+    ///   leaves across the branch; only the first continues the piece.
+    #[test]
+    fn candidates_meeting_on_a_seam_are_joined_only_where_they_run_on() {
+        let k = Kernel::default();
+        let approx_tol = 5e-6;
+        let (z, x, y) = (
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        let about_x = unit_cylinder(&k, Point3::new(-5.0, 0.0, 0.0), -z, y);
+        let top = unit_cylinder(&k, Point3::new(0.0, -5.0, 0.0), z, x);
+        let r = 0.5_f64.sqrt();
+        let at_45 = unit_cylinder(
+            &k,
+            Point3::new(0.0, -5.0, 0.0),
+            Vec3::new(r, 0.0, r),
+            Vec3::new(r, 0.0, -r),
+        );
+        // two branches meeting at the branch point (0, 0, 1) on `a`'s seam
+        let cands = [
+            candidate(branch(&k, 1.0, 0.0, 90.0)),
+            candidate(branch(&k, -1.0, 90.0, 180.0)),
+        ];
+        let (start, end) = (on_branch(1.0, 0.0), on_branch(-1.0, 180.0));
+        assert!(on_closed_seam(&k, &top.0, &top.1, Some(z), approx_tol).unwrap());
+        let got =
+            candidates_across_seam(&k, &cands, start, end, surfaces(&top, &about_x), approx_tol);
+        assert!(got.unwrap().is_none());
+
+        // one branch cut at the regular point at 45 degrees, on `a`'s seam
+        let seam = on_branch(1.0, 45.0);
+        assert!(on_closed_seam(&k, &at_45.0, &at_45.1, Some(seam), approx_tol).unwrap());
+        let cands = [
+            candidate(branch(&k, 1.0, 0.0, 45.0)),
+            candidate(branch(&k, 1.0, 45.0, 80.0)),
+        ];
+        let (start, end) = (on_branch(1.0, 0.0), on_branch(1.0, 80.0));
+        let got = candidates_across_seam(
+            &k,
+            &cands,
+            start,
+            end,
+            surfaces(&at_45, &about_x),
+            approx_tol,
+        );
+        let joined = got.unwrap().and_then(|c| c.curve_3d).expect("joined");
+        let (a, b) = curve_ends(&k, &joined);
+        assert!(
+            a.distance(start) <= 1e-9 && b.distance(end) <= 1e-9,
+            "{a:?} {b:?}"
+        );
+
+        // the second piece turns back over the first at the seam
+        let cands = [
+            candidate(branch(&k, 1.0, 20.0, 45.0)),
+            candidate(branch(&k, 1.0, 0.0, 45.0)),
+        ];
+        let (start, end) = (on_branch(1.0, 20.0), on_branch(1.0, 0.0));
+        let got = candidates_across_seam(
+            &k,
+            &cands,
+            start,
+            end,
+            surfaces(&at_45, &about_x),
+            approx_tol,
+        );
+        assert!(got.unwrap().is_none());
+
+        // a second piece that kinks at the regular point at 45 degrees: a segment leaving it
+        // along the branch's tangent `t` runs on; one turned 11 degrees off it toward `n`,
+        // still on the branch's side, kinks; one along `n`, across the branch, turns off it
+        let first = branch(&k, 1.0, 0.0, 45.0);
+        let t = Vec3::new(-1.0, -1.0, 1.0) / 3.0_f64.sqrt();
+        let n = Vec3::new(1.0, -1.0, 0.0) / 2.0_f64.sqrt();
+        // (at a fit a hundred times looser too: the ball the turn is read over is no wider than
+        // the fit, so the kink is still one; #21959 review)
+        for tol in [approx_tol, 100.0 * approx_tol] {
+            for (dir, runs_on) in [(t, true), (t + n * 0.2, false), (n, false)] {
+                let second = Curve::from(crate::curve::line::Line::from_points(
+                    seam,
+                    seam + dir * 0.1,
+                    3,
+                ));
+                let got = continues_across(&k, [&first, &second], surfaces(&at_45, &about_x), tol);
+                assert_eq!(got.unwrap(), runs_on, "{dir:?} at {tol}");
+            }
         }
     }
 }

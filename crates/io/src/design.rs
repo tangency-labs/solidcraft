@@ -15,7 +15,7 @@ mod text;
 mod thumbnail;
 pub use drawing::{FileKind, file_kind, read_drawing, read_drawing_file, write_drawing_container};
 pub use import_cache::ImportCache;
-pub use native_cache::read_design_geometry;
+pub use native_cache::{read_design_geometry, take_last_cache_refusal};
 pub use provenance::{
     OpenPgpSignature, OpenPgpSigner, ProvenanceChain, ProvenanceRecord, ProvenanceReport, ProvenanceSave, ProvenanceSigner, ProvenanceStatus,
     ProvenanceSummary, SignatureSource, Signer,
@@ -444,8 +444,10 @@ fn write_container(
     if crate::safe_write::cancelled() {
         return Err(cancelled());
     }
+    native_cache::take_last_cache_refusal();
     let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata, writer.space(2, budget)).ok());
     if let Some((manifest, data)) = cache {
+        native_cache::take_last_cache_refusal();
         let [manifest_entry, payload_entry] = native_cache::ENTRIES;
         // Deflated whatever the policy: the encoded bodies shrink about fourfold to tenfold, faster
         // than the extra bytes would be written and read.
@@ -1887,6 +1889,7 @@ mod tests {
             colors: Colors(vec![128; n * 3].into()),
             source_points: n as u64,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -2610,6 +2613,41 @@ mod tests {
         assert_eq!(bytes, required);
     }
 
+    /// When an imported body fails round-trip encoding or decoding, the refusal specifically identifies
+    /// the failing body and feature rather than misdiagnosing the refusal as file size budget (#21610).
+    #[test]
+    fn unencodable_body_refusal_identifies_body_and_feature_name() -> Result<()> {
+        use solidcore_record::Vec3;
+        let broken = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.))?.with_paint(Some(solidcraft_kernel::Paint {
+            opacity: 1.0,
+            faces: vec![solidcraft_kernel::FacePaint { face: usize::MAX, color: [1.0, 0.0, 0.0], opacity: 1.0, name: None }],
+            name: None,
+        }));
+        let mut model = saved_model(vec![broken]);
+        model.records["model_bodies"][0]["name"] = json!("CoolingFin");
+        let doc_json = json!({
+            "features": [{"id": 1, "name": "GPU Cooler Import"}]
+        });
+        let doc_bytes = serde_json::to_vec(&doc_json).map_err(invalid)?;
+        let err = native_cache::encode_model(&model, &doc_bytes, usize::MAX).err().ok_or_else(|| invalid("expected encode error"))?;
+        assert!(
+            err.to_string().contains("body 'CoolingFin' in feature 'GPU Cooler Import' could not be stored exactly"),
+            "unexpected error message: {err}"
+        );
+        let refusal = take_last_cache_refusal().ok_or_else(|| invalid("refusal reason was captured"))?;
+        assert!(refusal.contains("body 'CoolingFin' in feature 'GPU Cooler Import' could not be stored exactly"), "unexpected refusal: {refusal}");
+        assert!(!refusal.contains("design file budget"), "must not blame budget: {refusal}");
+
+        let mut doc = document();
+        doc.features[0].id = 1;
+        doc.features[0].name = "GPU Cooler Import".into();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&model))?;
+        assert!(!DesignContainerReader::new(Cursor::new(&bytes))?.has_model_cache());
+        let refusal = take_last_cache_refusal().ok_or_else(|| invalid("refusal captured after write_design_container"))?;
+        assert!(refusal.contains("CoolingFin") && refusal.contains("GPU Cooler Import"), "write_design_container captured refusal: {refusal}");
+        Ok(())
+    }
+
     /// #20724: the cap on the cache's manifest follows the design file limit (an eighth of it, the
     /// 32 MiB it always was at the default), saving and reading. A manifest just over 32 MiB is
     /// left out at the default limit, kept when the limit allows it, and refused on a read under
@@ -2701,6 +2739,7 @@ mod tests {
             colors: Colors::default(),
             source_points: count as u64,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -3725,6 +3764,7 @@ mod tests {
             colors: Colors::default(),
             source_points: 3,
             units: "mm".into(),
+            up: Default::default(),
             transform: solidcraft_doc::IDENTITY,
             point_size: 2.0,
             color_by: ColorBy::File,
@@ -3813,8 +3853,9 @@ mod tests {
     fn portable_thumbnail_is_keyed_bounded_and_does_not_read_sources() {
         // IO validates an opaque PNG header/hash; UI tests exercise real PNG decoding.
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
-        png.extend(240u32.to_be_bytes());
-        png.extend(150u32.to_be_bytes());
+        for side in crate::THUMBNAIL_SIZE {
+            png.extend((side as u32).to_be_bytes());
+        }
         let mut doc = Document::from_json(&document().to_json()).unwrap();
         if let FeatureKind::Import { step, .. } = &mut doc.features[0].kind {
             *step = "source data".repeat(250_000).into();
@@ -3826,7 +3867,7 @@ mod tests {
         assert!(count.get() < 256 * 1024);
         assert_eq!(reader.read_document().unwrap(), doc);
         let original = parts(&bytes);
-        for field in ["format", "app", "document", "payload"] {
+        for field in ["format", "document", "payload"] {
             let mut entries = original.clone();
             let mut key: Value = serde_json::from_slice(&entries["cache/thumbnail.json"]).unwrap();
             key[field] = json!("mismatch");
@@ -3835,6 +3876,12 @@ mod tests {
             assert!(read_design_thumbnail(&changed).is_none());
             assert_eq!(crate::read_design(&changed).unwrap(), doc);
         }
+        // A picture another version saved is still the design's picture: an update hides none.
+        let mut entries = original.clone();
+        let mut key: Value = serde_json::from_slice(&entries["cache/thumbnail.json"]).unwrap();
+        key["app"] = json!("0.0.1");
+        entries.insert("cache/thumbnail.json".into(), serde_json::to_vec(&key).unwrap());
+        assert_eq!(read_design_thumbnail(&package(&entries)), Some(png.clone()));
         let mut entries = original.clone();
         let source = entries.keys().find(|k| k.ends_with(".step")).unwrap().clone();
         entries.insert(source, b"corrupt source".to_vec());
@@ -4235,7 +4282,10 @@ mod tests {
                 legacy.start_file(name, zip::write::SimpleFileOptions::default().compression_method(method)).unwrap();
                 legacy.write_all(&data).unwrap();
             }
-            assert_eq!(crate::read_design(&legacy.finish().unwrap().into_inner()).unwrap(), doc);
+            // Its features keep the order of the pieces they split bodies into (#21552).
+            let mut upgraded = doc.clone();
+            upgraded.features.iter_mut().for_each(|f| f.least_face_piece_order = true);
+            assert_eq!(crate::read_design(&legacy.finish().unwrap().into_inner()).unwrap(), upgraded);
         }
     }
 
@@ -4345,6 +4395,26 @@ mod tests {
                 .is_ok()
             );
         }
+    }
+
+    #[test]
+    fn saved_sections_round_trip_and_an_old_design_has_none() {
+        use solidcore_record::Vec3;
+        let mut doc = Document::new("Sections");
+        assert!(!String::from_utf8_lossy(&crate::write_design(&doc).unwrap()).contains("saved_sections"), "none saved, nothing written");
+        let plane = solidcraft_doc::SavedSectionPlane { id: 1, origin: Vec3::new(0.0, 15.0, 0.0), normal: Vec3::Y, hidden: false };
+        doc.saved_sections.push(solidcraft_doc::SavedSection { name: "Wall".into(), planes: vec![plane.clone()], hatch: true });
+        doc.saved_sections.push(solidcraft_doc::SavedSection {
+            name: "Hidden".into(),
+            planes: vec![solidcraft_doc::SavedSectionPlane { hidden: true, ..plane }],
+            hatch: false,
+        });
+        let back = crate::read_design(&crate::write_design(&doc).unwrap()).unwrap();
+        assert_eq!(back.saved_sections, doc.saved_sections);
+        assert_eq!(crate::read_design(&write_design_container(&doc).unwrap()).unwrap().saved_sections, doc.saved_sections);
+        // A design written before sections could be saved opens with none.
+        let old = Document::new("Old");
+        assert!(crate::read_design(&crate::write_design(&old).unwrap()).unwrap().saved_sections.is_empty());
     }
 
     #[test]

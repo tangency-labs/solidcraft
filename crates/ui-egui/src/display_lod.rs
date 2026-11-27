@@ -20,10 +20,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use solidcore_record::Vec3;
-use solidcore_tess::TessPlan;
 use solidcraft_engine::doc::ModelBody;
 use solidcraft_engine::doc::display_quality::{DisplayQuality, MAX_REFINE, refinement_for};
 use solidcraft_engine::geom::{Aabb3, Mesh};
+use solidcraft_kernel::services::tess::TessPlan;
 
 /// Most triangles all refined bodies may draw together (on top of the rest of the model).
 pub(crate) const TRIANGLE_BUDGET: usize = 6_000_000;

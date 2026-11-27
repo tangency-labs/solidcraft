@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.fillet_color_edges": "Color edges",
+    "ui.fillet_color_edges_tip": "Draw the edges a click would take in their own color: the edge under the pointer, or the edges of the face under it. Remembered for the next Fillet or Chamfer."
+  },
+  "de": {
+    "ui.fillet_color_edges": "Kanten einfärben",
+    "ui.fillet_color_edges_tip": "Die Kanten, die ein Klick nehmen würde, in eigener Farbe zeichnen: die Kante unter dem Zeiger oder die Kanten der Fläche darunter. Bleibt für die nächste Verrundung oder Fase erhalten."
+  },
+  "ar": {
+    "ui.fillet_color_edges": "تلوين الحواف",
+    "ui.fillet_color_edges_tip": "ارسم الحواف التي ستأخذها النقرة بلونها الخاص: الحافة تحت المؤشر، أو حواف الوجه الذي تحته. يُحفظ للتقويس أو الشطف التالي."
+  },
+  "he": {
+    "ui.fillet_color_edges": "צביעת קצוות",
+    "ui.fillet_color_edges_tip": "צייר את הקצוות שלחיצה תיקח בצבע משלהם: הקצה מתחת לסמן, או קצוות הפאה שמתחתיו. נשמר לעיגול הפינה או לפאזה הבאים."
+  },
+  "ja": {
+    "ui.fillet_color_edges": "エッジに色を付ける",
+    "ui.fillet_color_edges_tip": "クリックで選ばれるエッジを専用の色で描きます。ポインター下のエッジ、またはその下にある面のエッジです。次のフィレットや面取りでも保持されます。"
+  },
+  "ko": {
+    "ui.fillet_color_edges": "모서리 색 입히기",
+    "ui.fillet_color_edges_tip": "클릭하면 선택될 모서리를 고유한 색으로 그립니다. 포인터 아래의 모서리 또는 그 아래 면의 모서리입니다. 다음 필렛이나 모따기에도 유지됩니다."
+  },
+  "vi": {
+    "ui.fillet_color_edges": "Tô màu cạnh",
+    "ui.fillet_color_edges_tip": "Vẽ các cạnh mà một cú nhấp sẽ chọn bằng màu riêng: cạnh dưới con trỏ, hoặc các cạnh của mặt bên dưới nó. Được ghi nhớ cho lần Bo tròn mép hoặc Vát mép tiếp theo."
+  },
+  "zh": {
+    "ui.fillet_color_edges": "为边着色",
+    "ui.fillet_color_edges_tip": "以专用颜色绘制单击将选取的边：指针下的边，或其下方面的各条边。下次圆角或倒角时保留此设置。"
+  }
+}

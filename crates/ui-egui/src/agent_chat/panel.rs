@@ -826,9 +826,10 @@ pub fn window_place(saved: Option<[f32; 4]>) -> Option<([f32; 2], [f32; 2])> {
 /// The chat window's settings. The saved place and size go only to a window that is opening:
 /// egui turns a changed place into a move, and the system rounds what it is given, so giving it
 /// every frame made the window chase its own rounding (it shook a pixel up and down).
-pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs) -> egui::ViewportBuilder {
+pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs, owner: egui::ViewportId) -> egui::ViewportBuilder {
     let title = format!("{document} — {}", tr("ui.agent_chat"));
-    let builder = egui::ViewportBuilder::default().with_title(title).with_min_inner_size([MIN_WIDTH, 320.0]);
+    let builder =
+        crate::window_chrome::popout_viewport(egui::ViewportBuilder::default(), owner).with_title(title).with_min_inner_size([MIN_WIDTH, 320.0]);
     if placed {
         return builder;
     }
@@ -843,7 +844,7 @@ pub fn window_builder(document: &str, placed: bool, prefs: &AgentPanelPrefs) -> 
 /// The system's close button closes the chat (it opens there again); Dock puts it back.
 #[cfg(not(target_arch = "wasm32"))]
 fn window(chat: &mut AgentChat, view: &PanelView, ctx: &egui::Context, prefs: &mut AgentPanelPrefs, blur: &mut crate::blur::State) {
-    let builder = window_builder(&view.document, chat.window_placed, prefs);
+    let builder = window_builder(&view.document, chat.window_placed, prefs, ctx.viewport_id());
     chat.window_placed = true;
     // The side panel isn't drawn: its place no longer counts as "in the chat".
     chat.panel_rect = None;
@@ -1308,6 +1309,18 @@ fn composer(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, state: St
 fn transcript_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) -> f32 {
     // Select All and Copy of the whole conversation, read before its labels see the keys.
     super::select_all::handle(chat, ui.ctx());
+    let top = ui.cursor().top();
+    if let Some(stage) = chat.current_stage() {
+        let t = Tokens::get();
+        let label = trf("ui.agent_chat_current_stage", &[("step", stage)]);
+        inset(ui, |ui| {
+            let line = ui
+                .add(egui::Label::new(RichText::new(&label).color(t.text_dim).size(t.font_small)).truncate().selectable(false))
+                .backing_on_hover_text(&label);
+            solidcraft_ui_registry::publish_rect("agent_chat:current_stage", line.rect);
+        });
+    }
+    let stage_height = ui.cursor().top() - top;
     let margin = Tokens::get().space_12 as i8;
     let height = ui.available_height();
     // The height inside the margins, less a point so rounding never shows a scroll bar.
@@ -1327,7 +1340,7 @@ fn transcript_body(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) ->
             scroll_while_selecting(ui);
         });
     solidcraft_ui_registry::publish_rect("agent_chat:conversation", conversation.inner_rect);
-    conversation.content_size.y
+    stage_height + conversation.content_size.y
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1472,19 +1485,23 @@ fn switcher(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui) {
     if let Some(options) = chat.config_options.clone() {
         config_selects(chat, ui, &options);
     }
-    ui.horizontal(|ui| {
-        let b = if chat.state().running() {
-            ui_kit::button(ui, tr("ui.agent_chat_stop"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.agent_chat_stop_tip"))
-        } else {
-            let label = if chat.state() == State::Failed { "ui.agent_chat_retry" } else { "ui.agent_chat_connect" };
-            ui_kit::button(ui, tr(label), ui_kit::Button::Normal)
-        };
-        solidcraft_ui_registry::publish_handle("agent_chat:connect", b.rect.center());
-        if b.clicked() {
-            chat.actions.push(if chat.state().running() { PanelAction::Disconnect } else { PanelAction::Connect });
-        }
-    });
-    if let Some(a) = &chat.auth_status {
+    if chat.state().shows_stop() || !chat.state().running() {
+        ui.horizontal(|ui| {
+            let b = if chat.state().shows_stop() {
+                ui_kit::button(ui, tr("ui.agent_chat_stop"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.agent_chat_stop_tip"))
+            } else {
+                let label = if chat.state() == State::Failed { "ui.agent_chat_retry" } else { "ui.agent_chat_connect" };
+                ui_kit::button(ui, tr(label), ui_kit::Button::Normal)
+            };
+            solidcraft_ui_registry::publish_handle("agent_chat:connect", b.rect.center());
+            if b.clicked() {
+                chat.actions.push(if chat.state().shows_stop() { PanelAction::Disconnect } else { PanelAction::Connect });
+            }
+        });
+    }
+    if chat.state().shows_auth_status()
+        && let Some(a) = &chat.auth_status
+    {
         ui.label(RichText::new(a).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_small));
     }
 }
@@ -2245,20 +2262,36 @@ fn conversation(chat: &mut AgentChat, view: &PanelView, ui: &mut egui::Ui, room:
                     }
                 });
             }
-            Item::Changes { steps, revision, history, undone } => {
-                ui.horizontal(|ui| {
-                    let text = trf("ui.agent_chat_changes", &[("n", &steps.to_string())]);
-                    ui.label(RichText::new(text).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
-                    if *undone {
-                        ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(solidcraft_theme::Tokens::get().font_caption));
-                    } else if revision.same(current) && view.undo_history.as_ref().is_some_and(|h| history.same(h)) {
-                        let b =
-                            ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal).backing_on_hover_text(tr("ui.ai_undo_tip"));
-                        solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
-                        if b.clicked() {
-                            undo = Some(n);
-                        }
+            Item::Changes { steps, summary, revision, history, undone } => {
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = t.space_6;
+                    if !summary.is_empty() {
+                        ui_kit::assistant_tool_detail(ui, |ui| {
+                            ui.set_min_width(ui.available_width().max(0.0));
+                            ui.spacing_mut().item_spacing.y = t.space_2;
+                            for line in summary {
+                                let mut text = RichText::new(line.as_str()).color(t.text_dim).size(t.font_small);
+                                if *undone {
+                                    text = text.strikethrough();
+                                }
+                                ui.add(egui::Label::new(text).truncate()).backing_on_hover_text(line.as_str());
+                            }
+                        });
                     }
+                    ui.horizontal(|ui| {
+                        let text = trf("ui.agent_chat_changes", &[("n", &steps.to_string())]);
+                        ui.label(RichText::new(text).color(t.text_dim).size(t.font_caption));
+                        if *undone {
+                            ui.label(RichText::new(tr("ui.agent_chat_undone")).color(t.text_dim).size(t.font_caption));
+                        } else if revision.same(current) && view.undo_history.as_ref().is_some_and(|h| history.same(h)) {
+                            let b = ui_kit::button(ui, tr("ui.agent_chat_undo_changes"), ui_kit::Button::Normal)
+                                .backing_on_hover_text(tr("ui.ai_undo_tip"));
+                            solidcraft_ui_registry::publish_handle("agent_chat:undo", b.rect.center());
+                            if b.clicked() {
+                                undo = Some(n);
+                            }
+                        }
+                    });
                 });
             }
             Item::Notice { text, error } => {

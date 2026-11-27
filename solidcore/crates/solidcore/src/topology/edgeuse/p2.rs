@@ -86,7 +86,7 @@ use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::geom::local_solve_nd::{BoundaryHandler, LocalSolveNd};
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::solution_array::SolutionEnd;
-use crate::geom::tol::coincidence_reach_3d;
+use crate::geom::tol::{contact_tol_3d, zone_reach_3d};
 use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec2, Vec3, EFF_ZERO, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -165,6 +165,7 @@ fn ser_as_true(e: &SolidError) -> bool {
         e,
         SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }
@@ -196,6 +197,7 @@ pub(crate) fn binormal_ignoring_status(
         Err(
             e @ (SolidError::Unported { .. }
             | SolidError::Cancelled { .. }
+            | SolidError::OutOfFuel { .. }
             | SolidError::InvalidInput { .. }
             | SolidError::PortInvariant { .. }
             | SolidError::NotFound { .. }),
@@ -970,10 +972,10 @@ pub struct EdgeuseSide {
 /// `SmEdgeuse::IsEdgeuseSideInSurface(lSmpCount, pOptPeriodicU, pOptPeriodicV,
 /// pOptOnNaturalBoundary)`: drops `smp_count` points of the edge curve (in edge use
 /// order) onto the face's surface and classifies them against the natural UV domain's
-/// sides (to the coincidence tolerance of the surface with itself mapped to UV in U and
-/// in V, [`coincidence_reach_3d`]; upstream to twice the surface zone tolerance; not
-/// upstream: a periodic side, a seam, to the edge's own tolerance, docs/booleans.md
-/// "Seams and poles";
+/// sides (to the larger of the surface's zone tolerance and the edge's tolerance, the edge's
+/// counted up to the contact tolerance, mapped to UV in U and in V, [`zone_reach_3d`];
+/// upstream to twice the surface zone tolerance; not upstream: a periodic side, a seam,
+/// to the edge's own tolerance, docs/booleans.md "Seams and poles";
 /// nor upstream: a sample that close to two opposite sides lies on the nearer, WR-18540).
 /// A sample off every side answers `true` at once. Otherwise the edge use runs along a
 /// side: a degenerate edge (its sample box below twice the zone tolerance) is `true`, and else
@@ -1115,20 +1117,32 @@ pub fn is_edgeuse_side_in_surface(
 
         // Tol  2d mapping of Surface ZoneTol3d (not upstream: a periodic side is a seam,
         // which bounds no material, so the edge runs along it only within the edge's own
-        // tolerance; docs/booleans.md, "Seams and poles"; nor upstream: the sample, dropped
-        // onto the surface, lies on another side when the two places coincide, within the
-        // surface's zone tolerance and the contact tolerance, not within upstream's twice
-        // it, the intersection tolerance; docs/booleans.md, "The coincidence rule")
+        // tolerance; docs/booleans.md, "Seams and poles"; nor upstream: the sample, a point
+        // of the edge dropped onto the surface, and the side, of the surface, are one place
+        // within the larger of the two objects' own tolerances, not within upstream's twice
+        // the surface's, and not within the contact tolerance either, which decides contacts
+        // between two operands' curves and is no statement of this face: a face and edges
+        // held to 1e-7 with an edge 1.17e-6 inside its domain's side read that edge as on
+        // the side, running the wrong way, #17689. The edge's tolerance counts up to the
+        // contact tolerance, the band before, so no body that band took is refused; a NaN
+        // surface tolerance stays NaN, within which nothing lies; docs/booleans.md, "The
+        // coincidence rule")
         let size = edge_point
             .x
             .abs()
             .max(edge_point.y.abs())
             .max(edge_point.z.abs());
+        let edge_part = edge_tol_3d.min(contact_tol_3d(k));
+        let side_zone_3d = if edge_part > surf_zone_tol_3d {
+            edge_part
+        } else {
+            surf_zone_tol_3d
+        };
         let side_tol_3d = |periodic: bool| {
             if periodic {
                 edge_tol_3d
             } else {
-                coincidence_reach_3d(k, surf_zone_tol_3d, surf_zone_tol_3d, size)
+                zone_reach_3d(side_zone_3d, size)
             }
         };
         let tol_2d_u = map_to_2d_dir(k, side_tol_3d(periodic_u), uv_drop_point, u_dir, surface)?;

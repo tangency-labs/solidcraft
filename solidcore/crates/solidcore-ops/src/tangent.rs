@@ -20,6 +20,11 @@
 //!   blend corner, from the edge's blend edge use, as fillet construction asks it.
 //! - [`tangent_face_chain_ordered`]: the picked faces, then every face across a smooth edge
 //!   from one of them, and so on.
+//! - [`curve_chain_ordered`]: the picked edges, then every edge that continues one of them
+//!   within `angle` at a shared vertex, as curves alone: a path, a rail or a boundary to run
+//!   along, not a corner to blend. The faces play no part (a one-face edge or a smooth edge
+//!   joins like any other); the walk stops at a vertex where more than one edge continues
+//!   (a branch: which way the path goes is not the walk's to choose).
 //!
 //! An edge whose smoothness the kernel leaves undecided (a blend's net within its margin of
 //! the angle, [`solidcore::query::tangent_edge::Tangency::Undecided`]) joins nothing and is
@@ -29,6 +34,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use solidcore::query::edge_turn::{convex_at, turn_at};
 use solidcore::query::tangent_edge::{tangent_all_along, Tangency};
+use solidcore::topology::edgeuse::{p1 as eu1, p3 as eu3};
 use solidcore::topology::{edge, face, vertex};
 use solidcore::{Brep, EdgeId, FaceId, Kernel};
 
@@ -61,10 +67,28 @@ impl Smooth {
         if let Some(t) = self.known.get(&e) {
             return Ok(*t);
         }
+        give_trims(k, b, e)?;
         let t = tangent_all_along(k, b, e, angle)?;
         self.known.insert(e, t);
         Ok(t)
     }
+}
+
+/// Gives each of edge `e`'s face uses that has no UV trim curve (pcurve) the one the kernel
+/// builds from the exact edge and surface (`GetOrCreateUVTrimCurve`), as the smoothness and
+/// convexity measures read them: a body a boolean left without trims (it builds them
+/// lazily) is walked as one with them. The walks run on a copy, so the caller's body is
+/// unchanged.
+///
+/// # Errors
+/// The kernel's, including its status when it cannot build a trim.
+fn give_trims(k: &Kernel, b: &mut Brep, e: EdgeId) -> solidcore::Result<()> {
+    for eu in edge::edgeuses(b, e, None, None)? {
+        if eu1::face(b, eu)?.is_some() && eu1::uv_trim_curve(b, eu)?.0.is_none() {
+            eu3::get_or_create_uv_trim_curve(k, b, eu, false, false, true)?.status?;
+        }
+    }
+    Ok(())
 }
 
 /// An angle a chain takes: finite, strictly between 0 and a right angle.
@@ -132,6 +156,8 @@ pub(crate) fn edge_walk(
                 if !turn_at(k, b, e, f, v)?.is_some_and(|turn| turn < angle) {
                     continue;
                 }
+                give_trims(k, b, e)?;
+                give_trims(k, b, f)?;
                 let turns_over = matches!(
                     (convex_at(k, b, e, v, angle)?, convex_at(k, b, f, v, angle)?),
                     (Some(a), Some(c)) if a != c
@@ -157,6 +183,78 @@ pub(crate) fn edge_walk(
         (Some(members), Some(undecided)) => Ok(Chain { members, undecided }),
         _ => Err(Error::Exception),
     })
+}
+
+/// The edges of `body` at record indices `edges` (through `order`), each once in order, then
+/// every edge that continues one of them within `angle` radians at a shared vertex, and so on
+/// (module documentation): the curve chain a path, rail or boundary pick stands for. At a
+/// vertex where more than one other edge continues the edge arriving there the chain does not
+/// go on (a branch). A closed edge (a whole circle) continues nothing. Every measure is the
+/// kernel's ([`solidcore::query::edge_turn::turn_at`]). [`Chain::undecided`] stays empty.
+///
+/// # Errors
+/// [`Error::Argument`] for no edges, an angle as for [`crate::blend::tangent_chain`], or an
+/// index past the order or naming an edge the body does not have; the kernel's refusals (an
+/// edge's curve that cannot be evaluated).
+pub fn curve_chain_ordered(
+    body: &Body,
+    order: &Order,
+    edges: &[usize],
+    angle: f64,
+) -> Result<Chain> {
+    if edges.is_empty() || !angle_ok(angle) {
+        return Err(Error::Argument);
+    }
+    let (copy, mapped) = body.copy_with_order(order)?;
+    with_body("curve_chain_ordered", &copy, |k, b| {
+        let list = mapped.edges.clone();
+        let mut chain: Vec<EdgeId> = Vec::new();
+        for &i in edges {
+            match list.get(i) {
+                Some(&e) if b.edge_list().contains(&e) => {
+                    if !chain.contains(&e) {
+                        chain.push(e);
+                    }
+                }
+                _ => return Ok(Err(Error::Argument)),
+            }
+        }
+        let index: BTreeMap<EdgeId, usize> =
+            list.iter().enumerate().map(|(i, &e)| (e, i)).collect();
+        let mut next = 0;
+        while let Some(&e) = chain.get(next) {
+            next += 1;
+            let ends = [edge::start_vertex(b, e)?, edge::end_vertex(b, e)?];
+            if ends[0].is_some() && ends[0] == ends[1] {
+                continue; // a closed edge: no end to run on from
+            }
+            for v in ends.into_iter().flatten() {
+                // the edges at the vertex, in record order
+                let mut at: Vec<EdgeId> = vertex::edges(b, v, None)?;
+                at.sort_by_key(|f| index.get(f).copied().unwrap_or(usize::MAX));
+                at.dedup();
+                let mut onward: Vec<EdgeId> = Vec::new();
+                for f in at {
+                    if f != e && turn_at(k, b, e, f, v)?.is_some_and(|turn| turn < angle) {
+                        onward.push(f);
+                    }
+                }
+                if let [f] = onward[..] {
+                    if !chain.contains(&f) {
+                        chain.push(f);
+                    }
+                }
+            }
+        }
+        let members: Option<Vec<usize>> = chain.iter().map(|&e| index_of(&list, e)).collect();
+        Ok(match members {
+            Some(members) => Ok(Chain {
+                members,
+                undecided: Vec::new(),
+            }),
+            None => Err(Error::Exception),
+        })
+    })?
 }
 
 /// The faces of `body` at record indices `faces` (through `order`), then every face across a

@@ -1101,7 +1101,11 @@ impl CrvOnSurf {
             &self.surface,
         ) {
             Ok(classes) => classes,
-            Err(e @ (SolidError::Unported { .. } | SolidError::Cancelled { .. })) => return Err(e),
+            Err(
+                e @ (SolidError::Unported { .. }
+                | SolidError::Cancelled { .. }
+                | SolidError::OutOfFuel { .. }),
+            ) => return Err(e),
             Err(e) => {
                 let status = Err(e);
                 return Ok(KnotsWithStatus {

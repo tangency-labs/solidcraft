@@ -4,9 +4,10 @@
 # SolidCore's history. This workflow pushes the commits under `solidcore` back to
 # tangency-labs/solidcore, so the same history can be read from either repository.
 #
-# It mirrors incrementally (scripts/ci/solidcore-mirror.sh): one mirror commit per new main
-# commit that changes solidcore/, a merged branch's commits included, each with exactly that
-# commit's solidcore/ tree, its author, dates and message, and a `solidcraft: <sha>` trailer. The
+# It mirrors incrementally (scripts/ci/solidcore-mirror.sh): one mirror commit per new first-parent
+# main commit that changes solidcore/ (one per pull request), each with exactly that commit's
+# solidcore/ tree, its author, dates and message (a merge commit's subject becomes the pull request's
+# title with " (#N)", as a squash commit reads), and a `solidcraft: <sha>` trailer. The
 # last one records the main commit it reached (`solidcraft-main:`), where the next run starts; the
 # first run starts from the vendoring merge. Never `git subtree split`: it replays main's whole
 # history (about 100 minutes) and overflows dash's recursion limit.
