@@ -32,13 +32,13 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("tab?: the design's tab (default: the one shown) → group it left; it moves out past the group's other designs; a group left with no design goes"),
     CommandSpec::new("tab.group.update", "Edit Tab Group", crate::checked!("tab.group.update", update))
         .icon("rename").noundo().doc_only().contract(&UPDATE_CONTRACT).output(output_schema_for::<TabGroupReply>)
-        .params("group: the group's id; name?: at most 64 characters, empty for none; colour?: blue|green|orange|yellow|purple|cyan|pink → group, name, colour"),
+        .params("group: the group's id; name?: at most 64 characters, empty for none; colour?: blue|green|orange|yellow|purple|cyan|pink; collapsed?: true folds the group's designs away to its label, false shows them (the design on screen keeps its group open) → group, name, colour, collapsed"),
     CommandSpec::new("tab.group.ungroup", "Ungroup Tabs", crate::checked!("tab.group.ungroup", ungroup))
         .icon("close").noundo().doc_only().contract(&ID_CONTRACT).output(output_schema_for::<TabGroupReply>)
         .params("group: the group's id → group; the group goes and its designs stay open where they are"),
     CommandSpec::new("tab.group.list", "List Tab Groups", crate::checked!("tab.group.list", list))
         .icon("list").noundo().doc_only().contract(&NO_PARAMS_CONTRACT).output(output_schema_for::<TabGroupReply>)
-        .params("no parameters → groups: [{id, name, colour, tabs}] in the order they were made, tabs 0 first; read-only")];
+        .params("no parameters → groups: [{id, name, colour, collapsed, tabs}] in the order they were made, tabs 0 first; read-only")];
 
 /// `p` as the contract type `P`; no parameters at all (`null`) is the empty object.
 fn parse<P: DeserializeOwned>(cmd: &str, p: &Value) -> Result<P> {
