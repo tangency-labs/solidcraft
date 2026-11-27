@@ -424,6 +424,16 @@ pub fn split_body_by_sheet_where_it_cuts(body: &Body, sheet: &Body, face: usize)
 /// A surface body trimmed by a tool, keeping what `keep` says. Each kept face is the face it is
 /// a piece of (its history is over `[body]`).
 pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> {
+    #[cfg(feature = "backend-occt")]
+    if let SplitTool::Plane(plane) = tool
+        && body.is_surface()
+        && let Some(made) = super::foreign::run(&crate::backend::Occt, OpKind::Split, &[body], |k, f| match f {
+            [fb] => k.trim_keep(fb, &solidcraft_kernel_api::SplitTool::Plane(*plane), keep).map(Some),
+            _ => Err(solidcraft_kernel_api::BackendError::Invalid("a trim takes one body".into())),
+        })
+    {
+        return made.and_then(|b| b.ok_or_else(|| crate::KernelError::Failed("the trim is empty".into())));
+    }
     match which(OpKind::Split) {
         Which::Solidcore => Solidcore.trim_keep(body, tool, keep),
     }

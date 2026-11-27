@@ -159,7 +159,7 @@ impl Backend for Occt {
             OpKind::OffsetFaces => Support::Yes,
             OpKind::Draft => Support::Yes,
             OpKind::Loft => Support::Some("two sections, no rails".into()),
-            OpKind::Split => Support::Some("a body split by a plane into one piece on each side".into()),
+            OpKind::Split => Support::Some("a body split by a plane into one piece on each side; a sheet trimmed by a plane".into()),
             _ => Support::No,
         }
     }
@@ -376,8 +376,17 @@ impl Modelling for Occt {
         unsupported("a body split")
     }
 
-    fn trim_keep(&self, _body: &Shape, _tool: &SplitTool<'_, Shape>, _keep: TrimKeep<'_>) -> Result<Shape, BackendError> {
-        unsupported("a trim")
+    fn trim_keep(&self, body: &Shape, tool: &SplitTool<'_, Shape>, keep: TrimKeep<'_>) -> Result<Shape, BackendError> {
+        // A plane, keeping the side a point is on: other tools, and regions picked, are solidcore's.
+        let (SplitTool::Plane(plane), TrimKeep::Side(at)) = (tool, keep) else {
+            return unsupported("a trim by a face or by sketch curves, or keeping picked regions");
+        };
+        let n = solidcraft_geom::PlaneGeom::normal(plane);
+        let side = solidcraft_geom::PlaneGeom::height(plane, at);
+        if !finite(&xyz(plane.origin)) || !finite(&xyz(n)) || n == Vec3::ZERO || !side.is_finite() || side == 0.0 {
+            return unsupported("a trim plane solidcore refuses, or a point on it");
+        }
+        body.trim_plane(xyz(plane.origin), xyz(n), side > 0.0).map_err(failed)
     }
 
     fn sweep(&self, _plane: &Plane, _region: &Region2, _path: &[PathSpan], _options: &SweepOptions) -> Result<Shape, BackendError> {
@@ -809,5 +818,46 @@ mod tests {
         assert!(fell_back() > before, "a miss runs on solidcore");
         assert_eq!(whole.len(), 1);
         assert!((volume(&whole[0]) - 1000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn sheets_trimmed_by_a_plane_match_solidcore() {
+        use crate::route::foreign::{Kernel, fell_back, set_kernel};
+        use solidcraft_geom::PlaneGeom as _;
+        let square = Region2 { outer: poly(&[(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]), holes: vec![] };
+        let holed = Region2 { outer: square.outer.clone(), holes: vec![solidcore_record::Loop2::circle(solidcore_record::Vec2::new(5.0, 5.0), 2.0)] };
+        let grade = |b: &Body| {
+            let m = crate::measure(b).unwrap();
+            (m.area, b.record().faces.len(), b.record().edges.len(), b.is_surface())
+        };
+        let at = |o: Vec3, n: Vec3| Plane::from_normal(o, n).unwrap();
+        let cases = [
+            ("a square, the right 7 kept", &square, at(v(3.0, 0.0, 0.0), v(1.0, 0.0, 0.0)), v(9.0, 5.0, 0.0), 70.0),
+            ("a square, the left 3 kept", &square, at(v(3.0, 0.0, 0.0), v(1.0, 0.0, 0.0)), v(1.0, 5.0, 0.0), 30.0),
+            ("a square cut on its diagonal", &square, at(v(0.0, 0.0, 0.0), v(1.0, -1.0, 0.0)), v(9.0, 1.0, 0.0), 50.0),
+            (
+                "a square with a hole, halved through it",
+                &holed,
+                at(v(5.0, 0.0, 0.0), v(1.0, 0.0, 0.0)),
+                v(9.0, 5.0, 0.0),
+                50.0 - 2.0 * std::f64::consts::PI,
+            ),
+        ];
+        let _chosen = crate::route::foreign::choosing();
+        for (what, region, plane, keep, area) in cases {
+            let trim = || {
+                crate::route::trim_keep(&crate::surfaces::patch_region(&Plane::XY, region)?, &crate::SplitTool::Plane(plane), TrimKeep::Side(keep))
+            };
+            set_kernel(Kernel::Solidcore);
+            let ours = grade(&trim().unwrap());
+            set_kernel(Kernel::Occt);
+            let before = fell_back();
+            let theirs = grade(&trim().unwrap());
+            set_kernel(Kernel::Solidcore);
+            assert_eq!(fell_back(), before, "{what}: solidcore ran it");
+            assert!((theirs.0 - area).abs() <= 1e-9 * area, "{what}: area {} against {area}", theirs.0);
+            assert!((ours.0 - theirs.0).abs() <= 1e-9 * area, "{what}: area {} against {}", theirs.0, ours.0);
+            assert_eq!((ours.1, ours.2, ours.3), (theirs.1, theirs.2, theirs.3), "{what}: faces, edges, a sheet");
+        }
     }
 }

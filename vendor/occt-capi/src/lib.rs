@@ -61,6 +61,7 @@ mod raw {
         pub fn occt_solid_count(h: u32) -> i32;
         pub fn occt_solid_at(h: u32, index: i32) -> u32;
         pub fn occt_split_plane(h: u32, ox: f64, oy: f64, oz: f64, nx: f64, ny: f64, nz: f64) -> u32;
+        pub fn occt_trim_plane(h: u32, ox: f64, oy: f64, oz: f64, nx: f64, ny: f64, nz: f64, side: i32) -> u32;
 
         pub fn occt_step_write(h: u32) -> u32;
         pub fn occt_step_read(data: *const u8, len: usize) -> u32;
@@ -276,6 +277,13 @@ impl Shape {
     pub fn split_plane(&self, origin: [f64; 3], normal: [f64; 3]) -> Result<Shape> {
         // SAFETY: a live handle.
         shape(unsafe { raw::occt_split_plane(self.0, origin[0], origin[1], origin[2], normal[0], normal[1], normal[2]) })
+    }
+
+    /// A sheet cut by the plane through `origin` square to `normal`, keeping as one shell the
+    /// faces on the normal's side (`above`) or its back.
+    pub fn trim_plane(&self, origin: [f64; 3], normal: [f64; 3], above: bool) -> Result<Shape> {
+        // SAFETY: a live handle.
+        shape(unsafe { raw::occt_trim_plane(self.0, origin[0], origin[1], origin[2], normal[0], normal[1], normal[2], if above { 1 } else { -1 }) })
     }
 
     /// The shape's solids, in OCCT's order.
