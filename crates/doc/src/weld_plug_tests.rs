@@ -1,6 +1,7 @@
 //! Plug and slot welds: round, slot, square-cornered L, countersunk and counterbored holes filled
-//! flush, partly, convex and concave against their volumes by hand; the parts left as they were;
-//! the gap named; every refusal.
+//! flush, partly, convex and concave against their volumes by hand, each weld checked valid; the
+//! parts left as they were; the gap named; the refusals the parts can bring about (`NotClosed` and
+//! `FloorUnmeasured` guard ops' answers and no valid pair of parts reaches them).
 
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
@@ -69,7 +70,9 @@ fn weld(top: &(Body, Order), below: &(Body, Order), at: [f64; 3], dir: [f64; 3],
     plug_weld((&top.0, &top.1), (&below.0, &below.1), wall(top, at, dir), &style)
 }
 
+/// The weld's volume, once the kernel's full check passes on it (brett19 on #22646: every weld).
 fn volume(p: &Plug) -> f64 {
+    assert!(p.body.check(solidcraft_kernel::services::CheckLevel::All).unwrap().is_valid(), "the weld fails the kernel's check");
     p.body.volume(1e-9).unwrap()
 }
 
@@ -88,7 +91,6 @@ fn a_round_plug_fills_its_hole_flush_and_leaves_both_parts_as_they_were() {
     let p = weld(&top, &below, IN, X, PlugStyle::default()).unwrap();
     close(volume(&p), ROUND * T);
     assert_eq!(p.gap, None);
-    assert!(p.body.check(solidcraft_kernel::services::CheckLevel::All).unwrap().is_valid());
     assert_eq!((record(&top.0), record(&below.0)), before);
 }
 
@@ -212,4 +214,56 @@ fn a_partial_fill_is_cut_where_the_hole_widens_past_the_part_s_bottom() {
     close(volume(&weld(&top, &below, at, X, PlugStyle::default()).unwrap()), frustum(T, 2.0, 18.0));
     let two = PlugStyle { fill: PlugFill::Partial { depth: 2.0 }, ..PlugStyle::default() };
     close(volume(&weld(&top, &below, at, X, two).unwrap()), frustum(2.0, 2.0, 6.0));
+}
+
+#[test]
+fn a_counterbore_from_below_is_filled_from_the_faying_face() {
+    // r 6 through, r 10 from the bottom up to z 3: the counterbore's ceiling faces down with a hole
+    // in it, but the weld stands on the plate's bottom face (brett19 on #22646)
+    let top = upper(0.0, vec![round_hole(), turned(10.0, -1.0, 10.0, 3.0)]);
+    let below = lower(60.0);
+    let full = PI * (100.0 * 3.0 + 36.0 * 5.0);
+    // picked on the through hole, on the counterbore's wall and on its ceiling (a step)
+    for (at, dir) in [([0.0, 0.0, 6.0], X), ([0.0, 0.0, 1.5], X), ([8.0, 0.0, 1.5], UP)] {
+        let p = weld(&top, &below, at, dir, PlugStyle::default()).unwrap();
+        close(volume(&p), full);
+        assert_eq!(p.gap, None);
+    }
+    let two = PlugStyle { fill: PlugFill::Partial { depth: 2.0 }, ..PlugStyle::default() };
+    close(volume(&weld(&top, &below, IN, X, two).unwrap()), PI * 100.0 * 2.0);
+    let five = PlugStyle { fill: PlugFill::Partial { depth: 5.0 }, ..PlugStyle::default() };
+    close(volume(&weld(&top, &below, IN, X, five).unwrap()), PI * (100.0 * 3.0 + 36.0 * 2.0));
+    let h = 1.5;
+    let convex = PlugStyle { face: PlugFace::Convex { height: h, shape: None }, ..PlugStyle::default() };
+    close(volume(&weld(&top, &below, IN, X, convex).unwrap()), full + PI * h * (3.0 * 36.0 + h * h) / 6.0);
+}
+
+#[test]
+fn the_part_s_top_face_picked_names_no_hole() {
+    let (top, below) = (upper(0.0, vec![round_hole()]), lower(60.0));
+    let picked = weld(&top, &below, [20.0, 20.0, T + 1.0], [0.0, 0.0, -1.0], PlugStyle::default());
+    assert!(matches!(picked, Err(PlugRefusal::NotAHole { .. })), "{picked:?}");
+}
+
+#[test]
+fn a_blind_hole_from_below_has_no_top() {
+    let (top, below) = (upper(0.0, vec![turned(6.0, -1.0, 6.0, 4.0)]), lower(60.0));
+    assert_eq!(weld(&top, &below, [0.0, 0.0, 2.0], X, PlugStyle::default()).unwrap_err(), PlugRefusal::NoTopFace);
+}
+
+#[test]
+fn a_floor_that_is_not_flat_is_refused() {
+    // the part below is a shallow cone, its apex under the hole's middle
+    let cone = ordered(turned_profile(&[[0.0, -5.0], [30.0, -5.0], [30.0, -1.0], [0.0, 0.0]]));
+    let top = upper(0.0, vec![round_hole()]);
+    assert!(matches!(weld(&top, &cone, IN, X, PlugStyle::default()), Err(PlugRefusal::FloorNotFlat { .. })));
+}
+
+#[test]
+fn parts_that_overlap_under_the_hole_are_refused() {
+    // the part below reaches 0.5 into the top part: the line down starts inside it and meets its
+    // bottom face, which faces down (brett19 on #22646: once read as a 4.5 gap)
+    let raised = ordered(make_box([-30.0, -30.0, -4.5], [60.0, 60.0, 5.0]).unwrap());
+    let top = upper(0.0, vec![round_hole()]);
+    assert!(matches!(weld(&top, &raised, IN, X, PlugStyle::default()), Err(PlugRefusal::PartsOverlap { .. })));
 }

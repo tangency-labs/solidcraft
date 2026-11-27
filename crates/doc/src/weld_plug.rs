@@ -12,12 +12,16 @@
 //! The *top part* has the hole; the *part below* lies under it. The hole's *bottom face* is the top
 //! part's planar face that faces the part below and holds the hole as an inner loop; its outward
 //! normal is the weld's way down. The weld's size is that loop: the hole at the faying surface
-//! (AWS A2.4 9.2).
+//! (AWS A2.4 9.2). A face that faces down with a hole in it but lies above the faying surface (the
+//! ceiling of a counterbore from below) is no bottom face: the top found from it is not above it,
+//! so it is passed over and the faying face is taken.
 //!
 //! The *hole's faces* are found from the bottom loop across edges, up to the one face that also
 //! touches the faces round the bottom face's outer loop (the part's sides): the *top face*. A hole
-//! that reaches a side is open, so it is no plug or slot. The faces between may be anything: a
-//! straight wall, a countersink, a counterbore's step.
+//! that reaches a side is open, so it is no plug or slot; so is a hole whose top is not flat and
+//! square to the weld, as the walk goes on through it to the sides. The faces between may be
+//! anything: a straight wall, a countersink, a counterbore's step. The face the user picks must be
+//! one of the hole's faces: its top and bottom faces belong to the part as a whole.
 //!
 //! The fill is those faces closed by two flat caps (the bottom and top loops) and sewn into a
 //! solid, so it follows the walls whatever their shape. A partial fill is that solid with
@@ -25,7 +29,8 @@
 //! concave face takes the same dome, turned down, out of it.
 //!
 //! The *floor* is the face of the part below that a line down from the bottom loop meets first.
-//! It must be flat and square to the way down and hold the whole bottom loop: no edge of the floor
+//! It must be flat and square to the way down, face up (else the line started inside the part
+//! below: the parts overlap) and hold the whole bottom loop: no edge of the floor
 //! within the zone tolerance of the loop (the gap added when the parts do not touch), and no loop of
 //! the floor inside it. A gap between the parts is not filled: the weld stands on the top part's
 //! bottom face, and [`Plug::gap`] names the gap for a notice (Alexander, 26 Nov).
@@ -54,13 +59,16 @@ pub enum PlugRefusal {
     #[error("{0}")]
     Invalid(&'static str),
     /// Record face `face` of the top part is not a face of a hole closed all round that opens
-    /// onto a planar face facing the part below.
+    /// onto a planar face facing the part below: no hole's face, the hole's own top or bottom
+    /// face, or a hole that reaches the part's sides (a top that is not flat and square to the weld
+    /// included).
     #[error("face {face} is not a face of a closed hole over the part below")]
     NotAHole {
         /// The picked face.
         face: usize,
     },
-    /// The hole has no single flat top face square to the way down.
+    /// The hole has no single flat top face square to the way down with a hole in it (a blind hole
+    /// from below).
     #[error("the hole has no single flat top face square to the weld")]
     NoTopFace,
     /// The floor, record face `face` of the part below, is not flat and square to the way down.
@@ -70,6 +78,14 @@ pub enum PlugRefusal {
     /// edges runs under the hole, or it has a hole of its own there.
     #[error("the floor under the hole, face {face} of the part below, does not reach under the whole hole")]
     FloorShort { face: usize },
+    /// The kernel found no closest points between the floor's edges, on record face `face` of the
+    /// part below, and the hole's loop, so the floor could not be checked.
+    #[error("the floor under the hole, face {face} of the part below, could not be measured against the hole")]
+    FloorUnmeasured { face: usize },
+    /// The line down from the hole starts inside the part below: the parts overlap there. Record
+    /// face `face` of the part below is the first face it meets, facing down.
+    #[error("the part below reaches into the top part under the hole (face {face} of the part below)")]
+    PartsOverlap { face: usize },
     /// A partial depth or a concave face's depth reaches `max` or past it.
     #[error("the depth reaches {max} or past it")]
     TooDeep { max: f64 },
@@ -214,7 +230,7 @@ pub fn plug_weld(top: (&Body, &Order), below: (&Body, &Order), wall: usize, styl
     let (b, _) = copied(below.0, below.1)?;
     let tol = sweep::zone_tolerance()?;
 
-    let hole = find_hole(&t, &b, picked)?;
+    let hole = find_hole(&t, &b, picked, tol)?;
     let gap = floor_under(&t, &b, &hole, tol)?;
 
     // the fill by the walls: the hole's faces and two caps, sewn
@@ -228,9 +244,7 @@ pub fn plug_weld(top: (&Body, &Order), below: (&Body, &Order), wall: usize, styl
     }
     let mut fill = sewn.body;
 
-    let Some(thickness) = t.body.face_square_level(&t.order, hole.top, hole.up, hole.at)?.map(|l| l.level) else {
-        return Err(PlugRefusal::NoTopFace);
-    };
+    let thickness = hole.thickness;
     let level = match style.fill {
         PlugFill::Full => thickness,
         PlugFill::Partial { depth } if depth >= thickness => return Err(PlugRefusal::TooDeep { max: thickness }),
@@ -269,18 +283,20 @@ struct Hole {
     /// The bottom face and the hole's loop on it.
     bottom: usize,
     bottom_loop: Vec<usize>,
-    /// The hole's faces, its top face and the loop on it.
+    /// The hole's faces and the loop on its top face.
     faces: Vec<usize>,
-    top: usize,
     top_loop: Vec<usize>,
+    /// The top face's level above the bottom face.
+    thickness: f64,
     /// The way up, out of the part below, and a point of the bottom loop.
     up: [f64; 3],
     at: [f64; 3],
 }
 
 /// The hole of the top part `t` that face `picked` belongs to, opening onto a face that faces the
-/// part below `b`.
-fn find_hole(t: &Copied, b: &Copied, picked: usize) -> Result<Hole> {
+/// part below `b` at the faying surface: a candidate whose top is not more than `tol` above it is
+/// passed over (brett19 on #22646).
+fn find_hole(t: &Copied, b: &Copied, picked: usize, tol: f64) -> Result<Hole> {
     let adj = t.body.adjacency(&t.order)?;
     let across = |edges: &[usize], not: usize| -> Vec<usize> {
         let mut v: Vec<usize> = edges.iter().filter_map(|&e| adj.edge_faces.get(e)).flatten().copied().filter(|&f| f != not).collect();
@@ -293,6 +309,8 @@ fn find_hole(t: &Copied, b: &Copied, picked: usize) -> Result<Hole> {
         let down = normal.value;
         let loops = t.body.face_loops(&t.order, bottom)?;
         let Some((outer_loop, inner)) = loops.split_first() else { continue };
+        // the stops of this bottom face's way up, found once for all its loops
+        let mut stop: Option<Vec<bool>> = None;
         for bottom_loop in inner {
             let Some(&first) = bottom_loop.first() else { continue };
             let at = t.body.edge_middle(&t.order, first)?;
@@ -307,13 +325,14 @@ fn find_hole(t: &Copied, b: &Copied, picked: usize) -> Result<Hole> {
             // the bottom loop the same way. A stop next to both is the top; a stop next to the hole
             // only is a step, and the hole goes on through it. Chamfered or split outer edges are
             // just more outside (CodeRabbit on #22646).
-            let is_stop = |g: usize| -> Result<bool> {
-                Ok(t.body.face_square_level(&t.order, g, up, at)?.is_some() && t.body.face_loops(&t.order, g)?.len() >= 2)
-            };
-            let mut stop = vec![false; t.order.faces.len()];
-            for (g, s) in stop.iter_mut().enumerate() {
-                *s = g != bottom && is_stop(g)?;
+            if stop.is_none() {
+                let mut flags = vec![false; t.order.faces.len()];
+                for (g, s) in flags.iter_mut().enumerate() {
+                    *s = g != bottom && t.body.face_square_level(&t.order, g, up, at)?.is_some() && t.body.face_loops(&t.order, g)?.len() >= 2;
+                }
+                stop = Some(flags);
             }
+            let stop = stop.as_deref().unwrap_or(&[]);
             let walk = |from: Vec<usize>, region: &mut Vec<usize>, met: &mut Vec<usize>| {
                 let mut stack = from;
                 while let Some(f) = stack.pop() {
@@ -344,7 +363,9 @@ fn find_hole(t: &Copied, b: &Copied, picked: usize) -> Result<Hole> {
                     walk(next, &mut faces, &mut stops);
                 }
             }
-            if !faces.contains(&picked) && !stops.contains(&picked) {
+            // the picked face must be the hole's own: the top face is the part's, and a pick of it
+            // would name whichever hole comes first
+            if !faces.contains(&picked) {
                 continue;
             }
             if faces.iter().any(|f| outside.contains(f)) {
@@ -353,10 +374,17 @@ fn find_hole(t: &Copied, b: &Copied, picked: usize) -> Result<Hole> {
             let [top] = stops[..] else {
                 return Err(PlugRefusal::NoTopFace);
             };
+            let Some(thickness) = t.body.face_square_level(&t.order, top, up, at)?.map(|l| l.level) else {
+                return Err(PlugRefusal::NoTopFace);
+            };
+            // not the faying surface: a face above it, as a counterbore's ceiling from below
+            if thickness <= tol {
+                continue;
+            }
             let top_loop = adj.face_edges.get(top).map_or(Vec::new(), |es| {
                 es.iter().copied().filter(|&e| adj.edge_faces.get(e).is_some_and(|fs| fs.iter().any(|g| faces.contains(g)))).collect()
             });
-            return Ok(Hole { bottom, bottom_loop: bottom_loop.clone(), faces, top, top_loop, up, at });
+            return Ok(Hole { bottom, bottom_loop: bottom_loop.clone(), faces, top_loop, thickness, up, at });
         }
     }
     Err(PlugRefusal::NotAHole { face: picked })
@@ -373,16 +401,28 @@ fn floor_under(t: &Copied, b: &Copied, hole: &Hole, tol: f64) -> Result<f64> {
     if b.body.face_square_level(&b.order, floor, hole.up, hole.at)?.is_none() {
         return Err(PlugRefusal::FloorNotFlat { face: floor });
     }
+    // a floor facing down: the line started inside the part below (brett19 on #22646)
+    let faces_up = b.body.face_plane_normal(&b.order, floor)?.is_some_and(|n| n.value.iter().zip(hole.up).map(|(a, u)| a * u).sum::<f64>() > 0.0);
+    if !faces_up {
+        return Err(PlugRefusal::PartsOverlap { face: floor });
+    }
     // no edge of the floor under the loop: none closer to it than the gap
     let rims = b.body.rim_edges(&b.order, &[floor])?;
     for &e in &hole.bottom_loop {
         let curve = t.body.edge_curve(&t.order, e)?;
-        if b.body.closest_to_curve(&b.order, &[], &rims, &curve)?.is_none_or(|c| c.distance <= gap + tol) {
+        let Some(closest) = b.body.closest_to_curve(&b.order, &[], &rims, &curve)? else {
+            return Err(PlugRefusal::FloorUnmeasured { face: floor });
+        };
+        if closest.distance <= gap + tol {
             return Err(PlugRefusal::FloorShort { face: floor });
         }
     }
-    // no loop of the floor inside the loop: one point of each, against the loop's prism down to it
-    let prism = sweep::extrude(&curves(&t.record, &hole.bottom_loop)?, down, gap + tol.max(1.0), 0.0, DraftCorner::Curvature, true)?;
+    // no loop of the floor inside the loop: one point of each, against the loop's prism down to it.
+    // The prism runs on past the floor by the top part's own size, so a floor loop at the gap lies
+    // inside it, not on its end face, at any scale.
+    let (lo, hi) = t.body.bounds()?;
+    let past = lo.iter().zip(hi).map(|(a, b)| b - a).sum::<f64>();
+    let prism = sweep::extrude(&curves(&t.record, &hole.bottom_loop)?, down, gap + past, 0.0, DraftCorner::Curvature, true)?;
     for l in b.body.face_loops(&b.order, floor)? {
         let Some(&e) = l.first() else { continue };
         let q = b.body.edge_middle(&b.order, e)?;
@@ -401,13 +441,9 @@ fn above(fill: &Body, up: [f64; 3], at: [f64; 3], depth: f64) -> Result<Body> {
     // the box's edges added up are at least its diagonal: no point of the fill is farther from
     // the square's middle than that plus the depth
     let reach = lo.iter().zip(hi).map(|(a, b)| b - a).sum::<f64>() + depth;
-    let [u, w] = match affine::orthonormal_axes(up, [1.0, 0.0, 0.0]) {
-        Ok([_, u]) => [u, affine::apply_point(&affine::rotation([0.0; 3], up, FRAC_PI_2)?, u)],
-        Err(_) => {
-            let [_, u] = affine::orthonormal_axes(up, [0.0, 1.0, 0.0])?;
-            [u, affine::apply_point(&affine::rotation([0.0; 3], up, FRAC_PI_2)?, u)]
-        }
-    };
+    // the kernel chooses a direction itself when x runs along up
+    let [_, u] = affine::orthonormal_axes(up, [1.0, 0.0, 0.0])?;
+    let w = affine::apply_point(&affine::rotation([0.0; 3], up, FRAC_PI_2)?, u);
     let corner = |a: f64, b: f64| std::array::from_fn(|i| at[i] + up[i] * depth + (u[i] * a + w[i] * b) * reach);
     let square = [corner(-1.0, -1.0), corner(1.0, -1.0), corner(1.0, 1.0), corner(-1.0, 1.0)];
     let sides: Vec<Curve> = (0..4).map(|i| Curve::Line { start: square[i], end: square[(i + 1) % 4] }).collect();
