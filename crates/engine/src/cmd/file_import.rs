@@ -595,7 +595,7 @@ pub(crate) fn add_in_component(
     tree: Tree<'_>,
 ) -> Result<(u64, Placed)> {
     let (top, top_occ) = new_component(s, name)?;
-    add_into_component(s, top, top_occ, kind, feature_name, body_names, hidden, tree)
+    add_into_component(s, top, top_occ, kind, feature_name, body_names, hidden, layers, tree)
 }
 
 /// [`add_in_component`] into the component `top` that already exists (placed by `top_occ`), empty
@@ -609,6 +609,7 @@ pub(crate) fn add_into_component(
     feature_name: &str,
     body_names: Vec<String>,
     hidden: &[bool],
+    layers: &[Option<String>],
     tree: Tree<'_>,
 ) -> Result<(u64, Placed)> {
     let (plan, imp, prepared) = match tree {

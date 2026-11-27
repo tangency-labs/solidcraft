@@ -1602,7 +1602,7 @@ pub(super) fn replace_kicad(s: &mut Session, comp: u64, board: &str, bytes: Vec<
         let feature = imported.feature;
         let feature_name = old_name.filter(|n| !n.trim().is_empty()).unwrap_or(feature.name);
         let tree = if imported.plan.places.is_empty() { import::Tree::Flat(None) } else { import::Tree::Mesh(&imported.plan) };
-        let (id, _) = import::add_into_component(s, comp, top_occ, feature.kind, &feature_name, feature.body_names, &[], tree)?;
+        let (id, _) = import::add_into_component(s, comp, top_occ, feature.kind, &feature_name, feature.body_names, &[], &[], tree)?;
         if let Some(step) = imported.board_step {
             import::add_step_in_component(s, comp, "board.step", step, &feature_name)?;
         }
@@ -6030,6 +6030,7 @@ mod tests {
                 opacity: 1.0,
                 faces: vec![solidcraft_kernel::FacePaint { face: usize::MAX, color: [1.0, 0.0, 0.0], opacity: 1.0, name: None }],
                 name: None,
+                layer: None,
             },
         ));
         let model = solidcraft_doc::SavedModel {

@@ -2644,6 +2644,7 @@ mod tests {
             opacity: 1.0,
             faces: vec![solidcraft_kernel::FacePaint { face: usize::MAX, color: [1.0, 0.0, 0.0], opacity: 1.0, name: None }],
             name: None,
+            layer: None,
         }));
         let mut model = saved_model(vec![broken]);
         model.records["model_bodies"][0]["name"] = json!("CoolingFin");
@@ -2752,6 +2753,7 @@ mod tests {
             opacity: 0.5,
             faces: vec![FacePaint { face: 0, color: [1.0, 0.0, 0.0], opacity: 0.8, name: None }],
             name: None,
+            layer: None,
         }));
         // Clearing face paint keeps inherited `regularization_protected = true`, so this body
         // shares `base`'s record and has `color == None, paint == None` yet encodes differently.
