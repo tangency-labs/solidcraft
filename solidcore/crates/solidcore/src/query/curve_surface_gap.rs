@@ -10071,20 +10071,24 @@ mod tests {
             "swapped ruling bound {g_swap:e} vs {delta:e}"
         );
 
-        // Slanted trim (`u_a != u_b`) is not a ruling: returns `None`.
+        // Slanted trim (`u_a != u_b`) is not a ruling: the ruling case returns `None`. The
+        // composed case (#22930) still bounds it, at least the gap at its first point.
         let wn_slant = make_line([u0, v0, 0.0], [u_mid, v1, 0.0], 0.0, 1.0);
         assert_eq!(
-            structured_trim_gap_bound(&cn, &wn_slant, &cylinder_net, [0.0, 1.0]),
+            iso_ruling_gap_bound(&cn, &wn_slant, &cylinder_net, [0.0, 1.0]),
             None
+        );
+        let first = (p_a - cyl_surf.evaluate_point(&k, Point2::new(u0, v0)).unwrap()).length();
+        let g_slant = structured_trim_gap_bound(&cn, &wn_slant, &cylinder_net, [0.0, 1.0]);
+        assert!(
+            g_slant.is_none_or(|g| g >= first),
+            "slanted trim bound {g_slant:?} below its first point's gap {first:e}"
         );
 
-        // Unequal weights along `v` breaks affinity in `v`: returns `None`.
+        // Unequal weights along `v` breaks affinity in `v`: the ruling case returns `None`.
         let mut bad_net = cylinder_net.clone();
         bad_net.pw[7] *= 1.5;
-        assert_eq!(
-            structured_trim_gap_bound(&cn, &wn, &bad_net, [0.0, 1.0]),
-            None
-        );
+        assert_eq!(iso_ruling_gap_bound(&cn, &wn, &bad_net, [0.0, 1.0]), None);
     }
 
     /// Even with `budget == None`, [`bisect`] stops immediately with `Some(INFINITY)` as soon
