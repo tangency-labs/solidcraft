@@ -11886,9 +11886,17 @@ fn centered_extrude(
     // lie on both sides of it, as their roles already say.
     let spans = caps[0].as_deref() == Some("bottom") && caps[1].as_deref() == Some("top") && !matches!(cap_roles, CapRoles::TwoSided);
     let start_name = || Some("start".to_string());
+    // An extrude whose start is offset off its sketch plane, with both caps on one side of it,
+    // gives both caps one role by their height (`top`, numbered `top#1` and `top#2` by where
+    // they lie). A piece of either cap that a later feature split off is named after that shared
+    // role, which stands for both caps, so it could not keep a sketch's attachment (T-1986). Each
+    // cap also answers to the end it closes, `cap:low` or `cap:high`, which no other face of the
+    // feature claims: a sketch on it attaches by that name. Its own name stays as it was.
+    let same_side = matches!(cap_roles, CapRoles::ByHeight) && caps[0] == caps[1];
     let cap_synonyms = match one_sided_direction.filter(|_| spans) {
         Some(crate::Direction::Positive) => [start_name(), None],
         Some(crate::Direction::Negative) => [None, start_name()],
+        Some(crate::Direction::Symmetric) | None if same_side => [Some("cap:low".to_string()), Some("cap:high".to_string())],
         Some(crate::Direction::Symmetric) | None => [None, None],
     };
     let roles = crate::lineage::ProfileRoles { sketch, region: Some(region), caps, cap_synonyms, thin };
