@@ -901,6 +901,87 @@ fn classify_points_honours_tolerance_trim_and_face_selection() {
     assert!(s.execute(id, &json!({"body":"Block", "points":[[2,2,10]], "face":[5,5,10]})).is_err());
 }
 
+/// A hollow rectangular tube (60x25x238 mm, 2.5 mm walls) with a batch containing points
+/// squarely on outer/inner planar faces, edges, vertices and within the `(tol, 2*tol)`
+/// B-rep classification band must classify every point cleanly when `face` is omitted,
+/// while still rejecting points off an explicitly selected face.
+#[test]
+fn classify_points_handles_hollow_tube_boundary_grid_and_tolerance_band() {
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    run(&mut s, "solid.box", json!({"corner": [1000.0, 360.0, 0.0], "length": 60.0, "width": 25.0, "height": 238.0, "body_name": "Tube"}));
+    run(
+        &mut s,
+        "solid.box",
+        json!({
+            "corner": [1002.5, 362.5, 0.0],
+            "length": 55.0,
+            "width": 20.0,
+            "height": 238.0,
+            "operation": "cut",
+            "targets": ["Tube"],
+        }),
+    );
+    let tol = s.model.state().body("Tube").unwrap().body.record().tolerance;
+    let id = "inspect.classify_points";
+    let points = vec![
+        [1001.25, 372.5, 119.0],
+        [1030.0, 372.5, 119.0],
+        [990.0, 372.5, 119.0],
+        [1000.0, 372.5, 119.0],
+        [1060.0, 372.5, 119.0],
+        [1002.5, 372.5, 119.0],
+        [1057.5, 372.5, 119.0],
+        [1030.0, 362.5, 119.0],
+        [1030.0, 382.5, 119.0],
+        [1001.25, 372.5, 0.0],
+        [1002.5, 362.5, 119.0],
+        [1000.0, 360.0, 119.0],
+        [1002.5, 372.5, 0.0],
+        [1002.5, 362.5, 0.0],
+        [1000.0, 360.0, 238.0],
+        [1002.5 + tol * 0.4, 372.5, 119.0],
+        [1000.0 - tol * 0.7, 360.0 - tol * 0.7, -tol * 0.7],
+        [1002.5 + tol * 0.7, 362.5 + tol * 0.7, -tol * 0.7],
+    ];
+    let expected_classes = ["inside", "outside", "outside", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on", "on"];
+    let r = run(&mut s, id, json!({"body": "Tube", "points": points}));
+    matches::<ClassifyPointsResult>(id, &r, false);
+    assert_eq!(r["results"].as_array().unwrap().len(), expected_classes.len());
+    let faces = run(&mut s, "model.faces", json!({"body": "Tube"}));
+    for (i, class) in expected_classes.into_iter().enumerate() {
+        let row = &r["results"][i];
+        assert_eq!(row["class"], class, "point {i}: {row}");
+        if class == "on" {
+            let n = crate::params::vec3(&row["normal"]).unwrap();
+            assert!((n.len() - 1.0).abs() < 1e-12, "point {i}: {row}");
+            assert!(faces["faces"].as_array().unwrap().iter().any(|f| f["name"] == row["face"]), "point {i}: {row}");
+        }
+    }
+    for (i, expected) in [
+        (3, [-1.0_f64, 0.0, 0.0]),
+        (4, [1.0, 0.0, 0.0]),
+        (5, [1.0, 0.0, 0.0]),
+        (6, [-1.0, 0.0, 0.0]),
+        (7, [0.0, 1.0, 0.0]),
+        (8, [0.0, -1.0, 0.0]),
+        (9, [0.0, 0.0, -1.0]),
+        (15, [1.0, 0.0, 0.0]),
+    ] {
+        let row = &r["results"][i];
+        let n = crate::params::vec3(&row["normal"]).unwrap();
+        let want = solidcore_record::Vec3::from(expected);
+        assert!((n - want).len() < 1e-12, "point {i}: {row}");
+    }
+    // Selecting the matching inner face works for a point on it, including a vertex hit within
+    // the per-axis box band whose Euclidean distance exceeds `tol`.
+    let inner_x_face = r["results"][5]["face"].clone();
+    let on_inner = run(&mut s, id, json!({"body": "Tube", "points": [[1002.5 + tol * 0.4, 372.5, 119.0]], "face": inner_x_face}));
+    matches::<ClassifyPointsResult>(id, &on_inner, false);
+    assert_eq!(on_inner["results"][0], r["results"][5]);
+    // Selecting an unrelated face still rejects a boundary point on a different face.
+    assert!(s.execute(id, &json!({"body": "Tube", "points": [[1002.5, 372.5, 119.0]], "face": [1000.0, 372.5, 119.0]})).is_err());
+}
+
 #[test]
 fn classify_points_refuses_hostile_inputs_in_every_check_mode() {
     let schema = input_schema_for::<ClassifyPointsParams>();
@@ -928,4 +1009,102 @@ fn classify_points_refuses_hostile_inputs_in_every_check_mode() {
         }
         assert_eq!(s.doc, before);
     }
+}
+
+/// An assembly inventory lists placements, not just definitions (#21797). The three boxes'
+/// names, bounds and 6000 mm3 volumes follow from their authored sizes and transforms.
+#[test]
+fn document_inspection_lists_every_body_placement_without_changing_the_design() {
+    let mut s = Session { param_check: ParamCheck::Warn, ..Session::default() };
+    let part = run(&mut s, "component.create", json!({"name":"Part", "grounded":false}));
+    run(&mut s, "solid.box", json!({"corner":[0,0,0], "length":10, "width":20, "height":30, "body_name":"Box", "name":"MadeBox"}));
+    run(&mut s, "sketch.create", json!({"plane":"XY", "name":"Datum"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[1,2], "radius":1}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "component.activate", json!({"component":0}));
+    let second = run(&mut s, "occurrence.copy", json!({"component":part["component"], "translate":[40,0,0]}))["occurrence"].clone();
+    let third = run(&mut s, "occurrence.copy", json!({"component":part["component"], "translate":[0,50,0]}))["occurrence"].clone();
+    run(&mut s, "component.activate", json!({"component":part["component"], "occurrence":part["occurrence"], "path":[part["occurrence"]]}));
+    run(&mut s, "select.set", json!({"items":[{"type":"body", "name":"Box"}]}));
+    let names = json!(["Box", "Box (Part:2)", "Box (Part:3)"]);
+    let check_boxes = |rows: &Value, expected: &[(&str, [f64; 3], [f64; 3])]| {
+        let rows = rows.as_array().unwrap();
+        assert_eq!(rows.len(), 3, "{rows:?}");
+        for (name, min, max) in expected {
+            let row = rows.iter().find(|b| b["name"] == *name).unwrap();
+            assert_eq!(row["closed"], true, "{row}");
+            assert!((row["volume_mm3"].as_f64().unwrap() - 6000.0).abs() < 1e-6, "{row}");
+            for k in 0..3 {
+                assert!((row["bbox"]["min"][k].as_f64().unwrap() - min[k]).abs() < 1e-6, "{row}");
+                assert!((row["bbox"]["max"][k].as_f64().unwrap() - max[k]).abs() < 1e-6, "{row}");
+            }
+        }
+        assert!((rows.iter().map(|b| b["volume_mm3"].as_f64().unwrap()).sum::<f64>() - 18000.0).abs() < 1e-6);
+    };
+    let state = |s: &Session| {
+        json!({"revision":s.revision, "undo":s.undo.len(), "redo":s.redo.len(), "dirty":s.is_dirty(),
+        "marker":s.doc.marker, "selection":&s.selection, "active_component":s.active_component,
+        "active_sketch":s.active_sketch, "active_path":&s.active_occurrence_path, "pending_moves":&s.pending_moves})
+    };
+    *s.world_cache.lock().unwrap() = None;
+    for measure in [false, true] {
+        let omitted = run(&mut s, "document.inspect", json!({"bodies":false, "measure":measure}));
+        assert!(omitted.get("bodies").is_none());
+        assert!(s.world_cache.lock().unwrap().is_none(), "omitting bodies must leave placements cold");
+    }
+    let before = state(&s);
+    let doc = s.doc.clone();
+    let model = s.model.state();
+    let full = run(&mut s, "document.inspect", json!({"measure":true}));
+    matches::<DocumentInspectResult>("document.inspect", &full, false);
+    check_boxes(
+        &full["bodies"],
+        &[
+            ("Box", [0.0, 0.0, 0.0], [10.0, 20.0, 30.0]),
+            ("Box (Part:2)", [40.0, 0.0, 0.0], [50.0, 20.0, 30.0]),
+            ("Box (Part:3)", [0.0, 50.0, 0.0], [10.0, 70.0, 30.0]),
+        ],
+    );
+    assert_eq!(full["sketches"].as_array().unwrap().len(), 1, "the sketch definition is not repeated");
+    assert_eq!(full["sketches"][0]["name"], "Datum");
+    assert_eq!(full["timeline"].as_array().unwrap().len(), 2, "the two authored features are not repeated");
+    for measure in [false, true] {
+        let named = run(&mut s, "document.inspect", json!({"bodies":"names", "measure":measure}));
+        matches::<DocumentInspectResult>("document.inspect", &named, false);
+        assert_eq!(named["bodies"], names);
+        let absent = run(&mut s, "document.inspect", json!({"bodies":false, "measure":measure}));
+        assert!(absent.get("bodies").is_none());
+        for reply in [&named, &absent] {
+            for key in ["params", "sketches", "timeline", "marker", "selection", "undo", "redo", "revision", "dirty"] {
+                assert_eq!(reply[key], full[key], "{key}: {reply}");
+            }
+        }
+    }
+    let listed = run(&mut s, "document.inspect", json!({"measure":false}));
+    assert_eq!(listed["bodies"].as_array().unwrap().iter().map(|b| b["name"].clone()).collect::<Vec<_>>(), names.as_array().unwrap().clone());
+    assert!(listed["bodies"].as_array().unwrap().iter().all(|b| b.get("volume_mm3").is_none()));
+    assert_eq!(state(&s), before);
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc) && std::sync::Arc::ptr_eq(&model, &s.model.state()));
+
+    // Visibility and an uncaptured quarter-turn/translation belong to a placement, not its definition.
+    run(&mut s, "browser.visibility", json!({"paths":[[second]], "visible":false}));
+    run(&mut s, "occurrence.move", json!({"occurrence":third, "to_matrix":[[0,-1,0,0],[1,0,0,50],[0,0,1,7]], "capture":false}));
+    let before = state(&s);
+    let doc = s.doc.clone();
+    let moved = run(&mut s, "document.inspect", json!({"measure":true}));
+    check_boxes(
+        &moved["bodies"],
+        &[
+            ("Box", [0.0, 0.0, 0.0], [10.0, 20.0, 30.0]),
+            ("Box (Part:2)", [40.0, 0.0, 0.0], [50.0, 20.0, 30.0]),
+            ("Box (Part:3)", [-20.0, 50.0, 7.0], [0.0, 60.0, 37.0]),
+        ],
+    );
+    for b in moved["bodies"].as_array().unwrap() {
+        assert_eq!(b["visible"], b["name"] != "Box (Part:2)", "{b}");
+    }
+    assert_eq!(moved["sketches"], full["sketches"]);
+    assert_eq!(moved["timeline"], full["timeline"]);
+    assert_eq!(state(&s), before);
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
 }

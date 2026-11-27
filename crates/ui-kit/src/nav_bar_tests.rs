@@ -20,6 +20,7 @@ fn slot(index: usize, id: &'static str, kind: NavigationKind, x: f32) -> SlotVie
         rect: Rect::from_min_size(pos2(x, 304.0), vec2(26.0, 26.0)),
         alias: None,
         dot: false,
+        context: Vec::new(),
     }
 }
 

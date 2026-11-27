@@ -45,7 +45,6 @@ use solidcore::Kernel;
 
 /// The flags SolidCraft's `fixes()` turns on at tangency-labs/solidcraft c494a18.
 const SOLIDCRAFT_C494A18: &[&str] = &[
-    "bspline_trim_preserves_uv_spans",
     "edgeuse_convexity_propagates_step_off_failure",
     "fillet_chamfer_cone_on_arc",
     "fillet_exact_round_classes",
@@ -58,13 +57,11 @@ const SOLIDCRAFT_C494A18: &[&str] = &[
     "linear_sweep_arc_is_cylinder",
     "local_surface_intersect_guards_max_boundary_retry",
     "new_edge_vertex_tolerance_covers_gap",
-    "offset_analytic_mate_edges",
     "offset_extension_as_itself",
     "offset_extension_from_base",
     "point_class_gap_3d_propagates_no_drop_error",
     "ssi_tangent_curve_tracer",
     "surface_continuity_checks_last_v_knot",
-    "uv_trim_corner_end_points_only",
 ];
 
 /// The volume 729f893 gives the rounded body at accuracy 1e-7.

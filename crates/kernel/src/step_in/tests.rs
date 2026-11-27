@@ -306,6 +306,71 @@ fn seam_only_torus_imports_as_a_whole_ring() {
     }
 }
 
+/// A whole ring torus (major radius 5, minor 2, about Z) whose one face is bounded by its two
+/// seams, each a SEAM_CURVE with a pcurve on either side, used out and back in one loop as
+/// SEAM_EDGEs (ISO 10303-42: an oriented edge that names the pcurve of its use), the way AP214
+/// and AP242 writers write a closed face. Read like ORIENTED_EDGEs, in either order round the
+/// loop or with one use of each seam written as an ORIENTED_EDGE: one closed body, volume 2π²Rr²
+/// (394.784 mm³) and area 4π²Rr.
+#[test]
+fn a_torus_bounded_by_seam_edges_imports_as_a_whole_ring() {
+    use std::f64::consts::PI;
+    let (major, minor) = (5.0_f64, 2.0_f64);
+    let outer = major + minor;
+    let tau = 2.0 * PI;
+    // Geometry: the torus, its tube circle at u = 0 and its ring circle at v = 0, each the 3D
+    // curve of a SEAM_CURVE with its two pcurves, lines in (u, v) at u = 0, 2π and v = 0, 2π.
+    let mut geometry = String::from(
+        "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n",
+    );
+    geometry +=
+        &format!("#5=TOROIDAL_SURFACE('',#4,{major:.16},{minor:.16});\n#10=CARTESIAN_POINT('',({outer:.16},0.,0.));\n#11=VERTEX_POINT('',#10);\n");
+    geometry += &format!(
+        "#14=CARTESIAN_POINT('',({major:.16},0.,0.));\n#15=DIRECTION('',(0.,-1.,0.));\n#16=AXIS2_PLACEMENT_3D('',#14,#15,#3);\n#17=CIRCLE('',#16,{minor:.16});\n#18=CIRCLE('',#4,{outer:.16});\n"
+    );
+    geometry += "#40=(GEOMETRIC_REPRESENTATION_CONTEXT(2)PARAMETRIC_REPRESENTATION_CONTEXT()REPRESENTATION_CONTEXT('2D SPACE',''));\n";
+    geometry += "#41=DIRECTION('',(0.,1.));\n#42=VECTOR('',#41,1.);\n#43=DIRECTION('',(1.,0.));\n#44=VECTOR('',#43,1.);\n";
+    // (id of the pcurve, its line's origin in (u, v), the vector along it)
+    for (pc, (u, v), along) in [(50, (0.0, 0.0), 42), (51, (tau, 0.0), 42), (52, (0.0, 0.0), 44), (53, (0.0, tau), 44)] {
+        let (pt, line, rep) = (pc + 10, pc + 20, pc + 30);
+        geometry += &format!(
+            "#{pt}=CARTESIAN_POINT('',({u:.16},{v:.16}));\n#{line}=LINE('',#{pt},#{along});\n#{rep}=DEFINITIONAL_REPRESENTATION('',(#{line}),#40);\n#{pc}=PCURVE('',#5,#{rep});\n"
+        );
+    }
+    geometry += "#24=SEAM_CURVE('',#17,(#50,#51),.PCURVE_S1.);\n#25=SEAM_CURVE('',#18,(#52,#53),.PCURVE_S1.);\n";
+    geometry += "#20=EDGE_CURVE('',#11,#11,#24,.T.);\n#19=EDGE_CURVE('',#11,#11,#25,.T.);\n";
+    // Each use of a seam names the pcurve on its side of the face.
+    let seam =
+        |id: u64, edge: u64, along: bool, pcurve: u64| format!("#{id}=SEAM_EDGE('',*,*,#{edge},{},#{pcurve});\n", if along { ".T." } else { ".F." });
+    let all_seams = format!("{}{}{}{}", seam(21, 20, true, 50), seam(22, 19, true, 52), seam(23, 20, false, 51), seam(26, 19, false, 53));
+    let mixed =
+        format!("{}{}#23=ORIENTED_EDGE('',*,*,#20,.F.);\n#26=ORIENTED_EDGE('',*,*,#19,.F.);\n", seam(21, 20, true, 50), seam(22, 19, true, 52));
+    let cases = [
+        ("tube then ring", all_seams.clone(), "#30=EDGE_LOOP('',(#21,#22,#23,#26));\n"),
+        ("ring then tube", all_seams, "#30=EDGE_LOOP('',(#22,#21,#26,#23));\n"),
+        ("seam and oriented edges", mixed, "#30=EDGE_LOOP('',(#21,#22,#23,#26));\n"),
+    ];
+    for (what, uses, edge_loop) in cases {
+        let mut t = String::from(HEAD);
+        t += &geometry;
+        t += &uses;
+        t += edge_loop;
+        t += "#31=FACE_OUTER_BOUND('',#30,.T.);\n#32=ADVANCED_FACE('',(#31),#5,.T.);\n#33=CLOSED_SHELL('',(#32));\n#34=MANIFOLD_SOLID_BREP('Ring',#33);\n";
+        t += "#35=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#34),#170);\n";
+        t += &context(170, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += TAIL;
+        let imp = step_import(&t).unwrap_or_else(|e| panic!("{what}: {e}"));
+        assert_eq!(imp.bodies.len(), 1, "{what}: {:?}", imp.warnings);
+        assert!(imp.warnings.is_empty(), "{what}: {:?}", imp.warnings);
+        assert!(imp.bodies[0].closed, "{what}");
+        let m = measure(&imp.bodies[0].body).unwrap();
+        let (volume, area) = (2.0 * PI * PI * major * minor * minor, 4.0 * PI * PI * major * minor);
+        assert!((volume - 394.784).abs() < 1e-3, "analytic volume {volume}");
+        assert!(rel(m.volume, volume) < 1e-3, "{what}: volume {} vs {volume}", m.volume);
+        assert!(rel(m.area, area) < 1e-3, "{what}: area {} vs {area}", m.area);
+    }
+}
+
 /// A torus (R 12, r 2) as SolidCraft 0.30.1 wrote it (#17930): two faces sharing one loop, a
 /// patch a third of the way round and half way round the tube, and the rest of the torus round
 /// it, each on its own TOROIDAL_SURFACE, both as written. The rest runs clockwise round the
@@ -6729,18 +6794,14 @@ fn a_coil_spring_wire_with_its_surface_a_little_off_its_edges_imports_in_bounded
     }
 }
 
-/// #20686: the closely wound wire whose surface lies 0.2 % outside its edges, cut by the flat end
-/// at the bottom of its second turn, measures the volume of the wire below that plane, not more
-/// and not less: about 67.7 mm³ (the control with another pitch and cut is a different wire, so
-/// its 81 mm³ is not this one's). The expected volume is the wire's tube integrated below
-/// `z = const`: over the helix angle, the radius and the angle round the wire, with the wire's
-/// own `(R + s cos f) s` measure.
-#[test]
-fn a_coil_spring_wire_with_a_surface_off_its_edges_measures_the_wire_below_its_end_plane() {
+/// The volume of the closely wound coil wire of [`coil_wire_file`] (two turns of a tube of radius
+/// 0.55 mm round a helix of radius 7.5 mm) below the plane `z = z_end`: the wire's tube integrated
+/// over the helix angle, the radius and the angle round the wire, with the wire's own
+/// `(R + s cos f) s` measure.
+fn coil_wire_volume_below(pitch: f64, z_end: f64) -> f64 {
     use std::f64::consts::PI;
-    let (pitch, radius, tube) = (1.125_f64, 7.5_f64, 0.55_f64);
+    let (radius, tube) = (7.5_f64, 0.55_f64);
     let c = pitch / (2.0 * PI);
-    let z_end = 1.7_f64;
     let (nt, ns, nf) = (800_usize, 16_usize, 48_usize);
     let mut sum = 0.0;
     for i in 0..nt {
@@ -6755,7 +6816,18 @@ fn a_coil_spring_wire_with_a_surface_off_its_edges_measures_the_wire_below_its_e
             }
         }
     }
-    let expected = sum * (4.0 * PI / nt as f64) * (tube / ns as f64) * (2.0 * PI / nf as f64);
+    sum * (4.0 * PI / nt as f64) * (tube / ns as f64) * (2.0 * PI / nf as f64)
+}
+
+/// #20686: the closely wound wire whose surface lies 0.2 % outside its edges, cut by the flat end
+/// at the bottom of its second turn, measures the volume of the wire below that plane, not more
+/// and not less: about 67.7 mm³ (the control with another pitch and cut is a different wire, so
+/// its 81 mm³ is not this one's).
+#[test]
+fn a_coil_spring_wire_with_a_surface_off_its_edges_measures_the_wire_below_its_end_plane() {
+    let (pitch, z_end) = (1.125_f64, 1.7_f64);
+    let c = pitch / (2.0 * std::f64::consts::PI);
+    let expected = coil_wire_volume_below(pitch, z_end);
     let imported = step_import(&coil_wire_file(pitch, 22, 1.002, z_end / c)).unwrap();
     assert!(imported.bodies.len() <= 1, "{:?}", imported.warnings);
     if let Some(body) = imported.bodies.first() {
@@ -6764,6 +6836,27 @@ fn a_coil_spring_wire_with_a_surface_off_its_edges_measures_the_wire_below_its_e
         assert!(body.closed, "{:?}", imported.warnings);
         let volume = measure(&body.body).unwrap().volume;
         assert!(rel(volume, expected) < 0.01, "{volume} against {expected}");
+    }
+}
+
+/// #20575 (`17-step-spring-wire-hang-b.step`): the closely wound wire cut where its flat end
+/// stands all but tangent to the tube of the turn above (the end plane touches the tube at the
+/// cut's last vertex) comes in as one closed body of the volume of the wire below that plane, about
+/// 68 mm³, not as surfaces with the wire's wall left out for an edge "4.78 mm off the face's
+/// surface". The kernel's drop of the cut's second piece onto the surface settled on another
+/// part of the surface for stretches of the edge; the trim is followed along the surface instead.
+/// The surface on the tube and 0.2 % off it (the file's) both read.
+#[test]
+fn a_coil_spring_wire_cut_by_a_plane_tangent_to_its_tube_imports_closed() {
+    let (pitch, cut) = (1.125_f64, 8.995_466_109_045_587_f64);
+    let expected = coil_wire_volume_below(pitch, pitch / (2.0 * std::f64::consts::PI) * cut);
+    for scale in [1.0, 0.998] {
+        let imported = step_import(&coil_wire_file(pitch, 22, scale, cut)).unwrap();
+        assert_eq!(imported.bodies.len(), 1, "{scale}: {:?}", imported.warnings);
+        let body = &imported.bodies[0];
+        assert!(body.closed && body.refused.is_none(), "{scale}: {:?}", imported.warnings);
+        let volume = measure(&body.body).unwrap().volume;
+        assert!(rel(volume, expected) < 0.01, "{scale}: {volume} against {expected}");
     }
 }
 
@@ -7180,6 +7273,24 @@ fn one_solid_mapped_several_times_in_a_part_comes_in_at_each_placement() {
     assert_eq!(xs.len(), 3, "{xs:?} {:?}", imp.warnings);
     for (x, want) in xs.iter().zip([0.0, 30.0, 60.0]) {
         assert!((x - want).abs() < 1e-6, "{xs:?}");
+    }
+}
+
+/// #2340: some writers leave a CARTESIAN_TRANSFORMATION_OPERATOR_3D's description out. A mapped
+/// item placed by an operator comes in at the operator's origin, whichever way it is written
+/// (the cube at x = 60, the one placement the row does not repeat).
+#[test]
+fn a_mapped_item_placed_by_an_operator_without_its_description_comes_in() {
+    for op in ["('','',$,$,#5020,1.,$)", "('',$,$,#5020,1.,$)", "('','',#5090,$,#5020,1.,$)", "('',#5090,$,#5020,1.,$)"] {
+        let text = mapped_cube_row("#5090=DIRECTION('',(1.,0.,0.));\n")
+            .replace("#5021=AXIS2_PLACEMENT_3D('',#5020,$,$)", &format!("#5021=CARTESIAN_TRANSFORMATION_OPERATOR_3D{op}"));
+        let imp = step_import(&text).unwrap();
+        let mut xs: Vec<f64> = imp.bodies.iter().map(|b| measure(&b.body).unwrap().bbox.min.x).collect();
+        xs.sort_by(f64::total_cmp);
+        assert_eq!(xs.len(), 3, "{op}: {xs:?} {:?}", imp.warnings);
+        for (x, want) in xs.iter().zip([0.0, 30.0, 60.0]) {
+            assert!((x - want).abs() < 1e-6, "{op}: {xs:?}");
+        }
     }
 }
 

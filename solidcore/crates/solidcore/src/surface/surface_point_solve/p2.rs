@@ -1234,23 +1234,7 @@ impl SurfPtGlobalSolver<'_> {
                     SolverOperation::Minimize => (value_sq < best_sq, value > best + loose_tol),
                     _ => (true, false),
                 };
-                let beyond = !better && far;
-                // (test only: the goldens' certificate of each dropped answer)
-                #[cfg(feature = "wr57-replay")]
-                let beyond = beyond
-                    && crate::surface::surface::replay::wrap_target_bound(
-                        crate::surface::surface::replay::TargetBound {
-                            kernel: k,
-                            surface,
-                            domain: self.base.domain(),
-                            point: self.base.test_point(),
-                            operation: op,
-                            value,
-                            target,
-                            tol: loose_tol,
-                        },
-                    );
-                if beyond {
+                if !better && far {
                     found_answer = false;
                     self.set_dropped_beyond_target(true);
                 }

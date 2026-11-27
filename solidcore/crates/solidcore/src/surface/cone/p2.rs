@@ -55,6 +55,12 @@
 //!   the radius's span, `height / (old_top_radius - old_bot_radius)`, so a truncated
 //!   cone's offset keeps its slope and stays `S + d n` at the same parameters; full apex
 //!   cones give the same value.
+//! - **Shallow cones (tangency-labs/solidcraft#18005).** `IsNurbSurfaceCone` refuses
+//!   any cone whose end circles' centres are less than `EFF_ZERO_SQRT` apart as a disk.
+//!   Here [`Cone::is_nurb_surface_cone`] refuses one only when its height is under
+//!   `EFF_ZERO`, or when its height and the difference of its end radii are both under
+//!   [`Cone::MIN_HEIGHT`]: a nearly flat cone with a real radial span (a STEP face of half
+//!   angle 89.999 degrees, 5.4e-7 high) keeps its exact cone, so its pcurves can be made.
 //! - **NURB.** As in `surface::cone::p1`, the cone is expected to have its NURB
 //!   ([`Cone::make_nurb`]); upstream makes a missing one inside `const` queries, which
 //!   the port does (and keeps) at the `Surface` level (`Surface::kind_with_nurb`).
@@ -113,7 +119,7 @@ use crate::geom::tol::{approx_tol3d, is_zero};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_SQRT, PI};
+use crate::math::{max2, min2, EFF_ZERO, EFF_ZERO_DEG, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{
     BSplineSurface, IsoCurveOptions, LocationType, SurfParamType,
@@ -308,9 +314,19 @@ fn iso_arc_exact(k: &Kernel, curve: &BSplineCurve, scaled_zero: f64) -> Result<O
     }) {
         return Ok(None);
     }
-    let end_ang = sweep.to_degrees();
+    let mut end_ang = sweep.to_degrees();
     if !(end_ang > 0.0 && end_ang <= 360.0 + EFF_ZERO_SQRT) {
         return Ok(None);
+    }
+    // Snap a closed full circle whose summed Bézier half-sweeps rounded slightly below
+    // 360 degrees (for example, far from the origin) up to 360 degrees, matching
+    // `is_arc_base`.
+    if segments
+        .last()
+        .is_some_and(|last| first.q0.distance(last.q2) <= scaled_zero)
+        && end_ang >= 360.0 - EFF_ZERO_SQRT
+    {
+        end_ang = 360.0;
     }
     Ok(Some(IsoArc {
         frame: Axis2Placement::new(centre, x_axis, normal.cross(x_axis)),
@@ -460,9 +476,19 @@ fn iso_arc_from_chord(
     }) {
         return Ok(None);
     }
-    let end_ang = sweep.to_degrees();
+    let mut end_ang = sweep.to_degrees();
     if !(end_ang > 0.0 && end_ang <= 360.0 + EFF_ZERO_SQRT) {
         return Ok(None);
+    }
+    // Snap a closed full circle whose summed Bézier half-sweeps rounded slightly below
+    // 360 degrees (for example, far from the origin) up to 360 degrees, matching
+    // `is_arc_base`.
+    if segments
+        .last()
+        .is_some_and(|last| first.q0.distance(last.q2) <= scaled_zero)
+        && end_ang >= 360.0 - EFF_ZERO_SQRT
+    {
+        end_ang = 360.0;
     }
     Ok(Some(IsoArc {
         frame: Axis2Placement::new(centre, x_axis, normal.cross(x_axis)),
@@ -1099,8 +1125,9 @@ impl Cone {
     // ---- IsNurbSurfaceCone -------------------------------------------------------
 
     /// The height (the distance between its end circles' centres) below which
-    /// [`Self::is_nurb_surface_cone`] refuses a NURB as a disk, not a cone, and
-    /// [`Self::rebuild_step_from_nurb_parameters`] refuses to rebuild one. Named so that the
+    /// [`Self::rebuild_step_from_nurb_parameters`] refuses to rebuild a cone, and
+    /// [`Self::is_nurb_surface_cone`] refuses a NURB as a disk, not a cone, when its end
+    /// radii also differ by less than this (tangency-labs/solidcraft#18005). Named so that the
     /// rotational sweep, which builds no analytic cone lower than this, and these tests use
     /// the same number (tangency-labs/solidcraft#17085). Above it a form can still be refused
     /// by the other tests.
@@ -1221,8 +1248,10 @@ impl Cone {
         let mut nurb_z_axis = center_top - center_bot;
         let height = nurb_z_axis.length();
 
-        // not a cone - height of cone is degenerate (cone is a disk)
-        if height < Self::MIN_HEIGHT {
+        // not a cone - height of cone is degenerate (cone is a disk): no height at all, or
+        // a height and a radial span both under the floor. A shallow cone whose radii differ
+        // by more keeps its cone (tangency-labs/solidcraft#18005).
+        if height < EFF_ZERO || height.max((top.radius - bot.radius).abs()) < Self::MIN_HEIGHT {
             return Ok(None);
         }
         nurb_z_axis = nurb_z_axis.unitize_or_z();
@@ -1591,6 +1620,7 @@ impl Cone {
 
         // (status ignored upstream)
         ignore_status(cylinder.rebuild_cone_polar_converter(k))?;
+        cylinder.sync_sweep_domain_with_polar_curve();
 
         // (status ignored upstream)
         let gen_ivl = Extent1d::from_min_max(bot_knot, top_knot);
@@ -1599,6 +1629,27 @@ impl Cone {
         }
 
         Ok(Some(cylinder))
+    }
+
+    /// Aligns the cone's STEP U domain with the sweep interval finalized by the polar
+    /// converter against the retained NURB, so `SmSurfOfRevolution::Test #7` agrees with
+    /// the polar curve (as `Sphere::keep_tested_nurb_on` does).
+    fn sync_sweep_domain_with_polar_curve(&mut self) {
+        if !self.rev.have_polar_conversion() {
+            return;
+        }
+        let Some(ivl) = self.rev.polar_curve().map(Ellipse::step_interval) else {
+            return;
+        };
+        if ivl.length() > EFF_ZERO
+            && ivl.length() <= 360.0 + EFF_ZERO_DEG
+            && ivl.min() >= -360.0 - EFF_ZERO_DEG
+            && ivl.max() <= 360.0 + EFF_ZERO_DEG
+        {
+            let d = self.rev.anal_uv_domain;
+            self.rev.anal_uv_domain =
+                Extent2d::from_bounds(ivl.min(), d.min().y, ivl.max(), d.max().y);
+        }
     }
 
     // ---- RebuildSTEPFromNURBParameters ---------------------------------------------
@@ -2092,6 +2143,7 @@ impl Cone {
         // Build newCone PolarConverter from Nurb rotation isoParamCurve (status
         // ignored), then save the gencurve
         ignore_status(self.rebuild_cone_polar_converter(k))?;
+        self.sync_sweep_domain_with_polar_curve();
         self.rev.gen_curve = Some(Curve::from(line));
         Ok(())
     }
@@ -2751,6 +2803,32 @@ mod tests {
             assert!((found.top_radius() - cone.top_radius()).abs() < 1e-9);
             assert_eq!(found.rev().swap_uv(), swap);
         }
+    }
+
+    #[test]
+    fn nearly_flat_cone_keeps_its_analytic_parametrisation() {
+        use crate::surface::implicit::AnalyticSupport;
+        use crate::surface::surface::Surface;
+
+        let k = kernel();
+        for (swap, inside) in [(false, false), (true, false), (false, true), (true, true)] {
+            for top in [1.95, 2.05] {
+                let cone = canonical(&k, 2.0, top, 5.0e-7, swap, inside);
+                let form = cone.rev().base();
+                let found = Cone::is_nurb_surface_cone(&k, form, 1.0)
+                    .unwrap()
+                    .expect("a shallow cone is still a cone");
+                assert!((found.bot_radius() - cone.bot_radius()).abs() < 1e-12);
+                assert!((found.top_radius() - cone.top_radius()).abs() < 1e-12);
+                assert_eq!(found.rev().swap_uv(), swap);
+                let support = AnalyticSupport::of(&Surface::from(cone.clone())).unwrap();
+                support.build(&k, form.copy()).unwrap();
+            }
+        }
+        let tiny = canonical(&k, 2.0e-6, 2.5e-6, 8.0e-7, false, false);
+        assert!(Cone::is_nurb_surface_cone(&k, tiny.rev().base(), 1.0)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -4011,5 +4089,59 @@ mod tests {
         let support =
             AnalyticSupport::of(&crate::surface::surface::Surface::from(cylinder)).unwrap();
         assert!(lies_on(&form, &support.implicit()).unwrap(), "{support:?}");
+    }
+
+    /// A full or partial cylinder far from the origin whose summed Bézier half-sweeps
+    /// round slightly below 360 degrees still recognises cleanly and passes
+    /// `Surface::assert_valid` (including `SmSurfOfRevolution::Test #7`).
+    #[test]
+    fn far_from_origin_cylinder_keeps_matching_polar_curve_domain() {
+        use crate::geom::assert_array::{AssertArray, ObjectKey};
+        use crate::surface::surface::Surface;
+
+        let k = kernel();
+        let seam = 0.6131_f64;
+        let x = Vec3::new(seam.cos(), seam.sin(), 0.0);
+        let y = Vec3::new(-seam.sin(), seam.cos(), 0.0);
+        for (origin, radius, height, end_ang) in [
+            (Point3::new(0.0, -1.0e6, 2.0e5), 6.0, 25.0, 360.0),
+            (Point3::new(0.0, -1.0e6, 2.0e5), 6.0, 25.0, 200.0),
+            (Point3::new(40.0, 25.0, 10.0), 0.1, 20.0, 360.0),
+            (Point3::new(40.0, 25.0, 10.0), 2500.0, 20.0, 360.0),
+        ] {
+            let mut cyl = Cone::new_cylinder_bounded(
+                origin, x, y, radius, 0.0, end_ang, height, false, false, false,
+            );
+            cyl.make_nurb(&k).unwrap();
+            let nurbs = cyl.rev().base().clone();
+            let found = Cone::is_nurb_surface_cylinder(&k, &nurbs, 1.0)
+                .unwrap()
+                .expect("a cylinder");
+            let u_ivl = found.rev().step_uv_domain().u_interval();
+            let polar_ivl = found
+                .rev()
+                .polar_curve()
+                .expect("polar curve")
+                .step_interval();
+            assert_eq!(u_ivl, polar_ivl, "{origin:?} r={radius} end={end_ang}");
+            if end_ang == 360.0 {
+                assert_eq!(
+                    u_ivl,
+                    Extent1d::from_min_max(0.0, 360.0),
+                    "{origin:?} r={radius}"
+                );
+            }
+
+            let surface = Surface::from(found);
+            let mut reports = AssertArray::new();
+            let valid = surface
+                .assert_valid(&k, Some(&mut reports), 2, ObjectKey(1))
+                .unwrap();
+            let failed: Vec<_> = reports.reports().iter().filter(|r| !r.ok).collect();
+            assert!(
+                valid && failed.is_empty(),
+                "{origin:?} r={radius} end={end_ang}: {failed:?}"
+            );
+        }
     }
 }
