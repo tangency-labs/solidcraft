@@ -3538,7 +3538,9 @@ fn socket_reach_lists_the_rib_in_the_sockets_way_and_shows_its_space() {
             input.items = vec![Sel::Edge { body: "Head".into(), index: 0, point: Vec3::new(36.5, 30.0, 10.0) }];
         }
         let c = socket_reach(app, app.dialog.as_ref().map_or(&[][..], |d| &d.inputs[..]), "19", "30", false);
-        if let Some(Kind::Assembly(Asm::SocketReach { diameter, length, flip, result, shown, asked, check, .. })) = app.dialog.as_mut().map(|d| &mut d.kind) {
+        if let Some(Kind::Assembly(Asm::SocketReach { diameter, length, flip, result, shown, asked, check, .. })) =
+            app.dialog.as_mut().map(|d| &mut d.kind)
+        {
             (*result, *shown, *check) = (None, Vec::new(), Some(c));
             *asked = (diameter.clone(), length.clone(), *flip);
         }
