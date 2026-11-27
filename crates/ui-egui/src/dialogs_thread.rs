@@ -509,18 +509,21 @@ pub(crate) fn rows(
         let mut chamfered = usize::from(o.tip != ThreadTip::None);
         choice_row(ui, "Start", "thread_start", &mut chamfered, STARTS_AT);
         // An offset start lies inside the face, which no chamfer reaches: with an offset a
-        // chamfer is the command's `tip: both`, which chamfers the free far end the thread reaches.
+        // chamfer is sent as the command's `tip: both` (`sent_tip`), which chamfers the free far
+        // end the thread reaches, and "Chamfer both ends" shows fixed on. The choice kept here is
+        // the user's own, so clearing the offset brings back what they chose.
         let offset = o.has_offset(doc);
         o.tip = match (chamfered, o.tip) {
             (0, _) => ThreadTip::None,
-            (_, ThreadTip::Start) | (_, ThreadTip::None) if offset => ThreadTip::Both,
             (_, ThreadTip::None) => ThreadTip::Start,
             (_, kept) => kept,
         };
         if o.tip != ThreadTip::None {
-            let mut both = o.tip == ThreadTip::Both;
+            let mut both = o.tip == ThreadTip::Both || offset;
             ui.add_enabled_ui(!offset, |ui| crate::ui_kit::checkbox_grid(ui, &mut [("Chamfer both ends", &mut both)], 2));
-            o.tip = if both || offset { ThreadTip::Both } else { ThreadTip::Start };
+            if !offset {
+                o.tip = if both { ThreadTip::Both } else { ThreadTip::Start };
+            }
             enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr("ui.iso_4753"));
             // ISO 4753's depth is for ISO metric threads; the other forms give theirs.
             let depth = if f == ThreadForm::Metric { "ui.iso_4753" } else { "thread.chamfer_depth_needed" };
@@ -655,6 +658,12 @@ pub(crate) fn sync_inputs(inputs: &mut Vec<SelInput>, active: &mut usize, o: &Op
 
 /// Put the options into the command's parameters. Defaults are left out, so a thread without
 /// them means what it always did.
+/// The tip the command is sent: with an offset the start lies inside the face, so a chamfered
+/// start is the command's `tip: both`, the free far end (the refusal of `tip: start` advises it).
+pub(crate) fn sent_tip(o: &Options, doc: &Document) -> ThreadTip {
+    if o.tip == ThreadTip::Start && o.has_offset(doc) { ThreadTip::Both } else { o.tip }
+}
+
 pub(crate) fn put_params(p: &mut Value, length: &str, o: &Options, inputs: &[SelInput]) {
     if o.form != ThreadForm::Metric {
         p["form"] = json!(o.form.name());

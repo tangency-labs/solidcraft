@@ -1007,3 +1007,29 @@ fn a_chamfer_with_an_offset_is_the_far_ends_and_a_zero_offset_is_none() {
     p["from"] = json!([0, 0, 10]);
     h.app.session.execute(&cmd, &p).unwrap_or_else(|e| panic!("{p}: {e}"));
 }
+
+/// Review of #23317: clearing the offset brings back the chamfer the user chose. With an offset the
+/// start's chamfer is sent as `tip: both`, but the window keeps the user's Start, so an offset of 0
+/// (none) sends `tip: start` again and "Chamfer both ends" is not left ticked.
+#[test]
+fn clearing_the_offset_brings_back_the_chosen_start_chamfer() {
+    let mut h = shaft();
+    type_in(&mut h, "Offset", "2 mm");
+    choose(&mut h, "Start", "Chamfer");
+    assert_eq!(params(&h)["tip"], "both");
+    assert_eq!(options(&h).tip, ThreadTip::Start, "the window keeps the user's choice");
+    type_in(&mut h, "Offset", "0 mm");
+    assert_eq!(params(&h)["tip"], "start");
+    assert_eq!(options(&h).tip, ThreadTip::Start);
+}
+
+/// Review of #23317: the offset is a length like the thread's own, so a bare number in an inch
+/// design is inches (sent with its unit), not millimetres.
+#[test]
+fn an_offset_typed_in_an_inch_design_is_inches() {
+    let mut h = shaft();
+    h.app.run("document.units", json!({ "units": "in" })).unwrap();
+    h.frames(2);
+    type_in(&mut h, "Offset", "0.1");
+    assert_eq!(params(&h)["offset"], "0.1 in");
+}

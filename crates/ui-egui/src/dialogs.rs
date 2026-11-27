@@ -8210,6 +8210,9 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 common["designation"] = json!(designation.trim());
             }
             crate::dialogs_thread::put_params(&mut common, length, options, &d.inputs);
+            if options.tip != crate::dialogs_thread::sent_tip(options, &app.session.doc) {
+                common["tip"] = json!(crate::dialogs_thread::sent_tip(options, &app.session.doc));
+            }
             let mut seen = std::collections::BTreeSet::new();
             let mut faces = Vec::new();
             for pick in sels(d, 0) {
