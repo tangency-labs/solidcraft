@@ -400,7 +400,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .enabled(in_sketch)
         .contract(&DELETE_CONTRACT)
         .output(output_schema_for::<DeleteResult>)
-        .params("entities: [curve, point or constraint ids]; preserve_projection_link?: bool (default false: break what remains of a partially deleted projection into normal geometry). With true, leave deleted source edges out and keep the rest linked where identifiable; otherwise break it off (listed in `broken_links` with why)"),
+        .params("entities: [curve, point, constraint or block ids] (a block's id or its axis line explodes the block; its last member takes the block and its axis with it; every member of the block open for Edit Contents closes it first, so the curves drawn in it go too); preserve_projection_link?: bool (default false: break what remains of a partially deleted projection into normal geometry). With true, leave deleted source edges out and keep the rest linked where identifiable; otherwise break it off (listed in `broken_links` with why)"),
     CommandSpec::new("sketch.detach_point", "Detach Sketch Point", crate::checked!("sketch.detach_point", detach_point))
         .icon("c_coincident")
         .enabled(in_sketch)
@@ -587,16 +587,27 @@ pub(super) fn edit_solved<T>(
             sk.points.clone(),
             sk.curves.clone(),
             sk.constraints.clone(),
+            sk.blocks.clone(),
             sk.wires.clone(),
             sk.wire_constraints.clone(),
             sk.wire_constraints_holding(),
             big,
         )
     });
+    // A closed block keeps its shape, and an open one keeps everything outside it still.
+    let guard = super::sketch_block::BlockGuard::new(&sk);
     let (out, left) = f(&mut sk, &mut doc)?;
+    if let Some(guard) = &guard {
+        guard.check(&sk, "")?;
+    }
+    // A block the edit left without members goes with its axis (positions kept by index for a
+    // drag's reference stay as they are).
+    if !matches!(left, Left::MovedFrom(_)) {
+        sk.prune_blocks_and_axes();
+    }
     let strictness = match before {
-        Some((points, curves, constraints, wires, wire_constraints, held, was_big)) => Strict {
-            planar: sk.points != points || sk.curves != curves || sk.constraints != constraints,
+        Some((points, curves, constraints, blocks, wires, wire_constraints, held, was_big)) => Strict {
+            planar: sk.points != points || sk.curves != curves || sk.constraints != constraints || sk.blocks != blocks,
             wires: sk.wires != wires || sk.wire_constraints != wire_constraints,
             held,
             was_big,
@@ -710,7 +721,7 @@ fn settle(strict: Strict, mut rep: SolveReport, sk: &mut Sketch, unsolved: Sketc
     // that curve away (a corner made the midpoint of the opposite side of its rectangle).
     let gone = shrunk(&unsolved, sk);
     if strict && let Some(curve) = &gone {
-        return Err(EngineError::Other(format!("that would shrink {curve} to a point: its constraints can only be met without it")));
+        return Err(EngineError::Other(shrink_message(sk, curve)));
     }
     if !rep.keeps_orientation() || far || gone.is_some() {
         let (wires, wire_constraints) = (std::mem::take(&mut sk.wires), std::mem::take(&mut sk.wire_constraints));
@@ -787,6 +798,15 @@ fn shrunk(before: &Sketch, after: &Sketch) -> Option<String> {
         .and_then(|i| after.curves.get(i).map(|c| c.id.clone()))
 }
 
+/// Why a solve that shrank `curve` to a point is refused; a block's curve or axis names the block,
+/// which would collapse onto its origin.
+fn shrink_message(sk: &Sketch, curve: &str) -> String {
+    match sk.blocks.iter().find(|b| b.axis == curve || b.curves.iter().any(|c| c == curve)) {
+        Some(b) => format!("that would shrink block {} to a point: its constraints can only be met by collapsing it", b.label()),
+        None => format!("that would shrink {curve} to a point: its constraints can only be met without it"),
+    }
+}
+
 /// A solve moving some point further than this many times the sketch's size (and its largest
 /// dimension value) has thrown the geometry to a far solution.
 const FLUNG: f64 = 1000.0;
@@ -798,7 +818,7 @@ const FLUNG: f64 = 1000.0;
 /// store a sketch whose curve has been squeezed away and which can never be solved back.
 pub(crate) fn collapse_reason(before: &Sketch, after: &Sketch) -> Option<String> {
     if let Some(curve) = shrunk(before, after) {
-        return Some(format!("that would shrink {curve} to a point: its constraints can only be met without it"));
+        return Some(shrink_message(after, &curve));
     }
     if flung(before, after) {
         return Some("that would throw points of the sketch far away: its constraints have no solution near the sketch as it is".into());
@@ -905,6 +925,12 @@ fn point_is_protected(sk: &Sketch, idx: usize) -> bool {
         return true;
     };
     if pt.fixed || pt.link.is_some() || pt.exprs.is_some() {
+        return true;
+    }
+    // A block keeps its points by id, each tied to its axis.
+    if sk.blocks.iter().any(|b| b.points.iter().any(|(id, _)| *id == pt.id))
+        || sk.curves.iter().any(|c| c.kind.uses(idx) && sk.blocks.iter().any(|b| b.axis == c.id || b.curves.contains(&c.id)))
+    {
         return true;
     }
     if sk.text_exprs().into_iter().any(|(_, expr)| expr_mentions_ident(expr, &pt.id))
@@ -1769,6 +1795,8 @@ fn finish_sketch(s: &mut Session, p: &Value) -> Result<Value> {
 /// the sketch leaves them apart (#15414): one Undo then takes back one change of the sketch,
 /// not the whole session the person had drawn.
 pub(crate) fn finish_model_edit(s: &mut Session, restore: bool, fold: bool) -> Result<Value> {
+    // Leaving the sketch closes the block open in it, in the edit's last step.
+    super::sketch_block::close_on_leaving(s);
     let id = s.active_sketch.take();
     s.sketching_view = None;
     let profiles = id.and_then(|i| s.model.state().sketch(i).map(|ss| ss.profiles.len())).unwrap_or(0);
@@ -1837,6 +1865,7 @@ fn complete_edit_step(step: &mut crate::Snapshot, marker: Option<usize>) {
     use std::sync::Arc;
     let doc = Arc::make_mut(&mut step.doc);
     doc.marker = marker.filter(|m| *m < doc.features.len());
+    super::sketch_block::close_open_blocks(doc);
     step.active_sketch = None;
     step.sketching_view = None;
     step.sketch_restore_marker = None;
@@ -1886,6 +1915,7 @@ fn finish_edit_history(s: &mut Session, entry: &SketchEntry, marker: Option<usiz
         if snap.active_sketch == Some(entry.sketch) {
             let doc = Arc::make_mut(&mut snap.doc);
             doc.marker = marker.filter(|m| *m < doc.features.len());
+            super::sketch_block::close_open_blocks(doc);
             snap.active_sketch = None;
             snap.sketching_view = None;
             snap.sketch_restore_marker = None;
@@ -3331,7 +3361,7 @@ pub(super) fn apply_in_order(sk: &mut Sketch, rep: &SolveReport, first: &[Ent], 
                 return Err(bad(cmd, "that would throw points of the sketch far away: its constraints have no solution near the sketch as it is"));
             }
             if let Some(curve) = shrunk(sk, &trial) {
-                return Err(bad(cmd, format!("that would shrink {curve} to a point: its constraints can only be met without it")));
+                return Err(bad(cmd, shrink_message(&trial, &curve)));
             }
             *sk = trial;
             return Ok(());
@@ -4819,6 +4849,16 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
             }
             driven = true;
         }
+        // A closed block already holds its own sizes: with `if_redundant: "driven"`, a dimension
+        // wholly inside one at its current size measures it.
+        if !driven
+            && defines.is_none()
+            && p.get("value").is_none_or(Value::is_null)
+            && str_(p, "if_redundant").is_some_and(|m| m.eq_ignore_ascii_case("driven"))
+            && sk.locks_a_closed_block(&k)
+        {
+            driven = true;
+        }
         if driven {
             // A reference dimension: measures, no parameter.
             let name = k.name();
@@ -5477,6 +5517,13 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
         // 3D constraints and curves (#10608) go after the loop, so a curve and its own
         // constraint can be deleted together.
         let (mut wire_cons, mut wires) = (Vec::new(), Vec::new());
+        // Every member of the open block named: it is closed first, so the curves drawn in it go
+        // with it.
+        let mut ids = ids.clone();
+        if let Some(open) = sk.open_block_now().filter(|b| !b.curves.is_empty() && b.curves.iter().all(|c| ids.contains(c))).map(|b| b.id.clone()) {
+            let closed = sk.close_block(&open).map_err(|e| bad(cmd, e.to_string()))?;
+            ids.extend(closed.added);
+        }
         for id in &ids {
             if let Some(c) = sk.curve_index(id) {
                 curves.push(c);
@@ -5494,9 +5541,26 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
             } else if sk.link(id).is_some() {
                 curves.extend(sk.link_curves(id));
                 points.extend(sk.link_points(id));
+            } else if sk.blocks.iter().any(|b| &b.id == id) {
+                // A block's id explodes it: its curves stay, as plain geometry.
+                sk.explode_block(id)?;
             } else {
                 return Err(bad(cmd, format!("unknown sketch entity `{id}`")));
             }
+        }
+        super::sketch_block::refuse_open_axis(sk, &curves, &points, cmd)?;
+        // A block whose axis goes is exploded first, while its axis still gives its size.
+        let exploding: Vec<String> = sk
+            .blocks
+            .iter()
+            .filter(|b| {
+                sk.curve_index(&b.axis)
+                    .is_some_and(|a| curves.contains(&a) || sk.curves.get(a).is_some_and(|c| c.kind.point_ids().iter().any(|q| points.contains(q))))
+            })
+            .map(|b| b.id.clone())
+            .collect();
+        for b in &exploding {
+            sk.explode_block(b)?;
         }
         sk.remove_wire_constraints(&wire_cons);
         sk.remove_wires(&wires);
@@ -5735,6 +5799,7 @@ fn detach_point(s: &mut Session, p: &Value) -> Result<Value> {
         if sk.is_linked_curve(ci) {
             return Err(bad(cmd, "cannot detach a projected or linked curve; break its link first"));
         }
+        super::sketch_block::refuse_members(sk, std::slice::from_ref(&curve_id), cmd)?;
         let in_offset =
             sk.offsets.iter().any(|o| o.outputs.iter().any(|id| id == &curve_id)) || sk.freeform_offsets.iter().any(|o| o.output == curve_id);
         if in_offset {
@@ -5777,6 +5842,9 @@ fn detach_point(s: &mut Session, p: &Value) -> Result<Value> {
                     let Some((ax_a, ax_b)) = line_pts(sk, l) else { continue };
                     let Some(mir_pos) = reflect_across_line(cur_new_pos, ax_a, ax_b) else { continue };
                     let Some(mir_ci) = find_mirrored_curve(sk, cur_ci, cur_new_idx, other_pi, l, &seen_curves) else { continue };
+                    if let Some(why) = sk.curves.get(mir_ci).and_then(|c| sk.block_refusal(&c.id)) {
+                        return Err(bad(cmd, why));
+                    }
                     let other_users = sk.curves.iter().filter(|c| c.kind.uses(other_pi)).count();
                     let other_protected =
                         other_pi == 0 || sk.points.get(other_pi).is_some_and(|pt| pt.fixed || pt.link.is_some() || pt.exprs.is_some());
@@ -5821,6 +5889,7 @@ fn unlink_curve_group(s: &mut Session, p: &Value) -> Result<Value> {
         serde_json::from_value(p.get("kind").cloned().unwrap_or(Value::Null)).map_err(|_| bad(cmd, "`kind` must be `equal` or `parallel`"))?;
     let ((removed, added), info) = edit_solve(s, p, cmd, false, |sk, _| {
         let ci = sk.curve_index(&curve_id).ok_or_else(|| bad(cmd, format!("unknown curve `{curve_id}`")))?;
+        super::sketch_block::refuse_members(sk, std::slice::from_ref(&curve_id), cmd)?;
         let matches_kind = |c: &ConstraintKind| match (kind, c) {
             (CurveGroupKind::Equal, ConstraintKind::Equal { a, b }) => Some((*a, *b)),
             (CurveGroupKind::Parallel, ConstraintKind::Parallel { a, b }) => Some((*a, *b)),

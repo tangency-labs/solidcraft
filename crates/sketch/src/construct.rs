@@ -36,15 +36,19 @@
 //! line, a line at a known angle, parallel or perpendicular to a placed line); lines at a
 //! distance from a placed line (a point at a distance, a tangent circle's centre), on the side
 //! the point was on; the radius to a touch point, normal to the line; midpoints and mirrored
-//! points. A circle's radius set by its dimensions is seeded too.
+//! points; a sketch block's members at their places in the frame of its axis, and a rigid
+//! block's axis as a pair of points at its length. A circle's radius set by its dimensions, or
+//! by the block it belongs to, is seeded too.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use solidcore_record::Vec2;
+use solidcraft_geom::prelude::*;
 
+use crate::block::BlockScale;
 use crate::decompose::{Budget, Decomposition, enqueue};
-use crate::loci::{MAX_LOCI, Reading, Rel, View, place, radii, read};
-use crate::model::{Sketch, in_range};
+use crate::loci::{MAX_LOCI, Reading, Rel, View, place, radii, read_leaving_out};
+use crate::model::{Sketch, in_range, radius_in_range};
 
 /// Rounds of decomposition then propagation per seed. Each round after the first must follow a
 /// propagation that placed something, so on real sketches the loop ends after a few; this
@@ -52,8 +56,8 @@ use crate::model::{Sketch, in_range};
 const MAX_ROUNDS: usize = 16;
 
 /// Start positions for the solver: `pos[i]` is the position of point `i` when it is given or
-/// constructed, `placed_by[i]` how it was placed; `radius[k]` the radius of circle or arc `k`
-/// when its dimensions set it.
+/// constructed, `placed_by[i]` how it was placed; `radius[k]` the radius of circle, arc or
+/// ellipse `k` when its dimensions or its block set it.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct Seed {
     pub pos: Vec<Option<Vec2>>,
@@ -99,8 +103,56 @@ impl Placement {
 /// is ignored. `edits`: the solve applies edits; a drag step solves against its reference and
 /// moves only held points. `on_curve` holds the sketch's point-on-curve pairs
 /// ([`crate::solver::points_on_curves`]); the decomposition works within what is left of
-/// `budget`, and charges it.
+/// `budget`, and charges it. The block members the solve leaves out (`left_out`, per point) are
+/// not placed: the solve places them from their block's axis.
+pub(crate) fn seed_leaving_out(
+    sk: &Sketch,
+    given: &[bool],
+    reference: Option<&[Vec2]>,
+    edits: bool,
+    on_curve: &[(usize, usize)],
+    left_out: &[bool],
+    budget: &mut Budget,
+) -> Seed {
+    let mut out = seed_points(sk, given, reference, edits, on_curve, left_out, budget);
+    free_block_radii(sk, &mut out);
+    out
+}
+
+/// [`seed_leaving_out`] leaving nothing out.
+#[cfg(test)]
 pub(crate) fn seed(sk: &Sketch, given: &[bool], reference: Option<&[Vec2]>, edits: bool, on_curve: &[(usize, usize)], budget: &mut Budget) -> Seed {
+    seed_leaving_out(sk, given, reference, edits, on_curve, &[], budget)
+}
+
+/// The radii of the member circles and ellipses of each scale-free sketch block whose axis ends
+/// are placed (and built on): their share of the axis length there. A rigid block's are read with
+/// the dimensions ([`radii`]).
+fn free_block_radii(sk: &Sketch, out: &mut Seed) {
+    let built = |i: usize| out.pos.get(i).copied().flatten().filter(|_| out.placed_by.get(i).copied().flatten().is_some_and(Placement::builds));
+    let mut found = Vec::new();
+    for f in sk.frame_rows().into_iter().filter(|f| f.scale == BlockScale::Free) {
+        let (Some(o), Some(x)) = (built(f.o), built(f.x)) else { continue };
+        let length = o.dist(x);
+        found.extend(f.radii.into_iter().map(|(k, share)| (k, share * length)).filter(|(_, r)| radius_in_range(*r)));
+    }
+    for (k, r) in found {
+        if let Some(slot @ None) = out.radius.get_mut(k) {
+            *slot = Some(r);
+        }
+    }
+}
+
+/// [`seed`]'s point placement, with the radii the dimensions set.
+fn seed_points(
+    sk: &Sketch,
+    given: &[bool],
+    reference: Option<&[Vec2]>,
+    edits: bool,
+    on_curve: &[(usize, usize)],
+    left_out: &[bool],
+    budget: &mut Budget,
+) -> Seed {
     let n = sk.points.len();
     let reference = reference.filter(|r| r.len() <= n);
     let before = |i: usize| match reference.and_then(|r| r.get(i)) {
@@ -111,7 +163,7 @@ pub(crate) fn seed(sk: &Sketch, given: &[bool], reference: Option<&[Vec2]>, edit
     let pos: Vec<Option<Vec2>> = sk.points.iter().enumerate().map(|(i, p)| (is_given(i) && in_range(p.pos)).then_some(p.pos)).collect();
     let placed_by = pos.iter().map(|p| p.map(|_| Placement::Given)).collect();
     let mut out = Seed { pos, placed_by, radius: radii(sk) };
-    let reading = read(sk, &before, on_curve, &out.radius);
+    let reading = read_leaving_out(sk, &before, on_curve, &out.radius, left_out);
     let mut prop = Propagation {
         reading: &reading,
         free: (0..n).map(|i| !is_given(i)).collect(),

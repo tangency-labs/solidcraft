@@ -3117,8 +3117,10 @@ impl Entry {
             row_key: format!("s:{}", f.id),
             thing: Thing::Sketch(f.id),
             // A sketch's patterns and projections fold under it.
-            patterns: (crate::sketch_pattern_tree::has_patterns(app, f.id) || crate::sketch_link_tree::has_links(app, f.id))
-                .then(|| format!("s:{}/patterns", f.id)),
+            patterns: (crate::sketch_pattern_tree::has_patterns(app, f.id)
+                || crate::sketch_link_tree::has_links(app, f.id)
+                || crate::sketch_block_tree::has_blocks(app, f.id))
+            .then(|| format!("s:{}/patterns", f.id)),
             label: if lost {
                 solidcraft_ui_text::format("browser.sketch_attachment_lost", &[("name", &crate::i18n::tr_name(&f.name))])
             } else if active {
@@ -3880,6 +3882,7 @@ fn entry_row(
         let dim = !visible || parent_hidden;
         crate::sketch_pattern_tree::browser_rows(app, rows, *id, depth + 1, path.map(|path| (comp, path)), dim);
         crate::sketch_link_tree::browser_rows(app, rows, *id, depth + 1, dim);
+        crate::sketch_block_tree::browser_rows(app, rows, *id, depth + 1, path.map(|path| (comp, path)), dim);
     }
     if built_open && built_key.is_some() {
         features::body_rows(app, rows, acts, comp, path.unwrap_or_default(), &e.row_key, &built, depth + 1);
@@ -4065,7 +4068,8 @@ pub fn dims_overlay(app: &SolveApp, painter: &egui::Painter, proj: &crate::viewp
         let centres = chain_centres(sk);
         let n = centres.len().max(1) as f64;
         let middle = centres.iter().fold(Vec2::ZERO, |a, p| a + *p) * (1.0 / n);
-        for c in &sk.constraints {
+        let hidden = crate::sketch_block_canvas::hidden_set(sk);
+        for c in sk.constraints.iter().filter(|c| !hidden.contains(c.id.as_str())) {
             let Some(frame) = crate::dim_view::shown_frame(app.preferences.ellipse_axes, sk, &c.kind, c.text) else { continue };
             let anchor = match frame {
                 DimFrame::Linear { p0, p1, .. } => (p0 + p1) * 0.5,

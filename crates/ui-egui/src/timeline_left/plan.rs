@@ -187,7 +187,7 @@ impl RowPlan {
             .iter()
             .map(|feature| {
                 index_of.get(&feature.0).and_then(|index| doc.features.get(*index)).is_some_and(
-                    |feature| matches!(&feature.kind, solidcraft_engine::doc::FeatureKind::Sketch { sketch, .. } if !sketch.patterns.is_empty() || (app.ui.project_link_tools && sketch.links.iter().any(crate::sketch_link_tree::listed))),
+                    |feature| matches!(&feature.kind, solidcraft_engine::doc::FeatureKind::Sketch { sketch, .. } if !sketch.patterns.is_empty() || !sketch.blocks.is_empty() || (app.ui.project_link_tools && sketch.links.iter().any(crate::sketch_link_tree::listed))),
                 )
             })
             .collect();

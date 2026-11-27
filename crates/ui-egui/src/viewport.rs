@@ -1297,6 +1297,8 @@ fn sketch_color(t: &Tokens, c: Rgb) -> [u8; 4] {
         c4(t.sketch_construction)
     } else if c == colors::SKETCH_CENTERLINE {
         c4(t.sketch_centerline)
+    } else if c == colors::SKETCH_BLOCK {
+        c4(t.sketch_block)
     } else {
         rgba(c)
     }
@@ -6386,7 +6388,32 @@ pub(crate) fn sketch_constraint_at(app: &SolveApp, pos: Pos2, hit: Option<&Hit>)
     let dimension =
         crate::dim_view::hit_text(pos).or_else(|| if on_geometry { None } else { crate::dim_view::hit(pos) }).filter(|_| !off("dimensions"));
     let glyph = crate::sketch_tools::glyph_at(pos).filter(|_| !off("constraints") && !matches!(hit, Some(Hit::SketchMidpoint { .. })));
-    dimension.or(glyph).map(|id| Sel::SketchConstraint { id })
+    // What a closed block holds is not picked: it changes only with Edit Contents.
+    let held = |id: &String| app.session.active_sketch.and_then(|s| app.session.doc.sketch(s).ok()).is_some_and(|sk| sk.is_held(id));
+    dimension.filter(|id| !held(id)).or(glyph.filter(|id| !held(id))).map(|id| Sel::SketchConstraint { id })
+}
+
+/// A double-click on a curve or point of a closed block of the sketch being edited opens the block
+/// to edit its contents (true: it was on one).
+fn double_click_block_member(app: &mut SolveApp) -> bool {
+    let Some(active) = crate::sketch_view::active_sketch(app) else { return false };
+    let id = match app.viewport.hover.clone() {
+        Some(Hit::SketchCurve { sketch, id, .. } | Hit::SketchPoint { sketch, id, .. }) if sketch == active => id,
+        _ => return false,
+    };
+    let Some(block) = app.session.doc.sketch(active).ok().and_then(|sk| sk.closed_block_with(&id)).map(|b| b.id.clone()) else { return false };
+    crate::sketch_block_tree::edit_contents(app, &block);
+    true
+}
+
+/// The sketch block whose glyph is under a left-click or a context-menu click (its id), when no
+/// sketch annotation is: it yields to midpoints and follows the pick filter as constraint glyphs do.
+pub(crate) fn sketch_block_glyph_at(app: &SolveApp, pos: Pos2, hit: Option<&Hit>) -> Option<String> {
+    crate::sketch_view::active_sketch(app)?;
+    if app.ui.pick_off.iter().any(|x| x == "constraints") || matches!(hit, Some(Hit::SketchMidpoint { .. })) {
+        return None;
+    }
+    sketch_constraint_at(app, pos, hit).is_none().then(|| crate::sketch_block_canvas::glyph_at(pos)).flatten()
 }
 
 /// What a click would pick: the first hit the open dialog's active input accepts, or with no
@@ -9248,11 +9275,19 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             } else {
                 let annotation = sketch_constraint_at(app, p, cand.as_ref().map(|c| &c.0));
+                let block_glyph = sketch_block_glyph_at(app, p, cand.as_ref().map(|c| &c.0));
                 if crate::sketch_text_handles::over(app, &proj, p) || crate::plane_resize::over(app, &proj, p) {
                     // A text's resize or rotation handle, or a plane's: it stays selected.
                 } else if !crate::sketch3d::click(app, &proj, p) {
                     match annotation {
                         Some(sel) => select(app, Some(sel), add || pen_select, allow_toggle || pen_select),
+                        // A block's glyph selects its members, as its Browser row does.
+                        None if let Some(block) = block_glyph => {
+                            // One member stands for the block: picking it takes the whole block, with
+                            // Shift adding it and Ctrl toggling it as for any pick.
+                            let member = crate::sketch_block_tree::a_member(app, &block);
+                            select(app, member, add || pen_select, allow_toggle || pen_select);
+                        }
                         // Clicking again on the same spot selects the next thing under it (not
                         // the second click of a double-click, which has its own actions).
                         None if !pen_select && !add && !resp.double_clicked() && crate::select_other::cycle_click(app, &proj, p) => {}
@@ -9313,6 +9348,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             && app.dialog.is_none()
             && (crate::sketch_modify_ui::double_click_pattern(app, p)
                 || crate::dim_view::double_click(app, p)
+                || crate::sketch_block_canvas::double_click(app, p)
                 || crate::dim_view::model_double_click(app, p));
         // Double-click a text (an outline or inside a letter; the first click selected it): edit it.
         if resp.double_clicked()
@@ -9324,11 +9360,20 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             crate::sketch_text::open(app, &entity);
         }
+        // Double-click a curve or point of a closed block: Edit Contents.
+        let contents = resp.double_clicked()
+            && !pen_select
+            && !held
+            && !dim_edit
+            && app.tool.is_none()
+            && app.dialog.is_none()
+            && double_click_block_member(app);
         // Double-click a sketch curve: select the chain joined to it end to end.
         if resp.double_clicked()
             && !pen_select
             && !held
             && !dim_edit
+            && !contents
             && app.tool.is_none()
             && app.dialog.is_none()
             && let Some(Hit::SketchCurve { sketch, id, .. }) = app.viewport.hover.clone()
@@ -10399,7 +10444,7 @@ pub(crate) fn select(app: &mut SolveApp, sel: Option<Sel>, add: bool, toggle: bo
     }
     match sel {
         Some(x) => {
-            let items = picked_selection(&app.session, &x);
+            let items = crate::sketch_block_tree::whole_blocks(&app.session, picked_selection(&app.session, &x));
             // Toggle-removal: all picked items are already selected and toggle is allowed. After
             // Select All, a Ctrl+click on a body leaves every other shown body selected, so the
             // scope is named here, once, for that click.
@@ -10568,17 +10613,21 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
         }
         if !sketch_dialog && !off("dimensions") {
             for (id, r) in crate::dim_view::text_rects() {
-                if bx.takes(&[r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()]) {
+                if !ss.sketch.is_held(&id) && bx.takes(&[r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()]) {
                     out.push(Sel::SketchConstraint { id });
                 }
             }
         }
         if !sketch_dialog && !off("constraints") {
             for (id, c) in crate::sketch_tools::glyph_positions() {
-                if bx.takes(&[c]) {
+                if !ss.sketch.is_held(&id) && bx.takes(&[c]) {
                     out.push(Sel::SketchConstraint { id });
                 }
             }
+        }
+        // A closed block is taken whole or not at all, as a click takes it.
+        if app.dialog.is_none() {
+            out = crate::sketch_block_tree::box_blocks(&app.session, out, bx.crossing && !bx.is_lasso());
         }
     } else {
         // With no dialog the marquee takes what a click takes: the bodies. A design whose only
@@ -11693,6 +11742,7 @@ pub(crate) fn scene_palette(dark: bool, mode: solidcraft_theme::ColorVision) -> 
         sketch_lost: rgb(t.sketch_lost),
         sketch_construction: rgb(t.sketch_construction),
         sketch_centerline: rgb(t.sketch_centerline),
+        sketch_block: rgb(t.sketch_block),
         axes: t.axes().map(rgb),
         cap: rgb(t.section_cap),
         hatch: t.section_hatch.map(rgb),
@@ -14160,6 +14210,7 @@ mod tests {
                 (colors::SKETCH_LOST, p.sketch_lost),
                 (colors::SKETCH_CONSTRUCTION, p.sketch_construction),
                 (colors::SKETCH_CENTERLINE, p.sketch_centerline),
+                (colors::SKETCH_BLOCK, p.sketch_block),
             ] {
                 let [r, g, b, _] = sketch_color(&t, tag);
                 assert_eq!(cpu, Rgb(r, g, b), "dark {dark}, {mode:?}: the window draws {tag:?} in another colour");

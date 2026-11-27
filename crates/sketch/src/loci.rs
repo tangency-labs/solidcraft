@@ -12,17 +12,19 @@
 //!   radius of an arc (a radius or diameter, also through equal arcs and circles) as distances
 //!   from its centre to its ends, a point on a circle of known radius, concentric centres,
 //!   tangent circles of known radii (external or internal as in the reference), the centre
-//!   distance of a slot of known radii; and, on a horizontal or vertical line, a point on it,
-//!   at a distance from it, its midpoint, a point mirrored across it and a tangent circle of
-//!   known radius (its centre at the radius from the line, above or beside the touch point).
+//!   distance of a slot of known radii, the axis length of a rigid sketch block; and, on a
+//!   horizontal or vertical line, a point on it, at a distance from it, its midpoint, a point
+//!   mirrored across it and a tangent circle of known radius (its centre at the radius from the
+//!   line, above or beside the touch point).
 //!   These are invariant under translation (and rotation unless along an axis), so the
 //!   decomposition's clusters are built on them;
 //! - **ties** between more points ([`Tie`]), read where a placement has the points they are
 //!   anchored on: a point on a line or at a distance from it (a tangent circle's centre, with a
 //!   known or arc radius), the radius to a touch point normal to the line, a midpoint, a point
 //!   mirrored across a line, equal lengths, an arc's ends at one distance from its centre (and
-//!   the centre on their bisector), and a line along a direction derived from a line angle, an
-//!   angle to another line, or parallel or perpendicular to it.
+//!   the centre on their bisector), a line along a direction derived from a line angle, an
+//!   angle to another line, or parallel or perpendicular to it, and a sketch block's member at
+//!   its place in the frame of the block's axis.
 //!
 //! Signs no residual keeps (horizontal or vertical distances, distances from a line, which
 //! side of a line a tangent circle is on, internal or external tangency) come from the
@@ -35,6 +37,7 @@
 use solidcore_record::Vec2;
 use solidcraft_geom::prelude::*;
 
+use crate::block::BlockScale;
 use crate::model::{ConstraintKind, CurveKind, MAX_COORD, Sketch, in_range, radius_in_range};
 use crate::union_find::{find, union};
 
@@ -454,6 +457,19 @@ fn partner(t: usize, x: usize, y: usize) -> Option<usize> {
     }
 }
 
+/// Least share of the axis length, squared, a block member must lie from the axis end it is
+/// read against for the two to give the axis: closer, the axis would carry its rounding
+/// magnified.
+const FRAME_REACH: f64 = 1e-4;
+
+/// The block axis `d` that puts a member at `q` from an axis end where the member's place in the
+/// frame, measured from that end, is (a, b): `q = a·d + b·perp(d)`. None when the member is too
+/// close to that end to tell.
+fn frame_axis(q: Vec2, a: f64, b: f64) -> Option<Vec2> {
+    let s = a * a + b * b;
+    (s >= FRAME_REACH && s.is_finite()).then(|| (q * a - q.perp() * b) / s).filter(|d| in_range(*d))
+}
+
 /// The readings of one value: the lowest and highest read.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Span {
@@ -552,6 +568,17 @@ enum Tie {
         a: usize,
         b: usize,
     },
+    /// `p` is at (u, v) in the frame of a sketch block's axis from `o` to `x`:
+    /// `p = o + u·d + v·perp(d)`, `d = x − o`. `o` and `x` place `p`; `p` and one axis end place
+    /// the other only when `p` lies well away from the origin (not at u = v = 0), else another
+    /// rule or the numerical solve does.
+    Frame {
+        p: usize,
+        o: usize,
+        x: usize,
+        u: f64,
+        v: f64,
+    },
 }
 
 impl Tie {
@@ -572,6 +599,7 @@ impl Tie {
             Tie::Mirror { p, q, l } => [4, u(p), u(q), u(l), 0, 0],
             Tie::SameLength { p1, q1, p2, q2 } => [5, u(p1), u(q1), u(p2), u(q2), 0],
             Tie::Equidistant { c, a, b } => [6, u(c), u(a), u(b), 0, 0],
+            Tie::Frame { p, o, x, u: a, v: b } => [7, u(p), u(o), u(x), a.to_bits(), b.to_bits()],
         }
     }
 
@@ -596,7 +624,7 @@ impl Tie {
                 [p].into_iter().chain(line(l).into_iter().flatten()).chain(between.into_iter().flatten()).collect()
             }
             Tie::Normal { p, e: q, l } | Tie::Mirror { p, q, l } => [p, q].into_iter().chain(line(l).into_iter().flatten()).collect(),
-            Tie::Midpoint { p, a, b } | Tie::Equidistant { c: p, a, b } => vec![p, a, b],
+            Tie::Midpoint { p, a, b } | Tie::Equidistant { c: p, a, b } | Tie::Frame { p, o: a, x: b, .. } => vec![p, a, b],
             Tie::SameLength { p1, q1, p2, q2 } => vec![p1, q1, p2, q2],
         };
         v.sort_unstable();
@@ -774,7 +802,8 @@ fn round_of(sk: &Sketch, k: usize) -> Option<Round> {
 }
 
 /// Per curve: a circle's or arc's radius as the driving dimensions set it (also through equal
-/// circles and arcs), or a fixed or projected circle's own.
+/// circles and arcs), or a fixed or projected circle's own; a member circle's or ellipse's of a
+/// rigid sketch block, its share of the block's length.
 pub(crate) fn radii(sk: &Sketch) -> Vec<Option<f64>> {
     use ConstraintKind::*;
     let mut radii = Vec::new();
@@ -787,8 +816,14 @@ pub(crate) fn radii(sk: &Sketch) -> Vec<Option<f64>> {
             radii.push((k, r));
         }
     }
+    // A rigid block's member circles and ellipses keep their share of its length.
+    for f in sk.frame_rows().into_iter().filter(|f| f.scale == BlockScale::Fixed) {
+        radii.extend(f.radii.iter().map(|(k, share)| (*k, share * f.length)).filter(|(_, r)| radius_in_range(*r)));
+    }
     let round = |k: usize| round_of(sk, k).is_some();
-    for c in sk.constraints.iter().filter(|c| !c.driven) {
+    let held = sk.held_mask();
+    for (_, c) in sk.constraints.iter().enumerate().filter(|(i, c)| !c.driven && !held.as_ref().is_some_and(|h| h.get(*i).copied().unwrap_or(false)))
+    {
         match c.kind {
             Radius { c, value } if round(c) && radius_in_range(value) => radii.push((c, value)),
             Diameter { c, value } if round(c) && radius_in_range(value / 2.0) => radii.push((c, value / 2.0)),
@@ -805,15 +840,28 @@ fn direction(ends: Option<(usize, usize)>, pos: &dyn Fn(usize) -> Option<Vec2>) 
     (pos(b)? - pos(a)?).normalized()
 }
 
+/// [`read_leaving_out`] leaving nothing out.
+#[cfg(test)]
+pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve: &[(usize, usize)], radius: &[Option<f64>]) -> Reading {
+    read_leaving_out(sk, before, on_curve, radius, &[])
+}
+
 /// Read the driving constraints of `sk`; `before(i)` is point `i`'s position in the reference
 /// layout (`None`, or out of range: unknown, and whatever it would decide is not read);
 /// `on_curve` the sketch's point-on-curve pairs ([`crate::solver::points_on_curves`]), `radius`
-/// its radii ([`radii`]).
+/// its radii ([`radii`]). The frame ties of the block members the solve leaves out (`left_out`,
+/// per point) are not read: the solve places them from their block's axis.
 ///
 /// Every constraint on a line is read as a tie; a tie on a horizontal or vertical line is
 /// then lowered to the relations between two points it amounts to (a row, a column, an offset
 /// across it), which the decomposition builds clusters on.
-pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve: &[(usize, usize)], radius: &[Option<f64>]) -> Reading {
+pub(crate) fn read_leaving_out(
+    sk: &Sketch,
+    before: &dyn Fn(usize) -> Option<Vec2>,
+    on_curve: &[(usize, usize)],
+    radius: &[Option<f64>],
+    left_out: &[bool],
+) -> Reading {
     use ConstraintKind::*;
     let n = sk.points.len();
     let m = sk.curves.len();
@@ -830,7 +878,14 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
     let rounds: Vec<Option<Round>> = (0..m).map(|k| round_of(sk, k)).collect();
     let line = |l: usize| lines.get(l).copied().flatten();
     let round = |k: usize| rounds.get(k).copied().flatten();
-    let cons: Vec<&ConstraintKind> = sk.constraints.iter().filter(|c| !c.driven && !sk.follows_its_source(&c.kind)).map(|c| &c.kind).collect();
+    let held = sk.held_mask();
+    let cons: Vec<&ConstraintKind> = sk
+        .constraints
+        .iter()
+        .enumerate()
+        .filter(|(i, c)| !c.driven && !sk.follows_its_source(&c.kind) && !held.as_ref().is_some_and(|h| h.get(*i).copied().unwrap_or(false)))
+        .map(|(_, c)| &c.kind)
+        .collect();
     let dim = |v: f64| (v.is_finite() && (0.0..=MAX_COORD).contains(&v)).then_some(v);
 
     // Radii and lengths the dimensions set, also through equal curves.
@@ -982,6 +1037,21 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
             _ => {}
         }
     }
+    // A sketch block holds each member point at its place in the frame of its axis; a rigid
+    // block's axis keeps its length, so the axis is a rigid pair the members join.
+    for f in sk.frame_rows() {
+        let (o, x) = (f.o, f.x);
+        if o >= n || x >= n || o == x {
+            continue;
+        }
+        if f.scale == BlockScale::Fixed
+            && let Some(l0) = dim(f.length)
+        {
+            rel(o, x, Rel::Dist(l0));
+        }
+        let kept = |p: usize| p < n && !left_out.get(p).copied().unwrap_or(false);
+        ties.extend(f.points.into_iter().filter(|(p, _)| kept(*p)).map(|(p, [u, v])| Tie::Frame { p, o, x, u, v }));
+    }
     for (l, ends) in lines.iter().enumerate() {
         if let (Some((a, b)), Some(d)) = (*ends, length.get(l).copied().flatten()) {
             rel(a, b, Rel::Dist(d));
@@ -1079,7 +1149,9 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
             Tie::OnLine { p, .. } => [a, b].into_iter().for_each(|q| rel(q, p, lowered(row, None))),
             Tie::Offset { p, len: Len::Value(d), .. } => [a, b].into_iter().for_each(|q| rel(q, p, lowered(row, Some(d)))),
             Tie::Normal { p, e, .. } => rel(e, p, lowered(!row, None)),
-            Tie::Offset { .. } | Tie::Mirror { .. } | Tie::Midpoint { .. } | Tie::SameLength { .. } | Tie::Equidistant { .. } => return true,
+            Tie::Offset { .. } | Tie::Mirror { .. } | Tie::Midpoint { .. } | Tie::SameLength { .. } | Tie::Equidistant { .. } | Tie::Frame { .. } => {
+                return true;
+            }
         }
         false
     });
@@ -1352,6 +1424,20 @@ impl Reading {
                     on(c, circle(at(c)?, r), rf(c).and_then(|x| circle(x, r)))
                 }
             }
+            Tie::Frame { p, o, x, u, v } => {
+                if t == p {
+                    let (po, d) = (at(o)?, at(x)? - at(o)?);
+                    point(o.min(x), po + d * u + d.perp() * v)
+                } else if t == o {
+                    let (pp, px) = (at(p)?, at(x)?);
+                    point(p.min(x), px - frame_axis(pp - px, u - 1.0, v)?)
+                } else if t == x {
+                    let (pp, po) = (at(p)?, at(o)?);
+                    point(p.min(o), po + frame_axis(pp - po, u, v)?)
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -1386,6 +1472,13 @@ impl Reading {
             },
             Tie::Equidistant { c, a, b } => match (pos(c), pos(a), pos(b)) {
                 (Some(c), Some(a), Some(b)) => check((a.dist(c) - b.dist(c)).abs(), a.dist(c), &[c, a, b]),
+                _ => true,
+            },
+            Tie::Frame { p, o, x, u, v } => match (pos(p), pos(o), pos(x)) {
+                (Some(q), Some(a), Some(b)) => {
+                    let d = b - a;
+                    check(q.dist(a + d * u + d.perp() * v), d.len() * (1.0 + u.abs() + v.abs()), &[q, a, b])
+                }
                 _ => true,
             },
         }

@@ -1120,6 +1120,7 @@ fn spline_insert_point(s: &mut Session, p: &Value) -> Result<Value> {
     let ((point, curve), info) = edit(s, p, cmd, false, |sk, _| {
         let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?;
         let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        super::sketch_block::refuse_members(sk, &[id.to_string()], cmd)?;
         let new = match end {
             None => sk.insert_spline_point(c, at),
             Some(at_start) => sk.extend_spline(c, at, at_start),
@@ -1139,6 +1140,7 @@ fn spline_remove_point(s: &mut Session, p: &Value) -> Result<Value> {
     let point = str_(p, "point").ok_or_else(|| bad(cmd, "`point` must be one of the spline's points"))?.to_string();
     let ((point, deleted), info) = edit(s, p, cmd, false, |sk, _| {
         let c = sk.curve_index(&id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        super::sketch_block::refuse_members(sk, std::slice::from_ref(&id), cmd)?;
         let at = sk.resolve_point(&point).ok_or_else(|| bad(cmd, format!("unknown sketch point `{point}`")))?;
         let name = sk.points.get(at).map_or(point.clone(), |q| q.id.clone());
         let deleted = sk.remove_spline_point(c, at).map_err(|e| bad(cmd, e.to_string()))?;
@@ -1153,6 +1155,7 @@ fn spline_control_polygon(s: &mut Session, p: &Value) -> Result<Value> {
     let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?;
     let (out, info) = edit(s, p, cmd, false, |sk, _| {
         let curve = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        super::sketch_block::refuse_members(sk, &[id.to_string()], cmd)?;
         let sides = sk.add_spline_control_polygon(curve).map_err(|error| bad(cmd, error.to_string()))?;
         Ok((ids_of(sk, &sides), Vec::new()))
     })?;
@@ -1164,6 +1167,7 @@ fn spline_handles(s: &mut Session, p: &Value) -> Result<Value> {
     let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?.to_string();
     let (handles, info) = edit(s, p, cmd, false, |sk, _| {
         let c = sk.curve_index(&id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        super::sketch_block::refuse_members(sk, std::slice::from_ref(&id), cmd)?;
         if matches!(sk.curves.get(c).map(|x| &x.kind), Some(CurveKind::Spline { handles, .. }) if !handles.is_empty()) {
             return Err(bad(cmd, format!("`{id}` already has tangent handles")));
         }
@@ -1182,6 +1186,7 @@ fn spline_reset_handles(s: &mut Session, p: &Value) -> Result<Value> {
     let id = str_(p, "curve").ok_or_else(|| bad(cmd, "`curve` must be a spline id"))?.to_string();
     let (removed, info) = edit(s, p, cmd, false, |sk, _| {
         let c = sk.curve_index(&id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;
+        super::sketch_block::refuse_members(sk, std::slice::from_ref(&id), cmd)?;
         let (spline, handles) = match sk.curves.get(c) {
             Some(curve) => match &curve.kind {
                 CurveKind::Spline { handles, .. } => (curve.id.clone(), handles.clone()),

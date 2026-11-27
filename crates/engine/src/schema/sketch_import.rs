@@ -98,9 +98,19 @@ pub struct InsertDrawingKeys {
     /// Default: 0, every edge as drawn.
     #[serde(default)]
     pub simplify: Option<f64>,
+    /// `true` makes the curves the drawing adds one block, as `sketch.block` makes one, with Fixed
+    /// scale: they keep their shape and move and turn as one. The block's origin goes where `at`
+    /// puts the file's origin (with `align` "center", the drawing's middle; with `size_from`
+    /// "viewbox" as well, the sheet's middle) and its axis runs along `angle`, about as long as
+    /// the drawing is large. Text stays outside the block (blocks of text are not supported yet).
+    /// The reply's `block` gives the block. Default: false.
+    #[serde(default)]
+    pub block: Option<bool>,
     /// `true` puts a Fix constraint on every point the drawing adds (as `sketch.constraint.fix`
     /// does), so it stays where it is put; a circle's or ellipse's radius stays free, and text and
-    /// the points the sketch already had are not touched. Default: false.
+    /// the points the sketch already had are not touched. With `block`, only the block's two
+    /// axis ends are fixed (and any point no curve holds), which holds the whole block; Explode
+    /// Block then leaves its curves free and only the axis line fixed. Default: false.
     #[serde(default)]
     pub fixed: Option<bool>,
     /// Read only when no sketch is being edited: the plane of the new sketch, as `sketch.create`
@@ -590,6 +600,10 @@ pub struct DrawingInserted {
     /// With `fixed: true`: how many points got a Fix constraint. Left out otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fixed: Option<usize>,
+    /// With `block: true`: the block the drawing's curves became. Left out otherwise, and when
+    /// the drawing added no curves.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block: Option<InsertedBlock>,
     /// The sketch's solve afterwards; null when it was not solved.
     pub info: Option<SketchSolve>,
     /// Everything the call added to the sketch: `{points, curves, constraints, dimensions}`.
@@ -603,6 +617,19 @@ pub struct DrawingInserted {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+}
+
+/// The block an insert with `block: true` made: its id, with the axis and origin `sketch.block`
+/// also replies with.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct InsertedBlock {
+    /// The block's id.
+    pub id: String,
+    /// The block's axis, a construction line from its origin along the insert angle: constrain
+    /// it to turn the block.
+    pub axis: String,
+    /// The block's origin, the axis start: constrain it to place the block.
+    pub origin: String,
 }
 
 /// A sketch's solve, as the sketch commands report it.

@@ -37,6 +37,8 @@ pub mod colors {
     pub const SKETCH_PROJECTED: Rgb = Rgb(150, 60, 190);
     /// Linked geometry whose reference was lost.
     pub const SKETCH_LOST: Rgb = Rgb(200, 60, 90);
+    /// The curves of a sketch block and its axis, while the block is not fully constrained.
+    pub const SKETCH_BLOCK: Rgb = Rgb(0, 80, 95);
     pub const PROFILE: Rgb = Rgb(255, 196, 120);
     pub const GRID: Rgb = Rgb(196, 202, 212);
     pub const GRID_MAJOR: Rgb = Rgb(170, 178, 190);
@@ -69,7 +71,7 @@ pub struct Palette {
     pub body: Rgb,
     pub body_selected: Rgb,
     /// Sketch curves: under-constrained, fully constrained (in the active sketch), in a finished
-    /// sketch, fixed, projected, with a lost link, construction, centerline.
+    /// sketch, fixed, projected, with a lost link, construction, centerline, a block's.
     pub sketch: Rgb,
     pub sketch_fixed: Rgb,
     pub sketch_done: Rgb,
@@ -78,6 +80,7 @@ pub struct Palette {
     pub sketch_lost: Rgb,
     pub sketch_construction: Rgb,
     pub sketch_centerline: Rgb,
+    pub sketch_block: Rgb,
     /// The origin axes: X, Y, Z.
     pub axes: [Rgb; 3],
     /// What the section cap is tinted toward.
@@ -108,6 +111,7 @@ impl Palette {
         sketch_lost: colors::SKETCH_LOST,
         sketch_construction: colors::SKETCH_CONSTRUCTION,
         sketch_centerline: colors::SKETCH_CENTERLINE,
+        sketch_block: colors::SKETCH_BLOCK,
         axes: [colors::AXIS_X, colors::AXIS_Y, colors::AXIS_Z],
         cap: colors::SECTION_CAP,
         hatch: solidcraft_viewport::SECTION_HATCH,
@@ -739,21 +743,34 @@ fn sketch_lines_in(
     p: &Palette,
 ) -> Vec<(Vec<Vec3>, Rgb, bool)> {
     let mut out = Vec::new();
+    let in_block: std::collections::HashSet<&str> =
+        sk.blocks.iter().flat_map(|b| b.curves.iter().chain(std::iter::once(&b.axis))).map(String::as_str).collect();
+    // While a block is open for editing its contents, they take the block's colour and the rest
+    // of the sketch the colour of a sketch not being edited.
+    let open = if active { sk.open_contents().map(|(_, curves)| curves) } else { None };
     for (i, c) in sk.curves.iter().enumerate() {
         if !sketch_curve_visible(sk, i) {
             continue;
         }
+        let determined_now = determined.get(i).copied().unwrap_or(false);
+        let opened = open.as_ref().map(|inside| inside.get(i).copied().unwrap_or(false));
         let col = if c.link.is_some() && !sk.is_text_curve(i) {
             if sk.is_lost_curve(i) { p.sketch_lost } else { p.sketch_projected }
         } else if c.fixed {
             p.sketch_locked
+        } else if opened == Some(true) {
+            p.sketch_block
+        } else if opened == Some(false) {
+            p.sketch_done
+        } else if active && !determined_now && in_block.contains(c.id.as_str()) {
+            p.sketch_block
         } else if c.centerline {
             p.sketch_centerline
         } else if c.construction {
             p.sketch_construction
         } else if !active {
             p.sketch_done
-        } else if determined.get(i).copied().unwrap_or(false) {
+        } else if determined_now {
             p.sketch_fixed
         } else {
             p.sketch

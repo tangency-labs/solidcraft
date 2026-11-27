@@ -790,6 +790,14 @@ pub(crate) fn decode(
         {
             sketch.prune_wire_constraints();
         }
+        // A block saved open for editing its contents (the design saved while its sketch was
+        // edited) opens closed, its members as the file lists them: no sketch is edited in a
+        // design just opened.
+        if let crate::FeatureKind::Sketch { sketch, .. } = &mut feature.kind
+            && sketch.validate_blocks().is_ok()
+        {
+            sketch.close_open_blocks_as_saved();
+        }
     }
     for feature in &d.features {
         if let crate::FeatureKind::Sketch { sketch, .. } = &feature.kind {
@@ -798,6 +806,7 @@ pub(crate) fn decode(
             sketch.validate_wires().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_wire_constraints().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_patterns().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+            sketch.validate_blocks().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_periodic_splines().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_spline_knots().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
             sketch.validate_spline_handles().map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
@@ -866,6 +875,16 @@ pub(crate) fn decode(
     // Fill in what older designs (and hand-edited files) may lack; a no-op otherwise.
     normalise(&mut d, &unit_words)?;
     d.drawings = crate::drawing::in_design(drawings).map_err(|e| DocError::Invalid(format!("damaged design: {e}")))?;
+    // A drawing's sketch with a block saved open opens with it closed, as the design's do.
+    for drawing in &mut d.drawings {
+        if drawing.sketches.iter().any(|r| r.sketch.open_block_now().is_some()) {
+            for r in &mut std::sync::Arc::make_mut(drawing).sketches {
+                if r.sketch.open_block_now().is_some() {
+                    std::sync::Arc::make_mut(r).sketch.close_open_blocks_as_saved();
+                }
+            }
+        }
+    }
     d.format = format_string(FORMAT);
     d.format_pending = pending_names();
     Ok(d)

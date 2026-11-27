@@ -3497,6 +3497,10 @@ impl Session {
             }
             e => e,
         });
+        // A sketch nobody edits keeps no block open, however its edit ended: in the same step.
+        if outermost && r.is_ok() && self.replacements == replacements {
+            cmd::close_unedited(self);
+        }
         // A value typed as `name = expression` defines the user parameter `name` (#4071), in the
         // same undo step; a refused definition fails the command, which leaves the design as it was.
         let r = match r {
@@ -3851,6 +3855,8 @@ impl Session {
         }
         self.clear_selection();
         self.prune_sheet_sketch_edit();
+        // A sketch nobody edits now keeps no block open.
+        cmd::close_unedited(self);
         if self.render_only_change(&before) {
             self.refresh_render(&before.doc);
         } else if self.visibility_only_change(&before) {

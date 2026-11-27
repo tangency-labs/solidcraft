@@ -171,6 +171,25 @@ only.
   quality (see *Words with more than one meaning*); *reference* is not a construction plane;
   *phantom* is not a hidden or see-through display.
 
+### block
+
+A set of sketch curves that keeps its shape while the set as a whole moves and turns.
+
+A block has its own construction line, its axis, whose start is the block's origin. With scale
+*free*, one length dimension also sets its size and its proportions stay. The constraints wholly
+inside a block are held: kept, but not solved, while the block is closed. *Edit Contents* and
+*Explode Block* let those that still hold drive again. A block is picked
+whole; *Edit Contents* opens it to change its curves in place, and *Close Block* keeps the new
+shape in the same block.
+
+- **In SolidCraft:** `sketch.block` ("Make Block"), `sketch.explode_block`, `sketch.block_edit`,
+  `sketch.block_open` ("Edit Contents"), `sketch.block_close` ("Close Block"); the sketch's
+  `blocks` design-file key, and each block's `axis`, `scale`, `held` and `open`.
+- **Don't use:** group (the Browser and timeline folders, and the Rigid Group joint), rigid set.
+- **Elsewhere:** block, rigid group, sketch block.
+- **For translators:** not a body, a component or a folder; a block here is not a shared
+  definition with instances: copies are independent.
+
 ### body
 
 One connected solid or surface shape that features create and change.

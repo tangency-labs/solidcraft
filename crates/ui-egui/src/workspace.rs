@@ -767,7 +767,7 @@ pub const SECTIONS: &[Section] = &[
         tab: "SKETCH",
         panel: "MODIFY",
         promoted: 3,
-        ids: &["sketch.trim", "sketch.offset", "sketch.fillet", "sketch.transform", "sketch.copy", "sketch.cut", "sketch.paste"],
+        ids: &["sketch.trim", "sketch.offset", "sketch.fillet", "sketch.transform", "sketch.copy", "sketch.cut", "sketch.paste", "sketch.block"],
     },
     Section { tab: "SKETCH", panel: "PATTERN", promoted: 3, ids: &["sketch.mirror", "sketch.pattern.circular", "sketch.pattern.rectangular"] },
     Section {
@@ -787,6 +787,7 @@ pub const SECTIONS: &[Section] = &[
             "sketch.constraint.vertical",
             "sketch.construction",
             "sketch.constrainer",
+            "sketch.block",
         ],
     },
     Section {
@@ -2113,6 +2114,16 @@ mod tests {
         let construction = crate::sketch_families::family("sketch.construction_line").unwrap();
         assert_eq!(ribbon_family_label(construction), "X-Lines");
         assert_eq!(construction.label, "Construction Line");
+    }
+
+    /// Make Block sits in Sketch › Modify and in Sketch › Constrain (#4069).
+    #[test]
+    fn make_block_is_in_sketch_modify_and_constrain() {
+        let specs = solidcraft_engine::command_specs();
+        for panel in ["MODIFY", "CONSTRAIN"] {
+            let (commands, _) = layout("SKETCH", panel, &specs).unwrap();
+            assert!(commands.iter().any(|c| c.id == "sketch.block"), "SKETCH/{panel}");
+        }
     }
 
     #[test]

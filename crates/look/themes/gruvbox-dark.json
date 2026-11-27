@@ -85,6 +85,7 @@
     "sketch_projected": "#d3869b",
     "sketch_lost": "#fb4934",
     "sketch_construction": "#fe8019",
+    "sketch_block": "#8ec07c",
     "sketch_centerline": "#d65d0e",
     "bend_up": "#b8bb26",
     "bend_down": "#fe8019",

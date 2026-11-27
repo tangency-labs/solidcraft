@@ -221,8 +221,20 @@ fn run_auto(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, p: &Value, datu
     let dims = crate::params::bool_(p, "dimensions").unwrap_or(true);
     let n0 = sk.constraints.len();
     let mut trials = 0;
+    // A block keeps its shape: a relation among its members, or with its axis, would only lock
+    // its pose.
+    let blocks = sk.block_members_now(true);
+    // A block open for editing its contents: only relations among its contents, which hold it
+    // in shape once it closes; everything else stays where it is while it is open.
+    let open = sk.open_contents();
+    let outside_open = |k: &ConstraintKind| {
+        open.as_ref().is_some_and(|(points, curves)| {
+            let (ps, cs) = k.indices();
+            !(ps.iter().all(|p| points.get(*p).copied().unwrap_or(false)) && cs.iter().all(|c| curves.get(*c).copied().unwrap_or(false)))
+        })
+    };
     let mut attempt = |sk: &mut Sketch, doc: &mut solidcraft_doc::Document, k: ConstraintKind, dim: bool, dof: &mut usize| {
-        if *dof == 0 || trials >= MAX_TRIALS {
+        if *dof == 0 || trials >= MAX_TRIALS || blocks.hold(&k) || outside_open(&k) {
             return;
         }
         trials += 1;
@@ -335,7 +347,17 @@ fn auto_constrain_datum(s: &mut Session, p: &Value) -> Result<Value> {
     auto(s, p, "sketch.auto_constrain_from_datum")
 }
 fn auto_constrain_finish(s: &mut Session, p: &Value) -> Result<Value> {
-    let r = auto(s, p, "sketch.finish_auto_constrain")?;
+    let id = sketch_store::active(s);
+    let open = id.is_some_and(|id| sketch_store::read(&s.doc, id).is_ok_and(|sk| sk.open_block_now().is_some()));
+    let mut r = auto(s, p, "sketch.finish_auto_constrain")?;
+    super::sketch_block::close_on_leaving(s);
+    // Closing the block it left open changes the freedom the reply reports.
+    if open && let Some(id) = id {
+        let mut sk = sketch_store::read(&s.doc, id)?.clone();
+        let rep = super::sketch::solve_current(&mut sk, &s.doc)?;
+        r["dof"] = Value::from(rep.dof);
+        r["sketch"] = serde_json::to_value(super::sketch::solve_info(&rep)).unwrap_or(Value::Null);
+    }
     s.active_sketch = None;
     s.sketching_view = None;
     s.revision += 1;
@@ -453,6 +475,7 @@ fn toggle_driven(s: &mut Session, p: &Value) -> Result<Value> {
     let mut before = None;
     let (driven, info) = edit(s, p, cmd, true, |sk, doc| {
         let c = sk.constraints.iter().find(|c| c.id == cid).cloned().ok_or_else(|| bad(cmd, format!("no constraint `{cid}`")))?;
+        super::sketch_block::refuse_held(sk, &cid, cmd)?;
         let v = c.kind.value().ok_or_else(|| bad(cmd, format!("`{cid}` is not a dimension")))?;
         let driven = want.unwrap_or(!c.driven);
         if driven == c.driven {

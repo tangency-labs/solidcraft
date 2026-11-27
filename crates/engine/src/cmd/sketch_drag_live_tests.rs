@@ -503,3 +503,30 @@ fn untouched_spline_handles_follow_a_dragged_fit_point() {
         assert!(sk.points[*h].pos.dist(*b) < 1e-6, "a turned spline keeps its handles");
     }
 }
+
+/// #4069: dragging one member of a block, a point or a curve, live or not, moves the whole block
+/// rigidly: every pair of its points keeps its distance.
+#[test]
+fn dragging_one_member_of_a_block_moves_the_whole_block_rigidly() {
+    for (entity, live) in [("l1.start", true), ("l1.start", false), ("l3", true), ("l3", false)] {
+        let mut s = Session::default();
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [10, 5], "p1": [50, 25]}));
+        run(&mut s, "sketch.circle.center", json!({"center": [30, 15], "radius": 5}));
+        run(&mut s, "sketch.block", json!({"curves": ["l1", "l2", "l3", "l4", "c1"]}));
+        let points = ["l1.start", "l2.start", "l3.start", "l4.start", "c1.center"];
+        let spans = |s: &Session| -> Vec<f64> { points.iter().flat_map(|a| points.iter().map(move |b| pt(s, a).dist(pt(s, b)))).collect() };
+        let before = spans(&s);
+        let from = pt(&s, if entity == "l3" { "l3.start" } else { "l1.start" });
+        let to = [from.x - 12.0, from.y + 7.0];
+        let dragged = run(&mut s, "sketch.drag", json!({"entity": entity, "from": [from.x, from.y], "to": to, "live": live}));
+        if live {
+            run(&mut s, "sketch.drag_end", json!({}));
+        }
+        assert!(dragged["reached"].as_f64().unwrap() > 0.0, "{entity}: {dragged}");
+        for (a, b) in spans(&s).iter().zip(&before) {
+            assert!((a - b).abs() < 1e-9, "{entity}, live {live}: {a} != {b}");
+        }
+        assert!(pt(&s, "l1.start").dist(solidcore_record::Vec2::new(10.0, 5.0)) > 1.0, "{entity}: the block moved");
+    }
+}

@@ -72,6 +72,7 @@ struct Piece {
 
 /// Merge the lines `ids` into the first: its id and the ids of the lines that went.
 fn merge(sk: &mut Sketch, ids: &[String], cmd: &str) -> Result<(String, Vec<String>)> {
+    super::sketch_block::refuse_members(sk, ids, cmd)?;
     let mut run: Vec<usize> = Vec::new();
     for id in ids {
         let c = sk.curve_index(id).ok_or_else(|| bad(cmd, format!("unknown curve `{id}`")))?;

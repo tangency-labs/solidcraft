@@ -18,13 +18,17 @@ use solidcore_record::{Seg2, Vec2};
 use solidcraft_geom::prelude::*;
 
 use crate::decompose::Budget;
-use crate::linalg::{Mat, determined_vars, solve as lin_solve, solve_unless};
+use crate::linalg::{Mat, Reduced, solve as lin_solve, solve_unless};
 use crate::model::{ConstraintKind, CurveKind, Sketch, TwoCircles};
 #[cfg(feature = "solver-profiling")]
 use crate::profiling::{self, Decision, Phase, StopReason};
 use crate::sparse::{Normal, Pattern};
 use crate::union_find::{find, union};
 
+#[path = "carried.rs"]
+mod carried;
+#[cfg(test)]
+pub(crate) use carried::switch as carried_switch;
 #[path = "cursor.rs"]
 mod cursor;
 pub use cursor::{move_line_towards, move_point_towards};
@@ -34,7 +38,7 @@ mod lm_memo;
 
 #[path = "redundancy.rs"]
 mod redundancy;
-pub use redundancy::{CONSISTENT, constraint_residual, determined_by};
+pub use redundancy::{CONSISTENT, constraint_residual, determined_by, kind_residual};
 
 const MAX_ITERS: usize = 500;
 /// Components of at least this many unknowns solve LM's steps with the sparse factorisation
@@ -112,6 +116,10 @@ pub struct SolveReport {
     /// the solve fails without a conflicting constraint to name (#5280).
     #[serde(default)]
     pub oversized: Option<usize>,
+    /// A group too large to solve holds a sketch block: a block joins to its axis every member
+    /// point another constraint also reads.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub oversized_block: bool,
     /// The solve of the 3D constraints among drawn 3D curves (#10608), for a sketch that has
     /// drawn 3D curves. Its freedoms are not in `dof` nor its failures in `status`: those are
     /// the planar sketch's, which planar edits measure themselves by.
@@ -146,6 +154,11 @@ impl SolveReport {
     /// or else `conflict` of the constraints still violated (listed, comma-separated).
     pub fn failure(&self, conflict: impl FnOnce(&str) -> String) -> String {
         if let Some(n) = self.oversized {
+            if self.oversized_block {
+                return format!(
+                    "the sketch joins {n} unknowns (point coordinates and radii) in one connected group, more than the {MAX_COMPONENT_VARS} the solver takes at once; a block joins to its axis every point of it that another constraint also holds: constrain fewer of its points, fix both ends of its axis, or explode it"
+                );
+            }
             return format!(
                 "the sketch joins {n} unknowns (point coordinates and radii) in one connected group, more than the {MAX_COMPONENT_VARS} the solver takes at once; a pattern joins all its copies: make fewer copies, or split them over several patterns or sketches"
             );
@@ -223,13 +236,19 @@ fn layout(sk: &Sketch, hold: &Hold) -> Layout {
         })
         .collect();
     let points = n;
+    // While a block is open, the radii outside its contents stay as they are, as the points do.
+    let open = sk.open_contents().map(|(_, curves)| curves);
     let rvar = sk
         .curves
         .iter()
         .enumerate()
         .map(|(i, c)| match c.kind {
             CurveKind::Circle { .. } | CurveKind::Ellipse { .. }
-                if c.link.is_none() && !c.fixed && !hold.radii.contains(&i) && !sk.offset_circle_follows_source(i) =>
+                if c.link.is_none()
+                    && !c.fixed
+                    && !hold.radii.contains(&i)
+                    && !sk.offset_circle_follows_source(i)
+                    && open.as_ref().is_none_or(|inside| inside.get(i).copied().unwrap_or(false)) =>
             {
                 n += 1;
                 Some(n - 1)
@@ -956,8 +975,45 @@ pub fn point_along(sk: &Sketch, c: usize, at: f64) -> Option<Vec2> {
 /// touch point (better conditioned than the distance form when an end point is on the curve).
 #[derive(Debug)]
 enum Block<'a> {
-    Closure { a: usize, b: usize },
-    Arc { c: usize, a: usize, b: usize },
+    Closure {
+        a: usize,
+        b: usize,
+    },
+    Arc {
+        c: usize,
+        a: usize,
+        b: usize,
+    },
+    /// A sketch block's member point `p` at its place (u, v) in the frame of the block's axis
+    /// from `o` to `x`: `p = o + u·d + v·perp(d)`, `d = x − o`. `f`: the block, by its index
+    /// in [`Sketch::frame_rows`].
+    Frame {
+        p: usize,
+        o: usize,
+        x: usize,
+        u: f64,
+        v: f64,
+        f: usize,
+    },
+    /// A sketch block of fixed scale keeps its axis from `o` to `x` at length `l0`.
+    FrameLength {
+        o: usize,
+        x: usize,
+        l0: f64,
+    },
+    /// A sketch block member's radius (curve `r`) at `k` times the block's length: `l0` for a
+    /// block of fixed scale, else the length of its axis from `o` to `x`.
+    FrameRadius {
+        r: usize,
+        o: usize,
+        x: usize,
+        k: f64,
+        l0: Option<f64>,
+        f: usize,
+    },
+    /// The members of a sketch block that the solve leaves out (see [`carried`]): no rows, and
+    /// moving the block's axis from `o` to `x` costs LM's damping what moving them would.
+    Carried(carried::Moments),
     User(usize, &'a ConstraintKind),
     TangentAt(usize, &'a ConstraintKind, usize),
 }
@@ -966,6 +1022,10 @@ fn copy_block<'a>(b: &Block<'a>) -> Block<'a> {
     match b {
         Block::Closure { a, b } => Block::Closure { a: *a, b: *b },
         Block::Arc { c, a, b } => Block::Arc { c: *c, a: *a, b: *b },
+        Block::Frame { p, o, x, u, v, f } => Block::Frame { p: *p, o: *o, x: *x, u: *u, v: *v, f: *f },
+        Block::FrameLength { o, x, l0 } => Block::FrameLength { o: *o, x: *x, l0: *l0 },
+        Block::FrameRadius { r, o, x, k, l0, f } => Block::FrameRadius { r: *r, o: *o, x: *x, k: *k, l0: *l0, f: *f },
+        Block::Carried(m) => Block::Carried(*m),
         Block::User(i, k) => Block::User(*i, k),
         Block::TangentAt(i, k, p) => Block::TangentAt(*i, k, *p),
     }
@@ -983,6 +1043,18 @@ fn block_residuals(s: &State, b: &Block, out: &mut Vec<f64>) {
             let cc = s.p(*c);
             out.push(cc.dist(s.p(*b)) - cc.dist(s.p(*a)));
         }
+        Block::Frame { p, o, x, u, v, .. } => {
+            let origin = s.p(*o);
+            let d = s.p(*x) - origin;
+            let q = s.p(*p) - origin - d * *u - d.perp() * *v;
+            out.extend([q.x, q.y]);
+        }
+        Block::FrameLength { o, x, l0 } => out.push(s.p(*o).dist(s.p(*x)) - l0),
+        Block::FrameRadius { r, o, x, k, l0, .. } => {
+            let l = l0.unwrap_or_else(|| s.p(*o).dist(s.p(*x)));
+            out.push(s.radius_of(*r) - k * l);
+        }
+        Block::Carried(_) => {}
         Block::User(_, k) => residuals(s, k, out),
         Block::TangentAt(_, k, p) => {
             let ConstraintKind::Tangent { a, b } = **k else { return };
@@ -1178,6 +1250,11 @@ fn block_refs(sk: &Sketch, b: &Block) -> Vec<Ref> {
     match b {
         Block::Closure { a, b } => vec![P(*a), P(*b)],
         Block::Arc { c, a, b } => vec![P(*c), P(*a), P(*b)],
+        Block::Frame { p, o, x, .. } => vec![P(*p), P(*o), P(*x)],
+        Block::FrameLength { o, x, .. } => vec![P(*o), P(*x)],
+        Block::FrameRadius { r, l0: Some(_), .. } => vec![C(*r)],
+        Block::FrameRadius { r, o, x, l0: None, .. } => vec![C(*r), P(*o), P(*x)],
+        Block::Carried(m) => vec![P(m.o), P(m.x)],
         Block::User(_, k) => match **k {
             PatternPoint { p, q, center, directions, .. } => {
                 vec![P(p), P(q)].into_iter().chain(center.map(P)).chain(directions.into_iter().flatten().map(|(l, _)| L(l))).collect()
@@ -1620,7 +1697,7 @@ fn lm_run_with(
         }
         return out;
     }
-    let out = lm_compute(sk, lay, blocks, vars, x, col, max_iters, budget.as_deref_mut(), give_up);
+    let out = lm_compute(sk, lay, blocks, vars, x, col, max_iters, budget.as_deref_mut(), give_up, TOL);
     // A cancelled run, or one its budget cut, stopped part way: not its result.
     if let Some(key) = key
         && !cancelled()
@@ -1677,7 +1754,45 @@ fn run_key(
     key.finish()
 }
 
-/// [`lm_run`]'s iteration.
+/// Iterations [`polish`] takes at most.
+const POLISH_ITERS: usize = 3;
+/// What [`polish`] asks of the axis: a tenth of [`TOL`] at the members it places.
+const POLISH_SHARE: f64 = 0.1;
+/// Below this share of the component's largest coordinate a residual is rounding:
+/// [`polish`] asks no less (64 units in the last place).
+const POLISH_RESOLUTION: f64 = 64.0 * f64::EPSILON;
+
+/// A few more iterations on a component LM solved that places block members left out of the
+/// solve ([`carried`]): a member placed from its block's axis is off by the axis' error times
+/// how far it reaches ([`carried::Moments::reach`]), so the axis is solved until that is a
+/// tenth of [`TOL`], or down to the rounding of the component's coordinates. Its work
+/// counts against `budget` as LM's does. Returns the largest residual left.
+fn polish(
+    sk: &Sketch,
+    lay: &Layout,
+    blocks: &[(Block, Vec<usize>)],
+    vars: &[usize],
+    x: &mut Vec<f64>,
+    col: &[usize],
+    residual: f64,
+    budget: &mut Budget,
+) -> f64 {
+    let reach = blocks.iter().filter_map(|(b, _)| if let Block::Carried(m) = b { Some(m.reach()) } else { None }).fold(1.0_f64, f64::max);
+    let size = vars.iter().filter_map(|v| x.get(*v)).fold(1.0_f64, |s, v| s.max(v.abs()));
+    let tol = (TOL * POLISH_SHARE / reach).max(size * POLISH_RESOLUTION);
+    if !(residual >= tol) {
+        return residual;
+    }
+    if !budget.counts_numeric() {
+        return lm_compute(sk, lay, blocks, vars, x, col, POLISH_ITERS, None, false, tol).map_or(residual, |(_, r)| r);
+    }
+    let mut meter = Budget::new(if budget.numeric_stops() { budget.numeric_left().unwrap_or(0) } else { usize::MAX });
+    let out = lm_compute(sk, lay, blocks, vars, x, col, POLISH_ITERS, Some(&mut meter), false, tol);
+    budget.charge_numeric(meter.spent());
+    out.map_or(residual, |(_, r)| r)
+}
+
+/// [`lm_run`]'s iteration, until every residual is below `tol`.
 fn lm_compute(
     sk: &Sketch,
     lay: &Layout,
@@ -1688,6 +1803,7 @@ fn lm_compute(
     max_iters: usize,
     mut budget: Option<&mut Budget>,
     give_up: bool,
+    tol: f64,
 ) -> Option<(usize, f64)> {
     #[cfg(feature = "solver-profiling")]
     let _timer = profiling::timer(Phase::Lm);
@@ -1714,7 +1830,7 @@ fn lm_compute(
             profiling::finish_run(run, StopReason::Cancelled, max_abs(&r));
             return Some((it, max_abs(&r)));
         }
-        if max_abs(&r) < TOL {
+        if max_abs(&r) < tol {
             #[cfg(feature = "solver-profiling")]
             profiling::finish_run(run, StopReason::ResidualTolerance, max_abs(&r));
             return Some((it, max_abs(&r)));
@@ -1777,6 +1893,8 @@ fn lm_compute(
                 }
             })
             .collect();
+        // Block members left out of the solve weigh on their axis as they did when in it.
+        let carried = carried::damping(sk, lay, blocks, x, col, n);
         for _attempt in 0..30 {
             let linear_work = n.saturating_mul(n).saturating_mul(n).saturating_add(evaluation_work);
             if !within_budget(&mut budget, linear_work) {
@@ -1785,6 +1903,9 @@ fn lm_compute(
                 return Some((it, max_abs(&r)));
             }
             let shift: Vec<f64> = weight.iter().map(|w| lambda * w + 1e-12).collect();
+            // A member kept in the solve took `1/(1 + λ)` of its axis' move in a step and left
+            // the rest to its rows: its damping weighed `λ/(1 + λ)` of that move.
+            let carried_lambda = lambda / (1.0 + lambda);
             let rhs: Vec<f64> = g.iter().map(|v| -v).collect();
             #[cfg(feature = "solver-profiling")]
             let linear_timer = profiling::timer(Phase::LinearSolve);
@@ -1793,15 +1914,30 @@ fn lm_compute(
                 for (i, s) in shift.iter().enumerate() {
                     m.add(i, i, *s);
                 }
+                for &(i, k, w) in &carried {
+                    m.add(i, k, carried_lambda * w);
+                }
                 solve_unless(m, rhs.clone(), &mut 0.0, &cancelled)
+            };
+            // The normal matrix with the left-out members' damping, where it has any.
+            let damped = |sys: &SparseSystem| -> Option<crate::sparse::Normal> {
+                let mut normal = sys.normal.clone();
+                for &(i, k, w) in &carried {
+                    let slot = normal.slot(i, k)?;
+                    *normal.vals.get_mut(slot)? += carried_lambda * w;
+                }
+                Some(normal)
             };
             // A pivot the sparse factorisation cannot trust (a system on the edge of singular)
             // is left to the dense elimination, as every step was before.
             let step = match (&dense_a, &sparse) {
                 (Some(a), _) => dense(a),
-                (None, Some(sys)) => sys
+                (None, Some(sys)) if carried.is_empty() => sys
                     .pattern
                     .solve_bound(&sys.normal, &sys.slots, &shift, &rhs, &cancelled)
+                    .or_else(|| if cancelled() { None } else { dense(&sys.normal.dense()) }),
+                (None, Some(sys)) => damped(sys)
+                    .and_then(|normal| sys.pattern.solve_bound(&normal, &sys.slots, &shift, &rhs, &cancelled))
                     .or_else(|| if cancelled() { None } else { dense(&sys.normal.dense()) }),
                 (None, None) => None,
             };
@@ -1969,7 +2105,7 @@ pub(crate) mod edit_work_override {
 /// tolerance depends on that order.)
 #[cfg(test)]
 fn assert_dense_agrees(j: &Mat, rank: usize, determined: &[bool]) {
-    let at = |tol: f64| if j.rows > 0 { determined_vars(j, tol) } else { (vec![false; j.cols], 0) };
+    let at = |tol: f64| if j.rows > 0 { crate::linalg::determined_vars(j, tol) } else { (vec![false; j.cols], 0) };
     let dense = at(1e-7);
     if j.data.iter().any(|v| !v.is_finite()) || at(1e-10) != dense || at(1e-4) != dense {
         return;
@@ -2197,6 +2333,14 @@ const NEARBY_STEP: f64 = 1e-4;
 /// Gauss-Newton steps [`Nearby`] takes to solve the stepped pose.
 const NEARBY_ITERS: usize = 8;
 
+/// A solved pose a short step along the freedoms: which unpinned unknowns are determined there,
+/// the Jacobian there and the values.
+struct NearPose {
+    determined: Vec<bool>,
+    reduced: Reduced,
+    x: Vec<f64>,
+}
+
 /// The rank analysis of the unpinned unknowns at a solved pose a short step away along their
 /// freedoms (see [`Nearby::determined`]).
 struct Nearby<'s, 'a> {
@@ -2217,11 +2361,11 @@ impl Nearby<'_, '_> {
     /// the line stays put to first order, but the line moves in as the point slides. The count
     /// of freedoms is the same, only which unknowns they move differs; a step along them
     /// leaves the turning point and shows it. `j`, `det` and `rank`: the analysis at `x`.
-    /// `None` when there is nothing to check (no freedom, or nothing determined), the
-    /// component is too large, or the step does not solve back to the same rank.
-    fn determined(&self, sk: &Sketch, lay: &Layout, x: &[f64], j: &Mat, det: &[bool], rank: usize) -> Option<Vec<bool>> {
+    /// `None` when there is nothing to check (no freedom, or nothing determined unless
+    /// `anyway`), the component is too large, or the step does not solve back to the same rank.
+    fn determined(&self, sk: &Sketch, lay: &Layout, x: &[f64], j: &Mat, det: &[bool], rank: usize, anyway: bool) -> Option<NearPose> {
         let m = self.rest.len();
-        if m > redundancy::MAX_REDUNDANCY_VARS || rank >= m || !det.iter().any(|d| *d) {
+        if m > redundancy::MAX_REDUNDANCY_VARS || rank >= m || !(anyway || det.iter().any(|d| *d)) {
             return None;
         }
         // Weights no simple relation ties together, so the step mixes every freedom.
@@ -2244,8 +2388,9 @@ impl Nearby<'_, '_> {
                 return None;
             }
             if max_abs(&r) < TOL {
-                let (near, near_rank) = determined_vars(&jy, 1e-7);
-                return (near_rank == rank).then_some(near);
+                let reduced = Reduced::of(&jy, 1e-7);
+                let (near, near_rank) = reduced.determined();
+                return (near_rank == rank).then_some(NearPose { determined: near, reduced, x: y });
             }
             // A least-squares step, damped only enough to keep the normal equations regular.
             let mut a = Mat::zeros(m, m);
@@ -2780,8 +2925,8 @@ fn initial_x(sk: &Sketch, lay: &Layout) -> Vec<f64> {
     x
 }
 
-/// The solve's blocks in order (the curves' own relations, then the driving constraints in
-/// constraint order) with the variables each reads, and per block whether it reads a constant
+/// The solve's blocks in order (the curves' own relations, then the sketch blocks' frames, then
+/// the driving constraints not held by a sketch block, in constraint order) with the variables each reads, and per block whether it reads a constant
 /// point.
 fn build_blocks<'a>(sk: &'a Sketch, lay: &Layout, on_curve: &[(usize, usize)]) -> (Vec<(Block<'a>, Vec<usize>)>, Vec<bool>) {
     let mut raw = Vec::new();
@@ -2798,8 +2943,26 @@ fn build_blocks<'a>(sk: &'a Sketch, lay: &Layout, on_curve: &[(usize, usize)]) -
             raw.push(Block::Arc { c, a, b });
         }
     }
+    for (fi, f) in sk.frame_rows().into_iter().enumerate() {
+        let (o, x) = (f.o, f.x);
+        for (p, [u, v]) in f.points {
+            raw.push(Block::Frame { p, o, x, u, v, f: fi });
+        }
+        let l0 = (f.scale == crate::block::BlockScale::Fixed).then_some(f.length);
+        if let Some(l0) = l0 {
+            raw.push(Block::FrameLength { o, x, l0 });
+        }
+        for (r, k) in f.radii {
+            raw.push(Block::FrameRadius { r, o, x, k, l0, f: fi });
+        }
+    }
+    let held = sk.held_mask();
     for (i, c) in sk.constraints.iter().enumerate() {
-        if c.driven || matches!(c.kind, ConstraintKind::OffsetDistance { .. }) || sk.follows_its_source(&c.kind) {
+        if c.driven
+            || matches!(c.kind, ConstraintKind::OffsetDistance { .. })
+            || sk.follows_its_source(&c.kind)
+            || held.as_ref().is_some_and(|h| h.get(i).copied().unwrap_or(false))
+        {
             continue;
         }
         raw.push(match touch_point(sk, &c.kind, on_curve) {
@@ -2846,14 +3009,106 @@ fn solve_from(
     budget: &mut Budget,
 ) -> SolveReport {
     use crate::construct::switch;
+    let whole = carried_differential(sk).then(|| {
+        let mut whole = sk.clone();
+        let report = carried::switch::without(|| solve_sensed(&mut whole, hold, reference, analysis, old_values, &mut Budget::full()));
+        (whole, report)
+    });
     if !(switch::seed_on() && switch::differential_on()) {
-        return solve_sensed(sk, hold, reference, analysis, old_values, budget);
+        let with = solve_sensed(sk, hold, reference, analysis, old_values, budget);
+        if let Some((whole, without)) = whole {
+            assert_same_as_whole(sk, hold, &with, &whole, &without);
+        }
+        return with;
     }
     let mut plain = sk.clone();
     let without = switch::without_seed(|| solve_sensed(&mut plain, hold, reference, analysis, old_values, &mut Budget::full()));
     let with = solve_sensed(sk, hold, reference, analysis, old_values, budget);
     assert_same_outcome(&with, &without);
+    if let Some((whole, without)) = whole {
+        assert_same_as_whole(sk, hold, &with, &whole, &without);
+    }
     with
+}
+
+/// The points a plain solve of `sk` leaves out of the solve ([`carried`]), ascending.
+#[cfg(test)]
+pub(crate) fn left_out_points(sk: &Sketch) -> Vec<usize> {
+    let lay = layout(sk, &Hold::default());
+    let (blocks, constant) = build_blocks(sk, &lay, &points_on_curves(sk));
+    carried::carry(sk, &lay, blocks, constant).2.points()
+}
+
+/// In this crate's tests a solve of a sketch with blocks small enough to solve whole is repeated
+/// with every block member kept in the solve ([`carried`]): leaving them out must not change
+/// the outcome.
+#[cfg(test)]
+fn carried_differential(sk: &Sketch) -> bool {
+    !sk.blocks.is_empty() && carried::switch::on() && sk.points.len() <= 1_000
+}
+
+/// The outcome leaving block members out of the solve must not change (see
+/// [`carried_differential`]): status and, for a solved sketch, freedoms, and, where everything
+/// is determined, every position (to well within what the iteration solves to: the solve that
+/// keeps them holds their frame rows only to its tolerance). What is determined and redundant is
+/// compared where the solve that keeps them analysed it: a group of more than
+/// `MAX_REDUNDANCY_VARS` unknowns skips the redundancy check and the check a short way off the
+/// pose (`Nearby`), which the smaller group the members leave behind gets. The solve that keeps
+/// them may fail where the other solves (it is the larger problem for LM). A failed solve names
+/// the same conflicts and turned-over constraints.
+#[cfg(test)]
+fn assert_same_as_whole(sk: &Sketch, hold: &Hold, with: &SolveReport, whole: &Sketch, without: &SolveReport) {
+    if with.ok() && !without.ok() || without.oversized.is_some() {
+        return;
+    }
+    let names = |r: &SolveReport| {
+        let mut failing = r.failing.clone();
+        failing.sort_unstable();
+        let mut folded = r.folded.clone();
+        folded.sort_unstable();
+        (r.status, failing, folded)
+    };
+    assert_eq!(names(with), names(without), "leaving block members out changed the solve's outcome");
+    if !without.ok() {
+        return;
+    }
+    assert_eq!(with.dof, without.dof, "leaving block members out changed the freedoms");
+    if !kept_in_skips_checks(sk, hold) {
+        assert_eq!(
+            (&with.point_determined, &with.curve_determined, &with.redundant),
+            (&without.point_determined, &without.curve_determined, &without.redundant),
+            "leaving block members out changed the analysis"
+        );
+    }
+    if with.ok() && with.dof == 0 && !with.point_determined.is_empty() {
+        for (a, b) in sk.points.iter().zip(&whole.points) {
+            assert!(a.pos.dist(b.pos) < 1e-7, "left out {:?}, kept {:?}", a.pos, b.pos);
+        }
+    }
+}
+
+/// Whether the solve that keeps every block member in reads a group too large for the
+/// redundancy check and `Nearby` (more than `MAX_REDUNDANCY_VARS` unknowns).
+#[cfg(test)]
+pub(crate) fn kept_in_skips_checks(sk: &Sketch, hold: &Hold) -> bool {
+    let lay = layout(sk, hold);
+    let (blocks, _) = build_blocks(sk, &lay, &points_on_curves(sk));
+    let mut parent: Vec<usize> = (0..lay.n).collect();
+    for (_, vars) in &blocks {
+        if let Some(&first) = vars.first() {
+            for &v in vars.iter().skip(1) {
+                union(&mut parent, first, v);
+            }
+        }
+    }
+    let mut size = vec![0_usize; lay.n];
+    for v in 0..lay.n {
+        let r = find(&mut parent, v);
+        if let Some(s) = size.get_mut(r) {
+            *s += 1;
+        }
+    }
+    size.iter().any(|s| *s > redundancy::MAX_REDUNDANCY_VARS)
 }
 
 /// The outcome the constructive seed must not change (see `solve_from`).
@@ -3760,10 +4015,12 @@ fn solve_inner(
             curve_determined: Vec::new(),
             redundant: Vec::new(),
             oversized: None,
+            oversized_block: false,
             wires: None,
         };
     }
     sk.prune_patterns();
+    sk.prune_blocks();
     sk.refresh_pattern_shapes();
     place_pierced_points(sk);
     let mut orientation_before = Vec::new();
@@ -3784,6 +4041,10 @@ fn solve_inner(
     let mut x = initial_x(sk, &lay);
     let x0 = x.clone();
     let on_curve = points_on_curves(sk);
+    // The blocks, and per block whether it reads a constant point. Block members nothing else
+    // reads follow their block's axis: left out of the solve (and of the seed), placed after it.
+    let (blocks, reads_constant) = build_blocks(sk, &lay, &on_curve);
+    let (blocks, reads_constant, left_out) = carried::carry(sk, &lay, blocks, reads_constant);
     // Start from the constructed positions of the points the constraints pin down (see
     // `construct`); LM still verifies every constraint from there. A touching placement does
     // not pin a point down well and is left where it is (`Placement::anchors`). `unseeded`
@@ -3801,7 +4062,7 @@ fn solve_inner(
         let edits = reference.is_none() || old_values.is_some();
         #[cfg(feature = "solver-profiling")]
         let seed_timer = profiling::timer(Phase::Seed);
-        let seeded = crate::construct::seed(sk, &given, reference, edits, &on_curve, budget);
+        let seeded = crate::construct::seed_leaving_out(sk, &given, reference, edits, &on_curve, &left_out.point_mask(sk.points.len()), budget);
         #[cfg(feature = "solver-profiling")]
         drop(seed_timer);
         for (i, (at, how)) in seeded.pos.iter().zip(&seeded.placed_by).enumerate() {
@@ -3835,9 +4096,6 @@ fn solve_inner(
         }
     }
     nudge_line_angles(sk, &lay, &mut x);
-
-    // The blocks, and per block whether it reads a constant point.
-    let (blocks, reads_constant) = build_blocks(sk, &lay, &on_curve);
 
     carry_with_seeded(&mut x, &x0, &constructed, &blocks, &lay, sk, &on_curve);
     // The plain start, for the variables whose start the seed (or carrying along it) moved.
@@ -3963,6 +4221,11 @@ fn solve_inner(
                 iterations += its;
                 residual = r;
             }
+            // Only success matters to a status-only solve (a drag's held one): not polished.
+            if residual < ACCEPT && !give_up && sub.iter().any(|(b, _)| matches!(b, Block::Carried(_))) {
+                columns(&mut col, vars, vars);
+                residual = residual.min(polish(sk, &lay, &sub, vars, &mut x, &col, residual, budget));
+            }
         }
         // Continuation (below) solves the whole component: the pinned values belong to the new
         // values, not to the ones it steps through.
@@ -4012,16 +4275,17 @@ fn solve_inner(
         }
     }
 
+    left_out.place(sk, &lay, &mut x);
     // A cancelled solve's report is not shown: it only says whether it solved.
     let analysis = if cancelled() { Analysis::StatusOnly } else { analysis };
     // Final residuals and analysis, component by component (the Jacobian is block diagonal:
     // its rank is the sum of the components' ranks).
     #[cfg(feature = "solver-profiling")]
     let _analysis_timer = profiling::timer(Phase::Analysis);
-    let mut max_residual = 0.0_f64;
+    let mut max_residual = left_out.implied_residual(sk, &lay, &mut x);
     let mut failing: Vec<String> = Vec::new();
     let mut det = vec![false; lay.n];
-    let mut rank = 0;
+    let mut rank = if analysis == Analysis::StatusOnly { 0 } else { left_out.settle_constant(&lay, &mut det) };
     let mut redundant: Vec<String> = Vec::new();
     let mut degenerate = false;
     // Tangents whose touch-free form is violated (or whose round curve collapsed): named in
@@ -4029,10 +4293,18 @@ fn solve_inner(
     // is never `Solved` with a constraint in `failing`.
     let mut named: Vec<String> = Vec::new();
     // A component too large to solve is a failure, not an allocation.
-    let too_large = comps.iter().filter(|(_, vars, bis)| !bis.is_empty() && oversized(vars)).map(|(_, vars, _)| vars.len()).max();
+    // The largest such component: the report gives its size, and the block advice only when it
+    // holds a block.
+    let largest = comps.iter().filter(|(_, vars, bis)| !bis.is_empty() && oversized(vars)).max_by_key(|(_, vars, _)| vars.len());
+    let too_large = largest.map(|(_, vars, _)| vars.len());
     if too_large.is_some() {
         max_residual = f64::MAX;
     }
+    let oversized_block = largest.is_some_and(|(_, _, bis)| {
+        bis.iter().any(|bi| {
+            matches!(all_blocks.get(*bi), Some((Block::Frame { .. } | Block::FrameLength { .. } | Block::FrameRadius { .. } | Block::Carried(_), _)))
+        })
+    });
     let mut check = |r: &[f64], owner: &[usize], blocks: &[(Block, Vec<usize>)], failing: &mut Vec<String>| {
         max_residual = max_residual.max(max_abs(r));
         for (row, v) in r.iter().enumerate() {
@@ -4115,8 +4387,10 @@ fn solve_inner(
         columns(&mut col, &rest, vars);
         let reading = blocks_reading(&sub, &rest);
         let (_, j, _) = local_system(sk, &lay, &reading, &mut x, &col, rest.len());
-        let (rest_det, rest_rank) = if j.rows > 0 { determined_vars(&j, 1e-7) } else { (vec![false; rest.len()], 0) };
-        let nearby = Nearby { blocks: &reading, rest: &rest, col: &col }.determined(sk, &lay, &x, &j, &rest_det, rest_rank);
+        let reduced = Reduced::of(&j, 1e-7);
+        let (rest_det, rest_rank) = reduced.determined();
+        let near = Nearby { blocks: &reading, rest: &rest, col: &col };
+        let mut nearby = near.determined(sk, &lay, &x, &j, &rest_det, rest_rank, false);
         let comp_rank = pin_flags.iter().filter(|p| **p).count() + rest_rank;
         rank += comp_rank;
         // More rows than rank: some constraint may be implied by the others.
@@ -4141,6 +4415,21 @@ fn solve_inner(
                 *slot = flag && !moves;
             }
         }
+        // The block members left out that follow this component's axes: determined where its
+        // freedoms leave them, here and (as below) a short way off this pose.
+        let frames = left_out.in_component(&lay, vars);
+        if !frames.is_empty() {
+            let floating = matches!(pin, Pin::Floating(_));
+            let (added, still_while_turning) =
+                left_out.settle(&lay, &frames, floating, &carried::Pose { sk, reduced: &reduced, x: &x }, &col, rest.len(), &mut det);
+            rank += added;
+            if nearby.is_none() && still_while_turning {
+                nearby = near.determined(sk, &lay, &x, &j, &rest_det, rest_rank, true);
+            }
+            if let Some(n) = &nearby {
+                left_out.unsettle(&lay, &frames, &carried::Pose { sk, reduced: &n.reduced, x: &n.x }, &col, rest.len(), &mut det);
+            }
+        }
         #[cfg(test)]
         {
             columns(&mut col, vars, vars);
@@ -4149,7 +4438,7 @@ fn solve_inner(
             assert_dense_agrees(&j, comp_rank, &reduced);
         }
         // What the freedoms move a short way off this pose is not determined either.
-        for (v, near) in rest.iter().zip(nearby.iter().flatten()) {
+        for (v, near) in rest.iter().zip(nearby.iter().flat_map(|n| &n.determined)) {
             if !near && let Some(slot) = det.get_mut(*v) {
                 *slot = false;
             }
@@ -4286,6 +4575,7 @@ fn solve_inner(
         curve_determined,
         redundant,
         oversized: too_large,
+        oversized_block,
         wires: None,
     }
 }

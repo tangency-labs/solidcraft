@@ -1266,7 +1266,11 @@ pub fn glyph_group(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> Vec<Stri
 /// midpoints together, so it would be left floating).
 pub fn glyph_deletion(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> Vec<solidcraft_engine::Sel> {
     use solidcraft_engine::{Sel, sketch::ConstraintKind::Midpoint};
-    let group = glyph_group(sk, id);
+    // A block's own constraints are not the user's to delete here.
+    let held = crate::sketch_block_canvas::held_set(sk);
+    let all = glyph_group(sk, id);
+    let free: Vec<String> = all.iter().filter(|g| !held.contains(g.as_str())).cloned().collect();
+    let group = if free.is_empty() { all } else { free };
     let shared = match sk.constraints.iter().find(|c| c.id == id).map(|c| &c.kind) {
         Some(Midpoint { p, .. }) if group.len() > 1 => Some(*p),
         _ => None,
@@ -1290,6 +1294,11 @@ pub fn active_glyph_deletion(app: &SolveApp, id: &str) -> Vec<solidcraft_engine:
         Some(ss) => glyph_deletion(&ss.sketch, id),
         None => vec![solidcraft_engine::Sel::SketchConstraint { id: id.to_string() }],
     }
+}
+
+/// The side of the glyphs drawn this frame, in screen pixels.
+pub(crate) fn glyph_px_now() -> f32 {
+    GLYPH_PX.with(Cell::get)
 }
 
 /// The constraint glyph under a screen position (its constraint id).
@@ -1346,9 +1355,11 @@ fn selected_detach_curve(app: &SolveApp, sid: u64, sk: &solidcraft_engine::sketc
     }
     app.session.selection.iter().rev().find_map(|sel| match sel {
         solidcraft_engine::Sel::SketchCurve { id, sketch } if sketch.is_none_or(|s| s == sid) => {
-            sk.curve_index(id).filter(|&ci| !sk.is_linked_curve(ci)).map(|ci| (id.clone(), ci))
+            sk.curve_index(id).filter(|&ci| !sk.is_linked_curve(ci) && sk.block_refusal(id).is_none()).map(|ci| (id.clone(), ci))
         }
-        solidcraft_engine::Sel::SketchMidpoint { id } => sk.curve_index(id).filter(|&ci| !sk.is_linked_curve(ci)).map(|ci| (id.clone(), ci)),
+        solidcraft_engine::Sel::SketchMidpoint { id } => {
+            sk.curve_index(id).filter(|&ci| !sk.is_linked_curve(ci) && sk.block_refusal(id).is_none()).map(|ci| (id.clone(), ci))
+        }
         _ => None,
     })
 }
@@ -2701,12 +2712,14 @@ fn sketch_px_per_mm(plane: &Plane, proj: &Proj) -> Option<f32> {
 
 fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Pos2>) {
     let Some(sid) = active_sketch(app) else {
+        crate::sketch_block_canvas::clear();
         DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
         return;
     };
     // While a dimension's value is typed, the glyphs sit where that value puts their geometry.
     let st = crate::dim_view::preview_world(app).unwrap_or_else(|| crate::open_meshing::session_world(&app.session));
     let Some(ss) = st.sketch(sid) else {
+        crate::sketch_block_canvas::clear();
         DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
         return;
     };
@@ -2716,6 +2729,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
     GLYPH_PX.with(|g| g.set(glyph));
     if ss.sketch.view.hide_constraints {
         GLYPHS.with(|g| g.borrow_mut().clear());
+        crate::sketch_block_canvas::clear();
         DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
         return;
     }
@@ -2726,6 +2740,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         && !constraint_glyphs_visible_at_scale(scale, app.preferences.hide_constraint_glyphs_zoomed_out, || sketch_span_px(ss, proj))
     {
         GLYPHS.with(|g| g.borrow_mut().clear());
+        crate::sketch_block_canvas::clear();
         DETACH_PREVIEW.with(|c| *c.borrow_mut() = None);
         return;
     }
@@ -2740,7 +2755,14 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         dim_texts.iter().any(|d| d.intersects(r))
     };
     let mut placed: Vec<(String, Pos2, Pos2)> = Vec::new();
-    for c in glyph_constraints(&ss.sketch) {
+    let hidden = crate::sketch_block_canvas::hidden_set(&ss.sketch);
+    // A glyph a block hides; only a MidPoint glyph stands for a group of constraints.
+    let hides = |c: &solidcraft_engine::sketch::Constraint| match c.kind {
+        _ if hidden.is_empty() => false,
+        solidcraft_engine::sketch::ConstraintKind::Midpoint { .. } => crate::sketch_block_canvas::held(&hidden, &glyph_group(&ss.sketch, &c.id)),
+        _ => hidden.contains(c.id.as_str()),
+    };
+    for c in glyph_constraints(&ss.sketch).filter(|c| !hides(c)) {
         for (at, dir) in glyph_anchors(&ss.sketch, &c.kind) {
             let Some(base) = proj.to_screen(ss.plane.to_world(at)) else { continue };
             // The entity's direction on screen, and its side.
@@ -2796,6 +2818,7 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
             }
         }
     }
+    let held = crate::sketch_block_canvas::held_set(&ss.sketch);
     let mut drawn: Vec<(String, Pos2)> = Vec::new();
     for (id, sp, base) in &placed {
         let Some(c) = ss.sketch.constraints.iter().find(|c| &c.id == id) else { continue };
@@ -2812,6 +2835,8 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
             tk.accent
         } else if redundant {
             tk.glyph_text.gamma_multiply(0.45)
+        } else if crate::sketch_block_canvas::held(&held, &group) {
+            tk.glyph_text.gamma_multiply(crate::sketch_block_canvas::HELD_FADE)
         } else {
             tk.glyph_text
         };
@@ -2839,6 +2864,8 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
         }
         drawn.push((id.clone(), *sp));
     }
+    let taken: Vec<Pos2> = drawn.iter().map(|(_, p)| *p).collect();
+    let block_label = crate::sketch_block_canvas::paint(app, ss, painter, proj, glyph, hover, &taken);
     // Simulated coincident break-off glyph (selected curve + hovered shared endpoint).
     let mut detach_tooltip: Option<(egui::Rect, String)> = None;
     let next_detach = resolve_detach_target(app, sid, &ss.sketch, hover, scale).and_then(|(curve_id, pi, point_id)| {
@@ -2879,22 +2906,18 @@ fn glyphs(app: &SolveApp, painter: &egui::Painter, proj: &Proj, hover: Option<Po
     });
     DETACH_PREVIEW.with(|c| *c.borrow_mut() = next_detach);
 
-    if let (Some((anchor_rect, label)), Some(h)) = (detach_tooltip, hover) {
-        let g =
-            painter.layout(label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small), tk.text, glyph_label_wrap_width(proj.rect));
-        let chip = glyph_label_rect(h, anchor_rect, g.size() + egui::vec2(6.0, 6.0), proj.rect);
-        crate::scenario::publish_rect("sketch:glyph_label", chip);
-        painter.rect_filled(chip, tk.radius_sm.saturating_sub(1), tk.panel);
-        painter.with_clip_rect(chip.intersect(painter.clip_rect())).galley(chip.min + egui::vec2(3.0, 3.0), g, tk.text);
-    } else if let (Some((id, at_glyph)), Some(h)) = (hovered_at, hover)
-        && let Some(c) = ss.sketch.constraints.iter().find(|c| c.id == id)
-    {
+    let constraint_label = hovered_at.and_then(|(id, at_glyph)| {
+        let c = ss.sketch.constraints.iter().find(|c| c.id == id)?;
         let ids = glyph_group(&ss.sketch, &id).join(", ");
         let label = if ss.report.redundant.contains(&id) {
             format!("{} ({ids}), redundant: already implied by other constraints", c.kind.name())
         } else {
             format!("{} ({ids})", c.kind.name())
         };
+        Some((label, at_glyph))
+    });
+    let detach_label = detach_tooltip.map(|(rect, label)| (label, rect.center()));
+    if let (Some((label, at_glyph)), Some(h)) = (detach_label.or(constraint_label).or(block_label), hover) {
         // Wrapped to the view's width so a narrow view never clips it (#10794).
         let g =
             painter.layout(label, egui::FontId::proportional(solidcraft_theme::Tokens::get().font_small), tk.text, glyph_label_wrap_width(proj.rect));

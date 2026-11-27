@@ -160,6 +160,11 @@ pub enum Target {
         sketch: u64,
         link: String,
     },
+    /// A block listed under its sketch.
+    SketchBlock {
+        sketch: u64,
+        block: String,
+    },
 }
 
 /// A command entry: label, icon, shortcut and enablement come from the registry.
@@ -679,6 +684,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Canvas { id } => crate::browser::canvas_items(app, *id),
         Target::PointCloud { id } => crate::browser::point_cloud_items(app, *id),
         Target::SketchLink { sketch, link } => sketch_link_items(app, *sketch, link),
+        Target::SketchBlock { sketch, block } => sketch_block_row_items(app, *sketch, block),
         Target::Origin => crate::browser::origin_items(app),
         Target::NamedViews => vec![act("ui.newView", "New Named View", "perspective")],
         Target::ViewGizmo => crate::view_gizmo::menu_items(app),
@@ -1913,6 +1919,44 @@ fn sketch_link_items(app: &SolveApp, sketch: u64, link: &str) -> Vec<Item> {
     v
 }
 
+/// A block's row in the Browser: Edit Block opens its sketch if need be; the others work on the
+/// sketch being edited. Delete Block deletes its members, which takes the block and its axis (an
+/// open block is closed first, so the curves drawn in it go too).
+fn sketch_block_row_items(app: &SolveApp, sketch: u64, block: &str) -> Vec<Item> {
+    let Ok(sk) = app.session.doc.sketch(sketch) else { return Vec::new() };
+    let Some(b) = sk.blocks.iter().find(|b| b.id == block) else { return Vec::new() };
+    let editing = app.session.active_sketch == Some(sketch);
+    let mut v = block_items(app, sketch, block, editing);
+    v.push(Item::sep());
+    v.push(cmd(app, "sketch.delete", "Delete Block").with(json!({"entities": b.curves})).on(editing));
+    v
+}
+
+/// Edit Block, Edit Contents (Close Block while it is open), Select Block, Show or Hide its
+/// constraints and dimensions, and Explode Block for block `block` of `sketch`.
+fn block_items(app: &SolveApp, sketch: u64, block: &str, editing: bool) -> Vec<Item> {
+    let one = json!({"sketch": sketch, "block": block});
+    let found = app.session.doc.sketch(sketch).ok().and_then(|sk| sk.blocks.iter().find(|b| b.id == block));
+    let open = found.is_some_and(|b| b.is_open());
+    let shown = found.is_some_and(|b| b.show_held);
+    let mut show = cmd(app, "sketch.block_edit", if shown { "Hide Constraints and Dimensions" } else { "Show Constraints and Dimensions" })
+        .with(json!({"sketch": sketch, "block": block, "show_constraints": !shown}))
+        .on(editing);
+    show.icon = "dimension".into();
+    let contents = if open {
+        act("ui.closeBlock", "Close Block", "c_block").with(one.clone()).on(editing)
+    } else {
+        act("ui.editContents", "Edit Contents", "c_block").with(one.clone())
+    };
+    vec![
+        act("ui.editBlock", "Edit Block", "c_block").with(one.clone()).on(!open),
+        contents,
+        act("ui.selectBlock", "Select Block", "c_block").with(one).on(editing),
+        show,
+        cmd(app, "sketch.explode_block", "Explode Block").with(json!({"block": block})).on(editing),
+    ]
+}
+
 /// The links (projections, not text) owning the selected sketch entities.
 fn selected_links(sk: &solidcraft_engine::sketch::Sketch, ents: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
@@ -2073,6 +2117,11 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
             v.push(act("ui.editSketchPattern", "Edit Sketch Pattern", "sketch_circ_pattern").with(json!({"pattern":pattern.id})));
         }
     }
+    // The block of the first selected member or axis line.
+    let in_block = curves.iter().find_map(|c| ss.sketch.block_of(c));
+    if let Some(block) = in_block {
+        v.extend(block_items(app, sid, &block.id, true));
+    }
     if crate::sketch_text::selected_entity(app).is_some() {
         v.push(cmd(app, "sketch.edit_text", "Edit Text"));
         v.extend(explode_text(app));
@@ -2113,6 +2162,10 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         .collect();
     if !lines.is_empty() {
         v.push(cmd(app, "sketch.infinite", "Infinite Line").with(json!({ "curves": lines })));
+    }
+    // Curves in no block can make one: Make Block as the ribbon starts it, with the selection.
+    if in_block.is_none() && curves.len() >= 2 {
+        v.push(cmd(app, "sketch.block", "Make Block"));
     }
     // #20317: lines joined end to end on one straight line become one. The whole selection goes,
     // so an arc in it is refused rather than left out.
@@ -2472,6 +2525,36 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.editEquationCurve" => {
             if let Some(id) = p.get("curve").and_then(Value::as_str) {
                 crate::sketch_modify_ui::edit_equation(app, id);
+            }
+        }
+        "ui.editBlock" => {
+            if let (Some(sketch), Some(block)) = (p.get("sketch").and_then(Value::as_u64), p.get("block").and_then(Value::as_str)) {
+                if app.session.active_sketch != Some(sketch) {
+                    app.edit_sketch(sketch);
+                }
+                if app.session.active_sketch == Some(sketch) {
+                    crate::sketch_modify_ui::edit_block(app, block);
+                }
+            }
+        }
+        "ui.editContents" => {
+            if let (Some(sketch), Some(block)) = (p.get("sketch").and_then(Value::as_u64), p.get("block").and_then(Value::as_str)) {
+                if app.session.active_sketch != Some(sketch) {
+                    app.edit_sketch(sketch);
+                }
+                if app.session.active_sketch == Some(sketch) {
+                    crate::sketch_block_tree::edit_contents(app, block);
+                }
+            }
+        }
+        "ui.closeBlock" => {
+            if let Some(block) = p.get("block").and_then(Value::as_str) {
+                crate::sketch_block_tree::close_contents(app, block);
+            }
+        }
+        "ui.selectBlock" => {
+            if let Some(block) = p.get("block").and_then(Value::as_str) {
+                crate::sketch_block_tree::select_members(app, block);
             }
         }
         "ui.editSketchPattern" => {
@@ -3420,6 +3503,11 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     crate::select_other::close(app);
     if let Some(sel) = crate::viewport::sketch_constraint_at(app, at, app.viewport.hover.as_ref()) {
         select_under(app, at, before, sel);
+    } else if let Some(sketch) = app.session.active_sketch
+        && let Some(block) = crate::viewport::sketch_block_glyph_at(app, at, app.viewport.hover.as_ref())
+    {
+        // A block's glyph opens the block's menu, as its Browser row does.
+        return open_for(app, at, Target::SketchBlock { sketch, block });
     } else if app.session.active_sketch.is_none()
         && let Some(h) = app.viewport.hover.clone()
         && let Some((_, sel)) = crate::viewport::candidate(app, &[h])
@@ -3625,6 +3713,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
             doc.feature(*id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }))
         }
         Target::SketchLink { sketch, link } => doc.sketch(*sketch).is_ok_and(|sk| sk.link(link).is_some()),
+        Target::SketchBlock { sketch, block } => doc.sketch(*sketch).is_ok_and(|sk| sk.blocks.iter().any(|b| &b.id == block)),
         // Construction geometry, as the browser's Construction folder lists it.
         Target::Plane { id } => doc.feature(*id).is_some_and(|f| f.kind.is_construction()),
         Target::Feature { id } => feature(*id),

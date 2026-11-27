@@ -76,6 +76,9 @@ pub struct Place {
     /// The middle of the drawing's box in the file's own coordinates, when it could be read.
     pub middle: Option<(f64, f64)>,
     pub align: Align,
+    /// The drawing comes in as one block (`sketch.insert_svg`'s `block`): its curves keep their
+    /// shape about an origin at the placed point, its axis along the angle.
+    pub block: bool,
 }
 
 /// The dots per inch an SVG's pixels are read at unless the dialog says otherwise.
@@ -230,6 +233,7 @@ fn open_with_bounds(app: &mut SolveApp, command: &str, path: String, bounds: Opt
         auto_value,
         middle,
         align: Align::Middle,
+        block: false,
     };
     app.dialog = Some(Dialog::new(Kind::InsertDrawing(place), Vec::new()));
 }
@@ -369,6 +373,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, p: &mut Place) {
         let r = crate::ui_kit::number_field(ui, &mut p.angle, -360.0..=360.0, 1.0, "\u{b0}");
         crate::scenario::publish_handle("dialog:insert:angle", r.rect.center());
     });
+    // The label sits beside the box: as a row label it would widen the label column for every row.
+    form_row(ui, "", |ui| {
+        let r = crate::ui_kit::checkbox(ui, solidcraft_ui_text::tr("ui.insert_as_block"), &mut p.block)
+            .backing_on_hover_text(solidcraft_ui_text::tr("ui.insert_as_block_tip"));
+        crate::scenario::publish_handle("dialog:insert:block", r.rect.center());
+    });
     crate::ui_kit::with_row_label_tooltip(ui, solidcraft_ui_text::tr("ui.insert_simplify_tip"), |ui| {
         form_row(ui, solidcraft_ui_text::tr("ui.insert_simplify"), |ui| {
             // Auto: the engine's smallest distance at which the drawing fits the sketch (worked
@@ -432,6 +442,10 @@ pub fn preview_placement(p: &Place, cmds: &mut [(String, Value)]) {
         // file-unit gap. The preview keeps every end as drawn instead, rather than showing a
         // join the confirmed sketch may not make; the gaps it shows are at most the tolerance.
         params["tolerance"] = json!(MIN_TOLERANCE_MM);
+        // The preview is the drawing alone: a block's axis takes its length from the placed size.
+        if let Some(map) = params.as_object_mut() {
+            map.remove("block");
+        }
     }
 }
 
@@ -447,6 +461,9 @@ pub fn commands(p: &Place) -> Result<Vec<(String, Value)>, String> {
         return Err("the angle must be a number".into());
     }
     let mut params = json!({"path": p.path, "at": [p.x, p.y], "scale": p.scale, "angle": p.angle, "align": p.align.word(), "simplify": p.simplify});
+    if p.block {
+        params["block"] = json!(true);
+    }
     if !p.command.ends_with("dxf") && p.dpi != DEFAULT_DPI {
         if !(p.dpi.is_finite() && (1.0..=10000.0).contains(&p.dpi)) {
             return Err("the resolution must be from 1 to 10000 dpi".into());
@@ -460,6 +477,7 @@ pub fn commands(p: &Place) -> Result<Vec<(String, Value)>, String> {
 mod tests {
     use super::*;
     use crate::scenario::{Harness, handle_at};
+    use solidcraft_engine::geom::prelude::*;
 
     fn svg_file(name: &str) -> String {
         svg_text_file(
@@ -601,6 +619,7 @@ mod tests {
             dpi: DEFAULT_DPI,
             measured_dpi: DEFAULT_DPI,
             simplify: 0.0,
+            block: false,
             auto: false,
             auto_value: None,
         };
@@ -646,6 +665,7 @@ mod tests {
             dpi: DEFAULT_DPI,
             measured_dpi: DEFAULT_DPI,
             simplify: 0.0,
+            block: false,
             auto: false,
             auto_value: None,
         };
@@ -957,6 +977,52 @@ mod tests {
         assert!(((lo_x + hi_x) / 2.0 - 5.0).abs() < 1e-6 && ((lo_y + hi_y) / 2.0 + 3.0).abs() < 1e-6, "about its middle");
     }
 
+    /// #22102: the Insert as block box makes OK bring the drawing in as one block, its origin at
+    /// X and Y and its axis along the angle; the preview still shows the drawing alone and moves
+    /// it without importing it again.
+    #[test]
+    fn insert_as_block_brings_the_drawing_in_as_one_block() {
+        let mut h = Harness::new();
+        h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+        h.settle();
+        open(&mut h.app, "sketch.insert_svg", svg_file("as-block.svg"));
+        h.frames(4);
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| &d.kind) else { panic!("the placement is open") };
+        assert!(!p.block, "it opens off");
+        assert!(commands(p).unwrap()[0].1.get("block").is_none(), "and asks for no block");
+        h.step(&json!({"click": {"handle": "dialog:insert:block"}})).unwrap();
+        h.frames(2);
+        let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_ref().map(|d| d.kind.clone()) else { panic!("still open") };
+        assert!(p.block, "the box is ticked");
+        let mut shown = commands(&p).unwrap();
+        assert_eq!(shown[0].1["block"], json!(true));
+        preview_placement(&p, &mut shown);
+        assert!(shown[0].1.get("block").is_none(), "the preview is the drawing alone: {}", shown[0].1);
+        h.step(&json!({"until": {"count": {"name": "sketch_preview_curves", "value": 4}}})).unwrap();
+        h.frame();
+        let last = h.app.preview.ms;
+        if let Some(Kind::InsertDrawing(p)) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            (p.x, p.y, p.angle) = (5.0, -3.0, 30.0);
+        }
+        h.frame();
+        assert!(!h.app.preview.busy && h.app.preview.ms == last, "the preview is moved, not imported again");
+        assert_eq!(h.app.preview.sketches[0].curves.len(), 4);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+        let st = h.app.session.world_state().unwrap();
+        let sk = &st.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
+        assert_eq!(sk.blocks.len(), 1);
+        assert_eq!(sk.blocks[0].curves.len(), 4, "the rectangle's four lines");
+        let axis = sk.curve_index(&sk.blocks[0].axis).unwrap();
+        let Some(solidcraft_engine::sketch::Shape::Line { a, b }) = sk.shape(axis) else { panic!("the axis is a line") };
+        assert!(a.dist(Vec2::new(5.0, -3.0)) < 1e-6, "the origin is the drawing's middle, at X and Y: {a:?}");
+        assert!(((b - a).angle() - 30f64.to_radians()).abs() < 1e-9, "along the angle: {:?}", b - a);
+        h.app.run("edit.undo", json!({})).unwrap();
+        h.settle();
+        assert!(lines(&h).is_empty(), "one undo removes the drawing and its block");
+    }
+
     /// The drawing's handles in the viewport edit the same values: a corner scales about the
     /// opposite one, the box moves, and the knob turns.
     #[test]
@@ -1014,6 +1080,7 @@ mod tests {
             auto_value: None,
             middle: None,
             align: Align::Middle,
+            block: false,
         };
         assert!(commands(&svg).unwrap()[0].1.get("dpi").is_none(), "96 dpi is what the command does without one");
         assert_eq!(commands(&Place { dpi: 72.0, ..svg.clone() }).unwrap()[0].1["dpi"], json!(72.0));
@@ -1078,6 +1145,7 @@ mod tests {
             middle: None,
             align: Align::Middle,
             simplify: 0.0,
+            block: false,
         };
         assert!(commands(&bad).is_err());
         h.step(&json!({"key": "Escape"})).unwrap();

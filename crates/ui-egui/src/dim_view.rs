@@ -728,6 +728,16 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
     let Some(d) = id.and_then(|id| DRAWN.with(|d| d.borrow().iter().find(|x| x.id == id).cloned())) else {
         return false;
     };
+    // A dimension a closed block holds changes only with Edit Contents.
+    let holder = app
+        .session
+        .active_sketch
+        .and_then(|s| app.session.doc.sketch(s).ok())
+        .and_then(|sk| sk.blocks.iter().find(|b| b.held.contains(&d.id)).map(crate::sketch_block_tree::label));
+    if let Some(name) = holder {
+        app.set_status(solidcraft_ui_text::format("ui.block_held_dimension", &[("name", &name)]), false);
+        return true;
+    }
     let (param, expr, driven) = match d.param {
         Some(param) => {
             let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
@@ -1213,8 +1223,10 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     // Text boxes already drawn this frame, in draw order: a later dimension that would land
     // on one of them steps clear of it (#44).
     let mut placed: Vec<Rect> = Vec::new();
+    let held = crate::sketch_block_canvas::held_set(&ss.sketch);
+    let hidden = crate::sketch_block_canvas::hidden_set(&ss.sketch);
     for (source, c, is_draft) in constraints {
-        if ss.sketch.view.hide_dimensions && !is_draft {
+        if !is_draft && (ss.sketch.view.hide_dimensions || hidden.contains(c.id.as_str())) {
             continue;
         }
         let sk = &source.sketch;
@@ -1238,6 +1250,9 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
             crate::viewport::Conflict::glyph_colour(app, &tk)
         } else if is_sel(&c.id) || hover.as_deref() == Some(c.id.as_str()) {
             tk.accent
+        } else if !is_draft && held.contains(c.id.as_str()) {
+            // A block holds it: kept, not solved, until the block is exploded.
+            crate::prefs::dimension_colour(&app.preferences, c.driven).gamma_multiply(crate::sketch_block_canvas::HELD_FADE)
         } else {
             crate::prefs::dimension_colour(&app.preferences, c.driven)
         };

@@ -358,6 +358,8 @@ mod sketch3d_frame_ui_tests;
 mod sketch_attachment_ui;
 #[cfg(test)]
 mod sketch_attachment_ui_tests;
+mod sketch_block_canvas;
+mod sketch_block_tree;
 mod sketch_construction;
 mod sketch_cursor_readout;
 pub mod sketch_dims;

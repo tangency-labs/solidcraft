@@ -238,6 +238,7 @@ fn check_payload(record: &SheetSketch) -> Result<()> {
     )?;
     require(sk.equations.is_empty(), || "not supported yet: sheet sketch equations".into())?;
     require(!sk.view.three_d && !sk.view.slice, || "model-only sketch view is not a sheet sketch".into())?;
+    sk.validate_blocks().map_err(|e| invalid(format!("blocks: {e}")))?;
     let origin = sk.points.first().ok_or_else(|| invalid("missing sketch origin"))?;
     require(origin.id == "origin" && origin.pos == Vec2::ZERO && origin.fixed && origin.link.is_none() && origin.exprs.is_none(), || {
         "sheet sketch point zero must be its fixed local origin".into()
