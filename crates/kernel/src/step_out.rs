@@ -106,11 +106,18 @@ pub fn step_export_bodies(bodies: &[ExportBody], header: &StepHeader) -> Result<
 
 /// [`step_export_bodies`] with each source record face's written STEP entity id.
 pub fn step_export_bodies_with_face_ids(bodies: &[ExportBody], header: &StepHeader) -> Result<StepExport> {
+    step_export_bodies_with_face_names(bodies, header, |_, _| String::new())
+}
+
+/// Flat STEP export with names on individual faces, addressed by body and source record index.
+pub fn step_export_bodies_with_face_names(
+    bodies: &[ExportBody], header: &StepHeader, face_name: impl Fn(usize, usize) -> String,
+) -> Result<StepExport> {
     let _span = solidcraft_profile::span("kernel", "step_export_bodies");
     for b in bodies {
         b.body.require_brep("STEP export")?;
     }
-    let written = product::bodies_with_face_ids(bodies.iter().map(export_body).collect(), &product_header(header)).map_err(kernel_error)?;
+    let written = product::bodies_with_face_names(bodies.iter().map(export_body).collect(), &product_header(header), face_name).map_err(kernel_error)?;
     let face_ids = written.face_ids.into_iter().next().ok_or_else(|| KernelError::Failed("STEP export omitted its product face map".into()))?;
     Ok(StepExport { text: written.text, face_ids })
 }

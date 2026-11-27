@@ -14,7 +14,7 @@ use crate::schema::{ParamCheck, input_schema_for, output_schema_for};
 
 #[test]
 fn schemas_and_the_key_check_agree() {
-    assert_keys(input_schema_for::<ExportStepParams>(), &["bodies", "path"]);
+    assert_keys(input_schema_for::<ExportStepParams>(), &["bodies", "face_names", "path"]);
     assert_keys(input_schema_for::<ExportMeshParams>(), &["bodies", "chord", "path", "quality"]);
     assert_keys(input_schema_for::<ExportStlParams>(), &["ascii", "bodies", "chord", "lay_on_print_faces", "path", "quality", "solids"]);
     assert_keys(input_schema_for::<Export3mfParams>(), &["bodies", "chord", "lay_on_print_faces", "objects", "path", "quality"]);

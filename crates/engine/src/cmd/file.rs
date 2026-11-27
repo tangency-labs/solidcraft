@@ -210,7 +210,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .contract(&EXPORT_STEP_CONTRACT)
         .output(crate::schema::output_schema_for::<crate::schema::file::ExportResult>)
-        .params("path; bodies?: [names] (default: every body; a design with components then exports as a STEP assembly) → {path, bytes, format}: STEP, whatever the path's extension"),
+        .params("path; bodies?: [names] (default: every body; a design with components then exports as a STEP assembly); face_names?: {body: {persistent_face_name: export_name}}; for an assembly, list the placed bodies for flat export → {path, bytes, format}: STEP, whatever the path's extension"),
     CommandSpec::new("file.stl_to_step", "Convert STL to STEP", crate::checked!("file.stl_to_step", stl_to_step))
         .any_part()
         .icon("export")
@@ -3716,7 +3716,20 @@ fn export_with_plugin(s: &mut Session, cmd: &str, path: &str, exporter: &crate::
 fn export_step(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "file.export_step";
     let path = path_arg(p, cmd)?;
-    export_to(s, cmd, path, Format::Step, &string_list(cmd, p, "bodies")?, &[], solidcraft_io::MeshQuality::default(), true)
+    let bodies = string_list(cmd, p, "bodies")?;
+    if let Some(value) = p.get("face_names") {
+        let names: solidcraft_io::StepFaceNames = serde_json::from_value(value.clone()).map_err(|e| bad(cmd, format!("face_names: {e}")))?;
+        if !names.is_empty() {
+            if bodies.is_empty() && !s.doc.occurrences.is_empty() {
+                return Err(bad(cmd, "supply bodies to export named faces in a flat STEP file for an assembly"));
+            }
+            let file_name = std::path::Path::new(path).file_name().map(|v| v.to_string_lossy().into_owned()).unwrap_or_else(|| s.doc.name.clone());
+            let bytes = solidcraft_io::export_named_step(&s.doc.painted(&*s.world_state()?), &bodies, &names, file_name, &s.doc.metadata)?;
+            solidcraft_io::vfs::write(path, &bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+            return Ok(json!({"path":path,"bytes":bytes.len(),"format":"Step"}));
+        }
+    }
+    export_to(s, cmd, path, Format::Step, &bodies, &[], solidcraft_io::MeshQuality::default(), true)
 }
 
 fn export_stl(s: &mut Session, p: &Value) -> Result<Value> {
@@ -4723,6 +4736,24 @@ mod tests {
         other.follow_file_rename("opfs://Plate.solidcraft", "opfs://Bracket.solidcraft");
         assert_eq!(other.path.as_deref(), Some("opfs://Other.solidcraft"));
         assert_eq!(other.doc.name, "Other");
+    }
+
+    #[test]
+    fn step_exports_shared_face_labels_and_refuses_missing_references_before_writing() {
+        let path = std::env::temp_dir().join(format!("solidcraft-named-faces-{}.step", std::process::id()));
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 20, "height": 30, "body_name": "Air"})).unwrap();
+        let faces = s.execute("model.faces", &json!({"body": "Air"})).unwrap();
+        let first = faces["faces"][0]["name"].as_str().unwrap();
+        let second = faces["faces"][1]["name"].as_str().unwrap();
+        s.execute("file.export_step", &json!({"path":path, "face_names":{"Air":{(first):"outer",(second):"outer"}}})).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert_eq!(text.matches("ADVANCED_FACE('outer',").count(), 2);
+        assert_eq!(text.matches("ADVANCED_FACE('',").count(), 4);
+        let err = s.execute("file.export_step", &json!({"path":path,"face_names":{"Air":{"missing":"wall"}}})).unwrap_err();
+        assert!(err.to_string().contains("missing"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+        std::fs::remove_file(path).unwrap();
     }
 
     /// `solids: face` writes one named ASCII STL solid per B-rep face, named by the face's

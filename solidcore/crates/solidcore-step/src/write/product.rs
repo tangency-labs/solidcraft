@@ -568,10 +568,19 @@ pub fn bodies(bodies: Vec<ExportBody<'_>>, header: &Header) -> Result<String> {
 ///
 /// As [`products`].
 pub fn bodies_with_face_ids(bodies: Vec<ExportBody<'_>>, header: &Header) -> Result<Exported> {
+    bodies_with_face_names(bodies, header, |_, _| String::new())
+}
+
+/// Write a flat part with an optional name for each source body and face index.
+///
+/// # Errors
+///
+/// As [`products`].
+pub fn bodies_with_face_names(bodies: Vec<ExportBody<'_>>, header: &Header, face_name: impl Fn(usize, usize) -> String) -> Result<Exported> {
     let name =
         if header.file_name.is_empty() { "Part".to_string() } else { strip_suffix(strip_suffix(&header.file_name, ".step"), ".stp").to_string() };
     let p = ExportProduct { name, bodies, children: Vec::new() };
-    products_with_face_ids(&[p], 0, header)
+    products_with_face_names(&[p], 0, header, |_, body, face| face_name(body, face))
 }
 
 /// `name` without every trailing `suffix`, compared without regard to ASCII case.

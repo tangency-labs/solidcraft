@@ -619,6 +619,7 @@ pub use step_out::StepExport;
 pub use step_out::StepHeader;
 pub use step_out::step_export_bodies;
 pub use step_out::step_export_bodies_with_face_ids;
+pub use step_out::step_export_bodies_with_face_names;
 pub use step_out::step_export_products;
 pub use surface_extend::ExtendLimit;
 pub use surface_extend::ExtendMode;
