@@ -5901,8 +5901,9 @@ impl OffsetGeometryCreation {
     }
 
     /// Not upstream: whether `vertex` is smooth and every face at it moves by the one
-    /// distance to the one point: it has edges, none lamina, every use of each is a tangent
-    /// sector within `tol_deg`, the operation is no local operation (whose faces move by
+    /// distance to the one point: it has edges, none lamina, it joins two faces or more
+    /// (a vertex of one face only, a sphere's pole or a seam's end, has no neighbour's offset
+    /// to graze), every use of each is a tangent sector within `tol_deg`, the operation is no local operation (whose faces move by
     /// their own distances, or not at all), no face at it is one the shell keeps unmoved,
     /// and every face's own image of it, `V + d n(V)` with that face's normal
     /// ([`Self::offset_vertex_image`]), lies within the body's tolerance at the vertex of
@@ -5947,6 +5948,19 @@ impl OffsetGeometryCreation {
                     uses.push(eu);
                 }
             }
+        }
+        // a vertex of one face only (a sphere's pole, a seam's end) has no two faces whose
+        // offsets could graze each other there
+        let mut faces: Vec<O> = Vec::new();
+        for &eu in &uses {
+            if let Some(face) = brep.edgeuse_face(eu)? {
+                if !contains(&faces, &face) {
+                    faces.push(face);
+                }
+            }
+        }
+        if faces.len() < 2 {
+            return Ok(false);
         }
         let tol = brep.brep_tolerance(vertex)?;
         let mut first: Option<Point3> = None;
