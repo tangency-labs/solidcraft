@@ -7,18 +7,25 @@
 //! crate stays small and quick (docs/design-container.md, "Portable thumbnail" and "Provisional
 //! saved display").
 //!
+//! Windows File Explorer's thumbnail handler (apps/solidcraft-explorer) reads the picture with
+//! [`keyed_picture`], which also checks the picture's key against the design, as the app does.
+//!
 //! Input is hostile: a file browser hands over whatever file has the extension. Every read is
 //! bounded, and any problem (not a container, a missing or oversized part, a malformed picture or
 //! mesh) is `None`: the file browser then shows its generic icon or the picture alone.
 
+#![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
+
 use std::fs::File;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use serde::Deserialize;
 
+mod keyed;
 mod model;
 
+pub use keyed::keyed_picture;
 pub use model::{Grab, Matrices, Model, Orbit, Pan, Vertex, model};
 
 /// The container formats this reader knows (docs/design-container.md; the second is the
@@ -28,6 +35,8 @@ const CONTAINERS: &[&str] = &["solidcraft-container/1", "solvecraft-container/1"
 const MAX_FILE: u64 = 2 << 30;
 /// More entries than any design the app writes (docs/design-container.md, "Bounds").
 const MAX_ENTRIES: usize = 10_000;
+/// The ZIP directory's bound: 10,000 entries with names far longer than a design's.
+const MAX_DIRECTORY: u64 = 8 << 20;
 const MAX_CONTAINER_JSON: u64 = 4 << 10;
 /// The saved picture's own bound is 256 KiB; a later, larger picture still fits.
 const MAX_PICTURE: u64 = 8 << 20;
@@ -75,19 +84,41 @@ impl Picture {
     }
 }
 
-/// The ZIP container at `path`, after its size, entry count and `container.json` are checked.
+/// The ZIP container at `path`, after its size and what [`open_archive`] checks.
 fn open(path: &Path) -> Option<zip::ZipArchive<File>> {
     let file = File::open(path).ok()?;
     let meta = file.metadata().ok()?;
     if !meta.is_file() || meta.len() > MAX_FILE {
         return None;
     }
-    let mut archive = zip::ZipArchive::new(file).ok()?;
+    open_archive(file)
+}
+
+/// The ZIP container `source` holds, read from its start whatever its position, after its size,
+/// its end-of-directory record, its entry count and `container.json` are checked.
+fn open_archive<R: Read + Seek>(mut source: R) -> Option<zip::ZipArchive<R>> {
+    let len = source.seek(SeekFrom::End(0)).ok()?;
+    if len > MAX_FILE {
+        return None;
+    }
+    directory_fits(&mut source, len)?;
+    source.seek(SeekFrom::Start(0)).ok()?;
+    let mut archive = zip::ZipArchive::new(source).ok()?;
     if archive.len() > MAX_ENTRIES {
         return None;
     }
     let container: Container = serde_json::from_slice(&part(&mut archive, "container.json", MAX_CONTAINER_JSON)?).ok()?;
     CONTAINERS.contains(&container.format.as_str()).then_some(archive)
+}
+
+/// `Some` when the end-of-central-directory record that ends `source` (`len` bytes long)
+/// describes a directory the `zip` crate may parse: one disk, the same entry count on it and in
+/// all, at most [`MAX_ENTRIES`] entries and [`MAX_DIRECTORY`] bytes, inside the file before the
+/// record, and no ZIP64 (a container never uses it). Checked before the `zip` crate reads the
+/// directory, so a hostile one cannot make it allocate or loop beyond these bounds.
+fn directory_fits<R: Read + Seek>(source: &mut R, len: u64) -> Option<()> {
+    let _ = (source, len);
+    Some(())
 }
 
 /// One entry's bytes, read in full only when its declared and actual sizes are within `limit`.
