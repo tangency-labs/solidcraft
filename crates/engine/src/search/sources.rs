@@ -154,7 +154,7 @@ impl SearchSource for FeaturesSource {
             let rolled_back = idx >= marker;
             let comp_path = component_path_label(doc, feature.component);
             let occ_path = first_occurrence_path(doc, feature.component);
-            let param_summary = feature.param_names.iter().take(8).find_map(|name| params.get(name.as_str())).map(format_param_value);
+            let param_summary = feature.param_names.iter().take(8).find_map(|name| params.get(name.as_str()).copied()).map(format_param_value);
             let mut detail_parts = vec![kind_label.to_string()];
             if let Some(val) = &param_summary
                 && !val.is_empty()
