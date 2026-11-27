@@ -82,12 +82,15 @@ fn commands_with_schemas_for_bindings() {
         assert!(f.get("input").is_some() && f.get("output").is_some(), "{}", f["id"]);
     }
 
-    // A converted command has both schemas; one in unconverted.txt has none yet.
+    // A converted command has both schemas; each one still in unconverted.txt has none yet.
     let find = |id: &str| full.iter().find(|c| c["id"] == id).unwrap();
     let solid_box = find("solid.box");
     assert!(solid_box["input"]["properties"].is_object(), "{}", solid_box["input"]);
     assert!(solid_box["output"].is_object(), "{}", solid_box["output"]);
-    assert!(find("solid.thread")["input"].is_null());
+    let unconverted = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../crates/engine/src/schema/unconverted.txt")).unwrap();
+    for id in unconverted.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+        assert!(find(id)["input"].is_null(), "{id} is listed as unconverted but has an input schema");
+    }
     // Most commands are converted, so a missing schema stays the exception.
     let without = full.iter().filter(|c| c["input"].is_null()).count();
     assert!(without * 10 < full.len(), "{without} of {} commands have no input schema", full.len());
