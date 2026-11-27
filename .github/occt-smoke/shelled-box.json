@@ -1,0 +1,4 @@
+{"commands": [
+  {"command": "solid.box", "params": {"length": 50, "width": 40, "height": 25, "body_name": "Case", "name": "Box"}},
+  {"command": "solid.shell", "params": {"faces": [[25, 20, 25]], "thickness": 2, "name": "Shell"}}
+]}

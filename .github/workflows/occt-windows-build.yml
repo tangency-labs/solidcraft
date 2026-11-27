@@ -97,8 +97,10 @@ jobs:
           SolidCraft test build with the Open CASCADE (OCCT 8.0.1) kernel adapter on (backend-occt).
           Built from tangency-labs/solidcraft $env:GITHUB_SHA. Unsigned, not a release.
 
-          solidcraft.exe runs with OCCT on by default: primitives, booleans and fillets try OCCT
-          first and fall back to solidcore. There is no in-app switch: "SolidCraft (solidcore
+          solidcraft.exe runs with OCCT on by default: primitives, booleans, plain fillets,
+          extrudes, revolves, equal chamfers, shells, thicken, offset faces, drafts and
+          two-section ruled lofts try OCCT first; anything OCCT can't do, or whose result doesn't
+          name as solidcore's does, falls back to solidcore (logged with the reason). There is no in-app switch: "SolidCraft (solidcore
           kernel).cmd" (or SOLIDCRAFT_KERNEL=solidcore) runs the same build on solidcore only.
           solidcraft-cli.exe is the matching command-line tool (same switch).
 
@@ -148,30 +150,53 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
-      # The bundled CLI, from the bundle folder only (no OCCT install on PATH), on both kernels.
-      - name: Smoke - bracket.json volume on OCCT and solidcore
+      # The bundled CLI, from the bundle folder only (no OCCT install on PATH), on both kernels:
+      # per design the OCCT-minus-solidcore volume, and per feature which kernel built each
+      # operation (the router's "built on occt" / "... solidcore runs it" lines, split at the
+      # engine's "feature ... begins" lines).
+      - name: Smoke - per-op kernel and OCCT-minus-solidcore volume
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
           $cli = 'dist\SolidCraft-OCCT-test\solidcraft-cli.exe'
-          $vol = @{}
-          foreach ($k in 'occt', 'solidcore') {
-            $env:SOLIDCRAFT_KERNEL = $k
-            $env:RUST_LOG = 'debug'
-            & $cli eval examples/bracket.json --json-out "eval-$k.json" 2> "eval-$k.log"
-            if ($LASTEXITCODE -ne 0) { Get-Content "eval-$k.log" -Tail 40; throw "eval on $k exited $LASTEXITCODE" }
-            $m = [regex]::Match((Get-Content "eval-$k.json" -Raw), '"volume[A-Za-z0-9_]*"\s*:\s*(-?[0-9.eE+-]+)')
-            if (-not $m.Success) { throw "no volume in eval output ($k)" }
-            $vol[$k] = [double]$m.Groups[1].Value
-            # The router logs each operation OCCT didn't take ("... solidcore runs it").
-            $fell = @(Select-String -Path "eval-$k.log" -Pattern 'solidcore runs it' | ForEach-Object { $_.Line })
-            Write-Output ("SMOKE kernel={0} volume_mm3={1:R} fell_back_to_solidcore={2}" -f $k, $vol[$k], $fell.Count)
-            $fell | Select-Object -First 10 | ForEach-Object { Write-Output "  $_" }
+          $designs = @('examples/bracket.json') + @(Get-ChildItem .github/occt-smoke -Filter *.json | Sort-Object Name | ForEach-Object { $_.FullName })
+          $report = [System.Collections.Generic.List[string]]::new()
+          $disagree = @()
+          foreach ($d in $designs) {
+            $name = [IO.Path]::GetFileNameWithoutExtension($d)
+            $vol = @{}
+            foreach ($k in 'occt', 'solidcore') {
+              $env:SOLIDCRAFT_KERNEL = $k
+              $env:RUST_LOG = 'info'
+              & $cli eval $d --json-out "eval-$name-$k.json" 2> "eval-$name-$k.log"
+              if ($LASTEXITCODE -ne 0) { Get-Content "eval-$name-$k.log" -Tail 40; throw "eval of $name on $k exited $LASTEXITCODE" }
+              $vol[$k] = [double]((Get-Content "eval-$name-$k.json" -Raw | ConvertFrom-Json).total.volume_mm3)
+            }
+            $diff = $vol['occt'] - $vol['solidcore']
+            $report.Add(("SMOKE {0}: occt {1:R} mm3, solidcore {2:R} mm3, occt - solidcore = {3:R} mm3" -f $name, $vol['occt'], $vol['solidcore'], $diff))
+            if ([Math]::Abs($diff) -gt 1e-6 * [Math]::Abs($vol['solidcore'])) { $disagree += $name }
+            # Per feature, on the OCCT run: each routed operation's verdict, in order.
+            $feature = $null
+            $ops = [ordered]@{}
+            foreach ($line in Get-Content "eval-$name-occt.log") {
+              $m = [regex]::Match($line, 'solidcraft_doc::smoke\] feature "(.*)" begins')
+              if ($m.Success) { $feature = $m.Groups[1].Value; if (-not $ops.Contains($feature)) { $ops[$feature] = [System.Collections.Generic.List[string]]::new() }; continue }
+              $m = [regex]::Match($line, '^\[\w+ solidcraft_kernel::route::\w+\] ([^:]+): (.*)$')
+              if (-not $m.Success -or $null -eq $feature) { continue }
+              $op = $m.Groups[1].Value; $rest = $m.Groups[2].Value
+              if ($rest -match '^built on occt') { $ops[$feature].Add("$op OCCT") }
+              elseif ($rest -match 'solidcore runs it') { $ops[$feature].Add("$op fallback: $($rest -replace '; solidcore runs it$', '')") }
+            }
+            foreach ($f in $ops.Keys) {
+              $v = if ($ops[$f].Count) { $ops[$f] -join '; ' } else { 'solidcore (no OCCT route on its path)' }
+              $report.Add("  $f -> $v")
+            }
           }
-          $diff = $vol['occt'] - $vol['solidcore']
-          Write-Output ("SMOKE occt - solidcore = {0:R} mm3" -f $diff)
-          if ([Math]::Abs($diff) -gt 1e-6 * [Math]::Abs($vol['solidcore'])) { throw "OCCT and solidcore volumes disagree" }
+          $report | ForEach-Object { Write-Output $_ }
+          $report | Set-Content smoke-table.txt
+          "## OCCT smoke`n``````n$($report -join "`n")`n``````" | Add-Content $env:GITHUB_STEP_SUMMARY
+          if ($disagree) { throw "OCCT and solidcore volumes disagree: $($disagree -join ', ')" }
 
       # OCCT really runs on Windows: the measurement matrix through the router on both kernels.
       - name: OCCT matrix (box, cylinder, sphere, torus, boolean, fillet)

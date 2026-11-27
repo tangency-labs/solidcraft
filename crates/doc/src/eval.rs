@@ -18480,6 +18480,8 @@ fn eval_feature(
     prepared_import: Option<&parallel::PreparedImport>,
 ) -> Result<()> {
     JOINED_TARGETS.with(|n| n.borrow_mut().clear());
+    // Throwaway OCCT test build only: the smoke step splits the kernel's route lines per feature.
+    log::info!(target: "solidcraft_doc::smoke", "feature {:?} begins", f.name);
     let r = eval_feature_kind(doc, vals, f, st, warning, import_report, repair, heal, prepared_meshes, prepared_import);
     for note in JOINED_TARGETS.with(|n| std::mem::take(&mut *n.borrow_mut())) {
         append_warning(warning, note);

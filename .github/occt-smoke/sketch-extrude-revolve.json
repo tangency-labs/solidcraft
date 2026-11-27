@@ -1,0 +1,10 @@
+{"commands": [
+  {"command": "sketch.create", "params": {"plane": "XY", "name": "Plate"}},
+  {"command": "sketch.line", "params": {"points": [[0, 0], [50, 0], [50, 30], [0, 30]], "closed": true}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"distance": 8, "body_name": "Base", "name": "Extrude"}},
+  {"command": "sketch.create", "params": {"plane": "XZ", "name": "Knob"}},
+  {"command": "sketch.line", "params": {"points": [[0, 8], [6, 8], [6, 18], [3, 22], [0, 22]], "closed": true}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.revolve", "params": {"axis": "Z", "angle": "360 deg", "name": "Revolve"}}
+]}

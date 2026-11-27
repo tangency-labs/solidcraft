@@ -109,6 +109,8 @@ pub(crate) fn run<B: Backend>(
         return None;
     }
     if backend.supports(op) == Support::No || operands.iter().any(|b| b.is_mesh()) {
+        // Throwaway OCCT test build only: the smoke step reads these lines per feature.
+        log::info!("{}: {} doesn't take it ({}); solidcore runs it", op.name(), B::ID, if backend.supports(op) == Support::No { "not in its support list" } else { "a mesh operand" });
         FELL_BACK.fetch_add(1, Ordering::Relaxed);
         return None;
     }
@@ -134,7 +136,10 @@ pub(crate) fn run<B: Backend>(
         })))
     });
     match answer {
-        Ok(Ok(body)) => Some(Ok(body)),
+        Ok(Ok(body)) => {
+            log::info!("{what}: built on {}", B::ID);
+            Some(Ok(body))
+        }
         Ok(Err(BackendError::Unsupported(why))) => {
             log::debug!("{what}: {} doesn't take it ({why}); solidcore runs it", B::ID);
             FELL_BACK.fetch_add(1, Ordering::Relaxed);
@@ -174,6 +179,7 @@ pub(crate) fn run_each<B: Backend>(
         return None;
     }
     if backend.supports(op) == Support::No {
+        log::info!("{}: {} doesn't take it (not in its support list); solidcore runs it", op.name(), B::ID);
         FELL_BACK.fetch_add(1, Ordering::Relaxed);
         return None;
     }
@@ -197,7 +203,10 @@ pub(crate) fn run_each<B: Backend>(
         })
     });
     match answer {
-        Ok(Ok(bodies)) => Some(Ok(bodies)),
+        Ok(Ok(bodies)) => {
+            log::info!("{what}: built on {}", B::ID);
+            Some(Ok(bodies))
+        }
         Ok(Err(BackendError::Unsupported(why))) => {
             log::info!("{what}: {} doesn't take it ({why}); solidcore runs it", B::ID);
             FELL_BACK.fetch_add(1, Ordering::Relaxed);
