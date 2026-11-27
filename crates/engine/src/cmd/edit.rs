@@ -1841,8 +1841,10 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     // broken references re-picked via #16661): remember where they sit now (in the model before
     // the feature). An edit sending only radius, distance, or options leaves the names alone.
     if let (
-        FeatureKind::Fillet { edges: a, body, .. } | FeatureKind::Chamfer { edges: a, body, .. },
-        FeatureKind::Fillet { edges: b, body: was, .. } | FeatureKind::Chamfer { edges: b, body: was, .. },
+        FeatureKind::Fillet { edges: a, body, .. } | FeatureKind::Chamfer { edges: a, body, .. } | FeatureKind::Dogbone { edges: a, body, .. },
+        FeatureKind::Fillet { edges: b, body: was, .. }
+        | FeatureKind::Chamfer { edges: b, body: was, .. }
+        | FeatureKind::Dogbone { edges: b, body: was, .. },
     ) = (&nf.kind, &f.kind)
         && (a != b || body != was || sets_path(set, "edges"))
     {
@@ -3174,6 +3176,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     let constructor = super::features::COMMANDS
         .iter()
         .chain(super::features_more::COMMANDS)
+        .chain(super::dogbone::COMMANDS)
         .chain(super::cell_grid::COMMANDS)
         .chain(super::shaft_spline::COMMANDS)
         .chain(super::construct::COMMANDS)

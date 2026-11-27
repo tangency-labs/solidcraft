@@ -1,9 +1,0 @@
-{
-  "ko": {
-    "cmd.file.stl_to_step": "STL을 STEP으로 변환",
-    "prefs.viewport_background_gradient": "그라데이션",
-    "prefs.viewport_background_middle": "가운데 색상",
-    "ui.template_file_choose": "파일 선택…",
-    "ui.template_file_entry": "파일: {name}"
-  }
-}

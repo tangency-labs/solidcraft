@@ -836,6 +836,7 @@ impl SavedModel {
             }
             let mut st = ModelState {
                 frame_bodies: Default::default(),
+                dogbones: Default::default(),
                 origin_frames: Default::default(),
                 bodies: ids("bodies", model_bodies.len())?.into_iter().filter_map(|i| model_bodies.get(i).cloned()).collect(),
                 sketches: ids("sketches", sketches.len())?.into_iter().filter_map(|i| sketches.get(i).cloned()).collect(),
@@ -1364,6 +1365,7 @@ impl Model {
         let mut before = Arc::new(ModelState::default());
         let mut cache_step_doc = super::init_capture_step_doc(doc, &vals);
         let mut cache_joints = std::collections::BTreeMap::new();
+        let component_digests = super::ComponentDigests::of(doc);
         if let Ok(mut cache) = model.cache.lock() {
             for (i, (f, r)) in doc.features.iter().zip(&model.results).enumerate().filter(|(_, (_, r))| !r.skipped && r.error.is_none()) {
                 let eval_doc = cache_step_doc.as_ref().unwrap_or(doc);
@@ -1377,7 +1379,8 @@ impl Model {
                     }
                     continue;
                 }
-                let key = EvalKey::new(eval_doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests);
+                let key = EvalKey::new(eval_doc, &vals, f, r.fingerprint, ctx, shared, &before, &model.import_digests, &component_digests);
+                model.component_keys.insert(f.id, key.reached);
                 let whole = CachedEval {
                     error: None,
                     error_code: None,

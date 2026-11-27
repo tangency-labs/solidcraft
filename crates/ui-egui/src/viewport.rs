@@ -3324,7 +3324,10 @@ fn body_scene(
                     let slot = slots.face(f);
                     set_palette_color(&mut arena, &mut sc.palette, slot, rgba);
                     let pbr = look.map_or(body_pbr, |l| l.pbr.filter(|_| finishes && opacity >= 0.999));
-                    let material = finish(color, pbr);
+                    let mut material = finish(color, pbr);
+                    if brushed(&material) {
+                        material.turn = turn_axis(&b.body, f);
+                    }
                     arena.set_material(slot, material);
                     face_colors.push(slot);
                     face_classes.push(class);
@@ -3497,7 +3500,45 @@ fn finish(color: Color32, pbr: Option<solidcraft_engine::doc::pbr_appearance::Pb
         ior: p.dielectric_ior() as f32,
         pbr: true,
         two_sided: false,
+        turn: None,
     })
+}
+
+/// Whether the viewport brushes a finish: a metal between polished and blasted (the shader's
+/// `brushing` strength is above zero).
+fn brushed(m: &crate::gpu::Material) -> bool {
+    m.pbr && m.metallic > 0.5 && m.roughness > 0.18 && m.roughness < 0.75
+}
+
+/// The axis face `face` of `body` was turned about, as `Material::turn` takes it: its cylinder's,
+/// cone's or torus's, or for a flat face bounded only by circles about one centre (a lug's end, a
+/// boss's top) the normal through that centre. `None` for other faces.
+fn turn_axis(body: &solidcraft_engine::kernel::Body, face: usize) -> Option<[[f32; 3]; 2]> {
+    use solidcraft_engine::geom::Vec3Geom;
+    use solidcraft_engine::kernel::{FaceSurface, edge_circle, face_edge_indices, face_surface};
+    let (at, along) = match face_surface(body, face)? {
+        FaceSurface::Cylinder { origin, axis, .. } => (origin, axis),
+        FaceSurface::Cone { apex, axis, .. } => (apex, axis),
+        FaceSurface::Torus { center, axis, .. } => (center, axis),
+        FaceSurface::Plane { normal, .. } => {
+            let tol = (body.size() * 1e-6).max(1e-6);
+            let mut centre = None;
+            for edge in face_edge_indices(body, face) {
+                let circle = edge_circle(body, edge)?;
+                if circle.axis.dot(normal).abs() < 1.0 - 1e-6 {
+                    return None;
+                }
+                match centre {
+                    None => centre = Some(circle.center),
+                    Some(c) if circle.center.dist(c) <= tol => {}
+                    Some(_) => return None,
+                }
+            }
+            (centre?, normal)
+        }
+        FaceSurface::Sphere { .. } => return None,
+    };
+    Some([at.to_f32(), along.to_f32()])
 }
 
 /// The colour of a measured seam whose highest order met is `order`, from the theme's
@@ -8638,17 +8679,19 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // An appearance swatch uses this frame's hover as its drop target.
     let swatch_released =
         ui.input(|i| i.pointer.any_released()) && egui::DragAndDrop::has_payload_of_type::<solidcraft_engine::doc::appearance::Look>(ui.ctx());
-    let hits = hover
-        .filter(|_| {
-            inside
-                && app.viewport.boxsel.is_none()
-                && !crate::joint_drag::active(app)
-                && !joint_handle_pointer
-                && !navigating
-                && !dragging_layer
-                // A part dragged in from the parts library lands in the design, not on a face.
-                && !design_dragged
-        })
+    // Where the pick under the pointer runs: nowhere while something else owns the pointer. An
+    // empty `hits` means empty space only where it ran (`picked`).
+    let picked = hover.filter(|_| {
+        inside
+            && app.viewport.boxsel.is_none()
+            && !crate::joint_drag::active(app)
+            && !joint_handle_pointer
+            && !navigating
+            && !dragging_layer
+            // A part dragged in from the parts library lands in the design, not on a face.
+            && !design_dragged
+    });
+    let hits = picked
         .map(|p| {
             if primary_down || swatch_released || resp.clicked() || resp.secondary_clicked() {
                 pick_cached(app, &proj, p)
@@ -9240,6 +9283,24 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
             && !crate::edit_in_place::double_click_face(app, &body)
         {
             app.edit_feature_of_face(&body, index, point);
+        }
+        // Double-click empty space with a component active: go back to its parent, as the
+        // ribbon's Activate Parent does. The same preference as a double-click on a face.
+        if resp.double_clicked()
+            && picked.is_some()
+            && hits.is_empty()
+            && !pen_select
+            && !held
+            && !dim_edit
+            && !reference_pick
+            && mods.is_none()
+            && app.tool.is_none()
+            && app.dialog.is_none()
+            && app.session.active_sketch.is_none()
+            && app.session.active_component != 0
+            && app.preferences.double_click_components
+        {
+            let _ = app.run("component.activate.parent", json!({}));
         }
         // A right-click, unless the same press opened the mouse gestures' ring: it finishes a
         // tool, confirms a dialog's input (when that preference is on), or opens the menu. egui's

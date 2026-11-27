@@ -781,8 +781,17 @@ fn slot_offsets(s: &[Option<OffsetSurfaceSlot>; 2]) -> [f64; 2] {
     })
 }
 
-#[allow(clippy::too_many_lines)]
 fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
+    rust_record_seen(i, &mut |_, _| {})
+}
+
+/// [`rust_record`], showing `seen` each offset surface of a Jacobian case's solver (with
+/// the extension it holds) once the call has returned, where its record is written.
+#[allow(clippy::too_many_lines)]
+fn rust_record_seen(
+    i: &Inputs,
+    seen: &mut dyn FnMut(&Kernel, &OffsetSurface),
+) -> Result<Rec, HarnessError> {
     let k = crate::runner_kernel();
     let mut o = Vec::new();
     match i {
@@ -976,6 +985,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
                 }
             }
             o.extend(slot_offsets(&fs.solver.surfaces));
+            fs.solver.surfaces.iter().flatten().for_each(|slot| seen(&k, &slot.surface));
         }
         Inputs::CdSetup {
             solver,
@@ -1052,6 +1062,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
                 }
             }
             o.extend(offsets(&fs.solver.surfaces));
+            fs.solver.surfaces.iter().flatten().for_each(|slot| seen(&k, &slot.surface));
         }
         Inputs::CdInit {
             solver,
@@ -2282,5 +2293,224 @@ mod tests {
             kinds: vec![],
         };
         assert!(rust(&base).is_err());
+    }
+}
+
+/// WR-458, WR-633 and WR-650 (#18921): the 172 rows the offset surface's extension from
+/// its base moves. A Jacobian taken outside a mate's domain is taken on the mate's offset's
+/// extension; each row's own case is run as its record is (`rust_record_seen`), and every
+/// extension its solver's offsets then hold is certified ([`crate::g1r_cert::ExtensionWatch`]:
+/// bit for bit the extension a fresh evaluation from the base's NURB builds, each step
+/// certified G1). Every row's solver holds at least one extension: the moved values are
+/// taken on certified extensions from the base (PROVEN, up to the rounding the
+/// certificate's header bounds).
+#[cfg(test)]
+mod wr458_moved_rows {
+    use super::*;
+    use crate::g1r_cert::ExtensionWatch;
+
+    const MOVED: [&str; 172] = [
+        "rv2j_cdjac_bump_cyl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_bump_cyl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_bump_cyl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_bump_cyl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_bump_cyl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_cdjac_bump_cyl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_cdjac_bump_cyl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_cdjac_bump_cyl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_cdjac_bump_cyl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_bump_cyl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_bump_cyl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_bump_cyl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_cdjac_coneu_bump_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_coneu_bump_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_coneu_bump_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_coneu_bump_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_coneu_bump_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_coneu_bump_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_coneu_bump_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_coneu_bump_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_cdjac_coneu_cyl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_coneu_cyl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_coneu_cyl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_coneu_cyl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_coneu_cyl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_cdjac_coneu_cyl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_cdjac_coneu_cyl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_cdjac_coneu_cyl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_cdjac_coneu_cyl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_coneu_cyl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_coneu_cyl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_coneu_cyl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_cdjac_coneu_pl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_coneu_pl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_coneu_pl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_coneu_pl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_coneu_pl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_coneu_pl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_coneu_pl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_coneu_pl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_cdjac_conev_bump_(0.1, 0.1)_(False, True)_1_0",
+        "rv2j_cdjac_conev_bump_(0.1, 0.1)_(False, True)_1_1",
+        "rv2j_cdjac_conev_bump_(0.1, 0.1)_(True, False)_1_0",
+        "rv2j_cdjac_conev_bump_(0.1, 0.1)_(True, False)_1_1",
+        "rv2j_cdjac_conev_bump_(2.0, 0.5)_(False, True)_1_0",
+        "rv2j_cdjac_conev_bump_(2.0, 0.5)_(False, True)_1_1",
+        "rv2j_cdjac_conev_bump_(2.0, 0.5)_(True, False)_1_0",
+        "rv2j_cdjac_conev_bump_(2.0, 0.5)_(True, False)_1_1",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(False, True)_1_0",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(False, True)_1_1",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(True, False)_1_0",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(True, False)_1_1",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_conev_cyl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_conev_cyl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_cdjac_conev_cyl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_cdjac_conev_cyl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_cdjac_conev_cyl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(False, True)_1_0",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(False, True)_1_1",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(True, False)_1_0",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(True, False)_1_1",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_conev_cyl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_cdjac_conev_pl_(0.1, 0.1)_(False, True)_1_0",
+        "rv2j_cdjac_conev_pl_(0.1, 0.1)_(False, True)_1_1",
+        "rv2j_cdjac_conev_pl_(0.1, 0.1)_(True, False)_1_0",
+        "rv2j_cdjac_conev_pl_(0.1, 0.1)_(True, False)_1_1",
+        "rv2j_cdjac_conev_pl_(2.0, 0.5)_(False, True)_1_0",
+        "rv2j_cdjac_conev_pl_(2.0, 0.5)_(False, True)_1_1",
+        "rv2j_cdjac_conev_pl_(2.0, 0.5)_(True, False)_1_0",
+        "rv2j_cdjac_conev_pl_(2.0, 0.5)_(True, False)_1_1",
+        "rv2j_cdjac_cyl_bump_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_bump_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_bump_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_bump_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_bump_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_bump_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_bump_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_bump_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_bump_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_bump_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_bump_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_bump_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_cyl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_cyl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_cyl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_cyl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_cyl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_cyl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_cyl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_cyl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_cyl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_cyl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_cyl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_cyl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_pl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_pl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_pl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_pl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_pl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_pl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_pl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_pl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_cdjac_cyl_pl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_cdjac_cyl_pl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_cdjac_cyl_pl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_cdjac_cyl_pl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_crjac_bump_cyl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_crjac_bump_cyl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_crjac_bump_cyl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_crjac_bump_cyl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_crjac_bump_cyl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_crjac_bump_cyl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_crjac_bump_cyl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_crjac_bump_cyl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_crjac_bump_cyl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_crjac_bump_cyl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_crjac_bump_cyl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_crjac_bump_cyl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_crjac_conev_cyl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_crjac_conev_cyl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_crjac_conev_cyl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_crjac_conev_cyl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_crjac_conev_cyl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_crjac_conev_cyl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_crjac_conev_cyl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_crjac_conev_cyl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_crjac_conev_cyl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_crjac_conev_cyl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_crjac_conev_cyl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_crjac_conev_cyl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_crjac_cyl_bump_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_crjac_cyl_bump_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_crjac_cyl_bump_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_crjac_cyl_bump_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_crjac_cyl_bump_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_crjac_cyl_bump_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_crjac_cyl_bump_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_crjac_cyl_bump_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_crjac_cyl_bump_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_crjac_cyl_bump_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_crjac_cyl_bump_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_crjac_cyl_bump_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_crjac_cyl_cyl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_crjac_cyl_cyl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_crjac_cyl_cyl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_crjac_cyl_cyl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_crjac_cyl_cyl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_crjac_cyl_cyl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_crjac_cyl_cyl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_crjac_cyl_cyl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_crjac_cyl_cyl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_crjac_cyl_cyl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_crjac_cyl_cyl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_crjac_cyl_cyl_(2.0, 0.5)_(True, False)_3_1",
+        "rv2j_crjac_cyl_pl_(0.1, 0.1)_(False, True)_3_0",
+        "rv2j_crjac_cyl_pl_(0.1, 0.1)_(False, True)_3_1",
+        "rv2j_crjac_cyl_pl_(0.1, 0.1)_(True, False)_3_0",
+        "rv2j_crjac_cyl_pl_(0.1, 0.1)_(True, False)_3_1",
+        "rv2j_crjac_cyl_pl_(1e-06, 1e-06)_(False, True)_3_0",
+        "rv2j_crjac_cyl_pl_(1e-06, 1e-06)_(False, True)_3_1",
+        "rv2j_crjac_cyl_pl_(1e-06, 1e-06)_(True, False)_3_0",
+        "rv2j_crjac_cyl_pl_(1e-06, 1e-06)_(True, False)_3_1",
+        "rv2j_crjac_cyl_pl_(2.0, 0.5)_(False, True)_3_0",
+        "rv2j_crjac_cyl_pl_(2.0, 0.5)_(False, True)_3_1",
+        "rv2j_crjac_cyl_pl_(2.0, 0.5)_(True, False)_3_0",
+        "rv2j_crjac_cyl_pl_(2.0, 0.5)_(True, False)_3_1",
+    ];
+
+    #[test]
+    fn each_moved_row_runs_on_certified_extensions_from_its_base() {
+        let ctx = CaseContext { root: crate::case::repo_root(), seeds: 16 };
+        let mut seen = 0;
+        for c in Runner.cases(&ctx).unwrap() {
+            if !MOVED.contains(&c.name.as_str()) {
+                continue;
+            }
+            seen += 1;
+            let i = c.parse::<Inputs>().unwrap();
+            let (mut growths, mut err) = (0, None);
+            let mut look = |k: &Kernel, s: &OffsetSurface| {
+                let mut w = ExtensionWatch::default();
+                match w.observe(k, &s.surface) {
+                    Ok(()) => growths += w.growths,
+                    Err(e) => {
+                        err.get_or_insert(e);
+                    }
+                }
+            };
+            let _rec = rust_record_seen(&i, &mut look).unwrap_or_else(|e| panic!("{}: {e:?}", c.name));
+            if let Some(e) = err {
+                panic!("{}: {e}", c.name);
+            }
+            eprintln!("{}: {growths} extensions", c.name);
+            assert!(growths > 0, "{}: no extension held", c.name);
+        }
+        assert_eq!(seen, MOVED.len());
     }
 }

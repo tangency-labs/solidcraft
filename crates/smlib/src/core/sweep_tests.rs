@@ -626,7 +626,8 @@ fn hostile_arguments_are_refused() {
     assert_eq!(sweep_stations(&sq, &[translate([0.0; 3]), flat], Ends::Capped).err(), Some(Error::Argument), "a singular map");
     assert_eq!(sweep_stations(&sq, &[translate([0.0; 3])], Ends::Capped).err(), Some(Error::Argument), "one station");
     assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 0.0, 1.0, None, 1e-3, false).err(), Some(Error::Argument), "no pitch");
-    assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 1.0, 300.0, None, 1e-3, false).err(), Some(Error::Argument), "too many turns");
+    let past = solidcore_ops::sweep::SCREW_MAX_TURNS + 1.0;
+    assert_eq!(screw_sweep(&sq, [0.0; 3], Z, 1.0, past, None, 1e-3, false).err(), Some(Error::Argument), "too many turns");
     assert_eq!(
         screw_sweep(&sq, [0.0; 3], Z, 1.0, 1.0, Some(&[(0.5, 0.0), (0.2, 0.0)]), 1e-3, false).err(),
         Some(Error::Argument),
