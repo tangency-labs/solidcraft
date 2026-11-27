@@ -91,6 +91,18 @@
 //! the pass did not visit carries its line parameters too (the whole line where they cannot
 //! be enclosed), so that a ray can tell whether it lies before a hit.
 //!
+//! **The order of the boxes.** The pass visits the box of least line parameter first (a
+//! half takes the least line parameter of the box it is cut from), of equal ones the last
+//! cut. What it decides of a box reads the box alone, so the order changes only where a pass
+//! at its limit stops: the boxes it left lie along the line past the ones it decided. A
+//! crossing's line parameter is the foot of its point, inside the line parameters of every
+//! box holding it, so every crossing of the leaf before the least line parameter of the boxes
+//! left lies in a box decided, as every crossing of a finished pass does; the solve adds those
+//! crossings and keeps the guesses' answer past them ([`SearchedLeaf::decided_roots`]). A
+//! shallow chord of a wide cylinder's side, whose leaf takes several thousand boxes along the
+//! silhouette between its crossings (where the line's direction lies in the tangent plane and
+//! no box about it is regular), gets its first crossing so.
+//!
 //! **The exclusion phase.** After a finished pass (only there: the records of a leaf say
 //! that a box is excluded by distance by its absence, which an unfinished leaf does not
 //! prove), a phase with its own budget ([`MAX_EXCLUSION_BOXES`] enclosures) cuts the boxes
@@ -1515,6 +1527,75 @@ struct Scratch {
     v: Ivl,
 }
 
+/// The work list of a leaf's pass (module docs, "The order of the boxes"): the box of least
+/// line parameter first (its key: the least line parameter of the box it was cut from,
+/// before it is enclosed itself), and of equal keys the last pushed, so that a pass stopped
+/// at its limit has decided every box whose points meet the line before the boxes it left.
+/// Each box carries its place in the cutting (the halves taken from the whole leaf, `false`
+/// the first). The order changes which boxes a pass at its limit reaches, never what it
+/// decides of a box ([`visit`] reads the box alone), so a finished pass decides the same
+/// boxes in any order.
+#[derive(Default)]
+struct Queue {
+    heap: std::collections::BinaryHeap<Queued>,
+    pushed: u64,
+}
+
+/// A box of the [`Queue`] with its key, its place in the order pushed and in the cutting.
+struct Queued {
+    key: f64,
+    seq: u64,
+    b: Scratch,
+    path: Vec<bool>,
+}
+
+impl Ord for Queued {
+    /// The greater pops first: the lesser key, then the later pushed.
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        other
+            .key
+            .total_cmp(&self.key)
+            .then(self.seq.cmp(&other.seq))
+    }
+}
+
+impl PartialOrd for Queued {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for Queued {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == core::cmp::Ordering::Equal
+    }
+}
+
+impl Eq for Queued {}
+
+impl Queue {
+    fn push(&mut self, b: Scratch, key: f64, path: Vec<bool>) {
+        self.pushed = self.pushed.wrapping_add(1);
+        self.heap.push(Queued {
+            key,
+            seq: self.pushed,
+            b,
+            path,
+        });
+    }
+
+    fn pop(&mut self) -> Option<(Scratch, f64, Vec<bool>)> {
+        self.heap.pop().map(|q| (q.b, q.key, q.path))
+    }
+
+    /// The boxes still to visit, in the order they would have been visited.
+    fn into_boxes(self) -> Vec<Scratch> {
+        let mut left = self.heap.into_sorted_vec();
+        left.reverse();
+        left.into_iter().map(|q| q.b).collect()
+    }
+}
+
 /// The certified crossings of `line` with the surface of `net` over the leaf's `domain`,
 /// reported for `t` in the leaf's `interval` (module docs), with what the pass decided of
 /// every box; `sides` is what lies across the leaf's sides.
@@ -1562,27 +1643,19 @@ fn isolate_within(
         // nor of a domain off the net's knots
         return Ok(out);
     }
-    let mut work = vec![Scratch { u, v }];
+    let mut work = Queue::default();
+    work.push(Scratch { u, v }, f64::NEG_INFINITY, Vec::new());
+    // the boxes decided and the roots certified, each with its place in the cutting (the
+    // order a pass that visits the first half's boxes before the second's decides them in)
+    let mut decided: Vec<(Vec<bool>, FloorBox)> = Vec::new();
+    let mut certified: Vec<(Vec<bool>, CertifiedRoot)> = Vec::new();
+    let mut left_to_visit: Vec<Scratch> = Vec::new();
     out.stop = Stop::Finished;
-    while let Some(b) = work.pop() {
+    while let Some((b, key, path)) = work.pop() {
         if out.boxes >= MAX_SCRATCH_BOXES {
             out.stop = Stop::AtLimit;
-            work.push(b);
-            // each with its line parameters, so that a ray can tell whether it lies
-            // before a hit (the whole line where they cannot be enclosed)
-            out.floor.extend(work.iter().map(|w| {
-                FloorBox {
-                    u: w.u,
-                    v: w.v,
-                    t: Some(
-                        enclosed(net, &line, w.u, w.v)
-                            .map(|e| line.feet(&e.r).1)
-                            .filter(|feet| feet.is_finite())
-                            .unwrap_or_else(Ivl::whole),
-                    ),
-                    kind: FloorKind::Unvisited,
-                }
-            }));
+            work.push(b, key, path);
+            left_to_visit = work.into_boxes();
             break;
         }
         if out.boxes % 64 == 0 {
@@ -1603,23 +1676,8 @@ fn isolate_within(
                 (kind, Some(t))
             }
             Visit::Root(root, t) => {
-                // one root, however many boxes hold it on their borders: the same root
-                // when its enclosure lies in a box another is the only root of (Rump,
-                // Thm 13.3), or when the hull of the two enclosures is regular (it then
-                // holds one root at most); roots with enclosures apart are two
-                let known = out.roots.iter().any(|r| {
-                    let [ru, rv, _] = root.enclosure;
-                    let [qu, qv] = r.unique;
-                    let [su, sv, _] = r.enclosure;
-                    (within(ru, qu) && within(rv, qv))
-                        || (meet(ru, su).is_some()
-                            && meet(rv, sv).is_some()
-                            && regular_over(net, &line, ru.hull(su), rv.hull(sv)))
-                });
                 let (unique, enclosure) = (root.unique, root.enclosure);
-                if !known {
-                    out.roots.push(root);
-                }
+                certified.push((path.clone(), root));
                 (FloorKind::Root { unique, enclosure }, Some(t))
             }
             Visit::Unshown(unique, enclosure, t) => {
@@ -1630,18 +1688,68 @@ fn isolate_within(
                 out.left += 1;
                 (FloorKind::Left, t)
             }
-            Visit::Halve(first, second) => {
-                work.push(second);
-                work.push(first);
+            Visit::Halve(first, second, feet) => {
+                // (halves inherit the least line parameter of the box they are cut from)
+                let key = feet.map_or(key, |t| t.lo);
+                let mut second_path = path.clone();
+                second_path.push(true);
+                let mut first_path = path;
+                first_path.push(false);
+                work.push(second, key, second_path);
+                work.push(first, key, first_path);
                 continue;
             }
         };
-        out.floor.push(FloorBox {
-            u: b.u,
-            v: b.v,
-            t,
-            kind,
+        decided.push((
+            path,
+            FloorBox {
+                u: b.u,
+                v: b.v,
+                t,
+                kind,
+            },
+        ));
+    }
+    // the records and the roots in the order of the cutting, first halves first: what a
+    // finished pass records and reports is then the same in whatever order it visited (the
+    // exclusion phase reads the records in this order within its budget, and of two boxes
+    // holding one root the first reports it); no decided box's place is the start of
+    // another's (a decided box is not cut), so the places are apart
+    decided.sort_by(|a, b| a.0.cmp(&b.0));
+    certified.sort_by(|a, b| a.0.cmp(&b.0));
+    out.floor = decided.into_iter().map(|(_, f)| f).collect();
+    // the boxes left to visit, each with its line parameters, so that a ray can tell whether
+    // it lies before a hit (the whole line where they cannot be enclosed)
+    out.floor.extend(left_to_visit.into_iter().map(|w| {
+        FloorBox {
+            u: w.u,
+            v: w.v,
+            t: Some(
+                enclosed(net, &line, w.u, w.v)
+                    .map(|e| line.feet(&e.r).1)
+                    .filter(|feet| feet.is_finite())
+                    .unwrap_or_else(Ivl::whole),
+            ),
+            kind: FloorKind::Unvisited,
+        }
+    }));
+    for (_, root) in certified {
+        // one root, however many boxes hold it on their borders: the same root when its
+        // enclosure lies in a box another is the only root of (Rump, Thm 13.3), or when the
+        // hull of the two enclosures is regular (it then holds one root at most); roots with
+        // enclosures apart are two
+        let known = out.roots.iter().any(|r| {
+            let [ru, rv, _] = root.enclosure;
+            let [qu, qv] = r.unique;
+            let [su, sv, _] = r.enclosure;
+            (within(ru, qu) && within(rv, qv))
+                || (meet(ru, su).is_some()
+                    && meet(rv, sv).is_some()
+                    && regular_over(net, &line, ru.hull(su), rv.hull(sv)))
         });
+        if !known {
+            out.roots.push(root);
+        }
     }
     if out.stop == Stop::Finished {
         let mut phase = Exclude {
@@ -1734,7 +1842,7 @@ fn enclose_strip_within(
         // (step 1 reads the surface's points alone: their partials only where it halves)
         let Some(r) = enclosed_value(net, &line, b.u, b.v) else {
             match wider(None) {
-                Visit::Halve(first, second) => {
+                Visit::Halve(first, second, _) => {
                     work.push(second);
                     work.push(first);
                 }
@@ -1775,7 +1883,7 @@ fn enclose_strip_within(
             None => Some(wider(Some(feet))),
         };
         match halved {
-            Some(Visit::Halve(first, second)) => {
+            Some(Visit::Halve(first, second, _)) => {
                 work.push(second);
                 work.push(first);
             }
@@ -1892,7 +2000,7 @@ impl Exclude<'_> {
         match halved {
             // (each half carries the line parameters of the box it is cut from until it is
             // enclosed: they hold its own)
-            Some(Visit::Halve(first, second)) => Cut::Halves(
+            Some(Visit::Halve(first, second, _)) => Cut::Halves(
                 FloorBox {
                     u: first.u,
                     v: first.v,
@@ -2032,6 +2140,54 @@ pub(crate) struct SearchedLeaf {
 }
 
 impl SearchedLeaf {
+    /// Its certified roots that the solve adds (module docs, "The order of the boxes"): every
+    /// one where its pass finished; where it stopped at its limit, those whose line parameters
+    /// lie wholly below `b`, the least line parameter of the boxes it left to visit (each
+    /// records the feet of its points widened by the tolerance, the whole line where they
+    /// cannot be enclosed), lowered to the least line parameter of any root reaching it until
+    /// none does.
+    /// A crossing's line parameter is the foot of its point, so a crossing in a box left to
+    /// visit has it at `b` or past it: every crossing below that bound lies in a box the pass
+    /// decided, as every crossing of a finished pass does, and the roots kept are all the
+    /// crossings below it that a finished pass would add, in order along the line. None where
+    /// the pass did not run or its records were not kept (nothing is then known of the boxes
+    /// it left).
+    pub(crate) fn decided_roots(&self) -> Vec<CertifiedRoot> {
+        let bound = match (self.stop, &self.floor) {
+            (Stop::Finished, _) => return self.roots.clone(),
+            (Stop::AtLimit, Some(floor)) => floor
+                .iter()
+                .filter(|f| f.kind == FloorKind::Unvisited)
+                .map(|f| f.t.map_or(f64::NEG_INFINITY, |t| t.lo))
+                .fold(f64::INFINITY, f64::min),
+            _ => return Vec::new(),
+        };
+        let line_parameters = |r: &CertifiedRoot| {
+            let [_, _, t] = r.enclosure;
+            t
+        };
+        // lowered until no root reaches it (each step lowers it to a root's start, or
+        // ends: at most one step a root)
+        let mut bound = bound;
+        loop {
+            let lower = self
+                .roots
+                .iter()
+                .map(line_parameters)
+                .filter(|t| t.hi >= bound)
+                .fold(bound, |b, t| b.min(t.lo));
+            if lower.total_cmp(&bound).is_ge() {
+                break;
+            }
+            bound = lower;
+        }
+        self.roots
+            .iter()
+            .filter(|r| line_parameters(r).hi < bound)
+            .copied()
+            .collect()
+    }
+
     /// Whether a box of this leaf that no record holds is excluded by distance (module docs,
     /// "The drop"): its pass finished, or stopped at its limit with the boxes it had still
     /// to visit recorded, and its records are kept. A pass that did not run proves nothing.
@@ -2809,8 +2965,8 @@ fn facing(b: &PlacedBox, leaves: &[SearchedLeaf], sides: &[LeafSides]) -> (Touch
 /// placed (`unplaced`: nothing has enclosed it) or the components passed their bounds;
 /// complete only with none of these. A strip's boxes it left undecided are in the
 /// components, over their own line parameters. A leaf whose pass ran beside leaves not run
-/// leaves the record undecided: a finished one may have added certified roots, so the
-/// solutions are no longer the guesses' alone.
+/// leaves the record undecided: its pass may have added certified roots, so the solutions
+/// are no longer the guesses' alone.
 pub(crate) fn side_record(
     leaves: &[SearchedLeaf],
     components: &Components,
@@ -5803,8 +5959,9 @@ enum Visit {
     Unshown([Ivl; 2], I3, Ivl),
     /// At the floor (step 3), with its line parameters where it was enclosed.
     Left(Option<Ivl>),
-    /// Its two halves, the first to visit first.
-    Halve(Scratch, Scratch),
+    /// Its two halves, the first to visit first, with the box's line parameters where it was
+    /// enclosed (the order [`isolate`] visits boxes in).
+    Halve(Scratch, Scratch, Option<Ivl>),
 }
 
 /// A box enclosed about the surface's point at its middle: the quotient's terms are then
@@ -5911,6 +6068,7 @@ fn visit(net: &LineNet, line: &ScratchLine, b: Scratch) -> Visit {
                     u: Ivl::new(knot, b.u.hi),
                     ..b
                 },
+                None,
             )
         } else {
             Visit::Halve(
@@ -5922,6 +6080,7 @@ fn visit(net: &LineNet, line: &ScratchLine, b: Scratch) -> Visit {
                     v: Ivl::new(knot, b.v.hi),
                     ..b
                 },
+                None,
             )
         };
     }
@@ -6000,9 +6159,9 @@ fn halves(b: Scratch, split_u: bool, mid: f64, t: Option<Ivl>) -> Visit {
     }
     let (first, second) = (Ivl::new(lo, mid), Ivl::new(mid, hi));
     if split_u {
-        Visit::Halve(Scratch { u: first, ..b }, Scratch { u: second, ..b })
+        Visit::Halve(Scratch { u: first, ..b }, Scratch { u: second, ..b }, t)
     } else {
-        Visit::Halve(Scratch { v: first, ..b }, Scratch { v: second, ..b })
+        Visit::Halve(Scratch { v: first, ..b }, Scratch { v: second, ..b }, t)
     }
 }
 
@@ -7147,6 +7306,77 @@ mod tests {
     }
 
     /// A searched leaf over `domain`, its pass ended at `stop`, with the records `floor`.
+    /// A certified root whose line parameters are `[lo, hi]` (its `(u, v)` boxes unit).
+    fn root_over(lo: f64, hi: f64) -> CertifiedRoot {
+        let unit = Ivl::new(0.0, 1.0);
+        CertifiedRoot {
+            point: [0.5, 0.5, 0.5 * (lo + hi)],
+            enclosure: [unit, unit, Ivl::new(lo, hi)],
+            unique: [unit, unit],
+        }
+    }
+
+    /// A box left to visit whose line parameters are `t`.
+    fn unvisited(t: Ivl) -> FloorBox {
+        FloorBox {
+            u: Ivl::new(0.0, 1.0),
+            v: Ivl::new(0.0, 1.0),
+            t: Some(t),
+            kind: FloorKind::Unvisited,
+        }
+    }
+
+    /// The roots a leaf's pass adds (`SearchedLeaf::decided_roots`): all of a finished pass;
+    /// of a pass at its limit, those wholly below the least line parameter of the boxes it
+    /// left, that bound lowered to the start of every root reaching it until none does; none
+    /// where a box left holds the whole line, the records were not kept, or the pass did not
+    /// run.
+    #[test]
+    fn a_pass_at_its_limit_adds_the_roots_before_every_box_it_left() {
+        let d = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let t = |r: &CertifiedRoot| r.enclosure[2].lo;
+        let with = |stop: Stop, floor: Option<Vec<FloorBox>>, roots: Vec<CertifiedRoot>| {
+            let mut leaf = leaf_of(d, stop, floor);
+            leaf.roots = roots;
+            leaf.decided_roots().iter().map(t).collect::<Vec<f64>>()
+        };
+        let roots = vec![
+            root_over(4.0, 5.0),
+            root_over(9.5, 10.5),
+            root_over(20.0, 21.0),
+        ];
+        assert_eq!(
+            with(Stop::Finished, Some(Vec::new()), roots.clone()),
+            vec![4.0, 9.5, 20.0]
+        );
+        // the box left from 10 on: the root reaching it is withheld, and so is every root
+        // past it
+        let left = vec![
+            unvisited(Ivl::new(12.0, 30.0)),
+            unvisited(Ivl::new(10.0, 11.0)),
+        ];
+        assert_eq!(
+            with(Stop::AtLimit, Some(left.clone()), roots.clone()),
+            vec![4.0]
+        );
+        // a box left over the whole line decides nothing, nor do records not kept, nor a pass
+        // that did not run
+        let whole = vec![unvisited(Ivl::whole())];
+        assert!(with(Stop::AtLimit, Some(whole), roots.clone()).is_empty());
+        assert!(with(Stop::AtLimit, None, roots.clone()).is_empty());
+        assert!(with(Stop::NotRun, Some(left.clone()), roots).is_empty());
+        // a chain of overlapping roots below the bound: the one reaching 10 lowers it to 8,
+        // the one reaching 8 to 7, the one reaching 7 to 6.5; only the root wholly below that
+        // is added
+        let chain = vec![
+            root_over(8.0, 10.5),
+            root_over(7.0, 8.5),
+            root_over(6.5, 7.5),
+            root_over(1.0, 2.0),
+        ];
+        assert_eq!(with(Stop::AtLimit, Some(left), chain), vec![1.0]);
+    }
+
     fn leaf_of(domain: Extent2d, stop: Stop, floor: Option<Vec<FloorBox>>) -> SearchedLeaf {
         SearchedLeaf {
             domain,

@@ -31,7 +31,9 @@
 //! curves they make, as upstream's `const` queries leave them. `IsInnerShell` keeps each target face surface's solve cache for the whole call
 //! (upstream's surface keeps its cache across the rays); the port otherwise builds one
 //! per intersection, and a failed build is kept too instead of being retried on every
-//! ray (the build is deterministic, so a retry fails the same way).
+//! ray (the build is deterministic, so a retry fails the same way). (Not upstream)
+//! `IsInnerShell` abandons a ray with a counted hit whose contact is undecided and goes to
+//! the next sample (its counts reach no check).
 //! Existing co-ported accessors are reused.
 //! `ClosureTraversalFromBothSides` is not in the pinned upstream: it is the fork's
 //! (tangency-labs/smlib@69c5198), used by `SmBrep::TestClosureSplitRegion` in place of
@@ -43,6 +45,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::error::topology::TopologyFailure;
 use crate::error::{Failure, Result, SolidError, SM_ERR_NULL_POINTER};
 use crate::geom::context::{MarkLock, MarkType};
+use crate::geom::solution_array::Contact;
 use crate::kernel::Kernel;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -734,8 +737,10 @@ impl crate::geom::solution_array::SolutionObject for RaySurface {
 }
 
 /// `pTargetFace->GlobalLineIntersect(GetUVDomain(), origin, direction, NULL, FALSE,
-/// GetTolerance(), sols)`: the line parameter of each solution. `held` is the face
-/// surface's cache, kept across the rays as upstream keeps it on the surface.
+/// GetTolerance(), sols)`: the line parameter of each solution, with its contact (not
+/// upstream: [`Contact::Undecided`] where the solve's certified pass could not type it).
+/// `held` is the face surface's cache, kept across the rays as upstream keeps it on the
+/// surface.
 fn line_parameters(
     k: &Kernel,
     b: &mut Brep,
@@ -743,7 +748,7 @@ fn line_parameters(
     held: &mut HeldSolveCache<RaySurface>,
     origin: Vec3,
     direction: Vec3,
-) -> Result<Vec<f64>> {
+) -> Result<Vec<(f64, Contact)>> {
     let face = b.face(f)?;
     let (uv_domain, tol) = (face.uv_domain, face.tolerance);
     let surface = RaySurface(
@@ -758,7 +763,7 @@ fn line_parameters(
     Ok(solutions
         .as_slice()
         .iter()
-        .map(|s| s.start.parameters[0])
+        .map(|s| (s.start.parameters[0], s.contact))
         .collect())
 }
 
@@ -766,6 +771,13 @@ fn line_parameters(
 /// Errors propagate from face sampling and the ray/face intersections (whose other
 /// failures skip the face, as upstream).
 /// An empty or inconclusive set returns the upstream `SM_ERR`.
+///
+/// (Not upstream) A ray with a counted hit whose contact is [`Contact::Undecided`] is
+/// abandoned: its counts decide nothing, and the next sample's ray is fired. Such a hit may
+/// stand for a contact a solve could not type (a touch counted as a crossing), or be one of
+/// two crossings of a leaf whose certified pass stopped at its limit before reaching the
+/// other, either of which would turn the ray's parity. The abandoned ray's hits are still
+/// solved, so the B-rep's trims are made as before.
 ///
 /// The rays and face samples run on `b` itself, so the UV trim curves their face
 /// classifications create stay on the B-rep, as upstream's `const` queries leave them.
@@ -808,23 +820,34 @@ pub fn is_inner_shell(k: &mut Kernel, b: &mut Brep, faceuses: &[FaceuseId]) -> R
             };
             forward = 0;
             backward = 0;
+            let mut undecided = false;
             for &target in faceuses {
                 let f = link(b.faceuse(target)?.face, NO_FACE)?;
                 let tol = b.face(f)?.tolerance;
                 let held = caches.entry(f).or_default();
                 match line_parameters(k, b, f, held, origin, direction) {
                     Ok(parameters) => {
-                        for t in parameters {
+                        for (t, contact) in parameters {
                             if t < -tol {
                                 backward += 1;
                             } else if t > tol {
                                 forward += 1;
+                            } else {
+                                continue;
                             }
+                            undecided |= contact == Contact::Undecided;
                         }
                     }
                     Err(e) if e.is_unported_or_cancelled() => return Err(e),
                     Err(_) => (),
                 }
+            }
+            if undecided {
+                // (no partial count reaches the checks after the samples: they read the last
+                // ray's, which are then none, as before any ray)
+                forward = 0;
+                backward = 0;
+                continue;
             }
             if forward == 1 && backward == 0 {
                 return Ok(true);

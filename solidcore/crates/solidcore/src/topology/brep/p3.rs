@@ -64,6 +64,11 @@
 //!   fail; the port releases it explicitly and reports a release failure (a mark
 //!   bookkeeping fault) as an error. An `OrientTrimmedSurfaces` that fails returns no
 //!   `rbMaybeNotClosedSolid` (upstream may have set it before the failure).
+//! - **Undecided ray hits (not upstream).** A ray pair of `OrientTrimmedSurfaces` with a
+//!   counted face hit whose contact is [`Contact::Undecided`] gives no vote, and the next
+//!   test point is tried, as `topology_traverser::is_inner_shell` abandons such a ray: the
+//!   hit may stand for a contact no solve could type, or be one of two crossings of a leaf
+//!   whose certified pass stopped at its limit.
 //! - **Shell walk.** `DeleteFace` marks everything its shell joins to the first vertex
 //!   of the deleted face, then reads the marks of that face's vertices. With a table of
 //!   marks ([`delete_face`]) the port's walk ends when the last of those vertices is
@@ -137,6 +142,7 @@ use crate::geom::context::{
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::object::{self, NotifyOperation, ObjectRef};
+use crate::geom::solution_array::Contact;
 use crate::geom::tol;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
@@ -6314,7 +6320,9 @@ enum RayVotes {
 
 /// The ray firing of [`orient_trimmed_surfaces`] for `face`: up to two consistent
 /// ray pairs from points inside the face (on trimmed iso curves through test points
-/// of its edge uses), each voting whether the face normal points into the solid.
+/// of its edge uses), each voting whether the face normal points into the solid. (Not
+/// upstream) A pair with a face hit off its start whose contact is [`Contact::Undecided`]
+/// gives no vote and counts as no ray, consistent or not: the next test point is tried.
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn orient_ray_votes(
     k: &Kernel,
@@ -6462,6 +6470,7 @@ fn orient_ray_votes(
 
             // for two rays leaving the surface in either direction
             let mut inside = [false; 2];
+            let mut undecided = false;
             for (ll, slot) in inside.iter_mut().enumerate() {
                 let mut direction = if ll == 0 { 1.0 } else { -1.0 };
                 let new_ray_vec = if normal.dot(ray_vec) < 0.0 {
@@ -6483,10 +6492,13 @@ fn orient_ray_votes(
 
                 // Count the solutions to determine if we are inside or outside
                 let mut points: Vec<Point3> = Vec::new();
-                for (num_variables, param) in solutions {
+                for (num_variables, param, contact) in solutions {
                     // when the solution was a face/curve intersection
                     if num_variables == 3 {
                         let p = line.evaluate_point(k, param)?;
+                        // (not upstream) a hit off the ray's start the solve could not type
+                        undecided |=
+                            contact == Contact::Undecided && p.distance(point_in_face) >= tolerance;
                         if !points.iter().any(|q| p.distance(*q) < tolerance) {
                             points.push(p);
                         }
@@ -6499,6 +6511,11 @@ fn orient_ray_votes(
 
                 // point is inside if there were an odd number of intersections
                 *slot = n % 2 == 1;
+            }
+            // (not upstream) a pair with an undecided hit votes nothing, and is no bad ray:
+            // both rays were still solved, as before
+            if undecided {
+                continue;
             }
 
             // Make sure rays are consistent
@@ -6534,20 +6551,20 @@ fn orient_ray_votes(
 
 /// `SmTopologySolver::BrepCurveSolve(this, line, its natural interval, SM_SO_INTERSECT,
 /// SM_SR_ALL, tolerance, SM_BIG_DOUBLE, NULL)` with `m_bEditingEnabled` off during the
-/// solve: the `(number of variables, curve parameter)` of every solution. The B-rep's
-/// spatial cache is built for the call (upstream's was dropped by the pre-edit
-/// notification).
+/// solve: the `(number of variables, curve parameter)` of every solution, with its contact
+/// (not upstream). The B-rep's spatial cache is built for the call (upstream's was dropped
+/// by the pre-edit notification).
 fn brep_curve_solve(
     k: &Kernel,
     b: &mut Brep,
     line: &Curve,
     tolerance: f64,
-) -> Result<Vec<(usize, f64)>> {
+) -> Result<Vec<(usize, f64, Contact)>> {
     use crate::intersect::topology_solver::p1::{CurveRef, TopologySolver};
     use crate::intersect::topology_solver::p2::TopologySolveOptions;
     let editing = b.editing_enabled();
     b.set_editing_enabled(false);
-    let res = (|| -> Result<Vec<(usize, f64)>> {
+    let res = (|| -> Result<Vec<(usize, f64, Contact)>> {
         let query = crate::query::brep::BrepQuery::of_brep(b);
         // (CacheMakeOrValidate: the cache with its vertex, curve and surface trees)
         let cache = query.cache(k, b)?;
@@ -6577,7 +6594,7 @@ fn brep_curve_solve(
         )?;
         let mut out = Vec::new();
         for s in sols.as_slice() {
-            out.push((s.num_variables, s.start.param(0)?));
+            out.push((s.num_variables, s.start.param(0)?, s.contact));
         }
         Ok(out)
     })();

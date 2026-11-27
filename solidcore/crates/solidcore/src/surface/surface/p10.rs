@@ -58,7 +58,9 @@
 //!   ([`Surface::certified_net`]) the solve runs through [`CertifiedLsi`], which keeps each
 //!   leaf whose guesses ran; after the traversal each is searched by
 //!   [`super::certified_line::isolate`] ([`CertifiedLsi::certified_pass`]), and every
-//!   certified crossing that no solution of the whole solve already stands for is added.
+//!   certified crossing that no solution of the whole solve already stands for is added (of
+//!   a leaf whose pass stopped at its limit, those before every box it left:
+//!   [`super::certified_line::SearchedLeaf::decided_roots`]).
 //!   Nothing is removed, and no solution a guess found is solved again. The traversal also
 //!   keeps the domain of each leaf and subtree it culls by the line's distance or
 //!   parameter, which [`super::certified_line::enclose_strip`] encloses, and the pass
@@ -1068,15 +1070,18 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             }
             search
         };
-        // Only a leaf the pass finished adds crossings: one stopped at the limit may hold
-        // a crossing the pass never reached, and adding one of two crossings it did reach
-        // would turn the guesses' even count (a ray passing near a crown seam, both
-        // crossings missed) into an odd one. Its answer stays the guesses'. (The solved
+        // A leaf adds the crossings its pass decided: all of them where it finished; where it
+        // stopped at the limit, the ones before every box it left (`decided_roots`), which are
+        // all its crossings up to there. Past them its answer stays the guesses'. (The solved
         // leaves come first in the search, in the order of `kept`.)
         for (job, found) in kept.leaves.iter().zip(&search.leaves) {
-            if found.roots.is_empty() || found.stop != certified_line::Stop::Finished {
+            let roots = found.decided_roots();
+            if roots.is_empty() {
                 continue;
             }
+            // (a crossing of a leaf at its limit may be one of two whose other lies past the
+            // boxes it left: a count over the solve's solutions reads it as undecided)
+            let at_limit = found.stop == certified_line::Stop::AtLimit;
             let leaf = LsiLeaf {
                 cache,
                 owner: job.owner,
@@ -1088,10 +1093,10 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                 conts: job.conts,
                 nodes: job.nodes,
             };
-            for root in &found.roots {
+            for root in &roots {
                 // a root whose evaluation, filter or point test fails is not added: the
                 // solve's answer without it is the guesses', as it was
-                ignored(self.add_certified_root(k, &leaf, root, tol / speed))?;
+                ignored(self.add_certified_root(k, &leaf, root, tol / speed, at_limit))?;
             }
         }
         // (a record not run leaves the solutions the guesses' alone, unclassified)
@@ -1146,13 +1151,16 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
 
     /// One certified root of `leaf`, added as a guess's hit is, unless a solution of the
     /// solve already stands for it; `reach` is the tolerance as a stretch of the line's
-    /// parameter.
+    /// parameter. Of a leaf whose pass stopped at its limit (`at_limit`) it is added
+    /// [`Contact::Undecided`], as the typing after finds it where it places it (its component
+    /// holds a leaf at its limit) and stays where it places it nowhere.
     fn add_certified_root(
         &mut self,
         k: &Kernel,
         leaf: &LsiLeaf<'s, O>,
         root: &certified_line::CertifiedRoot,
         reach: f64,
+        at_limit: bool,
     ) -> Result<()> {
         let [u, v, t] = root.point;
         // a contact is one solution: the guesses' where they found it
@@ -1173,7 +1181,10 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         if !within_tolerance {
             return Ok(());
         }
-        let solution = leaf.solution(t, uv, deviation)?;
+        let mut solution = leaf.solution(t, uv, deviation)?;
+        if at_limit {
+            solution.contact = Contact::Undecided;
+        }
 
         // skip negative parameter ray/surface intersections
         if self.ray_fire {
@@ -2498,14 +2509,18 @@ mod tests {
 
     /// A line dipping 2e-6 below the torus's crown where the crown meets the seam crosses it
     /// twice, at 0.5 ± 0.0259 (the gap along the crown's tangent is s⁴/(8R²r), so the dip is
-    /// met at s = ±(8R²r·2e-6)^¼ ≈ ±0.518 on a line of length 20). The guesses miss both,
-    /// and the pass stops at its box limit on the leaves there: it adds no root from them,
-    /// neither one crossing of the two, which would make a ray's count odd, nor both. The
-    /// solve's answer about the contact is the guesses' alone: no root added (the work
-    /// counter of roots added at the leaf-to-solution boundary) and no point at either
-    /// crossing.
+    /// met at s = ±(8R²r·2e-6)^¼ ≈ ±0.518 on a line of length 20), one crossing in a leaf on
+    /// each side of the seam. The guesses miss both, and the pass stops at its box limit on
+    /// both leaves. Each leaf adds its crossing only because, within that limit, it has
+    /// decided every box whose points meet the line before the crossing: a property of the
+    /// budget on this input, not of the geometry (with a smaller one, a leaf would add
+    /// nothing, and the solve could publish one crossing of the two). Here both are
+    /// published (the work counter of roots added at the leaf-to-solution boundary), at the
+    /// implicit equation's roots. The leaves there stop at their limit, so the contact of
+    /// every solution is undecided, which is what a ray's parity count reads
+    /// (`topology_traverser::is_inner_shell` abandons a ray with an undecided hit).
     #[test]
-    fn a_leaf_the_pass_does_not_finish_adds_no_crossing() {
+    fn a_leaf_the_pass_does_not_finish_adds_the_crossings_before_the_boxes_it_left() {
         let k = Kernel::default();
         let s = torus(&k);
         let p = Vec3::new(30.0, -10.0, 5.0 - 2.0e-6);
@@ -2519,24 +2534,26 @@ mod tests {
             .base_global_line_intersect::<H>(&k, H(0), &domain, p, d, None, false, 1.0e-6)
             .unwrap();
         assert!(k.work_counters.line_leaves_at_limit() > 0);
-        assert_eq!(k.work_counters.line_roots_added(), 0);
-        let crossings = sols
-            .as_slice()
-            .iter()
-            .filter(|sol| {
-                sol.solution_type == SolutionType::SingleValue
-                    && expected
-                        .iter()
-                        .any(|e| (sol.start.parameters[0] - e).abs() < 1.0e-6)
-            })
-            .count();
-        assert_eq!(crossings, 0, "a crossing published: {:?}", sols.as_slice());
-        // the leaves there stop at their limit: whatever the guesses return about the
-        // contact is undecided
-        assert!(sols
-            .as_slice()
-            .iter()
-            .all(|sol| sol.contact == Contact::Undecided));
+        assert_eq!(k.work_counters.line_roots_added(), 2);
+        for e in &expected {
+            let at = sols
+                .as_slice()
+                .iter()
+                .filter(|sol| {
+                    sol.solution_type == SolutionType::SingleValue
+                        && (sol.start.parameters[0] - e).abs() < 1.0e-9
+                })
+                .count();
+            assert_eq!(at, 1, "{e}: {:?}", sols.as_slice());
+        }
+        // the leaves there stop at their limit: every contact is undecided
+        assert!(
+            sols.as_slice()
+                .iter()
+                .all(|sol| sol.contact == Contact::Undecided),
+            "{:?}",
+            sols.as_slice()
+        );
         // and so is the line dipping 5e-7 below the crown at 45° (tolerance 1e-6), the
         // guesses' range or points about its two crossings
         let c = 30.0 / 2.0_f64.sqrt();
