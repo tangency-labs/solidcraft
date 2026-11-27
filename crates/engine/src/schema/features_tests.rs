@@ -237,6 +237,7 @@ fn combine_schema_and_the_key_check_agree() {
             "length",
             "modeled",
             "name",
+            "offset",
             "old_auto_size",
             "participants",
             "single_face_selection",

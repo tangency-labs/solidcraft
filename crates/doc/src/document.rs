@@ -1403,6 +1403,11 @@ pub enum FeatureKind {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Length")]
         length: Option<Expr>,
+        /// How far from the end it starts at (`from`) the thread starts, leaving that much of the
+        /// face plain; `length` and `up_to` are measured from there. `None` (or 0): at that end.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Offset")]
+        offset: Option<Expr>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         modeled: bool,
         /// Continuous flank faces for this feature. Missing in older designs: keep

@@ -957,6 +957,219 @@ fn a_blind_tapped_hole_stops_clear_of_its_bottom() {
     assert!((got - want).abs() < before * 1e-4, "{got} vs {want}");
 }
 
+/// The span a thread's reply gives, as world z from its axis point (low, high).
+fn thread_z(th: &Value) -> (f64, f64) {
+    let t = &th["thread"];
+    let at = |u: &str| t["axis_point"][2].as_f64().unwrap() + t["axis"][2].as_f64().unwrap() * t[u].as_f64().unwrap();
+    let (a, b) = (at("start"), at("end"));
+    (a.min(b), a.max(b))
+}
+
+/// #23145: `offset` starts the thread that far in from the end it starts at, and the extent is
+/// measured from there. On a d10 × 30 cylinder (z 0..30), offset 5: length 15 from the top is
+/// z 25 down to 10, from the bottom 5 up to 20; Full from the top runs on to the far end (0..25);
+/// up to the plane z = 12 from the top is 12..25; a length past the far end stops there (0..25).
+#[test]
+fn an_offset_thread_starts_that_far_in_from_its_end() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "Rod"}));
+    let top = json!([0, 0, 30]);
+    for (extra, want) in [
+        (json!({"length": 15, "from": top}), (10.0, 25.0)),
+        (json!({"length": 15, "from": [0, 0, 0]}), (5.0, 20.0)),
+        (json!({"from": top}), (0.0, 25.0)),
+        (json!({"up_to": {"origin": [0, 0, 12], "normal": [0, 0, 1]}, "from": top}), (12.0, 25.0)),
+        (json!({"length": 40, "from": top}), (0.0, 25.0)),
+    ] {
+        let mut p = json!({"face": [5, 0, 15], "designation": "M10", "offset": "5 mm"});
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        let th = run(&mut s, "solid.thread", p);
+        let (z0, z1) = thread_z(&th);
+        assert!((z0 - want.0).abs() < 1e-9 && (z1 - want.1).abs() < 1e-9, "{extra}: {th}");
+        // `model.threads` reports the same span as the reply.
+        let listed = run(&mut s, "model.threads", json!({}));
+        let feature = th["feature"].as_u64().unwrap();
+        let mine = listed["threads"].as_array().unwrap().iter().find(|t| t["feature"].as_u64() == Some(feature)).unwrap();
+        assert_eq!(mine, &th["thread"]);
+    }
+}
+
+/// A modelled M10 on the d10 × 30 cylinder, offset 5 and length 15 from the top: both ends of the
+/// groove are square stops inside the face (5 mm from the top, 10 mm from the bottom, each more
+/// than half a pitch), so it takes exactly 15 / P = 10 turns. A turn's volume is `ext_turn`, the
+/// closed form 2π∫ r g(r) dr of the ISO 68-1 groove section (a screw motion keeps volume, so one
+/// lead of the sweep has the volume of the section revolved), from the standard's profile alone.
+/// Just under the surface the 5 mm at the top and the 10 mm at the bottom stay whole, short of the
+/// groove's widest half width w (`ext_half_width`, 0.70 mm for M10) at each stop.
+#[test]
+fn a_modelled_offset_thread_leaves_its_start_plain() {
+    let (p, w) = (1.5, ext_half_width(10.0, 1.5));
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "Rod"}));
+    let before = exact_volume(&s, "Rod");
+    run(&mut s, "solid.thread", json!({"face": [5, 0, 15], "designation": "M10", "offset": 5, "length": 15, "from": [0, 0, 30], "modeled": true}));
+    let want = before - 15.0 / p * ext_turn(10.0, p, 5.0);
+    let got = exact_volume(&s, "Rod");
+    assert!((got - want).abs() < want * 2e-4, "{got} vs {want}");
+    let st = s.model.state();
+    let body = &st.body("Rod").unwrap().body;
+    assert!(body.validity().is_empty());
+    let ring = |z: f64| (0..36).map(|i| (i as f64 * 10.0).to_radians()).map(move |a| Vec3::new(4.9 * a.cos(), 4.9 * a.sin(), z));
+    let rings = |z0: f64, z1: f64| (0..=40).map(move |i| z0 + (z1 - z0) * i as f64 / 40.0).flat_map(ring);
+    let inside = |q: Vec3| body.classify_point(q).unwrap() == solidcraft_kernel::PointClass::Inside;
+    assert!(rings(25.0 + w + 0.1, 29.9).all(inside), "the offset at the top is cut");
+    assert!(rings(0.1, 10.0 - w - 0.1).all(inside), "the bottom past the thread is cut");
+    assert!(rings(11.0, 24.0).filter(|q| !inside(*q)).count() > 100, "the band 10..25 is not threaded");
+}
+
+/// The runout stays at the inner end, away from the offset start: the plain top stays whole and
+/// the fade goes on below z = 10, where the square stop would have ended.
+#[test]
+fn an_offset_threads_runout_stays_at_its_inner_end() {
+    let w = ext_half_width(10.0, 1.5);
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "Rod"}));
+    let p = json!({"face": [5, 0, 15], "designation": "M10", "offset": 5, "length": 15, "from": [0, 0, 30], "modeled": true, "ease_out": "standard"});
+    run(&mut s, "solid.thread", p);
+    let st = s.model.state();
+    let body = &st.body("Rod").unwrap().body;
+    assert!(body.validity().is_empty());
+    let ring = |z: f64| (0..36).map(|i| (i as f64 * 10.0).to_radians()).map(move |a| Vec3::new(4.9 * a.cos(), 4.9 * a.sin(), z));
+    let rings = |z0: f64, z1: f64| (0..=20).map(move |i| z0 + (z1 - z0) * i as f64 / 20.0).flat_map(ring);
+    let inside = |q: Vec3| body.classify_point(q).unwrap() == solidcraft_kernel::PointClass::Inside;
+    assert!(rings(25.0 + w + 0.1, 29.9).all(inside), "the offset at the top is cut");
+    assert!(rings(8.0, 10.0 - w - 0.1).filter(|q| !inside(*q)).count() > 10, "no runout below the threaded length");
+}
+
+/// A blind tapped hole (8.5 mm, M10's tap drill, 12 deep from the top of a 20 mm block), threaded
+/// Full with an offset of 3 from its mouth, its only free end. The groove's start is a square stop
+/// 3 mm down; at the bottom it stops with its section clear of the bottom, its centre the widest
+/// half width w inside it, as in `a_blind_tapped_hole_stops_clear_of_its_bottom`: the section is
+/// ISO 68-1's internal groove, g(r) = P/8 + 2 (d/2 - r) tan 30° (the flat P/8 at the major
+/// diameter), reaching 0.1 P inside the minor radius d/2 - 5 P √3 / 16 so it crosses the wall,
+/// so w = (P/8 + 2 (d/2 - (minor - 0.1 P)) tan 30°) / 2. That leaves 12 - 3 - w of square-ended
+/// sweep: (12 - 3 - w) / P turns of 2π∫ r g(r) dr over the wall, r 4.25..5.
+#[test]
+fn an_offset_tapped_thread_starts_below_the_holes_mouth() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.hole", json!({"position": [0, 0, 20], "diameter": 8.5, "depth": 12}));
+    let before = exact_volume(&s, "Block");
+    let th = run(&mut s, "solid.thread", json!({"face": [4.25, 0, 14], "designation": "M10", "offset": 3, "modeled": true}));
+    assert_eq!(th.get("warning"), None, "{th}");
+    let (d, p, rh) = (10.0, 1.5, 4.25);
+    let t = (PI / 6.0).tan();
+    let minor = d / 2.0 - 5.0 * p * 3f64.sqrt() / 16.0;
+    let w = (p / 8.0 + 2.0 * (d / 2.0 - (minor - 0.1 * p)) * t) / 2.0;
+    let f = |r: f64| (p / 8.0 + d * t) * r * r / 2.0 - 2.0 * t * r * r * r / 3.0;
+    let turn = 2.0 * PI * (f(d / 2.0) - f(rh));
+    let want = before - (12.0 - 3.0 - w) / p * turn;
+    let got = exact_volume(&s, "Block");
+    assert!((got - want).abs() < before * 1e-4, "{got} vs {want}");
+    // Just outside the bore, the 3 mm below the mouth (less the stop's half width) is whole.
+    let st = s.model.state();
+    let body = &st.body("Block").unwrap().body;
+    let ring = |z: f64| (0..36).map(|i| (i as f64 * 10.0).to_radians()).map(move |a| Vec3::new(4.4 * a.cos(), 4.4 * a.sin(), z));
+    assert!(
+        (0..=10)
+            .map(|i| 19.9 - (2.9 - w - 0.1) * i as f64 / 10.0)
+            .flat_map(ring)
+            .all(|q| body.classify_point(q).unwrap() == solidcraft_kernel::PointClass::Inside)
+    );
+}
+
+/// Each face of one Thread takes the offset from its own start end; a face shorter than the offset
+/// refuses the feature, naming its length.
+#[test]
+fn an_offset_applies_to_each_face_from_its_own_end() {
+    let shafts = |second_height: f64| {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "A"}));
+        run(&mut s, "solid.cylinder", json!({"base": [30, 0, 0], "radius": 5, "height": second_height, "body_name": "B"}));
+        s
+    };
+    let params = |h: f64| {
+        json!({"faces": [{"body": "A", "point": [5, 0, 15]}, {"body": "B", "point": [35, 0, h / 2.0]}],
+            "designation": "M10", "offset": 5, "length": 10, "from": [0, 0, 30]})
+    };
+    let mut s = shafts(20.0);
+    let made = run(&mut s, "solid.thread", params(20.0));
+    let spans: Vec<(f64, f64)> = made["threads"].as_array().unwrap().iter().map(|t| thread_z(&json!({"thread": t}))).collect();
+    assert_eq!(spans.len(), 2, "{made}");
+    // A runs 25 down to 15; B (z 0..20), started from its top as `from` is nearer it, 15 down to 5.
+    for (got, want) in spans.iter().zip([(15.0, 25.0), (5.0, 15.0)]) {
+        assert!((got.0 - want.0).abs() < 1e-9 && (got.1 - want.1).abs() < 1e-9, "{got:?} vs {want:?}: {made}");
+    }
+    let mut s = shafts(4.0);
+    let before = s.doc.to_json();
+    let e = s.execute("solid.thread", &params(4.0)).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("leaves nothing to thread") && e.contains("(4 mm)"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
+/// The refusals, each with its reason, leaving the design as it was: an offset below 0 (typed, or
+/// an expression a parameter change makes negative, with one message), one as long as the face
+/// or longer, one with a chamfered tip at its start, an `up_to` limit inside the offset, and an
+/// offset on a taper pipe thread.
+#[test]
+fn an_offset_is_refused_with_its_reason() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "Rod"}));
+    let base = json!({"face": [5, 0, 15], "designation": "M10", "from": [0, 0, 30]});
+    let with = |extra: Value| {
+        let mut p = base.clone();
+        p.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        p
+    };
+    for (extra, reason) in [
+        (json!({"offset": -1}), solidcraft_doc::THREAD_OFFSET_NEGATIVE),
+        (json!({"offset": 30}), "leaves nothing to thread"),
+        (json!({"offset": 31}), "leaves nothing to thread"),
+        (json!({"offset": 2, "modeled": true, "tip": "start"}), solidcraft_doc::THREAD_OFFSET_WITH_TIP),
+        (json!({"offset": 5, "up_to": {"origin": [0, 0, 27], "normal": [0, 0, 1]}}), "past its offset"),
+    ] {
+        let before = s.doc.to_json();
+        let e = s.execute("solid.thread", &with(extra.clone())).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(e.contains(reason), "{extra}: {e}");
+        assert_eq!(s.doc.to_json(), before, "{extra}");
+    }
+    // An expression: the same reason when a parameter change makes it negative.
+    run(&mut s, "parameters.add", json!({"name": "lead_in", "expression": "2 mm"}));
+    run(&mut s, "solid.thread", with(json!({"offset": "lead_in", "name": "Lead-in"})));
+    let changed = s.execute("parameters.change", &json!({"name": "lead_in", "expression": "-1 mm"}));
+    let errors: Vec<String> = s.model.results.iter().filter_map(|r| r.error.clone()).chain(changed.err().map(|e| e.to_string())).collect();
+    assert!(errors.iter().any(|e| e.contains(solidcraft_doc::THREAD_OFFSET_NEGATIVE)), "{errors:?}");
+    // A taper pipe thread's standard diameter is set at the pipe's end: no offset (cosmetic too).
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20.955 / 2.0, "height": 30, "body_name": "Pipe"}));
+    let e = s.execute("solid.thread", &json!({"face": [20.955 / 2.0, 0, 15], "designation": "R 1/2", "offset": 2, "from": [0, 0, 30]}));
+    let e = e.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("takes no offset"), "{e}");
+}
+
+/// An offset of 0 is no offset: the modelled body is the same to the byte, and the cosmetic thread
+/// the same record. A thread saved without one has no `offset` key, as before this change.
+#[test]
+fn a_zero_offset_builds_exactly_what_no_offset_does() {
+    let build = |modeled: bool, offset: Option<&str>| {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "Rod"}));
+        let mut p = json!({"face": [5, 0, 15], "designation": "M10", "length": 15, "from": [0, 0, 30], "modeled": modeled});
+        if let Some(o) = offset {
+            p["offset"] = json!(o);
+        }
+        run(&mut s, "solid.thread", p);
+        s
+    };
+    let bytes = |s: &Session| solidcraft_kernel::encode_native_body(&s.model.state().body("Rod").unwrap().body).unwrap();
+    let (plain, zero) = (build(true, None), build(true, Some("0 mm")));
+    assert!(bytes(&plain) == bytes(&zero), "a zero offset changed the modelled body");
+    let (mut plain, mut zero) = (build(false, None), build(false, Some("0 mm")));
+    assert_eq!(run(&mut plain, "model.threads", json!({})), run(&mut zero, "model.threads", json!({})));
+    assert!(zero.doc.to_json().contains("\"offset\""), "the offset given is saved");
+    assert!(!plain.doc.to_json().contains("\"offset\""), "a thread without an offset saves none");
+}
+
 /// A form's groove width at radius r between its root and crest: the pitch less the tooth, the
 /// tooth `flat` wide at the crest radius `crest` and widening by tan a + tan b per unit of depth.
 fn form_turn(p: f64, flat: f64, crest: f64, a: f64, b: f64, r0: f64, r1: f64, internal: bool) -> f64 {

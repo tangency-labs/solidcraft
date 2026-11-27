@@ -293,6 +293,8 @@ pub struct Options {
     pub starts: u32,
     /// An index into the extents (full, length, up to).
     pub extent: usize,
+    /// How far in from the end it starts at the thread starts, as typed (empty: at that end).
+    pub offset: String,
     pub ease_out: Ease,
     /// A modelled internal thread runs down to a blind hole's bottom (#22616).
     pub to_bottom: bool,
@@ -309,6 +311,7 @@ impl Default for Options {
             hand: ThreadHand::default(),
             starts: 1,
             extent: FULL,
+            offset: String::new(),
             ease_out: Ease::default(),
             to_bottom: false,
             tip: ThreadTip::default(),
@@ -320,10 +323,15 @@ impl Default for Options {
 }
 
 impl Options {
-    /// Does the thread start at one end of the face (a length or an Up To extent, a runout or a
-    /// tip)? Then the end to start from can be picked.
+    /// Does the thread start at one end of the face (a length or an Up To extent, an offset, a
+    /// runout or a tip)? Then the end to start from can be picked.
     pub fn starts_at_an_end(&self) -> bool {
-        self.extent != FULL || self.ease_out.fade || self.tip != ThreadTip::None
+        self.extent != FULL || self.has_offset() || self.ease_out.fade || self.tip != ThreadTip::None
+    }
+
+    /// Is an offset typed? Then the thread starts inside the face, not at its end.
+    pub fn has_offset(&self) -> bool {
+        !self.offset.trim().is_empty()
     }
 }
 
@@ -488,12 +496,16 @@ pub(crate) fn rows(
         }
         enter |= expr_row(ui, "Length", length);
     }
+    // How far in from the end it starts at the thread starts: a plain stretch at that end.
+    enter |= crate::ui_kit::expr_row_positive(ui, "Offset", &mut o.offset);
 
     crate::ui_kit::section(ui, "thread_ends", "Ends", true, |ui| {
         // The start, a free end: plain or chamfered; and with it chamfered, every other free end
         // the thread reaches too (a stud's two ends, ISO 4753), the command's `tip: both`.
         let mut chamfered = usize::from(o.tip != ThreadTip::None);
-        choice_row(ui, "Start", "thread_start", &mut chamfered, STARTS_AT);
+        // An offset start lies inside the face, which no chamfer reaches: the choice is kept
+        // plain then. A tip saved before the offset was typed stays, and the command says why.
+        ui.add_enabled_ui(!o.has_offset() || o.tip != ThreadTip::None, |ui| choice_row(ui, "Start", "thread_start", &mut chamfered, STARTS_AT));
         o.tip = match (chamfered, o.tip) {
             (0, _) => ThreadTip::None,
             (_, ThreadTip::None) => ThreadTip::Start,
@@ -654,6 +666,7 @@ pub(crate) fn put_params(p: &mut Value, length: &str, o: &Options, inputs: &[Sel
         }
         _ => {}
     }
+    put(p, &[("offset", o.offset.as_str())]);
     if let Some(from) = object_point(inputs, START_END) {
         p["from"] = from;
     }
@@ -719,6 +732,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
         face,
         designation,
         length,
+        offset,
         modeled,
         continuous_flanks,
         from,
@@ -756,6 +770,7 @@ pub(crate) fn reopen(d: &mut Dialog, s: &Session, feature: &Feature) {
         } else {
             FULL
         },
+        offset: offset.as_ref().map(expr).unwrap_or_default(),
         ease_out: Ease::of(ease_out),
         to_bottom: *to_bottom,
         tip: *tip,

@@ -212,6 +212,8 @@ pub use eval::RevolveExtent;
 pub use eval::SavedModel;
 pub use eval::SketchCopy;
 pub use eval::SolvedSketch;
+pub use eval::THREAD_OFFSET_NEGATIVE;
+pub use eval::THREAD_OFFSET_WITH_TIP;
 pub use eval::ThreadInfo;
 pub use eval::blend_target;
 pub use eval::cell_grid::MAX_CUT_CELLS;

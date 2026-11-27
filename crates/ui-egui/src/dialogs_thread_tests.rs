@@ -355,6 +355,7 @@ fn a_saved_thread_reopens_with_every_option() {
         ),
         (json!({"designation":"M20","from":[10,0,20],"up_to":[10,0,5]}), vec!["Cylindrical face", START_END, UP_TO]),
         (json!({"designation":"M20","up_to":"XY","from":[10,0,20]}), vec!["Cylindrical face", START_END, UP_TO]),
+        (json!({"designation":"M20","length":"8 mm","offset":"3 mm","from":[10,0,20]}), vec!["Cylindrical face", START_END]),
     ] {
         let mut h = Harness::new();
         h.call("ui.resize", json!({"width":1600,"height":1400}));
@@ -933,4 +934,22 @@ fn a_thread_can_be_chamfered_at_both_ends() {
     assert_eq!(params(&h)["tip"], "start");
     choose(&mut h, "Start", "None");
     assert!(params(&h).get("tip").is_none());
+}
+
+/// #23145: a typed offset goes into the command and a blank one stays out, and with one the end to
+/// start from can be picked even on a Full thread.
+#[test]
+fn an_offset_is_sent_only_when_typed_and_asks_for_the_start_end() {
+    let mut o = Options::default();
+    let mut p = json!({});
+    put_params(&mut p, "", &o, &[]);
+    assert_eq!(p.get("offset"), None, "{p}");
+    assert!(!o.starts_at_an_end());
+    o.offset = "  ".into();
+    assert!(!o.starts_at_an_end(), "a blank offset is none");
+    o.offset = "4 mm".into();
+    let mut p = json!({});
+    put_params(&mut p, "", &o, &[]);
+    assert_eq!(p["offset"], "4 mm");
+    assert!(o.starts_at_an_end(), "a Full thread with an offset starts at one end");
 }

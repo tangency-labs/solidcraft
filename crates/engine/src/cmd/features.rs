@@ -408,7 +408,8 @@ pub static COMMANDS: &[CommandSpec] = &[
             "ease_out?: expr|standard|short (modelled threads: the inner end, away from where the thread starts, fades out over this length (shorter than a turn too), its section moving out of the material as it turns; standard 2.5 P, short 1.25 P per ISO 3508; it lies past the full-form length, up to a shoulder's clearance; at a free end, inside the face; without it the groove stops square there, ending in its own profile; the start never fades: it runs off its free end, plain or chamfered (`tip`)); ",
             "tip?: none|start|both (modelled external threads: start chamfers the end the thread starts from, which must be free, both each free end the thread reaches, ISO 4753's chamfered end, the last teeth tapering into the cone; chamfer_angle?: angle expr to the axis, default 45 deg; chamfer_depth?: expr, radial from the major diameter, default for a metric thread down to the external minor diameter d3 = d - 1.226869 P (ISO 724), the largest ISO 4753 allows; other forms give it); ",
             "extent?: full|length|up_to (default: length when `length` is given, up_to when `up_to` is, else full: the whole face); ",
-            "length?: expr (from the end the thread starts at); ",
+            "length?: expr (from where the thread starts: the end it starts at, or `offset` in from it); ",
+            "offset?: length expr (default 0: how far in from the end it starts at (`from`) the thread starts, leaving that much of the face plain, a lead-in on a bolt or a plain stretch below a hole's mouth; `length` and `up_to` are measured from there, a length past the face's far end stops there, and the runout stays at the inner end; 0 or more and shorter than the face; not with `tip: start`, whose chamfer needs a free end, and not on a taper pipe thread, whose standard diameter is set at the pipe's end or the hole's mouth); ",
             "up_to?: [x,y,z] (a point, such as on a shoulder face: the thread runs to its place along the axis) | plane name or {origin, normal} (to where the plane crosses the axis); ",
             "from?: [x,y,z] near the end of the face the thread starts at (default: the face's only free end, the one with no material past it; else the end the `face` point lies within a third of the face of; a pick in the middle of a face whose ends are alike is refused); ",
             "modeled?: bool (default false); ",
@@ -6063,6 +6064,17 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(l) = &length {
         check_expr(s, l, Kind::Length, cmd, "length")?;
     }
+    let offset = expr(p, "offset");
+    if let Some(o) = &offset {
+        check_expr(s, o, Kind::Length, cmd, "offset")?;
+        let value = s.doc.eval(o, Kind::Length).map_err(|err| bad(cmd, format!("offset: {err}")))?;
+        if !(value >= 0.0 && value.is_finite()) {
+            return Err(bad(cmd, solidcraft_doc::THREAD_OFFSET_NEGATIVE));
+        }
+        if value > 0.0 && tip == ThreadTip::Start {
+            return Err(bad(cmd, solidcraft_doc::THREAD_OFFSET_WITH_TIP));
+        }
+    }
     let up_to = match p.get("up_to") {
         None | Some(Value::Null) => None,
         Some(v) => Some(match vec3(v) {
@@ -6124,6 +6136,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         face: FacePick(*face),
         designation,
         length,
+        offset,
         modeled,
         continuous_flanks,
         from,
