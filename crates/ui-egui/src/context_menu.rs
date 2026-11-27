@@ -273,6 +273,9 @@ pub struct MenuState {
     /// The construction axis under the cursor when the viewport menu opened. A right-click leaves
     /// it unselected, as it does a plane; the menu offers Find in Browser for it (#15355).
     pub axis: Option<String>,
+    /// The model line under the cursor when the sheet's menu opened: its view and the body that
+    /// drew it, which Hide in This View leaves out of that view (#22107).
+    pub drawing_line: Option<(u64, solidcraft_engine::drawing_view::Shown)>,
     /// Where the viewport menu opened and the keys held at that click (Select Other adds with
     /// them).
     opened: Option<(Pos2, crate::tool_modifiers::Held)>,
@@ -630,11 +633,12 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Body { name } => {
             let mut v = body_items(app, std::slice::from_ref(name), true);
             // A selected browser body hands every selected body to Export, the mesh dialogs
-            // (#18902), Isolate, and Show/Hide. A row outside the selection still targets only
-            // that row.
+            // (#18902), Isolate, Show/Hide and Edge Lines. A row outside the selection still
+            // targets only that row.
             let selected = sel_bodies(app);
             if selected.len() > 1 && selected.contains(name) {
                 let all_hidden = selected.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
+                let all_edgeless = selected.iter().all(|b| app.session.doc.edgeless_bodies.contains(b));
                 for item in &mut v {
                     match item.id.as_str() {
                         "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" | "ui.isolate" => {
@@ -643,6 +647,10 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                         "ui.hide" | "ui.show" => {
                             item.id = if all_hidden { "ui.show" } else { "ui.hide" }.into();
                             item.params = Some(json!({ "bodies": selected }));
+                        }
+                        "body.edge_lines" => {
+                            item.label = if all_edgeless { "Show Edge Lines" } else { "Hide Edge Lines" }.into();
+                            item.params = Some(json!({ "bodies": selected, "show": all_edgeless }));
                         }
                         _ => {}
                     }
@@ -692,8 +700,9 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
             let drawing = crate::drawing_workspace::active(app) || crate::workspace::sheet_scope(app);
             // Design, then Drawing (the owner's order), then Render: the workspaces there are. Ones still
             // to come aren't listed.
-            vec![
-                act("ui.workspace.design", "Design", "ws_design").with(json!({"workspace":"design"})).key(if rendering || drawing {
+            let plugin = crate::plugin_workspaces::active_id(app).is_some();
+            let mut items = vec![
+                act("ui.workspace.design", "Design", "ws_design").with(json!({"workspace":"design"})).key(if rendering || drawing || plugin {
                     ""
                 } else {
                     "current"
@@ -713,7 +722,9 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
                         crate::render_workspace::entry_open(app)
                     },
                 ),
-            ]
+            ];
+            items.extend(crate::plugin_workspaces::switcher_items(app));
+            items
         }
         Target::Units => crate::prefs::UNITS
             .iter()
@@ -1022,6 +1033,13 @@ fn drawing_items(app: &SolveApp) -> Vec<Item> {
                 tool(app, "drawing.view.projected.planned", "Projected View", drawing.can_project_from(*one).is_ok())
                     .with(json!({"parent": encode(*one)})),
             );
+            // A right-click on one of the view's model lines leaves that line's body out of it.
+            if let Some((view, shown)) = app.menu.drawing_line.as_ref().filter(|(view, _)| view == one) {
+                v.push(
+                    act("ui.drawingHideBody", "Hide in This View", "eye")
+                        .with(json!({"view": encode(*view), "path": shown.path, "body": shown.body})),
+                );
+            }
         } else if drawing.dimension(*one).is_some() {
             v.push(act("ui.drawingEdit", "Edit Text", "edit").with(object));
         } else if drawing.notes.by_id(*one).is_some() {
@@ -1294,6 +1312,9 @@ fn construction_feature(app: &SolveApp, name: &str) -> Option<u64> {
 fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
     let names = json!(bodies);
     let all_hidden = bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
+    // Hide Edge Lines draws the bodies without their outlines in every visual style (#21975);
+    // once every one of them is set so, the item puts them back.
+    let all_edgeless = bodies.iter().all(|b| app.session.doc.edgeless_bodies.contains(b));
     let one = bodies.len() == 1;
     let locked = bodies.iter().all(|b| app.session.visibility.locked_bodies.contains(b));
     let items = json!(bodies.iter().map(|b| json!({"type": "body", "name": b})).collect::<Vec<_>>());
@@ -1321,6 +1342,8 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         Item::sep(),
         act(if all_hidden { "ui.show" } else { "ui.hide" }, "Show/Hide", "eye").key("V").with(json!({ "bodies": names })),
         act("ui.lock", if locked { "Unlock" } else { "Lock" }, "ground").with(json!({ "bodies": names })),
+        cmd(app, "body.edge_lines", if all_edgeless { "Show Edge Lines" } else { "Hide Edge Lines" })
+            .with(json!({ "bodies": names, "show": all_edgeless })),
         isolate_bodies_item(app, bodies),
     ];
     if browser {
@@ -1450,7 +1473,7 @@ fn replace_sketch_from_file(app: &mut SolveApp, sketch: u64, at: Pos2) {
         let sketches: Vec<(u64, String)> = match solidcraft_engine::io::read_design_file(&path, None::<fn(solidcraft_engine::io::DesignPreview)>) {
             Ok((doc, _)) => doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::Sketch { .. })).map(|f| (f.id, f.name.clone())).collect(),
             Err(e) => {
-                app.set_status(format!("{path}: {e}"), true);
+                app.set_status(format!("{}: {e}", crate::display_user_path(&path)), true);
                 return;
             }
         };
@@ -1566,6 +1589,9 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
         entries.insert(0, Item::heading("Shared child: edits affect all copies of its parent"));
     }
     let bodies = app.session.occurrence_bodies(path, true).unwrap_or_default();
+    // What this placement shows decides the rows that act on it. The component's own bodies don't:
+    // a sub-assembly built from parts defined in another component owns none (#22710).
+    let has_bodies = !bodies.is_empty();
     let selected_paths = crate::browser::selected_occurrence_paths(app, path);
     let show_selected = selected_paths.iter().all(|path| app.session.occurrence_hidden(path));
     // The component's menu asks its first placement; this row may be another one.
@@ -1576,7 +1602,10 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
             item.enabled = app.session.active_occurrence_path.as_deref() != Some(path);
         }
         "ui.editInPlace" => item.params = Some(json!({"component": placement.component, "path": path})),
-        "ui.zoomTo" => item.params = Some(json!({ "items": [Sel::Occurrence { path: path.to_vec() }] })),
+        "ui.zoomTo" => {
+            item.params = Some(json!({ "items": [Sel::Occurrence { path: path.to_vec() }] }));
+            item.enabled = has_bodies;
+        }
         "occurrence.ground" => {
             item.label = if placement.grounded { "Unground" } else { "Ground" }.into();
             item.params = Some(json!({"occurrence": placement.occurrence, "grounded": !placement.grounded}));
@@ -1610,7 +1639,14 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
                 item.params = Some(json!({"paths": selected_paths}));
             }
         }
-        "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
+        "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => {
+            item.params =
+                Some(if item.id == "ui.export" { json!({"bodies": bodies, "component": placement.component}) } else { json!({"bodies": bodies}) });
+            item.enabled = has_bodies && (item.id != "ui.sendToSlicer" || crate::dialogs_save_mesh::available(app));
+        }
+        // A flyout's row is on while any of its entries is, as `group` made it; the entries
+        // above may have changed (each row is visited after its entries).
+        id if id.starts_with("ui.group.") && !item.children.is_empty() => item.enabled = item.children.iter().any(|c| c.enabled),
         // Expand Below and Collapse Below fold this placement's branch; Collapse All keeps the
         // whole tree.
         "browser.expand_all" | "browser.collapse_all" if item.params.as_ref().is_some_and(|p| p.get("component").is_some()) => {
@@ -1618,6 +1654,17 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
         }
         _ => {}
     });
+    // A placement that shows bodies can be isolated even when its component owns none, as a
+    // sub-assembly of parts defined elsewhere (#22710): its own Isolate goes before Zoom to Selection.
+    let isolates = |item: &Item| item.id == "ui.isolate" || item.id == "ui.isolateOccurrence";
+    if has_bodies && !entries.iter().any(isolates) {
+        let mut isolate = isolate_occurrence_item(app, path);
+        if selected_paths.len() > 1 {
+            isolate.params = Some(json!({"paths": selected_paths}));
+        }
+        let at = entries.iter().position(|item| item.id == "ui.zoomTo").unwrap_or(entries.len());
+        entries.insert(at, isolate);
+    }
     // One placement of several can show another design on its own, above the row for all of them.
     if app.session.doc.links.contains_key(&placement.component)
         && app.session.doc.occurrences.iter().filter(|o| o.component == placement.component).count() > 1
@@ -1765,7 +1812,7 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
         "Export",
         "export",
         vec![
-            act("ui.export", "Export…", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()),
+            act("ui.export", "Export…", "export").with(json!({ "bodies": names, "component": id })).on(!bodies.is_empty()),
             act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()),
             act("ui.sendToSlicer", "Send to Slicer", "export")
                 .with(json!({ "bodies": names }))
@@ -2372,6 +2419,15 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::drawing_workspace::edit(app, object, at);
             }
         }
+        "ui.drawingHideBody" => {
+            if let Some(view) = p.get("view").and_then(Value::as_str).and_then(solidcraft_engine::doc::ids::decode)
+                && let Ok(body) =
+                    serde_json::from_value::<solidcraft_engine::doc::drawing_view::HiddenBody>(json!({"path": p["path"], "body": p["body"]}))
+                && let Err(error) = crate::drawing_workspace::hide_body_in_view(app, view, body)
+            {
+                app.set_status(error, true);
+            }
+        }
         "drawing.view.projected.planned" if item.params.is_some() => {
             if let Some(parent) = p.get("parent").and_then(Value::as_str).and_then(solidcraft_engine::doc::ids::decode) {
                 crate::drawing_workspace::start_projected(app, parent);
@@ -2520,7 +2576,7 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.export" => {
             let body = bodies.first().map(String::as_str);
             let default_name = crate::export_name::default_for_bodies(app, &bodies);
-            let name = crate::export_name::offered(app, body, &default_name);
+            let name = crate::export_name::offered_for_component(app, body, id_of(&p, "component"), &default_name);
             // cadmpeg's Rhino writer needs a temporary file, which the browser has not.
             let formats: Vec<&str> = ["step", "stp", "igs", "stl", "3mf", "obj", "glb", "usd", "usda", "usdc", "usdz", "3dm"]
                 .into_iter()
@@ -2783,7 +2839,9 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 app.set_status(e, true);
             }
         }
-        "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" | "ui.workspace.drawing" => {
+        id if matches!(id, "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" | "ui.workspace.drawing")
+            || id.starts_with("ui.workspace.plugin:") =>
+        {
             let result = p.get("workspace").and_then(Value::as_str).map_or(Ok(()), |workspace| crate::workspace::enter(app, workspace));
             if let Err(error) = result {
                 app.set_status(error, true);
@@ -3330,7 +3388,15 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
     }
     if crate::drawing_workspace::active(app) {
         let under = crate::drawing_sheet_page::hovered(app);
-        return open_on_sheet(app, at, held, under);
+        // Over a view on the sheet, the model line under the cursor (Hide in This View, #22107).
+        let over_view = match &under {
+            Some(Sel::Drawing { object, .. }) => app.session.drawing("drawing.inspect").is_ok_and(|drawing| drawing.view(*object).is_some()),
+            _ => false,
+        };
+        let line = if over_view { crate::drawing_sheet_page::line_under(app, at) } else { None };
+        open_on_sheet(app, at, held, under);
+        app.menu.drawing_line = line;
+        return;
     }
     if crate::viewport::view_gizmo_at(app, at) {
         return open_for(app, at, Target::ViewGizmo);
@@ -3397,6 +3463,7 @@ pub(crate) fn open_on_sheet(app: &mut SolveApp, at: Pos2, held: crate::tool_modi
     app.menu.section_plane = None;
     app.menu.face = None;
     app.menu.plane = None;
+    app.menu.drawing_line = None;
     crate::select_other::close(app);
     if let Some(sel) = under {
         let before = app.session.selection.clone();
@@ -4136,6 +4203,14 @@ pub fn finish_rename(app: &mut SolveApp, text: Option<&str>, commit: bool) -> Re
 fn workspace_style(item: &Item) -> Option<crate::ui_kit::WorkspaceStyle> {
     use crate::ui_kit::WorkspaceStyle;
     use solidcraft_theme::AccentRamp;
+    if item.params.as_ref().and_then(|params| params.get("workspace")).and_then(Value::as_str).is_some_and(|id| id.starts_with("plugin:")) {
+        return Some(WorkspaceStyle {
+            slug: "plugin",
+            description: if item.enabled { "ui.plugin_workspace.description" } else { "ui.plugin_workspace.unavailable" },
+            tabs: Some("ui.plugin_workspace.tabs"),
+            ramp: None,
+        });
+    }
     Some(match item.label.as_str() {
         "Design" => {
             WorkspaceStyle { slug: "design", description: "ui.workspace_design_description", tabs: Some("ui.workspace_design_tabs"), ramp: None }
@@ -5441,6 +5516,21 @@ mod tests {
         run_item(&mut h.app, &show, Pos2::ZERO);
         assert!(h.app.session.body_visible("BoxA") && h.app.session.body_visible("BoxB"));
 
+        // Edge lines (#21975) also go to the whole selection, and the label reads all of it: with
+        // only BoxB drawn without them, the row offers to hide them on both.
+        h.app.run("body.edge_lines", json!({ "body": "BoxB", "show": false })).unwrap();
+        let edge_item = |h: &Harness| {
+            items(&h.app, &Target::Body { name: "BoxA".into() }).into_iter().find(|i| i.id == "body.edge_lines").expect("body menu offers Edge Lines")
+        };
+        let hide_edges = edge_item(&h);
+        assert_eq!(hide_edges.label, "Hide Edge Lines");
+        assert_eq!(hide_edges.params, Some(json!({ "bodies": ["BoxA", "BoxB"], "show": false })));
+        run_item(&mut h.app, &hide_edges, Pos2::ZERO);
+        assert!(["BoxA", "BoxB"].iter().all(|b| h.app.session.doc.edgeless_bodies.contains(*b)));
+        let show_edges = edge_item(&h);
+        assert_eq!(show_edges.label, "Show Edge Lines");
+        assert_eq!(show_edges.params, Some(json!({ "bodies": ["BoxA", "BoxB"], "show": true })));
+
         // A body outside the selection still targets only itself.
         let other =
             items(&h.app, &Target::Body { name: "BoxC".into() }).into_iter().find(|i| i.label == "Isolate").expect("other body menu offers Isolate");
@@ -5544,6 +5634,18 @@ mod tests {
 mod workspace_menu_tests {
     use super::*;
     use crate::scenario::{Harness, rect_of};
+
+    #[test]
+    fn plugin_workspace_rows_are_drawn_with_the_host_workspace_style() {
+        let ctx = crate::fonts::test_context();
+        let item = act("ui.workspace.plugin:manufacture/cam", "Machining", "ws_design").with(json!({"workspace":"plugin:manufacture/cam"}));
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            workspace_menu(ui, std::slice::from_ref(&item), None, 720.0);
+        });
+        output.textures_delta.clear();
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text() == "Machining")));
+        assert!(rect_of("menu:ui.workspace.plugin:manufacture/cam").is_some());
+    }
 
     #[test]
     fn workspace_titles_use_one_semibold_text_run() {

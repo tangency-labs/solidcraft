@@ -420,7 +420,15 @@ impl ThreadForm {
             }
             return Ok(ThreadSize { form: self, major: size.major, pitch: size.pitch(), lead: size.pitch() });
         }
-        let t = s.trim().to_ascii_uppercase().replace('×', "X").replace(' ', "");
+        // An ISO metric size may end in its tolerance class (`M8-6g`), which names no size.
+        let size = match self {
+            ThreadForm::Metric => match metric_class(s) {
+                (_, Some(class)) if crate::thread_catalog::iso_965_class(class).is_none() => return Err(not_a_class(class)),
+                (size, _) => size,
+            },
+            _ => s,
+        };
+        let t = size.trim().to_ascii_uppercase().replace('×', "X").replace(' ', "");
         let n = f64::from(starts.max(1));
         let (major, pitch, lead) = match self {
             ThreadForm::Metric => {
@@ -499,7 +507,7 @@ impl ThreadForm {
 
     fn example(self) -> &'static str {
         match self {
-            ThreadForm::Metric => "like M8 or M8x1",
+            ThreadForm::Metric => "like M8, M8x1 or M8-6g",
             ThreadForm::Unified => "like 1/4-20 UNC-2A or #10-32 UNF (UNC, UNF, UNEF or UN; classes 1A/2A/3A external, 1B/2B/3B internal)",
             ThreadForm::Trapezoidal => "like Tr20x4 or Tr40x14(P7)",
             ThreadForm::Acme => "like 1/2-10 ACME",
@@ -513,9 +521,23 @@ impl ThreadForm {
         }
     }
 
-    /// A Unified class names its side: A for a shaft, B for a hole. Classes are retained in
-    /// the callout; pitch-diameter allowances are not modelled by the basic profile.
+    /// A Unified class names its side: A for a shaft, B for a hole; so does an ISO metric one
+    /// (ISO 965-1, [`crate::thread_catalog::iso_965_class`]): e, f, g or h for a shaft, G or H for
+    /// a hole. Classes are retained in the callout; pitch-diameter allowances are not modelled by
+    /// the basic profile.
     pub fn check_class(self, designation: &str, internal: bool) -> Result<(), String> {
+        if self == ThreadForm::Metric {
+            self.parse(designation, 1)?;
+            return match metric_class(designation).1 {
+                Some(class) if crate::thread_catalog::iso_965_class(class) != Some(internal) => Err(format!(
+                    "ISO 965-1 class {class} is for an {} thread; this {} needs {} (uppercase for a hole, lowercase for a shaft)",
+                    if internal { "external" } else { "internal" },
+                    if internal { "hole" } else { "shaft" },
+                    if internal { "G or H, such as 6H or 5H6H" } else { "e, f, g or h, such as 6g or 5g6g" }
+                )),
+                _ => Ok(()),
+            };
+        }
         if self != ThreadForm::Unified {
             return Ok(());
         }
@@ -557,6 +579,13 @@ impl ThreadForm {
             }
             _ => None,
         }
+    }
+
+    /// The tolerance class a designation of this form ends in, as written: an ISO metric one's
+    /// (`M8-6g` gives `6g`, checked or not); none for the other forms, whose classes are part of
+    /// the size's text or none.
+    pub fn tolerance_class(self, designation: &str) -> Option<&str> {
+        if self == ThreadForm::Metric { metric_class(designation).1 } else { None }
     }
 
     /// An ISO 7-1 designation on an internal thread: `Rc` (the taper internal thread), else `R`.
@@ -792,6 +821,32 @@ fn unified_designation(s: &str) -> Option<(f64, f64, Option<&str>)> {
     Some((major, INCH / tpi, class))
 }
 
+/// An ISO metric designation's size and its tolerance class, if it ends in one: `M8-6g` is
+/// (`M8`, `6g`). ISO 965-1 writes the class after a dash (`M20 × 2 – 5H`): a hyphen or an en dash,
+/// with or without spaces around it. Only a class-shaped end (a digit and a letter, once or twice)
+/// is split off, so every size the parser read before reads the same (`M8x1e-1`, a pitch 0.1).
+pub(crate) fn metric_class(s: &str) -> (&str, Option<&str>) {
+    let s = s.trim();
+    let Some(at) = s.rfind(['-', '–']) else { return (s, None) };
+    let after = at + s.get(at..).and_then(|r| r.chars().next()).map_or(1, char::len_utf8);
+    let (Some(size), Some(tail)) = (s.get(..at), s.get(after..)) else { return (s, None) };
+    let tail = tail.trim();
+    let class = |d: u8, a: u8| d.is_ascii_digit() && a.is_ascii_alphabetic();
+    let shaped = match *tail.as_bytes() {
+        [d, a] => class(d, a),
+        [d1, a1, d2, a2] => class(d1, a1) && class(d2, a2),
+        _ => false,
+    };
+    if shaped { (size.trim_end(), Some(tail)) } else { (s, None) }
+}
+
+/// Why a class-shaped end of a metric designation is no ISO 965-1 class.
+fn not_a_class(class: &str) -> String {
+    format!(
+        "`{class}` is not an ISO 965-1 tolerance class: a shaft takes e, f, g or h, such as 6g, 4h or 5g6g (pitch diameter grade 3 to 9, then major diameter grade 4, 6 or 8); a hole takes G or H, such as 6H or 5H6H (grades 4 to 8); a class the same for both diameters is written once (6g, not 6g6g)"
+    )
+}
+
 /// A number; fractions allowed (`1/2`).
 fn num(s: &str) -> Option<f64> {
     let s = s.trim();
@@ -904,6 +959,51 @@ mod tests {
         }
         assert!(form.parse(&"1".repeat(5000), 1).is_err());
         assert!(ThreadForm::Metric.parse("1/4-20 UNC", 1).unwrap_err().contains("a unified designation, not metric"));
+    }
+
+    /// An ISO metric class (ISO 965-1) after the size names its side by its letter's case and
+    /// leaves the size as it was; a class-shaped end that is no class is refused as such, other
+    /// endings as an unknown size, as before; a size the parser read before still reads the same.
+    #[test]
+    fn metric_classes_name_the_side_and_keep_the_size() {
+        let form = ThreadForm::Metric;
+        for (text, size, internal) in [
+            ("M8-6g", "M8", false),
+            ("M8x1-6H", "M8x1", true),
+            ("M10x1.25-5g6g", "M10x1.25", false),
+            ("M16xPh3P1.5-6g", "M16xPh3P1.5", false),
+            ("M8 - 6g", "M8", false),
+            ("M8- 6g", "M8", false),
+            ("M20 × 2 – 5H", "M20x2", true),
+        ] {
+            assert_eq!(form.parse(text, 1), form.parse(size, 1), "{text}");
+            assert_eq!(ThreadForm::of_designation(text), Some(form), "{text}");
+            assert!(form.check_class(text, internal).is_ok(), "{text}");
+            let error = form.check_class(text, !internal).unwrap_err();
+            assert!(error.contains(if internal { "this shaft needs e, f, g or h" } else { "this hole needs G or H" }), "{text}: {error}");
+        }
+        assert_eq!(form.tolerance_class("M20 × 2 – 5H"), Some("5H"));
+        assert_eq!(form.tolerance_class("M8"), None);
+        assert_eq!(ThreadForm::Unified.tolerance_class("1/4-20 UNC-2A"), None);
+        for text in ["M8", "M8x1"] {
+            assert!(form.check_class(text, true).is_ok() && form.check_class(text, false).is_ok());
+        }
+        for text in ["M8-5g", "M8-6d", "M8-6g6g", "M8-2A", "M8-9H"] {
+            let error = form.parse(text, 1).unwrap_err();
+            assert!(error.contains("is not an ISO 965-1 tolerance class"), "{text}: {error}");
+        }
+        for text in ["M8-LH", "M8-6g-LH", "M8-6g-L", "M8-6H/6g", "M8-", "M-6g", "M8 6g"] {
+            let error = form.parse(text, 1).unwrap_err();
+            assert!(error.contains("unknown metric thread"), "{text}: {error}");
+        }
+        // An exponent's minus is no class: M8x1e-1 is M8 with a 0.1 mm pitch, as before.
+        let fine = form.parse("M8x1e-1", 1).unwrap();
+        assert!((fine.major, fine.pitch) == (8.0, 0.1), "{fine:?}");
+        assert!(form.parse(&format!("M8-{}", "6g".repeat(5000)), 1).is_err());
+        // A tapped hole's size names no class: its class is saved apart (`thread_class`).
+        assert_eq!(crate::parse_metric_thread("M8-6H"), None);
+        assert!(crate::parse_tapped_thread("M8-6H").is_none());
+        assert_eq!(crate::parse_metric_thread("M8"), Some((8.0, 1.25)));
     }
 
     /// Pipe-thread designations read to their table's size and write back as the standards write
