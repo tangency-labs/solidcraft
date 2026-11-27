@@ -2133,7 +2133,7 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                     let variants: Vec<_> = f.commands.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect();
                     dropdown_keys(app, ui, &variants);
                     let width = dropdown_width(app, ui, &variants);
-                    sketch_menu_rows(app, ui, &variants, width, &mut menu, &mut toggle);
+                    create_menu_rows(app, ui, "SKETCH", &variants, width, &mut menu, &mut toggle);
                 });
             }
         }
@@ -2311,6 +2311,12 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             let cmds: Vec<_> = grouped.iter().map(|(_, c)| *c).collect();
                             let row_w = dropdown_width(app, ui, &cmds);
                             ui.set_width(row_w);
+                            let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(ROW_H * 3.0);
+                            if tab == "MODEL" && *panel == "CREATE" && reveal.is_none() && compact_model_create(cmds.len(), room) {
+                                model_create_menu(app, ui, &cmds, row_w, room, &mut menu, &mut toggle);
+                                ribbon::section_footer(ui, solidcraft_ui_text::tr("ui.ribbon_pin_footer"));
+                                return;
+                            }
                             // Up and Down move the keyboard focus through the enabled rows (from none
                             // focused: the first or the last), instead of egui's own spatial move.
                             let (down, up) = ui.input(|i| (i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::ArrowUp)));
@@ -2335,7 +2341,6 @@ fn ribbon_contents(app: &mut SolveApp, ui: &mut egui::Ui, shape: RibbonShape) ->
                             // The rows scroll when the drop-down would run past the window's bottom.
                             // `min_scrolled_height` lets the rows grow past the size the area kept from
                             // an earlier, shorter list (#874); they still shrink to fit their content.
-                            let room = (ui.ctx().content_rect().bottom() - ui.cursor().top() - 64.0).max(ROW_H * 3.0);
                             egui::ScrollArea::vertical().id_salt("panel_menu_rows").max_height(room).min_scrolled_height(room).show(ui, |ui| {
                                 for (heading, c) in &grouped {
                                     if let Some(heading) = heading {
@@ -2902,6 +2907,49 @@ fn skip_on_ribbon(cmds: Vec<&'static solidcraft_engine::CommandSpec>, on_ribbon:
     if rest.is_empty() { cmds } else { rest }
 }
 
+/// Related Model Create commands share flyouts when the list cannot fit vertically.
+const MODEL_CREATE_FAMILIES: &[(&str, &[&str])] = &[
+    ("Primitives", &["solid.box", "solid.cylinder", "solid.sphere", "solid.cone", "solid.torus"]),
+    ("Along Path", &["solid.coil", "solid.pipe", "solid.revolve", "solid.sweep", "solid.loft"]),
+    ("At Face", &["plastic.boss", "solid.dome", "solid.emboss", "plastic.rest", "solid.thread"]),
+];
+
+fn compact_model_create(count: usize, room: f32) -> bool {
+    count as f32 * ROW_H > room
+}
+
+fn model_create_menu(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    cmds: &[&'static solidcraft_engine::CommandSpec],
+    width: f32,
+    room: f32,
+    menu: &mut Option<(egui::Pos2, &'static str, bool)>,
+    toggle: &mut Option<&'static str>,
+) {
+    let mut rest = cmds.to_vec();
+    egui::ScrollArea::vertical().id_salt("model_create_rows").max_height(room).show(ui, |ui| {
+        for &(label, ids) in MODEL_CREATE_FAMILIES {
+            let variants: Vec<_> = cmds.iter().copied().filter(|c| ids.contains(&c.id)).collect();
+            if variants.len() < 2 {
+                continue;
+            }
+            rest.retain(|c| !ids.contains(&c.id));
+            let Some(first) = variants.first() else { continue };
+            let mut item = crate::ui_kit::MenuItem::new(label, label, first.icon);
+            item.submenu = true;
+            let response = crate::ui_kit::Menu::item_button(ui, &item, |ui| {
+                dropdown_keys(app, ui, &variants);
+                let variants_w = dropdown_width(app, ui, &variants);
+                create_menu_rows(app, ui, "MODEL", &variants, variants_w, menu, toggle);
+            });
+            crate::scenario::publish_handle(&format!("model_create_family:{label}"), response.response.rect.center());
+        }
+        dropdown_keys(app, ui, &rest);
+        create_menu_rows(app, ui, "MODEL", &rest, width, menu, toggle);
+    });
+}
+
 /// Creation menus keep related variants together, including collapsed and overflow panels.
 /// The plain rows are `width` wide, the width the menu gives its family rows.
 fn sketch_create_menu(
@@ -2923,7 +2971,7 @@ fn sketch_create_menu(
                 let response = crate::ui_kit::Menu::item_button(ui, &item, |ui| {
                     dropdown_keys(app, ui, &variants);
                     let variants_w = dropdown_width(app, ui, &variants);
-                    sketch_menu_rows(app, ui, &variants, variants_w, menu, toggle);
+                    create_menu_rows(app, ui, "SKETCH", &variants, variants_w, menu, toggle);
                 });
                 crate::scenario::publish_handle(&format!("create_family:{}", f.label), response.response.rect.center());
             }
@@ -2931,21 +2979,22 @@ fn sketch_create_menu(
         crate::ui_kit::Menu::separator(ui);
         let rest: Vec<_> = cmds.iter().copied().filter(|c| crate::sketch_families::family(c.id).is_none()).collect();
         dropdown_keys(app, ui, &rest);
-        sketch_menu_rows(app, ui, &rest, width, menu, toggle);
+        create_menu_rows(app, ui, "SKETCH", &rest, width, menu, toggle);
     });
 }
 
-fn sketch_menu_rows(
+fn create_menu_rows(
     app: &mut SolveApp,
     ui: &mut egui::Ui,
+    tab: &str,
     cmds: &[&'static solidcraft_engine::CommandSpec],
     width: f32,
     menu: &mut Option<(egui::Pos2, &'static str, bool)>,
     toggle: &mut Option<&'static str>,
 ) {
     for c in cmds {
-        let pinned = crate::toolbar_custom::pinned_on(app, "SKETCH", c.id).is_some();
-        // A hovered search result in a sketch creation menu is marked steadily (#7287).
+        let pinned = crate::toolbar_custom::pinned_on(app, tab, c.id).is_some();
+        // A hovered search result in a creation menu is marked steadily (#7287).
         let revealed = app.sbox.reveal.as_ref().is_some_and(|r| r.preview && r.id == c.id);
         match dropdown_row(app, ui, c, width, pinned, revealed.then_some(1.0)) {
             None => {}
@@ -5247,6 +5296,19 @@ mod dropdown_tests {
         }
         let box_ = solidcraft_engine::find_command("solid.box").unwrap();
         assert_eq!(skip_on_ribbon(vec![box_], &["solid.box"]).len(), 1, "a drop-down is never left empty");
+    }
+
+    #[test]
+    fn model_create_compacts_only_when_rows_exceed_available_height() {
+        assert!(!compact_model_create(15, 15.0 * ROW_H));
+        assert!(compact_model_create(15, 8.0 * ROW_H));
+        let mut ids = std::collections::BTreeSet::new();
+        for &(_, commands) in MODEL_CREATE_FAMILIES {
+            for &id in commands {
+                assert!(ids.insert(id), "duplicate grouped command {id}");
+                assert!(solidcraft_engine::find_command(id).is_some(), "unknown grouped command {id}");
+            }
+        }
     }
 
     #[test]
