@@ -804,6 +804,15 @@ pub(crate) fn measure_items(s: &Session, items: &Value) -> Result<Value> {
             sels.push(sel);
         }
     }
+    // Three or more measure only as round items: one that cannot be round (a body, a vertex, a
+    // plane) is refused before anything is measured, as the third item always was.
+    if sels.len() > 2
+        && !sels.iter().all(|x| {
+            matches!(x, Sel::Edge { .. } | Sel::Face { .. } | Sel::SketchCurve { .. } | Sel::ExternalSketchCurve { .. } | Sel::Profile { .. })
+        })
+    {
+        return Err(bad(cmd, MEASURE_ITEM_COUNT));
+    }
     let world = s.world_state()?;
     let mut described = Vec::new();
     for x in &sels {

@@ -2869,8 +2869,8 @@ fn measure_items_reports_row_spacing_of_holes() {
 }
 
 /// Holes round a bolt circle (#10170): six 4 mm holes on a 60 mm pitch circle in a disc give the
-/// pitch-circle diameter, the 60° between holes and the chord between neighbours (30 mm); a hole
-/// drilled across them is refused with them, its axis being another.
+/// pitch-circle diameter, the 60° between holes and the chord between neighbours (30 mm). A
+/// hole's rim picked beside its own wall is refused in the kernel's words: two items, one centre.
 #[test]
 fn measure_items_reports_a_bolt_circle() {
     let mut s = Session::default();
@@ -2904,6 +2904,15 @@ fn measure_items_reports_a_bolt_circle() {
     assert!(angles.len() == 6 && angles.iter().all(|a| (a.as_f64().unwrap() - 60.0).abs() < 1e-6), "{r}");
     assert_eq!(sp["even"], true, "{r}");
     assert!((sp["angle_pitch_deg"].as_f64().unwrap() - 60.0).abs() < 1e-12 && (sp["pitch"].as_f64().unwrap() - 30.0).abs() < 1e-6, "{r}");
+
+    let (x, y) = at(0);
+    let rim = json!({"type": "edge", "body": "Flange", "point": [x, y + 2.0, 6.0]});
+    let e = s.execute("inspect.measure", &json!({"items": [hole(0), hole(1), rim]})).unwrap_err().to_string();
+    assert!(e.ends_with("`inspect.measure`: two of the round items share one centre"), "{e}");
+    // Bodies and vertices are never round: three of them are refused as a third item always was.
+    let corner = json!({"type": "vertex", "body": "Flange", "point": [40, 0, 0]});
+    let e = s.execute("inspect.measure", &json!({"items": [hole(0), hole(1), corner]})).unwrap_err().to_string();
+    assert!(e.contains("measure one or two items, or three or more round edges or holes"), "{e}");
 }
 
 /// The closest distance between a face and an edge, line or face that ends (#16270, #16271): a
