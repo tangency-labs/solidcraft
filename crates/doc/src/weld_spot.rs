@@ -133,6 +133,10 @@ pub enum MarkFaces {
     /// sheet's thickness), so the spot shows on both faces whatever the sheets; on both faces when
     /// the style has no ball.
     WhereBallHidden,
+    /// Only on the last sheet's outer face (along `normal`).
+    Upper,
+    /// Only on the first sheet's outer face (against `normal`).
+    Lower,
 }
 
 /// The marks of a [`SpotStyle`]: three zones on an outer face, a core out to diameter `core`, a
@@ -400,6 +404,8 @@ impl Layout {
                 None => [false, false],
                 Some(MarkFaces::Both) => [true, true],
                 Some(MarkFaces::WhereBallHidden) => [!shows(last), !shows(first)],
+                Some(MarkFaces::Upper) => [true, false],
+                Some(MarkFaces::Lower) => [false, true],
             },
             ball,
             pin,

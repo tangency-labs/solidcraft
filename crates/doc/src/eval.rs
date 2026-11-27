@@ -40,6 +40,21 @@ const FACES_KEPT: usize = 4;
 /// were worked out on: by face, count each way and display quality.
 type IsoLines = (Option<Body>, std::collections::HashMap<(usize, usize, usize), Arc<[kernel::IsoLine]>>);
 
+/// O(1) weak identity of a body's lazy rigid mesh placement (if any), preventing ABA reuse
+/// without retaining the placement or triggering tessellation.
+#[derive(Clone)]
+pub(crate) struct PlacementCell(Option<std::sync::Weak<placed_mesh::PlacedMesh>>);
+
+impl PlacementCell {
+    pub(crate) fn matches(&self, body: &ModelBody) -> bool {
+        match (&self.0, &body.mesh_placement) {
+            (Some(stored), Some(live)) => std::sync::Weak::ptr_eq(stored, &Arc::downgrade(live)),
+            (None, None) => true,
+            _ => false,
+        }
+    }
+}
+
 /// A body in the evaluated model.
 #[derive(Clone, Debug)]
 pub struct ModelBody {
@@ -543,6 +558,29 @@ impl ModelBody {
     /// unchanged) and, while it is held, by no other body.
     pub fn display_identity(&self) -> Arc<dyn std::any::Any + Send + Sync> {
         self.mesh.clone()
+    }
+
+    /// Weak reference to this body's display mesh cell, for O(1) cache identity checks without
+    /// triggering tessellation or retaining computed meshes.
+    pub(crate) fn mesh_cell(&self) -> std::sync::Weak<OnceLock<Arc<Mesh>>> {
+        Arc::downgrade(&self.mesh)
+    }
+
+    /// Address key of this body's display mesh cell, for O(1) hashing without triggering
+    /// tessellation.
+    pub(crate) fn mesh_cell_id(&self) -> usize {
+        Arc::as_ptr(&self.mesh) as usize
+    }
+
+    /// Weak reference to this body's rigid mesh placement (when present), for O(1) cache identity
+    /// checks without triggering tessellation.
+    pub(crate) fn placement_cell(&self) -> PlacementCell {
+        PlacementCell(self.mesh_placement.as_ref().map(Arc::downgrade))
+    }
+
+    /// Address key of this body's rigid mesh placement (0 when none), for O(1) hashing.
+    pub(crate) fn placement_cell_id(&self) -> usize {
+        self.mesh_placement.as_ref().map_or(0, |placed| Arc::as_ptr(placed) as usize)
     }
 
     /// For a rigidly placed copy of another body (a placement of a component's body, a pattern
@@ -1657,6 +1695,8 @@ struct Primed {
     results: Arc<std::collections::HashMap<u64, FeatureResult>>,
     /// The pose each of its pose-only features was evaluated at.
     poses: Arc<std::collections::HashMap<u64, u64>>,
+    /// The reached-component digest each feature was evaluated at.
+    component_keys: Arc<std::collections::HashMap<u64, u64>>,
 }
 
 /// Where a model keeps its results besides the cache ([`Model::keep`]). A copy of the model
@@ -2044,9 +2084,10 @@ pub struct Model {
     /// The document context the last `evaluate` ran in ([`context_digest`]).
     context: u64,
     /// The last active result of each feature hidden by the history marker, with its document
-    /// context. These share the existing states, so rolling back does not surrender them to
-    /// the bounded cache. A result leaves this map when its feature is active again or removed.
-    rolled_results: std::collections::HashMap<u64, (u64, FeatureResult)>,
+    /// context and reached-component digest. These share the existing states, so rolling back does
+    /// not surrender them to the bounded cache. A result leaves this map when its feature is active
+    /// again or removed.
+    rolled_results: std::collections::HashMap<u64, (u64, Option<u64>, FeatureResult)>,
     /// Results other copies of this model evaluated (ahead, off the window thread, or for
     /// another configuration row) that `evaluate` takes for features they match
     /// ([`Model::prime`], [`Model::prime_also`]), each with that copy's context and the poses
@@ -2070,6 +2111,8 @@ pub struct Model {
     /// The [`placement_digest`] each [`pose_only`] feature was last evaluated at, by feature id.
     /// Their fingerprints leave it out, so a pose change doesn't reach the features after them.
     poses: std::collections::HashMap<u64, u64>,
+    /// The reached-component digest each feature was last evaluated at, by feature id.
+    component_keys: std::collections::HashMap<u64, u64>,
     /// `evaluate` returns without waiting for the SMLib checks of its last features still running
     /// ([`Model::set_background_checks`]).
     background_checks: bool,
@@ -2723,27 +2766,29 @@ fn construct_digest(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature,
     if named { h.finish() } else { 0 }
 }
 
-/// Document-level inputs any feature may read: sheet metal and plastic rules (and the
-/// parameters they use), components and body placement. Construction geometry is not among
-/// them: each feature reads only the constructions it names ([`construct_digest`]).
+/// Document-level inputs any feature may read: units, sheet metal and plastic rules (and the
+/// parameters they use), and body-to-component overrides. Component definitions themselves are
+/// hashed per feature from the components it can reach ([`ComponentDigests`]), so adding an
+/// unrelated component or toggling display metadata (`history_hidden`, `identification_color`)
+/// never invalidates cached features (#22662). Construction geometry is not among them: each
+/// feature reads only the constructions it names ([`construct_digest`]).
 fn context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
     digest_context(doc, vals, true)
 }
 
-/// [`context_digest`] without the design's components: units and the sheet metal and plastic
+/// [`context_digest`] without body-to-component overrides: units and the sheet metal and plastic
 /// rules. A change told by what a feature read ([`Relative`]) takes the feature's own components
 /// instead ([`EvalKey`]), and is placed in the components as they are when it is reused.
 fn shared_context_digest(doc: &Document, vals: &BTreeMap<String, Value>) -> u64 {
     digest_context(doc, vals, false)
 }
 
-fn digest_context(doc: &Document, vals: &BTreeMap<String, Value>, components: bool) -> u64 {
+fn digest_context(doc: &Document, vals: &BTreeMap<String, Value>, body_components: bool) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     doc.units.hash(&mut h);
     serde_json::to_string(&doc.sheet).unwrap_or_default().hash(&mut h);
     serde_json::to_string(&doc.plastic).unwrap_or_default().hash(&mut h);
-    if components {
-        serde_json::to_string(&doc.components).unwrap_or_default().hash(&mut h);
+    if body_components {
         serde_json::to_string(&doc.body_components).unwrap_or_default().hash(&mut h);
     }
     for e in doc.sheet.rules.iter().flat_map(|r| r.fields().map(|(_, e, _)| e)) {
@@ -2759,6 +2804,142 @@ fn digest_context(doc: &Document, vals: &BTreeMap<String, Value>, components: bo
         }
     }
     h.finish()
+}
+
+/// The fields of a component that feature evaluation may read: its identity, name (for world
+/// placement names and target error messages) and parent. Display and metadata fields never
+/// affect geometry evaluation (#22662).
+fn hash_eval_component(c: &crate::Component, h: &mut impl Hasher) {
+    let crate::Component {
+        id,
+        name,
+        parent,
+        identification_color: _,
+        identification_color_index: _,
+        metadata: _,
+        properties: _,
+        name_split: _,
+        history_hidden: _,
+        physical_override: _,
+    } = c;
+    (id, name, parent).hash(h);
+}
+
+/// Precomputed per-component ancestor-chain digests for one evaluation pass, hashing only the
+/// evaluation-relevant fields of each component ([`hash_eval_component`]).
+pub(super) struct ComponentDigests {
+    chains: std::collections::HashMap<u64, u64>,
+    missing_chain: u64,
+    feature_component: std::collections::HashMap<u64, u64>,
+}
+
+impl ComponentDigests {
+    pub(super) fn of(doc: &Document) -> Self {
+        let mut by_id: std::collections::HashMap<u64, &crate::Component> = std::collections::HashMap::with_capacity(doc.components.len());
+        for c in &doc.components {
+            by_id.entry(c.id).or_insert(c);
+        }
+        let mut missing_h = std::collections::hash_map::DefaultHasher::new();
+        0u8.hash(&mut missing_h);
+        let missing_chain = missing_h.finish();
+
+        let mut chains: std::collections::HashMap<u64, u64> = std::collections::HashMap::with_capacity(by_id.len());
+        for &id in by_id.keys() {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            let mut c = id;
+            for _ in 0..=crate::MAX_PLACEMENT_DEPTH {
+                match by_id.get(&c) {
+                    Some(comp) => {
+                        1u8.hash(&mut h);
+                        hash_eval_component(comp, &mut h);
+                        if comp.id != 0 && comp.parent != comp.id {
+                            c = comp.parent;
+                        } else {
+                            break;
+                        }
+                    }
+                    None => {
+                        0u8.hash(&mut h);
+                        break;
+                    }
+                }
+            }
+            chains.insert(id, h.finish());
+        }
+
+        let mut feature_component: std::collections::HashMap<u64, u64> = std::collections::HashMap::with_capacity(doc.features.len());
+        for f in &doc.features {
+            feature_component.entry(f.id).or_insert(f.component);
+        }
+        Self { chains, missing_chain, feature_component }
+    }
+
+    fn chain(&self, id: u64) -> u64 {
+        self.chains.get(&id).copied().unwrap_or(self.missing_chain)
+    }
+
+    /// Digest of the component ancestor chains reachable by `f` from `st`: `f`'s own component,
+    /// any source/destination components named by a `BodyTransfer`, and every component owning a
+    /// body, sketch or construction in `st`. Components created later or holding nothing in `st`
+    /// are excluded.
+    fn reachable_digest(&self, doc: &Document, f: &Feature, st: &ModelState) -> u64 {
+        let mut ids = std::collections::BTreeSet::new();
+        ids.insert(f.component);
+        if let FeatureKind::BodyTransfer { from, to, .. } = &f.kind {
+            ids.insert(*from);
+            ids.insert(*to);
+        }
+        for b in &st.bodies {
+            ids.insert(b.component);
+            if !b.transferred
+                && let Some(&c) = doc.body_components.get(&b.name)
+            {
+                ids.insert(c);
+            }
+        }
+        for s in &st.sketches {
+            if let Some(&c) = self.feature_component.get(&s.feature) {
+                ids.insert(c);
+            }
+        }
+        for c in &st.construct {
+            if let Some(&comp) = self.feature_component.get(&c.feature) {
+                ids.insert(comp);
+            }
+        }
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for id in ids {
+            (id, self.chain(id)).hash(&mut h);
+        }
+        h.finish()
+    }
+
+    /// Digest of the component ancestor chains read by `f` via `read`: `f`'s own component and the
+    /// components owning the bodies and sketches `read` names.
+    fn reads_digest(&self, doc: &Document, f: &Feature, st: &ModelState, read: &Reads) -> u64 {
+        let mut ids = std::collections::BTreeSet::new();
+        ids.insert(f.component);
+        for &i in &read.bodies {
+            if let Some(b) = st.bodies.get(i) {
+                ids.insert(b.component);
+                if !b.transferred
+                    && let Some(&c) = doc.body_components.get(&b.name)
+                {
+                    ids.insert(c);
+                }
+            }
+        }
+        for id in &read.sketches {
+            if let Some(&c) = self.feature_component.get(id) {
+                ids.insert(c);
+            }
+        }
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for id in ids {
+            (id, self.chain(id)).hash(&mut h);
+        }
+        h.finish()
+    }
 }
 
 /// What the validation mode adds to the context digest: nothing for checking every step (how
@@ -3103,6 +3284,8 @@ impl PlacementReads {
 struct EvalKey {
     /// From the whole model before it ([`cache_key`]).
     whole: u64,
+    /// Digest of the component ancestor chains reachable by this feature at its input state.
+    reached: u64,
     /// From what it reads alone, with that ([`Feature::reads`]); `None` when it may read
     /// anything.
     reads: Option<(u64, Reads)>,
@@ -3152,6 +3335,7 @@ impl EvalKey {
         shared: u64,
         st: &ModelState,
         steps: &ImportDigests,
+        components: &ComponentDigests,
     ) -> EvalKey {
         // A frame member is built turned by the Rotate steps after it.
         let local = fingerprint(doc, 0, f, vals, false, steps)
@@ -3159,7 +3343,8 @@ impl EvalKey {
             ^ construct_digest(doc, vals, f, Some(st))
             ^ turns_digest(doc, vals, f).unwrap_or(0)
             ^ depth_digest(st);
-        let whole = cache_key(f, fp, local, ctx, st);
+        let reached = components.reachable_digest(doc, f, st);
+        let whole = cache_key(f, fp, local, ctx ^ reached, st);
         let read = f.reads(doc, st);
         let profile_key = read.as_ref().and_then(|_| whole_extrude_sketch_key(f, st));
         let sketch_key = |id: &u64| profile_key.filter(|(s, _)| s == id).map(|(_, key)| key).or_else(|| st.sketch_keys.get(id).copied());
@@ -3176,7 +3361,7 @@ impl EvalKey {
                 return (h.finish(), read);
             }
             "reads".hash(&mut h);
-            own_inputs(doc, vals, f, local, ctx, steps, &mut h);
+            own_inputs(doc, vals, f, local, ctx ^ components.reads_digest(doc, f, st, &read), steps, &mut h);
             // Every body's name and component: new names avoid the names, a cut's pieces are
             // numbered past them, a tool's default targets are its component's bodies.
             for b in &st.bodies {
@@ -3209,17 +3394,10 @@ impl EvalKey {
             let mut h = std::collections::hash_map::DefaultHasher::new();
             "relative".hash(&mut h);
             own_inputs(doc, vals, f, local, shared, steps, &mut h);
-            // Its own component and those it lies in, not every component of the design: a
-            // component deleted or added elsewhere changes nothing it reads.
-            let mut c = f.component;
-            for _ in 0..=crate::MAX_PLACEMENT_DEPTH {
-                let comp = doc.components.iter().find(|x| x.id == c);
-                serde_json::to_string(&comp).unwrap_or_default().hash(&mut h);
-                match comp {
-                    Some(comp) if comp.id != 0 && comp.parent != comp.id => c = comp.parent,
-                    _ => break,
-                }
-            }
+            // Its own component (and any component whose body or sketch it reads) with its
+            // ancestors, not every component of the design: a component deleted or added
+            // elsewhere, or a display-only change, changes nothing it reads.
+            components.reads_digest(doc, f, st, read).hash(&mut h);
             // The bodies it reads by name, not by where they stand: bodies before them come and go.
             let mut names = Vec::with_capacity(read.bodies.len());
             for &i in &read.bodies {
@@ -3247,7 +3425,7 @@ impl EvalKey {
             }
             h.finish()
         });
-        EvalKey { whole, reads, relative }
+        EvalKey { whole, reached, reads, relative }
     }
 }
 
@@ -4974,6 +5152,14 @@ fn placement_digest(doc: &Document, f: &Feature, st: Option<&ModelState>) -> u64
                 reads.placed_body(st, &anchor.target.body);
             }
         }
+        // A carried construction is moved in its own component's frame, from the frame of the
+        // first moved body, so both placements are read.
+        FeatureKind::Move { bodies, carry, .. } if !carry.is_empty() => {
+            reads.components.extend(carry.iter().filter_map(|id| doc.feature(id.0)).map(|g| g.component));
+            if let Some(first) = bodies.first() {
+                reads.placed_body(st, first);
+            }
+        }
         FeatureKind::Sketch { plane, sketch } => {
             match crate::face_anchor::plane_face_anchor(plane) {
                 // Read in the frame of the placement it was drawn in, its face through the
@@ -5698,7 +5884,12 @@ impl Model {
     /// it places moved (another configuration row's).
     pub fn prime_also(&mut self, ahead: &Model) {
         let results = ahead.results.iter().filter(|r| !r.skipped && !r.stale).map(|r| (r.id, r.clone())).collect();
-        self.primed.push(Primed { context: ahead.context, results: Arc::new(results), poses: Arc::new(ahead.poses.clone()) });
+        self.primed.push(Primed {
+            context: ahead.context,
+            results: Arc::new(results),
+            poses: Arc::new(ahead.poses.clone()),
+            component_keys: Arc::new(ahead.component_keys.clone()),
+        });
     }
 
     /// How many models' results are offered ([`Model::prime_also`]).
@@ -5786,12 +5977,9 @@ impl Model {
         let prev_import_digests = std::mem::take(&mut self.import_digests);
         self.import_digests = ImportDigests::of(doc, &prev_import_digests, heal);
         let primed: Vec<Primed> = self.primed.iter().filter(|p| !self.no_cache && p.context == ctx).cloned().collect();
-        // Each feature's component, for `Document::legacy_body_component` on every body after
-        // every feature without searching the timeline for each (the first feature with an id).
-        let mut feature_component: std::collections::HashMap<u64, u64> = std::collections::HashMap::with_capacity(doc.features.len());
-        for f in &doc.features {
-            feature_component.entry(f.id).or_insert(f.component);
-        }
+        // Per-component ancestor-chain digests and feature->component map, built once per pass.
+        let component_digests = ComponentDigests::of(doc);
+        let feature_component = &component_digests.feature_component;
         // The component envelopes' features: the bodies they made are marked after every feature.
         let envelopes: std::collections::HashSet<u64> =
             doc.features.iter().filter(|f| matches!(f.kind, FeatureKind::BoundingSolid { contents: true, .. })).map(|f| f.id).collect();
@@ -5822,7 +6010,7 @@ impl Model {
             &self.frame_bodies,
             &self.cache,
             &self.import_digests,
-            &feature_component,
+            &component_digests,
             &envelopes,
             carried.as_ref(),
             &prepared_imports,
@@ -5836,6 +6024,7 @@ impl Model {
             watched.cancelled(),
         );
         let mut poses = std::collections::HashMap::new();
+        let mut component_keys = std::collections::HashMap::with_capacity(doc.features.len());
         // Pose-only features evaluated again for a pose change alone: their new bodies, which
         // replace the old ones in the results reused after them (#12139).
         let mut moved: Vec<(u64, Vec<ModelBody>)> = Vec::new();
@@ -5864,6 +6053,7 @@ impl Model {
                 recomputed = s.recomputed;
                 restored = s.restored;
                 poses = s.poses;
+                component_keys = s.component_keys;
                 moved = s.moved;
                 failed = s.failed;
                 rolled_results = s.rolled_results;
@@ -5895,7 +6085,7 @@ impl Model {
                 {
                     failed.insert(r.id, (r.name.clone(), e.clone()));
                 }
-                self.placement_local = self.placement_local && placement_reuse::local_geometry(f, &feature_component);
+                self.placement_local = self.placement_local && placement_reuse::local_geometry(f, feature_component);
                 let rolled_back = i >= marker;
                 // Retain at most one active result per rolled-back feature, even across several
                 // marker moves. Build the map anew so deleted features release their states too.
@@ -5904,12 +6094,12 @@ impl Model {
                     None
                 } else if rolled_back {
                     let active = self.results.get(i).filter(|r| r.id == f.id && !r.skipped && !r.stale && !r.unkept);
-                    if let Some(saved) = active.map(|r| (previous_context, r.clone())).or(rolled) {
+                    if let Some(saved) = active.map(|r| (previous_context, self.component_keys.get(&f.id).copied(), r.clone())).or(rolled) {
                         self.rolled_results.insert(f.id, saved);
                     }
                     None
                 } else {
-                    rolled.filter(|(context, _)| *context == ctx).map(|(_, r)| r)
+                    rolled.filter(|(context, _, _)| *context == ctx).map(|(_, comp, r)| (comp, r))
                 };
                 // Opening was cancelled: the rest is skipped and the result discarded.
                 let cancelled = watched.step(i);
@@ -5935,10 +6125,13 @@ impl Model {
                         .results
                         .get(i)
                         .filter(current)
-                        .filter(|old| moved.is_empty() || old.skipped || reads_none_of(f, &state, &moved, &feature_component))
+                        .filter(|old| moved.is_empty() || old.skipped || reads_none_of(f, &state, &moved, feature_component))
                         .filter(|old| old.skipped || legacy_current(eval_doc, f, &state, &old.state))
                 {
                     let before_reuse = state.clone();
+                    if let Some(&k) = self.component_keys.get(&f.id) {
+                        component_keys.insert(f.id, k);
+                    }
                     if moved.is_empty() {
                         if !old.skipped {
                             state = old.state.clone();
@@ -6015,7 +6208,7 @@ impl Model {
                     continue;
                 }
                 // The same feature on the same inputs: its earlier result.
-                let mut key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests);
+                let mut key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests, &component_digests);
                 // A check that refused this feature's bodies on these inputs after its evaluation
                 // returned: it fails as it would have failed there.
                 if let Some(c) = carried.as_ref().filter(|c| c.id == f.id && c.key == key.whole) {
@@ -6050,6 +6243,7 @@ impl Model {
                         reuse = true;
                     }
                     let ok = c.error.is_none();
+                    component_keys.insert(f.id, key.reached);
                     // Not kept in the cached result: its notes follow the sketches as they are now.
                     let warning = if ok { with_retained_notes(doc, c.warning, f, &state) } else { c.warning };
                     out.push(FeatureResult {
@@ -6079,17 +6273,21 @@ impl Model {
                 if let Some(r) = rolled
                     .as_ref()
                     .filter(|_| moved.is_empty())
+                    .filter(|(comp, _)| *comp == Some(key.reached))
+                    .map(|(_, r)| r)
                     .filter(current)
                     .or_else(|| {
                         primed.iter().filter(|_| moved.is_empty()).find_map(|p| {
                             // posed where that model evaluated it, not only here
                             let posed_there = pose.is_none_or(|pose| p.poses.get(&f.id) == Some(&pose));
-                            p.results.get(&f.id).filter(current).filter(|_| posed_there)
+                            let comp_ok = p.component_keys.get(&f.id) == Some(&key.reached);
+                            p.results.get(&f.id).filter(current).filter(|_| posed_there && comp_ok)
                         })
                     })
                     .filter(|r| r.error.is_some() || legacy_current(eval_doc, f, &state, &r.state))
                 {
                     restored += 1;
+                    component_keys.insert(f.id, key.reached);
                     let before_rolled = state.clone();
                     if r.error.is_none() {
                         state = r.state.clone();
@@ -6124,7 +6322,7 @@ impl Model {
                     self.import_digests.heals.remove(&f.id);
                     fp = chain_fingerprint(eval_doc, &vals, f, prev_fp_in, rolled_back, &self.import_digests, Some(&state));
                     prev_fp = fp;
-                    key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests);
+                    key = EvalKey::new(eval_doc, &vals, f, fp, ctx, shared_ctx, &state, &self.import_digests, &component_digests);
                 }
                 let reads = key.reads.as_ref().filter(|_| {
                     !self.no_cache && checks.refused_at(i).is_none() && param_names(f).iter().all(|n| !self.param_errors.contains_key(n))
@@ -6268,6 +6466,7 @@ impl Model {
                         recomputed: recomputed - 1,
                         restored,
                         poses: poses.clone(),
+                        component_keys: component_keys.clone(),
                         moved: moved.clone(),
                         failed: failed.clone(),
                         rolled_results: rolled_results.clone(),
@@ -6414,6 +6613,7 @@ impl Model {
                     moved.push((f.id, bodies));
                     reuse = true;
                 }
+                component_keys.insert(f.id, key.reached);
                 out.push(FeatureResult {
                     id: f.id,
                     name: f.name.clone(),
@@ -6444,6 +6644,7 @@ impl Model {
         self.feature_checks = checks.running().then(|| overlap::Pending::new(checks));
         self.placement_local = self.placement_local && out.iter().all(|r| !r.skipped && !r.stale && !r.unkept && r.error.is_none());
         self.poses = poses;
+        self.component_keys = component_keys;
         self.results = out;
         self.note_states();
         // A cached import's result is as its check left it, not as the import first showed.
@@ -7081,7 +7282,7 @@ pub fn select_profiles(ss: &SolvedSketch, sel: &ProfileSel) -> Result<Vec<Region
         }
         // A curve loop that no longer bounds a profile exactly falls back to the best match; the
         // feature's warning says so (`profile_fallback_notes`).
-        ProfileSel::Curves { .. } | ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
+        ProfileSel::Curves { .. } | ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } | ProfileSel::SidedCurves { .. } => {
             crate::profile_selection_indices_lenient(ss, sel)?
                 .0
                 .into_iter()
@@ -18262,7 +18463,7 @@ fn eval_feature_kind(
             st.bodies.push(envelope);
             Ok(())
         }
-        FeatureKind::Move { bodies, translate, rotate_axis, rotate_about, origin, angle, copy, copy_frames } => {
+        FeatureKind::Move { bodies, translate, rotate_axis, rotate_about, origin, angle, copy, copy_frames, carry, leave } => {
             if !copy_frames.is_empty()
                 && (!*copy || copy_frames.len() != bodies.len() || copy_frames.iter().any(|m| !crate::valid_transfer_matrix(m)))
             {
@@ -18352,7 +18553,7 @@ fn eval_feature_kind(
                 return Err(e);
             }
             if !*copy {
-                move_constructions_with(doc, st, bodies, &base_motion);
+                move_constructions_with(doc, st, bodies, &base_motion, carry, leave);
             }
             Ok(())
         }
@@ -18810,9 +19011,10 @@ fn lost_turn_line(origin: Vec3, axis: Vec3, why: String, warning: &mut Option<St
 /// Construction axes and points built on bodies a Move moves go with them (#10127): an axis
 /// through a cylinder turns with the cylinder, as its faces do. Only those built from the moved
 /// bodies alone (`Construct::bodies`) follow; one also held by a fixed point, a plane or another
-/// body stays. `m` is the move in the bodies' own frame; each construction is kept in its
+/// body stays. The Move's `carry` list takes others along too, and its `leave` list keeps
+/// some of those built on the bodies where they are. `m` is the move in the bodies' own frame; each construction is kept in its
 /// component's frame (`construction_state`), so the move is carried over into that frame.
-fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::BodyName], m: &Mat) {
+fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::BodyName], m: &Mat, carry: &[FeatureId], leave: &[FeatureId]) {
     let frame_of = |feature: u64| {
         let comp = doc.feature(feature).map(|f| f.component).unwrap_or(0);
         if comp == 0 && !doc.occurrences.is_empty() { crate::IDENTITY } else { doc.component_transform(comp) }
@@ -18821,10 +19023,18 @@ fn move_constructions_with(doc: &Document, st: &mut ModelState, moved: &[crate::
         st.bodies.iter().filter(|b| moved.iter().any(|n| *n == b.name)).map(|b| (b.name.as_str(), body_world(doc, b))).collect();
     let mut placed = Vec::new();
     for (k, c) in st.construct.iter().enumerate() {
-        let Some(body) = c.bodies.first().and_then(|b| world.get(b.as_str())) else { continue };
-        if !c.bodies.iter().all(|b| world.contains_key(b.as_str())) {
+        if leave.iter().any(|f| *f == c.feature) {
             continue;
         }
+        // A carried construction moves in the frame of the first moved body.
+        let body = if carry.iter().any(|f| *f == c.feature) {
+            moved.first().and_then(|n| world.get(AsRef::<str>::as_ref(n)))
+        } else if c.bodies.iter().all(|b| world.contains_key(b.as_str())) {
+            c.bodies.first().and_then(|b| world.get(b.as_str()))
+        } else {
+            None
+        };
+        let Some(body) = body else { continue };
         let frame = frame_of(c.feature);
         let (Some(body_inv), Some(frame_inv)) = (crate::mat_inverse(body), crate::mat_inverse(&frame)) else { continue };
         let in_frame = crate::mat_mul(&crate::mat_mul(&frame_inv, body), &crate::mat_mul(m, &crate::mat_mul(&body_inv, &frame)));

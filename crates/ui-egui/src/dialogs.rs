@@ -8387,6 +8387,10 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     && let Some(height) = d.extra.get("coil_height").and_then(Value::as_str)
                 {
                     p.insert("height".into(), json!(height));
+                    // The height end to end (#20736); a sketch's section has only its centre line.
+                    if d.extra.get("height_measure").and_then(Value::as_str) == Some("overall") && !p.contains_key("sketch") {
+                        p.insert("height_measure".into(), json!("overall"));
+                    }
                 }
             }
             if let Some((point, normal)) = *at {
@@ -8547,7 +8551,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         let coil_profile = cmd == "solid.coil" && m.contains_key("sketch");
         for (k, v) in &d.extra {
             // The coil's size choice and height are put in the parameters by the command's own rows.
-            if k == "size_by" || k == "coil_height" {
+            if k == "size_by" || k == "coil_height" || k == "height_measure" {
                 continue;
             }
             // Saved selection mode is editor state, not a command parameter.
@@ -9001,6 +9005,11 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
         ProfileSel::Indices { indices } => indices.iter().copied().filter(|i| *i < ps.len()).collect(),
         ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
             solidcraft_engine::doc::profile_selection_indices(ss, sel).unwrap_or_default()
+        }
+        // The regions the feature builds, also those a change of the regions left to the closest
+        // match (#22548): re-saving the dialog must not drop them.
+        ProfileSel::SidedCurves { .. } => {
+            solidcraft_engine::doc::profile_selection_indices_lenient(ss, sel).map(|(found, _)| found).unwrap_or_default()
         }
         ProfileSel::Curves { loops } => loops
             .iter()
