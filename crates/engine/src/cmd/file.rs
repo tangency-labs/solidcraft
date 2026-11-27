@@ -2560,7 +2560,7 @@ fn write_bytes(
         history.prune_inline_snapshots(limits.max_bytes);
     }
     // Before the bytes are made: a check that ends meanwhile leaves this save without the cache.
-    let skip_reason = cache.then(|| s.model.cache_skip_reason(&s.design_saved(Some(path)))).flatten();
+    let skip_reason = cache.then(|| s.model.cache_skip_reason(&s.design_saved_with(Some(path), &s.document_history))).flatten();
     let chain = s.provenance_chain.clone().unwrap_or_default();
     let mut signature = None;
     let mut notes: Vec<String> = Vec::new();
