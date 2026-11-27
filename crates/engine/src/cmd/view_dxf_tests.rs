@@ -540,7 +540,7 @@ fn view_dxf_sketch_arc_planning_keeps_original_fallback_points_and_hidden_policy
     ];
     let bits = |points: &[Vec2]| points.iter().map(|p| [p.x.to_bits(), p.y.to_bits()]).collect::<Vec<_>>();
     for dashed in [false, true] {
-        let paths: Vec<_> = sources.iter().map(|(p, hidden)| mesh_lines::Path { points: p.clone(), hidden: *hidden }).collect();
+        let paths: Vec<_> = sources.iter().map(|(p, hidden)| mesh_lines::Path { points: p.clone(), closed: false, hidden: *hidden }).collect();
         let count = paths.iter().map(|p| p.points.len()).sum();
         let plan = PlannedViewArcs::sketch(&paths, 0.01, &Stage::new("dxf_write", 1)).unwrap();
         assert!(plan.sketch_shapes.is_empty() && plan.arc_source_points.is_empty(), "no full visible path is one circle/arc");
@@ -570,7 +570,7 @@ fn view_dxf_sketch_arc_planning_does_not_join_separate_curves_into_one_circle() 
         let segments = ring(Vec2::ZERO, 10., 40, from, to);
         let mut points: Vec<_> = segments.iter().map(|(a, _)| *a).collect();
         points.push(segments.last().unwrap().1);
-        paths.push(mesh_lines::Path { points, hidden: false });
+        paths.push(mesh_lines::Path { points, closed: false, hidden: false });
     }
     let plan = PlannedViewArcs::sketch(&paths, 0.01, &Stage::new("dxf_write", 1)).unwrap();
     assert_eq!(plan.arc_source_points, [41, 41]);
@@ -580,6 +580,68 @@ fn view_dxf_sketch_arc_planning_does_not_join_separate_curves_into_one_circle() 
     let layer = file.declare_layer("SKETCH", 5, DxfLinetype::Continuous, None).unwrap();
     assert_eq!(sketch_entities(paths, plan.sketch_shapes, false, &mut file, None, Some(layer)).unwrap(), 2);
     solidcraft_io::write_dxf_file(&file).unwrap();
+}
+
+#[test]
+fn view_dxf_open_sketch_arc_far_from_origin_does_not_close_its_gap() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.arc.center_point", json!({"center":[1_000_000,1_000_000],"start":[1_000_008,1_000_000],"sweep":359.995}));
+    let segments = s.doc.sketch(s.active_sketch.unwrap()).unwrap().segs(0);
+    let [solidcore_record::Seg2::Arc { sweep, .. }] = segments.as_slice() else { panic!("{segments:?}") };
+    assert!((sweep.to_degrees() - 359.995).abs() < 1e-6, "the actual command must retain the open arc: {segments:?}");
+    let mut top = camera(StandardView::Top);
+    top.target = Vec3::ZERO;
+    let result = run(&mut s, CMD, json!({"camera":top,"curves":"arcs","tolerance":0.0001}));
+    let file = solidcraft_io::read_dxf_file(result["dxf"].as_str().unwrap()).unwrap();
+    assert_eq!(file.entities().len(), 1);
+    let entity = &file.entities()[0];
+    assert_eq!(file.layer(entity.layer()).unwrap().name(), "SKETCH");
+    let DxfShape::Arc { a0, a1, .. } = entity.geometry() else {
+        panic!("an open sketch arc must not become a closed circle: {:?}", entity.geometry())
+    };
+    // The omitted0.005 degree arc spans0.000698 mm atR8, larger than the requested0.0001 mm.
+    assert!(((a1 - a0).rem_euclid(360.) - 359.995).abs() < 1e-6, "{a0}..{a1}");
+}
+
+#[test]
+fn view_dxf_true_sketch_circle_at_origin_stays_closed_with_zero_camera_target() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.circle.center", json!({"center":[0,0],"radius":8}));
+    let mut top = camera(StandardView::Top);
+    top.target = Vec3::ZERO;
+    let result = run(&mut s, CMD, json!({"camera":top,"curves":"arcs","tolerance":0.0001}));
+    let file = solidcraft_io::read_dxf_file(result["dxf"].as_str().unwrap()).unwrap();
+    assert_eq!(file.entities().len(), 1);
+    let entity = &file.entities()[0];
+    assert_eq!(file.layer(entity.layer()).unwrap().name(), "SKETCH");
+    let DxfShape::Circle { c, r } = entity.geometry() else { panic!("a true source circle must stay closed: {:?}", entity.geometry()) };
+    // The source is centered on the camera target; Top's pole clamp changes R8 by less than4e-12 mm.
+    assert!(c.len() < 1e-9 && (r - 8.).abs() < 1e-9, "center={c:?}, radius={r}");
+}
+
+#[test]
+fn view_dxf_clockwise_open_arc_preserves_sweep_when_camera_target_changes() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane":"XY"}));
+    run(&mut s, "sketch.arc.center_point", json!({"center":[1_000_000,1_000_000],"start":[1_000_008,1_000_000],"sweep":-359.995}));
+    for target in [Vec3::ZERO, Vec3::new(1_000_000., 1_000_000., 0.)] {
+        let mut top = camera(StandardView::Top);
+        top.target = target;
+        let result = run(&mut s, CMD, json!({"camera":top,"curves":"arcs","tolerance":0.0001}));
+        let file = solidcraft_io::read_dxf_file(result["dxf"].as_str().unwrap()).unwrap();
+        assert_eq!(file.entities().len(), 1, "target={target:?}");
+        let entity = &file.entities()[0];
+        assert_eq!(file.layer(entity.layer()).unwrap().name(), "SKETCH");
+        let DxfShape::Arc { r, a0, a1, .. } = entity.geometry() else {
+            panic!("the open clockwise source must remain an ARC: {:?}; target={target:?}", entity.geometry())
+        };
+        // DXF writes arcs counter-clockwise, exchanging the clockwise source's endpoints.
+        // Moving the camera target changes coordinates, not radius or the359.995 degree sweep.
+        assert!((r - 8.).abs() < 1e-9, "radius={r}; target={target:?}");
+        assert!(((a1 - a0).rem_euclid(360.) - 359.995).abs() < 1e-6, "{a0}..{a1}; target={target:?}");
+    }
 }
 
 #[test]

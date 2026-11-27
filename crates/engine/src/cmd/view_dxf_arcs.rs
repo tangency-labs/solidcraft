@@ -133,7 +133,7 @@ fn chain_from(
 }
 
 /// The circle or arc a chain of points is a tessellation of, or `None`.
-fn fit(points: &[Vec2], closed: bool, tolerance: f64) -> Option<DxfShape> {
+pub(super) fn fit(points: &[Vec2], closed: bool, tolerance: f64) -> Option<DxfShape> {
     let segments = points.len().saturating_sub(1);
     if segments < if closed { MIN_CLOSED } else { MIN_OPEN } {
         return None;

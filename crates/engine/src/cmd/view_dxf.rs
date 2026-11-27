@@ -228,21 +228,9 @@ impl PlannedViewArcs {
             if path.hidden || path.points.len() <= 2 {
                 continue;
             }
-            let mut segments = Vec::new();
-            segments.try_reserve_exact(path.points.len() - 1).map_err(|_| bad(CMD, "cannot allocate sketch recognition segments"))?;
-            for pair in path.points.windows(2) {
-                if let [a, b] = pair {
-                    segments.push((*a, *b));
-                }
-            }
-            let mut shapes = arcs::recognise(segments, tolerance);
+            let shape = arcs::fit(&path.points, path.closed, tolerance);
             writing.check().map_err(|e| bad(CMD, refused(e)))?;
-            if shapes.len() != 1 {
-                continue;
-            }
-            let Some(shape) = shapes.pop().filter(|shape| matches!(shape, DxfShape::Circle { .. } | DxfShape::Arc { .. })) else {
-                continue;
-            };
+            let Some(shape) = shape else { continue };
             plan.sketch_shapes.try_reserve(1).map_err(|_| bad(CMD, "cannot allocate recognized sketch shapes"))?;
             if matches!(shape, DxfShape::Arc { .. }) {
                 plan.arc_source_points.try_reserve(1).map_err(|_| bad(CMD, "cannot allocate sketch arc source counts"))?;
@@ -317,7 +305,7 @@ fn connect(lines: Vec<(Vec2, Vec2)>) -> Vec<mesh_lines::Path> {
             }
             points.reverse();
         }
-        result.push(mesh_lines::Path { points, hidden: true });
+        result.push(mesh_lines::Path { points, closed: false, hidden: true });
     }
     result
 }
