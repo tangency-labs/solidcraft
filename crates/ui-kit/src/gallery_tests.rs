@@ -1483,11 +1483,6 @@ pub const ELEMENTS: &[Element] = &[
     element!("table_row_height", |ui, _| {
         ui.allocate_space(vec2(table_row_height(), table_row_height()));
     }),
-    element!("summary_row", |ui, s| {
-        summary_row(ui, "Rule", "Drives width = 120 mm", &mut s.checked, ContentWidth::button(ui, "Edit"), |ui| {
-            button(ui, "Edit", Button::Normal);
-        });
-    }),
     element!("compact_button", |ui, _| {
         compact_button(ui, "▲", "Move up", true, false);
     }),
@@ -3002,4 +2997,65 @@ fn preference_widgets_and_figures_board_in_both_themes() {
         }
     }
     solidcraft_theme::set_dark(previous);
+}
+
+#[test]
+fn page_switch_empty_and_stale_selection_are_bounded() {
+    assert_eq!(super::page_switch::selected_index(0, 0), None);
+    assert_eq!(super::page_switch::selected_index(usize::MAX, 2), Some(1));
+    assert_eq!(super::page_switch::selected_index(0, 2), Some(0));
+}
+
+#[test]
+fn page_switch_slide_eases_out_and_finishes_in_140_ms() {
+    let mut slide = super::page_switch::Slide::new([0.0, 80.0], 1.0);
+    assert_eq!(slide.sample([80.0, 200.0], 1.0, 0.14), [0.0, 80.0]);
+    let halfway = slide.sample([80.0, 200.0], 1.07, 0.14);
+    assert!((halfway[0] - 70.0).abs() < 0.01);
+    assert!((halfway[1] - 185.0).abs() < 0.01);
+    assert_eq!(slide.sample([80.0, 200.0], 1.15, 0.14), [80.0, 200.0]);
+}
+
+#[test]
+fn page_switch_rapid_reversal_starts_at_the_current_position() {
+    let mut slide = super::page_switch::Slide::new([0.0, 80.0], 1.0);
+    slide.sample([80.0, 200.0], 1.0, 0.14);
+    let moving = slide.sample([80.0, 200.0], 1.04, 0.14);
+    assert_eq!(slide.sample([0.0, 80.0], 1.04, 0.14), moving);
+    assert_eq!(slide.sample([0.0, 80.0], 1.19, 0.14), [0.0, 80.0]);
+}
+
+#[test]
+fn page_switch_reduced_motion_and_invalid_duration_snap() {
+    let mut slide = super::page_switch::Slide::new([0.0, 80.0], 1.0);
+    for duration in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+        assert_eq!(slide.sample([80.0, 200.0], 1.02, duration), [80.0, 200.0]);
+        assert_eq!(slide.sample([0.0, 80.0], 1.03, duration), [0.0, 80.0]);
+    }
+}
+
+#[test]
+fn page_switch_honours_the_hosts_zero_animation_duration() {
+    let ctx = super::test_support::context();
+    ctx.global_style_mut(|style| style.animation_time = 0.14);
+    let selected = std::cell::Cell::new(0);
+    let mut draw = |ui: &mut Ui| {
+        let mut value = selected.get();
+        PageSwitch::new("test_pages", &["Named", "Dimensions"])
+            .counts(&[8, 41])
+            .targets(&["test:page:first", "test:page:second"])
+            .show(ui, &mut value);
+        selected.set(value);
+    };
+    super::test_support::raw_frame(&ctx, egui::RawInput { time: Some(1.0), ..Default::default() }, &mut draw);
+    let original = solidcraft_ui_registry::rect_of("page_switch:highlight").unwrap();
+    selected.set(1);
+    super::test_support::raw_frame(&ctx, egui::RawInput { time: Some(1.01), ..Default::default() }, &mut draw);
+    assert_eq!(solidcraft_ui_registry::rect_of("page_switch:highlight"), Some(original));
+    ctx.global_style_mut(|style| style.animation_time = 0.0);
+    super::test_support::raw_frame(&ctx, egui::RawInput { time: Some(1.02), ..Default::default() }, &mut draw);
+    let pill = solidcraft_ui_registry::rect_of("page_switch:highlight").unwrap();
+    let target = solidcraft_ui_registry::rect_of("test:page:second").unwrap();
+    assert_eq!(pill.x_range(), target.x_range());
+    assert!(pill.left() > original.left());
 }

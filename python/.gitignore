@@ -1,0 +1,5 @@
+# Written by `cargo xtask python`; never committed (docs/python-api.md).
+src/solidcraft/_generated/
+.venv/
+__pycache__/
+*.egg-info/
