@@ -2624,7 +2624,9 @@ fn drawing_snapshot_scene_and_export_answer_on_a_copy_without_blocking_control()
     let view = ask(&tx, "ui.inspect", json!({}));
     h.frames(1);
     assert!(view.try_recv().is_ok_and(|v| v["ok"] == true), "ui.* answered while drawing commands ran");
-    assert_eq!(h.app.control_answering.len(), 3, "all three drawing commands answered on copies");
+    // `drawing.view.snapshot` and `drawing.scene` run on copies in `control_answering`;
+    // `drawing.export` is dispatched off-thread through `file_load`.
+    assert_eq!(h.app.control_answering.len(), 2, "snapshot and scene answered on copies");
 
     let r = reply_to(&mut h, &snapshot);
     assert_eq!(r["ok"], true, "{r}");

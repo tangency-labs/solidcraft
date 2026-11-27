@@ -118,7 +118,6 @@ const NAMES_A_FILE: &[&str] = &["path", "paths", "file", "files", "dir", "folder
 
 /// Commands that change nothing in the design and write a file: they run on a copy.
 const ANSWERED_ON_A_COPY: &[&str] = &[
-    "drawing.export",
     "file.export",
     "file.export_3mf",
     "file.export_mjcf",
@@ -776,7 +775,7 @@ impl SolveApp {
         // The request's own level (#9184) checks it on the copy, and the reply says so, as
         // `control::handle` does; a word that is no level is refused there.
         let Ok(level) = crate::control::request_param_check(&req.method, &req.params) else { return Some(req) };
-        let mut copy = if matches!(id, "drawing.export" | "drawing.scene") { self.session.scratch_as_shown() } else { self.session.scratch() };
+        let mut copy = if id == "drawing.scene" { self.session.scratch_as_shown() } else { self.session.scratch() };
         if let Some(level) = level {
             copy.param_check = level;
         }
