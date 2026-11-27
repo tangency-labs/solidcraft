@@ -2810,6 +2810,111 @@ fn measure_items() {
     assert!(s.execute("inspect.measure", &json!({"items": [{"type": "nonsense"}]})).is_err());
 }
 
+/// Three or more round items measure as a row or a bolt circle (#10170): the gaps centre to
+/// centre in order along the row, the span and whether the spacing is even. A 400 × 40 × 5 panel
+/// with 3 mm holes at x = 22.5, 111.25, 200 and 377.5 on y = 20: three at a pitch of 88.75 and
+/// one 177.5 further, where a hole is left out.
+#[test]
+fn measure_items_reports_row_spacing_of_holes() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 400, "width": 40, "height": 5, "corner": [0, 0, 0], "body_name": "Panel"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Holes"}));
+    for x in [22.5, 111.25, 200.0, 377.5] {
+        run(&mut s, "sketch.circle.center", json!({"center": [x, 20], "diameter": 3}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 5, "operation": "cut"}));
+    let hole = |x: f64| json!({"type": "face", "body": "Panel", "point": [x + 1.5, 20.0, 2.5]});
+    let floats = |v: &Value| -> Vec<f64> { v.as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect() };
+    let near = |a: &[f64], b: &[f64]| a.len() == b.len() && a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-9);
+
+    // Picked out of order: the row runs from the end hole picked first.
+    let r = run(&mut s, "inspect.measure", json!({"items": [hole(200.0), hole(22.5), hole(111.25)]}));
+    let sp = &r["spacing"];
+    assert_eq!(sp["pattern"], "line", "{r}");
+    assert_eq!(sp["order"], json!([0, 2, 1]), "{r}");
+    assert!(near(&floats(&sp["gaps"]), &[88.75, 88.75]), "{r}");
+    assert!((sp["span"].as_f64().unwrap() - 177.5).abs() < 1e-9, "{r}");
+    assert_eq!(sp["even"], true, "{r}");
+    assert!((sp["pitch"].as_f64().unwrap() - 88.75).abs() < 1e-9, "{r}");
+    assert_eq!(sp["odd_gaps"], json!([]), "{r}");
+    assert!(sp.get("pcd").is_none(), "{r}");
+    assert_eq!(r["items"].as_array().unwrap().len(), 3, "{r}");
+    // Each gap lies between two hole centres.
+    let ends: Vec<Vec<Vec3>> = serde_json::from_value(sp["gap_points"].clone()).unwrap();
+    assert!(ends[0][0].dist(Vec3::new(200.0, 20.0, 2.5)) < 1e-9 && ends[0][1].dist(Vec3::new(111.25, 20.0, 2.5)) < 1e-9, "{r}");
+    // A pair's own figures are not a row's.
+    assert!(r.get("center_distance").is_none() && r.get("distance_mm").is_none(), "{r}");
+
+    // The hole left out shows as the odd gap, beside the pitch of the others.
+    let r = run(&mut s, "inspect.measure", json!({"items": [hole(22.5), hole(111.25), hole(200.0), hole(377.5)]}));
+    let sp = &r["spacing"];
+    assert!(near(&floats(&sp["gaps"]), &[88.75, 88.75, 177.5]), "{r}");
+    assert_eq!((&sp["even"], &sp["odd_gaps"]), (&json!(false), &json!([2])), "{r}");
+    assert!((sp["pitch"].as_f64().unwrap() - 88.75).abs() < 1e-9 && (sp["span"].as_f64().unwrap() - 355.0).abs() < 1e-9, "{r}");
+
+    // Two holes measure as before, with no spacing; so do two picks of one hole and another.
+    let r = run(&mut s, "inspect.measure", json!({"items": [hole(22.5), hole(111.25)]}));
+    assert!((r["center_distance"].as_f64().unwrap() - 88.75).abs() < 1e-9 && r.get("spacing").is_none(), "{r}");
+    let r = run(&mut s, "inspect.measure", json!({"items": [hole(22.5), hole(22.5), hole(111.25)]}));
+    assert!((r["center_distance"].as_f64().unwrap() - 88.75).abs() < 1e-9 && r.get("spacing").is_none(), "{r}");
+
+    // Three items that are not all round are still refused, and so are holes across each other.
+    let flat = json!({"type": "face", "body": "Panel", "point": [300.0, 20.0, 5.0]});
+    let e = s.execute("inspect.measure", &json!({"items": [hole(22.5), flat, hole(111.25)]})).unwrap_err().to_string();
+    assert!(e.contains("measure one or two items, or three or more round edges or holes"), "{e}");
+    let too_many: Vec<Value> = (0..65).map(|_| hole(22.5)).collect();
+    let e = s.execute("inspect.measure", &json!({"items": too_many})).unwrap_err().to_string();
+    assert!(e.contains("measure at most 64 items"), "{e}");
+}
+
+/// Holes round a bolt circle (#10170): six 4 mm holes on a 60 mm pitch circle in a disc give the
+/// pitch-circle diameter, the 60° between holes and the chord between neighbours (30 mm). A
+/// hole's rim picked beside its own wall is refused in the kernel's words: two items, one centre.
+#[test]
+fn measure_items_reports_a_bolt_circle() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 40, "height": 6, "body_name": "Flange"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Bolts"}));
+    let at = |k: u32| {
+        let t = (f64::from(k) * 60.0).to_radians();
+        (30.0 * t.cos(), 30.0 * t.sin())
+    };
+    for k in 0..6 {
+        let (x, y) = at(k);
+        run(&mut s, "sketch.circle.center", json!({"center": [x, y], "diameter": 4}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"distance": 6, "operation": "cut"}));
+    // A point on each hole's wall, on the side away from the disc's axis.
+    let hole = |k: u32| {
+        let (x, y) = at(k);
+        json!({"type": "face", "body": "Flange", "point": [x * 32.0 / 30.0, y * 32.0 / 30.0, 3.0]})
+    };
+    let r = run(&mut s, "inspect.measure", json!({"items": [hole(0), hole(3), hole(1), hole(5), hole(2), hole(4)]}));
+    let sp = &r["spacing"];
+    assert_eq!(sp["pattern"], "circle", "{r}");
+    assert_eq!(sp["order"], json!([0, 2, 4, 1, 5, 3]), "{r}");
+    assert!((sp["pcd"].as_f64().unwrap() - 60.0).abs() < 1e-6, "{r}");
+    let centre: Vec3 = serde_json::from_value(sp["pcd_center"].clone()).unwrap();
+    assert!(centre.dist(Vec3::new(0.0, 0.0, 3.0)) < 1e-6, "{r}");
+    let gaps = sp["gaps"].as_array().unwrap();
+    assert!(gaps.len() == 6 && gaps.iter().all(|g| (g.as_f64().unwrap() - 30.0).abs() < 1e-6), "{r}");
+    let angles = sp["angle_deg"].as_array().unwrap();
+    assert!(angles.len() == 6 && angles.iter().all(|a| (a.as_f64().unwrap() - 60.0).abs() < 1e-6), "{r}");
+    assert_eq!(sp["even"], true, "{r}");
+    assert!((sp["angle_pitch_deg"].as_f64().unwrap() - 60.0).abs() < 1e-12 && (sp["pitch"].as_f64().unwrap() - 30.0).abs() < 1e-6, "{r}");
+
+    let (x, y) = at(0);
+    let rim = json!({"type": "edge", "body": "Flange", "point": [x, y + 2.0, 6.0]});
+    let e = s.execute("inspect.measure", &json!({"items": [hole(0), hole(1), rim]})).unwrap_err().to_string();
+    assert!(e.ends_with("`inspect.measure`: two of the round items share one centre"), "{e}");
+    // Bodies and vertices are never round: three of them are refused as a third item always was.
+    let corner = json!({"type": "vertex", "body": "Flange", "point": [40, 0, 0]});
+    let e = s.execute("inspect.measure", &json!({"items": [hole(0), hole(1), corner]})).unwrap_err().to_string();
+    assert!(e.contains("measure one or two items, or three or more round edges or holes"), "{e}");
+}
+
 /// The closest distance between a face and an edge, line or face that ends (#16270, #16271): a
 /// line is not counted as running on to the face's plane, and two faces meet where they cross
 /// or come nearest along an edge, not only at a corner. Values worked out by hand on a

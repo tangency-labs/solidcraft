@@ -377,7 +377,9 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
                         && let Some(value) = authored.get_mut(index + 1)
                         && *value == rule_length_display(&app.session.doc, original)
                     {
-                        *value = original.to_string();
+                        // Legacy bare lengths are stored in millimetres. Keep
+                        // the explicit unit at the command boundary in an inch document.
+                        *value = crate::length_input::stored(&app.session.doc, original);
                     }
                 }
             }
