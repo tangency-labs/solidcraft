@@ -3156,7 +3156,7 @@ fn delete_after_marker_is_offered_only_when_it_deletes_more_than_the_clicked_fea
     // Several selected features: not offered, whatever lies after the marker.
     app.session.selection = vec![solidcraft_engine::Sel::Feature { id: box2 }, solidcraft_engine::Sel::Feature { id: box3 }];
     assert_eq!(delete_after_marker_entries(&app, box3), Vec::<serde_json::Value>::new());
-    app.run("timeline.roll_to", json!({"position": 2})).unwrap();
+    app.run("timeline.roll_to", json!({"position": 0})).unwrap();
     app.session.selection = vec![solidcraft_engine::Sel::Feature { id: box1 }, solidcraft_engine::Sel::Feature { id: box3 }];
     assert_eq!(delete_after_marker_entries(&app, box3), Vec::<serde_json::Value>::new());
 }
