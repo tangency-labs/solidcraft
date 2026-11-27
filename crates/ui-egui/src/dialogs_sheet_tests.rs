@@ -757,6 +757,184 @@ fn rules_dialog_sets_how_bend_angles_read() {
     }
 }
 
+/// The rule manager's unfold choice: Bend Deduction with a chart's 90° value reaches the rule and
+/// the flat pattern, the dialog shows both the next time, and K Factor takes the rule back.
+#[test]
+fn rules_dialog_unfolds_from_a_press_brake_charts_90_degree_value() {
+    for mode in [crate::ui_kit::LayoutMode::Floating, crate::ui_kit::LayoutMode::Docked] {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.set", json!({"layout":mode}));
+        h.app.run("sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "active": true})).unwrap();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+        h.app.run("sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": "90 deg"})).unwrap();
+        let shown = |app: &SolveApp| match app.dialog.as_ref().map(|d| &d.kind) {
+            Some(Kind::Sheet(Sm::Rules { unfold, values, .. })) => Some((*unfold, values.last().cloned().unwrap_or_default())),
+            _ => None,
+        };
+        let allowance = |app: &mut SolveApp| app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"][0]["allowance"].as_f64();
+        // K 0.5, R 1, T 2 at 90°: π/2 · (1 + 1) = π.
+        assert!((allowance(&mut h.app).unwrap_or(f64::NAN) - std::f64::consts::PI).abs() < 1e-9);
+        h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
+        h.frames(3);
+        assert_eq!(shown(&h.app), Some((0, String::new())), "a rule starts unfolding from its K-factor");
+        h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Unfold:Bend Deduction"}})).unwrap();
+        // The 90° field starts at the deduction K 0.5 gives, BD90 = 2·(1 + 2) − π, so switching alone
+        // changes nothing and shows no error: OK stays on.
+        // In full: the field is saved as it stands when the user types nothing over it.
+        let prefilled = shown(&h.app).map(|(unfold, value)| (unfold, crate::length_input::eval(&h.app.session.doc, &value, ValueKind::Length)));
+        assert!(
+            matches!(&prefilled, Some((1, Ok(value))) if (value - (6.0 - std::f64::consts::PI)).abs() < 1e-11),
+            "prefilled from the rule's K-factor: {prefilled:?}"
+        );
+        h.frames(2);
+        assert_eq!(crate::scenario::count_of("dialog:ok:enabled"), Some(1.0), "no error before the user types");
+        // The chart's BD90 3.2 mm: BA90 = 2·(1 + 2) − 3.2 = 2.8 mm.
+        if let Some(Kind::Sheet(Sm::Rules { values, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind)
+            && let Some(last) = values.last_mut()
+        {
+            *last = "3.2 mm".into();
+        }
+        h.frames(2);
+        h.step(&json!({"widget": "OK"})).unwrap();
+        assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+        let rule = h.app.session.doc.sheet_rule(None);
+        assert_eq!((rule.unfold_method.as_str(), rule.unfold_value.as_str(), rule.k_factor.as_str()), ("deduction", "3.2 mm", "0.5"));
+        assert!((allowance(&mut h.app).unwrap_or(f64::NAN) - 2.8).abs() < 1e-9);
+        h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
+        h.frames(3);
+        assert_eq!(shown(&h.app), Some((1, "3.2 mm".into())), "the dialog shows the rule's unfold choice and value");
+        // Deduction to allowance converts the value: BA90 = 6 − 3.2 = 2.8 mm, the same part.
+        h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Unfold:Bend Allowance"}})).unwrap();
+        assert_eq!(shown(&h.app), Some((2, "2.8 mm".into())), "converted to the equivalent allowance");
+        // Back to the K-factor: the K Factor field takes the K the chart's value works out to,
+        // (2.8/(π/2) − 1)/2, not the 0.5 the rule had stored, so the part stays as it is.
+        h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
+        h.step(&json!({"click": {"handle": "dialog:Unfold:K Factor"}})).unwrap();
+        h.step(&json!({"widget": "OK"})).unwrap();
+        let back = h.app.session.doc.sheet_rule(None);
+        assert_eq!((back.unfold_method.as_str(), back.unfold_value.as_str()), ("k_factor", ""), "a K Factor rule keeps no 90° value");
+        let k = back.k_factor.parse::<f64>().unwrap_or(f64::NAN);
+        assert!((k - (2.8 / std::f64::consts::FRAC_PI_2 - 1.0) / 2.0).abs() < 1e-11, "{}", back.k_factor);
+        assert!((allowance(&mut h.app).unwrap_or(f64::NAN) - 2.8).abs() < 1e-9);
+    }
+}
+
+/// OK on the prefilled 90° value, with nothing typed over it, saves the part as it was: the field
+/// holds the value in full, not rounded for show (K 0.5, R 1, T 2: the allowance stays π).
+#[test]
+fn rules_dialog_saves_an_unedited_prefilled_90_degree_value_in_full() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sheet.manage_rules", json!({"name": "AL2", "thickness": "2 mm", "k_factor": 0.5, "bend_radius": "1 mm", "active": true})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY", "name": "Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sheet.flange", json!({"sketch": "Base"})).unwrap();
+    h.app.run("sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20, "angle": "90 deg"})).unwrap();
+    h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click": {"handle": "dialog:Unfold"}})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Unfold:Bend Deduction"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog);
+    assert_eq!(h.app.session.doc.sheet_rule(None).unfold_method, "deduction");
+    let allowance = h.app.session.execute("sheet.flat_pattern", &json!({})).unwrap()["bends"][0]["allowance"].as_f64();
+    assert!((allowance.unwrap_or(f64::NAN) - std::f64::consts::PI).abs() < 1e-9, "{allowance:?}");
+}
+
+/// Switching the Unfold choice keeps the part whichever way it goes (#6794): a value left by an
+/// earlier choice is not read as the new one's, a chart's value becomes the K Factor field, and
+/// `Thickness` in the bend radius is the rule's thickness.
+#[test]
+fn switching_the_unfold_choice_keeps_the_part_whichever_way_it_goes() {
+    use std::f64::consts::{FRAC_PI_2, PI};
+    let doc = solidcraft_engine::doc::Document::default();
+    let (k_factor, deduction, allowance) = (unfold_index("k_factor"), unfold_index("deduction"), unfold_index("allowance"));
+    let mm = |text: &str| crate::length_input::eval(&doc, text, ValueKind::Length).unwrap_or(f64::NAN);
+    let rule = |k: &str, radius: &str| vec!["2 mm".to_string(), k.to_string(), radius.to_string()];
+
+    // K 0.5, R 1, T 2: BD90 = 6 − π, BA90 = π. Deduction, back to K Factor, then Allowance: the
+    // deduction left in the hidden field is not handed on as an allowance.
+    let (mut main, mut extra) = (rule("0.5", "1 mm"), vec![String::new()]);
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert!((mm(&extra[0]) - (6.0 - PI)).abs() < 1e-11, "{}", extra[0]);
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    assert_eq!(main[1], "0.5", "the K Factor field already says this K: left as typed");
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, allowance);
+    assert!((mm(&extra[0]) - PI).abs() < 1e-11, "{}", extra[0]);
+
+    // A chart's BD90 3.2 mm is K (2.8/(π/2) − 1)/2, about 0.3913, not the 0.5 in the K Factor
+    // field: K Factor takes it, and Bend Deduction again shows the 3.2 mm as it was typed.
+    let (mut main, mut extra) = (rule("0.5", "1 mm"), vec!["3.2 mm".to_string()]);
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    let k = main[1].parse::<f64>().unwrap_or(f64::NAN);
+    assert!((k - (2.8 / FRAC_PI_2 - 1.0) / 2.0).abs() < 1e-11, "{}", main[1]);
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert_eq!(extra[0], "3.2 mm");
+    // A K typed over it since then counts: the 3.2 mm no longer says the rule's K-factor.
+    main[1] = "0.5".into();
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    main[1] = "0.4".into();
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert!((mm(&extra[0]) - (6.0 - FRAC_PI_2 * (1.0 + 0.4 * 2.0))).abs() < 1e-11, "{}", extra[0]);
+
+    // The default rule's bend radius, `Thickness`, is the rule's 2 mm: BD90 = 2·(2 + 2) − π/2·(2 + 1).
+    let (mut main, mut extra) = (rule("0.5", "Thickness"), vec![String::new()]);
+    switch_unfold(&doc, &mut main, &mut extra, k_factor, deduction);
+    assert!((mm(&extra[0]) - (8.0 - 1.5 * PI)).abs() < 1e-11, "{}", extra[0]);
+
+    // A value no K-factor from 0 to 1 gives is the rule's error to report: nothing is rewritten.
+    let (mut main, mut extra) = (rule("0.5", "1 mm"), vec!["9 mm".to_string()]);
+    switch_unfold(&doc, &mut main, &mut extra, deduction, k_factor);
+    assert_eq!((main[1].as_str(), extra[0].as_str()), ("0.5", "9 mm"));
+}
+
+/// The rule manager's card widens to fit its longest label, as feature cards do (#10620): at
+/// 1280×720 "Bend Deduction at 90°" and "Bend Allowance at 90°" drew as "Bend Deduction a…", and
+/// the card widens no further than its labels need. It widens only while a 90° row shows: a rule
+/// that unfolds from its K-factor, as every rule did before, keeps the card's fixed width.
+#[test]
+fn the_rule_managers_card_fits_its_90_degree_labels() {
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.resize", json!({"width": 1280, "height": 720}));
+    h.step(&json!({"start": "sheet.manage_rules"})).unwrap();
+    h.frames(3);
+    let card = |h: &crate::scenario::Harness| h.ctx.memory(|m| m.area_rect(egui::Id::unique(("sc_dialog", "SHEET METAL RULES")))).map(|r| r.width());
+    let plain = card(&h).expect("the rules card");
+    for (choice, label) in [(1, "Bend Deduction at 90°"), (2, "Bend Allowance at 90°")] {
+        if let Some(Kind::Sheet(Sm::Rules { unfold, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *unfold = choice;
+        }
+        h.frames(4);
+        let drawn: Vec<String> = h
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text.starts_with(&label[..12]) => {
+                    Some(text.galley.rows.iter().map(|row| row.text()).collect::<String>())
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(drawn.iter().any(|t| t == label), "{label} drawn whole: {drawn:?}");
+        let wide = card(&h).unwrap_or(plain);
+        assert!(wide > plain && wide <= plain * 1.5, "{label}: card {wide} from {plain}");
+        // Wider, it is still a manager card: its header keeps the collapse arrow.
+        assert!(crate::scenario::handle_at("dialog:collapse").is_some(), "{label}: the header's collapse arrow");
+        // Back on K Factor the card is the width it was.
+        if let Some(Kind::Sheet(Sm::Rules { unfold, .. })) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+            *unfold = 0;
+        }
+        h.frames(4);
+        assert_eq!(card(&h), Some(plain), "the K Factor card keeps its fixed width after {label}");
+    }
+}
+
 /// The rule manager's rectangular relief, on a base whose corners are not square: the shape and
 /// the size the dialog shows reach the part, the bends and the flat pattern.
 #[test]
@@ -1840,7 +2018,7 @@ fn perforate_toolbar_opens_without_running_empty_parameters() {
         let ctx = crate::fonts::test_context();
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
             if let Kind::Sheet(k) = &mut dialog.kind {
-                rows(&mut app, ui, k, &mut dialog.inputs);
+                rows(&mut app, ui, k, &mut dialog.inputs, &dialog.extra);
             }
         });
         let texts: Vec<_> = crate::test_support::text_shapes(&output).map(|text| text.galley.text()).collect();
@@ -2660,7 +2838,7 @@ fn press_in_hardware_form_offers_the_sizes_the_table_has_for_the_kind() {
         }
         let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| {
             if let Kind::Sheet(k) = &mut dialog.kind {
-                rows(&mut app, ui, k, &mut dialog.inputs);
+                rows(&mut app, ui, k, &mut dialog.inputs, &dialog.extra);
             }
         });
         let texts: Vec<String> = crate::test_support::text_shapes(&output).map(|text| text.galley.text().to_string()).collect();

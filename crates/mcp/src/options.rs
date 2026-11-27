@@ -11,6 +11,12 @@ pub const COMPACT_ENV: &str = "SOLIDCRAFT_MCP_COMPACT";
 /// The command-line flag that turns on compact output.
 pub const COMPACT_FLAG: &str = "--compact";
 
+/// The command-line flag that adds `structuredContent` to every tool result, for programs that
+/// call the tools (the Python client): `{"result": the reply as JSON (or its text when it is
+/// not JSON), "notes": [the text blocks added after it]}`. Chat clients leave it off, since some
+/// show the model both the text and the structured copy.
+pub const STRUCTURED_FLAG: &str = "--structured";
+
 /// Output options of the MCP server.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Options {
@@ -19,6 +25,9 @@ pub struct Options {
     /// tool results that are JSON are not pretty-printed. Off: `inspect_design` returns every
     /// sketch in full, and JSON is pretty-printed.
     pub compact: bool,
+    /// Every tool result also carries its reply as `structuredContent` ([`STRUCTURED_FLAG`]).
+    /// Off: only errors with a structured reason carry it, as before.
+    pub structured: bool,
 }
 
 impl Options {
@@ -30,24 +39,26 @@ impl Options {
             Some("1" | "true" | "yes" | "on") => true,
             Some(other) => return Err(format!("{COMPACT_ENV} must be 1 or 0 (true/false, yes/no, on/off), not `{other}`")),
         };
-        Ok(Self { compact: flag || from_env })
+        Ok(Self { compact: flag || from_env, structured: false })
     }
 
     /// [`Options::resolve`] with this process's command-line arguments (`args`, after the
     /// subcommand) and environment.
     pub fn from_args_and_env(args: &[String]) -> Result<Self, String> {
-        Self::resolve(args.iter().any(|a| a == COMPACT_FLAG), std::env::var(COMPACT_ENV).ok().as_deref())
+        let structured = args.iter().any(|a| a == STRUCTURED_FLAG);
+        Self::resolve(args.iter().any(|a| a == COMPACT_FLAG), std::env::var(COMPACT_ENV).ok().as_deref()).map(|o| Self { structured, ..o })
     }
 
     /// The options the app reports in its `mcp.options` reply (`{"compact": bool}`); a field
-    /// missing or of another type is off.
+    /// missing or of another type is off. Structured results are the calling program's choice,
+    /// never the app's.
     pub fn from_app(reply: &serde_json::Value) -> Self {
-        Self { compact: reply.get("compact").and_then(serde_json::Value::as_bool).unwrap_or(false) }
+        Self { compact: reply.get("compact").and_then(serde_json::Value::as_bool).unwrap_or(false), structured: false }
     }
 
     /// Each option on when it is on in `self` or in `other`.
     pub fn or(self, other: Self) -> Self {
-        Self { compact: self.compact || other.compact }
+        Self { compact: self.compact || other.compact, structured: self.structured || other.structured }
     }
 
     /// Tool JSON as text: compact, or pretty-printed (the default).
@@ -62,23 +73,34 @@ mod tests {
 
     #[test]
     fn off_unless_asked() {
-        assert_eq!(Options::default(), Options { compact: false });
-        assert_eq!(Options::resolve(false, None), Ok(Options { compact: false }));
+        assert_eq!(Options::default(), Options { compact: false, structured: false });
+        assert_eq!(Options::resolve(false, None), Ok(Options { compact: false, structured: false }));
         for v in ["", "0", "false", "No", " off "] {
-            assert_eq!(Options::resolve(false, Some(v)), Ok(Options { compact: false }), "{v:?}");
+            assert_eq!(Options::resolve(false, Some(v)), Ok(Options { compact: false, structured: false }), "{v:?}");
         }
         for v in ["1", "true", "YES", "on"] {
-            assert_eq!(Options::resolve(false, Some(v)), Ok(Options { compact: true }), "{v:?}");
+            assert_eq!(Options::resolve(false, Some(v)), Ok(Options { compact: true, structured: false }), "{v:?}");
         }
-        assert_eq!(Options::resolve(true, None), Ok(Options { compact: true }));
-        assert_eq!(Options::resolve(true, Some("0")), Ok(Options { compact: true }), "the flag wins");
+        assert_eq!(Options::resolve(true, None), Ok(Options { compact: true, structured: false }));
+        assert_eq!(Options::resolve(true, Some("0")), Ok(Options { compact: true, structured: false }), "the flag wins");
         assert!(Options::resolve(false, Some("maybe")).is_err_and(|e| e.contains(COMPACT_ENV)));
+    }
+
+    #[test]
+    fn structured_comes_only_from_the_command_line() {
+        let args = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let on = Options::from_args_and_env(&args(&["--headless", STRUCTURED_FLAG])).unwrap();
+        assert!(on.structured);
+        assert!(!Options::from_args_and_env(&args(&["--headless"])).unwrap().structured);
+        assert!(!Options::from_app(&serde_json::json!({"compact": true, "structured": true})).structured);
+        let off = Options::default();
+        assert!(off.or(on).structured && on.or(off).structured);
     }
 
     #[test]
     fn the_app_or_the_command_line_turns_it_on() {
         let off = Options::default();
-        let on = Options { compact: true };
+        let on = Options { compact: true, structured: false };
         assert_eq!(Options::from_app(&serde_json::json!({"compact": true})), on);
         for reply in [serde_json::json!({}), serde_json::json!({"compact": "yes"}), serde_json::json!(null), serde_json::json!({"compact": false})] {
             assert_eq!(Options::from_app(&reply), off, "{reply}");

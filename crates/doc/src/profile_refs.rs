@@ -386,6 +386,7 @@ fn selection_indices(ss: &SolvedSketch, selection: &ProfileSel, mut notes: Optio
             associations.iter().map(|id| unique_profile(ss, &ss.sketch.offset_boundary(id)?)).collect::<Result<Vec<_>>>()?
         }
         ProfileSel::WholeBoundaries { profiles } => whole_profile_indices(ss, profiles)?,
+        ProfileSel::TextRegions { links } => text_region_indices(ss, links)?,
         ProfileSel::SidedCurves { loops } => sided_indices(ss, loops, notes)?,
         ProfileSel::Points { points } => {
             let mut indices = Vec::with_capacity(points.len());
@@ -406,6 +407,68 @@ fn selection_indices(ss: &SolvedSketch, selection: &ProfileSel, mut notes: Optio
         return Err(DocError::Invalid(format!("out-of-range profile selection in {}", ss.name)));
     }
     Ok(indices)
+}
+
+/// The letters of the texts `links` among the profiles of `ss`, in profile order: each profile
+/// whose outer loop is made of one of those texts' curves alone, less the letters' counters. A
+/// profile whose outer loop mixes a picked text's curves with other curves (a line drawn across a
+/// letter, or another picked text that new words run into) is refused: which of its pieces the
+/// text meant cannot be told.
+fn text_region_indices(ss: &SolvedSketch, links: &[String]) -> Result<Vec<usize>> {
+    use solidcraft_sketch::LinkKind;
+    if links.is_empty() || links.len() > MAX_SELECTIONS || links.iter().collect::<BTreeSet<_>>().len() != links.len() {
+        return Err(DocError::Invalid("a text profile selection needs a bounded list of different texts".into()));
+    }
+    let sk = &ss.sketch;
+    for id in links {
+        if !sk.link(id).is_some_and(|link| link.kind == LinkKind::Text && !link.lost) {
+            return Err(DocError::Unknown(format!("text {id} in {}", ss.name)));
+        }
+    }
+    let wanted: BTreeSet<&str> = links.iter().map(String::as_str).collect();
+    let link_of: std::collections::HashMap<&str, Option<&str>> = sk.curves.iter().map(|curve| (curve.id.as_str(), curve.link.as_deref())).collect();
+    let owner = |id: &String| link_of.get(id.as_str()).copied().flatten().filter(|link| wanted.contains(link));
+    let counters = solidcraft_sketch::text_counters(sk, &ss.profiles);
+    let mut indices = Vec::new();
+    for (index, profile) in ss.profiles.iter().enumerate() {
+        let Some(text) = profile.outer_curves.iter().find_map(owner) else {
+            continue;
+        };
+        if !profile.outer_curves.iter().all(|id| owner(id) == Some(text)) {
+            return Err(DocError::Invalid(format!("other curves of {} now cut into a picked text's letters; pick its profiles again", ss.name)));
+        }
+        if !counters.get(index).copied().unwrap_or(false) {
+            indices.push(index);
+        }
+    }
+    if indices.is_empty() {
+        return Err(DocError::Unknown(format!("letters of the picked text in {}", ss.name)));
+    }
+    Ok(indices)
+}
+
+/// The texts whose letters are exactly the profiles `checked`, when every one of them is a letter
+/// of a single text and none of those texts' letters is left out; otherwise none, and the pick is
+/// stored as before. A part of a text never grows into the whole text.
+fn text_capture(ss: &SolvedSketch, checked: &[usize]) -> Option<ProfileSel> {
+    let link_of: std::collections::HashMap<&str, Option<&str>> =
+        ss.sketch.curves.iter().map(|curve| (curve.id.as_str(), curve.link.as_deref())).collect();
+    let mut links = BTreeSet::new();
+    for index in checked {
+        let profile = ss.profiles.get(*index)?;
+        let mut owners = profile.outer_curves.iter().map(|id| link_of.get(id.as_str()).copied().flatten());
+        let owner = owners.next()??;
+        if owners.any(|other| other != Some(owner)) {
+            return None;
+        }
+        links.insert(owner.to_string());
+    }
+    let links: Vec<String> = links.into_iter().collect();
+    let mut found = text_region_indices(ss, &links).ok()?;
+    let mut picked = checked.to_vec();
+    found.sort_unstable();
+    picked.sort_unstable();
+    (found == picked).then_some(ProfileSel::TextRegions { links })
 }
 
 /// How far, relative to its size, a piece of a profile's loop may lie from a curve's line or
@@ -602,6 +665,9 @@ pub fn capture_profile_selection(ss: &SolvedSketch, indices: &[usize]) -> Result
     if checked.is_empty() || checked.iter().collect::<BTreeSet<_>>().len() != checked.len() {
         return Ok(ProfileSel::Indices { indices: indices.to_vec() });
     }
+    if let Some(texts) = text_capture(ss, &checked) {
+        return Ok(texts);
+    }
     // Capture adaptive free-form boundaries only with complete source provenance,
     // including every hole. Ordinary analytic captures keep their historical form.
     let adaptive = checked.iter().any(|index| {
@@ -772,6 +838,8 @@ mod tests {
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,
+                        to_ref: None,
+                        from_ref: None,
                     },
                     operation: crate::Operation::NewBody,
                     targets: vec![],
@@ -1035,6 +1103,8 @@ mod tests {
                         from_level: false,
                         picked_placements: Vec::new(),
                         one_sided_direction: None,
+                        to_ref: None,
+                        from_ref: None,
                     },
                     operation: crate::Operation::NewBody,
                     targets: vec![],

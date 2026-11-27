@@ -104,7 +104,7 @@ pub(crate) fn plate() -> Drawing {
         })]);
     }
     let id = d.allocate_id(&mut id_source).unwrap();
-    d.balloons.add([Arc::new(Balloon { id, view: front, edge: edge("F1:front|F1:top"), at: [60.0, 45.0], parts_list: None })]);
+    d.balloons.add([Arc::new(Balloon { id, view: front, edge: edge("F1:front|F1:top"), at: [60.0, 45.0], parts_list: None, along: None })]);
     d.validate().unwrap();
     d
 }
