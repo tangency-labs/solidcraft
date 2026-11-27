@@ -30,19 +30,9 @@ use crate::body::Body;
 use crate::history::{EdgeOrigin, FaceOrigin, History};
 use crate::{KernelError, Result, guard, record};
 
-/// What splits the faces.
-#[derive(Clone, Debug)]
-pub enum SplitTool<'a> {
-    /// A plane (unbounded).
-    Plane(Plane),
-    /// The surface of another body's face (`face` in that body's face order), extended. Split
-    /// Body by a face of a surface body joined tangentially to others cuts with their smooth
-    /// sheet as it is, or with the whole sheet where that does not cut through ([`split_body`]).
-    Face { body: &'a Body, face: usize },
-    /// Sketch curves (chains of segments in `plane`) swept along `along` (none: the plane's
-    /// normal); each curve splits on its own, an open one extended past its ends.
-    Curves { plane: Plane, curves: Vec<Vec<Seg2>>, along: Option<Vec3> },
-}
+/// What splits the faces: a plane, another body's face, or sketch curves swept
+/// ([`solidcraft_kernel_api::SplitTool`] over solidcore's body).
+pub type SplitTool<'a> = solidcraft_kernel_api::SplitTool<'a, Body>;
 
 /// Most segments a sketch tool may hold.
 pub(crate) const MAX_SEGMENTS: usize = 4096;
