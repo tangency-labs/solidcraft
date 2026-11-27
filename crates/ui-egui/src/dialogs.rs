@@ -504,6 +504,12 @@ crate::dialog_descriptor::dialog_descriptors! {
                 /// With round edges: the rounds' radius (an expression); empty: the offset's.
                 radius: String,
             },
+            FingerJoint {
+                count: String,
+                clearance: String,
+                inverted: bool,
+                edge_offset: String,
+            },
             EditParam {
                 name: String,
                 expr: String,
@@ -561,6 +567,10 @@ crate::dialog_descriptor::dialog_descriptors! {
             Frame(crate::dialogs_frame::Member),
             /// End caps on frame members (`dialogs_end_cap`).
             EndCap(crate::dialogs_end_cap::EndCap),
+            /// Weld tool (`dialogs_weld`).
+            Weld(Box<crate::dialogs_weld::WeldDialog>),
+            /// Dogbone reliefs in inside corners (`dialogs_dogbone`).
+            Dogbone(crate::dialogs_dogbone::Dogbone),
             /// Cell Grid (`dialogs_cell_grid`).
             CellGrid(crate::dialogs_cell_grid::CellGrid),
             /// Rotate Member (`dialogs_rotate_member`).
@@ -765,6 +775,8 @@ pub struct Dialog {
     pub(crate) started_from_sketch: Option<u64>,
     /// New Sketch was pressed: the dialog waits while the sketch is drawn ([`crate::command_sketch`]).
     pub(crate) new_sketch: bool,
+    /// Its handle drags, for Undo and Redo while it is open (#22838).
+    pub(crate) drag_undo: crate::dialog_drag_undo::DragUndo,
 }
 
 #[derive(Clone, Debug)]
@@ -1009,6 +1021,11 @@ impl Dialog {
         dense::command(&self.kind)
     }
 
+    /// The value box that has, or last had, the keyboard.
+    pub(crate) fn value_focus(&self) -> Option<egui::Id> {
+        self.value_focus
+    }
+
     /// Show why OK (or starting the sketch) was refused, for as long as the inputs stay as they are.
     pub(crate) fn refuse(&mut self, app: &SolveApp, error: String) {
         self.refused = Some(Refused::now(app, self));
@@ -1054,6 +1071,7 @@ impl Dialog {
             started_from_sketch: None,
             auto: None,
             new_sketch: false,
+            drag_undo: Default::default(),
         }
     }
 
@@ -1155,6 +1173,10 @@ impl Dialog {
             ),
             "solid.fillet" => Dialog::new(fillet_kind(&fillet_radius_default(app), false), vec![SelInput::new("Edges", EDGES | FACES, true)]),
             "solid.chamfer" => Dialog::new(fillet_kind(&length_default(s, "1"), true), vec![SelInput::new("Edges", EDGES | FACES, true)]),
+            "solid.finger_joint" => Dialog::new(
+                Kind::FingerJoint { count: "3".into(), clearance: length_default(s, "0"), inverted: false, edge_offset: length_default(s, "0") },
+                vec![SelInput::new("ui.finger_joint_bodies", BODIES, true)],
+            ),
             // The path is a sketch's curves or a body's edges, with Tangent Chain (#16084).
             "solid.pipe" => {
                 let (kind, inputs) = Kind::simple_start(id)?;
@@ -1405,6 +1427,8 @@ impl Dialog {
                     .or_else(|| crate::dialogs_frame::start(app, id))
                     .or_else(|| crate::dialogs_shaft_spline::start(app, id))
                     .or_else(|| crate::dialogs_end_cap::start(app, id))
+                    .or_else(|| crate::dialogs_weld::start(app, id))
+                    .or_else(|| crate::dialogs_dogbone::start(app, id))
                     .or_else(|| crate::dialogs_cell_grid::start(app, id))
                     .or_else(|| crate::dialogs_rotate_member::start(app, id))
                     .or_else(|| crate::dialogs_gusset::start(app, id))
@@ -1530,7 +1554,7 @@ impl Dialog {
                             inp.items.push(body);
                         }
                     }
-                    crate::dialogs_assembly::picked_whole_component(&mut d, &whole);
+                    crate::dialogs_assembly::picked_whole_component(&mut d, path, &whole);
                 }
                 continue;
             }
@@ -1724,6 +1748,7 @@ impl Dialog {
             Kind::Plastic(k) => return k.previews(),
             Kind::Frame(_)
             | Kind::EndCap(_)
+            | Kind::Dogbone(_)
             | Kind::CellGrid(_)
             | Kind::RotateMember(_)
             | Kind::FramePlate(_)
@@ -1772,6 +1797,7 @@ impl Dialog {
                 | Kind::Hole { .. }
                 | Kind::Primitive { .. }
                 | Kind::Combine { .. }
+                | Kind::FingerJoint { .. }
                 | Kind::BoundaryFill { .. }
         )
     }
@@ -1801,6 +1827,7 @@ impl Dialog {
             Kind::Shell { thickness } => ("Thickness", ValueKind::Length, thickness),
             Kind::Dome { height, .. } => ("Height", ValueKind::Length, height),
             Kind::Draft { angle } => ("Angle", ValueKind::Angle, angle),
+            Kind::Dogbone(c) => ("Diameter", ValueKind::Length, &mut c.diameter),
             Kind::Hole { diameter, opts, .. } => {
                 // A thread or a bolt size sets the diameter: nothing to type on the canvas.
                 if opts.tapped || opts.clearance {
@@ -3530,6 +3557,7 @@ fn title(k: &Kind) -> &'static str {
             _ => "TORUS",
         },
         Kind::Combine { .. } => "COMBINE",
+        Kind::FingerJoint { .. } => "cmd.solid.finger_joint",
         Kind::EditParam { .. } => "EDIT DIMENSION",
         Kind::Rename { .. } => "RENAME",
         Kind::RenameGroup { .. } => "RENAME GROUP",
@@ -3547,6 +3575,8 @@ fn title(k: &Kind) -> &'static str {
         Kind::Plastic(k) => k.title(),
         Kind::Frame(_) => "FRAME MEMBER",
         Kind::EndCap(_) => "ui.end_cap_title",
+        Kind::Weld(_) => "cmd.weld.create",
+        Kind::Dogbone(_) => "ui.dogbone_title",
         Kind::CellGrid(_) => "ui.cell_grid_title",
         Kind::RotateMember(_) => "ui.rotate_member_title",
         Kind::FrameTrim(_) => "TRIM/EXTEND",
@@ -4473,7 +4503,7 @@ fn command_disabled(app: &SolveApp, d: &Dialog, error: &str) -> bool {
     spec.disabled_refusal(&app.session).is_some_and(|refusal| refusal == error)
 }
 
-fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) {
+pub(crate) fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut egui::Ui) {
     if matches!(d.kind, Kind::SketchModify(_))
         && d.previews()
         && let Err(error) = apply_commands(app, d)
@@ -4563,40 +4593,71 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
         } else {
             // A fillet's refusal reads in plain words, or not at all where its Setback field already
             // says what is wrong; the kernel's own text stays in the hover text, Copy Details and the
-            // issue report.
+            // issue report. When SMLib reports the largest fitting size, the dialog names it and asks
+            // the user whether to apply it (#10849).
             let setback_in_field = d.extra.get("setbacks").is_none();
+            let single_radius = !matches!(d.extra.get("type").and_then(Value::as_str), Some("variable" | "spline"));
             let plain = if matches!(d.kind, Kind::Fillet { chamfer: false, .. }) { fillet_plain_error(&error, setback_in_field) } else { None };
-            ui.vertical(|ui| {
-                match &plain {
-                    Some(FilletRefusal::Plain(plain)) => {
-                        crate::ui_kit::text(ui, plain, crate::ui_kit::Text::Report("error", true)).backing_on_hover_text(shown_error(&error));
-                    }
-                    Some(FilletRefusal::InField) => {}
-                    None => {
-                        crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Report("error", true));
-                    }
-                }
-                ui.horizontal(|ui| {
-                    if plain.is_some() {
-                        let copy = crate::ui_kit::button(ui, tr("ui.copy_details"), crate::ui_kit::Button::Normal);
-                        crate::scenario::publish_handle("dialog:copy_details", copy.rect.center());
-                        if copy.backing_on_hover_text(tr("ui.copy_details_tip")).clicked() {
-                            ui.ctx().copy_text(error.clone());
+            let mut apply_fit: Option<String> = None;
+            let rect = ui
+                .vertical(|ui| {
+                    match &plain {
+                        Some(FilletRefusal::Plain(plain)) => {
+                            crate::ui_kit::text(ui, plain, crate::ui_kit::Text::Report("error", true)).backing_on_hover_text(shown_error(&error));
+                        }
+                        Some(FilletRefusal::FitSize { size_mm }) => {
+                            let shown = crate::length_input::shown(&app.session.doc, *size_mm);
+                            let msg = solidcraft_ui_text::format("ui.fillet_error_too_large_fit", &[("size", &shown)]);
+                            crate::ui_kit::text(ui, &msg, crate::ui_kit::Text::Report("error", true)).backing_on_hover_text(shown_error(&error));
+                        }
+                        Some(FilletRefusal::InField) => {}
+                        None => {
+                            crate::ui_kit::text(ui, &shown_error(&error), crate::ui_kit::Text::Report("error", true));
                         }
                     }
-                    // A value the field flags is the user's to change, not a failure to report.
-                    if matches!(plain, Some(FilletRefusal::InField)) {
-                        return;
-                    }
-                    let response = crate::ui_kit::button(ui, "Create Issue…", crate::ui_kit::Button::Normal);
-                    crate::scenario::publish_handle("dialog:create_issue", response.rect.center());
-                    if response.clicked() {
-                        crate::issue_report::begin(app, ctx, Some(d), Some(&error));
-                    }
-                });
-            })
-            .response
-            .rect
+                    ui.horizontal_wrapped(|ui| {
+                        if let Some(FilletRefusal::FitSize { size_mm }) = &plain
+                            && single_radius
+                        {
+                            let shown = crate::length_input::shown(&app.session.doc, *size_mm);
+                            let label = solidcraft_ui_text::format("ui.fillet_use_fit_size", &[("size", &shown)]);
+                            let use_fit = crate::ui_kit::button(ui, &label, crate::ui_kit::Button::Primary);
+                            crate::scenario::publish_handle("dialog:use_fit_size", use_fit.rect.center());
+                            if use_fit.backing_on_hover_text(tr("ui.fillet_use_fit_size_tip")).clicked() {
+                                apply_fit = Some(shown);
+                            }
+                        }
+                        if plain.is_some() {
+                            let copy = crate::ui_kit::button(ui, tr("ui.copy_details"), crate::ui_kit::Button::Normal);
+                            crate::scenario::publish_handle("dialog:copy_details", copy.rect.center());
+                            if copy.backing_on_hover_text(tr("ui.copy_details_tip")).clicked() {
+                                ui.ctx().copy_text(error.clone());
+                            }
+                        }
+                        // A value the field flags is the user's to change, not a failure to report.
+                        if matches!(plain, Some(FilletRefusal::InField)) {
+                            return;
+                        }
+                        let response = crate::ui_kit::button(ui, "Create Issue…", crate::ui_kit::Button::Normal);
+                        crate::scenario::publish_handle("dialog:create_issue", response.rect.center());
+                        if response.clicked() {
+                            crate::issue_report::begin(app, ctx, Some(d), Some(&error));
+                        }
+                    });
+                })
+                .response
+                .rect;
+            if let Some(fit_text) = apply_fit {
+                if let Kind::Fillet { radius, .. } = &mut d.kind {
+                    *radius = fit_text;
+                }
+                d.error = None;
+                d.refused = None;
+                app.preview.error = None;
+                ctx.request_repaint();
+                return;
+            }
+            rect
         };
         // The refusal comes last in the dialog, under the fold when the fields fill it: only its
         // first line showed, or none, and no Create Issue (#8454). The dialog scrolls a new one
@@ -4615,6 +4676,9 @@ fn error_rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: &mut 
 pub(crate) enum FilletRefusal {
     /// In these plain words.
     Plain(String),
+    /// Too large for the faces beside the edges, with SMLib's largest fitting size (mm), so the
+    /// dialog names it and asks the user whether to apply it (#10849).
+    FitSize { size_mm: f64 },
     /// Not again: the Setback field already flags the value and names the least it takes.
     InField,
 }
@@ -4635,10 +4699,11 @@ pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<
     {
         return Some(FilletRefusal::Plain(solidcraft_ui_text::format("ui.fillet_error_setback_short", &[("least", &format!("{least} mm"))])));
     }
-    let too_large = error.contains("larger than the faces beside its edges allow");
+    let too_large = error.contains("larger than the faces beside its edges allow") || error.contains("into the hollow");
     // The kernel tried smaller radii down to its least and none built: no radius is the cause, so
     // a smaller one, or Largest radius, is no advice (the full refusal stays under Copy details).
-    let none_fits = too_large && error.contains("no smaller radius builds either");
+    let none_fits = too_large && (error.contains("no smaller radius builds either") || error.contains("sizes tried builds"));
+    let fit_mm = solidcraft_engine::kernel::named_blend_fit(error).and_then(solidcraft_engine::kernel::BlendFit::length_mm);
     let corner = error.contains("setback") || error.contains("G2 corner") || error.contains("corner patch");
     let kernel = error.contains("SMLib")
         || error.contains("the operation failed")
@@ -4648,7 +4713,10 @@ pub(crate) fn fillet_plain_error(error: &str, setback_in_field: bool) -> Option<
     if none_fits {
         Some(FilletRefusal::Plain(tr("ui.fillet_error_no_radius").to_string()))
     } else if too_large {
-        Some(FilletRefusal::Plain(tr("ui.fillet_error_too_large").to_string()))
+        match fit_mm {
+            Some(size_mm) => Some(FilletRefusal::FitSize { size_mm }),
+            None => Some(FilletRefusal::Plain(tr("ui.fillet_error_too_large").to_string())),
+        }
     } else if corner && kernel {
         Some(FilletRefusal::Plain(tr("ui.fillet_error_corner").to_string()))
     } else if kernel {
@@ -5291,6 +5359,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
     // Physical materials: the library's, then the design's own (material.create).
+    if matches!(d.kind, Kind::Weld(_)) {
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && !app.esc_handled && escape_routed_here {
+            app.esc_handled = true;
+        } else {
+            crate::dialogs_weld::show(app, ctx, d);
+        }
+        return;
+    }
     let t = Tokens::get();
     let vp = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
     let placement = crate::shell::editor_space(app, vp);
@@ -5333,6 +5409,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         Kind::SaveMesh(_) => crate::dialogs_save_mesh::ready(&d.inputs),
         // OK waits for values the engine takes; the drawing says why it does not.
         Kind::ShaftSpline(_) => built.unwrap_or_else(|| apply_commands(app, &d).is_ok()),
+        // A drawing whose Resolution was just changed is being measured again, and the Simplify
+        // distance is still the one fitted at the old resolution: OK waits for the new fit
+        // ([`dialogs_insert_drawing::remeasure`]), so it cannot send a distance that does not fit.
+        Kind::InsertDrawing(p) => {
+            p.dpi == p.measured_dpi && (built.unwrap_or_else(|| apply_commands(app, &d).is_ok()) && app.preview.error.is_none())
+        }
         Kind::SketchModify(crate::sketch_modify_ui::Mod::Corner { .. }) => {
             // Corner dialogs: preview errors are visual only; validation errors from
             // `apply_commands` go to `d.error`. OK stays enabled when the preview fails.
@@ -5830,6 +5912,7 @@ fn rememberable(kind: &Kind) -> bool {
             )
             | Kind::Frame(_)
             | Kind::EndCap(_)
+            | Kind::Dogbone(_)
             | Kind::CellGrid(_)
     )
 }
@@ -8511,6 +8594,26 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             ("solid.combine", p)
         }
+        Kind::FingerJoint { count, clearance, inverted, edge_offset } => {
+            let bodies = sels(d, 0).body_names();
+            if bodies.len() < 2 || bodies.len() > solidcraft_engine::doc::MAX_FINGER_JOINT_BODIES {
+                return Err(tr("ui.finger_joint_select_bodies").into());
+            }
+            let mut seen = std::collections::BTreeSet::new();
+            if bodies.iter().any(|name| !seen.insert(name)) {
+                return Err(tr("ui.finger_joint_select_different").into());
+            }
+            let count =
+                count.trim().parse::<usize>().ok().filter(|n| (1..=64).contains(n)).ok_or_else(|| tr("ui.finger_joint_invalid_count").to_string())?;
+            if clearance.trim().is_empty() {
+                return Err(tr("ui.finger_joint_enter_clearance").into());
+            }
+            let edge_offset = if edge_offset.trim().is_empty() { Value::Null } else { json!(edge_offset) };
+            (
+                "solid.finger_joint",
+                json!({"bodies": bodies, "count": count, "clearance": clearance, "inverted": inverted, "edge_offset": edge_offset}),
+            )
+        }
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
         Kind::RenameGroup { group, name } => ("timeline.rename_group", json!({"group": group, "name": name})),
@@ -8548,6 +8651,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         Kind::Plastic(k) => return crate::dialogs_plastic::commands(app, k, &d.inputs, &d.extra),
         Kind::Frame(k) => return crate::dialogs_frame::commands(app, k, &d.inputs, &d.extra),
         Kind::EndCap(k) => return crate::dialogs_end_cap::commands(app, k, &d.inputs, &d.extra),
+        Kind::Weld(k) => return crate::dialogs_weld::params(k).map(|p| vec![("weld.create".into(), p)]),
+        Kind::Dogbone(k) => return crate::dialogs_dogbone::commands(app, k, &d.inputs, &d.extra),
         Kind::CellGrid(k) => return crate::dialogs_cell_grid::commands(app, k, &d.inputs, &d.extra),
         Kind::RotateMember(k) => return crate::dialogs_rotate_member::commands(app, k, &d.inputs, &d.extra, d.editing.is_some()),
         Kind::FrameTrim(k) => return crate::dialogs_frame::trim_commands(app, k, &d.inputs, &d.extra),
@@ -9022,7 +9127,7 @@ pub(crate) fn profile_indices(ss: &solidcraft_engine::doc::SolvedSketch, sel: &P
     let mut indices: Vec<usize> = match sel {
         ProfileSel::All => (0..ps.len()).collect(),
         ProfileSel::Indices { indices } => indices.iter().copied().filter(|i| *i < ps.len()).collect(),
-        ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } => {
+        ProfileSel::OffsetBoundaries { .. } | ProfileSel::WholeBoundaries { .. } | ProfileSel::TextRegions { .. } => {
             solidcraft_engine::doc::profile_selection_indices(ss, sel).unwrap_or_default()
         }
         // The regions the feature builds, also those a change of the regions left to the closest
@@ -9223,9 +9328,11 @@ fn construct_picks(id: &str) -> Option<(&'static str, &'static str, &'static [(&
     const CURVE: Accept = EDGES | CURVES;
     Some(match id {
         "construct.axis.through_cylinder" => ("construct.axis.through_cylinder", "AXIS THROUGH CYLINDER", &[("Face", FACES | EDGES, "face", false)]),
-        "construct.axis.normal_to_face" => {
-            ("construct.axis.normal_to_face", "AXIS PERPENDICULAR TO FACE", &[("Face", FACES, "face", false), ("Point", POINT, "point", false)])
-        }
+        "construct.axis.normal_to_face" => (
+            "construct.axis.normal_to_face",
+            "AXIS PERPENDICULAR TO FACE OR PLANE",
+            &[("Face or plane", FACES | PLANES, "face", false), ("Point", POINT, "point", false)],
+        ),
         "construct.axis.two_planes" => {
             ("construct.axis.two_planes", "AXIS THROUGH TWO PLANES", &[("First plane", PLANE, "a", false), ("Second plane", PLANE, "b", false)])
         }
@@ -10297,6 +10404,21 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
+        FeatureKind::FingerJoint { bodies, count, clearance, inverted, edge_offset } => {
+            let mut d = Dialog::new(
+                Kind::FingerJoint {
+                    count: count.to_string(),
+                    clearance: clearance.to_string(),
+                    inverted: *inverted,
+                    edge_offset: edge_offset.as_ref().map_or_else(|| length_default(s, "0"), |value| crate::length_input::stored(&s.doc, value)),
+                },
+                vec![SelInput::new("ui.finger_joint_bodies", BODIES, true)],
+            );
+            if let Some(input) = d.inputs.first_mut() {
+                input.items = bodies.iter().map(|body| Sel::Body { name: body.to_string() }).collect();
+            }
+            d
+        }
         FeatureKind::Mirror { features, plane, bodies, placements, combine } => {
             let mut d = start("solid.mirror")?;
             let ids: Vec<u64> = features.iter().map(|f| f.0).collect();
@@ -10952,6 +11074,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 .or_else(|| crate::dialogs_plastic::for_feature(app, other))
                 .or_else(|| crate::dialogs_frame::for_feature(app, &f))
                 .or_else(|| crate::dialogs_end_cap::for_feature(app, other))
+                .or_else(|| crate::dialogs_dogbone::for_feature(app, &f))
                 .or_else(|| crate::dialogs_cell_grid::for_feature(app, other))
                 .or_else(|| crate::dialogs_rotate_member::for_feature(app, id, other))
                 .or_else(|| crate::dialogs_frame::trim_for_feature(app, other))
@@ -11046,6 +11169,515 @@ mod refused_ok_tests {
         for s in steps {
             h.step(s).unwrap();
         }
+    }
+
+    fn corner_join_app(mut session: Session) -> SolveApp {
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+            ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})),
+            ("sketch.finish", json!({})),
+            ("sheet.flange", json!({"sketch": "Base"})),
+            ("sheet.flange", json!({"edges": [[50, 0, 0], [100, 30, 0]], "height": 20})),
+        ] {
+            session.execute(command, &params).unwrap();
+        }
+        SolveApp::new(session, Default::default())
+    }
+
+    fn corner_join_face_hits(app: &SolveApp) -> [(usize, Vec3); 2] {
+        let state = app.session.model.state();
+        let sheet = &state.surface_sheets[0];
+        let body = state.body(&sheet.body).unwrap();
+        let faces = body.body.faces(0.01).unwrap();
+        [0, 1].map(|joint| {
+            let source = sheet.bend_source_edge(joint, body).unwrap();
+            sheet
+                .bend_face_indices(body, &source)
+                .into_iter()
+                .find_map(|index| {
+                    let point = faces.get(index)?.centroid;
+                    body.body.faces_within(point, 1e-6).unwrap().iter().any(|&(face, _)| face == index).then_some((index, point))
+                })
+                .expect("a built flange has a point inside one of its faces")
+        })
+    }
+
+    #[test]
+    fn corner_join_dialog_sends_named_sources_not_viewport_picks() {
+        let mut app = corner_join_app(Session::default());
+        let body = app.session.model.state().surface_sheets[0].body.to_string();
+        let mut dialog = Dialog::for_command(&app, "sheet.corner_join").unwrap();
+        assert_eq!(dialog.command(), Some("sheet.corner_join"));
+        assert!(preview_commands(&app, &dialog).is_err());
+        for (input, (index, point)) in dialog.inputs.iter_mut().zip(corner_join_face_hits(&app)) {
+            input.items = vec![Sel::Face { body: body.clone(), index, point }];
+        }
+        for (mode, overlap, expected) in [(0, "", "butt"), (1, "1 mm", "partial_overlap"), (1, "", "full_overlap")] {
+            if let Kind::Sheet(crate::dialogs_sheet::Sm::CornerJoin { kind, overlap: value, .. }) = &mut dialog.kind {
+                *kind = mode;
+                *value = overlap.into();
+            }
+            let commands = preview_commands(&app, &dialog).unwrap();
+            let (command, params) = &commands[0];
+            assert_eq!(command, "sheet.corner_join");
+            assert_eq!(params["kind"], expected);
+            for key in ["covering", "covered"] {
+                assert!(params[key].as_str().unwrap().contains('|'));
+            }
+            assert_eq!(params.get("overlap").is_some(), !overlap.is_empty());
+            assert!(params.get("points").is_none());
+            let reply = app.session.execute(command, params).unwrap();
+            let reopened = for_feature(&app, reply["feature"].as_u64().unwrap(), None).unwrap();
+            assert_eq!(reopened.command(), Some("sheet.corner_join"));
+            assert!(reopened.inputs.is_empty());
+            let before_edit = serde_json::to_value(&app.session.doc).unwrap();
+            let reopened_commands = preview_commands(&app, &reopened).unwrap();
+            assert_eq!(serde_json::to_value(&app.session.doc).unwrap(), before_edit, "preview must not edit the design");
+            let (edit_command, edit) = &reopened_commands[0];
+            assert_eq!(edit_command, "timeline.redefine");
+            assert_eq!(edit["feature"], reply["feature"]);
+            assert_eq!(edit["command"], "sheet.corner_join");
+            for key in ["body", "covering", "covered", "kind", "overlap", "gap"] {
+                assert_eq!(edit["params"].get(key), params.get(key), "reopened {key} in {expected}");
+            }
+            let feature = reply["feature"].as_u64().unwrap();
+            let feature_kind = &app.session.doc.feature(feature).unwrap().kind;
+            assert_eq!(crate::workspace::feature_icon(feature_kind), Some("corner_join"));
+            assert_eq!(crate::timeline::icon_of(feature_kind), "corner_join");
+            let before_kind = serde_json::to_value(feature_kind).unwrap();
+            app.session.execute(edit_command, edit).unwrap();
+            assert_eq!(serde_json::to_value(&app.session.doc.feature(feature).unwrap().kind).unwrap(), before_kind);
+        }
+    }
+
+    #[test]
+    fn corner_join_dialog_uses_definition_names_for_rotated_component_picks() {
+        for (translate, axis, angle) in [([140, -25, 35], [0, 0, 1], "90 deg"), ([-80, 45, 12], [1, 0, 0], "37 deg")] {
+            let mut session = Session::default();
+            let component = session.execute("component.create", &json!({"name": "Part", "grounded": false})).unwrap();
+            let occurrence = component["occurrence"].as_u64().unwrap();
+            let mut app = corner_join_app(session);
+            app.session.execute("occurrence.move", &json!({"occurrence": occurrence, "translate": translate, "axis": axis, "angle": angle})).unwrap();
+            let local_hits = corner_join_face_hits(&app);
+            let state = app.session.model.state();
+            let sheet = &state.surface_sheets[0];
+            let definition = sheet.body.clone();
+            let local_points = local_hits.map(|(_, point)| point);
+            let definition_body = state.bodies.iter().find(|body| body.name == definition).unwrap();
+            let joints = sheet.corner_joints_at(&definition_body.body, local_points, 1e-6).unwrap();
+            let sources = joints.map(|joint| sheet.bend_source_edge(joint, definition_body).unwrap().to_string());
+            let world = crate::open_meshing::session_world(&app.session);
+            let body = world.bodies.iter().find(|body| body.source_name.as_deref() == Some(definition.as_str())).unwrap();
+            let points = local_points.map(|point| solidcraft_engine::doc::apply_point(&body.source_transform, point));
+            assert_ne!(points, local_points, "the selection must use transformed world points");
+            for order in [[0, 1], [1, 0]] {
+                let mut dialog = Dialog::for_command(&app, "sheet.corner_join").unwrap();
+                for (input, source) in dialog.inputs.iter_mut().zip(order) {
+                    input.items = vec![Sel::Face { body: body.name.clone(), index: local_hits[source].0, point: points[source] }];
+                }
+                for (mode, overlap, expected_kind) in [(0, "", "butt"), (1, "1 mm", "partial_overlap"), (1, "", "full_overlap")] {
+                    let Kind::Sheet(crate::dialogs_sheet::Sm::CornerJoin { kind, overlap: value, .. }) = &mut dialog.kind else {
+                        panic!("the command has a corner form")
+                    };
+                    *kind = mode;
+                    *value = overlap.into();
+                    let before = serde_json::to_value(&app.session.doc).unwrap();
+                    let commands = preview_commands(&app, &dialog).unwrap();
+                    assert_eq!(serde_json::to_value(&app.session.doc).unwrap(), before);
+                    let (command, params) = &commands[0];
+                    assert_eq!(command, "sheet.corner_join");
+                    assert_eq!(params["body"], definition);
+                    assert_eq!(params["covering"], sources[order[0]]);
+                    assert_eq!(params["covered"], sources[order[1]]);
+                    assert_eq!(params["kind"], expected_kind);
+                    assert_eq!(params.get("overlap").is_some(), !overlap.is_empty());
+                    assert!(params.get("points").is_none());
+                    app.session.execute(command, params).unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn corner_join_dialog_refills_expressions_and_swaps_named_sources_without_picks() {
+        let app = corner_join_app(Session::default());
+        let state = app.session.model.state();
+        let sheet = &state.surface_sheets[0];
+        let body = state.body(&sheet.body).unwrap();
+        let covering = sheet.bend_source_edge(0, body).unwrap();
+        let covered = sheet.bend_source_edge(1, body).unwrap();
+        let feature: FeatureKind = serde_json::from_value(json!({
+            "type": "sheet_corner_join", "body": sheet.body,
+            "covering": covering, "covered": covered,
+            "kind": "partial_overlap", "overlap": "corner_overlap", "gap": "corner_gap",
+        }))
+        .unwrap();
+        let (mut form, mut inputs, extra) = crate::dialogs_sheet::for_feature(&app, &feature).unwrap();
+        assert!(inputs.is_empty(), "saved identities never need reconstructed viewport picks");
+        let Kind::Sheet(form) = &mut form else { panic!("the feature has a sheet form") };
+        let commands = crate::dialogs_sheet::commands(&app, form, &inputs, &extra).unwrap();
+        let params = &commands[0].1;
+        assert_eq!(params["covering"], covering.to_string());
+        assert_eq!(params["covered"], covered.to_string());
+        assert_eq!(params["overlap"], "corner_overlap");
+        assert_eq!(params["gap"], "corner_gap");
+        assert_eq!(params["body"], sheet.body);
+        let crate::dialogs_sheet::Sm::CornerJoin { saved, .. } = form else { panic!("the form retains its named sources") };
+        crate::dialogs_sheet::swap_corner(saved, &mut inputs);
+        let swapped = crate::dialogs_sheet::commands(&app, form, &inputs, &extra).unwrap();
+        assert_eq!(swapped[0].1["covering"], covered.to_string());
+        assert_eq!(swapped[0].1["covered"], covering.to_string());
+        assert_eq!(swapped[0].1["overlap"], "corner_overlap");
+        assert_eq!(swapped[0].1["gap"], "corner_gap");
+    }
+
+    #[test]
+    fn flange_corner_join_dialog_refills_and_swaps_without_losing_edge_overrides() {
+        let reference = corner_join_app(Session::default());
+        let state = reference.session.model.state();
+        let sheet = &state.surface_sheets[0];
+        let body = state.body(&sheet.body).unwrap();
+        let sources = [sheet.bend_source_edge(0, body).unwrap(), sheet.bend_source_edge(1, body).unwrap()];
+        let mut session = Session::default();
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+            ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})),
+            ("sketch.finish", json!({})),
+            ("sheet.flange", json!({"sketch": "Base"})),
+        ] {
+            session.execute(command, &params).unwrap();
+        }
+        let mut app = SolveApp::new(session, Default::default());
+        let body = app.session.model.state().surface_sheets[0].body.clone();
+        let mut dialog = Dialog::for_command(&app, "sheet.flange").unwrap();
+        let points = [Vec3::new(50.0, 0.0, 0.0), Vec3::new(100.0, 30.0, 0.0)];
+        dialog.inputs[0].items = points.map(|point| Sel::Edge { body: body.clone(), index: 0, point }).to_vec();
+        let Kind::Sheet(crate::dialogs_sheet::Sm::Flange { height, own, height_from, corners, .. }) = &mut dialog.kind else {
+            panic!("the command has a flange form")
+        };
+        *height = "20 mm".into();
+        *height_from = 2;
+        *own = vec![(points[0], "90 deg".into(), "20 mm".into()), (points[1], "90 deg".into(), "22 mm".into())];
+        corners.push(crate::dialogs_sheet::FlangeCorner {
+            sources: sources.clone(),
+            kind: 1,
+            overlap: "1 mm + 0.25 mm".into(),
+            gap: "0.2 mm + 0.4 mm".into(),
+        });
+        let before = serde_json::to_value(&app.session.doc).unwrap();
+        let commands = preview_commands(&app, &dialog).unwrap();
+        assert_eq!(serde_json::to_value(&app.session.doc).unwrap(), before, "forming a preview must not change the design");
+        let (command, params) = &commands[0];
+        assert_eq!(command, "sheet.flange");
+        assert_eq!(params["corners"][0]["covering"], sources[0].to_string());
+        assert_eq!(params["corners"][0]["covered"], sources[1].to_string());
+        let reply = app.session.execute(command, params).unwrap();
+        let feature = reply["feature"].as_u64().unwrap();
+        let mut reopened = for_feature(&app, feature, None).unwrap();
+        let reopened_commands = preview_commands(&app, &reopened).unwrap();
+        let (edit_command, edit) = &reopened_commands[0];
+        assert_eq!(edit_command, "timeline.redefine");
+        assert_eq!(edit["command"], "sheet.flange");
+        for key in ["corners", "edges", "height", "angle", "height_from"] {
+            assert_eq!(edit["params"][key], params[key], "reopened {key}");
+        }
+        for (mode, overlap, kind) in [(0, "", "butt"), (1, "1 mm + 0.25 mm", "partial_overlap"), (1, "", "full_overlap")] {
+            let Kind::Sheet(crate::dialogs_sheet::Sm::Flange { corners, .. }) = &mut reopened.kind else {
+                panic!("the feature retains its flange form")
+            };
+            let corner = corners.first_mut().unwrap();
+            corner.kind = mode;
+            corner.overlap = overlap.into();
+            corner.sources.swap(0, 1);
+            let expected = corner.sources.clone();
+            let before = serde_json::to_value(&app.session.doc).unwrap();
+            let commands = preview_commands(&app, &reopened).unwrap();
+            assert_eq!(serde_json::to_value(&app.session.doc).unwrap(), before);
+            let (command, edit) = &commands[0];
+            let corner = &edit["params"]["corners"][0];
+            assert_eq!(corner["covering"], expected[0].to_string());
+            assert_eq!(corner["covered"], expected[1].to_string());
+            assert_eq!(corner["kind"], kind);
+            assert_eq!(corner.get("overlap").is_some(), !overlap.is_empty());
+            assert_eq!(corner["gap"], "0.2 mm + 0.4 mm");
+            assert_eq!(edit["params"]["edges"], params["edges"]);
+            app.session.execute(command, edit).unwrap();
+        }
+        let Kind::Sheet(crate::dialogs_sheet::Sm::Flange { corners, .. }) = &mut reopened.kind else { panic!("the feature retains its flange form") };
+        corners.clear();
+        let commands = preview_commands(&app, &reopened).unwrap();
+        assert!(commands[0].1["params"].get("corners").is_none(), "cleared choices must not be restored from extras");
+        app.session.execute(&commands[0].0, &commands[0].1).unwrap();
+        let FeatureKind::SheetFlange { corners, .. } = &app.session.doc.feature(feature).unwrap().kind else { panic!("the feature stays a flange") };
+        assert!(corners.is_empty());
+    }
+
+    #[test]
+    fn flange_corner_join_dialog_discovers_only_actual_new_corner_sources() {
+        for existing_flange in [false, true] {
+            let mut session = Session::default();
+            for (command, params) in [
+                ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+                ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})),
+                ("sketch.finish", json!({})),
+                ("sheet.flange", json!({"sketch": "Base"})),
+            ] {
+                session.execute(command, &params).unwrap();
+            }
+            if existing_flange {
+                session.execute("sheet.flange", &json!({"edges": [[50, 0, 0]], "height": 20})).unwrap();
+            }
+            let params = json!({"edges": if existing_flange { json!([[100, 30, 0]]) } else { json!([[50, 0, 0], [100, 30, 0]]) }, "height": 20});
+            let commands = vec![("sheet.flange".to_string(), params.clone())];
+            let before = serde_json::to_value(&session.doc).unwrap();
+            let preview = session.preview(&commands).unwrap();
+            let sources = crate::dialogs_sheet::flange_corner_sources(&preview.before, &preview.after, None);
+            assert_eq!(sources.len(), 1, "a new pair or a new flange meeting its neighbour has one corner");
+            let built = crate::preview::compute(
+                &session,
+                &commands,
+                crate::preview::Colors {
+                    body: [1; 4],
+                    added: [2; 4],
+                    new_body: [3; 4],
+                    removed: [4; 4],
+                    lost: [6; 4],
+                    selected: [7; 4],
+                    mirrored: [6; 4],
+                    edge: [5; 4],
+                    ghost: false,
+                    tint_new: true,
+                    glass_new: false,
+                    cut_tint: true,
+                    replaced_ghost: true,
+                },
+            )
+            .unwrap();
+            assert_eq!(built.flange_corners, sources, "the async preview carries the same authoritative pairs");
+            assert_eq!(serde_json::to_value(&session.doc).unwrap(), before, "discovery must not change the design");
+            let sheet = &preview.after.surface_sheets[0];
+            let body = preview.after.body(&sheet.body).unwrap();
+            let pair = &sources[0];
+            for source in pair {
+                let joint = sheet.bend_joint_for_edge_name(source, body).unwrap();
+                assert_eq!(sheet.bend_source_edge(joint, body).unwrap(), *source);
+            }
+            assert!(
+                crate::dialogs_sheet::flange_corner_sources(&preview.after, &preview.after, None).is_empty(),
+                "old corners are not new-flange choices"
+            );
+            let reply = session.execute("sheet.flange", &params).unwrap();
+            let feature = reply["feature"].as_u64().unwrap();
+            let edit = vec![("timeline.redefine".to_string(), json!({"feature": feature, "command": "sheet.flange", "params": params}))];
+            let preview = session.preview(&edit).unwrap();
+            assert_eq!(crate::dialogs_sheet::flange_corner_sources(&preview.before, &preview.after, Some(feature)), sources);
+        }
+    }
+
+    #[test]
+    fn flange_corner_discovery_ignores_preview_toggle_and_discards_unmatched_overrides() {
+        use crate::dialogs_sheet::{FlangeCorner, Sm, discover_flange_corners};
+
+        let mut session = Session::default();
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+            ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})),
+            ("sketch.finish", json!({})),
+            ("sheet.flange", json!({"sketch": "Base"})),
+        ] {
+            session.execute(command, &params).unwrap();
+        }
+        let app = SolveApp::new(session, Default::default());
+        let body = app.session.model.state().surface_sheets[0].body.clone();
+        let mut dialog = Dialog::for_command(&app, "sheet.flange").unwrap();
+        dialog.preview_enabled = false;
+        dialog.inputs[0].items =
+            [Vec3::new(50.0, 0.0, 0.0), Vec3::new(100.0, 30.0, 0.0)].map(|point| Sel::Edge { body: body.clone(), index: 0, point }).to_vec();
+        discover_flange_corners(&app, &mut dialog);
+        let Kind::Sheet(Sm::Flange { corners, corner_pairs, .. }) = &mut dialog.kind else { panic!("expected flange") };
+        assert_eq!(corner_pairs.len(), 1);
+        corners.push(FlangeCorner { sources: corner_pairs[0].clone(), kind: 0, overlap: String::new(), gap: "MissingParameter".into() });
+        discover_flange_corners(&app, &mut dialog);
+        assert!(matches!(&dialog.kind, Kind::Sheet(Sm::Flange { corners, corner_pairs, .. }) if corners.len() == 1 && corner_pairs.len() == 1));
+        dialog.inputs[0].items.truncate(1);
+        discover_flange_corners(&app, &mut dialog);
+        assert!(matches!(&dialog.kind, Kind::Sheet(Sm::Flange { corners, corner_pairs, .. }) if corners.is_empty() && corner_pairs.is_empty()));
+        assert!(preview_commands(&app, &dialog).unwrap()[0].1.get("corners").is_none());
+    }
+
+    #[test]
+    fn flange_corner_join_dialog_controls_edit_swap_and_collapse() {
+        let mut harness = Harness::new();
+        steps(&mut harness, &[json!({"call": "ui.resize", "params": {"width": 1600, "height": 2200}})]);
+        for (command, params) in [
+            ("parameters.add", json!({"name": "Overlap", "expression": "1.5 mm"})),
+            ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+            ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [100, 60]})),
+            ("sketch.finish", json!({})),
+            ("sheet.flange", json!({"sketch": "Base"})),
+        ] {
+            steps(&mut harness, &[json!({"call": "engine.execute", "params": {"command": command, "params": params}})]);
+        }
+        let body = harness.app.session.model.state().surface_sheets[0].body.clone();
+        let mut dialog = Dialog::for_command(&harness.app, "sheet.flange").unwrap();
+        let points = [Vec3::new(50.0, 0.0, 0.0), Vec3::new(100.0, 30.0, 0.0), Vec3::new(50.0, 60.0, 0.0)];
+        dialog.inputs[0].items = points.map(|point| Sel::Edge { body: body.clone(), index: 0, point }).to_vec();
+        let Kind::Sheet(crate::dialogs_sheet::Sm::Flange { height, own, height_from, .. }) = &mut dialog.kind else {
+            panic!("the command has a flange form")
+        };
+        *height = "20 mm".into();
+        *height_from = 2;
+        *own = vec![(points[0], "90 deg".into(), "20 mm".into()), (points[1], "90 deg".into(), "22 mm".into())];
+        let baseline = preview_commands(&harness.app, &dialog).unwrap()[0].1.clone();
+        let before = serde_json::to_value(&harness.app.session.doc).unwrap();
+        harness.app.dialog = Some(dialog);
+        harness.frames(2);
+        assert!(shown(&mut harness).is_none());
+        assert_eq!(harness.app.preview.flange_corners.len(), 2);
+        harness.frames(1);
+        let sources = harness.app.preview.flange_corners[1].clone();
+        assert_eq!(harness.app.preview.flange_faces.len(), 2);
+        let mapped = &harness.app.preview.flange_faces[1];
+        assert!(mapped.faces.iter().all(|faces| !faces.is_empty()));
+        assert!(mapped.faces[0].iter().all(|face| !mapped.faces[1].contains(face)), "the two flanges have distinct faces");
+        let triangles = mapped.mesh.tri_face.iter().filter(|face| mapped.faces.iter().any(|faces| faces.contains(&(**face as usize)))).count();
+        assert!(triangles > 0 && triangles < mapped.mesh.triangles.len(), "hover includes the two flanges but not the base");
+        let commands = |harness: &Harness| preview_commands(&harness.app, harness.app.dialog.as_ref().unwrap()).unwrap();
+        assert!(commands(&harness)[0].1.get("corners").is_none(), "showing the default must not save an override");
+        let first_heading = crate::scenario::rect_of("dialog:card_header:Corner 1").unwrap();
+        assert!(crate::scenario::rect_of("dialog:card_header:Corner 2").is_some());
+        assert!(crate::scenario::rect_of("dialog:corner_swap").is_none());
+        assert!(crate::scenario::rect_of("dialog:ui.surface_corner_overlap").is_none());
+        let chooser = crate::scenario::rect_of("dialog:segments:ui.surface_corner_type").unwrap();
+        assert!(crate::scenario::rect_of("dialog:ui.surface_corner_covering").is_none(), "raw covering rim names are not form rows");
+        assert!(crate::scenario::rect_of("dialog:ui.surface_corner_covered").is_none(), "raw covered rim names are not form rows");
+
+        steps(&mut harness, &[json!({"click": {"handle": "dialog:ui.surface_corner_type:Overlap"}})]);
+        harness.frames(2);
+        assert!(shown(&mut harness).is_none());
+        assert_eq!(commands(&harness)[0].1["corners"].as_array().unwrap().len(), 1, "Corner 1 retains the rule default");
+        assert_eq!(commands(&harness)[0].1["corners"][0]["kind"], "full_overlap");
+        assert_eq!(commands(&harness)[0].1["corners"][0]["covering"], sources[0].to_string());
+        assert_eq!(crate::scenario::rect_of("dialog:segments:ui.surface_corner_type").unwrap().min.x, chooser.min.x);
+        steps(&mut harness, &[json!({"click": {"handle": "dialog:corner_swap"}})]);
+        assert!(shown(&mut harness).is_none());
+        assert_eq!(commands(&harness)[0].1["corners"][0]["covering"], sources[1].to_string());
+        assert!(harness.app.preview.corner_hover().is_none(), "swap is outside the hover-sensitive header");
+        for index in 0..2 {
+            harness.app.preview.hovered_corner = Some(index);
+            let highlight = crate::viewport::build_highlight(&harness.app);
+            assert!(
+                highlight.blocks.iter().any(|block| block.bytes.opaque.iter().any(|range| !range.is_empty())),
+                "corner {index} renders its hover faces"
+            );
+            if index == 0 {
+                let first_key = highlight.blocks.last().unwrap().key;
+                harness.app.preview.hovered_corner = Some(1);
+                let second = crate::viewport::build_highlight(&harness.app);
+                assert_ne!(first_key, second.blocks.last().unwrap().key, "moving between corners invalidates the face-highlight cache");
+            }
+        }
+        harness.app.preview.hovered_corner = None;
+
+        let Kind::Sheet(crate::dialogs_sheet::Sm::Flange { corners, .. }) = &mut harness.app.dialog.as_mut().unwrap().kind else {
+            panic!("the flange form is open")
+        };
+        corners[0].overlap = "1 mm".into();
+        corners[0].gap = "0.6 mm".into();
+        harness.frames(2);
+        assert!(shown(&mut harness).is_none());
+        let partial = commands(&harness);
+        assert_eq!(partial[0].1["corners"][0]["kind"], "partial_overlap");
+        assert!(partial[0].1["corners"][0].get("overlap").is_some());
+        assert_eq!(partial[0].1["corners"][0]["gap"], "0.6 mm");
+        assert!(harness.app.preview.corner_hover().is_none(), "leaving the corner heading clears its highlight");
+        let thickness = harness.app.session.model.state().surface_sheets[0].sheet.thickness;
+        for text in ["0 mm".to_string(), "-1 mm".to_string(), format!("{} mm", thickness + 0.5)] {
+            let error = crate::dialogs_sheet::corner_overlap_error(&harness.app.session.doc, 1, &text, Some(thickness)).unwrap();
+            assert!(error.contains(&crate::length_input::shown(&harness.app.session.doc, thickness)), "{error}");
+        }
+        for text in ["1 mm + 0.5 mm".to_string(), "Overlap".to_string(), format!("{thickness} mm")] {
+            assert!(crate::dialogs_sheet::corner_overlap_error(&harness.app.session.doc, 1, &text, Some(thickness)).is_none());
+        }
+        let inch_doc = solidcraft_engine::doc::Document { units: "in".into(), ..Default::default() };
+        assert!(crate::dialogs_sheet::corner_overlap_error(&inch_doc, 1, "0.05", Some(thickness)).is_none());
+        assert!(crate::dialogs_sheet::corner_overlap_error(&inch_doc, 1, "0.2", Some(thickness)).unwrap().contains("in"));
+        for kind in [0, 2] {
+            assert!(crate::dialogs_sheet::corner_overlap_error(&harness.app.session.doc, kind, "not an expression", Some(thickness)).is_none());
+        }
+        let Kind::Sheet(crate::dialogs_sheet::Sm::Flange { corners, .. }) = &mut harness.app.dialog.as_mut().unwrap().kind else {
+            panic!("the flange form is open")
+        };
+        corners[0].overlap = "Overlap".into();
+        harness.frames(2);
+        assert!(shown(&mut harness).is_none());
+        assert_eq!(commands(&harness)[0].1["corners"][0]["overlap"], "Overlap", "the authored parameter is not replaced by its value");
+        let Kind::Sheet(crate::dialogs_sheet::Sm::Flange { corners, .. }) = &mut harness.app.dialog.as_mut().unwrap().kind else {
+            panic!("the flange form is open")
+        };
+        corners[0].overlap = format!("{} mm", thickness + 0.5);
+        harness.frames(2);
+        assert!(shown(&mut harness).unwrap().contains("sheet thickness"));
+        let error =
+            crate::dialogs_sheet::corner_overlap_error(&harness.app.session.doc, 1, &format!("{} mm", thickness + 0.5), Some(thickness)).unwrap();
+        let warning = crate::scenario::rect_of(&format!("dialog:status:{error}")).unwrap();
+        let second_heading = crate::scenario::rect_of("dialog:card_header:Corner 2").unwrap();
+        assert!(warning.min.y > second_heading.max.y, "the wrapping error belongs to Corner 2");
+        assert_eq!(
+            crate::scenario::rect_of("dialog:card_header:Corner 1"),
+            Some(first_heading),
+            "the untouched corner is neither removed nor renumbered"
+        );
+        assert!(harness.app.preview.flange_faces.is_empty());
+        assert!(harness.app.preview.corner_hover().is_none(), "a refused preview never leaves stale face highlights");
+        assert_eq!(commands(&harness)[0].1["corners"][0]["overlap"], format!("{} mm", thickness + 0.5));
+        assert_eq!(commands(&harness)[0].1["corners"].as_array().unwrap().len(), 1, "the other corner never becomes an implicit override");
+        assert_eq!(serde_json::to_value(&harness.app.session.doc).unwrap(), before, "invalid input cannot change the document");
+        let Kind::Sheet(crate::dialogs_sheet::Sm::Flange { corners, .. }) = &mut harness.app.dialog.as_mut().unwrap().kind else {
+            panic!("the flange form is open")
+        };
+        corners[0].overlap = "1 mm".into();
+        harness.frames(2);
+        assert!(shown(&mut harness).is_none(), "correcting Corner 2 restores the actual preview");
+        assert_eq!(harness.app.preview.flange_faces.len(), 2);
+        assert!(crate::scenario::rect_of(&format!("dialog:status:{error}")).is_none());
+        steps(&mut harness, &[json!({"click": {"handle": "dialog:ui.surface_corner_type:Butt"}})]);
+        assert!(shown(&mut harness).is_none());
+        let butt = commands(&harness);
+        assert_eq!(butt[0].1["corners"][0]["kind"], "butt");
+        assert!(butt[0].1["corners"][0].get("overlap").is_none());
+        for key in ["edges", "height", "angle", "height_from"] {
+            assert_eq!(butt[0].1[key], baseline[key], "the corner controls preserve {key}");
+        }
+
+        assert!(crate::scenario::rect_of("dialog:ui.surface_corner_overlap").is_none());
+        assert!(crate::scenario::rect_of("dialog:corner_swap").is_none());
+        steps(&mut harness, &[json!({"click": {"handle": "dialog:ui.surface_corner_type:Overlap"}})]);
+        let reopened = commands(&harness);
+        assert_eq!(reopened[0].1["corners"][0]["covering"], sources[1].to_string());
+        assert_eq!(reopened[0].1["corners"][0]["overlap"], "1 mm");
+        steps(&mut harness, &[json!({"click": {"handle": "dialog:card_header:Corner 2"}})]);
+        assert!(shown(&mut harness).is_none());
+        assert!(crate::scenario::rect_of("dialog:ui.surface_corner_overlap").is_none());
+        assert_eq!(commands(&harness), reopened, "collapsing does not edit the corner");
+        assert_eq!(serde_json::to_value(&harness.app.session.doc).unwrap(), before, "form interaction changes only the preview");
+        harness.app.dialog.as_mut().unwrap().inputs[0].items.pop();
+        harness.frames(2);
+        assert!(shown(&mut harness).is_none());
+        harness.frames(1);
+        assert_eq!(harness.app.preview.flange_corners.len(), 1);
+        assert!(crate::scenario::rect_of("dialog:card_header:Corner 2").is_none(), "new picks discard stale corner discovery");
+        harness.app.dialog.as_mut().unwrap().inputs[0].items.push(Sel::Edge { body, index: 0, point: points[2] });
+        harness.frames(2);
+        assert!(shown(&mut harness).is_none());
+        assert_eq!(harness.app.preview.flange_corners.len(), 2);
+        assert!(commands(&harness)[0].1.get("corners").is_none());
+        steps(&mut harness, &[json!({"key": "Enter"})]);
+        assert!(harness.app.dialog.is_none());
+        harness.frames(1);
+        assert!(harness.app.preview.corner_hover().is_none(), "closing the flange dialog clears its hover mapping");
+        let FeatureKind::SheetFlange { corners, .. } = &harness.app.session.doc.features.last().unwrap().kind else { panic!("OK creates a flange") };
+        assert!(corners.is_empty(), "a discarded corner is not restored when applying");
     }
 
     #[test]
@@ -11345,27 +11977,15 @@ mod refused_ok_tests {
     fn create_sketch_on_a_face_that_cannot_keep_an_attachment_waits_for_use_fixed_plane() {
         let mut h = Harness::new();
         let run = |h: &mut Harness, command: &str, params: Value| h.app.run(command, params).unwrap();
-        run(&mut h, "solid.box", json!({"length":40,"width":20,"height":5,"corner":[0,0,0],"body_name":"L"}));
-        run(&mut h, "solid.box", json!({"length":5,"width":20,"height":40,"corner":[0,0,0],"operation":"join"}));
-        run(&mut h, "sketch.create", json!({"plane":{"origin":[0,10,0],"x_dir":[1,0,0],"y_dir":[0,0,1]},"name":"RibSketch"}));
-        run(&mut h, "sketch.line", json!({"points":[[5,25],[25,5]],"ids":["l1"]}));
-        run(&mut h, "sketch.finish", json!({}));
-        run(&mut h, "solid.rib", json!({"sketch":"RibSketch","curves":["l1"],"thickness":4}));
+        // A coil's flat end has no history name: a coil reports no roles for the faces it sweeps.
+        run(&mut h, "solid.coil", json!({"diameter":40,"revolutions":1.5,"pitch":8,"section":"square","section_size":4,"body_name":"Coil"}));
         let (index, point) = {
             let world = h.app.session.world_state().unwrap();
-            let face = world
-                .body("L")
-                .unwrap()
-                .body
-                .faces(0.01)
-                .unwrap()
-                .into_iter()
-                .find(|face| face.plane_normal.is_some_and(|n| n.dot(solidcore_record::Vec3::Y) > 0.999) && (face.centroid.y - 12.0).abs() < 1e-6)
-                .unwrap();
+            let face = world.body("Coil").unwrap().body.faces(0.01).unwrap().into_iter().find(|face| face.plane_normal.is_some()).unwrap();
             (face.index, face.centroid)
         };
         let before = h.app.session.doc.to_json();
-        let sel = Sel::Face { body: "L".into(), index, point };
+        let sel = Sel::Face { body: "Coil".into(), index, point };
         let error = start_sketch(&mut h.app, &sel).unwrap_err();
         assert!(error.contains("fixed"), "{error}");
         assert_eq!(h.app.session.doc.to_json(), before, "no sketch is made until the user chooses a fixed plane");

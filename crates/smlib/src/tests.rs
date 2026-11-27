@@ -207,6 +207,7 @@ const ANSWERING: &[&str] = &[
     "tagged",
     "history",
     "check",
+    "check_local",
     "check_owned",
     "check_stitched",
     "make_cylinder",
@@ -357,6 +358,7 @@ fn every_entry_point_answers() {
     says("history", says("tagged", a.tagged(0)).unwrap().history());
     says("check", a.check(CheckLevel::All));
     says("check_stitched", a.check_stitched(CheckLevel::All));
+    says("check_local", a.check_local(&[0], &[0], CheckLevel::All));
     says("check_owned", a.try_clone().and_then(|c| c.check_owned(CheckLevel::All)));
     says("make_cylinder", Brep::make_cylinder([0.0; 3], 1.0, 1.0));
     says("make_sphere", Brep::make_sphere([0.0; 3], 1.0));
@@ -886,8 +888,7 @@ fn every_call_starts_clean_on_any_kernel() {
 /// `#[cfg(test)]` item of another kind, or a `mod name;` declaration, hides no code).
 #[test]
 fn status_sites_only_shrink() {
-    const SITES: &[(&str, usize)] =
-        &[("core/blend.rs", 6), ("core/measure.rs", 1), ("core/offset.rs", 5), ("core/split.rs", 1), ("core/ssi.rs", 1), ("core/sweep.rs", 3)];
+    const SITES: &[(&str, usize)] = &[("core/blend.rs", 6), ("core/measure.rs", 1), ("core/offset.rs", 5), ("core/ssi.rs", 1), ("core/sweep.rs", 3)];
     /// The lines of `text` outside its top-level inline test modules (rustfmt closes one with a
     /// `}` alone at the start of a line).
     fn code_lines(text: &str) -> Vec<&str> {
