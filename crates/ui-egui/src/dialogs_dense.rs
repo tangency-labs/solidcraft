@@ -62,6 +62,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Remove => Some("solid.remove"),
         Kind::PathPattern { .. } => Some("solid.pattern.path"),
         Kind::Combine { .. } => Some("solid.combine"),
+        Kind::FingerJoint { .. } => Some("solid.finger_joint"),
         Kind::Rib { web, .. } => Some(if *web { "solid.web" } else { "solid.rib" }),
         Kind::Primitive { cmd, .. } => Some(cmd),
         Kind::Surface(k) => Some(match k {
@@ -336,6 +337,18 @@ const MAX_COIL_REVOLUTIONS: i64 = solidcraft_engine::kernel::MAX_HELIX_TURNS as 
 fn count_row_to(ui: &mut egui::Ui, doc: &solidcraft_engine::doc::Document, label: &str, value: &mut String, max: i64) -> bool {
     let eval = |text: &str| doc.eval(text.trim(), solidcraft_engine::doc::expr::Kind::Unitless).ok();
     ui_kit::count_row(ui, label, value, &ui_kit::Count { min: 1, max, eval: &eval })
+}
+
+/// A finger count is stored as an integer on the feature, so this row follows the literal-integer
+/// rule used when the dialog submits it instead of accepting expressions the command cannot keep.
+fn finger_joint_count_row(ui: &mut egui::Ui, app: &SolveApp, value: &mut String) -> bool {
+    let literal = |text: &str| text.trim().parse::<usize>().ok();
+    let eval = |text: &str| literal(text).map(|count| count as f64);
+    let enter = ui_kit::count_row(ui, "ui.finger_joint_count", value, &ui_kit::Count { min: 1, max: 64, eval: &eval });
+    if !literal(value).is_some_and(|count| (1..=64).contains(&count)) {
+        ui_kit::status_line(ui, app.tr("ui.finger_joint_invalid_count"), ui_kit::StatusTone::Error);
+    }
+    enter
 }
 
 /// The distance types a rectangular pattern direction offers, in the order of
@@ -1684,6 +1697,12 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
                 }
             });
         }
+        Kind::FingerJoint { count, clearance, inverted, edge_offset } => {
+            enter |= finger_joint_count_row(ui, app, count);
+            enter |= expr_row(ui, "ui.finger_joint_clearance", clearance);
+            enter |= expr_row(ui, "ui.finger_joint_edge_offset", edge_offset);
+            ui_kit::checkbox_grid(ui, &mut [("ui.finger_joint_inverted", inverted)], 1);
+        }
         Kind::Surface(k) => {
             enter |= crate::dialogs_surface::rows(ui, k, &mut d.inputs, &mut d.active);
             // Extend's Distance drops a kept plane or face (one the dialog couldn't pick), so
@@ -2020,6 +2039,168 @@ mod tests {
         h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
         h.app.run("solid.extrude", json!({"distance":"5 mm"})).unwrap();
+    }
+
+    fn finger_joint_editor() -> (Harness, u64) {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":100,"width":3,"height":50,"body_name":"A","operation":"new"})).unwrap();
+        h.app.run("solid.box", json!({"corner":[48.5,-48.5,0],"length":3,"width":100,"height":50,"body_name":"B","operation":"new"})).unwrap();
+        let result = h.app.run("solid.finger_joint", json!({"bodies":["A","B"],"count":3,"clearance":"0.1 mm"})).unwrap();
+        let id = result["feature"].as_u64().unwrap();
+        h.app.edit_feature(id);
+        h.frames(2);
+        (h, id)
+    }
+
+    #[test]
+    fn finger_joint_creation_uses_preselection_in_order() {
+        let mut h = Harness::new();
+        let selected = vec![Sel::Body { name: "C".into() }, Sel::Body { name: "A".into() }, Sel::Body { name: "B".into() }];
+        h.app.session.selection = selected.clone();
+        h.app.start("solid.finger_joint");
+        let dialog = h.app.dialog.as_ref().unwrap();
+        assert_eq!(dialog.inputs[0].items, selected);
+        assert!(dialog.inputs[0].multi);
+        assert!(dialog.editing.is_none());
+        assert!(matches!(&dialog.kind, Kind::FingerJoint { edge_offset, .. } if edge_offset == "0 mm"));
+        let commands = apply_commands(&h.app, dialog).unwrap();
+        assert_eq!(commands[0].0, "solid.finger_joint");
+        assert_eq!(commands[0].1["bodies"], json!(["C", "A", "B"]));
+        assert_eq!(commands[0].1["count"], 3);
+        assert_eq!(commands[0].1["edge_offset"], "0 mm");
+    }
+
+    #[test]
+    fn finger_joint_creation_accepts_picks_after_opening() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":100,"width":3,"height":50,"body_name":"A","operation":"new"})).unwrap();
+        h.app.run("solid.box", json!({"corner":[48.5,-48.5,0],"length":3,"width":100,"height":50,"body_name":"B","operation":"new"})).unwrap();
+        h.app.session.selection.clear();
+        h.app.start("solid.finger_joint");
+        let mut dialog = h.app.dialog.take().unwrap();
+        assert!(dialog.inputs[0].items.is_empty());
+        assert!(apply_commands(&h.app, &dialog).is_err());
+        for name in ["B", "A"] {
+            dialog.pick(&h.app.session, Sel::Body { name: name.into() });
+        }
+        let commands = apply_commands(&h.app, &dialog).unwrap();
+        assert_eq!(commands[0].1["bodies"], json!(["B", "A"]));
+        run_dialog(&mut h.app, &dialog).unwrap();
+        assert!(matches!(
+            &h.app.session.doc.features.last().unwrap().kind,
+            FeatureKind::FingerJoint { bodies, count: 3, .. } if bodies.iter().map(|name| name.0.as_str()).collect::<Vec<_>>() == ["B", "A"]
+        ));
+    }
+
+    #[test]
+    fn finger_joint_preview_tracks_added_and_removed_bodies_without_committing() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":100,"width":3,"height":50,"body_name":"A","operation":"new"})).unwrap();
+        for (name, x) in [("B", 20), ("C", 70)] {
+            h.app.run("solid.box", json!({"corner":[x,-48.5,0],"length":3,"width":100,"height":50,"body_name":name,"operation":"new"})).unwrap();
+        }
+        let before = serde_json::to_value(&h.app.session.doc).unwrap();
+        h.app.session.selection.clear();
+        h.app.start("solid.finger_joint");
+        let mut dialog = h.app.dialog.take().unwrap();
+        assert!(dialog.previews() && dialog.preview_enabled);
+        for name in ["A", "B"] {
+            dialog.pick(&h.app.session, Sel::Body { name: name.into() });
+        }
+        let colors = crate::preview::Colors::from_tokens(&solidcraft_theme::Tokens::dark());
+        let commands = crate::dialogs::preview_commands(&h.app, &dialog).unwrap();
+        let first = crate::preview::compute(&h.app.session, &commands, colors).unwrap();
+        assert!(first.replaced.contains(&"B".to_string()));
+        dialog.pick(&h.app.session, Sel::Body { name: "C".into() });
+        let commands = crate::dialogs::preview_commands(&h.app, &dialog).unwrap();
+        assert_eq!(commands[0].1["bodies"], json!(["A", "B", "C"]));
+        let added = crate::preview::compute(&h.app.session, &commands, colors).unwrap();
+        assert!(added.replaced.contains(&"B".to_string()) && added.replaced.contains(&"C".to_string()));
+        dialog.remove_listed(&h.app.session, 0, 1, &Sel::Body { name: "B".into() });
+        let commands = crate::dialogs::preview_commands(&h.app, &dialog).unwrap();
+        assert_eq!(commands[0].1["bodies"], json!(["A", "C"]));
+        let removed = crate::preview::compute(&h.app.session, &commands, colors).unwrap();
+        assert!(!removed.replaced.contains(&"B".to_string()) && removed.replaced.contains(&"C".to_string()));
+        h.app.dialog = Some(dialog);
+        cancel(&mut h.app);
+        assert_eq!(serde_json::to_value(&h.app.session.doc).unwrap(), before);
+    }
+
+    #[test]
+    fn finger_joint_editor_refills_applies_and_undoes() {
+        let (mut h, id) = finger_joint_editor();
+        let dialog = h.app.dialog.as_mut().unwrap();
+        assert_eq!(dialog.inputs[0].items, vec![Sel::Body { name: "A".into() }, Sel::Body { name: "B".into() }]);
+        match &mut dialog.kind {
+            Kind::FingerJoint { count, clearance, inverted, edge_offset } => {
+                assert_eq!((count.as_str(), clearance.as_str(), *inverted, edge_offset.as_str()), ("3", "0.1 mm", false, "0 mm"));
+                *count = "2".into();
+                *clearance = "0.2 mm".into();
+                *inverted = true;
+                *edge_offset = "1 mm".into();
+            }
+            other => panic!("unexpected editor: {other:?}"),
+        }
+        let dialog = h.app.dialog.as_ref().unwrap().clone();
+        let commands = apply_commands(&h.app, &dialog).unwrap();
+        assert_eq!(commands[0].0, "timeline.redefine");
+        assert_eq!(commands[0].1["params"]["bodies"], json!(["A", "B"]));
+        run_dialog(&mut h.app, &dialog).unwrap();
+        match &h.app.session.doc.feature(id).unwrap().kind {
+            FeatureKind::FingerJoint { count, clearance, inverted, edge_offset, .. } => {
+                assert_eq!((*count, clearance.as_str(), *inverted), (2, "0.2 mm", true));
+                assert_eq!(edge_offset.as_ref().map(|value| value.as_str()), Some("1 mm"));
+            }
+            other => panic!("unexpected feature: {other:?}"),
+        }
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert!(matches!(
+            &h.app.session.doc.feature(id).unwrap().kind,
+            FeatureKind::FingerJoint { count: 3, inverted: false, edge_offset: None, .. }
+        ));
+    }
+
+    #[test]
+    fn finger_joint_editor_empty_edge_offset_uses_its_zero_default() {
+        let (mut h, id) = finger_joint_editor();
+        if let Kind::FingerJoint { edge_offset, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
+            edge_offset.clear();
+        } else {
+            panic!("expected finger joint editor");
+        }
+        let dialog = h.app.dialog.as_ref().unwrap().clone();
+        let commands = apply_commands(&h.app, &dialog).unwrap();
+        assert_eq!(commands[0].1["params"]["edge_offset"], serde_json::Value::Null);
+        run_dialog(&mut h.app, &dialog).unwrap();
+        assert!(matches!(&h.app.session.doc.feature(id).unwrap().kind, FeatureKind::FingerJoint { edge_offset: None, .. }));
+    }
+
+    #[test]
+    fn finger_joint_editor_rejects_bad_inputs_and_cancel_preserves_feature() {
+        let (mut h, id) = finger_joint_editor();
+        let before = serde_json::to_value(h.app.session.doc.feature(id).unwrap()).unwrap();
+        let dialog = h.app.dialog.as_mut().unwrap();
+        if let Kind::FingerJoint { count, .. } = &mut dialog.kind {
+            *count = "65".into();
+        } else {
+            panic!("expected finger joint editor");
+        }
+        assert!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
+        let dialog = h.app.dialog.as_mut().unwrap();
+        if let Kind::FingerJoint { count, clearance, .. } = &mut dialog.kind {
+            *count = "3".into();
+            clearance.clear();
+        }
+        assert!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
+        let dialog = h.app.dialog.as_mut().unwrap();
+        if let Kind::FingerJoint { clearance, .. } = &mut dialog.kind {
+            *clearance = "0.1 mm".into();
+        }
+        dialog.inputs[0].items = vec![Sel::Body { name: "A".into() }, Sel::Body { name: "A".into() }];
+        assert!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
+        cancel(&mut h.app);
+        assert_eq!(serde_json::to_value(h.app.session.doc.feature(id).unwrap()).unwrap(), before);
+        assert_eq!(h.app.session.doc.marker, None);
     }
 
     #[test]
