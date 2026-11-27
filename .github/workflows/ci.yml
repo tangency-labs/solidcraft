@@ -821,8 +821,10 @@ jobs:
       - name: Bound compilation and cache on the standard hosted runner
         if: vars.CI_RUNNER == 'ubuntu-24.04'
         run: |
-          echo 'CARGO_BUILD_JOBS=1' >> "$GITHUB_ENV"
-          echo 'SCCACHE_CACHE_SIZE=1G' >> "$GITHUB_ENV"
+          {
+            echo 'CARGO_BUILD_JOBS=1'
+            echo 'SCCACHE_CACHE_SIZE=1G'
+          } >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
@@ -918,9 +920,11 @@ jobs:
       - name: Bound compilation and cache on the standard hosted runner
         if: vars.CI_RUNNER == 'ubuntu-24.04'
         run: |
-          echo 'CARGO_BUILD_JOBS=1' >> "$GITHUB_ENV"
-          echo 'SCCACHE_CACHE_SIZE=1G' >> "$GITHUB_ENV"
-          echo 'RAYON_NUM_THREADS=2' >> "$GITHUB_ENV"
+          {
+            echo 'CARGO_BUILD_JOBS=1'
+            echo 'SCCACHE_CACHE_SIZE=1G'
+            echo 'RAYON_NUM_THREADS=2'
+          } >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@1.99.1
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
