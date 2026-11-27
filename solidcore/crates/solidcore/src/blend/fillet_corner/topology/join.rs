@@ -515,6 +515,147 @@ fn rolled_sides(
     Ok(out)
 }
 
+/// Not the fork's (tangency-labs/solidcraft#21940): on the closed blend's side whose one edge
+/// between its ends is a seam of a sphere face F there (both its edge uses on F) that runs
+/// from the corner's `vertex` into F and ends at a vertex no other edge reaches (the sphere's
+/// pole, as on a sphere turned so that its pole lies near the rim), where the blend's other
+/// face G is a plane and every ball touching F along the seam and touching G is smaller than
+/// the round: the seam lies inside the band the round takes off F, the round's contact line
+/// never crosses it, and nothing stands between the blend's ends there. The seam is taken out
+/// of `between`, so the section's end on that side lies on F, through the vertex, as where no
+/// edge runs from it.
+///
+/// Decided exactly: the seam is the arc of a great circle of the sphere from the vertex to the
+/// pole, and the ball touching the sphere at a point and the plane grows with the point's
+/// distance h from the plane (`h r / (r - h)`, for a nub as for a socket: the ball lies outside
+/// the sphere in both);
+/// so the largest ball along the seam is the one at the arc's point farthest from the plane
+/// ([`seam_point_farthest_from_plane`], in closed form), and `ball_touching_with` there decides.
+/// A seam that runs over the sphere's top and back down (a sphere turned so that its seam leaves
+/// the rim across the face) reaches the contact line there and stays a side edge. Other surfaces
+/// are left as they were.
+///
+/// Returns the face whose seam was taken out (the corner's `seam_short_of_rails`).
+///
+/// # Errors
+/// Those of the topology queries, the seam test, the solver lookup and `ball_touching_with`.
+fn seams_short_of_rails(
+    k: &Kernel,
+    target: &mut Brep,
+    solvers: &[Option<SolverObject>],
+    ids: &[Option<FilletSolverId>],
+    blended: EdgeuseId,
+    vertex: Option<crate::topology::VertexId>,
+    side: &[[Option<FaceId>; 2]; 2],
+    between: &mut [Vec<EdgeuseId>; 2],
+) -> Result<Option<FaceId>> {
+    use crate::surface::surface::p2::SurfaceKind;
+    // one closed blend meeting itself
+    let (1, Some(&Some(id)), Some(vertex)) = (ids.len(), ids.first(), vertex) else {
+        return Ok(None);
+    };
+    for s in 0..2 {
+        let Some(&[only]) = between.get(s).map(Vec::as_slice) else {
+            continue;
+        };
+        let (Some(&Some(face)), Some(&Some(other_face))) = (
+            side.get(s).and_then(|f| f.first()),
+            side.get(1 - s).and_then(|f| f.first()),
+        ) else {
+            continue;
+        };
+        if faces_of(target, only)? != [Some(face); 2] {
+            continue;
+        }
+        let (Some(SurfaceKind::Sphere(sphere)), Some(SurfaceKind::Plane(plane))) = (
+            crate::topology::face::p2::surface(target, face)?
+                .map(crate::surface::surface::Surface::kind),
+            crate::topology::face::p2::surface(target, other_face)?
+                .map(crate::surface::surface::Surface::kind),
+        ) else {
+            continue;
+        };
+        let centre = sphere.base().position().origin();
+        let radius = sphere.radius;
+        let plane_origin = plane.position().origin();
+        let plane_normal = plane.evaluate_normal();
+        let Some(edge) = eu1::edge(target, only)? else {
+            continue;
+        };
+        if !crate::topology::edge::is_seam(k, target, edge)? {
+            continue;
+        }
+        let Some(far) = crate::topology::edge::other_vertex(target, edge, Some(vertex))? else {
+            continue;
+        };
+        if far == vertex || crate::topology::vertex::edges(target, far, None)? != [edge] {
+            continue;
+        }
+        let Some(side_eu) = find_side_edgeuse(target, blended, only)? else {
+            continue;
+        };
+        let Some(at) = seam_point_farthest_from_plane(
+            centre,
+            radius,
+            crate::topology::vertex::point(target, vertex)?,
+            crate::topology::vertex::point(target, far)?,
+            plane_origin,
+            plane_normal,
+        ) else {
+            continue;
+        };
+        let (on_g, within, _) = crate::blend::blend_corner::end::ball_touching_with(
+            k,
+            target,
+            live(solvers, Some(id))?,
+            side_eu,
+            other_face,
+            at,
+            None,
+        )?;
+        if within && !on_g {
+            if let Some(b) = between.get_mut(s) {
+                b.clear();
+                return Ok(Some(face));
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Not the fork's (tangency-labs/solidcraft#21940): the point of the arc of the great circle of
+/// the sphere about `centre` of radius `radius` from its point `from` to its point `to` (less
+/// than half a turn: a seam from a rim's vertex to a pole) farthest from the plane through
+/// `plane_origin` square to `plane_normal`. On the arc `p(t) = c + r (cos t e1 + sin t e2)`,
+/// `t` in `[0, phi]`, the distance `n . (p - o)` is `a + r (A cos t + B sin t)`, whose extrema
+/// lie at `atan2(B, A)` and half a turn from it; the farthest of those inside the arc and the
+/// arc's ends is taken. `None` where the arc is not defined (`to` on the line of `centre` and
+/// `from`).
+fn seam_point_farthest_from_plane(
+    centre: crate::math::Point3,
+    radius: f64,
+    from: crate::math::Point3,
+    to: crate::math::Point3,
+    plane_origin: crate::math::Point3,
+    plane_normal: crate::math::Vec3,
+) -> Option<crate::math::Point3> {
+    let e1 = (from - centre).unitize().ok()?;
+    let w = to - centre;
+    let e2 = (w - e1 * w.dot(e1)).unitize().ok()?;
+    let phi = w.dot(e2).atan2(w.dot(e1));
+    let (a, b) = (plane_normal.dot(e1), plane_normal.dot(e2));
+    let point = |t: f64| centre + (e1 * t.cos() + e2 * t.sin()) * radius;
+    let distance = |t: f64| plane_normal.dot(point(t) - plane_origin).abs();
+    let peak = b.atan2(a);
+    let mut best = (0.0, distance(0.0));
+    for t in [phi, peak, peak + crate::math::PI, peak - crate::math::PI] {
+        if (0.0..=phi).contains(&t) && distance(t) > best.1 {
+            best = (t, distance(t));
+        }
+    }
+    Some(point(best.0))
+}
+
 /// Not the fork's (#17224): where the Join's section ends on a side edge `side_eu`
 /// (`SM_FV_RAIL_X_EDGEUSE`), whether the constant round `fs` has a ball of its radius
 /// touching its face F there (F the round's face the side edge bounds, G `other_face` its
@@ -633,7 +774,8 @@ impl FilletCorner {
     /// stands between the blends the section is the one through the vertex: its end on
     /// the first side `SM_FV_JOIN_SECTION`, on the other its mate (`SM_FV_MATE`). Where
     /// one edge stands between them on a side (their faces change there and are tangent
-    /// along it, which the classification checks, or a face's seam runs from the vertex)
+    /// along it, which the classification checks, or a face's seam runs from the vertex and
+    /// the rails cross it: not one that ends inside the band, `seams_short_of_rails`)
     /// its end there is where the rails cross that edge (`SM_FV_RAIL_X_EDGEUSE`), where
     /// the first blend's ball is the second's. Its mate is on the other side, or
     /// with such an edge on both sides where the rails cross the other one too. More
@@ -673,6 +815,16 @@ impl FilletCorner {
         }
         let (side, mut between) = join_sides(target, &solver_eus, &all_eus)?;
         let rolled = rolled_sides(target, solvers, &solver_eu_solvers, &side, &mut between)?;
+        self.seam_short_of_rails = seams_short_of_rails(
+            k,
+            target,
+            solvers,
+            &solver_eu_solvers,
+            *solver_eus.first().ok_or_else(|| defect(OP, PER_BLEND))?,
+            self.vertex,
+            &side,
+            &mut between,
+        )?;
         let cliff_join = self
             .blend
             .is_some_and(crate::blend::blend_corner::BlendCorner::is_cliff_join);
@@ -924,6 +1076,32 @@ impl FilletCorner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #21940: the point of the seam arc farthest from the plane, for a sphere of radius 1
+    /// about the origin and the plane y = 0. Turned 0.1 about x, the seam from the rim's vertex
+    /// (1, 0, 0) to the pole (0, -sin 0.1, cos 0.1) rises all the way: the pole is the farthest.
+    /// An arc from (1, 0, 0) to (-cos 0.1, -sin 0.1, 0), as a seam running over the sphere's
+    /// top, passes (0, -1, 0), the farthest, inside the arc, at distance 1.
+    #[test]
+    fn the_seam_s_farthest_point_from_the_plane_is_in_closed_form() {
+        use crate::math::{Point3, Vec3};
+        let (c, n, o) = (
+            Point3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Point3::new(0.0, 0.0, 0.0),
+        );
+        let a = 0.1_f64;
+        let pole = Point3::new(0.0, -a.sin(), a.cos());
+        let p = seam_point_farthest_from_plane(c, 1.0, Point3::new(1.0, 0.0, 0.0), pole, o, n)
+            .expect("the arc is defined");
+        assert!(p.distance(pole) < 1e-12, "{p:?}");
+        // a seam over the top: from (1, 0, 0) through (0, -1, 0)... to a pole near (-1, 0, 0)
+        let far = Point3::new(-a.cos(), -a.sin(), 0.0);
+        let p = seam_point_farthest_from_plane(c, 1.0, Point3::new(1.0, 0.0, 0.0), far, o, n)
+            .expect("the arc is defined");
+        assert!((n.dot(p - o).abs() - 1.0).abs() < 1e-12, "{p:?}");
+        assert!(p.distance(Point3::new(0.0, -1.0, 0.0)) < 1e-12, "{p:?}");
+    }
     use crate::blend::fillet_standard_solver::p1::ConstantDistanceFs;
 
     #[test]

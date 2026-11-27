@@ -81,6 +81,7 @@ pub(crate) mod piece;
 pub mod rollover;
 pub mod separate_ends;
 pub mod setback;
+pub mod support_ball;
 pub mod swept;
 
 const OP_CLASSIFY: &str = "blend::blend_corner::classify";
@@ -243,6 +244,11 @@ pub enum BlendCornerEvent {
     /// Not the fork's (WR-716, #2345): chamfers meeting at a vertex where every edge is
     /// chamfered, closed by their planes ([`chamfer`]).
     Chamfer,
+    /// Not the fork's (#19089): three equal convex rounds at a vertex of four faces whose
+    /// fourth edge is a tangent seam from a plane into a cylinder, the ball rolling on across
+    /// the seam onto the cylinder until it touches the third face: a torus and the corner
+    /// ball's sphere ([`support_ball`]).
+    SupportBall,
 }
 
 /// `SmBlendEnd` (the fork's 53c47b8): how an End ends, chosen when the corner is made.
@@ -372,6 +378,12 @@ impl BlendCorner {
     #[must_use]
     pub fn is_mixed(self) -> bool {
         self.event == BlendCornerEvent::Mixed
+    }
+
+    /// The support change ([`support_ball`]; #19089).
+    #[must_use]
+    pub fn is_support_ball(self) -> bool {
+        self.event == BlendCornerEvent::SupportBall
     }
 
     /// The chamfer event ([`chamfer`]; WR-716).
