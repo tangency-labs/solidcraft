@@ -737,10 +737,62 @@ pub(crate) fn render_offscreen_ao(
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
-// Test-only (`allow-print-in-tests` does not see a `cfg(all(test, ..))`).
-#[allow(clippy::print_stderr)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_offscreen_layers(
+    scene: GpuScene,
+    sketch: GpuScene,
+    view_proj: [[f32; 4]; 4],
+    back: [f32; 3],
+    eye: [f32; 4],
+    size: u32,
+    tess: Option<&str>,
+    analysis: [f32; 8],
+    colors: [f32; 36],
+) -> Option<Vec<u8>> {
+    offscreen_layers(
+        scene,
+        Some(sketch),
+        None,
+        view_proj,
+        back,
+        eye,
+        size,
+        Offscreen {
+            tess,
+            product_lights: None,
+            product: false,
+            srgb: false,
+            analysis,
+            analysis_colors: colors,
+            ssaa: 1.0,
+            ao_radius: 0.0,
+            ao_samples: solidcraft_viewport_gpu::view::AO_SAMPLES,
+            preview: None,
+            moving: None,
+        },
+    )
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
 fn offscreen(
     scene: GpuScene,
+    highlight: Option<GpuScene>,
+    view_proj: [[f32; 4]; 4],
+    back: [f32; 3],
+    eye: [f32; 4],
+    size: u32,
+    options: Offscreen<'_>,
+) -> Option<Vec<u8>> {
+    offscreen_layers(scene, None, highlight, view_proj, back, eye, size, options)
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+#[allow(clippy::too_many_arguments)]
+// Test-only (`allow-print-in-tests` does not see a `cfg(all(test, ..))`).
+#[allow(clippy::print_stderr)]
+fn offscreen_layers(
+    scene: GpuScene,
+    sketch: Option<GpuScene>,
     highlight: Option<GpuScene>,
     view_proj: [[f32; 4]; 4],
     back: [f32; 3],
@@ -759,17 +811,17 @@ fn offscreen(
     let target = GpuTarget { format, depth: Some(depth), samples: 1, tess: compute.is_some(), oit: false, edges: false };
     let mut resources = egui_wgpu::CallbackResources::default();
     resources.insert(Renderer::new(&device, target, compute));
-    let none = || Arc::new(Mutex::new(None));
     let cb = solidcraft_viewport_egui::ViewportCallback(Frame {
         // A preview frame with no session: no whole-body selection.
         selection_all: false,
+        hover_body: None,
         product_lights,
         product,
         upload_error: None,
         key: 1,
         slot: Arc::new(Mutex::new(Some(scene))),
-        sketch_key: 0,
-        sketch_slot: none(),
+        sketch_key: u64::from(sketch.is_some()),
+        sketch_slot: Arc::new(Mutex::new(sketch)),
         hl_key: u64::from(highlight.is_some()),
         hl_slot: Arc::new(Mutex::new(highlight)),
         pv_key: u64::from(preview.is_some()),

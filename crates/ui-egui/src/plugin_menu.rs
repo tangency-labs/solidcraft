@@ -72,7 +72,21 @@ pub(crate) struct State {
     /// Trusted folder consent keyed by an internal request serial, never by JSON arguments.
     folder_consents: std::collections::BTreeMap<u64, solidcraft_engine::plugin::folders::DialogFolders>,
     panel_pick: Option<PanelPick>,
-    panel_runs: Vec<std::sync::mpsc::Receiver<Value>>,
+    panel_runs: Vec<PanelRun>,
+    /// The dialog the viewport previews this pass, found before the dialogs are taken out of
+    /// `dialogs` to be drawn (`preview_commands` cannot find a dialog that is out of the list).
+    previewed: Option<u64>,
+}
+
+/// A docked panel's action in the control queue (#22032): the design it was queued on, and that
+/// design's revision when it ran, which a form the action asks for with `forms.open` opens against.
+struct PanelRun {
+    serial: u64,
+    session: u64,
+    reply: std::sync::mpsc::Receiver<Value>,
+    source_guard: Option<solidcraft_engine::schema::plugin::FormGuard>,
+    /// A successful reply held until its design is in front again.
+    received: Option<Value>,
 }
 
 #[cfg(test)]
@@ -166,6 +180,37 @@ pub(crate) struct Field {
     controls: Option<Map<String, Value>>,
     hook: Option<solidcraft_engine::plugin::dialog::FieldPatch>,
     hook_baseline: Option<Input>,
+    pub(crate) layout: Layout,
+}
+
+/// How a field sits in the dialog, from the layout annotations of `craft_plugin::layout`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct Layout {
+    /// A heading drawn above the field; empty for a divider line.
+    pub(crate) section: Option<String>,
+    /// The heading folds the fields under it, down to the next heading.
+    pub(crate) collapsible: bool,
+    /// The choice field whose current value is this field's unit.
+    pub(crate) unit_from: Option<String>,
+    /// The field's own unit, drawn while that choice has nothing chosen.
+    pub(crate) unit: Option<String>,
+    /// An `https` page the field's help link opens.
+    pub(crate) help: Option<String>,
+}
+impl Layout {
+    fn read(property: &Value, collapsible: bool) -> Self {
+        use craft_plugin::layout::{HELP, SECTION, UNIT_FROM, help_url};
+        let text = |key: &str| property.get(key).and_then(Value::as_str).map(str::trim).map(str::to_owned);
+        let section = text(SECTION);
+        Self {
+            collapsible: collapsible && section.as_ref().is_some_and(|s| !s.is_empty()),
+            section,
+            // A property name, matched exactly as the manifest check matched it.
+            unit_from: property.get(UNIT_FROM).and_then(Value::as_str).map(str::to_owned),
+            unit: ["unit", "x-unit", "units"].into_iter().find_map(|key| text(key).filter(|u| !u.is_empty())),
+            help: text(HELP).filter(|url| help_url(url)),
+        }
+    }
 }
 
 /// What a field holds, with its schema limits.
@@ -272,7 +317,15 @@ pub(crate) fn form(schema: &Value) -> Option<Vec<(Field, Input)>> {
     if required.iter().any(|key| !properties.contains_key(*key)) {
         return None;
     }
-    let mut fields = properties.iter().map(|(key, property)| field(key, property, required.contains(&key.as_str()))).collect::<Option<Vec<_>>>()?;
+    let collapsible = schema.get(craft_plugin::layout::SECTIONS).is_some();
+    let mut fields = properties
+        .iter()
+        .map(|(key, property)| {
+            let (mut field, input) = field(key, property, required.contains(&key.as_str()))?;
+            field.layout = Layout::read(property, collapsible);
+            Some((field, input))
+        })
+        .collect::<Option<Vec<_>>>()?;
     // The default remains required-first; open_entry applies declared order only on opt-in.
     let rank = |key: &str| required.iter().position(|r| *r == key).unwrap_or(usize::MAX);
     fields.sort_by(|(a, _), (b, _)| rank(&a.key).cmp(&rank(&b.key)).then_with(|| a.key.cmp(&b.key)));
@@ -317,6 +370,9 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
         "x-solidcraft-enabled-when",
         "x-solidcraft-defaults",
         "x-solidcraft-grant",
+        craft_plugin::layout::SECTION,
+        craft_plugin::layout::UNIT_FROM,
+        craft_plugin::layout::HELP,
     ];
     if p.keys().any(|k| !ANNOTATIONS.contains(&k.as_str()) && !allowed.contains(&k.as_str())) {
         return None;
@@ -448,6 +504,7 @@ fn field(key: &str, property: &Value, required: bool) -> Option<(Field, Input)> 
             controls: None,
             hook: None,
             hook_baseline: None,
+            layout: Layout::default(),
         },
         input,
     ))
@@ -472,6 +529,8 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
         SELECTION_KEY,
         "x-solidcraft-visible-when",
         "x-solidcraft-enabled-when",
+        craft_plugin::layout::SECTION,
+        craft_plugin::layout::HELP,
     ];
     if p.keys().any(|k| !KEYWORDS.contains(&k.as_str())) {
         return None;
@@ -529,6 +588,7 @@ fn selection_field(key: &str, p: &Map<String, Value>, required: bool) -> Option<
             controls: None,
             hook: None,
             hook_baseline: None,
+            layout: Layout::default(),
         },
         Input::Selection(Vec::new()),
     ))
@@ -862,6 +922,41 @@ fn slot_name(entry: &solidcraft_engine::plugin::Entry, kind: &str) -> Option<Str
         .and_then(|slot| slot["name"].as_str().map(str::trim).filter(|n| !n.is_empty()).map(str::to_owned))
 }
 
+fn slot_label_or_name(entry: &solidcraft_engine::plugin::Entry, kind: &str) -> Option<String> {
+    for slot in &entry.slots {
+        match slot {
+            solidcraft_engine::plugin::UiSlot::Ribbon { label: Some(l), .. } if kind == "ribbon" && !l.trim().is_empty() => {
+                return Some(l.trim().to_owned());
+            }
+            solidcraft_engine::plugin::UiSlot::Menu { label: Some(l), .. } if kind == "menu" && !l.trim().is_empty() => {
+                return Some(l.trim().to_owned());
+            }
+            _ => {}
+        }
+    }
+    if !entry.label.trim().is_empty() {
+        return Some(entry.label.trim().to_owned());
+    }
+    slot_name(entry, kind).filter(|name| kind != "ribbon" || crate::plugin_slots::ribbon_name(name).is_none() && !name.eq_ignore_ascii_case("model"))
+}
+
+/// Whether this entry appears in the Model tab's Plugins group.
+///
+/// Existing declarations without an explicit `model_group` setting retain prior
+/// inclusion behavior (they continue to appear in the Model tab Plugins group).
+/// An explicit `model_group: false` (on the entry or its ribbon slot) opts out.
+pub(crate) fn entry_shows_in_model_group(entry: &solidcraft_engine::plugin::Entry) -> bool {
+    if let Some(explicit) = entry.model_group {
+        return explicit;
+    }
+    for slot in &entry.slots {
+        if let solidcraft_engine::plugin::UiSlot::Ribbon { model_group: Some(explicit), .. } = slot {
+            return *explicit;
+        }
+    }
+    true
+}
+
 /// Whether the user has `plugin` turned on in Preferences › Plugins (read live, so turning it off
 /// hides it at once).
 pub(crate) fn shown(app: &SolveApp, plugin: &Listed) -> bool {
@@ -907,14 +1002,15 @@ pub(crate) fn ribbon_buttons(app: &SolveApp) -> Vec<RibbonButton> {
             });
         }
         for entry in &plugin.entries {
-            if plugin.ribbon_groups.iter().any(|group| group.entries.contains(&entry.name)) && !individually_pinned(app, plugin, entry) {
+            let grouped = plugin.ribbon_groups.iter().any(|group| group.entries.contains(&entry.name));
+            if (grouped || !entry_shows_in_model_group(entry)) && !individually_pinned(app, plugin, entry) {
                 continue;
             }
             let title = command_title(plugin, entry);
             let name = if title == plugin.name { title.clone() } else { format!("{}: {title}", plugin.name) };
             buttons.push(RibbonButton {
                 id: format!("{RIBBON_PREFIX}{}:{}", plugin.id, entry.name),
-                label: slot_name(entry, "ribbon").unwrap_or(title),
+                label: slot_label_or_name(entry, "ribbon").unwrap_or(title),
                 name,
                 icon: command_icon(plugin, entry).to_owned(),
             });
@@ -2432,6 +2528,14 @@ pub(crate) fn preview_commands(app: &SolveApp) -> Option<(u64, String, Vec<(Stri
     Some((dialog.id, dialog.plugin.id.clone(), vec![("plugin.run".to_owned(), run)]))
 }
 
+/// Why the preview of `dialog` failed: the error of the run for its current inputs, while the
+/// viewport previews this dialog and it is not running.
+pub(crate) fn preview_error<'a>(app: &'a SolveApp, dialog: &EntryDialog) -> Option<&'a str> {
+    let editable = dialog.running.is_none() && dialog.file_job.is_none();
+    (dialog.preview && editable && app.plugin_menu.previewed == Some(dialog.id)).then_some(())?;
+    app.preview.error.as_deref()
+}
+
 /// The first result drawn by this dialog follows its run's last Fit/Home command, as OK does.
 /// Even a run with no view command consumes the first preview: later edits never move the view.
 pub(crate) fn preview_drawn(app: &mut SolveApp, id: u64, view: Option<Value>) {
@@ -2454,6 +2558,8 @@ pub(crate) fn dry_run(scratch: &mut solidcraft_engine::Session, id: &str) {
     // Requests stay in the preview reply, which is discarded with the scratch design.
     // No preview reply goes through poll_dialog, the only place that opens requested forms.
     scratch.plugin_forms_interactive = true;
+    // The entry can ask (`plugin.preview`) and leave out what the preview does not need.
+    scratch.plugin_state.preview = true;
     if let Some(grants) = scratch.plugin_state.grants.get_mut(id) {
         grants.folders.clear();
         grants.command_groups.clear();
@@ -2570,7 +2676,7 @@ pub(crate) fn run_panel(app: &mut SolveApp, command: String, params: Value) -> R
     }
     let (request, reply) = solidcraft_control::ControlRequest::new("engine.execute", json!({"command":command,"params":params}));
     app.plugin_menu.pending.push((request.serial, app.session.uid));
-    app.plugin_menu.panel_runs.push(reply);
+    app.plugin_menu.panel_runs.push(PanelRun { serial: request.serial, session: app.session.uid, reply, source_guard: None, received: None });
     app.control_held.push_back(request);
     Ok(())
 }
@@ -2585,6 +2691,9 @@ pub(crate) fn check_dispatch(app: &mut SolveApp, req: &solidcraft_control::Contr
         // validation and the unchanged live design share the same revision token.
         let guard =
             solidcraft_engine::schema::plugin::FormGuard { document_id: app.session.document_id.clone(), revision: app.session.design_revision() };
+        if let Some(run) = app.plugin_menu.panel_runs.iter_mut().find(|run| run.serial == req.serial) {
+            run.source_guard = Some(guard.clone());
+        }
         if let Some(running) = app.plugin_menu.dialogs.iter_mut().filter_map(|d| d.running.as_mut()).find(|r| Arc::ptr_eq(&r.ticket, &req.ticket)) {
             running.source_guard = Some(guard);
         }
@@ -2602,19 +2711,38 @@ pub(crate) fn take_folder_consent(app: &mut SolveApp, serial: u64) -> Option<sol
 }
 
 /// Take the finished runs' replies: an edit closes its dialog, a read shows its result, an error
-/// stays in its dialog.
+/// stays in its dialog. A panel action's run opens the forms it asked for, as a dialog's does.
 pub(crate) fn poll(app: &mut SolveApp) {
-    for reply in std::mem::take(&mut app.plugin_menu.panel_runs) {
-        match reply.try_recv() {
-            Ok(value) => {
-                if value.get("ok") != Some(&Value::Bool(true)) {
-                    let error = value.get("error").and_then(Value::as_str).unwrap_or_else(|| solidcraft_ui_text::tr("ui.plugin_no_result"));
-                    app.set_status(solidcraft_ui_text::format("ui.plugin_dialog_failed", &[("error", error)]), true);
+    for mut run in std::mem::take(&mut app.plugin_menu.panel_runs) {
+        let value = match run.received.take() {
+            Some(value) => value,
+            None => match run.reply.try_recv() {
+                Ok(value) => value,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    app.plugin_menu.panel_runs.push(run);
+                    continue;
                 }
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => app.plugin_menu.panel_runs.push(reply),
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => app.set_status(app.tr("ui.plugin_no_result").to_owned(), true),
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    app.set_status(app.tr("ui.plugin_no_result").to_owned(), true);
+                    continue;
+                }
+            },
+        };
+        if value.get("ok") != Some(&Value::Bool(true)) {
+            let error = value.get("error").and_then(Value::as_str).unwrap_or_else(|| solidcraft_ui_text::tr("ui.plugin_no_result"));
+            app.set_status(solidcraft_ui_text::format("ui.plugin_dialog_failed", &[("error", error)]), true);
+            continue;
         }
+        // A requested form can hold picks from the action's own design: it opens once that design
+        // is in front, and not at all once that design is closed.
+        if run.session != app.session.uid {
+            if crate::documents::render_owner(app, run.session).is_some() {
+                run.received = Some(value);
+                app.plugin_menu.panel_runs.push(run);
+            }
+            continue;
+        }
+        open_requested_forms(app, &value, run.source_guard.take());
     }
     let ids: Vec<u64> = app.plugin_menu.dialogs.iter().map(|d| d.id).collect();
     for id in ids {
@@ -2673,6 +2801,14 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         dialog.changed |= dialog.revalidated;
         return;
     }
+    if let Some(messages) = reply.pointer("/result/messages").and_then(Value::as_array) {
+        for m in messages {
+            let level = m.get("level").and_then(Value::as_str).unwrap_or("info");
+            let text = m.get("message").and_then(Value::as_str).unwrap_or_default();
+            let is_error = level == "error";
+            app.messages.push(text, is_error, crate::now_ms());
+        }
+    }
     if dialog.writes.is_some() {
         let path = reply.pointer("/result/path").and_then(Value::as_str).unwrap_or_default().to_owned();
         let notes: Vec<String> =
@@ -2700,7 +2836,17 @@ fn poll_dialog(app: &mut SolveApp, id: u64) {
         open_requested_forms(app, &reply, source_guard);
         return;
     }
-    let done = solidcraft_ui_text::format("ui.plugin_dialog_done", &[("entry", &dialog.label)]);
+    let mut done = solidcraft_ui_text::format("ui.plugin_dialog_done", &[("entry", &dialog.label)]);
+    if let Some(last_warn) = reply
+        .pointer("/result/messages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .rfind(|m| m.get("level").and_then(Value::as_str) == Some("warn") || m.get("level").and_then(Value::as_str) == Some("error"))
+        .and_then(|m| m.get("message").and_then(Value::as_str))
+    {
+        done = format!("{done} · {last_warn}");
+    }
     app.plugin_menu.dialogs.remove(at);
     app.set_status(done, false);
     open_requested_forms(app, &reply, source_guard);
@@ -2730,6 +2876,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     poll(app);
     sync_picks(app);
     poll_hooks(app, ctx);
+    app.plugin_menu.previewed = preview_commands(app).map(|(id, _, _)| id);
     for mut dialog in std::mem::take(&mut app.plugin_menu.dialogs) {
         let id = dialog.id;
         let (stays, run_it, claim) = show_dialog(app, ctx, &mut dialog);
@@ -2921,6 +3068,32 @@ fn apply_browsed_folder(app: &mut SolveApp, id: u64, key: &str, path: String) {
 }
 
 /// Draws the dialog. Returns the key of a directory field whose Browse button was pressed.
+/// Give each field with `x-solidcraft-unit-from` the current value of the choice it names as
+/// its unit suffix, or its own unit while that choice has nothing chosen.
+fn follow_units(fields: &mut [(Field, Input)]) {
+    let chosen: Vec<(String, String)> = fields
+        .iter()
+        .filter_map(|(field, input)| match (&field.kind, input) {
+            (Kind::Choice { values, .. }, Input::Choice(Some(i))) => Some((field.key.clone(), values.get(*i)?.clone())),
+            _ => None,
+        })
+        .collect();
+    for (field, _) in fields.iter_mut() {
+        let Some(source) = field.layout.unit_from.as_deref() else { continue };
+        let value = chosen.iter().find(|(key, _)| key == source).map(|(_, value)| value.clone());
+        if let Kind::Number { unit, .. } | Kind::Integer { unit, .. } = &mut field.kind {
+            *unit = value.or_else(|| field.layout.unit.clone());
+        }
+    }
+}
+
+/// A field's help link, under its row: opens the plugin's `https` page in the browser.
+fn help_link(app: &SolveApp, ui: &mut egui::Ui, key: &str, url: &str) {
+    let t = solidcraft_theme::Tokens::get();
+    let link = ui_kit::row(ui, "", |ui| ui.hyperlink_to(egui::RichText::new(app.tr("ui.plugin_dialog_help")).size(t.font_small), url));
+    crate::scenario::publish_target(&format!("plugin_dialog:help:{key}"), link.rect);
+}
+
 fn body(
     app: &SolveApp,
     ui: &mut egui::Ui,
@@ -2949,6 +3122,10 @@ fn body(
         ui_kit::status_line(ui, &asks, ui_kit::StatusTone::Warning);
     }
     let editable = dialog.running.is_none() && dialog.file_job.is_none();
+    // A failed preview says why at the top, above the fields, where it is seen without scrolling.
+    if let Some(error) = preview_error(app, dialog) {
+        ui_kit::status_line(ui, &solidcraft_ui_text::format("ui.plugin_dialog_preview_failed", &[("error", error)]), ui_kit::StatusTone::Error);
+    }
     let mut browse = None;
     match dialog.fields.as_mut() {
         None => {
@@ -2958,11 +3135,29 @@ fn body(
             ui_kit::text(ui, app.tr("ui.plugin_dialog_no_inputs"), ui_kit::Text::Note("plugin_no_inputs"));
         }
         Some(fields) => {
+            follow_units(fields);
             ui.add_enabled_ui(editable, |ui| {
                 let mut picks = 0;
+                // Whether the fields under the last collapsible heading are folded away.
+                let mut folded = false;
                 for (field, input) in fields.iter_mut() {
                     let pick_index = picks;
-                    if !field.visible {
+                    // A heading ends the previous section even while a condition hides it.
+                    if let Some(title) = field.layout.section.as_deref() {
+                        folded = false;
+                        // The heading itself hides with its field.
+                        if field.visible && title.is_empty() {
+                            ui_kit::divider(ui, &format!("plugin_dialog:{}", field.key));
+                        } else if field.visible && field.layout.collapsible {
+                            let salt = ("plugin_dialog_section", id, &field.key);
+                            folded = ui_kit::section(ui, salt, title, true, |_| ()).is_none();
+                        } else if field.visible {
+                            ui_kit::section_heading(ui, title);
+                        }
+                    }
+                    // A folded field that Run would refuse is still drawn, so its problem is never hidden.
+                    let refused = || field_errors.contains_key(&field.key) || params(&[(field.clone(), input.clone())]).is_err();
+                    if !field.visible || (folded && !refused()) {
                         if matches!(input, Input::Selection(_)) {
                             picks += 1;
                         }
@@ -3003,6 +3198,9 @@ fn body(
                     if field.grant_read {
                         ui_kit::text(ui, app.tr("ui.plugin_dialog_folder_read_once"), ui_kit::Text::Note("plugin_folder_read_once"));
                     }
+                    if let Some(url) = field.layout.help.as_deref() {
+                        help_link(app, ui, &field.key, url);
+                    }
                 }
             });
             refresh_conditions(fields);
@@ -3011,14 +3209,6 @@ fn body(
     // Preview: a command that edits the design, as the native tools have it.
     if !dialog.read && !dialog.job && dialog.opens.is_none() && dialog.fields.is_some() {
         ui.add_enabled_ui(editable, |ui| ui_kit::checkbox(ui, app.tr_label("Preview"), &mut dialog.preview));
-        if dialog.preview
-            && editable
-            && app.preview.error.is_some()
-            && preview_commands(app).is_some_and(|(id, _, _)| id == dialog.id)
-            && let Some(error) = &app.preview.error
-        {
-            ui_kit::status_line(ui, &solidcraft_ui_text::format("ui.plugin_dialog_preview_failed", &[("error", error)]), ui_kit::StatusTone::Dim);
-        }
     }
     if dialog.changed {
         let key = if dialog.revalidated { "ui.plugin_edit_revalidated" } else { "ui.plugin_edit_changed" };

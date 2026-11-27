@@ -1,10 +1,29 @@
 {
-  "en": { "cmd.doc.info": "Design File Info" },
-  "de": { "cmd.doc.info": "Konstruktionsdatei-Info" },
-  "ko": { "cmd.doc.info": "설계 파일 정보" },
-  "ar": { "cmd.doc.info": "معلومات ملف التصميم" },
-  "he": { "cmd.doc.info": "פרטי קובץ התכנון" },
-  "ja": { "cmd.doc.info": "設計ファイルの情報" },
-  "vi": { "cmd.doc.info": "Thông tin tệp thiết kế" },
-  "zh": { "cmd.doc.info": "设计文件信息" }
+  "en": {
+    "cmd.doc.info": "Design File Info"
+  },
+  "de": {
+    "cmd.doc.info": "Konstruktionsdatei-Info"
+  },
+  "ko": {
+    "cmd.doc.info": "설계 파일 정보"
+  },
+  "ar": {
+    "cmd.doc.info": "معلومات ملف التصميم"
+  },
+  "he": {
+    "cmd.doc.info": "פרטי קובץ התכנון"
+  },
+  "ja": {
+    "cmd.doc.info": "設計ファイルの情報"
+  },
+  "vi": {
+    "cmd.doc.info": "Thông tin tệp thiết kế"
+  },
+  "zh": {
+    "cmd.doc.info": "设计文件信息"
+  },
+  "fr": {
+    "cmd.doc.info": "Informations sur le fichier de conception"
+  }
 }

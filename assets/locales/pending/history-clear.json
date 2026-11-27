@@ -22,5 +22,8 @@
   },
   "zh": {
     "ui.history_clear": "清除历史"
+  },
+  "fr": {
+    "ui.history_clear": "Effacer l’historique"
   }
 }

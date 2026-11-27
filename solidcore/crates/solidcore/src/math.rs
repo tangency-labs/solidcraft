@@ -754,6 +754,111 @@ pub fn parallelogram_point(corner: Point3, u: Vec3, v: Vec3, s: f64, t: f64) -> 
     corner + u * s + v * t
 }
 
+/// Why [`box_extent_along`], [`axis_along_own_axes`] and [`plane_offset_square_to`] refuse.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AxisRefusal {
+    /// A number of the map, the axis or the box is not finite.
+    NotFinite,
+    /// The axis has no direction (it is zero, or too short to unitize).
+    ZeroAxis,
+    /// The map flattens space, so it has no inverse.
+    FlatMap,
+}
+
+/// `axis` (a direction in the outer frame) as the placed body's own frame sees it, unit: the
+/// linear part of the inverse of `placement` applied to it, unitized.
+fn own_direction(placement: &Transform, axis: Vec3) -> Result<Vec3, AxisRefusal> {
+    if !placement.m.iter().flatten().all(|v| v.is_finite()) || !finite3(axis) {
+        return Err(AxisRefusal::NotFinite);
+    }
+    let inverse = placement.inverse().map_err(|_| AxisRefusal::FlatMap)?;
+    let own = inverse
+        .transform_vector(axis)
+        .unitize()
+        .map_err(|_| AxisRefusal::ZeroAxis)?;
+    if finite3(own) {
+        Ok(own)
+    } else {
+        Err(AxisRefusal::NotFinite)
+    }
+}
+
+/// Not upstream: how far a body's box `min`..`max` (in the body's own frame), placed in the outer
+/// frame by `placement`, reaches along the outer direction `axis` (any length): the box's
+/// [`crate::geom::extent3d::Extent3d::span_along`] along the unit direction that `axis` is in the
+/// body's own frame, high less low. Tight when `axis` runs along one of the body's own axes
+/// ([`axis_along_own_axes`]).
+///
+/// # Errors
+/// [`AxisRefusal`]: a number not finite (also the box's, or an extent not finite), a zero
+/// `axis`, or a `placement` that flattens space.
+pub fn box_extent_along(
+    min: Point3,
+    max: Point3,
+    placement: &Transform,
+    axis: Vec3,
+) -> Result<f64, AxisRefusal> {
+    let own = own_direction(placement, axis)?;
+    if !finite3(min) || !finite3(max) {
+        return Err(AxisRefusal::NotFinite);
+    }
+    let [low, high] =
+        crate::geom::extent3d::Extent3d::from_bounds(min.x, min.y, min.z, max.x, max.y, max.z)
+            .span_along(Point3::ZERO, own);
+    let extent = high - low;
+    if extent.is_finite() {
+        Ok(extent)
+    } else {
+        Err(AxisRefusal::NotFinite)
+    }
+}
+
+/// Not upstream: whether the outer direction `axis` runs along one of the own axes of a body
+/// placed by `placement` (so a box of the body is tight along it): the unit direction `axis` is
+/// in the body's own frame has a component of at least `1 - 1e-9` in size.
+///
+/// # Errors
+/// [`AxisRefusal`] for a number not finite, a zero `axis`, or a `placement` that flattens space.
+pub fn axis_along_own_axes(placement: &Transform, axis: Vec3) -> Result<bool, AxisRefusal> {
+    let own = own_direction(placement, axis)?;
+    Ok([own.x, own.y, own.z].iter().any(|c| c.abs() >= 1.0 - 1e-9))
+}
+
+/// Not upstream: where a flat face, a plane through `origin` with normal `normal` in a body's own
+/// frame, cuts the outer direction `axis` once the body is placed by `placement`, if it is square
+/// to it: `Some` of the offset of the placed `origin` along the unit `axis` from the outer
+/// origin when the placed normal is parallel to `axis` (the unit vectors' cross product no
+/// longer than `1e-9`), `None` when it is not, or when `origin` or `normal` is not finite or the
+/// placed normal has no direction.
+///
+/// # Errors
+/// [`AxisRefusal`] for a `placement` or `axis` with a number not finite, or a zero `axis`.
+pub fn plane_offset_square_to(
+    placement: &Transform,
+    origin: Point3,
+    normal: Vec3,
+    axis: Vec3,
+) -> Result<Option<f64>, AxisRefusal> {
+    if !placement.m.iter().flatten().all(|v| v.is_finite()) || !finite3(axis) {
+        return Err(AxisRefusal::NotFinite);
+    }
+    let axis = axis.unitize().map_err(|_| AxisRefusal::ZeroAxis)?;
+    if !finite3(origin) || !finite3(normal) {
+        return Ok(None);
+    }
+    let Ok(placed) = placement.transform_vector(normal).unitize() else {
+        return Ok(None);
+    };
+    if placed.cross(axis).length() > 1e-9 {
+        return Ok(None);
+    }
+    Ok(Some(
+        placement
+            .transform_point(origin)
+            .distance_along(Point3::ZERO, axis),
+    ))
+}
+
 /// The operation name of the refusals of [`centroid_and_mean_radius`].
 const OP_CENTROID: &str = "math::centroid_and_mean_radius";
 
@@ -1187,6 +1292,77 @@ pub fn arc_third_point_2d(
         .map(|d| along_2d(mid, n, d))
         .filter(|p| p.iter().all(|v| v.is_finite()))
         .min_by(|x, y| length_2d(sub_2d(*x, h)).total_cmp(&length_2d(sub_2d(*y, h))))
+}
+
+/// Not upstream: the distance between two points.
+#[must_use]
+pub fn distance_2d(a: [f64; 2], b: [f64; 2]) -> f64 {
+    length_2d(sub_2d(b, a))
+}
+
+/// Not upstream: the side of the line from `p` to `q` the region lies on that is on the left
+/// of the piece from `a` to `b` (a piece of a counter-clockwise loop lying on that line):
+/// `Some(true)` left of the line seen from `p` towards `q`, `Some(false)` right. `None` when
+/// an end of the piece lies further from the line than `tol` times the line's size, the line
+/// or the piece has no length, or a value is not finite.
+#[must_use]
+pub fn left_side_along_line_2d(
+    a: [f64; 2],
+    b: [f64; 2],
+    p: [f64; 2],
+    q: [f64; 2],
+    tol: f64,
+) -> Option<bool> {
+    let u = sub_2d(q, p);
+    let len = length_2d(u);
+    let size = 1.0 + len + length_2d(p);
+    // Whether the line has a length is its own matter; how far a piece may lie off it grows
+    // with where it is, as rounding does.
+    if !(tol.is_finite()
+        && tol >= 0.0
+        && len.is_finite()
+        && size.is_finite()
+        && len > tol * (1.0 + len))
+    {
+        return None;
+    }
+    let off = |x: [f64; 2]| {
+        let [dx, dy] = sub_2d(x, p);
+        (dx * u[1] - dy * u[0]).abs()
+    };
+    if !(off(a) <= tol * size * len && off(b) <= tol * size * len) {
+        return None;
+    }
+    let along = dot_2d(sub_2d(b, a), u);
+    if along > 0.0 {
+        Some(true)
+    } else if along < 0.0 {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// Not upstream: whether the region on the left of an arc piece (a piece of a counter-clockwise
+/// loop, about `centre` with `radius`, sweeping `sweep` radians, positive counter-clockwise)
+/// lies inside the circle about `c` of radius `r` the piece lies on: `Some(true)` inside,
+/// `Some(false)` outside. `None` when the piece's centre or radius is further from the circle's
+/// than `tol` times its size, the piece has no sweep, or a value is not finite.
+#[must_use]
+pub fn left_side_inside_circle_2d(
+    centre: [f64; 2],
+    radius: f64,
+    sweep: f64,
+    c: [f64; 2],
+    r: f64,
+    tol: f64,
+) -> Option<bool> {
+    let size = 1.0 + r.abs() + length_2d(c);
+    if !(tol.is_finite() && tol >= 0.0 && size.is_finite() && sweep.is_finite() && sweep != 0.0) {
+        return None;
+    }
+    let on = distance_2d(centre, c) <= tol * size && (radius.abs() - r.abs()).abs() <= tol * size;
+    on.then_some(sweep > 0.0)
 }
 
 #[cfg(test)]
@@ -1714,6 +1890,93 @@ mod tests {
             Point2::new(f64::MAX, 0.0),
         ])
         .is_err());
+    }
+
+    /// A piece running along its line has the region on the line's left, one running against it
+    /// on its right; a piece off the line, a line or piece with no length and bad numbers give
+    /// none.
+    #[test]
+    fn a_piece_on_a_line_tells_the_side_its_region_is_on() {
+        let (p, q) = ([0.0, 1.0], [0.0, 21.0]);
+        assert_eq!(
+            left_side_along_line_2d([0.0, 5.0], [0.0, 9.0], p, q, 1e-9),
+            Some(true)
+        );
+        assert_eq!(
+            left_side_along_line_2d([0.0, 9.0], [0.0, 5.0], p, q, 1e-9),
+            Some(false)
+        );
+        // Past the line's ends, on its carrier, still on it.
+        assert_eq!(
+            left_side_along_line_2d([0.0, 30.0], [0.0, 25.0], p, q, 1e-9),
+            Some(false)
+        );
+        assert_eq!(
+            left_side_along_line_2d([1e-6, 5.0], [0.0, 9.0], p, q, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_along_line_2d([0.0, 5.0], [0.0, 5.0], p, q, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_along_line_2d([0.0, 5.0], [0.0, 9.0], p, p, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_along_line_2d([0.0, 5.0], [0.0, 9.0], p, q, f64::NAN),
+            None
+        );
+        assert_eq!(
+            left_side_along_line_2d([f64::NAN, 5.0], [0.0, 9.0], p, q, 1e-9),
+            None
+        );
+        assert_eq!(distance_2d([1.0, 1.0], [4.0, 5.0]), 5.0);
+        // A short line far from the origin tells the same side as at the origin.
+        for x in [0.0, 5e5] {
+            let (p, q) = ([x, 0.0], [x, 4e-4]);
+            assert_eq!(
+                left_side_along_line_2d([x, 1e-4], [x, 3e-4], p, q, 1e-9),
+                Some(true),
+                "{x}"
+            );
+            assert_eq!(
+                left_side_along_line_2d([x, 3e-4], [x, 1e-4], p, q, 1e-9),
+                Some(false),
+                "{x}"
+            );
+        }
+    }
+
+    /// A counter-clockwise arc piece has the region inside its circle, a clockwise one outside;
+    /// a piece on another circle, with no sweep or bad numbers gives none.
+    #[test]
+    fn an_arc_piece_tells_whether_its_region_is_inside_the_circle() {
+        let c = [0.0, 19.4];
+        assert_eq!(
+            left_side_inside_circle_2d(c, 3.04, 1.2, c, 3.04, 1e-9),
+            Some(true)
+        );
+        assert_eq!(
+            left_side_inside_circle_2d(c, 3.04, -1.2, c, 3.04, 1e-9),
+            Some(false)
+        );
+        assert_eq!(
+            left_side_inside_circle_2d([0.0, 20.0], 3.04, 1.2, c, 3.04, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_inside_circle_2d(c, 3.05, 1.2, c, 3.04, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_inside_circle_2d(c, 3.04, 0.0, c, 3.04, 1e-9),
+            None
+        );
+        assert_eq!(
+            left_side_inside_circle_2d(c, 3.04, f64::NAN, c, 3.04, 1e-9),
+            None
+        );
     }
 
     #[test]
