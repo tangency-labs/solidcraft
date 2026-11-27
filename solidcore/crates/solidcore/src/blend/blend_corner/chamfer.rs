@@ -478,7 +478,8 @@ fn chamfer_planes(
         .collect())
 }
 
-/// [`chamfer_planes`] where face i's angle at V may be reflex (`reflex[i]`, above a half
+/// The ring's chamfer planes relative to V, from the edges' unit directions `t` and the
+/// widths, where face i's angle at V may be reflex (`reflex[i]`, above a half
 /// turn: the face between the two edges of one convexity at a vertex of three of both
 /// convexities); with each plane also its rails' unit directions away from the edge, into
 /// `F_i` and into `F_(i+1)`. Into a face is towards its other edge where its angle is below
@@ -657,12 +658,20 @@ fn mitre_tests_of(
 /// the least bound where several are. `None` where no one chamfer's size is the cause.
 #[cfg(test)] // the tests' entry for corners of one convexity
 fn too_wide(mu: &[Vec3], planes: &[ChamferPlane]) -> Option<(usize, f64)> {
-    too_wide_of(mu, planes, &MitreForms::one_convexity())
+    too_wide_of(mu, planes, &MitreForms::one_convexity()).map(|(i, hi, _)| (i, hi))
 }
 
-/// [`too_wide`] for the mitre's tests of `forms`.
-fn too_wide_of(mu: &[Vec3], planes: &[ChamferPlane], forms: &MitreForms) -> Option<(usize, f64)> {
-    let mut best: Option<(usize, f64)> = None;
+/// The chamfer whose size is too large for the mitre of `forms` (its tests fail at its size
+/// and hold below some bound with the others fixed), with the open interval of factors on
+/// its size where they hold, `(upper, lower)`: the upper bound is at most 1, the lower one
+/// may be below 0 (no lower bound). The least upper bound where several chamfers are.
+/// `None` where no one chamfer's size is the cause.
+fn too_wide_of(
+    mu: &[Vec3],
+    planes: &[ChamferPlane],
+    forms: &MitreForms,
+) -> Option<(usize, f64, f64)> {
+    let mut best: Option<(usize, f64, f64)> = None;
     for i in 0..planes.len() {
         let mut scale = vec![1.0; planes.len()];
         let at1 = mitre_tests_of(mu, planes, forms, &scale)?;
@@ -686,8 +695,8 @@ fn too_wide_of(mu: &[Vec3], planes: &[ChamferPlane], forms: &MitreForms) -> Opti
         if empty || hi <= lo || hi <= 0.0 || hi > 1.0 || hi.is_nan() {
             continue;
         }
-        if best.is_none_or(|(_, b)| hi < b) {
-            best = Some((i, hi));
+        if best.is_none_or(|(_, b, _)| hi < b) {
+            best = Some((i, hi, lo));
         }
     }
     best
@@ -832,13 +841,24 @@ fn ring_faces(b: &Brep, all_eus: &[EdgeuseId]) -> Result<Vec<Option<FaceId>>> {
     Ok(out)
 }
 
+/// The fit `size` where it is above `lower`, the lower end of the sizes that build (in the
+/// size's own unit): `None` where the fit margin took it to that end or below, so it names
+/// no size that builds.
+fn fit_above(size: f64, lower: f64) -> Option<f64> {
+    (size > lower).then_some(size)
+}
+
 /// The refusal of a chamfer too wide for the corner: its edge and its fit, the bound
-/// `hi` on its size factor less the fit margin.
+/// `hi` on its size factor less the fit margin. The sizes that build end below at the factor
+/// `lo` too (at chamfers of both convexities the mitre point leaves the odd chamfer's rails
+/// on either side); where the margin takes the fit to that end, the refusal names the edge
+/// and no size.
 fn too_wide_refusal(
     b: &Brep,
     kind: BlendChamferCorner,
     edge_of: Option<(EdgeId, ChamferWidth)>,
     hi: f64,
+    lo: f64,
 ) -> Result<ChamferRefusal> {
     let what = match kind {
         BlendChamferCorner::Mitre => "the chamfers' mitre point falls outside the corner",
@@ -855,16 +875,25 @@ fn too_wide_refusal(
         });
     };
     let margin = 1000.0 * edge::tolerance(b, e)?;
-    let (size, fit_kind) = match width {
+    let (size, lower, fit_kind) = match width {
         ChamferWidth::Offsets { prev, next }
             if (prev - next).abs() <= EFF_ZERO * prev.max(next) =>
         {
-            (hi * prev - margin, FitKind::Radius)
+            (hi * prev - margin, lo * prev, FitKind::Radius)
         }
-        ChamferWidth::Offsets { prev, next } => (hi - margin / prev.max(next), FitKind::Scale),
-        ChamferWidth::Chord(d) => (hi * d - margin, FitKind::Chord),
+        ChamferWidth::Offsets { prev, next } => (hi - margin / prev.max(next), lo, FitKind::Scale),
+        ChamferWidth::Chord(d) => (hi * d - margin, lo * d, FitKind::Chord),
     };
-    let size = size.max(0.0);
+    let Some(size) = fit_above(size.max(0.0), lower) else {
+        return Ok(ChamferRefusal {
+            error: FilletErrorType::NoRoom,
+            comment: format!(
+                "Fillet Error: {what} (one chamfer is too wide for the others); the sizes of that chamfer that close it are narrower than the fit margin, so none is named"
+            ),
+            fit_edge: Some(e),
+            fit: None,
+        });
+    };
     let named = match fit_kind {
         FitKind::Scale => format!("scale that chamfer by {} at most", fmt_g(size)),
         _ => format!("that chamfer builds up to {}", fmt_g(size)),
@@ -1138,13 +1167,14 @@ pub fn classify_chamfer(
                 ));
             }
             let edge_of = too_wide_of(&mu, &planes, &forms)
-                .and_then(|(i, hi)| Some(((*edges.get(i)?, *widths.get(i)?), hi)));
-            let hi = edge_of.map_or(0.0, |(_, hi)| hi);
+                .and_then(|(i, hi, lo)| Some(((*edges.get(i)?, *widths.get(i)?), hi, lo)));
+            let (hi, lo) = edge_of.map_or((0.0, f64::NEG_INFINITY), |(_, hi, lo)| (hi, lo));
             return Ok(ChamferClass::Refused(too_wide_refusal(
                 b,
                 kind,
-                edge_of.map(|(e, _)| e),
+                edge_of.map(|(e, _, _)| e),
                 hi,
+                lo,
             )?));
         }
     } else if spread(&xs).is_none_or(|s| s > gate) {
@@ -2201,14 +2231,37 @@ mod tests {
         let (mu, planes, forms) = l_corner([0.5, 1.0, 2.0]);
         let tests = mitre_tests_of(&mu, &planes, &forms, &ones).unwrap();
         assert!(tests.iter().any(|&g| g < -0.1), "{tests:?}");
-        let (i, hi) = too_wide_of(&mu, &planes, &forms).unwrap();
+        let (i, hi, lo) = too_wide_of(&mu, &planes, &forms).unwrap();
         assert_eq!(i, 2);
         assert!((hi - 0.75).abs() < 1e-14, "{hi}");
+        // and from a - c = 1/2 up, the factor 1/4
+        assert!((lo - 0.25).abs() < 1e-14, "{lo}");
 
         let (mu, planes, forms) = l_corner([0.5, 1.0, 1.4]);
         let m = mitre_point(&planes, &ones).unwrap();
         assert!((m - Vec3::new(0.05, 0.45, -1.45)).length() < 1e-14, "{m:?}");
         let tests = mitre_tests_of(&mu, &planes, &forms, &ones).unwrap();
         assert!(tests.iter().all(|&g| g > 0.01), "{tests:?}");
+    }
+
+    /// A concave chamfer of 0.0002 with convex ones of 1 and 2: the chamfer of 2 builds only
+    /// between `a - c = 0.9998` and `a + c = 1.0002`, the factors 0.4999 and 0.5001 on its
+    /// size. With the fit margin of 0.001 (1000 edge tolerances of 1e-6) the fit would be
+    /// 0.9992, below the sizes that build, so no size is named; with a concave chamfer of
+    /// 0.01 the fit 1.009 is above the lower end 0.99 and is named.
+    #[test]
+    fn a_fit_the_margin_takes_below_the_sizes_that_build_is_not_named() {
+        let (mu, planes, forms) = l_corner([0.0002, 1.0, 2.0]);
+        let (i, hi, lo) = too_wide_of(&mu, &planes, &forms).unwrap();
+        assert_eq!(i, 2);
+        assert!((hi - 0.5001).abs() < 1e-12, "{hi}");
+        assert!((lo - 0.4999).abs() < 1e-12, "{lo}");
+        let margin = 0.001;
+        assert_eq!(fit_above(hi * 2.0 - margin, lo * 2.0), None);
+
+        let (mu, planes, forms) = l_corner([0.01, 1.0, 2.0]);
+        let (_, hi, lo) = too_wide_of(&mu, &planes, &forms).unwrap();
+        let fit = fit_above(hi * 2.0 - margin, lo * 2.0).unwrap();
+        assert!((fit - 1.009).abs() < 1e-12, "{fit}");
     }
 }

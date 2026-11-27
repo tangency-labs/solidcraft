@@ -365,9 +365,13 @@ ball's sphere. Setback: the rounds stop short and a 2n-sided hole is filled.*
   between the odd chamfer's rails and past the pair's rails on the odd chamfer's faces; the
   pair's surfaces are continued there, exactly, on their own parameters. The mitre line of the
   pair is a crease of the other convexity than its chamfers' edges, so each X_i is on the
-  vertex's side of the third chamfer where the mitre holds. It holds while the pair's sizes
-  differ by less than the odd chamfer's reach (at right angles, by less than its size); past
-  that the too-wide chamfer is refused with its fit, asked a corner type or not. A Facet asked
+  vertex's side of the third chamfer where the mitre holds. It holds where M is
+  between the odd chamfer's rails and on the pair's side of the reflex face, and each X_i is on
+  the vertex's side of the third chamfer: sign tests on the same linear forms. (For chamfers
+  with one setback on both their faces, at right angles, that is while the pair's sizes differ
+  by less than the odd chamfer's size.) Past that the too-wide chamfer is refused with its fit,
+  asked a corner type or not; where the sizes that build are narrower than the fit margin, the
+  refusal names the edge and no size. A Facet asked
   there is refused, naming the vertex. The corner keeps its definition: its chamfers and the points they meet in (opt-in, WR-716).
 - **Chamfer Ends meeting across an edge.** Two chamfers on one face can end at the two
   vertices of an unchamfered edge of it, each an End on the face beyond that edge (a box's
