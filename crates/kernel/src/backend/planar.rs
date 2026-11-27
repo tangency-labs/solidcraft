@@ -68,8 +68,15 @@ impl Planar for Solidcore {
         section_corners::exit_through_box(end, toward, rect)
     }
 
-    fn reach_through_rounds(&self, end: Vec3, toward: Vec3, starts: &[Vec3], rounds: &[(Vec3, Vec3, f64)], most: f64) -> f64 {
-        section_corners::reach_through_rounds(end, toward, starts, rounds, most)
+    fn reach_through_rounds(
+        &self,
+        end: Vec3,
+        toward: Vec3,
+        sections: &[[Vec3; 4]],
+        rounds: &[(Vec3, Vec3, f64)],
+        most: f64,
+    ) -> Result<f64, PlanarRefused> {
+        section_corners::reach_through_rounds(end, toward, sections, rounds, most).map_err(|e| PlanarRefused(e.to_string()))
     }
 
     fn straight_length(&self, a: [f64; 2], b: [f64; 2]) -> f64 {

@@ -390,6 +390,7 @@ pub use measure::measure;
 pub use measure::measure_many;
 pub use measure::measure_mass;
 pub use measure::measure_mass_many;
+pub use measure::reach_past;
 pub use meshbody::MAX_TRIANGLES;
 pub use meshbody::mesh_body;
 pub use meshbody::mesh_body_with_normals;
