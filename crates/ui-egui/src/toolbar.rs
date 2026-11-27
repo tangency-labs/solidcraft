@@ -3166,6 +3166,11 @@ fn shortcuts_focused(app: &mut SolveApp, ctx: &egui::Context) {
         app.last_escape = None;
         return;
     }
+    // Undo and Redo take back an open dialog's last handle drag first, also with the keyboard
+    // in that dialog's value box (#22838).
+    if !popup_owner && !inline_editor && !chat_owner && crate::dialog_drag_undo::keys(app, ctx) {
+        return;
+    }
     if popup_owner
         || inline_editor
         || chat_owner

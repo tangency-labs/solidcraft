@@ -8607,6 +8607,7 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::tool_modifiers::set_manipulator_free(crate::prefs::manipulator_free_held(app, mods));
     let manipulator_dragging = crate::tool_modifiers::manipulator_dragging();
     crate::tool_modifiers::set_manipulator_dragging(false);
+    crate::dialog_drag_undo::track(app, ui.ctx(), primary_pressed, primary_down, manipulator_dragging);
     {
         let platform = crate::tool_modifiers::Platform::of(ui.ctx());
         let held = crate::tool_modifiers::Held::new(mods, platform);
