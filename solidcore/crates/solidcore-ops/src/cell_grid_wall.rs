@@ -124,10 +124,13 @@ mod tests {
         }
     }
 
-    /// Cells of pitch 2 pi 20 / 20 round the wall: size 5.2832, web 1.
+    /// Square cells of pitch 2 pi 20 / 20 round the wall (size 5.2832, web 1), whole clip: the
+    /// default spec is hexagons with snap, which a wall refuses.
     fn spec() -> CellGridSpec {
         let pitch = 2.0 * std::f64::consts::PI * 20.0 / 20.0;
         CellGridSpec {
+            shape: solidcore_record::cell_grid::CellShape::Square,
+            clip: solidcore_record::cell_grid::Clip::Whole,
             size: pitch - 1.0,
             web: 1.0,
             ..default_spec()
@@ -136,11 +139,7 @@ mod tests {
 
     #[test]
     fn a_tube_wall_is_planned_in_record_types() {
-        let spec = CellGridSpec {
-            shape: solidcore_record::cell_grid::CellShape::Square,
-            ..spec()
-        };
-        let plan = plan_wall_cell_grid(&tube(), &spec, WallDepth::Through).unwrap();
+        let plan = plan_wall_cell_grid(&tube(), &spec(), WallDepth::Through).unwrap();
         assert_eq!(plan.round, 20);
         assert!(!plan.sectors.is_empty() && !plan.masters.is_empty());
         assert!(plan
