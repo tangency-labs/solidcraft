@@ -33,6 +33,8 @@ pub(crate) enum Cell<'a> {
         r: f64,
         prims: Vec<Prim>,
     },
+    /// Any closed loop of lines and arcs (a sketched cell, convex or not).
+    General(&'a Loop),
 }
 
 impl Cell<'_> {
@@ -46,6 +48,7 @@ impl Cell<'_> {
                 y1: c.y + r,
             },
             Cell::Rounded { core, r, .. } => core.bounds.grown(*r),
+            Cell::General(lp) => lp.bounds(),
         }
     }
 
@@ -69,6 +72,7 @@ impl Cell<'_> {
                 }]
             }
             Cell::Rounded { prims, .. } => prims.clone(),
+            Cell::General(lp) => lp.prims.clone(),
         }
     }
 
@@ -86,6 +90,7 @@ impl Cell<'_> {
                         )
                     })
             }
+            Cell::General(lp) => lp.contains(p),
         }
     }
 }
@@ -119,7 +124,7 @@ fn fraction(p: &Prim, x: Vec2) -> f64 {
 }
 
 /// Up to four points where two pieces meet (the ends of the overlap where they run along each other).
-fn intersections(a: &Prim, b: &Prim) -> Vec<Vec2> {
+pub(super) fn intersections(a: &Prim, b: &Prim) -> Vec<Vec2> {
     let mut out = Vec::new();
     match (*a, *b) {
         (Prim::Line { a: p, b: q, .. }, Prim::Line { a: r, b: s, .. }) => {
