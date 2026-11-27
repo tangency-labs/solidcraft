@@ -169,8 +169,11 @@ fn a_torus_exports_a_closed_oriented_mesh_at_both_seams() {
     assert!(count > 0);
     assert_eq!(bytes.len(), 84 + count * 50);
     let mut edges = BTreeMap::<([u32; 3], [u32; 3]), (usize, i32)>::new();
-    let mut volume = 0.0;
-    let center = Vec3::new(100.0, -40.0, 30.0);
+    // Use the existing analytic surface and mesh measurement APIs on the raw STL
+    // coordinates. Do not import through mesh_body: it can repair the winding.
+    let surface = FaceSurface::Torus { center: Vec3::new(100.0, -40.0, 30.0), axis: solidcraft_geom::UnitVec3::Z, major: 20.0, minor: 2.0 };
+    let mut mesh = Mesh::default();
+    let mut facet = Mesh { positions: vec![Vec3::ZERO; 3], triangles: vec![[0, 1, 2]], ..Mesh::default() };
     for tri in bytes[84..].chunks_exact(50) {
         let mut points = [Vec3::ZERO; 3];
         let mut keys = [[0u32; 3]; 3];
@@ -180,12 +183,16 @@ fn a_torus_exports_a_closed_oriented_mesh_at_both_seams() {
                 f32::from_le_bytes(tri[offset..offset + 4].try_into().unwrap())
             });
             keys[i] = xyz.map(|x| if x == 0.0 { 0 } else { x.to_bits() });
-            let p = Vec3::new(xyz[0] as f64, xyz[1] as f64, xyz[2] as f64) - center;
+            let p = Vec3::new(xyz[0] as f64, xyz[1] as f64, xyz[2] as f64);
             points[i] = p;
-            assert!(((p.x.hypot(p.y) - 20.0).hypot(p.z) - 2.0).abs() < 1e-5, "{p:?}");
+            let nearest = surface.nearest(p).expect("nearest torus point");
+            assert!(solidcraft_kernel::points::points_meet(p.to_array(), nearest.to_array(), 1e-5).unwrap(), "{p:?}");
         }
-        assert!((points[1] - points[0]).cross(points[2] - points[0]).len() > 0.0);
-        volume += points[0].dot(points[1].cross(points[2])) / 6.0;
+        facet.positions.copy_from_slice(&points);
+        assert!(facet.measure().area > 0.0, "{points:?}");
+        let base = u32::try_from(mesh.positions.len()).unwrap();
+        mesh.positions.extend(points);
+        mesh.triangles.push([base, base + 1, base + 2]);
         for i in 0..3 {
             let (a, b) = (keys[i], keys[(i + 1) % 3]);
             assert_ne!(a, b);
@@ -196,6 +203,8 @@ fn a_torus_exports_a_closed_oriented_mesh_at_both_seams() {
         }
     }
     assert!(edges.values().all(|&edge| edge == (2, 0)), "every triangle side has one oppositely oriented neighbour");
-    let expected = 2.0 * std::f64::consts::PI.powi(2) * 20.0 * 4.0;
+    // Independent analytic volume 2π²Rr², with R = 20 and r = 2 mm.
+    let expected = 1579.136_704_174_297_2;
+    let volume = mesh.measure().volume;
     assert!((volume - expected).abs() < 0.01 * expected, "{volume} vs {expected}");
 }
