@@ -167,8 +167,9 @@ use super::form::{binom, gn_form_normalized, GnSectionFormT};
 use super::interval::{cmax, cmin, round_down, round_up, Ivl};
 use super::series::{v_hull, GnScalar, Ser, Trunc, VSer, MAX_E, MAX_S, TAYLOR, V3, VZ};
 use super::station::{
-    ders_basis, gn_evaluate, gn_evaluate_vn, gn_jacobian, gn_solve_station_with, gn_top_jets, knot,
-    smax, solve4, span, GnStation, GnSystem, Nurbs, Partials, StationOptions,
+    ders_basis_flat, gn_evaluate_point_ref, gn_evaluate_vn, gn_jacobian_ref, gn_solve_station_with,
+    gn_top_jets, knot, smax, solve4, span, GnIncremental, GnStation, GnSystem, Nurbs, Partials,
+    StationOptions,
 };
 use super::tay::{
     gn_half_angle, gn_invert, gn_target, tay_sqrt, GnAreaCells, Ring, Tay, TayScalar, TAY,
@@ -178,7 +179,7 @@ use crate::error::blend::{BlendFailure, SectionDegeneracy, SectionLimit, Section
 use crate::error::{Result, SolidError};
 use crate::geom::krawczyk::{contraction, k_operator};
 pub(crate) use crate::geom::nurbs_enclosure::{
-    at1, at2, below_continuity, knot_cuts, partials_hull, partials_over_piece, pw_at, Shift, IZ,
+    at1, below_continuity, knot_cuts, partials_hull, partials_over_piece, pw_at, Shift, IZ,
 };
 pub use crate::geom::nurbs_enclosure::{
     nurbs_partials_over_box, nurbs_partials_over_piece, nurbs_partials_over_piece_about,
@@ -354,7 +355,7 @@ fn derivs_over(
         // over [a, b] are its Taylor polynomials at the middle m, from exact point
         // derivatives (rounding only)
         let m = 0.5 * (a + b);
-        let nb = ders_basis(&cn.u, k, p, Ivl::from(m), p);
+        let nb = ders_basis_flat(&cn.u, k, p, Ivl::from(m), p);
         let mut am = vec![VZ; p + 1];
         let mut wm = vec![IZ; p + 1];
         for d in 0..=p {
@@ -362,7 +363,7 @@ fn derivs_over(
             for j in 0..=p {
                 // k >= p (sm_Span)
                 let li = 4 * (k + j - p);
-                let nj = at2(&nb, d, j, IZ);
+                let nj = nb.at(d as isize, j as isize);
                 x = x + nj * Ivl::from(pw_at(&cn.pw, li));
                 y = y + nj * Ivl::from(pw_at(&cn.pw, li + 1));
                 z = z + nj * Ivl::from(pw_at(&cn.pw, li + 2));
@@ -1894,20 +1895,14 @@ fn enclose_over_cells(
     let mut cm = [[IZ; 4]; 4];
     let mut q = f64::INFINITY;
     let mut proved = false;
-    let point = Trunc::new(0, 0)?;
     // G at the box's centre (which the iterations keep) for every s in the span
     let sg = {
         let pc = gn_try!(partials_over(xm, xm, 2), Inner::Unproved);
-        let sxc = xm.map(|x| Ser::constant(Ivl::from(x)));
-        let (sg, _) = gn_try!(
-            gn_evaluate(
-                &system(&pc, &leader, &tangent, r, side, law_r, equal_setback),
-                &sxc,
-                point
-            ),
+        let [pc0, pc1] = &pc;
+        gn_try!(
+            gn_evaluate_point_ref([pc0, pc1], &leader, &tangent, r, side, law_r, equal_setback),
             Inner::Unproved
-        );
-        sg
+        )
     };
     let mut it = 0;
     while it < 8 && !proved {
@@ -1917,18 +1912,15 @@ fn enclose_over_cells(
             partials_over(bx_.map(|x| x.lo), bx_.map(|x| x.hi), 2),
             Inner::Unproved
         );
-        let sxb = bx_.map(Ser::constant);
+        let [pb0, pb1] = &pb;
         let jac = gn_try!(
-            gn_jacobian(
-                &system(&pb, &leader, &tangent, r, side, law_r, equal_setback),
-                &sxb
-            ),
+            gn_jacobian_ref([pb0, pb1], &leader, &tangent, r, side, law_r, equal_setback),
             Inner::Unproved
         );
         let jm = jac.map(|row| row.map(Ivl::mid));
         y = gn_try!(inverse4(&jm), Inner::Unproved);
         (cm, q) = contraction(&y, &jac);
-        let kk = k_operator(&xm, &y, &sg.each_ref().map(|g| g.at(0, 0)), &cm, &bx_);
+        let kk = k_operator(&xm, &y, &sg, &cm, &bx_);
         let verdict = classify_k(&kk, &bx_);
         let inside = q < 1.0 && verdict == KVerdict::Inside;
         if inside {
@@ -1958,8 +1950,8 @@ fn enclose_over_cells(
             let mut d = [0.0_f64; 4];
             for (di, yi) in d.iter_mut().zip(&y) {
                 let mut v = IZ;
-                for (&yij, gj) in yi.iter().zip(&sg) {
-                    v = v + Ivl::from(yij) * gj.at(0, 0);
+                for (&yij, &gj) in yi.iter().zip(&sg) {
+                    v = v + Ivl::from(yij) * gj;
                 }
                 *di = (v - Ivl::from(v.mid())).mag() + v.mid().abs();
             }
@@ -2009,22 +2001,18 @@ fn enclose_over_cells(
         let Ok(pc) = partials_over(xc, xc, 2) else {
             break;
         };
-        let sxc = xc.map(|x| Ser::constant(Ivl::from(x)));
-        let Ok((sgc, _)) = gn_evaluate(
-            &system(&pc, &leader, &tangent, r, side, law_r, equal_setback),
-            &sxc,
-            point,
-        ) else {
+        let [pc0, pc1] = &pc;
+        let Ok(sgc) =
+            gn_evaluate_point_ref([pc0, pc1], &leader, &tangent, r, side, law_r, equal_setback)
+        else {
             break;
         };
         let Ok(pb) = partials_over(bx_.map(|x| x.lo), bx_.map(|x| x.hi), 2) else {
             break;
         };
-        let sxb = bx_.map(Ser::constant);
-        let Ok(jac) = gn_jacobian(
-            &system(&pb, &leader, &tangent, r, side, law_r, equal_setback),
-            &sxb,
-        ) else {
+        let [pb0, pb1] = &pb;
+        let Ok(jac) = gn_jacobian_ref([pb0, pb1], &leader, &tangent, r, side, law_r, equal_setback)
+        else {
             break;
         };
         let Ok(yc) = inverse4(&jac.map(|row| row.map(Ivl::mid))) else {
@@ -2037,7 +2025,7 @@ fn enclose_over_cells(
         }
         let mut next = bx_;
         let mut empty = false;
-        let kc = k_operator(&xc, &yc, &sgc.each_ref().map(|g| g.at(0, 0)), &cc, &bx_);
+        let kc = k_operator(&xc, &yc, &sgc, &cc, &bx_);
         for (xi, kv) in next.iter_mut().zip(kc) {
             let lo = cmax(xi.lo, kv.lo);
             let hi = cmin(xi.hi, kv.hi);
@@ -2077,56 +2065,65 @@ fn enclose_over_cells(
     } else {
         tr.e()
     };
-    for tot in 1..=(tr.s() + tr.e()) {
-        // this order's coefficients are those with i + k = tot, k <= eps_solved: G's at
-        // them depend only on x's at lower or equal powers of sigma and eps, so G is
-        // computed only there (bit for bit the whole truncation's, `Trunc::computing`),
-        // and not at all at an order with none to solve (the last ones, where every
-        // i = tot - k is past tr.s)
-        let eps = cmin_usize(eps_solved, tot);
-        if tot > tr.s() + eps {
-            continue;
-        }
-        let (sg, _) = gn_try!(
-            gn_evaluate(&sysk, &sx, tr.computing(tot, eps)),
-            Inner::Unproved
-        );
-        for i in 0..=cmin_usize(tr.s(), tot) {
-            let k = tot - i;
-            // the section's jets of order n are the face curve's (gn_top_jets, 3bc54a4)
-            if k > tr.e() || (n >= 1 && k >= n) {
+    let need_top = n >= 1 && n <= tr.e();
+    let (mut f, v, nrm) = if tr.s() + tr.e() >= 1 {
+        let mut series = GnIncremental::new(&sysk);
+        for tot in 1..=(tr.s() + tr.e()) {
+            // this order's coefficients are those with i + k = tot, k <= eps_solved: G's at
+            // them depend only on x's at lower or equal powers of sigma and eps, so G is
+            // computed only there (bit for bit the whole truncation's, `Trunc::computing`),
+            // and incrementally (`GnIncremental`) so lower orders are not recomputed
+            let eps = cmin_usize(eps_solved, tot);
+            if tot > tr.s() + eps {
                 continue;
             }
-            let mut yr = [IZ; 4];
-            let mut rho = 0.0_f64;
-            for (yrr, yrow) in yr.iter_mut().zip(&y) {
-                let mut v = IZ;
-                for (&yrc, gc) in yrow.iter().zip(&sg) {
-                    v = v - Ivl::from(yrc) * gc.at(i, k);
+            let sg = gn_try!(
+                series.evaluate_g(&sx, tr.computing(tot, eps)),
+                Inner::Unproved
+            );
+            for i in 0..=cmin_usize(tr.s(), tot) {
+                let k = tot - i;
+                // the section's jets of order n are the face curve's (gn_top_jets, 3bc54a4)
+                if k > tr.e() || (n >= 1 && k >= n) {
+                    continue;
                 }
-                *yrr = v;
-                rho = cmax(rho, v.mag());
-            }
-            // 1 - q rounded down: the quotient rounded up is then at least the exact one
-            let gap = round_down(1.0 - q);
-            if !gap.is_finite() || gap <= 0.0 {
-                return Ok(Inner::Unproved);
-            }
-            rho = round_up(rho / gap);
-            if !rho.is_finite() {
-                return Ok(Inner::Unproved);
-            }
-            for ((sxr, &yrr), crow) in sx.iter_mut().zip(&yr).zip(&cm) {
-                let mut v = yrr;
-                for &crc in crow {
-                    v = v + crc * Ivl::new(-rho, rho);
+                let mut yr = [IZ; 4];
+                let mut rho = 0.0_f64;
+                for (yrr, yrow) in yr.iter_mut().zip(&y) {
+                    let mut v = IZ;
+                    for (&yrc, gc) in yrow.iter().zip(sg) {
+                        v = v - Ivl::from(yrc) * gc.at(i, k);
+                    }
+                    *yrr = v;
+                    rho = cmax(rho, v.mag());
                 }
-                sxr.set(i, k, v);
+                // 1 - q rounded down: the quotient rounded up is then at least the exact one
+                let gap = round_down(1.0 - q);
+                if !gap.is_finite() || gap <= 0.0 {
+                    return Ok(Inner::Unproved);
+                }
+                rho = round_up(rho / gap);
+                if !rho.is_finite() {
+                    return Ok(Inner::Unproved);
+                }
+                for ((sxr, &yrr), crow) in sx.iter_mut().zip(&yr).zip(&cm) {
+                    let mut v = yrr;
+                    for &crc in crow {
+                        v = v + crc * Ivl::new(-rho, rho);
+                    }
+                    sxr.set(i, k, v);
+                }
             }
         }
+        gn_try!(series.evaluate_final(&sx, tr, need_top), Inner::Unproved);
+        series.into_fv(tr, need_top)
+    } else {
+        let (_, f, v, nrm) = gn_try!(gn_evaluate_vn(&sysk, &sx, tr), Inner::Unproved);
+        (f, v, need_top.then_some(nrm))
+    };
+    if let Some(nrm) = nrm {
+        gn_top_jets(n, tr, &nrm, &mut f);
     }
-    let (_, mut f, v, nrm) = gn_try!(gn_evaluate_vn(&sysk, &sx, tr), Inner::Unproved);
-    gn_top_jets(n, tr, &nrm, &mut f);
     // the faces' first partials over the box: |S_u| |du| + |S_v| |dv| bounds |dS| for a uv
     // step (du, dv) (#2690: kept apart, where the fork sums them)
     let mut ds = [[0.0_f64; 2]; 2];
@@ -7480,6 +7477,143 @@ mod tests {
             ];
             for (a, b) in point.into_iter().zip([at[0].x, at[0].y, at[0].z]) {
                 assert!(holds(a, b), "point at {t}: {b:?} apart from {a:?}");
+            }
+        }
+    }
+
+    /// Soundness check of incremental `gn_enclose_over` and `gn_certify_span` on curved
+    /// cylinder-plane fillet sections (both order-1 exact circle and G^2, away from and near
+    /// the cylinder's focal distance): every enclosed foot and derivative holds the station's
+    /// point solve across the span, and `gn_certify_span` certifies within target.
+    #[test]
+    fn incremental_enclosure_and_certificate_hold_on_curved_fillet_span() {
+        let k = Kernel::default();
+        let fp = plane(Vec3::ZERO, Vec3::X, Vec3::Y);
+        for (big_r, r, outward) in [(3.0_f64, 1.0_f64, true), (10.0, 4.0, false)] {
+            let mut cyl = Cone::new_cylinder_bounded(
+                Vec3::new(0.0, 0.0, -2.0),
+                Vec3::X,
+                Vec3::Y,
+                big_r,
+                0.0,
+                360.0,
+                10.0,
+                false,
+                false,
+                false,
+            );
+            cyl.make_nurb(&k).unwrap();
+            let fc = Surface::from(cyl);
+            let ball_r = if outward { big_r + r } else { big_r - r };
+            let frame = Axis2Placement::new(Vec3::new(0.0, 0.0, r), Vec3::X, Vec3::Y);
+            let leader = BSplineCurve::create_circle_segment(
+                3,
+                &frame,
+                ball_r,
+                10.0,
+                80.0,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap();
+            let ln = NurbsCurve::of(&leader).unwrap();
+            let (np, nc) = (nurbs(&k, &fp), nurbs(&k, &fc));
+            let faces = [&fp, &fc];
+            let lpt = |s: f64| leader.evaluate_point(s).unwrap();
+            let foot_c = |s: f64| {
+                let l = lpt(s);
+                let q = big_r / ball_r;
+                Vec3::new(l.x * q, l.y * q, r)
+            };
+            let (cu, cv) = nearest_uv(&nc, foot_c(0.45));
+            let pc = nurbs_partials(
+                &nc,
+                span(&nc.u, nc.p, nc.nu, cu),
+                span(&nc.v, nc.q, nc.nv, cv),
+                cu,
+                cv,
+                1,
+            );
+            let nrm = vec3(pc.at(1, 0)).cross(vec3(pc.at(0, 1)));
+            let to_center = lpt(0.45) - foot_c(0.45);
+            let side_c = if nrm.dot(to_center) > 0.0 { 1.0 } else { -1.0 };
+            let (rr, side) = ([r, r], [1.0, side_c]);
+            let seed_at = |s: f64| {
+                let l = lpt(s);
+                let (u, v) = nearest_uv(&nc, foot_c(s));
+                [l.x, l.y, u, v]
+            };
+            let (sa, sb) = (0.4, 0.42);
+            let a = station(&k, faces, &leader, sa, seed_at(sa), rr, side);
+            let b = station(&k, faces, &leader, sb, seed_at(sb), rr, side);
+            for n in [0_usize, 2] {
+                let enc = gn_enclose(
+                    &k,
+                    [&np, &nc],
+                    &ln,
+                    &a,
+                    &b,
+                    rr,
+                    side,
+                    n,
+                    4 + TAYLOR,
+                    None,
+                    None,
+                )
+                .unwrap()
+                .expect("enclosure must succeed on curved span");
+                let tr = Trunc::new(2, n).unwrap();
+                for &s in &[sa, 0.5 * (sa + sb), sb] {
+                    let st = super::super::station::gn_solve_station(
+                        &k,
+                        faces,
+                        &leader,
+                        s,
+                        seed_at(s),
+                        rr,
+                        side,
+                        tr,
+                        1e-12,
+                    )
+                    .unwrap();
+                    for q in 0..4 {
+                        for i in 0..=2 {
+                            for e in 0..=n {
+                                if n >= 1 && e >= n {
+                                    continue;
+                                }
+                                let iv = enc.x[q].at(i, e);
+                                let pt = st.x[q].at(i, e);
+                                let slack = 1e-10 * (1.0 + pt.abs());
+                                assert!(
+                                    iv.lo - slack <= pt && pt <= iv.hi + slack,
+                                    "outward={outward} n={n} s={s} x[{q}][{i}][{e}]: \
+                                     {pt} not in {iv:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+                let bound = gn_certify_span(
+                    &k,
+                    [&np, &nc],
+                    &ln,
+                    faces,
+                    &leader,
+                    &a,
+                    &b,
+                    rr,
+                    side,
+                    if n == 0 { 1 } else { n },
+                    1e-3,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+                assert!(
+                    bound.is_finite() && bound <= 1e-3,
+                    "outward={outward} n={n} bound={bound:e}"
+                );
             }
         }
     }
