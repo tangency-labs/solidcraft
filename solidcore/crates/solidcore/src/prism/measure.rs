@@ -1053,9 +1053,11 @@ pub struct StraightCandidates {
 ///
 /// Each normal and axis is taken in its canonical sense and the runs in a canonical order (by
 /// their values; equal values by index), so neither the runs' order nor their senses change
-/// which direction comes first, nor the indices it names. Nothing here proves a face straight
-/// along a candidate; a caller checks each face with [`face_straying`]. Empty when no plane pair
-/// is proved apart and no face is a cylinder.
+/// which direction comes first. The indices it names are positions in `runs`: of runs with one
+/// canonical normal or axis (a face and the one opposite it, say), the first in `runs` is named,
+/// so reordering those changes which face is named, never the direction. Nothing here proves a
+/// face straight along a candidate; a caller checks each face with [`face_straying`]. Empty when
+/// no plane pair is proved apart and no face is a cylinder.
 #[must_use]
 pub fn straight_candidates(runs: &[FaceRun]) -> StraightCandidates {
     let mut planes: Vec<(Vec3, usize, f64)> = Vec::new();
@@ -1080,6 +1082,9 @@ pub fn straight_candidates(runs: &[FaceRun]) -> StraightCandidates {
     // the best pair, and how far off its direction a direction inside both bands may lie (the
     // sine of that angle)
     let mut best: Option<(f64, Vec3, StraightBy, f64)> = None;
+    // shortcut: the pair scan is quadratic in the planes and takes no cancel token (10 000 planes
+    // are 5e7 pairs, about half a second); a cap that leaves the candidates incomplete, or a
+    // cancel check, if a caller passes that many faces
     for (i, &(n, a, sn)) in planes.iter().enumerate() {
         for &(m, b, sm) in planes.iter().skip(i + 1) {
             let Some((s, d)) = n.cross(m).length_and_unit() else {
@@ -1117,23 +1122,33 @@ pub fn straight_candidates(runs: &[FaceRun]) -> StraightCandidates {
         }
     }
     let mut complete = true;
+    let mut bands = None;
     if let (Some(&(first, _)), Some(reach)) = (out.first(), reach) {
         if !inside(first, runs) {
             match lean(first, runs, reach) {
-                Lean::Found(d) => out.insert(1, (canonical(d), StraightBy::Bands)),
+                Lean::Found(d) => bands = Some((canonical(d), StraightBy::Bands)),
                 Lean::Nowhere => {}
                 Lean::Undecided => complete = false,
             }
         }
     }
+    // the bands' direction second, right after the one it leans from
+    let directions = out
+        .iter()
+        .take(1)
+        .copied()
+        .chain(bands)
+        .chain(out.iter().skip(1).copied())
+        .collect();
     StraightCandidates {
-        directions: out,
+        directions,
         complete,
     }
 }
 
 /// Whether the unit `d` is inside every plane's and cylinder's band of `runs`.
-fn inside(d: Vec3, runs: &[FaceRun]) -> bool {
+#[must_use]
+pub fn inside(d: Vec3, runs: &[FaceRun]) -> bool {
     runs.iter().all(|run| match *run {
         FaceRun::Plane { normal, slope } => normal.dot(d).abs() <= slope,
         FaceRun::Axis { axis, slope } => axis.cross(d).length() <= slope,

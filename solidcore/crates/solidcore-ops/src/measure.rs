@@ -2904,9 +2904,11 @@ pub enum Straight {
     /// cylinder.
     Undetermined,
     /// Face `face` (an index into the faces passed) strays across the first direction tried by
-    /// more than the zone tolerance, and no other candidate proves every face straight. When the
-    /// faces are planes and cylinders, no direction is one [`Body::face_straying`] accepts for
-    /// every face ([`solidcore::prism::measure::straight_candidates`] proved it).
+    /// more than the zone tolerance, and no other candidate proves every face straight: no
+    /// direction is one [`Body::face_straying`] accepts for every plane and cylinder among the
+    /// faces ([`solidcore::prism::measure::straight_candidates`] proved it). A face with no band
+    /// (a ruled spline net) that strays while some candidate is inside every band proves nothing,
+    /// and gives [`Straight::Undecided`] instead.
     NotStraight {
         /// The face, as an index into the faces passed.
         face: usize,
@@ -2933,14 +2935,16 @@ pub enum Straight {
 /// plane pair wins); when that one is outside a plane's or cylinder's band (how far a direction
 /// may lean for the face to stay within the zone), a direction inside every band; then each
 /// cylinder axis. The order of the faces and the senses of their normals change neither the
-/// candidates, their order, nor the faces they name. Each candidate is tried in turn: the
-/// first along which every face strays by no more than the zone tolerance
+/// candidates nor their order; the faces named are positions in `faces`, and of faces with one
+/// plane normal or axis in either sense the first passed is named. Each candidate is tried in
+/// turn: the first along which every face strays by no more than the zone tolerance
 /// ([`crate::sweep::zone_tolerance`]) is the answer. Faces of other kinds give no candidate and
 /// no band but are proved along one when [`Body::face_straying`] covers them (a ruled spline net);
 /// an extruded surface gives none, so faces of extrusions and parallel planes alone are
 /// [`Straight::Undetermined`]. When no candidate proves every face and the kernel's search for a
 /// direction inside every band was not decided, the answer is [`Straight::Undecided`], never
-/// [`Straight::NotStraight`].
+/// [`Straight::NotStraight`]; so is it when the first face to stray has no band and a candidate
+/// is inside every band, since the bands then prove no refusal.
 ///
 /// # Errors
 /// [`Error::Argument`] for an index past a body's faces; the errors of the session and the zone
@@ -2953,7 +2957,7 @@ pub fn straight_direction(faces: &[(&Body, &Order, usize)]) -> Result<Straight> 
     }
     let mut first = None;
     let candidates = solidcore::prism::measure::straight_candidates(&runs);
-    for (d, by) in candidates.directions {
+    for &(d, by) in &candidates.directions {
         let d = array(d);
         let mut failed = None;
         for (i, &(body, order, face)) in faces.iter().enumerate() {
@@ -2975,6 +2979,19 @@ pub fn straight_direction(faces: &[(&Body, &Order, usize)]) -> Result<Straight> 
     }
     if !candidates.complete {
         return Ok(Straight::Undecided);
+    }
+    // a face with no band proves no refusal while a candidate is inside every band (CodeRabbit
+    // on #22066)
+    if let Some(Straight::NotStraight { face }) = first {
+        let unbanded = matches!(runs.get(face), Some(FaceRun::Other));
+        if unbanded
+            && candidates
+                .directions
+                .iter()
+                .any(|&(d, _)| solidcore::prism::measure::inside(d, &runs))
+        {
+            return Ok(Straight::Undecided);
+        }
     }
     Ok(first.unwrap_or(Straight::Undetermined))
 }
