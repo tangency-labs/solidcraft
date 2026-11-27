@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "solidcraft"
+dynamic = ["version"]
+description = "Drive SolidCraft, the parametric CAD app, from Python: every command and MCP tool, typed."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT OR Apache-2.0"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.scripts]
+solidcraft = "solidcraft._cli:main"
+solidcraft-session = "solidcraft.__main__:main"
+
+[tool.hatch.version]
+path = "src/solidcraft/_generated/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/solidcraft"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

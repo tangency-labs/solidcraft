@@ -1390,11 +1390,17 @@ impl Surface {
 
     /// This surface's definition carried onto `piece`, a piece, extension or copy of it
     /// (#2485, #2488). A sweep's (#2572) is read point for point on its B-spline net: a
-    /// piece of another kind keeps none.
+    /// piece of another kind keeps none, but keeps that its net is fitted, as an evaluation
+    /// copy does: it is made from the fitted net, not from the sweep. What an evaluation copy
+    /// keeps of a definition it dropped, that its net is fitted ([`Surface::net_is_fitted`]),
+    /// is carried too: a copy or piece of such a copy is still a fitted net.
     fn carry_definition(&self, mut piece: Self) -> Self {
+        piece.fitted_net = self.fitted_net;
         let sweep = matches!(self.definition.as_deref(), Some(KeptDefinition::Sweep(_)));
         if sweep && !matches!(piece.kind(), SurfaceKind::BSpline(_)) {
             piece.definition = None;
+            // (the definition goes, what it says of the net stays)
+            piece.fitted_net = self.net_is_fitted();
             return piece;
         }
         piece.definition.clone_from(&self.definition);
@@ -7965,6 +7971,81 @@ impl<'s> IsoCurveLengthIntegrand<'s> {
             surface,
             u_iso_value,
         }
+    }
+}
+
+impl Surface {
+    /// Not upstream (#20158): the content digest of how this surface evaluates and drops
+    /// points ([`Surface::evaluate_point`], [`Surface::drop_point`],
+    /// [`Surface::natural_uv_domain_with_nurb`]). Unlike [`crate::geom::content::Content`],
+    /// this ignores `definition` and `fitted_net` because direct evaluation and point drop
+    /// read only [`Surface::kind`] (and [`Surface::face_zone_tol_3d`] /
+    /// [`Kernel::blend_net_tolerance`], which the caller digests alongside this), and also
+    /// covers [`SurfaceKind::ProceduralBlend`] iteratively (bounded to 32 nested surfaces,
+    /// no recursion) so swept, lofted, and filleted faces all get a digest.
+    pub(crate) fn eval_content(&self, d: &mut crate::geom::content::Digest) -> Option<()> {
+        use crate::geom::content::Content;
+        const MAX_EVAL_SURFACES: usize = 32;
+        let mut stack = vec![self];
+        let mut visited = 0usize;
+        while let Some(surface) = stack.pop() {
+            visited += 1;
+            if visited > MAX_EVAL_SURFACES {
+                return None;
+            }
+            let Self {
+                kind: _,
+                owner: _,
+                owner_chain_face: _,
+                owner_zone_tol_3d: _,
+                cache_slot: _,
+                notify_identity: _,
+                made_kind: _,
+                boundary_memo: _,
+                singularities_memo: _,
+                continuity_memo: _,
+                definition: _,
+                fitted_net: _,
+            } = surface;
+            match surface.kind() {
+                SurfaceKind::BSpline(s) => {
+                    d.tag(1);
+                    s.content(d)?;
+                }
+                SurfaceKind::Plane(s) => {
+                    d.tag(2);
+                    s.content(d)?;
+                }
+                SurfaceKind::Cone(s) => {
+                    d.tag(3);
+                    s.content(d)?;
+                }
+                SurfaceKind::Sphere(s) => {
+                    d.tag(4);
+                    s.content(d)?;
+                }
+                SurfaceKind::Torus(s) => {
+                    d.tag(5);
+                    s.content(d)?;
+                }
+                SurfaceKind::SurfOfRevolution(s) => {
+                    d.tag(6);
+                    s.content(d)?;
+                }
+                SurfaceKind::SurfOfExtrusion(s) => {
+                    d.tag(7);
+                    s.content(d)?;
+                }
+                SurfaceKind::ProceduralBlend(pb) => {
+                    d.tag(8);
+                    pb.eval_content_head(d)?;
+                    stack.push(&pb.def.supports[1]);
+                    stack.push(&pb.def.supports[0]);
+                }
+                _ => return None,
+            }
+        }
+        Some(())
     }
 }
 

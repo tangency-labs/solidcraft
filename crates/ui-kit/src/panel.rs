@@ -702,7 +702,7 @@ impl<'a> Panel<'a> {
                 card.y_range(),
             );
             let resize =
-                ui.interact(rail, ui.scope_id().with("workspace_resize"), egui::Sense::drag()).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+                ui.interact(rail, ui.scope_id().with("workspace_resize"), egui::Sense::DRAG).on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
             solidcraft_ui_registry::publish_target(&format!("{}:resize", options.id), rail);
             if resize.dragged() && !options.compact {
                 let delta = ui.input(|i| i.pointer.delta().x) * if left { 1.0 } else { -1.0 };
@@ -935,9 +935,36 @@ impl<'a> Panel<'a> {
         heading: FeatureOptions<'_>,
         disabled: bool,
         valid: bool,
-        mut collapsed: Option<&mut bool>,
+        collapsed: Option<&mut bool>,
         body: impl FnOnce(&mut Ui) -> ComputeStatus,
     ) -> (bool, super::Action) {
+        self.feature_contents(ui, heading, disabled, valid, collapsed, (body, None::<fn(&mut Ui)>))
+    }
+
+    /// Feature card with an explicit left footer control. Keeps the bottom action row together
+    /// even when the general dialog preference places actions at the top.
+    pub fn feature_with_left(
+        &self,
+        ui: &mut Ui,
+        heading: FeatureOptions<'_>,
+        disabled: bool,
+        valid: bool,
+        body: impl FnOnce(&mut Ui) -> ComputeStatus,
+        left: impl FnOnce(&mut Ui),
+    ) -> (bool, super::Action) {
+        self.feature_contents(ui, heading, disabled, valid, None, (body, Some(left)))
+    }
+
+    fn feature_contents(
+        &self,
+        ui: &mut Ui,
+        heading: FeatureOptions<'_>,
+        disabled: bool,
+        valid: bool,
+        mut collapsed: Option<&mut bool>,
+        contents: (impl FnOnce(&mut Ui) -> ComputeStatus, Option<impl FnOnce(&mut Ui)>),
+    ) -> (bool, super::Action) {
+        let (body, left) = contents;
         let card = |ui: &mut Ui| {
             let t = Tokens::get();
             let min = ui.cursor().min;
@@ -948,7 +975,7 @@ impl<'a> Panel<'a> {
                 crate::frame::drag_dock(ui, band, heading.drag_key, heading.moved, self.bounded_anchor(ui.ctx()) - heading.docked);
             }
             let mut close = false;
-            let top = if DialogButtons::current(ui.ctx()) == DialogButtons::Top {
+            let top = if left.is_none() && DialogButtons::current(ui.ctx()) == DialogButtons::Top {
                 Some(TopHeader::new(ui, self.ok, heading.apply_label, self.cancel, collapsed.as_deref_mut(), &mut close))
             } else {
                 if let Some(collapsed) = collapsed.as_deref_mut() {
@@ -1051,6 +1078,9 @@ impl<'a> Panel<'a> {
                 valid && !state.applying,
                 super::Footer { apply: heading.apply_label, status: state.text.as_deref(), corners: Some(corners), ..Default::default() },
                 |ui| {
+                    if let Some(left) = left {
+                        left(ui);
+                    }
                     if state.busy {
                         let (rect, _) = ui.allocate_exact_size(vec2(t.space_16, ui.available_height()), egui::Sense::hover());
                         egui::Spinner::new().size(t.space_14).paint_at(ui, rect);

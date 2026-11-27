@@ -634,6 +634,10 @@ fn file_scopes_require_separate_read_and_write_approvals() {
 
     for command in [
         "component.insert_design",
+        "component.links",
+        "component.relink",
+        "component.replace_with_link",
+        "component.update_links",
         "file.insert_step",
         "file.insert_mesh",
         "file.insert_gerber",
@@ -743,6 +747,70 @@ fn file_commands_name_files_in_granted_folders_by_the_grants_name() {
         }
     }
     assert!(!input.join("copy.step").exists() && !root.join("copy.step").exists());
+    host.rollback_transaction().unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+/// A plugin keeps the designs it links current, as it inserts them: List Links, Update Links,
+/// Relink Source and Replace with Link read designs in its folders, named by `grant:`, under a
+/// read-only grant. A design outside them is refused, and so is a plugin without `file`.
+#[test]
+fn link_commands_read_designs_in_granted_folders_by_the_grants_name() {
+    let root = solidcraft_io::vfs::temp_dir().join(format!("sc-plugin-link-grants-{}", std::process::id()));
+    let lib = root.join("lib");
+    std::fs::create_dir_all(&lib).unwrap();
+    let save_box = |path: &Path, height: u32| {
+        let mut design = Session::default();
+        design.execute("solid.box", &json!({"length":10,"width":10,"height":height})).unwrap();
+        design.execute("file.save_as", &json!({"path":path})).unwrap();
+    };
+    save_box(&lib.join("part.sc"), 10);
+    save_box(&lib.join("other.sc"), 15);
+    save_box(&lib.join("plate.sc"), 5);
+    save_box(&root.join("outside.sc"), 30);
+    let mut host = SolidCraftHost {
+        session: Session::default(),
+        transaction: None,
+        sketch_exits: Vec::new(),
+        view: None,
+        groups: BTreeSet::from(["file".into()]),
+        file_folders: Vec::new(),
+        file_read_folders: vec![lib.clone()],
+        evaluation: None,
+        forms: Vec::new(),
+        form_source: None,
+        input_folders: Vec::new(),
+        messages: Vec::new(),
+        user_data: None,
+    };
+    host.session.plugin_state.file_grants = vec![FileGrant { name: "lib".into(), folder: lib.clone(), read: true, write: false }];
+    host.begin_transaction().unwrap();
+    host.run_command("component.insert_design", &json!({"path":"grant:lib/part.sc","name":"Part"})).unwrap();
+    save_box(&lib.join("part.sc"), 20);
+
+    let links = host.run_command("component.links", &json!({})).unwrap();
+    assert_eq!((&links["links"][0]["found"], &links["links"][0]["changed"]), (&json!(true), &json!(true)), "{links}");
+    let updated = host.run_command("component.update_links", &json!({})).unwrap();
+    assert_eq!(updated["updated"], json!(["Part"]), "{updated}");
+    let relinked = host.run_command("component.relink", &json!({"component":"Part","path":"grant:lib/other.sc"})).unwrap();
+    assert_eq!(relinked["path"], json!(lib.join("other.sc").to_string_lossy()), "{relinked}");
+
+    let outside = host.run_command("component.relink", &json!({"component":"Part","path":root.join("outside.sc")}));
+    assert!(matches!(&outside, Err(HostError::CommandFailed { .. })), "a design outside the folders is refused: {outside:?}");
+    let links = host.run_command("component.links", &json!({})).unwrap();
+    assert_eq!(links["links"][0]["file"], json!(lib.join("other.sc").to_string_lossy()), "the refused relink changed nothing: {links}");
+
+    host.run_command("component.activate", &json!({"component":0})).unwrap();
+    host.run_command("component.create", &json!({"name":"Plate"})).unwrap();
+    host.run_command("solid.box", &json!({"length":10,"width":10,"height":5})).unwrap();
+    let replaced = host.run_command("component.replace_with_link", &json!({"component":"Plate","path":"grant:lib/plate.sc"}));
+    assert!(replaced.is_ok(), "a copy is replaced by a link to a granted design: {replaced:?}");
+
+    host.groups.clear();
+    for id in ["component.links", "component.update_links", "component.relink", "component.replace_with_link"] {
+        let refused = host.run_command(id, &json!({"component":"Part","path":"grant:lib/part.sc"}));
+        assert!(matches!(&refused, Err(HostError::PermissionDenied { permission }) if permission.contains("`file` permission")), "{id}: {refused:?}");
+    }
     host.rollback_transaction().unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
@@ -951,6 +1019,44 @@ mod native {
             s.execute("plugin.install", &json!({"path":zip,"replace":true,"approve":approve})).unwrap()["folder"].as_str().unwrap().into()
         }
     }
+    /// An entry asks `plugin.preview` whether it runs as a dialog's live preview (#22297): true in
+    /// a run of a preview session or with `preview: true`, false otherwise, and with no command
+    /// group. The flag stays with that run.
+    #[test]
+    fn an_entry_can_tell_that_it_runs_as_a_preview() {
+        let fixture = Fixture::new("call $box");
+        let mut manifest = manifest();
+        manifest["runtime"]["commands"] = json!(["plugin.preview"]);
+        std::fs::write(fixture.0.join("sample/plugin.json"), manifest.to_string()).unwrap();
+        // The entry runs `plugin.preview` and returns its reply (its result is the command's).
+        let source = component_template()
+            .replace("      call $box\n      call $box\n", "      call $box\n")
+            .replace("i32.const 9\n      i32.const 1024\n      i32.const 33", "i32.const 14\n      i32.const 1024\n      i32.const 2")
+            .replace("\"solid.box\"", "\"plugin.preview\"")
+            .replace(r#""{\22length\22:2,\22width\22:3,\22height\22:4}""#, r#""{}""#);
+        std::fs::write(fixture.0.join("sample/plugin.wasm"), wat::parse_str(source).unwrap()).unwrap();
+        let mut s = Session::default();
+        let approval = s.execute("plugin.inspect", &json!({"path":fixture.path()})).unwrap()["approval"].clone();
+        let run = |s: &mut Session, preview: Option<bool>| {
+            let mut params = json!({"path":fixture.path(),"approval":approval,"entry":"make","params":{}});
+            if let Some(preview) = preview {
+                params["preview"] = json!(preview);
+            }
+            s.execute("plugin.run", &params).unwrap()["result"]["preview"].clone()
+        };
+        assert_eq!(run(&mut s, None), json!(false), "an ordinary run");
+        assert_eq!(run(&mut s, Some(true)), json!(true), "a script asks for the preview path");
+        assert!(!s.plugin_state.preview, "the flag stays with that run");
+        assert_eq!(run(&mut s, Some(false)), json!(false));
+        // A dialog's preview session (the host's dry run sets it) answers true without the param.
+        let mut preview = s.scratch();
+        preview.plugin_state.preview = true;
+        assert_eq!(run(&mut preview, None), json!(true));
+        // Outside any plugin run the command answers too.
+        assert_eq!(s.execute("plugin.preview", &json!({})).unwrap()["preview"], json!(false));
+        assert!(s.execute("plugin.preview", &json!({"x": 1})).is_err(), "it takes no parameters");
+    }
+
     /// A 0.41 plugin runs as before, alone and with a background shader added.
     #[test]
     fn a_commands_plugin_from_041_installs_and_runs_unchanged_beside_shaders() {
@@ -4255,7 +4361,9 @@ mod importers {
         let file = put(&root, "bracket.smp", &design());
         let importer = importer_for(&s, &file, None).unwrap().unwrap();
         let params = json!({"library":library});
-        assert!(import_file(&mut s, &importer, &file, &params).is_err());
+        let refused = s.execute("file.import", &json!({"path": file, "options": params})).unwrap_err();
+        assert!(matches!(refused.host_error(), Some(HostError::PermissionDenied { .. })), "{refused}");
+        assert!(refused.to_string().contains("the option library needs read approval for its folder"), "{refused}");
         s.plugin_state.user.dialog_folders = Some(folders::DialogFolders {
             plugin: "smp".into(),
             approval: package.approval,
