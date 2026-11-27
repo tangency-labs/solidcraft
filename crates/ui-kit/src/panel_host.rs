@@ -182,21 +182,6 @@ pub fn panel_host_control_label_opacity(
             if let Some(transport) = icon.strip_prefix("timeline_").filter(|name| matches!(*name, "first" | "back" | "play" | "forward" | "last")) {
                 let glyph = if transport == "play" && chrome.selected { "pause" } else { transport };
                 crate::icons::glyphs::transport_glyph(&painter, icon_rect.center(), glyph, ink);
-            } else if let Some(up) = match icon {
-                "timeline_expand" => Some(true),
-                "timeline_collapse" => Some(false),
-                _ => None,
-            } {
-                // The timeline row's chevron: up raises the row, down lowers it.
-                // The shared collapse chevron (down when it lowers the row, flipped when it raises it).
-                if up {
-                    crate::icons::paint_ink_flipped(&painter, icon_rect, "chevron", ink);
-                } else {
-                    crate::icons::paint_ink(&painter, icon_rect, "chevron", ink);
-                }
-            } else if matches!(icon, "timeline_1d" | "timeline_2d") {
-                // The timeline view switch keeps its blue chips, so it reads as timeline steps, not as the menu's dots.
-                crate::icons::paint_icon(&painter, icon_rect, icon, if chrome.enabled { 1.0 } else { 0.5 });
             } else {
                 crate::icons::paint_ink(&painter, icon_rect, icon, ink);
             }

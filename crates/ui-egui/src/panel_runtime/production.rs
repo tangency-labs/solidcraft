@@ -229,12 +229,12 @@ impl Product {
                     ("forward", "ui.history_forward", "timeline_forward"),
                     ("last", "ui.history_last", "timeline_last"),
                 ];
-                // At the header's right end: the 2D options, then the chevron that raises (up) or lowers (down) the row.
+                // At the header's right end: the 2D options, then the view icon that raises the row to the 2D timeline or lowers it to the 1D strip.
                 // The app shows the one that fits the height (`sync_timeline_header`).
                 entries.extend([
                     (TIMELINE_SETTINGS, "ui.timeline_2d_settings", "display"),
-                    (TIMELINE_EXPAND, "ui.timeline_2d_show", "timeline_expand"),
-                    (TIMELINE_COLLAPSE, "ui.timeline_2d_hide", "timeline_collapse"),
+                    (TIMELINE_EXPAND, "ui.timeline_2d_show", "timeline_2d"),
+                    (TIMELINE_COLLAPSE, "ui.timeline_2d_hide", "timeline_1d"),
                 ]);
                 entries
             }
@@ -937,6 +937,14 @@ pub(crate) fn sync_production_visibility(app: &mut crate::SolveApp) -> PanelResu
                 if inspector_visibility == Some(false) && instance.requested_open {
                     mutations.push(Mutation::Close { instance: id });
                 }
+            } else if product == Product::History
+                && visible
+                && !instance.requested_open
+                && layout.instance(&InstanceId::new(Product::Timeline2d.id())?).is_ok_and(|panel| panel.requested_open)
+            {
+                // A layout saved when the 2D Timeline was its own panel: the History takes its place, taller (`sync_timeline_view`).
+                mutations.push(Mutation::Close { instance: InstanceId::new(Product::Timeline2d.id())? });
+                mutations.push(Mutation::Open { kind: instance.kind.clone(), instance: id, destination: None });
             } else if snapshot.visible.get(product.index()).copied() != Some(visible)
                 && instance.requested_open != visible
                 && (!visible || product.available(app))
@@ -1115,9 +1123,9 @@ fn sync_sketch_options(app: &mut crate::SolveApp) -> PanelResult<()> {
     }
 }
 
-/// The History header's chevron that raises the bottom row to the 2D Timeline's standard height (it points up).
+/// The History header's view icon that raises the bottom row to the 2D Timeline's standard height (the 2D icon).
 pub(crate) const TIMELINE_EXPAND: &str = "timeline-expand";
-/// The chevron that lowers the row back to the one-row strip (it points down).
+/// The view icon that lowers the row back to the one-row strip (the 1D icon).
 pub(crate) const TIMELINE_COLLAPSE: &str = "timeline-collapse";
 /// The 2D Timeline's header button that opens its options.
 pub(crate) const TIMELINE_SETTINGS: &str = "settings";
@@ -1139,7 +1147,7 @@ pub(crate) fn tall_min_height() -> f32 {
     crate::timeline_2d::canvas::MIN_DOCK_HEIGHT + chrome_2d()
 }
 
-/// The height the chevron raises the bottom History to.
+/// The height the 2D icon raises the bottom History to.
 fn tall_standard_height() -> f32 {
     crate::timeline_2d::canvas::DOCK_TOTAL_HEIGHT + chrome_2d()
 }
@@ -1166,7 +1174,7 @@ pub(crate) fn timeline_tall(app: &crate::SolveApp) -> bool {
 }
 
 /// Keep the `timeline_2d` preference and the bottom History's height in step. Setting the preference
-/// (the control channel, a script) raises or lowers the row; a resize or the chevron shows in the preference.
+/// (the control channel, a script) raises or lowers the row; a resize or the icon shows in the preference.
 pub(crate) fn sync_timeline_view(app: &mut crate::SolveApp) -> PanelResult<()> {
     let Some(integration) = app.panel_runtime.as_ref() else { return Ok(()) };
     let (bottom, tall) = history_row(integration);

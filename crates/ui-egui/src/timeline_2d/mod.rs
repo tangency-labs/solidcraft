@@ -852,15 +852,15 @@ mod tests {
         assert_eq!(h.app.preferences.timeline_2d_unsuppress_mode, crate::prefs::Timeline2dUnsuppressMode::UnsuppressAll);
         assert!(!items(&h.app, &Target::HistoryControls).iter().any(|i| i.id.starts_with("ui.timeline2d")), "the Play button's menu stays as it was");
 
-        // 3. The chevron sits at the header's right end: down in 2D, where it lowers the row; up in the strip, where it raises it.
-        let in_2d = bounds(&h, &button("history", "timeline-collapse")).expect("the 2D Timeline has the down chevron");
+        // 3. The view icon sits at the header's right end: the 1D icon in 2D, where it lowers the row; the 2D icon in the strip, where it raises it.
+        let in_2d = bounds(&h, &button("history", "timeline-collapse")).expect("the 2D Timeline has the 1D icon");
         assert!(bounds(&h, &button("history", "timeline-expand")).is_none());
         click_control(&mut h, &button("history", "timeline-collapse"));
         assert!(!h.app.preferences.timeline_2d);
         h.frames(3);
-        let in_1d = bounds(&h, &button("history", "timeline-expand")).expect("the 1D History has the up chevron");
+        let in_1d = bounds(&h, &button("history", "timeline-expand")).expect("the 1D History has the 2D icon");
         assert!(bounds(&h, &button("history", "settings")).is_none(), "the options show only in 2D");
-        assert!((in_1d.right() - in_2d.right()).abs() < 1.0, "the chevron stays at the right end: {in_1d:?} {in_2d:?}");
+        assert!((in_1d.right() - in_2d.right()).abs() < 1.0, "the icon stays at the right end: {in_1d:?} {in_2d:?}");
         click_control(&mut h, &button("history", "timeline-expand"));
         assert!(h.app.preferences.timeline_2d);
 
