@@ -429,6 +429,9 @@ impl FaceIndex {
 }
 
 fn face_count(b: &ModelBody) -> usize {
+    if !b.body.is_mesh() {
+        return b.body.face_count();
+    }
     b.mesh().tri_face.iter().map(|f| *f as usize + 1).max().unwrap_or(0)
 }
 
@@ -1531,37 +1534,43 @@ pub fn has_tie_numbered_link_face(name: &str, feature: u64) -> bool {
 pub fn carried_face_names(part: &ModelState, imported: &[solidcraft_kernel::ImportedBody]) -> Vec<Vec<String>> {
     let solids: Vec<&ModelBody> = part.bodies.iter().filter(|b| !b.body.is_mesh()).collect();
     let indices: Vec<OnceLock<Option<FaceIndex>>> = solids.iter().map(|_| OnceLock::new()).collect();
-    imported
-        .iter()
-        .map(|read| {
-            let probe = ModelBody::new(String::new(), read.body.clone(), 0);
-            let points: Vec<Option<Vec3>> = face_spots(&probe).into_iter().map(|s| s.map(|s| s.point)).collect();
-            let best = solids
-                .iter()
-                .zip(&indices)
-                .filter_map(|(b, index)| {
-                    let tol = (b.body.size() * 2e-3).max(1e-3);
-                    let near = b.outline_bounds().inflated(tol);
-                    if !points.iter().flatten().any(|p| near.contains(*p)) {
-                        return None;
-                    }
-                    // Like face_name_at_body, a body too large to index is left unnamed.
-                    let index = index
-                        .get_or_init(|| {
-                            let mesh = b.mesh();
-                            (mesh.triangles.len() <= 2_000_000 && face_count(b) <= 50_000).then(|| FaceIndex::new(&mesh, face_count(b)))
-                        })
-                        .as_ref()?;
-                    let hits: Vec<Option<usize>> = points.iter().map(|p| p.and_then(|p| index.face_at(p, tol))).collect();
-                    Some((hits.iter().flatten().count(), *b, hits))
-                })
-                .filter(|(n, ..)| *n > 0)
-                .max_by_key(|(n, b, _)| (*n, b.name == read.name));
-            let Some((_, b, hits)) = best else { return Vec::new() };
-            let names = face_names(b);
-            hits.into_iter().map(|h| h.and_then(|i| names.get(i).cloned()).unwrap_or_default()).collect()
-        })
-        .collect()
+    let carry = |read: &solidcraft_kernel::ImportedBody| -> Vec<String> {
+        // Exact B-rep match: when records were preserved directly without a STEP round-trip,
+        // face indices agree 1:1 with no tessellation or spatial lookup needed.
+        if let Some(exact) = solids.iter().filter(|b| b.body.record() == read.body.record()).max_by_key(|b| b.name == read.name) {
+            return face_names(exact).as_ref().clone();
+        }
+        let probe = ModelBody::new(String::new(), read.body.clone(), 0);
+        let points: Vec<Option<Vec3>> = face_spots(&probe).into_iter().map(|s| s.map(|s| s.point)).collect();
+        let best = solids
+            .iter()
+            .zip(&indices)
+            .filter_map(|(b, index)| {
+                let tol = (b.body.size() * 2e-3).max(1e-3);
+                let near = b.outline_bounds().inflated(tol);
+                if !points.iter().flatten().any(|p| near.contains(*p)) {
+                    return None;
+                }
+                // Like face_name_at_body, a body too large to index is left unnamed.
+                let index = index
+                    .get_or_init(|| {
+                        let mesh = b.mesh();
+                        (mesh.triangles.len() <= 2_000_000 && face_count(b) <= 50_000).then(|| FaceIndex::new(&mesh, face_count(b)))
+                    })
+                    .as_ref()?;
+                let hits: Vec<Option<usize>> = points.iter().map(|p| p.and_then(|p| index.face_at(p, tol))).collect();
+                Some((hits.iter().flatten().count(), *b, hits))
+            })
+            .filter(|(n, ..)| *n > 0)
+            .max_by_key(|(n, b, _)| (*n, b.name == read.name));
+        let Some((_, b, hits)) = best else { return Vec::new() };
+        let names = face_names(b);
+        hits.into_iter().map(|h| h.and_then(|i| names.get(i).cloned()).unwrap_or_default()).collect()
+    };
+    if imported.len() <= 1 {
+        return imported.iter().map(carry).collect();
+    }
+    solidcraft_kernel::map_on_threads(imported, 16, carry).into_iter().map(Option::unwrap_or_default).collect()
 }
 
 /// Where a face is, for a script: a point that lies on it and picks it, and the plane, cylinder,
@@ -2039,6 +2048,24 @@ mod tests {
         let body2_faces = face_names(&mb2);
         assert!(body2_faces.contains(&names[0]), "expected a face belonging to Body2, got '{}'", names[0]);
         Ok(())
+    }
+
+    #[test]
+    fn carried_face_names_matches_exact_brep_records_without_meshing() {
+        let a = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 5.0)).unwrap();
+        let b = solidcraft_kernel::cylinder(Vec3::new(30.0, 0.0, 0.0), Vec3::Z, 4.0, 12.0).unwrap();
+        let st = ModelState::default().with_bodies(vec![ModelBody::new("Plate".into(), a.clone(), 1), ModelBody::new("Pin".into(), b.clone(), 2)]);
+        assert!(st.bodies.iter().all(|mb| mb.cached_mesh().is_none()));
+        let inputs = [
+            solidcraft_kernel::NativeRecordBody { name: "Plate".into(), body: &a },
+            solidcraft_kernel::NativeRecordBody { name: "Pin".into(), body: &b },
+        ];
+        let (_, imp, _) = solidcraft_kernel::records_from_bodies("Part", &inputs).unwrap();
+        let carried = carried_face_names(&st, &imp.bodies);
+        assert_eq!(carried.len(), 2);
+        assert_eq!(carried[0], *face_names(&st.bodies[0]));
+        assert_eq!(carried[1], *face_names(&st.bodies[1]));
+        assert!(st.bodies.iter().all(|mb| mb.cached_mesh().is_none()), "exact-record matching must not trigger reference meshing");
     }
 
     fn naive_edge_names(b: &ModelBody) -> Vec<String> {

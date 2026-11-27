@@ -240,12 +240,11 @@ pub(super) fn prefetch_imports(
                 Some((imp, digest))
             }
             ImportPayload::Records { records, .. } => {
-                let imp = kernel::records_import_shared_with_workers(records, inner).ok()?;
+                let imp = kernel::records_import_shared_arc_with_workers(records, inner).ok()?;
                 if kernel::watch::cancelled() {
                     return None;
                 }
-                let text = kernel::records_text(records).ok()?;
-                let digest = crate::config::payload_digest(&text);
+                let digest = crate::config::records_payload_digest(records).ok()?;
                 Some((imp, digest))
             }
         }
@@ -661,6 +660,7 @@ mod tests {
             }],
             warnings: Vec::new(),
             system: "test".into(),
+            native: false,
         })
     }
 

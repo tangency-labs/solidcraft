@@ -655,7 +655,7 @@ fn traced_records(
     } else {
         assembly::placed(ir, product, unplaced, &layers, &mut warnings)
     };
-    (ImportRecords { bodies, tree, warnings, system: system.to_string() }, origins)
+    (ImportRecords { bodies, tree, warnings, system: system.to_string(), native: false }, origins)
 }
 
 /// `records` with each B-rep the kernel cannot build replaced by the mesh the file shows it with,

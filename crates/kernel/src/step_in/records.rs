@@ -7,7 +7,7 @@
 //! The records are saved in the design: it reopens without the original file, as a STEP import
 //! does. They come back from a file, so they are checked as hostile input before any is used.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Weak};
 
 use serde::{Deserialize, Serialize};
 use solidcore_record::brep::Brep;
@@ -32,6 +32,17 @@ pub struct ImportRecords {
     /// The program that wrote the file, when it says.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub system: String,
+    /// Records already canonicalised by SolidCraft's own kernel (such as a linked design's
+    /// evaluated bodies): validated structurally and geometrically and restored directly with
+    /// [`crate::Body::from_record`] without an SMLib round-trip, keeping exact face numbering.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub native: bool,
+}
+
+/// One evaluated B-rep body packaged directly as an import record (no STEP round-trip).
+pub struct NativeRecordBody<'a> {
+    pub name: String,
+    pub body: &'a crate::Body,
 }
 
 /// One body of an import kept as records.
@@ -168,6 +179,7 @@ pub(crate) fn records_import_with_workers(records: &ImportRecords, workers: usiz
         });
     }
     // Prepare independent original bodies in parallel (on desktop), collecting in exact file order.
+    let native = records.native;
     let original_indices: Vec<usize> = records.bodies.iter().enumerate().filter_map(|(k, r)| r.copy_of.is_none().then_some(k)).collect();
     let mut prepared: Vec<Option<std::result::Result<Part, String>>> = vec![None; records.bodies.len()];
     if original_indices.len() > 1 && workers > 1 {
@@ -175,7 +187,7 @@ pub(crate) fn records_import_with_workers(records: &ImportRecords, workers: usiz
             if crate::watch::cancelled() {
                 return Err(String::new());
             }
-            part_of(&records.bodies[k])
+            if native { native_part_of(&records.bodies[k]) } else { part_of(&records.bodies[k]) }
         });
         if crate::watch::cancelled() {
             return Err(crate::watch::cancelled_error("import"));
@@ -199,7 +211,7 @@ pub(crate) fn records_import_with_workers(records: &ImportRecords, workers: usiz
         // The record body whose part this is: itself, or the one it is a copy of.
         let source = r.copy_of.unwrap_or(k);
         let part = match r.copy_of {
-            None => prepared[k].take().unwrap_or_else(|| part_of(r)),
+            None => prepared[k].take().unwrap_or_else(|| if native { native_part_of(r) } else { part_of(r) }),
             Some(j) => copy_part(records, &originals, k, j),
         };
         // An original's part is kept for its copies whatever its own placement: a copy placed
@@ -329,6 +341,31 @@ fn renumbered(nodes: &[StepNode], kept: &[Option<usize>], made: &[ImportedBody])
         .collect()
 }
 
+/// Cached `(text_key_hash, text_len)` of live `Arc<ImportRecords>`, keyed by allocation identity
+/// (`Weak` keeps no data alive and prevents pointer-reuse aliasing).
+static RECORD_KEYS: Mutex<Vec<(Weak<ImportRecords>, (u64, usize))>> = Mutex::new(Vec::new());
+
+/// Remember `text`'s cache key for `records`, avoiding repeat JSON serialisation while `records` lives.
+pub fn cache_records_text(records: &Arc<ImportRecords>, text: &str) -> (u64, usize) {
+    let key = super::text_key(text);
+    if let Ok(mut keys) = RECORD_KEYS.lock() {
+        keys.retain(|(w, _)| w.strong_count() > 0 && !std::ptr::eq(w.as_ptr(), Arc::as_ptr(records)));
+        keys.push((Arc::downgrade(records), key));
+    }
+    key
+}
+
+/// Cache key `(hash, len)` of `records`'s serialised form, computed once per live `Arc<ImportRecords>`.
+pub fn records_key_arc(records: &Arc<ImportRecords>) -> Result<(u64, usize)> {
+    if let Ok(keys) = RECORD_KEYS.lock()
+        && let Some((_, key)) = keys.iter().find(|(w, _)| w.strong_count() > 0 && std::ptr::eq(w.as_ptr(), Arc::as_ptr(records)))
+    {
+        return Ok(*key);
+    }
+    let text = records_text(records)?;
+    Ok(cache_records_text(records, &text))
+}
+
 /// [`records_import`] through the recent imports' cache ([`super::step_import_shared`]'s), keyed
 /// by the records' serialised form.
 pub fn records_import_shared(records: &ImportRecords) -> Result<Arc<StepImport>> {
@@ -348,6 +385,114 @@ pub fn records_import_shared_with_workers(records: &ImportRecords, workers: usiz
     let imp = Arc::new(records_import_with_workers(records, workers)?);
     super::remember(key, false, &imp, text.len() <= super::KEEP_SMALL_BYTES);
     Ok(imp)
+}
+
+/// [`records_import_shared`] using the cached key of a live `Arc<ImportRecords>`, avoiding
+/// re-serialising large records to JSON on cache hits.
+pub fn records_import_shared_arc(records: &Arc<ImportRecords>) -> Result<Arc<StepImport>> {
+    records_import_shared_arc_with_workers(records, super::parallel::workers())
+}
+
+/// [`records_import_shared_arc`] with at most `workers` inner worker threads, bounding nested
+/// parallelism when multiple independent imports decode concurrently.
+pub fn records_import_shared_arc_with_workers(records: &Arc<ImportRecords>, workers: usize) -> Result<Arc<StepImport>> {
+    let key = records_key_arc(records)?;
+    if let Some(imp) = super::recent(key, false) {
+        return Ok(imp);
+    }
+    let imp = Arc::new(records_import_with_workers(records, workers)?);
+    super::remember(key, false, &imp, key.1 <= super::KEEP_SMALL_BYTES);
+    Ok(imp)
+}
+
+/// Build [`ImportRecords`] and its ready [`StepImport`] directly from SolidCraft's own evaluated
+/// B-rep bodies (e.g. a linked design), registering the import in the recent-reads cache so the
+/// timeline evaluates it without re-parsing or re-importing through SMLib.
+///
+/// Returns `(records, import, serialized_text)` so callers can check size limits and cache the
+/// payload digest without serialising the records a second time.
+pub fn records_from_bodies(root_name: &str, bodies: &[NativeRecordBody<'_>]) -> Result<(Arc<ImportRecords>, Arc<StepImport>, String)> {
+    let _span = solidcraft_profile::span("import", "records.from_bodies");
+    if bodies.len() > super::MAX_BODIES {
+        return Err(KernelError::Invalid(format!("an import of {} bodies (at most {})", bodies.len(), super::MAX_BODIES)));
+    }
+    let product_name = if root_name.trim().is_empty() { "Part" } else { root_name };
+    let path = vec![product_name.to_string()];
+    let mut record_bodies = Vec::with_capacity(bodies.len());
+    let mut imported_bodies = Vec::with_capacity(bodies.len());
+    let mut solids = 0usize;
+    for (k, entry) in bodies.iter().enumerate() {
+        entry.body.require_brep("linked design body")?;
+        let brep = entry.body.record().clone();
+        let face_count = brep.faces.len();
+        let face_origin: Vec<u64> = (0..face_count as u64).collect();
+        let sheet = brep.regions.len() <= 1 || entry.body.is_surface();
+        let color = entry.body.color().map(|c| c.map(unit));
+        let paint = entry.body.paint().cloned();
+        let item = k as u64 + 1;
+        let sources: Vec<_> =
+            face_origin.iter().map(|f| Some(crate::FaceSource::Imported { item, face: f + 1, payload_sha256: None, producer: None })).collect();
+        let body = crate::Body::from_record(brep.clone())?.with_color(color).with_face_sources(Some(Arc::new(sources)));
+        let body = match &paint {
+            Some(paint) => body.with_paint(Some(body_paint(paint, &face_origin))),
+            None => body,
+        };
+        if !sheet {
+            solids += 1;
+        }
+        record_bodies.push(RecordBody {
+            name: entry.name.clone(),
+            path: path.clone(),
+            instance: None,
+            color,
+            paint,
+            hidden: false,
+            placement: None,
+            brep: Some(brep),
+            face_origin: face_origin.clone(),
+            mesh: None,
+            copy_of: None,
+            sheet,
+        });
+        imported_bodies.push(ImportedBody {
+            source_item: k as u64,
+            face_origin,
+            name: entry.name.clone(),
+            common_face_name: None,
+            body,
+            color,
+            path: path.clone(),
+            instance: None,
+            closed: !sheet,
+            file_faces: face_count,
+            refused: None,
+            hidden: false,
+        });
+    }
+    let tree = vec![StepNode {
+        name: product_name.to_string(),
+        transform: super::IDENTITY,
+        bodies: (0..imported_bodies.len()).collect(),
+        items: (0..imported_bodies.len()).map(|k| k as u64).collect(),
+        left_out: Vec::new(),
+        children: Vec::new(),
+    }];
+    let report = ImportReport { parts: imported_bodies.len(), solids, single_root: true, ..ImportReport::default() };
+    let records = Arc::new(ImportRecords { bodies: record_bodies, tree: tree.clone(), warnings: Vec::new(), system: String::new(), native: true });
+    let text = records_text(&records)?;
+    let key = cache_records_text(&records, &text);
+    let imp = Arc::new(StepImport {
+        tree,
+        bodies: imported_bodies,
+        warnings: Vec::new(),
+        report,
+        schema: String::new(),
+        system: String::new(),
+        preprocessor: String::new(),
+        description: String::new(),
+    });
+    super::remember(key, false, &imp, key.1 <= super::KEEP_SMALL_BYTES);
+    Ok((records, imp, text))
 }
 
 /// `records` with `notes` about the file added to its warnings (what a check of the bodies its
@@ -414,6 +559,22 @@ fn body_paint(paint: &crate::Paint, face_origin: &[u64]) -> crate::Paint {
 /// A colour channel or an opacity from a file, kept in 0..1 (1 when it is not a number).
 fn unit(x: f32) -> f32 {
     if x.is_finite() { x.clamp(0.0, 1.0) } else { 1.0 }
+}
+
+/// A native SolidCraft record restored directly without an SMLib round-trip, keeping exact face
+/// numbering. Records from a file are still hostile input and pass structural and geometric checks.
+fn native_part_of(r: &RecordBody) -> std::result::Result<Part, String> {
+    if let (None, Some(mesh)) = (&r.brep, &r.mesh) {
+        return mesh_part(mesh);
+    }
+    let brep = r.brep.as_ref().ok_or("no record")?;
+    if r.face_origin.len() != brep.faces.len() {
+        return Err(format!("{} face origins for {} faces", r.face_origin.len(), brep.faces.len()));
+    }
+    solidcore_ops::record_check::validate(brep).map_err(|e| format!("the record is invalid: {e}"))?;
+    let body = crate::Body::from_record(brep.clone()).map_err(|e| e.to_string())?;
+    let sheet = r.sheet || brep.regions.len() <= 1 || body.is_surface();
+    Ok(Part { body, closed: !sheet, file_faces: r.face_origin.len(), face_origin: r.face_origin.clone(), refused: None, split_edges: 0 })
 }
 
 /// The body SMLib makes of one record, checked first: a record from a file is hostile input.

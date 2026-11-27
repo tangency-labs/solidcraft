@@ -2452,7 +2452,8 @@ mod tests {
             left_out: Vec::new(),
             children: Vec::new(),
         }];
-        let records = Arc::new(solidcraft_kernel::ImportRecords { bodies: vec![body], tree, warnings: Vec::new(), system: "FreeCAD".into() });
+        let records =
+            Arc::new(solidcraft_kernel::ImportRecords { bodies: vec![body], tree, warnings: Vec::new(), system: "FreeCAD".into(), native: false });
         let mut doc = Document::new("Records");
         let kind = FeatureKind::Import {
             file: "block.FCStd".into(),
@@ -3488,8 +3489,13 @@ mod tests {
             copy_of: None,
             mesh: None,
         };
-        let records =
-            Arc::new(solidcraft_kernel::ImportRecords { bodies: vec![body], tree: Vec::new(), warnings: Vec::new(), system: String::new() });
+        let records = Arc::new(solidcraft_kernel::ImportRecords {
+            bodies: vec![body],
+            tree: Vec::new(),
+            warnings: Vec::new(),
+            system: String::new(),
+            native: false,
+        });
         let mut doc = document();
         let kind =
             FeatureKind::Import { file: "block.FCStd".into(), step: "".into(), components: Vec::new(), skip: Vec::new(), records: Some(records) };
@@ -3603,7 +3609,7 @@ mod tests {
             copy_of: None,
             sheet: false,
         };
-        solidcraft_kernel::ImportRecords { bodies: vec![tiny; count], tree: Vec::new(), warnings: Vec::new(), system: system.into() }
+        solidcraft_kernel::ImportRecords { bodies: vec![tiny; count], tree: Vec::new(), warnings: Vec::new(), system: system.into(), native: false }
     }
 
     /// An import kept as these records.

@@ -2448,8 +2448,8 @@ fn mesh_content_digest(mesh: &crate::MeshData) -> u64 {
 
 /// An import's records digested as their serialised form; records that will not serialise
 /// digest as nothing (their evaluation fails and says why).
-fn records_digest(records: &kernel::ImportRecords) -> u64 {
-    step_text_digest(&kernel::records_text(records).unwrap_or_default())
+fn records_digest(records: &Arc<kernel::ImportRecords>) -> u64 {
+    kernel::records_key_arc(records).map_or_else(|_| step_text_digest(""), |(hash, _)| hash)
 }
 
 fn step_text_digest(text: &str) -> u64 {
@@ -19623,7 +19623,7 @@ fn eval_feature_kind(
             let (imp, digest) = match prepared_import {
                 Some((imp, digest)) => (imp.clone(), digest.clone()),
                 None => match records {
-                    Some(r) => (kernel::records_import_shared(r)?, crate::config::payload_digest(&kernel::records_text(r)?)),
+                    Some(r) => (kernel::records_import_shared_arc(r)?, crate::config::records_payload_digest(r)?),
                     None => (kernel::step_import_shared(step)?, crate::config::payload_digest(step)),
                 },
             };

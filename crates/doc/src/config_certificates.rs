@@ -999,6 +999,33 @@ pub(crate) fn payload_digest(payload: &str) -> String {
     format!("{:x}", Sha256::digest(payload.as_bytes()))
 }
 
+/// Cached SHA-256 hex payload digests of live `Arc<ImportRecords>`, keyed by allocation identity
+/// (`Weak` keeps no records alive and prevents pointer-reuse aliasing).
+static RECORD_PAYLOAD_DIGESTS: std::sync::Mutex<Vec<(std::sync::Weak<solidcraft_kernel::ImportRecords>, String)>> = std::sync::Mutex::new(Vec::new());
+
+/// Remember `text`'s SHA-256 payload digest for `records`, avoiding re-serialising large records
+/// during evaluation while `records` lives.
+pub fn cache_records_payload_digest(records: &std::sync::Arc<solidcraft_kernel::ImportRecords>, text: &str) -> String {
+    let digest = payload_digest(text);
+    if let Ok(mut digests) = RECORD_PAYLOAD_DIGESTS.lock() {
+        digests.retain(|(w, _)| w.strong_count() > 0 && !std::ptr::eq(w.as_ptr(), std::sync::Arc::as_ptr(records)));
+        digests.push((std::sync::Arc::downgrade(records), digest.clone()));
+    }
+    digest
+}
+
+/// SHA-256 payload digest of `records`'s serialised form, computed once per live `Arc<ImportRecords>`.
+pub(crate) fn records_payload_digest(records: &std::sync::Arc<solidcraft_kernel::ImportRecords>) -> crate::Result<String> {
+    if let Ok(digests) = RECORD_PAYLOAD_DIGESTS.lock()
+        && let Some((_, digest)) = digests.iter().find(|(w, _)| w.strong_count() > 0 && std::ptr::eq(w.as_ptr(), std::sync::Arc::as_ptr(records)))
+    {
+        return Ok(digest.clone());
+    }
+    let text = solidcraft_kernel::records_text(records)?;
+    solidcraft_kernel::cache_records_text(records, &text);
+    Ok(cache_records_payload_digest(records, &text))
+}
+
 #[cfg(test)]
 #[path = "config_shell_tests.rs"]
 mod shell_tests;

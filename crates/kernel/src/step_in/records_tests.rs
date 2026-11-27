@@ -39,7 +39,7 @@ fn kept(text: &str) -> ImportRecords {
         left_out: Vec::new(),
         children: Vec::new(),
     }];
-    ImportRecords { bodies, tree, warnings: Vec::new(), system: String::new() }
+    ImportRecords { bodies, tree, warnings: Vec::new(), system: String::new(), native: false }
 }
 
 #[test]
@@ -416,13 +416,67 @@ fn a_small_cylinder_imported_with_coarse_distance_accuracy_meshes() {
 }
 
 #[test]
+fn native_records_from_bodies_round_trip_exactly_without_smlib() {
+    use solidcore_record::Vec3;
+    let paint = crate::Paint {
+        opacity: 0.75,
+        faces: vec![crate::FacePaint { face: 2, color: [0.1, 0.5, 0.9], opacity: 0.5, name: Some("Accent".into()) }],
+        name: Some("ShellBlue".into()),
+    };
+    let bx = crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 20.0, 30.0)).unwrap().with_color(Some([0.2, 0.4, 0.6])).with_paint(Some(paint));
+    let cyl = crate::cylinder(Vec3::new(40.0, 0.0, 0.0), Vec3::Z, 5.0, 12.0).unwrap();
+    let inputs = [super::NativeRecordBody { name: "Plate".into(), body: &bx }, super::NativeRecordBody { name: "Pin".into(), body: &cyl }];
+    let (records, imp, text) = super::records_from_bodies("Bracket", &inputs).unwrap();
+    assert!(records.native);
+    assert_eq!(records.bodies.len(), 2);
+    assert_eq!(imp.bodies.len(), 2);
+    assert_eq!(imp.tree.len(), 1);
+    assert_eq!(imp.tree[0].name, "Bracket");
+    assert_eq!(imp.tree[0].bodies, vec![0, 1]);
+    assert_eq!(imp.tree[0].items, vec![0, 1]);
+    assert_eq!((imp.report.parts, imp.report.solids, imp.report.single_root), (2, 2, true));
+    // Cached lookup hits without re-importing.
+    let shared = super::records_import_shared_arc(&records).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&shared, &imp));
+    // JSON round-trip and cold records_import restore identical records, face order, colour and paint.
+    let decoded: ImportRecords = serde_json::from_str(&text).unwrap();
+    assert_eq!(decoded, *records);
+    let cold = records_import(&decoded).unwrap();
+    assert_eq!(cold.bodies.len(), imp.bodies.len());
+    assert_eq!(cold.tree, imp.tree);
+    assert_eq!(cold.report, imp.report);
+    for (a, b) in imp.bodies.iter().zip(&cold.bodies) {
+        assert_eq!(a.body.record(), b.body.record());
+        assert_eq!(a.face_origin, b.face_origin);
+        assert_eq!(a.body.color(), b.body.color());
+        assert_eq!(a.body.paint(), b.body.paint());
+        assert_eq!(a.body.face_sources(), b.body.face_sources());
+        assert_eq!(a.closed, b.closed);
+        assert!(!b.body.holds_kernel_form(), "native records restore without calling SMLib");
+    }
+    // Hostile native records are still validated structurally and geometrically.
+    let mut broken = decoded.clone();
+    broken.bodies[0].face_origin.pop();
+    let imp_broken = records_import(&broken).unwrap();
+    assert_eq!(imp_broken.bodies.len(), 1);
+    assert!(imp_broken.warnings.iter().any(|w| w.contains("face origins")));
+
+    let mut bad_idx = decoded;
+    bad_idx.bodies[0].brep.as_mut().unwrap().edges[0].vertices[0] = 999;
+    let imp_bad = records_import(&bad_idx).unwrap();
+    assert_eq!(imp_bad.bodies.len(), 1);
+    assert!(imp_bad.warnings.iter().any(|w| w.contains("invalid")));
+}
+
+#[test]
 fn parallel_records_import_matches_serial_and_respects_cancellation() {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/step-conformance");
     let parts = ["cone_point", "cylinder_seam", "dome", "washer"];
-    let mut combined = ImportRecords { bodies: Vec::new(), tree: Vec::new(), warnings: vec!["header note".into()], system: "test".into() };
+    let mut combined =
+        ImportRecords { bodies: Vec::new(), tree: Vec::new(), warnings: vec!["header note".into()], system: "test".into(), native: false };
     let mut indices = Vec::new();
     for (idx, part) in parts.iter().enumerate() {
         let mut r = kept(&std::fs::read_to_string(dir.join(format!("{part}.step"))).unwrap());
