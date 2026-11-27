@@ -7,6 +7,10 @@
 # Off until the maintainer turns it on (docs/releasing.md, "Python packages"): the repository
 # variable PYTHON_PUBLISH set to "true", the environments `pypi` and `testpypi`, and this workflow
 # registered as the trusted publisher of the `solidcraft` project on pypi.org and test.pypi.org.
+# Both environments deploy from `v*` tags only (Settings > Environments > Deployment branches and
+# tags): PyPI trusts this file's name and the environment, not the ref, and workflow_dispatch runs
+# from any ref, so a changed copy of this file dispatched from a branch must not reach the upload
+# job. A release event runs from its tag; run it by hand with `--ref v<version>`.
 # A release published before the python job existed has no wheels: nothing is uploaded.
 name: Python packages
 
@@ -61,6 +65,7 @@ jobs:
     needs: wheels
     if: needs.wheels.outputs.found == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
+    # Deploys from `v*` tags only (the environment's rule, docs/releasing.md "Python packages").
     environment: ${{ needs.wheels.outputs.index }}
     permissions:
       id-token: write
