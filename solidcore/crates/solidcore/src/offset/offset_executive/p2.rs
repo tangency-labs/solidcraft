@@ -2676,11 +2676,11 @@ impl OffsetExecutive {
                     .domain;
                 let original_surface =
                     present(original_surface, OP_EXTENDED, OLD_SURFACE_NOT_KEPT)?;
-                choose_extended_domain(
+                let _ = self.choose_extended_domain_for_face(
+                    id,
                     &trim_domain,
                     &original_domain,
                     &extension_domain,
-                    crate::math::EFF_ZERO,
                     || {
                         let restored = crate::geom::context::Context::with_notification_context(
                             kernel,
@@ -2711,6 +2711,37 @@ impl OffsetExecutive {
         })();
         self.set_offset_brep(temporary);
         status
+    }
+
+    fn choose_extended_domain_for_face(
+        &mut self,
+        face: FaceId,
+        trim: &Extent2d,
+        original: &Extent2d,
+        extension: &Extent2d,
+        restore_original: impl FnOnce() -> Result<()>,
+    ) -> Result<ExtendedDomainChoice> {
+        match choose_extended_domain(
+            trim,
+            original,
+            extension,
+            crate::math::EFF_ZERO,
+            restore_original,
+        ) {
+            Ok(choice) => Ok(choice),
+            Err(err)
+                if matches!(err.offset_failure(), Some(OffsetFailure::TrimPastExtension))
+                    && self.is_kept_offset_face(face) =>
+            {
+                // (not upstream, #22806) `choose_extended_domain` already restored
+                // `original_surface` (without UV trims). Record the face so
+                // `resolve_crossing_loops_of_face` skips it until `restore_kept_edges`
+                // puts back every original kept edge and UV trim curve.
+                self.kept_extension_restored.insert(face);
+                Ok(ExtendedDomainChoice::Original)
+            }
+            Err(err) => Err(err),
+        }
     }
 }
 
@@ -5792,6 +5823,109 @@ mod tests {
             .downcast_ref::<NotificationLog>()
             .unwrap();
         assert!(log.0.is_empty());
+    }
+
+    /// #22806: in a local operation, `extend_result_faces_prefix` runs the normal extension
+    /// path on kept offset faces (leaving faces whose extension succeeds unchanged from
+    /// `main`), and if `choose_extended_domain` restores the original surface and fails with
+    /// [`OffsetFailure::TrimPastExtension`], a kept offset face records that restoration and
+    /// succeeds while non-kept, non-local-operation, and inverted faces still fail with
+    /// [`OffsetFailure::TrimPastExtension`].
+    #[test]
+    fn kept_face_extension_runs_normally_and_recovers_from_trim_past_extension() {
+        let mut kernel = Kernel::default();
+        let (mut result, face_id) = one_face(true);
+        let key = result_key(EntityRef::Face(face_id));
+        result.set_key(result_key(EntityRef::Brep(BrepId::from_index(0))).key);
+        result.face_mut(face_id).unwrap().rectangular_trim = 1;
+        let mut fixture = NotificationFixture::new(&source_brep());
+        let mut exec = OffsetExecutive::new(OffsetOperation::LocalOperation, 0.0, 1.0e-6);
+        let source_fu = FaceuseId::from_index(0);
+        exec.relate_faceuse(source_fu, face_id);
+        exec.kept_faceuses.insert(source_fu);
+        exec.insert_extended_surface(
+            key.key.0,
+            Surface::from(Plane::from_normal(Vec3::Z, Vec3::Z)),
+        );
+        exec.set_offset_brep(result);
+
+        // When extension succeeds, kept local-op faces run the normal path and are not
+        // marked as restored.
+        assert_eq!(
+            exec.extend_result_faces_prefix(&mut kernel, MarkType::Mark, &mut fixture.context()),
+            Ok(())
+        );
+        let after = exec.offset_brep().unwrap();
+        assert_eq!(
+            after.face(face_id).unwrap().rectangular_trim,
+            crate::topology::face::p2::UNSURE
+        );
+        assert!(!exec.is_kept_extension_restored(face_id));
+
+        // When `choose_extended_domain` fails with `TrimPastExtension` on a kept local-op
+        // face, `restore_original` runs, the face is recorded in `kept_extension_restored`,
+        // and the step succeeds.
+        let original = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let extension = Extent2d::from_bounds(-1.0, -1.0, 2.0, 2.0);
+        let outside = Extent2d::from_bounds(-2.0, -2.0, 3.0, 3.0);
+        let mut restored = false;
+        assert_eq!(
+            exec.choose_extended_domain_for_face(face_id, &outside, &original, &extension, || {
+                restored = true;
+                Ok(())
+            })
+            .unwrap(),
+            ExtendedDomainChoice::Original
+        );
+        assert!(restored);
+        assert!(exec.is_kept_extension_restored(face_id));
+
+        // If restoring the original surface itself fails, that error is not swallowed.
+        exec.kept_extension_restored.clear();
+        let restore_error = SolidError::invalid_input(OP_EXTENDED, "restore failed");
+        assert!(matches!(
+            exec.choose_extended_domain_for_face(face_id, &outside, &original, &extension, || {
+                Err(restore_error.clone())
+            }),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(!exec.is_kept_extension_restored(face_id));
+
+        // An inverted face is no longer kept and still fails with `TrimPastExtension`.
+        exec.inverted_faces.insert(face_id);
+        let err = exec
+            .choose_extended_domain_for_face(face_id, &outside, &original, &extension, || Ok(()))
+            .unwrap_err();
+        assert_eq!(
+            err.offset_failure(),
+            Some(&OffsetFailure::TrimPastExtension)
+        );
+        assert!(!exec.is_kept_extension_restored(face_id));
+
+        // A non-kept face (outside `LocalOperation` or without kept source faceuses) still
+        // fails with `TrimPastExtension`.
+        let mut non_local = OffsetExecutive::new(OffsetOperation::SolidOffset, 0.125, 1.0e-6);
+        non_local.relate_faceuse(source_fu, face_id);
+        non_local.kept_faceuses.insert(source_fu);
+        let err = non_local
+            .choose_extended_domain_for_face(face_id, &outside, &original, &extension, || Ok(()))
+            .unwrap_err();
+        assert_eq!(
+            err.offset_failure(),
+            Some(&OffsetFailure::TrimPastExtension)
+        );
+        assert!(!non_local.is_kept_extension_restored(face_id));
+
+        let mut unkept_local = OffsetExecutive::new(OffsetOperation::LocalOperation, 0.0, 1.0e-6);
+        unkept_local.relate_faceuse(source_fu, face_id);
+        let err = unkept_local
+            .choose_extended_domain_for_face(face_id, &outside, &original, &extension, || Ok(()))
+            .unwrap_err();
+        assert_eq!(
+            err.offset_failure(),
+            Some(&OffsetFailure::TrimPastExtension)
+        );
+        assert!(!unkept_local.is_kept_extension_restored(face_id));
     }
 
     #[test]
