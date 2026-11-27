@@ -273,7 +273,8 @@ impl Ellipse {
             (sweep * 180.0 / PI).min(360.0)
         };
         let interval = Extent1d::from_min_max(0.0, degrees);
-        let mut circle = Self::create_canonical_circle(k, &frame, arc.radius, Some(&interval), None)?;
+        let mut circle =
+            Self::create_canonical_circle(k, &frame, arc.radius, Some(&interval), None)?;
         // The circle's NURB closes any sweep past 360 - DEFAULT_ANGLE_TOL degrees, moving
         // its end onto its start (and its domain then ends at 360): an open arc that near
         // a full turn is made again over its own domain, closing only within the angular
@@ -685,7 +686,11 @@ mod tests {
         let closed = crate::curve::curve::p4::is_closed_base(k, e.base(), &iv, 0.0).unwrap();
         // The angular domain agrees: a full turn when closed, else the sweep.
         let degrees = e.step_interval();
-        let sweep = if closed { 360.0 } else { a.sweep() * 180.0 / PI };
+        let sweep = if closed {
+            360.0
+        } else {
+            a.sweep() * 180.0 / PI
+        };
         assert!(
             degrees.min() == 0.0 && (degrees.max() - sweep).abs() <= 1e-12 * 360.0,
             "{degrees:?} for a sweep of {sweep} degrees"
@@ -715,7 +720,11 @@ mod tests {
             // The frame of the first arc in the issue (axis and reference not unit).
             centre: Point3::new(-46.642538064907995, -99.52832980274029, 196.23709207988531),
             axis: Vec3::new(-0.560750111753277, -0.9210425121131868, 1.0595970762771103),
-            reference: Vec3::new(-0.45267220923568924, -1.069287548824933, -1.1690248206513878),
+            reference: Vec3::new(
+                -0.45267220923568924,
+                -1.069287548824933,
+                -1.1690248206513878,
+            ),
             radius,
             start: 0.7,
             end: 0.7 + TAU - short,
@@ -732,12 +741,21 @@ mod tests {
             let (start, end, closed, off) = shape(&k, &a);
             let case = format!("radius {radius}, short by {short}");
             assert_eq!(closed, closes, "{case}");
-            assert!(off <= 1e-13, "{case}: a point off the circle by {off} of the radius");
-            assert!(on(start, a.point_at(a.start).unwrap(), radius), "{case}: {start:?}");
+            assert!(
+                off <= 1e-13,
+                "{case}: a point off the circle by {off} of the radius"
+            );
+            assert!(
+                on(start, a.point_at(a.start).unwrap(), radius),
+                "{case}: {start:?}"
+            );
             if closes {
                 assert_eq!(start, end, "{case}");
             } else {
-                assert!(on(end, a.point_at(a.end).unwrap(), radius), "{case}: {end:?}");
+                assert!(
+                    on(end, a.point_at(a.end).unwrap(), radius),
+                    "{case}: {end:?}"
+                );
                 let gap = (end - start).length();
                 assert!(gap > 0.5 * radius * short, "{case}: ends {gap} apart");
             }
