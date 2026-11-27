@@ -77,6 +77,13 @@
 //!   and on one circle (a capped footprint split where it touches its face's rim) they
 //!   coincide and crossed at thousands of points within the tolerance. Solidcore-native, no
 //!   fork commit.
+//! - **A smooth vertex, at its image.** `trim_extended_edge` takes the vertex's image as an
+//!   end candidate, as for a lamina edge, at a vertex where every edge is a tangent sector
+//!   and every face moves by the one distance (no local operation, no face the shell keeps
+//!   unmoved: `smooth_vertex`): every face's offset passes through that one image, and a
+//!   neighbour's offset meets the curve there tangentially, so its crossing is only found
+//!   to about the square root of the residual along the curve. Solidcore-native, no fork
+//!   commit.
 //! - **A tangent edge's ends and its other UV curve (#17514).** `trim_extended_edge` takes a
 //!   grazing cut by a neighbour's offset as a crossing where the end has no tangent
 //!   neighbour and the curve meets the offset at more than the tangency tolerance (the
@@ -4991,6 +4998,16 @@ impl OffsetGeometryCreation {
             // touches its face's rim) their extensions, each wound round the circle many
             // times, coincide and cross within the tolerance at thousands of points, each
             // then weighed for moving to a curve end.
+            // Not upstream: the same end candidate at a smooth vertex, where every edge is a
+            // tangent sector (a round's rail meeting the tangent edge between its support
+            // and the next round: a drafted box's top round over its corner rounds), in an
+            // offset that moves every face there by the one distance. Every face there has
+            // one tangent plane, so every face's offset passes through the vertex's one
+            // image, and each offset edge's end is that image. A neighbour's
+            // offset meets the curve there tangentially: the crossing is found only to about
+            // the square root of the residual along the curve (3e-5 mm at a 2 mm wall on an
+            // R10 round), and an end placed there leaves the faces' trims a sliver past
+            // their corner, which the validity check refuses as a cusp.
             let vertex_image = !tan_eus.is_empty()
                 && (brep.edge_is_lamina(base_edge)?
                     || Self::runs_on_between_planes(
@@ -4999,7 +5016,8 @@ impl OffsetGeometryCreation {
                         base_edgeuse,
                         other_base_edgeuse,
                         &tan_eus,
-                    )?);
+                    )?
+                    || Self::smooth_vertex(k, brep, executive, base_vertex, tan_tol_deg)?);
             if vertex_image {
                 let tol_3d = brep.brep_tolerance(base_edge)?;
                 let image = self.offset_vertex_image(k, brep, base_edgeuse, base_vertex)?;
@@ -5877,6 +5895,48 @@ impl OffsetGeometryCreation {
                 .ok_or(dangling("face without surface"))?;
             if !matches!(surface_of(brep, sur)?.kind(), SurfaceKind::Plane(_)) {
                 return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Not upstream: whether `vertex` is smooth and every face at it moves by the one
+    /// distance: it has edges, none lamina, every use of each is a tangent sector within
+    /// `tol_deg`, the operation is no local operation (whose faces move by their own
+    /// distances, or not at all) and no face at it is one the shell keeps unmoved. Every
+    /// face at a smooth vertex has the one tangent plane there, so moved by one distance
+    /// `d` the offsets of all its faces pass through the vertex's one image `V + d n(V)`
+    /// ([`Self::offset_vertex_image`]), the end of each offset edge at it.
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology queries and the tangent sector test.
+    fn smooth_vertex<O: ClassObject + SolutionObject>(
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &impl OffsetExecutive<O>,
+        vertex: O,
+        tol_deg: f64,
+    ) -> Result<bool> {
+        if executive.is_local_operation() {
+            return Ok(false);
+        }
+        let edges = brep.vertex_edges(vertex)?;
+        if edges.is_empty() {
+            return Ok(false);
+        }
+        let shell_faces = executive.shell_faces();
+        for edge in edges {
+            if brep.edge_is_lamina(edge)? {
+                return Ok(false);
+            }
+            for eu in brep.edge_edgeuses(edge)? {
+                let unmoved = brep
+                    .edgeuse_face(eu)?
+                    .is_some_and(|face| contains(&shell_faces, &face));
+                if unmoved || !brep.edgeuse_is_tangent_sector(k, eu, tol_deg)? {
+                    return Ok(false);
+                }
             }
         }
         Ok(true)
