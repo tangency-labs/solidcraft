@@ -41,12 +41,13 @@ impl JsonSchema for JointOriginParam {
     fn schema_name() -> Cow<'static, str> {
         "JointOrigin".into()
     }
-    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let faces = generator.subschema_for::<[WorldPoint; 2]>();
         json_schema!({
-            "description": "A joint origin, as joint.create takes a side: a joint origin's name, or an object with occurrence and face, circle, edge or point (world coordinates, or a face's name), with path?, z?, x?, end?, on?, corner?, or with a frame {origin, z, x?}.",
+            "description": "A joint origin, as joint.create takes a side: a joint origin's name, or an object with occurrence and face, circle, edge or point (world coordinates, or a face's name), with path?, z?, x?, end?, on?, corner?, with `faces` (two world points on one occurrence), or with a frame {origin, z, x?}.",
             "anyOf": [
                 {"type": "string", "minLength": 1},
-                {"type": "object", "allOf": [secondary_axis_origin_schema()]}
+                {"type": "object", "allOf": [secondary_axis_origin_schema(), between_faces_origin_schema()], "properties": {"faces": faces}}
             ]
         })
     }
@@ -423,6 +424,25 @@ impl JsonSchema for JointLimits {
     }
 }
 
+const FACES_FORM: &str = "`faces` must be two points, one on each face: [[x, y, z], [x, y, z]]";
+
+/// The wall pair, shared by the command handler and the two joint-origin contracts.
+pub(crate) fn faces_param(v: &Value) -> Result<Option<[Vec3; 2]>, &'static str> {
+    faces_from_fields(|k| v.get(k))
+}
+
+fn faces_from_fields<'a>(get: impl Fn(&str) -> Option<&'a Value>) -> Result<Option<[Vec3; 2]>, &'static str> {
+    let Some(faces) = get("faces") else { return Ok(None) };
+    if ["face", "circle", "edge", "point", "frame", "plane", "axis", "sketch", "curve"].iter().any(|k| get(k).is_some()) {
+        return Err("`faces` cannot be combined with another joint origin reference");
+    }
+    if get("x").is_some_and(|x| !x.is_null()) || get("z").is_some_and(|z| !z.is_null()) {
+        return Err("a between-faces origin defines its own axes; do not give `x` or `z`");
+    }
+    let [a, b] = faces.as_array().map(Vec::as_slice).ok_or(FACES_FORM)? else { return Err(FACES_FORM) };
+    Ok(Some([params::vec3(a).ok_or(FACES_FORM)?, params::vec3(b).ok_or(FACES_FORM)?]))
+}
+
 /// A joint origin as `joint.create` reads a side: a joint origin's name, or an object that says
 /// where (`face`, `circle`, `edge` or `point`: a point in world coordinates, or for the first two
 /// a face's name; a `plane` or an `axis`: a name or key, or a definition object; or a `frame`).
@@ -468,6 +488,11 @@ impl JointOriginArg {
         if v.is_string() {
             return Ok(JointOriginArg(v.clone()));
         }
+        if faces_param(v)?.is_some() {
+            let m = v.as_object().ok_or("a joint origin must be an object")?;
+            check_between_faces_origin(m)?;
+            return Ok(JointOriginArg(v.clone()));
+        }
         check_secondary_axis_request(v)?;
         if v.get("sketch").is_some() {
             let m = v.as_object().ok_or("a joint origin must be an object")?;
@@ -496,6 +521,7 @@ impl JsonSchema for JointOriginArg {
     }
     fn json_schema(generator: &mut SchemaGenerator) -> Schema {
         let path = generator.subschema_for::<OccurrencePath>();
+        let faces = generator.subschema_for::<[WorldPoint; 2]>();
         // `params::vec3` reads [x, y, z] and {x, y, z}.
         let forms = [
             json!({"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}),
@@ -504,17 +530,18 @@ impl JsonSchema for JointOriginArg {
         let point = json!({"anyOf": forms});
         let at = |description: &str| json!({"description": description, "anyOf": forms});
         json_schema!({
-            "description": "A joint origin: the name of a joint origin made with joint.origin, or an object that says where it is, in world coordinates. Give one of face, circle, edge, point, sketch (with point or curve), plane or axis (a point [x, y, z]; for face and circle also a face's name; a plane or axis by name or definition object), or a frame {origin, z, x?}.",
+            "description": "A joint origin: the name of a joint origin made with joint.origin, or an object that says where it is, in world coordinates. Give one of face, circle, edge, point, sketch (with point or curve), plane or axis (a point [x, y, z]; for face and circle also a face's name; a plane or axis by name or definition object), faces (two points, one on each of two faces of one part: the plane midway between them), or a frame {origin, z, x?}.",
             "anyOf": [
                 {"type": "string", "description": "The name of a joint origin."},
                 {
                     "type": "object",
-                    "allOf": [secondary_axis_origin_schema()],
+                    "allOf": [secondary_axis_origin_schema(), between_faces_origin_schema()],
                     "properties": {
                         "occurrence": {"description": "The occurrence the origin is on, by id or name. Default: found from the point, or the named face's or sketch's component.", "type": ["number", "string"]},
                         "path": {"description": "The placement picked, as occurrence ids from the top of the assembly down to occurrence: says which copy of a sub-assembly placed more than once.", "anyOf": [path, {"type": "null"}]},
                         "face": {"description": "The centre of a planar face, or a round end of a round face: a point on it [x, y, z], or its name.", "anyOf": [point, {"type": "string"}]},
                         "circle": {"description": "The centre of a round end: a point [x, y, z] on its wall, rim or centre, or the round face's name.", "anyOf": [point, {"type": "string"}]},
+                        "faces": {"description": "Two distinct parallel planar faces of one occurrence, a world point on each. Defines the midplane, independent of their order. Do not also give another reference, x or z.", "allOf": [faces]},
                         "edge": at("A point [x, y, z] on an edge of a planar face."),
                         "point": {"description": "A point [x, y, z], or with sketch a sketch point id (e.g. \"c1.center\", \"p1\", \"origin\").", "anyOf": [point, {"type": "string", "minLength": 1}]},
                         "sketch": {"description": "A sketch on the component, by id or name, paired with point or curve.", "type": ["number", "string"]},
@@ -522,8 +549,8 @@ impl JsonSchema for JointOriginArg {
                         "plane": {"description": "The plane to sit on: \"XY\", \"XZ\" or \"YZ\" (the design's own), \"o:<ids>/origin/<item>\" (a placement's origin plane), a construction plane's name, or a plane definition object.", "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]},
                         "axis": {"description": "The axis to sit on: \"X\", \"Y\" or \"Z\", \"o:<ids>/origin/<item>\" (a placement's origin axis), a construction axis's name, or an axis definition object.", "anyOf": [{"type": "string", "minLength": 1}, {"type": "object"}]},
                         "frame": {"description": "An explicit frame {origin: [x, y, z], z: [x, y, z], x?: [x, y, z]}.", "type": "object"},
-                        "z": at("The frame's z axis, a direction [x, y, z], where it is not the face's normal."),
-                        "x": {"description": "The frame's turn about z: a direction [x, y, z], a face's name or {face: [x, y, z]}.", "anyOf": [point, {"type": "string"}, {"type": "object"}]},
+                        "z": {"description": "The frame's z axis, a direction [x, y, z], where it is not the face's normal. Null is omitted.", "anyOf": [point, {"type": "null"}]},
+                        "x": {"description": "The frame's turn about z: a direction [x, y, z], a face's name or {face: [x, y, z]}. Null is omitted.", "anyOf": [point, {"type": "string"}, {"type": "object"}, {"type": "null"}]},
                         "end": {"description": "A circle's end: the name of the face across its rim there.", "type": "string"},
                         "on": at("An edge origin: a point on the face to use."),
                         "corner": at("An edge origin: a point near one end of the edge, for the corner there."),
@@ -717,7 +744,8 @@ impl<'de> Deserialize<'de> for CreateJointParams {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ConstraintTypeParam(pub Constraint);
 
-const CONSTRAINT_MESSAGE: &str = "`type` must be mate, flush, distance, concentric, insert, parallel, perpendicular, angle, tangent or point_on_axis";
+pub(crate) const CONSTRAINT_MESSAGE: &str =
+    "`type` must be mate, flush, distance, concentric, insert, parallel, perpendicular, angle, tangent, point_on_axis or center";
 
 impl ConstraintTypeParam {
     fn read(v: &Value) -> Result<Self, String> {
@@ -731,7 +759,7 @@ impl JsonSchema for ConstraintTypeParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({
-            "description": "The rule: mate (two planes against each other), flush (two planes facing the same way), distance (a plane or a point `offset` from a plane), concentric (two round faces on one axis), insert (two round edges at one centre: only a turn is left), parallel, perpendicular, angle (two planes or axes), tangent (a cylinder resting on a plane) or point_on_axis. Case, spaces, `_` and `-` are ignored; coincident and axis are also taken.",
+            "description": "The rule: mate (two planes against each other), flush (two planes facing the same way), distance (a plane or a point `offset` from a plane), concentric (two round faces on one axis), insert (two round edges at one centre: only a turn is left), parallel, perpendicular, angle (two planes or axes), tangent (a cylinder resting on a plane), point_on_axis, or center (a plane aligned to the midplane of two parallel faces; at least one side needs `faces`). Case, spaces, `_` and `-` are ignored; coincident, axis and centered are also taken.",
             "type": "string",
             "minLength": 1
         })
@@ -749,8 +777,8 @@ pub struct CreateConstraintParams {
     #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "ConstraintTypeParam")]
     pub kind: Option<ConstraintTypeParam>,
-    /// Side a's reference: a joint origin, as joint.create takes it (a planar face or datum plane
-    /// for a plane, a round face, circle or axis for an axis, a point).
+    /// Side a's reference: a joint origin as joint.create takes it. Center needs a planar reference
+    /// on each side and a pair of parallel faces (`faces`) on at least one side.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "JointOriginArg")]
     pub a: Option<JointOriginArg>,
@@ -1213,11 +1241,13 @@ impl JsonSchema for SnapShape {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         let point = json!({"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3});
+        let face_pick = json!({"type": "object", "properties": {"pick": point, "face": {"type": "string"}}, "required": ["pick", "face"]});
         json_schema!({
-            "description": "Where a joint origin sits on its component's geometry, as saved: `type` is frame, face_center, circle_center, edge, point or sketch_point, with the keys that type holds: origin, pick, point or z as [x, y, z] (for sketch_point, sketch is the sketch feature id and point is the point reference string), x as [x, y, z] or a reference, face, end, edge and corner as persistent names, and for an edge origin its axis.",
+            "description": "Where a joint origin sits on its component's geometry, as saved. For between_faces, a and b each hold a pick and a persistent face name. For sketch_point, sketch is the sketch feature id and point is the point reference string. Points and directions are [x, y, z].",
             "type": "object",
             "properties": {
-                "type": {"enum": ["frame", "face_center", "circle_center", "edge", "point", "sketch_point"]},
+                "type": {"enum": ["frame", "face_center", "circle_center", "edge", "point", "plane", "between_faces", "axis", "sketch_point"]},
+                "a": face_pick, "b": face_pick,
                 "origin": point, "pick": point, "z": point,
                 "point": {"anyOf": [point, {"type": "string"}]},
                 "sketch": {"type": "integer", "minimum": 0},
@@ -2277,6 +2307,7 @@ fn secondary_axis_origin_schema() -> Value {
 }
 
 fn check_secondary_axis_request(v: &Value) -> Result<(), String> {
+    faces_param(v)?;
     if v.get("x").is_some_and(|x| x.get("reference").is_some() || x.get("planar_face").is_some()) {
         let m = v.as_object().ok_or("a secondary axis needs an origin object")?;
         MakeJointOriginParams::check(m)?;
@@ -2405,6 +2436,11 @@ pub struct MakeJointOriginParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "OriginFace")]
     pub face: Option<Value>,
+    /// Two distinct parallel planar faces of one occurrence, a world point on each. Defines the
+    /// midplane, independent of their order. Do not also give another reference, `x` or `z`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "[WorldPoint; 2]")]
+    pub faces: Option<Value>,
     /// The centre of a round end: a point on its wall or rim, the end's centre, or the round
     /// face's name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2476,12 +2512,29 @@ pub struct MakeJointOriginParams {
     pub body: Option<String>,
 }
 
+/// With `faces`, no other primary reference or custom axis applies.
+fn between_faces_origin_schema() -> Value {
+    json!({"anyOf": [
+        {"not": {"required": ["faces"]}},
+        {
+            "required": ["faces"],
+            "not": {"anyOf": [
+                {"required": ["face"]}, {"required": ["circle"]}, {"required": ["edge"]},
+                {"required": ["point"]}, {"required": ["frame"]}, {"required": ["plane"]},
+                {"required": ["axis"]}, {"required": ["sketch"]}, {"required": ["curve"]},
+                {"required": ["end"]}
+            ]},
+            "properties": {"x": {"type": "null"}, "z": {"type": "null"}}
+        }
+    ]})
+}
+
 fn origin_required(schema: &mut Schema) {
-    schema.insert("allOf".into(), json!([secondary_axis_origin_schema()]));
+    schema.insert("allOf".into(), json!([secondary_axis_origin_schema(), between_faces_origin_schema()]));
     // The handler refuses a call with none of them.
     schema.insert(
         "anyOf".into(),
-        json!([{"required": ["face"]}, {"required": ["circle"]}, {"required": ["edge"]}, {"required": ["point"]}, {"required": ["sketch"]}, {"required": ["plane"]}, {"required": ["axis"]}, {"required": ["frame"]}]),
+        json!([{"required": ["face"]}, {"required": ["circle"]}, {"required": ["edge"]}, {"required": ["point"]}, {"required": ["sketch"]}, {"required": ["plane"]}, {"required": ["axis"]}, {"required": ["frame"]}, {"required": ["faces"]}]),
     );
 }
 
@@ -2551,6 +2604,11 @@ fn origin_point(v: Option<&Value>, message: &str) -> Result<(), String> {
     }
 }
 
+fn check_between_faces_origin(m: &Map<String, Value>) -> Result<(), String> {
+    m.get("occurrence").map(OccurrenceKey::read).transpose()?;
+    origin_end(m, false)
+}
+
 impl MakeJointOriginParams {
     /// The keys `origin_param` reads, in the cases it reads them, in the order it reads them.
     fn check(m: &Map<String, Value>) -> Result<(), String> {
@@ -2560,6 +2618,9 @@ impl MakeJointOriginParams {
         // Then the path, by the same rule `occurrence.move` uses; `null` is left out.
         if let Some(path) = m.get("path").filter(|p| !p.is_null()) {
             OccurrencePath::deserialize(path).map_err(|_| "`path` must list 1..64 occurrence ids")?;
+        }
+        if faces_from_fields(|k| m.get(k))?.is_some() {
+            return check_between_faces_origin(m);
         }
         // A sketch-point origin: {sketch: id|name, point: "<id>" | curve: "<id>", occurrence?, path?, x?}.
         if m.get("sketch").is_some() {
@@ -2661,6 +2722,7 @@ impl<'de> Deserialize<'de> for MakeJointOriginParams {
             // Read by the handler's path parser, which `occurrence.move` shares.
             path: raw("path"),
             face: raw("face"),
+            faces: raw("faces"),
             circle: raw("circle"),
             edge: raw("edge"),
             point: raw("point"),

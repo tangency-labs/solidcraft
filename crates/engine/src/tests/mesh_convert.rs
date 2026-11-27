@@ -1222,6 +1222,43 @@ fn converted_face_extrusion_keeps_its_source_bound_profile_across_reopen_and_und
     check(&Session::new(Document::from_json(&s.doc.to_json()).unwrap()), false);
 }
 
+/// #22924: opening the lock file SolidCraft keeps beside an open design says what it is and
+/// which design to open, not that an importer could read it.
+#[test]
+fn open_names_the_design_a_lock_file_belongs_to() {
+    use solidcraft_io::design_lock;
+    let dir = std::env::temp_dir().join(format!("solidcraft-open-lock-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let design = dir.join("hemisphere.sc");
+    let lock = design_lock::lock_path(&design);
+    let open_any = || Session::default().execute("doc.open", &json!({"path": lock.to_string_lossy()})).unwrap_err().to_string();
+    let open = || {
+        let error = open_any();
+        assert!(error.contains("lock file for hemisphere.sc") && error.contains("Open hemisphere.sc instead"), "{error}");
+        assert!(!error.contains("export STEP") && !error.contains("importer plugin"), "{error}");
+        error
+    };
+    let mut held = design_lock::Lock::mine(design_lock::now_secs());
+    held.host = "workshop-pc".into();
+    design_lock::write(&design, &held).unwrap();
+    let error = open();
+    assert!(error.contains("open in SolidCraft on workshop-pc"), "{error}");
+    // Outside the folders the caller may use, the lock is not read to say who holds it.
+    let refused = solidcraft_io::vfs::scoped(Some(Default::default()), open_any);
+    assert!(!refused.contains("workshop-pc"), "{refused}");
+    // A lock left by a crash says nothing about who has the design open now.
+    held.refreshed = 0;
+    design_lock::write(&design, &held).unwrap();
+    let error = open();
+    assert!(!error.contains("workshop-pc"), "{error}");
+    // Another program's file with such a name is not called SolidCraft's.
+    let other = dir.join(".~report.xlsx.lock");
+    std::fs::write(&other, b"someone").unwrap();
+    let error = Session::default().execute("doc.open", &json!({"path": other.to_string_lossy()})).unwrap_err().to_string();
+    assert!(error.contains("can't open .lock files"), "{error}");
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 /// #18465: a file of another CAD program (a zip as a `.f3d`, text as a `.x_t`) is not a design;
 /// Open says it does not open that kind of file, not what the design reader made of it. A design
 /// under its own extension keeps the reader's words, and a design under an odd name still opens.

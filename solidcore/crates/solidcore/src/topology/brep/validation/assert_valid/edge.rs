@@ -88,6 +88,24 @@ pub(super) fn curve(
     )
 }
 
+/// Materializes any missing NURB cached on `c` before [`curve_readonly_in_walk`] runs
+/// (the only mutation the virtual curve check performs).
+fn ensure_curve_nurb(k: &Kernel, c: &mut Curve, level: u8) -> Result<()> {
+    let given = level == super::LEVEL_GIVEN;
+    let owner = c.owner();
+    match c.kind_mut() {
+        CurveKind::Line(x) if !given => x.ensure_nurb_for_assert(),
+        CurveKind::Ellipse(x) if !given => x.ensure_nurb_for_assert(k),
+        CurveKind::Parabola(x) if x.base().nurb.is_none() => {
+            crate::error::ignored(x.make_nurb(owner)).map(|_| ())
+        }
+        CurveKind::Hyperbola(x) if x.base().nurb.is_none() => {
+            crate::error::ignored(x.make_nurb(owner)).map(|_| ())
+        }
+        _ => Ok(()),
+    }
+}
+
 /// [`curve`] within the walk `walk` over an outer curve's contained objects.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn curve_in_walk(
@@ -101,21 +119,71 @@ pub(super) fn curve_in_walk(
     edge_ends: Option<&EdgeEnds>,
     walk: &mut curves::Walk,
 ) -> Result<bool> {
+    ensure_curve_nurb(k, c, level)?;
+    curve_readonly_in_walk(
+        k,
+        c,
+        list,
+        level,
+        key,
+        polar_key,
+        trim_surface,
+        edge_ends,
+        walk,
+    )
+}
+
+/// Read-only virtual curve check, once [`ensure_curve_nurb`] has materialized any
+/// missing NURB on `c`. Takes `&Curve` so callers can borrow surfaces directly from
+/// `&Brep` and evaluate multiple edges in parallel.
+#[allow(clippy::too_many_arguments)]
+fn curve_readonly(
+    k: &Kernel,
+    c: &Curve,
+    list: Option<&mut AssertArray>,
+    level: u8,
+    key: ObjectKey,
+    polar_key: ObjectKey,
+    trim_surface: Option<&Surface>,
+    edge_ends: Option<&EdgeEnds>,
+) -> Result<bool> {
+    let mut walk = curves::Walk::new(key);
+    curve_readonly_in_walk(
+        k,
+        c,
+        list,
+        level,
+        key,
+        polar_key,
+        trim_surface,
+        edge_ends,
+        &mut walk,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn curve_readonly_in_walk(
+    k: &Kernel,
+    c: &Curve,
+    list: Option<&mut AssertArray>,
+    level: u8,
+    key: ObjectKey,
+    polar_key: ObjectKey,
+    trim_surface: Option<&Surface>,
+    edge_ends: Option<&EdgeEnds>,
+    walk: &mut curves::Walk,
+) -> Result<bool> {
     let given = level == super::LEVEL_GIVEN;
-    let owner = c.owner();
     let mut list = list;
-    match c.kind_mut() {
+    match c.kind() {
         CurveKind::BSpline(x) => {
             x.assert_valid_on_edge(k, list, given, key, trim_surface, edge_ends)
         }
-        CurveKind::Line(x) => x.assert_valid_on(k, list, given, key, trim_surface),
-        CurveKind::Ellipse(x) => x.assert_valid_on(k, list, given, key, polar_key, trim_surface),
+        CurveKind::Line(x) => x.assert_valid_on_prepared(k, list, given, key, trim_surface),
+        CurveKind::Ellipse(x) => {
+            x.assert_valid_on_prepared(k, list, given, key, polar_key, trim_surface)
+        }
         CurveKind::Parabola(x) => {
-            // SmBSplineCurve::AssertValid builds a missing NURB (virtual MakeNurb,
-            // status ignored) after the SmCurve base check, which does not read it
-            if x.base().nurb.is_none() {
-                crate::error::ignored(x.make_nurb(owner))?;
-            }
             let analytic = x.is_analytic();
             let bounded = x.is_bounded();
             let base = x.base();
@@ -136,9 +204,6 @@ pub(super) fn curve_in_walk(
             )
         }
         CurveKind::Hyperbola(x) => {
-            if x.base().nurb.is_none() {
-                crate::error::ignored(x.make_nurb(owner))?;
-            }
             let analytic = x.is_analytic();
             let bounded = x.is_bounded();
             let base = x.base();
@@ -245,9 +310,21 @@ fn faces_tangent_at(k: &Kernel, b: &Brep, e: EdgeId, edge_end: f64) -> Result<bo
 }
 
 /// Runs the edge's curve check through [`curve`] on the curve held by the edge.
-fn edge_curve_check(k: &Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> Result<bool> {
+fn edge_curve_check(
+    k: &Kernel,
+    b: &mut Brep,
+    cx: &mut Cx<'_>,
+    e: EdgeId,
+    ends: Option<&EdgeEnds>,
+) -> Result<bool> {
     let level = cx.rep.level;
-    let ends = edge_ends(k, b, e)?;
+    let computed;
+    let ends = if let Some(ends) = ends {
+        ends
+    } else {
+        computed = edge_ends(k, b, e)?;
+        &computed
+    };
     let list = cx.rep.array.as_deref_mut();
     let Some(c) = b.edge_mut(e)?.curve.as_mut() else {
         return Ok(true);
@@ -260,7 +337,7 @@ fn edge_curve_check(k: &Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> Res
         geometry_key(20001, e.index()),
         geometry_key(20004, e.index()),
         None,
-        Some(&ends),
+        Some(ends),
     )
 }
 
@@ -294,13 +371,24 @@ pub(super) fn edge(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> 
     // body before are skipped ([`crate::geom::check_memo`]); the structural ones run
     let geo = !crate::geom::check_memo::edge_clean(k, e);
 
+    // Check all connected Edgeuses (precompute `edge_ends` once for the edge and all its
+    // edgeuses instead of recomputing it per edgeuse).
+    let edgeuses = b.edge(e)?.edgeuses.clone();
+    let shared_ends = if geo
+        && (has_curve
+            || edgeuses
+                .iter()
+                .any(|&eu| b.edgeuse(eu).is_ok_and(|r| r.uv_trim_curve.is_some())))
+    {
+        Some(edge_ends(k, b, e)?)
+    } else {
+        None
+    };
+
     // Check Edge->Curve
     if has_curve && geo {
-        rtn &= edge_curve_check(k, b, cx, e)?;
+        rtn &= edge_curve_check(k, b, cx, e, shared_ends.as_ref())?;
     }
-
-    // Check all connected Edgeuses
-    let edgeuses = b.edge(e)?.edgeuses.clone();
 
     // 3: Edges must have uses
     rtn &= cx
@@ -310,7 +398,7 @@ pub(super) fn edge(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> 
     // B-rep is unwritten (see [`Binormals`])
     let mut binormals = Binormals::default();
     for &eu in &edgeuses {
-        rtn &= edgeuse(k, b, cx, eu, &mut binormals)?;
+        rtn &= edgeuse(k, b, cx, eu, &mut binormals, Some(e), shared_ends.as_ref())?;
     }
 
     let edge_tol = tedge::tolerance(b, e)?;
@@ -816,13 +904,15 @@ fn edgeuse_geometry_due(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<bool> {
 }
 
 /// `SmEdgeuse::AssertValid(SM_NO_WALK)`.
-#[allow(clippy::too_many_lines)]
-pub(super) fn edgeuse(
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+fn edgeuse(
     k: &mut Kernel,
     b: &mut Brep,
     cx: &mut Cx<'_>,
     eu: EdgeuseId,
     binormals: &mut Binormals,
+    parent_edge: Option<EdgeId>,
+    parent_ends: Option<&EdgeEnds>,
 ) -> Result<bool> {
     const C: i64 = class::EDGEUSE;
     let this = EntityRef::Edgeuse(eu);
@@ -1013,33 +1103,40 @@ pub(super) fn edgeuse(
     // when Edgeuse has a UVTrimCurve - Check that it's valid
     if has_trim && geo {
         let level = cx.rep.level;
+        // Ensure any missing NURB on the trim curve first so the check itself borrows
+        // both the curve and the face's surface immutably without cloning the surface.
+        if let Some(c) = b.edgeuse_mut(eu)?.uv_trim_curve.as_mut() {
+            ensure_curve_nurb(k, c, level)?;
+        }
         // not upstream (WR-560): the trim is measured on its face's surface
         // (`GetEdgeuse()->GetFace()->GetSurface()`)
         let trim_surface = match eu1::face(b, eu)? {
-            Some(f) => b
-                .face(f)?
-                .surface
-                .as_ref()
-                .map(Surface::clone_for_evaluation)
-                .transpose()?,
+            Some(f) => b.face(f)?.surface.as_ref(),
             None => None,
         };
         // not upstream (WR-668): the trim's edge (`GetEdgeuse()->GetEdge()`)
-        let ends = match eu1::edge(b, eu)? {
+        let eu_edge = eu1::edge(b, eu)?;
+        let computed_ends = match eu_edge {
+            Some(e) if parent_edge == Some(e) && parent_ends.is_some() => None,
             Some(e) => Some(edge_ends(k, b, e)?),
             None => None,
         };
+        let ends = match eu_edge {
+            Some(e) if parent_edge == Some(e) && parent_ends.is_some() => parent_ends,
+            Some(_) => computed_ends.as_ref(),
+            None => None,
+        };
         let list = cx.rep.array.as_deref_mut();
-        if let Some(c) = b.edgeuse_mut(eu)?.uv_trim_curve.as_mut() {
-            rtn &= curve(
+        if let Some(c) = b.edgeuse(eu)?.uv_trim_curve.as_ref() {
+            rtn &= curve_readonly(
                 k,
                 c,
                 list,
                 level,
                 geometry_key(20003, eu.index()),
                 geometry_key(20005, eu.index()),
-                trim_surface.as_ref(),
-                ends.as_ref(),
+                trim_surface,
+                ends,
             )?;
         }
     }
