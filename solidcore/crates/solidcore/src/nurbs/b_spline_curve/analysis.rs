@@ -40,9 +40,6 @@ const MEMO_MAX_POINTS: usize = 4096;
 /// solutions' start ends.
 pub(crate) type AnalysisResult = (bool, Vec<SolutionEnd>);
 
-/// Shared read-only map snapshot for parallel validation workers.
-pub(crate) type AnalysisSnapshot = Arc<HashMap<Arc<[u64]>, Arc<AnalysisResult>>>;
-
 /// The results of `AssertValid`'s global property analyses, by the exact content of
 /// what they depend on ([`analysis_key`]): an unchanged curve checked again gets the
 /// result it got before. The key is the content bit for bit, never an address, so a
@@ -52,47 +49,17 @@ pub(crate) type AnalysisSnapshot = Arc<HashMap<Arc<[u64]>, Arc<AnalysisResult>>>
 pub struct AnalysisMemo {
     results: HashMap<Arc<[u64]>, Arc<AnalysisResult>>,
     order: VecDeque<Arc<[u64]>>,
-    /// Optional read-only parent snapshot shared across scoped worker threads during
-    /// parallel B-rep validation so workers hit already-cached curves without locking.
-    parent: Option<AnalysisSnapshot>,
 }
 
 impl AnalysisMemo {
-    /// Whether this memo holds no local entries.
-    #[cfg(any(not(target_arch = "wasm32"), test))]
-    #[must_use]
-    pub(crate) fn is_empty(&self) -> bool {
-        self.results.is_empty()
-    }
-
-    /// Cheap ref-counted snapshot of local entries for read-only worker lookup.
-    #[cfg(any(not(target_arch = "wasm32"), test))]
-    #[must_use]
-    pub(crate) fn snapshot(&self) -> AnalysisSnapshot {
-        Arc::new(self.results.clone())
-    }
-
-    /// Attaches a read-only parent snapshot (used by scoped parallel workers).
-    #[cfg(any(not(target_arch = "wasm32"), test))]
-    pub(crate) fn set_parent(&mut self, parent: Option<AnalysisSnapshot>) {
-        self.parent = parent;
-    }
-
     /// The result kept for `key`.
     pub(crate) fn get(&self, key: &[u64]) -> Option<Arc<AnalysisResult>> {
-        self.results
-            .get(key)
-            .or_else(|| self.parent.as_ref().and_then(|p| p.get(key)))
-            .cloned()
+        self.results.get(key).cloned()
     }
 
     /// Keeps `result` for `key`, dropping the oldest result past [`MEMO_CAPACITY`].
     pub(crate) fn insert(&mut self, key: Vec<u64>, result: AnalysisResult) {
         let key: Arc<[u64]> = Arc::from(key);
-        self.insert_arc(key, Arc::new(result));
-    }
-
-    fn insert_arc(&mut self, key: Arc<[u64]>, result: Arc<AnalysisResult>) {
         if self.results.contains_key(&key) {
             return;
         }
@@ -105,17 +72,7 @@ impl AnalysisMemo {
             }
         }
         self.order.push_back(Arc::clone(&key));
-        self.results.insert(key, result);
-    }
-
-    /// Merges entries recorded by a worker memo into `self` in deterministic FIFO order.
-    #[cfg(any(not(target_arch = "wasm32"), test))]
-    pub(crate) fn merge_from(&mut self, other: &Self) {
-        for key in &other.order {
-            if let Some(result) = other.results.get(key) {
-                self.insert_arc(Arc::clone(key), Arc::clone(result));
-            }
-        }
+        self.results.insert(key, Arc::new(result));
     }
 }
 
@@ -175,22 +132,5 @@ mod tests {
         assert!(memo.get(&[0]).is_none() && memo.get(&[1]).is_none());
         assert!(memo.get(&[2]).is_some());
         assert_eq!(memo.results.len(), MEMO_CAPACITY);
-    }
-
-    #[test]
-    fn parent_snapshot_and_merge_from_preserve_cached_entries() {
-        let mut parent = AnalysisMemo::default();
-        parent.insert(vec![10, 20], (true, Vec::new()));
-        let snap = parent.snapshot();
-
-        let mut worker = AnalysisMemo::default();
-        worker.set_parent(Some(snap));
-        assert!(worker.get(&[10, 20]).is_some());
-        assert!(worker.get(&[30, 40]).is_none());
-        worker.insert(vec![30, 40], (false, Vec::new()));
-
-        parent.merge_from(&worker);
-        assert!(parent.get(&[10, 20]).is_some());
-        assert_eq!(parent.get(&[30, 40]).map(|r| r.0), Some(false));
     }
 }

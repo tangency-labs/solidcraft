@@ -2535,7 +2535,8 @@ impl BSplineCurve {
                 // has no solution the test below could fail, so the search is not run
                 let (first_derivs_ok, sols) = if bounds.is_some_and(|b| bound_clears(b.speed, tol))
                     || (k.memoize_curve_caches
-                        && linear_bspline_min_speed(self, &domain).is_some_and(|s| s >= tol))
+                        && linear_bspline_min_speed(self, &domain)
+                            .is_some_and(|s| bound_clears(s, tol)))
                 {
                     (true, Vec::new())
                 } else {

@@ -724,16 +724,9 @@ fn sub_topology(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>) -> Result<bool> {
         k.check_cancelled(OP)?;
         rtn &= loops::loop_(k, b, cx, l)?;
     }
-    let mut prechecked_edges =
-        edge::precheck_edges(k, b, &edges, cx.rep.level, cx.rep.array.is_some())?;
-    for (idx, e) in edges.into_iter().enumerate() {
+    for e in edges {
         k.check_cancelled(OP)?;
-        let precheck = prechecked_edges
-            .as_mut()
-            .and_then(|v| v.get_mut(idx))
-            .and_then(Option::take)
-            .transpose()?;
-        rtn &= edge::edge_with_precheck(k, b, cx, e, precheck)?;
+        rtn &= edge::edge(k, b, cx, e)?;
     }
     for v in vertices {
         k.check_cancelled(OP)?;

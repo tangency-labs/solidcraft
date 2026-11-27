@@ -237,277 +237,6 @@ fn curve_readonly_in_walk(
     }
 }
 
-/// Pre-evaluated read-only curve check output for deterministic replay into `Cx`.
-pub(super) struct CurveCheckOutput {
-    ok: bool,
-    reports: Option<AssertArray>,
-}
-
-/// Pre-evaluated 3D edge curve and UV trim curve checks for one edge.
-pub(super) struct EdgeCurvePrecheck {
-    edge_curve: Option<CurveCheckOutput>,
-    trim_curves: BTreeMap<EdgeuseId, CurveCheckOutput>,
-}
-
-fn replay_curve_output(cx: &mut Cx<'_>, out: CurveCheckOutput) -> bool {
-    if let (Some(dst), Some(local)) = (cx.rep.array.as_deref_mut(), out.reports) {
-        for report in local.reports() {
-            dst.add_unique_delete_duplicate(report.clone());
-        }
-        dst.set_last_add(local.last_add());
-    }
-    out.ok
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn precheck_one_edge(
-    k: &Kernel,
-    b: &Brep,
-    e: EdgeId,
-    level: u8,
-    want_reports: bool,
-) -> Result<EdgeCurvePrecheck> {
-    let edge_rec = b.edge(e)?;
-    let has_curve = edge_rec.curve.is_some();
-    let edgeuses = &edge_rec.edgeuses;
-    let mut any_trim = false;
-    for &eu in edgeuses {
-        if b.edgeuse(eu)?.uv_trim_curve.is_some() {
-            any_trim = true;
-            break;
-        }
-    }
-    let shared_ends = if has_curve || any_trim {
-        Some(edge_ends(k, b, e)?)
-    } else {
-        None
-    };
-
-    let edge_curve = if let Some(c) = edge_rec.curve.as_ref() {
-        let mut local = want_reports.then(AssertArray::new);
-        let ok = curve_readonly(
-            k,
-            c,
-            local.as_mut(),
-            level,
-            geometry_key(20001, e.index()),
-            geometry_key(20004, e.index()),
-            None,
-            shared_ends.as_ref(),
-        )?;
-        Some(CurveCheckOutput { ok, reports: local })
-    } else {
-        None
-    };
-
-    let mut trim_curves = BTreeMap::new();
-    for &eu in edgeuses {
-        if b.edgeuse(eu)?.edge != Some(e) && b.edgeuse(eu)?.edge.is_some() {
-            continue;
-        }
-        let Some(c) = b.edgeuse(eu)?.uv_trim_curve.as_ref() else {
-            continue;
-        };
-        let trim_surface = match eu1::face(b, eu)? {
-            Some(f) => b.face(f)?.surface.as_ref(),
-            None => None,
-        };
-        let ends = if b.edgeuse(eu)?.edge == Some(e) {
-            shared_ends.as_ref()
-        } else {
-            None
-        };
-        let mut local = want_reports.then(AssertArray::new);
-        let ok = curve_readonly(
-            k,
-            c,
-            local.as_mut(),
-            level,
-            geometry_key(20003, eu.index()),
-            geometry_key(20005, eu.index()),
-            trim_surface,
-            ends,
-        )?;
-        trim_curves.insert(eu, CurveCheckOutput { ok, reports: local });
-    }
-
-    Ok(EdgeCurvePrecheck {
-        edge_curve,
-        trim_curves,
-    })
-}
-
-/// Pre-evaluates the expensive read-only edge curve and UV trim curve checks across
-/// dirty `edges` in parallel when the body is large enough and multiple threads are
-/// available (not upstream). Returns `None` on wasm32, single-core hosts, poll-counting
-/// cancellation/fuel tokens, or small dirty-edge counts. Errors are stored per-edge so
-/// the serial replay loop reports the first error in exact native edge order.
-#[cfg(not(target_arch = "wasm32"))]
-pub(super) fn precheck_edges(
-    k: &mut Kernel,
-    b: &mut Brep,
-    edges: &[EdgeId],
-    level: u8,
-    want_reports: bool,
-) -> Result<Option<Vec<Option<Result<EdgeCurvePrecheck>>>>> {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
-
-    const PARALLEL_EDGE_THRESHOLD: usize = 16;
-    const OP_PRECHECK: &str = "topology::brep::validation::assert_valid::edge::precheck_edges";
-
-    if edges.len() < PARALLEL_EDGE_THRESHOLD
-        || k.cancel.as_ref().is_some_and(|c| c.polls().is_some())
-    {
-        return Ok(None);
-    }
-    let dirty: Vec<(usize, EdgeId)> = edges
-        .iter()
-        .copied()
-        .enumerate()
-        .filter(|&(_, e)| !crate::geom::check_memo::edge_clean(k, e))
-        .collect();
-    if dirty.len() < PARALLEL_EDGE_THRESHOLD {
-        return Ok(None);
-    }
-    let threads = std::thread::available_parallelism()
-        .map_or(1, usize::from)
-        .min(dirty.len() >> 2);
-    if threads < 2 {
-        return Ok(None);
-    }
-
-    // Materialize any missing NURB on dirty analytic curves once before read-only parallel work.
-    for &(_, e) in &dirty {
-        k.check_cancelled(OP_PRECHECK)?;
-        if let Some(c) = b.edge_mut(e)?.curve.as_mut() {
-            ensure_curve_nurb(k, c, level)?;
-        }
-        let edgeuses = b.edge(e)?.edgeuses.clone();
-        for eu in edgeuses {
-            if let Some(c) = b.edgeuse_mut(eu)?.uv_trim_curve.as_mut() {
-                ensure_curve_nurb(k, c, level)?;
-            }
-        }
-    }
-
-    let parent_memo = if k.memoize_curve_caches {
-        let memo = k.caches.curve_analysis.borrow();
-        (!memo.is_empty()).then(|| memo.snapshot())
-    } else {
-        None
-    };
-
-    let tolerances = k.tolerances;
-    let seed = k.seed;
-    let fixes = k.fixes;
-    let memoize = k.memoize_curve_caches;
-    let cancel = k.cancel.clone();
-    let blend_net_tol = k.blend_net_tolerance.get();
-    let prove_lazy_trim = k.caches.prove_lazy_trim_raise;
-    let b_ref: &Brep = &*b;
-    let dirty_ref: &[(usize, EdgeId)] = &dirty;
-    let next_idx = AtomicUsize::new(0);
-
-    let worker_outputs: Vec<_> = std::thread::scope(|scope| {
-        let mut handles = Vec::new();
-        let _ = handles.try_reserve(threads);
-        for _ in 0..threads {
-            let parent_memo = parent_memo.as_ref().map(Arc::clone);
-            let cancel = cancel.clone();
-            let next_idx = &next_idx;
-            handles.push(scope.spawn(move || {
-                let mut worker_k = Kernel::new(&crate::kernel::KernelOptions { tolerances, seed });
-                worker_k.fixes = fixes;
-                worker_k.memoize_curve_caches = memoize;
-                worker_k.cancel = cancel;
-                worker_k.blend_net_tolerance.set(blend_net_tol);
-                worker_k.caches.prove_lazy_trim_raise = prove_lazy_trim;
-                if let Some(parent) = parent_memo {
-                    worker_k
-                        .caches
-                        .curve_analysis
-                        .borrow_mut()
-                        .set_parent(Some(parent));
-                }
-                let mut results = Vec::new();
-                loop {
-                    if let Err(err) = worker_k.check_cancelled(OP_PRECHECK) {
-                        let d_idx = next_idx.fetch_add(1, Ordering::Relaxed);
-                        if let Some(&(orig_idx, _)) = dirty_ref.get(d_idx) {
-                            results.push((orig_idx, Err(err)));
-                        }
-                        break;
-                    }
-                    let d_idx = next_idx.fetch_add(1, Ordering::Relaxed);
-                    let Some(&(orig_idx, e)) = dirty_ref.get(d_idx) else {
-                        break;
-                    };
-                    let res = precheck_one_edge(&worker_k, b_ref, e, level, want_reports);
-                    results.push((orig_idx, res));
-                }
-                (
-                    results,
-                    worker_k.caches.curve_analysis.into_inner(),
-                    worker_k.upstream_ub_passed,
-                )
-            }));
-        }
-        let mut collected = Vec::new();
-        let _ = collected.try_reserve(handles.len());
-        for handle in handles {
-            if let Ok(out) = handle.join() {
-                collected.push(out);
-            }
-        }
-        collected
-    });
-
-    // If a worker panicked (which solidcore forbids), fall back cleanly to serial execution.
-    if worker_outputs.len() != threads {
-        return Ok(None);
-    }
-
-    let mut slots: Vec<Option<Result<EdgeCurvePrecheck>>> =
-        (0..edges.len()).map(|_| None).collect();
-    for (results, memo, ub) in worker_outputs {
-        if k.memoize_curve_caches {
-            k.caches.curve_analysis.borrow_mut().merge_from(&memo);
-        }
-        for id in ub {
-            k.note_upstream_ub(id);
-        }
-        for (orig_idx, res) in results {
-            if let Some(slot) = slots.get_mut(orig_idx) {
-                *slot = Some(res);
-            }
-        }
-    }
-
-    for &(orig_idx, e) in &dirty {
-        if let Some(slot) = slots.get_mut(orig_idx) {
-            if slot.is_none() {
-                // Only unvisited if cancellation stopped workers early.
-                k.check_cancelled(OP_PRECHECK)?;
-                *slot = Some(precheck_one_edge(k, b, e, level, want_reports));
-            }
-        }
-    }
-    Ok(Some(slots))
-}
-
-#[cfg(target_arch = "wasm32")]
-#[allow(clippy::unnecessary_wraps)]
-pub(super) fn precheck_edges(
-    _k: &mut Kernel,
-    _b: &mut Brep,
-    _edges: &[EdgeId],
-    _level: u8,
-    _want_reports: bool,
-) -> Result<Option<Vec<Option<Result<EdgeCurvePrecheck>>>>> {
-    Ok(None)
-}
-
 /// The membership sets the edge-use checks share across a run.
 #[derive(Default)]
 pub(super) struct EdgeSets {
@@ -612,15 +341,9 @@ fn edge_curve_check(
     )
 }
 
-/// `SmEdge::AssertValid(SM_NO_WALK)`, reusing optional pre-evaluated curve checks.
+/// `SmEdge::AssertValid(SM_NO_WALK)`.
 #[allow(clippy::too_many_lines)]
-pub(super) fn edge_with_precheck(
-    k: &mut Kernel,
-    b: &mut Brep,
-    cx: &mut Cx<'_>,
-    e: EdgeId,
-    mut precheck: Option<EdgeCurvePrecheck>,
-) -> Result<bool> {
+pub(super) fn edge(k: &mut Kernel, b: &mut Brep, cx: &mut Cx<'_>, e: EdgeId) -> Result<bool> {
     const C: i64 = class::EDGE;
     let this = EntityRef::Edge(e);
     let mut rtn = true;
@@ -649,10 +372,9 @@ pub(super) fn edge_with_precheck(
     let geo = !crate::geom::check_memo::edge_clean(k, e);
 
     // Check all connected Edgeuses (precompute `edge_ends` once for the edge and all its
-    // edgeuses on the serial path instead of recomputing it per edgeuse).
+    // edgeuses instead of recomputing it per edgeuse).
     let edgeuses = b.edge(e)?.edgeuses.clone();
     let shared_ends = if geo
-        && precheck.is_none()
         && (has_curve
             || edgeuses
                 .iter()
@@ -665,11 +387,7 @@ pub(super) fn edge_with_precheck(
 
     // Check Edge->Curve
     if has_curve && geo {
-        if let Some(out) = precheck.as_mut().and_then(|p| p.edge_curve.take()) {
-            rtn &= replay_curve_output(cx, out);
-        } else {
-            rtn &= edge_curve_check(k, b, cx, e, shared_ends.as_ref())?;
-        }
+        rtn &= edge_curve_check(k, b, cx, e, shared_ends.as_ref())?;
     }
 
     // 3: Edges must have uses
@@ -680,17 +398,7 @@ pub(super) fn edge_with_precheck(
     // B-rep is unwritten (see [`Binormals`])
     let mut binormals = Binormals::default();
     for &eu in &edgeuses {
-        let trim_precheck = precheck.as_mut().and_then(|p| p.trim_curves.remove(&eu));
-        rtn &= edgeuse_with_precheck(
-            k,
-            b,
-            cx,
-            eu,
-            &mut binormals,
-            Some(e),
-            shared_ends.as_ref(),
-            trim_precheck,
-        )?;
+        rtn &= edgeuse(k, b, cx, eu, &mut binormals, Some(e), shared_ends.as_ref())?;
     }
 
     let edge_tol = tedge::tolerance(b, e)?;
@@ -1197,7 +905,7 @@ fn edgeuse_geometry_due(k: &Kernel, b: &Brep, eu: EdgeuseId) -> Result<bool> {
 
 /// `SmEdgeuse::AssertValid(SM_NO_WALK)`.
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
-fn edgeuse_with_precheck(
+fn edgeuse(
     k: &mut Kernel,
     b: &mut Brep,
     cx: &mut Cx<'_>,
@@ -1205,7 +913,6 @@ fn edgeuse_with_precheck(
     binormals: &mut Binormals,
     parent_edge: Option<EdgeId>,
     parent_ends: Option<&EdgeEnds>,
-    trim_precheck: Option<CurveCheckOutput>,
 ) -> Result<bool> {
     const C: i64 = class::EDGEUSE;
     let this = EntityRef::Edgeuse(eu);
@@ -1395,46 +1102,42 @@ fn edgeuse_with_precheck(
 
     // when Edgeuse has a UVTrimCurve - Check that it's valid
     if has_trim && geo {
-        if let Some(out) = trim_precheck {
-            rtn &= replay_curve_output(cx, out);
-        } else {
-            let level = cx.rep.level;
-            // Ensure any missing NURB on the trim curve first so the check itself borrows
-            // both the curve and the face's surface immutably without cloning the surface.
-            if let Some(c) = b.edgeuse_mut(eu)?.uv_trim_curve.as_mut() {
-                ensure_curve_nurb(k, c, level)?;
-            }
-            // not upstream (WR-560): the trim is measured on its face's surface
-            // (`GetEdgeuse()->GetFace()->GetSurface()`)
-            let trim_surface = match eu1::face(b, eu)? {
-                Some(f) => b.face(f)?.surface.as_ref(),
-                None => None,
-            };
-            // not upstream (WR-668): the trim's edge (`GetEdgeuse()->GetEdge()`)
-            let eu_edge = eu1::edge(b, eu)?;
-            let computed_ends = match eu_edge {
-                Some(e) if parent_edge == Some(e) && parent_ends.is_some() => None,
-                Some(e) => Some(edge_ends(k, b, e)?),
-                None => None,
-            };
-            let ends = match eu_edge {
-                Some(e) if parent_edge == Some(e) && parent_ends.is_some() => parent_ends,
-                Some(_) => computed_ends.as_ref(),
-                None => None,
-            };
-            let list = cx.rep.array.as_deref_mut();
-            if let Some(c) = b.edgeuse(eu)?.uv_trim_curve.as_ref() {
-                rtn &= curve_readonly(
-                    k,
-                    c,
-                    list,
-                    level,
-                    geometry_key(20003, eu.index()),
-                    geometry_key(20005, eu.index()),
-                    trim_surface,
-                    ends,
-                )?;
-            }
+        let level = cx.rep.level;
+        // Ensure any missing NURB on the trim curve first so the check itself borrows
+        // both the curve and the face's surface immutably without cloning the surface.
+        if let Some(c) = b.edgeuse_mut(eu)?.uv_trim_curve.as_mut() {
+            ensure_curve_nurb(k, c, level)?;
+        }
+        // not upstream (WR-560): the trim is measured on its face's surface
+        // (`GetEdgeuse()->GetFace()->GetSurface()`)
+        let trim_surface = match eu1::face(b, eu)? {
+            Some(f) => b.face(f)?.surface.as_ref(),
+            None => None,
+        };
+        // not upstream (WR-668): the trim's edge (`GetEdgeuse()->GetEdge()`)
+        let eu_edge = eu1::edge(b, eu)?;
+        let computed_ends = match eu_edge {
+            Some(e) if parent_edge == Some(e) && parent_ends.is_some() => None,
+            Some(e) => Some(edge_ends(k, b, e)?),
+            None => None,
+        };
+        let ends = match eu_edge {
+            Some(e) if parent_edge == Some(e) && parent_ends.is_some() => parent_ends,
+            Some(_) => computed_ends.as_ref(),
+            None => None,
+        };
+        let list = cx.rep.array.as_deref_mut();
+        if let Some(c) = b.edgeuse(eu)?.uv_trim_curve.as_ref() {
+            rtn &= curve_readonly(
+                k,
+                c,
+                list,
+                level,
+                geometry_key(20003, eu.index()),
+                geometry_key(20005, eu.index()),
+                trim_surface,
+                ends,
+            )?;
         }
     }
 
