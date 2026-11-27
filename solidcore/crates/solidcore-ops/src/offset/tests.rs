@@ -2729,9 +2729,9 @@ mod drafts {
     /// `Error::Unsupported`, and leaves the body untouched.
     #[test]
     fn a_cylinder_drafted_until_it_closes_is_refused_with_the_reason() {
-        all_fixes();
         // 6 degrees in radians (6 * pi / 180)
         const SIX: f64 = 0.104_719_755_119_659_78;
+        all_fixes();
         let c = make_cylinder([0.0; 3], 10.0, 100.0).unwrap();
         let o = order(&c);
         let before = c.to_smb(false).unwrap();
