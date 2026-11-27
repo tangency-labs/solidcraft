@@ -604,6 +604,24 @@ impl BackendGuard {
         (guard, skipped)
     }
 
+    /// [`Self::begin`] for standard startup (`gpu_startup`), which names an API on disk only while
+    /// Intel's Vulkan driver creates the window's device on Windows
+    /// (`gpu_startup::guards_device_creation`): a launch that left no attempt file behind writes
+    /// nothing, and only reads the APIs that crashed this version before. APIs whose window failed
+    /// to start are not skipped: standard startup goes to the software renderer instead.
+    pub fn begin_standard(dir: &Path, graphics_path: &Path, version: &str) -> (Self, SkippedBackends) {
+        let marker = dir.join(GRAPHICS_ATTEMPT);
+        if marker.exists() {
+            let (guard, skipped) = Self::begin(dir, graphics_path, version);
+            return (guard, SkippedBackends { crashed: skipped.crashed, failed: eframe::wgpu::Backends::empty() });
+        }
+        let crashed = read_backend_settings(graphics_path).map(|graphics| crashed_backends(&graphics, version)).unwrap_or_else(|reason| {
+            log::warn!("graphics: {reason}");
+            eframe::wgpu::Backends::empty()
+        });
+        (Self { marker, version: version.into() }, SkippedBackends { crashed, failed: eframe::wgpu::Backends::empty() })
+    }
+
     /// `backends` are about to be started: say so on disk first, flushed.
     pub fn attempt(&self, backends: eframe::wgpu::Backends) {
         let text = attempt_text(backends, &self.version);
@@ -1448,6 +1466,32 @@ mod tests {
         assert_eq!(backend_settings(&path), serde_json::json!({"msaa": 4, "crashed_backends": {"vulkan": "0.44.2"}}));
         let (_, skipped) = BackendGuard::begin(&dir, &path, "0.44.2");
         assert_eq!(skipped.crashed, Backends::VULKAN, "skipped from then on");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #22110: standard startup writes nothing on a launch that left no attempt behind (every
+    /// machine but Windows on Intel's Vulkan driver), and still learns from one that died while
+    /// Intel's Vulkan driver created the device: Vulkan is skipped by this version from then on.
+    #[test]
+    fn standard_startup_writes_nothing_until_a_guarded_device_crashed() {
+        use eframe::wgpu::Backends;
+        let dir = scratch("backend-guard-standard");
+        let path = dir.join("graphics.json");
+        std::fs::write(&path, r#"{"msaa":4,"failed_backends":{"dx12":"0.50.1"}}"#).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let (guard, skipped) = BackendGuard::begin_standard(&dir, &path, "0.50.1");
+        assert_eq!(skipped, SkippedBackends::default(), "nothing crashed; a failed window is not skipped");
+        assert_eq!(std::fs::read(&path).unwrap(), before, "graphics.json is not rewritten");
+        assert!(!dir.join(GRAPHICS_ATTEMPT).exists());
+        // The process dies while Intel's Vulkan driver creates the window's device.
+        guard.attempt(Backends::VULKAN);
+        let (_, skipped) = BackendGuard::begin_standard(&dir, &path, "0.50.1");
+        assert_eq!(skipped, SkippedBackends { crashed: Backends::VULKAN, failed: Backends::empty() });
+        assert!(!dir.join(GRAPHICS_ATTEMPT).exists(), "the leftover is read once");
+        let (_, skipped) = BackendGuard::begin_standard(&dir, &path, "0.50.1");
+        assert_eq!(skipped.crashed, Backends::VULKAN, "skipped from then on");
+        let (_, skipped) = BackendGuard::begin_standard(&dir, &path, "0.51.0");
+        assert_eq!(skipped, SkippedBackends::default(), "a new version tries Vulkan once more");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
