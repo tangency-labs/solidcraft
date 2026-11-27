@@ -450,7 +450,14 @@ fn write_container(
         return Err(cancelled());
     }
     native_cache::take_last_cache_refusal();
-    let cache = geometry.and_then(|g| native_cache::encode_model(g, &metadata, writer.space(2, budget)).ok());
+    let cache = match geometry {
+        Some(g) => match native_cache::encode_model_with_budget(g, &metadata, writer.file_space(2, budget), writer.expanded_space(2)) {
+            Ok(cache) => Some(cache),
+            Err(_) if crate::safe_write::cancelled() => return Err(cancelled()),
+            Err(_) => None,
+        },
+        None => None,
+    };
     if let Some((manifest, data)) = cache {
         native_cache::take_last_cache_refusal();
         let [manifest_entry, payload_entry] = native_cache::ENTRIES;
@@ -2980,6 +2987,67 @@ mod tests {
         assert!(all > space);
         let (manifest, _) = native_cache::encode_model(&model, document, space).unwrap();
         assert_eq!(kept_states(&serde_json::from_slice::<Value>(&manifest).unwrap()["model"]), vec![false, false, false, true]);
+    }
+
+    /// #18815: the design file budget is checked against the Deflate-compressed cache size, while
+    /// still enforcing the reader's unpacked expanded-package budget so opening never fails with
+    /// `expanded package too large`.
+    #[test]
+    fn model_cache_budget_uses_compressed_size_while_enforcing_expanded_limit() {
+        // Part 1: multi-state B-rep cache whose uncompressed size exceeds `file_space`, while its
+        // Deflate-compressed size fits cleanly within `file_space` and unpacked fits `expanded_space`.
+        let model = timeline_model();
+        let doc_bytes = b"{}";
+        let (full_manifest, full_payload) = native_cache::encode_model(&model, doc_bytes, usize::MAX).unwrap();
+        let raw = full_manifest.len() + full_payload.len();
+        let [manifest_entry, payload_entry] = native_cache::ENTRIES;
+        let compressed =
+            native_cache::deflated_len(&full_manifest, manifest_entry).unwrap() + native_cache::deflated_len(&full_payload, payload_entry).unwrap();
+        assert!(compressed * 2 < raw, "B-rep cache compresses significantly: {compressed} vs {raw}");
+
+        let file_space = compressed + (raw - compressed) / 2;
+        assert!(compressed < file_space && file_space < raw);
+        let (kept_manifest, kept_payload) = native_cache::encode_model_with_budget(&model, doc_bytes, file_space, raw).unwrap();
+        assert_eq!(kept_manifest.len() + kept_payload.len(), raw, "all states fit once compressed");
+        assert_eq!(kept_states(&serde_json::from_slice::<Value>(&kept_manifest).unwrap()["model"]), vec![true; 4]);
+
+        // When even the compressed final state exceeds `file_space`, it is dropped with a clear refusal.
+        take_last_cache_refusal();
+        assert!(native_cache::encode_model_with_budget(&model, doc_bytes, 1, raw).is_err());
+        let refusal = take_last_cache_refusal().expect("compressed-size refusal recorded");
+        assert!(refusal.contains("compressed"), "{refusal}");
+
+        // When the unpacked size exceeds `expanded_space`, the reader's unpacked limit still wins.
+        let pieces: Vec<Vec<(usize, usize)>> = (0..40).map(|i| vec![(i, BODY)]).collect();
+        let (last_only, _, _) = model.thinned(&pieces, 16 * BODY + BODY / 2).unwrap();
+        let (one_manifest, one_payload) = native_cache::encode_model(&last_only, doc_bytes, usize::MAX).unwrap();
+        let one_raw = one_manifest.len() + one_payload.len();
+        take_last_cache_refusal();
+        assert!(native_cache::encode_model_with_budget(&model, doc_bytes, raw, one_raw - 1).is_err());
+        let refusal = take_last_cache_refusal().expect("unpacked-size refusal recorded");
+        assert!(refusal.contains("unpacked"), "{refusal}");
+
+        // Part 2: end-to-end `write_container` keeps a compressible cache whose raw bytes exceed
+        // the remaining file budget (`file_space`), and `read_design_with_model` reads it back.
+        let doc = document();
+        let mut compressible = native_geometry();
+        compressible.records["model_bodies"][0]["name"] = json!("x".repeat(2 << 20));
+        // `file_space` deducts ~1 MiB + directory overhead (~66 KiB), leaving ~384 KiB of compressed
+        // budget for a 1.5 MiB container budget — far below the ~2 MiB raw cache, well above its
+        // ~10 KiB compressed size.
+        let budget = 1_500_000;
+        let bytes = write_container(&doc, DesignCompression::Fast, None, Some(&compressible), None, budget, None, None).unwrap();
+        assert!(bytes.len() <= budget, "written container ({} bytes) fits within budget ({budget})", bytes.len());
+        assert!(DesignContainerReader::new(Cursor::new(&bytes)).unwrap().has_model_cache());
+        let (opened, cached) = read_design_with_model(&bytes).unwrap();
+        assert_eq!(opened.to_json(), doc.to_json());
+        assert!(cached.is_some(), "reader accepts the compressed cache cleanly");
+
+        // Truly over budget even compressed: omitted with a clear refusal reason.
+        take_last_cache_refusal();
+        let dropped = write_container(&doc, DesignCompression::Fast, None, Some(&compressible), None, 70_000, None, None).unwrap();
+        assert!(!DesignContainerReader::new(Cursor::new(&dropped)).unwrap().has_model_cache());
+        assert!(take_last_cache_refusal().is_some());
     }
 
     #[test]

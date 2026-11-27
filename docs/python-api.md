@@ -51,6 +51,18 @@ skill.
 
 ## What is built
 
+### Install
+
+```sh
+pip install solidcraft          # the client, with solidcraft-cli for your platform
+uvx solidcraft mcp              # the MCP server over stdio, nothing installed first
+```
+
+The package's `solidcraft` command is `solidcraft-cli` with the same arguments, stdin, stdout and
+exit code (`uvx solidcraft --version`, `uvx solidcraft run replay.json --in part.sc`); with no
+arguments it prints the CLI's help. It runs the binary the client finds: `SOLIDCRAFT_CLI`, the one
+in the wheel, then `PATH`. An MCP client takes it as command `uvx`, args `["solidcraft", "mcp"]`.
+
 ### The API
 
 ```python
@@ -183,8 +195,8 @@ so a wheel carries the bytes `SHA256SUMS.txt` lists, signed where the app is
 - **A `py3-none-any` wheel** has no binary. It finds `solidcraft-cli` on `PATH` or through
   `SOLIDCRAFT_CLI`, which covers FreeBSD and the platforms without a wheel.
 - **`cargo xtask python wheel`** writes each wheel: the package with its generated bindings, the
-  `.dist-info` with `METADATA`, `WHEEL`, `RECORD` (SHA-256 of each file) and the `solidcraft-session`
-  entry point, and the licences (`THIRD-PARTY-LICENSES.txt` too when the binary is inside). The
+  `.dist-info` with `METADATA`, `WHEEL`, `RECORD` (SHA-256 of each file) and the `solidcraft` and
+  `solidcraft-session` entry points, and the licences (`THIRD-PARTY-LICENSES.txt` too when the binary is inside). The
   packaging scripts gain no Python dependency. There is no sdist, since building one would mean
   building the whole workspace.
 - **Versions** follow PEP 440: `0.52.0`, `0.52.0rc1`, and `0.52.0.dev<date><run><attempt>` for a
@@ -192,8 +204,9 @@ so a wheel carries the bytes `SHA256SUMS.txt` lists, signed where the app is
 - **Checks:** the release job installs the Linux x86_64 wheel into a clean environment and runs the
   client's tests with the binary inside it. Locally, a macOS wheel installed with `uv pip` passed
   the same tests with `SOLIDCRAFT_CLI` unset.
-- **Upload:** `pypi.yml` uploads a published release's wheels with PyPI trusted publishing (no
-  stored token). A stable release goes to PyPI, and a pre-release to TestPyPI. It stays off until
+- **Upload:** `pypi.yml` uploads a release's wheels with PyPI trusted publishing (no stored
+  token). A pre-release goes to TestPyPI when it is published, and to PyPI when it is flipped to a
+  full release; it never goes to PyPI while it is a pre-release. It stays off until
   the owner registers the publishers and sets `PYTHON_PUBLISH`.
 - **Size:** a platform wheel holds the whole `solidcraft-cli`. PyPI's default limit is 100 MB per
   file, and the universal macOS wheel may come close to it; PyPI raises the limit for a project on

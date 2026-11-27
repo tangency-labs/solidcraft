@@ -66,7 +66,7 @@ fn allow_errors_writes_anyway_and_a_saved_design_keeps_failing() {
     let output = cli().arg("run").arg(dir.broken_script()).arg("--allow-errors").arg("--out").arg(&step).arg("--save").arg(&saved).output().unwrap();
     assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains(&format!("{}: warning: Model cache not saved", saved.display())), "{stderr}");
+    assert!(stderr.contains(&format!("{}: warning: Model cache saved partially", saved.display())), "{stderr}");
     let measured: Value = serde_json::from_slice(&output.stdout).unwrap();
     // SMLib integrates the volume (a relative accuracy of 1e-4 asked for; a box comes out within
     // a few units in the last place), so the box's 4000 mm³ is checked to 1e-9, not to the bit.

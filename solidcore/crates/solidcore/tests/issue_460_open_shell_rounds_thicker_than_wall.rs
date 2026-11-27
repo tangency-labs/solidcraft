@@ -436,3 +436,56 @@ fn issue_22784_a_turned_wide_boss_keeps_its_cavity() {
         );
     }
 }
+
+/// tangency-labs/solidcraft#22783: a pad on a 60 x 40 x 25 block shelled closed with a wall of
+/// exactly half the pad's width. The offsets of the pad's two opposite sides land on one plane,
+/// so what the pad would hold of the cavity is part of that plane, of zero volume: the pad stays
+/// solid, as it does at any thicker wall, and the cavity is the block's alone,
+/// (60 - 2w) x (40 - 2w) x (25 - 2w). Refused before as walls meeting across the pad, naming
+/// the very wall it refused as the largest that fits. A 4 x 8 pad at 2 meets only across its
+/// narrow width; the 8 mm one keeps a 4 mm span, still of zero volume between the meeting
+/// sides. Each corner and wall is a short binary fraction or a sum of them, so the opposite
+/// offsets coincide exactly.
+#[test]
+fn issue_22783_a_pad_shelled_at_exactly_half_its_width_stays_solid() {
+    for (width, depth, height, wall) in [
+        (4.8, 4.8, 4.8, 2.4),
+        (5.0, 5.0, 5.0, 2.5),
+        (4.0, 8.0, 4.0, 2.0),
+    ] {
+        let mut k = Kernel {
+            fixes: UpstreamFixes::all(),
+            ..Kernel::default()
+        };
+        let block = create_box(&mut k, Point3::new(-30.0, -20.0, 0.0), 60.0, 40.0, 25.0).unwrap();
+        let pad = create_box(
+            &mut k,
+            Point3::new(-width / 2.0, -depth / 2.0, 25.0),
+            width,
+            depth,
+            height,
+        )
+        .unwrap();
+        let b = boolean_union(&mut k, block, pad).unwrap();
+        let want = 60.0 * 40.0 * 25.0 + width * depth * height
+            - (60.0 - 2.0 * wall) * (40.0 - 2.0 * wall) * (25.0 - 2.0 * wall);
+        let mut result = shell(&mut k, b, -wall, &[])
+            .unwrap_or_else(|e| panic!("pad {width} x {depth} at {wall}: {e:?}"));
+        solidcore::topology::integrity::check(&result).unwrap();
+        assert!(
+            brep_is_manifold_solid(&result).unwrap(),
+            "pad {width} x {depth}"
+        );
+        let check = check_brep(&mut k, &mut result, CheckLevel::Level2).unwrap();
+        assert!(
+            check.is_valid(),
+            "pad {width} x {depth} at {wall}: {:?}",
+            check.failures().collect::<Vec<_>>()
+        );
+        let got = volume(&k, &mut result).unwrap();
+        assert!(
+            (got - want).abs() <= 1e-6 * want,
+            "pad {width} x {depth} at {wall}: {got} vs {want}"
+        );
+    }
+}
