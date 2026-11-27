@@ -10,10 +10,35 @@
 use solidcore_record::brep::Brep;
 use solidcraft_kernel_api::{Backend, BackendError, BackendId, Exported, OpKind, Support};
 
+mod affine;
+mod cell_grid;
+mod curves;
+mod develop;
+mod dxf;
+mod exchange;
+mod frames;
+mod hatch;
+mod hole_stacks;
+mod mesh;
 mod modelling;
+#[cfg(feature = "backend-occt")]
+mod occt;
+mod planar;
+mod points;
+mod profiles;
+mod projection;
+mod query;
+mod runtime;
+mod sections;
+mod shaft_spline;
+mod tessellate;
+mod tube_cope;
 
 use crate::body::Body;
 use crate::{KernelError, Result};
+
+#[cfg(feature = "backend-occt")]
+pub(crate) use occt::Occt;
 
 /// solidcore, through `solidcore-ops`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -58,6 +83,7 @@ impl From<KernelError> for BackendError {
             KernelError::Lip(r) => BackendError::Failed(format!("raising a band: {r}")),
             KernelError::Repair(r) => BackendError::Failed(r.to_string()),
             KernelError::Heal(h) => BackendError::Failed(h.to_string()),
+            KernelError::Dome(r) => BackendError::Failed(r.to_string()),
         }
     }
 }

@@ -82,8 +82,7 @@ you also need [`trunk`](https://github.com/trunk-rs/trunk)
 git clone https://github.com/tangency-labs/solidcraft && cd solidcraft
 cargo run --release -p solidcraft -- --sample      # desktop app with a sample part
 cargo xtask test                                   # unit, engine and UI-scenario tests
-cargo xtask fast                                   # before a commit: what your change touches
-cargo xtask ci                                     # everything a PR must pass (see below)
+cargo xtask ci                                     # before pushing: runs what your change needs
 ```
 
 SolidCraft is the product, repository, Cargo package and executable name.
@@ -369,7 +368,8 @@ and a fresh CI run:
   length. `cargo xtask lists` rejects non-test const/static arrays with more than ten lines
   of entries, except fixed standard or algorithm tables listed with reasons in `xtask/src/lists.rs`.
   Built-in themes need only a JSON file in `crates/look/themes/`, with a unique nonnegative
-  integer `order` (the picker order) and its own `provenance` line; keep existing order values.
+  integer `order` and its own `provenance` line. Keep existing order values. The Theme list
+  shows Light and Dark first, then the theme files by name.
 - **Message catalogs** (`assets/locales/*.json`): one message per line, sorted by id. Add your
   message anywhere and run `cargo xtask lists --fix`; `cargo xtask lists` (in `cargo xtask ci`
   and the Lists workflow) fails on an unsorted catalog or an id that appears twice.
@@ -415,11 +415,9 @@ and a fresh CI run:
      comment on it first, then open your own claim.
    - Mark the PR ready for review when it is done.
 2. Branch from `main` and keep the PR to one topic.
-3. Run `cargo xtask fast` before pushing: it checks what your change touches (for a kernel change
-   in `solidcore/`, add `--units <id,...>` from your PR's `Units:` line to run their goldens). CI
-   runs the rest of `cargo xtask ci` (fmt, the asset, licence and layer checks, the i18n catalog
-   check, the kernel-case coverage check, clippy `-D warnings`, the tests and the wasm build
-   check), so you need not run that locally. The pull
+3. Run `cargo xtask ci` before pushing: it runs what your change needs, including the i18n and
+   kernel-case coverage checks when your change touches their paths, and prints what it skipped
+   and why (`--all` runs everything). The pull
    request runs the tests of the packages your change affects; the wasm build, the doc tests and
    the heavy tests run in the merge queue, so a green pull request run does not show that they pass.
    Heavy CI runs after review: a pull request gets the formatting and repository checks and a
@@ -517,7 +515,7 @@ comments only when they're about crashes, wrong results, data loss or security.
 
 Two quick checks run on every pull request (`.github/workflows/pr-checks.yml`, not required): it
 fails when a lower-numbered open PR by someone else already closes the same issue (the label
-`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt). A default here is a UX default only: a control, setting, preference or tool behaviour a user sees by default; a changed kernel or geometry result is `Changes a default: no`.
+`not-a-duplicate` skips it), or when the description lacks the `Changes a default: no` / `Changes a default: yes — <what>, old behaviour kept behind preference <name>` line (docs-only and bot PRs are exempt). A default here is a UX default only: a control, setting, preference or tool behaviour a user sees by default; a changed kernel or geometry result is `Changes a default: no`. Fixing janky or unintended behaviour is a bug fix, so `no` (a drag that cancelled now floats). Don't add a setting to keep old behaviour nobody would choose. `yes` is only for a deliberate change to established, intentional behaviour users rely on (sketch endpoints now merge instead of getting a coincident constraint).
 
 ## Labels and triage
 
@@ -586,6 +584,6 @@ about 250 KB and a clip under about 1 MB.
 ## Licence
 
 By contributing you agree that your contribution is licensed as MIT OR Apache-2.0, like the rest
-of SolidCraft. A contribution to the brand and interface (`crates/ui-kit`, `crates/look`,
-`crates/theme`, `assets/branding`, `assets/icons/app`) is licensed under
+of SolidCraft. A contribution to the branding or the interface icon artwork (`assets/branding`,
+`assets/icons/app`, the SVG masters in `crates/look/icons/design/svg`) is licensed under
 [LICENSE-BRAND](LICENSE-BRAND), which lets the maintainers also license it as MIT OR Apache-2.0. SolidCraft isn't affiliated with any CAD vendor; product names are trademarks of their owners (see NOTICE).

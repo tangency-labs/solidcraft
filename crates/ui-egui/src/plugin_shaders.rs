@@ -3,7 +3,7 @@
 //! The WGSL is checked off the window thread and built under an error scope on it; whatever fails
 //! leaves the theme's background, with one line in the status bar.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use egui_wgpu::wgpu;
@@ -39,8 +39,73 @@ struct Active {
     /// One, or two for a state shader: each binds one grid to both state bindings, read as prev or current.
     bind_groups: Vec<wgpu::BindGroup>,
     uniforms: wgpu::Buffer,
-    target: Option<Target>,
+    /// A picture per window and view in it: each shows its own, so a second window (or tile)
+    /// drawing its view does not draw over the picture another one shows.
+    targets: Slots<TargetKey, Target>,
     state: Option<Sim>,
+}
+
+/// The window (egui viewport) and the view in it (`Viewport::scene_slot`) a picture is drawn for.
+type TargetKey = (egui::ViewportId, Option<u64>);
+
+/// How long a view's picture is kept after it was last drawn: a closed window or a view gone.
+const TARGET_KEEP_SECS: f64 = 5.0;
+
+/// The least time between two state steps: views and windows drawing in the same frame step
+/// the state once, not once each.
+const STEP_GAP_SECS: f64 = 0.012;
+
+/// Values by key with the time each was last used, so the ones no longer used can be dropped.
+struct Slots<K, T> {
+    map: HashMap<K, (T, f64)>,
+}
+
+impl<K, T> Default for Slots<K, T> {
+    fn default() -> Self {
+        Self { map: HashMap::new() }
+    }
+}
+
+impl<K: Eq + std::hash::Hash, T> Slots<K, T> {
+    /// `key`'s value, marked used at `now`.
+    fn use_at(&mut self, key: &K, now: f64) -> Option<&mut T> {
+        self.map.get_mut(key).map(|(value, used)| {
+            *used = now;
+            value
+        })
+    }
+
+    fn insert(&mut self, key: K, value: T, now: f64) {
+        self.map.insert(key, (value, now));
+    }
+
+    fn remove(&mut self, key: &K) -> Option<T> {
+        self.map.remove(key).map(|(value, _)| value)
+    }
+
+    /// Takes out the values not used for `keep` seconds before `now` (or used "later", from
+    /// another clock), so their GPU pictures can be freed.
+    fn take_stale(&mut self, now: f64, keep: f64) -> Vec<T> {
+        let mut stale = Vec::new();
+        for (key, (value, used)) in std::mem::take(&mut self.map) {
+            if now - used > keep || used > now + keep {
+                stale.push(value);
+            } else {
+                self.map.insert(key, (value, used));
+            }
+        }
+        stale
+    }
+
+    fn take_all(&mut self) -> Vec<T> {
+        self.map.drain().map(|(_, (value, _))| value).collect()
+    }
+}
+
+/// Whether the state steps for a draw at `now`, after its last step at `last`: at most once per
+/// `STEP_GAP_SECS`, however many views and windows draw it (or when the clock runs back).
+fn steps_now(last: Option<f64>, now: f64) -> bool {
+    last.is_none_or(|last| now - last >= STEP_GAP_SECS || now < last)
 }
 
 /// A state shader's two grids: each frame the step writes the other one, then the background reads it.
@@ -52,6 +117,9 @@ struct Sim {
     current: usize,
     /// The step this frame: 0 on the first, then counting up (back to 1 after `FRAME_WRAP`).
     frame: u32,
+    /// The last step's number and when it ran (the input clock): views drawn between two steps
+    /// read the grid it wrote.
+    stepped: Option<(u32, f64)>,
 }
 
 /// The step counter's wrap: well past the grid's hash and warm-up needs, and far from f32's exact range.
@@ -300,16 +368,31 @@ pub(crate) fn paint(app: &mut SolveApp, painter: &egui::Painter, rect: egui::Rec
         0.0
     };
     let settings = settings(&app.preferences.shader_settings, &active.key, &active.shader);
-    let (step, grid) = match active.state.as_mut() {
+    // The input clock, not the frame: windows count their frames apart, and several views draw
+    // in one frame.
+    let now = ctx.input(|i| i.time);
+    let (step, grid, stepping) = match active.state.as_mut() {
         Some(sim) => {
-            let step = sim.frame;
-            sim.frame = next_step(step);
-            (step as f32, sim.size.map(|v| v as f32))
+            let stepping = steps_now(sim.stepped.map(|(_, at)| at), now);
+            let step = match (stepping, sim.stepped) {
+                (false, Some((step, _))) => step,
+                _ => {
+                    let step = sim.frame;
+                    sim.frame = next_step(step);
+                    sim.stepped = Some((step, now));
+                    step
+                }
+            };
+            (step as f32, sim.size.map(|v| v as f32), stepping)
         }
-        None => (0.0, [0.0, 0.0]),
+        None => (0.0, [0.0, 0.0], false),
     };
     let uniforms = host_uniforms(size, time, ppp, &app.cam, tokens, (step, grid), settings);
-    let Some(id) = draw(&rs, active, size, &uniforms) else { return };
+    let key = (ctx.viewport_id(), app.viewport.scene_slot());
+    let state = &mut app.plugin_shaders;
+    let Some(active) = state.active.as_mut() else { return };
+    free(&rs, active.targets.take_stale(now, TARGET_KEEP_SECS));
+    let Some(id) = draw(&rs, active, key, now, size, &uniforms, stepping) else { return };
     painter.image(id, rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
 }
 
@@ -414,10 +497,19 @@ fn missing(app: &mut SolveApp, key: &str) {
 }
 
 fn retire(state: &mut State) {
-    if let (Some(rs), Some(active)) = (&state.render, state.active.take())
-        && let Some(target) = active.target
-    {
-        rs.renderer.write().free_texture(&target.id);
+    if let (Some(rs), Some(mut active)) = (&state.render, state.active.take()) {
+        free(rs, active.targets.take_all());
+    }
+}
+
+/// Lets egui forget pictures no longer drawn.
+fn free(rs: &egui_wgpu::RenderState, targets: Vec<Target>) {
+    if targets.is_empty() {
+        return;
+    }
+    let mut renderer = rs.renderer.write();
+    for target in targets {
+        renderer.free_texture(&target.id);
     }
 }
 
@@ -575,11 +667,20 @@ fn build(rs: &egui_wgpu::RenderState, key: &str, loaded: Loaded) -> Result<Activ
     }
     let state = match (loaded.state, step) {
         (Some(size), Some(pipeline)) => {
-            <[wgpu::TextureView; 2]>::try_from(grids).ok().map(|views| Sim { pipeline, views, size, current: 0, frame: 0 })
+            <[wgpu::TextureView; 2]>::try_from(grids).ok().map(|views| Sim { pipeline, views, size, current: 0, frame: 0, stepped: None })
         }
         _ => None,
     };
-    Ok(Active { key: key.to_string(), animated: loaded.animated, shader: loaded.shader, pipeline, bind_groups, uniforms, target: None, state })
+    Ok(Active {
+        key: key.to_string(),
+        animated: loaded.animated,
+        shader: loaded.shader,
+        pipeline,
+        bind_groups,
+        uniforms,
+        targets: Slots::default(),
+        state,
+    })
 }
 
 fn make_pipeline(
@@ -673,8 +774,16 @@ pub(crate) fn upload(device: &wgpu::Device, queue: &wgpu::Queue, levels: &[([u32
     texture.create_view(&wgpu::TextureViewDescriptor::default())
 }
 
-fn draw(rs: &egui_wgpu::RenderState, active: &mut Active, size: [u32; 2], uniforms: &[u8]) -> Option<egui::TextureId> {
-    if active.target.as_ref().is_none_or(|t| t.size != size) {
+fn draw(
+    rs: &egui_wgpu::RenderState,
+    active: &mut Active,
+    key: TargetKey,
+    now: f64,
+    size: [u32; 2],
+    uniforms: &[u8],
+    stepping: bool,
+) -> Option<egui::TextureId> {
+    if active.targets.use_at(&key, now).is_none_or(|t| t.size != size) {
         let texture = rs.device.create_texture(&wgpu::TextureDescriptor {
             label: Some("sc_plugin_background_target"),
             size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
@@ -687,16 +796,16 @@ fn draw(rs: &egui_wgpu::RenderState, active: &mut Active, size: [u32; 2], unifor
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let mut renderer = rs.renderer.write();
-        let id = match active.target.take() {
+        let id = match active.targets.remove(&key) {
             Some(old) => {
                 renderer.update_egui_texture_from_wgpu_texture(&rs.device, &view, wgpu::FilterMode::Linear, old.id);
                 old.id
             }
             None => renderer.register_native_texture(&rs.device, &view, wgpu::FilterMode::Linear),
         };
-        active.target = Some(Target { size, view, id, drawn: None });
+        active.targets.insert(key, Target { size, view, id, drawn: None }, now);
     }
-    let target = active.target.as_mut()?;
+    let target = active.targets.use_at(&key, now)?;
     if target.drawn.as_deref() == Some(uniforms) {
         return Some(target.id);
     }
@@ -704,8 +813,9 @@ fn draw(rs: &egui_wgpu::RenderState, active: &mut Active, size: [u32; 2], unifor
     rs.queue.write_buffer(&active.uniforms, 0, uniforms);
     let mut encoder = rs.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("sc_plugin_background") });
     // The state step first, writing the grid that is not current; the background then reads it.
-    let mut group = 0;
-    if let Some(sim) = active.state.as_mut() {
+    // A draw between two steps reads the grid the last step wrote.
+    let mut group = active.state.as_ref().map_or(0, |sim| sim.current);
+    if let Some(sim) = active.state.as_mut().filter(|_| stepping) {
         let prev = sim.current;
         let next = 1 - prev;
         {
@@ -782,6 +892,54 @@ mod tests {
         assert_eq!(super::next_step(0), 1);
         assert_eq!(super::next_step(super::FRAME_WRAP - 1), super::FRAME_WRAP);
         assert_eq!(super::next_step(super::FRAME_WRAP), 1);
+    }
+
+    #[test]
+    fn each_window_and_view_keeps_its_own_background_picture() {
+        // The main window's view and a popped-out window's view: drawing one leaves the other's
+        // picture as it was, so the main window's panels never show the other window's view.
+        let main: super::TargetKey = (egui::ViewportId::ROOT, None);
+        let popped: super::TargetKey = (egui::ViewportId::from_hash_of("model 2"), Some(1 << 63));
+        let tile: super::TargetKey = (egui::ViewportId::ROOT, Some(2));
+        let mut pictures = super::Slots::<super::TargetKey, &str>::default();
+        pictures.insert(main, "main view", 1.0);
+        pictures.insert(popped, "model 2", 1.0);
+        pictures.insert(tile, "tile", 1.0);
+        *pictures.use_at(&popped, 1.1).unwrap() = "model 2, next frame";
+        assert_eq!(pictures.use_at(&main, 1.1).copied(), Some("main view"));
+        assert_eq!(pictures.use_at(&tile, 1.1).copied(), Some("tile"));
+        assert_eq!(pictures.use_at(&popped, 1.1).copied(), Some("model 2, next frame"));
+    }
+
+    #[test]
+    fn a_closed_windows_background_picture_is_dropped_after_a_while() {
+        let main: super::TargetKey = (egui::ViewportId::ROOT, None);
+        let popped: super::TargetKey = (egui::ViewportId::from_hash_of("model 2"), Some(1 << 63));
+        let mut pictures = super::Slots::<super::TargetKey, &str>::default();
+        pictures.insert(main, "main view", 0.0);
+        pictures.insert(popped, "model 2", 0.0);
+        // Only the main window keeps drawing.
+        for second in 1..=3 {
+            pictures.use_at(&main, f64::from(second));
+        }
+        assert!(pictures.take_stale(3.0, super::TARGET_KEEP_SECS).is_empty(), "kept for a while");
+        for second in 4..=10 {
+            pictures.use_at(&main, f64::from(second));
+        }
+        assert_eq!(pictures.take_stale(10.0, super::TARGET_KEEP_SECS), vec!["model 2"]);
+        assert_eq!(pictures.use_at(&main, 10.0).copied(), Some("main view"), "the drawn one stays");
+        assert_eq!(pictures.take_all(), vec!["main view"]);
+    }
+
+    #[test]
+    fn the_state_steps_once_however_many_windows_draw_it() {
+        // The first draw steps; the main window and a popped-out window drawing in the same frame
+        // step it once; the next frame steps again.
+        assert!(super::steps_now(None, 5.0));
+        assert!(!super::steps_now(Some(5.0), 5.0), "a second window in the same frame");
+        assert!(!super::steps_now(Some(5.0), 5.0 + super::STEP_GAP_SECS / 2.0));
+        assert!(super::steps_now(Some(5.0), 5.0 + 0.033), "the next frame at 30 per second");
+        assert!(super::steps_now(Some(5.0), 1.0), "a clock that went back does not stop it");
     }
 
     #[test]

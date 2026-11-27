@@ -131,7 +131,7 @@ fn in_own_process(test: &str, f: impl FnOnce()) {
 }
 
 /// Entry points that ask no kernel, so have nothing to say here.
-const NO_KERNEL: [&str; 16] = [
+const NO_KERNEL: [&str; 17] = [
     "inertia_tensor",
     "is_valid",
     "failed_tests",
@@ -148,9 +148,10 @@ const NO_KERNEL: [&str; 16] = [
     "in_call",
     "hold_a_kernel",
     "start",
+    "write_kernel_profiles",
 ];
 
-const ANSWERING: [&str; 73] = [
+const ANSWERING: &[&str] = &[
     "set_dump_dir",
     "current_call",
     "crash_test",
@@ -163,6 +164,7 @@ const ANSWERING: [&str; 73] = [
     "counts",
     "boolean",
     "boolean_tagged",
+    "boolean_tagged_owned",
     "union_all",
     "union_all_tagged",
     "boolean2d",
@@ -179,11 +181,15 @@ const ANSWERING: [&str; 73] = [
     "shell",
     "offset_faces",
     "thicken",
+    "offset_solid",
     "merge_faces",
+    "merge_faces_keeping_edges",
     "draft",
     "split_faces",
     "split_body",
     "split_body_by_sheet",
+    "trim_sheet",
+    "split_sheet",
     "untrim_face",
     "extend_sheet",
     "face_points",
@@ -300,6 +306,7 @@ fn every_entry_point_answers() {
     says("counts", a.counts());
     says("boolean", a.boolean(&t, BooleanOp::Union));
     says("boolean_tagged", a.boolean_tagged(&t, BooleanOp::Union));
+    says("boolean_tagged_owned", a.try_clone().and_then(|x| Brep::boolean_tagged_owned(Err(x), Ok(&t), BooleanOp::Union)));
     says("union_all", Brep::union_all(&[&a, &t]));
     says("union_all_tagged", Brep::union_all_tagged(&[&a, &t]));
     says("boolean2d", a.boolean2d(&t, BooleanOp::Union));
@@ -318,7 +325,9 @@ fn every_entry_point_answers() {
     says("shell", a.shell(&top, 0.1, 1.0));
     says("offset_faces", a.offset_faces(&top, 0.1, 1.0));
     says("thicken", a.thicken(1.0, false));
+    says("offset_solid", a.offset_solid(1.0, true));
     says("merge_faces", a.merge_faces(&top, 0.1));
+    says("merge_faces_keeping_edges", a.merge_faces_keeping_edges(&[0]));
     says("draft", a.draft(&[p(5.0, 10.0, 5.0)], 0.1, [0.0; 3], p(0.0, 0.0, 1.0), p(0.0, 0.0, 1.0), 0.1));
     let tool =
         says("Surface::plane", ssi::Surface::plane(p(0.0, 0.0, 5.0), p(1.0, 0.0, 0.0), p(0.0, 1.0, 0.0), [-50.0, 50.0], [-50.0, 50.0])).unwrap();
@@ -328,6 +337,8 @@ fn every_entry_point_answers() {
     let lines: Vec<Curve> = (0..4).map(|i| Curve::Line { start: square[i], end: square[(i + 1) % 4] }).collect();
     let sheet = says("planar_faces", Brep::planar_faces(&lines)).unwrap();
     says("split_body_by_sheet", a.split_body_by_sheet(&sheet, 0));
+    says("trim_sheet", a.trim_sheet(&sheet, &[p(5.0, 5.0, 5.0)]));
+    says("split_sheet", a.split_sheet(&sheet));
     says("untrim_face", sheet.untrim_face(p(5.0, 5.0, 5.0), 0.1, Holes::All, true, false));
     says("extend_sheet", sheet.extend_sheet(p(5.0, 5.0, 5.0), 0.1, 1.0, Continuation::Natural));
     says("face_points", a.face_points());
@@ -875,8 +886,7 @@ fn every_call_starts_clean_on_any_kernel() {
 /// `#[cfg(test)]` item of another kind, or a `mod name;` declaration, hides no code).
 #[test]
 fn status_sites_only_shrink() {
-    const SITES: &[(&str, usize)] =
-        &[("core/blend.rs", 6), ("core/measure.rs", 1), ("core/offset.rs", 7), ("core/split.rs", 1), ("core/ssi.rs", 1), ("core/sweep.rs", 6)];
+    const SITES: &[(&str, usize)] = &[("core/blend.rs", 6), ("core/measure.rs", 1), ("core/offset.rs", 5), ("core/ssi.rs", 1), ("core/sweep.rs", 3)];
     /// The lines of `text` outside its top-level inline test modules (rustfmt closes one with a
     /// `}` alone at the start of a line).
     fn code_lines(text: &str) -> Vec<&str> {
@@ -973,6 +983,41 @@ fn a_tagged_boolean_is_the_boolean_of_tagged_copies() {
     // The operands are left as they were: untagged, their records unchanged.
     let plain = Brep::make_box([0.0, 0.0, 0.0], [40.0, 30.0, 6.0]).unwrap();
     assert_eq!(plate.to_native_ordered().unwrap(), plain.to_native_ordered().unwrap());
+}
+
+/// A boolean of operands handed over and tagged themselves, with no copy: the same record,
+/// numbering and history as the boolean that tags copies of them. Each operand is imported from
+/// its record, as a body's form is made for a boolean, once handed over and once read. A cut by a
+/// box and by a cylinder, a union and an intersection, with one operand handed over and both.
+#[test]
+fn a_boolean_of_handed_over_operands_is_the_boolean_of_tagged_copies() {
+    let plate = Brep::make_box([0.0, 0.0, 0.0], [40.0, 30.0, 6.0]).unwrap().to_native().unwrap();
+    let pocket = Brep::make_box([5.0, 5.0, 2.0], [8.0, 6.0, 10.0]).unwrap().to_native().unwrap();
+    let bore = Brep::made_core(core::make_cylinder([25.0, 15.0, -1.0], 4.0, 8.0).unwrap()).to_native().unwrap();
+    let boss = Brep::made_core(core::make_cylinder([30.0, 10.0, 3.0], 3.0, 9.0).unwrap()).to_native().unwrap();
+    let import = |r| Brep::from_record(r, true).unwrap();
+    let cases = [
+        (&plate, &pocket, BooleanOp::Subtract),
+        (&plate, &bore, BooleanOp::Subtract),
+        (&plate, &boss, BooleanOp::Union),
+        (&plate, &boss, BooleanOp::Intersect),
+    ];
+    for (a, b, op) in cases {
+        let (ra, rb) = (import(a), import(b));
+        let want = ra.boolean_tagged(&rb, op).unwrap().unwrap();
+        for (hand_a, hand_b) in [(true, false), (false, true), (true, true)] {
+            let (sa, sb) = (import(a), import(b));
+            let (sa_before, sb_before) = (sa.to_native().unwrap(), sb.to_native().unwrap());
+            let ia = if hand_a { Err(import(a)) } else { Ok(&sa) };
+            let ib = if hand_b { Err(import(b)) } else { Ok(&sb) };
+            let got = Brep::boolean_tagged_owned(ia, ib, op).unwrap().unwrap();
+            assert_eq!(got.to_native_ordered().unwrap(), want.to_native_ordered().unwrap(), "{op:?} {hand_a} {hand_b}");
+            assert_eq!(got.history().unwrap(), want.history().unwrap(), "{op:?} {hand_a} {hand_b}");
+            // a read operand is left as it was
+            assert_eq!(sa.to_native().unwrap(), sa_before, "{op:?}");
+            assert_eq!(sb.to_native().unwrap(), sb_before, "{op:?}");
+        }
+    }
 }
 
 /// A union of operands each tagged as it is (solidcore#3359): the same record, numbering and

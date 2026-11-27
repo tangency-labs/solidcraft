@@ -127,7 +127,7 @@ fn edge_of(b: &Brep, eu: EdgeuseId) -> Result<EdgeId> {
 }
 
 /// `SmSurface::GetSingularities`: the sides of the natural domain that are poles.
-fn surface_singularities(k: &Kernel, surface: &Surface) -> Result<u32> {
+pub(crate) fn surface_singularities(k: &Kernel, surface: &Surface) -> Result<u32> {
     Ok(surface.get_singularities(k, false, false)?.singular)
 }
 
@@ -912,7 +912,11 @@ impl WindingHull {
             ) {
                 return None;
             }
-            curve.clone_for_evaluation().ok()?;
+            // the walk's copy of the curve for evaluation can only fail, for these three
+            // kinds, on its nesting check: the check alone, without the copy (an
+            // ellipse's copy rebuilds its NURB, for every loop of every point a face
+            // classifies)
+            Surface::check_curve_evaluation_copy_depth(curve, 0).ok()?;
             eu1::orientation(b, eu).ok()?;
             let failed = b
                 .edgeuse(eu)
@@ -1000,6 +1004,246 @@ impl WindingHull {
         };
         out(self.lo.x, self.hi.x, uv.x) || out(self.lo.y, self.hi.y, uv.y)
     }
+}
+
+/// The most boxes [`trim_boxes`] or [`edge_curve_boxes`] makes in one call: past this the
+/// curves are not bounded and the caller keeps its whole-box test. A curve crossing a box `n`
+/// boxes across takes about `n` of them (512 for the offset's fold test), so this leaves
+/// room for some hundred curves.
+pub(crate) const MAX_TRIM_BOXES: usize = 1 << 16;
+
+/// Not upstream (#20961): boxes `[x0, x1, y0, y1, z0, z1]` that hold `curve` over `ivl`, each
+/// at most about `fine` across, `budget` the boxes still allowed: a line cut into equal
+/// pieces at most `fine` long (its points between two of its points lie between them), a
+/// B-spline's (or an ellipse's NURB's) segment over `ivl` split into Bezier pieces, halved
+/// until their control points' box is that small (a piece lies in the box of its control
+/// points, the convex hull property, its weights positive; `ivl` within `[U[p], U[n]]`,
+/// [`in_hull_domain`], and no evaluation past the knots). `Ok(None)` for other curves, where
+/// those conditions fail, or past the budget.
+///
+/// # Errors
+///
+/// [`SolidError::Cancelled`] when the kernel's cancel token is set (polled per piece).
+fn curve_boxes(
+    k: &Kernel,
+    curve: &Curve,
+    ivl: &Extent1d,
+    fine: f64,
+    budget: &mut usize,
+) -> Result<Option<Vec<[f64; 6]>>> {
+    use crate::curve::curve::CurveKind;
+    use crate::nurbs::math::NOW;
+    const OP: &str = "query::loop::curve_boxes";
+    // the most halvings of a Bezier piece
+    const DEPTH: usize = 12;
+    let span = |a: Point3, z: Point3| {
+        [
+            a.x.min(z.x),
+            a.x.max(z.x),
+            a.y.min(z.y),
+            a.y.max(z.y),
+            a.z.min(z.z),
+            a.z.max(z.z),
+        ]
+    };
+    let control_box = |c: &crate::nurbs::crv_basic::Curve| -> Option<[f64; 6]> {
+        let mut bx = [
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ];
+        for q in c.cpts() {
+            if !(q.w == NOW || (q.w > 0.0 && q.w.is_finite())) {
+                return None;
+            }
+            let [x0, x1, y0, y1, z0, z1] = span(q.to_euclid(), q.to_euclid());
+            bx = [
+                bx[0].min(x0),
+                bx[1].max(x1),
+                bx[2].min(y0),
+                bx[3].max(y1),
+                bx[4].min(z0),
+                bx[5].max(z1),
+            ];
+        }
+        bx.iter().all(|x| x.is_finite()).then_some(bx)
+    };
+    let mut boxes = Vec::new();
+    let nurb = match curve.kind() {
+        CurveKind::Line(_) => {
+            let (Ok(a), Ok(z)) = (
+                curve.evaluate_point(k, ivl.min()),
+                curve.evaluate_point(k, ivl.max()),
+            ) else {
+                return Ok(None);
+            };
+            let pieces = (a.distance(z) / fine).ceil();
+            if !(pieces.is_finite() && pieces >= 0.0 && pieces < *budget as f64) {
+                return Ok(None);
+            }
+            let n = (pieces as usize).max(1);
+            let mut last = a;
+            for i in 1..=n {
+                k.check_cancelled(OP)?;
+                let t = ivl.min() + (ivl.max() - ivl.min()) * (i as f64 / n as f64);
+                let Ok(next) = curve.evaluate_point(k, if i == n { ivl.max() } else { t }) else {
+                    return Ok(None);
+                };
+                boxes.push(span(last, next));
+                last = next;
+            }
+            *budget -= n;
+            return Ok(Some(boxes));
+        }
+        CurveKind::BSpline(c) if !c.is_out_of_bounds_enabled() => c.nurb.as_ref(),
+        CurveKind::Ellipse(e) if !e.base().is_out_of_bounds_enabled() => e.base().nurb.as_ref(),
+        _ => None,
+    };
+    let Some(nurb) = nurb else {
+        return Ok(None);
+    };
+    if !in_hull_domain(nurb, ivl) {
+        return Ok(None);
+    }
+    let (p, knots) = (nurb.degree(), nurb.knots());
+    let (Some(&lo), Some(&hi)) = (knots.get(p), knots.get(nurb.cpts().len())) else {
+        return Ok(None);
+    };
+    let (a, z) = (ivl.min().max(lo), ivl.max().min(hi));
+    if a.partial_cmp(&z) != Some(std::cmp::Ordering::Less) {
+        return Ok(None);
+    }
+    let Some(mut pieces) = nurb
+        .extract_seg(a, z)
+        .ok()
+        .and_then(|seg| seg.decompose_bez().ok())
+    else {
+        return Ok(None);
+    };
+    let mut depth = vec![0usize; pieces.len()];
+    while let (Some(piece), Some(d)) = (pieces.pop(), depth.pop()) {
+        k.check_cancelled(OP)?;
+        if boxes.len() + pieces.len() >= *budget {
+            return Ok(None);
+        }
+        let Some(bx) = control_box(&piece) else {
+            return Ok(None);
+        };
+        let size = (bx[1] - bx[0]).max(bx[3] - bx[2]).max(bx[5] - bx[4]);
+        let (Some(&t0), Some(&t1)) = (piece.knots().first(), piece.knots().last()) else {
+            return Ok(None);
+        };
+        if size <= fine || d >= DEPTH {
+            boxes.push(bx);
+            continue;
+        }
+        let Ok((left, right)) = piece.split(0.5 * (t0 + t1)) else {
+            return Ok(None);
+        };
+        pieces.extend([left, right]);
+        depth.extend([d + 1, d + 1]);
+    }
+    *budget -= boxes.len();
+    Ok(Some(boxes))
+}
+
+/// Not upstream (#20961): boxes in the face's parameters that hold loop `l`'s UV trim
+/// curves over their edges' intervals (widened by the solves' slack), each at most about
+/// `fine` across ([`curve_boxes`]), and the chords between consecutive edge uses (the box of
+/// the nearest ends of each edge use and the next, where they join: the walk's chord across a
+/// gap between them).
+///
+/// `Ok(None)` where the loop is not what [`WindingHull::of`] bounds (its conditions, the same
+/// here), a trim is not bounded, or the loop takes more than [`MAX_TRIM_BOXES`] boxes, so a
+/// caller falls back to its whole-box test.
+///
+/// # Errors
+///
+/// [`SolidError::Cancelled`] when the kernel's cancel token is set.
+pub(crate) fn trim_boxes(
+    k: &Kernel,
+    b: &Brep,
+    l: LoopId,
+    fine: f64,
+) -> Result<Option<Vec<[f64; 4]>>> {
+    if !(fine.is_finite() && fine > 0.0) || WindingHull::of(k, b, l).is_none() {
+        return Ok(None);
+    }
+    let Some(lu) = b.loop_(l).ok().and_then(|lp| lp.loopuse) else {
+        return Ok(None);
+    };
+    let Ok(eus) = eu1::loopuse_edgeuses(b, lu) else {
+        return Ok(None);
+    };
+    let span = |a: Point3, z: Point3| [a.x.min(z.x), a.x.max(z.x), a.y.min(z.y), a.y.max(z.y)];
+    let mut budget = MAX_TRIM_BOXES;
+    let mut boxes = Vec::new();
+    // each edge use's trim points at the ends of its widened interval
+    let mut ends: Vec<(Point3, Point3)> = Vec::new();
+    for &eu in &eus {
+        let Some(edge) = edge_of(b, eu).ok().and_then(|e| b.edge(e).ok()) else {
+            return Ok(None);
+        };
+        let Some(trim_curve) = eu1::uv_trim_curve(b, eu).ok().and_then(|t| t.0) else {
+            return Ok(None);
+        };
+        let widened = with_solve_slack(&edge.interval);
+        let (Ok(a), Ok(z)) = (
+            trim_curve.evaluate_point(k, widened.min()),
+            trim_curve.evaluate_point(k, widened.max()),
+        ) else {
+            return Ok(None);
+        };
+        ends.push((a, z));
+        let Some(pieces) = curve_boxes(k, trim_curve, &widened, fine, &mut budget)? else {
+            return Ok(None);
+        };
+        boxes.extend(
+            pieces
+                .into_iter()
+                .map(|[x0, x1, y0, y1, _, _]| [x0, x1, y0, y1]),
+        );
+    }
+    // the chord from each edge use to the next: between their nearest ends, where they join
+    for (&(a, z), &(c, e)) in ends.iter().zip(ends.iter().cycle().skip(1)) {
+        let joint = [(a, c), (a, e), (z, c), (z, e)]
+            .into_iter()
+            .min_by(|x, y| x.0.distance(x.1).total_cmp(&y.0.distance(y.1)));
+        if let Some((p, q)) = joint {
+            boxes.push(span(p, q));
+        }
+    }
+    Ok(boxes
+        .iter()
+        .all(|bx| bx.iter().all(|x| x.is_finite()))
+        .then_some(boxes))
+}
+
+/// Not upstream (#20961): boxes in space that hold every point the walk's drop on `edge`'s
+/// curve can answer, each at most about `fine` across, for a caller that must keep clear of
+/// them: the curve over its interval widened by the solves' slack (the drop clamps into it)
+/// in [`curve_boxes`]' pieces, `budget` the boxes still allowed. `Ok(None)` where the curve
+/// is not bounded so.
+///
+/// # Errors
+///
+/// [`SolidError::Cancelled`] when the kernel's cancel token is set.
+pub(crate) fn edge_curve_boxes(
+    k: &Kernel,
+    edge: &crate::topology::Edge,
+    fine: f64,
+    budget: &mut usize,
+) -> Result<Option<Vec<[f64; 6]>>> {
+    let Some(curve) = edge.curve.as_ref() else {
+        return Ok(None);
+    };
+    if !(fine.is_finite() && fine > 0.0) {
+        return Ok(None);
+    }
+    curve_boxes(k, curve, &with_solve_slack(&edge.interval), fine, budget)
 }
 
 /// Not upstream: the parameters a curve may be evaluated at by the local solves of

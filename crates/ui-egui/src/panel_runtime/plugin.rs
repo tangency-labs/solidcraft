@@ -366,11 +366,16 @@ struct TextDraft {
     submitted: Option<String>,
 }
 
+fn panel_selection_id(panel: &PanelSnapshot) -> egui::Id {
+    egui::Id::unique((&panel.plugin, &panel.panel.id, "active-selection"))
+}
+
 fn button(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::ButtonSpec, actions: &mut Actions) {
     let response = crate::ui_kit::icon_label_action(ui, &spec.label, spec.icon.as_deref(), true, false);
     crate::scenario::publish_rect(&format!("plugin-panel:{}:{}:button:{}", panel.plugin, panel.panel.id, spec.entry), response.rect);
     if response.clicked() {
-        actions.push((spec.entry.clone(), event(panel, model::EventKind::Press, &spec.entry, None, None)));
+        let row = ui.ctx().data_mut(|data| data.get_temp::<Option<String>>(panel_selection_id(panel))).flatten();
+        actions.push((spec.entry.clone(), event(panel, model::EventKind::Press, &spec.entry, row, None)));
     }
 }
 
@@ -463,7 +468,11 @@ pub(super) fn draw(ui: &mut egui::Ui, panel: &PanelSnapshot, index: u32, actions
                     }
                 }
             });
-            ui.ctx().data_mut(|data| data.insert_temp(selected_id, selected.unwrap_or_default()));
+            let row = selected.clone();
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(selected_id, selected.unwrap_or_default());
+                data.insert_temp(panel_selection_id(panel), row);
+            });
         }
         model::Widget::Form(spec) => form(ui, panel, spec, actions, units),
         model::Widget::Text(text) | model::Widget::EmptyState(text) => {
@@ -543,7 +552,17 @@ fn table(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::TableSpec, acti
             });
         },
     );
-    ui.ctx().data_mut(|data| data.insert_temp(selected_id, selected));
+    let selection_str = if selected.is_empty() {
+        None
+    } else if selected.len() == 1 {
+        selected.iter().next().cloned()
+    } else {
+        Some(selected.iter().cloned().collect::<Vec<_>>().join(","))
+    };
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(selected_id, selected);
+        data.insert_temp(panel_selection_id(panel), selection_str);
+    });
 }
 
 fn form(ui: &mut egui::Ui, panel: &PanelSnapshot, spec: &model::FormSpec, actions: &mut Actions, units: &str) {

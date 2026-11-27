@@ -9,8 +9,9 @@
 use std::f64::consts::PI;
 
 use solidcore_ops::sweep::{extrude, planar_faces, project_curves, Curve, DraftCorner};
+use solidcore_ops::trim::split_sheet;
 use solidcore_ops::trim::{
-    remove_faces, split_face_by_curves, trim_by_dropped_curves, Region, MAX_PICKS,
+    remove_faces, split_face_by_curves, trim_by_dropped_curves, trim_sheet, Region, MAX_PICKS,
 };
 use solidcore_ops::{Body, Error, Order};
 
@@ -139,6 +140,256 @@ fn an_open_curve_inside_the_face_is_refused() {
         Some(Error::CurveDoesNotCut)
     );
     assert_eq!(b.counts().unwrap()[0], 1, "the sheet stays as it was");
+}
+
+/// The sheet follows y=3 up to x=5, then y=3+0.4(x-5). It cuts the square into
+/// area 5*3+5*(3+5)/2=35 below and 65 above. Extending either face alone is wrong.
+#[test]
+fn a_complete_sheet_cuts_regions_without_extending_its_faces() {
+    let target = planar_faces(&square(0.0, 10.0, 0.0)).unwrap();
+    let cutter = extrude(
+        &[
+            line([-5.0, 3.0, -5.0], [5.0, 3.0, -5.0]),
+            line([5.0, 3.0, -5.0], [15.0, 7.0, -5.0]),
+        ],
+        [0.0, 0.0, 1.0],
+        10.0,
+        0.0,
+        DraftCorner::Tangent,
+        false,
+    )
+    .unwrap();
+    assert_eq!(cutter.counts().unwrap()[0], 2);
+    for (points, expected) in [
+        (vec![[2.0, 1.0, 0.0]], 35.0),
+        (vec![[2.0, 9.0, 0.0]], 65.0),
+        (vec![[2.0, 1.0, 0.0], [2.0, 9.0, 0.0]], 100.0),
+    ] {
+        let kept = trim_sheet(&target, &cutter, &points).unwrap();
+        assert!(
+            rel(area(&kept), expected) < 1e-9,
+            "{} vs {expected}",
+            area(&kept)
+        );
+    }
+    assert_eq!(target.counts().unwrap()[0], 1);
+    assert_eq!(cutter.counts().unwrap()[0], 2);
+}
+
+/// A target of two separate sheets in one body (as a surface extrude of several profiles
+/// makes): the walls x in [0, 10], z in [0, 10] at y = 0 and y = 5, each a shell. The sheet
+/// z = 4 cuts each wall into 10*4 = 40 below and 10*6 = 60 above; a wall with no point picked
+/// is discarded whole. Each kept piece is one rectangle of its wall, its own shell: one face,
+/// four edges and four vertices, at the wall's corners on its side of z = 4 and the two points
+/// where z = 4 crosses the wall's sides x = 0 and x = 10.
+#[test]
+fn a_complete_sheet_trims_a_target_of_several_separate_sheets() {
+    // The corners of wall `y` from height `z0` to `z1`.
+    let corners =
+        |y: f64, z0: f64, z1: f64| vec![[0.0, y, z0], [10.0, y, z0], [10.0, y, z1], [0.0, y, z1]];
+    let wall = |y: f64| {
+        planar_faces(&polygon(&[
+            [0.0, y, 0.0],
+            [10.0, y, 0.0],
+            [10.0, y, 10.0],
+            [0.0, y, 10.0],
+        ]))
+        .unwrap()
+    };
+    let (a, b) = (wall(0.0), wall(5.0));
+    let target = solidcore_ops::stitch::gather(&[&a, &b]).unwrap();
+    assert_eq!(target.counts().unwrap()[0], 2);
+    let cutter = planar_faces(&polygon(&[
+        [-5.0, -5.0, 4.0],
+        [15.0, -5.0, 4.0],
+        [15.0, 10.0, 4.0],
+        [-5.0, 10.0, 4.0],
+    ]))
+    .unwrap();
+    for (points, expected, pieces) in [
+        (vec![[2.0, 0.0, 1.0]], 40.0, vec![corners(0.0, 0.0, 4.0)]),
+        (
+            vec![[2.0, 0.0, 1.0], [2.0, 5.0, 1.0]],
+            80.0,
+            vec![corners(0.0, 0.0, 4.0), corners(5.0, 0.0, 4.0)],
+        ),
+        (
+            vec![[2.0, 0.0, 1.0], [2.0, 5.0, 9.0]],
+            100.0,
+            vec![corners(0.0, 0.0, 4.0), corners(5.0, 4.0, 10.0)],
+        ),
+    ] {
+        let kept = trim_sheet(&target, &cutter, &points).unwrap();
+        assert!(
+            rel(area(&kept), expected) < 1e-9,
+            "{points:?}: {} vs {expected}",
+            area(&kept)
+        );
+        let n = pieces.len();
+        assert_eq!(kept.counts().unwrap(), [n, 4 * n, 4 * n], "{points:?}");
+        let (record, _) = kept.to_record().unwrap();
+        assert_eq!(record.shells.len(), n, "{points:?}: one shell per piece");
+        let mut want: Vec<[f64; 3]> = pieces.concat();
+        for v in &record.vertices {
+            let i = want
+                .iter()
+                .position(|w| (0..3).all(|k| (v.point[k] - w[k]).abs() < 1e-9))
+                .unwrap_or_else(|| {
+                    panic!(
+                        "{points:?}: vertex {:?} is no corner of a kept piece",
+                        v.point
+                    )
+                });
+            want.swap_remove(i);
+        }
+        assert!(want.is_empty(), "{points:?}: corners not found {want:?}");
+    }
+    assert_eq!(target.counts().unwrap()[0], 2, "the target stays as it was");
+}
+
+/// A split keeps every region, each its own body: the bent sheet of
+/// `a_complete_sheet_cuts_regions_without_extending_its_faces` cuts the square [0, 10]^2 into
+/// 35 below and 65 above, together the square's 100. Two separate walls cut by z = 4 make four
+/// pieces, 40 and 60 of each, every piece one face of its own.
+#[test]
+fn a_complete_sheet_splits_a_sheet_into_every_region() {
+    let target = planar_faces(&square(0.0, 10.0, 0.0)).unwrap();
+    let cutter = extrude(
+        &[
+            line([-5.0, 3.0, -5.0], [5.0, 3.0, -5.0]),
+            line([5.0, 3.0, -5.0], [15.0, 7.0, -5.0]),
+        ],
+        [0.0, 0.0, 1.0],
+        10.0,
+        0.0,
+        DraftCorner::Tangent,
+        false,
+    )
+    .unwrap();
+    let pieces = split_sheet(&target, &cutter).unwrap();
+    let mut areas: Vec<f64> = pieces.iter().map(area).collect();
+    areas.sort_by(f64::total_cmp);
+    assert_eq!(areas.len(), 2, "{areas:?}");
+    assert!(
+        rel(areas[0], 35.0) < 1e-9 && rel(areas[1], 65.0) < 1e-9,
+        "{areas:?}"
+    );
+    for piece in &pieces {
+        assert_eq!(piece.counts().unwrap()[0], 1, "each region is one face");
+    }
+    assert_eq!(target.counts().unwrap()[0], 1, "the target stays as it was");
+
+    let wall = |y: f64| {
+        planar_faces(&polygon(&[
+            [0.0, y, 0.0],
+            [10.0, y, 0.0],
+            [10.0, y, 10.0],
+            [0.0, y, 10.0],
+        ]))
+        .unwrap()
+    };
+    let (a, b) = (wall(0.0), wall(5.0));
+    let walls = solidcore_ops::stitch::gather(&[&a, &b]).unwrap();
+    let plane = planar_faces(&polygon(&[
+        [-5.0, -5.0, 4.0],
+        [15.0, -5.0, 4.0],
+        [15.0, 10.0, 4.0],
+        [-5.0, 10.0, 4.0],
+    ]))
+    .unwrap();
+    let pieces = split_sheet(&walls, &plane).unwrap();
+    let mut areas: Vec<f64> = pieces.iter().map(area).collect();
+    areas.sort_by(f64::total_cmp);
+    assert_eq!(areas.len(), 4, "{areas:?}");
+    for (got, want) in areas.iter().zip([40.0, 40.0, 60.0, 60.0]) {
+        assert!(rel(*got, want) < 1e-9, "{areas:?}");
+    }
+    for piece in &pieces {
+        assert_eq!(
+            piece.counts().unwrap(),
+            [1, 4, 4],
+            "each piece is one rectangle"
+        );
+    }
+}
+
+/// A closed sheet (a full turn of a surface: its shells close) splits into open regions. The
+/// box [0, 10]^3 cut by the plane z = 4 makes the bottom and the four walls' lower 40 each,
+/// 260, and the top and the walls' upper 60 each, 340: together the box's 600, each piece five
+/// faces with an open rim.
+#[test]
+fn a_complete_sheet_splits_a_closed_sheet_into_open_regions() {
+    let closed = solidcore_ops::make_box([0.0; 3], [10.0; 3]).unwrap();
+    let plane = planar_faces(&polygon(&[
+        [-5.0, -5.0, 4.0],
+        [15.0, -5.0, 4.0],
+        [15.0, 15.0, 4.0],
+        [-5.0, 15.0, 4.0],
+    ]))
+    .unwrap();
+    let pieces = split_sheet(&closed, &plane).unwrap();
+    let mut areas: Vec<f64> = pieces.iter().map(area).collect();
+    areas.sort_by(f64::total_cmp);
+    assert_eq!(areas.len(), 2, "{areas:?}");
+    assert!(
+        rel(areas[0], 260.0) < 1e-9 && rel(areas[1], 340.0) < 1e-9,
+        "{areas:?}"
+    );
+    for piece in &pieces {
+        assert_eq!(piece.counts().unwrap()[0], 5, "a box's open half");
+    }
+    assert_eq!(closed.counts().unwrap()[0], 6, "the target stays as it was");
+}
+
+/// A split refuses what a whole-sheet trim refuses: a cutter that separates nothing, a solid
+/// cutter and the same sheet twice. A closed target the cutter misses separates nothing.
+#[test]
+fn whole_sheet_split_refuses_non_cuts_and_solid_cutters() {
+    let target = planar_faces(&square(0.0, 10.0, 0.0)).unwrap();
+    let far = planar_faces(&square(0.0, 10.0, 20.0)).unwrap();
+    let solid = solidcore_ops::make_box([0.0; 3], [1.0; 3]).unwrap();
+    for (a, b) in [(&target, &far), (&solid, &far)] {
+        assert_eq!(split_sheet(a, b).err(), Some(Error::CurveDoesNotCut));
+    }
+    for (a, b) in [(&target, &solid), (&target, &target)] {
+        assert_eq!(split_sheet(a, b).err(), Some(Error::Argument));
+    }
+}
+
+#[test]
+fn whole_sheet_trim_refuses_non_cuts_and_ambiguous_or_hostile_picks() {
+    let target = planar_faces(&square(0.0, 10.0, 0.0)).unwrap();
+    let cutter = planar_faces(&polygon(&[
+        [-5.0, 3.0, -5.0],
+        [15.0, 3.0, -5.0],
+        [15.0, 3.0, 5.0],
+        [-5.0, 3.0, 5.0],
+    ]))
+    .unwrap();
+    assert_eq!(
+        trim_sheet(&target, &cutter, &[]).err(),
+        Some(Error::Argument)
+    );
+    assert_eq!(
+        trim_sheet(&target, &cutter, &[[f64::NAN, 0.0, 0.0]]).err(),
+        Some(Error::Argument)
+    );
+    assert!(matches!(
+        trim_sheet(&target, &cutter, &[[2.0, 3.0, 0.0]]),
+        Err(Error::Unsupported(_))
+    ));
+    let far = planar_faces(&square(0.0, 10.0, 20.0)).unwrap();
+    assert_eq!(
+        trim_sheet(&target, &far, &[[2.0, 1.0, 0.0]]).err(),
+        Some(Error::CurveDoesNotCut)
+    );
+    let solid = solidcore_ops::make_box([0.0; 3], [1.0; 3]).unwrap();
+    for (a, b) in [(&target, &solid), (&solid, &cutter), (&target, &target)] {
+        assert_eq!(
+            trim_sheet(a, b, &[[2.0, 1.0, 0.0]]).err(),
+            Some(Error::Argument)
+        );
+    }
 }
 
 #[test]
