@@ -131,8 +131,6 @@ separate copy at `vendor/egui-wgpu` before egui was vendored as a whole):
 - `src/lib.rs`: use 1x MSAA on the selected OpenGL adapter before creating pipelines,
   exposing the effective sample count so host paint callbacks can match it.
 - `src/winit.rs`: use that same effective count for depth and resolve attachments.
-- `src/renderer.rs`: when the GPU refuses a staging buffer for a frame's meshes (device lost
-  or out of memory), log a warning and draw nothing that frame instead of panicking (#1469).
 - Other backends retain requested MSAA, without another adapter or device probe.
 - `src/lib.rs`: clamp MSAA to the largest sample count the device supports for the surface and
   depth formats (`supported_msaa_samples`, `RenderState::msaa_supported`): a saved 8x on a
