@@ -101,6 +101,13 @@
 //!   ([`crate::nurbs::b_spline_curve::trim_image`]; at most 4096 pieces, each halved at
 //!   most 64 times, per call, no recursion): the constant metric WR-560 maps the trim by is exact only on a
 //!   plane, and near a pole the exact trim of a smooth curve turns sharply in (u, v).
+//!   Not upstream (WR-560 extended, tangency-labs/solidcraft#23062): test 11 of a UV
+//!   trim runs on the same mapped trim as test 13 (the search, the speed at each
+//!   solution, the tolerance and spacing from the mapped box, the #11574 bound on the
+//!   mapped trim's spans). A speed is a length per parameter, and in raw (u, v) a trim
+//!   along a parameter whose unit step is long on the surface reads as nearly stopped.
+//!   The fork maps tests 13 and 15 only. A trim whose mapped copy cannot be sized is
+//!   tested as it is (and fails test 13).
 //! - **Back-edges.** `HasInternalPole` calls `IsDegenerate` (`p2`); `IsSegmentLine`,
 //!   `IsOnPlane` and `JoinWith` test `IsKindOf(SmLine_TYPE)` (false for a
 //!   `BSplineCurve`; a line is a [`crate::curve::line::Line`], whose `JoinWith`
@@ -2085,8 +2092,9 @@ impl BSplineCurve {
     }
 
     /// [`BSplineCurve::assert_valid`] of a UV trim on `trim_surface`, its face's
-    /// surface: the radius of curvature (13) and coincident control point (15) tests
-    /// measure the trim on that surface (WR-560).
+    /// surface: the first derivative (11), radius of curvature (13) and coincident
+    /// control point (15) tests measure the trim on that surface (WR-560; test 11,
+    /// tangency-labs/solidcraft#23062).
     ///
     /// # Errors
     ///
@@ -2423,29 +2431,72 @@ impl BSplineCurve {
                 (1e-03, 5.0)
             };
 
+            // Not upstream (fork tangency-labs/smlib b4f8c57, WR-560; test 11 #23062): a
+            // UV trim's lengths and speeds are those of its face's surface. The trim is
+            // mapped by the surface's first fundamental form at its middle, and tests 11
+            // and 13 run on the mapped trim, with the mapped trim's tolerance and solution
+            // spacing. A mapped trim that cannot be sized fails test 13 (reported there)
+            // and is not analysed; test 11 then reads the trim as it is.
+            let mut has_metric = false;
+            let mut mapped: Option<BSplineCurve> = None;
+            let mut mapped_scale: Option<(f64, f64)> = None;
+            if sized {
+                if let Some(l) = trim_metric(k, self, bounded, ovr.trim_surface, &domain)? {
+                    has_metric = true;
+                    mapped = mapped_trim(self, l);
+                    let mapped_box = match mapped.as_ref() {
+                        Some(m) => ignored(m.calculate_bounding_box(
+                            &domain,
+                            BoundingBoxRequest {
+                                normal: true,
+                                pseudo: false,
+                                polar: false,
+                            },
+                        ))?
+                        .and_then(|b| b.normal),
+                        None => None,
+                    };
+                    mapped_scale = mapped_box.map(|b| bounded_scale(b.size().length(), size_t));
+                }
+            }
+            // the curve test 11 reads the speed of, with its tolerance, spacing and bounds
+            let (speed_curve, speed_tol, speed_sep, speed_bounds) =
+                match (mapped.as_ref(), mapped_scale) {
+                    (Some(m), Some((t, sep))) => {
+                        let b = if k.memoize_curve_caches {
+                            m.nurb.as_ref().and_then(span_bounds)
+                        } else {
+                            None
+                        };
+                        (m, t, sep, b)
+                    }
+                    _ => (self, tol, min_sep, bounds),
+                };
+
             // the search reports its own status (as the fork, tangency-labs/smlib
             // 8843967), so it always runs on a sized curve
             let solutions = if sized {
-                // Not upstream (#11574): a curve proved to move faster than `tol` everywhere
-                // has no solution the test below could fail, so the search is not run
-                let (first_derivs_ok, sols) = if bounds.is_some_and(|b| bound_clears(b.speed, tol))
-                {
-                    (true, Vec::new())
-                } else {
-                    global_property_analysis(
-                        k,
-                        self,
-                        &domain,
-                        CurveProperty::MinimizeFirstDerivative,
-                        min_sep,
-                    )?
-                };
+                // Not upstream (#11574): a curve proved to move faster than `speed_tol`
+                // everywhere has no solution the test below could fail, so the search is not
+                // run
+                let (first_derivs_ok, sols) =
+                    if speed_bounds.is_some_and(|b| bound_clears(b.speed, speed_tol)) {
+                        (true, Vec::new())
+                    } else {
+                        global_property_analysis(
+                            k,
+                            speed_curve,
+                            &domain,
+                            CurveProperty::MinimizeFirstDerivative,
+                            speed_sep,
+                        )?
+                    };
                 rtn &= report(
                     &mut list,
                     key,
                     if dim == 2 { 11 } else { 12 },
                     first_derivs_ok,
-                    tol,
+                    speed_tol,
                     UNDEF_DOUBLE,
                     |_| {},
                 )?;
@@ -2469,7 +2520,7 @@ impl BSplineCurve {
                 }
 
                 // 1stDeriv magnitude
-                let eval = ignored(self.evaluate(param, 1, false, false))?;
+                let eval = ignored(speed_curve.evaluate(param, 1, false, false))?;
                 let (evaluated, deriv_length) = match eval {
                     Some(pt_der) => (true, pt_der.get(1).copied().unwrap_or(Vec3::UNDEF).length()),
                     None => (false, UNDEF_DOUBLE),
@@ -2477,7 +2528,7 @@ impl BSplineCurve {
 
                 // check 1stDeriv > tolerance; a derivative that cannot be evaluated fails
                 // too (the fork, tangency-labs/smlib 8843967)
-                if !evaluated || deriv_length < tol {
+                if !evaluated || deriv_length < speed_tol {
                     let min_1st_deriv_param = param;
                     let test = if dim == 2 {
                         Some(11)
@@ -2487,8 +2538,8 @@ impl BSplineCurve {
                         None
                     };
                     if let Some(t) = test {
-                        let ok = evaluated && deriv_length >= tol;
-                        rtn &= report(&mut list, key, t, ok, tol, deriv_length, |r| {
+                        let ok = evaluated && deriv_length >= speed_tol;
+                        rtn &= report(&mut list, key, t, ok, speed_tol, deriv_length, |r| {
                             r.set_owner_param(Point2::new(min_1st_deriv_param, 0.0));
                             r.set_value(deriv_length);
                         })?;
@@ -2498,34 +2549,14 @@ impl BSplineCurve {
                 }
             }
 
-            // Not upstream (fork tangency-labs/smlib b4f8c57, WR-560, opt-in): a radius of
-            // curvature is a length, and a UV trim's lengths are those of its face's
-            // surface. The trim is tested mapped by the surface's first fundamental form
-            // at its middle, with the mapped trim's tolerance and solution spacing; a
-            // mapped trim that cannot be sized fails test 13 and is not analysed.
-            let mut mapped: Option<BSplineCurve> = None;
+            // (WR-560, above) a radius of curvature is a length: test 13 of a UV trim runs
+            // on the mapped trim; a mapped trim that cannot be sized fails it
             let (mut radius_sized, mut radius_tol, mut radius_sep) = (sized, tol, min_sep);
-            if sized {
-                if let Some(l) = trim_metric(k, self, bounded, ovr.trim_surface, &domain)? {
-                    mapped = mapped_trim(self, l);
-                    let mapped_box = match mapped.as_ref() {
-                        Some(m) => ignored(m.calculate_bounding_box(
-                            &domain,
-                            BoundingBoxRequest {
-                                normal: true,
-                                pseudo: false,
-                                polar: false,
-                            },
-                        ))?
-                        .and_then(|b| b.normal),
-                        None => None,
-                    };
-                    radius_sized = mapped_box.is_some();
-                    rtn &= bool_report(&mut list, key, 13, radius_sized)?;
-                    if let Some(mapped_box) = mapped_box {
-                        let mapped_size = mapped_box.size().length();
-                        (radius_tol, radius_sep) = bounded_scale(mapped_size, size_t);
-                    }
+            if has_metric {
+                radius_sized = mapped_scale.is_some();
+                rtn &= bool_report(&mut list, key, 13, radius_sized)?;
+                if let Some(scale) = mapped_scale {
+                    (radius_tol, radius_sep) = scale;
                 }
             }
             let copy_curve = mapped.as_ref().unwrap_or(self);
@@ -3251,6 +3282,23 @@ mod tests {
         // a curve that is no face's trim is tested as it is
         let idx = failed_tests(&k, &trim, None);
         assert!(idx.contains(&13), "{idx:?}");
+    }
+
+    /// #23062: test 11 of a UV trim reads its speed on its surface, as WR-560 reads its
+    /// radius (test 13). The exact trim of a r 0.4 circle on a plane spanning 100000 x 1 is
+    /// an ellipse 100000 times as wide as it is long in (u, v). Where the circle runs along
+    /// u, the trim moves at about 1e-5 in (u, v), under the tolerance of its raw box (about
+    /// 8e-5 a unit of its parameter, over 10000). On the plane it is the circle of radius
+    /// 0.4, which nowhere moves slower than its own tolerance.
+    #[test]
+    fn issue_23062_uv_trim_speed_is_measured_on_its_surface() {
+        let k = Kernel::default();
+        let (trim, plane) = circle_trim_on_plane((50_000.0, 0.5, 0.4), (100_000.0, 1.0));
+        let idx = failed_tests(&k, &trim, Some(&plane));
+        assert!(!idx.contains(&11), "{idx:?}");
+        // a curve that is no face's trim is tested as it is
+        let idx = failed_tests(&k, &trim, None);
+        assert!(idx.contains(&11), "{idx:?}");
     }
 
     /// A rational quadratic B-spline of dimension `dim` with `points`, `weights` and the
