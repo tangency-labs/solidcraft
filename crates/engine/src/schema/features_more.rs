@@ -385,8 +385,10 @@ pub struct EmbossParams {
     /// The bodies to emboss, by name. With `face`, only these are searched for it.
     #[serde(default)]
     pub targets: Option<NameList>,
-    /// A world point on the face to emboss: planar, a cylinder wall (either side) or another curved face. Default:
-    /// inferred when exactly one supported tangent cylinder matches the selected profiles.
+    /// A world point on the face to emboss: planar, a cylinder wall (either side) or another curved face. A point on
+    /// a ring of faces tangent to each other (a side of flats and rounds) stands for the ring: when the profiles lie
+    /// on another face of it, that face is taken. Default: inferred when exactly one supported tangent cylinder
+    /// matches the selected profiles.
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "EmbossFacePoint")]
     pub face: Option<EmbossFacePoint>,
