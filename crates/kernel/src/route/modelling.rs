@@ -1,11 +1,11 @@
 //! The router's body-making operations ([`solidcraft_kernel_api::Modelling`]).
 
-use solidcore_record::{Plane, Region2, Seg2, Vec2, Vec3};
+use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_kernel_api::{
     Axis2, BoolOp, ChamferSide, DraftCorner, ExtrudeSides, FilletTurn, Modelling, OpKind, Primitive, RevolveSides, Taper, TrimKeep,
 };
 
-use crate::SplitTool;
+use crate::{PathSeg, PointPath, SplitTool, SweepControl};
 
 use super::{Which, which};
 use crate::Result;
@@ -290,5 +290,94 @@ pub fn split_body_by_sheet_where_it_cuts(body: &Body, sheet: &Body, face: usize)
 pub fn trim_keep(body: &Body, tool: &SplitTool, keep: TrimKeep) -> Result<Body> {
     match which(OpKind::Split) {
         Which::Solidcore => Solidcore.trim_keep(body, tool, keep),
+    }
+}
+
+/// Sweep a planar region along a chain of path segments, keeping the profile perpendicular to
+/// the path; at sharp corners the walls meet in mitres.
+pub fn sweep(plane: &Plane, region: &Region2, path: &[PathSeg]) -> Result<Body> {
+    sweep_with(plane, region, path, &SweepControl::default())
+}
+
+/// [`sweep`] with sweep options. The default options are exactly [`sweep`]; a twist, an end
+/// scale, guide rails or an orientation direction place the profile at stations along the path.
+pub fn sweep_with(plane: &Plane, region: &Region2, path: &[PathSeg], ctl: &SweepControl) -> Result<Body> {
+    let (path, options) = (crate::sweep_api::spans(path), crate::sweep_api::options(ctl));
+    match which(OpKind::Sweep) {
+        Which::Solidcore => Solidcore.sweep(plane, region, &path, &options),
+    }
+}
+
+/// Sweep a planar region along a path through 3D sketch curves: its splines exactly, its
+/// polylines as lines.
+pub fn sweep_point_path_with(plane: &Plane, region: &Region2, path: &PointPath, ctl: &SweepControl) -> Result<Body> {
+    let (path, options) = (crate::sweep_api::point_path(path), crate::sweep_api::options(ctl));
+    match which(OpKind::Sweep) {
+        Which::Solidcore => Solidcore.sweep_points(plane, region, &path, &options),
+    }
+}
+
+/// Sweep a planar region's outer loop along a helix about `axis` through `axis_origin`: `turns`
+/// revolutions (right-handed about `axis`), rising `pitch` per turn, the profile keeping its
+/// attitude to the axis as a screw motion does.
+pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec3, pitch: f64, turns: f64) -> Result<Body> {
+    helical(plane, region, &Helix { origin: axis_origin, axis, pitch, turns, law: None, continuous_flanks: false })
+}
+
+/// [`sweep_helix`] with the profile moved off the axis as it turns, `offset` piecewise linear
+/// through `law`'s (turn, offset) pairs; `continuous_flanks` joins the spline walls across
+/// cylinder seams.
+#[allow(clippy::too_many_arguments)]
+pub fn sweep_helix_radial(
+    plane: &Plane,
+    region: &Region2,
+    axis_origin: Vec3,
+    axis: Vec3,
+    pitch: f64,
+    turns: f64,
+    law: &[(f64, f64)],
+    continuous_flanks: bool,
+) -> Result<Body> {
+    helical(plane, region, &Helix { origin: axis_origin, axis, pitch, turns, law: Some(law), continuous_flanks })
+}
+
+fn helical(plane: &Plane, region: &Region2, helix: &Helix<'_>) -> Result<Body> {
+    match which(OpKind::Sweep) {
+        Which::Solidcore => Solidcore.sweep_helix(plane, region, helix),
+    }
+}
+
+/// A solid through closed planar sections in order.
+pub fn loft(sections: &[(Plane, Loop2)]) -> Result<Body> {
+    loft_with_rails(sections, &[], RailFit::Scale)
+}
+
+/// [`loft`] following 1…16 guide rails (polylines from the first section to the last, through
+/// every section's curve), `fit` saying how they reshape the sections between. Without rails,
+/// the plain loft.
+pub fn loft_with_rails(sections: &[(Plane, Loop2)], rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
+    match which(OpKind::Loft) {
+        Which::Solidcore => Solidcore.loft(sections, rails, fit),
+    }
+}
+
+/// A loft through regions with matching hole counts: hole walls are built alongside the outline
+/// and share the end caps.
+pub fn loft_regions(sections: &[(Plane, Region2)]) -> Result<Body> {
+    match which(OpKind::Loft) {
+        Which::Solidcore => Solidcore.loft_regions(sections),
+    }
+}
+
+/// A solid from a planar loop of straight segments to an apex point off its plane (a pyramid).
+pub fn loft_to_point(plane: &Plane, lp: &Loop2, apex: Vec3) -> Result<Body> {
+    loft_to_point_with_rails(plane, lp, apex, &[], RailFit::Scale)
+}
+
+/// [`loft_to_point`] following one or two guide `rails` (polylines from the loop to the apex),
+/// `fit` saying how they reshape the section on the way. Without rails, the plain loft to a point.
+pub fn loft_to_point_with_rails(plane: &Plane, lp: &Loop2, apex: Vec3, rails: &[Vec<Vec3>], fit: RailFit) -> Result<Body> {
+    match which(OpKind::Loft) {
+        Which::Solidcore => Solidcore.loft_to_point(plane, lp, apex, rails, fit),
     }
 }
