@@ -4624,3 +4624,26 @@ fn every_plugin_dialog_message_has_text() {
     missing.dedup();
     assert!(missing.is_empty(), "no text for {missing:?}");
 }
+
+#[test]
+fn numeric_presets_keep_valid_distinct_values_without_constraining_manual_input() {
+    let schema = json!({"type":"object","properties":{
+        "width":{"type":"number","minimum":10,"maximum":30,"multipleOf":5,
+            "x-solidcraft-presets":[10,15,15.0,17,35,20,"30",25]},
+        "count":{"type":"integer","minimum":1,"maximum":5,"x-solidcraft-presets":[1,2.5,3,6]},
+        "label":{"type":"string","x-solidcraft-presets":[1,2]}
+    }});
+    let mut fields = form(&schema).unwrap();
+    let (width, input) = fields.iter_mut().find(|(f, _)| f.key == "width").unwrap();
+    assert_eq!(width.presets, vec![json!(10.0), json!(15.0), json!(20.0), json!(25.0)]);
+    *input = stored_input(width, &width.presets[2]).unwrap();
+    assert_eq!(scalar_value(width, input), Some(json!(20.0)));
+    *input = Input::Typed("30".into());
+    assert_eq!(scalar_value(width, input), Some(json!(30.0)));
+    let count = &fields.iter().find(|(f, _)| f.key == "count").unwrap().0;
+    assert_eq!(count.presets, [json!(1), json!(3)]);
+    assert!(fields.iter().find(|(f, _)| f.key == "label").unwrap().0.presets.is_empty());
+    let long = json!((0..100).collect::<Vec<_>>());
+    let kind = Kind::Integer { min: None, max: None, unit: None };
+    assert_eq!(numeric_presets(&kind, Some(&long)).len(), 16);
+}
