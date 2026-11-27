@@ -2627,3 +2627,138 @@ fn loop_crosses_itself_at_a_bow_tie_and_along_a_shared_line() {
     };
     assert_eq!(loop_crosses_itself(&curvy, 1e-7), None);
 }
+
+/// #3383: the wall of a circular segment's arc is a cylinder in the record, however short the
+/// arc. Recognition fits the circle of the wall's first row through three of its points, and on
+/// a short arc that circle's centre is off the axis by the points' rounding over the square of
+/// the arc; the sweep's ends were read about it, so the label's proof found the cylinder off its
+/// own form (by 30 times the rounding on a 0.1 degree arc of radius 1000) and the wall went as a
+/// rational spline. Its ends are now read off the form's end meridians about the cylinder's own
+/// axis. The 90 degree arc was a cylinder before as well.
+#[test]
+fn a_short_arcs_wall_is_a_cylinder_in_the_record() {
+    use solidcore_record::brep::Surface as RS;
+    all_fixes();
+    for (radius, deg) in [
+        (10.0_f64, 90.0_f64),
+        (10.0, 2.0),
+        (10.0, 1.0),
+        (1000.0, 5.0),
+        (1000.0, 2.0),
+        (1000.0, 1.0),
+        (1000.0, 0.1),
+        (1e4, 1.0),
+        (1e5, 0.01),
+    ] {
+        let half = deg.to_radians() / 2.0;
+        let start = FRAC_PI_2 - half;
+        let at = |t: f64| v(radius * t.cos(), radius * t.sin());
+        let segment = Region2 {
+            outer: Loop2 {
+                segs: vec![
+                    Seg2::Arc {
+                        center: v(0.0, 0.0),
+                        radius,
+                        start,
+                        sweep: 2.0 * half,
+                    },
+                    Seg2::Line {
+                        a: at(start + 2.0 * half),
+                        b: at(start),
+                    },
+                ],
+            },
+            holes: vec![],
+        };
+        let body = extrude_planar_regions(&Plane::XY, &[segment], 0.0, 10.0)
+            .unwrap_or_else(|e| panic!("r = {radius}, {deg} deg: {e:?}"));
+        let (record, _) = body
+            .to_record()
+            .unwrap_or_else(|e| panic!("r = {radius}, {deg} deg: {e:?}"));
+        let radii: Vec<f64> = record
+            .faces
+            .iter()
+            .filter_map(|f| match f.surface {
+                RS::Cylinder { radius, .. } => Some(radius),
+                RS::Plane { .. } => None,
+                ref other => panic!("r = {radius}, {deg} deg: a face {other:?}"),
+            })
+            .collect();
+        assert_eq!(radii, [radius], "r = {radius}, {deg} deg");
+        Body::from_record(&record, true)
+            .unwrap_or_else(|e| panic!("r = {radius}, {deg} deg: {e:?}"));
+    }
+}
+
+/// #3381: on a plane off the coordinate axes the recogniser fits a short arc's wall to no cone
+/// at all (its circles through three points of each row miss its tolerances), and the wall went
+/// to the record as a rational spline. A cylinder support has its axis, so the wall's
+/// parametrisation is read off the form about it: each arc here is a cylinder of its radius.
+/// (Some arcs on this plane still are not: their form's far row is off the cylinder by more than
+/// the proof's rounding at its middle point, which #3381 keeps open.)
+#[test]
+fn a_short_arcs_wall_off_the_coordinate_planes_is_a_cylinder_in_the_record() {
+    use solidcore_record::brep::Surface as RS;
+    all_fixes();
+    // the plane through the origin with normal (1, 2, 2) / 3, x = (2, -1, 0) / sqrt 5
+    let plane = Plane {
+        origin: Vec3::new(0.0, 0.0, 0.0),
+        x: Vec3::new(0.894_427_190_999_916, -0.447_213_595_499_958, 0.0),
+        y: Vec3::new(
+            0.298_142_396_999_971_97,
+            0.596_284_793_999_943_9,
+            -0.745_355_992_499_929_9,
+        ),
+    };
+    for (radius, deg, depth) in [
+        (100.0_f64, 0.1_f64, -3.0_f64),
+        (1000.0, 0.03, 10.0),
+        (1e4, 0.3, -3.0),
+        (1e5, 1.0, 10.0),
+        (1e5, 0.01, -3.0),
+        (10.0, 2.0, 10.0),
+    ] {
+        let half = deg.to_radians() / 2.0;
+        let start = FRAC_PI_2 - half;
+        let at = |t: f64| v(radius * t.cos(), radius * t.sin());
+        let segment = Region2 {
+            outer: Loop2 {
+                segs: vec![
+                    Seg2::Arc {
+                        center: v(0.0, 0.0),
+                        radius,
+                        start,
+                        sweep: 2.0 * half,
+                    },
+                    Seg2::Line {
+                        a: at(start + 2.0 * half),
+                        b: at(start),
+                    },
+                ],
+            },
+            holes: vec![],
+        };
+        let (lo, hi) = if depth > 0.0 {
+            (0.0, depth)
+        } else {
+            (depth, 0.0)
+        };
+        let body = extrude_planar_regions(&plane, &[segment], lo, hi)
+            .unwrap_or_else(|e| panic!("r = {radius}, {deg} deg: {e:?}"));
+        let (record, _) = body
+            .to_record()
+            .unwrap_or_else(|e| panic!("r = {radius}, {deg} deg: {e:?}"));
+        let radii: Vec<f64> = record
+            .faces
+            .iter()
+            .filter_map(|f| match f.surface {
+                RS::Cylinder { radius, .. } => Some(radius),
+                RS::Plane { .. } => None,
+                ref other => panic!("r = {radius}, {deg} deg: a face {other:?}"),
+            })
+            .collect();
+        assert_eq!(radii, [radius], "r = {radius}, {deg} deg");
+        Body::from_record(&record, true)
+            .unwrap_or_else(|e| panic!("r = {radius}, {deg} deg: {e:?}"));
+    }
+}

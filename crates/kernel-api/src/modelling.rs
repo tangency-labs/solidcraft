@@ -209,11 +209,34 @@ pub trait Modelling: Backend {
     fn boolean(&self, a: &Self::Form, b: &Self::Form, op: BoolOp) -> Result<Option<Self::Form>, Self::Error>;
     /// Constant-radius rounds of the edges nearest `edges`, turning at side edges as `turn` says.
     fn fillet(&self, body: &Self::Form, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<Self::Form, Self::Error>;
+    /// [`Modelling::fillet`], with the picks whose edges are gone: where some rounds overflow
+    /// their faces those are built first, and a picked edge one of them removes whole is not
+    /// rounded; a single concave round running off the flat face it rolls on carries that face
+    /// on. The picks left out come back with the body.
+    fn fillet_removing(&self, body: &Self::Form, edges: &[Vec3], radius: f64, turn: FilletTurn) -> Result<(Self::Form, Vec<Vec3>), Self::Error>;
+    /// Each edge nearest `edges` rounded at its own radius (`radii` in `edges`' order), in one
+    /// blend.
+    fn fillet_each(&self, body: &Self::Form, edges: &[Vec3], radii: &[f64], turn: FilletTurn) -> Result<Self::Form, Self::Error>;
+    /// Constant-radius rounds set back from the corners at the vertices nearest each point by
+    /// its distance, with a patch between the rounds there.
+    fn fillet_setback(&self, body: &Self::Form, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)]) -> Result<Self::Form, Self::Error>;
     /// An equal chamfer of the edges nearest `edges`.
     fn chamfer(&self, body: &Self::Form, edges: &[Vec3], distance: f64) -> Result<Self::Form, Self::Error>;
+    /// [`Modelling::chamfer`], and where a single concave chamfer runs off the flat face it
+    /// rolls on, that face carried on.
+    fn chamfer_carrying_face(&self, body: &Self::Form, edges: &[Vec3], distance: f64) -> Result<Self::Form, Self::Error>;
     /// An unequal chamfer: `d1` along the first face (the one facing up most, the other with
     /// `flip`), the second side by distance or angle.
     fn chamfer_sides(&self, body: &Self::Form, edges: &[Vec3], d1: f64, side: ChamferSide, flip: bool) -> Result<Self::Form, Self::Error>;
+    /// [`Modelling::chamfer_sides`], carrying a flat face on as [`Modelling::chamfer_carrying_face`].
+    fn chamfer_sides_carrying_face(
+        &self,
+        body: &Self::Form,
+        edges: &[Vec3],
+        d1: f64,
+        side: ChamferSide,
+        flip: bool,
+    ) -> Result<Self::Form, Self::Error>;
     /// The body hollowed to `thickness`, open at the faces nearest `open`.
     fn shell(&self, body: &Self::Form, open: &[Vec3], thickness: f64) -> Result<Self::Form, Self::Error>;
     /// A sheet thickened to `thickness`, to both sides when `symmetric`.
