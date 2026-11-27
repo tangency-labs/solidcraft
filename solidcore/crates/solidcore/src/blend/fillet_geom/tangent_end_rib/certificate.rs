@@ -1186,11 +1186,10 @@ impl Rib<'_, '_> {
                 alpha,
                 half: big_a,
             };
-            let Some(d) = self.near_errors(&band) else {
+            let Some(d) = self.near_errors(&band).filter(|d| !d.is_nan()) else {
                 return Ok(Ring::Open);
             };
-            // (a NaN fails it)
-            if !(d <= tol) {
+            if d > tol {
                 return Ok(Ring::Over);
             }
             let ring = |lo: f64, hi: f64| at(a0) + Ivl::new(lo, hi);
@@ -1265,7 +1264,7 @@ impl Rib<'_, '_> {
                 return Ok(None);
             }
             half = h.max(0.5 * half);
-            if !(inside <= 2.0 * half) {
+            if inside.is_nan() || inside > 2.0 * half {
                 return Ok(None);
             }
             let band = Band {
