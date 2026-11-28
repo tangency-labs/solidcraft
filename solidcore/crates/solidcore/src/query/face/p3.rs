@@ -121,6 +121,10 @@
 //!   and at the limits it counts with its own bound; a way along which its control
 //!   values are level is not halved. The fork set a cell aside on its solve's value,
 //!   which the surface takes but need not be its greatest.
+//!   Not the fork's (#23004): the cells of a face closed in a way are decided so as well.
+//!   A closed loop's net has a subpatch over each of its cells, and a ridge inside such a
+//!   face (a loft's bulge past its sections' major axis) takes no value of a solve's, so
+//!   the fork set every cell aside on the box so far and left the bulge out.
 //!   Not the fork's (#18809): a procedural blend cell whose net hull, raised by its
 //!   extraction rounding and definition certificate, cannot enlarge the box is skipped
 //!   before solving on the definition, whether the surface is open or closed.
@@ -489,6 +493,26 @@ pub fn calculate_tight_bounding_box<'a>(
     let mut face_bbox = Extent3d::new();
     calculate_tight_bounding_box_into(k, &mut b.into(), f, &mut face_bbox)?;
     Ok(face_bbox)
+}
+
+/// Whether [`calculate_tight_bounding_box_into`] of `f` could add nothing to its B-rep's
+/// tight box once that holds every vertex and every edge's tight box (or the edge's loose
+/// box lay inside it): so for a planar face with an edge that has a curve, whose own box
+/// is its vertices and those edge boxes alone. A face without such an edge is bounded by
+/// its surface over its domain, and a curved face by its surface too: both are `false`.
+/// It makes the same coordinate and surface checks first, so those refusals stay.
+///
+/// # Errors
+///
+/// Those of the checks, the face's edges and the planarity test.
+pub(crate) fn adds_nothing_to_brep_box(k: &Kernel, b: &Brep, f: FaceId) -> Result<bool> {
+    check_face_coordinates(k, b, f, OP_TIGHT)?;
+    let surface = face_surface(b, f, OP_TIGHT)?.clone_for_evaluation()?;
+    let mut has_curve = false;
+    for e in face_edges(b, f)? {
+        has_curve |= b.edge(e)?.curve.is_some();
+    }
+    Ok(has_curve && surface_is_planar(k, b, f, &surface, EFF_ZERO)?)
 }
 
 /// [`calculate_tight_bounding_box`] into the caller's `face_bbox` (`rFaceBBox`), for
@@ -1680,8 +1704,8 @@ fn net_cell(net: &NetSurface, cell: &Extent2d, dir: Vec3) -> Result<Option<NetCe
 ///
 /// Not the fork's (#13753): a solve's greatest is a value the surface takes, a lower
 /// bound on the cell's greatest, so the fork's 1.–3. on it can set aside a cell with a
-/// higher point the solve missed. A cell of a B-spline face open both ways (its subpatch,
-/// [`cell_patch`]) is decided on its control points instead: 1. on their greatest; 2. a
+/// higher point the solve missed. A cell of a B-spline face, open both ways or closed in one
+/// (#23004), (its subpatch, [`cell_patch`]) is decided on its control points instead: 1. on their greatest; 2. a
 /// solve's value at a point in the face only raises `best`; 3. on their least, less the
 /// subpatch's rounding, above `best` and the zone tolerance, with every solution
 /// classified outside; at the limits it counts with its own bound; and a way along which
@@ -1774,15 +1798,14 @@ fn face_directed_max_with<'b>(
     } else {
         (Vec::new(), Vec::new())
     };
-    // A B-spline face open both ways is decided cell by cell on its exact subpatch over
-    // the cell ([`cell_patch`]); any other face on its own surface.
-    let by_patch = matches!(surface.kind(), SurfaceKind::BSpline(_))
-        && !surface
-            .is_closed(k, uv_domain, SurfParamType::U, None, false)?
-            .0
-        && !surface
-            .is_closed(k, uv_domain, SurfParamType::V, None, false)?
-            .0;
+    // A B-spline face is decided cell by cell on its exact subpatch over the cell
+    // ([`cell_patch`]); any other face on its own surface. A face closed in a way has
+    // subpatches over its cells as well: a closed loop's net is one over its period, and a
+    // cell within it is one patch. Decided on a solve instead, such a cell had only the
+    // solve's value to bound it, and a ridge inside the face took no value of the solve's:
+    // the loft's side face bulges to 40.1244 at the end of its sections' major axis, 2.1 mm
+    // past its greatest edge, and the whole-domain solve found 38 there (#23004).
+    let by_patch = matches!(surface.kind(), SurfaceKind::BSpline(_));
     // #21660: on a surface open both ways over its natural domain (no loop of it can be
     // stored a period away, [`holds_point_beside_hole`]), the face lies within its trims'
     // boxes. The search starts from their box ([`trims_domain`]), not from the surface's
@@ -4443,6 +4466,118 @@ mod tests {
         assert!(matches!(got, Err(SolidError::Cancelled { .. })), "{got:?}");
     }
 
+    /// A tube closed in v, built as a loft's side face is: u runs along four sections (a
+    /// cubic whose control magnitudes are `1, 1.1, 1.05, 0.9` over `[0, 1]`), v around the
+    /// closed loop of an ellipse of semi-axes 1 and 0.6 (nine control points, degree 2,
+    /// weights `1` and `1/sqrt 2`, knots `0,0,0,1,1,2,2,3,3,4,4,4`; `v = 0` and `v = 4`
+    /// meet). Its greatest x is 1.052 at `u = 0.354`, a ridge inside the face at `v` near
+    /// 1, past the face's ends at 1: no edge of it holds that value.
+    fn closed_tube_with_a_bulge() -> Surface {
+        let scale = [1.0, 1.1, 1.05, 0.9];
+        let w = 1.0 / 2.0_f64.sqrt();
+        let loop_xy = [
+            (0.0, 0.6),
+            (1.0, 0.6),
+            (1.0, 0.0),
+            (1.0, -0.6),
+            (0.0, -0.6),
+            (-1.0, -0.6),
+            (-1.0, 0.0),
+            (-1.0, 0.6),
+            (0.0, 0.6),
+        ];
+        let weights = [1.0, w, 1.0, w, 1.0, w, 1.0, w, 1.0];
+        let net: Vec<Vec<CPoint>> = (0..4)
+            .map(|i| {
+                loop_xy
+                    .iter()
+                    .zip(weights)
+                    .map(|(&(x, y), weight)| {
+                        CPoint::weighted(
+                            Vec3::new(scale[i] * x, scale[i] * y, 10.0 * i as f64),
+                            weight,
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        let u = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let v = vec![0.0, 0.0, 0.0, 1.0, 1.0, 2.0, 2.0, 3.0, 3.0, 4.0, 4.0, 4.0];
+        let nurb = NurbSurface::new(net, 3, 2, u, v).unwrap();
+        Surface::from(BSplineSurface::from_nurb(nurb, false))
+    }
+
+    /// The kernel, B-rep and face over [`closed_tube_with_a_bulge`]'s whole domain
+    /// (`[0, 1]` by `[0, 4]`), with no edges: the box it starts from is none at all.
+    fn closed_tube_face() -> (Kernel, Brep, FaceId) {
+        let mut b = Brep::new();
+        let s = b.add_shell().unwrap();
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 4.0);
+        let f = b
+            .add_face_record(Face {
+                surface: Some(closed_tube_with_a_bulge()),
+                faceuse: None,
+                uv_domain: domain,
+                tolerance: 1e-6,
+                ..Face::new(s)
+            })
+            .unwrap();
+        (Kernel::default(), b, f)
+    }
+
+    /// #23004: a face closed in a way is decided on its cells' control points, as one open
+    /// both ways is. The whole-domain solve of the loft's side face found 38, its greatest
+    /// edge, and missed the ridge at 40.1244: the fork set the cell aside on that value and
+    /// boxed the face to 38. Here the solve reports the value 1 the ends hold and misses the
+    /// ridge; the cells' hulls bound the face, and the box holds every point of it.
+    #[test]
+    fn a_closed_faces_ridge_is_boxed_although_the_solve_misses_it() {
+        let (k, b, f) = closed_tube_face();
+        let face = b.face(f).unwrap();
+        let surface = face.surface.clone().unwrap();
+        let domain = face.uv_domain;
+        let mut sampled = 0.0_f64;
+        for i in 0..=100 {
+            let u = domain.min().x + 0.01 * (domain.max().x - domain.min().x) * f64::from(i);
+            for j in 0..=100 {
+                let v = domain.min().y + 0.01 * (domain.max().y - domain.min().y) * f64::from(j);
+                let mut eval = SurfaceEval::with_uv(&k, Some(&surface), u, v);
+                let p = eval_pos(&mut eval).unwrap();
+                sampled = sampled.max(p.x);
+            }
+        }
+        let mut lb: LazyBrep<'_> = (&b).into();
+        let mut missed = |_: &mut LazyBrep<'_>, _: &Surface, _: &Extent2d, _: Vec3| {
+            Ok(CellDirectedMax {
+                top: 1.0,
+                in_face: false,
+                found: true,
+                face_top: -crate::math::BIG_DOUBLE,
+                outside: false,
+            })
+        };
+        let top = face_directed_max_with(
+            &k,
+            &mut lb,
+            f,
+            &surface,
+            &domain,
+            1e-6,
+            Vec3::new(1.0, 0.0, 0.0),
+            1.0,
+            SearchLimits {
+                max_depth: FACE_EXTREME_MAX_DEPTH,
+                max_cells: FACE_EXTREME_MAX_CELLS,
+            },
+            &mut missed,
+        )
+        .unwrap();
+        assert!(
+            top >= sampled,
+            "x max {top} is below the face's own {sampled}"
+        );
+        assert!(top <= 1.1, "x max {top} is above the control points' 1.1");
+    }
     /// The rounding of a subpatch's hull is a small finite bound for the crown, and none
     /// when it overflows (a rational net with coordinates near `1e100` and weights `1e-300`
     /// and 1): an unsolved cell then counts with the surface's loose box, not the hull.

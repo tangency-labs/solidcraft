@@ -78,7 +78,9 @@ pub mod join_gap;
 pub mod mixed;
 pub mod on_face;
 pub(crate) mod piece;
+pub(crate) mod proved_trim;
 pub mod rollover;
+pub mod section_mitre;
 pub mod separate_ends;
 pub mod setback;
 pub mod support_ball;
@@ -596,45 +598,59 @@ pub trait MitreSolvers {
     fn ops(&mut self, id: FilletSolverId) -> Result<&mut dyn FilletSolverOps>;
 }
 
-/// `sm_FootOnSurface`: the point of `surface` nearest `point` (on it), from the guess
-/// `uv`: Newton on the foot's normal equations, to rounding. `None` where it does not
-/// converge in 40 steps (or the normal equations are singular).
-fn foot_on_surface(
+/// One Newton step of the foot's normal equations at `uv`: the change of `uv` towards the
+/// point of `surface` nearest `point`. On a surface affine in its parameters (a plane's) the
+/// step from any `uv` lands on the foot, also where the foot is past the surface's box.
+/// `None` where the normal equations are singular.
+fn foot_step(
     k: &Kernel,
     surface: &Surface,
     point: Point3,
-    mut uv: Point2,
-) -> Result<Option<Point2>> {
+    uv: Point2,
+) -> Result<Option<(f64, f64)>> {
     let flags = EvaluateFlags {
         u_side: Side::Left,
         v_side: Side::Left,
         only_upper_half: true,
         non_zero_tangents: false,
     };
+    let d = surface.evaluate(k, uv, 1, 1, flags)?;
+    let at = |i: usize, j: usize| {
+        d.get(i).and_then(|row| row.get(j)).copied().ok_or_else(|| {
+            missing_defect(
+                OP_EXACT,
+                "the surface's evaluation to first order returned fewer derivatives than asked",
+            )
+        })
+    };
+    let r = point - at(0, 0)?;
+    let su = at(1, 0)?;
+    let sv = at(0, 1)?;
+    let a = su.dot(su);
+    let b = su.dot(sv);
+    let c = sv.dot(sv);
+    let det = a * c - b * b;
+    if det <= EFF_ZERO * a * c {
+        return Ok(None);
+    }
+    let ru = su.dot(r);
+    let rv = sv.dot(r);
+    Ok(Some(((c * ru - b * rv) / det, (a * rv - b * ru) / det)))
+}
+
+/// `sm_FootOnSurface`: the point of `surface` nearest `point` (on it), from the guess
+/// `uv`: Newton on the foot's normal equations, to rounding. `None` where it does not
+/// converge in 40 steps (or the normal equations are singular).
+pub(crate) fn foot_on_surface(
+    k: &Kernel,
+    surface: &Surface,
+    point: Point3,
+    mut uv: Point2,
+) -> Result<Option<Point2>> {
     for _ in 0..40 {
-        let d = surface.evaluate(k, uv, 1, 1, flags)?;
-        let at = |i: usize, j: usize| {
-            d.get(i).and_then(|row| row.get(j)).copied().ok_or_else(|| {
-                missing_defect(
-                    OP_EXACT,
-                    "the surface's evaluation to first order returned fewer derivatives than asked",
-                )
-            })
-        };
-        let r = point - at(0, 0)?;
-        let su = at(1, 0)?;
-        let sv = at(0, 1)?;
-        let a = su.dot(su);
-        let b = su.dot(sv);
-        let c = sv.dot(sv);
-        let det = a * c - b * b;
-        if det <= EFF_ZERO * a * c {
+        let Some((du, dv)) = foot_step(k, surface, point, uv)? else {
             return Ok(None);
-        }
-        let ru = su.dot(r);
-        let rv = sv.dot(r);
-        let du = (c * ru - b * rv) / det;
-        let dv = (a * rv - b * ru) / det;
+        };
         uv.x += du;
         uv.y += dv;
         if du.abs() + dv.abs() <= 4.0 * EFF_ZERO * (1.0 + uv.x.abs() + uv.y.abs()) {
