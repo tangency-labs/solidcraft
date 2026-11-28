@@ -34,6 +34,23 @@ fn coderabbit_review_saved_x(s: &Session, side: &str) -> Option<solidcraft_doc::
 }
 
 #[test]
+fn joint_edit_refuses_nested_set_without_changing_the_joint() {
+    for mode in crate::schema::ParamCheck::ALL {
+        let (mut s, p) = coderabbit_review_plane_joint();
+        run(&mut s, "joint.create", p);
+        s.param_check = mode;
+        let before = s.doc.clone();
+        let undo = s.undo.len();
+        let error = s.execute("joint.edit", &json!({"joint":"ReviewJoint", "set":{"offset":25}})).unwrap_err();
+        assert!(error.to_string().contains("`set`"), "{error}");
+        assert_eq!(s.doc, before);
+        assert_eq!(s.undo.len(), undo);
+        run(&mut s, "joint.edit", json!({"joint":"ReviewJoint", "offset":25}));
+        assert_ne!(s.doc, before);
+    }
+}
+
+#[test]
 fn coderabbit_review_primary_replacement_retains_alignment_and_validates_it() {
     use solidcraft_doc::joints::XRef;
     for (side, occurrence) in [("a", "ReviewA"), ("b", "ReviewB")] {
