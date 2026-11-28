@@ -23,8 +23,13 @@
 //! | [`OffsetFacesExecutive::reblend`]     | `OffsetFaces` step 5 (the sharp edges blended again) |
 //! | [`OffsetFacesExecutive::take_off`]    | `OffsetFaces` step 3 (the blends taken off)       |
 //! | [`OffsetFacesExecutive::offset_faces`] | `OffsetFaces`                                    |
+//! | [`OffsetFacesExecutive::move_onto`]   | (not in the fork) `OffsetFaces` with step 4 a move onto given surfaces |
 //!
 //! Deviations:
+//! - **Moves onto given surfaces** (not in the fork): a draft's faces go onto the surfaces it
+//!   gives them ([`OffsetFacesExecutive::move_onto`]), the blends on them following through
+//!   steps 1 to 6 as a face offset's do; each moved face carries a [`MARK_ONTO`] code naming
+//!   its surface, so a piece of it the removals leave goes onto the same one.
 //! - **Scope.** The marks, the collection of the followed blends, the
 //!   kept attributes and their restoring (steps 1, 2 and 6 of `OffsetFaces`), the move
 //!   (step 4), the re-blend (step 5), taking the blends off (step 3) and `OffsetFaces`.
@@ -98,6 +103,7 @@ use crate::geom::attribute::{
 };
 use crate::geom::global_solver::SolverOperation;
 use crate::kernel::Kernel;
+use crate::math::det;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
 use crate::offset::offset_executive::p2::local_operation_simple;
@@ -151,6 +157,10 @@ const RAIL_WITHOUT_PRIMARY_EDGEUSE: &str = "a rail of a followed blend has no pr
 const MOVED_SURFACE_NOT_STORED: &str = "the face move's store does not hold the new surface the \
      face's offset returned, though the store only appends and the handle is the index it \
      appended at";
+/// Why a moved face names no surface ([`OffsetFacesExecutive::move_onto`]).
+const MOVED_FACE_WITHOUT_SURFACE: &str = "a face to move onto a given surface carries no \
+     mark naming the surface, though every face marked to move was marked with its surface and \
+     the marks are copied to every piece of a face";
 /// Why a removal names no sharp edge ([`OffsetFacesExecutive::take_off`]).
 const REMOVAL_WITHOUT_SHARP_EDGE: &str = "a blend's removal reported success without the sharp \
      edge it replaced the blend with, which every removal that succeeds makes";
@@ -175,6 +185,14 @@ pub const MARK_SUPPORT: i64 = 0;
 pub const MARK_SHARP: i64 = 2;
 /// `s_lEnd`: `+ k`, the face across the blend's `k`-th other edge (an end face).
 pub const MARK_END: i64 = 3;
+/// Not in the fork: `- i`, a moved face that goes onto the caller's surface `i`
+/// ([`OffsetFacesExecutive::move_onto`]).
+pub const MARK_ONTO: i64 = -16;
+
+/// The mark of a moved face that goes onto the caller's surface `index`.
+const fn onto_code(index: usize) -> i64 {
+    MARK_ONTO.saturating_sub(code_term(index))
+}
 
 /// Why [`OffsetFacesExecutive`] refused (`SmOffsetFacesRefusal`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -621,7 +639,7 @@ impl OffsetFacesExecutive {
                     }
                     let cos =
                         normals[0].dot(normals[1]) / (normals[0].length() * normals[1].length());
-                    let limit = (TANGENCY_TOL_DEG * (crate::math::PI / 180.0)).cos();
+                    let limit = det::cos(TANGENCY_TOL_DEG * (crate::math::PI / 180.0));
                     // (`!(dCos > -limit) || !(dCos < limit)`: a NaN cosine skips too)
                     let at_an_angle = cos > -limit && cos < limit;
                     if !at_an_angle {
@@ -1186,6 +1204,17 @@ impl OffsetFacesExecutive {
     }
 }
 
+/// Step 4 of a face move whose blends follow: along the normals
+/// ([`OffsetFacesExecutive::offset_faces`]) or onto given surfaces
+/// ([`OffsetFacesExecutive::move_onto`]).
+#[derive(Clone, Copy)]
+enum Move<'s> {
+    /// Each moved face onto its surface's offset by `distance`, `tol` the B-rep's tolerance.
+    By { distance: f64, tol: f64 },
+    /// Each moved face onto the surface its [`MARK_ONTO`] code names.
+    Onto(&'s [Surface]),
+}
+
 // ---- step 3 and OffsetFaces ------------------------------------------------------------
 
 /// Whether a face on `s` can grow to wherever a group of blends beside it comes off without
@@ -1552,6 +1581,89 @@ impl OffsetFacesExecutive {
         r
     }
 
+    /// Not in the fork: each face `faces[i]` moved onto `surfaces[i]` by the local operation
+    /// (`SmBrep::LocalOperation`, as a draft moves its faces), the tangent blends on the moved
+    /// faces following as they follow [`Self::offset_faces`]: the body is
+    /// `blend(move(unblend(body)))`, steps 1 to 6 with step 4 this move. A blend beside a
+    /// moved face cannot be extended to meet the face's new surface: rolled on the old
+    /// surface, it lies off the new one (a round of a cylinder's rim beside the cone the
+    /// cylinder is drafted to), so it comes off with its faces met at the sharp edge, the
+    /// faces move, and the new sharp edge is blended again at the blend's size. With no
+    /// blend to follow, the move is the local operation alone. Each surface is that of the
+    /// face as it stands, extended or trimmed by the local operation, so it is the same
+    /// surface for the face once its blends are off (their removal extends the face on its
+    /// own surface). On failure the B-rep is left in an unspecified state: work on a copy.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_INVALID_INPUT` for no faces, or not one surface for each; the refusals of
+    /// the steps ([`Self::refusal`], [`Self::reason`]); those of the steps and of the
+    /// local operation.
+    pub fn move_onto(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        faces: &[FaceId],
+        surfaces: Vec<Surface>,
+    ) -> Result<()> {
+        self.refusal = OffsetFacesRefusal::None;
+        self.reason.clear();
+        self.followed = 0;
+        if faces.is_empty() || faces.len() != surfaces.len() {
+            return Err(Failure::new(
+                OP,
+                OffsetFailure::FaceMoveSurfacesUnmatched {
+                    faces: faces.len(),
+                    surfaces: surfaces.len(),
+                },
+            )
+            .with_status(SM_ERR_INVALID_INPUT)
+            .into_error());
+        }
+        // 1. The blends that follow.
+        let blends = self.collect(k, b, faces, b.tolerance())?;
+        if blends.is_empty() {
+            return local_operation_simple(k, b, faces, surfaces);
+        }
+        for (i, &f) in faces.iter().enumerate() {
+            FollowedBlendMark::add(b, Some(EntityRef::Face(f)), MARK_MOVED)?;
+            FollowedBlendMark::add(b, Some(EntityRef::Face(f)), onto_code(i))?;
+        }
+        let editing = b.editing_enabled();
+        b.set_editing_enabled(true);
+        let r = self.follow(k, b, blends, Move::Onto(&surfaces));
+        b.set_editing_enabled(editing);
+        b.refresh_cached_topology();
+        r
+    }
+
+    /// Step 4 of [`Self::move_onto`]: each face marked [`MARK_MOVED`] (the moved faces, or
+    /// the pieces of them that taking the blends off left) moved onto the surface its
+    /// [`MARK_ONTO`] code names, by the local operation.
+    ///
+    /// # Errors
+    ///
+    /// A defect for a moved face that names no surface; those of the local operation.
+    fn move_marked_onto(k: &mut Kernel, b: &mut Brep, surfaces: &[Surface]) -> Result<()> {
+        let mut faces = Vec::new();
+        let mut onto = Vec::new();
+        for f in crate::topology::brep::p1::faces(b, None)? {
+            let e = Some(EntityRef::Face(f));
+            if !FollowedBlendMark::has(b, e, MARK_MOVED) {
+                continue;
+            }
+            let surface = surfaces
+                .iter()
+                .enumerate()
+                .find(|(i, _)| FollowedBlendMark::has(b, e, onto_code(*i)))
+                .map(|(_, s)| s.clone())
+                .ok_or_else(|| defect(MOVED_FACE_WITHOUT_SURFACE, SM_ERR))?;
+            faces.push(f);
+            onto.push(surface);
+        }
+        local_operation_simple(k, b, &faces, onto)
+    }
+
     fn offset_faces_editing(
         &mut self,
         k: &mut Kernel,
@@ -1568,13 +1680,28 @@ impl OffsetFacesExecutive {
         }
 
         // 1. The blends that follow.
-        let mut blends = self.collect(k, b, faces, tol)?;
+        let blends = self.collect(k, b, faces, tol)?;
+        self.follow(k, b, blends, Move::By { distance, tol })
+    }
+
+    /// Steps 2 to 6 for the blends `blends` that follow the faces marked [`MARK_MOVED`],
+    /// step 4 the move `how`; every mark removed at the end.
+    fn follow(
+        &mut self,
+        k: &mut Kernel,
+        b: &mut Brep,
+        mut blends: Vec<Followed>,
+        how: Move<'_>,
+    ) -> Result<()> {
         // 2. What each stands for, kept, and marks on the faces around it.
         self.keep_and_mark(b, &mut blends)?;
         // 3. Each taken off, its faces met at the sharp edge.
         self.take_off(k, b, &mut blends)?;
         // 4. The faces moved.
-        self.move_faces(k, b, distance, tol)?;
+        match how {
+            Move::By { distance, tol } => self.move_faces(k, b, distance, tol)?,
+            Move::Onto(surfaces) => Self::move_marked_onto(k, b, surfaces)?,
+        }
         if blends.is_empty() {
             return FollowedBlendMark::remove_from_topology(b);
         }
@@ -1726,7 +1853,7 @@ mod tests {
                         let (s, t) = edge::start_end_vertices(&b, e).unwrap();
                         [s, t].into_iter().flatten().all(|v| {
                             let p = vertex::point(&b, v).unwrap();
-                            ((p.x - 30.0).powi(2) + (p.y - 20.0).powi(2)).sqrt() > 9.99
+                            (det::powi(p.x - 30.0, 2) + det::powi(p.y - 20.0, 2)).sqrt() > 9.99
                                 && p.z > 11.9
                         })
                     })

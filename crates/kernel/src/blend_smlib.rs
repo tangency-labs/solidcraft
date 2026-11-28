@@ -102,6 +102,13 @@ pub(crate) fn fillet_variable(body: &Body, edge_at: Vec3, start: Vec3, spline: &
     imp::variable(body, edge_at, start, spline)
 }
 
+/// The edges at `edges`, one tangent chain, rounded with the radius `spline` (checked by the
+/// caller) along the whole chain from its end nearest `start`
+/// ([`crate::fillet_variable_spline_chain`]).
+pub(crate) fn fillet_variable_chain(body: &Body, edges: &[Vec3], start: Vec3, spline: &RadiusSpline) -> Result<Body> {
+    imp::variable_chain(body, edges, start, spline)
+}
+
 /// The edges `picks` select, in the body's edge order, as a blend resolves them, and per edge
 /// whether a pick passes it over (a seam or a smooth join: never a blend's edge), for a caller
 /// that selects edges to blend ([`crate::tangent_chain`]).
@@ -431,6 +438,18 @@ mod imp {
             b.fillet_variable(at, tol, [start.x, start.y, start.z], spline.degree, &spline.knots, &spline.radii)
         })
         .map_err(|e| crate::blend::with_continuation(e, next))
+    }
+
+    pub(super) fn variable_chain(body: &Body, edges: &[Vec3], start: Vec3, spline: &RadiusSpline) -> Result<Body> {
+        body.require_brep("fillet")?;
+        if !start.is_finite() {
+            return Err(KernelError::Invalid("the start point must be finite".into()));
+        }
+        let picked = resolve(body, edges)?;
+        let tol = pick_tolerance(body);
+        run(body, "variable fillet", &picked.edges, |b| {
+            b.fillet_variable_chain(&picked.points, tol, [start.x, start.y, start.z], spline.degree, &spline.knots, &spline.radii)
+        })
     }
 
     /// `op` on `body` in SMLib, tagged as operand 0, checked, decoded, with its history.
@@ -961,5 +980,41 @@ mod tests {
         assert!(vc.record.is_ok(), "{:?}", vc.record);
         assert!(matches!(vc.smlib, Some(crate::SmlibCheck::Valid)), "{:?}", vc.smlib);
         assert!(volume(&chained) < volume(&joined_bevel));
+    }
+
+    /// A plate with a shallow bottom pocket whose straight side edges are clipped symmetrically
+    /// on -X and +X by through-bores: a 0.5 mm chamfer on the clipped pocket edge overflows
+    /// across the bore's cylindrical wall and must sew cleanly on both sides regardless of the
+    /// bore cylinder's seam orientation.
+    #[test]
+    fn a_pocket_edge_clipped_by_symmetric_through_bores_chamfers_both_sides() {
+        let plate = box_solid(Vec3::new(-100.0, -40.0, 0.0), Vec3::new(100.0, 40.0, 12.0)).unwrap();
+        let pocket = box_solid(Vec3::new(-60.0, -20.0, -1.0), Vec3::new(60.0, 20.0, 4.0)).unwrap();
+        let body = crate::boolean(&plate, &pocket, crate::BoolOp::Cut).unwrap().unwrap();
+        let bore_neg = crate::cylinder(Vec3::new(-68.0, -18.0, -1.0), Vec3::new(0.0, 0.0, 1.0), 10.0, 14.0).unwrap();
+        let body = crate::boolean(&body, &bore_neg, crate::BoolOp::Cut).unwrap().unwrap();
+        let bore_pos = crate::cylinder(Vec3::new(68.0, -18.0, -1.0), Vec3::new(0.0, 0.0, 1.0), 10.0, 14.0).unwrap();
+        let body = crate::boolean(&body, &bore_pos, crate::BoolOp::Cut).unwrap().unwrap();
+
+        let before = volume(&body);
+        let neg_pick = Vec3::new(-60.0, 4.0, 0.0);
+        let pos_pick = Vec3::new(60.0, 4.0, 0.0);
+
+        let neg = chamfer(&body, &[neg_pick], 0.5).unwrap();
+        let pos = chamfer(&body, &[pos_pick], 0.5).unwrap();
+        let both = chamfer(&body, &[neg_pick, pos_pick], 0.5).unwrap();
+
+        for (label, out) in [("neg", &neg), ("pos", &pos), ("both", &both)] {
+            let v = crate::validity(out);
+            assert!(v.record.is_ok(), "{label}: {:?}", v.record);
+            assert!(matches!(v.smlib, Some(crate::SmlibCheck::Valid)), "{label}: {:?}", v.smlib);
+        }
+
+        let removed_neg = before - volume(&neg);
+        let removed_pos = before - volume(&pos);
+        let removed_both = before - volume(&both);
+        assert!(removed_neg > 3.5 && removed_neg < 4.5, "removed_neg={removed_neg}");
+        assert!((removed_neg - removed_pos).abs() < 1e-4, "neg={removed_neg}, pos={removed_pos}");
+        assert!((removed_both - 2.0 * removed_neg).abs() < 1e-3, "both={removed_both}, 2*neg={}", 2.0 * removed_neg);
     }
 }

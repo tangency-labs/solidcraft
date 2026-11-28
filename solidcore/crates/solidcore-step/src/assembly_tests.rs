@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use super::*;
 use solidcore_record::Vec3;
-use solidcore_record::brep::{Curve as BCurve, Frame, Surface as BSurface};
+use solidcore_record::brep::{Curve as BCurve, Curve2, Frame, Surface as BSurface};
 
 /// The box's corner `c`: bit 0 is x (10 mm), bit 1 y (20 mm), bit 2 z (30 mm).
 fn corner(c: usize) -> [f64; 3] {
@@ -87,6 +87,108 @@ fn a_box_assembled_from_its_parts_is_a_closed_solid_record() {
     origins.sort_unstable();
     assert_eq!(origins, vec![0, 1, 2, 3, 4, 5]);
     assert!(solid.turned.is_empty(), "no face disagrees with its loops: {:?}", solid.turned);
+}
+
+/// Each record edge is named by the origin it was added with (the box's `8 * low + high`
+/// corner), each once.
+#[test]
+fn every_edge_of_the_box_is_named_by_its_origin() {
+    let (solid, _) = assembled_box().unwrap();
+    let mut origins: Vec<u64> = solid.edge_origin.iter().map(|o| o.expect("an edge added, not made")).collect();
+    origins.sort_unstable();
+    let mut want: Vec<u64> = FACES
+        .iter()
+        .flat_map(|(c, _, _)| (0..4).map(move |k| (c[k].min(c[(k + 1) % 4]), c[k].max(c[(k + 1) % 4]))))
+        .map(|(a, z)| a as u64 * 8 + z as u64)
+        .collect();
+    want.sort_unstable();
+    want.dedup();
+    assert_eq!(origins, want);
+}
+
+/// The box with its top face (corners 4, 5, 7, 6 at z = 30) on a spline patch 40 mm square about
+/// the face's centre c = (5, 10, 30), turned 30° about z and quadratic in u, its middle row of
+/// control points 1 mm on along â: `p = c + s(u) â + 40 (v - 1/2) b̂`,
+/// `s(u) = 40 u - 20 + 2 u (1 - u)`. No edge of the face runs along a line of its parameters,
+/// no straight edge is a straight line in them, and there is no kernel to fit a pcurve. Where
+/// `given`, each top use's pcurve is given as the straight (u, v) line between its ends (`off`
+/// from them in u), which lies off its edge by at most a quarter of the 1 mm bulge.
+fn box_with_spline_top(given: bool, off: f64) -> R<Solid> {
+    let (sin, cos) = std::f64::consts::FRAC_PI_6.sin_cos();
+    let (a, b) = ([cos, sin], [-sin, cos]);
+    let c = [5.0, 10.0];
+    // u where s(u) = t: the root in [0, 1] of -2u² + 42u - (20 + t).
+    let u_of = |t: f64| (42.0 - (42.0f64 * 42.0 - 8.0 * (20.0 + t)).sqrt()) / 4.0;
+    let uv = |p: [f64; 3]| {
+        let d = [p[0] - c[0], p[1] - c[1]];
+        [u_of(d[0] * a[0] + d[1] * a[1]) + off, 0.5 + (d[0] * b[0] + d[1] * b[1]) / 40.0]
+    };
+    let at = |s: f64, v: f64| [c[0] + s * a[0] + 40.0 * (v - 0.5) * b[0], c[1] + s * a[1] + 40.0 * (v - 0.5) * b[1], 30.0];
+    let mut asm = Assembly::new(1e-6, None);
+    let mut vertices = Vec::new();
+    for c in 0..8 {
+        vertices.push(asm.add_vertex(corner(c))?);
+    }
+    let mut edges: HashMap<(usize, usize), u32> = HashMap::new();
+    let mut faces = Vec::new();
+    for (f, (corners, u_axis, v_axis)) in FACES.into_iter().enumerate() {
+        let (mut uses, mut pcurves) = (Vec::new(), Vec::new());
+        for k in 0..4 {
+            let (i, j) = (corners[k], corners[(k + 1) % 4]);
+            let key = (i.min(j), i.max(j));
+            let (p, q) = (corner(key.0), corner(key.1));
+            let e = match edges.get(&key) {
+                Some(e) => *e,
+                None => {
+                    let (e, _) = asm.add_edge(
+                        key.0 as u64 * 8 + key.1 as u64,
+                        BCurve::Line { start: p, end: q },
+                        [0.0, 1.0],
+                        [vertices[key.0], vertices[key.1]],
+                    )?;
+                    edges.insert(key, e);
+                    e
+                }
+            };
+            uses.push((e, i == key.0));
+            pcurves.push(Some(Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![uv(p), uv(q)] }));
+        }
+        let face = if f == 1 {
+            // Control rows at s = -20, 1 (the quadratic's middle: s(1/2) = 1/2 = (-20 + 2·1 + 20) / 4), 20.
+            let surface = BSurface::Spline {
+                u_knots: vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+                v_knots: vec![0.0, 0.0, 1.0, 1.0],
+                points: vec![vec![at(-20.0, 0.0), at(-20.0, 1.0)], vec![at(1.0, 0.0), at(1.0, 1.0)], vec![at(20.0, 0.0), at(20.0, 1.0)]],
+            };
+            if given {
+                asm.add_face_with_pcurves(f as u64, surface, vec![Bound::Edges(uses)], Some(0), true, vec![pcurves])?
+            } else {
+                asm.add_face(f as u64, surface, vec![Bound::Edges(uses)], Some(0), true)?
+            }
+        } else {
+            asm.add_face(f as u64, BSurface::Plane { origin: corner(corners[0]), u_axis, v_axis }, vec![Bound::Edges(uses)], Some(0), true)?
+        };
+        faces.push((face, true));
+    }
+    asm.finish(0, "box".into(), vec![faces], Kind::Solid)
+}
+
+/// A spline face's pcurves given by its producer are its record's where the face has none in
+/// closed form and no kernel is there to fit them, and without them the face is refused. Each
+/// edge's tolerance covers its given pcurve's gap, up to a quarter of the 1 mm bulge (as a file's
+/// pcurves are covered). Given off their edges by 0.1 in u (4 mm, past the 1 mm an edge's
+/// tolerance may grow to), the record's check refuses them.
+#[test]
+fn a_spline_face_takes_the_pcurves_its_producer_gives() {
+    assert!(box_with_spline_top(false, 0.0).is_err(), "no pcurves on the top without a kernel to fit them");
+    let solid = box_with_spline_top(true, 0.0).unwrap();
+    let brep = &solid.brep;
+    assert_eq!((brep.faces.len(), brep.edges.len(), brep.vertices.len()), (6, 12, 8));
+    let top = solid.face_origin.iter().position(|o| *o == 1).unwrap();
+    assert!(matches!(brep.faces[top].surface, BSurface::Spline { .. }));
+    let worst = brep.edges.iter().map(|e| e.tolerance).fold(0.0, f64::max);
+    assert!(worst <= 0.25 * 1.5 + 1e-6, "the most tolerance an edge takes, {worst} mm");
+    assert!(box_with_spline_top(true, 0.1).is_err(), "pcurves off their edges");
 }
 
 /// The top face's cubic edge lies off its plane only between the 16 even gap samples (#11652).
@@ -785,6 +887,54 @@ fn whole_cylinder() -> BSurface {
         v_knots: vec![0.0, 0.0, 1.0, 1.0],
         homogeneous,
     }
+}
+
+/// [`whole_cylinder`] of radius `r`.
+fn whole_cylinder_of(r: f64) -> BSurface {
+    match whole_cylinder() {
+        BSurface::RationalSpline { u_knots, v_knots, homogeneous } => {
+            let homogeneous = homogeneous.into_iter().map(|row| row.into_iter().map(|[x, y, z, w]| [r * x, r * y, z, w]).collect()).collect();
+            BSurface::RationalSpline { u_knots, v_knots, homogeneous }
+        }
+        other => other,
+    }
+}
+
+/// Seating a trim that lies a sliver across a closed patch's seam is edited only under an enclosed
+/// bound: the unit cylinder's trim 2e-3 across its seam (a period of 4) moves its surface by about
+/// 2.83e-3 mm, which the bound holds and is accepted against 5e-2; the cylinder 50 times wider moves
+/// 50 times as far over the same sliver (0.14 mm), its partials make the bound past 5e-2, and the
+/// trim is declined; so is a trim past the sliver, one not finite, a weight that is not positive
+/// and a surface that is not a spline.
+#[test]
+fn a_trim_is_seated_only_under_an_enclosed_bound_within_the_tolerance() {
+    let trim = |x: f64| Curve2::Spline { knots: vec![0.0, 0.0, 1.0, 1.0], points: vec![[x, 0.1], [x, 0.9]] };
+    let shift = |surface: &BSurface, pcurve: &Curve2, which: Option<bool>| {
+        let eval = SurfaceEval::new(surface).unwrap();
+        let dom = eval.domain();
+        let (Some(period), Some((lo, hi))) = (dom.period[0], dom.range[0]) else { panic!("{dom:?}") };
+        assert_eq!((period, lo, hi), (4.0, 0.0, 4.0));
+        seating_shift(&eval, 0, [lo, hi], period, pcurve, which, 0.0)
+    };
+    // The move of the surface for 2e-3 of u at the seam: a quarter turn is one unit of u, and the
+    // rational arc runs sqrt(2) per unit of u at its ends (a bit over 1.4), so 2.83e-3 mm.
+    let moved = 2e-3 * 1.4;
+    let narrow = shift(&whole_cylinder(), &trim(-2e-3), None).expect("a bound");
+    assert!(narrow >= moved && narrow < 5e-2, "{narrow}");
+    // The same from the other side of the line, and with only the end that moves counted.
+    assert!(shift(&whole_cylinder(), &trim(2e-3), None).is_some_and(|s| s >= moved && s < 5e-2));
+    assert!(shift(&whole_cylinder(), &trim(-2e-3), Some(true)).is_some_and(|s| s >= moved && s < 5e-2));
+    let wide = shift(&whole_cylinder_of(50.0), &trim(-2e-3), None).expect("a bound");
+    assert!(wide >= 50.0 * moved && wide > 5e-2, "{wide}");
+    // A trim past the sliver (4e-3), or not finite, is not bounded.
+    assert!(shift(&whole_cylinder(), &trim(-5e-3), None).is_none());
+    assert!(shift(&whole_cylinder(), &trim(f64::NAN), None).is_none());
+    let rational = Curve2::RationalSpline { knots: vec![0.0, 0.0, 1.0, 1.0], homogeneous: vec![[-2e-3, 0.1, 1.0], [-2e-3, -0.9, -1.0]] };
+    assert!(shift(&whole_cylinder(), &rational, None).is_none());
+    // A surface that is not a spline is not decided: its trim stays where it is.
+    let plane = BSurface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] };
+    let eval = SurfaceEval::new(&plane).unwrap();
+    assert!(seating_shift(&eval, 0, [0.0, 4.0], 4.0, &trim(-2e-3), None, 0.0).is_none());
 }
 
 /// A closed patch started elsewhere is the same surface: from its new start to the old seam at

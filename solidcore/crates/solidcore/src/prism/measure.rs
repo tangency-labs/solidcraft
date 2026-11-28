@@ -29,6 +29,7 @@
 
 #![allow(clippy::neg_cmp_op_on_partial_ord)] // NaN-refusing tests, kept as written
 
+use crate::math::det;
 use std::collections::BTreeSet;
 use std::f64::consts::{FRAC_1_SQRT_2, PI, TAU};
 
@@ -256,8 +257,8 @@ fn wall_error(
         // rank-one weights keep the normalized convex coefficients; their error is bounded by the
         // positive least weight
         let error = 2.0 * variation
-            + 8.0 * magnitude * rank_error / min_w.powi(2)
-            + 2048.0 * f64::EPSILON * magnitude / min_w.powi(2);
+            + 8.0 * magnitude * rank_error / det::powi(min_w, 2)
+            + 2048.0 * f64::EPSILON * magnitude / det::powi(min_w, 2);
         best = best.min(error);
     }
     best.is_finite().then_some(best)
@@ -283,7 +284,7 @@ fn segment_same(a: &Seg2, b: &Seg2, tolerance: f64) -> bool {
                 sweep: s,
             },
         ) => {
-            let at = |angle: f64, radius: f64| Vec2::new(angle.cos(), angle.sin()) * radius;
+            let at = |angle: f64, radius: f64| Vec2::new(det::cos(angle), det::sin(angle)) * radius;
             center.distance(c) <= tolerance
                 && (radius - r).abs() <= tolerance
                 && (sweep.abs() - s.abs()).abs() * radius <= tolerance
@@ -840,7 +841,7 @@ fn separated_material(loops: &[CapLoop], clearance: f64, work: &mut usize) -> Op
             let Seg2::Line { a, b } = *s else { return None };
             let x = b - a;
             let y = nx.end() - nx.start();
-            turn += cross2(x, y).atan2(x.dot(y));
+            turn += det::atan2(cross2(x, y), x.dot(y));
             angular_error += clearance * 8.0 / x.length() + 256.0 * f64::EPSILON;
             for (j, t) in outer.segments.iter().enumerate() {
                 if i != j && a.distance(t.start()) <= clearance {
@@ -1096,12 +1097,12 @@ pub fn straight_candidates(runs: &[FaceRun]) -> StraightCandidates {
                 // direction but for its rounding, which |n · d| and |m · d| bound (brett19 on
                 // #22066). The bound takes its own rounding: s and |n · m| each within 4 ulps, the
                 // two dot products within 4 more, so it leans on no slack in `accepted`.
-                let acute = (s - 4.0 * f64::EPSILON).atan2(n.dot(m).abs() + 4.0 * f64::EPSILON);
+                let acute = det::atan2(s - 4.0 * f64::EPSILON, n.dot(m).abs() + 4.0 * f64::EPSILON);
                 let leaning = accepted(sn, true).max(accepted(sm, true))
                     + n.dot(d).abs()
                     + m.dot(d).abs()
                     + 8.0 * f64::EPSILON;
-                let reach = leaning / (0.5 * acute).sin() * (1.0 + 1e-12);
+                let reach = leaning / det::sin(0.5 * acute) * (1.0 + 1e-12);
                 best = Some((s, d, StraightBy::Planes(a, b), reach));
             }
         }
@@ -1314,7 +1315,7 @@ impl Rows {
 
     /// The band `|c + a p + b q| <= slope`.
     fn band(&mut self, a: f64, b: f64, c: f64, slope: f64) {
-        let n = a.hypot(b);
+        let n = det::hypot(a, b);
         if n == 0.0 {
             self.never |= c.abs() > slope;
             return;
@@ -1329,7 +1330,7 @@ impl Rows {
         let mut out = self.lines.clone();
         for &(c, t) in &self.discs {
             for k in 0..SIDES {
-                let (sin, cos) = (TAU * f64::from(k) / f64::from(SIDES)).sin_cos();
+                let (sin, cos) = det::sin_cos(TAU * f64::from(k) / f64::from(SIDES));
                 out.push(((cos, sin), cos.mul_add(c.0, sin * c.1) + t));
             }
         }
@@ -1346,7 +1347,7 @@ impl Rows {
         });
         lines
             && self.discs.iter().all(|&(c, t)| {
-                let d = (x.0 - c.0).hypot(x.1 - c.1);
+                let d = det::hypot(x.0 - c.0, x.1 - c.1);
                 let slack = 64.0
                     * f64::EPSILON
                     * (d + r.abs() + t.abs() + c.0.abs() + c.1.abs() + x.0.abs() + x.1.abs());
@@ -1421,7 +1422,7 @@ impl Rows {
                 }
                 // the two discs alone: the circle in their lens, on the line of their centres
                 let (dx, dy) = (cl.0 - ck.0, cl.1 - ck.1);
-                let gap = dx.hypot(dy);
+                let gap = det::hypot(dx, dy);
                 if gap > 0.0 {
                     let r = 0.5 * (tk + tl - gap);
                     let s = (tk - r) / gap;
@@ -1878,11 +1879,15 @@ mod tests {
         )
         .unwrap();
         assert!(along < 1e-9, "{along}");
-        let off = Vec3::new(0.0, 1.0_f64.to_radians().sin(), 1.0_f64.to_radians().cos());
+        let off = Vec3::new(
+            0.0,
+            det::sin(1.0_f64.to_radians()),
+            det::cos(1.0_f64.to_radians()),
+        );
         let skew = wall_error(extrusions[0], off, 120.0, &mut work, true).unwrap();
         // 4 x 120 x sin(1 degree), and the 1024 eps
         assert!(
-            (skew - 480.0 * 1.0_f64.to_radians().sin()).abs() < 1e-9,
+            (skew - 480.0 * det::sin(1.0_f64.to_radians())).abs() < 1e-9,
             "{skew}"
         );
     }
@@ -2033,7 +2038,7 @@ mod straight_tests {
             let reach = s + f * t * FRAC_1_SQRT_2;
             for k in 0..64 {
                 let turn = TAU * f64::from(k) / 64.0;
-                let (sin, cos) = turn.sin_cos();
+                let (sin, cos) = det::sin_cos(turn);
                 let at = |x: f64, y: f64, z: f64| v(cos * x - sin * y, sin * x + cos * y, z);
                 let runs = [
                     FaceRun::Plane {
@@ -2064,7 +2069,7 @@ mod straight_tests {
         let slope = 1e-5 / (2.0 * 10.0 * 2.0_f64.sqrt());
         (0..n)
             .map(|k| {
-                let (sin, cos) = (TAU * f64::from(k) / f64::from(n)).sin_cos();
+                let (sin, cos) = det::sin_cos(TAU * f64::from(k) / f64::from(n));
                 FaceRun::Plane {
                     normal: v(cos, 0.9 * slope, sin).unitize().unwrap(),
                     slope,
@@ -2135,7 +2140,7 @@ mod straight_tests {
             (1e-9, 1e-11),
             (1e-10, 1e-13),
         ] {
-            let (sin, cos) = f64::sin_cos(lean);
+            let (sin, cos) = det::sin_cos(lean);
             let near = [
                 plane(unit(1.0, 0.1, 0.0), slope),
                 plane(unit(cos, 0.1, sin), slope),
@@ -2219,7 +2224,7 @@ mod straight_tests {
     /// axis's angle alone.
     #[test]
     fn an_axis_far_off_the_pair_is_proved_to_have_none() {
-        let (sin, cos) = 70.0_f64.to_radians().sin_cos();
+        let (sin, cos) = det::sin_cos(70.0_f64.to_radians());
         let runs = [
             FaceRun::Plane {
                 normal: v(1.0, 0.0, 0.0),

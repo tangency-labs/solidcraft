@@ -8,7 +8,8 @@ use std::f64::consts::PI;
 use solidcore_record::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_geom::Seg2Geom;
 
-use crate::build::{box_solid, extrude, extrude_tapered};
+use crate::build::{box_solid, extrude};
+use crate::extrude_tapered;
 use crate::{Body, BoolOp, ChamferSide, boolean, chamfer, chamfer_sides};
 
 const TOL: f64 = 1e-3;

@@ -2556,7 +2556,9 @@ fn allocation_paired_resize_and_double_click_transfer_owned_exact_candidates_wit
             let release = interaction.update(&service, &fixture_scope(&service), &host, HostPointerEvent::Release { at });
             let committed = fixture_commit(&mut service, &host, release.candidate.unwrap());
             assert_eq!(committed.sashes[0].bounds, preview.bounds);
-            let axis = |size: Size| if zone == Zone::Bottom { size.width } else { size.height };
+            let axis = |size: Size| {
+                if zone == Zone::Bottom { size.width } else { size.height }
+            };
             assert_eq!(
                 service.layout().sections.iter().map(|section| axis(section.size)).sum::<f32>(),
                 host.sections.iter().map(|section| axis(section.outer.size)).sum::<f32>()
@@ -2969,8 +2971,8 @@ struct RawPanelHost {
     painted_frames: Vec<HostFrame>,
     finished_frames: Vec<HostFrame>,
     clicked_widgets: Vec<egui::Id>,
+    menu_keyboard_intents: Vec<egui::Id>,
     double_clicked_widgets: Vec<egui::Id>,
-    painted_menu: bool,
     late_modal: bool,
     reserve_escape_for_host: bool,
     escape_reservations: usize,
@@ -3004,8 +3006,8 @@ impl RawPanelHost {
             painted_frames: Vec::new(),
             finished_frames: Vec::new(),
             clicked_widgets: Vec::new(),
+            menu_keyboard_intents: Vec::new(),
             double_clicked_widgets: Vec::new(),
-            painted_menu: false,
             late_modal: false,
             reserve_escape_for_host: false,
             escape_reservations: 0,
@@ -3049,6 +3051,7 @@ impl RawPanelHost {
         self.painted_frames.clear();
         self.finished_frames.clear();
         self.clicked_widgets.clear();
+        self.menu_keyboard_intents.clear();
         self.double_clicked_widgets.clear();
         self.modal_observations.clear();
         self.focused_response = None;
@@ -3085,6 +3088,9 @@ impl RawPanelHost {
                 )
                 .unwrap();
             let painted = self.host.frame().unwrap().clone();
+            if let Some(source) = self.host.pending_menu_keyboard_source() {
+                self.menu_keyboard_intents.push(source);
+            }
             for control in &painted.controls {
                 if let Some(response) = ui.ctx().read_response(control.id) {
                     if response.clicked() || response.secondary_clicked() {
@@ -3213,7 +3219,6 @@ impl RawPanelHost {
         if multipass {
             assert!(passes >= 2, "must actually exercise another egui pass");
         }
-        self.painted_menu |= self.host.frame().is_some_and(|frame| frame.menu_bounds.is_some());
         (self.host.frame().cloned(), output)
     }
 
@@ -4515,6 +4520,8 @@ enum MenuRoute {
     CurrentTabs,
     OtherMove,
     KeyboardMove,
+    KeyboardApply,
+    PeekOtherMove,
     OtherApply,
     CloseRefusal,
     LateWindow,
@@ -4530,6 +4537,8 @@ fn actual_popup_actions_preserve_retained_owners_and_respect_late_layers_and_lif
             MenuRoute::CurrentTabs,
             MenuRoute::OtherMove,
             MenuRoute::KeyboardMove,
+            MenuRoute::KeyboardApply,
+            MenuRoute::PeekOtherMove,
             MenuRoute::OtherApply,
             MenuRoute::CloseRefusal,
             MenuRoute::LateWindow,
@@ -4537,6 +4546,17 @@ fn actual_popup_actions_preserve_retained_owners_and_respect_late_layers_and_lif
             MenuRoute::OtherHeaderMenu,
         ] {
             let (mut raw, _) = raw_leaf_fixture(scale);
+            if matches!(route, MenuRoute::PeekOtherMove) {
+                raw.content
+                    .dispatch(vec![
+                        Mutation::Collapse { section: section("editor-section"), collapsed: true },
+                        Mutation::Peek { instance: id("editor") },
+                    ])
+                    .unwrap();
+                raw.frame(Vec::new(), false);
+                raw.frame(Vec::new(), false);
+                assert_eq!(raw.content.runtime.layout().interaction().peek, Some(id("editor")));
+            }
             if matches!(route, MenuRoute::LateModal) {
                 raw.prime_modal();
             }
@@ -4565,13 +4585,15 @@ fn actual_popup_actions_preserve_retained_owners_and_respect_late_layers_and_lif
                 });
             }
             assert!(raw.host.frame().unwrap().menu_bounds.is_some());
-            if matches!(route, MenuRoute::CurrentPanelApply | MenuRoute::OtherApply | MenuRoute::CloseRefusal) {
+            if matches!(route, MenuRoute::CurrentPanelApply | MenuRoute::OtherApply | MenuRoute::KeyboardApply | MenuRoute::CloseRefusal) {
                 scroll_real_host_popup_to_end(&mut raw);
             }
             let target = match route {
                 MenuRoute::CurrentPanelApply => HostControlTarget::Content { instance: id("editor"), action: ControlId::new("apply").unwrap() },
                 MenuRoute::CurrentTabs => HostControlTarget::PanelMenu { instance: id("editor") },
-                MenuRoute::OtherApply => HostControlTarget::Content { instance: id("document-body"), action: ControlId::new("apply").unwrap() },
+                MenuRoute::OtherApply | MenuRoute::KeyboardApply => {
+                    HostControlTarget::Content { instance: id("document-body"), action: ControlId::new("apply").unwrap() }
+                }
                 MenuRoute::CloseRefusal => HostControlTarget::Shared { instance: id("document-body"), action: HostSharedAction::Close },
                 MenuRoute::OtherHeaderMenu => HostControlTarget::Shared { instance: id("next-header"), action: HostSharedAction::Collapse },
                 _ => HostControlTarget::Shared { instance: id("document-body"), action: HostSharedAction::Move(Zone::Bottom) },
@@ -4599,10 +4621,11 @@ fn actual_popup_actions_preserve_retained_owners_and_respect_late_layers_and_lif
             let before = raw.content.runtime.layout().inspect();
             let commits = raw.content.native.commits;
             let at = egui_rect(source.bounds).center();
-            let keyboard = matches!(route, MenuRoute::KeyboardMove);
+            let keyboard = matches!(route, MenuRoute::KeyboardMove | MenuRoute::KeyboardApply);
             if keyboard {
                 raw.ctx.memory_mut(|memory| memory.request_focus(source.id));
                 raw.frame(Vec::new(), false);
+                assert_eq!(raw.ctx.memory(|memory| memory.focused()), Some(source.id), "{route:?}: retain the deliberately focused menu action");
             } else {
                 raw.frame(vec![egui::Event::PointerMoved(at)], false);
                 raw.pointer(at, true, false);
@@ -4622,7 +4645,8 @@ fn actual_popup_actions_preserve_retained_owners_and_respect_late_layers_and_lif
                 )
                 .0;
             let rejected = matches!(route, MenuRoute::CloseRefusal | MenuRoute::LateWindow | MenuRoute::LateModal);
-            let structural = !rejected && matches!(route, MenuRoute::OtherMove | MenuRoute::KeyboardMove | MenuRoute::OtherHeaderMenu);
+            let structural =
+                !rejected && matches!(route, MenuRoute::OtherMove | MenuRoute::KeyboardMove | MenuRoute::PeekOtherMove | MenuRoute::OtherHeaderMenu);
             assert_eq!(raw.content.runtime.layout().inspect().revision, before.revision + u64::from(structural));
             assert_eq!(raw.content.native.commits, commits + u64::from(structural));
             if structural {
@@ -4630,7 +4654,11 @@ fn actual_popup_actions_preserve_retained_owners_and_respect_late_layers_and_lif
                 if matches!(route, MenuRoute::OtherHeaderMenu) {
                     assert!(!raw.content.runtime.layout().layout().containing(&id("next-header")).unwrap().collapsed);
                 } else {
-                    assert_eq!(raw.content.runtime.layout().layout().containing(&id("document-body")).unwrap().location.zone(), Zone::Bottom);
+                    assert_eq!(
+                        raw.content.runtime.layout().layout().containing(&id("document-body")).unwrap().location.zone(),
+                        Zone::Bottom,
+                        "{route:?} at {scale}x must execute its selected placement"
+                    );
                 }
             } else {
                 assert_eq!(raw.content.runtime.layout().inspect(), before);
@@ -4638,8 +4666,11 @@ fn actual_popup_actions_preserve_retained_owners_and_respect_late_layers_and_lif
             if matches!(route, MenuRoute::CloseRefusal) {
                 assert!(released.events.iter().any(|event| matches!(event, HostEvent::Rejected { error, .. } if error.rule == Rule::Lifecycle)));
             }
+            if matches!(route, MenuRoute::PeekOtherMove) {
+                assert!(raw.content.runtime.layout().interaction().peek.is_none(), "an unrelated menu placement dismisses Peek during admission");
+            }
             let apply_editor = matches!(route, MenuRoute::CurrentPanelApply);
-            let apply_other = matches!(route, MenuRoute::OtherApply);
+            let apply_other = matches!(route, MenuRoute::OtherApply | MenuRoute::KeyboardApply);
             assert_eq!(raw.content.commands.calls, u64::from(apply_editor || apply_other));
             assert_eq!(raw.content.probe.state(&editor).unwrap().applies, old_editor.applies + u64::from(apply_editor));
             assert_eq!(raw.content.probe.state(&other).unwrap().applies, old_other.applies + u64::from(apply_other));
@@ -8725,10 +8756,17 @@ fn late_shared_modal_discards_pointer_and_keyboard_intents_without_latent_action
                 let events =
                     if keyboard { vec![host_key(egui::Key::Enter, true)] } else { vec![egui::Event::PointerMoved(at), button_event(at, false)] };
                 raw.frame(events, true);
-                assert!(
-                    raw.clicked_widgets.contains(&widget.id),
-                    "the earlier real response must queue an intent before the late modal blocks finish"
-                );
+                if keyboard && action == 2 {
+                    assert!(
+                        raw.menu_keyboard_intents.contains(&widget.id),
+                        "the shared menu must queue its selected keyboard action before the late modal blocks finish"
+                    );
+                } else {
+                    assert!(
+                        raw.clicked_widgets.contains(&widget.id),
+                        "the earlier real response must queue an intent before the late modal blocks finish"
+                    );
+                }
                 assert_no_host_mutation(&raw, &before, commits);
                 assert_modal_preserves_painted_host_geometry(&raw);
                 assert!(raw.modal_observations[0].visible);
@@ -9550,12 +9588,11 @@ fn host_key(key: egui::Key, pressed: bool) -> egui::Event {
 }
 
 fn assert_no_popup(frame: &HostFrame) {
-    assert!(frame.menu_bounds.is_none());
+    assert!(frame.menu_bounds.is_none(), "remaining menu bounds {:?}; events {:?}", frame.menu_bounds, frame.events);
     assert!(!frame.controls.iter().any(|control| matches!(control.target, HostControlTarget::PanelMenu { .. } | HostControlTarget::Shared { .. })));
 }
 
 fn open_root_popup(raw: &mut RawPanelHost, source: &HostControlTarget, button: egui::PointerButton, multipass: bool) {
-    let previously_painted = raw.painted_menu;
     let at = raw.at(source.clone());
     raw.frame(vec![egui::Event::PointerMoved(at)], false);
     raw.frame(vec![popup_button(at, button, true)], false);
@@ -9563,9 +9600,8 @@ fn open_root_popup(raw: &mut RawPanelHost, source: &HostControlTarget, button: e
     assert_no_popup(&raw.painted_frames[0]);
     assert_no_popup(&raw.finished_frames[0]);
     raw.frame(Vec::new(), false);
-    if !multipass && !previously_painted {
-        assert_no_popup(raw.host.frame().unwrap());
-    }
+    // egui may automatically run the measuring pass during the release frame.
+    // Wait for visible rows without assuming which quiet frame first paints them.
     raw.frame(Vec::new(), false);
     assert!(raw.host.frame().unwrap().menu_bounds.is_some(), "accepted popup is published after it actually paints");
 }
@@ -9849,6 +9885,7 @@ fn late_first_appearance_window_blocks_nested_popup_navigation() {
                     raw.pointer(outside, false, false);
                     raw.frame(Vec::new(), true);
                 }
+                assert!(raw.host.frame().unwrap().menu_bounds.is_none(), "popup cancellation route {cancel} at {scale}x must not retain navigation");
                 assert_no_popup(raw.host.frame().unwrap());
                 assert_eq!(raw.content.commands.calls, 0);
             }
@@ -10103,7 +10140,7 @@ fn exhausted_single_pass_sizing_and_collapsed_headers_publish_only_actual_footpr
         let card = sizing.layout.sections.iter().find(|card| card.instance == id("log-0")).unwrap();
         assert_eq!(sizing.layout.resolved.panels.len(), 1, "intended geometry survives invisible measurement");
         for regions in [&sizing.layout.painted, &sizing.layout.input, &sizing.layout.occlusion, &sizing.layout.reservations] {
-            assert!(!regions.iter().any(|bounds| egui_rect(*bounds).intersect(egui_rect(card.outer)).is_positive()));
+            assert!(!regions.iter().any(|bounds| { egui_rect(*bounds).intersect(egui_rect(card.outer)).is_positive() }));
         }
         assert!(sizing.controls.is_empty(), "no metadata-only controls from an invisible Area");
         let key = ControllerKey { instance: id("log-0"), owner: raw.content.runtime.instance_owner(&id("log-0")).unwrap() };
@@ -13794,6 +13831,12 @@ fn shared_menu_keyboard_entry_end_and_escape_restore_actual_opener() {
         raw.frame(vec![host_key(egui::Key::Enter, false)], false);
         raw.frame(Vec::new(), false);
         assert_ne!(raw.ctx.memory(|memory| memory.focused()), Some(opener.id));
+        assert!(
+            raw.capacity.contains_rect(raw.host.frame().unwrap().menu_bounds.unwrap()),
+            "menu {:?} must fit host {:?} at {scale}x",
+            raw.host.frame().unwrap().menu_bounds,
+            raw.capacity
+        );
         // Settle the entry reveal, then prove a retained first-row focus does
         // not undo manual wheel scrolling on subsequent ordinary paints.
         raw.frame(Vec::new(), false);
@@ -14995,25 +15038,27 @@ fn production_sole_content_tracks_real_tree_folds_and_stops_at_column_capacity()
 }
 
 #[test]
-fn production_bottom_history_has_fixed_height_without_collapse_or_height_changes() {
+fn production_bottom_history_is_a_strip_that_does_not_collapse_and_skips_the_gap_below_the_2d_timeline() {
     let mut h = production_content_harness(false, false);
     h.frames(6);
+    let strip = |h: &crate::scenario::Harness| {
+        let frame = h.app.universal_panel_frame().unwrap();
+        frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap().outer.size.height
+    };
+    let shots = h.app.panel_runtime().unwrap().layout().registry().get(&PanelKind::new("solidcraft.render_shots").unwrap()).unwrap();
+    let one_row = shots.fixed_bottom_height.unwrap();
+    assert_eq!(strip(&h), one_row);
     let frame = h.app.universal_panel_frame().unwrap();
-    let history = frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap();
-    let spec = h.app.panel_runtime().unwrap().layout().registry().get(&PanelKind::new("solidcraft.history").unwrap()).unwrap();
-    assert_eq!(history.outer.size.height, spec.fixed_bottom_height.unwrap());
-    assert!(history.collapse.is_none());
-    let before = h.app.panel_runtime().unwrap().layout().inspect();
+    assert!(frame.layout.sections.iter().find(|card| card.instance == id("history")).unwrap().collapse.is_none());
     assert!(h.app.run_panel_command("panel.collapse", &serde_json::json!({"target":{"type":"instance","id":"history"},"collapsed":true})).is_err());
-    assert!(
-        h.app
-            .run_panel_command(
-                "panel.resize",
-                &serde_json::json!({"target":{"type":"instance","id":"history"},"size":{"width":760,"height":100},"thickness_only":true})
-            )
-            .is_err()
+    // A height just above the strip is in the gap below the 2D Timeline: the row stays the strip.
+    let _ = h.app.run_panel_command(
+        "panel.resize",
+        &serde_json::json!({"target":{"type":"instance","id":"history"},"size":{"width":760,"height":one_row + 10.0},"thickness_only":true}),
     );
-    assert_eq!(h.app.panel_runtime().unwrap().layout().inspect(), before);
+    h.frames(3);
+    assert_eq!(strip(&h), one_row);
+    assert!(!crate::panel_runtime::timeline_tall(&h.app));
 }
 
 #[test]
@@ -16390,4 +16435,47 @@ fn a_panel_let_go_on_the_toolbar_band_floats_just_below_it_drawn_every_frame() {
         assert!((card.origin.y - cap.top()).abs() < 1.0, "{scale}: just below the band: {card:?} vs {cap:?}");
         assert!(card.origin.x <= last.x && right(card) >= last.x, "{scale}: under the pointer's x");
     }
+}
+
+/// #23395: an item list with nothing selected leaves a button's event without a row; an empty
+/// row id would have the whole press refused.
+#[test]
+fn plugin_panel_button_beside_an_unselected_item_list_sends_no_row() {
+    use solidcraft_engine::plugin::ui::*;
+    let mut panel = plugin_table_snapshot();
+    panel.panel.layout = Layout {
+        root: 0,
+        nodes: vec![
+            Node { widget: Widget::Group(vec![1, 2]) },
+            Node { widget: Widget::Toolbar(vec![ButtonSpec { label: "Refresh".into(), icon: None, entry: "show".into() }]) },
+            Node { widget: Widget::ItemList(ListSpec { bind: "/tools".into(), on_select: None }) },
+        ],
+    };
+    let ctx = crate::fonts::test_context();
+    let mut actions = Vec::new();
+    {
+        let mut frame = |events: Vec<egui::Event>| {
+            crate::test_support::frame(
+                &ctx,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 300.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    super::plugin::draw(ui, &panel, 0, &mut actions, "in", 0);
+                },
+            )
+        };
+        // The list has drawn, and so stored its selection, before the button is pressed.
+        frame(Vec::new());
+        frame(Vec::new());
+        let at = crate::scenario::rect_of("plugin-panel:machining:tools:button:show").unwrap().center();
+        frame(crate::test_support::pointer(at, true));
+        frame(crate::test_support::pointer(at, false));
+    }
+    assert_eq!(
+        actions,
+        vec![("show".into(), UiEvent { panel: "tools".into(), event: EventKind::Press, path: "show".into(), row: None, value: None })]
+    );
 }

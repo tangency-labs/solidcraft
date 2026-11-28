@@ -60,6 +60,8 @@ impl Walk for crate::document::Operation {}
 impl Walk for crate::hardware_catalog::HardwareKind {}
 impl Walk for solidcraft_kernel::Continuity {}
 impl Walk for solidcraft_kernel::DraftCorner {}
+impl Walk for crate::MorphMapMode {}
+impl Walk for crate::MorphProjection {}
 impl Walk for crate::document::Direction {}
 impl Walk for crate::document::PatternDistance {}
 impl Walk for crate::document::CellGridMode {}

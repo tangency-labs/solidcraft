@@ -114,6 +114,7 @@ pub fn runs(points: &[[f64; 2]], closed: bool, min_step: f64, smooth_turn_cos: f
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::det;
 
     /// 30 degrees: the turn a regular 12-gon makes at each corner.
     const COS_30: f64 = 0.866;
@@ -122,7 +123,7 @@ mod tests {
         (0..n)
             .map(|i| {
                 let a = std::f64::consts::TAU * i as f64 / n as f64;
-                [50.0 + 5.0 * a.cos(), 50.0 + 5.0 * a.sin()]
+                [50.0 + 5.0 * det::cos(a), 50.0 + 5.0 * det::sin(a)]
             })
             .collect()
     }
@@ -131,8 +132,8 @@ mod tests {
     fn an_open_line_is_cut_at_its_sharp_turns_only() {
         // A right angle at (10, 0), then a 10 degree bend at (10, 10).
         let bend = [
-            10.0 + 10.0 * 10f64.to_radians().sin(),
-            10.0 + 10.0 * 10f64.to_radians().cos(),
+            10.0 + 10.0 * det::sin(10f64.to_radians()),
+            10.0 + 10.0 * det::cos(10f64.to_radians()),
         ];
         let line = [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], bend];
         assert_eq!(
@@ -194,10 +195,10 @@ mod tests {
         let mut drop_: Vec<[f64; 2]> = (0..=40)
             .map(|i| {
                 let a = (30.0 + 7.5 * f64::from(i)).to_radians();
-                [5.0 * a.cos(), 5.0 * a.sin()]
+                [5.0 * det::cos(a), 5.0 * det::sin(a)]
             })
             .collect();
-        let tip = [5.0 / 30f64.to_radians().cos(), 0.0];
+        let tip = [5.0 / det::cos(30f64.to_radians()), 0.0];
         drop_.push(tip);
         let round = runs(&drop_, true, 1e-3, COS_30);
         assert_eq!(round.len(), 1);

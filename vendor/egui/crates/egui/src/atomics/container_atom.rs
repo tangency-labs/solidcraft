@@ -1,11 +1,11 @@
 use crate::{
-    AtomKind, AtomPaintArgs, Atoms, Direction, FontSelection, Frame, IdSalt, Image, IntoAtoms,
-    Response, SizedAtom, SizedAtomKind, Stroke, Ui, WidgetAtom,
+    AtomKind, AtomPaintArgs, Atoms, Direction, FontSelection, Frame, IdSalt, Image,
+    IntoAtoms, Response, SizedAtom, SizedAtomKind, Stroke, Ui, WidgetAtom, galley_cap_ink_rise,
     text_selection::LabelSelectionState,
 };
 use alloc::sync::Arc;
 use core::ops::{Deref, DerefMut};
-use emath::{Align2, GuiRounding as _, NumExt as _, Rect, Vec2};
+use emath::{Align, Align2, GuiRounding as _, NumExt as _, Rect, Vec2};
 use epaint::text::TextWrapMode;
 use epaint::{Color32, Galley};
 use smallvec::SmallVec;
@@ -598,6 +598,15 @@ impl<'atom> SizedContainerAtom<'atom> {
 
             match sized.kind {
                 SizedAtomKind::Text(galley) => {
+                    // SolidCraft: optical vertical centring. Vertically centred single-row
+                    // text is lifted so a capital's ink reads centred in the row box rather
+                    // than low in it (see `galley_cap_ink_rise`). [`crate::TextEdit`] lifts
+                    // its own text the same way, so the hint, prefix and suffix atoms here
+                    // keep its baseline (SolidCraft #23381).
+                    let mut pos = item_rect.min;
+                    if sized.align.y() == Align::Center {
+                        pos.y -= galley_cap_ink_rise(ui.painter(), &galley);
+                    }
                     if let Some(response) = selection_response {
                         // Route through the label selection machinery, which also
                         // paints the galley. `Stroke::NONE` keeps the rendering
@@ -605,14 +614,13 @@ impl<'atom> SizedContainerAtom<'atom> {
                         LabelSelectionState::label_text_selection(
                             ui,
                             response,
-                            item_rect.min,
+                            pos,
                             galley,
                             fallback_text_color,
                             Stroke::NONE,
                         );
                     } else {
-                        ui.painter()
-                            .galley(item_rect.min, galley, fallback_text_color);
+                        ui.painter().galley(pos, galley, fallback_text_color);
                     }
                 }
                 SizedAtomKind::Image { image, size: _ } => {
