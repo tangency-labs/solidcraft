@@ -261,6 +261,7 @@ impl Product {
             Self::Browser => vec![("magnifier", "ui.browser_search_hint", "zoom")],
             Self::PartsLibrary => vec![
                 ("refresh", "parts_library.refresh", "update"),
+                ("sort", "parts_library.sort", "sort_by"),
                 ("choose-folder", "parts_library.choose_another", "folder"),
                 ("design-folder", "parts_library.design_folder", "open"),
             ],
@@ -1760,6 +1761,9 @@ impl FramePanelContent for ProductionFrame<'_> {
     fn header_action_clicked(&mut self, instance: &InstanceId, action: &ControlId, button: egui::Rect) {
         if instance.0 == Product::History.id() && action.0 == TIMELINE_SETTINGS {
             crate::context_menu::open_for(self.app, button.left_bottom(), crate::context_menu::Target::Timeline2dOptions);
+        }
+        if instance.0 == Product::PartsLibrary.id() && action.0 == "sort" {
+            crate::context_menu::toggle_for(self.app, button, button.left_bottom(), crate::context_menu::Target::PartsLibrarySort);
         }
     }
 

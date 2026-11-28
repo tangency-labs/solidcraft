@@ -1,0 +1,58 @@
+{
+  "en": {
+    "parts_library.sort": "Sort by",
+    "parts_library.sort_name_ascending": "Name A–Z",
+    "parts_library.sort_name_descending": "Name Z–A",
+    "parts_library.sort_modified_descending": "Date modified, newest first",
+    "parts_library.sort_modified_ascending": "Date modified, oldest first"
+  },
+  "de": {
+    "parts_library.sort": "Sortieren nach",
+    "parts_library.sort_name_ascending": "Name A–Z",
+    "parts_library.sort_name_descending": "Name Z–A",
+    "parts_library.sort_modified_descending": "Änderungsdatum, neueste zuerst",
+    "parts_library.sort_modified_ascending": "Änderungsdatum, älteste zuerst"
+  },
+  "zh": {
+    "parts_library.sort": "排序方式",
+    "parts_library.sort_name_ascending": "名称 A–Z",
+    "parts_library.sort_name_descending": "名称 Z–A",
+    "parts_library.sort_modified_descending": "修改日期，从新到旧",
+    "parts_library.sort_modified_ascending": "修改日期，从旧到新"
+  },
+  "ja": {
+    "parts_library.sort": "並べ替え",
+    "parts_library.sort_name_ascending": "名前 A–Z",
+    "parts_library.sort_name_descending": "名前 Z–A",
+    "parts_library.sort_modified_descending": "更新日時（新しい順）",
+    "parts_library.sort_modified_ascending": "更新日時（古い順）"
+  },
+  "ko": {
+    "parts_library.sort": "정렬 기준",
+    "parts_library.sort_name_ascending": "이름 A–Z",
+    "parts_library.sort_name_descending": "이름 Z–A",
+    "parts_library.sort_modified_descending": "수정한 날짜, 최신순",
+    "parts_library.sort_modified_ascending": "수정한 날짜, 오래된순"
+  },
+  "ar": {
+    "parts_library.sort": "الترتيب حسب",
+    "parts_library.sort_name_ascending": "الاسم أ–ي",
+    "parts_library.sort_name_descending": "الاسم ي–أ",
+    "parts_library.sort_modified_descending": "تاريخ التعديل، الأحدث أولاً",
+    "parts_library.sort_modified_ascending": "تاريخ التعديل، الأقدم أولاً"
+  },
+  "he": {
+    "parts_library.sort": "מיון לפי",
+    "parts_library.sort_name_ascending": "שם א–ת",
+    "parts_library.sort_name_descending": "שם ת–א",
+    "parts_library.sort_modified_descending": "תאריך שינוי, מהחדש לישן",
+    "parts_library.sort_modified_ascending": "תאריך שינוי, מהישן לחדש"
+  },
+  "vi": {
+    "parts_library.sort": "Sắp xếp theo",
+    "parts_library.sort_name_ascending": "Tên A–Z",
+    "parts_library.sort_name_descending": "Tên Z–A",
+    "parts_library.sort_modified_descending": "Ngày sửa, mới nhất trước",
+    "parts_library.sort_modified_ascending": "Ngày sửa, cũ nhất trước"
+  }
+}

@@ -1161,6 +1161,54 @@ impl LibrarySize {
     }
 }
 
+/// The order the parts library lists a folder's cards in (#23334): by name (A–Z or Z–A) or by
+/// the files' date modified (newest or oldest first). Folders come first in every order, and a
+/// saved value this version doesn't know reads as name A–Z.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LibrarySort {
+    #[default]
+    NameAscending,
+    NameDescending,
+    ModifiedDescending,
+    ModifiedAscending,
+}
+
+impl<'de> Deserialize<'de> for LibrarySort {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let v = serde_json::Value::deserialize(d)?;
+        Ok(v.as_str().and_then(Self::from_id).unwrap_or_default())
+    }
+}
+
+impl LibrarySort {
+    pub const ALL: [Self; 4] = [Self::NameAscending, Self::NameDescending, Self::ModifiedDescending, Self::ModifiedAscending];
+
+    /// The sort as `ui.library` and the saved preferences spell it.
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::NameAscending => "name_ascending",
+            Self::NameDescending => "name_descending",
+            Self::ModifiedDescending => "modified_descending",
+            Self::ModifiedAscending => "modified_ascending",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.id() == id)
+    }
+
+    /// The message id of the order's label.
+    pub fn label_id(self) -> &'static str {
+        match self {
+            Self::NameAscending => "parts_library.sort_name_ascending",
+            Self::NameDescending => "parts_library.sort_name_descending",
+            Self::ModifiedDescending => "parts_library.sort_modified_descending",
+            Self::ModifiedAscending => "parts_library.sort_modified_ascending",
+        }
+    }
+}
+
 /// Which program reads the 3D mouse on Linux when both spacenavd and the device itself (hidraw)
 /// are there (Preferences: "3D mouse driver"). Read by the app's reader, not by this crate.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -4470,6 +4518,11 @@ fn prepare_preferences(
         && v.as_str().and_then(LibrarySize::from_id).is_none()
     {
         return Err("`library_size` must be small, medium, large or list".into());
+    }
+    if let Some(v) = p.get("library_sort")
+        && v.as_str().and_then(LibrarySort::from_id).is_none()
+    {
+        return Err("`library_sort` must be name_ascending, name_descending, modified_descending or modified_ascending".into());
     }
     if let Some(v) = p.get("dimension_input")
         && !matches!(v.as_str(), Some("view" | "window"))

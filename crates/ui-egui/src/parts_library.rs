@@ -17,7 +17,7 @@ use solidcore_record::Vec3;
 use solidcraft_engine::geom::prelude::*;
 
 use crate::SolveApp;
-use crate::prefs::LibrarySize;
+use crate::prefs::{LibrarySize, LibrarySort};
 use crate::ui_kit::{Container, PartCard, PartCardSize, PartFace, Surface};
 use solidcraft_theme::Tokens;
 
@@ -122,6 +122,8 @@ pub struct Entry {
     pub kind: Kind,
     /// A folder's designs and parts (not counting its subfolders).
     pub count: usize,
+    /// The file's last modification, for the date sorts (#23334); None when it can't be read.
+    pub modified: Option<std::time::SystemTime>,
 }
 
 /// What a card carries while it is dragged.
@@ -156,7 +158,9 @@ pub struct LibraryState {
     slow_pictures: Vec<std::sync::mpsc::Receiver<(String, Option<crate::ui_kit::PreviewImage>)>>,
 }
 
-/// Read a folder: its subfolders, then its designs and parts, by name (hidden files left out).
+/// Read a folder: its subfolders, then its designs and parts (hidden files left out). The entries
+/// come back in name order with the folders first; the panel orders them again by the sort
+/// preference (#23334).
 pub fn list(dir: &Path) -> Result<Vec<Entry>, String> {
     let read = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let mut out = Vec::new();
@@ -172,7 +176,8 @@ pub fn list(dir: &Path) -> Result<Vec<Entry>, String> {
         if let Some(kind) = kind {
             let shown = if kind == Kind::Folder { name } else { path.file_stem().map_or(name.clone(), |s| s.to_string_lossy().to_string()) };
             let count = if kind == Kind::Folder { parts_in(&path) } else { 0 };
-            out.push(Entry { path, name: shown, kind, count });
+            let modified = item.metadata().ok().and_then(|m| m.modified().ok());
+            out.push(Entry { path, name: shown, kind, count, modified });
         }
         if out.len() >= MAX_ENTRIES {
             break;
@@ -180,6 +185,24 @@ pub fn list(dir: &Path) -> Result<Vec<Entry>, String> {
     }
     out.sort_by(|a, b| (a.kind != Kind::Folder).cmp(&(b.kind != Kind::Folder)).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
     Ok(out)
+}
+
+/// `entries` in the library's sort order (#23334): folders first, then by name or by date
+/// modified, ascending or descending as the preference says. Name order ignores case.
+pub fn sorted(mut entries: Vec<Entry>, sort: LibrarySort) -> Vec<Entry> {
+    entries.sort_by(|a, b| {
+        let folders_first = (a.kind != Kind::Folder).cmp(&(b.kind != Kind::Folder));
+        let order = match sort {
+            LibrarySort::NameAscending | LibrarySort::NameDescending => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+            LibrarySort::ModifiedDescending | LibrarySort::ModifiedAscending => a.modified.cmp(&b.modified),
+        };
+        let ascending = matches!(sort, LibrarySort::NameAscending | LibrarySort::ModifiedAscending);
+        let mut key = if ascending { order } else { order.reverse() };
+        // A folder's own name breaks its date tie, and equal keys keep a stable, name-sorted list.
+        key = key.then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        folders_first.then(key)
+    });
+    entries
 }
 
 /// How many designs and parts a folder holds directly (0 when it can't be read).
@@ -620,10 +643,11 @@ fn take(app: &mut SolveApp, ctx: &egui::Context, acts: Acts) {
     }
 }
 
-/// The shown folder's entries the search leaves.
+/// The shown folder's entries the search leaves, in the library's sort order (#23334).
 fn filtered(app: &SolveApp) -> Vec<Entry> {
     let filter = app.parts_library.filter.to_lowercase();
-    app.parts_library.entries.iter().filter(|e| filter.is_empty() || e.name.to_lowercase().contains(&filter)).cloned().collect()
+    let entries = app.parts_library.entries.iter().filter(|e| filter.is_empty() || e.name.to_lowercase().contains(&filter)).cloned().collect();
+    sorted(entries, app.preferences.library_sort)
 }
 
 /// Returns the body's natural height: its fixed bands plus the whole list, however much of it
@@ -762,6 +786,18 @@ fn state(ui: &mut egui::Ui, icon: &str, ink: Option<egui::Color32>, text: &str) 
 /// The shared panel header's status: the shown folder's item count, once a folder is chosen.
 pub(crate) fn status(app: &SolveApp) -> Option<String> {
     root(app).map(|_| item_count(app))
+}
+
+/// The Sort by button's menu: the four card orders, the current one marked (#23334).
+pub(crate) fn sort_items(app: &SolveApp) -> Vec<crate::ui_kit::Item> {
+    let tr = solidcraft_ui_text::tr;
+    LibrarySort::ALL
+        .into_iter()
+        .map(|sort| {
+            let item = crate::ui_kit::Item::action("ui.librarySort", tr(sort.label_id()), "sort_by").with(json!({ "sort": sort.id() }));
+            if app.preferences.library_sort == sort { item.key("current") } else { item }
+        })
+        .collect()
 }
 
 /// "N items" ("1 item"); while searching, those the search leaves.
@@ -1019,6 +1055,12 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
     if let Some(v) = p.get("size") {
         app.preferences.library_size = v.as_str().and_then(LibrarySize::from_id).ok_or("`size` must be small, medium, large or list")?;
     }
+    if let Some(v) = p.get("sort") {
+        app.preferences.library_sort = v
+            .as_str()
+            .and_then(LibrarySort::from_id)
+            .ok_or("`sort` must be name_ascending, name_descending, modified_descending or modified_ascending")?;
+    }
     if let Some(sub) = p.get("subfolder").and_then(serde_json::Value::as_str) {
         let root = root(app).ok_or("no library folder set")?;
         // Only names of folders inside it: no `..`, no absolute or drive paths.
@@ -1061,6 +1103,7 @@ pub fn control(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::
     Ok(json!({
         "open": app.preferences.library_open,
         "size": app.preferences.library_size.id(),
+        "sort": app.preferences.library_sort.id(),
         "folder": app.preferences.library_folder,
         "shown": current(app).map(|p| p.to_string_lossy().to_string()),
         "entries": app.parts_library.entries.iter().map(|e| json!({"name": e.name, "kind": kind(e.kind), "path": e.path.to_string_lossy()})).collect::<Vec<_>>(),
@@ -1097,6 +1140,105 @@ mod tests {
         assert!(named.contains(&("bracket", Kind::Design)) && named.contains(&("adapter", Kind::Step)), "{named:?}");
         assert!(!named.iter().any(|(n, _)| n.contains("notes") || n.contains("hidden")), "{named:?}");
         assert!(list(&h.dir.join("missing")).is_err());
+    }
+
+    /// The cards' order follows the sort preference (#23334): folders first in every order, then
+    /// name A–Z, name Z–A, date modified newest first or oldest first. Equal keys fall back to
+    /// name order, so the list is stable.
+    #[test]
+    fn the_sort_orders_the_cards_by_name_or_date_modified() {
+        let at = |days: u64| Some(std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(days * 86_400));
+        let entry = |name: &str, kind: Kind, days: u64| Entry { path: PathBuf::from(name), name: name.into(), kind, count: 0, modified: at(days) };
+        let (folder, old, mid, new) = (
+            entry("Fasteners", Kind::Folder, 10),
+            entry("bracket", Kind::Design, 1),
+            entry("adapter", Kind::Step, 5),
+            entry("Bolt", Kind::Design, 9),
+        );
+        let source = vec![old.clone(), new.clone(), folder.clone(), mid.clone()];
+        fn named(entries: &[Entry]) -> Vec<&str> {
+            entries.iter().map(|e| e.name.as_str()).collect()
+        }
+        // The listing keeps name order with the folders first (the default).
+        assert_eq!(named(&sorted(source.clone(), LibrarySort::NameAscending)), ["Fasteners", "adapter", "Bolt", "bracket"]);
+        // Reversed names, still folders first.
+        assert_eq!(named(&sorted(source.clone(), LibrarySort::NameDescending)), ["Fasteners", "bracket", "Bolt", "adapter"]);
+        // Newest first: the newest file leads the files, the folder keeps its place.
+        assert_eq!(named(&sorted(source.clone(), LibrarySort::ModifiedDescending)), ["Fasteners", "Bolt", "adapter", "bracket"]);
+        // Oldest first.
+        assert_eq!(named(&sorted(source.clone(), LibrarySort::ModifiedAscending)), ["Fasteners", "bracket", "adapter", "Bolt"]);
+        // A file without a readable date sorts by name at the end of its date group.
+        let mut no_date = entry("zebra", Kind::Design, 0);
+        no_date.modified = None;
+        let entries = sorted(vec![new.clone(), no_date.clone(), old.clone()], LibrarySort::ModifiedDescending);
+        assert_eq!(named(&entries), ["Bolt", "bracket", "zebra"], "{entries:?}");
+    }
+
+    /// The header's Sort by button opens the four orders, the current one marked; picking one
+    /// reorders the cards and the choice is remembered with the preferences (#23334).
+    #[test]
+    fn the_sort_button_orders_the_cards_and_the_choice_is_kept() {
+        let mut h = crate::scenario::Harness::new();
+        parts(&h.dir);
+        control(&mut h.app, &json!({"folder": h.dir.to_string_lossy()})).unwrap();
+        h.frames(3);
+        use crate::context_menu::{Target, items, run_item};
+        use crate::panel_runtime::{HostControlTarget, HostPointerTarget};
+        use solidcraft_engine::panels::{ControlId, InstanceId};
+        h.app.home.open = false;
+        h.frames(3);
+        let button = HostControlTarget::Pointer(HostPointerTarget::HeaderAction {
+            instance: InstanceId("parts-library".into()),
+            action: ControlId("sort".into()),
+        });
+        let frame = h.app.universal_panel_frame().unwrap();
+        let bounds = frame
+            .controls
+            .iter()
+            .find(|c| c.target == button)
+            .map(|c| crate::panel_runtime::egui_rect(c.bounds))
+            .expect("the library header has the Sort by button");
+        let at = bounds.center();
+        h.call("ui.click", json!({"x": at.x, "y": at.y}));
+        h.frames(3);
+        assert_eq!(h.app.menu.target, Target::PartsLibrarySort, "the Sort by button opens the orders");
+        assert!(
+            crate::context_menu::open_from(&h.app, bounds, &Target::PartsLibrarySort),
+            "the menu belongs to the button, so a second click closes it"
+        );
+        // The default is marked, and the menu offers all four orders.
+        let all = items(&h.app, &Target::PartsLibrarySort);
+        assert_eq!(all.len(), 4, "{all:?}");
+        assert_eq!(all[0].shortcut, "current", "name A–Z starts marked: {all:?}");
+        let pick = |h: &mut crate::scenario::Harness, sort: &str| {
+            let item = items(&h.app, &Target::PartsLibrarySort)
+                .into_iter()
+                .find(|i| i.params.as_ref().is_some_and(|p| p["sort"] == sort))
+                .unwrap_or_else(|| panic!("the menu offers the order {sort}"));
+            run_item(&mut h.app, &item, egui::Pos2::ZERO);
+        };
+        pick(&mut h, "modified_descending");
+        assert_eq!(h.app.preferences.library_sort, LibrarySort::ModifiedDescending);
+        assert!(h.app.prefs().contains("library_sort"), "the order is kept with the preferences");
+        // The cards take the preference's order (the fixture's adapter was written after
+        // bracket, and equal dates fall back to name order, so newest first), while the raw
+        // listing stays in name order.
+        let files = |h: &crate::scenario::Harness| {
+            h.app.parts_library.entries.iter().filter(|e| e.kind != Kind::Folder).map(|e| e.name.clone()).collect::<Vec<_>>()
+        };
+        let shown = sorted(h.app.parts_library.entries.clone(), h.app.preferences.library_sort);
+        let shown: Vec<_> = shown.iter().filter(|e| e.kind != Kind::Folder).map(|e| e.name.clone()).collect();
+        assert_eq!(shown, ["adapter", "bracket"], "newest first: {shown:?}");
+        assert_eq!(files(&h), ["adapter", "bracket"], "the listing itself is name order: name A–Z was never the mtime order's promise");
+        pick(&mut h, "modified_ascending");
+        assert_eq!(h.app.preferences.library_sort, LibrarySort::ModifiedAscending);
+        let shown = sorted(h.app.parts_library.entries.clone(), h.app.preferences.library_sort);
+        let shown: Vec<_> = shown.iter().filter(|e| e.kind != Kind::Folder).map(|e| e.name.clone()).collect();
+        assert_eq!(shown, ["bracket", "adapter"], "oldest first: {shown:?}");
+        assert!(control(&mut h.app, &json!({"sort": "name_ascending"})).is_ok());
+        assert_eq!(h.app.preferences.library_sort, LibrarySort::NameAscending);
+        assert!(control(&mut h.app, &json!({"sort": "newest"})).is_err(), "an unknown order is refused");
+        assert_eq!(control(&mut h.app, &json!({})).unwrap()["sort"], "name_ascending", "the state names the order");
     }
 
     /// The card through `ui.library`: a folder chosen, shown, browsed into (and the subfolder

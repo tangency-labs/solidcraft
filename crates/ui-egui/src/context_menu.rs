@@ -155,6 +155,8 @@ pub enum Target {
     },
     /// The quick menu at the cursor: the commands that take the selection (#5501).
     Quick,
+    /// The Parts Library header's Sort by button: the card orders (#23334).
+    PartsLibrarySort,
     /// A projection (link) listed under its sketch.
     SketchLink {
         sketch: u64,
@@ -693,6 +695,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Quick => crate::quick_menu::items(app),
         Target::HistoryControls => crate::timeline::transport_items(app),
         Target::Timeline2dOptions => crate::timeline_2d::option_items(app),
+        Target::PartsLibrarySort => crate::parts_library::sort_items(app),
         Target::HistoryFolder => crate::timeline::history_folder_items(app),
         Target::Timeline { feature } => crate::timeline::feature_items(app, *feature),
         Target::Workspace => {
@@ -2827,6 +2830,12 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 crate::prefs::choose_nav_preset(&mut app.preferences, preset);
             }
         }
+        "ui.librarySort" => {
+            // Picked here, an order sets what the Parts Library's Sort by menu sets.
+            if let Some(sort) = p.get("sort").and_then(Value::as_str).and_then(crate::prefs::LibrarySort::from_id) {
+                app.preferences.library_sort = sort;
+            }
+        }
         "ui.historyPlayButton" => {
             if let Err(e) = crate::prefs::set(app, &json!({ "history_play_button": p["show"] })) {
                 app.set_status(e, true);
@@ -3633,6 +3642,7 @@ pub fn check_target(app: &SolveApp, target: &Target) -> Result<(), String> {
         | Target::AppBar { .. }
         | Target::HistoryControls
         | Target::Timeline2dOptions
+        | Target::PartsLibrarySort
         | Target::Workspace
         | Target::NamedViews
         | Target::ViewGizmo
