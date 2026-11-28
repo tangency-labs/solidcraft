@@ -44,6 +44,63 @@ use crate::nurbs::srf_basic::{Direction, Surface as NlSurface};
 use crate::nurbs::srf_tool::p1::extract_iso_crv;
 use crate::SolidError;
 
+/// Whether the oriented pcurves wind clockwise, using a certified signed area. `None`
+/// means the bounds on the signed area could not establish its sign.
+///
+/// # Errors
+/// Invalid pcurves or cancellation, as in [`crate::mass::loop_area::loop_area_sign`].
+pub fn loop_is_clockwise(
+    k: &crate::Kernel,
+    pcurves: &[(&Curve2, bool)],
+) -> crate::Result<Option<bool>> {
+    use crate::blend::fillet_section::certificate::NurbsCurve;
+    use crate::mass::loop_area::{loop_area_sign, LoopAreaSign};
+
+    let mut nurbs = Vec::new();
+    for &(curve, forward) in pcurves {
+        let (u, n, pw) = match curve {
+            Curve2::Spline { knots, points } => (
+                knots,
+                points.len(),
+                points.iter().flat_map(|&[x, y]| [x, y, 0.0, 1.0]).collect(),
+            ),
+            Curve2::RationalSpline { knots, homogeneous } => (
+                knots,
+                homogeneous.len(),
+                homogeneous
+                    .iter()
+                    .flat_map(|&[xw, yw, w]| [xw, yw, 0.0, w])
+                    .collect(),
+            ),
+        };
+        let p = u
+            .len()
+            .checked_sub(n)
+            .and_then(|d| d.checked_sub(1))
+            .ok_or_else(|| {
+                SolidError::invalid_input("pcurve::loop_is_clockwise", "pcurve degree")
+            })?;
+        nurbs.push((
+            NurbsCurve {
+                p,
+                n,
+                u: u.clone(),
+                pw,
+            },
+            forward,
+        ));
+    }
+    let curves: Vec<_> = nurbs
+        .iter()
+        .map(|(curve, forward)| (curve, *forward))
+        .collect();
+    Ok(match loop_area_sign(k, &curves)? {
+        LoopAreaSign::Positive(_) => Some(false),
+        LoopAreaSign::Negative(_) => Some(true),
+        LoopAreaSign::Undecided(_) => None,
+    })
+}
+
 /// Why no pcurves: the records are malformed or out of bounds (`Invalid`), no pcurve within
 /// the tolerance was found or the geometry is not supported (`Failed`), or the fit would exceed
 /// its caps (`TooLarge`).

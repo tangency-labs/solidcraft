@@ -56,6 +56,7 @@ pub(super) fn command(kind: &Kind) -> Option<&'static str> {
         Kind::Split { .. } => Some("solid.split_body"),
         Kind::DeleteFaces { .. } => Some("face.delete"),
         Kind::Move { .. } => Some("solid.move"),
+        Kind::TransformFace { .. } => Some("solid.transform_face"),
         Kind::Thread { .. } => Some("solid.thread"),
         Kind::ReplaceFace => Some("solid.replace_face"),
         Kind::BoundaryFill { .. } => Some("solid.boundary_fill"),
@@ -523,6 +524,25 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
         crate::dialogs_move::type_row(app, d, ui);
         let n = d.inputs.len();
         input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 1..n);
+    } else if matches!(d.kind, Kind::TransformFace { .. }) {
+        input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 0..1);
+        let mode = if transform_face::pivot_input(d).is_some() {
+            2
+        } else {
+            usize::from(matches!(d.kind, Kind::TransformFace { explicit_pivot: true, .. }))
+        };
+        let mut selected = mode;
+        choice_row(ui, "Pivot", "transform_face_pivot", &mut selected, &["Picked point", "Custom", transform_face::PICK_ON_FACE]);
+        if selected != mode {
+            transform_face::set_pivot_mode(d, selected);
+            if selected == 2 {
+                surrender_keyboard_focus(ui);
+                app.preview.clear();
+            }
+        }
+        if selected == 2 && !sels(d, 0).is_empty() {
+            input_rows_range(d, ui, &app.session, app.preferences.origin_plane_names, 1..2);
+        }
     } else if matches!(d.kind, Kind::ShaftSpline(_)) {
         // The face a part's teeth start from shows once the part's round face is picked (#17693).
         for rows in crate::dialogs_shaft_spline::shown_picks(&d.inputs) {
@@ -662,6 +682,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             distance2,
             taper,
             taper_present,
+            taper2,
             to_offset,
             start,
             offset_start,
@@ -794,7 +815,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                     }
                 }
             });
-            let advanced = *offset_start || object_on(&d.inputs, FROM_OBJECT) || *taper_present;
+            let advanced = *offset_start || object_on(&d.inputs, FROM_OBJECT) || *taper_present || !taper2.trim().is_empty();
+            // Taper Angle 2 belongs to a Distance second side (All and To Object take no taper).
+            let second_distance = !*all2 && !object_on(&d.inputs, TO_OBJECT2);
             ui_kit::section(ui, "extrude_advanced", "Advanced", advanced, |ui| {
                 let old = if object_on(&d.inputs, FROM_OBJECT) { 2 } else { usize::from(*offset_start) };
                 let mut st = old;
@@ -817,7 +840,9 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                         form_row(ui, "Symmetric Offset", |ui| check(ui, symmetric_offset));
                     }
                 }
-                if *direction < 2 {
+                // Every side is drafted by the taper; the second of two sides by its own when
+                // Taper Angle 2 is filled in (empty: the same as Taper Angle).
+                if crate::dialogs::extrude_taper_shown(*direction, *thin, st == 1 && *symmetric_offset) {
                     form_row(ui, "Taper Angle", |ui| {
                         let before = taper.clone();
                         enter |= ui_kit::stepped_field(ui, taper, "", "1 deg", |text, delta| angle_step(text, delta, 1.0, None));
@@ -825,6 +850,14 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                             *taper_present = !taper.trim().is_empty();
                         }
                     });
+                    if two_sided(*direction) && second_distance {
+                        form_row(ui, "ui.taper_angle_2", |ui| {
+                            let first = taper.clone();
+                            enter |= ui_kit::stepped_field(ui, taper2, &first, "1 deg", |text, delta| {
+                                angle_step(if text.trim().is_empty() { &first } else { text }, delta, 1.0, None)
+                            });
+                        });
+                    }
                 }
             });
         }
@@ -1597,6 +1630,25 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::OffsetFaces { distance } => {
             enter |= expr_row(ui, "Distance", distance);
+        }
+        Kind::TransformFace { translate, axis, custom_axis, angle, explicit_pivot, origin } => {
+            for (label, v) in ["X Distance", "Y Distance", "Z Distance"].into_iter().zip(translate) {
+                enter |= expr_row(ui, label, v);
+            }
+            form_row(ui, "Axis", |ui| {
+                ui_kit::segmented(ui, axis, &["X", "Y", "Z", "Custom"], Default::default());
+            });
+            if *axis == 3 {
+                for (label, v) in ["X", "Y", "Z"].into_iter().zip(custom_axis) {
+                    enter |= ui_kit::text_row(ui, label, v, "").0;
+                }
+            }
+            enter |= expr_row(ui, "Angle", angle);
+            if *explicit_pivot {
+                for (label, v) in ["ui.transform_face.pivot_x", "ui.transform_face.pivot_y", "ui.transform_face.pivot_z"].into_iter().zip(origin) {
+                    enter |= expr_row(ui, label, v);
+                }
+            }
         }
         Kind::Thread { designation, length, suggested, of, options, .. } => {
             let mut modeled = d.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false);

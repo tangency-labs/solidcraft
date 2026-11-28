@@ -401,6 +401,7 @@ pub const OPENAI_PRESETS: &[ApiPreset] = &[
     ApiPreset { name: "Cheaper Inference", base_url: "https://api.cheaperinference.com/v1" },
     // UnoRouter serves OpenAI-compatible chat completions and GET /v1/models (#17068).
     ApiPreset { name: "UnoRouter", base_url: "https://api.unorouter.com/v1" },
+    ApiPreset { name: "LLMTR", base_url: "https://llmtr.com/v1" },
     // AI/ML API lists image, video and speech models too; the picker keeps the chat ones (#20006).
     ApiPreset { name: "AI/ML API", base_url: "https://api.aimlapi.com/v1" },
     ApiPreset { name: "OpenRouter", base_url: "https://openrouter.ai/api/v1" },
@@ -481,6 +482,7 @@ mod tests {
         assert!(key_safe_for("https://api.openai.com/v1"));
         assert!(key_safe_for("https://api.mammouth.ai/v1"));
         assert!(key_safe_for("https://api.cheaperinference.com/v1"));
+        assert!(key_safe_for("https://llmtr.com/v1"));
         assert!(key_safe_for("http://localhost:11434/v1"));
         assert!(key_safe_for("http://127.0.0.1:1234/v1"));
         assert!(key_safe_for("http://[::1]:8080/v1"));
@@ -591,6 +593,7 @@ mod tests {
         assert!(presets(Protocol::OpenAi).iter().all(|p| !p.name.is_empty() && p.base_url.starts_with("http")));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Mammouth AI" && key_safe_for(p.base_url)));
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Mistral AI" && p.base_url == "https://api.mistral.ai/v1"));
+        assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "LLMTR" && key_safe_for(p.base_url)));
         // #11816: Google's OpenAI-compatible endpoint, with the key sent only over HTTPS.
         assert!(presets(Protocol::OpenAi).iter().any(|p| p.name == "Google Gemini"
             && p.base_url == "https://generativelanguage.googleapis.com/v1beta/openai"

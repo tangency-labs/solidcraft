@@ -175,11 +175,12 @@ struct DocView {
 
 impl DocSlot {
     fn new(session: Session) -> DocSlot {
+        let cam = Camera { frame: session.doc.view_frame, ..Camera::default() };
         DocSlot {
             session,
             autosave: None,
             big_operation: false,
-            cam: Camera::default(),
+            cam,
             pending_feature_edit: None,
             pre_sketch_cam: None,
             sketch_last_views: Default::default(),
@@ -2120,7 +2121,7 @@ pub fn adopt(app: &mut SolveApp, mut session: Session) -> bool {
         crate::render_workspace::reset_document(app);
         crate::drawing_workspace::reset_document(app);
         app.session.invalidate_view(rev);
-        app.cam = Camera::default();
+        app.cam = Camera { frame: app.session.doc.view_frame, ..Camera::default() };
         app.fit_view();
         // The linked designs that changed while it was closed are read again (#9739): last, as a
         // read is taken up only by the design revision it started from.

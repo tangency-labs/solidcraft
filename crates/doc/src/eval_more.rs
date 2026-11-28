@@ -1963,7 +1963,7 @@ struct ExtrudeCut {
 /// extrude or a missing sketch.
 fn extrude_cut(st: &ModelState, f: &Feature) -> Result<Option<ExtrudeCut>> {
     let FeatureKind::Extrude { sketch, profiles, operation, extent, .. } = &f.kind else { return Ok(None) };
-    if extent.taper.is_some() {
+    if extent.taper.is_some() || extent.taper2.is_some() {
         return Ok(None);
     }
     let Some(ss) = st.sketch(sketch.0) else { return Ok(None) };
@@ -2406,7 +2406,7 @@ pub(super) fn surface_sheet_join(
     constructor: Option<&ExtrudeConstructor>,
 ) -> Result<Vec<String>> {
     let FeatureKind::Extrude { sketch, profiles, extent, .. } = &f.kind else { return Ok(Vec::new()) };
-    if extent.taper.is_some() {
+    if extent.taper.is_some() || extent.taper2.is_some() {
         return Ok(Vec::new());
     }
     let Some(c) = constructor else { return Ok(Vec::new()) };

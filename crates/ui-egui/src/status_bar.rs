@@ -169,7 +169,8 @@ fn paint(app: &mut SolveApp, ui: &mut egui::Ui, contents: &Contents) {
         if let Some(dot) = dot {
             painter.circle_filled(pos2(item.left() + t.space_4, item.center().y), t.space_3 + 0.5, dot);
         }
-        painter.galley(pos2(item.left() + dot_width, item.center().y - galley.size().y / 2.0), galley, colour);
+        let rise = egui::galley_cap_ink_rise(&painter, &galley);
+        painter.galley(pos2(item.left() + dot_width, item.center().y - galley.size().y / 2.0 - rise), galley, colour);
         ui.interact(item, egui::Id::unique(handle), Sense::hover()).widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &text));
         crate::scenario::publish_target(handle, item);
         right = item.left();
@@ -193,7 +194,7 @@ fn menu_button(app: &mut SolveApp, ui: &mut egui::Ui, right: f32, target: Target
         painter.rect_filled(button, t.control_radius, t.hover);
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
-    let text_at = pos2(button.left() + t.space_6, button.center().y - galley.size().y / 2.0);
+    let text_at = pos2(button.left() + t.space_6, button.center().y - galley.size().y / 2.0 - egui::galley_cap_ink_rise(&painter, &galley));
     painter.galley(text_at, galley, t.text);
     let chevron_rect = Rect::from_center_size(pos2(button.right() - t.space_6 - chevron / 2.0, button.center().y), vec2(chevron, chevron));
     crate::ui_kit::dropdown_indicator(&painter, chevron_rect, t.text_dim);
@@ -227,6 +228,34 @@ mod tests {
                 let ratio = solidcraft_theme::contrast_ratio(state.colour(&t), t.toolbar);
                 assert!(ratio >= 3.0, "{state:?} on the bar: contrast {ratio:.2}");
             }
+        }
+    }
+
+    /// #23399: the status-bar items are painted by hand, so they lift themselves the way
+    /// #23381's shared rows do: a capital's ink sits in the middle of the bar, not low in it.
+    #[test]
+    fn status_items_read_centred_in_the_bar() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", serde_json::json!({"plane": "XY"})).unwrap();
+        h.call("ui.prefs", serde_json::json!({"status_bar": true}));
+        h.settle();
+        for handle in ["status:sketch", "status:editing"] {
+            let item = crate::scenario::rect_of(handle).unwrap_or_else(|| panic!("{handle} is drawn"));
+            let text = h
+                .shapes
+                .iter()
+                .find_map(|s| match &s.shape {
+                    egui::Shape::Text(text) if item.contains(text.pos + text.galley.size() / 2.0) => Some(text.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{handle}'s text"));
+            // A capital in the label's font, laid out alone: where its ink sits in a row.
+            let font = text.galley.job.sections[0].format.font_id.clone();
+            let job = egui::text::LayoutJob::single_section("H".to_owned(), egui::TextFormat::simple(font, Color32::WHITE));
+            let probe = h.ctx.fonts_mut(|fonts| fonts.layout_job(job));
+            let ink = text.pos.y + probe.mesh_bounds.center().y;
+            assert!((ink - item.center().y).abs() <= 0.5, "{handle}: capital ink at {ink}, the bar's middle at {}", item.center().y);
         }
     }
 }

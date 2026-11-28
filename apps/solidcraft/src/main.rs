@@ -723,6 +723,9 @@ impl App {
         let reason = gpu.lost.reason().unwrap_or_default();
         log::error!("graphics: the device was lost ({reason}); closing to start again");
         solidcraft_engine::note!("SolidCraft graphics: the device was lost ({reason}); starting again");
+        // A report the next start offers, as it does a crash's, with this run's renderer and log
+        // (before the step below, which would read as a startup step in it).
+        solidcraft_engine::crash::device_lost(&reason);
         solidcraft_engine::crash::phase(&format!("graphics device lost: {reason}"));
         gpu.lost_at = Some(device_lost::now_secs());
         gpu.reason = reason;
@@ -2311,7 +2314,12 @@ fn gpu_ready(a: &mut App, gpu: &GpuSetup, built: solidcraft_ui_egui::WgpuBuilt) 
     // Reflect a confirmed probe fallback or an unsupported saved count in Graphics.
     solidcraft_ui_egui::prefs::check_msaa(app, u32::from(gpu.samples));
     let info = gpu.rs.adapter.get_info();
-    solidcraft_engine::crash::set_environment(&format!("Renderer: {:?} {} ({}), MSAA {scene_samples}x", info.backend, info.name, info.driver));
+    // As the adapter step names it (`startup_step`), so a report reads the API, adapter and driver
+    // of the run that failed (`crash::graphics`).
+    solidcraft_engine::crash::set_environment(&format!(
+        "Renderer: {:?} {} ({:?}, driver {} {}), MSAA {scene_samples}x",
+        info.backend, info.name, info.device_type, info.driver, info.driver_info
+    ));
 }
 
 /// The window's graphics setup: eframe's own (`WgpuConfiguration::default()`), which lets wgpu

@@ -373,7 +373,7 @@ pub(crate) fn icon_of(k: &FeatureKind) -> &'static str {
         FeatureKind::Dome { .. } => "dome",
         FeatureKind::Draft { .. } => "draft",
         FeatureKind::Split { .. } => "split",
-        FeatureKind::Move { .. } => "move",
+        FeatureKind::Move { .. } | FeatureKind::TransformFace { .. } => "move",
         FeatureKind::CapturePosition { .. } => "capture",
         FeatureKind::Import { .. } | FeatureKind::MeshImport { .. } | FeatureKind::MeshConvert { .. } => "import",
         FeatureKind::MeshReduce { .. } => "mesh_reduce",
@@ -1356,7 +1356,7 @@ fn timeline_strip(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool, x: f32)
     // edited or picked component's features, after the path to it (`timeline_scope`).
     let strip = crate::timeline_fold::Strip { marker, from_view, floating, accent };
     crate::timeline_scope::follow(app);
-    let history = crate::timeline_fold::history(app, &strip);
+    let history = crate::timeline_fold::cached(app, ui, &strip);
     // The edited component's last feature, scrolled into view once (`timeline_scope`): the
     // folded chip holding it, its component's own chip, or the feature itself. Read before the
     // path, whose click asks for it in what the next frame shows.

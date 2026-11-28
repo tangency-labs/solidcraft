@@ -600,6 +600,7 @@ mod tests {
                             through_all: false,
                             second_follows_first: false,
                             taper: None,
+                            taper2: None,
                             corner: Default::default(),
                             to: None,
                             to_offset: None,

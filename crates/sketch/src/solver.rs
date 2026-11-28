@@ -4409,6 +4409,7 @@ mod typed_dimension_tests {
             kind: ConstraintKind::Midpoint { p, l: circle },
             param: None,
             driven: false,
+            driven_param: None,
             text: None,
         });
         let rep = solve(&mut sk);

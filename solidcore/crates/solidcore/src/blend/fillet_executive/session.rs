@@ -6817,12 +6817,17 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
         // `e`, so no sample of the pair can pass the band test. The boxes are
         // guaranteed bounds, never sampled extremes: the control polygon's box of a
         // B-spline (or line) with positive weights holds the whole curve (the convex
-        // hull property), and a curve of any other kind is not pruned.
+        // hull property), and a curve of any other kind is not pruned. An edge is boxed
+        // over its own interval (#22590), since its foot `e` is found on that part only.
         let margin = 100.0 * tol + apart;
         let mut edge_boxes: Vec<Option<Extent3d>> = Vec::new();
         for &(edge, _) in &edges {
             let e = self.target.edge(edge)?;
-            edge_boxes.push(e.curve.as_ref().and_then(control_hull_box));
+            edge_boxes.push(
+                e.curve
+                    .as_ref()
+                    .and_then(|curve| edge_hull_box(k, curve, &e.interval)),
+            );
         }
         let rail_boxes: Vec<Vec<Option<Extent3d>>> = rails
             .iter()
@@ -7669,6 +7674,34 @@ fn control_hull_box(curve: &crate::curve::curve::Curve) -> Option<Extent3d> {
         hull.add_point(p);
     }
     Some(hull)
+}
+
+/// The band check's box of an edge: a box holding the part of `curve` over the edge's
+/// `interval`, for the curves [`control_hull_box`] bounds: the box of the control points of the spans that part covers
+/// ([`crate::curve::curve::Curve::calculate_bounding_box`]). Those control points hold the
+/// curve over those spans (the convex hull property, span by span), so the box is a
+/// guaranteed bound as [`control_hull_box`]'s is. It is the box of an edge's own part of a
+/// longer curve: the edges a loft leaves on one curve of many spans, each on its span, are
+/// boxed round that span, not round the whole curve (#22590, where every one of 426 rim
+/// edges had the 538 mm box of the whole rim and no pair was pruned). `None` where
+/// [`control_hull_box`] gives none, or the box cannot be computed: that edge is not pruned.
+fn edge_hull_box(
+    k: &Kernel,
+    curve: &crate::curve::curve::Curve,
+    interval: &crate::geom::extent1d::Extent1d,
+) -> Option<Extent3d> {
+    control_hull_box(curve)?;
+    let req = crate::nurbs::b_spline_curve::BoundingBoxRequest {
+        normal: true,
+        pseudo: false,
+        polar: false,
+    };
+    let bx = curve
+        .calculate_bounding_box(k, interval, req, false)
+        .ok()?
+        .normal?;
+    let finite = (0..3).all(|i| bx.min_at(i).is_finite() && bx.max_at(i).is_finite());
+    (bx.is_defined() && finite).then_some(bx)
 }
 
 impl SolverLoadingAccess<FilletObject> for SessionObjects<'_> {
@@ -9587,6 +9620,40 @@ mod tests {
     use crate::topology::brep::p8::{create_planar_face_with_3d_curves, FaceBuildEnv};
     use crate::topology::loopuse;
     use crate::topology::topology_traverser::Marks;
+
+    /// #22590: the band check boxes an edge round its own part of its curve, not round the
+    /// whole curve. The 426 rim edges a loft left on one spline of many spans each had the
+    /// 538 mm box of the whole rim, so the check pruned none of their pairs and a round of the
+    /// rim did not finish in 25 minutes. An edge on a sixteenth of a circle of radius 100 and
+    /// one on a tenth of a 100 mm line: each box holds its part and is far smaller than the
+    /// curve's.
+    #[test]
+    fn the_band_check_boxes_an_edge_round_its_own_part_of_a_long_curve() {
+        use crate::primitive::api_curves::{create_circle, create_line_segment};
+        let k = Kernel::new(&crate::kernel::KernelOptions::default());
+        let circle = Curve::from(create_circle(Point3::new(0.0, 0.0, 0.0), 100.0).unwrap());
+        let line = Curve::from(
+            create_line_segment(Point3::new(0.0, 0.0, 0.0), Point3::new(100.0, 0.0, 0.0)).unwrap(),
+        );
+        for (curve, from, to) in [(&circle, 0.30, 0.3625), (&line, 0.45, 0.55)] {
+            let all = curve.natural_interval();
+            let part =
+                crate::geom::extent1d::Extent1d::from_min_max(all.evaluate(from), all.evaluate(to));
+            let whole = control_hull_box(curve).unwrap().size().length();
+            let own = edge_hull_box(&k, curve, &part).unwrap();
+            for s in 0..=32 {
+                let p = curve
+                    .evaluate_point(&k, part.evaluate(f64::from(s) / 32.0))
+                    .unwrap();
+                assert!(own.contains_point(p, 1e-9), "{p:?} outside {own:?}");
+            }
+            let size = own.size().length();
+            assert!(
+                size < 0.5 * whole,
+                "the edge's box {size} against the curve's {whole}"
+            );
+        }
+    }
 
     /// Only the constant-radius solvers have fixed offsets an End's rail end can be solved
     /// with (#15906): a constant-distance solver solves its offset at each section and a

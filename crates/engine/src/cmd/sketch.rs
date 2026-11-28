@@ -559,9 +559,10 @@ pub(super) fn edit_solved<T>(
     f: impl FnOnce(&mut Sketch, &mut solidcraft_doc::Document) -> Result<(T, Left)>,
 ) -> Result<(T, Option<SolveReport>)> {
     let mut doc = (*s.doc).clone();
+    let live_driven = (!s.model.results.is_empty()).then(|| s.model.state().driven_params());
     let mut sk = sketch_store::read(&doc, id)?.clone();
     if sk.patterns.iter().any(|p| p.count_expression.is_some() || !p.expressions.is_empty()) {
-        doc.apply_pattern_values(&doc.param_values().0, &mut sk)?;
+        doc.apply_pattern_values(&doc.param_values_with(live_driven.as_ref()).0, &mut sk)?;
     }
     // The next frame of a live gesture on this sketch, nothing else run since the last one: its
     // links are as that frame projected them, from a model that hasn't changed (#3222).
@@ -612,7 +613,7 @@ pub(super) fn edit_solved<T>(
         // A drag left a step placed but unsolved: solve it keeping the orientation of the last
         // solved positions. A drag changes no values, so there is nothing to continue.
         Left::MovedFrom(reference) => {
-            doc.apply_dimension_values(&doc.param_values().0, &mut sk)?;
+            doc.apply_dimension_values(&doc.param_values_with(live_driven.as_ref()).0, &mut sk)?;
             sk.refresh_offsets()?;
             let unsolved = sk.clone();
             let first_analysis = if offsets { Analysis::StatusOnly } else { analysis };
@@ -629,7 +630,7 @@ pub(super) fn edit_solved<T>(
         }
         // Solved for the document's values, continuing from the stored solved state.
         Left::Solved | Left::Unsolved => {
-            let (vals, _) = doc.param_values();
+            let (vals, _) = doc.param_values_with(live_driven.as_ref());
             sk.refresh_offsets()?;
             let unsolved = sk.clone();
             #[cfg(test)]
@@ -3314,6 +3315,7 @@ pub(super) fn apply_in_order(sk: &mut Sketch, rep: &SolveReport, first: &[Ent], 
             kind,
             param: None,
             driven: false,
+            driven_param: None,
             text: None,
         }));
         let ok = solve_with(&mut trial, &h, None, Analysis::StatusOnly, None).ok();
@@ -4516,11 +4518,15 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
     let value = if s.sheet_sketching() && p.get("value").is_some() { Some(crate::params::req_expr(cmd, p, "value")?) } else { expr(p, "value") };
     let text_at = p.get("text_at").and_then(vec2);
     let mut driven = bool_(p, "driven").unwrap_or(false);
+    let driven_name = str_(p, "name").map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
     // Sheet dimensions have their own authored paper expression and never define
     // a parameter on the source model. Reference dimensions remain value-less.
     let on_sheet = s.sheet_sketching();
     if on_sheet && driven && value.is_some() {
         return Err(bad(cmd, "a sheet sketch reference dimension cannot define or take a value"));
+    }
+    if on_sheet && driven_name.is_some() {
+        return Err(bad(cmd, "a sheet sketch dimension cannot define a parameter"));
     }
     if on_sheet && bool_(p, "scale_sketch").unwrap_or(false) {
         return Err(bad(cmd, "scaling a sheet sketch through a dimension is not supported"));
@@ -4557,6 +4563,7 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
     let mut before = None;
     let (mut residual, mut new_id) = (None, String::new());
     let start = s.doc.clone();
+    let live_driven = (!s.model.results.is_empty()).then(|| s.model.state().driven_params());
     let ((param, kind_name, current), info) = edit(s, p, cmd, true, |sk, doc| {
         before = Some(dof_now(sk));
         let ents: Vec<String> = ents
@@ -4823,16 +4830,32 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
             driven = true;
         }
         if driven {
-            // A reference dimension: measures, no parameter.
+            let dname = if let Some(n) = driven_name.as_deref() {
+                if let Some(why) = solidcraft_doc::Document::param_name_problem(n) {
+                    return Err(bad(cmd, format!("name: {why}")));
+                }
+                if doc.param(n).is_some()
+                    || doc.text_param(n).is_some()
+                    || doc.is_driven_param(n)
+                    || doc.features.iter().any(|f| f.param_names.iter().any(|x| x == n))
+                {
+                    return Err(bad(cmd, format!("name: there is already a parameter `{n}`")));
+                }
+                Some(n.to_string())
+            } else {
+                None
+            };
+            // A reference dimension: measures; with `name`, exposes its value as a read-only parameter (#14426).
             let name = k.name();
             let id = sk.add_constraint(k, None)?;
             new_id = id.clone();
             place_text(sk, &id, text_at);
             if let Some(c) = sk.constraints.iter_mut().find(|c| c.id == id) {
                 c.driven = true;
+                c.driven_param = dname.clone();
             }
             before = None;
-            return Ok((String::new(), name, measured(is_angle, cur)));
+            return Ok((dname.unwrap_or_default(), name, measured(is_angle, cur)));
         }
         // With no value, the dimension restates what it measures, in the design's units (#3812).
         let (unit, default_expr) = if is_angle {
@@ -4879,7 +4902,7 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
         let e = value.as_ref().map(|e| doc.with_design_unit(e, kind)).unwrap_or(default_expr);
         let pname = doc.new_model_param(&e, &unit)?;
         // The value must evaluate.
-        let (vals, errs) = doc.param_values();
+        let (vals, errs) = doc.param_values_with(live_driven.as_ref());
         if let Some(err) = errs.get(&pname) {
             return Err(bad(cmd, format!("value: {err}")));
         }
@@ -4953,7 +4976,7 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
     if driven {
         return Ok(DimensionResult {
             constraint: None,
-            param: None,
+            param: (!param.is_empty()).then_some(param),
             driven: Some(true),
             kind: kind_name.to_string(),
             expression: None,
@@ -4987,6 +5010,12 @@ fn dimension_result(s: &mut Session, p: &Value) -> Result<DimensionResult> {
             param_warnings: Vec::new(),
             constraint: None,
         });
+    }
+    // A dimension must not reference a driven dimension of this sketch or a later sketch (#14426).
+    if let Err(err) = s.doc.check_driven_timeline() {
+        s.doc = start;
+        s.refresh();
+        return Err(bad(cmd, format!("value: {err}")));
     }
     // A dimension the sketch already determines cannot drive it: it is refused, or with
     // `if_redundant: "driven"` placed as a driven (reference) dimension instead.

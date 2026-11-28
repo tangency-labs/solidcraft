@@ -68,8 +68,8 @@ impl Planar for Solidcore {
         section_corners::is_open(outline)
     }
 
-    fn exit_through_box(&self, end: Vec3, toward: Vec3, rect: [Vec3; 4]) -> Option<f64> {
-        section_corners::exit_through_box(end, toward, rect)
+    fn reach_through_box(&self, end: Vec3, toward: Vec3, sections: &[[Vec3; 4]], rect: [Vec3; 4]) -> Option<f64> {
+        section_corners::reach_through_box(end, toward, sections, rect)
     }
 
     fn reach_through_rounds(

@@ -5055,6 +5055,7 @@ fn pick_cached_with(app: &mut SolveApp, proj: &Proj, pos: Pos2, feedback: Option
     app.viewport.woken_centre.hash(&mut h);
     crate::sketch3d::drawing(app).hash(&mut h);
     app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept).hash(&mut h);
+    crate::snap_wake::pivot_face(app).is_some().hash(&mut h);
     crate::hole_place::snapping(app).hash(&mut h);
     crate::drag_snap::suppressed().hash(&mut h);
     app.session.visibility.hidden_bodies.hash(&mut h);
@@ -5300,6 +5301,11 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     // Select Other and tool picks share the same visible-image boundary as ordinary picks.
     if crate::render_workspace::active(app) && !app.preferences.render_legacy_image_defaults && !proj.rect.contains(pos) {
         return Some(Vec::new());
+    }
+    // These are deliberate screen-space handles, not candidates on the body under the pointer.
+    // A nearby edge, or material in front of a centre, must not steal the click.
+    if crate::snap_wake::pivot_face(app).is_some() {
+        return Some(crate::snap_wake::hits(app, proj, pos).into_iter().map(|(_, hit, _)| hit).collect());
     }
     let s = &app.session;
     // A joint drag drawn by moving its bodies shows them where the world it began on has them,
@@ -5988,11 +5994,11 @@ fn feature_parts(app: &SolveApp, id: u64, shown_only: bool) -> Vec<Sel> {
             continue;
         }
         let names = solidcraft_engine::doc::naming::face_names(b);
-        let m = b.mesh();
         let target_indices: std::collections::HashSet<usize> =
             names.iter().enumerate().filter(|(_, n)| solidcraft_engine::doc::persistent_name::made_by(n) == Some(id)).map(|(i, _)| i).collect();
         let mut found_face = false;
         if !target_indices.is_empty() {
+            let m = b.mesh();
             let mut face_points: std::collections::HashMap<usize, solidcore_record::Vec3> = std::collections::HashMap::new();
             for (t, f) in m.triangles.iter().zip(&m.tri_face) {
                 let fi = *f as usize;
@@ -6026,9 +6032,135 @@ fn feature_parts(app: &SolveApp, id: u64, shown_only: bool) -> Vec<Sel> {
     out
 }
 
-/// A point on face `index` of `m`: the middle of its first triangle.
-fn first_triangle_point(m: &solidcraft_engine::geom::Mesh, index: usize) -> Option<solidcore_record::Vec3> {
-    m.triangles.iter().zip(&m.tri_face).find_map(|(t, f)| (*f as usize == index).then(|| m.tri(t)).flatten().map(|[a, b, c]| (a + b + c) / 3.0))
+/// The first triangle midpoint for each face index in `targets` of `m`, in a single pass.
+fn first_triangle_point(
+    m: &solidcraft_engine::geom::Mesh,
+    targets: &std::collections::HashSet<usize>,
+) -> std::collections::HashMap<usize, solidcore_record::Vec3> {
+    let mut points = std::collections::HashMap::with_capacity(targets.len());
+    if targets.is_empty() {
+        return points;
+    }
+    for (t, f) in m.triangles.iter().zip(&m.tri_face) {
+        let fi = *f as usize;
+        if targets.contains(&fi)
+            && !points.contains_key(&fi)
+            && let Some([a, b, c]) = m.tri(t)
+        {
+            points.insert(fi, (a + b + c) / 3.0);
+            if points.len() == targets.len() {
+                break;
+            }
+        }
+    }
+    points
+}
+
+/// Evaluated rigid motion of a non-copy `Move` feature whose axis is explicit.
+#[derive(Clone, Copy)]
+struct MoveRigid<'a> {
+    translate: Vec3,
+    origin: Vec3,
+    axis: Vec3,
+    angle: f64,
+    matrix: solidcraft_engine::doc::Mat,
+    bodies: &'a [solidcraft_engine::doc::BodyName],
+}
+
+/// Evaluates the rigid transform of a non-copy `Move` feature whose axis is explicit (no
+/// `rotate_about` reference).
+fn move_feature_rigid<'a>(doc: &'a solidcraft_engine::doc::Document, kind: &'a solidcraft_engine::doc::FeatureKind) -> Option<MoveRigid<'a>> {
+    use solidcraft_engine::doc::{FeatureKind, expr::Kind};
+    let FeatureKind::Move { bodies, translate, rotate_axis, rotate_about: None, origin, angle, copy: false, .. } = kind else {
+        return None;
+    };
+    let translate = Vec3::new(
+        doc.eval(&translate[0], Kind::Length).ok()?,
+        doc.eval(&translate[1], Kind::Length).ok()?,
+        doc.eval(&translate[2], Kind::Length).ok()?,
+    );
+    let angle = match angle {
+        Some(a) => doc.eval(a, Kind::Angle).ok()?,
+        None => 0.0,
+    };
+    let axis = rotate_axis.map(Vec3::from).unwrap_or(Vec3::Z);
+    let origin = match origin {
+        Some(p) => Vec3::new(doc.eval(&p[0], Kind::Length).ok()?, doc.eval(&p[1], Kind::Length).ok()?, doc.eval(&p[2], Kind::Length).ok()?),
+        None => Vec3::ZERO,
+    };
+    if !(translate.is_finite() && angle.is_finite() && axis.is_finite() && origin.is_finite()) {
+        return None;
+    }
+    let matrix = solidcraft_engine::doc::rigid(translate, origin, axis, angle);
+    Some(MoveRigid { translate, origin, axis, angle, matrix, bodies: bodies.as_slice() })
+}
+
+/// Classifies whether `rigid` moves every point inside `bounds` by more than `tol` without
+/// meshing the body:
+/// - `Some(false)`: the motion is sub-tolerance (no rotation and `|t| <= tol`), so no face moved.
+/// - `Some(true)`: every point in `bounds` moves strictly more than `tol`, so every face moved.
+/// - `None`: the rotation axis passes through or within `tol` of `bounds`; fall back per face.
+fn rigid_moves_all_points(rigid: &MoveRigid<'_>, bounds: &solidcraft_engine::geom::Aabb3, tol: f64) -> Option<bool> {
+    let (t, origin, axis, angle) = (rigid.translate, rigid.origin, rigid.axis, rigid.angle);
+    let tau = std::f64::consts::TAU;
+    let mut ang = angle.rem_euclid(tau);
+    if ang > std::f64::consts::PI {
+        ang -= tau;
+    }
+    let t_len = (t.x * t.x + t.y * t.y + t.z * t.z).sqrt();
+    if ang.abs() <= 1e-12 {
+        return Some(t_len > tol);
+    }
+    let axis_len = (axis.x * axis.x + axis.y * axis.y + axis.z * axis.z).sqrt();
+    if axis_len <= 1e-12 {
+        return Some(t_len > tol);
+    }
+    let u = Vec3::new(axis.x / axis_len, axis.y / axis_len, axis.z / axis_len);
+    let t_along = t.x * u.x + t.y * u.y + t.z * u.z;
+    if t_along.abs() > tol {
+        return Some(true);
+    }
+    if bounds.is_empty() {
+        return None;
+    }
+    let half_sin = (ang.abs() * 0.5).sin();
+    if half_sin <= 1e-12 {
+        return Some(t_len > tol);
+    }
+    let r_safe = tol / (2.0 * half_sin);
+    // The fixed-point axis line of `origin + R(u, ang) * (p - origin) + t_perp`:
+    // `p_axis = origin + 0.5 * t_perp + 0.5 * cot(ang / 2) * (u x t_perp)`.
+    let t_perp = Vec3::new(t.x - u.x * t_along, t.y - u.y * t_along, t.z - u.z * t_along);
+    let u_cross_t = Vec3::new(u.y * t_perp.z - u.z * t_perp.y, u.z * t_perp.x - u.x * t_perp.z, u.x * t_perp.y - u.y * t_perp.x);
+    let half_cot = (ang * 0.5).cos() / (ang * 0.5).sin();
+    let p_axis = Vec3::new(
+        origin.x + 0.5 * t_perp.x + 0.5 * half_cot * u_cross_t.x,
+        origin.y + 0.5 * t_perp.y + 0.5 * half_cot * u_cross_t.y,
+        origin.z + 0.5 * t_perp.z + 0.5 * half_cot * u_cross_t.z,
+    );
+    // Slab intersection test between infinite line `p_axis + s * u` and `bounds` expanded by
+    // `r_safe` on every axis. If they do not intersect, every point in `bounds` lies farther than
+    // `r_safe` from the axis line and therefore moves strictly more than `tol`.
+    let (mut t_min, mut t_max) = (f64::NEG_INFINITY, f64::INFINITY);
+    for (p, d, lo, hi) in [
+        (p_axis.x, u.x, bounds.min.x - r_safe, bounds.max.x + r_safe),
+        (p_axis.y, u.y, bounds.min.y - r_safe, bounds.max.y + r_safe),
+        (p_axis.z, u.z, bounds.min.z - r_safe, bounds.max.z + r_safe),
+    ] {
+        if d.abs() <= 1e-12 {
+            if p < lo || p > hi {
+                return Some(true);
+            }
+        } else {
+            let (a, b) = ((lo - p) / d, (hi - p) / d);
+            t_min = t_min.max(a.min(b));
+            t_max = t_max.min(a.max(b));
+            if t_min > t_max {
+                return Some(true);
+            }
+        }
+    }
+    None
 }
 
 /// The faces a feature changed, for the states either side of it, on the bodies as they are now:
@@ -6038,21 +6170,24 @@ fn first_triangle_point(m: &solidcraft_engine::geom::Mesh, index: usize) -> Opti
 /// its body once per placement, and the copies share the body's face names.
 fn changed_faces(app: &SolveApp, id: u64, now: &solidcraft_engine::doc::ModelState, shown_only: bool) -> Vec<Sel> {
     let Some(index) = app.session.doc.features.iter().position(|f| f.id == id) else { return Vec::new() };
+    let feature = &app.session.doc.features[index];
+    let move_rigid = move_feature_rigid(&app.session.doc, &feature.kind);
     let after = match app.session.doc.features.get(index + 1) {
         Some(next) => app.session.model.state_before(next.id),
         None => app.session.model.state(),
     };
     let before = app.session.model.state_before(id);
     let current = app.session.model.state();
-    let replaced = app.preview.effective_replaced();
+    let replaced: std::collections::HashSet<&str> = app.preview.effective_replaced().iter().map(String::as_str).collect();
     let mut out = Vec::new();
+    let mut emitted: std::collections::HashSet<(String, usize)> = std::collections::HashSet::new();
     for b in &after.bodies {
         // The body as `now` shows it, once per placement (the body itself outside a component).
         let copies: Vec<_> = now
             .bodies
             .iter()
             .filter(|c| c.definition_name() == b.name)
-            .filter(|c| !shown_only || (app.body_visible(&c.name) && !replaced.contains(&c.name)))
+            .filter(|c| !shown_only || (app.body_visible(&c.name) && !replaced.contains(c.name.as_str())))
             .map(|c| (c, solidcraft_engine::doc::naming::face_names(c)))
             .collect();
         if copies.is_empty() {
@@ -6067,34 +6202,119 @@ fn changed_faces(app: &SolveApp, id: u64, now: &solidcraft_engine::doc::ModelSta
         if b.body.same(&old.body) && names == old_names {
             continue;
         }
-        // A body the feature did change is measured once ([`ModelBody::faces_at`]), not at
-        // every rebuild: a picked Move feature changes every body it moves.
         let tol = (b.body.size() * 1e-3).max(1e-4);
-        let (Ok(new_faces), Ok(old_faces)) = (b.faces_at(tol), old.faces_at(tol)) else { continue };
         let now_names = solidcraft_engine::doc::naming::face_names(now_body);
-        for (i, name) in names.iter().enumerate() {
-            let Some(new) = new_faces.get(i) else { continue };
-            // A face the feature moved takes a new name (Offset Face); a face it only trimmed
-            // or stretched keeps its own. Either is a face the feature changed.
-            let moved = match old_names.iter().position(|old| old == name) {
-                None => true,
-                Some(j) => {
-                    let Some(was) = old_faces.get(j) else { continue };
-                    (new.area - was.area).abs() > new.area.max(1e-9) * 1e-4
-                        || new.centroid.dist(was.centroid) > tol
-                        || matches!((new.plane_normal, was.plane_normal), (Some(a), Some(b)) if a.dot(b) < 1.0 - 1e-7)
+        let now_index: std::collections::HashMap<&str, usize> = now_names.iter().enumerate().map(|(i, n)| (n.as_str(), i)).collect();
+        let mut current_names: Vec<&str> = Vec::new();
+        // Fast path for a non-copy rigid Move: avoid meshing `b` and `old` with `Body::faces`
+        // (1.6 s on a 103-body STEP assembly on first hover or after an edit) whenever the rigid
+        // transform alone settles whether every face moved.
+        let rigid_handled = if let Some(rigid) = move_rigid
+            && names == old_names
+            && rigid.bodies.iter().filter(|n| **n == b.name).count() == 1
+        {
+            match rigid_moves_all_points(&rigid, &old.outline_bounds(), tol) {
+                Some(false) => true,
+                Some(true) => {
+                    let mut lazy_faces: Option<Option<std::sync::Arc<[solidcraft_engine::kernel::FaceInfo]>>> = None;
+                    for (i, name) in names.iter().enumerate() {
+                        if let Some(&k) = now_index.get(name.as_str()) {
+                            current_names.push(now_names[k].as_str());
+                            continue;
+                        }
+                        let new_faces = lazy_faces.get_or_insert_with(|| b.faces_at(tol).ok()).as_deref();
+                        let Some(new) = new_faces.and_then(|faces| faces.get(i)) else { continue };
+                        if let Some(current_name) = current_face(now_body, &now_names, name, new, tol).and_then(|k| now_names.get(k)) {
+                            current_names.push(current_name.as_str());
+                        }
+                    }
+                    true
                 }
-            };
-            if !moved {
+                None => {
+                    // The rotation axis passes through or near this body: measure `b` alone and
+                    // recover each pre-move face by applying `matrix^-1` instead of also meshing `old`.
+                    if let Some(inv) = solidcraft_engine::doc::mat_inverse(&rigid.matrix)
+                        && let Ok(new_faces) = b.faces_at(tol)
+                    {
+                        for (i, name) in names.iter().enumerate() {
+                            let Some(new) = new_faces.get(i) else { continue };
+                            let was_centroid = solidcraft_engine::doc::apply_point(&inv, new.centroid);
+                            let was_normal = new.plane_normal.map(|n| solidcraft_engine::doc::apply_vector(&inv, n));
+                            let moved = new.centroid.dist(was_centroid) > tol
+                                || matches!((new.plane_normal, was_normal), (Some(a), Some(b)) if a.dot(b) < 1.0 - 1e-7);
+                            if !moved {
+                                continue;
+                            }
+                            if let Some(&k) = now_index.get(name.as_str()) {
+                                current_names.push(now_names[k].as_str());
+                            } else if let Some(current_name) = current_face(now_body, &now_names, name, new, tol).and_then(|k| now_names.get(k)) {
+                                current_names.push(current_name.as_str());
+                            }
+                        }
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+        } else {
+            false
+        };
+        if !rigid_handled {
+            // A body the feature did change is measured once ([`ModelBody::faces_at`]), not at
+            // every rebuild.
+            let (Ok(new_faces), Ok(old_faces)) = (b.faces_at(tol), old.faces_at(tol)) else { continue };
+            let old_index: std::collections::HashMap<&str, usize> = old_names.iter().enumerate().map(|(i, n)| (n.as_str(), i)).collect();
+            for (i, name) in names.iter().enumerate() {
+                let Some(new) = new_faces.get(i) else { continue };
+                // A face the feature moved takes a new name (Offset Face); a face it only trimmed
+                // or stretched keeps its own. Either is a face the feature changed.
+                let moved = match old_index.get(name.as_str()).copied() {
+                    None => true,
+                    Some(j) => {
+                        let Some(was) = old_faces.get(j) else { continue };
+                        (new.area - was.area).abs() > new.area.max(1e-9) * 1e-4
+                            || new.centroid.dist(was.centroid) > tol
+                            || matches!((new.plane_normal, was.plane_normal), (Some(a), Some(b)) if a.dot(b) < 1.0 - 1e-7)
+                    }
+                };
+                if !moved {
+                    continue;
+                }
+                // The face as the body has it now, by the name it carries there on every copy.
+                let current_name = now_index
+                    .get(name.as_str())
+                    .copied()
+                    .or_else(|| current_face(now_body, &now_names, name, new, tol))
+                    .and_then(|k| now_names.get(k));
+                if let Some(current_name) = current_name {
+                    current_names.push(current_name.as_str());
+                }
+            }
+        }
+        if current_names.is_empty() {
+            continue;
+        }
+        for (copy, copy_names) in &copies {
+            let copy_index: std::collections::HashMap<&str, usize> = copy_names.iter().enumerate().map(|(i, n)| (n.as_str(), i)).collect();
+            let mut ordered: Vec<usize> = Vec::with_capacity(current_names.len());
+            let mut targets: std::collections::HashSet<usize> = std::collections::HashSet::with_capacity(current_names.len());
+            for &current_name in &current_names {
+                if let Some(&idx) = copy_index.get(current_name)
+                    && targets.insert(idx)
+                {
+                    ordered.push(idx);
+                }
+            }
+            if targets.is_empty() {
                 continue;
             }
-            // The face as the body has it now, by the name it carries there on every copy.
-            let Some(current_name) = current_face(now_body, &now_names, name, new, tol).and_then(|k| now_names.get(k)) else { continue };
-            for (copy, copy_names) in &copies {
-                let Some(index) = copy_names.iter().position(|n| n == current_name) else { continue };
-                let Some(point) = first_triangle_point(&copy.mesh(), index) else { continue };
-                if !out.iter().any(|s| matches!(s, Sel::Face { body, index: i, .. } if body == &copy.name && *i == index)) {
-                    out.push(Sel::Face { body: copy.name.clone(), index, point });
+            let points = first_triangle_point(&copy.mesh(), &targets);
+            for idx in ordered {
+                if let Some(&point) = points.get(&idx)
+                    && emitted.insert((copy.name.clone(), idx))
+                {
+                    out.push(Sel::Face { body: copy.name.clone(), index: idx, point });
                 }
             }
         }
@@ -7667,28 +7887,35 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
     let dragging = crate::dialogs_move::dragging(app);
     // ...and outlined rather than filled, so they keep their look, as the preview draws them.
     let move_outlined: std::collections::HashSet<String> = crate::dialogs_move::moved_bodies(app).into_iter().collect();
-    let moving = |name: &str| dragging && chain_of(live.as_ref(), name).is_some();
-    let chained = live.as_ref().filter(|_| !dragging);
-    let carry = |b: &solidcraft_engine::doc::ModelBody| chain_of(chained, &b.name);
+    let live_set: std::collections::HashSet<&str> = live.as_ref().map(|(names, _)| names.iter().map(String::as_str).collect()).unwrap_or_default();
+    let live_mat = live.as_ref().map(|(_, m)| *m);
+    let effective_replaced: std::collections::HashSet<&str> = app.preview.effective_replaced().iter().map(String::as_str).collect();
+    let moving = |name: &str| dragging && live_set.contains(name);
+    let carry_name = |name: &str| if !dragging && live_set.contains(name) { live_mat } else { None };
+    let carry = |b: &solidcraft_engine::doc::ModelBody| carry_name(&b.name);
     let previewing_joint = app.preview.active && !app.preview.rolled_back && app.preview.interaction.is_some();
-    let replaced = |name: &str| {
-        moving(name) || (!previewing_joint && app.preview.effective_replaced().iter().any(|n| n == name) && chain_of(chained, name).is_none())
-    };
+    let replaced = |name: &str| moving(name) || (!previewing_joint && effective_replaced.contains(name) && carry_name(name).is_none());
     // A moved body the preview draws as a layer moved on the GPU is drawn by that layer, in its
     // own look and outlined as picked: lighting it here copied and moved its every triangle
     // again at each change of the move, seconds a keystroke on a large assembly (#17804).
     let as_layer = crate::dialogs_move::drawn_as_layer(app);
-    let lit_by_layer = |name: &str| as_layer && chain_of(chained, name).is_some();
-    let shown = |b: &solidcraft_engine::doc::ModelBody| {
-        carried_mesh(carry(b), if product || previewing_joint { b.mesh() } else { shown_mesh(app, b, &active_bodies) })
-    };
+    let lit_by_layer = |name: &str| as_layer && carry_name(name).is_some();
+    let base_shown = |b: &solidcraft_engine::doc::ModelBody| if product || previewing_joint { b.mesh() } else { shown_mesh(app, b, &active_bodies) };
+    let shown = |b: &solidcraft_engine::doc::ModelBody| carried_mesh(carry(b), base_shown(b));
     let drawn = |b: &solidcraft_engine::doc::ModelBody| carried_mesh(carry(b), if previewing_joint { b.mesh() } else { drawn_mesh(app, b) });
     let items = app.highlighted();
     let sketches = selected_sketches(app, &items);
     let mut sel = Vec::new();
+    let mut seen_bodies: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut seen_faces: std::collections::HashSet<(String, usize)> = std::collections::HashSet::new();
     for item in &items {
         for piece in displayed_selection(app, item).into_iter().filter(|s| !product || matches!(s, Sel::Body { .. } | Sel::Face { .. })) {
-            if !sel.iter().any(|x| crate::selection::same_item(x, &piece)) {
+            let unique = match &piece {
+                Sel::Body { name } => seen_bodies.insert(name.clone()),
+                Sel::Face { body, index, .. } => seen_faces.insert((body.clone(), *index)),
+                _ => !sel.iter().any(|x| crate::selection::same_item(x, &piece)),
+            };
+            if unique {
                 sel.push(piece);
             }
         }
@@ -7992,6 +8219,17 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         && t.sel_face.a() == 255
         && !projected
         && sel.iter().filter(|x| matches!(x, Sel::Face { .. } | Sel::Body { .. })).take(2).count() == 1;
+    // Group multiple selected faces of the same body (e.g. a picked Move feature covering every
+    // face of 100+ bodies) so each body's mesh and edge list are scanned once instead of once per
+    // face.
+    let mut multi_sel_faces: std::collections::HashMap<&str, std::collections::HashSet<usize>> = std::collections::HashMap::new();
+    for x in &sel {
+        if let Sel::Face { body, index, .. } = x {
+            multi_sel_faces.entry(body.as_str()).or_default().insert(*index);
+        }
+    }
+    multi_sel_faces.retain(|_, faces| faces.len() > 1);
+    let mut emitted_sel_face_bodies: std::collections::HashSet<&str> = std::collections::HashSet::with_capacity(multi_sel_faces.len());
     for x in &sel {
         match x {
             Sel::Face { body, index, .. } => {
@@ -7999,6 +8237,31 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 // Lit, not flat: an imported mesh (STL, OBJ) is one face, and a flat fill would
                 // paint the whole part as a single silhouette.
                 if let Some(b) = by_name.get(body).filter(|_| crate::viewport::body_shown(app, body) && !replaced(body)) {
+                    if let Some(faces) = multi_sel_faces.get(body.as_str()) {
+                        if !emitted_sel_face_bodies.insert(body.as_str()) {
+                            continue;
+                        }
+                        let m = shown(b);
+                        if outlines && has_pickable_outline(&m) {
+                            for (ei, e) in m.edges.iter().enumerate() {
+                                if m.edge_pickable(ei) && m.edge_faces.get(ei).is_some_and(|ef| ef.iter().any(|f| faces.contains(&(*f as usize)))) {
+                                    edge_lines(&mut feedback, e, selected_edge, 2.0, &[]);
+                                }
+                            }
+                        } else {
+                            mesh_tris(&mut feedback, &m, c4(t.sel_face), true, |f| faces.contains(&(f as usize)));
+                            let dm = drawn(b);
+                            let col = feedback.color(c4(t.sel_edge.gamma_multiply(0.45)));
+                            for (ei, e) in dm.edges.iter().enumerate() {
+                                if dm.edge_pickable(ei) && dm.edge_faces.get(ei).is_some_and(|ef| ef.iter().any(|f| faces.contains(&(*f as usize)))) {
+                                    for p in e.windows(2) {
+                                        feedback.hidden_line(p[0].to_f32(), p[1].to_f32(), col, 1.4);
+                                    }
+                                }
+                            }
+                        }
+                        continue;
+                    }
                     // The only face of an imported mesh covers all its triangles and has no
                     // pickable outline. Preserve authored normals in the copied fill: the
                     // instanced flat shader uses the geometric normal even on a triangle with
@@ -8033,11 +8296,17 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
                 if let Some(b) = by_name.get(name)
                     && crate::viewport::body_shown(app, name)
                     && !replaced(name)
-                    && !(moved && app.preview.effective_replaced().iter().any(|n| n == name))
+                    && !(moved && effective_replaced.contains(name.as_str()))
                 {
-                    if moved && has_pickable_outline(&shown(b)) {
-                        moved_body_outline(&mut feedback, &shown(b), &solidcraft_engine::doc::IDENTITY, app.preferences.show_selected_hidden_edges);
-                    } else if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {
+                    if moved {
+                        let base = base_shown(b);
+                        if has_pickable_outline(&base) {
+                            let m = carry(b).unwrap_or(solidcraft_engine::doc::IDENTITY);
+                            moved_body_outline(&mut feedback, &base, &m, app.preferences.show_selected_hidden_edges);
+                            continue;
+                        }
+                    }
+                    if let Some(m) = outlines.then(|| shown(b)).filter(|mesh| has_pickable_outline(mesh)) {
                         for (_, e) in m.edges.iter().enumerate().filter(|(ei, _)| m.edge_pickable(*ei)) {
                             edge_lines(&mut feedback, e, selected_edge, 2.0, &[]);
                         }
@@ -8216,7 +8485,7 @@ fn build_highlight_with_projection(app: &SolveApp, projection: impl FnOnce() -> 
         // A body the preview stands in for is not lit, its old faces fighting with the preview,
         // but outlined by what the preview draws for it where it says (a combine's result, or a
         // tool it ghosts).
-        let stood_in = !previewing_joint && app.preview.effective_replaced().contains(&b.name);
+        let stood_in = !previewing_joint && effective_replaced.contains(b.name.as_str());
         let stand_ins: Vec<&std::sync::Arc<solidcraft_engine::geom::Mesh>> =
             if stood_in { app.preview.outlines.iter().filter(|(name, _)| *name == b.name).map(|(_, m)| m).collect() } else { Vec::new() };
         if stood_in && stand_ins.is_empty() {
@@ -8881,6 +9150,11 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     // An appearance swatch uses this frame's hover as its drop target.
     let swatch_released =
         ui.input(|i| i.pointer.any_released()) && egui::DragAndDrop::has_payload_of_type::<solidcraft_engine::doc::appearance::Look>(ui.ctx());
+    let picking_pivot = crate::snap_wake::pivot_face(app).is_some();
+    if picking_pivot {
+        // This input knows its face before hover testing and needs no hover to show its handles.
+        crate::snap_wake::update(app, &[], false, None);
+    }
     // Where the pick under the pointer runs: nowhere while something else owns the pointer. An
     // empty `hits` means empty space only where it ran (`picked`).
     let picked = hover.filter(|_| {
@@ -8917,16 +9191,18 @@ fn show_view(app: &mut SolveApp, ui: &mut egui::Ui) {
     let cand = stable_alignment_hover(app, &proj, hover.filter(|_| inside && !navigating), cand);
     // The view moved under a still pointer: the highlight under it stays on the face it
     // was on instead of going off (#2130). It is picked again when the gesture ends.
-    if !(hover_frozen && inside) {
+    if picking_pivot || !(hover_frozen && inside) {
         app.viewport.hover = cand.as_ref().map(|c| c.0.clone());
     }
     wake_centre(app, &hits, hover, &proj);
 
-    let keep = crate::tool_modifiers::keep_snap_points(crate::tool_modifiers::Held::new(
-        ui.input(|i| i.modifiers),
-        crate::tool_modifiers::Platform::of(ui.ctx()),
-    ));
-    crate::snap_wake::update(app, &hits, keep, hover.filter(|_| inside).map(|p| (&proj, p)));
+    if !picking_pivot {
+        let keep = crate::tool_modifiers::keep_snap_points(crate::tool_modifiers::Held::new(
+            ui.input(|i| i.modifiers),
+            crate::tool_modifiers::Platform::of(ui.ctx()),
+        ));
+        crate::snap_wake::update(app, &hits, keep, hover.filter(|_| inside).map(|p| (&proj, p)));
+    }
     // Select Other: a press held still opens the list of everything under it; while the list is
     // open its row under the pointer is what lights up. A mode lit in the navigation bar or a
     // held Space owns drags, not a still press, so only a navigation that has started cancels
@@ -14585,6 +14861,224 @@ mod tests {
         assert!(lit.len() == faces_of(pin) && lit.iter().all(|x| matches!(x, Sel::Face { body, .. } if body == pin)), "{lit:?}");
     }
 
+    /// Rigid-motion classification avoids `Body::faces` whenever the rigid transform and body
+    /// outline bounds prove either that no face moved (zero move) or that every face moved (pure
+    /// translation, screw motion, or off-axis rotation), while falling back when the rotation
+    /// axis passes through the body's bounds.
+    #[test]
+    fn rigid_moves_all_points_classifies_translations_and_rotations() {
+        let bounds = solidcraft_engine::geom::Aabb3 { min: Vec3::new(10.0, 10.0, 0.0), max: Vec3::new(20.0, 20.0, 10.0) };
+        let tol = 0.01;
+        let rigid = |translate: Vec3, origin: Vec3, axis: Vec3, angle: f64| MoveRigid {
+            translate,
+            origin,
+            axis,
+            angle,
+            matrix: solidcraft_engine::doc::rigid(translate, origin, axis, angle),
+            bodies: &[],
+        };
+        assert_eq!(rigid_moves_all_points(&rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, 0.0), &bounds, tol), Some(false));
+        assert_eq!(rigid_moves_all_points(&rigid(Vec3::new(0.005, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0), &bounds, tol), Some(false));
+        assert_eq!(rigid_moves_all_points(&rigid(Vec3::new(5.0, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0), &bounds, tol), Some(true));
+        // Screw motion: axial translation > tol moves every point regardless of axis intersection.
+        assert_eq!(rigid_moves_all_points(&rigid(Vec3::new(0.0, 0.0, 2.0), Vec3::new(15.0, 15.0, 0.0), Vec3::Z, 0.5), &bounds, tol), Some(true));
+        // Pure rotation about an axis outside the bounds moves every point.
+        assert_eq!(rigid_moves_all_points(&rigid(Vec3::ZERO, Vec3::ZERO, Vec3::Z, 0.5), &bounds, tol), Some(true));
+        // Pure rotation about an axis passing through the body falls back per face.
+        assert_eq!(rigid_moves_all_points(&rigid(Vec3::ZERO, Vec3::new(15.0, 15.0, 0.0), Vec3::Z, 0.5), &bounds, tol), None);
+    }
+
+    /// Even the VERY FIRST hover or edit of a rigid `Move` feature avoids calling `Body::faces`
+    /// on the pre-move and post-move bodies when the transform moves every point past tolerance
+    /// (zero tessellation work on the UI thread, both initially and after `timeline.redefine`).
+    #[test]
+    fn first_hover_and_edit_of_move_feature_never_meshes_moved_bodies() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.set_origin_shown(false);
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":20,"operation":"new"})).unwrap();
+        h.app.run("solid.cylinder", json!({"radius":5,"height":12,"base":[40,0,0],"operation":"new"})).unwrap();
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[80,0,0],"operation":"new"})).unwrap();
+        let names: Vec<String> = h.app.session.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+        let [block, pin, stays] = names.as_slice() else { panic!("three bodies: {names:?}") };
+        h.app.run("solid.move", json!({"bodies":[block, pin],"translate":[0,30,0]})).unwrap();
+        let id = h.app.session.doc.features.last().unwrap().id;
+        // Warm only the final displayed meshes (as an open viewport already has); `state_before(id)`
+        // and `ModelBody::faces_at` are completely cold.
+        for b in &h.app.session.model.state().bodies {
+            let _ = b.mesh();
+        }
+        let (lit, work) = solidcraft_engine::kernel::profile::capture(|| feature_geometry(&h.app, id));
+        assert_eq!(work.tessellate_ms, 0.0, "first hover of Move must not run Body::faces tessellation: {work:?}");
+        let state = h.app.session.model.state();
+        let faces_of = |name: &str| state.body(name).unwrap().body.face_count();
+        let faces_lit = |name: &str| lit.iter().filter(|x| matches!(x, Sel::Face { body, .. } if body == name)).count();
+        assert_eq!((faces_lit(block), faces_lit(pin), faces_lit(stays)), (faces_of(block), faces_of(pin), 0));
+
+        // After an edit (`timeline.redefine`) to an off-axis rotation, cold first hover still
+        // performs zero `Body::faces` tessellation.
+        h.app
+            .run(
+                "timeline.redefine",
+                json!({"feature":id,"command":"solid.move","params":{"bodies":[pin],"origin":[0,0,0],"axis":[0,0,1],"angle":"45 deg"}}),
+            )
+            .unwrap();
+        for b in &h.app.session.model.state().bodies {
+            let _ = b.mesh();
+        }
+        let (rot_lit, rot_work) = solidcraft_engine::kernel::profile::capture(|| feature_geometry(&h.app, id));
+        assert_eq!(rot_work.tessellate_ms, 0.0, "first hover after Move rotation edit must not tessellate: {rot_work:?}");
+        assert_eq!(rot_lit.len(), faces_of(pin));
+        assert!(rot_lit.iter().all(|x| matches!(x, Sel::Face { body, .. } if body == pin)));
+
+        // After an edit to a zero move, cold first hover returns empty with zero tessellation.
+        h.app.run("timeline.redefine", json!({"feature":id,"command":"solid.move","params":{"bodies":[block, pin],"translate":[0,0,0]}})).unwrap();
+        let (zero_lit, zero_work) = solidcraft_engine::kernel::profile::capture(|| feature_geometry(&h.app, id));
+        assert_eq!(zero_work.tessellate_ms, 0.0, "zero Move must not tessellate: {zero_work:?}");
+        assert!(zero_lit.is_empty());
+    }
+
+    /// Timing benchmark for all three viewport stalls fixed in wt112:
+    /// 1. History bar grouping on 3,324 features across components (uncached vs cached).
+    /// 2. First hover of a multi-body `Move` feature (`feature_geometry` vs `faces_at`).
+    /// 3. Move dialog triad drag with GPU `MovingLayer` (pointer hold + highlight key stability).
+    #[test]
+    #[ignore]
+    fn bench_wt112_history_grouping_and_move_highlight() {
+        // --- 1. History bar grouping on 3,324 features ---
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.history_bar_groups = true;
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Seed"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let template_feature = h.app.session.doc.features[0].clone();
+        let template_result = h.app.session.model.results[0].clone();
+        {
+            let doc = std::sync::Arc::make_mut(&mut h.app.session.doc);
+            doc.components.clear();
+            doc.features.clear();
+            for c in 1..=60u64 {
+                doc.components.push(solidcraft_engine::doc::Component {
+                    id: c,
+                    name: format!("SubAsm{c}"),
+                    parent: if c <= 10 { 0 } else { ((c - 1) % 10) + 1 },
+                    ..Default::default()
+                });
+            }
+            for i in 0..3_324usize {
+                let mut f = template_feature.clone();
+                f.id = (i + 1) as u64;
+                f.name = format!("Feat{i}");
+                f.component = ((i / 55) as u64 % 60) + 1;
+                doc.features.push(f);
+            }
+        }
+        h.app.session.model.results = (0..3_324usize)
+            .map(|i| {
+                let mut r = template_result.clone();
+                r.id = (i + 1) as u64;
+                r.name = format!("Feat{i}");
+                r
+            })
+            .collect();
+        let strip = crate::timeline_fold::Strip {
+            marker: 3_324,
+            from_view: [None, None],
+            floating: true,
+            accent: crate::workspace::tab_accent(&solidcraft_theme::Tokens::get(), &h.app.ui.tab),
+        };
+        let iters = 200usize;
+        let t0 = std::time::Instant::now();
+        for _ in 0..iters {
+            let uncached = crate::timeline_fold::history(&h.app, &strip);
+            std::hint::black_box(uncached.entries.len());
+        }
+        let uncached_ms = t0.elapsed().as_secs_f64() * 1000.0 / iters as f64;
+        // Warm cache once, then time steady-state cached frames.
+        let mut cached_ms = 0.0;
+        let mut built_before = 0;
+        let mut built_after = 0;
+        let _ = h.ctx.run_ui(egui::RawInput::default(), |ui| {
+            let _ = crate::timeline_fold::cached(&h.app, ui, &strip);
+            built_before = crate::timeline_fold::plan_built_count();
+            let t1 = std::time::Instant::now();
+            for _ in 0..iters {
+                let kept = crate::timeline_fold::cached(&h.app, ui, &strip);
+                std::hint::black_box(kept.entries.len());
+            }
+            cached_ms = t1.elapsed().as_secs_f64() * 1000.0 / iters as f64;
+            built_after = crate::timeline_fold::plan_built_count();
+        });
+        assert_eq!(built_after, built_before, "steady frames must never rebuild History grouping");
+        eprintln!(
+            "[wt112] History grouping (3,324 features): before={uncached_ms:.4} ms/frame, after={cached_ms:.4} ms/frame ({:.1}x)",
+            uncached_ms / cached_ms.max(1e-6)
+        );
+
+        // --- 2. Multi-body Move first hover (avoiding Body::faces) ---
+        let mut mv = crate::scenario::Harness::new();
+        mv.app.set_origin_shown(false);
+        let body_count = 32usize;
+        for i in 0..body_count {
+            let x = (i as f64) * 25.0;
+            mv.app.run("solid.cylinder", json!({"radius": 5, "height": 12, "base": [x, 0, 0], "operation": "new"})).unwrap();
+        }
+        let names: Vec<String> = mv.app.session.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+        mv.app.run("solid.move", json!({"bodies": names, "translate": [0, 40, 0]})).unwrap();
+        let move_id = mv.app.session.doc.features.last().unwrap().id;
+        for b in &mv.app.session.model.state().bodies {
+            let _ = b.mesh();
+        }
+        let t_fast = std::time::Instant::now();
+        let (lit, fast_work) = solidcraft_engine::kernel::profile::capture(|| feature_geometry(&mv.app, move_id));
+        let fast_ms = t_fast.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(fast_work.tessellate_ms, 0.0, "Move first hover must not run Body::faces");
+        assert_eq!(lit.len(), body_count * 3);
+        // Compare against what uncached `Body::faces` on before + after bodies would have cost.
+        let before_st = mv.app.session.model.state_before(move_id);
+        let after_st = mv.app.session.model.state();
+        let t_old = std::time::Instant::now();
+        for b in &after_st.bodies {
+            let tol = (b.body.size() * 1e-3).max(1e-4);
+            let _ = b.faces_at(tol);
+            if let Some(old) = before_st.body(&b.name) {
+                let _ = old.faces_at(tol);
+            }
+        }
+        let old_ms = t_old.elapsed().as_secs_f64() * 1000.0;
+        eprintln!(
+            "[wt112] Move first hover ({body_count} cylinders): before(faces_at)={old_ms:.2} ms, after(rigid fast path)={fast_ms:.2} ms ({:.1}x)",
+            old_ms / fast_ms.max(1e-6)
+        );
+
+        // --- 3. Move dialog triad drag with MovingLayer ---
+        mv.app.viewport.gpu = Some(crate::gpu::GpuTarget {
+            format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+            depth: None,
+            samples: 1,
+            tess: false,
+            oit: false,
+            edges: false,
+        });
+        mv.app.start("solid.move");
+        if let Some(d) = mv.app.dialog.as_mut() {
+            d.inputs[0].items = names.iter().map(|n| Sel::Body { name: n.clone() }).collect();
+            d.extra.insert("drag0".into(), json!([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
+        }
+        mv.app.preview.show_layer_for_tests(1);
+        assert!(drag_layer::holds_pointer(&mv.app, false, true), "Move preview layer drag suppresses pointer picking");
+        let base_key = highlight_key(&mv.app);
+        let mut rebuilds = 0usize;
+        for step in 1..=40 {
+            if let Some(crate::dialogs::Kind::Move { x, .. }) = mv.app.dialog.as_mut().map(|d| &mut d.kind) {
+                *x = format!("{step} mm");
+            }
+            if highlight_key(&mv.app) != base_key {
+                rebuilds += 1;
+            }
+        }
+        assert_eq!(rebuilds, 0, "Move triad drag steps must not invalidate highlight_key");
+        eprintln!("[wt112] Move triad drag (40 steps, {body_count} bodies): highlight_key rebuilds={rebuilds}");
+    }
+
     #[test]
     fn history_marker_shows_only_its_sketch_without_changing_visibility() -> Result<(), Box<dyn std::error::Error>> {
         for explicitly_hidden in [false, true] {
@@ -16990,8 +17484,17 @@ mod tests {
     fn the_lit_face_does_not_change_while_the_view_is_panned() {
         let mut h = crate::scenario::Harness::new();
         h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 400, "width": 400, "height": 200}}));
-        h.app.cam =
-            Camera { target: Vec3::new(200.0, 200.0, 100.0), yaw: 0.6, pitch: 0.9, roll: 0.0, distance: 700.0, fov: 0.0, up: Default::default() };
+        h.app.cam = Camera {
+            target: Vec3::new(200.0, 200.0, 100.0),
+            yaw: 0.6,
+            pitch: 0.9,
+            roll: 0.0,
+            distance: 700.0,
+            fov: 0.0,
+            up: Default::default(),
+            // Test change: Camera gained `frame` (the design's own orientation, #6455); None is the camera as before.
+            frame: None,
+        };
         h.frames(3);
         let at = face_pixel(&h);
         h.call("ui.move", json!({"x": at.x, "y": at.y}));
@@ -17037,7 +17540,8 @@ mod tests {
         h.app.preferences.orbit_around = crate::prefs::OrbitAround::Origin;
         h.call("engine.execute", json!({"command": "solid.box", "params": {"length": 400, "width": 400, "height": 200, "corner": [-200,-200,-100]}}));
         h.app.set_origin_shown(false);
-        h.app.cam = Camera { target: Vec3::ZERO, yaw: 0.3, pitch: 0.15, roll: 0.0, distance: 700.0, fov: 0.0, up: Default::default() };
+        // Test change: Camera gained `frame` (the design's own orientation, #6455); None is the camera as before.
+        h.app.cam = Camera { target: Vec3::ZERO, yaw: 0.3, pitch: 0.15, roll: 0.0, distance: 700.0, fov: 0.0, up: Default::default(), frame: None };
         h.frames(3);
         // A low orbit through the box centre crosses side faces without
         // tracking a point on the top face as the camera turns.
@@ -17180,6 +17684,8 @@ mod tests {
             distance: 100.0,
             fov: 0.0,
             up: Default::default(),
+            // Test change: Camera gained `frame` (the design's own orientation, #6455); None is the camera as before.
+            frame: None,
         };
         h.frames(3);
         h
@@ -21015,6 +21521,20 @@ mod tests {
                 moved(half, end, half_centre, if keeps { first.shift } else { then.shift });
             }
         }
+    }
+
+    #[test]
+    fn right_clicking_the_axis_compass_opens_the_set_as_menu() {
+        use crate::context_menu::Target;
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"axes"}));
+        h.run(
+            &json!([{"call":"ui.view","params":{"view":"home"}}, {"frames": 10}, {"click":{"handle":"axis_view:z"},"button":"right"}, {"frames": 3}]),
+        )
+        .unwrap();
+        assert!(h.app.viewport.context_menu.is_some() && h.app.menu.target == Target::ViewGizmo, "menu at {:?}", h.app.viewport.context_menu);
+        let rows = crate::context_menu::items(&h.app, &Target::ViewGizmo);
+        assert!(rows.iter().any(|i| i.label == "Set as"), "the menu has Set as");
     }
 
     #[test]

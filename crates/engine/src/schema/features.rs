@@ -147,9 +147,14 @@ pub struct ExtrudeParams {
     #[serde(default)]
     pub extent: Option<ExtentKeyword>,
     /// Draft angle of the side walls (positive: outward, so the far end is larger along the
-    /// extrusion direction; negative: inward, so the far end is smaller).
+    /// extrusion direction; negative: inward, so the far end is smaller). With `direction:
+    /// symmetric` it drafts both halves from the start plane; with `distance2`, the first side.
     #[serde(default)]
     pub taper: Option<AngleExpr>,
+    /// With `distance2`: the second side's draft angle, from the start plane the same way
+    /// (positive: that side's far end is larger). Default: `taper`.
+    #[serde(default)]
+    pub taper2: Option<AngleExpr>,
     /// Which way to extrude. Default: positive.
     #[serde(default)]
     pub direction: Option<DirectionParam>,

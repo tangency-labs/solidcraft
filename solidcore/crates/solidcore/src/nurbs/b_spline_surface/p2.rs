@@ -422,13 +422,14 @@ impl BSplineSurface {
     /// [`crate::surface::cone::Cone::is_nurb_surface_cone`], ...);
     /// [`SolidError::Unported`] from the still-unwired recognised sphere conversion.
     pub fn copy_and_add_analytics(&self, k: &Kernel) -> Result<Surface> {
-        self.copy_and_add_analytics_within(k, k.tolerances.zone_tol_3d)
+        self.copy_and_add_analytics_within(k, f64::INFINITY)
     }
 
-    /// [`Self::copy_and_add_analytics`], the analytic taken only where it gives this
-    /// surface's points within `tol` as well as within the zone tolerance (not upstream,
-    /// #22584): a face copied with its edges keeps the edges' tolerance, and a plane that
-    /// strays from the surface by more than that leaves the face's vertices off it.
+    /// [`Self::copy_and_add_analytics`], the analytic taken only where it also gives this
+    /// surface's points within `tol`, a hard bound (not upstream, #22584): a face copied
+    /// with its edges keeps the edges' tolerance, and a plane that strays from the surface
+    /// by more than that leaves the face's vertices off it. `f64::INFINITY` asks for
+    /// nothing more than [`Self::copy_and_add_analytics`].
     ///
     /// # Errors
     ///
@@ -468,7 +469,8 @@ impl BSplineSurface {
     /// [`Self::copy_and_add_analytics`] keeps an exact copy, so a face split with
     /// `MakeEdgeInFaceWithVU` keeps its UV domain and trims on the copy. A point that
     /// fails to evaluate, or a NaN distance, is a mismatch. The points must agree within
-    /// the zone tolerance, and within `within` where that is tighter.
+    /// the zone tolerance (at least `1e-9` of the points' box), and always within `within`:
+    /// the scale floor never raises a bound the caller asked for.
     fn same_parameterization(&self, k: &Kernel, analytic: &Surface, within: f64) -> bool {
         let domain = self.natural_uv_domain();
         let steps = 6.0;
@@ -490,8 +492,8 @@ impl BSplineSurface {
         let tol = k
             .tolerances
             .zone_tol_3d
-            .min(within)
-            .max(1.0e-9 * bbox.size().length());
+            .max(1.0e-9 * bbox.size().length())
+            .min(within);
         // (`!(d <= tol)`: a NaN distance is a mismatch)
         pairs.iter().all(|&(a, b)| a.distance(b) <= tol)
     }
@@ -2642,6 +2644,36 @@ mod tests {
         let far = s.natural_uv_domain().evaluate(1.0, 1.0);
         let corner = s.evaluate_point(far).unwrap();
         assert!(kept.evaluate_point(k, far).unwrap().distance(corner) < 1e-12);
+    }
+
+    /// The bound asked for holds on a large face too: the check's scale floor (`1e-9` of the
+    /// points' box) never raises it. The same wall 8000 wide, its far edge 7e-6 longer: the
+    /// floor is 8e-6, under the zone tolerance, so the plain copy is the plane; a copy asked
+    /// for 5e-6 keeps the B-spline, though 7e-6 is under the floor.
+    #[test]
+    fn the_scale_floor_never_raises_the_bound_asked_for() {
+        let k = &Kernel::default();
+        let p = |x: f64, z: f64| CPoint::new(x, 0.0, z, NOW);
+        let net = vec![
+            vec![p(0.0, 0.0), p(0.0, 80.0)],
+            vec![p(8000.0, 0.0), p(8000.0 + 7e-6, 80.0)],
+        ];
+        let nurb = Surface::new(
+            net,
+            1,
+            1,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .unwrap();
+        let s = BSplineSurface::from_nurb(nurb, false);
+        let is_plane = |c: &crate::surface::surface::Surface| {
+            matches!(c.kind(), crate::surface::surface::SurfaceKind::Plane(_))
+        };
+        assert!(is_plane(&s.copy_and_add_analytics(k).unwrap()));
+        assert!(!is_plane(
+            &s.copy_and_add_analytics_within(k, 5e-6).unwrap()
+        ));
     }
 
     #[test]

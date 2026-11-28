@@ -8,6 +8,8 @@
 //! - [`offset_faces`]: the faces named moved along their outward normals
 //!   ([`solidcore::offset::offset_faces::OffsetFacesExecutive`]), the same room test first for a
 //!   move inward.
+//! - [`transform_face`]: one support moved rigidly, its neighbours retrimmed on their own
+//!   supports, without rebuilding tangent blends.
 //! - [`thicken`]: a sheet thickened, or moved back by half first.
 //! - [`offset_sheet`]: every face of a sheet moved onto its surface's offset
 //!   (`SmApiOffsetBrepFull`).
@@ -25,11 +27,14 @@ use solidcore::error::{ErrorKind, Reason};
 use solidcore::geom::attribute::{ids, Attribute, Behavior};
 use solidcore::offset::draft::{draft_surface, refuse_closing_wall, Draft, DraftRefusal};
 use solidcore::offset::offset_executive::p1::certified_offset_surface;
-use solidcore::offset::offset_executive::p2::{offset_brep_simple, OffsetOptions, ShellOptions};
+use solidcore::offset::offset_executive::p2::{
+    local_operation_simple, offset_brep_simple, OffsetOptions, ShellOptions,
+};
 use solidcore::offset::offset_faces::{OffsetFacesExecutive, OffsetFacesRefusal};
 use solidcore::offset::thin_features::shell_brep;
 use solidcore::offset::wall_room::{shell_wall_room, WallRoom};
 use solidcore::surface::surface::{Surface, SurfaceKind};
+use solidcore::topology::brep::local_operation::{transformed_face_surface, FaceMotion};
 use solidcore::topology::brep::p2::is_manifold_solid;
 use solidcore::{Brep, EntityRef, FaceId, Kernel, SolidError, Vec3};
 
@@ -271,7 +276,7 @@ fn offset_refused(
         OffsetFailure::Folds { largest, .. } => {
             return Error::WallFolds {
                 largest: Some(largest),
-            }
+            };
         }
         // a rounded offset's tube that folds (#13685): the wall is the tube's radius
         OffsetFailure::TubeFolds { largest, .. } => return Error::WallFolds { largest },
@@ -550,6 +555,52 @@ pub fn offset_faces(body: &Body, order: &Order, faces: &[usize], distance: f64) 
         }
         let moved = std::mem::take(b);
         replace(k, b, moved, expect)
+    })?
+}
+
+/// Rotate one face's supporting surface about `axis` through `origin` by `angle` radians,
+/// then translate it. Lengths are in mm. The remaining faces stay on their supports and
+/// extend or trim to meet it. Returns `false` without rebuilding for an invariant support.
+///
+/// # Errors
+/// [`Error::Argument`] for an invalid record face, a body that is not an outward solid,
+/// or invalid motion parameters; the local operation's refusal or a result that fails
+/// the solid check. A failure rolls back the edit, including topology and provenance.
+pub fn transform_face(
+    body: &Body,
+    order: &Order,
+    face: usize,
+    translate: [f64; 3],
+    origin: [f64; 3],
+    axis: [f64; 3],
+    angle: f64,
+) -> Result<bool> {
+    let picked = order::face(order, face)?;
+    let motion = FaceMotion::new(
+        Vec3::from_array(translate),
+        Vec3::from_array(origin),
+        Vec3::from_array(axis),
+        angle,
+    )
+    .map_err(|_| Error::Argument)?;
+    with_body("TransformFace", body, |k, b| {
+        if !b.face_list().contains(&picked) {
+            return Ok(Err(Error::Argument));
+        }
+        let expect = Expect::of(k, b)?;
+        if !expect.solid() {
+            return Ok(Err(Error::Argument));
+        }
+        let surface = match transformed_face_surface(k, b, picked, &motion) {
+            Ok(Some(s)) => s,
+            Ok(None) => return Ok(Ok(false)),
+            Err(e) => return Ok(Err(status(e, &in_order(order)))),
+        };
+        if let Err(e) = local_operation_simple(k, b, &[picked], vec![surface]) {
+            return Ok(Err(status(e, &in_order(order))));
+        }
+        let moved = std::mem::take(b);
+        Ok(replace(k, b, moved, expect)?.map(|()| true))
     })?
 }
 

@@ -294,6 +294,10 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, all: &[Ro
 fn finish_view_edit(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog, all: &[Row]) -> bool {
     let Some((_, name, col, _)) = d.typing.clone() else { return true };
     let Some(row) = all.iter().find(|r| r.name == name) else { return true };
+    if col == EXPRESSION && row.read_only {
+        d.typing = None;
+        return true;
+    }
     let draft = match col {
         EXPRESSION => d.editing.get(&name),
         COMMENT => d.comments.get(&name),
@@ -362,6 +366,7 @@ pub(super) fn validate_name(app: &SolveApp, old: &str, new: &str, promoting: boo
     }
     let taken = app.session.doc.param(new).is_some()
         || app.session.doc.text_param(new).is_some()
+        || app.session.doc.is_driven_param(new)
         || app.session.doc.features.iter().any(|f| f.param_names.iter().any(|n| n == new));
     if new != old && taken {
         return Err(solidcraft_ui_text::format("parameters.redesign.taken_name", &[("name", new)]));
@@ -875,7 +880,7 @@ pub(super) fn states(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog
                 None
             } else {
                 ui.scroll_to_cursor(Some(egui::Align::TOP));
-                Some(all.iter().filter(|r| named(r) && r.favorite).map(|r| (r.name.clone(), r.expression.clone())).collect())
+                Some(all.iter().filter(|r| named(r) && r.favorite && !r.read_only).map(|r| (r.name.clone(), r.expression.clone())).collect())
             };
         }
         compact(app, ui, d, all);
@@ -887,10 +892,17 @@ fn compact(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, all: &[R
     let Some(originals) = d.redesign.compact.take() else { return };
     for r in all.iter().filter(|r| named(r) && r.favorite) {
         ui.push_id(("key_field", &r.name), |ui| {
-            let changed = originals.get(&r.name).is_some_and(|original| d.editing.get(&r.name).unwrap_or(&r.expression) != original);
+            let changed = !r.read_only && originals.get(&r.name).is_some_and(|original| d.editing.get(&r.name).unwrap_or(&r.expression) != original);
             let label = if changed { solidcraft_ui_text::format("parameters.redesign.changed_key", &[("name", &r.name)]) } else { r.name.clone() };
             ui_kit::text(ui, &label, ui_kit::Text::MonoCell);
             ui_kit::text(ui, &r.comment, ui_kit::Text::Hint("key_comment"));
+            if r.read_only {
+                let shown = show_value(r);
+                let response = ui_kit::text(ui, &shown, ui_kit::Text::Value(&format!("key_value:{}", r.name), r.error.is_some()))
+                    .backing_on_hover_text(&r.expression);
+                crate::scenario::publish_target(&format!("params:key:{}", r.name), response.rect);
+                return;
+            }
             let id = ui.make_persistent_id("expression");
             let mut expression = d.editing.get(&r.name).cloned().unwrap_or_else(|| r.expression.clone());
             let response = ui_kit::cell_editor(ui, id, &mut expression, "Expression", false);
@@ -928,6 +940,7 @@ fn compact(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, all: &[R
     if reset.clicked() {
         let edits: Vec<_> = all
             .iter()
+            .filter(|r| !r.read_only)
             .filter_map(|r| {
                 let original = originals.get(&r.name)?;
                 (d.editing.get(&r.name).unwrap_or(&r.expression) != original).then(|| ui_kit::Edit::Set {

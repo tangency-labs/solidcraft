@@ -3044,3 +3044,32 @@ fn a_cache_hit_loads_cranelift_code_without_compiling_with_winch() {
     // Best effort: Wasmtime's cache worker may still be writing here.
     let _ = std::fs::remove_dir_all(root.parent().unwrap());
 }
+
+/// #23498: a component whose inner instances each have their own memory makes Wasmtime write an
+/// adapter over two memories, which it panics on with multi-memory off: refused instead.
+#[test]
+fn a_component_needing_multi_memory_is_refused_plainly() {
+    let bytes = wat::parse_str(
+        r#"(component
+          (component $a
+            (core module $m
+              (memory (export "mem") 1)
+              (func (export "realloc") (param i32 i32 i32 i32) (result i32) i32.const 0)
+              (func (export "take") (param i32 i32)))
+            (core instance $i (instantiate $m))
+            (func (export "take") (param "s" string)
+              (canon lift (core func $i "take") (memory (core memory $i "mem")) (realloc (core func $i "realloc")))))
+          (component $b
+            (import "take" (func $take (param "s" string)))
+            (core module $m (memory (export "mem") 1))
+            (core instance $mi (instantiate $m))
+            (core func $low (canon lower (func $take) (memory (core memory $mi "mem"))))
+            (core module $user (import "d" "take" (func (param i32 i32))))
+            (core instance (instantiate $user (with "d" (instance (export "take" (func $low)))))))
+          (instance $ai (instantiate $a))
+          (instance (instantiate $b (with "take" (func $ai "take")))))"#,
+    )
+    .unwrap();
+    let error = compile_with(&bytes, 512 * 1024, Tier::Optimized).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(error.contains("multi-memory"), "{error}");
+}

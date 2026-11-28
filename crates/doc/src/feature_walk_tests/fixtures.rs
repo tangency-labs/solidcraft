@@ -22,7 +22,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
     let sk = serde_json::to_value(solidcraft_sketch::Sketch::new()).unwrap();
     let extent = |n: &str| {
         json!({"distance": format!("{n}.distance"), "distance2": format!("{n}.distance2"), "start_offset": format!("{n}.start_offset"),
-            "taper": format!("{n}.taper"), "to_offset": format!("{n}.to_offset")})
+            "taper": format!("{n}.taper"), "taper2": format!("{n}.taper2"), "to_offset": format!("{n}.to_offset")})
     };
     let fillet = |style: Value| json!({"type": "fillet", "edges": [o], "radius": "fillet.radius", "style": style});
     let pattern = |p: Value| json!({"type": "pattern", "features": [7], "pattern": p});
@@ -163,6 +163,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ("split_face", json!({"type": "split_face", "faces": [o], "plane": plane("split_face")})),
         ("scale", json!({"type": "scale", "bodies": ["B"], "factor": "scale.factor", "factors": ["scale.x", "scale.y", "scale.z"]})),
         ("offset_face", json!({"type": "offset_face", "faces": [o], "distance": "offset_face.distance"})),
+        (
+            "transform_face",
+            json!({"type": "transform_face", "face": o, "body": "B", "translate": ["tx", "ty", "tz"],
+                "rotate_axis": [0, 0, 1], "origin": ["ox", "oy", "oz"], "angle": "turn"}),
+        ),
         ("delete_face", json!({"type": "delete_face", "faces": [o]})),
         ("bounding_solid", json!({"type": "bounding_solid", "bodies": ["B"], "margin": "bounding.margin"})),
         ("pipe", json!({"type": "pipe", "path_sketch": 1, "path": ["l1"], "diameter": "pipe.diameter", "wall": "pipe.wall"})),
@@ -427,6 +432,7 @@ pub(super) fn with_points(name: &str, mut v: Value) -> Value {
         "rest" => json!({"along": [0.6, 0.8, 0.0]}),
         "align" => json!({"from_normal": [0.0, 0.0, 1.0], "to_normal": [1.0, 0.0, 0.0]}),
         "scale" => json!({"origin": p(8.0)}),
+        "transform_face" => json!({"origin": p(8.0)}),
         "move" => json!({"rotate_axis": [0.0, 1.0, 0.0]}),
         "unstitch" | "reverse_normal" => json!({"faces": [p(10.0)]}),
         _ => json!({}),

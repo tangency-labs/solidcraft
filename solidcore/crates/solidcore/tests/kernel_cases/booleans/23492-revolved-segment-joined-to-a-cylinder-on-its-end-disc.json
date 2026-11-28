@@ -1,0 +1,186 @@
+{
+  "area": "booleans",
+  "bodies": {
+    "b55": {
+      "keeping_splines": false,
+      "trusted": true
+    },
+    "b56": {
+      "keeping_splines": false,
+      "trusted": true
+    }
+  },
+  "calls": [
+    {
+      "inputs": [],
+      "op": "revolve",
+      "outputs": [
+        "b51"
+      ],
+      "params": {
+        "angle": 1.5707963267948966,
+        "cap": true,
+        "direction": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "center": [
+                0.0,
+                0.0,
+                18.0
+              ],
+              "end": 4.261362168588427,
+              "radius": 20.0,
+              "reference": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "start": -1.1197695149986342
+            }
+          },
+          {
+            "line": {
+              "end": [
+                0.0,
+                8.717797887081348,
+                0.0
+              ],
+              "start": [
+                0.0,
+                -8.717797887081348,
+                0.0
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [],
+      "op": "extrude",
+      "outputs": [
+        "b53"
+      ],
+      "params": {
+        "cap": true,
+        "corner": "curvature",
+        "direction": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "distance": 40.0,
+        "draft": 0.0,
+        "profile": [
+          {
+            "arc": {
+              "axis": [
+                1.0,
+                0.0,
+                0.0
+              ],
+              "center": [
+                -40.0,
+                0.0,
+                18.0
+              ],
+              "end": 6.896285307179586,
+              "radius": 20.0,
+              "reference": [
+                0.0,
+                1.0,
+                0.0
+              ],
+              "start": 0.6131
+            }
+          }
+        ]
+      }
+    },
+    {
+      "inputs": [
+        "b55",
+        "b56"
+      ],
+      "op": "boolean_tagged",
+      "outputs": [
+        "b57"
+      ],
+      "params": {
+        "op": "union"
+      }
+    }
+  ],
+  "case": "23492-revolved-segment-joined-to-a-cylinder-on-its-end-disc",
+  "expected": {
+    "area_mm2": 11130.536042294361,
+    "body_count": 1,
+    "method": "Pappus. The turned region is the disc less its cap below z = 0 (A_cap = 400 acos(0.9) - 18 sqrt(76), with integral of z over it M_cap = 18 A_cap - (2/3)(400 - 324)^(3/2)), at distance z from the axis: V_turn = (pi/2)(18 * 400 pi - M_cap). The leg, pi 20^2 * 40, lies in x <= 0 and the turn in x >= 0: V = 85825.70744345649. Area: the leg's side 2 pi 20 * 40, its far disc 400 pi and the part of its end disc the turn leaves bare (A_cap); the turned arc by Pappus, (pi/2) * 20 (18 (pi + 2b) + 40 cos b) with b = asin(0.9); the turn's end face 400 pi - A_cap: 11130.536042294361.",
+    "source": "analytic",
+    "sources": [
+      "tangency-labs/solidcraft#23492"
+    ],
+    "tolerance": {
+      "rel": 1e-09
+    },
+    "volume_mm3": 85825.70744345649,
+    "what": "issue 23492 case A1: the disc of radius 20 about (y, z) = (0, 18) in the plane x = 0, cut off along the y axis (z >= 0), turned a quarter turn about the y axis (+z towards +x), joined to the cylinder of radius 20 about y = 0, z = 18 from x = -40 to x = 0, whose end disc holds the turn's start face. Refused since 0.49.1 with 'the drop found no foot point': the drop of the shared edge onto the turned face starts where that face meets its axis, a singular point, and just past it the edge leaves the face, so the drop of the next point, bounded by the curve-on-surface distance, rightly finds no point within the bound; that was taken as an error."
+  },
+  "expressible": true,
+  "operation_expressible": true,
+  "outcome": {
+    "ran": true,
+    "raw_counts": {
+      "edges": 7,
+      "faces": 5,
+      "vertices": 4
+    }
+  },
+  "records": "23492-revolved-segment-joined-to-a-cylinder-on-its-end-disc.bodies.json.gz",
+  "result": [
+    {
+      "body": "Turn",
+      "made": "b57"
+    }
+  ],
+  "rig": {
+    "error": null,
+    "known_failing": null,
+    "measured": {
+      "area_mm2": 11130.536042294363,
+      "body_count": 1,
+      "edges": 7,
+      "faces": 5,
+      "vertices": 4,
+      "volume_mm3": 85825.70744345649
+    },
+    "refused_with": null,
+    "status": "pass"
+  },
+  "sources": [
+    "tangency-labs/solidcraft#23492"
+  ],
+  "traced_ops": [
+    "revolve",
+    "extrude",
+    "boolean_tagged"
+  ],
+  "ungraded": [],
+  "what": "issue 23492 case A1: the disc of radius 20 about (y, z) = (0, 18) in the plane x = 0, cut off along the y axis (z >= 0), turned a quarter turn about the y axis (+z towards +x), joined to the cylinder of radius 20 about y = 0, z = 18 from x = -40 to x = 0, whose end disc holds the turn's start face. Refused since 0.49.1 with 'the drop found no foot point': the drop of the shared edge onto the turned face starts where that face meets its axis, a singular point, and just past it the edge leaves the face, so the drop of the next point, bounded by the curve-on-surface distance, rightly finds no point within the bound; that was taken as an error.",
+  "why_not": []
+}

@@ -2596,7 +2596,7 @@ fn sketch_naming_its_last_ids(n: usize, m: usize) -> Sketch {
     let (point, curve) = (sk.points[a].clone(), sk.curves[line].clone());
     sk.points.extend((0..n).map(|i| SPoint { id: format!("q{i}"), ..point.clone() }));
     sk.curves.extend((0..n).map(|i| Curve { id: format!("c{i}"), ..curve.clone() }));
-    let constraint = |id: String, kind| Constraint { id, kind, param: None, driven: false, text: None };
+    let constraint = |id: String, kind| Constraint { id, kind, param: None, driven: false, driven_param: None, text: None };
     sk.constraints.extend((0..2 * n - 1).map(|i| constraint(format!("k{i}"), ConstraintKind::Fix { p: a })));
     let relation = ConstraintKind::PatternPoint { p: 0, q: a, center: Some(0), angle: PI, offset: Vec2::ZERO, directions: [None, None] };
     sk.constraints.push(constraint("kz".into(), relation));
@@ -2753,6 +2753,7 @@ fn pruning_drops_exactly_the_patterns_that_lost_a_curve() {
         kind: ConstraintKind::Fix { p: a },
         param: None,
         driven: false,
+        driven_param: None,
         text: None,
     }));
     sk.patterns.extend((0..m).map(|i| SketchPattern {

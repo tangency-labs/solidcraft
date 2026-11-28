@@ -21,6 +21,8 @@
 //! upstream makes them again for every check. The curves are a function of the surface
 //! value, the domain and the kernel's tolerances, so a hit gives what a fresh build
 //! gives; `Kernel::memoize_curve_caches` turns it off with the curve cache memo.
+//! [`SpGlobalSolver::local_solve_branch`] counts the leaves it solves or skips without
+//! an enclosure excluding them ([`SpGlobalSolver::leaves_solved`], #23057).
 //!
 //! Deviations: out-parameters become return values. The caller's object handles
 //! (`O`, the objects named in solutions) replace the `this` and `&crCurve` pointers
@@ -3650,6 +3652,9 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
             if are_same(uv_domain.max().x, uv_domain.min().x)
                 || are_same(uv_domain.max().y, uv_domain.min().y)
             {
+                // not upstream (#23057): a sliver of the patch is skipped unsolved,
+                // not excluded by its enclosure
+                self.leaves_solved += 1;
                 return Ok(false);
             }
         }
@@ -3701,6 +3706,10 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
                 solve_for_surface = false;
             }
         }
+
+        // not upstream (#23057): no enclosure excluded this leaf, and its solve may find
+        // nothing, so an empty answer no longer proves that there is no point
+        self.leaves_solved += 1;
 
         // solve
         let solutions = sp_local_solve::<O>(

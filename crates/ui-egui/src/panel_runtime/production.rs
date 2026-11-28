@@ -395,13 +395,25 @@ impl Product {
             }
             Self::Browser => {
                 presentation.status = Some(crate::browser_search::body_count(app));
-                vec![RuntimeAction {
+                let search = RuntimeAction {
                     id: ControlId("magnifier".into()),
                     label: solidcraft_ui_text::tr("ui.browser_search_hint").into(),
                     enabled: true,
                     disabled_reason: None,
                     pressed: Some(crate::browser_search::bar_shown(app)),
-                }]
+                };
+                // The view options have no header button, so they are rows of the panel's ⋯ menu,
+                // under a View heading.
+                presentation.menu_heading = Some(solidcraft_ui_text::tr("ui.tab_view").into());
+                std::iter::once(search)
+                    .chain(crate::browser::menu_toggles(app).into_iter().map(|(id, label, on)| RuntimeAction {
+                        id: ControlId(id.into()),
+                        label: solidcraft_ui_text::tr(label).into(),
+                        enabled: true,
+                        disabled_reason: None,
+                        pressed: Some(on),
+                    }))
+                    .collect()
             }
             Self::PartsLibrary => {
                 presentation.status = crate::parts_library::status(app);
@@ -430,6 +442,7 @@ impl Product {
             status: None,
             attention: false,
             actions: Vec::new(),
+            menu_heading: None,
         }
     }
 }
@@ -733,7 +746,7 @@ pub(crate) fn drain_production_actions(app: &mut crate::SolveApp) -> PanelResult
                     crate::drawing_workspace::start(app, "drawing.sheet.add");
                 }
             }
-            Product::Browser => crate::browser::magnifier(app),
+            Product::Browser => crate::browser::menu_action(app, &action.action.0).map_err(|reason| error(Rule::Availability, reason))?,
             Product::PartsLibrary => crate::parts_library::header_action(app, &action.action.0),
             Product::RenderShots | Product::SketchOptions | Product::Bom | Product::DrawingInspector => {}
         }
