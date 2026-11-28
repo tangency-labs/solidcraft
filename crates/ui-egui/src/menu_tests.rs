@@ -167,6 +167,22 @@ fn a_sketch_curve_in_the_viewport_offers_the_sketch_menu() {
     assert!(!editing.iter().any(|i| i.label == "Edit Sketch"), "{:?}", labels(&editing));
 }
 
+#[test]
+fn grease_pencil_from_the_context_menu_discards_an_untouched_empty_sketch() {
+    let mut h = crate::scenario::Harness::new();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    assert!(h.app.session.doc.feature(sketch).is_some(), "the scripted sketch is retained");
+
+    act(&mut h.app, &Target::Sketch { id: sketch }, "Grease Pencil");
+    assert_eq!(h.app.session.active_sketch, Some(sketch));
+    assert!(h.app.tool.as_ref().is_some_and(|tool| tool.cmd == crate::grease_pencil::COMMAND));
+    h.app.finish_sketch();
+    h.settle();
+
+    assert!(h.app.session.doc.feature(sketch).is_none());
+}
+
 /// The History bar names the edit item as the Browser does: Edit Sketch on a sketch, Edit
 /// Feature on any other feature (#14366).
 #[test]

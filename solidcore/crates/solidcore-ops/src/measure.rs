@@ -662,6 +662,20 @@ pub fn segment_2d_intersection(
     )
 }
 
+/// A point of the trace inside the axis's linearly varying radius, including its round caps.
+pub fn segment_band_contact(
+    trace: [[f64; 2]; 2],
+    axis: [[f64; 2]; 2],
+    radii: [f64; 2],
+) -> Option<[f64; 2]> {
+    solidcore::geom::segment_band::contact(
+        trace.map(solidcore::Vec2::from_array),
+        axis.map(solidcore::Vec2::from_array),
+        radii,
+    )
+    .map(solidcore::Vec2::to_array)
+}
+
 /// All segment-segment intersections between two 2D polylines within tolerance `tol`.
 pub fn polyline_2d_crossings(a: &[[f64; 2]], b: &[[f64; 2]], tol: f64) -> Result<Vec<[f64; 2]>> {
     let pa: Vec<_> = a.iter().copied().map(point2).collect::<Result<Vec<_>>>()?;

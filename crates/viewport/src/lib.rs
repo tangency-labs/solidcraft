@@ -43,7 +43,6 @@ pub use footprint::footprint;
 pub use pick::DrawnPoint;
 pub use pick::nearest_drawn_point;
 pub use pick::nearest_on_screen_segment;
-pub use pick::stroke_sweep_contact;
 pub use raster::Canvas;
 pub use raster::render;
 pub use raster::render_picture;

@@ -1439,7 +1439,7 @@ fn fs_line_all(i: LOut) -> @location(0) vec4<f32> {
 // closest point along the projected centerline, including the two end caps.
 struct InkOut {
     @builtin(position) pos: vec4<f32>,
-    @location(0) @interpolate(linear) xy: vec2<f32>,
+    @location(0) xy: vec2<f32>, // clip w is 1, so this interpolates linearly on WebGL2 too
     @location(1) @interpolate(flat) line: vec3<f32>, // screen length and the endpoint radii
     @location(2) @interpolate(flat) depth: vec4<f32>, // endpoint depths, then reciprocal w
     @location(3) @interpolate(flat) a: vec3<f32>,

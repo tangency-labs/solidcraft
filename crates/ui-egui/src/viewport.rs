@@ -561,6 +561,13 @@ pub struct ViewportState {
     pub(crate) axes: Option<Rect>,
 }
 
+/// A displayed copy of a sketch's ink, relative to the sketch's world geometry.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InkPlacement {
+    pub(crate) frame: Mat,
+    pub(crate) path: Vec<u64>,
+}
+
 /// Something under the cursor. The control channel reports it in the selection's own form
 /// (`{"type": "edge", "body", "index", …}`, #9087).
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
@@ -600,7 +607,7 @@ pub enum Hit {
         point: Vec3,
         /// The displayed occurrence placement of an ink stroke.
         #[serde(skip)]
-        ink_frame: Option<Arc<Mat>>,
+        ink_frame: Option<Arc<InkPlacement>>,
     },
     Vertex {
         body: String,
@@ -898,8 +905,8 @@ pub(crate) fn visible_sketches(app: &SolveApp) -> Vec<u64> {
 
 /// The other placements of a component sketch it is drawn at: each copy of its part that is
 /// shown, with its own eye and Sketches folder ([`solidcraft_engine::view::sketch_shown_at`]).
-/// Only a joint's origin picks points there ([`placed_sketch_hits`]); everything else works on
-/// the sketch where it is edited.
+/// Joint origins can pick points there ([`placed_sketch_hits`]), and ink picks use the displayed
+/// copy while still selecting the source stroke.
 pub(crate) fn sketch_copies_shown(app: &SolveApp, st: &solidcraft_engine::doc::ModelState, sid: u64) -> Vec<solidcraft_engine::doc::SketchCopy> {
     st.sketch_copies.get(&sid).map_or_else(Vec::new, |copies| {
         copies.iter().filter(|c| solidcraft_engine::view::sketch_shown_at(&app.session, sid, &c.path)).cloned().collect()
@@ -910,6 +917,19 @@ pub(crate) fn sketch_copies_shown(app: &SolveApp, st: &solidcraft_engine::doc::M
 /// `own` (it is shown there, [`visible_sketches`]), and each copy [`sketch_copies_shown`] gives.
 pub(crate) fn sketch_frames(app: &SolveApp, st: &solidcraft_engine::doc::ModelState, sid: u64, own: bool) -> Vec<solidcraft_engine::doc::Mat> {
     own.then_some(solidcraft_engine::doc::IDENTITY).into_iter().chain(sketch_copies_shown(app, st, sid).into_iter().map(|c| c.delta)).collect()
+}
+
+/// The frames ink is drawn at, with their paths for remembering which occurrence was selected.
+pub(crate) fn ink_placements(app: &SolveApp, st: &solidcraft_engine::doc::ModelState, sketch: u64, selected: bool) -> Vec<InkPlacement> {
+    let copies = sketch_copies_shown(app, st, sketch);
+    let own = solidcraft_engine::view::sketch_shown(&app.session, sketch) || (selected && copies.is_empty());
+    own.then(|| InkPlacement {
+        frame: solidcraft_engine::doc::IDENTITY,
+        path: app.session.doc.feature(sketch).map_or_else(Vec::new, |feature| app.session.feature_path(feature.component)),
+    })
+    .into_iter()
+    .chain(copies.into_iter().map(|copy| InkPlacement { frame: copy.delta, path: copy.path }))
+    .collect()
 }
 
 /// The sketches that failed for lost projections, each built for the result it failed with and
@@ -1299,8 +1319,8 @@ pub(crate) fn ink_frames(frames: &[Mat], selected: bool) -> &[Mat] {
 }
 
 fn hovered_ink(app: &SolveApp) -> Option<(u64, &str, &Mat)> {
-    let Hit::SketchCurve { sketch, id, ink_frame: Some(frame), .. } = app.viewport.hover.as_ref()? else { return None };
-    Some((*sketch, id, frame))
+    let Hit::SketchCurve { sketch, id, ink_frame: Some(placement), .. } = app.viewport.hover.as_ref()? else { return None };
+    Some((*sketch, id, &placement.frame))
 }
 
 fn ink_highlight(t: &Tokens) -> Color32 {
@@ -5780,13 +5800,14 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, options: PickOptions<'_>) -
     let wireframe = app.ui.visual_style == 2;
     let hidden_edges = app.preferences.select_hidden_edges;
     let visible = |p: Vec3, slack: f64| kept(p) && (through || wireframe || hidden_from.is_none_or(|t| (p - o).dot(d) <= t + slack));
-    if !crate::render_workspace::active(app)
-        && !app.ui.pick_off.iter().any(|x| x == "sketch" || x == "sketch_curves")
-        && let Some(ink) = crate::grease_pencil::nearby_ink(app, &st, proj, pos, 4.0, None, |p| {
-            kept(p) && (wireframe || hidden_from.is_none_or(|t| (p - o).dot(d) <= t + slack))
-        })
-    {
-        hits.insert(before_curves, ink);
+    if !crate::render_workspace::active(app) && !app.ui.pick_off.iter().any(|x| x == "sketch" || x == "sketch_curves") {
+        let visible = |point| visible(point, slack);
+        if all {
+            let ink = crate::grease_pencil::nearby_inks(app, &st, proj, pos, 4.0, visible);
+            hits.splice(before_curves..before_curves, ink);
+        } else if let Some(ink) = crate::grease_pencil::nearby_ink(app, &st, proj, pos, 4.0, None, visible) {
+            hits.insert(before_curves, ink);
+        }
     }
     // Vertices (edge end points) and edges, within 7 and 6 points of the cursor.
     let reach = crate::pick_index::reach(proj, pos, 8.0);
@@ -7334,6 +7355,7 @@ pub(crate) fn hover_drawn(hover: &Option<Hit>) -> String {
         Some(Hit::Face { body, index, .. }) => format!("face {body:?} {index}"),
         Some(Hit::Plane { name, .. }) => format!("plane {name:?}"),
         Some(Hit::Edge { body, index, mid, .. }) => format!("edge {body:?} {index} {mid:?}"),
+        Some(Hit::SketchCurve { sketch, id, straight, ink_frame: Some(placement), .. }) => format!("ink {sketch} {id:?} {straight} {placement:?}"),
         Some(Hit::SketchCurve { sketch, id, straight, .. }) => format!("curve {sketch} {id:?} {straight}"),
         other => format!("{other:?}"),
     }
@@ -11137,6 +11159,7 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
     }
     let st = crate::open_meshing::shown_world(app);
     let mut out: Vec<Sel> = Vec::new();
+    let mut ink_paths = Vec::new();
     let to2 = |pts: &[Vec3]| -> Vec<Pos2> { pts.iter().filter_map(|p| proj.to_screen(*p)).collect() };
     let sketch_dialog = app.dialog.as_ref().is_some_and(|d| matches!(d.kind, crate::dialogs::Kind::SketchModify(_)));
     let accepts = app.dialog.as_ref().and_then(|d| d.active_input()).map(|i| i.accept);
@@ -11277,15 +11300,25 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
     }
     if app.dialog.is_none() && !app.ui.pick_off.iter().any(|x| x == "sketch" || x == "sketch_curves") {
         let active = crate::sketch_view::active_sketch(app);
-        for ss in st
-            .sketches
-            .iter()
-            .filter(|ss| active.is_none_or(|sketch| sketch == ss.feature) && solidcraft_engine::view::sketch_shown(&app.session, ss.feature))
-        {
-            for wire in ss.sketch.wires.iter().filter(|w| w.ink_diameter.is_some()) {
-                let points = to2(&wire.pts);
-                if (bx.crossing || points.len() == wire.pts.len()) && bx.takes(&points) {
+        let selected: std::collections::BTreeSet<_> = selected_ink_sketches(app, &st).collect();
+        for ss in st.sketches.iter().filter(|ss| active.is_none_or(|sketch| sketch == ss.feature)) {
+            let mut wires = ss.sketch.wires.iter().filter(|wire| wire.ink_diameter.is_some()).peekable();
+            if wires.peek().is_none() {
+                continue;
+            }
+            let placements = ink_placements(app, &st, ss.feature, selected.contains(&ss.feature));
+            for wire in wires {
+                let picked = placements.iter().find(|placement| {
+                    let points: Vec<_> = wire
+                        .pts
+                        .iter()
+                        .filter_map(|&point| proj.to_screen(solidcraft_kernel::affine::apply_point(&placement.frame, point.into()).into()))
+                        .collect();
+                    (bx.crossing || points.len() == wire.pts.len()) && bx.takes(&points)
+                });
+                if let Some(placement) = picked {
                     out.push(Sel::ExternalSketchCurve { sketch: ss.feature, id: wire.id.clone() });
+                    ink_paths.push((ss.feature, wire.id.clone(), placement.path.clone()));
                 }
             }
         }
@@ -11373,7 +11406,11 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
         return;
     }
     let items = serde_json::to_value(&out).unwrap_or_default();
-    let _ = app.run("select.set", json!({"items": items, "add": add}));
+    if app.run("select.set", json!({"items": items, "add": add})).is_ok() {
+        for (sketch, id, path) in ink_paths {
+            crate::grease_pencil::remember_ink_placement(app, sketch, &id, path);
+        }
+    }
 }
 
 /// Whether a marquee takes curve `i` of a sketch: a window takes it when it lies wholly inside,
@@ -12628,6 +12665,68 @@ mod tests {
 
     use super::*;
     use crate::navigation::*;
+
+    #[test]
+    fn select_other_offers_overlapping_ink_and_respects_through_picking() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"corner":[-10,-10,2],"length":20,"width":20,"height":8})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let ids: Vec<_> = [0.0, 20.0, 25.0]
+            .into_iter()
+            .map(|z| {
+                h.app.run("sketch.grease_pencil", json!({"points":[[-15,0,z],[15,0,z]],"diameter":1})).unwrap()["curves"][0]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.call("ui.camera", json!({"target":[0,0,0],"distance":120}));
+        let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+        let at = proj.to_screen(Vec3::ZERO).unwrap();
+        let ink_ids = |hits: Vec<Hit>| {
+            hits.into_iter()
+                .filter_map(|hit| if let Hit::SketchCurve { id, ink_frame: Some(_), .. } = hit { Some(id) } else { None })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ink_ids(pick(&h.app, &proj, at)), [ids[2].clone()]);
+        let rows = |app: &SolveApp| ink_ids(crate::select_other::rows(app, &proj, at).into_iter().map(|row| row.hit).collect());
+        h.app.preferences.select_other_hidden = false;
+        assert_eq!(rows(&h.app), [ids[2].clone(), ids[1].clone()]);
+        h.app.preferences.select_other_hidden = true;
+        assert_eq!(rows(&h.app), [ids[2].clone(), ids[1].clone(), ids[0].clone()]);
+    }
+
+    #[test]
+    fn marquee_selects_ink_on_the_displayed_occurrence_and_copies_from_there() {
+        let mut h = crate::scenario::Harness::new();
+        let own = h.app.run("component.create", json!({"name":"Ink Part"})).unwrap()["occurrence"].as_u64().unwrap();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+        let ink = h.app.run("sketch.grease_pencil", json!({"points":[[0,0,0],[10,0,0]],"diameter":1})).unwrap();
+        let id = ink["curves"][0].as_str().unwrap().to_owned();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("component.activate", json!({"component":0})).unwrap();
+        let copy = h.app.run("occurrence.copy", json!({"occurrence":own,"translate":[100,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.call("ui.camera", json!({"target":[55,0,0],"distance":160}));
+        let proj = projection(&h.app, h.app.viewport.rect.unwrap());
+        let screen = |x, y| proj.to_screen(Vec3::new(x, y, 0.0)).unwrap();
+        let on_ink = |x| pick(&h.app, &proj, screen(x, 0.0)).into_iter().find(|hit| matches!(hit, Hit::SketchCurve { ink_frame: Some(_), .. }));
+        let own_hover = on_ink(5.0);
+        let copy_hover = on_ink(105.0);
+        assert!(own_hover.is_some() && copy_hover.is_some());
+        assert_ne!(hover_drawn(&own_hover), hover_drawn(&copy_hover), "switching copies repaints the highlighted placement");
+
+        h.app.session.visibility.hidden_occurrences.push(vec![own]);
+        assert!(!solidcraft_engine::view::sketch_shown(&h.app.session, sketch));
+        assert!(solidcraft_engine::view::sketch_shown_at(&h.app.session, sketch, &[copy]));
+        box_select(&mut h.app, &proj, BoxSel::from_drag(screen(-3.0, 3.0), screen(13.0, -3.0)), false);
+        assert!(h.app.session.selection.is_empty(), "a marquee cannot take the hidden source");
+        box_select(&mut h.app, &proj, BoxSel::from_drag(screen(97.0, 3.0), screen(113.0, -3.0)), false);
+        assert_eq!(h.app.session.selection, [Sel::ExternalSketchCurve { sketch, id }]);
+        assert_eq!(crate::grease_pencil::copy_strokes(&h.app).unwrap()[0].points, [[100.0, 0.0, 0.0], [110.0, 0.0, 0.0]]);
+    }
 
     #[test]
     fn hovering_and_dragging_ink_use_the_stroke_in_the_active_sketch() {

@@ -3828,8 +3828,9 @@ impl SolveApp {
         let opened_in = self.session.active_component;
         let moved = (opened_in, &self.session.active_occurrence_path) != (context.0, &context.1);
         self.pre_sketch_component = moved.then_some(PreSketchComponent { sketch: id, component: context.0, path: context.1, opened_in });
+        self.session.mark_sketch_entered_by_person();
         if turn {
-            self.look_at_opened_sketch(before);
+            self.open_sketch_camera(before, true);
         }
     }
 

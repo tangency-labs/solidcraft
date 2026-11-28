@@ -340,6 +340,24 @@ fn curves_drawn_one_at_a_time_join_the_ends_they_meet_once() {
 }
 
 #[test]
+fn explicitly_joined_ink_ends_do_not_add_redundant_automatic_joints() {
+    let mut sk = Sketch::new();
+    let corner = v(10.0, 1.0, 1.0);
+    let a = line(&mut sk, corner, v(0.0, 0.0, 0.0));
+    let b = line(&mut sk, corner, v(10.0, 10.0, 1.0));
+    let ink = line(&mut sk, corner, v(10.0, 1.0, 10.0));
+    sk.wires.last_mut().unwrap().ink_diameter = Some(1.0);
+    let ink_end = WirePoint { wire: ink.clone(), index: 0 };
+    assert!(sk.join_drawn_ends(&[ink]).unwrap().is_empty());
+    for wire in [&a, &b] {
+        let end = WirePoint { wire: wire.clone(), index: 0 };
+        sk.add_wire_constraint(WireConstraintKind::Coincident { a: end, b: ink_end.clone() }).unwrap();
+    }
+    assert!(sk.join_drawn_ends(&[a, b]).unwrap().is_empty());
+    assert_eq!(sk.wire_constraints.len(), 2);
+}
+
+#[test]
 fn freedoms_are_counted_exactly_far_from_the_origin() {
     // A point on a long oblique line, 400 m out: one slide left, as near the origin.
     let mut sk = Sketch::new();

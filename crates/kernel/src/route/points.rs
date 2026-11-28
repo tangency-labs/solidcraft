@@ -83,6 +83,13 @@ pub fn polyline_2d_closest_point(point: [f64; 2], points: &[[f64; 2]]) -> Result
     }
 }
 
+/// A point of the trace within the axis's linearly varying radius.
+pub fn segment_band_contact(trace: [[f64; 2]; 2], axis: [[f64; 2]; 2], radii: [f64; 2]) -> Option<[f64; 2]> {
+    match which(OpKind::Points) {
+        Which::Solidcore => Solidcore.segment_band_contact(trace, axis, radii),
+    }
+}
+
 /// Whether `point` still lies on face `face` of `record`, on its surface and within its trims,
 /// to a thousandth of the body's box diagonal.
 pub fn stored_face(record: &Brep, face: usize, point: [f64; 3]) -> Result<bool, PointsRefused> {

@@ -143,6 +143,8 @@ pub trait Points: Backend {
     /// The distance from `point` to the polyline through `points`, and its closest point; `None`
     /// for a polyline of no points.
     fn polyline_2d_closest_point(&self, point: [f64; 2], points: &[[f64; 2]]) -> Result<Option<(f64, [f64; 2])>, PointsRefused>;
+    /// A point of the trace within the axis's linearly varying radius.
+    fn segment_band_contact(&self, trace: [[f64; 2]; 2], axis: [[f64; 2]; 2], radii: [f64; 2]) -> Option<[f64; 2]>;
     /// Whether `point` still lies on face `face` of `record`, on its surface and within its trims,
     /// to a thousandth of the body's box diagonal.
     fn stored_face(&self, record: &Brep, face: usize, point: [f64; 3]) -> Result<bool, PointsRefused>;

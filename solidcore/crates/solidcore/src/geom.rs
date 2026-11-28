@@ -44,6 +44,7 @@ pub mod polyline;
 pub mod polynomial;
 pub mod pseudo_box;
 pub mod scan_frame;
+pub mod segment_band;
 pub mod solution_array;
 pub mod step_matrix;
 pub mod stroke_runs;

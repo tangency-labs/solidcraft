@@ -70,6 +70,10 @@ impl Points for Solidcore {
         measure::polyline_2d_closest_point(point, points).map_err(refused)
     }
 
+    fn segment_band_contact(&self, trace: [[f64; 2]; 2], axis: [[f64; 2]; 2], radii: [f64; 2]) -> Option<[f64; 2]> {
+        measure::segment_band_contact(trace, axis, radii)
+    }
+
     fn stored_face(&self, record: &Brep, face: usize, point: [f64; 3]) -> Result<bool, PointsRefused> {
         pick::stored_face(record, face, point).map_err(refused)
     }
