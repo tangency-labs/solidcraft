@@ -6475,10 +6475,20 @@ pub fn candidate(app: &SolveApp, hits: &[Hit]) -> Option<(Hit, Sel)> {
     if let Some(d) = app.dialog.as_ref().filter(|d| d.wants_picks()) {
         let snap = d.face_snap(&app.session, hits);
         let snaps = crate::dialogs_assembly::takes_snaps(d);
-        return hits.iter().filter(|h| snap_allowed(app, snaps, h)).find_map(|h| {
+        let take = |h: &Hit| {
             d.candidate_on(&app.session, h, snap.as_ref())
                 .map(|s| (h.clone(), crate::dialogs_assembly::woken_pick(app, snaps, crate::dialogs_move::component_pick(app, h, s))))
-        });
+        };
+        let first = hits.iter().filter(|h| snap_allowed(app, snaps, h)).find_map(take);
+        // A profile a body's face hides is still the profiles input's pick (`Dialog::profile_behind`).
+        if let Some((face, picked)) = &first
+            && d.profile_behind(&app.session, face, picked)
+            && let Some(profile) =
+                hits.iter().filter(|h| matches!(h, Hit::Profile { .. })).find_map(take).filter(|(_, s)| matches!(s, Sel::Profile { .. }))
+        {
+            return Some(profile);
+        }
+        return first;
     }
     hits.iter().filter(|h| crate::selection_mode::allowed(app, h)).find_map(|h| hit_candidate(app, h))
 }
