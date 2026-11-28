@@ -1,8 +1,10 @@
 //! A body as hidden lines read it: its vertices' points, its edges' curves and NURBS forms on their
 //! intervals, and its faces' surfaces, NURBS forms, domains and edge loops, in the evaluator's
 //! kinds ([`crate::eval::geometry`]). `solidcore-ops`' `hlr` fills it from a record through
-//! `solidcore-convert`; a blend face comes as its NURBS form (the blend's definition is no line of
-//! a drawing).
+//! `solidcore-convert`; a blend face comes as its NURBS form, its net B, with B's certified bound
+//! ε from the blend's definition S ([`Face::bound`]), and the drawing widens what it reads on B
+//! by ε: its curves' accuracy, and its ray tests to first order
+//! (docs/definitions-and-certificates.md §3.7, §7 invariant 2).
 
 use crate::eval::{Curve, Surface};
 use crate::math::{Transform, Vec3};
@@ -70,6 +72,11 @@ pub struct Face {
     pub domain: [[f64; 2]; 2],
     /// Its loops, the outer first.
     pub loops: Vec<Loop>,
+    /// How far `surface` may lie from what the face is (mm): the certified bound ε of a blend's
+    /// net B from the blend's definition S, |B − S| ≤ ε at every parameter
+    /// (docs/definitions-and-certificates.md §4.1); 0 where the surface is the face itself, and
+    /// for a face whose producer gives no bound (a screw-swept wall's net, for now).
+    pub bound: f64,
 }
 
 impl Face {
@@ -337,6 +344,10 @@ impl Brep {
                         },
                         domain: f.domain,
                         loops: f.loops.clone(),
+                        // The definition moves with its net: the move's rounding of the net's
+                        // coordinates is the drawing's, inside the 1e-9 of the scene every
+                        // face's tests allow, and ε stays the distance from the definition.
+                        bound: f.bound,
                     })
                 })
                 .collect::<Option<_>>()?,

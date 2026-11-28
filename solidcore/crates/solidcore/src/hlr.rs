@@ -175,6 +175,9 @@ struct FaceData {
     hi: Vec3,
     /// Neither a plane nor a recognised quadric or torus.
     freeform: bool,
+    /// The record face's [`body::Face::bound`]: how far `surface` may lie from the face's
+    /// definition.
+    bound: f64,
 }
 
 /// A body prepared once and shared by all of its placements.
@@ -287,6 +290,10 @@ pub fn prepare_cancellable(
 ) -> Result<Prepared, HlrError> {
     if !(1..=MAX_TRIM_SAMPLES).contains(&opts.trim_samples) {
         return Err(HlrError::Invalid("trim samples"));
+    }
+    // A bound is a distance: a negative or non-finite one says nothing.
+    if !b.faces.iter().all(|f| f.bound >= 0. && f.bound.is_finite()) {
+        return Err(HlrError::Invalid("face bound"));
     }
     // Work on the body moved to its own centre: rounding in ray and inversion formulas grows
     // with the coordinates, and a part may be modelled far from the origin (W05a finding 7).
@@ -425,6 +432,7 @@ pub fn prepare_cancellable(
             lo,
             hi,
             freeform,
+            bound: f.bound,
         });
     }
     for (ei, (c, acc)) in curves.into_iter().enumerate() {
@@ -802,6 +810,9 @@ struct Track<'a> {
     source: Source,
     acc: CurveAccuracy,
     own: Vec<usize>,
+    /// How far the surface a silhouette was traced on may lie from its faces' definition (the
+    /// largest [`body::Face::bound`] of the set); 0 for an edge, which is its own curve.
+    bound: f64,
     /// Own-face hits closer than this are the curve's own surface: a sampled silhouette's
     /// chord lies up to its deviation inside the surface, and a ray tangent there leaves it
     /// again after about sqrt(2 * radius * deviation).
@@ -1127,7 +1138,7 @@ pub fn hidden_lines_on(
         )?;
         let n = sets
             .iter()
-            .flat_map(|(_, _, sils)| sils)
+            .flat_map(|(_, _, _, sils)| sils)
             .fold(0usize, |n, s| n.saturating_add(s.ranges.len()))
             .saturating_mul(placements);
         if curves.fetch_add(n, Ordering::Relaxed).saturating_add(n) > opts.max_tracks {
@@ -1169,6 +1180,7 @@ pub fn hidden_lines_on(
                 },
                 acc: e.acc,
                 own: e.faces.clone(),
+                bound: 0.,
                 // Skip the ray's own start on its faces: rounding grows with the coordinates
                 // (1e-9 of the scene), the margin with the faces themselves (1e-6 of their
                 // size), never with the whole scene, so small parts in large scenes keep their
@@ -1208,7 +1220,7 @@ pub fn hidden_lines_on(
                 });
             }
         }
-        for (fi, size, sils) in traced.get(&key(p)).into_iter().flatten().flatten() {
+        for (fi, size, bound, sils) in traced.get(&key(p)).into_iter().flatten().flatten() {
             let Some(f) = def.faces.get(*fi) else {
                 continue;
             };
@@ -1222,6 +1234,7 @@ pub fn hidden_lines_on(
                         source: Source::Silhouette { face: *fi },
                         acc: s.acc,
                         own: f.group.clone(),
+                        bound: *bound,
                         own_eps: match s.acc {
                             CurveAccuracy::Sampled {
                                 max_sample_deviation_mm: dev,
@@ -1305,6 +1318,7 @@ pub fn hidden_lines_on(
             .ok_or(HlrError::Invalid("placement"))?;
         for piece in &mut l.pieces {
             let (geometry, accuracy) = piece_geometry(t, piece, p, view);
+            let accuracy = widened(accuracy, t.bound);
             piece.geometry = geometry.into_iter().map(|g| shift_seg(g, shift)).collect();
             piece.accuracy = accuracy;
             piece.points = piece.points.iter().map(|q| shifted(*q)).collect();
@@ -1373,7 +1387,7 @@ pub fn silhouettes(
     };
     let sets = body_silhouettes(def, placed.local_dir(view.d), opts, &ctx)?;
     let mut out = Vec::new();
-    for (face, _, sils) in &sets {
+    for (face, _, bound, sils) in &sets {
         for s in sils {
             for r in &s.ranges {
                 if out.len() >= opts.max_tracks {
@@ -1386,6 +1400,7 @@ pub fn silhouettes(
                     source: Source::Silhouette { face: *face },
                     acc: s.acc,
                     own: Vec::new(),
+                    bound: *bound,
                     own_eps: 0.,
                     samples: Vec::new(),
                     sags: Vec::new(),
@@ -1406,6 +1421,7 @@ pub fn silhouettes(
                     sag,
                 };
                 let (geometry, accuracy) = piece_geometry(&track, &piece, placed, view);
+                let accuracy = widened(accuracy, track.bound);
                 out.push(Silhouette {
                     face: *face,
                     geometry: geometry.into_iter().map(|g| shift_seg(g, shift)).collect(),
@@ -1432,7 +1448,7 @@ fn body_silhouettes(
     dl: Vec3,
     opts: &Options,
     ctx: &Ctx,
-) -> Result<Vec<(usize, f64, Vec<silhouette::Sil>)>, HlrError> {
+) -> Result<Vec<(usize, f64, f64, Vec<silhouette::Sil>)>, HlrError> {
     let supported: Vec<bool> = def
         .faces
         .iter()
@@ -1483,6 +1499,11 @@ fn body_silhouettes(
             .filter_map(|j| def.faces.get(*j))
             .map(|m| (m.hi - m.lo).len())
             .fold(0., f64::max);
+        let bound = members
+            .iter()
+            .filter_map(|j| def.faces.get(*j))
+            .map(|m| m.bound)
+            .fold(0., f64::max);
         let mut sils = Vec::new();
         // Once cancellation is seen the tracing stops and its partial curves are dropped, even
         // if the callback would answer false later.
@@ -1497,7 +1518,7 @@ fn body_silhouettes(
         if stopped.get() {
             return Err(HlrError::Cancelled);
         }
-        out.push((fi, size, sils));
+        out.push((fi, size, bound, sils));
     }
     Ok(out)
 }
@@ -2224,6 +2245,32 @@ fn shift_seg(g: Seg2, d: [f64; 2]) -> Seg2 {
             w,
         },
         Seg2::Bezier { n, p } => Seg2::Bezier { n, p: p.map(m) },
+    }
+}
+
+/// `accuracy` of a curve drawn on a surface that may lie `bound` from what its face is, widened
+/// by `bound`: each point drawn is the image of a point of that surface, and the face's point at
+/// the same parameters is within `bound` of it, so the curve lies within its deviation plus
+/// `bound` of the face's own image. For an outline that bounds how far the line lies from the
+/// face's image, not from the face's own outline, which a bound on positions alone does not
+/// place. An exact curve on such a surface is bounded by `bound`; nothing changes where `bound`
+/// is 0.
+fn widened(accuracy: CurveAccuracy, bound: f64) -> CurveAccuracy {
+    if !(bound > 0.) {
+        return accuracy;
+    }
+    match accuracy {
+        CurveAccuracy::Analytic => CurveAccuracy::Bounded {
+            max_deviation_mm: bound,
+        },
+        CurveAccuracy::Bounded { max_deviation_mm } => CurveAccuracy::Bounded {
+            max_deviation_mm: max_deviation_mm + bound,
+        },
+        CurveAccuracy::Sampled {
+            max_sample_deviation_mm,
+        } => CurveAccuracy::Sampled {
+            max_sample_deviation_mm: max_sample_deviation_mm + bound,
+        },
     }
 }
 
@@ -3154,9 +3201,42 @@ fn classify_point_counted(
                 *tests += 1;
                 hits.clear();
                 f.surface.ray_as(&f.analytic, p0, dl, range, &mut hits);
+                // A face drawn from a surface within ε of what it is crosses the ray within
+                // ε / |n · d| of a hit on that surface, to first order; `None` where there is no
+                // normal to cross along, and nothing is known of the face.
+                let margin_of = |h: &Hit| -> Option<f64> {
+                    if !(f.bound > 0.) {
+                        return Some(0.);
+                    }
+                    let c = f.surface.normal(h.uv)?.dot(dl).abs();
+                    (c > 0.).then(|| f.bound / c)
+                };
                 for h in &hits {
                     let p = f.surface.point(h.uv);
-                    let tol = 2. * f.trim.chord_error + 1e-7 * (f.hi - f.lo).len();
+                    // Closer than its margin to the face's boundary, or to `start`, the hit
+                    // decides nothing: the face itself may pass on either side of the point, or
+                    // miss the ray. So does a hit with another crossing of the same surface within
+                    // twice their margins: the ray passes it less than ε deep (a parabola through
+                    // two crossings is their distance times its slope over 4 deep), and the face
+                    // may miss it. A ray within ε of a face's surface that never crosses it is
+                    // not seen here.
+                    let Some(margin) = margin_of(h) else {
+                        uncertain = true;
+                        continue;
+                    };
+                    if margin > 0.
+                        && hits.iter().any(|g| {
+                            !std::ptr::eq(g, h)
+                                && margin_of(g)
+                                    .is_none_or(|m| (g.lam - h.lam).abs() < 2. * (margin + m))
+                        })
+                    {
+                        uncertain = true;
+                        continue;
+                    }
+                    // Hits nearer the point than `start` are its own surface or rounding.
+                    let start = if is_own { own_eps } else { ctx.eps_own };
+                    let tol = 2. * f.trim.chord_error + 1e-7 * (f.hi - f.lo).len() + margin;
                     // A hit on the boundary is uncertain on either side of it, so the parity test
                     // is left out there: its cost grows with the boundary around the hit, all of a
                     // circle when bodies in line along the view meet each other on their circles.
@@ -3169,7 +3249,7 @@ fn classify_point_counted(
                         Some(inside) => {
                             // An unsupported freeform face never hides anything for certain.
                             let unsure = f.freeform && !ctx.freeform;
-                            if inside && (unsure || h.grazing || (!is_own && h.lam < ctx.eps_own)) {
+                            if inside && (unsure || h.grazing || h.lam < start + margin) {
                                 uncertain = true;
                             } else if inside {
                                 return true;
