@@ -1,0 +1,5 @@
+esc 1
+part
+
+width = param(60 mm)
+  why: "fits\nthe motor"

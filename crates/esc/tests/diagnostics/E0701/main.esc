@@ -1,0 +1,4 @@
+esc 1
+part
+
+body = import_step("/vendor/nema17.step")

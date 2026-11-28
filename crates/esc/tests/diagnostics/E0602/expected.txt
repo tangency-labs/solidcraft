@@ -1,0 +1,3 @@
+main.esc:4:17: error[E0602]: `mm/m3` isn't a unit; units are `mm`, `cm`, `m`, `in`, `deg`, `rad`, `g`, `kg`, `g/cm3`, `kg/m3`
+  | density = param(1.2 mm/m3)
+  |                 ^^^^^^^^^

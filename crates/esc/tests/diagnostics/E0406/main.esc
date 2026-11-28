@@ -1,0 +1,6 @@
+esc 1
+part
+
+thick = param(4 mm)
+
+wall = param(thick.half)

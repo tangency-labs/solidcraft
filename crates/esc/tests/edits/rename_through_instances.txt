@@ -1,0 +1,60 @@
+== plate.esc
+esc 1
+part
+
+width = param(60 mm)
+  why: "fits the 58 mm motor spacing"
+
+thick = param(4 mm)
+
+density = param(1.24 g/cm3)
+
+outline = sketch(on: plane(XY))
+  base = line(~(0 mm, 0 mm), ~(60 mm, 0 mm))
+  side = line(base.end, ~(60 mm, 40 mm))
+  top = line(side.end, ~(0 mm, 40 mm))
+  back = line(top.end, base.start)
+    why: "closes the outline"
+  c1 = coincident(base.start, origin)
+  c2 = horizontal(base)
+  c3 = vertical(side)
+  c4 = horizontal(top)
+  w = length(base, width)
+  h = length(side, 40 mm)
+
+plate = extrude(outline, thick)
+
+hole_at = point(x: width / 2 - 6 mm, y: 0 mm, z: thick)
+
+drilled = hole(plate, d: 3.2 mm, at: hole_at, along: -Z, depth: thick)
+
+rounded = fillet(edges(drilled, parallel: Z, pick: outermost, count: 4), r: 2 mm)
+  todo: "check the radius against the printer"
+
+mount = connector(origin: hole_at, z: +Z, x: +Y)
+== robot.esc
+esc 1
+assembly
+
+chassis_part = import("plate", width: 64 mm)
+
+wheel = import("wheel")
+
+motor = import("nema17")
+
+chassis = instance(chassis_part)
+
+motor_l = instance(motor)
+
+wheel_l = instance(wheel)
+
+j_motor = rigid(motor_l.shaft_face, chassis.mount, angle: 90 deg)
+
+j_wheel = revolute(wheel_l.hub, motor_l.shaft_face, angle: 0 deg)
+
+s1 = step(place(chassis))
+
+s2 = step(insert(motor_l, joint: j_motor, from: axis(chassis.mount, -Z), distance: 30 mm), after: s1)
+  why: "the motor goes in before the wheel covers its mount"
+
+s3 = step(press(wheel_l, joint: j_wheel, from: axis(motor_l.shaft_face, +Z), distance: 20 mm), after: s2)

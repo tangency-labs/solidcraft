@@ -35,6 +35,8 @@ solidcraft-format = { path = "crates/format" }
 solidcraft-io = { path = "crates/io" }
 # A saved design's picture and summary for file browsers, without the kernel (apps/solidcraft-quicklook)
 solidcraft-design-preview = { path = "crates/design-preview" }
+# The .esc text design format: parser, canonical layout, checks without geometry, edit intents
+solidcraft-esc = { path = "crates/esc" }
 solidcraft-icon-svg = { path = "crates/icon-svg" }
 solidcraft-engine = { path = "crates/engine" }
 # Without its default features, so an app built with `--no-default-features` leaves out what
@@ -91,6 +93,8 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+# The .esc format's lossless syntax tree (MIT OR Apache-2.0).
+rowan = "0.17"
 # command parameter and result schemas
 schemars = "1.2"
 serde_path_to_error = "0.1"

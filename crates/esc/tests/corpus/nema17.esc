@@ -1,0 +1,8 @@
+esc 1
+part
+
+body = import_step("vendor/nema17.step")
+
+mass = param(280 g)
+
+shaft_face = connector(origin: center_of(faces(body, kind: plane, extreme: +Z, count: 1)), z: +Z)

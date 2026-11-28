@@ -1,0 +1,4 @@
+esc 1
+part
+
+area = param(60 mm * 40 mm)

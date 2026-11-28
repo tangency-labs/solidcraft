@@ -1,0 +1,1 @@
+{"file": "plate.esc", "intent": {"intent": "edit_args", "target": "rounded", "args": [{"arg": "r", "value": "3 mm"}, {"arg": 0, "value": "edges(drilled, parallel: Z, pick: outermost, count: 4)"}]}}

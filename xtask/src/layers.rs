@@ -52,6 +52,8 @@ pub const TABLE: &[(&str, Class)] = &[
     ("profile", Class::Standalone),
     // a saved design's picture and summary for file browsers, read without the kernel (no workspace dependencies)
     ("design-preview", Class::Standalone),
+    // the .esc text design format: parser, layout, checks without geometry, edit intents (no workspace dependencies)
+    ("esc", Class::Standalone),
     ("sketch", Class::Layer(1)),
     // sheet development: solidcore's (solidcore-ops' develop and query) with SolidCraft's wording of its refusals
     ("develop", Class::Layer(1)),

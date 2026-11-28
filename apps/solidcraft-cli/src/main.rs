@@ -27,6 +27,7 @@
 //! solidcraft-cli mcp setup [--dry-run] [--client NAME] [--live] (alias: mcp install) add it to OpenCode, Claude Desktop, Claude Code, Cursor
 //! solidcraft-cli plugin check <folder|plugin.zip> [--json]    what Install and a call would refuse, with fixes
 //! solidcraft-cli plugin test <folder|plugin.zip> [--json] [--out DIR] [--require-cases]  run the plugin's tests/*.json on the real host
+//! solidcraft-cli esc check|fmt|edit|rename ...                the .esc text design format (crates/esc)
 //! solidcraft-cli licences                                     SolidCraft's licence and the third-party licences
 //! solidcraft-cli icon --out F.png|F.ico [--size N]             the app icon (packaging; drawn, not a file)
 //!
@@ -43,6 +44,7 @@ mod bench_agent;
 mod bench_assistant;
 mod check;
 mod crashes;
+mod esc;
 mod fuzz;
 mod kernel_cases;
 mod kernel_cases_export;
@@ -128,6 +130,20 @@ define_plugin_usage!(
 
 /// `crashes`'s lines in the usage.
 const USAGE_CRASHES: &str = "  solidcraft-cli crashes [list [--json] | show <id> | replay <id> | dir | clear [<id>]]\n";
+/// `esc`'s lines in the usage.
+const USAGE_ESC: &str = "  solidcraft-cli esc check <file.esc|folder>... [--json] [--fix]
+      (the .esc text design format's checks without geometry: syntax, layout, names, references, operations and
+       their arguments, units, imports; each problem with its file, line, column and stable code; --fix first rewrites
+       every file that parses into canonical layout; exits with 1 when anything is found)
+  solidcraft-cli esc fmt <file.esc|folder>... [--check]
+      (rewrites each file into canonical layout; --check only lists the files that aren't)
+  solidcraft-cli esc edit <file.esc> <intent-json> [--root DIR]
+      (applies an edit intent, the same ones the GUI makes, e.g. {\"intent\": \"set_param\", \"name\": \"width\", \"value\": \"64 mm\"};
+       set_param, edit_args, insert_entry, delete_entry, add_note, remove_note, set_seed, rename. References are searched for
+       in every .esc file under --root, by default the current folder)
+  solidcraft-cli esc rename <file.esc> <name|sketch.line> <new-name> [--root DIR]
+      (renames an entry or a sketch line and every reference to it under --root)
+";
 /// `licences`'s lines in the usage.
 const USAGE_LICENCES: &str = "  solidcraft-cli licences\n";
 /// `gpu`'s lines in the usage.
@@ -170,6 +186,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "mcp", usage: USAGE_MCP, listed: true },
     Command { name: "plugin", usage: USAGE_PLUGIN, listed: true },
     Command { name: "crashes", usage: USAGE_CRASHES, listed: true },
+    Command { name: "esc", usage: USAGE_ESC, listed: true },
     Command { name: "licences", usage: USAGE_LICENCES, listed: true },
     Command { name: "licenses", usage: USAGE_LICENCES, listed: false },
     Command { name: "gpu", usage: USAGE_GPU, listed: true },
@@ -294,6 +311,7 @@ fn run_command(args: &[String]) -> Result<(), String> {
         }
         Some("plugin") => plugin::run(&args[1..]),
         Some("crashes") => crashes::run(&args[1..]),
+        Some("esc") => esc::run(&args[1..]),
         Some("icon") => cmd_icon(&args[1..]),
         Some("licences" | "licenses") => {
             // Written, not print!ed: a closed pipe (`| head`) is not a crash.
